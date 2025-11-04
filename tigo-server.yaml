@@ -1,0 +1,128 @@
+esphome:
+  name: tigo-server
+  friendly_name: "Tigo Server"
+
+esp32:
+  board: esp32dev
+  framework:
+    type: arduino
+
+# External components
+external_components:
+  - source: 
+      type: local
+      path: components
+
+# WiFi configuration
+wifi:
+  ssid: "YOUR_WIFI_SSID"
+  password: "YOUR_WIFI_PASSWORD"
+  
+  # Enable fallback hotspot (captive portal) in case wifi connection fails
+  ap:
+    ssid: "Tigo-Server Fallback Hotspot"
+    password: "12345678"
+
+captive_portal:
+
+# Enable logging
+logger:
+  level: INFO  # Change to DEBUG if you need detailed logs for troubleshooting
+  baud_rate: 0  # Disable hardware logging since we use the UART for Tigo communication
+
+# Enable Home Assistant API
+api:
+
+# Enable OTA updates
+ota:
+  - platform: esphome
+    password: "YOUR_OTA_PASSWORD"
+
+# MQTT is handled natively by ESPHome through Home Assistant API
+# No separate MQTT configuration needed
+
+# Web Server (optional, basic ESPHome web interface)
+web_server:
+  port: 80
+
+# UART configuration for Tigo communication
+uart:
+  id: tigo_uart
+  tx_pin: GPIO1   # TX pin (same as original - pin 1)
+  rx_pin: GPIO3   # RX pin (same as original - pin 3) 
+  baud_rate: 38400
+  data_bits: 8
+  parity: NONE
+  stop_bits: 1
+
+# Tigo Server component - sensors will be created automatically!
+tigo_server:
+  id: tigo_hub
+  uart_id: tigo_uart
+  update_interval: 30s
+  number_of_devices: 20  # Set this to exactly the number of Tigo devices you have
+  auto_create_sensors: true  # Set to true to generate YAML configuration in logs
+
+# IMPORTANT: Set auto_create_sensors to true and check the logs after first boot
+# The component will generate YAML sensor configuration that you need to copy/paste here
+# After flashing this basic config, check the logs for complete sensor YAML configuration
+
+# STEP 1: Flash this configuration first
+# STEP 2: Use the "Generate YAML Config" button in Home Assistant or ESPHome dashboard
+# STEP 3: Copy the generated YAML and paste it below, then reflash
+
+# Tigo Server Control Buttons
+button:
+  - platform: tigo_server
+    name: "Generate YAML Config"
+    id: generate_yaml_button
+    tigo_server_id: tigo_hub
+    button_type: yaml_generator
+  - platform: tigo_server
+    name: "Print Device Mappings"
+    id: device_mappings_button
+    tigo_server_id: tigo_hub
+    button_type: device_mappings
+  - platform: tigo_server
+    name: "Reset Node Table"
+    id: reset_node_table_button
+    tigo_server_id: tigo_hub
+    button_type: reset_node_table
+
+# COPY THE GENERATED SENSOR YAML FROM LOGS HERE:
+sensor:
+  # Check Home Assistant or ESPHome logs to see the actual sensor IDs
+  # Optional: Text sensors for device information
+  - platform: wifi_signal
+    name: "Tigo Server WiFi Signal"
+    update_interval: 60s
+
+  - platform: uptime
+    name: "Tigo Server Uptime"
+
+text_sensor:
+  - platform: wifi_info
+    ip_address:
+      name: "Tigo Server IP Address"
+    ssid:
+      name: "Tigo Server Connected SSID"
+  
+  - platform: version
+    name: "Tigo Server ESPHome Version"
+
+# Optional: Binary sensors
+binary_sensor:
+  - platform: status
+    name: "Tigo Server Status"
+
+# Optional: Switches for control
+switch:
+  - platform: restart
+    name: "Tigo Server Restart"
+
+# Time component (optional, for logging timestamps)
+time:
+  - platform: sntp
+    id: sntp_time
+    timezone: "Europe/Berlin"  # Adjust for your timezone
+

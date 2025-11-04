@@ -1,0 +1,930 @@
+#include "tigo_server.h"
+#include "esphome/core/log.h"
+#include "esphome/core/helpers.h"
+#include "esphome/core/application.h"
+#include <cstring>
+#include <numeric>
+
+namespace esphome {
+namespace tigo_server {
+
+static const char *const TAG = "tigo_server";
+
+// Tigo CRC table - copied from original Arduino code
+const uint8_t TigoServerComponent::tigo_crc_table_[256] = {
+  0x0,0x3,0x6,0x5,0xC,0xF,0xA,0x9,0xB,0x8,0xD,0xE,0x7,0x4,0x1,0x2,
+  0x5,0x6,0x3,0x0,0x9,0xA,0xF,0xC,0xE,0xD,0x8,0xB,0x2,0x1,0x4,0x7,
+  0xA,0x9,0xC,0xF,0x6,0x5,0x0,0x3,0x1,0x2,0x7,0x4,0xD,0xE,0xB,0x8,
+  0xF,0xC,0x9,0xA,0x3,0x0,0x5,0x6,0x4,0x7,0x2,0x1,0x8,0xB,0xE,0xD,
+  0x7,0x4,0x1,0x2,0xB,0x8,0xD,0xE,0xC,0xF,0xA,0x9,0x0,0x3,0x6,0x5,
+  0x2,0x1,0x4,0x7,0xE,0xD,0x8,0xB,0x9,0xA,0xF,0xC,0x5,0x6,0x3,0x0,
+  0xD,0xE,0xB,0x8,0x1,0x2,0x7,0x4,0x6,0x5,0x0,0x3,0xA,0x9,0xC,0xF,
+  0x8,0xB,0xE,0xD,0x4,0x7,0x2,0x1,0x3,0x0,0x5,0x6,0xF,0xC,0x9,0xA,
+  0xE,0xD,0x8,0xB,0x2,0x1,0x4,0x7,0x5,0x6,0x3,0x0,0x9,0xA,0xF,0xC,
+  0xB,0x8,0xD,0xE,0x7,0x4,0x1,0x2,0x0,0x3,0x6,0x5,0xC,0xF,0xA,0x9,
+  0x4,0x7,0x2,0x1,0x8,0xB,0xE,0xD,0xF,0xC,0x9,0xA,0x3,0x0,0x5,0x6,
+  0x1,0x2,0x7,0x4,0xD,0xE,0xB,0x8,0xA,0x9,0xC,0xF,0x6,0x5,0x0,0x3,
+  0x9,0xA,0xF,0xC,0x5,0x6,0x3,0x0,0x2,0x1,0x4,0x7,0xE,0xD,0x8,0xB,
+  0xC,0xF,0xA,0x9,0x0,0x3,0x6,0x5,0x7,0x4,0x1,0x2,0xB,0x8,0xD,0xE,
+  0x3,0x0,0x5,0x6,0xF,0xC,0x9,0xA,0x8,0xB,0xE,0xD,0x4,0x7,0x2,0x1,
+  0x6,0x5,0x0,0x3,0xA,0x9,0xC,0xF,0xD,0xE,0xB,0x8,0x1,0x2,0x7,0x4
+};
+
+void TigoServerComponent::setup() {
+  ESP_LOGCONFIG(TAG, "Setting up Tigo Server...");
+  generate_crc_table();
+  devices_.reserve(number_of_devices_);
+  node_table_.reserve(number_of_devices_);
+  load_node_table();
+  
+  // Load persistent node table (includes device mappings)
+  if (auto_create_sensors_) {
+    ESP_LOGI(TAG, "YAML generation mode enabled. Use the 'Generate YAML' button to create sensor configuration.");
+  }
+}
+
+void TigoServerComponent::loop() {
+  process_serial_data();
+}
+
+void TigoServerComponent::update() {
+  // This is called every polling interval
+  publish_sensor_data();
+}
+
+void TigoServerComponent::dump_config() {
+  ESP_LOGCONFIG(TAG, "Tigo Server:");
+  ESP_LOGCONFIG(TAG, "  Update interval: %lums", this->get_update_interval());
+  ESP_LOGCONFIG(TAG, "  Max devices: %d", number_of_devices_);
+  ESP_LOGCONFIG(TAG, "  Generate YAML config: %s", auto_create_sensors_ ? "YES" : "NO");
+  check_uart_settings(38400);
+}
+
+float TigoServerComponent::get_setup_priority() const {
+  // Setup before API and other components that might need our sensors
+  return setup_priority::HARDWARE - 1.0f;
+}
+
+#ifdef USE_BUTTON
+void TigoYamlGeneratorButton::press_action() {
+  ESP_LOGI("tigo_button", "Generating YAML configuration...");
+  if (this->tigo_server_ != nullptr) {
+    this->tigo_server_->generate_sensor_yaml();
+  } else {
+    ESP_LOGE("tigo_button", "Tigo server component not set!");
+  }
+}
+
+void TigoDeviceMappingsButton::press_action() {
+  ESP_LOGI("tigo_button", "Printing device mappings...");
+  if (this->tigo_server_ != nullptr) {
+    this->tigo_server_->print_device_mappings();
+  } else {
+    ESP_LOGE("tigo_button", "Tigo server component not set!");
+  }
+}
+
+void TigoResetNodeTableButton::press_action() {
+  ESP_LOGI("tigo_button", "Resetting node table...");
+  if (this->tigo_server_ != nullptr) {
+    this->tigo_server_->reset_node_table();
+  } else {
+    ESP_LOGE("tigo_button", "Tigo server component not set!");
+  }
+}
+#endif
+
+void TigoServerComponent::process_serial_data() {
+  while (available()) {
+    char incoming_byte = read();
+    incoming_data_ += incoming_byte;
+    
+    // Check if frame starts
+    if (!frame_started_ && incoming_data_.find("\x7E\x08") != std::string::npos) {
+      ESP_LOGW(TAG, "Packet missed!");
+    }
+    
+    if (!frame_started_ && incoming_data_.find("\x7E\x07") != std::string::npos) {
+      // Start of a new frame detected
+      frame_started_ = true;
+      size_t start_pos = incoming_data_.find("\x7E\x07");
+      incoming_data_ = incoming_data_.substr(start_pos);  // Keep only from start delimiter
+    }
+    // Check if frame ends
+    else if (frame_started_ && incoming_data_.find("\x7E\x08") != std::string::npos) {
+      // End of frame detected
+      frame_started_ = false;
+      size_t end_pos = incoming_data_.find("\x7E\x08");
+      
+      // Extract frame without start and end delimiters
+      std::string frame = incoming_data_.substr(2, end_pos - 2);
+      incoming_data_.clear(); // Clear buffer for next frame
+      
+      // Process the frame
+      process_frame(frame);
+    }
+    
+    // Reset if buffer grows too large (safety mechanism)
+    if (incoming_data_.length() > 1024) {
+      incoming_data_.clear();
+      frame_started_ = false;
+      ESP_LOGW(TAG, "Buffer too small, resetting!");
+    }
+  }
+}
+
+void TigoServerComponent::process_frame(const std::string &frame) {
+  std::string processed_frame = remove_escape_sequences(frame);
+  
+  if (!verify_checksum(processed_frame)) {
+    ESP_LOGW(TAG, "Invalid checksum for frame: %s", frame_to_hex_string(processed_frame).c_str());
+    return;
+  }
+  
+  // Remove checksum (last 2 bytes)
+  processed_frame = processed_frame.substr(0, processed_frame.length() - 2);
+  std::string hex_frame = frame_to_hex_string(processed_frame);
+  
+  if (hex_frame.length() < 10) {
+    ESP_LOGW(TAG, "Frame too short: %s", hex_frame.c_str());
+    return;
+  }
+  
+  std::string segment = hex_frame.substr(4, 4); // Get type segment
+  
+  if (segment == "0149") {
+    // Power data frame
+    int start_payload = 8 + calculate_header_length(hex_frame.substr(8, 4));
+    std::string payload = hex_frame.substr(start_payload);
+    
+    size_t pos = 0;
+    while (pos < payload.length()) {
+      if (pos + 14 > payload.length()) {
+        ESP_LOGW(TAG, "Incomplete packet, aborting");
+        break;
+      }
+      
+      std::string type = payload.substr(pos, 2);
+      std::string length_hex = payload.substr(pos + 12, 2);
+      int length = std::stoi(length_hex, nullptr, 16);
+      
+      int packet_length_chars = length * 2 + 14;
+      if (pos + packet_length_chars > payload.length()) {
+        ESP_LOGW(TAG, "Incomplete packet, aborting at pos %zu", pos);
+        break;
+      }
+      
+      std::string packet = payload.substr(pos, packet_length_chars);
+      
+      if (type == "31") {
+        process_power_frame(packet);
+      } else if (type == "09") {
+        process_09_frame(packet);
+      } else if (type != "07" && type != "18") {
+        ESP_LOGD(TAG, "Unknown packet type: %s, packet: %s", type.c_str(), packet.c_str());
+      }
+      
+      pos += packet_length_chars;
+    }
+  } else if (segment == "0B10" || segment == "0B0F") {
+    // Command request or response
+    std::string type = hex_frame.substr(14, 2);
+    if (type == "27") {
+      process_27_frame(hex_frame.substr(18));
+    }
+    // Handle other command types as needed
+  } else if (segment == "0148") {
+    // Receive request packet
+    // ESP_LOGD(TAG, "Receive request packet");
+  } else {
+    ESP_LOGD(TAG, "Unknown frame type: %s", hex_frame.c_str());
+  }
+}
+
+void TigoServerComponent::process_power_frame(const std::string &frame) {
+  DeviceData data;
+  
+  // Parse frame according to original Arduino logic
+  data.addr = frame.substr(2, 4);
+  data.pv_node_id = frame.substr(6, 4);
+  
+  ESP_LOGD(TAG, "Processing power frame for device addr: %s", data.addr.c_str());
+  
+  // Voltage In (scale by 0.05)
+  int voltage_in_raw = std::stoi(frame.substr(14, 3), nullptr, 16);
+  data.voltage_in = voltage_in_raw * 0.05f;
+  
+  // Voltage Out (scale by 0.10)
+  int voltage_out_raw = std::stoi(frame.substr(17, 3), nullptr, 16);
+  data.voltage_out = voltage_out_raw * 0.10f;
+  
+  // Duty Cycle
+  data.duty_cycle = std::stoi(frame.substr(20, 2), nullptr, 16);
+  
+  // Current In (scale by 0.005)
+  int current_in_raw = std::stoi(frame.substr(22, 3), nullptr, 16);
+  data.current_in = current_in_raw * 0.005f;
+  
+  // Temperature (scale by 0.1)
+  int temperature_raw = std::stoi(frame.substr(25, 3), nullptr, 16);
+  data.temperature = temperature_raw * 0.1f;
+  
+  // Slot Counter
+  data.slot_counter = frame.substr(34, 4);
+  
+  // RSSI
+  data.rssi = std::stoi(frame.substr(38, 2), nullptr, 16);
+  
+  data.changed = true;
+  data.last_update = millis();
+  
+  // Find barcode from unified node table (Frame 27 or Frame 09 data)
+  NodeTableData* node = find_node_by_addr(data.addr);
+  if (node != nullptr) {
+    // Prefer Frame 09 barcode if available, otherwise use Frame 27 long address
+    if (!node->frame09_barcode.empty()) {
+      data.barcode = node->frame09_barcode;
+    } else if (!node->long_address.empty()) {
+      data.barcode = node->long_address;
+    }
+  }
+  
+  update_device_data(data);
+}
+
+void TigoServerComponent::process_09_frame(const std::string &frame) {
+  std::string addr = frame.substr(14, 4);
+  std::string node_id = frame.substr(18, 4);  
+  std::string barcode = frame.substr(40, 6);
+  
+  ESP_LOGI(TAG, "Frame 09 - Device Identity: addr=%s, node_id=%s, barcode=%s", 
+           addr.c_str(), node_id.c_str(), barcode.c_str());
+  
+  // Find or create node table entry
+  NodeTableData* node = find_node_by_addr(addr);
+  if (node != nullptr) {
+    // Update existing node with Frame 09 barcode
+    if (node->frame09_barcode != barcode) {
+      node->frame09_barcode = barcode;
+      ESP_LOGI(TAG, "Updated Frame 09 barcode for node %s: %s", addr.c_str(), barcode.c_str());
+      save_node_table();
+    }
+  } else {
+    // Create new node table entry for Frame 09 data
+    NodeTableData new_node;
+    new_node.addr = addr;
+    new_node.frame09_barcode = barcode;
+    new_node.sensor_index = -1;  // Will be assigned when device becomes active
+    new_node.is_persistent = true;
+    node_table_.push_back(new_node);
+    ESP_LOGI(TAG, "Created new node entry for Frame 09: addr=%s, barcode=%s", addr.c_str(), barcode.c_str());
+    save_node_table();
+  }
+  
+  // Also update existing device if already discovered
+  DeviceData* device = find_device_by_addr(addr);
+  if (device != nullptr && device->barcode != barcode) {
+    device->barcode = barcode;
+    ESP_LOGI(TAG, "Updated existing device %s with Frame 09 barcode: %s", addr.c_str(), barcode.c_str());
+  }
+}
+
+void TigoServerComponent::process_27_frame(const std::string &frame) {
+  int num_entries = std::stoi(frame.substr(4, 4), nullptr, 16);
+  ESP_LOGD(TAG, "Frame 27 received, entries: %d", num_entries);
+  
+  size_t pos = 8;
+  bool table_changed = false;
+  
+  for (int i = 0; i < num_entries && pos + 20 <= frame.length(); i++) {
+    std::string long_addr = frame.substr(pos, 16);
+    std::string addr = frame.substr(pos + 16, 4);
+    pos += 20;
+    
+    // Check if entry exists
+    bool found = false;
+    for (auto &node : node_table_) {
+      if (node.long_address == long_addr) {
+        if (node.addr != addr) {
+          node.addr = addr;
+          table_changed = true;
+        }
+        found = true;
+        break;
+      }
+    }
+    
+    if (!found && node_table_.size() < number_of_devices_) {
+      NodeTableData new_node;
+      new_node.long_address = long_addr;
+      new_node.addr = addr;
+      new_node.checksum = std::string(1, compute_tigo_crc4(addr));
+      node_table_.push_back(new_node);
+      table_changed = true;
+    }
+  }
+  
+  if (table_changed) {
+    save_node_table();
+  }
+}
+
+void TigoServerComponent::update_device_data(const DeviceData &data) {
+  ESP_LOGD(TAG, "Updating device data for addr: %s", data.addr.c_str());
+  
+  // Find existing device or add new one
+  DeviceData *device = find_device_by_addr(data.addr);
+  if (device != nullptr) {
+    *device = data;
+    ESP_LOGD(TAG, "Updated existing device: %s", data.addr.c_str());
+  } else if (devices_.size() < number_of_devices_) {
+    devices_.push_back(data);
+    ESP_LOGI(TAG, "New device discovered: addr=%s, barcode=%s, auto_create=%s", 
+             data.addr.c_str(), data.barcode.c_str(), auto_create_sensors_ ? "true" : "false");
+    
+    // Assign pre-created sensors to new device if enabled
+    if (auto_create_sensors_ && created_devices_.find(data.addr) == created_devices_.end()) {
+      // Check if we have a saved sensor index in the node table
+      NodeTableData* node = find_node_by_addr(data.addr);
+      int sensor_index = -1;
+      
+      if (node != nullptr && node->sensor_index >= 0) {
+        sensor_index = node->sensor_index;
+        ESP_LOGI(TAG, "Restored device %s to previous Tigo %d assignment", data.addr.c_str(), sensor_index + 1);
+      } else {
+        // Assign new sensor index
+        assign_sensor_index_to_node(data.addr);
+        node = find_node_by_addr(data.addr);
+        if (node != nullptr) {
+          sensor_index = node->sensor_index;
+        }
+      }
+      
+      ESP_LOGI(TAG, "New device discovered: %s - Vin:%.2fV, Vout:%.2fV, Curr:%.3fA, Temp:%.1f°C", 
+               data.addr.c_str(), data.voltage_in, data.voltage_out, data.current_in, data.temperature);
+      
+      created_devices_.insert(data.addr);
+      
+      if (auto_create_sensors_) {
+        ESP_LOGI(TAG, "Device %s discovered! Add this address to your manual sensor configuration", data.addr.c_str());
+      }
+    } else if (!auto_create_sensors_) {
+      ESP_LOGD(TAG, "Auto-creation disabled, skipping sensor creation for: %s", data.addr.c_str());
+    } else {
+      ESP_LOGD(TAG, "Sensors already created for device: %s", data.addr.c_str());
+    }
+  } else {
+    ESP_LOGW(TAG, "Maximum number of devices reached (%d)", number_of_devices_);
+  }
+}
+
+DeviceData* TigoServerComponent::find_device_by_addr(const std::string &addr) {
+  for (auto &device : devices_) {
+    if (device.addr == addr) {
+      return &device;
+    }
+  }
+  return nullptr;
+}
+
+void TigoServerComponent::publish_sensor_data() {
+  ESP_LOGD(TAG, "Publishing sensor data for %zu devices", devices_.size());
+  
+  for (const auto &device : devices_) {
+    std::string device_id = device.barcode.empty() ? ("mod#" + device.addr) : device.barcode;
+    
+    // Publish voltage input sensor
+    auto voltage_in_it = voltage_in_sensors_.find(device.addr);
+    if (voltage_in_it != voltage_in_sensors_.end()) {
+      voltage_in_it->second->publish_state(device.voltage_in);
+      ESP_LOGD(TAG, "Published input voltage for %s: %.2fV", device.addr.c_str(), device.voltage_in);
+    } else {
+      ESP_LOGW(TAG, "No input voltage sensor found for device %s", device.addr.c_str());
+    }
+    
+    // Publish voltage output sensor
+    auto voltage_out_it = voltage_out_sensors_.find(device.addr);
+    if (voltage_out_it != voltage_out_sensors_.end()) {
+      voltage_out_it->second->publish_state(device.voltage_out);
+      ESP_LOGD(TAG, "Published output voltage for %s: %.2fV", device.addr.c_str(), device.voltage_out);
+    }
+    
+    // Publish current sensor
+    auto current_in_it = current_in_sensors_.find(device.addr);
+    if (current_in_it != current_in_sensors_.end()) {
+      current_in_it->second->publish_state(device.current_in);
+      ESP_LOGD(TAG, "Published current for %s: %.3fA", device.addr.c_str(), device.current_in);
+    }
+    
+    // Publish temperature sensor
+    auto temperature_it = temperature_sensors_.find(device.addr);
+    if (temperature_it != temperature_sensors_.end()) {
+      temperature_it->second->publish_state(device.temperature);
+      ESP_LOGD(TAG, "Published temperature for %s: %.1f°C", device.addr.c_str(), device.temperature);
+    }
+    
+    // Publish power sensor (calculated)
+    auto power_it = power_sensors_.find(device.addr);
+    if (power_it != power_sensors_.end()) {
+      float power = device.voltage_out * device.current_in;
+      power_it->second->publish_state(power);
+      ESP_LOGD(TAG, "Published power for %s: %.0fW", device.addr.c_str(), power);
+    }
+    
+    // Publish RSSI sensor
+    auto rssi_it = rssi_sensors_.find(device.addr);
+    if (rssi_it != rssi_sensors_.end()) {
+      rssi_it->second->publish_state(device.rssi);
+      ESP_LOGD(TAG, "Published RSSI for %s: %ddBm", device.addr.c_str(), device.rssi);
+    }
+    
+    // Check if this device has a combined Tigo sensor
+    auto tigo_power_it = power_sensors_.find(device.addr);
+    if (tigo_power_it != power_sensors_.end() && 
+        voltage_in_sensors_.find(device.addr) == voltage_in_sensors_.end()) {
+      // This is a combined sensor (power sensor exists but individual sensors don't)
+      float power = device.voltage_out * device.current_in;
+      
+      // Calculate data age
+      unsigned long current_time = millis();
+      unsigned long data_age_ms = current_time - device.last_update;
+      float data_age_seconds = data_age_ms / 1000.0f;
+      
+      // Format timestamp string for enhanced logging
+      char timestamp_str[32];
+      if (data_age_ms < 1000) {
+        snprintf(timestamp_str, sizeof(timestamp_str), "%.0fms ago", (float)data_age_ms);
+      } else if (data_age_ms < 60000) {
+        snprintf(timestamp_str, sizeof(timestamp_str), "%.1fs ago", data_age_ms / 1000.0f);
+      } else if (data_age_ms < 3600000) {
+        snprintf(timestamp_str, sizeof(timestamp_str), "%.1fm ago", data_age_ms / 60000.0f);
+      } else {
+        snprintf(timestamp_str, sizeof(timestamp_str), "%.1fh ago", data_age_ms / 3600000.0f);
+      }
+      
+      // Publish the power value
+      tigo_power_it->second->publish_state(power);
+      
+      // Enhanced logging with timestamp and all metrics for potential Home Assistant template extraction
+      ESP_LOGI(TAG, "TIGO_%s: power=%.0f voltage_in=%.2f voltage_out=%.2f current=%.3f temp=%.1f rssi=%d last_update=%s", 
+               device.addr.c_str(), power, device.voltage_in, device.voltage_out, 
+               device.current_in, device.temperature, device.rssi, timestamp_str);
+               
+      ESP_LOGD(TAG, "Published combined Tigo sensor for %s: %.0fW with enhanced attributes logging", device.addr.c_str());
+    }
+
+
+  }
+}
+
+std::string TigoServerComponent::remove_escape_sequences(const std::string &frame) {
+  std::string result;
+  result.reserve(frame.length());
+  
+  for (size_t i = 0; i < frame.length(); ++i) {
+    if (frame[i] == '\x7E' && i < frame.length() - 1) {
+      char next_byte = frame[i + 1];
+      switch (next_byte) {
+        case '\x00': result += '\x7E'; break; // Escaped 7E -> raw 7E
+        case '\x01': result += '\x24'; break; // Escaped 7E 01 -> raw 24
+        case '\x02': result += '\x23'; break; // Escaped 7E 02 -> raw 23
+        case '\x03': result += '\x25'; break; // Escaped 7E 03 -> raw 25
+        case '\x04': result += '\xA4'; break; // Escaped 7E 04 -> raw A4
+        case '\x05': result += '\xA3'; break; // Escaped 7E 05 -> raw A3
+        case '\x06': result += '\xA5'; break; // Escaped 7E 06 -> raw A5
+        default:
+          result += frame[i];
+          result += next_byte;
+          break;
+      }
+      i++; // Skip next byte
+    } else {
+      result += frame[i];
+    }
+  }
+  return result;
+}
+
+bool TigoServerComponent::verify_checksum(const std::string &frame) {
+  if (frame.length() < 2) return false;
+  
+  std::string checksum_str = frame.substr(frame.length() - 2);
+  uint16_t extracted_checksum = (static_cast<uint8_t>(checksum_str[0]) << 8) | 
+                                static_cast<uint8_t>(checksum_str[1]);
+  
+  uint16_t computed_checksum = compute_crc16_ccitt(
+    reinterpret_cast<const uint8_t*>(frame.c_str()), 
+    frame.length() - 2
+  );
+  
+  return extracted_checksum == computed_checksum;
+}
+
+std::string TigoServerComponent::frame_to_hex_string(const std::string &frame) {
+  std::string hex_str;
+  hex_str.reserve(frame.length() * 2);
+  
+  for (unsigned char byte : frame) {
+    char hex_chars[3];
+    sprintf(hex_chars, "%02X", byte);
+    hex_str += hex_chars;
+  }
+  return hex_str;
+}
+
+int TigoServerComponent::calculate_header_length(const std::string &hex_frame) {
+  // Convert from little-endian: swap bytes
+  std::string low_byte = hex_frame.substr(0, 2);
+  std::string high_byte = hex_frame.substr(2, 2);
+  std::string status_hex = low_byte + high_byte;
+  
+  unsigned int status = std::stoul(status_hex, nullptr, 16);
+  int length = 2; // Status word is always 2 bytes
+  
+  // Check bits according to original logic
+  if ((status & (1 << 0)) == 0) length += 1;
+  if ((status & (1 << 1)) == 0) length += 1;
+  if ((status & (1 << 2)) == 0) length += 2;
+  if ((status & (1 << 3)) == 0) length += 2;
+  if ((status & (1 << 4)) == 0) length += 1;
+  length += 1; // Bit 5
+  length += 2; // Bit 6
+  
+  return length * 2; // Convert to hex characters
+}
+
+void TigoServerComponent::generate_crc_table() {
+  for (uint16_t i = 0; i < CRC_TABLE_SIZE; ++i) {
+    uint16_t crc = i;
+    for (uint8_t j = 8; j > 0; --j) {
+      if (crc & 1) {
+        crc = (crc >> 1) ^ CRC_POLYNOMIAL;
+      } else {
+        crc >>= 1;
+      }
+    }
+    crc_table_[i] = crc;
+  }
+}
+
+uint16_t TigoServerComponent::compute_crc16_ccitt(const uint8_t *data, size_t length) {
+  uint16_t crc = 0x8408; // Initial value
+  for (size_t i = 0; i < length; i++) {
+    uint8_t index = (crc ^ data[i]) & 0xFF;
+    crc = (crc >> 8) ^ crc_table_[index];
+  }
+  crc = (crc >> 8) | (crc << 8);
+  return crc;
+}
+
+char TigoServerComponent::compute_tigo_crc4(const std::string &hex_string) {
+  uint8_t crc = 0x2;
+  for (size_t i = 0; i < hex_string.length(); i += 2) {
+    if (i + 1 >= hex_string.length()) break;
+    
+    std::string byte_str = hex_string.substr(i, 2);
+    uint8_t byte_val = std::stoul(byte_str, nullptr, 16);
+    crc = tigo_crc_table_[byte_val ^ (crc << 4)];
+  }
+  return crc_char_map_[crc];
+}
+
+
+
+void TigoServerComponent::generate_sensor_yaml() {
+  ESP_LOGI(TAG, "");
+  ESP_LOGI(TAG, "=== COPY THE FOLLOWING YAML CONFIGURATION ===");
+  ESP_LOGI(TAG, "# Add this to your ESPHome YAML file under 'sensor:'");
+  ESP_LOGI(TAG, "");
+  ESP_LOGI(TAG, "sensor:");
+  
+  // First, generate configs for nodes with assigned sensor indices
+  std::vector<NodeTableData> assigned_nodes;
+  for (const auto& node : node_table_) {
+    if (node.sensor_index >= 0) {
+      assigned_nodes.push_back(node);
+    }
+  }
+  
+  if (!assigned_nodes.empty()) {
+    // Sort by sensor index
+    std::sort(assigned_nodes.begin(), assigned_nodes.end(), 
+              [](const auto& a, const auto& b) { return a.sensor_index < b.sensor_index; });
+    
+    ESP_LOGI(TAG, "  # Discovered devices with actual addresses:");
+    for (const auto& node : assigned_nodes) {
+      std::string index_str = std::to_string(node.sensor_index + 1);
+      
+      // Build barcode comment from available data
+      std::string barcode_comment = "";
+      if (!node.frame09_barcode.empty()) {
+        barcode_comment = " - Frame09: " + node.frame09_barcode;
+      } else if (!node.long_address.empty()) {
+        barcode_comment = " - Frame27: " + node.long_address;
+      }
+      
+      ESP_LOGI(TAG, "  # Tigo Device %s (discovered%s)", index_str.c_str(), barcode_comment.c_str());
+      ESP_LOGI(TAG, "  - platform: tigo_server");
+      ESP_LOGI(TAG, "    tigo_server_id: tigo_hub");
+      ESP_LOGI(TAG, "    address: \"%s\"", node.addr.c_str());
+      ESP_LOGI(TAG, "");
+    }
+  }
+  
+  // Generate placeholders for remaining devices if needed
+  int discovered_count = assigned_nodes.size();
+  if (discovered_count < number_of_devices_) {
+    ESP_LOGI(TAG, "  # Additional device slots (update addresses when devices are discovered):");
+    for (int i = discovered_count; i < number_of_devices_; i++) {
+      std::string index_str = std::to_string(i + 1);
+      
+      ESP_LOGI(TAG, "  # Tigo Device %s (placeholder - update address when discovered)", index_str.c_str());
+      ESP_LOGI(TAG, "  - platform: tigo_server");
+      ESP_LOGI(TAG, "    tigo_server_id: tigo_hub");
+      ESP_LOGI(TAG, "    address: \"device_%s\"  # CHANGE THIS to actual device address", index_str.c_str());
+      ESP_LOGI(TAG, "");
+    }
+  }
+  
+  ESP_LOGI(TAG, "# GENERATION SUMMARY:");
+  ESP_LOGI(TAG, "# - Found %d discovered devices with real addresses", discovered_count);
+  ESP_LOGI(TAG, "# - Generated %d placeholder configs for remaining devices", number_of_devices_ - discovered_count);
+  ESP_LOGI(TAG, "# - Total configuration slots: %d", number_of_devices_);
+  ESP_LOGI(TAG, "=== END YAML CONFIGURATION ===");
+  ESP_LOGI(TAG, "");
+  ESP_LOGI(TAG, "Simplified YAML generated! Each device entry automatically creates 6 sensors.");
+  ESP_LOGI(TAG, "Copy the above configuration - no need to specify individual sensors!");
+}
+
+void TigoServerComponent::print_device_mappings() {
+  ESP_LOGI(TAG, "=== UNIFIED NODE TABLE ===");
+  
+  // Count nodes with sensor assignments
+  int assigned_count = 0;
+  for (const auto& node : node_table_) {
+    if (node.sensor_index >= 0) assigned_count++;
+  }
+  
+  if (assigned_count == 0) {
+    ESP_LOGI(TAG, "No devices have been assigned sensor indices yet.");
+  } else {
+    ESP_LOGI(TAG, "Found %d device sensor assignments:", assigned_count);
+    ESP_LOGI(TAG, "");
+    
+    // Sort nodes by sensor index for cleaner display
+    std::vector<NodeTableData> sorted_nodes;
+    for (const auto& node : node_table_) {
+      if (node.sensor_index >= 0) {
+        sorted_nodes.push_back(node);
+      }
+    }
+    std::sort(sorted_nodes.begin(), sorted_nodes.end(), 
+              [](const auto& a, const auto& b) { return a.sensor_index < b.sensor_index; });
+    
+    for (const auto& node : sorted_nodes) {
+      std::string info = "Device Address " + node.addr;
+      
+      // Add Frame 09 barcode if available
+      if (!node.frame09_barcode.empty()) {
+        info += " (Frame09: " + node.frame09_barcode + ")";
+      }
+      
+      // Add Frame 27 long address if available and different
+      if (!node.long_address.empty() && node.long_address != node.frame09_barcode) {
+        info += " (Frame27: " + node.long_address + ")";
+      }
+      
+      ESP_LOGI(TAG, "  Tigo %d: %s", node.sensor_index + 1, info.c_str());
+    }
+    ESP_LOGI(TAG, "");
+  }
+  
+  // Show nodes without sensor assignments (discovered but not active)
+  std::vector<NodeTableData> unassigned_nodes;
+  for (const auto& node : node_table_) {
+    if (node.sensor_index == -1) {
+      unassigned_nodes.push_back(node);
+    }
+  }
+  
+  if (!unassigned_nodes.empty()) {
+    ESP_LOGI(TAG, "Discovered devices without sensor assignments (%d):", unassigned_nodes.size());
+    for (const auto& node : unassigned_nodes) {
+      std::string info = "Device " + node.addr;
+      if (!node.frame09_barcode.empty()) {
+        info += " (barcode: " + node.frame09_barcode + ")";
+      }
+      info += " - waiting for power data";
+      ESP_LOGI(TAG, "  %s", info.c_str());
+    }
+    ESP_LOGI(TAG, "");
+  }
+  
+  // Show currently active devices
+  if (!devices_.empty()) {
+    ESP_LOGI(TAG, "Currently active devices (%d):", devices_.size());
+    for (const auto& device : devices_) {
+      NodeTableData* node = find_node_by_addr(device.addr);
+      std::string status = "unmapped";
+      if (node != nullptr && node->sensor_index >= 0) {
+        status = "mapped to Tigo " + std::to_string(node->sensor_index + 1);
+      }
+      
+      std::string name = device.barcode.empty() ? ("mod#" + device.addr) : device.barcode;
+      std::string data_sources = "";
+      if (node != nullptr) {
+        std::vector<std::string> sources;
+        if (!node->frame09_barcode.empty()) sources.push_back("Frame09");
+        if (!node->long_address.empty()) sources.push_back("Frame27");
+        if (!sources.empty()) {
+          data_sources = " [" + std::accumulate(sources.begin() + 1, sources.end(), sources[0],
+                                               [](const std::string& a, const std::string& b) { return a + "+" + b; }) + "]";
+        }
+      }
+      
+      ESP_LOGI(TAG, "  Device %s (%s): %s%s", device.addr.c_str(), name.c_str(), status.c_str(), data_sources.c_str());
+    }
+    ESP_LOGI(TAG, "");
+  }
+  
+  // Show next available sensor index
+  int next_index = get_next_available_sensor_index();
+  if (next_index >= 0) {
+    ESP_LOGI(TAG, "Next available sensor index: Tigo %d", next_index + 1);
+  } else {
+    ESP_LOGI(TAG, "All %d sensor slots are assigned", number_of_devices_);
+  }
+  
+  ESP_LOGI(TAG, "Total node table entries: %d", node_table_.size());
+  ESP_LOGI(TAG, "=== END UNIFIED NODE TABLE ===");
+}
+
+void TigoServerComponent::load_node_table() {
+  ESP_LOGI(TAG, "Loading persistent node table...");
+  
+  int loaded_count = 0;
+  // Load node table entries up to the configured number of devices
+  for (int i = 0; i < number_of_devices_; i++) {
+    std::string pref_key = "node_" + std::to_string(i);
+    uint32_t hash = fnv1_hash(pref_key);
+    
+    // Use char array for ESPHome preferences
+    auto restore = global_preferences->make_preference<char[256]>(hash);
+    char node_data[256] = {0};
+    
+    if (restore.load(&node_data) && strlen(node_data) > 0) {
+      // Format: "addr|long_addr|checksum|barcode|sensor_index"
+      std::string node_str(node_data);
+      std::vector<std::string> parts;
+      size_t start = 0, end = 0;
+      
+      // Split by '|' delimiter
+      while ((end = node_str.find('|', start)) != std::string::npos) {
+        parts.push_back(node_str.substr(start, end - start));
+        start = end + 1;
+      }
+      parts.push_back(node_str.substr(start)); // Last part
+      
+      if (parts.size() >= 5) {
+        NodeTableData node;
+        node.addr = parts[0];
+        node.long_address = parts[1];
+        node.checksum = parts[2];
+        node.frame09_barcode = parts[3];
+        node.sensor_index = std::stoi(parts[4]);
+        node.is_persistent = true;
+        
+        node_table_.push_back(node);
+        loaded_count++;
+        ESP_LOGI(TAG, "Restored node: %s -> Tigo %d (barcode: %s)", 
+                 node.addr.c_str(), node.sensor_index + 1, node.frame09_barcode.c_str());
+      }
+    }
+  }
+  
+  ESP_LOGI(TAG, "Loaded %d persistent node table entries (capacity: %d devices)", loaded_count, number_of_devices_);
+}
+
+void TigoServerComponent::save_node_table() {
+  ESP_LOGD(TAG, "Saving node table to flash...");
+  
+  // Clear old entries first
+  for (int i = 0; i < number_of_devices_; i++) {
+    std::string pref_key = "node_" + std::to_string(i);
+    uint32_t hash = fnv1_hash(pref_key);
+    auto save = global_preferences->make_preference<char[256]>(hash);
+    char empty_data[256] = {0};
+    save.save(&empty_data);
+  }
+  
+  // Save current persistent nodes
+  int i = 0;
+  int saved_count = 0;
+  for (const auto &node : node_table_) {
+    if (i >= number_of_devices_) break; // Safety limit
+    if (!node.is_persistent) continue;   // Only save persistent nodes
+    
+    std::string pref_key = "node_" + std::to_string(i);
+    uint32_t hash = fnv1_hash(pref_key);
+    
+    // Format: "addr|long_addr|checksum|barcode|sensor_index"
+    std::string node_str = node.addr + "|" + 
+                          node.long_address + "|" + 
+                          node.checksum + "|" + 
+                          node.frame09_barcode + "|" + 
+                          std::to_string(node.sensor_index);
+    
+    // Copy to char array for preferences
+    char node_data[256] = {0};
+    strncpy(node_data, node_str.c_str(), sizeof(node_data) - 1);
+    
+    auto save = global_preferences->make_preference<char[256]>(hash);
+    save.save(&node_data);
+    saved_count++;
+    i++;
+  }
+  
+  ESP_LOGD(TAG, "Saved %d node table entries to flash", saved_count);
+}
+
+void TigoServerComponent::reset_node_table() {
+  ESP_LOGI(TAG, "Resetting node table - clearing all persistent device mappings...");
+  
+  int cleared_count = node_table_.size();
+  
+  // Clear the in-memory node table
+  node_table_.clear();
+  
+  // Clear all persistent storage entries
+  for (int i = 0; i < number_of_devices_; i++) {
+    std::string pref_key = "node_" + std::to_string(i);
+    uint32_t hash = fnv1_hash(pref_key);
+    auto save = global_preferences->make_preference<char[256]>(hash);
+    char empty_data[256] = {0};
+    save.save(&empty_data);
+  }
+  
+  // Clear the device sensor index cache
+  created_devices_.clear();
+  
+  ESP_LOGI(TAG, "Node table reset complete:");
+  ESP_LOGI(TAG, "- Cleared %d node table entries", cleared_count);
+  ESP_LOGI(TAG, "- Cleared %d persistent storage slots", number_of_devices_);
+  ESP_LOGI(TAG, "- Reset device sensor index cache");
+  ESP_LOGI(TAG, "");
+  ESP_LOGI(TAG, "All device mappings have been removed. Devices will be");
+  ESP_LOGI(TAG, "rediscovered and reassigned new sensor indices when they");
+  ESP_LOGI(TAG, "send power data. Frame 09 and Frame 27 data will be");
+  ESP_LOGI(TAG, "recollected automatically during normal operation.");
+}
+
+int TigoServerComponent::get_next_available_sensor_index() {
+  // Create a set of used indices from the unified node table
+  std::set<int> used_indices;
+  for (const auto &node : node_table_) {
+    if (node.sensor_index >= 0) {
+      used_indices.insert(node.sensor_index);
+    }
+  }
+  
+  // Find the first available index
+  for (int i = 0; i < number_of_devices_; i++) {
+    if (used_indices.find(i) == used_indices.end()) {
+      return i;
+    }
+  }
+  
+  return -1; // No available indices
+}
+
+std::string TigoServerComponent::get_device_name(const DeviceData &device) {
+  if (!device.barcode.empty() && device.barcode.length() >= 5) {
+    return "Tigo " + device.barcode;
+  }
+  return "Tigo Module " + device.addr;
+}
+
+NodeTableData* TigoServerComponent::find_node_by_addr(const std::string &addr) {
+  for (auto &node : node_table_) {
+    if (node.addr == addr) {
+      return &node;
+    }
+  }
+  return nullptr;
+}
+
+void TigoServerComponent::assign_sensor_index_to_node(const std::string &addr) {
+  NodeTableData* node = find_node_by_addr(addr);
+  if (node != nullptr && node->sensor_index == -1) {
+    int index = get_next_available_sensor_index();
+    if (index >= 0) {
+      node->sensor_index = index;
+      node->is_persistent = true;
+      ESP_LOGI(TAG, "Assigned sensor index %d to device %s", index + 1, addr.c_str());
+      save_node_table();
+    }
+  }
+}
+
+}  // namespace tigo_server
+}  // namespace esphome
