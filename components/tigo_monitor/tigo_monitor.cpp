@@ -1,17 +1,18 @@
-#include "tigo_server.h"
+#include "tigo_monitor.h"
 #include "esphome/core/log.h"
 #include "esphome/core/helpers.h"
 #include "esphome/core/application.h"
+#include "esphome/core/preferences.h"
 #include <cstring>
 #include <numeric>
 
 namespace esphome {
-namespace tigo_server {
+namespace tigo_monitor {
 
-static const char *const TAG = "tigo_server";
+static const char *const TAG = "tigo_monitor";
 
 // Tigo CRC table - copied from original Arduino code
-const uint8_t TigoServerComponent::tigo_crc_table_[256] = {
+const uint8_t TigoMonitorComponent::tigo_crc_table_[256] = {
   0x0,0x3,0x6,0x5,0xC,0xF,0xA,0x9,0xB,0x8,0xD,0xE,0x7,0x4,0x1,0x2,
   0x5,0x6,0x3,0x0,0x9,0xA,0xF,0xC,0xE,0xD,0x8,0xB,0x2,0x1,0x4,0x7,
   0xA,0x9,0xC,0xF,0x6,0x5,0x0,0x3,0x1,0x2,0x7,0x4,0xD,0xE,0xB,0x8,
@@ -30,38 +31,33 @@ const uint8_t TigoServerComponent::tigo_crc_table_[256] = {
   0x6,0x5,0x0,0x3,0xA,0x9,0xC,0xF,0xD,0xE,0xB,0x8,0x1,0x2,0x7,0x4
 };
 
-void TigoServerComponent::setup() {
+void TigoMonitorComponent::setup() {
   ESP_LOGCONFIG(TAG, "Setting up Tigo Server...");
   generate_crc_table();
   devices_.reserve(number_of_devices_);
   node_table_.reserve(number_of_devices_);
   load_node_table();
-  
-  // Load persistent node table (includes device mappings)
-  if (auto_create_sensors_) {
-    ESP_LOGI(TAG, "YAML generation mode enabled. Use the 'Generate YAML' button to create sensor configuration.");
-  }
+  load_energy_data();
 }
 
-void TigoServerComponent::loop() {
+void TigoMonitorComponent::loop() {
   process_serial_data();
 }
 
-void TigoServerComponent::update() {
+void TigoMonitorComponent::update() {
   // This is called every polling interval
   publish_sensor_data();
 }
 
-void TigoServerComponent::dump_config() {
+void TigoMonitorComponent::dump_config() {
   ESP_LOGCONFIG(TAG, "Tigo Server:");
   ESP_LOGCONFIG(TAG, "  Update interval: %lums", this->get_update_interval());
   ESP_LOGCONFIG(TAG, "  Max devices: %d", number_of_devices_);
-  ESP_LOGCONFIG(TAG, "  Generate YAML config: %s", auto_create_sensors_ ? "YES" : "NO");
-  ESP_LOGCONFIG(TAG, "  Multi-sensor platform with auto-templating enabled");
+  ESP_LOGCONFIG(TAG, "  Multi-sensor platform with manual configuration");
   check_uart_settings(38400);
 }
 
-float TigoServerComponent::get_setup_priority() const {
+float TigoMonitorComponent::get_setup_priority() const {
   // Setup before API and other components that might need our sensors
   return setup_priority::HARDWARE - 1.0f;
 }
@@ -69,8 +65,8 @@ float TigoServerComponent::get_setup_priority() const {
 #ifdef USE_BUTTON
 void TigoYamlGeneratorButton::press_action() {
   ESP_LOGI("tigo_button", "Generating YAML configuration...");
-  if (this->tigo_server_ != nullptr) {
-    this->tigo_server_->generate_sensor_yaml();
+  if (this->tigo_monitor_ != nullptr) {
+    this->tigo_monitor_->generate_sensor_yaml();
   } else {
     ESP_LOGE("tigo_button", "Tigo server component not set!");
   }
@@ -78,8 +74,8 @@ void TigoYamlGeneratorButton::press_action() {
 
 void TigoDeviceMappingsButton::press_action() {
   ESP_LOGI("tigo_button", "Printing device mappings...");
-  if (this->tigo_server_ != nullptr) {
-    this->tigo_server_->print_device_mappings();
+  if (this->tigo_monitor_ != nullptr) {
+    this->tigo_monitor_->print_device_mappings();
   } else {
     ESP_LOGE("tigo_button", "Tigo server component not set!");
   }
@@ -87,15 +83,15 @@ void TigoDeviceMappingsButton::press_action() {
 
 void TigoResetNodeTableButton::press_action() {
   ESP_LOGI("tigo_button", "Resetting node table...");
-  if (this->tigo_server_ != nullptr) {
-    this->tigo_server_->reset_node_table();
+  if (this->tigo_monitor_ != nullptr) {
+    this->tigo_monitor_->reset_node_table();
   } else {
     ESP_LOGE("tigo_button", "Tigo server component not set!");
   }
 }
 #endif
 
-void TigoServerComponent::process_serial_data() {
+void TigoMonitorComponent::process_serial_data() {
   while (available()) {
     char incoming_byte = read();
     incoming_data_ += incoming_byte;
@@ -134,7 +130,7 @@ void TigoServerComponent::process_serial_data() {
   }
 }
 
-void TigoServerComponent::process_frame(const std::string &frame) {
+void TigoMonitorComponent::process_frame(const std::string &frame) {
   std::string processed_frame = remove_escape_sequences(frame);
   
   if (!verify_checksum(processed_frame)) {
@@ -202,7 +198,7 @@ void TigoServerComponent::process_frame(const std::string &frame) {
   }
 }
 
-void TigoServerComponent::process_power_frame(const std::string &frame) {
+void TigoMonitorComponent::process_power_frame(const std::string &frame) {
   DeviceData data;
   
   // Parse frame according to original Arduino logic
@@ -239,26 +235,26 @@ void TigoServerComponent::process_power_frame(const std::string &frame) {
   data.changed = true;
   data.last_update = millis();
   
-  // Find barcode from unified node table (Frame 27 or Frame 09 data)
+  // Find barcode from Frame 09 data only
   NodeTableData* node = find_node_by_addr(data.addr);
-  if (node != nullptr) {
-    // Prefer Frame 09 barcode if available, otherwise use Frame 27 long address
-    if (!node->frame09_barcode.empty()) {
-      data.barcode = node->frame09_barcode;
-    } else if (!node->long_address.empty()) {
-      data.barcode = node->long_address;
-    }
+  if (node != nullptr && !node->frame09_barcode.empty()) {
+    data.barcode = node->frame09_barcode;
+    ESP_LOGD(TAG, "Using Frame 09 barcode for device %s: %s", data.addr.c_str(), data.barcode.c_str());
+  } else {
+    // No Frame 09 barcode available yet
+    data.barcode = "";
+    ESP_LOGD(TAG, "No Frame 09 barcode available for device %s", data.addr.c_str());
   }
   
   update_device_data(data);
 }
 
-void TigoServerComponent::process_09_frame(const std::string &frame) {
+void TigoMonitorComponent::process_09_frame(const std::string &frame) {
   std::string addr = frame.substr(14, 4);
   std::string node_id = frame.substr(18, 4);  
   std::string barcode = frame.substr(40, 6);
   
-  ESP_LOGI(TAG, "Frame 09 - Device Identity: addr=%s, node_id=%s, barcode=%s", 
+  ESP_LOGI(TAG, "📦 Frame 09 - Device Identity: addr=%s, node_id=%s, barcode=%s", 
            addr.c_str(), node_id.c_str(), barcode.c_str());
   
   // Find or create node table entry
@@ -284,20 +280,26 @@ void TigoServerComponent::process_09_frame(const std::string &frame) {
   
   // Also update existing device if already discovered
   DeviceData* device = find_device_by_addr(addr);
-  if (device != nullptr && device->barcode != barcode) {
-    device->barcode = barcode;
-    ESP_LOGI(TAG, "Updated existing device %s with Frame 09 barcode: %s", addr.c_str(), barcode.c_str());
+  if (device != nullptr) {
+    if (device->barcode != barcode) {
+      device->barcode = barcode;
+      ESP_LOGI(TAG, "Updated existing device %s with Frame 09 barcode: %s", addr.c_str(), barcode.c_str());
+    } else {
+      ESP_LOGD(TAG, "Device %s already has Frame 09 barcode: %s", addr.c_str(), barcode.c_str());
+    }
     
-    // Immediately update barcode sensor if it exists
+    // Always publish the barcode sensor when Frame 09 data arrives
     auto barcode_it = barcode_sensors_.find(addr);
     if (barcode_it != barcode_sensors_.end()) {
       barcode_it->second->publish_state(barcode);
-      ESP_LOGD(TAG, "Published updated barcode for %s: %s", addr.c_str(), barcode.c_str());
+      ESP_LOGD(TAG, "Published Frame 09 barcode for %s: %s", addr.c_str(), barcode.c_str());
     }
+  } else {
+    ESP_LOGD(TAG, "Frame 09 data for %s received before power data - barcode stored in node table", addr.c_str());
   }
 }
 
-void TigoServerComponent::process_27_frame(const std::string &frame) {
+void TigoMonitorComponent::process_27_frame(const std::string &frame) {
   int num_entries = std::stoi(frame.substr(4, 4), nullptr, 16);
   ESP_LOGD(TAG, "Frame 27 received, entries: %d", num_entries);
   
@@ -337,7 +339,7 @@ void TigoServerComponent::process_27_frame(const std::string &frame) {
   }
 }
 
-void TigoServerComponent::update_device_data(const DeviceData &data) {
+void TigoMonitorComponent::update_device_data(const DeviceData &data) {
   ESP_LOGD(TAG, "Updating device data for addr: %s", data.addr.c_str());
   
   // Find existing device or add new one
@@ -347,20 +349,20 @@ void TigoServerComponent::update_device_data(const DeviceData &data) {
     ESP_LOGD(TAG, "Updated existing device: %s", data.addr.c_str());
   } else if (devices_.size() < number_of_devices_) {
     devices_.push_back(data);
-    ESP_LOGI(TAG, "New device discovered: addr=%s, barcode=%s, auto_create=%s", 
-             data.addr.c_str(), data.barcode.c_str(), auto_create_sensors_ ? "true" : "false");
+    ESP_LOGI(TAG, "New device discovered: addr=%s, barcode=%s", 
+             data.addr.c_str(), data.barcode.c_str());
     
-    // Assign pre-created sensors to new device if enabled
-    if (auto_create_sensors_ && created_devices_.find(data.addr) == created_devices_.end()) {
+    // Track device discovery for node table management
+    if (created_devices_.find(data.addr) == created_devices_.end()) {
       // Check if we have a saved sensor index in the node table
       NodeTableData* node = find_node_by_addr(data.addr);
       int sensor_index = -1;
       
       if (node != nullptr && node->sensor_index >= 0) {
         sensor_index = node->sensor_index;
-        ESP_LOGI(TAG, "Restored device %s to previous Tigo %d assignment", data.addr.c_str(), sensor_index + 1);
+        ESP_LOGI(TAG, "Restored device %s to previous index %d assignment", data.addr.c_str(), sensor_index + 1);
       } else {
-        // Assign new sensor index
+        // Assign new sensor index for node table tracking
         assign_sensor_index_to_node(data.addr);
         node = find_node_by_addr(data.addr);
         if (node != nullptr) {
@@ -368,25 +370,26 @@ void TigoServerComponent::update_device_data(const DeviceData &data) {
         }
       }
       
-      ESP_LOGI(TAG, "New device discovered: %s - Vin:%.2fV, Vout:%.2fV, Curr:%.3fA, Temp:%.1f°C", 
-               data.addr.c_str(), data.voltage_in, data.voltage_out, data.current_in, data.temperature);
+      // After device creation, ensure barcode is up to date from node table
+      DeviceData* new_device = &devices_.back();
+      if (node != nullptr && !node->frame09_barcode.empty() && new_device->barcode != node->frame09_barcode) {
+        new_device->barcode = node->frame09_barcode;
+        ESP_LOGI(TAG, "Applied Frame 09 barcode to new device %s: %s", data.addr.c_str(), node->frame09_barcode.c_str());
+      }
+      
+      ESP_LOGI(TAG, "Device data: %s - Vin:%.2fV, Vout:%.2fV, Curr:%.3fA, Temp:%.1f°C, Barcode:%s", 
+               data.addr.c_str(), data.voltage_in, data.voltage_out, data.current_in, data.temperature, new_device->barcode.c_str());
       
       created_devices_.insert(data.addr);
-      
-      if (auto_create_sensors_) {
-        ESP_LOGI(TAG, "Device %s discovered! Add this address to your manual sensor configuration", data.addr.c_str());
-      }
-    } else if (!auto_create_sensors_) {
-      ESP_LOGD(TAG, "Auto-creation disabled, skipping sensor creation for: %s", data.addr.c_str());
     } else {
-      ESP_LOGD(TAG, "Sensors already created for device: %s", data.addr.c_str());
+      ESP_LOGD(TAG, "Device already tracked: %s", data.addr.c_str());
     }
   } else {
     ESP_LOGW(TAG, "Maximum number of devices reached (%d)", number_of_devices_);
   }
 }
 
-DeviceData* TigoServerComponent::find_device_by_addr(const std::string &addr) {
+DeviceData* TigoMonitorComponent::find_device_by_addr(const std::string &addr) {
   for (auto &device : devices_) {
     if (device.addr == addr) {
       return &device;
@@ -395,7 +398,7 @@ DeviceData* TigoServerComponent::find_device_by_addr(const std::string &addr) {
   return nullptr;
 }
 
-void TigoServerComponent::publish_sensor_data() {
+void TigoMonitorComponent::publish_sensor_data() {
   ESP_LOGD(TAG, "Publishing sensor data for %zu devices", devices_.size());
   
   for (const auto &device : devices_) {
@@ -490,9 +493,94 @@ void TigoServerComponent::publish_sensor_data() {
 
 
   }
+  
+  // Publish device count sensor if configured
+  if (device_count_sensor_ != nullptr) {
+    int device_count = devices_.size();
+    device_count_sensor_->publish_state(device_count);
+    ESP_LOGD(TAG, "Published device count: %d", device_count);
+  }
+  
+  // Calculate and publish power sum sensor if configured
+  if (power_sum_sensor_ != nullptr) {
+    float total_power = 0.0f;
+    int active_devices = 0;
+    
+    for (const auto &device : devices_) {
+      float device_power = device.voltage_out * device.current_in;
+      total_power += device_power;
+      active_devices++;
+    }
+    
+    power_sum_sensor_->publish_state(total_power);
+    ESP_LOGD(TAG, "Published power sum: %.0fW from %d devices", total_power, active_devices);
+    
+    // Calculate and publish energy sum sensor if configured
+    if (energy_sum_sensor_ != nullptr) {
+      unsigned long current_time = millis();
+      
+      if (last_energy_update_ > 0) {
+        // Calculate time difference in hours
+        unsigned long time_diff_ms = current_time - last_energy_update_;
+        float time_diff_hours = time_diff_ms / 3600000.0f;
+        
+        // Calculate energy increment in kWh (power in watts * time in hours / 1000)
+        float energy_increment_kwh = (total_power * time_diff_hours) / 1000.0f;
+        total_energy_kwh_ += energy_increment_kwh;
+        
+        ESP_LOGD(TAG, "Energy calculation: %.0fW for %.4fh = %.6f kWh increment, total: %.3f kWh", 
+                 total_power, time_diff_hours, energy_increment_kwh, total_energy_kwh_);
+      }
+      
+      last_energy_update_ = current_time;
+      energy_sum_sensor_->publish_state(total_energy_kwh_);
+      ESP_LOGD(TAG, "Published energy sum: %.3f kWh", total_energy_kwh_);
+      
+      // Save energy data periodically (every 10 updates to reduce flash wear)
+      static int save_counter = 0;
+      if (++save_counter >= 10) {
+        save_energy_data();
+        save_counter = 0;
+      }
+    }
+  } else if (energy_sum_sensor_ != nullptr) {
+    // Energy sensor configured but no power sum sensor - calculate power directly
+    float total_power = 0.0f;
+    
+    for (const auto &device : devices_) {
+      float device_power = device.voltage_out * device.current_in;
+      total_power += device_power;
+    }
+    
+    unsigned long current_time = millis();
+    
+    if (last_energy_update_ > 0) {
+      // Calculate time difference in hours
+      unsigned long time_diff_ms = current_time - last_energy_update_;
+      float time_diff_hours = time_diff_ms / 3600000.0f;
+      
+      // Calculate energy increment in kWh
+      float energy_increment_kwh = (total_power * time_diff_hours) / 1000.0f;
+      total_energy_kwh_ += energy_increment_kwh;
+      
+      ESP_LOGD(TAG, "Energy calculation: %.0fW for %.4fh = %.6f kWh increment, total: %.3f kWh", 
+               total_power, time_diff_hours, energy_increment_kwh, total_energy_kwh_);
+    }
+    
+    last_energy_update_ = current_time;
+    energy_sum_sensor_->publish_state(total_energy_kwh_);
+    ESP_LOGD(TAG, "Published energy sum: %.3f kWh", total_energy_kwh_);
+    
+    // Save energy data periodically
+    static int save_counter_standalone = 0;
+    if (++save_counter_standalone >= 10) {
+      save_energy_data();
+      save_counter_standalone = 0;
+    }
+  }
 }
 
-std::string TigoServerComponent::remove_escape_sequences(const std::string &frame) {
+std::string TigoMonitorComponent::remove_escape_sequences(const std::string &frame) {
   std::string result;
   result.reserve(frame.length());
   
@@ -520,7 +608,7 @@ std::string TigoServerComponent::remove_escape_sequences(const std::string &fram
   return result;
 }
 
-bool TigoServerComponent::verify_checksum(const std::string &frame) {
+bool TigoMonitorComponent::verify_checksum(const std::string &frame) {
   if (frame.length() < 2) return false;
   
   std::string checksum_str = frame.substr(frame.length() - 2);
@@ -535,7 +623,7 @@ bool TigoServerComponent::verify_checksum(const std::string &frame) {
   return extracted_checksum == computed_checksum;
 }
 
-std::string TigoServerComponent::frame_to_hex_string(const std::string &frame) {
+std::string TigoMonitorComponent::frame_to_hex_string(const std::string &frame) {
   std::string hex_str;
   hex_str.reserve(frame.length() * 2);
   
@@ -547,7 +635,7 @@ std::string TigoServerComponent::frame_to_hex_string(const std::string &frame) {
   return hex_str;
 }
 
-int TigoServerComponent::calculate_header_length(const std::string &hex_frame) {
+int TigoMonitorComponent::calculate_header_length(const std::string &hex_frame) {
   // Convert from little-endian: swap bytes
   std::string low_byte = hex_frame.substr(0, 2);
   std::string high_byte = hex_frame.substr(2, 2);
@@ -568,7 +656,7 @@ int TigoServerComponent::calculate_header_length(const std::string &hex_frame) {
   return length * 2; // Convert to hex characters
 }
 
-void TigoServerComponent::generate_crc_table() {
+void TigoMonitorComponent::generate_crc_table() {
   for (uint16_t i = 0; i < CRC_TABLE_SIZE; ++i) {
     uint16_t crc = i;
     for (uint8_t j = 8; j > 0; --j) {
@@ -582,7 +670,7 @@ void TigoServerComponent::generate_crc_table() {
   }
 }
 
-uint16_t TigoServerComponent::compute_crc16_ccitt(const uint8_t *data, size_t length) {
+uint16_t TigoMonitorComponent::compute_crc16_ccitt(const uint8_t *data, size_t length) {
   uint16_t crc = 0x8408; // Initial value
   for (size_t i = 0; i < length; i++) {
     uint8_t index = (crc ^ data[i]) & 0xFF;
@@ -592,7 +680,7 @@ uint16_t TigoServerComponent::compute_crc16_ccitt(const uint8_t *data, size_t le
   return crc;
 }
 
-char TigoServerComponent::compute_tigo_crc4(const std::string &hex_string) {
+char TigoMonitorComponent::compute_tigo_crc4(const std::string &hex_string) {
   uint8_t crc = 0x2;
   for (size_t i = 0; i < hex_string.length(); i += 2) {
     if (i + 1 >= hex_string.length()) break;
@@ -606,7 +694,7 @@ char TigoServerComponent::compute_tigo_crc4(const std::string &hex_string) {
 
 
 
-void TigoServerComponent::generate_sensor_yaml() {
+void TigoMonitorComponent::generate_sensor_yaml() {
   ESP_LOGI(TAG, "");
   ESP_LOGI(TAG, "=== COPY THE FOLLOWING YAML CONFIGURATION ===");
   ESP_LOGI(TAG, "# Add this to your ESPHome YAML file under 'sensor:'");
@@ -639,8 +727,8 @@ void TigoServerComponent::generate_sensor_yaml() {
       }
       
       ESP_LOGI(TAG, "  # Tigo Device %s (discovered%s)", index_str.c_str(), barcode_comment.c_str());
-      ESP_LOGI(TAG, "  - platform: tigo_server");
-      ESP_LOGI(TAG, "    tigo_server_id: tigo_hub");
+      ESP_LOGI(TAG, "  - platform: tigo_monitor");
+      ESP_LOGI(TAG, "    tigo_monitor_id: tigo_hub");
       ESP_LOGI(TAG, "    address: \"%s\"", node.addr.c_str());
       ESP_LOGI(TAG, "    name: \"Tigo Device %s\"", index_str.c_str());
       ESP_LOGI(TAG, "    power: {}");
@@ -661,8 +749,8 @@ void TigoServerComponent::generate_sensor_yaml() {
       std::string index_str = std::to_string(i + 1);
       
       ESP_LOGI(TAG, "  # Tigo Device %s (placeholder - update address when discovered)", index_str.c_str());
-      ESP_LOGI(TAG, "  - platform: tigo_server");
-      ESP_LOGI(TAG, "    tigo_server_id: tigo_hub");
+      ESP_LOGI(TAG, "  - platform: tigo_monitor");
+      ESP_LOGI(TAG, "    tigo_monitor_id: tigo_hub");
       ESP_LOGI(TAG, "    address: \"device_%s\"  # CHANGE THIS to actual device address", index_str.c_str());
       ESP_LOGI(TAG, "    name: \"Tigo Device %s\"", index_str.c_str());
       ESP_LOGI(TAG, "    power: {}");
@@ -671,18 +759,6 @@ void TigoServerComponent::generate_sensor_yaml() {
       ESP_LOGI(TAG, "    current_in: {}");
       ESP_LOGI(TAG, "    temperature: {}");
       ESP_LOGI(TAG, "    rssi: {}");
-      ESP_LOGI(TAG, "");
-      ESP_LOGI(TAG, "      name: \"Tigo Device %s Power\"", index_str.c_str());
-      ESP_LOGI(TAG, "    voltage_in:");
-      ESP_LOGI(TAG, "      name: \"Tigo Device %s Voltage In\"", index_str.c_str());
-      ESP_LOGI(TAG, "    voltage_out:");
-      ESP_LOGI(TAG, "      name: \"Tigo Device %s Voltage Out\"", index_str.c_str());
-      ESP_LOGI(TAG, "    current_in:");
-      ESP_LOGI(TAG, "      name: \"Tigo Device %s Current\"", index_str.c_str());
-      ESP_LOGI(TAG, "    temperature:");
-      ESP_LOGI(TAG, "      name: \"Tigo Device %s Temperature\"", index_str.c_str());
-      ESP_LOGI(TAG, "    rssi:");
-      ESP_LOGI(TAG, "      name: \"Tigo Device %s RSSI\"", index_str.c_str());
       ESP_LOGI(TAG, "");
     }
   }
@@ -699,7 +775,7 @@ void TigoServerComponent::generate_sensor_yaml() {
   ESP_LOGI(TAG, "Copy the configuration above - sensor names are auto-generated from base name!");
 }
 
-void TigoServerComponent::print_device_mappings() {
+void TigoMonitorComponent::print_device_mappings() {
   ESP_LOGI(TAG, "=== UNIFIED NODE TABLE ===");
   
   // Count nodes with sensor assignments
@@ -802,14 +878,14 @@ void TigoServerComponent::print_device_mappings() {
   ESP_LOGI(TAG, "=== END UNIFIED NODE TABLE ===");
 }
 
-void TigoServerComponent::load_node_table() {
+void TigoMonitorComponent::load_node_table() {
   ESP_LOGI(TAG, "Loading persistent node table...");
   
   int loaded_count = 0;
   // Load node table entries up to the configured number of devices
   for (int i = 0; i < number_of_devices_; i++) {
     std::string pref_key = "node_" + std::to_string(i);
-    uint32_t hash = fnv1_hash(pref_key);
+    uint32_t hash = esphome::fnv1_hash(pref_key);
     
     // Use char array for ESPHome preferences
     auto restore = global_preferences->make_preference<char[256]>(hash);
@@ -848,13 +924,13 @@ void TigoServerComponent::load_node_table() {
   ESP_LOGI(TAG, "Loaded %d persistent node table entries (capacity: %d devices)", loaded_count, number_of_devices_);
 }
 
-void TigoServerComponent::save_node_table() {
+void TigoMonitorComponent::save_node_table() {
   ESP_LOGD(TAG, "Saving node table to flash...");
   
   // Clear old entries first
   for (int i = 0; i < number_of_devices_; i++) {
     std::string pref_key = "node_" + std::to_string(i);
-    uint32_t hash = fnv1_hash(pref_key);
+    uint32_t hash = esphome::fnv1_hash(pref_key);
     auto save = global_preferences->make_preference<char[256]>(hash);
     char empty_data[256] = {0};
     save.save(&empty_data);
@@ -868,7 +944,7 @@ void TigoServerComponent::save_node_table() {
     if (!node.is_persistent) continue;   // Only save persistent nodes
     
     std::string pref_key = "node_" + std::to_string(i);
-    uint32_t hash = fnv1_hash(pref_key);
+    uint32_t hash = esphome::fnv1_hash(pref_key);
     
     // Format: "addr|long_addr|checksum|barcode|sensor_index"
     std::string node_str = node.addr + "|" + 
@@ -890,7 +966,7 @@ void TigoServerComponent::save_node_table() {
   ESP_LOGD(TAG, "Saved %d node table entries to flash", saved_count);
 }
 
-void TigoServerComponent::reset_node_table() {
+void TigoMonitorComponent::reset_node_table() {
   ESP_LOGI(TAG, "Resetting node table - clearing all persistent device mappings...");
   
   int cleared_count = node_table_.size();
@@ -901,7 +977,7 @@ void TigoServerComponent::reset_node_table() {
   // Clear all persistent storage entries
   for (int i = 0; i < number_of_devices_; i++) {
     std::string pref_key = "node_" + std::to_string(i);
-    uint32_t hash = fnv1_hash(pref_key);
+    uint32_t hash = esphome::fnv1_hash(pref_key);
     auto save = global_preferences->make_preference<char[256]>(hash);
     char empty_data[256] = {0};
     save.save(&empty_data);
@@ -921,7 +997,7 @@ void TigoServerComponent::reset_node_table() {
   ESP_LOGI(TAG, "recollected automatically during normal operation.");
 }
 
-int TigoServerComponent::get_next_available_sensor_index() {
+int TigoMonitorComponent::get_next_available_sensor_index() {
   // Create a set of used indices from the unified node table
   std::set<int> used_indices;
   for (const auto &node : node_table_) {
@@ -940,14 +1016,14 @@ int TigoServerComponent::get_next_available_sensor_index() {
   return -1; // No available indices
 }
 
-std::string TigoServerComponent::get_device_name(const DeviceData &device) {
+std::string TigoMonitorComponent::get_device_name(const DeviceData &device) {
   if (!device.barcode.empty() && device.barcode.length() >= 5) {
     return "Tigo " + device.barcode;
   }
   return "Tigo Module " + device.addr;
 }
 
-NodeTableData* TigoServerComponent::find_node_by_addr(const std::string &addr) {
+NodeTableData* TigoMonitorComponent::find_node_by_addr(const std::string &addr) {
   for (auto &node : node_table_) {
     if (node.addr == addr) {
       return &node;
@@ -956,18 +1032,56 @@ NodeTableData* TigoServerComponent::find_node_by_addr(const std::string &addr) {
   return nullptr;
 }
 
-void TigoServerComponent::assign_sensor_index_to_node(const std::string &addr) {
+void TigoMonitorComponent::assign_sensor_index_to_node(const std::string &addr) {
   NodeTableData* node = find_node_by_addr(addr);
-  if (node != nullptr && node->sensor_index == -1) {
+  
+  if (node == nullptr) {
+    // Create a new node entry if it doesn't exist
+    if (node_table_.size() < number_of_devices_) {
+      NodeTableData new_node;
+      new_node.addr = addr;
+      new_node.sensor_index = -1;  // Will be assigned below
+      new_node.is_persistent = true;
+      node_table_.push_back(new_node);
+      node = &node_table_.back();  // Point to the newly added node
+      ESP_LOGI(TAG, "Created new node entry for power data device: %s", addr.c_str());
+    } else {
+      ESP_LOGW(TAG, "Cannot create node entry - node table is full (%d devices)", number_of_devices_);
+      return;
+    }
+  }
+  
+  if (node->sensor_index == -1) {
     int index = get_next_available_sensor_index();
     if (index >= 0) {
       node->sensor_index = index;
       node->is_persistent = true;
       ESP_LOGI(TAG, "Assigned sensor index %d to device %s", index + 1, addr.c_str());
       save_node_table();
+    } else {
+      ESP_LOGW(TAG, "No available sensor index for device %s", addr.c_str());
     }
   }
 }
 
-}  // namespace tigo_server
+void TigoMonitorComponent::load_energy_data() {
+  auto restore = global_preferences->make_preference<float>(ENERGY_DATA_HASH);
+  if (restore.load(&total_energy_kwh_)) {
+    ESP_LOGI(TAG, "Restored total energy: %.3f kWh", total_energy_kwh_);
+  } else {
+    ESP_LOGI(TAG, "No previous energy data found, starting from 0 kWh");
+    total_energy_kwh_ = 0.0f;
+  }
+}
+
+void TigoMonitorComponent::save_energy_data() {
+  auto save = global_preferences->make_preference<float>(ENERGY_DATA_HASH);
+  if (save.save(&total_energy_kwh_)) {
+    ESP_LOGD(TAG, "Saved energy data: %.3f kWh", total_energy_kwh_);
+  } else {
+    ESP_LOGW(TAG, "Failed to save energy data");
+  }
+}
+
+}  // namespace tigo_monitor
 }  // namespace esphome

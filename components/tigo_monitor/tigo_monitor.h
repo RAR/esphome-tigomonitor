@@ -15,7 +15,7 @@
 #include <string>
 
 namespace esphome {
-namespace tigo_server {
+namespace tigo_monitor {
 
 static const uint16_t CRC_POLYNOMIAL = 0x8408;  // Reversed polynomial (0x1021 reflected)
 static const size_t CRC_TABLE_SIZE = 256;
@@ -44,9 +44,9 @@ struct NodeTableData {
   bool is_persistent = false;  // Whether this mapping should be saved to flash
 };
 
-class TigoServerComponent : public PollingComponent, public uart::UARTDevice {
+class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
  public:
-  TigoServerComponent() = default;
+  TigoMonitorComponent() = default;
   
   void setup() override;
   void loop() override;
@@ -60,31 +60,43 @@ class TigoServerComponent : public PollingComponent, public uart::UARTDevice {
   // Manual sensor registration (for advanced users who want specific configurations)
   void add_voltage_in_sensor(const std::string &address, sensor::Sensor *sensor) { 
     this->voltage_in_sensors_[address] = sensor; 
-    ESP_LOGCONFIG("tigo_server", "Registered voltage_in sensor for address: %s", address.c_str());
+    ESP_LOGCONFIG("tigo_monitor", "Registered voltage_in sensor for address: %s", address.c_str());
   }
   void add_voltage_out_sensor(const std::string &address, sensor::Sensor *sensor) { 
     this->voltage_out_sensors_[address] = sensor; 
-    ESP_LOGCONFIG("tigo_server", "Registered voltage_out sensor for address: %s", address.c_str());
+    ESP_LOGCONFIG("tigo_monitor", "Registered voltage_out sensor for address: %s", address.c_str());
   }
   void add_current_in_sensor(const std::string &address, sensor::Sensor *sensor) { 
     this->current_in_sensors_[address] = sensor; 
-    ESP_LOGCONFIG("tigo_server", "Registered current_in sensor for address: %s", address.c_str());
+    ESP_LOGCONFIG("tigo_monitor", "Registered current_in sensor for address: %s", address.c_str());
   }
   void add_temperature_sensor(const std::string &address, sensor::Sensor *sensor) { 
     this->temperature_sensors_[address] = sensor; 
-    ESP_LOGCONFIG("tigo_server", "Registered temperature sensor for address: %s", address.c_str());
+    ESP_LOGCONFIG("tigo_monitor", "Registered temperature sensor for address: %s", address.c_str());
   }
   void add_power_sensor(const std::string &address, sensor::Sensor *sensor) { 
     this->power_sensors_[address] = sensor; 
-    ESP_LOGCONFIG("tigo_server", "Registered power sensor for address: %s", address.c_str());
+    ESP_LOGCONFIG("tigo_monitor", "Registered power sensor for address: %s", address.c_str());
+  }
+  void add_power_sum_sensor(sensor::Sensor *sensor) { 
+    this->power_sum_sensor_ = sensor; 
+    ESP_LOGCONFIG("tigo_monitor", "Registered power sum sensor");
+  }
+  void add_energy_sum_sensor(sensor::Sensor *sensor) { 
+    this->energy_sum_sensor_ = sensor; 
+    ESP_LOGCONFIG("tigo_monitor", "Registered energy sum sensor");
+  }
+  void add_device_count_sensor(sensor::Sensor *sensor) { 
+    this->device_count_sensor_ = sensor; 
+    ESP_LOGCONFIG("tigo_monitor", "Registered device count sensor");
   }
   void add_rssi_sensor(const std::string &address, sensor::Sensor *sensor) { 
     this->rssi_sensors_[address] = sensor; 
-    ESP_LOGCONFIG("tigo_server", "Registered rssi sensor for address: %s", address.c_str());
+    ESP_LOGCONFIG("tigo_monitor", "Registered rssi sensor for address: %s", address.c_str());
   }
   void add_barcode_sensor(const std::string &address, text_sensor::TextSensor *sensor) { 
     this->barcode_sensors_[address] = sensor; 
-    ESP_LOGCONFIG("tigo_server", "Registered barcode sensor for address: %s", address.c_str());
+    ESP_LOGCONFIG("tigo_monitor", "Registered barcode sensor for address: %s", address.c_str());
   }
   void add_tigo_sensor(const std::string &address, sensor::Sensor *sensor) {
     this->power_sensors_[address] = sensor;
@@ -94,7 +106,6 @@ class TigoServerComponent : public PollingComponent, public uart::UARTDevice {
 
   // Configuration
   void set_number_of_devices(int count) { number_of_devices_ = count; }
-  void set_auto_create_sensors(bool auto_create) { auto_create_sensors_ = auto_create; }
   
   // Generate YAML configuration for manual setup
   void generate_sensor_yaml();
@@ -136,6 +147,10 @@ class TigoServerComponent : public PollingComponent, public uart::UARTDevice {
   NodeTableData* find_node_by_addr(const std::string &addr);
   void assign_sensor_index_to_node(const std::string &addr);
   
+  // Energy persistence
+  void load_energy_data();
+  void save_energy_data();
+  
  private:
   std::vector<DeviceData> devices_;
   std::vector<NodeTableData> node_table_;  // Unified table for all device info
@@ -146,15 +161,22 @@ class TigoServerComponent : public PollingComponent, public uart::UARTDevice {
   std::map<std::string, sensor::Sensor*> power_sensors_;
   std::map<std::string, sensor::Sensor*> rssi_sensors_;
   std::map<std::string, text_sensor::TextSensor*> barcode_sensors_;
+  sensor::Sensor* power_sum_sensor_ = nullptr;
+  sensor::Sensor* energy_sum_sensor_ = nullptr;
+  sensor::Sensor* device_count_sensor_ = nullptr;
+  
+  // Energy calculation variables
+  float total_energy_kwh_ = 0.0f;
+  unsigned long last_energy_update_ = 0;
   
   // Persistence
   static const uint32_t DEVICE_MAPPING_HASH = 0x12345678;  // Hash for preferences key
+  static const uint32_t ENERGY_DATA_HASH = 0x87654321;     // Hash for energy data key
   
   std::string incoming_data_;
   bool frame_started_ = false;
   uint16_t crc_table_[CRC_TABLE_SIZE];
   int number_of_devices_ = 5;
-  bool auto_create_sensors_ = true;
   std::set<std::string> created_devices_;
   
   // No timing variables needed - ESPHome handles update intervals
@@ -167,28 +189,28 @@ class TigoServerComponent : public PollingComponent, public uart::UARTDevice {
 #ifdef USE_BUTTON
 class TigoYamlGeneratorButton : public button::Button, public Component {
  public:
-  void set_tigo_server(TigoServerComponent *server) { this->tigo_server_ = server; }
+  void set_tigo_monitor(TigoMonitorComponent *server) { this->tigo_monitor_ = server; }
   void press_action() override;
  protected:
-  TigoServerComponent *tigo_server_;
+  TigoMonitorComponent *tigo_monitor_;
 };
 
 class TigoDeviceMappingsButton : public button::Button, public Component {
  public:
-  void set_tigo_server(TigoServerComponent *server) { this->tigo_server_ = server; }
+  void set_tigo_monitor(TigoMonitorComponent *server) { this->tigo_monitor_ = server; }
   void press_action() override;
  protected:
-  TigoServerComponent *tigo_server_;
+  TigoMonitorComponent *tigo_monitor_;
 };
 
 class TigoResetNodeTableButton : public button::Button, public Component {
  public:
-  void set_tigo_server(TigoServerComponent *server) { this->tigo_server_ = server; }
+  void set_tigo_monitor(TigoMonitorComponent *server) { this->tigo_monitor_ = server; }
   void press_action() override;
  protected:
-  TigoServerComponent *tigo_server_;
+  TigoMonitorComponent *tigo_monitor_;
 };
 #endif
 
-}  // namespace tigo_server
+}  // namespace tigo_monitor
 }  // namespace esphome

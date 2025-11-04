@@ -1,4 +1,4 @@
-"""Sensor platform for Tigo Server devices."""
+"""Sensor platform for Tigo Monitor devices."""
 import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome.components import sensor, text_sensor
@@ -11,19 +11,25 @@ from esphome.const import (
     DEVICE_CLASS_CURRENT,
     DEVICE_CLASS_TEMPERATURE,
     DEVICE_CLASS_SIGNAL_STRENGTH,
+    DEVICE_CLASS_ENERGY,
     STATE_CLASS_MEASUREMENT,
+    STATE_CLASS_TOTAL_INCREASING,
     UNIT_WATT,
     UNIT_VOLT,
     UNIT_AMPERE,
     UNIT_CELSIUS,
-    UNIT_DECIBEL_MILLIWATT
+    UNIT_DECIBEL_MILLIWATT,
+    UNIT_KILOWATT_HOURS
 )
-from . import tigo_server_ns, TigoServerComponent, CONF_TIGO_SERVER_ID
+from . import tigo_monitor_ns, TigoMonitorComponent, CONF_TIGO_MONITOR_ID
 
-DEPENDENCIES = ['tigo_server']
+DEPENDENCIES = ['tigo_monitor']
 
 # Define specific sensor configs
 CONF_POWER = "power"
+CONF_POWER_SUM = "power_sum"
+CONF_ENERGY_SUM = "energy_sum"
+CONF_DEVICE_COUNT = "device_count"
 CONF_VOLTAGE_IN = "voltage_in"
 CONF_VOLTAGE_OUT = "voltage_out"
 CONF_CURRENT_IN = "current_in"
@@ -79,7 +85,13 @@ def _auto_template_sensor_config(config):
                 # Create a valid ID by converting to lowercase and replacing spaces/hyphens with underscores
                 base_id = base_name.lower().replace(' ', '_').replace('-', '_')
                 suffix_id = suffix.lower().replace(' ', '_').replace('-', '_')
-                id_string = f"{base_id}_{suffix_id}"
+                
+                # Special handling for power sum sensor (no device-specific suffix)
+                if conf_key == CONF_POWER_SUM:
+                    id_string = f"{base_id}_power_sum"
+                else:
+                    id_string = f"{base_id}_{suffix_id}"
+                    
                 # Use appropriate sensor type for ID declaration
                 if conf_key == CONF_BARCODE:
                     sensor_config[CONF_ID] = cv.declare_id(text_sensor.TextSensor)(id_string)
@@ -93,9 +105,10 @@ def _auto_template_sensor_config(config):
     
     return config
 
-CONFIG_SCHEMA = cv.All(
+# Schema for individual device sensors
+DEVICE_CONFIG_SCHEMA = cv.All(
     cv.Schema({
-        cv.GenerateID(CONF_TIGO_SERVER_ID): cv.use_id(TigoServerComponent),
+        cv.GenerateID(CONF_TIGO_MONITOR_ID): cv.use_id(TigoMonitorComponent),
         cv.Required(CONF_ADDRESS): cv.string,
         cv.Required(CONF_NAME): cv.string,
         cv.Optional(CONF_POWER): _tigo_sensor_schema(
@@ -139,8 +152,82 @@ CONFIG_SCHEMA = cv.All(
     _auto_template_sensor_config,
 )
 
+# Schema for power sum sensor (no address required)
+POWER_SUM_CONFIG_SCHEMA = sensor.sensor_schema(
+    unit_of_measurement=UNIT_WATT,
+    accuracy_decimals=0,
+    device_class=DEVICE_CLASS_POWER,
+    state_class=STATE_CLASS_MEASUREMENT,
+).extend({
+    cv.GenerateID(CONF_TIGO_MONITOR_ID): cv.use_id(TigoMonitorComponent),
+}).extend(cv.COMPONENT_SCHEMA)
+
+# Schema for energy sum sensor (no address required)
+ENERGY_SUM_CONFIG_SCHEMA = sensor.sensor_schema(
+    unit_of_measurement=UNIT_KILOWATT_HOURS,
+    accuracy_decimals=3,
+    device_class=DEVICE_CLASS_ENERGY,
+    state_class=STATE_CLASS_TOTAL_INCREASING,
+).extend({
+    cv.GenerateID(CONF_TIGO_MONITOR_ID): cv.use_id(TigoMonitorComponent),
+}).extend(cv.COMPONENT_SCHEMA)
+
+# Schema for device count sensor (no address required)
+DEVICE_COUNT_CONFIG_SCHEMA = sensor.sensor_schema(
+    accuracy_decimals=0,
+    state_class=STATE_CLASS_MEASUREMENT,
+).extend({
+    cv.GenerateID(CONF_TIGO_MONITOR_ID): cv.use_id(TigoMonitorComponent),
+}).extend(cv.COMPONENT_SCHEMA)
+
+# Main config schema that handles both types
+def _validate_config(config):
+    """Validate configuration and determine sensor type"""
+    # Check sensor type by name keywords
+    sensor_name = config.get(CONF_NAME, "").lower()
+    has_energy_keywords = any(keyword in sensor_name for keyword in ["energy", "kwh", "kilowatt", "wh"])
+    has_power_keywords = any(keyword in sensor_name for keyword in ["power", "watt", "total", "sum", "combined", "system"])
+    has_count_keywords = any(keyword in sensor_name for keyword in ["count", "devices", "discovered", "active", "number"])
+    
+    # If it has keywords and no address, treat as aggregate sensor
+    if CONF_ADDRESS not in config:
+        if has_energy_keywords:
+            return ENERGY_SUM_CONFIG_SCHEMA(config)
+        elif has_power_keywords:
+            return POWER_SUM_CONFIG_SCHEMA(config)
+        elif has_count_keywords:
+            return DEVICE_COUNT_CONFIG_SCHEMA(config)
+        else:
+            raise cv.Invalid("For sensors without address, use names containing 'energy'/'kwh' for energy sensors, 'power'/'total'/'sum' for power sensors, or 'count'/'devices' for device count sensors")
+    elif CONF_ADDRESS in config:
+        # This is a device sensor configuration
+        return DEVICE_CONFIG_SCHEMA(config)
+    else:
+        # Default to requiring address for safety
+        raise cv.Invalid("Either 'address' is required for device sensors, or use appropriate keywords for aggregate sensors")
+
+CONFIG_SCHEMA = _validate_config
+
 async def to_code(config):
-    hub = await cg.get_variable(config[CONF_TIGO_SERVER_ID])
+    hub = await cg.get_variable(config[CONF_TIGO_MONITOR_ID])
+    
+    # Check if this is an aggregate sensor (no address) or device sensor (has address)
+    if CONF_ADDRESS not in config:
+        # Check if this is energy, power, or device count sensor by name keywords
+        sensor_name = config.get(CONF_NAME, "").lower()
+        has_energy_keywords = any(keyword in sensor_name for keyword in ["energy", "kwh", "kilowatt", "wh"])
+        has_count_keywords = any(keyword in sensor_name for keyword in ["count", "devices", "discovered", "active", "number"])
+        
+        sens = await sensor.new_sensor(config)
+        if has_energy_keywords:
+            cg.add(hub.add_energy_sum_sensor(sens))
+        elif has_count_keywords:
+            cg.add(hub.add_device_count_sensor(sens))
+        else:
+            cg.add(hub.add_power_sum_sensor(sens))
+        return
+    
+    # This is a device sensor configuration
     address = config[CONF_ADDRESS]
     
     # Define sensor configurations with their methods

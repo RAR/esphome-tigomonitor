@@ -1,6 +1,6 @@
 esphome:
-  name: tigo-server
-  friendly_name: "Tigo Server"
+  name: tigo-monitor
+  friendly_name: "Tigo Monitor"
 
 esp32:
   board: esp32dev
@@ -20,7 +20,7 @@ wifi:
   
   # Enable fallback hotspot (captive portal) in case wifi connection fails
   ap:
-    ssid: "Tigo-Server Fallback Hotspot"
+    ssid: "Tigo-Monitor Fallback Hotspot"
     password: "12345678"
 
 captive_portal:
@@ -55,70 +55,85 @@ uart:
   parity: NONE
   stop_bits: 1
 
-# Tigo Server component - sensors will be created automatically!
-tigo_server:
+# Tigo Monitor component - sensors will be created automatically!
+tigo_monitor:
   id: tigo_hub
   uart_id: tigo_uart
   update_interval: 30s
   number_of_devices: 20  # Set this to exactly the number of Tigo devices you have
-  auto_create_sensors: true  # Set to true to generate YAML configuration in logs
 
-# IMPORTANT: Set auto_create_sensors to true and check the logs after first boot
-# The component will generate YAML sensor configuration that you need to copy/paste here
-# After flashing this basic config, check the logs for complete sensor YAML configuration
+# Configure your sensors below - add individual device sensors and/or the power sum sensor
 
-# STEP 1: Flash this configuration first
-# STEP 2: Use the "Generate YAML Config" button in Home Assistant or ESPHome dashboard
-# STEP 3: Copy the generated YAML and paste it below, then reflash
-
-# Tigo Server Control Buttons
+# Tigo Monitor Control Buttons
 button:
-  - platform: tigo_server
+  - platform: tigo_monitor
     name: "Generate YAML Config"
     id: generate_yaml_button
-    tigo_server_id: tigo_hub
+    tigo_monitor_id: tigo_hub
     button_type: yaml_generator
-  - platform: tigo_server
+  - platform: tigo_monitor
     name: "Print Device Mappings"
     id: device_mappings_button
-    tigo_server_id: tigo_hub
+    tigo_monitor_id: tigo_hub
     button_type: device_mappings
-  - platform: tigo_server
+  - platform: tigo_monitor
     name: "Reset Node Table"
     id: reset_node_table_button
-    tigo_server_id: tigo_hub
+    tigo_monitor_id: tigo_hub
     button_type: reset_node_table
 
 # COPY THE GENERATED SENSOR YAML FROM LOGS HERE:
 sensor:
-  # Check Home Assistant or ESPHome logs to see the actual sensor IDs
-  # Optional: Text sensors for device information
+  # NEW: Power Sum Sensor - Automatically calculates total power from all Tigo devices
+  - platform: tigo_monitor
+    tigo_monitor_id: tigo_hub
+    name: "Total System Power"
+    id: total_system_power
+    # Optional: Add filters for smoothing
+    filters:
+      - sliding_window_moving_average:
+          window_size: 5
+          send_every: 1
+
+  # NEW: Energy Sum Sensor - Automatically calculates total kWh produced by all Tigo devices
+  - platform: tigo_monitor
+    tigo_monitor_id: tigo_hub
+    name: "Total System Energy"
+    id: total_system_energy
+
+  # NEW: Device Count Sensor - Shows the number of discovered Tigo devices
+  - platform: tigo_monitor
+    tigo_monitor_id: tigo_hub
+    name: "Discovered Devices Count"
+    id: discovered_devices_count
+
+  # System monitoring sensors
   - platform: wifi_signal
-    name: "Tigo Server WiFi Signal"
+    name: "Tigo Monitor WiFi Signal"
     update_interval: 60s
 
   - platform: uptime
-    name: "Tigo Server Uptime"
+    name: "Tigo Monitor Uptime"
 
 text_sensor:
   - platform: wifi_info
     ip_address:
-      name: "Tigo Server IP Address"
+      name: "Tigo Monitor IP Address"
     ssid:
-      name: "Tigo Server Connected SSID"
+      name: "Tigo Monitor Connected SSID"
   
   - platform: version
-    name: "Tigo Server ESPHome Version"
+    name: "Tigo Monitor ESPHome Version"
 
 # Optional: Binary sensors
 binary_sensor:
   - platform: status
-    name: "Tigo Server Status"
+    name: "Tigo Monitor Status"
 
 # Optional: Switches for control
 switch:
   - platform: restart
-    name: "Tigo Server Restart"
+    name: "Tigo Monitor Restart"
 
 # Time component (optional, for logging timestamps)
 time:
