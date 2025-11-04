@@ -57,6 +57,7 @@ void TigoServerComponent::dump_config() {
   ESP_LOGCONFIG(TAG, "  Update interval: %lums", this->get_update_interval());
   ESP_LOGCONFIG(TAG, "  Max devices: %d", number_of_devices_);
   ESP_LOGCONFIG(TAG, "  Generate YAML config: %s", auto_create_sensors_ ? "YES" : "NO");
+  ESP_LOGCONFIG(TAG, "  Multi-sensor platform with auto-templating enabled");
   check_uart_settings(38400);
 }
 
@@ -286,6 +287,13 @@ void TigoServerComponent::process_09_frame(const std::string &frame) {
   if (device != nullptr && device->barcode != barcode) {
     device->barcode = barcode;
     ESP_LOGI(TAG, "Updated existing device %s with Frame 09 barcode: %s", addr.c_str(), barcode.c_str());
+    
+    // Immediately update barcode sensor if it exists
+    auto barcode_it = barcode_sensors_.find(addr);
+    if (barcode_it != barcode_sensors_.end()) {
+      barcode_it->second->publish_state(barcode);
+      ESP_LOGD(TAG, "Published updated barcode for %s: %s", addr.c_str(), barcode.c_str());
+    }
   }
 }
 
@@ -436,6 +444,13 @@ void TigoServerComponent::publish_sensor_data() {
     if (rssi_it != rssi_sensors_.end()) {
       rssi_it->second->publish_state(device.rssi);
       ESP_LOGD(TAG, "Published RSSI for %s: %ddBm", device.addr.c_str(), device.rssi);
+    }
+    
+    // Publish barcode text sensor
+    auto barcode_it = barcode_sensors_.find(device.addr);
+    if (barcode_it != barcode_sensors_.end()) {
+      barcode_it->second->publish_state(device.barcode);
+      ESP_LOGD(TAG, "Published barcode for %s: %s", device.addr.c_str(), device.barcode.c_str());
     }
     
     // Check if this device has a combined Tigo sensor
@@ -627,6 +642,13 @@ void TigoServerComponent::generate_sensor_yaml() {
       ESP_LOGI(TAG, "  - platform: tigo_server");
       ESP_LOGI(TAG, "    tigo_server_id: tigo_hub");
       ESP_LOGI(TAG, "    address: \"%s\"", node.addr.c_str());
+      ESP_LOGI(TAG, "    name: \"Tigo Device %s\"", index_str.c_str());
+      ESP_LOGI(TAG, "    power: {}");
+      ESP_LOGI(TAG, "    voltage_in: {}");
+      ESP_LOGI(TAG, "    voltage_out: {}");
+      ESP_LOGI(TAG, "    current_in: {}");
+      ESP_LOGI(TAG, "    temperature: {}");
+      ESP_LOGI(TAG, "    rssi: {}");
       ESP_LOGI(TAG, "");
     }
   }
@@ -642,6 +664,25 @@ void TigoServerComponent::generate_sensor_yaml() {
       ESP_LOGI(TAG, "  - platform: tigo_server");
       ESP_LOGI(TAG, "    tigo_server_id: tigo_hub");
       ESP_LOGI(TAG, "    address: \"device_%s\"  # CHANGE THIS to actual device address", index_str.c_str());
+      ESP_LOGI(TAG, "    name: \"Tigo Device %s\"", index_str.c_str());
+      ESP_LOGI(TAG, "    power: {}");
+      ESP_LOGI(TAG, "    voltage_in: {}");
+      ESP_LOGI(TAG, "    voltage_out: {}");
+      ESP_LOGI(TAG, "    current_in: {}");
+      ESP_LOGI(TAG, "    temperature: {}");
+      ESP_LOGI(TAG, "    rssi: {}");
+      ESP_LOGI(TAG, "");
+      ESP_LOGI(TAG, "      name: \"Tigo Device %s Power\"", index_str.c_str());
+      ESP_LOGI(TAG, "    voltage_in:");
+      ESP_LOGI(TAG, "      name: \"Tigo Device %s Voltage In\"", index_str.c_str());
+      ESP_LOGI(TAG, "    voltage_out:");
+      ESP_LOGI(TAG, "      name: \"Tigo Device %s Voltage Out\"", index_str.c_str());
+      ESP_LOGI(TAG, "    current_in:");
+      ESP_LOGI(TAG, "      name: \"Tigo Device %s Current\"", index_str.c_str());
+      ESP_LOGI(TAG, "    temperature:");
+      ESP_LOGI(TAG, "      name: \"Tigo Device %s Temperature\"", index_str.c_str());
+      ESP_LOGI(TAG, "    rssi:");
+      ESP_LOGI(TAG, "      name: \"Tigo Device %s RSSI\"", index_str.c_str());
       ESP_LOGI(TAG, "");
     }
   }
@@ -652,8 +693,10 @@ void TigoServerComponent::generate_sensor_yaml() {
   ESP_LOGI(TAG, "# - Total configuration slots: %d", number_of_devices_);
   ESP_LOGI(TAG, "=== END YAML CONFIGURATION ===");
   ESP_LOGI(TAG, "");
-  ESP_LOGI(TAG, "Simplified YAML generated! Each device entry automatically creates 6 sensors.");
-  ESP_LOGI(TAG, "Copy the above configuration - no need to specify individual sensors!");
+  ESP_LOGI(TAG, "Auto-templated YAML generated! Each device creates 6 sensors with names based on 'name' field:");
+  ESP_LOGI(TAG, "- [name] Power (W), [name] Voltage In (V), [name] Voltage Out (V)");
+  ESP_LOGI(TAG, "- [name] Current (A), [name] Temperature (°C), [name] RSSI (dBm)");
+  ESP_LOGI(TAG, "Copy the configuration above - sensor names are auto-generated from base name!");
 }
 
 void TigoServerComponent::print_device_mappings() {

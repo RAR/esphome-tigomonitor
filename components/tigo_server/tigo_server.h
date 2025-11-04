@@ -4,6 +4,7 @@
 #include "esphome/core/defines.h"
 #include "esphome/components/uart/uart.h"
 #include "esphome/components/sensor/sensor.h"
+#include "esphome/components/text_sensor/text_sensor.h"
 
 #ifdef USE_BUTTON
 #include "esphome/components/button/button.h"
@@ -59,21 +60,31 @@ class TigoServerComponent : public PollingComponent, public uart::UARTDevice {
   // Manual sensor registration (for advanced users who want specific configurations)
   void add_voltage_in_sensor(const std::string &address, sensor::Sensor *sensor) { 
     this->voltage_in_sensors_[address] = sensor; 
+    ESP_LOGCONFIG("tigo_server", "Registered voltage_in sensor for address: %s", address.c_str());
   }
   void add_voltage_out_sensor(const std::string &address, sensor::Sensor *sensor) { 
     this->voltage_out_sensors_[address] = sensor; 
+    ESP_LOGCONFIG("tigo_server", "Registered voltage_out sensor for address: %s", address.c_str());
   }
   void add_current_in_sensor(const std::string &address, sensor::Sensor *sensor) { 
     this->current_in_sensors_[address] = sensor; 
+    ESP_LOGCONFIG("tigo_server", "Registered current_in sensor for address: %s", address.c_str());
   }
   void add_temperature_sensor(const std::string &address, sensor::Sensor *sensor) { 
     this->temperature_sensors_[address] = sensor; 
+    ESP_LOGCONFIG("tigo_server", "Registered temperature sensor for address: %s", address.c_str());
   }
   void add_power_sensor(const std::string &address, sensor::Sensor *sensor) { 
     this->power_sensors_[address] = sensor; 
+    ESP_LOGCONFIG("tigo_server", "Registered power sensor for address: %s", address.c_str());
   }
   void add_rssi_sensor(const std::string &address, sensor::Sensor *sensor) { 
     this->rssi_sensors_[address] = sensor; 
+    ESP_LOGCONFIG("tigo_server", "Registered rssi sensor for address: %s", address.c_str());
+  }
+  void add_barcode_sensor(const std::string &address, text_sensor::TextSensor *sensor) { 
+    this->barcode_sensors_[address] = sensor; 
+    ESP_LOGCONFIG("tigo_server", "Registered barcode sensor for address: %s", address.c_str());
   }
   void add_tigo_sensor(const std::string &address, sensor::Sensor *sensor) {
     this->power_sensors_[address] = sensor;
@@ -134,6 +145,7 @@ class TigoServerComponent : public PollingComponent, public uart::UARTDevice {
   std::map<std::string, sensor::Sensor*> temperature_sensors_;
   std::map<std::string, sensor::Sensor*> power_sensors_;
   std::map<std::string, sensor::Sensor*> rssi_sensors_;
+  std::map<std::string, text_sensor::TextSensor*> barcode_sensors_;
   
   // Persistence
   static const uint32_t DEVICE_MAPPING_HASH = 0x12345678;  // Hash for preferences key
