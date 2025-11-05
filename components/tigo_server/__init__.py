@@ -28,6 +28,4 @@ async def to_code(config):
     
     # Set the port
     cg.add(var.set_port(config[CONF_PORT]))
-    
-    # Add ESP-IDF define
-    cg.add_define("USE_ESP_IDF")
+
