@@ -31,6 +31,10 @@ struct DeviceData {
   std::string slot_counter;
   int rssi;
   std::string barcode;
+  std::string firmware_version;
+  float efficiency;
+  float power_factor;
+  float load_factor;
   bool changed = false;
   unsigned long last_update = 0;
 };
@@ -98,6 +102,26 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
     this->barcode_sensors_[address] = sensor; 
     ESP_LOGCONFIG("tigo_monitor", "Registered barcode sensor for address: %s", address.c_str());
   }
+  void add_duty_cycle_sensor(const std::string &address, sensor::Sensor *sensor) { 
+    this->duty_cycle_sensors_[address] = sensor; 
+    ESP_LOGCONFIG("tigo_monitor", "Registered duty_cycle sensor for address: %s", address.c_str());
+  }
+  void add_firmware_version_sensor(const std::string &address, text_sensor::TextSensor *sensor) { 
+    this->firmware_version_sensors_[address] = sensor; 
+    ESP_LOGCONFIG("tigo_monitor", "Registered firmware_version sensor for address: %s", address.c_str());
+  }
+  void add_efficiency_sensor(const std::string &address, sensor::Sensor *sensor) { 
+    this->efficiency_sensors_[address] = sensor; 
+    ESP_LOGCONFIG("tigo_monitor", "Registered efficiency sensor for address: %s", address.c_str());
+  }
+  void add_power_factor_sensor(const std::string &address, sensor::Sensor *sensor) { 
+    this->power_factor_sensors_[address] = sensor; 
+    ESP_LOGCONFIG("tigo_monitor", "Registered power_factor sensor for address: %s", address.c_str());
+  }
+  void add_load_factor_sensor(const std::string &address, sensor::Sensor *sensor) { 
+    this->load_factor_sensors_[address] = sensor; 
+    ESP_LOGCONFIG("tigo_monitor", "Registered load_factor sensor for address: %s", address.c_str());
+  }
   void add_tigo_sensor(const std::string &address, sensor::Sensor *sensor) {
     this->power_sensors_[address] = sensor;
   }
@@ -161,6 +185,11 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   std::map<std::string, sensor::Sensor*> power_sensors_;
   std::map<std::string, sensor::Sensor*> rssi_sensors_;
   std::map<std::string, text_sensor::TextSensor*> barcode_sensors_;
+  std::map<std::string, sensor::Sensor*> duty_cycle_sensors_;
+  std::map<std::string, text_sensor::TextSensor*> firmware_version_sensors_;
+  std::map<std::string, sensor::Sensor*> efficiency_sensors_;
+  std::map<std::string, sensor::Sensor*> power_factor_sensors_;
+  std::map<std::string, sensor::Sensor*> load_factor_sensors_;
   sensor::Sensor* power_sum_sensor_ = nullptr;
   sensor::Sensor* energy_sum_sensor_ = nullptr;
   sensor::Sensor* device_count_sensor_ = nullptr;

@@ -39,6 +39,7 @@ void TigoMonitorComponent::setup() {
   load_node_table();
   load_energy_data();
 }
+  
 
 void TigoMonitorComponent::loop() {
   process_serial_data();
@@ -232,6 +233,25 @@ void TigoMonitorComponent::process_power_frame(const std::string &frame) {
   // RSSI
   data.rssi = std::stoi(frame.substr(38, 2), nullptr, 16);
   
+  // Calculate additional sensor values
+  // Efficiency calculation (output power / input power * 100)
+  float input_power = data.voltage_in * data.current_in;
+  float output_power = data.voltage_out * data.current_in;
+  if (input_power > 0.0f) {
+    data.efficiency = (output_power / input_power) * 100.0f;
+  } else {
+    data.efficiency = 0.0f;
+  }
+  
+  // Power factor (assuming unity for DC systems, can be customized)
+  data.power_factor = 1.0f;
+  
+  // Load factor (duty cycle as decimal)
+  data.load_factor = data.duty_cycle / 100.0f;
+  
+  // Firmware version (placeholder - would need to be extracted from other frames if available)
+  data.firmware_version = "unknown";
+  
   data.changed = true;
   data.last_update = millis();
   
@@ -409,8 +429,6 @@ void TigoMonitorComponent::publish_sensor_data() {
     if (voltage_in_it != voltage_in_sensors_.end()) {
       voltage_in_it->second->publish_state(device.voltage_in);
       ESP_LOGD(TAG, "Published input voltage for %s: %.2fV", device.addr.c_str(), device.voltage_in);
-    } else {
-      ESP_LOGW(TAG, "No input voltage sensor found for device %s", device.addr.c_str());
     }
     
     // Publish voltage output sensor
@@ -454,6 +472,41 @@ void TigoMonitorComponent::publish_sensor_data() {
     if (barcode_it != barcode_sensors_.end()) {
       barcode_it->second->publish_state(device.barcode);
       ESP_LOGD(TAG, "Published barcode for %s: %s", device.addr.c_str(), device.barcode.c_str());
+    }
+
+    // Publish duty cycle sensor
+    auto duty_cycle_it = duty_cycle_sensors_.find(device.addr);
+    if (duty_cycle_it != duty_cycle_sensors_.end()) {
+      duty_cycle_it->second->publish_state(device.duty_cycle);
+      ESP_LOGD(TAG, "Published duty cycle for %s: %u%%", device.addr.c_str(), device.duty_cycle);
+    }
+
+    // Publish firmware version text sensor
+    auto firmware_version_it = firmware_version_sensors_.find(device.addr);
+    if (firmware_version_it != firmware_version_sensors_.end()) {
+      firmware_version_it->second->publish_state(device.firmware_version);
+      ESP_LOGD(TAG, "Published firmware version for %s: %s", device.addr.c_str(), device.firmware_version.c_str());
+    }
+
+    // Publish efficiency sensor
+    auto efficiency_it = efficiency_sensors_.find(device.addr);
+    if (efficiency_it != efficiency_sensors_.end()) {
+      efficiency_it->second->publish_state(device.efficiency);
+      ESP_LOGD(TAG, "Published efficiency for %s: %.2f%%", device.addr.c_str(), device.efficiency);
+    }
+
+    // Publish power factor sensor
+    auto power_factor_it = power_factor_sensors_.find(device.addr);
+    if (power_factor_it != power_factor_sensors_.end()) {
+      power_factor_it->second->publish_state(device.power_factor);
+      ESP_LOGD(TAG, "Published power factor for %s: %.3f", device.addr.c_str(), device.power_factor);
+    }
+
+    // Publish load factor sensor
+    auto load_factor_it = load_factor_sensors_.find(device.addr);
+    if (load_factor_it != load_factor_sensors_.end()) {
+      load_factor_it->second->publish_state(device.load_factor);
+      ESP_LOGD(TAG, "Published load factor for %s: %.3f", device.addr.c_str(), device.load_factor);
     }
     
     // Check if this device has a combined Tigo sensor
@@ -727,7 +780,7 @@ void TigoMonitorComponent::generate_sensor_yaml() {
       }
       
       ESP_LOGI(TAG, "  # Tigo Device %s (discovered%s)", index_str.c_str(), barcode_comment.c_str());
-      ESP_LOGI(TAG, "  - platform: tigo_monitor");
+      ESP_LOGI(TAG, "  - platform: tigo_server");
       ESP_LOGI(TAG, "    tigo_monitor_id: tigo_hub");
       ESP_LOGI(TAG, "    address: \"%s\"", node.addr.c_str());
       ESP_LOGI(TAG, "    name: \"Tigo Device %s\"", index_str.c_str());
@@ -749,7 +802,7 @@ void TigoMonitorComponent::generate_sensor_yaml() {
       std::string index_str = std::to_string(i + 1);
       
       ESP_LOGI(TAG, "  # Tigo Device %s (placeholder - update address when discovered)", index_str.c_str());
-      ESP_LOGI(TAG, "  - platform: tigo_monitor");
+      ESP_LOGI(TAG, "  - platform: tigo_server");
       ESP_LOGI(TAG, "    tigo_monitor_id: tigo_hub");
       ESP_LOGI(TAG, "    address: \"device_%s\"  # CHANGE THIS to actual device address", index_str.c_str());
       ESP_LOGI(TAG, "    name: \"Tigo Device %s\"", index_str.c_str());

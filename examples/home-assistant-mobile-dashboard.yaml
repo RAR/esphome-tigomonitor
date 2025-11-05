@@ -1,0 +1,170 @@
+# Mobile-Optimized Dashboard for Tigo Monitor
+# This configuration is optimized for mobile devices
+# Copy this into a new dashboard tab in Home Assistant
+
+title: Solar Mobile
+path: tigo-mobile
+icon: mdi:solar-panel-large
+panel: false
+cards:
+  # Quick System Status
+  - type: glance
+    title: System Status
+    entities:
+      - entity: sensor.tigo_monitor_total_system_power
+        name: Power
+        icon: mdi:flash
+      - entity: sensor.tigo_monitor_total_system_energy
+        name: Energy
+        icon: mdi:counter
+      - entity: sensor.tigo_monitor_active_device_count
+        name: Devices
+        icon: mdi:solar-panel
+
+  # Current Production Chart
+  - type: mini-graph-card
+    name: Power Production
+    entities:
+      - sensor.tigo_monitor_total_system_power
+    hours_to_show: 6
+    points_per_hour: 4
+    line_color: orange
+    line_width: 3
+    animate: true
+    show:
+      name: true
+      icon: true
+      state: true
+      legend: false
+      fill: fade
+
+  # Individual Panel Status
+  - type: entities
+    title: Panel Status
+    show_header_toggle: false
+    entities:
+      - type: custom:fold-entity-row
+        head:
+          entity: sensor.tigo_device_1_power
+          name: Panel 1
+        entities:
+          - sensor.tigo_device_1_efficiency
+          - sensor.tigo_device_1_temperature
+          - sensor.tigo_device_1_voltage_out
+          
+      - type: custom:fold-entity-row  
+        head:
+          entity: sensor.tigo_device_2_power
+          name: Panel 2
+        entities:
+          - sensor.tigo_device_2_efficiency
+          - sensor.tigo_device_2_temperature
+          - sensor.tigo_device_2_voltage_out
+
+      - type: custom:fold-entity-row
+        head: 
+          entity: sensor.tigo_device_3_power
+          name: Panel 3
+        entities:
+          - sensor.tigo_device_3_efficiency
+          - sensor.tigo_device_3_temperature
+          - sensor.tigo_device_3_voltage_out
+
+      - type: custom:fold-entity-row
+        head:
+          entity: sensor.tigo_device_4_power  
+          name: Panel 4
+        entities:
+          - sensor.tigo_device_4_efficiency
+          - sensor.tigo_device_4_temperature
+          - sensor.tigo_device_4_voltage_out
+
+  # Efficiency Overview
+  - type: horizontal-stack
+    cards:
+      - type: gauge
+        entity: sensor.tigo_device_1_efficiency
+        name: Panel 1
+        min: 85
+        max: 100
+        severity:
+          red: 85
+          yellow: 92
+          green: 95
+
+      - type: gauge
+        entity: sensor.tigo_device_2_efficiency
+        name: Panel 2
+        min: 85
+        max: 100
+        severity:
+          red: 85
+          yellow: 92
+          green: 95
+
+  # Temperature Alerts
+  - type: entities
+    title: Temperature Monitor
+    show_header_toggle: false
+    entities:
+      - sensor.tigo_device_1_temperature
+      - sensor.tigo_device_2_temperature
+      - sensor.tigo_device_3_temperature
+      - sensor.tigo_device_4_temperature
+    state_color: true
+
+  # Quick Actions
+  - type: entities
+    title: Quick Actions
+    show_header_toggle: false
+    entities:
+      - entity: button.tigo_monitor_print_device_mappings
+        name: Show Devices
+        icon: mdi:format-list-bulleted
+        tap_action:
+          action: call-service
+          service: button.press
+          service_data:
+            entity_id: button.tigo_monitor_print_device_mappings
+            
+      - entity: button.tigo_monitor_generate_yaml_config
+        name: Generate Config
+        icon: mdi:file-code
+        tap_action:
+          action: call-service
+          service: button.press
+          service_data:
+            entity_id: button.tigo_monitor_generate_yaml_config
+
+  # Today's Performance Summary
+  - type: markdown
+    content: |
+      ## Today's Summary
+      
+      **Total Production:** {{ states('sensor.tigo_monitor_total_system_energy') }} kWh
+      
+      **Best Performing Panel:** 
+      {% set efficiencies = [
+        states('sensor.tigo_device_1_efficiency') | float(0),
+        states('sensor.tigo_device_2_efficiency') | float(0), 
+        states('sensor.tigo_device_3_efficiency') | float(0),
+        states('sensor.tigo_device_4_efficiency') | float(0)
+      ] %}
+      Panel {{ efficiencies.index(efficiencies|max) + 1 }} - {{ efficiencies|max }}%
+      
+      **Hottest Panel:**
+      {% set temps = [
+        states('sensor.tigo_device_1_temperature') | float(0),
+        states('sensor.tigo_device_2_temperature') | float(0),
+        states('sensor.tigo_device_3_temperature') | float(0), 
+        states('sensor.tigo_device_4_temperature') | float(0)
+      ] %}
+      Panel {{ temps.index(temps|max) + 1 }} - {{ temps|max }}°C
+      
+      {% if temps|max > 70 %}
+      ⚠️ **High Temperature Alert**
+      {% elif efficiencies|min < 90 %}
+      ⚠️ **Low Efficiency Alert** 
+      {% else %}
+      ✅ **All Systems Normal**
+      {% endif %}

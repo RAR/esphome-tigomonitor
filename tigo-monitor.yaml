@@ -1,11 +1,12 @@
 esphome:
-  name: tigo-monitor
-  friendly_name: "Tigo Monitor"
+  name: tigo-server
+  friendly_name: "Tigo Server"
 
 esp32:
   board: esp32dev
   framework:
-    type: arduino
+    type: esp-idf
+    version: recommended
 
 # External components
 external_components:
@@ -20,7 +21,7 @@ wifi:
   
   # Enable fallback hotspot (captive portal) in case wifi connection fails
   ap:
-    ssid: "Tigo-Monitor Fallback Hotspot"
+    ssid: "Tigo-Server Fallback Hotspot"
     password: "12345678"
 
 captive_portal:
@@ -109,31 +110,31 @@ sensor:
 
   # System monitoring sensors
   - platform: wifi_signal
-    name: "Tigo Monitor WiFi Signal"
+    name: "Tigo Server WiFi Signal"
     update_interval: 60s
 
   - platform: uptime
-    name: "Tigo Monitor Uptime"
+    name: "Tigo Server Uptime"
 
 text_sensor:
   - platform: wifi_info
     ip_address:
-      name: "Tigo Monitor IP Address"
+      name: "Tigo Server IP Address"
     ssid:
-      name: "Tigo Monitor Connected SSID"
+      name: "Tigo Server Connected SSID"
   
   - platform: version
-    name: "Tigo Monitor ESPHome Version"
+    name: "Tigo Server ESPHome Version"
 
 # Optional: Binary sensors
 binary_sensor:
   - platform: status
-    name: "Tigo Monitor Status"
+    name: "Tigo Server Status"
 
 # Optional: Switches for control
 switch:
   - platform: restart
-    name: "Tigo Monitor Restart"
+    name: "Tigo Server Restart"
 
 # Time component (optional, for logging timestamps)
 time:

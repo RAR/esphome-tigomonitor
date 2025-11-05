@@ -1,0 +1,349 @@
+# Home Assistant Dashboard Configuration for Tigo Monitor
+# Copy this configuration into your Home Assistant dashboard editor
+# Customize entity names to match your actual ESPHome device names
+
+title: Solar System Monitor
+path: tigo-solar
+icon: mdi:solar-panel
+cards:
+  # System Overview Row
+  - type: horizontal-stack
+    cards:
+      # Total System Power
+      - type: gauge
+        entity: sensor.tigo_monitor_total_system_power
+        name: System Power
+        unit: W
+        min: 0
+        max: 5000
+        severity:
+          green: 0
+          yellow: 3000
+          red: 4500
+        needle: true
+
+      # Total Energy Production  
+      - type: gauge
+        entity: sensor.tigo_monitor_total_system_energy
+        name: Energy Today
+        unit: kWh
+        min: 0
+        max: 40
+        severity:
+          green: 0
+          yellow: 25
+          red: 35
+        needle: true
+
+      # Active Device Count
+      - type: gauge
+        entity: sensor.tigo_monitor_active_device_count
+        name: Active Devices
+        unit: devices
+        min: 0
+        max: 20
+        severity:
+          red: 0
+          yellow: 15
+          green: 18
+        needle: true
+
+  # System Statistics Cards
+  - type: horizontal-stack
+    cards:
+      - type: statistic
+        entity: sensor.tigo_monitor_total_system_power
+        name: Power Statistics
+        stat_type: max
+        period:
+          calendar:
+            period: day
+
+      - type: statistic
+        entity: sensor.tigo_monitor_total_system_energy
+        name: Daily Energy
+        stat_type: state
+        period:
+          calendar:
+            period: day
+
+      - type: history-graph
+        entities:
+          - sensor.tigo_monitor_total_system_power
+        hours_to_show: 12
+        refresh_interval: 60
+        title: Power Trend (12h)
+
+  # Individual Device Performance Overview
+  - type: entities
+    title: Device Performance Overview
+    show_header_toggle: false
+    entities:
+      - type: section
+        label: Efficiency Metrics
+      - entity: sensor.tigo_device_1_efficiency
+        name: "Panel 1 Efficiency"
+        icon: mdi:percent
+      - entity: sensor.tigo_device_2_efficiency
+        name: "Panel 2 Efficiency" 
+        icon: mdi:percent
+      - entity: sensor.tigo_device_3_efficiency
+        name: "Panel 3 Efficiency"
+        icon: mdi:percent
+      - type: section
+        label: Power Factor
+      - entity: sensor.tigo_device_1_power_factor
+        name: "Panel 1 Power Factor"
+        icon: mdi:sine-wave
+      - entity: sensor.tigo_device_2_power_factor
+        name: "Panel 2 Power Factor"
+        icon: mdi:sine-wave
+      - entity: sensor.tigo_device_3_power_factor
+        name: "Panel 3 Power Factor"
+        icon: mdi:sine-wave
+
+  # Device Grid - Power Output
+  - type: grid
+    title: Panel Power Output
+    columns: 3
+    square: false
+    cards:
+      - type: gauge
+        entity: sensor.tigo_device_1_power
+        name: Panel 1
+        unit: W
+        min: 0
+        max: 400
+        severity:
+          red: 0
+          yellow: 200
+          green: 300
+
+      - type: gauge
+        entity: sensor.tigo_device_2_power
+        name: Panel 2
+        unit: W
+        min: 0
+        max: 400
+        severity:
+          red: 0
+          yellow: 200
+          green: 300
+
+      - type: gauge
+        entity: sensor.tigo_device_3_power
+        name: Panel 3
+        unit: W
+        min: 0
+        max: 400
+        severity:
+          red: 0
+          yellow: 200
+          green: 300
+
+      - type: gauge
+        entity: sensor.tigo_device_4_power
+        name: Panel 4
+        unit: W
+        min: 0
+        max: 400
+        severity:
+          red: 0
+          yellow: 200
+          green: 300
+
+      - type: gauge
+        entity: sensor.tigo_device_5_power
+        name: Panel 5
+        unit: W
+        min: 0
+        max: 400
+        severity:
+          red: 0
+          yellow: 200
+          green: 300
+
+      - type: gauge
+        entity: sensor.tigo_device_6_power
+        name: Panel 6
+        unit: W
+        min: 0
+        max: 400
+        severity:
+          red: 0
+          yellow: 200
+          green: 300
+
+  # Detailed Device Information
+  - type: entities
+    title: Device Details
+    show_header_toggle: false
+    entities:
+      # Device 1 Details
+      - type: section
+        label: "Panel 1 (Address: 1234)"
+      - entity: text_sensor.tigo_device_1_barcode
+        name: Serial Number
+        icon: mdi:barcode
+      - entity: text_sensor.tigo_device_1_firmware_version
+        name: Firmware Version
+        icon: mdi:chip
+      - entity: sensor.tigo_device_1_voltage_in
+        name: Input Voltage
+        icon: mdi:lightning-bolt
+      - entity: sensor.tigo_device_1_voltage_out
+        name: Output Voltage
+        icon: mdi:lightning-bolt-outline
+      - entity: sensor.tigo_device_1_current_in
+        name: Current
+        icon: mdi:current-ac
+      - entity: sensor.tigo_device_1_temperature
+        name: Temperature
+        icon: mdi:thermometer
+      - entity: sensor.tigo_device_1_rssi
+        name: Signal Strength
+        icon: mdi:wifi-strength-2
+      - entity: sensor.tigo_device_1_duty_cycle
+        name: Duty Cycle
+        icon: mdi:pulse
+
+  # Temperature Monitoring
+  - type: history-graph
+    title: Panel Temperature Monitoring
+    entities:
+      - entity: sensor.tigo_device_1_temperature
+        name: Panel 1
+      - entity: sensor.tigo_device_2_temperature
+        name: Panel 2
+      - entity: sensor.tigo_device_3_temperature
+        name: Panel 3
+      - entity: sensor.tigo_device_4_temperature
+        name: Panel 4
+    hours_to_show: 24
+    refresh_interval: 300
+
+  # Efficiency Trend Analysis
+  - type: custom:apexcharts-card
+    title: Efficiency Trends
+    header:
+      show: true
+    series:
+      - entity: sensor.tigo_device_1_efficiency
+        name: Panel 1 Efficiency
+        color: '#1f77b4'
+      - entity: sensor.tigo_device_2_efficiency
+        name: Panel 2 Efficiency  
+        color: '#ff7f0e'
+      - entity: sensor.tigo_device_3_efficiency
+        name: Panel 3 Efficiency
+        color: '#2ca02c'
+      - entity: sensor.tigo_device_4_efficiency
+        name: Panel 4 Efficiency
+        color: '#d62728'
+    graph_span: 24h
+    yaxis:
+      - min: 85
+        max: 100
+        suffix: '%'
+
+  # Signal Strength Monitoring  
+  - type: entities
+    title: Communication Status
+    show_header_toggle: false
+    entities:
+      - type: section
+        label: Signal Strength (RSSI)
+      - entity: sensor.tigo_device_1_rssi
+        name: Panel 1 Signal
+        icon: mdi:wifi-strength-2
+      - entity: sensor.tigo_device_2_rssi
+        name: Panel 2 Signal
+        icon: mdi:wifi-strength-2
+      - entity: sensor.tigo_device_3_rssi
+        name: Panel 3 Signal
+        icon: mdi:wifi-strength-2
+      - entity: sensor.tigo_device_4_rssi
+        name: Panel 4 Signal
+        icon: mdi:wifi-strength-2
+
+  # Load Factor Analysis
+  - type: grid
+    title: Load Factor Analysis
+    columns: 2
+    square: false
+    cards:
+      - type: gauge
+        entity: sensor.tigo_device_1_load_factor
+        name: Panel 1 Load
+        min: 0
+        max: 1
+        severity:
+          red: 0
+          yellow: 0.5
+          green: 0.8
+
+      - type: gauge
+        entity: sensor.tigo_device_2_load_factor
+        name: Panel 2 Load
+        min: 0
+        max: 1
+        severity:
+          red: 0
+          yellow: 0.5
+          green: 0.8
+
+      - type: gauge
+        entity: sensor.tigo_device_3_load_factor
+        name: Panel 3 Load
+        min: 0
+        max: 1
+        severity:
+          red: 0
+          yellow: 0.5
+          green: 0.8
+
+      - type: gauge
+        entity: sensor.tigo_device_4_load_factor
+        name: Panel 4 Load
+        min: 0
+        max: 1
+        severity:
+          red: 0
+          yellow: 0.5
+          green: 0.8
+
+  # System Management Controls
+  - type: entities
+    title: System Management
+    show_header_toggle: false
+    entities:
+      - type: section
+        label: Device Discovery
+      - entity: button.tigo_monitor_print_device_mappings
+        name: Show Device List
+        icon: mdi:format-list-bulleted
+      - entity: button.tigo_monitor_generate_yaml_config
+        name: Generate Config
+        icon: mdi:file-code
+      - entity: button.tigo_monitor_clear_device_mappings
+        name: Clear Mappings
+        icon: mdi:delete-sweep
+
+  # Energy Dashboard Integration Note
+  - type: markdown
+    content: |
+      ## 📊 Energy Dashboard Integration
+      
+      **Add to Energy Dashboard:**
+      - **Solar Production**: `sensor.tigo_monitor_total_system_energy`
+      - **Individual Panels**: Use individual device energy sensors if configured
+      
+      **Performance Monitoring:**
+      - Monitor efficiency trends to identify underperforming panels
+      - Watch temperature levels during peak sun hours
+      - Track signal strength for communication issues
+      
+      **Maintenance Alerts:**
+      - Set automations for efficiency drops below 90%
+      - Alert on high temperatures (>70°C)
+      - Notify on communication loss (low RSSI)

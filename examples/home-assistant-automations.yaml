@@ -1,0 +1,187 @@
+# Home Assistant Automations for Tigo Monitor
+# Add these to your automations.yaml file or via the UI
+
+# Efficiency Drop Alert
+- alias: "Tigo - Low Efficiency Alert"
+  description: "Alert when any panel efficiency drops below 90%"
+  trigger:
+    - platform: numeric_state
+      entity_id:
+        - sensor.tigo_device_1_efficiency
+        - sensor.tigo_device_2_efficiency
+        - sensor.tigo_device_3_efficiency
+        - sensor.tigo_device_4_efficiency
+        - sensor.tigo_device_5_efficiency
+        - sensor.tigo_device_6_efficiency
+      below: 90
+      for:
+        minutes: 15
+  condition:
+    - condition: sun
+      after: sunrise
+      before: sunset
+  action:
+    - service: notify.mobile_app_your_phone
+      data:
+        title: "⚠️ Solar Panel Efficiency Alert"
+        message: "Panel {{ trigger.to_state.name }} efficiency dropped to {{ trigger.to_state.state }}%"
+        data:
+          tag: "tigo_efficiency_alert"
+          importance: high
+
+# High Temperature Alert  
+- alias: "Tigo - High Temperature Alert"
+  description: "Alert when panel temperature exceeds 70°C"
+  trigger:
+    - platform: numeric_state
+      entity_id:
+        - sensor.tigo_device_1_temperature
+        - sensor.tigo_device_2_temperature
+        - sensor.tigo_device_3_temperature
+        - sensor.tigo_device_4_temperature
+        - sensor.tigo_device_5_temperature
+        - sensor.tigo_device_6_temperature
+      above: 70
+      for:
+        minutes: 10
+  action:
+    - service: notify.mobile_app_your_phone
+      data:
+        title: "🌡️ High Panel Temperature"
+        message: "Panel {{ trigger.to_state.name }} temperature: {{ trigger.to_state.state }}°C"
+        data:
+          tag: "tigo_temperature_alert"
+
+# Communication Loss Alert
+- alias: "Tigo - Communication Loss Alert" 
+  description: "Alert when panel RSSI drops too low"
+  trigger:
+    - platform: numeric_state
+      entity_id:
+        - sensor.tigo_device_1_rssi
+        - sensor.tigo_device_2_rssi
+        - sensor.tigo_device_3_rssi
+        - sensor.tigo_device_4_rssi
+        - sensor.tigo_device_5_rssi
+        - sensor.tigo_device_6_rssi
+      below: -80
+      for:
+        minutes: 5
+  action:
+    - service: notify.mobile_app_your_phone
+      data:
+        title: "📡 Panel Communication Issue"
+        message: "Panel {{ trigger.to_state.name }} has weak signal: {{ trigger.to_state.state }} dBm"
+        data:
+          tag: "tigo_communication_alert"
+
+# Device Count Monitor
+- alias: "Tigo - Device Count Monitor"
+  description: "Alert when fewer devices are active than expected"
+  trigger:
+    - platform: numeric_state
+      entity_id: sensor.tigo_monitor_active_device_count
+      below: 6  # Adjust to your expected device count
+      for:
+        minutes: 30
+  condition:
+    - condition: sun
+      after: sunrise
+      before: sunset
+  action:
+    - service: notify.mobile_app_your_phone
+      data:
+        title: "⚠️ Missing Solar Devices"
+        message: "Only {{ trigger.to_state.state }} of 6 expected panels are active"
+        data:
+          tag: "tigo_device_count_alert"
+
+# Daily Energy Report
+- alias: "Tigo - Daily Energy Report"
+  description: "Send daily energy production summary"
+  trigger:
+    - platform: time
+      at: "20:00:00"
+  action:
+    - service: notify.mobile_app_your_phone
+      data:
+        title: "☀️ Daily Solar Report"
+        message: |
+          Today's Energy Production: {{ states('sensor.tigo_monitor_total_system_energy') }} kWh
+          Peak Power: {{ state_attr('sensor.tigo_monitor_total_system_power', 'max_value') | default('N/A') }} W
+          Active Panels: {{ states('sensor.tigo_monitor_active_device_count') }}
+        data:
+          tag: "tigo_daily_report"
+
+# Weekly Efficiency Summary
+- alias: "Tigo - Weekly Efficiency Summary"
+  description: "Weekly efficiency performance summary"
+  trigger:
+    - platform: time
+      at: "09:00:00"
+    - condition: time
+      weekday:
+        - sun
+  action:
+    - service: notify.mobile_app_your_phone
+      data:
+        title: "📊 Weekly Solar Performance"
+        message: |
+          Average Efficiency This Week:
+          Panel 1: {{ states('sensor.tigo_device_1_efficiency') }}%
+          Panel 2: {{ states('sensor.tigo_device_2_efficiency') }}%
+          Panel 3: {{ states('sensor.tigo_device_3_efficiency') }}%
+          
+          Check dashboard for detailed trends.
+        data:
+          tag: "tigo_weekly_summary"
+
+# Power Factor Alert
+- alias: "Tigo - Power Factor Alert"
+  description: "Alert when power factor indicates voltage regulation issues"
+  trigger:
+    - platform: numeric_state
+      entity_id:
+        - sensor.tigo_device_1_power_factor
+        - sensor.tigo_device_2_power_factor
+        - sensor.tigo_device_3_power_factor
+        - sensor.tigo_device_4_power_factor
+        - sensor.tigo_device_5_power_factor
+        - sensor.tigo_device_6_power_factor
+      above: 1.3
+      for:
+        minutes: 20
+    - platform: numeric_state
+      entity_id:
+        - sensor.tigo_device_1_power_factor
+        - sensor.tigo_device_2_power_factor
+        - sensor.tigo_device_3_power_factor
+        - sensor.tigo_device_4_power_factor
+        - sensor.tigo_device_5_power_factor
+        - sensor.tigo_device_6_power_factor
+      below: 0.7
+      for:
+        minutes: 20
+  condition:
+    - condition: sun
+      after: sunrise
+      before: sunset
+  action:
+    - service: notify.mobile_app_your_phone
+      data:
+        title: "⚡ Voltage Regulation Alert"
+        message: "Panel {{ trigger.to_state.name }} power factor: {{ trigger.to_state.state }}"
+        data:
+          tag: "tigo_power_factor_alert"
+
+# Startup Device Discovery
+- alias: "Tigo - Auto Generate Config on Startup"
+  description: "Automatically generate device config after Home Assistant startup"
+  trigger:
+    - platform: homeassistant
+      event: start
+  action:
+    - delay: "00:02:00"  # Wait 2 minutes for system to stabilize
+    - service: button.press
+      target:
+        entity_id: button.tigo_monitor_generate_yaml_config

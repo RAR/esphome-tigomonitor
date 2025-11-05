@@ -19,7 +19,8 @@ from esphome.const import (
     UNIT_AMPERE,
     UNIT_CELSIUS,
     UNIT_DECIBEL_MILLIWATT,
-    UNIT_KILOWATT_HOURS
+    UNIT_KILOWATT_HOURS,
+    UNIT_PERCENT
 )
 from . import tigo_monitor_ns, TigoMonitorComponent, CONF_TIGO_MONITOR_ID
 
@@ -33,9 +34,15 @@ CONF_DEVICE_COUNT = "device_count"
 CONF_VOLTAGE_IN = "voltage_in"
 CONF_VOLTAGE_OUT = "voltage_out"
 CONF_CURRENT_IN = "current_in"
+CONF_DUTY_CYCLE = "duty_cycle"
 CONF_TEMPERATURE = "temperature"
 CONF_RSSI = "rssi"
 CONF_BARCODE = "barcode"
+CONF_FIRMWARE_VERSION = "firmware_version"
+CONF_DEVICE_INFO = "device_info"
+CONF_EFFICIENCY = "efficiency"
+CONF_POWER_FACTOR = "power_factor"
+CONF_LOAD_FACTOR = "load_factor"
 
 def _tigo_sensor_schema(**kwargs):
     """Create a sensor schema that allows empty configs for auto-templating"""
@@ -67,9 +74,15 @@ def _auto_template_sensor_config(config):
         (CONF_VOLTAGE_IN, "Voltage In"),
         (CONF_VOLTAGE_OUT, "Voltage Out"),
         (CONF_CURRENT_IN, "Current"),
+        (CONF_DUTY_CYCLE, "Duty Cycle"),
         (CONF_TEMPERATURE, "Temperature"),
         (CONF_RSSI, "RSSI"),
         (CONF_BARCODE, "Barcode"),
+        (CONF_FIRMWARE_VERSION, "Firmware Version"),
+        (CONF_DEVICE_INFO, "Device Info"),
+        (CONF_EFFICIENCY, "Efficiency"),
+        (CONF_POWER_FACTOR, "Power Factor"),
+        (CONF_LOAD_FACTOR, "Load Factor"),
     ]
     
     for conf_key, suffix in sensor_configs:
@@ -93,13 +106,13 @@ def _auto_template_sensor_config(config):
                     id_string = f"{base_id}_{suffix_id}"
                     
                 # Use appropriate sensor type for ID declaration
-                if conf_key == CONF_BARCODE:
+                if conf_key in [CONF_BARCODE, CONF_FIRMWARE_VERSION, CONF_DEVICE_INFO]:
                     sensor_config[CONF_ID] = cv.declare_id(text_sensor.TextSensor)(id_string)
                 else:
                     sensor_config[CONF_ID] = cv.declare_id(sensor.Sensor)(id_string)
             
             # Add default fields for text sensors (skip None values to avoid C++ generation issues)
-            if conf_key == CONF_BARCODE:
+            if conf_key in [CONF_BARCODE, CONF_FIRMWARE_VERSION, CONF_DEVICE_INFO]:
                 if "disabled_by_default" not in sensor_config:
                     sensor_config["disabled_by_default"] = False
     
@@ -135,6 +148,11 @@ DEVICE_CONFIG_SCHEMA = cv.All(
             device_class=DEVICE_CLASS_CURRENT,
             state_class=STATE_CLASS_MEASUREMENT,
         ),
+        cv.Optional(CONF_DUTY_CYCLE): _tigo_sensor_schema(
+            unit_of_measurement=UNIT_PERCENT,
+            accuracy_decimals=1,
+            state_class=STATE_CLASS_MEASUREMENT,
+        ),
         cv.Optional(CONF_TEMPERATURE): _tigo_sensor_schema(
             unit_of_measurement=UNIT_CELSIUS,
             accuracy_decimals=1,
@@ -148,6 +166,22 @@ DEVICE_CONFIG_SCHEMA = cv.All(
             state_class=STATE_CLASS_MEASUREMENT,
         ),
         cv.Optional(CONF_BARCODE): _tigo_text_sensor_schema(),
+        cv.Optional(CONF_FIRMWARE_VERSION): _tigo_text_sensor_schema(),
+        cv.Optional(CONF_DEVICE_INFO): _tigo_text_sensor_schema(),
+        cv.Optional(CONF_EFFICIENCY): _tigo_sensor_schema(
+            unit_of_measurement=UNIT_PERCENT,
+            accuracy_decimals=1,
+            state_class=STATE_CLASS_MEASUREMENT,
+        ),
+        cv.Optional(CONF_POWER_FACTOR): _tigo_sensor_schema(
+            accuracy_decimals=3,
+            state_class=STATE_CLASS_MEASUREMENT,
+        ),
+        cv.Optional(CONF_LOAD_FACTOR): _tigo_sensor_schema(
+            unit_of_measurement=UNIT_PERCENT,
+            accuracy_decimals=1,
+            state_class=STATE_CLASS_MEASUREMENT,
+        ),
     }).extend(cv.COMPONENT_SCHEMA),
     _auto_template_sensor_config,
 )
@@ -236,9 +270,15 @@ async def to_code(config):
         (CONF_VOLTAGE_IN, hub.add_voltage_in_sensor, sensor.new_sensor),
         (CONF_VOLTAGE_OUT, hub.add_voltage_out_sensor, sensor.new_sensor),
         (CONF_CURRENT_IN, hub.add_current_in_sensor, sensor.new_sensor),
+        (CONF_DUTY_CYCLE, hub.add_duty_cycle_sensor, sensor.new_sensor),
         (CONF_TEMPERATURE, hub.add_temperature_sensor, sensor.new_sensor),
         (CONF_RSSI, hub.add_rssi_sensor, sensor.new_sensor),
         (CONF_BARCODE, hub.add_barcode_sensor, text_sensor.new_text_sensor),
+        (CONF_FIRMWARE_VERSION, hub.add_firmware_version_sensor, text_sensor.new_text_sensor),
+        (CONF_DEVICE_INFO, hub.add_device_info_sensor, text_sensor.new_text_sensor),
+        (CONF_EFFICIENCY, hub.add_efficiency_sensor, sensor.new_sensor),
+        (CONF_POWER_FACTOR, hub.add_power_factor_sensor, sensor.new_sensor),
+        (CONF_LOAD_FACTOR, hub.add_load_factor_sensor, sensor.new_sensor),
     ]
     
     # Process each configured sensor type (auto-templating already done in validation)
