@@ -28,16 +28,20 @@ class PSRAMString {
   void append(const char* str) {
     size_t len = strlen(str);
     reserve(size_ + len + 1);
-    memcpy(data_ + size_, str, len);
-    size_ += len;
-    data_[size_] = '\0';
+    if (data_) {
+      memcpy(data_ + size_, str, len);
+      size_ += len;
+      data_[size_] = '\0';
+    }
   }
   
   void append(const std::string& str) {
     reserve(size_ + str.length() + 1);
-    memcpy(data_ + size_, str.c_str(), str.length());
-    size_ += str.length();
-    data_[size_] = '\0';
+    if (data_) {
+      memcpy(data_ + size_, str.c_str(), str.length());
+      size_ += str.length();
+      data_[size_] = '\0';
+    }
   }
   
   const char* c_str() const { return data_ ? data_ : ""; }
@@ -47,26 +51,34 @@ class PSRAMString {
   void reserve(size_t new_capacity) {
     if (new_capacity <= capacity_) return;
     
-    // Allocate from PSRAM if available, otherwise regular heap
     size_t alloc_size = new_capacity + 1024;  // Add some headroom
-    char* new_data = static_cast<char*>(heap_caps_malloc(alloc_size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    char* new_data = nullptr;
     
-    if (!new_data) {
-      // Fallback to regular heap if PSRAM allocation fails
-      new_data = static_cast<char*>(malloc(alloc_size));
-      ESP_LOGW(TAG, "PSRAM allocation failed, using regular heap for HTML buffer");
-    } else {
-      ESP_LOGD(TAG, "Allocated %zu bytes from PSRAM for HTML buffer", alloc_size);
-    }
-    
-    if (new_data) {
-      if (data_) {
-        memcpy(new_data, data_, size_);
-        heap_caps_free(data_);
+    // Try PSRAM first if available
+    size_t psram_available = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+    if (psram_available >= alloc_size) {
+      new_data = static_cast<char*>(heap_caps_malloc(alloc_size, MALLOC_CAP_SPIRAM));
+      if (new_data) {
+        ESP_LOGV(TAG, "Allocated %zu bytes from PSRAM (available: %zu)", alloc_size, psram_available);
       }
-      data_ = new_data;
-      capacity_ = alloc_size;
     }
+    
+    // Fallback to regular heap
+    if (!new_data) {
+      new_data = static_cast<char*>(heap_caps_malloc(alloc_size, MALLOC_CAP_DEFAULT));
+      if (!new_data) {
+        ESP_LOGE(TAG, "Failed to allocate %zu bytes for buffer", alloc_size);
+        return;
+      }
+      ESP_LOGV(TAG, "Allocated %zu bytes from regular heap", alloc_size);
+    }
+    
+    if (data_) {
+      memcpy(new_data, data_, size_);
+      heap_caps_free(data_);
+    }
+    data_ = new_data;
+    capacity_ = alloc_size;
   }
   
   char* data_;
@@ -449,7 +461,7 @@ std::string TigoWebServer::build_yaml_json() {
   std::sort(assigned_nodes.begin(), assigned_nodes.end(),
             [](const auto &a, const auto &b) { return a.sensor_index < b.sensor_index; });
   
-  yaml_text = "sensor:\\n";
+  yaml_text = "sensor:\n";
   
   for (const auto &node : assigned_nodes) {
     std::string index_str = std::to_string(node.sensor_index + 1);
@@ -461,25 +473,28 @@ std::string TigoWebServer::build_yaml_json() {
       barcode_comment = " - Frame09: " + node.frame09_barcode;
     }
     
-    yaml_text += "  # Tigo Device " + index_str + " (discovered" + barcode_comment + ")\\n";
-    yaml_text += "  - platform: tigo_server\\n";
-    yaml_text += "    tigo_monitor_id: tigo_hub\\n";
-    yaml_text += "    address: \\\"" + node.addr + "\\\"\\n";
-    yaml_text += "    name: \\\"Tigo Device " + index_str + "\\\"\\n";
-    yaml_text += "    power: {}\\n";
-    yaml_text += "    voltage_in: {}\\n";
-    yaml_text += "    voltage_out: {}\\n";
-    yaml_text += "    current_in: {}\\n";
-    yaml_text += "    temperature: {}\\n";
-    yaml_text += "    rssi: {}\\n";
-    yaml_text += "\\n";
+    yaml_text += "  # Tigo Device " + index_str + " (discovered" + barcode_comment + ")\n";
+    yaml_text += "  - platform: tigo_monitor\n";
+    yaml_text += "    tigo_monitor_id: tigo_hub\n";
+    yaml_text += "    address: \"" + node.addr + "\"\n";
+    yaml_text += "    name: \"Tigo Device " + index_str + "\"\n";
+    yaml_text += "    power: {}\n";
+    yaml_text += "    voltage_in: {}\n";
+    yaml_text += "    voltage_out: {}\n";
+    yaml_text += "    current_in: {}\n";
+    yaml_text += "    temperature: {}\n";
+    yaml_text += "    rssi: {}\n";
+    yaml_text += "\n";
   }
   
-  // Escape quotes for JSON
+  // Escape for JSON - convert newlines to \n
   std::string json = "{\"yaml\":\"";
   for (char c : yaml_text) {
     if (c == '"') json += "\\\"";
     else if (c == '\\') json += "\\\\";
+    else if (c == '\n') json += "\\n";
+    else if (c == '\r') json += "\\r";
+    else if (c == '\t') json += "\\t";
     else json += c;
   }
   json += "\",\"device_count\":" + std::to_string(assigned_nodes.size()) + "}";
