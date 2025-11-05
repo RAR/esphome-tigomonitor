@@ -38,6 +38,11 @@ void TigoMonitorComponent::setup() {
   node_table_.reserve(number_of_devices_);
   load_node_table();
   load_energy_data();
+  
+  // Initialize night mode tracking
+  last_data_received_ = millis();
+  last_zero_publish_ = 0;
+  in_night_mode_ = false;
 }
   
 
@@ -391,6 +396,13 @@ void TigoMonitorComponent::process_27_frame(const std::string &frame) {
 void TigoMonitorComponent::update_device_data(const DeviceData &data) {
   ESP_LOGD(TAG, "Updating device data for addr: %s", data.addr.c_str());
   
+  // Track when data is received
+  last_data_received_ = millis();
+  if (in_night_mode_) {
+    ESP_LOGI(TAG, "Exiting night mode - data received from %s", data.addr.c_str());
+    in_night_mode_ = false;
+  }
+  
   // Find existing device or add new one
   DeviceData *device = find_device_by_addr(data.addr);
   if (device != nullptr) {
@@ -454,6 +466,95 @@ DeviceData* TigoMonitorComponent::find_device_by_addr(const std::string &addr) {
 }
 
 void TigoMonitorComponent::publish_sensor_data() {
+  unsigned long current_time = millis();
+  
+  // Check if we should enter night mode (no data for 1 hour)
+  if (last_data_received_ > 0 && !in_night_mode_ && (current_time - last_data_received_ > NO_DATA_TIMEOUT)) {
+    ESP_LOGI(TAG, "Entering night mode - no data received for 1 hour");
+    in_night_mode_ = true;
+    last_zero_publish_ = 0;  // Reset to force immediate zero publish
+  }
+  
+  // In night mode, publish zeros every 10 minutes
+  if (in_night_mode_) {
+    if (last_zero_publish_ == 0 || (current_time - last_zero_publish_ >= ZERO_PUBLISH_INTERVAL)) {
+      ESP_LOGI(TAG, "Night mode: Publishing zero values for all sensors");
+      last_zero_publish_ = current_time;
+      
+      // Publish zeros for all registered devices
+      for (const auto &device : devices_) {
+        // Publish zero voltage input
+        auto voltage_in_it = voltage_in_sensors_.find(device.addr);
+        if (voltage_in_it != voltage_in_sensors_.end()) {
+          voltage_in_it->second->publish_state(0.0f);
+        }
+        
+        // Publish zero voltage output
+        auto voltage_out_it = voltage_out_sensors_.find(device.addr);
+        if (voltage_out_it != voltage_out_sensors_.end()) {
+          voltage_out_it->second->publish_state(0.0f);
+        }
+        
+        // Publish zero current
+        auto current_in_it = current_in_sensors_.find(device.addr);
+        if (current_in_it != current_in_sensors_.end()) {
+          current_in_it->second->publish_state(0.0f);
+        }
+        
+        // Publish zero temperature
+        auto temperature_it = temperature_sensors_.find(device.addr);
+        if (temperature_it != temperature_sensors_.end()) {
+          temperature_it->second->publish_state(0.0f);
+        }
+        
+        // Publish zero power
+        auto power_it = power_sensors_.find(device.addr);
+        if (power_it != power_sensors_.end()) {
+          power_it->second->publish_state(0.0f);
+        }
+        
+        // Publish zero RSSI
+        auto rssi_it = rssi_sensors_.find(device.addr);
+        if (rssi_it != rssi_sensors_.end()) {
+          rssi_it->second->publish_state(0.0f);
+        }
+        
+        // Publish zero duty cycle
+        auto duty_cycle_it = duty_cycle_sensors_.find(device.addr);
+        if (duty_cycle_it != duty_cycle_sensors_.end()) {
+          duty_cycle_it->second->publish_state(0.0f);
+        }
+        
+        // Publish zero efficiency
+        auto efficiency_it = efficiency_sensors_.find(device.addr);
+        if (efficiency_it != efficiency_sensors_.end()) {
+          efficiency_it->second->publish_state(0.0f);
+        }
+        
+        // Publish zero power factor
+        auto power_factor_it = power_factor_sensors_.find(device.addr);
+        if (power_factor_it != power_factor_sensors_.end()) {
+          power_factor_it->second->publish_state(0.0f);
+        }
+        
+        // Publish zero load factor
+        auto load_factor_it = load_factor_sensors_.find(device.addr);
+        if (load_factor_it != load_factor_sensors_.end()) {
+          load_factor_it->second->publish_state(0.0f);
+        }
+      }
+      
+      // Publish zero power sum
+      if (power_sum_sensor_ != nullptr) {
+        power_sum_sensor_->publish_state(0.0f);
+      }
+      
+      ESP_LOGI(TAG, "Night mode: Zero values published for %zu devices", devices_.size());
+    }
+    return;  // Don't publish actual data in night mode
+  }
+  
+  // Normal mode - publish actual sensor data
   ESP_LOGD(TAG, "Publishing sensor data for %zu devices", devices_.size());
   
   for (const auto &device : devices_) {

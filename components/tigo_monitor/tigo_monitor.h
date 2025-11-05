@@ -203,6 +203,13 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   float total_energy_kwh_ = 0.0f;
   unsigned long last_energy_update_ = 0;
   
+  // Night mode / no data handling
+  unsigned long last_data_received_ = 0;
+  unsigned long last_zero_publish_ = 0;
+  static const unsigned long NO_DATA_TIMEOUT = 3600000;  // 1 hour in milliseconds
+  static const unsigned long ZERO_PUBLISH_INTERVAL = 600000;  // 10 minutes in milliseconds
+  bool in_night_mode_ = false;
+  
   // Persistence
   static const uint32_t DEVICE_MAPPING_HASH = 0x12345678;  // Hash for preferences key
   static const uint32_t ENERGY_DATA_HASH = 0x87654321;     // Hash for energy data key
