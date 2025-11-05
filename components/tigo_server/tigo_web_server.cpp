@@ -13,6 +13,67 @@ namespace tigo_server {
 
 static const char *const TAG = "tigo_web_server";
 
+// Helper class to manage PSRAM-allocated strings for large HTML content
+class PSRAMString {
+ public:
+  PSRAMString() : data_(nullptr), size_(0), capacity_(0) {}
+  
+  ~PSRAMString() {
+    if (data_) {
+      heap_caps_free(data_);
+    }
+  }
+  
+  // Append string, allocating from PSRAM if available
+  void append(const char* str) {
+    size_t len = strlen(str);
+    reserve(size_ + len + 1);
+    memcpy(data_ + size_, str, len);
+    size_ += len;
+    data_[size_] = '\0';
+  }
+  
+  void append(const std::string& str) {
+    reserve(size_ + str.length() + 1);
+    memcpy(data_ + size_, str.c_str(), str.length());
+    size_ += str.length();
+    data_[size_] = '\0';
+  }
+  
+  const char* c_str() const { return data_ ? data_ : ""; }
+  size_t length() const { return size_; }
+  
+ private:
+  void reserve(size_t new_capacity) {
+    if (new_capacity <= capacity_) return;
+    
+    // Allocate from PSRAM if available, otherwise regular heap
+    size_t alloc_size = new_capacity + 1024;  // Add some headroom
+    char* new_data = static_cast<char*>(heap_caps_malloc(alloc_size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    
+    if (!new_data) {
+      // Fallback to regular heap if PSRAM allocation fails
+      new_data = static_cast<char*>(malloc(alloc_size));
+      ESP_LOGW(TAG, "PSRAM allocation failed, using regular heap for HTML buffer");
+    } else {
+      ESP_LOGD(TAG, "Allocated %zu bytes from PSRAM for HTML buffer", alloc_size);
+    }
+    
+    if (new_data) {
+      if (data_) {
+        memcpy(new_data, data_, size_);
+        heap_caps_free(data_);
+      }
+      data_ = new_data;
+      capacity_ = alloc_size;
+    }
+  }
+  
+  char* data_;
+  size_t size_;
+  size_t capacity_;
+};
+
 void TigoWebServer::setup() {
   ESP_LOGI(TAG, "Starting Tigo Web Server on port %d...", port_);
   
@@ -122,7 +183,11 @@ tigo_monitor::TigoMonitorComponent *TigoWebServer::get_parent_from_req(httpd_req
 
 esp_err_t TigoWebServer::dashboard_handler(httpd_req_t *req) {
   TigoWebServer *server = static_cast<TigoWebServer *>(req->user_ctx);
-  std::string html = server->get_dashboard_html();
+  
+  // Use PSRAM for large HTML content
+  PSRAMString html;
+  std::string content = server->get_dashboard_html();
+  html.append(content);
   
   httpd_resp_set_type(req, "text/html");
   httpd_resp_send(req, html.c_str(), html.length());
@@ -131,7 +196,10 @@ esp_err_t TigoWebServer::dashboard_handler(httpd_req_t *req) {
 
 esp_err_t TigoWebServer::overview_handler(httpd_req_t *req) {
   TigoWebServer *server = static_cast<TigoWebServer *>(req->user_ctx);
-  std::string html = server->get_overview_html();
+  
+  PSRAMString html;
+  std::string content = server->get_overview_html();
+  html.append(content);
   
   httpd_resp_set_type(req, "text/html");
   httpd_resp_send(req, html.c_str(), html.length());
@@ -140,7 +208,10 @@ esp_err_t TigoWebServer::overview_handler(httpd_req_t *req) {
 
 esp_err_t TigoWebServer::node_table_handler(httpd_req_t *req) {
   TigoWebServer *server = static_cast<TigoWebServer *>(req->user_ctx);
-  std::string html = server->get_node_table_html();
+  
+  PSRAMString html;
+  std::string content = server->get_node_table_html();
+  html.append(content);
   
   httpd_resp_set_type(req, "text/html");
   httpd_resp_send(req, html.c_str(), html.length());
@@ -149,7 +220,10 @@ esp_err_t TigoWebServer::node_table_handler(httpd_req_t *req) {
 
 esp_err_t TigoWebServer::esp_status_handler(httpd_req_t *req) {
   TigoWebServer *server = static_cast<TigoWebServer *>(req->user_ctx);
-  std::string html = server->get_esp_status_html();
+  
+  PSRAMString html;
+  std::string content = server->get_esp_status_html();
+  html.append(content);
   
   httpd_resp_set_type(req, "text/html");
   httpd_resp_send(req, html.c_str(), html.length());
@@ -158,7 +232,10 @@ esp_err_t TigoWebServer::esp_status_handler(httpd_req_t *req) {
 
 esp_err_t TigoWebServer::yaml_config_handler(httpd_req_t *req) {
   TigoWebServer *server = static_cast<TigoWebServer *>(req->user_ctx);
-  std::string html = server->get_yaml_config_html();
+  
+  PSRAMString html;
+  std::string content = server->get_yaml_config_html();
+  html.append(content);
   
   httpd_resp_set_type(req, "text/html");
   httpd_resp_send(req, html.c_str(), html.length());
@@ -169,51 +246,66 @@ esp_err_t TigoWebServer::yaml_config_handler(httpd_req_t *req) {
 
 esp_err_t TigoWebServer::api_devices_handler(httpd_req_t *req) {
   TigoWebServer *server = static_cast<TigoWebServer *>(req->user_ctx);
+  
+  PSRAMString json_buffer;
   std::string json = server->build_devices_json();
+  json_buffer.append(json);
   
   httpd_resp_set_type(req, "application/json");
   httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
-  httpd_resp_send(req, json.c_str(), json.length());
+  httpd_resp_send(req, json_buffer.c_str(), json_buffer.length());
   return ESP_OK;
 }
 
 esp_err_t TigoWebServer::api_overview_handler(httpd_req_t *req) {
   TigoWebServer *server = static_cast<TigoWebServer *>(req->user_ctx);
+  
+  PSRAMString json_buffer;
   std::string json = server->build_overview_json();
+  json_buffer.append(json);
   
   httpd_resp_set_type(req, "application/json");
   httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
-  httpd_resp_send(req, json.c_str(), json.length());
+  httpd_resp_send(req, json_buffer.c_str(), json_buffer.length());
   return ESP_OK;
 }
 
 esp_err_t TigoWebServer::api_node_table_handler(httpd_req_t *req) {
   TigoWebServer *server = static_cast<TigoWebServer *>(req->user_ctx);
+  
+  PSRAMString json_buffer;
   std::string json = server->build_node_table_json();
+  json_buffer.append(json);
   
   httpd_resp_set_type(req, "application/json");
   httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
-  httpd_resp_send(req, json.c_str(), json.length());
+  httpd_resp_send(req, json_buffer.c_str(), json_buffer.length());
   return ESP_OK;
 }
 
 esp_err_t TigoWebServer::api_esp_status_handler(httpd_req_t *req) {
   TigoWebServer *server = static_cast<TigoWebServer *>(req->user_ctx);
+  
+  PSRAMString json_buffer;
   std::string json = server->build_esp_status_json();
+  json_buffer.append(json);
   
   httpd_resp_set_type(req, "application/json");
   httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
-  httpd_resp_send(req, json.c_str(), json.length());
+  httpd_resp_send(req, json_buffer.c_str(), json_buffer.length());
   return ESP_OK;
 }
 
 esp_err_t TigoWebServer::api_yaml_handler(httpd_req_t *req) {
   TigoWebServer *server = static_cast<TigoWebServer *>(req->user_ctx);
+  
+  PSRAMString json_buffer;
   std::string json = server->build_yaml_json();
+  json_buffer.append(json);
   
   httpd_resp_set_type(req, "application/json");
   httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
-  httpd_resp_send(req, json.c_str(), json.length());
+  httpd_resp_send(req, json_buffer.c_str(), json_buffer.length());
   return ESP_OK;
 }
 
