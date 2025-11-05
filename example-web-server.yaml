@@ -8,10 +8,21 @@ esphome:
   platformio_options:
     board_build.flash_mode: dio
 
+psram:
+  mode: octal
+  speed: 80MHz
+
 esp32:
-  board: esp32dev
+  board: m5stack-atoms3  # For M5Stack AtomS3/AtomS3R with 8MB PSRAM
+  variant: esp32s3
   framework:
     type: esp-idf  # Required for custom web server
+    sdkconfig_options:
+      CONFIG_ESP32S3_DEFAULT_CPU_FREQ_240: "y"
+      CONFIG_ESP32S3_DATA_CACHE_64KB: "y"
+      CONFIG_ESP32S3_DATA_CACHE_LINE_64B: "y"
+      CONFIG_SPIRAM_MODE_OCT: "y"
+      CONFIG_SPIRAM_SPEED_80M: "y"
 
 # Point to local component
 external_components:

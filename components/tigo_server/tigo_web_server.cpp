@@ -77,6 +77,16 @@ class PSRAMString {
 void TigoWebServer::setup() {
   ESP_LOGI(TAG, "Starting Tigo Web Server on port %d...", port_);
   
+  // Check PSRAM availability
+  size_t total_psram = heap_caps_get_total_size(MALLOC_CAP_SPIRAM);
+  size_t free_psram = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+  if (total_psram > 0) {
+    ESP_LOGI(TAG, "PSRAM detected: %zu bytes total, %zu bytes free", total_psram, free_psram);
+  } else {
+    ESP_LOGW(TAG, "PSRAM not available - large buffers will use regular heap");
+    ESP_LOGW(TAG, "If your ESP32 has PSRAM, ensure it's properly configured in the YAML");
+  }
+  
   httpd_config_t config = HTTPD_DEFAULT_CONFIG();
   config.server_port = port_;
   config.ctrl_port = port_ + 1;
