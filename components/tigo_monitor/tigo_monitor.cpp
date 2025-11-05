@@ -255,15 +255,15 @@ void TigoMonitorComponent::process_power_frame(const std::string &frame) {
   data.changed = true;
   data.last_update = millis();
   
-  // Find barcode from Frame 09 data only
+  // Find barcode from Frame 27 data only
   NodeTableData* node = find_node_by_addr(data.addr);
-  if (node != nullptr && !node->frame09_barcode.empty()) {
-    data.barcode = node->frame09_barcode;
-    ESP_LOGD(TAG, "Using Frame 09 barcode for device %s: %s", data.addr.c_str(), data.barcode.c_str());
+  if (node != nullptr && !node->long_address.empty()) {
+    data.barcode = node->long_address;
+    ESP_LOGD(TAG, "Using Frame 27 long address as barcode for device %s: %s", data.addr.c_str(), data.barcode.c_str());
   } else {
-    // No Frame 09 barcode available yet
+    // No Frame 27 long address available yet
     data.barcode = "";
-    ESP_LOGD(TAG, "No Frame 09 barcode available for device %s", data.addr.c_str());
+    ESP_LOGD(TAG, "No Frame 27 long address available for device %s", data.addr.c_str());
   }
   
   update_device_data(data);
@@ -299,20 +299,24 @@ void TigoMonitorComponent::process_09_frame(const std::string &frame) {
   }
   
   // Also update existing device if already discovered
+  // Frame 09 barcode is now fallback - only use if Frame 27 not available
   DeviceData* device = find_device_by_addr(addr);
   if (device != nullptr) {
-    if (device->barcode != barcode) {
+    // Only update device barcode with Frame 09 if no Frame 27 long address available
+    if (node != nullptr && node->long_address.empty() && device->barcode != barcode) {
       device->barcode = barcode;
-      ESP_LOGI(TAG, "Updated existing device %s with Frame 09 barcode: %s", addr.c_str(), barcode.c_str());
+      ESP_LOGI(TAG, "Updated existing device %s with Frame 09 barcode (fallback): %s", addr.c_str(), barcode.c_str());
+      
+      // Publish the Frame 09 barcode since it's being used as fallback
+      auto barcode_it = barcode_sensors_.find(addr);
+      if (barcode_it != barcode_sensors_.end()) {
+        barcode_it->second->publish_state(barcode);
+        ESP_LOGD(TAG, "Published Frame 09 barcode (fallback) for %s: %s", addr.c_str(), barcode.c_str());
+      }
+    } else if (node != nullptr && !node->long_address.empty()) {
+      ESP_LOGD(TAG, "Device %s already has Frame 27 long address as barcode, ignoring Frame 09: %s", addr.c_str(), barcode.c_str());
     } else {
       ESP_LOGD(TAG, "Device %s already has Frame 09 barcode: %s", addr.c_str(), barcode.c_str());
-    }
-    
-    // Always publish the barcode sensor when Frame 09 data arrives
-    auto barcode_it = barcode_sensors_.find(addr);
-    if (barcode_it != barcode_sensors_.end()) {
-      barcode_it->second->publish_state(barcode);
-      ESP_LOGD(TAG, "Published Frame 09 barcode for %s: %s", addr.c_str(), barcode.c_str());
     }
   } else {
     ESP_LOGD(TAG, "Frame 09 data for %s received before power data - barcode stored in node table", addr.c_str());
@@ -321,7 +325,7 @@ void TigoMonitorComponent::process_09_frame(const std::string &frame) {
 
 void TigoMonitorComponent::process_27_frame(const std::string &frame) {
   int num_entries = std::stoi(frame.substr(4, 4), nullptr, 16);
-  ESP_LOGD(TAG, "Frame 27 received, entries: %d", num_entries);
+  ESP_LOGI(TAG, "📦 Frame 27 received, entries: %d", num_entries);
   
   size_t pos = 8;
   bool table_changed = false;
@@ -331,26 +335,51 @@ void TigoMonitorComponent::process_27_frame(const std::string &frame) {
     std::string addr = frame.substr(pos + 16, 4);
     pos += 20;
     
-    // Check if entry exists
-    bool found = false;
-    for (auto &node : node_table_) {
-      if (node.long_address == long_addr) {
-        if (node.addr != addr) {
-          node.addr = addr;
-          table_changed = true;
-        }
-        found = true;
-        break;
+    ESP_LOGI(TAG, "📦 Frame 27 - Device Identity: addr=%s, long_addr=%s", 
+             addr.c_str(), long_addr.c_str());
+    
+    // Find or create node table entry
+    NodeTableData* node = find_node_by_addr(addr);
+    if (node != nullptr) {
+      // Update existing node with Frame 27 long address
+      if (node->long_address != long_addr) {
+        node->long_address = long_addr;
+        ESP_LOGI(TAG, "Updated Frame 27 long address for node %s: %s", addr.c_str(), long_addr.c_str());
+        table_changed = true;
+      }
+    } else {
+      // Create new node table entry for Frame 27 data
+      if (node_table_.size() < number_of_devices_) {
+        NodeTableData new_node;
+        new_node.addr = addr;
+        new_node.long_address = long_addr;
+        new_node.checksum = std::string(1, compute_tigo_crc4(addr));
+        new_node.sensor_index = -1;  // Will be assigned when device becomes active
+        new_node.is_persistent = true;
+        node_table_.push_back(new_node);
+        ESP_LOGI(TAG, "Created new node entry for Frame 27: addr=%s, long_addr=%s", addr.c_str(), long_addr.c_str());
+        table_changed = true;
       }
     }
     
-    if (!found && node_table_.size() < number_of_devices_) {
-      NodeTableData new_node;
-      new_node.long_address = long_addr;
-      new_node.addr = addr;
-      new_node.checksum = std::string(1, compute_tigo_crc4(addr));
-      node_table_.push_back(new_node);
-      table_changed = true;
+    // Also update existing device if already discovered
+    DeviceData* device = find_device_by_addr(addr);
+    if (device != nullptr) {
+      if (device->barcode != long_addr) {
+        device->barcode = long_addr;
+        ESP_LOGI(TAG, "Updated existing device %s with Frame 27 long address: %s", addr.c_str(), long_addr.c_str());
+      } else {
+        ESP_LOGD(TAG, "Device %s already has Frame 27 long address: %s", addr.c_str(), long_addr.c_str());
+      }
+      
+      // Always publish the barcode sensor when Frame 27 data arrives
+      auto barcode_it = barcode_sensors_.find(addr);
+      if (barcode_it != barcode_sensors_.end()) {
+        barcode_it->second->publish_state(long_addr);
+        ESP_LOGD(TAG, "Published Frame 27 long address for %s: %s", addr.c_str(), long_addr.c_str());
+      }
+    } else {
+      ESP_LOGD(TAG, "Frame 27 data for %s received before power data - long address stored in node table", addr.c_str());
     }
   }
   
@@ -391,10 +420,16 @@ void TigoMonitorComponent::update_device_data(const DeviceData &data) {
       }
       
       // After device creation, ensure barcode is up to date from node table
+      // Prioritize Frame 27 long address as primary barcode source
       DeviceData* new_device = &devices_.back();
-      if (node != nullptr && !node->frame09_barcode.empty() && new_device->barcode != node->frame09_barcode) {
+      if (node != nullptr && !node->long_address.empty() && new_device->barcode != node->long_address) {
+        new_device->barcode = node->long_address;
+        ESP_LOGI(TAG, "Applied Frame 27 long address as barcode to new device %s: %s", data.addr.c_str(), node->long_address.c_str());
+      }
+      // Fallback to Frame 09 barcode if Frame 27 not available
+      else if (node != nullptr && !node->frame09_barcode.empty() && new_device->barcode != node->frame09_barcode) {
         new_device->barcode = node->frame09_barcode;
-        ESP_LOGI(TAG, "Applied Frame 09 barcode to new device %s: %s", data.addr.c_str(), node->frame09_barcode.c_str());
+        ESP_LOGI(TAG, "Applied Frame 09 barcode (fallback) to new device %s: %s", data.addr.c_str(), node->frame09_barcode.c_str());
       }
       
       ESP_LOGI(TAG, "Device data: %s - Vin:%.2fV, Vout:%.2fV, Curr:%.3fA, Temp:%.1f°C, Barcode:%s", 
@@ -771,12 +806,12 @@ void TigoMonitorComponent::generate_sensor_yaml() {
     for (const auto& node : assigned_nodes) {
       std::string index_str = std::to_string(node.sensor_index + 1);
       
-      // Build barcode comment from available data
+      // Build barcode comment from available data, prioritizing Frame 27
       std::string barcode_comment = "";
-      if (!node.frame09_barcode.empty()) {
-        barcode_comment = " - Frame09: " + node.frame09_barcode;
-      } else if (!node.long_address.empty()) {
+      if (!node.long_address.empty()) {
         barcode_comment = " - Frame27: " + node.long_address;
+      } else if (!node.frame09_barcode.empty()) {
+        barcode_comment = " - Frame09: " + node.frame09_barcode;
       }
       
       ESP_LOGI(TAG, "  # Tigo Device %s (discovered%s)", index_str.c_str(), barcode_comment.c_str());
@@ -856,14 +891,14 @@ void TigoMonitorComponent::print_device_mappings() {
     for (const auto& node : sorted_nodes) {
       std::string info = "Device Address " + node.addr;
       
-      // Add Frame 09 barcode if available
-      if (!node.frame09_barcode.empty()) {
-        info += " (Frame09: " + node.frame09_barcode + ")";
+      // Add Frame 27 long address as primary barcode (new default)
+      if (!node.long_address.empty()) {
+        info += " (Frame27: " + node.long_address + ")";
       }
       
-      // Add Frame 27 long address if available and different
-      if (!node.long_address.empty() && node.long_address != node.frame09_barcode) {
-        info += " (Frame27: " + node.long_address + ")";
+      // Add Frame 09 barcode if available and different from Frame 27
+      if (!node.frame09_barcode.empty() && node.long_address != node.frame09_barcode) {
+        info += " (Frame09: " + node.frame09_barcode + ")";
       }
       
       ESP_LOGI(TAG, "  Tigo %d: %s", node.sensor_index + 1, info.c_str());
