@@ -1,0 +1,67 @@
+#pragma once
+
+#include "esphome/core/component.h"
+#include "esphome/core/log.h"
+#include "esphome/components/tigo_monitor/tigo_monitor.h"
+
+#ifdef USE_ESP_IDF
+#include <esp_http_server.h>
+#endif
+
+namespace esphome {
+namespace tigo_server {
+
+#ifdef USE_ESP_IDF
+
+class TigoWebServer : public Component {
+ public:
+  TigoWebServer() = default;
+  
+  void set_tigo_monitor(tigo_monitor::TigoMonitorComponent *parent) { parent_ = parent; }
+  
+  void setup() override;
+  void loop() override {}
+  float get_setup_priority() const override { return setup_priority::WIFI - 1.0f; }
+  
+  void set_port(uint16_t port) { port_ = port; }
+  uint16_t get_port() const { return port_; }
+
+ protected:
+  tigo_monitor::TigoMonitorComponent *parent_{nullptr};
+  httpd_handle_t server_{nullptr};
+  uint16_t port_{80};
+  
+  // HTTP handlers
+  static esp_err_t dashboard_handler(httpd_req_t *req);
+  static esp_err_t overview_handler(httpd_req_t *req);
+  static esp_err_t node_table_handler(httpd_req_t *req);
+  static esp_err_t esp_status_handler(httpd_req_t *req);
+  static esp_err_t yaml_config_handler(httpd_req_t *req);
+  
+  // API endpoints (JSON)
+  static esp_err_t api_devices_handler(httpd_req_t *req);
+  static esp_err_t api_overview_handler(httpd_req_t *req);
+  static esp_err_t api_node_table_handler(httpd_req_t *req);
+  static esp_err_t api_esp_status_handler(httpd_req_t *req);
+  static esp_err_t api_yaml_handler(httpd_req_t *req);
+  
+  // Helper functions
+  tigo_monitor::TigoMonitorComponent *get_parent_from_req(httpd_req_t *req);
+  std::string get_dashboard_html();
+  std::string get_overview_html();
+  std::string get_node_table_html();
+  std::string get_esp_status_html();
+  std::string get_yaml_config_html();
+  
+  // JSON builders
+  std::string build_devices_json();
+  std::string build_overview_json();
+  std::string build_node_table_json();
+  std::string build_esp_status_json();
+  std::string build_yaml_json();
+};
+
+#endif  // USE_ESP_IDF
+
+}  // namespace tigo_server
+}  // namespace esphome

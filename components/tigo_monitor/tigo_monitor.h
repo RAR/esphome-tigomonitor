@@ -131,6 +131,11 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   // Configuration
   void set_number_of_devices(int count) { number_of_devices_ = count; }
   
+  // Public getters for web server access
+  const std::vector<DeviceData>& get_devices() const { return devices_; }
+  const std::vector<NodeTableData>& get_node_table() const { return node_table_; }
+  int get_number_of_devices() const { return number_of_devices_; }
+  
   // Generate YAML configuration for manual setup
   void generate_sensor_yaml();
   

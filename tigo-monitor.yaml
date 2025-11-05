@@ -43,8 +43,9 @@ ota:
 # No separate MQTT configuration needed
 
 # Web Server (optional, basic ESPHome web interface)
-web_server:
-  port: 80
+# Comment out if using custom Tigo web server below
+# web_server:
+#   port: 80
 
 # UART configuration for Tigo communication
 uart:
@@ -60,8 +61,14 @@ uart:
 tigo_monitor:
   id: tigo_hub
   uart_id: tigo_uart
+  number_of_devices: 20
   update_interval: 30s
-  number_of_devices: 20  # Set this to exactly the number of Tigo devices you have
+
+# Custom web server for comprehensive Tigo monitoring dashboard
+tigo_server:
+  id: tigo_web
+  tigo_monitor_id: tigo_hub
+  port: 80
 
 # Configure your sensors below - add individual device sensors and/or the power sum sensor
 

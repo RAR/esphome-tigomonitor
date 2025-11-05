@@ -26,3 +26,4 @@ def to_code(config):
     yield uart.register_uart_device(var, config)
     
     cg.add(var.set_number_of_devices(config[CONF_NUMBER_OF_DEVICES]))
+
