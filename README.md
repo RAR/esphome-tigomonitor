@@ -16,13 +16,18 @@ A comprehensive ESPHome component for monitoring Tigo solar power optimizers via
 - **Persistent Storage**: Device mappings and energy data survive reboots
 
 ### Web Interface
-- **Built-in Web Dashboard**: Custom web server with 6 comprehensive pages
-  - **Dashboard**: Real-time overview of all devices with live power metrics
-  - **System Overview**: Aggregated statistics and system-wide analytics
+- **Built-in Web Dashboard**: Custom web server with 5 comprehensive pages
+  - **Dashboard**: Real-time overview with system stats and live device metrics
+    - Total Power, Current, Energy (kWh), Efficiency, Temperature, Active Devices
+    - Temperature unit toggle (°F/°C) with persistent preference
+    - Device cards with CCA-friendly names and real-time metrics
   - **Node Table**: Complete device registry with CCA labels and hierarchy
+    - Individual node deletion capability
+    - CCA validation badges
   - **ESP32 Status**: System health, memory usage, task count, and uptime
   - **YAML Config Generator**: Automatic sensor configuration generation
   - **CCA Info**: Tigo CCA device information and status monitoring
+    - Manual refresh button for on-demand updates
 - **Mobile Responsive**: Optimized layouts for desktop and mobile devices
 - **Auto-refresh**: Live updates without page reloads
 - **No External Dependencies**: Runs entirely on the ESP32
@@ -37,6 +42,7 @@ A comprehensive ESPHome component for monitoring Tigo solar power optimizers via
 - **Device Validation**: Visual indicators for CCA-validated devices
 
 ### Advanced Features
+- **Flash Wear Optimization**: Energy data saved hourly (24 writes/day) for extended flash lifespan
 - **Night Mode**: Automatic zero publishing when no data received (prevents stale data at night)
 - **UART Optimization**: ISR in IRAM for reduced packet loss
 - **Flexible Configuration**: Support for individual sensors or combined device sensors
@@ -179,11 +185,16 @@ cd esphome-tigomonitor
 
 The web server provides:
 - **Dashboard** (`/`) - Live device monitoring with real-time metrics
-- **Overview** (`/overview`) - System-wide statistics and aggregation
+  - System stats: Total Power, Current, Energy, Efficiency, Temperature, Active Devices
+  - Temperature toggle (°F/°C) with localStorage persistence
+  - Device cards with CCA labels and live metrics
 - **Node Table** (`/nodes`) - Complete device list with CCA labels
+  - Delete individual nodes
+  - CCA validation indicators
 - **ESP32 Status** (`/status`) - System health and resource usage
 - **YAML Config** (`/yaml`) - Auto-generated sensor configuration
 - **CCA Info** (`/cca`) - Tigo CCA device status and information
+  - Manual refresh capability
 
 ### Sensor Types
 
@@ -284,22 +295,28 @@ The component includes a built-in web server accessible at `http://<esp32-ip>/`
 ### Web Dashboard Features
 
 #### Dashboard Page (`/`)
-- **Live Device Cards**: Real-time power, voltage, current, and temperature for each device
-- **System Statistics**: Total power, average efficiency, active device count
+- **System Statistics**: 6 stat cards showing real-time system metrics
+  - Total Power (W), Total Current (A), Total Energy (kWh)
+  - Active Devices, Average Efficiency (%), Average Temperature
+- **Temperature Unit Toggle**: Switch between Fahrenheit and Celsius
+  - Preference saved to browser localStorage
+  - Applies to all temperature displays
+- **Live Device Cards**: Real-time monitoring for each device
+  - CCA-friendly names (e.g., "East Roof Panel 3")
+  - Two-line headers: CCA label + barcode/address
+  - Power, voltage, current, temperature, efficiency, RSSI
+  - Data age indicators
 - **Auto-refresh**: Updates every 5 seconds
-- **Device Age Indicators**: Shows how recently each device reported data
-
-#### Overview Page (`/overview`)
-- **System Metrics**: Total power, current, efficiency, temperature
-- **Active Device Count**: Real-time tracking of online devices
-- **Aggregated Statistics**: System-wide analytics
 
 #### Node Table Page (`/nodes`)
 - **Complete Device List**: All discovered devices with sensor assignments
 - **CCA Integration**: Shows panel names from Tigo CCA (if configured)
 - **Hierarchy Display**: Inverter → String → Panel structure
-- **Barcode Information**: Frame 09 and Frame 27 barcode data
+- **Barcode Information**: Frame 27 barcode data (16-char long address)
 - **Validation Badges**: Visual indicators for CCA-validated devices
+- **Node Management**: Delete individual nodes with confirmation
+  - Removes node from persistent storage
+  - Frees up sensor index for reuse
 
 #### ESP32 Status Page (`/status`)
 - **System Information**: Uptime, ESPHome version, compilation time
@@ -321,13 +338,13 @@ The component includes a built-in web server accessible at `http://<esp32-ip>/`
 - **Discovery Progress**: Current discovery status (e.g., "36/36")
 - **Uptime**: CCA uptime in human-readable format
 - **Last Config Sync**: When configuration was last pulled from cloud
+- **Manual Refresh Button**: On-demand CCA device info update
 - **Auto-refresh**: Updates every 30 seconds
 
 ### Accessing the Web Interface
 
 ```
-http://<esp32-ip-address>/        # Dashboard
-http://<esp32-ip-address>/overview # Overview
+http://<esp32-ip-address>/        # Dashboard (with system stats and live devices)
 http://<esp32-ip-address>/nodes    # Node Table
 http://<esp32-ip-address>/status   # ESP32 Status
 http://<esp32-ip-address>/yaml     # YAML Config
@@ -352,11 +369,12 @@ tigo_monitor:
 
 #### Features
 
-- **Barcode Matching**: Fuzzy matches UART devices with CCA configuration using Frame 27 (16-char) and Frame 09 (6-char) barcodes
+- **Barcode Matching**: Matches UART devices with CCA configuration using Frame 27 (16-char) barcodes
 - **Hierarchy Mapping**: Shows Inverter → String → Panel relationships
 - **Label Storage**: CCA labels persist across reboots
 - **Manual Sync**: Button to refresh CCA configuration on demand
 - **Auto-sync**: Optional automatic synchronization on startup (5-second delay for WiFi)
+- **Web Refresh**: On-demand CCA device info refresh via web interface
 
 #### CCA Sync Button
 
@@ -446,13 +464,14 @@ sensor:
 
 Look for these log messages:
 
-- `📦 Frame 09 - Device Identity:` - Device barcode information
+- `📦 Frame 27 received` - Long address (16-char barcode) discovery
 - `New device discovered:` - Power data from new devices
 - `Assigned sensor index X to device YYYY` - Device mapping assignments
+- `Energy data saved at hour boundary` - Hourly energy persistence confirmation
 
 ### Troubleshooting Logs
 
-- `No Frame 09 barcode available for device XXXX` - Device found but no barcode yet
+- `No Frame 27 long address available for device XXXX` - Device found but no barcode yet
 - `Cannot create node entry - node table is full` - Increase `number_of_devices`
 - `Maximum number of devices reached` - Adjust configuration limit
 
@@ -494,7 +513,7 @@ components/
 │   └── tigo_monitor.h        # Component header file
 ├── tigo_server/
 │   ├── __init__.py           # Web server component initialization
-│   ├── tigo_web_server.cpp   # Web server implementation (6 pages + APIs)
+│   ├── tigo_web_server.cpp   # Web server implementation (5 pages + APIs)
 │   └── tigo_web_server.h     # Web server header file
 ├── examples/                 # Configuration examples
 ├── tigo-server.yaml          # Main configuration file
@@ -624,9 +643,10 @@ Update the dashboard entity names to match your ESPHome configuration:
    - Look for "📦 Frame" messages in logs
 
 2. **Devices discovered but no barcodes**
-   - Frame 09 and Frame 27 data may not be transmitted by all systems
-   - Devices will work without barcodes (shows as "mod#XXXX")
+   - Frame 27 data may not be transmitted by all systems immediately
+   - Devices will work without barcodes (shows as "Module XXXX")
    - Wait longer for Frame 27 (16-char barcode) to be received
+   - Frame 09 (6-char) barcodes are no longer used
 
 3. **"Packet missed!" errors**
    - Add `CONFIG_UART_ISR_IN_IRAM: "y"` to ESP-IDF sdkconfig_options
@@ -648,8 +668,9 @@ Update the dashboard entity names to match your ESPHome configuration:
 
 6. **Energy data resets on reboot**
    - Component automatically saves energy data to flash
-   - Check logs for "Restored total energy" messages
-   - Data is saved at the top of each hour to reduce flash wear
+   - Check logs for "Restored total energy" and "Energy data saved at hour boundary" messages
+   - Data is saved at the top of each hour to reduce flash wear (24 writes/day)
+   - Maximum data loss on unexpected reboot: 1 hour of energy accumulation
 
 7. **Too many devices**
    - Increase `number_of_devices` in configuration
@@ -678,7 +699,10 @@ button:
 - **Memory Usage**: ~11-15% RAM (15% with web server), ~49% Flash (typical ESP32)
 - **Update Rate**: 30-60 seconds recommended for normal operation
 - **Device Limit**: Tested with up to 36 devices
-- **Persistence**: Energy data saved hourly at the top of each hour to reduce flash wear
+- **Flash Wear Optimization**: Energy data saved hourly at the top of each hour
+  - 24 writes/day (vs 288 with every-10-updates approach)
+  - Flash lifespan: ~11 years @ 100k cycles, ~114 years @ 1M cycles
+  - Maximum data loss: 1 hour of energy on unexpected reboot
 - **Web Server**: Adds ~4-5% RAM overhead, provides comprehensive monitoring interface
 - **UART Optimization**: ISR in IRAM significantly reduces packet loss
 - **CCA Queries**: HTTP requests add ~2-3 second delay during sync
