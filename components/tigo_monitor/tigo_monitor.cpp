@@ -6,6 +6,10 @@
 #include <cstring>
 #include <numeric>
 
+#ifdef USE_OTA
+#include "esphome/components/ota/ota_backend.h"
+#endif
+
 #ifdef USE_ESP_IDF
 #include "esp_http_client.h"
 #include <esp_heap_caps.h>
@@ -90,6 +94,9 @@ void TigoMonitorComponent::setup() {
   last_zero_publish_ = 0;
   in_night_mode_ = false;
   
+  // Register shutdown callback to save persistent data before OTA/reboot
+  App.register_component(this);
+  
   // Query CCA on boot if IP is configured and sync_cca_on_startup is enabled
   if (!cca_ip_.empty() && sync_cca_on_startup_) {
     ESP_LOGI(TAG, "CCA IP configured: %s - will sync configuration on boot", cca_ip_.c_str());
@@ -116,6 +123,11 @@ void TigoMonitorComponent::dump_config() {
   ESP_LOGCONFIG(TAG, "  Max devices: %d", number_of_devices_);
   ESP_LOGCONFIG(TAG, "  Multi-sensor platform with manual configuration");
   check_uart_settings(38400);
+}
+
+void TigoMonitorComponent::on_shutdown() {
+  ESP_LOGI(TAG, "System shutdown detected - saving persistent data to flash...");
+  save_persistent_data();
 }
 
 float TigoMonitorComponent::get_setup_priority() const {
@@ -438,6 +450,17 @@ void TigoMonitorComponent::update_device_data(const DeviceData &data) {
     devices_.push_back(data);
     ESP_LOGI(TAG, "New device discovered: addr=%s, barcode=%s", 
              data.addr.c_str(), data.barcode.c_str());
+    
+    // Load saved peak power for this device
+    DeviceData* new_device = &devices_.back();
+    std::string pref_key = "peak_" + data.addr;
+    uint32_t hash = esphome::fnv1_hash(pref_key);
+    auto load = global_preferences->make_preference<float>(hash);
+    float saved_peak = 0.0f;
+    if (load.load(&saved_peak) && saved_peak > 0.0f) {
+      new_device->peak_power = saved_peak;
+      ESP_LOGI(TAG, "Restored peak power for %s: %.0fW", data.addr.c_str(), saved_peak);
+    }
     
     // Track device discovery for node table management
     if (created_devices_.find(data.addr) == created_devices_.end()) {
@@ -1201,6 +1224,53 @@ void TigoMonitorComponent::save_node_table() {
   }
   
   ESP_LOGD(TAG, "Saved %d node table entries to flash", saved_count);
+}
+
+void TigoMonitorComponent::save_peak_power_data() {
+  ESP_LOGD(TAG, "Saving peak power data to flash...");
+  
+  int saved_count = 0;
+  for (size_t i = 0; i < devices_.size(); i++) {
+    const auto &device = devices_[i];
+    if (device.peak_power > 0.0f) {
+      std::string pref_key = "peak_" + device.addr;
+      uint32_t hash = esphome::fnv1_hash(pref_key);
+      auto save = global_preferences->make_preference<float>(hash);
+      save.save(&device.peak_power);
+      saved_count++;
+    }
+  }
+  
+  ESP_LOGD(TAG, "Saved %d peak power entries to flash", saved_count);
+}
+
+void TigoMonitorComponent::load_peak_power_data() {
+  ESP_LOGD(TAG, "Loading peak power data from flash...");
+  
+  int loaded_count = 0;
+  for (size_t i = 0; i < devices_.size(); i++) {
+    auto &device = devices_[i];
+    std::string pref_key = "peak_" + device.addr;
+    uint32_t hash = esphome::fnv1_hash(pref_key);
+    auto load = global_preferences->make_preference<float>(hash);
+    
+    float saved_peak = 0.0f;
+    if (load.load(&saved_peak) && saved_peak > 0.0f) {
+      device.peak_power = saved_peak;
+      loaded_count++;
+      ESP_LOGD(TAG, "Loaded peak power for %s: %.0fW", device.addr.c_str(), saved_peak);
+    }
+  }
+  
+  ESP_LOGI(TAG, "Loaded %d peak power entries from flash", loaded_count);
+}
+
+void TigoMonitorComponent::save_persistent_data() {
+  ESP_LOGI(TAG, "Saving all persistent data to flash (node table, peak power, energy)...");
+  save_node_table();
+  save_peak_power_data();
+  save_energy_data();
+  ESP_LOGI(TAG, "All persistent data saved successfully");
 }
 
 void TigoMonitorComponent::reset_node_table() {

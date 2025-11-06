@@ -66,6 +66,7 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   void loop() override;
   void update() override;
   void dump_config() override;
+  void on_shutdown() override;
   float get_setup_priority() const override;
 
   // Device name helper
@@ -203,6 +204,9 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   // Unified node table management (combines Frame 27, Frame 09, and device mappings)
   void load_node_table();
   void save_node_table();
+  void save_peak_power_data();
+  void load_peak_power_data();
+  void save_persistent_data();  // Save all persistent data (node table + peak power + energy)
   int get_next_available_sensor_index();
   NodeTableData* find_node_by_addr(const std::string &addr);
   void assign_sensor_index_to_node(const std::string &addr);
