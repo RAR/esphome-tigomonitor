@@ -1201,12 +1201,11 @@ std::string TigoWebServer::get_node_table_html() {
             <th>Device Name / Barcode</th>
             <th>Location</th>
             <th>Sensor Index</th>
-            <th>Checksum</th>
             <th>Action</th>
           </tr>
         </thead>
         <tbody id="node-table-body">
-          <tr><td colspan="6" style="text-align:center;">Loading...</td></tr>
+          <tr><td colspan="5" style="text-align:center;">Loading...</td></tr>
         </tbody>
       </table>
     </div>
@@ -1304,7 +1303,6 @@ std::string TigoWebServer::get_node_table_html() {
                 `<span class="badge badge-warning">Unassigned</span>`}
               ${node.cca_validated ? '<span class="badge badge-info" style="margin-left:0.5rem;">CCA ✓</span>' : ''}
             </td>
-            <td><span class="code">${node.checksum || '-'}</span></td>
             <td style="text-align:center;">
               <button onclick="deleteNode('${node.addr}')" style="padding: 0.5rem 1rem; background-color: #e74c3c; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.875rem;">
                 🗑️ Delete
