@@ -12,11 +12,13 @@ TigoMonitorComponent = tigo_monitor_ns.class_('TigoMonitorComponent', cg.Polling
 
 CONF_TIGO_MONITOR_ID = 'tigo_monitor_id'
 CONF_NUMBER_OF_DEVICES = 'number_of_devices'
+CONF_CCA_IP = 'cca_ip'
 
 CONFIG_SCHEMA = cv.Schema({
     cv.GenerateID(): cv.declare_id(TigoMonitorComponent),
     cv.GenerateID(CONF_UART_ID): cv.use_id(uart.UARTComponent),
     cv.Optional(CONF_NUMBER_OF_DEVICES, default=20): cv.int_range(min=1, max=100),
+    cv.Optional(CONF_CCA_IP): cv.string,
 }).extend(cv.polling_component_schema('30s')).extend(uart.UART_DEVICE_SCHEMA)
 
 @coroutine
@@ -26,4 +28,10 @@ def to_code(config):
     yield uart.register_uart_device(var, config)
     
     cg.add(var.set_number_of_devices(config[CONF_NUMBER_OF_DEVICES]))
+    
+    if CONF_CCA_IP in config:
+        cg.add(var.set_cca_ip(config[CONF_CCA_IP]))
+    
+    # Add ESP-IDF HTTP client component dependency
+    cg.add_library("ESP32 HTTP Client", None)
 

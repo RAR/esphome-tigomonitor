@@ -405,12 +405,16 @@ std::string TigoWebServer::build_node_table_json() {
     if (!first) json += ",";
     first = false;
     
-    char buffer[512];
+    char buffer[1024];
     snprintf(buffer, sizeof(buffer),
       "{\"addr\":\"%s\",\"long_address\":\"%s\",\"frame09_barcode\":\"%s\","
-      "\"sensor_index\":%d,\"checksum\":\"%s\"}",
+      "\"sensor_index\":%d,\"checksum\":\"%s\","
+      "\"cca_validated\":%s,\"cca_label\":\"%s\",\"cca_string\":\"%s\",\"cca_inverter\":\"%s\",\"cca_channel\":\"%s\"}",
       node.addr.c_str(), node.long_address.c_str(), node.frame09_barcode.c_str(),
-      node.sensor_index, node.checksum.c_str());
+      node.sensor_index, node.checksum.c_str(),
+      node.cca_validated ? "true" : "false",
+      node.cca_label.c_str(), node.cca_string_label.c_str(),
+      node.cca_inverter_label.c_str(), node.cca_channel.c_str());
     
     json += buffer;
   }
@@ -466,18 +470,28 @@ std::string TigoWebServer::build_yaml_json() {
   for (const auto &node : assigned_nodes) {
     std::string index_str = std::to_string(node.sensor_index + 1);
     std::string barcode_comment = "";
+    std::string device_name;
     
-    if (!node.long_address.empty()) {
-      barcode_comment = " - Frame27: " + node.long_address;
-    } else if (!node.frame09_barcode.empty()) {
-      barcode_comment = " - Frame09: " + node.frame09_barcode;
+    // Prefer CCA label if available, otherwise use generic name
+    if (!node.cca_label.empty()) {
+      device_name = node.cca_label;
+      if (!node.cca_string_label.empty() || !node.cca_inverter_label.empty()) {
+        barcode_comment = " - CCA: " + node.cca_inverter_label + " / " + node.cca_string_label;
+      }
+    } else {
+      device_name = "Tigo Device " + index_str;
+      if (!node.long_address.empty()) {
+        barcode_comment = " - Frame27: " + node.long_address;
+      } else if (!node.frame09_barcode.empty()) {
+        barcode_comment = " - Frame09: " + node.frame09_barcode;
+      }
     }
     
-    yaml_text += "  # Tigo Device " + index_str + " (discovered" + barcode_comment + ")\n";
+    yaml_text += "  # " + device_name + " (discovered" + barcode_comment + ")\n";
     yaml_text += "  - platform: tigo_monitor\n";
     yaml_text += "    tigo_monitor_id: tigo_hub\n";
     yaml_text += "    address: \"" + node.addr + "\"\n";
-    yaml_text += "    name: \"Tigo Device " + index_str + "\"\n";
+    yaml_text += "    name: \"" + device_name + "\"\n";
     yaml_text += "    power: {}\n";
     yaml_text += "    voltage_in: {}\n";
     yaml_text += "    voltage_out: {}\n";
@@ -779,7 +793,10 @@ std::string TigoWebServer::get_node_table_html() {
     .badge { display: inline-block; padding: 0.25rem 0.75rem; border-radius: 12px; font-size: 0.75rem; font-weight: 600; }
     .badge-success { background: #27ae60; color: white; }
     .badge-warning { background: #f39c12; color: white; }
+    .badge-info { background: #3498db; color: white; }
     .code { font-family: monospace; background: #f8f9fa; padding: 0.25rem 0.5rem; border-radius: 4px; }
+    .cca-info { color: #16a085; font-weight: 500; }
+    .hierarchy { color: #95a5a6; font-size: 0.85rem; margin-top: 0.25rem; }
   </style>
 </head>
 <body>
@@ -801,8 +818,8 @@ std::string TigoWebServer::get_node_table_html() {
         <thead>
           <tr>
             <th>Address</th>
-            <th>Long Address (Frame 27)</th>
-            <th>Barcode (Frame 09)</th>
+            <th>Device Name / Barcode</th>
+            <th>Location</th>
             <th>Sensor Index</th>
             <th>Checksum</th>
           </tr>
@@ -821,19 +838,50 @@ std::string TigoWebServer::get_node_table_html() {
         const data = await response.json();
         
         const tbody = document.getElementById('node-table-body');
-        tbody.innerHTML = data.nodes.map(node => `
+        tbody.innerHTML = data.nodes.map(node => {
+          // Build device name/barcode cell
+          let deviceInfo = '';
+          if (node.cca_validated && node.cca_label) {
+            deviceInfo = `<span class="cca-info">${node.cca_label}</span>`;
+            if (node.long_address) {
+              deviceInfo += `<div class="hierarchy">Barcode: <span class="code">${node.long_address}</span></div>`;
+            } else if (node.frame09_barcode) {
+              deviceInfo += `<div class="hierarchy">Barcode: <span class="code">${node.frame09_barcode}</span></div>`;
+            }
+          } else {
+            deviceInfo = `<span class="code">${node.long_address || node.frame09_barcode || '-'}</span>`;
+          }
+          
+          // Build location cell
+          let location = '';
+          if (node.cca_validated) {
+            if (node.cca_inverter && node.cca_string) {
+              location = `<div class="hierarchy">${node.cca_inverter} → ${node.cca_string}</div>`;
+            } else if (node.cca_string) {
+              location = `<div class="hierarchy">${node.cca_string}</div>`;
+            }
+            if (node.cca_channel) {
+              location += `<div class="hierarchy" style="font-size:0.75rem; margin-top:0.125rem;">Channel: ${node.cca_channel}</div>`;
+            }
+          }
+          if (!location) {
+            location = '<span style="color:#bdc3c7;">-</span>';
+          }
+          
+          return `
           <tr>
             <td><span class="code">${node.addr}</span></td>
-            <td><span class="code">${node.long_address || '-'}</span></td>
-            <td><span class="code">${node.frame09_barcode || '-'}</span></td>
+            <td>${deviceInfo}</td>
+            <td>${location}</td>
             <td>
               ${node.sensor_index >= 0 ? 
                 `<span class="badge badge-success">Tigo ${node.sensor_index + 1}</span>` : 
                 `<span class="badge badge-warning">Unassigned</span>`}
+              ${node.cca_validated ? '<span class="badge badge-info" style="margin-left:0.5rem;">CCA ✓</span>' : ''}
             </td>
             <td><span class="code">${node.checksum || '-'}</span></td>
           </tr>
-        `).join('');
+        `}).join('');
       } catch (error) {
         console.error('Error loading data:', error);
       }

@@ -46,7 +46,16 @@ struct NodeTableData {
   std::string frame09_barcode; // Frame 09: 6-character barcode (fallback when Frame 27 unavailable)
   int sensor_index = -1;       // ESPHome sensor index (-1 = unassigned)
   bool is_persistent = false;  // Whether this mapping should be saved to flash
+  
+  // CCA-sourced metadata (optional, populated via HTTP query)
+  std::string cca_label;          // Friendly name from CCA (e.g., "East Roof Panel 3")
+  std::string cca_string_label;   // Parent string label (e.g., "String 1")
+  std::string cca_inverter_label; // Parent inverter label (e.g., "Inverter 1")
+  std::string cca_channel;        // CCA channel identifier
+  int cca_object_id = -1;         // CCA's internal object ID
+  bool cca_validated = false;     // True if matched with CCA configuration
 };
+
 
 class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
  public:
@@ -126,15 +135,15 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
     this->power_sensors_[address] = sensor;
   }
 
-
-
   // Configuration
   void set_number_of_devices(int count) { number_of_devices_ = count; }
+  void set_cca_ip(const std::string &ip) { cca_ip_ = ip; }
   
   // Public getters for web server access
   const std::vector<DeviceData>& get_devices() const { return devices_; }
   const std::vector<NodeTableData>& get_node_table() const { return node_table_; }
   int get_number_of_devices() const { return number_of_devices_; }
+  const std::string& get_cca_ip() const { return cca_ip_; }
   
   // Generate YAML configuration for manual setup
   void generate_sensor_yaml();
@@ -144,6 +153,9 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   
   // Reset node table (clear all persistent device mappings)
   void reset_node_table();
+  
+  // CCA synchronization (called by button or on boot)
+  void sync_from_cca();
   
  protected:
   // Frame processing
@@ -175,6 +187,11 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   int get_next_available_sensor_index();
   NodeTableData* find_node_by_addr(const std::string &addr);
   void assign_sensor_index_to_node(const std::string &addr);
+  
+  // CCA HTTP query and matching
+  void query_cca_config();
+  void match_cca_to_uart(const std::string &json_response);
+  std::string get_barcode_for_node(const NodeTableData &node);
   
   // Energy persistence
   void load_energy_data();
@@ -219,6 +236,7 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   uint16_t crc_table_[CRC_TABLE_SIZE];
   int number_of_devices_ = 5;
   std::set<std::string> created_devices_;
+  std::string cca_ip_;  // Optional CCA IP address for HTTP queries
   
   // No timing variables needed - ESPHome handles update intervals
   
@@ -245,6 +263,14 @@ class TigoDeviceMappingsButton : public button::Button, public Component {
 };
 
 class TigoResetNodeTableButton : public button::Button, public Component {
+ public:
+  void set_tigo_monitor(TigoMonitorComponent *server) { this->tigo_monitor_ = server; }
+  void press_action() override;
+ protected:
+  TigoMonitorComponent *tigo_monitor_;
+};
+
+class TigoSyncFromCCAButton : public button::Button, public Component {
  public:
   void set_tigo_monitor(TigoMonitorComponent *server) { this->tigo_monitor_ = server; }
   void press_action() override;

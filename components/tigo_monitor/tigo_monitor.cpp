@@ -6,6 +6,11 @@
 #include <cstring>
 #include <numeric>
 
+#ifdef USE_ESP_IDF
+#include "esp_http_client.h"
+#include "cJSON.h"
+#endif
+
 namespace esphome {
 namespace tigo_monitor {
 
@@ -43,6 +48,13 @@ void TigoMonitorComponent::setup() {
   last_data_received_ = millis();
   last_zero_publish_ = 0;
   in_night_mode_ = false;
+  
+  // Query CCA on boot if IP is configured
+  if (!cca_ip_.empty()) {
+    ESP_LOGI(TAG, "CCA IP configured: %s - will sync configuration on boot", cca_ip_.c_str());
+    // Defer HTTP query to after WiFi is connected
+    defer("cca_sync", [this]() { this->sync_from_cca(); });
+  }
 }
   
 
@@ -91,6 +103,15 @@ void TigoResetNodeTableButton::press_action() {
   ESP_LOGI("tigo_button", "Resetting node table...");
   if (this->tigo_monitor_ != nullptr) {
     this->tigo_monitor_->reset_node_table();
+  } else {
+    ESP_LOGE("tigo_button", "Tigo server component not set!");
+  }
+}
+
+void TigoSyncFromCCAButton::press_action() {
+  ESP_LOGI("tigo_button", "Syncing from CCA...");
+  if (this->tigo_monitor_ != nullptr) {
+    this->tigo_monitor_->sync_from_cca();
   } else {
     ESP_LOGE("tigo_button", "Tigo server component not set!");
   }
@@ -1271,6 +1292,222 @@ void TigoMonitorComponent::save_energy_data() {
     ESP_LOGW(TAG, "Failed to save energy data");
   }
 }
+
+// ========== CCA HTTP Query Functions ==========
+
+void TigoMonitorComponent::sync_from_cca() {
+  if (cca_ip_.empty()) {
+    ESP_LOGW(TAG, "Cannot sync from CCA - no IP address configured");
+    return;
+  }
+  
+  ESP_LOGI(TAG, "Syncing device configuration from CCA at %s...", cca_ip_.c_str());
+  query_cca_config();
+}
+
+std::string TigoMonitorComponent::get_barcode_for_node(const NodeTableData &node) {
+  // Prefer Frame 27 long address (16-char barcode)
+  if (!node.long_address.empty() && node.long_address.length() == 16) {
+    return node.long_address;
+  }
+  // Fallback to Frame 09 barcode (6-char)
+  if (!node.frame09_barcode.empty()) {
+    return node.frame09_barcode;
+  }
+  return "";
+}
+
+#ifdef USE_ESP_IDF
+void TigoMonitorComponent::query_cca_config() {
+  std::string url = "http://" + cca_ip_ + "/cgi-bin/summary_config";
+  ESP_LOGI(TAG, "Querying CCA configuration from: %s", url.c_str());
+  
+  esp_http_client_config_t config = {};
+  config.url = url.c_str();
+  config.method = HTTP_METHOD_GET;
+  config.timeout_ms = 10000;
+  config.buffer_size = 4096;  // Larger buffer for chunked responses
+  
+  esp_http_client_handle_t client = esp_http_client_init(&config);
+  
+  // Set authorization header (Tigo:$olar)
+  esp_http_client_set_header(client, "Authorization", "Basic VGlnbzokb2xhcg==");
+  
+  esp_err_t err = esp_http_client_open(client, 0);
+  
+  if (err != ESP_OK) {
+    ESP_LOGE(TAG, "Failed to open HTTP connection: %s", esp_err_to_name(err));
+    esp_http_client_cleanup(client);
+    return;
+  }
+  
+  int content_length = esp_http_client_fetch_headers(client);
+  int status_code = esp_http_client_get_status_code(client);
+  
+  ESP_LOGI(TAG, "HTTP GET Status = %d, content_length = %d", status_code, content_length);
+  
+  if (status_code == 200) {
+    // Read response in chunks (handles both known and chunked content-length)
+    std::string response;
+    char buffer[1024];
+    int read_len;
+    
+    while ((read_len = esp_http_client_read(client, buffer, sizeof(buffer))) > 0) {
+      response.append(buffer, read_len);
+    }
+    
+    if (read_len < 0) {
+      ESP_LOGE(TAG, "Failed to read HTTP response");
+    } else if (response.empty()) {
+      ESP_LOGW(TAG, "CCA returned empty response");
+    } else {
+      ESP_LOGI(TAG, "Received %d bytes from CCA", response.length());
+      ESP_LOGD(TAG, "CCA Response: %s", response.c_str());
+      match_cca_to_uart(response);
+    }
+  } else {
+    ESP_LOGW(TAG, "CCA returned status %d", status_code);
+  }
+  
+  esp_http_client_close(client);
+  esp_http_client_cleanup(client);
+}
+
+void TigoMonitorComponent::match_cca_to_uart(const std::string &json_response) {
+  cJSON *root = cJSON_Parse(json_response.c_str());
+  if (root == NULL) {
+    ESP_LOGE(TAG, "Failed to parse CCA JSON response");
+    return;
+  }
+  
+  int matched_count = 0;
+  int cca_panel_count = 0;
+  
+  // CCA returns array of objects with hierarchical structure
+  // type: 2 = Panel, 3 = String, 4 = Inverter
+  if (!cJSON_IsArray(root)) {
+    ESP_LOGE(TAG, "CCA response is not an array");
+    cJSON_Delete(root);
+    return;
+  }
+  
+  // Build a map of object_id -> object for quick lookup
+  std::map<int, cJSON*> objects;
+  int array_size = cJSON_GetArraySize(root);
+  for (int i = 0; i < array_size; i++) {
+    cJSON *obj = cJSON_GetArrayItem(root, i);
+    cJSON *id = cJSON_GetObjectItem(obj, "id");
+    if (id && cJSON_IsNumber(id)) {
+      objects[id->valueint] = obj;
+    }
+  }
+  
+  // Process all objects to find panels (type 2)
+  for (int i = 0; i < array_size; i++) {
+    cJSON *obj = cJSON_GetArrayItem(root, i);
+    cJSON *type = cJSON_GetObjectItem(obj, "type");
+    
+    if (type && cJSON_IsNumber(type) && type->valueint == 2) {
+      // This is a panel
+      cca_panel_count++;
+      
+      cJSON *serial = cJSON_GetObjectItem(obj, "serial");
+      cJSON *label = cJSON_GetObjectItem(obj, "label");
+      cJSON *channel = cJSON_GetObjectItem(obj, "channel");
+      cJSON *object_id = cJSON_GetObjectItem(obj, "id");
+      cJSON *parent_id = cJSON_GetObjectItem(obj, "parent");
+      
+      if (!serial || !cJSON_IsString(serial)) continue;
+      
+      std::string cca_serial = serial->valuestring;
+      std::string cca_label_str = (label && cJSON_IsString(label)) ? label->valuestring : "";
+      std::string cca_channel_str = (channel && cJSON_IsString(channel)) ? channel->valuestring : "";
+      int cca_obj_id = (object_id && cJSON_IsNumber(object_id)) ? object_id->valueint : -1;
+      
+      // Find parent string and inverter
+      std::string string_label = "";
+      std::string inverter_label = "";
+      
+      if (parent_id && cJSON_IsNumber(parent_id)) {
+        int parent = parent_id->valueint;
+        if (objects.count(parent) > 0) {
+          cJSON *parent_obj = objects[parent];
+          cJSON *parent_type = cJSON_GetObjectItem(parent_obj, "type");
+          cJSON *parent_label = cJSON_GetObjectItem(parent_obj, "label");
+          
+          if (parent_type && cJSON_IsNumber(parent_type) && parent_type->valueint == 3) {
+            // Parent is a string
+            string_label = (parent_label && cJSON_IsString(parent_label)) ? parent_label->valuestring : "";
+            
+            // Find grandparent (inverter)
+            cJSON *grandparent_id = cJSON_GetObjectItem(parent_obj, "parent");
+            if (grandparent_id && cJSON_IsNumber(grandparent_id)) {
+              int gp = grandparent_id->valueint;
+              if (objects.count(gp) > 0) {
+                cJSON *gp_obj = objects[gp];
+                cJSON *gp_label = cJSON_GetObjectItem(gp_obj, "label");
+                inverter_label = (gp_label && cJSON_IsString(gp_label)) ? gp_label->valuestring : "";
+              }
+            }
+          }
+        }
+      }
+      
+      // Try to match with UART-discovered nodes
+      bool matched = false;
+      for (auto &node : node_table_) {
+        std::string uart_barcode = get_barcode_for_node(node);
+        if (uart_barcode.empty()) continue;
+        
+        // Match: CCA serial should contain or equal UART barcode
+        // (CCA might have longer format like "ABC123456-123")
+        if (cca_serial.find(uart_barcode) != std::string::npos ||
+            uart_barcode.find(cca_serial) != std::string::npos) {
+          
+          node.cca_label = cca_label_str;
+          node.cca_string_label = string_label;
+          node.cca_inverter_label = inverter_label;
+          node.cca_channel = cca_channel_str;
+          node.cca_object_id = cca_obj_id;
+          node.cca_validated = true;
+          
+          ESP_LOGI(TAG, "Matched UART device %s (%s) with CCA panel '%s' (String: %s, Inverter: %s)",
+                   node.addr.c_str(), uart_barcode.c_str(), cca_label_str.c_str(),
+                   string_label.c_str(), inverter_label.c_str());
+          
+          matched = true;
+          matched_count++;
+          break;
+        }
+      }
+      
+      if (!matched) {
+        ESP_LOGW(TAG, "CCA panel '%s' (serial: %s) not found in UART discovered devices",
+                 cca_label_str.c_str(), cca_serial.c_str());
+      }
+    }
+  }
+  
+  ESP_LOGI(TAG, "CCA Sync complete: %d CCA panels found, %d matched with UART devices",
+           cca_panel_count, matched_count);
+  
+  // Save updated node table with CCA metadata
+  if (matched_count > 0) {
+    save_node_table();
+  }
+  
+  cJSON_Delete(root);
+}
+#else
+// Fallback if not using ESP-IDF
+void TigoMonitorComponent::query_cca_config() {
+  ESP_LOGW(TAG, "CCA sync requires ESP-IDF framework - feature not available");
+}
+
+void TigoMonitorComponent::match_cca_to_uart(const std::string &json_response) {
+  // Not implemented for Arduino framework
+}
+#endif
 
 }  // namespace tigo_monitor
 }  // namespace esphome
