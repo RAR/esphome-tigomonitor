@@ -37,6 +37,7 @@ struct DeviceData {
   float load_factor;
   bool changed = false;
   unsigned long last_update = 0;
+  float peak_power = 0.0f;  // Historical peak power (watts)
 };
 
 struct NodeTableData {
@@ -90,6 +91,10 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   void add_power_sensor(const std::string &address, sensor::Sensor *sensor) { 
     this->power_sensors_[address] = sensor; 
     ESP_LOGCONFIG("tigo_monitor", "Registered power sensor for address: %s", address.c_str());
+  }
+  void add_peak_power_sensor(const std::string &address, sensor::Sensor *sensor) { 
+    this->peak_power_sensors_[address] = sensor; 
+    ESP_LOGCONFIG("tigo_monitor", "Registered peak_power sensor for address: %s", address.c_str());
   }
   void add_power_sum_sensor(sensor::Sensor *sensor) { 
     this->power_sum_sensor_ = sensor; 
@@ -219,6 +224,7 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   std::map<std::string, sensor::Sensor*> current_in_sensors_;
   std::map<std::string, sensor::Sensor*> temperature_sensors_;
   std::map<std::string, sensor::Sensor*> power_sensors_;
+  std::map<std::string, sensor::Sensor*> peak_power_sensors_;
   std::map<std::string, sensor::Sensor*> rssi_sensors_;
   std::map<std::string, text_sensor::TextSensor*> barcode_sensors_;
   std::map<std::string, sensor::Sensor*> duty_cycle_sensors_;

@@ -429,8 +429,11 @@ void TigoMonitorComponent::update_device_data(const DeviceData &data) {
   // Find existing device or add new one
   DeviceData *device = find_device_by_addr(data.addr);
   if (device != nullptr) {
+    // Preserve peak_power when updating device data
+    float saved_peak_power = device->peak_power;
     *device = data;
-    ESP_LOGD(TAG, "Updated existing device: %s", data.addr.c_str());
+    device->peak_power = saved_peak_power;
+    ESP_LOGD(TAG, "Updated existing device: %s (preserved peak: %.0fW)", data.addr.c_str(), saved_peak_power);
   } else if (devices_.size() < number_of_devices_) {
     devices_.push_back(data);
     ESP_LOGI(TAG, "New device discovered: addr=%s, barcode=%s", 
@@ -580,7 +583,8 @@ void TigoMonitorComponent::publish_sensor_data() {
   // Normal mode - publish actual sensor data
   ESP_LOGD(TAG, "Publishing sensor data for %zu devices", devices_.size());
   
-  for (const auto &device : devices_) {
+  for (size_t i = 0; i < devices_.size(); i++) {
+    auto &device = devices_[i];
     std::string device_id = device.barcode.empty() ? ("mod#" + device.addr) : device.barcode;
     
     // Publish voltage input sensor
@@ -617,6 +621,19 @@ void TigoMonitorComponent::publish_sensor_data() {
       float power = device.voltage_out * device.current_in;
       power_it->second->publish_state(power);
       ESP_LOGD(TAG, "Published power for %s: %.0fW", device.addr.c_str(), power);
+      
+      // Track peak power
+      if (power > device.peak_power) {
+        device.peak_power = power;
+        ESP_LOGD(TAG, "New peak power for %s: %.0fW", device.addr.c_str(), device.peak_power);
+      }
+    }
+    
+    // Publish peak power sensor (always publish current peak)
+    auto peak_power_it = peak_power_sensors_.find(device.addr);
+    if (peak_power_it != peak_power_sensors_.end()) {
+      peak_power_it->second->publish_state(device.peak_power);
+      ESP_LOGD(TAG, "Published peak power for %s: %.0fW", device.addr.c_str(), device.peak_power);
     }
     
     // Publish RSSI sensor

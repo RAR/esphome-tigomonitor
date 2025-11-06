@@ -510,10 +510,10 @@ std::string TigoWebServer::build_devices_json() {
     
     snprintf(buffer, sizeof(buffer),
       "{\"addr\":\"%s\",\"barcode\":\"%s\",\"name\":\"%s\",\"voltage_in\":%.2f,\"voltage_out\":%.2f,"
-      "\"current\":%.3f,\"power\":%.1f,\"temperature\":%.1f,\"rssi\":%d,"
+      "\"current\":%.3f,\"power\":%.1f,\"peak_power\":%.1f,\"temperature\":%.1f,\"rssi\":%d,"
       "\"duty_cycle\":%.1f,\"efficiency\":%.2f,\"data_age_ms\":%lu}",
       device.addr.c_str(), device.barcode.c_str(), device_name.c_str(), device.voltage_in, device.voltage_out,
-      device.current_in, power, device.temperature, device.rssi,
+      device.current_in, power, device.peak_power, device.temperature, device.rssi,
       duty_cycle_percent, device.efficiency, data_age_ms);
     
     json += buffer;
@@ -666,6 +666,7 @@ std::string TigoWebServer::build_yaml_json() {
     yaml_text += "    address: \"" + node.addr + "\"\n";
     yaml_text += "    name: \"" + device_name + "\"\n";
     yaml_text += "    power: {}\n";
+    yaml_text += "    peak_power: {}\n";
     yaml_text += "    voltage_in: {}\n";
     yaml_text += "    voltage_out: {}\n";
     yaml_text += "    current_in: {}\n";
@@ -885,6 +886,10 @@ std::string TigoWebServer::get_dashboard_html() {
                 <div class="metric">
                   <span class="metric-label">Power</span>
                   <span class="metric-value">${device.power.toFixed(1)} W</span>
+                </div>
+                <div class="metric">
+                  <span class="metric-label">Peak Power</span>
+                  <span class="metric-value">${device.peak_power.toFixed(1)} W</span>
                 </div>
                 <div class="metric">
                   <span class="metric-label">Current</span>
