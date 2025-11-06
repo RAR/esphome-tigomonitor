@@ -6,10 +6,60 @@
 #include <cstring>
 #include <numeric>
 
+#ifdef USE_OTA
+#include "esphome/components/ota/ota_backend.h"
+#endif
+
+#ifdef USE_ESP_IDF
+#include "esp_http_client.h"
+#include <esp_heap_caps.h>
+#include "cJSON.h"
+#endif
+
 namespace esphome {
 namespace tigo_monitor {
 
 static const char *const TAG = "tigo_monitor";
+
+#ifdef USE_ESP_IDF
+// Helper function to allocate from PSRAM if available, falls back to regular heap
+static void* psram_malloc(size_t size) {
+  void* ptr = heap_caps_malloc(size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+  if (ptr) {
+    ESP_LOGV(TAG, "Allocated %zu bytes from PSRAM", size);
+    return ptr;
+  }
+  // Fallback to regular heap
+  ptr = heap_caps_malloc(size, MALLOC_CAP_DEFAULT);
+  if (ptr) {
+    ESP_LOGV(TAG, "Allocated %zu bytes from regular heap (PSRAM unavailable)", size);
+  }
+  return ptr;
+}
+
+static void* psram_calloc(size_t count, size_t size) {
+  void* ptr = heap_caps_calloc(count, size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+  if (ptr) {
+    ESP_LOGV(TAG, "Allocated %zu bytes from PSRAM (calloc)", count * size);
+    return ptr;
+  }
+  // Fallback to regular heap
+  ptr = heap_caps_calloc(count, size, MALLOC_CAP_DEFAULT);
+  if (ptr) {
+    ESP_LOGV(TAG, "Allocated %zu bytes from regular heap (calloc, PSRAM unavailable)", count * size);
+  }
+  return ptr;
+}
+
+// Custom allocator hooks for cJSON to use PSRAM
+static void* cjson_malloc_psram(size_t size) {
+  return psram_malloc(size);
+}
+
+static void cjson_free_psram(void* ptr) {
+  heap_caps_free(ptr);
+}
+#endif
 
 // Tigo CRC table - copied from original Arduino code
 const uint8_t TigoMonitorComponent::tigo_crc_table_[256] = {
@@ -38,6 +88,36 @@ void TigoMonitorComponent::setup() {
   node_table_.reserve(number_of_devices_);
   load_node_table();
   load_energy_data();
+  
+  // Check if we have existing CCA data and rebuild string groups
+  bool has_cca_data = false;
+  for (const auto &node : node_table_) {
+    if (!node.cca_string_label.empty() && node.cca_validated) {
+      has_cca_data = true;
+      break;
+    }
+  }
+  if (has_cca_data) {
+    ESP_LOGI(TAG, "Found existing CCA data in node table - rebuilding string groups");
+    rebuild_string_groups();
+  }
+  
+  // Initialize night mode tracking
+  last_data_received_ = millis();
+  last_zero_publish_ = 0;
+  in_night_mode_ = false;
+  
+  // Register shutdown callback to save persistent data before OTA/reboot
+  App.register_component(this);
+  
+  // Query CCA on boot if IP is configured and sync_cca_on_startup is enabled
+  if (!cca_ip_.empty() && sync_cca_on_startup_) {
+    ESP_LOGI(TAG, "CCA IP configured: %s - will sync configuration on boot", cca_ip_.c_str());
+    // Delay sync to allow WiFi to connect (5 seconds after setup)
+    this->set_timeout("cca_sync", 5000, [this]() { this->sync_from_cca(); });
+  } else if (!cca_ip_.empty() && !sync_cca_on_startup_) {
+    ESP_LOGI(TAG, "CCA IP configured: %s - automatic sync disabled (use 'Sync from CCA' button)", cca_ip_.c_str());
+  }
 }
   
 
@@ -56,6 +136,11 @@ void TigoMonitorComponent::dump_config() {
   ESP_LOGCONFIG(TAG, "  Max devices: %d", number_of_devices_);
   ESP_LOGCONFIG(TAG, "  Multi-sensor platform with manual configuration");
   check_uart_settings(38400);
+}
+
+void TigoMonitorComponent::on_shutdown() {
+  ESP_LOGI(TAG, "System shutdown detected - saving persistent data to flash...");
+  save_persistent_data();
 }
 
 float TigoMonitorComponent::get_setup_priority() const {
@@ -86,6 +171,15 @@ void TigoResetNodeTableButton::press_action() {
   ESP_LOGI("tigo_button", "Resetting node table...");
   if (this->tigo_monitor_ != nullptr) {
     this->tigo_monitor_->reset_node_table();
+  } else {
+    ESP_LOGE("tigo_button", "Tigo server component not set!");
+  }
+}
+
+void TigoSyncFromCCAButton::press_action() {
+  ESP_LOGI("tigo_button", "Syncing from CCA...");
+  if (this->tigo_monitor_ != nullptr) {
+    this->tigo_monitor_->sync_from_cca();
   } else {
     ESP_LOGE("tigo_button", "Tigo server component not set!");
   }
@@ -255,15 +349,15 @@ void TigoMonitorComponent::process_power_frame(const std::string &frame) {
   data.changed = true;
   data.last_update = millis();
   
-  // Find barcode from Frame 09 data only
+  // Find barcode from Frame 27 data only
   NodeTableData* node = find_node_by_addr(data.addr);
-  if (node != nullptr && !node->frame09_barcode.empty()) {
-    data.barcode = node->frame09_barcode;
-    ESP_LOGD(TAG, "Using Frame 09 barcode for device %s: %s", data.addr.c_str(), data.barcode.c_str());
+  if (node != nullptr && !node->long_address.empty()) {
+    data.barcode = node->long_address;
+    ESP_LOGD(TAG, "Using Frame 27 long address as barcode for device %s: %s", data.addr.c_str(), data.barcode.c_str());
   } else {
-    // No Frame 09 barcode available yet
+    // No Frame 27 long address available yet
     data.barcode = "";
-    ESP_LOGD(TAG, "No Frame 09 barcode available for device %s", data.addr.c_str());
+    ESP_LOGD(TAG, "No Frame 27 long address available for device %s", data.addr.c_str());
   }
   
   update_device_data(data);
@@ -274,54 +368,17 @@ void TigoMonitorComponent::process_09_frame(const std::string &frame) {
   std::string node_id = frame.substr(18, 4);  
   std::string barcode = frame.substr(40, 6);
   
-  ESP_LOGI(TAG, "📦 Frame 09 - Device Identity: addr=%s, node_id=%s, barcode=%s", 
+  ESP_LOGD(TAG, "📦 Frame 09 - Device Identity (IGNORED): addr=%s, node_id=%s, barcode=%s", 
            addr.c_str(), node_id.c_str(), barcode.c_str());
+  ESP_LOGD(TAG, "Frame 09 barcodes are ignored - only Frame 27 (16-char) barcodes are used");
   
-  // Find or create node table entry
-  NodeTableData* node = find_node_by_addr(addr);
-  if (node != nullptr) {
-    // Update existing node with Frame 09 barcode
-    if (node->frame09_barcode != barcode) {
-      node->frame09_barcode = barcode;
-      ESP_LOGI(TAG, "Updated Frame 09 barcode for node %s: %s", addr.c_str(), barcode.c_str());
-      save_node_table();
-    }
-  } else {
-    // Create new node table entry for Frame 09 data
-    NodeTableData new_node;
-    new_node.addr = addr;
-    new_node.frame09_barcode = barcode;
-    new_node.sensor_index = -1;  // Will be assigned when device becomes active
-    new_node.is_persistent = true;
-    node_table_.push_back(new_node);
-    ESP_LOGI(TAG, "Created new node entry for Frame 09: addr=%s, barcode=%s", addr.c_str(), barcode.c_str());
-    save_node_table();
-  }
-  
-  // Also update existing device if already discovered
-  DeviceData* device = find_device_by_addr(addr);
-  if (device != nullptr) {
-    if (device->barcode != barcode) {
-      device->barcode = barcode;
-      ESP_LOGI(TAG, "Updated existing device %s with Frame 09 barcode: %s", addr.c_str(), barcode.c_str());
-    } else {
-      ESP_LOGD(TAG, "Device %s already has Frame 09 barcode: %s", addr.c_str(), barcode.c_str());
-    }
-    
-    // Always publish the barcode sensor when Frame 09 data arrives
-    auto barcode_it = barcode_sensors_.find(addr);
-    if (barcode_it != barcode_sensors_.end()) {
-      barcode_it->second->publish_state(barcode);
-      ESP_LOGD(TAG, "Published Frame 09 barcode for %s: %s", addr.c_str(), barcode.c_str());
-    }
-  } else {
-    ESP_LOGD(TAG, "Frame 09 data for %s received before power data - barcode stored in node table", addr.c_str());
-  }
+  // Frame 09 data is now completely ignored to prevent duplicate entries
+  // Only Frame 27 long addresses (16-char) are used for device identification
 }
 
 void TigoMonitorComponent::process_27_frame(const std::string &frame) {
   int num_entries = std::stoi(frame.substr(4, 4), nullptr, 16);
-  ESP_LOGD(TAG, "Frame 27 received, entries: %d", num_entries);
+  ESP_LOGI(TAG, "📦 Frame 27 received, entries: %d", num_entries);
   
   size_t pos = 8;
   bool table_changed = false;
@@ -331,26 +388,51 @@ void TigoMonitorComponent::process_27_frame(const std::string &frame) {
     std::string addr = frame.substr(pos + 16, 4);
     pos += 20;
     
-    // Check if entry exists
-    bool found = false;
-    for (auto &node : node_table_) {
-      if (node.long_address == long_addr) {
-        if (node.addr != addr) {
-          node.addr = addr;
-          table_changed = true;
-        }
-        found = true;
-        break;
+    ESP_LOGI(TAG, "📦 Frame 27 - Device Identity: addr=%s, long_addr=%s", 
+             addr.c_str(), long_addr.c_str());
+    
+    // Find or create node table entry
+    NodeTableData* node = find_node_by_addr(addr);
+    if (node != nullptr) {
+      // Update existing node with Frame 27 long address
+      if (node->long_address != long_addr) {
+        node->long_address = long_addr;
+        ESP_LOGI(TAG, "Updated Frame 27 long address for node %s: %s", addr.c_str(), long_addr.c_str());
+        table_changed = true;
+      }
+    } else {
+      // Create new node table entry for Frame 27 data
+      if (node_table_.size() < number_of_devices_) {
+        NodeTableData new_node;
+        new_node.addr = addr;
+        new_node.long_address = long_addr;
+        new_node.checksum = std::string(1, compute_tigo_crc4(addr));
+        new_node.sensor_index = -1;  // Will be assigned when device becomes active
+        new_node.is_persistent = true;
+        node_table_.push_back(new_node);
+        ESP_LOGI(TAG, "Created new node entry for Frame 27: addr=%s, long_addr=%s", addr.c_str(), long_addr.c_str());
+        table_changed = true;
       }
     }
     
-    if (!found && node_table_.size() < number_of_devices_) {
-      NodeTableData new_node;
-      new_node.long_address = long_addr;
-      new_node.addr = addr;
-      new_node.checksum = std::string(1, compute_tigo_crc4(addr));
-      node_table_.push_back(new_node);
-      table_changed = true;
+    // Also update existing device if already discovered
+    DeviceData* device = find_device_by_addr(addr);
+    if (device != nullptr) {
+      if (device->barcode != long_addr) {
+        device->barcode = long_addr;
+        ESP_LOGI(TAG, "Updated existing device %s with Frame 27 long address: %s", addr.c_str(), long_addr.c_str());
+      } else {
+        ESP_LOGD(TAG, "Device %s already has Frame 27 long address: %s", addr.c_str(), long_addr.c_str());
+      }
+      
+      // Always publish the barcode sensor when Frame 27 data arrives
+      auto barcode_it = barcode_sensors_.find(addr);
+      if (barcode_it != barcode_sensors_.end()) {
+        barcode_it->second->publish_state(long_addr);
+        ESP_LOGD(TAG, "Published Frame 27 long address for %s: %s", addr.c_str(), long_addr.c_str());
+      }
+    } else {
+      ESP_LOGD(TAG, "Frame 27 data for %s received before power data - long address stored in node table", addr.c_str());
     }
   }
   
@@ -362,15 +444,36 @@ void TigoMonitorComponent::process_27_frame(const std::string &frame) {
 void TigoMonitorComponent::update_device_data(const DeviceData &data) {
   ESP_LOGD(TAG, "Updating device data for addr: %s", data.addr.c_str());
   
+  // Track when data is received
+  last_data_received_ = millis();
+  if (in_night_mode_) {
+    ESP_LOGI(TAG, "Exiting night mode - data received from %s", data.addr.c_str());
+    in_night_mode_ = false;
+  }
+  
   // Find existing device or add new one
   DeviceData *device = find_device_by_addr(data.addr);
   if (device != nullptr) {
+    // Preserve peak_power when updating device data
+    float saved_peak_power = device->peak_power;
     *device = data;
-    ESP_LOGD(TAG, "Updated existing device: %s", data.addr.c_str());
+    device->peak_power = saved_peak_power;
+    ESP_LOGD(TAG, "Updated existing device: %s (preserved peak: %.0fW)", data.addr.c_str(), saved_peak_power);
   } else if (devices_.size() < number_of_devices_) {
     devices_.push_back(data);
     ESP_LOGI(TAG, "New device discovered: addr=%s, barcode=%s", 
              data.addr.c_str(), data.barcode.c_str());
+    
+    // Load saved peak power for this device
+    DeviceData* new_device = &devices_.back();
+    std::string pref_key = "peak_" + data.addr;
+    uint32_t hash = esphome::fnv1_hash(pref_key);
+    auto load = global_preferences->make_preference<float>(hash);
+    float saved_peak = 0.0f;
+    if (load.load(&saved_peak) && saved_peak > 0.0f) {
+      new_device->peak_power = saved_peak;
+      ESP_LOGI(TAG, "Restored peak power for %s: %.0fW", data.addr.c_str(), saved_peak);
+    }
     
     // Track device discovery for node table management
     if (created_devices_.find(data.addr) == created_devices_.end()) {
@@ -391,10 +494,16 @@ void TigoMonitorComponent::update_device_data(const DeviceData &data) {
       }
       
       // After device creation, ensure barcode is up to date from node table
+      // Prioritize Frame 27 long address as primary barcode source
       DeviceData* new_device = &devices_.back();
-      if (node != nullptr && !node->frame09_barcode.empty() && new_device->barcode != node->frame09_barcode) {
+      if (node != nullptr && !node->long_address.empty() && new_device->barcode != node->long_address) {
+        new_device->barcode = node->long_address;
+        ESP_LOGI(TAG, "Applied Frame 27 long address as barcode to new device %s: %s", data.addr.c_str(), node->long_address.c_str());
+      }
+      // Fallback to Frame 09 barcode if Frame 27 not available
+      else if (node != nullptr && !node->frame09_barcode.empty() && new_device->barcode != node->frame09_barcode) {
         new_device->barcode = node->frame09_barcode;
-        ESP_LOGI(TAG, "Applied Frame 09 barcode to new device %s: %s", data.addr.c_str(), node->frame09_barcode.c_str());
+        ESP_LOGI(TAG, "Applied Frame 09 barcode (fallback) to new device %s: %s", data.addr.c_str(), node->frame09_barcode.c_str());
       }
       
       ESP_LOGI(TAG, "Device data: %s - Vin:%.2fV, Vout:%.2fV, Curr:%.3fA, Temp:%.1f°C, Barcode:%s", 
@@ -418,10 +527,234 @@ DeviceData* TigoMonitorComponent::find_device_by_addr(const std::string &addr) {
   return nullptr;
 }
 
+void TigoMonitorComponent::rebuild_string_groups() {
+  ESP_LOGI(TAG, "Rebuilding string groups from CCA data...");
+  ESP_LOGI(TAG, "Node table has %d entries", node_table_.size());
+  
+  // Count how many nodes have CCA data
+  int cca_validated_count = 0;
+  for (const auto &node : node_table_) {
+    if (node.cca_validated) {
+      ESP_LOGD(TAG, "Node %s: cca_validated=%d, string_label='%s'", 
+               node.addr.c_str(), node.cca_validated, node.cca_string_label.c_str());
+      cca_validated_count++;
+    }
+  }
+  ESP_LOGI(TAG, "%d nodes have CCA validation", cca_validated_count);
+  
+  // Clear existing string data but preserve peak power
+  std::map<std::string, float> saved_peaks;
+  for (const auto &pair : strings_) {
+    saved_peaks[pair.first] = pair.second.peak_power;
+  }
+  strings_.clear();
+  
+  // Group devices by their CCA string label
+  for (const auto &node : node_table_) {
+    if (!node.cca_string_label.empty() && node.cca_validated) {
+      const std::string &string_label = node.cca_string_label;
+      
+      // Create string entry if it doesn't exist
+      if (strings_.find(string_label) == strings_.end()) {
+        StringData string_data;
+        string_data.string_label = string_label;
+        string_data.inverter_label = node.cca_inverter_label;
+        strings_[string_label] = string_data;
+        
+        // Restore peak power if available
+        if (saved_peaks.count(string_label) > 0) {
+          strings_[string_label].peak_power = saved_peaks[string_label];
+        }
+        
+        ESP_LOGI(TAG, "Created string group: %s (Inverter: %s)", 
+                 string_label.c_str(), node.cca_inverter_label.c_str());
+      }
+      
+      // Add device to string group
+      strings_[string_label].device_addrs.push_back(node.addr);
+      strings_[string_label].total_device_count++;
+    }
+  }
+  
+  ESP_LOGI(TAG, "String grouping complete: %d strings created", strings_.size());
+  for (const auto &pair : strings_) {
+    ESP_LOGI(TAG, "  %s: %d devices", pair.first.c_str(), pair.second.total_device_count);
+  }
+}
+
+void TigoMonitorComponent::update_string_data() {
+  if (strings_.empty()) {
+    return;  // No string groups configured
+  }
+  
+  unsigned long current_time = millis();
+  
+  for (auto &pair : strings_) {
+    StringData &string_data = pair.second;
+    
+    // Reset aggregates
+    string_data.total_power = 0.0f;
+    string_data.total_current = 0.0f;
+    float sum_voltage_in = 0.0f;
+    float sum_voltage_out = 0.0f;
+    float sum_temp = 0.0f;
+    float sum_efficiency = 0.0f;
+    string_data.min_efficiency = 100.0f;
+    string_data.max_efficiency = 0.0f;
+    string_data.active_device_count = 0;
+    
+    // Aggregate data from all devices in this string
+    for (const auto &addr : string_data.device_addrs) {
+      DeviceData *device = find_device_by_addr(addr);
+      if (device && device->last_update > 0) {
+        float device_power = device->voltage_out * device->current_in;
+        string_data.total_power += device_power;
+        string_data.total_current += device->current_in;
+        sum_voltage_in += device->voltage_in;
+        sum_voltage_out += device->voltage_out;
+        sum_temp += device->temperature;
+        sum_efficiency += device->efficiency;
+        
+        if (device->efficiency < string_data.min_efficiency) {
+          string_data.min_efficiency = device->efficiency;
+        }
+        if (device->efficiency > string_data.max_efficiency) {
+          string_data.max_efficiency = device->efficiency;
+        }
+        
+        string_data.active_device_count++;
+      }
+    }
+    
+    // Calculate averages
+    if (string_data.active_device_count > 0) {
+      string_data.avg_voltage_in = sum_voltage_in / string_data.active_device_count;
+      string_data.avg_voltage_out = sum_voltage_out / string_data.active_device_count;
+      string_data.avg_temperature = sum_temp / string_data.active_device_count;
+      string_data.avg_efficiency = sum_efficiency / string_data.active_device_count;
+      string_data.last_update = current_time;
+      
+      // Update peak power
+      if (string_data.total_power > string_data.peak_power) {
+        string_data.peak_power = string_data.total_power;
+        ESP_LOGD(TAG, "New peak power for %s: %.0fW", 
+                 string_data.string_label.c_str(), string_data.peak_power);
+      }
+      
+      ESP_LOGD(TAG, "String %s: %.0fW from %d/%d devices (avg eff: %.1f%%)", 
+               string_data.string_label.c_str(), string_data.total_power,
+               string_data.active_device_count, string_data.total_device_count,
+               string_data.avg_efficiency);
+    } else {
+      // No active devices - reset min/max efficiency
+      string_data.min_efficiency = 0.0f;
+      string_data.max_efficiency = 0.0f;
+    }
+  }
+}
+
+StringData* TigoMonitorComponent::find_string_by_label(const std::string &label) {
+  auto it = strings_.find(label);
+  if (it != strings_.end()) {
+    return &it->second;
+  }
+  return nullptr;
+}
+
 void TigoMonitorComponent::publish_sensor_data() {
+  unsigned long current_time = millis();
+  
+  // Check if we should enter night mode (no data for 1 hour)
+  if (last_data_received_ > 0 && !in_night_mode_ && (current_time - last_data_received_ > NO_DATA_TIMEOUT)) {
+    ESP_LOGI(TAG, "Entering night mode - no data received for 1 hour");
+    in_night_mode_ = true;
+    last_zero_publish_ = 0;  // Reset to force immediate zero publish
+  }
+  
+  // In night mode, publish zeros every 10 minutes
+  if (in_night_mode_) {
+    if (last_zero_publish_ == 0 || (current_time - last_zero_publish_ >= ZERO_PUBLISH_INTERVAL)) {
+      ESP_LOGI(TAG, "Night mode: Publishing zero values for all sensors");
+      last_zero_publish_ = current_time;
+      
+      // Publish zeros for all registered devices
+      for (const auto &device : devices_) {
+        // Publish zero voltage input
+        auto voltage_in_it = voltage_in_sensors_.find(device.addr);
+        if (voltage_in_it != voltage_in_sensors_.end()) {
+          voltage_in_it->second->publish_state(0.0f);
+        }
+        
+        // Publish zero voltage output
+        auto voltage_out_it = voltage_out_sensors_.find(device.addr);
+        if (voltage_out_it != voltage_out_sensors_.end()) {
+          voltage_out_it->second->publish_state(0.0f);
+        }
+        
+        // Publish zero current
+        auto current_in_it = current_in_sensors_.find(device.addr);
+        if (current_in_it != current_in_sensors_.end()) {
+          current_in_it->second->publish_state(0.0f);
+        }
+        
+        // Publish zero temperature
+        auto temperature_it = temperature_sensors_.find(device.addr);
+        if (temperature_it != temperature_sensors_.end()) {
+          temperature_it->second->publish_state(0.0f);
+        }
+        
+        // Publish zero power
+        auto power_it = power_sensors_.find(device.addr);
+        if (power_it != power_sensors_.end()) {
+          power_it->second->publish_state(0.0f);
+        }
+        
+        // Publish zero RSSI
+        auto rssi_it = rssi_sensors_.find(device.addr);
+        if (rssi_it != rssi_sensors_.end()) {
+          rssi_it->second->publish_state(0.0f);
+        }
+        
+        // Publish zero duty cycle
+        auto duty_cycle_it = duty_cycle_sensors_.find(device.addr);
+        if (duty_cycle_it != duty_cycle_sensors_.end()) {
+          duty_cycle_it->second->publish_state(0.0f);
+        }
+        
+        // Publish zero efficiency
+        auto efficiency_it = efficiency_sensors_.find(device.addr);
+        if (efficiency_it != efficiency_sensors_.end()) {
+          efficiency_it->second->publish_state(0.0f);
+        }
+        
+        // Publish zero power factor
+        auto power_factor_it = power_factor_sensors_.find(device.addr);
+        if (power_factor_it != power_factor_sensors_.end()) {
+          power_factor_it->second->publish_state(0.0f);
+        }
+        
+        // Publish zero load factor
+        auto load_factor_it = load_factor_sensors_.find(device.addr);
+        if (load_factor_it != load_factor_sensors_.end()) {
+          load_factor_it->second->publish_state(0.0f);
+        }
+      }
+      
+      // Publish zero power sum
+      if (power_sum_sensor_ != nullptr) {
+        power_sum_sensor_->publish_state(0.0f);
+      }
+      
+      ESP_LOGI(TAG, "Night mode: Zero values published for %zu devices", devices_.size());
+    }
+    return;  // Don't publish actual data in night mode
+  }
+  
+  // Normal mode - publish actual sensor data
   ESP_LOGD(TAG, "Publishing sensor data for %zu devices", devices_.size());
   
-  for (const auto &device : devices_) {
+  for (size_t i = 0; i < devices_.size(); i++) {
+    auto &device = devices_[i];
     std::string device_id = device.barcode.empty() ? ("mod#" + device.addr) : device.barcode;
     
     // Publish voltage input sensor
@@ -458,6 +791,19 @@ void TigoMonitorComponent::publish_sensor_data() {
       float power = device.voltage_out * device.current_in;
       power_it->second->publish_state(power);
       ESP_LOGD(TAG, "Published power for %s: %.0fW", device.addr.c_str(), power);
+      
+      // Track peak power
+      if (power > device.peak_power) {
+        device.peak_power = power;
+        ESP_LOGD(TAG, "New peak power for %s: %.0fW", device.addr.c_str(), device.peak_power);
+      }
+    }
+    
+    // Publish peak power sensor (always publish current peak)
+    auto peak_power_it = peak_power_sensors_.find(device.addr);
+    if (peak_power_it != peak_power_sensors_.end()) {
+      peak_power_it->second->publish_state(device.peak_power);
+      ESP_LOGD(TAG, "Published peak power for %s: %.0fW", device.addr.c_str(), device.peak_power);
     }
     
     // Publish RSSI sensor
@@ -589,11 +935,15 @@ void TigoMonitorComponent::publish_sensor_data() {
       energy_sum_sensor_->publish_state(total_energy_kwh_);
       ESP_LOGD(TAG, "Published energy sum: %.3f kWh", total_energy_kwh_);
       
-      // Save energy data periodically (every 10 updates to reduce flash wear)
-      static int save_counter = 0;
-      if (++save_counter >= 10) {
+      // Save energy data at the top of each hour to reduce flash wear
+      static unsigned long last_save_time = 0;
+      unsigned long hours_elapsed = current_time / 3600000;  // Hours since boot
+      unsigned long last_save_hour = last_save_time / 3600000;
+      
+      if (hours_elapsed > last_save_hour) {
         save_energy_data();
-        save_counter = 0;
+        last_save_time = current_time;
+        ESP_LOGI(TAG, "Energy data saved at hour boundary");
       }
     }
   } else if (energy_sum_sensor_ != nullptr) {
@@ -624,13 +974,20 @@ void TigoMonitorComponent::publish_sensor_data() {
     energy_sum_sensor_->publish_state(total_energy_kwh_);
     ESP_LOGD(TAG, "Published energy sum: %.3f kWh", total_energy_kwh_);
     
-    // Save energy data periodically
-    static int save_counter_standalone = 0;
-    if (++save_counter_standalone >= 10) {
+    // Save energy data at the top of each hour to reduce flash wear
+    static unsigned long last_save_time_standalone = 0;
+    unsigned long hours_elapsed = current_time / 3600000;  // Hours since boot
+    unsigned long last_save_hour = last_save_time_standalone / 3600000;
+    
+    if (hours_elapsed > last_save_hour) {
       save_energy_data();
-      save_counter_standalone = 0;
+      last_save_time_standalone = current_time;
+      ESP_LOGI(TAG, "Energy data saved at hour boundary");
     }
   }
+  
+  // Update string-level aggregation data
+  update_string_data();
 }
 
 std::string TigoMonitorComponent::remove_escape_sequences(const std::string &frame) {
@@ -771,12 +1128,12 @@ void TigoMonitorComponent::generate_sensor_yaml() {
     for (const auto& node : assigned_nodes) {
       std::string index_str = std::to_string(node.sensor_index + 1);
       
-      // Build barcode comment from available data
+      // Build barcode comment from available data, prioritizing Frame 27
       std::string barcode_comment = "";
-      if (!node.frame09_barcode.empty()) {
-        barcode_comment = " - Frame09: " + node.frame09_barcode;
-      } else if (!node.long_address.empty()) {
+      if (!node.long_address.empty()) {
         barcode_comment = " - Frame27: " + node.long_address;
+      } else if (!node.frame09_barcode.empty()) {
+        barcode_comment = " - Frame09: " + node.frame09_barcode;
       }
       
       ESP_LOGI(TAG, "  # Tigo Device %s (discovered%s)", index_str.c_str(), barcode_comment.c_str());
@@ -856,14 +1213,14 @@ void TigoMonitorComponent::print_device_mappings() {
     for (const auto& node : sorted_nodes) {
       std::string info = "Device Address " + node.addr;
       
-      // Add Frame 09 barcode if available
-      if (!node.frame09_barcode.empty()) {
-        info += " (Frame09: " + node.frame09_barcode + ")";
+      // Add Frame 27 long address as primary barcode (new default)
+      if (!node.long_address.empty()) {
+        info += " (Frame27: " + node.long_address + ")";
       }
       
-      // Add Frame 27 long address if available and different
-      if (!node.long_address.empty() && node.long_address != node.frame09_barcode) {
-        info += " (Frame27: " + node.long_address + ")";
+      // Add Frame 09 barcode if available and different from Frame 27
+      if (!node.frame09_barcode.empty() && node.long_address != node.frame09_barcode) {
+        info += " (Frame09: " + node.frame09_barcode + ")";
       }
       
       ESP_LOGI(TAG, "  Tigo %d: %s", node.sensor_index + 1, info.c_str());
@@ -966,10 +1323,31 @@ void TigoMonitorComponent::load_node_table() {
         node.sensor_index = std::stoi(parts[4]);
         node.is_persistent = true;
         
+        // Load CCA fields if available (new format with 10 fields)
+        if (parts.size() >= 10) {
+          node.cca_label = parts[5];
+          node.cca_string_label = parts[6];
+          node.cca_inverter_label = parts[7];
+          node.cca_channel = parts[8];
+          node.cca_validated = (parts[9] == "1");
+          
+          ESP_LOGI(TAG, "Restored node with CCA: %s -> Tigo %d (barcode: %s, string: %s, validated: %s)", 
+                   node.addr.c_str(), node.sensor_index + 1, node.frame09_barcode.c_str(),
+                   node.cca_string_label.c_str(), node.cca_validated ? "yes" : "no");
+        } else {
+          // Old format without CCA fields - initialize to defaults
+          node.cca_label = "";
+          node.cca_string_label = "";
+          node.cca_inverter_label = "";
+          node.cca_channel = "";
+          node.cca_validated = false;
+          
+          ESP_LOGI(TAG, "Restored node (legacy format): %s -> Tigo %d (barcode: %s)", 
+                   node.addr.c_str(), node.sensor_index + 1, node.frame09_barcode.c_str());
+        }
+        
         node_table_.push_back(node);
         loaded_count++;
-        ESP_LOGI(TAG, "Restored node: %s -> Tigo %d (barcode: %s)", 
-                 node.addr.c_str(), node.sensor_index + 1, node.frame09_barcode.c_str());
       }
     }
   }
@@ -999,12 +1377,17 @@ void TigoMonitorComponent::save_node_table() {
     std::string pref_key = "node_" + std::to_string(i);
     uint32_t hash = esphome::fnv1_hash(pref_key);
     
-    // Format: "addr|long_addr|checksum|barcode|sensor_index"
+    // Format: "addr|long_addr|checksum|barcode|sensor_index|cca_label|cca_string|cca_inverter|cca_channel|cca_validated"
     std::string node_str = node.addr + "|" + 
                           node.long_address + "|" + 
                           node.checksum + "|" + 
                           node.frame09_barcode + "|" + 
-                          std::to_string(node.sensor_index);
+                          std::to_string(node.sensor_index) + "|" +
+                          node.cca_label + "|" +
+                          node.cca_string_label + "|" +
+                          node.cca_inverter_label + "|" +
+                          node.cca_channel + "|" +
+                          (node.cca_validated ? "1" : "0");
     
     // Copy to char array for preferences
     char node_data[256] = {0};
@@ -1017,6 +1400,73 @@ void TigoMonitorComponent::save_node_table() {
   }
   
   ESP_LOGD(TAG, "Saved %d node table entries to flash", saved_count);
+}
+
+void TigoMonitorComponent::save_peak_power_data() {
+  ESP_LOGD(TAG, "Saving peak power data to flash...");
+  
+  int saved_count = 0;
+  for (size_t i = 0; i < devices_.size(); i++) {
+    const auto &device = devices_[i];
+    if (device.peak_power > 0.0f) {
+      std::string pref_key = "peak_" + device.addr;
+      uint32_t hash = esphome::fnv1_hash(pref_key);
+      auto save = global_preferences->make_preference<float>(hash);
+      save.save(&device.peak_power);
+      saved_count++;
+    }
+  }
+  
+  ESP_LOGD(TAG, "Saved %d peak power entries to flash", saved_count);
+}
+
+void TigoMonitorComponent::load_peak_power_data() {
+  ESP_LOGD(TAG, "Loading peak power data from flash...");
+  
+  int loaded_count = 0;
+  for (size_t i = 0; i < devices_.size(); i++) {
+    auto &device = devices_[i];
+    std::string pref_key = "peak_" + device.addr;
+    uint32_t hash = esphome::fnv1_hash(pref_key);
+    auto load = global_preferences->make_preference<float>(hash);
+    
+    float saved_peak = 0.0f;
+    if (load.load(&saved_peak) && saved_peak > 0.0f) {
+      device.peak_power = saved_peak;
+      loaded_count++;
+      ESP_LOGD(TAG, "Loaded peak power for %s: %.0fW", device.addr.c_str(), saved_peak);
+    }
+  }
+  
+  ESP_LOGI(TAG, "Loaded %d peak power entries from flash", loaded_count);
+}
+
+void TigoMonitorComponent::reset_peak_power() {
+  ESP_LOGI(TAG, "Resetting all peak power values...");
+  
+  int reset_count = 0;
+  for (size_t i = 0; i < devices_.size(); i++) {
+    auto &device = devices_[i];
+    device.peak_power = 0.0f;
+    
+    // Clear from flash storage
+    std::string pref_key = "peak_" + device.addr;
+    uint32_t hash = esphome::fnv1_hash(pref_key);
+    auto save = global_preferences->make_preference<float>(hash);
+    float zero = 0.0f;
+    save.save(&zero);
+    reset_count++;
+  }
+  
+  ESP_LOGI(TAG, "Reset %d peak power values", reset_count);
+}
+
+void TigoMonitorComponent::save_persistent_data() {
+  ESP_LOGI(TAG, "Saving all persistent data to flash (node table, peak power, energy)...");
+  save_node_table();
+  save_peak_power_data();
+  save_energy_data();
+  ESP_LOGI(TAG, "All persistent data saved successfully");
 }
 
 void TigoMonitorComponent::reset_node_table() {
@@ -1048,6 +1498,46 @@ void TigoMonitorComponent::reset_node_table() {
   ESP_LOGI(TAG, "rediscovered and reassigned new sensor indices when they");
   ESP_LOGI(TAG, "send power data. Frame 09 and Frame 27 data will be");
   ESP_LOGI(TAG, "recollected automatically during normal operation.");
+}
+
+bool TigoMonitorComponent::remove_node(uint16_t addr) {
+  ESP_LOGI(TAG, "Removing node with address: 0x%04X", addr);
+  
+  // Convert addr to hex string for comparison (lowercase)
+  char addr_hex[5];
+  snprintf(addr_hex, sizeof(addr_hex), "%04x", addr);
+  std::string addr_str(addr_hex);
+  
+  // Find the node in the table (case-insensitive comparison)
+  auto it = std::find_if(node_table_.begin(), node_table_.end(),
+    [&addr_str](const NodeTableData &node) {
+      // Convert both to lowercase for comparison
+      std::string node_addr_lower = node.addr;
+      std::transform(node_addr_lower.begin(), node_addr_lower.end(), node_addr_lower.begin(), ::tolower);
+      return node_addr_lower == addr_str;
+    });
+  
+  if (it == node_table_.end()) {
+    ESP_LOGW(TAG, "Node with address 0x%04X (%s) not found in table", addr, addr_str.c_str());
+    return false;
+  }
+  
+  int sensor_index = it->sensor_index;
+  
+  // Remove from created_devices_ cache if it has a sensor index
+  if (sensor_index >= 0) {
+    std::string device_key = "tigo_" + std::to_string(sensor_index);
+    created_devices_.erase(device_key);
+  }
+  
+  // Remove from node table
+  node_table_.erase(it);
+  
+  // Save updated node table to persistent storage
+  save_node_table();
+  
+  ESP_LOGI(TAG, "Successfully removed node 0x%04X (sensor index: %d)", addr, sensor_index);
+  return true;
 }
 
 int TigoMonitorComponent::get_next_available_sensor_index() {
@@ -1135,6 +1625,345 @@ void TigoMonitorComponent::save_energy_data() {
     ESP_LOGW(TAG, "Failed to save energy data");
   }
 }
+
+// ========== CCA HTTP Query Functions ==========
+
+void TigoMonitorComponent::sync_from_cca() {
+  if (cca_ip_.empty()) {
+    ESP_LOGW(TAG, "Cannot sync from CCA - no IP address configured");
+    return;
+  }
+  
+  ESP_LOGI(TAG, "Syncing device configuration from CCA at %s...", cca_ip_.c_str());
+  query_cca_config();
+}
+
+void TigoMonitorComponent::refresh_cca_data() {
+  if (cca_ip_.empty()) {
+    ESP_LOGW(TAG, "Cannot refresh CCA data - no IP address configured");
+    return;
+  }
+  
+  ESP_LOGI(TAG, "Refreshing CCA data from %s...", cca_ip_.c_str());
+  
+  // First query device info
+  query_cca_device_info();
+  
+  // Wait longer to ensure first HTTP connection is fully cleaned up and memory freed
+  delay(1000);
+  
+  // Then query config and match devices
+  query_cca_config();
+}
+
+std::string TigoMonitorComponent::get_barcode_for_node(const NodeTableData &node) {
+  // Only use Frame 27 long address (16-char barcode)
+  // Frame 09 barcodes are ignored to prevent duplicate entries
+  if (!node.long_address.empty() && node.long_address.length() == 16) {
+    return node.long_address;
+  }
+  return "";
+}
+
+#ifdef USE_ESP_IDF
+void TigoMonitorComponent::query_cca_config() {
+  std::string url = "http://" + cca_ip_ + "/cgi-bin/summary_config";
+  ESP_LOGI(TAG, "Querying CCA configuration from: %s", url.c_str());
+  
+  esp_http_client_config_t config = {};
+  config.url = url.c_str();
+  config.method = HTTP_METHOD_GET;
+  config.timeout_ms = 10000;
+  config.buffer_size = 4096;  // Larger buffer for chunked responses
+  
+  esp_http_client_handle_t client = esp_http_client_init(&config);
+  
+  // Set authorization header (Tigo:$olar)
+  esp_http_client_set_header(client, "Authorization", "Basic VGlnbzokb2xhcg==");
+  
+  esp_err_t err = esp_http_client_open(client, 0);
+  
+  if (err != ESP_OK) {
+    ESP_LOGE(TAG, "Failed to open HTTP connection: %s", esp_err_to_name(err));
+    esp_http_client_cleanup(client);
+    return;
+  }
+  
+  int content_length = esp_http_client_fetch_headers(client);
+  int status_code = esp_http_client_get_status_code(client);
+  
+  ESP_LOGI(TAG, "HTTP GET Status = %d, content_length = %d", status_code, content_length);
+  
+  if (status_code == 200) {
+    // Allocate read buffer from PSRAM if available (larger buffer = fewer reads)
+    const size_t buffer_size = 4096;
+    char* buffer = static_cast<char*>(psram_malloc(buffer_size));
+    if (!buffer) {
+      ESP_LOGE(TAG, "Failed to allocate HTTP read buffer");
+      esp_http_client_close(client);
+      esp_http_client_cleanup(client);
+      return;
+    }
+    
+    // Read response in chunks (handles both known and chunked content-length)
+    std::string response;
+    response.reserve(content_length > 0 ? content_length : 8192);  // Pre-allocate
+    int read_len;
+    
+    while ((read_len = esp_http_client_read(client, buffer, buffer_size)) > 0) {
+      response.append(buffer, read_len);
+    }
+    
+    heap_caps_free(buffer);  // Free PSRAM buffer
+    
+    if (read_len < 0) {
+      ESP_LOGE(TAG, "Failed to read HTTP response");
+    } else if (response.empty()) {
+      ESP_LOGW(TAG, "CCA returned empty response");
+    } else {
+      ESP_LOGI(TAG, "Received %d bytes from CCA", response.length());
+      ESP_LOGD(TAG, "CCA Response: %s", response.c_str());
+      match_cca_to_uart(response);
+    }
+  } else {
+    ESP_LOGW(TAG, "CCA returned status %d", status_code);
+  }
+  
+  esp_http_client_close(client);
+  esp_http_client_cleanup(client);
+}
+
+void TigoMonitorComponent::match_cca_to_uart(const std::string &json_response) {
+  // Set custom allocators for cJSON to use PSRAM
+  cJSON_Hooks hooks;
+  hooks.malloc_fn = cjson_malloc_psram;
+  hooks.free_fn = cjson_free_psram;
+  cJSON_InitHooks(&hooks);
+  
+  cJSON *root = cJSON_Parse(json_response.c_str());
+  if (root == NULL) {
+    ESP_LOGE(TAG, "Failed to parse CCA JSON response");
+    // Reset to default allocators
+    cJSON_InitHooks(NULL);
+    return;
+  }
+  
+  int matched_count = 0;
+  int cca_panel_count = 0;
+  
+  // CCA returns array of objects with hierarchical structure
+  // type: 2 = Panel, 3 = String, 4 = Inverter
+  if (!cJSON_IsArray(root)) {
+    ESP_LOGE(TAG, "CCA response is not an array");
+    cJSON_Delete(root);
+    return;
+  }
+  
+  // Build a map of object_id -> object for quick lookup
+  // Note: IDs are STRINGS in the CCA API, not numbers
+  std::map<std::string, cJSON*> objects;
+  int array_size = cJSON_GetArraySize(root);
+  for (int i = 0; i < array_size; i++) {
+    cJSON *obj = cJSON_GetArrayItem(root, i);
+    cJSON *id = cJSON_GetObjectItem(obj, "id");
+    if (id && cJSON_IsString(id)) {
+      objects[id->valuestring] = obj;
+    }
+  }
+  
+  // Process all objects to find panels (type 2)
+  for (int i = 0; i < array_size; i++) {
+    cJSON *obj = cJSON_GetArrayItem(root, i);
+    cJSON *type = cJSON_GetObjectItem(obj, "type");
+    
+    if (type && cJSON_IsNumber(type) && type->valueint == 2) {
+      // This is a panel
+      cca_panel_count++;
+      
+      cJSON *serial = cJSON_GetObjectItem(obj, "serial");
+      cJSON *label = cJSON_GetObjectItem(obj, "label");
+      cJSON *channel = cJSON_GetObjectItem(obj, "channel");
+      cJSON *object_id = cJSON_GetObjectItem(obj, "id");
+      cJSON *parent_id = cJSON_GetObjectItem(obj, "parent");
+      
+      if (!serial || !cJSON_IsString(serial)) continue;
+      
+      std::string cca_serial = serial->valuestring;
+      std::string cca_label_str = (label && cJSON_IsString(label)) ? label->valuestring : "";
+      std::string cca_channel_str = (channel && cJSON_IsString(channel)) ? channel->valuestring : "";
+      std::string cca_obj_id = (object_id && cJSON_IsString(object_id)) ? object_id->valuestring : "";
+      
+      // Find parent string and inverter
+      std::string string_label = "";
+      std::string inverter_label = "";
+      
+      if (parent_id && cJSON_IsString(parent_id)) {
+        std::string parent = parent_id->valuestring;
+        if (objects.count(parent) > 0) {
+          cJSON *parent_obj = objects[parent];
+          cJSON *parent_type = cJSON_GetObjectItem(parent_obj, "type");
+          cJSON *parent_label = cJSON_GetObjectItem(parent_obj, "label");
+          
+          if (parent_type && cJSON_IsNumber(parent_type) && parent_type->valueint == 3) {
+            // Parent is a string
+            string_label = (parent_label && cJSON_IsString(parent_label)) ? parent_label->valuestring : "";
+            
+            // Find grandparent (inverter)
+            cJSON *grandparent_id = cJSON_GetObjectItem(parent_obj, "parent");
+            if (grandparent_id && cJSON_IsString(grandparent_id)) {
+              std::string gp = grandparent_id->valuestring;
+              if (objects.count(gp) > 0) {
+                cJSON *gp_obj = objects[gp];
+                cJSON *gp_label = cJSON_GetObjectItem(gp_obj, "label");
+                inverter_label = (gp_label && cJSON_IsString(gp_label)) ? gp_label->valuestring : "";
+              }
+            }
+          }
+        }
+      }
+      
+      // Try to match with UART-discovered nodes
+      bool matched = false;
+      for (auto &node : node_table_) {
+        std::string uart_barcode = get_barcode_for_node(node);
+        if (uart_barcode.empty()) continue;
+        
+        // Match: CCA serial should contain or equal UART barcode
+        // (CCA might have longer format like "ABC123456-123")
+        if (cca_serial.find(uart_barcode) != std::string::npos ||
+            uart_barcode.find(cca_serial) != std::string::npos) {
+          
+          node.cca_label = cca_label_str;
+          node.cca_string_label = string_label;
+          node.cca_inverter_label = inverter_label;
+          node.cca_channel = cca_channel_str;
+          node.cca_object_id = cca_obj_id;
+          node.cca_validated = true;
+          
+          ESP_LOGI(TAG, "Matched UART device %s (%s) with CCA panel '%s' (String: %s, Inverter: %s)",
+                   node.addr.c_str(), uart_barcode.c_str(), cca_label_str.c_str(),
+                   string_label.c_str(), inverter_label.c_str());
+          
+          matched = true;
+          matched_count++;
+          break;
+        }
+      }
+      
+      if (!matched) {
+        ESP_LOGW(TAG, "CCA panel '%s' (serial: %s) not found in UART discovered devices",
+                 cca_label_str.c_str(), cca_serial.c_str());
+      }
+    }
+  }
+  
+  ESP_LOGI(TAG, "CCA Sync complete: %d CCA panels found, %d matched with UART devices",
+           cca_panel_count, matched_count);
+  
+  // Save updated node table with CCA metadata
+  if (matched_count > 0) {
+    save_node_table();
+    last_cca_sync_time_ = millis();
+    
+    // Rebuild string groups based on updated CCA data
+    rebuild_string_groups();
+  }
+  
+  cJSON_Delete(root);
+  
+  // Reset cJSON to default allocators
+  cJSON_InitHooks(NULL);
+}
+
+void TigoMonitorComponent::query_cca_device_info() {
+  std::string url = "http://" + cca_ip_ + "/cgi-bin/mobile_api?cmd=DEVICE_INFO";
+  ESP_LOGI(TAG, "Querying CCA device info from: %s", url.c_str());
+  
+  esp_http_client_config_t config = {};
+  config.url = url.c_str();
+  config.method = HTTP_METHOD_GET;
+  config.timeout_ms = 10000;
+  config.buffer_size = 2048;
+  
+  esp_http_client_handle_t client = esp_http_client_init(&config);
+  
+  // Set authorization header (Tigo:$olar)
+  esp_http_client_set_header(client, "Authorization", "Basic VGlnbzokb2xhcg==");
+  
+  esp_err_t err = esp_http_client_open(client, 0);
+  
+  if (err != ESP_OK) {
+    ESP_LOGE(TAG, "Failed to open HTTP connection for device info: %s", esp_err_to_name(err));
+    esp_http_client_cleanup(client);
+    cca_device_info_ = "{\"error\":\"Failed to connect to CCA\"}";
+    return;
+  }
+  
+  int content_length = esp_http_client_fetch_headers(client);
+  int status_code = esp_http_client_get_status_code(client);
+  
+  ESP_LOGI(TAG, "CCA Device Info HTTP GET Status = %d, content_length = %d", status_code, content_length);
+  
+  if (status_code == 200) {
+    // Allocate read buffer from PSRAM if available
+    const size_t buffer_size = 2048;
+    char* buffer = static_cast<char*>(psram_malloc(buffer_size));
+    if (!buffer) {
+      ESP_LOGE(TAG, "Failed to allocate HTTP read buffer");
+      cca_device_info_ = "{\"error\":\"Memory allocation failed\"}";
+      esp_http_client_close(client);
+      esp_http_client_cleanup(client);
+      return;
+    }
+    
+    // Read response in chunks
+    std::string response;
+    response.reserve(content_length > 0 ? content_length : 2048);  // Pre-allocate
+    int read_len;
+    
+    while ((read_len = esp_http_client_read(client, buffer, buffer_size)) > 0) {
+      response.append(buffer, read_len);
+    }
+    
+    heap_caps_free(buffer);  // Free PSRAM buffer
+    
+    if (read_len < 0) {
+      ESP_LOGE(TAG, "Failed to read CCA device info response");
+      cca_device_info_ = "{\"error\":\"Failed to read response\"}";
+    } else if (response.empty()) {
+      ESP_LOGW(TAG, "CCA returned empty device info");
+      cca_device_info_ = "{\"error\":\"Empty response\"}";
+    } else {
+      ESP_LOGI(TAG, "Received %d bytes of device info from CCA", response.length());
+      ESP_LOGD(TAG, "CCA Device Info: %s", response.c_str());
+      cca_device_info_ = response;
+    }
+  } else {
+    ESP_LOGW(TAG, "CCA device info returned status %d", status_code);
+    char error_buf[128];
+    snprintf(error_buf, sizeof(error_buf), "{\"error\":\"HTTP %d\"}", status_code);
+    cca_device_info_ = error_buf;
+  }
+  
+  esp_http_client_close(client);
+  esp_http_client_cleanup(client);
+}
+
+#else
+// Fallback if not using ESP-IDF
+void TigoMonitorComponent::query_cca_config() {
+  ESP_LOGW(TAG, "CCA sync requires ESP-IDF framework - feature not available");
+}
+
+void TigoMonitorComponent::query_cca_device_info() {
+  ESP_LOGW(TAG, "CCA device info query requires ESP-IDF framework - feature not available");
+  cca_device_info_ = "{\"error\":\"ESP-IDF required\"}";
+}
+
+void TigoMonitorComponent::match_cca_to_uart(const std::string &json_response) {
+  // Not implemented for Arduino framework
+}
+#endif
 
 }  // namespace tigo_monitor
 }  // namespace esphome

@@ -28,6 +28,7 @@ DEPENDENCIES = ['tigo_monitor']
 
 # Define specific sensor configs
 CONF_POWER = "power"
+CONF_PEAK_POWER = "peak_power"
 CONF_POWER_SUM = "power_sum"
 CONF_ENERGY_SUM = "energy_sum"
 CONF_DEVICE_COUNT = "device_count"
@@ -71,6 +72,7 @@ def _auto_template_sensor_config(config):
     # Sensor configurations with their suffixes
     sensor_configs = [
         (CONF_POWER, "Power"),
+        (CONF_PEAK_POWER, "Peak Power"),
         (CONF_VOLTAGE_IN, "Voltage In"),
         (CONF_VOLTAGE_OUT, "Voltage Out"),
         (CONF_CURRENT_IN, "Current"),
@@ -125,6 +127,12 @@ DEVICE_CONFIG_SCHEMA = cv.All(
         cv.Required(CONF_ADDRESS): cv.string,
         cv.Required(CONF_NAME): cv.string,
         cv.Optional(CONF_POWER): _tigo_sensor_schema(
+            unit_of_measurement=UNIT_WATT,
+            accuracy_decimals=0,
+            device_class=DEVICE_CLASS_POWER,
+            state_class=STATE_CLASS_MEASUREMENT,
+        ),
+        cv.Optional(CONF_PEAK_POWER): _tigo_sensor_schema(
             unit_of_measurement=UNIT_WATT,
             accuracy_decimals=0,
             device_class=DEVICE_CLASS_POWER,
@@ -267,6 +275,7 @@ async def to_code(config):
     # Define sensor configurations with their methods
     sensor_configs = [
         (CONF_POWER, hub.add_power_sensor, sensor.new_sensor),
+        (CONF_PEAK_POWER, hub.add_peak_power_sensor, sensor.new_sensor),
         (CONF_VOLTAGE_IN, hub.add_voltage_in_sensor, sensor.new_sensor),
         (CONF_VOLTAGE_OUT, hub.add_voltage_out_sensor, sensor.new_sensor),
         (CONF_CURRENT_IN, hub.add_current_in_sensor, sensor.new_sensor),

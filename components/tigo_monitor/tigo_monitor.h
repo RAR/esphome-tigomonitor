@@ -37,16 +37,44 @@ struct DeviceData {
   float load_factor;
   bool changed = false;
   unsigned long last_update = 0;
+  float peak_power = 0.0f;  // Historical peak power (watts)
 };
 
 struct NodeTableData {
-  std::string long_address;    // Frame 27: 16-character long address
+  std::string long_address;    // Frame 27: 16-character long address (PRIMARY barcode source)
   std::string addr;            // 4-character short address
   std::string checksum;        // CRC checksum
-  std::string frame09_barcode; // Frame 09: 6-character barcode
+  std::string frame09_barcode; // Frame 09: 6-character barcode (fallback when Frame 27 unavailable)
   int sensor_index = -1;       // ESPHome sensor index (-1 = unassigned)
   bool is_persistent = false;  // Whether this mapping should be saved to flash
+  
+  // CCA-sourced metadata (optional, populated via HTTP query)
+  std::string cca_label;          // Friendly name from CCA (e.g., "East Roof Panel 3")
+  std::string cca_string_label;   // Parent string label (e.g., "String 1")
+  std::string cca_inverter_label; // Parent inverter label (e.g., "Inverter 1")
+  std::string cca_channel;        // CCA channel identifier
+  std::string cca_object_id;      // CCA's internal object ID (string type)
+  bool cca_validated = false;     // True if matched with CCA configuration
 };
+
+struct StringData {
+  std::string string_label;       // String name from CCA (e.g., "String 1")
+  std::string inverter_label;     // Parent inverter name
+  std::vector<std::string> device_addrs; // Device addresses in this string
+  float total_power = 0.0f;
+  float total_current = 0.0f;
+  float avg_voltage_in = 0.0f;
+  float avg_voltage_out = 0.0f;
+  float avg_temperature = 0.0f;
+  float avg_efficiency = 0.0f;
+  float min_efficiency = 100.0f;
+  float max_efficiency = 0.0f;
+  float peak_power = 0.0f;        // Historical peak power for this string
+  int active_device_count = 0;
+  int total_device_count = 0;
+  unsigned long last_update = 0;
+};
+
 
 class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
  public:
@@ -56,6 +84,7 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   void loop() override;
   void update() override;
   void dump_config() override;
+  void on_shutdown() override;
   float get_setup_priority() const override;
 
   // Device name helper
@@ -81,6 +110,10 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   void add_power_sensor(const std::string &address, sensor::Sensor *sensor) { 
     this->power_sensors_[address] = sensor; 
     ESP_LOGCONFIG("tigo_monitor", "Registered power sensor for address: %s", address.c_str());
+  }
+  void add_peak_power_sensor(const std::string &address, sensor::Sensor *sensor) { 
+    this->peak_power_sensors_[address] = sensor; 
+    ESP_LOGCONFIG("tigo_monitor", "Registered peak_power sensor for address: %s", address.c_str());
   }
   void add_power_sum_sensor(sensor::Sensor *sensor) { 
     this->power_sum_sensor_ = sensor; 
@@ -126,10 +159,24 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
     this->power_sensors_[address] = sensor;
   }
 
-
-
   // Configuration
   void set_number_of_devices(int count) { number_of_devices_ = count; }
+  void set_cca_ip(const std::string &ip) { cca_ip_ = ip; }
+  void set_sync_cca_on_startup(bool sync) { sync_cca_on_startup_ = sync; }
+  
+  // Public getters for web server access
+  const std::vector<DeviceData>& get_devices() const { return devices_; }
+  const std::vector<NodeTableData>& get_node_table() const { return node_table_; }
+  const std::map<std::string, StringData>& get_strings() const { return strings_; }
+  int get_number_of_devices() const { return number_of_devices_; }
+  const std::string& get_cca_ip() const { return cca_ip_; }
+  bool get_sync_cca_on_startup() const { return sync_cca_on_startup_; }
+  const std::string& get_cca_device_info() const { return cca_device_info_; }
+  unsigned long get_last_cca_sync_time() const { return last_cca_sync_time_; }
+  float get_total_energy_kwh() const { return total_energy_kwh_; }
+  
+  // Public methods for web server access
+  void reset_peak_power();  // Reset all peak power values to 0
   
   // Generate YAML configuration for manual setup
   void generate_sensor_yaml();
@@ -139,6 +186,18 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   
   // Reset node table (clear all persistent device mappings)
   void reset_node_table();
+  
+  // Remove individual node by address
+  bool remove_node(uint16_t addr);
+  
+  // CCA synchronization (called by button or on boot)
+  void sync_from_cca();
+  
+  // CCA refresh (called by web server refresh button - does both device info + config sync)
+  void refresh_cca_data();
+  
+  // CCA device info query (called by web server)
+  void query_cca_device_info();
   
  protected:
   // Frame processing
@@ -164,12 +223,25 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   void publish_sensor_data();
   DeviceData* find_device_by_addr(const std::string &addr);
   
+  // String-level aggregation
+  void update_string_data();
+  void rebuild_string_groups();
+  StringData* find_string_by_label(const std::string &label);
+  
   // Unified node table management (combines Frame 27, Frame 09, and device mappings)
   void load_node_table();
   void save_node_table();
+  void save_peak_power_data();
+  void load_peak_power_data();
+  void save_persistent_data();  // Save all persistent data (node table + peak power + energy)
   int get_next_available_sensor_index();
   NodeTableData* find_node_by_addr(const std::string &addr);
   void assign_sensor_index_to_node(const std::string &addr);
+  
+  // CCA HTTP query and matching
+  void query_cca_config();
+  void match_cca_to_uart(const std::string &json_response);
+  std::string get_barcode_for_node(const NodeTableData &node);
   
   // Energy persistence
   void load_energy_data();
@@ -178,11 +250,13 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
  private:
   std::vector<DeviceData> devices_;
   std::vector<NodeTableData> node_table_;  // Unified table for all device info
+  std::map<std::string, StringData> strings_;  // String-level aggregation (key = string_label)
   std::map<std::string, sensor::Sensor*> voltage_in_sensors_;
   std::map<std::string, sensor::Sensor*> voltage_out_sensors_;
   std::map<std::string, sensor::Sensor*> current_in_sensors_;
   std::map<std::string, sensor::Sensor*> temperature_sensors_;
   std::map<std::string, sensor::Sensor*> power_sensors_;
+  std::map<std::string, sensor::Sensor*> peak_power_sensors_;
   std::map<std::string, sensor::Sensor*> rssi_sensors_;
   std::map<std::string, text_sensor::TextSensor*> barcode_sensors_;
   std::map<std::string, sensor::Sensor*> duty_cycle_sensors_;
@@ -198,6 +272,13 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   float total_energy_kwh_ = 0.0f;
   unsigned long last_energy_update_ = 0;
   
+  // Night mode / no data handling
+  unsigned long last_data_received_ = 0;
+  unsigned long last_zero_publish_ = 0;
+  static const unsigned long NO_DATA_TIMEOUT = 3600000;  // 1 hour in milliseconds
+  static const unsigned long ZERO_PUBLISH_INTERVAL = 600000;  // 10 minutes in milliseconds
+  bool in_night_mode_ = false;
+  
   // Persistence
   static const uint32_t DEVICE_MAPPING_HASH = 0x12345678;  // Hash for preferences key
   static const uint32_t ENERGY_DATA_HASH = 0x87654321;     // Hash for energy data key
@@ -207,6 +288,10 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   uint16_t crc_table_[CRC_TABLE_SIZE];
   int number_of_devices_ = 5;
   std::set<std::string> created_devices_;
+  std::string cca_ip_;  // Optional CCA IP address for HTTP queries
+  bool sync_cca_on_startup_ = true;  // Whether to sync from CCA on boot (default: true)
+  std::string cca_device_info_;  // Cached CCA device info JSON
+  unsigned long last_cca_sync_time_ = 0;  // millis() of last successful CCA sync
   
   // No timing variables needed - ESPHome handles update intervals
   
@@ -233,6 +318,14 @@ class TigoDeviceMappingsButton : public button::Button, public Component {
 };
 
 class TigoResetNodeTableButton : public button::Button, public Component {
+ public:
+  void set_tigo_monitor(TigoMonitorComponent *server) { this->tigo_monitor_ = server; }
+  void press_action() override;
+ protected:
+  TigoMonitorComponent *tigo_monitor_;
+};
+
+class TigoSyncFromCCAButton : public button::Button, public Component {
  public:
   void set_tigo_monitor(TigoMonitorComponent *server) { this->tigo_monitor_ = server; }
   void press_action() override;

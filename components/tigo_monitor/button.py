@@ -12,6 +12,7 @@ CONF_BUTTON_TYPE = "button_type"
 TigoYamlGeneratorButton = tigo_monitor_ns.class_('TigoYamlGeneratorButton', button.Button, cg.Component)
 TigoDeviceMappingsButton = tigo_monitor_ns.class_('TigoDeviceMappingsButton', button.Button, cg.Component)
 TigoResetNodeTableButton = tigo_monitor_ns.class_('TigoResetNodeTableButton', button.Button, cg.Component)
+TigoSyncFromCCAButton = tigo_monitor_ns.class_('TigoSyncFromCCAButton', button.Button, cg.Component)
 
 # Create a configuration function that returns the appropriate schema
 def get_config_schema():
@@ -30,6 +31,11 @@ def get_config_schema():
         button.button_schema(TigoResetNodeTableButton).extend({
             cv.GenerateID(CONF_TIGO_MONITOR_ID): cv.use_id(TigoMonitorComponent),
             cv.Required(CONF_BUTTON_TYPE): cv.one_of("reset_node_table"),
+        }),
+        # Sync from CCA Button Schema
+        button.button_schema(TigoSyncFromCCAButton).extend({
+            cv.GenerateID(CONF_TIGO_MONITOR_ID): cv.use_id(TigoMonitorComponent),
+            cv.Required(CONF_BUTTON_TYPE): cv.one_of("sync_from_cca"),
         })
     )
 

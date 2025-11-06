@@ -3,16 +3,42 @@ esphome:
   friendly_name: "Tigo Server"
 
 esp32:
-  board: esp32dev
+  board: m5stack-atoms3
+  variant: esp32s3
   framework:
     type: esp-idf
     version: recommended
+    sdkconfig_options:
+      CONFIG_ESP32S3_DEFAULT_CPU_FREQ_240: "y"
+      # UART optimizations to prevent packet loss
+      CONFIG_UART_ISR_IN_IRAM: "y"
+      CONFIG_UART_RX_BUFFER_SIZE: "2048"
+      CONFIG_UART_TX_BUFFER_SIZE: "512"
+      # Increase event queue size
+      CONFIG_FREERTOS_QUEUE_REGISTRY_SIZE: "32"
+      # Logging optimizations
+      CONFIG_LOG_DEFAULT_LEVEL_INFO: "y"
+      CONFIG_LOG_MAXIMUM_LEVEL_VERBOSE: "y"
+      # Enable PSRAM (8MB on AtomS3)
+      CONFIG_SPIRAM_MODE_OCT: "y"
+      CONFIG_SPIRAM_SPEED_80M: "y"
+
+# Enable PSRAM
+psram:
+  mode: octal
+  speed: 80MHz
 
 # External components
 external_components:
   - source: 
       type: local
       path: components
+  - source:
+      type: git
+      url: https://github.com/ssieb/esphome
+      ref: lp5562
+    components: [ lp5562 ]
+    refresh: 1min
 
 # WiFi configuration
 wifi:
@@ -43,8 +69,9 @@ ota:
 # No separate MQTT configuration needed
 
 # Web Server (optional, basic ESPHome web interface)
-web_server:
-  port: 80
+# Comment out if using custom Tigo web server below
+# web_server:
+#   port: 80
 
 # UART configuration for Tigo communication
 uart:
@@ -55,13 +82,20 @@ uart:
   data_bits: 8
   parity: NONE
   stop_bits: 1
+  rx_buffer_size: 2048  # Increased from default 256 to reduce packet loss
 
 # Tigo Monitor component - sensors will be created automatically!
 tigo_monitor:
   id: tigo_hub
   uart_id: tigo_uart
+  number_of_devices: 20
   update_interval: 30s
-  number_of_devices: 20  # Set this to exactly the number of Tigo devices you have
+
+# Custom web server for comprehensive Tigo monitoring dashboard
+tigo_server:
+  id: tigo_web
+  tigo_monitor_id: tigo_hub
+  port: 80
 
 # Configure your sensors below - add individual device sensors and/or the power sum sensor
 
@@ -111,10 +145,12 @@ sensor:
   # System monitoring sensors
   - platform: wifi_signal
     name: "Tigo Server WiFi Signal"
+    id: wifi_rssi
     update_interval: 60s
 
   - platform: uptime
     name: "Tigo Server Uptime"
+    id: uptime_sensor
 
 text_sensor:
   - platform: wifi_info

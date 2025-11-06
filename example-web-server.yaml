@@ -1,0 +1,98 @@
+substitutions:
+  name: tigo-solar-monitor
+  friendly_name: Tigo Solar Monitor
+
+esphome:
+  name: ${name}
+  friendly_name: ${friendly_name}
+  platformio_options:
+    board_build.flash_mode: dio
+
+psram:
+  mode: octal
+  speed: 80MHz
+
+esp32:
+  board: m5stack-atoms3  # For M5Stack AtomS3/AtomS3R with 8MB PSRAM
+  variant: esp32s3
+  framework:
+    type: esp-idf  # Required for custom web server
+    sdkconfig_options:
+      CONFIG_ESP32S3_DEFAULT_CPU_FREQ_240: "y"
+      CONFIG_ESP32S3_DATA_CACHE_64KB: "y"
+      CONFIG_ESP32S3_DATA_CACHE_LINE_64B: "y"
+      CONFIG_SPIRAM_MODE_OCT: "y"
+      CONFIG_SPIRAM_SPEED_80M: "y"
+
+# Point to local component
+external_components:
+  - source:
+      type: local
+      path: components
+    
+wifi:
+  ssid: "YourWiFiSSID"
+  password: "YourWiFiPassword"
+  
+  # Enable fallback hotspot in case WiFi fails
+  ap:
+    ssid: "${friendly_name} Fallback"
+    password: "12345678"
+
+logger:
+  level: DEBUG
+
+# Optional: Enable ESPHome's built-in API for Home Assistant
+# api:
+#   encryption:
+#     key: "base64key=="
+
+# Optional: Enable Over-The-Air updates
+# ota:
+#   - platform: esphome
+#     password: "changeme"
+
+# UART configuration for Tigo communication
+uart:
+  id: uart_bus
+  tx_pin: GPIO17
+  rx_pin: GPIO16
+  baud_rate: 38400
+  
+# Tigo Monitor Component with Custom Web Server
+tigo_monitor:
+  id: tigo_hub
+  number_of_devices: 20
+  update_interval: 30s
+  
+  # Enable custom web server on port 80
+  web_server:
+    port: 80
+
+# Optional: Buttons for diagnostics (commented out for basic test)
+# button:
+#   - platform: tigo_monitor
+#     tigo_monitor_id: tigo_hub
+#     name: "Generate YAML Config"
+#     
+#   - platform: tigo_monitor
+#     tigo_monitor_id: tigo_hub
+#     name: "Print Device Mappings"
+#     
+#   - platform: tigo_monitor
+#     tigo_monitor_id: tigo_hub
+#     name: "Reset Node Table"
+
+# System-wide sensors (commented out for basic test)
+# sensor:
+#   - platform: tigo_monitor
+#     tigo_monitor_id: tigo_hub
+#     power_sum:
+#       name: "Total Solar Power"
+#     energy_sum:
+#       name: "Total Solar Energy"
+#     device_count:
+#       name: "Active Devices"
+
+# Individual device sensors (add after discovery using web UI YAML generator)
+# Visit http://<esp32-ip>/yaml to get auto-generated configuration
