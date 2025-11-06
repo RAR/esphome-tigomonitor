@@ -149,6 +149,14 @@ void TigoWebServer::setup() {
     };
     httpd_register_uri_handler(server_, &yaml_config_uri);
     
+    httpd_uri_t cca_info_uri = {
+      .uri = "/cca",
+      .method = HTTP_GET,
+      .handler = cca_info_handler,
+      .user_ctx = this
+    };
+    httpd_register_uri_handler(server_, &cca_info_uri);
+    
     // Register API endpoints
     httpd_uri_t api_devices_uri = {
       .uri = "/api/devices",
@@ -189,6 +197,14 @@ void TigoWebServer::setup() {
       .user_ctx = this
     };
     httpd_register_uri_handler(server_, &api_yaml_uri);
+    
+    httpd_uri_t api_cca_info_uri = {
+      .uri = "/api/cca",
+      .method = HTTP_GET,
+      .handler = api_cca_info_handler,
+      .user_ctx = this
+    };
+    httpd_register_uri_handler(server_, &api_cca_info_uri);
     
     ESP_LOGI(TAG, "All routes registered");
   } else {
@@ -323,6 +339,31 @@ esp_err_t TigoWebServer::api_yaml_handler(httpd_req_t *req) {
   
   PSRAMString json_buffer;
   std::string json = server->build_yaml_json();
+  json_buffer.append(json);
+  
+  httpd_resp_set_type(req, "application/json");
+  httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+  httpd_resp_send(req, json_buffer.c_str(), json_buffer.length());
+  return ESP_OK;
+}
+
+esp_err_t TigoWebServer::cca_info_handler(httpd_req_t *req) {
+  TigoWebServer *server = static_cast<TigoWebServer *>(req->user_ctx);
+  
+  PSRAMString html;
+  std::string content = server->get_cca_info_html();
+  html.append(content);
+  
+  httpd_resp_set_type(req, "text/html");
+  httpd_resp_send(req, html.c_str(), html.length());
+  return ESP_OK;
+}
+
+esp_err_t TigoWebServer::api_cca_info_handler(httpd_req_t *req) {
+  TigoWebServer *server = static_cast<TigoWebServer *>(req->user_ctx);
+  
+  PSRAMString json_buffer;
+  std::string json = server->build_cca_info_json();
   json_buffer.append(json);
   
   httpd_resp_set_type(req, "application/json");
@@ -562,6 +603,7 @@ std::string TigoWebServer::get_dashboard_html() {
       <a href="/nodes">Node Table</a>
       <a href="/status">ESP32 Status</a>
       <a href="/yaml">YAML Config</a>
+      <a href="/cca">CCA Info</a>
     </div>
   </div>
   
@@ -704,6 +746,7 @@ std::string TigoWebServer::get_overview_html() {
       <a href="/nodes">Node Table</a>
       <a href="/status">ESP32 Status</a>
       <a href="/yaml">YAML Config</a>
+      <a href="/cca">CCA Info</a>
     </div>
   </div>
   
@@ -808,6 +851,7 @@ std::string TigoWebServer::get_node_table_html() {
       <a href="/nodes" class="active">Node Table</a>
       <a href="/status">ESP32 Status</a>
       <a href="/yaml">YAML Config</a>
+      <a href="/cca">CCA Info</a>
     </div>
   </div>
   
@@ -931,6 +975,7 @@ std::string TigoWebServer::get_esp_status_html() {
       <a href="/nodes">Node Table</a>
       <a href="/status" class="active">ESP32 Status</a>
       <a href="/yaml">YAML Config</a>
+      <a href="/cca">CCA Info</a>
     </div>
   </div>
   
@@ -1052,6 +1097,7 @@ std::string TigoWebServer::get_yaml_config_html() {
       <a href="/nodes">Node Table</a>
       <a href="/status">ESP32 Status</a>
       <a href="/yaml" class="active">YAML Config</a>
+      <a href="/cca">CCA Info</a>
     </div>
   </div>
   
@@ -1099,6 +1145,290 @@ std::string TigoWebServer::get_yaml_config_html() {
 </body>
 </html>
 )html";
+}
+
+std::string TigoWebServer::get_cca_info_html() {
+  return R"html(<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Tigo Monitor - CCA Information</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f5f5; }
+    .header { background: #2c3e50; color: white; padding: 1rem 2rem; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+    .header h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
+    .nav { display: flex; gap: 1rem; margin-top: 0.5rem; }
+    .nav a { color: #3498db; text-decoration: none; padding: 0.5rem 1rem; background: rgba(255,255,255,0.1); border-radius: 4px; }
+    .nav a:hover { background: rgba(255,255,255,0.2); }
+    .nav a.active { background: #3498db; color: white; }
+    .container { max-width: 1200px; margin: 2rem auto; padding: 0 1rem; }
+    .card { background: white; border-radius: 8px; padding: 2rem; box-shadow: 0 2px 4px rgba(0,0,0,0.1); margin-bottom: 1.5rem; }
+    .card h2 { color: #2c3e50; margin-bottom: 1rem; font-size: 1.5rem; border-bottom: 2px solid #3498db; padding-bottom: 0.5rem; }
+    .info-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 1rem; }
+    .info-item { padding: 1rem; background: #f8f9fa; border-radius: 4px; }
+    .info-label { font-size: 0.875rem; color: #7f8c8d; margin-bottom: 0.25rem; text-transform: uppercase; }
+    .info-value { font-size: 1.125rem; font-weight: 600; color: #2c3e50; }
+    .badge { display: inline-block; padding: 0.25rem 0.75rem; border-radius: 12px; font-size: 0.75rem; font-weight: bold; }
+    .badge-success { background: #27ae60; color: white; }
+    .badge-warning { background: #f39c12; color: white; }
+    .badge-error { background: #e74c3c; color: white; }
+    .loading { text-align: center; padding: 2rem; color: #7f8c8d; }
+    .error { background: #e74c3c; color: white; padding: 1rem; border-radius: 4px; }
+    .code-block { background: #2c3e50; color: #ecf0f1; padding: 1rem; border-radius: 4px; font-family: monospace; white-space: pre-wrap; word-wrap: break-word; max-height: 400px; overflow-y: auto; font-size: 0.875rem; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>🌞 Tigo Solar Monitor</h1>
+    <div class="nav">
+      <a href="/">Dashboard</a>
+      <a href="/overview">Overview</a>
+      <a href="/nodes">Node Table</a>
+      <a href="/status">ESP32 Status</a>
+      <a href="/yaml">YAML Config</a>
+      <a href="/cca" class="active">CCA Info</a>
+    </div>
+  </div>
+  
+  <div class="container">
+    <div class="card">
+      <h2>CCA Connection Status</h2>
+      <div class="info-grid">
+        <div class="info-item">
+          <div class="info-label">CCA IP Address</div>
+          <div class="info-value" id="cca-ip">--</div>
+        </div>
+        <div class="info-item">
+          <div class="info-label">Last Sync</div>
+          <div class="info-value" id="last-sync">--</div>
+        </div>
+        <div class="info-item">
+          <div class="info-label">Connection Status</div>
+          <div class="info-value" id="connection-status">
+            <span class="badge badge-warning">Checking...</span>
+          </div>
+        </div>
+      </div>
+    </div>
+    
+    <div class="card">
+      <h2>CCA Device Information</h2>
+      <div id="device-info" class="loading">Loading CCA device information...</div>
+    </div>
+    
+    <div class="card">
+      <h2>Raw JSON Response</h2>
+      <pre class="code-block" id="json-response">Loading...</pre>
+    </div>
+  </div>
+  
+  <script>
+    function formatTime(seconds) {
+      if (!seconds || seconds === 0) return 'Never';
+      if (seconds < 60) return seconds + ' seconds ago';
+      if (seconds < 3600) return Math.floor(seconds / 60) + ' minutes ago';
+      if (seconds < 86400) return Math.floor(seconds / 3600) + ' hours ago';
+      return Math.floor(seconds / 86400) + ' days ago';
+    }
+    
+    async function loadData() {
+      try {
+        const response = await fetch('/api/cca');
+        const data = await response.json();
+        
+        // Update connection info
+        document.getElementById('cca-ip').textContent = data.cca_ip || 'Not configured';
+        document.getElementById('last-sync').textContent = formatTime(data.last_sync_seconds_ago);
+        
+        // Parse device info
+        let deviceInfo = null;
+        try {
+          deviceInfo = JSON.parse(data.device_info);
+        } catch (e) {
+          console.error('Failed to parse device info:', e);
+        }
+        
+        if (deviceInfo && !deviceInfo.error) {
+          document.getElementById('connection-status').innerHTML = '<span class="badge badge-success">Connected</span>';
+          
+          // Build device info grid - display all available fields
+          let html = '<div class="info-grid">';
+          
+          // Helper function to format uptime from milliseconds
+          function formatUptime(ms) {
+            const seconds = Math.floor(ms / 1000);
+            const days = Math.floor(seconds / 86400);
+            const hours = Math.floor((seconds % 86400) / 3600);
+            const minutes = Math.floor((seconds % 3600) / 60);
+            const secs = seconds % 60;
+            
+            let parts = [];
+            if (days > 0) parts.push(days + 'd');
+            if (hours > 0) parts.push(hours + 'h');
+            if (minutes > 0) parts.push(minutes + 'm');
+            if (secs > 0 || parts.length === 0) parts.push(secs + 's');
+            return parts.join(' ');
+          }
+          
+          // Helper function to format timestamp
+          function formatTimestamp(ts) {
+            if (!ts) return 'Never';
+            const date = new Date(ts * 1000); // Unix timestamp to JS Date
+            return date.toLocaleString();
+          }
+          
+          // Field labels and special handling
+          const fieldLabels = {
+            'serial': 'Serial Number',
+            'sw_version': 'Software Version',
+            'sysid': 'System ID',
+            'kernel_version': 'Kernel Version',
+            'discovery': 'Discovery Mode',
+            'fw_config_status': 'Firmware Config Status',
+            'UTS': 'Uptime',
+            'sysconfig_ts': 'Last Cloud Config Sync',
+            'hw_version': 'Hardware Version',
+            'model': 'Model',
+            'mac_address': 'MAC Address',
+            'ip_address': 'IP Address',
+            'subnet_mask': 'Subnet Mask',
+            'gateway': 'Gateway',
+            'dns': 'DNS Server',
+            'ntp_server': 'NTP Server',
+            'timezone': 'Timezone',
+            'cpu_load': 'CPU Load',
+            'memory_total': 'Total Memory',
+            'memory_free': 'Free Memory',
+            'disk_total': 'Total Disk',
+            'disk_free': 'Free Disk',
+            'temperature': 'Temperature',
+            'panel_count': 'Panel Count',
+            'optimizer_count': 'Optimizer Count',
+            'inverter_count': 'Inverter Count',
+            'string_count': 'String Count',
+            'cloud_connected': 'Cloud Connected',
+            'last_cloud_sync': 'Last Cloud Sync',
+            'api_version': 'API Version'
+          };
+          
+          // Process status array separately if it exists
+          let statusArray = [];
+          if (deviceInfo.status && Array.isArray(deviceInfo.status)) {
+            statusArray = deviceInfo.status;
+          }
+          
+          for (const [key, value] of Object.entries(deviceInfo)) {
+            // Skip the status array itself - we'll expand it below
+            if (key === 'status' && Array.isArray(value)) continue;
+            
+            const label = fieldLabels[key] || key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+            let displayValue = value;
+            
+            // Special formatting for certain fields
+            if (key === 'UTS') {
+              displayValue = formatUptime(value);
+            } else if (key === 'sysconfig_ts') {
+              displayValue = formatTimestamp(value);
+            } else if (key === 'discovery') {
+              displayValue = value ? '<span class="badge badge-success">Active</span>' : '<span class="badge badge-warning">Inactive</span>';
+            } else if (key === 'cloud_connected') {
+              displayValue = value ? '<span class="badge badge-success">Yes</span>' : '<span class="badge badge-error">No</span>';
+            } else if (typeof value === 'boolean') {
+              displayValue = value ? '<span class="badge badge-success">Yes</span>' : '<span class="badge badge-warning">No</span>';
+            } else if (typeof value === 'object') {
+              displayValue = JSON.stringify(value);
+            }
+            
+            html += '<div class="info-item"><div class="info-label">' + label + '</div><div class="info-value">' + displayValue + '</div></div>';
+          }
+          
+          // Add status items if they exist
+          // Status codes: 0 = OK/Green, 2 = Warning/Yellow, -1 = N/A/Gray, others = Error/Red
+          for (const statusItem of statusArray) {
+            const label = statusItem.name || 'Status';
+            let badge = '';
+            
+            if (statusItem.status === 0) {
+              badge = '<span class="badge badge-success">OK</span>';
+            } else if (statusItem.status === 2) {
+              badge = '<span class="badge badge-warning">Warning</span>';
+            } else if (statusItem.status === -1) {
+              badge = '<span style="background: #95a5a6; color: white; padding: 0.25rem 0.75rem; border-radius: 12px; font-size: 0.75rem; font-weight: bold; display: inline-block;">N/A</span>';
+            } else {
+              badge = '<span class="badge badge-error">Error</span>';
+            }
+            
+            html += '<div class="info-item"><div class="info-label">' + label + '</div><div class="info-value">' + badge + '</div></div>';
+          }
+          
+          html += '</div>';
+          document.getElementById('device-info').innerHTML = html;
+        } else {
+          const errorMsg = deviceInfo && deviceInfo.error ? deviceInfo.error : 'Unknown error';
+          document.getElementById('connection-status').innerHTML = '<span class="badge badge-error">Error</span>';
+          document.getElementById('device-info').innerHTML = '<div class="error">Failed to retrieve CCA information: ' + errorMsg + '</div>';
+        }
+        
+        // Display raw JSON
+        document.getElementById('json-response').textContent = JSON.stringify(deviceInfo || data.device_info, null, 2);
+        
+      } catch (error) {
+        console.error('Error loading data:', error);
+        document.getElementById('connection-status').innerHTML = '<span class="badge badge-error">Failed</span>';
+        document.getElementById('device-info').innerHTML = '<div class="error">Error loading CCA information</div>';
+        document.getElementById('json-response').textContent = 'Error: ' + error.message;
+      }
+    }
+    
+    loadData();
+    setInterval(loadData, 30000); // Refresh every 30 seconds
+  </script>
+</body>
+</html>
+)html";
+}
+
+std::string TigoWebServer::build_cca_info_json() {
+  // Query CCA device info if not cached or stale
+  if (parent_->get_cca_device_info().empty() || 
+      parent_->get_last_cca_sync_time() == 0) {
+    parent_->query_cca_device_info();
+  }
+  
+  // Calculate seconds since last sync (ESP32 millis() to seconds)
+  unsigned long last_sync = parent_->get_last_cca_sync_time();
+  unsigned long seconds_ago = 0;
+  if (last_sync > 0) {
+    seconds_ago = (millis() - last_sync) / 1000;
+  }
+  
+  std::string json = "{";
+  json += "\"cca_ip\":\"" + parent_->get_cca_ip() + "\",";
+  json += "\"last_sync_seconds_ago\":" + std::to_string(seconds_ago) + ",";
+  json += "\"device_info\":";
+  
+  // Embed the device info JSON (already a JSON string)
+  const std::string &device_info = parent_->get_cca_device_info();
+  if (device_info.empty()) {
+    json += "\"{}\"";
+  } else {
+    // Escape the JSON string for embedding
+    json += "\"";
+    for (char c : device_info) {
+      if (c == '"') json += "\\\"";
+      else if (c == '\\') json += "\\\\";
+      else if (c == '\n') json += "\\n";
+      else if (c == '\r') json += "\\r";
+      else if (c == '\t') json += "\\t";
+      else json += c;
+    }
+    json += "\"";
+  }
+  
+  json += "}";
+  return json;
 }
 
 }  // namespace tigo_server

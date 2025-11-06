@@ -138,12 +138,16 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   // Configuration
   void set_number_of_devices(int count) { number_of_devices_ = count; }
   void set_cca_ip(const std::string &ip) { cca_ip_ = ip; }
+  void set_sync_cca_on_startup(bool sync) { sync_cca_on_startup_ = sync; }
   
   // Public getters for web server access
   const std::vector<DeviceData>& get_devices() const { return devices_; }
   const std::vector<NodeTableData>& get_node_table() const { return node_table_; }
   int get_number_of_devices() const { return number_of_devices_; }
   const std::string& get_cca_ip() const { return cca_ip_; }
+  bool get_sync_cca_on_startup() const { return sync_cca_on_startup_; }
+  const std::string& get_cca_device_info() const { return cca_device_info_; }
+  unsigned long get_last_cca_sync_time() const { return last_cca_sync_time_; }
   
   // Generate YAML configuration for manual setup
   void generate_sensor_yaml();
@@ -156,6 +160,9 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   
   // CCA synchronization (called by button or on boot)
   void sync_from_cca();
+  
+  // CCA device info query (called by web server)
+  void query_cca_device_info();
   
  protected:
   // Frame processing
@@ -237,6 +244,9 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   int number_of_devices_ = 5;
   std::set<std::string> created_devices_;
   std::string cca_ip_;  // Optional CCA IP address for HTTP queries
+  bool sync_cca_on_startup_ = true;  // Whether to sync from CCA on boot (default: true)
+  std::string cca_device_info_;  // Cached CCA device info JSON
+  unsigned long last_cca_sync_time_ = 0;  // millis() of last successful CCA sync
   
   // No timing variables needed - ESPHome handles update intervals
   

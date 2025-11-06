@@ -44,6 +44,8 @@ class TigoWebServer : public Component {
   static esp_err_t api_node_table_handler(httpd_req_t *req);
   static esp_err_t api_esp_status_handler(httpd_req_t *req);
   static esp_err_t api_yaml_handler(httpd_req_t *req);
+  static esp_err_t cca_info_handler(httpd_req_t *req);
+  static esp_err_t api_cca_info_handler(httpd_req_t *req);
   
   // Helper functions
   tigo_monitor::TigoMonitorComponent *get_parent_from_req(httpd_req_t *req);
@@ -52,6 +54,7 @@ class TigoWebServer : public Component {
   std::string get_node_table_html();
   std::string get_esp_status_html();
   std::string get_yaml_config_html();
+  std::string get_cca_info_html();
   
   // JSON builders
   std::string build_devices_json();
@@ -59,6 +62,7 @@ class TigoWebServer : public Component {
   std::string build_node_table_json();
   std::string build_esp_status_json();
   std::string build_yaml_json();
+  std::string build_cca_info_json();
 };
 
 #endif  // USE_ESP_IDF

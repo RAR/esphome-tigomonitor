@@ -49,11 +49,13 @@ void TigoMonitorComponent::setup() {
   last_zero_publish_ = 0;
   in_night_mode_ = false;
   
-  // Query CCA on boot if IP is configured
-  if (!cca_ip_.empty()) {
+  // Query CCA on boot if IP is configured and sync_cca_on_startup is enabled
+  if (!cca_ip_.empty() && sync_cca_on_startup_) {
     ESP_LOGI(TAG, "CCA IP configured: %s - will sync configuration on boot", cca_ip_.c_str());
-    // Defer HTTP query to after WiFi is connected
-    defer("cca_sync", [this]() { this->sync_from_cca(); });
+    // Delay sync to allow WiFi to connect (5 seconds after setup)
+    this->set_timeout("cca_sync", 5000, [this]() { this->sync_from_cca(); });
+  } else if (!cca_ip_.empty() && !sync_cca_on_startup_) {
+    ESP_LOGI(TAG, "CCA IP configured: %s - automatic sync disabled (use 'Sync from CCA' button)", cca_ip_.c_str());
   }
 }
   
@@ -1494,14 +1496,82 @@ void TigoMonitorComponent::match_cca_to_uart(const std::string &json_response) {
   // Save updated node table with CCA metadata
   if (matched_count > 0) {
     save_node_table();
+    last_cca_sync_time_ = millis();
   }
   
   cJSON_Delete(root);
 }
+
+void TigoMonitorComponent::query_cca_device_info() {
+  std::string url = "http://" + cca_ip_ + "/cgi-bin/mobile_api?cmd=DEVICE_INFO";
+  ESP_LOGI(TAG, "Querying CCA device info from: %s", url.c_str());
+  
+  esp_http_client_config_t config = {};
+  config.url = url.c_str();
+  config.method = HTTP_METHOD_GET;
+  config.timeout_ms = 10000;
+  config.buffer_size = 2048;
+  
+  esp_http_client_handle_t client = esp_http_client_init(&config);
+  
+  // Set authorization header (Tigo:$olar)
+  esp_http_client_set_header(client, "Authorization", "Basic VGlnbzokb2xhcg==");
+  
+  esp_err_t err = esp_http_client_open(client, 0);
+  
+  if (err != ESP_OK) {
+    ESP_LOGE(TAG, "Failed to open HTTP connection for device info: %s", esp_err_to_name(err));
+    esp_http_client_cleanup(client);
+    cca_device_info_ = "{\"error\":\"Failed to connect to CCA\"}";
+    return;
+  }
+  
+  int content_length = esp_http_client_fetch_headers(client);
+  int status_code = esp_http_client_get_status_code(client);
+  
+  ESP_LOGI(TAG, "CCA Device Info HTTP GET Status = %d, content_length = %d", status_code, content_length);
+  
+  if (status_code == 200) {
+    // Read response in chunks
+    std::string response;
+    char buffer[1024];
+    int read_len;
+    
+    while ((read_len = esp_http_client_read(client, buffer, sizeof(buffer))) > 0) {
+      response.append(buffer, read_len);
+    }
+    
+    if (read_len < 0) {
+      ESP_LOGE(TAG, "Failed to read CCA device info response");
+      cca_device_info_ = "{\"error\":\"Failed to read response\"}";
+    } else if (response.empty()) {
+      ESP_LOGW(TAG, "CCA returned empty device info");
+      cca_device_info_ = "{\"error\":\"Empty response\"}";
+    } else {
+      ESP_LOGI(TAG, "Received %d bytes of device info from CCA", response.length());
+      ESP_LOGD(TAG, "CCA Device Info: %s", response.c_str());
+      cca_device_info_ = response;
+    }
+  } else {
+    ESP_LOGW(TAG, "CCA device info returned status %d", status_code);
+    char error_buf[128];
+    snprintf(error_buf, sizeof(error_buf), "{\"error\":\"HTTP %d\"}", status_code);
+    cca_device_info_ = error_buf;
+  }
+  
+  esp_http_client_close(client);
+  esp_http_client_cleanup(client);
+}
+
 #else
 // Fallback if not using ESP-IDF
 void TigoMonitorComponent::query_cca_config() {
   ESP_LOGW(TAG, "CCA sync requires ESP-IDF framework - feature not available");
+}
+
+void TigoMonitorComponent::query_cca_device_info() {
+  ESP_LOGW(TAG, "CCA device info query requires ESP-IDF framework - feature not available");
+  cca_device_info_ = "{\"error\":\"ESP-IDF required\"}";
 }
 
 void TigoMonitorComponent::match_cca_to_uart(const std::string &json_response) {
