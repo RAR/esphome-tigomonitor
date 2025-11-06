@@ -1751,34 +1751,6 @@ void TigoMonitorComponent::match_cca_to_uart(const std::string &json_response) {
     }
   }
   
-  // Log all objects to understand CCA structure
-  ESP_LOGI(TAG, "CCA returned %d objects total", array_size);
-  for (int i = 0; i < array_size; i++) {
-    cJSON *obj = cJSON_GetArrayItem(root, i);
-    
-    // Print all fields in the first few objects to understand structure
-    if (i < 5) {
-      char *obj_str = cJSON_PrintUnformatted(obj);
-      if (obj_str) {
-        ESP_LOGI(TAG, "  Object %d raw JSON: %s", i, obj_str);
-        free(obj_str);
-      }
-    }
-    
-    cJSON *type = cJSON_GetObjectItem(obj, "type");
-    cJSON *label = cJSON_GetObjectItem(obj, "label");
-    cJSON *object_id = cJSON_GetObjectItem(obj, "id");
-    cJSON *parent_id = cJSON_GetObjectItem(obj, "parent");
-    
-    if (type && cJSON_IsNumber(type)) {
-      ESP_LOGI(TAG, "  Object %s: type=%d, label='%s', parent=%s",
-               (object_id && cJSON_IsString(object_id)) ? object_id->valuestring : "(none)",
-               type->valueint,
-               (label && cJSON_IsString(label)) ? label->valuestring : "(none)",
-               (parent_id && cJSON_IsString(parent_id)) ? parent_id->valuestring : "(none)");
-    }
-  }
-  
   // Process all objects to find panels (type 2)
   for (int i = 0; i < array_size; i++) {
     cJSON *obj = cJSON_GetArrayItem(root, i);
