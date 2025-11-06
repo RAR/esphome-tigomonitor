@@ -292,6 +292,9 @@ Press the "Print Device Mappings" button to see discovered devices in the logs.
 
 The component includes a built-in web server accessible at `http://<esp32-ip>/`
 
+![Dashboard](docs/images/Dashboard.png)
+*Dashboard page showing system statistics and live device monitoring with temperature toggle*
+
 ### Web Dashboard Features
 
 #### Dashboard Page (`/`)
@@ -309,6 +312,10 @@ The component includes a built-in web server accessible at `http://<esp32-ip>/`
 - **Auto-refresh**: Updates every 5 seconds
 
 #### Node Table Page (`/nodes`)
+
+![Node Table](docs/images/NodeTable.png)
+*Node table showing all discovered devices with CCA labels and delete functionality*
+
 - **Complete Device List**: All discovered devices with sensor assignments
 - **CCA Integration**: Shows panel names from Tigo CCA (if configured)
 - **Hierarchy Display**: Inverter → String → Panel structure
@@ -319,6 +326,10 @@ The component includes a built-in web server accessible at `http://<esp32-ip>/`
   - Frees up sensor index for reuse
 
 #### ESP32 Status Page (`/status`)
+
+![ESP32 Status](docs/images/ESP32Status.png)
+*ESP32 status page with system information and memory metrics*
+
 - **System Information**: Uptime, ESPHome version, compilation time
 - **Memory Metrics**: Heap and PSRAM usage with visual progress bars
 - **Minimum Free Memory**: Lowest memory levels (helps detect memory leaks)
@@ -326,12 +337,20 @@ The component includes a built-in web server accessible at `http://<esp32-ip>/`
 - **Auto-refresh**: Updates every 5 seconds
 
 #### YAML Config Page (`/yaml`)
+
+![YAML Config](docs/images/YAML.png)
+*Auto-generated YAML configuration with one-click copy*
+
 - **Auto-generated Configuration**: Complete sensor definitions for all devices
 - **CCA Labels**: Uses panel names from CCA if synced
 - **Copy to Clipboard**: One-click copy functionality
 - **Device Count**: Shows number of configured devices
 
 #### CCA Info Page (`/cca`)
+
+![CCA Info](docs/images/CCA.png)
+*CCA device information with manual refresh capability*
+
 - **Connection Status**: Real-time CCA connectivity
 - **Device Information**: Serial number, software version, system ID
 - **System Status**: Cloud connection, gateway communication, module status
@@ -476,6 +495,9 @@ Look for these log messages:
 - `Maximum number of devices reached` - Adjust configuration limit
 
 ## 🏠 Home Assistant Integration
+
+![Home Assistant](docs/images/HA.png)
+*Home Assistant Energy Dashboard integration showing solar production tracking*
 
 ### Energy Dashboard
 
@@ -726,6 +748,7 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 This project builds upon the excellent work of several open-source contributors:
 
 - **[Bobsilvio/tigo_server](https://github.com/Bobsilvio/tigo_server)** - Original Arduino-based Tigo monitoring implementation that provided the foundation for understanding Tigo communication protocols
+- **[Bobsilvio/tigosolar-local](https://github.com/Bobsilvio/tigosolar-local)** - Local monitoring solution for Tigo solar systems with valuable protocol insights
 - **[willglynn/taptap](https://github.com/willglynn/taptap)** - Innovative approach to Tigo system monitoring and reverse engineering insights
 - **[tictactom/tigo_server](https://github.com/tictactom/tigo_server)** - Additional Tigo monitoring implementation and protocol documentation
 - **ESPHome Framework** - Providing the robust platform for ESP32-based home automation components
