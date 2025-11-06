@@ -374,9 +374,8 @@ esp_err_t TigoWebServer::api_cca_info_handler(httpd_req_t *req) {
 esp_err_t TigoWebServer::api_cca_refresh_handler(httpd_req_t *req) {
   TigoWebServer *server = static_cast<TigoWebServer *>(req->user_ctx);
   
-  // Trigger full CCA sync (device info + config sync)
-  server->parent_->query_cca_device_info();
-  server->parent_->sync_from_cca();
+  // Trigger full CCA refresh (device info + config sync with proper sequencing)
+  server->parent_->refresh_cca_data();
   
   // Return simple success response
   const char* response = "{\"status\":\"ok\",\"message\":\"CCA refresh initiated\"}";
@@ -438,31 +437,71 @@ std::string TigoWebServer::build_devices_json() {
   
   const auto &devices = parent_->get_devices();
   const auto &node_table = parent_->get_node_table();
-  bool first = true;
+  
+  // Create a vector of device info with names and sensor indices for sorting
+  struct DeviceWithName {
+    const tigo_monitor::DeviceData *device;
+    std::string name;
+    int sensor_index;
+  };
+  
+  std::vector<DeviceWithName> sorted_devices;
   
   for (const auto &device : devices) {
-    if (!first) json += ",";
-    first = false;
+    DeviceWithName dwn;
+    dwn.device = &device;
+    dwn.sensor_index = -1;
     
-    // Find the node table entry to get CCA label
-    std::string device_name;
+    // Find the node table entry to get CCA label and sensor index
     for (const auto &node : node_table) {
       if (node.addr == device.addr) {
+        dwn.sensor_index = node.sensor_index;
         if (!node.cca_label.empty()) {
-          device_name = node.cca_label;
+          dwn.name = node.cca_label;
         }
         break;
       }
     }
     
     // Fallback to barcode or address if no CCA label
-    if (device_name.empty()) {
+    if (dwn.name.empty()) {
       if (!device.barcode.empty() && device.barcode.length() >= 5) {
-        device_name = device.barcode;
+        dwn.name = device.barcode;
       } else {
-        device_name = "Module " + device.addr;
+        dwn.name = "Module " + device.addr;
       }
     }
+    
+    sorted_devices.push_back(dwn);
+  }
+  
+  // Sort by name (CCA label if available), then by sensor index
+  std::sort(sorted_devices.begin(), sorted_devices.end(),
+            [](const DeviceWithName &a, const DeviceWithName &b) {
+              // If both have CCA labels or both don't, sort by name
+              bool a_has_cca = (a.name.find("Module ") != 0 && a.name.length() != 16);
+              bool b_has_cca = (b.name.find("Module ") != 0 && b.name.length() != 16);
+              
+              if (a_has_cca && b_has_cca) {
+                // Both have CCA names - sort alphabetically
+                return a.name < b.name;
+              } else if (!a_has_cca && !b_has_cca) {
+                // Neither has CCA name - sort by sensor index
+                return a.sensor_index < b.sensor_index;
+              } else {
+                // CCA names come before non-CCA names
+                return a_has_cca;
+              }
+            });
+  
+  bool first = true;
+  
+  for (const auto &dwn : sorted_devices) {
+    if (!first) json += ",";
+    first = false;
+    
+    const auto &device = *dwn.device;
+    const std::string &device_name = dwn.name;
     
     char buffer[512];
     float power = device.voltage_out * device.current_in;

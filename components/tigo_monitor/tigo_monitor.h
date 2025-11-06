@@ -165,6 +165,9 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   // CCA synchronization (called by button or on boot)
   void sync_from_cca();
   
+  // CCA refresh (called by web server refresh button - does both device info + config sync)
+  void refresh_cca_data();
+  
   // CCA device info query (called by web server)
   void query_cca_device_info();
   

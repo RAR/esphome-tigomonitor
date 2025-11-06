@@ -8,6 +8,7 @@
 
 #ifdef USE_ESP_IDF
 #include "esp_http_client.h"
+#include <esp_heap_caps.h>
 #include "cJSON.h"
 #endif
 
@@ -1311,6 +1312,24 @@ void TigoMonitorComponent::sync_from_cca() {
   }
   
   ESP_LOGI(TAG, "Syncing device configuration from CCA at %s...", cca_ip_.c_str());
+  query_cca_config();
+}
+
+void TigoMonitorComponent::refresh_cca_data() {
+  if (cca_ip_.empty()) {
+    ESP_LOGW(TAG, "Cannot refresh CCA data - no IP address configured");
+    return;
+  }
+  
+  ESP_LOGI(TAG, "Refreshing CCA data from %s...", cca_ip_.c_str());
+  
+  // First query device info
+  query_cca_device_info();
+  
+  // Wait longer to ensure first HTTP connection is fully cleaned up and memory freed
+  delay(1000);
+  
+  // Then query config and match devices
   query_cca_config();
 }
 
