@@ -19,6 +19,14 @@ esp32:
       # Logging optimizations
       CONFIG_LOG_DEFAULT_LEVEL_INFO: "y"
       CONFIG_LOG_MAXIMUM_LEVEL_VERBOSE: "y"
+      # Enable PSRAM (8MB on AtomS3)
+      CONFIG_SPIRAM_MODE_OCT: "y"
+      CONFIG_SPIRAM_SPEED_80M: "y"
+
+# Enable PSRAM
+psram:
+  mode: octal
+  speed: 80MHz
 
 # External components
 external_components:
@@ -41,8 +49,6 @@ wifi:
   ap:
     ssid: "Tigo-Server Fallback Hotspot"
     password: "12345678"
-
-
 
 captive_portal:
 

@@ -51,11 +51,17 @@ A comprehensive ESPHome component for monitoring Tigo solar power optimizers via
 
 ## 📋 Requirements
 
-- ESP32 development board (ESP32-S3 recommended, tested on M5Stack AtomS3)
+- ESP32 development board (ESP32-S3 with PSRAM strongly recommended)
+  - **Tested:** M5Stack AtomS3 (no PSRAM, limited to ~20 devices with web server)
+  - **Recommended:** M5Stack AtomS3R (8MB PSRAM, supports 36+ devices)
 - UART connection to Tigo communication system (38400 baud)
 - ESPHome 2025.10.3 or newer
 - Home Assistant (optional, for full integration)
 - Tigo CCA (Cloud Connect Advanced) - optional, for panel name auto-labeling
+
+**Memory Requirements:**
+- **Without PSRAM:** Minimum 30-40KB free heap needed for web server + CCA queries
+- **With PSRAM:** 8MB additional RAM, eliminates memory constraints
 
 ## 🔧 Framework Requirements
 
@@ -163,6 +169,43 @@ First clone the repository:
 git clone https://github.com/RAR/esphome-tigomonitor.git
 cd esphome-tigomonitor
 ```
+
+### 3. PSRAM Configuration (Recommended for Web Server)
+
+If using the web server with many devices, PSRAM significantly improves memory availability. The M5Stack AtomS3R has 8MB of PSRAM (AtomS3 does not have PSRAM).
+
+**For ESP32-S3 with PSRAM (M5Stack AtomS3R):**
+
+```yaml
+esphome:
+  name: tigo-monitor
+  platformio_options:
+    board_build.flash_mode: dio
+
+psram:
+  mode: octal
+  speed: 80MHz
+
+esp32:
+  board: m5stack-atoms3
+  variant: esp32s3
+  framework:
+    type: esp-idf
+    sdkconfig_options:
+      CONFIG_ESP32S3_DEFAULT_CPU_FREQ_240: "y"
+      CONFIG_ESP32S3_DATA_CACHE_64KB: "y"
+      CONFIG_ESP32S3_DATA_CACHE_LINE_64B: "y"
+      CONFIG_SPIRAM_MODE_OCT: "y"
+      CONFIG_SPIRAM_SPEED_80M: "y"
+```
+
+**Benefits of PSRAM:**
+- **8MB additional RAM** for web server HTML/JSON buffers
+- **Prevents socket creation failures** from memory exhaustion
+- **Supports more devices** (tested with 36+)
+- **Better performance** with concurrent web requests
+
+The web server automatically uses PSRAM when available for large allocations, falling back to regular heap if PSRAM is not present.
 
 ## 🔧 Configuration Options
 
@@ -697,9 +740,15 @@ Update the dashboard entity names to match your ESPHome configuration:
 7. **Too many devices**
    - Increase `number_of_devices` in configuration
    - Monitor memory usage in compilation output
-   - Consider reducing web server features if memory is tight
+   - **Solution:** Use ESP32-S3 with PSRAM (e.g., M5Stack AtomS3R) for 36+ devices
 
-8. **Night mode / Zero publishing**
+8. **Socket creation failures / Memory exhaustion**
+   - Symptom: `Failed to create socket` errors in logs
+   - Minimum free heap below 30-40KB causes connection failures
+   - **Immediate fix:** Reboot ESP32 to clear memory fragmentation
+   - **Best solution:** Upgrade to ESP32 with PSRAM (8MB additional RAM)
+
+9. **Night mode / Zero publishing**
    - Component automatically enters night mode after 1 hour of no data
    - Publishes zeros every 10 minutes to prevent stale data in Home Assistant
    - This is normal behavior - devices resume when sun comes up
@@ -718,14 +767,27 @@ button:
 
 ## 📈 Performance Notes
 
-- **Memory Usage**: ~11-15% RAM (15% with web server), ~49% Flash (typical ESP32)
+### Memory Usage
+- **Without PSRAM (M5Stack AtomS3):**
+  - Base: ~10-11% RAM, ~49% Flash
+  - With Web Server: ~15% RAM (minimum 30KB free heap required)
+  - **Limitation:** ~20 devices maximum with web server enabled
+  - Risk of socket creation failures under heavy load
+
+- **With PSRAM (M5Stack AtomS3R):**
+  - Base: ~10% RAM + 8MB PSRAM
+  - With Web Server: ~12% RAM + PSRAM for buffers
+  - **Capacity:** 36+ devices tested successfully
+  - No socket creation issues, stable under load
+
+### Performance Metrics
 - **Update Rate**: 30-60 seconds recommended for normal operation
-- **Device Limit**: Tested with up to 36 devices
+- **Device Limit**: 36 devices tested (with PSRAM), ~20 without PSRAM
 - **Flash Wear Optimization**: Energy data saved hourly at the top of each hour
   - 24 writes/day (vs 288 with every-10-updates approach)
   - Flash lifespan: ~11 years @ 100k cycles, ~114 years @ 1M cycles
   - Maximum data loss: 1 hour of energy on unexpected reboot
-- **Web Server**: Adds ~4-5% RAM overhead, provides comprehensive monitoring interface
+- **Web Server**: Uses PSRAM for HTML/JSON buffers when available
 - **UART Optimization**: ISR in IRAM significantly reduces packet loss
 - **CCA Queries**: HTTP requests add ~2-3 second delay during sync
 - **Night Mode**: Automatic zero publishing after 1 hour of no data (every 10 minutes)

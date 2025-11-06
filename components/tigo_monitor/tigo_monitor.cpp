@@ -17,6 +17,46 @@ namespace tigo_monitor {
 
 static const char *const TAG = "tigo_monitor";
 
+#ifdef USE_ESP_IDF
+// Helper function to allocate from PSRAM if available, falls back to regular heap
+static void* psram_malloc(size_t size) {
+  void* ptr = heap_caps_malloc(size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+  if (ptr) {
+    ESP_LOGV(TAG, "Allocated %zu bytes from PSRAM", size);
+    return ptr;
+  }
+  // Fallback to regular heap
+  ptr = heap_caps_malloc(size, MALLOC_CAP_DEFAULT);
+  if (ptr) {
+    ESP_LOGV(TAG, "Allocated %zu bytes from regular heap (PSRAM unavailable)", size);
+  }
+  return ptr;
+}
+
+static void* psram_calloc(size_t count, size_t size) {
+  void* ptr = heap_caps_calloc(count, size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+  if (ptr) {
+    ESP_LOGV(TAG, "Allocated %zu bytes from PSRAM (calloc)", count * size);
+    return ptr;
+  }
+  // Fallback to regular heap
+  ptr = heap_caps_calloc(count, size, MALLOC_CAP_DEFAULT);
+  if (ptr) {
+    ESP_LOGV(TAG, "Allocated %zu bytes from regular heap (calloc, PSRAM unavailable)", count * size);
+  }
+  return ptr;
+}
+
+// Custom allocator hooks for cJSON to use PSRAM
+static void* cjson_malloc_psram(size_t size) {
+  return psram_malloc(size);
+}
+
+static void cjson_free_psram(void* ptr) {
+  heap_caps_free(ptr);
+}
+#endif
+
 // Tigo CRC table - copied from original Arduino code
 const uint8_t TigoMonitorComponent::tigo_crc_table_[256] = {
   0x0,0x3,0x6,0x5,0xC,0xF,0xA,0x9,0xB,0x8,0xD,0xE,0x7,0x4,0x1,0x2,
@@ -1372,14 +1412,26 @@ void TigoMonitorComponent::query_cca_config() {
   ESP_LOGI(TAG, "HTTP GET Status = %d, content_length = %d", status_code, content_length);
   
   if (status_code == 200) {
+    // Allocate read buffer from PSRAM if available (larger buffer = fewer reads)
+    const size_t buffer_size = 4096;
+    char* buffer = static_cast<char*>(psram_malloc(buffer_size));
+    if (!buffer) {
+      ESP_LOGE(TAG, "Failed to allocate HTTP read buffer");
+      esp_http_client_close(client);
+      esp_http_client_cleanup(client);
+      return;
+    }
+    
     // Read response in chunks (handles both known and chunked content-length)
     std::string response;
-    char buffer[1024];
+    response.reserve(content_length > 0 ? content_length : 8192);  // Pre-allocate
     int read_len;
     
-    while ((read_len = esp_http_client_read(client, buffer, sizeof(buffer))) > 0) {
+    while ((read_len = esp_http_client_read(client, buffer, buffer_size)) > 0) {
       response.append(buffer, read_len);
     }
+    
+    heap_caps_free(buffer);  // Free PSRAM buffer
     
     if (read_len < 0) {
       ESP_LOGE(TAG, "Failed to read HTTP response");
@@ -1399,9 +1451,17 @@ void TigoMonitorComponent::query_cca_config() {
 }
 
 void TigoMonitorComponent::match_cca_to_uart(const std::string &json_response) {
+  // Set custom allocators for cJSON to use PSRAM
+  cJSON_Hooks hooks;
+  hooks.malloc_fn = cjson_malloc_psram;
+  hooks.free_fn = cjson_free_psram;
+  cJSON_InitHooks(&hooks);
+  
   cJSON *root = cJSON_Parse(json_response.c_str());
   if (root == NULL) {
     ESP_LOGE(TAG, "Failed to parse CCA JSON response");
+    // Reset to default allocators
+    cJSON_InitHooks(NULL);
     return;
   }
   
@@ -1523,6 +1583,9 @@ void TigoMonitorComponent::match_cca_to_uart(const std::string &json_response) {
   }
   
   cJSON_Delete(root);
+  
+  // Reset cJSON to default allocators
+  cJSON_InitHooks(NULL);
 }
 
 void TigoMonitorComponent::query_cca_device_info() {
@@ -1555,14 +1618,27 @@ void TigoMonitorComponent::query_cca_device_info() {
   ESP_LOGI(TAG, "CCA Device Info HTTP GET Status = %d, content_length = %d", status_code, content_length);
   
   if (status_code == 200) {
+    // Allocate read buffer from PSRAM if available
+    const size_t buffer_size = 2048;
+    char* buffer = static_cast<char*>(psram_malloc(buffer_size));
+    if (!buffer) {
+      ESP_LOGE(TAG, "Failed to allocate HTTP read buffer");
+      cca_device_info_ = "{\"error\":\"Memory allocation failed\"}";
+      esp_http_client_close(client);
+      esp_http_client_cleanup(client);
+      return;
+    }
+    
     // Read response in chunks
     std::string response;
-    char buffer[1024];
+    response.reserve(content_length > 0 ? content_length : 2048);  // Pre-allocate
     int read_len;
     
-    while ((read_len = esp_http_client_read(client, buffer, sizeof(buffer))) > 0) {
+    while ((read_len = esp_http_client_read(client, buffer, buffer_size)) > 0) {
       response.append(buffer, read_len);
     }
+    
+    heap_caps_free(buffer);  // Free PSRAM buffer
     
     if (read_len < 0) {
       ESP_LOGE(TAG, "Failed to read CCA device info response");
