@@ -261,6 +261,8 @@ The component automatically uses PSRAM when available for HTTP buffers, JSON par
 | `tigo_monitor_id` | ID | Required | Reference to tigo_monitor component |
 | `port` | Integer | 80 | HTTP port for web interface |
 | `api_token` | String | None | Bearer token for API authentication (optional) |
+| `web_username` | String | None | Username for HTTP Basic Auth on web pages (optional) |
+| `web_password` | String | None | Password for HTTP Basic Auth on web pages (optional) |
 
 The web server provides:
 - **Dashboard** (`/`) - Live device monitoring with real-time metrics
@@ -318,6 +320,68 @@ curl -H "Authorization: Bearer wrong-token" http://10.75.0.45/api/status
 - Avoid using the token in URLs (use headers only)
 - Use HTTPS if exposing the API outside your local network
 - Rotate tokens periodically
+
+### Web Page Authentication
+
+The web interface supports optional HTTP Basic Authentication to protect access to all HTML pages:
+
+```yaml
+tigo_server:
+  tigo_monitor_id: tigo_hub
+  port: 80
+  web_username: "admin"              # Optional - username for web pages
+  web_password: "your-password"      # Optional - password for web pages
+  api_token: "your-api-token"        # Optional - separate token for API
+```
+
+**Features:**
+- **HTTP Basic Auth**: Standard browser authentication (username/password prompt)
+- **Optional**: If not configured, web pages remain open (backward compatible)
+- **Protected Pages**: All HTML pages require authentication:
+  - `/` (Dashboard), `/nodes` (Node Table), `/status` (ESP Status)
+  - `/yaml` (YAML Config), `/cca` (CCA Info)
+- **API Separate**: API endpoints use Bearer token authentication (see API Authentication section)
+- **Browser Caching**: Credentials cached per browser session (no repeated prompts)
+- **Logout**: Clear browser cache/cookies or restart browser to logout
+
+**Use Cases:**
+- **Web + API Auth**: Protect both web interface and API with different credentials
+  ```yaml
+  tigo_server:
+    web_username: "admin"
+    web_password: "web-password"
+    api_token: "api-secret-token"
+  ```
+  - Browser users: Prompted for username/password once per session
+  - API clients: Must send `Authorization: Bearer api-secret-token` header
+
+- **Web Only**: Protect web pages, leave API open for programmatic access
+  ```yaml
+  tigo_server:
+    web_username: "admin"
+    web_password: "secure-password"
+    # No api_token = API remains open
+  ```
+
+- **API Only**: Protect API, leave web pages open (previous behavior)
+  ```yaml
+  tigo_server:
+    api_token: "api-secret-token"
+    # No web_username/web_password = pages remain open
+  ```
+
+**Security Recommendations:**
+- Use strong passwords (10+ characters, mixed case, numbers, symbols)
+- Different credentials for web and API access
+- Change default passwords immediately
+- Consider using HTTPS for production deployments
+- Limit access via firewall rules to trusted networks
+
+**Browser Experience:**
+- First visit prompts for username/password
+- Credentials stored in browser session
+- No login page needed - standard HTTP Basic Auth dialog
+- Works on all browsers and mobile devices
 
 ### Sensor Types
 

@@ -28,12 +28,20 @@ class TigoWebServer : public Component {
   
   void set_api_token(const std::string &token) { api_token_ = token; }
   const std::string &get_api_token() const { return api_token_; }
+  
+  void set_web_username(const std::string &username) { web_username_ = username; }
+  const std::string &get_web_username() const { return web_username_; }
+  
+  void set_web_password(const std::string &password) { web_password_ = password; }
+  const std::string &get_web_password() const { return web_password_; }
 
  protected:
   tigo_monitor::TigoMonitorComponent *parent_{nullptr};
   httpd_handle_t server_{nullptr};
   uint16_t port_{80};
   std::string api_token_{""};
+  std::string web_username_{""};
+  std::string web_password_{""};
   
   // HTTP handlers
   static esp_err_t dashboard_handler(httpd_req_t *req);
@@ -57,6 +65,7 @@ class TigoWebServer : public Component {
   
   // Helper functions
   bool check_api_auth(httpd_req_t *req);
+  bool check_web_auth(httpd_req_t *req);
   tigo_monitor::TigoMonitorComponent *get_parent_from_req(httpd_req_t *req);
   std::string get_dashboard_html();
   std::string get_node_table_html();

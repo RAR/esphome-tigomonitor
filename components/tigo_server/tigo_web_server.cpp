@@ -10,6 +10,7 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <cstring>
+#include <mbedtls/base64.h>
 
 namespace esphome {
 namespace tigo_server {
@@ -241,6 +242,13 @@ void TigoWebServer::setup() {
     };
     httpd_register_uri_handler(server_, &api_reset_peak_power_uri);
     
+    // Log web authentication status
+    if (!web_username_.empty() && !web_password_.empty()) {
+      ESP_LOGI(TAG, "HTTP Basic Authentication configured for web pages (user: %s)", web_username_.c_str());
+    } else {
+      ESP_LOGI(TAG, "Web authentication not configured - pages remain open");
+    }
+    
     ESP_LOGI(TAG, "All routes registered");
   } else {
     ESP_LOGE(TAG, "Failed to start web server");
@@ -309,10 +317,104 @@ bool TigoWebServer::check_api_auth(httpd_req_t *req) {
   return true;
 }
 
+bool TigoWebServer::check_web_auth(httpd_req_t *req) {
+  TigoWebServer *server = static_cast<TigoWebServer *>(req->user_ctx);
+  
+  // If no credentials configured, allow all requests (backward compatible)
+  if (server->web_username_.empty() || server->web_password_.empty()) {
+    return true;
+  }
+  
+  // Get Authorization header
+  size_t buf_len = httpd_req_get_hdr_value_len(req, "Authorization");
+  if (buf_len == 0) {
+    // Send 401 with WWW-Authenticate header to trigger browser auth prompt
+    httpd_resp_set_status(req, "401 Unauthorized");
+    httpd_resp_set_hdr(req, "WWW-Authenticate", "Basic realm=\"Tigo Monitor\"");
+    httpd_resp_send(req, "401 Unauthorized", HTTPD_RESP_USE_STRLEN);
+    return false;
+  }
+  
+  // Read Authorization header
+  char *auth_header = static_cast<char*>(malloc(buf_len + 1));
+  if (!auth_header) {
+    httpd_resp_send_500(req);
+    return false;
+  }
+  
+  if (httpd_req_get_hdr_value_str(req, "Authorization", auth_header, buf_len + 1) != ESP_OK) {
+    free(auth_header);
+    httpd_resp_send_500(req);
+    return false;
+  }
+  
+  // Check for "Basic <credentials>" format
+  std::string auth_str(auth_header);
+  free(auth_header);
+  
+  if (auth_str.length() < 6 || auth_str.substr(0, 6) != "Basic ") {
+    // Send 401 to trigger browser auth prompt
+    httpd_resp_set_status(req, "401 Unauthorized");
+    httpd_resp_set_hdr(req, "WWW-Authenticate", "Basic realm=\"Tigo Monitor\"");
+    httpd_resp_send(req, "401 Unauthorized", HTTPD_RESP_USE_STRLEN);
+    return false;
+  }
+  
+  // Extract and decode base64 credentials
+  std::string encoded_creds = auth_str.substr(6);
+  
+  // Decode base64
+  size_t decoded_len = 0;
+  unsigned char decoded[256];
+  int ret = mbedtls_base64_decode(decoded, sizeof(decoded), &decoded_len,
+                                   (const unsigned char*)encoded_creds.c_str(),
+                                   encoded_creds.length());
+  
+  if (ret != 0 || decoded_len == 0) {
+    ESP_LOGW(TAG, "Failed to decode Basic Auth credentials");
+    httpd_resp_set_status(req, "401 Unauthorized");
+    httpd_resp_set_hdr(req, "WWW-Authenticate", "Basic realm=\"Tigo Monitor\"");
+    httpd_resp_send(req, "401 Unauthorized", HTTPD_RESP_USE_STRLEN);
+    return false;
+  }
+  
+  std::string credentials((char*)decoded, decoded_len);
+  
+  // Split username:password
+  size_t colon_pos = credentials.find(':');
+  if (colon_pos == std::string::npos) {
+    ESP_LOGW(TAG, "Invalid Basic Auth format");
+    httpd_resp_set_status(req, "401 Unauthorized");
+    httpd_resp_set_hdr(req, "WWW-Authenticate", "Basic realm=\"Tigo Monitor\"");
+    httpd_resp_send(req, "401 Unauthorized", HTTPD_RESP_USE_STRLEN);
+    return false;
+  }
+  
+  std::string username = credentials.substr(0, colon_pos);
+  std::string password = credentials.substr(colon_pos + 1);
+  
+  // Compare credentials
+  if (username != server->web_username_ || password != server->web_password_) {
+    ESP_LOGW(TAG, "Invalid web credentials provided for user: %s", username.c_str());
+    httpd_resp_set_status(req, "401 Unauthorized");
+    httpd_resp_set_hdr(req, "WWW-Authenticate", "Basic realm=\"Tigo Monitor\"");
+    httpd_resp_send(req, "401 Unauthorized", HTTPD_RESP_USE_STRLEN);
+    return false;
+  }
+  
+  // Credentials valid
+  return true;
+}
+
 // ===== HTML Page Handlers =====
 
 esp_err_t TigoWebServer::dashboard_handler(httpd_req_t *req) {
   TigoWebServer *server = static_cast<TigoWebServer *>(req->user_ctx);
+  
+  // Check web authentication
+  if (!server->check_web_auth(req)) {
+    return ESP_OK;
+  }
   
   // Use PSRAM for large HTML content
   PSRAMString html;
@@ -327,6 +429,11 @@ esp_err_t TigoWebServer::dashboard_handler(httpd_req_t *req) {
 esp_err_t TigoWebServer::node_table_handler(httpd_req_t *req) {
   TigoWebServer *server = static_cast<TigoWebServer *>(req->user_ctx);
   
+  // Check web authentication
+  if (!server->check_web_auth(req)) {
+    return ESP_OK;
+  }
+  
   PSRAMString html;
   std::string content = server->get_node_table_html();
   html.append(content);
@@ -339,6 +446,11 @@ esp_err_t TigoWebServer::node_table_handler(httpd_req_t *req) {
 esp_err_t TigoWebServer::esp_status_handler(httpd_req_t *req) {
   TigoWebServer *server = static_cast<TigoWebServer *>(req->user_ctx);
   
+  // Check web authentication
+  if (!server->check_web_auth(req)) {
+    return ESP_OK;
+  }
+  
   PSRAMString html;
   std::string content = server->get_esp_status_html();
   html.append(content);
@@ -350,6 +462,11 @@ esp_err_t TigoWebServer::esp_status_handler(httpd_req_t *req) {
 
 esp_err_t TigoWebServer::yaml_config_handler(httpd_req_t *req) {
   TigoWebServer *server = static_cast<TigoWebServer *>(req->user_ctx);
+  
+  // Check web authentication
+  if (!server->check_web_auth(req)) {
+    return ESP_OK;
+  }
   
   PSRAMString html;
   std::string content = server->get_yaml_config_html();
@@ -460,6 +577,11 @@ esp_err_t TigoWebServer::api_yaml_handler(httpd_req_t *req) {
 
 esp_err_t TigoWebServer::cca_info_handler(httpd_req_t *req) {
   TigoWebServer *server = static_cast<TigoWebServer *>(req->user_ctx);
+  
+  // Check web authentication
+  if (!server->check_web_auth(req)) {
+    return ESP_OK;
+  }
   
   PSRAMString html;
   std::string content = server->get_cca_info_html();

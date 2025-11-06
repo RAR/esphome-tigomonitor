@@ -11,12 +11,16 @@ TigoWebServer = tigo_server_ns.class_('TigoWebServer', cg.Component)
 
 CONF_TIGO_MONITOR_ID = 'tigo_monitor_id'
 CONF_API_TOKEN = 'api_token'
+CONF_WEB_USERNAME = 'web_username'
+CONF_WEB_PASSWORD = 'web_password'
 
 CONFIG_SCHEMA = cv.Schema({
     cv.GenerateID(): cv.declare_id(TigoWebServer),
     cv.GenerateID(CONF_TIGO_MONITOR_ID): cv.use_id(tigo_monitor.TigoMonitorComponent),
     cv.Optional(CONF_PORT, default=80): cv.port,
     cv.Optional(CONF_API_TOKEN): cv.string,
+    cv.Optional(CONF_WEB_USERNAME): cv.string,
+    cv.Optional(CONF_WEB_PASSWORD): cv.string,
 }).extend(cv.COMPONENT_SCHEMA)
 
 
@@ -34,4 +38,10 @@ async def to_code(config):
     # Set the API token if provided
     if CONF_API_TOKEN in config:
         cg.add(var.set_api_token(config[CONF_API_TOKEN]))
+    
+    # Set the web authentication if provided
+    if CONF_WEB_USERNAME in config:
+        cg.add(var.set_web_username(config[CONF_WEB_USERNAME]))
+    if CONF_WEB_PASSWORD in config:
+        cg.add(var.set_web_password(config[CONF_WEB_PASSWORD]))
 
