@@ -51,17 +51,19 @@ A comprehensive ESPHome component for monitoring Tigo solar power optimizers via
 
 ## 📋 Requirements
 
-- ESP32 development board (ESP32-S3 with PSRAM strongly recommended)
-  - **Tested:** M5Stack AtomS3 (no PSRAM, limited to ~20 devices with web server)
-  - **Recommended:** M5Stack AtomS3R (8MB PSRAM, supports 36+ devices)
+- ESP32 development board
+  - **Less than 15 devices:** ESP32 or ESP32-S3 without PSRAM will work
+  - **15+ devices:** ESP32-S3 with PSRAM **required**
+  - **Tested:** M5Stack AtomS3 (no PSRAM, works up to ~15-20 devices with web server)
+  - **Recommended:** [M5Stack AtomS3R](https://docs.m5stack.com/en/core/AtomS3R) (8MB PSRAM, supports 36+ devices)
 - UART connection to Tigo communication system (38400 baud)
 - ESPHome 2025.10.3 or newer
 - Home Assistant (optional, for full integration)
 - Tigo CCA (Cloud Connect Advanced) - optional, for panel name auto-labeling
 
 **Memory Requirements:**
-- **Without PSRAM:** Minimum 30-40KB free heap needed for web server + CCA queries
-- **With PSRAM:** 8MB additional RAM, eliminates memory constraints
+- **Without PSRAM (<15 devices):** Minimum 30-40KB free heap needed for web server + CCA queries
+- **With PSRAM (15+ devices):** 8MB additional RAM, eliminates memory constraints
 
 ## 🔧 Framework Requirements
 
@@ -89,12 +91,19 @@ esp32:
 
 ### 1. Hardware Setup
 
-Connect your ESP32 to the Tigo communication system:
+Connect your ESP32 to the Tigo communication system via RS485:
 
-- **TX Pin**: GPIO1 (connects to Tigo RX)
-- **RX Pin**: GPIO3 (connects to Tigo TX)
+**Recommended Hardware:**
+- **M5Stack AtomS3R** (8MB PSRAM) for 15+ devices
+- **M5Stack Atomic RS485 Base** ([link](https://docs.m5stack.com/en/atom/Atomic%20RS485%20Base)) - provides easy RS485 connection with built-in level shifters
+
+**UART Connection:**
+- **TX Pin**: GPIO1 (connects to Tigo RX via RS485)
+- **RX Pin**: GPIO3 (connects to Tigo TX via RS485)
 - **Baud Rate**: 38400
 - **Data**: 8 bits, No parity, 1 stop bit
+
+**Note:** The Tigo communication system uses RS485. The Atomic RS485 Base provides the necessary level shifting and makes connection straightforward.
 
 ### 2. Basic Configuration
 
@@ -170,9 +179,9 @@ git clone https://github.com/RAR/esphome-tigomonitor.git
 cd esphome-tigomonitor
 ```
 
-### 3. PSRAM Configuration (Recommended for Web Server)
+### 3. PSRAM Configuration (Required for 15+ Devices)
 
-If using the web server with many devices, PSRAM significantly improves memory availability. The M5Stack AtomS3R has 8MB of PSRAM (AtomS3 does not have PSRAM).
+**PSRAM is required when monitoring 15 or more Tigo devices.** The M5Stack AtomS3R has 8MB of PSRAM (AtomS3 does not have PSRAM).
 
 **For ESP32-S3 with PSRAM (M5Stack AtomS3R):**
 
@@ -200,12 +209,12 @@ esp32:
 ```
 
 **Benefits of PSRAM:**
-- **8MB additional RAM** for web server HTML/JSON buffers
+- **Required for 15+ devices** - eliminates memory constraints
+- **8MB additional RAM** for HTTP buffers, JSON parsing, and web server
 - **Prevents socket creation failures** from memory exhaustion
-- **Supports more devices** (tested with 36+)
-- **Better performance** with concurrent web requests
+- **Better performance** with concurrent web requests and CCA queries
 
-The web server automatically uses PSRAM when available for large allocations, falling back to regular heap if PSRAM is not present.
+The component automatically uses PSRAM when available for HTTP buffers, JSON parsing, and web server operations, falling back to regular heap if PSRAM is not present.
 
 ## 🔧 Configuration Options
 
@@ -782,12 +791,15 @@ button:
 
 ### Performance Metrics
 - **Update Rate**: 30-60 seconds recommended for normal operation
-- **Device Limit**: 36 devices tested (with PSRAM), ~20 without PSRAM
+- **Device Limits**: 
+  - Without PSRAM: Up to ~15 devices (20 max, but may experience memory issues)
+  - With PSRAM: 36+ devices tested successfully
+  - **Recommendation:** Use ESP32-S3 with PSRAM for 15+ devices
 - **Flash Wear Optimization**: Energy data saved hourly at the top of each hour
   - 24 writes/day (vs 288 with every-10-updates approach)
   - Flash lifespan: ~11 years @ 100k cycles, ~114 years @ 1M cycles
   - Maximum data loss: 1 hour of energy on unexpected reboot
-- **Web Server**: Uses PSRAM for HTML/JSON buffers when available
+- **PSRAM Optimization**: HTTP buffers, JSON parsing, and web server use PSRAM when available
 - **UART Optimization**: ISR in IRAM significantly reduces packet loss
 - **CCA Queries**: HTTP requests add ~2-3 second delay during sync
 - **Night Mode**: Automatic zero publishing after 1 hour of no data (every 10 minutes)
