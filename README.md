@@ -4,25 +4,52 @@ A comprehensive ESPHome component for monitoring Tigo solar power optimizers via
 
 ## 🌟 Features
 
+### Core Monitoring
 - **ESP-IDF Framework**: Built specifically for ESP-IDF for optimal performance and reliability
 - **Individual Device Monitoring**: Track voltage, current, power, temperature, and RSSI for each Tigo optimizer
 - **System Aggregation**: Total system power, energy production (kWh), and active device count
 - **Device Discovery**: Automatic detection and persistent mapping of Tigo devices
-- **Barcode Identification**: Device identification using Frame 09 barcode data
+- **Barcode Identification**: Device identification using Frame 09 and Frame 27 barcode data
 - **Power Efficiency Analytics**: Conversion efficiency, power factor, duty cycle, and load factor metrics
 - **Device Information**: Firmware version and device info extraction from string responses
 - **Energy Dashboard Integration**: Compatible with Home Assistant's Energy Dashboard
 - **Persistent Storage**: Device mappings and energy data survive reboots
+
+### Web Interface
+- **Built-in Web Dashboard**: Custom web server with 6 comprehensive pages
+  - **Dashboard**: Real-time overview of all devices with live power metrics
+  - **System Overview**: Aggregated statistics and system-wide analytics
+  - **Node Table**: Complete device registry with CCA labels and hierarchy
+  - **ESP32 Status**: System health, memory usage, task count, and uptime
+  - **YAML Config Generator**: Automatic sensor configuration generation
+  - **CCA Info**: Tigo CCA device information and status monitoring
+- **Mobile Responsive**: Optimized layouts for desktop and mobile devices
+- **Auto-refresh**: Live updates without page reloads
+- **No External Dependencies**: Runs entirely on the ESP32
+
+### CCA Integration
+- **Automatic CCA Sync**: Query Tigo CCA for panel configuration data
+- **Panel Name Mapping**: Automatically label panels with CCA-assigned names
+- **Hierarchy Display**: Shows Inverter → String → Panel relationships
+- **Barcode Matching**: Fuzzy matching between UART devices and CCA configuration
+- **Sync on Boot**: Optional automatic synchronization on startup
+- **Manual Sync Button**: On-demand CCA configuration refresh
+- **Device Validation**: Visual indicators for CCA-validated devices
+
+### Advanced Features
+- **Night Mode**: Automatic zero publishing when no data received (prevents stale data at night)
+- **UART Optimization**: ISR in IRAM for reduced packet loss
 - **Flexible Configuration**: Support for individual sensors or combined device sensors
 - **Management Tools**: Built-in buttons for YAML generation and device management
 - **OTA Updates**: Over-the-air firmware updates
 
 ## 📋 Requirements
 
-- ESP32 development board
+- ESP32 development board (ESP32-S3 recommended, tested on M5Stack AtomS3)
 - UART connection to Tigo communication system (38400 baud)
 - ESPHome 2025.10.3 or newer
 - Home Assistant (optional, for full integration)
+- Tigo CCA (Cloud Connect Advanced) - optional, for panel name auto-labeling
 
 ## 🔧 Framework Requirements
 
@@ -31,8 +58,9 @@ This component requires the ESP-IDF framework:
 ### ESP-IDF Framework
 - Uses native ESP-IDF libraries for optimal performance
 - Better memory efficiency and reliability
-- Memory usage: ~10% RAM, ~49% Flash
+- Memory usage: ~10% RAM, ~49% Flash (without web server), ~15% RAM with web server
 - Robust implementation with advanced features
+- Required for web server functionality
 
 Configure ESP-IDF framework in your configuration:
 ```yaml
@@ -41,6 +69,8 @@ esp32:
   framework:
     type: esp-idf
     version: recommended
+    sdkconfig_options:
+      CONFIG_UART_ISR_IN_IRAM: "y"  # Reduces UART packet loss
 ```
 
 ## 🛠️ Installation
@@ -71,9 +101,10 @@ esp32:
 # External components
 external_components:
   - source: github://RAR/esphome-tigomonitor
-    components: [ tigo_monitor ]
+    components: [ tigo_monitor, tigo_server ]
     # Optional: specify a specific version/branch
     # ref: v1.0.0  # Use a specific release tag
+    # ref: dev     # Use development branch
     # ref: main    # Use main branch (default)
 
 # WiFi configuration
@@ -101,6 +132,13 @@ tigo_monitor:
   uart_id: tigo_uart
   update_interval: 30s
   number_of_devices: 20  # Set to your actual number of Tigo devices
+  cca_ip: "192.168.1.100"  # Optional: IP address of your Tigo CCA
+  sync_cca_on_startup: true  # Optional: Auto-sync CCA config on boot (default: true)
+
+# Optional: Web Server for monitoring dashboard
+tigo_server:
+  tigo_monitor_id: tigo_hub
+  port: 80  # Default web server port
 ```
 
 ### Alternative Installation (Development)
@@ -129,6 +167,23 @@ cd esphome-tigomonitor
 | `uart_id` | ID | Required | UART component ID for communication |
 | `update_interval` | Time | 60s | How often to publish sensor data |
 | `number_of_devices` | Integer | 5 | Maximum number of Tigo devices to track |
+| `cca_ip` | String | None | IP address of Tigo CCA for automatic panel labeling |
+| `sync_cca_on_startup` | Boolean | true | Automatically sync CCA configuration on boot |
+
+### Tigo Web Server Component
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `tigo_monitor_id` | ID | Required | Reference to tigo_monitor component |
+| `port` | Integer | 80 | HTTP port for web interface |
+
+The web server provides:
+- **Dashboard** (`/`) - Live device monitoring with real-time metrics
+- **Overview** (`/overview`) - System-wide statistics and aggregation
+- **Node Table** (`/nodes`) - Complete device list with CCA labels
+- **ESP32 Status** (`/status`) - System health and resource usage
+- **YAML Config** (`/yaml`) - Auto-generated sensor configuration
+- **CCA Info** (`/cca`) - Tigo CCA device status and information
 
 ### Sensor Types
 
@@ -208,9 +263,123 @@ button:
     name: "Print Device Mappings"
     tigo_monitor_id: tigo_hub
     button_type: device_mappings
+  
+  - platform: tigo_monitor
+    name: "Sync from CCA"
+    tigo_monitor_id: tigo_hub
+    button_type: sync_from_cca  # Fetch panel names from Tigo CCA
+  
+  - platform: tigo_monitor
+    name: "Reset Node Table"
+    tigo_monitor_id: tigo_hub
+    button_type: reset_node_table
 ```
 
 Press the "Print Device Mappings" button to see discovered devices in the logs.
+
+## 🌐 Web Interface
+
+The component includes a built-in web server accessible at `http://<esp32-ip>/`
+
+### Web Dashboard Features
+
+#### Dashboard Page (`/`)
+- **Live Device Cards**: Real-time power, voltage, current, and temperature for each device
+- **System Statistics**: Total power, average efficiency, active device count
+- **Auto-refresh**: Updates every 5 seconds
+- **Device Age Indicators**: Shows how recently each device reported data
+
+#### Overview Page (`/overview`)
+- **System Metrics**: Total power, current, efficiency, temperature
+- **Active Device Count**: Real-time tracking of online devices
+- **Aggregated Statistics**: System-wide analytics
+
+#### Node Table Page (`/nodes`)
+- **Complete Device List**: All discovered devices with sensor assignments
+- **CCA Integration**: Shows panel names from Tigo CCA (if configured)
+- **Hierarchy Display**: Inverter → String → Panel structure
+- **Barcode Information**: Frame 09 and Frame 27 barcode data
+- **Validation Badges**: Visual indicators for CCA-validated devices
+
+#### ESP32 Status Page (`/status`)
+- **System Information**: Uptime, ESPHome version, compilation time
+- **Memory Metrics**: Heap and PSRAM usage with visual progress bars
+- **Minimum Free Memory**: Lowest memory levels (helps detect memory leaks)
+- **Task Count**: Number of active FreeRTOS tasks
+- **Auto-refresh**: Updates every 5 seconds
+
+#### YAML Config Page (`/yaml`)
+- **Auto-generated Configuration**: Complete sensor definitions for all devices
+- **CCA Labels**: Uses panel names from CCA if synced
+- **Copy to Clipboard**: One-click copy functionality
+- **Device Count**: Shows number of configured devices
+
+#### CCA Info Page (`/cca`)
+- **Connection Status**: Real-time CCA connectivity
+- **Device Information**: Serial number, software version, system ID
+- **System Status**: Cloud connection, gateway communication, module status
+- **Discovery Progress**: Current discovery status (e.g., "36/36")
+- **Uptime**: CCA uptime in human-readable format
+- **Last Config Sync**: When configuration was last pulled from cloud
+- **Auto-refresh**: Updates every 30 seconds
+
+### Accessing the Web Interface
+
+```
+http://<esp32-ip-address>/        # Dashboard
+http://<esp32-ip-address>/overview # Overview
+http://<esp32-ip-address>/nodes    # Node Table
+http://<esp32-ip-address>/status   # ESP32 Status
+http://<esp32-ip-address>/yaml     # YAML Config
+http://<esp32-ip-address>/cca      # CCA Info
+```
+
+## 🔗 CCA Integration
+
+### Automatic Panel Labeling
+
+The component can query your Tigo CCA (Cloud Connect Advanced) to automatically label panels with their configured names.
+
+#### Configuration
+
+```yaml
+tigo_monitor:
+  id: tigo_hub
+  uart_id: tigo_uart
+  cca_ip: "192.168.1.100"  # Your CCA IP address
+  sync_cca_on_startup: true  # Auto-sync on boot
+```
+
+#### Features
+
+- **Barcode Matching**: Fuzzy matches UART devices with CCA configuration using Frame 27 (16-char) and Frame 09 (6-char) barcodes
+- **Hierarchy Mapping**: Shows Inverter → String → Panel relationships
+- **Label Storage**: CCA labels persist across reboots
+- **Manual Sync**: Button to refresh CCA configuration on demand
+- **Auto-sync**: Optional automatic synchronization on startup (5-second delay for WiFi)
+
+#### CCA Sync Button
+
+```yaml
+button:
+  - platform: tigo_monitor
+    name: "Sync from CCA"
+    tigo_monitor_id: tigo_hub
+    button_type: sync_from_cca
+```
+
+Press this button to query the CCA and match panels to their configured names. The component will:
+1. Query CCA's `/cgi-bin/summary_config` endpoint
+2. Parse panel configuration with serial numbers
+3. Match CCA serials to UART device barcodes
+4. Store matched labels persistently
+
+#### Benefits
+
+- **User-Friendly Names**: "East Roof Panel 3" instead of "Tigo Device 1"
+- **System Visualization**: See which string and inverter each panel belongs to
+- **YAML Generation**: Auto-generated configs use CCA names
+- **Web Interface**: Node Table displays CCA labels and hierarchy
 
 ### Step 3: Generate Configuration
 
@@ -318,14 +487,18 @@ automation:
 ```
 components/
 ├── tigo_monitor/
-│   ├── __init__.py          # Component initialization
-│   ├── button.py            # Management button platform
-│   ├── sensor.py            # Sensor platform configuration
+│   ├── __init__.py           # Component initialization and config validation
+│   ├── button.py             # Management button platform (YAML gen, CCA sync, etc.)
+│   ├── sensor.py             # Sensor platform configuration
 │   ├── tigo_monitor.cpp      # Main component implementation
 │   └── tigo_monitor.h        # Component header file
-├── examples/                # Configuration examples
-├── tigo-server.yaml         # Main configuration file
-└── README.md               # This file
+├── tigo_server/
+│   ├── __init__.py           # Web server component initialization
+│   ├── tigo_web_server.cpp   # Web server implementation (6 pages + APIs)
+│   └── tigo_web_server.h     # Web server header file
+├── examples/                 # Configuration examples
+├── tigo-server.yaml          # Main configuration file
+└── README.md                 # This file
 ```
 
 ## 🔧 Advanced Configuration
@@ -440,25 +613,53 @@ Update the dashboard entity names to match your ESPHome configuration:
 - Ensure ESPHome 2025.10.4+ for ESP-IDF 5.4.2 support
 - Check framework version: `type: esp-idf, version: recommended`
 - Memory usage may require adjusting `number_of_devices`
+- Add `CONFIG_UART_ISR_IN_IRAM: "y"` to sdkconfig_options to reduce packet loss
 
 ### Common Issues
 
 1. **No devices discovered**
-   - Check UART wiring and baud rate
+   - Check UART wiring and baud rate (38400)
    - Verify Tigo system is communicating
    - Check ESPHome logs for Frame detection
+   - Look for "📦 Frame" messages in logs
 
 2. **Devices discovered but no barcodes**
-   - Frame 09 data may not be transmitted by all systems
+   - Frame 09 and Frame 27 data may not be transmitted by all systems
    - Devices will work without barcodes (shows as "mod#XXXX")
+   - Wait longer for Frame 27 (16-char barcode) to be received
 
-3. **Energy data resets on reboot**
+3. **"Packet missed!" errors**
+   - Add `CONFIG_UART_ISR_IN_IRAM: "y"` to ESP-IDF sdkconfig_options
+   - This moves UART interrupt handler to IRAM for faster processing
+   - Significantly reduces packet loss
+
+4. **CCA sync not working**
+   - Verify CCA IP address is correct
+   - Check network connectivity between ESP32 and CCA
+   - CCA must be on same network or routable from ESP32
+   - Check CCA is responding (try accessing http://cca-ip in browser)
+   - Review logs for "CCA Sync complete" or error messages
+
+5. **Web interface not accessible**
+   - Verify `tigo_server` component is configured
+   - Check ESP32 IP address (look in ESPHome logs)
+   - Ensure port 80 is not blocked by firewall
+   - Try accessing http://esp32-ip directly
+
+6. **Energy data resets on reboot**
    - Component automatically saves energy data to flash
    - Check logs for "Restored total energy" messages
+   - Data is saved every 10 updates to reduce flash wear
 
-4. **Too many devices**
+7. **Too many devices**
    - Increase `number_of_devices` in configuration
    - Monitor memory usage in compilation output
+   - Consider reducing web server features if memory is tight
+
+8. **Night mode / Zero publishing**
+   - Component automatically enters night mode after 1 hour of no data
+   - Publishes zeros every 10 minutes to prevent stale data in Home Assistant
+   - This is normal behavior - devices resume when sun comes up
 
 ### Reset Commands
 
@@ -474,10 +675,14 @@ button:
 
 ## 📈 Performance Notes
 
-- **Memory Usage**: ~11% RAM, ~49% Flash (typical ESP32)
+- **Memory Usage**: ~11-15% RAM (15% with web server), ~49% Flash (typical ESP32)
 - **Update Rate**: 30-60 seconds recommended for normal operation
-- **Device Limit**: Tested with up to 20 devices
+- **Device Limit**: Tested with up to 36 devices
 - **Persistence**: Energy data saved every 10 updates to reduce flash wear
+- **Web Server**: Adds ~4-5% RAM overhead, provides comprehensive monitoring interface
+- **UART Optimization**: ISR in IRAM significantly reduces packet loss
+- **CCA Queries**: HTTP requests add ~2-3 second delay during sync
+- **Night Mode**: Automatic zero publishing after 1 hour of no data (every 10 minutes)
 
 ## 🤝 Contributing
 
