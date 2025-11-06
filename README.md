@@ -752,7 +752,6 @@ This project builds upon the excellent work of several open-source contributors:
 - **[willglynn/taptap](https://github.com/willglynn/taptap)** - Innovative approach to Tigo system monitoring and reverse engineering insights
 - **[tictactom/tigo_server](https://github.com/tictactom/tigo_server)** - Additional Tigo monitoring implementation and protocol documentation
 - **ESPHome Framework** - Providing the robust platform for ESP32-based home automation components
-- **Home Assistant Community** - Inspiration and integration patterns for energy monitoring solutions
 
 Special thanks to all the developers who contributed to understanding and documenting the Tigo communication protocols through their open-source work.
 
