@@ -175,6 +175,9 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   unsigned long get_last_cca_sync_time() const { return last_cca_sync_time_; }
   float get_total_energy_kwh() const { return total_energy_kwh_; }
   
+  // Public methods for web server access
+  void reset_peak_power();  // Reset all peak power values to 0
+  
   // Generate YAML configuration for manual setup
   void generate_sensor_yaml();
   

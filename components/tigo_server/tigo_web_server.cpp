@@ -233,6 +233,14 @@ void TigoWebServer::setup() {
     };
     httpd_register_uri_handler(server_, &api_restart_uri);
     
+    httpd_uri_t api_reset_peak_power_uri = {
+      .uri = "/api/reset_peak_power",
+      .method = HTTP_POST,
+      .handler = api_reset_peak_power_handler,
+      .user_ctx = this
+    };
+    httpd_register_uri_handler(server_, &api_reset_peak_power_uri);
+    
     ESP_LOGI(TAG, "All routes registered");
   } else {
     ESP_LOGE(TAG, "Failed to start web server");
@@ -469,6 +477,21 @@ esp_err_t TigoWebServer::api_restart_handler(httpd_req_t *req) {
   
   // Schedule restart after a short delay to allow response to be sent
   App.safe_reboot();
+  
+  return ESP_OK;
+}
+
+esp_err_t TigoWebServer::api_reset_peak_power_handler(httpd_req_t *req) {
+  TigoWebServer *server = (TigoWebServer *)req->user_ctx;
+  ESP_LOGI(TAG, "Reset peak power requested via web interface");
+  
+  // Reset peak power for all devices
+  server->parent_->reset_peak_power();
+  
+  // Send success response
+  const char* response = "{\"status\":\"ok\",\"message\":\"Peak power values reset successfully\"}";
+  httpd_resp_set_type(req, "application/json");
+  httpd_resp_send(req, response, strlen(response));
   
   return ESP_OK;
 }
@@ -1421,8 +1444,12 @@ std::string TigoWebServer::get_esp_status_html() {
         <button onclick="restartESP()" style="padding: 12px 24px; background-color: #e74c3c; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; font-weight: bold;">
           🔄 Restart ESP32
         </button>
+        <button onclick="resetPeakPower()" style="padding: 12px 24px; background-color: #f39c12; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; font-weight: bold;">
+          ⚡ Reset Peak Power
+        </button>
       </div>
       <div id="restart-message" style="margin-top: 1rem; padding: 1rem; border-radius: 4px; display: none;"></div>
+      <div id="reset-message" style="margin-top: 1rem; padding: 1rem; border-radius: 4px; display: none;"></div>
     </div>
   </div>
   
@@ -1523,6 +1550,38 @@ std::string TigoWebServer::get_esp_status_html() {
         messageDiv.style.backgroundColor = '#e74c3c';
         messageDiv.textContent = 'Error: Failed to send restart command. Please try again.';
         console.error('Restart error:', error);
+      }
+    }
+    
+    async function resetPeakPower() {
+      const messageDiv = document.getElementById('reset-message');
+      
+      if (!confirm('Are you sure you want to reset all peak power values? This will clear the historical maximum power readings for all devices.')) {
+        return;
+      }
+      
+      messageDiv.style.display = 'block';
+      messageDiv.style.backgroundColor = '#3498db';
+      messageDiv.style.color = 'white';
+      messageDiv.textContent = 'Resetting peak power values...';
+      
+      try {
+        const response = await fetch('/api/reset_peak_power', { method: 'POST' });
+        if (response.ok) {
+          messageDiv.style.backgroundColor = '#27ae60';
+          messageDiv.textContent = 'Peak power values have been reset successfully!';
+          
+          // Hide message after 5 seconds
+          setTimeout(() => {
+            messageDiv.style.display = 'none';
+          }, 5000);
+        } else {
+          throw new Error('Failed to reset peak power');
+        }
+      } catch (error) {
+        messageDiv.style.backgroundColor = '#e74c3c';
+        messageDiv.textContent = 'Error: Failed to reset peak power. Please try again.';
+        console.error('Reset error:', error);
       }
     }
     

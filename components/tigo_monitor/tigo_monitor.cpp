@@ -1441,6 +1441,26 @@ void TigoMonitorComponent::load_peak_power_data() {
   ESP_LOGI(TAG, "Loaded %d peak power entries from flash", loaded_count);
 }
 
+void TigoMonitorComponent::reset_peak_power() {
+  ESP_LOGI(TAG, "Resetting all peak power values...");
+  
+  int reset_count = 0;
+  for (size_t i = 0; i < devices_.size(); i++) {
+    auto &device = devices_[i];
+    device.peak_power = 0.0f;
+    
+    // Clear from flash storage
+    std::string pref_key = "peak_" + device.addr;
+    uint32_t hash = esphome::fnv1_hash(pref_key);
+    auto save = global_preferences->make_preference<float>(hash);
+    float zero = 0.0f;
+    save.save(&zero);
+    reset_count++;
+  }
+  
+  ESP_LOGI(TAG, "Reset %d peak power values", reset_count);
+}
+
 void TigoMonitorComponent::save_persistent_data() {
   ESP_LOGI(TAG, "Saving all persistent data to flash (node table, peak power, energy)...");
   save_node_table();
