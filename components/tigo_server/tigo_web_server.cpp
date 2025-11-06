@@ -217,6 +217,14 @@ void TigoWebServer::setup() {
     };
     httpd_register_uri_handler(server_, &api_node_delete_uri);
     
+    httpd_uri_t api_restart_uri = {
+      .uri = "/api/restart",
+      .method = HTTP_POST,
+      .handler = api_restart_handler,
+      .user_ctx = this
+    };
+    httpd_register_uri_handler(server_, &api_restart_uri);
+    
     ESP_LOGI(TAG, "All routes registered");
   } else {
     ESP_LOGE(TAG, "Failed to start web server");
@@ -426,6 +434,20 @@ esp_err_t TigoWebServer::api_node_delete_handler(httpd_req_t *req) {
     httpd_resp_set_status(req, "404 Not Found");
     httpd_resp_send(req, response.c_str(), response.length());
   }
+  
+  return ESP_OK;
+}
+
+esp_err_t TigoWebServer::api_restart_handler(httpd_req_t *req) {
+  ESP_LOGI(TAG, "Restart requested via web interface");
+  
+  // Send success response
+  const char* response = "{\"status\":\"ok\",\"message\":\"Restarting ESP32...\"}";
+  httpd_resp_set_type(req, "application/json");
+  httpd_resp_send(req, response, strlen(response));
+  
+  // Schedule restart after a short delay to allow response to be sent
+  App.safe_reboot();
   
   return ESP_OK;
 }
@@ -1245,6 +1267,16 @@ std::string TigoWebServer::get_esp_status_html() {
         </div>
       </div>
     </div>
+    
+    <div class="card">
+      <h2>Actions</h2>
+      <div style="display: flex; gap: 1rem; flex-wrap: wrap;">
+        <button onclick="restartESP()" style="padding: 12px 24px; background-color: #e74c3c; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; font-weight: bold;">
+          🔄 Restart ESP32
+        </button>
+      </div>
+      <div id="restart-message" style="margin-top: 1rem; padding: 1rem; border-radius: 4px; display: none;"></div>
+    </div>
   </div>
   
   <script>
@@ -1312,6 +1344,38 @@ std::string TigoWebServer::get_esp_status_html() {
         }
       } catch (error) {
         console.error('Error loading data:', error);
+      }
+    }
+    
+    async function restartESP() {
+      const messageDiv = document.getElementById('restart-message');
+      
+      if (!confirm('Are you sure you want to restart the ESP32? This will interrupt monitoring briefly.')) {
+        return;
+      }
+      
+      messageDiv.style.display = 'block';
+      messageDiv.style.backgroundColor = '#3498db';
+      messageDiv.style.color = 'white';
+      messageDiv.textContent = 'Restarting ESP32... Please wait 10-15 seconds.';
+      
+      try {
+        const response = await fetch('/api/restart', { method: 'POST' });
+        if (response.ok) {
+          messageDiv.style.backgroundColor = '#27ae60';
+          messageDiv.textContent = 'Restart command sent! The ESP32 is rebooting. Page will reload in 15 seconds...';
+          
+          // Reload page after 15 seconds to reconnect
+          setTimeout(() => {
+            window.location.reload();
+          }, 15000);
+        } else {
+          throw new Error('Failed to restart');
+        }
+      } catch (error) {
+        messageDiv.style.backgroundColor = '#e74c3c';
+        messageDiv.textContent = 'Error: Failed to send restart command. Please try again.';
+        console.error('Restart error:', error);
       }
     }
     
