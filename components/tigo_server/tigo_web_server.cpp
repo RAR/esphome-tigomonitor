@@ -700,42 +700,56 @@ std::string TigoWebServer::get_dashboard_html() {
   <title>Tigo Monitor - Dashboard</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f5f5; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f5f5; transition: background-color 0.3s, color 0.3s; }
     .header { background: #2c3e50; color: white; padding: 1rem 2rem; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
     .header-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem; }
     .header h1 { font-size: 1.5rem; margin: 0; }
-    .temp-toggle { background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.3); color: white; padding: 0.5rem 1rem; border-radius: 4px; cursor: pointer; font-size: 0.875rem; transition: all 0.2s; }
-    .temp-toggle:hover { background: rgba(255,255,255,0.2); }
+    .header-controls { display: flex; gap: 0.5rem; }
+    .temp-toggle, .theme-toggle { background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.3); color: white; padding: 0.5rem 1rem; border-radius: 4px; cursor: pointer; font-size: 0.875rem; transition: all 0.2s; }
+    .temp-toggle:hover, .theme-toggle:hover { background: rgba(255,255,255,0.2); }
     .nav { display: flex; gap: 1rem; margin-top: 0.5rem; }
-    .nav a { color: #3498db; text-decoration: none; padding: 0.5rem 1rem; background: rgba(255,255,255,0.1); border-radius: 4px; }
+    .nav a { color: #3498db; text-decoration: none; padding: 0.5rem 1rem; background: rgba(255,255,255,0.1); border-radius: 4px; transition: all 0.2s; }
     .nav a:hover { background: rgba(255,255,255,0.2); }
     .nav a.active { background: #3498db; color: white; }
     .container { max-width: 1400px; margin: 2rem auto; padding: 0 1rem; }
     .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-bottom: 2rem; }
-    .stat-card { background: white; padding: 1.5rem; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+    .stat-card { background: white; padding: 1.5rem; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); transition: background-color 0.3s, box-shadow 0.3s; }
     .stat-card h3 { font-size: 0.875rem; color: #7f8c8d; margin-bottom: 0.5rem; text-transform: uppercase; }
     .stat-card .value { font-size: 2rem; font-weight: bold; color: #2c3e50; }
     .stat-card .unit { font-size: 1rem; color: #95a5a6; margin-left: 0.25rem; }
     .devices-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(350px, 1fr)); gap: 1rem; }
-    .device-card { background: white; border-radius: 8px; padding: 1.5rem; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+    .device-card { background: white; border-radius: 8px; padding: 1.5rem; box-shadow: 0 2px 4px rgba(0,0,0,0.1); transition: background-color 0.3s, box-shadow 0.3s; }
     .device-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; border-bottom: 2px solid #ecf0f1; padding-bottom: 0.75rem; }
     .device-title-section { flex: 1; }
     .device-title { font-size: 1.125rem; font-weight: bold; color: #2c3e50; }
     .device-subtitle { font-size: 0.75rem; color: #7f8c8d; margin-top: 0.25rem; }
     .device-badge { background: #27ae60; color: white; padding: 0.25rem 0.75rem; border-radius: 12px; font-size: 0.75rem; }
     .device-metrics { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0.75rem; }
-    .metric { display: flex; justify-content: space-between; padding: 0.5rem; background: #f8f9fa; border-radius: 4px; }
+    .metric { display: flex; justify-content: space-between; padding: 0.5rem; background: #f8f9fa; border-radius: 4px; transition: background-color 0.3s; }
     .metric-label { color: #7f8c8d; font-size: 0.875rem; }
     .metric-value { font-weight: 600; color: #2c3e50; }
     .loading { text-align: center; padding: 2rem; color: #7f8c8d; }
     .error { background: #e74c3c; color: white; padding: 1rem; border-radius: 4px; margin-bottom: 1rem; }
+    
+    /* Dark mode styles */
+    body.dark-mode { background: #1a1a1a; color: #e0e0e0; }
+    body.dark-mode .header { background: #1e1e1e; }
+    body.dark-mode .stat-card, body.dark-mode .device-card { background: #2d2d2d; box-shadow: 0 2px 4px rgba(0,0,0,0.3); }
+    body.dark-mode .stat-card h3, body.dark-mode .metric-label, body.dark-mode .device-subtitle { color: #b0b0b0; }
+    body.dark-mode .stat-card .value, body.dark-mode .metric-value, body.dark-mode .device-title { color: #e0e0e0; }
+    body.dark-mode .metric { background: #3a3a3a; }
+    body.dark-mode .device-header { border-bottom-color: #444; }
+    body.dark-mode .loading { color: #b0b0b0; }
   </style>
 </head>
 <body>
   <div class="header">
     <div class="header-top">
       <h1>🌞 Tigo Solar Monitor</h1>
-      <button class="temp-toggle" onclick="toggleTempUnit()" id="temp-toggle">°F</button>
+      <div class="header-controls">
+        <button class="temp-toggle" onclick="toggleTempUnit()" id="temp-toggle">°F</button>
+        <button class="theme-toggle" onclick="toggleTheme()" id="theme-toggle">🌙</button>
+      </div>
     </div>
     <div class="nav">
       <a href="/" class="active">Dashboard</a>
@@ -785,6 +799,26 @@ std::string TigoWebServer::get_dashboard_html() {
       return (celsius * 9/5) + 32;
     }
     
+    // Theme toggle
+    let darkMode = localStorage.getItem('darkMode') === 'true';
+    
+    function toggleTheme() {
+      darkMode = !darkMode;
+      localStorage.setItem('darkMode', darkMode);
+      applyTheme();
+    }
+    
+    function applyTheme() {
+      if (darkMode) {
+        document.body.classList.add('dark-mode');
+        document.getElementById('theme-toggle').textContent = '☀️';
+      } else {
+        document.body.classList.remove('dark-mode');
+        document.getElementById('theme-toggle').textContent = '🌙';
+      }
+    }
+    
+    // Temperature toggle
     function toggleTempUnit() {
       useFahrenheit = !useFahrenheit;
       localStorage.setItem('tempUnit', useFahrenheit ? 'F' : 'C');
@@ -803,8 +837,9 @@ std::string TigoWebServer::get_dashboard_html() {
       return useFahrenheit ? '°F' : '°C';
     }
     
-    // Initialize toggle button
+    // Initialize toggle buttons
     document.addEventListener('DOMContentLoaded', () => {
+      applyTheme();
       document.getElementById('temp-toggle').textContent = useFahrenheit ? '°C' : '°F';
     });
     
@@ -905,34 +940,51 @@ std::string TigoWebServer::get_node_table_html() {
   <title>Tigo Monitor - Node Table</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f5f5; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f5f5; transition: background-color 0.3s, color 0.3s; }
     .header { background: #2c3e50; color: white; padding: 1rem 2rem; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
-    .header h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
+    .header-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem; }
+    .header h1 { font-size: 1.5rem; margin: 0; }
+    .theme-toggle { background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.3); color: white; padding: 0.5rem 1rem; border-radius: 4px; cursor: pointer; font-size: 0.875rem; transition: all 0.2s; }
+    .theme-toggle:hover { background: rgba(255,255,255,0.2); }
     .nav { display: flex; gap: 1rem; margin-top: 0.5rem; }
-    .nav a { color: #3498db; text-decoration: none; padding: 0.5rem 1rem; background: rgba(255,255,255,0.1); border-radius: 4px; }
+    .nav a { color: #3498db; text-decoration: none; padding: 0.5rem 1rem; background: rgba(255,255,255,0.1); border-radius: 4px; transition: all 0.2s; }
     .nav a:hover { background: rgba(255,255,255,0.2); }
     .nav a.active { background: #3498db; color: white; }
     .container { max-width: 1400px; margin: 2rem auto; padding: 0 1rem; }
-    .card { background: white; border-radius: 8px; padding: 2rem; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+    .card { background: white; border-radius: 8px; padding: 2rem; box-shadow: 0 2px 4px rgba(0,0,0,0.1); transition: background-color 0.3s, box-shadow 0.3s; }
     .card h2 { color: #2c3e50; margin-bottom: 1.5rem; font-size: 1.5rem; border-bottom: 2px solid #3498db; padding-bottom: 0.5rem; }
     table { width: 100%; border-collapse: collapse; }
     thead { background: #34495e; color: white; }
     th { padding: 1rem; text-align: left; font-weight: 600; }
-    td { padding: 1rem; border-bottom: 1px solid #ecf0f1; }
+    td { padding: 1rem; border-bottom: 1px solid #ecf0f1; transition: background-color 0.3s; }
     tbody tr:hover { background: #f8f9fa; }
     .badge { display: inline-block; padding: 0.25rem 0.75rem; border-radius: 12px; font-size: 0.75rem; font-weight: 600; }
     .badge-success { background: #27ae60; color: white; }
     .badge-warning { background: #f39c12; color: white; }
     .badge-info { background: #3498db; color: white; }
-    .code { font-family: monospace; background: #f8f9fa; padding: 0.25rem 0.5rem; border-radius: 4px; }
+    .code { font-family: monospace; background: #f8f9fa; padding: 0.25rem 0.5rem; border-radius: 4px; transition: background-color 0.3s; }
     .cca-info { color: #16a085; font-weight: 500; }
     .hierarchy { color: #95a5a6; font-size: 0.85rem; margin-top: 0.25rem; }
     button:hover { opacity: 0.8; }
+    
+    /* Dark mode styles */
+    body.dark-mode { background: #1a1a1a; color: #e0e0e0; }
+    body.dark-mode .header { background: #1e1e1e; }
+    body.dark-mode .card { background: #2d2d2d; box-shadow: 0 2px 4px rgba(0,0,0,0.3); }
+    body.dark-mode .card h2 { color: #e0e0e0; }
+    body.dark-mode thead { background: #1e1e1e; }
+    body.dark-mode td { border-bottom-color: #444; color: #e0e0e0; }
+    body.dark-mode tbody tr:hover { background: #3a3a3a; }
+    body.dark-mode .code { background: #3a3a3a; color: #e0e0e0; }
+    body.dark-mode .hierarchy { color: #b0b0b0; }
   </style>
 </head>
 <body>
   <div class="header">
-    <h1>🌞 Tigo Solar Monitor</h1>
+    <div class="header-top">
+      <h1>🌞 Tigo Solar Monitor</h1>
+      <button class="theme-toggle" onclick="toggleTheme()" id="theme-toggle">🌙</button>
+    </div>
     <div class="nav">
       <a href="/">Dashboard</a>
       <a href="/nodes" class="active">Node Table</a>
@@ -964,6 +1016,28 @@ std::string TigoWebServer::get_node_table_html() {
   </div>
   
   <script>
+    // Dark mode
+    let darkMode = localStorage.getItem('darkMode') === 'true';
+    
+    function toggleTheme() {
+      darkMode = !darkMode;
+      localStorage.setItem('darkMode', darkMode);
+      applyTheme();
+    }
+    
+    function applyTheme() {
+      if (darkMode) {
+        document.body.classList.add('dark-mode');
+        document.getElementById('theme-toggle').textContent = '☀️';
+      } else {
+        document.body.classList.remove('dark-mode');
+        document.getElementById('theme-toggle').textContent = '🌙';
+      }
+    }
+    
+    // Apply theme on load
+    applyTheme();
+    
     async function deleteNode(addr) {
       if (!confirm('Are you sure you want to delete node with address ' + addr + '?')) {
         return;
@@ -1063,27 +1137,44 @@ std::string TigoWebServer::get_esp_status_html() {
   <title>Tigo Monitor - ESP32 Status</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f5f5; }
-    .header { background: #2c3e50; color: white; padding: 1rem 2rem; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f5f5; transition: background-color 0.3s, color 0.3s; }
+    .header { background: #2c3e50; color: white; padding: 1rem 2rem; box-shadow: 0 2px 4px rgba(0,0,0,0.1); transition: background-color 0.3s; }
+    .header-top { display: flex; justify-content: space-between; align-items: center; }
     .header h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
+    .theme-toggle { background: rgba(255,255,255,0.1); border: none; color: white; padding: 0.5rem 1rem; border-radius: 4px; cursor: pointer; font-size: 1.2rem; transition: background-color 0.3s; }
+    .theme-toggle:hover { background: rgba(255,255,255,0.2); }
     .nav { display: flex; gap: 1rem; margin-top: 0.5rem; }
-    .nav a { color: #3498db; text-decoration: none; padding: 0.5rem 1rem; background: rgba(255,255,255,0.1); border-radius: 4px; }
+    .nav a { color: #3498db; text-decoration: none; padding: 0.5rem 1rem; background: rgba(255,255,255,0.1); border-radius: 4px; transition: background-color 0.3s; }
     .nav a:hover { background: rgba(255,255,255,0.2); }
     .nav a.active { background: #3498db; color: white; }
     .container { max-width: 1200px; margin: 2rem auto; padding: 0 1rem; }
-    .card { background: white; border-radius: 8px; padding: 2rem; box-shadow: 0 2px 4px rgba(0,0,0,0.1); margin-bottom: 1.5rem; }
-    .card h2 { color: #2c3e50; margin-bottom: 1.5rem; font-size: 1.5rem; border-bottom: 2px solid #3498db; padding-bottom: 0.5rem; }
+    .card { background: white; border-radius: 8px; padding: 2rem; box-shadow: 0 2px 4px rgba(0,0,0,0.1); margin-bottom: 1.5rem; transition: background-color 0.3s, box-shadow 0.3s; }
+    .card h2 { color: #2c3e50; margin-bottom: 1.5rem; font-size: 1.5rem; border-bottom: 2px solid #3498db; padding-bottom: 0.5rem; transition: color 0.3s; }
     .info-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1rem; }
-    .info-item { background: #f8f9fa; padding: 1.5rem; border-radius: 4px; }
-    .info-item h3 { color: #7f8c8d; font-size: 0.875rem; margin-bottom: 0.5rem; text-transform: uppercase; }
-    .info-item .value { font-size: 1.5rem; font-weight: bold; color: #2c3e50; }
-    .progress-bar { width: 100%; height: 20px; background: #ecf0f1; border-radius: 10px; overflow: hidden; margin-top: 0.5rem; }
-    .progress-fill { height: 100%; background: #27ae60; transition: width 0.3s; }
+    .info-item { background: #f8f9fa; padding: 1.5rem; border-radius: 4px; transition: background-color 0.3s; }
+    .info-item h3 { color: #7f8c8d; font-size: 0.875rem; margin-bottom: 0.5rem; text-transform: uppercase; transition: color 0.3s; }
+    .info-item .value { font-size: 1.5rem; font-weight: bold; color: #2c3e50; transition: color 0.3s; }
+    .progress-bar { width: 100%; height: 20px; background: #ecf0f1; border-radius: 10px; overflow: hidden; margin-top: 0.5rem; transition: background-color 0.3s; }
+    .progress-fill { height: 100%; background: #27ae60; transition: width 0.3s, background-color 0.3s; }
+    
+    /* Dark mode styles */
+    body.dark-mode { background: #1a1a1a; color: #e0e0e0; }
+    body.dark-mode .header { background: #1c2833; }
+    body.dark-mode .card { background: #2c2c2c; box-shadow: 0 2px 4px rgba(0,0,0,0.3); }
+    body.dark-mode .card h2 { color: #e0e0e0; border-bottom-color: #5dade2; }
+    body.dark-mode .info-item { background: #1e1e1e; }
+    body.dark-mode .info-item h3 { color: #a0a0a0; }
+    body.dark-mode .info-item .value { color: #e0e0e0; }
+    body.dark-mode .progress-bar { background: #3a3a3a; }
+    body.dark-mode .progress-fill { background: #45a87d; }
   </style>
 </head>
 <body>
   <div class="header">
-    <h1>🌞 Tigo Solar Monitor</h1>
+    <div class="header-top">
+      <h1>🌞 Tigo Solar Monitor</h1>
+      <button class="theme-toggle" onclick="toggleTheme()">🌙</button>
+    </div>
     <div class="nav">
       <a href="/">Dashboard</a>
       <a href="/nodes">Node Table</a>
@@ -1152,6 +1243,28 @@ std::string TigoWebServer::get_esp_status_html() {
   </div>
   
   <script>
+    // Dark mode support
+    let darkMode = localStorage.getItem('darkMode') === 'true';
+    
+    function toggleTheme() {
+      darkMode = !darkMode;
+      localStorage.setItem('darkMode', darkMode);
+      applyTheme();
+    }
+    
+    function applyTheme() {
+      if (darkMode) {
+        document.body.classList.add('dark-mode');
+        document.querySelector('.theme-toggle').textContent = '☀️';
+      } else {
+        document.body.classList.remove('dark-mode');
+        document.querySelector('.theme-toggle').textContent = '🌙';
+      }
+    }
+    
+    // Apply theme on page load
+    applyTheme();
+    
     function formatBytes(bytes) {
       if (bytes < 1024) return bytes + ' B';
       if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
@@ -1214,26 +1327,43 @@ std::string TigoWebServer::get_yaml_config_html() {
   <title>Tigo Monitor - YAML Configuration</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f5f5; }
-    .header { background: #2c3e50; color: white; padding: 1rem 2rem; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f5f5; transition: background-color 0.3s, color 0.3s; }
+    .header { background: #2c3e50; color: white; padding: 1rem 2rem; box-shadow: 0 2px 4px rgba(0,0,0,0.1); transition: background-color 0.3s; }
+    .header-top { display: flex; justify-content: space-between; align-items: center; }
     .header h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
+    .theme-toggle { background: rgba(255,255,255,0.1); border: none; color: white; padding: 0.5rem 1rem; border-radius: 4px; cursor: pointer; font-size: 1.2rem; transition: background-color 0.3s; }
+    .theme-toggle:hover { background: rgba(255,255,255,0.2); }
     .nav { display: flex; gap: 1rem; margin-top: 0.5rem; }
-    .nav a { color: #3498db; text-decoration: none; padding: 0.5rem 1rem; background: rgba(255,255,255,0.1); border-radius: 4px; }
+    .nav a { color: #3498db; text-decoration: none; padding: 0.5rem 1rem; background: rgba(255,255,255,0.1); border-radius: 4px; transition: background-color 0.3s; }
     .nav a:hover { background: rgba(255,255,255,0.2); }
     .nav a.active { background: #3498db; color: white; }
     .container { max-width: 1200px; margin: 2rem auto; padding: 0 1rem; }
-    .card { background: white; border-radius: 8px; padding: 2rem; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
-    .card h2 { color: #2c3e50; margin-bottom: 1rem; font-size: 1.5rem; border-bottom: 2px solid #3498db; padding-bottom: 0.5rem; }
-    .info { background: #e8f5e9; border-left: 4px solid #27ae60; padding: 1rem; margin-bottom: 1.5rem; border-radius: 4px; }
-    .code-block { background: #2c3e50; color: #ecf0f1; padding: 1.5rem; border-radius: 4px; font-family: monospace; white-space: pre-wrap; word-wrap: break-word; max-height: 600px; overflow-y: auto; }
-    .copy-btn { background: #3498db; color: white; border: none; padding: 0.75rem 1.5rem; border-radius: 4px; cursor: pointer; font-size: 1rem; margin-top: 1rem; }
+    .card { background: white; border-radius: 8px; padding: 2rem; box-shadow: 0 2px 4px rgba(0,0,0,0.1); transition: background-color 0.3s, box-shadow 0.3s; }
+    .card h2 { color: #2c3e50; margin-bottom: 1rem; font-size: 1.5rem; border-bottom: 2px solid #3498db; padding-bottom: 0.5rem; transition: color 0.3s; }
+    .info { background: #e8f5e9; border-left: 4px solid #27ae60; padding: 1rem; margin-bottom: 1.5rem; border-radius: 4px; transition: background-color 0.3s, border-color 0.3s; }
+    .code-block { background: #2c3e50; color: #ecf0f1; padding: 1.5rem; border-radius: 4px; font-family: monospace; white-space: pre-wrap; word-wrap: break-word; max-height: 600px; overflow-y: auto; transition: background-color 0.3s, color 0.3s; }
+    .copy-btn { background: #3498db; color: white; border: none; padding: 0.75rem 1.5rem; border-radius: 4px; cursor: pointer; font-size: 1rem; margin-top: 1rem; transition: background-color 0.3s; }
     .copy-btn:hover { background: #2980b9; }
     .copy-btn:active { background: #1c5a85; }
+    
+    /* Dark mode styles */
+    body.dark-mode { background: #1a1a1a; color: #e0e0e0; }
+    body.dark-mode .header { background: #1c2833; }
+    body.dark-mode .card { background: #2c2c2c; box-shadow: 0 2px 4px rgba(0,0,0,0.3); }
+    body.dark-mode .card h2 { color: #e0e0e0; border-bottom-color: #5dade2; }
+    body.dark-mode .info { background: #1e3a1e; border-left-color: #45a87d; color: #b8e6c9; }
+    body.dark-mode .code-block { background: #1e1e1e; color: #d4d4d4; }
+    body.dark-mode .copy-btn { background: #5dade2; }
+    body.dark-mode .copy-btn:hover { background: #4a9fd8; }
+    body.dark-mode .copy-btn:active { background: #3a8fc8; }
   </style>
 </head>
 <body>
   <div class="header">
-    <h1>🌞 Tigo Solar Monitor</h1>
+    <div class="header-top">
+      <h1>🌞 Tigo Solar Monitor</h1>
+      <button class="theme-toggle" onclick="toggleTheme()">🌙</button>
+    </div>
     <div class="nav">
       <a href="/">Dashboard</a>
       <a href="/nodes">Node Table</a>
@@ -1257,6 +1387,28 @@ std::string TigoWebServer::get_yaml_config_html() {
   </div>
   
   <script>
+    // Dark mode support
+    let darkMode = localStorage.getItem('darkMode') === 'true';
+    
+    function toggleTheme() {
+      darkMode = !darkMode;
+      localStorage.setItem('darkMode', darkMode);
+      applyTheme();
+    }
+    
+    function applyTheme() {
+      if (darkMode) {
+        document.body.classList.add('dark-mode');
+        document.querySelector('.theme-toggle').textContent = '☀️';
+      } else {
+        document.body.classList.remove('dark-mode');
+        document.querySelector('.theme-toggle').textContent = '🌙';
+      }
+    }
+    
+    // Apply theme on page load
+    applyTheme();
+    
     async function loadData() {
       try {
         const response = await fetch('/api/yaml');
@@ -1298,32 +1450,49 @@ std::string TigoWebServer::get_cca_info_html() {
   <title>Tigo Monitor - CCA Information</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f5f5; }
-    .header { background: #2c3e50; color: white; padding: 1rem 2rem; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f5f5; transition: background-color 0.3s, color 0.3s; }
+    .header { background: #2c3e50; color: white; padding: 1rem 2rem; box-shadow: 0 2px 4px rgba(0,0,0,0.1); transition: background-color 0.3s; }
+    .header-top { display: flex; justify-content: space-between; align-items: center; }
     .header h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
+    .theme-toggle { background: rgba(255,255,255,0.1); border: none; color: white; padding: 0.5rem 1rem; border-radius: 4px; cursor: pointer; font-size: 1.2rem; transition: background-color 0.3s; }
+    .theme-toggle:hover { background: rgba(255,255,255,0.2); }
     .nav { display: flex; gap: 1rem; margin-top: 0.5rem; }
-    .nav a { color: #3498db; text-decoration: none; padding: 0.5rem 1rem; background: rgba(255,255,255,0.1); border-radius: 4px; }
+    .nav a { color: #3498db; text-decoration: none; padding: 0.5rem 1rem; background: rgba(255,255,255,0.1); border-radius: 4px; transition: background-color 0.3s; }
     .nav a:hover { background: rgba(255,255,255,0.2); }
     .nav a.active { background: #3498db; color: white; }
     .container { max-width: 1200px; margin: 2rem auto; padding: 0 1rem; }
-    .card { background: white; border-radius: 8px; padding: 2rem; box-shadow: 0 2px 4px rgba(0,0,0,0.1); margin-bottom: 1.5rem; }
-    .card h2 { color: #2c3e50; margin-bottom: 1rem; font-size: 1.5rem; border-bottom: 2px solid #3498db; padding-bottom: 0.5rem; }
+    .card { background: white; border-radius: 8px; padding: 2rem; box-shadow: 0 2px 4px rgba(0,0,0,0.1); margin-bottom: 1.5rem; transition: background-color 0.3s, box-shadow 0.3s; }
+    .card h2 { color: #2c3e50; margin-bottom: 1rem; font-size: 1.5rem; border-bottom: 2px solid #3498db; padding-bottom: 0.5rem; transition: color 0.3s; }
     .info-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 1rem; }
-    .info-item { padding: 1rem; background: #f8f9fa; border-radius: 4px; }
-    .info-label { font-size: 0.875rem; color: #7f8c8d; margin-bottom: 0.25rem; text-transform: uppercase; }
-    .info-value { font-size: 1.125rem; font-weight: 600; color: #2c3e50; }
+    .info-item { padding: 1rem; background: #f8f9fa; border-radius: 4px; transition: background-color 0.3s; }
+    .info-label { font-size: 0.875rem; color: #7f8c8d; margin-bottom: 0.25rem; text-transform: uppercase; transition: color 0.3s; }
+    .info-value { font-size: 1.125rem; font-weight: 600; color: #2c3e50; transition: color 0.3s; }
     .badge { display: inline-block; padding: 0.25rem 0.75rem; border-radius: 12px; font-size: 0.75rem; font-weight: bold; }
     .badge-success { background: #27ae60; color: white; }
     .badge-warning { background: #f39c12; color: white; }
     .badge-error { background: #e74c3c; color: white; }
-    .loading { text-align: center; padding: 2rem; color: #7f8c8d; }
+    .loading { text-align: center; padding: 2rem; color: #7f8c8d; transition: color 0.3s; }
     .error { background: #e74c3c; color: white; padding: 1rem; border-radius: 4px; }
-    .code-block { background: #2c3e50; color: #ecf0f1; padding: 1rem; border-radius: 4px; font-family: monospace; white-space: pre-wrap; word-wrap: break-word; max-height: 400px; overflow-y: auto; font-size: 0.875rem; }
+    .code-block { background: #2c3e50; color: #ecf0f1; padding: 1rem; border-radius: 4px; font-family: monospace; white-space: pre-wrap; word-wrap: break-word; max-height: 400px; overflow-y: auto; font-size: 0.875rem; transition: background-color 0.3s, color 0.3s; }
+    
+    /* Dark mode styles */
+    body.dark-mode { background: #1a1a1a; color: #e0e0e0; }
+    body.dark-mode .header { background: #1c2833; }
+    body.dark-mode .card { background: #2c2c2c; box-shadow: 0 2px 4px rgba(0,0,0,0.3); }
+    body.dark-mode .card h2 { color: #e0e0e0; border-bottom-color: #5dade2; }
+    body.dark-mode .info-item { background: #1e1e1e; }
+    body.dark-mode .info-label { color: #a0a0a0; }
+    body.dark-mode .info-value { color: #e0e0e0; }
+    body.dark-mode .loading { color: #a0a0a0; }
+    body.dark-mode .code-block { background: #1e1e1e; color: #d4d4d4; }
   </style>
 </head>
 <body>
   <div class="header">
-    <h1>🌞 Tigo Solar Monitor</h1>
+    <div class="header-top">
+      <h1>🌞 Tigo Solar Monitor</h1>
+      <button class="theme-toggle" onclick="toggleTheme()">🌙</button>
+    </div>
     <div class="nav">
       <a href="/">Dashboard</a>
       <a href="/nodes">Node Table</a>
@@ -1366,6 +1535,28 @@ std::string TigoWebServer::get_cca_info_html() {
   </div>
   
   <script>
+    // Dark mode support
+    let darkMode = localStorage.getItem('darkMode') === 'true';
+    
+    function toggleTheme() {
+      darkMode = !darkMode;
+      localStorage.setItem('darkMode', darkMode);
+      applyTheme();
+    }
+    
+    function applyTheme() {
+      if (darkMode) {
+        document.body.classList.add('dark-mode');
+        document.querySelector('.theme-toggle').textContent = '☀️';
+      } else {
+        document.body.classList.remove('dark-mode');
+        document.querySelector('.theme-toggle').textContent = '🌙';
+      }
+    }
+    
+    // Apply theme on page load
+    applyTheme();
+    
     function formatTime(seconds) {
       if (!seconds || seconds === 0) return 'Never';
       if (seconds < 60) return seconds + ' seconds ago';
