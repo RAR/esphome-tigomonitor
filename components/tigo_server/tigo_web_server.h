@@ -33,7 +33,6 @@ class TigoWebServer : public Component {
   
   // HTTP handlers
   static esp_err_t dashboard_handler(httpd_req_t *req);
-  static esp_err_t overview_handler(httpd_req_t *req);
   static esp_err_t node_table_handler(httpd_req_t *req);
   static esp_err_t esp_status_handler(httpd_req_t *req);
   static esp_err_t yaml_config_handler(httpd_req_t *req);
@@ -46,11 +45,12 @@ class TigoWebServer : public Component {
   static esp_err_t api_yaml_handler(httpd_req_t *req);
   static esp_err_t cca_info_handler(httpd_req_t *req);
   static esp_err_t api_cca_info_handler(httpd_req_t *req);
+  static esp_err_t api_cca_refresh_handler(httpd_req_t *req);
+  static esp_err_t api_node_delete_handler(httpd_req_t *req);
   
   // Helper functions
   tigo_monitor::TigoMonitorComponent *get_parent_from_req(httpd_req_t *req);
   std::string get_dashboard_html();
-  std::string get_overview_html();
   std::string get_node_table_html();
   std::string get_esp_status_html();
   std::string get_yaml_config_html();

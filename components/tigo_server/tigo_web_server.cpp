@@ -120,14 +120,6 @@ void TigoWebServer::setup() {
     };
     httpd_register_uri_handler(server_, &dashboard_uri);
     
-    httpd_uri_t overview_uri = {
-      .uri = "/overview",
-      .method = HTTP_GET,
-      .handler = overview_handler,
-      .user_ctx = this
-    };
-    httpd_register_uri_handler(server_, &overview_uri);
-    
     httpd_uri_t node_table_uri = {
       .uri = "/nodes",
       .method = HTTP_GET,
@@ -209,6 +201,22 @@ void TigoWebServer::setup() {
     };
     httpd_register_uri_handler(server_, &api_cca_info_uri);
     
+    httpd_uri_t api_cca_refresh_uri = {
+      .uri = "/api/cca/refresh",
+      .method = HTTP_GET,
+      .handler = api_cca_refresh_handler,
+      .user_ctx = this
+    };
+    httpd_register_uri_handler(server_, &api_cca_refresh_uri);
+    
+    httpd_uri_t api_node_delete_uri = {
+      .uri = "/api/nodes/delete",
+      .method = HTTP_POST,
+      .handler = api_node_delete_handler,
+      .user_ctx = this
+    };
+    httpd_register_uri_handler(server_, &api_node_delete_uri);
+    
     ESP_LOGI(TAG, "All routes registered");
   } else {
     ESP_LOGE(TAG, "Failed to start web server");
@@ -228,18 +236,6 @@ esp_err_t TigoWebServer::dashboard_handler(httpd_req_t *req) {
   // Use PSRAM for large HTML content
   PSRAMString html;
   std::string content = server->get_dashboard_html();
-  html.append(content);
-  
-  httpd_resp_set_type(req, "text/html");
-  httpd_resp_send(req, html.c_str(), html.length());
-  return ESP_OK;
-}
-
-esp_err_t TigoWebServer::overview_handler(httpd_req_t *req) {
-  TigoWebServer *server = static_cast<TigoWebServer *>(req->user_ctx);
-  
-  PSRAMString html;
-  std::string content = server->get_overview_html();
   html.append(content);
   
   httpd_resp_set_type(req, "text/html");
@@ -375,29 +371,110 @@ esp_err_t TigoWebServer::api_cca_info_handler(httpd_req_t *req) {
   return ESP_OK;
 }
 
+esp_err_t TigoWebServer::api_cca_refresh_handler(httpd_req_t *req) {
+  TigoWebServer *server = static_cast<TigoWebServer *>(req->user_ctx);
+  
+  // Trigger fresh CCA device info query
+  server->parent_->query_cca_device_info();
+  
+  // Return simple success response
+  const char* response = "{\"status\":\"ok\",\"message\":\"CCA refresh initiated\"}";
+  httpd_resp_set_type(req, "application/json");
+  httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+  httpd_resp_send(req, response, strlen(response));
+  return ESP_OK;
+}
+
+esp_err_t TigoWebServer::api_node_delete_handler(httpd_req_t *req) {
+  TigoWebServer *server = static_cast<TigoWebServer *>(req->user_ctx);
+  
+  // Parse query parameter "addr"
+  char query_str[64];
+  if (httpd_req_get_url_query_str(req, query_str, sizeof(query_str)) != ESP_OK) {
+    const char* error_response = "{\"status\":\"error\",\"message\":\"Missing addr parameter\"}";
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_status(req, "400 Bad Request");
+    httpd_resp_send(req, error_response, strlen(error_response));
+    return ESP_OK;
+  }
+  
+  // Extract addr value
+  char addr_str[16];
+  if (httpd_query_key_value(query_str, "addr", addr_str, sizeof(addr_str)) != ESP_OK) {
+    const char* error_response = "{\"status\":\"error\",\"message\":\"Invalid addr parameter\"}";
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_status(req, "400 Bad Request");
+    httpd_resp_send(req, error_response, strlen(error_response));
+    return ESP_OK;
+  }
+  
+  // Convert addr from hex string to uint16_t
+  uint16_t addr = (uint16_t) strtol(addr_str, nullptr, 16);
+  
+  // Call remove_node
+  bool success = server->parent_->remove_node(addr);
+  
+  // Return response
+  std::string response;
+  if (success) {
+    response = "{\"status\":\"ok\",\"message\":\"Node deleted successfully\"}";
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, response.c_str(), response.length());
+  } else {
+    response = "{\"status\":\"error\",\"message\":\"Node not found\"}";
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_status(req, "404 Not Found");
+    httpd_resp_send(req, response.c_str(), response.length());
+  }
+  
+  return ESP_OK;
+}
+
 // ===== JSON Builders =====
 
 std::string TigoWebServer::build_devices_json() {
   std::string json = "{\"devices\":[";
   
   const auto &devices = parent_->get_devices();
+  const auto &node_table = parent_->get_node_table();
   bool first = true;
   
   for (const auto &device : devices) {
     if (!first) json += ",";
     first = false;
     
+    // Find the node table entry to get CCA label
+    std::string device_name;
+    for (const auto &node : node_table) {
+      if (node.addr == device.addr) {
+        if (!node.cca_label.empty()) {
+          device_name = node.cca_label;
+        }
+        break;
+      }
+    }
+    
+    // Fallback to barcode or address if no CCA label
+    if (device_name.empty()) {
+      if (!device.barcode.empty() && device.barcode.length() >= 5) {
+        device_name = device.barcode;
+      } else {
+        device_name = "Module " + device.addr;
+      }
+    }
+    
     char buffer[512];
     float power = device.voltage_out * device.current_in;
     unsigned long data_age_ms = millis() - device.last_update;
+    float duty_cycle_percent = (device.duty_cycle / 255.0f) * 100.0f;
     
     snprintf(buffer, sizeof(buffer),
-      "{\"addr\":\"%s\",\"barcode\":\"%s\",\"voltage_in\":%.2f,\"voltage_out\":%.2f,"
+      "{\"addr\":\"%s\",\"barcode\":\"%s\",\"name\":\"%s\",\"voltage_in\":%.2f,\"voltage_out\":%.2f,"
       "\"current\":%.3f,\"power\":%.1f,\"temperature\":%.1f,\"rssi\":%d,"
-      "\"duty_cycle\":%u,\"efficiency\":%.2f,\"data_age_ms\":%lu}",
-      device.addr.c_str(), device.barcode.c_str(), device.voltage_in, device.voltage_out,
+      "\"duty_cycle\":%.1f,\"efficiency\":%.2f,\"data_age_ms\":%lu}",
+      device.addr.c_str(), device.barcode.c_str(), device_name.c_str(), device.voltage_in, device.voltage_out,
       device.current_in, power, device.temperature, device.rssi,
-      device.duty_cycle, device.efficiency, data_age_ms);
+      duty_cycle_percent, device.efficiency, data_age_ms);
     
     json += buffer;
   }
@@ -429,12 +506,14 @@ std::string TigoWebServer::build_overview_json() {
     avg_temp /= active_devices;
   }
   
+  float total_energy = parent_->get_total_energy_kwh();
+  
   char buffer[512];
   snprintf(buffer, sizeof(buffer),
     "{\"total_power\":%.1f,\"total_current\":%.3f,\"avg_efficiency\":%.2f,"
-    "\"avg_temperature\":%.1f,\"active_devices\":%d,\"max_devices\":%d}",
+    "\"avg_temperature\":%.1f,\"active_devices\":%d,\"max_devices\":%d,\"total_energy\":%.3f}",
     total_power, total_current, avg_efficiency, avg_temp,
-    active_devices, parent_->get_number_of_devices());
+    active_devices, parent_->get_number_of_devices(), total_energy);
   
   return std::string(buffer);
 }
@@ -583,7 +662,10 @@ std::string TigoWebServer::get_dashboard_html() {
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f5f5; }
     .header { background: #2c3e50; color: white; padding: 1rem 2rem; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
-    .header h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
+    .header-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem; }
+    .header h1 { font-size: 1.5rem; margin: 0; }
+    .temp-toggle { background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.3); color: white; padding: 0.5rem 1rem; border-radius: 4px; cursor: pointer; font-size: 0.875rem; transition: all 0.2s; }
+    .temp-toggle:hover { background: rgba(255,255,255,0.2); }
     .nav { display: flex; gap: 1rem; margin-top: 0.5rem; }
     .nav a { color: #3498db; text-decoration: none; padding: 0.5rem 1rem; background: rgba(255,255,255,0.1); border-radius: 4px; }
     .nav a:hover { background: rgba(255,255,255,0.2); }
@@ -597,7 +679,9 @@ std::string TigoWebServer::get_dashboard_html() {
     .devices-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(350px, 1fr)); gap: 1rem; }
     .device-card { background: white; border-radius: 8px; padding: 1.5rem; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
     .device-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; border-bottom: 2px solid #ecf0f1; padding-bottom: 0.75rem; }
+    .device-title-section { flex: 1; }
     .device-title { font-size: 1.125rem; font-weight: bold; color: #2c3e50; }
+    .device-subtitle { font-size: 0.75rem; color: #7f8c8d; margin-top: 0.25rem; }
     .device-badge { background: #27ae60; color: white; padding: 0.25rem 0.75rem; border-radius: 12px; font-size: 0.75rem; }
     .device-metrics { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0.75rem; }
     .metric { display: flex; justify-content: space-between; padding: 0.5rem; background: #f8f9fa; border-radius: 4px; }
@@ -609,10 +693,12 @@ std::string TigoWebServer::get_dashboard_html() {
 </head>
 <body>
   <div class="header">
-    <h1>🌞 Tigo Solar Monitor</h1>
+    <div class="header-top">
+      <h1>🌞 Tigo Solar Monitor</h1>
+      <button class="temp-toggle" onclick="toggleTempUnit()" id="temp-toggle">°F</button>
+    </div>
     <div class="nav">
       <a href="/" class="active">Dashboard</a>
-      <a href="/overview">Overview</a>
       <a href="/nodes">Node Table</a>
       <a href="/status">ESP32 Status</a>
       <a href="/yaml">YAML Config</a>
@@ -627,6 +713,10 @@ std::string TigoWebServer::get_dashboard_html() {
         <div><span class="value" id="total-power">--</span><span class="unit">W</span></div>
       </div>
       <div class="stat-card">
+        <h3>Total Current</h3>
+        <div><span class="value" id="total-current">--</span><span class="unit">A</span></div>
+      </div>
+      <div class="stat-card">
         <h3>Active Devices</h3>
         <div><span class="value" id="active-devices">--</span></div>
       </div>
@@ -636,7 +726,11 @@ std::string TigoWebServer::get_dashboard_html() {
       </div>
       <div class="stat-card">
         <h3>Avg Temperature</h3>
-        <div><span class="value" id="avg-temp">--</span><span class="unit">°C</span></div>
+        <div><span class="value" id="avg-temp">--</span><span class="unit" id="avg-temp-unit">°C</span></div>
+      </div>
+      <div class="stat-card">
+        <h3>Total Energy</h3>
+        <div><span class="value" id="total-energy">--</span><span class="unit">kWh</span></div>
       </div>
     </div>
     
@@ -644,6 +738,36 @@ std::string TigoWebServer::get_dashboard_html() {
   </div>
   
   <script>
+    // Temperature unit management
+    let useFahrenheit = localStorage.getItem('tempUnit') === 'F';
+    
+    function celsiusToFahrenheit(celsius) {
+      return (celsius * 9/5) + 32;
+    }
+    
+    function toggleTempUnit() {
+      useFahrenheit = !useFahrenheit;
+      localStorage.setItem('tempUnit', useFahrenheit ? 'F' : 'C');
+      document.getElementById('temp-toggle').textContent = useFahrenheit ? '°C' : '°F';
+      loadData(); // Refresh display with new units
+    }
+    
+    function formatTemperature(celsius) {
+      if (useFahrenheit) {
+        return celsiusToFahrenheit(celsius).toFixed(1);
+      }
+      return celsius.toFixed(1);
+    }
+    
+    function getTempUnit() {
+      return useFahrenheit ? '°F' : '°C';
+    }
+    
+    // Initialize toggle button
+    document.addEventListener('DOMContentLoaded', () => {
+      document.getElementById('temp-toggle').textContent = useFahrenheit ? '°C' : '°F';
+    });
+    
     async function loadData() {
       try {
         const [devicesRes, overviewRes] = await Promise.all([
@@ -656,9 +780,12 @@ std::string TigoWebServer::get_dashboard_html() {
         
         // Update stats
         document.getElementById('total-power').textContent = overviewData.total_power.toFixed(1);
+        document.getElementById('total-current').textContent = overviewData.total_current.toFixed(3);
         document.getElementById('active-devices').textContent = overviewData.active_devices;
         document.getElementById('avg-efficiency').textContent = overviewData.avg_efficiency.toFixed(1);
-        document.getElementById('avg-temp').textContent = overviewData.avg_temperature.toFixed(1);
+        document.getElementById('avg-temp').textContent = formatTemperature(overviewData.avg_temperature);
+        document.getElementById('avg-temp-unit').textContent = getTempUnit();
+        document.getElementById('total-energy').textContent = overviewData.total_energy.toFixed(3);
         
         // Update devices
         const devicesContainer = document.getElementById('devices');
@@ -667,10 +794,16 @@ std::string TigoWebServer::get_dashboard_html() {
                           device.data_age_ms < 60000 ? `${(device.data_age_ms/1000).toFixed(1)}s` :
                           `${(device.data_age_ms/60000).toFixed(1)}m`;
           
+          // Create subtitle from barcode or address
+          const subtitle = device.barcode || `Addr: ${device.addr}`;
+          
           return `
             <div class="device-card">
               <div class="device-header">
-                <div class="device-title">${device.barcode || device.addr}</div>
+                <div class="device-title-section">
+                  <div class="device-title">${device.name}</div>
+                  <div class="device-subtitle">${subtitle}</div>
+                </div>
                 <div class="device-badge">${ageText}</div>
               </div>
               <div class="device-metrics">
@@ -692,7 +825,7 @@ std::string TigoWebServer::get_dashboard_html() {
                 </div>
                 <div class="metric">
                   <span class="metric-label">Temperature</span>
-                  <span class="metric-value">${device.temperature.toFixed(1)} °C</span>
+                  <span class="metric-value">${formatTemperature(device.temperature)} ${getTempUnit()}</span>
                 </div>
                 <div class="metric">
                   <span class="metric-label">Efficiency</span>
@@ -710,105 +843,6 @@ std::string TigoWebServer::get_dashboard_html() {
             </div>
           `;
         }).join('');
-      } catch (error) {
-        console.error('Error loading data:', error);
-      }
-    }
-    
-    loadData();
-    setInterval(loadData, 5000);
-  </script>
-</body>
-</html>
-)html";
-}
-
-std::string TigoWebServer::get_overview_html() {
-  return R"html(<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Tigo Monitor - Overview</title>
-  <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f5f5; }
-    .header { background: #2c3e50; color: white; padding: 1rem 2rem; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
-    .header h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
-    .nav { display: flex; gap: 1rem; margin-top: 0.5rem; }
-    .nav a { color: #3498db; text-decoration: none; padding: 0.5rem 1rem; background: rgba(255,255,255,0.1); border-radius: 4px; }
-    .nav a:hover { background: rgba(255,255,255,0.2); }
-    .nav a.active { background: #3498db; color: white; }
-    .container { max-width: 1200px; margin: 2rem auto; padding: 0 1rem; }
-    .overview-grid { display: grid; gap: 1.5rem; }
-    .card { background: white; border-radius: 8px; padding: 2rem; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
-    .card h2 { color: #2c3e50; margin-bottom: 1.5rem; font-size: 1.5rem; border-bottom: 2px solid #3498db; padding-bottom: 0.5rem; }
-    .metric-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 1rem; margin-bottom: 1rem; }
-    .metric-item { background: #f8f9fa; padding: 1.5rem; border-radius: 4px; }
-    .metric-item h3 { color: #7f8c8d; font-size: 0.875rem; margin-bottom: 0.5rem; text-transform: uppercase; }
-    .metric-item .value { font-size: 2.5rem; font-weight: bold; color: #2c3e50; }
-    .metric-item .unit { font-size: 1.25rem; color: #95a5a6; margin-left: 0.5rem; }
-  </style>
-</head>
-<body>
-  <div class="header">
-    <h1>🌞 Tigo Solar Monitor</h1>
-    <div class="nav">
-      <a href="/">Dashboard</a>
-      <a href="/overview" class="active">Overview</a>
-      <a href="/nodes">Node Table</a>
-      <a href="/status">ESP32 Status</a>
-      <a href="/yaml">YAML Config</a>
-      <a href="/cca">CCA Info</a>
-    </div>
-  </div>
-  
-  <div class="container">
-    <div class="overview-grid">
-      <div class="card">
-        <h2>System Overview</h2>
-        <div class="metric-row">
-          <div class="metric-item">
-            <h3>Total Power Output</h3>
-            <div><span class="value" id="total-power">--</span><span class="unit">W</span></div>
-          </div>
-          <div class="metric-item">
-            <h3>Total Current</h3>
-            <div><span class="value" id="total-current">--</span><span class="unit">A</span></div>
-          </div>
-        </div>
-        <div class="metric-row">
-          <div class="metric-item">
-            <h3>Average Efficiency</h3>
-            <div><span class="value" id="avg-efficiency">--</span><span class="unit">%</span></div>
-          </div>
-          <div class="metric-item">
-            <h3>Average Temperature</h3>
-            <div><span class="value" id="avg-temp">--</span><span class="unit">°C</span></div>
-          </div>
-        </div>
-        <div class="metric-row">
-          <div class="metric-item">
-            <h3>Active Devices</h3>
-            <div><span class="value" id="active-devices">--</span><span class="unit">/ <span id="max-devices">--</span></span></div>
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
-  
-  <script>
-    async function loadData() {
-      try {
-        const response = await fetch('/api/overview');
-        const data = await response.json();
-        
-        document.getElementById('total-power').textContent = data.total_power.toFixed(1);
-        document.getElementById('total-current').textContent = data.total_current.toFixed(3);
-        document.getElementById('avg-efficiency').textContent = data.avg_efficiency.toFixed(1);
-        document.getElementById('avg-temp').textContent = data.avg_temperature.toFixed(1);
-        document.getElementById('active-devices').textContent = data.active_devices;
-        document.getElementById('max-devices').textContent = data.max_devices;
       } catch (error) {
         console.error('Error loading data:', error);
       }
@@ -853,6 +887,7 @@ std::string TigoWebServer::get_node_table_html() {
     .code { font-family: monospace; background: #f8f9fa; padding: 0.25rem 0.5rem; border-radius: 4px; }
     .cca-info { color: #16a085; font-weight: 500; }
     .hierarchy { color: #95a5a6; font-size: 0.85rem; margin-top: 0.25rem; }
+    button:hover { opacity: 0.8; }
   </style>
 </head>
 <body>
@@ -860,7 +895,6 @@ std::string TigoWebServer::get_node_table_html() {
     <h1>🌞 Tigo Solar Monitor</h1>
     <div class="nav">
       <a href="/">Dashboard</a>
-      <a href="/overview">Overview</a>
       <a href="/nodes" class="active">Node Table</a>
       <a href="/status">ESP32 Status</a>
       <a href="/yaml">YAML Config</a>
@@ -879,16 +913,39 @@ std::string TigoWebServer::get_node_table_html() {
             <th>Location</th>
             <th>Sensor Index</th>
             <th>Checksum</th>
+            <th>Action</th>
           </tr>
         </thead>
         <tbody id="node-table-body">
-          <tr><td colspan="5" style="text-align:center;">Loading...</td></tr>
+          <tr><td colspan="6" style="text-align:center;">Loading...</td></tr>
         </tbody>
       </table>
     </div>
   </div>
   
   <script>
+    async function deleteNode(addr) {
+      if (!confirm('Are you sure you want to delete node with address ' + addr + '?')) {
+        return;
+      }
+      
+      try {
+        const response = await fetch('/api/nodes/delete?addr=' + encodeURIComponent(addr), {
+          method: 'POST'
+        });
+        
+        if (response.ok) {
+          // Reload the table
+          await loadData();
+        } else {
+          alert('Failed to delete node');
+        }
+      } catch (error) {
+        console.error('Error deleting node:', error);
+        alert('Error deleting node: ' + error.message);
+      }
+    }
+    
     async function loadData() {
       try {
         const response = await fetch('/api/nodes');
@@ -937,6 +994,11 @@ std::string TigoWebServer::get_node_table_html() {
               ${node.cca_validated ? '<span class="badge badge-info" style="margin-left:0.5rem;">CCA ✓</span>' : ''}
             </td>
             <td><span class="code">${node.checksum || '-'}</span></td>
+            <td style="text-align:center;">
+              <button onclick="deleteNode('${node.addr}')" style="padding: 0.5rem 1rem; background-color: #e74c3c; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.875rem;">
+                🗑️ Delete
+              </button>
+            </td>
           </tr>
         `}).join('');
       } catch (error) {
@@ -984,7 +1046,6 @@ std::string TigoWebServer::get_esp_status_html() {
     <h1>🌞 Tigo Solar Monitor</h1>
     <div class="nav">
       <a href="/">Dashboard</a>
-      <a href="/overview">Overview</a>
       <a href="/nodes">Node Table</a>
       <a href="/status" class="active">ESP32 Status</a>
       <a href="/yaml">YAML Config</a>
@@ -1079,6 +1140,7 @@ std::string TigoWebServer::get_esp_status_html() {
           document.getElementById('psram-progress').style.width = psramUsedPct + '%';
         } else {
           document.getElementById('psram-free').textContent = 'Not available';
+          document.getElementById('psram-progress').style.width = '0%';
         }
         
         // Display system information
@@ -1134,7 +1196,6 @@ std::string TigoWebServer::get_yaml_config_html() {
     <h1>🌞 Tigo Solar Monitor</h1>
     <div class="nav">
       <a href="/">Dashboard</a>
-      <a href="/overview">Overview</a>
       <a href="/nodes">Node Table</a>
       <a href="/status">ESP32 Status</a>
       <a href="/yaml" class="active">YAML Config</a>
@@ -1225,7 +1286,6 @@ std::string TigoWebServer::get_cca_info_html() {
     <h1>🌞 Tigo Solar Monitor</h1>
     <div class="nav">
       <a href="/">Dashboard</a>
-      <a href="/overview">Overview</a>
       <a href="/nodes">Node Table</a>
       <a href="/status">ESP32 Status</a>
       <a href="/yaml">YAML Config</a>
@@ -1235,7 +1295,12 @@ std::string TigoWebServer::get_cca_info_html() {
   
   <div class="container">
     <div class="card">
-      <h2>CCA Connection Status</h2>
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+        <h2 style="margin: 0;">CCA Connection Status</h2>
+        <button onclick="refreshCCA()" style="padding: 8px 16px; background-color: #4CAF50; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px;">
+          🔄 Refresh
+        </button>
+      </div>
       <div class="info-grid">
         <div class="info-item">
           <div class="info-label">CCA IP Address</div>
@@ -1257,11 +1322,6 @@ std::string TigoWebServer::get_cca_info_html() {
     <div class="card">
       <h2>CCA Device Information</h2>
       <div id="device-info" class="loading">Loading CCA device information...</div>
-    </div>
-    
-    <div class="card">
-      <h2>Raw JSON Response</h2>
-      <pre class="code-block" id="json-response">Loading...</pre>
     </div>
   </div>
   
@@ -1329,6 +1389,7 @@ std::string TigoWebServer::get_cca_info_html() {
             'discovery': 'Discovery Mode',
             'fw_config_status': 'Firmware Config Status',
             'UTS': 'Uptime',
+            'uts': 'Uptime',
             'sysconfig_ts': 'Last Cloud Config Sync',
             'hw_version': 'Hardware Version',
             'model': 'Model',
@@ -1368,7 +1429,7 @@ std::string TigoWebServer::get_cca_info_html() {
             let displayValue = value;
             
             // Special formatting for certain fields
-            if (key === 'UTS') {
+            if (key === 'UTS' || key === 'uts') {
               displayValue = formatUptime(value);
             } else if (key === 'sysconfig_ts') {
               displayValue = formatTimestamp(value);
@@ -1412,14 +1473,34 @@ std::string TigoWebServer::get_cca_info_html() {
           document.getElementById('device-info').innerHTML = '<div class="error">Failed to retrieve CCA information: ' + errorMsg + '</div>';
         }
         
-        // Display raw JSON
-        document.getElementById('json-response').textContent = JSON.stringify(deviceInfo || data.device_info, null, 2);
-        
       } catch (error) {
         console.error('Error loading data:', error);
         document.getElementById('connection-status').innerHTML = '<span class="badge badge-error">Failed</span>';
         document.getElementById('device-info').innerHTML = '<div class="error">Error loading CCA information</div>';
-        document.getElementById('json-response').textContent = 'Error: ' + error.message;
+      }
+    }
+    
+    async function refreshCCA() {
+      // Show loading state
+      document.getElementById('connection-status').innerHTML = '<span class="badge badge-warning">Refreshing...</span>';
+      document.getElementById('device-info').innerHTML = '<div class="loading">Refreshing CCA device information...</div>';
+      
+      try {
+        // Trigger a fresh query by calling the sync API
+        const syncResponse = await fetch('/api/cca/refresh');
+        if (!syncResponse.ok) {
+          throw new Error('Refresh request failed');
+        }
+        
+        // Wait a moment for the query to complete
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        
+        // Load the updated data
+        await loadData();
+      } catch (error) {
+        console.error('Error refreshing CCA data:', error);
+        document.getElementById('connection-status').innerHTML = '<span class="badge badge-error">Refresh Failed</span>';
+        document.getElementById('device-info').innerHTML = '<div class="error">Failed to refresh CCA information: ' + error.message + '</div>';
       }
     }
     

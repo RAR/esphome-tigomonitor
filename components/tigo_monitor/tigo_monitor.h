@@ -148,6 +148,7 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   bool get_sync_cca_on_startup() const { return sync_cca_on_startup_; }
   const std::string& get_cca_device_info() const { return cca_device_info_; }
   unsigned long get_last_cca_sync_time() const { return last_cca_sync_time_; }
+  float get_total_energy_kwh() const { return total_energy_kwh_; }
   
   // Generate YAML configuration for manual setup
   void generate_sensor_yaml();
@@ -157,6 +158,9 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   
   // Reset node table (clear all persistent device mappings)
   void reset_node_table();
+  
+  // Remove individual node by address
+  bool remove_node(uint16_t addr);
   
   // CCA synchronization (called by button or on boot)
   void sync_from_cca();

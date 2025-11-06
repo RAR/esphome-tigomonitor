@@ -649,7 +649,7 @@ Update the dashboard entity names to match your ESPHome configuration:
 6. **Energy data resets on reboot**
    - Component automatically saves energy data to flash
    - Check logs for "Restored total energy" messages
-   - Data is saved every 10 updates to reduce flash wear
+   - Data is saved at the top of each hour to reduce flash wear
 
 7. **Too many devices**
    - Increase `number_of_devices` in configuration
@@ -678,7 +678,7 @@ button:
 - **Memory Usage**: ~11-15% RAM (15% with web server), ~49% Flash (typical ESP32)
 - **Update Rate**: 30-60 seconds recommended for normal operation
 - **Device Limit**: Tested with up to 36 devices
-- **Persistence**: Energy data saved every 10 updates to reduce flash wear
+- **Persistence**: Energy data saved hourly at the top of each hour to reduce flash wear
 - **Web Server**: Adds ~4-5% RAM overhead, provides comprehensive monitoring interface
 - **UART Optimization**: ISR in IRAM significantly reduces packet loss
 - **CCA Queries**: HTTP requests add ~2-3 second delay during sync

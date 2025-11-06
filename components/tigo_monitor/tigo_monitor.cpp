@@ -302,53 +302,12 @@ void TigoMonitorComponent::process_09_frame(const std::string &frame) {
   std::string node_id = frame.substr(18, 4);  
   std::string barcode = frame.substr(40, 6);
   
-  ESP_LOGI(TAG, "📦 Frame 09 - Device Identity: addr=%s, node_id=%s, barcode=%s", 
+  ESP_LOGD(TAG, "📦 Frame 09 - Device Identity (IGNORED): addr=%s, node_id=%s, barcode=%s", 
            addr.c_str(), node_id.c_str(), barcode.c_str());
+  ESP_LOGD(TAG, "Frame 09 barcodes are ignored - only Frame 27 (16-char) barcodes are used");
   
-  // Find or create node table entry
-  NodeTableData* node = find_node_by_addr(addr);
-  if (node != nullptr) {
-    // Update existing node with Frame 09 barcode
-    if (node->frame09_barcode != barcode) {
-      node->frame09_barcode = barcode;
-      ESP_LOGI(TAG, "Updated Frame 09 barcode for node %s: %s", addr.c_str(), barcode.c_str());
-      save_node_table();
-    }
-  } else {
-    // Create new node table entry for Frame 09 data
-    NodeTableData new_node;
-    new_node.addr = addr;
-    new_node.frame09_barcode = barcode;
-    new_node.sensor_index = -1;  // Will be assigned when device becomes active
-    new_node.is_persistent = true;
-    node_table_.push_back(new_node);
-    ESP_LOGI(TAG, "Created new node entry for Frame 09: addr=%s, barcode=%s", addr.c_str(), barcode.c_str());
-    save_node_table();
-  }
-  
-  // Also update existing device if already discovered
-  // Frame 09 barcode is now fallback - only use if Frame 27 not available
-  DeviceData* device = find_device_by_addr(addr);
-  if (device != nullptr) {
-    // Only update device barcode with Frame 09 if no Frame 27 long address available
-    if (node != nullptr && node->long_address.empty() && device->barcode != barcode) {
-      device->barcode = barcode;
-      ESP_LOGI(TAG, "Updated existing device %s with Frame 09 barcode (fallback): %s", addr.c_str(), barcode.c_str());
-      
-      // Publish the Frame 09 barcode since it's being used as fallback
-      auto barcode_it = barcode_sensors_.find(addr);
-      if (barcode_it != barcode_sensors_.end()) {
-        barcode_it->second->publish_state(barcode);
-        ESP_LOGD(TAG, "Published Frame 09 barcode (fallback) for %s: %s", addr.c_str(), barcode.c_str());
-      }
-    } else if (node != nullptr && !node->long_address.empty()) {
-      ESP_LOGD(TAG, "Device %s already has Frame 27 long address as barcode, ignoring Frame 09: %s", addr.c_str(), barcode.c_str());
-    } else {
-      ESP_LOGD(TAG, "Device %s already has Frame 09 barcode: %s", addr.c_str(), barcode.c_str());
-    }
-  } else {
-    ESP_LOGD(TAG, "Frame 09 data for %s received before power data - barcode stored in node table", addr.c_str());
-  }
+  // Frame 09 data is now completely ignored to prevent duplicate entries
+  // Only Frame 27 long addresses (16-char) are used for device identification
 }
 
 void TigoMonitorComponent::process_27_frame(const std::string &frame) {
@@ -748,11 +707,15 @@ void TigoMonitorComponent::publish_sensor_data() {
       energy_sum_sensor_->publish_state(total_energy_kwh_);
       ESP_LOGD(TAG, "Published energy sum: %.3f kWh", total_energy_kwh_);
       
-      // Save energy data periodically (every 10 updates to reduce flash wear)
-      static int save_counter = 0;
-      if (++save_counter >= 10) {
+      // Save energy data at the top of each hour to reduce flash wear
+      static unsigned long last_save_time = 0;
+      unsigned long hours_elapsed = current_time / 3600000;  // Hours since boot
+      unsigned long last_save_hour = last_save_time / 3600000;
+      
+      if (hours_elapsed > last_save_hour) {
         save_energy_data();
-        save_counter = 0;
+        last_save_time = current_time;
+        ESP_LOGI(TAG, "Energy data saved at hour boundary");
       }
     }
   } else if (energy_sum_sensor_ != nullptr) {
@@ -783,11 +746,15 @@ void TigoMonitorComponent::publish_sensor_data() {
     energy_sum_sensor_->publish_state(total_energy_kwh_);
     ESP_LOGD(TAG, "Published energy sum: %.3f kWh", total_energy_kwh_);
     
-    // Save energy data periodically
-    static int save_counter_standalone = 0;
-    if (++save_counter_standalone >= 10) {
+    // Save energy data at the top of each hour to reduce flash wear
+    static unsigned long last_save_time_standalone = 0;
+    unsigned long hours_elapsed = current_time / 3600000;  // Hours since boot
+    unsigned long last_save_hour = last_save_time_standalone / 3600000;
+    
+    if (hours_elapsed > last_save_hour) {
       save_energy_data();
-      save_counter_standalone = 0;
+      last_save_time_standalone = current_time;
+      ESP_LOGI(TAG, "Energy data saved at hour boundary");
     }
   }
 }
@@ -1209,6 +1176,46 @@ void TigoMonitorComponent::reset_node_table() {
   ESP_LOGI(TAG, "recollected automatically during normal operation.");
 }
 
+bool TigoMonitorComponent::remove_node(uint16_t addr) {
+  ESP_LOGI(TAG, "Removing node with address: 0x%04X", addr);
+  
+  // Convert addr to hex string for comparison (lowercase)
+  char addr_hex[5];
+  snprintf(addr_hex, sizeof(addr_hex), "%04x", addr);
+  std::string addr_str(addr_hex);
+  
+  // Find the node in the table (case-insensitive comparison)
+  auto it = std::find_if(node_table_.begin(), node_table_.end(),
+    [&addr_str](const NodeTableData &node) {
+      // Convert both to lowercase for comparison
+      std::string node_addr_lower = node.addr;
+      std::transform(node_addr_lower.begin(), node_addr_lower.end(), node_addr_lower.begin(), ::tolower);
+      return node_addr_lower == addr_str;
+    });
+  
+  if (it == node_table_.end()) {
+    ESP_LOGW(TAG, "Node with address 0x%04X (%s) not found in table", addr, addr_str.c_str());
+    return false;
+  }
+  
+  int sensor_index = it->sensor_index;
+  
+  // Remove from created_devices_ cache if it has a sensor index
+  if (sensor_index >= 0) {
+    std::string device_key = "tigo_" + std::to_string(sensor_index);
+    created_devices_.erase(device_key);
+  }
+  
+  // Remove from node table
+  node_table_.erase(it);
+  
+  // Save updated node table to persistent storage
+  save_node_table();
+  
+  ESP_LOGI(TAG, "Successfully removed node 0x%04X (sensor index: %d)", addr, sensor_index);
+  return true;
+}
+
 int TigoMonitorComponent::get_next_available_sensor_index() {
   // Create a set of used indices from the unified node table
   std::set<int> used_indices;
@@ -1308,13 +1315,10 @@ void TigoMonitorComponent::sync_from_cca() {
 }
 
 std::string TigoMonitorComponent::get_barcode_for_node(const NodeTableData &node) {
-  // Prefer Frame 27 long address (16-char barcode)
+  // Only use Frame 27 long address (16-char barcode)
+  // Frame 09 barcodes are ignored to prevent duplicate entries
   if (!node.long_address.empty() && node.long_address.length() == 16) {
     return node.long_address;
-  }
-  // Fallback to Frame 09 barcode (6-char)
-  if (!node.frame09_barcode.empty()) {
-    return node.frame09_barcode;
   }
   return "";
 }
