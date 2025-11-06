@@ -374,8 +374,9 @@ esp_err_t TigoWebServer::api_cca_info_handler(httpd_req_t *req) {
 esp_err_t TigoWebServer::api_cca_refresh_handler(httpd_req_t *req) {
   TigoWebServer *server = static_cast<TigoWebServer *>(req->user_ctx);
   
-  // Trigger fresh CCA device info query
+  // Trigger full CCA sync (device info + config sync)
   server->parent_->query_cca_device_info();
+  server->parent_->sync_from_cca();
   
   // Return simple success response
   const char* response = "{\"status\":\"ok\",\"message\":\"CCA refresh initiated\"}";
