@@ -485,6 +485,7 @@ std::string TigoWebServer::build_devices_json() {
   struct DeviceWithName {
     const tigo_monitor::DeviceData *device;
     std::string name;
+    std::string string_label;
     int sensor_index;
   };
   
@@ -494,11 +495,13 @@ std::string TigoWebServer::build_devices_json() {
     DeviceWithName dwn;
     dwn.device = &device;
     dwn.sensor_index = -1;
+    dwn.string_label = "";
     
-    // Find the node table entry to get CCA label and sensor index
+    // Find the node table entry to get CCA label, string label, and sensor index
     for (const auto &node : node_table) {
       if (node.addr == device.addr) {
         dwn.sensor_index = node.sensor_index;
+        dwn.string_label = node.cca_string_label;
         if (!node.cca_label.empty()) {
           dwn.name = node.cca_label;
         }
@@ -545,17 +548,18 @@ std::string TigoWebServer::build_devices_json() {
     
     const auto &device = *dwn.device;
     const std::string &device_name = dwn.name;
+    const std::string &string_label = dwn.string_label;
     
-    char buffer[512];
+    char buffer[600];
     float power = device.voltage_out * device.current_in;
     unsigned long data_age_ms = millis() - device.last_update;
     float duty_cycle_percent = (device.duty_cycle / 255.0f) * 100.0f;
     
     snprintf(buffer, sizeof(buffer),
-      "{\"addr\":\"%s\",\"barcode\":\"%s\",\"name\":\"%s\",\"voltage_in\":%.2f,\"voltage_out\":%.2f,"
+      "{\"addr\":\"%s\",\"barcode\":\"%s\",\"name\":\"%s\",\"string_label\":\"%s\",\"voltage_in\":%.2f,\"voltage_out\":%.2f,"
       "\"current\":%.3f,\"power\":%.1f,\"peak_power\":%.1f,\"temperature\":%.1f,\"rssi\":%d,"
       "\"duty_cycle\":%.1f,\"efficiency\":%.2f,\"data_age_ms\":%lu}",
-      device.addr.c_str(), device.barcode.c_str(), device_name.c_str(), device.voltage_in, device.voltage_out,
+      device.addr.c_str(), device.barcode.c_str(), device_name.c_str(), string_label.c_str(), device.voltage_in, device.voltage_out,
       device.current_in, power, device.peak_power, device.temperature, device.rssi,
       duty_cycle_percent, device.efficiency, data_age_ms);
     
@@ -803,6 +807,15 @@ std::string TigoWebServer::get_dashboard_html() {
     .stat-card .value { font-size: 2rem; font-weight: bold; color: #2c3e50; }
     .stat-card .unit { font-size: 1rem; color: #95a5a6; margin-left: 0.25rem; }
     .devices-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(350px, 1fr)); gap: 1rem; }
+    .string-summary { grid-column: 1 / -1; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 8px; padding: 1.5rem; margin-top: 1.5rem; box-shadow: 0 4px 6px rgba(0,0,0,0.1); transition: box-shadow 0.3s; }
+    .string-summary:first-child { margin-top: 0; }
+    .string-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; }
+    .string-header h3 { color: white; font-size: 1.5rem; margin: 0; }
+    .string-inverter { background: rgba(255,255,255,0.2); color: white; padding: 0.5rem 1rem; border-radius: 20px; font-size: 0.875rem; font-weight: 600; }
+    .string-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 1rem; }
+    .string-stat { background: rgba(255,255,255,0.15); padding: 1rem; border-radius: 8px; text-align: center; }
+    .string-stat .stat-label { display: block; color: rgba(255,255,255,0.8); font-size: 0.75rem; text-transform: uppercase; margin-bottom: 0.5rem; }
+    .string-stat .stat-value { display: block; color: white; font-size: 1.5rem; font-weight: bold; }
     .device-card { background: white; border-radius: 8px; padding: 1.5rem; box-shadow: 0 2px 4px rgba(0,0,0,0.1); transition: background-color 0.3s, box-shadow 0.3s; }
     .device-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; border-bottom: 2px solid #ecf0f1; padding-bottom: 0.75rem; }
     .device-title-section { flex: 1; }
@@ -825,6 +838,7 @@ std::string TigoWebServer::get_dashboard_html() {
     body.dark-mode .metric { background: #3a3a3a; }
     body.dark-mode .device-header { border-bottom-color: #444; }
     body.dark-mode .loading { color: #b0b0b0; }
+    body.dark-mode .string-summary { box-shadow: 0 4px 6px rgba(0,0,0,0.5); }
   </style>
 </head>
 <body>
@@ -930,13 +944,15 @@ std::string TigoWebServer::get_dashboard_html() {
     
     async function loadData() {
       try {
-        const [devicesRes, overviewRes] = await Promise.all([
+        const [devicesRes, overviewRes, stringsRes] = await Promise.all([
           fetch('/api/devices'),
-          fetch('/api/overview')
+          fetch('/api/overview'),
+          fetch('/api/strings')
         ]);
         
         const devicesData = await devicesRes.json();
         const overviewData = await overviewRes.json();
+        const stringsData = await stringsRes.json();
         
         // Update stats
         document.getElementById('total-power').textContent = overviewData.total_power.toFixed(1);
@@ -947,14 +963,27 @@ std::string TigoWebServer::get_dashboard_html() {
         document.getElementById('avg-temp-unit').textContent = getTempUnit();
         document.getElementById('total-energy').textContent = overviewData.total_energy.toFixed(3);
         
-        // Update devices
-        const devicesContainer = document.getElementById('devices');
-        devicesContainer.innerHTML = devicesData.devices.map(device => {
+        // Group devices by string
+        const devicesByString = {};
+        const unassignedDevices = [];
+        
+        devicesData.devices.forEach(device => {
+          if (device.string_label) {
+            if (!devicesByString[device.string_label]) {
+              devicesByString[device.string_label] = [];
+            }
+            devicesByString[device.string_label].push(device);
+          } else {
+            unassignedDevices.push(device);
+          }
+        });
+        
+        // Render device card helper
+        function renderDevice(device) {
           const ageText = device.data_age_ms < 1000 ? `${device.data_age_ms}ms` : 
                           device.data_age_ms < 60000 ? `${(device.data_age_ms/1000).toFixed(1)}s` :
                           `${(device.data_age_ms/60000).toFixed(1)}m`;
           
-          // Create subtitle from barcode or address
           const subtitle = device.barcode || `Addr: ${device.addr}`;
           
           return `
@@ -1006,7 +1035,63 @@ std::string TigoWebServer::get_dashboard_html() {
               </div>
             </div>
           `;
-        }).join('');
+        }
+        
+        // Build HTML with string groups
+        const devicesContainer = document.getElementById('devices');
+        let html = '';
+        
+        // Render strings with their summary cards
+        const stringLabels = Object.keys(devicesByString).sort();
+        stringLabels.forEach(stringLabel => {
+          const stringInfo = stringsData.strings.find(s => s.label === stringLabel);
+          const devices = devicesByString[stringLabel];
+          
+          // String summary card
+          if (stringInfo) {
+            html += `
+              <div class="string-summary">
+                <div class="string-header">
+                  <h3>${stringLabel}</h3>
+                  <span class="string-inverter">${stringInfo.inverter}</span>
+                </div>
+                <div class="string-stats">
+                  <div class="string-stat">
+                    <span class="stat-label">Devices</span>
+                    <span class="stat-value">${stringInfo.total_devices}</span>
+                  </div>
+                  <div class="string-stat">
+                    <span class="stat-label">Power</span>
+                    <span class="stat-value">${stringInfo.total_power.toFixed(1)} W</span>
+                  </div>
+                  <div class="string-stat">
+                    <span class="stat-label">Peak</span>
+                    <span class="stat-value">${stringInfo.peak_power.toFixed(1)} W</span>
+                  </div>
+                  <div class="string-stat">
+                    <span class="stat-label">Avg Eff</span>
+                    <span class="stat-value">${stringInfo.avg_efficiency.toFixed(1)}%</span>
+                  </div>
+                </div>
+              </div>
+            `;
+          }
+          
+          // Devices in this string
+          devices.forEach(device => {
+            html += renderDevice(device);
+          });
+        });
+        
+        // Unassigned devices section
+        if (unassignedDevices.length > 0) {
+          html += '<div class="string-summary"><div class="string-header"><h3>Unassigned Devices</h3></div></div>';
+          unassignedDevices.forEach(device => {
+            html += renderDevice(device);
+          });
+        }
+        
+        devicesContainer.innerHTML = html;
       } catch (error) {
         console.error('Error loading data:', error);
       }
