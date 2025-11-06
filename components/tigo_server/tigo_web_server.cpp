@@ -7,6 +7,9 @@
 #include "esphome/core/version.h"
 #include <esp_heap_caps.h>
 #include <esp_system.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+#include <cstring>
 
 namespace esphome {
 namespace tigo_server {
@@ -465,8 +468,6 @@ std::string TigoWebServer::build_node_table_json() {
 }
 
 std::string TigoWebServer::build_esp_status_json() {
-  char buffer[1024];
-  
   // Get heap info
   size_t free_heap = heap_caps_get_free_size(MALLOC_CAP_DEFAULT);
   size_t total_heap = heap_caps_get_total_size(MALLOC_CAP_DEFAULT);
@@ -479,13 +480,25 @@ std::string TigoWebServer::build_esp_status_json() {
   uint32_t uptime_hours = (uptime_sec % 86400) / 3600;
   uint32_t uptime_mins = (uptime_sec % 3600) / 60;
   
+  // Get task count (this function is always available)
+  UBaseType_t task_count = uxTaskGetNumberOfTasks();
+  
+  // Get minimum free heap ever seen
+  size_t min_free_heap = heap_caps_get_minimum_free_size(MALLOC_CAP_DEFAULT);
+  size_t min_free_psram = heap_caps_get_minimum_free_size(MALLOC_CAP_SPIRAM);
+  
+  char buffer[1024];
   snprintf(buffer, sizeof(buffer),
     "{\"free_heap\":%zu,\"total_heap\":%zu,\"free_psram\":%zu,\"total_psram\":%zu,"
+    "\"min_free_heap\":%zu,\"min_free_psram\":%zu,"
     "\"uptime_sec\":%u,\"uptime_days\":%u,\"uptime_hours\":%u,\"uptime_mins\":%u,"
-    "\"esphome_version\":\"%s\",\"compilation_time\":\"%s %s\"}",
+    "\"esphome_version\":\"%s\",\"compilation_time\":\"%s %s\","
+    "\"task_count\":%u}",
     free_heap, total_heap, free_psram, total_psram,
+    min_free_heap, min_free_psram,
     uptime_sec, uptime_days, uptime_hours, uptime_mins,
-    ESPHOME_VERSION, __DATE__, __TIME__);
+    ESPHOME_VERSION, __DATE__, __TIME__,
+    (unsigned int)task_count);
   
   return std::string(buffer);
 }
@@ -1017,6 +1030,24 @@ std::string TigoWebServer::get_esp_status_html() {
         </div>
       </div>
     </div>
+    
+    <div class="card">
+      <h2>System Information</h2>
+      <div class="info-grid">
+        <div class="info-item">
+          <h3>Active Tasks</h3>
+          <div class="value" id="task-count">--</div>
+        </div>
+        <div class="info-item">
+          <h3>Minimum Free Heap</h3>
+          <div class="value" id="min-heap">--</div>
+        </div>
+        <div class="info-item">
+          <h3>Minimum Free PSRAM</h3>
+          <div class="value" id="min-psram">--</div>
+        </div>
+      </div>
+    </div>
   </div>
   
   <script>
@@ -1048,6 +1079,16 @@ std::string TigoWebServer::get_esp_status_html() {
           document.getElementById('psram-progress').style.width = psramUsedPct + '%';
         } else {
           document.getElementById('psram-free').textContent = 'Not available';
+        }
+        
+        // Display system information
+        document.getElementById('task-count').textContent = data.task_count || '--';
+        document.getElementById('min-heap').textContent = formatBytes(data.min_free_heap || 0);
+        
+        if (data.total_psram > 0) {
+          document.getElementById('min-psram').textContent = formatBytes(data.min_free_psram || 0);
+        } else {
+          document.getElementById('min-psram').textContent = 'Not available';
         }
       } catch (error) {
         console.error('Error loading data:', error);
