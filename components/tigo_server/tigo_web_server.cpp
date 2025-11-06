@@ -177,6 +177,14 @@ void TigoWebServer::setup() {
     };
     httpd_register_uri_handler(server_, &api_node_table_uri);
     
+    httpd_uri_t api_strings_uri = {
+      .uri = "/api/strings",
+      .method = HTTP_GET,
+      .handler = api_strings_handler,
+      .user_ctx = this
+    };
+    httpd_register_uri_handler(server_, &api_strings_uri);
+    
     httpd_uri_t api_esp_status_uri = {
       .uri = "/api/status",
       .method = HTTP_GET,
@@ -320,6 +328,19 @@ esp_err_t TigoWebServer::api_node_table_handler(httpd_req_t *req) {
   
   PSRAMString json_buffer;
   std::string json = server->build_node_table_json();
+  json_buffer.append(json);
+  
+  httpd_resp_set_type(req, "application/json");
+  httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+  httpd_resp_send(req, json_buffer.c_str(), json_buffer.length());
+  return ESP_OK;
+}
+
+esp_err_t TigoWebServer::api_strings_handler(httpd_req_t *req) {
+  TigoWebServer *server = static_cast<TigoWebServer *>(req->user_ctx);
+  
+  PSRAMString json_buffer;
+  std::string json = server->build_strings_json();
   json_buffer.append(json);
   
   httpd_resp_set_type(req, "application/json");
@@ -578,6 +599,47 @@ std::string TigoWebServer::build_overview_json() {
     active_devices, parent_->get_number_of_devices(), total_energy);
   
   return std::string(buffer);
+}
+
+std::string TigoWebServer::build_strings_json() {
+  const auto &strings = parent_->get_strings();
+  
+  ESP_LOGD(TAG, "Building strings JSON - found %d strings", strings.size());
+  
+  std::string json = "{\"strings\":[";
+  
+  bool first = true;
+  
+  for (const auto &pair : strings) {
+    if (!first) json += ",";
+    first = false;
+    
+    const auto &string_data = pair.second;
+    
+    ESP_LOGD(TAG, "String: %s, devices: %d/%d, power: %.0fW", 
+             string_data.string_label.c_str(), 
+             string_data.active_device_count, 
+             string_data.total_device_count,
+             string_data.total_power);
+    
+    char buffer[512];
+    snprintf(buffer, sizeof(buffer),
+      "{\"label\":\"%s\",\"inverter\":\"%s\",\"total_power\":%.1f,\"peak_power\":%.1f,"
+      "\"total_current\":%.3f,\"avg_voltage_in\":%.2f,\"avg_voltage_out\":%.2f,"
+      "\"avg_temperature\":%.1f,\"avg_efficiency\":%.2f,\"min_efficiency\":%.2f,"
+      "\"max_efficiency\":%.2f,\"active_devices\":%d,\"total_devices\":%d}",
+      string_data.string_label.c_str(), string_data.inverter_label.c_str(),
+      string_data.total_power, string_data.peak_power, string_data.total_current,
+      string_data.avg_voltage_in, string_data.avg_voltage_out,
+      string_data.avg_temperature, string_data.avg_efficiency,
+      string_data.min_efficiency, string_data.max_efficiency,
+      string_data.active_device_count, string_data.total_device_count);
+    
+    json += buffer;
+  }
+  
+  json += "]}";
+  return json;
 }
 
 std::string TigoWebServer::build_node_table_json() {

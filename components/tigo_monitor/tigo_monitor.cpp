@@ -89,6 +89,19 @@ void TigoMonitorComponent::setup() {
   load_node_table();
   load_energy_data();
   
+  // Check if we have existing CCA data and rebuild string groups
+  bool has_cca_data = false;
+  for (const auto &node : node_table_) {
+    if (!node.cca_string_label.empty() && node.cca_validated) {
+      has_cca_data = true;
+      break;
+    }
+  }
+  if (has_cca_data) {
+    ESP_LOGI(TAG, "Found existing CCA data in node table - rebuilding string groups");
+    rebuild_string_groups();
+  }
+  
   // Initialize night mode tracking
   last_data_received_ = millis();
   last_zero_publish_ = 0;
@@ -514,6 +527,140 @@ DeviceData* TigoMonitorComponent::find_device_by_addr(const std::string &addr) {
   return nullptr;
 }
 
+void TigoMonitorComponent::rebuild_string_groups() {
+  ESP_LOGI(TAG, "Rebuilding string groups from CCA data...");
+  ESP_LOGI(TAG, "Node table has %d entries", node_table_.size());
+  
+  // Count how many nodes have CCA data
+  int cca_validated_count = 0;
+  for (const auto &node : node_table_) {
+    if (node.cca_validated) {
+      ESP_LOGD(TAG, "Node %s: cca_validated=%d, string_label='%s'", 
+               node.addr.c_str(), node.cca_validated, node.cca_string_label.c_str());
+      cca_validated_count++;
+    }
+  }
+  ESP_LOGI(TAG, "%d nodes have CCA validation", cca_validated_count);
+  
+  // Clear existing string data but preserve peak power
+  std::map<std::string, float> saved_peaks;
+  for (const auto &pair : strings_) {
+    saved_peaks[pair.first] = pair.second.peak_power;
+  }
+  strings_.clear();
+  
+  // Group devices by their CCA string label
+  for (const auto &node : node_table_) {
+    if (!node.cca_string_label.empty() && node.cca_validated) {
+      const std::string &string_label = node.cca_string_label;
+      
+      // Create string entry if it doesn't exist
+      if (strings_.find(string_label) == strings_.end()) {
+        StringData string_data;
+        string_data.string_label = string_label;
+        string_data.inverter_label = node.cca_inverter_label;
+        strings_[string_label] = string_data;
+        
+        // Restore peak power if available
+        if (saved_peaks.count(string_label) > 0) {
+          strings_[string_label].peak_power = saved_peaks[string_label];
+        }
+        
+        ESP_LOGI(TAG, "Created string group: %s (Inverter: %s)", 
+                 string_label.c_str(), node.cca_inverter_label.c_str());
+      }
+      
+      // Add device to string group
+      strings_[string_label].device_addrs.push_back(node.addr);
+      strings_[string_label].total_device_count++;
+    }
+  }
+  
+  ESP_LOGI(TAG, "String grouping complete: %d strings created", strings_.size());
+  for (const auto &pair : strings_) {
+    ESP_LOGI(TAG, "  %s: %d devices", pair.first.c_str(), pair.second.total_device_count);
+  }
+}
+
+void TigoMonitorComponent::update_string_data() {
+  if (strings_.empty()) {
+    return;  // No string groups configured
+  }
+  
+  unsigned long current_time = millis();
+  
+  for (auto &pair : strings_) {
+    StringData &string_data = pair.second;
+    
+    // Reset aggregates
+    string_data.total_power = 0.0f;
+    string_data.total_current = 0.0f;
+    float sum_voltage_in = 0.0f;
+    float sum_voltage_out = 0.0f;
+    float sum_temp = 0.0f;
+    float sum_efficiency = 0.0f;
+    string_data.min_efficiency = 100.0f;
+    string_data.max_efficiency = 0.0f;
+    string_data.active_device_count = 0;
+    
+    // Aggregate data from all devices in this string
+    for (const auto &addr : string_data.device_addrs) {
+      DeviceData *device = find_device_by_addr(addr);
+      if (device && device->last_update > 0) {
+        float device_power = device->voltage_out * device->current_in;
+        string_data.total_power += device_power;
+        string_data.total_current += device->current_in;
+        sum_voltage_in += device->voltage_in;
+        sum_voltage_out += device->voltage_out;
+        sum_temp += device->temperature;
+        sum_efficiency += device->efficiency;
+        
+        if (device->efficiency < string_data.min_efficiency) {
+          string_data.min_efficiency = device->efficiency;
+        }
+        if (device->efficiency > string_data.max_efficiency) {
+          string_data.max_efficiency = device->efficiency;
+        }
+        
+        string_data.active_device_count++;
+      }
+    }
+    
+    // Calculate averages
+    if (string_data.active_device_count > 0) {
+      string_data.avg_voltage_in = sum_voltage_in / string_data.active_device_count;
+      string_data.avg_voltage_out = sum_voltage_out / string_data.active_device_count;
+      string_data.avg_temperature = sum_temp / string_data.active_device_count;
+      string_data.avg_efficiency = sum_efficiency / string_data.active_device_count;
+      string_data.last_update = current_time;
+      
+      // Update peak power
+      if (string_data.total_power > string_data.peak_power) {
+        string_data.peak_power = string_data.total_power;
+        ESP_LOGD(TAG, "New peak power for %s: %.0fW", 
+                 string_data.string_label.c_str(), string_data.peak_power);
+      }
+      
+      ESP_LOGD(TAG, "String %s: %.0fW from %d/%d devices (avg eff: %.1f%%)", 
+               string_data.string_label.c_str(), string_data.total_power,
+               string_data.active_device_count, string_data.total_device_count,
+               string_data.avg_efficiency);
+    } else {
+      // No active devices - reset min/max efficiency
+      string_data.min_efficiency = 0.0f;
+      string_data.max_efficiency = 0.0f;
+    }
+  }
+}
+
+StringData* TigoMonitorComponent::find_string_by_label(const std::string &label) {
+  auto it = strings_.find(label);
+  if (it != strings_.end()) {
+    return &it->second;
+  }
+  return nullptr;
+}
+
 void TigoMonitorComponent::publish_sensor_data() {
   unsigned long current_time = millis();
   
@@ -838,6 +985,9 @@ void TigoMonitorComponent::publish_sensor_data() {
       ESP_LOGI(TAG, "Energy data saved at hour boundary");
     }
   }
+  
+  // Update string-level aggregation data
+  update_string_data();
 }
 
 std::string TigoMonitorComponent::remove_escape_sequences(const std::string &frame) {
@@ -1173,10 +1323,31 @@ void TigoMonitorComponent::load_node_table() {
         node.sensor_index = std::stoi(parts[4]);
         node.is_persistent = true;
         
+        // Load CCA fields if available (new format with 10 fields)
+        if (parts.size() >= 10) {
+          node.cca_label = parts[5];
+          node.cca_string_label = parts[6];
+          node.cca_inverter_label = parts[7];
+          node.cca_channel = parts[8];
+          node.cca_validated = (parts[9] == "1");
+          
+          ESP_LOGI(TAG, "Restored node with CCA: %s -> Tigo %d (barcode: %s, string: %s, validated: %s)", 
+                   node.addr.c_str(), node.sensor_index + 1, node.frame09_barcode.c_str(),
+                   node.cca_string_label.c_str(), node.cca_validated ? "yes" : "no");
+        } else {
+          // Old format without CCA fields - initialize to defaults
+          node.cca_label = "";
+          node.cca_string_label = "";
+          node.cca_inverter_label = "";
+          node.cca_channel = "";
+          node.cca_validated = false;
+          
+          ESP_LOGI(TAG, "Restored node (legacy format): %s -> Tigo %d (barcode: %s)", 
+                   node.addr.c_str(), node.sensor_index + 1, node.frame09_barcode.c_str());
+        }
+        
         node_table_.push_back(node);
         loaded_count++;
-        ESP_LOGI(TAG, "Restored node: %s -> Tigo %d (barcode: %s)", 
-                 node.addr.c_str(), node.sensor_index + 1, node.frame09_barcode.c_str());
       }
     }
   }
@@ -1206,12 +1377,17 @@ void TigoMonitorComponent::save_node_table() {
     std::string pref_key = "node_" + std::to_string(i);
     uint32_t hash = esphome::fnv1_hash(pref_key);
     
-    // Format: "addr|long_addr|checksum|barcode|sensor_index"
+    // Format: "addr|long_addr|checksum|barcode|sensor_index|cca_label|cca_string|cca_inverter|cca_channel|cca_validated"
     std::string node_str = node.addr + "|" + 
                           node.long_address + "|" + 
                           node.checksum + "|" + 
                           node.frame09_barcode + "|" + 
-                          std::to_string(node.sensor_index);
+                          std::to_string(node.sensor_index) + "|" +
+                          node.cca_label + "|" +
+                          node.cca_string_label + "|" +
+                          node.cca_inverter_label + "|" +
+                          node.cca_channel + "|" +
+                          (node.cca_validated ? "1" : "0");
     
     // Copy to char array for preferences
     char node_data[256] = {0};
@@ -1564,13 +1740,42 @@ void TigoMonitorComponent::match_cca_to_uart(const std::string &json_response) {
   }
   
   // Build a map of object_id -> object for quick lookup
-  std::map<int, cJSON*> objects;
+  // Note: IDs are STRINGS in the CCA API, not numbers
+  std::map<std::string, cJSON*> objects;
   int array_size = cJSON_GetArraySize(root);
   for (int i = 0; i < array_size; i++) {
     cJSON *obj = cJSON_GetArrayItem(root, i);
     cJSON *id = cJSON_GetObjectItem(obj, "id");
-    if (id && cJSON_IsNumber(id)) {
-      objects[id->valueint] = obj;
+    if (id && cJSON_IsString(id)) {
+      objects[id->valuestring] = obj;
+    }
+  }
+  
+  // Log all objects to understand CCA structure
+  ESP_LOGI(TAG, "CCA returned %d objects total", array_size);
+  for (int i = 0; i < array_size; i++) {
+    cJSON *obj = cJSON_GetArrayItem(root, i);
+    
+    // Print all fields in the first few objects to understand structure
+    if (i < 5) {
+      char *obj_str = cJSON_PrintUnformatted(obj);
+      if (obj_str) {
+        ESP_LOGI(TAG, "  Object %d raw JSON: %s", i, obj_str);
+        free(obj_str);
+      }
+    }
+    
+    cJSON *type = cJSON_GetObjectItem(obj, "type");
+    cJSON *label = cJSON_GetObjectItem(obj, "label");
+    cJSON *object_id = cJSON_GetObjectItem(obj, "id");
+    cJSON *parent_id = cJSON_GetObjectItem(obj, "parent");
+    
+    if (type && cJSON_IsNumber(type)) {
+      ESP_LOGI(TAG, "  Object %s: type=%d, label='%s', parent=%s",
+               (object_id && cJSON_IsString(object_id)) ? object_id->valuestring : "(none)",
+               type->valueint,
+               (label && cJSON_IsString(label)) ? label->valuestring : "(none)",
+               (parent_id && cJSON_IsString(parent_id)) ? parent_id->valuestring : "(none)");
     }
   }
   
@@ -1594,14 +1799,14 @@ void TigoMonitorComponent::match_cca_to_uart(const std::string &json_response) {
       std::string cca_serial = serial->valuestring;
       std::string cca_label_str = (label && cJSON_IsString(label)) ? label->valuestring : "";
       std::string cca_channel_str = (channel && cJSON_IsString(channel)) ? channel->valuestring : "";
-      int cca_obj_id = (object_id && cJSON_IsNumber(object_id)) ? object_id->valueint : -1;
+      std::string cca_obj_id = (object_id && cJSON_IsString(object_id)) ? object_id->valuestring : "";
       
       // Find parent string and inverter
       std::string string_label = "";
       std::string inverter_label = "";
       
-      if (parent_id && cJSON_IsNumber(parent_id)) {
-        int parent = parent_id->valueint;
+      if (parent_id && cJSON_IsString(parent_id)) {
+        std::string parent = parent_id->valuestring;
         if (objects.count(parent) > 0) {
           cJSON *parent_obj = objects[parent];
           cJSON *parent_type = cJSON_GetObjectItem(parent_obj, "type");
@@ -1613,8 +1818,8 @@ void TigoMonitorComponent::match_cca_to_uart(const std::string &json_response) {
             
             // Find grandparent (inverter)
             cJSON *grandparent_id = cJSON_GetObjectItem(parent_obj, "parent");
-            if (grandparent_id && cJSON_IsNumber(grandparent_id)) {
-              int gp = grandparent_id->valueint;
+            if (grandparent_id && cJSON_IsString(grandparent_id)) {
+              std::string gp = grandparent_id->valuestring;
               if (objects.count(gp) > 0) {
                 cJSON *gp_obj = objects[gp];
                 cJSON *gp_label = cJSON_GetObjectItem(gp_obj, "label");
@@ -1667,6 +1872,9 @@ void TigoMonitorComponent::match_cca_to_uart(const std::string &json_response) {
   if (matched_count > 0) {
     save_node_table();
     last_cca_sync_time_ = millis();
+    
+    // Rebuild string groups based on updated CCA data
+    rebuild_string_groups();
   }
   
   cJSON_Delete(root);

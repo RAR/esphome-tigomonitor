@@ -41,6 +41,7 @@ class TigoWebServer : public Component {
   static esp_err_t api_devices_handler(httpd_req_t *req);
   static esp_err_t api_overview_handler(httpd_req_t *req);
   static esp_err_t api_node_table_handler(httpd_req_t *req);
+  static esp_err_t api_strings_handler(httpd_req_t *req);
   static esp_err_t api_esp_status_handler(httpd_req_t *req);
   static esp_err_t api_yaml_handler(httpd_req_t *req);
   static esp_err_t cca_info_handler(httpd_req_t *req);
@@ -61,6 +62,7 @@ class TigoWebServer : public Component {
   std::string build_devices_json();
   std::string build_overview_json();
   std::string build_node_table_json();
+  std::string build_strings_json();
   std::string build_esp_status_json();
   std::string build_yaml_json();
   std::string build_cca_info_json();

@@ -53,8 +53,26 @@ struct NodeTableData {
   std::string cca_string_label;   // Parent string label (e.g., "String 1")
   std::string cca_inverter_label; // Parent inverter label (e.g., "Inverter 1")
   std::string cca_channel;        // CCA channel identifier
-  int cca_object_id = -1;         // CCA's internal object ID
+  std::string cca_object_id;      // CCA's internal object ID (string type)
   bool cca_validated = false;     // True if matched with CCA configuration
+};
+
+struct StringData {
+  std::string string_label;       // String name from CCA (e.g., "String 1")
+  std::string inverter_label;     // Parent inverter name
+  std::vector<std::string> device_addrs; // Device addresses in this string
+  float total_power = 0.0f;
+  float total_current = 0.0f;
+  float avg_voltage_in = 0.0f;
+  float avg_voltage_out = 0.0f;
+  float avg_temperature = 0.0f;
+  float avg_efficiency = 0.0f;
+  float min_efficiency = 100.0f;
+  float max_efficiency = 0.0f;
+  float peak_power = 0.0f;        // Historical peak power for this string
+  int active_device_count = 0;
+  int total_device_count = 0;
+  unsigned long last_update = 0;
 };
 
 
@@ -149,6 +167,7 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   // Public getters for web server access
   const std::vector<DeviceData>& get_devices() const { return devices_; }
   const std::vector<NodeTableData>& get_node_table() const { return node_table_; }
+  const std::map<std::string, StringData>& get_strings() const { return strings_; }
   int get_number_of_devices() const { return number_of_devices_; }
   const std::string& get_cca_ip() const { return cca_ip_; }
   bool get_sync_cca_on_startup() const { return sync_cca_on_startup_; }
@@ -201,6 +220,11 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   void publish_sensor_data();
   DeviceData* find_device_by_addr(const std::string &addr);
   
+  // String-level aggregation
+  void update_string_data();
+  void rebuild_string_groups();
+  StringData* find_string_by_label(const std::string &label);
+  
   // Unified node table management (combines Frame 27, Frame 09, and device mappings)
   void load_node_table();
   void save_node_table();
@@ -223,6 +247,7 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
  private:
   std::vector<DeviceData> devices_;
   std::vector<NodeTableData> node_table_;  // Unified table for all device info
+  std::map<std::string, StringData> strings_;  // String-level aggregation (key = string_label)
   std::map<std::string, sensor::Sensor*> voltage_in_sensors_;
   std::map<std::string, sensor::Sensor*> voltage_out_sensors_;
   std::map<std::string, sensor::Sensor*> current_in_sensors_;
