@@ -106,7 +106,7 @@ void TigoWebServer::setup() {
   httpd_config_t config = HTTPD_DEFAULT_CONFIG();
   config.server_port = port_;
   config.ctrl_port = port_ + 1;
-  config.max_uri_handlers = 16;
+  config.max_uri_handlers = 20;  // Increased for additional endpoints
   config.stack_size = 8192;
   
   if (httpd_start(&server_, &config) == ESP_OK) {
@@ -241,6 +241,14 @@ void TigoWebServer::setup() {
       .user_ctx = this
     };
     httpd_register_uri_handler(server_, &api_reset_peak_power_uri);
+    
+    httpd_uri_t api_health_uri = {
+      .uri = "/api/health",
+      .method = HTTP_GET,
+      .handler = api_health_handler,
+      .user_ctx = this
+    };
+    httpd_register_uri_handler(server_, &api_health_uri);
     
     // Log web authentication status
     if (!web_username_.empty() && !web_password_.empty()) {
@@ -705,6 +713,26 @@ esp_err_t TigoWebServer::api_reset_peak_power_handler(httpd_req_t *req) {
   
   // Send success response
   const char* response = "{\"status\":\"ok\",\"message\":\"Peak power values reset successfully\"}";
+  httpd_resp_set_type(req, "application/json");
+  httpd_resp_send(req, response, strlen(response));
+  
+  return ESP_OK;
+}
+
+esp_err_t TigoWebServer::api_health_handler(httpd_req_t *req) {
+  // Health check endpoint - no authentication required for monitoring systems
+  // Returns simple JSON with status and uptime
+  
+  uint32_t uptime_seconds = millis() / 1000;
+  
+  char response[256];
+  snprintf(response, sizeof(response),
+    "{\"status\":\"ok\",\"uptime\":%u,\"heap_free\":%u,\"heap_min_free\":%u}",
+    uptime_seconds,
+    esp_get_free_heap_size(),
+    esp_get_minimum_free_heap_size()
+  );
+  
   httpd_resp_set_type(req, "application/json");
   httpd_resp_send(req, response, strlen(response));
   

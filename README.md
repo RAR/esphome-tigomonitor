@@ -71,6 +71,7 @@ A comprehensive ESPHome component for monitoring Tigo solar power optimizers via
   - `/api/yaml` - Generated YAML configuration
   - `/api/cca` - CCA connection info and device data
   - `/api/restart` - Remote system restart
+  - `/api/health` - Health check endpoint (no auth required)
 
 ## 📋 Requirements
 
@@ -295,8 +296,25 @@ tigo_server:
   - `/api/devices`, `/api/overview`, `/api/strings`
   - `/api/nodes`, `/api/status`, `/api/yaml`, `/api/cca`
   - `/api/restart`, `/api/reset_peak_power`, `/api/cca_refresh`, `/api/node_delete`
+- **Exception**: `/api/health` does not require authentication (for monitoring systems)
 - **Web Pages Unaffected**: Dashboard and other HTML pages remain accessible
 - **401 Unauthorized**: Returns proper HTTP 401 with JSON error when token is missing/invalid
+
+**Health Check Endpoint:**
+
+The `/api/health` endpoint is always accessible without authentication for use with monitoring and health check systems:
+
+```bash
+# Health check - no authentication required
+curl http://10.75.0.45/api/health
+# Returns: {"status":"ok","uptime":12345,"heap_free":245760,"heap_min_free":198432}
+```
+
+Response includes:
+- `status`: Always "ok" if responding
+- `uptime`: Uptime in seconds
+- `heap_free`: Current free heap memory in bytes
+- `heap_min_free`: Minimum free heap since boot in bytes
 
 **Usage Examples:**
 
