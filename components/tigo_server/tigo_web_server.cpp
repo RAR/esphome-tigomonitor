@@ -252,6 +252,63 @@ tigo_monitor::TigoMonitorComponent *TigoWebServer::get_parent_from_req(httpd_req
   return server->parent_;
 }
 
+bool TigoWebServer::check_api_auth(httpd_req_t *req) {
+  TigoWebServer *server = static_cast<TigoWebServer *>(req->user_ctx);
+  
+  // If no token is configured, allow all requests (backward compatible)
+  if (server->api_token_.empty()) {
+    return true;
+  }
+  
+  // Get Authorization header
+  size_t buf_len = httpd_req_get_hdr_value_len(req, "Authorization");
+  if (buf_len == 0) {
+    ESP_LOGW(TAG, "API request without Authorization header");
+    httpd_resp_set_status(req, "401 Unauthorized");
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, "{\"error\":\"Authorization required\"}", HTTPD_RESP_USE_STRLEN);
+    return false;
+  }
+  
+  // Read Authorization header
+  char *auth_header = static_cast<char*>(malloc(buf_len + 1));
+  if (!auth_header) {
+    httpd_resp_send_500(req);
+    return false;
+  }
+  
+  if (httpd_req_get_hdr_value_str(req, "Authorization", auth_header, buf_len + 1) != ESP_OK) {
+    free(auth_header);
+    httpd_resp_send_500(req);
+    return false;
+  }
+  
+  // Check for "Bearer <token>" format
+  std::string auth_str(auth_header);
+  free(auth_header);
+  
+  if (auth_str.length() < 7 || auth_str.substr(0, 7) != "Bearer ") {
+    ESP_LOGW(TAG, "Invalid Authorization header format (expected 'Bearer <token>')");
+    httpd_resp_set_status(req, "401 Unauthorized");
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, "{\"error\":\"Invalid authorization format\"}", HTTPD_RESP_USE_STRLEN);
+    return false;
+  }
+  
+  // Extract token and compare
+  std::string provided_token = auth_str.substr(7);
+  if (provided_token != server->api_token_) {
+    ESP_LOGW(TAG, "Invalid API token provided");
+    httpd_resp_set_status(req, "401 Unauthorized");
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, "{\"error\":\"Invalid token\"}", HTTPD_RESP_USE_STRLEN);
+    return false;
+  }
+  
+  // Token valid
+  return true;
+}
+
 // ===== HTML Page Handlers =====
 
 esp_err_t TigoWebServer::dashboard_handler(httpd_req_t *req) {
@@ -307,6 +364,9 @@ esp_err_t TigoWebServer::yaml_config_handler(httpd_req_t *req) {
 
 esp_err_t TigoWebServer::api_devices_handler(httpd_req_t *req) {
   TigoWebServer *server = static_cast<TigoWebServer *>(req->user_ctx);
+  if (!server->check_api_auth(req)) {
+    return ESP_OK;  // Response already sent by check_api_auth
+  }
   
   PSRAMString json_buffer;
   std::string json = server->build_devices_json();
@@ -320,6 +380,9 @@ esp_err_t TigoWebServer::api_devices_handler(httpd_req_t *req) {
 
 esp_err_t TigoWebServer::api_overview_handler(httpd_req_t *req) {
   TigoWebServer *server = static_cast<TigoWebServer *>(req->user_ctx);
+  if (!server->check_api_auth(req)) {
+    return ESP_OK;
+  }
   
   PSRAMString json_buffer;
   std::string json = server->build_overview_json();
@@ -333,6 +396,9 @@ esp_err_t TigoWebServer::api_overview_handler(httpd_req_t *req) {
 
 esp_err_t TigoWebServer::api_node_table_handler(httpd_req_t *req) {
   TigoWebServer *server = static_cast<TigoWebServer *>(req->user_ctx);
+  if (!server->check_api_auth(req)) {
+    return ESP_OK;
+  }
   
   PSRAMString json_buffer;
   std::string json = server->build_node_table_json();
@@ -346,6 +412,9 @@ esp_err_t TigoWebServer::api_node_table_handler(httpd_req_t *req) {
 
 esp_err_t TigoWebServer::api_strings_handler(httpd_req_t *req) {
   TigoWebServer *server = static_cast<TigoWebServer *>(req->user_ctx);
+  if (!server->check_api_auth(req)) {
+    return ESP_OK;
+  }
   
   PSRAMString json_buffer;
   std::string json = server->build_strings_json();
@@ -359,6 +428,9 @@ esp_err_t TigoWebServer::api_strings_handler(httpd_req_t *req) {
 
 esp_err_t TigoWebServer::api_esp_status_handler(httpd_req_t *req) {
   TigoWebServer *server = static_cast<TigoWebServer *>(req->user_ctx);
+  if (!server->check_api_auth(req)) {
+    return ESP_OK;
+  }
   
   PSRAMString json_buffer;
   std::string json = server->build_esp_status_json();
@@ -372,6 +444,9 @@ esp_err_t TigoWebServer::api_esp_status_handler(httpd_req_t *req) {
 
 esp_err_t TigoWebServer::api_yaml_handler(httpd_req_t *req) {
   TigoWebServer *server = static_cast<TigoWebServer *>(req->user_ctx);
+  if (!server->check_api_auth(req)) {
+    return ESP_OK;
+  }
   
   PSRAMString json_buffer;
   std::string json = server->build_yaml_json();
@@ -397,6 +472,9 @@ esp_err_t TigoWebServer::cca_info_handler(httpd_req_t *req) {
 
 esp_err_t TigoWebServer::api_cca_info_handler(httpd_req_t *req) {
   TigoWebServer *server = static_cast<TigoWebServer *>(req->user_ctx);
+  if (!server->check_api_auth(req)) {
+    return ESP_OK;
+  }
   
   PSRAMString json_buffer;
   std::string json = server->build_cca_info_json();
@@ -410,6 +488,9 @@ esp_err_t TigoWebServer::api_cca_info_handler(httpd_req_t *req) {
 
 esp_err_t TigoWebServer::api_cca_refresh_handler(httpd_req_t *req) {
   TigoWebServer *server = static_cast<TigoWebServer *>(req->user_ctx);
+  if (!server->check_api_auth(req)) {
+    return ESP_OK;
+  }
   
   // Trigger full CCA refresh (device info + config sync with proper sequencing)
   server->parent_->refresh_cca_data();
@@ -424,6 +505,9 @@ esp_err_t TigoWebServer::api_cca_refresh_handler(httpd_req_t *req) {
 
 esp_err_t TigoWebServer::api_node_delete_handler(httpd_req_t *req) {
   TigoWebServer *server = static_cast<TigoWebServer *>(req->user_ctx);
+  if (!server->check_api_auth(req)) {
+    return ESP_OK;
+  }
   
   // Parse query parameter "addr"
   char query_str[64];
@@ -468,6 +552,11 @@ esp_err_t TigoWebServer::api_node_delete_handler(httpd_req_t *req) {
 }
 
 esp_err_t TigoWebServer::api_restart_handler(httpd_req_t *req) {
+  TigoWebServer *server = static_cast<TigoWebServer *>(req->user_ctx);
+  if (!server->check_api_auth(req)) {
+    return ESP_OK;
+  }
+  
   ESP_LOGI(TAG, "Restart requested via web interface");
   
   // Send success response
@@ -483,6 +572,10 @@ esp_err_t TigoWebServer::api_restart_handler(httpd_req_t *req) {
 
 esp_err_t TigoWebServer::api_reset_peak_power_handler(httpd_req_t *req) {
   TigoWebServer *server = (TigoWebServer *)req->user_ctx;
+  if (!server->check_api_auth(req)) {
+    return ESP_OK;
+  }
+  
   ESP_LOGI(TAG, "Reset peak power requested via web interface");
   
   // Reset peak power for all devices
@@ -804,7 +897,7 @@ std::string TigoWebServer::build_yaml_json() {
 // ===== HTML Page Generators =====
 
 std::string TigoWebServer::get_dashboard_html() {
-  return R"html(<!DOCTYPE html>
+  std::string html = R"html(<!DOCTYPE html>
 <html>
 <head>
   <meta charset="UTF-8">
@@ -914,6 +1007,18 @@ std::string TigoWebServer::get_dashboard_html() {
   </div>
   
   <script>
+    // API Token configuration
+    const API_TOKEN = ")html" + api_token_ + R"html(";
+    
+    // Fetch wrapper that includes authorization header if token is set
+    async function apiFetch(url, options = {}) {
+      if (API_TOKEN) {
+        options.headers = options.headers || {};
+        options.headers['Authorization'] = 'Bearer ' + API_TOKEN;
+      }
+      return fetch(url, options);
+    }
+    
     // Temperature unit management
     let useFahrenheit = localStorage.getItem('tempUnit') === 'F';
     
@@ -968,9 +1073,9 @@ std::string TigoWebServer::get_dashboard_html() {
     async function loadData() {
       try {
         const [devicesRes, overviewRes, stringsRes] = await Promise.all([
-          fetch('/api/devices'),
-          fetch('/api/overview'),
-          fetch('/api/strings')
+          apiFetch('/api/devices'),
+          apiFetch('/api/overview'),
+          apiFetch('/api/strings')
         ]);
         
         const devicesData = await devicesRes.json();
@@ -1126,10 +1231,11 @@ std::string TigoWebServer::get_dashboard_html() {
 </body>
 </html>
 )html";
+  return html;
 }
 
 std::string TigoWebServer::get_node_table_html() {
-  return R"html(<!DOCTYPE html>
+  std::string html = R"html(<!DOCTYPE html>
 <html>
 <head>
   <meta charset="UTF-8">
@@ -1212,6 +1318,18 @@ std::string TigoWebServer::get_node_table_html() {
   </div>
   
   <script>
+    // API Token configuration
+    const API_TOKEN = ")html" + api_token_ + R"html(";
+    
+    // Fetch wrapper that includes authorization header if token is set
+    async function apiFetch(url, options = {}) {
+      if (API_TOKEN) {
+        options.headers = options.headers || {};
+        options.headers['Authorization'] = 'Bearer ' + API_TOKEN;
+      }
+      return fetch(url, options);
+    }
+    
     // Dark mode
     let darkMode = localStorage.getItem('darkMode') === 'true';
     
@@ -1240,7 +1358,7 @@ std::string TigoWebServer::get_node_table_html() {
       }
       
       try {
-        const response = await fetch('/api/nodes/delete?addr=' + encodeURIComponent(addr), {
+        const response = await apiFetch('/api/nodes/delete?addr=' + encodeURIComponent(addr), {
           method: 'POST'
         });
         
@@ -1258,7 +1376,7 @@ std::string TigoWebServer::get_node_table_html() {
     
     async function loadData() {
       try {
-        const response = await fetch('/api/nodes');
+        const response = await apiFetch('/api/nodes');
         const data = await response.json();
         
         const tbody = document.getElementById('node-table-body');
@@ -1321,10 +1439,11 @@ std::string TigoWebServer::get_node_table_html() {
 </body>
 </html>
 )html";
+  return html;
 }
 
 std::string TigoWebServer::get_esp_status_html() {
-  return R"html(<!DOCTYPE html>
+  std::string html = R"html(<!DOCTYPE html>
 <html>
 <head>
   <meta charset="UTF-8">
@@ -1452,6 +1571,18 @@ std::string TigoWebServer::get_esp_status_html() {
   </div>
   
   <script>
+    // API Token configuration
+    const API_TOKEN = ")html" + api_token_ + R"html(";
+    
+    // Fetch wrapper that includes authorization header if token is set
+    async function apiFetch(url, options = {}) {
+      if (API_TOKEN) {
+        options.headers = options.headers || {};
+        options.headers['Authorization'] = 'Bearer ' + API_TOKEN;
+      }
+      return fetch(url, options);
+    }
+    
     // Dark mode support
     let darkMode = localStorage.getItem('darkMode') === 'true';
     
@@ -1482,7 +1613,7 @@ std::string TigoWebServer::get_esp_status_html() {
     
     async function loadData() {
       try {
-        const response = await fetch('/api/status');
+        const response = await apiFetch('/api/status');
         const data = await response.json();
         
         document.getElementById('uptime').textContent = 
@@ -1532,7 +1663,7 @@ std::string TigoWebServer::get_esp_status_html() {
       messageDiv.textContent = 'Restarting ESP32... Please wait 10-15 seconds.';
       
       try {
-        const response = await fetch('/api/restart', { method: 'POST' });
+        const response = await apiFetch('/api/restart', { method: 'POST' });
         if (response.ok) {
           messageDiv.style.backgroundColor = '#27ae60';
           messageDiv.textContent = 'Restart command sent! The ESP32 is rebooting. Page will reload in 15 seconds...';
@@ -1564,7 +1695,7 @@ std::string TigoWebServer::get_esp_status_html() {
       messageDiv.textContent = 'Resetting peak power values...';
       
       try {
-        const response = await fetch('/api/reset_peak_power', { method: 'POST' });
+        const response = await apiFetch('/api/reset_peak_power', { method: 'POST' });
         if (response.ok) {
           messageDiv.style.backgroundColor = '#27ae60';
           messageDiv.textContent = 'Peak power values have been reset successfully!';
@@ -1589,10 +1720,11 @@ std::string TigoWebServer::get_esp_status_html() {
 </body>
 </html>
 )html";
+  return html;
 }
 
 std::string TigoWebServer::get_yaml_config_html() {
-  return R"html(<!DOCTYPE html>
+  std::string html = R"html(<!DOCTYPE html>
 <html>
 <head>
   <meta charset="UTF-8">
@@ -1660,6 +1792,18 @@ std::string TigoWebServer::get_yaml_config_html() {
   </div>
   
   <script>
+    // API Token configuration
+    const API_TOKEN = ")html" + api_token_ + R"html(";
+    
+    // Fetch wrapper that includes authorization header if token is set
+    async function apiFetch(url, options = {}) {
+      if (API_TOKEN) {
+        options.headers = options.headers || {};
+        options.headers['Authorization'] = 'Bearer ' + API_TOKEN;
+      }
+      return fetch(url, options);
+    }
+    
     // Dark mode support
     let darkMode = localStorage.getItem('darkMode') === 'true';
     
@@ -1684,7 +1828,7 @@ std::string TigoWebServer::get_yaml_config_html() {
     
     async function loadData() {
       try {
-        const response = await fetch('/api/yaml');
+        const response = await apiFetch('/api/yaml');
         const data = await response.json();
         
         document.getElementById('yaml-content').textContent = data.yaml;
@@ -1712,10 +1856,11 @@ std::string TigoWebServer::get_yaml_config_html() {
 </body>
 </html>
 )html";
+  return html;
 }
 
 std::string TigoWebServer::get_cca_info_html() {
-  return R"html(<!DOCTYPE html>
+  std::string html = R"html(<!DOCTYPE html>
 <html>
 <head>
   <meta charset="UTF-8">
@@ -1808,6 +1953,18 @@ std::string TigoWebServer::get_cca_info_html() {
   </div>
   
   <script>
+    // API Token configuration
+    const API_TOKEN = ")html" + api_token_ + R"html(";
+    
+    // Fetch wrapper that includes authorization header if token is set
+    async function apiFetch(url, options = {}) {
+      if (API_TOKEN) {
+        options.headers = options.headers || {};
+        options.headers['Authorization'] = 'Bearer ' + API_TOKEN;
+      }
+      return fetch(url, options);
+    }
+    
     // Dark mode support
     let darkMode = localStorage.getItem('darkMode') === 'true';
     
@@ -1840,7 +1997,7 @@ std::string TigoWebServer::get_cca_info_html() {
     
     async function loadData() {
       try {
-        const response = await fetch('/api/cca');
+        const response = await apiFetch('/api/cca');
         const data = await response.json();
         
         // Update connection info
@@ -1991,7 +2148,7 @@ std::string TigoWebServer::get_cca_info_html() {
       
       try {
         // Trigger a fresh query by calling the sync API
-        const syncResponse = await fetch('/api/cca/refresh');
+        const syncResponse = await apiFetch('/api/cca/refresh');
         if (!syncResponse.ok) {
           throw new Error('Refresh request failed');
         }
@@ -2014,6 +2171,7 @@ std::string TigoWebServer::get_cca_info_html() {
 </body>
 </html>
 )html";
+  return html;
 }
 
 std::string TigoWebServer::build_cca_info_json() {

@@ -121,8 +121,8 @@ Connect your ESP32 to the Tigo communication system via RS485:
 - **M5Stack Atomic RS485 Base** ([link](https://docs.m5stack.com/en/atom/Atomic%20RS485%20Base)) - provides easy RS485 connection with built-in level shifters
 
 **UART Connection:**
-- **TX Pin**: GPIO1 (connects to Tigo RX via RS485)
-- **RX Pin**: GPIO3 (connects to Tigo TX via RS485)
+- **TX Pin**: GPIO6 (connects to Tigo RX via RS485)
+- **RX Pin**: GPIO5 (connects to Tigo TX via RS485)
 - **Baud Rate**: 38400
 - **Data**: 8 bits, No parity, 1 stop bit
 
@@ -166,9 +166,12 @@ ota:
 # UART configuration for Tigo communication
 uart:
   id: tigo_uart
-  tx_pin: GPIO1
-  rx_pin: GPIO3
+  tx_pin: GPIO6
+  rx_pin: GPIO5
   baud_rate: 38400
+  data_bits: 8
+  parity: NONE
+  stop_bits: 1
 
 # Tigo Monitor component
 tigo_monitor:
@@ -257,6 +260,7 @@ The component automatically uses PSRAM when available for HTTP buffers, JSON par
 |--------|------|---------|-------------|
 | `tigo_monitor_id` | ID | Required | Reference to tigo_monitor component |
 | `port` | Integer | 80 | HTTP port for web interface |
+| `api_token` | String | None | Bearer token for API authentication (optional) |
 
 The web server provides:
 - **Dashboard** (`/`) - Live device monitoring with real-time metrics
@@ -270,6 +274,50 @@ The web server provides:
 - **YAML Config** (`/yaml`) - Auto-generated sensor configuration
 - **CCA Info** (`/cca`) - Tigo CCA device status and information
   - Manual refresh capability
+
+### API Authentication
+
+The web interface supports optional API token authentication to secure access to all `/api/*` endpoints:
+
+```yaml
+tigo_server:
+  tigo_monitor_id: tigo_hub
+  port: 80
+  api_token: "your-secret-token-here"  # Optional - if omitted, API is open
+```
+
+**Features:**
+- **Optional**: If no token is configured, API endpoints remain open (backward compatible)
+- **Bearer Token**: Uses standard `Authorization: Bearer <token>` header format
+- **All API Endpoints**: Protects all `/api/*` endpoints including:
+  - `/api/devices`, `/api/overview`, `/api/strings`
+  - `/api/nodes`, `/api/status`, `/api/yaml`, `/api/cca`
+  - `/api/restart`, `/api/reset_peak_power`, `/api/cca_refresh`, `/api/node_delete`
+- **Web Pages Unaffected**: Dashboard and other HTML pages remain accessible
+- **401 Unauthorized**: Returns proper HTTP 401 with JSON error when token is missing/invalid
+
+**Usage Examples:**
+
+```bash
+# Without authentication (if api_token not configured)
+curl http://10.75.0.45/api/devices
+
+# With authentication
+curl -H "Authorization: Bearer your-secret-token-here" http://10.75.0.45/api/devices
+
+# Test authentication
+curl http://10.75.0.45/api/status
+# Returns: {"error":"Authorization required"}
+
+curl -H "Authorization: Bearer wrong-token" http://10.75.0.45/api/status
+# Returns: {"error":"Invalid token"}
+```
+
+**Security Recommendations:**
+- Use a strong, randomly generated token (e.g., 32+ characters)
+- Avoid using the token in URLs (use headers only)
+- Use HTTPS if exposing the API outside your local network
+- Rotate tokens periodically
 
 ### Sensor Types
 

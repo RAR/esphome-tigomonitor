@@ -25,11 +25,15 @@ class TigoWebServer : public Component {
   
   void set_port(uint16_t port) { port_ = port; }
   uint16_t get_port() const { return port_; }
+  
+  void set_api_token(const std::string &token) { api_token_ = token; }
+  const std::string &get_api_token() const { return api_token_; }
 
  protected:
   tigo_monitor::TigoMonitorComponent *parent_{nullptr};
   httpd_handle_t server_{nullptr};
   uint16_t port_{80};
+  std::string api_token_{""};
   
   // HTTP handlers
   static esp_err_t dashboard_handler(httpd_req_t *req);
@@ -52,6 +56,7 @@ class TigoWebServer : public Component {
   static esp_err_t api_reset_peak_power_handler(httpd_req_t *req);
   
   // Helper functions
+  bool check_api_auth(httpd_req_t *req);
   tigo_monitor::TigoMonitorComponent *get_parent_from_req(httpd_req_t *req);
   std::string get_dashboard_html();
   std::string get_node_table_html();

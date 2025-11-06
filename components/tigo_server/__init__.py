@@ -10,11 +10,13 @@ tigo_server_ns = cg.esphome_ns.namespace('tigo_server')
 TigoWebServer = tigo_server_ns.class_('TigoWebServer', cg.Component)
 
 CONF_TIGO_MONITOR_ID = 'tigo_monitor_id'
+CONF_API_TOKEN = 'api_token'
 
 CONFIG_SCHEMA = cv.Schema({
     cv.GenerateID(): cv.declare_id(TigoWebServer),
     cv.GenerateID(CONF_TIGO_MONITOR_ID): cv.use_id(tigo_monitor.TigoMonitorComponent),
     cv.Optional(CONF_PORT, default=80): cv.port,
+    cv.Optional(CONF_API_TOKEN): cv.string,
 }).extend(cv.COMPONENT_SCHEMA)
 
 
@@ -28,4 +30,8 @@ async def to_code(config):
     
     # Set the port
     cg.add(var.set_port(config[CONF_PORT]))
+    
+    # Set the API token if provided
+    if CONF_API_TOKEN in config:
+        cg.add(var.set_api_token(config[CONF_API_TOKEN]))
 
