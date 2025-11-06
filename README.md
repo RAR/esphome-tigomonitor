@@ -20,16 +20,22 @@ A comprehensive ESPHome component for monitoring Tigo solar power optimizers via
   - **Dashboard**: Real-time overview with system stats and live device metrics
     - Total Power, Current, Energy (kWh), Efficiency, Temperature, Active Devices
     - Temperature unit toggle (°F/°C) with persistent preference
+    - **String-Grouped Layout**: Devices organized by CCA strings with summary cards
+    - String summary cards show: Total Power, Peak Power, Avg Efficiency, Device Count
+    - Visual hierarchy with gradient headers for each string/inverter
     - Device cards with CCA-friendly names and real-time metrics
+    - Historical peak power tracking per device
+    - Dark mode support with persistent preference
   - **Node Table**: Complete device registry with CCA labels and hierarchy
     - Individual node deletion capability
     - CCA validation badges
   - **ESP32 Status**: System health, memory usage, task count, and uptime
+    - Remote restart button with confirmation
   - **YAML Config Generator**: Automatic sensor configuration generation
   - **CCA Info**: Tigo CCA device information and status monitoring
     - Manual refresh button for on-demand updates
 - **Mobile Responsive**: Optimized layouts for desktop and mobile devices
-- **Auto-refresh**: Live updates without page reloads
+- **Auto-refresh**: Live updates without page reloads (5 second intervals)
 - **No External Dependencies**: Runs entirely on the ESP32
 
 ### CCA Integration
@@ -40,14 +46,31 @@ A comprehensive ESPHome component for monitoring Tigo solar power optimizers via
 - **Sync on Boot**: Optional automatic synchronization on startup
 - **Manual Sync Button**: On-demand CCA configuration refresh
 - **Device Validation**: Visual indicators for CCA-validated devices
+- **String Aggregation**: Real-time aggregated metrics per string
+  - Per-string power, peak power, current, voltage, temperature
+  - Per-string efficiency (average, min, max)
+  - Active device count per string
+- **Persistent Metadata**: CCA configuration survives reboots
 
 ### Advanced Features
 - **Flash Wear Optimization**: Energy data saved hourly (24 writes/day) for extended flash lifespan
+- **Peak Power Tracking**: Historical maximum power per device with flash persistence
+- **OTA/Shutdown Data Persistence**: Automatic data save before OTA updates or restarts
+- **String-Level Analytics**: Aggregated metrics for each string with API endpoint
 - **Night Mode**: Automatic zero publishing when no data received (prevents stale data at night)
 - **UART Optimization**: ISR in IRAM for reduced packet loss
 - **Flexible Configuration**: Support for individual sensors or combined device sensors
 - **Management Tools**: Built-in buttons for YAML generation and device management
 - **OTA Updates**: Over-the-air firmware updates
+- **RESTful API**: JSON endpoints for all system and device data
+  - `/api/devices` - Individual device metrics with string labels
+  - `/api/overview` - System-wide aggregates
+  - `/api/strings` - Per-string aggregated data
+  - `/api/nodes` - Node table with CCA metadata
+  - `/api/status` - ESP32 system status
+  - `/api/yaml` - Generated YAML configuration
+  - `/api/cca` - CCA connection info and device data
+  - `/api/restart` - Remote system restart
 
 ## 📋 Requirements
 
