@@ -7,6 +7,10 @@
 #include "esphome/components/text_sensor/text_sensor.h"
 #include "esphome/components/binary_sensor/binary_sensor.h"
 
+#ifdef USE_TIME
+#include "esphome/components/time/real_time_clock.h"
+#endif
+
 #ifdef USE_BUTTON
 #include "esphome/components/button/button.h"
 #endif
@@ -192,6 +196,13 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   
   // Public methods for web server access
   void reset_peak_power();  // Reset all peak power values to 0
+  void reset_total_energy();  // Reset total energy to 0
+  void check_midnight_reset();  // Check if midnight has passed and reset configured sensors
+  void set_reset_at_midnight(bool reset) { this->reset_at_midnight_ = reset; }
+  
+#ifdef USE_TIME
+  void set_time_id(time::RealTimeClock *time_id) { this->time_id_ = time_id; }
+#endif
   
   // Generate YAML configuration for manual setup
   void generate_sensor_yaml();
@@ -293,6 +304,13 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   // UART diagnostics
   uint32_t invalid_checksum_count_ = 0;
   uint32_t missed_packet_count_ = 0;
+  
+  // Midnight reset tracking
+  bool reset_at_midnight_ = false;  // Global flag to reset peak power and energy at midnight
+  int last_reset_day_ = -1;  // Track which day we last reset (day of year)
+#ifdef USE_TIME
+  time::RealTimeClock *time_id_{nullptr};
+#endif
   
   // Night mode / no data handling
   unsigned long last_data_received_ = 0;

@@ -1,8 +1,8 @@
 """ESPHome external component for Tigo Server communication."""
 import esphome.codegen as cg
 import esphome.config_validation as cv
-from esphome.components import uart
-from esphome.const import CONF_ID, CONF_UART_ID
+from esphome.components import uart, time as time_
+from esphome.const import CONF_ID, CONF_UART_ID, CONF_TIME_ID
 from esphome.core import coroutine
 
 DEPENDENCIES = ['uart']
@@ -14,6 +14,7 @@ CONF_TIGO_MONITOR_ID = 'tigo_monitor_id'
 CONF_NUMBER_OF_DEVICES = 'number_of_devices'
 CONF_CCA_IP = 'cca_ip'
 CONF_SYNC_CCA_ON_STARTUP = 'sync_cca_on_startup'
+CONF_RESET_AT_MIDNIGHT = 'reset_at_midnight'
 
 CONFIG_SCHEMA = cv.Schema({
     cv.GenerateID(): cv.declare_id(TigoMonitorComponent),
@@ -21,6 +22,8 @@ CONFIG_SCHEMA = cv.Schema({
     cv.Optional(CONF_NUMBER_OF_DEVICES, default=20): cv.int_range(min=1, max=100),
     cv.Optional(CONF_CCA_IP): cv.string,
     cv.Optional(CONF_SYNC_CCA_ON_STARTUP, default=True): cv.boolean,
+    cv.Optional(CONF_TIME_ID): cv.use_id(time_.RealTimeClock),
+    cv.Optional(CONF_RESET_AT_MIDNIGHT, default=False): cv.boolean,
 }).extend(cv.polling_component_schema('30s')).extend(uart.UART_DEVICE_SCHEMA)
 
 @coroutine
@@ -34,6 +37,16 @@ def to_code(config):
     if CONF_CCA_IP in config:
         cg.add(var.set_cca_ip(config[CONF_CCA_IP]))
         cg.add(var.set_sync_cca_on_startup(config[CONF_SYNC_CCA_ON_STARTUP]))
+    
+    if CONF_TIME_ID in config:
+        time_id = yield cg.get_variable(config[CONF_TIME_ID])
+        cg.add(var.set_time_id(time_id))
+        cg.add_define("USE_TIME")
+    
+    if config[CONF_RESET_AT_MIDNIGHT]:
+        if CONF_TIME_ID not in config:
+            raise cv.Invalid("reset_at_midnight requires a time_id to be configured")
+        cg.add(var.set_reset_at_midnight(True))
     
     # Add ESP-IDF HTTP client component dependency
     cg.add_library("ESP32 HTTP Client", None)

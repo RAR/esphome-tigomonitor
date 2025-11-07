@@ -254,6 +254,51 @@ The component automatically uses PSRAM when available for HTTP buffers, JSON par
 | `number_of_devices` | Integer | 5 | Maximum number of Tigo devices to track |
 | `cca_ip` | String | None | IP address of Tigo CCA for automatic panel labeling |
 | `sync_cca_on_startup` | Boolean | true | Automatically sync CCA configuration on boot |
+| `time_id` | ID | None | Optional time component for midnight reset feature |
+| `reset_at_midnight` | Boolean | false | Reset peak power and total energy at midnight (requires time_id) |
+
+#### Midnight Reset Feature
+
+To enable automatic daily reset of peak power and total energy sensors at midnight:
+
+1. Configure a time component (e.g., HomeAssistant time or SNTP)
+2. Reference it in the tigo_monitor component using `time_id`
+3. Set `reset_at_midnight: true` on the tigo_monitor component
+
+**Example:**
+
+```yaml
+time:
+  - platform: homeassistant
+    id: ha_time
+
+tigo_monitor:
+  id: tigo_hub
+  uart_id: uart_bus
+  number_of_devices: 20
+  time_id: ha_time
+  reset_at_midnight: true  # Resets all peak power and total energy at midnight
+
+sensor:
+  # This will reset to 0 every day at midnight
+  - platform: tigo_monitor
+    tigo_monitor_id: tigo_hub
+    name: "Daily Energy Production"
+  
+  # Individual device peak power - also resets at midnight
+  - platform: tigo_monitor
+    tigo_monitor_id: tigo_hub
+    address: "1234"
+    name: "Panel 1"
+    peak_power:
+```
+
+**Notes:**
+- Without a time component, the reset feature cannot be enabled
+- Reset happens when the component detects a day change (based on day_of_year)
+- All peak power sensors and total energy sensor reset simultaneously
+- Values are published and saved to persistent storage after reset
+- Useful for tracking daily production totals
 
 ### Tigo Web Server Component
 
@@ -444,6 +489,7 @@ sensor:
     address: "1234"  # Device address from discovery
     name: "Tigo Device 1"
     power: {}
+    peak_power: {}
     voltage_in: {}
     voltage_out: {}
     current_in: {}

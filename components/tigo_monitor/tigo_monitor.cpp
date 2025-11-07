@@ -140,6 +140,7 @@ void TigoMonitorComponent::loop() {
 
 void TigoMonitorComponent::update() {
   // This is called every polling interval
+  check_midnight_reset();
   publish_sensor_data();
 }
 
@@ -1491,6 +1492,54 @@ void TigoMonitorComponent::reset_peak_power() {
   }
   
   ESP_LOGI(TAG, "Reset %d peak power values", reset_count);
+}
+
+void TigoMonitorComponent::reset_total_energy() {
+  ESP_LOGI(TAG, "Resetting total energy...");
+  
+  total_energy_kwh_ = 0.0f;
+  
+  // Publish the reset value
+  if (energy_sum_sensor_ != nullptr) {
+    energy_sum_sensor_->publish_state(0.0f);
+  }
+  
+  // Save to persistent storage
+  save_energy_data();
+  
+  ESP_LOGI(TAG, "Total energy reset to 0 kWh");
+}
+
+void TigoMonitorComponent::check_midnight_reset() {
+#ifdef USE_TIME
+  if (!reset_at_midnight_) {
+    return;  // Reset at midnight not enabled
+  }
+  
+  if (time_id_ == nullptr) {
+    return;  // No time component configured
+  }
+  
+  auto now = time_id_->now();
+  if (!now.is_valid()) {
+    return;  // Time not synced yet
+  }
+  
+  int current_day = now.day_of_year;
+  
+  // Check if we've crossed into a new day
+  if (last_reset_day_ != -1 && last_reset_day_ != current_day) {
+    ESP_LOGI(TAG, "Midnight detected - resetting peak power and total energy (day %d -> %d)", last_reset_day_, current_day);
+    
+    // Reset total energy
+    reset_total_energy();
+    
+    // Reset all peak power values
+    reset_peak_power();
+  }
+  
+  last_reset_day_ = current_day;
+#endif
 }
 
 void TigoMonitorComponent::save_persistent_data() {
