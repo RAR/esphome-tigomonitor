@@ -454,6 +454,13 @@ text_sensor:
     barcode: {}
     firmware_version: {}  # Device firmware version
     device_info: {}       # Additional device information
+
+binary_sensor:
+  # Night mode indicator
+  - platform: tigo_monitor
+    tigo_monitor_id: tigo_hub
+    night_mode:
+      name: "Solar Night Mode"
 ```
 
 ## 🚀 Quick Start Guide
@@ -912,7 +919,8 @@ Update the dashboard entity names to match your ESPHome configuration:
 
 9. **Night mode / Zero publishing**
    - Component automatically enters night mode after 1 hour of no data
-   - Publishes zeros every 10 minutes to prevent stale data in Home Assistant
+   - Publishes zeros every 10 minutes to prevent stale data in Home Assistant (temperatures show as unavailable)
+   - Binary sensor available to track night mode state
    - This is normal behavior - devices resume when sun comes up
 
 ### Reset Commands

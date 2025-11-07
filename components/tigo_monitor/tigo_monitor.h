@@ -5,6 +5,7 @@
 #include "esphome/components/uart/uart.h"
 #include "esphome/components/sensor/sensor.h"
 #include "esphome/components/text_sensor/text_sensor.h"
+#include "esphome/components/binary_sensor/binary_sensor.h"
 
 #ifdef USE_BUTTON
 #include "esphome/components/button/button.h"
@@ -158,6 +159,10 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   void add_tigo_sensor(const std::string &address, sensor::Sensor *sensor) {
     this->power_sensors_[address] = sensor;
   }
+  void add_night_mode_sensor(binary_sensor::BinarySensor *sensor) {
+    this->night_mode_sensor_ = sensor;
+    ESP_LOGCONFIG("tigo_monitor", "Registered night mode binary sensor");
+  }
 
   // Configuration
   void set_number_of_devices(int count) { number_of_devices_ = count; }
@@ -267,6 +272,7 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   sensor::Sensor* power_sum_sensor_ = nullptr;
   sensor::Sensor* energy_sum_sensor_ = nullptr;
   sensor::Sensor* device_count_sensor_ = nullptr;
+  binary_sensor::BinarySensor* night_mode_sensor_ = nullptr;
   
   // Energy calculation variables
   float total_energy_kwh_ = 0.0f;

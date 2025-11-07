@@ -106,6 +106,9 @@ void TigoMonitorComponent::setup() {
   last_data_received_ = millis();
   last_zero_publish_ = 0;
   in_night_mode_ = false;
+  if (night_mode_sensor_ != nullptr) {
+    night_mode_sensor_->publish_state(false);
+  }
   
   // Register shutdown callback to save persistent data before OTA/reboot
   App.register_component(this);
@@ -449,6 +452,9 @@ void TigoMonitorComponent::update_device_data(const DeviceData &data) {
   if (in_night_mode_) {
     ESP_LOGI(TAG, "Exiting night mode - data received from %s", data.addr.c_str());
     in_night_mode_ = false;
+    if (night_mode_sensor_ != nullptr) {
+      night_mode_sensor_->publish_state(false);
+    }
   }
   
   // Find existing device or add new one
@@ -669,6 +675,9 @@ void TigoMonitorComponent::publish_sensor_data() {
     ESP_LOGI(TAG, "Entering night mode - no data received for 1 hour");
     in_night_mode_ = true;
     last_zero_publish_ = 0;  // Reset to force immediate zero publish
+    if (night_mode_sensor_ != nullptr) {
+      night_mode_sensor_->publish_state(true);
+    }
   }
   
   // In night mode, publish zeros every 10 minutes
@@ -697,10 +706,10 @@ void TigoMonitorComponent::publish_sensor_data() {
           current_in_it->second->publish_state(0.0f);
         }
         
-        // Publish zero temperature
+        // Publish NaN temperature (unavailable in night mode)
         auto temperature_it = temperature_sensors_.find(device.addr);
         if (temperature_it != temperature_sensors_.end()) {
-          temperature_it->second->publish_state(0.0f);
+          temperature_it->second->publish_state(NAN);
         }
         
         // Publish zero power
