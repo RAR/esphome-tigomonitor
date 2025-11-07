@@ -110,6 +110,16 @@ void TigoMonitorComponent::setup() {
     night_mode_sensor_->publish_state(false);
   }
   
+  // Initialize UART diagnostics
+  invalid_checksum_count_ = 0;
+  missed_packet_count_ = 0;
+  if (invalid_checksum_sensor_ != nullptr) {
+    invalid_checksum_sensor_->publish_state(0);
+  }
+  if (missed_packet_sensor_ != nullptr) {
+    missed_packet_sensor_->publish_state(0);
+  }
+  
   // Register shutdown callback to save persistent data before OTA/reboot
   App.register_component(this);
   
@@ -196,6 +206,10 @@ void TigoMonitorComponent::process_serial_data() {
     
     // Check if frame starts
     if (!frame_started_ && incoming_data_.find("\x7E\x08") != std::string::npos) {
+      missed_packet_count_++;
+      if (missed_packet_sensor_ != nullptr) {
+        missed_packet_sensor_->publish_state(missed_packet_count_);
+      }
       ESP_LOGW(TAG, "Packet missed!");
     }
     
@@ -232,6 +246,10 @@ void TigoMonitorComponent::process_frame(const std::string &frame) {
   std::string processed_frame = remove_escape_sequences(frame);
   
   if (!verify_checksum(processed_frame)) {
+    invalid_checksum_count_++;
+    if (invalid_checksum_sensor_ != nullptr) {
+      invalid_checksum_sensor_->publish_state(invalid_checksum_count_);
+    }
     ESP_LOGW(TAG, "Invalid checksum for frame: %s", frame_to_hex_string(processed_frame).c_str());
     return;
   }

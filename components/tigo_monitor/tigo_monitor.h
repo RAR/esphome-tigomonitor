@@ -128,6 +128,14 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
     this->device_count_sensor_ = sensor; 
     ESP_LOGCONFIG("tigo_monitor", "Registered device count sensor");
   }
+  void add_invalid_checksum_sensor(sensor::Sensor *sensor) {
+    this->invalid_checksum_sensor_ = sensor;
+    ESP_LOGCONFIG("tigo_monitor", "Registered invalid checksum sensor");
+  }
+  void add_missed_packet_sensor(sensor::Sensor *sensor) {
+    this->missed_packet_sensor_ = sensor;
+    ESP_LOGCONFIG("tigo_monitor", "Registered missed packet sensor");
+  }
   void add_rssi_sensor(const std::string &address, sensor::Sensor *sensor) { 
     this->rssi_sensors_[address] = sensor; 
     ESP_LOGCONFIG("tigo_monitor", "Registered rssi sensor for address: %s", address.c_str());
@@ -179,6 +187,8 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   const std::string& get_cca_device_info() const { return cca_device_info_; }
   unsigned long get_last_cca_sync_time() const { return last_cca_sync_time_; }
   float get_total_energy_kwh() const { return total_energy_kwh_; }
+  uint32_t get_invalid_checksum_count() const { return invalid_checksum_count_; }
+  uint32_t get_missed_packet_count() const { return missed_packet_count_; }
   
   // Public methods for web server access
   void reset_peak_power();  // Reset all peak power values to 0
@@ -272,11 +282,17 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   sensor::Sensor* power_sum_sensor_ = nullptr;
   sensor::Sensor* energy_sum_sensor_ = nullptr;
   sensor::Sensor* device_count_sensor_ = nullptr;
+  sensor::Sensor* invalid_checksum_sensor_ = nullptr;
+  sensor::Sensor* missed_packet_sensor_ = nullptr;
   binary_sensor::BinarySensor* night_mode_sensor_ = nullptr;
   
   // Energy calculation variables
   float total_energy_kwh_ = 0.0f;
   unsigned long last_energy_update_ = 0;
+  
+  // UART diagnostics
+  uint32_t invalid_checksum_count_ = 0;
+  uint32_t missed_packet_count_ = 0;
   
   // Night mode / no data handling
   unsigned long last_data_received_ = 0;

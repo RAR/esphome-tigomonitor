@@ -423,6 +423,15 @@ sensor:
   - platform: tigo_monitor
     tigo_monitor_id: tigo_hub
     name: "Active Device Count"
+  
+  # UART diagnostic counters (optional)
+  - platform: tigo_monitor
+    tigo_monitor_id: tigo_hub
+    name: "Invalid Checksum Count"
+  
+  - platform: tigo_monitor
+    tigo_monitor_id: tigo_hub
+    name: "Missed Packet Count"
 ```
 
 #### Individual Device Sensors

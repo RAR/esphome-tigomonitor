@@ -32,6 +32,8 @@ CONF_PEAK_POWER = "peak_power"
 CONF_POWER_SUM = "power_sum"
 CONF_ENERGY_SUM = "energy_sum"
 CONF_DEVICE_COUNT = "device_count"
+CONF_INVALID_CHECKSUM = "invalid_checksum"
+CONF_MISSED_PACKET = "missed_packet"
 CONF_VOLTAGE_IN = "voltage_in"
 CONF_VOLTAGE_OUT = "voltage_out"
 CONF_CURRENT_IN = "current_in"
@@ -222,6 +224,24 @@ DEVICE_COUNT_CONFIG_SCHEMA = sensor.sensor_schema(
     cv.GenerateID(CONF_TIGO_MONITOR_ID): cv.use_id(TigoMonitorComponent),
 }).extend(cv.COMPONENT_SCHEMA)
 
+# Schema for invalid checksum counter (no address required)
+INVALID_CHECKSUM_CONFIG_SCHEMA = sensor.sensor_schema(
+    accuracy_decimals=0,
+    state_class=STATE_CLASS_MEASUREMENT,
+    icon="mdi:alert-circle-outline",
+).extend({
+    cv.GenerateID(CONF_TIGO_MONITOR_ID): cv.use_id(TigoMonitorComponent),
+}).extend(cv.COMPONENT_SCHEMA)
+
+# Schema for missed packet counter (no address required)
+MISSED_PACKET_CONFIG_SCHEMA = sensor.sensor_schema(
+    accuracy_decimals=0,
+    state_class=STATE_CLASS_MEASUREMENT,
+    icon="mdi:alert-circle-outline",
+).extend({
+    cv.GenerateID(CONF_TIGO_MONITOR_ID): cv.use_id(TigoMonitorComponent),
+}).extend(cv.COMPONENT_SCHEMA)
+
 # Main config schema that handles both types
 def _validate_config(config):
     """Validate configuration and determine sensor type"""
@@ -230,6 +250,8 @@ def _validate_config(config):
     has_energy_keywords = any(keyword in sensor_name for keyword in ["energy", "kwh", "kilowatt", "wh"])
     has_power_keywords = any(keyword in sensor_name for keyword in ["power", "watt", "total", "sum", "combined", "system"])
     has_count_keywords = any(keyword in sensor_name for keyword in ["count", "devices", "discovered", "active", "number"])
+    has_checksum_keywords = any(keyword in sensor_name for keyword in ["checksum", "invalid", "crc", "error"])
+    has_packet_keywords = any(keyword in sensor_name for keyword in ["packet", "missed", "lost", "dropped"])
     
     # If it has keywords and no address, treat as aggregate sensor
     if CONF_ADDRESS not in config:
@@ -239,8 +261,12 @@ def _validate_config(config):
             return POWER_SUM_CONFIG_SCHEMA(config)
         elif has_count_keywords:
             return DEVICE_COUNT_CONFIG_SCHEMA(config)
+        elif has_checksum_keywords:
+            return INVALID_CHECKSUM_CONFIG_SCHEMA(config)
+        elif has_packet_keywords:
+            return MISSED_PACKET_CONFIG_SCHEMA(config)
         else:
-            raise cv.Invalid("For sensors without address, use names containing 'energy'/'kwh' for energy sensors, 'power'/'total'/'sum' for power sensors, or 'count'/'devices' for device count sensors")
+            raise cv.Invalid("For sensors without address, use names containing 'energy'/'kwh' for energy sensors, 'power'/'total'/'sum' for power sensors, 'count'/'devices' for device count sensors, 'checksum'/'invalid' for checksum errors, or 'packet'/'missed' for packet errors")
     elif CONF_ADDRESS in config:
         # This is a device sensor configuration
         return DEVICE_CONFIG_SCHEMA(config)
@@ -255,16 +281,22 @@ async def to_code(config):
     
     # Check if this is an aggregate sensor (no address) or device sensor (has address)
     if CONF_ADDRESS not in config:
-        # Check if this is energy, power, or device count sensor by name keywords
+        # Check if this is energy, power, device count, or diagnostic sensor by name keywords
         sensor_name = config.get(CONF_NAME, "").lower()
         has_energy_keywords = any(keyword in sensor_name for keyword in ["energy", "kwh", "kilowatt", "wh"])
         has_count_keywords = any(keyword in sensor_name for keyword in ["count", "devices", "discovered", "active", "number"])
+        has_checksum_keywords = any(keyword in sensor_name for keyword in ["checksum", "invalid", "crc", "error"])
+        has_packet_keywords = any(keyword in sensor_name for keyword in ["packet", "missed", "lost", "dropped"])
         
         sens = await sensor.new_sensor(config)
         if has_energy_keywords:
             cg.add(hub.add_energy_sum_sensor(sens))
         elif has_count_keywords:
             cg.add(hub.add_device_count_sensor(sens))
+        elif has_checksum_keywords:
+            cg.add(hub.add_invalid_checksum_sensor(sens))
+        elif has_packet_keywords:
+            cg.add(hub.add_missed_packet_sensor(sens))
         else:
             cg.add(hub.add_power_sum_sensor(sens))
         return

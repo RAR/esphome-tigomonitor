@@ -960,18 +960,24 @@ std::string TigoWebServer::build_esp_status_json() {
   size_t min_free_heap = heap_caps_get_minimum_free_size(MALLOC_CAP_DEFAULT);
   size_t min_free_psram = heap_caps_get_minimum_free_size(MALLOC_CAP_SPIRAM);
   
+  // Get UART diagnostics from parent
+  uint32_t invalid_checksum = parent_->get_invalid_checksum_count();
+  uint32_t missed_packets = parent_->get_missed_packet_count();
+  
   char buffer[1024];
   snprintf(buffer, sizeof(buffer),
     "{\"free_heap\":%zu,\"total_heap\":%zu,\"free_psram\":%zu,\"total_psram\":%zu,"
     "\"min_free_heap\":%zu,\"min_free_psram\":%zu,"
     "\"uptime_sec\":%u,\"uptime_days\":%u,\"uptime_hours\":%u,\"uptime_mins\":%u,"
     "\"esphome_version\":\"%s\",\"compilation_time\":\"%s %s\","
-    "\"task_count\":%u}",
+    "\"task_count\":%u,"
+    "\"invalid_checksum\":%u,\"missed_packets\":%u}",
     free_heap, total_heap, free_psram, total_psram,
     min_free_heap, min_free_psram,
     uptime_sec, uptime_days, uptime_hours, uptime_mins,
     ESPHOME_VERSION, __DATE__, __TIME__,
-    (unsigned int)task_count);
+    (unsigned int)task_count,
+    invalid_checksum, missed_packets);
   
   return std::string(buffer);
 }
@@ -1706,6 +1712,20 @@ std::string TigoWebServer::get_esp_status_html() {
     </div>
     
     <div class="card">
+      <h2>UART Diagnostics</h2>
+      <div class="info-grid">
+        <div class="info-item">
+          <h3>Invalid Checksums</h3>
+          <div class="value" id="invalid-checksum">--</div>
+        </div>
+        <div class="info-item">
+          <h3>Missed Packets</h3>
+          <div class="value" id="missed-packets">--</div>
+        </div>
+      </div>
+    </div>
+    
+    <div class="card">
       <h2>Actions</h2>
       <div style="display: flex; gap: 1rem; flex-wrap: wrap;">
         <button onclick="restartESP()" style="padding: 12px 24px; background-color: #e74c3c; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; font-weight: bold;">
@@ -1789,6 +1809,8 @@ std::string TigoWebServer::get_esp_status_html() {
         // Display system information
         document.getElementById('task-count').textContent = data.task_count || '--';
         document.getElementById('min-heap').textContent = formatBytes(data.min_free_heap || 0);
+        document.getElementById('invalid-checksum').textContent = data.invalid_checksum || 0;
+        document.getElementById('missed-packets').textContent = data.missed_packets || 0;
         
         if (data.total_psram > 0) {
           document.getElementById('min-psram').textContent = formatBytes(data.min_free_psram || 0);
