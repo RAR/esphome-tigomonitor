@@ -80,6 +80,16 @@ struct StringData {
   unsigned long last_update = 0;
 };
 
+struct InverterData {
+  std::string name;               // User-defined inverter name
+  std::vector<std::string> mppt_labels;  // List of MPPT labels assigned to this inverter
+  float total_power = 0.0f;
+  float peak_power = 0.0f;
+  float total_energy = 0.0f;
+  int active_device_count = 0;
+  int total_device_count = 0;
+};
+
 
 class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
  public:
@@ -180,11 +190,13 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   void set_number_of_devices(int count) { number_of_devices_ = count; }
   void set_cca_ip(const std::string &ip) { cca_ip_ = ip; }
   void set_sync_cca_on_startup(bool sync) { sync_cca_on_startup_ = sync; }
+  void add_inverter(const std::string &name, const std::vector<std::string> &mppt_labels);
   
   // Public getters for web server access
   const std::vector<DeviceData>& get_devices() const { return devices_; }
   const std::vector<NodeTableData>& get_node_table() const { return node_table_; }
   const std::map<std::string, StringData>& get_strings() const { return strings_; }
+  const std::vector<InverterData>& get_inverters() const { return inverters_; }
   int get_number_of_devices() const { return number_of_devices_; }
   const std::string& get_cca_ip() const { return cca_ip_; }
   bool get_sync_cca_on_startup() const { return sync_cca_on_startup_; }
@@ -252,6 +264,9 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   // String-level aggregation
   void update_string_data();
   void rebuild_string_groups();
+  
+  // Inverter-level aggregation
+  void update_inverter_data();
   StringData* find_string_by_label(const std::string &label);
   
   // Unified node table management (combines Frame 27, Frame 09, and device mappings)
@@ -277,6 +292,7 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   std::vector<DeviceData> devices_;
   std::vector<NodeTableData> node_table_;  // Unified table for all device info
   std::map<std::string, StringData> strings_;  // String-level aggregation (key = string_label)
+  std::vector<InverterData> inverters_;  // User-defined inverter groupings
   std::map<std::string, sensor::Sensor*> voltage_in_sensors_;
   std::map<std::string, sensor::Sensor*> voltage_out_sensors_;
   std::map<std::string, sensor::Sensor*> current_in_sensors_;

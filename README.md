@@ -182,12 +182,31 @@ tigo_monitor:
   number_of_devices: 20  # Set to your actual number of Tigo devices
   cca_ip: "192.168.1.100"  # Optional: IP address of your Tigo CCA
   sync_cca_on_startup: true  # Optional: Auto-sync CCA config on boot (default: true)
+  
+  # Optional: Group MPPTs by inverter for organized dashboard view
+  inverters:
+    - name: "Inverter 1"
+      mppts:
+        - "MPPT 1"
+        - "MPPT 2"
+    - name: "Inverter 2"
+      mppts:
+        - "MPPT 3"
+        - "MPPT 4"
 
 # Optional: Web Server for monitoring dashboard
 tigo_server:
   tigo_monitor_id: tigo_hub
   port: 80  # Default web server port
 ```
+
+**Inverter Grouping**: When inverters are configured, the web dashboard automatically displays a hierarchical view:
+- Inverters at the top level with aggregate stats
+- MPPTs grouped under their assigned inverter
+- Strings and panels nested under each MPPT
+- Visual indentation and colored headers for easy navigation
+
+Without inverter configuration, the dashboard shows MPPTs at the top level.
 
 ### Alternative Installation (Development)
 
@@ -256,6 +275,36 @@ The component automatically uses PSRAM when available for HTTP buffers, JSON par
 | `sync_cca_on_startup` | Boolean | true | Automatically sync CCA configuration on boot |
 | `time_id` | ID | None | Optional time component for midnight reset feature |
 | `reset_at_midnight` | Boolean | false | Reset peak power and total energy at midnight (requires time_id) |
+| `inverters` | List | None | Optional inverter grouping configuration (see below) |
+
+#### Inverter Grouping
+
+You can optionally define inverters and manually assign MPPTs to each inverter for organized display in the web UI and `/api/inverters` endpoint. This is useful when you have multiple inverters with MPPTs that you want to group and track separately.
+
+**Configuration:**
+
+```yaml
+tigo_monitor:
+  id: tigo_hub
+  uart_id: uart_bus
+  number_of_devices: 36
+  inverters:
+    - name: "Inverter 1"
+      mppts:
+        - "MPPT 1"
+        - "MPPT 2"
+    - name: "Inverter 2"
+      mppts:
+        - "MPPT 3"
+        - "MPPT 4"
+```
+
+**Notes:**
+- MPPT labels must match the labels from CCA (e.g., "MPPT 1", "MPPT 2")
+- The web UI will group strings by inverter when configured
+- `/api/inverters` endpoint provides aggregated power, peak, and device counts per inverter
+- Inverter grouping is optional - if not configured, the UI shows MPPTs individually
+- Each inverter shows total power, peak power, and device counts across all its MPPTs
 
 #### Midnight Reset Feature
 

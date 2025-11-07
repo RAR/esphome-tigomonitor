@@ -678,6 +678,51 @@ void TigoMonitorComponent::update_string_data() {
   }
 }
 
+void TigoMonitorComponent::add_inverter(const std::string &name, const std::vector<std::string> &mppt_labels) {
+  InverterData inverter;
+  inverter.name = name;
+  inverter.mppt_labels = mppt_labels;
+  inverters_.push_back(inverter);
+  ESP_LOGCONFIG(TAG, "Registered inverter '%s' with %d MPPTs", name.c_str(), mppt_labels.size());
+  for (const auto &mppt : mppt_labels) {
+    ESP_LOGCONFIG(TAG, "  - MPPT: %s", mppt.c_str());
+  }
+}
+
+void TigoMonitorComponent::update_inverter_data() {
+  // Reset all inverter aggregates
+  for (auto &inverter : inverters_) {
+    inverter.total_power = 0.0f;
+    inverter.peak_power = 0.0f;
+    inverter.total_energy = 0.0f;
+    inverter.active_device_count = 0;
+    inverter.total_device_count = 0;
+  }
+  
+  // Aggregate data from strings that belong to each inverter
+  for (auto &inverter : inverters_) {
+    for (const auto &mppt_label : inverter.mppt_labels) {
+      // Find all strings that belong to this MPPT
+      for (const auto &string_pair : strings_) {
+        const auto &string_data = string_pair.second;
+        
+        // Check if this string belongs to this MPPT
+        if (string_data.inverter_label == mppt_label) {
+          inverter.total_power += string_data.total_power;
+          inverter.peak_power += string_data.peak_power;
+          inverter.active_device_count += string_data.active_device_count;
+          inverter.total_device_count += string_data.total_device_count;
+        }
+      }
+    }
+    
+    ESP_LOGD(TAG, "Inverter %s: %.0fW from %d/%d devices (peak: %.0fW)", 
+             inverter.name.c_str(), inverter.total_power,
+             inverter.active_device_count, inverter.total_device_count,
+             inverter.peak_power);
+  }
+}
+
 StringData* TigoMonitorComponent::find_string_by_label(const std::string &label) {
   auto it = strings_.find(label);
   if (it != strings_.end()) {
@@ -1016,6 +1061,11 @@ void TigoMonitorComponent::publish_sensor_data() {
   
   // Update string-level aggregation data
   update_string_data();
+  
+  // Update inverter-level aggregation if inverters are configured
+  if (!inverters_.empty()) {
+    update_inverter_data();
+  }
 }
 
 std::string TigoMonitorComponent::remove_escape_sequences(const std::string &frame) {

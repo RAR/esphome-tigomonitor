@@ -2,7 +2,7 @@
 import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome.components import uart, time as time_
-from esphome.const import CONF_ID, CONF_UART_ID, CONF_TIME_ID
+from esphome.const import CONF_ID, CONF_UART_ID, CONF_TIME_ID, CONF_NAME
 from esphome.core import coroutine
 
 DEPENDENCIES = ['uart']
@@ -15,6 +15,14 @@ CONF_NUMBER_OF_DEVICES = 'number_of_devices'
 CONF_CCA_IP = 'cca_ip'
 CONF_SYNC_CCA_ON_STARTUP = 'sync_cca_on_startup'
 CONF_RESET_AT_MIDNIGHT = 'reset_at_midnight'
+CONF_INVERTERS = 'inverters'
+CONF_MPPIS = 'mppts'
+
+# Inverter configuration schema
+INVERTER_SCHEMA = cv.Schema({
+    cv.Required(CONF_NAME): cv.string,
+    cv.Required(CONF_MPPIS): cv.ensure_list(cv.string),
+})
 
 CONFIG_SCHEMA = cv.Schema({
     cv.GenerateID(): cv.declare_id(TigoMonitorComponent),
@@ -24,6 +32,7 @@ CONFIG_SCHEMA = cv.Schema({
     cv.Optional(CONF_SYNC_CCA_ON_STARTUP, default=True): cv.boolean,
     cv.Optional(CONF_TIME_ID): cv.use_id(time_.RealTimeClock),
     cv.Optional(CONF_RESET_AT_MIDNIGHT, default=False): cv.boolean,
+    cv.Optional(CONF_INVERTERS): cv.ensure_list(INVERTER_SCHEMA),
 }).extend(cv.polling_component_schema('30s')).extend(uart.UART_DEVICE_SCHEMA)
 
 @coroutine
@@ -47,6 +56,14 @@ def to_code(config):
         if CONF_TIME_ID not in config:
             raise cv.Invalid("reset_at_midnight requires a time_id to be configured")
         cg.add(var.set_reset_at_midnight(True))
+    
+    # Configure inverters if provided
+    if CONF_INVERTERS in config:
+        for inverter_config in config[CONF_INVERTERS]:
+            inverter_name = inverter_config[CONF_NAME]
+            mppts = inverter_config[CONF_MPPIS]
+            # Pass the Python list directly - ESPHome will convert it
+            cg.add(var.add_inverter(inverter_name, mppts))
     
     # Add ESP-IDF HTTP client component dependency
     cg.add_library("ESP32 HTTP Client", None)

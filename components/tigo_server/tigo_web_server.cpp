@@ -186,6 +186,14 @@ void TigoWebServer::setup() {
     };
     httpd_register_uri_handler(server_, &api_strings_uri);
     
+    httpd_uri_t api_inverters_uri = {
+      .uri = "/api/inverters",
+      .method = HTTP_GET,
+      .handler = api_inverters_handler,
+      .user_ctx = this
+    };
+    httpd_register_uri_handler(server_, &api_inverters_uri);
+    
     httpd_uri_t api_esp_status_uri = {
       .uri = "/api/status",
       .method = HTTP_GET,
@@ -543,6 +551,22 @@ esp_err_t TigoWebServer::api_strings_handler(httpd_req_t *req) {
   
   PSRAMString json_buffer;
   std::string json = server->build_strings_json();
+  json_buffer.append(json);
+  
+  httpd_resp_set_type(req, "application/json");
+  httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+  httpd_resp_send(req, json_buffer.c_str(), json_buffer.length());
+  return ESP_OK;
+}
+
+esp_err_t TigoWebServer::api_inverters_handler(httpd_req_t *req) {
+  TigoWebServer *server = static_cast<TigoWebServer *>(req->user_ctx);
+  if (!server->check_api_auth(req)) {
+    return ESP_OK;
+  }
+  
+  PSRAMString json_buffer;
+  std::string json = server->build_inverters_json();
   json_buffer.append(json);
   
   httpd_resp_set_type(req, "application/json");
@@ -912,6 +936,72 @@ std::string TigoWebServer::build_strings_json() {
   return json;
 }
 
+std::string TigoWebServer::build_inverters_json() {
+  const auto &inverters = parent_->get_inverters();
+  const auto &strings = parent_->get_strings();
+  
+  ESP_LOGD(TAG, "Building inverters JSON - found %d inverters", inverters.size());
+  
+  std::string json = "{\"inverters\":[";
+  
+  bool first_inv = true;
+  for (const auto &inverter : inverters) {
+    if (!first_inv) json += ",";
+    first_inv = false;
+    
+    ESP_LOGD(TAG, "Inverter: %s, devices: %d/%d, power: %.0fW", 
+             inverter.name.c_str(),
+             inverter.active_device_count, 
+             inverter.total_device_count,
+             inverter.total_power);
+    
+    // Build MPPT labels array
+    std::string mppt_labels_json = "[";
+    bool first_mppt = true;
+    for (const auto &mppt : inverter.mppt_labels) {
+      if (!first_mppt) mppt_labels_json += ",";
+      first_mppt = false;
+      mppt_labels_json += "\"" + mppt + "\"";
+    }
+    mppt_labels_json += "]";
+    
+    // Build strings array for this inverter
+    std::string strings_json = "[";
+    bool first_str = true;
+    for (const auto &mppt_label : inverter.mppt_labels) {
+      for (const auto &string_pair : strings) {
+        const auto &string_data = string_pair.second;
+        if (string_data.inverter_label == mppt_label) {
+          if (!first_str) strings_json += ",";
+          first_str = false;
+          
+          char buffer[512];
+          snprintf(buffer, sizeof(buffer),
+            "{\"label\":\"%s\",\"mppt\":\"%s\",\"total_power\":%.1f,\"peak_power\":%.1f,"
+            "\"active_devices\":%d,\"total_devices\":%d}",
+            string_data.string_label.c_str(), string_data.inverter_label.c_str(),
+            string_data.total_power, string_data.peak_power,
+            string_data.active_device_count, string_data.total_device_count);
+          strings_json += buffer;
+        }
+      }
+    }
+    strings_json += "]";
+    
+    // Build the inverter JSON object (don't use snprintf to avoid truncation)
+    json += "{\"name\":\"" + inverter.name + "\",";
+    json += "\"mppts\":" + mppt_labels_json + ",";
+    json += "\"total_power\":" + std::to_string(inverter.total_power) + ",";
+    json += "\"peak_power\":" + std::to_string(inverter.peak_power) + ",";
+    json += "\"active_devices\":" + std::to_string(inverter.active_device_count) + ",";
+    json += "\"total_devices\":" + std::to_string(inverter.total_device_count) + ",";
+    json += "\"strings\":" + strings_json + "}";
+  }
+  
+  json += "]}";
+  return json;
+}
+
 std::string TigoWebServer::build_node_table_json() {
   std::string json = "{\"nodes\":[";
   
@@ -1079,7 +1169,7 @@ std::string TigoWebServer::get_dashboard_html() {
     .stat-card .value { font-size: 2rem; font-weight: bold; color: #2c3e50; }
     .stat-card .unit { font-size: 1rem; color: #95a5a6; margin-left: 0.25rem; }
     .devices-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(350px, 1fr)); gap: 1rem; }
-    .string-summary { grid-column: 1 / -1; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 8px; padding: 1.5rem; margin-top: 1.5rem; box-shadow: 0 4px 6px rgba(0,0,0,0.1); transition: box-shadow 0.3s; }
+    .string-summary { grid-column: 1 / -1; background: linear-gradient(135deg, #6b7280 0%, #4b5563 100%); border-radius: 8px; padding: 1.5rem; margin-top: 1.5rem; box-shadow: 0 4px 6px rgba(0,0,0,0.1); transition: box-shadow 0.3s; }
     .string-summary:first-child { margin-top: 0; }
     .string-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; }
     .string-header h3 { color: white; font-size: 1.5rem; margin: 0; }
@@ -1221,24 +1311,56 @@ std::string TigoWebServer::get_dashboard_html() {
     }
     
     // Initialize toggle buttons
+    let invertersData = { inverters: [] }; // Cache inverter config (static, only changes on reboot)
+    
     document.addEventListener('DOMContentLoaded', () => {
       applyTheme();
       document.getElementById('temp-toggle').textContent = useFahrenheit ? '°C' : '°F';
+      // Initial load - fetch inverters once, then start refresh cycle
+      loadInitialData();
     });
+    
+    async function loadInitialData() {
+      // Fetch inverter config once on page load (static configuration)
+      try {
+        const invertersRes = await apiFetch('/api/inverters');
+        invertersData = await invertersRes.json();
+        console.log('Inverters data loaded:', invertersData);
+      } catch (err) {
+        console.warn('Inverters endpoint not available, using empty data', err);
+      }
+      
+      // Load dynamic data
+      try {
+        await loadData();
+      } catch (error) {
+        console.error('Error loading initial data:', error);
+        setTimeout(loadInitialData, 5000);
+      }
+    }
     
     async function loadData() {
       try {
-        const [devicesRes, overviewRes, stringsRes] = await Promise.all([
-          apiFetch('/api/devices'),
-          apiFetch('/api/overview'),
-          apiFetch('/api/strings')
-        ]);
-        
+        // Load dynamic data sequentially to reduce server load
+        const devicesRes = await apiFetch('/api/devices');
         const devicesData = await devicesRes.json();
+        
+        const overviewRes = await apiFetch('/api/overview');
         const overviewData = await overviewRes.json();
+        
+        const stringsRes = await apiFetch('/api/strings');
         const stringsData = await stringsRes.json();
         
-        // Update stats
+        processAndRenderData(devicesData, overviewData, stringsData, invertersData);
+      } catch (error) {
+        console.error('Error loading data:', error);
+        document.getElementById('devices').innerHTML = '<div class="device-card">Error loading data. Retrying...</div>';
+        setTimeout(loadData, 5000);
+      }
+    }
+    
+    function processAndRenderData(devicesData, overviewData, stringsData, invertersData) {
+      try {
         document.getElementById('total-power').textContent = overviewData.total_power.toFixed(1);
         document.getElementById('total-current').textContent = overviewData.total_current.toFixed(3);
         document.getElementById('active-devices').textContent = overviewData.active_devices;
@@ -1321,51 +1443,163 @@ std::string TigoWebServer::get_dashboard_html() {
           `;
         }
         
-        // Build HTML with string groups
+        // Build HTML with inverter/string groups
         const devicesContainer = document.getElementById('devices');
         let html = '';
         
-        // Render strings with their summary cards
-        const stringLabels = Object.keys(devicesByString).sort();
-        stringLabels.forEach(stringLabel => {
-          const stringInfo = stringsData.strings.find(s => s.label === stringLabel);
-          const devices = devicesByString[stringLabel];
-          
-          // String summary card
-          if (stringInfo) {
+        // Check if inverters are configured
+        if (invertersData.inverters && invertersData.inverters.length > 0) {
+          // Group by inverter -> MPPT -> String
+          invertersData.inverters.forEach(inverter => {
+            // Inverter summary card
             html += `
-              <div class="string-summary">
-                <div class="string-header">
-                  <h3>${stringLabel}</h3>
-                  <span class="string-inverter">${stringInfo.inverter}</span>
+              <div class="string-summary" style="background: linear-gradient(135deg, #52525b 0%, #3f3f46 100%); color: white; margin-bottom: 0.5rem;">
+                <div class="string-header" style="border-bottom-color: rgba(255,255,255,0.2);">
+                  <h3 style="color: white; font-size: 1.3rem;">⚡ ${inverter.name}</h3>
                 </div>
                 <div class="string-stats">
                   <div class="string-stat">
-                    <span class="stat-label">Devices</span>
-                    <span class="stat-value">${stringInfo.total_devices}</span>
+                    <span class="stat-label" style="color: rgba(255,255,255,0.9);">Devices</span>
+                    <span class="stat-value" style="color: white;">${inverter.total_devices}</span>
                   </div>
                   <div class="string-stat">
-                    <span class="stat-label">Power</span>
-                    <span class="stat-value">${stringInfo.total_power.toFixed(1)} W</span>
+                    <span class="stat-label" style="color: rgba(255,255,255,0.9);">Power</span>
+                    <span class="stat-value" style="color: white;">${inverter.total_power.toFixed(1)} W</span>
                   </div>
                   <div class="string-stat">
-                    <span class="stat-label">Peak</span>
-                    <span class="stat-value">${stringInfo.peak_power.toFixed(1)} W</span>
-                  </div>
-                  <div class="string-stat">
-                    <span class="stat-label">Avg Eff</span>
-                    <span class="stat-value">${stringInfo.avg_efficiency.toFixed(1)}%</span>
+                    <span class="stat-label" style="color: rgba(255,255,255,0.9);">Peak</span>
+                    <span class="stat-value" style="color: white;">${inverter.peak_power.toFixed(1)} W</span>
                   </div>
                 </div>
               </div>
             `;
-          }
-          
-          // Devices in this string
-          devices.forEach(device => {
-            html += renderDevice(device);
+            
+            // Render strings for this inverter's MPPTs
+            inverter.mppts.forEach(mpptLabel => {
+              const stringsForMppt = stringsData.strings.filter(s => s.inverter === mpptLabel);
+              
+              stringsForMppt.forEach(stringInfo => {
+                const devices = devicesByString[stringInfo.label] || [];
+                
+                // String summary card (indented under inverter)
+                html += `
+                  <div class="string-summary" style="margin-left: 2rem; border-left: 4px solid rgba(255,255,255,0.3);">
+                    <div class="string-header">
+                      <h3>${stringInfo.label}</h3>
+                      <span class="string-inverter">${stringInfo.inverter}</span>
+                    </div>
+                    <div class="string-stats">
+                      <div class="string-stat">
+                        <span class="stat-label">Devices</span>
+                        <span class="stat-value">${stringInfo.total_devices}</span>
+                      </div>
+                      <div class="string-stat">
+                        <span class="stat-label">Power</span>
+                        <span class="stat-value">${stringInfo.total_power.toFixed(1)} W</span>
+                      </div>
+                      <div class="string-stat">
+                        <span class="stat-label">Peak</span>
+                        <span class="stat-value">${stringInfo.peak_power.toFixed(1)} W</span>
+                      </div>
+                      <div class="string-stat">
+                        <span class="stat-label">Avg Eff</span>
+                        <span class="stat-value">${stringInfo.avg_efficiency.toFixed(1)}%</span>
+                      </div>
+                    </div>
+                  </div>
+                `;
+                
+                // Devices in this string (further indented)
+                devices.forEach(device => {
+                  html += '<div style="margin-left: 2rem;">' + renderDevice(device) + '</div>';
+                });
+              });
+            });
           });
-        });
+          
+          // Render unassigned strings (those not in any inverter's MPPTs)
+          const assignedMppts = new Set();
+          invertersData.inverters.forEach(inv => inv.mppts.forEach(m => assignedMppts.add(m)));
+          
+          const unassignedStrings = stringsData.strings.filter(s => !assignedMppts.has(s.inverter));
+          if (unassignedStrings.length > 0) {
+            html += '<div class="string-summary"><div class="string-header"><h3>Unassigned MPPTs</h3></div></div>';
+            unassignedStrings.forEach(stringInfo => {
+              const devices = devicesByString[stringInfo.label] || [];
+              html += `
+                <div class="string-summary">
+                  <div class="string-header">
+                    <h3>${stringInfo.label}</h3>
+                    <span class="string-inverter">${stringInfo.inverter}</span>
+                  </div>
+                  <div class="string-stats">
+                    <div class="string-stat">
+                      <span class="stat-label">Devices</span>
+                      <span class="stat-value">${stringInfo.total_devices}</span>
+                    </div>
+                    <div class="string-stat">
+                      <span class="stat-label">Power</span>
+                      <span class="stat-value">${stringInfo.total_power.toFixed(1)} W</span>
+                    </div>
+                    <div class="string-stat">
+                      <span class="stat-label">Peak</span>
+                      <span class="stat-value">${stringInfo.peak_power.toFixed(1)} W</span>
+                    </div>
+                    <div class="string-stat">
+                      <span class="stat-label">Avg Eff</span>
+                      <span class="stat-value">${stringInfo.avg_efficiency.toFixed(1)}%</span>
+                    </div>
+                  </div>
+                </div>
+              `;
+              devices.forEach(device => {
+                html += renderDevice(device);
+              });
+            });
+          }
+        } else {
+          // Original rendering: Render strings with their summary cards
+          const stringLabels = Object.keys(devicesByString).sort();
+          stringLabels.forEach(stringLabel => {
+            const stringInfo = stringsData.strings.find(s => s.label === stringLabel);
+            const devices = devicesByString[stringLabel];
+            
+            // String summary card
+            if (stringInfo) {
+              html += `
+                <div class="string-summary">
+                  <div class="string-header">
+                    <h3>${stringLabel}</h3>
+                    <span class="string-inverter">${stringInfo.inverter}</span>
+                  </div>
+                  <div class="string-stats">
+                    <div class="string-stat">
+                      <span class="stat-label">Devices</span>
+                      <span class="stat-value">${stringInfo.total_devices}</span>
+                    </div>
+                    <div class="string-stat">
+                      <span class="stat-label">Power</span>
+                      <span class="stat-value">${stringInfo.total_power.toFixed(1)} W</span>
+                    </div>
+                    <div class="string-stat">
+                      <span class="stat-label">Peak</span>
+                      <span class="stat-value">${stringInfo.peak_power.toFixed(1)} W</span>
+                    </div>
+                    <div class="string-stat">
+                      <span class="stat-label">Avg Eff</span>
+                      <span class="stat-value">${stringInfo.avg_efficiency.toFixed(1)}%</span>
+                    </div>
+                  </div>
+                </div>
+              `;
+            }
+            
+            // Devices in this string
+            devices.forEach(device => {
+              html += renderDevice(device);
+            });
+          });
+        }
         
         // Unassigned devices section
         if (unassignedDevices.length > 0) {
