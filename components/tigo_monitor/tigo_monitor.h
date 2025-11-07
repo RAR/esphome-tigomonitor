@@ -52,7 +52,7 @@ struct NodeTableData {
   // CCA-sourced metadata (optional, populated via HTTP query)
   std::string cca_label;          // Friendly name from CCA (e.g., "East Roof Panel 3")
   std::string cca_string_label;   // Parent string label (e.g., "String 1")
-  std::string cca_inverter_label; // Parent inverter label (e.g., "Inverter 1")
+  std::string cca_inverter_label; // Parent MPPT label (e.g., "MPPT 1" - CCA calls it "Inverter")
   std::string cca_channel;        // CCA channel identifier
   std::string cca_object_id;      // CCA's internal object ID (string type)
   bool cca_validated = false;     // True if matched with CCA configuration
@@ -60,7 +60,7 @@ struct NodeTableData {
 
 struct StringData {
   std::string string_label;       // String name from CCA (e.g., "String 1")
-  std::string inverter_label;     // Parent inverter name
+  std::string inverter_label;     // Parent MPPT name (called "Inverter" in CCA)
   std::vector<std::string> device_addrs; // Device addresses in this string
   float total_power = 0.0f;
   float total_current = 0.0f;

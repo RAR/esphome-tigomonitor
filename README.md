@@ -41,7 +41,7 @@ A comprehensive ESPHome component for monitoring Tigo solar power optimizers via
 ### CCA Integration
 - **Automatic CCA Sync**: Query Tigo CCA for panel configuration data
 - **Panel Name Mapping**: Automatically label panels with CCA-assigned names
-- **Hierarchy Display**: Shows Inverter → String → Panel relationships
+- **Hierarchy Display**: Shows MPPT → String → Panel relationships
 - **Barcode Matching**: Fuzzy matching between UART devices and CCA configuration
 - **Sync on Boot**: Optional automatic synchronization on startup
 - **Manual Sync Button**: On-demand CCA configuration refresh
@@ -539,7 +539,7 @@ The component includes a built-in web server accessible at `http://<esp32-ip>/`
 
 - **Complete Device List**: All discovered devices with sensor assignments
 - **CCA Integration**: Shows panel names from Tigo CCA (if configured)
-- **Hierarchy Display**: Inverter → String → Panel structure
+- **Hierarchy Display**: MPPT → String → Panel structure
 - **Barcode Information**: Frame 27 barcode data (16-char long address)
 - **Validation Badges**: Visual indicators for CCA-validated devices
 - **Node Management**: Delete individual nodes with confirmation
@@ -610,7 +610,7 @@ tigo_monitor:
 #### Features
 
 - **Barcode Matching**: Matches UART devices with CCA configuration using Frame 27 (16-char) barcodes
-- **Hierarchy Mapping**: Shows Inverter → String → Panel relationships
+- **Hierarchy Mapping**: Shows MPPT → String → Panel relationships
 - **Label Storage**: CCA labels persist across reboots
 - **Manual Sync**: Button to refresh CCA configuration on demand
 - **Auto-sync**: Optional automatic synchronization on startup (5-second delay for WiFi)

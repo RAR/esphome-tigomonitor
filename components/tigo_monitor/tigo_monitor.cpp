@@ -1358,6 +1358,11 @@ void TigoMonitorComponent::load_node_table() {
           node.cca_channel = parts[8];
           node.cca_validated = (parts[9] == "1");
           
+          // Replace "Inverter" with "MPPT" for more accurate terminology
+          if (node.cca_inverter_label.find("Inverter ") == 0) {
+            node.cca_inverter_label.replace(0, 9, "MPPT ");
+          }
+          
           ESP_LOGI(TAG, "Restored node with CCA: %s -> Tigo %d (barcode: %s, string: %s, validated: %s)", 
                    node.addr.c_str(), node.sensor_index + 1, node.frame09_barcode.c_str(),
                    node.cca_string_label.c_str(), node.cca_validated ? "yes" : "no");
@@ -1860,6 +1865,11 @@ void TigoMonitorComponent::match_cca_to_uart(const std::string &json_response) {
         if (cca_serial.find(uart_barcode) != std::string::npos ||
             uart_barcode.find(cca_serial) != std::string::npos) {
           
+          // Replace "Inverter" with "MPPT" for more accurate terminology
+          if (inverter_label.find("Inverter ") == 0) {
+            inverter_label.replace(0, 9, "MPPT ");
+          }
+          
           node.cca_label = cca_label_str;
           node.cca_string_label = string_label;
           node.cca_inverter_label = inverter_label;
@@ -1867,7 +1877,7 @@ void TigoMonitorComponent::match_cca_to_uart(const std::string &json_response) {
           node.cca_object_id = cca_obj_id;
           node.cca_validated = true;
           
-          ESP_LOGI(TAG, "Matched UART device %s (%s) with CCA panel '%s' (String: %s, Inverter: %s)",
+          ESP_LOGI(TAG, "Matched UART device %s (%s) with CCA panel '%s' (String: %s, MPPT: %s)",
                    node.addr.c_str(), uart_barcode.c_str(), cca_label_str.c_str(),
                    string_label.c_str(), inverter_label.c_str());
           
