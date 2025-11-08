@@ -3,6 +3,7 @@
 #include "esphome/core/helpers.h"
 #include "esphome/core/application.h"
 #include "esphome/core/preferences.h"
+#include "esphome/components/network/util.h"
 #include <cstring>
 #include <numeric>
 
@@ -2053,16 +2054,28 @@ std::string TigoMonitorComponent::get_barcode_for_node(const NodeTableData &node
 
 #ifdef USE_ESP_IDF
 void TigoMonitorComponent::query_cca_config() {
+  // Check if network is available before attempting connection
+  if (!network::is_connected()) {
+    ESP_LOGW(TAG, "Network not connected, skipping CCA config query");
+    return;
+  }
+  
   std::string url = "http://" + cca_ip_ + "/cgi-bin/summary_config";
   ESP_LOGI(TAG, "Querying CCA configuration from: %s", url.c_str());
   
   esp_http_client_config_t config = {};
   config.url = url.c_str();
   config.method = HTTP_METHOD_GET;
-  config.timeout_ms = 10000;
+  config.timeout_ms = 5000;  // Reduced timeout to fail faster
   config.buffer_size = 4096;  // Larger buffer for chunked responses
+  config.is_async = false;
+  config.keep_alive_enable = false;  // Force connection close after request
   
   esp_http_client_handle_t client = esp_http_client_init(&config);
+  if (!client) {
+    ESP_LOGE(TAG, "Failed to initialize HTTP client");
+    return;
+  }
   
   // Set authorization header (Tigo:$olar)
   esp_http_client_set_header(client, "Authorization", "Basic VGlnbzokb2xhcg==");
@@ -2267,16 +2280,30 @@ void TigoMonitorComponent::match_cca_to_uart(const std::string &json_response) {
 }
 
 void TigoMonitorComponent::query_cca_device_info() {
+  // Check if network is available before attempting connection
+  if (!network::is_connected()) {
+    ESP_LOGW(TAG, "Network not connected, skipping CCA device info query");
+    cca_device_info_ = "{\"error\":\"Network not connected\"}";
+    return;
+  }
+  
   std::string url = "http://" + cca_ip_ + "/cgi-bin/mobile_api?cmd=DEVICE_INFO";
   ESP_LOGI(TAG, "Querying CCA device info from: %s", url.c_str());
   
   esp_http_client_config_t config = {};
   config.url = url.c_str();
   config.method = HTTP_METHOD_GET;
-  config.timeout_ms = 10000;
+  config.timeout_ms = 5000;  // Reduced timeout to fail faster
   config.buffer_size = 2048;
+  config.is_async = false;
+  config.keep_alive_enable = false;  // Force connection close after request
   
   esp_http_client_handle_t client = esp_http_client_init(&config);
+  if (!client) {
+    ESP_LOGE(TAG, "Failed to initialize HTTP client");
+    cca_device_info_ = "{\"error\":\"Client init failed\"}";
+    return;
+  }
   
   // Set authorization header (Tigo:$olar)
   esp_http_client_set_header(client, "Authorization", "Basic VGlnbzokb2xhcg==");

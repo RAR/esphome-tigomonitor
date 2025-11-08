@@ -5,10 +5,18 @@
 #include "esphome/core/application.h"
 #include "esphome/core/util.h"
 #include "esphome/core/version.h"
+#include "esphome/components/network/util.h"
+#ifdef USE_WIFI
+#include "esphome/components/wifi/wifi_component.h"
+#endif
 #include <esp_heap_caps.h>
 #include <esp_system.h>
+#include <esp_wifi.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
+#include <lwip/sockets.h>
+#include <lwip/tcp.h>
+#include <lwip/stats.h>
 #include <cstring>
 #include <mbedtls/base64.h>
 
@@ -1081,20 +1089,66 @@ std::string TigoWebServer::build_esp_status_json() {
   uint32_t invalid_checksum = parent_->get_invalid_checksum_count();
   uint32_t missed_packets = parent_->get_missed_packet_count();
   
-  char buffer[1024];
+  // Get network stats
+  bool network_connected = network::is_connected();
+  int8_t wifi_rssi = 0;
+  std::string ip_address = "N/A";
+  std::string mac_address = "N/A";
+  
+#ifdef USE_WIFI
+  if (network_connected && wifi::global_wifi_component != nullptr) {
+    wifi_rssi = wifi::global_wifi_component->wifi_rssi();
+    
+    // Get IP address - use the newer get_ip_addresses() method
+    auto addresses = wifi::global_wifi_component->get_ip_addresses();
+    if (!addresses.empty() && addresses[0].is_set()) {
+      ip_address = addresses[0].str();
+    }
+    
+    // Get MAC address via global function
+    mac_address = get_mac_address_pretty();
+  }
+#endif
+
+  // Count active sockets by checking lwIP socket table
+  int active_sockets = 0;
+  int max_sockets = 0;
+  
+#if LWIP_STATS && LWIP_STATS_DISPLAY
+  // Get socket stats if lwIP stats are enabled
+  active_sockets = lwip_stats.sys.used;
+  max_sockets = MEMP_NUM_NETCONN;
+#else
+  // Manual count by checking socket validity
+  max_sockets = 16;  // From CONFIG_LWIP_MAX_SOCKETS
+  for (int i = 0; i < max_sockets; i++) {
+    struct sockaddr_storage addr;
+    socklen_t len = sizeof(addr);
+    // Try to get socket name - if successful, socket is active
+    if (getpeername(i, (struct sockaddr*)&addr, &len) == 0 || errno == ENOTCONN) {
+      active_sockets++;
+    }
+  }
+#endif
+  
+  char buffer[1536];
   snprintf(buffer, sizeof(buffer),
     "{\"free_heap\":%zu,\"total_heap\":%zu,\"free_psram\":%zu,\"total_psram\":%zu,"
     "\"min_free_heap\":%zu,\"min_free_psram\":%zu,"
     "\"uptime_sec\":%u,\"uptime_days\":%u,\"uptime_hours\":%u,\"uptime_mins\":%u,"
     "\"esphome_version\":\"%s\",\"compilation_time\":\"%s %s\","
     "\"task_count\":%u,"
-    "\"invalid_checksum\":%u,\"missed_packets\":%u}",
+    "\"invalid_checksum\":%u,\"missed_packets\":%u,"
+    "\"network_connected\":%s,\"wifi_rssi\":%d,\"ip_address\":\"%s\",\"mac_address\":\"%s\","
+    "\"active_sockets\":%d,\"max_sockets\":%d}",
     free_heap, total_heap, free_psram, total_psram,
     min_free_heap, min_free_psram,
     uptime_sec, uptime_days, uptime_hours, uptime_mins,
     ESPHOME_VERSION, __DATE__, __TIME__,
     (unsigned int)task_count,
-    invalid_checksum, missed_packets);
+    invalid_checksum, missed_packets,
+    network_connected ? "true" : "false", wifi_rssi, ip_address.c_str(), mac_address.c_str(),
+    active_sockets, max_sockets);
   
   return std::string(buffer);
 }
@@ -1955,6 +2009,35 @@ std::string TigoWebServer::get_esp_status_html() {
     </div>
     
     <div class="card">
+      <h2>Network</h2>
+      <div class="info-grid">
+        <div class="info-item">
+          <h3>Connection Status</h3>
+          <div class="value" id="network-status">--</div>
+        </div>
+        <div class="info-item">
+          <h3>WiFi Signal (RSSI)</h3>
+          <div class="value" id="wifi-rssi">--</div>
+        </div>
+        <div class="info-item">
+          <h3>IP Address</h3>
+          <div class="value" id="ip-address">--</div>
+        </div>
+        <div class="info-item">
+          <h3>MAC Address</h3>
+          <div class="value" id="mac-address">--</div>
+        </div>
+        <div class="info-item">
+          <h3>Active Sockets</h3>
+          <div class="value" id="socket-count">--</div>
+          <div class="progress-bar">
+            <div class="progress-fill" id="socket-progress"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    
+    <div class="card">
       <h2>System Information</h2>
       <div class="info-grid">
         <div class="info-item">
@@ -2076,6 +2159,25 @@ std::string TigoWebServer::get_esp_status_html() {
         document.getElementById('min-heap').textContent = formatBytes(data.min_free_heap || 0);
         document.getElementById('invalid-checksum').textContent = data.invalid_checksum || 0;
         document.getElementById('missed-packets').textContent = data.missed_packets || 0;
+        
+        // Display network information
+        document.getElementById('network-status').textContent = 
+          data.network_connected ? '✓ Connected' : '✗ Disconnected';
+        document.getElementById('network-status').style.color = 
+          data.network_connected ? '#4caf50' : '#f44336';
+        document.getElementById('wifi-rssi').textContent = 
+          data.wifi_rssi !== 0 ? `${data.wifi_rssi} dBm` : 'N/A';
+        document.getElementById('ip-address').textContent = data.ip_address || 'N/A';
+        document.getElementById('mac-address').textContent = data.mac_address || 'N/A';
+        
+        // Display socket usage
+        const socketUsedPct = data.max_sockets > 0 ? 
+          (data.active_sockets / data.max_sockets * 100) : 0;
+        document.getElementById('socket-count').textContent = 
+          `${data.active_sockets} / ${data.max_sockets}`;
+        document.getElementById('socket-progress').style.width = socketUsedPct + '%';
+        document.getElementById('socket-progress').style.backgroundColor = 
+          socketUsedPct > 75 ? '#f44336' : (socketUsedPct > 50 ? '#ff9800' : '#4caf50');
         
         if (data.total_psram > 0) {
           document.getElementById('min-psram').textContent = formatBytes(data.min_free_psram || 0);
