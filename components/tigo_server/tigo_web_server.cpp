@@ -807,19 +807,26 @@ std::string TigoWebServer::build_devices_json() {
   
   // Create a vector of device info with names and sensor indices for sorting
   struct DeviceWithName {
-    const tigo_monitor::DeviceData *device;
+    const tigo_monitor::DeviceData *device;  // May be nullptr if no runtime data yet
+    std::string addr;
+    std::string barcode;
     std::string name;
     std::string string_label;
     int sensor_index;
+    bool has_runtime_data;
   };
   
   std::vector<DeviceWithName> sorted_devices;
   
+  // First, add all devices that have runtime data
   for (const auto &device : devices) {
     DeviceWithName dwn;
     dwn.device = &device;
+    dwn.addr = device.addr;
+    dwn.barcode = device.barcode;
     dwn.sensor_index = -1;
     dwn.string_label = "";
+    dwn.has_runtime_data = true;
     
     // Find the node table entry to get CCA label, string label, and sensor index
     for (const auto &node : node_table) {
@@ -843,6 +850,42 @@ std::string TigoWebServer::build_devices_json() {
     }
     
     sorted_devices.push_back(dwn);
+  }
+  
+  // Now add nodes from node_table that don't have runtime data yet
+  // This handles the case where ESP32 restarted at night - we know about them but haven't seen them
+  for (const auto &node : node_table) {
+    // Check if this node already exists in sorted_devices
+    bool found = false;
+    for (const auto &existing : sorted_devices) {
+      if (existing.addr == node.addr) {
+        found = true;
+        break;
+      }
+    }
+    
+    if (!found && node.sensor_index >= 0) {
+      // This node is in the table but has no runtime data yet
+      DeviceWithName dwn;
+      dwn.device = nullptr;
+      dwn.addr = node.addr;
+      // Prefer long_address (16-char Frame 27), fallback to frame09_barcode (6-char)
+      dwn.barcode = !node.long_address.empty() ? node.long_address : node.frame09_barcode;
+      dwn.sensor_index = node.sensor_index;
+      dwn.string_label = node.cca_string_label;
+      dwn.has_runtime_data = false;
+      
+      // Use CCA label if available, otherwise barcode, otherwise address
+      if (!node.cca_label.empty()) {
+        dwn.name = node.cca_label;
+      } else if (!dwn.barcode.empty() && dwn.barcode.length() >= 5) {
+        dwn.name = dwn.barcode;
+      } else {
+        dwn.name = "Module " + node.addr;
+      }
+      
+      sorted_devices.push_back(dwn);
+    }
   }
   
   // Sort by name (CCA label if available), then by sensor index
@@ -870,22 +913,34 @@ std::string TigoWebServer::build_devices_json() {
     if (!first) json += ",";
     first = false;
     
-    const auto &device = *dwn.device;
     const std::string &device_name = dwn.name;
     const std::string &string_label = dwn.string_label;
     
     char buffer[600];
-    float power = device.voltage_out * device.current_in;
-    unsigned long data_age_ms = millis() - device.last_update;
-    float duty_cycle_percent = (device.duty_cycle / 255.0f) * 100.0f;
     
-    snprintf(buffer, sizeof(buffer),
-      "{\"addr\":\"%s\",\"barcode\":\"%s\",\"name\":\"%s\",\"string_label\":\"%s\",\"voltage_in\":%.2f,\"voltage_out\":%.2f,"
-      "\"current\":%.3f,\"power\":%.1f,\"peak_power\":%.1f,\"temperature\":%.1f,\"rssi\":%d,"
-      "\"duty_cycle\":%.1f,\"efficiency\":%.2f,\"data_age_ms\":%lu}",
-      device.addr.c_str(), device.barcode.c_str(), device_name.c_str(), string_label.c_str(), device.voltage_in, device.voltage_out,
-      device.current_in, power, device.peak_power, device.temperature, device.rssi,
-      duty_cycle_percent, device.efficiency, data_age_ms);
+    if (dwn.has_runtime_data && dwn.device != nullptr) {
+      // Device has runtime data - show actual values
+      const auto &device = *dwn.device;
+      float power = device.voltage_out * device.current_in;
+      unsigned long data_age_ms = millis() - device.last_update;
+      float duty_cycle_percent = (device.duty_cycle / 255.0f) * 100.0f;
+      
+      snprintf(buffer, sizeof(buffer),
+        "{\"addr\":\"%s\",\"barcode\":\"%s\",\"name\":\"%s\",\"string_label\":\"%s\",\"voltage_in\":%.2f,\"voltage_out\":%.2f,"
+        "\"current\":%.3f,\"power\":%.1f,\"peak_power\":%.1f,\"temperature\":%.1f,\"rssi\":%d,"
+        "\"duty_cycle\":%.1f,\"efficiency\":%.2f,\"data_age_ms\":%lu}",
+        device.addr.c_str(), device.barcode.c_str(), device_name.c_str(), string_label.c_str(), device.voltage_in, device.voltage_out,
+        device.current_in, power, device.peak_power, device.temperature, device.rssi,
+        duty_cycle_percent, device.efficiency, data_age_ms);
+    } else {
+      // Device is known but has no runtime data yet (e.g., ESP32 restarted at night)
+      // Show zeros with a very large data_age to indicate no recent data
+      snprintf(buffer, sizeof(buffer),
+        "{\"addr\":\"%s\",\"barcode\":\"%s\",\"name\":\"%s\",\"string_label\":\"%s\",\"voltage_in\":0.00,\"voltage_out\":0.00,"
+        "\"current\":0.000,\"power\":0.0,\"peak_power\":0.0,\"temperature\":0.0,\"rssi\":0,"
+        "\"duty_cycle\":0.0,\"efficiency\":0.00,\"data_age_ms\":999999999}",
+        dwn.addr.c_str(), dwn.barcode.c_str(), device_name.c_str(), string_label.c_str());
+    }
     
     json += buffer;
   }
