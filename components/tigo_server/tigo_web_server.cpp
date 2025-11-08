@@ -16,7 +16,6 @@
 #include <freertos/task.h>
 #include <lwip/sockets.h>
 #include <lwip/tcp.h>
-#include <lwip/stats.h>
 #include <cstring>
 #include <mbedtls/base64.h>
 
@@ -1094,10 +1093,12 @@ std::string TigoWebServer::build_esp_status_json() {
   int8_t wifi_rssi = 0;
   std::string ip_address = "N/A";
   std::string mac_address = "N/A";
+  std::string ssid = "N/A";
   
 #ifdef USE_WIFI
   if (network_connected && wifi::global_wifi_component != nullptr) {
     wifi_rssi = wifi::global_wifi_component->wifi_rssi();
+    ssid = wifi::global_wifi_component->wifi_ssid();
     
     // Get IP address - use the newer get_ip_addresses() method
     auto addresses = wifi::global_wifi_component->get_ip_addresses();
@@ -1110,26 +1111,23 @@ std::string TigoWebServer::build_esp_status_json() {
   }
 #endif
 
-  // Count active sockets by checking lwIP socket table
+  // Count active TCP connections by examining file descriptors
+  // This counts actual open sockets, not just the HTTP server
   int active_sockets = 0;
-  int max_sockets = 0;
+  int max_sockets = 16;  // From CONFIG_LWIP_MAX_SOCKETS
   
-#if LWIP_STATS && LWIP_STATS_DISPLAY
-  // Get socket stats if lwIP stats are enabled
-  active_sockets = lwip_stats.sys.used;
-  max_sockets = MEMP_NUM_NETCONN;
-#else
-  // Manual count by checking socket validity
-  max_sockets = 16;  // From CONFIG_LWIP_MAX_SOCKETS
-  for (int i = 0; i < max_sockets; i++) {
-    struct sockaddr_storage addr;
-    socklen_t len = sizeof(addr);
-    // Try to get socket name - if successful, socket is active
-    if (getpeername(i, (struct sockaddr*)&addr, &len) == 0 || errno == ENOTCONN) {
+  // Check each possible socket FD
+  // On ESP-IDF, socket FDs usually start at a specific base
+  // We'll check by attempting to get socket options
+  for (int fd = 0; fd < 64; fd++) {  // Check a reasonable range
+    struct sockaddr_in addr;
+    socklen_t addr_len = sizeof(addr);
+    // getsockname succeeds if FD is a valid socket
+    if (getsockname(fd, (struct sockaddr*)&addr, &addr_len) == 0) {
       active_sockets++;
+      if (active_sockets >= max_sockets) break;  // Stop when we hit our limit
     }
   }
-#endif
   
   char buffer[1536];
   snprintf(buffer, sizeof(buffer),
@@ -1139,7 +1137,7 @@ std::string TigoWebServer::build_esp_status_json() {
     "\"esphome_version\":\"%s\",\"compilation_time\":\"%s %s\","
     "\"task_count\":%u,"
     "\"invalid_checksum\":%u,\"missed_packets\":%u,"
-    "\"network_connected\":%s,\"wifi_rssi\":%d,\"ip_address\":\"%s\",\"mac_address\":\"%s\","
+    "\"network_connected\":%s,\"wifi_rssi\":%d,\"wifi_ssid\":\"%s\",\"ip_address\":\"%s\",\"mac_address\":\"%s\","
     "\"active_sockets\":%d,\"max_sockets\":%d}",
     free_heap, total_heap, free_psram, total_psram,
     min_free_heap, min_free_psram,
@@ -1147,7 +1145,7 @@ std::string TigoWebServer::build_esp_status_json() {
     ESPHOME_VERSION, __DATE__, __TIME__,
     (unsigned int)task_count,
     invalid_checksum, missed_packets,
-    network_connected ? "true" : "false", wifi_rssi, ip_address.c_str(), mac_address.c_str(),
+    network_connected ? "true" : "false", wifi_rssi, ssid.c_str(), ip_address.c_str(), mac_address.c_str(),
     active_sockets, max_sockets);
   
   return std::string(buffer);
@@ -2016,6 +2014,10 @@ std::string TigoWebServer::get_esp_status_html() {
           <div class="value" id="network-status">--</div>
         </div>
         <div class="info-item">
+          <h3>WiFi SSID</h3>
+          <div class="value" id="wifi-ssid">--</div>
+        </div>
+        <div class="info-item">
           <h3>WiFi Signal (RSSI)</h3>
           <div class="value" id="wifi-rssi">--</div>
         </div>
@@ -2165,6 +2167,7 @@ std::string TigoWebServer::get_esp_status_html() {
           data.network_connected ? '✓ Connected' : '✗ Disconnected';
         document.getElementById('network-status').style.color = 
           data.network_connected ? '#4caf50' : '#f44336';
+        document.getElementById('wifi-ssid').textContent = data.wifi_ssid || 'N/A';
         document.getElementById('wifi-rssi').textContent = 
           data.wifi_rssi !== 0 ? `${data.wifi_rssi} dBm` : 'N/A';
         document.getElementById('ip-address').textContent = data.ip_address || 'N/A';
