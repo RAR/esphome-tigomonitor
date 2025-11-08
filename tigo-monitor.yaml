@@ -10,12 +10,16 @@ esp32:
     version: recommended
     sdkconfig_options:
       CONFIG_ESP32S3_DEFAULT_CPU_FREQ_240: "y"
-      # UART optimizations to prevent packet loss
+      # UART optimizations to prevent packet loss (increased for 32MB PSRAM)
       CONFIG_UART_ISR_IN_IRAM: "y"
-      CONFIG_UART_RX_BUFFER_SIZE: "2048"
-      CONFIG_UART_TX_BUFFER_SIZE: "512"
+      CONFIG_UART_RX_BUFFER_SIZE: "8192"
+      CONFIG_UART_TX_BUFFER_SIZE: "2048"
+      # Reduce task switching overhead
+      CONFIG_FREERTOS_HZ: "1000"
       # Increase event queue size
-      CONFIG_FREERTOS_QUEUE_REGISTRY_SIZE: "32"
+      CONFIG_FREERTOS_QUEUE_REGISTRY_SIZE: "64"
+      # Optimize for low latency
+      CONFIG_FREERTOS_USE_TICKLESS_IDLE: "n"
       # Logging optimizations
       CONFIG_LOG_DEFAULT_LEVEL_INFO: "y"
       CONFIG_LOG_MAXIMUM_LEVEL_VERBOSE: "y"
@@ -82,7 +86,7 @@ uart:
   data_bits: 8
   parity: NONE
   stop_bits: 1
-  rx_buffer_size: 2048  # Increased from default 256 to reduce packet loss
+  rx_buffer_size: 8192  # Increased for 32MB PSRAM to reduce packet loss
 
 # Tigo Monitor component - sensors will be created automatically!
 tigo_monitor:

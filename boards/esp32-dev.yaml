@@ -1,0 +1,50 @@
+# Generic ESP32 DevKit Configuration (No PSRAM)
+# 520KB SRAM, 240MHz, No PSRAM
+# Recommended for: Small installations (up to ~12 devices)
+# Note: Memory limited - disable web server if experiencing issues
+
+esphome:
+  name: tigo-server
+  friendly_name: "Tigo Server"
+
+esp32:
+  board: esp32dev
+  framework:
+    type: esp-idf
+    version: recommended
+    sdkconfig_options:
+      CONFIG_ESP32_DEFAULT_CPU_FREQ_240: "y"
+      # Conservative UART settings for limited memory
+      CONFIG_UART_ISR_IN_IRAM: "y"
+      CONFIG_UART_RX_BUFFER_SIZE: "1024"
+      CONFIG_UART_TX_BUFFER_SIZE: "256"
+      # Standard event queue
+      CONFIG_FREERTOS_QUEUE_REGISTRY_SIZE: "16"
+      # Logging optimizations
+      CONFIG_LOG_DEFAULT_LEVEL_INFO: "y"
+
+# UART configuration for Tigo communication
+uart:
+  id: tigo_uart
+  tx_pin: GPIO1   # Standard UART0 TX
+  rx_pin: GPIO3   # Standard UART0 RX
+  baud_rate: 38400
+  data_bits: 8
+  parity: NONE
+  stop_bits: 1
+  rx_buffer_size: 1024  # Conservative for limited memory
+
+# Tigo Monitor component - limited devices for memory constraints
+tigo_monitor:
+  id: tigo_hub
+  uart_id: tigo_uart
+  number_of_devices: 12  # Limited by available heap
+  update_interval: 30s
+
+# Custom web server (may need to disable if memory constrained)
+tigo_server:
+  id: tigo_web
+  tigo_monitor_id: tigo_hub
+  port: 80
+  # Note: If experiencing out-of-memory issues, comment out this component
+  # and use Home Assistant API only

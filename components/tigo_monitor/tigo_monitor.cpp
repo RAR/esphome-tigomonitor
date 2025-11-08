@@ -26,13 +26,16 @@ static const char *const TAG = "tigo_monitor";
 static void* psram_malloc(size_t size) {
   void* ptr = heap_caps_malloc(size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
   if (ptr) {
-    ESP_LOGV(TAG, "Allocated %zu bytes from PSRAM", size);
+    // Only log large allocations to reduce spam
+    if (size > 1024) {
+      ESP_LOGD(TAG, "Allocated %zu bytes from PSRAM", size);
+    }
     return ptr;
   }
   // Fallback to regular heap
   ptr = heap_caps_malloc(size, MALLOC_CAP_DEFAULT);
-  if (ptr) {
-    ESP_LOGV(TAG, "Allocated %zu bytes from regular heap (PSRAM unavailable)", size);
+  if (ptr && size > 1024) {
+    ESP_LOGW(TAG, "Allocated %zu bytes from regular heap (PSRAM unavailable)", size);
   }
   return ptr;
 }
@@ -51,6 +54,15 @@ static void* psram_calloc(size_t count, size_t size) {
   return ptr;
 }
 
+// Export for PSRAMAllocator in header
+void* psram_malloc_impl(size_t size) {
+  return psram_malloc(size);
+}
+
+void psram_free_impl(void* ptr) {
+  heap_caps_free(ptr);
+}
+
 // Custom allocator hooks for cJSON to use PSRAM
 static void* cjson_malloc_psram(size_t size) {
   return psram_malloc(size);
@@ -59,6 +71,96 @@ static void* cjson_malloc_psram(size_t size) {
 static void cjson_free_psram(void* ptr) {
   heap_caps_free(ptr);
 }
+
+// Helper functions for incoming_data_ buffer (works with both string and vector<char>)
+template<typename BufferType>
+inline size_t buffer_size(const BufferType& buf);
+
+template<>
+inline size_t buffer_size<std::string>(const std::string& buf) {
+  return buf.size();
+}
+
+template<>
+inline size_t buffer_size<psram_vector<char>>(const psram_vector<char>& buf) {
+  return buf.size();
+}
+
+template<typename BufferType>
+inline void buffer_clear(BufferType& buf);
+
+template<>
+inline void buffer_clear<std::string>(std::string& buf) {
+  buf.clear();
+}
+
+template<>
+inline void buffer_clear<psram_vector<char>>(psram_vector<char>& buf) {
+  buf.clear();
+}
+
+template<typename BufferType>
+inline void buffer_append(BufferType& buf, char c);
+
+template<>
+inline void buffer_append<std::string>(std::string& buf, char c) {
+  buf += c;
+}
+
+template<>
+inline void buffer_append<psram_vector<char>>(psram_vector<char>& buf, char c) {
+  buf.push_back(c);
+}
+
+template<typename BufferType>
+inline size_t buffer_find(const BufferType& buf, const char* pattern, size_t pattern_len);
+
+template<>
+inline size_t buffer_find<std::string>(const std::string& buf, const char* pattern, size_t pattern_len) {
+  return buf.find(pattern);
+}
+
+template<>
+inline size_t buffer_find<psram_vector<char>>(const psram_vector<char>& buf, const char* pattern, size_t pattern_len) {
+  if (buf.size() < pattern_len) return std::string::npos;
+  for (size_t i = 0; i <= buf.size() - pattern_len; i++) {
+    if (memcmp(&buf[i], pattern, pattern_len) == 0) {
+      return i;
+    }
+  }
+  return std::string::npos;
+}
+
+template<typename BufferType>
+inline std::string buffer_substr(const BufferType& buf, size_t pos, size_t len);
+
+template<>
+inline std::string buffer_substr<std::string>(const std::string& buf, size_t pos, size_t len) {
+  return buf.substr(pos, len);
+}
+
+template<>
+inline std::string buffer_substr<psram_vector<char>>(const psram_vector<char>& buf, size_t pos, size_t len) {
+  if (pos >= buf.size()) return "";
+  size_t actual_len = std::min(len, buf.size() - pos);
+  return std::string(&buf[pos], actual_len);
+}
+
+template<typename BufferType>
+inline void buffer_erase_prefix(BufferType& buf, size_t pos);
+
+template<>
+inline void buffer_erase_prefix<std::string>(std::string& buf, size_t pos) {
+  buf = buf.substr(pos);
+}
+
+template<>
+inline void buffer_erase_prefix<psram_vector<char>>(psram_vector<char>& buf, size_t pos) {
+  if (pos < buf.size()) {
+    buf.erase(buf.begin(), buf.begin() + pos);
+  }
+}
+
 #endif
 
 // Tigo CRC table - copied from original Arduino code
@@ -83,9 +185,38 @@ const uint8_t TigoMonitorComponent::tigo_crc_table_[256] = {
 
 void TigoMonitorComponent::setup() {
   ESP_LOGCONFIG(TAG, "Setting up Tigo Server...");
+  
+#ifdef USE_ESP_IDF
+  // Log PSRAM availability
+  size_t psram_size = heap_caps_get_total_size(MALLOC_CAP_SPIRAM);
+  size_t psram_free = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+  if (psram_size > 0) {
+    ESP_LOGI(TAG, "PSRAM available: %zu KB total, %zu KB free - using PSRAM for device/node storage", 
+             psram_size / 1024, psram_free / 1024);
+  } else {
+    ESP_LOGW(TAG, "No PSRAM detected - using regular heap (may limit device capacity)");
+  }
+#endif
+
   generate_crc_table();
   devices_.reserve(number_of_devices_);
   node_table_.reserve(number_of_devices_);
+  
+#ifdef USE_ESP_IDF
+  // Pre-allocate PSRAM buffer for incoming serial data (16KB capacity)
+  incoming_data_.reserve(16384);
+  size_t internal_free = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+  size_t psram_free_after = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+  
+  // Check stack watermark for this task
+  UBaseType_t stack_high_water = uxTaskGetStackHighWaterMark(NULL);
+  ESP_LOGI(TAG, "Pre-allocated 16KB PSRAM buffer for incoming serial data");
+  ESP_LOGI(TAG, "Memory after allocation - Internal: %zu KB free, PSRAM: %zu KB free", 
+           internal_free / 1024, psram_free_after / 1024);
+  ESP_LOGI(TAG, "Stack high water mark: %u bytes free (monitor for stack overflow)", 
+           stack_high_water * sizeof(StackType_t));
+#endif
+  
   load_node_table();
   load_energy_data();
   
@@ -126,8 +257,8 @@ void TigoMonitorComponent::setup() {
   // Query CCA on boot if IP is configured and sync_cca_on_startup is enabled
   if (!cca_ip_.empty() && sync_cca_on_startup_) {
     ESP_LOGI(TAG, "CCA IP configured: %s - will sync configuration on boot", cca_ip_.c_str());
-    // Delay sync to allow WiFi to connect (5 seconds after setup)
-    this->set_timeout("cca_sync", 5000, [this]() { this->sync_from_cca(); });
+    // Delay sync to allow WiFi to connect and stabilize (15 seconds after setup)
+    this->set_timeout("cca_sync", 15000, [this]() { this->sync_from_cca(); });
   } else if (!cca_ip_.empty() && !sync_cca_on_startup_) {
     ESP_LOGI(TAG, "CCA IP configured: %s - automatic sync disabled (use 'Sync from CCA' button)", cca_ip_.c_str());
   }
@@ -136,6 +267,36 @@ void TigoMonitorComponent::setup() {
 
 void TigoMonitorComponent::loop() {
   process_serial_data();
+  
+#ifdef USE_ESP_IDF
+  // Periodic heap and stack monitoring (every 60 seconds) to detect memory leaks/stack issues
+  static unsigned long last_heap_check = 0;
+  unsigned long now = millis();
+  if (now - last_heap_check > 60000) {
+    last_heap_check = now;
+    size_t internal_free = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+    size_t psram_free = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+    size_t internal_min = heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL);
+    UBaseType_t stack_watermark = uxTaskGetStackHighWaterMark(NULL);
+    
+    ESP_LOGD(TAG, "Heap: Internal %zu KB free (%zu KB min), PSRAM %zu KB free, Buffer: %zu bytes",
+             internal_free / 1024, internal_min / 1024, psram_free / 1024, buffer_size(incoming_data_));
+    ESP_LOGD(TAG, "Stack: %u bytes free (warning if < 512 bytes)", 
+             stack_watermark * sizeof(StackType_t));
+    
+    // Warn if stack is getting low
+    if (stack_watermark * sizeof(StackType_t) < 512) {
+      ESP_LOGW(TAG, "⚠️ Stack running low! Only %u bytes free - potential stack overflow risk",
+               stack_watermark * sizeof(StackType_t));
+    }
+    
+    // Warn if internal RAM is getting low
+    if (internal_min < 50000) {
+      ESP_LOGW(TAG, "⚠️ Internal RAM minimum reached %zu KB - potential heap exhaustion",
+               internal_min / 1024);
+    }
+  }
+#endif
 }
 
 void TigoMonitorComponent::update() {
@@ -158,8 +319,9 @@ void TigoMonitorComponent::on_shutdown() {
 }
 
 float TigoMonitorComponent::get_setup_priority() const {
-  // Setup before API and other components that might need our sensors
-  return setup_priority::HARDWARE - 1.0f;
+  // Setup after network components (WiFi, API) to ensure they're ready for CCA sync
+  // AFTER_WIFI priority is around 250, which is after WiFi (600) and API (600)
+  return setup_priority::AFTER_WIFI;
 }
 
 #ifdef USE_BUTTON
@@ -201,8 +363,90 @@ void TigoSyncFromCCAButton::press_action() {
 #endif
 
 void TigoMonitorComponent::process_serial_data() {
+#ifdef USE_ESP_IDF
+  // Safety: limit processing to prevent watchdog timeouts
+  const size_t MAX_BYTES_PER_LOOP = 2048;  // Process max 2KB per loop iteration
+  size_t bytes_processed = 0;
+#endif
+  
   while (available()) {
+#ifdef USE_ESP_IDF
+    // Yield to watchdog if we've processed too much data
+    if (bytes_processed >= MAX_BYTES_PER_LOOP) {
+      ESP_LOGV(TAG, "Yielding after processing %zu bytes", bytes_processed);
+      yield();  // Let other tasks run
+      return;   // Continue next loop
+    }
+    bytes_processed++;
+#endif
+    
     char incoming_byte = read();
+    
+#ifdef USE_ESP_IDF
+    // Safety check: ensure we have capacity before append
+    if (incoming_data_.size() >= 16384) {
+      ESP_LOGW(TAG, "Buffer at max capacity before append, clearing!");
+      buffer_clear(incoming_data_);
+      frame_started_ = false;
+      missed_packet_count_++;
+      continue;  // Skip this byte
+    }
+    
+    buffer_append(incoming_data_, incoming_byte);
+    
+    // Check if frame starts
+    if (!frame_started_ && buffer_find(incoming_data_, "\x7E\x08", 2) != std::string::npos) {
+      missed_packet_count_++;
+      if (missed_packet_sensor_ != nullptr) {
+        missed_packet_sensor_->publish_state(missed_packet_count_);
+      }
+      ESP_LOGW(TAG, "Packet missed!");
+    }
+    
+    if (!frame_started_ && buffer_find(incoming_data_, "\x7E\x07", 2) != std::string::npos) {
+      // Start of a new frame detected
+      frame_started_ = true;
+      size_t start_pos = buffer_find(incoming_data_, "\x7E\x07", 2);
+      buffer_erase_prefix(incoming_data_, start_pos);  // Keep only from start delimiter
+    }
+    // Check if frame ends
+    else if (frame_started_ && buffer_find(incoming_data_, "\x7E\x08", 2) != std::string::npos) {
+      // End of frame detected
+      frame_started_ = false;
+      size_t end_pos = buffer_find(incoming_data_, "\x7E\x08", 2);
+      
+      // Safety check: ensure end_pos is valid
+      if (end_pos < 2 || end_pos > incoming_data_.size()) {
+        ESP_LOGW(TAG, "Invalid frame end position: %zu (buffer size: %zu)", end_pos, incoming_data_.size());
+        buffer_clear(incoming_data_);
+        missed_packet_count_++;
+        continue;
+      }
+      
+      // Extract frame without start and end delimiters
+      std::string frame = buffer_substr(incoming_data_, 2, end_pos - 2);
+      buffer_clear(incoming_data_); // Clear buffer for next frame
+      
+      // Process the frame with safety checks
+      if (!frame.empty() && frame.length() < 10000) {
+        ESP_LOGV(TAG, "Processing frame of %zu bytes", frame.length());
+        process_frame(frame);
+      } else if (frame.length() >= 10000) {
+        ESP_LOGW(TAG, "Frame too large (%zu bytes), skipping", frame.length());
+        missed_packet_count_++;
+      }
+    }
+    
+    // Reset if buffer grows too large (safety mechanism)
+    // Large buffer for high-throughput systems (P4 with 32MB PSRAM can handle this easily)
+    if (buffer_size(incoming_data_) > 16384) {
+      buffer_clear(incoming_data_);
+      frame_started_ = false;
+      ESP_LOGW(TAG, "Buffer too small, resetting! (>16KB bytes)");
+      missed_packet_count_++;
+    }
+#else
+    // Fallback to standard string operations
     incoming_data_ += incoming_byte;
     
     // Check if frame starts
@@ -235,11 +479,13 @@ void TigoMonitorComponent::process_serial_data() {
     }
     
     // Reset if buffer grows too large (safety mechanism)
-    if (incoming_data_.length() > 1024) {
+    if (incoming_data_.length() > 16384) {
       incoming_data_.clear();
       frame_started_ = false;
-      ESP_LOGW(TAG, "Buffer too small, resetting!");
+      ESP_LOGW(TAG, "Buffer too small, resetting! (>16KB bytes)");
+      missed_packet_count_++;
     }
+#endif
   }
 }
 
@@ -1097,7 +1343,16 @@ std::string TigoMonitorComponent::remove_escape_sequences(const std::string &fra
 }
 
 bool TigoMonitorComponent::verify_checksum(const std::string &frame) {
-  if (frame.length() < 2) return false;
+  if (frame.length() < 2) {
+    ESP_LOGV(TAG, "Frame too short for checksum verification: %zu bytes", frame.length());
+    return false;
+  }
+  
+  // Safety check: prevent potential out-of-bounds access
+  if (frame.length() > 10000) {
+    ESP_LOGW(TAG, "Frame suspiciously large: %zu bytes, rejecting", frame.length());
+    return false;
+  }
   
   std::string checksum_str = frame.substr(frame.length() - 2);
   uint16_t extracted_checksum = (static_cast<uint8_t>(checksum_str[0]) << 8) | 

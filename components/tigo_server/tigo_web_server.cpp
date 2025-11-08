@@ -250,6 +250,14 @@ void TigoWebServer::setup() {
     };
     httpd_register_uri_handler(server_, &api_reset_peak_power_uri);
     
+    httpd_uri_t api_reset_node_table_uri = {
+      .uri = "/api/reset_node_table",
+      .method = HTTP_POST,
+      .handler = api_reset_node_table_handler,
+      .user_ctx = this
+    };
+    httpd_register_uri_handler(server_, &api_reset_node_table_uri);
+    
     httpd_uri_t api_health_uri = {
       .uri = "/api/health",
       .method = HTTP_GET,
@@ -743,6 +751,25 @@ esp_err_t TigoWebServer::api_reset_peak_power_handler(httpd_req_t *req) {
   return ESP_OK;
 }
 
+esp_err_t TigoWebServer::api_reset_node_table_handler(httpd_req_t *req) {
+  TigoWebServer *server = (TigoWebServer *)req->user_ctx;
+  if (!server->check_api_auth(req)) {
+    return ESP_OK;
+  }
+  
+  ESP_LOGI(TAG, "Reset node table requested via web interface");
+  
+  // Reset node table (clears all device mappings, barcodes, CCA data)
+  server->parent_->reset_node_table();
+  
+  // Send success response
+  const char* response = "{\"status\":\"ok\",\"message\":\"Node table reset successfully\"}";
+  httpd_resp_set_type(req, "application/json");
+  httpd_resp_send(req, response, strlen(response));
+  
+  return ESP_OK;
+}
+
 esp_err_t TigoWebServer::api_health_handler(httpd_req_t *req) {
   // Health check endpoint - no authentication required for monitoring systems
   // Returns simple JSON with status and uptime
@@ -1031,9 +1058,9 @@ std::string TigoWebServer::build_node_table_json() {
 }
 
 std::string TigoWebServer::build_esp_status_json() {
-  // Get heap info
-  size_t free_heap = heap_caps_get_free_size(MALLOC_CAP_DEFAULT);
-  size_t total_heap = heap_caps_get_total_size(MALLOC_CAP_DEFAULT);
+  // Get heap info - use MALLOC_CAP_INTERNAL for internal RAM only (excludes PSRAM)
+  size_t free_heap = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+  size_t total_heap = heap_caps_get_total_size(MALLOC_CAP_INTERNAL);
   size_t free_psram = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
   size_t total_psram = heap_caps_get_total_size(MALLOC_CAP_SPIRAM);
   
@@ -1046,8 +1073,8 @@ std::string TigoWebServer::build_esp_status_json() {
   // Get task count (this function is always available)
   UBaseType_t task_count = uxTaskGetNumberOfTasks();
   
-  // Get minimum free heap ever seen
-  size_t min_free_heap = heap_caps_get_minimum_free_size(MALLOC_CAP_DEFAULT);
+  // Get minimum free heap ever seen - also use INTERNAL to track internal RAM watermark
+  size_t min_free_heap = heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL);
   size_t min_free_psram = heap_caps_get_minimum_free_size(MALLOC_CAP_SPIRAM);
   
   // Get UART diagnostics from parent
@@ -1169,7 +1196,7 @@ std::string TigoWebServer::get_dashboard_html() {
     .stat-card .value { font-size: 2rem; font-weight: bold; color: #2c3e50; }
     .stat-card .unit { font-size: 1rem; color: #95a5a6; margin-left: 0.25rem; }
     .devices-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(350px, 1fr)); gap: 1rem; }
-    .string-summary { grid-column: 1 / -1; background: linear-gradient(135deg, #6b7280 0%, #4b5563 100%); border-radius: 8px; padding: 1.5rem; margin-top: 1.5rem; box-shadow: 0 4px 6px rgba(0,0,0,0.1); transition: box-shadow 0.3s; }
+    .string-summary { grid-column: 1 / -1; background: linear-gradient(135deg, #6b7280 0%, #4b5563 100%); border-radius: 8px; padding: 1.5rem; margin-top: 0rem; box-shadow: 0 4px 6px rgba(0,0,0,0.1); transition: box-shadow 0.3s; }
     .string-summary:first-child { margin-top: 0; }
     .string-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; }
     .string-header h3 { color: white; font-size: 1.5rem; margin: 0; }
@@ -1911,7 +1938,7 @@ std::string TigoWebServer::get_esp_status_html() {
       <h2>Memory</h2>
       <div class="info-grid">
         <div class="info-item">
-          <h3>Heap Memory</h3>
+          <h3>Internal RAM</h3>
           <div class="value" id="heap-free">--</div>
           <div class="progress-bar">
             <div class="progress-fill" id="heap-progress"></div>
@@ -1968,9 +1995,13 @@ std::string TigoWebServer::get_esp_status_html() {
         <button onclick="resetPeakPower()" style="padding: 12px 24px; background-color: #f39c12; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; font-weight: bold;">
           ⚡ Reset Peak Power
         </button>
+        <button onclick="resetNodeTable()" style="padding: 12px 24px; background-color: #c0392b; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; font-weight: bold;">
+          🗑️ Reset All Node Data
+        </button>
       </div>
       <div id="restart-message" style="margin-top: 1rem; padding: 1rem; border-radius: 4px; display: none;"></div>
       <div id="reset-message" style="margin-top: 1rem; padding: 1rem; border-radius: 4px; display: none;"></div>
+      <div id="node-reset-message" style="margin-top: 1rem; padding: 1rem; border-radius: 4px; display: none;"></div>
     </div>
   </div>
   
@@ -2117,6 +2148,38 @@ std::string TigoWebServer::get_esp_status_html() {
         messageDiv.style.backgroundColor = '#e74c3c';
         messageDiv.textContent = 'Error: Failed to reset peak power. Please try again.';
         console.error('Reset error:', error);
+      }
+    }
+    
+    async function resetNodeTable() {
+      const messageDiv = document.getElementById('node-reset-message');
+      
+      if (!confirm('⚠️ WARNING: This will delete ALL node data including device mappings, barcodes, and CCA labels!\n\nThe system will need to rediscover all devices and you will need to sync from CCA again.\n\nAre you absolutely sure you want to continue?')) {
+        return;
+      }
+      
+      messageDiv.style.display = 'block';
+      messageDiv.style.backgroundColor = '#e67e22';
+      messageDiv.style.color = 'white';
+      messageDiv.textContent = 'Resetting all node data...';
+      
+      try {
+        const response = await apiFetch('/api/reset_node_table', { method: 'POST' });
+        if (response.ok) {
+          messageDiv.style.backgroundColor = '#27ae60';
+          messageDiv.textContent = 'All node data has been reset! System will restart in 3 seconds...';
+          
+          // Wait 3 seconds then restart
+          setTimeout(() => {
+            window.location.href = '/';
+          }, 3000);
+        } else {
+          throw new Error('Failed to reset node table');
+        }
+      } catch (error) {
+        messageDiv.style.backgroundColor = '#e74c3c';
+        messageDiv.textContent = 'Error: Failed to reset node data. Please try again.';
+        console.error('Reset node table error:', error);
       }
     }
     

@@ -1,0 +1,113 @@
+# Example Tigo Monitor Configuration using ESP32-P4 EVBoard
+# This demonstrates how to use the board-specific configurations
+
+# Include board-specific hardware configuration
+packages:
+  board: !include esp32p4-evboard.yaml
+
+# External components
+external_components:
+  - source: 
+      type: local
+      path: ../components
+
+# WiFi configuration
+wifi:
+  ssid: "YOUR_WIFI_SSID"
+  password: "YOUR_WIFI_PASSWORD"
+  
+  # Enable fallback hotspot (captive portal) in case wifi connection fails
+  ap:
+    ssid: "Tigo-Server Fallback Hotspot"
+    password: "12345678"
+
+captive_portal:
+
+# Enable logging
+logger:
+  level: INFO  # Change to DEBUG if you need detailed logs for troubleshooting
+  baud_rate: 0  # Disable hardware logging since we use the UART for Tigo communication
+
+# Enable Home Assistant API
+api:
+
+# Enable OTA updates
+ota:
+  - platform: esphome
+    password: "YOUR_OTA_PASSWORD"
+
+# Tigo Monitor Control Buttons
+button:
+  - platform: tigo_monitor
+    name: "Generate YAML Config"
+    id: generate_yaml_button
+    tigo_monitor_id: tigo_hub
+    button_type: yaml_generator
+  - platform: tigo_monitor
+    name: "Print Device Mappings"
+    id: device_mappings_button
+    tigo_monitor_id: tigo_hub
+    button_type: device_mappings
+  - platform: tigo_monitor
+    name: "Reset Node Table"
+    id: reset_node_table_button
+    tigo_monitor_id: tigo_hub
+    button_type: reset_node_table
+
+# System sensors
+sensor:
+  # Power Sum Sensor - Automatically calculates total power from all Tigo devices
+  - platform: tigo_monitor
+    tigo_monitor_id: tigo_hub
+    name: "Total System Power"
+    id: total_system_power
+    filters:
+      - sliding_window_moving_average:
+          window_size: 5
+          send_every: 1
+
+  # Energy Sum Sensor - Automatically calculates total kWh produced
+  - platform: tigo_monitor
+    tigo_monitor_id: tigo_hub
+    name: "Total System Energy"
+    id: total_system_energy
+
+  # Device Count Sensor
+  - platform: tigo_monitor
+    tigo_monitor_id: tigo_hub
+    name: "Discovered Devices Count"
+    id: discovered_devices_count
+
+  # System monitoring sensors
+  - platform: wifi_signal
+    name: "Tigo Server WiFi Signal"
+    id: wifi_rssi
+    update_interval: 60s
+
+  - platform: uptime
+    name: "Tigo Server Uptime"
+    id: uptime_sensor
+
+text_sensor:
+  - platform: wifi_info
+    ip_address:
+      name: "Tigo Server IP Address"
+    ssid:
+      name: "Tigo Server Connected SSID"
+  
+  - platform: version
+    name: "Tigo Server ESPHome Version"
+
+binary_sensor:
+  - platform: status
+    name: "Tigo Server Status"
+
+switch:
+  - platform: restart
+    name: "Tigo Server Restart"
+
+# Time component (optional, for logging timestamps)
+time:
+  - platform: sntp
+    id: sntp_time
+    timezone: "America/New_York"  # Adjust for your timezone

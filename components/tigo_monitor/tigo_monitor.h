@@ -18,6 +18,65 @@
 #include <map>
 #include <set>
 #include <string>
+#include <limits>
+#include <new>
+
+#ifdef USE_ESP_IDF
+#include <esp_heap_caps.h>
+
+// Forward declare PSRAM allocation functions
+namespace esphome {
+namespace tigo_monitor {
+  void* psram_malloc_impl(size_t size);
+  void psram_free_impl(void* ptr);
+}
+}
+
+// STL-compatible allocator for PSRAM usage
+template<typename T>
+class PSRAMAllocator {
+public:
+  using value_type = T;
+  using pointer = T*;
+  using const_pointer = const T*;
+  using size_type = std::size_t;
+  using difference_type = std::ptrdiff_t;
+
+  template<typename U>
+  struct rebind {
+    using other = PSRAMAllocator<U>;
+  };
+
+  PSRAMAllocator() noexcept = default;
+  template<typename U>
+  PSRAMAllocator(const PSRAMAllocator<U>&) noexcept {}
+
+  T* allocate(std::size_t n) {
+    if (n > std::numeric_limits<std::size_t>::max() / sizeof(T))
+      return nullptr;  // Can't throw - exceptions disabled
+    
+    void* ptr = esphome::tigo_monitor::psram_malloc_impl(n * sizeof(T));
+    return static_cast<T*>(ptr);
+  }
+
+  void deallocate(T* p, std::size_t) noexcept {
+    esphome::tigo_monitor::psram_free_impl(p);
+  }
+
+  template<typename U>
+  bool operator==(const PSRAMAllocator<U>&) const noexcept { return true; }
+  
+  template<typename U>
+  bool operator!=(const PSRAMAllocator<U>&) const noexcept { return false; }
+};
+
+// Type aliases for PSRAM-backed containers
+template<typename T>
+using psram_vector = std::vector<T, PSRAMAllocator<T>>;
+
+template<typename Key, typename T>
+using psram_map = std::map<Key, T, std::less<Key>, PSRAMAllocator<std::pair<const Key, T>>>;
+#endif
 
 namespace esphome {
 namespace tigo_monitor {
@@ -193,10 +252,17 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   void add_inverter(const std::string &name, const std::vector<std::string> &mppt_labels);
   
   // Public getters for web server access
+#ifdef USE_ESP_IDF
+  const psram_vector<DeviceData>& get_devices() const { return devices_; }
+  const psram_vector<NodeTableData>& get_node_table() const { return node_table_; }
+  const psram_map<std::string, StringData>& get_strings() const { return strings_; }
+  const psram_vector<InverterData>& get_inverters() const { return inverters_; }
+#else
   const std::vector<DeviceData>& get_devices() const { return devices_; }
   const std::vector<NodeTableData>& get_node_table() const { return node_table_; }
   const std::map<std::string, StringData>& get_strings() const { return strings_; }
   const std::vector<InverterData>& get_inverters() const { return inverters_; }
+#endif
   int get_number_of_devices() const { return number_of_devices_; }
   const std::string& get_cca_ip() const { return cca_ip_; }
   bool get_sync_cca_on_startup() const { return sync_cca_on_startup_; }
@@ -289,10 +355,19 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   void save_energy_data();
   
  private:
+#ifdef USE_ESP_IDF
+  // Use PSRAM-backed containers for large data structures
+  psram_vector<DeviceData> devices_;
+  psram_vector<NodeTableData> node_table_;  // Unified table for all device info
+  psram_map<std::string, StringData> strings_;  // String-level aggregation (key = string_label)
+  psram_vector<InverterData> inverters_;  // User-defined inverter groupings
+#else
+  // Fallback to standard containers on Arduino
   std::vector<DeviceData> devices_;
-  std::vector<NodeTableData> node_table_;  // Unified table for all device info
-  std::map<std::string, StringData> strings_;  // String-level aggregation (key = string_label)
-  std::vector<InverterData> inverters_;  // User-defined inverter groupings
+  std::vector<NodeTableData> node_table_;
+  std::map<std::string, StringData> strings_;
+  std::vector<InverterData> inverters_;
+#endif
   std::map<std::string, sensor::Sensor*> voltage_in_sensors_;
   std::map<std::string, sensor::Sensor*> voltage_out_sensors_;
   std::map<std::string, sensor::Sensor*> current_in_sensors_;
@@ -339,7 +414,12 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   static const uint32_t DEVICE_MAPPING_HASH = 0x12345678;  // Hash for preferences key
   static const uint32_t ENERGY_DATA_HASH = 0x87654321;     // Hash for energy data key
   
+#ifdef USE_ESP_IDF
+  // Use PSRAM-backed buffer for incoming serial data (can grow to 16KB)
+  psram_vector<char> incoming_data_;
+#else
   std::string incoming_data_;
+#endif
   bool frame_started_ = false;
   uint16_t crc_table_[CRC_TABLE_SIZE];
   int number_of_devices_ = 5;

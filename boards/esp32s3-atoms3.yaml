@@ -1,0 +1,57 @@
+# ESP32-S3 M5Stack AtomS3/AtomS3R Configuration
+# 8MB PSRAM, 240MHz, Octal PSRAM
+# Recommended for: Standard installations (up to ~30 devices)
+
+esphome:
+  name: tigo-server
+  friendly_name: "Tigo Server"
+
+esp32:
+  board: m5stack-atoms3
+  variant: esp32s3
+  framework:
+    type: esp-idf
+    version: recommended
+    sdkconfig_options:
+      CONFIG_ESP32S3_DEFAULT_CPU_FREQ_240: "y"
+      # UART optimizations to prevent packet loss
+      CONFIG_UART_ISR_IN_IRAM: "y"
+      CONFIG_UART_RX_BUFFER_SIZE: "2048"
+      CONFIG_UART_TX_BUFFER_SIZE: "512"
+      # Increase event queue size
+      CONFIG_FREERTOS_QUEUE_REGISTRY_SIZE: "32"
+      # Logging optimizations
+      CONFIG_LOG_DEFAULT_LEVEL_INFO: "y"
+      CONFIG_LOG_MAXIMUM_LEVEL_VERBOSE: "y"
+      # Enable PSRAM (8MB on AtomS3)
+      CONFIG_SPIRAM_MODE_OCT: "y"
+      CONFIG_SPIRAM_SPEED_80M: "y"
+
+# Enable PSRAM
+psram:
+  mode: octal
+  speed: 80MHz
+
+# UART configuration for Tigo communication
+uart:
+  id: tigo_uart
+  tx_pin: GPIO6   # AtomS3/AtomS3R with Atomic RS485 Base
+  rx_pin: GPIO5   # AtomS3/AtomS3R with Atomic RS485 Base
+  baud_rate: 38400
+  data_bits: 8
+  parity: NONE
+  stop_bits: 1
+  rx_buffer_size: 2048  # Optimized for 8MB PSRAM
+
+# Tigo Monitor component
+tigo_monitor:
+  id: tigo_hub
+  uart_id: tigo_uart
+  number_of_devices: 30  # Suitable for 8MB PSRAM
+  update_interval: 30s
+
+# Custom web server
+tigo_server:
+  id: tigo_web
+  tigo_monitor_id: tigo_hub
+  port: 80
