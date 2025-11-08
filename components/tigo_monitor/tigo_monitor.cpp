@@ -1306,6 +1306,103 @@ void TigoMonitorComponent::publish_sensor_data() {
     }
   }
   
+  // Publish saved data for nodes that have sensors but no runtime data yet
+  // This handles the case where ESP32 restarts at night - we publish zeros with saved peak power
+  for (const auto &node : node_table_) {
+    // Only process nodes that have assigned sensor indices
+    if (node.sensor_index < 0) continue;
+    
+    // Check if this node already has runtime data
+    bool has_runtime_data = false;
+    for (const auto &device : devices_) {
+      if (device.addr == node.addr) {
+        has_runtime_data = true;
+        break;
+      }
+    }
+    
+    // Skip if we already published data for this node
+    if (has_runtime_data) continue;
+    
+    // This node has a sensor but no runtime data - publish zeros with saved peak power
+    ESP_LOGD(TAG, "Publishing saved data for node %s (no runtime data yet)", node.addr.c_str());
+    
+    // Try to load saved peak power for this node
+    std::string pref_key = "peak_" + node.addr;
+    uint32_t hash = esphome::fnv1_hash(pref_key);
+    auto load = global_preferences->make_preference<float>(hash);
+    float saved_peak = 0.0f;
+    load.load(&saved_peak);
+    
+    // Publish zeros for all sensors except peak power (which uses saved value)
+    auto voltage_in_it = voltage_in_sensors_.find(node.addr);
+    if (voltage_in_it != voltage_in_sensors_.end()) {
+      voltage_in_it->second->publish_state(0.0f);
+    }
+    
+    auto voltage_out_it = voltage_out_sensors_.find(node.addr);
+    if (voltage_out_it != voltage_out_sensors_.end()) {
+      voltage_out_it->second->publish_state(0.0f);
+    }
+    
+    auto current_in_it = current_in_sensors_.find(node.addr);
+    if (current_in_it != current_in_sensors_.end()) {
+      current_in_it->second->publish_state(0.0f);
+    }
+    
+    auto temperature_it = temperature_sensors_.find(node.addr);
+    if (temperature_it != temperature_sensors_.end()) {
+      temperature_it->second->publish_state(NAN);  // Use NAN for unavailable temperature
+    }
+    
+    auto power_it = power_sensors_.find(node.addr);
+    if (power_it != power_sensors_.end()) {
+      power_it->second->publish_state(0.0f);
+    }
+    
+    auto peak_power_it = peak_power_sensors_.find(node.addr);
+    if (peak_power_it != peak_power_sensors_.end()) {
+      peak_power_it->second->publish_state(saved_peak);  // Use saved peak power
+      ESP_LOGD(TAG, "Published saved peak power for %s: %.0fW", node.addr.c_str(), saved_peak);
+    }
+    
+    auto rssi_it = rssi_sensors_.find(node.addr);
+    if (rssi_it != rssi_sensors_.end()) {
+      rssi_it->second->publish_state(0.0f);
+    }
+    
+    auto barcode_it = barcode_sensors_.find(node.addr);
+    if (barcode_it != barcode_sensors_.end()) {
+      std::string barcode = !node.long_address.empty() ? node.long_address : node.frame09_barcode;
+      barcode_it->second->publish_state(barcode);
+    }
+    
+    auto duty_cycle_it = duty_cycle_sensors_.find(node.addr);
+    if (duty_cycle_it != duty_cycle_sensors_.end()) {
+      duty_cycle_it->second->publish_state(0.0f);
+    }
+    
+    auto firmware_version_it = firmware_version_sensors_.find(node.addr);
+    if (firmware_version_it != firmware_version_sensors_.end()) {
+      firmware_version_it->second->publish_state("unknown");
+    }
+    
+    auto efficiency_it = efficiency_sensors_.find(node.addr);
+    if (efficiency_it != efficiency_sensors_.end()) {
+      efficiency_it->second->publish_state(0.0f);
+    }
+    
+    auto power_factor_it = power_factor_sensors_.find(node.addr);
+    if (power_factor_it != power_factor_sensors_.end()) {
+      power_factor_it->second->publish_state(0.0f);
+    }
+    
+    auto load_factor_it = load_factor_sensors_.find(node.addr);
+    if (load_factor_it != load_factor_sensors_.end()) {
+      load_factor_it->second->publish_state(0.0f);
+    }
+  }
+  
   // Update string-level aggregation data
   update_string_data();
   
