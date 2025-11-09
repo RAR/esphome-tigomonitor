@@ -361,13 +361,28 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   psram_vector<NodeTableData> node_table_;  // Unified table for all device info
   psram_map<std::string, StringData> strings_;  // String-level aggregation (key = string_label)
   psram_vector<InverterData> inverters_;  // User-defined inverter groupings
+  
+  // Sensor maps stored in PSRAM to save internal RAM (saves ~6-10KB depending on config)
+  psram_map<std::string, sensor::Sensor*> voltage_in_sensors_;
+  psram_map<std::string, sensor::Sensor*> voltage_out_sensors_;
+  psram_map<std::string, sensor::Sensor*> current_in_sensors_;
+  psram_map<std::string, sensor::Sensor*> temperature_sensors_;
+  psram_map<std::string, sensor::Sensor*> power_sensors_;
+  psram_map<std::string, sensor::Sensor*> peak_power_sensors_;
+  psram_map<std::string, sensor::Sensor*> rssi_sensors_;
+  psram_map<std::string, text_sensor::TextSensor*> barcode_sensors_;
+  psram_map<std::string, sensor::Sensor*> duty_cycle_sensors_;
+  psram_map<std::string, text_sensor::TextSensor*> firmware_version_sensors_;
+  psram_map<std::string, sensor::Sensor*> efficiency_sensors_;
+  psram_map<std::string, sensor::Sensor*> power_factor_sensors_;
+  psram_map<std::string, sensor::Sensor*> load_factor_sensors_;
 #else
   // Fallback to standard containers on Arduino
   std::vector<DeviceData> devices_;
   std::vector<NodeTableData> node_table_;
   std::map<std::string, StringData> strings_;
   std::vector<InverterData> inverters_;
-#endif
+  
   std::map<std::string, sensor::Sensor*> voltage_in_sensors_;
   std::map<std::string, sensor::Sensor*> voltage_out_sensors_;
   std::map<std::string, sensor::Sensor*> current_in_sensors_;
@@ -381,6 +396,7 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   std::map<std::string, sensor::Sensor*> efficiency_sensors_;
   std::map<std::string, sensor::Sensor*> power_factor_sensors_;
   std::map<std::string, sensor::Sensor*> load_factor_sensors_;
+#endif
   sensor::Sensor* power_sum_sensor_ = nullptr;
   sensor::Sensor* energy_sum_sensor_ = nullptr;
   sensor::Sensor* device_count_sensor_ = nullptr;
