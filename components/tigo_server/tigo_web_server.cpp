@@ -29,153 +29,6 @@ namespace tigo_server {
 
 static const char *const TAG = "tigo_web_server";
 
-// Global log buffer instance
-static LogBuffer* g_log_buffer = nullptr;
-
-// Helper function to add logs to buffer from anywhere
-void log_to_buffer(esp_log_level_t level, const char* tag, const char* message) {
-  if (g_log_buffer) {
-    g_log_buffer->add_log(level, tag, message);
-  }
-}
-
-// Helper function to strip ANSI color codes from log messages
-static std::string strip_ansi_codes(const char* message) {
-  std::string result;
-  result.reserve(strlen(message));
-  
-  const char* p = message;
-  while (*p) {
-    if (*p == '\033' && *(p+1) == '[') {
-      // Skip ANSI escape sequence: \033[...m
-      p += 2;
-      while (*p && *p != 'm') {
-        p++;
-      }
-      if (*p == 'm') p++;
-    } else {
-      result += *p++;
-    }
-  }
-  
-  return result;
-}
-
-// LogBuffer implementation
-LogBuffer::LogBuffer(size_t max_entries) 
-  : buffer_(nullptr), max_entries_(max_entries), current_index_(0), use_psram_(false) {
-  
-  mutex_ = xSemaphoreCreateMutex();
-  
-  // Check if PSRAM is available
-  size_t total_psram = heap_caps_get_total_size(MALLOC_CAP_SPIRAM);
-  
-  if (total_psram == 0) {
-    // No PSRAM available - disable log buffering entirely
-    ESP_LOGW(TAG, "Log streaming disabled - PSRAM not available (device has no PSRAM or it's not configured)");
-    ESP_LOGW(TAG, "Log streaming is only supported on devices with PSRAM to prevent memory exhaustion");
-    max_entries_ = 0;
-    return;
-  }
-  
-  // Try to allocate from PSRAM
-  size_t buffer_size = max_entries * sizeof(LogEntry);
-  size_t psram_available = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
-  
-  if (psram_available >= buffer_size) {
-    buffer_ = static_cast<LogEntry*>(heap_caps_malloc(buffer_size, MALLOC_CAP_SPIRAM));
-    if (buffer_) {
-      use_psram_ = true;
-      ESP_LOGI(TAG, "Log buffer allocated %zu bytes from PSRAM (capacity: %zu entries)", 
-               buffer_size, max_entries);
-    }
-  }
-  
-  // If PSRAM allocation failed, disable log buffering
-  if (!buffer_) {
-    ESP_LOGE(TAG, "Failed to allocate log buffer from PSRAM - log streaming disabled");
-    max_entries_ = 0;
-    return;
-  }
-  
-  // Initialize buffer
-  for (size_t i = 0; i < max_entries_; i++) {
-    new (&buffer_[i]) LogEntry();
-  }
-}
-
-LogBuffer::~LogBuffer() {
-  if (buffer_) {
-    // Call destructors
-    for (size_t i = 0; i < max_entries_; i++) {
-      buffer_[i].~LogEntry();
-    }
-    heap_caps_free(buffer_);
-  }
-  if (mutex_) {
-    vSemaphoreDelete(mutex_);
-  }
-}
-
-void LogBuffer::add_log(esp_log_level_t level, const char* tag, const char* message) {
-  if (!buffer_ || max_entries_ == 0) return;
-  
-  if (xSemaphoreTake(mutex_, pdMS_TO_TICKS(10)) == pdTRUE) {
-    size_t index = current_index_ % max_entries_;
-    
-    // Try to get Unix timestamp from system time
-    uint64_t timestamp_ms = 0;
-    
-    // Get current Unix time if available
-    struct timeval tv;
-    if (gettimeofday(&tv, nullptr) == 0 && tv.tv_sec > 1000000000) {
-      // Time is valid (after year 2001), convert to milliseconds
-      timestamp_ms = ((uint64_t)tv.tv_sec * 1000) + (tv.tv_usec / 1000);
-    } else {
-      // Fallback to millis if time not synced yet
-      timestamp_ms = millis();
-    }
-    
-    buffer_[index].timestamp = timestamp_ms;
-    buffer_[index].level = level;
-    buffer_[index].tag = tag;
-    buffer_[index].message = message;
-    
-    current_index_++;
-    
-    xSemaphoreGive(mutex_);
-  }
-}
-
-std::vector<LogEntry> LogBuffer::get_logs(size_t start_index) {
-  std::vector<LogEntry> result;
-  
-  if (!buffer_ || max_entries_ == 0) return result;
-  
-  if (xSemaphoreTake(mutex_, pdMS_TO_TICKS(100)) == pdTRUE) {
-    size_t total_logs = std::min(current_index_, max_entries_);
-    
-    // Calculate starting point
-    size_t actual_start = (start_index < current_index_) ? start_index : current_index_;
-    
-    for (size_t i = actual_start; i < current_index_; i++) {
-      size_t index = i % max_entries_;
-      result.push_back(buffer_[index]);
-    }
-    
-    xSemaphoreGive(mutex_);
-  }
-  
-  return result;
-}
-
-void LogBuffer::clear() {
-  if (xSemaphoreTake(mutex_, pdMS_TO_TICKS(100)) == pdTRUE) {
-    current_index_ = 0;
-    xSemaphoreGive(mutex_);
-  }
-}
-
 // Helper class to manage PSRAM-allocated strings for large HTML content
 class PSRAMString {
  public:
@@ -252,56 +105,6 @@ class PSRAMString {
 void TigoWebServer::setup() {
   ESP_LOGI(TAG, "Starting Tigo Web Server on port %d...", port_);
   
-  // Initialize log buffer FIRST
-  if (!log_buffer_) {
-    log_buffer_ = new LogBuffer(500);  // Store last 500 log entries (only if PSRAM available)
-    g_log_buffer = log_buffer_;
-    
-    // Check if log buffer was successfully initialized
-    if (log_buffer_->is_using_psram()) {
-      ESP_LOGI(TAG, "Log streaming enabled using PSRAM buffer");
-    } else {
-      ESP_LOGI(TAG, "Log streaming disabled - requires PSRAM");
-    }
-  }
-  
-  // Hook into ESPHome's logger to capture all logs (only if buffer is available)
-  if (log_buffer_ && log_buffer_->is_using_psram() && esphome::logger::global_logger != nullptr) {
-    esphome::logger::global_logger->add_on_log_callback(
-      [](uint8_t level, const char *tag, const char *message, size_t message_len) {
-        if (g_log_buffer) {
-          // Convert ESPHome log level to ESP-IDF log level
-          esp_log_level_t esp_level;
-          switch(level) {
-            case 1: esp_level = ESP_LOG_ERROR; break;    // ERROR
-            case 2: esp_level = ESP_LOG_WARN; break;     // WARN  
-            case 3: esp_level = ESP_LOG_INFO; break;     // INFO
-            case 4: esp_level = ESP_LOG_INFO; break;     // CONFIG -> INFO
-            case 5: esp_level = ESP_LOG_DEBUG; break;    // DEBUG
-            case 6: esp_level = ESP_LOG_VERBOSE; break;  // VERBOSE
-            case 7: esp_level = ESP_LOG_VERBOSE; break;  // VERY_VERBOSE -> VERBOSE
-            default: esp_level = ESP_LOG_INFO; break;
-          }
-          
-          // Strip ANSI color codes from the message
-          std::string clean_message = strip_ansi_codes(message);
-          g_log_buffer->add_log(esp_level, tag, clean_message.c_str());
-        }
-      }
-    );
-    ESP_LOGI(TAG, "Hooked into ESPHome logger - all logs will be captured!");
-  } else if (!log_buffer_ || !log_buffer_->is_using_psram()) {
-    ESP_LOGW(TAG, "ESPHome logger hook not installed - log streaming requires PSRAM");
-  } else {
-    ESP_LOGW(TAG, "ESPHome logger not available - log capture disabled");
-  }
-  
-  // Manually add a test log to verify buffer works (only if available)
-  if (g_log_buffer && g_log_buffer->is_using_psram()) {
-    g_log_buffer->add_log(ESP_LOG_INFO, "TEST", "Manual test log entry");
-    ESP_LOGI(TAG, "Added manual test log, current_index=%zu", g_log_buffer->get_current_index());
-  }
-  
   // Check PSRAM availability
   size_t total_psram = heap_caps_get_total_size(MALLOC_CAP_SPIRAM);
   size_t free_psram = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
@@ -321,10 +124,7 @@ void TigoWebServer::setup() {
   config.keep_alive_enable = false; // Disable keep-alive to free connections faster
   
   if (httpd_start(&server_, &config) == ESP_OK) {
-    ESP_LOGI(TAG, "Web server started successfully");
-    
-    std::string start_msg = "Web server started on port " + std::to_string(port_);
-    log_to_buffer(ESP_LOG_INFO, TAG, start_msg.c_str());
+    ESP_LOGI(TAG, "Web server started successfully on port %d", port_);
     
     // Register HTML page handlers
     httpd_uri_t dashboard_uri = {
@@ -495,40 +295,6 @@ void TigoWebServer::setup() {
       .user_ctx = this
     };
     httpd_register_uri_handler(server_, &api_health_uri);
-    
-    // Register more specific log endpoints first (ESP-IDF matches in order)
-    httpd_uri_t api_logs_status_uri = {
-      .uri = "/api/logs/status",
-      .method = HTTP_GET,
-      .handler = api_logs_status_handler,
-      .user_ctx = this
-    };
-    httpd_register_uri_handler(server_, &api_logs_status_uri);
-    
-    httpd_uri_t api_logs_clear_uri = {
-      .uri = "/api/logs/clear",
-      .method = HTTP_POST,
-      .handler = api_logs_clear_handler,
-      .user_ctx = this
-    };
-    httpd_register_uri_handler(server_, &api_logs_clear_uri);
-    
-    httpd_uri_t api_logs_stream_uri = {
-      .uri = "/api/logs/stream",
-      .method = HTTP_GET,
-      .handler = api_logs_stream_handler,
-      .user_ctx = this
-    };
-    httpd_register_uri_handler(server_, &api_logs_stream_uri);
-    
-    // Register general /api/logs last
-    httpd_uri_t api_logs_uri = {
-      .uri = "/api/logs",
-      .method = HTTP_GET,
-      .handler = api_logs_handler,
-      .user_ctx = this
-    };
-    httpd_register_uri_handler(server_, &api_logs_uri);
     
     // Log web authentication status
     if (!web_username_.empty() && !web_password_.empty()) {
@@ -1277,8 +1043,7 @@ esp_err_t TigoWebServer::api_restart_handler(httpd_req_t *req) {
     return ESP_OK;
   }
   
-  ESP_LOGI(TAG, "Restart requested via web interface");
-  log_to_buffer(ESP_LOG_WARN, TAG, "Restart requested via web interface - rebooting...");
+  ESP_LOGW(TAG, "Restart requested via web interface - rebooting...");
   
   // Send success response
   const char* response = "{\"status\":\"ok\",\"message\":\"Restarting ESP32...\"}";
@@ -1348,186 +1113,6 @@ esp_err_t TigoWebServer::api_health_handler(httpd_req_t *req) {
   
   return ESP_OK;
 }
-
-esp_err_t TigoWebServer::api_logs_status_handler(httpd_req_t *req) {
-  TigoWebServer *server = static_cast<TigoWebServer *>(req->user_ctx);
-  
-  // Check authentication
-  if (!server->check_api_auth(req)) {
-    return ESP_OK;
-  }
-  
-  // Simple lightweight endpoint to check if logging is enabled
-  // Avoids copying log entries when client just wants to know status
-  
-  LogBuffer *log_buffer = server->log_buffer_;
-  bool logging_enabled = (log_buffer != nullptr && log_buffer->is_using_psram());
-  size_t log_count = logging_enabled ? log_buffer->get_current_index() : 0;
-  
-  char response[256];
-  snprintf(response, sizeof(response),
-    "{\"enabled\":%s,\"count\":%zu}",
-    logging_enabled ? "true" : "false",
-    log_count
-  );
-  
-  httpd_resp_set_type(req, "application/json");
-  httpd_resp_set_hdr(req, "Connection", "close");
-  httpd_resp_send(req, response, strlen(response));
-  
-  return ESP_OK;
-}
-
-esp_err_t TigoWebServer::api_logs_handler(httpd_req_t *req) {
-  TigoWebServer *server = static_cast<TigoWebServer *>(req->user_ctx);
-  if (!server->check_api_auth(req)) {
-    return ESP_OK;
-  }
-  
-  LogBuffer *log_buffer = server->log_buffer_;
-  if (!log_buffer || !log_buffer->is_using_psram()) {
-    // Log streaming disabled - no PSRAM available
-    const char* error_msg = "{\"error\":\"Log streaming not available - requires PSRAM\",\"current_index\":0,\"logs\":[]}";
-    httpd_resp_set_type(req, "application/json");
-    httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
-    httpd_resp_send(req, error_msg, strlen(error_msg));
-    return ESP_OK;
-  }
-  
-  // Get query parameter for start index
-  char query_str[64] = {0};
-  size_t start_index = 0;
-  
-  if (httpd_req_get_url_query_str(req, query_str, sizeof(query_str)) == ESP_OK) {
-    char param[32] = {0};
-    if (httpd_query_key_value(query_str, "start", param, sizeof(param)) == ESP_OK) {
-      start_index = atoi(param);
-    }
-  }
-  
-  auto logs = log_buffer->get_logs(start_index);
-  
-  // Limit log entries to prevent memory exhaustion on devices with limited internal RAM
-  // The logs are already in PSRAM, but the vector copy uses internal RAM
-  const size_t MAX_LOGS_PER_REQUEST = 50;
-  if (logs.size() > MAX_LOGS_PER_REQUEST) {
-    // Keep only the most recent logs
-    logs.erase(logs.begin(), logs.begin() + (logs.size() - MAX_LOGS_PER_REQUEST));
-  }
-  
-  // Use PSRAMString to avoid exhausting internal RAM on devices like AtomS3R
-  PSRAMString json;
-  json.append("{\"current_index\":");
-  json.append(std::to_string(log_buffer->get_current_index()));
-  json.append(",\"logs\":[");
-  bool first = true;
-  
-  for (const auto &log : logs) {
-    if (!first) json.append(",");
-    first = false;
-    
-    const char* level_str = "INFO";
-    switch(log.level) {
-      case ESP_LOG_ERROR: level_str = "ERROR"; break;
-      case ESP_LOG_WARN: level_str = "WARN"; break;
-      case ESP_LOG_INFO: level_str = "INFO"; break;
-      case ESP_LOG_DEBUG: level_str = "DEBUG"; break;
-      case ESP_LOG_VERBOSE: level_str = "VERBOSE"; break;
-      default: break;
-    }
-    
-    // Build entry directly in PSRAMString to avoid internal RAM allocation
-    char buf[64];
-    snprintf(buf, sizeof(buf), "{\"timestamp\":%llu,\"level\":\"%s\",\"tag\":\"", 
-             (unsigned long long)log.timestamp, level_str);
-    json.append(buf);
-    
-    // Escape tag directly into PSRAMString
-    for (char c : log.tag) {
-      if (c == '"') json.append("\\\"");
-      else if (c == '\\') json.append("\\\\");
-      else if (c == '\b') json.append("\\b");
-      else if (c == '\f') json.append("\\f");
-      else if (c == '\n') json.append("\\n");
-      else if (c == '\r') json.append("\\r");
-      else if (c == '\t') json.append("\\t");
-      else if ((unsigned char)c < 0x20) {
-        char escape_buf[7];
-        snprintf(escape_buf, sizeof(escape_buf), "\\u%04x", (unsigned char)c);
-        json.append(escape_buf);
-      } else {
-        char single[2] = {c, '\0'};
-        json.append(single);
-      }
-    }
-    
-    json.append("\",\"message\":\"");
-    
-    // Escape message directly into PSRAMString
-    for (char c : log.message) {
-      if (c == '"') json.append("\\\"");
-      else if (c == '\\') json.append("\\\\");
-      else if (c == '\b') json.append("\\b");
-      else if (c == '\f') json.append("\\f");
-      else if (c == '\n') json.append("\\n");
-      else if (c == '\r') json.append("\\r");
-      else if (c == '\t') json.append("\\t");
-      else if ((unsigned char)c < 0x20) {
-        char escape_buf[7];
-        snprintf(escape_buf, sizeof(escape_buf), "\\u%04x", (unsigned char)c);
-        json.append(escape_buf);
-      } else {
-        char single[2] = {c, '\0'};
-        json.append(single);
-      }
-    }
-    
-    json.append("\"}");
-  }
-  
-  json.append("]}");
-  
-  httpd_resp_set_type(req, "application/json");
-  httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
-  httpd_resp_set_hdr(req, "Connection", "close");
-  httpd_resp_send(req, json.c_str(), json.length());
-  
-  return ESP_OK;
-}
-
-esp_err_t TigoWebServer::api_logs_stream_handler(httpd_req_t *req) {
-  // Server-Sent Events implementation (if needed in future)
-  // For now, just return error - we'll use polling instead
-  httpd_resp_send_404(req);
-  return ESP_OK;
-}
-
-esp_err_t TigoWebServer::api_logs_clear_handler(httpd_req_t *req) {
-  TigoWebServer *server = static_cast<TigoWebServer *>(req->user_ctx);
-  if (!server->check_api_auth(req)) {
-    return ESP_OK;
-  }
-  
-  LogBuffer *log_buffer = server->log_buffer_;
-  if (!log_buffer || !log_buffer->is_using_psram()) {
-    // Log streaming disabled - no PSRAM available
-    const char* error_msg = "{\"error\":\"Log streaming not available - requires PSRAM\"}";
-    httpd_resp_set_type(req, "application/json");
-    httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
-    httpd_resp_send(req, error_msg, strlen(error_msg));
-    return ESP_OK;
-  }
-  
-  log_buffer->clear();
-  
-  const char* response = "{\"status\":\"ok\",\"message\":\"Logs cleared\"}";
-  httpd_resp_set_type(req, "application/json");
-  httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
-  httpd_resp_send(req, response, strlen(response));
-  
-  return ESP_OK;
-}
-
 // ===== JSON Builders =====
 
 std::string TigoWebServer::build_devices_json() {
@@ -3978,19 +3563,7 @@ std::string TigoWebServer::build_cca_info_json() {
 }
 
 void TigoWebServer::loop() {
-  // Periodically add status logs
-  static uint32_t last_status_log = 0;
-  
-  if (millis() - last_status_log > 60000) {  // Every 60 seconds
-    if (g_log_buffer && parent_) {
-      char msg[128];
-      snprintf(msg, sizeof(msg), "System status: %zu devices, heap: %u bytes free", 
-               parent_->get_devices().size(), 
-               esp_get_free_heap_size());
-      log_to_buffer(ESP_LOG_INFO, TAG, msg);
-    }
-    last_status_log = millis();
-  }
+  // Nothing to do in loop
 }
 
 TigoWebServer::~TigoWebServer() {

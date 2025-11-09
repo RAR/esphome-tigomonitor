@@ -30,39 +30,7 @@ namespace tigo_server {
 #ifdef USE_ESP_IDF
 
 // Forward declarations
-class LogBuffer;
 class PSRAMString;
-
-// Helper function to add logs to buffer
-void log_to_buffer(esp_log_level_t level, const char* tag, const char* message);
-
-// Log entry structure
-struct LogEntry {
-  uint64_t timestamp;  // Unix timestamp in milliseconds
-  esp_log_level_t level;
-  std::string tag;
-  std::string message;
-};
-
-// Ring buffer for storing log messages
-class LogBuffer {
- public:
-  LogBuffer(size_t max_entries = 500);
-  ~LogBuffer();
-  
-  void add_log(esp_log_level_t level, const char* tag, const char* message);
-  std::vector<LogEntry> get_logs(size_t start_index = 0);
-  size_t get_current_index() const { return current_index_; }
-  void clear();
-  bool is_using_psram() const { return use_psram_; }
-  
- private:
-  LogEntry* buffer_;
-  size_t max_entries_;
-  size_t current_index_;
-  SemaphoreHandle_t mutex_;
-  bool use_psram_;
-};
 
 class TigoWebServer : public Component {
  public:
@@ -86,9 +54,6 @@ class TigoWebServer : public Component {
   
   void set_web_password(const std::string &password) { web_password_ = password; }
   const std::string &get_web_password() const { return web_password_; }
-  
-  // Log buffer access
-  LogBuffer* get_log_buffer() { return log_buffer_; }
 
  protected:
   tigo_monitor::TigoMonitorComponent *parent_{nullptr};
@@ -97,7 +62,6 @@ class TigoWebServer : public Component {
   std::string api_token_{""};
   std::string web_username_{""};
   std::string web_password_{""};
-  LogBuffer* log_buffer_{nullptr};
   temperature_sensor_handle_t temp_sensor_handle_{nullptr};
   
   // HTTP handlers
@@ -124,10 +88,6 @@ class TigoWebServer : public Component {
   static esp_err_t api_reset_peak_power_handler(httpd_req_t *req);
   static esp_err_t api_reset_node_table_handler(httpd_req_t *req);
   static esp_err_t api_health_handler(httpd_req_t *req);
-  static esp_err_t api_logs_handler(httpd_req_t *req);
-  static esp_err_t api_logs_status_handler(httpd_req_t *req);
-  static esp_err_t api_logs_clear_handler(httpd_req_t *req);
-  static esp_err_t api_logs_stream_handler(httpd_req_t *req);
   
   // Helper functions
   bool check_api_auth(httpd_req_t *req);
