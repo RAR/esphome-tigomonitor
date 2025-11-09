@@ -922,7 +922,8 @@ std::string TigoWebServer::build_devices_json() {
       // Device has runtime data - show actual values
       const auto &device = *dwn.device;
       float power = device.voltage_out * device.current_in;
-      unsigned long data_age_ms = millis() - device.last_update;
+      // If last_update is 0, device hasn't been updated yet - use ULONG_MAX to indicate "never"
+      unsigned long data_age_ms = (device.last_update == 0) ? ULONG_MAX : (millis() - device.last_update);
       float duty_cycle_percent = (device.duty_cycle / 255.0f) * 100.0f;
       
       snprintf(buffer, sizeof(buffer),
@@ -1520,7 +1521,9 @@ std::string TigoWebServer::get_dashboard_html() {
         
         // Render device card helper
         function renderDevice(device) {
-          const ageText = device.data_age_ms < 1000 ? `${device.data_age_ms}ms` : 
+          // Check for "never updated" condition (ULONG_MAX or very large value)
+          const ageText = device.data_age_ms > 86400000 ? 'Never' :  // > 1 day indicates invalid/never
+                          device.data_age_ms < 1000 ? `${device.data_age_ms}ms` : 
                           device.data_age_ms < 60000 ? `${(device.data_age_ms/1000).toFixed(1)}s` :
                           `${(device.data_age_ms/60000).toFixed(1)}m`;
           
@@ -2617,7 +2620,7 @@ std::string TigoWebServer::get_cca_info_html() {
     applyTheme();
     
     function formatTime(seconds) {
-      if (!seconds || seconds === 0) return 'Never';
+      if (!seconds || seconds === 0 || seconds > 4294967) return 'Never'; // > ~49 days indicates invalid/never
       if (seconds < 60) return seconds + ' seconds ago';
       if (seconds < 3600) return Math.floor(seconds / 60) + ' minutes ago';
       if (seconds < 86400) return Math.floor(seconds / 3600) + ' hours ago';
