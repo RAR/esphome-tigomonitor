@@ -1027,6 +1027,10 @@ esp_err_t TigoWebServer::api_logs_handler(httpd_req_t *req) {
     return ESP_OK;
   }
   
+  // Check available heap before building response
+  size_t free_heap_before = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+  size_t free_psram_before = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+  
   // Get query parameter for start index
   char query_str[64] = {0};
   size_t start_index = 0;
@@ -1040,11 +1044,18 @@ esp_err_t TigoWebServer::api_logs_handler(httpd_req_t *req) {
   
   auto logs = log_buffer->get_logs(start_index);
   
-  std::string json = "{\"current_index\":" + std::to_string(log_buffer->get_current_index()) + ",\"logs\":[";
+  ESP_LOGD(TAG, "Building log response: %zu logs from index %zu (heap: %zu internal, %zu PSRAM)", 
+           logs.size(), start_index, free_heap_before, free_psram_before);
+  
+  // Use PSRAMString to avoid exhausting internal RAM on devices like AtomS3R
+  PSRAMString json;
+  json.append("{\"current_index\":");
+  json.append(std::to_string(log_buffer->get_current_index()));
+  json.append(",\"logs\":[");
   bool first = true;
   
   for (const auto &log : logs) {
-    if (!first) json += ",";
+    if (!first) json.append(",");
     first = false;
     
     const char* level_str = "INFO";
@@ -1057,9 +1068,11 @@ esp_err_t TigoWebServer::api_logs_handler(httpd_req_t *req) {
       default: break;
     }
     
-    // Escape JSON strings properly
+    // Build escaped strings - use small buffers to minimize internal RAM usage
     std::string escaped_tag;
     std::string escaped_msg;
+    escaped_tag.reserve(log.tag.length() + 20);  // Pre-allocate with some headroom
+    escaped_msg.reserve(log.message.length() + 50);
     
     // Escape tag
     for (char c : log.tag) {
@@ -1099,14 +1112,22 @@ esp_err_t TigoWebServer::api_logs_handler(httpd_req_t *req) {
       }
     }
     
-    char entry[1024];  // Increased size for escaped content
+    char entry[1024];  // Stack-allocated buffer for single entry
     snprintf(entry, sizeof(entry),
       "{\"timestamp\":%llu,\"level\":\"%s\",\"tag\":\"%s\",\"message\":\"%s\"}",
       (unsigned long long)log.timestamp, level_str, escaped_tag.c_str(), escaped_msg.c_str());
-    json += entry;
+    json.append(entry);
   }
   
-  json += "]}";
+  json.append("]}");
+  
+  size_t free_heap_after = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+  size_t free_psram_after = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+  
+  ESP_LOGD(TAG, "Log response built: %zu bytes (heap after: %zu internal [-%zu], %zu PSRAM [-%zu])", 
+           json.length(), 
+           free_heap_after, free_heap_before - free_heap_after,
+           free_psram_after, free_psram_before - free_psram_after);
   
   httpd_resp_set_type(req, "application/json");
   httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
