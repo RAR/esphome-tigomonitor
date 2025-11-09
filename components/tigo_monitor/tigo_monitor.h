@@ -76,6 +76,12 @@ using psram_vector = std::vector<T, PSRAMAllocator<T>>;
 
 template<typename Key, typename T>
 using psram_map = std::map<Key, T, std::less<Key>, PSRAMAllocator<std::pair<const Key, T>>>;
+
+template<typename T>
+using psram_set = std::set<T, std::less<T>, PSRAMAllocator<T>>;
+
+// PSRAM-backed string using std::basic_string with PSRAMAllocator
+using psram_string = std::basic_string<char, std::char_traits<char>, PSRAMAllocator<char>>;
 #endif
 
 namespace esphome {
@@ -266,7 +272,11 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   int get_number_of_devices() const { return number_of_devices_; }
   const std::string& get_cca_ip() const { return cca_ip_; }
   bool get_sync_cca_on_startup() const { return sync_cca_on_startup_; }
+#ifdef USE_ESP_IDF
+  std::string get_cca_device_info() const { return std::string(cca_device_info_.begin(), cca_device_info_.end()); }
+#else
   const std::string& get_cca_device_info() const { return cca_device_info_; }
+#endif
   unsigned long get_last_cca_sync_time() const { return last_cca_sync_time_; }
   float get_total_energy_kwh() const { return total_energy_kwh_; }
   uint32_t get_invalid_checksum_count() const { return invalid_checksum_count_; }
@@ -433,16 +443,20 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
 #ifdef USE_ESP_IDF
   // Use PSRAM-backed buffer for incoming serial data (can grow to 16KB)
   psram_vector<char> incoming_data_;
+  
+  // Move large/growing data structures to PSRAM to save internal RAM
+  psram_set<std::string> created_devices_;        // Device creation tracker (~4-8 bytes per device)
+  psram_string cca_device_info_;                  // Cached CCA device info JSON (can be several KB)
 #else
   std::string incoming_data_;
+  std::set<std::string> created_devices_;
+  std::string cca_device_info_;
 #endif
   bool frame_started_ = false;
   uint16_t crc_table_[CRC_TABLE_SIZE];
   int number_of_devices_ = 5;
-  std::set<std::string> created_devices_;
-  std::string cca_ip_;  // Optional CCA IP address for HTTP queries
+  std::string cca_ip_;  // Optional CCA IP address for HTTP queries (small, kept in internal RAM)
   bool sync_cca_on_startup_ = true;  // Whether to sync from CCA on boot (default: true)
-  std::string cca_device_info_;  // Cached CCA device info JSON
   unsigned long last_cca_sync_time_ = 0;  // millis() of last successful CCA sync
   
   // No timing variables needed - ESPHome handles update intervals
