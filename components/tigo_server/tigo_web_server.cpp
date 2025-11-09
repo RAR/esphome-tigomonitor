@@ -2513,8 +2513,8 @@ std::string TigoWebServer::get_esp_status_html() {
     <div class="card">
       <h2>System Logs</h2>
       <div style="margin-bottom: 1rem; display: flex; gap: 0.5rem; flex-wrap: wrap;">
-        <button id="log-pause-btn" onclick="toggleLogPause()" style="padding: 8px 16px; background-color: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px;">
-          ⏸️ Pause
+        <button id="log-pause-btn" onclick="toggleLogPause()" style="padding: 8px 16px; background-color: #27ae60; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px;">
+          ▶️ Resume
         </button>
         <button onclick="clearLogs()" style="padding: 8px 16px; background-color: #95a5a6; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px;">
           🗑️ Clear
@@ -2537,7 +2537,7 @@ std::string TigoWebServer::get_esp_status_html() {
       </div>
       <div id="log-console" style="background: #1e1e1e; color: #d4d4d4; padding: 1rem; border-radius: 4px; font-family: 'Courier New', monospace; font-size: 12px; height: 400px; overflow-y: auto; white-space: pre-wrap; word-wrap: break-word;"></div>
       <div id="ws-status" style="margin-top: 0.5rem; font-size: 12px; color: #7f8c8d;">
-        <span id="ws-status-text">Connecting to log stream...</span>
+        <span id="ws-status-text">⏸️ Log streaming paused - click Resume to start</span>
       </div>
     </div>
   </div>
@@ -2769,7 +2769,7 @@ std::string TigoWebServer::get_esp_status_html() {
     }
     
     // Log polling system (instead of WebSocket)
-    let logPaused = false;
+    let logPaused = true;  // Start paused by default to reduce load
     let autoScroll = true;
     let allLogs = [];
     let currentFilter = 'all';
@@ -2873,6 +2873,22 @@ std::string TigoWebServer::get_esp_status_html() {
       const btn = document.getElementById('log-pause-btn');
       btn.textContent = logPaused ? '▶️ Resume' : '⏸️ Pause';
       btn.style.backgroundColor = logPaused ? '#27ae60' : '#3498db';
+      
+      // When resuming, load initial logs and start polling if not already started
+      if (!logPaused) {
+        if (allLogs.length === 0) {
+          loadInitialLogs();
+        }
+        if (!logPollInterval) {
+          logPollInterval = setInterval(fetchLogs, 1000);  // Poll every second
+        }
+        document.getElementById('ws-status-text').textContent = '✅ Connected (polling)';
+        document.getElementById('ws-status-text').style.color = '#27ae60';
+      } else {
+        // When paused, update status
+        document.getElementById('ws-status-text').textContent = '⏸️ Log streaming paused';
+        document.getElementById('ws-status-text').style.color = '#95a5a6';
+      }
     }
     
     async function clearLogs() {
@@ -2920,9 +2936,9 @@ std::string TigoWebServer::get_esp_status_html() {
       URL.revokeObjectURL(url);
     }
     
-    // Initialize log system
-    loadInitialLogs();
-    logPollInterval = setInterval(fetchLogs, 1000);  // Poll every second
+    // Initialize log system - but don't start polling yet (paused by default)
+    // Load initial logs on demand when user clicks Resume
+    // logPollInterval will be started by toggleLogPause() when user resumes
     
     loadData();
     setInterval(loadData, 5000);
