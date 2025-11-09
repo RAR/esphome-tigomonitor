@@ -66,7 +66,18 @@ LogBuffer::LogBuffer(size_t max_entries)
   
   mutex_ = xSemaphoreCreateMutex();
   
-  // Try to allocate from PSRAM first
+  // Check if PSRAM is available
+  size_t total_psram = heap_caps_get_total_size(MALLOC_CAP_SPIRAM);
+  
+  if (total_psram == 0) {
+    // No PSRAM available - disable log buffering entirely
+    ESP_LOGW(TAG, "Log streaming disabled - PSRAM not available (device has no PSRAM or it's not configured)");
+    ESP_LOGW(TAG, "Log streaming is only supported on devices with PSRAM to prevent memory exhaustion");
+    max_entries_ = 0;
+    return;
+  }
+  
+  // Try to allocate from PSRAM
   size_t buffer_size = max_entries * sizeof(LogEntry);
   size_t psram_available = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
   
@@ -79,17 +90,11 @@ LogBuffer::LogBuffer(size_t max_entries)
     }
   }
   
-  // Fallback to regular heap
+  // If PSRAM allocation failed, disable log buffering
   if (!buffer_) {
-    buffer_ = static_cast<LogEntry*>(heap_caps_malloc(buffer_size, MALLOC_CAP_DEFAULT));
-    if (buffer_) {
-      ESP_LOGI(TAG, "Log buffer allocated %zu bytes from internal RAM (capacity: %zu entries)", 
-               buffer_size, max_entries);
-    } else {
-      ESP_LOGE(TAG, "Failed to allocate log buffer!");
-      max_entries_ = 0;
-      return;
-    }
+    ESP_LOGE(TAG, "Failed to allocate log buffer from PSRAM - log streaming disabled");
+    max_entries_ = 0;
+    return;
   }
   
   // Initialize buffer
@@ -248,13 +253,19 @@ void TigoWebServer::setup() {
   
   // Initialize log buffer FIRST
   if (!log_buffer_) {
-    log_buffer_ = new LogBuffer(500);  // Store last 500 log entries
+    log_buffer_ = new LogBuffer(500);  // Store last 500 log entries (only if PSRAM available)
     g_log_buffer = log_buffer_;
-    ESP_LOGI(TAG, "Log buffer created at %p", (void*)g_log_buffer);
+    
+    // Check if log buffer was successfully initialized
+    if (log_buffer_->is_using_psram()) {
+      ESP_LOGI(TAG, "Log streaming enabled using PSRAM buffer");
+    } else {
+      ESP_LOGI(TAG, "Log streaming disabled - requires PSRAM");
+    }
   }
   
-  // Hook into ESPHome's logger to capture all logs
-  if (esphome::logger::global_logger != nullptr) {
+  // Hook into ESPHome's logger to capture all logs (only if buffer is available)
+  if (log_buffer_ && log_buffer_->is_using_psram() && esphome::logger::global_logger != nullptr) {
     esphome::logger::global_logger->add_on_log_callback(
       [](uint8_t level, const char *tag, const char *message, size_t message_len) {
         if (g_log_buffer) {
@@ -278,12 +289,14 @@ void TigoWebServer::setup() {
       }
     );
     ESP_LOGI(TAG, "Hooked into ESPHome logger - all logs will be captured!");
+  } else if (!log_buffer_ || !log_buffer_->is_using_psram()) {
+    ESP_LOGW(TAG, "ESPHome logger hook not installed - log streaming requires PSRAM");
   } else {
     ESP_LOGW(TAG, "ESPHome logger not available - log capture disabled");
   }
   
-  // Manually add a test log to verify buffer works
-  if (g_log_buffer) {
+  // Manually add a test log to verify buffer works (only if available)
+  if (g_log_buffer && g_log_buffer->is_using_psram()) {
     g_log_buffer->add_log(ESP_LOG_INFO, "TEST", "Manual test log entry");
     ESP_LOGI(TAG, "Added manual test log, current_index=%zu", g_log_buffer->get_current_index());
   }
@@ -294,8 +307,7 @@ void TigoWebServer::setup() {
   if (total_psram > 0) {
     ESP_LOGI(TAG, "PSRAM detected: %zu bytes total, %zu bytes free", total_psram, free_psram);
   } else {
-    ESP_LOGW(TAG, "PSRAM not available - large buffers will use regular heap");
-    ESP_LOGW(TAG, "If your ESP32 has PSRAM, ensure it's properly configured in the YAML");
+    ESP_LOGW(TAG, "PSRAM not available - log streaming and large buffers disabled");
   }
   
   httpd_config_t config = HTTPD_DEFAULT_CONFIG();
@@ -1022,8 +1034,12 @@ esp_err_t TigoWebServer::api_logs_handler(httpd_req_t *req) {
   }
   
   LogBuffer *log_buffer = server->log_buffer_;
-  if (!log_buffer) {
-    httpd_resp_send_500(req);
+  if (!log_buffer || !log_buffer->is_using_psram()) {
+    // Log streaming disabled - no PSRAM available
+    const char* error_msg = "{\"error\":\"Log streaming not available - requires PSRAM\",\"current_index\":0,\"logs\":[]}";
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+    httpd_resp_send(req, error_msg, strlen(error_msg));
     return ESP_OK;
   }
   
@@ -1150,9 +1166,16 @@ esp_err_t TigoWebServer::api_logs_clear_handler(httpd_req_t *req) {
   }
   
   LogBuffer *log_buffer = server->log_buffer_;
-  if (log_buffer) {
-    log_buffer->clear();
+  if (!log_buffer || !log_buffer->is_using_psram()) {
+    // Log streaming disabled - no PSRAM available
+    const char* error_msg = "{\"error\":\"Log streaming not available - requires PSRAM\"}";
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+    httpd_resp_send(req, error_msg, strlen(error_msg));
+    return ESP_OK;
   }
+  
+  log_buffer->clear();
   
   const char* response = "{\"status\":\"ok\",\"message\":\"Logs cleared\"}";
   httpd_resp_set_type(req, "application/json");
@@ -2805,6 +2828,25 @@ std::string TigoWebServer::get_esp_status_html() {
         const response = await apiFetch(`/api/logs?start=${lastLogIndex}`);
         const data = await response.json();
         
+        // Check if log streaming is disabled (no PSRAM)
+        if (data.error) {
+          document.getElementById('ws-status-text').textContent = '⚠️ ' + data.error;
+          document.getElementById('ws-status-text').style.color = '#e67e22';
+          
+          // Disable the resume button
+          const btn = document.getElementById('pause-log-btn');
+          btn.disabled = true;
+          btn.textContent = '🚫 Not Available';
+          btn.style.backgroundColor = '#95a5a6';
+          
+          // Stop polling
+          if (logPollInterval) {
+            clearInterval(logPollInterval);
+            logPollInterval = null;
+          }
+          return;
+        }
+        
         if (data.logs && data.logs.length > 0) {
           allLogs.push(...data.logs);
           
@@ -2960,6 +3002,27 @@ std::string TigoWebServer::get_esp_status_html() {
     // Initialize log system - but don't start polling yet (paused by default)
     // Load initial logs on demand when user clicks Resume
     // logPollInterval will be started by toggleLogPause() when user resumes
+    
+    // Check on page load if log streaming is available
+    async function checkLogAvailability() {
+      try {
+        const response = await apiFetch('/api/logs?start=0');
+        const data = await response.json();
+        if (data.error) {
+          // Log streaming disabled
+          document.getElementById('ws-status-text').textContent = '⚠️ ' + data.error;
+          document.getElementById('ws-status-text').style.color = '#e67e22';
+          
+          const btn = document.getElementById('pause-log-btn');
+          btn.disabled = true;
+          btn.textContent = '🚫 Not Available';
+          btn.style.backgroundColor = '#95a5a6';
+        }
+      } catch (error) {
+        console.error('Failed to check log availability:', error);
+      }
+    }
+    checkLogAvailability();
     
     loadData();
     setInterval(loadData, 5000);

@@ -52,6 +52,7 @@ class LogBuffer {
   std::vector<LogEntry> get_logs(size_t start_index = 0);
   size_t get_current_index() const { return current_index_; }
   void clear();
+  bool is_using_psram() const { return use_psram_; }
   
  private:
   LogEntry* buffer_;
