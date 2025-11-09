@@ -18,6 +18,7 @@
 #include <lwip/tcp.h>
 #include <cstring>
 #include <mbedtls/base64.h>
+#include <driver/temperature_sensor.h>
 
 namespace esphome {
 namespace tigo_server {
@@ -1144,6 +1145,18 @@ std::string TigoWebServer::build_esp_status_json() {
   uint32_t invalid_checksum = parent_->get_invalid_checksum_count();
   uint32_t missed_packets = parent_->get_missed_packet_count();
   
+  // Get ESP32 internal temperature (ESP-IDF API)
+  float internal_temp = 0.0f;
+  temperature_sensor_handle_t temp_sensor = NULL;
+  temperature_sensor_config_t temp_sensor_config = TEMPERATURE_SENSOR_CONFIG_DEFAULT(-10, 80);
+  if (temperature_sensor_install(&temp_sensor_config, &temp_sensor) == ESP_OK) {
+    if (temperature_sensor_enable(temp_sensor) == ESP_OK) {
+      temperature_sensor_get_celsius(temp_sensor, &internal_temp);
+      temperature_sensor_disable(temp_sensor);
+    }
+    temperature_sensor_uninstall(temp_sensor);
+  }
+  
   // Get network stats
   bool network_connected = network::is_connected();
   int8_t wifi_rssi = 0;
@@ -1195,7 +1208,7 @@ std::string TigoWebServer::build_esp_status_json() {
     "\"min_free_heap\":%zu,\"min_free_psram\":%zu,"
     "\"uptime_sec\":%u,\"uptime_days\":%u,\"uptime_hours\":%u,\"uptime_mins\":%u,"
     "\"esphome_version\":\"%s\",\"compilation_time\":\"%s %s\","
-    "\"task_count\":%u,"
+    "\"task_count\":%u,\"internal_temp\":%.1f,"
     "\"invalid_checksum\":%u,\"missed_packets\":%u,"
     "\"network_connected\":%s,\"wifi_rssi\":%d,\"wifi_ssid\":\"%s\",\"ip_address\":\"%s\",\"mac_address\":\"%s\","
     "\"active_sockets\":%d,\"max_sockets\":%d}",
@@ -1203,7 +1216,7 @@ std::string TigoWebServer::build_esp_status_json() {
     min_free_heap, min_free_psram,
     uptime_sec, uptime_days, uptime_hours, uptime_mins,
     ESPHOME_VERSION, __DATE__, __TIME__,
-    (unsigned int)task_count,
+    (unsigned int)task_count, internal_temp,
     invalid_checksum, missed_packets,
     network_connected ? "true" : "false", wifi_rssi, ssid.c_str(), ip_address.c_str(), mac_address.c_str(),
     active_sockets, max_sockets);
@@ -1986,7 +1999,7 @@ std::string TigoWebServer::get_esp_status_html() {
     .header { background: #2c3e50; color: white; padding: 1rem 2rem; box-shadow: 0 2px 4px rgba(0,0,0,0.1); transition: background-color 0.3s; }
     .header-top { display: flex; justify-content: space-between; align-items: center; }
     .header h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
-    .theme-toggle { background: rgba(255,255,255,0.1); border: none; color: white; padding: 0.5rem 1rem; border-radius: 4px; cursor: pointer; font-size: 1.2rem; transition: background-color 0.3s; }
+    .theme-toggle { background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.3); color: white; padding: 0.5rem 1rem; border-radius: 4px; cursor: pointer; font-size: 0.875rem; transition: all 0.2s; }
     .theme-toggle:hover { background: rgba(255,255,255,0.2); }
     .nav { display: flex; gap: 1rem; margin-top: 0.5rem; }
     .nav a { color: #3498db; text-decoration: none; padding: 0.5rem 1rem; background: rgba(255,255,255,0.1); border-radius: 4px; transition: background-color 0.3s; }
@@ -2012,13 +2025,18 @@ std::string TigoWebServer::get_esp_status_html() {
     body.dark-mode .info-item .value { color: #e0e0e0; }
     body.dark-mode .progress-bar { background: #3a3a3a; }
     body.dark-mode .progress-fill { background: #45a87d; }
+    .temp-toggle { background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.3); color: white; padding: 0.5rem 1rem; border-radius: 4px; cursor: pointer; font-size: 0.875rem; transition: all 0.2s; margin-left: 1rem; }
+    .temp-toggle:hover { background: rgba(255,255,255,0.2); }
   </style>
 </head>
 <body>
   <div class="header">
     <div class="header-top">
       <h1>🌞 Tigo Solar Monitor</h1>
-      <button class="theme-toggle" onclick="toggleTheme()">🌙</button>
+      <div>
+        <button class="temp-toggle" onclick="toggleTempUnit()" id="temp-toggle">°F</button>
+        <button class="theme-toggle" onclick="toggleTheme()">🌙</button>
+      </div>
     </div>
     <div class="nav">
       <a href="/">Dashboard</a>
@@ -2044,6 +2062,22 @@ std::string TigoWebServer::get_esp_status_html() {
         <div class="info-item">
           <h3>Compiled</h3>
           <div class="value" id="compile-time">--</div>
+        </div>
+        <div class="info-item">
+          <h3>Active Tasks</h3>
+          <div class="value" id="task-count">--</div>
+        </div>
+        <div class="info-item">
+          <h3>Temperature</h3>
+          <div class="value" id="internal-temp">--</div>
+        </div>
+        <div class="info-item">
+          <h3>Minimum Free Heap</h3>
+          <div class="value" id="min-heap">--</div>
+        </div>
+        <div class="info-item">
+          <h3>Minimum Free PSRAM</h3>
+          <div class="value" id="min-psram">--</div>
         </div>
       </div>
     </div>
@@ -2102,24 +2136,6 @@ std::string TigoWebServer::get_esp_status_html() {
     </div>
     
     <div class="card">
-      <h2>System Information</h2>
-      <div class="info-grid">
-        <div class="info-item">
-          <h3>Active Tasks</h3>
-          <div class="value" id="task-count">--</div>
-        </div>
-        <div class="info-item">
-          <h3>Minimum Free Heap</h3>
-          <div class="value" id="min-heap">--</div>
-        </div>
-        <div class="info-item">
-          <h3>Minimum Free PSRAM</h3>
-          <div class="value" id="min-psram">--</div>
-        </div>
-      </div>
-    </div>
-    
-    <div class="card">
       <h2>UART Diagnostics</h2>
       <div class="info-grid">
         <div class="info-item">
@@ -2168,6 +2184,31 @@ std::string TigoWebServer::get_esp_status_html() {
     // Dark mode support
     let darkMode = localStorage.getItem('darkMode') === 'true';
     
+    // Temperature unit toggle
+    let useFahrenheit = localStorage.getItem('tempUnit') === 'F';
+    
+    function celsiusToFahrenheit(celsius) {
+      return (celsius * 9/5) + 32;
+    }
+    
+    function formatTemperature(celsius) {
+      if (useFahrenheit) {
+        return celsiusToFahrenheit(celsius).toFixed(1);
+      }
+      return celsius.toFixed(1);
+    }
+    
+    function getTempUnit() {
+      return useFahrenheit ? '°F' : '°C';
+    }
+    
+    function toggleTempUnit() {
+      useFahrenheit = !useFahrenheit;
+      localStorage.setItem('tempUnit', useFahrenheit ? 'F' : 'C');
+      document.getElementById('temp-toggle').textContent = useFahrenheit ? '°C' : '°F';
+      loadData(); // Refresh display with new units
+    }
+    
     function toggleTheme() {
       darkMode = !darkMode;
       localStorage.setItem('darkMode', darkMode);
@@ -2184,8 +2225,9 @@ std::string TigoWebServer::get_esp_status_html() {
       }
     }
     
-    // Apply theme on page load
+    // Apply theme and temp toggle on page load
     applyTheme();
+    document.getElementById('temp-toggle').textContent = useFahrenheit ? '°C' : '°F';
     
     function formatBytes(bytes) {
       if (bytes < 1024) return bytes + ' B';
@@ -2220,6 +2262,8 @@ std::string TigoWebServer::get_esp_status_html() {
         
         // Display system information
         document.getElementById('task-count').textContent = data.task_count || '--';
+        document.getElementById('internal-temp').textContent = 
+          data.internal_temp !== undefined ? `${formatTemperature(data.internal_temp)}${getTempUnit()}` : '--';
         document.getElementById('min-heap').textContent = formatBytes(data.min_free_heap || 0);
         document.getElementById('invalid-checksum').textContent = data.invalid_checksum || 0;
         document.getElementById('missed-packets').textContent = data.missed_packets || 0;
@@ -2372,7 +2416,7 @@ std::string TigoWebServer::get_yaml_config_html() {
     .header { background: #2c3e50; color: white; padding: 1rem 2rem; box-shadow: 0 2px 4px rgba(0,0,0,0.1); transition: background-color 0.3s; }
     .header-top { display: flex; justify-content: space-between; align-items: center; }
     .header h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
-    .theme-toggle { background: rgba(255,255,255,0.1); border: none; color: white; padding: 0.5rem 1rem; border-radius: 4px; cursor: pointer; font-size: 1.2rem; transition: background-color 0.3s; }
+    .theme-toggle { background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.3); color: white; padding: 0.5rem 1rem; border-radius: 4px; cursor: pointer; font-size: 0.875rem; transition: all 0.2s; }
     .theme-toggle:hover { background: rgba(255,255,255,0.2); }
     .nav { display: flex; gap: 1rem; margin-top: 0.5rem; }
     .nav a { color: #3498db; text-decoration: none; padding: 0.5rem 1rem; background: rgba(255,255,255,0.1); border-radius: 4px; transition: background-color 0.3s; }
@@ -2508,7 +2552,7 @@ std::string TigoWebServer::get_cca_info_html() {
     .header { background: #2c3e50; color: white; padding: 1rem 2rem; box-shadow: 0 2px 4px rgba(0,0,0,0.1); transition: background-color 0.3s; }
     .header-top { display: flex; justify-content: space-between; align-items: center; }
     .header h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
-    .theme-toggle { background: rgba(255,255,255,0.1); border: none; color: white; padding: 0.5rem 1rem; border-radius: 4px; cursor: pointer; font-size: 1.2rem; transition: background-color 0.3s; }
+    .theme-toggle { background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.3); color: white; padding: 0.5rem 1rem; border-radius: 4px; cursor: pointer; font-size: 0.875rem; transition: all 0.2s; }
     .theme-toggle:hover { background: rgba(255,255,255,0.2); }
     .nav { display: flex; gap: 1rem; margin-top: 0.5rem; }
     .nav a { color: #3498db; text-decoration: none; padding: 0.5rem 1rem; background: rgba(255,255,255,0.1); border-radius: 4px; transition: background-color 0.3s; }
