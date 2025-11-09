@@ -114,6 +114,7 @@ class TigoWebServer : public Component {
   static esp_err_t api_cca_info_handler(httpd_req_t *req);
   static esp_err_t api_cca_refresh_handler(httpd_req_t *req);
   static esp_err_t api_node_delete_handler(httpd_req_t *req);
+  static esp_err_t api_node_import_handler(httpd_req_t *req);
   static esp_err_t api_restart_handler(httpd_req_t *req);
   static esp_err_t api_reset_peak_power_handler(httpd_req_t *req);
   static esp_err_t api_reset_node_table_handler(httpd_req_t *req);

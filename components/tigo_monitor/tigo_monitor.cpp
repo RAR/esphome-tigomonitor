@@ -2024,6 +2024,53 @@ bool TigoMonitorComponent::remove_node(uint16_t addr) {
   return true;
 }
 
+bool TigoMonitorComponent::import_node_table(const std::vector<NodeTableData>& nodes) {
+  ESP_LOGI(TAG, "Importing node table with %zu nodes", nodes.size());
+  
+  // Clear existing node table
+  node_table_.clear();
+  created_devices_.clear();
+  
+  // Reserve capacity to avoid reallocations during import
+  node_table_.reserve(nodes.size());
+  
+  // Import all nodes
+  for (const auto& node : nodes) {
+    // Validate node data
+    if (node.addr.empty()) {
+      ESP_LOGW(TAG, "Skipping node with empty address");
+      continue;
+    }
+    
+    // Check for duplicate addresses
+    bool duplicate = false;
+    for (const auto& existing : node_table_) {
+      if (existing.addr == node.addr) {
+        ESP_LOGW(TAG, "Skipping duplicate node with address: %s", node.addr.c_str());
+        duplicate = true;
+        break;
+      }
+    }
+    
+    if (duplicate) continue;
+    
+    // Add node to table
+    node_table_.push_back(node);
+    
+    ESP_LOGD(TAG, "Imported node: addr=%s, barcode=%s, sensor_index=%d, cca_label=%s",
+             node.addr.c_str(), 
+             node.long_address.empty() ? node.frame09_barcode.c_str() : node.long_address.c_str(),
+             node.sensor_index,
+             node.cca_label.c_str());
+  }
+  
+  // Save imported node table to persistent storage
+  save_node_table();
+  
+  ESP_LOGI(TAG, "Successfully imported %zu nodes", node_table_.size());
+  return true;
+}
+
 int TigoMonitorComponent::get_next_available_sensor_index() {
   // Create a set of used indices from the unified node table
   std::set<int> used_indices;

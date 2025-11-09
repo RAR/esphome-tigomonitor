@@ -22,6 +22,7 @@
 #include <sys/time.h>
 #include <mbedtls/base64.h>
 #include <driver/temperature_sensor.h>
+#include "cJSON.h"
 
 namespace esphome {
 namespace tigo_server {
@@ -443,6 +444,14 @@ void TigoWebServer::setup() {
       .user_ctx = this
     };
     httpd_register_uri_handler(server_, &api_node_delete_uri);
+    
+    httpd_uri_t api_node_import_uri = {
+      .uri = "/api/nodes/import",
+      .method = HTTP_POST,
+      .handler = api_node_import_handler,
+      .user_ctx = this
+    };
+    httpd_register_uri_handler(server_, &api_node_import_uri);
     
     httpd_uri_t api_restart_uri = {
       .uri = "/api/restart",
@@ -944,6 +953,217 @@ esp_err_t TigoWebServer::api_node_delete_handler(httpd_req_t *req) {
     httpd_resp_set_type(req, "application/json");
     httpd_resp_set_status(req, "404 Not Found");
     httpd_resp_send(req, response.c_str(), response.length());
+  }
+  
+  return ESP_OK;
+}
+
+esp_err_t TigoWebServer::api_node_import_handler(httpd_req_t *req) {
+  TigoWebServer *server = static_cast<TigoWebServer *>(req->user_ctx);
+  if (!server->check_api_auth(req)) {
+    return ESP_OK;
+  }
+  
+  // Log content type
+  char content_type[64] = {0};
+  if (httpd_req_get_hdr_value_len(req, "Content-Type") > 0) {
+    httpd_req_get_hdr_value_str(req, "Content-Type", content_type, sizeof(content_type));
+    ESP_LOGI(TAG, "Import request Content-Type: %s", content_type);
+  }
+  
+  // Read the POST body
+  char* buf = nullptr;
+  size_t buf_len = req->content_len;
+  
+  ESP_LOGI(TAG, "Import request content_len: %zu", buf_len);
+  
+  if (buf_len == 0 || buf_len > 102400) {  // Max 100KB
+    const char* error_response = "{\"status\":\"error\",\"message\":\"Invalid content length\"}";
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_status(req, "400 Bad Request");
+    httpd_resp_send(req, error_response, strlen(error_response));
+    return ESP_OK;
+  }
+  
+  // Try to allocate from PSRAM first for large buffers
+  size_t psram_available = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+  if (psram_available >= buf_len + 1024) {
+    buf = static_cast<char*>(heap_caps_malloc(buf_len + 1, MALLOC_CAP_SPIRAM));
+    if (buf) {
+      ESP_LOGI(TAG, "Allocated %zu bytes from PSRAM for import buffer", buf_len + 1);
+    }
+  }
+  
+  // Fallback to regular heap
+  if (!buf) {
+    buf = static_cast<char*>(heap_caps_malloc(buf_len + 1, MALLOC_CAP_DEFAULT));
+    if (!buf) {
+      const char* error_response = "{\"status\":\"error\",\"message\":\"Out of memory\"}";
+      httpd_resp_set_type(req, "application/json");
+      httpd_resp_set_status(req, "500 Internal Server Error");
+      httpd_resp_send(req, error_response, strlen(error_response));
+      return ESP_OK;
+    }
+    ESP_LOGI(TAG, "Allocated %zu bytes from internal RAM for import buffer (PSRAM unavailable)", buf_len + 1);
+  }
+  
+  // Read POST body - may require multiple calls for large payloads
+  size_t total_received = 0;
+  while (total_received < buf_len) {
+    int ret = httpd_req_recv(req, buf + total_received, buf_len - total_received);
+    if (ret <= 0) {
+      heap_caps_free(buf);
+      if (ret == HTTPD_SOCK_ERR_TIMEOUT) {
+        const char* error_response = "{\"status\":\"error\",\"message\":\"Request timeout\"}";
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_set_status(req, "408 Request Timeout");
+        httpd_resp_send(req, error_response, strlen(error_response));
+      } else {
+        const char* error_response = "{\"status\":\"error\",\"message\":\"Failed to read request body\"}";
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_send_500(req);
+      }
+      return ESP_OK;
+    }
+    total_received += ret;
+  }
+  
+  buf[total_received] = '\0';
+  
+  ESP_LOGD(TAG, "Received %zu bytes of JSON data", total_received);
+  ESP_LOGV(TAG, "JSON content (first 200 chars): %.200s", buf);
+  
+  // Parse JSON using cJSON library
+  std::vector<tigo_monitor::NodeTableData> nodes;
+  
+  cJSON *root = cJSON_Parse(buf);
+  if (!root) {
+    const char *error_ptr = cJSON_GetErrorPtr();
+    if (error_ptr != NULL) {
+      ESP_LOGE(TAG, "JSON parse error before: %.50s", error_ptr);
+    }
+    heap_caps_free(buf);
+    const char* error_response = "{\"status\":\"error\",\"message\":\"Invalid JSON - parse error\"}";
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_status(req, "400 Bad Request");
+    httpd_resp_send(req, error_response, strlen(error_response));
+    return ESP_OK;
+  }
+  
+  cJSON *nodes_array = cJSON_GetObjectItem(root, "nodes");
+  if (!nodes_array || !cJSON_IsArray(nodes_array)) {
+    cJSON_Delete(root);
+    heap_caps_free(buf);
+    const char* error_response = "{\"status\":\"error\",\"message\":\"Missing or invalid 'nodes' array\"}";
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_status(req, "400 Bad Request");
+    httpd_resp_send(req, error_response, strlen(error_response));
+    return ESP_OK;
+  }
+  
+  int array_size = cJSON_GetArraySize(nodes_array);
+  ESP_LOGI(TAG, "Parsing %d nodes from JSON", array_size);
+  
+  for (int i = 0; i < array_size; i++) {
+    cJSON *node_obj = cJSON_GetArrayItem(nodes_array, i);
+    if (!node_obj || !cJSON_IsObject(node_obj)) continue;
+    
+    tigo_monitor::NodeTableData node;
+    
+    // Extract string fields
+    cJSON *item;
+    if ((item = cJSON_GetObjectItem(node_obj, "addr")) && cJSON_IsString(item)) {
+      node.addr = item->valuestring;
+    }
+    if ((item = cJSON_GetObjectItem(node_obj, "long_address")) && cJSON_IsString(item)) {
+      node.long_address = item->valuestring;
+    }
+    if ((item = cJSON_GetObjectItem(node_obj, "frame09_barcode")) && cJSON_IsString(item)) {
+      node.frame09_barcode = item->valuestring;
+    }
+    if ((item = cJSON_GetObjectItem(node_obj, "checksum")) && cJSON_IsString(item)) {
+      node.checksum = item->valuestring;
+    }
+    if ((item = cJSON_GetObjectItem(node_obj, "cca_label")) && cJSON_IsString(item)) {
+      node.cca_label = item->valuestring;
+    }
+    if ((item = cJSON_GetObjectItem(node_obj, "cca_string")) && cJSON_IsString(item)) {
+      node.cca_string_label = item->valuestring;
+    }
+    if ((item = cJSON_GetObjectItem(node_obj, "cca_inverter")) && cJSON_IsString(item)) {
+      node.cca_inverter_label = item->valuestring;
+    }
+    if ((item = cJSON_GetObjectItem(node_obj, "cca_channel")) && cJSON_IsString(item)) {
+      node.cca_channel = item->valuestring;
+    }
+    if ((item = cJSON_GetObjectItem(node_obj, "cca_object_id")) && cJSON_IsString(item)) {
+      node.cca_object_id = item->valuestring;
+    }
+    
+    // Extract int field
+    if ((item = cJSON_GetObjectItem(node_obj, "sensor_index")) && cJSON_IsNumber(item)) {
+      node.sensor_index = item->valueint;
+    }
+    
+    // Extract bool field
+    if ((item = cJSON_GetObjectItem(node_obj, "cca_validated")) && cJSON_IsBool(item)) {
+      node.cca_validated = cJSON_IsTrue(item);
+    }
+    
+    node.is_persistent = true;  // All imported nodes are persistent
+    
+    // Only add nodes that have actual device data (non-empty address AND barcode)
+    if (!node.addr.empty() && (!node.long_address.empty() || !node.frame09_barcode.empty())) {
+      nodes.push_back(node);
+      ESP_LOGD(TAG, "Imported node %zu: addr=%s, barcode=%s", nodes.size(), 
+               node.addr.c_str(), 
+               !node.long_address.empty() ? node.long_address.c_str() : node.frame09_barcode.c_str());
+    } else {
+      ESP_LOGD(TAG, "Skipped empty node: addr=%s", node.addr.c_str());
+    }
+  }
+  
+  cJSON_Delete(root);
+  
+  ESP_LOGI(TAG, "Parsed %d JSON objects, added %zu valid nodes", array_size, nodes.size());
+  
+  // Free the input buffer immediately after parsing to reduce memory pressure
+  heap_caps_free(buf);
+  buf = nullptr;
+  
+  if (nodes.empty()) {
+    const char* error_response = "{\"status\":\"error\",\"message\":\"No valid nodes found in import data\"}";
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_status(req, "400 Bad Request");
+    httpd_resp_send(req, error_response, strlen(error_response));
+    return ESP_OK;
+  }
+  
+  // Log memory status before import
+  size_t free_before = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+  ESP_LOGI(TAG, "Free internal RAM before import: %zu bytes", free_before);
+  
+  // Import the nodes
+  bool success = server->parent_->import_node_table(nodes);
+  
+  // Log memory status after import
+  size_t free_after = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+  size_t min_free = heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL);
+  ESP_LOGI(TAG, "Free internal RAM after import: %zu bytes (used %zu bytes, minimum ever: %zu bytes)", 
+           free_after, free_before - free_after, min_free);
+  
+  if (success) {
+    char response[256];
+    snprintf(response, sizeof(response),
+      "{\"status\":\"ok\",\"message\":\"Successfully imported %zu nodes\",\"imported\":%zu}",
+      nodes.size(), nodes.size());
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, response, strlen(response));
+  } else {
+    const char* error_response = "{\"status\":\"error\",\"message\":\"Failed to import node table\"}";
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_status(req, "500 Internal Server Error");
+    httpd_resp_send(req, error_response, strlen(error_response));
   }
   
   return ESP_OK;
@@ -1481,31 +1701,37 @@ std::string TigoWebServer::build_inverters_json() {
 }
 
 std::string TigoWebServer::build_node_table_json() {
-  std::string json = "{\"nodes\":[";
+  cJSON *root = cJSON_CreateObject();
+  cJSON *nodes_array = cJSON_CreateArray();
   
   const auto &node_table = parent_->get_node_table();
-  bool first = true;
   
   for (const auto &node : node_table) {
-    if (!first) json += ",";
-    first = false;
+    cJSON *node_obj = cJSON_CreateObject();
     
-    char buffer[1024];
-    snprintf(buffer, sizeof(buffer),
-      "{\"addr\":\"%s\",\"long_address\":\"%s\",\"frame09_barcode\":\"%s\","
-      "\"sensor_index\":%d,\"checksum\":\"%s\","
-      "\"cca_validated\":%s,\"cca_label\":\"%s\",\"cca_string\":\"%s\",\"cca_inverter\":\"%s\",\"cca_channel\":\"%s\"}",
-      node.addr.c_str(), node.long_address.c_str(), node.frame09_barcode.c_str(),
-      node.sensor_index, node.checksum.c_str(),
-      node.cca_validated ? "true" : "false",
-      node.cca_label.c_str(), node.cca_string_label.c_str(),
-      node.cca_inverter_label.c_str(), node.cca_channel.c_str());
+    cJSON_AddStringToObject(node_obj, "addr", node.addr.c_str());
+    cJSON_AddStringToObject(node_obj, "long_address", node.long_address.c_str());
+    cJSON_AddStringToObject(node_obj, "frame09_barcode", node.frame09_barcode.c_str());
+    cJSON_AddNumberToObject(node_obj, "sensor_index", node.sensor_index);
+    cJSON_AddStringToObject(node_obj, "checksum", node.checksum.c_str());
+    cJSON_AddBoolToObject(node_obj, "cca_validated", node.cca_validated);
+    cJSON_AddStringToObject(node_obj, "cca_label", node.cca_label.c_str());
+    cJSON_AddStringToObject(node_obj, "cca_string", node.cca_string_label.c_str());
+    cJSON_AddStringToObject(node_obj, "cca_inverter", node.cca_inverter_label.c_str());
+    cJSON_AddStringToObject(node_obj, "cca_channel", node.cca_channel.c_str());
     
-    json += buffer;
+    cJSON_AddItemToArray(nodes_array, node_obj);
   }
   
-  json += "]}";
-  return json;
+  cJSON_AddItemToObject(root, "nodes", nodes_array);
+  
+  char *json_str = cJSON_Print(root);
+  std::string result(json_str);
+  
+  cJSON_free(json_str);
+  cJSON_Delete(root);
+  
+  return result;
 }
 
 std::string TigoWebServer::build_esp_status_json() {
@@ -2231,6 +2457,16 @@ std::string TigoWebServer::get_node_table_html() {
   <div class="container">
     <div class="card">
       <h2>Node Table</h2>
+      <div style="margin-bottom: 1.5rem; display: flex; gap: 1rem; flex-wrap: wrap;">
+        <button onclick="exportNodeTable()" style="padding: 0.75rem 1.5rem; background-color: #27ae60; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.875rem; font-weight: 600;">
+          📥 Export Node Table
+        </button>
+        <button onclick="document.getElementById('import-file').click()" style="padding: 0.75rem 1.5rem; background-color: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.875rem; font-weight: 600;">
+          📤 Import Node Table
+        </button>
+        <input type="file" id="import-file" accept=".json" style="display: none;" onchange="importNodeTable(event)">
+        <span id="import-status" style="align-self: center; font-size: 0.875rem; color: #27ae60; display: none;"></span>
+      </div>
       <table>
         <thead>
           <tr>
@@ -2282,6 +2518,89 @@ std::string TigoWebServer::get_node_table_html() {
     
     // Apply theme on load
     applyTheme();
+    
+    async function exportNodeTable() {
+      try {
+        const response = await apiFetch('/api/nodes');
+        const data = await response.json();
+        
+        // Create downloadable JSON file
+        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `node-table-${new Date().toISOString().split('T')[0]}.json`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      } catch (error) {
+        console.error('Error exporting node table:', error);
+        alert('Failed to export node table: ' + error.message);
+      }
+    }
+    
+    async function importNodeTable(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+      
+      const statusEl = document.getElementById('import-status');
+      
+      try {
+        const text = await file.text();
+        const data = JSON.parse(text);
+        
+        // Validate data structure
+        if (!data.nodes || !Array.isArray(data.nodes)) {
+          throw new Error('Invalid node table format: missing "nodes" array');
+        }
+        
+        // Confirm import
+        if (!confirm(`Import ${data.nodes.length} node(s)? This will replace the current node table.`)) {
+          event.target.value = ''; // Reset file input
+          return;
+        }
+        
+        // Send to server
+        const response = await apiFetch('/api/nodes/import', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(data)
+        });
+        
+        if (response.ok) {
+          const result = await response.json();
+          statusEl.textContent = `✅ Successfully imported ${result.imported || data.nodes.length} node(s)`;
+          statusEl.style.color = '#27ae60';
+          statusEl.style.display = 'inline';
+          
+          // Reload table
+          await loadData();
+          
+          // Hide status after 5 seconds
+          setTimeout(() => {
+            statusEl.style.display = 'none';
+          }, 5000);
+        } else {
+          const error = await response.json();
+          throw new Error(error.message || 'Import failed');
+        }
+      } catch (error) {
+        console.error('Error importing node table:', error);
+        statusEl.textContent = `❌ Import failed: ${error.message}`;
+        statusEl.style.color = '#e74c3c';
+        statusEl.style.display = 'inline';
+        
+        setTimeout(() => {
+          statusEl.style.display = 'none';
+        }, 5000);
+      }
+      
+      // Reset file input
+      event.target.value = '';
+    }
     
     async function deleteNode(addr) {
       if (!confirm('Are you sure you want to delete node with address ' + addr + '?')) {

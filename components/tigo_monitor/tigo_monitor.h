@@ -304,6 +304,9 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   // Remove individual node by address
   bool remove_node(uint16_t addr);
   
+  // Import node table from JSON data
+  bool import_node_table(const std::vector<NodeTableData>& nodes);
+  
   // CCA synchronization (called by button or on boot)
   void sync_from_cca();
   
