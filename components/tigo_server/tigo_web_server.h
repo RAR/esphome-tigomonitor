@@ -10,6 +10,7 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
 #include <esp_heap_caps.h>
+#include <driver/temperature_sensor.h>
 #include <vector>
 #include <string>
 #include <ctime>
@@ -28,8 +29,9 @@ namespace tigo_server {
 
 #ifdef USE_ESP_IDF
 
-// Forward declaration
+// Forward declarations
 class LogBuffer;
+class PSRAMString;
 
 // Helper function to add logs to buffer
 void log_to_buffer(esp_log_level_t level, const char* tag, const char* message);
@@ -65,6 +67,7 @@ class LogBuffer {
 class TigoWebServer : public Component {
  public:
   TigoWebServer() = default;
+  ~TigoWebServer();
   
   void set_tigo_monitor(tigo_monitor::TigoMonitorComponent *parent) { parent_ = parent; }
   
@@ -95,12 +98,14 @@ class TigoWebServer : public Component {
   std::string web_username_{""};
   std::string web_password_{""};
   LogBuffer* log_buffer_{nullptr};
+  temperature_sensor_handle_t temp_sensor_handle_{nullptr};
   
   // HTTP handlers
   static esp_err_t dashboard_handler(httpd_req_t *req);
   static esp_err_t node_table_handler(httpd_req_t *req);
   static esp_err_t esp_status_handler(httpd_req_t *req);
   static esp_err_t yaml_config_handler(httpd_req_t *req);
+  static esp_err_t favicon_handler(httpd_req_t *req);
   
   // API endpoints (JSON)
   static esp_err_t api_devices_handler(httpd_req_t *req);
@@ -120,18 +125,19 @@ class TigoWebServer : public Component {
   static esp_err_t api_reset_node_table_handler(httpd_req_t *req);
   static esp_err_t api_health_handler(httpd_req_t *req);
   static esp_err_t api_logs_handler(httpd_req_t *req);
-  static esp_err_t api_logs_stream_handler(httpd_req_t *req);
+  static esp_err_t api_logs_status_handler(httpd_req_t *req);
   static esp_err_t api_logs_clear_handler(httpd_req_t *req);
+  static esp_err_t api_logs_stream_handler(httpd_req_t *req);
   
   // Helper functions
   bool check_api_auth(httpd_req_t *req);
   bool check_web_auth(httpd_req_t *req);
   tigo_monitor::TigoMonitorComponent *get_parent_from_req(httpd_req_t *req);
-  std::string get_dashboard_html();
-  std::string get_node_table_html();
-  std::string get_esp_status_html();
-  std::string get_yaml_config_html();
-  std::string get_cca_info_html();
+  void get_dashboard_html(PSRAMString& html);
+  void get_node_table_html(PSRAMString& html);
+  void get_esp_status_html(PSRAMString& html);
+  void get_yaml_config_html(PSRAMString& html);
+  void get_cca_info_html(PSRAMString& html);
   
   // JSON builders
   std::string build_devices_json();

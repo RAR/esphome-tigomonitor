@@ -316,6 +316,9 @@ void TigoWebServer::setup() {
   config.ctrl_port = port_ + 1;
   config.max_uri_handlers = 25;  // Increased for log endpoints
   config.stack_size = 8192;
+  config.lru_purge_enable = true;  // Enable LRU purging of connections
+  config.max_open_sockets = 4;     // Limit concurrent connections to reduce memory
+  config.keep_alive_enable = false; // Disable keep-alive to free connections faster
   
   if (httpd_start(&server_, &config) == ESP_OK) {
     ESP_LOGI(TAG, "Web server started successfully");
@@ -331,6 +334,14 @@ void TigoWebServer::setup() {
       .user_ctx = this
     };
     httpd_register_uri_handler(server_, &dashboard_uri);
+    
+    httpd_uri_t favicon_uri = {
+      .uri = "/favicon.ico",
+      .method = HTTP_GET,
+      .handler = favicon_handler,
+      .user_ctx = this
+    };
+    httpd_register_uri_handler(server_, &favicon_uri);
     
     httpd_uri_t node_table_uri = {
       .uri = "/nodes",
@@ -486,6 +497,14 @@ void TigoWebServer::setup() {
     httpd_register_uri_handler(server_, &api_health_uri);
     
     // Register more specific log endpoints first (ESP-IDF matches in order)
+    httpd_uri_t api_logs_status_uri = {
+      .uri = "/api/logs/status",
+      .method = HTTP_GET,
+      .handler = api_logs_status_handler,
+      .user_ctx = this
+    };
+    httpd_register_uri_handler(server_, &api_logs_status_uri);
+    
     httpd_uri_t api_logs_clear_uri = {
       .uri = "/api/logs/clear",
       .method = HTTP_POST,
@@ -516,6 +535,23 @@ void TigoWebServer::setup() {
       ESP_LOGI(TAG, "HTTP Basic Authentication configured for web pages (user: %s)", web_username_.c_str());
     } else {
       ESP_LOGI(TAG, "Web authentication not configured - pages remain open");
+    }
+    
+    // Initialize temperature sensor once at startup
+    temperature_sensor_config_t temp_sensor_config = TEMPERATURE_SENSOR_CONFIG_DEFAULT(-10, 80);
+    esp_err_t err = temperature_sensor_install(&temp_sensor_config, &temp_sensor_handle_);
+    if (err == ESP_OK) {
+      err = temperature_sensor_enable(temp_sensor_handle_);
+      if (err == ESP_OK) {
+        ESP_LOGI(TAG, "Temperature sensor initialized successfully");
+      } else {
+        ESP_LOGW(TAG, "Failed to enable temperature sensor: %s", esp_err_to_name(err));
+        temperature_sensor_uninstall(temp_sensor_handle_);
+        temp_sensor_handle_ = nullptr;
+      }
+    } else {
+      ESP_LOGW(TAG, "Failed to install temperature sensor: %s", esp_err_to_name(err));
+      temp_sensor_handle_ = nullptr;
     }
     
     ESP_LOGI(TAG, "All routes registered");
@@ -677,6 +713,22 @@ bool TigoWebServer::check_web_auth(httpd_req_t *req) {
 
 // ===== HTML Page Handlers =====
 
+esp_err_t TigoWebServer::favicon_handler(httpd_req_t *req) {
+  // Simple SVG favicon - solar panel icon
+  const char* favicon_svg = 
+    "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'>"
+    "<rect x='20' y='30' width='60' height='40' fill='#3498db' stroke='#2c3e50' stroke-width='2'/>"
+    "<line x1='20' y1='50' x2='80' y2='50' stroke='#2c3e50' stroke-width='2'/>"
+    "<line x1='50' y1='30' x2='50' y2='70' stroke='#2c3e50' stroke-width='2'/>"
+    "<path d='M 40 70 L 35 85 L 65 85 L 60 70' fill='#95a5a6' stroke='#2c3e50' stroke-width='2'/>"
+    "</svg>";
+  
+  httpd_resp_set_type(req, "image/svg+xml");
+  httpd_resp_set_hdr(req, "Cache-Control", "public, max-age=86400");
+  httpd_resp_send(req, favicon_svg, strlen(favicon_svg));
+  return ESP_OK;
+}
+
 esp_err_t TigoWebServer::dashboard_handler(httpd_req_t *req) {
   TigoWebServer *server = static_cast<TigoWebServer *>(req->user_ctx);
   
@@ -687,11 +739,25 @@ esp_err_t TigoWebServer::dashboard_handler(httpd_req_t *req) {
   
   // Use PSRAM for large HTML content
   PSRAMString html;
-  std::string content = server->get_dashboard_html();
-  html.append(content);
+  server->get_dashboard_html(html);
   
   httpd_resp_set_type(req, "text/html");
-  httpd_resp_send(req, html.c_str(), html.length());
+  
+  // Send in chunks to avoid internal RAM buffering
+  const char* data = html.c_str();
+  size_t len = html.length();
+  const size_t chunk_size = 4096;
+  size_t sent = 0;
+  
+  while (sent < len) {
+    size_t to_send = (len - sent > chunk_size) ? chunk_size : (len - sent);
+    if (httpd_resp_send_chunk(req, data + sent, to_send) != ESP_OK) {
+      return ESP_FAIL;
+    }
+    sent += to_send;
+  }
+  httpd_resp_send_chunk(req, nullptr, 0);
+  
   return ESP_OK;
 }
 
@@ -704,11 +770,25 @@ esp_err_t TigoWebServer::node_table_handler(httpd_req_t *req) {
   }
   
   PSRAMString html;
-  std::string content = server->get_node_table_html();
-  html.append(content);
+  server->get_node_table_html(html);
   
   httpd_resp_set_type(req, "text/html");
-  httpd_resp_send(req, html.c_str(), html.length());
+  
+  // Send in chunks to avoid internal RAM buffering
+  const char* data = html.c_str();
+  size_t len = html.length();
+  const size_t chunk_size = 4096;
+  size_t sent = 0;
+  
+  while (sent < len) {
+    size_t to_send = (len - sent > chunk_size) ? chunk_size : (len - sent);
+    if (httpd_resp_send_chunk(req, data + sent, to_send) != ESP_OK) {
+      return ESP_FAIL;
+    }
+    sent += to_send;
+  }
+  httpd_resp_send_chunk(req, nullptr, 0);
+  
   return ESP_OK;
 }
 
@@ -721,12 +801,13 @@ esp_err_t TigoWebServer::esp_status_handler(httpd_req_t *req) {
   }
   
   PSRAMString html;
-  std::string content = server->get_esp_status_html();
-  html.append(content);
+  server->get_esp_status_html(html);
   
   httpd_resp_set_type(req, "text/html");
-  httpd_resp_send(req, html.c_str(), html.length());
-  return ESP_OK;
+  httpd_resp_set_hdr(req, "Connection", "close");
+  esp_err_t result = httpd_resp_send(req, html.c_str(), html.length());
+  
+  return result;
 }
 
 esp_err_t TigoWebServer::yaml_config_handler(httpd_req_t *req) {
@@ -738,11 +819,25 @@ esp_err_t TigoWebServer::yaml_config_handler(httpd_req_t *req) {
   }
   
   PSRAMString html;
-  std::string content = server->get_yaml_config_html();
-  html.append(content);
+  server->get_yaml_config_html(html);
   
   httpd_resp_set_type(req, "text/html");
-  httpd_resp_send(req, html.c_str(), html.length());
+  
+  // Send in chunks to avoid internal RAM buffering
+  const char* data = html.c_str();
+  size_t len = html.length();
+  const size_t chunk_size = 4096;
+  size_t sent = 0;
+  
+  while (sent < len) {
+    size_t to_send = (len - sent > chunk_size) ? chunk_size : (len - sent);
+    if (httpd_resp_send_chunk(req, data + sent, to_send) != ESP_OK) {
+      return ESP_FAIL;
+    }
+    sent += to_send;
+  }
+  httpd_resp_send_chunk(req, nullptr, 0);
+  
   return ESP_OK;
 }
 
@@ -755,8 +850,7 @@ esp_err_t TigoWebServer::api_devices_handler(httpd_req_t *req) {
   }
   
   PSRAMString json_buffer;
-  std::string json = server->build_devices_json();
-  json_buffer.append(json);
+  json_buffer.append(server->build_devices_json());
   
   httpd_resp_set_type(req, "application/json");
   httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
@@ -771,8 +865,7 @@ esp_err_t TigoWebServer::api_overview_handler(httpd_req_t *req) {
   }
   
   PSRAMString json_buffer;
-  std::string json = server->build_overview_json();
-  json_buffer.append(json);
+  json_buffer.append(server->build_overview_json());
   
   httpd_resp_set_type(req, "application/json");
   httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
@@ -787,8 +880,7 @@ esp_err_t TigoWebServer::api_node_table_handler(httpd_req_t *req) {
   }
   
   PSRAMString json_buffer;
-  std::string json = server->build_node_table_json();
-  json_buffer.append(json);
+  json_buffer.append(server->build_node_table_json());
   
   httpd_resp_set_type(req, "application/json");
   httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
@@ -803,8 +895,7 @@ esp_err_t TigoWebServer::api_strings_handler(httpd_req_t *req) {
   }
   
   PSRAMString json_buffer;
-  std::string json = server->build_strings_json();
-  json_buffer.append(json);
+  json_buffer.append(server->build_strings_json());
   
   httpd_resp_set_type(req, "application/json");
   httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
@@ -819,8 +910,7 @@ esp_err_t TigoWebServer::api_inverters_handler(httpd_req_t *req) {
   }
   
   PSRAMString json_buffer;
-  std::string json = server->build_inverters_json();
-  json_buffer.append(json);
+  json_buffer.append(server->build_inverters_json());
   
   httpd_resp_set_type(req, "application/json");
   httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
@@ -835,11 +925,11 @@ esp_err_t TigoWebServer::api_esp_status_handler(httpd_req_t *req) {
   }
   
   PSRAMString json_buffer;
-  std::string json = server->build_esp_status_json();
-  json_buffer.append(json);
+  json_buffer.append(server->build_esp_status_json());
   
   httpd_resp_set_type(req, "application/json");
   httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+  httpd_resp_set_hdr(req, "Connection", "close");
   httpd_resp_send(req, json_buffer.c_str(), json_buffer.length());
   return ESP_OK;
 }
@@ -851,8 +941,7 @@ esp_err_t TigoWebServer::api_yaml_handler(httpd_req_t *req) {
   }
   
   PSRAMString json_buffer;
-  std::string json = server->build_yaml_json();
-  json_buffer.append(json);
+  json_buffer.append(server->build_yaml_json());
   
   httpd_resp_set_type(req, "application/json");
   httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
@@ -869,11 +958,25 @@ esp_err_t TigoWebServer::cca_info_handler(httpd_req_t *req) {
   }
   
   PSRAMString html;
-  std::string content = server->get_cca_info_html();
-  html.append(content);
+  server->get_cca_info_html(html);
   
   httpd_resp_set_type(req, "text/html");
-  httpd_resp_send(req, html.c_str(), html.length());
+  
+  // Send in chunks to avoid internal RAM buffering
+  const char* data = html.c_str();
+  size_t len = html.length();
+  const size_t chunk_size = 4096;
+  size_t sent = 0;
+  
+  while (sent < len) {
+    size_t to_send = (len - sent > chunk_size) ? chunk_size : (len - sent);
+    if (httpd_resp_send_chunk(req, data + sent, to_send) != ESP_OK) {
+      return ESP_FAIL;
+    }
+    sent += to_send;
+  }
+  httpd_resp_send_chunk(req, nullptr, 0);
+  
   return ESP_OK;
 }
 
@@ -884,8 +987,7 @@ esp_err_t TigoWebServer::api_cca_info_handler(httpd_req_t *req) {
   }
   
   PSRAMString json_buffer;
-  std::string json = server->build_cca_info_json();
-  json_buffer.append(json);
+  json_buffer.append(server->build_cca_info_json());
   
   httpd_resp_set_type(req, "application/json");
   httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
@@ -1247,6 +1349,35 @@ esp_err_t TigoWebServer::api_health_handler(httpd_req_t *req) {
   return ESP_OK;
 }
 
+esp_err_t TigoWebServer::api_logs_status_handler(httpd_req_t *req) {
+  TigoWebServer *server = static_cast<TigoWebServer *>(req->user_ctx);
+  
+  // Check authentication
+  if (!server->check_api_auth(req)) {
+    return ESP_OK;
+  }
+  
+  // Simple lightweight endpoint to check if logging is enabled
+  // Avoids copying log entries when client just wants to know status
+  
+  LogBuffer *log_buffer = server->log_buffer_;
+  bool logging_enabled = (log_buffer != nullptr && log_buffer->is_using_psram());
+  size_t log_count = logging_enabled ? log_buffer->get_current_index() : 0;
+  
+  char response[256];
+  snprintf(response, sizeof(response),
+    "{\"enabled\":%s,\"count\":%zu}",
+    logging_enabled ? "true" : "false",
+    log_count
+  );
+  
+  httpd_resp_set_type(req, "application/json");
+  httpd_resp_set_hdr(req, "Connection", "close");
+  httpd_resp_send(req, response, strlen(response));
+  
+  return ESP_OK;
+}
+
 esp_err_t TigoWebServer::api_logs_handler(httpd_req_t *req) {
   TigoWebServer *server = static_cast<TigoWebServer *>(req->user_ctx);
   if (!server->check_api_auth(req)) {
@@ -1263,10 +1394,6 @@ esp_err_t TigoWebServer::api_logs_handler(httpd_req_t *req) {
     return ESP_OK;
   }
   
-  // Check available heap before building response
-  size_t free_heap_before = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
-  size_t free_psram_before = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
-  
   // Get query parameter for start index
   char query_str[64] = {0};
   size_t start_index = 0;
@@ -1280,8 +1407,13 @@ esp_err_t TigoWebServer::api_logs_handler(httpd_req_t *req) {
   
   auto logs = log_buffer->get_logs(start_index);
   
-  ESP_LOGD(TAG, "Building log response: %zu logs from index %zu (heap: %zu internal, %zu PSRAM)", 
-           logs.size(), start_index, free_heap_before, free_psram_before);
+  // Limit log entries to prevent memory exhaustion on devices with limited internal RAM
+  // The logs are already in PSRAM, but the vector copy uses internal RAM
+  const size_t MAX_LOGS_PER_REQUEST = 50;
+  if (logs.size() > MAX_LOGS_PER_REQUEST) {
+    // Keep only the most recent logs
+    logs.erase(logs.begin(), logs.begin() + (logs.size() - MAX_LOGS_PER_REQUEST));
+  }
   
   // Use PSRAMString to avoid exhausting internal RAM on devices like AtomS3R
   PSRAMString json;
@@ -1304,69 +1436,60 @@ esp_err_t TigoWebServer::api_logs_handler(httpd_req_t *req) {
       default: break;
     }
     
-    // Build escaped strings - use small buffers to minimize internal RAM usage
-    std::string escaped_tag;
-    std::string escaped_msg;
-    escaped_tag.reserve(log.tag.length() + 20);  // Pre-allocate with some headroom
-    escaped_msg.reserve(log.message.length() + 50);
+    // Build entry directly in PSRAMString to avoid internal RAM allocation
+    char buf[64];
+    snprintf(buf, sizeof(buf), "{\"timestamp\":%llu,\"level\":\"%s\",\"tag\":\"", 
+             (unsigned long long)log.timestamp, level_str);
+    json.append(buf);
     
-    // Escape tag
+    // Escape tag directly into PSRAMString
     for (char c : log.tag) {
-      if (c == '"') escaped_tag += "\\\"";
-      else if (c == '\\') escaped_tag += "\\\\";
-      else if (c == '\b') escaped_tag += "\\b";
-      else if (c == '\f') escaped_tag += "\\f";
-      else if (c == '\n') escaped_tag += "\\n";
-      else if (c == '\r') escaped_tag += "\\r";
-      else if (c == '\t') escaped_tag += "\\t";
+      if (c == '"') json.append("\\\"");
+      else if (c == '\\') json.append("\\\\");
+      else if (c == '\b') json.append("\\b");
+      else if (c == '\f') json.append("\\f");
+      else if (c == '\n') json.append("\\n");
+      else if (c == '\r') json.append("\\r");
+      else if (c == '\t') json.append("\\t");
       else if ((unsigned char)c < 0x20) {
-        // Escape other control characters as \uXXXX
-        char buf[7];
-        snprintf(buf, sizeof(buf), "\\u%04x", (unsigned char)c);
-        escaped_tag += buf;
+        char escape_buf[7];
+        snprintf(escape_buf, sizeof(escape_buf), "\\u%04x", (unsigned char)c);
+        json.append(escape_buf);
       } else {
-        escaped_tag += c;
+        char single[2] = {c, '\0'};
+        json.append(single);
       }
     }
     
-    // Escape message
+    json.append("\",\"message\":\"");
+    
+    // Escape message directly into PSRAMString
     for (char c : log.message) {
-      if (c == '"') escaped_msg += "\\\"";
-      else if (c == '\\') escaped_msg += "\\\\";
-      else if (c == '\b') escaped_msg += "\\b";
-      else if (c == '\f') escaped_msg += "\\f";
-      else if (c == '\n') escaped_msg += "\\n";
-      else if (c == '\r') escaped_msg += "\\r";
-      else if (c == '\t') escaped_msg += "\\t";
+      if (c == '"') json.append("\\\"");
+      else if (c == '\\') json.append("\\\\");
+      else if (c == '\b') json.append("\\b");
+      else if (c == '\f') json.append("\\f");
+      else if (c == '\n') json.append("\\n");
+      else if (c == '\r') json.append("\\r");
+      else if (c == '\t') json.append("\\t");
       else if ((unsigned char)c < 0x20) {
-        // Escape other control characters as \uXXXX
-        char buf[7];
-        snprintf(buf, sizeof(buf), "\\u%04x", (unsigned char)c);
-        escaped_msg += buf;
+        char escape_buf[7];
+        snprintf(escape_buf, sizeof(escape_buf), "\\u%04x", (unsigned char)c);
+        json.append(escape_buf);
       } else {
-        escaped_msg += c;
+        char single[2] = {c, '\0'};
+        json.append(single);
       }
     }
     
-    char entry[1024];  // Stack-allocated buffer for single entry
-    snprintf(entry, sizeof(entry),
-      "{\"timestamp\":%llu,\"level\":\"%s\",\"tag\":\"%s\",\"message\":\"%s\"}",
-      (unsigned long long)log.timestamp, level_str, escaped_tag.c_str(), escaped_msg.c_str());
-    json.append(entry);
+    json.append("\"}");
   }
   
   json.append("]}");
   
-  size_t free_heap_after = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
-  size_t free_psram_after = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
-  
-  ESP_LOGD(TAG, "Log response built: %zu bytes (heap after: %zu internal [-%zu], %zu PSRAM [-%zu])", 
-           json.length(), 
-           free_heap_after, free_heap_before - free_heap_after,
-           free_psram_after, free_psram_before - free_psram_after);
-  
   httpd_resp_set_type(req, "application/json");
   httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+  httpd_resp_set_hdr(req, "Connection", "close");
   httpd_resp_send(req, json.c_str(), json.length());
   
   return ESP_OK;
@@ -1701,6 +1824,24 @@ std::string TigoWebServer::build_inverters_json() {
 }
 
 std::string TigoWebServer::build_node_table_json() {
+  // Configure cJSON to use PSRAM if available
+  cJSON_Hooks hooks;
+  bool using_psram = false;
+  size_t total_psram = heap_caps_get_total_size(MALLOC_CAP_SPIRAM);
+  
+  if (total_psram > 0) {
+    hooks.malloc_fn = [](size_t size) -> void* {
+      void* ptr = heap_caps_malloc(size, MALLOC_CAP_SPIRAM);
+      if (!ptr) {
+        ptr = malloc(size);  // Fallback to regular heap
+      }
+      return ptr;
+    };
+    hooks.free_fn = [](void* ptr) { heap_caps_free(ptr); };
+    cJSON_InitHooks(&hooks);
+    using_psram = true;
+  }
+  
   cJSON *root = cJSON_CreateObject();
   cJSON *nodes_array = cJSON_CreateArray();
   
@@ -1731,6 +1872,11 @@ std::string TigoWebServer::build_node_table_json() {
   cJSON_free(json_str);
   cJSON_Delete(root);
   
+  // Reset to default allocators
+  if (using_psram) {
+    cJSON_InitHooks(NULL);
+  }
+  
   return result;
 }
 
@@ -1758,16 +1904,10 @@ std::string TigoWebServer::build_esp_status_json() {
   uint32_t invalid_checksum = parent_->get_invalid_checksum_count();
   uint32_t missed_packets = parent_->get_missed_packet_count();
   
-  // Get ESP32 internal temperature (ESP-IDF API)
+  // Get ESP32 internal temperature (using persistent sensor handle)
   float internal_temp = 0.0f;
-  temperature_sensor_handle_t temp_sensor = NULL;
-  temperature_sensor_config_t temp_sensor_config = TEMPERATURE_SENSOR_CONFIG_DEFAULT(-10, 80);
-  if (temperature_sensor_install(&temp_sensor_config, &temp_sensor) == ESP_OK) {
-    if (temperature_sensor_enable(temp_sensor) == ESP_OK) {
-      temperature_sensor_get_celsius(temp_sensor, &internal_temp);
-      temperature_sensor_disable(temp_sensor);
-    }
-    temperature_sensor_uninstall(temp_sensor);
+  if (temp_sensor_handle_ != nullptr) {
+    temperature_sensor_get_celsius(temp_sensor_handle_, &internal_temp);
   }
   
   // Get network stats
@@ -1793,27 +1933,25 @@ std::string TigoWebServer::build_esp_status_json() {
   }
 #endif
 
-  // Count active TCP connections by examining file descriptors
-  // This counts actual open sockets, not just the HTTP server
+  // Get active socket count from HTTP server if available
   int active_sockets = 0;
+  if (server_) {
+    // Query the HTTP server for active client sessions
+    // This is much more efficient than scanning all LWIP sockets
+    // First call to get count, then allocate and get the actual FDs
+    size_t max_clients = 10;  // Should be enough for our config (max_open_sockets = 4)
+    int client_fds[10];
+    esp_err_t err = httpd_get_client_list(server_, &max_clients, client_fds);
+    if (err == ESP_OK) {
+      active_sockets = max_clients;
+    }
+  }
+  
 #ifdef CONFIG_LWIP_MAX_SOCKETS
   int max_sockets = CONFIG_LWIP_MAX_SOCKETS;
 #else
-  int max_sockets = 16;  // Fallback if not defined
+  int max_sockets = 16;
 #endif
-  
-  // Check each possible socket FD
-  // On ESP-IDF, socket FDs usually start at a specific base
-  // We'll check by attempting to get socket options
-  for (int fd = 0; fd < 64; fd++) {  // Check a reasonable range
-    struct sockaddr_in addr;
-    socklen_t addr_len = sizeof(addr);
-    // getsockname succeeds if FD is a valid socket
-    if (getsockname(fd, (struct sockaddr*)&addr, &addr_len) == 0) {
-      active_sockets++;
-      if (active_sockets >= max_sockets) break;  // Stop when we hit our limit
-    }
-  }
   
   char buffer[1536];
   snprintf(buffer, sizeof(buffer),
@@ -1907,8 +2045,8 @@ std::string TigoWebServer::build_yaml_json() {
 
 // ===== HTML Page Generators =====
 
-std::string TigoWebServer::get_dashboard_html() {
-  std::string html = R"html(<!DOCTYPE html>
+void TigoWebServer::get_dashboard_html(PSRAMString& html) {
+  html.append(R"html(<!DOCTYPE html)
 <html>
 <head>
   <meta charset="UTF-8">
@@ -2387,12 +2525,11 @@ std::string TigoWebServer::get_dashboard_html() {
   </script>
 </body>
 </html>
-)html";
-  return html;
+)html");
 }
 
-std::string TigoWebServer::get_node_table_html() {
-  std::string html = R"html(<!DOCTYPE html>
+void TigoWebServer::get_node_table_html(PSRAMString& html) {
+  html.append(R"html(<!DOCTYPE html>
 <html>
 <head>
   <meta charset="UTF-8">
@@ -2688,12 +2825,11 @@ std::string TigoWebServer::get_node_table_html() {
   </script>
 </body>
 </html>
-)html";
-  return html;
+)html");
 }
 
-std::string TigoWebServer::get_esp_status_html() {
-  std::string html = R"html(<!DOCTYPE html>
+void TigoWebServer::get_esp_status_html(PSRAMString& html) {
+  html.append(R"html(<!DOCTYPE html>
 <html>
 <head>
   <meta charset="UTF-8">
@@ -3325,11 +3461,11 @@ std::string TigoWebServer::get_esp_status_html() {
     // Check on page load if log streaming is available
     async function checkLogAvailability() {
       try {
-        const response = await apiFetch('/api/logs?start=0');
+        const response = await apiFetch('/api/logs/status');
         const data = await response.json();
-        if (data.error) {
+        if (!data.enabled) {
           // Log streaming disabled
-          document.getElementById('ws-status-text').textContent = '⚠️ ' + data.error;
+          document.getElementById('ws-status-text').textContent = '⚠️ Log streaming not available - requires PSRAM';
           document.getElementById('ws-status-text').style.color = '#e67e22';
           
           const btn = document.getElementById('pause-log-btn');
@@ -3348,12 +3484,11 @@ std::string TigoWebServer::get_esp_status_html() {
   </script>
 </body>
 </html>
-)html";
-  return html;
+)html");
 }
 
-std::string TigoWebServer::get_yaml_config_html() {
-  std::string html = R"html(<!DOCTYPE html>
+void TigoWebServer::get_yaml_config_html(PSRAMString& html) {
+  html.append(R"html(<!DOCTYPE html>
 <html>
 <head>
   <meta charset="UTF-8">
@@ -3484,12 +3619,11 @@ std::string TigoWebServer::get_yaml_config_html() {
   </script>
 </body>
 </html>
-)html";
-  return html;
+)html");
 }
 
-std::string TigoWebServer::get_cca_info_html() {
-  std::string html = R"html(<!DOCTYPE html>
+void TigoWebServer::get_cca_info_html(PSRAMString& html) {
+  html.append(R"html(<!DOCTYPE html>
 <html>
 <head>
   <meta charset="UTF-8">
@@ -3799,8 +3933,7 @@ std::string TigoWebServer::get_cca_info_html() {
   </script>
 </body>
 </html>
-)html";
-  return html;
+)html");
 }
 
 std::string TigoWebServer::build_cca_info_json() {
@@ -3857,6 +3990,15 @@ void TigoWebServer::loop() {
       log_to_buffer(ESP_LOG_INFO, TAG, msg);
     }
     last_status_log = millis();
+  }
+}
+
+TigoWebServer::~TigoWebServer() {
+  // Clean up temperature sensor if it was initialized
+  if (temp_sensor_handle_ != nullptr) {
+    temperature_sensor_disable(temp_sensor_handle_);
+    temperature_sensor_uninstall(temp_sensor_handle_);
+    temp_sensor_handle_ = nullptr;
   }
 }
 
