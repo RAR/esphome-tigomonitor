@@ -1170,7 +1170,11 @@ std::string TigoWebServer::build_esp_status_json() {
   // Count active TCP connections by examining file descriptors
   // This counts actual open sockets, not just the HTTP server
   int active_sockets = 0;
-  int max_sockets = 16;  // From CONFIG_LWIP_MAX_SOCKETS
+#ifdef CONFIG_LWIP_MAX_SOCKETS
+  int max_sockets = CONFIG_LWIP_MAX_SOCKETS;
+#else
+  int max_sockets = 16;  // Fallback if not defined
+#endif
   
   // Check each possible socket FD
   // On ESP-IDF, socket FDs usually start at a specific base
