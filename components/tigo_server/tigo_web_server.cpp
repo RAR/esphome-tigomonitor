@@ -5,7 +5,9 @@
 #include "esphome/core/application.h"
 #include "esphome/core/util.h"
 #include "esphome/core/version.h"
+#include "esphome/core/time.h"
 #include "esphome/components/network/util.h"
+#include "esphome/components/logger/logger.h"
 #ifdef USE_WIFI
 #include "esphome/components/wifi/wifi_component.h"
 #endif
@@ -17,6 +19,7 @@
 #include <lwip/sockets.h>
 #include <lwip/tcp.h>
 #include <cstring>
+#include <sys/time.h>
 #include <mbedtls/base64.h>
 #include <driver/temperature_sensor.h>
 
@@ -24,6 +27,148 @@ namespace esphome {
 namespace tigo_server {
 
 static const char *const TAG = "tigo_web_server";
+
+// Global log buffer instance
+static LogBuffer* g_log_buffer = nullptr;
+
+// Helper function to add logs to buffer from anywhere
+void log_to_buffer(esp_log_level_t level, const char* tag, const char* message) {
+  if (g_log_buffer) {
+    g_log_buffer->add_log(level, tag, message);
+  }
+}
+
+// Helper function to strip ANSI color codes from log messages
+static std::string strip_ansi_codes(const char* message) {
+  std::string result;
+  result.reserve(strlen(message));
+  
+  const char* p = message;
+  while (*p) {
+    if (*p == '\033' && *(p+1) == '[') {
+      // Skip ANSI escape sequence: \033[...m
+      p += 2;
+      while (*p && *p != 'm') {
+        p++;
+      }
+      if (*p == 'm') p++;
+    } else {
+      result += *p++;
+    }
+  }
+  
+  return result;
+}
+
+// LogBuffer implementation
+LogBuffer::LogBuffer(size_t max_entries) 
+  : buffer_(nullptr), max_entries_(max_entries), current_index_(0), use_psram_(false) {
+  
+  mutex_ = xSemaphoreCreateMutex();
+  
+  // Try to allocate from PSRAM first
+  size_t buffer_size = max_entries * sizeof(LogEntry);
+  size_t psram_available = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+  
+  if (psram_available >= buffer_size) {
+    buffer_ = static_cast<LogEntry*>(heap_caps_malloc(buffer_size, MALLOC_CAP_SPIRAM));
+    if (buffer_) {
+      use_psram_ = true;
+      ESP_LOGI(TAG, "Log buffer allocated %zu bytes from PSRAM (capacity: %zu entries)", 
+               buffer_size, max_entries);
+    }
+  }
+  
+  // Fallback to regular heap
+  if (!buffer_) {
+    buffer_ = static_cast<LogEntry*>(heap_caps_malloc(buffer_size, MALLOC_CAP_DEFAULT));
+    if (buffer_) {
+      ESP_LOGI(TAG, "Log buffer allocated %zu bytes from internal RAM (capacity: %zu entries)", 
+               buffer_size, max_entries);
+    } else {
+      ESP_LOGE(TAG, "Failed to allocate log buffer!");
+      max_entries_ = 0;
+      return;
+    }
+  }
+  
+  // Initialize buffer
+  for (size_t i = 0; i < max_entries_; i++) {
+    new (&buffer_[i]) LogEntry();
+  }
+}
+
+LogBuffer::~LogBuffer() {
+  if (buffer_) {
+    // Call destructors
+    for (size_t i = 0; i < max_entries_; i++) {
+      buffer_[i].~LogEntry();
+    }
+    heap_caps_free(buffer_);
+  }
+  if (mutex_) {
+    vSemaphoreDelete(mutex_);
+  }
+}
+
+void LogBuffer::add_log(esp_log_level_t level, const char* tag, const char* message) {
+  if (!buffer_ || max_entries_ == 0) return;
+  
+  if (xSemaphoreTake(mutex_, pdMS_TO_TICKS(10)) == pdTRUE) {
+    size_t index = current_index_ % max_entries_;
+    
+    // Try to get Unix timestamp from system time
+    uint64_t timestamp_ms = 0;
+    
+    // Get current Unix time if available
+    struct timeval tv;
+    if (gettimeofday(&tv, nullptr) == 0 && tv.tv_sec > 1000000000) {
+      // Time is valid (after year 2001), convert to milliseconds
+      timestamp_ms = ((uint64_t)tv.tv_sec * 1000) + (tv.tv_usec / 1000);
+    } else {
+      // Fallback to millis if time not synced yet
+      timestamp_ms = millis();
+    }
+    
+    buffer_[index].timestamp = timestamp_ms;
+    buffer_[index].level = level;
+    buffer_[index].tag = tag;
+    buffer_[index].message = message;
+    
+    current_index_++;
+    
+    xSemaphoreGive(mutex_);
+  }
+}
+
+std::vector<LogEntry> LogBuffer::get_logs(size_t start_index) {
+  std::vector<LogEntry> result;
+  
+  if (!buffer_ || max_entries_ == 0) return result;
+  
+  if (xSemaphoreTake(mutex_, pdMS_TO_TICKS(100)) == pdTRUE) {
+    size_t total_logs = std::min(current_index_, max_entries_);
+    
+    // Calculate starting point
+    size_t actual_start = (start_index < current_index_) ? start_index : current_index_;
+    
+    for (size_t i = actual_start; i < current_index_; i++) {
+      size_t index = i % max_entries_;
+      result.push_back(buffer_[index]);
+    }
+    
+    xSemaphoreGive(mutex_);
+  }
+  
+  return result;
+}
+
+void LogBuffer::clear() {
+  if (xSemaphoreTake(mutex_, pdMS_TO_TICKS(100)) == pdTRUE) {
+    current_index_ = 0;
+    xSemaphoreGive(mutex_);
+  }
+}
 
 // Helper class to manage PSRAM-allocated strings for large HTML content
 class PSRAMString {
@@ -101,6 +246,48 @@ class PSRAMString {
 void TigoWebServer::setup() {
   ESP_LOGI(TAG, "Starting Tigo Web Server on port %d...", port_);
   
+  // Initialize log buffer FIRST
+  if (!log_buffer_) {
+    log_buffer_ = new LogBuffer(500);  // Store last 500 log entries
+    g_log_buffer = log_buffer_;
+    ESP_LOGI(TAG, "Log buffer created at %p", (void*)g_log_buffer);
+  }
+  
+  // Hook into ESPHome's logger to capture all logs
+  if (esphome::logger::global_logger != nullptr) {
+    esphome::logger::global_logger->add_on_log_callback(
+      [](uint8_t level, const char *tag, const char *message, size_t message_len) {
+        if (g_log_buffer) {
+          // Convert ESPHome log level to ESP-IDF log level
+          esp_log_level_t esp_level;
+          switch(level) {
+            case 1: esp_level = ESP_LOG_ERROR; break;    // ERROR
+            case 2: esp_level = ESP_LOG_WARN; break;     // WARN  
+            case 3: esp_level = ESP_LOG_INFO; break;     // INFO
+            case 4: esp_level = ESP_LOG_INFO; break;     // CONFIG -> INFO
+            case 5: esp_level = ESP_LOG_DEBUG; break;    // DEBUG
+            case 6: esp_level = ESP_LOG_VERBOSE; break;  // VERBOSE
+            case 7: esp_level = ESP_LOG_VERBOSE; break;  // VERY_VERBOSE -> VERBOSE
+            default: esp_level = ESP_LOG_INFO; break;
+          }
+          
+          // Strip ANSI color codes from the message
+          std::string clean_message = strip_ansi_codes(message);
+          g_log_buffer->add_log(esp_level, tag, clean_message.c_str());
+        }
+      }
+    );
+    ESP_LOGI(TAG, "Hooked into ESPHome logger - all logs will be captured!");
+  } else {
+    ESP_LOGW(TAG, "ESPHome logger not available - log capture disabled");
+  }
+  
+  // Manually add a test log to verify buffer works
+  if (g_log_buffer) {
+    g_log_buffer->add_log(ESP_LOG_INFO, "TEST", "Manual test log entry");
+    ESP_LOGI(TAG, "Added manual test log, current_index=%zu", g_log_buffer->get_current_index());
+  }
+  
   // Check PSRAM availability
   size_t total_psram = heap_caps_get_total_size(MALLOC_CAP_SPIRAM);
   size_t free_psram = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
@@ -114,11 +301,14 @@ void TigoWebServer::setup() {
   httpd_config_t config = HTTPD_DEFAULT_CONFIG();
   config.server_port = port_;
   config.ctrl_port = port_ + 1;
-  config.max_uri_handlers = 20;  // Increased for additional endpoints
+  config.max_uri_handlers = 25;  // Increased for log endpoints
   config.stack_size = 8192;
   
   if (httpd_start(&server_, &config) == ESP_OK) {
     ESP_LOGI(TAG, "Web server started successfully");
+    
+    std::string start_msg = "Web server started on port " + std::to_string(port_);
+    log_to_buffer(ESP_LOG_INFO, TAG, start_msg.c_str());
     
     // Register HTML page handlers
     httpd_uri_t dashboard_uri = {
@@ -273,6 +463,32 @@ void TigoWebServer::setup() {
       .user_ctx = this
     };
     httpd_register_uri_handler(server_, &api_health_uri);
+    
+    // Register more specific log endpoints first (ESP-IDF matches in order)
+    httpd_uri_t api_logs_clear_uri = {
+      .uri = "/api/logs/clear",
+      .method = HTTP_POST,
+      .handler = api_logs_clear_handler,
+      .user_ctx = this
+    };
+    httpd_register_uri_handler(server_, &api_logs_clear_uri);
+    
+    httpd_uri_t api_logs_stream_uri = {
+      .uri = "/api/logs/stream",
+      .method = HTTP_GET,
+      .handler = api_logs_stream_handler,
+      .user_ctx = this
+    };
+    httpd_register_uri_handler(server_, &api_logs_stream_uri);
+    
+    // Register general /api/logs last
+    httpd_uri_t api_logs_uri = {
+      .uri = "/api/logs",
+      .method = HTTP_GET,
+      .handler = api_logs_handler,
+      .user_ctx = this
+    };
+    httpd_register_uri_handler(server_, &api_logs_uri);
     
     // Log web authentication status
     if (!web_username_.empty() && !web_password_.empty()) {
@@ -728,6 +944,7 @@ esp_err_t TigoWebServer::api_restart_handler(httpd_req_t *req) {
   }
   
   ESP_LOGI(TAG, "Restart requested via web interface");
+  log_to_buffer(ESP_LOG_WARN, TAG, "Restart requested via web interface - rebooting...");
   
   // Send success response
   const char* response = "{\"status\":\"ok\",\"message\":\"Restarting ESP32...\"}";
@@ -793,6 +1010,132 @@ esp_err_t TigoWebServer::api_health_handler(httpd_req_t *req) {
   );
   
   httpd_resp_set_type(req, "application/json");
+  httpd_resp_send(req, response, strlen(response));
+  
+  return ESP_OK;
+}
+
+esp_err_t TigoWebServer::api_logs_handler(httpd_req_t *req) {
+  TigoWebServer *server = static_cast<TigoWebServer *>(req->user_ctx);
+  if (!server->check_api_auth(req)) {
+    return ESP_OK;
+  }
+  
+  LogBuffer *log_buffer = server->log_buffer_;
+  if (!log_buffer) {
+    httpd_resp_send_500(req);
+    return ESP_OK;
+  }
+  
+  // Get query parameter for start index
+  char query_str[64] = {0};
+  size_t start_index = 0;
+  
+  if (httpd_req_get_url_query_str(req, query_str, sizeof(query_str)) == ESP_OK) {
+    char param[32] = {0};
+    if (httpd_query_key_value(query_str, "start", param, sizeof(param)) == ESP_OK) {
+      start_index = atoi(param);
+    }
+  }
+  
+  auto logs = log_buffer->get_logs(start_index);
+  
+  std::string json = "{\"current_index\":" + std::to_string(log_buffer->get_current_index()) + ",\"logs\":[";
+  bool first = true;
+  
+  for (const auto &log : logs) {
+    if (!first) json += ",";
+    first = false;
+    
+    const char* level_str = "INFO";
+    switch(log.level) {
+      case ESP_LOG_ERROR: level_str = "ERROR"; break;
+      case ESP_LOG_WARN: level_str = "WARN"; break;
+      case ESP_LOG_INFO: level_str = "INFO"; break;
+      case ESP_LOG_DEBUG: level_str = "DEBUG"; break;
+      case ESP_LOG_VERBOSE: level_str = "VERBOSE"; break;
+      default: break;
+    }
+    
+    // Escape JSON strings properly
+    std::string escaped_tag;
+    std::string escaped_msg;
+    
+    // Escape tag
+    for (char c : log.tag) {
+      if (c == '"') escaped_tag += "\\\"";
+      else if (c == '\\') escaped_tag += "\\\\";
+      else if (c == '\b') escaped_tag += "\\b";
+      else if (c == '\f') escaped_tag += "\\f";
+      else if (c == '\n') escaped_tag += "\\n";
+      else if (c == '\r') escaped_tag += "\\r";
+      else if (c == '\t') escaped_tag += "\\t";
+      else if ((unsigned char)c < 0x20) {
+        // Escape other control characters as \uXXXX
+        char buf[7];
+        snprintf(buf, sizeof(buf), "\\u%04x", (unsigned char)c);
+        escaped_tag += buf;
+      } else {
+        escaped_tag += c;
+      }
+    }
+    
+    // Escape message
+    for (char c : log.message) {
+      if (c == '"') escaped_msg += "\\\"";
+      else if (c == '\\') escaped_msg += "\\\\";
+      else if (c == '\b') escaped_msg += "\\b";
+      else if (c == '\f') escaped_msg += "\\f";
+      else if (c == '\n') escaped_msg += "\\n";
+      else if (c == '\r') escaped_msg += "\\r";
+      else if (c == '\t') escaped_msg += "\\t";
+      else if ((unsigned char)c < 0x20) {
+        // Escape other control characters as \uXXXX
+        char buf[7];
+        snprintf(buf, sizeof(buf), "\\u%04x", (unsigned char)c);
+        escaped_msg += buf;
+      } else {
+        escaped_msg += c;
+      }
+    }
+    
+    char entry[1024];  // Increased size for escaped content
+    snprintf(entry, sizeof(entry),
+      "{\"timestamp\":%llu,\"level\":\"%s\",\"tag\":\"%s\",\"message\":\"%s\"}",
+      (unsigned long long)log.timestamp, level_str, escaped_tag.c_str(), escaped_msg.c_str());
+    json += entry;
+  }
+  
+  json += "]}";
+  
+  httpd_resp_set_type(req, "application/json");
+  httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+  httpd_resp_send(req, json.c_str(), json.length());
+  
+  return ESP_OK;
+}
+
+esp_err_t TigoWebServer::api_logs_stream_handler(httpd_req_t *req) {
+  // Server-Sent Events implementation (if needed in future)
+  // For now, just return error - we'll use polling instead
+  httpd_resp_send_404(req);
+  return ESP_OK;
+}
+
+esp_err_t TigoWebServer::api_logs_clear_handler(httpd_req_t *req) {
+  TigoWebServer *server = static_cast<TigoWebServer *>(req->user_ctx);
+  if (!server->check_api_auth(req)) {
+    return ESP_OK;
+  }
+  
+  LogBuffer *log_buffer = server->log_buffer_;
+  if (log_buffer) {
+    log_buffer->clear();
+  }
+  
+  const char* response = "{\"status\":\"ok\",\"message\":\"Logs cleared\"}";
+  httpd_resp_set_type(req, "application/json");
+  httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
   httpd_resp_send(req, response, strlen(response));
   
   return ESP_OK;
@@ -2166,6 +2509,37 @@ std::string TigoWebServer::get_esp_status_html() {
       <div id="reset-message" style="margin-top: 1rem; padding: 1rem; border-radius: 4px; display: none;"></div>
       <div id="node-reset-message" style="margin-top: 1rem; padding: 1rem; border-radius: 4px; display: none;"></div>
     </div>
+    
+    <div class="card">
+      <h2>System Logs</h2>
+      <div style="margin-bottom: 1rem; display: flex; gap: 0.5rem; flex-wrap: wrap;">
+        <button id="log-pause-btn" onclick="toggleLogPause()" style="padding: 8px 16px; background-color: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px;">
+          ⏸️ Pause
+        </button>
+        <button onclick="clearLogs()" style="padding: 8px 16px; background-color: #95a5a6; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px;">
+          🗑️ Clear
+        </button>
+        <button onclick="toggleAutoScroll()" id="autoscroll-btn" style="padding: 8px 16px; background-color: #27ae60; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px;">
+          📜 Auto-scroll: ON
+        </button>
+        <button onclick="downloadLogs()" style="padding: 8px 16px; background-color: #8e44ad; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px;">
+          💾 Download
+        </button>
+        <select id="log-level-filter" onchange="filterLogsByLevel()" style="padding: 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 14px;">
+          <option value="all">All Levels</option>
+          <option value="ERROR">ERROR</option>
+          <option value="WARN">WARN</option>
+          <option value="INFO">INFO</option>
+          <option value="DEBUG">DEBUG</option>
+          <option value="VERBOSE">VERBOSE</option>
+        </select>
+        <input type="text" id="log-search" onkeyup="searchLogs()" placeholder="Search logs..." style="padding: 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 14px; flex: 1; min-width: 200px;">
+      </div>
+      <div id="log-console" style="background: #1e1e1e; color: #d4d4d4; padding: 1rem; border-radius: 4px; font-family: 'Courier New', monospace; font-size: 12px; height: 400px; overflow-y: auto; white-space: pre-wrap; word-wrap: break-word;"></div>
+      <div id="ws-status" style="margin-top: 0.5rem; font-size: 12px; color: #7f8c8d;">
+        <span id="ws-status-text">Connecting to log stream...</span>
+      </div>
+    </div>
   </div>
   
   <script>
@@ -2393,6 +2767,162 @@ std::string TigoWebServer::get_esp_status_html() {
         console.error('Reset node table error:', error);
       }
     }
+    
+    // Log polling system (instead of WebSocket)
+    let logPaused = false;
+    let autoScroll = true;
+    let allLogs = [];
+    let currentFilter = 'all';
+    let searchTerm = '';
+    let lastLogIndex = 0;
+    let logPollInterval = null;
+    
+    async function fetchLogs() {
+      if (logPaused) return;
+      
+      try {
+        const response = await apiFetch(`/api/logs?start=${lastLogIndex}`);
+        const data = await response.json();
+        
+        if (data.logs && data.logs.length > 0) {
+          allLogs.push(...data.logs);
+          
+          // Keep only last 1000 logs
+          if (allLogs.length > 1000) {
+            allLogs = allLogs.slice(-1000);
+          }
+          
+          lastLogIndex = data.current_index;
+          renderLogs();
+        }
+        
+        document.getElementById('ws-status-text').textContent = '✅ Connected (polling)';
+        document.getElementById('ws-status-text').style.color = '#27ae60';
+      } catch (error) {
+        console.error('Failed to fetch logs:', error);
+        document.getElementById('ws-status-text').textContent = '❌ Connection error';
+        document.getElementById('ws-status-text').style.color = '#e74c3c';
+      }
+    }
+    
+    async function loadInitialLogs() {
+      try {
+        const response = await apiFetch('/api/logs?start=0');
+        const data = await response.json();
+        
+        allLogs = data.logs || [];
+        lastLogIndex = data.current_index || 0;
+        renderLogs();
+        
+        document.getElementById('ws-status-text').textContent = '✅ Connected (polling)';
+        document.getElementById('ws-status-text').style.color = '#27ae60';
+      } catch (error) {
+        console.error('Failed to load initial logs:', error);
+        document.getElementById('ws-status-text').textContent = '❌ Failed to load logs';
+        document.getElementById('ws-status-text').style.color = '#e74c3c';
+      }
+    }
+    
+    function renderLogs() {
+      const console = document.getElementById('log-console');
+      
+      // Filter logs
+      let filteredLogs = allLogs;
+      
+      if (currentFilter !== 'all') {
+        filteredLogs = filteredLogs.filter(log => log.level === currentFilter);
+      }
+      
+      if (searchTerm) {
+        const term = searchTerm.toLowerCase();
+        filteredLogs = filteredLogs.filter(log => 
+          log.tag.toLowerCase().includes(term) || 
+          log.message.toLowerCase().includes(term)
+        );
+      }
+      
+      // Render logs
+      let html = '';
+      filteredLogs.forEach(log => {
+        const time = new Date(log.timestamp).toLocaleTimeString();
+        const color = getLogColor(log.level);
+        html += `<span style="color: ${color};">[${time}] [${log.level}] [${log.tag}] ${log.message}</span>\n`;
+      });
+      
+      console.innerHTML = html || '<span style="color: #7f8c8d;">No logs to display</span>';
+      
+      // Auto-scroll
+      if (autoScroll && !logPaused) {
+        console.scrollTop = console.scrollHeight;
+      }
+    }
+    
+    function getLogColor(level) {
+      switch(level) {
+        case 'ERROR': return '#e74c3c';
+        case 'WARN': return '#f39c12';
+        case 'INFO': return '#3498db';
+        case 'DEBUG': return '#95a5a6';
+        case 'VERBOSE': return '#7f8c8d';
+        default: return '#d4d4d4';
+      }
+    }
+    
+    function toggleLogPause() {
+      logPaused = !logPaused;
+      const btn = document.getElementById('log-pause-btn');
+      btn.textContent = logPaused ? '▶️ Resume' : '⏸️ Pause';
+      btn.style.backgroundColor = logPaused ? '#27ae60' : '#3498db';
+    }
+    
+    async function clearLogs() {
+      try {
+        await apiFetch('/api/logs/clear', { method: 'POST' });
+        allLogs = [];
+        lastLogIndex = 0;
+        renderLogs();
+      } catch (error) {
+        console.error('Failed to clear logs:', error);
+      }
+    }
+    
+    function toggleAutoScroll() {
+      autoScroll = !autoScroll;
+      const btn = document.getElementById('autoscroll-btn');
+      btn.textContent = autoScroll ? '📜 Auto-scroll: ON' : '📜 Auto-scroll: OFF';
+      btn.style.backgroundColor = autoScroll ? '#27ae60' : '#95a5a6';
+    }
+    
+    function filterLogsByLevel() {
+      currentFilter = document.getElementById('log-level-filter').value;
+      renderLogs();
+    }
+    
+    function searchLogs() {
+      searchTerm = document.getElementById('log-search').value;
+      renderLogs();
+    }
+    
+    function downloadLogs() {
+      const content = allLogs.map(log => {
+        const time = new Date(log.timestamp).toISOString();
+        return `[${time}] [${log.level}] [${log.tag}] ${log.message}`;
+      }).join('\n');
+      
+      const blob = new Blob([content], { type: 'text/plain' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `esp32-logs-${new Date().toISOString().replace(/:/g, '-')}.txt`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }
+    
+    // Initialize log system
+    loadInitialLogs();
+    logPollInterval = setInterval(fetchLogs, 1000);  // Poll every second
     
     loadData();
     setInterval(loadData, 5000);
@@ -2893,6 +3423,22 @@ std::string TigoWebServer::build_cca_info_json() {
   
   json += "}";
   return json;
+}
+
+void TigoWebServer::loop() {
+  // Periodically add status logs
+  static uint32_t last_status_log = 0;
+  
+  if (millis() - last_status_log > 60000) {  // Every 60 seconds
+    if (g_log_buffer && parent_) {
+      char msg[128];
+      snprintf(msg, sizeof(msg), "System status: %zu devices, heap: %u bytes free", 
+               parent_->get_devices().size(), 
+               esp_get_free_heap_size());
+      log_to_buffer(ESP_LOG_INFO, TAG, msg);
+    }
+    last_status_log = millis();
+  }
 }
 
 }  // namespace tigo_server
