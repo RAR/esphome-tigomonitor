@@ -591,8 +591,12 @@ void TigoMonitorComponent::process_power_frame(const std::string &frame) {
   int current_in_raw = std::stoi(frame.substr(22, 3), nullptr, 16);
   data.current_in = current_in_raw * 0.005f;
   
-  // Temperature (scale by 0.1)
+  // Temperature (scale by 0.1) - handle signed 12-bit value in two's complement
   int temperature_raw = std::stoi(frame.substr(25, 3), nullptr, 16);
+  // Convert from 12-bit two's complement to signed value
+  if (temperature_raw & 0x800) {  // Check sign bit (bit 11)
+    temperature_raw = temperature_raw - 0x1000;  // Convert to negative
+  }
   data.temperature = temperature_raw * 0.1f;
   
   // Slot Counter
