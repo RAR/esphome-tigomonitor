@@ -99,15 +99,15 @@ class TigoWebServer : public Component {
   void get_yaml_config_html(PSRAMString& html);
   void get_cca_info_html(PSRAMString& html);
   
-  // JSON builders
-  std::string build_devices_json();
-  std::string build_overview_json();
-  std::string build_node_table_json();
-  std::string build_strings_json();
-  std::string build_inverters_json();
-  std::string build_esp_status_json();
-  std::string build_yaml_json();
-  std::string build_cca_info_json();
+  // JSON builders - now write directly to PSRAMString to avoid internal RAM allocation
+  void build_devices_json(PSRAMString& json);
+  void build_overview_json(PSRAMString& json);
+  void build_node_table_json(PSRAMString& json);
+  void build_strings_json(PSRAMString& json);
+  void build_inverters_json(PSRAMString& json);
+  void build_esp_status_json(PSRAMString& json);
+  void build_yaml_json(PSRAMString& json);
+  void build_cca_info_json(PSRAMString& json);
 };
 
 #endif  // USE_ESP_IDF

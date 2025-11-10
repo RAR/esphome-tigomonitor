@@ -616,7 +616,7 @@ esp_err_t TigoWebServer::api_devices_handler(httpd_req_t *req) {
   }
   
   PSRAMString json_buffer;
-  json_buffer.append(server->build_devices_json());
+  server->build_devices_json(json_buffer);
   
   httpd_resp_set_type(req, "application/json");
   httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
@@ -631,7 +631,7 @@ esp_err_t TigoWebServer::api_overview_handler(httpd_req_t *req) {
   }
   
   PSRAMString json_buffer;
-  json_buffer.append(server->build_overview_json());
+  server->build_overview_json(json_buffer);
   
   httpd_resp_set_type(req, "application/json");
   httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
@@ -646,7 +646,7 @@ esp_err_t TigoWebServer::api_node_table_handler(httpd_req_t *req) {
   }
   
   PSRAMString json_buffer;
-  json_buffer.append(server->build_node_table_json());
+  server->build_node_table_json(json_buffer);
   
   httpd_resp_set_type(req, "application/json");
   httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
@@ -661,7 +661,7 @@ esp_err_t TigoWebServer::api_strings_handler(httpd_req_t *req) {
   }
   
   PSRAMString json_buffer;
-  json_buffer.append(server->build_strings_json());
+  server->build_strings_json(json_buffer);
   
   httpd_resp_set_type(req, "application/json");
   httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
@@ -676,7 +676,7 @@ esp_err_t TigoWebServer::api_inverters_handler(httpd_req_t *req) {
   }
   
   PSRAMString json_buffer;
-  json_buffer.append(server->build_inverters_json());
+  server->build_inverters_json(json_buffer);
   
   httpd_resp_set_type(req, "application/json");
   httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
@@ -691,7 +691,7 @@ esp_err_t TigoWebServer::api_esp_status_handler(httpd_req_t *req) {
   }
   
   PSRAMString json_buffer;
-  json_buffer.append(server->build_esp_status_json());
+  server->build_esp_status_json(json_buffer);
   
   httpd_resp_set_type(req, "application/json");
   httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
@@ -707,7 +707,7 @@ esp_err_t TigoWebServer::api_yaml_handler(httpd_req_t *req) {
   }
   
   PSRAMString json_buffer;
-  json_buffer.append(server->build_yaml_json());
+  server->build_yaml_json(json_buffer);
   
   httpd_resp_set_type(req, "application/json");
   httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
@@ -753,7 +753,7 @@ esp_err_t TigoWebServer::api_cca_info_handler(httpd_req_t *req) {
   }
   
   PSRAMString json_buffer;
-  json_buffer.append(server->build_cca_info_json());
+  server->build_cca_info_json(json_buffer);
   
   httpd_resp_set_type(req, "application/json");
   httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
@@ -1115,8 +1115,8 @@ esp_err_t TigoWebServer::api_health_handler(httpd_req_t *req) {
 }
 // ===== JSON Builders =====
 
-std::string TigoWebServer::build_devices_json() {
-  std::string json = "{\"devices\":[";
+void TigoWebServer::build_devices_json(PSRAMString& json) {
+  json.append("{\"devices\":[");
   
   const auto &devices = parent_->get_devices();
   const auto &node_table = parent_->get_node_table();
@@ -1226,7 +1226,7 @@ std::string TigoWebServer::build_devices_json() {
   bool first = true;
   
   for (const auto &dwn : sorted_devices) {
-    if (!first) json += ",";
+    if (!first) json.append(",");
     first = false;
     
     const std::string &device_name = dwn.name;
@@ -1259,14 +1259,13 @@ std::string TigoWebServer::build_devices_json() {
         dwn.addr.c_str(), dwn.barcode.c_str(), device_name.c_str(), string_label.c_str());
     }
     
-    json += buffer;
+    json.append(buffer);
   }
   
-  json += "]}";
-  return json;
+  json.append("]}");
 }
 
-std::string TigoWebServer::build_overview_json() {
+void TigoWebServer::build_overview_json(PSRAMString& json) {
   const auto &devices = parent_->get_devices();
   
   float total_power = 0.0f;
@@ -1298,20 +1297,20 @@ std::string TigoWebServer::build_overview_json() {
     total_power, total_current, avg_efficiency, avg_temp,
     active_devices, parent_->get_number_of_devices(), total_energy);
   
-  return std::string(buffer);
+  json.append(buffer);
 }
 
-std::string TigoWebServer::build_strings_json() {
+void TigoWebServer::build_strings_json(PSRAMString& json) {
   const auto &strings = parent_->get_strings();
   
   ESP_LOGD(TAG, "Building strings JSON - found %d strings", strings.size());
   
-  std::string json = "{\"strings\":[";
+  json.append("{\"strings\":[");
   
   bool first = true;
   
   for (const auto &pair : strings) {
-    if (!first) json += ",";
+    if (!first) json.append(",");
     first = false;
     
     const auto &string_data = pair.second;
@@ -1335,24 +1334,23 @@ std::string TigoWebServer::build_strings_json() {
       string_data.min_efficiency, string_data.max_efficiency,
       string_data.active_device_count, string_data.total_device_count);
     
-    json += buffer;
+    json.append(buffer);
   }
   
-  json += "]}";
-  return json;
+  json.append("]}");
 }
 
-std::string TigoWebServer::build_inverters_json() {
+void TigoWebServer::build_inverters_json(PSRAMString& json) {
   const auto &inverters = parent_->get_inverters();
   const auto &strings = parent_->get_strings();
   
   ESP_LOGD(TAG, "Building inverters JSON - found %d inverters", inverters.size());
   
-  std::string json = "{\"inverters\":[";
+  json.append("{\"inverters\":[");
   
   bool first_inv = true;
   for (const auto &inverter : inverters) {
-    if (!first_inv) json += ",";
+    if (!first_inv) json.append(",");
     first_inv = false;
     
     ESP_LOGD(TAG, "Inverter: %s, devices: %d/%d, power: %.0fW", 
@@ -1362,23 +1360,27 @@ std::string TigoWebServer::build_inverters_json() {
              inverter.total_power);
     
     // Build MPPT labels array
-    std::string mppt_labels_json = "[";
+    PSRAMString mppt_labels_json;
+    mppt_labels_json.append("[");
     bool first_mppt = true;
     for (const auto &mppt : inverter.mppt_labels) {
-      if (!first_mppt) mppt_labels_json += ",";
+      if (!first_mppt) mppt_labels_json.append(",");
       first_mppt = false;
-      mppt_labels_json += "\"" + mppt + "\"";
+      mppt_labels_json.append("\"");
+      mppt_labels_json.append(mppt.c_str());
+      mppt_labels_json.append("\"");
     }
-    mppt_labels_json += "]";
+    mppt_labels_json.append("]");
     
     // Build strings array for this inverter
-    std::string strings_json = "[";
+    PSRAMString strings_json;
+    strings_json.append("[");
     bool first_str = true;
     for (const auto &mppt_label : inverter.mppt_labels) {
       for (const auto &string_pair : strings) {
         const auto &string_data = string_pair.second;
         if (string_data.inverter_label == mppt_label) {
-          if (!first_str) strings_json += ",";
+          if (!first_str) strings_json.append(",");
           first_str = false;
           
           char buffer[512];
@@ -1388,27 +1390,42 @@ std::string TigoWebServer::build_inverters_json() {
             string_data.string_label.c_str(), string_data.inverter_label.c_str(),
             string_data.total_power, string_data.peak_power,
             string_data.active_device_count, string_data.total_device_count);
-          strings_json += buffer;
+          strings_json.append(buffer);
         }
       }
     }
-    strings_json += "]";
+    strings_json.append("]");
     
-    // Build the inverter JSON object (don't use snprintf to avoid truncation)
-    json += "{\"name\":\"" + inverter.name + "\",";
-    json += "\"mppts\":" + mppt_labels_json + ",";
-    json += "\"total_power\":" + std::to_string(inverter.total_power) + ",";
-    json += "\"peak_power\":" + std::to_string(inverter.peak_power) + ",";
-    json += "\"active_devices\":" + std::to_string(inverter.active_device_count) + ",";
-    json += "\"total_devices\":" + std::to_string(inverter.total_device_count) + ",";
-    json += "\"strings\":" + strings_json + "}";
+    // Build the inverter JSON object
+    json.append("{\"name\":\"");
+    json.append(inverter.name.c_str());
+    json.append("\",\"mppts\":");
+    json.append(mppt_labels_json.c_str());
+    json.append(",\"total_power\":");
+    
+    char buffer[64];
+    snprintf(buffer, sizeof(buffer), "%.1f", inverter.total_power);
+    json.append(buffer);
+    json.append(",\"peak_power\":");
+    snprintf(buffer, sizeof(buffer), "%.1f", inverter.peak_power);
+    json.append(buffer);
+    
+    json.append(",\"active_devices\":");
+    snprintf(buffer, sizeof(buffer), "%d", inverter.active_device_count);
+    json.append(buffer);
+    json.append(",\"total_devices\":");
+    snprintf(buffer, sizeof(buffer), "%d", inverter.total_device_count);
+    json.append(buffer);
+    
+    json.append(",\"strings\":");
+    json.append(strings_json.c_str());
+    json.append("}");
   }
   
-  json += "]}";
-  return json;
+  json.append("]}");
 }
 
-std::string TigoWebServer::build_node_table_json() {
+void TigoWebServer::build_node_table_json(PSRAMString& json) {
   // Configure cJSON to use PSRAM if available
   cJSON_Hooks hooks;
   bool using_psram = false;
@@ -1452,7 +1469,7 @@ std::string TigoWebServer::build_node_table_json() {
   cJSON_AddItemToObject(root, "nodes", nodes_array);
   
   char *json_str = cJSON_Print(root);
-  std::string result(json_str);
+  json.append(json_str);
   
   cJSON_free(json_str);
   cJSON_Delete(root);
@@ -1461,11 +1478,9 @@ std::string TigoWebServer::build_node_table_json() {
   if (using_psram) {
     cJSON_InitHooks(NULL);
   }
-  
-  return result;
 }
 
-std::string TigoWebServer::build_esp_status_json() {
+void TigoWebServer::build_esp_status_json(PSRAMString& json) {
   // Get heap info - use MALLOC_CAP_INTERNAL for internal RAM only (excludes PSRAM)
   size_t free_heap = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
   size_t total_heap = heap_caps_get_total_size(MALLOC_CAP_INTERNAL);
@@ -1557,11 +1572,11 @@ std::string TigoWebServer::build_esp_status_json() {
     network_connected ? "true" : "false", wifi_rssi, ssid.c_str(), ip_address.c_str(), mac_address.c_str(),
     active_sockets, max_sockets);
   
-  return std::string(buffer);
+  json.append(buffer);
 }
 
-std::string TigoWebServer::build_yaml_json() {
-  std::string yaml_text;
+void TigoWebServer::build_yaml_json(PSRAMString& json) {
+  PSRAMString yaml_text;
   const auto &node_table = parent_->get_node_table();
   
   // Build YAML configuration
@@ -1576,7 +1591,7 @@ std::string TigoWebServer::build_yaml_json() {
   std::sort(assigned_nodes.begin(), assigned_nodes.end(),
             [](const auto &a, const auto &b) { return a.sensor_index < b.sensor_index; });
   
-  yaml_text = "sensor:\n";
+  yaml_text.append("sensor:\n");
   
   for (const auto &node : assigned_nodes) {
     std::string index_str = std::to_string(node.sensor_index + 1);
@@ -1598,34 +1613,47 @@ std::string TigoWebServer::build_yaml_json() {
       }
     }
     
-    yaml_text += "  # " + device_name + " (discovered" + barcode_comment + ")\n";
-    yaml_text += "  - platform: tigo_monitor\n";
-    yaml_text += "    tigo_monitor_id: tigo_hub\n";
-    yaml_text += "    address: \"" + node.addr + "\"\n";
-    yaml_text += "    name: \"" + device_name + "\"\n";
-    yaml_text += "    power: {}\n";
-    yaml_text += "    peak_power: {}\n";
-    yaml_text += "    voltage_in: {}\n";
-    yaml_text += "    voltage_out: {}\n";
-    yaml_text += "    current_in: {}\n";
-    yaml_text += "    temperature: {}\n";
-    yaml_text += "    rssi: {}\n";
-    yaml_text += "\n";
+    yaml_text.append("  # ");
+    yaml_text.append(device_name.c_str());
+    yaml_text.append(" (discovered");
+    yaml_text.append(barcode_comment.c_str());
+    yaml_text.append(")\n");
+    yaml_text.append("  - platform: tigo_monitor\n");
+    yaml_text.append("    tigo_monitor_id: tigo_hub\n");
+    yaml_text.append("    address: \"");
+    yaml_text.append(node.addr.c_str());
+    yaml_text.append("\"\n");
+    yaml_text.append("    name: \"");
+    yaml_text.append(device_name.c_str());
+    yaml_text.append("\"\n");
+    yaml_text.append("    power: {}\n");
+    yaml_text.append("    peak_power: {}\n");
+    yaml_text.append("    voltage_in: {}\n");
+    yaml_text.append("    voltage_out: {}\n");
+    yaml_text.append("    current_in: {}\n");
+    yaml_text.append("    temperature: {}\n");
+    yaml_text.append("    rssi: {}\n");
+    yaml_text.append("\n");
   }
   
   // Escape for JSON - convert newlines to \n
-  std::string json = "{\"yaml\":\"";
-  for (char c : yaml_text) {
-    if (c == '"') json += "\\\"";
-    else if (c == '\\') json += "\\\\";
-    else if (c == '\n') json += "\\n";
-    else if (c == '\r') json += "\\r";
-    else if (c == '\t') json += "\\t";
-    else json += c;
+  json.append("{\"yaml\":\"");
+  for (size_t i = 0; i < yaml_text.length(); i++) {
+    char c = yaml_text.c_str()[i];
+    if (c == '"') json.append("\\\"");
+    else if (c == '\\') json.append("\\\\");
+    else if (c == '\n') json.append("\\n");
+    else if (c == '\r') json.append("\\r");
+    else if (c == '\t') json.append("\\t");
+    else {
+      char buf[2] = {c, '\0'};
+      json.append(buf);
+    }
   }
-  json += "\",\"device_count\":" + std::to_string(assigned_nodes.size()) + "}";
   
-  return json;
+  char count_buf[64];
+  snprintf(count_buf, sizeof(count_buf), "\",\"device_count\":%zu}", assigned_nodes.size());
+  json.append(count_buf);
 }
 
 // ===== HTML Page Generators =====
@@ -2106,7 +2134,7 @@ void TigoWebServer::get_dashboard_html(PSRAMString& html) {
     }
     
     loadData();
-    setInterval(loadData, 5000);
+    setInterval(loadData, 10000);  // Poll every 10 seconds to reduce memory churn
   </script>
 </body>
 </html>
@@ -2824,7 +2852,7 @@ void TigoWebServer::get_esp_status_html(PSRAMString& html) {
     // Log polling system (instead of WebSocket)
     
     loadData();
-    setInterval(loadData, 5000);
+    setInterval(loadData, 10000);  // Poll every 10 seconds to reduce memory churn
   </script>
 </body>
 </html>
@@ -3280,7 +3308,7 @@ void TigoWebServer::get_cca_info_html(PSRAMString& html) {
 )html");
 }
 
-std::string TigoWebServer::build_cca_info_json() {
+void TigoWebServer::build_cca_info_json(PSRAMString& json) {
   // Query CCA device info if not cached or stale
   if (parent_->get_cca_device_info().empty() || 
       parent_->get_last_cca_sync_time() == 0) {
@@ -3294,31 +3322,35 @@ std::string TigoWebServer::build_cca_info_json() {
     seconds_ago = (millis() - last_sync) / 1000;
   }
   
-  std::string json = "{";
-  json += "\"cca_ip\":\"" + parent_->get_cca_ip() + "\",";
-  json += "\"last_sync_seconds_ago\":" + std::to_string(seconds_ago) + ",";
-  json += "\"device_info\":";
+  json.append("{\"cca_ip\":\"");
+  json.append(parent_->get_cca_ip().c_str());
+  json.append("\",\"last_sync_seconds_ago\":");
+  
+  char buf[32];
+  snprintf(buf, sizeof(buf), "%lu", seconds_ago);
+  json.append(buf);
+  json.append(",\"device_info\":\"");
   
   // Embed the device info JSON (already a JSON string)
   const std::string &device_info = parent_->get_cca_device_info();
   if (device_info.empty()) {
-    json += "\"{}\"";
+    json.append("{}");
   } else {
     // Escape the JSON string for embedding
-    json += "\"";
     for (char c : device_info) {
-      if (c == '"') json += "\\\"";
-      else if (c == '\\') json += "\\\\";
-      else if (c == '\n') json += "\\n";
-      else if (c == '\r') json += "\\r";
-      else if (c == '\t') json += "\\t";
-      else json += c;
+      if (c == '"') json.append("\\\"");
+      else if (c == '\\') json.append("\\\\");
+      else if (c == '\n') json.append("\\n");
+      else if (c == '\r') json.append("\\r");
+      else if (c == '\t') json.append("\\t");
+      else {
+        char ch[2] = {c, '\0'};
+        json.append(ch);
+      }
     }
-    json += "\"";
   }
   
-  json += "}";
-  return json;
+  json.append("\"}");
 }
 
 void TigoWebServer::loop() {
