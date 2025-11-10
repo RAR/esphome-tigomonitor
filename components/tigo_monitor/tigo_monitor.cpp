@@ -1429,21 +1429,21 @@ std::string TigoMonitorComponent::remove_escape_sequences(const std::string &fra
     if (frame[i] == '\x7E' && i < frame.length() - 1) {
       char next_byte = frame[i + 1];
       switch (next_byte) {
-        case '\x00': result += '\x7E'; break; // Escaped 7E -> raw 7E
-        case '\x01': result += '\x24'; break; // Escaped 7E 01 -> raw 24
-        case '\x02': result += '\x23'; break; // Escaped 7E 02 -> raw 23
-        case '\x03': result += '\x25'; break; // Escaped 7E 03 -> raw 25
-        case '\x04': result += '\xA4'; break; // Escaped 7E 04 -> raw A4
-        case '\x05': result += '\xA3'; break; // Escaped 7E 05 -> raw A3
-        case '\x06': result += '\xA5'; break; // Escaped 7E 06 -> raw A5
+        case '\x00': result.push_back('\x7E'); break; // Escaped 7E -> raw 7E
+        case '\x01': result.push_back('\x24'); break; // Escaped 7E 01 -> raw 24
+        case '\x02': result.push_back('\x23'); break; // Escaped 7E 02 -> raw 23
+        case '\x03': result.push_back('\x25'); break; // Escaped 7E 03 -> raw 25
+        case '\x04': result.push_back('\xA4'); break; // Escaped 7E 04 -> raw A4
+        case '\x05': result.push_back('\xA3'); break; // Escaped 7E 05 -> raw A3
+        case '\x06': result.push_back('\xA5'); break; // Escaped 7E 06 -> raw A5
         default:
-          result += frame[i];
-          result += next_byte;
+          result.push_back(frame[i]);
+          result.push_back(next_byte);
           break;
       }
       i++; // Skip next byte
     } else {
-      result += frame[i];
+      result.push_back(frame[i]);
     }
   }
   return result;
@@ -1480,7 +1480,8 @@ std::string TigoMonitorComponent::frame_to_hex_string(const std::string &frame) 
   for (unsigned char byte : frame) {
     char hex_chars[3];
     sprintf(hex_chars, "%02X", byte);
-    hex_str += hex_chars;
+    hex_str.push_back(hex_chars[0]);
+    hex_str.push_back(hex_chars[1]);
   }
   return hex_str;
 }
