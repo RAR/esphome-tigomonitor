@@ -496,6 +496,9 @@ void TigoMonitorComponent::process_serial_data() {
 }
 
 void TigoMonitorComponent::process_frame(const std::string &frame) {
+  // Note: processed_frame and hex_frame are allocated in PSRAM via helper functions
+  // (remove_escape_sequences and frame_to_hex_string use psram_string internally)
+  // This saves 2-4KB of internal RAM per frame processed
   std::string processed_frame = remove_escape_sequences(frame);
   
   if (!verify_checksum(processed_frame)) {
@@ -1422,6 +1425,35 @@ void TigoMonitorComponent::publish_sensor_data() {
 }
 
 std::string TigoMonitorComponent::remove_escape_sequences(const std::string &frame) {
+#ifdef USE_ESP_IDF
+  // Use PSRAM for large temporary buffer to avoid internal RAM fragmentation
+  psram_string result;
+  result.reserve(frame.length());
+  
+  for (size_t i = 0; i < frame.length(); ++i) {
+    if (frame[i] == '\x7E' && i < frame.length() - 1) {
+      char next_byte = frame[i + 1];
+      switch (next_byte) {
+        case '\x00': result.push_back('\x7E'); break; // Escaped 7E -> raw 7E
+        case '\x01': result.push_back('\x24'); break; // Escaped 7E 01 -> raw 24
+        case '\x02': result.push_back('\x23'); break; // Escaped 7E 02 -> raw 23
+        case '\x03': result.push_back('\x25'); break; // Escaped 7E 03 -> raw 25
+        case '\x04': result.push_back('\xA4'); break; // Escaped 7E 04 -> raw A4
+        case '\x05': result.push_back('\xA3'); break; // Escaped 7E 05 -> raw A3
+        case '\x06': result.push_back('\xA5'); break; // Escaped 7E 06 -> raw A5
+        default:
+          result.push_back(frame[i]);
+          result.push_back(next_byte);
+          break;
+      }
+      i++; // Skip next byte
+    } else {
+      result.push_back(frame[i]);
+    }
+  }
+  // Convert back to std::string for compatibility with existing code
+  return std::string(result.begin(), result.end());
+#else
   std::string result;
   result.reserve(frame.length());
   
@@ -1447,6 +1479,7 @@ std::string TigoMonitorComponent::remove_escape_sequences(const std::string &fra
     }
   }
   return result;
+#endif
 }
 
 bool TigoMonitorComponent::verify_checksum(const std::string &frame) {
@@ -1474,6 +1507,21 @@ bool TigoMonitorComponent::verify_checksum(const std::string &frame) {
 }
 
 std::string TigoMonitorComponent::frame_to_hex_string(const std::string &frame) {
+#ifdef USE_ESP_IDF
+  // Use PSRAM for hex conversion buffer to save internal RAM
+  // Hex strings can be 2KB+ for large frames
+  psram_string hex_str;
+  hex_str.reserve(frame.length() * 2);
+  
+  for (unsigned char byte : frame) {
+    char hex_chars[3];
+    sprintf(hex_chars, "%02X", byte);
+    hex_str.push_back(hex_chars[0]);
+    hex_str.push_back(hex_chars[1]);
+  }
+  // Convert back to std::string for compatibility with existing code
+  return std::string(hex_str.begin(), hex_str.end());
+#else
   std::string hex_str;
   hex_str.reserve(frame.length() * 2);
   
@@ -1484,6 +1532,7 @@ std::string TigoMonitorComponent::frame_to_hex_string(const std::string &frame) 
     hex_str.push_back(hex_chars[1]);
   }
   return hex_str;
+#endif
 }
 
 int TigoMonitorComponent::calculate_header_length(const std::string &hex_frame) {
