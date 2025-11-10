@@ -106,7 +106,7 @@ class TigoWebServer : public Component {
   void build_strings_json(PSRAMString& json);
   void build_inverters_json(PSRAMString& json);
   void build_esp_status_json(PSRAMString& json);
-  void build_yaml_json(PSRAMString& json);
+  void build_yaml_json(PSRAMString& json, const std::set<std::string>& selected_sensors, const std::set<std::string>& selected_hub_sensors);
   void build_cca_info_json(PSRAMString& json);
 };
 

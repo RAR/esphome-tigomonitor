@@ -706,8 +706,50 @@ esp_err_t TigoWebServer::api_yaml_handler(httpd_req_t *req) {
     return ESP_OK;
   }
   
+  // Parse query parameters to get selected sensors
+  char query[512];
+  std::set<std::string> selected_sensors;
+  std::set<std::string> selected_hub_sensors;
+  
+  if (httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK) {
+    char sensors_param[400];
+    if (httpd_query_key_value(query, "sensors", sensors_param, sizeof(sensors_param)) == ESP_OK) {
+      // Parse comma-separated sensor list
+      std::string sensors_str(sensors_param);
+      size_t start = 0;
+      size_t end = sensors_str.find(',');
+      
+      while (end != std::string::npos) {
+        selected_sensors.insert(sensors_str.substr(start, end - start));
+        start = end + 1;
+        end = sensors_str.find(',', start);
+      }
+      selected_sensors.insert(sensors_str.substr(start));
+    }
+    
+    char hub_sensors_param[400];
+    if (httpd_query_key_value(query, "hub_sensors", hub_sensors_param, sizeof(hub_sensors_param)) == ESP_OK) {
+      // Parse comma-separated hub sensor list
+      std::string hub_sensors_str(hub_sensors_param);
+      size_t start = 0;
+      size_t end = hub_sensors_str.find(',');
+      
+      while (end != std::string::npos) {
+        selected_hub_sensors.insert(hub_sensors_str.substr(start, end - start));
+        start = end + 1;
+        end = hub_sensors_str.find(',', start);
+      }
+      selected_hub_sensors.insert(hub_sensors_str.substr(start));
+    }
+  }
+  
+  // If no sensors specified, use default set
+  if (selected_sensors.empty()) {
+    selected_sensors = {"power", "peak_power", "voltage_in", "voltage_out", "current_in", "temperature", "rssi"};
+  }
+  
   PSRAMString json_buffer;
-  server->build_yaml_json(json_buffer);
+  server->build_yaml_json(json_buffer, selected_sensors, selected_hub_sensors);
   
   httpd_resp_set_type(req, "application/json");
   httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
@@ -1572,7 +1614,7 @@ void TigoWebServer::build_esp_status_json(PSRAMString& json) {
   json.append(buffer);
 }
 
-void TigoWebServer::build_yaml_json(PSRAMString& json) {
+void TigoWebServer::build_yaml_json(PSRAMString& json, const std::set<std::string>& selected_sensors, const std::set<std::string>& selected_hub_sensors) {
   PSRAMString yaml_text;
   const auto &node_table = parent_->get_node_table();
   
@@ -1590,6 +1632,53 @@ void TigoWebServer::build_yaml_json(PSRAMString& json) {
   
   yaml_text.append("sensor:\n");
   
+  // Add hub-level sensors if any are selected
+  if (!selected_hub_sensors.empty()) {
+    yaml_text.append("  # Hub-level sensors (system-wide, no address required)\n");
+    yaml_text.append("  - platform: tigo_monitor\n");
+    yaml_text.append("    tigo_monitor_id: tigo_hub\n");
+    
+    if (selected_hub_sensors.count("power_sum") > 0) {
+      yaml_text.append("    power_sum:\n");
+      yaml_text.append("      name: \"Total Power\"\n");
+    }
+    if (selected_hub_sensors.count("energy_sum") > 0) {
+      yaml_text.append("    energy_sum:\n");
+      yaml_text.append("      name: \"Total Energy\"\n");
+    }
+    if (selected_hub_sensors.count("device_count") > 0) {
+      yaml_text.append("    device_count:\n");
+      yaml_text.append("      name: \"Device Count\"\n");
+    }
+    if (selected_hub_sensors.count("invalid_checksum") > 0) {
+      yaml_text.append("    invalid_checksum:\n");
+      yaml_text.append("      name: \"Invalid Checksum Count\"\n");
+    }
+    if (selected_hub_sensors.count("missed_packet") > 0) {
+      yaml_text.append("    missed_packet:\n");
+      yaml_text.append("      name: \"Missed Packet Count\"\n");
+    }
+    if (selected_hub_sensors.count("internal_ram_free") > 0) {
+      yaml_text.append("    internal_ram_free:\n");
+      yaml_text.append("      name: \"Free Internal RAM\"\n");
+    }
+    if (selected_hub_sensors.count("internal_ram_min") > 0) {
+      yaml_text.append("    internal_ram_min:\n");
+      yaml_text.append("      name: \"Min Free Internal RAM\"\n");
+    }
+    if (selected_hub_sensors.count("psram_free") > 0) {
+      yaml_text.append("    psram_free:\n");
+      yaml_text.append("      name: \"Free PSRAM\"\n");
+    }
+    if (selected_hub_sensors.count("stack_free") > 0) {
+      yaml_text.append("    stack_free:\n");
+      yaml_text.append("      name: \"Free Stack\"\n");
+    }
+    
+    yaml_text.append("\n");
+  }
+  
+  // Add per-device sensors
   for (const auto &node : assigned_nodes) {
     std::string index_str = std::to_string(node.sensor_index + 1);
     std::string barcode_comment = "";
@@ -1621,13 +1710,45 @@ void TigoWebServer::build_yaml_json(PSRAMString& json) {
     yaml_text.append("    name: \"");
     yaml_text.append(device_name.c_str());
     yaml_text.append("\"\n");
-    yaml_text.append("    power: {}\n");
-    yaml_text.append("    peak_power: {}\n");
-    yaml_text.append("    voltage_in: {}\n");
-    yaml_text.append("    voltage_out: {}\n");
-    yaml_text.append("    current_in: {}\n");
-    yaml_text.append("    temperature: {}\n");
-    yaml_text.append("    rssi: {}\n");
+    
+    // Add only selected sensors
+    if (selected_sensors.count("power") > 0) {
+      yaml_text.append("    power: {}\n");
+    }
+    if (selected_sensors.count("peak_power") > 0) {
+      yaml_text.append("    peak_power: {}\n");
+    }
+    if (selected_sensors.count("voltage_in") > 0) {
+      yaml_text.append("    voltage_in: {}\n");
+    }
+    if (selected_sensors.count("voltage_out") > 0) {
+      yaml_text.append("    voltage_out: {}\n");
+    }
+    if (selected_sensors.count("current_in") > 0) {
+      yaml_text.append("    current_in: {}\n");
+    }
+    if (selected_sensors.count("temperature") > 0) {
+      yaml_text.append("    temperature: {}\n");
+    }
+    if (selected_sensors.count("rssi") > 0) {
+      yaml_text.append("    rssi: {}\n");
+    }
+    if (selected_sensors.count("duty_cycle") > 0) {
+      yaml_text.append("    duty_cycle: {}\n");
+    }
+    if (selected_sensors.count("efficiency") > 0) {
+      yaml_text.append("    efficiency: {}\n");
+    }
+    if (selected_sensors.count("power_factor") > 0) {
+      yaml_text.append("    power_factor: {}\n");
+    }
+    if (selected_sensors.count("load_factor") > 0) {
+      yaml_text.append("    load_factor: {}\n");
+    }
+    if (selected_sensors.count("barcode") > 0) {
+      yaml_text.append("    barcode: {}\n");
+    }
+    
     yaml_text.append("\n");
   }
   
@@ -2877,6 +2998,15 @@ void TigoWebServer::get_yaml_config_html(PSRAMString& html) {
     .card { background: white; border-radius: 8px; padding: 2rem; box-shadow: 0 2px 4px rgba(0,0,0,0.1); transition: background-color 0.3s, box-shadow 0.3s; }
     .card h2 { color: #2c3e50; margin-bottom: 1rem; font-size: 1.5rem; border-bottom: 2px solid #3498db; padding-bottom: 0.5rem; transition: color 0.3s; }
     .info { background: #e8f5e9; border-left: 4px solid #27ae60; padding: 1rem; margin-bottom: 1.5rem; border-radius: 4px; transition: background-color 0.3s, border-color 0.3s; }
+    .sensor-selection { margin-bottom: 1.5rem; padding: 1.5rem; background: #f8f9fa; border-radius: 8px; transition: background-color 0.3s; }
+    .sensor-selection h3 { color: #2c3e50; margin-bottom: 1rem; font-size: 1.125rem; transition: color 0.3s; }
+    .checkbox-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 0.75rem; margin-bottom: 1rem; }
+    .checkbox-grid label { display: flex; align-items: center; cursor: pointer; padding: 0.5rem; background: white; border-radius: 4px; transition: background-color 0.2s; }
+    .checkbox-grid label:hover { background: #e3f2fd; }
+    .checkbox-grid input[type="checkbox"] { margin-right: 0.5rem; cursor: pointer; width: 18px; height: 18px; }
+    .selection-buttons { display: flex; gap: 0.5rem; }
+    .select-btn { background: #f0f0f0; color: #333; border: 1px solid #ccc; padding: 0.5rem 1rem; border-radius: 4px; cursor: pointer; font-size: 0.875rem; transition: all 0.2s; }
+    .select-btn:hover { background: #e0e0e0; border-color: #999; }
     .code-block { background: #2c3e50; color: #ecf0f1; padding: 1.5rem; border-radius: 4px; font-family: monospace; white-space: pre-wrap; word-wrap: break-word; max-height: 600px; overflow-y: auto; transition: background-color 0.3s, color 0.3s; }
     .copy-btn { background: #3498db; color: white; border: none; padding: 0.75rem 1.5rem; border-radius: 4px; cursor: pointer; font-size: 1rem; margin-top: 1rem; transition: background-color 0.3s; }
     .copy-btn:hover { background: #2980b9; }
@@ -2888,6 +3018,12 @@ void TigoWebServer::get_yaml_config_html(PSRAMString& html) {
     body.dark-mode .card { background: #2c2c2c; box-shadow: 0 2px 4px rgba(0,0,0,0.3); }
     body.dark-mode .card h2 { color: #e0e0e0; border-bottom-color: #5dade2; }
     body.dark-mode .info { background: #1e3a1e; border-left-color: #45a87d; color: #b8e6c9; }
+    body.dark-mode .sensor-selection { background: #1e1e1e; }
+    body.dark-mode .sensor-selection h3 { color: #e0e0e0; }
+    body.dark-mode .checkbox-grid label { background: #2c2c2c; color: #e0e0e0; }
+    body.dark-mode .checkbox-grid label:hover { background: #1a3a52; }
+    body.dark-mode .select-btn { background: #2c2c2c; color: #e0e0e0; border-color: #444; }
+    body.dark-mode .select-btn:hover { background: #3a3a3a; border-color: #666; }
     body.dark-mode .code-block { background: #1e1e1e; color: #d4d4d4; }
     body.dark-mode .copy-btn { background: #5dade2; }
     body.dark-mode .copy-btn:hover { background: #4a9fd8; }
@@ -2913,10 +3049,50 @@ void TigoWebServer::get_yaml_config_html(PSRAMString& html) {
     <div class="card">
       <h2>YAML Configuration</h2>
       <div class="info">
-        <strong>Instructions:</strong> Copy the configuration below and add it to your ESPHome YAML file. 
-        This configuration is automatically generated based on discovered devices.
+        <strong>Instructions:</strong> Select the sensors you want to include in the generated configuration, then copy it to your ESPHome YAML file.
         Devices: <strong id="device-count">--</strong>
       </div>
+      
+      <div class="sensor-selection">
+        <h3>Per-Device Sensors:</h3>
+        <div class="checkbox-grid">
+          <label><input type="checkbox" checked id="sel-power" onchange="updateYAML()"> Power (W)</label>
+          <label><input type="checkbox" checked id="sel-peak_power" onchange="updateYAML()"> Peak Power (W)</label>
+          <label><input type="checkbox" checked id="sel-voltage_in" onchange="updateYAML()"> Input Voltage (V)</label>
+          <label><input type="checkbox" checked id="sel-voltage_out" onchange="updateYAML()"> Output Voltage (V)</label>
+          <label><input type="checkbox" checked id="sel-current_in" onchange="updateYAML()"> Input Current (A)</label>
+          <label><input type="checkbox" checked id="sel-temperature" onchange="updateYAML()"> Temperature (°C)</label>
+          <label><input type="checkbox" checked id="sel-rssi" onchange="updateYAML()"> RSSI (dBm)</label>
+          <label><input type="checkbox" id="sel-duty_cycle" onchange="updateYAML()"> Duty Cycle (%)</label>
+          <label><input type="checkbox" id="sel-efficiency" onchange="updateYAML()"> Efficiency (%)</label>
+          <label><input type="checkbox" id="sel-power_factor" onchange="updateYAML()"> Power Factor</label>
+          <label><input type="checkbox" id="sel-load_factor" onchange="updateYAML()"> Load Factor</label>
+          <label><input type="checkbox" id="sel-barcode" onchange="updateYAML()"> Barcode</label>
+        </div>
+        <div class="selection-buttons">
+          <button class="select-btn" onclick="selectAllDevice()">Select All</button>
+          <button class="select-btn" onclick="selectDefaultDevice()">Default Sensors</button>
+          <button class="select-btn" onclick="selectNoneDevice()">Deselect All</button>
+        </div>
+        
+        <h3 style="margin-top: 1.5rem;">Hub-Level Sensors:</h3>
+        <div class="checkbox-grid">
+          <label><input type="checkbox" id="sel-power_sum" onchange="updateYAML()"> Total Power (W)</label>
+          <label><input type="checkbox" id="sel-energy_sum" onchange="updateYAML()"> Total Energy (kWh)</label>
+          <label><input type="checkbox" id="sel-device_count" onchange="updateYAML()"> Device Count</label>
+          <label><input type="checkbox" id="sel-invalid_checksum" onchange="updateYAML()"> Invalid Checksum Count</label>
+          <label><input type="checkbox" id="sel-missed_packet" onchange="updateYAML()"> Missed Packet Count</label>
+          <label><input type="checkbox" id="sel-internal_ram_free" onchange="updateYAML()"> Free Internal RAM</label>
+          <label><input type="checkbox" id="sel-internal_ram_min" onchange="updateYAML()"> Min Free Internal RAM</label>
+          <label><input type="checkbox" id="sel-psram_free" onchange="updateYAML()"> Free PSRAM</label>
+          <label><input type="checkbox" id="sel-stack_free" onchange="updateYAML()"> Free Stack</label>
+        </div>
+        <div class="selection-buttons">
+          <button class="select-btn" onclick="selectAllHub()">Select All</button>
+          <button class="select-btn" onclick="selectNoneHub()">Deselect All</button>
+        </div>
+      </div>
+      
       <pre class="code-block" id="yaml-content">Loading...</pre>
       <button class="copy-btn" onclick="copyToClipboard()">Copy to Clipboard</button>
     </div>
@@ -2957,9 +3133,75 @@ void TigoWebServer::get_yaml_config_html(PSRAMString& html) {
     // Apply theme on page load
     applyTheme();
     
+    function getSelectedSensors() {
+      const deviceSensors = ['power', 'peak_power', 'voltage_in', 'voltage_out', 'current_in', 
+                       'temperature', 'rssi', 'duty_cycle', 'efficiency', 'power_factor', 
+                       'load_factor', 'barcode'];
+      return deviceSensors.filter(s => document.getElementById('sel-' + s).checked);
+    }
+    
+    function getSelectedHubSensors() {
+      const hubSensors = ['power_sum', 'energy_sum', 'device_count', 'invalid_checksum', 
+                          'missed_packet', 'internal_ram_free', 'internal_ram_min', 
+                          'psram_free', 'stack_free'];
+      return hubSensors.filter(s => document.getElementById('sel-' + s).checked);
+    }
+    
+    function selectAllDevice() {
+      const sensors = ['power', 'peak_power', 'voltage_in', 'voltage_out', 'current_in', 
+                       'temperature', 'rssi', 'duty_cycle', 'efficiency', 'power_factor', 
+                       'load_factor', 'barcode'];
+      sensors.forEach(s => document.getElementById('sel-' + s).checked = true);
+      updateYAML();
+    }
+    
+    function selectDefaultDevice() {
+      const defaultSensors = ['power', 'peak_power', 'voltage_in', 'voltage_out', 'current_in', 
+                              'temperature', 'rssi'];
+      const allSensors = ['power', 'peak_power', 'voltage_in', 'voltage_out', 'current_in', 
+                          'temperature', 'rssi', 'duty_cycle', 'efficiency', 'power_factor', 
+                          'load_factor', 'barcode'];
+      allSensors.forEach(s => {
+        document.getElementById('sel-' + s).checked = defaultSensors.includes(s);
+      });
+      updateYAML();
+    }
+    
+    function selectNoneDevice() {
+      const sensors = ['power', 'peak_power', 'voltage_in', 'voltage_out', 'current_in', 
+                       'temperature', 'rssi', 'duty_cycle', 'efficiency', 'power_factor', 
+                       'load_factor', 'barcode'];
+      sensors.forEach(s => document.getElementById('sel-' + s).checked = false);
+      updateYAML();
+    }
+    
+    function selectAllHub() {
+      const hubSensors = ['power_sum', 'energy_sum', 'device_count', 'invalid_checksum', 
+                          'missed_packet', 'internal_ram_free', 'internal_ram_min', 
+                          'psram_free', 'stack_free'];
+      hubSensors.forEach(s => document.getElementById('sel-' + s).checked = true);
+      updateYAML();
+    }
+    
+    function selectNoneHub() {
+      const hubSensors = ['power_sum', 'energy_sum', 'device_count', 'invalid_checksum', 
+                          'missed_packet', 'internal_ram_free', 'internal_ram_min', 
+                          'psram_free', 'stack_free'];
+      hubSensors.forEach(s => document.getElementById('sel-' + s).checked = false);
+      updateYAML();
+    }
+    
     async function loadData() {
+      updateYAML();
+    }
+    
+    async function updateYAML() {
       try {
-        const response = await apiFetch('/api/yaml');
+        const selectedSensors = getSelectedSensors();
+        const selectedHubSensors = getSelectedHubSensors();
+        const sensorParams = selectedSensors.join(',');
+        const hubParams = selectedHubSensors.join(',');
+        const response = await apiFetch('/api/yaml?sensors=' + sensorParams + '&hub_sensors=' + hubParams);
         const data = await response.json();
         
         document.getElementById('yaml-content').textContent = data.yaml;
