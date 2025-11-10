@@ -551,7 +551,7 @@ void TigoMonitorComponent::process_frame(const std::string &frame) {
     // Command request or response
     std::string type = hex_frame.substr(14, 2);
     if (type == "27") {
-      process_27_frame(hex_frame.substr(18));
+      process_27_frame(hex_frame, 18);  // Pass offset instead of creating substring
     }
     // Handle other command types as needed
   } else if (segment == "0148") {
@@ -637,7 +637,7 @@ void TigoMonitorComponent::process_09_frame(const std::string &frame) {
   std::string node_id = frame.substr(18, 4);  
   std::string barcode = frame.substr(40, 6);
   
-  ESP_LOGD(TAG, "📦 Frame 09 - Device Identity (IGNORED): addr=%s, node_id=%s, barcode=%s", 
+  ESP_LOGD(TAG, "Frame 09 - Device Identity (IGNORED): addr=%s, node_id=%s, barcode=%s", 
            addr.c_str(), node_id.c_str(), barcode.c_str());
   ESP_LOGD(TAG, "Frame 09 barcodes are ignored - only Frame 27 (16-char) barcodes are used");
   
@@ -645,19 +645,25 @@ void TigoMonitorComponent::process_09_frame(const std::string &frame) {
   // Only Frame 27 long addresses (16-char) are used for device identification
 }
 
-void TigoMonitorComponent::process_27_frame(const std::string &frame) {
-  int num_entries = std::stoi(frame.substr(4, 4), nullptr, 16);
-  ESP_LOGI(TAG, "📦 Frame 27 received, entries: %d", num_entries);
+void TigoMonitorComponent::process_27_frame(const std::string &hex_frame, size_t offset) {
+  // Parse number of entries from the frame starting at offset
+  if (offset + 4 > hex_frame.length()) {
+    ESP_LOGW(TAG, "Frame 27 too short");
+    return;
+  }
   
-  size_t pos = 8;
+  int num_entries = std::stoi(hex_frame.substr(offset, 4), nullptr, 16);
+  ESP_LOGI(TAG, "Frame 27 received, entries: %d", num_entries);
+  
+  size_t pos = offset + 4;  // Start after the entry count
   bool table_changed = false;
   
-  for (int i = 0; i < num_entries && pos + 20 <= frame.length(); i++) {
-    std::string long_addr = frame.substr(pos, 16);
-    std::string addr = frame.substr(pos + 16, 4);
+  for (int i = 0; i < num_entries && pos + 20 <= hex_frame.length(); i++) {
+    std::string long_addr = hex_frame.substr(pos, 16);
+    std::string addr = hex_frame.substr(pos + 16, 4);
     pos += 20;
     
-    ESP_LOGI(TAG, "📦 Frame 27 - Device Identity: addr=%s, long_addr=%s", 
+    ESP_LOGI(TAG, "Frame 27 - Device Identity: addr=%s, long_addr=%s", 
              addr.c_str(), long_addr.c_str());
     
     // Find or create node table entry

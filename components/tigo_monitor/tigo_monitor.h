@@ -327,7 +327,7 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   // Frame type handlers
   void process_power_frame(const std::string &frame);
   void process_09_frame(const std::string &frame);
-  void process_27_frame(const std::string &frame);
+  void process_27_frame(const std::string &hex_frame, size_t offset);
   int calculate_header_length(const std::string &hex_frame);
   
   // CRC functions
