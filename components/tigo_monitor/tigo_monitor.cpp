@@ -223,15 +223,20 @@ void TigoMonitorComponent::setup() {
   
   // Check if we have existing CCA data and rebuild string groups
   bool has_cca_data = false;
+  int cca_nodes = 0;
   for (const auto &node : node_table_) {
     if (!node.cca_string_label.empty() && node.cca_validated) {
       has_cca_data = true;
-      break;
+      cca_nodes++;
+      ESP_LOGD(TAG, "Loaded node %s with CCA data: label='%s', string='%s', validated=%d",
+               node.addr.c_str(), node.cca_label.c_str(), node.cca_string_label.c_str(), node.cca_validated);
     }
   }
   if (has_cca_data) {
-    ESP_LOGI(TAG, "Found existing CCA data in node table - rebuilding string groups");
+    ESP_LOGI(TAG, "Found existing CCA data in %d nodes - rebuilding string groups", cca_nodes);
     rebuild_string_groups();
+  } else {
+    ESP_LOGI(TAG, "No CCA data found in node table - UI will show barcodes until CCA sync occurs");
   }
   
   // Initialize night mode tracking
@@ -808,8 +813,8 @@ void TigoMonitorComponent::rebuild_string_groups() {
   int cca_validated_count = 0;
   for (const auto &node : node_table_) {
     if (node.cca_validated) {
-      ESP_LOGD(TAG, "Node %s: cca_validated=%d, string_label='%s'", 
-               node.addr.c_str(), node.cca_validated, node.cca_string_label.c_str());
+      ESP_LOGD(TAG, "Node %s: cca_validated=%d, cca_label='%s', string_label='%s'", 
+               node.addr.c_str(), node.cca_validated, node.cca_label.c_str(), node.cca_string_label.c_str());
       cca_validated_count++;
     }
   }
@@ -1732,17 +1737,17 @@ void TigoMonitorComponent::load_node_table() {
       }
       parts.push_back(node_str.substr(start)); // Last part
       
-      // Updated format: addr|long_address|checksum|sensor_index|cca_label|cca_string|cca_inverter|cca_channel|cca_validated
-      // Note: frame09_barcode field removed - old data will be ignored on load
+      // Current format (9 fields): addr|long_address|checksum|sensor_index|cca_label|cca_string|cca_inverter|cca_channel|cca_validated
+      // Old format (10 fields): addr|long_address|checksum|frame09_barcode|sensor_index|cca_label|cca_string|cca_inverter|cca_channel|cca_validated
+      // Legacy format (4 fields): addr|long_address|checksum|sensor_index
       if (parts.size() >= 4) {
         NodeTableData node;
         node.addr = parts[0];
         node.long_address = parts[1];
         node.checksum = parts[2];
-        // parts[3] was frame09_barcode - skip it for backward compatibility
         
         // Determine sensor index position based on format
-        int sensor_idx_pos = (parts.size() >= 10) ? 4 : 3;  // New format has frame09 field, old doesn't
+        int sensor_idx_pos = (parts.size() >= 10) ? 4 : 3;  // Old format with frame09 at position 3
         if (sensor_idx_pos < parts.size()) {
           node.sensor_index = std::stoi(parts[sensor_idx_pos]);
           node.is_persistent = true;
@@ -1750,13 +1755,30 @@ void TigoMonitorComponent::load_node_table() {
           continue;  // Skip malformed entry
         }
         
-        // Load CCA fields if available (format with 10 fields including obsolete frame09)
+        // Load CCA fields if available
         if (parts.size() >= 10) {
+          // Old format: addr|long_addr|checksum|frame09|sensor_idx|cca_label|cca_string|cca_inverter|cca_channel|cca_validated
           node.cca_label = parts[5];
           node.cca_string_label = parts[6];
           node.cca_inverter_label = parts[7];
           node.cca_channel = parts[8];
           node.cca_validated = (parts[9] == "1");
+          
+          // Replace "Inverter" with "MPPT" for more accurate terminology
+          if (node.cca_inverter_label.find("Inverter ") == 0) {
+            node.cca_inverter_label.replace(0, 9, "MPPT ");
+          }
+          
+          ESP_LOGI(TAG, "Restored node (old format): %s -> Tigo %d (barcode: %s, string: %s, validated: %s)", 
+                   node.addr.c_str(), node.sensor_index + 1, node.long_address.c_str(),
+                   node.cca_string_label.c_str(), node.cca_validated ? "yes" : "no");
+        } else if (parts.size() >= 9) {
+          // Current format: addr|long_addr|checksum|sensor_idx|cca_label|cca_string|cca_inverter|cca_channel|cca_validated
+          node.cca_label = parts[4];
+          node.cca_string_label = parts[5];
+          node.cca_inverter_label = parts[6];
+          node.cca_channel = parts[7];
+          node.cca_validated = (parts[8] == "1");
           
           // Replace "Inverter" with "MPPT" for more accurate terminology
           if (node.cca_inverter_label.find("Inverter ") == 0) {
