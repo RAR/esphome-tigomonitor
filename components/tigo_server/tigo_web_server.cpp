@@ -946,9 +946,7 @@ esp_err_t TigoWebServer::api_node_import_handler(httpd_req_t *req) {
     if ((item = cJSON_GetObjectItem(node_obj, "long_address")) && cJSON_IsString(item)) {
       node.long_address = item->valuestring;
     }
-    if ((item = cJSON_GetObjectItem(node_obj, "frame09_barcode")) && cJSON_IsString(item)) {
-      node.frame09_barcode = item->valuestring;
-    }
+    // frame09_barcode field removed - Frame 09 data is ignored
     if ((item = cJSON_GetObjectItem(node_obj, "checksum")) && cJSON_IsString(item)) {
       node.checksum = item->valuestring;
     }
@@ -981,11 +979,10 @@ esp_err_t TigoWebServer::api_node_import_handler(httpd_req_t *req) {
     node.is_persistent = true;  // All imported nodes are persistent
     
     // Only add nodes that have actual device data (non-empty address AND barcode)
-    if (!node.addr.empty() && (!node.long_address.empty() || !node.frame09_barcode.empty())) {
+    if (!node.addr.empty() && !node.long_address.empty()) {
       nodes.push_back(node);
       ESP_LOGD(TAG, "Imported node %zu: addr=%s, barcode=%s", nodes.size(), 
-               node.addr.c_str(), 
-               !node.long_address.empty() ? node.long_address.c_str() : node.frame09_barcode.c_str());
+               node.addr.c_str(), node.long_address.c_str());
     } else {
       ESP_LOGD(TAG, "Skipped empty node: addr=%s", node.addr.c_str());
     }
@@ -1185,8 +1182,8 @@ void TigoWebServer::build_devices_json(PSRAMString& json) {
       DeviceWithName dwn;
       dwn.device = nullptr;
       dwn.addr = node.addr;
-      // Prefer long_address (16-char Frame 27), fallback to frame09_barcode (6-char)
-      dwn.barcode = !node.long_address.empty() ? node.long_address : node.frame09_barcode;
+      // Use Frame 27 long_address (16-char) as barcode
+      dwn.barcode = node.long_address;
       dwn.sensor_index = node.sensor_index;
       dwn.string_label = node.cca_string_label;
       dwn.has_runtime_data = false;
@@ -1454,7 +1451,7 @@ void TigoWebServer::build_node_table_json(PSRAMString& json) {
     
     cJSON_AddStringToObject(node_obj, "addr", node.addr.c_str());
     cJSON_AddStringToObject(node_obj, "long_address", node.long_address.c_str());
-    cJSON_AddStringToObject(node_obj, "frame09_barcode", node.frame09_barcode.c_str());
+    // frame09_barcode field removed - Frame 09 data is ignored
     cJSON_AddNumberToObject(node_obj, "sensor_index", node.sensor_index);
     cJSON_AddStringToObject(node_obj, "checksum", node.checksum.c_str());
     cJSON_AddBoolToObject(node_obj, "cca_validated", node.cca_validated);
@@ -1608,8 +1605,6 @@ void TigoWebServer::build_yaml_json(PSRAMString& json) {
       device_name = "Tigo Device " + index_str;
       if (!node.long_address.empty()) {
         barcode_comment = " - Frame27: " + node.long_address;
-      } else if (!node.frame09_barcode.empty()) {
-        barcode_comment = " - Frame09: " + node.frame09_barcode;
       }
     }
     

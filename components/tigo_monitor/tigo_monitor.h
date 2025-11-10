@@ -111,10 +111,9 @@ struct DeviceData {
 };
 
 struct NodeTableData {
-  std::string long_address;    // Frame 27: 16-character long address (PRIMARY barcode source)
+  std::string long_address;    // Frame 27: 16-character long address (PRIMARY and ONLY barcode source)
   std::string addr;            // 4-character short address
   std::string checksum;        // CRC checksum
-  std::string frame09_barcode; // Frame 09: 6-character barcode (fallback when Frame 27 unavailable)
   int sensor_index = -1;       // ESPHome sensor index (-1 = unassigned)
   bool is_persistent = false;  // Whether this mapping should be saved to flash
   

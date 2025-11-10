@@ -772,16 +772,11 @@ void TigoMonitorComponent::update_device_data(const DeviceData &data) {
       }
       
       // After device creation, ensure barcode is up to date from node table
-      // Prioritize Frame 27 long address as primary barcode source
+      // Use Frame 27 long address as the only barcode source
       DeviceData* new_device = &devices_.back();
       if (node != nullptr && !node->long_address.empty() && new_device->barcode != node->long_address) {
         new_device->barcode = node->long_address;
         ESP_LOGI(TAG, "Applied Frame 27 long address as barcode to new device %s: %s", data.addr.c_str(), node->long_address.c_str());
-      }
-      // Fallback to Frame 09 barcode if Frame 27 not available
-      else if (node != nullptr && !node->frame09_barcode.empty() && new_device->barcode != node->frame09_barcode) {
-        new_device->barcode = node->frame09_barcode;
-        ESP_LOGI(TAG, "Applied Frame 09 barcode (fallback) to new device %s: %s", data.addr.c_str(), node->frame09_barcode.c_str());
       }
       
       ESP_LOGI(TAG, "Device data: %s - Vin:%.2fV, Vout:%.2fV, Curr:%.3fA, Temp:%.1f°C, Barcode:%s", 
@@ -1379,8 +1374,7 @@ void TigoMonitorComponent::publish_sensor_data() {
     
     auto barcode_it = barcode_sensors_.find(node.addr);
     if (barcode_it != barcode_sensors_.end()) {
-      std::string barcode = !node.long_address.empty() ? node.long_address : node.frame09_barcode;
-      barcode_it->second->publish_state(barcode);
+      barcode_it->second->publish_state(node.long_address);
     }
     
     auto duty_cycle_it = duty_cycle_sensors_.find(node.addr);
@@ -1565,12 +1559,10 @@ void TigoMonitorComponent::generate_sensor_yaml() {
     for (const auto& node : assigned_nodes) {
       std::string index_str = std::to_string(node.sensor_index + 1);
       
-      // Build barcode comment from available data, prioritizing Frame 27
+      // Build barcode comment from Frame 27 data
       std::string barcode_comment = "";
       if (!node.long_address.empty()) {
         barcode_comment = " - Frame27: " + node.long_address;
-      } else if (!node.frame09_barcode.empty()) {
-        barcode_comment = " - Frame09: " + node.frame09_barcode;
       }
       
       ESP_LOGI(TAG, "  # Tigo Device %s (discovered%s)", index_str.c_str(), barcode_comment.c_str());
@@ -1650,14 +1642,9 @@ void TigoMonitorComponent::print_device_mappings() {
     for (const auto& node : sorted_nodes) {
       std::string info = "Device Address " + node.addr;
       
-      // Add Frame 27 long address as primary barcode (new default)
+      // Add Frame 27 long address (only barcode source)
       if (!node.long_address.empty()) {
         info += " (Frame27: " + node.long_address + ")";
-      }
-      
-      // Add Frame 09 barcode if available and different from Frame 27
-      if (!node.frame09_barcode.empty() && node.long_address != node.frame09_barcode) {
-        info += " (Frame09: " + node.frame09_barcode + ")";
       }
       
       ESP_LOGI(TAG, "  Tigo %d: %s", node.sensor_index + 1, info.c_str());
@@ -1677,8 +1664,8 @@ void TigoMonitorComponent::print_device_mappings() {
     ESP_LOGI(TAG, "Discovered devices without sensor assignments (%d):", unassigned_nodes.size());
     for (const auto& node : unassigned_nodes) {
       std::string info = "Device " + node.addr;
-      if (!node.frame09_barcode.empty()) {
-        info += " (barcode: " + node.frame09_barcode + ")";
+      if (!node.long_address.empty()) {
+        info += " (barcode: " + node.long_address + ")";
       }
       info += " - waiting for power data";
       ESP_LOGI(TAG, "  %s", info.c_str());
@@ -1698,14 +1685,8 @@ void TigoMonitorComponent::print_device_mappings() {
       
       std::string name = device.barcode.empty() ? ("mod#" + device.addr) : device.barcode;
       std::string data_sources = "";
-      if (node != nullptr) {
-        std::vector<std::string> sources;
-        if (!node->frame09_barcode.empty()) sources.push_back("Frame09");
-        if (!node->long_address.empty()) sources.push_back("Frame27");
-        if (!sources.empty()) {
-          data_sources = " [" + std::accumulate(sources.begin() + 1, sources.end(), sources[0],
-                                               [](const std::string& a, const std::string& b) { return a + "+" + b; }) + "]";
-        }
+      if (node != nullptr && !node->long_address.empty()) {
+        data_sources = " [Frame27]";
       }
       
       ESP_LOGI(TAG, "  Device %s (%s): %s%s", device.addr.c_str(), name.c_str(), status.c_str(), data_sources.c_str());
@@ -1751,16 +1732,25 @@ void TigoMonitorComponent::load_node_table() {
       }
       parts.push_back(node_str.substr(start)); // Last part
       
-      if (parts.size() >= 5) {
+      // Updated format: addr|long_address|checksum|sensor_index|cca_label|cca_string|cca_inverter|cca_channel|cca_validated
+      // Note: frame09_barcode field removed - old data will be ignored on load
+      if (parts.size() >= 4) {
         NodeTableData node;
         node.addr = parts[0];
         node.long_address = parts[1];
         node.checksum = parts[2];
-        node.frame09_barcode = parts[3];
-        node.sensor_index = std::stoi(parts[4]);
-        node.is_persistent = true;
+        // parts[3] was frame09_barcode - skip it for backward compatibility
         
-        // Load CCA fields if available (new format with 10 fields)
+        // Determine sensor index position based on format
+        int sensor_idx_pos = (parts.size() >= 10) ? 4 : 3;  // New format has frame09 field, old doesn't
+        if (sensor_idx_pos < parts.size()) {
+          node.sensor_index = std::stoi(parts[sensor_idx_pos]);
+          node.is_persistent = true;
+        } else {
+          continue;  // Skip malformed entry
+        }
+        
+        // Load CCA fields if available (format with 10 fields including obsolete frame09)
         if (parts.size() >= 10) {
           node.cca_label = parts[5];
           node.cca_string_label = parts[6];
@@ -1774,7 +1764,7 @@ void TigoMonitorComponent::load_node_table() {
           }
           
           ESP_LOGI(TAG, "Restored node with CCA: %s -> Tigo %d (barcode: %s, string: %s, validated: %s)", 
-                   node.addr.c_str(), node.sensor_index + 1, node.frame09_barcode.c_str(),
+                   node.addr.c_str(), node.sensor_index + 1, node.long_address.c_str(),
                    node.cca_string_label.c_str(), node.cca_validated ? "yes" : "no");
         } else {
           // Old format without CCA fields - initialize to defaults
@@ -1785,7 +1775,7 @@ void TigoMonitorComponent::load_node_table() {
           node.cca_validated = false;
           
           ESP_LOGI(TAG, "Restored node (legacy format): %s -> Tigo %d (barcode: %s)", 
-                   node.addr.c_str(), node.sensor_index + 1, node.frame09_barcode.c_str());
+                   node.addr.c_str(), node.sensor_index + 1, node.long_address.c_str());
         }
         
         node_table_.push_back(node);
@@ -1819,11 +1809,11 @@ void TigoMonitorComponent::save_node_table() {
     std::string pref_key = "node_" + std::to_string(i);
     uint32_t hash = esphome::fnv1_hash(pref_key);
     
-    // Format: "addr|long_addr|checksum|barcode|sensor_index|cca_label|cca_string|cca_inverter|cca_channel|cca_validated"
+    // Format: "addr|long_addr|checksum|sensor_index|cca_label|cca_string|cca_inverter|cca_channel|cca_validated"
+    // Note: frame09_barcode field removed (was between checksum and sensor_index)
     std::string node_str = node.addr + "|" + 
                           node.long_address + "|" + 
                           node.checksum + "|" + 
-                          node.frame09_barcode + "|" + 
                           std::to_string(node.sensor_index) + "|" +
                           node.cca_label + "|" +
                           node.cca_string_label + "|" +
@@ -2065,7 +2055,7 @@ bool TigoMonitorComponent::import_node_table(const std::vector<NodeTableData>& n
     
     ESP_LOGD(TAG, "Imported node: addr=%s, barcode=%s, sensor_index=%d, cca_label=%s",
              node.addr.c_str(), 
-             node.long_address.empty() ? node.frame09_barcode.c_str() : node.long_address.c_str(),
+             node.long_address.c_str(),
              node.sensor_index,
              node.cca_label.c_str());
   }
