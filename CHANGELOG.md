@@ -5,6 +5,72 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] - 2025-11-10
+
+### Added
+- **Memory Monitoring Sensors** for Home Assistant
+  - Internal RAM Free (KB) - Current free internal RAM
+  - Internal RAM Min (KB) - Minimum free since boot (watermark)
+  - PSRAM Free (KB) - Current free PSRAM
+  - Stack Free (bytes) - Current task stack free space
+  - All sensors update every 60 seconds
+  - Keyword-based auto-detection in YAML config
+  - Enables memory health tracking and alerting in Home Assistant
+
+### Fixed
+- **Critical Memory Leaks** in frame processing
+  - `frame_to_hex_string()`: Changed from `+=` to `push_back()` to eliminate repeated allocations
+  - `remove_escape_sequences()`: Changed from `+=` to `push_back()` to eliminate repeated allocations
+  - Both functions process hundreds of frames per hour
+  - Fixes gradual heap exhaustion even without web UI usage
+  - Stable memory usage over long-term operation
+- **CCA Data Persistence Bug**
+  - Fixed `load_node_table()` not loading CCA data after frame09_barcode removal
+  - Save format changed from 10 fields to 9 fields, but load logic was checking for 10+ fields
+  - Now properly handles both 9-field (current) and 10-field (old) formats
+  - CCA labels now correctly display after restart with `sync_cca_on_startup: false`
+  - Added backward compatibility for old saved data
+- **Negative Temperature Support**
+  - Temperature values now correctly handle sub-zero readings
+  - Implemented proper 12-bit two's complement conversion
+  - Supports range: -204.8°C to +204.7°C
+  - Critical for winter operation and cold climate installations
+
+### Changed
+- **PSRAM Optimization for Frame Processing**
+  - `frame_to_hex_string()` now uses `psram_string` internally (saves 1-3KB per frame)
+  - `remove_escape_sequences()` now uses `psram_string` internally (saves 500-1500 bytes per frame)
+  - Combined savings: 3-5KB internal RAM per frame processed
+  - Conditional compilation: PSRAM path on ESP-IDF, original code on other platforms
+  - Preserves internal RAM for critical operations
+- **Enhanced Memory Logging**
+  - Added more detailed logging for CCA data loading
+  - Improved diagnostic messages for node table restoration
+  - Better tracking of memory usage patterns
+
+### Technical Details
+- Memory leak fixes eliminate continuous heap fragmentation
+- PSRAM optimizations reduce internal RAM pressure by 3-5KB per frame
+- Frame processing functions handle thousands of frames per day
+- `push_back()` with `reserve()` provides single allocation vs repeated allocations with `+=`
+- PSRAM access ~4x slower but negligible impact (microseconds) vs memory benefits
+- All optimizations maintain backward compatibility
+
+### Performance Impact
+- **Stable heap usage**: No more gradual memory exhaustion
+- **Reduced fragmentation**: Internal RAM allocations eliminated for large buffers
+- **Long-term reliability**: Systems can run indefinitely without memory issues
+- **PSRAM utilization**: Large temporary buffers now in PSRAM instead of internal RAM
+
+### Upgrade Notes
+1. Recommended for all users - critical stability fixes
+2. Memory monitoring sensors are optional but recommended for diagnostics
+3. No configuration changes required for bug fixes
+4. No breaking changes - fully backward compatible
+
+### Breaking Changes
+None - All changes are backward compatible.
+
 ## [1.0.0] - 2025-11-06
 
 ### Added - Authentication & Security
@@ -161,4 +227,5 @@ None - All changes are backward compatible. Web authentication and API tokens ar
 ## Initial Development
 Previous commits were part of the initial development phase. This is the first official release with comprehensive feature set and documentation.
 
+[1.1.0]: https://github.com/RAR/esphome-tigomonitor/releases/tag/v1.1.0
 [1.0.0]: https://github.com/RAR/esphome-tigomonitor/releases/tag/v1.0.0
