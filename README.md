@@ -75,9 +75,12 @@ A comprehensive ESPHome component for monitoring Tigo solar power optimizers via
 
 ## 📋 Requirements
 
-- ESP32 development board
-  - **Less than 15 devices:** ESP32 or ESP32-S3 without PSRAM will work
-  - **15+ devices:** ESP32-S3 with PSRAM **required**
+- **ESP32 development board with PSRAM strongly recommended**
+  - **Recommended:** ESP32-S3 with PSRAM (e.g., ESP32-S3-DevKitC-1-N8R8)
+  - The web interface and JSON APIs allocate data in PSRAM when available, significantly reducing internal RAM pressure
+  - Without PSRAM, the system will use internal RAM which may cause stability issues with many devices or web interface usage
+  - **Small systems (< 10 devices):** ESP32 or ESP32-S3 without PSRAM may work but is not recommended
+  - **Medium to large systems (10+ devices):** ESP32-S3 with PSRAM **required** for stability
   - **Tested:** M5Stack AtomS3 (no PSRAM, works up to ~15-20 devices with web server)
   - **Recommended:** [M5Stack AtomS3R](https://docs.m5stack.com/en/core/AtomS3R) (8MB PSRAM, supports 36+ devices)
 - UART connection to Tigo communication system (38400 baud)
@@ -1013,13 +1016,15 @@ Update the dashboard entity names to match your ESPHome configuration:
 7. **Too many devices**
    - Increase `number_of_devices` in configuration
    - Monitor memory usage in compilation output
-   - **Solution:** Use ESP32-S3 with PSRAM (e.g., M5Stack AtomS3R) for 36+ devices
+   - **Solution:** Use ESP32-S3 with PSRAM (e.g., M5Stack AtomS3R) for 10+ devices
 
 8. **Socket creation failures / Memory exhaustion**
-   - Symptom: `Failed to create socket` errors in logs
-   - Minimum free heap below 30-40KB causes connection failures
-   - **Immediate fix:** Reboot ESP32 to clear memory fragmentation
-   - **Best solution:** Upgrade to ESP32 with PSRAM (8MB additional RAM)
+   - Symptom: `Failed to create socket` errors in logs, web interface crashes, or system instability
+   - Cause: Internal RAM fragmentation from repeated allocations without PSRAM
+   - **Immediate fix:** Reboot ESP32 to temporarily clear memory fragmentation
+   - **Permanent solution:** Upgrade to ESP32-S3 with PSRAM (e.g., M5Stack AtomS3R)
+   - **Note:** Without PSRAM, JSON builders and web interface allocate in internal RAM causing fragmentation over time
+   - With PSRAM, all buffers use PSRAM eliminating internal RAM pressure
 
 9. **Night mode / Zero publishing**
    - Component automatically enters night mode after 1 hour of no data
@@ -1042,29 +1047,32 @@ button:
 ## 📈 Performance Notes
 
 ### Memory Usage
-- **Without PSRAM (M5Stack AtomS3):**
-  - Base: ~10-11% RAM, ~49% Flash
-  - With Web Server: ~15% RAM (minimum 30KB free heap required)
-  - **Limitation:** ~20 devices maximum with web server enabled
-  - Risk of socket creation failures under heavy load
-
-- **With PSRAM (M5Stack AtomS3R):**
-  - Base: ~10% RAM + 8MB PSRAM
-  - With Web Server: ~12% RAM + PSRAM for buffers
+- **With PSRAM (Strongly Recommended):**
+  - Base: ~10% internal RAM + 8MB PSRAM
+  - With Web Server: ~12% internal RAM + PSRAM for all buffers and JSON data
   - **Capacity:** 36+ devices tested successfully
-  - No socket creation issues, stable under load
+  - **Stability:** Web interface and JSON APIs allocate data in PSRAM, preventing internal RAM fragmentation
+  - **No socket creation issues** - stable under concurrent web requests
+
+- **Without PSRAM (Not Recommended):**
+  - Base: ~10-11% RAM, ~49% Flash
+  - With Web Server: ~15-20% RAM (highly variable)
+  - **Limitation:** May work for small systems (< 10 devices) but not recommended
+  - **Stability Issues:** Internal RAM allocations cause fragmentation over time
+  - **Risk:** Socket creation failures, web interface crashes, memory exhaustion
+  - **Note:** The system will function but may become unstable with web interface usage
 
 ### Performance Metrics
 - **Update Rate**: 30-60 seconds recommended for normal operation
 - **Device Limits**: 
-  - Without PSRAM: Up to ~15 devices (20 max, but may experience memory issues)
-  - With PSRAM: 36+ devices tested successfully
-  - **Recommendation:** Use ESP32-S3 with PSRAM for 15+ devices
+  - **With PSRAM (Recommended):** 36+ devices tested successfully
+  - Without PSRAM: Up to ~10 devices (may work but not supported)
+  - **Strong Recommendation:** Use ESP32-S3 with PSRAM (e.g., M5Stack AtomS3R) for all deployments
 - **Flash Wear Optimization**: Energy data saved hourly at the top of each hour
   - 24 writes/day (vs 288 with every-10-updates approach)
   - Flash lifespan: ~11 years @ 100k cycles, ~114 years @ 1M cycles
   - Maximum data loss: 1 hour of energy on unexpected reboot
-- **PSRAM Optimization**: HTTP buffers, JSON parsing, and web server use PSRAM when available
+- **PSRAM Optimization**: All HTTP buffers, JSON data, HTML pages, and web server operations use PSRAM when available, automatically falling back to internal RAM if not present
 - **UART Optimization**: ISR in IRAM significantly reduces packet loss
 - **CCA Queries**: HTTP requests add ~2-3 second delay during sync
 - **Night Mode**: Automatic zero publishing after 1 hour of no data (every 10 minutes)
