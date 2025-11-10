@@ -112,6 +112,36 @@ void TigoWebServer::setup() {
     ESP_LOGI(TAG, "PSRAM detected: %zu bytes total, %zu bytes free", total_psram, free_psram);
   } else {
     ESP_LOGW(TAG, "PSRAM not available - log streaming and large buffers disabled");
+    
+#if defined(CONFIG_IDF_TARGET_ESP32S3) || defined(CONFIG_IDF_TARGET_ESP32P4)
+    // On ESP32-S3 and ESP32-P4, check if PSRAM is physically present but not configured
+    ESP_LOGW(TAG, "");
+    ESP_LOGW(TAG, "**************************************************************");
+    ESP_LOGW(TAG, "* If your board has PSRAM (e.g., AtomS3R, P4-EVBoard),      *");
+    ESP_LOGW(TAG, "* you MUST enable it in your YAML configuration!            *");
+    ESP_LOGW(TAG, "*                                                            *");
+#ifdef CONFIG_IDF_TARGET_ESP32S3
+    ESP_LOGW(TAG, "* For ESP32-S3, add this to your YAML:                      *");
+    ESP_LOGW(TAG, "*   esphome:                                                 *");
+    ESP_LOGW(TAG, "*     platformio_options:                                    *");
+    ESP_LOGW(TAG, "*       board_build.arduino.memory_type: qio_opi            *");
+    ESP_LOGW(TAG, "*       board_build.f_flash: 80000000L                      *");
+    ESP_LOGW(TAG, "*       board_build.flash_mode: qio                         *");
+    ESP_LOGW(TAG, "*       build_flags:                                         *");
+    ESP_LOGW(TAG, "*         - -DBOARD_HAS_PSRAM                               *");
+#endif
+#ifdef CONFIG_IDF_TARGET_ESP32P4
+    ESP_LOGW(TAG, "* For ESP32-P4, add this to your YAML:                      *");
+    ESP_LOGW(TAG, "*   psram:                                                   *");
+    ESP_LOGW(TAG, "*     mode: hex                                              *");
+    ESP_LOGW(TAG, "*     speed: 200MHz                                          *");
+#endif
+    ESP_LOGW(TAG, "*                                                            *");
+    ESP_LOGW(TAG, "* PSRAM is REQUIRED for 15+ devices!                        *");
+    ESP_LOGW(TAG, "* See boards/ folder for complete examples.                 *");
+    ESP_LOGW(TAG, "**************************************************************");
+    ESP_LOGW(TAG, "");
+#endif
   }
   
   httpd_config_t config = HTTPD_DEFAULT_CONFIG();
@@ -2598,6 +2628,18 @@ void TigoWebServer::get_esp_status_html(PSRAMString& html) {
     body.dark-mode .progress-fill { background: #45a87d; }
     .temp-toggle { background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.3); color: white; padding: 0.5rem 1rem; border-radius: 4px; cursor: pointer; font-size: 0.875rem; transition: all 0.2s; margin-left: 1rem; }
     .temp-toggle:hover { background: rgba(255,255,255,0.2); }
+    
+    /* Warning banner styles */
+    .warning-banner { background: #fff3cd; border: 2px solid #ffc107; border-radius: 8px; padding: 1.5rem; margin-bottom: 1.5rem; display: none; }
+    .warning-banner.show { display: block; }
+    .warning-banner h3 { color: #856404; margin-bottom: 1rem; font-size: 1.25rem; }
+    .warning-banner p { color: #856404; margin-bottom: 0.5rem; line-height: 1.5; }
+    .warning-banner code { background: #fff; padding: 0.2rem 0.5rem; border-radius: 3px; font-family: 'Courier New', monospace; font-size: 0.875rem; }
+    .warning-banner ul { margin-left: 1.5rem; margin-top: 0.5rem; }
+    .warning-banner li { margin-bottom: 0.25rem; }
+    body.dark-mode .warning-banner { background: #4a3c1a; border-color: #ffc107; }
+    body.dark-mode .warning-banner h3, body.dark-mode .warning-banner p { color: #ffc107; }
+    body.dark-mode .warning-banner code { background: #2c2c2c; color: #e0e0e0; }
   </style>
 </head>
 <body>
@@ -2619,6 +2661,13 @@ void TigoWebServer::get_esp_status_html(PSRAMString& html) {
   </div>
   
   <div class="container">
+    <div class="warning-banner" id="psram-warning">
+      <h3>⚠️ PSRAM Not Configured</h3>
+      <p><strong>Your board may have PSRAM, but it's not enabled in your configuration.</strong></p>
+      <p>PSRAM is <strong>required for 15+ devices</strong> to prevent memory exhaustion and socket creation failures.</p>
+      <p id="psram-config-instructions"></p>
+    </div>
+    
     <div class="card">
       <h2>System Information</h2>
       <div class="info-grid">
@@ -2826,9 +2875,44 @@ void TigoWebServer::get_esp_status_html(PSRAMString& html) {
           document.getElementById('psram-free').textContent = 
             `${formatBytes(data.free_psram)} / ${formatBytes(data.total_psram)}`;
           document.getElementById('psram-progress').style.width = psramUsedPct + '%';
+          // Hide PSRAM warning if PSRAM is available
+          document.getElementById('psram-warning').classList.remove('show');
         } else {
           document.getElementById('psram-free').textContent = 'Not available';
           document.getElementById('psram-progress').style.width = '0%';
+          
+          // Show PSRAM warning with chip-specific instructions
+          const warningBanner = document.getElementById('psram-warning');
+          const configInstructions = document.getElementById('psram-config-instructions');
+          
+          // Try to detect chip type from compilation info
+          const compileInfo = data.compilation_time || '';
+          let chipType = 'unknown';
+          
+          // Check build info or make educated guess
+          // Note: We could add chip type to the API response for more accuracy
+          if (compileInfo.includes('S3') || navigator.userAgent.includes('S3')) {
+            chipType = 's3';
+          } else if (compileInfo.includes('P4') || navigator.userAgent.includes('P4')) {
+            chipType = 'p4';
+          }
+          
+          if (chipType === 's3') {
+            configInstructions.innerHTML = 
+              '<p><strong>For ESP32-S3 (AtomS3R, etc.):</strong></p>' +
+              '<p>Add to your YAML: <code>board_build.arduino.memory_type: qio_opi</code> and <code>-DBOARD_HAS_PSRAM</code></p>' +
+              '<p>See <code>boards/esp32s3-atoms3r.yaml</code> for complete example.</p>';
+          } else if (chipType === 'p4') {
+            configInstructions.innerHTML = 
+              '<p><strong>For ESP32-P4:</strong></p>' +
+              '<p>Add to your YAML: <code>psram: { mode: hex, speed: 200MHz }</code></p>' +
+              '<p>See <code>boards/esp32p4-evboard.yaml</code> for complete example.</p>';
+          } else {
+            configInstructions.innerHTML = 
+              '<p>If your board has PSRAM, check the <code>boards/</code> folder for configuration examples.</p>';
+          }
+          
+          warningBanner.classList.add('show');
         }
         
         // Display system information
