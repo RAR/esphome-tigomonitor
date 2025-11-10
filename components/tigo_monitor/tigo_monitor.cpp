@@ -284,16 +284,29 @@ void TigoMonitorComponent::loop() {
     size_t psram_free = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
     size_t internal_min = heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL);
     UBaseType_t stack_watermark = uxTaskGetStackHighWaterMark(NULL);
+    size_t stack_free_bytes = stack_watermark * sizeof(StackType_t);
     
     ESP_LOGD(TAG, "Heap: Internal %zu KB free (%zu KB min), PSRAM %zu KB free, Buffer: %zu bytes",
              internal_free / 1024, internal_min / 1024, psram_free / 1024, buffer_size(incoming_data_));
-    ESP_LOGD(TAG, "Stack: %u bytes free (warning if < 512 bytes)", 
-             stack_watermark * sizeof(StackType_t));
+    ESP_LOGD(TAG, "Stack: %u bytes free (warning if < 512 bytes)", stack_free_bytes);
+    
+    // Publish memory sensors to Home Assistant
+    if (internal_ram_free_sensor_ != nullptr) {
+      internal_ram_free_sensor_->publish_state(internal_free / 1024.0f);  // KB
+    }
+    if (internal_ram_min_sensor_ != nullptr) {
+      internal_ram_min_sensor_->publish_state(internal_min / 1024.0f);  // KB
+    }
+    if (psram_free_sensor_ != nullptr) {
+      psram_free_sensor_->publish_state(psram_free / 1024.0f);  // KB
+    }
+    if (stack_free_sensor_ != nullptr) {
+      stack_free_sensor_->publish_state(stack_free_bytes);  // bytes
+    }
     
     // Warn if stack is getting low
-    if (stack_watermark * sizeof(StackType_t) < 512) {
-      ESP_LOGW(TAG, "⚠️ Stack running low! Only %u bytes free - potential stack overflow risk",
-               stack_watermark * sizeof(StackType_t));
+    if (stack_free_bytes < 512) {
+      ESP_LOGW(TAG, "⚠️ Stack running low! Only %u bytes free - potential stack overflow risk", stack_free_bytes);
     }
     
     // Warn if internal RAM is getting low

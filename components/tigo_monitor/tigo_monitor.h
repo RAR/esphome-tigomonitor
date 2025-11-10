@@ -249,6 +249,24 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
     this->night_mode_sensor_ = sensor;
     ESP_LOGCONFIG("tigo_monitor", "Registered night mode binary sensor");
   }
+  
+  // Memory monitoring sensors (ESP32 only)
+  void add_internal_ram_free_sensor(sensor::Sensor *sensor) {
+    this->internal_ram_free_sensor_ = sensor;
+    ESP_LOGCONFIG("tigo_monitor", "Registered internal RAM free sensor");
+  }
+  void add_internal_ram_min_sensor(sensor::Sensor *sensor) {
+    this->internal_ram_min_sensor_ = sensor;
+    ESP_LOGCONFIG("tigo_monitor", "Registered internal RAM minimum sensor");
+  }
+  void add_psram_free_sensor(sensor::Sensor *sensor) {
+    this->psram_free_sensor_ = sensor;
+    ESP_LOGCONFIG("tigo_monitor", "Registered PSRAM free sensor");
+  }
+  void add_stack_free_sensor(sensor::Sensor *sensor) {
+    this->stack_free_sensor_ = sensor;
+    ESP_LOGCONFIG("tigo_monitor", "Registered stack free sensor");
+  }
 
   // Configuration
   void set_number_of_devices(int count) { number_of_devices_ = count; }
@@ -415,6 +433,12 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   sensor::Sensor* invalid_checksum_sensor_ = nullptr;
   sensor::Sensor* missed_packet_sensor_ = nullptr;
   binary_sensor::BinarySensor* night_mode_sensor_ = nullptr;
+  
+  // Memory monitoring sensors (ESP32 only)
+  sensor::Sensor* internal_ram_free_sensor_ = nullptr;
+  sensor::Sensor* internal_ram_min_sensor_ = nullptr;
+  sensor::Sensor* psram_free_sensor_ = nullptr;
+  sensor::Sensor* stack_free_sensor_ = nullptr;
   
   // Energy calculation variables
   float total_energy_kwh_ = 0.0f;

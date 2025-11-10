@@ -46,6 +46,11 @@ CONF_DEVICE_INFO = "device_info"
 CONF_EFFICIENCY = "efficiency"
 CONF_POWER_FACTOR = "power_factor"
 CONF_LOAD_FACTOR = "load_factor"
+# Memory monitoring (ESP32 only)
+CONF_INTERNAL_RAM_FREE = "internal_ram_free"
+CONF_INTERNAL_RAM_MIN = "internal_ram_min"
+CONF_PSRAM_FREE = "psram_free"
+CONF_STACK_FREE = "stack_free"
 
 def _tigo_sensor_schema(**kwargs):
     """Create a sensor schema that allows empty configs for auto-templating"""
@@ -242,6 +247,43 @@ MISSED_PACKET_CONFIG_SCHEMA = sensor.sensor_schema(
     cv.GenerateID(CONF_TIGO_MONITOR_ID): cv.use_id(TigoMonitorComponent),
 }).extend(cv.COMPONENT_SCHEMA)
 
+# Memory monitoring sensors (ESP32 only)
+INTERNAL_RAM_FREE_CONFIG_SCHEMA = sensor.sensor_schema(
+    unit_of_measurement="KB",
+    accuracy_decimals=1,
+    state_class=STATE_CLASS_MEASUREMENT,
+    icon="mdi:memory",
+).extend({
+    cv.GenerateID(CONF_TIGO_MONITOR_ID): cv.use_id(TigoMonitorComponent),
+}).extend(cv.COMPONENT_SCHEMA)
+
+INTERNAL_RAM_MIN_CONFIG_SCHEMA = sensor.sensor_schema(
+    unit_of_measurement="KB",
+    accuracy_decimals=1,
+    state_class=STATE_CLASS_MEASUREMENT,
+    icon="mdi:memory",
+).extend({
+    cv.GenerateID(CONF_TIGO_MONITOR_ID): cv.use_id(TigoMonitorComponent),
+}).extend(cv.COMPONENT_SCHEMA)
+
+PSRAM_FREE_CONFIG_SCHEMA = sensor.sensor_schema(
+    unit_of_measurement="KB",
+    accuracy_decimals=1,
+    state_class=STATE_CLASS_MEASUREMENT,
+    icon="mdi:memory",
+).extend({
+    cv.GenerateID(CONF_TIGO_MONITOR_ID): cv.use_id(TigoMonitorComponent),
+}).extend(cv.COMPONENT_SCHEMA)
+
+STACK_FREE_CONFIG_SCHEMA = sensor.sensor_schema(
+    unit_of_measurement="B",
+    accuracy_decimals=0,
+    state_class=STATE_CLASS_MEASUREMENT,
+    icon="mdi:memory",
+).extend({
+    cv.GenerateID(CONF_TIGO_MONITOR_ID): cv.use_id(TigoMonitorComponent),
+}).extend(cv.COMPONENT_SCHEMA)
+
 # Main config schema that handles both types
 def _validate_config(config):
     """Validate configuration and determine sensor type"""
@@ -252,6 +294,10 @@ def _validate_config(config):
     has_count_keywords = any(keyword in sensor_name for keyword in ["count", "devices", "discovered", "active", "number"])
     has_checksum_keywords = any(keyword in sensor_name for keyword in ["checksum", "invalid", "crc", "error"])
     has_packet_keywords = any(keyword in sensor_name for keyword in ["packet", "missed", "lost", "dropped"])
+    has_internal_ram_keywords = any(keyword in sensor_name for keyword in ["internal", "ram", "heap"])
+    has_psram_keywords = "psram" in sensor_name
+    has_stack_keywords = "stack" in sensor_name
+    has_min_keywords = any(keyword in sensor_name for keyword in ["min", "minimum", "watermark"])
     
     # If it has keywords and no address, treat as aggregate sensor
     if CONF_ADDRESS not in config:
@@ -265,8 +311,16 @@ def _validate_config(config):
             return INVALID_CHECKSUM_CONFIG_SCHEMA(config)
         elif has_packet_keywords:
             return MISSED_PACKET_CONFIG_SCHEMA(config)
+        elif has_psram_keywords:
+            return PSRAM_FREE_CONFIG_SCHEMA(config)
+        elif has_stack_keywords:
+            return STACK_FREE_CONFIG_SCHEMA(config)
+        elif has_internal_ram_keywords and has_min_keywords:
+            return INTERNAL_RAM_MIN_CONFIG_SCHEMA(config)
+        elif has_internal_ram_keywords:
+            return INTERNAL_RAM_FREE_CONFIG_SCHEMA(config)
         else:
-            raise cv.Invalid("For sensors without address, use names containing 'energy'/'kwh' for energy sensors, 'power'/'total'/'sum' for power sensors, 'count'/'devices' for device count sensors, 'checksum'/'invalid' for checksum errors, or 'packet'/'missed' for packet errors")
+            raise cv.Invalid("For sensors without address, use names containing 'energy'/'kwh' for energy sensors, 'power'/'total'/'sum' for power sensors, 'count'/'devices' for device count, 'checksum'/'invalid' for checksum errors, 'packet'/'missed' for packet errors, 'psram' for PSRAM free, 'stack' for stack free, 'internal ram min' for internal RAM minimum, or 'internal ram' for internal RAM free")
     elif CONF_ADDRESS in config:
         # This is a device sensor configuration
         return DEVICE_CONFIG_SCHEMA(config)
@@ -287,6 +341,10 @@ async def to_code(config):
         has_count_keywords = any(keyword in sensor_name for keyword in ["count", "devices", "discovered", "active", "number"])
         has_checksum_keywords = any(keyword in sensor_name for keyword in ["checksum", "invalid", "crc", "error"])
         has_packet_keywords = any(keyword in sensor_name for keyword in ["packet", "missed", "lost", "dropped"])
+        has_internal_ram_keywords = any(keyword in sensor_name for keyword in ["internal", "ram", "heap"])
+        has_psram_keywords = "psram" in sensor_name
+        has_stack_keywords = "stack" in sensor_name
+        has_min_keywords = any(keyword in sensor_name for keyword in ["min", "minimum", "watermark"])
         
         sens = await sensor.new_sensor(config)
         if has_energy_keywords:
@@ -297,6 +355,14 @@ async def to_code(config):
             cg.add(hub.add_invalid_checksum_sensor(sens))
         elif has_packet_keywords:
             cg.add(hub.add_missed_packet_sensor(sens))
+        elif has_psram_keywords:
+            cg.add(hub.add_psram_free_sensor(sens))
+        elif has_stack_keywords:
+            cg.add(hub.add_stack_free_sensor(sens))
+        elif has_internal_ram_keywords and has_min_keywords:
+            cg.add(hub.add_internal_ram_min_sensor(sens))
+        elif has_internal_ram_keywords:
+            cg.add(hub.add_internal_ram_free_sensor(sens))
         else:
             cg.add(hub.add_power_sum_sensor(sens))
         return
