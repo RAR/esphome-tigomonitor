@@ -2,10 +2,73 @@
 # 128x128 LCD screen showing Tigo Monitor status
 # Include this package in your config to enable the display
 
+# External component for LP5562 LED driver
+external_components:
+  - source:
+      type: git
+      url: https://github.com/RAR/esphome-lp5562
+    components: [ lp5562 ]
+
+# I2C bus for LP5562 (RGB LED + LCD Backlight control)
+i2c:
+  sda: GPIO38  # SYS_SDA
+  scl: GPIO39  # SYS_SCL
+  scan: true
+
+# LP5562 LED driver (controls RGB indicator LED + LCD backlight)
+lp5562:
+  id: rgb_driver
+  address: 0x30
+
 # SPI bus for the LCD
 spi:
   clk_pin: GPIO15
   mosi_pin: GPIO21
+
+# Outputs for LP5562 channels
+output:
+  - platform: lp5562
+    id: lp5562_red
+    lp5562_id: rgb_driver
+    channel: 0  # Red channel
+  - platform: lp5562
+    id: lp5562_green
+    lp5562_id: rgb_driver
+    channel: 1  # Green channel
+  - platform: lp5562
+    id: lp5562_blue
+    lp5562_id: rgb_driver
+    channel: 2  # Blue channel
+  - platform: lp5562
+    id: backlight_output
+    lp5562_id: rgb_driver
+    channel: 3  # White channel (LCD backlight)
+
+# Light entities
+light:
+  # RGB indicator LED
+  - platform: rgb
+    name: "RGB LED"
+    id: status_led
+    red: lp5562_red
+    green: lp5562_green
+    blue: lp5562_blue
+    restore_mode: RESTORE_DEFAULT_OFF
+    effects:
+      - pulse:
+          name: "Pulse"
+          transition_length: 1s
+          update_interval: 1s
+      - strobe:
+          name: "Strobe"
+
+  # LCD Backlight (LP5562 White Channel)
+  - platform: monochromatic
+    name: "LCD Backlight"
+    id: lcd_backlight
+    output: backlight_output
+    restore_mode: RESTORE_DEFAULT_ON
+    default_transition_length: 0.5s
 
 # Display configuration
 display:
