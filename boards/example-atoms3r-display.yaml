@@ -1,0 +1,72 @@
+# Example Tigo Monitor Configuration with AtomS3R Display
+# This demonstrates the AtomS3R with built-in LCD display
+
+# Include board-specific hardware configuration
+packages:
+  board: !include esp32s3-atoms3r.yaml
+  display: !include atoms3r-display.yaml
+
+# External components
+external_components:
+  - source: 
+      type: local
+      path: ../components
+
+# WiFi configuration
+wifi:
+  ssid: "YOUR_WIFI_SSID"
+  password: "YOUR_WIFI_PASSWORD"
+  
+  # Enable fallback hotspot (captive portal) in case wifi connection fails
+  ap:
+    ssid: "Tigo-Server Fallback Hotspot"
+    password: "12345678"
+
+captive_portal:
+
+# Enable logging
+logger:
+  level: INFO  # Change to DEBUG if you need detailed logs for troubleshooting
+  baud_rate: 0  # Disable hardware logging since we use the UART for Tigo communication
+
+# Enable Home Assistant API
+api:
+
+# Enable OTA updates
+ota:
+  - platform: esphome
+    password: "YOUR_OTA_PASSWORD"
+
+# Needed for display fonts
+font:
+text_sensor:
+
+# Tigo Monitor Control Buttons
+button:
+  - platform: tigo_monitor
+    name: "Generate YAML Config"
+    id: generate_yaml_button
+    tigo_monitor_id: tigo_hub
+    button_type: yaml_generator
+  - platform: tigo_monitor
+    name: "Print Device Mappings"
+    id: device_mappings_button
+    tigo_monitor_id: tigo_hub
+    button_type: device_mappings
+  - platform: tigo_monitor
+    name: "Reset Node Table"
+    id: reset_nodes_button
+    tigo_monitor_id: tigo_hub
+    button_type: reset_node_table
+
+# Optional: Add some sensors for Home Assistant
+sensor:
+  - platform: tigo_monitor
+    tigo_monitor_id: tigo_hub
+    name: "Total Solar Power"
+  - platform: tigo_monitor
+    tigo_monitor_id: tigo_hub
+    name: "Total System Energy"
+  - platform: tigo_monitor
+    tigo_monitor_id: tigo_hub
+    name: "Active Device Count"

@@ -1,0 +1,139 @@
+# M5Stack AtomS3R Display Package
+# 128x128 LCD screen showing Tigo Monitor status
+# Include this package in your config to enable the display
+
+# SPI bus for the LCD
+spi:
+  clk_pin: GPIO15
+  mosi_pin: GPIO21
+
+# Display configuration
+display:
+  - platform: st7789v
+    id: atoms3r_lcd
+    model: CUSTOM
+    height: 128
+    width: 128
+    offset_height: 2
+    offset_width: 1
+    cs_pin: GPIO14
+    dc_pin: GPIO42
+    reset_pin: GPIO48
+    rotation: 0
+    eightbitcolor: true
+    data_rate: 40MHz
+    update_interval: 2s
+    setup_priority: -100  # Initialize display after everything else to avoid WDT timeout
+    lambda: |-
+      // Get device data from tigo_monitor
+      auto devices = id(tigo_hub)->get_devices();
+      int device_count = 0;
+      float total_power = 0.0;
+      int online_count = 0;
+      
+      // Current time in milliseconds
+      unsigned long now = millis();
+      
+      // Count active devices and sum power
+      for (const auto &device : devices) {
+        device_count++;
+        // Calculate power from voltage and current
+        float power = device.voltage_in * device.current_in;
+        // Consider online if seen in last 5 minutes (300000 ms)
+        if (device.last_update > 0 && (now - device.last_update) < 300000) {
+          online_count++;
+          total_power += power;
+        }
+      }
+      
+      // Background
+      it.fill(COLOR_BLACK);
+      
+      // Header - Title
+      it.print(64, 5, id(font_title), COLOR_WHITE, TextAlign::TOP_CENTER, "TIGO");
+      it.print(64, 20, id(font_small), Color(150, 150, 150), TextAlign::TOP_CENTER, "Solar Monitor");
+      
+      // Divider line
+      it.line(10, 35, 118, 35, Color(100, 100, 100));
+      
+      // Main stats
+      if (device_count > 0) {
+        // Total Power - Large and prominent
+        it.printf(64, 45, id(font_large), COLOR_ORANGE, TextAlign::TOP_CENTER, "%.0fW", total_power);
+        
+        // Device status
+        it.printf(64, 75, id(font_medium), COLOR_WHITE, TextAlign::TOP_CENTER, "%d/%d", online_count, device_count);
+        it.print(64, 92, id(font_tiny), Color(150, 150, 150), TextAlign::TOP_CENTER, "devices online");
+        
+        // Status indicator
+        if (online_count == device_count) {
+          it.filled_circle(10, 110, 4, COLOR_GREEN);
+          it.print(20, 107, id(font_small), COLOR_GREEN, TextAlign::CENTER_LEFT, "All OK");
+        } else if (online_count > 0) {
+          it.filled_circle(10, 110, 4, COLOR_ORANGE);
+          it.printf(20, 107, id(font_small), COLOR_ORANGE, TextAlign::CENTER_LEFT, "%d Offline", device_count - online_count);
+        } else {
+          it.filled_circle(10, 110, 4, COLOR_RED);
+          it.print(20, 107, id(font_small), COLOR_RED, TextAlign::CENTER_LEFT, "No Data");
+        }
+      } else {
+        // No devices discovered yet
+        it.print(64, 55, id(font_medium), Color(200, 200, 0), TextAlign::TOP_CENTER, "WAITING");
+        it.print(64, 80, id(font_small), Color(150, 150, 150), TextAlign::TOP_CENTER, "for devices...");
+        it.filled_circle(10, 110, 4, Color(200, 200, 0));
+        it.print(20, 107, id(font_small), Color(200, 200, 0), TextAlign::CENTER_LEFT, "Scanning");
+      }
+      
+      // WiFi status indicator (top right)
+      if (id(wifi_status).state) {
+        it.filled_circle(118, 10, 3, COLOR_GREEN);
+      } else {
+        it.filled_circle(118, 10, 3, COLOR_RED);
+      }
+
+# Color definitions
+color:
+  - id: COLOR_BLACK
+    red: 0%
+    green: 0%
+    blue: 0%
+  - id: COLOR_WHITE
+    red: 100%
+    green: 100%
+    blue: 100%
+  - id: COLOR_GREEN
+    red: 0%
+    green: 100%
+    blue: 0%
+  - id: COLOR_RED
+    red: 100%
+    green: 0%
+    blue: 0%
+  - id: COLOR_ORANGE
+    red: 100%
+    green: 65%
+    blue: 0%
+
+# Fonts for the display
+font:
+  - file: "gfonts://Roboto@bold"
+    id: font_title
+    size: 14
+  - file: "gfonts://Roboto@bold"
+    id: font_large
+    size: 28
+  - file: "gfonts://Roboto"
+    id: font_medium
+    size: 18
+  - file: "gfonts://Roboto"
+    id: font_small
+    size: 12
+  - file: "gfonts://Roboto"
+    id: font_tiny
+    size: 9
+
+# WiFi status sensor for display indicator
+binary_sensor:
+  - platform: status
+    id: wifi_status
+    internal: true
