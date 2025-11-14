@@ -6,7 +6,7 @@ This directory contains optimized ESPHome configurations for different ESP32 boa
 
 ### ESP32-S3 Boards
 
-#### `esp32s3-atoms3.yaml` - M5Stack AtomS3 (8MB PSRAM)
+#### `esp32s3-atoms3.yaml` - M5Stack AtomS3 (No PSRAM)
 - **Board**: M5Stack AtomS3
 - **PSRAM**: 8MB (Octal)
 - **CPU**: 240MHz
@@ -18,7 +18,8 @@ This directory contains optimized ESPHome configurations for different ESP32 boa
 - **PSRAM**: 8MB (Octal)
 - **CPU**: 240MHz
 - **Recommended for**: Standard installations (up to ~30 devices)
-- **UART Buffers**: 2048 RX / 512 TX
+- **UART Buffers**: 2048 RX / 512 TX (increase RX to 8192 if using display package)
+- **Note**: When using `atoms3r-display.yaml` package, display updates compete with UART. See UART_OPTIMIZATION.md for packet loss mitigation. TX buffer can stay small since we only listen to the bus.
 
 ### ESP32-P4 Boards
 
@@ -27,7 +28,7 @@ This directory contains optimized ESPHome configurations for different ESP32 boa
 - **PSRAM**: 32MB (Octal)
 - **CPU**: 400MHz (dual-core)
 - **Recommended for**: Large installations (50+ devices)
-- **UART Buffers**: 8192 RX / 2048 TX
+- **UART Buffers**: 16384 RX / 1024 TX (listen-only, no transmission)
 - **Special optimizations**: High-frequency FreeRTOS tick, tickless idle disabled
 
 ### Standard ESP32 Boards

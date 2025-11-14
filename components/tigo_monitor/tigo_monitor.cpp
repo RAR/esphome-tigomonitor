@@ -383,8 +383,9 @@ void TigoSyncFromCCAButton::press_action() {
 
 void TigoMonitorComponent::process_serial_data() {
 #ifdef USE_ESP_IDF
-  // Safety: limit processing to prevent watchdog timeouts
-  const size_t MAX_BYTES_PER_LOOP = 2048;  // Process max 2KB per loop iteration
+  // Increase processing limit for high-throughput systems with display
+  // Display updates can delay UART processing, so process more per loop
+  const size_t MAX_BYTES_PER_LOOP = 4096;  // Process max 4KB per loop iteration (was 2KB)
   size_t bytes_processed = 0;
 #endif
   

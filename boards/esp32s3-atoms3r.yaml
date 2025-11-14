@@ -19,6 +19,8 @@ esp32:
       CONFIG_UART_ISR_IN_IRAM: "y"
       CONFIG_UART_RX_BUFFER_SIZE: "2048"
       CONFIG_UART_TX_BUFFER_SIZE: "512"
+      # Note: Increase RX to 8192 if using atoms3r-display.yaml package
+      # TX can stay small (512-1024) since we only listen to the bus
       # Increase event queue size
       CONFIG_FREERTOS_QUEUE_REGISTRY_SIZE: "32"
       # Logging optimizations

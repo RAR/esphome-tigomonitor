@@ -1,6 +1,13 @@
 # M5Stack AtomS3R Display Package
 # 128x128 LCD screen showing Tigo Monitor status
 # Include this package in your config to enable the display
+#
+# IMPORTANT: Display updates compete with UART processing. To minimize missed packets:
+# 1. Increase UART RX buffer: CONFIG_UART_RX_BUFFER_SIZE: "8192" or higher
+# 2. TX buffer can stay small (1024) since we only listen to the bus
+# 3. Increase display update_interval to 5s or more (default below)
+# 4. Consider disabling light effects during peak solar hours
+# 5. The component automatically processes 4KB per loop to handle display overhead
 
 # External component for LP5562 LED driver
 external_components:
@@ -85,7 +92,7 @@ display:
     rotation: 0
     eightbitcolor: true
     data_rate: 40MHz
-    update_interval: 2s
+    update_interval: 5s  # Increased from 2s to reduce CPU load and minimize missed UART packets
     setup_priority: -100  # Initialize display after everything else to avoid WDT timeout
     lambda: |-
       // Get device data from tigo_monitor
