@@ -200,3 +200,7 @@ binary_sensor:
   - platform: status
     id: wifi_status
     internal: true
+
+# Configure tigo_server to control the backlight from web UI
+tigo_server:
+  backlight: lcd_backlight

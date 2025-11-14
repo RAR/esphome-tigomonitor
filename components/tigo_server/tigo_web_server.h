@@ -15,10 +15,13 @@
 #include <string>
 #include <ctime>
 
-// Forward declare Logger from esphome
+// Forward declare Logger and Light from esphome
 namespace esphome {
 namespace logger {
 class Logger;
+}
+namespace light {
+class LightState;
 }
 }
 
@@ -38,6 +41,7 @@ class TigoWebServer : public Component {
   ~TigoWebServer();
   
   void set_tigo_monitor(tigo_monitor::TigoMonitorComponent *parent) { parent_ = parent; }
+  void set_backlight(light::LightState *backlight) { backlight_ = backlight; }
   
   void setup() override;
   void loop() override;
@@ -57,6 +61,7 @@ class TigoWebServer : public Component {
 
  protected:
   tigo_monitor::TigoMonitorComponent *parent_{nullptr};
+  light::LightState *backlight_{nullptr};
   httpd_handle_t server_{nullptr};
   uint16_t port_{80};
   std::string api_token_{""};
@@ -88,6 +93,7 @@ class TigoWebServer : public Component {
   static esp_err_t api_reset_peak_power_handler(httpd_req_t *req);
   static esp_err_t api_reset_node_table_handler(httpd_req_t *req);
   static esp_err_t api_health_handler(httpd_req_t *req);
+  static esp_err_t api_backlight_handler(httpd_req_t *req);
   
   // Helper functions
   bool check_api_auth(httpd_req_t *req);

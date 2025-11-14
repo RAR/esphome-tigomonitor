@@ -8,6 +8,10 @@
 #include "esphome/core/time.h"
 #include "esphome/components/network/util.h"
 #include "esphome/components/logger/logger.h"
+#ifdef USE_LIGHT
+#include "esphome/components/light/light_state.h"
+#include "esphome/components/light/light_call.h"
+#endif
 #ifdef USE_WIFI
 #include "esphome/components/wifi/wifi_component.h"
 #endif
@@ -325,6 +329,14 @@ void TigoWebServer::setup() {
       .user_ctx = this
     };
     httpd_register_uri_handler(server_, &api_health_uri);
+    
+    httpd_uri_t api_backlight_uri = {
+      .uri = "/api/backlight",
+      .method = HTTP_POST,
+      .handler = api_backlight_handler,
+      .user_ctx = this
+    };
+    httpd_register_uri_handler(server_, &api_backlight_uri);
     
     // Log web authentication status
     if (!web_username_.empty() && !web_password_.empty()) {
@@ -2648,6 +2660,7 @@ void TigoWebServer::get_esp_status_html(PSRAMString& html) {
       <h1>🌞 Tigo Solar Monitor</h1>
       <div>
         <button class="temp-toggle" onclick="toggleTempUnit()" id="temp-toggle">°F</button>
+        <button class="temp-toggle" onclick="toggleBacklight()" id="backlight-toggle">💡 Backlight</button>
         <button class="theme-toggle" onclick="toggleTheme()">🌙</button>
       </div>
     </div>
@@ -2833,6 +2846,25 @@ void TigoWebServer::get_esp_status_html(PSRAMString& html) {
       darkMode = !darkMode;
       localStorage.setItem('darkMode', darkMode);
       applyTheme();
+    }
+    
+    async function toggleBacklight() {
+      try {
+        const response = await apiFetch('/api/backlight', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: 'state=toggle'
+        });
+        const data = await response.json();
+        if (data.success) {
+          const btn = document.getElementById('backlight-toggle');
+          btn.textContent = data.state === 'on' ? '💡 Backlight ON' : '💡 Backlight OFF';
+        } else {
+          console.error('Failed to toggle backlight:', data.error);
+        }
+      } catch (error) {
+        console.error('Error toggling backlight:', error);
+      }
     }
     
     function applyTheme() {
@@ -3672,6 +3704,68 @@ void TigoWebServer::build_cca_info_json(PSRAMString& json) {
   }
   
   json.append("\"}");
+}
+
+esp_err_t TigoWebServer::api_backlight_handler(httpd_req_t *req) {
+  TigoWebServer *server = static_cast<TigoWebServer *>(req->user_ctx);
+  
+#ifdef USE_LIGHT
+  if (server->backlight_ == nullptr) {
+    httpd_resp_set_status(req, "404 Not Found");
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, "{\"success\":false,\"error\":\"Backlight not configured\"}");
+    return ESP_OK;
+  }
+  
+  // Read POST body
+  char buf[128];
+  int ret = httpd_req_recv(req, buf, sizeof(buf) - 1);
+  if (ret <= 0) {
+    httpd_resp_set_status(req, "400 Bad Request");
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, "{\"success\":false,\"error\":\"Invalid request\"}");
+    return ESP_OK;
+  }
+  buf[ret] = '\0';
+  
+  // Parse simple state=on|off or state=toggle
+  bool turn_on = false;
+  bool toggle = false;
+  
+  if (strstr(buf, "state=on")) {
+    turn_on = true;
+  } else if (strstr(buf, "state=off")) {
+    turn_on = false;
+  } else if (strstr(buf, "state=toggle")) {
+    toggle = true;
+    // Get current state
+    auto current_values = server->backlight_->current_values;
+    turn_on = current_values.get_state() == 0.0f;  // If off, turn on
+  } else {
+    httpd_resp_set_status(req, "400 Bad Request");
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, "{\"success\":false,\"error\":\"Invalid state parameter\"}");
+    return ESP_OK;
+  }
+  
+  // Make the light call
+  auto call = server->backlight_->make_call();
+  call.set_state(turn_on);
+  call.perform();
+  
+  // Return success
+  httpd_resp_set_type(req, "application/json");
+  const char *response = turn_on ? 
+    "{\"success\":true,\"state\":\"on\"}" : 
+    "{\"success\":true,\"state\":\"off\"}";
+  httpd_resp_sendstr(req, response);
+#else
+  httpd_resp_set_status(req, "501 Not Implemented");
+  httpd_resp_set_type(req, "application/json");
+  httpd_resp_sendstr(req, "{\"success\":false,\"error\":\"Light component not available\"}");
+#endif
+  
+  return ESP_OK;
 }
 
 void TigoWebServer::loop() {

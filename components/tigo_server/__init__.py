@@ -1,6 +1,6 @@
 import esphome.codegen as cg
 import esphome.config_validation as cv
-from esphome.components import tigo_monitor
+from esphome.components import tigo_monitor, light
 from esphome.const import CONF_ID, CONF_PORT
 
 DEPENDENCIES = ['tigo_monitor']
@@ -13,6 +13,7 @@ CONF_TIGO_MONITOR_ID = 'tigo_monitor_id'
 CONF_API_TOKEN = 'api_token'
 CONF_WEB_USERNAME = 'web_username'
 CONF_WEB_PASSWORD = 'web_password'
+CONF_BACKLIGHT = 'backlight'
 
 CONFIG_SCHEMA = cv.Schema({
     cv.GenerateID(): cv.declare_id(TigoWebServer),
@@ -21,6 +22,7 @@ CONFIG_SCHEMA = cv.Schema({
     cv.Optional(CONF_API_TOKEN): cv.string,
     cv.Optional(CONF_WEB_USERNAME): cv.string,
     cv.Optional(CONF_WEB_PASSWORD): cv.string,
+    cv.Optional(CONF_BACKLIGHT): cv.use_id(light.LightState),
 }).extend(cv.COMPONENT_SCHEMA)
 
 
@@ -44,4 +46,8 @@ async def to_code(config):
         cg.add(var.set_web_username(config[CONF_WEB_USERNAME]))
     if CONF_WEB_PASSWORD in config:
         cg.add(var.set_web_password(config[CONF_WEB_PASSWORD]))
-
+    
+    # Set the backlight if provided
+    if CONF_BACKLIGHT in config:
+        backlight = await cg.get_variable(config[CONF_BACKLIGHT])
+        cg.add(var.set_backlight(backlight))

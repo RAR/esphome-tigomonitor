@@ -27,9 +27,7 @@ esp32:
       # Enable PSRAM (8MB on AtomS3R)
       CONFIG_SPIRAM_MODE_OCT: "y"
       CONFIG_SPIRAM_SPEED_80M: "y"
-      # Increase task watchdog timeout for display initialization
-      CONFIG_ESP_TASK_WDT_TIMEOUT_S: "10"
-      CONFIG_ESP_TASK_WDT_INIT: "y"
+
 
 # Enable PSRAM
 psram:
