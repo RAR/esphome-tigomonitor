@@ -2660,7 +2660,6 @@ void TigoWebServer::get_esp_status_html(PSRAMString& html) {
       <h1>🌞 Tigo Solar Monitor</h1>
       <div>
         <button class="temp-toggle" onclick="toggleTempUnit()" id="temp-toggle">°F</button>
-        <button class="temp-toggle" onclick="toggleBacklight()" id="backlight-toggle">💡 Backlight</button>
         <button class="theme-toggle" onclick="toggleTheme()">🌙</button>
       </div>
     </div>
@@ -2785,6 +2784,9 @@ void TigoWebServer::get_esp_status_html(PSRAMString& html) {
     <div class="card">
       <h2>Actions</h2>
       <div style="display: flex; gap: 1rem; flex-wrap: wrap;">
+        <button onclick="toggleBacklight()" id="backlight-toggle" style="padding: 12px 24px; background-color: #9b59b6; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; font-weight: bold;">
+          💡 Toggle Backlight
+        </button>
         <button onclick="restartESP()" style="padding: 12px 24px; background-color: #e74c3c; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; font-weight: bold;">
           🔄 Restart ESP32
         </button>
@@ -2795,6 +2797,7 @@ void TigoWebServer::get_esp_status_html(PSRAMString& html) {
           🗑️ Reset All Node Data
         </button>
       </div>
+      <div id="backlight-message" style="margin-top: 1rem; padding: 1rem; border-radius: 4px; display: none;"></div>
       <div id="restart-message" style="margin-top: 1rem; padding: 1rem; border-radius: 4px; display: none;"></div>
       <div id="reset-message" style="margin-top: 1rem; padding: 1rem; border-radius: 4px; display: none;"></div>
       <div id="node-reset-message" style="margin-top: 1rem; padding: 1rem; border-radius: 4px; display: none;"></div>
@@ -2849,6 +2852,7 @@ void TigoWebServer::get_esp_status_html(PSRAMString& html) {
     }
     
     async function toggleBacklight() {
+      const messageDiv = document.getElementById('backlight-message');
       try {
         const response = await apiFetch('/api/backlight', {
           method: 'POST',
@@ -2857,13 +2861,26 @@ void TigoWebServer::get_esp_status_html(PSRAMString& html) {
         });
         const data = await response.json();
         if (data.success) {
-          const btn = document.getElementById('backlight-toggle');
-          btn.textContent = data.state === 'on' ? '💡 Backlight ON' : '💡 Backlight OFF';
+          messageDiv.style.display = 'block';
+          messageDiv.style.backgroundColor = '#d4edda';
+          messageDiv.style.color = '#155724';
+          messageDiv.style.border = '1px solid #c3e6cb';
+          messageDiv.textContent = `Backlight turned ${data.state.toUpperCase()}`;
+          setTimeout(() => { messageDiv.style.display = 'none'; }, 3000);
         } else {
-          console.error('Failed to toggle backlight:', data.error);
+          messageDiv.style.display = 'block';
+          messageDiv.style.backgroundColor = '#f8d7da';
+          messageDiv.style.color = '#721c24';
+          messageDiv.style.border = '1px solid #f5c6cb';
+          messageDiv.textContent = `Error: ${data.error || 'Failed to toggle backlight'}`;
         }
       } catch (error) {
         console.error('Error toggling backlight:', error);
+        messageDiv.style.display = 'block';
+        messageDiv.style.backgroundColor = '#f8d7da';
+        messageDiv.style.color = '#721c24';
+        messageDiv.style.border = '1px solid #f5c6cb';
+        messageDiv.textContent = `Error: ${error.message}`;
       }
     }
     
