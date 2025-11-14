@@ -1781,10 +1781,15 @@ void TigoMonitorComponent::print_device_mappings() {
 void TigoMonitorComponent::load_node_table() {
   ESP_LOGI(TAG, "Loading persistent node table...");
   
+  // Pre-allocate string buffer to avoid repeated allocations
+  static std::string pref_key;
+  pref_key.reserve(32);
+  
   int loaded_count = 0;
   // Load node table entries up to the configured number of devices
   for (int i = 0; i < number_of_devices_; i++) {
-    std::string pref_key = "node_" + std::to_string(i);
+    pref_key = "node_";
+    pref_key += std::to_string(i);
     uint32_t hash = esphome::fnv1_hash(pref_key);
     
     // Use char array for ESPHome preferences
@@ -1879,9 +1884,14 @@ void TigoMonitorComponent::load_node_table() {
 void TigoMonitorComponent::save_node_table() {
   ESP_LOGD(TAG, "Saving node table to flash...");
   
+  // Pre-allocate string buffer to avoid repeated allocations
+  static std::string pref_key;
+  pref_key.reserve(32);
+  
   // Clear old entries first
   for (int i = 0; i < number_of_devices_; i++) {
-    std::string pref_key = "node_" + std::to_string(i);
+    pref_key = "node_";
+    pref_key += std::to_string(i);
     uint32_t hash = esphome::fnv1_hash(pref_key);
     auto save = global_preferences->make_preference<char[256]>(hash);
     char empty_data[256] = {0};
@@ -1895,7 +1905,8 @@ void TigoMonitorComponent::save_node_table() {
     if (i >= number_of_devices_) break; // Safety limit
     if (!node.is_persistent) continue;   // Only save persistent nodes
     
-    std::string pref_key = "node_" + std::to_string(i);
+    pref_key = "node_";
+    pref_key += std::to_string(i);
     uint32_t hash = esphome::fnv1_hash(pref_key);
     
     // Format: "addr|long_addr|checksum|sensor_index|cca_label|cca_string|cca_inverter|cca_channel|cca_validated"
@@ -1926,11 +1937,17 @@ void TigoMonitorComponent::save_node_table() {
 void TigoMonitorComponent::save_peak_power_data() {
   ESP_LOGD(TAG, "Saving peak power data to flash...");
   
+  // Pre-allocate string buffer to avoid repeated allocations
+  static std::string pref_key;
+  pref_key.reserve(32);
+  
   int saved_count = 0;
   for (size_t i = 0; i < devices_.size(); i++) {
     const auto &device = devices_[i];
     if (device.peak_power > 0.0f) {
-      std::string pref_key = "peak_" + device.addr;
+      // Reuse string buffer instead of creating new string each iteration
+      pref_key = "peak_";
+      pref_key += device.addr;
       uint32_t hash = esphome::fnv1_hash(pref_key);
       auto save = global_preferences->make_preference<float>(hash);
       save.save(&device.peak_power);
@@ -1944,10 +1961,16 @@ void TigoMonitorComponent::save_peak_power_data() {
 void TigoMonitorComponent::load_peak_power_data() {
   ESP_LOGD(TAG, "Loading peak power data from flash...");
   
+  // Pre-allocate string buffer to avoid repeated allocations
+  static std::string pref_key;
+  pref_key.reserve(32);
+  
   int loaded_count = 0;
   for (size_t i = 0; i < devices_.size(); i++) {
     auto &device = devices_[i];
-    std::string pref_key = "peak_" + device.addr;
+    // Reuse string buffer instead of creating new string each iteration
+    pref_key = "peak_";
+    pref_key += device.addr;
     uint32_t hash = esphome::fnv1_hash(pref_key);
     auto load = global_preferences->make_preference<float>(hash);
     
@@ -1965,13 +1988,18 @@ void TigoMonitorComponent::load_peak_power_data() {
 void TigoMonitorComponent::reset_peak_power() {
   ESP_LOGI(TAG, "Resetting all peak power values...");
   
+  // Pre-allocate string buffer to avoid repeated allocations
+  static std::string pref_key;
+  pref_key.reserve(32);
+  
   int reset_count = 0;
   for (size_t i = 0; i < devices_.size(); i++) {
     auto &device = devices_[i];
     device.peak_power = 0.0f;
     
-    // Clear from flash storage
-    std::string pref_key = "peak_" + device.addr;
+    // Clear from flash storage - reuse string buffer
+    pref_key = "peak_";
+    pref_key += device.addr;
     uint32_t hash = esphome::fnv1_hash(pref_key);
     auto save = global_preferences->make_preference<float>(hash);
     float zero = 0.0f;
