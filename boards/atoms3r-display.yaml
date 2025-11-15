@@ -95,26 +95,11 @@ display:
     update_interval: 5s  # Increased from 2s to reduce CPU load and minimize missed UART packets
     setup_priority: -100  # Initialize display after everything else to avoid WDT timeout
     lambda: |-
-      // Get device data from tigo_monitor
-      auto devices = id(tigo_hub)->get_devices();
-      int device_count = 0;
-      float total_power = 0.0;
-      int online_count = 0;
-      
-      // Current time in milliseconds
-      unsigned long now = millis();
-      
-      // Count active devices and sum power
-      for (const auto &device : devices) {
-        device_count++;
-        // Calculate power from voltage and current
-        float power = device.voltage_in * device.current_in;
-        // Consider online if seen in last 5 minutes (300000 ms)
-        if (device.last_update > 0 && (now - device.last_update) < 300000) {
-          online_count++;
-          total_power += power;
-        }
-      }
+      // Use cached values from tigo_monitor (updated during sensor publish)
+      // This avoids iterating through 30+ devices on every display update
+      int device_count = id(tigo_hub)->get_device_count();
+      int online_count = id(tigo_hub)->get_online_device_count();
+      float total_power = id(tigo_hub)->get_total_power();
       
       // Background
       it.fill(COLOR_BLACK);

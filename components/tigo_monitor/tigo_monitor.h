@@ -299,6 +299,11 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   uint32_t get_invalid_checksum_count() const { return invalid_checksum_count_; }
   uint32_t get_missed_packet_count() const { return missed_packet_count_; }
   
+  // Fast display helper methods (cached, no iteration)
+  int get_device_count() const { return devices_.size(); }
+  int get_online_device_count() const;
+  float get_total_power() const;
+  
   // Public methods for web server access
   void reset_peak_power();  // Reset all peak power values to 0
   void reset_total_energy();  // Reset total energy to 0
@@ -447,6 +452,10 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   // UART diagnostics
   uint32_t invalid_checksum_count_ = 0;
   uint32_t missed_packet_count_ = 0;
+  
+  // Cached display stats (updated during publish_sensor_data to avoid iteration in display lambda)
+  int cached_online_count_ = 0;
+  float cached_total_power_ = 0.0f;
   
   // Midnight reset tracking
   bool reset_at_midnight_ = false;  // Global flag to reset peak power and energy at midnight

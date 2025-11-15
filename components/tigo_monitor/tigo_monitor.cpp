@@ -1251,15 +1251,27 @@ void TigoMonitorComponent::publish_sensor_data() {
   if (power_sum_sensor_ != nullptr) {
     float total_power = 0.0f;
     int active_devices = 0;
+    int online_count = 0;
+    unsigned long now = millis();
+    const unsigned long ONLINE_THRESHOLD = 300000;  // 5 minutes
     
     for (const auto &device : devices_) {
       float device_power = device.voltage_out * device.current_in;
       total_power += device_power;
       active_devices++;
+      
+      // Count online devices (seen in last 5 minutes)
+      if (device.last_update > 0 && (now - device.last_update) < ONLINE_THRESHOLD) {
+        online_count++;
+      }
     }
     
+    // Cache values for fast display access (avoids iteration in display lambda)
+    cached_total_power_ = total_power;
+    cached_online_count_ = online_count;
+    
     power_sum_sensor_->publish_state(total_power);
-    ESP_LOGD(TAG, "Published power sum: %.0fW from %d devices", total_power, active_devices);
+    ESP_LOGD(TAG, "Published power sum: %.0fW from %d devices (%d online)", total_power, active_devices, online_count);
     
     // Calculate and publish energy sum sensor if configured
     if (energy_sum_sensor_ != nullptr) {
@@ -2669,6 +2681,18 @@ void TigoMonitorComponent::match_cca_to_uart(const std::string &json_response) {
   // Not implemented for Arduino framework
 }
 #endif
+
+// ========== Fast Display Helper Methods ==========
+
+int TigoMonitorComponent::get_online_device_count() const {
+  // Return cached value updated during publish_sensor_data()
+  return cached_online_count_;
+}
+
+float TigoMonitorComponent::get_total_power() const {
+  // Return cached value updated during publish_sensor_data()
+  return cached_total_power_;
+}
 
 }  // namespace tigo_monitor
 }  // namespace esphome
