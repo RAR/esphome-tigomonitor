@@ -1989,6 +1989,12 @@ void TigoMonitorComponent::load_peak_power_data() {
 void TigoMonitorComponent::reset_peak_power() {
   ESP_LOGI(TAG, "Resetting all peak power values...");
   
+#ifdef USE_ESP_IDF
+  // Log heap before reset
+  size_t heap_before = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+  ESP_LOGD(TAG, "Internal heap before reset: %zu bytes", heap_before);
+#endif
+  
   // Pre-allocate string buffer to avoid repeated allocations
   static std::string pref_key;
   pref_key.reserve(32);
@@ -2008,7 +2014,14 @@ void TigoMonitorComponent::reset_peak_power() {
     reset_count++;
   }
   
+#ifdef USE_ESP_IDF
+  // Log heap after reset
+  size_t heap_after = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+  ESP_LOGI(TAG, "Reset %d peak power values (heap: %zu -> %zu, delta: %zd bytes)", 
+           reset_count, heap_before, heap_after, (ssize_t)(heap_after - heap_before));
+#else
   ESP_LOGI(TAG, "Reset %d peak power values", reset_count);
+#endif
 }
 
 void TigoMonitorComponent::reset_total_energy() {
@@ -2048,11 +2061,27 @@ void TigoMonitorComponent::check_midnight_reset() {
   if (last_reset_day_ != -1 && last_reset_day_ != current_day) {
     ESP_LOGI(TAG, "Midnight detected - resetting peak power and total energy (day %d -> %d)", last_reset_day_, current_day);
     
+#ifdef USE_ESP_IDF
+    // Log heap before midnight reset operations
+    size_t heap_before = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+    size_t heap_min_before = heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL);
+    ESP_LOGI(TAG, "Heap before midnight reset: %zu bytes free (%zu min)", heap_before, heap_min_before);
+#endif
+    
     // Reset total energy
     reset_total_energy();
     
     // Reset all peak power values
     reset_peak_power();
+    
+#ifdef USE_ESP_IDF
+    // Log heap after midnight reset operations
+    size_t heap_after = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+    size_t heap_min_after = heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL);
+    ESP_LOGI(TAG, "Heap after midnight reset: %zu bytes free (%zu min)", heap_after, heap_min_after);
+    ESP_LOGI(TAG, "Midnight reset impact: free delta=%zd bytes, min delta=%zd bytes",
+             (ssize_t)(heap_after - heap_before), (ssize_t)(heap_min_after - heap_min_before));
+#endif
   }
   
   last_reset_day_ = current_day;
