@@ -298,6 +298,7 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   float get_total_energy_kwh() const { return total_energy_kwh_; }
   uint32_t get_invalid_checksum_count() const { return invalid_checksum_count_; }
   uint32_t get_missed_packet_count() const { return missed_packet_count_; }
+  uint32_t get_total_frames_processed() const { return total_frames_processed_; }
   
   // Fast display helper methods (cached, no iteration)
   int get_device_count() const { return devices_.size(); }

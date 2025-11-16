@@ -1584,6 +1584,7 @@ void TigoWebServer::build_esp_status_json(PSRAMString& json) {
   // Get UART diagnostics from parent
   uint32_t invalid_checksum = parent_->get_invalid_checksum_count();
   uint32_t missed_packets = parent_->get_missed_packet_count();
+  uint32_t total_frames = parent_->get_total_frames_processed();
   
   // Get ESP32 internal temperature (using persistent sensor handle)
   float internal_temp = 0.0f;
@@ -1641,7 +1642,7 @@ void TigoWebServer::build_esp_status_json(PSRAMString& json) {
     "\"uptime_sec\":%u,\"uptime_days\":%u,\"uptime_hours\":%u,\"uptime_mins\":%u,"
     "\"esphome_version\":\"%s\",\"compilation_time\":\"%s %s\","
     "\"task_count\":%u,\"internal_temp\":%.1f,"
-    "\"invalid_checksum\":%u,\"missed_packets\":%u,"
+    "\"invalid_checksum\":%u,\"missed_packets\":%u,\"total_frames\":%u,"
     "\"network_connected\":%s,\"wifi_rssi\":%d,\"wifi_ssid\":\"%s\",\"ip_address\":\"%s\",\"mac_address\":\"%s\","
     "\"active_sockets\":%d,\"max_sockets\":%d}",
     free_heap, total_heap, free_psram, total_psram,
@@ -1649,7 +1650,7 @@ void TigoWebServer::build_esp_status_json(PSRAMString& json) {
     uptime_sec, uptime_days, uptime_hours, uptime_mins,
     ESPHOME_VERSION, __DATE__, __TIME__,
     (unsigned int)task_count, internal_temp,
-    invalid_checksum, missed_packets,
+    invalid_checksum, missed_packets, total_frames,
     network_connected ? "true" : "false", wifi_rssi, ssid.c_str(), ip_address.c_str(), mac_address.c_str(),
     active_sockets, max_sockets);
   
@@ -2777,6 +2778,13 @@ void TigoWebServer::get_esp_status_html(PSRAMString& html) {
         <div class="info-item">
           <h3>Missed Packets</h3>
           <div class="value" id="missed-packets">--</div>
+          <div style="font-size: 0.9em; color: #7f8c8d; margin-top: 0.5rem;">
+            <span id="missed-packets-rate">--</span>
+          </div>
+        </div>
+        <div class="info-item">
+          <h3>Total Frames</h3>
+          <div class="value" id="total-frames">--</div>
         </div>
       </div>
     </div>
@@ -2971,6 +2979,16 @@ void TigoWebServer::get_esp_status_html(PSRAMString& html) {
         document.getElementById('min-heap').textContent = formatBytes(data.min_free_heap || 0);
         document.getElementById('invalid-checksum').textContent = data.invalid_checksum || 0;
         document.getElementById('missed-packets').textContent = data.missed_packets || 0;
+        document.getElementById('total-frames').textContent = data.total_frames || 0;
+        
+        // Calculate and display miss rate
+        if (data.total_frames > 0) {
+          const totalAttempts = data.total_frames + data.missed_packets;
+          const missRate = (data.missed_packets / totalAttempts * 100).toFixed(3);
+          document.getElementById('missed-packets-rate').textContent = `${missRate}% miss rate`;
+        } else {
+          document.getElementById('missed-packets-rate').textContent = '--';
+        }
         
         // Display network information
         document.getElementById('network-status').textContent = 
