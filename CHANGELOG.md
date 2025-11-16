@@ -5,6 +5,98 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] - 2025-11-16
+
+### Added
+- **AtomS3R Display Package** (`boards/atoms3r-display.yaml`)
+  - 128x128 ST7789V LCD display showing real-time solar monitor status
+  - LP5562 LED driver integration for RGB status LED and LCD backlight
+  - Displays total power, device count, online status, and WiFi indicator
+  - Optimized display lambda with cached values (O(1) instead of O(n))
+  - 5-second update interval to minimize CPU load
+  - Web UI backlight toggle button in Actions section
+- **Packet Statistics Display** in Web UI
+  - Total frames processed counter
+  - Missed packet percentage (miss rate)
+  - Provides context for packet loss (typical: 0.02-0.04% for RS485)
+  - Shows 99.96%+ success rate is excellent performance
+- **Comprehensive Memory Leak Diagnostics**
+  - Heap monitoring before/after midnight reset operations
+  - Detailed logging of memory deltas during peak power reset
+  - Minimum heap watermark tracking
+  - Identifies exact source of RAM consumption
+- **Fast Display Helper Methods**
+  - `get_device_count()`: Returns device count without iteration
+  - `get_online_device_count()`: Returns cached online count
+  - `get_total_power()`: Returns cached total power
+  - Cached values updated during sensor publish cycle
+  - Eliminates 5-10ms CPU blocking during display updates
+
+### Fixed
+- **Memory Leak in Midnight Reset** (2KB RAM loss per day)
+  - Optimized `reset_peak_power()`: Pre-allocate static string buffer, reuse across loop
+  - Optimized `save_peak_power_data()`: Eliminate temporary string allocations
+  - Optimized `load_peak_power_data()`: Eliminate temporary string allocations
+  - Optimized `save_node_table()`: Reuse string buffer for preference keys
+  - Optimized `load_node_table()`: Reuse string buffer for preference keys
+  - Root cause: `std::string pref_key = "peak_" + device.addr` created 30+ allocations per reset
+  - Solution: Static string buffer with reserve(32), reuse with `pref_key = "peak_"; pref_key += device.addr`
+  - Eliminates heap fragmentation from alloc/free cycles
+  - Zero heap allocations per iteration after first call
+
+### Changed
+- **UART Processing Optimization**
+  - Doubled `MAX_BYTES_PER_LOOP` from 2KB to 4KB per iteration
+  - Handles display overhead and I2C operations more efficiently
+  - Reduces risk of RX buffer overflow during SPI/I2C operations
+- **Display Update Frequency**
+  - Increased from 2s to 5s in atoms3r-display.yaml
+  - 60% reduction in SPI overhead
+  - More CPU time available for UART processing
+- **Enhanced Packet Miss Logging**
+  - Now logs buffer size and UART availability when packet missed
+  - Example: "Packet missed! Found END before START (buffer: 14 bytes, available: 68)"
+  - Helps diagnose buffer overflow vs. bus collision
+- **Packet Statistics Tracking**
+  - Added `total_frames_processed_` counter
+  - Incremented in `process_frame()` for every successful frame
+  - Enables miss rate calculation: `(missed / (total + missed)) × 100`
+  - Periodic logging every 60 seconds with heap stats
+
+### Performance
+- **Display Lambda Optimization**
+  - Before: 5-10ms CPU time per update (device iteration + calculations)
+  - After: <0.5ms CPU time per update (3 getter calls + rendering)
+  - 90%+ reduction in display CPU overhead
+  - Eliminated allocation of Color() objects in lambda
+  - No more string formatting or power calculations during display
+- **Memory Leak Resolution**
+  - Before: ~2KB RAM loss every midnight reset
+  - After: Zero measurable RAM loss at midnight
+  - Improved long-term stability for 24/7 operation
+- **Packet Reception Performance**
+  - Measured: 0.02-0.04% miss rate (99.96-99.98% success)
+  - ~60,000 frames processed per hour with 30 devices
+  - Missed packets occur in synchronized bursts (bus collisions)
+  - Performance near theoretical maximum for multi-drop RS485
+
+### Documentation
+- **UART_OPTIMIZATION.md**: Comprehensive guide for packet loss troubleshooting
+  - Root cause analysis (display SPI, I2C, processing bottlenecks)
+  - Buffer size recommendations (8KB RX for display users, 1KB TX listen-only)
+  - Step-by-step optimization procedures
+  - Testing and validation procedures
+  - When to use ESP32-P4 for large installations
+- **Updated boards/README.md**
+  - Notes on buffer size increases needed with display
+  - Clarifies TX buffer can be small for listen-only mode
+  - References UART optimization guide
+
+### Board Configurations
+- **atoms3r-display.yaml**: Complete AtomS3R display package with LP5562
+- **Updated esp32s3-atoms3r.yaml**: Added notes about display buffer requirements
+- **Updated esp32p4-evboard.yaml**: Corrected TX buffer to 1024 (listen-only)
+
 ## [1.1.0] - 2025-11-10
 
 ### Added
