@@ -290,6 +290,14 @@ void TigoMonitorComponent::loop() {
              internal_free / 1024, internal_min / 1024, psram_free / 1024, buffer_size(incoming_data_));
     ESP_LOGD(TAG, "Stack: %u bytes free (warning if < 512 bytes)", stack_free_bytes);
     
+    // Log packet statistics
+    uint32_t total_attempts = total_frames_processed_ + missed_packet_count_;
+    if (total_attempts > 0) {
+      float miss_rate = (missed_packet_count_ * 100.0f) / total_attempts;
+      ESP_LOGI(TAG, "Packet stats: %u processed, %u missed (%.2f%% miss rate), %u invalid checksums",
+               total_frames_processed_, missed_packet_count_, miss_rate, invalid_checksum_count_);
+    }
+    
     // Publish memory sensors to Home Assistant
     if (internal_ram_free_sensor_ != nullptr) {
       internal_ram_free_sensor_->publish_state(internal_free / 1024.0f);  // KB
@@ -420,7 +428,9 @@ void TigoMonitorComponent::process_serial_data() {
       if (missed_packet_sensor_ != nullptr) {
         missed_packet_sensor_->publish_state(missed_packet_count_);
       }
-      ESP_LOGW(TAG, "Packet missed!");
+      // Log buffer size and state to help diagnose if this is a buffer overflow or sync issue
+      ESP_LOGW(TAG, "Packet missed! Found END before START (buffer: %zu bytes, available: %zu)", 
+               buffer_size(incoming_data_), available());
     }
     
     if (!frame_started_ && buffer_find(incoming_data_, "\x7E\x07", 2) != std::string::npos) {
@@ -513,6 +523,10 @@ void TigoMonitorComponent::process_frame(const std::string &frame) {
   // Note: processed_frame and hex_frame are allocated in PSRAM via helper functions
   // (remove_escape_sequences and frame_to_hex_string use psram_string internally)
   // This saves 2-4KB of internal RAM per frame processed
+  
+  // Increment total frames processed counter for diagnostics
+  total_frames_processed_++;
+  
   std::string processed_frame = remove_escape_sequences(frame);
   
   if (!verify_checksum(processed_frame)) {

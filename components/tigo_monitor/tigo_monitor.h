@@ -452,6 +452,7 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   // UART diagnostics
   uint32_t invalid_checksum_count_ = 0;
   uint32_t missed_packet_count_ = 0;
+  uint32_t total_frames_processed_ = 0;  // Track successful frame processing for miss rate calculation
   
   // Cached display stats (updated during publish_sensor_data to avoid iteration in display lambda)
   int cached_online_count_ = 0;
