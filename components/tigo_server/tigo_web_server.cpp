@@ -3551,22 +3551,6 @@ void TigoWebServer::get_cca_info_html(PSRAMString& html) {
           // Build device info grid - display all available fields
           let html = '<div class="info-grid">';
           
-          // Helper function to format uptime from milliseconds
-          function formatUptime(ms) {
-            const seconds = Math.floor(ms / 1000);
-            const days = Math.floor(seconds / 86400);
-            const hours = Math.floor((seconds % 86400) / 3600);
-            const minutes = Math.floor((seconds % 3600) / 60);
-            const secs = seconds % 60;
-            
-            let parts = [];
-            if (days > 0) parts.push(days + 'd');
-            if (hours > 0) parts.push(hours + 'h');
-            if (minutes > 0) parts.push(minutes + 'm');
-            if (secs > 0 || parts.length === 0) parts.push(secs + 's');
-            return parts.join(' ');
-          }
-          
           // Helper function to format timestamp
           function formatTimestamp(ts) {
             if (!ts) return 'Never';
@@ -3618,14 +3602,16 @@ void TigoWebServer::get_cca_info_html(PSRAMString& html) {
           for (const [key, value] of Object.entries(deviceInfo)) {
             // Skip the status array itself - we'll expand it below
             if (key === 'status' && Array.isArray(value)) continue;
+            // Skip the code field - it's an internal status code not useful to display
+            if (key === 'code') continue;
+            // Skip UTS/uts field - it's unreliable and doesn't represent actual uptime
+            if (key === 'UTS' || key === 'uts') continue;
             
             const label = fieldLabels[key] || key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
             let displayValue = value;
             
             // Special formatting for certain fields
-            if (key === 'UTS' || key === 'uts') {
-              displayValue = formatUptime(value);
-            } else if (key === 'sysconfig_ts') {
+            if (key === 'sysconfig_ts') {
               displayValue = formatTimestamp(value);
             } else if (key === 'discovery') {
               displayValue = value ? '<span class="badge badge-success">Active</span>' : '<span class="badge badge-warning">Inactive</span>';
@@ -3644,6 +3630,12 @@ void TigoWebServer::get_cca_info_html(PSRAMString& html) {
           // Status codes: 0 = OK/Green, 2 = Warning/Yellow, -1 = N/A/Gray, others = Error/Red
           for (const statusItem of statusArray) {
             const label = statusItem.name || 'Status';
+            
+            // Skip status items that duplicate main fields (S/N, S/W)
+            if (label.startsWith('S/N:') || label.startsWith('S/W:')) {
+              continue;
+            }
+            
             let badge = '';
             
             if (statusItem.status === 0) {
