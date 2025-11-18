@@ -1318,7 +1318,7 @@ void TigoWebServer::build_devices_json(PSRAMString& json) {
     if (dwn.has_runtime_data && dwn.device != nullptr) {
       // Device has runtime data - show actual values
       const auto &device = *dwn.device;
-      float power = device.voltage_out * device.current_in;
+      float power = device.voltage_out * device.current_in * parent_->get_power_calibration();
       // If last_update is 0, device hasn't been updated yet - use ULONG_MAX to indicate "never"
       unsigned long data_age_ms = (device.last_update == 0) ? ULONG_MAX : (millis() - device.last_update);
       float duty_cycle_percent = (device.duty_cycle / 255.0f) * 100.0f;
@@ -1356,7 +1356,7 @@ void TigoWebServer::build_overview_json(PSRAMString& json) {
   int active_devices = 0;
   
   for (const auto &device : devices) {
-    float power = device.voltage_out * device.current_in;
+    float power = device.voltage_out * device.current_in * parent_->get_power_calibration();
     total_power += power;
     total_current += device.current_in;
     avg_efficiency += device.efficiency;
@@ -1868,7 +1868,7 @@ void TigoWebServer::get_dashboard_html(PSRAMString& html) {
     
     /* Dark mode styles */
     body.dark-mode { background: #1a1a1a; color: #e0e0e0; }
-    body.dark-mode .header { background: #1e1e1e; }
+    body.dark-mode .header { background: #1c2833; }
     body.dark-mode .stat-card, body.dark-mode .device-card { background: #2d2d2d; box-shadow: 0 2px 4px rgba(0,0,0,0.3); }
     body.dark-mode .stat-card h3, body.dark-mode .metric-label, body.dark-mode .device-subtitle { color: #b0b0b0; }
     body.dark-mode .stat-card .value, body.dark-mode .metric-value, body.dark-mode .device-title { color: #e0e0e0; }
@@ -2313,6 +2313,7 @@ void TigoWebServer::get_node_table_html(PSRAMString& html) {
     .header { background: #2c3e50; color: white; padding: 1rem 2rem; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
     .header-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem; }
     .header h1 { font-size: 1.5rem; margin: 0; }
+    .header-controls { display: flex; gap: 0.5rem; }
     .theme-toggle { background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.3); color: white; padding: 0.5rem 1rem; border-radius: 4px; cursor: pointer; font-size: 0.875rem; transition: all 0.2s; }
     .theme-toggle:hover { background: rgba(255,255,255,0.2); }
     .nav { display: flex; gap: 1rem; margin-top: 0.5rem; }
@@ -2338,7 +2339,7 @@ void TigoWebServer::get_node_table_html(PSRAMString& html) {
     
     /* Dark mode styles */
     body.dark-mode { background: #1a1a1a; color: #e0e0e0; }
-    body.dark-mode .header { background: #1e1e1e; }
+    body.dark-mode .header { background: #1c2833; }
     body.dark-mode .card { background: #2d2d2d; box-shadow: 0 2px 4px rgba(0,0,0,0.3); }
     body.dark-mode .card h2 { color: #e0e0e0; }
     body.dark-mode thead { background: #1e1e1e; }
@@ -2352,7 +2353,9 @@ void TigoWebServer::get_node_table_html(PSRAMString& html) {
   <div class="header">
     <div class="header-top">
       <h1>🌞 Tigo Solar Monitor</h1>
-      <button class="theme-toggle" onclick="toggleTheme()" id="theme-toggle">🌙</button>
+      <div class="header-controls">
+        <button class="theme-toggle" onclick="toggleTheme()" id="theme-toggle">🌙</button>
+      </div>
     </div>
     <div class="nav">
       <a href="/">Dashboard</a>
@@ -2611,10 +2614,11 @@ void TigoWebServer::get_esp_status_html(PSRAMString& html) {
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f5f5; transition: background-color 0.3s, color 0.3s; }
     .header { background: #2c3e50; color: white; padding: 1rem 2rem; box-shadow: 0 2px 4px rgba(0,0,0,0.1); transition: background-color 0.3s; }
-    .header-top { display: flex; justify-content: space-between; align-items: center; }
-    .header h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
-    .theme-toggle { background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.3); color: white; padding: 0.5rem 1rem; border-radius: 4px; cursor: pointer; font-size: 0.875rem; transition: all 0.2s; }
-    .theme-toggle:hover { background: rgba(255,255,255,0.2); }
+    .header-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem; }
+    .header h1 { font-size: 1.5rem; margin: 0; }
+    .header-controls { display: flex; gap: 0.5rem; }
+    .temp-toggle, .theme-toggle { background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.3); color: white; padding: 0.5rem 1rem; border-radius: 4px; cursor: pointer; font-size: 0.875rem; transition: all 0.2s; }
+    .temp-toggle:hover, .theme-toggle:hover { background: rgba(255,255,255,0.2); }
     .nav { display: flex; gap: 1rem; margin-top: 0.5rem; }
     .nav a { color: #3498db; text-decoration: none; padding: 0.5rem 1rem; background: rgba(255,255,255,0.1); border-radius: 4px; transition: background-color 0.3s; }
     .nav a:hover { background: rgba(255,255,255,0.2); }
@@ -2659,7 +2663,7 @@ void TigoWebServer::get_esp_status_html(PSRAMString& html) {
   <div class="header">
     <div class="header-top">
       <h1>🌞 Tigo Solar Monitor</h1>
-      <div>
+      <div class="header-controls">
         <button class="temp-toggle" onclick="toggleTempUnit()" id="temp-toggle">°F</button>
         <button class="theme-toggle" onclick="toggleTheme()">🌙</button>
       </div>
@@ -3137,8 +3141,9 @@ void TigoWebServer::get_yaml_config_html(PSRAMString& html) {
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f5f5; transition: background-color 0.3s, color 0.3s; }
     .header { background: #2c3e50; color: white; padding: 1rem 2rem; box-shadow: 0 2px 4px rgba(0,0,0,0.1); transition: background-color 0.3s; }
-    .header-top { display: flex; justify-content: space-between; align-items: center; }
-    .header h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
+    .header-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem; }
+    .header h1 { font-size: 1.5rem; margin: 0; }
+    .header-controls { display: flex; gap: 0.5rem; }
     .theme-toggle { background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.3); color: white; padding: 0.5rem 1rem; border-radius: 4px; cursor: pointer; font-size: 0.875rem; transition: all 0.2s; }
     .theme-toggle:hover { background: rgba(255,255,255,0.2); }
     .nav { display: flex; gap: 1rem; margin-top: 0.5rem; }
@@ -3185,7 +3190,9 @@ void TigoWebServer::get_yaml_config_html(PSRAMString& html) {
   <div class="header">
     <div class="header-top">
       <h1>🌞 Tigo Solar Monitor</h1>
-      <button class="theme-toggle" onclick="toggleTheme()">🌙</button>
+      <div class="header-controls">
+        <button class="theme-toggle" onclick="toggleTheme()">🌙</button>
+      </div>
     </div>
     <div class="nav">
       <a href="/">Dashboard</a>
@@ -3393,8 +3400,9 @@ void TigoWebServer::get_cca_info_html(PSRAMString& html) {
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f5f5; transition: background-color 0.3s, color 0.3s; }
     .header { background: #2c3e50; color: white; padding: 1rem 2rem; box-shadow: 0 2px 4px rgba(0,0,0,0.1); transition: background-color 0.3s; }
-    .header-top { display: flex; justify-content: space-between; align-items: center; }
-    .header h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
+    .header-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem; }
+    .header h1 { font-size: 1.5rem; margin: 0; }
+    .header-controls { display: flex; gap: 0.5rem; }
     .theme-toggle { background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.3); color: white; padding: 0.5rem 1rem; border-radius: 4px; cursor: pointer; font-size: 0.875rem; transition: all 0.2s; }
     .theme-toggle:hover { background: rgba(255,255,255,0.2); }
     .nav { display: flex; gap: 1rem; margin-top: 0.5rem; }
@@ -3432,7 +3440,9 @@ void TigoWebServer::get_cca_info_html(PSRAMString& html) {
   <div class="header">
     <div class="header-top">
       <h1>🌞 Tigo Solar Monitor</h1>
-      <button class="theme-toggle" onclick="toggleTheme()">🌙</button>
+      <div class="header-controls">
+        <button class="theme-toggle" onclick="toggleTheme()">🌙</button>
+      </div>
     </div>
     <div class="nav">
       <a href="/">Dashboard</a>

@@ -272,6 +272,7 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   void set_number_of_devices(int count) { number_of_devices_ = count; }
   void set_cca_ip(const std::string &ip) { cca_ip_ = ip; }
   void set_sync_cca_on_startup(bool sync) { sync_cca_on_startup_ = sync; }
+  void set_power_calibration(float multiplier) { power_calibration_ = multiplier; }
   void add_inverter(const std::string &name, const std::vector<std::string> &mppt_labels);
   
   // Public getters for web server access
@@ -299,6 +300,7 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   uint32_t get_invalid_checksum_count() const { return invalid_checksum_count_; }
   uint32_t get_missed_packet_count() const { return missed_packet_count_; }
   uint32_t get_total_frames_processed() const { return total_frames_processed_; }
+  float get_power_calibration() const { return power_calibration_; }
   
   // Fast display helper methods (cached, no iteration)
   int get_device_count() const { return devices_.size(); }
@@ -476,6 +478,9 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   // Persistence
   static const uint32_t DEVICE_MAPPING_HASH = 0x12345678;  // Hash for preferences key
   static const uint32_t ENERGY_DATA_HASH = 0x87654321;     // Hash for energy data key
+  
+  // Power calibration multiplier (default 1.0 = no adjustment)
+  float power_calibration_ = 1.0f;
   
 #ifdef USE_ESP_IDF
   // Use PSRAM-backed buffer for incoming serial data (can grow to 16KB)

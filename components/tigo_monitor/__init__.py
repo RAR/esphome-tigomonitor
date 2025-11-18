@@ -17,6 +17,7 @@ CONF_SYNC_CCA_ON_STARTUP = 'sync_cca_on_startup'
 CONF_RESET_AT_MIDNIGHT = 'reset_at_midnight'
 CONF_INVERTERS = 'inverters'
 CONF_MPPIS = 'mppts'
+CONF_POWER_CALIBRATION = 'power_calibration'
 
 # Inverter configuration schema
 INVERTER_SCHEMA = cv.Schema({
@@ -33,6 +34,7 @@ CONFIG_SCHEMA = cv.Schema({
     cv.Optional(CONF_TIME_ID): cv.use_id(time_.RealTimeClock),
     cv.Optional(CONF_RESET_AT_MIDNIGHT, default=False): cv.boolean,
     cv.Optional(CONF_INVERTERS): cv.ensure_list(INVERTER_SCHEMA),
+    cv.Optional(CONF_POWER_CALIBRATION, default=1.0): cv.float_range(min=0.5, max=2.0),
 }).extend(cv.polling_component_schema('30s')).extend(uart.UART_DEVICE_SCHEMA)
 
 @coroutine
@@ -56,6 +58,9 @@ def to_code(config):
         if CONF_TIME_ID not in config:
             raise cv.Invalid("reset_at_midnight requires a time_id to be configured")
         cg.add(var.set_reset_at_midnight(True))
+    
+    # Set power calibration multiplier
+    cg.add(var.set_power_calibration(config[CONF_POWER_CALIBRATION]))
     
     # Configure inverters if provided
     if CONF_INVERTERS in config:
