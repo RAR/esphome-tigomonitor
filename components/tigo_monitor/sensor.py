@@ -33,7 +33,7 @@ CONF_POWER_SUM = "power_sum"
 CONF_ENERGY_SUM = "energy_sum"
 CONF_DEVICE_COUNT = "device_count"
 CONF_INVALID_CHECKSUM = "invalid_checksum"
-CONF_MISSED_PACKET = "missed_packet"
+CONF_MISSED_FRAME = "missed_frame"
 CONF_VOLTAGE_IN = "voltage_in"
 CONF_VOLTAGE_OUT = "voltage_out"
 CONF_CURRENT_IN = "current_in"
@@ -238,8 +238,8 @@ INVALID_CHECKSUM_CONFIG_SCHEMA = sensor.sensor_schema(
     cv.GenerateID(CONF_TIGO_MONITOR_ID): cv.use_id(TigoMonitorComponent),
 }).extend(cv.COMPONENT_SCHEMA)
 
-# Schema for missed packet counter (no address required)
-MISSED_PACKET_CONFIG_SCHEMA = sensor.sensor_schema(
+# Schema for missed frame counter (no address required)
+MISSED_FRAME_CONFIG_SCHEMA = sensor.sensor_schema(
     accuracy_decimals=0,
     state_class=STATE_CLASS_MEASUREMENT,
     icon="mdi:alert-circle-outline",
@@ -293,7 +293,7 @@ def _validate_config(config):
     has_power_keywords = any(keyword in sensor_name for keyword in ["power", "watt", "total", "sum", "combined", "system"])
     has_count_keywords = any(keyword in sensor_name for keyword in ["count", "devices", "discovered", "active", "number"])
     has_checksum_keywords = any(keyword in sensor_name for keyword in ["checksum", "invalid", "crc", "error"])
-    has_packet_keywords = any(keyword in sensor_name for keyword in ["packet", "missed", "lost", "dropped"])
+    has_frame_keywords = any(keyword in sensor_name for keyword in ["frame", "missed", "lost", "dropped"])
     has_internal_ram_keywords = any(keyword in sensor_name for keyword in ["internal", "ram", "heap"])
     has_psram_keywords = "psram" in sensor_name
     has_stack_keywords = "stack" in sensor_name
@@ -309,8 +309,8 @@ def _validate_config(config):
             return DEVICE_COUNT_CONFIG_SCHEMA(config)
         elif has_checksum_keywords:
             return INVALID_CHECKSUM_CONFIG_SCHEMA(config)
-        elif has_packet_keywords:
-            return MISSED_PACKET_CONFIG_SCHEMA(config)
+        elif has_frame_keywords:
+            return MISSED_FRAME_CONFIG_SCHEMA(config)
         elif has_psram_keywords:
             return PSRAM_FREE_CONFIG_SCHEMA(config)
         elif has_stack_keywords:
@@ -320,7 +320,7 @@ def _validate_config(config):
         elif has_internal_ram_keywords:
             return INTERNAL_RAM_FREE_CONFIG_SCHEMA(config)
         else:
-            raise cv.Invalid("For sensors without address, use names containing 'energy'/'kwh' for energy sensors, 'power'/'total'/'sum' for power sensors, 'count'/'devices' for device count, 'checksum'/'invalid' for checksum errors, 'packet'/'missed' for packet errors, 'psram' for PSRAM free, 'stack' for stack free, 'internal ram min' for internal RAM minimum, or 'internal ram' for internal RAM free")
+            raise cv.Invalid("For sensors without address, use names containing 'energy'/'kwh' for energy sensors, 'power'/'total'/'sum' for power sensors, 'count'/'devices' for device count, 'checksum'/'invalid' for checksum errors, 'frame'/'missed' for frame errors, 'psram' for PSRAM free, 'stack' for stack free, 'internal ram min' for internal RAM minimum, or 'internal ram' for internal RAM free")
     elif CONF_ADDRESS in config:
         # This is a device sensor configuration
         return DEVICE_CONFIG_SCHEMA(config)
@@ -340,7 +340,7 @@ async def to_code(config):
         has_energy_keywords = any(keyword in sensor_name for keyword in ["energy", "kwh", "kilowatt", "wh"])
         has_count_keywords = any(keyword in sensor_name for keyword in ["count", "devices", "discovered", "active", "number"])
         has_checksum_keywords = any(keyword in sensor_name for keyword in ["checksum", "invalid", "crc", "error"])
-        has_packet_keywords = any(keyword in sensor_name for keyword in ["packet", "missed", "lost", "dropped"])
+        has_frame_keywords = any(keyword in sensor_name for keyword in ["frame", "missed", "lost", "dropped"])
         has_internal_ram_keywords = any(keyword in sensor_name for keyword in ["internal", "ram", "heap"])
         has_psram_keywords = "psram" in sensor_name
         has_stack_keywords = "stack" in sensor_name
@@ -353,8 +353,8 @@ async def to_code(config):
             cg.add(hub.add_device_count_sensor(sens))
         elif has_checksum_keywords:
             cg.add(hub.add_invalid_checksum_sensor(sens))
-        elif has_packet_keywords:
-            cg.add(hub.add_missed_packet_sensor(sens))
+        elif has_frame_keywords:
+            cg.add(hub.add_missed_frame_sensor(sens))
         elif has_psram_keywords:
             cg.add(hub.add_psram_free_sensor(sens))
         elif has_stack_keywords:

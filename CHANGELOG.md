@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **Terminology Consistency**
+  - Renamed all "packet" references to "frame" for serial communication accuracy
+  - Updated `missed_packet` sensor to `missed_frame` (config name: `missed_frame`)
+  - Updated API methods: `add_missed_frame_sensor()`, `get_missed_frame_count()`
+  - Log messages now use "Frame missed!" instead of "Packet missed!"
+  - Tigo serial protocol uses frames, not packets
+
 ### Added
 - **Power Calibration Feature**
   - New `power_calibration` configuration option (default: 1.0)

@@ -249,12 +249,12 @@ void TigoMonitorComponent::setup() {
   
   // Initialize UART diagnostics
   invalid_checksum_count_ = 0;
-  missed_packet_count_ = 0;
+  missed_frame_count_ = 0;
   if (invalid_checksum_sensor_ != nullptr) {
     invalid_checksum_sensor_->publish_state(0);
   }
-  if (missed_packet_sensor_ != nullptr) {
-    missed_packet_sensor_->publish_state(0);
+  if (missed_frame_sensor_ != nullptr) {
+    missed_frame_sensor_->publish_state(0);
   }
   
   // Register shutdown callback to save persistent data before OTA/reboot
@@ -291,11 +291,11 @@ void TigoMonitorComponent::loop() {
     ESP_LOGD(TAG, "Stack: %u bytes free (warning if < 512 bytes)", stack_free_bytes);
     
     // Log packet statistics
-    uint32_t total_attempts = total_frames_processed_ + missed_packet_count_;
+    uint32_t total_attempts = total_frames_processed_ + missed_frame_count_;
     if (total_attempts > 0) {
-      float miss_rate = (missed_packet_count_ * 100.0f) / total_attempts;
-      ESP_LOGI(TAG, "Packet stats: %u processed, %u missed (%.2f%% miss rate), %u invalid checksums",
-               total_frames_processed_, missed_packet_count_, miss_rate, invalid_checksum_count_);
+      float miss_rate = (missed_frame_count_ * 100.0f) / total_attempts;
+      ESP_LOGI(TAG, "Frame stats: %u processed, %u missed (%.2f%% miss rate), %u invalid checksums",
+               total_frames_processed_, missed_frame_count_, miss_rate, invalid_checksum_count_);
     }
     
     // Publish memory sensors to Home Assistant
@@ -416,7 +416,7 @@ void TigoMonitorComponent::process_serial_data() {
       ESP_LOGW(TAG, "Buffer at max capacity before append, clearing!");
       buffer_clear(incoming_data_);
       frame_started_ = false;
-      missed_packet_count_++;
+      missed_frame_count_++;
       continue;  // Skip this byte
     }
     
@@ -424,9 +424,9 @@ void TigoMonitorComponent::process_serial_data() {
     
     // Check if frame starts
     if (!frame_started_ && buffer_find(incoming_data_, "\x7E\x08", 2) != std::string::npos) {
-      missed_packet_count_++;
-      if (missed_packet_sensor_ != nullptr) {
-        missed_packet_sensor_->publish_state(missed_packet_count_);
+      missed_frame_count_++;
+      if (missed_frame_sensor_ != nullptr) {
+        missed_frame_sensor_->publish_state(missed_frame_count_);
       }
       // Log buffer size and state to help diagnose if this is a buffer overflow or sync issue
       ESP_LOGW(TAG, "Packet missed! Found END before START (buffer: %zu bytes, available: %zu)", 
@@ -449,7 +449,7 @@ void TigoMonitorComponent::process_serial_data() {
       if (end_pos < 2 || end_pos > incoming_data_.size()) {
         ESP_LOGW(TAG, "Invalid frame end position: %zu (buffer size: %zu)", end_pos, incoming_data_.size());
         buffer_clear(incoming_data_);
-        missed_packet_count_++;
+        missed_frame_count_++;
         continue;
       }
       
@@ -463,7 +463,7 @@ void TigoMonitorComponent::process_serial_data() {
         process_frame(frame);
       } else if (frame.length() >= 10000) {
         ESP_LOGW(TAG, "Frame too large (%zu bytes), skipping", frame.length());
-        missed_packet_count_++;
+        missed_frame_count_++;
       }
     }
     
@@ -473,7 +473,7 @@ void TigoMonitorComponent::process_serial_data() {
       buffer_clear(incoming_data_);
       frame_started_ = false;
       ESP_LOGW(TAG, "Buffer too small, resetting! (>16KB bytes)");
-      missed_packet_count_++;
+      missed_frame_count_++;
     }
 #else
     // Fallback to standard string operations
@@ -481,11 +481,11 @@ void TigoMonitorComponent::process_serial_data() {
     
     // Check if frame starts
     if (!frame_started_ && incoming_data_.find("\x7E\x08") != std::string::npos) {
-      missed_packet_count_++;
-      if (missed_packet_sensor_ != nullptr) {
-        missed_packet_sensor_->publish_state(missed_packet_count_);
+      missed_frame_count_++;
+      if (missed_frame_sensor_ != nullptr) {
+        missed_frame_sensor_->publish_state(missed_frame_count_);
       }
-      ESP_LOGW(TAG, "Packet missed!");
+      ESP_LOGW(TAG, "Frame missed!");
     }
     
     if (!frame_started_ && incoming_data_.find("\x7E\x07") != std::string::npos) {
@@ -513,7 +513,7 @@ void TigoMonitorComponent::process_serial_data() {
       incoming_data_.clear();
       frame_started_ = false;
       ESP_LOGW(TAG, "Buffer too small, resetting! (>16KB bytes)");
-      missed_packet_count_++;
+      missed_frame_count_++;
     }
 #endif
   }

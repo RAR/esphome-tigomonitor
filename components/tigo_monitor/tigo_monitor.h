@@ -210,9 +210,9 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
     this->invalid_checksum_sensor_ = sensor;
     ESP_LOGCONFIG("tigo_monitor", "Registered invalid checksum sensor");
   }
-  void add_missed_packet_sensor(sensor::Sensor *sensor) {
-    this->missed_packet_sensor_ = sensor;
-    ESP_LOGCONFIG("tigo_monitor", "Registered missed packet sensor");
+  void add_missed_frame_sensor(sensor::Sensor *sensor) {
+    this->missed_frame_sensor_ = sensor;
+    ESP_LOGCONFIG("tigo_monitor", "Registered missed frame sensor");
   }
   void add_rssi_sensor(const std::string &address, sensor::Sensor *sensor) { 
     this->rssi_sensors_[address] = sensor; 
@@ -298,7 +298,7 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   unsigned long get_last_cca_sync_time() const { return last_cca_sync_time_; }
   float get_total_energy_kwh() const { return total_energy_kwh_; }
   uint32_t get_invalid_checksum_count() const { return invalid_checksum_count_; }
-  uint32_t get_missed_packet_count() const { return missed_packet_count_; }
+  uint32_t get_missed_frame_count() const { return missed_frame_count_; }
   uint32_t get_total_frames_processed() const { return total_frames_processed_; }
   float get_power_calibration() const { return power_calibration_; }
   
@@ -439,7 +439,7 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   sensor::Sensor* energy_sum_sensor_ = nullptr;
   sensor::Sensor* device_count_sensor_ = nullptr;
   sensor::Sensor* invalid_checksum_sensor_ = nullptr;
-  sensor::Sensor* missed_packet_sensor_ = nullptr;
+  sensor::Sensor* missed_frame_sensor_ = nullptr;
   binary_sensor::BinarySensor* night_mode_sensor_ = nullptr;
   
   // Memory monitoring sensors (ESP32 only)
@@ -454,7 +454,7 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   
   // UART diagnostics
   uint32_t invalid_checksum_count_ = 0;
-  uint32_t missed_packet_count_ = 0;
+  uint32_t missed_frame_count_ = 0;
   uint32_t total_frames_processed_ = 0;  // Track successful frame processing for miss rate calculation
   
   // Cached display stats (updated during publish_sensor_data to avoid iteration in display lambda)

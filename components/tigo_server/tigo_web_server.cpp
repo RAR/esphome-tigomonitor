@@ -1583,7 +1583,7 @@ void TigoWebServer::build_esp_status_json(PSRAMString& json) {
   
   // Get UART diagnostics from parent
   uint32_t invalid_checksum = parent_->get_invalid_checksum_count();
-  uint32_t missed_packets = parent_->get_missed_packet_count();
+  uint32_t missed_frames = parent_->get_missed_frame_count();
   uint32_t total_frames = parent_->get_total_frames_processed();
   
   // Get ESP32 internal temperature (using persistent sensor handle)
@@ -1642,7 +1642,7 @@ void TigoWebServer::build_esp_status_json(PSRAMString& json) {
     "\"uptime_sec\":%u,\"uptime_days\":%u,\"uptime_hours\":%u,\"uptime_mins\":%u,"
     "\"esphome_version\":\"%s\",\"compilation_time\":\"%s %s\","
     "\"task_count\":%u,\"internal_temp\":%.1f,"
-    "\"invalid_checksum\":%u,\"missed_packets\":%u,\"total_frames\":%u,"
+    "\"invalid_checksum\":%u,\"missed_frames\":%u,\"total_frames\":%u,"
     "\"network_connected\":%s,\"wifi_rssi\":%d,\"wifi_ssid\":\"%s\",\"ip_address\":\"%s\",\"mac_address\":\"%s\","
     "\"active_sockets\":%d,\"max_sockets\":%d}",
     free_heap, total_heap, free_psram, total_psram,
@@ -1650,7 +1650,7 @@ void TigoWebServer::build_esp_status_json(PSRAMString& json) {
     uptime_sec, uptime_days, uptime_hours, uptime_mins,
     ESPHOME_VERSION, __DATE__, __TIME__,
     (unsigned int)task_count, internal_temp,
-    invalid_checksum, missed_packets, total_frames,
+    invalid_checksum, missed_frames, total_frames,
     network_connected ? "true" : "false", wifi_rssi, ssid.c_str(), ip_address.c_str(), mac_address.c_str(),
     active_sockets, max_sockets);
   
@@ -1697,9 +1697,9 @@ void TigoWebServer::build_yaml_json(PSRAMString& json, const std::set<std::strin
       yaml_text.append("    invalid_checksum:\n");
       yaml_text.append("      name: \"Invalid Checksum Count\"\n");
     }
-    if (selected_hub_sensors.count("missed_packet") > 0) {
-      yaml_text.append("    missed_packet:\n");
-      yaml_text.append("      name: \"Missed Packet Count\"\n");
+    if (selected_hub_sensors.count("missed_frame") > 0) {
+      yaml_text.append("    missed_frame:\n");
+      yaml_text.append("      name: \"Missed Frame Count\"\n");
     }
     if (selected_hub_sensors.count("internal_ram_free") > 0) {
       yaml_text.append("    internal_ram_free:\n");
@@ -2780,10 +2780,10 @@ void TigoWebServer::get_esp_status_html(PSRAMString& html) {
           <div class="value" id="invalid-checksum">--</div>
         </div>
         <div class="info-item">
-          <h3>Missed Packets</h3>
-          <div class="value" id="missed-packets">--</div>
+          <h3>Missed Frames</h3>
+          <div class="value" id="missed-frames">--</div>
           <div style="font-size: 0.9em; color: #7f8c8d; margin-top: 0.5rem;">
-            <span id="missed-packets-rate">--</span>
+            <span id="missed-frames-rate">--</span>
           </div>
         </div>
         <div class="info-item">
@@ -2982,16 +2982,16 @@ void TigoWebServer::get_esp_status_html(PSRAMString& html) {
           data.internal_temp !== undefined ? `${formatTemperature(data.internal_temp)}${getTempUnit()}` : '--';
         document.getElementById('min-heap').textContent = formatBytes(data.min_free_heap || 0);
         document.getElementById('invalid-checksum').textContent = data.invalid_checksum || 0;
-        document.getElementById('missed-packets').textContent = data.missed_packets || 0;
+        document.getElementById('missed-frames').textContent = data.missed_frames || 0;
         document.getElementById('total-frames').textContent = data.total_frames || 0;
         
         // Calculate and display miss rate
         if (data.total_frames > 0) {
-          const totalAttempts = data.total_frames + data.missed_packets;
-          const missRate = (data.missed_packets / totalAttempts * 100).toFixed(3);
-          document.getElementById('missed-packets-rate').textContent = `${missRate}% miss rate`;
+          const totalAttempts = data.total_frames + data.missed_frames;
+          const missRate = (data.missed_frames / totalAttempts * 100).toFixed(3);
+          document.getElementById('missed-frames-rate').textContent = `${missRate}% miss rate`;
         } else {
-          document.getElementById('missed-packets-rate').textContent = '--';
+          document.getElementById('missed-frames-rate').textContent = '--';
         }
         
         // Display network information
@@ -3239,7 +3239,7 @@ void TigoWebServer::get_yaml_config_html(PSRAMString& html) {
           <label><input type="checkbox" id="sel-energy_sum" onchange="updateYAML()"> Total Energy (kWh)</label>
           <label><input type="checkbox" id="sel-device_count" onchange="updateYAML()"> Device Count</label>
           <label><input type="checkbox" id="sel-invalid_checksum" onchange="updateYAML()"> Invalid Checksum Count</label>
-          <label><input type="checkbox" id="sel-missed_packet" onchange="updateYAML()"> Missed Packet Count</label>
+          <label><input type="checkbox" id="sel-missed_frame" onchange="updateYAML()"> Missed Frame Count</label>
           <label><input type="checkbox" id="sel-internal_ram_free" onchange="updateYAML()"> Free Internal RAM</label>
           <label><input type="checkbox" id="sel-internal_ram_min" onchange="updateYAML()"> Min Free Internal RAM</label>
           <label><input type="checkbox" id="sel-psram_free" onchange="updateYAML()"> Free PSRAM</label>
@@ -3300,7 +3300,7 @@ void TigoWebServer::get_yaml_config_html(PSRAMString& html) {
     
     function getSelectedHubSensors() {
       const hubSensors = ['power_sum', 'energy_sum', 'device_count', 'invalid_checksum', 
-                          'missed_packet', 'internal_ram_free', 'internal_ram_min', 
+                          'missed_frame', 'internal_ram_free', 'internal_ram_min', 
                           'psram_free', 'stack_free'];
       return hubSensors.filter(s => document.getElementById('sel-' + s).checked);
     }
@@ -3335,7 +3335,7 @@ void TigoWebServer::get_yaml_config_html(PSRAMString& html) {
     
     function selectAllHub() {
       const hubSensors = ['power_sum', 'energy_sum', 'device_count', 'invalid_checksum', 
-                          'missed_packet', 'internal_ram_free', 'internal_ram_min', 
+                          'missed_frame', 'internal_ram_free', 'internal_ram_min', 
                           'psram_free', 'stack_free'];
       hubSensors.forEach(s => document.getElementById('sel-' + s).checked = true);
       updateYAML();
@@ -3343,7 +3343,7 @@ void TigoWebServer::get_yaml_config_html(PSRAMString& html) {
     
     function selectNoneHub() {
       const hubSensors = ['power_sum', 'energy_sum', 'device_count', 'invalid_checksum', 
-                          'missed_packet', 'internal_ram_free', 'internal_ram_min', 
+                          'missed_frame', 'internal_ram_free', 'internal_ram_min', 
                           'psram_free', 'stack_free'];
       hubSensors.forEach(s => document.getElementById('sel-' + s).checked = false);
       updateYAML();
