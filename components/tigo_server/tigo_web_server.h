@@ -81,6 +81,7 @@ class TigoWebServer : public Component {
   static esp_err_t api_overview_handler(httpd_req_t *req);
   static esp_err_t api_node_table_handler(httpd_req_t *req);
   static esp_err_t api_strings_handler(httpd_req_t *req);
+  static esp_err_t api_energy_history_handler(httpd_req_t *req);
   static esp_err_t api_inverters_handler(httpd_req_t *req);
   static esp_err_t api_esp_status_handler(httpd_req_t *req);
   static esp_err_t api_yaml_handler(httpd_req_t *req);
@@ -110,6 +111,7 @@ class TigoWebServer : public Component {
   void build_overview_json(PSRAMString& json);
   void build_node_table_json(PSRAMString& json);
   void build_strings_json(PSRAMString& json);
+  void build_energy_history_json(PSRAMString& json);
   void build_inverters_json(PSRAMString& json);
   void build_esp_status_json(PSRAMString& json);
   void build_yaml_json(PSRAMString& json, const std::set<std::string>& selected_sensors, const std::set<std::string>& selected_hub_sensors);

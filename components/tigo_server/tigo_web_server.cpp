@@ -242,6 +242,14 @@ void TigoWebServer::setup() {
     };
     httpd_register_uri_handler(server_, &api_strings_uri);
     
+    httpd_uri_t api_energy_history_uri = {
+      .uri = "/api/energy/history",
+      .method = HTTP_GET,
+      .handler = api_energy_history_handler,
+      .user_ctx = this
+    };
+    httpd_register_uri_handler(server_, &api_energy_history_uri);
+    
     httpd_uri_t api_inverters_uri = {
       .uri = "/api/inverters",
       .method = HTTP_GET,
@@ -704,6 +712,21 @@ esp_err_t TigoWebServer::api_strings_handler(httpd_req_t *req) {
   
   PSRAMString json_buffer;
   server->build_strings_json(json_buffer);
+  
+  httpd_resp_set_type(req, "application/json");
+  httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+  httpd_resp_send(req, json_buffer.c_str(), json_buffer.length());
+  return ESP_OK;
+}
+
+esp_err_t TigoWebServer::api_energy_history_handler(httpd_req_t *req) {
+  TigoWebServer *server = static_cast<TigoWebServer *>(req->user_ctx);
+  if (!server->check_api_auth(req)) {
+    return ESP_OK;
+  }
+  
+  PSRAMString json_buffer;
+  server->build_energy_history_json(json_buffer);
   
   httpd_resp_set_type(req, "application/json");
   httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
@@ -1506,6 +1529,62 @@ void TigoWebServer::build_inverters_json(PSRAMString& json) {
   json.append("]}");
 }
 
+void TigoWebServer::build_energy_history_json(PSRAMString& json) {
+  if (!parent_) {
+    json.append("{\"error\":\"No parent component\"}");
+    return;
+  }
+  
+  auto history = parent_->get_daily_energy_history();
+  float current_energy = parent_->get_total_energy_kwh();
+  
+  json.append("{\"current_energy\":");
+  
+  char buffer[64];
+  snprintf(buffer, sizeof(buffer), "%.3f", current_energy);
+  json.append(buffer);
+  
+  json.append(",\"history\":[");
+  
+  // Fill in last 7 days with 0 for missing data
+  struct timeval tv;
+  gettimeofday(&tv, nullptr);
+  time_t now_time = tv.tv_sec;
+  
+  bool first = true;
+  for (int days_ago = 6; days_ago >= 0; days_ago--) {
+    if (!first) json.append(",");
+    first = false;
+    
+    // Calculate date for days_ago
+    time_t day_time = now_time - (days_ago * 86400);
+    struct tm day_tm;
+    localtime_r(&day_time, &day_tm);
+    
+    // Look for this date in history
+    float energy = 0.0f;
+    for (const auto &entry : history) {
+      if (entry.year == (day_tm.tm_year + 1900) && 
+          entry.month == (day_tm.tm_mon + 1) && 
+          entry.day == day_tm.tm_mday) {
+        energy = entry.energy_kwh;
+        break;
+      }
+    }
+    
+    json.append("{\"date\":\"");
+    snprintf(buffer, sizeof(buffer), "%04d-%02d-%02d", 
+             day_tm.tm_year + 1900, day_tm.tm_mon + 1, day_tm.tm_mday);
+    json.append(buffer);
+    json.append("\",\"energy\":");
+    snprintf(buffer, sizeof(buffer), "%.3f", energy);
+    json.append(buffer);
+    json.append("}");
+  }
+  
+  json.append("]}");
+}
+
 void TigoWebServer::build_node_table_json(PSRAMString& json) {
   // Configure cJSON to use PSRAM if available
   cJSON_Hooks hooks;
@@ -1826,6 +1905,7 @@ void TigoWebServer::get_dashboard_html(PSRAMString& html) {
   <title>Tigo Monitor - Dashboard</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
+    :root { --text-color: #2c3e50; --axis-color: #666; }
     body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f5f5; transition: background-color 0.3s, color 0.3s; }
     .header { background: #2c3e50; color: white; padding: 1rem 2rem; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
     .header-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem; }
@@ -1876,6 +1956,12 @@ void TigoWebServer::get_dashboard_html(PSRAMString& html) {
     body.dark-mode .device-header { border-bottom-color: #444; }
     body.dark-mode .loading { color: #b0b0b0; }
     body.dark-mode .string-summary { box-shadow: 0 4px 6px rgba(0,0,0,0.5); }
+    
+    /* Energy history card */
+    .energy-history-card { background: #ffffff; border-radius: 8px; padding: 20px; margin: 20px 0; box-shadow: 0 2px 4px rgba(0,0,0,0.1); transition: background-color 0.3s, box-shadow 0.3s; color: #2c3e50; }
+    .energy-history-card h2 { margin-top: 0; color: #2c3e50; }
+    body.dark-mode .energy-history-card { background: #3a3a3a; box-shadow: 0 2px 4px rgba(0,0,0,0.3); color: #ffffff; }
+    body.dark-mode .energy-history-card h2 { color: #ffffff; }
   </style>
 </head>
 <body>
@@ -1924,6 +2010,11 @@ void TigoWebServer::get_dashboard_html(PSRAMString& html) {
       </div>
     </div>
     
+    <div class="energy-history-card">
+      <h2>Daily Energy History (Last 7 Days)</h2>
+      <canvas id="energyChart" style="max-height: 300px;"></canvas>
+    </div>
+    
     <div class="devices-grid" id="devices"></div>
   </div>
   
@@ -1963,6 +2054,10 @@ void TigoWebServer::get_dashboard_html(PSRAMString& html) {
       } else {
         document.body.classList.remove('dark-mode');
         document.getElementById('theme-toggle').textContent = '🌙';
+      }
+      // Redraw energy chart with new theme colors
+      if (typeof loadEnergyHistory === 'function') {
+        loadEnergyHistory();
       }
     }
     
@@ -2292,8 +2387,130 @@ void TigoWebServer::get_dashboard_html(PSRAMString& html) {
       }
     }
     
+    // Energy history chart
+    let energyChart = null;
+    
+    async function loadEnergyHistory() {
+      try {
+        const res = await apiFetch('/api/energy/history');
+        const data = await res.json();
+        
+        if (data.error) {
+          console.error('Energy history error:', data.error);
+          return;
+        }
+        
+        // Prepare chart data
+        const dates = data.history.map(entry => {
+          const date = new Date(entry.date);
+          return (date.getMonth() + 1) + '/' + date.getDate();
+        });
+        const energies = data.history.map(entry => entry.energy);
+        
+        // Add today's energy if we have current data
+        if (data.current_energy > 0) {
+          const today = new Date();
+          dates.push((today.getMonth() + 1) + '/' + today.getDate());
+          energies.push(data.current_energy);
+        }
+        
+        // Render simple bar chart
+        const ctx = document.getElementById('energyChart');
+        if (!ctx) return;
+        
+        // Destroy existing chart
+        if (energyChart) {
+          energyChart = null;
+        }
+        
+        // Simple canvas-based bar chart
+        const canvas = ctx;
+        const context = canvas.getContext('2d');
+        const width = canvas.parentElement.clientWidth - 40;
+        const height = 300;
+        canvas.width = width;
+        canvas.height = height;
+        
+        // Clear canvas
+        context.clearRect(0, 0, width, height);
+        
+        const isDarkMode = document.body.classList.contains('dark-mode');
+        const textColor = isDarkMode ? '#ffffff' : '#2c3e50';
+        const axisColor = isDarkMode ? '#cccccc' : '#666';
+        
+        if (energies.length === 0) {
+          context.fillStyle = textColor;
+          context.font = '14px Arial';
+          context.textAlign = 'center';
+          context.fillText('No energy history data yet', width / 2, height / 2);
+          return;
+        }
+        
+        // Calculate chart dimensions
+        const padding = 50;
+        const chartWidth = width - padding * 2;
+        const chartHeight = height - padding * 2;
+        const barWidth = chartWidth / energies.length - 10;
+        const maxEnergy = Math.max(...energies);
+        const scale = maxEnergy > 0 ? chartHeight / maxEnergy : 1;
+        
+        // Draw axes
+        context.strokeStyle = axisColor;
+        context.lineWidth = 1;
+        context.beginPath();
+        context.moveTo(padding, padding);
+        context.lineTo(padding, height - padding);
+        context.lineTo(width - padding, height - padding);
+        context.stroke();
+        
+        // Draw bars
+        energies.forEach((energy, index) => {
+          const barHeight = energy * scale;
+          const x = padding + index * (barWidth + 10) + 5;
+          const y = height - padding - barHeight;
+          
+          // Bar
+          const gradient = context.createLinearGradient(x, y, x, y + barHeight);
+          gradient.addColorStop(0, isDarkMode ? '#60a5fa' : '#3b82f6');
+          gradient.addColorStop(1, isDarkMode ? '#3b82f6' : '#2563eb');
+          context.fillStyle = gradient;
+          context.fillRect(x, y, barWidth, barHeight);
+          
+          // Value label on top
+          context.fillStyle = textColor;
+          context.font = '12px Arial';
+          context.textAlign = 'center';
+          context.fillText(energy.toFixed(1), x + barWidth / 2, y - 5);
+          
+          // Date label below
+          context.save();
+          context.translate(x + barWidth / 2, height - padding + 15);
+          context.rotate(-Math.PI / 4);
+          context.textAlign = 'right';
+          context.font = '11px Arial';
+          context.fillText(dates[index], 0, 0);
+          context.restore();
+        });
+        
+        // Y-axis label
+        context.save();
+        context.translate(15, height / 2);
+        context.rotate(-Math.PI / 2);
+        context.textAlign = 'center';
+        context.font = 'bold 12px Arial';
+        context.fillStyle = textColor;
+        context.fillText('Energy (kWh)', 0, 0);
+        context.restore();
+        
+      } catch (error) {
+        console.error('Error loading energy history:', error);
+      }
+    }
+    
     loadData();
+    loadEnergyHistory();
     setInterval(loadData, 10000);  // Poll every 10 seconds to reduce memory churn
+    setInterval(loadEnergyHistory, 60000);  // Update energy chart every minute
   </script>
 </body>
 </html>

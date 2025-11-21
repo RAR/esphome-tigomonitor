@@ -220,6 +220,7 @@ void TigoMonitorComponent::setup() {
   
   load_node_table();
   load_energy_data();
+  load_daily_energy_history();
   
   // Check if we have existing CCA data and rebuild string groups
   bool has_cca_data = false;
@@ -1308,6 +1309,9 @@ void TigoMonitorComponent::publish_sensor_data() {
       energy_sum_sensor_->publish_state(total_energy_kwh_);
       ESP_LOGD(TAG, "Published energy sum: %.3f kWh", total_energy_kwh_);
       
+      // Update daily energy tracking
+      update_daily_energy(total_energy_kwh_);
+      
       // Save energy data at the top of each hour to reduce flash wear
       static unsigned long last_save_time = 0;
       unsigned long hours_elapsed = current_time / 3600000;  // Hours since boot
@@ -1346,6 +1350,9 @@ void TigoMonitorComponent::publish_sensor_data() {
     last_energy_update_ = current_time;
     energy_sum_sensor_->publish_state(total_energy_kwh_);
     ESP_LOGD(TAG, "Published energy sum: %.3f kWh", total_energy_kwh_);
+    
+    // Update daily energy tracking
+    update_daily_energy(total_energy_kwh_);
     
     // Save energy data at the top of each hour to reduce flash wear
     static unsigned long last_save_time_standalone = 0;
@@ -2115,10 +2122,11 @@ void TigoMonitorComponent::check_midnight_reset() {
 }
 
 void TigoMonitorComponent::save_persistent_data() {
-  ESP_LOGI(TAG, "Saving all persistent data to flash (node table, peak power, energy)...");
+  ESP_LOGI(TAG, "Saving all persistent data to flash (node table, peak power, energy, daily history)...");
   save_node_table();
   save_peak_power_data();
   save_energy_data();
+  save_daily_energy_history();
   ESP_LOGI(TAG, "All persistent data saved successfully");
 }
 
@@ -2324,6 +2332,141 @@ void TigoMonitorComponent::save_energy_data() {
   } else {
     ESP_LOGW(TAG, "Failed to save energy data");
   }
+}
+
+void TigoMonitorComponent::update_daily_energy(float energy_kwh) {
+#ifdef USE_TIME
+  if (time_id_ == nullptr) {
+    return;  // No time component
+  }
+  
+  auto now = time_id_->now();
+  if (!now.is_valid()) {
+    return;  // Time not synced
+  }
+  
+  // Generate current day key (YYYYMMDD format)
+  uint32_t day_key = (now.year * 10000) + (now.month * 100) + now.day_of_month;
+  
+  // Check if this is a new day
+  if (current_day_key_ != day_key) {
+    // New day - archive yesterday's energy if we have it
+    if (current_day_key_ != 0 && total_energy_kwh_ > 0.0f) {
+      DailyEnergyData yesterday = DailyEnergyData::from_key(current_day_key_);
+      yesterday.energy_kwh = total_energy_kwh_;
+      
+      // Add to history (or update if exists)
+      bool found = false;
+      for (auto &entry : daily_energy_history_) {
+        if (entry.to_key() == current_day_key_) {
+          entry.energy_kwh = total_energy_kwh_;
+          found = true;
+          break;
+        }
+      }
+      if (!found) {
+        daily_energy_history_.push_back(yesterday);
+      }
+      
+      // Keep only last 7 days
+      if (daily_energy_history_.size() > MAX_DAILY_HISTORY) {
+        daily_energy_history_.erase(daily_energy_history_.begin());
+      }
+      
+      ESP_LOGI(TAG, "Archived daily energy: %04d-%02d-%02d = %.3f kWh", 
+               yesterday.year, yesterday.month, yesterday.day, yesterday.energy_kwh);
+      
+      // Save to flash
+      save_daily_energy_history();
+    }
+    
+    current_day_key_ = day_key;
+  }
+#endif
+}
+
+void TigoMonitorComponent::save_daily_energy_history() {
+  ESP_LOGD(TAG, "Saving daily energy history to flash (%zu days)...", daily_energy_history_.size());
+  
+  // Pack history into a simple buffer
+  // Format: count (1 byte) + array of [key (4 bytes) + energy (4 bytes)]
+  static const size_t MAX_BUFFER_SIZE = 1 + (MAX_DAILY_HISTORY * 8);
+  uint8_t buffer[MAX_BUFFER_SIZE] = {0};
+  
+  size_t count = std::min(daily_energy_history_.size(), MAX_DAILY_HISTORY);
+  buffer[0] = static_cast<uint8_t>(count);
+  
+  size_t offset = 1;
+  for (size_t i = 0; i < count; i++) {
+    uint32_t key = daily_energy_history_[i].to_key();
+    float energy = daily_energy_history_[i].energy_kwh;
+    
+    // Store key (4 bytes)
+    memcpy(&buffer[offset], &key, sizeof(uint32_t));
+    offset += sizeof(uint32_t);
+    
+    // Store energy (4 bytes)
+    memcpy(&buffer[offset], &energy, sizeof(float));
+    offset += sizeof(float);
+  }
+  
+  uint32_t hash = esphome::fnv1_hash("daily_energy_history");
+  auto save = global_preferences->make_preference<uint8_t[MAX_BUFFER_SIZE]>(hash);
+  if (save.save(&buffer)) {
+    ESP_LOGD(TAG, "Saved %zu daily energy entries to flash", count);
+  } else {
+    ESP_LOGW(TAG, "Failed to save daily energy history");
+  }
+}
+
+void TigoMonitorComponent::load_daily_energy_history() {
+  ESP_LOGD(TAG, "Loading daily energy history from flash...");
+  
+  static const size_t MAX_BUFFER_SIZE = 1 + (MAX_DAILY_HISTORY * 8);
+  uint8_t buffer[MAX_BUFFER_SIZE] = {0};
+  
+  uint32_t hash = esphome::fnv1_hash("daily_energy_history");
+  auto load = global_preferences->make_preference<uint8_t[MAX_BUFFER_SIZE]>(hash);
+  
+  if (!load.load(&buffer)) {
+    ESP_LOGD(TAG, "No saved daily energy history found");
+    return;
+  }
+  
+  size_t count = buffer[0];
+  if (count > MAX_DAILY_HISTORY) {
+    ESP_LOGW(TAG, "Invalid daily energy history count: %zu", count);
+    return;
+  }
+  
+  daily_energy_history_.clear();
+  size_t offset = 1;
+  
+  for (size_t i = 0; i < count; i++) {
+    uint32_t key;
+    float energy;
+    
+    // Load key (4 bytes)
+    memcpy(&key, &buffer[offset], sizeof(uint32_t));
+    offset += sizeof(uint32_t);
+    
+    // Load energy (4 bytes)
+    memcpy(&energy, &buffer[offset], sizeof(float));
+    offset += sizeof(float);
+    
+    DailyEnergyData entry = DailyEnergyData::from_key(key);
+    entry.energy_kwh = energy;
+    daily_energy_history_.push_back(entry);
+    
+    ESP_LOGD(TAG, "Loaded: %04d-%02d-%02d = %.3f kWh", 
+             entry.year, entry.month, entry.day, entry.energy_kwh);
+  }
+  
+  ESP_LOGI(TAG, "Loaded %zu daily energy entries from flash", count);
+}
+
+std::vector<DailyEnergyData> TigoMonitorComponent::get_daily_energy_history() const {
+  return daily_energy_history_;
 }
 
 // ========== CCA HTTP Query Functions ==========

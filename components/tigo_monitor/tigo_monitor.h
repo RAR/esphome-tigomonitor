@@ -154,6 +154,26 @@ struct InverterData {
   int total_device_count = 0;
 };
 
+struct DailyEnergyData {
+  uint16_t year = 0;
+  uint8_t month = 0;
+  uint8_t day = 0;
+  float energy_kwh = 0.0f;
+  
+  // Helper to convert to timestamp-like key
+  uint32_t to_key() const {
+    return (year * 10000) + (month * 100) + day;  // e.g., 20251121
+  }
+  
+  static DailyEnergyData from_key(uint32_t key) {
+    DailyEnergyData data;
+    data.year = key / 10000;
+    data.month = (key % 10000) / 100;
+    data.day = key % 100;
+    return data;
+  }
+};
+
 
 class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
  public:
@@ -302,6 +322,9 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   uint32_t get_total_frames_processed() const { return total_frames_processed_; }
   float get_power_calibration() const { return power_calibration_; }
   
+  // Daily energy history access
+  std::vector<DailyEnergyData> get_daily_energy_history() const;
+  
   // Fast display helper methods (cached, no iteration)
   int get_device_count() const { return devices_.size(); }
   int get_online_device_count() const;
@@ -378,6 +401,9 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   void save_node_table();
   void save_peak_power_data();
   void load_peak_power_data();
+  void save_daily_energy_history();
+  void load_daily_energy_history();
+  void update_daily_energy(float energy_kwh);
   void save_persistent_data();  // Save all persistent data (node table + peak power + energy)
   int get_next_available_sensor_index();
   NodeTableData* find_node_by_addr(const std::string &addr);
@@ -451,6 +477,11 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   // Energy calculation variables
   float total_energy_kwh_ = 0.0f;
   unsigned long last_energy_update_ = 0;
+  
+  // Daily energy history (keep last 7 days)
+  static const size_t MAX_DAILY_HISTORY = 7;
+  std::vector<DailyEnergyData> daily_energy_history_;
+  uint32_t current_day_key_ = 0;  // YYYYMMDD format
   
   // UART diagnostics
   uint32_t invalid_checksum_count_ = 0;
