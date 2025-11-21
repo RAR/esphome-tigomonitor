@@ -278,6 +278,8 @@ The component automatically uses PSRAM when available for HTTP buffers, JSON par
 | `sync_cca_on_startup` | Boolean | true | Automatically sync CCA configuration on boot |
 | `time_id` | ID | None | Optional time component for midnight reset feature |
 | `reset_at_midnight` | Boolean | false | Reset peak power and total energy at midnight (requires time_id) |
+| `power_calibration` | Float | 1.0 | Power calibration multiplier (range: 0.5-2.0) |
+| `night_mode_timeout` | Integer | 60 | Minutes without data before entering night mode (range: 1-1440) |
 | `inverters` | List | None | Optional inverter grouping configuration (see below) |
 
 #### Inverter Grouping
@@ -351,6 +353,43 @@ sensor:
 - All peak power sensors and total energy sensor reset simultaneously
 - Values are published and saved to persistent storage after reset
 - Useful for tracking daily production totals
+
+#### Power Calibration
+
+If total power readings differ from your inverter or other monitoring sources, you can apply a calibration multiplier:
+
+```yaml
+tigo_monitor:
+  id: tigo_hub
+  uart_id: uart_bus
+  number_of_devices: 20
+  power_calibration: 1.05  # Increase all power readings by 5%
+```
+
+**Notes:**
+- Accepts values from 0.5 to 2.0 (50% to 200%)
+- Applied to all power calculations: individual device power, string power, total power
+- Multiplier affects energy calculations as well
+- Default: 1.0 (no adjustment)
+
+#### Night Mode Timeout
+
+Customize how long to wait without receiving data before entering night mode (when zeros are published to prevent stale data):
+
+```yaml
+tigo_monitor:
+  id: tigo_hub
+  uart_id: uart_bus
+  number_of_devices: 20
+  night_mode_timeout: 90  # Wait 90 minutes before entering night mode
+```
+
+**Notes:**
+- Accepts values from 1 to 1440 minutes (1 minute to 24 hours)
+- Default: 60 minutes (1 hour)
+- When triggered, publishes zero values every 10 minutes until data resumes
+- Useful for systems with intermittent communication or extended shadow periods
+- Night mode binary sensor indicates current state
 
 ### Tigo Web Server Component
 

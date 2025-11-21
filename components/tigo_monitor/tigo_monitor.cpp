@@ -1023,9 +1023,9 @@ StringData* TigoMonitorComponent::find_string_by_label(const std::string &label)
 void TigoMonitorComponent::publish_sensor_data() {
   unsigned long current_time = millis();
   
-  // Check if we should enter night mode (no data for 1 hour)
-  if (last_data_received_ > 0 && !in_night_mode_ && (current_time - last_data_received_ > NO_DATA_TIMEOUT)) {
-    ESP_LOGI(TAG, "Entering night mode - no data received for 1 hour");
+  // Check if we should enter night mode (no data for configured timeout period)
+  if (last_data_received_ > 0 && !in_night_mode_ && (current_time - last_data_received_ > night_mode_timeout_)) {
+    ESP_LOGI(TAG, "Entering night mode - no data received for %lu minutes", night_mode_timeout_ / 60000);
     in_night_mode_ = true;
     last_zero_publish_ = 0;  // Reset to force immediate zero publish
     if (night_mode_sensor_ != nullptr) {

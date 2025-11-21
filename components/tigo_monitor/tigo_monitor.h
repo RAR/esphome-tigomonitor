@@ -335,6 +335,7 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   void reset_total_energy();  // Reset total energy to 0
   void check_midnight_reset();  // Check if midnight has passed and reset configured sensors
   void set_reset_at_midnight(bool reset) { this->reset_at_midnight_ = reset; }
+  void set_night_mode_timeout(unsigned long timeout_ms) { this->night_mode_timeout_ = timeout_ms; }
   
 #ifdef USE_TIME
   void set_time_id(time::RealTimeClock *time_id) { this->time_id_ = time_id; }
@@ -502,7 +503,7 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   // Night mode / no data handling
   unsigned long last_data_received_ = 0;
   unsigned long last_zero_publish_ = 0;
-  static const unsigned long NO_DATA_TIMEOUT = 3600000;  // 1 hour in milliseconds
+  unsigned long night_mode_timeout_ = 3600000;  // Default: 1 hour in milliseconds (configurable)
   static const unsigned long ZERO_PUBLISH_INTERVAL = 600000;  // 10 minutes in milliseconds
   bool in_night_mode_ = false;
   

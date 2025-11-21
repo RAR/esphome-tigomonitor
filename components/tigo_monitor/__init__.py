@@ -18,6 +18,7 @@ CONF_RESET_AT_MIDNIGHT = 'reset_at_midnight'
 CONF_INVERTERS = 'inverters'
 CONF_MPPIS = 'mppts'
 CONF_POWER_CALIBRATION = 'power_calibration'
+CONF_NIGHT_MODE_TIMEOUT = 'night_mode_timeout'
 
 # Inverter configuration schema
 INVERTER_SCHEMA = cv.Schema({
@@ -35,6 +36,7 @@ CONFIG_SCHEMA = cv.Schema({
     cv.Optional(CONF_RESET_AT_MIDNIGHT, default=False): cv.boolean,
     cv.Optional(CONF_INVERTERS): cv.ensure_list(INVERTER_SCHEMA),
     cv.Optional(CONF_POWER_CALIBRATION, default=1.0): cv.float_range(min=0.5, max=2.0),
+    cv.Optional(CONF_NIGHT_MODE_TIMEOUT, default=60): cv.int_range(min=1, max=1440),  # 1 minute to 24 hours
 }).extend(cv.polling_component_schema('30s')).extend(uart.UART_DEVICE_SCHEMA)
 
 @coroutine
@@ -61,6 +63,9 @@ def to_code(config):
     
     # Set power calibration multiplier
     cg.add(var.set_power_calibration(config[CONF_POWER_CALIBRATION]))
+    
+    # Set night mode timeout (convert minutes to milliseconds)
+    cg.add(var.set_night_mode_timeout(config[CONF_NIGHT_MODE_TIMEOUT] * 60000))
     
     # Configure inverters if provided
     if CONF_INVERTERS in config:
