@@ -1107,6 +1107,10 @@ void TigoMonitorComponent::publish_sensor_data() {
         power_sum_sensor_->publish_state(0.0f);
       }
       
+      // Update cached values for display
+      cached_total_power_ = 0.0f;
+      cached_online_count_ = 0;
+      
       ESP_LOGI(TAG, "Night mode: Zero values published for %zu devices", devices_.size());
     }
     return;  // Don't publish actual data in night mode
