@@ -483,6 +483,7 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   static const size_t MAX_DAILY_HISTORY = 7;
   std::vector<DailyEnergyData> daily_energy_history_;
   uint32_t current_day_key_ = 0;  // YYYYMMDD format
+  float energy_at_day_start_ = 0.0f;  // Energy value at the start of current day
   
   // UART diagnostics
   uint32_t invalid_checksum_count_ = 0;
