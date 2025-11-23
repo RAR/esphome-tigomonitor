@@ -321,6 +321,7 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   uint32_t get_missed_frame_count() const { return missed_frame_count_; }
   uint32_t get_total_frames_processed() const { return total_frames_processed_; }
   float get_power_calibration() const { return power_calibration_; }
+  bool is_in_night_mode() const { return in_night_mode_; }
   
   // Daily energy history access
   std::vector<DailyEnergyData> get_daily_energy_history() const;

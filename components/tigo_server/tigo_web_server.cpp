@@ -1370,6 +1370,19 @@ void TigoWebServer::build_devices_json(PSRAMString& json) {
 }
 
 void TigoWebServer::build_overview_json(PSRAMString& json) {
+  // In night mode, use cached values (all zeros)
+  if (parent_->is_in_night_mode()) {
+    char buffer[512];
+    snprintf(buffer, sizeof(buffer),
+      "{\"total_power\":%.1f,\"total_current\":%.3f,\"avg_efficiency\":%.2f,"
+      "\"avg_temperature\":%.1f,\"active_devices\":%d,\"max_devices\":%d,\"total_energy\":%.3f}",
+      0.0f, 0.0f, 0.0f, 0.0f,
+      0, parent_->get_number_of_devices(), parent_->get_total_energy_kwh());
+    
+    json.append(buffer);
+    return;
+  }
+  
   const auto &devices = parent_->get_devices();
   
   float total_power = 0.0f;
