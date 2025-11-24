@@ -2107,17 +2107,17 @@ void TigoMonitorComponent::check_midnight_reset() {
     
     // IMPORTANT: Archive yesterday's energy BEFORE resetting
     // This ensures we capture the full day's production
-    uint32_t yesterday_key = (now.year * 10000) + (now.month * 100) + (now.day_of_month - 1);
-    if (yesterday_key > 0) {
+    // Use current_day_key_ which was already tracking yesterday
+    if (current_day_key_ != 0) {
       float yesterday_production = total_energy_kwh_ - energy_at_day_start_;
       if (yesterday_production > 0.0f) {
-        DailyEnergyData yesterday = DailyEnergyData::from_key(yesterday_key);
+        DailyEnergyData yesterday = DailyEnergyData::from_key(current_day_key_);
         yesterday.energy_kwh = yesterday_production;
         
         // Add to history
         bool found = false;
         for (auto &entry : daily_energy_history_) {
-          if (entry.to_key() == yesterday_key) {
+          if (entry.to_key() == current_day_key_) {
             entry.energy_kwh = yesterday_production;
             found = true;
             break;
@@ -2132,11 +2132,15 @@ void TigoMonitorComponent::check_midnight_reset() {
           daily_energy_history_.erase(daily_energy_history_.begin());
         }
         
-        ESP_LOGI(TAG, "Archived daily energy at midnight: %04d-%02d-%02d = %.3f kWh", 
-                 yesterday.year, yesterday.month, yesterday.day, yesterday_production);
+        ESP_LOGI(TAG, "Archived daily energy at midnight: %04d-%02d-%02d = %.3f kWh (total: %.3f, started: %.3f)", 
+                 yesterday.year, yesterday.month, yesterday.day, yesterday_production,
+                 total_energy_kwh_, energy_at_day_start_);
         save_daily_energy_history();
       }
     }
+    
+    // Update current_day_key to today
+    current_day_key_ = (now.year * 10000) + (now.month * 100) + now.day_of_month;
     
     // Now reset total energy
     reset_total_energy();
@@ -2393,40 +2397,44 @@ void TigoMonitorComponent::update_daily_energy(float energy_kwh) {
   
   // Check if this is a new day
   if (current_day_key_ != day_key) {
-    // New day - archive yesterday's energy production if we have it
-    if (current_day_key_ != 0) {
-      // Calculate yesterday's production (current total - energy at start of yesterday)
-      float yesterday_production = total_energy_kwh_ - energy_at_day_start_;
-      
-      // Only archive if we had positive production yesterday
-      if (yesterday_production > 0.0f) {
-        DailyEnergyData yesterday = DailyEnergyData::from_key(current_day_key_);
-        yesterday.energy_kwh = yesterday_production;
+    // If reset_at_midnight is enabled, let check_midnight_reset() handle archival
+    // to avoid double-archiving and race conditions
+    if (!reset_at_midnight_) {
+      // New day - archive yesterday's energy production if we have it
+      if (current_day_key_ != 0) {
+        // Calculate yesterday's production (current total - energy at start of yesterday)
+        float yesterday_production = total_energy_kwh_ - energy_at_day_start_;
         
-        // Add to history (or update if exists)
-        bool found = false;
-        for (auto &entry : daily_energy_history_) {
-          if (entry.to_key() == current_day_key_) {
-            entry.energy_kwh = yesterday_production;
-            found = true;
-            break;
+        // Only archive if we had positive production yesterday
+        if (yesterday_production > 0.0f) {
+          DailyEnergyData yesterday = DailyEnergyData::from_key(current_day_key_);
+          yesterday.energy_kwh = yesterday_production;
+          
+          // Add to history (or update if exists)
+          bool found = false;
+          for (auto &entry : daily_energy_history_) {
+            if (entry.to_key() == current_day_key_) {
+              entry.energy_kwh = yesterday_production;
+              found = true;
+              break;
+            }
           }
+          if (!found) {
+            daily_energy_history_.push_back(yesterday);
+          }
+          
+          // Keep only last 7 days
+          if (daily_energy_history_.size() > MAX_DAILY_HISTORY) {
+            daily_energy_history_.erase(daily_energy_history_.begin());
+          }
+          
+          ESP_LOGI(TAG, "Archived daily energy: %04d-%02d-%02d = %.3f kWh (total was %.3f, day started at %.3f)", 
+                   yesterday.year, yesterday.month, yesterday.day, yesterday_production,
+                   total_energy_kwh_, energy_at_day_start_);
+          
+          // Save to flash
+          save_daily_energy_history();
         }
-        if (!found) {
-          daily_energy_history_.push_back(yesterday);
-        }
-        
-        // Keep only last 7 days
-        if (daily_energy_history_.size() > MAX_DAILY_HISTORY) {
-          daily_energy_history_.erase(daily_energy_history_.begin());
-        }
-        
-        ESP_LOGI(TAG, "Archived daily energy: %04d-%02d-%02d = %.3f kWh (total was %.3f, day started at %.3f)", 
-                 yesterday.year, yesterday.month, yesterday.day, yesterday_production,
-                 total_energy_kwh_, energy_at_day_start_);
-        
-        // Save to flash
-        save_daily_energy_history();
       }
     }
     

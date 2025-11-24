@@ -1550,6 +1550,7 @@ void TigoWebServer::build_energy_history_json(PSRAMString& json) {
   
   auto history = parent_->get_daily_energy_history();
   float current_energy = parent_->get_total_energy_kwh();
+  float energy_at_day_start = parent_->get_energy_at_day_start();
   
   json.append("{\"current_energy\":");
   
@@ -1576,12 +1577,19 @@ void TigoWebServer::build_energy_history_json(PSRAMString& json) {
     
     // Look for this date in history
     float energy = 0.0f;
-    for (const auto &entry : history) {
-      if (entry.year == (day_tm.tm_year + 1900) && 
-          entry.month == (day_tm.tm_mon + 1) && 
-          entry.day == day_tm.tm_mday) {
-        energy = entry.energy_kwh;
-        break;
+    
+    // For today (days_ago == 0), use current production
+    if (days_ago == 0) {
+      energy = current_energy - energy_at_day_start;
+    } else {
+      // For past days, look in archived history
+      for (const auto &entry : history) {
+        if (entry.year == (day_tm.tm_year + 1900) && 
+            entry.month == (day_tm.tm_mon + 1) && 
+            entry.day == day_tm.tm_mday) {
+          energy = entry.energy_kwh;
+          break;
+        }
       }
     }
     
