@@ -2428,13 +2428,6 @@ void TigoWebServer::get_dashboard_html(PSRAMString& html) {
         });
         const energies = data.history.map(entry => entry.energy);
         
-        // Add today's energy if we have current data
-        if (data.current_energy > 0) {
-          const today = new Date();
-          dates.push((today.getMonth() + 1) + '/' + today.getDate());
-          energies.push(data.current_energy);
-        }
-        
         // Render simple bar chart
         const ctx = document.getElementById('energyChart');
         if (!ctx) return;
