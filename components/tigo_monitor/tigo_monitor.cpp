@@ -1031,6 +1031,12 @@ void TigoMonitorComponent::publish_sensor_data() {
     if (night_mode_sensor_ != nullptr) {
       night_mode_sensor_->publish_state(true);
     }
+    
+    // Save energy data to flash when entering night mode
+    // This captures the day's production before going dark
+    ESP_LOGI(TAG, "Night mode: Saving energy data to flash (total: %.3f kWh, baseline: %.3f kWh)", 
+             total_energy_kwh_, energy_at_day_start_);
+    save_energy_data();
   }
   
   // In night mode, publish zeros every 10 minutes
@@ -2363,12 +2369,31 @@ void TigoMonitorComponent::load_energy_data() {
   auto restore = global_preferences->make_preference<float>(ENERGY_DATA_HASH);
   if (restore.load(&total_energy_kwh_)) {
     ESP_LOGI(TAG, "Restored total energy: %.3f kWh", total_energy_kwh_);
-    // Initialize day start to current total (will be updated on first day change)
-    energy_at_day_start_ = total_energy_kwh_;
+    
+    // Try to restore energy_at_day_start_ and current_day_key_
+    uint32_t baseline_hash = esphome::fnv1_hash("energy_day_baseline");
+    auto restore_baseline = global_preferences->make_preference<float>(baseline_hash);
+    if (restore_baseline.load(&energy_at_day_start_)) {
+      ESP_LOGI(TAG, "Restored day start baseline: %.3f kWh", energy_at_day_start_);
+    } else {
+      // No baseline saved - assume we're starting fresh today
+      energy_at_day_start_ = total_energy_kwh_;
+      ESP_LOGI(TAG, "No baseline found, using current total as baseline: %.3f kWh", energy_at_day_start_);
+    }
+    
+    uint32_t day_key_hash = esphome::fnv1_hash("current_day_key");
+    auto restore_day_key = global_preferences->make_preference<uint32_t>(day_key_hash);
+    if (restore_day_key.load(&current_day_key_)) {
+      ESP_LOGI(TAG, "Restored current day key: %u", current_day_key_);
+    } else {
+      current_day_key_ = 0;
+      ESP_LOGI(TAG, "No day key found, will initialize on first time sync");
+    }
   } else {
     ESP_LOGI(TAG, "No previous energy data found, starting from 0 kWh");
     total_energy_kwh_ = 0.0f;
     energy_at_day_start_ = 0.0f;
+    current_day_key_ = 0;
   }
 }
 
@@ -2378,6 +2403,23 @@ void TigoMonitorComponent::save_energy_data() {
     ESP_LOGD(TAG, "Saved energy data: %.3f kWh", total_energy_kwh_);
   } else {
     ESP_LOGW(TAG, "Failed to save energy data");
+  }
+  
+  // Also save energy_at_day_start_ and current_day_key_ for accurate daily tracking after reboots
+  uint32_t baseline_hash = esphome::fnv1_hash("energy_day_baseline");
+  auto save_baseline = global_preferences->make_preference<float>(baseline_hash);
+  if (save_baseline.save(&energy_at_day_start_)) {
+    ESP_LOGD(TAG, "Saved day start baseline: %.3f kWh", energy_at_day_start_);
+  } else {
+    ESP_LOGW(TAG, "Failed to save day start baseline");
+  }
+  
+  uint32_t day_key_hash = esphome::fnv1_hash("current_day_key");
+  auto save_day_key = global_preferences->make_preference<uint32_t>(day_key_hash);
+  if (save_day_key.save(&current_day_key_)) {
+    ESP_LOGD(TAG, "Saved current day key: %u", current_day_key_);
+  } else {
+    ESP_LOGW(TAG, "Failed to save current day key");
   }
 }
 
@@ -2448,7 +2490,7 @@ void TigoMonitorComponent::update_daily_energy(float energy_kwh) {
 }
 
 void TigoMonitorComponent::save_daily_energy_history() {
-  ESP_LOGD(TAG, "Saving daily energy history to flash (%zu days)...", daily_energy_history_.size());
+  ESP_LOGI(TAG, "Saving daily energy history to flash (%zu days)...", daily_energy_history_.size());
   
   // Pack history into a simple buffer
   // Format: count (1 byte) + array of [key (4 bytes) + energy (4 bytes)]
@@ -2463,6 +2505,10 @@ void TigoMonitorComponent::save_daily_energy_history() {
     uint32_t key = daily_energy_history_[i].to_key();
     float energy = daily_energy_history_[i].energy_kwh;
     
+    ESP_LOGI(TAG, "  Saving entry %zu: %04d-%02d-%02d = %.3f kWh (key=%u)", 
+             i, daily_energy_history_[i].year, daily_energy_history_[i].month, 
+             daily_energy_history_[i].day, energy, key);
+    
     // Store key (4 bytes)
     memcpy(&buffer[offset], &key, sizeof(uint32_t));
     offset += sizeof(uint32_t);
@@ -2475,7 +2521,7 @@ void TigoMonitorComponent::save_daily_energy_history() {
   uint32_t hash = esphome::fnv1_hash("daily_energy_history");
   auto save = global_preferences->make_preference<uint8_t[MAX_BUFFER_SIZE]>(hash);
   if (save.save(&buffer)) {
-    ESP_LOGD(TAG, "Saved %zu daily energy entries to flash", count);
+    ESP_LOGI(TAG, "Saved %zu daily energy entries to flash", count);
   } else {
     ESP_LOGW(TAG, "Failed to save daily energy history");
   }
