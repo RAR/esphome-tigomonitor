@@ -2525,6 +2525,16 @@ void TigoWebServer::get_dashboard_html(PSRAMString& html) {
       }
     }
     
+    // Redraw chart on window resize (debounced)
+    let resizeTimeout;
+    window.addEventListener('resize', () => {
+      if (!energyHistoryLoaded) return;
+      clearTimeout(resizeTimeout);
+      resizeTimeout = setTimeout(() => {
+        loadEnergyHistory();
+      }, 250);  // Debounce 250ms to avoid excessive redraws
+    });
+    
     // Start auto-refresh intervals
     setInterval(loadData, 10000);  // Poll every 10 seconds to reduce memory churn
     setInterval(loadEnergyHistory, 60000);  // Update energy chart every minute
