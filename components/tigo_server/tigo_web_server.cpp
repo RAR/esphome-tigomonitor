@@ -2076,8 +2076,8 @@ void TigoWebServer::get_dashboard_html(PSRAMString& html) {
         document.body.classList.remove('dark-mode');
         document.getElementById('theme-toggle').textContent = '🌙';
       }
-      // Redraw energy chart with new theme colors
-      if (typeof loadEnergyHistory === 'function') {
+      // Redraw energy chart with new theme colors (only if already loaded)
+      if (energyHistoryLoaded && typeof loadEnergyHistory === 'function') {
         loadEnergyHistory();
       }
     }
@@ -2124,6 +2124,7 @@ void TigoWebServer::get_dashboard_html(PSRAMString& html) {
       // Load dynamic data
       try {
         await loadData();
+        await loadEnergyHistory();
       } catch (error) {
         console.error('Error loading initial data:', error);
         setTimeout(loadInitialData, 5000);
@@ -2410,6 +2411,7 @@ void TigoWebServer::get_dashboard_html(PSRAMString& html) {
     
     // Energy history chart
     let energyChart = null;
+    let energyHistoryLoaded = false;  // Track if energy history has been loaded
     
     async function loadEnergyHistory() {
       try {
@@ -2516,13 +2518,14 @@ void TigoWebServer::get_dashboard_html(PSRAMString& html) {
         context.fillText('Energy (kWh)', 0, 0);
         context.restore();
         
+        energyHistoryLoaded = true;  // Mark as loaded
+        
       } catch (error) {
         console.error('Error loading energy history:', error);
       }
     }
     
-    loadData();
-    loadEnergyHistory();
+    // Start auto-refresh intervals
     setInterval(loadData, 10000);  // Poll every 10 seconds to reduce memory churn
     setInterval(loadEnergyHistory, 60000);  // Update energy chart every minute
   </script>
