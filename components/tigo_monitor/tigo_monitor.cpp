@@ -2141,18 +2141,33 @@ void TigoMonitorComponent::check_midnight_reset() {
         ESP_LOGI(TAG, "Archived daily energy at midnight: %04d-%02d-%02d = %.3f kWh (total: %.3f, started: %.3f)", 
                  yesterday.year, yesterday.month, yesterday.day, yesterday_production,
                  total_energy_kwh_, energy_at_day_start_);
-        save_daily_energy_history();
       }
     }
     
     // Update current_day_key to today
     current_day_key_ = (now.year * 10000) + (now.month * 100) + now.day_of_month;
     
-    // Now reset total energy
-    reset_total_energy();
+    // Now reset total energy (without saving to flash yet)
+    total_energy_kwh_ = 0.0f;
+    energy_at_day_start_ = 0.0f;
     
-    // Reset all peak power values
-    reset_peak_power();
+    if (energy_sum_sensor_ != nullptr) {
+      energy_sum_sensor_->publish_state(0.0f);
+    }
+    
+    // Reset all peak power values (without saving to flash yet)
+    int reset_count = 0;
+    for (auto &device : devices_) {
+      device.peak_power = 0.0f;
+      reset_count++;
+    }
+    
+    ESP_LOGI(TAG, "Reset total energy and %d peak power values (deferred flash writes)", reset_count);
+    
+    // Save all persistent data in one batch to minimize flash operations
+    save_persistent_data();
+    
+    ESP_LOGI(TAG, "Midnight reset complete - all data saved to flash");
     
     // Reset the day start baseline to 0 (since we just reset energy)
     energy_at_day_start_ = 0.0f;
