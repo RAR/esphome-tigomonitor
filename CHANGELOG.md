@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **GitHub Project Link** in Web UI Header
+  - GitHub logo icon button added to all 5 web pages
+  - Links to https://github.com/RAR/esphome-tigomonitor
+  - Styled consistently with temperature and theme toggle buttons
+- **Daily Energy History Chart**
+  - 7-day energy production bar chart on dashboard
+  - Automatically archives daily totals at midnight
+  - Persists energy baseline across reboots for accurate daily tracking
+  - Saves energy data when entering night mode
+  - Responsive chart resizing on window resize
+- **Midnight Reset Optimization**
+  - Batched flash writes to reduce heap fragmentation
+  - Eliminated 38 individual preference saves
+  - Consolidated into single `save_persistent_data()` call
+
+### Fixed
+- **Night Mode Display Issues**
+  - Dashboard API now returns zero watts during night mode instead of residual cached power
+  - Cached total power properly zeroed when all devices go offline
+- **Daily Energy Tracking**
+  - Fixed race condition between `update_daily_energy()` and `check_midnight_reset()` archival
+  - Only midnight reset archives when `reset_at_midnight` enabled
+  - Energy baseline (`energy_at_day_start_`) now persisted to flash
+  - Today's energy correctly calculated as current minus baseline in chart
+  - Removed duplicate "today" bar from energy history chart
+- **Web UI Performance**
+  - Fixed duplicate energy history API call on initial page load
+  - Added `energyHistoryLoaded` flag to prevent redundant fetches
+- **CSS Consistency**
+  - Removed duplicate `.temp-toggle` CSS rule from Status page
+  - All header control buttons styled consistently across pages
+
 ### Changed
 - **Terminology Consistency**
   - Renamed all "packet" references to "frame" for serial communication accuracy
