@@ -346,6 +346,14 @@ void TigoWebServer::setup() {
     };
     httpd_register_uri_handler(server_, &api_backlight_uri);
     
+    httpd_uri_t api_github_release_uri = {
+      .uri = "/api/github/release",
+      .method = HTTP_GET,
+      .handler = api_github_release_handler,
+      .user_ctx = this
+    };
+    httpd_register_uri_handler(server_, &api_github_release_uri);
+    
     // Log web authentication status
     if (!web_username_.empty() && !web_password_.empty()) {
       ESP_LOGI(TAG, "HTTP Basic Authentication configured for web pages (user: %s)", web_username_.c_str());
@@ -1967,6 +1975,19 @@ void TigoWebServer::get_dashboard_html(PSRAMString& html) {
     .loading { text-align: center; padding: 2rem; color: #7f8c8d; }
     .error { background: #e74c3c; color: white; padding: 1rem; border-radius: 4px; margin-bottom: 1rem; }
     
+    /* Release banner */
+    .release-banner { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 1rem 2rem; display: none; align-items: center; justify-content: space-between; box-shadow: 0 2px 8px rgba(0,0,0,0.15); position: relative; }
+    .release-banner-content { display: flex; align-items: center; gap: 1rem; flex: 1; }
+    .release-banner-icon { font-size: 1.5rem; }
+    .release-banner-text { flex: 1; }
+    .release-banner-title { font-weight: 600; margin-bottom: 0.25rem; }
+    .release-banner-message { font-size: 0.875rem; opacity: 0.9; }
+    .release-banner-actions { display: flex; gap: 0.75rem; align-items: center; }
+    .release-banner-btn { background: rgba(255,255,255,0.2); border: 1px solid rgba(255,255,255,0.3); color: white; padding: 0.5rem 1rem; border-radius: 4px; cursor: pointer; font-size: 0.875rem; transition: all 0.2s; text-decoration: none; display: inline-block; }
+    .release-banner-btn:hover { background: rgba(255,255,255,0.3); }
+    .release-banner-dismiss { background: transparent; border: none; color: white; font-size: 1.5rem; cursor: pointer; opacity: 0.8; padding: 0.25rem 0.5rem; transition: opacity 0.2s; }
+    .release-banner-dismiss:hover { opacity: 1; }
+    
     /* Dark mode styles */
     body.dark-mode { background: #1a1a1a; color: #e0e0e0; }
     body.dark-mode .header { background: #1c2833; }
@@ -2003,6 +2024,20 @@ void TigoWebServer::get_dashboard_html(PSRAMString& html) {
       <a href="/status">ESP32 Status</a>
       <a href="/yaml">YAML Config</a>
       <a href="/cca">CCA Info</a>
+    </div>
+  </div>
+  
+  <div class="release-banner" id="release-banner">
+    <div class="release-banner-content">
+      <div class="release-banner-icon">🎉</div>
+      <div class="release-banner-text">
+        <div class="release-banner-title">New Release Available!</div>
+        <div class="release-banner-message" id="release-message">A new version is available on GitHub</div>
+      </div>
+    </div>
+    <div class="release-banner-actions">
+      <a href="#" id="release-link" target="_blank" class="release-banner-btn">View Release</a>
+      <button class="release-banner-dismiss" onclick="dismissReleaseBanner()" title="Dismiss">&times;</button>
     </div>
   </div>
   
@@ -2104,12 +2139,52 @@ void TigoWebServer::get_dashboard_html(PSRAMString& html) {
       return useFahrenheit ? '°F' : '°C';
     }
     
+    // Release banner functions
+    const CURRENT_VERSION = 'v1.2.0'; // Update this with each release
+    
+    async function checkForNewRelease() {
+      try {
+        // Check if banner was dismissed for this version
+        const dismissedVersion = localStorage.getItem('dismissedReleaseVersion');
+        if (dismissedVersion === CURRENT_VERSION) {
+          return; // Already dismissed for current version
+        }
+        
+        // Fetch latest release from GitHub
+        const response = await fetch('https://api.github.com/repos/RAR/esphome-tigomonitor/releases/latest');
+        if (!response.ok) {
+          console.warn('Could not fetch release info');
+          return;
+        }
+        
+        const release = await response.json();
+        const latestVersion = release.tag_name;
+        
+        // Compare versions - show banner if latest is newer than current
+        if (latestVersion !== CURRENT_VERSION && !dismissedVersion) {
+          document.getElementById('release-message').textContent = `Version ${latestVersion} is now available!`;
+          document.getElementById('release-link').href = release.html_url;
+          document.getElementById('release-banner').style.display = 'flex';
+        }
+      } catch (error) {
+        console.error('Error checking for releases:', error);
+      }
+    }
+    
+    function dismissReleaseBanner() {
+      document.getElementById('release-banner').style.display = 'none';
+      // Remember dismissal for current version
+      localStorage.setItem('dismissedReleaseVersion', CURRENT_VERSION);
+    }
+    
     // Initialize toggle buttons
     let invertersData = { inverters: [] }; // Cache inverter config (static, only changes on reboot)
     
     document.addEventListener('DOMContentLoaded', () => {
       applyTheme();
       document.getElementById('temp-toggle').textContent = useFahrenheit ? '°C' : '°F';
+      // Check for new releases
+      checkForNewRelease();
       // Initial load - fetch inverters once, then start refresh cycle
       loadInitialData();
     });
@@ -4057,6 +4132,19 @@ esp_err_t TigoWebServer::api_backlight_handler(httpd_req_t *req) {
   httpd_resp_sendstr(req, "{\"success\":false,\"error\":\"Light component not available\"}");
 #endif
   
+  return ESP_OK;
+}
+
+esp_err_t TigoWebServer::api_github_release_handler(httpd_req_t *req) {
+  // This endpoint returns GitHub API URL for client-side fetch
+  // Client will check for new releases directly from browser
+  
+  httpd_resp_set_type(req, "application/json");
+  httpd_resp_set_hdr(req, "Cache-Control", "public, max-age=3600"); // Cache for 1 hour
+  
+  const char *response = R"({"fetch_url":"https://api.github.com/repos/RAR/esphome-tigomonitor/releases/latest"})";
+  
+  httpd_resp_sendstr(req, response);
   return ESP_OK;
 }
 
