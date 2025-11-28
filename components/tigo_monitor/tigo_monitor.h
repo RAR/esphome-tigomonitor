@@ -116,6 +116,7 @@ struct NodeTableData {
   std::string checksum;        // CRC checksum
   int sensor_index = -1;       // ESPHome sensor index (-1 = unassigned)
   bool is_persistent = false;  // Whether this mapping should be saved to flash
+  std::string firmware_version; // Frame 0x07: Firmware version string (runtime only, not persisted)
   
   // CCA-sourced metadata (optional, populated via HTTP query)
   std::string cca_label;          // Friendly name from CCA (e.g., "East Roof Panel 3")
@@ -567,6 +568,7 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   std::string cca_device_info_;
 #endif
   bool frame_started_ = false;
+  bool in_escape_sequence_ = false;  // Track if we're in the middle of an escape sequence
   uint16_t crc_table_[CRC_TABLE_SIZE];
   int number_of_devices_ = 5;
   std::string cca_ip_;  // Optional CCA IP address for HTTP queries (small, kept in internal RAM)
@@ -576,6 +578,7 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   // UART transmit state (Phase 1)
   uint16_t gateway_id_ = 0x1201;  // Gateway ID (auto-discovered from traffic, default 0x1201)
   uint8_t command_sequence_ = 0x01;  // Start at 0x01 - using CCA's sequence range (0x01-0x7F)
+  uint8_t last_cca_sequence_ = 0x00;  // Track last sequence number seen from CCA
   bool gateway_id_discovered_ = false;  // Whether we've sniffed the gateway ID
   bool suppressing_rx_ = false;  // True when ignoring RX during/after TX to skip echo
   unsigned long rx_suppress_until_ = 0;  // millis() timestamp to resume RX processing
