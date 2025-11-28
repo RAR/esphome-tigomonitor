@@ -1637,6 +1637,7 @@ void TigoWebServer::build_node_table_json(PSRAMString& json) {
   cJSON *nodes_array = cJSON_CreateArray();
   
   const auto &node_table = parent_->get_node_table();
+  const auto &devices = parent_->get_devices();
   
   for (const auto &node : node_table) {
     cJSON *node_obj = cJSON_CreateObject();
@@ -1651,6 +1652,16 @@ void TigoWebServer::build_node_table_json(PSRAMString& json) {
     cJSON_AddStringToObject(node_obj, "cca_string", node.cca_string_label.c_str());
     cJSON_AddStringToObject(node_obj, "cca_inverter", node.cca_inverter_label.c_str());
     cJSON_AddStringToObject(node_obj, "cca_channel", node.cca_channel.c_str());
+    
+    // Look up firmware version from device data
+    std::string firmware_version = "";
+    for (const auto &device : devices) {
+      if (device.addr == node.addr) {
+        firmware_version = device.firmware_version;
+        break;
+      }
+    }
+    cJSON_AddStringToObject(node_obj, "firmware_version", firmware_version.c_str());
     
     cJSON_AddItemToArray(nodes_array, node_obj);
   }
@@ -2318,12 +2329,6 @@ void TigoWebServer::get_dashboard_html(PSRAMString& html) {
                   <span class="metric-label">RSSI</span>
                   <span class="metric-value">${device.rssi} dBm</span>
                 </div>
-                ${device.firmware_version ? `
-                <div class="metric" style="grid-column: 1 / -1;">
-                  <span class="metric-label">Firmware</span>
-                  <span class="metric-value" style="font-size: 0.85em; font-family: monospace;">${device.firmware_version}</span>
-                </div>
-                ` : ''}
               </div>
             </div>
           `;
@@ -2724,12 +2729,13 @@ void TigoWebServer::get_node_table_html(PSRAMString& html) {
             <th>Address</th>
             <th>Device Name / Barcode</th>
             <th>Location</th>
+            <th>Firmware Version</th>
             <th>Sensor Index</th>
             <th>Action</th>
           </tr>
         </thead>
         <tbody id="node-table-body">
-          <tr><td colspan="5" style="text-align:center;">Loading...</td></tr>
+          <tr><td colspan="6" style="text-align:center;">Loading...</td></tr>
         </tbody>
       </table>
     </div>
@@ -2916,6 +2922,7 @@ void TigoWebServer::get_node_table_html(PSRAMString& html) {
             <td><span class="code">${node.addr}</span></td>
             <td>${deviceInfo}</td>
             <td>${location}</td>
+            <td><span class="code" style="font-size:0.85em;">${node.firmware_version || '<span style="color:#bdc3c7;">-</span>'}</span></td>
             <td>
               ${node.sensor_index >= 0 ? 
                 `<span class="badge badge-success">Tigo ${node.sensor_index + 1}</span>` : 
