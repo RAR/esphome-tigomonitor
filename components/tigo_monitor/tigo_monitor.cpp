@@ -132,6 +132,27 @@ inline size_t buffer_find<psram_vector<char>>(const psram_vector<char>& buf, con
   return std::string::npos;
 }
 
+// Find pattern starting from a specific position
+template<typename BufferType>
+inline size_t buffer_find_from(const BufferType& buf, const char* pattern, size_t start_pos);
+
+template<>
+inline size_t buffer_find_from<std::string>(const std::string& buf, const char* pattern, size_t start_pos) {
+  size_t pos = buf.find(pattern, start_pos);
+  return pos;
+}
+
+template<>
+inline size_t buffer_find_from<psram_vector<char>>(const psram_vector<char>& buf, const char* pattern, size_t start_pos) {
+  if (start_pos >= buf.size() || buf.size() < 1) return std::string::npos;
+  for (size_t i = start_pos; i < buf.size(); i++) {
+    if (buf[i] == pattern[0]) {
+      return i;
+    }
+  }
+  return std::string::npos;
+}
+
 template<typename BufferType>
 inline std::string buffer_substr(const BufferType& buf, size_t pos, size_t len);
 
@@ -388,9 +409,63 @@ void TigoSyncFromCCAButton::press_action() {
     ESP_LOGE("tigo_button", "Tigo server component not set!");
   }
 }
+
+void TigoRequestGatewayVersionButton::press_action() {
+  ESP_LOGI("tigo_button", "Requesting gateway version info...");
+  if (this->tigo_monitor_ != nullptr) {
+    this->tigo_monitor_->send_gateway_version_request();
+  } else {
+    ESP_LOGE("tigo_button", "Tigo server component not set!");
+  }
+}
+
+void TigoRequestDeviceDiscoveryButton::press_action() {
+  ESP_LOGI("tigo_button", "Requesting device discovery from gateway...");
+  if (this->tigo_monitor_ != nullptr) {
+    this->tigo_monitor_->send_device_discovery_request();
+  } else {
+    ESP_LOGE("tigo_button", "Tigo server component not set!");
+  }
+}
 #endif
 
 void TigoMonitorComponent::process_serial_data() {
+  // Check if RX is suppressed (ignoring echo after transmission)
+  if (suppressing_rx_) {
+    // Count-based suppression: discard exact number of echo bytes
+    if (echo_bytes_flushed_ >= expected_echo_bytes_) {
+      // All echo bytes flushed, resume normal processing
+      suppressing_rx_ = false;
+      ESP_LOGI(TAG, "Echo complete (%d/%d bytes), resuming RX", 
+               echo_bytes_flushed_, expected_echo_bytes_);
+      echo_bytes_flushed_ = 0;
+      expected_echo_bytes_ = 0;
+      
+      // Clear any partial frame data to ensure clean synchronization
+      buffer_clear(incoming_data_);
+      frame_started_ = false;
+    } else if (millis() >= rx_suppress_until_) {
+      // Timeout: flush remaining bytes and resume
+      // This handles cases where echo is smaller than expected (half-duplex RS-485)
+      suppressing_rx_ = false;
+      ESP_LOGI(TAG, "Echo timeout, flushed %d/%d bytes, resuming RX", 
+               echo_bytes_flushed_, expected_echo_bytes_);
+      echo_bytes_flushed_ = 0;
+      expected_echo_bytes_ = 0;
+      
+      // Clear any partial frame data to ensure clean synchronization
+      buffer_clear(incoming_data_);
+      frame_started_ = false;
+    } else {
+      // Still suppressing - discard incoming echo bytes
+      while (available() && echo_bytes_flushed_ < expected_echo_bytes_) {
+        read();
+        echo_bytes_flushed_++;
+      }
+      return;  // Don't process anything during suppression
+    }
+  }
+  
 #ifdef USE_ESP_IDF
   // Increase processing limit for high-throughput systems with display
   // Display updates can delay UART processing, so process more per loop
@@ -423,47 +498,76 @@ void TigoMonitorComponent::process_serial_data() {
     
     buffer_append(incoming_data_, incoming_byte);
     
-    // Check if frame starts
-    if (!frame_started_ && buffer_find(incoming_data_, "\x7E\x08", 2) != std::string::npos) {
-      missed_frame_count_++;
-      if (missed_frame_sensor_ != nullptr) {
-        missed_frame_sensor_->publish_state(missed_frame_count_);
+    // Frame delimiter detection with escape sequence awareness
+    // Only 7E 07 and 7E 08 at the START of buffer positions are delimiters
+    // 7E 00-06 are escape sequences (not delimiters)
+    
+    // Check if frame starts (7E 07 that's not an escape sequence)
+    if (!frame_started_) {
+      size_t pos = 0;
+      while ((pos = buffer_find_from(incoming_data_, "\x7E", pos)) != std::string::npos) {
+        // Check if this 7E is followed by 07 (start delimiter)
+        if (pos + 1 < buffer_size(incoming_data_)) {
+          char next = incoming_data_[pos + 1];
+          if (next == '\x07') {
+            // Found start delimiter!
+            frame_started_ = true;
+            buffer_erase_prefix(incoming_data_, pos);  // Keep only from start delimiter
+            break;
+          } else if (next == '\x08') {
+            // Found END before START - missed frame
+            missed_frame_count_++;
+            if (missed_frame_sensor_ != nullptr) {
+              missed_frame_sensor_->publish_state(missed_frame_count_);
+            }
+            ESP_LOGD(TAG, "Packet missed! Found END before START");
+            // Discard up to and including this END marker
+            buffer_erase_prefix(incoming_data_, pos + 2);
+            pos = 0;  // Restart search
+            continue;
+          } else if (next >= '\x00' && next <= '\x06') {
+            // This is an escape sequence, skip both bytes
+            pos += 2;
+            continue;
+          }
+        }
+        pos++;
       }
-      // Log buffer size and state to help diagnose if this is a buffer overflow or sync issue
-      ESP_LOGW(TAG, "Packet missed! Found END before START (buffer: %zu bytes, available: %zu)", 
-               buffer_size(incoming_data_), available());
     }
     
-    if (!frame_started_ && buffer_find(incoming_data_, "\x7E\x07", 2) != std::string::npos) {
-      // Start of a new frame detected
-      frame_started_ = true;
-      size_t start_pos = buffer_find(incoming_data_, "\x7E\x07", 2);
-      buffer_erase_prefix(incoming_data_, start_pos);  // Keep only from start delimiter
-    }
-    // Check if frame ends
-    else if (frame_started_ && buffer_find(incoming_data_, "\x7E\x08", 2) != std::string::npos) {
-      // End of frame detected
-      frame_started_ = false;
-      size_t end_pos = buffer_find(incoming_data_, "\x7E\x08", 2);
-      
-      // Safety check: ensure end_pos is valid
-      if (end_pos < 2 || end_pos > incoming_data_.size()) {
-        ESP_LOGW(TAG, "Invalid frame end position: %zu (buffer size: %zu)", end_pos, incoming_data_.size());
-        buffer_clear(incoming_data_);
-        missed_frame_count_++;
-        continue;
+    // Check if frame ends (7E 08 that's not an escape sequence)
+    if (frame_started_) {
+      // Search for 7E 08 starting after the initial 7E 07
+      size_t pos = 2;  // Skip the start delimiter
+      while ((pos = buffer_find_from(incoming_data_, "\x7E", pos)) != std::string::npos) {
+        if (pos + 1 < buffer_size(incoming_data_)) {
+          char next = incoming_data_[pos + 1];
+          if (next == '\x08') {
+            // Found end delimiter!
+            frame_started_ = false;
+            
+            // Extract frame without start (7E 07) and end (7E 08) delimiters
+            std::string frame = buffer_substr(incoming_data_, 2, pos - 2);
+            buffer_clear(incoming_data_); // Clear buffer for next frame
+            
+            // Process the frame with safety checks
+            if (!frame.empty() && frame.length() < 10000) {
+              ESP_LOGV(TAG, "Processing frame of %zu bytes", frame.length());
+              process_frame(frame);
+            } else if (frame.length() >= 10000) {
+              ESP_LOGW(TAG, "Frame too large (%zu bytes), skipping", frame.length());
+              missed_frame_count_++;
+            }
+            break;
+          } else if (next >= '\x00' && next <= '\x06') {
+            // This is an escape sequence, skip both bytes
+            pos += 2;
+            continue;
+          }
+        }
+        pos++;
       }
-      
-      // Extract frame without start and end delimiters
-      std::string frame = buffer_substr(incoming_data_, 2, end_pos - 2);
-      buffer_clear(incoming_data_); // Clear buffer for next frame
-      
-      // Process the frame with safety checks
-      if (!frame.empty() && frame.length() < 10000) {
-        ESP_LOGV(TAG, "Processing frame of %zu bytes", frame.length());
-        process_frame(frame);
-      } else if (frame.length() >= 10000) {
-        ESP_LOGW(TAG, "Frame too large (%zu bytes), skipping", frame.length());
+    }
         missed_frame_count_++;
       }
     }
@@ -548,6 +652,40 @@ void TigoMonitorComponent::process_frame(const std::string &frame) {
     return;
   }
   
+  // Ignore frames with segment 0B0F and our destination (echoed command requests we sent)
+  if (hex_frame.length() >= 8) {
+    std::string segment = hex_frame.substr(4, 4);
+    std::string dest_addr = hex_frame.substr(0, 4);
+    
+    // Check if this is an echo of our own command request
+    // Our requests have segment 0B0F, CCA's also use 0B0F but different destinations
+    if (segment == "0B0F" && (dest_addr == "1201" || dest_addr == std::to_string(gateway_id_))) {
+      // This might be our echo - check if it matches expected pattern
+      // CCA requests look like: 12010B0F0000002E73 (9 bytes)
+      // Our requests should match this format, so we'll see echoes
+      // For now, log verbosely to help debug
+      ESP_LOGV(TAG, "Possible echo of command request: %s", hex_frame.c_str());
+      // Don't return yet - let it process in case it's actually from CCA
+    }
+  }
+  
+  // Auto-discover gateway ID from traffic (passive discovery)
+  // Gateway REQUEST destination is 0x1201 (positions 0-4 in command frames)
+  // Gateway RESPONSE source is 0x9201 (but we need the request destination!)
+  if (!gateway_id_discovered_ && hex_frame.length() >= 8) {
+    std::string segment = hex_frame.substr(4, 4);
+    // Look for command REQUEST frames (segment 0B0F)
+    if (segment == "0B0F") {
+      std::string dest_addr = hex_frame.substr(0, 4);
+      // Gateway requests go to 0x12XX addresses
+      if (dest_addr.substr(0, 2) == "12") {
+        gateway_id_ = std::stoi(dest_addr, nullptr, 16);
+        gateway_id_discovered_ = true;
+        ESP_LOGI(TAG, "Gateway ID auto-discovered from request: 0x%04X", gateway_id_);
+      }
+    }
+  }
+  
   std::string segment = hex_frame.substr(4, 4); // Get type segment
   
   if (segment == "0149") {
@@ -590,11 +728,94 @@ void TigoMonitorComponent::process_frame(const std::string &frame) {
     }
   } else if (segment == "0B10" || segment == "0B0F") {
     // Command request or response
+    ESP_LOGI(TAG, "Command frame received (segment %s): %s", segment.c_str(), hex_frame.c_str());
     std::string type = hex_frame.substr(14, 2);
     if (type == "27") {
       process_27_frame(hex_frame, 18);  // Pass offset instead of creating substring
     } else if (type == "0E") {
       process_0E_frame(hex_frame.substr(18));  // Gateway radio config response
+    } else if (type == "0D") {
+      ESP_LOGI(TAG, "Frame 0x0D - Gateway config REQUEST seen from CCA: %s", hex_frame.c_str());
+    } else if (type == "2E") {
+      ESP_LOGI(TAG, "Frame 0x2E - Network status REQUEST seen from CCA: %s", hex_frame.c_str());
+    } else if (type == "41") {
+      // Frame 0x41 - Unknown command, log both request and response
+      if (segment == "0B0F") {
+        // Parse the 25-byte payload to understand what it contains
+        // Format: 1201 0B0F 0000 0041 [seq] [25-byte payload]
+        // Header = 9 bytes, then payload
+        if (hex_frame.length() >= 68) {  // 9 header bytes (18 hex chars) + 25 payload bytes (50 hex chars)
+          std::string payload = hex_frame.substr(18);  // Everything after header
+          
+          // Try to decode payload structure
+          ESP_LOGI(TAG, "Frame 0x41 REQUEST from CCA (seq=%s):", hex_frame.substr(16, 2).c_str());
+          ESP_LOGI(TAG, "  Full payload (%d bytes): %s", payload.length() / 2, payload.c_str());
+          
+          // Parse suspected fields (all hex string offsets are *2 for byte positions)
+          if (payload.length() >= 50) {
+            std::string field1 = payload.substr(0, 4);   // Bytes 0-1
+            std::string field2 = payload.substr(4, 8);   // Bytes 2-5 (32-bit value)
+            std::string field3 = payload.substr(12, 4);  // Bytes 6-7
+            std::string field4 = payload.substr(16, 8);  // Bytes 8-11 (4 null bytes?)
+            std::string field5 = payload.substr(24, 8);  // Bytes 12-15
+            std::string field6 = payload.substr(32, 4);  // Bytes 16-17
+            std::string field7 = payload.substr(36, 4);  // Bytes 18-19
+            std::string field8 = payload.substr(40, 4);  // Bytes 20-21
+            std::string field9 = payload.substr(44, 4);  // Bytes 22-23
+            std::string field10 = payload.substr(48, 4); // Bytes 24-25
+            
+            ESP_LOGI(TAG, "  Field breakdown: [%s] [%s] [%s] [%s]", 
+                     field1.c_str(), field2.c_str(), field3.c_str(), field4.c_str());
+            ESP_LOGI(TAG, "                   [%s] [%s] [%s] [%s] [%s] [%s]",
+                     field5.c_str(), field6.c_str(), field7.c_str(), field8.c_str(), field9.c_str(), field10.c_str());
+          }
+        }
+        ESP_LOGI(TAG, "Frame 0x41 - Unknown command REQUEST from CCA: %s", hex_frame.c_str());
+      } else {
+        ESP_LOGI(TAG, "Frame 0x41 - Unknown command RESPONSE from gateway: %s", hex_frame.c_str());
+      }
+    } else if (type == "22") {
+      // Frame 0x22 - Unknown short command request
+      ESP_LOGI(TAG, "Frame 0x22 REQUEST from CCA: %s", hex_frame.c_str());
+    } else if (type == "23") {
+      // Frame 0x23 - Response to 0x22
+      ESP_LOGI(TAG, "Frame 0x23 RESPONSE from gateway: %s", hex_frame.c_str());
+    } else if (type == "26") {
+      // Frame 0x26 - Device list request
+      ESP_LOGI(TAG, "Frame 0x26 - Device list REQUEST from CCA: %s", hex_frame.c_str());
+    } else if (type == "27") {
+      // Frame 0x27 - Device list response! Parse device entries
+      if (segment == "0B10") {
+        ESP_LOGI(TAG, "Frame 0x27 - Device list RESPONSE from gateway: %s", hex_frame.c_str());
+        
+        // Parse device list payload
+        // Format after header (9 bytes): [device_count (2 bytes)] [device_entries...]
+        if (hex_frame.length() >= 22) {  // At least header + count
+          std::string payload = hex_frame.substr(18);  // After header
+          
+          // First 2 bytes (4 hex chars) = device count
+          if (payload.length() >= 4) {
+            std::string count_str = payload.substr(0, 4);
+            uint16_t device_count = (uint16_t)strtol(count_str.c_str(), nullptr, 16);
+            
+            ESP_LOGI(TAG, "  Device count: %u", device_count);
+            ESP_LOGI(TAG, "  Device entries (raw): %s", payload.substr(4).c_str());
+            
+            // Each device entry appears to be 12 bytes (24 hex chars)
+            // Format: [unknown_field] [address] [status?]
+            size_t entry_size = 24;  // 12 bytes = 24 hex chars
+            size_t offset = 4;  // Start after count
+            
+            for (uint16_t i = 0; i < device_count && offset + entry_size <= payload.length(); i++) {
+              std::string entry = payload.substr(offset, entry_size);
+              ESP_LOGI(TAG, "    Device %u: %s", i + 1, entry.c_str());
+              offset += entry_size;
+            }
+          }
+        }
+      }
+    } else {
+      ESP_LOGD(TAG, "Unknown command type 0x%s in segment %s: %s", type.c_str(), segment.c_str(), hex_frame.c_str());
     }
     // Handle other command types as needed
   } else if (segment == "0148") {
@@ -2256,36 +2477,236 @@ void TigoMonitorComponent::request_firmware_versions() {
   ESP_LOGI(TAG, "Frame 0x07 processing is ready to capture version responses from CCA");
 }
 
-void TigoMonitorComponent::request_network_status() {
-  ESP_LOGI(TAG, "Requesting network status from gateway...");
+// =============================================================================
+// UART Transmit Implementation (Phase 1 - Gateway Queries Only)
+// =============================================================================
+
+void TigoMonitorComponent::discover_gateway_id() {
+  // Gateway ID is auto-discovered from incoming traffic
+  // Look for frames with source address pattern 0x92XX (gateway prefix)
+  // This is called during frame processing when we see gateway frames
   
-  // NOTE: This is a placeholder for future UART transmit functionality
-  // To actually request network status, we would need to:
-  // 1. Send PV packet type 0x2E (network status request) to gateway (PV node ID 0x0001)
-  // 2. Wait for 0x2F (network status response) frame
-  // 
-  // For now, this method just logs that we would send the request.
-  // Frame 0x2F processing is already implemented and will capture
-  // network status responses when the CCA controller queries them.
+  if (gateway_id_discovered_) {
+    return;  // Already discovered
+  }
   
-  ESP_LOGW(TAG, "Network status request not yet implemented (UART TX required)");
-  ESP_LOGI(TAG, "Frame 0x2F processing is ready to capture network status from CCA queries");
+  // Discovery happens passively in process_frame() when we see 0x92XX addresses
+  // This method is just a placeholder for future active discovery if needed
+  ESP_LOGD(TAG, "Gateway ID discovery is passive (watching for 0x92XX frames)");
 }
 
-void TigoMonitorComponent::request_gateway_config() {
-  ESP_LOGI(TAG, "Requesting gateway radio configuration...");
+std::string TigoMonitorComponent::apply_escape_sequences(const std::string &data) {
+  // Apply taptap protocol escape sequences per protocol doc:
+  // 7E 00 -> 7E    7E 01 -> 24    7E 02 -> 23    7E 03 -> 25
+  // 7E 04 -> A4    7E 05 -> A3    7E 06 -> A5
   
-  // NOTE: This is a placeholder for future UART transmit functionality
-  // To actually request gateway config, we would need to:
-  // 1. Send PV packet type 0x0D (gateway radio config request) to gateway
-  // 2. Wait for 0x0E (gateway radio config response) frame
-  // 
-  // For now, this method just logs that we would send the request.
-  // Frame 0x0E processing is already implemented and will capture
-  // gateway config responses when the CCA controller queries them.
+  std::string escaped;
+  escaped.reserve(data.size() * 2);  // Worst case: every byte needs escaping
   
-  ESP_LOGW(TAG, "Gateway config request not yet implemented (UART TX required)");
-  ESP_LOGI(TAG, "Frame 0x0E processing is ready to capture gateway config from CCA queries");
+  for (uint8_t byte : data) {
+    switch (byte) {
+      case 0x7E:
+        escaped.push_back(0x7E);
+        escaped.push_back(0x00);
+        break;
+      case 0x24:
+        escaped.push_back(0x7E);
+        escaped.push_back(0x01);
+        break;
+      case 0x23:
+        escaped.push_back(0x7E);
+        escaped.push_back(0x02);
+        break;
+      case 0x25:
+        escaped.push_back(0x7E);
+        escaped.push_back(0x03);
+        break;
+      case 0xA4:
+        escaped.push_back(0x7E);
+        escaped.push_back(0x04);
+        break;
+      case 0xA3:
+        escaped.push_back(0x7E);
+        escaped.push_back(0x05);
+        break;
+      case 0xA5:
+        escaped.push_back(0x7E);
+        escaped.push_back(0x06);
+        break;
+      default:
+        escaped.push_back(byte);
+        break;
+    }
+  }
+  
+  return escaped;
+}
+
+std::string TigoMonitorComponent::build_gateway_frame(uint16_t gateway_addr, uint16_t pv_packet_type, const std::string &command_data) {
+  // Build taptap gateway transport layer command request frame (type 0B 0F)
+  // Per taptap protocol doc:
+  //   Address: gateway_addr (e.g., 0x1201)
+  //   Type: 0B 0F (command request)
+  //   Payload: ??? ??? ??? PV_packet_type sequence command_data
+  //            00  00  00  06              66       5E3030496E666F0D
+  
+  std::string frame;
+  frame.reserve(64);
+  
+  // Destination address (gateway, big-endian)
+  frame.push_back((gateway_addr >> 8) & 0xFF);
+  frame.push_back(gateway_addr & 0xFF);
+  
+  // Frame type: 0x0B0F for command REQUEST
+  frame.push_back(0x0B);
+  frame.push_back(0x0F);
+  
+  // Payload begins here:
+  // 3 unknown bytes (CCA uses 00 00 00)
+  frame.push_back(0x00);
+  frame.push_back(0x00);
+  frame.push_back(0x00);
+  
+  // PV packet type (e.g., 0x06 for string request, 0x26 for node table)
+  frame.push_back(pv_packet_type & 0xFF);
+  
+  // Sequence number (increments with each command)
+  // Per protocol doc: "controller avoids using sequence numbers FF or 00"
+  frame.push_back(command_sequence_);
+  command_sequence_++;
+  if (command_sequence_ == 0x00 || command_sequence_ == 0xFF) {
+    command_sequence_ = 0x01;  // Skip both 0x00 and 0xFF
+  }
+  
+  // Command data (e.g., device address + string query, or offset parameter)
+  // Command data (e.g., device address + string query, or offset parameter)
+  frame.append(command_data);
+  
+  // Compute CRC-16/CCITT over address + type + payload
+  // Per protocol doc: checksum covers "the address, type, and payload together"
+  uint16_t crc = compute_crc16_ccitt((const uint8_t*)frame.data(), frame.size());
+  
+  // Append CRC in little-endian format (low byte, high byte)
+  frame.push_back(crc & 0xFF);
+  frame.push_back((crc >> 8) & 0xFF);
+  
+  ESP_LOGD(TAG, "TX: Built command frame (before escaping): %s", frame_to_hex_string(frame).c_str());
+  
+  // Apply escape sequences to entire frame (including CRC)
+  std::string escaped = apply_escape_sequences(frame);
+  
+  ESP_LOGD(TAG, "TX: After escaping: %s", frame_to_hex_string(escaped).c_str());
+  
+  return escaped;
+}
+
+void TigoMonitorComponent::send_raw_frame(const std::string &escaped_frame) {
+  // Send frame with taptap framing bytes
+  // Format: 0x7E 0x07 <escaped_frame> 0x7E 0x08
+  
+  ESP_LOGI(TAG, "TX: Frame (hex): %s", frame_to_hex_string(escaped_frame).c_str());
+  
+  // Set flag to suppress RX processing ONLY during transmission
+  // Echo timing: RS-485 echo is immediate (same speed as TX)
+  // At 38400 baud: ~260 microseconds per byte
+  // 26 bytes = 6.8ms transmission time + ~2-3ms transceiver delay = ~10ms total
+  // Strategy: Flush only exact echo bytes, then resume immediately
+  suppressing_rx_ = true;
+  expected_echo_bytes_ = 4 + escaped_frame.size();  // Frame markers + data
+  rx_suppress_until_ = millis() + 12;  // 12ms timeout for echo (generous margin)
+  
+  // Clear any pending RX data BEFORE transmission to start clean
+  int pre_flush = 0;
+  while (available()) {
+    read();
+    pre_flush++;
+  }
+  
+  // Calculate total frame size in bytes (framing + data)
+  size_t total_bytes = 4 + escaped_frame.size();  // 0x7E 0x07 + data + 0x7E 0x08
+  
+  // Start frame marker
+  write_byte(0x7E);
+  write_byte(0x07);
+  
+  // Write escaped frame data
+  write_array((const uint8_t*)escaped_frame.data(), escaped_frame.size());
+  
+  // End frame marker
+  write_byte(0x7E);
+  write_byte(0x08);
+  
+  flush();
+  
+  ESP_LOGI(TAG, "TX: Sent %u bytes, pre-flushed %d bytes, RX suppressed for 15ms", 
+           total_bytes, pre_flush);
+  
+  // Note: RX will be automatically re-enabled in process_serial_data() after rx_suppress_until_
+}
+
+void TigoMonitorComponent::send_gateway_version_request() {
+  // Send type 0x06 string request for version/firmware info
+  // Per taptap protocol: queries devices via gateway proxy
+  // Command payload: PV_node_ID (2 bytes) + string_query
+  
+  if (!gateway_id_discovered_) {
+    ESP_LOGW(TAG, "Gateway ID not yet discovered, using default 0x1201");
+  }
+  
+  // Determine target PV node ID
+  uint16_t target_pv_node = 0x0001;  // Default: gateway itself
+  const char* query_string = "^00Mppt\r";  // Default query for gateway
+  
+  if (!devices_.empty()) {
+    // Use first discovered device - need to find its PV node ID
+    // For now, try a low node ID like 0x0002 (first device after gateway)
+    target_pv_node = 0x0002;
+    query_string = "^00Tests\r";
+    ESP_LOGI(TAG, "Sending version request to PV node 0x%04X with query '%s'", 
+             target_pv_node, query_string);
+  } else {
+    ESP_LOGI(TAG, "No devices discovered, sending version request to gateway (PV node 0x%04X)", 
+             target_pv_node);
+  }
+  
+  // Build command data: PV_node_ID + query_string
+  std::string command_data;
+  command_data.push_back((target_pv_node >> 8) & 0xFF);  // PV node ID high byte
+  command_data.push_back(target_pv_node & 0xFF);          // PV node ID low byte
+  
+  // Append query string
+  command_data.append(query_string);
+  
+  // Build and send frame (type 0x06 = string request)
+  std::string frame = build_gateway_frame(gateway_id_, 0x06, command_data);
+  send_raw_frame(frame);
+  
+  ESP_LOGI(TAG, "Version request sent, waiting for type 0x07 response with sequence 0x%02X", 
+           command_sequence_ - 1);
+}
+void TigoMonitorComponent::send_device_discovery_request() {
+  // Send type 0x26 request to gateway for device list (paginated)
+  // Request format: type 0x26 with 2-byte offset parameter
+  
+  if (!gateway_id_discovered_) {
+    ESP_LOGW(TAG, "Gateway ID not yet discovered, using default 0x1201");
+  }
+  
+  // Start with offset 0x0000 (first page of devices)
+  uint16_t offset = 0x0000;
+  
+  ESP_LOGI(TAG, "Sending device discovery request (type 0x26, offset 0x%04X) to 0x%04X", offset, gateway_id_);
+  
+  // Payload: 2-byte offset (big-endian)
+  std::string payload;
+  payload.push_back((offset >> 8) & 0xFF);
+  payload.push_back(offset & 0xFF);
+  
+  std::string frame = build_gateway_frame(gateway_id_, 0x26, payload);
+  send_raw_frame(frame);
+  
+  ESP_LOGI(TAG, "Device discovery request sent, waiting for Frame 0x27 response...");
+  ESP_LOGI(TAG, "Note: CCA queries pages 0x0000, 0x000E, 0x001A, 0x0026 to get full device list");
 }
 
 void TigoMonitorComponent::check_midnight_reset() {

@@ -93,6 +93,7 @@ class TigoWebServer : public Component {
   static esp_err_t api_restart_handler(httpd_req_t *req);
   static esp_err_t api_reset_peak_power_handler(httpd_req_t *req);
   static esp_err_t api_reset_node_table_handler(httpd_req_t *req);
+  static esp_err_t api_query_handler(httpd_req_t *req);
   static esp_err_t api_health_handler(httpd_req_t *req);
   static esp_err_t api_backlight_handler(httpd_req_t *req);
   static esp_err_t api_github_release_handler(httpd_req_t *req);

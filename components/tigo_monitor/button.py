@@ -13,6 +13,8 @@ TigoYamlGeneratorButton = tigo_monitor_ns.class_('TigoYamlGeneratorButton', butt
 TigoDeviceMappingsButton = tigo_monitor_ns.class_('TigoDeviceMappingsButton', button.Button, cg.Component)
 TigoResetNodeTableButton = tigo_monitor_ns.class_('TigoResetNodeTableButton', button.Button, cg.Component)
 TigoSyncFromCCAButton = tigo_monitor_ns.class_('TigoSyncFromCCAButton', button.Button, cg.Component)
+TigoRequestGatewayVersionButton = tigo_monitor_ns.class_('TigoRequestGatewayVersionButton', button.Button, cg.Component)
+TigoRequestDeviceDiscoveryButton = tigo_monitor_ns.class_('TigoRequestDeviceDiscoveryButton', button.Button, cg.Component)
 
 # Create a configuration function that returns the appropriate schema
 def get_config_schema():
@@ -36,6 +38,16 @@ def get_config_schema():
         button.button_schema(TigoSyncFromCCAButton).extend({
             cv.GenerateID(CONF_TIGO_MONITOR_ID): cv.use_id(TigoMonitorComponent),
             cv.Required(CONF_BUTTON_TYPE): cv.one_of("sync_from_cca"),
+        }),
+        # Request Gateway Version Button Schema (Phase 1 UART TX)
+        button.button_schema(TigoRequestGatewayVersionButton).extend({
+            cv.GenerateID(CONF_TIGO_MONITOR_ID): cv.use_id(TigoMonitorComponent),
+            cv.Required(CONF_BUTTON_TYPE): cv.one_of("request_gateway_version"),
+        }),
+        # Request Device Discovery Button Schema (Phase 1 UART TX)
+        button.button_schema(TigoRequestDeviceDiscoveryButton).extend({
+            cv.GenerateID(CONF_TIGO_MONITOR_ID): cv.use_id(TigoMonitorComponent),
+            cv.Required(CONF_BUTTON_TYPE): cv.one_of("request_device_discovery"),
         })
     )
 

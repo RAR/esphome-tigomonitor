@@ -349,8 +349,11 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   const NetworkStatusData& get_network_status() const { return network_status_; }
   const GatewayRadioConfig& get_gateway_radio_config() const { return gateway_radio_config_; }
   void request_firmware_versions();   // Trigger version query for all devices
-  void request_network_status();      // Query gateway network status
-  void request_gateway_config();      // Query gateway radio configuration
+  
+  // UART transmit methods (Phase 1: Gateway queries only)
+  void send_gateway_version_request();       // Send type 0x06 request to gateway for version info
+  void send_device_discovery_request();      // Send type 0x26 request to discover devices
+  uint16_t get_gateway_id() const { return gateway_id_; }
   
   // Public methods for web server access
   void reset_peak_power();  // Reset all peak power values to 0
@@ -408,6 +411,12 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   void generate_crc_table();
   uint16_t compute_crc16_ccitt(const uint8_t *data, size_t length);
   char compute_tigo_crc4(const std::string &hex_string);
+  
+  // UART transmit helpers (Phase 1 implementation)
+  std::string apply_escape_sequences(const std::string &data);
+  std::string build_gateway_frame(uint16_t gateway_addr, uint16_t frame_type, const std::string &payload);
+  void send_raw_frame(const std::string &frame);
+  void discover_gateway_id();  // Sniff gateway ID from traffic
   
   // Device management
   void update_device_data(const DeviceData &data);
@@ -564,6 +573,15 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   bool sync_cca_on_startup_ = true;  // Whether to sync from CCA on boot (default: true)
   unsigned long last_cca_sync_time_ = 0;  // millis() of last successful CCA sync
   
+  // UART transmit state (Phase 1)
+  uint16_t gateway_id_ = 0x1201;  // Gateway ID (auto-discovered from traffic, default 0x1201)
+  uint8_t command_sequence_ = 0x01;  // Start at 0x01 - using CCA's sequence range (0x01-0x7F)
+  bool gateway_id_discovered_ = false;  // Whether we've sniffed the gateway ID
+  bool suppressing_rx_ = false;  // True when ignoring RX during/after TX to skip echo
+  unsigned long rx_suppress_until_ = 0;  // millis() timestamp to resume RX processing
+  size_t expected_echo_bytes_ = 0;  // Number of echo bytes expected from last TX
+  size_t echo_bytes_flushed_ = 0;   // Number of echo bytes flushed so far
+  
   // No timing variables needed - ESPHome handles update intervals
   
   // Character mapping for Tigo CRC
@@ -597,6 +615,22 @@ class TigoResetNodeTableButton : public button::Button, public Component {
 };
 
 class TigoSyncFromCCAButton : public button::Button, public Component {
+ public:
+  void set_tigo_monitor(TigoMonitorComponent *server) { this->tigo_monitor_ = server; }
+  void press_action() override;
+ protected:
+  TigoMonitorComponent *tigo_monitor_;
+};
+
+class TigoRequestGatewayVersionButton : public button::Button, public Component {
+ public:
+  void set_tigo_monitor(TigoMonitorComponent *server) { this->tigo_monitor_ = server; }
+  void press_action() override;
+ protected:
+  TigoMonitorComponent *tigo_monitor_;
+};
+
+class TigoRequestDeviceDiscoveryButton : public button::Button, public Component {
  public:
   void set_tigo_monitor(TigoMonitorComponent *server) { this->tigo_monitor_ = server; }
   void press_action() override;

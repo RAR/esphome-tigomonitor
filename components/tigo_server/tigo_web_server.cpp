@@ -330,6 +330,14 @@ void TigoWebServer::setup() {
     };
     httpd_register_uri_handler(server_, &api_reset_node_table_uri);
     
+    httpd_uri_t api_query_uri = {
+      .uri = "/api/query",
+      .method = HTTP_POST,
+      .handler = api_query_handler,
+      .user_ctx = this
+    };
+    httpd_register_uri_handler(server_, &api_query_uri);
+    
     httpd_uri_t api_health_uri = {
       .uri = "/api/health",
       .method = HTTP_GET,
@@ -1181,6 +1189,91 @@ esp_err_t TigoWebServer::api_reset_peak_power_handler(httpd_req_t *req) {
   
   // Send success response
   const char* response = "{\"status\":\"ok\",\"message\":\"Peak power values reset successfully\"}";
+  httpd_resp_set_type(req, "application/json");
+  httpd_resp_send(req, response, strlen(response));
+  
+  return ESP_OK;
+}
+
+esp_err_t TigoWebServer::api_query_handler(httpd_req_t *req) {
+  TigoWebServer *server = (TigoWebServer *)req->user_ctx;
+  if (!server->check_api_auth(req)) {
+    return ESP_OK;
+  }
+  
+  // Read POST body
+  char content[256];
+  int ret = httpd_req_recv(req, content, sizeof(content) - 1);
+  if (ret <= 0) {
+    if (ret == HTTPD_SOCK_ERR_TIMEOUT) {
+      httpd_resp_send_408(req);
+    }
+    return ESP_FAIL;
+  }
+  content[ret] = '\0';
+  
+  // Parse JSON (simple manual parsing for query_type field)
+  const char* query_type_key = "\"query_type\"";
+  char* query_type_start = strstr(content, query_type_key);
+  if (!query_type_start) {
+    const char* error_response = "{\"status\":\"error\",\"message\":\"Missing query_type parameter\"}";
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_status(req, "400 Bad Request");
+    httpd_resp_send(req, error_response, strlen(error_response));
+    return ESP_OK;
+  }
+  
+  // Extract query type value (skip to opening quote after colon)
+  char* value_start = strchr(query_type_start + strlen(query_type_key), '"');
+  if (!value_start) {
+    const char* error_response = "{\"status\":\"error\",\"message\":\"Invalid query_type format\"}";
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_status(req, "400 Bad Request");
+    httpd_resp_send(req, error_response, strlen(error_response));
+    return ESP_OK;
+  }
+  value_start++; // Skip opening quote
+  
+  char* value_end = strchr(value_start, '"');
+  if (!value_end) {
+    const char* error_response = "{\"status\":\"error\",\"message\":\"Invalid query_type format\"}";
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_status(req, "400 Bad Request");
+    httpd_resp_send(req, error_response, strlen(error_response));
+    return ESP_OK;
+  }
+  
+  size_t value_len = value_end - value_start;
+  char query_type[32];
+  if (value_len >= sizeof(query_type)) {
+    const char* error_response = "{\"status\":\"error\",\"message\":\"Query type too long\"}";
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_status(req, "400 Bad Request");
+    httpd_resp_send(req, error_response, strlen(error_response));
+    return ESP_OK;
+  }
+  
+  strncpy(query_type, value_start, value_len);
+  query_type[value_len] = '\0';
+  
+  ESP_LOGI(TAG, "Query request received: %s", query_type);
+  
+  // Execute query based on type
+  const char* response;
+  if (strcmp(query_type, "gateway_version") == 0) {
+    server->parent_->send_gateway_version_request();
+    response = "{\"status\":\"ok\",\"message\":\"Gateway version query sent, waiting for Frame 0x07 response...\"}";
+  } else if (strcmp(query_type, "device_discovery") == 0) {
+    server->parent_->send_device_discovery_request();
+    response = "{\"status\":\"ok\",\"message\":\"Device discovery query sent, waiting for Frame 0x27 response...\"}";
+  } else {
+    const char* error_response = "{\"status\":\"error\",\"message\":\"Unknown query_type. Valid types: gateway_version, device_discovery\"}";
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_status(req, "400 Bad Request");
+    httpd_resp_send(req, error_response, strlen(error_response));
+    return ESP_OK;
+  }
+  
   httpd_resp_set_type(req, "application/json");
   httpd_resp_send(req, response, strlen(response));
   
@@ -2721,7 +2814,14 @@ void TigoWebServer::get_node_table_html(PSRAMString& html) {
           📤 Import Node Table
         </button>
         <input type="file" id="import-file" accept=".json" style="display: none;" onchange="importNodeTable(event)">
+        <button onclick="requestGatewayVersion()" style="padding: 0.75rem 1.5rem; background-color: #9b59b6; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.875rem; font-weight: 600;">
+          📋 Query Gateway Version
+        </button>
+        <button onclick="requestDeviceDiscovery()" style="padding: 0.75rem 1.5rem; background-color: #e67e22; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.875rem; font-weight: 600;">
+          🔍 Discover Devices
+        </button>
         <span id="import-status" style="align-self: center; font-size: 0.875rem; color: #27ae60; display: none;"></span>
+        <span id="query-status" style="align-self: center; font-size: 0.875rem; font-weight: 600; display: none;"></span>
       </div>
       <table>
         <thead>
@@ -2941,6 +3041,83 @@ void TigoWebServer::get_node_table_html(PSRAMString& html) {
       }
     }
     
+    async function requestGatewayVersion() {
+      const statusEl = document.getElementById('query-status');
+      try {
+        statusEl.textContent = '📋 Requesting gateway version...';
+        statusEl.style.color = '#9b59b6';
+        statusEl.style.display = 'inline';
+        
+        const response = await apiFetch('/api/query', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ query_type: 'gateway_version' })
+        });
+        
+        if (response.ok) {
+          const result = await response.json();
+          statusEl.textContent = '✅ ' + result.message;
+          statusEl.style.color = '#27ae60';
+          
+          setTimeout(() => {
+            statusEl.style.display = 'none';
+          }, 5000);
+        } else {
+          const error = await response.json();
+          throw new Error(error.message || 'Query failed');
+        }
+      } catch (error) {
+        console.error('Error requesting gateway version:', error);
+        statusEl.textContent = `❌ Query failed: ${error.message}`;
+        statusEl.style.color = '#e74c3c';
+        
+        setTimeout(() => {
+          statusEl.style.display = 'none';
+        }, 5000);
+      }
+    }
+    
+    async function requestDeviceDiscovery() {
+      const statusEl = document.getElementById('query-status');
+      try {
+        statusEl.textContent = '🔍 Discovering devices...';
+        statusEl.style.color = '#e67e22';
+        statusEl.style.display = 'inline';
+        
+        const response = await apiFetch('/api/query', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ query_type: 'device_discovery' })
+        });
+        
+        if (response.ok) {
+          const result = await response.json();
+          statusEl.textContent = '✅ ' + result.message;
+          statusEl.style.color = '#27ae60';
+          
+          setTimeout(() => {
+            statusEl.style.display = 'none';
+          }, 5000);
+        } else {
+          const error = await response.json();
+          throw new Error(error.message || 'Query failed');
+        }
+      } catch (error) {
+        console.error('Error requesting device discovery:', error);
+        statusEl.textContent = `❌ Query failed: ${error.message}`;
+        statusEl.style.color = '#e74c3c';
+        
+        setTimeout(() => {
+          statusEl.style.display = 'none';
+        }, 5000);
+      }
+    }
+    
+    // Load initial data and set up auto-refresh
     loadData();
     setInterval(loadData, 10000);
   </script>
