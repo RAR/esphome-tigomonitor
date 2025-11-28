@@ -798,6 +798,10 @@ void TigoMonitorComponent::process_07_frame(const std::string &frame) {
   // Frame 0x07: String response (ASCII text, typically firmware version)
   // Frame structure: type(2) + pv_node_id(4) + short_addr(4) + dsn(2) + length(2) + data...
   
+  // TODO: Consider persisting firmware_version to flash if Frame 0x07 responses are infrequent.
+  // Currently runtime-only to avoid stale data if firmware updates occur.
+  // Monitor frequency in real deployment before deciding on persistence strategy.
+  
   std::string addr = frame.substr(2, 4);
   int data_length = std::stoi(frame.substr(12, 2), nullptr, 16);
   
