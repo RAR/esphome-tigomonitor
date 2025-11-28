@@ -1357,10 +1357,10 @@ void TigoWebServer::build_devices_json(PSRAMString& json) {
       snprintf(buffer, sizeof(buffer),
         "{\"addr\":\"%s\",\"barcode\":\"%s\",\"name\":\"%s\",\"string_label\":\"%s\",\"voltage_in\":%.2f,\"voltage_out\":%.2f,"
         "\"current\":%.3f,\"power\":%.1f,\"peak_power\":%.1f,\"temperature\":%.1f,\"rssi\":%d,"
-        "\"duty_cycle\":%.1f,\"efficiency\":%.2f,\"data_age_ms\":%lu}",
+        "\"duty_cycle\":%.1f,\"efficiency\":%.2f,\"firmware_version\":\"%s\",\"data_age_ms\":%lu}",
         device.addr.c_str(), device.barcode.c_str(), device_name.c_str(), string_label.c_str(), device.voltage_in, device.voltage_out,
         device.current_in, power, device.peak_power, device.temperature, device.rssi,
-        duty_cycle_percent, device.efficiency, data_age_ms);
+        duty_cycle_percent, device.efficiency, device.firmware_version.c_str(), data_age_ms);
     } else {
       // Device is known but has no runtime data yet (e.g., ESP32 restarted at night)
       // Show zeros with a very large data_age to indicate no recent data
@@ -1743,7 +1743,11 @@ void TigoWebServer::build_esp_status_json(PSRAMString& json) {
   int max_sockets = 16;
 #endif
   
-  char buffer[1536];
+  // Get network diagnostics from parent (taptap protocol data)
+  const auto& network_status = parent_->get_network_status();
+  const auto& gateway_config = parent_->get_gateway_radio_config();
+  
+  char buffer[2048];  // Increased buffer size for network diagnostics
   snprintf(buffer, sizeof(buffer),
     "{\"free_heap\":%zu,\"total_heap\":%zu,\"free_psram\":%zu,\"total_psram\":%zu,"
     "\"min_free_heap\":%zu,\"min_free_psram\":%zu,"
@@ -1752,7 +1756,9 @@ void TigoWebServer::build_esp_status_json(PSRAMString& json) {
     "\"task_count\":%u,\"internal_temp\":%.1f,"
     "\"invalid_checksum\":%u,\"missed_frames\":%u,\"total_frames\":%u,"
     "\"network_connected\":%s,\"wifi_rssi\":%d,\"wifi_ssid\":\"%s\",\"ip_address\":\"%s\",\"mac_address\":\"%s\","
-    "\"active_sockets\":%d,\"max_sockets\":%d}",
+    "\"active_sockets\":%d,\"max_sockets\":%d,"
+    "\"network_status\":{\"node_count\":%u,\"counter\":%u,\"last_update\":%lu},"
+    "\"gateway_config\":{\"channel\":%u,\"pan_id\":%u,\"encryption_key\":\"%s\",\"last_update\":%lu}}",
     free_heap, total_heap, free_psram, total_psram,
     min_free_heap, min_free_psram,
     uptime_sec, uptime_days, uptime_hours, uptime_mins,
@@ -1760,7 +1766,9 @@ void TigoWebServer::build_esp_status_json(PSRAMString& json) {
     (unsigned int)task_count, internal_temp,
     invalid_checksum, missed_frames, total_frames,
     network_connected ? "true" : "false", wifi_rssi, ssid.c_str(), ip_address.c_str(), mac_address.c_str(),
-    active_sockets, max_sockets);
+    active_sockets, max_sockets,
+    network_status.node_count, network_status.counter, network_status.last_update,
+    gateway_config.channel, gateway_config.pan_id, gateway_config.encryption_key.c_str(), gateway_config.last_update);
   
   json.append(buffer);
 }
@@ -2310,6 +2318,12 @@ void TigoWebServer::get_dashboard_html(PSRAMString& html) {
                   <span class="metric-label">RSSI</span>
                   <span class="metric-value">${device.rssi} dBm</span>
                 </div>
+                ${device.firmware_version ? `
+                <div class="metric" style="grid-column: 1 / -1;">
+                  <span class="metric-label">Firmware</span>
+                  <span class="metric-value" style="font-size: 0.85em; font-family: monospace;">${device.firmware_version}</span>
+                </div>
+                ` : ''}
               </div>
             </div>
           `;
@@ -3118,6 +3132,54 @@ void TigoWebServer::get_esp_status_html(PSRAMString& html) {
     </div>
     
     <div class="card">
+      <h2>Network Diagnostics</h2>
+      <div class="info-grid">
+        <div class="info-item">
+          <h3>Mesh Node Count</h3>
+          <div class="value" id="mesh-node-count">--</div>
+          <div style="font-size: 0.9em; color: #7f8c8d; margin-top: 0.5rem;">
+            Total devices in mesh network
+          </div>
+        </div>
+        <div class="info-item">
+          <h3>Network Counter</h3>
+          <div class="value" id="network-counter">--</div>
+          <div style="font-size: 0.9em; color: #7f8c8d; margin-top: 0.5rem;">
+            Last update: <span id="network-status-age">--</span>
+          </div>
+        </div>
+        <div class="info-item">
+          <h3>802.15.4 Channel</h3>
+          <div class="value" id="radio-channel">--</div>
+          <div style="font-size: 0.9em; color: #7f8c8d; margin-top: 0.5rem;">
+            2.4 GHz wireless channel
+          </div>
+        </div>
+        <div class="info-item">
+          <h3>PAN ID</h3>
+          <div class="value" id="pan-id">--</div>
+          <div style="font-size: 0.9em; color: #7f8c8d; margin-top: 0.5rem;">
+            Personal Area Network ID
+          </div>
+        </div>
+        <div class="info-item">
+          <h3>Encryption Key</h3>
+          <div class="value" id="encryption-key" style="font-family: monospace; font-size: 0.85em;">--</div>
+          <div style="font-size: 0.9em; color: #7f8c8d; margin-top: 0.5rem;">
+            AES-128 (first/last 4 chars)
+          </div>
+        </div>
+        <div class="info-item">
+          <h3>Gateway Config Age</h3>
+          <div class="value" id="gateway-config-age">--</div>
+          <div style="font-size: 0.9em; color: #7f8c8d; margin-top: 0.5rem;">
+            Last config query
+          </div>
+        </div>
+      </div>
+    </div>
+    
+    <div class="card">
       <h2>Actions</h2>
       <div style="display: flex; gap: 1rem; flex-wrap: wrap;">
         <button onclick="toggleBacklight()" id="backlight-toggle" style="padding: 12px 24px; background-color: #9b59b6; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; font-weight: bold;">
@@ -3316,6 +3378,60 @@ void TigoWebServer::get_esp_status_html(PSRAMString& html) {
           document.getElementById('missed-frames-rate').textContent = `${missRate}% miss rate`;
         } else {
           document.getElementById('missed-frames-rate').textContent = '--';
+        }
+        
+        // Display network diagnostics (from taptap protocol frames)
+        if (data.network_status) {
+          document.getElementById('mesh-node-count').textContent = 
+            data.network_status.node_count || '--';
+          document.getElementById('network-counter').textContent = 
+            data.network_status.counter !== undefined ? 
+              `0x${data.network_status.counter.toString(16).toUpperCase().padStart(4, '0')}` : '--';
+          
+          if (data.network_status.last_update > 0) {
+            const ageSeconds = Math.floor((Date.now() - data.network_status.last_update) / 1000);
+            document.getElementById('network-status-age').textContent = 
+              ageSeconds < 60 ? `${ageSeconds}s ago` : 
+              ageSeconds < 3600 ? `${Math.floor(ageSeconds / 60)}m ago` :
+              `${Math.floor(ageSeconds / 3600)}h ago`;
+          } else {
+            document.getElementById('network-status-age').textContent = 'never';
+          }
+        } else {
+          document.getElementById('mesh-node-count').textContent = '--';
+          document.getElementById('network-counter').textContent = '--';
+          document.getElementById('network-status-age').textContent = 'no data';
+        }
+        
+        if (data.gateway_config) {
+          document.getElementById('radio-channel').textContent = 
+            data.gateway_config.channel || '--';
+          document.getElementById('pan-id').textContent = 
+            data.gateway_config.pan_id !== undefined ? 
+              `0x${data.gateway_config.pan_id.toString(16).toUpperCase().padStart(4, '0')}` : '--';
+          
+          if (data.gateway_config.encryption_key && data.gateway_config.encryption_key.length >= 8) {
+            const key = data.gateway_config.encryption_key;
+            document.getElementById('encryption-key').textContent = 
+              `${key.substring(0, 4)}...${key.substring(key.length - 4)}`;
+          } else {
+            document.getElementById('encryption-key').textContent = '--';
+          }
+          
+          if (data.gateway_config.last_update > 0) {
+            const ageSeconds = Math.floor((Date.now() - data.gateway_config.last_update) / 1000);
+            document.getElementById('gateway-config-age').textContent = 
+              ageSeconds < 60 ? `${ageSeconds}s ago` : 
+              ageSeconds < 3600 ? `${Math.floor(ageSeconds / 60)}m ago` :
+              `${Math.floor(ageSeconds / 3600)}h ago`;
+          } else {
+            document.getElementById('gateway-config-age').textContent = 'never';
+          }
+        } else {
+          document.getElementById('radio-channel').textContent = '--';
+          document.getElementById('pan-id').textContent = '--';
+          document.getElementById('encryption-key').textContent = '--';
+          document.getElementById('gateway-config-age').textContent = 'no data';
         }
         
         // Display network information
