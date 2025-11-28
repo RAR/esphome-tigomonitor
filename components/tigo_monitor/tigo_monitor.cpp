@@ -606,7 +606,17 @@ void TigoMonitorComponent::process_power_frame(const std::string &frame) {
   data.addr = frame.substr(2, 4);
   data.pv_node_id = frame.substr(6, 4);
   
-  ESP_LOGD(TAG, "Processing power frame for device addr: %s", data.addr.c_str());
+  // Detect format version based on data length field
+  // Old format (pre-CCA 4.x): 13 bytes (0x0D)
+  // New format (CCA 4.x+): 15 bytes (0x0F)
+  int data_length = std::stoi(frame.substr(12, 2), nullptr, 16);
+  bool is_new_format = (data_length == 15);
+  
+  if (is_new_format) {
+    ESP_LOGD(TAG, "Processing power frame (new 15-byte format) for device addr: %s", data.addr.c_str());
+  } else {
+    ESP_LOGD(TAG, "Processing power frame (legacy 13-byte format) for device addr: %s", data.addr.c_str());
+  }
   
   // Voltage In (scale by 0.05)
   int voltage_in_raw = std::stoi(frame.substr(14, 3), nullptr, 16);
@@ -631,11 +641,32 @@ void TigoMonitorComponent::process_power_frame(const std::string &frame) {
   }
   data.temperature = temperature_raw * 0.1f;
   
-  // Slot Counter
-  data.slot_counter = frame.substr(34, 4);
-  
-  // RSSI
-  data.rssi = std::stoi(frame.substr(38, 2), nullptr, 16);
+  // Parse position-dependent fields based on format
+  if (is_new_format) {
+    // New format: 3 extra bytes inserted after temperature (6 hex chars)
+    // Unknown field 1 at position 28-33 (observed values: 92 00 64)
+    std::string unknown_field_1 = frame.substr(28, 6);
+    
+    // Slot Counter shifted by 6 chars
+    data.slot_counter = frame.substr(40, 4);
+    
+    // RSSI shifted by 6 chars
+    data.rssi = std::stoi(frame.substr(44, 2), nullptr, 16);
+    
+    // Unknown field 2 at position 46-49 (observed values: 02 00)
+    if (frame.length() >= 50) {
+      std::string unknown_field_2 = frame.substr(46, 4);
+      ESP_LOGV(TAG, "New format fields for %s: unknown1=%s, unknown2=%s", 
+               data.addr.c_str(), unknown_field_1.c_str(), unknown_field_2.c_str());
+    }
+  } else {
+    // Legacy format: original field positions
+    // Slot Counter
+    data.slot_counter = frame.substr(34, 4);
+    
+    // RSSI
+    data.rssi = std::stoi(frame.substr(38, 2), nullptr, 16);
+  }
   
   // Calculate additional sensor values
   // Efficiency calculation (output power / input power * 100)
