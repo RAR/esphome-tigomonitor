@@ -2,12 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+The format is based on [Keep a Changelog](https://keepachangelog.com/en1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.3.0] - 2025-11-27
+
 ### Added
+- **New Release Banner**
+  - Dismissable banner on dashboard showing when new GitHub releases are available
+  - Checks GitHub API on page load for latest release
+  - Displays version info and direct link to release page
+  - Per-version dismissal stored in localStorage
+  - Beautiful gradient purple design with emoji icon
 - **GitHub Project Link** in Web UI Header
   - GitHub logo icon button added to all 5 web pages
   - Links to https://github.com/RAR/esphome-tigomonitor
@@ -18,10 +26,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Persists energy baseline across reboots for accurate daily tracking
   - Saves energy data when entering night mode
   - Responsive chart resizing on window resize
-- **Midnight Reset Optimization**
-  - Batched flash writes to reduce heap fragmentation
-  - Eliminated 38 individual preference saves
-  - Consolidated into single `save_persistent_data()` call
+- **Power Calibration Feature**
+  - New `power_calibration` configuration option (default: 1.0)
+  - Multiplier applied to all power calculations (sensors, web UI, displays)
+  - Allows calibration against inverter or other reference measurements
+  - Range: 0.5 to 2.0 (50% to 200%)
+  - Example: `power_calibration: 1.184` for 18.4% adjustment
 
 ### Fixed
 - **Night Mode Display Issues**
@@ -48,13 +58,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Log messages now use "Frame missed!" instead of "Packet missed!"
   - Tigo serial protocol uses frames, not packets
 
-### Added
-- **Power Calibration Feature**
-  - New `power_calibration` configuration option (default: 1.0)
-  - Multiplier applied to all power calculations (sensors, web UI, displays)
-  - Allows calibration against inverter or other reference measurements
-  - Range: 0.5 to 2.0 (50% to 200%)
-  - Example: `power_calibration: 1.184` for 18.4% adjustment
+### Improved
+- **Midnight Reset Optimization**
+  - Batched flash writes to reduce heap fragmentation
+  - Eliminated 38 individual preference saves
+  - Consolidated into single `save_persistent_data()` call
 
 ## [1.2.0] - 2025-11-16
 
