@@ -101,7 +101,7 @@ struct DeviceData {
   std::string slot_counter;
   int rssi;
   std::string barcode;
-  std::string firmware_version;
+  std::string firmware_version;  // From Frame 0x07 version request
   float efficiency;
   float power_factor;
   float load_factor;
@@ -172,6 +172,19 @@ struct DailyEnergyData {
     data.day = key % 100;
     return data;
   }
+};
+
+struct NetworkStatusData {
+  uint16_t node_count = 0;          // Total nodes in network
+  uint16_t counter = 0;             // Network status counter
+  unsigned long last_update = 0;    // When this was last updated
+};
+
+struct GatewayRadioConfig {
+  uint8_t channel = 0;              // 802.15.4 channel (11-26)
+  uint16_t pan_id = 0;              // 802.15.4 PAN ID
+  std::string encryption_key;       // AES-128 key (32 hex chars)
+  unsigned long last_update = 0;    // When this was last queried
 };
 
 
@@ -332,6 +345,13 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   int get_online_device_count() const;
   float get_total_power() const;
   
+  // Network diagnostic methods
+  const NetworkStatusData& get_network_status() const { return network_status_; }
+  const GatewayRadioConfig& get_gateway_radio_config() const { return gateway_radio_config_; }
+  void request_firmware_versions();   // Trigger version query for all devices
+  void request_network_status();      // Query gateway network status
+  void request_gateway_config();      // Query gateway radio configuration
+  
   // Public methods for web server access
   void reset_peak_power();  // Reset all peak power values to 0
   void reset_total_energy();  // Reset total energy to 0
@@ -379,6 +399,9 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   void process_power_frame(const std::string &frame);
   void process_09_frame(const std::string &frame);
   void process_27_frame(const std::string &hex_frame, size_t offset);
+  void process_07_frame(const std::string &frame);  // String response (version info)
+  void process_2F_frame(const std::string &frame);  // Network status response
+  void process_0E_frame(const std::string &frame);  // Gateway radio config response
   int calculate_header_length(const std::string &hex_frame);
   
   // CRC functions
@@ -491,6 +514,11 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   uint32_t invalid_checksum_count_ = 0;
   uint32_t missed_frame_count_ = 0;
   uint32_t total_frames_processed_ = 0;  // Track successful frame processing for miss rate calculation
+  
+  // Network diagnostics (from Frame 0x2F and 0x0E)
+  NetworkStatusData network_status_;
+  GatewayRadioConfig gateway_radio_config_;
+  bool version_query_pending_ = false;  // Track if we're waiting for version responses
   
   // Cached display stats (updated during publish_sensor_data to avoid iteration in display lambda)
   int cached_online_count_ = 0;

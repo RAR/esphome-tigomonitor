@@ -578,7 +578,11 @@ void TigoMonitorComponent::process_frame(const std::string &frame) {
         process_power_frame(packet);
       } else if (type == "09") {
         process_09_frame(packet);
-      } else if (type != "07" && type != "18") {
+      } else if (type == "07") {
+        process_07_frame(packet);  // String response (firmware version)
+      } else if (type == "2F") {
+        process_2F_frame(packet);  // Network status response
+      } else if (type != "18") {
         ESP_LOGD(TAG, "Unknown packet type: %s, packet: %s", type.c_str(), packet.c_str());
       }
       
@@ -589,6 +593,8 @@ void TigoMonitorComponent::process_frame(const std::string &frame) {
     std::string type = hex_frame.substr(14, 2);
     if (type == "27") {
       process_27_frame(hex_frame, 18);  // Pass offset instead of creating substring
+    } else if (type == "0E") {
+      process_0E_frame(hex_frame.substr(18));  // Gateway radio config response
     }
     // Handle other command types as needed
   } else if (segment == "0148") {
@@ -786,6 +792,122 @@ void TigoMonitorComponent::process_27_frame(const std::string &hex_frame, size_t
   if (table_changed) {
     save_node_table();
   }
+}
+
+void TigoMonitorComponent::process_07_frame(const std::string &frame) {
+  // Frame 0x07: String response (ASCII text, typically firmware version)
+  // Frame structure: type(2) + pv_node_id(4) + short_addr(4) + dsn(2) + length(2) + data...
+  
+  std::string addr = frame.substr(2, 4);
+  int data_length = std::stoi(frame.substr(12, 2), nullptr, 16);
+  
+  // Extract ASCII string from hex data (skip 14-char header)
+  if (frame.length() < 14 + (data_length * 2)) {
+    ESP_LOGW(TAG, "Frame 0x07 too short for device %s", addr.c_str());
+    return;
+  }
+  
+  std::string hex_data = frame.substr(14, data_length * 2);
+  std::string version_str;
+  
+  // Convert hex to ASCII
+  for (size_t i = 0; i < hex_data.length(); i += 2) {
+    if (i + 2 <= hex_data.length()) {
+      int byte_val = std::stoi(hex_data.substr(i, 2), nullptr, 16);
+      if (byte_val >= 32 && byte_val < 127) {  // Printable ASCII
+        version_str += static_cast<char>(byte_val);
+      } else if (byte_val == 0x0D) {  // Carriage return
+        version_str += "\\r";
+      } else if (byte_val == 0x0A) {  // Line feed
+        version_str += "\\n";
+      }
+    }
+  }
+  
+  ESP_LOGI(TAG, "Frame 0x07 - Firmware Version: addr=%s, version='%s'", addr.c_str(), version_str.c_str());
+  
+  // Update device firmware version
+  DeviceData* device = find_device_by_addr(addr);
+  if (device != nullptr) {
+    device->firmware_version = version_str;
+    
+    // Publish firmware version sensor if registered
+    auto fw_it = firmware_version_sensors_.find(addr);
+    if (fw_it != firmware_version_sensors_.end()) {
+      fw_it->second->publish_state(version_str);
+    }
+  }
+}
+
+void TigoMonitorComponent::process_2F_frame(const std::string &frame) {
+  // Frame 0x2F: Network status response
+  // Expected format: counter(4) + node_count(4) + node_count(4) + node_count(4)
+  // Multiple node counts may differ when gateway can't reach all nodes
+  
+  if (frame.length() < 14 + 16) {  // Header + 3x node counts (4 hex chars each) + counter
+    ESP_LOGW(TAG, "Frame 0x2F too short: %zu bytes", frame.length());
+    return;
+  }
+  
+  // Parse network status data (skip 14-char header)
+  size_t offset = 14;
+  
+  // Counter appears to be a 16-bit incrementing value
+  std::string counter_hex = frame.substr(offset, 4);
+  network_status_.counter = std::stoi(counter_hex, nullptr, 16);
+  offset += 4;
+  
+  // First node count (typically the authoritative one)
+  std::string node_count_hex = frame.substr(offset, 4);
+  network_status_.node_count = std::stoi(node_count_hex, nullptr, 16);
+  network_status_.last_update = millis();
+  
+  ESP_LOGI(TAG, "Frame 0x2F - Network Status: node_count=%u, counter=0x%04X", 
+           network_status_.node_count, network_status_.counter);
+}
+
+void TigoMonitorComponent::process_0E_frame(const std::string &frame) {
+  // Frame 0x0E: Gateway radio configuration response
+  // Format: unk(2) + channel(2) + pan_id(4) + cap/cfp/bop/iap(8) + unk(14) + key(32) + unk(12)
+  
+  if (frame.length() < 2 + 2 + 4 + 8 + 14 + 32) {
+    ESP_LOGW(TAG, "Frame 0x0E too short: %zu bytes", frame.length());
+    return;
+  }
+  
+  size_t offset = 0;
+  
+  // Skip unknown byte
+  offset += 2;
+  
+  // 802.15.4 channel (11-26 are valid)
+  std::string channel_hex = frame.substr(offset, 2);
+  gateway_radio_config_.channel = std::stoi(channel_hex, nullptr, 16);
+  offset += 2;
+  
+  // PAN ID (16-bit)
+  std::string pan_id_hex = frame.substr(offset, 4);
+  gateway_radio_config_.pan_id = std::stoi(pan_id_hex, nullptr, 16);
+  offset += 4;
+  
+  // Skip CAP/CFP/BOP/IAP timing fields (8 chars)
+  offset += 8;
+  
+  // Skip unknown fields (14 chars)
+  offset += 14;
+  
+  // AES-128 encryption key (32 hex chars = 16 bytes)
+  if (offset + 32 <= frame.length()) {
+    gateway_radio_config_.encryption_key = frame.substr(offset, 32);
+  }
+  
+  gateway_radio_config_.last_update = millis();
+  
+  ESP_LOGI(TAG, "Frame 0x0E - Gateway Config: channel=%u, PAN_ID=0x%04X, key=%s...%s", 
+           gateway_radio_config_.channel, 
+           gateway_radio_config_.pan_id,
+           gateway_radio_config_.encryption_key.substr(0, 4).c_str(),
+           gateway_radio_config_.encryption_key.substr(28, 4).c_str());
 }
 
 void TigoMonitorComponent::update_device_data(const DeviceData &data) {
@@ -2112,6 +2234,54 @@ void TigoMonitorComponent::reset_total_energy() {
   save_energy_data();
   
   ESP_LOGI(TAG, "Total energy reset to 0 kWh");
+}
+
+void TigoMonitorComponent::request_firmware_versions() {
+  ESP_LOGI(TAG, "Requesting firmware versions from all devices...");
+  
+  // NOTE: This is a placeholder for future UART transmit functionality
+  // To actually request firmware versions, we would need to:
+  // 1. Send PV packet type 0x06 (string request) with "^00Version\r" payload
+  // 2. Wait for 0x07 (string response) frames with version data
+  // 
+  // For now, this method just logs that we would send the request.
+  // Frame 0x07 processing is already implemented and will capture
+  // version responses if the CCA controller sends them.
+  
+  ESP_LOGW(TAG, "Firmware version request not yet implemented (UART TX required)");
+  ESP_LOGI(TAG, "Frame 0x07 processing is ready to capture version responses from CCA");
+}
+
+void TigoMonitorComponent::request_network_status() {
+  ESP_LOGI(TAG, "Requesting network status from gateway...");
+  
+  // NOTE: This is a placeholder for future UART transmit functionality
+  // To actually request network status, we would need to:
+  // 1. Send PV packet type 0x2E (network status request) to gateway (PV node ID 0x0001)
+  // 2. Wait for 0x2F (network status response) frame
+  // 
+  // For now, this method just logs that we would send the request.
+  // Frame 0x2F processing is already implemented and will capture
+  // network status responses when the CCA controller queries them.
+  
+  ESP_LOGW(TAG, "Network status request not yet implemented (UART TX required)");
+  ESP_LOGI(TAG, "Frame 0x2F processing is ready to capture network status from CCA queries");
+}
+
+void TigoMonitorComponent::request_gateway_config() {
+  ESP_LOGI(TAG, "Requesting gateway radio configuration...");
+  
+  // NOTE: This is a placeholder for future UART transmit functionality
+  // To actually request gateway config, we would need to:
+  // 1. Send PV packet type 0x0D (gateway radio config request) to gateway
+  // 2. Wait for 0x0E (gateway radio config response) frame
+  // 
+  // For now, this method just logs that we would send the request.
+  // Frame 0x0E processing is already implemented and will capture
+  // gateway config responses when the CCA controller queries them.
+  
+  ESP_LOGW(TAG, "Gateway config request not yet implemented (UART TX required)");
+  ESP_LOGI(TAG, "Frame 0x0E processing is ready to capture gateway config from CCA queries");
 }
 
 void TigoMonitorComponent::check_midnight_reset() {

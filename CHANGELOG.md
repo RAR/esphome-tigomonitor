@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Enhanced Network Diagnostics** (inspired by [taptap protocol analysis](https://github.com/willglynn/taptap))
+  - **Firmware Version Collection** (Frame 0x06/0x07)
+    - Captures firmware version strings from devices when CCA queries them
+    - Stores version in `DeviceData` and publishes to `firmware_version` text sensors
+    - Example: `"Mnode Version K8.0120 (2D)"`
+    - Passive monitoring - no UART transmit required
+  - **Network Status Monitoring** (Frame 0x2E/0x2F)
+    - Tracks total node count in mesh network
+    - Records network status counter for diagnostics
+    - Available via `get_network_status()` API method
+    - Web UI can display network health metrics
+  - **Gateway Radio Configuration** (Frame 0x0D/0x0E)
+    - Captures 802.15.4 radio parameters when CCA queries gateway
+    - Tracks: channel (11-26), PAN ID, AES-128 encryption key
+    - Available via `get_gateway_radio_config()` API method
+    - Useful for RF troubleshooting and multi-gateway setups
+- **Data Structures**
+  - `NetworkStatusData`: node count, counter, last update timestamp
+  - `GatewayRadioConfig`: channel, PAN ID, encryption key, last update timestamp
+  - Both structures accessible from web server for diagnostics display
+
+### Technical Details
+- Frame processing is **passive monitoring only** - no UART transmit capability required
+- All three new frame types are captured when CCA controller queries devices/gateway
+- Request methods (`request_firmware_versions()`, `request_network_status()`, `request_gateway_config()`) are placeholders for future UART TX implementation
+- Frame parsers follow taptap protocol documentation for accuracy
+- Firmware version strings support ASCII conversion with escape sequences
+- Network status captures first node count value (most authoritative)
+- Gateway config extracts channel, PAN ID, and key while skipping timing fields
+
 ## [1.3.0] - 2025-11-27
 
 ### Added
