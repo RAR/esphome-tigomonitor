@@ -337,6 +337,7 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   uint32_t get_total_frames_processed() const { return total_frames_processed_; }
   float get_power_calibration() const { return power_calibration_; }
   bool is_in_night_mode() const { return in_night_mode_; }
+  const std::string& get_gateway_firmware() const { return gateway_firmware_; }
   
   // Daily energy history access
   std::vector<DailyEnergyData> get_daily_energy_history() const;
@@ -437,10 +438,12 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   void save_node_table();
   void save_peak_power_data();
   void load_peak_power_data();
+  void save_firmware_versions();
+  void load_firmware_versions();
   void save_daily_energy_history();
   void load_daily_energy_history();
   void update_daily_energy(float energy_kwh);
-  void save_persistent_data();  // Save all persistent data (node table + peak power + energy)
+  void save_persistent_data();  // Save all persistent data (node table + peak power + energy + firmware)
   int get_next_available_sensor_index();
   NodeTableData* find_node_by_addr(const std::string &addr);
   void assign_sensor_index_to_node(const std::string &addr);
@@ -574,6 +577,7 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   std::string cca_ip_;  // Optional CCA IP address for HTTP queries (small, kept in internal RAM)
   bool sync_cca_on_startup_ = true;  // Whether to sync from CCA on boot (default: true)
   unsigned long last_cca_sync_time_ = 0;  // millis() of last successful CCA sync
+  std::string gateway_firmware_;  // Gateway firmware version (decoded from Frame 0x0B response)
   
   // UART transmit state (Phase 1)
   uint16_t gateway_id_ = 0x1201;  // Gateway ID (auto-discovered from traffic, default 0x1201)

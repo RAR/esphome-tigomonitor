@@ -242,6 +242,17 @@ void TigoMonitorComponent::setup() {
   load_node_table();
   load_energy_data();
   load_daily_energy_history();
+  load_firmware_versions();
+  
+  // Load gateway firmware version from flash
+  auto gw_fw_prefs = global_preferences->make_preference<char[128]>(0xABCDEF01);
+  char gw_fw_buffer[128] = {0};
+  if (gw_fw_prefs.load(&gw_fw_buffer)) {
+    gateway_firmware_ = gw_fw_buffer;
+    if (!gateway_firmware_.empty()) {
+      ESP_LOGI(TAG, "Loaded gateway firmware from flash: %s", gateway_firmware_.c_str());
+    }
+  }
   
   // Check if we have existing CCA data and rebuild string groups
   bool has_cca_data = false;
@@ -293,11 +304,11 @@ void TigoMonitorComponent::setup() {
   
   // Query gateway for device list on startup (Frame 0x0D auth + Frame 0x27 discovery)
   // Send Frame 0x0D first (gateway config request) to establish session like CCA does
-  ESP_LOGI(TAG, "Will query gateway for device list in 20 seconds (Frame 0x0D + 0x26 sequence)");
-  this->set_timeout("gateway_discovery", 20000, [this]() { 
-    ESP_LOGI(TAG, "Initiating gateway device discovery with authentication...");
-    this->send_device_discovery_request(); 
-  });
+  // Disabled - gateway has exclusive CCA binding and won't respond to ESP32 while CCA connected
+  // ESP_LOGI(TAG, "Will query gateway for device list in 20 seconds (Frame 0x0D + 0x26 sequence)");
+  // this->set_timeout("gateway_discovery", 20000, [this]() { 
+  //   this->send_device_discovery_request(); 
+  // });
 }
   
 
@@ -871,8 +882,124 @@ void TigoMonitorComponent::process_frame(const std::string &frame) {
                  prefix.c_str(), seq.c_str(), payload.c_str());
         ESP_LOGI(TAG, "  Compare with OUR Frame 0x0D - look for differences!");
       }
-    } else if (type == "0E") {
-      ESP_LOGI(TAG, "Frame 0x2E - Network status REQUEST seen from CCA: %s", hex_frame.c_str());
+    } else if (type == "0A") {
+      // Frame 0x0A - Gateway info request FROM CCA (startup)
+      ESP_LOGI(TAG, "*** Frame 0x0A (Gateway Info Request) from CCA");
+      if (hex_frame.length() >= 18) {
+        std::string seq = hex_frame.substr(16, 2);
+        std::string payload = hex_frame.length() > 18 ? hex_frame.substr(18) : "(none)";
+        ESP_LOGI(TAG, "  Seq=%s, payload=%s", seq.c_str(), payload.c_str());
+      }
+      ESP_LOGI(TAG, "  Full frame: %s", hex_frame.c_str());
+    } else if (type == "0B") {
+      // Frame 0x0B - Gateway info response FROM GATEWAY (contains firmware version)
+      ESP_LOGI(TAG, "*** Frame 0x0B (Gateway Info Response) from gateway");
+      if (hex_frame.length() >= 18) {
+        std::string payload = hex_frame.length() > 18 ? hex_frame.substr(18) : "(none)";
+        ESP_LOGI(TAG, "  Payload length=%d bytes", (int)(payload.length() / 2));
+        // Try to extract ASCII text from payload
+        std::string ascii_text;
+        for (size_t i = 0; i < payload.length(); i += 2) {
+          if (i + 2 <= payload.length()) {
+            int byte_val = std::stoi(payload.substr(i, 2), nullptr, 16);
+            if (byte_val >= 32 && byte_val < 127) {
+              ascii_text += (char)byte_val;
+            } else if (byte_val == 0x0D) {
+              ascii_text += " | ";  // Carriage return separator
+            }
+          }
+        }
+        if (!ascii_text.empty()) {
+          ESP_LOGI(TAG, "  Gateway Info: %s", ascii_text.c_str());
+        }
+        ESP_LOGI(TAG, "  Raw payload: %s", payload.c_str());
+      }
+      ESP_LOGI(TAG, "  Full frame: %s", hex_frame.c_str());
+    } else if (type == "2E") {
+      // Frame 0x2E - Network status request FROM CCA
+      ESP_LOGI(TAG, "*** Frame 0x2E (Network Status Request) from CCA");
+      if (hex_frame.length() >= 18) {
+        std::string seq = hex_frame.substr(16, 2);
+        std::string payload = hex_frame.length() > 18 ? hex_frame.substr(18) : "(none)";
+        ESP_LOGI(TAG, "  Seq=%s, payload=%s", seq.c_str(), payload.c_str());
+      }
+      ESP_LOGI(TAG, "  Full frame: %s", hex_frame.c_str());
+    } else if (type == "2F") {
+      // Frame 0x2F - Network status response FROM GATEWAY
+      ESP_LOGI(TAG, "*** Frame 0x2F (Network Status Response) from gateway");
+      if (hex_frame.length() >= 18) {
+        std::string payload = hex_frame.length() > 18 ? hex_frame.substr(18) : "(none)";
+        ESP_LOGI(TAG, "  Payload=%s", payload.c_str());
+      }
+      ESP_LOGI(TAG, "  Full frame: %s", hex_frame.c_str());
+    } else if (type == "3A") {
+      // Frame 0x3A - Auth sequence step 1 REQUEST
+      ESP_LOGI(TAG, "*** Frame 0x3A (Auth Step 1 Request) from CCA");
+      if (hex_frame.length() >= 18) {
+        std::string seq = hex_frame.substr(16, 2);
+        std::string payload = hex_frame.length() > 18 ? hex_frame.substr(18) : "(none)";
+        ESP_LOGI(TAG, "  Seq=%s, payload=%s", seq.c_str(), payload.c_str());
+      }
+      ESP_LOGI(TAG, "  Full frame: %s", hex_frame.c_str());
+    } else if (type == "3B") {
+      // Frame 0x3B - Auth sequence step 1 RESPONSE
+      ESP_LOGI(TAG, "*** Frame 0x3B (Auth Step 1 Response) from gateway");
+      if (hex_frame.length() >= 18) {
+        std::string payload = hex_frame.length() > 18 ? hex_frame.substr(18) : "(none)";
+        ESP_LOGI(TAG, "  Payload=%s", payload.c_str());
+      }
+      ESP_LOGI(TAG, "  Full frame: %s", hex_frame.c_str());
+    } else if (type == "3C") {
+      // Frame 0x3C - Auth sequence step 2 REQUEST
+      ESP_LOGI(TAG, "*** Frame 0x3C (Auth Step 2 Request) from CCA");
+      if (hex_frame.length() >= 18) {
+        std::string seq = hex_frame.substr(16, 2);
+        std::string payload = hex_frame.length() > 18 ? hex_frame.substr(18) : "(none)";
+        ESP_LOGI(TAG, "  Seq=%s, payload=%s", seq.c_str(), payload.c_str());
+      }
+      ESP_LOGI(TAG, "  Full frame: %s", hex_frame.c_str());
+    } else if (type == "3D") {
+      // Frame 0x3D - Auth sequence step 2 RESPONSE
+      ESP_LOGI(TAG, "*** Frame 0x3D (Auth Step 2 Response) from gateway");
+      if (hex_frame.length() >= 18) {
+        std::string payload = hex_frame.length() > 18 ? hex_frame.substr(18) : "(none)";
+        ESP_LOGI(TAG, "  Payload=%s", payload.c_str());
+      }
+      ESP_LOGI(TAG, "  Full frame: %s", hex_frame.c_str());
+    } else if (type == "3A") {
+      // Frame 0x3A - Auth sequence step 1 REQUEST
+      ESP_LOGI(TAG, "*** Frame 0x3A (Auth Step 1 Request) from CCA");
+      if (hex_frame.length() >= 18) {
+        std::string seq = hex_frame.substr(16, 2);
+        std::string payload = hex_frame.length() > 18 ? hex_frame.substr(18) : "(none)";
+        ESP_LOGI(TAG, "  Seq=%s, payload=%s", seq.c_str(), payload.c_str());
+      }
+      ESP_LOGI(TAG, "  Full frame: %s", hex_frame.c_str());
+    } else if (type == "3B") {
+      // Frame 0x3B - Auth sequence step 1 RESPONSE
+      ESP_LOGI(TAG, "*** Frame 0x3B (Auth Step 1 Response) from gateway");
+      if (hex_frame.length() >= 18) {
+        std::string payload = hex_frame.length() > 18 ? hex_frame.substr(18) : "(none)";
+        ESP_LOGI(TAG, "  Payload=%s", payload.c_str());
+      }
+      ESP_LOGI(TAG, "  Full frame: %s", hex_frame.c_str());
+    } else if (type == "3C") {
+      // Frame 0x3C - Auth sequence step 2 REQUEST
+      ESP_LOGI(TAG, "*** Frame 0x3C (Auth Step 2 Request) from CCA");
+      if (hex_frame.length() >= 18) {
+        std::string seq = hex_frame.substr(16, 2);
+        std::string payload = hex_frame.length() > 18 ? hex_frame.substr(18) : "(none)";
+        ESP_LOGI(TAG, "  Seq=%s, payload=%s", seq.c_str(), payload.c_str());
+      }
+      ESP_LOGI(TAG, "  Full frame: %s", hex_frame.c_str());
+    } else if (type == "3D") {
+      // Frame 0x3D - Auth sequence step 2 RESPONSE
+      ESP_LOGI(TAG, "*** Frame 0x3D (Auth Step 2 Response) from gateway");
+      if (hex_frame.length() >= 18) {
+        std::string payload = hex_frame.length() > 18 ? hex_frame.substr(18) : "(none)";
+        ESP_LOGI(TAG, "  Payload=%s", payload.c_str());
+      }
+      ESP_LOGI(TAG, "  Full frame: %s", hex_frame.c_str());
     } else if (type == "41") {
       // Frame 0x41 - Unknown command, log both request and response
       if (segment == "0B0F") {
@@ -960,14 +1087,135 @@ void TigoMonitorComponent::process_frame(const std::string &frame) {
         }
       }
     } else {
-      ESP_LOGD(TAG, "Unknown command type 0x%s in segment %s: %s", type.c_str(), segment.c_str(), hex_frame.c_str());
+      // Log ALL unknown command types at INFO level for comprehensive visibility
+      if (segment == "0B0F") {
+        ESP_LOGI(TAG, "*** Unknown Command REQUEST 0x%s from CCA", type.c_str());
+        if (hex_frame.length() >= 18) {
+          std::string seq = hex_frame.substr(16, 2);
+          std::string payload = hex_frame.length() > 18 ? hex_frame.substr(18) : "(none)";
+          ESP_LOGI(TAG, "  Seq=%s, payload length=%d bytes", seq.c_str(), (int)(payload.length() / 2));
+          ESP_LOGI(TAG, "  Payload: %s", payload.c_str());
+        }
+        ESP_LOGI(TAG, "  Full frame: %s", hex_frame.c_str());
+      } else if (segment == "0B10") {
+        ESP_LOGI(TAG, "*** Unknown Command RESPONSE 0x%s from gateway", type.c_str());
+        if (hex_frame.length() >= 18) {
+          std::string payload = hex_frame.length() > 18 ? hex_frame.substr(18) : "(none)";
+          ESP_LOGI(TAG, "  Payload length=%d bytes", (int)(payload.length() / 2));
+          ESP_LOGI(TAG, "  Payload: %s", payload.c_str());
+        }
+        ESP_LOGI(TAG, "  Full frame: %s", hex_frame.c_str());
+      } else {
+        ESP_LOGI(TAG, "*** Unknown frame segment %s, type 0x%s", segment.c_str(), type.c_str());
+        ESP_LOGI(TAG, "  Full frame: %s", hex_frame.c_str());
+      }
     }
     // Handle other command types as needed
   } else if (segment == "0148") {
     // Receive request packet
     // ESP_LOGD(TAG, "Receive request packet");
+  } else if (hex_frame.substr(0, 6) == "000000") {
+    // Non-command frames starting with 000000 (broadcast polls, etc.)
+    if (hex_frame.length() >= 10) {
+      std::string type_maybe = hex_frame.substr(6, 4);
+      if (type_maybe == "0014") {
+        ESP_LOGI(TAG, "*** Broadcast Poll Frame 0x14 from CCA: %s", hex_frame.c_str());
+      } else if (type_maybe == "0010") {
+        ESP_LOGI(TAG, "*** Broadcast Frame 0x10 from CCA: %s", hex_frame.c_str());
+      } else {
+        ESP_LOGI(TAG, "*** Non-command frame (000000 prefix): %s", hex_frame.c_str());
+      }
+    } else {
+      ESP_LOGI(TAG, "*** Non-command frame: %s", hex_frame.c_str());
+    }
+  } else if (hex_frame.length() >= 8) {
+    // Direct-addressed frames (not command frames)
+    // Format: [dest_addr (4 hex)] [frame_type (4 hex)] [data...]
+    // Examples: 1201003A, 9201003B, 1201003C, 9201003D, 1201000A, 9201000B
+    std::string dest_addr = hex_frame.substr(0, 4);
+    std::string frame_type = hex_frame.substr(4, 4);
+    
+    // Determine direction based on address
+    bool is_request = (dest_addr == "1201" || dest_addr == "1202" || dest_addr == "1235");
+    bool is_response = (dest_addr == "9201" || dest_addr == "9202" || dest_addr == "9235");
+    
+    if (frame_type == "003A") {
+      ESP_LOGI(TAG, "*** Frame 0x3A (Auth Step 1) %s: %s", 
+               is_request ? "REQUEST to gateway" : "???", hex_frame.c_str());
+    } else if (frame_type == "003B") {
+      ESP_LOGI(TAG, "*** Frame 0x3B (Auth Step 1) %s: %s", 
+               is_response ? "RESPONSE from gateway" : "???", hex_frame.c_str());
+      if (hex_frame.length() > 8) {
+        std::string payload = hex_frame.substr(8);
+        ESP_LOGI(TAG, "  Payload: %s", payload.c_str());
+      }
+    } else if (frame_type == "003C") {
+      ESP_LOGI(TAG, "*** Frame 0x3C (Auth Step 2) %s: %s", 
+               is_request ? "REQUEST to gateway" : "???", hex_frame.c_str());
+      if (hex_frame.length() > 8) {
+        std::string payload = hex_frame.substr(8);
+        ESP_LOGI(TAG, "  Payload: %s", payload.c_str());
+      }
+    } else if (frame_type == "003D") {
+      ESP_LOGI(TAG, "*** Frame 0x3D (Auth Step 2) %s: %s", 
+               is_response ? "RESPONSE from gateway" : "???", hex_frame.c_str());
+    } else if (frame_type == "000A") {
+      ESP_LOGI(TAG, "*** Frame 0x0A (Gateway Info) %s: %s", 
+               is_request ? "REQUEST to gateway" : "???", hex_frame.c_str());
+    } else if (frame_type == "000B") {
+      ESP_LOGI(TAG, "*** Frame 0x0B (Gateway Info) %s: %s", 
+               is_response ? "RESPONSE from gateway" : "???", hex_frame.c_str());
+      // Decode ASCII firmware version from payload and store it
+      if (hex_frame.length() > 8) {
+        std::string payload = hex_frame.substr(8);
+        ESP_LOGI(TAG, "  Payload length: %d bytes", (int)(payload.length() / 2));
+        std::string ascii_text;
+        for (size_t i = 0; i < payload.length(); i += 2) {
+          if (i + 2 <= payload.length()) {
+            int byte_val = std::stoi(payload.substr(i, 2), nullptr, 16);
+            if (byte_val >= 32 && byte_val < 127) {
+              ascii_text += (char)byte_val;
+            } else if (byte_val == 0x0D) {
+              ascii_text += " | ";  // Carriage return separator
+            }
+          }
+        }
+        if (!ascii_text.empty()) {
+          // Clean up the firmware string (remove trailing separators)
+          while (!ascii_text.empty() && (ascii_text.back() == ' ' || ascii_text.back() == '|')) {
+            ascii_text.pop_back();
+          }
+          
+          // Store firmware version if changed
+          if (gateway_firmware_ != ascii_text) {
+            gateway_firmware_ = ascii_text;
+            ESP_LOGI(TAG, "  Gateway Firmware: %s", gateway_firmware_.c_str());
+            
+            // Save to flash
+            auto gw_fw_save = global_preferences->make_preference<char[128]>(0xABCDEF01);
+            char gw_fw_buf[128] = {0};
+            strncpy(gw_fw_buf, gateway_firmware_.c_str(), sizeof(gw_fw_buf) - 1);
+            gw_fw_save.save(&gw_fw_buf);
+            ESP_LOGI(TAG, "  Gateway firmware saved to flash");
+          } else {
+            ESP_LOGI(TAG, "  Gateway Firmware: %s (unchanged)", gateway_firmware_.c_str());
+          }
+        }
+      }
+    } else if (frame_type == "0B00" || frame_type == "0B01") {
+      ESP_LOGI(TAG, "*** Frame 0x0B%s (Unknown handshake) %s: %s", 
+               frame_type.substr(2, 2).c_str(),
+               is_request ? "REQUEST" : is_response ? "RESPONSE" : "???", 
+               hex_frame.c_str());
+    } else {
+      ESP_LOGI(TAG, "*** Direct-addressed frame type 0x%s (%s -> %s): %s", 
+               frame_type.c_str(),
+               is_request ? "CCA" : is_response ? "Gateway" : "Unknown",
+               is_request ? "Gateway" : is_response ? "CCA" : "Unknown",
+               hex_frame.c_str());
+    }
   } else {
-    ESP_LOGD(TAG, "Unknown frame type: %s", hex_frame.c_str());
+    ESP_LOGI(TAG, "*** Unknown frame type: %s", hex_frame.c_str());
   }
 }
 
@@ -1164,10 +1412,6 @@ void TigoMonitorComponent::process_07_frame(const std::string &frame) {
   // Frame 0x07: String response (ASCII text, typically firmware version)
   // Frame structure: type(2) + pv_node_id(4) + short_addr(4) + dsn(2) + length(2) + data...
   
-  // TODO: Consider persisting firmware_version to flash if Frame 0x07 responses are infrequent.
-  // Currently runtime-only to avoid stale data if firmware updates occur.
-  // Monitor frequency in real deployment before deciding on persistence strategy.
-  
   std::string addr = frame.substr(2, 4);
   int data_length = std::stoi(frame.substr(12, 2), nullptr, 16);
   
@@ -1219,7 +1463,21 @@ void TigoMonitorComponent::process_07_frame(const std::string &frame) {
   // Update device firmware version (runtime)
   DeviceData* device = find_device_by_addr(addr);
   if (device != nullptr) {
-    device->firmware_version = version_str;
+    // Only update and save if version changed
+    if (device->firmware_version != version_str) {
+      device->firmware_version = version_str;
+      
+      // Save firmware version to flash (infrequent updates)
+      static std::string pref_key;
+      pref_key = "fw_";
+      pref_key += device->addr;
+      uint32_t hash = esphome::fnv1_hash(pref_key);
+      auto fw_save = global_preferences->make_preference<char[64]>(hash);
+      char fw_buf[64] = {0};
+      strncpy(fw_buf, version_str.c_str(), sizeof(fw_buf) - 1);
+      fw_save.save(&fw_buf);
+      ESP_LOGI(TAG, "Saved firmware version to flash for device %s", device->addr.c_str());
+    }
     
     // Publish firmware version sensor if registered
     auto fw_it = firmware_version_sensors_.find(addr);
@@ -1232,8 +1490,6 @@ void TigoMonitorComponent::process_07_frame(const std::string &frame) {
   NodeTableData* node = find_node_by_addr(addr);
   if (node != nullptr) {
     node->firmware_version = version_str;
-    // Note: Not persisting to flash (firmware_version is runtime-only for freshness)
-    // save_node_table(); // Uncomment if persistence desired
   }
 }
 
@@ -2607,6 +2863,62 @@ void TigoMonitorComponent::load_peak_power_data() {
   ESP_LOGI(TAG, "Loaded %d peak power entries from flash", loaded_count);
 }
 
+void TigoMonitorComponent::save_firmware_versions() {
+  ESP_LOGD(TAG, "Saving firmware versions to flash...");
+  
+  // Pre-allocate string buffer to avoid repeated allocations
+  static std::string pref_key;
+  pref_key.reserve(32);
+  
+  int saved_count = 0;
+  for (size_t i = 0; i < devices_.size(); i++) {
+    const auto &device = devices_[i];
+    if (!device.firmware_version.empty()) {
+      // Reuse string buffer
+      pref_key = "fw_";
+      pref_key += device.addr;
+      uint32_t hash = esphome::fnv1_hash(pref_key);
+      
+      // Save using char array preference
+      auto save = global_preferences->make_preference<char[64]>(hash);
+      char fw_buf[64] = {0};
+      strncpy(fw_buf, device.firmware_version.c_str(), sizeof(fw_buf) - 1);
+      save.save(&fw_buf);
+      saved_count++;
+    }
+  }
+  
+  ESP_LOGD(TAG, "Saved %d firmware versions to flash", saved_count);
+}
+
+void TigoMonitorComponent::load_firmware_versions() {
+  ESP_LOGD(TAG, "Loading firmware versions from flash...");
+  
+  // Pre-allocate string buffer to avoid repeated allocations
+  static std::string pref_key;
+  pref_key.reserve(32);
+  
+  int loaded_count = 0;
+  for (size_t i = 0; i < devices_.size(); i++) {
+    auto &device = devices_[i];
+    // Reuse string buffer
+    pref_key = "fw_";
+    pref_key += device.addr;
+    uint32_t hash = esphome::fnv1_hash(pref_key);
+    
+    // Load firmware version
+    auto load = global_preferences->make_preference<char[64]>(hash);
+    char fw_buffer[64] = {0};
+    if (load.load(&fw_buffer) && fw_buffer[0] != '\0') {
+      device.firmware_version = fw_buffer;
+      loaded_count++;
+      ESP_LOGD(TAG, "Loaded firmware for %s: %s", device.addr.c_str(), fw_buffer);
+    }
+  }
+  
+  ESP_LOGI(TAG, "Loaded %d firmware versions from flash", loaded_count);
+}
+
 void TigoMonitorComponent::reset_peak_power() {
   ESP_LOGI(TAG, "Resetting all peak power values...");
   
@@ -3070,9 +3382,10 @@ void TigoMonitorComponent::check_midnight_reset() {
 }
 
 void TigoMonitorComponent::save_persistent_data() {
-  ESP_LOGI(TAG, "Saving all persistent data to flash (node table, peak power, energy, daily history)...");
+  ESP_LOGI(TAG, "Saving all persistent data to flash (node table, peak power, firmware versions, energy, daily history)...");
   save_node_table();
   save_peak_power_data();
+  save_firmware_versions();
   save_energy_data();
   save_daily_energy_history();
   ESP_LOGI(TAG, "All persistent data saved successfully");
