@@ -2143,36 +2143,38 @@ void TigoMonitorComponent::check_midnight_reset() {
 #endif
     
     // IMPORTANT: Archive yesterday's energy BEFORE resetting
-    // This ensures we capture the full day's production
-    // Use current_day_key_ which was already tracking yesterday
-    if (current_day_key_ != 0) {
-      float yesterday_production = total_energy_kwh_ - energy_at_day_start_;
-      if (yesterday_production > 0.0f) {
-        DailyEnergyData yesterday = DailyEnergyData::from_key(current_day_key_);
-        yesterday.energy_kwh = yesterday_production;
-        
-        // Add to history
-        bool found = false;
-        for (auto &entry : daily_energy_history_) {
-          if (entry.to_key() == current_day_key_) {
-            entry.energy_kwh = yesterday_production;
-            found = true;
-            break;
-          }
+    // Calculate yesterday's date explicitly (now - 1 day) to avoid race condition
+    // with update_daily_energy() which may have already updated current_day_key_ to today
+    time_t yesterday_timestamp = now.timestamp - 86400;  // Subtract 24 hours (86400 seconds)
+    auto yesterday_time = ESPTime::from_epoch_local(yesterday_timestamp);
+    uint32_t yesterday_key = (yesterday_time.year * 10000) + (yesterday_time.month * 100) + yesterday_time.day_of_month;
+    
+    float yesterday_production = total_energy_kwh_ - energy_at_day_start_;
+    if (yesterday_production > 0.0f) {
+      DailyEnergyData yesterday = DailyEnergyData::from_key(yesterday_key);
+      yesterday.energy_kwh = yesterday_production;
+      
+      // Add to history
+      bool found = false;
+      for (auto &entry : daily_energy_history_) {
+        if (entry.to_key() == yesterday_key) {
+          entry.energy_kwh = yesterday_production;
+          found = true;
+          break;
         }
-        if (!found) {
-          daily_energy_history_.push_back(yesterday);
-        }
-        
-        // Keep only last 7 days
-        if (daily_energy_history_.size() > MAX_DAILY_HISTORY) {
-          daily_energy_history_.erase(daily_energy_history_.begin());
-        }
-        
-        ESP_LOGI(TAG, "Archived daily energy at midnight: %04d-%02d-%02d = %.3f kWh (total: %.3f, started: %.3f)", 
-                 yesterday.year, yesterday.month, yesterday.day, yesterday_production,
-                 total_energy_kwh_, energy_at_day_start_);
       }
+      if (!found) {
+        daily_energy_history_.push_back(yesterday);
+      }
+      
+      // Keep only last 7 days
+      if (daily_energy_history_.size() > MAX_DAILY_HISTORY) {
+        daily_energy_history_.erase(daily_energy_history_.begin());
+      }
+      
+      ESP_LOGI(TAG, "Archived daily energy at midnight: %04d-%02d-%02d = %.3f kWh (total: %.3f, started: %.3f)", 
+               yesterday.year, yesterday.month, yesterday.day, yesterday_production,
+               total_energy_kwh_, energy_at_day_start_);
     }
     
     // Update current_day_key to today
@@ -2546,6 +2548,8 @@ void TigoMonitorComponent::save_daily_energy_history() {
   size_t count = std::min(daily_energy_history_.size(), MAX_DAILY_HISTORY);
   buffer[0] = static_cast<uint8_t>(count);
   
+  ESP_LOGI(TAG, "Packing %zu entries into buffer (max=%zu, buffer_size=%zu)", count, MAX_DAILY_HISTORY, MAX_BUFFER_SIZE);
+  
   size_t offset = 1;
   for (size_t i = 0; i < count; i++) {
     uint32_t key = daily_energy_history_[i].to_key();
@@ -2565,31 +2569,37 @@ void TigoMonitorComponent::save_daily_energy_history() {
   }
   
   uint32_t hash = esphome::fnv1_hash("daily_energy_history");
+  ESP_LOGI(TAG, "Using preference hash: 0x%08X (buffer offset=%zu)", hash, offset);
+  
   auto save = global_preferences->make_preference<uint8_t[MAX_BUFFER_SIZE]>(hash);
   if (save.save(&buffer)) {
-    ESP_LOGI(TAG, "Saved %zu daily energy entries to flash", count);
+    ESP_LOGI(TAG, "Successfully saved %zu daily energy entries to flash (hash=0x%08X)", count, hash);
   } else {
-    ESP_LOGW(TAG, "Failed to save daily energy history");
+    ESP_LOGW(TAG, "FAILED to save daily energy history (hash=0x%08X)", hash);
   }
 }
 
 void TigoMonitorComponent::load_daily_energy_history() {
-  ESP_LOGD(TAG, "Loading daily energy history from flash...");
+  ESP_LOGI(TAG, "Loading daily energy history from flash...");
   
   static const size_t MAX_BUFFER_SIZE = 1 + (MAX_DAILY_HISTORY * 8);
   uint8_t buffer[MAX_BUFFER_SIZE] = {0};
   
   uint32_t hash = esphome::fnv1_hash("daily_energy_history");
+  ESP_LOGI(TAG, "Using preference hash: 0x%08X (buffer_size=%zu)", hash, MAX_BUFFER_SIZE);
+  
   auto load = global_preferences->make_preference<uint8_t[MAX_BUFFER_SIZE]>(hash);
   
   if (!load.load(&buffer)) {
-    ESP_LOGD(TAG, "No saved daily energy history found");
+    ESP_LOGI(TAG, "No saved daily energy history found (hash=0x%08X)", hash);
     return;
   }
   
   size_t count = buffer[0];
+  ESP_LOGI(TAG, "Loaded buffer with count=%zu (max=%zu)", count, MAX_DAILY_HISTORY);
+  
   if (count > MAX_DAILY_HISTORY) {
-    ESP_LOGW(TAG, "Invalid daily energy history count: %zu", count);
+    ESP_LOGW(TAG, "Invalid daily energy history count: %zu (max=%zu)", count, MAX_DAILY_HISTORY);
     return;
   }
   
