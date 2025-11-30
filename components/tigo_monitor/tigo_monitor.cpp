@@ -535,7 +535,34 @@ void TigoMonitorComponent::process_frame(const std::string &frame) {
     if (invalid_checksum_sensor_ != nullptr) {
       invalid_checksum_sensor_->publish_state(invalid_checksum_count_);
     }
-    ESP_LOGW(TAG, "Invalid checksum for frame: %s", frame_to_hex_string(processed_frame).c_str());
+    
+    // Enhanced logging for invalid checksum debugging
+    std::string hex_frame = frame_to_hex_string(processed_frame);
+    uint16_t extracted_crc = 0;
+    uint16_t computed_crc = 0;
+    
+    if (processed_frame.length() >= 2) {
+      std::string checksum_str = processed_frame.substr(processed_frame.length() - 2);
+      extracted_crc = (static_cast<uint8_t>(checksum_str[0]) << 8) | static_cast<uint8_t>(checksum_str[1]);
+      computed_crc = compute_crc16_ccitt(
+        reinterpret_cast<const uint8_t*>(processed_frame.c_str()), 
+        processed_frame.length() - 2
+      );
+    }
+    
+    // Log frame type and length for pattern analysis
+    std::string frame_type = "unknown";
+    if (hex_frame.length() >= 10) {
+      std::string segment = hex_frame.substr(4, 4);
+      if (segment == "0149") frame_type = "power_data";
+      else if (segment == "0148") frame_type = "receive_request";
+      else if (segment == "0B10" || segment == "0B0F") frame_type = "command";
+      else frame_type = segment;
+    }
+    
+    ESP_LOGW(TAG, "Invalid checksum #%u: type=%s, len=%zu, expected=0x%04X, got=0x%04X, frame=%s", 
+             invalid_checksum_count_, frame_type.c_str(), processed_frame.length(),
+             computed_crc, extracted_crc, hex_frame.c_str());
     return;
   }
   
@@ -1957,19 +1984,15 @@ void TigoMonitorComponent::load_node_table() {
 }
 
 void TigoMonitorComponent::save_node_table() {
-  ESP_LOGD(TAG, "Saving node table to flash...");
-  
-  // Pre-allocate string buffer to avoid repeated allocations
-  static std::string pref_key;
-  pref_key.reserve(32);
+  // Use stack-allocated buffer instead of heap string to prevent memory leaks
+  char pref_key[32];
+  char empty_data[256] = {0};
   
   // Clear old entries first
   for (int i = 0; i < number_of_devices_; i++) {
-    pref_key = "node_";
-    pref_key += std::to_string(i);
+    snprintf(pref_key, sizeof(pref_key), "node_%d", i);
     uint32_t hash = esphome::fnv1_hash(pref_key);
     auto save = global_preferences->make_preference<char[256]>(hash);
-    char empty_data[256] = {0};
     save.save(&empty_data);
   }
   
@@ -1977,28 +2000,25 @@ void TigoMonitorComponent::save_node_table() {
   int i = 0;
   int saved_count = 0;
   for (const auto &node : node_table_) {
-    if (i >= number_of_devices_) break; // Safety limit
-    if (!node.is_persistent) continue;   // Only save persistent nodes
+    if (i >= number_of_devices_) break;
+    if (!node.is_persistent) continue;
     
-    pref_key = "node_";
-    pref_key += std::to_string(i);
+    snprintf(pref_key, sizeof(pref_key), "node_%d", i);
     uint32_t hash = esphome::fnv1_hash(pref_key);
     
+    // Format node data into buffer - use snprintf for efficiency
     // Format: "addr|long_addr|checksum|sensor_index|cca_label|cca_string|cca_inverter|cca_channel|cca_validated"
-    // Note: frame09_barcode field removed (was between checksum and sensor_index)
-    std::string node_str = node.addr + "|" + 
-                          node.long_address + "|" + 
-                          node.checksum + "|" + 
-                          std::to_string(node.sensor_index) + "|" +
-                          node.cca_label + "|" +
-                          node.cca_string_label + "|" +
-                          node.cca_inverter_label + "|" +
-                          node.cca_channel + "|" +
-                          (node.cca_validated ? "1" : "0");
-    
-    // Copy to char array for preferences
-    char node_data[256] = {0};
-    strncpy(node_data, node_str.c_str(), sizeof(node_data) - 1);
+    char node_data[256];
+    snprintf(node_data, sizeof(node_data), "%s|%s|%s|%d|%s|%s|%s|%s|%d",
+             node.addr.c_str(),
+             node.long_address.c_str(),
+             node.checksum.c_str(),
+             node.sensor_index,
+             node.cca_label.c_str(),
+             node.cca_string_label.c_str(),
+             node.cca_inverter_label.c_str(),
+             node.cca_channel.c_str(),
+             node.cca_validated ? 1 : 0);
     
     auto save = global_preferences->make_preference<char[256]>(hash);
     save.save(&node_data);
@@ -2006,23 +2026,18 @@ void TigoMonitorComponent::save_node_table() {
     i++;
   }
   
-  ESP_LOGD(TAG, "Saved %d node table entries to flash", saved_count);
+  ESP_LOGD(TAG, "Saved %d node table entries", saved_count);
 }
 
 void TigoMonitorComponent::save_peak_power_data() {
-  ESP_LOGD(TAG, "Saving peak power data to flash...");
-  
-  // Pre-allocate string buffer to avoid repeated allocations
-  static std::string pref_key;
-  pref_key.reserve(32);
-  
+  // Use stack-allocated buffer instead of heap string to prevent memory leaks
+  char pref_key[32];
   int saved_count = 0;
-  for (size_t i = 0; i < devices_.size(); i++) {
-    const auto &device = devices_[i];
+  
+  for (const auto &device : devices_) {
     if (device.peak_power > 0.0f) {
-      // Reuse string buffer instead of creating new string each iteration
-      pref_key = "peak_";
-      pref_key += device.addr;
+      // Build key in stack buffer - no heap allocations
+      snprintf(pref_key, sizeof(pref_key), "peak_%s", device.addr.c_str());
       uint32_t hash = esphome::fnv1_hash(pref_key);
       auto save = global_preferences->make_preference<float>(hash);
       save.save(&device.peak_power);
@@ -2030,22 +2045,17 @@ void TigoMonitorComponent::save_peak_power_data() {
     }
   }
   
-  ESP_LOGD(TAG, "Saved %d peak power entries to flash", saved_count);
+  ESP_LOGD(TAG, "Saved %d peak power entries", saved_count);
 }
 
 void TigoMonitorComponent::load_peak_power_data() {
-  ESP_LOGD(TAG, "Loading peak power data from flash...");
-  
-  // Pre-allocate string buffer to avoid repeated allocations
-  static std::string pref_key;
-  pref_key.reserve(32);
-  
+  // Use stack-allocated buffer instead of heap string to prevent memory leaks
+  char pref_key[32];
   int loaded_count = 0;
-  for (size_t i = 0; i < devices_.size(); i++) {
-    auto &device = devices_[i];
-    // Reuse string buffer instead of creating new string each iteration
-    pref_key = "peak_";
-    pref_key += device.addr;
+  
+  for (auto &device : devices_) {
+    // Build key in stack buffer - no heap allocations
+    snprintf(pref_key, sizeof(pref_key), "peak_%s", device.addr.c_str());
     uint32_t hash = esphome::fnv1_hash(pref_key);
     auto load = global_preferences->make_preference<float>(hash);
     
@@ -2053,45 +2063,36 @@ void TigoMonitorComponent::load_peak_power_data() {
     if (load.load(&saved_peak) && saved_peak > 0.0f) {
       device.peak_power = saved_peak;
       loaded_count++;
-      ESP_LOGD(TAG, "Loaded peak power for %s: %.0fW", device.addr.c_str(), saved_peak);
     }
   }
   
-  ESP_LOGI(TAG, "Loaded %d peak power entries from flash", loaded_count);
+  ESP_LOGI(TAG, "Loaded %d peak power entries", loaded_count);
 }
 
 void TigoMonitorComponent::reset_peak_power() {
-  ESP_LOGI(TAG, "Resetting all peak power values...");
-  
 #ifdef USE_ESP_IDF
-  // Log heap before reset
   size_t heap_before = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
-  ESP_LOGD(TAG, "Internal heap before reset: %zu bytes", heap_before);
 #endif
   
-  // Pre-allocate string buffer to avoid repeated allocations
-  static std::string pref_key;
-  pref_key.reserve(32);
-  
+  // Use stack-allocated buffer instead of heap string to prevent memory leaks
+  char pref_key[32];
   int reset_count = 0;
-  for (size_t i = 0; i < devices_.size(); i++) {
-    auto &device = devices_[i];
+  float zero = 0.0f;
+  
+  for (auto &device : devices_) {
     device.peak_power = 0.0f;
     
-    // Clear from flash storage - reuse string buffer
-    pref_key = "peak_";
-    pref_key += device.addr;
+    // Build key in stack buffer - no heap allocations
+    snprintf(pref_key, sizeof(pref_key), "peak_%s", device.addr.c_str());
     uint32_t hash = esphome::fnv1_hash(pref_key);
     auto save = global_preferences->make_preference<float>(hash);
-    float zero = 0.0f;
     save.save(&zero);
     reset_count++;
   }
   
 #ifdef USE_ESP_IDF
-  // Log heap after reset
   size_t heap_after = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
-  ESP_LOGI(TAG, "Reset %d peak power values (heap: %zu -> %zu, delta: %zd bytes)", 
+  ESP_LOGI(TAG, "Reset %d peak power values (heap: %zu -> %zu, delta: %+zd bytes)", 
            reset_count, heap_before, heap_after, (ssize_t)(heap_after - heap_before));
 #else
   ESP_LOGI(TAG, "Reset %d peak power values", reset_count);
@@ -2538,8 +2539,6 @@ void TigoMonitorComponent::update_daily_energy(float energy_kwh) {
 }
 
 void TigoMonitorComponent::save_daily_energy_history() {
-  ESP_LOGI(TAG, "Saving daily energy history to flash (%zu days)...", daily_energy_history_.size());
-  
   // Pack history into a simple buffer
   // Format: count (1 byte) + array of [key (4 bytes) + energy (4 bytes)]
   static const size_t MAX_BUFFER_SIZE = 1 + (MAX_DAILY_HISTORY * 8);
@@ -2548,16 +2547,11 @@ void TigoMonitorComponent::save_daily_energy_history() {
   size_t count = std::min(daily_energy_history_.size(), MAX_DAILY_HISTORY);
   buffer[0] = static_cast<uint8_t>(count);
   
-  ESP_LOGI(TAG, "Packing %zu entries into buffer (max=%zu, buffer_size=%zu)", count, MAX_DAILY_HISTORY, MAX_BUFFER_SIZE);
-  
+  // Pack entries silently - excessive logging during flash write causes heap allocations
   size_t offset = 1;
   for (size_t i = 0; i < count; i++) {
     uint32_t key = daily_energy_history_[i].to_key();
     float energy = daily_energy_history_[i].energy_kwh;
-    
-    ESP_LOGI(TAG, "  Saving entry %zu: %04d-%02d-%02d = %.3f kWh (key=%u)", 
-             i, daily_energy_history_[i].year, daily_energy_history_[i].month, 
-             daily_energy_history_[i].day, energy, key);
     
     // Store key (4 bytes)
     memcpy(&buffer[offset], &key, sizeof(uint32_t));
@@ -2569,34 +2563,28 @@ void TigoMonitorComponent::save_daily_energy_history() {
   }
   
   uint32_t hash = esphome::fnv1_hash("daily_energy_history");
-  ESP_LOGI(TAG, "Using preference hash: 0x%08X (buffer offset=%zu)", hash, offset);
-  
   auto save = global_preferences->make_preference<uint8_t[MAX_BUFFER_SIZE]>(hash);
+  
   if (save.save(&buffer)) {
-    ESP_LOGI(TAG, "Successfully saved %zu daily energy entries to flash (hash=0x%08X)", count, hash);
+    ESP_LOGD(TAG, "Saved %zu daily energy entries to flash (hash=0x%08X)", count, hash);
   } else {
-    ESP_LOGW(TAG, "FAILED to save daily energy history (hash=0x%08X)", hash);
+    ESP_LOGW(TAG, "Failed to save daily energy history (hash=0x%08X)", hash);
   }
 }
 
 void TigoMonitorComponent::load_daily_energy_history() {
-  ESP_LOGI(TAG, "Loading daily energy history from flash...");
-  
   static const size_t MAX_BUFFER_SIZE = 1 + (MAX_DAILY_HISTORY * 8);
   uint8_t buffer[MAX_BUFFER_SIZE] = {0};
   
   uint32_t hash = esphome::fnv1_hash("daily_energy_history");
-  ESP_LOGI(TAG, "Using preference hash: 0x%08X (buffer_size=%zu)", hash, MAX_BUFFER_SIZE);
-  
   auto load = global_preferences->make_preference<uint8_t[MAX_BUFFER_SIZE]>(hash);
   
   if (!load.load(&buffer)) {
-    ESP_LOGI(TAG, "No saved daily energy history found (hash=0x%08X)", hash);
+    ESP_LOGD(TAG, "No saved daily energy history found");
     return;
   }
   
   size_t count = buffer[0];
-  ESP_LOGI(TAG, "Loaded buffer with count=%zu (max=%zu)", count, MAX_DAILY_HISTORY);
   
   if (count > MAX_DAILY_HISTORY) {
     ESP_LOGW(TAG, "Invalid daily energy history count: %zu (max=%zu)", count, MAX_DAILY_HISTORY);

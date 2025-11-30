@@ -2503,8 +2503,10 @@ void TigoWebServer::get_dashboard_html(PSRAMString& html) {
         
         // Prepare chart data
         const dates = data.history.map(entry => {
-          const date = new Date(entry.date);
-          return (date.getMonth() + 1) + '/' + date.getDate();
+          // Parse date string directly to avoid timezone shifts
+          // Format: "YYYY-MM-DD" -> "M/D"
+          const parts = entry.date.split('-');
+          return parseInt(parts[1]) + '/' + parseInt(parts[2]);
         });
         const energies = data.history.map(entry => entry.energy);
         
