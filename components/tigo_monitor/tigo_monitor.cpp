@@ -736,34 +736,164 @@ void TigoMonitorComponent::process_frame(const std::string &frame) {
   // Checksum valid! Continue processing with the data (without checksum)
   std::string hex_frame = frame_to_hex_string(processed_data);
   
-  // Log command frames, especially Frame 0x27 responses
-  if (hex_frame.length() >= 8) {
-    std::string segment = hex_frame.substr(4, 4);
-    if (segment == "0B10") {
-      // Command responses - only log interesting ones
-      if (hex_frame.length() >= 16) {
-        std::string type = hex_frame.substr(14, 2);
-        if (type == "27") {
-          ESP_LOGI(TAG, "*** Frame 0x27 DEVICE LIST RESPONSE! len=%zu: %s", hex_frame.length(), hex_frame.c_str());
-        } else if (type == "0E") {
-          ESP_LOGI(TAG, "*** Frame 0x0E AUTH RESPONSE! len=%zu: %s", hex_frame.length(), hex_frame.c_str());
-        } else if (type == "0D") {
-          ESP_LOGD(TAG, "Frame 0x0D echo/response from gateway: %s", hex_frame.c_str());
-        } else {
-          ESP_LOGD(TAG, "Command response (0B10) type=0x%s", type.c_str());
+  // ========== TGGW PROTOCOL DECODING ==========
+  // Based on reverse-engineered protocol at protocol/docs/GATEWAY_PROTOCOL.md
+  // TGGW packets: 00 FF FF 7E [LEN] [DEST] [CMD] [PAYLOAD] [CRC] 7E 08
+  // CCA sends commands to gateway at 38400 baud over RS485
+  
+  // Check if this looks like a TGGW packet
+  if (hex_frame.length() >= 14 && hex_frame.substr(0, 6) == "00FFFF") {
+    ESP_LOGI(TAG, "⚡ TGGW packet detected! Full frame: %s", hex_frame.c_str());
+    
+    // TGGW preamble detected! Decode the packet
+    
+    if (hex_frame.length() >= 16) {
+      // Extract TGGW fields
+      std::string preamble = hex_frame.substr(0, 6);      // 00FFFF
+      std::string start = hex_frame.substr(6, 2);         // 7E
+      std::string len = hex_frame.substr(8, 2);           // Length byte
+      std::string dest = hex_frame.substr(10, 4);         // Destination (2 bytes)
+      std::string cmd = hex_frame.substr(14, 4);          // Command (2 bytes)
+      
+      int frame_len = std::stoi(len, nullptr, 16);
+      int payload_len = frame_len - 7;  // Total - overhead
+      
+      std::string payload = "";
+      if (hex_frame.length() >= 18 + (payload_len * 2)) {
+        payload = hex_frame.substr(18, payload_len * 2);
+      }
+      
+      // Extract CRC and trailer if present
+      std::string crc = "";
+      std::string end_marker = "";
+      std::string trailer = "";
+      if (hex_frame.length() >= 18 + (payload_len * 2) + 8) {
+        crc = hex_frame.substr(18 + (payload_len * 2), 4);
+        end_marker = hex_frame.substr(18 + (payload_len * 2) + 4, 2);
+        trailer = hex_frame.substr(18 + (payload_len * 2) + 6, 2);
+      }
+      
+      // Decode command
+      const char* cmd_name = "UNKNOWN";
+      if (cmd == "000A") cmd_name = "VERSION";
+      else if (cmd == "000C") cmd_name = "SET_CHANNEL";
+      else if (cmd == "000E") cmd_name = "GET_CHANNEL";
+      else if (cmd == "0010") cmd_name = "RESET";
+      else if (cmd == "001C") cmd_name = "GET_DEVICECOUNT";
+      else if (cmd == "001E") cmd_name = "GET_ADT";
+      else if (cmd == "0028") cmd_name = "GET_PANID";
+      else if (cmd == "003A") cmd_name = "GET_MAC";
+      else if (cmd == "003C") cmd_name = "SET_ID_BY_MAC";
+      else if (cmd == "0056") cmd_name = "GET_GATEWAY_MODE";
+      else if (cmd == "0308") cmd_name = "GET_PAN";
+      else if (cmd == "0026") cmd_name = "GET_NEW_BINARY_DATA";
+      else if (cmd == "0028") cmd_name = "GET_OLD_BINARY_DATA";
+      else if (cmd == "0044") cmd_name = "GET_NOTIFY";
+      else if (cmd == "0046") cmd_name = "GET_GATEWAY_STAT";
+      else if (cmd == "0050") cmd_name = "SEND_BROADCAST";
+      else if (cmd == "0052") cmd_name = "SET_SEND_STRING";
+      else if (cmd == "005A") cmd_name = "SET_NETRUN";
+      
+      // Determine direction
+      bool is_request = (dest.substr(0, 2) == "12" || dest == "0000");  // To gateway or broadcast
+      bool is_response = (dest.substr(0, 2) == "92" || dest.substr(0, 2) == "93");  // From gateway
+      
+      const char* direction = is_request ? "CCA→GW" : (is_response ? "GW→CCA" : "????");
+      
+      ESP_LOGI(TAG, "┌─ TGGW %s: %s [0x%s]", direction, cmd_name, cmd.c_str());
+      ESP_LOGI(TAG, "│  Dest: 0x%s, Len: %d bytes, CRC: 0x%s", 
+               dest.c_str(), frame_len, crc.c_str());
+      
+      if (!payload.empty()) {
+        ESP_LOGI(TAG, "│  Payload (%d bytes): %s", payload_len, payload.c_str());
+        
+        // Decode specific payloads
+        if (cmd == "000E" && payload.length() >= 4) {
+          // GET_CHANNEL response
+          std::string channel = payload.substr(2, 2);
+          int ch = std::stoi(channel, nullptr, 16);
+          ESP_LOGI(TAG, "│  → ZigBee Channel: %d", ch);
+        } else if (cmd == "001C" && payload.length() >= 4) {
+          // GET_DEVICECOUNT response
+          std::string count = payload.substr(2, 2);
+          int dev_count = std::stoi(count, nullptr, 16);
+          ESP_LOGI(TAG, "│  → Device Count: %d optimizers", dev_count);
+        } else if (cmd == "0056" && payload.length() >= 2) {
+          // GET_GATEWAY_MODE response
+          int mode = std::stoi(payload.substr(0, 2), nullptr, 16);
+          const char* mode_name = (mode == 0) ? "Normal" : (mode == 1) ? "Active" : "Unknown";
+          ESP_LOGI(TAG, "│  → Gateway Mode: %s (%d)", mode_name, mode);
+        } else if (cmd == "0308" && payload.length() >= 8) {
+          // GET_PAN response
+          std::string pan = payload.substr(0, 8);
+          ESP_LOGI(TAG, "│  → PAN Data: 0x%s", pan.c_str());
+        } else if (cmd == "003A" && payload.length() >= 16) {
+          // GET_MAC response
+          ESP_LOGI(TAG, "│  → Gateway MAC: %s", payload.c_str());
+        } else if (cmd == "000A" && payload.length() >= 6) {
+          // VERSION response
+          std::string version = "";
+          for (size_t i = 0; i < payload.length(); i += 2) {
+            int byte = std::stoi(payload.substr(i, 2), nullptr, 16);
+            if (byte >= 32 && byte < 127) version += (char)byte;
+          }
+          ESP_LOGI(TAG, "│  → Gateway Version: %s", version.c_str());
         }
       }
-    } else if (segment == "0B0F") {
-      // Check for Frame 0x27 in command requests (from CCA)
+      
+      ESP_LOGI(TAG, "└─ End TGGW packet (total %zu chars)", hex_frame.length());
+      ESP_LOGD(TAG, "   Raw: %s", hex_frame.c_str());
+      
+      // Don't process further - this is pure TGGW protocol, not optimizer telemetry
+      return;
+    }
+  }
+  
+  // ========== CCA ↔ GATEWAY COMMAND LOGGING ==========
+  // Log all command frames at INFO level (0B0F = requests, 0B10 = responses)
+  // NOTE: Legacy Tigo frames (0x0148/0x0149) are optimizer telemetry, not CCA↔GW commands
+  // CCA↔GW commands use TGGW protocol (00FFFF7E prefix) and are caught above
+  if (hex_frame.length() >= 8) {
+    std::string segment = hex_frame.substr(4, 4);
+    if (segment == "0B10" || segment == "0B0F") {
       if (hex_frame.length() >= 16) {
         std::string type = hex_frame.substr(14, 2);
-        if (type == "27") {
-          ESP_LOGI(TAG, "*** Frame 0x27 RESPONSE! len=%zu: %s", hex_frame.length(), hex_frame.c_str());
-        } else if (type == "26") {
-          ESP_LOGI(TAG, "Frame 0x26 device discovery REQUEST seen from CCA: %s", hex_frame.c_str());
+        std::string dest = hex_frame.substr(0, 4);
+        bool is_request = (segment == "0B0F");
+        
+        // Command name mapping (from binary analysis)
+        const char* cmd_name = "Unknown";
+        if (type == "0D") cmd_name = "Gateway Config Request";
+        else if (type == "0E") cmd_name = "Gateway Config Response";
+        else if (type == "26") cmd_name = "Device List Request";
+        else if (type == "27") cmd_name = "Device List Response";
+        else if (type == "2C") cmd_name = "Mesh Config Request";
+        else if (type == "2D") cmd_name = "Mesh Config Response";
+        else if (type == "2E") cmd_name = "Network Status Request";
+        else if (type == "2F") cmd_name = "Network Status Response";
+        else if (type == "41") cmd_name = "Batched Telemetry Query";
+        else if (type == "43") cmd_name = "Batched Telemetry (Alt)";
+        else if (type == "05") cmd_name = "LMU Entry Update";
+        else if (type == "06") cmd_name = "Command Validation";
+        
+        // Formatted command logging
+        if (is_request) {
+          ESP_LOGI(TAG, "┌─ CCA→GW Command 0x%s (%s)", type.c_str(), cmd_name);
         } else {
-          ESP_LOGD(TAG, "Command (0B0F) type=0x%s, len=%zu", type.c_str(), hex_frame.length());
+          ESP_LOGI(TAG, "┌─ GW→CCA Response 0x%s (%s)", type.c_str(), cmd_name);
         }
+        
+        // Extract sequence and payload
+        std::string seq = hex_frame.length() >= 18 ? hex_frame.substr(16, 2) : "--";
+        std::string payload = hex_frame.length() > 18 ? hex_frame.substr(18) : "";
+        
+        ESP_LOGI(TAG, "│  Dest: 0x%s, Seq: 0x%s", dest.c_str(), seq.c_str());
+        
+        if (!payload.empty()) {
+          ESP_LOGI(TAG, "│  Payload (%zu bytes): %s", payload.length() / 2, payload.c_str());
+        }
+        
+        ESP_LOGI(TAG, "└─ Full: %s", hex_frame.c_str());
       }
     }
   }
@@ -848,8 +978,7 @@ void TigoMonitorComponent::process_frame(const std::string &frame) {
       pos += packet_length_chars;
     }
   } else if (segment == "0B10" || segment == "0B0F") {
-    // Command request or response
-    ESP_LOGD(TAG, "Command frame received (segment %s): %s", segment.c_str(), hex_frame.c_str());
+    // Command frames are already logged above, just track sequence numbers here
     
     // Track CCA's sequence numbers from command REQUEST frames (0B0F)
     if (segment == "0B0F" && hex_frame.length() >= 16) {
@@ -932,40 +1061,64 @@ void TigoMonitorComponent::process_frame(const std::string &frame) {
         ESP_LOGI(TAG, "  Payload=%s", payload.c_str());
       }
       ESP_LOGI(TAG, "  Full frame: %s", hex_frame.c_str());
-    } else if (type == "3A") {
-      // Frame 0x3A - Auth sequence step 1 REQUEST
-      ESP_LOGI(TAG, "*** Frame 0x3A (Auth Step 1 Request) from CCA");
+    } else if (type == "06") {
+      // Frame 0x06 - Device query REQUEST from CCA
+      ESP_LOGI(TAG, "┌─ Frame 0x06: Device Query REQUEST (CCA→Device)");
       if (hex_frame.length() >= 18) {
         std::string seq = hex_frame.substr(16, 2);
-        std::string payload = hex_frame.length() > 18 ? hex_frame.substr(18) : "(none)";
-        ESP_LOGI(TAG, "  Seq=%s, payload=%s", seq.c_str(), payload.c_str());
+        std::string payload = hex_frame.length() > 18 ? hex_frame.substr(18) : "";
+        ESP_LOGI(TAG, "│  Sequence: 0x%s", seq.c_str());
+        
+        if (!payload.empty()) {
+          ESP_LOGI(TAG, "│  Payload (%zu bytes): %s", payload.length() / 2, payload.c_str());
+          
+          // Try to decode payload - often contains ASCII commands
+          std::string ascii_payload = "";
+          for (size_t i = 0; i < payload.length(); i += 2) {
+            if (i + 1 < payload.length()) {
+              int byte = std::stoi(payload.substr(i, 2), nullptr, 16);
+              if (byte >= 32 && byte < 127) {
+                ascii_payload += (char)byte;
+              } else {
+                ascii_payload += '.';
+              }
+            }
+          }
+          ESP_LOGI(TAG, "│  ASCII: \"%s\"", ascii_payload.c_str());
+        }
       }
-      ESP_LOGI(TAG, "  Full frame: %s", hex_frame.c_str());
-    } else if (type == "3B") {
-      // Frame 0x3B - Auth sequence step 1 RESPONSE
-      ESP_LOGI(TAG, "*** Frame 0x3B (Auth Step 1 Response) from gateway");
-      if (hex_frame.length() >= 18) {
-        std::string payload = hex_frame.length() > 18 ? hex_frame.substr(18) : "(none)";
-        ESP_LOGI(TAG, "  Payload=%s", payload.c_str());
-      }
-      ESP_LOGI(TAG, "  Full frame: %s", hex_frame.c_str());
-    } else if (type == "3C") {
-      // Frame 0x3C - Auth sequence step 2 REQUEST
-      ESP_LOGI(TAG, "*** Frame 0x3C (Auth Step 2 Request) from CCA");
+      ESP_LOGI(TAG, "└─ Full: %s", hex_frame.c_str());
+    } else if (type == "07") {
+      // Frame 0x07 - Device query RESPONSE from device/gateway
+      ESP_LOGI(TAG, "┌─ Frame 0x07: Device Query RESPONSE (Device→CCA)");
       if (hex_frame.length() >= 18) {
         std::string seq = hex_frame.substr(16, 2);
-        std::string payload = hex_frame.length() > 18 ? hex_frame.substr(18) : "(none)";
-        ESP_LOGI(TAG, "  Seq=%s, payload=%s", seq.c_str(), payload.c_str());
+        std::string payload = hex_frame.length() > 18 ? hex_frame.substr(18) : "";
+        ESP_LOGI(TAG, "│  Sequence: 0x%s", seq.c_str());
+        
+        if (!payload.empty()) {
+          ESP_LOGI(TAG, "│  Payload (%zu bytes): %s", payload.length() / 2, payload.c_str());
+          
+          // Try to decode payload - often contains version strings or status
+          std::string ascii_payload = "";
+          for (size_t i = 0; i < payload.length(); i += 2) {
+            if (i + 1 < payload.length()) {
+              int byte = std::stoi(payload.substr(i, 2), nullptr, 16);
+              if (byte >= 32 && byte < 127) {
+                ascii_payload += (char)byte;
+              } else if (byte == 0x0D || byte == 0x0A) {
+                ascii_payload += "\\n";
+              } else {
+                ascii_payload += '.';
+              }
+            }
+          }
+          ESP_LOGI(TAG, "│  ASCII: \"%s\"", ascii_payload.c_str());
+        } else {
+          ESP_LOGI(TAG, "│  (empty response)");
+        }
       }
-      ESP_LOGI(TAG, "  Full frame: %s", hex_frame.c_str());
-    } else if (type == "3D") {
-      // Frame 0x3D - Auth sequence step 2 RESPONSE
-      ESP_LOGI(TAG, "*** Frame 0x3D (Auth Step 2 Response) from gateway");
-      if (hex_frame.length() >= 18) {
-        std::string payload = hex_frame.length() > 18 ? hex_frame.substr(18) : "(none)";
-        ESP_LOGI(TAG, "  Payload=%s", payload.c_str());
-      }
-      ESP_LOGI(TAG, "  Full frame: %s", hex_frame.c_str());
+      ESP_LOGI(TAG, "└─ Full: %s", hex_frame.c_str());
     } else if (type == "3A") {
       // Frame 0x3A - Auth sequence step 1 REQUEST
       ESP_LOGI(TAG, "*** Frame 0x3A (Auth Step 1 Request) from CCA");
@@ -1001,40 +1154,40 @@ void TigoMonitorComponent::process_frame(const std::string &frame) {
       }
       ESP_LOGI(TAG, "  Full frame: %s", hex_frame.c_str());
     } else if (type == "41") {
-      // Frame 0x41 - Unknown command, log both request and response
+      // Frame 0x41 - Batched telemetry query with TUID list
       if (segment == "0B0F") {
-        // Parse the 25-byte payload to understand what it contains
-        // Format: 1201 0B0F 0000 0041 [seq] [25-byte payload]
-        // Header = 9 bytes, then payload
+        // Payload structure (from lmudcd @ 0x344bc):
+        // [count:2] [flags:2] [TUID:2] [TUID:2] ... [session/checksum:12?]
         if (hex_frame.length() >= 68) {  // 9 header bytes (18 hex chars) + 25 payload bytes (50 hex chars)
           std::string payload = hex_frame.substr(18);  // Everything after header
           
-          // Try to decode payload structure
-          ESP_LOGI(TAG, "Frame 0x41 REQUEST from CCA (seq=%s):", hex_frame.substr(16, 2).c_str());
-          ESP_LOGI(TAG, "  Full payload (%d bytes): %s", payload.length() / 2, payload.c_str());
+          ESP_LOGI(TAG, "Frame 0x41 - Batched Telemetry Query (seq=%s):", hex_frame.substr(16, 2).c_str());
+          ESP_LOGI(TAG, "  Payload (%d bytes): %s", payload.length() / 2, payload.c_str());
           
-          // Parse suspected fields (all hex string offsets are *2 for byte positions)
-          if (payload.length() >= 50) {
-            std::string field1 = payload.substr(0, 4);   // Bytes 0-1
-            std::string field2 = payload.substr(4, 8);   // Bytes 2-5 (32-bit value)
-            std::string field3 = payload.substr(12, 4);  // Bytes 6-7
-            std::string field4 = payload.substr(16, 8);  // Bytes 8-11 (4 null bytes?)
-            std::string field5 = payload.substr(24, 8);  // Bytes 12-15
-            std::string field6 = payload.substr(32, 4);  // Bytes 16-17
-            std::string field7 = payload.substr(36, 4);  // Bytes 18-19
-            std::string field8 = payload.substr(40, 4);  // Bytes 20-21
-            std::string field9 = payload.substr(44, 4);  // Bytes 22-23
-            std::string field10 = payload.substr(48, 4); // Bytes 24-25
+          // Decode structure based on binary analysis
+          if (payload.length() >= 8) {
+            // Count field (bytes 0-1, little-endian)
+            uint8_t count_lo = strtol(payload.substr(0, 2).c_str(), nullptr, 16);
+            uint8_t count_hi = strtol(payload.substr(2, 2).c_str(), nullptr, 16);
+            uint16_t device_count = count_lo | (count_hi << 8);
             
-            ESP_LOGI(TAG, "  Field breakdown: [%s] [%s] [%s] [%s]", 
-                     field1.c_str(), field2.c_str(), field3.c_str(), field4.c_str());
-            ESP_LOGI(TAG, "                   [%s] [%s] [%s] [%s] [%s] [%s]",
-                     field5.c_str(), field6.c_str(), field7.c_str(), field8.c_str(), field9.c_str(), field10.c_str());
+            // Flags field (bytes 2-3)
+            std::string flags = payload.substr(4, 4);
+            
+            ESP_LOGI(TAG, "  Device count: %d, Flags: 0x%s", device_count, flags.c_str());
+            
+            // Extract TUID list (2 bytes each, starting at byte 4)
+            if (payload.length() >= 8 && device_count > 0 && device_count < 20) {
+              ESP_LOGI(TAG, "  TUID list:");
+              for (int i = 0; i < device_count && (8 + i * 4) < payload.length(); i++) {
+                std::string tuid = payload.substr(8 + i * 4, 4);
+                uint16_t tuid_val = strtol(tuid.substr(0, 2).c_str(), nullptr, 16) | 
+                                   (strtol(tuid.substr(2, 2).c_str(), nullptr, 16) << 8);
+                ESP_LOGI(TAG, "    [%d] TUID: 0x%s (%d)", i, tuid.c_str(), tuid_val);
+              }
+            }
           }
         }
-        ESP_LOGI(TAG, "Frame 0x41 - Unknown command REQUEST from CCA: %s", hex_frame.c_str());
-      } else {
-        ESP_LOGI(TAG, "Frame 0x41 - Unknown command RESPONSE from gateway: %s", hex_frame.c_str());
       }
     } else if (type == "22") {
       // Frame 0x22 - Unknown short command request
@@ -1056,31 +1209,40 @@ void TigoMonitorComponent::process_frame(const std::string &frame) {
         ESP_LOGI(TAG, "  Compare with OUR Frame 0x26 - look for differences!");
       }
     } else if (type == "27") {
-      // Frame 0x27 - Device list response! Parse device entries
+      // Frame 0x27 - Device list response with TUID→MAC mappings
       if (segment == "0B10") {
-        ESP_LOGI(TAG, "Frame 0x27 - Device list RESPONSE from gateway: %s", hex_frame.c_str());
+        ESP_LOGI(TAG, "Frame 0x27 - Device List Response from gateway");
         
-        // Parse device list payload
-        // Format after header (9 bytes): [device_count (2 bytes)] [device_entries...]
+        // Payload structure (from binary analysis):
+        // [count:2] [TUID:2 MAC:8] [TUID:2 MAC:8] ...
         if (hex_frame.length() >= 22) {  // At least header + count
           std::string payload = hex_frame.substr(18);  // After header
           
-          // First 2 bytes (4 hex chars) = device count
+          // First 2 bytes (little-endian) = device count
           if (payload.length() >= 4) {
-            std::string count_str = payload.substr(0, 4);
-            uint16_t device_count = (uint16_t)strtol(count_str.c_str(), nullptr, 16);
+            uint8_t count_lo = strtol(payload.substr(0, 2).c_str(), nullptr, 16);
+            uint8_t count_hi = strtol(payload.substr(2, 2).c_str(), nullptr, 16);
+            uint16_t device_count = count_lo | (count_hi << 8);
             
             ESP_LOGI(TAG, "  Device count: %u", device_count);
-            ESP_LOGI(TAG, "  Device entries (raw): %s", payload.substr(4).c_str());
             
-            // Each device entry appears to be 12 bytes (24 hex chars)
-            // Format: [unknown_field] [address] [status?]
-            size_t entry_size = 24;  // 12 bytes = 24 hex chars
+            // Each device entry: TUID (2 bytes) + MAC (8 bytes) = 10 bytes (20 hex chars)
+            size_t entry_size = 20;  // 10 bytes = 20 hex chars
             size_t offset = 4;  // Start after count
             
             for (uint16_t i = 0; i < device_count && offset + entry_size <= payload.length(); i++) {
               std::string entry = payload.substr(offset, entry_size);
-              ESP_LOGI(TAG, "    Device %u: %s", i + 1, entry.c_str());
+              
+              // Parse TUID (little-endian)
+              uint8_t tuid_lo = strtol(entry.substr(0, 2).c_str(), nullptr, 16);
+              uint8_t tuid_hi = strtol(entry.substr(2, 2).c_str(), nullptr, 16);
+              uint16_t tuid = tuid_lo | (tuid_hi << 8);
+              
+              // Parse MAC address (8 bytes)
+              std::string mac_hex = entry.substr(4, 16);
+              
+              ESP_LOGI(TAG, "    [%u] TUID: %u (0x%04X), MAC: %s", 
+                      i + 1, tuid, tuid, mac_hex.c_str());
               offset += entry_size;
             }
           }

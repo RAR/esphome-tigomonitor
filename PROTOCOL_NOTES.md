@@ -1,4 +1,13 @@
-# Taptap Protocol Research Notes
+# Tigo Protocol Research Notes
+
+> **⚠️ NOTICE**: Comprehensive protocol documentation has been moved to a dedicated repository:  
+> **📁 Location**: `/home/rar/tigo-protocol-analysis/`  
+> **📖 Main docs**: `docs/INDEX.md` - Complete documentation index  
+> **🔍 Quick ref**: `binary-analysis/QUICK_REFERENCE.md` - Command reference table
+>
+> This file contains legacy notes. For complete analysis, see the dedicated repo.
+
+---
 
 ## Overview
 This document captures research findings about the Taptap proprietary protocol used by Tigo gateways for communication with solar optimizers and the Cloud Connect Advanced (CCA) device.
