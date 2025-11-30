@@ -289,14 +289,20 @@ void TigoMonitorComponent::loop() {
     UBaseType_t stack_watermark = uxTaskGetStackHighWaterMark(NULL);
     size_t stack_free_bytes = stack_watermark * sizeof(StackType_t);
     
-    // Detect significant memory drops (>10KB)
-    if (last_internal_free > 0 && (last_internal_free - internal_free) > 10240) {
-      ESP_LOGW(TAG, "⚠️ MEMORY DROP DETECTED: Internal RAM dropped %zd KB (%zu -> %zu KB)",
-               (last_internal_free - internal_free) / 1024, last_internal_free / 1024, internal_free / 1024);
+    // Detect significant memory drops (>10KB) - use signed comparison to avoid underflow
+    if (last_internal_free > 0 && last_internal_free > internal_free) {
+      ssize_t drop = (ssize_t)last_internal_free - (ssize_t)internal_free;
+      if (drop > 10240) {
+        ESP_LOGW(TAG, "⚠️ MEMORY DROP DETECTED: Internal RAM dropped %zd KB (%zu -> %zu KB)",
+                 drop / 1024, last_internal_free / 1024, internal_free / 1024);
+      }
     }
-    if (last_internal_min > 0 && (last_internal_min - internal_min) > 10240) {
-      ESP_LOGW(TAG, "⚠️ MIN HEAP DROP DETECTED: Minimum heap dropped %zd KB (%zu -> %zu KB)",
-               (last_internal_min - internal_min) / 1024, last_internal_min / 1024, internal_min / 1024);
+    if (last_internal_min > 0 && last_internal_min > internal_min) {
+      ssize_t drop = (ssize_t)last_internal_min - (ssize_t)internal_min;
+      if (drop > 10240) {
+        ESP_LOGW(TAG, "⚠️ MIN HEAP DROP DETECTED: Minimum heap dropped %zd KB (%zu -> %zu KB)",
+                 drop / 1024, last_internal_min / 1024, internal_min / 1024);
+      }
     }
     
     last_internal_free = internal_free;
