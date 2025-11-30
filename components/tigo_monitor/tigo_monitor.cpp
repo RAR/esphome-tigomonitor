@@ -278,6 +278,8 @@ void TigoMonitorComponent::loop() {
 #ifdef USE_ESP_IDF
   // Periodic heap and stack monitoring (every 60 seconds) to detect memory leaks/stack issues
   static unsigned long last_heap_check = 0;
+  static size_t last_internal_free = 0;
+  static size_t last_internal_min = 0;
   unsigned long now = millis();
   if (now - last_heap_check > 60000) {
     last_heap_check = now;
@@ -287,7 +289,20 @@ void TigoMonitorComponent::loop() {
     UBaseType_t stack_watermark = uxTaskGetStackHighWaterMark(NULL);
     size_t stack_free_bytes = stack_watermark * sizeof(StackType_t);
     
-    ESP_LOGD(TAG, "Heap: Internal %zu KB free (%zu KB min), PSRAM %zu KB free, Buffer: %zu bytes",
+    // Detect significant memory drops (>10KB)
+    if (last_internal_free > 0 && (last_internal_free - internal_free) > 10240) {
+      ESP_LOGW(TAG, "⚠️ MEMORY DROP DETECTED: Internal RAM dropped %zd KB (%zu -> %zu KB)",
+               (last_internal_free - internal_free) / 1024, last_internal_free / 1024, internal_free / 1024);
+    }
+    if (last_internal_min > 0 && (last_internal_min - internal_min) > 10240) {
+      ESP_LOGW(TAG, "⚠️ MIN HEAP DROP DETECTED: Minimum heap dropped %zd KB (%zu -> %zu KB)",
+               (last_internal_min - internal_min) / 1024, last_internal_min / 1024, internal_min / 1024);
+    }
+    
+    last_internal_free = internal_free;
+    last_internal_min = internal_min;
+    
+    ESP_LOGI(TAG, "Heap: Internal %zu KB free (%zu KB min), PSRAM %zu KB free, Buffer: %zu bytes",
              internal_free / 1024, internal_min / 1024, psram_free / 1024, buffer_size(incoming_data_));
     ESP_LOGD(TAG, "Stack: %u bytes free (warning if < 512 bytes)", stack_free_bytes);
     
@@ -1988,8 +2003,15 @@ void TigoMonitorComponent::save_node_table() {
   char pref_key[32];
   char empty_data[256] = {0};
   
-  // Clear old entries first
-  for (int i = 0; i < number_of_devices_; i++) {
+  // Count persistent nodes first
+  int persistent_count = 0;
+  for (const auto &node : node_table_) {
+    if (node.is_persistent) persistent_count++;
+  }
+  
+  // Only clear slots we'll actually use (avoid creating excess preference handles)
+  int slots_needed = std::max(persistent_count, 1);  // At least 1 slot for cleanup
+  for (int i = 0; i < slots_needed && i < number_of_devices_; i++) {
     snprintf(pref_key, sizeof(pref_key), "node_%d", i);
     uint32_t hash = esphome::fnv1_hash(pref_key);
     auto save = global_preferences->make_preference<char[256]>(hash);
@@ -2030,6 +2052,11 @@ void TigoMonitorComponent::save_node_table() {
 }
 
 void TigoMonitorComponent::save_peak_power_data() {
+  if (devices_.empty()) {
+    ESP_LOGD(TAG, "No devices to save peak power for");
+    return;
+  }
+  
   // Use stack-allocated buffer instead of heap string to prevent memory leaks
   char pref_key[32];
   int saved_count = 0;
@@ -2629,8 +2656,21 @@ void TigoMonitorComponent::sync_from_cca() {
     return;
   }
   
+#ifdef USE_ESP_IDF
+  size_t heap_before = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+  ESP_LOGI(TAG, "Syncing device configuration from CCA at %s (heap: %zu KB)...", 
+           cca_ip_.c_str(), heap_before / 1024);
+#else
   ESP_LOGI(TAG, "Syncing device configuration from CCA at %s...", cca_ip_.c_str());
+#endif
+  
   query_cca_config();
+  
+#ifdef USE_ESP_IDF
+  size_t heap_after = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+  ESP_LOGI(TAG, "CCA sync complete (heap: %zu KB, delta: %+zd KB)", 
+           heap_after / 1024, (ssize_t)(heap_after - heap_before) / 1024);
+#endif
 }
 
 void TigoMonitorComponent::refresh_cca_data() {
