@@ -766,18 +766,41 @@ void TigoMonitorComponent::process_27_frame(const std::string &hex_frame, size_t
     return;
   }
   
+#ifdef USE_ESP_IDF
+  static unsigned long last_frame27_heap_check = 0;
+  static size_t last_frame27_heap = 0;
+  unsigned long now = millis();
+  
+  // Log heap before processing if it's been >30s since last check
+  if (now - last_frame27_heap_check > 30000) {
+    last_frame27_heap = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+    last_frame27_heap_check = now;
+  }
+#endif
+  
   int num_entries = std::stoi(hex_frame.substr(offset, 4), nullptr, 16);
-  ESP_LOGI(TAG, "Frame 27 received, entries: %d", num_entries);
+  ESP_LOGD(TAG, "Frame 27 received, entries: %d", num_entries);
   
   size_t pos = offset + 4;  // Start after the entry count
   bool table_changed = false;
   
+  // Pre-allocate buffers to avoid repeated heap allocations in loop
+  char long_addr_buf[17];  // 16 chars + null terminator
+  char addr_buf[5];        // 4 chars + null terminator
+  
   for (int i = 0; i < num_entries && pos + 20 <= hex_frame.length(); i++) {
-    std::string long_addr = hex_frame.substr(pos, 16);
-    std::string addr = hex_frame.substr(pos + 16, 4);
+    // Extract to stack buffers instead of creating std::string temporaries
+    memcpy(long_addr_buf, hex_frame.c_str() + pos, 16);
+    long_addr_buf[16] = '\0';
+    memcpy(addr_buf, hex_frame.c_str() + pos + 16, 4);
+    addr_buf[4] = '\0';
     pos += 20;
     
-    ESP_LOGI(TAG, "Frame 27 - Device Identity: addr=%s, long_addr=%s", 
+    // Only create strings when actually needed for storage/comparison
+    std::string long_addr(long_addr_buf);
+    std::string addr(addr_buf);
+    
+    ESP_LOGD(TAG, "Frame 27 - Device Identity: addr=%s, long_addr=%s", 
              addr.c_str(), long_addr.c_str());
     
     // Find or create node table entry
@@ -786,7 +809,7 @@ void TigoMonitorComponent::process_27_frame(const std::string &hex_frame, size_t
       // Update existing node with Frame 27 long address
       if (node->long_address != long_addr) {
         node->long_address = long_addr;
-        ESP_LOGI(TAG, "Updated Frame 27 long address for node %s: %s", addr.c_str(), long_addr.c_str());
+        ESP_LOGD(TAG, "Updated Frame 27 long address for node %s: %s", addr.c_str(), long_addr.c_str());
         table_changed = true;
       }
     } else {
@@ -795,7 +818,9 @@ void TigoMonitorComponent::process_27_frame(const std::string &hex_frame, size_t
         NodeTableData new_node;
         new_node.addr = addr;
         new_node.long_address = long_addr;
-        new_node.checksum = std::string(1, compute_tigo_crc4(addr));
+        // Store checksum as single-char string without temporary allocation
+        char crc_char = compute_tigo_crc4(addr);
+        new_node.checksum.assign(1, crc_char);
         new_node.sensor_index = -1;  // Will be assigned when device becomes active
         new_node.is_persistent = true;
         node_table_.push_back(new_node);
@@ -809,7 +834,7 @@ void TigoMonitorComponent::process_27_frame(const std::string &hex_frame, size_t
     if (device != nullptr) {
       if (device->barcode != long_addr) {
         device->barcode = long_addr;
-        ESP_LOGI(TAG, "Updated existing device %s with Frame 27 long address: %s", addr.c_str(), long_addr.c_str());
+        ESP_LOGD(TAG, "Updated existing device %s with Frame 27 long address: %s", addr.c_str(), long_addr.c_str());
       } else {
         ESP_LOGD(TAG, "Device %s already has Frame 27 long address: %s", addr.c_str(), long_addr.c_str());
       }
@@ -825,8 +850,31 @@ void TigoMonitorComponent::process_27_frame(const std::string &hex_frame, size_t
     }
   }
   
+  // Rate limit node table saves to prevent flash/heap exhaustion during CCA discovery floods
+  // Only save if changed AND it's been >10 seconds since last save
   if (table_changed) {
-    save_node_table();
+    static unsigned long last_node_table_save = 0;
+    unsigned long now = millis();
+    
+    if (now - last_node_table_save > 10000) {
+      save_node_table();
+      last_node_table_save = now;
+      
+#ifdef USE_ESP_IDF
+      // Log heap after Frame 27 processing if we saved
+      if (last_frame27_heap > 0) {
+        size_t heap_after = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+        if ((last_frame27_heap - heap_after) > 5120) {  // >5KB drop
+          ESP_LOGW(TAG, "⚠️ Frame 27 processing caused heap drop: %zu KB -> %zu KB (-%zd KB)",
+                   last_frame27_heap / 1024, heap_after / 1024, 
+                   (last_frame27_heap - heap_after) / 1024);
+        }
+        last_frame27_heap = heap_after;  // Reset for next check
+      }
+#endif
+    } else {
+      ESP_LOGD(TAG, "Deferring node table save (last save %lu ms ago)", now - last_node_table_save);
+    }
   }
 }
 
