@@ -208,6 +208,13 @@ const uint8_t TigoMonitorComponent::tigo_crc_table_[256] = {
 void TigoMonitorComponent::setup() {
   ESP_LOGCONFIG(TAG, "Setting up Tigo Server...");
   
+  // Setup RS485 flow control pin (DE/RE)
+  if (this->flow_control_pin_ != nullptr) {
+    this->flow_control_pin_->setup();
+    this->flow_control_pin_->digital_write(false);  // Start in RX mode (LOW)
+    ESP_LOGI(TAG, "RS485 flow control pin configured (DE/RE control)");
+  }
+  
 #ifdef USE_ESP_IDF
   // Log PSRAM availability
   size_t psram_size = heap_caps_get_total_size(MALLOC_CAP_SPIRAM);
@@ -464,6 +471,13 @@ void TigoMonitorComponent::process_serial_data() {
       // Clear only if we detect garbage (no frame started and buffer has junk)
       if (!frame_started_ && buffer_size(incoming_data_) > 0) {
         size_t buf_size = buffer_size(incoming_data_);
+        // Log buffer contents for debugging
+        std::string buffer_preview = frame_to_hex_string(
+          buffer_substr(incoming_data_, 0, std::min((size_t)50, buf_size))
+        );
+        ESP_LOGI(TAG, "Post-echo buffer (%zu bytes): %s%s", buf_size, 
+                 buffer_preview.c_str(), buf_size > 50 ? "..." : "");
+        
         // Check if buffer starts with frame delimiter
         if (buf_size >= 2 && !(incoming_data_[0] == '\x7E' && incoming_data_[1] == '\x07')) {
           ESP_LOGD(TAG, "Clearing %zu bytes of non-frame data after echo", buf_size);
@@ -898,8 +912,39 @@ void TigoMonitorComponent::process_frame(const std::string &frame) {
     }
   }
   
+  // Minimum frame is 4 bytes (gateway_id + command)
+  // Management commands (0x00-0x05 range) can be header-only with no payload
+  if (hex_frame.length() < 8) {
+    ESP_LOGW(TAG, "Frame too short (< 4 bytes): %s", hex_frame.c_str());
+    return;
+  }
+  
+  // Check if this is a short management command (valid for CCA startup sequence)
+  if (hex_frame.length() == 8) {
+    // 4 bytes = gateway_id (2) + command (2)
+    std::string gateway_addr = hex_frame.substr(0, 4);
+    std::string command = hex_frame.substr(4, 4);
+    
+    // Management commands that can have minimal/no payload:
+    // 0x000A - VERSION_REQUEST, 0x000E - GET_CHANNEL_REQUEST
+    // 0x003A - GET_MAC_REQUEST, 0x003B - GET_MAC_RESPONSE
+    // 0x003C - SET_ID_REQUEST, 0x003D - SET_ID_RESPONSE
+    if (command == "000A" || command == "000E" || 
+        command == "003A" || command == "003B" || 
+        command == "003C" || command == "003D") {
+      ESP_LOGD(TAG, "CCA management frame: GW=%s CMD=0x%s", gateway_addr.c_str(), command.c_str());
+      // These are valid but we don't process them (CCA ↔ Gateway handshake)
+      return;
+    }
+    
+    // Other short frames are suspicious
+    ESP_LOGW(TAG, "Unexpected short frame (4 bytes): %s", hex_frame.c_str());
+    return;
+  }
+  
+  // Frames with segment/payload must be at least 10 bytes (5 byte header minimum)
   if (hex_frame.length() < 10) {
-    ESP_LOGW(TAG, "Frame too short: %s", hex_frame.c_str());
+    ESP_LOGW(TAG, "Frame too short for data payload: %s", hex_frame.c_str());
     return;
   }
   
@@ -3288,7 +3333,7 @@ void TigoMonitorComponent::send_raw_frame(const std::string &escaped_frame) {
   // Strategy: Flush only exact echo bytes, then resume immediately
   suppressing_rx_ = true;
   expected_echo_bytes_ = 7 + escaped_frame.size();  // Controller preamble + frame markers + data
-  rx_suppress_until_ = millis() + 30;  // 30ms timeout for echo + electrical settling time
+  rx_suppress_until_ = millis() + 50;  // 50ms timeout for echo + flow control settling
   
   // Clear any pending RX data BEFORE transmission to start clean
   int pre_flush = 0;
@@ -3303,6 +3348,12 @@ void TigoMonitorComponent::send_raw_frame(const std::string &escaped_frame) {
   // Build complete transmission for logging
   std::string full_tx;
   full_tx.reserve(total_bytes);
+  
+  // RS485 flow control: Set DE/RE HIGH for transmit mode
+  if (this->flow_control_pin_ != nullptr) {
+    this->flow_control_pin_->digital_write(true);
+    delayMicroseconds(10);  // 10µs settling time
+  }
   
   // CRITICAL: Controller preamble (missing this is why gateway wasn't responding!)
   full_tx.push_back(0x00);
@@ -3329,6 +3380,12 @@ void TigoMonitorComponent::send_raw_frame(const std::string &escaped_frame) {
   write_byte(0x08);
   
   flush();
+  
+  // RS485 flow control: Set DE/RE LOW for receive mode
+  if (this->flow_control_pin_ != nullptr) {
+    delayMicroseconds(50);  // 50µs for last byte to finish transmitting
+    this->flow_control_pin_->digital_write(false);
+  }
   
   ESP_LOGI(TAG, "TX: Full transmission (%u bytes): %s", total_bytes, frame_to_hex_string(full_tx).c_str());
   ESP_LOGI(TAG, "TX: Sent %u bytes, pre-flushed %d bytes, RX suppressed for 30ms", 
@@ -3412,7 +3469,8 @@ void TigoMonitorComponent::send_device_discovery_request() {
   send_raw_frame(frame1);
   
   // Step 2: Send Frame 0x0D again with different payload (like CCA)
-  this->set_timeout("discovery_step2", 600, [this, saved_sequence]() {
+  // 650ms delay = 600ms CCA timing + 50ms settling after echo flush
+  this->set_timeout("discovery_step2", 650, [this, saved_sequence]() {
     ESP_LOGI(TAG, "Step 2: Sending second Frame 0x0D (seq=0x%02X)...", command_sequence_);
     std::string config_payload2;
     config_payload2.push_back(0x00);
@@ -3421,7 +3479,8 @@ void TigoMonitorComponent::send_device_discovery_request() {
     send_raw_frame(frame2);
     
     // Step 3: Send Frame 0x26 (node table request)
-    this->set_timeout("discovery_step3", 600, [this, saved_sequence]() {
+    // 650ms delay = 600ms CCA timing + 50ms settling after echo flush
+    this->set_timeout("discovery_step3", 650, [this, saved_sequence]() {
       ESP_LOGI(TAG, "Step 3: Sending Frame 0x26 (node table request, seq=0x%02X)...", command_sequence_);
       
       uint16_t offset = 0x0000;

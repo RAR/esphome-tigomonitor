@@ -4,6 +4,7 @@ import esphome.config_validation as cv
 from esphome.components import uart, time as time_
 from esphome.const import CONF_ID, CONF_UART_ID, CONF_TIME_ID, CONF_NAME
 from esphome.core import coroutine
+from esphome import pins
 
 DEPENDENCIES = ['uart']
 
@@ -19,6 +20,7 @@ CONF_INVERTERS = 'inverters'
 CONF_MPPIS = 'mppts'
 CONF_POWER_CALIBRATION = 'power_calibration'
 CONF_NIGHT_MODE_TIMEOUT = 'night_mode_timeout'
+CONF_FLOW_CONTROL_PIN = 'flow_control_pin'
 
 # Inverter configuration schema
 INVERTER_SCHEMA = cv.Schema({
@@ -37,6 +39,7 @@ CONFIG_SCHEMA = cv.Schema({
     cv.Optional(CONF_INVERTERS): cv.ensure_list(INVERTER_SCHEMA),
     cv.Optional(CONF_POWER_CALIBRATION, default=1.0): cv.float_range(min=0.5, max=2.0),
     cv.Optional(CONF_NIGHT_MODE_TIMEOUT, default=60): cv.int_range(min=1, max=1440),  # 1 minute to 24 hours
+    cv.Optional(CONF_FLOW_CONTROL_PIN): pins.gpio_output_pin_schema,
 }).extend(cv.polling_component_schema('30s')).extend(uart.UART_DEVICE_SCHEMA)
 
 @coroutine
@@ -74,6 +77,11 @@ def to_code(config):
             mppts = inverter_config[CONF_MPPIS]
             # Pass the Python list directly - ESPHome will convert it
             cg.add(var.add_inverter(inverter_name, mppts))
+    
+    # Configure flow control pin (RS485 DE/RE control)
+    if CONF_FLOW_CONTROL_PIN in config:
+        pin = yield cg.gpio_pin_expression(config[CONF_FLOW_CONTROL_PIN])
+        cg.add(var.set_flow_control_pin(pin))
     
     # Add ESP-IDF HTTP client component dependency
     cg.add_library("ESP32 HTTP Client", None)

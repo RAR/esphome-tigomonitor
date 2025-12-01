@@ -14,6 +14,7 @@
 #ifdef USE_BUTTON
 #include "esphome/components/button/button.h"
 #endif
+#include "esphome/core/gpio.h"
 #include <vector>
 #include <map>
 #include <set>
@@ -248,6 +249,9 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
     this->missed_frame_sensor_ = sensor;
     ESP_LOGCONFIG("tigo_monitor", "Registered missed frame sensor");
   }
+  
+  // RS485 flow control pin (DE/RE control)
+  void set_flow_control_pin(GPIOPin *pin) { this->flow_control_pin_ = pin; }
   void add_rssi_sensor(const std::string &address, sensor::Sensor *sensor) { 
     this->rssi_sensors_[address] = sensor; 
     ESP_LOGCONFIG("tigo_monitor", "Registered rssi sensor for address: %s", address.c_str());
@@ -557,6 +561,9 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   
   // Power calibration multiplier (default 1.0 = no adjustment)
   float power_calibration_ = 1.0f;
+  
+  // RS485 flow control (DE/RE pin)
+  GPIOPin *flow_control_pin_{nullptr};
   
 #ifdef USE_ESP_IDF
   // Use PSRAM-backed buffer for incoming serial data (can grow to 16KB)
