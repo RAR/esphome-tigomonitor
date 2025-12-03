@@ -361,8 +361,69 @@ std::map<std::string, NodeInfo> node_table_;
 
 ## Release Process
 
-1. Update `CHANGELOG.md` with new version and date
-2. Update version references in `README.md`
-3. Test on real hardware (AtomS3R recommended)
-4. Git tag: `git tag v1.x.x && git push --tags`
-5. Create GitHub release with changelog excerpt
+### Pre-Release Checklist
+1. **Ensure all changes are on `dev` branch** and tested
+2. **Update `CHANGELOG.md`** with new version, date, and changes:
+   - Group by: Added, Fixed, Changed, Removed
+   - Use descriptive bullet points with context
+3. **Update `CURRENT_VERSION`** in web server JavaScript (release banner):
+   ```cpp
+   // tigo_web_server.cpp line ~2147
+   const CURRENT_VERSION = 'v1.x.x'; // Update this with each release
+   ```
+4. **Compile and verify** no errors: `esphome compile <yaml>`
+
+### Release Steps
+```bash
+# 1. Commit all changes on dev
+git add -A && git commit -m "docs: Update changelog for vX.Y.Z release"
+
+# 2. Merge dev to main
+git checkout main
+git merge dev -m "Merge dev for vX.Y.Z release"
+
+# 3. Create annotated tag
+git tag -a vX.Y.Z -m "Release vX.Y.Z
+
+Key changes:
+- Feature 1
+- Fix 2
+- etc"
+
+# 4. Push everything
+git push origin main
+git push origin dev
+git push origin vX.Y.Z
+
+# 5. Create GitHub release using CLI
+gh release create vX.Y.Z --title "vX.Y.Z" --notes "## What's Changed
+
+### Added
+- Feature descriptions
+
+### Fixed  
+- Bug fix descriptions
+
+**Full Changelog**: https://github.com/RAR/esphome-tigomonitor/compare/vX.Y.Z-1...vX.Y.Z"
+
+# 6. Return to dev for continued work
+git checkout dev
+```
+
+### Post-Release
+- Verify release appears on GitHub releases page
+- Check that release banner on devices shows correct version (won't prompt for update to self)
+- Sync dev with main if any hotfixes were made: `git checkout dev && git merge main`
+
+### Hotfix Process
+If a critical bug is found after release:
+1. Fix on `dev` branch
+2. Update CHANGELOG with patch version (e.g., 1.3.1 → 1.3.2)
+3. Update `CURRENT_VERSION` in web server
+4. Follow normal release steps above
+
+### Version Numbering
+- **Major (X.0.0)**: Breaking changes, major new features
+- **Minor (0.X.0)**: New features, backward compatible
+- **Patch (0.0.X)**: Bug fixes, documentation, cleanup
+
