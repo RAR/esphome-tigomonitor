@@ -321,6 +321,8 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   uint32_t get_invalid_checksum_count() const { return invalid_checksum_count_; }
   uint32_t get_missed_frame_count() const { return missed_frame_count_; }
   uint32_t get_total_frames_processed() const { return total_frames_processed_; }
+  uint32_t get_frame_27_count() const { return frame_27_count_; }
+  uint32_t get_command_frame_count() const { return command_frame_count_; }
   float get_power_calibration() const { return power_calibration_; }
   bool is_in_night_mode() const { return in_night_mode_; }
   
@@ -491,6 +493,8 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   uint32_t invalid_checksum_count_ = 0;
   uint32_t missed_frame_count_ = 0;
   uint32_t total_frames_processed_ = 0;  // Track successful frame processing for miss rate calculation
+  uint32_t frame_27_count_ = 0;  // Track Frame 27 (device list) responses received
+  uint32_t command_frame_count_ = 0;  // Track total command frames (0B10/0B0F)
   
   // Cached display stats (updated during publish_sensor_data to avoid iteration in display lambda)
   int cached_online_count_ = 0;

@@ -1693,6 +1693,8 @@ void TigoWebServer::build_esp_status_json(PSRAMString& json) {
   uint32_t invalid_checksum = parent_->get_invalid_checksum_count();
   uint32_t missed_frames = parent_->get_missed_frame_count();
   uint32_t total_frames = parent_->get_total_frames_processed();
+  uint32_t command_frames = parent_->get_command_frame_count();
+  uint32_t frame_27_count = parent_->get_frame_27_count();
   
   // Get ESP32 internal temperature (using persistent sensor handle)
   float internal_temp = 0.0f;
@@ -1751,6 +1753,7 @@ void TigoWebServer::build_esp_status_json(PSRAMString& json) {
     "\"esphome_version\":\"%s\",\"compilation_time\":\"%s %s\","
     "\"task_count\":%u,\"internal_temp\":%.1f,"
     "\"invalid_checksum\":%u,\"missed_frames\":%u,\"total_frames\":%u,"
+    "\"command_frames\":%u,\"frame_27_count\":%u,"
     "\"network_connected\":%s,\"wifi_rssi\":%d,\"wifi_ssid\":\"%s\",\"ip_address\":\"%s\",\"mac_address\":\"%s\","
     "\"active_sockets\":%d,\"max_sockets\":%d}",
     free_heap, total_heap, free_psram, total_psram,
@@ -1759,6 +1762,7 @@ void TigoWebServer::build_esp_status_json(PSRAMString& json) {
     ESPHOME_VERSION, __DATE__, __TIME__,
     (unsigned int)task_count, internal_temp,
     invalid_checksum, missed_frames, total_frames,
+    command_frames, frame_27_count,
     network_connected ? "true" : "false", wifi_rssi, ssid.c_str(), ip_address.c_str(), mac_address.c_str(),
     active_sockets, max_sockets);
   

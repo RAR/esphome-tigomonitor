@@ -634,9 +634,24 @@ void TigoMonitorComponent::process_frame(const std::string &frame) {
     }
   } else if (segment == "0B10" || segment == "0B0F") {
     // Command request or response
-    std::string type = hex_frame.substr(14, 2);
-    if (type == "27") {
-      process_27_frame(hex_frame, 18);  // Pass offset instead of creating substring
+    // Frame structure: dest(4) + type(4) + len(4) + cmd(4) + seq(2) + payload
+    // Position:        0-3      4-7       8-11     12-15    16-17    18+
+    command_frame_count_++;
+    std::string cmd = hex_frame.substr(12, 4);  // Full 4-char command (e.g., "0027")
+    std::string cmd_byte = hex_frame.substr(14, 2);  // Just the command byte (e.g., "27")
+    
+    // Log all command frames to help debug Frame 27 capture
+    ESP_LOGD(TAG, "Command frame: segment=%s, cmd=%s, len=%zu", 
+             segment.c_str(), cmd.c_str(), hex_frame.length());
+    
+    if (cmd_byte == "27") {
+      frame_27_count_++;
+      ESP_LOGI(TAG, "Frame 27 detected! (#%u) Full frame: %s", frame_27_count_, hex_frame.c_str());
+      process_27_frame(hex_frame, 18);  // Payload starts at position 18
+    } else if (cmd_byte == "26") {
+      ESP_LOGD(TAG, "Frame 26 (device list request) detected");
+    } else if (cmd_byte == "2E" || cmd_byte == "2F") {
+      ESP_LOGV(TAG, "Network status frame %s", cmd_byte.c_str());
     }
     // Handle other command types as needed
   } else if (segment == "0148") {
@@ -766,28 +781,23 @@ void TigoMonitorComponent::process_09_frame(const std::string &frame) {
 }
 
 void TigoMonitorComponent::process_27_frame(const std::string &hex_frame, size_t offset) {
-  // Parse number of entries from the frame starting at offset
-  if (offset + 4 > hex_frame.length()) {
-    ESP_LOGW(TAG, "Frame 27 too short");
+  // Frame 27 format per taptap protocol:
+  // [starting_index:2 bytes (4 hex)] [num_entries:2 bytes (4 hex)] [entries...]
+  // Each entry: [long_address:8 bytes (16 hex)] [pv_node_id:2 bytes (4 hex)] = 20 hex chars
+  
+  if (offset + 8 > hex_frame.length()) {
+    ESP_LOGW(TAG, "Frame 27 too short for header (need %zu, have %zu)", offset + 8, hex_frame.length());
     return;
   }
   
-#ifdef USE_ESP_IDF
-  static unsigned long last_frame27_heap_check = 0;
-  static size_t last_frame27_heap = 0;
-  unsigned long now = millis();
+  // Parse starting_index (first 4 hex chars at offset)
+  int starting_index = std::stoi(hex_frame.substr(offset, 4), nullptr, 16);
   
-  // Log heap before processing if it's been >30s since last check
-  if (now - last_frame27_heap_check > 30000) {
-    last_frame27_heap = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
-    last_frame27_heap_check = now;
-  }
-#endif
+  // Parse num_entries (next 4 hex chars)
+  int num_entries = std::stoi(hex_frame.substr(offset + 4, 4), nullptr, 16);
+  ESP_LOGI(TAG, "Frame 27 received: starting_index=%d, entries=%d", starting_index, num_entries);
   
-  int num_entries = std::stoi(hex_frame.substr(offset, 4), nullptr, 16);
-  ESP_LOGD(TAG, "Frame 27 received, entries: %d", num_entries);
-  
-  size_t pos = offset + 4;  // Start after the entry count
+  size_t pos = offset + 8;  // Start after starting_index (4) + num_entries (4)
   bool table_changed = false;
   
   // Pre-allocate buffers to avoid repeated heap allocations in loop
@@ -820,7 +830,7 @@ void TigoMonitorComponent::process_27_frame(const std::string &hex_frame, size_t
       }
     } else {
       // Create new node table entry for Frame 27 data
-      if (node_table_.size() < number_of_devices_) {
+      if (node_table_.size() < (size_t)number_of_devices_) {
         NodeTableData new_node;
         new_node.addr = addr;
         new_node.long_address = long_addr;
@@ -830,8 +840,12 @@ void TigoMonitorComponent::process_27_frame(const std::string &hex_frame, size_t
         new_node.sensor_index = -1;  // Will be assigned when device becomes active
         new_node.is_persistent = true;
         node_table_.push_back(new_node);
-        ESP_LOGI(TAG, "Created new node entry for Frame 27: addr=%s, long_addr=%s", addr.c_str(), long_addr.c_str());
+        ESP_LOGI(TAG, "Created new node entry for Frame 27: addr=%s, long_addr=%s (table size now %zu)", 
+                 addr.c_str(), long_addr.c_str(), node_table_.size());
         table_changed = true;
+      } else {
+        ESP_LOGW(TAG, "Cannot create node entry for %s - table full (%zu >= %d)", 
+                 addr.c_str(), node_table_.size(), number_of_devices_);
       }
     }
     
@@ -860,26 +874,14 @@ void TigoMonitorComponent::process_27_frame(const std::string &hex_frame, size_t
   // Only save if changed AND it's been >10 seconds since last save
   if (table_changed) {
     static unsigned long last_node_table_save = 0;
-    unsigned long now = millis();
+    unsigned long now_ms = millis();
     
-    if (now - last_node_table_save > 10000) {
+    if (now_ms - last_node_table_save > 10000) {
+      ESP_LOGI(TAG, "Saving node table (Frame 27 updates, %zu entries)", node_table_.size());
       save_node_table();
-      last_node_table_save = now;
-      
-#ifdef USE_ESP_IDF
-      // Log heap after Frame 27 processing if we saved
-      if (last_frame27_heap > 0) {
-        size_t heap_after = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
-        if ((last_frame27_heap - heap_after) > 5120) {  // >5KB drop
-          ESP_LOGW(TAG, "⚠️ Frame 27 processing caused heap drop: %zu KB -> %zu KB (-%zd KB)",
-                   last_frame27_heap / 1024, heap_after / 1024, 
-                   (last_frame27_heap - heap_after) / 1024);
-        }
-        last_frame27_heap = heap_after;  // Reset for next check
-      }
-#endif
+      last_node_table_save = now_ms;
     } else {
-      ESP_LOGD(TAG, "Deferring node table save (last save %lu ms ago)", now - last_node_table_save);
+      ESP_LOGD(TAG, "Deferring node table save (last save %lu ms ago)", now_ms - last_node_table_save);
     }
   }
 }
