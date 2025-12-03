@@ -9,16 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.3.1] - 2025-12-03
 
-### Fixed
-- **Frame 27 Node Table Parsing**
-  - Fixed incorrect payload offset in Frame 27 (Node Table Response) parsing
-  - Previous code read `num_entries` from offset 18, but per taptap protocol that position contains `starting_index`
-  - Correct structure: `[starting_index:4 hex][num_entries:4 hex][entries...]` at offset 18
-  - Now correctly parses all device entries (was only parsing 2 per frame instead of 12)
-  - Node table now properly populates with all device long addresses from gateway
-  - CCA sync now has complete device data to match against
-
 ### Added
+- **CCA Firmware 4.x Support**
+  - Support both 13-byte (pre-4.x) and 15-byte (4.x+) power frame formats
+  - Auto-detect format based on data length field (0x0D vs 0x0F)
+  - Parse slot counter and RSSI from correct positions for each format
+  - Maintains full backward compatibility with older firmware
+  - Addresses issue reported in willglynn/taptap#20
 - **Frame 27 Diagnostic Counters**
   - Added `command_frame_count` to track all 0B10/0B0F command frames received
   - Added `frame_27_count` to track specifically Frame 27 node table responses
@@ -27,6 +24,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Log starting_index and entry count when processing Frame 27
   - Warning when node table is full and cannot create new entries
   - Info log when saving node table after Frame 27 updates
+- **CCA Binary Analysis Documentation** (`CCA_BINARY_ANALYSIS.md`)
+  - Complete 12-byte telemetry format decoded (100% verified)
+  - Command code mapping from reverse engineering
+
+### Fixed
+- **Frame 27 Node Table Parsing**
+  - Fixed incorrect payload offset in Frame 27 (Node Table Response) parsing
+  - Previous code read `num_entries` from offset 18, but per taptap protocol that position contains `starting_index`
+  - Correct structure: `[starting_index:4 hex][num_entries:4 hex][entries...]` at offset 18
+  - Now correctly parses all device entries (was only parsing 2 per frame instead of 12)
+  - Node table now properly populates with all device long addresses from gateway
+  - CCA sync now has complete device data to match against
+- **Midnight Reset Memory Leak**
+  - Fixed preference handle accumulation causing heap fragmentation
+  - Eliminated heap allocations in Frame 27 processing loop
+  - Use stack-allocated buffers instead of std::string temporaries
+- **Heap Monitoring Bug**
+  - Fixed unsigned underflow in heap change calculation
+- **Daily Energy Date Display**
+  - Fixed date calculation for energy history chart labels
 
 ## [1.3.0] - 2025-11-27
 
