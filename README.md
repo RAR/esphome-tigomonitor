@@ -1,6 +1,6 @@
 # ESPHome Tigo Monitor Component
 
-A comprehensive ESPHome component for monitoring Tigo solar power optimizers via UART communication. Built for the ESP-IDF framework and enables real-time monitoring of individual Tigo devices with system-wide power and energy tracking through Home Assistant.
+An ESPHome component for monitoring Tigo solar power optimizers via UART communication. Enables real-time monitoring of individual Tigo devices with system-wide power and energy tracking through Home Assistant.
 
 ## 🌟 Features
 
@@ -9,7 +9,7 @@ A comprehensive ESPHome component for monitoring Tigo solar power optimizers via
 - **Individual Device Monitoring**: Track voltage, current, power, temperature, and RSSI for each Tigo optimizer
 - **System Aggregation**: Total system power, energy production (kWh), and active device count
 - **Device Discovery**: Automatic detection and persistent mapping of Tigo devices
-- **Barcode Identification**: Device identification using Frame 09 and Frame 27 barcode data
+- **Barcode Identification**: Device identification using Frame 27 barcode data
 - **Power Efficiency Analytics**: Conversion efficiency, power factor, duty cycle, and load factor metrics
 - **Device Information**: Firmware version and device info extraction from string responses
 - **Energy Dashboard Integration**: Compatible with Home Assistant's Energy Dashboard
@@ -841,7 +841,7 @@ sensor:
 
 Look for these log messages:
 
-- `📦 Frame 27 received` - Long address (16-char barcode) discovery
+- `Frame 27 received` - Long address (16-char barcode) discovery
 - `New device discovered:` - Power data from new devices
 - `Assigned sensor index X to device YYYY` - Device mapping assignments
 - `Energy data saved at hour boundary` - Hourly energy persistence confirmation
@@ -1020,7 +1020,7 @@ Update the dashboard entity names to match your ESPHome configuration:
    - Check UART wiring and baud rate (38400)
    - Verify Tigo system is communicating
    - Check ESPHome logs for Frame detection
-   - Look for "📦 Frame" messages in logs
+   - Look for "Frame" messages in logs
 
 2. **Devices discovered but no barcodes**
    - Frame 27 data may not be transmitted by all systems immediately
@@ -1105,12 +1105,8 @@ button:
 - **Update Rate**: 30-60 seconds recommended for normal operation
 - **Device Limits**: 
   - **With PSRAM (Recommended):** 36+ devices tested successfully
-  - Without PSRAM: Up to ~10 devices (may work but not supported)
+  - Without PSRAM: Up to ~10 devices 
   - **Strong Recommendation:** Use ESP32-S3 with PSRAM (e.g., M5Stack AtomS3R) for all deployments
-- **Flash Wear Optimization**: Energy data saved hourly at the top of each hour
-  - 24 writes/day (vs 288 with every-10-updates approach)
-  - Flash lifespan: ~11 years @ 100k cycles, ~114 years @ 1M cycles
-  - Maximum data loss: 1 hour of energy on unexpected reboot
 - **PSRAM Optimization**: All HTTP buffers, JSON data, HTML pages, and web server operations use PSRAM when available, automatically falling back to internal RAM if not present
 - **UART Optimization**: ISR in IRAM significantly reduces packet loss
 - **CCA Queries**: HTTP requests add ~2-3 second delay during sync
@@ -1137,19 +1133,9 @@ This project builds upon the excellent work of several open-source contributors:
 - **[Bobsilvio/tigosolar-local](https://github.com/Bobsilvio/tigosolar-local)** - Local monitoring solution for Tigo solar systems with valuable protocol insights
 - **[willglynn/taptap](https://github.com/willglynn/taptap)** - Innovative approach to Tigo system monitoring and reverse engineering insights
 - **[tictactom/tigo_server](https://github.com/tictactom/tigo_server)** - Additional Tigo monitoring implementation and protocol documentation
-- **ESPHome Framework** - Providing the robust platform for ESP32-based home automation components
-
-Special thanks to all the developers who contributed to understanding and documenting the Tigo communication protocols through their open-source work.
-
-## 📞 Support
-
-For issues and questions:
-
-1. Check the troubleshooting section above
-2. Review ESPHome logs for error messages
-3. Open an issue on the project repository
-4. Include your configuration and relevant log excerpts
 
 ---
 
-**Happy Solar Monitoring! ☀️**
+## ⚖️ Trademark Disclaimer
+
+All trademarks, logos, and brand names are the property of their respective owners. All company, product, and service names used in this project are for identification purposes only. Use of these names, trademarks, and brands does not imply endorsement.
