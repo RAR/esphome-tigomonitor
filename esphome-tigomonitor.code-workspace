@@ -1,0 +1,38 @@
+{
+	"folders": [
+		{
+			"path": "."
+		},
+		{
+			"path": "../tigo-protocol-analysis"
+		},
+		{
+			"path": "../tigo_cca_analysis"
+		},
+		{
+			"path": "../esphome-tigo-ble"
+		}
+	],
+	"settings": {
+		"files.associations": {
+			"numeric": "cpp",
+			"text_encoding": "cpp",
+			"thread": "cpp",
+			"vector": "cpp",
+			"cstring": "cpp",
+			"cmath": "cpp",
+			"chrono": "cpp",
+			"array": "cpp",
+			"bitset": "cpp",
+			"string_view": "cpp",
+			"format": "cpp",
+			"initializer_list": "cpp",
+			"ranges": "cpp",
+			"span": "cpp",
+			"regex": "cpp",
+			"cstddef": "cpp",
+			"algorithm": "cpp",
+			"random": "cpp"
+		}
+	}
+}
