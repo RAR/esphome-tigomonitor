@@ -1,149 +1,205 @@
-# Tigo Monitor Custom Web Server
+# Web Server & API
 
-This custom web UI provides a comprehensive dashboard for monitoring your Tigo solar optimizer system. Built using ESP-IDF's HTTP server component, it runs independently from ESPHome's built-in web server.
+The Tigo Monitor includes a built-in web server with dashboard and RESTful API.
 
-## Features
+## Pages
 
-### 📊 Dashboard (`/`)
-- Real-time monitoring of all connected solar panels
-- Live metrics for each device:
-  - Power output (W)
-  - Input/Output voltage (V)
-  - Current (A)
-  - Temperature (°C)
-  - Efficiency (%)
-  - Duty cycle (%)
-  - RSSI signal strength (dBm)
-- Auto-refreshes every 5 seconds
-- System-wide statistics (total power, active devices, averages)
+| Page | URL | Description |
+|------|-----|-------------|
+| Dashboard | `/` | Real-time system overview with device cards |
+| Node Table | `/nodes` | Device registry with CCA labels |
+| ESP32 Status | `/status` | System health, memory, uptime |
+| YAML Config | `/yaml` | Auto-generated sensor configuration |
+| CCA Info | `/cca` | Tigo CCA device status |
 
-### 📈 Overview (`/overview`)
-- System-wide aggregated metrics
-- Total power output
-- Total current
-- Average efficiency across all devices
-- Average temperature
-- Active device count
+![Dashboard](images/Dashboard.png)
 
-### 🗂️ Node Table (`/nodes`)
-- Complete device mapping table
-- Shows all discovered devices
-- Frame 27 long addresses (16-char, primary barcode)
-- Frame 09 barcodes (6-char, fallback)
-- Sensor index assignments
-- Device checksums
+---
 
-### 💾 ESP32 Status (`/status`)
-- System information
-  - Uptime (days, hours, minutes)
-  - ESPHome version
-  - Compilation timestamp
-- Memory usage
-  - Heap memory (free/total with visual progress bar)
-  - PSRAM (if available)
-- Real-time system health monitoring
+## Dashboard Features
 
-### ⚙️ YAML Configuration (`/yaml`)
-- Auto-generated ESPHome YAML configuration
-- Based on discovered devices
-- Copy-to-clipboard functionality
-- Ready to paste into your ESPHome config
-- Updates as new devices are discovered
+### System Statistics
+Six stat cards showing real-time metrics:
+- Total Power (W)
+- Total Current (A)
+- Total Energy (kWh)
+- Active Devices
+- Average Efficiency (%)
+- Average Temperature
 
-## Configuration
+### Device Cards
+- CCA-friendly names (e.g., "East Roof Panel 3")
+- Two-line headers: CCA label + barcode/address
+- Power, voltage, current, temperature, efficiency, RSSI
+- Data age indicators
+- Peak power tracking
 
-Add the web server to your ESPHome YAML configuration:
+### UI Features
+- **Temperature Toggle**: Switch °F/°C (saved to localStorage)
+- **Dark Mode**: Persistent preference
+- **Auto-refresh**: Updates every 5 seconds
+- **Mobile Responsive**: Optimized for all screen sizes
+- **String Grouping**: Devices organized by MPPT/string
 
-```yaml
-tigo_monitor:
-  id: tigo_hub
-  number_of_devices: 20
-  update_interval: 30s
-  web_server:
-    port: 80  # Optional, defaults to 80
-```
+---
+
+## Node Table
+
+![Node Table](images/NodeTable.png)
+
+- Complete device list with sensor assignments
+- CCA panel names and hierarchy (MPPT → String → Panel)
+- Barcode information (Frame 27, 16-char)
+- Validation badges for CCA-matched devices
+- Delete individual nodes with confirmation
+
+---
+
+## ESP32 Status
+
+![ESP32 Status](images/ESP32Status.png)
+
+- **System Info**: Uptime, ESPHome version, compile time
+- **Memory**: Heap and PSRAM usage with progress bars
+- **Minimum Free**: Lowest memory (detect leaks)
+- **Task Count**: Active FreeRTOS tasks
+- **Restart Button**: Remote system restart
+
+---
 
 ## API Endpoints
 
-The web server provides RESTful JSON APIs for all data:
+All endpoints return JSON. Auto-refresh every 5-30 seconds.
 
-- `GET /api/devices` - All device data with metrics
-- `GET /api/overview` - System overview statistics
-- `GET /api/nodes` - Node table mappings
-- `GET /api/status` - ESP32 system status
-- `GET /api/yaml` - Generated YAML configuration
+| Endpoint | Description |
+|----------|-------------|
+| `/api/devices` | Device metrics with string labels |
+| `/api/overview` | System-wide aggregates |
+| `/api/strings` | Per-string aggregated data |
+| `/api/nodes` | Node table with CCA metadata |
+| `/api/status` | ESP32 system status |
+| `/api/yaml` | Generated YAML configuration |
+| `/api/cca` | CCA connection info |
+| `/api/inverters` | Per-inverter aggregates |
+| `/api/restart` | Trigger system restart |
+| `/api/health` | Health check (no auth) |
 
-All API endpoints support CORS for external access.
+### Example Response
+
+```bash
+curl http://192.168.1.100/api/overview
+```
+
+```json
+{
+  "total_power": 4523.5,
+  "total_current": 12.3,
+  "total_energy": 45.6,
+  "active_devices": 20,
+  "avg_efficiency": 96.2,
+  "avg_temperature": 42.5
+}
+```
+
+---
+
+## Authentication
+
+### API Authentication (Bearer Token)
+
+```yaml
+tigo_server:
+  tigo_monitor_id: tigo_hub
+  api_token: "your-secret-token"
+```
+
+Usage:
+```bash
+curl -H "Authorization: Bearer your-secret-token" http://esp32/api/devices
+```
+
+### Web Authentication (HTTP Basic)
+
+```yaml
+tigo_server:
+  tigo_monitor_id: tigo_hub
+  web_username: "admin"
+  web_password: "secure-password"
+```
+
+Browser prompts for credentials. Cached per session.
+
+### Health Check
+
+`/api/health` requires no authentication:
+
+```bash
+curl http://esp32/api/health
+```
+
+```json
+{
+  "status": "ok",
+  "uptime": 12345,
+  "heap_free": 245760,
+  "heap_min_free": 198432
+}
+```
+
+---
+
+## Configuration
+
+```yaml
+tigo_server:
+  tigo_monitor_id: tigo_hub
+  port: 80
+  api_token: "optional-token"
+  web_username: "optional-user"
+  web_password: "optional-pass"
+```
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `tigo_monitor_id` | ID | Required | Reference to tigo_monitor |
+| `port` | Integer | 80 | HTTP port |
+| `api_token` | String | None | Bearer token for API |
+| `web_username` | String | None | HTTP Basic Auth user |
+| `web_password` | String | None | HTTP Basic Auth pass |
+
+---
 
 ## Technical Details
 
-### Framework
-- **HTTP Server**: ESP-IDF native HTTP server (`esp_http_server`)
-- **Framework**: ESP-IDF only (not Arduino)
-- **Port**: Configurable (default 80)
-- **Auto-refresh**: JavaScript-based polling (5-10 seconds)
-
-### Resources
+- **Framework**: ESP-IDF native HTTP server
 - **Stack size**: 8KB per request
-- **Max URI handlers**: 16 routes
-- **Memory**: Optimized for ESP32 with minimal overhead
+- **Max handlers**: 16 routes
+- **CORS**: Enabled for external access
+- **Memory**: PSRAM-backed when available
 
-### Design
-- **Responsive**: Mobile-friendly responsive design
-- **Modern UI**: Clean, professional interface
-- **Real-time**: Auto-updating data without page refresh
-- **Fast**: Minimal JavaScript, no external dependencies
-
-## Usage
-
-1. **Enable in YAML**: Add `web_server:` section to your `tigo_monitor` configuration
-2. **Flash firmware**: Upload to your ESP32
-3. **Connect**: Navigate to `http://<esp32-ip-address>` in your browser
-4. **Monitor**: View real-time data from all your Tigo optimizers
-
-## Pages Overview
-
-### Dashboard
-Perfect for daily monitoring with at-a-glance metrics for all panels.
-
-### Overview  
-Bird's-eye view of entire system performance and statistics.
-
-### Node Table
-Technical view showing device discovery and mapping details.
-
-### ESP32 Status
-Hardware health monitoring and system diagnostics.
-
-### YAML Config
-Quick setup assistant - generates configuration automatically.
-
-## Notes
-
-- Web server runs on ESP32's WiFi interface
-- No external web server required
-- All processing happens on-device
-- Lightweight and fast
-- Perfect for local network monitoring
-- Can be accessed from any device on your network
+---
 
 ## Example URLs
 
-If your ESP32 IP is `192.168.1.100`:
+If ESP32 IP is `192.168.1.100`:
 
-- Dashboard: `http://192.168.1.100/`
-- Overview: `http://192.168.1.100/overview`
-- Nodes: `http://192.168.1.100/nodes`
-- Status: `http://192.168.1.100/status`
-- YAML: `http://192.168.1.100/yaml`
-- API: `http://192.168.1.100/api/devices`
+```
+http://192.168.1.100/           # Dashboard
+http://192.168.1.100/nodes      # Node Table
+http://192.168.1.100/status     # ESP32 Status
+http://192.168.1.100/yaml       # YAML Config
+http://192.168.1.100/cca        # CCA Info
+http://192.168.1.100/api/devices  # JSON API
+```
+
+---
 
 ## Browser Compatibility
 
 Works with all modern browsers:
-- Chrome/Edge
+- Chrome / Edge
 - Firefox
 - Safari
 - Mobile browsers
 
-No plugins or extensions required!
+No plugins required. All processing on-device.
