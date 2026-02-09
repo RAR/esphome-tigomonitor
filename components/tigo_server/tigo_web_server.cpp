@@ -1349,7 +1349,7 @@ void TigoWebServer::build_devices_json(PSRAMString& json) {
     if (dwn.has_runtime_data && dwn.device != nullptr) {
       // Device has runtime data - show actual values
       const auto &device = *dwn.device;
-      float power = device.voltage_out * device.current_in * parent_->get_power_calibration();
+      float power = device.voltage_in * device.current_in * parent_->get_power_calibration();
       // If last_update is 0, device hasn't been updated yet - use ULONG_MAX to indicate "never"
       unsigned long data_age_ms = (device.last_update == 0) ? ULONG_MAX : (millis() - device.last_update);
       float duty_cycle_percent = (device.duty_cycle / 255.0f) * 100.0f;
@@ -1400,7 +1400,7 @@ void TigoWebServer::build_overview_json(PSRAMString& json) {
   int active_devices = 0;
   
   for (const auto &device : devices) {
-    float power = device.voltage_out * device.current_in * parent_->get_power_calibration();
+    float power = device.voltage_in * device.current_in * parent_->get_power_calibration();
     total_power += power;
     total_current += device.current_in;
     avg_efficiency += device.efficiency;
