@@ -123,7 +123,7 @@ curl -H "Authorization: Bearer your-token" http://esp32/api/devices
 
 ### System-Level Sensors
 
-No `address` required:
+No `address` required. Each hub sensor is a separate platform entry — sensor type is **auto-detected from the `name` keywords**:
 
 ```yaml
 sensor:
@@ -142,13 +142,41 @@ sensor:
   - platform: tigo_monitor
     tigo_monitor_id: tigo_hub
     name: "Missed Frame Count"
+
+  - platform: tigo_monitor
+    tigo_monitor_id: tigo_hub
+    name: "Invalid Checksum Count"
+
+  - platform: tigo_monitor
+    tigo_monitor_id: tigo_hub
+    name: "Free Internal RAM"
+
+  - platform: tigo_monitor
+    tigo_monitor_id: tigo_hub
+    name: "Min Free Internal RAM"
+
+  - platform: tigo_monitor
+    tigo_monitor_id: tigo_hub
+    name: "Free PSRAM"
+
+  - platform: tigo_monitor
+    tigo_monitor_id: tigo_hub
+    name: "Free Stack"
 ```
 
 Sensor type is inferred from name keywords:
-- `power` → Total power sensor
-- `energy`, `kwh` → Energy sensor
-- `count`, `device` → Device count sensor
-- `frame`, `missed` → Missed frame counter
+- `power`, `total`, `sum`, `watt`, `system`, `combined` → Total power sensor
+- `energy`, `kwh`, `kilowatt`, `wh` → Energy sensor
+- `count`, `devices`, `discovered`, `active`, `number` → Device count sensor
+- `frame`, `missed`, `lost`, `dropped` → Missed frame counter
+- `checksum`, `invalid`, `crc`, `error` → Invalid checksum counter
+- `internal`, `ram`, `heap` (with `min`/`minimum`/`watermark`) → Min free internal RAM
+- `internal`, `ram`, `heap` (without min keywords) → Free internal RAM
+- `psram` → Free PSRAM sensor
+- `stack` → Free stack sensor
+
+> **Important:** Each hub-level sensor must be its own `- platform: tigo_monitor` entry.
+> Do **not** nest them as sub-keys (e.g., `power_sum:`) under a single platform entry — that format is only for per-device sensors.
 
 ### Individual Device Sensors
 

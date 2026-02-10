@@ -1788,49 +1788,57 @@ void TigoWebServer::build_yaml_json(PSRAMString& json, const std::set<std::strin
   yaml_text.append("sensor:\n");
   
   // Add hub-level sensors if any are selected
+  // Each hub sensor must be its own platform entry with keyword-rich name
+  // (sensor type is inferred from name keywords in sensor.py)
   if (!selected_hub_sensors.empty()) {
     yaml_text.append("  # Hub-level sensors (system-wide, no address required)\n");
-    yaml_text.append("  - platform: tigo_monitor\n");
-    yaml_text.append("    tigo_monitor_id: tigo_hub\n");
+    yaml_text.append("  # Sensor type is auto-detected from name keywords\n");
     
     if (selected_hub_sensors.count("power_sum") > 0) {
-      yaml_text.append("    power_sum:\n");
-      yaml_text.append("      name: \"Total Power\"\n");
+      yaml_text.append("  - platform: tigo_monitor\n");
+      yaml_text.append("    tigo_monitor_id: tigo_hub\n");
+      yaml_text.append("    name: \"Total System Power\"\n\n");
     }
     if (selected_hub_sensors.count("energy_sum") > 0) {
-      yaml_text.append("    energy_sum:\n");
-      yaml_text.append("      name: \"Total Energy\"\n");
+      yaml_text.append("  - platform: tigo_monitor\n");
+      yaml_text.append("    tigo_monitor_id: tigo_hub\n");
+      yaml_text.append("    name: \"Total System Energy\"\n\n");
     }
     if (selected_hub_sensors.count("device_count") > 0) {
-      yaml_text.append("    device_count:\n");
-      yaml_text.append("      name: \"Device Count\"\n");
+      yaml_text.append("  - platform: tigo_monitor\n");
+      yaml_text.append("    tigo_monitor_id: tigo_hub\n");
+      yaml_text.append("    name: \"Active Device Count\"\n\n");
     }
     if (selected_hub_sensors.count("invalid_checksum") > 0) {
-      yaml_text.append("    invalid_checksum:\n");
-      yaml_text.append("      name: \"Invalid Checksum Count\"\n");
+      yaml_text.append("  - platform: tigo_monitor\n");
+      yaml_text.append("    tigo_monitor_id: tigo_hub\n");
+      yaml_text.append("    name: \"Invalid Checksum Count\"\n\n");
     }
     if (selected_hub_sensors.count("missed_frame") > 0) {
-      yaml_text.append("    missed_frame:\n");
-      yaml_text.append("      name: \"Missed Frame Count\"\n");
+      yaml_text.append("  - platform: tigo_monitor\n");
+      yaml_text.append("    tigo_monitor_id: tigo_hub\n");
+      yaml_text.append("    name: \"Missed Frame Count\"\n\n");
     }
     if (selected_hub_sensors.count("internal_ram_free") > 0) {
-      yaml_text.append("    internal_ram_free:\n");
-      yaml_text.append("      name: \"Free Internal RAM\"\n");
+      yaml_text.append("  - platform: tigo_monitor\n");
+      yaml_text.append("    tigo_monitor_id: tigo_hub\n");
+      yaml_text.append("    name: \"Free Internal RAM\"\n\n");
     }
     if (selected_hub_sensors.count("internal_ram_min") > 0) {
-      yaml_text.append("    internal_ram_min:\n");
-      yaml_text.append("      name: \"Min Free Internal RAM\"\n");
+      yaml_text.append("  - platform: tigo_monitor\n");
+      yaml_text.append("    tigo_monitor_id: tigo_hub\n");
+      yaml_text.append("    name: \"Min Free Internal RAM\"\n\n");
     }
     if (selected_hub_sensors.count("psram_free") > 0) {
-      yaml_text.append("    psram_free:\n");
-      yaml_text.append("      name: \"Free PSRAM\"\n");
+      yaml_text.append("  - platform: tigo_monitor\n");
+      yaml_text.append("    tigo_monitor_id: tigo_hub\n");
+      yaml_text.append("    name: \"Free PSRAM\"\n\n");
     }
     if (selected_hub_sensors.count("stack_free") > 0) {
-      yaml_text.append("    stack_free:\n");
-      yaml_text.append("      name: \"Free Stack\"\n");
+      yaml_text.append("  - platform: tigo_monitor\n");
+      yaml_text.append("    tigo_monitor_id: tigo_hub\n");
+      yaml_text.append("    name: \"Free Stack\"\n\n");
     }
-    
-    yaml_text.append("\n");
   }
   
   // Add per-device sensors

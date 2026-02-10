@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **YAML Generator: Hub-level sensor output format** ([#4](https://github.com/RAR/esphome-tigomonitor/issues/4))
+  - YAML config page (`/yaml`) was generating hub-level sensors in a nested sub-key format (`power_sum:`, `energy_sum:`, etc.) under a single platform entry, which is invalid
+  - Hub sensors now correctly generate as separate `- platform: tigo_monitor` entries with keyword-rich names that match the sensor type auto-detection in `sensor.py`
+  - Names updated to use proper keywords: "Total System Power", "Total System Energy", "Active Device Count", etc.
+
+### Changed
+- **Documentation: Expanded system-level sensor reference** in `CONFIGURATION.md`
+  - Added all 9 hub-level sensor types with complete YAML examples (was only showing 4)
+  - Documented full keyword list for each sensor type including all accepted synonyms
+  - Added note clarifying that hub sensors must each be their own platform entry
+
 ## [1.3.1] - 2025-12-03
 
 ### Added
