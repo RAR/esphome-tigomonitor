@@ -37,6 +37,7 @@ CONF_MISSED_FRAME = "missed_frame"
 CONF_VOLTAGE_IN = "voltage_in"
 CONF_VOLTAGE_OUT = "voltage_out"
 CONF_CURRENT_IN = "current_in"
+CONF_CURRENT_OUT = "current_out"
 CONF_DUTY_CYCLE = "duty_cycle"
 CONF_TEMPERATURE = "temperature"
 CONF_RSSI = "rssi"
@@ -46,6 +47,7 @@ CONF_DEVICE_INFO = "device_info"
 CONF_EFFICIENCY = "efficiency"
 CONF_POWER_FACTOR = "power_factor"
 CONF_LOAD_FACTOR = "load_factor"
+CONF_POWER_OUT = "power_out"
 # Memory monitoring (ESP32 only)
 CONF_INTERNAL_RAM_FREE = "internal_ram_free"
 CONF_INTERNAL_RAM_MIN = "internal_ram_min"
@@ -80,8 +82,10 @@ def _auto_template_sensor_config(config):
     sensor_configs = [
         (CONF_POWER, "Power"),
         (CONF_PEAK_POWER, "Peak Power"),
+        (CONF_POWER_OUT, "Output Power"),
         (CONF_VOLTAGE_IN, "Voltage In"),
         (CONF_VOLTAGE_OUT, "Voltage Out"),
+        (CONF_CURRENT_OUT, "Output Current"),
         (CONF_CURRENT_IN, "Current"),
         (CONF_DUTY_CYCLE, "Duty Cycle"),
         (CONF_TEMPERATURE, "Temperature"),
@@ -163,6 +167,12 @@ DEVICE_CONFIG_SCHEMA = cv.All(
             device_class=DEVICE_CLASS_CURRENT,
             state_class=STATE_CLASS_MEASUREMENT,
         ),
+        cv.Optional(CONF_CURRENT_OUT): _tigo_sensor_schema(
+            unit_of_measurement=UNIT_AMPERE,
+            accuracy_decimals=2,
+            device_class=DEVICE_CLASS_CURRENT,
+            state_class=STATE_CLASS_MEASUREMENT,
+        ),
         cv.Optional(CONF_DUTY_CYCLE): _tigo_sensor_schema(
             unit_of_measurement=UNIT_PERCENT,
             accuracy_decimals=1,
@@ -186,6 +196,12 @@ DEVICE_CONFIG_SCHEMA = cv.All(
         cv.Optional(CONF_EFFICIENCY): _tigo_sensor_schema(
             unit_of_measurement=UNIT_PERCENT,
             accuracy_decimals=1,
+            state_class=STATE_CLASS_MEASUREMENT,
+        ),
+        cv.Optional(CONF_POWER_OUT): _tigo_sensor_schema(
+            unit_of_measurement=UNIT_WATT,
+            accuracy_decimals=0,
+            device_class=DEVICE_CLASS_POWER,
             state_class=STATE_CLASS_MEASUREMENT,
         ),
         cv.Optional(CONF_POWER_FACTOR): _tigo_sensor_schema(
@@ -374,8 +390,10 @@ async def to_code(config):
     sensor_configs = [
         (CONF_POWER, hub.add_power_sensor, sensor.new_sensor),
         (CONF_PEAK_POWER, hub.add_peak_power_sensor, sensor.new_sensor),
+        (CONF_POWER_OUT, hub.add_power_out_sensor, sensor.new_sensor),
         (CONF_VOLTAGE_IN, hub.add_voltage_in_sensor, sensor.new_sensor),
         (CONF_VOLTAGE_OUT, hub.add_voltage_out_sensor, sensor.new_sensor),
+        (CONF_CURRENT_OUT, hub.add_current_out_sensor, sensor.new_sensor),
         (CONF_CURRENT_IN, hub.add_current_in_sensor, sensor.new_sensor),
         (CONF_DUTY_CYCLE, hub.add_duty_cycle_sensor, sensor.new_sensor),
         (CONF_TEMPERATURE, hub.add_temperature_sensor, sensor.new_sensor),

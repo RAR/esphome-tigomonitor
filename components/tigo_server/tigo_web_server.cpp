@@ -1356,17 +1356,17 @@ void TigoWebServer::build_devices_json(PSRAMString& json) {
       
       snprintf(buffer, sizeof(buffer),
         "{\"addr\":\"%s\",\"barcode\":\"%s\",\"name\":\"%s\",\"string_label\":\"%s\",\"voltage_in\":%.2f,\"voltage_out\":%.2f,"
-        "\"current\":%.3f,\"power\":%.1f,\"peak_power\":%.1f,\"temperature\":%.1f,\"rssi\":%d,"
+        "\"current\":%.3f,\"current_out\":%.3f,\"power\":%.1f,\"power_out\":%.1f,\"peak_power\":%.1f,\"temperature\":%.1f,\"rssi\":%d,"
         "\"duty_cycle\":%.1f,\"efficiency\":%.2f,\"data_age_ms\":%lu}",
         device.addr.c_str(), device.barcode.c_str(), device_name.c_str(), string_label.c_str(), device.voltage_in, device.voltage_out,
-        device.current_in, power, device.peak_power, device.temperature, device.rssi,
+        device.current_in, device.current_out, power, device.power_out, device.peak_power, device.temperature, device.rssi,
         duty_cycle_percent, device.efficiency, data_age_ms);
     } else {
       // Device is known but has no runtime data yet (e.g., ESP32 restarted at night)
       // Show zeros with a very large data_age to indicate no recent data
       snprintf(buffer, sizeof(buffer),
         "{\"addr\":\"%s\",\"barcode\":\"%s\",\"name\":\"%s\",\"string_label\":\"%s\",\"voltage_in\":0.00,\"voltage_out\":0.00,"
-        "\"current\":0.000,\"power\":0.0,\"peak_power\":0.0,\"temperature\":0.0,\"rssi\":0,"
+        "\"current\":0.000,\"current_out\":0.000,\"power\":0.0,\"power_out\":0.0,\"peak_power\":0.0,\"temperature\":0.0,\"rssi\":0,"
         "\"duty_cycle\":0.0,\"efficiency\":0.00,\"data_age_ms\":999999999}",
         dwn.addr.c_str(), dwn.barcode.c_str(), device_name.c_str(), string_label.c_str());
     }

@@ -732,20 +732,34 @@ void TigoMonitorComponent::process_power_frame(const std::string &frame) {
   }
   
   // Calculate additional sensor values
-  // Efficiency calculation (output power / input power * 100)
-  float input_power = data.voltage_in * data.current_in;
-  float output_power = data.voltage_in * data.current_in;  // 100% efficiency: power_in = power_out
+  // Normalize duty cycle to 0..1 (duty cycle is raw 0-255 from device)
+  float duty_norm = static_cast<float>(data.duty_cycle) / 255.0f;
+  if (duty_norm < 0.001f) duty_norm = 0.0f;  // avoid tiny non-zero values
+
+  // Calculate output current: I_out = I_in / duty_cycle_normalized
+  if (duty_norm <= 0.0f) {
+    // Safety: if duty cycle is zero, fallback to input current
+    data.current_out = data.current_in;
+  } else {
+    data.current_out = data.current_in / duty_norm;
+  }
+
+  // Calculate input and output power and apply power calibration to both
+  float input_power = data.voltage_in * data.current_in * this->power_calibration_;
+  data.power_out = data.voltage_out * data.current_out * this->power_calibration_;
+
+  // Efficiency = power_out / power_in (expressed as percentage to preserve compatibility)
   if (input_power > 0.0f) {
-    data.efficiency = (output_power / input_power) * 100.0f;
+    data.efficiency = (data.power_out / input_power) * 100.0f;
   } else {
     data.efficiency = 0.0f;
   }
-  
+
   // Power factor (assuming unity for DC systems, can be customized)
   data.power_factor = 1.0f;
-  
-  // Load factor (duty cycle as decimal)
-  data.load_factor = data.duty_cycle / 100.0f;
+
+  // Load factor (duty cycle as decimal 0..1)
+  data.load_factor = duty_norm;
   
   // Firmware version (placeholder - would need to be extracted from other frames if available)
   data.firmware_version = "unknown";
@@ -1205,6 +1219,18 @@ void TigoMonitorComponent::publish_sensor_data() {
         if (power_it != power_sensors_.end()) {
           power_it->second->publish_state(0.0f);
         }
+
+        // Publish zero output current
+        auto current_out_it = current_out_sensors_.find(device.addr);
+        if (current_out_it != current_out_sensors_.end()) {
+          current_out_it->second->publish_state(0.0f);
+        }
+
+        // Publish zero output power
+        auto power_out_it = power_out_sensors_.find(device.addr);
+        if (power_out_it != power_out_sensors_.end()) {
+          power_out_it->second->publish_state(0.0f);
+        }
         
         // Publish zero RSSI
         auto rssi_it = rssi_sensors_.find(device.addr);
@@ -1278,6 +1304,13 @@ void TigoMonitorComponent::publish_sensor_data() {
       current_in_it->second->publish_state(device.current_in);
       ESP_LOGD(TAG, "Published current for %s: %.3fA", device.addr.c_str(), device.current_in);
     }
+
+      // Publish output current sensor
+      auto current_out_it = current_out_sensors_.find(device.addr);
+      if (current_out_it != current_out_sensors_.end()) {
+        current_out_it->second->publish_state(device.current_out);
+        ESP_LOGD(TAG, "Published output current for %s: %.3fA", device.addr.c_str(), device.current_out);
+      }
     
     // Publish temperature sensor
     auto temperature_it = temperature_sensors_.find(device.addr);
@@ -1298,6 +1331,13 @@ void TigoMonitorComponent::publish_sensor_data() {
         device.peak_power = power;
         ESP_LOGD(TAG, "New peak power for %s: %.0fW", device.addr.c_str(), device.peak_power);
       }
+    }
+
+    // Publish output power sensor
+    auto power_out_it = power_out_sensors_.find(device.addr);
+    if (power_out_it != power_out_sensors_.end()) {
+      power_out_it->second->publish_state(device.power_out);
+      ESP_LOGD(TAG, "Published output power for %s: %.0fW", device.addr.c_str(), device.power_out);
     }
     
     // Publish peak power sensor (always publish current peak)
@@ -1557,6 +1597,16 @@ void TigoMonitorComponent::publish_sensor_data() {
     auto power_it = power_sensors_.find(node.addr);
     if (power_it != power_sensors_.end()) {
       power_it->second->publish_state(0.0f);
+    }
+
+    auto current_out_it = current_out_sensors_.find(node.addr);
+    if (current_out_it != current_out_sensors_.end()) {
+      current_out_it->second->publish_state(0.0f);
+    }
+
+    auto power_out_it = power_out_sensors_.find(node.addr);
+    if (power_out_it != power_out_sensors_.end()) {
+      power_out_it->second->publish_state(0.0f);
     }
     
     auto peak_power_it = peak_power_sensors_.find(node.addr);
@@ -1818,6 +1868,8 @@ void TigoMonitorComponent::generate_sensor_yaml() {
       ESP_LOGI(TAG, "    power: {}");
       ESP_LOGI(TAG, "    voltage_in: {}");
       ESP_LOGI(TAG, "    voltage_out: {}");
+      ESP_LOGI(TAG, "    power_out: {}");
+      ESP_LOGI(TAG, "    current_out: {}");
       ESP_LOGI(TAG, "    current_in: {}");
       ESP_LOGI(TAG, "    temperature: {}");
       ESP_LOGI(TAG, "    rssi: {}");
@@ -1840,6 +1892,8 @@ void TigoMonitorComponent::generate_sensor_yaml() {
       ESP_LOGI(TAG, "    power: {}");
       ESP_LOGI(TAG, "    voltage_in: {}");
       ESP_LOGI(TAG, "    voltage_out: {}");
+      ESP_LOGI(TAG, "    power_out: {}");
+      ESP_LOGI(TAG, "    current_out: {}");
       ESP_LOGI(TAG, "    current_in: {}");
       ESP_LOGI(TAG, "    temperature: {}");
       ESP_LOGI(TAG, "    rssi: {}");

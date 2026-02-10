@@ -97,12 +97,14 @@ struct DeviceData {
   float voltage_out;
   uint8_t duty_cycle;
   float current_in;
+  float current_out;
   float temperature;
   std::string slot_counter;
   int rssi;
   std::string barcode;
   std::string firmware_version;
   float efficiency;
+  float power_out;
   float power_factor;
   float load_factor;
   bool changed = false;
@@ -202,6 +204,10 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
     this->current_in_sensors_[address] = sensor; 
     ESP_LOGCONFIG("tigo_monitor", "Registered current_in sensor for address: %s", address.c_str());
   }
+  void add_current_out_sensor(const std::string &address, sensor::Sensor *sensor) {
+    this->current_out_sensors_[address] = sensor;
+    ESP_LOGCONFIG("tigo_monitor", "Registered current_out sensor for address: %s", address.c_str());
+  }
   void add_temperature_sensor(const std::string &address, sensor::Sensor *sensor) { 
     this->temperature_sensors_[address] = sensor; 
     ESP_LOGCONFIG("tigo_monitor", "Registered temperature sensor for address: %s", address.c_str());
@@ -209,6 +215,10 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   void add_power_sensor(const std::string &address, sensor::Sensor *sensor) { 
     this->power_sensors_[address] = sensor; 
     ESP_LOGCONFIG("tigo_monitor", "Registered power sensor for address: %s", address.c_str());
+  }
+  void add_power_out_sensor(const std::string &address, sensor::Sensor *sensor) { 
+    this->power_out_sensors_[address] = sensor; 
+    ESP_LOGCONFIG("tigo_monitor", "Registered power_out sensor for address: %s", address.c_str());
   }
   void add_peak_power_sensor(const std::string &address, sensor::Sensor *sensor) { 
     this->peak_power_sensors_[address] = sensor; 
@@ -437,6 +447,8 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   psram_map<std::string, sensor::Sensor*> current_in_sensors_;
   psram_map<std::string, sensor::Sensor*> temperature_sensors_;
   psram_map<std::string, sensor::Sensor*> power_sensors_;
+  psram_map<std::string, sensor::Sensor*> power_out_sensors_;
+  psram_map<std::string, sensor::Sensor*> current_out_sensors_;
   psram_map<std::string, sensor::Sensor*> peak_power_sensors_;
   psram_map<std::string, sensor::Sensor*> rssi_sensors_;
   psram_map<std::string, text_sensor::TextSensor*> barcode_sensors_;
@@ -457,6 +469,8 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   std::map<std::string, sensor::Sensor*> current_in_sensors_;
   std::map<std::string, sensor::Sensor*> temperature_sensors_;
   std::map<std::string, sensor::Sensor*> power_sensors_;
+  std::map<std::string, sensor::Sensor*> power_out_sensors_;
+  std::map<std::string, sensor::Sensor*> current_out_sensors_;
   std::map<std::string, sensor::Sensor*> peak_power_sensors_;
   std::map<std::string, sensor::Sensor*> rssi_sensors_;
   std::map<std::string, text_sensor::TextSensor*> barcode_sensors_;
