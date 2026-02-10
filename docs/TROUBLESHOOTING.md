@@ -88,6 +88,22 @@ esp32:
 | Without PSRAM | ~10 devices | Not recommended, unstable with web UI |
 | With PSRAM | 36+ devices | Tested stable |
 
+### PSRAM Not Detected After Enabling
+
+**Symptoms:**
+- ESP32 crashes and rolls back to previous firmware
+- Logs show `OTA rollback detected! Rolled back from partition 'app1'`
+- PSRAM not recognized despite `esptool.py` confirming it exists
+
+**Cause:** ESPHome does not rebuild the bootloader when changing PSRAM configuration. The old bootloader doesn't initialize PSRAM, causing boot failure.
+
+**Solution:**
+1. Clean ESPHome build files: `esphome clean <yaml>`
+2. Erase flash completely: `esptool.py erase_flash`
+3. Flash again: `esphome run <yaml>`
+
+This forces a fresh bootloader build with PSRAM support enabled.
+
 ---
 
 ## CCA Integration
@@ -165,11 +181,54 @@ tigo_monitor:
 
 ## Compilation Errors
 
+### `fatal error: esphome/components/sensor/sensor.h: No such file or directory`
+
+**Cause:** ESPHome only generates `#include` headers for components that are declared in your YAML. The tigo_monitor C++ code includes `sensor/sensor.h`, `text_sensor/text_sensor.h`, and `binary_sensor/binary_sensor.h`, so these must exist in your config.
+
+**Solution:** Add stub sections to your YAML (even if empty):
+
+```yaml
+sensor:
+
+text_sensor:
+
+binary_sensor:
+```
+
+You can add actual sensors later — the empty declarations are enough to trigger header generation.
+
 ### "has no member" Error
 
 **Cause:** Method renamed during refactoring.
 
 **Solution:** Update to latest component version, or check for stale method names.
+
+### external_components Not Loading
+
+**Cause:** The shorthand `github://` format may not resolve correctly depending on ESPHome version.
+
+**Solution:** Use the expanded format:
+
+```yaml
+external_components:
+  - source:
+      type: git
+      url: https://github.com/RAR/esphome-tigomonitor
+    components: [ tigo_monitor, tigo_server ]
+    refresh: 0s
+```
+
+For a specific release:
+
+```yaml
+external_components:
+  - source:
+      type: git
+      url: https://github.com/RAR/esphome-tigomonitor
+      ref: v1.3.1
+    components: [ tigo_monitor, tigo_server ]
+    refresh: 0s
+```
 
 ### ESP-IDF Errors
 

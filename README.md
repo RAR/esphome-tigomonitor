@@ -42,15 +42,20 @@ esphome:
   name: tigo-monitor
 
 esp32:
-  board: esp32dev
+  board: esp32-s3-devkitc-1
   framework:
     type: esp-idf
     sdkconfig_options:
       CONFIG_UART_ISR_IN_IRAM: "y"
 
 external_components:
-  - source: github://RAR/esphome-tigomonitor
+  - source:
+      type: git
+      url: https://github.com/RAR/esphome-tigomonitor
     components: [ tigo_monitor, tigo_server ]
+    refresh: 0s
+
+logger:
 
 wifi:
   ssid: !secret wifi_ssid
@@ -80,6 +85,10 @@ tigo_server:
 
 ### 3. Add Sensors
 
+> **Important:** You must declare `sensor:`, `text_sensor:`, and `binary_sensor:` sections
+> (even if empty) so ESPHome generates the required C++ headers. Without them, compilation will fail
+> with `fatal error: esphome/components/sensor/sensor.h: No such file or directory`.
+
 ```yaml
 sensor:
   # System totals
@@ -91,7 +100,7 @@ sensor:
     tigo_monitor_id: tigo_hub
     name: "Total System Energy"
 
-  # Individual device
+  # Individual device (address from web UI discovery)
   - platform: tigo_monitor
     tigo_monitor_id: tigo_hub
     address: "1234"
@@ -102,6 +111,11 @@ sensor:
     current_in: {}
     temperature: {}
     efficiency: {}
+
+# Required even if empty — ensures ESPHome generates component headers
+text_sensor:
+
+binary_sensor:
 ```
 
 ### 4. Access Web Interface
@@ -138,6 +152,24 @@ esp32:
       CONFIG_SPIRAM_MODE_OCT: "y"
       CONFIG_SPIRAM_SPEED_80M: "y"
 ```
+
+For generic ESP32-S3 boards (e.g., DevKitC-1):
+
+```yaml
+esp32:
+  board: esp32-s3-devkitc-1
+  variant: esp32s3
+  framework:
+    type: esp-idf
+
+psram:
+  mode: octal
+  speed: 80MHz
+```
+
+> **Tip:** If you previously flashed without PSRAM and are now enabling it, you must
+> clean the ESPHome build files **and** erase the ESP32 flash completely (e.g., `esptool.py erase_flash`).
+> ESPHome does not rebuild the bootloader automatically when PSRAM settings change.
 
 ## Management Buttons
 

@@ -14,10 +14,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Names updated to use proper keywords: "Total System Power", "Total System Energy", "Active Device Count", etc.
 
 ### Changed
+- **Documentation: Quick Start overhaul** ([#3](https://github.com/RAR/esphome-tigomonitor/issues/3))
+  - `external_components` now uses expanded `type: git` / `url:` format instead of shorthand `github://` which may not resolve correctly
+  - Board changed from `esp32dev` to `esp32-s3-devkitc-1` (generic ESP32-S3)
+  - Added `logger:` to base config
+  - Added required empty `sensor:`, `text_sensor:`, `binary_sensor:` stub sections with explanation — without these, compilation fails due to missing generated headers
+  - Added generic ESP32-S3 PSRAM config example alongside existing M5Stack example
+  - Added PSRAM bootloader gotcha: must clean build + erase flash when switching from non-PSRAM to PSRAM config
 - **Documentation: Expanded system-level sensor reference** in `CONFIGURATION.md`
   - Added all 9 hub-level sensor types with complete YAML examples (was only showing 4)
   - Documented full keyword list for each sensor type including all accepted synonyms
   - Added note clarifying that hub sensors must each be their own platform entry
+- **Troubleshooting: New sections**
+  - Added fix for `fatal error: sensor/sensor.h: No such file or directory` compile error
+  - Added `external_components` loading troubleshooting with correct format examples
+  - Added PSRAM not detected after enabling (bootloader rebuild required)
 
 ## [1.3.1] - 2025-12-03
 
