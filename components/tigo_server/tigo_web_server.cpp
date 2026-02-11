@@ -2291,12 +2291,20 @@ void TigoWebServer::get_dashboard_html(PSRAMString& html) {
                   <span class="metric-value">${device.power.toFixed(1)} W</span>
                 </div>
                 <div class="metric">
+                  <span class="metric-label">Power Out</span>
+                  <span class="metric-value">${device.power_out.toFixed(1)} W</span>
+                </div>
+                <div class="metric">
                   <span class="metric-label">Peak Power</span>
                   <span class="metric-value">${device.peak_power.toFixed(1)} W</span>
                 </div>
                 <div class="metric">
                   <span class="metric-label">Current</span>
                   <span class="metric-value">${device.current.toFixed(3)} A</span>
+                </div>
+                <div class="metric">
+                  <span class="metric-label">Current Out</span>
+                  <span class="metric-value">${device.current_out.toFixed(3)} A</span>
                 </div>
                 <div class="metric">
                   <span class="metric-label">Voltage In</span>
