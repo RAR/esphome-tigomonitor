@@ -732,34 +732,51 @@ void TigoMonitorComponent::process_power_frame(const std::string &frame) {
   }
   
   // Calculate additional sensor values
+  // Detect optimizer vs monitor-only (TS4-A-S) modules.
+  // Heuristic: if Voltage_out is essentially zero while Voltage_in is valid (>1V),
+  // treat as monitor-only and override output values to mirror input.
+  bool is_monitor_only = (data.voltage_out <= 0.001f && data.voltage_in > 1.0f);
+  data.is_optimizer = !is_monitor_only;
+
   // Normalize duty cycle to 0..1 (duty cycle is raw 0-255 from device)
   float duty_norm = static_cast<float>(data.duty_cycle) / 255.0f;
   if (duty_norm < 0.001f) duty_norm = 0.0f;  // avoid tiny non-zero values
 
-  // Calculate output current: I_out = I_in / duty_cycle_normalized
-  if (duty_norm <= 0.0f) {
-    // Safety: if duty cycle is zero, fallback to input current
-    data.current_out = data.current_in;
-  } else {
-    data.current_out = data.current_in / duty_norm;
-  }
-
-  // Calculate input and output power and apply power calibration to both
+  // Calculate input power (apply calibration)
   float input_power = data.voltage_in * data.current_in * this->power_calibration_;
-  data.power_out = data.voltage_out * data.current_out * this->power_calibration_;
 
-  // Efficiency = power_out / power_in (expressed as percentage to preserve compatibility)
-  if (input_power > 0.0f) {
-    data.efficiency = (data.power_out / input_power) * 100.0f;
+  if (is_monitor_only) {
+    // Monitor-only device: outputs mirror inputs
+    data.voltage_out = data.voltage_in;
+    data.current_out = data.current_in;
+    data.power_out = input_power;  // Output power equals input power
+    data.duty_cycle = 255;         // Hard-code duty cycle to 100%
+    duty_norm = 1.0f;
+    data.efficiency = 100.0f;      // Hard-code efficiency to 100%
+    data.load_factor = duty_norm;
   } else {
-    data.efficiency = 0.0f;
+    // Optimizer device: compute based on duty cycle
+    if (duty_norm <= 0.0f) {
+      // Safety: if duty cycle is zero, fallback to input current
+      data.current_out = data.current_in;
+    } else {
+      data.current_out = data.current_in / duty_norm;
+    }
+
+    // Calculate output power and efficiency
+    data.power_out = data.voltage_out * data.current_out * this->power_calibration_;
+    if (input_power > 0.0f) {
+      data.efficiency = (data.power_out / input_power) * 100.0f;
+    } else {
+      data.efficiency = 0.0f;
+    }
+
+    // Load factor (duty cycle as decimal 0..1)
+    data.load_factor = duty_norm;
   }
 
   // Power factor (assuming unity for DC systems, can be customized)
   data.power_factor = 1.0f;
-
-  // Load factor (duty cycle as decimal 0..1)
-  data.load_factor = duty_norm;
   
   // Firmware version (placeholder - would need to be extracted from other frames if available)
   data.firmware_version = "unknown";
@@ -1268,8 +1285,14 @@ void TigoMonitorComponent::publish_sensor_data() {
         power_sum_sensor_->publish_state(0.0f);
       }
       
+      // Publish zero power out sum
+      if (power_out_sum_sensor_ != nullptr) {
+        power_out_sum_sensor_->publish_state(0.0f);
+      }
+      
       // Update cached values for display
       cached_total_power_ = 0.0f;
+      cached_total_power_out_ = 0.0f;
       cached_online_count_ = 0;
       
       ESP_LOGI(TAG, "Night mode: Zero values published for %zu devices", devices_.size());
@@ -1466,6 +1489,18 @@ void TigoMonitorComponent::publish_sensor_data() {
     
     power_sum_sensor_->publish_state(total_power);
     ESP_LOGD(TAG, "Published power sum: %.0fW from %d devices (%d online)", total_power, active_devices, online_count);
+    
+    // Calculate and publish power output sum sensor if configured
+    if (power_out_sum_sensor_ != nullptr) {
+      float total_power_out = 0.0f;
+      for (const auto &device : devices_) {
+        total_power_out += device.power_out;
+      }
+      
+      cached_total_power_out_ = total_power_out;
+      power_out_sum_sensor_->publish_state(total_power_out);
+      ESP_LOGD(TAG, "Published power out sum: %.0fW from %d devices", total_power_out, active_devices);
+    }
     
     // Calculate and publish energy sum sensor if configured
     if (energy_sum_sensor_ != nullptr) {

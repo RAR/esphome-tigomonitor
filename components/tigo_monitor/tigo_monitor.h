@@ -110,6 +110,8 @@ struct DeviceData {
   bool changed = false;
   unsigned long last_update = 0;
   float peak_power = 0.0f;  // Historical peak power (watts)
+  // True if this device is an optimizer (produces V_out != 0). False for monitor-only modules.
+  bool is_optimizer = true;
 };
 
 struct NodeTableData {
@@ -227,6 +229,10 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   void add_power_sum_sensor(sensor::Sensor *sensor) { 
     this->power_sum_sensor_ = sensor; 
     ESP_LOGCONFIG("tigo_monitor", "Registered power sum sensor");
+  }
+  void add_power_out_sum_sensor(sensor::Sensor *sensor) { 
+    this->power_out_sum_sensor_ = sensor; 
+    ESP_LOGCONFIG("tigo_monitor", "Registered power out sum sensor");
   }
   void add_energy_sum_sensor(sensor::Sensor *sensor) { 
     this->energy_sum_sensor_ = sensor; 
@@ -481,6 +487,7 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   std::map<std::string, sensor::Sensor*> load_factor_sensors_;
 #endif
   sensor::Sensor* power_sum_sensor_ = nullptr;
+  sensor::Sensor* power_out_sum_sensor_ = nullptr;
   sensor::Sensor* energy_sum_sensor_ = nullptr;
   sensor::Sensor* device_count_sensor_ = nullptr;
   sensor::Sensor* invalid_checksum_sensor_ = nullptr;
@@ -513,6 +520,7 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   // Cached display stats (updated during publish_sensor_data to avoid iteration in display lambda)
   int cached_online_count_ = 0;
   float cached_total_power_ = 0.0f;
+  float cached_total_power_out_ = 0.0f;
   
   // Midnight reset tracking
   bool reset_at_midnight_ = false;  // Global flag to reset peak power and energy at midnight

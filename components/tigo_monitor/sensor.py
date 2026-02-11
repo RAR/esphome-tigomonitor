@@ -30,6 +30,7 @@ DEPENDENCIES = ['tigo_monitor']
 CONF_POWER = "power"
 CONF_PEAK_POWER = "peak_power"
 CONF_POWER_SUM = "power_sum"
+CONF_POWER_OUT_SUM = "power_out_sum"
 CONF_ENERGY_SUM = "energy_sum"
 CONF_DEVICE_COUNT = "device_count"
 CONF_INVALID_CHECKSUM = "invalid_checksum"
@@ -227,6 +228,16 @@ POWER_SUM_CONFIG_SCHEMA = sensor.sensor_schema(
     cv.GenerateID(CONF_TIGO_MONITOR_ID): cv.use_id(TigoMonitorComponent),
 }).extend(cv.COMPONENT_SCHEMA)
 
+# Schema for power output sum sensor (no address required)
+POWER_OUT_SUM_CONFIG_SCHEMA = sensor.sensor_schema(
+    unit_of_measurement=UNIT_WATT,
+    accuracy_decimals=0,
+    device_class=DEVICE_CLASS_POWER,
+    state_class=STATE_CLASS_MEASUREMENT,
+).extend({
+    cv.GenerateID(CONF_TIGO_MONITOR_ID): cv.use_id(TigoMonitorComponent),
+}).extend(cv.COMPONENT_SCHEMA)
+
 # Schema for energy sum sensor (no address required)
 ENERGY_SUM_CONFIG_SCHEMA = sensor.sensor_schema(
     unit_of_measurement=UNIT_KILOWATT_HOURS,
@@ -306,7 +317,8 @@ def _validate_config(config):
     # Check sensor type by name keywords
     sensor_name = config.get(CONF_NAME, "").lower()
     has_energy_keywords = any(keyword in sensor_name for keyword in ["energy", "kwh", "kilowatt", "wh"])
-    has_power_keywords = any(keyword in sensor_name for keyword in ["power", "watt", "total", "sum", "combined", "system"])
+    has_output_power_keywords = any(keyword in sensor_name for keyword in ["output power", "power out", "p_out", "p out"])
+    has_power_keywords = any(keyword in sensor_name for keyword in ["power", "watt", "total", "sum", "combined", "system"]) and not has_output_power_keywords
     has_count_keywords = any(keyword in sensor_name for keyword in ["count", "devices", "discovered", "active", "number"])
     has_checksum_keywords = any(keyword in sensor_name for keyword in ["checksum", "invalid", "crc", "error"])
     has_frame_keywords = any(keyword in sensor_name for keyword in ["frame", "missed", "lost", "dropped"])
@@ -319,6 +331,8 @@ def _validate_config(config):
     if CONF_ADDRESS not in config:
         if has_energy_keywords:
             return ENERGY_SUM_CONFIG_SCHEMA(config)
+        elif has_output_power_keywords:
+            return POWER_OUT_SUM_CONFIG_SCHEMA(config)
         elif has_power_keywords:
             return POWER_SUM_CONFIG_SCHEMA(config)
         elif has_count_keywords:
@@ -354,6 +368,7 @@ async def to_code(config):
         # Check if this is energy, power, device count, or diagnostic sensor by name keywords
         sensor_name = config.get(CONF_NAME, "").lower()
         has_energy_keywords = any(keyword in sensor_name for keyword in ["energy", "kwh", "kilowatt", "wh"])
+        has_output_power_keywords = any(keyword in sensor_name for keyword in ["output power", "power out", "p_out", "p out"])
         has_count_keywords = any(keyword in sensor_name for keyword in ["count", "devices", "discovered", "active", "number"])
         has_checksum_keywords = any(keyword in sensor_name for keyword in ["checksum", "invalid", "crc", "error"])
         has_frame_keywords = any(keyword in sensor_name for keyword in ["frame", "missed", "lost", "dropped"])
@@ -365,6 +380,8 @@ async def to_code(config):
         sens = await sensor.new_sensor(config)
         if has_energy_keywords:
             cg.add(hub.add_energy_sum_sensor(sens))
+        elif has_output_power_keywords:
+            cg.add(hub.add_power_out_sum_sensor(sens))
         elif has_count_keywords:
             cg.add(hub.add_device_count_sensor(sens))
         elif has_checksum_keywords:
