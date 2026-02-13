@@ -1527,8 +1527,8 @@ void TigoMonitorComponent::publish_sensor_data() {
         ESP_LOGD(TAG, "Published energy out sum: %.3f kWh", total_energy_out_kwh_);
       }
       
-      // Update daily energy tracking
-      update_daily_energy(total_energy_in_kwh_);
+      // Update daily energy tracking (output energy)
+      update_daily_energy(total_energy_out_kwh_);
       
       // Save energy data at the top of each hour to reduce flash wear
       static unsigned long last_save_time = 0;
@@ -1580,8 +1580,8 @@ void TigoMonitorComponent::publish_sensor_data() {
       ESP_LOGD(TAG, "Published energy out sum: %.3f kWh", total_energy_out_kwh_);
     }
     
-    // Update daily energy tracking
-    update_daily_energy(total_energy_in_kwh_);
+    // Update daily energy tracking (output energy)
+    update_daily_energy(total_energy_out_kwh_);
     
     // Save energy data at the top of each hour to reduce flash wear
     static unsigned long last_save_time_standalone = 0;
@@ -2341,7 +2341,7 @@ void TigoMonitorComponent::check_midnight_reset() {
     auto yesterday_time = ESPTime::from_epoch_local(yesterday_timestamp);
     uint32_t yesterday_key = (yesterday_time.year * 10000) + (yesterday_time.month * 100) + yesterday_time.day_of_month;
     
-    float yesterday_production = total_energy_in_kwh_ - energy_at_day_start_;
+    float yesterday_production = total_energy_out_kwh_ - energy_at_day_start_;
     if (yesterday_production > 0.0f) {
       DailyEnergyData yesterday = DailyEnergyData::from_key(yesterday_key);
       yesterday.energy_kwh = yesterday_production;
@@ -2366,7 +2366,7 @@ void TigoMonitorComponent::check_midnight_reset() {
       
       ESP_LOGI(TAG, "Archived daily energy at midnight: %04d-%02d-%02d = %.3f kWh (total: %.3f, started: %.3f)", 
                yesterday.year, yesterday.month, yesterday.day, yesterday_production,
-               total_energy_in_kwh_, energy_at_day_start_);
+               total_energy_out_kwh_, energy_at_day_start_);
     }
     
     // Update current_day_key to today
@@ -2620,8 +2620,8 @@ void TigoMonitorComponent::load_energy_data() {
     if (restore_baseline.load(&energy_at_day_start_)) {
       ESP_LOGI(TAG, "Restored day start baseline: %.3f kWh", energy_at_day_start_);
     } else {
-      // No baseline saved - assume we're starting fresh today
-      energy_at_day_start_ = total_energy_in_kwh_;
+      // No baseline saved - assume we're starting fresh today (output energy baseline)
+      energy_at_day_start_ = total_energy_out_kwh_;
       ESP_LOGI(TAG, "No baseline found, using current total as baseline: %.3f kWh", energy_at_day_start_);
     }
 
@@ -2704,8 +2704,8 @@ void TigoMonitorComponent::update_daily_energy(float energy_kwh) {
     if (!reset_at_midnight_) {
       // New day - archive yesterday's energy production if we have it
       if (current_day_key_ != 0) {
-        // Calculate yesterday's production (current total - energy at start of yesterday)
-        float yesterday_production = total_energy_in_kwh_ - energy_at_day_start_;
+        // Calculate yesterday's production (current output total - output energy at start of yesterday)
+        float yesterday_production = energy_kwh - energy_at_day_start_;
         
         // Only archive if we had positive production yesterday
         if (yesterday_production > 0.0f) {
@@ -2732,7 +2732,7 @@ void TigoMonitorComponent::update_daily_energy(float energy_kwh) {
           
           ESP_LOGI(TAG, "Archived daily energy: %04d-%02d-%02d = %.3f kWh (total was %.3f, day started at %.3f)", 
                    yesterday.year, yesterday.month, yesterday.day, yesterday_production,
-                   total_energy_in_kwh_, energy_at_day_start_);
+                   energy_kwh, energy_at_day_start_);
           
           // Save to flash
           save_daily_energy_history();
@@ -2740,9 +2740,9 @@ void TigoMonitorComponent::update_daily_energy(float energy_kwh) {
       }
     }
     
-    // Update to new day and record current total as the starting point
+    // Update to new day and record current output total as the starting point
     current_day_key_ = day_key;
-    energy_at_day_start_ = total_energy_in_kwh_;
+    energy_at_day_start_ = energy_kwh;
     ESP_LOGI(TAG, "New day started: %04d-%02d-%02d, energy baseline: %.3f kWh", 
              now.year, now.month, now.day_of_month, energy_at_day_start_);
   }

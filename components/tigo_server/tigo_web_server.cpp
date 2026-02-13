@@ -1385,7 +1385,7 @@ void TigoWebServer::build_overview_json(PSRAMString& json) {
       "\"avg_temperature\":%.1f,\"active_devices\":%d,\"max_devices\":%d,\"total_energy\":%.3f,\"total_energy_in\":%.3f,\"total_energy_out\":%.3f}",
       0.0f, 0.0f, 0.0f, 0.0f,
       0, parent_->get_number_of_devices(),
-      parent_->get_total_energy_in_kwh(), parent_->get_total_energy_in_kwh(), parent_->get_total_energy_out_kwh());
+      parent_->get_total_energy_out_kwh(), parent_->get_total_energy_in_kwh(), parent_->get_total_energy_out_kwh());
     
     json.append(buffer);
     return;
@@ -1393,14 +1393,14 @@ void TigoWebServer::build_overview_json(PSRAMString& json) {
   
   const auto &devices = parent_->get_devices();
   
-  float total_power = 0.0f;
+  float total_power_out = 0.0f;
   float total_current = 0.0f;
   float avg_efficiency = 0.0f;
   float avg_temp = 0.0f;
   int active_devices = 0;
   
   for (const auto &device : devices) {
-    total_power += device.power_in;
+    total_power_out += device.power_out;
     total_current += device.current_in;
     avg_efficiency += device.efficiency;
     avg_temp += device.temperature;
@@ -1419,8 +1419,8 @@ void TigoWebServer::build_overview_json(PSRAMString& json) {
   snprintf(buffer, sizeof(buffer),
     "{\"total_power\":%.1f,\"total_current\":%.3f,\"avg_efficiency\":%.2f,"
     "\"avg_temperature\":%.1f,\"active_devices\":%d,\"max_devices\":%d,\"total_energy\":%.3f,\"total_energy_in\":%.3f,\"total_energy_out\":%.3f}",
-    total_power, total_current, avg_efficiency, avg_temp,
-    active_devices, parent_->get_number_of_devices(), total_energy_in, total_energy_in, total_energy_out);
+    total_power_out, total_current, avg_efficiency, avg_temp,
+    active_devices, parent_->get_number_of_devices(), total_energy_out, total_energy_in, total_energy_out);
   
   json.append(buffer);
 }
@@ -1557,7 +1557,7 @@ void TigoWebServer::build_energy_history_json(PSRAMString& json) {
   }
   
   auto history = parent_->get_daily_energy_history();
-  float current_energy = parent_->get_total_energy_kwh();
+  float current_energy = parent_->get_total_energy_out_kwh();
   float energy_at_day_start = parent_->get_energy_at_day_start();
   
   json.append("{\"current_energy\":");
