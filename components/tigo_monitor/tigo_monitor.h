@@ -104,6 +104,7 @@ struct DeviceData {
   std::string barcode;
   std::string firmware_version;
   float efficiency;
+  float power_in;
   float power_out;
   float power_factor;
   float load_factor;
@@ -214,9 +215,12 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
     this->temperature_sensors_[address] = sensor; 
     ESP_LOGCONFIG("tigo_monitor", "Registered temperature sensor for address: %s", address.c_str());
   }
-  void add_power_sensor(const std::string &address, sensor::Sensor *sensor) { 
-    this->power_sensors_[address] = sensor; 
-    ESP_LOGCONFIG("tigo_monitor", "Registered power sensor for address: %s", address.c_str());
+  void add_power_in_sensor(const std::string &address, sensor::Sensor *sensor) { 
+    this->power_in_sensors_[address] = sensor; 
+    ESP_LOGCONFIG("tigo_monitor", "Registered power_in sensor for address: %s", address.c_str());
+  }
+  void add_power_sensor(const std::string &address, sensor::Sensor *sensor) {
+    this->add_power_in_sensor(address, sensor);
   }
   void add_power_out_sensor(const std::string &address, sensor::Sensor *sensor) { 
     this->power_out_sensors_[address] = sensor; 
@@ -226,17 +230,27 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
     this->peak_power_sensors_[address] = sensor; 
     ESP_LOGCONFIG("tigo_monitor", "Registered peak_power sensor for address: %s", address.c_str());
   }
-  void add_power_sum_sensor(sensor::Sensor *sensor) { 
-    this->power_sum_sensor_ = sensor; 
-    ESP_LOGCONFIG("tigo_monitor", "Registered power sum sensor");
+  void add_power_in_sum_sensor(sensor::Sensor *sensor) {
+    this->power_in_sum_sensor_ = sensor;
+    ESP_LOGCONFIG("tigo_monitor", "Registered power in sum sensor");
+  }
+  void add_power_sum_sensor(sensor::Sensor *sensor) {
+    this->add_power_in_sum_sensor(sensor);
   }
   void add_power_out_sum_sensor(sensor::Sensor *sensor) { 
     this->power_out_sum_sensor_ = sensor; 
     ESP_LOGCONFIG("tigo_monitor", "Registered power out sum sensor");
   }
-  void add_energy_sum_sensor(sensor::Sensor *sensor) { 
-    this->energy_sum_sensor_ = sensor; 
-    ESP_LOGCONFIG("tigo_monitor", "Registered energy sum sensor");
+  void add_energy_in_sum_sensor(sensor::Sensor *sensor) {
+    this->energy_in_sum_sensor_ = sensor;
+    ESP_LOGCONFIG("tigo_monitor", "Registered energy in sum sensor");
+  }
+  void add_energy_out_sum_sensor(sensor::Sensor *sensor) {
+    this->energy_out_sum_sensor_ = sensor;
+    ESP_LOGCONFIG("tigo_monitor", "Registered energy out sum sensor");
+  }
+  void add_energy_sum_sensor(sensor::Sensor *sensor) {
+    this->add_energy_in_sum_sensor(sensor);
   }
   void add_device_count_sensor(sensor::Sensor *sensor) { 
     this->device_count_sensor_ = sensor; 
@@ -279,7 +293,7 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
     ESP_LOGCONFIG("tigo_monitor", "Registered load_factor sensor for address: %s", address.c_str());
   }
   void add_tigo_sensor(const std::string &address, sensor::Sensor *sensor) {
-    this->power_sensors_[address] = sensor;
+    this->power_in_sensors_[address] = sensor;
   }
   void add_night_mode_sensor(binary_sensor::BinarySensor *sensor) {
     this->night_mode_sensor_ = sensor;
@@ -332,7 +346,9 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   const std::string& get_cca_device_info() const { return cca_device_info_; }
 #endif
   unsigned long get_last_cca_sync_time() const { return last_cca_sync_time_; }
-  float get_total_energy_kwh() const { return total_energy_kwh_; }
+  float get_total_energy_in_kwh() const { return total_energy_in_kwh_; }
+  float get_total_energy_out_kwh() const { return total_energy_out_kwh_; }
+  float get_total_energy_kwh() const { return total_energy_in_kwh_; }
   float get_energy_at_day_start() const { return energy_at_day_start_; }
   uint32_t get_invalid_checksum_count() const { return invalid_checksum_count_; }
   uint32_t get_missed_frame_count() const { return missed_frame_count_; }
@@ -452,7 +468,7 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   psram_map<std::string, sensor::Sensor*> voltage_out_sensors_;
   psram_map<std::string, sensor::Sensor*> current_in_sensors_;
   psram_map<std::string, sensor::Sensor*> temperature_sensors_;
-  psram_map<std::string, sensor::Sensor*> power_sensors_;
+  psram_map<std::string, sensor::Sensor*> power_in_sensors_;
   psram_map<std::string, sensor::Sensor*> power_out_sensors_;
   psram_map<std::string, sensor::Sensor*> current_out_sensors_;
   psram_map<std::string, sensor::Sensor*> peak_power_sensors_;
@@ -474,7 +490,7 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   std::map<std::string, sensor::Sensor*> voltage_out_sensors_;
   std::map<std::string, sensor::Sensor*> current_in_sensors_;
   std::map<std::string, sensor::Sensor*> temperature_sensors_;
-  std::map<std::string, sensor::Sensor*> power_sensors_;
+  std::map<std::string, sensor::Sensor*> power_in_sensors_;
   std::map<std::string, sensor::Sensor*> power_out_sensors_;
   std::map<std::string, sensor::Sensor*> current_out_sensors_;
   std::map<std::string, sensor::Sensor*> peak_power_sensors_;
@@ -486,9 +502,10 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   std::map<std::string, sensor::Sensor*> power_factor_sensors_;
   std::map<std::string, sensor::Sensor*> load_factor_sensors_;
 #endif
-  sensor::Sensor* power_sum_sensor_ = nullptr;
+  sensor::Sensor* power_in_sum_sensor_ = nullptr;
   sensor::Sensor* power_out_sum_sensor_ = nullptr;
-  sensor::Sensor* energy_sum_sensor_ = nullptr;
+  sensor::Sensor* energy_in_sum_sensor_ = nullptr;
+  sensor::Sensor* energy_out_sum_sensor_ = nullptr;
   sensor::Sensor* device_count_sensor_ = nullptr;
   sensor::Sensor* invalid_checksum_sensor_ = nullptr;
   sensor::Sensor* missed_frame_sensor_ = nullptr;
@@ -501,7 +518,8 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   sensor::Sensor* stack_free_sensor_ = nullptr;
   
   // Energy calculation variables
-  float total_energy_kwh_ = 0.0f;
+  float total_energy_in_kwh_ = 0.0f;
+  float total_energy_out_kwh_ = 0.0f;
   unsigned long last_energy_update_ = 0;
   
   // Daily energy history (keep last 7 days)
@@ -519,7 +537,7 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   
   // Cached display stats (updated during publish_sensor_data to avoid iteration in display lambda)
   int cached_online_count_ = 0;
-  float cached_total_power_ = 0.0f;
+  float cached_total_power_in_ = 0.0f;
   float cached_total_power_out_ = 0.0f;
   
   // Midnight reset tracking
@@ -539,6 +557,7 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   // Persistence
   static const uint32_t DEVICE_MAPPING_HASH = 0x12345678;  // Hash for preferences key
   static const uint32_t ENERGY_DATA_HASH = 0x87654321;     // Hash for energy data key
+  static const uint32_t ENERGY_DATA_OUT_HASH = 0x87654322; // Hash for output energy data key
   
   // Power calibration multiplier (default 1.0 = no adjustment)
   float power_calibration_ = 1.0f;

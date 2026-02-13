@@ -818,7 +818,7 @@ esp_err_t TigoWebServer::api_yaml_handler(httpd_req_t *req) {
   
   // If no sensors specified, use default set
   if (selected_sensors.empty()) {
-    selected_sensors = {"power", "peak_power", "voltage_in", "voltage_out", "current_in", "temperature", "rssi"};
+    selected_sensors = {"power_in", "peak_power", "voltage_in", "voltage_out", "current_in", "temperature", "rssi"};
   }
   
   PSRAMString json_buffer;
@@ -1349,24 +1349,23 @@ void TigoWebServer::build_devices_json(PSRAMString& json) {
     if (dwn.has_runtime_data && dwn.device != nullptr) {
       // Device has runtime data - show actual values
       const auto &device = *dwn.device;
-      float power = device.voltage_in * device.current_in * parent_->get_power_calibration();
       // If last_update is 0, device hasn't been updated yet - use ULONG_MAX to indicate "never"
       unsigned long data_age_ms = (device.last_update == 0) ? ULONG_MAX : (millis() - device.last_update);
       float duty_cycle_percent = (device.duty_cycle / 255.0f) * 100.0f;
       
       snprintf(buffer, sizeof(buffer),
         "{\"addr\":\"%s\",\"barcode\":\"%s\",\"name\":\"%s\",\"string_label\":\"%s\",\"voltage_in\":%.2f,\"voltage_out\":%.2f,"
-        "\"current\":%.3f,\"current_out\":%.3f,\"power\":%.1f,\"power_out\":%.1f,\"peak_power\":%.1f,\"temperature\":%.1f,\"rssi\":%d,"
+        "\"current\":%.3f,\"current_out\":%.3f,\"power_in\":%.1f,\"power\":%.1f,\"power_out\":%.1f,\"peak_power\":%.1f,\"temperature\":%.1f,\"rssi\":%d,"
         "\"duty_cycle\":%.1f,\"efficiency\":%.2f,\"data_age_ms\":%lu}",
         device.addr.c_str(), device.barcode.c_str(), device_name.c_str(), string_label.c_str(), device.voltage_in, device.voltage_out,
-        device.current_in, device.current_out, power, device.power_out, device.peak_power, device.temperature, device.rssi,
+        device.current_in, device.current_out, device.power_in, device.power_in, device.power_out, device.peak_power, device.temperature, device.rssi,
         duty_cycle_percent, device.efficiency, data_age_ms);
     } else {
       // Device is known but has no runtime data yet (e.g., ESP32 restarted at night)
       // Show zeros with a very large data_age to indicate no recent data
       snprintf(buffer, sizeof(buffer),
         "{\"addr\":\"%s\",\"barcode\":\"%s\",\"name\":\"%s\",\"string_label\":\"%s\",\"voltage_in\":0.00,\"voltage_out\":0.00,"
-        "\"current\":0.000,\"current_out\":0.000,\"power\":0.0,\"power_out\":0.0,\"peak_power\":0.0,\"temperature\":0.0,\"rssi\":0,"
+        "\"current\":0.000,\"current_out\":0.000,\"power_in\":0.0,\"power\":0.0,\"power_out\":0.0,\"peak_power\":0.0,\"temperature\":0.0,\"rssi\":0,"
         "\"duty_cycle\":0.0,\"efficiency\":0.00,\"data_age_ms\":999999999}",
         dwn.addr.c_str(), dwn.barcode.c_str(), device_name.c_str(), string_label.c_str());
     }
@@ -1383,9 +1382,10 @@ void TigoWebServer::build_overview_json(PSRAMString& json) {
     char buffer[512];
     snprintf(buffer, sizeof(buffer),
       "{\"total_power\":%.1f,\"total_current\":%.3f,\"avg_efficiency\":%.2f,"
-      "\"avg_temperature\":%.1f,\"active_devices\":%d,\"max_devices\":%d,\"total_energy\":%.3f}",
+      "\"avg_temperature\":%.1f,\"active_devices\":%d,\"max_devices\":%d,\"total_energy\":%.3f,\"total_energy_in\":%.3f,\"total_energy_out\":%.3f}",
       0.0f, 0.0f, 0.0f, 0.0f,
-      0, parent_->get_number_of_devices(), parent_->get_total_energy_kwh());
+      0, parent_->get_number_of_devices(),
+      parent_->get_total_energy_in_kwh(), parent_->get_total_energy_in_kwh(), parent_->get_total_energy_out_kwh());
     
     json.append(buffer);
     return;
@@ -1400,8 +1400,7 @@ void TigoWebServer::build_overview_json(PSRAMString& json) {
   int active_devices = 0;
   
   for (const auto &device : devices) {
-    float power = device.voltage_in * device.current_in * parent_->get_power_calibration();
-    total_power += power;
+    total_power += device.power_in;
     total_current += device.current_in;
     avg_efficiency += device.efficiency;
     avg_temp += device.temperature;
@@ -1413,14 +1412,15 @@ void TigoWebServer::build_overview_json(PSRAMString& json) {
     avg_temp /= active_devices;
   }
   
-  float total_energy = parent_->get_total_energy_kwh();
+  float total_energy_in = parent_->get_total_energy_in_kwh();
+  float total_energy_out = parent_->get_total_energy_out_kwh();
   
   char buffer[512];
   snprintf(buffer, sizeof(buffer),
     "{\"total_power\":%.1f,\"total_current\":%.3f,\"avg_efficiency\":%.2f,"
-    "\"avg_temperature\":%.1f,\"active_devices\":%d,\"max_devices\":%d,\"total_energy\":%.3f}",
+    "\"avg_temperature\":%.1f,\"active_devices\":%d,\"max_devices\":%d,\"total_energy\":%.3f,\"total_energy_in\":%.3f,\"total_energy_out\":%.3f}",
     total_power, total_current, avg_efficiency, avg_temp,
-    active_devices, parent_->get_number_of_devices(), total_energy);
+    active_devices, parent_->get_number_of_devices(), total_energy_in, total_energy_in, total_energy_out);
   
   json.append(buffer);
 }
@@ -1799,10 +1799,16 @@ void TigoWebServer::build_yaml_json(PSRAMString& json, const std::set<std::strin
       yaml_text.append("    tigo_monitor_id: tigo_hub\n");
       yaml_text.append("    name: \"Total System Power\"\n\n");
     }
-    if (selected_hub_sensors.count("energy_sum") > 0) {
+    if (selected_hub_sensors.count("energy_in_sum") > 0 || selected_hub_sensors.count("energy_sum") > 0) {
       yaml_text.append("  - platform: tigo_monitor\n");
       yaml_text.append("    tigo_monitor_id: tigo_hub\n");
-      yaml_text.append("    name: \"Total System Energy\"\n\n");
+      yaml_text.append("    name: \"Total Energy In\"\n\n");
+    }
+    if (selected_hub_sensors.count("energy_out_sum") > 0) {
+      yaml_text.append("  - platform: tigo_monitor\n");
+      yaml_text.append("    tigo_monitor_id: tigo_hub\n");
+      yaml_text.append("    name: \"Total Energy Out\"\n\n");
+    }
     }
     if (selected_hub_sensors.count("device_count") > 0) {
       yaml_text.append("  - platform: tigo_monitor\n");
@@ -1875,8 +1881,8 @@ void TigoWebServer::build_yaml_json(PSRAMString& json, const std::set<std::strin
     yaml_text.append("\"\n");
     
     // Add only selected sensors
-    if (selected_sensors.count("power") > 0) {
-      yaml_text.append("    power: {}\n");
+    if (selected_sensors.count("power_in") > 0 || selected_sensors.count("power") > 0) {
+      yaml_text.append("    power_in: {}\n");
     }
     if (selected_sensors.count("peak_power") > 0) {
       yaml_text.append("    peak_power: {}\n");
@@ -2287,8 +2293,8 @@ void TigoWebServer::get_dashboard_html(PSRAMString& html) {
               </div>
               <div class="device-metrics">
                 <div class="metric">
-                  <span class="metric-label">Power</span>
-                  <span class="metric-value">${device.power.toFixed(1)} W</span>
+                  <span class="metric-label">Power In</span>
+                  <span class="metric-value">${device.power_in.toFixed(1)} W</span>
                 </div>
                 <div class="metric">
                   <span class="metric-label">Power Out</span>
@@ -3563,7 +3569,7 @@ void TigoWebServer::get_yaml_config_html(PSRAMString& html) {
       <div class="sensor-selection">
         <h3>Per-Device Sensors:</h3>
         <div class="checkbox-grid">
-          <label><input type="checkbox" checked id="sel-power" onchange="updateYAML()"> Power (W)</label>
+          <label><input type="checkbox" checked id="sel-power_in" onchange="updateYAML()"> Power In (W)</label>
           <label><input type="checkbox" checked id="sel-peak_power" onchange="updateYAML()"> Peak Power (W)</label>
           <label><input type="checkbox" checked id="sel-voltage_in" onchange="updateYAML()"> Input Voltage (V)</label>
           <label><input type="checkbox" checked id="sel-voltage_out" onchange="updateYAML()"> Output Voltage (V)</label>
@@ -3585,7 +3591,8 @@ void TigoWebServer::get_yaml_config_html(PSRAMString& html) {
         <h3 style="margin-top: 1.5rem;">Hub-Level Sensors:</h3>
         <div class="checkbox-grid">
           <label><input type="checkbox" id="sel-power_sum" onchange="updateYAML()"> Total Power (W)</label>
-          <label><input type="checkbox" id="sel-energy_sum" onchange="updateYAML()"> Total Energy (kWh)</label>
+          <label><input type="checkbox" id="sel-energy_in_sum" onchange="updateYAML()"> Total Energy In (kWh)</label>
+          <label><input type="checkbox" id="sel-energy_out_sum" onchange="updateYAML()"> Total Energy Out (kWh)</label>
           <label><input type="checkbox" id="sel-device_count" onchange="updateYAML()"> Device Count</label>
           <label><input type="checkbox" id="sel-invalid_checksum" onchange="updateYAML()"> Invalid Checksum Count</label>
           <label><input type="checkbox" id="sel-missed_frame" onchange="updateYAML()"> Missed Frame Count</label>
@@ -3641,21 +3648,21 @@ void TigoWebServer::get_yaml_config_html(PSRAMString& html) {
     applyTheme();
     
     function getSelectedSensors() {
-      const deviceSensors = ['power', 'peak_power', 'voltage_in', 'voltage_out', 'current_in', 
+      const deviceSensors = ['power_in', 'peak_power', 'voltage_in', 'voltage_out', 'current_in', 
                        'temperature', 'rssi', 'duty_cycle', 'efficiency', 'power_factor', 
                        'load_factor', 'barcode'];
       return deviceSensors.filter(s => document.getElementById('sel-' + s).checked);
     }
     
     function getSelectedHubSensors() {
-      const hubSensors = ['power_sum', 'energy_sum', 'device_count', 'invalid_checksum', 
+      const hubSensors = ['power_sum', 'energy_in_sum', 'energy_out_sum', 'device_count', 'invalid_checksum', 
                           'missed_frame', 'internal_ram_free', 'internal_ram_min', 
                           'psram_free', 'stack_free'];
       return hubSensors.filter(s => document.getElementById('sel-' + s).checked);
     }
     
     function selectAllDevice() {
-      const sensors = ['power', 'peak_power', 'voltage_in', 'voltage_out', 'current_in', 
+      const sensors = ['power_in', 'peak_power', 'voltage_in', 'voltage_out', 'current_in', 
                        'temperature', 'rssi', 'duty_cycle', 'efficiency', 'power_factor', 
                        'load_factor', 'barcode'];
       sensors.forEach(s => document.getElementById('sel-' + s).checked = true);
@@ -3663,9 +3670,9 @@ void TigoWebServer::get_yaml_config_html(PSRAMString& html) {
     }
     
     function selectDefaultDevice() {
-      const defaultSensors = ['power', 'peak_power', 'voltage_in', 'voltage_out', 'current_in', 
+      const defaultSensors = ['power_in', 'peak_power', 'voltage_in', 'voltage_out', 'current_in', 
                               'temperature', 'rssi'];
-      const allSensors = ['power', 'peak_power', 'voltage_in', 'voltage_out', 'current_in', 
+      const allSensors = ['power_in', 'peak_power', 'voltage_in', 'voltage_out', 'current_in', 
                           'temperature', 'rssi', 'duty_cycle', 'efficiency', 'power_factor', 
                           'load_factor', 'barcode'];
       allSensors.forEach(s => {
@@ -3675,7 +3682,7 @@ void TigoWebServer::get_yaml_config_html(PSRAMString& html) {
     }
     
     function selectNoneDevice() {
-      const sensors = ['power', 'peak_power', 'voltage_in', 'voltage_out', 'current_in', 
+      const sensors = ['power_in', 'peak_power', 'voltage_in', 'voltage_out', 'current_in', 
                        'temperature', 'rssi', 'duty_cycle', 'efficiency', 'power_factor', 
                        'load_factor', 'barcode'];
       sensors.forEach(s => document.getElementById('sel-' + s).checked = false);
@@ -3683,7 +3690,7 @@ void TigoWebServer::get_yaml_config_html(PSRAMString& html) {
     }
     
     function selectAllHub() {
-      const hubSensors = ['power_sum', 'energy_sum', 'device_count', 'invalid_checksum', 
+      const hubSensors = ['power_sum', 'energy_in_sum', 'energy_out_sum', 'device_count', 'invalid_checksum', 
                           'missed_frame', 'internal_ram_free', 'internal_ram_min', 
                           'psram_free', 'stack_free'];
       hubSensors.forEach(s => document.getElementById('sel-' + s).checked = true);
@@ -3691,7 +3698,7 @@ void TigoWebServer::get_yaml_config_html(PSRAMString& html) {
     }
     
     function selectNoneHub() {
-      const hubSensors = ['power_sum', 'energy_sum', 'device_count', 'invalid_checksum', 
+      const hubSensors = ['power_sum', 'energy_in_sum', 'energy_out_sum', 'device_count', 'invalid_checksum', 
                           'missed_frame', 'internal_ram_free', 'internal_ram_min', 
                           'psram_free', 'stack_free'];
       hubSensors.forEach(s => document.getElementById('sel-' + s).checked = false);

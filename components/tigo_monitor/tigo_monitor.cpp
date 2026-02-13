@@ -743,13 +743,13 @@ void TigoMonitorComponent::process_power_frame(const std::string &frame) {
   if (duty_norm < 0.001f) duty_norm = 0.0f;  // avoid tiny non-zero values
 
   // Calculate input power (apply calibration)
-  float input_power = data.voltage_in * data.current_in * this->power_calibration_;
+  data.power_in = data.voltage_in * data.current_in * this->power_calibration_;
 
   if (is_monitor_only) {
     // Monitor-only device: outputs mirror inputs
     data.voltage_out = data.voltage_in;
     data.current_out = data.current_in;
-    data.power_out = input_power;  // Output power equals input power
+    data.power_out = data.power_in;  // Output power equals input power
     data.duty_cycle = 255;         // Hard-code duty cycle to 100%
     duty_norm = 1.0f;
     data.efficiency = 100.0f;      // Hard-code efficiency to 100%
@@ -765,8 +765,8 @@ void TigoMonitorComponent::process_power_frame(const std::string &frame) {
 
     // Calculate output power and efficiency
     data.power_out = data.voltage_out * data.current_out * this->power_calibration_;
-    if (input_power > 0.0f) {
-      data.efficiency = (data.power_out / input_power) * 100.0f;
+    if (data.power_in > 0.0f) {
+      data.efficiency = (data.power_out / data.power_in) * 100.0f;
     } else {
       data.efficiency = 0.0f;
     }
@@ -1081,8 +1081,7 @@ void TigoMonitorComponent::update_string_data() {
     for (const auto &addr : string_data.device_addrs) {
       DeviceData *device = find_device_by_addr(addr);
       if (device && device->last_update > 0) {
-        float device_power = device->voltage_in * device->current_in * power_calibration_;
-        string_data.total_power += device_power;
+        string_data.total_power += device->power_in;
         string_data.total_current += device->current_in;
         sum_voltage_in += device->voltage_in;
         sum_voltage_out += device->voltage_out;
@@ -1194,8 +1193,8 @@ void TigoMonitorComponent::publish_sensor_data() {
     
     // Save energy data to flash when entering night mode
     // This captures the day's production before going dark
-    ESP_LOGI(TAG, "Night mode: Saving energy data to flash (total: %.3f kWh, baseline: %.3f kWh)", 
-             total_energy_kwh_, energy_at_day_start_);
+    ESP_LOGI(TAG, "Night mode: Saving energy data to flash (in: %.3f kWh, out: %.3f kWh, baseline: %.3f kWh)", 
+         total_energy_in_kwh_, total_energy_out_kwh_, energy_at_day_start_);
     save_energy_data();
   }
   
@@ -1232,9 +1231,9 @@ void TigoMonitorComponent::publish_sensor_data() {
         }
         
         // Publish zero power
-        auto power_it = power_sensors_.find(device.addr);
-        if (power_it != power_sensors_.end()) {
-          power_it->second->publish_state(0.0f);
+        auto power_in_it = power_in_sensors_.find(device.addr);
+        if (power_in_it != power_in_sensors_.end()) {
+          power_in_it->second->publish_state(0.0f);
         }
 
         // Publish zero output current
@@ -1281,8 +1280,8 @@ void TigoMonitorComponent::publish_sensor_data() {
       }
       
       // Publish zero power sum
-      if (power_sum_sensor_ != nullptr) {
-        power_sum_sensor_->publish_state(0.0f);
+      if (power_in_sum_sensor_ != nullptr) {
+        power_in_sum_sensor_->publish_state(0.0f);
       }
       
       // Publish zero power out sum
@@ -1291,7 +1290,7 @@ void TigoMonitorComponent::publish_sensor_data() {
       }
       
       // Update cached values for display
-      cached_total_power_ = 0.0f;
+      cached_total_power_in_ = 0.0f;
       cached_total_power_out_ = 0.0f;
       cached_online_count_ = 0;
       
@@ -1343,15 +1342,14 @@ void TigoMonitorComponent::publish_sensor_data() {
     }
     
     // Publish power sensor (calculated)
-    auto power_it = power_sensors_.find(device.addr);
-    if (power_it != power_sensors_.end()) {
-      float power = device.voltage_in * device.current_in * power_calibration_;
-      power_it->second->publish_state(power);
-      ESP_LOGD(TAG, "Published power for %s: %.0fW", device.addr.c_str(), power);
+    auto power_in_it = power_in_sensors_.find(device.addr);
+    if (power_in_it != power_in_sensors_.end()) {
+      power_in_it->second->publish_state(device.power_in);
+      ESP_LOGD(TAG, "Published power_in for %s: %.0fW", device.addr.c_str(), device.power_in);
       
       // Track peak power
-      if (power > device.peak_power) {
-        device.peak_power = power;
+      if (device.power_in > device.peak_power) {
+        device.peak_power = device.power_in;
         ESP_LOGD(TAG, "New peak power for %s: %.0fW", device.addr.c_str(), device.peak_power);
       }
     }
@@ -1420,11 +1418,11 @@ void TigoMonitorComponent::publish_sensor_data() {
     }
     
     // Check if this device has a combined Tigo sensor
-    auto tigo_power_it = power_sensors_.find(device.addr);
-    if (tigo_power_it != power_sensors_.end() && 
+    auto tigo_power_it = power_in_sensors_.find(device.addr);
+    if (tigo_power_it != power_in_sensors_.end() && 
         voltage_in_sensors_.find(device.addr) == voltage_in_sensors_.end()) {
       // This is a combined sensor (power sensor exists but individual sensors don't)
-      float power = device.voltage_in * device.current_in * power_calibration_;
+      float power_in = device.power_in;
       
       // Calculate data age
       unsigned long current_time = millis();
@@ -1444,14 +1442,14 @@ void TigoMonitorComponent::publish_sensor_data() {
       }
       
       // Publish the power value
-      tigo_power_it->second->publish_state(power);
+      tigo_power_it->second->publish_state(power_in);
       
       // Enhanced logging with timestamp and all metrics for potential Home Assistant template extraction
-      ESP_LOGI(TAG, "TIGO_%s: power=%.0f voltage_in=%.2f voltage_out=%.2f current=%.3f temp=%.1f rssi=%d last_update=%s", 
-               device.addr.c_str(), power, device.voltage_in, device.voltage_out, 
+      ESP_LOGI(TAG, "TIGO_%s: power_in=%.0f voltage_in=%.2f voltage_out=%.2f current=%.3f temp=%.1f rssi=%d last_update=%s", 
+               device.addr.c_str(), power_in, device.voltage_in, device.voltage_out, 
                device.current_in, device.temperature, device.rssi, timestamp_str);
                
-      ESP_LOGD(TAG, "Published combined Tigo sensor for %s: %.0fW with enhanced attributes logging", device.addr.c_str());
+      ESP_LOGD(TAG, "Published combined Tigo sensor for %s: %.0fW with enhanced attributes logging", device.addr.c_str(), power_in);
     }
 
 
@@ -1465,16 +1463,17 @@ void TigoMonitorComponent::publish_sensor_data() {
   }
   
   // Calculate and publish power sum sensor if configured
-  if (power_sum_sensor_ != nullptr) {
-    float total_power = 0.0f;
+  if (power_in_sum_sensor_ != nullptr) {
+    float total_power_in = 0.0f;
+    float total_power_out = 0.0f;
     int active_devices = 0;
     int online_count = 0;
     unsigned long now = millis();
     const unsigned long ONLINE_THRESHOLD = 300000;  // 5 minutes
     
     for (const auto &device : devices_) {
-      float device_power = device.voltage_in * device.current_in * power_calibration_;
-      total_power += device_power;
+      total_power_in += device.power_in;
+      total_power_out += device.power_out;
       active_devices++;
       
       // Count online devices (seen in last 5 minutes)
@@ -1484,26 +1483,21 @@ void TigoMonitorComponent::publish_sensor_data() {
     }
     
     // Cache values for fast display access (avoids iteration in display lambda)
-    cached_total_power_ = total_power;
+    cached_total_power_in_ = total_power_in;
+    cached_total_power_out_ = total_power_out;
     cached_online_count_ = online_count;
     
-    power_sum_sensor_->publish_state(total_power);
-    ESP_LOGD(TAG, "Published power sum: %.0fW from %d devices (%d online)", total_power, active_devices, online_count);
+    power_in_sum_sensor_->publish_state(total_power_in);
+    ESP_LOGD(TAG, "Published power sum: %.0fW from %d devices (%d online)", total_power_in, active_devices, online_count);
     
     // Calculate and publish power output sum sensor if configured
     if (power_out_sum_sensor_ != nullptr) {
-      float total_power_out = 0.0f;
-      for (const auto &device : devices_) {
-        total_power_out += device.power_out;
-      }
-      
-      cached_total_power_out_ = total_power_out;
       power_out_sum_sensor_->publish_state(total_power_out);
       ESP_LOGD(TAG, "Published power out sum: %.0fW from %d devices", total_power_out, active_devices);
     }
     
-    // Calculate and publish energy sum sensor if configured
-    if (energy_sum_sensor_ != nullptr) {
+    // Calculate and publish energy sum sensors if configured
+    if (energy_in_sum_sensor_ != nullptr || energy_out_sum_sensor_ != nullptr) {
       unsigned long current_time = millis();
       
       if (last_energy_update_ > 0) {
@@ -1512,19 +1506,29 @@ void TigoMonitorComponent::publish_sensor_data() {
         float time_diff_hours = time_diff_ms / 3600000.0f;
         
         // Calculate energy increment in kWh (power in watts * time in hours / 1000)
-        float energy_increment_kwh = (total_power * time_diff_hours) / 1000.0f;
-        total_energy_kwh_ += energy_increment_kwh;
+        float energy_in_increment_kwh = (total_power_in * time_diff_hours) / 1000.0f;
+        float energy_out_increment_kwh = (total_power_out * time_diff_hours) / 1000.0f;
+        total_energy_in_kwh_ += energy_in_increment_kwh;
+        total_energy_out_kwh_ += energy_out_increment_kwh;
         
-        ESP_LOGD(TAG, "Energy calculation: %.0fW for %.4fh = %.6f kWh increment, total: %.3f kWh", 
-                 total_power, time_diff_hours, energy_increment_kwh, total_energy_kwh_);
+        ESP_LOGD(TAG, "Energy calculation: Pin %.0fW, Pout %.0fW for %.4fh => Ein +%.6f kWh (%.3f), Eout +%.6f kWh (%.3f)", 
+           total_power_in, total_power_out, time_diff_hours,
+                 energy_in_increment_kwh, total_energy_in_kwh_,
+                 energy_out_increment_kwh, total_energy_out_kwh_);
       }
       
       last_energy_update_ = current_time;
-      energy_sum_sensor_->publish_state(total_energy_kwh_);
-      ESP_LOGD(TAG, "Published energy sum: %.3f kWh", total_energy_kwh_);
+      if (energy_in_sum_sensor_ != nullptr) {
+        energy_in_sum_sensor_->publish_state(total_energy_in_kwh_);
+        ESP_LOGD(TAG, "Published energy in sum: %.3f kWh", total_energy_in_kwh_);
+      }
+      if (energy_out_sum_sensor_ != nullptr) {
+        energy_out_sum_sensor_->publish_state(total_energy_out_kwh_);
+        ESP_LOGD(TAG, "Published energy out sum: %.3f kWh", total_energy_out_kwh_);
+      }
       
       // Update daily energy tracking
-      update_daily_energy(total_energy_kwh_);
+      update_daily_energy(total_energy_in_kwh_);
       
       // Save energy data at the top of each hour to reduce flash wear
       static unsigned long last_save_time = 0;
@@ -1537,13 +1541,14 @@ void TigoMonitorComponent::publish_sensor_data() {
         ESP_LOGI(TAG, "Energy data saved at hour boundary");
       }
     }
-  } else if (energy_sum_sensor_ != nullptr) {
+  } else if (energy_in_sum_sensor_ != nullptr || energy_out_sum_sensor_ != nullptr) {
     // Energy sensor configured but no power sum sensor - calculate power directly
-    float total_power = 0.0f;
+    float total_power_in = 0.0f;
+    float total_power_out = 0.0f;
     
     for (const auto &device : devices_) {
-      float device_power = device.voltage_in * device.current_in * power_calibration_;
-      total_power += device_power;
+      total_power_in += device.power_in;
+      total_power_out += device.power_out;
     }
     
     unsigned long current_time = millis();
@@ -1554,19 +1559,29 @@ void TigoMonitorComponent::publish_sensor_data() {
       float time_diff_hours = time_diff_ms / 3600000.0f;
       
       // Calculate energy increment in kWh
-      float energy_increment_kwh = (total_power * time_diff_hours) / 1000.0f;
-      total_energy_kwh_ += energy_increment_kwh;
+      float energy_in_increment_kwh = (total_power_in * time_diff_hours) / 1000.0f;
+      float energy_out_increment_kwh = (total_power_out * time_diff_hours) / 1000.0f;
+      total_energy_in_kwh_ += energy_in_increment_kwh;
+      total_energy_out_kwh_ += energy_out_increment_kwh;
       
-      ESP_LOGD(TAG, "Energy calculation: %.0fW for %.4fh = %.6f kWh increment, total: %.3f kWh", 
-               total_power, time_diff_hours, energy_increment_kwh, total_energy_kwh_);
+      ESP_LOGD(TAG, "Energy calculation: Pin %.0fW, Pout %.0fW for %.4fh => Ein +%.6f kWh (%.3f), Eout +%.6f kWh (%.3f)", 
+           total_power_in, total_power_out, time_diff_hours,
+               energy_in_increment_kwh, total_energy_in_kwh_,
+               energy_out_increment_kwh, total_energy_out_kwh_);
     }
     
     last_energy_update_ = current_time;
-    energy_sum_sensor_->publish_state(total_energy_kwh_);
-    ESP_LOGD(TAG, "Published energy sum: %.3f kWh", total_energy_kwh_);
+    if (energy_in_sum_sensor_ != nullptr) {
+      energy_in_sum_sensor_->publish_state(total_energy_in_kwh_);
+      ESP_LOGD(TAG, "Published energy in sum: %.3f kWh", total_energy_in_kwh_);
+    }
+    if (energy_out_sum_sensor_ != nullptr) {
+      energy_out_sum_sensor_->publish_state(total_energy_out_kwh_);
+      ESP_LOGD(TAG, "Published energy out sum: %.3f kWh", total_energy_out_kwh_);
+    }
     
     // Update daily energy tracking
-    update_daily_energy(total_energy_kwh_);
+    update_daily_energy(total_energy_in_kwh_);
     
     // Save energy data at the top of each hour to reduce flash wear
     static unsigned long last_save_time_standalone = 0;
@@ -1629,9 +1644,9 @@ void TigoMonitorComponent::publish_sensor_data() {
       temperature_it->second->publish_state(NAN);  // Use NAN for unavailable temperature
     }
     
-    auto power_it = power_sensors_.find(node.addr);
-    if (power_it != power_sensors_.end()) {
-      power_it->second->publish_state(0.0f);
+    auto power_in_it = power_in_sensors_.find(node.addr);
+    if (power_in_it != power_in_sensors_.end()) {
+      power_in_it->second->publish_state(0.0f);
     }
 
     auto current_out_it = current_out_sensors_.find(node.addr);
@@ -1900,7 +1915,7 @@ void TigoMonitorComponent::generate_sensor_yaml() {
       ESP_LOGI(TAG, "    tigo_monitor_id: tigo_hub");
       ESP_LOGI(TAG, "    address: \"%s\"", node.addr.c_str());
       ESP_LOGI(TAG, "    name: \"Tigo Device %s\"", index_str.c_str());
-      ESP_LOGI(TAG, "    power: {}");
+      ESP_LOGI(TAG, "    power_in: {}");
       ESP_LOGI(TAG, "    voltage_in: {}");
       ESP_LOGI(TAG, "    voltage_out: {}");
       ESP_LOGI(TAG, "    power_out: {}");
@@ -1924,7 +1939,7 @@ void TigoMonitorComponent::generate_sensor_yaml() {
       ESP_LOGI(TAG, "    tigo_monitor_id: tigo_hub");
       ESP_LOGI(TAG, "    address: \"device_%s\"  # CHANGE THIS to actual device address", index_str.c_str());
       ESP_LOGI(TAG, "    name: \"Tigo Device %s\"", index_str.c_str());
-      ESP_LOGI(TAG, "    power: {}");
+      ESP_LOGI(TAG, "    power_in: {}");
       ESP_LOGI(TAG, "    voltage_in: {}");
       ESP_LOGI(TAG, "    voltage_out: {}");
       ESP_LOGI(TAG, "    power_out: {}");
@@ -1943,7 +1958,7 @@ void TigoMonitorComponent::generate_sensor_yaml() {
   ESP_LOGI(TAG, "=== END YAML CONFIGURATION ===");
   ESP_LOGI(TAG, "");
   ESP_LOGI(TAG, "Auto-templated YAML generated! Each device creates 6 sensors with names based on 'name' field:");
-  ESP_LOGI(TAG, "- [name] Power (W), [name] Voltage In (V), [name] Voltage Out (V)");
+  ESP_LOGI(TAG, "- [name] Power In (W), [name] Voltage In (V), [name] Voltage Out (V)");
   ESP_LOGI(TAG, "- [name] Current (A), [name] Temperature (°C), [name] RSSI (dBm)");
   ESP_LOGI(TAG, "Copy the configuration above - sensor names are auto-generated from base name!");
 }
@@ -2274,17 +2289,21 @@ void TigoMonitorComponent::reset_peak_power() {
 void TigoMonitorComponent::reset_total_energy() {
   ESP_LOGI(TAG, "Resetting total energy...");
   
-  total_energy_kwh_ = 0.0f;
+  total_energy_in_kwh_ = 0.0f;
+  total_energy_out_kwh_ = 0.0f;
   
   // Publish the reset value
-  if (energy_sum_sensor_ != nullptr) {
-    energy_sum_sensor_->publish_state(0.0f);
+  if (energy_in_sum_sensor_ != nullptr) {
+    energy_in_sum_sensor_->publish_state(0.0f);
+  }
+  if (energy_out_sum_sensor_ != nullptr) {
+    energy_out_sum_sensor_->publish_state(0.0f);
   }
   
   // Save to persistent storage
   save_energy_data();
   
-  ESP_LOGI(TAG, "Total energy reset to 0 kWh");
+  ESP_LOGI(TAG, "Total energy in/out reset to 0 kWh");
 }
 
 void TigoMonitorComponent::check_midnight_reset() {
@@ -2322,7 +2341,7 @@ void TigoMonitorComponent::check_midnight_reset() {
     auto yesterday_time = ESPTime::from_epoch_local(yesterday_timestamp);
     uint32_t yesterday_key = (yesterday_time.year * 10000) + (yesterday_time.month * 100) + yesterday_time.day_of_month;
     
-    float yesterday_production = total_energy_kwh_ - energy_at_day_start_;
+    float yesterday_production = total_energy_in_kwh_ - energy_at_day_start_;
     if (yesterday_production > 0.0f) {
       DailyEnergyData yesterday = DailyEnergyData::from_key(yesterday_key);
       yesterday.energy_kwh = yesterday_production;
@@ -2347,18 +2366,22 @@ void TigoMonitorComponent::check_midnight_reset() {
       
       ESP_LOGI(TAG, "Archived daily energy at midnight: %04d-%02d-%02d = %.3f kWh (total: %.3f, started: %.3f)", 
                yesterday.year, yesterday.month, yesterday.day, yesterday_production,
-               total_energy_kwh_, energy_at_day_start_);
+               total_energy_in_kwh_, energy_at_day_start_);
     }
     
     // Update current_day_key to today
     current_day_key_ = (now.year * 10000) + (now.month * 100) + now.day_of_month;
     
     // Now reset total energy (without saving to flash yet)
-    total_energy_kwh_ = 0.0f;
+    total_energy_in_kwh_ = 0.0f;
+    total_energy_out_kwh_ = 0.0f;
     energy_at_day_start_ = 0.0f;
     
-    if (energy_sum_sensor_ != nullptr) {
-      energy_sum_sensor_->publish_state(0.0f);
+    if (energy_in_sum_sensor_ != nullptr) {
+      energy_in_sum_sensor_->publish_state(0.0f);
+    }
+    if (energy_out_sum_sensor_ != nullptr) {
+      energy_out_sum_sensor_->publish_state(0.0f);
     }
     
     // Reset all peak power values (without saving to flash yet)
@@ -2588,8 +2611,8 @@ void TigoMonitorComponent::assign_sensor_index_to_node(const std::string &addr) 
 
 void TigoMonitorComponent::load_energy_data() {
   auto restore = global_preferences->make_preference<float>(ENERGY_DATA_HASH);
-  if (restore.load(&total_energy_kwh_)) {
-    ESP_LOGI(TAG, "Restored total energy: %.3f kWh", total_energy_kwh_);
+  if (restore.load(&total_energy_in_kwh_)) {
+    ESP_LOGI(TAG, "Restored total input energy: %.3f kWh", total_energy_in_kwh_);
     
     // Try to restore energy_at_day_start_ and current_day_key_
     uint32_t baseline_hash = esphome::fnv1_hash("energy_day_baseline");
@@ -2598,8 +2621,16 @@ void TigoMonitorComponent::load_energy_data() {
       ESP_LOGI(TAG, "Restored day start baseline: %.3f kWh", energy_at_day_start_);
     } else {
       // No baseline saved - assume we're starting fresh today
-      energy_at_day_start_ = total_energy_kwh_;
+      energy_at_day_start_ = total_energy_in_kwh_;
       ESP_LOGI(TAG, "No baseline found, using current total as baseline: %.3f kWh", energy_at_day_start_);
+    }
+
+    auto restore_out = global_preferences->make_preference<float>(ENERGY_DATA_OUT_HASH);
+    if (restore_out.load(&total_energy_out_kwh_)) {
+      ESP_LOGI(TAG, "Restored total output energy: %.3f kWh", total_energy_out_kwh_);
+    } else {
+      total_energy_out_kwh_ = 0.0f;
+      ESP_LOGI(TAG, "No previous output energy data found, starting from 0 kWh");
     }
     
     uint32_t day_key_hash = esphome::fnv1_hash("current_day_key");
@@ -2612,7 +2643,8 @@ void TigoMonitorComponent::load_energy_data() {
     }
   } else {
     ESP_LOGI(TAG, "No previous energy data found, starting from 0 kWh");
-    total_energy_kwh_ = 0.0f;
+    total_energy_in_kwh_ = 0.0f;
+    total_energy_out_kwh_ = 0.0f;
     energy_at_day_start_ = 0.0f;
     current_day_key_ = 0;
   }
@@ -2620,10 +2652,17 @@ void TigoMonitorComponent::load_energy_data() {
 
 void TigoMonitorComponent::save_energy_data() {
   auto save = global_preferences->make_preference<float>(ENERGY_DATA_HASH);
-  if (save.save(&total_energy_kwh_)) {
-    ESP_LOGD(TAG, "Saved energy data: %.3f kWh", total_energy_kwh_);
+  if (save.save(&total_energy_in_kwh_)) {
+    ESP_LOGD(TAG, "Saved input energy data: %.3f kWh", total_energy_in_kwh_);
   } else {
-    ESP_LOGW(TAG, "Failed to save energy data");
+    ESP_LOGW(TAG, "Failed to save input energy data");
+  }
+
+  auto save_out = global_preferences->make_preference<float>(ENERGY_DATA_OUT_HASH);
+  if (save_out.save(&total_energy_out_kwh_)) {
+    ESP_LOGD(TAG, "Saved output energy data: %.3f kWh", total_energy_out_kwh_);
+  } else {
+    ESP_LOGW(TAG, "Failed to save output energy data");
   }
   
   // Also save energy_at_day_start_ and current_day_key_ for accurate daily tracking after reboots
@@ -2666,7 +2705,7 @@ void TigoMonitorComponent::update_daily_energy(float energy_kwh) {
       // New day - archive yesterday's energy production if we have it
       if (current_day_key_ != 0) {
         // Calculate yesterday's production (current total - energy at start of yesterday)
-        float yesterday_production = total_energy_kwh_ - energy_at_day_start_;
+        float yesterday_production = total_energy_in_kwh_ - energy_at_day_start_;
         
         // Only archive if we had positive production yesterday
         if (yesterday_production > 0.0f) {
@@ -2693,7 +2732,7 @@ void TigoMonitorComponent::update_daily_energy(float energy_kwh) {
           
           ESP_LOGI(TAG, "Archived daily energy: %04d-%02d-%02d = %.3f kWh (total was %.3f, day started at %.3f)", 
                    yesterday.year, yesterday.month, yesterday.day, yesterday_production,
-                   total_energy_kwh_, energy_at_day_start_);
+                   total_energy_in_kwh_, energy_at_day_start_);
           
           // Save to flash
           save_daily_energy_history();
@@ -2703,7 +2742,7 @@ void TigoMonitorComponent::update_daily_energy(float energy_kwh) {
     
     // Update to new day and record current total as the starting point
     current_day_key_ = day_key;
-    energy_at_day_start_ = total_energy_kwh_;
+    energy_at_day_start_ = total_energy_in_kwh_;
     ESP_LOGI(TAG, "New day started: %04d-%02d-%02d, energy baseline: %.3f kWh", 
              now.year, now.month, now.day_of_month, energy_at_day_start_);
   }
@@ -3185,7 +3224,7 @@ int TigoMonitorComponent::get_online_device_count() const {
 
 float TigoMonitorComponent::get_total_power() const {
   // Return cached value updated during publish_sensor_data()
-  return cached_total_power_;
+  return cached_total_power_in_;
 }
 
 }  // namespace tigo_monitor
