@@ -338,8 +338,8 @@ def _validate_config(config):
     sensor_name = config.get(CONF_NAME, "").lower()
     has_energy_out_keywords = any(keyword in sensor_name for keyword in ["energy out", "output energy", "e_out", "e out"])
     has_energy_in_keywords = any(keyword in sensor_name for keyword in ["energy in", "input energy", "e_in", "e in"]) and not has_energy_out_keywords
-    has_output_power_keywords = any(keyword in sensor_name for keyword in ["output power", "power out", "p_out", "p out"])
-    has_power_in_keywords = any(keyword in sensor_name for keyword in ["input power", "power in", "p_in", "p in"]) and not has_output_power_keywords
+    has_power_out_keywords = any(keyword in sensor_name for keyword in ["output power", "power out", "p_out", "p out"])
+    has_power_in_keywords = any(keyword in sensor_name for keyword in ["input power", "power in", "p_in", "p in"]) and not has_power_out_keywords
     has_count_keywords = any(keyword in sensor_name for keyword in ["count", "devices", "discovered", "active", "number"])
     has_checksum_keywords = any(keyword in sensor_name for keyword in ["checksum", "invalid", "crc", "error"])
     has_frame_keywords = any(keyword in sensor_name for keyword in ["frame", "missed", "lost", "dropped"])
@@ -354,7 +354,7 @@ def _validate_config(config):
             return ENERGY_OUT_SUM_CONFIG_SCHEMA(config)
         elif has_energy_in_keywords:
             return ENERGY_IN_SUM_CONFIG_SCHEMA(config)
-        elif has_output_power_keywords:
+        elif has_power_out_keywords:
             return POWER_OUT_SUM_CONFIG_SCHEMA(config)
         elif has_power_in_keywords:
             return POWER_IN_SUM_CONFIG_SCHEMA(config)
@@ -391,8 +391,9 @@ async def to_code(config):
         # Check if this is energy, power, device count, or diagnostic sensor by name keywords
         sensor_name = config.get(CONF_NAME, "").lower()
         has_energy_out_keywords = any(keyword in sensor_name for keyword in ["energy out", "output energy", "e_out", "e out"])
-        has_energy_in_keywords = any(keyword in sensor_name for keyword in ["energy", "kwh", "kilowatt", "wh"]) and not has_energy_out_keywords
-        has_output_power_keywords = any(keyword in sensor_name for keyword in ["output power", "power out", "p_out", "p out"])
+        has_energy_in_keywords = any(keyword in sensor_name for keyword in ["energy in", "input energy", "e_in", "e in"]) and not has_energy_out_keywords
+        has_power_out_keywords = any(keyword in sensor_name for keyword in ["output power", "power out", "p_out", "p out"])
+        has_power_in_keywords = any(keyword in sensor_name for keyword in ["input power", "power in", "p_in", "p in"]) and not has_power_out_keywords
         has_count_keywords = any(keyword in sensor_name for keyword in ["count", "devices", "discovered", "active", "number"])
         has_checksum_keywords = any(keyword in sensor_name for keyword in ["checksum", "invalid", "crc", "error"])
         has_frame_keywords = any(keyword in sensor_name for keyword in ["frame", "missed", "lost", "dropped"])
@@ -406,8 +407,10 @@ async def to_code(config):
             cg.add(hub.add_energy_out_sum_sensor(sens))
         elif has_energy_in_keywords:
             cg.add(hub.add_energy_in_sum_sensor(sens))
-        elif has_output_power_keywords:
+        elif has_power_out_keywords:
             cg.add(hub.add_power_out_sum_sensor(sens))
+        elif has_power_in_keywords:
+            cg.add(hub.add_power_sum_sensor(sens))
         elif has_count_keywords:
             cg.add(hub.add_device_count_sensor(sens))
         elif has_checksum_keywords:

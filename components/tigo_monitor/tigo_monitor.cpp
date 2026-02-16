@@ -1081,7 +1081,7 @@ void TigoMonitorComponent::update_string_data() {
     for (const auto &addr : string_data.device_addrs) {
       DeviceData *device = find_device_by_addr(addr);
       if (device && device->last_update > 0) {
-        string_data.total_power += device->power_in;
+        string_data.total_power += device->power_out;
         string_data.total_current += device->current_in;
         sum_voltage_in += device->voltage_in;
         sum_voltage_out += device->voltage_out;
