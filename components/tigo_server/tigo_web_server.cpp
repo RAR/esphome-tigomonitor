@@ -1811,7 +1811,6 @@ void TigoWebServer::build_yaml_json(PSRAMString& json, const std::set<std::strin
     }
     }
     if (selected_hub_sensors.count("device_count") > 0) {
-      yaml_text.append("  - platform: tigo_monitor\n");
       yaml_text.append("    tigo_monitor_id: tigo_hub\n");
       yaml_text.append("    name: \"Active Device Count\"\n\n");
     }
