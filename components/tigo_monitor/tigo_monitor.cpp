@@ -1382,11 +1382,12 @@ void TigoMonitorComponent::publish_sensor_data() {
       ESP_LOGD(TAG, "Published barcode for %s: %s", device.addr.c_str(), device.barcode.c_str());
     }
 
-    // Publish duty cycle sensor
+    // Publish duty cycle sensor (normalize raw 0-255 byte to 0-100%)
     auto duty_cycle_it = duty_cycle_sensors_.find(device.addr);
     if (duty_cycle_it != duty_cycle_sensors_.end()) {
-      duty_cycle_it->second->publish_state(device.duty_cycle);
-      ESP_LOGD(TAG, "Published duty cycle for %s: %u%%", device.addr.c_str(), device.duty_cycle);
+      float duty_cycle_percent = (device.duty_cycle / 255.0f) * 100.0f;
+      duty_cycle_it->second->publish_state(duty_cycle_percent);
+      ESP_LOGD(TAG, "Published duty cycle for %s: %.1f%%", device.addr.c_str(), duty_cycle_percent);
     }
 
     // Publish firmware version text sensor
