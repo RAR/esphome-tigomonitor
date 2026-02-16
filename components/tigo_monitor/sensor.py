@@ -337,9 +337,9 @@ def _validate_config(config):
     # Check sensor type by name keywords
     sensor_name = config.get(CONF_NAME, "").lower()
     has_energy_out_keywords = any(keyword in sensor_name for keyword in ["energy out", "output energy", "e_out", "e out"])
-    has_energy_in_keywords = any(keyword in sensor_name for keyword in ["energy in", "input energy", "e_in", "e in"]) and not has_energy_out_keywords
+    has_energy_in_keywords = any(keyword in sensor_name for keyword in ["energy in", "input energy", "e_in", "e in", "energy", "kwh", "kilowatt", "wh"]) and not has_energy_out_keywords
     has_power_out_keywords = any(keyword in sensor_name for keyword in ["output power", "power out", "p_out", "p out"])
-    has_power_in_keywords = any(keyword in sensor_name for keyword in ["input power", "power in", "p_in", "p in"]) and not has_power_out_keywords
+    has_power_in_keywords = any(keyword in sensor_name for keyword in ["input power", "power in", "p_in", "p in", "power", "watt", "total", "sum", "combined", "system"]) and not has_power_out_keywords
     has_count_keywords = any(keyword in sensor_name for keyword in ["count", "devices", "discovered", "active", "number"])
     has_checksum_keywords = any(keyword in sensor_name for keyword in ["checksum", "invalid", "crc", "error"])
     has_frame_keywords = any(keyword in sensor_name for keyword in ["frame", "missed", "lost", "dropped"])
@@ -373,7 +373,7 @@ def _validate_config(config):
         elif has_internal_ram_keywords:
             return INTERNAL_RAM_FREE_CONFIG_SCHEMA(config)
         else:
-            raise cv.Invalid("For sensors without address, use names containing 'energy out'/'output energy' for output-energy sensors, 'energy'/'kwh' for input-energy sensors, 'power'/'total'/'sum' for power sensors, 'count'/'devices' for device count, 'checksum'/'invalid' for checksum errors, 'frame'/'missed' for frame errors, 'psram' for PSRAM free, 'stack' for stack free, 'internal ram min' for internal RAM minimum, or 'internal ram' for internal RAM free")
+            raise cv.Invalid("For sensors without address, use names containing 'energy out'/'output energy' for output-energy sensors, 'energy'/'kwh'/'energy in' for input-energy sensors, 'power out'/'output power' for output-power sensors, 'power'/'total'/'sum'/'power in' for input-power sensors, 'count'/'devices' for device count, 'checksum'/'invalid' for checksum errors, 'frame'/'missed' for frame errors, 'psram' for PSRAM free, 'stack' for stack free, 'internal ram min' for internal RAM minimum, or 'internal ram' for internal RAM free")
     elif CONF_ADDRESS in config:
         # This is a device sensor configuration
         return DEVICE_CONFIG_SCHEMA(config)
@@ -391,9 +391,9 @@ async def to_code(config):
         # Check if this is energy, power, device count, or diagnostic sensor by name keywords
         sensor_name = config.get(CONF_NAME, "").lower()
         has_energy_out_keywords = any(keyword in sensor_name for keyword in ["energy out", "output energy", "e_out", "e out"])
-        has_energy_in_keywords = any(keyword in sensor_name for keyword in ["energy in", "input energy", "e_in", "e in"]) and not has_energy_out_keywords
+        has_energy_in_keywords = any(keyword in sensor_name for keyword in ["energy in", "input energy", "e_in", "e in", "energy", "kwh", "kilowatt", "wh"]) and not has_energy_out_keywords
         has_power_out_keywords = any(keyword in sensor_name for keyword in ["output power", "power out", "p_out", "p out"])
-        has_power_in_keywords = any(keyword in sensor_name for keyword in ["input power", "power in", "p_in", "p in"]) and not has_power_out_keywords
+        has_power_in_keywords = any(keyword in sensor_name for keyword in ["input power", "power in", "p_in", "p in", "power", "watt", "total", "sum", "combined", "system"]) and not has_power_out_keywords
         has_count_keywords = any(keyword in sensor_name for keyword in ["count", "devices", "discovered", "active", "number"])
         has_checksum_keywords = any(keyword in sensor_name for keyword in ["checksum", "invalid", "crc", "error"])
         has_frame_keywords = any(keyword in sensor_name for keyword in ["frame", "missed", "lost", "dropped"])

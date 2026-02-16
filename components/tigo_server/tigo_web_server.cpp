@@ -818,7 +818,7 @@ esp_err_t TigoWebServer::api_yaml_handler(httpd_req_t *req) {
   
   // If no sensors specified, use default set
   if (selected_sensors.empty()) {
-    selected_sensors = {"power_in", "peak_power", "voltage_in", "voltage_out", "current_in", "temperature", "rssi"};
+    selected_sensors = {"power_in", "peak_power", "voltage_in", "voltage_out", "current_in", "current_out", "power_out", "temperature", "rssi"};
   }
   
   PSRAMString json_buffer;
@@ -1358,7 +1358,7 @@ void TigoWebServer::build_devices_json(PSRAMString& json) {
         "\"current\":%.3f,\"current_out\":%.3f,\"power_in\":%.1f,\"power\":%.1f,\"power_out\":%.1f,\"peak_power\":%.1f,\"temperature\":%.1f,\"rssi\":%d,"
         "\"duty_cycle\":%.1f,\"efficiency\":%.2f,\"data_age_ms\":%lu}",
         device.addr.c_str(), device.barcode.c_str(), device_name.c_str(), string_label.c_str(), device.voltage_in, device.voltage_out,
-        device.current_in, device.current_out, device.power_in, device.power_in, device.power_out, device.peak_power, device.temperature, device.rssi,
+        device.current_in, device.current_out, device.power_in, device.power_out, device.power_out, device.peak_power, device.temperature, device.rssi,
         duty_cycle_percent, device.efficiency, data_age_ms);
     } else {
       // Device is known but has no runtime data yet (e.g., ESP32 restarted at night)
@@ -1886,6 +1886,9 @@ void TigoWebServer::build_yaml_json(PSRAMString& json, const std::set<std::strin
     if (selected_sensors.count("peak_power") > 0) {
       yaml_text.append("    peak_power: {}\n");
     }
+    if (selected_sensors.count("power_out") > 0) {
+      yaml_text.append("    power_out: {}\n");
+    }
     if (selected_sensors.count("voltage_in") > 0) {
       yaml_text.append("    voltage_in: {}\n");
     }
@@ -1894,6 +1897,9 @@ void TigoWebServer::build_yaml_json(PSRAMString& json, const std::set<std::strin
     }
     if (selected_sensors.count("current_in") > 0) {
       yaml_text.append("    current_in: {}\n");
+    }
+    if (selected_sensors.count("current_out") > 0) {
+      yaml_text.append("    current_out: {}\n");
     }
     if (selected_sensors.count("temperature") > 0) {
       yaml_text.append("    temperature: {}\n");
@@ -3569,10 +3575,12 @@ void TigoWebServer::get_yaml_config_html(PSRAMString& html) {
         <h3>Per-Device Sensors:</h3>
         <div class="checkbox-grid">
           <label><input type="checkbox" checked id="sel-power_in" onchange="updateYAML()"> Power In (W)</label>
+          <label><input type="checkbox" id="sel-power_out" onchange="updateYAML()"> Power Out (W)</label>
           <label><input type="checkbox" checked id="sel-peak_power" onchange="updateYAML()"> Peak Power (W)</label>
           <label><input type="checkbox" checked id="sel-voltage_in" onchange="updateYAML()"> Input Voltage (V)</label>
           <label><input type="checkbox" checked id="sel-voltage_out" onchange="updateYAML()"> Output Voltage (V)</label>
           <label><input type="checkbox" checked id="sel-current_in" onchange="updateYAML()"> Input Current (A)</label>
+          <label><input type="checkbox" id="sel-current_out" onchange="updateYAML()"> Output Current (A)</label>
           <label><input type="checkbox" checked id="sel-temperature" onchange="updateYAML()"> Temperature (°C)</label>
           <label><input type="checkbox" checked id="sel-rssi" onchange="updateYAML()"> RSSI (dBm)</label>
           <label><input type="checkbox" id="sel-duty_cycle" onchange="updateYAML()"> Duty Cycle (%)</label>
@@ -3647,7 +3655,7 @@ void TigoWebServer::get_yaml_config_html(PSRAMString& html) {
     applyTheme();
     
     function getSelectedSensors() {
-      const deviceSensors = ['power_in', 'peak_power', 'voltage_in', 'voltage_out', 'current_in', 
+      const deviceSensors = ['power_in', 'power_out', 'peak_power', 'voltage_in', 'voltage_out', 'current_in', 'current_out',
                        'temperature', 'rssi', 'duty_cycle', 'efficiency', 'power_factor', 
                        'load_factor', 'barcode'];
       return deviceSensors.filter(s => document.getElementById('sel-' + s).checked);
@@ -3661,7 +3669,7 @@ void TigoWebServer::get_yaml_config_html(PSRAMString& html) {
     }
     
     function selectAllDevice() {
-      const sensors = ['power_in', 'peak_power', 'voltage_in', 'voltage_out', 'current_in', 
+      const sensors = ['power_in', 'power_out', 'peak_power', 'voltage_in', 'voltage_out', 'current_in', 'current_out',
                        'temperature', 'rssi', 'duty_cycle', 'efficiency', 'power_factor', 
                        'load_factor', 'barcode'];
       sensors.forEach(s => document.getElementById('sel-' + s).checked = true);
@@ -3671,7 +3679,7 @@ void TigoWebServer::get_yaml_config_html(PSRAMString& html) {
     function selectDefaultDevice() {
       const defaultSensors = ['power_in', 'peak_power', 'voltage_in', 'voltage_out', 'current_in', 
                               'temperature', 'rssi'];
-      const allSensors = ['power_in', 'peak_power', 'voltage_in', 'voltage_out', 'current_in', 
+      const allSensors = ['power_in', 'power_out', 'peak_power', 'voltage_in', 'voltage_out', 'current_in', 'current_out',
                           'temperature', 'rssi', 'duty_cycle', 'efficiency', 'power_factor', 
                           'load_factor', 'barcode'];
       allSensors.forEach(s => {
@@ -3681,7 +3689,7 @@ void TigoWebServer::get_yaml_config_html(PSRAMString& html) {
     }
     
     function selectNoneDevice() {
-      const sensors = ['power_in', 'peak_power', 'voltage_in', 'voltage_out', 'current_in', 
+      const sensors = ['power_in', 'power_out', 'peak_power', 'voltage_in', 'voltage_out', 'current_in', 'current_out',
                        'temperature', 'rssi', 'duty_cycle', 'efficiency', 'power_factor', 
                        'load_factor', 'barcode'];
       sensors.forEach(s => document.getElementById('sel-' + s).checked = false);

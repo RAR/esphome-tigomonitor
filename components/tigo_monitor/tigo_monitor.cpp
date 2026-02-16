@@ -1957,9 +1957,9 @@ void TigoMonitorComponent::generate_sensor_yaml() {
   ESP_LOGI(TAG, "# - Total configuration slots: %d", number_of_devices_);
   ESP_LOGI(TAG, "=== END YAML CONFIGURATION ===");
   ESP_LOGI(TAG, "");
-  ESP_LOGI(TAG, "Auto-templated YAML generated! Each device creates 6 sensors with names based on 'name' field:");
-  ESP_LOGI(TAG, "- [name] Power In (W), [name] Voltage In (V), [name] Voltage Out (V)");
-  ESP_LOGI(TAG, "- [name] Current (A), [name] Temperature (°C), [name] RSSI (dBm)");
+  ESP_LOGI(TAG, "Auto-templated YAML generated! Each device creates 8 sensors with names based on 'name' field:");
+  ESP_LOGI(TAG, "- [name] Power In (W), [name] Power Out (W), [name] Voltage In (V), [name] Voltage Out (V)");
+  ESP_LOGI(TAG, "- [name] Current (A), [name] Output Current (A), [name] Temperature (°C), [name] RSSI (dBm)");
   ESP_LOGI(TAG, "Copy the configuration above - sensor names are auto-generated from base name!");
 }
 
