@@ -1797,7 +1797,12 @@ void TigoWebServer::build_yaml_json(PSRAMString& json, const std::set<std::strin
     if (selected_hub_sensors.count("power_sum") > 0) {
       yaml_text.append("  - platform: tigo_monitor\n");
       yaml_text.append("    tigo_monitor_id: tigo_hub\n");
-      yaml_text.append("    name: \"Total System Power\"\n\n");
+      yaml_text.append("    name: \"Total Input Power\"\n\n");
+    }
+    if (selected_hub_sensors.count("power_out_sum") > 0) {
+      yaml_text.append("  - platform: tigo_monitor\n");
+      yaml_text.append("    tigo_monitor_id: tigo_hub\n");
+      yaml_text.append("    name: \"Total Output Power\"\n\n");
     }
     if (selected_hub_sensors.count("energy_in_sum") > 0 || selected_hub_sensors.count("energy_sum") > 0) {
       yaml_text.append("  - platform: tigo_monitor\n");
@@ -3597,7 +3602,8 @@ void TigoWebServer::get_yaml_config_html(PSRAMString& html) {
         
         <h3 style="margin-top: 1.5rem;">Hub-Level Sensors:</h3>
         <div class="checkbox-grid">
-          <label><input type="checkbox" id="sel-power_sum" onchange="updateYAML()"> Total Power (W)</label>
+          <label><input type="checkbox" id="sel-power_sum" onchange="updateYAML()"> Total Power In (W)</label>
+          <label><input type="checkbox" id="sel-power_out_sum" onchange="updateYAML()"> Total Power Out (W)</label>
           <label><input type="checkbox" id="sel-energy_in_sum" onchange="updateYAML()"> Total Energy In (kWh)</label>
           <label><input type="checkbox" id="sel-energy_out_sum" onchange="updateYAML()"> Total Energy Out (kWh)</label>
           <label><input type="checkbox" id="sel-device_count" onchange="updateYAML()"> Device Count</label>
@@ -3662,7 +3668,7 @@ void TigoWebServer::get_yaml_config_html(PSRAMString& html) {
     }
     
     function getSelectedHubSensors() {
-      const hubSensors = ['power_sum', 'energy_in_sum', 'energy_out_sum', 'device_count', 'invalid_checksum', 
+      const hubSensors = ['power_sum', 'power_out_sum', 'energy_in_sum', 'energy_out_sum', 'device_count', 'invalid_checksum', 
                           'missed_frame', 'internal_ram_free', 'internal_ram_min', 
                           'psram_free', 'stack_free'];
       return hubSensors.filter(s => document.getElementById('sel-' + s).checked);
@@ -3697,7 +3703,7 @@ void TigoWebServer::get_yaml_config_html(PSRAMString& html) {
     }
     
     function selectAllHub() {
-      const hubSensors = ['power_sum', 'energy_in_sum', 'energy_out_sum', 'device_count', 'invalid_checksum', 
+      const hubSensors = ['power_sum', 'power_out_sum', 'energy_in_sum', 'energy_out_sum', 'device_count', 'invalid_checksum', 
                           'missed_frame', 'internal_ram_free', 'internal_ram_min', 
                           'psram_free', 'stack_free'];
       hubSensors.forEach(s => document.getElementById('sel-' + s).checked = true);
@@ -3705,7 +3711,7 @@ void TigoWebServer::get_yaml_config_html(PSRAMString& html) {
     }
     
     function selectNoneHub() {
-      const hubSensors = ['power_sum', 'energy_in_sum', 'energy_out_sum', 'device_count', 'invalid_checksum', 
+      const hubSensors = ['power_sum', 'power_out_sum', 'energy_in_sum', 'energy_out_sum', 'device_count', 'invalid_checksum', 
                           'missed_frame', 'internal_ram_free', 'internal_ram_min', 
                           'psram_free', 'stack_free'];
       hubSensors.forEach(s => document.getElementById('sel-' + s).checked = false);
