@@ -1717,7 +1717,9 @@ void TigoWebServer::build_esp_status_json(PSRAMString& json) {
     // Get IP address - use the newer get_ip_addresses() method
     auto addresses = wifi::global_wifi_component->get_ip_addresses();
     if (!addresses.empty() && addresses[0].is_set()) {
-      ip_address = addresses[0].str();
+      char buf[20];
+      addresses[0].str_to(buf, sizeof(buf));
+      ip_address = buf;
     }
     
     // Get MAC address via global function
@@ -2168,7 +2170,7 @@ void TigoWebServer::get_dashboard_html(PSRAMString& html) {
     }
     
     // Release banner functions
-    const CURRENT_VERSION = 'v1.4.0'; // Update this with each release
+    const CURRENT_VERSION = 'v1.4.1'; // Update this with each release
     
     async function checkForNewRelease() {
       try {

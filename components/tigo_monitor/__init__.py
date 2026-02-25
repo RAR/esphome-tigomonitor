@@ -1,7 +1,7 @@
 """ESPHome external component for Tigo Server communication."""
 import esphome.codegen as cg
 import esphome.config_validation as cv
-from esphome.components import uart, time as time_
+from esphome.components import uart, time as time_, esp32
 from esphome.const import CONF_ID, CONF_UART_ID, CONF_TIME_ID, CONF_NAME
 from esphome.core import coroutine
 
@@ -76,5 +76,5 @@ def to_code(config):
             cg.add(var.add_inverter(inverter_name, mppts))
     
     # Add ESP-IDF HTTP client component dependency
-    cg.add_library("ESP32 HTTP Client", None)
+    esp32.include_builtin_idf_component("esp_http_client")
 
