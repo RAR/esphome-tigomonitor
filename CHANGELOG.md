@@ -7,13 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-02-25
+
+### Added
+- **Output-Channel Telemetry** ([#6](https://github.com/RAR/esphome-tigomonitor/pull/6)) — contributed by [@aeozyalcin](https://github.com/aeozyalcin)
+  - New per-device `current_out` and `power_out` sensors derived from duty cycle
+  - New `power_in` sensor (explicit input power with calibration applied)
+  - New hub-level `Total Output Power` aggregate sensor
+  - Input vs output power split enables accurate per-device efficiency tracking
+  - `power_out` and `current_out` displayed on web UI device cards
+- **TS4-A-S (Monitor-Only) Module Support** ([#5](https://github.com/RAR/esphome-tigomonitor/issues/5))
+  - Auto-detect monitor-only modules (voltage_out ≈ 0, voltage_in > 1V)
+  - Monitor-only devices mirror input values to output and report 100% efficiency
+- **Aggregate Sensor Naming: Input/Output Distinction**
+  - Hub sensors now support `input`/`output` keywords for power and energy
+  - e.g. "Total Input Power", "Total Output Power", "Total Input Energy", "Total Output Energy"
+  - Backward compatible — existing names like "Total System Power" still route to input variants
+
 ### Fixed
+- **Duty Cycle Sensor: HA Now Reports 0–100%**
+  - Raw UART byte (0–255) was published directly to Home Assistant as "%"
+  - Now normalized to 0–100% matching the web UI display
 - **YAML Generator: Hub-level sensor output format** ([#4](https://github.com/RAR/esphome-tigomonitor/issues/4))
   - YAML config page (`/yaml`) was generating hub-level sensors in a nested sub-key format (`power_sum:`, `energy_sum:`, etc.) under a single platform entry, which is invalid
   - Hub sensors now correctly generate as separate `- platform: tigo_monitor` entries with keyword-rich names that match the sensor type auto-detection in `sensor.py`
   - Names updated to use proper keywords: "Total System Power", "Total System Energy", "Active Device Count", etc.
+- **DeviceData struct field initialization** — `current_out`, `power_in`, `power_out` now default to `0.0f`
 
 ### Changed
+- **Power calculation consolidated into `DeviceData`** — power was previously calculated in 8 separate places; now computed once during frame processing
+- **Daily energy history and overview totals switched to output-channel tracking**
 - **Documentation: Quick Start overhaul** ([#3](https://github.com/RAR/esphome-tigomonitor/issues/3))
   - `external_components` now uses expanded `type: git` / `url:` format instead of shorthand `github://` which may not resolve correctly
   - Board changed from `esp32dev` to `esp32-s3-devkitc-1` (generic ESP32-S3)
