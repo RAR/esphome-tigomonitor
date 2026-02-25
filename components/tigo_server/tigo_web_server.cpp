@@ -1718,7 +1718,7 @@ void TigoWebServer::build_esp_status_json(PSRAMString& json) {
     auto addresses = wifi::global_wifi_component->get_ip_addresses();
     if (!addresses.empty() && addresses[0].is_set()) {
       char buf[20];
-      addresses[0].str_to(buf, sizeof(buf));
+      addresses[0].str_to(buf);
       ip_address = buf;
     }
     
