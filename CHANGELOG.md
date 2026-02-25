@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.1] - 2026-02-25
+
+### Fixed
+- **Remote package compile error: `esp_http_client.h` not found**
+  - `__init__.py` used `cg.add_library()` which doesn't work for ESP-IDF built-in components
+  - Now uses `esp32.include_builtin_idf_component("esp_http_client")` — the correct ESPHome pattern
+  - Only affected remote/git installations; local path installs worked because the IDF component was already resolved
+- **Deprecation warning: `IPAddress::str()` removed in ESPHome 2026.8.0**
+  - Switched to `str_to()` API in web server status page
+
 ## [1.4.0] - 2026-02-25
 
 ### Added
