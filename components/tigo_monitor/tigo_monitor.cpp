@@ -258,9 +258,6 @@ void TigoMonitorComponent::setup() {
     missed_frame_sensor_->publish_state(0);
   }
   
-  // Register shutdown callback to save persistent data before OTA/reboot
-  App.register_component(this);
-  
   // Query CCA on boot if IP is configured and sync_cca_on_startup is enabled
   if (!cca_ip_.empty() && sync_cca_on_startup_) {
     ESP_LOGI(TAG, "CCA IP configured: %s - will sync configuration on boot", cca_ip_.c_str());
