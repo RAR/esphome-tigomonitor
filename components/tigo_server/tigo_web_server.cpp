@@ -1712,7 +1712,8 @@ void TigoWebServer::build_esp_status_json(PSRAMString& json) {
 #ifdef USE_WIFI
   if (network_connected && wifi::global_wifi_component != nullptr) {
     wifi_rssi = wifi::global_wifi_component->wifi_rssi();
-    ssid = wifi::global_wifi_component->wifi_ssid();
+    char ssid_buf[wifi::SSID_BUFFER_SIZE];
+    ssid = wifi::global_wifi_component->wifi_ssid_to(ssid_buf);
     
     // Get IP address - use the newer get_ip_addresses() method
     auto addresses = wifi::global_wifi_component->get_ip_addresses();
@@ -2170,7 +2171,7 @@ void TigoWebServer::get_dashboard_html(PSRAMString& html) {
     }
     
     // Release banner functions
-    const CURRENT_VERSION = 'v1.4.1'; // Update this with each release
+    const CURRENT_VERSION = 'v1.4.2'; // Update this with each release
     
     async function checkForNewRelease() {
       try {

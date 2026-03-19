@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.2] - 2026-03-19
+
+### Fixed
+- **ESPHome 2026.3 compatibility: `register_component` removed from public API**
+  - Removed redundant `App.register_component(this)` call in `setup()` — component is already registered via codegen
+- **Deprecation warning: `wifi_ssid()` deprecated in ESPHome 2026.3.0**
+  - Switched to `wifi_ssid_to()` buffer-based API (old API removed in 2026.9.0)
+
 ## [1.4.1] - 2026-02-25
 
 ### Fixed
