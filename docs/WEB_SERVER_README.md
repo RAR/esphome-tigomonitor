@@ -148,6 +148,25 @@ curl http://esp32/api/health
 
 ---
 
+## Home Assistant Ingress
+
+The web UI supports proxying through Home Assistant's reverse proxy with a dynamic URL prefix, compatible with both [Home Assistant Ingress](https://developers.home-assistant.io/docs/add-ons/presentation/#ingress) and the community [hass_ingress](https://github.com/lovelylain/hass_ingress) integration.
+
+To enable ingress support, add the following to your `sdkconfig_options` so the ESP-IDF HTTP server can handle the longer URIs and headers that HA Ingress generates:
+
+```yaml
+esp32:
+  framework:
+    type: esp-idf
+    sdkconfig_options:
+      CONFIG_HTTPD_MAX_REQ_HDR_LEN: "2048"
+      CONFIG_HTTPD_MAX_URI_LEN: "1024"
+```
+
+The component automatically detects the ingress base path from the `X-Ingress-Path` header and rewrites all internal links accordingly — no additional configuration required.
+
+---
+
 ## Configuration
 
 ```yaml
