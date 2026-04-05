@@ -8,7 +8,7 @@ This directory contains optimized ESPHome configurations for different ESP32 boa
 
 #### `esp32s3-atoms3.yaml` - M5Stack AtomS3 (No PSRAM)
 - **Board**: M5Stack AtomS3
-- **PSRAM**: 8MB (Octal)
+- **PSRAM**: None
 - **CPU**: 240MHz
 - **Recommended for**: Standard installations (up to ~30 devices)
 - **UART Buffers**: 2048 RX / 512 TX
