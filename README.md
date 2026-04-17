@@ -10,7 +10,7 @@ An ESPHome component for monitoring Tigo solar optimizers via RS485/UART. Real-t
 - **System Aggregation** – Total power, energy (kWh), active device count
 - **Built-in Web UI** – Dashboard, node table, status, YAML generator, CCA info
 - **CCA Integration** – Auto-sync panel names from Tigo Cloud Connect Advanced
-- **Home Assistant** – Energy Dashboard compatible, full API integration
+- **Home Assistant** – Energy Dashboard compatible, full API integration, Ingress-proxy friendly
 - **Persistent Storage** – Device mappings and energy data survive reboots
 
 ## Requirements
