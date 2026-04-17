@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.3] - 2026-04-17
+
+### Added
+- **Home Assistant Ingress support** ([#7](https://github.com/RAR/esphome-tigomonitor/pull/7)) — contributed by [@aeozyalcin](https://github.com/aeozyalcin)
+  - Web UI now works when proxied through Home Assistant Ingress (e.g. the [hass_ingress](https://github.com/lovelylain/hass_ingress) integration)
+  - Nav links are set dynamically from `window.location.pathname` so they resolve under any URL prefix
+  - `apiFetch()` prepends the detected `BASE_PATH` to all `/api/*` requests
+  - Post-reset redirect on the Status page returns to the ingress-prefixed root
+  - Purely client-side JavaScript change — no C++ or ESPHome config changes required for standalone access
+  - See [`docs/WEB_SERVER_README.md`](docs/WEB_SERVER_README.md#home-assistant-ingress) for setup details
+
 ## [1.4.2] - 2026-03-19
 
 ### Fixed
