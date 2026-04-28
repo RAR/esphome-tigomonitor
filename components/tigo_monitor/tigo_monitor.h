@@ -29,6 +29,11 @@ namespace esphome {
 namespace tigo_monitor {
   void* psram_malloc_impl(size_t size);
   void psram_free_impl(void* ptr);
+  // Logs heap diagnostics and calls abort() — used by PSRAMAllocator when
+  // both PSRAM and internal heap are exhausted. STL containers cannot
+  // handle a null allocator return, so a clean panic-reboot is safer than
+  // continuing into undefined behavior.
+  [[noreturn]] void psram_alloc_failed_abort(size_t bytes_requested);
 }
 }
 
@@ -52,10 +57,17 @@ public:
   PSRAMAllocator(const PSRAMAllocator<U>&) noexcept {}
 
   T* allocate(std::size_t n) {
+    // Size overflow: STL would also UAF here, so abort cleanly.
     if (n > std::numeric_limits<std::size_t>::max() / sizeof(T))
-      return nullptr;  // Can't throw - exceptions disabled
-    
-    void* ptr = esphome::tigo_monitor::psram_malloc_impl(n * sizeof(T));
+      esphome::tigo_monitor::psram_alloc_failed_abort(0);
+
+    const std::size_t bytes = n * sizeof(T);
+    void* ptr = esphome::tigo_monitor::psram_malloc_impl(bytes);
+    if (ptr == nullptr) {
+      // Both PSRAM and internal heap exhausted. STL containers will UAF
+      // on the returned nullptr — abort cleanly with diagnostics instead.
+      esphome::tigo_monitor::psram_alloc_failed_abort(bytes);
+    }
     return static_cast<T*>(ptr);
   }
 
