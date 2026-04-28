@@ -23,6 +23,8 @@
 
 #ifdef USE_ESP_IDF
 #include <esp_heap_caps.h>
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 
 // Forward declare PSRAM allocation functions
 namespace esphome {
@@ -326,16 +328,30 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   void add_inverter(const std::string &name, const std::vector<std::string> &mppt_labels);
   
   // Public getters for web server access
+  // NOTE: get_X() return references and are only safe from the main task (the
+  // single writer). Web server callbacks run on the esp_http_server task; they
+  // MUST use snapshot_X() instead, which returns a locked copy and is safe
+  // against concurrent mutation by the main task.
 #ifdef USE_ESP_IDF
   const psram_vector<DeviceData>& get_devices() const { return devices_; }
   const psram_vector<NodeTableData>& get_node_table() const { return node_table_; }
   const psram_map<std::string, StringData>& get_strings() const { return strings_; }
   const psram_vector<InverterData>& get_inverters() const { return inverters_; }
+
+  psram_vector<DeviceData> snapshot_devices() const;
+  psram_vector<NodeTableData> snapshot_node_table() const;
+  psram_map<std::string, StringData> snapshot_strings() const;
+  psram_vector<InverterData> snapshot_inverters() const;
 #else
   const std::vector<DeviceData>& get_devices() const { return devices_; }
   const std::vector<NodeTableData>& get_node_table() const { return node_table_; }
   const std::map<std::string, StringData>& get_strings() const { return strings_; }
   const std::vector<InverterData>& get_inverters() const { return inverters_; }
+
+  std::vector<DeviceData> snapshot_devices() const { return devices_; }
+  std::vector<NodeTableData> snapshot_node_table() const { return node_table_; }
+  std::map<std::string, StringData> snapshot_strings() const { return strings_; }
+  std::vector<InverterData> snapshot_inverters() const { return inverters_; }
 #endif
   int get_number_of_devices() const { return number_of_devices_; }
   const std::string& get_cca_ip() const { return cca_ip_; }
@@ -456,6 +472,38 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   void save_energy_data();
   
  private:
+#ifdef USE_ESP_IDF
+  // Recursive mutex protecting the structure (size/iterators) of devices_,
+  // node_table_, strings_, inverters_, and cca_device_info_. Held briefly
+  // around mutations and during snapshot copies. Recursive so internal
+  // helpers can re-take it. Created in setup().
+  mutable SemaphoreHandle_t state_mutex_{nullptr};
+
+  // RAII guard for state_mutex_. No-op if mutex is null (defensive: allows
+  // construction on a partially-initialized component to fail safely).
+  class StateLock {
+   public:
+    explicit StateLock(SemaphoreHandle_t sem) : sem_(sem) {
+      if (sem_ != nullptr) xSemaphoreTakeRecursive(sem_, portMAX_DELAY);
+    }
+    ~StateLock() {
+      if (sem_ != nullptr) xSemaphoreGiveRecursive(sem_);
+    }
+    StateLock(const StateLock&) = delete;
+    StateLock& operator=(const StateLock&) = delete;
+   private:
+    SemaphoreHandle_t sem_;
+  };
+#else
+  // Non-ESP-IDF (Arduino) builds are single-threaded; StateLock is a no-op.
+  struct StateLockDummy {};
+  mutable StateLockDummy state_mutex_{};
+  class StateLock {
+   public:
+    explicit StateLock(StateLockDummy &) {}
+  };
+#endif
+
 #ifdef USE_ESP_IDF
   // Use PSRAM-backed containers for large data structures
   psram_vector<DeviceData> devices_;

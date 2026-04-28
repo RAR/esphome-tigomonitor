@@ -1230,9 +1230,9 @@ esp_err_t TigoWebServer::api_health_handler(httpd_req_t *req) {
 void TigoWebServer::build_devices_json(PSRAMString& json) {
   json.append("{\"devices\":[");
   
-  const auto &devices = parent_->get_devices();
-  const auto &node_table = parent_->get_node_table();
-  
+  const auto devices = parent_->snapshot_devices();
+  const auto node_table = parent_->snapshot_node_table();
+
   // Create a vector of device info with names and sensor indices for sorting
   struct DeviceWithName {
     const tigo_monitor::DeviceData *device;  // May be nullptr if no runtime data yet
@@ -1391,8 +1391,8 @@ void TigoWebServer::build_overview_json(PSRAMString& json) {
     return;
   }
   
-  const auto &devices = parent_->get_devices();
-  
+  const auto devices = parent_->snapshot_devices();
+
   float total_power_out = 0.0f;
   float total_current = 0.0f;
   float avg_efficiency = 0.0f;
@@ -1426,8 +1426,8 @@ void TigoWebServer::build_overview_json(PSRAMString& json) {
 }
 
 void TigoWebServer::build_strings_json(PSRAMString& json) {
-  const auto &strings = parent_->get_strings();
-  
+  const auto strings = parent_->snapshot_strings();
+
   ESP_LOGD(TAG, "Building strings JSON - found %d strings", strings.size());
   
   json.append("{\"strings\":[");
@@ -1466,9 +1466,9 @@ void TigoWebServer::build_strings_json(PSRAMString& json) {
 }
 
 void TigoWebServer::build_inverters_json(PSRAMString& json) {
-  const auto &inverters = parent_->get_inverters();
-  const auto &strings = parent_->get_strings();
-  
+  const auto inverters = parent_->snapshot_inverters();
+  const auto strings = parent_->snapshot_strings();
+
   ESP_LOGD(TAG, "Building inverters JSON - found %d inverters", inverters.size());
   
   json.append("{\"inverters\":[");
@@ -1635,12 +1635,12 @@ void TigoWebServer::build_node_table_json(PSRAMString& json) {
   
   cJSON *root = cJSON_CreateObject();
   cJSON *nodes_array = cJSON_CreateArray();
-  
-  const auto &node_table = parent_->get_node_table();
-  
+
+  const auto node_table = parent_->snapshot_node_table();
+
   for (const auto &node : node_table) {
     cJSON *node_obj = cJSON_CreateObject();
-    
+
     cJSON_AddStringToObject(node_obj, "addr", node.addr.c_str());
     cJSON_AddStringToObject(node_obj, "long_address", node.long_address.c_str());
     // frame09_barcode field removed - Frame 09 data is ignored
@@ -1774,8 +1774,8 @@ void TigoWebServer::build_esp_status_json(PSRAMString& json) {
 
 void TigoWebServer::build_yaml_json(PSRAMString& json, const std::set<std::string>& selected_sensors, const std::set<std::string>& selected_hub_sensors) {
   PSRAMString yaml_text;
-  const auto &node_table = parent_->get_node_table();
-  
+  const auto node_table = parent_->snapshot_node_table();
+
   // Build YAML configuration
   std::vector<tigo_monitor::NodeTableData> assigned_nodes;
   for (const auto &node : node_table) {
