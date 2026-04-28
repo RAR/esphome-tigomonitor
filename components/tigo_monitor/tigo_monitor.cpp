@@ -3155,7 +3155,7 @@ void TigoMonitorComponent::query_cca_device_info() {
   // Check if network is available before attempting connection
   if (!network::is_connected()) {
     ESP_LOGW(TAG, "Network not connected, skipping CCA device info query");
-    cca_device_info_ = "{\"error\":\"Network not connected\"}";
+    set_cca_device_info("{\"error\":\"Network not connected\"}");
     return;
   }
   
@@ -3173,7 +3173,7 @@ void TigoMonitorComponent::query_cca_device_info() {
   esp_http_client_handle_t client = esp_http_client_init(&config);
   if (!client) {
     ESP_LOGE(TAG, "Failed to initialize HTTP client");
-    cca_device_info_ = "{\"error\":\"Client init failed\"}";
+    set_cca_device_info("{\"error\":\"Client init failed\"}");
     return;
   }
   
@@ -3185,7 +3185,7 @@ void TigoMonitorComponent::query_cca_device_info() {
   if (err != ESP_OK) {
     ESP_LOGE(TAG, "Failed to open HTTP connection for device info: %s", esp_err_to_name(err));
     esp_http_client_cleanup(client);
-    cca_device_info_ = "{\"error\":\"Failed to connect to CCA\"}";
+    set_cca_device_info("{\"error\":\"Failed to connect to CCA\"}");
     return;
   }
   
@@ -3200,7 +3200,7 @@ void TigoMonitorComponent::query_cca_device_info() {
     char* buffer = static_cast<char*>(psram_malloc(buffer_size));
     if (!buffer) {
       ESP_LOGE(TAG, "Failed to allocate HTTP read buffer");
-      cca_device_info_ = "{\"error\":\"Memory allocation failed\"}";
+      set_cca_device_info("{\"error\":\"Memory allocation failed\"}");
       esp_http_client_close(client);
       esp_http_client_cleanup(client);
       return;
@@ -3219,20 +3219,20 @@ void TigoMonitorComponent::query_cca_device_info() {
     
     if (read_len < 0) {
       ESP_LOGE(TAG, "Failed to read CCA device info response");
-      cca_device_info_ = "{\"error\":\"Failed to read response\"}";
+      set_cca_device_info("{\"error\":\"Failed to read response\"}");
     } else if (response.empty()) {
       ESP_LOGW(TAG, "CCA returned empty device info");
-      cca_device_info_ = "{\"error\":\"Empty response\"}";
+      set_cca_device_info("{\"error\":\"Empty response\"}");
     } else {
       ESP_LOGI(TAG, "Received %d bytes of device info from CCA", response.length());
       ESP_LOGD(TAG, "CCA Device Info: %s", response.c_str());
-      cca_device_info_ = response;
+      set_cca_device_info(response);
     }
   } else {
     ESP_LOGW(TAG, "CCA device info returned status %d", status_code);
     char error_buf[128];
     snprintf(error_buf, sizeof(error_buf), "{\"error\":\"HTTP %d\"}", status_code);
-    cca_device_info_ = error_buf;
+    set_cca_device_info(error_buf);
   }
   
   esp_http_client_close(client);
@@ -3247,7 +3247,7 @@ void TigoMonitorComponent::query_cca_config() {
 
 void TigoMonitorComponent::query_cca_device_info() {
   ESP_LOGW(TAG, "CCA device info query requires ESP-IDF framework - feature not available");
-  cca_device_info_ = "{\"error\":\"ESP-IDF required\"}";
+  set_cca_device_info("{\"error\":\"ESP-IDF required\"}");
 }
 
 void TigoMonitorComponent::match_cca_to_uart(const std::string &json_response) {
