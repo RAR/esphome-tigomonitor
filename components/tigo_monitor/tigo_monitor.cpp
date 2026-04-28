@@ -2935,18 +2935,27 @@ void TigoMonitorComponent::query_cca_config() {
     }
     
     // Read response in chunks (handles both known and chunked content-length)
+    // Cap response size to protect against malformed/malicious upstream that could exhaust heap.
+    constexpr size_t MAX_CCA_RESPONSE_BYTES = 64 * 1024;
     std::string response;
     response.reserve(content_length > 0 ? content_length : 8192);  // Pre-allocate
     int read_len;
-    
+    bool response_truncated = false;
+
     while ((read_len = esp_http_client_read(client, buffer, buffer_size)) > 0) {
+      if (response.length() + read_len > MAX_CCA_RESPONSE_BYTES) {
+        response_truncated = true;
+        break;
+      }
       response.append(buffer, read_len);
     }
-    
+
     heap_caps_free(buffer);  // Free PSRAM buffer
-    
+
     if (read_len < 0) {
       ESP_LOGE(TAG, "Failed to read HTTP response");
+    } else if (response_truncated) {
+      ESP_LOGE(TAG, "CCA response exceeded %zu byte cap; aborting parse", MAX_CCA_RESPONSE_BYTES);
     } else if (response.empty()) {
       ESP_LOGW(TAG, "CCA returned empty response");
     } else {
@@ -3165,19 +3174,29 @@ void TigoMonitorComponent::query_cca_device_info() {
     }
     
     // Read response in chunks
+    // Cap response size to protect against malformed/malicious upstream that could exhaust heap.
+    constexpr size_t MAX_CCA_RESPONSE_BYTES = 64 * 1024;
     std::string response;
     response.reserve(content_length > 0 ? content_length : 2048);  // Pre-allocate
     int read_len;
-    
+    bool response_truncated = false;
+
     while ((read_len = esp_http_client_read(client, buffer, buffer_size)) > 0) {
+      if (response.length() + read_len > MAX_CCA_RESPONSE_BYTES) {
+        response_truncated = true;
+        break;
+      }
       response.append(buffer, read_len);
     }
-    
+
     heap_caps_free(buffer);  // Free PSRAM buffer
-    
+
     if (read_len < 0) {
       ESP_LOGE(TAG, "Failed to read CCA device info response");
       cca_device_info_ = "{\"error\":\"Failed to read response\"}";
+    } else if (response_truncated) {
+      ESP_LOGE(TAG, "CCA device info exceeded %zu byte cap", MAX_CCA_RESPONSE_BYTES);
+      cca_device_info_ = "{\"error\":\"Response too large\"}";
     } else if (response.empty()) {
       ESP_LOGW(TAG, "CCA returned empty device info");
       cca_device_info_ = "{\"error\":\"Empty response\"}";
