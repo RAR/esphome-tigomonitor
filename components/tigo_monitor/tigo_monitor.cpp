@@ -201,7 +201,16 @@ const uint8_t TigoMonitorComponent::tigo_crc_table_[256] = {
 
 void TigoMonitorComponent::setup() {
   ESP_LOGCONFIG(TAG, "Setting up Tigo Server...");
-  
+
+#ifdef USE_ESP_IDF
+  // Create the recursive mutex protecting shared collections from concurrent
+  // access by the main task (UART/loop) and the esp_http_server task.
+  state_mutex_ = xSemaphoreCreateRecursiveMutex();
+  if (state_mutex_ == nullptr) {
+    ESP_LOGE(TAG, "Failed to create state mutex - shared state will be unprotected!");
+  }
+#endif
+
 #ifdef USE_ESP_IDF
   // Log PSRAM availability
   size_t psram_size = heap_caps_get_total_size(MALLOC_CAP_SPIRAM);
@@ -301,7 +310,30 @@ void TigoMonitorComponent::setup() {
 }
   
 
+#ifdef USE_ESP_IDF
+psram_vector<DeviceData> TigoMonitorComponent::snapshot_devices() const {
+  StateLock lock(state_mutex_);
+  return devices_;
+}
+
+psram_vector<NodeTableData> TigoMonitorComponent::snapshot_node_table() const {
+  StateLock lock(state_mutex_);
+  return node_table_;
+}
+
+psram_map<std::string, StringData> TigoMonitorComponent::snapshot_strings() const {
+  StateLock lock(state_mutex_);
+  return strings_;
+}
+
+psram_vector<InverterData> TigoMonitorComponent::snapshot_inverters() const {
+  StateLock lock(state_mutex_);
+  return inverters_;
+}
+#endif
+
 void TigoMonitorComponent::loop() {
+  StateLock lock(state_mutex_);
   process_serial_data();
   
 #ifdef USE_ESP_IDF
@@ -379,6 +411,7 @@ void TigoMonitorComponent::loop() {
 
 void TigoMonitorComponent::update() {
   // This is called every polling interval
+  StateLock lock(state_mutex_);
   check_midnight_reset();
   publish_sensor_data();
 }
@@ -2287,10 +2320,11 @@ void TigoMonitorComponent::load_peak_power_data() {
 }
 
 void TigoMonitorComponent::reset_peak_power() {
+  StateLock lock(state_mutex_);
 #ifdef USE_ESP_IDF
   size_t heap_before = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
 #endif
-  
+
   // Use stack-allocated buffer instead of heap string to prevent memory leaks
   char pref_key[32];
   int reset_count = 0;
@@ -2455,8 +2489,9 @@ void TigoMonitorComponent::save_persistent_data() {
 }
 
 void TigoMonitorComponent::reset_node_table() {
+  StateLock lock(state_mutex_);
   ESP_LOGI(TAG, "Resetting node table - clearing all persistent device mappings...");
-  
+
   int cleared_count = node_table_.size();
   
   // Clear the in-memory node table
@@ -2486,8 +2521,9 @@ void TigoMonitorComponent::reset_node_table() {
 }
 
 bool TigoMonitorComponent::remove_node(uint16_t addr) {
+  StateLock lock(state_mutex_);
   ESP_LOGI(TAG, "Removing node with address: 0x%04X", addr);
-  
+
   // Convert addr to hex string for comparison (lowercase)
   char addr_hex[5];
   snprintf(addr_hex, sizeof(addr_hex), "%04x", addr);
@@ -2526,8 +2562,9 @@ bool TigoMonitorComponent::remove_node(uint16_t addr) {
 }
 
 bool TigoMonitorComponent::import_node_table(const std::vector<NodeTableData>& nodes) {
+  StateLock lock(state_mutex_);
   ESP_LOGI(TAG, "Importing node table with %zu nodes", nodes.size());
-  
+
   // Clear existing node table
   node_table_.clear();
   created_devices_.clear();
@@ -2859,6 +2896,7 @@ void TigoMonitorComponent::load_daily_energy_history() {
 }
 
 std::vector<DailyEnergyData> TigoMonitorComponent::get_daily_energy_history() const {
+  StateLock lock(state_mutex_);
   return daily_energy_history_;
 }
 
@@ -3004,6 +3042,10 @@ void TigoMonitorComponent::query_cca_config() {
 }
 
 void TigoMonitorComponent::match_cca_to_uart(const std::string &json_response) {
+  // Lock around all mutations to node_table_/strings_/inverters_ that this
+  // method performs. Held for the duration of CCA-result application — does
+  // not include the prior HTTP I/O.
+  StateLock lock(state_mutex_);
   // Set custom allocators for cJSON to use PSRAM
   cJSON_Hooks hooks;
   hooks.malloc_fn = cjson_malloc_psram;
