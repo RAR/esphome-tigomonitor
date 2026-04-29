@@ -371,9 +371,13 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   const std::string& get_cca_ip() const { return cca_ip_; }
   bool get_sync_cca_on_startup() const { return sync_cca_on_startup_; }
 #ifdef USE_ESP_IDF
-  std::string get_cca_device_info() const { return std::string(cca_device_info_.begin(), cca_device_info_.end()); }
+  // Returns a locked copy of cca_device_info_. Safe to call from any task.
+  std::string get_cca_device_info() const {
+    StateLock lock(state_mutex_);
+    return std::string(cca_device_info_.begin(), cca_device_info_.end());
+  }
 #else
-  const std::string& get_cca_device_info() const { return cca_device_info_; }
+  std::string get_cca_device_info() const { return cca_device_info_; }
 #endif
   unsigned long get_last_cca_sync_time() const { return last_cca_sync_time_; }
   float get_total_energy_in_kwh() const { return total_energy_in_kwh_; }
@@ -484,6 +488,18 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   void query_cca_config();
   void match_cca_to_uart(const std::string &json_response);
   std::string get_barcode_for_node(const NodeTableData &node);
+
+  // Thread-safe setter for cca_device_info_. Takes state_mutex_ briefly
+  // around the assignment so concurrent get_cca_device_info() callers
+  // never observe a torn psram_string.
+  void set_cca_device_info(const std::string &value) {
+    StateLock lock(state_mutex_);
+#ifdef USE_ESP_IDF
+    cca_device_info_.assign(value.begin(), value.end());
+#else
+    cca_device_info_ = value;
+#endif
+  }
   
   // Energy persistence
   void load_energy_data();
