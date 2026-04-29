@@ -64,6 +64,21 @@ void psram_free_impl(void* ptr) {
   heap_caps_free(ptr);
 }
 
+// Called by PSRAMAllocator when both PSRAM and internal heap are exhausted.
+// Log diagnostics and abort — STL containers cannot tolerate a null return
+// from a non-throwing allocator (next access is UB), so a clean panic-reboot
+// is the safest available option.
+[[noreturn]] void psram_alloc_failed_abort(size_t bytes_requested) {
+  size_t psram_free = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+  size_t internal_free = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+  size_t internal_min = heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL);
+  ESP_LOGE(TAG,
+           "FATAL: PSRAMAllocator exhausted (requested %zu bytes). "
+           "PSRAM free=%zu KB, internal free=%zu KB, internal min=%zu KB. Aborting.",
+           bytes_requested, psram_free / 1024, internal_free / 1024, internal_min / 1024);
+  abort();
+}
+
 // Custom allocator hooks for cJSON to use PSRAM
 static void* cjson_malloc_psram(size_t size) {
   return psram_malloc(size);
