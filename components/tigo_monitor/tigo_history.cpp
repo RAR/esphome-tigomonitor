@@ -124,17 +124,17 @@ bool TigoHistory::start_writer_task() {
     ESP_LOGE(TAG, "Failed to create tsdb writer queue");
     return false;
   }
-  // Stack 4 KB — esp_tsdb's per-query stack is ~500 B; tsdb_write similar.
-  // Priority 1 matches the main app task, well below the UART task.
+  // Stack 8 KB — tsdb_write + LittleFS ops + esp_log printf overflowed 4 KB
+  // in practice. Priority 1 matches the main app task, well below UART.
   BaseType_t ok = xTaskCreate(&TigoHistory::writer_task_entry_, "tsdb_writer",
-                              4096, this, 1, &task_);
+                              8192, this, 1, &task_);
   if (ok != pdPASS) {
     ESP_LOGE(TAG, "Failed to create tsdb writer task");
     vQueueDelete(queue_);
     queue_ = nullptr;
     return false;
   }
-  ESP_LOGI(TAG, "tsdb writer task started (queue depth 4, stack 4 KB)");
+  ESP_LOGI(TAG, "tsdb writer task started (queue depth 4, stack 8 KB)");
   return true;
 }
 
@@ -183,13 +183,15 @@ void TigoHistory::writer_task_loop_() {
     uint32_t t0 = (uint32_t) (esp_timer_get_time() / 1000);
     esp_err_t err = tsdb_write(row.timestamp, row.values);
     uint32_t dt = (uint32_t) (esp_timer_get_time() / 1000) - t0;
+    UBaseType_t hwm = uxTaskGetStackHighWaterMark(nullptr);
     if (err != ESP_OK) {
-      ESP_LOGW(TAG, "tsdb_write @ %lu failed after %u ms: %s",
+      ESP_LOGW(TAG, "tsdb_write @ %lu failed after %u ms: %s (stack hwm %u B)",
                (unsigned long) row.timestamp, (unsigned) dt,
-               esp_err_to_name(err));
+               esp_err_to_name(err), (unsigned) (hwm * sizeof(StackType_t)));
     } else {
-      ESP_LOGD(TAG, "tsdb_write @ %lu ok in %u ms",
-               (unsigned long) row.timestamp, (unsigned) dt);
+      ESP_LOGD(TAG, "tsdb_write @ %lu ok in %u ms (stack hwm %u B free)",
+               (unsigned long) row.timestamp, (unsigned) dt,
+               (unsigned) (hwm * sizeof(StackType_t)));
     }
   }
 }
