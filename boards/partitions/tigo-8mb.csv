@@ -1,0 +1,21 @@
+# Tigo Monitor partition table for 8 MB flash (e.g. AtomS3R)
+# Adds a LittleFS-backed `tsdb` partition for esp_tsdb time-series storage.
+# Empty offset column = auto-allocate (ESP-IDF computes sequentially).
+#
+# Layout (offsets computed by ESP-IDF):
+#   bootloader + partition_table reserve up to 0x9000
+#   otadata    8 KB     OTA selection
+#   phy_init   4 KB     Wi-Fi PHY calibration
+#   app0       1.75 MB  OTA slot A
+#   app1       1.75 MB  OTA slot B
+#   nvs        448 KB   ESPHome credentials, prefs
+#   tsdb       3 MB     LittleFS for time-series data
+# Total: ~7.0 MB used of 8.0 MB
+#
+# Name,    Type, SubType,  Offset, Size,     Flags
+otadata,   data, ota,      ,       0x2000,
+phy_init,  data, phy,      ,       0x1000,
+app0,      app,  ota_0,    ,       0x1C0000,
+app1,      app,  ota_1,    ,       0x1C0000,
+nvs,       data, nvs,      ,       0x70000,
+tsdb,      data, littlefs, ,       0x300000,
