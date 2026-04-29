@@ -18,6 +18,7 @@
 #include "freertos/task.h"
 
 #include <cstdint>
+#include <functional>
 
 namespace esphome {
 namespace tigo_monitor {
@@ -48,6 +49,15 @@ class TigoHistory {
   // Encode + push a snapshot onto the writer queue. Non-blocking; drops the
   // sample (with a (W) log) if the queue is full.
   void enqueue_snapshot(const SystemSnapshot &snap);
+
+  // Iterates rows in [start_ts, end_ts] (inclusive). For each row the callback
+  // receives (timestamp, total_p in watts, total_e_kwh × 100 — divide by 100).
+  // Returns number of rows yielded, or -1 on error.
+  // Runs synchronously on the caller's task — fine to invoke from an HTTP
+  // handler since esp_http_server runs on its own task.
+  using PowerRowCb = std::function<void(uint32_t /*ts*/, int16_t /*total_p_w*/,
+                                        int16_t /*total_e_kwh_x100*/)>;
+  int iterate_power(uint32_t start_ts, uint32_t end_ts, const PowerRowCb &cb);
 
   bool initialized() const { return initialized_; }
 

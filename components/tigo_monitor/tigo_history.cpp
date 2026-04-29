@@ -170,6 +170,36 @@ void TigoHistory::enqueue_snapshot(const SystemSnapshot &snap) {
   }
 }
 
+int TigoHistory::iterate_power(uint32_t start_ts, uint32_t end_ts,
+                               const PowerRowCb &cb) {
+  if (!initialized_)
+    return -1;
+  if (end_ts < start_ts)
+    return 0;
+
+  // Read only columns 0 (total_p) and 1 (total_e). Cuts flash IO roughly 7x
+  // versus reading the full 14-param row.
+  uint8_t cols[] = {0, 1};
+  tsdb_query_t q;
+  esp_err_t err = tsdb_query_init(&q, start_ts, end_ts, cols, 2);
+  if (err != ESP_OK) {
+    ESP_LOGW(TAG, "tsdb_query_init failed: %s", esp_err_to_name(err));
+    return -1;
+  }
+
+  int count = 0;
+  uint32_t ts = 0;
+  // Defensively size the values buffer to the full schema in case the query
+  // engine ignores the column selector and writes back all params.
+  int16_t values[kSystemNumParams] = {0};
+  while (tsdb_query_next(&q, &ts, values) == ESP_OK) {
+    cb(ts, values[0], values[1]);
+    ++count;
+  }
+  tsdb_query_close(&q);
+  return count;
+}
+
 void TigoHistory::writer_task_entry_(void *arg) {
   static_cast<TigoHistory *>(arg)->writer_task_loop_();
 }

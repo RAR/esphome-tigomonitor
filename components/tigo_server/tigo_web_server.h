@@ -96,6 +96,9 @@ class TigoWebServer : public Component {
   static esp_err_t api_health_handler(httpd_req_t *req);
   static esp_err_t api_backlight_handler(httpd_req_t *req);
   static esp_err_t api_github_release_handler(httpd_req_t *req);
+#ifdef TIGO_TSDB_AVAILABLE
+  static esp_err_t api_history_power_handler(httpd_req_t *req);
+#endif
   
   // Helper functions
   bool check_api_auth(httpd_req_t *req);

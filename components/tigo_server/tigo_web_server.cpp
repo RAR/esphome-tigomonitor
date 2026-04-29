@@ -17,6 +17,7 @@
 #endif
 #include <esp_heap_caps.h>
 #include <esp_system.h>
+#include <esp_timer.h>
 #include <esp_wifi.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
@@ -353,7 +354,17 @@ void TigoWebServer::setup() {
       .user_ctx = this
     };
     httpd_register_uri_handler(server_, &api_github_release_uri);
-    
+
+#ifdef TIGO_TSDB_AVAILABLE
+    httpd_uri_t api_history_power_uri = {
+      .uri = "/api/history/power",
+      .method = HTTP_GET,
+      .handler = api_history_power_handler,
+      .user_ctx = this
+    };
+    httpd_register_uri_handler(server_, &api_history_power_uri);
+#endif
+
     // Log web authentication status
     if (!web_username_.empty() && !web_password_.empty()) {
       ESP_LOGI(TAG, "HTTP Basic Authentication configured for web pages (user: %s)", web_username_.c_str());
@@ -4267,15 +4278,115 @@ esp_err_t TigoWebServer::api_backlight_handler(httpd_req_t *req) {
 esp_err_t TigoWebServer::api_github_release_handler(httpd_req_t *req) {
   // This endpoint returns GitHub API URL for client-side fetch
   // Client will check for new releases directly from browser
-  
+
   httpd_resp_set_type(req, "application/json");
   httpd_resp_set_hdr(req, "Cache-Control", "public, max-age=3600"); // Cache for 1 hour
-  
+
   const char *response = R"({"fetch_url":"https://api.github.com/repos/RAR/esphome-tigomonitor/releases/latest"})";
-  
+
   httpd_resp_sendstr(req, response);
   return ESP_OK;
 }
+
+#ifdef TIGO_TSDB_AVAILABLE
+esp_err_t TigoWebServer::api_history_power_handler(httpd_req_t *req) {
+  TigoWebServer *server = static_cast<TigoWebServer *>(req->user_ctx);
+  if (!server->check_api_auth(req))
+    return ESP_OK;
+
+  if (server->parent_ == nullptr) {
+    httpd_resp_set_status(req, "503 Service Unavailable");
+    httpd_resp_sendstr(req, "{\"error\":\"monitor not bound\"}");
+    return ESP_OK;
+  }
+  tigo_monitor::TigoHistory *hist = server->parent_->get_history();
+  if (hist == nullptr || !hist->initialized()) {
+    httpd_resp_set_status(req, "503 Service Unavailable");
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, "{\"error\":\"history not initialized\"}");
+    return ESP_OK;
+  }
+
+  // Parse range. Supported: day | week | month | year. Default day.
+  uint32_t window_seconds = 24 * 3600;
+  const char *range_label = "day";
+  char query_buf[64] = {0};
+  if (httpd_req_get_url_query_str(req, query_buf, sizeof(query_buf)) == ESP_OK) {
+    char range[16] = {0};
+    if (httpd_query_key_value(query_buf, "range", range, sizeof(range)) == ESP_OK) {
+      if (strcmp(range, "week") == 0) {
+        window_seconds = 7UL * 24 * 3600;
+        range_label = "week";
+      } else if (strcmp(range, "month") == 0) {
+        window_seconds = 30UL * 24 * 3600;
+        range_label = "month";
+      } else if (strcmp(range, "year") == 0) {
+        window_seconds = 365UL * 24 * 3600;
+        range_label = "year";
+      } else if (strcmp(range, "day") != 0) {
+        httpd_resp_set_status(req, "400 Bad Request");
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_sendstr(req, "{\"error\":\"range must be day|week|month|year\"}");
+        return ESP_OK;
+      }
+    }
+  }
+
+  uint32_t now_ts = (uint32_t) ::time(nullptr);
+  if (now_ts < 1577836800u /* 2020-01-01 */) {
+    httpd_resp_set_status(req, "503 Service Unavailable");
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, "{\"error\":\"system clock not set\"}");
+    return ESP_OK;
+  }
+  uint32_t start_ts = (now_ts > window_seconds) ? (now_ts - window_seconds) : 0;
+
+  PSRAMString json;
+  char tmp[96];
+  json.append("{\"range\":\"");
+  json.append(range_label);
+  json.append("\",\"start\":");
+  snprintf(tmp, sizeof(tmp), "%lu", (unsigned long) start_ts);
+  json.append(tmp);
+  json.append(",\"end\":");
+  snprintf(tmp, sizeof(tmp), "%lu", (unsigned long) now_ts);
+  json.append(tmp);
+  json.append(",\"records\":[");
+
+  bool first = true;
+  // Hard cap response to ~1 MB; runaway query (corrupt index, huge range) cant exhaust heap.
+  constexpr size_t kMaxBytes = 1u << 20;
+  uint32_t t0_ms = (uint32_t) (esp_timer_get_time() / 1000);
+  int n = hist->iterate_power(start_ts, now_ts,
+      [&](uint32_t ts, int16_t total_p, int16_t total_e_x100) {
+        if (json.length() > kMaxBytes)
+          return;  // we still get called, just skip emit
+        if (!first)
+          json.append(",");
+        first = false;
+        char row[64];
+        snprintf(row, sizeof(row), "{\"t\":%lu,\"p\":%d,\"e\":%.2f}",
+                 (unsigned long) ts, (int) total_p, total_e_x100 / 100.0f);
+        json.append(row);
+      });
+  uint32_t dt_ms = (uint32_t) (esp_timer_get_time() / 1000) - t0_ms;
+
+  json.append("],\"count\":");
+  snprintf(tmp, sizeof(tmp), "%d", (n < 0) ? 0 : n);
+  json.append(tmp);
+  json.append(",\"query_ms\":");
+  snprintf(tmp, sizeof(tmp), "%u", (unsigned) dt_ms);
+  json.append(tmp);
+  if (n < 0)
+    json.append(",\"error\":\"query failed\"");
+  json.append("}");
+
+  httpd_resp_set_type(req, "application/json");
+  httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+  httpd_resp_send(req, json.c_str(), json.length());
+  return ESP_OK;
+}
+#endif  // TIGO_TSDB_AVAILABLE
 
 void TigoWebServer::loop() {
   // Nothing to do in loop

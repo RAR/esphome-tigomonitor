@@ -367,6 +367,10 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   int get_device_count() const { return devices_.size(); }
   int get_online_device_count() const;
   float get_total_power() const;
+
+#ifdef TIGO_TSDB_AVAILABLE
+  TigoHistory *get_history() { return &history_; }
+#endif
   
   // Public methods for web server access
   void reset_peak_power();  // Reset all peak power values to 0
