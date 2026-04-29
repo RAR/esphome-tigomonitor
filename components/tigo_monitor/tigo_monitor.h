@@ -21,6 +21,8 @@
 #include <limits>
 #include <new>
 
+#include "tigo_history.h"
+
 #ifdef USE_ESP_IDF
 #include <esp_heap_caps.h>
 
@@ -586,6 +588,10 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   // Character mapping for Tigo CRC
   static constexpr const char* crc_char_map_ = "GHJKLMNPRSTVWXYZ";
   static const uint8_t tigo_crc_table_[256];
+
+#ifdef TIGO_TSDB_AVAILABLE
+  TigoHistory history_;
+#endif
 };
 
 #ifdef USE_BUTTON

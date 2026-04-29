@@ -221,6 +221,14 @@ void TigoMonitorComponent::setup() {
   load_node_table();
   load_energy_data();
   load_daily_energy_history();
+
+#ifdef TIGO_TSDB_AVAILABLE
+  // Open the time-series database. No writes happen yet — this just mounts
+  // LittleFS on the `tsdb` partition and creates system.tsdb if absent.
+  if (!history_.init()) {
+    ESP_LOGW(TAG, "Time-series history disabled (init failed) — sensor data still publishes normally");
+  }
+#endif
   
   // Check if we have existing CCA data and rebuild string groups
   bool has_cca_data = false;

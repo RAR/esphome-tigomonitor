@@ -18,6 +18,8 @@ esp32:
     components:
       # Time-series database for persistent history (see docs/tsdb-integration.md)
       - zakery292/esp_tsdb^2.0.2
+      # LittleFS — backing filesystem for the tsdb partition
+      - joltwallet/littlefs^1.16
     sdkconfig_options:
       CONFIG_ESP32S3_DEFAULT_CPU_FREQ_240: "y"
       # UART optimizations to prevent packet loss
