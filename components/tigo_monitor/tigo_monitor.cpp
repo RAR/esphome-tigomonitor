@@ -223,10 +223,19 @@ void TigoMonitorComponent::setup() {
   load_daily_energy_history();
 
 #ifdef TIGO_TSDB_AVAILABLE
-  // Open the time-series database. No writes happen yet — this just mounts
-  // LittleFS on the `tsdb` partition and creates system.tsdb if absent.
-  if (!history_.init()) {
-    ESP_LOGW(TAG, "Time-series history disabled (init failed) — sensor data still publishes normally");
+  // Open the time-series database. Mounts LittleFS on the `tsdb` partition
+  // and creates system.tsdb if absent. On success, start the writer task and
+  // schedule a 5-min snapshot interval.
+  if (history_.init() && history_.start_writer_task()) {
+    last_snapshot_total_e_kwh_ = total_energy_in_kwh_;
+    for (size_t i = 0; i < 4; ++i)
+      last_snapshot_inv_e_kwh_[i] = (i < inverters_.size()) ? inverters_[i].total_energy : 0.0f;
+    last_snapshot_frames_lost_ = missed_frame_count_;
+    this->set_interval("tsdb_snapshot", 5UL * 60UL * 1000UL,
+                       [this]() { this->snapshot_to_history_(); });
+    ESP_LOGI(TAG, "tsdb snapshot interval armed (every 5 min)");
+  } else {
+    ESP_LOGW(TAG, "Time-series history disabled — sensor data still publishes normally");
   }
 #endif
   
@@ -3232,6 +3241,65 @@ float TigoMonitorComponent::get_total_power() const {
   // Return cached value updated during publish_sensor_data()
   return cached_total_power_in_;
 }
+
+#ifdef TIGO_TSDB_AVAILABLE
+void TigoMonitorComponent::snapshot_to_history_() {
+  if (!history_.initialized()) return;
+
+  // Need a valid wall-clock to key the row. Skip silently before SNTP/HA sync.
+  uint32_t now_ts = 0;
+#ifdef USE_TIME
+  if (time_id_ != nullptr) {
+    auto t = time_id_->now();
+    if (t.is_valid()) now_ts = (uint32_t) t.timestamp;
+  }
+#endif
+  if (now_ts == 0) {
+    ESP_LOGD(TAG, "tsdb snapshot skipped — no valid wall-clock yet");
+    return;
+  }
+
+  SystemSnapshot snap{};
+  snap.timestamp = now_ts;
+
+  // This runs on the same FreeRTOS task that updates the cached aggregates,
+  // so no synchronization is needed here. The (long) flash write happens
+  // later on the dedicated writer task, well after this method returns.
+  snap.total_p_w = cached_total_power_in_;
+  snap.period_e_kwh =
+      std::max(0.0f, total_energy_in_kwh_ - last_snapshot_total_e_kwh_);
+  last_snapshot_total_e_kwh_ = total_energy_in_kwh_;
+
+  for (size_t i = 0; i < 4; ++i) {
+    if (i < inverters_.size()) {
+      snap.inv_p_w[i] = inverters_[i].total_power;
+      snap.inv_e_kwh[i] = std::max(
+          0.0f, inverters_[i].total_energy - last_snapshot_inv_e_kwh_[i]);
+      last_snapshot_inv_e_kwh_[i] = inverters_[i].total_energy;
+    }
+  }
+
+  float sum_t = 0.0f;
+  int n = 0;
+  for (const auto &d : devices_) {
+    if (d.temperature > -50.0f && d.temperature < 150.0f) {
+      sum_t += d.temperature;
+      ++n;
+    }
+  }
+  snap.temp_avg_c = (n > 0) ? (sum_t / n) : 0.0f;
+
+  snap.freq_hz = 0.0f;  // not currently extracted from telemetry
+  uint32_t lost_now = missed_frame_count_;
+  uint32_t lost_period =
+      (lost_now >= last_snapshot_frames_lost_) ? (lost_now - last_snapshot_frames_lost_) : 0;
+  snap.frames_lost = (uint16_t) std::min<uint32_t>(lost_period, UINT16_MAX);
+  last_snapshot_frames_lost_ = lost_now;
+  snap.wifi_rssi_dbm = 0;  // TODO: plumb through wifi::global_wifi_component
+
+  history_.enqueue_snapshot(snap);
+}
+#endif  // TIGO_TSDB_AVAILABLE
 
 }  // namespace tigo_monitor
 }  // namespace esphome

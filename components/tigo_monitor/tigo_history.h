@@ -13,9 +13,28 @@
 
 #include "esp_tsdb.h"
 #include "esp_littlefs.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/queue.h"
+#include "freertos/task.h"
+
+#include <cstdint>
 
 namespace esphome {
 namespace tigo_monitor {
+
+// Raw 5-min snapshot. The history layer encodes these to int16_t and writes.
+// Caller fills this under the TigoMonitorComponent state lock.
+struct SystemSnapshot {
+  uint32_t timestamp;          // unix epoch seconds (0 = invalid, will be dropped)
+  float total_p_w;             // system power in watts
+  float period_e_kwh;          // energy produced in this 5-min window (kWh)
+  float inv_p_w[4];            // per-inverter power
+  float inv_e_kwh[4];          // per-inverter 5-min energy
+  float temp_avg_c;            // average device temperature
+  float freq_hz;               // 0 if unavailable
+  uint16_t frames_lost;        // missed frames in this window
+  int16_t wifi_rssi_dbm;       // 0 if unavailable
+};
 
 class TigoHistory {
  public:
@@ -23,13 +42,25 @@ class TigoHistory {
   // Returns true on success. Logs (E) on any failure.
   bool init();
 
+  // Spawns the dedicated FreeRTOS writer task. Must be called after init().
+  bool start_writer_task();
+
+  // Encode + push a snapshot onto the writer queue. Non-blocking; drops the
+  // sample (with a (W) log) if the queue is full.
+  void enqueue_snapshot(const SystemSnapshot &snap);
+
   bool initialized() const { return initialized_; }
 
  private:
+  static void writer_task_entry_(void *arg);
+  void writer_task_loop_();
+
   bool mount_filesystem_();
   bool init_system_db_();
 
   bool initialized_{false};
+  QueueHandle_t queue_{nullptr};
+  TaskHandle_t task_{nullptr};
 };
 
 }  // namespace tigo_monitor

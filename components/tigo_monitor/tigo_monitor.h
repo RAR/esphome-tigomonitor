@@ -591,6 +591,12 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
 
 #ifdef TIGO_TSDB_AVAILABLE
   TigoHistory history_;
+  // Captures cumulative readings at the previous snapshot so each tsdb row
+  // stores the per-period (5-min) energy delta rather than running totals.
+  float last_snapshot_total_e_kwh_ = 0.0f;
+  float last_snapshot_inv_e_kwh_[4] = {0, 0, 0, 0};
+  uint32_t last_snapshot_frames_lost_ = 0;
+  void snapshot_to_history_();
 #endif
 };
 
