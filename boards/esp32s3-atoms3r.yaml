@@ -10,9 +10,14 @@ esphome:
 esp32:
   board: m5stack-atoms3
   variant: esp32s3
+  flash_size: 8MB
+  partitions: partitions/tigo-8mb.csv
   framework:
     type: esp-idf
     version: recommended
+    components:
+      # Time-series database for persistent history (see docs/tsdb-integration.md)
+      - zakery292/esp_tsdb^2.0.2
     sdkconfig_options:
       CONFIG_ESP32S3_DEFAULT_CPU_FREQ_240: "y"
       # UART optimizations to prevent packet loss
