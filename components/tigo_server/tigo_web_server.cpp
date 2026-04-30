@@ -621,46 +621,46 @@ esp_err_t TigoWebServer::favicon_handler(httpd_req_t *req) {
   return ESP_OK;
 }
 
+// Shared helper for the legacy-page → SPA redirects. Using a RELATIVE Location
+// ("app#x" rather than "/app#x") matters under HA Ingress: the browser is
+// at /api/hassio_ingress/<token>/<page>, so a relative target resolves to
+// /api/hassio_ingress/<token>/app#x. An absolute "/app#x" would bypass the
+// ingress prefix and 404 at the supervisor. Standalone access works either
+// way.
+static esp_err_t redirect_to_app_view(httpd_req_t *req, const char *fragment) {
+  // Buffers stay valid until httpd_resp_send returns, which is fine for
+  // stack-local strings — esp_http_server reads them synchronously.
+  char loc[48];
+  snprintf(loc, sizeof(loc), "app#%s", fragment);
+  char body[128];
+  snprintf(body, sizeof(body), "<a href=\"%s\">%s</a>", loc, loc);
+
+  httpd_resp_set_status(req, "302 Found");
+  httpd_resp_set_hdr(req, "Location", loc);
+  httpd_resp_set_type(req, "text/html");
+  return httpd_resp_send(req, body, HTTPD_RESP_USE_STRLEN);
+}
+
 esp_err_t TigoWebServer::dashboard_handler(httpd_req_t *req) {
   // / is now a redirect into the SPA — the legacy dashboard.html is retired.
-  // Matches the R3-R7 pattern.
-  httpd_resp_set_status(req, "302 Found");
-  httpd_resp_set_hdr(req, "Location", "/app#dashboard");
-  httpd_resp_set_type(req, "text/html");
-  const char *body = "<a href=\"/app#dashboard\">/app#dashboard</a>";
-  return httpd_resp_send(req, body, HTTPD_RESP_USE_STRLEN);
+  return redirect_to_app_view(req, "dashboard");
 }
 
 esp_err_t TigoWebServer::node_table_handler(httpd_req_t *req) {
-  // /nodes is now a redirect into the SPA (R4). The /api/nodes endpoint it
-  // used to be paired with stays live (consumed from #view-nodes inside /app).
-  httpd_resp_set_status(req, "302 Found");
-  httpd_resp_set_hdr(req, "Location", "/app#nodes");
-  httpd_resp_set_type(req, "text/html");
-  const char *body = "<a href=\"/app#nodes\">/app#nodes</a>";
-  return httpd_resp_send(req, body, HTTPD_RESP_USE_STRLEN);
+  // /nodes (R4) — /api/nodes stays live, consumed from #view-nodes inside /app.
+  return redirect_to_app_view(req, "nodes");
 }
 
 esp_err_t TigoWebServer::esp_status_handler(httpd_req_t *req) {
-  // /status is now a redirect into the SPA's Diagnostics view (R5). The
-  // /api/status endpoint stays live and is consumed there alongside the
-  // new /api/tsdb/stats data.
-  httpd_resp_set_status(req, "302 Found");
-  httpd_resp_set_hdr(req, "Location", "/app#diagnostics");
-  httpd_resp_set_type(req, "text/html");
-  const char *body = "<a href=\"/app#diagnostics\">/app#diagnostics</a>";
-  return httpd_resp_send(req, body, HTTPD_RESP_USE_STRLEN);
+  // /status (R5) — /api/status stays live; consumed from #view-diagnostics
+  // alongside /api/tsdb/stats.
+  return redirect_to_app_view(req, "diagnostics");
 }
 
 esp_err_t TigoWebServer::history_handler(httpd_req_t *req) {
-  // /history is now a redirect into the SPA. The /api/history/* endpoints
-  // it used to be paired with stay live (they're consumed from #view-history
-  // inside /app).
-  httpd_resp_set_status(req, "302 Found");
-  httpd_resp_set_hdr(req, "Location", "/app#history");
-  httpd_resp_set_type(req, "text/html");
-  const char *body = "<a href=\"/app#history\">/app#history</a>";
-  return httpd_resp_send(req, body, HTTPD_RESP_USE_STRLEN);
+  // /history (R3) — /api/history/* endpoints stay live, consumed from
+  // #view-history inside /app.
+  return redirect_to_app_view(req, "history");
 }
 
 esp_err_t TigoWebServer::app_handler(httpd_req_t *req) {
@@ -679,13 +679,8 @@ esp_err_t TigoWebServer::app_handler(httpd_req_t *req) {
 }
 
 esp_err_t TigoWebServer::yaml_config_handler(httpd_req_t *req) {
-  // /yaml is now a redirect into the SPA's Tools view (R6). The /api/yaml
-  // endpoint stays live and is consumed there.
-  httpd_resp_set_status(req, "302 Found");
-  httpd_resp_set_hdr(req, "Location", "/app#tools");
-  httpd_resp_set_type(req, "text/html");
-  const char *body = "<a href=\"/app#tools\">/app#tools</a>";
-  return httpd_resp_send(req, body, HTTPD_RESP_USE_STRLEN);
+  // /yaml (R6) — /api/yaml stays live, consumed from #view-tools.
+  return redirect_to_app_view(req, "tools");
 }
 
 // ===== API Handlers (JSON) =====
@@ -985,13 +980,9 @@ esp_err_t TigoWebServer::api_yaml_handler(httpd_req_t *req) {
 }
 
 esp_err_t TigoWebServer::cca_info_handler(httpd_req_t *req) {
-  // /cca is now a redirect into the SPA's CCA view (R7). The /api/cca and
-  // /api/cca/refresh endpoints stay live and are consumed there.
-  httpd_resp_set_status(req, "302 Found");
-  httpd_resp_set_hdr(req, "Location", "/app#cca");
-  httpd_resp_set_type(req, "text/html");
-  const char *body = "<a href=\"/app#cca\">/app#cca</a>";
-  return httpd_resp_send(req, body, HTTPD_RESP_USE_STRLEN);
+  // /cca (R7) — /api/cca and /api/cca/refresh stay live, consumed from
+  // #view-cca.
+  return redirect_to_app_view(req, "cca");
 }
 
 esp_err_t TigoWebServer::api_cca_info_handler(httpd_req_t *req) {
