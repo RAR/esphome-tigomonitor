@@ -128,7 +128,11 @@ bool TigoHistory::init_system_db_() {
   cfg.max_records = TSDB_CALC_MAX_RECORDS(kSystemFileBytes, kSystemNumParams);
   cfg.index_stride = 380;
   cfg.buffer_pool_size = 10 * 1024;
-  cfg.alloc_strategy = TSDB_ALLOC_INTERNAL_RAM;
+  // PSRAM-backed buffer pool. The S3-PICO-1 has 8 MB octal PSRAM — internal
+  // RAM is the constraint (we land at ~110 KB free at low water with the
+  // SPA + tsdb stack). Buffer access is fast enough on octal PSRAM that
+  // tsdb_write latency stays well under the 5-min snapshot budget.
+  cfg.alloc_strategy = TSDB_ALLOC_PSRAM;
   cfg.use_paged_allocation = false;
   cfg.page_size = 0;
 
@@ -158,7 +162,9 @@ bool TigoHistory::open_panel_db_(size_t idx) {
   // Smaller pool than system db — each panel DB is ~3.5x smaller and reads
   // are rare (one column at a time). 6 KB covers read+write+query buffers.
   cfg.buffer_pool_size = 6 * 1024;
-  cfg.alloc_strategy = TSDB_ALLOC_INTERNAL_RAM;
+  // PSRAM-backed (see init_system_db_ for rationale). With 3 panel DBs at
+  // 6 KB each, this saves ~18 KB of internal RAM vs. the default.
+  cfg.alloc_strategy = TSDB_ALLOC_PSRAM;
   cfg.use_paged_allocation = false;
   cfg.page_size = 0;
 
