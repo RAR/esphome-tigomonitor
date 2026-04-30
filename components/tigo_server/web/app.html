@@ -171,6 +171,36 @@
   }
   .panel-bar:hover .panel-bar-tip { opacity: 1; }
 
+  /* ===== Dashboard heatmap grid (replaces bars) =====
+     Same color buckets as the panel bars (good/warn/bad/dead) so the legend
+     still applies, but every tile is the same size — anomalies pop out
+     visually instead of being scaled by power magnitude. */
+  .panel-heat-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(40px, 1fr));
+    gap: 3px;
+  }
+  .panel-heat-tile {
+    aspect-ratio: 1;
+    border-radius: 4px;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    font-size: 10px; font-weight: 600;
+    position: relative; cursor: default;
+    transition: transform 0.1s;
+    overflow: visible;
+  }
+  .panel-heat-tile:hover { transform: scale(1.12); z-index: 5; }
+  .panel-heat-tile .pht-id { font-size: 10px; line-height: 1; }
+  .panel-heat-tile .pht-w  { font-size: 9px; line-height: 1; opacity: 0.85; margin-top: 2px; font-variant-numeric: tabular-nums; }
+  .panel-heat-tile.good { background: var(--good); color: #061018; }
+  .panel-heat-tile.warn { background: var(--warn); color: #1c1300; }
+  .panel-heat-tile.bad  { background: var(--bad);  color: #fff; }
+  .panel-heat-tile.dead {
+    background: var(--bg-3); border: 1px dashed var(--text-faint);
+    color: var(--text-faint);
+  }
+  .panel-heat-tile:hover .panel-bar-tip { opacity: 1; }
+
   .panel-string-row { display: flex; align-items: flex-start; gap: 10px; margin-top: 8px; }
   .panel-string-label { width: 90px; font-size: 11px; color: var(--text-dim); padding-top: 4px; flex-shrink: 0; }
   .panel-string-bars { flex: 1; }
@@ -1058,7 +1088,10 @@
         </div>
       `;
 
-      // Per-string panel bar rows.
+      // Per-string heatmap rows — fixed-size tiles colored by health bucket.
+      // Replaces the variable-height bar rendering: anomalies pop out by color
+      // instead of being scaled by power, which scans faster across many
+      // panels. Same panelClass thresholds → same legend applies.
       for (const s of (inv.strings || [])) {
         const panels = (byString[s.label] || [])
           .slice()
@@ -1066,31 +1099,29 @@
         const powers = panels.map(p => p.power_in || 0);
         const med = median(powers.filter(p => p > 5));
 
-        let scale = Math.max(...powers, 1);
-        // Round up to next 100 W so bars don't all max out at 100 % of one runaway panel.
-        scale = Math.max(scale, 100);
-
-        let bars = '';
+        let tiles = '';
         if (panels.length === 0) {
-          bars = `<div style="font-size:11px;color:var(--text-faint);padding:8px 0">No panels reporting yet</div>`;
+          tiles = `<div style="font-size:11px;color:var(--text-faint);padding:8px 0">No panels reporting yet</div>`;
         } else {
-          bars = '<div class="panel-bar-row">';
+          tiles = '<div class="panel-heat-grid">';
           for (const p of panels) {
             const w = p.power_in || 0;
             const cls = panelClass(w, med);
-            const heightPct = cls === 'dead' ? 0 : Math.max(2, (w / scale) * 100);
-            bars += `<div class="panel-bar ${cls}" style="height:${heightPct.toFixed(1)}%">` +
-                    `<div class="panel-bar-tip">${p.name || p.addr} · ${w.toFixed(0)} W</div>` +
-                    `</div>`;
+            const id = p.name || p.addr;
+            tiles += `<div class="panel-heat-tile ${cls}">
+              <span class="pht-id">${id}</span>
+              <span class="pht-w">${cls === 'dead' ? '—' : Math.round(w) + 'W'}</span>
+              <div class="panel-bar-tip">${id} · ${w.toFixed(0)} W</div>
+            </div>`;
           }
-          bars += '</div>';
+          tiles += '</div>';
         }
 
         const stringLabel = s.display_label || s.label;
         html += `
           <div class="panel-string-row">
             <div class="panel-string-label">${stringLabel}<br><span style="color:var(--text-faint);font-size:10px">${s.mppt}</span></div>
-            <div class="panel-string-bars">${bars}</div>
+            <div class="panel-string-bars">${tiles}</div>
           </div>
         `;
       }
