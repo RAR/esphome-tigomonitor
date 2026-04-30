@@ -1,0 +1,539 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Tigo Monitor - ESP32 Status</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f5f5; transition: background-color 0.3s, color 0.3s; }
+    .header { background: #2c3e50; color: white; padding: 1rem 2rem; box-shadow: 0 2px 4px rgba(0,0,0,0.1); transition: background-color 0.3s; }
+    .header-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem; }
+    .header h1 { font-size: 1.5rem; margin: 0; }
+    .header-controls { display: flex; gap: 0.5rem; }
+    .temp-toggle, .theme-toggle, .github-link { background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.3); color: white; padding: 0.5rem 1rem; border-radius: 4px; cursor: pointer; font-size: 0.875rem; transition: all 0.2s; text-decoration: none; display: inline-flex; align-items: center; }
+    .temp-toggle:hover, .theme-toggle:hover, .github-link:hover { background: rgba(255,255,255,0.2); }
+    .nav { display: flex; gap: 1rem; margin-top: 0.5rem; }
+    .nav a { color: #3498db; text-decoration: none; padding: 0.5rem 1rem; background: rgba(255,255,255,0.1); border-radius: 4px; transition: background-color 0.3s; }
+    .nav a:hover { background: rgba(255,255,255,0.2); }
+    .nav a.active { background: #3498db; color: white; }
+    .container { max-width: 1200px; margin: 2rem auto; padding: 0 1rem; }
+    .card { background: white; border-radius: 8px; padding: 2rem; box-shadow: 0 2px 4px rgba(0,0,0,0.1); margin-bottom: 1.5rem; transition: background-color 0.3s, box-shadow 0.3s; }
+    .card h2 { color: #2c3e50; margin-bottom: 1.5rem; font-size: 1.5rem; border-bottom: 2px solid #3498db; padding-bottom: 0.5rem; transition: color 0.3s; }
+    .info-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1rem; }
+    .info-item { background: #f8f9fa; padding: 1.5rem; border-radius: 4px; transition: background-color 0.3s; }
+    .info-item h3 { color: #7f8c8d; font-size: 0.875rem; margin-bottom: 0.5rem; text-transform: uppercase; transition: color 0.3s; }
+    .info-item .value { font-size: 1.5rem; font-weight: bold; color: #2c3e50; transition: color 0.3s; }
+    .progress-bar { width: 100%; height: 20px; background: #ecf0f1; border-radius: 10px; overflow: hidden; margin-top: 0.5rem; transition: background-color 0.3s; }
+    .progress-fill { height: 100%; background: #27ae60; transition: width 0.3s, background-color 0.3s; }
+    
+    /* Dark mode styles */
+    body.dark-mode { background: #1a1a1a; color: #e0e0e0; }
+    body.dark-mode .header { background: #1c2833; }
+    body.dark-mode .card { background: #2c2c2c; box-shadow: 0 2px 4px rgba(0,0,0,0.3); }
+    body.dark-mode .card h2 { color: #e0e0e0; border-bottom-color: #5dade2; }
+    body.dark-mode .info-item { background: #1e1e1e; }
+    body.dark-mode .info-item h3 { color: #a0a0a0; }
+    body.dark-mode .info-item .value { color: #e0e0e0; }
+    body.dark-mode .progress-bar { background: #3a3a3a; }
+    body.dark-mode .progress-fill { background: #45a87d; }
+    
+    /* Warning banner styles */
+    .warning-banner { background: #fff3cd; border: 2px solid #ffc107; border-radius: 8px; padding: 1.5rem; margin-bottom: 1.5rem; display: none; }
+    .warning-banner.show { display: block; }
+    .warning-banner h3 { color: #856404; margin-bottom: 1rem; font-size: 1.25rem; }
+    .warning-banner p { color: #856404; margin-bottom: 0.5rem; line-height: 1.5; }
+    .warning-banner code { background: #fff; padding: 0.2rem 0.5rem; border-radius: 3px; font-family: 'Courier New', monospace; font-size: 0.875rem; }
+    .warning-banner ul { margin-left: 1.5rem; margin-top: 0.5rem; }
+    .warning-banner li { margin-bottom: 0.25rem; }
+    body.dark-mode .warning-banner { background: #4a3c1a; border-color: #ffc107; }
+    body.dark-mode .warning-banner h3, body.dark-mode .warning-banner p { color: #ffc107; }
+    body.dark-mode .warning-banner code { background: #2c2c2c; color: #e0e0e0; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="header-top">
+      <h1>🌞 Tigo Solar Monitor</h1>
+      <div class="header-controls">
+        <a href="https://github.com/RAR/esphome-tigomonitor" target="_blank" class="github-link" title="View on GitHub"><svg height="16" width="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"></path></svg></a>
+        <button class="temp-toggle" onclick="toggleTempUnit()" id="temp-toggle">°F</button>
+        <button class="theme-toggle" onclick="toggleTheme()">🌙</button>
+      </div>
+    </div>
+    <div class="nav">
+      <a href="#" id="nav-dashboard">Dashboard</a>
+      <a href="#" id="nav-nodes">Node Table</a>
+      <a href="#" id="nav-status" class="active">ESP32 Status</a>
+      <a href="#" id="nav-yaml">YAML Config</a>
+      <a href="#" id="nav-cca">CCA Info</a>
+    </div>
+  </div>
+  
+  <div class="container">
+    <div class="warning-banner" id="psram-warning">
+      <h3>⚠️ PSRAM Not Configured</h3>
+      <p><strong>Your board may have PSRAM, but it's not enabled in your configuration.</strong></p>
+      <p>PSRAM is <strong>required for 15+ devices</strong> to prevent memory exhaustion and socket creation failures.</p>
+      <p id="psram-config-instructions"></p>
+    </div>
+    
+    <div class="card">
+      <h2>System Information</h2>
+      <div class="info-grid">
+        <div class="info-item">
+          <h3>Uptime</h3>
+          <div class="value" id="uptime">--</div>
+        </div>
+        <div class="info-item">
+          <h3>ESPHome Version</h3>
+          <div class="value" id="version">--</div>
+        </div>
+        <div class="info-item">
+          <h3>Compiled</h3>
+          <div class="value" id="compile-time">--</div>
+        </div>
+        <div class="info-item">
+          <h3>Active Tasks</h3>
+          <div class="value" id="task-count">--</div>
+        </div>
+        <div class="info-item">
+          <h3>Temperature</h3>
+          <div class="value" id="internal-temp">--</div>
+        </div>
+        <div class="info-item">
+          <h3>Minimum Free Heap</h3>
+          <div class="value" id="min-heap">--</div>
+        </div>
+        <div class="info-item">
+          <h3>Minimum Free PSRAM</h3>
+          <div class="value" id="min-psram">--</div>
+        </div>
+      </div>
+    </div>
+    
+    <div class="card">
+      <h2>Memory</h2>
+      <div class="info-grid">
+        <div class="info-item">
+          <h3>Internal RAM</h3>
+          <div class="value" id="heap-free">--</div>
+          <div class="progress-bar">
+            <div class="progress-fill" id="heap-progress"></div>
+          </div>
+        </div>
+        <div class="info-item">
+          <h3>PSRAM</h3>
+          <div class="value" id="psram-free">--</div>
+          <div class="progress-bar">
+            <div class="progress-fill" id="psram-progress"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    
+    <div class="card">
+      <h2>Network</h2>
+      <div class="info-grid">
+        <div class="info-item">
+          <h3>Connection Status</h3>
+          <div class="value" id="network-status">--</div>
+        </div>
+        <div class="info-item">
+          <h3>WiFi SSID</h3>
+          <div class="value" id="wifi-ssid">--</div>
+        </div>
+        <div class="info-item">
+          <h3>WiFi Signal (RSSI)</h3>
+          <div class="value" id="wifi-rssi">--</div>
+        </div>
+        <div class="info-item">
+          <h3>IP Address</h3>
+          <div class="value" id="ip-address">--</div>
+        </div>
+        <div class="info-item">
+          <h3>MAC Address</h3>
+          <div class="value" id="mac-address">--</div>
+        </div>
+        <div class="info-item">
+          <h3>Active Sockets</h3>
+          <div class="value" id="socket-count">--</div>
+          <div class="progress-bar">
+            <div class="progress-fill" id="socket-progress"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    
+    <div class="card">
+      <h2>UART Diagnostics</h2>
+      <div class="info-grid">
+        <div class="info-item">
+          <h3>Invalid Checksums</h3>
+          <div class="value" id="invalid-checksum">--</div>
+        </div>
+        <div class="info-item">
+          <h3>Missed Frames</h3>
+          <div class="value" id="missed-frames">--</div>
+          <div style="font-size: 0.9em; color: #7f8c8d; margin-top: 0.5rem;">
+            <span id="missed-frames-rate">--</span>
+          </div>
+        </div>
+        <div class="info-item">
+          <h3>Total Frames</h3>
+          <div class="value" id="total-frames">--</div>
+        </div>
+      </div>
+    </div>
+    
+    <div class="card">
+      <h2>Actions</h2>
+      <div style="display: flex; gap: 1rem; flex-wrap: wrap;">
+        <button onclick="toggleBacklight()" id="backlight-toggle" style="padding: 12px 24px; background-color: #9b59b6; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; font-weight: bold;">
+          💡 Toggle Backlight
+        </button>
+        <button onclick="restartESP()" style="padding: 12px 24px; background-color: #e74c3c; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; font-weight: bold;">
+          🔄 Restart ESP32
+        </button>
+        <button onclick="resetPeakPower()" style="padding: 12px 24px; background-color: #f39c12; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; font-weight: bold;">
+          ⚡ Reset Peak Power
+        </button>
+        <button onclick="resetNodeTable()" style="padding: 12px 24px; background-color: #c0392b; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; font-weight: bold;">
+          🗑️ Reset All Node Data
+        </button>
+      </div>
+      <div id="backlight-message" style="margin-top: 1rem; padding: 1rem; border-radius: 4px; display: none;"></div>
+      <div id="restart-message" style="margin-top: 1rem; padding: 1rem; border-radius: 4px; display: none;"></div>
+      <div id="reset-message" style="margin-top: 1rem; padding: 1rem; border-radius: 4px; display: none;"></div>
+      <div id="node-reset-message" style="margin-top: 1rem; padding: 1rem; border-radius: 4px; display: none;"></div>
+    </div>
+  </div>
+  
+  <script>
+    // API Token configuration
+    const API_TOKEN = __TIGO_API_TOKEN__;
+
+    // Detect ingress base path for HA ingress compatibility
+    function getBasePath() {
+      const path = window.location.pathname;
+      const lastSlash = path.lastIndexOf('/');
+      return path.substring(0, lastSlash + 1);
+    }
+    const BASE_PATH = getBasePath();
+
+    // Fetch wrapper that includes authorization header if token is set
+    async function apiFetch(url, options = {}) {
+      if (API_TOKEN) {
+        options.headers = options.headers || {};
+        options.headers['Authorization'] = 'Bearer ' + API_TOKEN;
+      }
+      // Prefix with BASE_PATH for HA ingress compatibility
+      const fullUrl = BASE_PATH + url.replace(/^\//, '');
+      return fetch(fullUrl, options);
+    }
+
+    // Dark mode support
+    let darkMode = localStorage.getItem('darkMode') === 'true';
+
+    // Temperature unit toggle
+    let useFahrenheit = localStorage.getItem('tempUnit') === 'F';
+    
+    function celsiusToFahrenheit(celsius) {
+      return (celsius * 9/5) + 32;
+    }
+    
+    function formatTemperature(celsius) {
+      if (useFahrenheit) {
+        return celsiusToFahrenheit(celsius).toFixed(1);
+      }
+      return celsius.toFixed(1);
+    }
+    
+    function getTempUnit() {
+      return useFahrenheit ? '°F' : '°C';
+    }
+    
+    function toggleTempUnit() {
+      useFahrenheit = !useFahrenheit;
+      localStorage.setItem('tempUnit', useFahrenheit ? 'F' : 'C');
+      document.getElementById('temp-toggle').textContent = useFahrenheit ? '°C' : '°F';
+      loadData(); // Refresh display with new units
+    }
+    
+    function toggleTheme() {
+      darkMode = !darkMode;
+      localStorage.setItem('darkMode', darkMode);
+      applyTheme();
+    }
+    
+    async function toggleBacklight() {
+      const messageDiv = document.getElementById('backlight-message');
+      try {
+        const response = await apiFetch('/api/backlight', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: 'state=toggle'
+        });
+        const data = await response.json();
+        if (data.success) {
+          messageDiv.style.display = 'block';
+          messageDiv.style.backgroundColor = '#d4edda';
+          messageDiv.style.color = '#155724';
+          messageDiv.style.border = '1px solid #c3e6cb';
+          messageDiv.textContent = `Backlight turned ${data.state.toUpperCase()}`;
+          setTimeout(() => { messageDiv.style.display = 'none'; }, 3000);
+        } else {
+          messageDiv.style.display = 'block';
+          messageDiv.style.backgroundColor = '#f8d7da';
+          messageDiv.style.color = '#721c24';
+          messageDiv.style.border = '1px solid #f5c6cb';
+          messageDiv.textContent = `Error: ${data.error || 'Failed to toggle backlight'}`;
+        }
+      } catch (error) {
+        console.error('Error toggling backlight:', error);
+        messageDiv.style.display = 'block';
+        messageDiv.style.backgroundColor = '#f8d7da';
+        messageDiv.style.color = '#721c24';
+        messageDiv.style.border = '1px solid #f5c6cb';
+        messageDiv.textContent = `Error: ${error.message}`;
+      }
+    }
+    
+    function applyTheme() {
+      if (darkMode) {
+        document.body.classList.add('dark-mode');
+        document.querySelector('.theme-toggle').textContent = '☀️';
+      } else {
+        document.body.classList.remove('dark-mode');
+        document.querySelector('.theme-toggle').textContent = '🌙';
+      }
+    }
+    
+    // Apply theme and temp toggle on page load
+    applyTheme();
+    document.getElementById('temp-toggle').textContent = useFahrenheit ? '°C' : '°F';
+
+    // Set nav links relative to base path (HA ingress compatibility)
+    document.getElementById('nav-dashboard').href = BASE_PATH;
+    document.getElementById('nav-nodes').href = BASE_PATH + 'nodes';
+    document.getElementById('nav-status').href = BASE_PATH + 'status';
+    document.getElementById('nav-yaml').href = BASE_PATH + 'yaml';
+    document.getElementById('nav-cca').href = BASE_PATH + 'cca';
+    
+    function formatBytes(bytes) {
+      if (bytes < 1024) return bytes + ' B';
+      if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+      return (bytes / (1024 * 1024)).toFixed(2) + ' MB';
+    }
+    
+    async function loadData() {
+      try {
+        const response = await apiFetch('/api/status');
+        const data = await response.json();
+        
+        document.getElementById('uptime').textContent = 
+          `${data.uptime_days}d ${data.uptime_hours}h ${data.uptime_mins}m`;
+        document.getElementById('version').textContent = data.esphome_version;
+        document.getElementById('compile-time').textContent = data.compilation_time;
+        
+        const heapUsedPct = ((data.total_heap - data.free_heap) / data.total_heap * 100);
+        document.getElementById('heap-free').textContent = 
+          `${formatBytes(data.free_heap)} / ${formatBytes(data.total_heap)}`;
+        document.getElementById('heap-progress').style.width = heapUsedPct + '%';
+        
+        if (data.total_psram > 0) {
+          const psramUsedPct = ((data.total_psram - data.free_psram) / data.total_psram * 100);
+          document.getElementById('psram-free').textContent = 
+            `${formatBytes(data.free_psram)} / ${formatBytes(data.total_psram)}`;
+          document.getElementById('psram-progress').style.width = psramUsedPct + '%';
+          // Hide PSRAM warning if PSRAM is available
+          document.getElementById('psram-warning').classList.remove('show');
+        } else {
+          document.getElementById('psram-free').textContent = 'Not available';
+          document.getElementById('psram-progress').style.width = '0%';
+          
+          // Show PSRAM warning with chip-specific instructions
+          const warningBanner = document.getElementById('psram-warning');
+          const configInstructions = document.getElementById('psram-config-instructions');
+          
+          // Try to detect chip type from compilation info
+          const compileInfo = data.compilation_time || '';
+          let chipType = 'unknown';
+          
+          // Check build info or make educated guess
+          // Note: We could add chip type to the API response for more accuracy
+          if (compileInfo.includes('S3') || navigator.userAgent.includes('S3')) {
+            chipType = 's3';
+          } else if (compileInfo.includes('P4') || navigator.userAgent.includes('P4')) {
+            chipType = 'p4';
+          }
+          
+          if (chipType === 's3') {
+            configInstructions.innerHTML = 
+              '<p><strong>For ESP32-S3 (AtomS3R, etc.):</strong></p>' +
+              '<p>Add to your YAML: <code>board_build.arduino.memory_type: qio_opi</code> and <code>-DBOARD_HAS_PSRAM</code></p>' +
+              '<p>See <code>boards/esp32s3-atoms3r.yaml</code> for complete example.</p>';
+          } else if (chipType === 'p4') {
+            configInstructions.innerHTML = 
+              '<p><strong>For ESP32-P4:</strong></p>' +
+              '<p>Add to your YAML: <code>psram: { mode: hex, speed: 200MHz }</code></p>' +
+              '<p>See <code>boards/esp32p4-evboard.yaml</code> for complete example.</p>';
+          } else {
+            configInstructions.innerHTML = 
+              '<p>If your board has PSRAM, check the <code>boards/</code> folder for configuration examples.</p>';
+          }
+          
+          warningBanner.classList.add('show');
+        }
+        
+        // Display system information
+        document.getElementById('task-count').textContent = data.task_count || '--';
+        document.getElementById('internal-temp').textContent = 
+          data.internal_temp !== undefined ? `${formatTemperature(data.internal_temp)}${getTempUnit()}` : '--';
+        document.getElementById('min-heap').textContent = formatBytes(data.min_free_heap || 0);
+        document.getElementById('invalid-checksum').textContent = data.invalid_checksum || 0;
+        document.getElementById('missed-frames').textContent = data.missed_frames || 0;
+        document.getElementById('total-frames').textContent = data.total_frames || 0;
+        
+        // Calculate and display miss rate
+        if (data.total_frames > 0) {
+          const totalAttempts = data.total_frames + data.missed_frames;
+          const missRate = (data.missed_frames / totalAttempts * 100).toFixed(3);
+          document.getElementById('missed-frames-rate').textContent = `${missRate}% miss rate`;
+        } else {
+          document.getElementById('missed-frames-rate').textContent = '--';
+        }
+        
+        // Display network information
+        document.getElementById('network-status').textContent = 
+          data.network_connected ? '✓ Connected' : '✗ Disconnected';
+        document.getElementById('network-status').style.color = 
+          data.network_connected ? '#4caf50' : '#f44336';
+        document.getElementById('wifi-ssid').textContent = data.wifi_ssid || 'N/A';
+        document.getElementById('wifi-rssi').textContent = 
+          data.wifi_rssi !== 0 ? `${data.wifi_rssi} dBm` : 'N/A';
+        document.getElementById('ip-address').textContent = data.ip_address || 'N/A';
+        document.getElementById('mac-address').textContent = data.mac_address || 'N/A';
+        
+        // Display socket usage
+        const socketUsedPct = data.max_sockets > 0 ? 
+          (data.active_sockets / data.max_sockets * 100) : 0;
+        document.getElementById('socket-count').textContent = 
+          `${data.active_sockets} / ${data.max_sockets}`;
+        document.getElementById('socket-progress').style.width = socketUsedPct + '%';
+        document.getElementById('socket-progress').style.backgroundColor = 
+          socketUsedPct > 75 ? '#f44336' : (socketUsedPct > 50 ? '#ff9800' : '#4caf50');
+        
+        if (data.total_psram > 0) {
+          document.getElementById('min-psram').textContent = formatBytes(data.min_free_psram || 0);
+        } else {
+          document.getElementById('min-psram').textContent = 'Not available';
+        }
+      } catch (error) {
+        console.error('Error loading data:', error);
+      }
+    }
+    
+    async function restartESP() {
+      const messageDiv = document.getElementById('restart-message');
+      
+      if (!confirm('Are you sure you want to restart the ESP32? This will interrupt monitoring briefly.')) {
+        return;
+      }
+      
+      messageDiv.style.display = 'block';
+      messageDiv.style.backgroundColor = '#3498db';
+      messageDiv.style.color = 'white';
+      messageDiv.textContent = 'Restarting ESP32... Please wait 10-15 seconds.';
+      
+      try {
+        const response = await apiFetch('/api/restart', { method: 'POST' });
+        if (response.ok) {
+          messageDiv.style.backgroundColor = '#27ae60';
+          messageDiv.textContent = 'Restart command sent! The ESP32 is rebooting. Page will reload in 15 seconds...';
+          
+          // Reload page after 15 seconds to reconnect
+          setTimeout(() => {
+            window.location.reload();
+          }, 15000);
+        } else {
+          throw new Error('Failed to restart');
+        }
+      } catch (error) {
+        messageDiv.style.backgroundColor = '#e74c3c';
+        messageDiv.textContent = 'Error: Failed to send restart command. Please try again.';
+        console.error('Restart error:', error);
+      }
+    }
+    
+    async function resetPeakPower() {
+      const messageDiv = document.getElementById('reset-message');
+      
+      if (!confirm('Are you sure you want to reset all peak power values? This will clear the historical maximum power readings for all devices.')) {
+        return;
+      }
+      
+      messageDiv.style.display = 'block';
+      messageDiv.style.backgroundColor = '#3498db';
+      messageDiv.style.color = 'white';
+      messageDiv.textContent = 'Resetting peak power values...';
+      
+      try {
+        const response = await apiFetch('/api/reset_peak_power', { method: 'POST' });
+        if (response.ok) {
+          messageDiv.style.backgroundColor = '#27ae60';
+          messageDiv.textContent = 'Peak power values have been reset successfully!';
+          
+          // Hide message after 5 seconds
+          setTimeout(() => {
+            messageDiv.style.display = 'none';
+          }, 5000);
+        } else {
+          throw new Error('Failed to reset peak power');
+        }
+      } catch (error) {
+        messageDiv.style.backgroundColor = '#e74c3c';
+        messageDiv.textContent = 'Error: Failed to reset peak power. Please try again.';
+        console.error('Reset error:', error);
+      }
+    }
+    
+    async function resetNodeTable() {
+      const messageDiv = document.getElementById('node-reset-message');
+      
+      if (!confirm('⚠️ WARNING: This will delete ALL node data including device mappings, barcodes, and CCA labels!\n\nThe system will need to rediscover all devices and you will need to sync from CCA again.\n\nAre you absolutely sure you want to continue?')) {
+        return;
+      }
+      
+      messageDiv.style.display = 'block';
+      messageDiv.style.backgroundColor = '#e67e22';
+      messageDiv.style.color = 'white';
+      messageDiv.textContent = 'Resetting all node data...';
+      
+      try {
+        const response = await apiFetch('/api/reset_node_table', { method: 'POST' });
+        if (response.ok) {
+          messageDiv.style.backgroundColor = '#27ae60';
+          messageDiv.textContent = 'All node data has been reset! System will restart in 3 seconds...';
+          
+          // Wait 3 seconds then restart
+          setTimeout(() => {
+            window.location.href = BASE_PATH;
+          }, 3000);
+        } else {
+          throw new Error('Failed to reset node table');
+        }
+      } catch (error) {
+        messageDiv.style.backgroundColor = '#e74c3c';
+        messageDiv.textContent = 'Error: Failed to reset node data. Please try again.';
+        console.error('Reset node table error:', error);
+      }
+    }
+    
+    // Log polling system (instead of WebSocket)
+    
+    loadData();
+    setInterval(loadData, 10000);  // Poll every 10 seconds to reduce memory churn
+  </script>
+</body>
+</html>

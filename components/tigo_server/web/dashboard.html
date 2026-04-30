@@ -1,0 +1,719 @@
+<!DOCTYPE html)
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Tigo Monitor - Dashboard</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    :root { --text-color: #2c3e50; --axis-color: #666; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f5f5; transition: background-color 0.3s, color 0.3s; }
+    .header { background: #2c3e50; color: white; padding: 1rem 2rem; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+    .header-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem; }
+    .header h1 { font-size: 1.5rem; margin: 0; }
+    .header-controls { display: flex; gap: 0.5rem; }
+    .temp-toggle, .theme-toggle, .github-link { background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.3); color: white; padding: 0.5rem 1rem; border-radius: 4px; cursor: pointer; font-size: 0.875rem; transition: all 0.2s; text-decoration: none; display: inline-flex; align-items: center; }
+    .temp-toggle:hover, .theme-toggle:hover, .github-link:hover { background: rgba(255,255,255,0.2); }
+    .nav { display: flex; gap: 1rem; margin-top: 0.5rem; }
+    .nav a { color: #3498db; text-decoration: none; padding: 0.5rem 1rem; background: rgba(255,255,255,0.1); border-radius: 4px; transition: all 0.2s; }
+    .nav a:hover { background: rgba(255,255,255,0.2); }
+    .nav a.active { background: #3498db; color: white; }
+    .container { max-width: 1400px; margin: 2rem auto; padding: 0 1rem; }
+    .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-bottom: 2rem; }
+    .stat-card { background: white; padding: 1.5rem; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); transition: background-color 0.3s, box-shadow 0.3s; }
+    .stat-card h3 { font-size: 0.875rem; color: #7f8c8d; margin-bottom: 0.5rem; text-transform: uppercase; }
+    .stat-card .value { font-size: 2rem; font-weight: bold; color: #2c3e50; }
+    .stat-card .unit { font-size: 1rem; color: #95a5a6; margin-left: 0.25rem; }
+    .devices-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(350px, 1fr)); gap: 1rem; }
+    .string-summary { grid-column: 1 / -1; background: linear-gradient(135deg, #6b7280 0%, #4b5563 100%); border-radius: 8px; padding: 1.5rem; margin-top: 0rem; box-shadow: 0 4px 6px rgba(0,0,0,0.1); transition: box-shadow 0.3s; }
+    .string-summary:first-child { margin-top: 0; }
+    .string-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; }
+    .string-header h3 { color: white; font-size: 1.5rem; margin: 0; }
+    .string-inverter { background: rgba(255,255,255,0.2); color: white; padding: 0.5rem 1rem; border-radius: 20px; font-size: 0.875rem; font-weight: 600; }
+    .string-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 1rem; }
+    .string-stat { background: rgba(255,255,255,0.15); padding: 1rem; border-radius: 8px; text-align: center; }
+    .string-stat .stat-label { display: block; color: rgba(255,255,255,0.8); font-size: 0.75rem; text-transform: uppercase; margin-bottom: 0.5rem; }
+    .string-stat .stat-value { display: block; color: white; font-size: 1.5rem; font-weight: bold; }
+    .device-card { background: white; border-radius: 8px; padding: 1.5rem; box-shadow: 0 2px 4px rgba(0,0,0,0.1); transition: background-color 0.3s, box-shadow 0.3s; }
+    .device-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; border-bottom: 2px solid #ecf0f1; padding-bottom: 0.75rem; }
+    .device-title-section { flex: 1; }
+    .device-title { font-size: 1.125rem; font-weight: bold; color: #2c3e50; }
+    .device-subtitle { font-size: 0.75rem; color: #7f8c8d; margin-top: 0.25rem; }
+    .device-badge { background: #27ae60; color: white; padding: 0.25rem 0.75rem; border-radius: 12px; font-size: 0.75rem; }
+    .device-metrics { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0.75rem; }
+    .metric { display: flex; justify-content: space-between; padding: 0.5rem; background: #f8f9fa; border-radius: 4px; transition: background-color 0.3s; }
+    .metric-label { color: #7f8c8d; font-size: 0.875rem; }
+    .metric-value { font-weight: 600; color: #2c3e50; }
+    .loading { text-align: center; padding: 2rem; color: #7f8c8d; }
+    .error { background: #e74c3c; color: white; padding: 1rem; border-radius: 4px; margin-bottom: 1rem; }
+    
+    /* Release banner */
+    .release-banner { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 1rem 2rem; display: none; align-items: center; justify-content: space-between; box-shadow: 0 2px 8px rgba(0,0,0,0.15); position: relative; }
+    .release-banner-content { display: flex; align-items: center; gap: 1rem; flex: 1; }
+    .release-banner-icon { font-size: 1.5rem; }
+    .release-banner-text { flex: 1; }
+    .release-banner-title { font-weight: 600; margin-bottom: 0.25rem; }
+    .release-banner-message { font-size: 0.875rem; opacity: 0.9; }
+    .release-banner-actions { display: flex; gap: 0.75rem; align-items: center; }
+    .release-banner-btn { background: rgba(255,255,255,0.2); border: 1px solid rgba(255,255,255,0.3); color: white; padding: 0.5rem 1rem; border-radius: 4px; cursor: pointer; font-size: 0.875rem; transition: all 0.2s; text-decoration: none; display: inline-block; }
+    .release-banner-btn:hover { background: rgba(255,255,255,0.3); }
+    .release-banner-dismiss { background: transparent; border: none; color: white; font-size: 1.5rem; cursor: pointer; opacity: 0.8; padding: 0.25rem 0.5rem; transition: opacity 0.2s; }
+    .release-banner-dismiss:hover { opacity: 1; }
+    
+    /* Dark mode styles */
+    body.dark-mode { background: #1a1a1a; color: #e0e0e0; }
+    body.dark-mode .header { background: #1c2833; }
+    body.dark-mode .stat-card, body.dark-mode .device-card { background: #2d2d2d; box-shadow: 0 2px 4px rgba(0,0,0,0.3); }
+    body.dark-mode .stat-card h3, body.dark-mode .metric-label, body.dark-mode .device-subtitle { color: #b0b0b0; }
+    body.dark-mode .stat-card .value, body.dark-mode .metric-value, body.dark-mode .device-title { color: #e0e0e0; }
+    body.dark-mode .metric { background: #3a3a3a; }
+    body.dark-mode .device-header { border-bottom-color: #444; }
+    body.dark-mode .loading { color: #b0b0b0; }
+    body.dark-mode .string-summary { box-shadow: 0 4px 6px rgba(0,0,0,0.5); }
+    
+    /* Energy history card */
+    .energy-history-card { background: #ffffff; border-radius: 8px; padding: 20px; margin: 20px 0; box-shadow: 0 2px 4px rgba(0,0,0,0.1); transition: background-color 0.3s, box-shadow 0.3s; color: #2c3e50; }
+    .energy-history-card h2 { margin-top: 0; color: #2c3e50; }
+    body.dark-mode .energy-history-card { background: #3a3a3a; box-shadow: 0 2px 4px rgba(0,0,0,0.3); color: #ffffff; }
+    body.dark-mode .energy-history-card h2 { color: #ffffff; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="header-top">
+      <h1>🌞 Tigo Solar Monitor</h1>
+      <div class="header-controls">
+        <a href="https://github.com/RAR/esphome-tigomonitor" target="_blank" class="github-link" title="View on GitHub">
+          <svg height="16" width="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"></path></svg>
+        </a>
+        <button class="temp-toggle" onclick="toggleTempUnit()" id="temp-toggle">°F</button>
+        <button class="theme-toggle" onclick="toggleTheme()" id="theme-toggle">🌙</button>
+      </div>
+    </div>
+    <div class="nav">
+      <a href="#" id="nav-dashboard" class="active">Dashboard</a>
+      <a href="#" id="nav-nodes">Node Table</a>
+      <a href="#" id="nav-status">ESP32 Status</a>
+      <a href="#" id="nav-yaml">YAML Config</a>
+      <a href="#" id="nav-cca">CCA Info</a>
+    </div>
+  </div>
+  
+  <div class="release-banner" id="release-banner">
+    <div class="release-banner-content">
+      <div class="release-banner-icon">🎉</div>
+      <div class="release-banner-text">
+        <div class="release-banner-title">New Release Available!</div>
+        <div class="release-banner-message" id="release-message">A new version is available on GitHub</div>
+      </div>
+    </div>
+    <div class="release-banner-actions">
+      <a href="#" id="release-link" target="_blank" class="release-banner-btn">View Release</a>
+      <button class="release-banner-dismiss" onclick="dismissReleaseBanner()" title="Dismiss">&times;</button>
+    </div>
+  </div>
+  
+  <div class="container">
+    <div class="stats" id="stats">
+      <div class="stat-card">
+        <h3>Total Power</h3>
+        <div><span class="value" id="total-power">--</span><span class="unit">W</span></div>
+      </div>
+      <div class="stat-card">
+        <h3>Total Current</h3>
+        <div><span class="value" id="total-current">--</span><span class="unit">A</span></div>
+      </div>
+      <div class="stat-card">
+        <h3>Active Devices</h3>
+        <div><span class="value" id="active-devices">--</span></div>
+      </div>
+      <div class="stat-card">
+        <h3>Avg Efficiency</h3>
+        <div><span class="value" id="avg-efficiency">--</span><span class="unit">%</span></div>
+      </div>
+      <div class="stat-card">
+        <h3>Avg Temperature</h3>
+        <div><span class="value" id="avg-temp">--</span><span class="unit" id="avg-temp-unit">°C</span></div>
+      </div>
+      <div class="stat-card">
+        <h3>Total Energy</h3>
+        <div><span class="value" id="total-energy">--</span><span class="unit">kWh</span></div>
+      </div>
+    </div>
+    
+    <div class="energy-history-card">
+      <h2>Daily Energy History (Last 7 Days)</h2>
+      <canvas id="energyChart" style="max-height: 300px;"></canvas>
+    </div>
+    
+    <div class="devices-grid" id="devices"></div>
+  </div>
+  
+  <script>
+    // API Token configuration
+    const API_TOKEN = __TIGO_API_TOKEN__;
+
+    // Detect ingress base path for HA ingress compatibility
+    function getBasePath() {
+      const path = window.location.pathname;
+      const lastSlash = path.lastIndexOf('/');
+      return path.substring(0, lastSlash + 1);
+    }
+    const BASE_PATH = getBasePath();
+
+    // Fetch wrapper that includes authorization header if token is set
+    async function apiFetch(url, options = {}) {
+      if (API_TOKEN) {
+        options.headers = options.headers || {};
+        options.headers['Authorization'] = 'Bearer ' + API_TOKEN;
+      }
+      // Prefix with BASE_PATH for HA ingress compatibility
+      const fullUrl = BASE_PATH + url.replace(/^\//, '');
+      return fetch(fullUrl, options);
+    }
+
+    // Temperature unit management
+    let useFahrenheit = localStorage.getItem('tempUnit') === 'F';
+    
+    function celsiusToFahrenheit(celsius) {
+      return (celsius * 9/5) + 32;
+    }
+    
+    // Theme toggle
+    let darkMode = localStorage.getItem('darkMode') === 'true';
+    
+    function toggleTheme() {
+      darkMode = !darkMode;
+      localStorage.setItem('darkMode', darkMode);
+      applyTheme();
+    }
+    
+    function applyTheme() {
+      if (darkMode) {
+        document.body.classList.add('dark-mode');
+        document.getElementById('theme-toggle').textContent = '☀️';
+      } else {
+        document.body.classList.remove('dark-mode');
+        document.getElementById('theme-toggle').textContent = '🌙';
+      }
+      // Redraw energy chart with new theme colors (only if already loaded)
+      if (energyHistoryLoaded && typeof loadEnergyHistory === 'function') {
+        loadEnergyHistory();
+      }
+    }
+    
+    // Temperature toggle
+    function toggleTempUnit() {
+      useFahrenheit = !useFahrenheit;
+      localStorage.setItem('tempUnit', useFahrenheit ? 'F' : 'C');
+      document.getElementById('temp-toggle').textContent = useFahrenheit ? '°C' : '°F';
+      loadData(); // Refresh display with new units
+    }
+    
+    function formatTemperature(celsius) {
+      if (useFahrenheit) {
+        return celsiusToFahrenheit(celsius).toFixed(1);
+      }
+      return celsius.toFixed(1);
+    }
+    
+    function getTempUnit() {
+      return useFahrenheit ? '°F' : '°C';
+    }
+    
+    // Release banner functions
+    const CURRENT_VERSION = 'v1.4.3'; // Update this with each release
+    
+    async function checkForNewRelease() {
+      try {
+        // Check if banner was dismissed for this version
+        const dismissedVersion = localStorage.getItem('dismissedReleaseVersion');
+        if (dismissedVersion === CURRENT_VERSION) {
+          return; // Already dismissed for current version
+        }
+        
+        // Fetch latest release from GitHub
+        const response = await fetch('https://api.github.com/repos/RAR/esphome-tigomonitor/releases/latest');
+        if (!response.ok) {
+          console.warn('Could not fetch release info');
+          return;
+        }
+        
+        const release = await response.json();
+        const latestVersion = release.tag_name;
+        
+        // Compare versions - show banner if latest is newer than current
+        if (latestVersion !== CURRENT_VERSION && !dismissedVersion) {
+          document.getElementById('release-message').textContent = `Version ${latestVersion} is now available!`;
+          document.getElementById('release-link').href = release.html_url;
+          document.getElementById('release-banner').style.display = 'flex';
+        }
+      } catch (error) {
+        console.error('Error checking for releases:', error);
+      }
+    }
+    
+    function dismissReleaseBanner() {
+      document.getElementById('release-banner').style.display = 'none';
+      // Remember dismissal for current version
+      localStorage.setItem('dismissedReleaseVersion', CURRENT_VERSION);
+    }
+    
+    // Initialize toggle buttons
+    let invertersData = { inverters: [] }; // Cache inverter config (static, only changes on reboot)
+    
+    document.addEventListener('DOMContentLoaded', () => {
+      // Set nav links relative to base path (HA ingress compatibility)
+      document.getElementById('nav-dashboard').href = BASE_PATH;
+      document.getElementById('nav-nodes').href = BASE_PATH + 'nodes';
+      document.getElementById('nav-status').href = BASE_PATH + 'status';
+      document.getElementById('nav-yaml').href = BASE_PATH + 'yaml';
+      document.getElementById('nav-cca').href = BASE_PATH + 'cca';
+      applyTheme();
+      document.getElementById('temp-toggle').textContent = useFahrenheit ? '°C' : '°F';
+      // Check for new releases
+      checkForNewRelease();
+      // Initial load - fetch inverters once, then start refresh cycle
+      loadInitialData();
+    });
+    
+    async function loadInitialData() {
+      // Fetch inverter config once on page load (static configuration)
+      try {
+        const invertersRes = await apiFetch('/api/inverters');
+        invertersData = await invertersRes.json();
+        console.log('Inverters data loaded:', invertersData);
+      } catch (err) {
+        console.warn('Inverters endpoint not available, using empty data', err);
+      }
+      
+      // Load dynamic data
+      try {
+        await loadData();
+        await loadEnergyHistory();
+      } catch (error) {
+        console.error('Error loading initial data:', error);
+        setTimeout(loadInitialData, 5000);
+      }
+    }
+    
+    async function loadData() {
+      try {
+        // Load dynamic data sequentially to reduce server load
+        const devicesRes = await apiFetch('/api/devices');
+        const devicesData = await devicesRes.json();
+        
+        const overviewRes = await apiFetch('/api/overview');
+        const overviewData = await overviewRes.json();
+        
+        const stringsRes = await apiFetch('/api/strings');
+        const stringsData = await stringsRes.json();
+        
+        processAndRenderData(devicesData, overviewData, stringsData, invertersData);
+      } catch (error) {
+        console.error('Error loading data:', error);
+        document.getElementById('devices').innerHTML = '<div class="device-card">Error loading data. Retrying...</div>';
+        setTimeout(loadData, 5000);
+      }
+    }
+    
+    function processAndRenderData(devicesData, overviewData, stringsData, invertersData) {
+      try {
+        document.getElementById('total-power').textContent = overviewData.total_power.toFixed(1);
+        document.getElementById('total-current').textContent = overviewData.total_current.toFixed(3);
+        document.getElementById('active-devices').textContent = overviewData.active_devices;
+        document.getElementById('avg-efficiency').textContent = overviewData.avg_efficiency.toFixed(1);
+        document.getElementById('avg-temp').textContent = formatTemperature(overviewData.avg_temperature);
+        document.getElementById('avg-temp-unit').textContent = getTempUnit();
+        document.getElementById('total-energy').textContent = overviewData.total_energy.toFixed(3);
+        
+        // Group devices by string
+        const devicesByString = {};
+        const unassignedDevices = [];
+        
+        devicesData.devices.forEach(device => {
+          if (device.string_label) {
+            if (!devicesByString[device.string_label]) {
+              devicesByString[device.string_label] = [];
+            }
+            devicesByString[device.string_label].push(device);
+          } else {
+            unassignedDevices.push(device);
+          }
+        });
+        
+        // Render device card helper
+        function renderDevice(device) {
+          // Check for "never updated" condition (ULONG_MAX or very large value)
+          const ageText = device.data_age_ms > 86400000 ? 'Never' :  // > 1 day indicates invalid/never
+                          device.data_age_ms < 1000 ? `${device.data_age_ms}ms` : 
+                          device.data_age_ms < 60000 ? `${(device.data_age_ms/1000).toFixed(1)}s` :
+                          `${(device.data_age_ms/60000).toFixed(1)}m`;
+          
+          const subtitle = device.barcode || `Addr: ${device.addr}`;
+          
+          return `
+            <div class="device-card">
+              <div class="device-header">
+                <div class="device-title-section">
+                  <div class="device-title">${device.name}</div>
+                  <div class="device-subtitle">${subtitle}</div>
+                </div>
+                <div class="device-badge">${ageText}</div>
+              </div>
+              <div class="device-metrics">
+                <div class="metric">
+                  <span class="metric-label">Power In</span>
+                  <span class="metric-value">${device.power_in.toFixed(1)} W</span>
+                </div>
+                <div class="metric">
+                  <span class="metric-label">Power Out</span>
+                  <span class="metric-value">${device.power_out.toFixed(1)} W</span>
+                </div>
+                <div class="metric">
+                  <span class="metric-label">Peak Power</span>
+                  <span class="metric-value">${device.peak_power.toFixed(1)} W</span>
+                </div>
+                <div class="metric">
+                  <span class="metric-label">Current</span>
+                  <span class="metric-value">${device.current.toFixed(3)} A</span>
+                </div>
+                <div class="metric">
+                  <span class="metric-label">Current Out</span>
+                  <span class="metric-value">${device.current_out.toFixed(3)} A</span>
+                </div>
+                <div class="metric">
+                  <span class="metric-label">Voltage In</span>
+                  <span class="metric-value">${device.voltage_in.toFixed(2)} V</span>
+                </div>
+                <div class="metric">
+                  <span class="metric-label">Voltage Out</span>
+                  <span class="metric-value">${device.voltage_out.toFixed(2)} V</span>
+                </div>
+                <div class="metric">
+                  <span class="metric-label">Temperature</span>
+                  <span class="metric-value">${formatTemperature(device.temperature)} ${getTempUnit()}</span>
+                </div>
+                <div class="metric">
+                  <span class="metric-label">Efficiency</span>
+                  <span class="metric-value">${device.efficiency.toFixed(1)} %</span>
+                </div>
+                <div class="metric">
+                  <span class="metric-label">Duty Cycle</span>
+                  <span class="metric-value">${device.duty_cycle} %</span>
+                </div>
+                <div class="metric">
+                  <span class="metric-label">RSSI</span>
+                  <span class="metric-value">${device.rssi} dBm</span>
+                </div>
+              </div>
+            </div>
+          `;
+        }
+        
+        // Build HTML with inverter/string groups
+        const devicesContainer = document.getElementById('devices');
+        let html = '';
+        
+        // Check if inverters are configured
+        if (invertersData.inverters && invertersData.inverters.length > 0) {
+          // Group by inverter -> MPPT -> String
+          invertersData.inverters.forEach(inverter => {
+            // Inverter summary card
+            html += `
+              <div class="string-summary" style="background: linear-gradient(135deg, #52525b 0%, #3f3f46 100%); color: white; margin-bottom: 0.5rem;">
+                <div class="string-header" style="border-bottom-color: rgba(255,255,255,0.2);">
+                  <h3 style="color: white; font-size: 1.3rem;">⚡ ${inverter.name}</h3>
+                </div>
+                <div class="string-stats">
+                  <div class="string-stat">
+                    <span class="stat-label" style="color: rgba(255,255,255,0.9);">Devices</span>
+                    <span class="stat-value" style="color: white;">${inverter.total_devices}</span>
+                  </div>
+                  <div class="string-stat">
+                    <span class="stat-label" style="color: rgba(255,255,255,0.9);">Power</span>
+                    <span class="stat-value" style="color: white;">${inverter.total_power.toFixed(1)} W</span>
+                  </div>
+                  <div class="string-stat">
+                    <span class="stat-label" style="color: rgba(255,255,255,0.9);">Peak</span>
+                    <span class="stat-value" style="color: white;">${inverter.peak_power.toFixed(1)} W</span>
+                  </div>
+                </div>
+              </div>
+            `;
+            
+            // Render strings for this inverter's MPPTs
+            inverter.mppts.forEach(mpptLabel => {
+              const stringsForMppt = stringsData.strings.filter(s => s.inverter === mpptLabel);
+              
+              stringsForMppt.forEach(stringInfo => {
+                const devices = devicesByString[stringInfo.label] || [];
+                
+                // String summary card (indented under inverter)
+                html += `
+                  <div class="string-summary" style="margin-left: 2rem; border-left: 4px solid rgba(255,255,255,0.3);">
+                    <div class="string-header">
+                      <h3>${stringInfo.label}</h3>
+                      <span class="string-inverter">${stringInfo.inverter}</span>
+                    </div>
+                    <div class="string-stats">
+                      <div class="string-stat">
+                        <span class="stat-label">Devices</span>
+                        <span class="stat-value">${stringInfo.total_devices}</span>
+                      </div>
+                      <div class="string-stat">
+                        <span class="stat-label">Power</span>
+                        <span class="stat-value">${stringInfo.total_power.toFixed(1)} W</span>
+                      </div>
+                      <div class="string-stat">
+                        <span class="stat-label">Peak</span>
+                        <span class="stat-value">${stringInfo.peak_power.toFixed(1)} W</span>
+                      </div>
+                      <div class="string-stat">
+                        <span class="stat-label">Avg Eff</span>
+                        <span class="stat-value">${stringInfo.avg_efficiency.toFixed(1)}%</span>
+                      </div>
+                    </div>
+                  </div>
+                `;
+                
+                // Devices in this string (further indented)
+                devices.forEach(device => {
+                  html += '<div style="margin-left: 2rem;">' + renderDevice(device) + '</div>';
+                });
+              });
+            });
+          });
+          
+          // Render unassigned strings (those not in any inverter's MPPTs)
+          const assignedMppts = new Set();
+          invertersData.inverters.forEach(inv => inv.mppts.forEach(m => assignedMppts.add(m)));
+          
+          const unassignedStrings = stringsData.strings.filter(s => !assignedMppts.has(s.inverter));
+          if (unassignedStrings.length > 0) {
+            html += '<div class="string-summary"><div class="string-header"><h3>Unassigned MPPTs</h3></div></div>';
+            unassignedStrings.forEach(stringInfo => {
+              const devices = devicesByString[stringInfo.label] || [];
+              html += `
+                <div class="string-summary">
+                  <div class="string-header">
+                    <h3>${stringInfo.label}</h3>
+                    <span class="string-inverter">${stringInfo.inverter}</span>
+                  </div>
+                  <div class="string-stats">
+                    <div class="string-stat">
+                      <span class="stat-label">Devices</span>
+                      <span class="stat-value">${stringInfo.total_devices}</span>
+                    </div>
+                    <div class="string-stat">
+                      <span class="stat-label">Power</span>
+                      <span class="stat-value">${stringInfo.total_power.toFixed(1)} W</span>
+                    </div>
+                    <div class="string-stat">
+                      <span class="stat-label">Peak</span>
+                      <span class="stat-value">${stringInfo.peak_power.toFixed(1)} W</span>
+                    </div>
+                    <div class="string-stat">
+                      <span class="stat-label">Avg Eff</span>
+                      <span class="stat-value">${stringInfo.avg_efficiency.toFixed(1)}%</span>
+                    </div>
+                  </div>
+                </div>
+              `;
+              devices.forEach(device => {
+                html += renderDevice(device);
+              });
+            });
+          }
+        } else {
+          // Original rendering: Render strings with their summary cards
+          const stringLabels = Object.keys(devicesByString).sort();
+          stringLabels.forEach(stringLabel => {
+            const stringInfo = stringsData.strings.find(s => s.label === stringLabel);
+            const devices = devicesByString[stringLabel];
+            
+            // String summary card
+            if (stringInfo) {
+              html += `
+                <div class="string-summary">
+                  <div class="string-header">
+                    <h3>${stringLabel}</h3>
+                    <span class="string-inverter">${stringInfo.inverter}</span>
+                  </div>
+                  <div class="string-stats">
+                    <div class="string-stat">
+                      <span class="stat-label">Devices</span>
+                      <span class="stat-value">${stringInfo.total_devices}</span>
+                    </div>
+                    <div class="string-stat">
+                      <span class="stat-label">Power</span>
+                      <span class="stat-value">${stringInfo.total_power.toFixed(1)} W</span>
+                    </div>
+                    <div class="string-stat">
+                      <span class="stat-label">Peak</span>
+                      <span class="stat-value">${stringInfo.peak_power.toFixed(1)} W</span>
+                    </div>
+                    <div class="string-stat">
+                      <span class="stat-label">Avg Eff</span>
+                      <span class="stat-value">${stringInfo.avg_efficiency.toFixed(1)}%</span>
+                    </div>
+                  </div>
+                </div>
+              `;
+            }
+            
+            // Devices in this string
+            devices.forEach(device => {
+              html += renderDevice(device);
+            });
+          });
+        }
+        
+        // Unassigned devices section
+        if (unassignedDevices.length > 0) {
+          html += '<div class="string-summary"><div class="string-header"><h3>Unassigned Devices</h3></div></div>';
+          unassignedDevices.forEach(device => {
+            html += renderDevice(device);
+          });
+        }
+        
+        devicesContainer.innerHTML = html;
+      } catch (error) {
+        console.error('Error loading data:', error);
+      }
+    }
+    
+    // Energy history chart
+    let energyChart = null;
+    let energyHistoryLoaded = false;  // Track if energy history has been loaded
+    
+    async function loadEnergyHistory() {
+      try {
+        const res = await apiFetch('/api/energy/history');
+        const data = await res.json();
+        
+        if (data.error) {
+          console.error('Energy history error:', data.error);
+          return;
+        }
+        
+        // Prepare chart data
+        const dates = data.history.map(entry => {
+          // Parse date string directly to avoid timezone shifts
+          // Format: "YYYY-MM-DD" -> "M/D"
+          const parts = entry.date.split('-');
+          return parseInt(parts[1]) + '/' + parseInt(parts[2]);
+        });
+        const energies = data.history.map(entry => entry.energy);
+        
+        // Render simple bar chart
+        const ctx = document.getElementById('energyChart');
+        if (!ctx) return;
+        
+        // Destroy existing chart
+        if (energyChart) {
+          energyChart = null;
+        }
+        
+        // Simple canvas-based bar chart
+        const canvas = ctx;
+        const context = canvas.getContext('2d');
+        const width = canvas.parentElement.clientWidth - 40;
+        const height = 300;
+        canvas.width = width;
+        canvas.height = height;
+        
+        // Clear canvas
+        context.clearRect(0, 0, width, height);
+        
+        const isDarkMode = document.body.classList.contains('dark-mode');
+        const textColor = isDarkMode ? '#ffffff' : '#2c3e50';
+        const axisColor = isDarkMode ? '#cccccc' : '#666';
+        
+        if (energies.length === 0) {
+          context.fillStyle = textColor;
+          context.font = '14px Arial';
+          context.textAlign = 'center';
+          context.fillText('No energy history data yet', width / 2, height / 2);
+          return;
+        }
+        
+        // Calculate chart dimensions
+        const padding = 50;
+        const chartWidth = width - padding * 2;
+        const chartHeight = height - padding * 2;
+        const barWidth = chartWidth / energies.length - 10;
+        const maxEnergy = Math.max(...energies);
+        const scale = maxEnergy > 0 ? chartHeight / maxEnergy : 1;
+        
+        // Draw axes
+        context.strokeStyle = axisColor;
+        context.lineWidth = 1;
+        context.beginPath();
+        context.moveTo(padding, padding);
+        context.lineTo(padding, height - padding);
+        context.lineTo(width - padding, height - padding);
+        context.stroke();
+        
+        // Draw bars
+        energies.forEach((energy, index) => {
+          const barHeight = energy * scale;
+          const x = padding + index * (barWidth + 10) + 5;
+          const y = height - padding - barHeight;
+          
+          // Bar
+          const gradient = context.createLinearGradient(x, y, x, y + barHeight);
+          gradient.addColorStop(0, isDarkMode ? '#60a5fa' : '#3b82f6');
+          gradient.addColorStop(1, isDarkMode ? '#3b82f6' : '#2563eb');
+          context.fillStyle = gradient;
+          context.fillRect(x, y, barWidth, barHeight);
+          
+          // Value label on top
+          context.fillStyle = textColor;
+          context.font = '12px Arial';
+          context.textAlign = 'center';
+          context.fillText(energy.toFixed(1), x + barWidth / 2, y - 5);
+          
+          // Date label below
+          context.save();
+          context.translate(x + barWidth / 2, height - padding + 15);
+          context.rotate(-Math.PI / 4);
+          context.textAlign = 'right';
+          context.font = '11px Arial';
+          context.fillText(dates[index], 0, 0);
+          context.restore();
+        });
+        
+        // Y-axis label
+        context.save();
+        context.translate(15, height / 2);
+        context.rotate(-Math.PI / 2);
+        context.textAlign = 'center';
+        context.font = 'bold 12px Arial';
+        context.fillStyle = textColor;
+        context.fillText('Energy (kWh)', 0, 0);
+        context.restore();
+        
+        energyHistoryLoaded = true;  // Mark as loaded
+        
+      } catch (error) {
+        console.error('Error loading energy history:', error);
+      }
+    }
+    
+    // Redraw chart on window resize (debounced)
+    let resizeTimeout;
+    window.addEventListener('resize', () => {
+      if (!energyHistoryLoaded) return;
+      clearTimeout(resizeTimeout);
+      resizeTimeout = setTimeout(() => {
+        loadEnergyHistory();
+      }, 250);  // Debounce 250ms to avoid excessive redraws
+    });
+    
+    // Start auto-refresh intervals
+    setInterval(loadData, 10000);  // Poll every 10 seconds to reduce memory churn
+    setInterval(loadEnergyHistory, 60000);  // Update energy chart every minute
+  </script>
+</body>
+</html>

@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Tigo Monitor - Node Table</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f5f5; transition: background-color 0.3s, color 0.3s; }
+    .header { background: #2c3e50; color: white; padding: 1rem 2rem; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+    .header-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem; }
+    .header h1 { font-size: 1.5rem; margin: 0; }
+    .header-controls { display: flex; gap: 0.5rem; }
+    .theme-toggle, .github-link { background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.3); color: white; padding: 0.5rem 1rem; border-radius: 4px; cursor: pointer; font-size: 0.875rem; transition: all 0.2s; text-decoration: none; display: inline-flex; align-items: center; }
+    .theme-toggle:hover, .github-link:hover { background: rgba(255,255,255,0.2); }
+    .nav { display: flex; gap: 1rem; margin-top: 0.5rem; }
+    .nav a { color: #3498db; text-decoration: none; padding: 0.5rem 1rem; background: rgba(255,255,255,0.1); border-radius: 4px; transition: all 0.2s; }
+    .nav a:hover { background: rgba(255,255,255,0.2); }
+    .nav a.active { background: #3498db; color: white; }
+    .container { max-width: 1400px; margin: 2rem auto; padding: 0 1rem; }
+    .card { background: white; border-radius: 8px; padding: 2rem; box-shadow: 0 2px 4px rgba(0,0,0,0.1); transition: background-color 0.3s, box-shadow 0.3s; }
+    .card h2 { color: #2c3e50; margin-bottom: 1.5rem; font-size: 1.5rem; border-bottom: 2px solid #3498db; padding-bottom: 0.5rem; }
+    table { width: 100%; border-collapse: collapse; }
+    thead { background: #34495e; color: white; }
+    th { padding: 1rem; text-align: left; font-weight: 600; }
+    td { padding: 1rem; border-bottom: 1px solid #ecf0f1; transition: background-color 0.3s; }
+    tbody tr:hover { background: #f8f9fa; }
+    .badge { display: inline-block; padding: 0.25rem 0.75rem; border-radius: 12px; font-size: 0.75rem; font-weight: 600; }
+    .badge-success { background: #27ae60; color: white; }
+    .badge-warning { background: #f39c12; color: white; }
+    .badge-info { background: #3498db; color: white; }
+    .code { font-family: monospace; background: #f8f9fa; padding: 0.25rem 0.5rem; border-radius: 4px; transition: background-color 0.3s; }
+    .cca-info { color: #16a085; font-weight: 500; }
+    .hierarchy { color: #95a5a6; font-size: 0.85rem; margin-top: 0.25rem; }
+    button:hover { opacity: 0.8; }
+    
+    /* Dark mode styles */
+    body.dark-mode { background: #1a1a1a; color: #e0e0e0; }
+    body.dark-mode .header { background: #1c2833; }
+    body.dark-mode .card { background: #2d2d2d; box-shadow: 0 2px 4px rgba(0,0,0,0.3); }
+    body.dark-mode .card h2 { color: #e0e0e0; }
+    body.dark-mode thead { background: #1e1e1e; }
+    body.dark-mode td { border-bottom-color: #444; color: #e0e0e0; }
+    body.dark-mode tbody tr:hover { background: #3a3a3a; }
+    body.dark-mode .code { background: #3a3a3a; color: #e0e0e0; }
+    body.dark-mode .hierarchy { color: #b0b0b0; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="header-top">
+      <h1>🌞 Tigo Solar Monitor</h1>
+      <div class="header-controls">
+        <a href="https://github.com/RAR/esphome-tigomonitor" target="_blank" class="github-link" title="View on GitHub">
+          <svg height="16" width="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"></path></svg>
+        </a>
+        <button class="theme-toggle" onclick="toggleTheme()" id="theme-toggle">🌙</button>
+      </div>
+    </div>
+    <div class="nav">
+      <a href="#" id="nav-dashboard">Dashboard</a>
+      <a href="#" id="nav-nodes" class="active">Node Table</a>
+      <a href="#" id="nav-status">ESP32 Status</a>
+      <a href="#" id="nav-yaml">YAML Config</a>
+      <a href="#" id="nav-cca">CCA Info</a>
+    </div>
+  </div>
+  
+  <div class="container">
+    <div class="card">
+      <h2>Node Table</h2>
+      <div style="margin-bottom: 1.5rem; display: flex; gap: 1rem; flex-wrap: wrap;">
+        <button onclick="exportNodeTable()" style="padding: 0.75rem 1.5rem; background-color: #27ae60; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.875rem; font-weight: 600;">
+          📥 Export Node Table
+        </button>
+        <button onclick="document.getElementById('import-file').click()" style="padding: 0.75rem 1.5rem; background-color: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.875rem; font-weight: 600;">
+          📤 Import Node Table
+        </button>
+        <input type="file" id="import-file" accept=".json" style="display: none;" onchange="importNodeTable(event)">
+        <span id="import-status" style="align-self: center; font-size: 0.875rem; color: #27ae60; display: none;"></span>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>Address</th>
+            <th>Device Name / Barcode</th>
+            <th>Location</th>
+            <th>Sensor Index</th>
+            <th>Action</th>
+          </tr>
+        </thead>
+        <tbody id="node-table-body">
+          <tr><td colspan="5" style="text-align:center;">Loading...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+  
+  <script>
+    // API Token configuration
+    const API_TOKEN = __TIGO_API_TOKEN__;
+
+    // Detect ingress base path for HA ingress compatibility
+    function getBasePath() {
+      const path = window.location.pathname;
+      const lastSlash = path.lastIndexOf('/');
+      return path.substring(0, lastSlash + 1);
+    }
+    const BASE_PATH = getBasePath();
+
+    // Fetch wrapper that includes authorization header if token is set
+    async function apiFetch(url, options = {}) {
+      if (API_TOKEN) {
+        options.headers = options.headers || {};
+        options.headers['Authorization'] = 'Bearer ' + API_TOKEN;
+      }
+      // Prefix with BASE_PATH for HA ingress compatibility
+      const fullUrl = BASE_PATH + url.replace(/^\//, '');
+      return fetch(fullUrl, options);
+    }
+
+    // Dark mode
+    let darkMode = localStorage.getItem('darkMode') === 'true';
+    
+    function toggleTheme() {
+      darkMode = !darkMode;
+      localStorage.setItem('darkMode', darkMode);
+      applyTheme();
+    }
+    
+    function applyTheme() {
+      if (darkMode) {
+        document.body.classList.add('dark-mode');
+        document.getElementById('theme-toggle').textContent = '☀️';
+      } else {
+        document.body.classList.remove('dark-mode');
+        document.getElementById('theme-toggle').textContent = '🌙';
+      }
+    }
+    
+    // Apply theme on load
+    applyTheme();
+
+    // Set nav links relative to base path (HA ingress compatibility)
+    document.getElementById('nav-dashboard').href = BASE_PATH;
+    document.getElementById('nav-nodes').href = BASE_PATH + 'nodes';
+    document.getElementById('nav-status').href = BASE_PATH + 'status';
+    document.getElementById('nav-yaml').href = BASE_PATH + 'yaml';
+    document.getElementById('nav-cca').href = BASE_PATH + 'cca';
+    
+    async function exportNodeTable() {
+      try {
+        const response = await apiFetch('/api/nodes');
+        const data = await response.json();
+        
+        // Create downloadable JSON file
+        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `node-table-${new Date().toISOString().split('T')[0]}.json`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      } catch (error) {
+        console.error('Error exporting node table:', error);
+        alert('Failed to export node table: ' + error.message);
+      }
+    }
+    
+    async function importNodeTable(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+      
+      const statusEl = document.getElementById('import-status');
+      
+      try {
+        const text = await file.text();
+        const data = JSON.parse(text);
+        
+        // Validate data structure
+        if (!data.nodes || !Array.isArray(data.nodes)) {
+          throw new Error('Invalid node table format: missing "nodes" array');
+        }
+        
+        // Confirm import
+        if (!confirm(`Import ${data.nodes.length} node(s)? This will replace the current node table.`)) {
+          event.target.value = ''; // Reset file input
+          return;
+        }
+        
+        // Send to server
+        const response = await apiFetch('/api/nodes/import', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(data)
+        });
+        
+        if (response.ok) {
+          const result = await response.json();
+          statusEl.textContent = `✅ Successfully imported ${result.imported || data.nodes.length} node(s)`;
+          statusEl.style.color = '#27ae60';
+          statusEl.style.display = 'inline';
+          
+          // Reload table
+          await loadData();
+          
+          // Hide status after 5 seconds
+          setTimeout(() => {
+            statusEl.style.display = 'none';
+          }, 5000);
+        } else {
+          const error = await response.json();
+          throw new Error(error.message || 'Import failed');
+        }
+      } catch (error) {
+        console.error('Error importing node table:', error);
+        statusEl.textContent = `❌ Import failed: ${error.message}`;
+        statusEl.style.color = '#e74c3c';
+        statusEl.style.display = 'inline';
+        
+        setTimeout(() => {
+          statusEl.style.display = 'none';
+        }, 5000);
+      }
+      
+      // Reset file input
+      event.target.value = '';
+    }
+    
+    async function deleteNode(addr) {
+      if (!confirm('Are you sure you want to delete node with address ' + addr + '?')) {
+        return;
+      }
+      
+      try {
+        const response = await apiFetch('/api/nodes/delete?addr=' + encodeURIComponent(addr), {
+          method: 'POST'
+        });
+        
+        if (response.ok) {
+          // Reload the table
+          await loadData();
+        } else {
+          alert('Failed to delete node');
+        }
+      } catch (error) {
+        console.error('Error deleting node:', error);
+        alert('Error deleting node: ' + error.message);
+      }
+    }
+    
+    async function loadData() {
+      try {
+        const response = await apiFetch('/api/nodes');
+        const data = await response.json();
+        
+        const tbody = document.getElementById('node-table-body');
+        tbody.innerHTML = data.nodes.map(node => {
+          // Build device name/barcode cell
+          let deviceInfo = '';
+          if (node.cca_validated && node.cca_label) {
+            deviceInfo = `<span class="cca-info">${node.cca_label}</span>`;
+            if (node.long_address) {
+              deviceInfo += `<div class="hierarchy">Barcode: <span class="code">${node.long_address}</span></div>`;
+            } else if (node.frame09_barcode) {
+              deviceInfo += `<div class="hierarchy">Barcode: <span class="code">${node.frame09_barcode}</span></div>`;
+            }
+          } else {
+            deviceInfo = `<span class="code">${node.long_address || node.frame09_barcode || '-'}</span>`;
+          }
+          
+          // Build location cell
+          let location = '';
+          if (node.cca_validated) {
+            if (node.cca_inverter && node.cca_string) {
+              location = `<div class="hierarchy">${node.cca_inverter} → ${node.cca_string}</div>`;
+            } else if (node.cca_string) {
+              location = `<div class="hierarchy">${node.cca_string}</div>`;
+            }
+            if (node.cca_channel) {
+              location += `<div class="hierarchy" style="font-size:0.75rem; margin-top:0.125rem;">Channel: ${node.cca_channel}</div>`;
+            }
+          }
+          if (!location) {
+            location = '<span style="color:#bdc3c7;">-</span>';
+          }
+          
+          return `
+          <tr>
+            <td><span class="code">${node.addr}</span></td>
+            <td>${deviceInfo}</td>
+            <td>${location}</td>
+            <td>
+              ${node.sensor_index >= 0 ? 
+                `<span class="badge badge-success">Tigo ${node.sensor_index + 1}</span>` : 
+                `<span class="badge badge-warning">Unassigned</span>`}
+              ${node.cca_validated ? '<span class="badge badge-info" style="margin-left:0.5rem;">CCA ✓</span>' : ''}
+            </td>
+            <td style="text-align:center;">
+              <button onclick="deleteNode('${node.addr}')" style="padding: 0.5rem 1rem; background-color: #e74c3c; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.875rem;">
+                🗑️ Delete
+              </button>
+            </td>
+          </tr>
+        `}).join('');
+      } catch (error) {
+        console.error('Error loading data:', error);
+      }
+    }
+    
+    loadData();
+    setInterval(loadData, 10000);
+  </script>
+</body>
+</html>
