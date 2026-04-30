@@ -477,6 +477,9 @@
           <option value="stale">Stale</option>
         </select>
         <span class="table-meta" id="nodes-count" style="margin-left:auto">—</span>
+        <button class="btn" id="nodes-export-btn" title="Download node table as JSON">Export</button>
+        <button class="btn" id="nodes-import-btn" title="Restore node table from JSON file">Import</button>
+        <input type="file" id="nodes-import-file" accept=".json,application/json" style="display:none">
         <button class="btn" id="nodes-refresh-btn">Refresh</button>
       </div>
 
@@ -566,7 +569,6 @@
         </div>
       </div>
 
-      <div id="tools-toast" class="toast"></div>
     </section>
 
     <!-- DIAGNOSTICS -->
@@ -693,6 +695,9 @@
       </div>
     </section>
   </main>
+
+  <!-- Global toast (lives outside any view so it's reachable from any tab) -->
+  <div id="app-toast" class="toast"></div>
 </div>
 
 <script>
@@ -1386,6 +1391,57 @@
   });
   document.getElementById('nodes-refresh-btn').addEventListener('click', refreshNodes);
 
+  // Export — pulls current node table from /api/nodes and downloads it as JSON.
+  document.getElementById('nodes-export-btn').addEventListener('click', async () => {
+    try {
+      const r = await apiFetch('/api/nodes');
+      if (!r.ok) throw new Error('/api/nodes ' + r.status);
+      const data = await r.json();
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `node-table-${new Date().toISOString().split('T')[0]}.json`;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      showToast('Exported node table ✓', 'ok');
+    } catch (e) {
+      showToast(`Export failed: ${e.message}`, 'err');
+    }
+  });
+
+  // Import — file picker → POST /api/nodes/import → reload table.
+  document.getElementById('nodes-import-btn').addEventListener('click', () => {
+    document.getElementById('nodes-import-file').click();
+  });
+  document.getElementById('nodes-import-file').addEventListener('change', async ev => {
+    const file = ev.target.files[0];
+    ev.target.value = '';  // reset so re-picking the same file fires change
+    if (!file) return;
+    try {
+      const data = JSON.parse(await file.text());
+      if (!data.nodes || !Array.isArray(data.nodes)) {
+        throw new Error('missing "nodes" array');
+      }
+      if (!confirm(`Import ${data.nodes.length} node(s)? This replaces the current node table.`)) return;
+      const r = await apiFetch('/api/nodes/import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      });
+      if (!r.ok) {
+        let msg = `${r.status}`;
+        try { msg = (await r.json()).message || msg; } catch (_) {}
+        throw new Error(msg);
+      }
+      const result = await r.json();
+      showToast(`Imported ${result.imported || data.nodes.length} node(s) ✓`, 'ok');
+      await refreshNodes();
+    } catch (e) {
+      showToast(`Import failed: ${e.message}`, 'err');
+    }
+  });
+
   // Auto-refresh on view-switch.
   document.querySelector('#nav button[data-view="nodes"]').addEventListener('click', refreshNodes);
   if (window.location.hash === '#nodes') refreshNodes();
@@ -1596,7 +1652,7 @@
   }
 
   function showToast(msg, kind) {
-    const t = document.getElementById('tools-toast');
+    const t = document.getElementById('app-toast');
     t.textContent = msg;
     t.className = 'toast show' + (kind ? ' ' + kind : '');
     clearTimeout(t._timer);
