@@ -6,18 +6,24 @@
 
 #include "esp_timer.h"
 
+#include <cinttypes>
 #include <climits>
 #include <cmath>
+#include <cstdio>
+#include <cstring>
 
 namespace esphome {
 namespace tigo_monitor {
 
 static const char *const TAG = "tigo_history";
 
-// Encoded row pushed onto the writer queue. Layout matches the schema below.
+// Encoded row pushed onto the writer queue. Layout matches the schemas below:
+// — system_values mirror kSystemParamNames (14 entries)
+// — panel_values is laid out as [panel_db_0 first 16][panel_db_1 next 16]
 struct EncodedRow {
   uint32_t timestamp;
-  int16_t values[14];
+  int16_t system_values[14];
+  int16_t panel_values[kMaxPanelSlots];
 };
 
 // Encoders — clamp to int16 range to avoid silent wraparound on runaway sensors.
@@ -47,15 +53,41 @@ static const char *kSystemParamNames[] = {
 static constexpr size_t kSystemNumParams =
     sizeof(kSystemParamNames) / sizeof(kSystemParamNames[0]);
 
-// Cap system.tsdb at ~2 MB on the 3 MB tsdb partition; leaves ~1 MB for
-// panels.tsdb (added in a later phase).
+// Per-panel schema — same 16 names in each DB. The slot map (panel_map.json)
+// resolves slot -> barcode at the application layer; the DB just sees columns.
+static const char *kPanelParamNames[kPanelsPerDb] = {
+    "p00", "p01", "p02", "p03", "p04", "p05", "p06", "p07",
+    "p08", "p09", "p10", "p11", "p12", "p13", "p14", "p15",
+};
+
+// Cap system.tsdb at ~2 MB on the 3 MB tsdb partition; leaves ~1 MB shared
+// across the panel DBs and LittleFS overhead.
 static constexpr size_t kSystemFileBytes = 2 * 1024 * 1024;
+
+// 256 KB per panel DB × 3 DBs = 768 KB; plus 2 MB system + ~200 KB LittleFS
+// overhead fits the 3 MB partition with ~60 KB headroom. At 16 panels × 2
+// bytes + 4-byte ts = 36 B/record, this gives ~7200 records per DB ≈ 25 days
+// of 5-min data per panel — short of the design doc's 30-day target but
+// acceptable until a 16 MB hardware variant exists.
+static constexpr size_t kPanelFileBytes = 256 * 1024;
+
+static constexpr const char *kPanelMapPath = "/tsdb/panel_map.json";
 
 bool TigoHistory::init() {
   if (!mount_filesystem_())
     return false;
   if (!init_system_db_())
     return false;
+  // Panel DBs are opened lazily — load_slot_map_() will open any DBs
+  // referenced by previously-saved slot assignments, and get_or_assign_slot()
+  // opens new ones as panels appear. Empty installs commit zero panel-DB
+  // flash; large installs grow into 1, 2, or 3 DBs naturally.
+  if (!load_slot_map_()) {
+    ESP_LOGW(TAG, "Slot map load failed — starting with empty mapping");
+    slot_map_.clear();
+    for (auto &b : slot_to_barcode_) b.clear();
+    next_free_slot_ = 0;
+  }
   initialized_ = true;
   return true;
 }
@@ -99,14 +131,190 @@ bool TigoHistory::init_system_db_() {
   cfg.use_paged_allocation = false;
   cfg.page_size = 0;
 
-  esp_err_t err = tsdb_init(&cfg);
-  if (err != ESP_OK) {
-    ESP_LOGE(TAG, "tsdb_init for system.tsdb failed: %s", esp_err_to_name(err));
+  system_db_ = tsdb_open(&cfg);
+  if (system_db_ == nullptr) {
+    ESP_LOGE(TAG, "tsdb_open for system.tsdb failed");
     return false;
   }
   ESP_LOGI(TAG, "tsdb opened: system.tsdb (%zu params, capacity ~%lu records)",
            kSystemNumParams, (unsigned long) cfg.max_records);
   return true;
+}
+
+bool TigoHistory::open_panel_db_(size_t idx) {
+  if (idx >= kNumPanelDbs) return false;
+  if (panel_db_[idx] != nullptr) return true;  // already open
+
+  char path[32];
+  std::snprintf(path, sizeof(path), "/tsdb/panels%zu.tsdb", idx);
+
+  tsdb_config_t cfg = {};
+  cfg.filepath = path;
+  cfg.num_params = kPanelsPerDb;
+  cfg.param_names = kPanelParamNames;
+  cfg.max_records = TSDB_CALC_MAX_RECORDS(kPanelFileBytes, kPanelsPerDb);
+  cfg.index_stride = 380;
+  // Smaller pool than system db — each panel DB is ~3.5x smaller and reads
+  // are rare (one column at a time). 6 KB covers read+write+query buffers.
+  cfg.buffer_pool_size = 6 * 1024;
+  cfg.alloc_strategy = TSDB_ALLOC_INTERNAL_RAM;
+  cfg.use_paged_allocation = false;
+  cfg.page_size = 0;
+
+  panel_db_[idx] = tsdb_open(&cfg);
+  if (panel_db_[idx] == nullptr) {
+    ESP_LOGE(TAG, "tsdb_open for %s failed", path);
+    return false;
+  }
+  ESP_LOGI(TAG, "tsdb opened: %s (%zu panels, capacity ~%lu records)", path,
+           kPanelsPerDb, (unsigned long) cfg.max_records);
+  return true;
+}
+
+// Tiny hand-rolled JSON for the slot map — avoids pulling in a parser for
+// what's ultimately a flat list of 6-char keys to uint8 values. Format:
+//   {"slots":[{"b":"abc123","s":0},{"b":"def456","s":1}]}
+// Reads tolerate trailing commas and whitespace between tokens.
+bool TigoHistory::load_slot_map_() {
+  slot_map_.clear();
+  for (auto &b : slot_to_barcode_) b.clear();
+  next_free_slot_ = 0;
+
+  FILE *f = fopen(kPanelMapPath, "rb");
+  if (f == nullptr) {
+    ESP_LOGI(TAG, "panel_map.json absent — starting empty");
+    return true;
+  }
+
+  fseek(f, 0, SEEK_END);
+  long size = ftell(f);
+  fseek(f, 0, SEEK_SET);
+  if (size <= 0 || size > 8192) {
+    ESP_LOGW(TAG, "panel_map.json size out of bounds: %ld", size);
+    fclose(f);
+    return true;  // Fresh start
+  }
+
+  std::string buf;
+  buf.resize((size_t) size);
+  size_t read = fread(buf.data(), 1, (size_t) size, f);
+  fclose(f);
+  if (read != (size_t) size) {
+    ESP_LOGW(TAG, "panel_map.json short read");
+    return true;
+  }
+
+  // Parse {"b":"xxxxxx","s":N} pairs.
+  size_t pos = 0;
+  while (pos < buf.size()) {
+    size_t b_open = buf.find("\"b\"", pos);
+    if (b_open == std::string::npos) break;
+    size_t q1 = buf.find('"', b_open + 3);
+    if (q1 == std::string::npos) break;
+    size_t q2 = buf.find('"', q1 + 1);
+    if (q2 == std::string::npos) break;
+    std::string barcode = buf.substr(q1 + 1, q2 - q1 - 1);
+
+    size_t s_open = buf.find("\"s\"", q2);
+    if (s_open == std::string::npos) break;
+    size_t colon = buf.find(':', s_open);
+    if (colon == std::string::npos) break;
+    int slot_int = -1;
+    if (std::sscanf(buf.c_str() + colon + 1, " %d", &slot_int) != 1) break;
+
+    if (!barcode.empty() && slot_int >= 0 && slot_int < (int) kMaxPanelSlots) {
+      uint8_t slot = (uint8_t) slot_int;
+      slot_map_[barcode] = slot;
+      slot_to_barcode_[slot] = barcode;
+      if (slot >= next_free_slot_) next_free_slot_ = slot + 1;
+    }
+    pos = colon + 1;
+  }
+
+  ESP_LOGI(TAG, "Loaded %zu panel slot mappings from %s (next_free=%u)",
+           slot_map_.size(), kPanelMapPath, (unsigned) next_free_slot_);
+
+  // Re-open any panel DBs that previously-saved slots map into. Without this
+  // a query for an existing slot would race the next snapshot's lazy-open and
+  // briefly fail with -1.
+  for (uint8_t s = 0; s < next_free_slot_; ++s) {
+    if (slot_to_barcode_[s].empty()) continue;
+    open_panel_db_(s / kPanelsPerDb);
+  }
+  return true;
+}
+
+bool TigoHistory::save_slot_map_() {
+  // Atomic swap via temp file + rename — LittleFS rename is the closest we
+  // get to durability across an unexpected power loss.
+  const char *tmp_path = "/tsdb/panel_map.tmp";
+  FILE *f = fopen(tmp_path, "wb");
+  if (f == nullptr) {
+    ESP_LOGE(TAG, "Failed to open %s for write", tmp_path);
+    return false;
+  }
+
+  fputs("{\"slots\":[", f);
+  bool first = true;
+  for (uint8_t s = 0; s < kMaxPanelSlots; ++s) {
+    if (slot_to_barcode_[s].empty()) continue;
+    if (!first) fputc(',', f);
+    first = false;
+    std::fprintf(f, "{\"b\":\"%s\",\"s\":%u}", slot_to_barcode_[s].c_str(),
+                 (unsigned) s);
+  }
+  fputs("]}\n", f);
+  fflush(f);
+  fclose(f);
+
+  // POSIX rename on LittleFS deletes the dest if it exists; keeps writes
+  // atomic from the reader's perspective.
+  if (std::rename(tmp_path, kPanelMapPath) != 0) {
+    ESP_LOGE(TAG, "Failed to rename %s -> %s", tmp_path, kPanelMapPath);
+    return false;
+  }
+  return true;
+}
+
+uint8_t TigoHistory::get_or_assign_slot(const std::string &barcode_last6) {
+  if (barcode_last6.empty()) return 0xFF;
+
+  auto it = slot_map_.find(barcode_last6);
+  if (it != slot_map_.end()) return it->second;
+
+  if (next_free_slot_ >= kMaxPanelSlots) {
+    // Capacity exhausted. Caller should drop this panel's series silently.
+    return 0xFF;
+  }
+
+  uint8_t slot = next_free_slot_++;
+  slot_map_[barcode_last6] = slot;
+  slot_to_barcode_[slot] = barcode_last6;
+
+  // Lazy DB open: only commit panels<idx>.tsdb to flash when this slot's
+  // bucket actually has its first panel. Pays the ~290ms tsdb_open cost on
+  // the slot-assignment path (typically once per ~16 panels at install
+  // time), not on every snapshot.
+  open_panel_db_(slot / kPanelsPerDb);
+
+  ESP_LOGI(TAG, "Assigned panel slot %u to %s", (unsigned) slot,
+           barcode_last6.c_str());
+
+  // Synchronous save — slot assignments are infrequent (only on first sight
+  // of a barcode) and the cost of losing one is "panel rejoins as a new
+  // slot, history splits in two", which we want to avoid.
+  save_slot_map_();
+  return slot;
+}
+
+std::vector<PanelSlot> TigoHistory::snapshot_slot_map() const {
+  std::vector<PanelSlot> out;
+  out.reserve(slot_map_.size());
+  for (uint8_t s = 0; s < kMaxPanelSlots; ++s) {
+    if (slot_to_barcode_[s].empty()) continue;
+    out.push_back({slot_to_barcode_[s], s});
+  }
+  return out;
 }
 
 bool TigoHistory::start_writer_task() {
@@ -125,7 +333,9 @@ bool TigoHistory::start_writer_task() {
     return false;
   }
   // Stack 8 KB — tsdb_write + LittleFS ops + esp_log printf overflowed 4 KB
-  // in practice. Priority 1 matches the main app task, well below UART.
+  // in practice. Three back-to-back writes per drain (system + 2x panels)
+  // adds peak depth but stays well under 8 KB; soak shows ~3.5 KB hwm.
+  // Priority 1 matches the main app task, well below UART.
   BaseType_t ok = xTaskCreate(&TigoHistory::writer_task_entry_, "tsdb_writer",
                               8192, this, 1, &task_);
   if (ok != pdPASS) {
@@ -148,20 +358,24 @@ void TigoHistory::enqueue_snapshot(const SystemSnapshot &snap) {
   EncodedRow row;
   row.timestamp = snap.timestamp;
   // Order must match kSystemParamNames in init_system_db_.
-  row.values[0] = enc_w_(snap.total_p_w);
-  row.values[1] = enc_kwh_(snap.period_e_kwh);
-  row.values[2] = enc_w_(snap.inv_p_w[0]);
-  row.values[3] = enc_kwh_(snap.inv_e_kwh[0]);
-  row.values[4] = enc_w_(snap.inv_p_w[1]);
-  row.values[5] = enc_kwh_(snap.inv_e_kwh[1]);
-  row.values[6] = enc_w_(snap.inv_p_w[2]);
-  row.values[7] = enc_kwh_(snap.inv_e_kwh[2]);
-  row.values[8] = enc_w_(snap.inv_p_w[3]);
-  row.values[9] = enc_kwh_(snap.inv_e_kwh[3]);
-  row.values[10] = enc_temp_(snap.temp_avg_c);
-  row.values[11] = enc_dhz_(snap.freq_hz);
-  row.values[12] = enc_clamp_((float) snap.frames_lost);
-  row.values[13] = enc_clamp_((float) snap.wifi_rssi_dbm);
+  row.system_values[0] = enc_w_(snap.total_p_w);
+  row.system_values[1] = enc_kwh_(snap.period_e_kwh);
+  row.system_values[2] = enc_w_(snap.inv_p_w[0]);
+  row.system_values[3] = enc_kwh_(snap.inv_e_kwh[0]);
+  row.system_values[4] = enc_w_(snap.inv_p_w[1]);
+  row.system_values[5] = enc_kwh_(snap.inv_e_kwh[1]);
+  row.system_values[6] = enc_w_(snap.inv_p_w[2]);
+  row.system_values[7] = enc_kwh_(snap.inv_e_kwh[2]);
+  row.system_values[8] = enc_w_(snap.inv_p_w[3]);
+  row.system_values[9] = enc_kwh_(snap.inv_e_kwh[3]);
+  row.system_values[10] = enc_temp_(snap.temp_avg_c);
+  row.system_values[11] = enc_dhz_(snap.freq_hz);
+  row.system_values[12] = enc_clamp_((float) snap.frames_lost);
+  row.system_values[13] = enc_clamp_((float) snap.wifi_rssi_dbm);
+
+  for (size_t i = 0; i < kMaxPanelSlots; ++i) {
+    row.panel_values[i] = enc_w_(snap.panel_p_w[i]);
+  }
 
   // Non-blocking. If the queue is full, drop the sample with a warning.
   if (xQueueSend(queue_, &row, 0) != pdTRUE) {
@@ -181,9 +395,9 @@ int TigoHistory::iterate_power(uint32_t start_ts, uint32_t end_ts,
   // versus reading the full 14-param row.
   uint8_t cols[] = {0, 1};
   tsdb_query_t q;
-  esp_err_t err = tsdb_query_init(&q, start_ts, end_ts, cols, 2);
+  esp_err_t err = tsdb_query_init_h(system_db_, &q, start_ts, end_ts, cols, 2);
   if (err != ESP_OK) {
-    ESP_LOGW(TAG, "tsdb_query_init failed: %s", esp_err_to_name(err));
+    ESP_LOGW(TAG, "tsdb_query_init_h failed: %s", esp_err_to_name(err));
     return -1;
   }
 
@@ -194,6 +408,37 @@ int TigoHistory::iterate_power(uint32_t start_ts, uint32_t end_ts,
   int16_t values[kSystemNumParams] = {0};
   while (tsdb_query_next(&q, &ts, values) == ESP_OK) {
     cb(ts, values[0], values[1]);
+    ++count;
+  }
+  tsdb_query_close(&q);
+  return count;
+}
+
+int TigoHistory::iterate_panel(uint8_t slot, uint32_t start_ts, uint32_t end_ts,
+                               const PanelRowCb &cb) {
+  if (!initialized_) return -1;
+  if (slot >= kMaxPanelSlots) return -1;
+  if (end_ts < start_ts) return 0;
+
+  size_t db_idx = slot / kPanelsPerDb;
+  uint8_t col = slot % kPanelsPerDb;
+  if (panel_db_[db_idx] == nullptr) return -1;
+
+  tsdb_query_t q;
+  uint8_t cols[] = {col};
+  esp_err_t err =
+      tsdb_query_init_h(panel_db_[db_idx], &q, start_ts, end_ts, cols, 1);
+  if (err != ESP_OK) {
+    ESP_LOGW(TAG, "panel %u tsdb_query_init_h failed: %s", (unsigned) slot,
+             esp_err_to_name(err));
+    return -1;
+  }
+
+  int count = 0;
+  uint32_t ts = 0;
+  int16_t values[kPanelsPerDb] = {0};
+  while (tsdb_query_next(&q, &ts, values) == ESP_OK) {
+    cb(ts, values[0]);
     ++count;
   }
   tsdb_query_close(&q);
@@ -211,16 +456,37 @@ void TigoHistory::writer_task_loop_() {
       continue;
     }
     uint32_t t0 = (uint32_t) (esp_timer_get_time() / 1000);
-    esp_err_t err = tsdb_write(row.timestamp, row.values);
-    uint32_t dt = (uint32_t) (esp_timer_get_time() / 1000) - t0;
+
+    esp_err_t err = tsdb_write_h(system_db_, row.timestamp, row.system_values);
+    uint32_t t_sys = (uint32_t) (esp_timer_get_time() / 1000) - t0;
+
+    // Panel writes happen back-to-back. A single failure on one DB shouldn't
+    // skip the others — keep going so we lose at most one DB's data per row.
+    uint32_t panel_total_ms = 0;
+    for (size_t i = 0; i < kNumPanelDbs; ++i) {
+      if (panel_db_[i] == nullptr) continue;
+      uint32_t ti = (uint32_t) (esp_timer_get_time() / 1000);
+      esp_err_t perr = tsdb_write_h(panel_db_[i], row.timestamp,
+                                    row.panel_values + i * kPanelsPerDb);
+      uint32_t dt = (uint32_t) (esp_timer_get_time() / 1000) - ti;
+      panel_total_ms += dt;
+      if (perr != ESP_OK) {
+        ESP_LOGW(TAG, "panels%zu write @ %lu failed after %u ms: %s", i,
+                 (unsigned long) row.timestamp, (unsigned) dt,
+                 esp_err_to_name(perr));
+      }
+    }
+
     UBaseType_t hwm = uxTaskGetStackHighWaterMark(nullptr);
     if (err != ESP_OK) {
       ESP_LOGW(TAG, "tsdb_write @ %lu failed after %u ms: %s (stack hwm %u B)",
-               (unsigned long) row.timestamp, (unsigned) dt,
+               (unsigned long) row.timestamp, (unsigned) t_sys,
                esp_err_to_name(err), (unsigned) (hwm * sizeof(StackType_t)));
     } else {
-      ESP_LOGD(TAG, "tsdb_write @ %lu ok in %u ms (stack hwm %u B free)",
-               (unsigned long) row.timestamp, (unsigned) dt,
+      ESP_LOGD(TAG,
+               "tsdb_write @ %lu ok (sys %u ms, panels %u ms, stack hwm %u B)",
+               (unsigned long) row.timestamp, (unsigned) t_sys,
+               (unsigned) panel_total_ms,
                (unsigned) (hwm * sizeof(StackType_t)));
     }
   }

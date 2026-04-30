@@ -152,7 +152,7 @@ void TigoWebServer::setup() {
   httpd_config_t config = HTTPD_DEFAULT_CONFIG();
   config.server_port = port_;
   config.ctrl_port = port_ + 1;
-  config.max_uri_handlers = 25;  // Increased for log endpoints
+  config.max_uri_handlers = 28;  // Increased for log + history endpoints (panels, panel history)
   config.stack_size = 8192;
   config.lru_purge_enable = true;  // Enable LRU purging of connections
   config.max_open_sockets = 4;     // Limit concurrent connections to reduce memory
@@ -363,6 +363,22 @@ void TigoWebServer::setup() {
       .user_ctx = this
     };
     httpd_register_uri_handler(server_, &api_history_power_uri);
+
+    httpd_uri_t api_history_panel_uri = {
+      .uri = "/api/history/panel",
+      .method = HTTP_GET,
+      .handler = api_history_panel_handler,
+      .user_ctx = this
+    };
+    httpd_register_uri_handler(server_, &api_history_panel_uri);
+
+    httpd_uri_t api_panels_uri = {
+      .uri = "/api/panels",
+      .method = HTTP_GET,
+      .handler = api_panels_handler,
+      .user_ctx = this
+    };
+    httpd_register_uri_handler(server_, &api_panels_uri);
 #endif
 
     // Log web authentication status
@@ -4379,6 +4395,212 @@ esp_err_t TigoWebServer::api_history_power_handler(httpd_req_t *req) {
   json.append(tmp);
   if (n < 0)
     json.append(",\"error\":\"query failed\"");
+  json.append("}");
+
+  httpd_resp_set_type(req, "application/json");
+  httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+  httpd_resp_send(req, json.c_str(), json.length());
+  return ESP_OK;
+}
+
+esp_err_t TigoWebServer::api_history_panel_handler(httpd_req_t *req) {
+  TigoWebServer *server = static_cast<TigoWebServer *>(req->user_ctx);
+  if (!server->check_api_auth(req))
+    return ESP_OK;
+
+  if (server->parent_ == nullptr) {
+    httpd_resp_set_status(req, "503 Service Unavailable");
+    httpd_resp_sendstr(req, "{\"error\":\"monitor not bound\"}");
+    return ESP_OK;
+  }
+  tigo_monitor::TigoHistory *hist = server->parent_->get_history();
+  if (hist == nullptr || !hist->initialized()) {
+    httpd_resp_set_status(req, "503 Service Unavailable");
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, "{\"error\":\"history not initialized\"}");
+    return ESP_OK;
+  }
+
+  // Parse slot (required) + range (optional, default day).
+  int slot_int = -1;
+  uint32_t window_seconds = 24 * 3600;
+  const char *range_label = "day";
+  char query_buf[64] = {0};
+  if (httpd_req_get_url_query_str(req, query_buf, sizeof(query_buf)) == ESP_OK) {
+    char slot_str[8] = {0};
+    if (httpd_query_key_value(query_buf, "slot", slot_str, sizeof(slot_str)) == ESP_OK) {
+      slot_int = atoi(slot_str);
+    }
+    char range[16] = {0};
+    if (httpd_query_key_value(query_buf, "range", range, sizeof(range)) == ESP_OK) {
+      if (strcmp(range, "week") == 0) {
+        window_seconds = 7UL * 24 * 3600;
+        range_label = "week";
+      } else if (strcmp(range, "month") == 0) {
+        window_seconds = 30UL * 24 * 3600;
+        range_label = "month";
+      } else if (strcmp(range, "year") == 0) {
+        window_seconds = 365UL * 24 * 3600;
+        range_label = "year";
+      } else if (strcmp(range, "day") != 0) {
+        httpd_resp_set_status(req, "400 Bad Request");
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_sendstr(req, "{\"error\":\"range must be day|week|month|year\"}");
+        return ESP_OK;
+      }
+    }
+  }
+
+  if (slot_int < 0 || slot_int >= (int) tigo_monitor::kMaxPanelSlots) {
+    httpd_resp_set_status(req, "400 Bad Request");
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, "{\"error\":\"slot must be 0..47\"}");
+    return ESP_OK;
+  }
+
+  uint32_t now_ts = (uint32_t) ::time(nullptr);
+  if (now_ts < 1577836800u /* 2020-01-01 */) {
+    httpd_resp_set_status(req, "503 Service Unavailable");
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, "{\"error\":\"system clock not set\"}");
+    return ESP_OK;
+  }
+  uint32_t start_ts = (now_ts > window_seconds) ? (now_ts - window_seconds) : 0;
+
+  PSRAMString json;
+  char tmp[96];
+  json.append("{\"slot\":");
+  snprintf(tmp, sizeof(tmp), "%d", slot_int);
+  json.append(tmp);
+  json.append(",\"range\":\"");
+  json.append(range_label);
+  json.append("\",\"start\":");
+  snprintf(tmp, sizeof(tmp), "%lu", (unsigned long) start_ts);
+  json.append(tmp);
+  json.append(",\"end\":");
+  snprintf(tmp, sizeof(tmp), "%lu", (unsigned long) now_ts);
+  json.append(tmp);
+  json.append(",\"records\":[");
+
+  bool first = true;
+  constexpr size_t kMaxBytes = 1u << 20;
+  uint32_t t0_ms = (uint32_t) (esp_timer_get_time() / 1000);
+  int n = hist->iterate_panel((uint8_t) slot_int, start_ts, now_ts,
+      [&](uint32_t ts, int16_t power_w) {
+        if (json.length() > kMaxBytes)
+          return;
+        if (!first)
+          json.append(",");
+        first = false;
+        char row[48];
+        snprintf(row, sizeof(row), "{\"t\":%lu,\"p\":%d}",
+                 (unsigned long) ts, (int) power_w);
+        json.append(row);
+      });
+  uint32_t dt_ms = (uint32_t) (esp_timer_get_time() / 1000) - t0_ms;
+
+  json.append("],\"count\":");
+  snprintf(tmp, sizeof(tmp), "%d", (n < 0) ? 0 : n);
+  json.append(tmp);
+  json.append(",\"query_ms\":");
+  snprintf(tmp, sizeof(tmp), "%u", (unsigned) dt_ms);
+  json.append(tmp);
+  if (n < 0)
+    json.append(",\"error\":\"query failed\"");
+  json.append("}");
+
+  httpd_resp_set_type(req, "application/json");
+  httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+  httpd_resp_send(req, json.c_str(), json.length());
+  return ESP_OK;
+}
+
+esp_err_t TigoWebServer::api_panels_handler(httpd_req_t *req) {
+  TigoWebServer *server = static_cast<TigoWebServer *>(req->user_ctx);
+  if (!server->check_api_auth(req))
+    return ESP_OK;
+
+  if (server->parent_ == nullptr) {
+    httpd_resp_set_status(req, "503 Service Unavailable");
+    httpd_resp_sendstr(req, "{\"error\":\"monitor not bound\"}");
+    return ESP_OK;
+  }
+  tigo_monitor::TigoHistory *hist = server->parent_->get_history();
+  if (hist == nullptr || !hist->initialized()) {
+    httpd_resp_set_status(req, "503 Service Unavailable");
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, "{\"error\":\"history not initialized\"}");
+    return ESP_OK;
+  }
+
+  // Build a barcode-suffix -> NodeTableData lookup so we can attach friendly
+  // names from CCA metadata to each slot. node_table_ keys are 16-char
+  // long_addresses; the slot map keys on the last 6 chars of the barcode.
+  auto nodes = server->parent_->snapshot_node_table();
+  std::unordered_map<std::string, const tigo_monitor::NodeTableData *> by_suffix;
+  for (const auto &n : nodes) {
+    if (n.long_address.size() >= 6) {
+      by_suffix[n.long_address.substr(n.long_address.size() - 6)] = &n;
+    }
+  }
+
+  std::vector<tigo_monitor::PanelSlot> slots = hist->snapshot_slot_map();
+
+  PSRAMString json;
+  json.append("{\"slots\":[");
+  bool first = true;
+  for (const auto &s : slots) {
+    if (!first) json.append(",");
+    first = false;
+    char row[256];
+    const tigo_monitor::NodeTableData *node = nullptr;
+    auto it = by_suffix.find(s.barcode_last6);
+    if (it != by_suffix.end()) node = it->second;
+
+    // CCA labels can contain quotes/backslashes — escape them. Most installs
+    // won't, but better to be defensive than to break the parse.
+    auto json_escape = [](const std::string &in) {
+      std::string out;
+      out.reserve(in.size());
+      for (char c : in) {
+        if (c == '"' || c == '\\') {
+          out.push_back('\\');
+          out.push_back(c);
+        } else if ((unsigned char) c < 0x20) {
+          // Drop control chars rather than emit \u escapes.
+          continue;
+        } else {
+          out.push_back(c);
+        }
+      }
+      return out;
+    };
+
+    snprintf(row, sizeof(row),
+             "{\"slot\":%u,\"barcode\":\"%s\"",
+             (unsigned) s.slot, s.barcode_last6.c_str());
+    json.append(row);
+    if (node != nullptr) {
+      std::string label = json_escape(node->cca_label);
+      std::string mppt = json_escape(node->cca_inverter_label);
+      std::string str_lbl = json_escape(node->cca_string_label);
+      json.append(",\"label\":\"");
+      json.append(label.c_str());
+      json.append("\",\"mppt\":\"");
+      json.append(mppt.c_str());
+      json.append("\",\"string\":\"");
+      json.append(str_lbl.c_str());
+      json.append("\"");
+    }
+    json.append("}");
+  }
+  json.append("],\"count\":");
+  char tmp[16];
+  snprintf(tmp, sizeof(tmp), "%zu", slots.size());
+  json.append(tmp);
+  json.append(",\"max_slots\":");
+  snprintf(tmp, sizeof(tmp), "%zu", tigo_monitor::kMaxPanelSlots);
+  json.append(tmp);
   json.append("}");
 
   httpd_resp_set_type(req, "application/json");

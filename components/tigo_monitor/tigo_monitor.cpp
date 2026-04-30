@@ -3376,6 +3376,17 @@ void TigoMonitorComponent::snapshot_to_history_() {
     snap.frames_lost = (uint16_t) std::min<uint32_t>(lost_period, UINT16_MAX);
     last_snapshot_frames_lost_ = lost_now;
     snap.wifi_rssi_dbm = 0;  // TODO: plumb through wifi::global_wifi_component
+
+    // Per-panel powers indexed by stable slot. Devices without a known
+    // barcode (typically: just-joined nodes that haven't reported a frame 27
+    // yet) are skipped — they'll get a slot assignment on the next snapshot.
+    for (const auto &d : devices_) {
+      if (d.barcode.size() < 6) continue;
+      std::string key = d.barcode.substr(d.barcode.size() - 6);
+      uint8_t slot = history_.get_or_assign_slot(key);
+      if (slot >= kMaxPanelSlots) continue;  // table full
+      snap.panel_p_w[slot] = d.power_in;
+    }
   }
 
   history_.enqueue_snapshot(snap);
