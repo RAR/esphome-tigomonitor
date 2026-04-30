@@ -99,6 +99,16 @@ class TigoHistory {
 
   bool initialized() const { return initialized_; }
 
+  // Direct handle access for diagnostic endpoints (e.g. /api/tsdb/stats).
+  // Caller must not close these — TigoHistory owns the lifecycle.
+  tsdb_t *system_db() const { return system_db_; }
+  tsdb_t *panel_db(size_t idx) const {
+    return idx < kNumPanelDbs ? panel_db_[idx] : nullptr;
+  }
+  size_t panel_db_count() const { return kNumPanelDbs; }
+  size_t slot_count() const { return slot_map_.size(); }
+  uint8_t next_free_slot() const { return next_free_slot_; }
+
  private:
   static void writer_task_entry_(void *arg);
   void writer_task_loop_();

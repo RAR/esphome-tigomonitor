@@ -102,6 +102,7 @@ class TigoWebServer : public Component {
   static esp_err_t api_history_power_handler(httpd_req_t *req);
   static esp_err_t api_history_panel_handler(httpd_req_t *req);
   static esp_err_t api_panels_handler(httpd_req_t *req);
+  static esp_err_t api_tsdb_stats_handler(httpd_req_t *req);
 #endif
   
   // Helper functions
@@ -109,7 +110,6 @@ class TigoWebServer : public Component {
   bool check_web_auth(httpd_req_t *req);
   tigo_monitor::TigoMonitorComponent *get_parent_from_req(httpd_req_t *req);
   void get_dashboard_html(PSRAMString& html);
-  void get_esp_status_html(PSRAMString& html);
   void get_yaml_config_html(PSRAMString& html);
   void get_cca_info_html(PSRAMString& html);
   void get_app_html(PSRAMString& html);

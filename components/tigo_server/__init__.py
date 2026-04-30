@@ -43,7 +43,8 @@ CONFIG_SCHEMA = cv.Schema({
 # Pages retired into the SPA still live as 302 redirects to /app#<view>:
 #   - 'history' (R3) — see history_handler
 #   - 'nodes'   (R4) — see node_table_handler
-WEB_PAGES = ['dashboard', 'status', 'yaml', 'cca', 'app']
+#   - 'status'  (R5) — see esp_status_handler (renamed to /app#diagnostics)
+WEB_PAGES = ['dashboard', 'yaml', 'cca', 'app']
 TOKEN_PLACEHOLDER = '__TIGO_API_TOKEN__'
 
 

@@ -153,7 +153,7 @@ void TigoWebServer::setup() {
   httpd_config_t config = HTTPD_DEFAULT_CONFIG();
   config.server_port = port_;
   config.ctrl_port = port_ + 1;
-  config.max_uri_handlers = 31;  // log + history endpoints + /history + /app SPA
+  config.max_uri_handlers = 32;  // + /api/tsdb/stats for the SPA diagnostics view
   config.stack_size = 8192;
   config.lru_purge_enable = true;  // Enable LRU purging of connections
   config.max_open_sockets = 4;     // Limit concurrent connections to reduce memory
@@ -396,6 +396,14 @@ void TigoWebServer::setup() {
       .user_ctx = this
     };
     httpd_register_uri_handler(server_, &api_panels_uri);
+
+    httpd_uri_t api_tsdb_stats_uri = {
+      .uri = "/api/tsdb/stats",
+      .method = HTTP_GET,
+      .handler = api_tsdb_stats_handler,
+      .user_ctx = this
+    };
+    httpd_register_uri_handler(server_, &api_tsdb_stats_uri);
 #endif
 
     // Log web authentication status
@@ -640,21 +648,14 @@ esp_err_t TigoWebServer::node_table_handler(httpd_req_t *req) {
 }
 
 esp_err_t TigoWebServer::esp_status_handler(httpd_req_t *req) {
-  TigoWebServer *server = static_cast<TigoWebServer *>(req->user_ctx);
-  
-  // Check web authentication
-  if (!server->check_web_auth(req)) {
-    return ESP_OK;
-  }
-  
-  PSRAMString html;
-  server->get_esp_status_html(html);
-  
+  // /status is now a redirect into the SPA's Diagnostics view (R5). The
+  // /api/status endpoint stays live and is consumed there alongside the
+  // new /api/tsdb/stats data.
+  httpd_resp_set_status(req, "302 Found");
+  httpd_resp_set_hdr(req, "Location", "/app#diagnostics");
   httpd_resp_set_type(req, "text/html");
-  httpd_resp_set_hdr(req, "Connection", "close");
-  esp_err_t result = httpd_resp_send(req, html.c_str(), html.length());
-  
-  return result;
+  const char *body = "<a href=\"/app#diagnostics\">/app#diagnostics</a>";
+  return httpd_resp_send(req, body, HTTPD_RESP_USE_STRLEN);
 }
 
 esp_err_t TigoWebServer::history_handler(httpd_req_t *req) {
@@ -2011,12 +2012,6 @@ void TigoWebServer::get_dashboard_html(PSRAMString& html) {
   html.append(DASHBOARD_HTML_POST);
 }
 
-void TigoWebServer::get_esp_status_html(PSRAMString& html) {
-  html.append(STATUS_HTML_PRE);
-  html.append(api_token_);
-  html.append(STATUS_HTML_POST);
-}
-
 void TigoWebServer::get_yaml_config_html(PSRAMString& html) {
   html.append(YAML_HTML_PRE);
   html.append(api_token_);
@@ -2453,6 +2448,93 @@ esp_err_t TigoWebServer::api_panels_handler(httpd_req_t *req) {
   snprintf(tmp, sizeof(tmp), "%zu", tigo_monitor::kMaxPanelSlots);
   json.append(tmp);
   json.append("}");
+
+  httpd_resp_set_type(req, "application/json");
+  httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+  httpd_resp_send(req, json.c_str(), json.length());
+  return ESP_OK;
+}
+
+esp_err_t TigoWebServer::api_tsdb_stats_handler(httpd_req_t *req) {
+  TigoWebServer *server = static_cast<TigoWebServer *>(req->user_ctx);
+  if (!server->check_api_auth(req)) return ESP_OK;
+
+  if (server->parent_ == nullptr) {
+    httpd_resp_set_status(req, "503 Service Unavailable");
+    httpd_resp_sendstr(req, "{\"error\":\"monitor not bound\"}");
+    return ESP_OK;
+  }
+  tigo_monitor::TigoHistory *hist = server->parent_->get_history();
+  if (hist == nullptr || !hist->initialized()) {
+    httpd_resp_set_status(req, "503 Service Unavailable");
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, "{\"error\":\"history not initialized\"}");
+    return ESP_OK;
+  }
+
+  PSRAMString json;
+  char buf[160];
+
+  // LittleFS partition info — denominator for "how full is /tsdb".
+  size_t fs_total = 0, fs_used = 0;
+  esp_littlefs_info("tsdb", &fs_total, &fs_used);
+
+  json.append("{\"littlefs\":{\"total\":");
+  snprintf(buf, sizeof(buf), "%zu", fs_total); json.append(buf);
+  json.append(",\"used\":");
+  snprintf(buf, sizeof(buf), "%zu", fs_used); json.append(buf);
+  json.append("},\"slots\":{\"used\":");
+  snprintf(buf, sizeof(buf), "%zu", hist->slot_count()); json.append(buf);
+  json.append(",\"next_free\":");
+  snprintf(buf, sizeof(buf), "%u", (unsigned) hist->next_free_slot()); json.append(buf);
+  json.append(",\"max\":");
+  snprintf(buf, sizeof(buf), "%zu", tigo_monitor::kMaxPanelSlots); json.append(buf);
+  json.append("},\"databases\":[");
+
+  // Per-DB stats. tsdb_get_stats_h returns ESP_ERR_INVALID_STATE for nullptr,
+  // so we skip lazy-unopened panel DBs (which is the right behavior — they
+  // have nothing to report yet).
+  auto append_db = [&](const char *label, tsdb_t *db, bool first) {
+    if (db == nullptr) return;
+    tsdb_stats_t stats = {};
+    if (tsdb_get_stats_h(db, &stats) != ESP_OK) return;
+    if (!first) json.append(",");
+    json.append("{\"label\":\"");
+    json.append(label);
+    json.append("\",\"records\":");
+    snprintf(buf, sizeof(buf), "%lu", (unsigned long) stats.total_records); json.append(buf);
+    json.append(",\"max_records\":");
+    snprintf(buf, sizeof(buf), "%lu", (unsigned long) stats.max_records); json.append(buf);
+    json.append(",\"writes\":");
+    snprintf(buf, sizeof(buf), "%lu", (unsigned long) stats.total_writes); json.append(buf);
+    json.append(",\"evictions\":");
+    snprintf(buf, sizeof(buf), "%lu", (unsigned long) stats.total_evictions); json.append(buf);
+    json.append(",\"oldest_ts\":");
+    snprintf(buf, sizeof(buf), "%lu", (unsigned long) stats.oldest_timestamp); json.append(buf);
+    json.append(",\"newest_ts\":");
+    snprintf(buf, sizeof(buf), "%lu", (unsigned long) stats.newest_timestamp); json.append(buf);
+    json.append(",\"size_bytes\":");
+    snprintf(buf, sizeof(buf), "%lu", (unsigned long) stats.storage_bytes); json.append(buf);
+    json.append(",\"params\":");
+    snprintf(buf, sizeof(buf), "%u", (unsigned) stats.num_params); json.append(buf);
+    json.append("}");
+  };
+
+  bool first = true;
+  if (hist->system_db() != nullptr) {
+    append_db("system", hist->system_db(), first);
+    first = false;
+  }
+  for (size_t i = 0; i < hist->panel_db_count(); ++i) {
+    tsdb_t *db = hist->panel_db(i);
+    if (db == nullptr) continue;
+    char label[16];
+    snprintf(label, sizeof(label), "panels%zu", i);
+    append_db(label, db, first);
+    first = false;
+  }
+
+  json.append("]}");
 
   httpd_resp_set_type(req, "application/json");
   httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");

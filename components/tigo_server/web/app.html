@@ -486,12 +486,111 @@
     <section class="view" id="view-diagnostics">
       <div class="topbar">
         <h1>Diagnostics</h1>
-        <div class="topbar-meta">ESP32 health · TSDB stats</div>
+        <div class="topbar-meta" id="diag-meta">—</div>
       </div>
-      <div class="placeholder">
-        <div class="placeholder-title">Diagnostics view — coming in R5</div>
-        <div>Heap · stack · WiFi · TSDB file sizes &amp; write counts</div>
-        <div style="margin-top:12px"><a class="placeholder-link" href="./status" id="link-status">Use today's /status page →</a></div>
+
+      <div class="section-head">
+        <div class="section-title">Memory</div>
+        <div class="section-sub" id="diag-mem-sub">heap · psram</div>
+      </div>
+      <div class="hist-stat-grid">
+        <div class="hist-stat-card">
+          <div class="hist-stat-label">Internal RAM free</div>
+          <div class="hist-stat-val" id="diag-heap-free">—<span class="hist-stat-unit">KB</span></div>
+          <div class="hist-stat-sub" id="diag-heap-sub">…</div>
+        </div>
+        <div class="hist-stat-card">
+          <div class="hist-stat-label">Internal RAM min</div>
+          <div class="hist-stat-val" id="diag-heap-min">—<span class="hist-stat-unit">KB</span></div>
+          <div class="hist-stat-sub">lifetime low water</div>
+        </div>
+        <div class="hist-stat-card">
+          <div class="hist-stat-label">PSRAM free</div>
+          <div class="hist-stat-val" id="diag-psram-free">—<span class="hist-stat-unit">KB</span></div>
+          <div class="hist-stat-sub" id="diag-psram-sub">…</div>
+        </div>
+        <div class="hist-stat-card">
+          <div class="hist-stat-label">Internal temp</div>
+          <div class="hist-stat-val" id="diag-temp">—<span class="hist-stat-unit">°C</span></div>
+          <div class="hist-stat-sub">on-chip sensor</div>
+        </div>
+      </div>
+
+      <div class="section-head">
+        <div class="section-title">Network &amp; uptime</div>
+        <div class="section-sub" id="diag-net-sub">—</div>
+      </div>
+      <div class="hist-stat-grid">
+        <div class="hist-stat-card">
+          <div class="hist-stat-label">Uptime</div>
+          <div class="hist-stat-val" id="diag-uptime">—</div>
+          <div class="hist-stat-sub" id="diag-uptime-sub">since boot</div>
+        </div>
+        <div class="hist-stat-card">
+          <div class="hist-stat-label">WiFi RSSI</div>
+          <div class="hist-stat-val" id="diag-rssi">—<span class="hist-stat-unit">dBm</span></div>
+          <div class="hist-stat-sub" id="diag-ssid">—</div>
+        </div>
+        <div class="hist-stat-card">
+          <div class="hist-stat-label">IP address</div>
+          <div class="hist-stat-val" id="diag-ip" style="font-size:18px;font-family:ui-monospace,Menlo,monospace">—</div>
+          <div class="hist-stat-sub" id="diag-mac" style="font-family:ui-monospace,Menlo,monospace">—</div>
+        </div>
+        <div class="hist-stat-card">
+          <div class="hist-stat-label">Active sockets</div>
+          <div class="hist-stat-val" id="diag-sockets">—<span class="hist-stat-unit" id="diag-sockets-of">/ —</span></div>
+          <div class="hist-stat-sub" id="diag-tasks">— FreeRTOS tasks</div>
+        </div>
+      </div>
+
+      <div class="section-head">
+        <div class="section-title">UART telemetry</div>
+        <div class="section-sub" id="diag-uart-sub">—</div>
+      </div>
+      <div class="hist-stat-grid">
+        <div class="hist-stat-card">
+          <div class="hist-stat-label">Frames processed</div>
+          <div class="hist-stat-val" id="diag-frames">—</div>
+          <div class="hist-stat-sub" id="diag-frames-sub">since boot</div>
+        </div>
+        <div class="hist-stat-card">
+          <div class="hist-stat-label">Frames missed</div>
+          <div class="hist-stat-val" id="diag-frames-missed">—</div>
+          <div class="hist-stat-sub" id="diag-frames-rate">— miss rate</div>
+        </div>
+        <div class="hist-stat-card">
+          <div class="hist-stat-label">Bad checksums</div>
+          <div class="hist-stat-val" id="diag-bad-cks">—</div>
+          <div class="hist-stat-sub">CRC failures</div>
+        </div>
+        <div class="hist-stat-card">
+          <div class="hist-stat-label">ESPHome version</div>
+          <div class="hist-stat-val" id="diag-version" style="font-size:18px">—</div>
+          <div class="hist-stat-sub" id="diag-built">—</div>
+        </div>
+      </div>
+
+      <div class="section-head">
+        <div class="section-title">Time-series database</div>
+        <div class="section-sub" id="diag-tsdb-sub">—</div>
+      </div>
+      <div class="table-wrap">
+        <table class="nodes">
+          <thead>
+            <tr>
+              <th>Database</th>
+              <th class="num">Records</th>
+              <th class="num">Max</th>
+              <th class="num">Writes</th>
+              <th class="num">Evictions</th>
+              <th class="num">Size (KB)</th>
+              <th>Range</th>
+            </tr>
+          </thead>
+          <tbody id="diag-tsdb-tbody">
+            <tr><td colspan="7" style="text-align:center;color:var(--text-faint);padding:32px 0">Loading TSDB stats…</td></tr>
+          </tbody>
+        </table>
       </div>
     </section>
 
@@ -1207,6 +1306,125 @@
   // Light auto-refresh every 10 s while view is active so V/I/W stay live.
   setInterval(() => {
     if (document.getElementById('view-nodes').classList.contains('active')) refreshNodes();
+  }, 10000);
+
+  // ============================================================
+  // R5 — Diagnostics view
+  // ============================================================
+
+  function fmtUptime(sec) {
+    if (sec < 60) return `${sec}s`;
+    if (sec < 3600) return `${Math.floor(sec / 60)}m ${sec % 60}s`;
+    if (sec < 86400) return `${Math.floor(sec / 3600)}h ${Math.floor((sec % 3600) / 60)}m`;
+    return `${Math.floor(sec / 86400)}d ${Math.floor((sec % 86400) / 3600)}h`;
+  }
+
+  function fmtKB(bytes) {
+    return (bytes / 1024).toFixed(1);
+  }
+
+  function fmtTimestamp(epochSec) {
+    if (!epochSec) return '—';
+    return new Date(epochSec * 1000).toLocaleString();
+  }
+
+  async function refreshDiagnostics() {
+    if (!document.getElementById('view-diagnostics').classList.contains('active')) return;
+    try {
+      const [statusR, tsdbR] = await Promise.all([
+        apiFetch('/api/status'),
+        apiFetch('/api/tsdb/stats'),
+      ]);
+      if (!statusR.ok) throw new Error('/api/status ' + statusR.status);
+      const status = await statusR.json();
+
+      // Memory
+      document.getElementById('diag-heap-free').innerHTML =
+        `${fmtKB(status.free_heap)}<span class="hist-stat-unit">KB</span>`;
+      document.getElementById('diag-heap-sub').textContent =
+        `${(100 * status.free_heap / status.total_heap).toFixed(1)}% of ${fmtKB(status.total_heap)} KB`;
+      document.getElementById('diag-heap-min').innerHTML =
+        `${fmtKB(status.min_free_heap)}<span class="hist-stat-unit">KB</span>`;
+      document.getElementById('diag-psram-free').innerHTML =
+        `${fmtKB(status.free_psram)}<span class="hist-stat-unit">KB</span>`;
+      document.getElementById('diag-psram-sub').textContent =
+        `${(100 * status.free_psram / status.total_psram).toFixed(1)}% of ${fmtKB(status.total_psram)} KB`;
+      document.getElementById('diag-temp').innerHTML =
+        `${(status.internal_temp || 0).toFixed(1)}<span class="hist-stat-unit">°C</span>`;
+
+      // Network / uptime
+      document.getElementById('diag-uptime').innerHTML = fmtUptime(status.uptime_sec || 0);
+      document.getElementById('diag-uptime-sub').textContent =
+        `${status.uptime_days || 0}d ${status.uptime_hours || 0}h ${status.uptime_mins || 0}m`;
+      document.getElementById('diag-rssi').innerHTML =
+        `${status.wifi_rssi}<span class="hist-stat-unit">dBm</span>`;
+      document.getElementById('diag-ssid').textContent = status.wifi_ssid || '—';
+      document.getElementById('diag-ip').textContent = status.ip_address || '—';
+      document.getElementById('diag-mac').textContent = status.mac_address || '—';
+      document.getElementById('diag-sockets').textContent = status.active_sockets ?? '—';
+      document.getElementById('diag-sockets-of').textContent = ` / ${status.max_sockets ?? '—'}`;
+      document.getElementById('diag-tasks').textContent = `${status.task_count || 0} FreeRTOS tasks`;
+
+      // UART telemetry
+      const total = status.total_frames || 0;
+      const missed = status.missed_frames || 0;
+      const rate = total > 0 ? (100 * missed / total) : 0;
+      document.getElementById('diag-frames').textContent = total.toLocaleString();
+      document.getElementById('diag-frames-missed').textContent = missed.toLocaleString();
+      document.getElementById('diag-frames-rate').textContent =
+        `${rate.toFixed(2)}% miss rate`;
+      document.getElementById('diag-bad-cks').textContent =
+        (status.invalid_checksum ?? 0).toLocaleString();
+      document.getElementById('diag-version').textContent = status.esphome_version || '—';
+      document.getElementById('diag-built').textContent =
+        status.compilation_time ? `built ${status.compilation_time}` : '—';
+
+      // TSDB
+      const tbody = document.getElementById('diag-tsdb-tbody');
+      const sub = document.getElementById('diag-tsdb-sub');
+      if (tsdbR.ok) {
+        const t = await tsdbR.json();
+        const fsPct = t.littlefs && t.littlefs.total > 0
+          ? (100 * t.littlefs.used / t.littlefs.total).toFixed(1)
+          : '—';
+        sub.textContent =
+          `LittleFS ${fmtKB(t.littlefs.used)} / ${fmtKB(t.littlefs.total)} KB (${fsPct}%) · ` +
+          `${t.slots.used}/${t.slots.max} slots assigned`;
+        let html = '';
+        for (const db of (t.databases || [])) {
+          const range = db.oldest_ts > 0
+            ? `${fmtTimestamp(db.oldest_ts)} → ${fmtTimestamp(db.newest_ts)}`
+            : '—';
+          html += `<tr>
+            <td><strong>${db.label}</strong> <span class="mono">(${db.params}p)</span></td>
+            <td class="num">${db.records.toLocaleString()}</td>
+            <td class="num">${db.max_records.toLocaleString()}</td>
+            <td class="num">${db.writes.toLocaleString()}</td>
+            <td class="num">${db.evictions.toLocaleString()}</td>
+            <td class="num">${fmtKB(db.size_bytes)}</td>
+            <td class="mono" style="color:var(--text-dim)">${range}</td>
+          </tr>`;
+        }
+        tbody.innerHTML = html ||
+          '<tr><td colspan="7" style="text-align:center;color:var(--text-faint);padding:32px 0">No databases open</td></tr>';
+      } else {
+        sub.textContent = 'TSDB stats unavailable';
+        tbody.innerHTML =
+          `<tr><td colspan="7" style="text-align:center;color:var(--text-faint);padding:32px 0">/api/tsdb/stats returned ${tsdbR.status}</td></tr>`;
+      }
+
+      const now = new Date();
+      document.getElementById('diag-meta').textContent =
+        `last update ${now.toLocaleTimeString()}`;
+    } catch (e) {
+      document.getElementById('diag-meta').textContent = `refresh error: ${e.message}`;
+    }
+  }
+
+  document.querySelector('#nav button[data-view="diagnostics"]').addEventListener('click', refreshDiagnostics);
+  if (window.location.hash === '#diagnostics') refreshDiagnostics();
+  setInterval(() => {
+    if (document.getElementById('view-diagnostics').classList.contains('active')) refreshDiagnostics();
   }, 10000);
 </script>
 </body>
