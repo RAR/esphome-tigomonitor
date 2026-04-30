@@ -1098,15 +1098,33 @@ void TigoMonitorComponent::rebuild_string_groups() {
         StringData string_data;
         string_data.string_label = string_label;
         string_data.inverter_label = node.cca_inverter_label;
+
+        // Pull any saved display label out of NVS, keyed by canonical label.
+        // Same pattern add_inverter uses for inverter display names.
+        char pref_key[80];
+        snprintf(pref_key, sizeof(pref_key), "str_dn:%s", string_label.c_str());
+        uint32_t hash = esphome::fnv1_hash(pref_key);
+        auto pref = global_preferences->make_preference<char[64]>(hash);
+        char dn_buf[64] = {};
+        if (pref.load(&dn_buf) && dn_buf[0] != '\0') {
+          string_data.display_label = dn_buf;
+        }
+
         strings_[string_label] = string_data;
-        
+
         // Restore peak power if available
         if (saved_peaks.count(string_label) > 0) {
           strings_[string_label].peak_power = saved_peaks[string_label];
         }
-        
-        ESP_LOGI(TAG, "Created string group: %s (Inverter: %s)", 
-                 string_label.c_str(), node.cca_inverter_label.c_str());
+
+        if (string_data.display_label.empty()) {
+          ESP_LOGI(TAG, "Created string group: %s (Inverter: %s)",
+                   string_label.c_str(), node.cca_inverter_label.c_str());
+        } else {
+          ESP_LOGI(TAG, "Created string group: %s (Inverter: %s, display='%s')",
+                   string_label.c_str(), node.cca_inverter_label.c_str(),
+                   string_data.display_label.c_str());
+        }
       }
       
       // Add device to string group
@@ -1237,6 +1255,27 @@ bool TigoMonitorComponent::set_inverter_display_name(const std::string &canonica
   }
   ESP_LOGW(TAG, "set_inverter_display_name: no inverter matches '%s'", canonical.c_str());
   return false;
+}
+
+bool TigoMonitorComponent::set_string_display_label(const std::string &canonical,
+                                                   const std::string &display_label) {
+  auto it = strings_.find(canonical);
+  if (it == strings_.end()) {
+    ESP_LOGW(TAG, "set_string_display_label: no string matches '%s'", canonical.c_str());
+    return false;
+  }
+  it->second.display_label = display_label;
+
+  char pref_key[80];
+  snprintf(pref_key, sizeof(pref_key), "str_dn:%s", canonical.c_str());
+  uint32_t hash = esphome::fnv1_hash(pref_key);
+  auto pref = global_preferences->make_preference<char[64]>(hash);
+  char dn_buf[64] = {};
+  strncpy(dn_buf, display_label.c_str(), sizeof(dn_buf) - 1);
+  pref.save(&dn_buf);
+  ESP_LOGI(TAG, "Renamed string '%s' -> '%s' (saved to NVS)",
+           canonical.c_str(), display_label.c_str());
+  return true;
 }
 
 void TigoMonitorComponent::update_inverter_data() {

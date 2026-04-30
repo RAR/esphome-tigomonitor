@@ -148,7 +148,11 @@ struct NodeTableData {
 };
 
 struct StringData {
-  std::string string_label;       // String name from CCA (e.g., "String 1")
+  std::string string_label;       // Canonical CCA string label (e.g. "String A").
+                                  // Immutable identity used for lookup + NVS keys.
+  std::string display_label;      // Optional override saved via /api/strings/rename;
+                                  // empty = fall back to string_label. UI shows
+                                  // display_label first.
   std::string inverter_label;     // Parent MPPT name (called "Inverter" in CCA)
   std::vector<std::string> device_addrs; // Device addresses in this string
   float total_power = 0.0f;
@@ -348,6 +352,11 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   // Returns true on success, false if the canonical name doesn't match an
   // inverter loaded from YAML.
   bool set_inverter_display_name(const std::string &canonical, const std::string &display_name);
+
+  // Same pattern, applied to CCA-derived strings. Canonical = the string_label
+  // from CCA (e.g. "String A"); display_label is the UI override. Empty
+  // display_label clears the override.
+  bool set_string_display_label(const std::string &canonical, const std::string &display_label);
   
   // Public getters for web server access
   // NOTE: get_X() return references and are only safe from the main task (the

@@ -153,7 +153,7 @@ void TigoWebServer::setup() {
   httpd_config_t config = HTTPD_DEFAULT_CONFIG();
   config.server_port = port_;
   config.ctrl_port = port_ + 1;
-  config.max_uri_handlers = 33;  // + /api/inverters/rename
+  config.max_uri_handlers = 34;  // + /api/inverters/rename + /api/strings/rename
   config.stack_size = 8192;
   config.lru_purge_enable = true;  // Enable LRU purging of connections
   config.max_open_sockets = 4;     // Limit concurrent connections to reduce memory
@@ -283,6 +283,14 @@ void TigoWebServer::setup() {
       .user_ctx = this
     };
     httpd_register_uri_handler(server_, &api_inverters_rename_uri);
+
+    httpd_uri_t api_strings_rename_uri = {
+      .uri = "/api/strings/rename",
+      .method = HTTP_POST,
+      .handler = api_strings_rename_handler,
+      .user_ctx = this
+    };
+    httpd_register_uri_handler(server_, &api_strings_rename_uri);
     
     httpd_uri_t api_esp_status_uri = {
       .uri = "/api/status",
@@ -853,6 +861,70 @@ esp_err_t TigoWebServer::api_inverters_rename_handler(httpd_req_t *req) {
     httpd_resp_set_status(req, "404 Not Found");
     httpd_resp_set_type(req, "application/json");
     httpd_resp_sendstr(req, "{\"success\":false,\"error\":\"unknown inverter\"}");
+    return ESP_OK;
+  }
+
+  httpd_resp_set_type(req, "application/json");
+  httpd_resp_sendstr(req, "{\"success\":true}");
+  return ESP_OK;
+}
+
+// POST body shape: {"label":"<canonical>","display_label":"<friendly>"}
+// Mirror of api_inverters_rename_handler — strings have a different
+// canonical-key field name (label, not name) but the rest is identical.
+esp_err_t TigoWebServer::api_strings_rename_handler(httpd_req_t *req) {
+  TigoWebServer *server = static_cast<TigoWebServer *>(req->user_ctx);
+  if (!server->check_api_auth(req)) return ESP_OK;
+  if (server->parent_ == nullptr) {
+    httpd_resp_set_status(req, "503 Service Unavailable");
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, "{\"success\":false,\"error\":\"monitor not bound\"}");
+    return ESP_OK;
+  }
+
+  char buf[256];
+  int ret = httpd_req_recv(req, buf, sizeof(buf) - 1);
+  if (ret <= 0) {
+    httpd_resp_set_status(req, "400 Bad Request");
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, "{\"success\":false,\"error\":\"empty body\"}");
+    return ESP_OK;
+  }
+  buf[ret] = '\0';
+
+  auto extract = [](const char *body, const char *key, char *out, size_t outlen) -> bool {
+    char needle[40];
+    snprintf(needle, sizeof(needle), "\"%s\"", key);
+    const char *k = strstr(body, needle);
+    if (!k) return false;
+    const char *colon = strchr(k, ':');
+    if (!colon) return false;
+    const char *q1 = strchr(colon, '"');
+    if (!q1) return false;
+    const char *q2 = strchr(q1 + 1, '"');
+    if (!q2) return false;
+    size_t n = (size_t) (q2 - q1 - 1);
+    if (n >= outlen) n = outlen - 1;
+    memcpy(out, q1 + 1, n);
+    out[n] = '\0';
+    return true;
+  };
+
+  char canonical[64] = {};
+  char display[64] = {};
+  if (!extract(buf, "label", canonical, sizeof(canonical))) {
+    httpd_resp_set_status(req, "400 Bad Request");
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, "{\"success\":false,\"error\":\"missing 'label'\"}");
+    return ESP_OK;
+  }
+  extract(buf, "display_label", display, sizeof(display));
+
+  bool ok = server->parent_->set_string_display_label(canonical, display);
+  if (!ok) {
+    httpd_resp_set_status(req, "404 Not Found");
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, "{\"success\":false,\"error\":\"unknown string\"}");
     return ESP_OK;
   }
 
@@ -1529,19 +1601,21 @@ void TigoWebServer::build_strings_json(PSRAMString& json) {
              string_data.total_device_count,
              string_data.total_power);
     
-    char buffer[512];
+    char buffer[640];
     snprintf(buffer, sizeof(buffer),
-      "{\"label\":\"%s\",\"inverter\":\"%s\",\"total_power\":%.1f,\"peak_power\":%.1f,"
+      "{\"label\":\"%s\",\"display_label\":\"%s\",\"inverter\":\"%s\","
+      "\"total_power\":%.1f,\"peak_power\":%.1f,"
       "\"total_current\":%.3f,\"avg_voltage_in\":%.2f,\"avg_voltage_out\":%.2f,"
       "\"avg_temperature\":%.1f,\"avg_efficiency\":%.2f,\"min_efficiency\":%.2f,"
       "\"max_efficiency\":%.2f,\"active_devices\":%d,\"total_devices\":%d}",
-      string_data.string_label.c_str(), string_data.inverter_label.c_str(),
+      string_data.string_label.c_str(), string_data.display_label.c_str(),
+      string_data.inverter_label.c_str(),
       string_data.total_power, string_data.peak_power, string_data.total_current,
       string_data.avg_voltage_in, string_data.avg_voltage_out,
       string_data.avg_temperature, string_data.avg_efficiency,
       string_data.min_efficiency, string_data.max_efficiency,
       string_data.active_device_count, string_data.total_device_count);
-    
+
     json.append(buffer);
   }
   
@@ -1591,11 +1665,13 @@ void TigoWebServer::build_inverters_json(PSRAMString& json) {
           if (!first_str) strings_json.append(",");
           first_str = false;
           
-          char buffer[512];
+          char buffer[640];
           snprintf(buffer, sizeof(buffer),
-            "{\"label\":\"%s\",\"mppt\":\"%s\",\"total_power\":%.1f,\"peak_power\":%.1f,"
+            "{\"label\":\"%s\",\"display_label\":\"%s\",\"mppt\":\"%s\","
+            "\"total_power\":%.1f,\"peak_power\":%.1f,"
             "\"active_devices\":%d,\"total_devices\":%d}",
-            string_data.string_label.c_str(), string_data.inverter_label.c_str(),
+            string_data.string_label.c_str(), string_data.display_label.c_str(),
+            string_data.inverter_label.c_str(),
             string_data.total_power, string_data.peak_power,
             string_data.active_device_count, string_data.total_device_count);
           strings_json.append(buffer);

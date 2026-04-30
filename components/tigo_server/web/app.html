@@ -2093,9 +2093,15 @@
             </div>`;
           }
 
+          const stringEffective = s.display_label || s.label;
+          const stringCanonicalSuffix = s.display_label
+            ? `<span class="topo-inv-name-canonical">(${topoEscape(s.label)})</span>`
+            : '';
           stringSections.push(`<div class="topo-string">
             <div class="topo-string-head">
-              <strong>${topoEscape(s.label)}</strong> · ${topoEscape(s.mppt)}
+              <strong class="topo-string-name-text">${topoEscape(stringEffective)}</strong>${stringCanonicalSuffix}
+              <button class="topo-inv-name-edit-btn" data-rename-string="${topoEscape(s.label)}" title="Rename string">✎</button>
+              · ${topoEscape(s.mppt)}
               <span class="topo-string-pill">${visible.length} panels</span>
               <span class="topo-string-pill">${topoFmtKW(s.total_power || 0)}</span>
               <span class="topo-string-pill">${(s.active_devices ?? 0)}/${(s.total_devices ?? 0)} active</span>
@@ -2155,56 +2161,64 @@
         });
       });
 
-      // Inline rename. Click pencil → swap label for input → blur/Enter saves,
-      // Escape cancels. POST sends canonical name + new display_name; empty
-      // display_name clears the override and falls back to the YAML name.
-      tree.querySelectorAll('.topo-inv-name-edit-btn').forEach(btn => {
-        btn.addEventListener('click', e => {
-          e.stopPropagation();
-          const canonical = btn.dataset.rename;
-          const nameDiv = btn.parentElement;
-          const textSpan = nameDiv.querySelector('.topo-inv-name-text');
-          const current = textSpan.textContent;
+      // Inline rename. Same shape for both inverter and string ✎ buttons —
+      // distinguished by which data-attribute is set on the button. Click
+      // pencil → swap label for input → blur/Enter saves, Escape cancels.
+      // Empty new value (or value equal to canonical) clears the override.
+      const wireRename = (btnSelector, dataAttr, textSelector, endpoint, payloadKey) => {
+        tree.querySelectorAll(btnSelector).forEach(btn => {
+          btn.addEventListener('click', e => {
+            e.stopPropagation();
+            const canonical = btn.dataset[dataAttr];
+            const head = btn.parentElement;
+            const textEl = head.querySelector(textSelector);
+            const current = textEl.textContent;
 
-          const input = document.createElement('input');
-          input.type = 'text';
-          input.className = 'topo-inv-name-input';
-          input.value = current;
-          input.maxLength = 63;
+            const input = document.createElement('input');
+            input.type = 'text';
+            input.className = 'topo-inv-name-input';
+            input.value = current;
+            input.maxLength = 63;
 
-          const cancel = () => refreshTopology();
-          const save = async () => {
-            const newName = input.value.trim();
-            // If the new name equals the canonical, send empty display_name
-            // to clear the override.
-            const display = (newName === canonical) ? '' : newName;
-            try {
-              const r = await apiFetch('/api/inverters/rename', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ name: canonical, display_name: display }),
-              });
-              if (!r.ok) throw new Error(`${r.status}`);
-              showToast('Inverter renamed ✓', 'ok');
-              await refreshTopology();
-            } catch (err) {
-              showToast(`Rename failed: ${err.message}`, 'err');
-              await refreshTopology();
-            }
-          };
+            const cancel = () => refreshTopology();
+            const save = async () => {
+              const newName = input.value.trim();
+              const display = (newName === canonical) ? '' : newName;
+              const body = { [payloadKey === 'name' ? 'name' : 'label']: canonical };
+              body[payloadKey === 'name' ? 'display_name' : 'display_label'] = display;
+              try {
+                const r = await apiFetch(endpoint, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify(body),
+                });
+                if (!r.ok) throw new Error(`${r.status}`);
+                showToast('Renamed ✓', 'ok');
+                await refreshTopology();
+              } catch (err) {
+                showToast(`Rename failed: ${err.message}`, 'err');
+                await refreshTopology();
+              }
+            };
 
-          input.addEventListener('keydown', ev => {
-            if (ev.key === 'Enter') { ev.preventDefault(); save(); }
-            else if (ev.key === 'Escape') { ev.preventDefault(); cancel(); }
+            input.addEventListener('keydown', ev => {
+              if (ev.key === 'Enter') { ev.preventDefault(); save(); }
+              else if (ev.key === 'Escape') { ev.preventDefault(); cancel(); }
+            });
+            input.addEventListener('blur', save);
+
+            textEl.replaceWith(input);
+            btn.style.display = 'none';
+            input.focus();
+            input.select();
           });
-          input.addEventListener('blur', save);
-
-          textSpan.replaceWith(input);
-          btn.style.display = 'none';
-          input.focus();
-          input.select();
         });
-      });
+      };
+
+      wireRename('.topo-inv-name-edit-btn[data-rename]', 'rename',
+                 '.topo-inv-name-text', '/api/inverters/rename', 'name');
+      wireRename('.topo-inv-name-edit-btn[data-rename-string]', 'renameString',
+                 '.topo-string-name-text', '/api/strings/rename', 'label');
 
       document.getElementById('topo-summary').textContent =
         `${inverters.length} inverter${inverters.length === 1 ? '' : 's'} · ` +
