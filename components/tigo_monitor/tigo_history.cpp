@@ -11,6 +11,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <unistd.h>  // fsync, fileno
 
 namespace esphome {
 namespace tigo_monitor {
@@ -245,12 +246,19 @@ bool TigoHistory::load_slot_map_() {
 }
 
 bool TigoHistory::save_slot_map_() {
-  // Atomic swap via temp file + rename — LittleFS rename is the closest we
-  // get to durability across an unexpected power loss.
-  const char *tmp_path = "/tsdb/panel_map.tmp";
-  FILE *f = fopen(tmp_path, "wb");
+  // Write directly to the destination. We tried temp-file + rename, but the
+  // joltwallet LittleFS port we depend on returns EEXIST on rename when the
+  // destination already exists (POSIX semantics expect clobber). Direct
+  // write is good enough here:
+  //  - LittleFS metadata updates are atomic at the block level, so a
+  //    concurrent reader sees either the old or the new file, never a mix.
+  //  - On power loss mid-write the file may end up truncated; the load path
+  //    already tolerates partial JSON and falls back to the entries it could
+  //    parse (worst case: a few panels get re-assigned to fresh slots,
+  //    splitting their history — much better than no persistence at all).
+  FILE *f = fopen(kPanelMapPath, "wb");
   if (f == nullptr) {
-    ESP_LOGE(TAG, "Failed to open %s for write", tmp_path);
+    ESP_LOGE(TAG, "Failed to open %s for write", kPanelMapPath);
     return false;
   }
 
@@ -265,14 +273,8 @@ bool TigoHistory::save_slot_map_() {
   }
   fputs("]}\n", f);
   fflush(f);
+  fsync(fileno(f));
   fclose(f);
-
-  // POSIX rename on LittleFS deletes the dest if it exists; keeps writes
-  // atomic from the reader's perspective.
-  if (std::rename(tmp_path, kPanelMapPath) != 0) {
-    ESP_LOGE(TAG, "Failed to rename %s -> %s", tmp_path, kPanelMapPath);
-    return false;
-  }
   return true;
 }
 
