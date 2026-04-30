@@ -11,7 +11,6 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
-#include <dirent.h>  // opendir, readdir
 #include <errno.h>
 #include <sys/stat.h>  // stat
 #include <unistd.h>  // fsync, fileno
@@ -81,46 +80,36 @@ bool TigoHistory::init() {
   if (!mount_filesystem_())
     return false;
 
-  // Diagnostic: dump pre-init dir listing for /tsdb. Ground truth for
-  // "did the previous session's writes actually reach flash and survive".
-  // Run AFTER mount but BEFORE tsdb_open (tsdb_open will unlink+recreate
-  // a 0-byte file, hiding the evidence).
+  // Diagnostic: stat each known tsdb path and the marker. opendir/readdir
+  // aren't implemented for esp_littlefs at the newlib layer (they're stubs
+  // that always fail), so per-path stat is the way.
   {
-    DIR *dp = opendir("/tsdb");
-    if (dp == nullptr) {
-      ESP_LOGW(TAG, "boot dir: opendir(/tsdb) failed errno=%d", errno);
-    } else {
-      int n = 0;
-      struct dirent *ent;
-      while ((ent = readdir(dp)) != nullptr) {
-        char full[64];
-        snprintf(full, sizeof(full), "/tsdb/%s", ent->d_name);
-        struct stat st = {};
-        if (stat(full, &st) == 0) {
-          ESP_LOGI(TAG, "boot dir: %s (%ld bytes)", ent->d_name,
-                   (long) st.st_size);
-        } else {
-          ESP_LOGI(TAG, "boot dir: %s (stat failed errno=%d)", ent->d_name,
-                   errno);
-        }
-        ++n;
+    const char *paths[] = {
+        "/tsdb/system.tsdb",
+        "/tsdb/panels0.tsdb",
+        "/tsdb/panels1.tsdb",
+        "/tsdb/panels2.tsdb",
+        "/tsdb/panel_map.json",
+        "/tsdb/shutdown_marker.json",
+        "/tsdb/system.tsdb.pulse",  // should never persist — pulse is a unlink-after-close test
+    };
+    for (const char *p : paths) {
+      struct stat st = {};
+      if (stat(p, &st) == 0) {
+        ESP_LOGI(TAG, "boot stat: %s = %ld bytes", p, (long) st.st_size);
+      } else {
+        ESP_LOGI(TAG, "boot stat: %s = MISSING", p);
       }
-      closedir(dp);
-      ESP_LOGI(TAG, "boot dir: %d entry(ies) total", n);
     }
 
-    // Additional smoke test: does the previous session's shutdown marker
-    // (written via plain open-write-close pattern) survive? If yes, plain
-    // file persistence works on this FS and the bug is specific to the
-    // long-lived r+b handles. If no, we have a deeper FS issue.
+    // Read back the shutdown marker if present so we can see prior session's
+    // ms-since-boot value and confirm the open-write-close pattern persisted.
     FILE *m = fopen("/tsdb/shutdown_marker.json", "rb");
-    if (m == nullptr) {
-      ESP_LOGW(TAG, "boot marker: shutdown_marker.json absent (errno=%d)", errno);
-    } else {
+    if (m != nullptr) {
       char buf[64] = {};
       size_t r = fread(buf, 1, sizeof(buf) - 1, m);
       fclose(m);
-      ESP_LOGI(TAG, "boot marker: shutdown_marker.json present, %zu bytes: %s",
+      ESP_LOGI(TAG, "boot marker: shutdown_marker.json content (%zu bytes): %s",
                r, buf);
     }
   }
@@ -626,31 +615,24 @@ void TigoHistory::flush_and_close() {
     }
   }
 
-  // Dir listing right before unmount. Names + sizes for everything LittleFS
-  // currently sees. Compared against the boot dir listing on next boot,
-  // this tells us exactly what does and doesn't survive a reboot.
+  // Per-path stat right before unmount. opendir/readdir aren't implemented
+  // for esp_littlefs (newlib stub), so we enumerate by known path.
   {
-    DIR *dp = opendir("/tsdb");
-    if (dp == nullptr) {
-      ESP_LOGW(TAG, "pre-unmount dir: opendir failed errno=%d", errno);
-    } else {
-      int n = 0;
-      struct dirent *ent;
-      while ((ent = readdir(dp)) != nullptr) {
-        char full[64];
-        snprintf(full, sizeof(full), "/tsdb/%s", ent->d_name);
-        struct stat st = {};
-        if (stat(full, &st) == 0) {
-          ESP_LOGI(TAG, "pre-unmount dir: %s (%ld bytes)", ent->d_name,
-                   (long) st.st_size);
-        } else {
-          ESP_LOGI(TAG, "pre-unmount dir: %s (stat failed errno=%d)",
-                   ent->d_name, errno);
-        }
-        ++n;
+    const char *paths[] = {
+        "/tsdb/system.tsdb",
+        "/tsdb/panels0.tsdb",
+        "/tsdb/panels1.tsdb",
+        "/tsdb/panels2.tsdb",
+        "/tsdb/panel_map.json",
+        "/tsdb/shutdown_marker.json",
+    };
+    for (const char *p : paths) {
+      struct stat st = {};
+      if (stat(p, &st) == 0) {
+        ESP_LOGI(TAG, "pre-unmount stat: %s = %ld bytes", p, (long) st.st_size);
+      } else {
+        ESP_LOGI(TAG, "pre-unmount stat: %s = MISSING", p);
       }
-      closedir(dp);
-      ESP_LOGI(TAG, "pre-unmount dir: %d entry(ies) total", n);
     }
   }
 
