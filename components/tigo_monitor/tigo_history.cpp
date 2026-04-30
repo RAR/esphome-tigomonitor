@@ -11,6 +11,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <sys/stat.h>  // stat
 #include <unistd.h>  // fsync, fileno
 
 namespace esphome {
@@ -77,6 +78,30 @@ static constexpr const char *kPanelMapPath = "/tsdb/panel_map.json";
 bool TigoHistory::init() {
   if (!mount_filesystem_())
     return false;
+
+  // Diagnostic: dump pre-init file sizes for every tsdb file we expect to
+  // see. Ground truth for "did the previous run's writes actually reach
+  // flash". Run AFTER mount but BEFORE tsdb_open (which may unlink+recreate
+  // a 0-byte file, hiding the evidence).
+  {
+    const char *paths[] = {
+        "/tsdb/system.tsdb",
+        "/tsdb/panels0.tsdb",
+        "/tsdb/panels1.tsdb",
+        "/tsdb/panels2.tsdb",
+        "/tsdb/panel_map.json",
+    };
+    for (const char *p : paths) {
+      struct stat st = {};
+      int rc = stat(p, &st);
+      if (rc == 0) {
+        ESP_LOGI(TAG, "boot stat: %s = %ld bytes", p, (long) st.st_size);
+      } else {
+        ESP_LOGI(TAG, "boot stat: %s = MISSING", p);
+      }
+    }
+  }
+
   if (!init_system_db_())
     return false;
   // Panel DBs are opened lazily — load_slot_map_() will open any DBs
@@ -495,7 +520,11 @@ void TigoHistory::writer_task_loop_() {
 }
 
 void TigoHistory::flush_and_close() {
-  if (!initialized_) return;
+  ESP_LOGI(TAG, "flush_and_close: ENTRY (initialized=%d)", initialized_ ? 1 : 0);
+  if (!initialized_) {
+    ESP_LOGW(TAG, "flush_and_close: not initialized — bailing out");
+    return;
+  }
 
   // Give the writer a brief window to drain whatever's already enqueued. We
   // don't pull the task down — its queue read is a portMAX_DELAY block, but
@@ -539,6 +568,25 @@ void TigoHistory::flush_and_close() {
   // every restart wipes the tsdb files; panel_map.json survives only
   // because save_slot_map_ creates a fresh file each save (the dir-entry
   // op forces a journal commit as a side effect).
+  // Re-stat each file right before unmount. If sizes are non-zero here but
+  // back to 0 at next boot's pre-init stat, the unmount itself isn't
+  // committing — and we'll need to look at lfs_fs_sync or flush from inside
+  // the fork rather than at this layer.
+  {
+    const char *paths[] = {"/tsdb/system.tsdb", "/tsdb/panels0.tsdb",
+                            "/tsdb/panels1.tsdb", "/tsdb/panels2.tsdb",
+                            "/tsdb/panel_map.json"};
+    for (const char *p : paths) {
+      struct stat st = {};
+      int rc = stat(p, &st);
+      if (rc == 0) {
+        ESP_LOGI(TAG, "pre-unmount stat: %s = %ld bytes", p, (long) st.st_size);
+      } else {
+        ESP_LOGI(TAG, "pre-unmount stat: %s = MISSING", p);
+      }
+    }
+  }
+
   esp_err_t uerr = esp_vfs_littlefs_unregister("tsdb");
   if (uerr == ESP_OK) {
     ESP_LOGI(TAG, "flush_and_close: LittleFS /tsdb unmounted (journal committed)");
@@ -548,6 +596,7 @@ void TigoHistory::flush_and_close() {
   }
 
   initialized_ = false;
+  ESP_LOGI(TAG, "flush_and_close: EXIT");
 }
 
 }  // namespace tigo_monitor
