@@ -244,6 +244,40 @@
   .badge.bad   { background: rgba(248,113,113,0.15); color: var(--bad); }
   .badge.stale { background: rgba(138,150,173,0.15); color: var(--text-dim); }
 
+  /* ===== Tools view ===== */
+  .tools-card { background: var(--bg-2); border: 1px solid var(--border); border-radius: 10px; padding: 18px 20px; margin-bottom: 16px; }
+  .tools-card h3 { font-size: 14px; font-weight: 600; margin-bottom: 12px; }
+  .tools-card p.hint { font-size: 12px; color: var(--text-dim); margin-bottom: 12px; }
+  .checkbox-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 6px; margin-bottom: 12px; }
+  .checkbox-grid label { display: flex; align-items: center; gap: 8px; padding: 6px 8px; background: var(--bg-3); border-radius: 4px; cursor: pointer; font-size: 12px; transition: background 0.1s; }
+  .checkbox-grid label:hover { background: var(--bg-4); }
+  .checkbox-grid input[type="checkbox"] { width: 14px; height: 14px; cursor: pointer; accent-color: var(--accent); }
+  .tools-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+  .yaml-block {
+    background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+    padding: 14px; font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 12px; line-height: 1.5; color: var(--text);
+    white-space: pre-wrap; word-wrap: break-word;
+    max-height: 480px; overflow-y: auto;
+  }
+  .danger-row { display: flex; gap: 12px; align-items: center; padding: 12px; background: var(--bg-3); border-radius: 6px; margin-bottom: 8px; }
+  .danger-row:last-child { margin-bottom: 0; }
+  .danger-text { flex: 1; font-size: 12px; }
+  .danger-text strong { display: block; color: var(--text); margin-bottom: 2px; }
+  .danger-text span { color: var(--text-dim); }
+  .btn.danger { background: rgba(248,113,113,0.15); border-color: rgba(248,113,113,0.4); color: var(--bad); }
+  .btn.danger:hover { background: rgba(248,113,113,0.25); }
+  .toast {
+    position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(100px);
+    background: var(--bg-3); border: 1px solid var(--border); color: var(--text);
+    padding: 10px 16px; border-radius: 6px; font-size: 13px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+    transition: transform 0.2s; z-index: 1000;
+  }
+  .toast.show { transform: translateX(-50%) translateY(0); }
+  .toast.ok { border-color: var(--good); }
+  .toast.err { border-color: var(--bad); }
+
   /* Alerts */
   .alerts { background: var(--bg-2); border: 1px solid var(--border); border-radius: 10px; padding: 16px 20px; }
   .alerts-empty { color: var(--text-dim); font-size: 12px; padding: 8px 0; }
@@ -473,13 +507,66 @@
     <section class="view" id="view-tools">
       <div class="topbar">
         <h1>Tools</h1>
-        <div class="topbar-meta">Configuration helpers and maintenance</div>
+        <div class="topbar-meta" id="tools-meta">Configuration helpers and maintenance</div>
       </div>
-      <div class="placeholder">
-        <div class="placeholder-title">Tools view — coming in R6</div>
-        <div>YAML generator · history compaction · resets</div>
-        <div style="margin-top:12px"><a class="placeholder-link" href="./yaml" id="link-yaml">Use today's /yaml page →</a></div>
+
+      <div class="section-head">
+        <div class="section-title">YAML Configuration</div>
+        <div class="section-sub" id="tools-yaml-sub">— devices</div>
       </div>
+      <div class="tools-card">
+        <p class="hint">Pick the sensors you want exposed to ESPHome / Home Assistant. The block below mirrors what you'd paste into your <code>esphome:</code> YAML.</p>
+
+        <h3 style="margin-top:8px">Per-device sensors</h3>
+        <div class="checkbox-grid" id="tools-dev-grid"></div>
+        <div class="tools-actions">
+          <button class="btn" data-tools-pick="dev-all">Select all</button>
+          <button class="btn" data-tools-pick="dev-default">Defaults</button>
+          <button class="btn" data-tools-pick="dev-none">Clear</button>
+        </div>
+
+        <h3 style="margin-top:14px">Hub-level sensors</h3>
+        <div class="checkbox-grid" id="tools-hub-grid"></div>
+        <div class="tools-actions">
+          <button class="btn" data-tools-pick="hub-all">Select all</button>
+          <button class="btn" data-tools-pick="hub-none">Clear</button>
+        </div>
+
+        <pre class="yaml-block" id="tools-yaml">Loading…</pre>
+        <div class="tools-actions" style="margin-top:12px">
+          <button class="btn primary" id="tools-yaml-copy">Copy to clipboard</button>
+        </div>
+      </div>
+
+      <div class="section-head">
+        <div class="section-title">Maintenance</div>
+        <div class="section-sub">Resets and reboot</div>
+      </div>
+      <div class="tools-card">
+        <div class="danger-row">
+          <div class="danger-text">
+            <strong>Reset peak power</strong>
+            <span>Clears the per-device peak-power high-water marks back to live readings.</span>
+          </div>
+          <button class="btn" id="tools-reset-peak">Reset peaks</button>
+        </div>
+        <div class="danger-row">
+          <div class="danger-text">
+            <strong>Clear node table</strong>
+            <span>Drops the persisted UART/CCA node table. Devices repopulate as their next telemetry frames arrive.</span>
+          </div>
+          <button class="btn danger" id="tools-reset-nodes">Clear nodes</button>
+        </div>
+        <div class="danger-row">
+          <div class="danger-text">
+            <strong>Restart device</strong>
+            <span>Reboots the ESP32. UART will drop briefly; the dashboard will reconnect on its own.</span>
+          </div>
+          <button class="btn danger" id="tools-restart">Restart</button>
+        </div>
+      </div>
+
+      <div id="tools-toast" class="toast"></div>
     </section>
 
     <!-- DIAGNOSTICS -->
@@ -632,7 +719,7 @@
 
   // Adjust placeholder "use today's page" links so they point at sibling URLs
   // under the same base (works for HA Ingress / nested deployments).
-  for (const id of ['link-history', 'link-nodes', 'link-yaml', 'link-status', 'link-cca']) {
+  for (const id of ['link-history', 'link-nodes', 'link-status', 'link-cca']) {
     const el = document.getElementById(id);
     if (!el) continue;
     const stub = el.getAttribute('href').replace(/^\.\//, '');
@@ -1426,6 +1513,130 @@
   setInterval(() => {
     if (document.getElementById('view-diagnostics').classList.contains('active')) refreshDiagnostics();
   }, 10000);
+
+  // ============================================================
+  // R6 — Tools view (YAML generator + maintenance)
+  // ============================================================
+
+  const TOOLS_DEV_SENSORS = [
+    {id: 'power_in',    label: 'Power In (W)',         dflt: true},
+    {id: 'power_out',   label: 'Power Out (W)',        dflt: false},
+    {id: 'peak_power',  label: 'Peak Power (W)',       dflt: true},
+    {id: 'voltage_in',  label: 'Input Voltage (V)',    dflt: true},
+    {id: 'voltage_out', label: 'Output Voltage (V)',   dflt: true},
+    {id: 'current_in',  label: 'Input Current (A)',    dflt: true},
+    {id: 'current_out', label: 'Output Current (A)',   dflt: false},
+    {id: 'temperature', label: 'Temperature (°C)',     dflt: true},
+    {id: 'rssi',        label: 'RSSI (dBm)',           dflt: true},
+    {id: 'duty_cycle',  label: 'Duty Cycle (%)',       dflt: false},
+    {id: 'efficiency',  label: 'Efficiency (%)',       dflt: false},
+    {id: 'power_factor',label: 'Power Factor',         dflt: false},
+    {id: 'load_factor', label: 'Load Factor',          dflt: false},
+    {id: 'barcode',     label: 'Barcode',              dflt: false},
+  ];
+  const TOOLS_HUB_SENSORS = [
+    {id: 'power_sum',         label: 'Total Power In (W)'},
+    {id: 'power_out_sum',     label: 'Total Power Out (W)'},
+    {id: 'energy_in_sum',     label: 'Total Energy In (kWh)'},
+    {id: 'energy_out_sum',    label: 'Total Energy Out (kWh)'},
+    {id: 'device_count',      label: 'Device Count'},
+    {id: 'invalid_checksum',  label: 'Invalid Checksum Count'},
+    {id: 'missed_frame',      label: 'Missed Frame Count'},
+    {id: 'internal_ram_free', label: 'Free Internal RAM'},
+    {id: 'internal_ram_min',  label: 'Min Free Internal RAM'},
+    {id: 'psram_free',        label: 'Free PSRAM'},
+    {id: 'stack_free',        label: 'Free Stack'},
+  ];
+
+  function toolsBuildGrids() {
+    const dev = document.getElementById('tools-dev-grid');
+    dev.innerHTML = TOOLS_DEV_SENSORS.map(s =>
+      `<label><input type="checkbox" data-tools-dev="${s.id}"${s.dflt ? ' checked' : ''}>${s.label}</label>`
+    ).join('');
+    const hub = document.getElementById('tools-hub-grid');
+    hub.innerHTML = TOOLS_HUB_SENSORS.map(s =>
+      `<label><input type="checkbox" data-tools-hub="${s.id}">${s.label}</label>`
+    ).join('');
+    dev.querySelectorAll('input').forEach(i => i.addEventListener('change', refreshTools));
+    hub.querySelectorAll('input').forEach(i => i.addEventListener('change', refreshTools));
+  }
+
+  function toolsPick(kind) {
+    const dev = document.querySelectorAll('#tools-dev-grid input');
+    const hub = document.querySelectorAll('#tools-hub-grid input');
+    if (kind === 'dev-all')      dev.forEach(i => i.checked = true);
+    else if (kind === 'dev-none') dev.forEach(i => i.checked = false);
+    else if (kind === 'dev-default') {
+      const dflts = new Set(TOOLS_DEV_SENSORS.filter(s => s.dflt).map(s => s.id));
+      dev.forEach(i => i.checked = dflts.has(i.dataset.toolsDev));
+    }
+    else if (kind === 'hub-all')  hub.forEach(i => i.checked = true);
+    else if (kind === 'hub-none') hub.forEach(i => i.checked = false);
+    refreshTools();
+  }
+
+  async function refreshTools() {
+    if (!document.getElementById('view-tools').classList.contains('active')) return;
+    try {
+      const dev = [...document.querySelectorAll('#tools-dev-grid input:checked')]
+        .map(i => i.dataset.toolsDev).join(',');
+      const hub = [...document.querySelectorAll('#tools-hub-grid input:checked')]
+        .map(i => i.dataset.toolsHub).join(',');
+      const r = await apiFetch(`/api/yaml?sensors=${dev}&hub_sensors=${hub}`);
+      if (!r.ok) throw new Error('/api/yaml ' + r.status);
+      const data = await r.json();
+      document.getElementById('tools-yaml').textContent = data.yaml || '';
+      document.getElementById('tools-yaml-sub').textContent = `${data.device_count ?? '—'} devices`;
+      document.getElementById('tools-meta').textContent =
+        `last update ${new Date().toLocaleTimeString()}`;
+    } catch (e) {
+      document.getElementById('tools-yaml').textContent = `Error: ${e.message}`;
+      document.getElementById('tools-meta').textContent = `error: ${e.message}`;
+    }
+  }
+
+  function showToast(msg, kind) {
+    const t = document.getElementById('tools-toast');
+    t.textContent = msg;
+    t.className = 'toast show' + (kind ? ' ' + kind : '');
+    clearTimeout(t._timer);
+    t._timer = setTimeout(() => { t.className = 'toast'; }, 2400);
+  }
+
+  async function toolsAction(path, label, confirmMsg) {
+    if (confirmMsg && !window.confirm(confirmMsg)) return;
+    try {
+      const r = await apiFetch(path, { method: 'POST' });
+      if (!r.ok) throw new Error(`${path} ${r.status}`);
+      showToast(`${label} ✓`, 'ok');
+    } catch (e) {
+      showToast(`${label} failed: ${e.message}`, 'err');
+    }
+  }
+
+  toolsBuildGrids();
+  document.querySelectorAll('[data-tools-pick]').forEach(btn => {
+    btn.addEventListener('click', () => toolsPick(btn.dataset.toolsPick));
+  });
+  document.getElementById('tools-yaml-copy').addEventListener('click', () => {
+    const text = document.getElementById('tools-yaml').textContent;
+    navigator.clipboard.writeText(text).then(
+      () => showToast('Copied to clipboard ✓', 'ok'),
+      () => showToast('Copy failed', 'err')
+    );
+  });
+  document.getElementById('tools-reset-peak').addEventListener('click', () =>
+    toolsAction('/api/reset_peak_power', 'Peak power reset',
+      'Reset all per-device peak-power values?'));
+  document.getElementById('tools-reset-nodes').addEventListener('click', () =>
+    toolsAction('/api/reset_node_table', 'Node table cleared',
+      'Clear the persisted node table? Devices will repopulate as telemetry arrives.'));
+  document.getElementById('tools-restart').addEventListener('click', () =>
+    toolsAction('/api/restart', 'Restart issued',
+      'Reboot the ESP32 now?'));
+
+  document.querySelector('#nav button[data-view="tools"]').addEventListener('click', refreshTools);
+  if (window.location.hash === '#tools') refreshTools();
 </script>
 </body>
 </html>

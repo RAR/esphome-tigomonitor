@@ -44,7 +44,8 @@ CONFIG_SCHEMA = cv.Schema({
 #   - 'history' (R3) — see history_handler
 #   - 'nodes'   (R4) — see node_table_handler
 #   - 'status'  (R5) — see esp_status_handler (renamed to /app#diagnostics)
-WEB_PAGES = ['dashboard', 'yaml', 'cca', 'app']
+#   - 'yaml'    (R6) — see yaml_config_handler (renamed to /app#tools)
+WEB_PAGES = ['dashboard', 'cca', 'app']
 TOKEN_PLACEHOLDER = '__TIGO_API_TOKEN__'
 
 
