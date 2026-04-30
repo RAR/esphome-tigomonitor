@@ -244,6 +244,50 @@
   .badge.bad   { background: rgba(248,113,113,0.15); color: var(--bad); }
   .badge.stale { background: rgba(138,150,173,0.15); color: var(--text-dim); }
 
+  /* ===== Topology view ===== */
+  .topo-toolbar { display: flex; gap: 8px; align-items: center; margin-bottom: 16px; flex-wrap: wrap; }
+  .topo-toolbar .topo-summary { margin-left: auto; font-size: 12px; color: var(--text-dim); }
+  .topo-tree { display: flex; flex-direction: column; gap: 16px; }
+
+  .topo-inv {
+    background: var(--bg-2); border: 1px solid var(--border); border-radius: 10px;
+    padding: 14px 18px;
+  }
+  .topo-inv-head { display: flex; align-items: center; gap: 12px; cursor: pointer; user-select: none; }
+  .topo-inv-toggle { font-size: 16px; color: var(--accent); width: 18px; text-align: center; transition: transform 0.15s; }
+  .topo-inv.collapsed .topo-inv-toggle { transform: rotate(-90deg); }
+  .topo-inv-name { font-weight: 600; font-size: 14px; flex-shrink: 0; }
+  .topo-inv-stats { font-size: 12px; color: var(--text-dim); margin-left: auto; }
+  .topo-inv-stats strong { color: var(--text); font-variant-numeric: tabular-nums; }
+  .topo-inv-body { margin-top: 12px; display: flex; flex-direction: column; gap: 12px; }
+  .topo-inv.collapsed .topo-inv-body { display: none; }
+
+  .topo-string { background: var(--bg-3); border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; }
+  .topo-string-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12px; color: var(--text-dim); margin-bottom: 10px; }
+  .topo-string-head strong { color: var(--text); font-size: 13px; }
+  .topo-string-pill {
+    background: var(--bg-2); border: 1px solid var(--border); border-radius: 4px;
+    padding: 2px 8px; font-size: 11px; font-variant-numeric: tabular-nums;
+  }
+
+  .panel-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; }
+  .panel-tile {
+    background: var(--bg-2); border: 1px solid var(--border); border-radius: 6px;
+    padding: 10px; cursor: default; transition: border-color 0.1s, background 0.1s;
+  }
+  .panel-tile:hover { border-color: var(--accent-2); }
+  .panel-tile.warn { border-left: 3px solid var(--warn); }
+  .panel-tile.bad  { border-left: 3px solid var(--bad); }
+  .panel-tile.dead { opacity: 0.45; border-style: dashed; }
+  .panel-tile-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 6px; }
+  .panel-tile-id { font-weight: 600; font-size: 12px; }
+  .panel-tile-bc { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 10px; color: var(--text-faint); }
+  .panel-tile-power { font-size: 16px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .panel-tile-power .unit { font-size: 11px; color: var(--text-dim); font-weight: 500; margin-left: 2px; }
+  .panel-tile-detail { display: flex; justify-content: space-between; gap: 4px; font-size: 10px; color: var(--text-dim); margin-top: 4px; font-variant-numeric: tabular-nums; }
+
+  .topo-empty { padding: 60px 24px; text-align: center; color: var(--text-dim); font-size: 13px; }
+
   /* ===== Tools view ===== */
   .tools-card { background: var(--bg-2); border: 1px solid var(--border); border-radius: 10px; padding: 18px 20px; margin-bottom: 16px; }
   .tools-card h3 { font-size: 14px; font-weight: 600; margin-bottom: 12px; }
@@ -449,11 +493,18 @@
     <section class="view" id="view-topology">
       <div class="topbar">
         <h1>Topology</h1>
-        <div class="topbar-meta">String &rarr; panel mapping</div>
+        <div class="topbar-meta" id="topo-meta">CCA-derived inverter → string → panel hierarchy</div>
       </div>
-      <div class="placeholder">
-        <div class="placeholder-title">Topology view — separate project (R7+)</div>
-        <div>Drag-drop CCA mapping correction is its own redesign once we have the write-side endpoints.</div>
+
+      <div class="topo-toolbar">
+        <button class="btn" id="topo-expand-btn">Expand all</button>
+        <button class="btn" id="topo-collapse-btn">Collapse all</button>
+        <input class="input" id="topo-filter" placeholder="Filter by name, barcode, or string…">
+        <span class="topo-summary" id="topo-summary">—</span>
+      </div>
+
+      <div id="topo-tree" class="topo-tree">
+        <div class="topo-empty">Loading topology…</div>
       </div>
     </section>
 
@@ -1894,6 +1945,226 @@
   setInterval(() => {
     if (document.getElementById('view-cca').classList.contains('active')) refreshCca();
   }, 30000);
+
+  // ============================================================
+  // Topology view — read-only inverter → string → panel hierarchy
+  // ============================================================
+
+  const topoState = {
+    filter: '',
+    collapsed: new Set(),  // inverter names that are collapsed
+  };
+
+  function topoEscape(s) {
+    return String(s).replace(/[&<>"']/g, c =>
+      ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  }
+
+  // Per-string color thresholds: a panel is warn if its power is < 70% of the
+  // string median, bad if < 40%. dead if data_age > 30s (stale telemetry).
+  // Matches the dashboard's panel-bar colour rules so nothing in the UI
+  // disagrees about a panel's health.
+  function topoPanelClass(power, median, dataAgeMs) {
+    if (dataAgeMs && dataAgeMs > 30000) return 'dead';
+    if (median <= 0 || power == null) return '';
+    const ratio = power / median;
+    if (ratio < 0.40) return 'bad';
+    if (ratio < 0.70) return 'warn';
+    return '';
+  }
+
+  function topoMedian(values) {
+    if (!values.length) return 0;
+    const sorted = [...values].sort((a, b) => a - b);
+    const m = Math.floor(sorted.length / 2);
+    return sorted.length % 2 ? sorted[m] : (sorted[m - 1] + sorted[m]) / 2;
+  }
+
+  function topoLast6(barcode) {
+    if (!barcode) return '';
+    return barcode.length > 6 ? barcode.slice(-6) : barcode;
+  }
+
+  function topoFmtKW(w) {
+    if (w >= 1000) return `${(w / 1000).toFixed(2)} kW`;
+    return `${Math.round(w)} W`;
+  }
+
+  function topoMatchesFilter(panel, stringLabel) {
+    if (!topoState.filter) return true;
+    const f = topoState.filter.toLowerCase();
+    return (panel.name || '').toLowerCase().includes(f)
+      || (panel.barcode || '').toLowerCase().includes(f)
+      || (panel.addr || '').toLowerCase().includes(f)
+      || (stringLabel || '').toLowerCase().includes(f);
+  }
+
+  async function refreshTopology() {
+    if (!document.getElementById('view-topology').classList.contains('active')) return;
+    try {
+      const [invR, devR, nodeR] = await Promise.all([
+        apiFetch('/api/inverters'),
+        apiFetch('/api/devices'),
+        apiFetch('/api/nodes'),
+      ]);
+      if (!invR.ok) throw new Error('/api/inverters ' + invR.status);
+      if (!devR.ok) throw new Error('/api/devices ' + devR.status);
+      if (!nodeR.ok) throw new Error('/api/nodes ' + nodeR.status);
+
+      const invData = await invR.json();
+      const devData = await devR.json();
+      const nodeData = await nodeR.json();
+
+      // Index runtime telemetry by addr — nodes carry the CCA mapping;
+      // devices carry the live V/I/P/T. Joining them locally rather than
+      // adding a new endpoint keeps the server side untouched.
+      const devByAddr = {};
+      for (const d of (devData.devices || [])) devByAddr[d.addr] = d;
+
+      // Group nodes by inverter (MPPT) → string. A node's cca_inverter is
+      // the MPPT label (e.g. "MPPT 1"); we match the inverter by membership
+      // in its mppts list.
+      const stringPanelsByMppt = {};  // { mppt: { stringLabel: [panel,...] } }
+      for (const n of (nodeData.nodes || [])) {
+        if (!n.cca_validated) continue;
+        const mppt = n.cca_inverter || '';
+        const sl = n.cca_string || '';
+        if (!stringPanelsByMppt[mppt]) stringPanelsByMppt[mppt] = {};
+        if (!stringPanelsByMppt[mppt][sl]) stringPanelsByMppt[mppt][sl] = [];
+        const dev = devByAddr[n.addr] || {};
+        stringPanelsByMppt[mppt][sl].push({
+          addr: n.addr,
+          name: n.cca_label || n.addr,
+          barcode: n.long_address || '',
+          power: dev.power_in ?? 0,
+          voltage: dev.voltage_in ?? 0,
+          current: dev.current ?? 0,
+          temperature: dev.temperature ?? 0,
+          dataAgeMs: dev.data_age_ms ?? 999999999,
+        });
+      }
+
+      const tree = document.getElementById('topo-tree');
+      let html = '';
+      let totalPanels = 0, totalStrings = 0, totalActive = 0;
+
+      const inverters = invData.inverters || [];
+      for (const inv of inverters) {
+        // Build the panels-per-string map for this inverter by walking each
+        // of its strings and pulling from the per-MPPT bucket above.
+        const stringSections = [];
+        let invPanelCount = 0;
+        for (const s of (inv.strings || [])) {
+          const panels = (stringPanelsByMppt[s.mppt] || {})[s.label] || [];
+          // Apply text filter early so we can hide empty strings cleanly.
+          const visible = panels.filter(p => topoMatchesFilter(p, s.label));
+          if (topoState.filter && visible.length === 0) continue;
+
+          // Per-string median for color coding.
+          const powers = panels.map(p => p.power).filter(v => v > 0);
+          const median = topoMedian(powers);
+
+          let panelHtml = '';
+          for (const p of visible) {
+            const cls = topoPanelClass(p.power, median, p.dataAgeMs);
+            panelHtml += `<div class="panel-tile ${cls}" title="${topoEscape(p.barcode)}">
+              <div class="panel-tile-head">
+                <div class="panel-tile-id">${topoEscape(p.name)}</div>
+                <div class="panel-tile-bc">…${topoEscape(topoLast6(p.barcode))}</div>
+              </div>
+              <div class="panel-tile-power">${Math.round(p.power)}<span class="unit">W</span></div>
+              <div class="panel-tile-detail">
+                <span>${p.voltage.toFixed(1)} V</span>
+                <span>${p.current.toFixed(1)} A</span>
+                <span>${p.temperature.toFixed(0)} °C</span>
+              </div>
+            </div>`;
+          }
+
+          stringSections.push(`<div class="topo-string">
+            <div class="topo-string-head">
+              <strong>${topoEscape(s.label)}</strong> · ${topoEscape(s.mppt)}
+              <span class="topo-string-pill">${visible.length} panels</span>
+              <span class="topo-string-pill">${topoFmtKW(s.total_power || 0)}</span>
+              <span class="topo-string-pill">${(s.active_devices ?? 0)}/${(s.total_devices ?? 0)} active</span>
+            </div>
+            <div class="panel-grid">${panelHtml || '<div style="color:var(--text-faint);padding:12px;font-size:12px">No panels match the filter</div>'}</div>
+          </div>`);
+
+          invPanelCount += panels.length;
+          totalStrings += 1;
+        }
+
+        if (topoState.filter && stringSections.length === 0) continue;
+
+        const collapsed = topoState.collapsed.has(inv.name) ? ' collapsed' : '';
+        html += `<div class="topo-inv${collapsed}" data-inv="${topoEscape(inv.name)}">
+          <div class="topo-inv-head">
+            <span class="topo-inv-toggle">▾</span>
+            <div class="topo-inv-name">${topoEscape(inv.name)}</div>
+            <div class="topo-inv-stats">
+              <strong>${topoFmtKW(inv.total_power || 0)}</strong> ·
+              ${(inv.active_devices ?? 0)}/${(inv.total_devices ?? 0)} panels ·
+              ${(inv.mppts || []).map(m => topoEscape(m)).join(', ') || '—'}
+            </div>
+          </div>
+          <div class="topo-inv-body">${stringSections.join('')}</div>
+        </div>`;
+
+        totalPanels += invPanelCount;
+        totalActive += inv.active_devices || 0;
+      }
+
+      tree.innerHTML = html ||
+        '<div class="topo-empty">No topology data — CCA mappings may not be loaded yet.</div>';
+
+      // Wire collapse toggles on the freshly-rendered headers.
+      tree.querySelectorAll('.topo-inv-head').forEach(head => {
+        head.addEventListener('click', () => {
+          const card = head.parentElement;
+          const name = card.dataset.inv;
+          if (card.classList.toggle('collapsed')) {
+            topoState.collapsed.add(name);
+          } else {
+            topoState.collapsed.delete(name);
+          }
+        });
+      });
+
+      document.getElementById('topo-summary').textContent =
+        `${inverters.length} inverter${inverters.length === 1 ? '' : 's'} · ` +
+        `${totalStrings} string${totalStrings === 1 ? '' : 's'} · ` +
+        `${totalActive}/${totalPanels} panels active`;
+      document.getElementById('topo-meta').textContent =
+        `last update ${new Date().toLocaleTimeString()}`;
+    } catch (e) {
+      document.getElementById('topo-tree').innerHTML =
+        `<div class="topo-empty" style="color:var(--bad)">Error loading topology: ${topoEscape(e.message)}</div>`;
+      document.getElementById('topo-meta').textContent = `error: ${e.message}`;
+    }
+  }
+
+  document.getElementById('topo-expand-btn').addEventListener('click', () => {
+    topoState.collapsed.clear();
+    document.querySelectorAll('#topo-tree .topo-inv').forEach(c => c.classList.remove('collapsed'));
+  });
+  document.getElementById('topo-collapse-btn').addEventListener('click', () => {
+    document.querySelectorAll('#topo-tree .topo-inv').forEach(c => {
+      c.classList.add('collapsed');
+      topoState.collapsed.add(c.dataset.inv);
+    });
+  });
+  document.getElementById('topo-filter').addEventListener('input', e => {
+    topoState.filter = e.target.value.trim();
+    refreshTopology();
+  });
+
+  document.querySelector('#nav button[data-view="topology"]').addEventListener('click', refreshTopology);
+  if (window.location.hash === '#topology') refreshTopology();
+  // Live telemetry refresh while view is active.
+  setInterval(() => {
+    if (document.getElementById('view-topology').classList.contains('active')) refreshTopology();
+  }, 10000);
 </script>
 </body>
 </html>
