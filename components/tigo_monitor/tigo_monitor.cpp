@@ -1110,6 +1110,16 @@ void TigoMonitorComponent::rebuild_string_groups() {
           string_data.display_label = dn_buf;
         }
 
+        // Per-string panel nameplate rating, same persistence pattern but
+        // stored as uint16. 0 means "not set" → UI ignores it.
+        snprintf(pref_key, sizeof(pref_key), "str_rt:%s", string_label.c_str());
+        uint32_t rt_hash = esphome::fnv1_hash(pref_key);
+        auto rt_pref = global_preferences->make_preference<uint16_t>(rt_hash);
+        uint16_t rt_val = 0;
+        if (rt_pref.load(&rt_val) && rt_val > 0) {
+          string_data.panel_rating_w = rt_val;
+        }
+
         strings_[string_label] = string_data;
 
         // Restore peak power if available
@@ -1255,6 +1265,25 @@ bool TigoMonitorComponent::set_inverter_display_name(const std::string &canonica
   }
   ESP_LOGW(TAG, "set_inverter_display_name: no inverter matches '%s'", canonical.c_str());
   return false;
+}
+
+bool TigoMonitorComponent::set_string_panel_rating(const std::string &canonical,
+                                                  uint16_t rating_w) {
+  auto it = strings_.find(canonical);
+  if (it == strings_.end()) {
+    ESP_LOGW(TAG, "set_string_panel_rating: no string matches '%s'", canonical.c_str());
+    return false;
+  }
+  it->second.panel_rating_w = rating_w;
+
+  char pref_key[80];
+  snprintf(pref_key, sizeof(pref_key), "str_rt:%s", canonical.c_str());
+  uint32_t hash = esphome::fnv1_hash(pref_key);
+  auto pref = global_preferences->make_preference<uint16_t>(hash);
+  pref.save(&rating_w);
+  ESP_LOGI(TAG, "Set panel rating for string '%s' = %u W (saved to NVS)",
+           canonical.c_str(), (unsigned) rating_w);
+  return true;
 }
 
 bool TigoMonitorComponent::set_string_display_label(const std::string &canonical,

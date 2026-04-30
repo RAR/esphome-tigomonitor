@@ -153,6 +153,11 @@ struct StringData {
   std::string display_label;      // Optional override saved via /api/strings/rename;
                                   // empty = fall back to string_label. UI shows
                                   // display_label first.
+  uint16_t panel_rating_w = 0;    // Nameplate rating (W) per panel in this string,
+                                  // saved via /api/strings/rating. 0 = not set;
+                                  // the UI then falls back to median-only views.
+                                  // Capped at uint16 to fit any realistic panel
+                                  // (250-450W typical, 1000W headroom).
   std::string inverter_label;     // Parent MPPT name (called "Inverter" in CCA)
   std::vector<std::string> device_addrs; // Device addresses in this string
   float total_power = 0.0f;
@@ -357,6 +362,11 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   // from CCA (e.g. "String A"); display_label is the UI override. Empty
   // display_label clears the override.
   bool set_string_display_label(const std::string &canonical, const std::string &display_label);
+
+  // Per-string panel nameplate rating (W). Used by the UI to compute
+  // % of rated for individual panels and total nameplate roll-ups for
+  // the string. Pass 0 to clear the override.
+  bool set_string_panel_rating(const std::string &canonical, uint16_t rating_w);
   
   // Public getters for web server access
   // NOTE: get_X() return references and are only safe from the main task (the

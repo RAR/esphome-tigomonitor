@@ -153,7 +153,7 @@ void TigoWebServer::setup() {
   httpd_config_t config = HTTPD_DEFAULT_CONFIG();
   config.server_port = port_;
   config.ctrl_port = port_ + 1;
-  config.max_uri_handlers = 34;  // + /api/inverters/rename + /api/strings/rename
+  config.max_uri_handlers = 35;  // + /api/strings/rating
   config.stack_size = 8192;
   config.lru_purge_enable = true;  // Enable LRU purging of connections
   config.max_open_sockets = 4;     // Limit concurrent connections to reduce memory
@@ -291,6 +291,14 @@ void TigoWebServer::setup() {
       .user_ctx = this
     };
     httpd_register_uri_handler(server_, &api_strings_rename_uri);
+
+    httpd_uri_t api_strings_rating_uri = {
+      .uri = "/api/strings/rating",
+      .method = HTTP_POST,
+      .handler = api_strings_rating_handler,
+      .user_ctx = this
+    };
+    httpd_register_uri_handler(server_, &api_strings_rating_uri);
     
     httpd_uri_t api_esp_status_uri = {
       .uri = "/api/status",
@@ -894,6 +902,92 @@ esp_err_t TigoWebServer::api_strings_rename_handler(httpd_req_t *req) {
   extract(buf, "display_label", display, sizeof(display));
 
   bool ok = server->parent_->set_string_display_label(canonical, display);
+  if (!ok) {
+    httpd_resp_set_status(req, "404 Not Found");
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, "{\"success\":false,\"error\":\"unknown string\"}");
+    return ESP_OK;
+  }
+
+  httpd_resp_set_type(req, "application/json");
+  httpd_resp_sendstr(req, "{\"success\":true}");
+  return ESP_OK;
+}
+
+// POST body: {"label":"<canonical>","rating_w":<int>}
+// rating_w is the per-panel nameplate watts in this string (0-65535).
+// 0 clears the override.
+esp_err_t TigoWebServer::api_strings_rating_handler(httpd_req_t *req) {
+  TigoWebServer *server = static_cast<TigoWebServer *>(req->user_ctx);
+  if (!server->check_api_auth(req)) return ESP_OK;
+  if (server->parent_ == nullptr) {
+    httpd_resp_set_status(req, "503 Service Unavailable");
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, "{\"success\":false,\"error\":\"monitor not bound\"}");
+    return ESP_OK;
+  }
+
+  char buf[256];
+  int ret = httpd_req_recv(req, buf, sizeof(buf) - 1);
+  if (ret <= 0) {
+    httpd_resp_set_status(req, "400 Bad Request");
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, "{\"success\":false,\"error\":\"empty body\"}");
+    return ESP_OK;
+  }
+  buf[ret] = '\0';
+
+  // Quoted-string extractor (same shape as the rename handlers).
+  auto extract_str = [](const char *body, const char *key, char *out, size_t outlen) -> bool {
+    char needle[40];
+    snprintf(needle, sizeof(needle), "\"%s\"", key);
+    const char *k = strstr(body, needle);
+    if (!k) return false;
+    const char *colon = strchr(k, ':');
+    if (!colon) return false;
+    const char *q1 = strchr(colon, '"');
+    if (!q1) return false;
+    const char *q2 = strchr(q1 + 1, '"');
+    if (!q2) return false;
+    size_t n = (size_t) (q2 - q1 - 1);
+    if (n >= outlen) n = outlen - 1;
+    memcpy(out, q1 + 1, n);
+    out[n] = '\0';
+    return true;
+  };
+  // Numeric value extractor — finds "key": then strtoul over the digits.
+  auto extract_num = [](const char *body, const char *key, long *out) -> bool {
+    char needle[40];
+    snprintf(needle, sizeof(needle), "\"%s\"", key);
+    const char *k = strstr(body, needle);
+    if (!k) return false;
+    const char *colon = strchr(k, ':');
+    if (!colon) return false;
+    const char *p = colon + 1;
+    while (*p == ' ' || *p == '\t') ++p;
+    char *end = nullptr;
+    long v = strtol(p, &end, 10);
+    if (end == p) return false;
+    *out = v;
+    return true;
+  };
+
+  char canonical[64] = {};
+  long rating = -1;
+  if (!extract_str(buf, "label", canonical, sizeof(canonical))) {
+    httpd_resp_set_status(req, "400 Bad Request");
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, "{\"success\":false,\"error\":\"missing 'label'\"}");
+    return ESP_OK;
+  }
+  if (!extract_num(buf, "rating_w", &rating) || rating < 0 || rating > 65535) {
+    httpd_resp_set_status(req, "400 Bad Request");
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, "{\"success\":false,\"error\":\"missing or invalid 'rating_w'\"}");
+    return ESP_OK;
+  }
+
+  bool ok = server->parent_->set_string_panel_rating(canonical, (uint16_t) rating);
   if (!ok) {
     httpd_resp_set_status(req, "404 Not Found");
     httpd_resp_set_type(req, "application/json");
@@ -1570,15 +1664,17 @@ void TigoWebServer::build_strings_json(PSRAMString& json) {
              string_data.total_device_count,
              string_data.total_power);
     
-    char buffer[640];
+    char buffer[680];
     snprintf(buffer, sizeof(buffer),
       "{\"label\":\"%s\",\"display_label\":\"%s\",\"inverter\":\"%s\","
+      "\"panel_rating_w\":%u,"
       "\"total_power\":%.1f,\"peak_power\":%.1f,"
       "\"total_current\":%.3f,\"avg_voltage_in\":%.2f,\"avg_voltage_out\":%.2f,"
       "\"avg_temperature\":%.1f,\"avg_efficiency\":%.2f,\"min_efficiency\":%.2f,"
       "\"max_efficiency\":%.2f,\"active_devices\":%d,\"total_devices\":%d}",
       string_data.string_label.c_str(), string_data.display_label.c_str(),
       string_data.inverter_label.c_str(),
+      (unsigned) string_data.panel_rating_w,
       string_data.total_power, string_data.peak_power, string_data.total_current,
       string_data.avg_voltage_in, string_data.avg_voltage_out,
       string_data.avg_temperature, string_data.avg_efficiency,
@@ -1634,13 +1730,15 @@ void TigoWebServer::build_inverters_json(PSRAMString& json) {
           if (!first_str) strings_json.append(",");
           first_str = false;
           
-          char buffer[640];
+          char buffer[680];
           snprintf(buffer, sizeof(buffer),
             "{\"label\":\"%s\",\"display_label\":\"%s\",\"mppt\":\"%s\","
+            "\"panel_rating_w\":%u,"
             "\"total_power\":%.1f,\"peak_power\":%.1f,"
             "\"active_devices\":%d,\"total_devices\":%d}",
             string_data.string_label.c_str(), string_data.display_label.c_str(),
             string_data.inverter_label.c_str(),
+            (unsigned) string_data.panel_rating_w,
             string_data.total_power, string_data.peak_power,
             string_data.active_device_count, string_data.total_device_count);
           strings_json.append(buffer);
