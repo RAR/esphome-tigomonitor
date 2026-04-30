@@ -1361,8 +1361,8 @@
       document.getElementById('diag-ssid').textContent = status.wifi_ssid || '—';
       document.getElementById('diag-ip').textContent = status.ip_address || '—';
       document.getElementById('diag-mac').textContent = status.mac_address || '—';
-      document.getElementById('diag-sockets').textContent = status.active_sockets ?? '—';
-      document.getElementById('diag-sockets-of').textContent = ` / ${status.max_sockets ?? '—'}`;
+      document.getElementById('diag-sockets').innerHTML =
+        `${status.active_sockets ?? '—'}<span class="hist-stat-unit" id="diag-sockets-of"> / ${status.max_sockets ?? '—'}</span>`;
       document.getElementById('diag-tasks').textContent = `${status.task_count || 0} FreeRTOS tasks`;
 
       // UART telemetry
