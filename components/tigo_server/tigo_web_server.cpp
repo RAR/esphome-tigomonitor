@@ -614,15 +614,41 @@ bool TigoWebServer::check_web_auth(httpd_req_t *req) {
 // ===== HTML Page Handlers =====
 
 esp_err_t TigoWebServer::favicon_handler(httpd_req_t *req) {
-  // Simple SVG favicon - solar panel icon
-  const char* favicon_svg = 
-    "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'>"
-    "<rect x='20' y='30' width='60' height='40' fill='#3498db' stroke='#2c3e50' stroke-width='2'/>"
-    "<line x1='20' y1='50' x2='80' y2='50' stroke='#2c3e50' stroke-width='2'/>"
-    "<line x1='50' y1='30' x2='50' y2='70' stroke='#2c3e50' stroke-width='2'/>"
-    "<path d='M 40 70 L 35 85 L 65 85 L 60 70' fill='#95a5a6' stroke='#2c3e50' stroke-width='2'/>"
+  // Brand mark — same artwork as docs/images/logo.svg and the SPA sidebar
+  // brand-logo. Rounded gradient tile + 3x3 panel grid with a "live" cell
+  // highlight + faint telemetry pulse. Kept inline as a single string so we
+  // don't pay an extra HTTP round-trip + cache miss for an icon.
+  const char *favicon_svg =
+    "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'>"
+    "<defs>"
+      "<linearGradient id='b' x1='0' y1='0' x2='1' y2='1'>"
+        "<stop offset='0%' stop-color='#4ade80'/>"
+        "<stop offset='100%' stop-color='#38bdf8'/>"
+      "</linearGradient>"
+      "<radialGradient id='g' cx='50%' cy='40%' r='60%'>"
+        "<stop offset='0%' stop-color='#fff' stop-opacity='.85'/>"
+        "<stop offset='60%' stop-color='#fff' stop-opacity='.2'/>"
+        "<stop offset='100%' stop-color='#fff' stop-opacity='0'/>"
+      "</radialGradient>"
+    "</defs>"
+    "<rect width='64' height='64' rx='14' fill='url(#b)'/>"
+    "<g transform='translate(10 10)' fill='#061018' fill-opacity='.18'>"
+      "<rect width='13' height='13' rx='2'/>"
+      "<rect x='15' width='13' height='13' rx='2'/>"
+      "<rect x='30' width='13' height='13' rx='2'/>"
+      "<rect y='15' width='13' height='13' rx='2'/>"
+      "<rect x='15' y='15' width='13' height='13' rx='2' fill-opacity='.55'/>"
+      "<rect x='30' y='15' width='13' height='13' rx='2'/>"
+      "<rect y='30' width='13' height='13' rx='2'/>"
+      "<rect x='15' y='30' width='13' height='13' rx='2'/>"
+      "<rect x='30' y='30' width='13' height='13' rx='2'/>"
+    "</g>"
+    "<rect x='25' y='25' width='13' height='13' rx='2' fill='url(#g)'/>"
+    "<path d='M8 50 18 50 22 44 28 52 34 47 40 49 56 49' fill='none' "
+      "stroke='#061018' stroke-opacity='.55' stroke-width='2' "
+      "stroke-linecap='round' stroke-linejoin='round'/>"
     "</svg>";
-  
+
   httpd_resp_set_type(req, "image/svg+xml");
   httpd_resp_set_hdr(req, "Cache-Control", "public, max-age=86400");
   httpd_resp_send(req, favicon_svg, strlen(favicon_svg));
