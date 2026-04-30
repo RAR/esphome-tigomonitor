@@ -679,18 +679,14 @@ esp_err_t TigoWebServer::esp_status_handler(httpd_req_t *req) {
 }
 
 esp_err_t TigoWebServer::history_handler(httpd_req_t *req) {
-  TigoWebServer *server = static_cast<TigoWebServer *>(req->user_ctx);
-
-  if (!server->check_web_auth(req)) {
-    return ESP_OK;
-  }
-
-  PSRAMString html;
-  server->get_history_html(html);
-
+  // /history is now a redirect into the SPA. The /api/history/* endpoints
+  // it used to be paired with stay live (they're consumed from #view-history
+  // inside /app).
+  httpd_resp_set_status(req, "302 Found");
+  httpd_resp_set_hdr(req, "Location", "/app#history");
   httpd_resp_set_type(req, "text/html");
-  httpd_resp_set_hdr(req, "Connection", "close");
-  return httpd_resp_send(req, html.c_str(), html.length());
+  const char *body = "<a href=\"/app#history\">/app#history</a>";
+  return httpd_resp_send(req, body, HTTPD_RESP_USE_STRLEN);
 }
 
 esp_err_t TigoWebServer::app_handler(httpd_req_t *req) {
@@ -2058,12 +2054,6 @@ void TigoWebServer::get_cca_info_html(PSRAMString& html) {
   html.append(CCA_HTML_PRE);
   html.append(api_token_);
   html.append(CCA_HTML_POST);
-}
-
-void TigoWebServer::get_history_html(PSRAMString& html) {
-  html.append(HISTORY_HTML_PRE);
-  html.append(api_token_);
-  html.append(HISTORY_HTML_POST);
 }
 
 void TigoWebServer::get_app_html(PSRAMString& html) {

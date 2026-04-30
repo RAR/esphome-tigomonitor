@@ -113,7 +113,6 @@ class TigoWebServer : public Component {
   void get_esp_status_html(PSRAMString& html);
   void get_yaml_config_html(PSRAMString& html);
   void get_cca_info_html(PSRAMString& html);
-  void get_history_html(PSRAMString& html);
   void get_app_html(PSRAMString& html);
   
   // JSON builders - now write directly to PSRAMString to avoid internal RAM allocation
