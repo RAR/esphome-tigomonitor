@@ -515,7 +515,7 @@ void TigoHistory::flush_and_close() {
   }
 
   // Close each open tsdb_t. tsdb_close_h calls fclose on the underlying
-  // FILE*, which is what triggers esp_littlefs's metadata commit. After
+  // FILE*, which is what triggers esp_littlefs's per-file commit. After
   // tsdb_close_h the handle is freed — null the pointer so any racing
   // /api/tsdb/stats during shutdown returns "no DB" instead of UAF.
   if (system_db_ != nullptr) {
@@ -528,6 +528,23 @@ void TigoHistory::flush_and_close() {
     tsdb_close_h(panel_db_[i]);
     panel_db_[i] = nullptr;
     ESP_LOGI(TAG, "flush_and_close: panels%zu closed", i);
+  }
+
+  // Unmount LittleFS. Per-file fclose commits inode metadata, but the
+  // **filesystem journal** (block allocation map, dir-entry table) only
+  // commits on operations that touch the directory tree — and the tsdb
+  // files re-use one inode for their entire lifetime, so the journal can
+  // sit uncommitted across many writes. esp_vfs_littlefs_unregister()
+  // calls lfs_unmount which does the final journal commit. Without this
+  // every restart wipes the tsdb files; panel_map.json survives only
+  // because save_slot_map_ creates a fresh file each save (the dir-entry
+  // op forces a journal commit as a side effect).
+  esp_err_t uerr = esp_vfs_littlefs_unregister("tsdb");
+  if (uerr == ESP_OK) {
+    ESP_LOGI(TAG, "flush_and_close: LittleFS /tsdb unmounted (journal committed)");
+  } else {
+    ESP_LOGW(TAG, "flush_and_close: LittleFS unmount failed: %s",
+             esp_err_to_name(uerr));
   }
 
   initialized_ = false;
