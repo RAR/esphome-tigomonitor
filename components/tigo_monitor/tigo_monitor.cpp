@@ -3338,40 +3338,45 @@ void TigoMonitorComponent::snapshot_to_history_() {
   SystemSnapshot snap{};
   snap.timestamp = now_ts;
 
-  // This runs on the same FreeRTOS task that updates the cached aggregates,
-  // so no synchronization is needed here. The (long) flash write happens
-  // later on the dedicated writer task, well after this method returns.
-  snap.total_p_w = cached_total_power_in_;
-  snap.period_e_kwh =
-      std::max(0.0f, total_energy_in_kwh_ - last_snapshot_total_e_kwh_);
-  last_snapshot_total_e_kwh_ = total_energy_in_kwh_;
+  // Take the state lock for the gather. The recursive mutex guards the same
+  // aggregates the web-server snapshot getters protect, and matches the pattern
+  // established by fix/state-mutex-snapshots. The actual flash write runs later
+  // on the dedicated writer task — only the in-memory copy happens under lock.
+  {
+    StateLock lock(state_mutex_);
 
-  for (size_t i = 0; i < 4; ++i) {
-    if (i < inverters_.size()) {
-      snap.inv_p_w[i] = inverters_[i].total_power;
-      snap.inv_e_kwh[i] = std::max(
-          0.0f, inverters_[i].total_energy - last_snapshot_inv_e_kwh_[i]);
-      last_snapshot_inv_e_kwh_[i] = inverters_[i].total_energy;
+    snap.total_p_w = cached_total_power_in_;
+    snap.period_e_kwh =
+        std::max(0.0f, total_energy_in_kwh_ - last_snapshot_total_e_kwh_);
+    last_snapshot_total_e_kwh_ = total_energy_in_kwh_;
+
+    for (size_t i = 0; i < 4; ++i) {
+      if (i < inverters_.size()) {
+        snap.inv_p_w[i] = inverters_[i].total_power;
+        snap.inv_e_kwh[i] = std::max(
+            0.0f, inverters_[i].total_energy - last_snapshot_inv_e_kwh_[i]);
+        last_snapshot_inv_e_kwh_[i] = inverters_[i].total_energy;
+      }
     }
-  }
 
-  float sum_t = 0.0f;
-  int n = 0;
-  for (const auto &d : devices_) {
-    if (d.temperature > -50.0f && d.temperature < 150.0f) {
-      sum_t += d.temperature;
-      ++n;
+    float sum_t = 0.0f;
+    int n = 0;
+    for (const auto &d : devices_) {
+      if (d.temperature > -50.0f && d.temperature < 150.0f) {
+        sum_t += d.temperature;
+        ++n;
+      }
     }
-  }
-  snap.temp_avg_c = (n > 0) ? (sum_t / n) : 0.0f;
+    snap.temp_avg_c = (n > 0) ? (sum_t / n) : 0.0f;
 
-  snap.freq_hz = 0.0f;  // not currently extracted from telemetry
-  uint32_t lost_now = missed_frame_count_;
-  uint32_t lost_period =
-      (lost_now >= last_snapshot_frames_lost_) ? (lost_now - last_snapshot_frames_lost_) : 0;
-  snap.frames_lost = (uint16_t) std::min<uint32_t>(lost_period, UINT16_MAX);
-  last_snapshot_frames_lost_ = lost_now;
-  snap.wifi_rssi_dbm = 0;  // TODO: plumb through wifi::global_wifi_component
+    snap.freq_hz = 0.0f;  // not currently extracted from telemetry
+    uint32_t lost_now = missed_frame_count_;
+    uint32_t lost_period =
+        (lost_now >= last_snapshot_frames_lost_) ? (lost_now - last_snapshot_frames_lost_) : 0;
+    snap.frames_lost = (uint16_t) std::min<uint32_t>(lost_period, UINT16_MAX);
+    last_snapshot_frames_lost_ = lost_now;
+    snap.wifi_rssi_dbm = 0;  // TODO: plumb through wifi::global_wifi_component
+  }
 
   history_.enqueue_snapshot(snap);
 }
