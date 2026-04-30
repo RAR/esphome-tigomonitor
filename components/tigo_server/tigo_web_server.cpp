@@ -153,7 +153,7 @@ void TigoWebServer::setup() {
   httpd_config_t config = HTTPD_DEFAULT_CONFIG();
   config.server_port = port_;
   config.ctrl_port = port_ + 1;
-  config.max_uri_handlers = 33;  // + /api/tsdb/snapshot_now diagnostic
+  config.max_uri_handlers = 32;  // + /api/tsdb/stats for the SPA diagnostics view
   config.stack_size = 8192;
   config.lru_purge_enable = true;  // Enable LRU purging of connections
   config.max_open_sockets = 4;     // Limit concurrent connections to reduce memory
@@ -404,14 +404,6 @@ void TigoWebServer::setup() {
       .user_ctx = this
     };
     httpd_register_uri_handler(server_, &api_tsdb_stats_uri);
-
-    httpd_uri_t api_tsdb_snapshot_now_uri = {
-      .uri = "/api/tsdb/snapshot_now",
-      .method = HTTP_POST,
-      .handler = api_tsdb_snapshot_now_handler,
-      .user_ctx = this
-    };
-    httpd_register_uri_handler(server_, &api_tsdb_snapshot_now_uri);
 #endif
 
     // Log web authentication status
@@ -2433,24 +2425,6 @@ esp_err_t TigoWebServer::api_panels_handler(httpd_req_t *req) {
   httpd_resp_set_type(req, "application/json");
   httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
   httpd_resp_send(req, json.c_str(), json.length());
-  return ESP_OK;
-}
-
-esp_err_t TigoWebServer::api_tsdb_snapshot_now_handler(httpd_req_t *req) {
-  TigoWebServer *server = static_cast<TigoWebServer *>(req->user_ctx);
-  if (!server->check_api_auth(req)) return ESP_OK;
-  if (server->parent_ == nullptr) {
-    httpd_resp_set_status(req, "503 Service Unavailable");
-    httpd_resp_sendstr(req, "{\"error\":\"monitor not bound\"}");
-    return ESP_OK;
-  }
-  // Fire snapshot_to_history_ immediately. Skips the 5-min interval so we
-  // can test persistence on a desk unit without waiting around. No-op if
-  // wall-clock isn't yet valid (snapshot_to_history_ self-skips in that
-  // case and logs a debug line).
-  server->parent_->force_snapshot_now();
-  httpd_resp_set_type(req, "application/json");
-  httpd_resp_sendstr(req, "{\"status\":\"ok\",\"message\":\"snapshot enqueued\"}");
   return ESP_OK;
 }
 

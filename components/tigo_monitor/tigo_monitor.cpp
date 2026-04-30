@@ -425,18 +425,11 @@ void TigoMonitorComponent::dump_config() {
 }
 
 void TigoMonitorComponent::on_shutdown() {
-  ESP_LOGI(TAG, "on_shutdown: ENTRY — saving persistent data to flash...");
+  ESP_LOGI(TAG, "System shutdown detected - saving persistent data to flash...");
   save_persistent_data();
 #ifdef TIGO_TSDB_AVAILABLE
-  // Cleanly close every open tsdb_t handle. esp_littlefs only commits
-  // metadata for long-lived r+b file handles on close — without this,
-  // every restart wipes the in-progress tsdb files even though writes
-  // fsync along the way (slot_map.json survives because save_slot_map_
-  // does an open→write→close every time).
-  ESP_LOGI(TAG, "on_shutdown: calling history_.flush_and_close()");
   history_.flush_and_close();
 #endif
-  ESP_LOGI(TAG, "on_shutdown: EXIT");
 }
 
 float TigoMonitorComponent::get_setup_priority() const {

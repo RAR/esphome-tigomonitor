@@ -11,8 +11,6 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
-#include <errno.h>
-#include <sys/stat.h>  // stat
 #include <unistd.h>  // fsync, fileno
 
 namespace esphome {
@@ -79,41 +77,6 @@ static constexpr const char *kPanelMapPath = "/tsdb/panel_map.json";
 bool TigoHistory::init() {
   if (!mount_filesystem_())
     return false;
-
-  // Diagnostic: stat each known tsdb path and the marker. opendir/readdir
-  // aren't implemented for esp_littlefs at the newlib layer (they're stubs
-  // that always fail), so per-path stat is the way.
-  {
-    const char *paths[] = {
-        "/tsdb/system.tsdb",
-        "/tsdb/panels0.tsdb",
-        "/tsdb/panels1.tsdb",
-        "/tsdb/panels2.tsdb",
-        "/tsdb/panel_map.json",
-        "/tsdb/shutdown_marker.json",
-        "/tsdb/system.tsdb.pulse",  // should never persist — pulse is a unlink-after-close test
-    };
-    for (const char *p : paths) {
-      struct stat st = {};
-      if (stat(p, &st) == 0) {
-        ESP_LOGI(TAG, "boot stat: %s = %ld bytes", p, (long) st.st_size);
-      } else {
-        ESP_LOGI(TAG, "boot stat: %s = MISSING", p);
-      }
-    }
-
-    // Read back the shutdown marker if present so we can see prior session's
-    // ms-since-boot value and confirm the open-write-close pattern persisted.
-    FILE *m = fopen("/tsdb/shutdown_marker.json", "rb");
-    if (m != nullptr) {
-      char buf[64] = {};
-      size_t r = fread(buf, 1, sizeof(buf) - 1, m);
-      fclose(m);
-      ESP_LOGI(TAG, "boot marker: shutdown_marker.json content (%zu bytes): %s",
-               r, buf);
-    }
-  }
-
   if (!init_system_db_())
     return false;
   // Panel DBs are opened lazily — load_slot_map_() will open any DBs
@@ -516,55 +479,32 @@ void TigoHistory::writer_task_loop_() {
       }
     }
 
-    // Force LittleFS to commit each tsdb file's dir entry. Without this,
-    // fopen("r+b") + fwrite + fflush + fsync leaves the file in an
-    // un-published state — every reboot starts with system.tsdb missing
-    // and the previous session's data unreadable. tsdb_sync_h does
-    // fclose+fopen("r+b") so the dir-entry commit fires the way
-    // panel_map.json's open-write-close pattern does.
-    uint32_t t_sync_start = (uint32_t) (esp_timer_get_time() / 1000);
-    if (system_db_ != nullptr) tsdb_sync_h(system_db_);
-    for (size_t i = 0; i < kNumPanelDbs; ++i) {
-      if (panel_db_[i] != nullptr) tsdb_sync_h(panel_db_[i]);
-    }
-    uint32_t t_sync_total = (uint32_t) (esp_timer_get_time() / 1000) - t_sync_start;
-
     UBaseType_t hwm = uxTaskGetStackHighWaterMark(nullptr);
     if (err != ESP_OK) {
       ESP_LOGW(TAG, "tsdb_write @ %lu failed after %u ms: %s (stack hwm %u B)",
                (unsigned long) row.timestamp, (unsigned) t_sys,
                esp_err_to_name(err), (unsigned) (hwm * sizeof(StackType_t)));
     } else {
-      ESP_LOGI(TAG,
-               "tsdb_write @ %lu ok (sys %u ms, panels %u ms, sync %u ms, stack hwm %u B)",
+      ESP_LOGD(TAG,
+               "tsdb_write @ %lu ok (sys %u ms, panels %u ms, stack hwm %u B)",
                (unsigned long) row.timestamp, (unsigned) t_sys,
-               (unsigned) panel_total_ms, (unsigned) t_sync_total,
+               (unsigned) panel_total_ms,
                (unsigned) (hwm * sizeof(StackType_t)));
     }
   }
 }
 
 void TigoHistory::flush_and_close() {
-  ESP_LOGI(TAG, "flush_and_close: ENTRY (initialized=%d)", initialized_ ? 1 : 0);
-  if (!initialized_) {
-    ESP_LOGW(TAG, "flush_and_close: not initialized — bailing out");
-    return;
-  }
+  if (!initialized_) return;
 
-  // Give the writer a brief window to drain whatever's already enqueued. We
-  // don't pull the task down — its queue read is a portMAX_DELAY block, but
-  // anything already received will have run tsdb_write_h before we get here.
-  // 200 ms covers the common case (one row, ~120 ms total flash IO).
-  if (queue_ != nullptr) {
-    UBaseType_t pending = uxQueueMessagesWaiting(queue_);
-    if (pending > 0) {
-      ESP_LOGI(TAG, "flush_and_close: waiting on %u queued snapshot(s)",
-               (unsigned) pending);
-      uint32_t deadline = (uint32_t) (esp_timer_get_time() / 1000) + 800;
-      while (uxQueueMessagesWaiting(queue_) > 0 &&
-             (uint32_t) (esp_timer_get_time() / 1000) < deadline) {
-        vTaskDelay(pdMS_TO_TICKS(20));
-      }
+  // Drain whatever's already enqueued (best effort, 800 ms cap). Anything
+  // already received by the writer task will have run tsdb_write_h before
+  // we get here; this just lets queued items complete before close.
+  if (queue_ != nullptr && uxQueueMessagesWaiting(queue_) > 0) {
+    uint32_t deadline = (uint32_t) (esp_timer_get_time() / 1000) + 800;
+    while (uxQueueMessagesWaiting(queue_) > 0 &&
+           (uint32_t) (esp_timer_get_time() / 1000) < deadline) {
+      vTaskDelay(pdMS_TO_TICKS(20));
     }
   }
 
@@ -575,13 +515,11 @@ void TigoHistory::flush_and_close() {
   if (system_db_ != nullptr) {
     tsdb_close_h(system_db_);
     system_db_ = nullptr;
-    ESP_LOGI(TAG, "flush_and_close: system_db closed");
   }
   for (size_t i = 0; i < kNumPanelDbs; ++i) {
     if (panel_db_[i] == nullptr) continue;
     tsdb_close_h(panel_db_[i]);
     panel_db_[i] = nullptr;
-    ESP_LOGI(TAG, "flush_and_close: panels%zu closed", i);
   }
 
   // Unmount LittleFS. Per-file fclose commits inode metadata, but the
@@ -593,59 +531,12 @@ void TigoHistory::flush_and_close() {
   // every restart wipes the tsdb files; panel_map.json survives only
   // because save_slot_map_ creates a fresh file each save (the dir-entry
   // op forces a journal commit as a side effect).
-  // Smoke test: write a marker file using the simple open(wb)+write+fclose
-  // pattern that save_slot_map_ uses. We know that pattern works on the
-  // live unit (panel_map.json persists). If THIS marker survives reboot
-  // but the tsdb files don't, the issue is uniquely about long-lived r+b
-  // handles. If even THIS doesn't survive, the FS or partition itself is
-  // broken on this unit.
-  {
-    FILE *m = fopen("/tsdb/shutdown_marker.json", "wb");
-    if (m == nullptr) {
-      ESP_LOGW(TAG, "marker: fopen failed errno=%d", errno);
-    } else {
-      uint32_t now = (uint32_t) (esp_timer_get_time() / 1000);
-      char buf[64];
-      int n = snprintf(buf, sizeof(buf), "{\"ms\":%lu}\n", (unsigned long) now);
-      size_t w = fwrite(buf, 1, (size_t) n, m);
-      fflush(m);
-      fsync(fileno(m));
-      fclose(m);
-      ESP_LOGI(TAG, "marker: wrote shutdown_marker.json (%zu bytes)", w);
-    }
-  }
-
-  // Per-path stat right before unmount. opendir/readdir aren't implemented
-  // for esp_littlefs (newlib stub), so we enumerate by known path.
-  {
-    const char *paths[] = {
-        "/tsdb/system.tsdb",
-        "/tsdb/panels0.tsdb",
-        "/tsdb/panels1.tsdb",
-        "/tsdb/panels2.tsdb",
-        "/tsdb/panel_map.json",
-        "/tsdb/shutdown_marker.json",
-    };
-    for (const char *p : paths) {
-      struct stat st = {};
-      if (stat(p, &st) == 0) {
-        ESP_LOGI(TAG, "pre-unmount stat: %s = %ld bytes", p, (long) st.st_size);
-      } else {
-        ESP_LOGI(TAG, "pre-unmount stat: %s = MISSING", p);
-      }
-    }
-  }
-
   esp_err_t uerr = esp_vfs_littlefs_unregister("tsdb");
-  if (uerr == ESP_OK) {
-    ESP_LOGI(TAG, "flush_and_close: LittleFS /tsdb unmounted (journal committed)");
-  } else {
+  if (uerr != ESP_OK) {
     ESP_LOGW(TAG, "flush_and_close: LittleFS unmount failed: %s",
              esp_err_to_name(uerr));
   }
-
   initialized_ = false;
-  ESP_LOGI(TAG, "flush_and_close: EXIT");
 }
 
 }  // namespace tigo_monitor
