@@ -41,12 +41,13 @@ CONFIG_SCHEMA = cv.Schema({
 # of truth, and the generated header is a build artifact (gitignored).
 
 # Pages retired into the SPA still live as 302 redirects to /app#<view>:
+#   - '/'       — see dashboard_handler  (302 → /app#dashboard)
 #   - 'history' (R3) — see history_handler
 #   - 'nodes'   (R4) — see node_table_handler
 #   - 'status'  (R5) — see esp_status_handler (renamed to /app#diagnostics)
 #   - 'yaml'    (R6) — see yaml_config_handler (renamed to /app#tools)
 #   - 'cca'     (R7) — see cca_info_handler
-WEB_PAGES = ['dashboard', 'app']
+WEB_PAGES = ['app']
 TOKEN_PLACEHOLDER = '__TIGO_API_TOKEN__'
 
 

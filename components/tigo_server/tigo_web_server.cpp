@@ -622,35 +622,13 @@ esp_err_t TigoWebServer::favicon_handler(httpd_req_t *req) {
 }
 
 esp_err_t TigoWebServer::dashboard_handler(httpd_req_t *req) {
-  TigoWebServer *server = static_cast<TigoWebServer *>(req->user_ctx);
-  
-  // Check web authentication
-  if (!server->check_web_auth(req)) {
-    return ESP_OK;
-  }
-  
-  // Use PSRAM for large HTML content
-  PSRAMString html;
-  server->get_dashboard_html(html);
-  
+  // / is now a redirect into the SPA — the legacy dashboard.html is retired.
+  // Matches the R3-R7 pattern.
+  httpd_resp_set_status(req, "302 Found");
+  httpd_resp_set_hdr(req, "Location", "/app#dashboard");
   httpd_resp_set_type(req, "text/html");
-  
-  // Send in chunks to avoid internal RAM buffering
-  const char* data = html.c_str();
-  size_t len = html.length();
-  const size_t chunk_size = 4096;
-  size_t sent = 0;
-  
-  while (sent < len) {
-    size_t to_send = (len - sent > chunk_size) ? chunk_size : (len - sent);
-    if (httpd_resp_send_chunk(req, data + sent, to_send) != ESP_OK) {
-      return ESP_FAIL;
-    }
-    sent += to_send;
-  }
-  httpd_resp_send_chunk(req, nullptr, 0);
-  
-  return ESP_OK;
+  const char *body = "<a href=\"/app#dashboard\">/app#dashboard</a>";
+  return httpd_resp_send(req, body, HTTPD_RESP_USE_STRLEN);
 }
 
 esp_err_t TigoWebServer::node_table_handler(httpd_req_t *req) {
@@ -2116,12 +2094,6 @@ void TigoWebServer::build_yaml_json(PSRAMString& json, const std::set<std::strin
 }
 
 // ===== HTML Page Generators =====
-
-void TigoWebServer::get_dashboard_html(PSRAMString& html) {
-  html.append(DASHBOARD_HTML_PRE);
-  html.append(api_token_);
-  html.append(DASHBOARD_HTML_POST);
-}
 
 void TigoWebServer::get_app_html(PSRAMString& html) {
   html.append(APP_HTML_PRE);

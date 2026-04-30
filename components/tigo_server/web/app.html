@@ -334,6 +334,15 @@
   .toast.ok { border-color: var(--good); }
   .toast.err { border-color: var(--bad); }
 
+  /* Color legend */
+  .legend {
+    display: flex; flex-wrap: wrap; gap: 16px;
+    background: var(--bg-2); border: 1px solid var(--border); border-radius: 10px;
+    padding: 10px 16px; margin-bottom: 24px; font-size: 11px; color: var(--text-dim);
+  }
+  .legend-item { display: flex; align-items: center; gap: 6px; }
+  .legend-swatch { width: 14px; height: 14px; border-radius: 3px; }
+
   /* Alerts */
   .alerts { background: var(--bg-2); border: 1px solid var(--border); border-radius: 10px; padding: 16px 20px; }
   .alerts-empty { color: var(--text-dim); font-size: 12px; padding: 8px 0; }
@@ -409,9 +418,9 @@
           <div class="hero-trend" id="hero-active-sub">—</div>
         </div>
         <div class="hero-card">
-          <div class="hero-label">Avg temperature</div>
-          <div class="hero-val"><span id="hero-temp">—</span><span class="unit">°C</span></div>
-          <div class="hero-trend">across reporting devices</div>
+          <div class="hero-label">This month</div>
+          <div class="hero-val"><span id="hero-month">—</span><span class="unit">kWh</span></div>
+          <div class="hero-trend" id="hero-month-sub">—</div>
         </div>
       </div>
 
@@ -420,6 +429,13 @@
         <div class="section-sub" id="dash-inv-sub">—</div>
       </div>
       <div class="inv-grid" id="inv-grid"></div>
+
+      <div class="legend">
+        <div class="legend-item"><div class="legend-swatch" style="background:var(--good)"></div> Healthy (&gt;90% string median)</div>
+        <div class="legend-item"><div class="legend-swatch" style="background:var(--warn)"></div> Underperforming (60–90%)</div>
+        <div class="legend-item"><div class="legend-swatch" style="background:var(--bad)"></div> Fault / &lt;60%</div>
+        <div class="legend-item"><div class="legend-swatch" style="background:var(--bg-3);border:1px dashed var(--text-faint)"></div> Stale / no data</div>
+      </div>
 
       <div class="section-head">
         <div class="section-title">Alerts</div>
@@ -944,12 +960,40 @@
     return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
   }
 
-  function renderHero(ov) {
-    const [val, unit] = fmtPower(ov.total_power || 0);
+  // Sliding window for "% vs 5 min ago" — keep ~5 min of (ts, power) samples
+  // and compare current against the oldest in the window. Survives transient
+  // dips that a 1-tick prev-vs-now comparison would amplify.
+  const heroPowerHist = [];  // [{ts: ms, p: W}, ...]
+
+  function renderHero(ov, monthSum, monthDays, peakPower) {
+    const nowMs = Date.now();
+    const power = ov.total_power || 0;
+    heroPowerHist.push({ ts: nowMs, p: power });
+    while (heroPowerHist.length > 1 && heroPowerHist[0].ts < nowMs - 5 * 60 * 1000) {
+      heroPowerHist.shift();
+    }
+
+    const [val, unit] = fmtPower(power);
     document.getElementById('hero-power').textContent = val;
     document.getElementById('hero-power-unit').textContent = unit;
+
+    // Trend: % delta vs the oldest sample in the 5-min window. Falls back to
+    // the device-count line until we have a real comparison sample.
+    const oldest = heroPowerHist[0];
+    const trendBits = [];
+    if (oldest && oldest.p > 5 && (nowMs - oldest.ts) > 30 * 1000) {
+      const pct = ((power - oldest.p) / oldest.p) * 100;
+      const sign = pct >= 0 ? '+' : '';
+      trendBits.push(`${sign}${pct.toFixed(0)}% vs. 5 min ago`);
+    }
+    if (peakPower && peakPower > 0 && power > 0) {
+      const pctPeak = (power / peakPower) * 100;
+      trendBits.push(`${pctPeak.toFixed(0)}% of peak`);
+    }
     document.getElementById('hero-power-sub').textContent =
-      `${ov.active_devices || 0} of ${ov.max_devices || 0} reporting`;
+      trendBits.length ? trendBits.join(' · ')
+                       : `${ov.active_devices || 0} of ${ov.max_devices || 0} reporting`;
+
     document.getElementById('hero-energy').textContent =
       (ov.total_energy_in ?? ov.total_energy ?? 0).toFixed(1);
     document.getElementById('hero-active').textContent = ov.active_devices ?? 0;
@@ -957,8 +1001,15 @@
     const ratio = ov.max_devices ? ((ov.active_devices || 0) / ov.max_devices) : 0;
     document.getElementById('hero-active-sub').textContent =
       `${(ratio * 100).toFixed(0)}% online`;
-    document.getElementById('hero-temp').textContent =
-      (ov.avg_temperature || 0).toFixed(1);
+
+    document.getElementById('hero-month').textContent =
+      monthSum != null ? monthSum.toFixed(0) : '—';
+    if (monthSum != null && monthDays > 0) {
+      document.getElementById('hero-month-sub').textContent =
+        `Avg ${(monthSum / monthDays).toFixed(1)} kWh/day`;
+    } else {
+      document.getElementById('hero-month-sub').textContent = '—';
+    }
   }
 
   function renderInverters(inverters, devices) {
@@ -1132,21 +1183,47 @@
       return;
     }
     try {
-      const [ovR, invR, devR] = await Promise.all([
+      const [ovR, invR, devR, histR] = await Promise.all([
         apiFetch('/api/overview'),
         apiFetch('/api/inverters'),
         apiFetch('/api/devices'),
+        apiFetch('/api/energy/history'),
       ]);
-      const ov  = await ovR.json();
-      const inv = await invR.json();
-      const dev = await devR.json();
+      const ov   = await ovR.json();
+      const inv  = await invR.json();
+      const dev  = await devR.json();
+      const hist = histR.ok ? await histR.json() : { history: [] };
 
-      renderHero(ov);
+      // "This month" — sum of daily entries within current YYYY-MM, plus
+      // today's accumulating value (today isn't in history yet).
+      const now = new Date();
+      const yyyymm = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+      let monthSum = 0;
+      let monthDays = 0;
+      for (const e of (hist.history || [])) {
+        if (e.date && e.date.startsWith(yyyymm)) {
+          monthSum += e.energy || 0;
+          monthDays += 1;
+        }
+      }
+      // Add today's running total (not yet in history). Days-counted gets
+      // +1 only if today actually has any power yet.
+      const today = ov.total_energy_in ?? ov.total_energy ?? 0;
+      monthSum += today;
+      if (today > 0) monthDays += 1;
+
+      // Peak power: max across inverter peak_power fields. Single source of
+      // truth — overview doesn't carry it.
+      let peakPower = 0;
+      for (const i of (inv.inverters || [])) {
+        if ((i.peak_power || 0) > peakPower) peakPower = i.peak_power;
+      }
+
+      renderHero(ov, monthSum, monthDays, peakPower);
       renderInverters(inv.inverters || [], dev.devices || []);
       renderAlerts(inv.inverters || [], dev.devices || []);
-      const now = new Date();
       document.getElementById('dash-meta').textContent =
-        `refreshing every 5s · last update ${now.toLocaleTimeString()}`;
+        `refreshing every 5s · last update ${new Date().toLocaleTimeString()}`;
       dashLastErr = null;
     } catch (e) {
       if (dashLastErr !== e.message) {
