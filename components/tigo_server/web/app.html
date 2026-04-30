@@ -687,11 +687,39 @@
     <section class="view" id="view-cca">
       <div class="topbar">
         <h1>CCA Info</h1>
-        <div class="topbar-meta">Tigo CCA configuration mirror</div>
+        <div class="topbar-meta" id="cca-meta">Tigo CCA configuration mirror</div>
       </div>
-      <div class="placeholder">
-        <div class="placeholder-title">CCA view — coming in R7</div>
-        <div style="margin-top:12px"><a class="placeholder-link" href="./cca" id="link-cca">Use today's /cca page →</a></div>
+
+      <div class="section-head">
+        <div class="section-title">Connection</div>
+        <div class="section-sub" id="cca-conn-sub">—</div>
+      </div>
+      <div class="hist-stat-grid">
+        <div class="hist-stat-card">
+          <div class="hist-stat-label">CCA IP address</div>
+          <div class="hist-stat-val" id="cca-ip" style="font-size:18px;font-family:ui-monospace,Menlo,monospace">—</div>
+          <div class="hist-stat-sub">configured target</div>
+        </div>
+        <div class="hist-stat-card">
+          <div class="hist-stat-label">Last sync</div>
+          <div class="hist-stat-val" id="cca-last-sync" style="font-size:18px">—</div>
+          <div class="hist-stat-sub" id="cca-last-sync-sub">since boot</div>
+        </div>
+        <div class="hist-stat-card">
+          <div class="hist-stat-label">Status</div>
+          <div class="hist-stat-val" id="cca-status" style="font-size:18px">—</div>
+          <div class="hist-stat-sub">live link state</div>
+        </div>
+      </div>
+
+      <div class="section-head">
+        <div class="section-title">Device information</div>
+        <div class="section-sub">
+          <button class="btn" id="cca-refresh-btn">Refresh from CCA</button>
+        </div>
+      </div>
+      <div class="tools-card">
+        <div id="cca-device-info" style="color:var(--text-dim)">Loading CCA device information…</div>
       </div>
     </section>
   </main>
@@ -724,7 +752,7 @@
 
   // Adjust placeholder "use today's page" links so they point at sibling URLs
   // under the same base (works for HA Ingress / nested deployments).
-  for (const id of ['link-history', 'link-nodes', 'link-status', 'link-cca']) {
+  for (const id of ['link-history', 'link-nodes', 'link-status']) {
     const el = document.getElementById(id);
     if (!el) continue;
     const stub = el.getAttribute('href').replace(/^\.\//, '');
@@ -1693,6 +1721,179 @@
 
   document.querySelector('#nav button[data-view="tools"]').addEventListener('click', refreshTools);
   if (window.location.hash === '#tools') refreshTools();
+
+  // ============================================================
+  // R7 — CCA view (Tigo CCA configuration mirror)
+  // ============================================================
+
+  const CCA_FIELD_LABELS = {
+    serial: 'Serial number',
+    sw_version: 'Software version',
+    sysid: 'System ID',
+    kernel_version: 'Kernel version',
+    discovery: 'Discovery mode',
+    fw_config_status: 'Firmware config status',
+    sysconfig_ts: 'Last cloud config sync',
+    hw_version: 'Hardware version',
+    model: 'Model',
+    mac_address: 'MAC address',
+    ip_address: 'IP address',
+    subnet_mask: 'Subnet mask',
+    gateway: 'Gateway',
+    dns: 'DNS server',
+    ntp_server: 'NTP server',
+    timezone: 'Timezone',
+    cpu_load: 'CPU load',
+    memory_total: 'Total memory',
+    memory_free: 'Free memory',
+    disk_total: 'Total disk',
+    disk_free: 'Free disk',
+    temperature: 'Temperature',
+    panel_count: 'Panel count',
+    optimizer_count: 'Optimizer count',
+    inverter_count: 'Inverter count',
+    string_count: 'String count',
+    cloud_connected: 'Cloud connected',
+    last_cloud_sync: 'Last cloud sync',
+    api_version: 'API version',
+  };
+
+  function ccaFmtSyncAge(seconds) {
+    if (seconds == null || seconds === 0 || seconds > 4294967) return 'Never';
+    if (seconds < 60) return `${seconds}s ago`;
+    if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
+    if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
+    return `${Math.floor(seconds / 86400)}d ago`;
+  }
+
+  function ccaFmtTimestamp(ts) {
+    if (!ts) return 'Never';
+    return new Date(ts * 1000).toLocaleString();
+  }
+
+  function ccaPrettyKey(key) {
+    return key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+  }
+
+  function ccaRenderStatus(label, badgeClass) {
+    return `<span class="badge ${badgeClass}">${label}</span>`;
+  }
+
+  function ccaFormatValue(key, value) {
+    if (key === 'sysconfig_ts') return ccaFmtTimestamp(value);
+    if (key === 'discovery')
+      return value ? ccaRenderStatus('Active', 'ok') : ccaRenderStatus('Inactive', 'warn');
+    if (key === 'cloud_connected')
+      return value ? ccaRenderStatus('Yes', 'ok') : ccaRenderStatus('No', 'bad');
+    if (typeof value === 'boolean')
+      return value ? ccaRenderStatus('Yes', 'ok') : ccaRenderStatus('No', 'warn');
+    if (typeof value === 'object' && value !== null) return JSON.stringify(value);
+    return String(value);
+  }
+
+  function ccaStatusBadge(code) {
+    if (code === 0) return ccaRenderStatus('OK', 'ok');
+    if (code === 2) return ccaRenderStatus('Warning', 'warn');
+    if (code === -1) return ccaRenderStatus('N/A', 'stale');
+    return ccaRenderStatus('Error', 'bad');
+  }
+
+  function ccaSetStatusBadge(state) {
+    const el = document.getElementById('cca-status');
+    if (state === 'connected') el.innerHTML = ccaRenderStatus('Connected', 'ok');
+    else if (state === 'refreshing') el.innerHTML = ccaRenderStatus('Refreshing', 'warn');
+    else if (state === 'error') el.innerHTML = ccaRenderStatus('Error', 'bad');
+    else if (state === 'failed') el.innerHTML = ccaRenderStatus('Failed', 'bad');
+    else el.innerHTML = ccaRenderStatus('Checking…', 'warn');
+  }
+
+  function ccaRenderDeviceInfo(deviceInfo) {
+    const target = document.getElementById('cca-device-info');
+    if (!deviceInfo || deviceInfo.error) {
+      const msg = deviceInfo && deviceInfo.error ? deviceInfo.error : 'Unknown error';
+      target.innerHTML = `<div style="color:var(--bad)">Failed to retrieve CCA information: ${msg}</div>`;
+      return false;
+    }
+
+    const statusItems = Array.isArray(deviceInfo.status) ? deviceInfo.status : [];
+    let html = '<div class="hist-stat-grid">';
+
+    for (const [key, value] of Object.entries(deviceInfo)) {
+      if (key === 'status' && Array.isArray(value)) continue;
+      if (key === 'code') continue;          // internal
+      if (key === 'UTS' || key === 'uts') continue;  // unreliable
+
+      const label = CCA_FIELD_LABELS[key] || ccaPrettyKey(key);
+      html += `<div class="hist-stat-card">
+        <div class="hist-stat-label">${label}</div>
+        <div class="hist-stat-val" style="font-size:14px;word-break:break-word">${ccaFormatValue(key, value)}</div>
+      </div>`;
+    }
+
+    for (const item of statusItems) {
+      const label = item.name || 'Status';
+      if (label.startsWith('S/N:') || label.startsWith('S/W:')) continue;  // dup of main fields
+      html += `<div class="hist-stat-card">
+        <div class="hist-stat-label">${label}</div>
+        <div class="hist-stat-val" style="font-size:14px">${ccaStatusBadge(item.status)}</div>
+      </div>`;
+    }
+
+    html += '</div>';
+    target.innerHTML = html;
+    return true;
+  }
+
+  async function refreshCca() {
+    if (!document.getElementById('view-cca').classList.contains('active')) return;
+    try {
+      const r = await apiFetch('/api/cca');
+      if (!r.ok) throw new Error(`/api/cca ${r.status}`);
+      const data = await r.json();
+
+      document.getElementById('cca-ip').textContent = data.cca_ip || 'Not configured';
+      document.getElementById('cca-last-sync').textContent =
+        ccaFmtSyncAge(data.last_sync_seconds_ago);
+
+      let deviceInfo = null;
+      try { deviceInfo = JSON.parse(data.device_info); }
+      catch (_) { deviceInfo = null; }
+
+      const ok = ccaRenderDeviceInfo(deviceInfo);
+      ccaSetStatusBadge(ok ? 'connected' : 'error');
+      document.getElementById('cca-meta').textContent =
+        `last update ${new Date().toLocaleTimeString()}`;
+    } catch (e) {
+      ccaSetStatusBadge('failed');
+      document.getElementById('cca-device-info').innerHTML =
+        `<div style="color:var(--bad)">Error loading CCA information: ${e.message}</div>`;
+      document.getElementById('cca-meta').textContent = `error: ${e.message}`;
+    }
+  }
+
+  document.getElementById('cca-refresh-btn').addEventListener('click', async () => {
+    ccaSetStatusBadge('refreshing');
+    document.getElementById('cca-device-info').innerHTML =
+      '<div style="color:var(--text-dim)">Refreshing CCA device information…</div>';
+    try {
+      const r = await apiFetch('/api/cca/refresh');
+      if (!r.ok) throw new Error('refresh request failed');
+      // Give the CCA a moment to respond before re-fetching.
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      await refreshCca();
+    } catch (e) {
+      ccaSetStatusBadge('failed');
+      document.getElementById('cca-device-info').innerHTML =
+        `<div style="color:var(--bad)">Failed to refresh: ${e.message}</div>`;
+    }
+  });
+
+  document.querySelector('#nav button[data-view="cca"]').addEventListener('click', refreshCca);
+  if (window.location.hash === '#cca') refreshCca();
+  // Same 30s cadence the standalone /cca page used.
+  setInterval(() => {
+    if (document.getElementById('view-cca').classList.contains('active')) refreshCca();
+  }, 30000);
 </script>
 </body>
 </html>

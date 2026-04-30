@@ -110,7 +110,6 @@ class TigoWebServer : public Component {
   bool check_web_auth(httpd_req_t *req);
   tigo_monitor::TigoMonitorComponent *get_parent_from_req(httpd_req_t *req);
   void get_dashboard_html(PSRAMString& html);
-  void get_cca_info_html(PSRAMString& html);
   void get_app_html(PSRAMString& html);
   
   // JSON builders - now write directly to PSRAMString to avoid internal RAM allocation

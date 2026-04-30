@@ -860,34 +860,13 @@ esp_err_t TigoWebServer::api_yaml_handler(httpd_req_t *req) {
 }
 
 esp_err_t TigoWebServer::cca_info_handler(httpd_req_t *req) {
-  TigoWebServer *server = static_cast<TigoWebServer *>(req->user_ctx);
-  
-  // Check web authentication
-  if (!server->check_web_auth(req)) {
-    return ESP_OK;
-  }
-  
-  PSRAMString html;
-  server->get_cca_info_html(html);
-  
+  // /cca is now a redirect into the SPA's CCA view (R7). The /api/cca and
+  // /api/cca/refresh endpoints stay live and are consumed there.
+  httpd_resp_set_status(req, "302 Found");
+  httpd_resp_set_hdr(req, "Location", "/app#cca");
   httpd_resp_set_type(req, "text/html");
-  
-  // Send in chunks to avoid internal RAM buffering
-  const char* data = html.c_str();
-  size_t len = html.length();
-  const size_t chunk_size = 4096;
-  size_t sent = 0;
-  
-  while (sent < len) {
-    size_t to_send = (len - sent > chunk_size) ? chunk_size : (len - sent);
-    if (httpd_resp_send_chunk(req, data + sent, to_send) != ESP_OK) {
-      return ESP_FAIL;
-    }
-    sent += to_send;
-  }
-  httpd_resp_send_chunk(req, nullptr, 0);
-  
-  return ESP_OK;
+  const char *body = "<a href=\"/app#cca\">/app#cca</a>";
+  return httpd_resp_send(req, body, HTTPD_RESP_USE_STRLEN);
 }
 
 esp_err_t TigoWebServer::api_cca_info_handler(httpd_req_t *req) {
@@ -1989,12 +1968,6 @@ void TigoWebServer::get_dashboard_html(PSRAMString& html) {
   html.append(DASHBOARD_HTML_PRE);
   html.append(api_token_);
   html.append(DASHBOARD_HTML_POST);
-}
-
-void TigoWebServer::get_cca_info_html(PSRAMString& html) {
-  html.append(CCA_HTML_PRE);
-  html.append(api_token_);
-  html.append(CCA_HTML_POST);
 }
 
 void TigoWebServer::get_app_html(PSRAMString& html) {
