@@ -103,6 +103,7 @@ class TigoWebServer : public Component {
   static esp_err_t api_history_panel_handler(httpd_req_t *req);
   static esp_err_t api_panels_handler(httpd_req_t *req);
   static esp_err_t api_tsdb_stats_handler(httpd_req_t *req);
+  static esp_err_t api_tsdb_snapshot_now_handler(httpd_req_t *req);
 #endif
   
   // Helper functions

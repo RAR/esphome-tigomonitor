@@ -677,6 +677,12 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   float last_snapshot_inv_e_kwh_[4] = {0, 0, 0, 0};
   uint32_t last_snapshot_frames_lost_ = 0;
   void snapshot_to_history_();
+
+ public:
+  // Public hook so the web server can force-fire a snapshot. Used by the
+  // /api/tsdb/snapshot_now diagnostic endpoint for testing persistence
+  // without waiting 5 min between writes.
+  void force_snapshot_now() { snapshot_to_history_(); }
 #endif
 };
 
