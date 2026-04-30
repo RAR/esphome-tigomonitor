@@ -166,7 +166,9 @@ struct StringData {
 };
 
 struct InverterData {
-  std::string name;               // User-defined inverter name
+  std::string name;               // Canonical name from YAML (immutable identity)
+  std::string display_name;       // Optional override saved via /api/inverters/rename;
+                                  // empty = fall back to name. UI shows display_name first.
   std::vector<std::string> mppt_labels;  // List of MPPT labels assigned to this inverter
   float total_power = 0.0f;
   float peak_power = 0.0f;
@@ -340,6 +342,12 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   void set_sync_cca_on_startup(bool sync) { sync_cca_on_startup_ = sync; }
   void set_power_calibration(float multiplier) { power_calibration_ = multiplier; }
   void add_inverter(const std::string &name, const std::vector<std::string> &mppt_labels);
+
+  // Set the user-friendly display name for an inverter (looked up by canonical
+  // name). Persists to NVS via global_preferences so it survives reboots.
+  // Returns true on success, false if the canonical name doesn't match an
+  // inverter loaded from YAML.
+  bool set_inverter_display_name(const std::string &canonical, const std::string &display_name);
   
   // Public getters for web server access
   // NOTE: get_X() return references and are only safe from the main task (the

@@ -257,6 +257,18 @@
   .topo-inv-toggle { font-size: 16px; color: var(--accent); width: 18px; text-align: center; transition: transform 0.15s; }
   .topo-inv.collapsed .topo-inv-toggle { transform: rotate(-90deg); }
   .topo-inv-name { font-weight: 600; font-size: 14px; flex-shrink: 0; }
+  .topo-inv-name-edit-btn {
+    background: none; border: 1px solid var(--border); color: var(--text-dim);
+    border-radius: 4px; padding: 2px 6px; font-size: 10px; cursor: pointer;
+    margin-left: 4px;
+  }
+  .topo-inv-name-edit-btn:hover { color: var(--text); border-color: var(--accent-2); }
+  .topo-inv-name-input {
+    background: var(--bg); border: 1px solid var(--accent-2); color: var(--text);
+    border-radius: 4px; padding: 2px 6px; font-size: 13px; font-weight: 600;
+    min-width: 160px;
+  }
+  .topo-inv-name-canonical { color: var(--text-faint); font-size: 11px; font-weight: 400; margin-left: 6px; }
   .topo-inv-stats { font-size: 12px; color: var(--text-dim); margin-left: auto; }
   .topo-inv-stats strong { color: var(--text); font-variant-numeric: tabular-nums; }
   .topo-inv-body { margin-top: 12px; display: flex; flex-direction: column; gap: 12px; }
@@ -2098,10 +2110,19 @@
         if (topoState.filter && stringSections.length === 0) continue;
 
         const collapsed = topoState.collapsed.has(inv.name) ? ' collapsed' : '';
+        const effectiveName = inv.display_name || inv.name;
+        // If the user has set a display name, also show the canonical YAML
+        // name in muted text so they can still see what's in their config.
+        const canonicalSuffix = inv.display_name
+          ? `<span class="topo-inv-name-canonical">(${topoEscape(inv.name)})</span>`
+          : '';
         html += `<div class="topo-inv${collapsed}" data-inv="${topoEscape(inv.name)}">
           <div class="topo-inv-head">
             <span class="topo-inv-toggle">▾</span>
-            <div class="topo-inv-name">${topoEscape(inv.name)}</div>
+            <div class="topo-inv-name">
+              <span class="topo-inv-name-text">${topoEscape(effectiveName)}</span>${canonicalSuffix}
+              <button class="topo-inv-name-edit-btn" data-rename="${topoEscape(inv.name)}" title="Rename inverter">✎</button>
+            </div>
             <div class="topo-inv-stats">
               <strong>${topoFmtKW(inv.total_power || 0)}</strong> ·
               ${(inv.active_devices ?? 0)}/${(inv.total_devices ?? 0)} panels ·
@@ -2118,9 +2139,12 @@
       tree.innerHTML = html ||
         '<div class="topo-empty">No topology data — CCA mappings may not be loaded yet.</div>';
 
-      // Wire collapse toggles on the freshly-rendered headers.
+      // Wire collapse toggles on the freshly-rendered headers. The edit
+      // button stops propagation so opening rename doesn't toggle collapse.
       tree.querySelectorAll('.topo-inv-head').forEach(head => {
-        head.addEventListener('click', () => {
+        head.addEventListener('click', e => {
+          if (e.target.closest('.topo-inv-name-edit-btn') ||
+              e.target.closest('.topo-inv-name-input')) return;
           const card = head.parentElement;
           const name = card.dataset.inv;
           if (card.classList.toggle('collapsed')) {
@@ -2128,6 +2152,57 @@
           } else {
             topoState.collapsed.delete(name);
           }
+        });
+      });
+
+      // Inline rename. Click pencil → swap label for input → blur/Enter saves,
+      // Escape cancels. POST sends canonical name + new display_name; empty
+      // display_name clears the override and falls back to the YAML name.
+      tree.querySelectorAll('.topo-inv-name-edit-btn').forEach(btn => {
+        btn.addEventListener('click', e => {
+          e.stopPropagation();
+          const canonical = btn.dataset.rename;
+          const nameDiv = btn.parentElement;
+          const textSpan = nameDiv.querySelector('.topo-inv-name-text');
+          const current = textSpan.textContent;
+
+          const input = document.createElement('input');
+          input.type = 'text';
+          input.className = 'topo-inv-name-input';
+          input.value = current;
+          input.maxLength = 63;
+
+          const cancel = () => refreshTopology();
+          const save = async () => {
+            const newName = input.value.trim();
+            // If the new name equals the canonical, send empty display_name
+            // to clear the override.
+            const display = (newName === canonical) ? '' : newName;
+            try {
+              const r = await apiFetch('/api/inverters/rename', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name: canonical, display_name: display }),
+              });
+              if (!r.ok) throw new Error(`${r.status}`);
+              showToast('Inverter renamed ✓', 'ok');
+              await refreshTopology();
+            } catch (err) {
+              showToast(`Rename failed: ${err.message}`, 'err');
+              await refreshTopology();
+            }
+          };
+
+          input.addEventListener('keydown', ev => {
+            if (ev.key === 'Enter') { ev.preventDefault(); save(); }
+            else if (ev.key === 'Escape') { ev.preventDefault(); cancel(); }
+          });
+          input.addEventListener('blur', save);
+
+          textSpan.replaceWith(input);
+          btn.style.display = 'none';
+          input.focus();
+          input.select();
         });
       });
 

@@ -1195,11 +1195,48 @@ void TigoMonitorComponent::add_inverter(const std::string &name, const std::vect
   InverterData inverter;
   inverter.name = name;
   inverter.mppt_labels = mppt_labels;
+
+  // Pull any previously-saved display name out of NVS. Keyed by canonical name
+  // so renames stick across reboots even if the YAML is untouched.
+  char pref_key[80];
+  snprintf(pref_key, sizeof(pref_key), "inv_dn:%s", name.c_str());
+  uint32_t hash = esphome::fnv1_hash(pref_key);
+  auto pref = global_preferences->make_preference<char[64]>(hash);
+  char dn_buf[64] = {};
+  if (pref.load(&dn_buf) && dn_buf[0] != '\0') {
+    inverter.display_name = dn_buf;
+    ESP_LOGCONFIG(TAG, "Loaded display name '%s' for inverter '%s'", dn_buf, name.c_str());
+  }
+
   inverters_.push_back(inverter);
   ESP_LOGCONFIG(TAG, "Registered inverter '%s' with %d MPPTs", name.c_str(), mppt_labels.size());
   for (const auto &mppt : mppt_labels) {
     ESP_LOGCONFIG(TAG, "  - MPPT: %s", mppt.c_str());
   }
+}
+
+bool TigoMonitorComponent::set_inverter_display_name(const std::string &canonical,
+                                                    const std::string &display_name) {
+  // Match against the canonical (YAML) name — display_name is purely cosmetic
+  // and never used as a key.
+  for (auto &inv : inverters_) {
+    if (inv.name != canonical) continue;
+    inv.display_name = display_name;
+
+    char pref_key[80];
+    snprintf(pref_key, sizeof(pref_key), "inv_dn:%s", canonical.c_str());
+    uint32_t hash = esphome::fnv1_hash(pref_key);
+    auto pref = global_preferences->make_preference<char[64]>(hash);
+    char dn_buf[64] = {};
+    // Truncate at 63 chars; UI enforces a similar limit but be defensive.
+    strncpy(dn_buf, display_name.c_str(), sizeof(dn_buf) - 1);
+    pref.save(&dn_buf);
+    ESP_LOGI(TAG, "Renamed inverter '%s' -> '%s' (saved to NVS)",
+             canonical.c_str(), display_name.c_str());
+    return true;
+  }
+  ESP_LOGW(TAG, "set_inverter_display_name: no inverter matches '%s'", canonical.c_str());
+  return false;
 }
 
 void TigoMonitorComponent::update_inverter_data() {

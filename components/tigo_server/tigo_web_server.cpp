@@ -153,7 +153,7 @@ void TigoWebServer::setup() {
   httpd_config_t config = HTTPD_DEFAULT_CONFIG();
   config.server_port = port_;
   config.ctrl_port = port_ + 1;
-  config.max_uri_handlers = 32;  // + /api/tsdb/stats for the SPA diagnostics view
+  config.max_uri_handlers = 33;  // + /api/inverters/rename
   config.stack_size = 8192;
   config.lru_purge_enable = true;  // Enable LRU purging of connections
   config.max_open_sockets = 4;     // Limit concurrent connections to reduce memory
@@ -275,6 +275,14 @@ void TigoWebServer::setup() {
       .user_ctx = this
     };
     httpd_register_uri_handler(server_, &api_inverters_uri);
+
+    httpd_uri_t api_inverters_rename_uri = {
+      .uri = "/api/inverters/rename",
+      .method = HTTP_POST,
+      .handler = api_inverters_rename_handler,
+      .user_ctx = this
+    };
+    httpd_register_uri_handler(server_, &api_inverters_rename_uri);
     
     httpd_uri_t api_esp_status_uri = {
       .uri = "/api/status",
@@ -776,13 +784,80 @@ esp_err_t TigoWebServer::api_inverters_handler(httpd_req_t *req) {
   if (!server->check_api_auth(req)) {
     return ESP_OK;
   }
-  
+
   PSRAMString json_buffer;
   server->build_inverters_json(json_buffer);
-  
+
   httpd_resp_set_type(req, "application/json");
   httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
   httpd_resp_send(req, json_buffer.c_str(), json_buffer.length());
+  return ESP_OK;
+}
+
+// POST body shape: {"name":"<canonical>","display_name":"<friendly>"}
+// "name" matches the YAML-defined inverter name; "display_name" is the
+// override (empty string clears the override and falls back to canonical).
+esp_err_t TigoWebServer::api_inverters_rename_handler(httpd_req_t *req) {
+  TigoWebServer *server = static_cast<TigoWebServer *>(req->user_ctx);
+  if (!server->check_api_auth(req)) return ESP_OK;
+  if (server->parent_ == nullptr) {
+    httpd_resp_set_status(req, "503 Service Unavailable");
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, "{\"success\":false,\"error\":\"monitor not bound\"}");
+    return ESP_OK;
+  }
+
+  char buf[256];
+  int ret = httpd_req_recv(req, buf, sizeof(buf) - 1);
+  if (ret <= 0) {
+    httpd_resp_set_status(req, "400 Bad Request");
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, "{\"success\":false,\"error\":\"empty body\"}");
+    return ESP_OK;
+  }
+  buf[ret] = '\0';
+
+  // Tiny hand-rolled extractor — same approach the rest of this file uses for
+  // small POST bodies (no JSON parser dependency).
+  auto extract = [](const char *body, const char *key, char *out, size_t outlen) -> bool {
+    char needle[40];
+    snprintf(needle, sizeof(needle), "\"%s\"", key);
+    const char *k = strstr(body, needle);
+    if (!k) return false;
+    const char *colon = strchr(k, ':');
+    if (!colon) return false;
+    const char *q1 = strchr(colon, '"');
+    if (!q1) return false;
+    const char *q2 = strchr(q1 + 1, '"');
+    if (!q2) return false;
+    size_t n = (size_t) (q2 - q1 - 1);
+    if (n >= outlen) n = outlen - 1;
+    memcpy(out, q1 + 1, n);
+    out[n] = '\0';
+    return true;
+  };
+
+  char canonical[64] = {};
+  char display[64] = {};
+  if (!extract(buf, "name", canonical, sizeof(canonical))) {
+    httpd_resp_set_status(req, "400 Bad Request");
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, "{\"success\":false,\"error\":\"missing 'name'\"}");
+    return ESP_OK;
+  }
+  // display_name is optional — empty means "clear override".
+  extract(buf, "display_name", display, sizeof(display));
+
+  bool ok = server->parent_->set_inverter_display_name(canonical, display);
+  if (!ok) {
+    httpd_resp_set_status(req, "404 Not Found");
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, "{\"success\":false,\"error\":\"unknown inverter\"}");
+    return ESP_OK;
+  }
+
+  httpd_resp_set_type(req, "application/json");
+  httpd_resp_sendstr(req, "{\"success\":true}");
   return ESP_OK;
 }
 
@@ -1532,6 +1607,8 @@ void TigoWebServer::build_inverters_json(PSRAMString& json) {
     // Build the inverter JSON object
     json.append("{\"name\":\"");
     json.append(inverter.name.c_str());
+    json.append("\",\"display_name\":\"");
+    json.append(inverter.display_name.c_str());
     json.append("\",\"mppts\":");
     json.append(mppt_labels_json.c_str());
     json.append(",\"total_power\":");
