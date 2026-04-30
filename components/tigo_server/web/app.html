@@ -418,7 +418,10 @@
 
     <div class="conn">
       <span class="pill"><span class="dot" id="conn-dot"></span><span id="conn-label">connecting…</span></span>
-      <button class="theme-toggle" id="theme-toggle" title="Toggle light/dark">☀</button>
+      <span style="display:flex;gap:6px">
+        <button class="theme-toggle" id="temp-toggle" title="Toggle °C / °F">°F</button>
+        <button class="theme-toggle" id="theme-toggle" title="Toggle light/dark">☀</button>
+      </span>
     </div>
   </aside>
 
@@ -879,6 +882,34 @@
     const next = document.body.classList.contains('light-mode') ? 'dark' : 'light';
     localStorage.setItem('tigoTheme', next);
     applyTheme(next);
+  });
+
+  // ===== Temperature unit (°C / °F) =====
+  // Same localStorage key the legacy /yaml + /dashboard pages used so users
+  // who set a preference there keep it after the SPA migration. The button
+  // shows the OPPOSITE unit (its target) the way the legacy header did.
+  let useFahrenheit = localStorage.getItem('tempUnit') === 'F';
+  function applyTempUnit() {
+    document.getElementById('temp-toggle').textContent = useFahrenheit ? '°C' : '°F';
+  }
+  function tempUnit() { return useFahrenheit ? '°F' : '°C'; }
+  function fmtTemp(celsius, decimals = 1) {
+    if (celsius == null) return '—';
+    const v = useFahrenheit ? (celsius * 9 / 5 + 32) : celsius;
+    return v.toFixed(decimals);
+  }
+  applyTempUnit();
+  document.getElementById('temp-toggle').addEventListener('click', () => {
+    useFahrenheit = !useFahrenheit;
+    localStorage.setItem('tempUnit', useFahrenheit ? 'F' : 'C');
+    applyTempUnit();
+    // Re-render whichever view is currently active so the change is immediate
+    // — temperature appears on Diagnostics, Nodes, and Topology.
+    const active = document.querySelector('.view.active');
+    if (!active) return;
+    if (active.id === 'view-diagnostics') refreshDiagnostics();
+    else if (active.id === 'view-nodes') refreshNodes();
+    else if (active.id === 'view-topology') refreshTopology();
   });
 
   // ===== View switching with hash routing =====
@@ -1542,7 +1573,7 @@
           <td class="num">${v.toFixed(1)}</td>
           <td class="num">${a.toFixed(2)}</td>
           <td class="num"><strong>${w.toFixed(0)} W</strong></td>
-          <td class="num">${t.toFixed(0)} °C</td>
+          <td class="num">${fmtTemp(t, 0)} ${tempUnit()}</td>
           <td class="num">${fmtAge(age)}</td>
           <td><span class="badge ${state}">${stateLabel}</span></td>
         </tr>
@@ -1705,7 +1736,7 @@
       document.getElementById('diag-psram-sub').textContent =
         `${(100 * status.free_psram / status.total_psram).toFixed(1)}% of ${fmtKB(status.total_psram)} KB`;
       document.getElementById('diag-temp').innerHTML =
-        `${(status.internal_temp || 0).toFixed(1)}<span class="hist-stat-unit">°C</span>`;
+        `${fmtTemp(status.internal_temp || 0)}<span class="hist-stat-unit">${tempUnit()}</span>`;
 
       // Network / uptime
       document.getElementById('diag-uptime').innerHTML = fmtUptime(status.uptime_sec || 0);
@@ -2217,7 +2248,7 @@
               <div class="panel-tile-detail">
                 <span>${p.voltage.toFixed(1)} V</span>
                 <span>${p.current.toFixed(1)} A</span>
-                <span>${p.temperature.toFixed(0)} °C</span>
+                <span>${fmtTemp(p.temperature, 0)} ${tempUnit()}</span>
               </div>
             </div>`;
           }
