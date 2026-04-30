@@ -1965,6 +1965,10 @@
   const topoState = {
     filter: '',
     collapsed: new Set(),  // inverter names that are collapsed
+    editing: false,        // true while a rename input is open — pauses
+                           // auto-refresh so the input doesn't get blown away
+                           // mid-edit (the blur listener would treat that as
+                           // "save" and commit a half-typed name).
   };
 
   function topoEscape(s) {
@@ -2013,6 +2017,10 @@
 
   async function refreshTopology() {
     if (!document.getElementById('view-topology').classList.contains('active')) return;
+    // Bail if a rename input is currently open. Re-rendering would kill the
+    // input mid-keystroke; the blur listener would then save a half-typed
+    // name. Auto-refresh resumes once the user commits or cancels.
+    if (topoState.editing) return;
     try {
       const [invR, devR, nodeR] = await Promise.all([
         apiFetch('/api/inverters'),
@@ -2180,12 +2188,29 @@
             input.value = current;
             input.maxLength = 63;
 
-            const cancel = () => refreshTopology();
+            // Guard against a settled flag in case a save already cleared it
+            // — multiple commit paths converge here.
+            let settled = false;
+            topoState.editing = true;
+
+            const finish = () => {
+              if (settled) return;
+              settled = true;
+              topoState.editing = false;
+            };
+
+            const cancel = () => {
+              finish();
+              refreshTopology();
+            };
+
             const save = async () => {
+              if (settled) return;
               const newName = input.value.trim();
               const display = (newName === canonical) ? '' : newName;
               const body = { [payloadKey === 'name' ? 'name' : 'label']: canonical };
               body[payloadKey === 'name' ? 'display_name' : 'display_label'] = display;
+              finish();  // release the auto-refresh guard before the network round-trip
               try {
                 const r = await apiFetch(endpoint, {
                   method: 'POST',
