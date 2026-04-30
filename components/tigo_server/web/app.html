@@ -121,6 +121,79 @@
   .placeholder-title { font-size: 16px; color: var(--text); margin-bottom: 8px; }
   .placeholder-link { color: var(--accent-2); text-decoration: none; }
   .placeholder-link:hover { text-decoration: underline; }
+
+  /* ===== Dashboard hero strip ===== */
+  .hero { display: grid; grid-template-columns: 2fr 1fr 1fr 1fr; gap: 16px; margin-bottom: 24px; }
+  .hero-card { background: var(--bg-2); border: 1px solid var(--border); border-radius: 10px; padding: 18px 20px; }
+  .hero-card.primary {
+    background: linear-gradient(135deg, rgba(74,222,128,0.08), rgba(56,189,248,0.06));
+    border-color: rgba(74,222,128,0.25);
+  }
+  .hero-label { font-size: 11px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px; }
+  .hero-val { font-size: 28px; font-weight: 700; margin-top: 6px; font-variant-numeric: tabular-nums; }
+  .hero-val .unit { font-size: 14px; color: var(--text-dim); font-weight: 500; margin-left: 4px; }
+  .hero-card.primary .hero-val { font-size: 36px; color: var(--accent); }
+  .hero-trend { font-size: 11px; color: var(--text-dim); margin-top: 4px; }
+
+  .section-head { display: flex; justify-content: space-between; align-items: baseline; margin: 8px 0 12px; }
+  .section-title { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.6px; }
+  .section-sub { font-size: 12px; color: var(--text-dim); }
+
+  /* ===== Inverter cards ===== */
+  .inv-grid { display: grid; gap: 12px; margin-bottom: 24px; }
+  .inv-card { background: var(--bg-2); border: 1px solid var(--border); border-radius: 10px; padding: 18px 20px; }
+  .inv-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
+  .inv-name { font-weight: 600; font-size: 15px; }
+  .inv-meta { display: flex; gap: 18px; font-size: 12px; color: var(--text-dim); margin-top: 4px; }
+  .inv-meta strong { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
+  .inv-stat { font-size: 18px; font-weight: 700; color: var(--accent); font-variant-numeric: tabular-nums; }
+  .inv-stat .unit { font-size: 12px; color: var(--text-dim); font-weight: 500; margin-left: 3px; }
+
+  .panel-bar-row { display: flex; gap: 4px; align-items: flex-end; height: 80px; }
+  .panel-bar {
+    flex: 1; min-width: 8px;
+    background: var(--bg-3); border-radius: 3px 3px 0 0;
+    position: relative; cursor: pointer;
+    transition: transform 0.1s;
+  }
+  .panel-bar:hover { transform: translateY(-2px); }
+  .panel-bar.good { background: linear-gradient(180deg, var(--good), #16a34a); }
+  .panel-bar.warn { background: linear-gradient(180deg, var(--warn), #d97706); }
+  .panel-bar.bad  { background: linear-gradient(180deg, var(--bad), #b91c1c); }
+  .panel-bar.dead { background: var(--bg-3); border-top: 2px dashed var(--text-faint); height: 4px !important; }
+  .panel-bar-tip {
+    position: absolute; bottom: 100%; left: 50%; transform: translateX(-50%);
+    background: var(--bg-3); border: 1px solid var(--border);
+    padding: 6px 8px; border-radius: 4px; font-size: 11px;
+    white-space: nowrap; pointer-events: none; opacity: 0;
+    transition: opacity 0.1s; margin-bottom: 4px; z-index: 10;
+    color: var(--text);
+  }
+  .panel-bar:hover .panel-bar-tip { opacity: 1; }
+
+  .panel-string-row { display: flex; align-items: flex-start; gap: 10px; margin-top: 8px; }
+  .panel-string-label { width: 90px; font-size: 11px; color: var(--text-dim); padding-top: 4px; flex-shrink: 0; }
+  .panel-string-bars { flex: 1; }
+
+  /* Sparkline */
+  .spark-row { display: flex; align-items: center; gap: 16px; margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border); }
+  .spark-label { font-size: 11px; color: var(--text-dim); width: 90px; }
+  .spark { flex: 1; height: 32px; }
+  .spark-val { font-size: 12px; color: var(--text-dim); width: 80px; text-align: right; font-variant-numeric: tabular-nums; }
+
+  /* Alerts */
+  .alerts { background: var(--bg-2); border: 1px solid var(--border); border-radius: 10px; padding: 16px 20px; }
+  .alerts-empty { color: var(--text-dim); font-size: 12px; padding: 8px 0; }
+  .alert-row { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
+  .alert-row:last-child { border-bottom: none; }
+  .alert-badge {
+    padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.4px;
+  }
+  .alert-badge.warn { background: rgba(251,191,36,0.15); color: var(--warn); }
+  .alert-badge.bad  { background: rgba(248,113,113,0.15); color: var(--bad); }
+  .alert-msg { flex: 1; color: var(--text-dim); }
+  .alert-msg strong { color: var(--text); }
 </style>
 </head>
 <body>
@@ -163,13 +236,43 @@
     <section class="view active" id="view-dashboard">
       <div class="topbar">
         <h1>Dashboard</h1>
-        <div class="topbar-meta">Live system overview</div>
+        <div class="topbar-meta" id="dash-meta">refreshing every 5s · last update —</div>
       </div>
-      <div class="placeholder">
-        <div class="placeholder-title">Dashboard view — coming in R2</div>
-        <div>Hero strip · per-inverter panel bars · sparklines · alerts</div>
-        <div style="margin-top:12px"><a class="placeholder-link" href="./">Use today's dashboard →</a></div>
+
+      <div class="hero">
+        <div class="hero-card primary">
+          <div class="hero-label">Current power</div>
+          <div class="hero-val"><span id="hero-power">—</span><span class="unit" id="hero-power-unit">W</span></div>
+          <div class="hero-trend" id="hero-power-sub">—</div>
+        </div>
+        <div class="hero-card">
+          <div class="hero-label">Today's energy</div>
+          <div class="hero-val"><span id="hero-energy">—</span><span class="unit">kWh</span></div>
+          <div class="hero-trend" id="hero-energy-sub">since midnight</div>
+        </div>
+        <div class="hero-card">
+          <div class="hero-label">Active panels</div>
+          <div class="hero-val"><span id="hero-active">—</span><span class="unit" id="hero-active-of">/ —</span></div>
+          <div class="hero-trend" id="hero-active-sub">—</div>
+        </div>
+        <div class="hero-card">
+          <div class="hero-label">Avg temperature</div>
+          <div class="hero-val"><span id="hero-temp">—</span><span class="unit">°C</span></div>
+          <div class="hero-trend">across reporting devices</div>
+        </div>
       </div>
+
+      <div class="section-head">
+        <div class="section-title">Inverters</div>
+        <div class="section-sub" id="dash-inv-sub">—</div>
+      </div>
+      <div class="inv-grid" id="inv-grid"></div>
+
+      <div class="section-head">
+        <div class="section-title">Alerts</div>
+        <div class="section-sub" id="dash-alert-sub">—</div>
+      </div>
+      <div class="alerts" id="alerts"></div>
     </section>
 
     <!-- HISTORY -->
@@ -350,6 +453,263 @@
       document.getElementById('brand-sub').textContent = `up ${Math.floor(d.uptime / 60)}m`;
     }
   }).catch(() => {});
+
+  // ============================================================
+  // R2 — Dashboard view
+  // ============================================================
+
+  // Per-inverter rolling power buffer for sparklines. In-memory only; the
+  // history page handles persistent timeseries via /api/history/power.
+  const SPARK_LEN = 36;  // ~3 minutes at 5 s cadence
+  const sparkBuffers = {};
+
+  function pushSpark(name, watts) {
+    if (!sparkBuffers[name]) sparkBuffers[name] = [];
+    const buf = sparkBuffers[name];
+    buf.push(watts);
+    if (buf.length > SPARK_LEN) buf.shift();
+  }
+
+  function sparklineSvg(values) {
+    if (!values || values.length < 2) {
+      return '<svg class="spark" viewBox="0 0 300 32" preserveAspectRatio="none"></svg>';
+    }
+    let max = 0;
+    for (const v of values) if (v > max) max = v;
+    if (max <= 0) max = 1;
+    const w = 300, h = 32;
+    const step = w / Math.max(1, values.length - 1);
+    const pts = values.map((v, i) => `${(i * step).toFixed(1)},${(h - (v / max) * (h - 4) - 2).toFixed(1)}`);
+    return `<svg class="spark" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">` +
+           `<polyline points="${pts.join(' ')}" fill="none" stroke="var(--accent)" stroke-width="1.5"/>` +
+           `</svg>`;
+  }
+
+  function fmtPower(w) {
+    if (w >= 1000) return [(w / 1000).toFixed(2), 'kW'];
+    return [Math.round(w).toString(), 'W'];
+  }
+
+  function panelClass(power, stringMedian) {
+    // No useful reference (night, or string offline) — show all bars dashed.
+    if (stringMedian < 5) return 'dead';
+    const ratio = power / stringMedian;
+    if (ratio < 0.3) return 'bad';
+    if (ratio < 0.7) return 'warn';
+    return 'good';
+  }
+
+  function median(values) {
+    if (values.length === 0) return 0;
+    const sorted = values.slice().sort((a, b) => a - b);
+    const mid = sorted.length >> 1;
+    return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+  }
+
+  function renderHero(ov) {
+    const [val, unit] = fmtPower(ov.total_power || 0);
+    document.getElementById('hero-power').textContent = val;
+    document.getElementById('hero-power-unit').textContent = unit;
+    document.getElementById('hero-power-sub').textContent =
+      `${ov.active_devices || 0} of ${ov.max_devices || 0} reporting`;
+    document.getElementById('hero-energy').textContent =
+      (ov.total_energy_in ?? ov.total_energy ?? 0).toFixed(1);
+    document.getElementById('hero-active').textContent = ov.active_devices ?? 0;
+    document.getElementById('hero-active-of').textContent = ` / ${ov.max_devices ?? 0}`;
+    const ratio = ov.max_devices ? ((ov.active_devices || 0) / ov.max_devices) : 0;
+    document.getElementById('hero-active-sub').textContent =
+      `${(ratio * 100).toFixed(0)}% online`;
+    document.getElementById('hero-temp').textContent =
+      (ov.avg_temperature || 0).toFixed(1);
+  }
+
+  function renderInverters(inverters, devices) {
+    const grid = document.getElementById('inv-grid');
+    grid.innerHTML = '';
+
+    document.getElementById('dash-inv-sub').textContent =
+      `${inverters.length} inverter${inverters.length === 1 ? '' : 's'}`;
+
+    // Index devices by string for quick lookup.
+    const byString = {};
+    for (const d of devices) {
+      const k = d.string_label || '(unknown)';
+      (byString[k] = byString[k] || []).push(d);
+    }
+
+    inverters.forEach(inv => {
+      // Push current total power into spark buffer.
+      pushSpark(inv.name, inv.total_power || 0);
+
+      const card = document.createElement('div');
+      card.className = 'inv-card';
+
+      const totalPanels = inv.total_devices || 0;
+      const activePanels = inv.active_devices || 0;
+      const stringCount = (inv.strings || []).length;
+
+      let html = `
+        <div class="inv-head">
+          <div>
+            <div class="inv-name">${inv.name}</div>
+            <div class="inv-meta">
+              <span><strong>${stringCount}</strong> string${stringCount === 1 ? '' : 's'}</span>
+              <span><strong>${activePanels}</strong> / <strong>${totalPanels}</strong> panels</span>
+              <span>peak <strong>${(inv.peak_power || 0).toFixed(0)} W</strong></span>
+            </div>
+          </div>
+          <div>
+            <div class="inv-stat">${(inv.total_power || 0).toFixed(0)}<span class="unit">W</span></div>
+          </div>
+        </div>
+      `;
+
+      // Per-string panel bar rows.
+      for (const s of (inv.strings || [])) {
+        const panels = (byString[s.label] || [])
+          .slice()
+          .sort((a, b) => (a.name || '').localeCompare(b.name || '', undefined, { numeric: true }));
+        const powers = panels.map(p => p.power_in || 0);
+        const med = median(powers.filter(p => p > 5));
+
+        let scale = Math.max(...powers, 1);
+        // Round up to next 100 W so bars don't all max out at 100 % of one runaway panel.
+        scale = Math.max(scale, 100);
+
+        let bars = '';
+        if (panels.length === 0) {
+          bars = `<div style="font-size:11px;color:var(--text-faint);padding:8px 0">No panels reporting yet</div>`;
+        } else {
+          bars = '<div class="panel-bar-row">';
+          for (const p of panels) {
+            const w = p.power_in || 0;
+            const cls = panelClass(w, med);
+            const heightPct = cls === 'dead' ? 0 : Math.max(2, (w / scale) * 100);
+            bars += `<div class="panel-bar ${cls}" style="height:${heightPct.toFixed(1)}%">` +
+                    `<div class="panel-bar-tip">${p.name || p.addr} · ${w.toFixed(0)} W</div>` +
+                    `</div>`;
+          }
+          bars += '</div>';
+        }
+
+        html += `
+          <div class="panel-string-row">
+            <div class="panel-string-label">${s.label}<br><span style="color:var(--text-faint);font-size:10px">${s.mppt}</span></div>
+            <div class="panel-string-bars">${bars}</div>
+          </div>
+        `;
+      }
+
+      // Sparkline of recent total power for this inverter.
+      const buf = sparkBuffers[inv.name] || [];
+      html += `
+        <div class="spark-row">
+          <div class="spark-label">Recent power</div>
+          ${sparklineSvg(buf)}
+          <div class="spark-val">${(inv.total_power || 0).toFixed(0)} W now</div>
+        </div>
+      `;
+
+      card.innerHTML = html;
+      grid.appendChild(card);
+    });
+  }
+
+  function renderAlerts(inverters, devices) {
+    const target = document.getElementById('alerts');
+    const sub = document.getElementById('dash-alert-sub');
+    target.innerHTML = '';
+
+    const stringMap = {};
+    for (const inv of inverters) {
+      for (const s of (inv.strings || [])) {
+        stringMap[s.label] = { inv: inv.name, mppt: s.mppt };
+      }
+    }
+    const byString = {};
+    for (const d of devices) {
+      const k = d.string_label || '(unknown)';
+      (byString[k] = byString[k] || []).push(d);
+    }
+
+    const rows = [];
+    for (const [label, panels] of Object.entries(byString)) {
+      const meta = stringMap[label];
+      if (!meta) continue;
+      const powers = panels.map(p => p.power_in || 0);
+      const med = median(powers.filter(p => p > 5));
+      if (med < 5) continue;  // string offline or pre-dawn — no useful comparison
+      for (const p of panels) {
+        const w = p.power_in || 0;
+        const ratio = w / med;
+        if (ratio < 0.3) {
+          rows.push({ severity: 'bad', panel: p, label, meta, watts: w, med });
+        } else if (ratio < 0.6) {
+          rows.push({ severity: 'warn', panel: p, label, meta, watts: w, med });
+        }
+      }
+    }
+
+    if (rows.length === 0) {
+      target.innerHTML = '<div class="alerts-empty">All reporting panels within nominal range.</div>';
+      sub.textContent = 'all clear';
+      return;
+    }
+
+    rows.sort((a, b) => (a.severity === 'bad' ? -1 : 1) - (b.severity === 'bad' ? -1 : 1));
+    sub.textContent = `${rows.length} flagged`;
+
+    for (const row of rows.slice(0, 12)) {  // cap for readability
+      const div = document.createElement('div');
+      div.className = 'alert-row';
+      div.innerHTML = `
+        <span class="alert-badge ${row.severity}">${row.severity === 'bad' ? 'low' : 'shaded'}</span>
+        <span class="alert-msg">
+          <strong>${row.panel.name || row.panel.addr}</strong>
+          (${row.label}) · ${row.watts.toFixed(0)} W
+          — ${(100 * row.watts / row.med).toFixed(0)}% of string median (${row.med.toFixed(0)} W)
+        </span>
+      `;
+      target.appendChild(div);
+    }
+  }
+
+  let dashLastErr = null;
+  async function refreshDashboard() {
+    if (!document.getElementById('view-dashboard').classList.contains('active')) {
+      // Page hidden — don't pay for the fetches.
+      return;
+    }
+    try {
+      const [ovR, invR, devR] = await Promise.all([
+        apiFetch('/api/overview'),
+        apiFetch('/api/inverters'),
+        apiFetch('/api/devices'),
+      ]);
+      const ov  = await ovR.json();
+      const inv = await invR.json();
+      const dev = await devR.json();
+
+      renderHero(ov);
+      renderInverters(inv.inverters || [], dev.devices || []);
+      renderAlerts(inv.inverters || [], dev.devices || []);
+      const now = new Date();
+      document.getElementById('dash-meta').textContent =
+        `refreshing every 5s · last update ${now.toLocaleTimeString()}`;
+      dashLastErr = null;
+    } catch (e) {
+      if (dashLastErr !== e.message) {
+        console.error('dashboard refresh failed', e);
+        dashLastErr = e.message;
+      }
+      document.getElementById('dash-meta').textContent = `refresh error: ${e.message}`;
+    }
+  }
+  refreshDashboard();
+  setInterval(refreshDashboard, 5000);
+
+  // Re-render the dashboard immediately when nav lands on it.
+  document.querySelector('#nav button[data-view="dashboard"]').addEventListener('click', refreshDashboard);
 </script>
 </body>
 </html>
