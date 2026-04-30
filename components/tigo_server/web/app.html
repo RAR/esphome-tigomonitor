@@ -1,0 +1,355 @@
+<!DOCTYPE html)
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tigo Monitor</title>
+<style>
+  /* ===== Theme tokens ===== */
+  :root {
+    --bg: #0b0f17;
+    --bg-2: #121826;
+    --bg-3: #1a2233;
+    --bg-4: #243047;
+    --border: #243047;
+    --text: #e6ecf5;
+    --text-dim: #8a96ad;
+    --text-faint: #5a6478;
+    --accent: #4ade80;
+    --accent-2: #38bdf8;
+    --accent-3: #a78bfa;
+    --warn: #fbbf24;
+    --bad: #f87171;
+    --good: #4ade80;
+  }
+  body.light-mode {
+    --bg: #f5f7fa;
+    --bg-2: #ffffff;
+    --bg-3: #f1f5f9;
+    --bg-4: #e2e8f0;
+    --border: #e2e8f0;
+    --text: #0f172a;
+    --text-dim: #475569;
+    --text-faint: #94a3b8;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    font-size: 14px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    transition: background-color 0.2s, color 0.2s;
+  }
+  button, input, select, textarea { font: inherit; color: inherit; }
+  a { color: inherit; }
+
+  .app { display: grid; grid-template-columns: 240px 1fr; min-height: 100vh; }
+
+  /* ===== Sidebar ===== */
+  aside {
+    background: var(--bg-2);
+    border-right: 1px solid var(--border);
+    padding: 20px 0;
+    display: flex;
+    flex-direction: column;
+    position: sticky; top: 0; height: 100vh;
+  }
+  .brand {
+    padding: 0 20px 20px;
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 10px;
+  }
+  .brand-logo {
+    width: 32px; height: 32px; border-radius: 8px;
+    background: linear-gradient(135deg, var(--accent), var(--accent-2));
+    display: grid; place-items: center;
+    font-weight: 700; color: #061018;
+  }
+  .brand-name { font-weight: 600; letter-spacing: 0.2px; }
+  .brand-sub { font-size: 11px; color: var(--text-faint); }
+
+  .overview { padding: 16px 20px; border-bottom: 1px solid var(--border); }
+  .overview-row { display: flex; justify-content: space-between; padding: 4px 0; font-size: 12px; }
+  .overview-label { color: var(--text-dim); }
+  .overview-val { font-variant-numeric: tabular-nums; font-weight: 500; }
+
+  nav { padding: 12px 8px; flex: 1; }
+  nav button {
+    display: flex; align-items: center; gap: 10px; width: 100%;
+    padding: 9px 12px; margin: 2px 0;
+    color: var(--text-dim); background: none; border: none; cursor: pointer;
+    border-radius: 6px; font-size: 13px; text-align: left;
+  }
+  nav button:hover { background: var(--bg-3); color: var(--text); }
+  nav button.active { background: var(--bg-3); color: var(--text); }
+  nav .icon { width: 16px; opacity: 0.8; text-align: center; }
+
+  .conn { padding: 12px 20px; border-top: 1px solid var(--border); font-size: 11px; color: var(--text-dim); display: flex; justify-content: space-between; align-items: center; }
+  .pill { display: inline-flex; align-items: center; gap: 6px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--good); box-shadow: 0 0 8px var(--good); }
+  .theme-toggle {
+    background: none; border: 1px solid var(--border); color: var(--text-dim);
+    border-radius: 4px; padding: 4px 8px; cursor: pointer; font-size: 11px;
+  }
+  .theme-toggle:hover { background: var(--bg-3); color: var(--text); }
+
+  /* ===== Main ===== */
+  main { padding: 24px 32px; overflow-y: auto; }
+  .topbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; }
+  h1 { font-size: 20px; font-weight: 600; }
+  .topbar-meta { font-size: 12px; color: var(--text-dim); }
+  .btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: var(--bg-3); border: 1px solid var(--border); color: var(--text);
+    padding: 7px 12px; border-radius: 6px; cursor: pointer; font-size: 12px;
+  }
+  .btn:hover { background: var(--bg-4); }
+  .btn.primary { background: var(--accent); color: #061018; border-color: var(--accent); font-weight: 600; }
+
+  /* ===== View switching ===== */
+  .view { display: none; }
+  .view.active { display: block; }
+
+  .placeholder {
+    background: var(--bg-2); border: 1px dashed var(--border); border-radius: 10px;
+    padding: 60px 24px; text-align: center; color: var(--text-dim);
+  }
+  .placeholder-title { font-size: 16px; color: var(--text); margin-bottom: 8px; }
+  .placeholder-link { color: var(--accent-2); text-decoration: none; }
+  .placeholder-link:hover { text-decoration: underline; }
+</style>
+</head>
+<body>
+<div class="app">
+  <!-- ===== Sidebar ===== -->
+  <aside>
+    <div class="brand">
+      <div class="brand-logo">T</div>
+      <div>
+        <div class="brand-name">Tigo Monitor</div>
+        <div class="brand-sub" id="brand-sub">v—</div>
+      </div>
+    </div>
+
+    <div class="overview">
+      <div class="overview-row"><span class="overview-label">Active panels</span><span class="overview-val" id="ov-active">— / —</span></div>
+      <div class="overview-row"><span class="overview-label">Total power</span><span class="overview-val" id="ov-power">— W</span></div>
+      <div class="overview-row"><span class="overview-label">Today</span><span class="overview-val" id="ov-today">— kWh</span></div>
+    </div>
+
+    <nav id="nav">
+      <button data-view="dashboard" class="active"><span class="icon">▣</span> Dashboard</button>
+      <button data-view="history"><span class="icon">↗</span> History</button>
+      <button data-view="topology"><span class="icon">⌘</span> Topology</button>
+      <button data-view="nodes"><span class="icon">≡</span> Node Table</button>
+      <button data-view="tools"><span class="icon">⚙</span> Tools</button>
+      <button data-view="diagnostics"><span class="icon">◈</span> Diagnostics</button>
+      <button data-view="cca"><span class="icon">◉</span> CCA Info</button>
+    </nav>
+
+    <div class="conn">
+      <span class="pill"><span class="dot" id="conn-dot"></span><span id="conn-label">connecting…</span></span>
+      <button class="theme-toggle" id="theme-toggle" title="Toggle light/dark">☀</button>
+    </div>
+  </aside>
+
+  <!-- ===== Main content ===== -->
+  <main>
+    <!-- DASHBOARD -->
+    <section class="view active" id="view-dashboard">
+      <div class="topbar">
+        <h1>Dashboard</h1>
+        <div class="topbar-meta">Live system overview</div>
+      </div>
+      <div class="placeholder">
+        <div class="placeholder-title">Dashboard view — coming in R2</div>
+        <div>Hero strip · per-inverter panel bars · sparklines · alerts</div>
+        <div style="margin-top:12px"><a class="placeholder-link" href="./">Use today's dashboard →</a></div>
+      </div>
+    </section>
+
+    <!-- HISTORY -->
+    <section class="view" id="view-history">
+      <div class="topbar">
+        <h1>History</h1>
+        <div class="topbar-meta">Backed by esp_tsdb</div>
+      </div>
+      <div class="placeholder">
+        <div class="placeholder-title">History view — coming in R3</div>
+        <div>Power · Energy · Per-panel timelines</div>
+        <div style="margin-top:12px"><a class="placeholder-link" href="./history" id="link-history">Use today's /history page →</a></div>
+      </div>
+    </section>
+
+    <!-- TOPOLOGY -->
+    <section class="view" id="view-topology">
+      <div class="topbar">
+        <h1>Topology</h1>
+        <div class="topbar-meta">String &rarr; panel mapping</div>
+      </div>
+      <div class="placeholder">
+        <div class="placeholder-title">Topology view — separate project (R7+)</div>
+        <div>Drag-drop CCA mapping correction is its own redesign once we have the write-side endpoints.</div>
+      </div>
+    </section>
+
+    <!-- NODES -->
+    <section class="view" id="view-nodes">
+      <div class="topbar">
+        <h1>Node Table</h1>
+        <div class="topbar-meta">Discovered devices</div>
+      </div>
+      <div class="placeholder">
+        <div class="placeholder-title">Node table view — coming in R4</div>
+        <div>Address · barcode · CCA label · sensor index</div>
+        <div style="margin-top:12px"><a class="placeholder-link" href="./nodes" id="link-nodes">Use today's /nodes page →</a></div>
+      </div>
+    </section>
+
+    <!-- TOOLS -->
+    <section class="view" id="view-tools">
+      <div class="topbar">
+        <h1>Tools</h1>
+        <div class="topbar-meta">Configuration helpers and maintenance</div>
+      </div>
+      <div class="placeholder">
+        <div class="placeholder-title">Tools view — coming in R6</div>
+        <div>YAML generator · history compaction · resets</div>
+        <div style="margin-top:12px"><a class="placeholder-link" href="./yaml" id="link-yaml">Use today's /yaml page →</a></div>
+      </div>
+    </section>
+
+    <!-- DIAGNOSTICS -->
+    <section class="view" id="view-diagnostics">
+      <div class="topbar">
+        <h1>Diagnostics</h1>
+        <div class="topbar-meta">ESP32 health · TSDB stats</div>
+      </div>
+      <div class="placeholder">
+        <div class="placeholder-title">Diagnostics view — coming in R5</div>
+        <div>Heap · stack · WiFi · TSDB file sizes &amp; write counts</div>
+        <div style="margin-top:12px"><a class="placeholder-link" href="./status" id="link-status">Use today's /status page →</a></div>
+      </div>
+    </section>
+
+    <!-- CCA -->
+    <section class="view" id="view-cca">
+      <div class="topbar">
+        <h1>CCA Info</h1>
+        <div class="topbar-meta">Tigo CCA configuration mirror</div>
+      </div>
+      <div class="placeholder">
+        <div class="placeholder-title">CCA view — coming in R7</div>
+        <div style="margin-top:12px"><a class="placeholder-link" href="./cca" id="link-cca">Use today's /cca page →</a></div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<script>
+  const API_TOKEN = "__TIGO_API_TOKEN__";
+
+  // HA Ingress base-path detection.
+  function getBasePath() {
+    const path = window.location.pathname;
+    // App path looks like .../app — strip the trailing 'app' to get the base.
+    const m = path.match(/^(.*\/)app\/?$/);
+    if (m) return m[1];
+    const lastSlash = path.lastIndexOf('/');
+    return path.substring(0, lastSlash + 1);
+  }
+  const BASE_PATH = getBasePath();
+
+  async function apiFetch(url, options = {}) {
+    if (API_TOKEN) {
+      options.headers = options.headers || {};
+      options.headers['Authorization'] = 'Bearer ' + API_TOKEN;
+    }
+    return fetch(BASE_PATH + url.replace(/^\//, ''), options);
+  }
+
+  // Adjust placeholder "use today's page" links so they point at sibling URLs
+  // under the same base (works for HA Ingress / nested deployments).
+  for (const id of ['link-history', 'link-nodes', 'link-yaml', 'link-status', 'link-cca']) {
+    const el = document.getElementById(id);
+    if (!el) continue;
+    const stub = el.getAttribute('href').replace(/^\.\//, '');
+    el.href = BASE_PATH + stub;
+  }
+
+  // ===== Theme =====
+  function applyTheme(theme) {
+    document.body.classList.toggle('light-mode', theme === 'light');
+    document.getElementById('theme-toggle').textContent = theme === 'light' ? '☾' : '☀';
+  }
+  const initialTheme = localStorage.getItem('tigoTheme') || 'dark';
+  applyTheme(initialTheme);
+  document.getElementById('theme-toggle').addEventListener('click', () => {
+    const next = document.body.classList.contains('light-mode') ? 'dark' : 'light';
+    localStorage.setItem('tigoTheme', next);
+    applyTheme(next);
+  });
+
+  // ===== View switching with hash routing =====
+  function showView(id) {
+    document.querySelectorAll('#nav button').forEach(b => b.classList.toggle('active', b.dataset.view === id));
+    document.querySelectorAll('.view').forEach(v => v.classList.toggle('active', v.id === 'view-' + id));
+    if (window.location.hash !== '#' + id) {
+      history.replaceState(null, '', '#' + id);
+    }
+    window.scrollTo(0, 0);
+  }
+
+  document.querySelectorAll('#nav button').forEach(btn => {
+    btn.addEventListener('click', () => showView(btn.dataset.view));
+  });
+
+  window.addEventListener('hashchange', () => {
+    const v = window.location.hash.replace(/^#/, '') || 'dashboard';
+    if (document.getElementById('view-' + v)) showView(v);
+  });
+
+  // Initial view from hash, default 'dashboard'.
+  const initialView = window.location.hash.replace(/^#/, '') || 'dashboard';
+  if (document.getElementById('view-' + initialView)) showView(initialView);
+
+  // ===== Sidebar overview live data =====
+  // Pulls /api/overview every 10 s — same endpoint the dashboard uses today.
+  // Errors degrade gracefully: dot turns red, label says "offline".
+  async function refreshOverview() {
+    try {
+      const r = await apiFetch('/api/overview');
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const d = await r.json();
+      document.getElementById('ov-active').textContent =
+        `${d.active_devices ?? 0} / ${d.max_devices ?? 0}`;
+      document.getElementById('ov-power').textContent =
+        `${(d.total_power ?? 0).toFixed(0)} W`;
+      document.getElementById('ov-today').textContent =
+        `${(d.total_energy_in ?? d.total_energy ?? 0).toFixed(1)} kWh`;
+      document.getElementById('conn-dot').style.background = 'var(--good)';
+      document.getElementById('conn-dot').style.boxShadow = '0 0 8px var(--good)';
+      document.getElementById('conn-label').textContent = 'connected';
+    } catch (e) {
+      document.getElementById('conn-dot').style.background = 'var(--bad)';
+      document.getElementById('conn-dot').style.boxShadow = '0 0 8px var(--bad)';
+      document.getElementById('conn-label').textContent = 'offline';
+    }
+  }
+  refreshOverview();
+  setInterval(refreshOverview, 10000);
+
+  // ===== Version label =====
+  // Pulls from /api/health on first load. Cheap call, runs once.
+  apiFetch('/api/health').then(r => r.ok ? r.json() : null).then(d => {
+    if (d && d.uptime !== undefined) {
+      document.getElementById('brand-sub').textContent = `up ${Math.floor(d.uptime / 60)}m`;
+    }
+  }).catch(() => {});
+</script>
+</body>
+</html>
