@@ -99,6 +99,15 @@ class TigoHistory {
 
   bool initialized() const { return initialized_; }
 
+  // Drains the writer queue (best-effort, with timeout) and closes every open
+  // tsdb_t handle. Called from TigoMonitorComponent::on_shutdown() so that
+  // user-initiated reboots (incl. /api/restart) commit pending writes to
+  // flash. esp_littlefs's lfs_file_close issues the metadata commit that
+  // bare fsync apparently doesn't on long-lived r+b file handles — without
+  // this hook, every reboot wipes the in-progress tsdb files even though
+  // each tsdb_write_h fflushes + fsyncs along the way.
+  void flush_and_close();
+
   // Direct handle access for diagnostic endpoints (e.g. /api/tsdb/stats).
   // Caller must not close these — TigoHistory owns the lifecycle.
   tsdb_t *system_db() const { return system_db_; }

@@ -494,6 +494,45 @@ void TigoHistory::writer_task_loop_() {
   }
 }
 
+void TigoHistory::flush_and_close() {
+  if (!initialized_) return;
+
+  // Give the writer a brief window to drain whatever's already enqueued. We
+  // don't pull the task down — its queue read is a portMAX_DELAY block, but
+  // anything already received will have run tsdb_write_h before we get here.
+  // 200 ms covers the common case (one row, ~120 ms total flash IO).
+  if (queue_ != nullptr) {
+    UBaseType_t pending = uxQueueMessagesWaiting(queue_);
+    if (pending > 0) {
+      ESP_LOGI(TAG, "flush_and_close: waiting on %u queued snapshot(s)",
+               (unsigned) pending);
+      uint32_t deadline = (uint32_t) (esp_timer_get_time() / 1000) + 800;
+      while (uxQueueMessagesWaiting(queue_) > 0 &&
+             (uint32_t) (esp_timer_get_time() / 1000) < deadline) {
+        vTaskDelay(pdMS_TO_TICKS(20));
+      }
+    }
+  }
+
+  // Close each open tsdb_t. tsdb_close_h calls fclose on the underlying
+  // FILE*, which is what triggers esp_littlefs's metadata commit. After
+  // tsdb_close_h the handle is freed — null the pointer so any racing
+  // /api/tsdb/stats during shutdown returns "no DB" instead of UAF.
+  if (system_db_ != nullptr) {
+    tsdb_close_h(system_db_);
+    system_db_ = nullptr;
+    ESP_LOGI(TAG, "flush_and_close: system_db closed");
+  }
+  for (size_t i = 0; i < kNumPanelDbs; ++i) {
+    if (panel_db_[i] == nullptr) continue;
+    tsdb_close_h(panel_db_[i]);
+    panel_db_[i] = nullptr;
+    ESP_LOGI(TAG, "flush_and_close: panels%zu closed", i);
+  }
+
+  initialized_ = false;
+}
+
 }  // namespace tigo_monitor
 }  // namespace esphome
 
