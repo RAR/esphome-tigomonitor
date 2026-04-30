@@ -210,6 +210,40 @@
   .chart-stat strong { color: var(--text); font-variant-numeric: tabular-nums; }
   .chart-area { width: 100%; height: 220px; display: block; }
 
+  /* ===== Nodes view ===== */
+  .table-toolbar { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; flex-wrap: wrap; }
+  .input {
+    background: var(--bg-2); border: 1px solid var(--border); color: var(--text);
+    padding: 7px 12px; border-radius: 6px; font-size: 12px; min-width: 240px;
+  }
+  .input:focus { outline: none; border-color: var(--accent); }
+  .table-toolbar .input.compact { min-width: auto; }
+  .table-meta { font-size: 12px; color: var(--text-dim); }
+
+  .table-wrap { background: var(--bg-2); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+  table.nodes { width: 100%; border-collapse: collapse; font-size: 12px; }
+  table.nodes th {
+    text-align: left; padding: 10px 12px; font-weight: 600;
+    color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.4px;
+    background: var(--bg-3); border-bottom: 1px solid var(--border);
+    font-size: 10px; position: sticky; top: 0;
+  }
+  table.nodes td { padding: 10px 12px; border-bottom: 1px solid var(--border); font-variant-numeric: tabular-nums; }
+  table.nodes tr:last-child td { border-bottom: none; }
+  table.nodes tr:hover td { background: var(--bg-3); }
+  table.nodes .mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; color: var(--text-dim); font-size: 11px; }
+  table.nodes .num { text-align: right; }
+  table.nodes td strong { color: var(--text); }
+
+  .badge {
+    display: inline-block; padding: 2px 8px; border-radius: 4px;
+    font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.4px;
+  }
+  .badge.ok    { background: rgba(74,222,128,0.15); color: var(--good); }
+  .badge.warn  { background: rgba(251,191,36,0.15); color: var(--warn); }
+  .badge.bad   { background: rgba(248,113,113,0.15); color: var(--bad); }
+  .badge.stale { background: rgba(138,150,173,0.15); color: var(--text-dim); }
+
   /* Alerts */
   .alerts { background: var(--bg-2); border: 1px solid var(--border); border-radius: 10px; padding: 16px 20px; }
   .alerts-empty { color: var(--text-dim); font-size: 12px; padding: 8px 0; }
@@ -393,12 +427,45 @@
     <section class="view" id="view-nodes">
       <div class="topbar">
         <h1>Node Table</h1>
-        <div class="topbar-meta">Discovered devices</div>
+        <div class="topbar-meta" id="nodes-meta">—</div>
       </div>
-      <div class="placeholder">
-        <div class="placeholder-title">Node table view — coming in R4</div>
-        <div>Address · barcode · CCA label · sensor index</div>
-        <div style="margin-top:12px"><a class="placeholder-link" href="./nodes" id="link-nodes">Use today's /nodes page →</a></div>
+
+      <div class="table-toolbar">
+        <input class="input" id="nodes-search" placeholder="Search name, barcode, address…">
+        <select class="input compact" id="nodes-filter-string">
+          <option value="">All strings</option>
+        </select>
+        <select class="input compact" id="nodes-filter-state">
+          <option value="">All states</option>
+          <option value="ok">Active</option>
+          <option value="warn">Shaded</option>
+          <option value="bad">Fault</option>
+          <option value="stale">Stale</option>
+        </select>
+        <span class="table-meta" id="nodes-count" style="margin-left:auto">—</span>
+        <button class="btn" id="nodes-refresh-btn">Refresh</button>
+      </div>
+
+      <div class="table-wrap">
+        <table class="nodes">
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Addr</th>
+              <th>Barcode</th>
+              <th>String / MPPT</th>
+              <th class="num">V</th>
+              <th class="num">A</th>
+              <th class="num">Power</th>
+              <th class="num">Temp</th>
+              <th class="num">Age</th>
+              <th>State</th>
+            </tr>
+          </thead>
+          <tbody id="nodes-tbody">
+            <tr><td colspan="10" style="text-align:center;color:var(--text-faint);padding:40px 0">Loading…</td></tr>
+          </tbody>
+        </table>
       </div>
     </section>
 
@@ -973,6 +1040,174 @@
     refreshHistory(histRange);
     histLoadedOnce = true;
   }
+
+  // ============================================================
+  // R4 — Nodes view
+  // ============================================================
+
+  let nodesData = { nodes: [], devices: [] };  // last fetch result
+  const nodesFilters = { search: '', stringLabel: '', state: '' };
+
+  function classifyNode(device, stringMedian) {
+    const age = device.data_age_ms ?? 999999;
+    if (age > 60000) return 'stale';
+    const w = device.power_in || 0;
+    if (stringMedian < 5) return 'ok';  // pre-dawn / string offline — no useful comparison
+    const r = w / stringMedian;
+    if (r < 0.3) return 'bad';
+    if (r < 0.7) return 'warn';
+    return 'ok';
+  }
+
+  function fmtAge(ms) {
+    if (ms === undefined || ms < 0) return '—';
+    if (ms < 1500) return 'now';
+    const s = Math.floor(ms / 1000);
+    if (s < 60) return s + 's';
+    if (s < 3600) return Math.floor(s / 60) + 'm';
+    return Math.floor(s / 3600) + 'h';
+  }
+
+  function renderNodesTable() {
+    const tbody = document.getElementById('nodes-tbody');
+    const countEl = document.getElementById('nodes-count');
+    const metaEl = document.getElementById('nodes-meta');
+
+    const nodes = nodesData.nodes || [];
+    const devices = nodesData.devices || [];
+
+    // Index devices by long_address (the persistent key) and by addr.
+    const byLong = {};
+    const byAddr = {};
+    for (const d of devices) {
+      if (d.barcode) byLong[d.barcode] = d;
+      byAddr[d.addr] = d;
+    }
+
+    // String medians for state classification.
+    const stringPowers = {};
+    for (const d of devices) {
+      const k = d.string_label || '';
+      (stringPowers[k] = stringPowers[k] || []).push(d.power_in || 0);
+    }
+    const stringMedians = {};
+    for (const [k, arr] of Object.entries(stringPowers)) {
+      const filtered = arr.filter(p => p > 5).sort((a, b) => a - b);
+      if (filtered.length === 0) { stringMedians[k] = 0; continue; }
+      const m = filtered.length >> 1;
+      stringMedians[k] = filtered.length % 2 ? filtered[m] : (filtered[m - 1] + filtered[m]) / 2;
+    }
+
+    const search = nodesFilters.search.toLowerCase();
+    const filterString = nodesFilters.stringLabel;
+    const filterState = nodesFilters.state;
+
+    let visibleCount = 0;
+    let html = '';
+
+    for (const n of nodes) {
+      // Match a live device by long_address (preferred) then short addr.
+      const dev = byLong[n.long_address] || byAddr[n.addr] || null;
+      const name = n.cca_label || dev?.name || n.addr;
+      const barcodeShort = n.long_address ? n.long_address.slice(-8) : '—';
+      const stringLabel = n.cca_string || dev?.string_label || '—';
+      const mpptLabel = n.cca_inverter || '—';
+      const v = dev?.voltage_in ?? 0;
+      const a = dev?.current ?? dev?.current_in ?? 0;
+      const w = dev?.power_in ?? 0;
+      const t = dev?.temperature ?? 0;
+      const age = dev?.data_age_ms ?? 999999;
+      const state = dev ? classifyNode(dev, stringMedians[stringLabel] || 0) : 'stale';
+      const stateLabel = state === 'ok' ? 'active' : state === 'warn' ? 'shaded' :
+                         state === 'bad' ? 'fault' : 'stale';
+
+      // Apply filters.
+      if (search) {
+        const hay = `${name} ${n.addr} ${n.long_address || ''}`.toLowerCase();
+        if (!hay.includes(search)) continue;
+      }
+      if (filterString && stringLabel !== filterString) continue;
+      if (filterState && state !== filterState) continue;
+      visibleCount++;
+
+      html += `
+        <tr>
+          <td><strong>${name}</strong></td>
+          <td class="mono">${n.addr}</td>
+          <td class="mono">…${barcodeShort}</td>
+          <td>${stringLabel} <span style="color:var(--text-faint)">·</span> ${mpptLabel}</td>
+          <td class="num">${v.toFixed(1)}</td>
+          <td class="num">${a.toFixed(2)}</td>
+          <td class="num"><strong>${w.toFixed(0)} W</strong></td>
+          <td class="num">${t.toFixed(0)} °C</td>
+          <td class="num">${fmtAge(age)}</td>
+          <td><span class="badge ${state}">${stateLabel}</span></td>
+        </tr>
+      `;
+    }
+
+    if (visibleCount === 0) {
+      html = '<tr><td colspan="10" style="text-align:center;color:var(--text-faint);padding:40px 0">No nodes match the current filters.</td></tr>';
+    }
+    tbody.innerHTML = html;
+    countEl.textContent = `${visibleCount} of ${nodes.length} shown`;
+    metaEl.textContent = `${nodes.length} discovered · ${devices.filter(d => (d.data_age_ms ?? 999999) < 60000).length} reporting`;
+  }
+
+  function rebuildNodesStringFilter() {
+    const sel = document.getElementById('nodes-filter-string');
+    const current = sel.value;
+    const seen = new Set();
+    for (const n of nodesData.nodes || []) {
+      if (n.cca_string) seen.add(n.cca_string);
+    }
+    const labels = Array.from(seen).sort();
+    sel.innerHTML = '<option value="">All strings</option>' +
+      labels.map(l => `<option value="${l}">${l}</option>`).join('');
+    if (labels.includes(current)) sel.value = current;
+  }
+
+  async function refreshNodes() {
+    if (!document.getElementById('view-nodes').classList.contains('active')) return;
+    try {
+      const [nR, dR] = await Promise.all([
+        apiFetch('/api/nodes'),
+        apiFetch('/api/devices'),
+      ]);
+      nodesData = {
+        nodes: (await nR.json()).nodes || [],
+        devices: (await dR.json()).devices || [],
+      };
+      rebuildNodesStringFilter();
+      renderNodesTable();
+    } catch (e) {
+      document.getElementById('nodes-tbody').innerHTML =
+        `<tr><td colspan="10" style="text-align:center;color:var(--bad);padding:40px 0">refresh error: ${e.message}</td></tr>`;
+    }
+  }
+
+  document.getElementById('nodes-search').addEventListener('input', e => {
+    nodesFilters.search = e.target.value;
+    renderNodesTable();
+  });
+  document.getElementById('nodes-filter-string').addEventListener('change', e => {
+    nodesFilters.stringLabel = e.target.value;
+    renderNodesTable();
+  });
+  document.getElementById('nodes-filter-state').addEventListener('change', e => {
+    nodesFilters.state = e.target.value;
+    renderNodesTable();
+  });
+  document.getElementById('nodes-refresh-btn').addEventListener('click', refreshNodes);
+
+  // Auto-refresh on view-switch.
+  document.querySelector('#nav button[data-view="nodes"]').addEventListener('click', refreshNodes);
+  if (window.location.hash === '#nodes') refreshNodes();
+
+  // Light auto-refresh every 10 s while view is active so V/I/W stay live.
+  setInterval(() => {
+    if (document.getElementById('view-nodes').classList.contains('active')) refreshNodes();
+  }, 10000);
 </script>
 </body>
 </html>

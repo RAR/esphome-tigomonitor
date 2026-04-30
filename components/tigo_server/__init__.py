@@ -40,9 +40,10 @@ CONFIG_SCHEMA = cv.Schema({
 # The header is regenerated on every config — the .html files are the source
 # of truth, and the generated header is a build artifact (gitignored).
 
-# 'history' retired in R3 — its content lives inside app.html under #history.
-# /history still serves a 302 redirect for old bookmarks (see history_handler).
-WEB_PAGES = ['dashboard', 'nodes', 'status', 'yaml', 'cca', 'app']
+# Pages retired into the SPA still live as 302 redirects to /app#<view>:
+#   - 'history' (R3) — see history_handler
+#   - 'nodes'   (R4) — see node_table_handler
+WEB_PAGES = ['dashboard', 'status', 'yaml', 'cca', 'app']
 TOKEN_PLACEHOLDER = '__TIGO_API_TOKEN__'
 
 
