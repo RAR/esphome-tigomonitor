@@ -986,10 +986,15 @@
       const activePanels = inv.active_devices || 0;
       const stringCount = (inv.strings || []).length;
 
+      // Prefer the user-set display name from Topology rename; fall back to
+      // the canonical YAML name. Same fallback rule for strings below.
+      // Sparkline buffers stay keyed by canonical name so renames don't lose
+      // history.
+      const invName = inv.display_name || inv.name;
       let html = `
         <div class="inv-head">
           <div>
-            <div class="inv-name">${inv.name}</div>
+            <div class="inv-name">${invName}</div>
             <div class="inv-meta">
               <span><strong>${stringCount}</strong> string${stringCount === 1 ? '' : 's'}</span>
               <span><strong>${activePanels}</strong> / <strong>${totalPanels}</strong> panels</span>
@@ -1030,9 +1035,10 @@
           bars += '</div>';
         }
 
+        const stringLabel = s.display_label || s.label;
         html += `
           <div class="panel-string-row">
-            <div class="panel-string-label">${s.label}<br><span style="color:var(--text-faint);font-size:10px">${s.mppt}</span></div>
+            <div class="panel-string-label">${stringLabel}<br><span style="color:var(--text-faint);font-size:10px">${s.mppt}</span></div>
             <div class="panel-string-bars">${bars}</div>
           </div>
         `;
@@ -1061,7 +1067,14 @@
     const stringMap = {};
     for (const inv of inverters) {
       for (const s of (inv.strings || [])) {
-        stringMap[s.label] = { inv: inv.name, mppt: s.mppt };
+        // Key by canonical so device.string_label (also canonical) matches.
+        // Stash display labels for the alert text.
+        stringMap[s.label] = {
+          inv: inv.name,
+          invDisplay: inv.display_name || inv.name,
+          mppt: s.mppt,
+          stringDisplay: s.display_label || s.label,
+        };
       }
     }
     const byString = {};
@@ -1104,7 +1117,7 @@
         <span class="alert-badge ${row.severity}">${row.severity === 'bad' ? 'low' : 'shaded'}</span>
         <span class="alert-msg">
           <strong>${row.panel.name || row.panel.addr}</strong>
-          (${row.label}) · ${row.watts.toFixed(0)} W
+          (${row.meta.stringDisplay}) · ${row.watts.toFixed(0)} W
           — ${(100 * row.watts / row.med).toFixed(0)}% of string median (${row.med.toFixed(0)} W)
         </span>
       `;
