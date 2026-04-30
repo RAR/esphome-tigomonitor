@@ -527,16 +527,29 @@ void TigoHistory::writer_task_loop_() {
       }
     }
 
+    // Force LittleFS to commit each tsdb file's dir entry. Without this,
+    // fopen("r+b") + fwrite + fflush + fsync leaves the file in an
+    // un-published state — every reboot starts with system.tsdb missing
+    // and the previous session's data unreadable. tsdb_sync_h does
+    // fclose+fopen("r+b") so the dir-entry commit fires the way
+    // panel_map.json's open-write-close pattern does.
+    uint32_t t_sync_start = (uint32_t) (esp_timer_get_time() / 1000);
+    if (system_db_ != nullptr) tsdb_sync_h(system_db_);
+    for (size_t i = 0; i < kNumPanelDbs; ++i) {
+      if (panel_db_[i] != nullptr) tsdb_sync_h(panel_db_[i]);
+    }
+    uint32_t t_sync_total = (uint32_t) (esp_timer_get_time() / 1000) - t_sync_start;
+
     UBaseType_t hwm = uxTaskGetStackHighWaterMark(nullptr);
     if (err != ESP_OK) {
       ESP_LOGW(TAG, "tsdb_write @ %lu failed after %u ms: %s (stack hwm %u B)",
                (unsigned long) row.timestamp, (unsigned) t_sys,
                esp_err_to_name(err), (unsigned) (hwm * sizeof(StackType_t)));
     } else {
-      ESP_LOGD(TAG,
-               "tsdb_write @ %lu ok (sys %u ms, panels %u ms, stack hwm %u B)",
+      ESP_LOGI(TAG,
+               "tsdb_write @ %lu ok (sys %u ms, panels %u ms, sync %u ms, stack hwm %u B)",
                (unsigned long) row.timestamp, (unsigned) t_sys,
-               (unsigned) panel_total_ms,
+               (unsigned) panel_total_ms, (unsigned) t_sync_total,
                (unsigned) (hwm * sizeof(StackType_t)));
     }
   }
