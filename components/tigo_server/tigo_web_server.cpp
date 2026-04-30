@@ -153,7 +153,7 @@ void TigoWebServer::setup() {
   httpd_config_t config = HTTPD_DEFAULT_CONFIG();
   config.server_port = port_;
   config.ctrl_port = port_ + 1;
-  config.max_uri_handlers = 28;  // Increased for log + history endpoints (panels, panel history)
+  config.max_uri_handlers = 30;  // log + history endpoints + /history HTML page
   config.stack_size = 8192;
   config.lru_purge_enable = true;  // Enable LRU purging of connections
   config.max_open_sockets = 4;     // Limit concurrent connections to reduce memory
@@ -203,6 +203,14 @@ void TigoWebServer::setup() {
     };
     httpd_register_uri_handler(server_, &yaml_config_uri);
     
+    httpd_uri_t history_uri = {
+      .uri = "/history",
+      .method = HTTP_GET,
+      .handler = history_handler,
+      .user_ctx = this
+    };
+    httpd_register_uri_handler(server_, &history_uri);
+
     httpd_uri_t cca_info_uri = {
       .uri = "/cca",
       .method = HTTP_GET,
@@ -660,6 +668,21 @@ esp_err_t TigoWebServer::esp_status_handler(httpd_req_t *req) {
   esp_err_t result = httpd_resp_send(req, html.c_str(), html.length());
   
   return result;
+}
+
+esp_err_t TigoWebServer::history_handler(httpd_req_t *req) {
+  TigoWebServer *server = static_cast<TigoWebServer *>(req->user_ctx);
+
+  if (!server->check_web_auth(req)) {
+    return ESP_OK;
+  }
+
+  PSRAMString html;
+  server->get_history_html(html);
+
+  httpd_resp_set_type(req, "text/html");
+  httpd_resp_set_hdr(req, "Connection", "close");
+  return httpd_resp_send(req, html.c_str(), html.length());
 }
 
 esp_err_t TigoWebServer::yaml_config_handler(httpd_req_t *req) {
@@ -2012,6 +2035,12 @@ void TigoWebServer::get_cca_info_html(PSRAMString& html) {
   html.append(CCA_HTML_PRE);
   html.append(api_token_);
   html.append(CCA_HTML_POST);
+}
+
+void TigoWebServer::get_history_html(PSRAMString& html) {
+  html.append(HISTORY_HTML_PRE);
+  html.append(api_token_);
+  html.append(HISTORY_HTML_POST);
 }
 
 void TigoWebServer::build_cca_info_json(PSRAMString& json) {

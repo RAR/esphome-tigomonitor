@@ -57,6 +57,7 @@
     </div>
     <div class="nav">
       <a href="#" id="nav-dashboard">Dashboard</a>
+      <a href="#" id="nav-history">History</a>
       <a href="#" id="nav-nodes">Node Table</a>
       <a href="#" id="nav-status">ESP32 Status</a>
       <a href="#" id="nav-yaml">YAML Config</a>
@@ -143,6 +144,7 @@
 
     // Set nav links relative to base path (HA ingress compatibility)
     document.getElementById('nav-dashboard').href = BASE_PATH;
+      document.getElementById('nav-history').href = BASE_PATH + 'history';
     document.getElementById('nav-nodes').href = BASE_PATH + 'nodes';
     document.getElementById('nav-status').href = BASE_PATH + 'status';
     document.getElementById('nav-yaml').href = BASE_PATH + 'yaml';

@@ -40,7 +40,7 @@ CONFIG_SCHEMA = cv.Schema({
 # The header is regenerated on every config — the .html files are the source
 # of truth, and the generated header is a build artifact (gitignored).
 
-WEB_PAGES = ['dashboard', 'nodes', 'status', 'yaml', 'cca']
+WEB_PAGES = ['dashboard', 'nodes', 'status', 'yaml', 'cca', 'history']
 TOKEN_PLACEHOLDER = '__TIGO_API_TOKEN__'
 
 
