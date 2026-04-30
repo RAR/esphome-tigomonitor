@@ -1,90 +1,89 @@
 # Web Server & API
 
-The Tigo Monitor includes a built-in web server with dashboard and RESTful API.
+Tigo Monitor ships a single-page web app and a JSON API on the configured `tigo_server` port (default 80). Everything lives at `/app` — the legacy per-page paths still resolve as 302 redirects so existing bookmarks keep working.
 
-## Pages
+## Single-page app
 
-| Page | URL | Description |
-|------|-----|-------------|
-| Dashboard | `/` | Real-time system overview with device cards |
-| Node Table | `/nodes` | Device registry with CCA labels |
-| ESP32 Status | `/status` | System health, memory, uptime |
-| YAML Config | `/yaml` | Auto-generated sensor configuration |
-| CCA Info | `/cca` | Tigo CCA device status |
+| View | URL | Notes |
+|------|-----|-------|
+| Dashboard | `/app#dashboard` | Hero strip · per-string panel heatmap · color legend · alerts |
+| History | `/app#history` | TSDB-backed power/energy charts; range tabs (day / week / month / year) |
+| Topology | `/app#topology` | Inverter → string → panel tree with live V/I/W/°C; rename + nameplate editing |
+| Node Table | `/app#nodes` | Device registry with CCA metadata; Export / Import as JSON |
+| Tools | `/app#tools` | YAML generator + Reset Peak / Clear Node Table / Restart |
+| Diagnostics | `/app#diagnostics` | Memory · network · UART telemetry · TSDB stats |
+| CCA Info | `/app#cca` | Live CCA mirror; manual Refresh button |
 
-![Dashboard](images/Dashboard.png)
+`/`, `/nodes`, `/status`, `/yaml`, `/cca`, `/history` all 302 → `/app#<view>`. The redirects use a relative `Location` so they work standalone *and* under HA Ingress without any extra configuration.
 
----
+### Sidebar
 
-## Dashboard Features
+The sidebar's footer carries:
 
-### System Statistics
-Six stat cards showing real-time metrics:
-- Total Power (W)
-- Total Current (A)
-- Total Energy (kWh)
-- Active Devices
-- Average Efficiency (%)
-- Average Temperature
+- **GitHub link** → opens `github.com/RAR/esphome-tigomonitor` in a new tab.
+- **°C / °F toggle** — persists via `localStorage['tempUnit']` (same key the legacy page used). The button shows the unit you'll *get* if you click. Active view re-renders immediately.
+- **Theme toggle** — light/dark, persists via `localStorage['tigoTheme']`.
 
-### Device Cards
-- CCA-friendly names (e.g., "East Roof Panel 3")
-- Two-line headers: CCA label + barcode/address
-- Power, voltage, current, temperature, efficiency, RSSI
-- Data age indicators
-- Peak power tracking
+### Naming overrides
 
-### UI Features
-- **Temperature Toggle**: Switch °F/°C (saved to localStorage)
-- **Dark Mode**: Persistent preference
-- **Auto-refresh**: Updates every 5 seconds
-- **Mobile Responsive**: Optimized for all screen sizes
-- **String Grouping**: Devices organized by MPPT/string
+Inverters and strings can be renamed live from the Topology view (✎ next to each label). The override is stored in NVS via ESPHome's `global_preferences` API and is keyed by canonical name (the YAML inverter name or CCA string label). YAML stays the source of truth for identity — overrides are purely display labels and are used wherever those names appear: Topology, Dashboard inverter cards, Dashboard alert text, embedded strings inside `/api/inverters`.
 
----
+Empty override = falls back to canonical.
 
-## Node Table
+### Per-string panel nameplate
 
-![Node Table](images/NodeTable.png)
+Each string can carry a per-panel nameplate watts value (uint16, 0 = unset). Set via the click-to-edit pill in Topology. When set:
 
-- Complete device list with sensor assignments
-- CCA panel names and hierarchy (MPPT → String → Panel)
-- Barcode information (Frame 27, 16-char)
-- Validation badges for CCA-matched devices
-- Delete individual nodes with confirmation
+- Topology and Dashboard tiles display "350 W (88%)" alongside watts.
+- String roll-ups display "Y% of Z kW" (output vs total nameplate).
+- `panelClass` switches to rating-vs-power health classification (`<30%` bad, `<70%` warn, else good) with a "string sleeping" check that flips the whole row to dead when total output is `<5%` of total nameplate (so dawn doesn't paint everything red).
+
+Falls back to median-vs-peer behavior when no rating is set.
+
+### Heatmap
+
+The dashboard uses fixed-size colored tiles per panel grouped by string. Color buckets match the legend strip (good ≥70% of reference, warn ≥30%, bad else, dead = string sleeping or telemetry stale). Each tile shows panel name + watts; hover scales the tile and reveals a tooltip with the full reading and "% of rated" if available.
 
 ---
 
-## ESP32 Status
+## API endpoints
 
-![ESP32 Status](images/ESP32Status.png)
+All endpoints return JSON unless noted. Optional Bearer-token auth (see Authentication below).
 
-- **System Info**: Uptime, ESPHome version, compile time
-- **Memory**: Heap and PSRAM usage with progress bars
-- **Minimum Free**: Lowest memory (detect leaks)
-- **Task Count**: Active FreeRTOS tasks
-- **Restart Button**: Remote system restart
+### Read
 
----
-
-## API Endpoints
-
-All endpoints return JSON. Auto-refresh every 5-30 seconds.
-
-| Endpoint | Description |
-|----------|-------------|
-| `/api/devices` | Device metrics with string labels |
-| `/api/overview` | System-wide aggregates |
-| `/api/strings` | Per-string aggregated data |
+| Endpoint | Returns |
+|----------|---------|
+| `/api/health` | `{status, uptime, heap_free, heap_min_free}` — no auth |
+| `/api/status` | ESP32 status + UART counters + RSSI + memory |
+| `/api/overview` | System aggregates (`total_power`, `total_energy_in`, `active_devices`, …) |
+| `/api/devices` | Per-device live telemetry (`power_in`, `voltage_in`, `current`, `temperature`, `data_age_ms`, …) |
+| `/api/strings` | Flat per-string aggregates incl. `display_label`, `panel_rating_w` |
+| `/api/inverters` | Hierarchical inverter rollups with embedded strings (each carries `display_label`, `panel_rating_w`) and inverter `display_name` |
 | `/api/nodes` | Node table with CCA metadata |
-| `/api/status` | ESP32 system status |
-| `/api/yaml` | Generated YAML configuration |
-| `/api/cca` | CCA connection info |
-| `/api/inverters` | Per-inverter aggregates |
-| `/api/restart` | Trigger system restart |
-| `/api/health` | Health check (no auth) |
+| `/api/cca` | CCA connection state + `device_info` (encoded JSON string from CCA) |
+| `/api/yaml?sensors=…&hub_sensors=…` | Generated YAML config (Tools view) |
+| `/api/tsdb/stats` | LittleFS partition + per-DB record counts (only when esp_tsdb is compiled in) |
+| `/api/history/power?range=day\|week\|month\|year` | System power/energy time series |
+| `/api/history/panel?slot=N&range=…` | Single-panel power time series |
+| `/api/panels` | Slot map (`barcode → slot`) |
+| `/api/energy/history` | Daily energy history (RAM ring buffer, kept alongside TSDB) |
 
-### Example Response
+### Write
+
+| Endpoint | Payload | Behaviour |
+|----------|---------|-----------|
+| `POST /api/restart` | none | Calls `App.safe_reboot()` after sending response |
+| `POST /api/reset_peak_power` | none | Clears per-device peak-power high-water marks |
+| `POST /api/reset_node_table` | none | Drops the persisted node table; devices repopulate from telemetry |
+| `POST /api/nodes/import` | JSON `{nodes:[…]}` | Replaces the node table from a previous Export |
+| `POST /api/inverters/rename` | `{name, display_name}` | Set inverter display name. Empty `display_name` clears the override |
+| `POST /api/strings/rename` | `{label, display_label}` | Set string display name. Empty clears the override |
+| `POST /api/strings/rating` | `{label, rating_w}` | Set per-panel nameplate watts. `rating_w=0` clears |
+| `POST /api/cca/refresh` | none | Triggers a fresh CCA query |
+| `POST /api/backlight` | `state=on\|off\|toggle` | Backlight control (units with backlight wired) |
+
+### Example
 
 ```bash
 curl http://192.168.1.100/api/overview
@@ -94,18 +93,35 @@ curl http://192.168.1.100/api/overview
 {
   "total_power": 4523.5,
   "total_current": 12.3,
-  "total_energy": 45.6,
+  "total_energy_in": 45.6,
   "active_devices": 20,
+  "max_devices": 24,
   "avg_efficiency": 96.2,
   "avg_temperature": 42.5
 }
+```
+
+Renaming an inverter:
+
+```bash
+curl -X POST http://192.168.1.100/api/inverters/rename \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"FlexBoss A","display_name":"South Roof"}'
+```
+
+Setting per-panel nameplate watts on a string:
+
+```bash
+curl -X POST http://192.168.1.100/api/strings/rating \
+  -H 'Content-Type: application/json' \
+  -d '{"label":"String A","rating_w":400}'
 ```
 
 ---
 
 ## Authentication
 
-### API Authentication (Bearer Token)
+### API (Bearer token)
 
 ```yaml
 tigo_server:
@@ -113,12 +129,11 @@ tigo_server:
   api_token: "your-secret-token"
 ```
 
-Usage:
 ```bash
 curl -H "Authorization: Bearer your-secret-token" http://esp32/api/devices
 ```
 
-### Web Authentication (HTTP Basic)
+### Web (HTTP Basic)
 
 ```yaml
 tigo_server:
@@ -129,30 +144,15 @@ tigo_server:
 
 Browser prompts for credentials. Cached per session.
 
-### Health Check
-
-`/api/health` requires no authentication:
-
-```bash
-curl http://esp32/api/health
-```
-
-```json
-{
-  "status": "ok",
-  "uptime": 12345,
-  "heap_free": 245760,
-  "heap_min_free": 198432
-}
-```
+`/api/health` is the only endpoint that ignores both auth schemes.
 
 ---
 
 ## Home Assistant Ingress
 
-The web UI supports proxying through Home Assistant's reverse proxy with a dynamic URL prefix, compatible with both [Home Assistant Ingress](https://developers.home-assistant.io/docs/add-ons/presentation/#ingress) and the community [hass_ingress](https://github.com/lovelylain/hass_ingress) integration.
+The SPA detects ingress prefixes from `window.location.pathname` and prepends the detected `BASE_PATH` to every `apiFetch`. Legacy-page redirects use a relative `Location` so they resolve under any URL prefix.
 
-To enable ingress support, add the following to your `sdkconfig_options` so the ESP-IDF HTTP server can handle the longer URIs and headers that HA Ingress generates:
+To allow the longer URIs HA Ingress generates, add:
 
 ```yaml
 esp32:
@@ -163,7 +163,7 @@ esp32:
       CONFIG_HTTPD_MAX_URI_LEN: "1024"
 ```
 
-The component automatically detects the ingress base path from the `X-Ingress-Path` header and rewrites all internal links accordingly — no additional configuration required.
+Compatible with the [hass_ingress](https://github.com/lovelylain/hass_ingress) integration; native HA add-on Ingress also works.
 
 ---
 
@@ -176,49 +176,31 @@ tigo_server:
   api_token: "optional-token"
   web_username: "optional-user"
   web_password: "optional-pass"
+  backlight: backlight_id   # optional — enables /api/backlight
 ```
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `tigo_monitor_id` | ID | Required | Reference to tigo_monitor |
+| `tigo_monitor_id` | ID | required | Reference to `tigo_monitor` |
 | `port` | Integer | 80 | HTTP port |
-| `api_token` | String | None | Bearer token for API |
-| `web_username` | String | None | HTTP Basic Auth user |
-| `web_password` | String | None | HTTP Basic Auth pass |
+| `api_token` | String | none | Bearer token for `/api/*` |
+| `web_username` | String | none | HTTP Basic Auth user |
+| `web_password` | String | none | HTTP Basic Auth pass |
+| `backlight` | ID | none | Light component for the optional `/api/backlight` endpoint |
 
 ---
 
-## Technical Details
+## Technical notes
 
-- **Framework**: ESP-IDF native HTTP server
-- **Stack size**: 8KB per request
-- **Max handlers**: 16 routes
-- **CORS**: Enabled for external access
-- **Memory**: PSRAM-backed when available
-
----
-
-## Example URLs
-
-If ESP32 IP is `192.168.1.100`:
-
-```
-http://192.168.1.100/           # Dashboard
-http://192.168.1.100/nodes      # Node Table
-http://192.168.1.100/status     # ESP32 Status
-http://192.168.1.100/yaml       # YAML Config
-http://192.168.1.100/cca        # CCA Info
-http://192.168.1.100/api/devices  # JSON API
-```
+- **Framework**: ESP-IDF native `esp_http_server` on a dedicated 8 KB-stack task.
+- **Max URI handlers**: 35 routes registered (raise via `config.max_uri_handlers` in `tigo_web_server.cpp` if adding more).
+- **Connection model**: 4 max open sockets, keep-alive disabled, LRU purge enabled — minimizes internal RAM footprint without much real-world impact at typical poll rates.
+- **HTML assets**: served from `R""` raw-string constants in `web_assets.h`, regenerated from `components/tigo_server/web/*.html` by the Python codegen step. The API token placeholder (`__TIGO_API_TOKEN__`) is substituted at runtime so each device's token stays unique without a recompile.
+- **Memory**: response building and HTML buffers go through `PSRAMString` so large pages don't pressure internal heap.
+- **Persistence**: NVS (via `global_preferences`) holds inverter/string display-name overrides and panel nameplate ratings. Node table and energy history live in NVS too. TSDB time-series data lives on a separate LittleFS partition — see [`docs/tsdb-integration.md`](tsdb-integration.md).
 
 ---
 
-## Browser Compatibility
+## Browser support
 
-Works with all modern browsers:
-- Chrome / Edge
-- Firefox
-- Safari
-- Mobile browsers
-
-No plugins required. All processing on-device.
+Modern Chrome / Firefox / Safari, mobile or desktop. No plugins. The SPA degrades gracefully if the API token is set incorrectly (visible "refresh error" in topbar).

@@ -7,11 +7,13 @@ An ESPHome component for monitoring Tigo solar optimizers via RS485/UART. Real-t
 ## Features
 
 - **Device Monitoring** – Voltage, current, power, temperature, RSSI per optimizer
-- **System Aggregation** – Total power, energy (kWh), active device count
-- **Built-in Web UI** – Dashboard, node table, status, YAML generator, CCA info
+- **System Aggregation** – Total power, energy (kWh), active device count, peak tracking
+- **Built-in Single-Page Web App** – Dashboard heatmap, history, topology, nodes, tools, diagnostics, CCA info
+- **On-Flash History** – Per-snapshot rollups + per-panel power persisted via [esp_tsdb](https://github.com/zakery292/esp_tsdb); survives reboots and OTA updates
 - **CCA Integration** – Auto-sync panel names from Tigo Cloud Connect Advanced
+- **In-UI Naming** – Friendly inverter and string names settable from Topology view, persisted to NVS (YAML stays the source of truth for identity)
+- **Per-String Nameplate** – Set the rated watts per panel; health classification and "% of rated" readouts use it
 - **Home Assistant** – Energy Dashboard compatible, full API integration, Ingress-proxy friendly
-- **Persistent Storage** – Device mappings and energy data survive reboots
 
 ## Requirements
 
@@ -120,15 +122,19 @@ binary_sensor:
 
 ### 4. Access Web Interface
 
-Navigate to `http://<esp32-ip>/` for the dashboard.
+Navigate to `http://<esp32-ip>/` — you land on the Dashboard view of the single-page app at `/app#dashboard`. Sidebar nav switches between views; the URL hash updates so views are deep-linkable.
 
-| Page | URL | Description |
+| View | URL | Description |
 |------|-----|-------------|
-| Dashboard | `/` | Real-time system overview |
-| Node Table | `/nodes` | Device registry with CCA labels |
-| Status | `/status` | ESP32 health and memory |
-| YAML Config | `/yaml` | Auto-generated sensor config |
-| CCA Info | `/cca` | Tigo CCA device status |
+| Dashboard | `/app#dashboard` | Hero strip + per-string heatmap + alerts |
+| History | `/app#history` | TSDB-backed power & energy charts (day / week / month / year) |
+| Topology | `/app#topology` | Inverter → string → panel hierarchy with live V/I/W/°C, rename + nameplate editing |
+| Node Table | `/app#nodes` | Device registry with CCA labels, export/import |
+| Tools | `/app#tools` | YAML generator + Reset Peak / Clear Nodes / Restart actions |
+| Diagnostics | `/app#diagnostics` | Memory, network, UART telemetry, TSDB stats |
+| CCA Info | `/app#cca` | Tigo CCA device status with manual refresh |
+
+Legacy paths (`/`, `/nodes`, `/status`, `/yaml`, `/cca`, `/history`) all 302 to the corresponding `#view`.
 
 ## PSRAM Configuration
 
@@ -188,14 +194,23 @@ button:
 
 ## API Endpoints
 
-All endpoints return JSON. Optional Bearer token authentication.
+All endpoints return JSON. Optional Bearer token authentication. See [`docs/WEB_SERVER_README.md`](docs/WEB_SERVER_README.md#api-endpoints) for the full set.
 
 | Endpoint | Description |
 |----------|-------------|
+| `/api/overview` | System aggregates (power, energy, device counts) |
 | `/api/devices` | Device metrics with string labels |
-| `/api/overview` | System aggregates |
-| `/api/strings` | Per-string data |
+| `/api/inverters` | Per-inverter rollups + embedded strings (incl. `display_name`, `display_label`, `panel_rating_w`) |
+| `/api/nodes` | Node table with CCA metadata; POST `/api/nodes/import` to restore |
+| `/api/strings` | Flat per-string aggregates |
+| `/api/inverters/rename` | POST `{name, display_name}` — set inverter friendly name |
+| `/api/strings/rename` | POST `{label, display_label}` — set string friendly name |
+| `/api/strings/rating` | POST `{label, rating_w}` — set per-panel nameplate watts |
 | `/api/status` | ESP32 status |
+| `/api/tsdb/stats` | LittleFS partition usage + per-DB record counts (only when esp_tsdb enabled) |
+| `/api/history/power?range=…` | TSDB-backed system power/energy series |
+| `/api/history/panel?slot=N&range=…` | TSDB-backed single-panel power series |
+| `/api/panels` | Slot map (panel barcode → DB slot) |
 | `/api/health` | Health check (no auth) |
 
 ## Documentation
@@ -204,7 +219,8 @@ All endpoints return JSON. Optional Bearer token authentication.
 |----------|-------------|
 | [Wiring Guide](docs/WIRING.md) | RS485 connection to Tigo CCA/TAP |
 | [Configuration Guide](docs/CONFIGURATION.md) | Full configuration options |
-| [Web Server](docs/WEB_SERVER_README.md) | Web UI and API details |
+| [Web Server](docs/WEB_SERVER_README.md) | SPA + API reference |
+| [TSDB Integration](docs/tsdb-integration.md) | On-flash time-series history (esp_tsdb) |
 | [Troubleshooting](docs/TROUBLESHOOTING.md) | Common issues and solutions |
 | [Home Assistant](docs/HOME_ASSISTANT.md) | HA integration and dashboards |
 | [UART Optimization](docs/UART_OPTIMIZATION.md) | Reducing packet loss |

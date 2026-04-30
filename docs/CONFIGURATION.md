@@ -54,6 +54,20 @@ inverters:
 
 MPPT labels must match CCA labels exactly. The web dashboard shows hierarchy: Inverter → MPPT → String → Panel.
 
+#### Renaming from the UI
+
+Inverter and string display names are editable from the Topology view (✎ next to each label). Overrides are persisted to NVS, keyed by canonical YAML/CCA name. The YAML-defined `name:` is still the immutable identity used everywhere internally; the override only affects display. Empty override = falls back to canonical name. Useful when you want friendlier names ("South Roof") without redeploying YAML.
+
+#### Per-string panel nameplate (rating)
+
+Click the rating pill in the Topology view to set the per-panel nameplate watts for a string (uint16, 0 = unset). Persisted to NVS. When set:
+
+- Panel tiles show "% of rated" alongside watts.
+- Health classification uses rating-vs-power instead of median-vs-peer (with a "string sleeping" check at <5% of total nameplate so dawn doesn't paint everything red).
+- String aggregate roll-up shows output as % of total nameplate.
+
+Falls back to median-based behavior when unset.
+
 ### Midnight Reset
 
 Reset peak power and energy daily:
@@ -303,6 +317,29 @@ esp32:
       CONFIG_SPIRAM_MODE_OCT: "y"
       CONFIG_SPIRAM_SPEED_80M: "y"
 ```
+
+---
+
+## On-Flash History (esp_tsdb)
+
+Persistent time-series history is opt-in via two extra dependencies and a custom partition table. See [`docs/tsdb-integration.md`](tsdb-integration.md) for the full schema, sizing, and query reference.
+
+Quick form (8 MB AtomS3R):
+
+```yaml
+esp32:
+  framework:
+    type: esp-idf
+    components:
+      - name: zakery292/esp_tsdb
+        path: /path/to/esp_tsdb       # see tsdb-integration.md re: pinning
+      - joltwallet/littlefs^1.16
+    sdkconfig_options:
+      CONFIG_PARTITION_TABLE_CUSTOM: "y"
+      CONFIG_PARTITION_TABLE_FILENAME: "boards/partitions/tigo-8mb.csv"
+```
+
+Without these, the rest of the component still works — you just lose the History view and the `/api/history/*` and `/api/tsdb/stats` endpoints.
 
 ---
 

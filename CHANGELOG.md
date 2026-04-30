@@ -7,6 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Single-page web app at `/app`** (full UI redesign, R1–R7)
+  - All views collapsed into one shell with sidebar nav and hash routing (`/app#dashboard`, `/app#history`, `/app#topology`, `/app#nodes`, `/app#tools`, `/app#diagnostics`, `/app#cca`).
+  - Legacy paths (`/`, `/nodes`, `/status`, `/yaml`, `/cca`, `/history`) redirect to the corresponding `#view` so existing bookmarks keep working.
+  - HA Ingress compliant: redirects use relative `Location: app#...` so they resolve under any URL prefix, and the SPA derives `BASE_PATH` from `window.location.pathname`.
+  - Sidebar footer now carries a GitHub link, a `°C` / `°F` toggle (persists via `localStorage['tempUnit']`), and the existing theme toggle.
+- **On-flash time-series history** (Phase 3 — esp_tsdb backed)
+  - Persistent per-snapshot rollups (system + per-inverter) and per-panel power survive reboots and OTA updates.
+  - Three lazy-opened panel DBs covering up to 48 panels (16 base params each).
+  - New endpoints: `/api/history/power?range=day|week|month|year`, `/api/history/panel?slot=N&range=...`, `/api/panels`, `/api/tsdb/stats`.
+  - Diagnostics view shows per-DB record counts, range, evictions, plus LittleFS partition usage.
+  - Requires the `esp_tsdb` external component and a `tsdb` LittleFS partition (see [`docs/tsdb-integration.md`](docs/tsdb-integration.md)).
+- **Topology view** — read-only inverter → string → panel hierarchy with live V/I/W/°C, search filter, expand/collapse, color-coded panel tiles.
+- **Heatmap dashboard** — fixed-size colored tiles per panel grouped by string, replacing the old variable-height bar chart. Same good/warn/bad/dead bands so the legend still applies.
+- **Color legend strip** on the dashboard showing the good/warn/bad/dead thresholds.
+- **"This month" hero card** (replaces "Avg temperature") — sums current month's daily history plus today's running total; subline shows kWh/day average.
+- **"% vs 5 min ago · % of peak" trend** on the Current Power hero card once a 5-min window of comparison data is available.
+- **Inverter and string rename** — click the ✎ next to any inverter or string heading in Topology to set a friendly display name. Persists to NVS via `global_preferences` (keyed by canonical YAML/CCA name). YAML config remains the source of truth for identity; the override is purely cosmetic and used everywhere those names appear (Dashboard, Topology, alerts).
+  - New endpoints: `POST /api/inverters/rename`, `POST /api/strings/rename`.
+- **Per-string panel nameplate rating** — click the rating pill in Topology to set per-panel watts. Persists to NVS. When set, panel tiles show "% of rated" alongside watts and `panelClass` switches to rating-based health classification (with a "<5% of total nameplate → string sleeping" check so dawn doesn't paint everything red). String roll-up shows total output as % of total nameplate.
+  - New endpoint: `POST /api/strings/rating` with `{label, rating_w}` (rating_w=0 clears).
+- **Tools view** absorbs the YAML generator and adds inline Reset Peak Power / Reset Node Table / Restart device actions with toast feedback.
+- **Diagnostics view** adds a TSDB section (open DBs, record counts, oldest/newest timestamps, evictions, file sizes) alongside the existing memory / network / UART / version cards.
+- **Node table Export / Import** restored on the Nodes view (same JSON shape as before).
+
+### Changed
+- **TSDB buffer pools moved to PSRAM** (`TSDB_ALLOC_PSRAM`) — reclaims ~28 KB of internal heap on units with PSRAM. Internal heap low-water improved from ~110 KB to ~150 KB on the 8 MB AtomS3R reference rig.
+- Diagnostics view active-sockets card no longer crashes when the inner span is replaced (`innerHTML`-based render).
+- Sparkline buffers and string-grouping maps continue to key on canonical names so renames don't lose history or break grouping.
+
+### Fixed
+- **History wiped on every reboot** when using esp_tsdb (only with `feat/handle-based-api` fork). Root cause: `tsdb_open` used `stat()` to detect file existence, but joltwallet's `esp_littlefs` returns `ENOENT` from `stat()` for files that `fopen("rb")` immediately reads bytes back from. Every boot took the create-new path and `fopen("w+b")` truncated the existing file. Fix in the upstream PR (`zakery292/esp_tsdb#1`): try `fopen(..., "r+b")` first; fall through to create-new only on failure. Slot map (panel_map.json) was unaffected because it uses `open(wb)+write+close` per save, which never hits the bad code path.
+- **Nodes view crashed at active-sockets** during R5 diag-view rendering (fixed in `2f14ad8`).
+- **Persistence cleanup on shutdown**: `TigoMonitorComponent::on_shutdown` now drains the TSDB writer queue (best-effort, 800 ms cap), `tsdb_close_h`s every open handle, and unmounts LittleFS so the journal commits cleanly before `esp_restart`.
+
+### Dependencies
+- New optional dependency: `esp_tsdb` (currently from local fork at `feat/handle-based-api`; will return to a registry pin once `zakery292/esp_tsdb#1` is merged and tagged).
+- New required dependency for history features: `joltwallet/littlefs` (any 1.16+).
+
 ## [1.4.3] - 2026-04-17
 
 ### Added

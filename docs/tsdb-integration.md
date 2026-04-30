@@ -1,267 +1,169 @@
-# esp_tsdb Integration Plan
+# TSDB Integration
 
-Persistent on-flash time-series storage for Tigo Monitor, replacing the
-volatile in-RAM history that resets on every reboot.
+On-flash time-series storage for Tigo Monitor, backed by [`zakery292/esp_tsdb`](https://github.com/zakery292/esp_tsdb). Survives reboots and OTA updates; queryable from the SPA's History view and from the JSON API.
 
-Component: [`zakery292/esp_tsdb` v2.0.2](https://components.espressif.com/components/zakery292/esp_tsdb/versions/2.0.2/readme).
-
----
-
-## Goals
-
-- History survives reboots and OTA updates.
-- Power & energy charts for day / week / month / year ranges.
-- Per-panel history at useful resolution without burning flash.
-- Query latency <500ms for dashboard ranges (week view).
-- No regression in UART frame throughput (currently ~14 fps, 0.003% loss).
-
-## Non-goals
-
-- Full per-panel V/I/T at 5-min resolution (too many series — see schema).
-- Real-time streaming of historical data; UI polls.
-- Replacing `/api/energy-history` immediately — run side-by-side first.
+> **Status:** Phases 1–3 shipped. Per-snapshot system rollups + per-panel power are persisted at 5-min cadence; up to 48 panels supported across three lazy-opened panel DBs. Daily-rollup phase (Phase 4) and the volatile-history retirement (Phase 6) are tracked separately and not on the critical path.
 
 ---
 
-## Constraints from esp_tsdb
+## What gets persisted
 
-| Constraint | Implication |
-|---|---|
-| 64 params max per DB | Need to tier by aggregation level; can't store all per-panel metrics in one DB |
-| `int16_t` values only | Scale at write, descale at read; document scaling per param |
-| LittleFS-backed | Need a flash partition; pick size up front (resizing erases) |
-| ~290ms write avg, 412ms p95 | Write off the UART task; never under the state mutex |
-| Sequential overflow on schema add | Design param list up front; migrations leave dead flash |
-| 5-min × 1 week query ≈ 130ms | Fast enough for week view; pre-aggregate for month/year |
+Two logical schemas, three on-disk DBs (panel DB is striped because esp_tsdb caps at 16 base params per file).
 
----
-
-## Schema design
-
-Two databases. The split keeps system rollups fast and per-panel data lazy.
-
-### `system.tsdb` — system + per-inverter rollups (5-min resolution)
-
-Sized for a 4-inverter system; 14 base params, room for growth.
-
-| # | Name | Unit | Scale | Range covered |
-|---|---|---|---|---|
-| 0 | `total_p` | W | ×1 | 0–32 kW |
-| 1 | `total_e` | kWh ×100 | ×100 | 0–327 kWh per period (resets daily; cumulative kept elsewhere) |
-| 2 | `inv1_p` | W | ×1 | 0–32 kW per inverter |
-| 3 | `inv1_e` | kWh ×100 | ×100 | |
-| 4 | `inv2_p` | W | ×1 | |
-| 5 | `inv2_e` | kWh ×100 | ×100 | |
-| 6 | `inv3_p` | W | ×1 | |
-| 7 | `inv3_e` | kWh ×100 | ×100 | |
-| 8 | `inv4_p` | W | ×1 | |
-| 9 | `inv4_e` | kWh ×100 | ×100 | |
-| 10 | `temp_avg` | °C | ×1 | -40 to 100 |
-| 11 | `freq` | dHz | ×10 | 0–6553 dHz (= 0–655 Hz) |
-| 12 | `frames_lost` | count | ×1 | per 5-min window |
-| 13 | `wifi_rssi` | dBm | ×1 | -100 to 0 |
-
-**Why these:** drives every dashboard chart, every "today/week/month" stat, every inverter-level alert. ~55 params reserved (extras) for future per-string rollups when we add them.
-
-**Storage estimate:** 14 params × 2 bytes + 4-byte timestamp = 32 bytes/record. At 5-min cadence: 288 records/day × 32 bytes = ~9 KB/day, ~3.3 MB/year. **Sized at 8 MB → ~2.4 years** of 5-min data with index overhead.
-
-### `panels.tsdb` — per-panel power (5-min resolution)
-
-Power only. V/I/T at 5-min would triple writes for marginal benefit; if a panel is misbehaving the dashboard's live view shows V/I/T already.
-
-| # | Name | Unit | Scale | Range |
-|---|---|---|---|---|
-| 0..63 | `p00`..`p63` | W | ×1 | 0–500 W per panel |
-
-**Capacity:** 64 panels max in one DB. Most installs are <48; for larger systems, instantiate `panels2.tsdb`. We don't need to pay for that complexity until someone hits the limit.
-
-**Storage estimate:** 64 × 2 bytes + 4-byte ts = 132 bytes/record. 288/day × 132 = ~38 KB/day, ~14 MB/year. **Sized at 16 MB → ~14 months** at full panel count.
-
-**Mapping:** stable index assigned per barcode at first sight, persisted alongside the DB in a small JSON file (`panel_map.json` on LittleFS). New panels get the next free slot. Removed panels keep their slot (don't shuffle indices — would invalidate history).
-
-### `daily.tsdb` — pre-aggregated daily rollup
-
-Hand-rolled rollup written nightly (00:01 local), so month/year queries don't scan 5-min data.
+### `system.tsdb` — system + per-inverter rollups (5-min cadence, 14 params)
 
 | # | Name | Unit | Scale |
-|---|---|---|---|
-| 0 | `energy` | Wh | ×1 (range 0–32767 Wh = 32.7 kWh — *insufficient*; use kWh ×100 instead) |
-| 0 | `energy` | kWh ×100 | ×100 (range 0–327 kWh/day) |
-| 1 | `peak_p` | W | ×1 |
-| 2 | `runtime_min` | min | ×1 |
-| 3 | `frames_lost` | count | ×1 |
-| 4..N | per-inverter daily energy | kWh ×100 | ×100 |
+|---|------|------|-------|
+| 0 | `total_p` | W | ×1 |
+| 1 | `total_e` | kWh | ×100 (period delta — energy produced in the 5-min window) |
+| 2–9 | `inv1_p` … `inv4_e` | W or kWh ×100 | per-inverter power and 5-min energy delta |
+| 10 | `temp_avg` | °C | ×1 |
+| 11 | `freq` | dHz | ×10 (currently 0 — wired but not extracted from telemetry) |
+| 12 | `frames_lost` | count | ×1 |
+| 13 | `wifi_rssi` | dBm | ×1 |
 
-365 records/year, trivially small.
+### `panels{0,1,2}.tsdb` — per-panel power (5-min cadence, 16 params each)
 
----
+Each DB covers 16 panel slots. Up to 48 panels total. DBs are opened lazily — `panels1.tsdb` doesn't exist on flash until a 17th slot is assigned.
 
-## Scaling reference
+Slots are stable: a barcode is mapped to a slot on first sight and that mapping persists in `/tsdb/panel_map.json` (small JSON file written via fopen("wb")+fclose for crash safety). Replaced panels keep their slot history; new barcodes get the next free slot. Removed panels are not garbage-collected — their history stays in place.
 
-Stored as `int16_t`. Always apply scaling at write & read:
-
-```c
-// Write helpers
-static inline int16_t enc_w(float watts) { return (int16_t)lroundf(watts); }
-static inline int16_t enc_kwh(float kwh)  { return (int16_t)lroundf(kwh * 100.0f); }
-static inline int16_t enc_v(float volts)  { return (int16_t)lroundf(volts * 10.0f); }
-
-// Read helpers
-static inline float dec_kwh(int16_t v)  { return v / 100.0f; }
-```
-
-Bounds-check before encoding — clamp to `INT16_MIN/MAX` to avoid silent wraparound on a runaway sensor.
+If 48 slots fill up, additional panels are skipped silently (with a `(W)` log). Bumping `kNumPanelDbs` in `tigo_history.h` raises the cap, but requires bigger flash sizing per below.
 
 ---
 
-## Partition table
+## Sizing
 
-Add a LittleFS partition. Current AtomS3R has 8 MB flash; existing partition table is ESPHome default. esp_tsdb wants ~24 MB total for our schema (8 + 16 + small daily). **The 8 MB AtomS3R can't fit this without compromise.**
+`tigo-8mb.csv` partition layout reserves 3 MB for the LittleFS partition (label `tsdb`):
 
-Options:
-
-**A. Reduced retention (fits 8 MB AtomS3R):**
-- `system.tsdb` 4 MB → ~14 months of 5-min data
-- `panels.tsdb` 3 MB → ~80 days of per-panel data
-- `daily.tsdb` ~50 KB
-- Leaves ~1 MB headroom for LittleFS overhead
-
-**B. Recommend 16 MB board variant** (e.g., AtomS3R-M12 or generic ESP32-S3-N16R8) for full retention.
-
-**Decision needed from user:** A is the safer default (works on existing hardware); B becomes the recommended config in `boards/` for long-term users. I'd ship both — code reads partition size at boot and adjusts `max_records` on `tsdb_init`.
-
-Partition table snippet (option A):
-
-```csv
-# Name,    Type, SubType, Offset,   Size,     Flags
-nvs,      data, nvs,     0x9000,   0x6000,
-phy_init, data, phy,     0xf000,   0x1000,
-factory,  app,  factory, 0x10000,  0x300000,
-ota_0,    app,  ota_0,   0x310000, 0x300000,
-ota_1,    app,  ota_1,   0x610000, 0x180000,
-tsdb,     data, littlefs,0x790000, 0x870000,
 ```
+otadata    8 KB
+phy_init   4 KB
+app0       1.75 MB   (OTA slot A)
+app1       1.75 MB   (OTA slot B)
+nvs        448 KB
+tsdb       3 MB      (LittleFS — system.tsdb + 3× panels<N>.tsdb)
+```
+
+Per-DB allocations in `tigo_history.cpp`:
+
+| DB | File size | Records | At 5-min cadence | Buffer pool |
+|----|-----------|---------|------------------|-------------|
+| `system.tsdb` | 2 MB | ~65k records | ~227 days at full cadence | 10 KB (PSRAM) |
+| `panels{0,1,2}.tsdb` | 256 KB each | ~7,200 records | ~25 days each | 6 KB each (PSRAM) |
+
+Buffer pools live in PSRAM (`TSDB_ALLOC_PSRAM`) so they don't pressure internal heap; the AtomS3R reference rig reclaimed ~28 KB internal heap by moving them out.
 
 ---
 
 ## Write path
 
-### Task
+A dedicated FreeRTOS task (`tsdb_writer`, priority 1, 8 KB stack) drains a queue of encoded snapshots. Snapshots are produced by a 5-min `set_interval` timer on the main app task:
 
-Dedicated FreeRTOS task `tsdb_writer_task` (priority below UART, stack 4 KB).
+1. Take the state lock briefly to gather aggregates (system, per-inverter, per-panel power).
+2. Encode floats to int16 with the appropriate scale.
+3. `xQueueSend` non-blocking — if the queue is full (4-deep), drop the sample with a log warning. With 5-min cadence the queue should never be more than 1 deep in steady state.
 
-Inbox: a small ring buffer (PSRAM) of pending samples, populated by a 5-min timer in the main app loop.
+The writer task pops snapshots and calls `tsdb_write_h(system_db_, …)` followed by `tsdb_write_h(panel_db_[i], …)` for every open panel DB. Each `tsdb_write_h` does fflush + fsync internally.
 
-```cpp
-// Pseudocode in tigo_monitor.cpp
-void TigoMonitor::flush_to_tsdb_() {
-  // Called every 5 minutes from a software timer.
-  TsdbSample s;
-  {
-    StateLock lock(state_mutex_);   // brief — just snapshot rollups
-    s.ts = now();
-    s.total_p = enc_w(this->total_power_);
-    s.total_e = enc_kwh(this->energy_5min_);
-    for (size_t i = 0; i < inverters_.size() && i < 4; ++i) {
-      s.inv_p[i] = enc_w(inverters_[i].power);
-      s.inv_e[i] = enc_kwh(inverters_[i].energy_5min);
-    }
-    // ... per-panel snapshot too
-  }  // lock released
-  xQueueSend(tsdb_queue_, &s, 0);   // non-blocking; drop if full + log warn
-}
+On `App.safe_reboot()`, `TigoMonitorComponent::on_shutdown()`:
 
-// In tsdb_writer_task:
-TsdbSample s;
-while (xQueueReceive(tsdb_queue_, &s, portMAX_DELAY)) {
-  int16_t row[14] = { s.total_p, s.total_e, s.inv_p[0], s.inv_e[0], ... };
-  esp_err_t err = tsdb_write(s.ts, row);
-  if (err != ESP_OK) ESP_LOGW(TAG, "tsdb write failed: %s", esp_err_to_name(err));
-}
-```
+1. Drains the writer queue (best effort, 800 ms cap).
+2. `tsdb_close_h`s every open handle (releases buffer pool, fcloses underlying FILE*).
+3. `esp_vfs_littlefs_unregister("tsdb")` — final journal commit before the partition is unmounted.
 
-**Critical:** the 290ms write happens on the writer task, not the UART task or the main loop. The state mutex is only held during the snapshot (microseconds), not during the flash write.
-
-### Cadence
-
-- **5-min** for `system.tsdb` and `panels.tsdb` — one queue, two writes back-to-back.
-- **Daily at 00:01** for `daily.tsdb` — rolled up from `system.tsdb` via `tsdb_aggregate(start_of_day, end_of_day, idx, TSDB_AGG_SUM, &out)`.
-- **Synchronous flush** before OTA + before reboot (already a graceful-shutdown path in `tigo_monitor.cpp`; add a hook).
+This pairing matters: without the explicit close, the next `tsdb_open` in some scenarios would re-create the file from scratch (see "Implementation notes" below).
 
 ---
 
 ## Query path
 
-New endpoints on `tigo_web_server`:
+The SPA's History view and the JSON API both pull from `/api/history/power` (system) and `/api/history/panel?slot=N` (single panel). Queries run on the http_server task using `tsdb_query_*_h` and stream results into a `PSRAMString`.
 
-| Endpoint | Source DB | Resolution | Notes |
-|---|---|---|---|
-| `/api/history/power?range=day` | `system.tsdb` | 5-min | ~288 points |
-| `/api/history/power?range=week` | `system.tsdb` | 5-min | ~2k points; dashboard week chart |
-| `/api/history/power?range=month` | `system.tsdb` aggregated to hourly | hourly | ~720 points |
-| `/api/history/power?range=year` | `daily.tsdb` | daily | ~365 points |
-| `/api/history/energy?range=…` | `daily.tsdb` mostly | daily | bar chart |
-| `/api/history/panel?id=P18&range=week` | `panels.tsdb` | 5-min | one column read |
-| `/api/history/panels?range=week` | `panels.tsdb` | 5-min, all panels | for the per-panel bar chart |
+| Endpoint | Source | Resolution | Typical points |
+|----------|--------|------------|----------------|
+| `/api/history/power?range=day` | `system.tsdb` | 5-min | ~288 |
+| `/api/history/power?range=week` | `system.tsdb` | 5-min | ~2,000 |
+| `/api/history/power?range=month` | `system.tsdb` | 5-min | ~8,640 (capped at oldest record on disk) |
+| `/api/history/power?range=year` | `system.tsdb` | 5-min | (covers what's on disk, ≤ ~227 days) |
+| `/api/history/panel?slot=N&range=…` | `panels{slot/16}.tsdb` | 5-min | one column read |
+| `/api/panels` | `panel_map.json` | — | full slot map |
+| `/api/tsdb/stats` | live handles | — | per-DB record counts, oldest/newest, evictions, file sizes |
 
-Implementation pattern (handler runs on http_server task, NOT app task — already true today):
+The Diagnostics view consumes `/api/tsdb/stats` to render the database table (records / max records / writes / evictions / size / range).
 
-```cpp
-// Inside the http handler. No state mutex needed; tsdb has its own internal locking.
-tsdb_query_t q;
-tsdb_query_init(&q, start, end, NULL, 0);
-PSRAMString json;
-json.reserve(64 * 1024);
-json += "[";
-uint32_t ts; int16_t row[14];
-bool first = true;
-while (tsdb_query_next(&q, &ts, row) == ESP_OK) {
-  if (!first) json += ",";
-  first = false;
-  // emit {"t":1714410600,"p":7840,"e":326}
-  ...
-}
-json += "]";
-tsdb_query_close(&q);
+---
+
+## Required configuration
+
+Add the `esp_tsdb` and `joltwallet/littlefs` dependencies plus a `tsdb` partition.
+
+`tigo-8mb.csv` (lives under `boards/partitions/`):
+
+```csv
+otadata,   data, ota,      ,       0x2000,
+phy_init,  data, phy,      ,       0x1000,
+app0,      app,  ota_0,    ,       0x1C0000,
+app1,      app,  ota_1,    ,       0x1C0000,
+nvs,       data, nvs,      ,       0x70000,
+tsdb,      data, littlefs, ,       0x300000,
 ```
 
-**Cap response size** the same way we cap CCA responses — hard limit at 1 MB to prevent runaway queries.
+YAML:
+
+```yaml
+esp32:
+  board: m5stack-atoms3
+  variant: esp32s3
+  framework:
+    type: esp-idf
+    components:
+      # Until zakery292/esp_tsdb#1 lands and tags a release, the path: form
+      # below points at the local handle-based-API fork. Once the upstream
+      # release ships, swap this for a registry pin.
+      - name: zakery292/esp_tsdb
+        path: /path/to/esp_tsdb
+      - joltwallet/littlefs^1.16
+    sdkconfig_options:
+      CONFIG_PARTITION_TABLE_CUSTOM: "y"
+      CONFIG_PARTITION_TABLE_FILENAME: "boards/partitions/tigo-8mb.csv"
+      CONFIG_LITTLEFS_FOR_IDF_3_2: "n"
+```
+
+The TSDB code is conditionally compiled — without those two dependencies on the include path, `tigo_history.h` short-circuits and the History / TSDB-stats endpoints don't exist. You can run the rest of the component without TSDB; you just lose persistent history.
 
 ---
 
-## Bootstrapping & migration
+## Implementation notes
 
-- On first boot after upgrade: tsdb files don't exist → `tsdb_init` creates them. No data yet.
-- The existing in-RAM `daily_energy_history_` (from `/api/energy-history`) keeps working in parallel for the first month so users don't lose visible history during the transition.
-- After 30 days of tsdb data accumulated, `/api/energy-history` becomes a passthrough to `/api/history/energy?range=month` and the in-RAM ring buffer is removed.
+### Persistence bug fix (upstream PR `zakery292/esp_tsdb#1`)
 
----
+Empirical: history was being wiped on every reboot even though `tsdb_write_h` does fflush + fsync after every record. Root cause was in `tsdb_open`'s file-existence detection: it called `stat(filepath)` and went down the create-new path on failure. On joltwallet's `esp_littlefs` (1.21.1), `stat()` returns `ENOENT` for files that `fopen("rb")` immediately reads bytes back from — so every boot took the create-new path and `fopen("w+b")` truncated the existing data.
 
-## Risks & open questions
+Fix: probe existence by trying `fopen(path, "r+b")` first; fall through to `fopen("w+b")` only if that fails. The slot map (`panel_map.json`) was unaffected because it uses an `open(wb)+write+close` cycle every save, which never hits the bad code path.
 
-1. **Flash wear.** LittleFS does its own wear leveling. At 5-min cadence × 2 writes = 576 writes/day × ~3 KB each = ~1.7 MB/day. Flash endurance is ~100k erase cycles per sector; LittleFS spreads them. Should last >10 years at this rate, but worth measuring with `esp_partition_get_sha256` over time and surfacing in diagnostics.
-2. **Concurrent flash I/O during OTA.** OTA writes flash; tsdb writes flash. The readme calls out 750ms latency spikes under concurrent load. Solution: pause the writer task during OTA (we already have an `ota` event hook in ESPHome).
-3. **Component is one author, recent.** v2.0.2; backward-compatible with v1 according to the readme. Worth pinning to an exact version and reading the source before merging.
-4. **8 MB board limit.** Real decision the user needs to make: do we ship Option A (reduced retention everywhere) or Option B (recommend 16 MB hardware, keep A as fallback)?
-5. **Panel-index stability.** If a panel is replaced (new barcode, same physical slot), how do we handle history? Probably: leave the old slot's history in place (read-only), assign a new slot for the new panel. UI surfaces both with a "replaced on YYYY-MM-DD" pill.
+### Multi-DB striping
 
----
+`esp_tsdb` caps at 16 base params per DB. To cover 48 panels, three panel DBs are opened lazily as slots fill. The fork's `tsdb_t *` handle-based API (also from PR #1) makes this straightforward — each DB has its own handle, mutex, and buffer pool.
 
-## Implementation phases
+### PSRAM placement
 
-1. **Add the dependency + partition.** New `tsdb` partition in `boards/*.yaml` partition tables, add `idf.py` dependency, verify it links and `tsdb_init` succeeds. No data written yet.
-2. **System rollup writer.** Add the 5-min timer, the writer task, and `system.tsdb` schema. Add `/api/history/power?range=day|week`. Verify on dashboard.
-3. **Daily rollup.** Cron at 00:01 to aggregate into `daily.tsdb`. Add `/api/history/energy`.
-4. **Per-panel.** `panels.tsdb` + barcode→index mapping + `/api/history/panel`. Tools-view button to view a panel's last week.
-5. **Diagnostics.** Surface TSDB stats in the diagnostics view: file sizes, write latency p95, last write age, slot map.
-6. **Retire volatile history.** Once stable for ~30 days, remove the in-RAM history and point legacy endpoints at TSDB.
-
-Each phase is its own branch off `main`, mergeable independently.
+Buffer pools default to internal RAM in upstream esp_tsdb. We override via `cfg.alloc_strategy = TSDB_ALLOC_PSRAM` so the ~28 KB total stays out of the constrained internal heap on the AtomS3R.
 
 ---
 
-## Open question for the user
+## Out of scope (for now)
 
-**Option A** (8 MB board, ~14 months system data, ~80 days panel data) or **Option B** (recommend 16 MB board for new installs, keep A as the small-flash variant)?
+- **Full per-panel V/I/T at 5-min** — too many series for the int16-only schema; the live UI shows V/I/T already.
+- **Real-time streaming** — UI polls.
+- **Daily/monthly pre-aggregation** (`daily.tsdb` from the original plan) — month/year queries currently scan the system DB directly. Fine for ~227 days of 5-min data; add aggregation if larger flash is fitted.
+- **Per-string rollups in `system.tsdb`** — there's headroom in the param layout for future strings, but not wired.
 
-Both are easy code-wise; the answer just changes default partition sizes shipped in `boards/`.
+---
+
+## Where to look in the source
+
+- `components/tigo_monitor/tigo_history.{h,cpp}` — schema, encoders, writer task, slot map.
+- `components/tigo_monitor/tigo_monitor.cpp` `snapshot_to_history_()` — gathers and enqueues snapshots.
+- `components/tigo_server/tigo_web_server.cpp` `api_history_*_handler`, `api_panels_handler`, `api_tsdb_stats_handler` — query/stats endpoints.
+- `components/tigo_server/web/app.html` — History view (charts) + Diagnostics view (TSDB stats table).
