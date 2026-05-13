@@ -49,6 +49,25 @@
 
   .app { display: grid; grid-template-columns: 240px 1fr; min-height: 100vh; }
 
+  /* ===== Mobile drawer ===== */
+  /* The hamburger and overlay are inert at desktop widths and only switch on
+     under 768px (see the media block at the bottom of this stylesheet). */
+  .mobile-menu-btn {
+    display: none;
+    position: fixed; top: 10px; left: 10px; z-index: 60;
+    background: var(--bg-2); border: 1px solid var(--border); color: var(--text);
+    width: 40px; height: 40px; border-radius: 8px;
+    align-items: center; justify-content: center;
+    font-size: 18px; line-height: 1; cursor: pointer;
+  }
+  .mobile-menu-btn:hover { background: var(--bg-3); }
+  .sidebar-overlay {
+    display: none;
+    position: fixed; inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    z-index: 50;
+  }
+
   /* ===== Sidebar ===== */
   aside {
     background: var(--bg-2);
@@ -123,7 +142,7 @@
   .placeholder-link:hover { text-decoration: underline; }
 
   /* ===== Dashboard hero strip ===== */
-  .hero { display: grid; grid-template-columns: 2fr 1fr 1fr 1fr; gap: 16px; margin-bottom: 24px; }
+  .hero { display: grid; grid-template-columns: 2fr 1fr 1fr 1fr 1fr; gap: 16px; margin-bottom: 24px; }
   .hero-card { background: var(--bg-2); border: 1px solid var(--border); border-radius: 10px; padding: 18px 20px; }
   .hero-card.primary {
     background: linear-gradient(135deg, rgba(74,222,128,0.08), rgba(56,189,248,0.06));
@@ -191,7 +210,11 @@
   }
   .panel-heat-tile:hover { transform: scale(1.06); z-index: 5; }
   .panel-heat-tile .pht-id { font-size: 13px; line-height: 1; }
-  .panel-heat-tile .pht-w  { font-size: 12px; line-height: 1; opacity: 0.85; margin-top: 6px; font-variant-numeric: tabular-nums; }
+  .panel-heat-tile .pht-w  { font-size: 12px; line-height: 1; opacity: 0.85; margin-top: 6px; font-variant-numeric: tabular-nums; text-align: center; }
+  .panel-heat-tile .pht-rated {
+    display: inline-block; font-size: 10px; opacity: 0.7; margin-left: 2px;
+    font-weight: 500;
+  }
   .panel-heat-tile.good { background: var(--good); color: #061018; }
   .panel-heat-tile.warn { background: var(--warn); color: #1c1300; }
   .panel-heat-tile.bad  { background: var(--bad);  color: #fff; }
@@ -199,17 +222,24 @@
     background: var(--bg-3); border: 1px dashed var(--text-faint);
     color: var(--text-faint);
   }
+  /* Bottom stripe — rating-vs-nameplate signal, independent of peer color.
+     Uses the same good/warn/bad palette so the loud cases (e.g. green tile +
+     red stripe = keeping up with shaded neighbors, but everyone is well
+     below nameplate) jump out visually. */
+  .panel-heat-rating {
+    position: absolute; left: 4px; right: 4px; bottom: 4px; height: 4px;
+    border-radius: 2px;
+    box-shadow: 0 0 0 1px rgba(0,0,0,0.35);
+  }
+  .panel-heat-rating.good { background: var(--good); }
+  .panel-heat-rating.warn { background: var(--warn); }
+  .panel-heat-rating.bad  { background: var(--bad);  }
+  .panel-heat-tile.dead .panel-heat-rating { display: none; }
   .panel-heat-tile:hover .panel-bar-tip { opacity: 1; }
 
   .panel-string-row { display: flex; align-items: flex-start; gap: 10px; margin-top: 8px; }
   .panel-string-label { width: 90px; font-size: 11px; color: var(--text-dim); padding-top: 4px; flex-shrink: 0; }
   .panel-string-bars { flex: 1; }
-
-  /* Sparkline */
-  .spark-row { display: flex; align-items: center; gap: 16px; margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border); }
-  .spark-label { font-size: 11px; color: var(--text-dim); width: 90px; }
-  .spark { flex: 1; height: 32px; }
-  .spark-val { font-size: 12px; color: var(--text-dim); width: 80px; text-align: right; font-variant-numeric: tabular-nums; }
 
   /* ===== History view ===== */
   .source-banner { background: var(--bg-2); border: 1px solid var(--border); border-radius: 8px; padding: 0.75rem 1rem; margin-bottom: 1rem; display: flex; align-items: center; gap: 0.75rem; font-size: 0.85rem; color: var(--text-dim); }
@@ -251,23 +281,23 @@
   .table-meta { font-size: 12px; color: var(--text-dim); }
 
   .table-wrap { background: var(--bg-2); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
-  table.nodes { width: 100%; border-collapse: collapse; font-size: 12px; }
+  table.nodes { width: 100%; border-collapse: collapse; font-size: 14px; }
   table.nodes th {
-    text-align: left; padding: 10px 12px; font-weight: 600;
+    text-align: left; padding: 12px 14px; font-weight: 600;
     color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.4px;
     background: var(--bg-3); border-bottom: 1px solid var(--border);
-    font-size: 10px; position: sticky; top: 0;
+    font-size: 11px; position: sticky; top: 0;
   }
-  table.nodes td { padding: 10px 12px; border-bottom: 1px solid var(--border); font-variant-numeric: tabular-nums; }
+  table.nodes td { padding: 12px 14px; border-bottom: 1px solid var(--border); font-variant-numeric: tabular-nums; }
   table.nodes tr:last-child td { border-bottom: none; }
   table.nodes tr:hover td { background: var(--bg-3); }
-  table.nodes .mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; color: var(--text-dim); font-size: 11px; }
+  table.nodes .mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; color: var(--text-dim); font-size: 13px; }
   table.nodes .num { text-align: right; }
   table.nodes td strong { color: var(--text); }
 
   .badge {
-    display: inline-block; padding: 2px 8px; border-radius: 4px;
-    font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.4px;
+    display: inline-block; padding: 3px 9px; border-radius: 4px;
+    font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.4px;
   }
   .badge.ok    { background: rgba(74,222,128,0.15); color: var(--good); }
   .badge.warn  { background: rgba(251,191,36,0.15); color: var(--warn); }
@@ -386,10 +416,105 @@
   .alert-badge.bad  { background: rgba(248,113,113,0.15); color: var(--bad); }
   .alert-msg { flex: 1; color: var(--text-dim); }
   .alert-msg strong { color: var(--text); }
+
+  /* ============================================================
+     Responsive — tablet (≤1024px) and phone (≤768px).
+     Strategy:
+       - Below 1024: hero grid collapses to 2 cols (still side-by-side).
+       - Below 768: sidebar becomes an off-canvas drawer triggered by the
+         hamburger in the top-left; hero stacks to 1 col; tables get a
+         horizontal scroll wrapper; tap targets and font sizes bump up.
+       Charts already render at the SVG's actual width, so no chart-specific
+       rules here — the dynamic-viewBox handler covers them.
+     ============================================================ */
+
+  @media (max-width: 1024px) {
+    .hero { grid-template-columns: 1fr 1fr; }
+    main { padding: 24px 20px; }
+  }
+
+  @media (max-width: 768px) {
+    .app { display: block; }
+    aside {
+      position: fixed; top: 0; left: 0; bottom: 0;
+      width: 280px; max-width: 85vw;
+      height: 100vh;
+      z-index: 55;
+      transform: translateX(-100%);
+      transition: transform 0.22s ease;
+      box-shadow: 4px 0 24px rgba(0, 0, 0, 0.4);
+    }
+    .app.menu-open aside { transform: translateX(0); }
+    .app.menu-open .sidebar-overlay { display: block; }
+
+    main { padding: 60px 14px 20px; }
+    .mobile-menu-btn { display: inline-flex; }
+
+    .topbar { flex-wrap: wrap; gap: 6px; margin-bottom: 16px; }
+    .topbar-meta { font-size: 11px; flex-basis: 100%; }
+    h1 { font-size: 18px; }
+
+    .hero { grid-template-columns: 1fr; gap: 10px; margin-bottom: 16px; }
+    .hero-card { padding: 14px 16px; }
+    .hero-val { font-size: 24px; }
+    .hero-card.primary .hero-val { font-size: 30px; }
+
+    .inv-card { padding: 14px 16px; }
+    .inv-head { flex-wrap: wrap; gap: 8px; }
+    .inv-meta { flex-wrap: wrap; gap: 10px; }
+    .inv-stat { font-size: 22px; }
+
+    /* Stack each string's label above its tile row instead of side-by-side
+       — labels at fixed 90px don't leave room for tiles on a phone.
+       align-items: stretch is critical here: the inherited flex-start from
+       desktop leaves panel-string-bars at content width, which collapses
+       the inner grid to a single column. */
+    .panel-string-row { flex-direction: column; align-items: stretch; gap: 4px; }
+    .panel-string-label { width: auto; padding-top: 0; }
+    .panel-string-bars { width: 100%; }
+    .panel-heat-grid {
+      grid-template-columns: repeat(auto-fill, minmax(64px, 1fr));
+    }
+    .panel-heat-tile .pht-id { font-size: 12px; }
+    .panel-heat-tile .pht-w { font-size: 11px; }
+
+    .legend { flex-wrap: wrap; gap: 8px; }
+
+    /* Tables → horizontal scroll so they keep their columnar shape rather
+       than reflowing into card-list form (which loses at-a-glance compare). */
+    .table-wrap { overflow-x: auto; }
+    table.nodes { min-width: 720px; }
+
+    /* History segmented controls / chart cards */
+    .controls { flex-wrap: wrap; }
+    .seg button { padding: 8px 12px; }
+    .chart-card { padding: 14px; }
+
+    /* Topology */
+    .topo-toolbar { gap: 6px; }
+    .topo-toolbar .topo-summary { margin-left: 0; flex-basis: 100%; }
+    .topo-inv { padding: 12px; }
+    .topo-inv-stats { margin-left: 0; flex-basis: 100%; }
+    .topo-string { padding: 10px; }
+    .topo-string-head { font-size: 11px; }
+    .panel-grid { grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); }
+
+    /* Tools view buttons */
+    .checkbox-grid { grid-template-columns: 1fr; }
+
+    /* Buttons — bigger tap targets across the board. */
+    .btn, .input { padding: 10px 14px; font-size: 13px; }
+    nav button { padding: 12px 14px; font-size: 14px; }
+  }
 </style>
 </head>
 <body>
 <div class="app">
+  <!-- Mobile hamburger (display:none above 768px) + overlay that dims the
+       page when the drawer is open. -->
+  <button class="mobile-menu-btn" id="mobile-menu-btn" aria-label="Open menu">☰</button>
+  <div class="sidebar-overlay" id="sidebar-overlay"></div>
+
   <!-- ===== Sidebar ===== -->
   <aside>
     <div class="brand">
@@ -496,6 +621,11 @@
           <div class="hero-val"><span id="hero-month">—</span><span class="unit">kWh</span></div>
           <div class="hero-trend" id="hero-month-sub">—</div>
         </div>
+        <div class="hero-card">
+          <div class="hero-label">Avg panel temp</div>
+          <div class="hero-val"><span id="hero-temp">—</span><span class="unit" id="hero-temp-unit">°C</span></div>
+          <div class="hero-trend" id="hero-temp-sub">across reporting panels</div>
+        </div>
       </div>
 
       <div class="section-head">
@@ -505,10 +635,13 @@
       <div class="inv-grid" id="inv-grid"></div>
 
       <div class="legend">
-        <div class="legend-item"><div class="legend-swatch" style="background:var(--good)"></div> Healthy (&gt;90% string median)</div>
-        <div class="legend-item"><div class="legend-swatch" style="background:var(--warn)"></div> Underperforming (60–90%)</div>
-        <div class="legend-item"><div class="legend-swatch" style="background:var(--bad)"></div> Fault / &lt;60%</div>
-        <div class="legend-item"><div class="legend-swatch" style="background:var(--bg-3);border:1px dashed var(--text-faint)"></div> Stale / no data</div>
+        <div class="legend-item"><div class="legend-swatch" style="background:var(--good)"></div> On par (≥70% of string median)</div>
+        <div class="legend-item"><div class="legend-swatch" style="background:var(--warn)"></div> Lagging (30–70%)</div>
+        <div class="legend-item"><div class="legend-swatch" style="background:var(--bad)"></div> Far below peers (&lt;30%)</div>
+        <div class="legend-item"><div class="legend-swatch" style="background:var(--bg-3);border:1px dashed var(--text-faint)"></div> Sleeping / no data</div>
+      </div>
+      <div style="font-size:11px;color:var(--text-faint);margin-top:6px">
+        Tile color compares each panel to its string median — answers "is this panel keeping up with neighbors right now?". Low output at dawn, dusk, or under cloud cover is expected and shifts the median, not the color. The small stripe at the bottom of a tile compares to the per-panel nameplate rating (when set) using the same green/yellow/red bands — useful for spotting cases where the whole string is below rating but individual panels still look "on par" with each other.
       </div>
 
       <div class="section-head">
@@ -568,10 +701,8 @@
           <div class="chart-title">Power · 5-minute resolution</div>
           <div class="chart-stat"><strong id="hist-power-now">—</strong> · query took <strong id="hist-power-ms">—</strong></div>
         </div>
-        <svg id="hist-chart-power" class="chart-area" viewBox="0 0 1000 220" preserveAspectRatio="none">
-          <line x1="0" y1="55"  x2="1000" y2="55"  stroke="var(--border)" stroke-dasharray="2,3"/>
-          <line x1="0" y1="110" x2="1000" y2="110" stroke="var(--border)" stroke-dasharray="2,3"/>
-          <line x1="0" y1="165" x2="1000" y2="165" stroke="var(--border)" stroke-dasharray="2,3"/>
+        <svg id="hist-chart-power" class="chart-area" viewBox="0 0 1000 220">
+          <g id="hist-power-grid"></g>
           <path id="hist-power-fill" d="" fill="var(--accent)" opacity="0.12"/>
           <polyline id="hist-power-poly" points="" fill="none" stroke="var(--accent)" stroke-width="1.8"/>
           <g id="hist-power-y-labels"></g>
@@ -584,7 +715,7 @@
           <div class="chart-title">Daily energy</div>
           <div class="chart-stat">Total <strong id="hist-energy-total">—</strong></div>
         </div>
-        <svg id="hist-chart-energy" class="chart-area" viewBox="0 0 1000 220" preserveAspectRatio="none">
+        <svg id="hist-chart-energy" class="chart-area" viewBox="0 0 1000 220">
           <g id="hist-energy-bars"></g>
           <g id="hist-energy-labels"></g>
         </svg>
@@ -945,10 +1076,11 @@
     localStorage.setItem('tempUnit', useFahrenheit ? 'F' : 'C');
     applyTempUnit();
     // Re-render whichever view is currently active so the change is immediate
-    // — temperature appears on Diagnostics, Nodes, and Topology.
+    // — temperature appears on Dashboard, Diagnostics, Nodes, and Topology.
     const active = document.querySelector('.view.active');
     if (!active) return;
-    if (active.id === 'view-diagnostics') refreshDiagnostics();
+    if (active.id === 'view-dashboard') refreshDashboard();
+    else if (active.id === 'view-diagnostics') refreshDiagnostics();
     else if (active.id === 'view-nodes') refreshNodes();
     else if (active.id === 'view-topology') refreshTopology();
   });
@@ -961,11 +1093,20 @@
       history.replaceState(null, '', '#' + id);
     }
     window.scrollTo(0, 0);
+    // Auto-close the mobile drawer on view selection.
+    document.querySelector('.app').classList.remove('menu-open');
   }
 
   document.querySelectorAll('#nav button').forEach(btn => {
     btn.addEventListener('click', () => showView(btn.dataset.view));
   });
+
+  // ===== Mobile drawer toggle =====
+  const mobileMenuBtn = document.getElementById('mobile-menu-btn');
+  const sidebarOverlay = document.getElementById('sidebar-overlay');
+  const appShell = document.querySelector('.app');
+  mobileMenuBtn.addEventListener('click', () => appShell.classList.toggle('menu-open'));
+  sidebarOverlay.addEventListener('click', () => appShell.classList.remove('menu-open'));
 
   window.addEventListener('hashchange', () => {
     const v = window.location.hash.replace(/^#/, '') || 'dashboard';
@@ -1002,73 +1143,60 @@
   refreshOverview();
   setInterval(refreshOverview, 10000);
 
-  // ===== Version label =====
-  // Pulls from /api/health on first load. Cheap call, runs once.
-  apiFetch('/api/health').then(r => r.ok ? r.json() : null).then(d => {
-    if (d && d.uptime !== undefined) {
-      document.getElementById('brand-sub').textContent = `up ${Math.floor(d.uptime / 60)}m`;
-    }
-  }).catch(() => {});
+  // ===== Brand uptime =====
+  // Formats as "Xd Yh Zm" so long uptimes are legible at a glance.
+  function fmtBrandUptime(sec) {
+    if (sec < 60) return `${sec}s`;
+    const d = Math.floor(sec / 86400);
+    const h = Math.floor((sec % 86400) / 3600);
+    const m = Math.floor((sec % 3600) / 60);
+    const parts = [];
+    if (d) parts.push(`${d}d`);
+    if (h || d) parts.push(`${h}h`);
+    parts.push(`${m}m`);
+    return parts.join(' ');
+  }
+  function refreshBrandUptime() {
+    apiFetch('/api/health').then(r => r.ok ? r.json() : null).then(d => {
+      if (d && d.uptime !== undefined) {
+        document.getElementById('brand-sub').textContent = `up ${fmtBrandUptime(d.uptime)}`;
+      }
+    }).catch(() => {});
+  }
+  refreshBrandUptime();
+  setInterval(refreshBrandUptime, 60000);
 
   // ============================================================
   // R2 — Dashboard view
   // ============================================================
-
-  // Per-inverter rolling power buffer for sparklines. In-memory only; the
-  // history page handles persistent timeseries via /api/history/power.
-  const SPARK_LEN = 36;  // ~3 minutes at 5 s cadence
-  const sparkBuffers = {};
-
-  function pushSpark(name, watts) {
-    if (!sparkBuffers[name]) sparkBuffers[name] = [];
-    const buf = sparkBuffers[name];
-    buf.push(watts);
-    if (buf.length > SPARK_LEN) buf.shift();
-  }
-
-  function sparklineSvg(values) {
-    if (!values || values.length < 2) {
-      return '<svg class="spark" viewBox="0 0 300 32" preserveAspectRatio="none"></svg>';
-    }
-    let max = 0;
-    for (const v of values) if (v > max) max = v;
-    if (max <= 0) max = 1;
-    const w = 300, h = 32;
-    const step = w / Math.max(1, values.length - 1);
-    const pts = values.map((v, i) => `${(i * step).toFixed(1)},${(h - (v / max) * (h - 4) - 2).toFixed(1)}`);
-    return `<svg class="spark" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">` +
-           `<polyline points="${pts.join(' ')}" fill="none" stroke="var(--accent)" stroke-width="1.5"/>` +
-           `</svg>`;
-  }
 
   function fmtPower(w) {
     if (w >= 1000) return [(w / 1000).toFixed(2), 'kW'];
     return [Math.round(w).toString(), 'W'];
   }
 
-  // panelClass picks the comparison reference based on what's available:
-  //  - If a per-panel nameplate rating is set on the string, compare power
-  //    against rating directly. To avoid flagging every panel as bad at dawn
-  //    or under heavy cloud, the whole string is treated as "sleeping" (dead)
-  //    when its aggregate output is below 5% of total nameplate.
-  //  - Otherwise fall back to median-based peer comparison (the legacy rule).
-  // Bands match in both modes so the same legend applies.
-  function panelClass(power, stringMedian, opts) {
-    const rating = opts && opts.rating;
-    const stringTotal = opts && opts.stringTotal;
-    const panelCount = opts && opts.panelCount;
-
-    if (rating && rating > 0) {
-      const totalNameplate = (panelCount || 0) * rating;
-      if (totalNameplate > 0 && (stringTotal || 0) < totalNameplate * 0.05) return 'dead';
-      const ratio = power / rating;
-      if (ratio < 0.3) return 'bad';
-      if (ratio < 0.7) return 'warn';
-      return 'good';
-    }
-
+  // panelClass — drives the tile background color. Always a peer (median)
+  // comparison so the legend "% of string median" is honest. Nameplate
+  // comparison is a separate signal (see ratingClass below) shown as a
+  // stripe + text, never as the main color.
+  function panelClass(power, stringMedian) {
     if (stringMedian < 5) return 'dead';
     const ratio = power / stringMedian;
+    if (ratio < 0.3) return 'bad';
+    if (ratio < 0.7) return 'warn';
+    return 'good';
+  }
+
+  // ratingClass — secondary signal: how the panel compares to its per-panel
+  // nameplate rating. Returns null when there's no rating set or when the
+  // whole string is "sleeping" (aggregate output <5% of total nameplate),
+  // because at dawn / heavy cloud every panel is honestly far below rating
+  // and a wall of red stripes carries no information.
+  function ratingClass(power, rating, stringTotal, panelCount) {
+    if (!rating || rating <= 0) return null;
+    const totalNameplate = (panelCount || 0) * rating;
+    if (totalNameplate > 0 && (stringTotal || 0) < totalNameplate * 0.05) return null;
+    const ratio = power / rating;
     if (ratio < 0.3) return 'bad';
     if (ratio < 0.7) return 'warn';
     return 'good';
@@ -1131,6 +1259,14 @@
     } else {
       document.getElementById('hero-month-sub').textContent = '—';
     }
+
+    // Average panel temperature comes from /api/overview (avg over reporting
+    // devices). Empty state = "—" so the card doesn't read "0.0" at night.
+    const avgC = ov.avg_temperature;
+    const reporting = ov.active_devices || 0;
+    document.getElementById('hero-temp').textContent =
+      (avgC != null && reporting > 0) ? fmtTemp(avgC, 1) : '—';
+    document.getElementById('hero-temp-unit').textContent = tempUnit();
   }
 
   function renderInverters(inverters, devices) {
@@ -1148,9 +1284,6 @@
     }
 
     inverters.forEach(inv => {
-      // Push current total power into spark buffer.
-      pushSpark(inv.name, inv.total_power || 0);
-
       const card = document.createElement('div');
       card.className = 'inv-card';
 
@@ -1160,8 +1293,6 @@
 
       // Prefer the user-set display name from Topology rename; fall back to
       // the canonical YAML name. Same fallback rule for strings below.
-      // Sparkline buffers stay keyed by canonical name so renames don't lose
-      // history.
       const invName = inv.display_name || inv.name;
       let html = `
         <div class="inv-head">
@@ -1200,17 +1331,25 @@
           tiles = '<div class="panel-heat-grid">';
           for (const p of panels) {
             const w = p.power_in || 0;
-            const cls = panelClass(w, med, opts);
+            const cls = panelClass(w, med);
+            const rCls = ratingClass(w, rating, s.total_power || 0, panels.length);
             const id = p.name || p.addr;
             const wText = cls === 'dead' ? '—' : Math.round(w) + 'W';
-            const pctText = (rating > 0 && cls !== 'dead')
-              ? ` · ${Math.round((w / rating) * 100)}%`
+            const ratedPct = (rating > 0 && cls !== 'dead')
+              ? Math.round((w / rating) * 100)
+              : null;
+            const pctText = ratedPct != null
+              ? ` <span class="pht-rated">${ratedPct}% rated</span>`
               : '';
-            const tipPct = rating > 0 ? ` (${Math.round((w / rating) * 100)}% of ${rating}W)` : '';
+            const tipParts = [`${id} · ${w.toFixed(0)} W`];
+            if (med > 0) tipParts.push(`${Math.round((w / med) * 100)}% of string median (${Math.round(med)}W)`);
+            if (ratedPct != null) tipParts.push(`${ratedPct}% of nameplate (${rating}W)`);
+            const stripe = rCls ? `<div class="panel-heat-rating ${rCls}"></div>` : '';
             tiles += `<div class="panel-heat-tile ${cls}">
               <span class="pht-id">${id}</span>
               <span class="pht-w">${wText}${pctText}</span>
-              <div class="panel-bar-tip">${id} · ${w.toFixed(0)} W${tipPct}</div>
+              ${stripe}
+              <div class="panel-bar-tip">${tipParts.join(' · ')}</div>
             </div>`;
           }
           tiles += '</div>';
@@ -1229,16 +1368,6 @@
           </div>
         `;
       }
-
-      // Sparkline of recent total power for this inverter.
-      const buf = sparkBuffers[inv.name] || [];
-      html += `
-        <div class="spark-row">
-          <div class="spark-label">Recent power</div>
-          ${sparklineSvg(buf)}
-          <div class="spark-val">${(inv.total_power || 0).toFixed(0)} W now</div>
-        </div>
-      `;
 
       card.innerHTML = html;
       grid.appendChild(card);
@@ -1347,11 +1476,12 @@
       monthSum += today;
       if (today > 0) monthDays += 1;
 
-      // Peak power: max across inverter peak_power fields. Single source of
-      // truth — overview doesn't carry it.
+      // Peak power: sum of per-inverter peak_power. Numerator (total_power)
+      // is system-wide, so the denominator must be too — using max() here
+      // produced >100% on multi-inverter rigs.
       let peakPower = 0;
       for (const i of (inv.inverters || [])) {
-        if ((i.peak_power || 0) > peakPower) peakPower = i.peak_power;
+        peakPower += i.peak_power || 0;
       }
 
       renderHero(ov, monthSum, monthDays, peakPower);
@@ -1384,7 +1514,23 @@
     return w >= 1000 ? `${(w / 1000).toFixed(2)} kW` : `${Math.round(w)} W`;
   }
 
+  // Sync the chart SVG's viewBox to its actual rendered width so text
+  // labels render 1:1 instead of being stretched/compressed by the
+  // default preserveAspectRatio. Returns the effective width to use in
+  // coordinate calculations.
+  function chartViewBoxWidth(svgId) {
+    const svg = document.getElementById(svgId);
+    const W = Math.max(200, Math.floor(svg.clientWidth || svg.getBoundingClientRect().width || 1000));
+    svg.setAttribute('viewBox', `0 0 ${W} 220`);
+    return W;
+  }
+
+  // Cached last-render data so we can redraw on window resize without
+  // refetching from /api/history.
+  let lastHistData = null;
+
   function renderHistPowerChart(records, queryMs) {
+    const grid = document.getElementById('hist-power-grid');
     const poly = document.getElementById('hist-power-poly');
     const fill = document.getElementById('hist-power-fill');
     const yLab = document.getElementById('hist-power-y-labels');
@@ -1392,9 +1538,15 @@
     const nowEl = document.getElementById('hist-power-now');
     const msEl = document.getElementById('hist-power-ms');
 
+    const W = chartViewBoxWidth('hist-chart-power');
+
+    grid.innerHTML =
+      `<line x1="0" y1="55"  x2="${W}" y2="55"  stroke="var(--border)" stroke-dasharray="2,3"/>` +
+      `<line x1="0" y1="110" x2="${W}" y2="110" stroke="var(--border)" stroke-dasharray="2,3"/>` +
+      `<line x1="0" y1="165" x2="${W}" y2="165" stroke="var(--border)" stroke-dasharray="2,3"/>`;
     yLab.innerHTML = '';
     xLab.innerHTML = '';
-    msEl.textContent = `${queryMs} ms`;
+    if (queryMs !== undefined) msEl.textContent = `${queryMs} ms`;
 
     if (!records || records.length === 0) {
       poly.setAttribute('points', '');
@@ -1411,12 +1563,12 @@
     const yScale = Math.max(1000, Math.ceil(pMax / 1000) * 1000);
 
     const pts = records.map(r => {
-      const x = ((r.t - tMin) / tSpan) * 1000;
+      const x = ((r.t - tMin) / tSpan) * W;
       const y = 210 - (r.p / yScale) * 200;
       return `${x.toFixed(1)},${y.toFixed(1)}`;
     });
     poly.setAttribute('points', pts.join(' '));
-    fill.setAttribute('d', `M${pts.join(' L')} L1000,210 L0,210 Z`);
+    fill.setAttribute('d', `M${pts.join(' L')} L${W},210 L0,210 Z`);
 
     const yLabel = (frac, y) =>
       `<text x="6" y="${y}" fill="var(--text-faint)" font-size="10">${(yScale * frac / 1000).toFixed(1)} kW</text>`;
@@ -1424,7 +1576,7 @@
 
     const ticks = 4;
     for (let i = 0; i <= ticks; ++i) {
-      const x = i / ticks * 1000;
+      const x = i / ticks * W;
       const t = tMin + i / ticks * tSpan;
       const d = new Date(t * 1000);
       const lbl = histRange === 'day'
@@ -1480,6 +1632,8 @@
     bars.innerHTML = '';
     labels.innerHTML = '';
 
+    const W = chartViewBoxWidth('hist-chart-energy');
+
     const entries = Array.from(days.entries()).sort((a, b) => a[0].localeCompare(b[0])).slice(-30);
     if (entries.length === 0) {
       totalEl.textContent = '0.0 kWh';
@@ -1490,7 +1644,7 @@
     for (const [, v] of entries) { if (v > maxE) maxE = v; totalE += v; }
     totalEl.textContent = `${totalE.toFixed(1)} kWh`;
 
-    const usable = 980;
+    const usable = W - 20;
     const step = usable / entries.length;
     const barW = Math.max(8, step - 4);
     const pad = (step - barW) / 2;
@@ -1519,6 +1673,7 @@
       const data = await r.json();
       status.textContent = `${data.count} records · ${data.query_ms} ms · range=${range}`;
       const days = bucketByDayHist(data.records);
+      lastHistData = { records: data.records, days, queryMs: data.query_ms };
       renderHistPowerChart(data.records, data.query_ms);
       renderHistStats(data.records, days);
       renderHistEnergyBars(days);
@@ -1527,6 +1682,18 @@
       console.error(e);
     }
   }
+
+  // Redraw on resize so the dynamic viewBox tracks the new width. Debounced
+  // so dragging the window edge doesn't spam renders.
+  let histResizeTimer = null;
+  window.addEventListener('resize', () => {
+    if (!lastHistData) return;
+    clearTimeout(histResizeTimer);
+    histResizeTimer = setTimeout(() => {
+      renderHistPowerChart(lastHistData.records, undefined);
+      renderHistEnergyBars(lastHistData.days);
+    }, 120);
+  });
 
   document.querySelectorAll('#hist-range-seg button').forEach(btn => {
     btn.addEventListener('click', () => {
