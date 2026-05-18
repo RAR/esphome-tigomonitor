@@ -728,17 +728,31 @@ void TigoMonitorComponent::process_frame(const std::string &frame) {
 }
 
 void TigoMonitorComponent::process_power_frame(const std::string &frame) {
+  // Need at least 14 chars to read the format/length byte at offset 12
+  if (frame.length() < 14) {
+    ESP_LOGW(TAG, "Power frame too short for header (%zu chars), skipping", frame.length());
+    return;
+  }
+
   DeviceData data;
-  
+
   // Parse frame according to original Arduino logic
   data.addr = frame.substr(2, 4);
   data.pv_node_id = frame.substr(6, 4);
-  
+
   // Detect format version based on data length field
   // Old format (pre-CCA 4.x): 13 bytes (0x0D)
   // New format (CCA 4.x+): 15 bytes (0x0F)
   int data_length = std::stoi(frame.substr(12, 2), nullptr, 16);
   bool is_new_format = (data_length == 15);
+
+  // Legacy format reads through offset 40 (RSSI at 38-39); new format through offset 46 (RSSI at 44-45)
+  size_t required = is_new_format ? 46 : 40;
+  if (frame.length() < required) {
+    ESP_LOGW(TAG, "Power frame too short for %s format (need %zu, have %zu), skipping",
+             is_new_format ? "new" : "legacy", required, frame.length());
+    return;
+  }
   
   if (is_new_format) {
     ESP_LOGD(TAG, "Processing power frame (new 15-byte format) for device addr: %s", data.addr.c_str());
@@ -864,8 +878,13 @@ void TigoMonitorComponent::process_power_frame(const std::string &frame) {
 }
 
 void TigoMonitorComponent::process_09_frame(const std::string &frame) {
+  // Need at least 46 chars to read barcode at offset 40 (length 6)
+  if (frame.length() < 46) {
+    ESP_LOGW(TAG, "Frame 09 too short (%zu chars), skipping", frame.length());
+    return;
+  }
   std::string addr = frame.substr(14, 4);
-  std::string node_id = frame.substr(18, 4);  
+  std::string node_id = frame.substr(18, 4);
   std::string barcode = frame.substr(40, 6);
   
   ESP_LOGD(TAG, "Frame 09 - Device Identity (IGNORED): addr=%s, node_id=%s, barcode=%s", 
