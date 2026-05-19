@@ -1738,14 +1738,17 @@
     const peerLegend = document.getElementById('panel-modal-peer-legend');
     peerLegend.style.display = 'none';
 
+    // Clear stale series immediately so reopening on another panel doesn't
+    // briefly show the previous panel's lines while the new fetch is in flight.
+    renderPanelModalChart([], [], null);
+    msEl.textContent = '…';
+
     const slotMap = await ensurePanelSlotMap();
     const slot = slotMap[sig];
     if (slot == null) {
       msEl.textContent = 'no slot yet';
-      renderPanelModalChart([], [], null);
       return;
     }
-    msEl.textContent = '…';
 
     const peerSlots = findPanelModalPeerSlots(slotMap);
     const range = panelModalRange;
