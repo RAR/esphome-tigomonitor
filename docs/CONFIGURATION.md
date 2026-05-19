@@ -215,6 +215,52 @@ sensor:
     load_factor: {}
 ```
 
+### Grouping panels into HA sub-devices
+
+ESPHome's [sub-devices feature](https://esphome.io/components/esphome/#esphome-devices)
+lets one ESPHome node expose multiple logical "devices" to Home Assistant. The
+generator in the Tools view emits this for you — pick **Per MPPT**, **Per inverter**,
+or **Per panel** in the grouping selector and the YAML it produces will include
+an `esphome.devices:` block plus a `device_id:` on each child sensor.
+
+If you're hand-writing the YAML, the same pattern works: declare the device once
+on the panel's base config and the schema propagates it to every child sensor
+(power_in, peak_power, voltage_in, etc.) — no need to repeat `device_id:` on each:
+
+```yaml
+esphome:
+  name: tigo-monitor
+  devices:
+    - id: tigo_mppt_1
+      name: "MPPT 1"
+    - id: tigo_mppt_2
+      name: "MPPT 2"
+
+sensor:
+  - platform: tigo_monitor
+    tigo_monitor_id: tigo_hub
+    address: "1234"
+    name: "Panel 1"
+    device_id: tigo_mppt_1   # propagates to all child sensors below
+    power: {}
+    voltage_in: {}
+    current_in: {}
+    temperature: {}
+
+  - platform: tigo_monitor
+    tigo_monitor_id: tigo_hub
+    address: "5678"
+    name: "Panel 2"
+    device_id: tigo_mppt_1
+    power: {}
+    voltage_in: {}
+    current_in: {}
+    temperature: {}
+```
+
+After flashing, Home Assistant shows "MPPT 1" and "MPPT 2" as separate device
+cards, each grouping the entities for its panels.
+
 ### Text Sensors
 
 ```yaml

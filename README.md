@@ -9,10 +9,13 @@ An ESPHome component for monitoring Tigo solar optimizers via RS485/UART. Real-t
 - **Device Monitoring** – Voltage, current, power, temperature, RSSI per optimizer
 - **System Aggregation** – Total power, energy (kWh), active device count, peak tracking
 - **Built-in Single-Page Web App** – Dashboard heatmap, history, topology, nodes, tools, diagnostics, CCA info
+- **Panel Detail Modal** – Click any panel heat tile to see live readings (V/I/W, temp, RSSI, efficiency, duty cycle) and a power-history chart with a string-median overlay so you can tell a single-panel dip apart from string-wide shading
+- **Sortable Node Table** – Every column header is clickable; arrow indicator marks the active sort; numeric columns default to "biggest first"
 - **On-Flash History** – Per-snapshot rollups + per-panel power persisted via [esp_tsdb](https://github.com/zakery292/esp_tsdb); survives reboots and OTA updates
 - **CCA Integration** – Auto-sync panel names from Tigo Cloud Connect Advanced
 - **In-UI Naming** – Friendly inverter and string names settable from Topology view, persisted to NVS (YAML stays the source of truth for identity)
 - **Per-String Nameplate** – Set the rated watts per panel; health classification and "% of rated" readouts use it
+- **Sub-Device YAML Generator** – Tools view emits an `esphome.devices:` block and propagates `device_id` to each child sensor, with per-MPPT / per-inverter / per-panel / flat grouping
 - **Home Assistant** – Energy Dashboard compatible, full API integration, Ingress-proxy friendly
 
 ## Requirements
@@ -135,6 +138,15 @@ Navigate to `http://<esp32-ip>/` — you land on the Dashboard view of the singl
 | CCA Info | `/app#cca` | Tigo CCA device status with manual refresh |
 
 Legacy paths (`/`, `/nodes`, `/status`, `/yaml`, `/cca`, `/history`) all 302 to the corresponding `#view`.
+
+### Gallery
+
+| View | Screenshot |
+|------|------------|
+| Dashboard — hero strip, per-string heatmap, click any panel for the detail modal | ![Dashboard](docs/images/Dashboard.png) |
+| History — TSDB-backed power chart with gradient fill + daily energy bars | ![History](docs/images/History.png) |
+| Tools — YAML generator with per-MPPT / per-inverter / per-panel / flat sub-device grouping | ![Tools](docs/images/Tools.png) |
+| Diagnostics — memory / network / UART / per-DB TSDB stats | ![Diagnostics](docs/images/Diagnostics.png) |
 
 ## PSRAM Configuration
 

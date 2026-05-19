@@ -44,6 +44,25 @@ Falls back to median-vs-peer behavior when no rating is set.
 
 The dashboard uses fixed-size colored tiles per panel grouped by string. Color buckets match the legend strip (good ≥70% of reference, warn ≥30%, bad else, dead = string sleeping or telemetry stale). Each tile shows panel name + watts; hover scales the tile and reveals a tooltip with the full reading and "% of rated" if available.
 
+### Panel detail modal
+
+Click any heat tile on a desktop viewport (>768 px) to open a modal showing:
+
+- **Live readings** — Power in, Voltage in, Current in, Voltage out, Temperature, Efficiency, Duty cycle, RSSI. Re-painted on the dashboard's 5-second refresh tick while the modal stays open.
+- **Power history chart** — fetched from `/api/history/panel?slot=N&range=day|week|month`. The active panel's series is the solid accent line; whenever there are ≥2 peer panels on the same string, the **string median** is overlaid as a dashed dim line so single-panel anomalies are visually separable from string-wide events (e.g. shading, cloud cover).
+
+Slot lookup uses `/api/panels` (barcode last-6 → tsdb slot) and is cached on first fetch. The modal is hidden via `@media (max-width: 768px)` on phones — it would be too cramped — so the heat tile cursor reverts to default on those viewports.
+
+### Sortable Node Table
+
+Every column header on the Nodes view is clickable. Click cycles ascending / descending, with an arrow indicator (`↑` / `↓`) on the active column. Defaults:
+
+- Numeric columns (V, A, Power, Temp) sort **descending** on first click — "biggest first" is usually what you want.
+- Text columns and Age sort **ascending**.
+- State sorts by health order (`ok → warn → bad → stale`), so reversing surfaces problems first.
+
+Filters (search, string, state) are applied first; sort sees the filtered set.
+
 ---
 
 ## API endpoints
@@ -62,11 +81,11 @@ All endpoints return JSON unless noted. Optional Bearer-token auth (see Authenti
 | `/api/inverters` | Hierarchical inverter rollups with embedded strings (each carries `display_label`, `panel_rating_w`) and inverter `display_name` |
 | `/api/nodes` | Node table with CCA metadata |
 | `/api/cca` | CCA connection state + `device_info` (encoded JSON string from CCA) |
-| `/api/yaml?sensors=…&hub_sensors=…` | Generated YAML config (Tools view) |
+| `/api/yaml?sensors=…&hub_sensors=…&grouping=panel\|mppt\|inverter\|none` | Generated YAML config (Tools view). `grouping` (default `none`) emits an `esphome.devices:` block and propagates `device_id:` to each child sensor at the chosen granularity |
 | `/api/tsdb/stats` | LittleFS partition + per-DB record counts (only when esp_tsdb is compiled in) |
 | `/api/history/power?range=day\|week\|month\|year` | System power/energy time series |
 | `/api/history/panel?slot=N&range=…` | Single-panel power time series |
-| `/api/panels` | Slot map (`barcode → slot`) |
+| `/api/panels` | Slot map: array of `{slot, barcode (last 6 chars), label?, mppt?, string?}` keyed off the TSDB panel-slot table; used by the panel detail modal to find the right slot for a given heat tile |
 | `/api/energy/history` | Daily energy history (RAM ring buffer, kept alongside TSDB) |
 
 ### Write

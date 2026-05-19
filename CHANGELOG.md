@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Panel detail modal on the dashboard** — click any heatmap tile (desktop only) to open a modal with the panel's live readings (V/I/W, temp, RSSI, efficiency, duty cycle) and a power history chart sourced from `/api/history/panel?slot=N&range=day|week|month`.
+  - Slot lookup uses `/api/panels` (barcode last-6 → tsdb slot), cached after first fetch.
+  - **Peer overlay**: a dashed "string median" line overlays the panel's own line whenever there are ≥2 peers in the same string, so a single-panel dip is visually separable from string-wide shading.
+  - **Live refresh**: live readings re-paint on the dashboard's 5-second tick while the modal is open; chart re-fetches on range change / reopen.
+  - Hidden on viewports ≤768 px (modal would be too cramped on a phone); the heat tile cursor reverts to default in that case.
+- **Sortable Node Table** — every column header (`Name`, `Addr`, `Barcode`, `String / MPPT`, `V`, `A`, `Power`, `Temp`, `Age`, `State`) is clickable. Click cycles ascending/descending; an arrow indicator marks the active column. Numeric columns default to descending on first click; State sorts by health order (`ok → warn → bad → stale`) so reversing surfaces problems first.
+- **YAML generator emits `esphome.devices:` block + propagates `device_id`** to child sensors. Group panels into HA devices per-MPPT, per-inverter, per-panel, or stay flat (no devices) via a selector in the Tools view. The choice persists in `localStorage['tools-grouping']`.
+  - Schema-level propagation: setting `device_id:` once on a panel base config now flows automatically to all child sensors (power_in, peak_power, voltage_in, etc.) — no need to repeat it.
+- **Brand logo mark** — SVG mark in the sidebar header, matching favicon (`docs/images/logo.svg`).
 - **Single-page web app at `/app`** (full UI redesign, R1–R7)
   - All views collapsed into one shell with sidebar nav and hash routing (`/app#dashboard`, `/app#history`, `/app#topology`, `/app#nodes`, `/app#tools`, `/app#diagnostics`, `/app#cca`).
   - Legacy paths (`/`, `/nodes`, `/status`, `/yaml`, `/cca`, `/history`) redirect to the corresponding `#view` so existing bookmarks keep working.
@@ -33,11 +42,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Node table Export / Import** restored on the Nodes view (same JSON shape as before).
 
 ### Changed
+- **Visual polish across the SPA** — a single design language across cards:
+  - 2 px accent rainbow rail (`--accent → --accent-2 → --accent-3`) across the top of all major container cards (inverter cards, chart cards, topology inverter cards, the panel detail modal).
+  - Subtle diagonal accent gradient overlay (green→blue→transparent) on container cards.
+  - Smaller, lighter gradient on grouped stat tiles (`.hist-stat-card`, used on History and Diagnostics) — no rail, since rails on every tile turn into wallpaper.
+  - Daily-energy bars use a vertical gradient (top → faded at baseline) instead of flat 0.85-opacity accent-2.
+  - System power chart's area uses a vertical gradient (accent at top, transparent at bottom) instead of a flat 12 %-opacity slab.
+  - Sidebar gets a subtle vertical gradient (accent overlay top → `bg-2 → bg-3` base).
+  - "Current Power" hero card picks up the same accent diagonal gradient as the panel modal, with an accent-green border tint.
+  - Brand name in sidebar bumped from inherited 14 px → 16 px.
+- **Panel heat tile** "% rated" badge moved to its own line for readability on narrow tiles.
+- **Dashboard mobile layout** — responsive sidebar drawer + tile reflow for ≤768 px viewports.
 - **TSDB buffer pools moved to PSRAM** (`TSDB_ALLOC_PSRAM`) — reclaims ~28 KB of internal heap on units with PSRAM. Internal heap low-water improved from ~110 KB to ~150 KB on the 8 MB AtomS3R reference rig.
 - Diagnostics view active-sockets card no longer crashes when the inner span is replaced (`innerHTML`-based render).
 - Sparkline buffers and string-grouping maps continue to key on canonical names so renames don't lose history or break grouping.
 
 ### Fixed
+- **OTA reboot crash inside `tsdb_close_h`** (`IllegalInstruction` → newlib `_lock_close` assertion → `panic_abort`). The drain loop only checked `uxQueueMessagesWaiting() == 0`, but the writer task could already have pulled the last row and be mid-`fwrite` — holding the FILE's per-stream lock. `fclose` then tripped newlib. Fix: writer recognises a sentinel `EncodedRow` (timestamp = `UINT32_MAX`), gives a `writer_done_` binary semaphore, and self-deletes. `flush_and_close` enqueues the sentinel after its drain and waits on the semaphore (1500 ms cap) before any `tsdb_close_h` — no possible race with `fclose`. Filed upstream as a note on `zakery292/esp_tsdb#1` suggesting `tsdb_close_h` mirror the mutex-held fclose pattern already used in `tsdb_sync_h`.
+- **`process_power_frame` / `process_09_frame` substr OOB** crashes on short or malformed RS485 frames. `process_09_frame` did `frame.substr(40, 6)` without checking length; with `-fno-exceptions` (ESP-IDF default), `std::out_of_range` becomes `abort` and the unwind surfaced as `InstFetchPrivilege`. Added upfront length guards. `process_27_frame` already guarded its reads.
+- **Panel modal showed "—" for Current in** — the `/api/devices` JSON field is named `"current"` (filled from `device.current_in`), not `"current_in"`; modal now reads the correct key. Duty cycle is already a percent in the JSON, so the suffix is now `%`.
+- **Panel modal card was transparent** because the CSS used `var(--bg-1)`, which isn't defined (`:root` defines `--bg`, `--bg-2`, `--bg-3`, `--bg-4`). Switched to `--bg-2`.
+- **Panel modal showed prior panel's history** during the in-flight fetch when reopening on a different panel — chart polylines now reset to empty + "…" placeholder on every open/range-change.
+- **YAML generator emitted redundant `tigo_mppt_mppt_4`-style IDs** when the user's label already started with the type tag. Generator now skips the type prefix when the slug already begins with it (so "MPPT 4" → `tigo_mppt_4`, "FlexBoss A" → `tigo_inverter_flexboss_a`).
 - **History wiped on every reboot** when using esp_tsdb (only with `feat/handle-based-api` fork). Root cause: `tsdb_open` used `stat()` to detect file existence, but joltwallet's `esp_littlefs` returns `ENOENT` from `stat()` for files that `fopen("rb")` immediately reads bytes back from. Every boot took the create-new path and `fopen("w+b")` truncated the existing file. Fix in the upstream PR (`zakery292/esp_tsdb#1`): try `fopen(..., "r+b")` first; fall through to create-new only on failure. Slot map (panel_map.json) was unaffected because it uses `open(wb)+write+close` per save, which never hits the bad code path.
 - **Nodes view crashed at active-sockets** during R5 diag-view rendering (fixed in `2f14ad8`).
 - **Persistence cleanup on shutdown**: `TigoMonitorComponent::on_shutdown` now drains the TSDB writer queue (best-effort, 800 ms cap), `tsdb_close_h`s every open handle, and unmounts LittleFS so the journal commits cleanly before `esp_restart`.
