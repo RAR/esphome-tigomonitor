@@ -317,24 +317,6 @@
     border: 1px solid var(--border);
     border-radius: 8px; padding: 10px 12px;
   }
-  .panel-modal-stat.hero {
-    grid-column: 1 / -1;
-    background: linear-gradient(135deg, rgba(74,222,128,0.10) 0%, rgba(56,189,248,0.05) 60%, transparent 100%);
-    border: 1px solid rgba(74,222,128,0.28);
-    padding: 14px 18px;
-  }
-  .panel-modal-stat.hero .panel-modal-stat-val {
-    font-size: 32px;
-    color: var(--accent);
-    text-align: center;
-    margin-top: 6px;
-  }
-  .panel-modal-stat.hero .hero-unit {
-    font-size: 14px;
-    color: var(--text-dim);
-    font-weight: 500;
-    margin-left: 6px;
-  }
   .panel-modal-stat-lbl { font-size: 10px; color: var(--text-faint); text-transform: uppercase; letter-spacing: 0.06em; }
   .panel-modal-stat-val { font-size: 18px; font-weight: 600; font-variant-numeric: tabular-nums; margin-top: 2px; }
   .legend-chip { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-dim); }
@@ -1720,7 +1702,11 @@
   function renderPanelModalLive() {
     if (!panelModalAddr) return;
     const dev = (window.__lastDevicesByAddr || {})[panelModalAddr] || {};
-    document.getElementById('panel-modal-title').textContent = panelModalName;
+    const power = dev.power_in;
+    document.getElementById('panel-modal-title').textContent =
+      (power != null && power > 0)
+        ? `${panelModalName} · ${Math.round(power)} W`
+        : panelModalName;
 
     const statsEl = document.getElementById('panel-modal-stats');
     const fmt = (v, suf, dec) => (v != null ? v.toFixed(dec == null ? 1 : dec) + (suf || '') : '—');
@@ -1728,10 +1714,8 @@
       ? fmtTemp(dev.temperature, 1) + tempUnit()
       : '—';
     const rssiStr = (dev.rssi != null) ? `${dev.rssi} dB` : '—';
-    const heroVal = (dev.power_in != null)
-      ? `<span>${Math.round(dev.power_in)}</span><span class="hero-unit">W</span>`
-      : '—';
-    const rest = [
+    const stats = [
+      ['Power in',    fmt(dev.power_in, ' W', 0)],
       ['Voltage in',  fmt(dev.voltage_in, ' V')],
       ['Current in',  fmt(dev.current_in, ' A', 2)],
       ['Voltage out', fmt(dev.voltage_out, ' V')],
@@ -1740,14 +1724,9 @@
       ['Duty cycle',  fmt(dev.duty_cycle, '', 0)],
       ['RSSI',        rssiStr],
     ];
-    statsEl.innerHTML =
-      `<div class="panel-modal-stat hero">
-         <div class="panel-modal-stat-lbl">Power in</div>
-         <div class="panel-modal-stat-val">${heroVal}</div>
-       </div>` +
-      rest.map(([l, v]) =>
-        `<div class="panel-modal-stat"><div class="panel-modal-stat-lbl">${l}</div><div class="panel-modal-stat-val">${v}</div></div>`
-      ).join('');
+    statsEl.innerHTML = stats.map(([l, v]) =>
+      `<div class="panel-modal-stat"><div class="panel-modal-stat-lbl">${l}</div><div class="panel-modal-stat-val">${v}</div></div>`
+    ).join('');
   }
 
   function openPanelModal(data) {
