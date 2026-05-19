@@ -1717,11 +1717,11 @@
     const stats = [
       ['Power in',    fmt(dev.power_in, ' W', 0)],
       ['Voltage in',  fmt(dev.voltage_in, ' V')],
-      ['Current in',  fmt(dev.current_in, ' A', 2)],
+      ['Current in',  fmt(dev.current, ' A', 2)],
       ['Voltage out', fmt(dev.voltage_out, ' V')],
       ['Temperature', tempStr],
       ['Efficiency',  fmt(dev.efficiency, '%', 0)],
-      ['Duty cycle',  fmt(dev.duty_cycle, '', 0)],
+      ['Duty cycle',  fmt(dev.duty_cycle, '%', 0)],
       ['RSSI',        rssiStr],
     ];
     statsEl.innerHTML = stats.map(([l, v]) =>
