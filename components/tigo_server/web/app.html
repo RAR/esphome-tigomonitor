@@ -386,6 +386,10 @@
 
   .table-wrap { background: var(--bg-2); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
   table.nodes { width: 100%; border-collapse: collapse; font-size: 14px; }
+  table.nodes th[data-sort] { cursor: pointer; user-select: none; }
+  table.nodes th[data-sort]:hover { color: var(--text); }
+  table.nodes th.sort-asc::after { content: ' ↑'; color: var(--accent); }
+  table.nodes th.sort-desc::after { content: ' ↓'; color: var(--accent); }
   table.nodes th {
     text-align: left; padding: 12px 14px; font-weight: 600;
     color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.4px;
@@ -901,16 +905,16 @@
         <table class="nodes">
           <thead>
             <tr>
-              <th>Name</th>
-              <th>Addr</th>
-              <th>Barcode</th>
-              <th>String / MPPT</th>
-              <th class="num">V</th>
-              <th class="num">A</th>
-              <th class="num">Power</th>
-              <th class="num">Temp</th>
-              <th class="num">Age</th>
-              <th>State</th>
+              <th data-sort="name">Name</th>
+              <th data-sort="addr">Addr</th>
+              <th data-sort="barcode">Barcode</th>
+              <th data-sort="string">String / MPPT</th>
+              <th class="num" data-sort="voltage">V</th>
+              <th class="num" data-sort="current">A</th>
+              <th class="num" data-sort="power">Power</th>
+              <th class="num" data-sort="temp">Temp</th>
+              <th class="num" data-sort="age">Age</th>
+              <th data-sort="state">State</th>
             </tr>
           </thead>
           <tbody id="nodes-tbody">
@@ -2230,6 +2234,7 @@
 
   let nodesData = { nodes: [], devices: [] };  // last fetch result
   const nodesFilters = { search: '', stringLabel: '', state: '' };
+  const nodesSort = { key: 'name', dir: 1 };  // dir: 1 = asc, -1 = desc
 
   function classifyNode(device, stringMedian) {
     const age = device.data_age_ms ?? 999999;
@@ -2285,14 +2290,15 @@
     const filterString = nodesFilters.stringLabel;
     const filterState = nodesFilters.state;
 
-    let visibleCount = 0;
-    let html = '';
-
+    // Build row data first, then sort, then render — so column sort sees
+    // the full set after filters are applied.
+    const rows = [];
     for (const n of nodes) {
       // Match a live device by long_address (preferred) then short addr.
       const dev = byLong[n.long_address] || byAddr[n.addr] || null;
       const name = n.cca_label || dev?.name || n.addr;
-      const barcodeShort = n.long_address ? n.long_address.slice(-8) : '—';
+      const barcodeKey = n.long_address || '';
+      const barcodeShort = barcodeKey ? barcodeKey.slice(-8) : '—';
       const stringLabel = n.cca_string || dev?.string_label || '—';
       const mpptLabel = n.cca_inverter || '—';
       const v = dev?.voltage_in ?? 0;
@@ -2301,40 +2307,85 @@
       const t = dev?.temperature ?? 0;
       const age = dev?.data_age_ms ?? 999999;
       const state = dev ? classifyNode(dev, stringMedians[stringLabel] || 0) : 'stale';
-      const stateLabel = state === 'ok' ? 'active' : state === 'warn' ? 'shaded' :
-                         state === 'bad' ? 'fault' : 'stale';
 
-      // Apply filters.
       if (search) {
         const hay = `${name} ${n.addr} ${n.long_address || ''}`.toLowerCase();
         if (!hay.includes(search)) continue;
       }
       if (filterString && stringLabel !== filterString) continue;
       if (filterState && state !== filterState) continue;
-      visibleCount++;
 
+      rows.push({ n, name, addr: n.addr, barcodeKey, barcodeShort,
+                  stringLabel, mpptLabel, v, a, w, t, age, state });
+    }
+
+    // Sort by current column. Numeric columns sort numerically; string
+    // columns use locale-aware compare with numeric collation so "Panel 10"
+    // sorts after "Panel 9".
+    const stateOrder = { ok: 0, warn: 1, bad: 2, stale: 3 };
+    const numericKeys = new Set(['voltage', 'current', 'power', 'temp', 'age']);
+    const stateKey = (k, r) => {
+      switch (k) {
+        case 'name':    return r.name;
+        case 'addr':    return r.addr;
+        case 'barcode': return r.barcodeKey;
+        case 'string':  return `${r.stringLabel} ${r.mpptLabel}`;
+        case 'voltage': return r.v;
+        case 'current': return r.a;
+        case 'power':   return r.w;
+        case 'temp':    return r.t;
+        case 'age':     return r.age;
+        case 'state':   return stateOrder[r.state] ?? 99;
+        default:        return r.name;
+      }
+    };
+    if (nodesSort.key) {
+      const k = nodesSort.key;
+      const d = nodesSort.dir;
+      rows.sort((r1, r2) => {
+        const a1 = stateKey(k, r1);
+        const a2 = stateKey(k, r2);
+        if (numericKeys.has(k) || typeof a1 === 'number') return (a1 - a2) * d;
+        return a1.localeCompare(a2, undefined, { numeric: true }) * d;
+      });
+    }
+
+    let html = '';
+    for (const r of rows) {
+      const stateLabel = r.state === 'ok' ? 'active' : r.state === 'warn' ? 'shaded' :
+                         r.state === 'bad' ? 'fault' : 'stale';
       html += `
         <tr>
-          <td><strong>${name}</strong></td>
-          <td class="mono">${n.addr}</td>
-          <td class="mono">…${barcodeShort}</td>
-          <td>${stringLabel} <span style="color:var(--text-faint)">·</span> ${mpptLabel}</td>
-          <td class="num">${v.toFixed(1)}</td>
-          <td class="num">${a.toFixed(2)}</td>
-          <td class="num"><strong>${w.toFixed(0)} W</strong></td>
-          <td class="num">${fmtTemp(t, 0)} ${tempUnit()}</td>
-          <td class="num">${fmtAge(age)}</td>
-          <td><span class="badge ${state}">${stateLabel}</span></td>
+          <td><strong>${r.name}</strong></td>
+          <td class="mono">${r.addr}</td>
+          <td class="mono">…${r.barcodeShort}</td>
+          <td>${r.stringLabel} <span style="color:var(--text-faint)">·</span> ${r.mpptLabel}</td>
+          <td class="num">${r.v.toFixed(1)}</td>
+          <td class="num">${r.a.toFixed(2)}</td>
+          <td class="num"><strong>${r.w.toFixed(0)} W</strong></td>
+          <td class="num">${fmtTemp(r.t, 0)} ${tempUnit()}</td>
+          <td class="num">${fmtAge(r.age)}</td>
+          <td><span class="badge ${r.state}">${stateLabel}</span></td>
         </tr>
       `;
     }
 
-    if (visibleCount === 0) {
+    if (rows.length === 0) {
       html = '<tr><td colspan="10" style="text-align:center;color:var(--text-faint);padding:40px 0">No nodes match the current filters.</td></tr>';
     }
     tbody.innerHTML = html;
-    countEl.textContent = `${visibleCount} of ${nodes.length} shown`;
+    countEl.textContent = `${rows.length} of ${nodes.length} shown`;
     metaEl.textContent = `${nodes.length} discovered · ${devices.filter(d => (d.data_age_ms ?? 999999) < 60000).length} reporting`;
+    updateNodesSortIndicators();
+  }
+
+  function updateNodesSortIndicators() {
+    document.querySelectorAll('table.nodes thead th[data-sort]').forEach(th => {
+      th.classList.remove('sort-asc', 'sort-desc');
+      if (th.getAttribute('data-sort') === nodesSort.key) {
+        th.classList.add(nodesSort.dir === 1 ? 'sort-asc' : 'sort-desc');
+      }
+    });
   }
 
   function rebuildNodesStringFilter() {
@@ -2382,6 +2433,22 @@
     renderNodesTable();
   });
   document.getElementById('nodes-refresh-btn').addEventListener('click', refreshNodes);
+
+  // Sortable column headers — click cycles asc/desc; default direction
+  // depends on column type (numeric defaults to desc on first click since
+  // "biggest first" is usually what you want for power/voltage/etc).
+  document.querySelectorAll('table.nodes thead th[data-sort]').forEach(th => {
+    th.addEventListener('click', () => {
+      const key = th.getAttribute('data-sort');
+      if (nodesSort.key === key) {
+        nodesSort.dir = -nodesSort.dir;
+      } else {
+        nodesSort.key = key;
+        nodesSort.dir = ['voltage', 'current', 'power', 'temp'].includes(key) ? -1 : 1;
+      }
+      renderNodesTable();
+    });
+  });
 
   // Export — pulls current node table from /api/nodes and downloads it as JSON.
   document.getElementById('nodes-export-btn').addEventListener('click', async () => {
