@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.0-alpha.1] - 2026-05-20
+
 ### Added
 - **Panel detail modal on the dashboard** — click any heatmap tile (desktop only) to open a modal with the panel's live readings (V/I/W, temp, RSSI, efficiency, duty cycle) and a power history chart sourced from `/api/history/panel?slot=N&range=day|week|month`.
   - Slot lookup uses `/api/panels` (barcode last-6 → tsdb slot), cached after first fetch.
