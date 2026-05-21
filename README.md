@@ -82,6 +82,8 @@ wifi:
 api:
 ota:
   - platform: esphome
+    # Lets future partition-table changes apply over OTA (ESPHome 2026.5.0+)
+    allow_partition_access: true
 
 uart:
   id: tigo_uart

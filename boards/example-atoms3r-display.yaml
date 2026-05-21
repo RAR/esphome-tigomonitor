@@ -36,6 +36,9 @@ api:
 ota:
   - platform: esphome
     password: "YOUR_OTA_PASSWORD"
+    # Allows future partition-table changes to be applied over OTA
+    # (ESPHome 2026.5.0+). Without it, repartitioning needs a serial flash.
+    allow_partition_access: true
 
 # Needed for display fonts
 font:

@@ -17,12 +17,13 @@ esp32:
     type: esp-idf
     advanced:
       enable_idf_experimental_features: yes
-    # TODO(tsdb): re-enable once esp_tsdb upstream adds esp32p4 to supported_targets.
-    # The IDF Component Manager rejects the dep on P4 because the published manifest
-    # only lists esp32 / esp32s2 / esp32s3 / esp32c3 / esp32c6 / esp32h2.
-    # Tracking: https://github.com/zakery292/esp_tsdb (manifest: idf_component.yml)
-    # components:
-    #   - zakery292/esp_tsdb^2.0.2
+    components:
+      # Local fork (~/esp_tsdb feat/handle-based-api + esp32p4 manifest target)
+      # used to verify P4 build before opening the upstream manifest PR.
+      - name: zakery292/esp_tsdb
+        path: /home/rar/esp_tsdb
+      # LittleFS — backing filesystem for the tsdb partition
+      - joltwallet/littlefs^1.16
     sdkconfig_options:
       # UART optimizations — aggressive for 32 MB PSRAM
       CONFIG_UART_ISR_IN_IRAM: "y"
@@ -89,6 +90,9 @@ logger:
 ota:
   - platform: esphome
     password: !secret ota_password
+    # Allows future partition-table changes to be applied over OTA
+    # (ESPHome 2026.5.0+). Without it, repartitioning needs a serial flash.
+    allow_partition_access: true
 
 api:
   encryption:
