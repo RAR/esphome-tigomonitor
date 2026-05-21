@@ -233,7 +233,7 @@ external_components:
 ### ESP-IDF Errors
 
 **Solutions:**
-1. Use ESPHome 2025.10.3+
+1. Use ESPHome 2026.5.0+
 2. Set `framework: type: esp-idf, version: recommended`
 3. Try clean compile: `esphome clean <yaml> && esphome compile <yaml>`
 

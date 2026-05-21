@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `allow_partition_access: true` in the example OTA configs — lets ESPHome 2026.5.0+ apply partition-table changes over OTA, so repartitions *after* 2.0 no longer need a serial flash.
+
+### Changed
+- Minimum ESPHome bumped to **2026.5.0** (enforced via `esphome: min_version:`) — required by the `allow_partition_access` OTA option.
+- `esp_tsdb` dependency now points at the `RAR/esp_tsdb` fork's `tigomonitor` branch (handle-based API + `esp32p4` target) instead of a local path / stale registry pin.
+
 ## [2.0.0-alpha.1] - 2026-05-20
 
 ### Added

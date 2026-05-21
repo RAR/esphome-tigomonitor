@@ -5,6 +5,8 @@
 
 esphome:
   name: tigo-monitor-p4
+  # allow_partition_access in the OTA config requires ESPHome 2026.5.0+
+  min_version: "2026.5.0"
   platformio_options:
     board_build.flash_mode: dio
 
