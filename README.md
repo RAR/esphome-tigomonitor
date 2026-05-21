@@ -64,6 +64,8 @@ wifi:
 api:
 ota:
   - platform: esphome
+    # Bridge release: enables OTA partition-table updates (ESPHome 2026.5.0+)
+    allow_partition_access: true
 
 uart:
   id: tigo_uart

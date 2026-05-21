@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.4] - 2026-05-21
+
+> **Bridge release — the recommended hop before 2.0.** Functionally identical
+> to 1.4.3; its only job is to upgrade the OTA receiver. 2.0 reshapes the flash
+> partition layout for the on-flash time-series database, and that repartition
+> can only be applied over OTA by a firmware that already speaks the new OTA
+> protocol. 1.4.3 does not — so without this bridge the 1.x → 2.0 jump needs a
+> serial flash.
+>
+> **Upgrade path:** `1.4.3` → OTA → `1.4.4` → OTA → `2.0.0`. The `1.4.3 → 1.4.4`
+> hop is an ordinary OTA. The `1.4.4 → 2.0` hop then performs the verified
+> partition reshape over OTA — no USB cable. The reshape still wipes NVS, so
+> export your node table (Tools → Export) before the second hop.
+
+### Added
+- `allow_partition_access: true` in the example OTA configs. Built on
+  ESPHome 2026.5.0+, this opts the OTA receiver into the partition-table
+  update protocol so a later firmware can repartition the device over OTA.
+
+### Changed
+- Built against ESPHome 2026.5.0+ (required for the OTA partition-update
+  protocol).
+
 ## [1.4.3] - 2026-04-17
 
 ### Added
