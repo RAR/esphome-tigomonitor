@@ -20,7 +20,7 @@ An ESPHome component for monitoring Tigo solar optimizers via RS485/UART. Real-t
 | **Hardware** | ESP32-S3 with PSRAM recommended (e.g., M5Stack AtomS3R) |
 | **Connection** | RS485 to Tigo system at 38400 baud |
 | **Framework** | ESP-IDF (not Arduino) |
-| **ESPHome** | 2025.10.3+ |
+| **ESPHome** | 2026.5.0+ (needed for `allow_partition_access` OTA) |
 
 > **Note:** PSRAM is strongly recommended for 15+ devices. Without PSRAM, expect instability with web interface usage.
 
@@ -40,6 +40,7 @@ Connect ESP32 to Tigo system via RS485:
 ```yaml
 esphome:
   name: tigo-monitor
+  min_version: "2026.5.0"  # required for allow_partition_access (OTA)
 
 esp32:
   board: esp32-s3-devkitc-1
