@@ -118,11 +118,12 @@ esp32:
   framework:
     type: esp-idf
     components:
-      # Until zakery292/esp_tsdb#1 lands and tags a release, the path: form
-      # below points at the local handle-based-API fork. Once the upstream
-      # release ships, swap this for a registry pin.
+      # Until zakery292/esp_tsdb#1 lands and a release is tagged, this points
+      # at the RAR/esp_tsdb fork's `tigomonitor` branch (handle-based API +
+      # esp32p4 manifest target). Swap for a registry pin once upstream ships.
       - name: zakery292/esp_tsdb
-        path: /path/to/esp_tsdb
+        source: https://github.com/RAR/esp_tsdb.git
+        ref: tigomonitor
       - joltwallet/littlefs^1.16
     sdkconfig_options:
       CONFIG_PARTITION_TABLE_CUSTOM: "y"

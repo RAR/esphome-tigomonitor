@@ -16,8 +16,12 @@ esp32:
     type: esp-idf
     version: recommended
     components:
-      # Time-series database for persistent history (see docs/tsdb-integration.md)
-      - zakery292/esp_tsdb^2.0.2
+      # Time-series database for persistent history (see docs/tsdb-integration.md).
+      # Pinned to the RAR/esp_tsdb fork's `tigomonitor` branch (handle-based API +
+      # esp32p4 manifest target) until both land upstream and a release is tagged.
+      - name: zakery292/esp_tsdb
+        source: https://github.com/RAR/esp_tsdb.git
+        ref: tigomonitor
       # LittleFS — backing filesystem for the tsdb partition
       - joltwallet/littlefs^1.16
     sdkconfig_options:

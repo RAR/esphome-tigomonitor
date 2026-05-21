@@ -18,10 +18,11 @@ esp32:
     advanced:
       enable_idf_experimental_features: yes
     components:
-      # Local fork (~/esp_tsdb feat/handle-based-api + esp32p4 manifest target)
-      # used to verify P4 build before opening the upstream manifest PR.
+      # RAR/esp_tsdb fork, `tigomonitor` branch (handle-based API + esp32p4
+      # manifest target) — until both land upstream and a release is tagged.
       - name: zakery292/esp_tsdb
-        path: /home/rar/esp_tsdb
+        source: https://github.com/RAR/esp_tsdb.git
+        ref: tigomonitor
       # LittleFS — backing filesystem for the tsdb partition
       - joltwallet/littlefs^1.16
     sdkconfig_options:
