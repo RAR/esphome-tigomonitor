@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [1.4.4] - 2026-05-21
+## [1.4.4] - 2026-05-30
 
 > **Bridge release — the recommended hop before 2.0.** Functionally identical
 > to 1.4.3; its only job is to upgrade the OTA receiver. 2.0 reshapes the flash
