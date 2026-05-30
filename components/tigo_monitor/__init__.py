@@ -78,3 +78,12 @@ def to_code(config):
     # Add ESP-IDF HTTP client component dependency
     esp32.include_builtin_idf_component("esp_http_client")
 
+    # ESP-IDF 6.0 removed the built-in `json` component that bundled cJSON.
+    # Our C++ includes "cJSON.h" (tigo_monitor.cpp, tigo_web_server.cpp), so on
+    # IDF >= 6 we must pull cJSON in as a managed component from the registry.
+    # On IDF 5.x it is still built-in; adding it there would collide, so guard
+    # on the version. Both components compile into the same `src` target, so
+    # declaring the dependency once here covers tigo_server as well.
+    if esp32.idf_version() >= cv.Version(6, 0, 0):
+        esp32.add_idf_component(name="espressif/cjson", ref="^1.7.19")
+

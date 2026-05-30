@@ -14,6 +14,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Minimum ESPHome bumped to **2026.5.0** (enforced via `esphome: min_version:`) — required by the `allow_partition_access` OTA option.
 - `esp_tsdb` dependency now points at the `RAR/esp_tsdb` fork's `tigomonitor` branch (handle-based API + `esp32p4` target) instead of a local path / stale registry pin.
 
+### Fixed
+- **ESP-IDF 6.0 build: `fatal error: cJSON.h: No such file or directory`** (#15). IDF 6.0 removed the built-in `json` component that bundled cJSON; the C++ still includes `"cJSON.h"`. `tigo_monitor` now declares the `espressif/cjson` managed component (`^1.7.19`) on IDF ≥ 6.0 — guarded by version, since on IDF 5.x cJSON is still built-in and adding it would collide. One declaration covers `tigo_server` too (shared `src` target). Builds on IDF 5.x are unaffected.
+
 ## [2.0.0-alpha.1] - 2026-05-20
 
 ### Added
