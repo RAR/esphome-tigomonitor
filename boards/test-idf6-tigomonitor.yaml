@@ -13,14 +13,15 @@
 # Reuses the AtomS3R hardware base (UART pins, PSRAM, esp_tsdb + littlefs,
 # sdkconfig) and overrides only the framework version to 6.0.1.
 #
-# STATUS (2026-05-30, ESPHome 2026.5.1): our sources compile clean on IDF 6.0.1
-# and espressif/cjson resolves + builds from the registry (the whole point).
-# The build currently stops UPSTREAM at bootloader.bin generation — the
-# pioarduino prep_IDF6 platform calls esptool 5.2.0 with the now-removed
-# `--flash-mode/--flash-freq/--flash-size` top-level args. That's a platform
-# packaging bug, not ours; a fully-green v6 build awaits pioarduino shipping a
-# stable IDF6 platform (or esphome blessing one). Treat a clean compile of
-# tigo_monitor.cpp / tigo_web_server.cpp here as the pass criterion until then.
+# STATUS (2026-05-30): full green build on IDF 6.0.1 — espressif/cjson resolves
+# from the registry, both component sources compile, and the complete firmware
+# image (incl. bootloader.bin) builds. Verified end-to-end.
+#
+# Note: the pioarduino `prep_IDF6` platform is a moving branch. An earlier run
+# against a STALE cached clone failed at bootloader.bin (esptool 5.2.0 rejected
+# the platform's old `--flash-mode/--flash-freq/--flash-size` args); a fresh
+# platform clone cleared it. If you hit that error, wipe the cached platform
+# (~/.platformio/platforms/*espressif32*) to re-fetch.
 
 packages:
   board: !include esp32s3-atoms3r.yaml
