@@ -5,6 +5,8 @@
 esphome:
   name: tigo-server
   friendly_name: "Tigo Server"
+  # allow_partition_access in the OTA config requires ESPHome 2026.5.0+
+  min_version: "2026.5.0"
 
 esp32:
   board: m5stack-atoms3
