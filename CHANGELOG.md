@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **ESP-IDF 6.0 build: `fatal error: cJSON.h: No such file or directory`** ([#15](https://github.com/RAR/esphome-tigomonitor/issues/15)). IDF 6.0 removed the built-in `json` component that bundled cJSON; the C++ still includes `"cJSON.h"`. `tigo_monitor` now declares the `espressif/cjson` managed component (`^1.7.19`) on IDF ≥ 6.0 — guarded by version, since on IDF 5.x cJSON is still built-in and adding it would collide. One declaration covers `tigo_server` too (shared `src` target). Builds on the default/recommended IDF 5.x toolchain are unaffected.
+
 ## [1.4.3] - 2026-04-17
 
 ### Added
