@@ -51,7 +51,7 @@ captive_portal:
 
 logger:
   level: INFO
-  baud_rate: 0  # UART is used for the Tigo bus
+#  baud_rate: 0  # UART is used for the Tigo bus
 
 api:
 
