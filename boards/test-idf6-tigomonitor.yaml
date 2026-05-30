@@ -1,0 +1,68 @@
+# ESP-IDF 6.0 build-verification target (AtomS3R, headless)
+#
+# Purpose: compile the tigo_monitor / tigo_server components against ESP-IDF 6.0
+# to verify v6 compatibility — chiefly that the cJSON fix pulls espressif/cjson
+# from the registry (the built-in `json` component is gone in IDF 6.0).
+#
+# Everyday builds should stay on `version: recommended` (IDF 5.5.4); this file
+# only exists to exercise the 6.x path. No display package, so display-driver
+# churn on v6 doesn't muddy the signal — just our two components + wifi/api/ota.
+#
+#   esphome compile boards/test-idf6-tigomonitor.yaml
+#
+# Reuses the AtomS3R hardware base (UART pins, PSRAM, esp_tsdb + littlefs,
+# sdkconfig) and overrides only the framework version to 6.0.1.
+
+packages:
+  board: !include esp32s3-atoms3r.yaml
+
+# Force the ESP-IDF 6.0.1 toolchain. esphome 2026.5.0+ maps this to the
+# pioarduino prep_IDF6 platform; `recommended`/`latest`/`dev` all still resolve
+# to 5.5.4, so this override is the only thing selecting v6.
+esp32:
+  framework:
+    type: esp-idf
+    version: "6.0.1"
+
+# Use the in-repo component source
+external_components:
+  - source:
+      type: local
+      path: ../components
+
+wifi:
+  ssid: "YOUR_WIFI_SSID"
+  password: "YOUR_WIFI_PASSWORD"
+  ap:
+    ssid: "Tigo-Server IDF6 Test"
+    password: "12345678"
+
+captive_portal:
+
+logger:
+  level: INFO
+  baud_rate: 0  # UART is used for the Tigo bus
+
+api:
+
+ota:
+  - platform: esphome
+    password: "YOUR_OTA_PASSWORD"
+    allow_partition_access: true
+
+# Stub sections — required so ESPHome generates the sensor/text_sensor/
+# binary_sensor headers the components include.
+sensor:
+  - platform: tigo_monitor
+    tigo_monitor_id: tigo_hub
+    name: "Total Solar Power"
+  - platform: tigo_monitor
+    tigo_monitor_id: tigo_hub
+    name: "Total System Energy"
+  - platform: tigo_monitor
+    tigo_monitor_id: tigo_hub
+    name: "Active Device Count"
+
+text_sensor:
+
+binary_sensor:
