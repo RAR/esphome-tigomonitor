@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Crash (`IllegalInstruction` abort) on malformed power frames** ([#17](https://github.com/RAR/esphome-tigomonitor/issues/17)). `process_power_frame()` read fixed-offset fields (notably the new-format RSSI at offset 44) without checking the frame was long enough; a checksum-passing but short frame handed an empty substring to `std::stoi()`, which threw `std::invalid_argument` and aborted the device. Added a per-format length guard (`need 46` new / `40` legacy) that drops short frames instead of crashing. Backport of the guard already present on the 2.0 (`next`) line.
+
 ## [1.4.4] - 2026-05-30
 
 > **Bridge release — the recommended hop before 2.0.** Functionally identical

@@ -660,18 +660,36 @@ void TigoMonitorComponent::process_frame(const std::string &frame) {
 }
 
 void TigoMonitorComponent::process_power_frame(const std::string &frame) {
+  // Need at least 14 chars to read the format/length byte at offset 12
+  if (frame.length() < 14) {
+    ESP_LOGW(TAG, "Power frame too short for header (%zu chars), skipping", frame.length());
+    return;
+  }
+
   DeviceData data;
-  
+
   // Parse frame according to original Arduino logic
   data.addr = frame.substr(2, 4);
   data.pv_node_id = frame.substr(6, 4);
-  
+
   // Detect format version based on data length field
   // Old format (pre-CCA 4.x): 13 bytes (0x0D)
   // New format (CCA 4.x+): 15 bytes (0x0F)
   int data_length = std::stoi(frame.substr(12, 2), nullptr, 16);
   bool is_new_format = (data_length == 15);
-  
+
+  // Guard every fixed-offset field read below: a frame that passed the checksum
+  // but is shorter than the format requires would otherwise hand an empty
+  // substring to std::stoi() (e.g. the new-format RSSI at offset 44 on a
+  // 44-char packet), which throws std::invalid_argument and aborts the device.
+  // Legacy reads through offset 40 (RSSI at 38-39); new through 46 (RSSI 44-45).
+  size_t required = is_new_format ? 46 : 40;
+  if (frame.length() < required) {
+    ESP_LOGW(TAG, "Power frame too short for %s format (need %zu, have %zu), skipping",
+             is_new_format ? "new" : "legacy", required, frame.length());
+    return;
+  }
+
   if (is_new_format) {
     ESP_LOGD(TAG, "Processing power frame (new 15-byte format) for device addr: %s", data.addr.c_str());
   } else {
