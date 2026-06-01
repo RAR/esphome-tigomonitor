@@ -26,6 +26,16 @@
 packages:
   board: !include esp32s3-atoms3r.yaml
 
+# Unique node name so this v6 build gets its OWN build dir
+# (.esphome/build/tigo-idf6-test/). The board package names every config
+# `tigo-server`; without this override the 5.x example configs and this 6.x
+# config share .esphome/build/tigo-server/, so switching between them leaves a
+# stale CMake toolchain cache — you get `xtensa-esp32s3-elf-gcc: not found` /
+# `cannot execute 'cc1'` / host-`as` errors from a 5.x-configured dir being
+# built with the 6.0 unified toolchain. Isolating the build dir avoids it.
+esphome:
+  name: tigo-idf6-test
+
 # Force the ESP-IDF 6.0.1 toolchain. esphome 2026.5.0+ maps this to the
 # pioarduino prep_IDF6 platform; `recommended`/`latest`/`dev` all still resolve
 # to 5.5.4, so this override is the only thing selecting v6.
@@ -41,11 +51,11 @@ external_components:
       path: ../components
 
 wifi:
-  ssid: "YOUR_WIFI_SSID"
-  password: "YOUR_WIFI_PASSWORD"
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
   ap:
     ssid: "Tigo-Server IDF6 Test"
-    password: "12345678"
+    password: !secret ap_password
 
 captive_portal:
 
@@ -54,10 +64,12 @@ logger:
 #  baud_rate: 0  # UART is used for the Tigo bus
 
 api:
+  encryption:
+    key: !secret api_encryption_key
 
 ota:
   - platform: esphome
-    password: "YOUR_OTA_PASSWORD"
+    password: !secret ota_password
     allow_partition_access: true
 
 # Stub sections — required so ESPHome generates the sensor/text_sensor/
