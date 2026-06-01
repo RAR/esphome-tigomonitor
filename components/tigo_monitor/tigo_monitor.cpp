@@ -749,8 +749,12 @@ void TigoMonitorComponent::process_power_frame(const std::string &frame) {
   // Legacy format reads through offset 40 (RSSI at 38-39); new format through offset 46 (RSSI at 44-45)
   size_t required = is_new_format ? 46 : 40;
   if (frame.length() < required) {
-    ESP_LOGW(TAG, "Power frame too short for %s format (need %zu, have %zu), skipping",
-             is_new_format ? "new" : "legacy", required, frame.length());
+    // Dump the raw packet so a too-short frame can be decoded by hand — this is
+    // how we learn whether a given CCA firmware lays the new-format fields out
+    // differently than we assume (e.g. RSSI not actually at offset 44).
+    ESP_LOGW(TAG, "Power frame too short for %s format (addr=%s, data_length=%d, need %zu, have %zu), skipping: %s",
+             is_new_format ? "new" : "legacy", data.addr.c_str(), data_length,
+             required, frame.length(), frame.c_str());
     return;
   }
   
