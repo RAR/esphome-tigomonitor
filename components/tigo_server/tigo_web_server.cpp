@@ -2110,7 +2110,9 @@ void TigoWebServer::get_dashboard_html(PSRAMString& html) {
   
   <script>
     // API Token configuration
-    const API_TOKEN = ")html" + api_token_ + R"html(";
+    const API_TOKEN = ")html");
+  html.append(api_token_);
+  html.append(R"html(";
 
     // Detect ingress base path for HA ingress compatibility
     function getBasePath() {
@@ -2780,7 +2782,9 @@ void TigoWebServer::get_node_table_html(PSRAMString& html) {
   
   <script>
     // API Token configuration
-    const API_TOKEN = ")html" + api_token_ + R"html(";
+    const API_TOKEN = ")html");
+  html.append(api_token_);
+  html.append(R"html(";
 
     // Detect ingress base path for HA ingress compatibility
     function getBasePath() {
@@ -3216,7 +3220,9 @@ void TigoWebServer::get_esp_status_html(PSRAMString& html) {
   
   <script>
     // API Token configuration
-    const API_TOKEN = ")html" + api_token_ + R"html(";
+    const API_TOKEN = ")html");
+  html.append(api_token_);
+  html.append(R"html(";
 
     // Detect ingress base path for HA ingress compatibility
     function getBasePath() {
@@ -3680,7 +3686,9 @@ void TigoWebServer::get_yaml_config_html(PSRAMString& html) {
   
   <script>
     // API Token configuration
-    const API_TOKEN = ")html" + api_token_ + R"html(";
+    const API_TOKEN = ")html");
+  html.append(api_token_);
+  html.append(R"html(";
 
     // Detect ingress base path for HA ingress compatibility
     function getBasePath() {
@@ -3929,7 +3937,9 @@ void TigoWebServer::get_cca_info_html(PSRAMString& html) {
   
   <script>
     // API Token configuration
-    const API_TOKEN = ")html" + api_token_ + R"html(";
+    const API_TOKEN = ")html");
+  html.append(api_token_);
+  html.append(R"html(";
 
     // Detect ingress base path for HA ingress compatibility
     function getBasePath() {
