@@ -267,7 +267,11 @@ void TigoMonitorComponent::setup() {
   bool has_cca_data = false;
   int cca_nodes = 0;
   for (const auto &node : node_table_) {
-    if (!node.cca_string_label.empty() && node.cca_validated) {
+    // Group on the presence of a string label alone. cca_validated is set only
+    // when a node was matched against the CCA API, but hand-built node tables
+    // (imported via /api/nodes/import without CCA access) are authoritative too —
+    // requiring validation here left manual imports stuck at "0 strings". See #18.
+    if (!node.cca_string_label.empty()) {
       has_cca_data = true;
       cca_nodes++;
       ESP_LOGD(TAG, "Loaded node %s with CCA data: label='%s', string='%s', validated=%d",
@@ -1102,9 +1106,11 @@ void TigoMonitorComponent::rebuild_string_groups() {
   }
   strings_.clear();
   
-  // Group devices by their CCA string label
+  // Group devices by their CCA string label. A non-empty string label is
+  // sufficient — see the note in setup(): manually-imported node tables are
+  // authoritative even without cca_validated (#18).
   for (const auto &node : node_table_) {
-    if (!node.cca_string_label.empty() && node.cca_validated) {
+    if (!node.cca_string_label.empty()) {
       const std::string &string_label = node.cca_string_label;
       
       // Create string entry if it doesn't exist
