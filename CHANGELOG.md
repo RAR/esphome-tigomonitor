@@ -8,7 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
-- **Crash (`IllegalInstruction` abort) on malformed power frames** ([#17](https://github.com/RAR/esphome-tigomonitor/issues/17)). `process_power_frame()` read fixed-offset fields (notably the new-format RSSI at offset 44) without checking the frame was long enough; a checksum-passing but short frame handed an empty substring to `std::stoi()`, which threw `std::invalid_argument` and aborted the device. Added a per-format length guard (`need 46` new / `40` legacy) that drops short frames instead of crashing. Backport of the guard already present on the 2.0 (`next`) line.
+- **Crash (`IllegalInstruction` abort) on power frames** ([#17](https://github.com/RAR/esphome-tigomonitor/issues/17)). `process_power_frame()` read fixed-offset fields without checking the frame was long enough; a checksum-passing but short frame handed an empty substring to `std::stoi()`, which threw `std::invalid_argument` and aborted the device. Added a length guard that drops short frames instead of crashing.
+- **CCA 4.x power frames not parsed — wrong new-format slot/RSSI offsets** ([#14](https://github.com/RAR/esphome-tigomonitor/discussions/14)/[#17](https://github.com/RAR/esphome-tigomonitor/issues/17)). Decoding real 4.x frames showed the 15-byte "new format" is the legacy 13-byte layout plus 2 trailing pad bytes (`0x0000`) appended **after** RSSI — it does not insert bytes or shift the tail. The code read slot counter at char 40 and RSSI at char 44, both past the end of a 44-char frame (so every new-format frame was dropped, and previously crashed). Slot counter and RSSI now read at the legacy offsets (34 / 38) for both formats; voltage/current/temperature were already correct.
 
 ## [1.4.4] - 2026-05-30
 

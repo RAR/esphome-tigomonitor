@@ -682,8 +682,10 @@ void TigoMonitorComponent::process_power_frame(const std::string &frame) {
   // but is shorter than the format requires would otherwise hand an empty
   // substring to std::stoi() (e.g. the new-format RSSI at offset 44 on a
   // 44-char packet), which throws std::invalid_argument and aborts the device.
-  // Legacy reads through offset 40 (RSSI at 38-39); new through 46 (RSSI 44-45).
-  size_t required = is_new_format ? 46 : 40;
+  // Both formats place slot counter at chars 34-37 and RSSI at 38-39 → need >=40.
+  // New (15-byte / CCA 4.x) frames are 44 chars: they APPEND 2 pad bytes after
+  // RSSI, they do not shift the fields (decoded from real 4.x frames in #14/#17).
+  size_t required = 40;
   if (frame.length() < required) {
     // Dump the raw packet so a too-short frame can be decoded by hand — this is
     // how we learn whether a given CCA firmware lays the new-format fields out
@@ -723,31 +725,18 @@ void TigoMonitorComponent::process_power_frame(const std::string &frame) {
   }
   data.temperature = temperature_raw * 0.1f;
   
-  // Parse position-dependent fields based on format
+  // Slot counter (chars 34-37) and RSSI (chars 38-39) are at the SAME offsets
+  // for both formats. The new 15-byte format only appends 2 trailing pad bytes
+  // (chars 40-43, observed 0x0000) after RSSI — it does not relocate these.
+  data.slot_counter = frame.substr(34, 4);
+  data.rssi = std::stoi(frame.substr(38, 2), nullptr, 16);
+
   if (is_new_format) {
-    // New format: 3 extra bytes inserted after temperature (6 hex chars)
-    // Unknown field 1 at position 28-33 (observed values: 92 00 64)
-    std::string unknown_field_1 = frame.substr(28, 6);
-    
-    // Slot Counter shifted by 6 chars
-    data.slot_counter = frame.substr(40, 4);
-    
-    // RSSI shifted by 6 chars
-    data.rssi = std::stoi(frame.substr(44, 2), nullptr, 16);
-    
-    // Unknown field 2 at position 46-49 (observed values: 02 00)
-    if (frame.length() >= 50) {
-      std::string unknown_field_2 = frame.substr(46, 4);
-      ESP_LOGV(TAG, "New format fields for %s: unknown1=%s, unknown2=%s", 
-               data.addr.c_str(), unknown_field_1.c_str(), unknown_field_2.c_str());
-    }
-  } else {
-    // Legacy format: original field positions
-    // Slot Counter
-    data.slot_counter = frame.substr(34, 4);
-    
-    // RSSI
-    data.rssi = std::stoi(frame.substr(38, 2), nullptr, 16);
+    // chars 28-33 carry a 3-byte field of unknown meaning (observed e.g. 830064)
+    ESP_LOGV(TAG, "New-format fields for %s: f1=%s slot=%s rssi=0x%02X pad=%s",
+             data.addr.c_str(), frame.substr(28, 6).c_str(),
+             data.slot_counter.c_str(), (unsigned int) (data.rssi & 0xFF),
+             frame.substr(40, 4).c_str());
   }
   
   // Calculate additional sensor values
