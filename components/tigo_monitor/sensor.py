@@ -1,4 +1,6 @@
 """Sensor platform for Tigo Monitor devices."""
+import re
+
 import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome.components import sensor, text_sensor
@@ -331,55 +333,94 @@ STACK_FREE_CONFIG_SCHEMA = sensor.sensor_schema(
     cv.GenerateID(CONF_TIGO_MONITOR_ID): cv.use_id(TigoMonitorComponent),
 }).extend(cv.COMPONENT_SCHEMA)
 
+# --- Aggregate (no-address) sensor classification --------------------------
+# Aggregate sensors carry no `address`, so their type is inferred from keywords
+# in the `name`. Matching is WHOLE-WORD (regex \b) so a substring can't cross-
+# trigger another category — e.g. "sum" must not match inside "checksum", and
+# "e in" must not match inside "free internal". Rule order matters: the first
+# match wins, so more specific categories (energy/power out, checksum, frame)
+# are listed before broader ones (generic power, count). In particular,
+# checksum/frame precede count so names like "Invalid Checksum Count" /
+# "Missed Frame Count" are not swallowed by the generic "count" keyword.
+_AGGREGATE_RULES = [
+    ("energy_out",   ["energy out", "output energy", "e_out", "e out"]),
+    ("energy_in",    ["energy in", "input energy", "e_in", "e in",
+                      "energy", "kwh", "kilowatt", "wh"]),
+    ("power_out",    ["output power", "power out", "p_out", "p out"]),
+    ("power_in",     ["input power", "power in", "p_in", "p in", "power",
+                      "watt", "total", "sum", "combined", "system"]),
+    ("checksum",     ["checksum", "invalid", "crc", "error"]),
+    ("frame",        ["frame", "missed", "lost", "dropped"]),
+    ("count",        ["count", "devices", "discovered", "active", "number"]),
+    ("psram",        ["psram"]),
+    ("stack",        ["stack"]),
+    ("internal_ram", ["internal", "ram", "heap"]),
+]
+
+_MIN_KEYWORDS = ["min", "minimum", "watermark"]
+
+
+def _name_has(name, keywords):
+    """True if any keyword matches `name` as a whole word/phrase.
+
+    Whole-word matching avoids substring false positives such as "sum"
+    matching inside "checksum" or "e in" matching inside "free internal".
+    """
+    return any(re.search(r"\b" + re.escape(kw) + r"\b", name) for kw in keywords)
+
+
+def _classify_aggregate_sensor(name):
+    """Return the aggregate-sensor category for a no-address sensor name.
+
+    Returns None when no category matches.
+    """
+    name = name.lower()
+    for category, keywords in _AGGREGATE_RULES:
+        if _name_has(name, keywords):
+            if category == "internal_ram" and _name_has(name, _MIN_KEYWORDS):
+                return "internal_ram_min"
+            return category
+    return None
+
+
+_AGGREGATE_SCHEMA_BY_CATEGORY = {
+    "energy_out": ENERGY_OUT_SUM_CONFIG_SCHEMA,
+    "energy_in": ENERGY_IN_SUM_CONFIG_SCHEMA,
+    "power_out": POWER_OUT_SUM_CONFIG_SCHEMA,
+    "power_in": POWER_IN_SUM_CONFIG_SCHEMA,
+    "checksum": INVALID_CHECKSUM_CONFIG_SCHEMA,
+    "frame": MISSED_FRAME_CONFIG_SCHEMA,
+    "count": DEVICE_COUNT_CONFIG_SCHEMA,
+    "psram": PSRAM_FREE_CONFIG_SCHEMA,
+    "stack": STACK_FREE_CONFIG_SCHEMA,
+    "internal_ram": INTERNAL_RAM_FREE_CONFIG_SCHEMA,
+    "internal_ram_min": INTERNAL_RAM_MIN_CONFIG_SCHEMA,
+}
+
+
 # Main config schema that handles both types
 def _validate_config(config):
-    """Validate configuration and determine sensor type"""
-    # Check sensor type by name keywords
-    sensor_name = config.get(CONF_NAME, "").lower()
-    has_energy_out_keywords = any(keyword in sensor_name for keyword in ["energy out", "output energy", "e_out", "e out"])
-    has_energy_in_keywords = any(keyword in sensor_name for keyword in ["energy in", "input energy", "e_in", "e in", "energy", "kwh", "kilowatt", "wh"]) and not has_energy_out_keywords
-    has_power_out_keywords = any(keyword in sensor_name for keyword in ["output power", "power out", "p_out", "p out"])
-    has_power_in_keywords = any(keyword in sensor_name for keyword in ["input power", "power in", "p_in", "p in", "power", "watt", "total", "sum", "combined", "system"]) and not has_power_out_keywords
-    has_count_keywords = any(keyword in sensor_name for keyword in ["count", "devices", "discovered", "active", "number"])
-    has_checksum_keywords = any(keyword in sensor_name for keyword in ["checksum", "invalid", "crc", "error"])
-    has_frame_keywords = any(keyword in sensor_name for keyword in ["frame", "missed", "lost", "dropped"])
-    has_internal_ram_keywords = any(keyword in sensor_name for keyword in ["internal", "ram", "heap"])
-    has_psram_keywords = "psram" in sensor_name
-    has_stack_keywords = "stack" in sensor_name
-    has_min_keywords = any(keyword in sensor_name for keyword in ["min", "minimum", "watermark"])
-    
-    # If it has keywords and no address, treat as aggregate sensor
-    if CONF_ADDRESS not in config:
-        if has_energy_out_keywords:
-            return ENERGY_OUT_SUM_CONFIG_SCHEMA(config)
-        elif has_energy_in_keywords:
-            return ENERGY_IN_SUM_CONFIG_SCHEMA(config)
-        elif has_power_out_keywords:
-            return POWER_OUT_SUM_CONFIG_SCHEMA(config)
-        elif has_power_in_keywords:
-            return POWER_IN_SUM_CONFIG_SCHEMA(config)
-        elif has_count_keywords:
-            return DEVICE_COUNT_CONFIG_SCHEMA(config)
-        elif has_checksum_keywords:
-            return INVALID_CHECKSUM_CONFIG_SCHEMA(config)
-        elif has_frame_keywords:
-            return MISSED_FRAME_CONFIG_SCHEMA(config)
-        elif has_psram_keywords:
-            return PSRAM_FREE_CONFIG_SCHEMA(config)
-        elif has_stack_keywords:
-            return STACK_FREE_CONFIG_SCHEMA(config)
-        elif has_internal_ram_keywords and has_min_keywords:
-            return INTERNAL_RAM_MIN_CONFIG_SCHEMA(config)
-        elif has_internal_ram_keywords:
-            return INTERNAL_RAM_FREE_CONFIG_SCHEMA(config)
-        else:
-            raise cv.Invalid("For sensors without address, use names containing 'energy out'/'output energy' for output-energy sensors, 'energy'/'kwh'/'energy in' for input-energy sensors, 'power out'/'output power' for output-power sensors, 'power'/'total'/'sum'/'power in' for input-power sensors, 'count'/'devices' for device count, 'checksum'/'invalid' for checksum errors, 'frame'/'missed' for frame errors, 'psram' for PSRAM free, 'stack' for stack free, 'internal ram min' for internal RAM minimum, or 'internal ram' for internal RAM free")
-    elif CONF_ADDRESS in config:
-        # This is a device sensor configuration
+    """Validate configuration and determine sensor type."""
+    if CONF_ADDRESS in config:
+        # Device sensor — keyed by address.
         return DEVICE_CONFIG_SCHEMA(config)
-    else:
-        # Default to requiring address for safety
-        raise cv.Invalid("Either 'address' is required for device sensors, or use appropriate keywords for aggregate sensors")
+
+    # Aggregate sensor — type is inferred from name keywords.
+    category = _classify_aggregate_sensor(config.get(CONF_NAME, ""))
+    schema = _AGGREGATE_SCHEMA_BY_CATEGORY.get(category)
+    if schema is None:
+        raise cv.Invalid(
+            "For sensors without 'address', the name must contain a keyword "
+            "identifying the aggregate type: 'energy out'/'output energy' for "
+            "output-energy, 'energy'/'kwh'/'energy in' for input-energy, "
+            "'power out'/'output power' for output-power, "
+            "'power'/'total'/'sum'/'power in' for input-power, "
+            "'count'/'devices' for device count, 'checksum'/'invalid' for "
+            "checksum errors, 'frame'/'missed' for frame errors, 'psram' for "
+            "PSRAM free, 'stack' for stack free, 'internal ram min' for "
+            "internal RAM minimum, or 'internal ram' for internal RAM free."
+        )
+    return schema(config)
 
 CONFIG_SCHEMA = _validate_config
 
@@ -388,45 +429,24 @@ async def to_code(config):
     
     # Check if this is an aggregate sensor (no address) or device sensor (has address)
     if CONF_ADDRESS not in config:
-        # Check if this is energy, power, device count, or diagnostic sensor by name keywords
-        sensor_name = config.get(CONF_NAME, "").lower()
-        has_energy_out_keywords = any(keyword in sensor_name for keyword in ["energy out", "output energy", "e_out", "e out"])
-        has_energy_in_keywords = any(keyword in sensor_name for keyword in ["energy in", "input energy", "e_in", "e in", "energy", "kwh", "kilowatt", "wh"]) and not has_energy_out_keywords
-        has_power_out_keywords = any(keyword in sensor_name for keyword in ["output power", "power out", "p_out", "p out"])
-        has_power_in_keywords = any(keyword in sensor_name for keyword in ["input power", "power in", "p_in", "p in", "power", "watt", "total", "sum", "combined", "system"]) and not has_power_out_keywords
-        has_count_keywords = any(keyword in sensor_name for keyword in ["count", "devices", "discovered", "active", "number"])
-        has_checksum_keywords = any(keyword in sensor_name for keyword in ["checksum", "invalid", "crc", "error"])
-        has_frame_keywords = any(keyword in sensor_name for keyword in ["frame", "missed", "lost", "dropped"])
-        has_internal_ram_keywords = any(keyword in sensor_name for keyword in ["internal", "ram", "heap"])
-        has_psram_keywords = "psram" in sensor_name
-        has_stack_keywords = "stack" in sensor_name
-        has_min_keywords = any(keyword in sensor_name for keyword in ["min", "minimum", "watermark"])
-        
+        # Aggregate sensor — route by the same name-keyword classifier used in
+        # validation, so the registered hub method always matches the schema.
+        category = _classify_aggregate_sensor(config.get(CONF_NAME, ""))
         sens = await sensor.new_sensor(config)
-        if has_energy_out_keywords:
-            cg.add(hub.add_energy_out_sum_sensor(sens))
-        elif has_energy_in_keywords:
-            cg.add(hub.add_energy_in_sum_sensor(sens))
-        elif has_power_out_keywords:
-            cg.add(hub.add_power_out_sum_sensor(sens))
-        elif has_power_in_keywords:
-            cg.add(hub.add_power_sum_sensor(sens))
-        elif has_count_keywords:
-            cg.add(hub.add_device_count_sensor(sens))
-        elif has_checksum_keywords:
-            cg.add(hub.add_invalid_checksum_sensor(sens))
-        elif has_frame_keywords:
-            cg.add(hub.add_missed_frame_sensor(sens))
-        elif has_psram_keywords:
-            cg.add(hub.add_psram_free_sensor(sens))
-        elif has_stack_keywords:
-            cg.add(hub.add_stack_free_sensor(sens))
-        elif has_internal_ram_keywords and has_min_keywords:
-            cg.add(hub.add_internal_ram_min_sensor(sens))
-        elif has_internal_ram_keywords:
-            cg.add(hub.add_internal_ram_free_sensor(sens))
-        else:
-            cg.add(hub.add_power_sum_sensor(sens))
+        register = {
+            "energy_out": hub.add_energy_out_sum_sensor,
+            "energy_in": hub.add_energy_in_sum_sensor,
+            "power_out": hub.add_power_out_sum_sensor,
+            "power_in": hub.add_power_sum_sensor,
+            "checksum": hub.add_invalid_checksum_sensor,
+            "frame": hub.add_missed_frame_sensor,
+            "count": hub.add_device_count_sensor,
+            "psram": hub.add_psram_free_sensor,
+            "stack": hub.add_stack_free_sensor,
+            "internal_ram": hub.add_internal_ram_free_sensor,
+            "internal_ram_min": hub.add_internal_ram_min_sensor,
+        }.get(category, hub.add_power_sum_sensor)
+        cg.add(register(sens))
         return
     
     # This is a device sensor configuration
