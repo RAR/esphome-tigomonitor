@@ -42,6 +42,10 @@ esp32:
       # Enable PSRAM (8MB on AtomS3R)
       CONFIG_SPIRAM_MODE_OCT: "y"
       CONFIG_SPIRAM_SPEED_80M: "y"
+      # Allocate WiFi + lwIP buffers in PSRAM to free internal RAM.
+      # Recommended for large installs — prevents new-connection resets
+      # (OTA / API) after uptime when internal RAM gets tight.
+      CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP: "y"
 
 
 # Enable PSRAM

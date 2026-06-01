@@ -205,6 +205,28 @@ psram:
 > clean the ESPHome build files **and** erase the ESP32 flash completely (e.g., `esptool.py erase_flash`).
 > ESPHome does not rebuild the bootloader automatically when PSRAM settings change.
 
+### Large installs (30+ devices)
+
+With many devices the static entity/API state plus WiFi/lwIP buffers can exhaust
+**internal** RAM (PSRAM holds the device data, but network buffers default to internal
+RAM). The symptom is new TCP connections being reset after a few minutes of uptime —
+OTA fails with `Connection reset by peer`, `esphome logs` won't attach — while the
+existing Home Assistant connection keeps working, and a reboot temporarily clears it.
+
+Move the WiFi and lwIP buffers into PSRAM to relieve internal RAM:
+
+```yaml
+esp32:
+  framework:
+    type: esp-idf
+    sdkconfig_options:
+      CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP: "y"
+```
+
+Check the headroom at any time via `curl http://<device-ip>/api/health` — the
+`heap_min_free` field is the low-water mark of internal RAM. If it drops into the
+low single-digit KB, you need this flag (and/or a smaller `CONFIG_UART_RX_BUFFER_SIZE`).
+
 ## Management Buttons
 
 ```yaml
