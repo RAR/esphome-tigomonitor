@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.5] - 2026-06-01
+
 ### Fixed
 - **Wrong HA units on diagnostic aggregate sensors** (e.g. "Invalid Checksum Count" reported in **W**, "Min Free Internal RAM" in **kWh**). The aggregate-sensor type was inferred by naive substring matching, so `"sum"` matched inside *check`sum`* (→ power/W) and `"e in"` matched inside *fre`e in`ternal* (→ energy/kWh). Classification is now whole-word (regex `\b`) with an explicit rule order, so checksum/frame/RAM names route correctly. Backport of the classifier already on the 2.0 (`next`) line.
 - **Crash (`std::bad_alloc` abort) loading web pages with many devices.** Each HTML page was assembled as a single `html.append(R"html(...)" + api_token_ + R"html(...)")` expression, which built the entire page as one large `std::string` temporary in **internal** RAM before copying it to the PSRAM-backed buffer. On a busy device (e.g. 66 optimizers + TSDB) that internal allocation could throw `bad_alloc` and abort (seen in `get_dashboard_html`). The API-token splice is now three separate `append()`s so each literal streams straight to PSRAM with no large internal temporary. Affected all five HTML pages.
