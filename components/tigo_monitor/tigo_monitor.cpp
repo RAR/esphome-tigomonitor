@@ -2732,7 +2732,14 @@ bool TigoMonitorComponent::import_node_table(const std::vector<NodeTableData>& n
   
   // Save imported node table to persistent storage
   save_node_table();
-  
+
+  // Rebuild string groups so Topology/Dashboard reflect the new table without a
+  // reboot. The node table itself is read live, but strings_ is otherwise only
+  // rebuilt in setup() or after a CCA sync — an import without CCA access left
+  // edits invisible until a reboot. Safe under the held state_mutex_:
+  // rebuild_string_groups() doesn't re-lock. See #21.
+  rebuild_string_groups();
+
   ESP_LOGI(TAG, "Successfully imported %zu nodes", node_table_.size());
   return true;
 }
