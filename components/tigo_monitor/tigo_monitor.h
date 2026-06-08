@@ -394,6 +394,16 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   std::map<std::string, StringData> snapshot_strings() const { return strings_; }
   std::vector<InverterData> snapshot_inverters() const { return inverters_; }
 #endif
+  // Run fn() while holding the state lock so the web-server task can read the
+  // live get_X() containers directly instead of taking a by-value snapshot.
+  // The snapshots copy each struct's std::string members onto the small
+  // internal heap; under dashboard polling that churn fragments internal RAM to
+  // OOM (#23). fn() must only do a quick in-memory serialization — no network
+  // I/O — since the main task is blocked from mutating state for its duration.
+  template<typename Fn> void with_state_lock(Fn &&fn) const {
+    StateLock lock(state_mutex_);
+    fn();
+  }
   int get_number_of_devices() const { return number_of_devices_; }
   const std::string& get_cca_ip() const { return cca_ip_; }
   bool get_sync_cca_on_startup() const { return sync_cca_on_startup_; }

@@ -1482,149 +1482,131 @@ esp_err_t TigoWebServer::api_health_handler(httpd_req_t *req) {
 void TigoWebServer::build_devices_json(PSRAMString& json) {
   json.append("{\"devices\":[");
   
-  const auto devices = parent_->snapshot_devices();
-  const auto node_table = parent_->snapshot_node_table();
-
-  // Create a vector of device info with names and sensor indices for sorting
+  // Intermediate entries hold pointers into the live device/node tables rather
+  // than copying each struct's std::string members. Copying churned the small
+  // internal heap on every poll and, under dashboard refresh, fragmented it to
+  // OOM (#23). The pointers are valid only while the state lock below is held.
   struct DeviceWithName {
-    const tigo_monitor::DeviceData *device;  // May be nullptr if no runtime data yet
-    std::string addr;
-    std::string barcode;
-    std::string name;
-    std::string string_label;
+    const tigo_monitor::DeviceData *device;  // nullptr if node-only (no runtime data)
+    const std::string *addr;
+    const std::string *barcode;
+    const std::string *cca_label;            // nullptr when there is no CCA label
+    const std::string *string_label;
     int sensor_index;
     bool has_runtime_data;
   };
-  
-  std::vector<DeviceWithName> sorted_devices;
-  
-  // First, add all devices that have runtime data
-  for (const auto &device : devices) {
-    DeviceWithName dwn;
-    dwn.device = &device;
-    dwn.addr = device.addr;
-    dwn.barcode = device.barcode;
-    dwn.sensor_index = -1;
-    dwn.string_label = "";
-    dwn.has_runtime_data = true;
-    
-    // Find the node table entry to get CCA label, string label, and sensor index
-    for (const auto &node : node_table) {
-      if (node.addr == device.addr) {
-        dwn.sensor_index = node.sensor_index;
-        dwn.string_label = node.cca_string_label;
-        if (!node.cca_label.empty()) {
-          dwn.name = node.cca_label;
-        }
-        break;
-      }
-    }
-    
-    // Fallback to barcode or address if no CCA label
-    if (dwn.name.empty()) {
-      if (!device.barcode.empty() && device.barcode.length() >= 5) {
-        dwn.name = device.barcode;
-      } else {
-        dwn.name = "Module " + device.addr;
-      }
-    }
-    
-    sorted_devices.push_back(dwn);
-  }
-  
-  // Now add nodes from node_table that don't have runtime data yet
-  // This handles the case where ESP32 restarted at night - we know about them but haven't seen them
-  for (const auto &node : node_table) {
-    // Check if this node already exists in sorted_devices
-    bool found = false;
-    for (const auto &existing : sorted_devices) {
-      if (existing.addr == node.addr) {
-        found = true;
-        break;
-      }
-    }
-    
-    if (!found && node.sensor_index >= 0) {
-      // This node is in the table but has no runtime data yet
+
+  static const std::string EMPTY_STR;
+
+  parent_->with_state_lock([&]() {
+    const auto &devices = parent_->get_devices();
+    const auto &node_table = parent_->get_node_table();
+
+    std::vector<DeviceWithName> sorted_devices;
+
+    // First, add all devices that have runtime data
+    for (const auto &device : devices) {
       DeviceWithName dwn;
-      dwn.device = nullptr;
-      dwn.addr = node.addr;
-      // Use Frame 27 long_address (16-char) as barcode
-      dwn.barcode = node.long_address;
-      dwn.sensor_index = node.sensor_index;
-      dwn.string_label = node.cca_string_label;
-      dwn.has_runtime_data = false;
-      
-      // Use CCA label if available, otherwise barcode, otherwise address
-      if (!node.cca_label.empty()) {
-        dwn.name = node.cca_label;
-      } else if (!dwn.barcode.empty() && dwn.barcode.length() >= 5) {
-        dwn.name = dwn.barcode;
-      } else {
-        dwn.name = "Module " + node.addr;
+      dwn.device = &device;
+      dwn.addr = &device.addr;
+      dwn.barcode = &device.barcode;
+      dwn.cca_label = nullptr;
+      dwn.string_label = &EMPTY_STR;
+      dwn.sensor_index = -1;
+      dwn.has_runtime_data = true;
+
+      // Find the node table entry to get CCA label, string label, sensor index
+      for (const auto &node : node_table) {
+        if (node.addr == device.addr) {
+          dwn.sensor_index = node.sensor_index;
+          dwn.string_label = &node.cca_string_label;
+          if (!node.cca_label.empty()) dwn.cca_label = &node.cca_label;
+          break;
+        }
       }
-      
+
       sorted_devices.push_back(dwn);
     }
-  }
-  
-  // Sort by name (CCA label if available), then by sensor index
-  std::sort(sorted_devices.begin(), sorted_devices.end(),
-            [](const DeviceWithName &a, const DeviceWithName &b) {
-              // If both have CCA labels or both don't, sort by name
-              bool a_has_cca = (a.name.find("Module ") != 0 && a.name.length() != 16);
-              bool b_has_cca = (b.name.find("Module ") != 0 && b.name.length() != 16);
-              
-              if (a_has_cca && b_has_cca) {
-                // Both have CCA names - sort alphabetically
-                return a.name < b.name;
-              } else if (!a_has_cca && !b_has_cca) {
-                // Neither has CCA name - sort by sensor index
-                return a.sensor_index < b.sensor_index;
-              } else {
-                // CCA names come before non-CCA names
-                return a_has_cca;
-              }
-            });
-  
-  bool first = true;
-  
-  for (const auto &dwn : sorted_devices) {
-    if (!first) json.append(",");
-    first = false;
-    
-    const std::string &device_name = dwn.name;
-    const std::string &string_label = dwn.string_label;
-    
-    char buffer[600];
-    
-    if (dwn.has_runtime_data && dwn.device != nullptr) {
-      // Device has runtime data - show actual values
-      const auto &device = *dwn.device;
-      // If last_update is 0, device hasn't been updated yet - use ULONG_MAX to indicate "never"
-      unsigned long data_age_ms = (device.last_update == 0) ? ULONG_MAX : (millis() - device.last_update);
-      float duty_cycle_percent = (device.duty_cycle / 255.0f) * 100.0f;
-      
-      snprintf(buffer, sizeof(buffer),
-        "{\"addr\":\"%s\",\"barcode\":\"%s\",\"name\":\"%s\",\"string_label\":\"%s\",\"voltage_in\":%.2f,\"voltage_out\":%.2f,"
-        "\"current\":%.3f,\"current_out\":%.3f,\"power_in\":%.1f,\"power\":%.1f,\"power_out\":%.1f,\"peak_power\":%.1f,\"temperature\":%.1f,\"rssi\":%d,"
-        "\"duty_cycle\":%.1f,\"efficiency\":%.2f,\"data_age_ms\":%lu}",
-        device.addr.c_str(), device.barcode.c_str(), device_name.c_str(), string_label.c_str(), device.voltage_in, device.voltage_out,
-        device.current_in, device.current_out, device.power_in, device.power_out, device.power_out, device.peak_power, device.temperature, device.rssi,
-        duty_cycle_percent, device.efficiency, data_age_ms);
-    } else {
-      // Device is known but has no runtime data yet (e.g., ESP32 restarted at night)
-      // Show zeros with a very large data_age to indicate no recent data
-      snprintf(buffer, sizeof(buffer),
-        "{\"addr\":\"%s\",\"barcode\":\"%s\",\"name\":\"%s\",\"string_label\":\"%s\",\"voltage_in\":0.00,\"voltage_out\":0.00,"
-        "\"current\":0.000,\"current_out\":0.000,\"power_in\":0.0,\"power\":0.0,\"power_out\":0.0,\"peak_power\":0.0,\"temperature\":0.0,\"rssi\":0,"
-        "\"duty_cycle\":0.0,\"efficiency\":0.00,\"data_age_ms\":999999999}",
-        dwn.addr.c_str(), dwn.barcode.c_str(), device_name.c_str(), string_label.c_str());
+
+    // Now add nodes from node_table that don't have runtime data yet (e.g. the
+    // ESP32 restarted at night - known but not yet seen this session)
+    for (const auto &node : node_table) {
+      bool found = false;
+      for (const auto &existing : sorted_devices) {
+        if (*existing.addr == node.addr) { found = true; break; }
+      }
+
+      if (!found && node.sensor_index >= 0) {
+        DeviceWithName dwn;
+        dwn.device = nullptr;
+        dwn.addr = &node.addr;
+        dwn.barcode = &node.long_address;   // Frame 27 long address as barcode
+        dwn.cca_label = node.cca_label.empty() ? nullptr : &node.cca_label;
+        dwn.string_label = &node.cca_string_label;
+        dwn.sensor_index = node.sensor_index;
+        dwn.has_runtime_data = false;
+        sorted_devices.push_back(dwn);
+      }
     }
-    
-    json.append(buffer);
-  }
-  
+
+    // CCA-labelled devices first (alphabetical), then unlabelled by sensor index
+    std::sort(sorted_devices.begin(), sorted_devices.end(),
+              [](const DeviceWithName &a, const DeviceWithName &b) {
+                bool a_has_cca = (a.cca_label != nullptr);
+                bool b_has_cca = (b.cca_label != nullptr);
+                if (a_has_cca && b_has_cca) return *a.cca_label < *b.cca_label;
+                if (!a_has_cca && !b_has_cca) return a.sensor_index < b.sensor_index;
+                return a_has_cca;
+              });
+
+    bool first = true;
+    for (const auto &dwn : sorted_devices) {
+      if (!first) json.append(",");
+      first = false;
+
+      // Resolve the display name without copying: CCA label, else barcode,
+      // else a "Module <addr>" fallback built in a small stack buffer.
+      char name_buf[48];
+      const char *name_cstr;
+      if (dwn.cca_label != nullptr) {
+        name_cstr = dwn.cca_label->c_str();
+      } else if (dwn.barcode->length() >= 5) {
+        name_cstr = dwn.barcode->c_str();
+      } else {
+        snprintf(name_buf, sizeof(name_buf), "Module %s", dwn.addr->c_str());
+        name_cstr = name_buf;
+      }
+
+      char buffer[600];
+
+      if (dwn.has_runtime_data && dwn.device != nullptr) {
+        // Device has runtime data - show actual values
+        const auto &device = *dwn.device;
+        // If last_update is 0, device hasn't been updated yet - use ULONG_MAX to indicate "never"
+        unsigned long data_age_ms = (device.last_update == 0) ? ULONG_MAX : (millis() - device.last_update);
+        float duty_cycle_percent = (device.duty_cycle / 255.0f) * 100.0f;
+
+        snprintf(buffer, sizeof(buffer),
+          "{\"addr\":\"%s\",\"barcode\":\"%s\",\"name\":\"%s\",\"string_label\":\"%s\",\"voltage_in\":%.2f,\"voltage_out\":%.2f,"
+          "\"current\":%.3f,\"current_out\":%.3f,\"power_in\":%.1f,\"power\":%.1f,\"power_out\":%.1f,\"peak_power\":%.1f,\"temperature\":%.1f,\"rssi\":%d,"
+          "\"duty_cycle\":%.1f,\"efficiency\":%.2f,\"data_age_ms\":%lu}",
+          device.addr.c_str(), device.barcode.c_str(), name_cstr, dwn.string_label->c_str(), device.voltage_in, device.voltage_out,
+          device.current_in, device.current_out, device.power_in, device.power_out, device.power_out, device.peak_power, device.temperature, device.rssi,
+          duty_cycle_percent, device.efficiency, data_age_ms);
+      } else {
+        // Device is known but has no runtime data yet (e.g., ESP32 restarted at night)
+        // Show zeros with a very large data_age to indicate no recent data
+        snprintf(buffer, sizeof(buffer),
+          "{\"addr\":\"%s\",\"barcode\":\"%s\",\"name\":\"%s\",\"string_label\":\"%s\",\"voltage_in\":0.00,\"voltage_out\":0.00,"
+          "\"current\":0.000,\"current_out\":0.000,\"power_in\":0.0,\"power\":0.0,\"power_out\":0.0,\"peak_power\":0.0,\"temperature\":0.0,\"rssi\":0,"
+          "\"duty_cycle\":0.0,\"efficiency\":0.00,\"data_age_ms\":999999999}",
+          dwn.addr->c_str(), dwn.barcode->c_str(), name_cstr, dwn.string_label->c_str());
+      }
+
+      json.append(buffer);
+    }
+  });
+
   json.append("]}");
 }
 
@@ -1643,21 +1625,21 @@ void TigoWebServer::build_overview_json(PSRAMString& json) {
     return;
   }
   
-  const auto devices = parent_->snapshot_devices();
-
   float total_power_out = 0.0f;
   float total_current = 0.0f;
   float avg_efficiency = 0.0f;
   float avg_temp = 0.0f;
   int active_devices = 0;
-  
-  for (const auto &device : devices) {
-    total_power_out += device.power_out;
-    total_current += device.current_in;
-    avg_efficiency += device.efficiency;
-    avg_temp += device.temperature;
-    active_devices++;
-  }
+
+  parent_->with_state_lock([&]() {
+    for (const auto &device : parent_->get_devices()) {
+      total_power_out += device.power_out;
+      total_current += device.current_in;
+      avg_efficiency += device.efficiency;
+      avg_temp += device.temperature;
+      active_devices++;
+    }
+  });
   
   if (active_devices > 0) {
     avg_efficiency /= active_devices;
@@ -1678,14 +1660,14 @@ void TigoWebServer::build_overview_json(PSRAMString& json) {
 }
 
 void TigoWebServer::build_strings_json(PSRAMString& json) {
-  const auto strings = parent_->snapshot_strings();
-
-  ESP_LOGD(TAG, "Building strings JSON - found %d strings", strings.size());
-  
   json.append("{\"strings\":[");
-  
+
   bool first = true;
-  
+
+  parent_->with_state_lock([&]() {
+  const auto &strings = parent_->get_strings();
+  ESP_LOGD(TAG, "Building strings JSON - found %d strings", strings.size());
+
   for (const auto &pair : strings) {
     if (!first) json.append(",");
     first = false;
@@ -1717,18 +1699,20 @@ void TigoWebServer::build_strings_json(PSRAMString& json) {
 
     json.append(buffer);
   }
-  
+  });
+
   json.append("]}");
 }
 
 void TigoWebServer::build_inverters_json(PSRAMString& json) {
-  const auto inverters = parent_->snapshot_inverters();
-  const auto strings = parent_->snapshot_strings();
+  json.append("{\"inverters\":[");
+
+  parent_->with_state_lock([&]() {
+  const auto &inverters = parent_->get_inverters();
+  const auto &strings = parent_->get_strings();
 
   ESP_LOGD(TAG, "Building inverters JSON - found %d inverters", inverters.size());
-  
-  json.append("{\"inverters\":[");
-  
+
   bool first_inv = true;
   for (const auto &inverter : inverters) {
     if (!first_inv) json.append(",");
@@ -1808,7 +1792,8 @@ void TigoWebServer::build_inverters_json(PSRAMString& json) {
     json.append(strings_json.c_str());
     json.append("}");
   }
-  
+  });
+
   json.append("]}");
 }
 
@@ -1898,9 +1883,8 @@ void TigoWebServer::build_node_table_json(PSRAMString& json) {
   cJSON *root = cJSON_CreateObject();
   cJSON *nodes_array = cJSON_CreateArray();
 
-  const auto node_table = parent_->snapshot_node_table();
-
-  for (const auto &node : node_table) {
+  parent_->with_state_lock([&]() {
+  for (const auto &node : parent_->get_node_table()) {
     cJSON *node_obj = cJSON_CreateObject();
 
     cJSON_AddStringToObject(node_obj, "addr", node.addr.c_str());
@@ -1916,7 +1900,8 @@ void TigoWebServer::build_node_table_json(PSRAMString& json) {
     
     cJSON_AddItemToArray(nodes_array, node_obj);
   }
-  
+  });
+
   cJSON_AddItemToObject(root, "nodes", nodes_array);
   
   char *json_str = cJSON_Print(root);
@@ -2038,17 +2023,20 @@ void TigoWebServer::build_yaml_json(PSRAMString& json, const std::set<std::strin
   PSRAMString yaml_text;
   const auto node_table = parent_->snapshot_node_table();
 
-  // Build YAML configuration
-  std::vector<tigo_monitor::NodeTableData> assigned_nodes;
+  // Build YAML configuration. Hold pointers into the local snapshot rather than
+  // copying each NodeTableData (and its std::string members) a second time — the
+  // by-value copy here was the heaviest internal-RAM allocation in the web layer
+  // and the exact site that OOM-crashed under heap exhaustion (#23).
+  std::vector<const tigo_monitor::NodeTableData*> assigned_nodes;
   for (const auto &node : node_table) {
     if (node.sensor_index >= 0) {
-      assigned_nodes.push_back(node);
+      assigned_nodes.push_back(&node);
     }
   }
 
   // Sort by sensor index
   std::sort(assigned_nodes.begin(), assigned_nodes.end(),
-            [](const auto &a, const auto &b) { return a.sensor_index < b.sensor_index; });
+            [](const auto *a, const auto *b) { return a->sensor_index < b->sensor_index; });
 
   // Resolve effective grouping: "inverter" falls back to "mppt" if no
   // inverters are configured (otherwise every panel lands on the same
@@ -2093,7 +2081,8 @@ void TigoWebServer::build_yaml_json(PSRAMString& json, const std::set<std::strin
   };
 
   if (effective_grouping == "panel") {
-    for (const auto &node : assigned_nodes) {
+    for (const auto *node_ptr : assigned_nodes) {
+      const auto &node = *node_ptr;
       std::string idx_str = std::to_string(node.sensor_index + 1);
       std::string display = !node.cca_label.empty() ? node.cca_label
                                                     : ("Tigo Panel " + idx_str);
@@ -2102,7 +2091,8 @@ void TigoWebServer::build_yaml_json(PSRAMString& json, const std::set<std::strin
       register_device(id, display);
     }
   } else if (effective_grouping == "mppt") {
-    for (const auto &node : assigned_nodes) {
+    for (const auto *node_ptr : assigned_nodes) {
+      const auto &node = *node_ptr;
       std::string label = node.cca_inverter_label.empty() ? std::string("Unassigned MPPT")
                                                           : node.cca_inverter_label;
       std::string id = make_id("mppt", label);
@@ -2117,7 +2107,8 @@ void TigoWebServer::build_yaml_json(PSRAMString& json, const std::set<std::strin
         mppt_to_inverter[mppt] = name;
       }
     }
-    for (const auto &node : assigned_nodes) {
+    for (const auto *node_ptr : assigned_nodes) {
+      const auto &node = *node_ptr;
       auto it = mppt_to_inverter.find(node.cca_inverter_label);
       std::string display = (it != mppt_to_inverter.end()) ? it->second : std::string("Unassigned");
       std::string id = make_id("inverter", display);
@@ -2207,7 +2198,8 @@ void TigoWebServer::build_yaml_json(PSRAMString& json, const std::set<std::strin
   }
   
   // Add per-device sensors
-  for (const auto &node : assigned_nodes) {
+  for (const auto *node_ptr : assigned_nodes) {
+    const auto &node = *node_ptr;
     std::string index_str = std::to_string(node.sensor_index + 1);
     std::string barcode_comment = "";
     std::string device_name;
