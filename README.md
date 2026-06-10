@@ -227,6 +227,19 @@ Check the headroom at any time via `curl http://<device-ip>/api/health` — the
 `heap_min_free` field is the low-water mark of internal RAM. If it drops into the
 low single-digit KB, you need this flag (and/or a smaller `CONFIG_UART_RX_BUFFER_SIZE`).
 
+Two more things dominate internal RAM as installs grow:
+
+- **Entity count.** Every per-panel sensor declared in YAML costs roughly
+  110–150 bytes of internal RAM at boot (the sensor object plus API
+  registration). That sounds small until it scales: 64 panels × 7 sensor types
+  ≈ 450 entities ≈ **50–70 KB of internal RAM** — the largest static consumer
+  on a big install. Declare only the per-panel sensors you actually use in
+  Home Assistant; the web dashboard shows every metric for every panel
+  regardless, at no per-entity cost.
+- **UART RX buffer.** `CONFIG_UART_RX_BUFFER_SIZE` is allocated from internal
+  (DMA-capable) RAM, never PSRAM. 2–8 KB is plenty on an ESP32-S3 at 38400
+  baud; a 32 KB buffer silently spends a sixth of the usable internal heap.
+
 ## Management Buttons
 
 ```yaml
