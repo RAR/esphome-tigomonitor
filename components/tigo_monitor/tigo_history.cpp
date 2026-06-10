@@ -537,18 +537,31 @@ void TigoHistory::flush_and_close() {
   // _lock_close. Send a sentinel row, then wait for the writer to ack via
   // writer_done_ — by the time we take that semaphore, the writer task is
   // gone and nothing else is touching the tsdb handles.
+  //
+  // If the writer does NOT confirm exit, abort the close entirely rather
+  // than closing under it: fclose/lfs_unmount racing a live lfs_file_write
+  // is concurrent-littlefs access and panicked an in-field OTA
+  // (lfs_unmount_ vs lfs_file_flushedwrite). Skipping the clean close is
+  // safe — every tsdb write is fflush+fsync'd, so flash already holds
+  // everything but the one in-flight row, and littlefs's next mount tidies
+  // any orphans. A re-invocation (e.g. retried OTA) picks up the writer's
+  // late ack via writer_done_ and completes the close cleanly.
   if (queue_ != nullptr && task_ != nullptr && writer_done_ != nullptr) {
     EncodedRow sentinel{};
     sentinel.timestamp = 0xFFFFFFFFu;
     if (xQueueSend(queue_, &sentinel, pdMS_TO_TICKS(200)) != pdTRUE) {
-      ESP_LOGW(TAG, "flush_and_close: could not enqueue writer-stop sentinel");
-    } else {
-      // 1500 ms cap covers a worst-case in-flight write (system + 2 panel DBs)
-      // even on a slow flash. If we time out we still proceed — better to
-      // risk one bad close than to spin forever and miss the OTA reboot.
-      if (xSemaphoreTake(writer_done_, pdMS_TO_TICKS(1500)) != pdTRUE) {
-        ESP_LOGW(TAG, "flush_and_close: writer did not exit within 1500 ms");
-      }
+      ESP_LOGW(TAG, "flush_and_close: could not enqueue writer-stop sentinel; "
+                    "skipping close — writer still owns the tsdb handles");
+      return;
+    }
+    // 5 s cap: the realistic worst case is not the writes themselves but a
+    // littlefs GC / deorphan pass on a well-filled ring, which can run
+    // multi-second. Delaying the OTA reboot a few seconds is cheaper than
+    // closing under a live writer.
+    if (xSemaphoreTake(writer_done_, pdMS_TO_TICKS(5000)) != pdTRUE) {
+      ESP_LOGW(TAG, "flush_and_close: writer did not exit within 5000 ms; "
+                    "skipping close — flash is consistent (every write is fsync'd)");
+      return;
     }
     task_ = nullptr;
   }
