@@ -104,6 +104,18 @@ using psram_string = std::basic_string<char, std::char_traits<char>, PSRAMAlloca
 namespace esphome {
 namespace tigo_monitor {
 
+// Frame-processing strings live in PSRAM on IDF builds. Every UART frame
+// produces a processed copy, a 2x-size hex copy, and per-packet slices; the
+// helpers used to stage those in psram_string but then copied the result back
+// into a std::string on the internal heap, churning it all day at a rate
+// proportional to bus traffic (#23). frame_string keeps the whole pipeline in
+// PSRAM end-to-end.
+#ifdef USE_ESP_IDF
+using frame_string = psram_string;
+#else
+using frame_string = std::string;
+#endif
+
 static const uint16_t CRC_POLYNOMIAL = 0x8408;  // Reversed polynomial (0x1021 reflected)
 static const size_t CRC_TABLE_SIZE = 256;
 
@@ -480,16 +492,16 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
  protected:
   // Frame processing
   void process_serial_data();
-  void process_frame(const std::string &frame);
-  std::string remove_escape_sequences(const std::string &frame);
-  bool verify_checksum(const std::string &frame);
-  std::string frame_to_hex_string(const std::string &frame);
-  
+  void process_frame(const frame_string &frame);
+  frame_string remove_escape_sequences(const frame_string &frame);
+  bool verify_checksum(const frame_string &frame);
+  frame_string frame_to_hex_string(const frame_string &frame);
+
   // Frame type handlers
-  void process_power_frame(const std::string &frame);
-  void process_09_frame(const std::string &frame);
-  void process_27_frame(const std::string &hex_frame, size_t offset);
-  int calculate_header_length(const std::string &hex_frame);
+  void process_power_frame(const frame_string &frame);
+  void process_09_frame(const frame_string &frame);
+  void process_27_frame(const frame_string &hex_frame, size_t offset);
+  int calculate_header_length(const frame_string &hex_frame);
   
   // CRC functions
   void generate_crc_table();

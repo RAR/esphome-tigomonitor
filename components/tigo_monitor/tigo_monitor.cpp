@@ -5,6 +5,7 @@
 #include "esphome/core/preferences.h"
 #include "esphome/components/network/util.h"
 #include <cstring>
+#include <cstdlib>
 #include <numeric>
 
 #ifdef USE_OTA
@@ -148,18 +149,19 @@ inline size_t buffer_find<psram_vector<char>>(const psram_vector<char>& buf, con
 }
 
 template<typename BufferType>
-inline std::string buffer_substr(const BufferType& buf, size_t pos, size_t len);
+inline frame_string buffer_substr(const BufferType& buf, size_t pos, size_t len);
 
 template<>
-inline std::string buffer_substr<std::string>(const std::string& buf, size_t pos, size_t len) {
-  return buf.substr(pos, len);
+inline frame_string buffer_substr<std::string>(const std::string& buf, size_t pos, size_t len) {
+  if (pos >= buf.size()) return "";
+  return frame_string(buf.data() + pos, std::min(len, buf.size() - pos));
 }
 
 template<>
-inline std::string buffer_substr<psram_vector<char>>(const psram_vector<char>& buf, size_t pos, size_t len) {
+inline frame_string buffer_substr<psram_vector<char>>(const psram_vector<char>& buf, size_t pos, size_t len) {
   if (pos >= buf.size()) return "";
   size_t actual_len = std::min(len, buf.size() - pos);
-  return std::string(&buf[pos], actual_len);
+  return frame_string(&buf[pos], actual_len);
 }
 
 template<typename BufferType>
@@ -545,7 +547,7 @@ void TigoMonitorComponent::process_serial_data() {
       }
       
       // Extract frame without start and end delimiters
-      std::string frame = buffer_substr(incoming_data_, 2, end_pos - 2);
+      frame_string frame = buffer_substr(incoming_data_, 2, end_pos - 2);
       buffer_clear(incoming_data_); // Clear buffer for next frame
       
       // Process the frame with safety checks
@@ -610,15 +612,25 @@ void TigoMonitorComponent::process_serial_data() {
   }
 }
 
-void TigoMonitorComponent::process_frame(const std::string &frame) {
-  // Note: processed_frame and hex_frame are allocated in PSRAM via helper functions
-  // (remove_escape_sequences and frame_to_hex_string use psram_string internally)
-  // This saves 2-4KB of internal RAM per frame processed
-  
+// Parse a fixed-width hex field directly out of the frame — no temporary
+// string allocation, and unlike std::stoi it cannot abort on malformed bus
+// data (exceptions are disabled on ESP-IDF, so a throw is a panic).
+static int parse_hex_field(const frame_string &s, size_t pos, size_t len) {
+  char buf[12];
+  if (len >= sizeof(buf) || pos + len > s.length()) return 0;
+  memcpy(buf, s.c_str() + pos, len);
+  buf[len] = '\0';
+  return static_cast<int>(strtol(buf, nullptr, 16));
+}
+
+void TigoMonitorComponent::process_frame(const frame_string &frame) {
+  // The whole frame pipeline stays in frame_string (PSRAM on IDF builds) —
+  // see the typedef note in the header (#23).
+
   // Increment total frames processed counter for diagnostics
   total_frames_processed_++;
-  
-  std::string processed_frame = remove_escape_sequences(frame);
+
+  frame_string processed_frame = remove_escape_sequences(frame);
   
   if (!verify_checksum(processed_frame)) {
     invalid_checksum_count_++;
@@ -627,23 +639,23 @@ void TigoMonitorComponent::process_frame(const std::string &frame) {
     }
     
     // Enhanced logging for invalid checksum debugging
-    std::string hex_frame = frame_to_hex_string(processed_frame);
+    frame_string hex_frame = frame_to_hex_string(processed_frame);
     uint16_t extracted_crc = 0;
     uint16_t computed_crc = 0;
-    
+
     if (processed_frame.length() >= 2) {
-      std::string checksum_str = processed_frame.substr(processed_frame.length() - 2);
-      extracted_crc = (static_cast<uint8_t>(checksum_str[0]) << 8) | static_cast<uint8_t>(checksum_str[1]);
+      extracted_crc = (static_cast<uint8_t>(processed_frame[processed_frame.length() - 2]) << 8) |
+                      static_cast<uint8_t>(processed_frame[processed_frame.length() - 1]);
       computed_crc = compute_crc16_ccitt(
-        reinterpret_cast<const uint8_t*>(processed_frame.c_str()), 
+        reinterpret_cast<const uint8_t*>(processed_frame.c_str()),
         processed_frame.length() - 2
       );
     }
-    
+
     // Log frame type and length for pattern analysis
-    std::string frame_type = "unknown";
+    frame_string frame_type = "unknown";
     if (hex_frame.length() >= 10) {
-      std::string segment = hex_frame.substr(4, 4);
+      frame_string segment = hex_frame.substr(4, 4);
       if (segment == "0149") frame_type = "power_data";
       else if (segment == "0148") frame_type = "receive_request";
       else if (segment == "0B10" || segment == "0B0F") frame_type = "command";
@@ -658,38 +670,37 @@ void TigoMonitorComponent::process_frame(const std::string &frame) {
   
   // Remove checksum (last 2 bytes)
   processed_frame = processed_frame.substr(0, processed_frame.length() - 2);
-  std::string hex_frame = frame_to_hex_string(processed_frame);
-  
+  frame_string hex_frame = frame_to_hex_string(processed_frame);
+
   if (hex_frame.length() < 10) {
     ESP_LOGW(TAG, "Frame too short: %s", hex_frame.c_str());
     return;
   }
-  
-  std::string segment = hex_frame.substr(4, 4); // Get type segment
-  
+
+  frame_string segment = hex_frame.substr(4, 4); // Get type segment
+
   if (segment == "0149") {
     // Power data frame
     int start_payload = 8 + calculate_header_length(hex_frame.substr(8, 4));
-    std::string payload = hex_frame.substr(start_payload);
-    
+    frame_string payload = hex_frame.substr(start_payload);
+
     size_t pos = 0;
     while (pos < payload.length()) {
       if (pos + 14 > payload.length()) {
         ESP_LOGW(TAG, "Incomplete packet, aborting");
         break;
       }
-      
-      std::string type = payload.substr(pos, 2);
-      std::string length_hex = payload.substr(pos + 12, 2);
-      int length = std::stoi(length_hex, nullptr, 16);
-      
+
+      frame_string type = payload.substr(pos, 2);
+      int length = parse_hex_field(payload, pos + 12, 2);
+
       int packet_length_chars = length * 2 + 14;
       if (pos + packet_length_chars > payload.length()) {
         ESP_LOGW(TAG, "Incomplete packet, aborting at pos %zu", pos);
         break;
       }
-      
-      std::string packet = payload.substr(pos, packet_length_chars);
+
+      frame_string packet = payload.substr(pos, packet_length_chars);
       
       if (type == "31") {
         process_power_frame(packet);
@@ -706,8 +717,8 @@ void TigoMonitorComponent::process_frame(const std::string &frame) {
     // Frame structure: dest(4) + type(4) + len(4) + cmd(4) + seq(2) + payload
     // Position:        0-3      4-7       8-11     12-15    16-17    18+
     command_frame_count_++;
-    std::string cmd = hex_frame.substr(12, 4);  // Full 4-char command (e.g., "0027")
-    std::string cmd_byte = hex_frame.substr(14, 2);  // Just the command byte (e.g., "27")
+    frame_string cmd = hex_frame.substr(12, 4);  // Full 4-char command (e.g., "0027")
+    frame_string cmd_byte = hex_frame.substr(14, 2);  // Just the command byte (e.g., "27")
     
     // Log all command frames to help debug Frame 27 capture
     ESP_LOGD(TAG, "Command frame: segment=%s, cmd=%s, len=%zu", 
@@ -731,7 +742,7 @@ void TigoMonitorComponent::process_frame(const std::string &frame) {
   }
 }
 
-void TigoMonitorComponent::process_power_frame(const std::string &frame) {
+void TigoMonitorComponent::process_power_frame(const frame_string &frame) {
   // Need at least 14 chars to read the format/length byte at offset 12
   if (frame.length() < 14) {
     ESP_LOGW(TAG, "Power frame too short for header (%zu chars), skipping", frame.length());
@@ -741,13 +752,13 @@ void TigoMonitorComponent::process_power_frame(const std::string &frame) {
   DeviceData data;
 
   // Parse frame according to original Arduino logic
-  data.addr = frame.substr(2, 4);
-  data.pv_node_id = frame.substr(6, 4);
+  data.addr.assign(frame.c_str() + 2, 4);
+  data.pv_node_id.assign(frame.c_str() + 6, 4);
 
   // Detect format version based on data length field
   // Old format (pre-CCA 4.x): 13 bytes (0x0D)
   // New format (CCA 4.x+): 15 bytes (0x0F)
-  int data_length = std::stoi(frame.substr(12, 2), nullptr, 16);
+  int data_length = parse_hex_field(frame, 12, 2);
   bool is_new_format = (data_length == 15);
 
   // Both formats place the slot counter at chars 34-37 and RSSI at 38-39, so
@@ -773,22 +784,22 @@ void TigoMonitorComponent::process_power_frame(const std::string &frame) {
   }
   
   // Voltage In (scale by 0.05)
-  int voltage_in_raw = std::stoi(frame.substr(14, 3), nullptr, 16);
+  int voltage_in_raw = parse_hex_field(frame, 14, 3);
   data.voltage_in = voltage_in_raw * 0.05f;
-  
+
   // Voltage Out (scale by 0.10)
-  int voltage_out_raw = std::stoi(frame.substr(17, 3), nullptr, 16);
+  int voltage_out_raw = parse_hex_field(frame, 17, 3);
   data.voltage_out = voltage_out_raw * 0.10f;
-  
+
   // Duty Cycle
-  data.duty_cycle = std::stoi(frame.substr(20, 2), nullptr, 16);
-  
+  data.duty_cycle = parse_hex_field(frame, 20, 2);
+
   // Current In (scale by 0.005)
-  int current_in_raw = std::stoi(frame.substr(22, 3), nullptr, 16);
+  int current_in_raw = parse_hex_field(frame, 22, 3);
   data.current_in = current_in_raw * 0.005f;
-  
+
   // Temperature (scale by 0.1) - handle signed 12-bit value in two's complement
-  int temperature_raw = std::stoi(frame.substr(25, 3), nullptr, 16);
+  int temperature_raw = parse_hex_field(frame, 25, 3);
   // Convert from 12-bit two's complement to signed value
   if (temperature_raw & 0x800) {  // Check sign bit (bit 11)
     temperature_raw = temperature_raw - 0x1000;  // Convert to negative
@@ -798,8 +809,8 @@ void TigoMonitorComponent::process_power_frame(const std::string &frame) {
   // Slot counter (chars 34-37) and RSSI (chars 38-39) are at the SAME offsets
   // for both formats. The new 15-byte format only appends 2 trailing pad bytes
   // (chars 40-43, observed 0x0000) after RSSI — it does not relocate these.
-  data.slot_counter = frame.substr(34, 4);
-  data.rssi = std::stoi(frame.substr(38, 2), nullptr, 16);
+  data.slot_counter.assign(frame.c_str() + 34, 4);
+  data.rssi = parse_hex_field(frame, 38, 2);
 
   if (is_new_format) {
     // chars 28-33 carry a 3-byte field of unknown meaning (observed e.g. 830064)
@@ -876,15 +887,15 @@ void TigoMonitorComponent::process_power_frame(const std::string &frame) {
   update_device_data(data);
 }
 
-void TigoMonitorComponent::process_09_frame(const std::string &frame) {
+void TigoMonitorComponent::process_09_frame(const frame_string &frame) {
   // Need at least 46 chars to read barcode at offset 40 (length 6)
   if (frame.length() < 46) {
     ESP_LOGW(TAG, "Frame 09 too short (%zu chars), skipping", frame.length());
     return;
   }
-  std::string addr = frame.substr(14, 4);
-  std::string node_id = frame.substr(18, 4);
-  std::string barcode = frame.substr(40, 6);
+  frame_string addr = frame.substr(14, 4);
+  frame_string node_id = frame.substr(18, 4);
+  frame_string barcode = frame.substr(40, 6);
   
   ESP_LOGD(TAG, "Frame 09 - Device Identity (IGNORED): addr=%s, node_id=%s, barcode=%s", 
            addr.c_str(), node_id.c_str(), barcode.c_str());
@@ -894,7 +905,7 @@ void TigoMonitorComponent::process_09_frame(const std::string &frame) {
   // Only Frame 27 long addresses (16-char) are used for device identification
 }
 
-void TigoMonitorComponent::process_27_frame(const std::string &hex_frame, size_t offset) {
+void TigoMonitorComponent::process_27_frame(const frame_string &hex_frame, size_t offset) {
   // Frame 27 format per taptap protocol:
   // [starting_index:2 bytes (4 hex)] [num_entries:2 bytes (4 hex)] [entries...]
   // Each entry: [long_address:8 bytes (16 hex)] [pv_node_id:2 bytes (4 hex)] = 20 hex chars
@@ -905,10 +916,10 @@ void TigoMonitorComponent::process_27_frame(const std::string &hex_frame, size_t
   }
   
   // Parse starting_index (first 4 hex chars at offset)
-  int starting_index = std::stoi(hex_frame.substr(offset, 4), nullptr, 16);
-  
+  int starting_index = parse_hex_field(hex_frame, offset, 4);
+
   // Parse num_entries (next 4 hex chars)
-  int num_entries = std::stoi(hex_frame.substr(offset + 4, 4), nullptr, 16);
+  int num_entries = parse_hex_field(hex_frame, offset + 4, 4);
   ESP_LOGI(TAG, "Frame 27 received: starting_index=%d, entries=%d", starting_index, num_entries);
   
   size_t pos = offset + 8;  // Start after starting_index (4) + num_entries (4)
@@ -1901,39 +1912,12 @@ void TigoMonitorComponent::publish_sensor_data() {
   }
 }
 
-std::string TigoMonitorComponent::remove_escape_sequences(const std::string &frame) {
-#ifdef USE_ESP_IDF
-  // Use PSRAM for large temporary buffer to avoid internal RAM fragmentation
-  psram_string result;
+frame_string TigoMonitorComponent::remove_escape_sequences(const frame_string &frame) {
+  // frame_string is PSRAM-backed on IDF builds, so the result stays out of
+  // internal RAM end-to-end (it used to be copied back into a std::string).
+  frame_string result;
   result.reserve(frame.length());
-  
-  for (size_t i = 0; i < frame.length(); ++i) {
-    if (frame[i] == '\x7E' && i < frame.length() - 1) {
-      char next_byte = frame[i + 1];
-      switch (next_byte) {
-        case '\x00': result.push_back('\x7E'); break; // Escaped 7E -> raw 7E
-        case '\x01': result.push_back('\x24'); break; // Escaped 7E 01 -> raw 24
-        case '\x02': result.push_back('\x23'); break; // Escaped 7E 02 -> raw 23
-        case '\x03': result.push_back('\x25'); break; // Escaped 7E 03 -> raw 25
-        case '\x04': result.push_back('\xA4'); break; // Escaped 7E 04 -> raw A4
-        case '\x05': result.push_back('\xA3'); break; // Escaped 7E 05 -> raw A3
-        case '\x06': result.push_back('\xA5'); break; // Escaped 7E 06 -> raw A5
-        default:
-          result.push_back(frame[i]);
-          result.push_back(next_byte);
-          break;
-      }
-      i++; // Skip next byte
-    } else {
-      result.push_back(frame[i]);
-    }
-  }
-  // Convert back to std::string for compatibility with existing code
-  return std::string(result.begin(), result.end());
-#else
-  std::string result;
-  result.reserve(frame.length());
-  
+
   for (size_t i = 0; i < frame.length(); ++i) {
     if (frame[i] == '\x7E' && i < frame.length() - 1) {
       char next_byte = frame[i + 1];
@@ -1956,52 +1940,37 @@ std::string TigoMonitorComponent::remove_escape_sequences(const std::string &fra
     }
   }
   return result;
-#endif
 }
 
-bool TigoMonitorComponent::verify_checksum(const std::string &frame) {
+bool TigoMonitorComponent::verify_checksum(const frame_string &frame) {
   if (frame.length() < 2) {
     ESP_LOGV(TAG, "Frame too short for checksum verification: %zu bytes", frame.length());
     return false;
   }
-  
+
   // Safety check: prevent potential out-of-bounds access
   if (frame.length() > 10000) {
     ESP_LOGW(TAG, "Frame suspiciously large: %zu bytes, rejecting", frame.length());
     return false;
   }
-  
-  std::string checksum_str = frame.substr(frame.length() - 2);
-  uint16_t extracted_checksum = (static_cast<uint8_t>(checksum_str[0]) << 8) | 
-                                static_cast<uint8_t>(checksum_str[1]);
-  
+
+  uint16_t extracted_checksum = (static_cast<uint8_t>(frame[frame.length() - 2]) << 8) |
+                                static_cast<uint8_t>(frame[frame.length() - 1]);
+
   uint16_t computed_checksum = compute_crc16_ccitt(
-    reinterpret_cast<const uint8_t*>(frame.c_str()), 
+    reinterpret_cast<const uint8_t*>(frame.c_str()),
     frame.length() - 2
   );
-  
+
   return extracted_checksum == computed_checksum;
 }
 
-std::string TigoMonitorComponent::frame_to_hex_string(const std::string &frame) {
-#ifdef USE_ESP_IDF
-  // Use PSRAM for hex conversion buffer to save internal RAM
-  // Hex strings can be 2KB+ for large frames
-  psram_string hex_str;
+frame_string TigoMonitorComponent::frame_to_hex_string(const frame_string &frame) {
+  // Hex strings can be 2KB+ for large frames; frame_string keeps them in
+  // PSRAM on IDF builds (no internal-RAM copy-back).
+  frame_string hex_str;
   hex_str.reserve(frame.length() * 2);
-  
-  for (unsigned char byte : frame) {
-    char hex_chars[3];
-    sprintf(hex_chars, "%02X", byte);
-    hex_str.push_back(hex_chars[0]);
-    hex_str.push_back(hex_chars[1]);
-  }
-  // Convert back to std::string for compatibility with existing code
-  return std::string(hex_str.begin(), hex_str.end());
-#else
-  std::string hex_str;
-  hex_str.reserve(frame.length() * 2);
-  
+
   for (unsigned char byte : frame) {
     char hex_chars[3];
     sprintf(hex_chars, "%02X", byte);
@@ -2009,16 +1978,18 @@ std::string TigoMonitorComponent::frame_to_hex_string(const std::string &frame) 
     hex_str.push_back(hex_chars[1]);
   }
   return hex_str;
-#endif
 }
 
-int TigoMonitorComponent::calculate_header_length(const std::string &hex_frame) {
-  // Convert from little-endian: swap bytes
-  std::string low_byte = hex_frame.substr(0, 2);
-  std::string high_byte = hex_frame.substr(2, 2);
-  std::string status_hex = low_byte + high_byte;
-  
-  unsigned int status = std::stoul(status_hex, nullptr, 16);
+int TigoMonitorComponent::calculate_header_length(const frame_string &hex_frame) {
+  // Parse the 4-char status word in place. NOTE: despite the historical
+  // "swap bytes" comment, the original code concatenated substr(0,2) +
+  // substr(2,2) — i.e. the chars in their original order — and every
+  // downstream offset is calibrated against that. Keep it byte-identical.
+  char status_hex[5] = {0};
+  size_t n = std::min<size_t>(4, hex_frame.length());
+  memcpy(status_hex, hex_frame.c_str(), n);
+
+  unsigned int status = static_cast<unsigned int>(strtoul(status_hex, nullptr, 16));
   int length = 2; // Status word is always 2 bytes
   
   // Check bits according to original logic
