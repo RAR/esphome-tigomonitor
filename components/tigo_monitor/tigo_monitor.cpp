@@ -1030,7 +1030,7 @@ void TigoMonitorComponent::update_device_data(const DeviceData &data) {
     DeviceData* new_device = &devices_.back();
     std::string pref_key = "peak_" + data.addr;
     uint32_t hash = esphome::fnv1_hash(pref_key);
-    auto load = global_preferences->make_preference<float>(hash);
+    auto load = this->cached_pref_<float>(hash);
     float saved_peak = 0.0f;
     if (load.load(&saved_peak) && saved_peak > 0.0f) {
       new_device->peak_power = saved_peak;
@@ -1124,7 +1124,7 @@ void TigoMonitorComponent::rebuild_string_groups() {
         char pref_key[80];
         snprintf(pref_key, sizeof(pref_key), "str_dn:%s", string_label.c_str());
         uint32_t hash = esphome::fnv1_hash(pref_key);
-        auto pref = global_preferences->make_preference<char[64]>(hash);
+        auto pref = this->cached_pref_<char[64]>(hash);
         char dn_buf[64] = {};
         if (pref.load(&dn_buf) && dn_buf[0] != '\0') {
           string_data.display_label = dn_buf;
@@ -1134,7 +1134,7 @@ void TigoMonitorComponent::rebuild_string_groups() {
         // stored as uint16. 0 means "not set" → UI ignores it.
         snprintf(pref_key, sizeof(pref_key), "str_rt:%s", string_label.c_str());
         uint32_t rt_hash = esphome::fnv1_hash(pref_key);
-        auto rt_pref = global_preferences->make_preference<uint16_t>(rt_hash);
+        auto rt_pref = this->cached_pref_<uint16_t>(rt_hash);
         uint16_t rt_val = 0;
         if (rt_pref.load(&rt_val) && rt_val > 0) {
           string_data.panel_rating_w = rt_val;
@@ -1249,7 +1249,7 @@ void TigoMonitorComponent::add_inverter(const std::string &name, const std::vect
   char pref_key[80];
   snprintf(pref_key, sizeof(pref_key), "inv_dn:%s", name.c_str());
   uint32_t hash = esphome::fnv1_hash(pref_key);
-  auto pref = global_preferences->make_preference<char[64]>(hash);
+  auto pref = this->cached_pref_<char[64]>(hash);
   char dn_buf[64] = {};
   if (pref.load(&dn_buf) && dn_buf[0] != '\0') {
     inverter.display_name = dn_buf;
@@ -1274,7 +1274,7 @@ bool TigoMonitorComponent::set_inverter_display_name(const std::string &canonica
     char pref_key[80];
     snprintf(pref_key, sizeof(pref_key), "inv_dn:%s", canonical.c_str());
     uint32_t hash = esphome::fnv1_hash(pref_key);
-    auto pref = global_preferences->make_preference<char[64]>(hash);
+    auto pref = this->cached_pref_<char[64]>(hash);
     char dn_buf[64] = {};
     // Truncate at 63 chars; UI enforces a similar limit but be defensive.
     strncpy(dn_buf, display_name.c_str(), sizeof(dn_buf) - 1);
@@ -1299,7 +1299,7 @@ bool TigoMonitorComponent::set_string_panel_rating(const std::string &canonical,
   char pref_key[80];
   snprintf(pref_key, sizeof(pref_key), "str_rt:%s", canonical.c_str());
   uint32_t hash = esphome::fnv1_hash(pref_key);
-  auto pref = global_preferences->make_preference<uint16_t>(hash);
+  auto pref = this->cached_pref_<uint16_t>(hash);
   pref.save(&rating_w);
   ESP_LOGI(TAG, "Set panel rating for string '%s' = %u W (saved to NVS)",
            canonical.c_str(), (unsigned) rating_w);
@@ -1318,7 +1318,7 @@ bool TigoMonitorComponent::set_string_display_label(const std::string &canonical
   char pref_key[80];
   snprintf(pref_key, sizeof(pref_key), "str_dn:%s", canonical.c_str());
   uint32_t hash = esphome::fnv1_hash(pref_key);
-  auto pref = global_preferences->make_preference<char[64]>(hash);
+  auto pref = this->cached_pref_<char[64]>(hash);
   char dn_buf[64] = {};
   strncpy(dn_buf, display_label.c_str(), sizeof(dn_buf) - 1);
   pref.save(&dn_buf);
@@ -1810,7 +1810,7 @@ void TigoMonitorComponent::publish_sensor_data() {
     // Try to load saved peak power for this node
     std::string pref_key = "peak_" + node.addr;
     uint32_t hash = esphome::fnv1_hash(pref_key);
-    auto load = global_preferences->make_preference<float>(hash);
+    auto load = this->cached_pref_<float>(hash);
     float saved_peak = 0.0f;
     load.load(&saved_peak);
     
@@ -2261,7 +2261,7 @@ void TigoMonitorComponent::load_node_table() {
     uint32_t hash = esphome::fnv1_hash(pref_key);
     
     // Use char array for ESPHome preferences
-    auto restore = global_preferences->make_preference<char[256]>(hash);
+    auto restore = this->cached_pref_<char[256]>(hash);
     char node_data[256] = {0};
     
     if (restore.load(&node_data) && strlen(node_data) > 0) {
@@ -2365,7 +2365,7 @@ void TigoMonitorComponent::save_node_table() {
   for (int i = 0; i < slots_needed && i < number_of_devices_; i++) {
     snprintf(pref_key, sizeof(pref_key), "node_%d", i);
     uint32_t hash = esphome::fnv1_hash(pref_key);
-    auto save = global_preferences->make_preference<char[256]>(hash);
+    auto save = this->cached_pref_<char[256]>(hash);
     save.save(&empty_data);
   }
   
@@ -2393,7 +2393,7 @@ void TigoMonitorComponent::save_node_table() {
              node.cca_channel.c_str(),
              node.cca_validated ? 1 : 0);
     
-    auto save = global_preferences->make_preference<char[256]>(hash);
+    auto save = this->cached_pref_<char[256]>(hash);
     save.save(&node_data);
     saved_count++;
     i++;
@@ -2417,7 +2417,7 @@ void TigoMonitorComponent::save_peak_power_data() {
       // Build key in stack buffer - no heap allocations
       snprintf(pref_key, sizeof(pref_key), "peak_%s", device.addr.c_str());
       uint32_t hash = esphome::fnv1_hash(pref_key);
-      auto save = global_preferences->make_preference<float>(hash);
+      auto save = this->cached_pref_<float>(hash);
       save.save(&device.peak_power);
       saved_count++;
     }
@@ -2435,7 +2435,7 @@ void TigoMonitorComponent::load_peak_power_data() {
     // Build key in stack buffer - no heap allocations
     snprintf(pref_key, sizeof(pref_key), "peak_%s", device.addr.c_str());
     uint32_t hash = esphome::fnv1_hash(pref_key);
-    auto load = global_preferences->make_preference<float>(hash);
+    auto load = this->cached_pref_<float>(hash);
     
     float saved_peak = 0.0f;
     if (load.load(&saved_peak) && saved_peak > 0.0f) {
@@ -2464,7 +2464,7 @@ void TigoMonitorComponent::reset_peak_power() {
     // Build key in stack buffer - no heap allocations
     snprintf(pref_key, sizeof(pref_key), "peak_%s", device.addr.c_str());
     uint32_t hash = esphome::fnv1_hash(pref_key);
-    auto save = global_preferences->make_preference<float>(hash);
+    auto save = this->cached_pref_<float>(hash);
     save.save(&zero);
     reset_count++;
   }
@@ -2629,7 +2629,7 @@ void TigoMonitorComponent::reset_node_table() {
   for (int i = 0; i < number_of_devices_; i++) {
     std::string pref_key = "node_" + std::to_string(i);
     uint32_t hash = esphome::fnv1_hash(pref_key);
-    auto save = global_preferences->make_preference<char[256]>(hash);
+    auto save = this->cached_pref_<char[256]>(hash);
     char empty_data[256] = {0};
     save.save(&empty_data);
   }
@@ -2812,13 +2812,13 @@ void TigoMonitorComponent::assign_sensor_index_to_node(const std::string &addr) 
 }
 
 void TigoMonitorComponent::load_energy_data() {
-  auto restore = global_preferences->make_preference<float>(ENERGY_DATA_HASH);
+  auto restore = this->cached_pref_<float>(ENERGY_DATA_HASH);
   if (restore.load(&total_energy_in_kwh_)) {
     ESP_LOGI(TAG, "Restored total input energy: %.3f kWh", total_energy_in_kwh_);
     
     // Try to restore energy_at_day_start_ and current_day_key_
     uint32_t baseline_hash = esphome::fnv1_hash("energy_day_baseline");
-    auto restore_baseline = global_preferences->make_preference<float>(baseline_hash);
+    auto restore_baseline = this->cached_pref_<float>(baseline_hash);
     if (restore_baseline.load(&energy_at_day_start_)) {
       ESP_LOGI(TAG, "Restored day start baseline: %.3f kWh", energy_at_day_start_);
     } else {
@@ -2827,7 +2827,7 @@ void TigoMonitorComponent::load_energy_data() {
       ESP_LOGI(TAG, "No baseline found, using current total as baseline: %.3f kWh", energy_at_day_start_);
     }
 
-    auto restore_out = global_preferences->make_preference<float>(ENERGY_DATA_OUT_HASH);
+    auto restore_out = this->cached_pref_<float>(ENERGY_DATA_OUT_HASH);
     if (restore_out.load(&total_energy_out_kwh_)) {
       ESP_LOGI(TAG, "Restored total output energy: %.3f kWh", total_energy_out_kwh_);
     } else {
@@ -2836,7 +2836,7 @@ void TigoMonitorComponent::load_energy_data() {
     }
     
     uint32_t day_key_hash = esphome::fnv1_hash("current_day_key");
-    auto restore_day_key = global_preferences->make_preference<uint32_t>(day_key_hash);
+    auto restore_day_key = this->cached_pref_<uint32_t>(day_key_hash);
     if (restore_day_key.load(&current_day_key_)) {
       ESP_LOGI(TAG, "Restored current day key: %u", current_day_key_);
     } else {
@@ -2853,14 +2853,14 @@ void TigoMonitorComponent::load_energy_data() {
 }
 
 void TigoMonitorComponent::save_energy_data() {
-  auto save = global_preferences->make_preference<float>(ENERGY_DATA_HASH);
+  auto save = this->cached_pref_<float>(ENERGY_DATA_HASH);
   if (save.save(&total_energy_in_kwh_)) {
     ESP_LOGD(TAG, "Saved input energy data: %.3f kWh", total_energy_in_kwh_);
   } else {
     ESP_LOGW(TAG, "Failed to save input energy data");
   }
 
-  auto save_out = global_preferences->make_preference<float>(ENERGY_DATA_OUT_HASH);
+  auto save_out = this->cached_pref_<float>(ENERGY_DATA_OUT_HASH);
   if (save_out.save(&total_energy_out_kwh_)) {
     ESP_LOGD(TAG, "Saved output energy data: %.3f kWh", total_energy_out_kwh_);
   } else {
@@ -2869,7 +2869,7 @@ void TigoMonitorComponent::save_energy_data() {
   
   // Also save energy_at_day_start_ and current_day_key_ for accurate daily tracking after reboots
   uint32_t baseline_hash = esphome::fnv1_hash("energy_day_baseline");
-  auto save_baseline = global_preferences->make_preference<float>(baseline_hash);
+  auto save_baseline = this->cached_pref_<float>(baseline_hash);
   if (save_baseline.save(&energy_at_day_start_)) {
     ESP_LOGD(TAG, "Saved day start baseline: %.3f kWh", energy_at_day_start_);
   } else {
@@ -2877,7 +2877,7 @@ void TigoMonitorComponent::save_energy_data() {
   }
   
   uint32_t day_key_hash = esphome::fnv1_hash("current_day_key");
-  auto save_day_key = global_preferences->make_preference<uint32_t>(day_key_hash);
+  auto save_day_key = this->cached_pref_<uint32_t>(day_key_hash);
   if (save_day_key.save(&current_day_key_)) {
     ESP_LOGD(TAG, "Saved current day key: %u", current_day_key_);
   } else {
@@ -2976,7 +2976,7 @@ void TigoMonitorComponent::save_daily_energy_history() {
   }
   
   uint32_t hash = esphome::fnv1_hash("daily_energy_history");
-  auto save = global_preferences->make_preference<uint8_t[MAX_BUFFER_SIZE]>(hash);
+  auto save = this->cached_pref_<uint8_t[MAX_BUFFER_SIZE]>(hash);
   
   if (save.save(&buffer)) {
     ESP_LOGD(TAG, "Saved %zu daily energy entries to flash (hash=0x%08X)", count, hash);
@@ -2990,7 +2990,7 @@ void TigoMonitorComponent::load_daily_energy_history() {
   uint8_t buffer[MAX_BUFFER_SIZE] = {0};
   
   uint32_t hash = esphome::fnv1_hash("daily_energy_history");
-  auto load = global_preferences->make_preference<uint8_t[MAX_BUFFER_SIZE]>(hash);
+  auto load = this->cached_pref_<uint8_t[MAX_BUFFER_SIZE]>(hash);
   
   if (!load.load(&buffer)) {
     ESP_LOGD(TAG, "No saved daily energy history found");

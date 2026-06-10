@@ -2,6 +2,7 @@
 
 #include "esphome/core/component.h"
 #include "esphome/core/defines.h"
+#include "esphome/core/preferences.h"
 #include "esphome/components/uart/uart.h"
 #include "esphome/components/sensor/sensor.h"
 #include "esphome/components/text_sensor/text_sensor.h"
@@ -574,6 +575,27 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
     explicit StateLock(StateLockDummy &) {}
   };
 #endif
+
+  // ESPHome's make_preference() heap-allocates a backend object that is never
+  // freed — it is designed to be called once per key at setup, not repeatedly
+  // at runtime. Periodic paths (the peak-power restore in publish_sensor_data,
+  // node-table and energy saves) called it every cycle, leaking ~28 B of
+  // internal RAM per call (#23: ~4 KB/h on installs with silent table nodes).
+  // Route every NVS access through this hash-keyed cache so each key allocates
+  // its backend exactly once. StateLock guards the map — both the main loop
+  // and httpd handlers (renames/ratings) reach it.
+#ifdef USE_ESP_IDF
+  psram_map<uint32_t, ESPPreferenceObject> pref_cache_;
+#else
+  std::map<uint32_t, ESPPreferenceObject> pref_cache_;
+#endif
+  template<typename T> ESPPreferenceObject &cached_pref_(uint32_t hash) {
+    StateLock lock(state_mutex_);
+    auto it = pref_cache_.find(hash);
+    if (it == pref_cache_.end())
+      it = pref_cache_.emplace(hash, global_preferences->make_preference<T>(hash)).first;
+    return it->second;
+  }
 
 #ifdef USE_ESP_IDF
   // Use PSRAM-backed containers for large data structures
