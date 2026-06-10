@@ -277,9 +277,15 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   void add_power_sum_sensor(sensor::Sensor *sensor) {
     this->add_power_in_sum_sensor(sensor);
   }
-  void add_power_out_sum_sensor(sensor::Sensor *sensor) { 
-    this->power_out_sum_sensor_ = sensor; 
+  void add_power_out_sum_sensor(sensor::Sensor *sensor) {
+    this->power_out_sum_sensor_ = sensor;
     ESP_LOGCONFIG("tigo_monitor", "Registered power out sum sensor");
+  }
+  // Per-string aggregate power, keyed by the canonical CCA string label.
+  // Published from update_string_data() each cycle (zeros in night mode).
+  void add_string_power_sensor(const std::string &string_label, sensor::Sensor *sensor) {
+    this->string_power_sensors_[string_label] = sensor;
+    ESP_LOGCONFIG("tigo_monitor", "Registered string power sensor for '%s'", string_label.c_str());
   }
   void add_energy_in_sum_sensor(sensor::Sensor *sensor) {
     this->energy_in_sum_sensor_ = sensor;
@@ -632,6 +638,7 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   psram_map<std::string, sensor::Sensor*> efficiency_sensors_;
   psram_map<std::string, sensor::Sensor*> power_factor_sensors_;
   psram_map<std::string, sensor::Sensor*> load_factor_sensors_;
+  psram_map<std::string, sensor::Sensor*> string_power_sensors_;  // key = canonical string label
 #else
   // Fallback to standard containers on Arduino
   std::vector<DeviceData> devices_;
@@ -654,6 +661,7 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   std::map<std::string, sensor::Sensor*> efficiency_sensors_;
   std::map<std::string, sensor::Sensor*> power_factor_sensors_;
   std::map<std::string, sensor::Sensor*> load_factor_sensors_;
+  std::map<std::string, sensor::Sensor*> string_power_sensors_;  // key = canonical string label
 #endif
   sensor::Sensor* power_in_sum_sensor_ = nullptr;
   sensor::Sensor* power_out_sum_sensor_ = nullptr;

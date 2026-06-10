@@ -55,6 +55,7 @@ CONF_EFFICIENCY = "efficiency"
 CONF_POWER_FACTOR = "power_factor"
 CONF_LOAD_FACTOR = "load_factor"
 CONF_POWER_OUT = "power_out"
+CONF_STRING_LABEL = "string_label"  # Per-string aggregate sensor (keyed by CCA string label)
 # Memory monitoring (ESP32 only)
 CONF_INTERNAL_RAM_FREE = "internal_ram_free"
 CONF_INTERNAL_RAM_MIN = "internal_ram_min"
@@ -253,6 +254,19 @@ POWER_IN_SUM_CONFIG_SCHEMA = sensor.sensor_schema(
     cv.GenerateID(CONF_TIGO_MONITOR_ID): cv.use_id(TigoMonitorComponent),
 }).extend(cv.COMPONENT_SCHEMA)
 
+# Schema for a per-string power sensor — keyed by the CCA string label instead
+# of a device address. One entity per string instead of one per panel; on large
+# installs each dropped panel entity saves ~110-150 B of internal RAM.
+STRING_POWER_CONFIG_SCHEMA = sensor.sensor_schema(
+    unit_of_measurement=UNIT_WATT,
+    accuracy_decimals=1,
+    device_class=DEVICE_CLASS_POWER,
+    state_class=STATE_CLASS_MEASUREMENT,
+).extend({
+    cv.GenerateID(CONF_TIGO_MONITOR_ID): cv.use_id(TigoMonitorComponent),
+    cv.Required(CONF_STRING_LABEL): cv.string_strict,
+}).extend(cv.COMPONENT_SCHEMA)
+
 # Schema for power output sum sensor (no address required)
 POWER_OUT_SUM_CONFIG_SCHEMA = sensor.sensor_schema(
     unit_of_measurement=UNIT_WATT,
@@ -414,6 +428,16 @@ _AGGREGATE_SCHEMA_BY_CATEGORY = {
 # Main config schema that handles both types
 def _validate_config(config):
     """Validate configuration and determine sensor type."""
+    if CONF_STRING_LABEL in config:
+        # Per-string aggregate sensor — keyed by CCA string label.
+        if CONF_ADDRESS in config:
+            raise cv.Invalid(
+                "'string_label' and 'address' are mutually exclusive: use "
+                "'address' for a per-panel sensor or 'string_label' for a "
+                "per-string aggregate."
+            )
+        return STRING_POWER_CONFIG_SCHEMA(config)
+
     if CONF_ADDRESS in config:
         # Device sensor — keyed by address.
         return DEVICE_CONFIG_SCHEMA(config)
@@ -439,7 +463,13 @@ CONFIG_SCHEMA = _validate_config
 
 async def to_code(config):
     hub = await cg.get_variable(config[CONF_TIGO_MONITOR_ID])
-    
+
+    # Per-string aggregate sensor — published from update_string_data()
+    if CONF_STRING_LABEL in config:
+        sens = await sensor.new_sensor(config)
+        cg.add(hub.add_string_power_sensor(config[CONF_STRING_LABEL], sens))
+        return
+
     # Check if this is an aggregate sensor (no address) or device sensor (has address)
     if CONF_ADDRESS not in config:
         # Aggregate sensor — route by the same name-keyword classifier used in

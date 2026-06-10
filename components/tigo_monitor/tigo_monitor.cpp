@@ -1247,6 +1247,14 @@ void TigoMonitorComponent::update_string_data() {
       string_data.min_efficiency = 0.0f;
       string_data.max_efficiency = 0.0f;
     }
+
+    // Publish the per-string power sensor, if one is configured for this
+    // label. total_power was freshly aggregated above (0 with no active
+    // devices), so HA stays in lockstep with the web UI.
+    auto sens_it = string_power_sensors_.find(pair.first);
+    if (sens_it != string_power_sensors_.end()) {
+      sens_it->second->publish_state(string_data.total_power);
+    }
   }
 }
 
@@ -1484,10 +1492,16 @@ void TigoMonitorComponent::publish_sensor_data() {
       if (power_in_sum_sensor_ != nullptr) {
         power_in_sum_sensor_->publish_state(0.0f);
       }
-      
+
       // Publish zero power out sum
       if (power_out_sum_sensor_ != nullptr) {
         power_out_sum_sensor_->publish_state(0.0f);
+      }
+
+      // Zero the per-string power sensors (update_string_data doesn't run in
+      // night mode, so they'd otherwise hold the last daylight value)
+      for (auto &pair : string_power_sensors_) {
+        pair.second->publish_state(0.0f);
       }
       
       // Update cached values for display

@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Per-string power sensors** (#21, #23). `string_label: "A"` on a `tigo_monitor` sensor entry creates one HA entity carrying that string's aggregated power (same value the web UI shows), published every update cycle and zeroed in night mode. One entity per string instead of seven per panel — on a 64-panel install that's ~50-70 KB of internal RAM back at boot. Feed it into an HA Riemann-sum + Utility Meter for per-string daily energy.
 - `allow_partition_access: true` in the example OTA configs — lets ESPHome 2026.5.0+ apply partition-table changes over OTA, so repartitions *after* 2.0 no longer need a serial flash.
 
 ### Changed

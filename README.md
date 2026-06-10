@@ -133,6 +133,13 @@ sensor:
     temperature: {}
     efficiency: {}
 
+  # Per-string aggregate — one entity per string instead of one per panel.
+  # The label is the CCA string label (shown in the Node Table / Topology).
+  - platform: tigo_monitor
+    tigo_monitor_id: tigo_hub
+    string_label: "A"
+    name: "String A Power"
+
 # Required even if empty — ensures ESPHome generates component headers
 text_sensor:
 
@@ -235,7 +242,9 @@ Two more things dominate internal RAM as installs grow:
   ≈ 450 entities ≈ **50–70 KB of internal RAM** — the largest static consumer
   on a big install. Declare only the per-panel sensors you actually use in
   Home Assistant; the web dashboard shows every metric for every panel
-  regardless, at no per-entity cost.
+  regardless, at no per-entity cost. For HA aggregates, prefer the
+  `string_label:` per-string power sensor (one entity per string) over
+  declaring — or lambda-summing — per-panel sensors.
 - **UART RX buffer.** `CONFIG_UART_RX_BUFFER_SIZE` is allocated from internal
   (DMA-capable) RAM, never PSRAM. 2–8 KB is plenty on an ESP32-S3 at 38400
   baud; a 32 KB buffer silently spends a sixth of the usable internal heap.
