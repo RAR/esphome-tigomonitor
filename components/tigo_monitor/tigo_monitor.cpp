@@ -375,7 +375,10 @@ void TigoMonitorComponent::loop() {
     last_internal_free = internal_free;
     last_internal_min = internal_min;
     
-    ESP_LOGI(TAG, "Heap: Internal %zu KB free (%zu KB min), PSRAM %zu KB free, Buffer: %zu bytes",
+    // Routine per-minute heap/frame telemetry is debug-level: the same numbers
+    // are on the HA memory sensors, and the actionable signals (memory-drop and
+    // low-RAM below) stay at WARN. Bump the logger to DEBUG to watch a leak (#23).
+    ESP_LOGD(TAG, "Heap: Internal %zu KB free (%zu KB min), PSRAM %zu KB free, Buffer: %zu bytes",
              internal_free / 1024, internal_min / 1024, psram_free / 1024, buffer_size(incoming_data_));
     ESP_LOGD(TAG, "Stack: %u bytes free (warning if < 512 bytes)", stack_free_bytes);
     
@@ -383,7 +386,7 @@ void TigoMonitorComponent::loop() {
     uint32_t total_attempts = total_frames_processed_ + missed_frame_count_;
     if (total_attempts > 0) {
       float miss_rate = (missed_frame_count_ * 100.0f) / total_attempts;
-      ESP_LOGI(TAG, "Frame stats: %u processed, %u missed (%.2f%% miss rate), %u invalid checksums",
+      ESP_LOGD(TAG, "Frame stats: %u processed, %u missed (%.2f%% miss rate), %u invalid checksums",
                total_frames_processed_, missed_frame_count_, miss_rate, invalid_checksum_count_);
     }
     
@@ -1760,6 +1763,20 @@ void TigoMonitorComponent::publish_sensor_data() {
         // Reporting fresh data but producing nothing — shaded, failed, or off
         zero_production_count++;
       }
+    }
+    // A panel assigned to a sensor slot but with no runtime row this session
+    // (dead/removed optimizer, or one not yet seen since boot) is shown stale in
+    // the dashboard via build_devices_json's node-only branch, but never appears
+    // in devices_. Count those too so the HA sensor matches the UI's stale tiles
+    // (#24) — otherwise dead panels show stale on the dashboard yet the count
+    // reads 0. Daytime-only: night mode already publishes 0 above and returns.
+    for (const auto &node : node_table_) {
+      if (node.sensor_index < 0) continue;
+      bool has_runtime = false;
+      for (const auto &device : devices_) {
+        if (device.addr == node.addr) { has_runtime = true; break; }
+      }
+      if (!has_runtime) stale_count++;
     }
     if (stale_count_sensor_ != nullptr)
       stale_count_sensor_->publish_state(stale_count);
