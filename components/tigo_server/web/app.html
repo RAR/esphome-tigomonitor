@@ -239,6 +239,14 @@
     background: var(--bg-3); border: 1px dashed var(--text-faint);
     color: var(--text-faint);
   }
+  /* Stale = gone silent on the bus (≠ producing zero): hatched gray so a
+     dead/offline optimizer reads differently from a shaded or failing one */
+  .panel-heat-tile.stale {
+    background: repeating-linear-gradient(45deg, var(--bg-3), var(--bg-3) 6px, var(--bg-4) 6px, var(--bg-4) 12px);
+    color: var(--text-dim);
+    border: 1px dashed var(--text-faint);
+  }
+  .panel-heat-tile.stale .panel-heat-rating { display: none; }
   /* Bottom stripe — rating-vs-nameplate signal, independent of peer color.
      Uses the same good/warn/bad palette so the loud cases (e.g. green tile +
      red stripe = keeping up with shaded neighbors, but everyone is well
@@ -472,6 +480,7 @@
   .panel-tile.warn { border-left: 3px solid var(--warn); }
   .panel-tile.bad  { border-left: 3px solid var(--bad); }
   .panel-tile.dead { opacity: 0.45; border-style: dashed; }
+  .panel-tile.stale { opacity: 0.55; border-style: dashed; border-left: 3px solid var(--text-faint); }
   .panel-tile-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 6px; }
   .panel-tile-id { font-weight: 600; font-size: 12px; }
   .panel-tile-bc { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 10px; color: var(--text-faint); }
@@ -535,6 +544,14 @@
   }
   .alert-badge.warn { background: rgba(251,191,36,0.15); color: var(--warn); }
   .alert-badge.bad  { background: rgba(248,113,113,0.15); color: var(--bad); }
+  .alert-badge.stale { background: rgba(138,150,173,0.15); color: var(--text-dim); }
+  /* MPPT grouping inside an inverter card (shown when >1 string shares an MPPT) */
+  .topo-mppt { border-left: 2px solid var(--bg-4); margin: 10px 0 10px 4px; padding-left: 12px; }
+  .topo-mppt-head {
+    display: flex; align-items: center; gap: 10px; font-size: 12px;
+    color: var(--text-dim); font-weight: 600; margin-bottom: 6px;
+  }
+  .topo-mppt-head strong { color: var(--text); font-variant-numeric: tabular-nums; }
   .alert-msg { flex: 1; color: var(--text-dim); }
   .alert-msg strong { color: var(--text); }
 
@@ -1525,18 +1542,22 @@
           tiles = '<div class="panel-heat-grid">';
           for (const p of panels) {
             const w = p.power_in || 0;
-            const cls = panelClass(w, med);
-            const rCls = ratingClass(w, rating, s.total_power || 0, panels.length);
+            // stale (firmware flag: silent past stale_timeout) wins over the
+            // power-based health classes — a panel that left the bus is a
+            // different problem than one producing badly
+            const cls = p.stale ? 'stale' : panelClass(w, med);
+            const rCls = cls === 'stale' ? null : ratingClass(w, rating, s.total_power || 0, panels.length);
             const id = p.name || p.addr;
-            const wText = cls === 'dead' ? '—' : Math.round(w) + 'W';
-            const ratedPct = (rating > 0 && cls !== 'dead')
+            const wText = cls === 'stale' ? 'stale' : (cls === 'dead' ? '—' : Math.round(w) + 'W');
+            const ratedPct = (rating > 0 && cls !== 'dead' && cls !== 'stale')
               ? Math.round((w / rating) * 100)
               : null;
             const pctText = ratedPct != null
               ? ` <span class="pht-rated">${ratedPct}% rated</span>`
               : '';
             const tipParts = [`${id} · ${w.toFixed(0)} W`];
-            if (med > 0) tipParts.push(`${Math.round((w / med) * 100)}% of string median (${Math.round(med)}W)`);
+            if (cls === 'stale') tipParts.push(`stale — no data for ${fmtAge(p.data_age_ms)}`);
+            if (med > 0 && cls !== 'stale') tipParts.push(`${Math.round((w / med) * 100)}% of string median (${Math.round(med)}W)`);
             if (ratedPct != null) tipParts.push(`${ratedPct}% of nameplate (${rating}W)`);
             const stripe = rCls ? `<div class="panel-heat-rating ${rCls}"></div>` : '';
             const bc6 = (p.barcode || '').slice(-6);
@@ -1599,20 +1620,58 @@
       (byString[k] = byString[k] || []).push(d);
     }
 
+    // Is the system producing at all? Gates the "string down" alert so a
+    // whole-site outage (night, snow) doesn't flag every string at once.
+    let systemActive = false;
+    for (const panels of Object.values(byString)) {
+      if (median(panels.map(p => p.power_in || 0).filter(p => p > 5)) >= 5) {
+        systemActive = true;
+        break;
+      }
+    }
+
+    // Rows carry explicit badge class/text so the three alert kinds
+    // (low/shaded vs stale vs string-down) render distinctly.
     const rows = [];
+
+    // Stale panels — silent on the bus past stale_timeout (firmware flag).
+    // Collapse into one summary row when there are many, so a flaky TAP
+    // doesn't bury the production alerts.
+    const stalePanels = devices.filter(d => d.stale);
+    if (stalePanels.length > 4) {
+      rows.push({ rank: 1, badgeCls: 'stale', badgeText: 'stale',
+        msg: `<strong>${stalePanels.length} panels</strong> have stopped reporting — check the bus / TAP if the sun is up` });
+    } else {
+      for (const p of stalePanels) {
+        rows.push({ rank: 1, badgeCls: 'stale', badgeText: 'stale',
+          msg: `<strong>${p.name || p.addr}</strong>${p.string_label ? ` (${p.string_label})` : ''} — no data for ${fmtAge(p.data_age_ms)}` });
+      }
+    }
+
     for (const [label, panels] of Object.entries(byString)) {
       const meta = stringMap[label];
       if (!meta) continue;
       const powers = panels.map(p => p.power_in || 0);
       const med = median(powers.filter(p => p > 5));
-      if (med < 5) continue;  // string offline or pre-dawn — no useful comparison
+      if (med < 5) {
+        // Whole string flat. Only meaningful when the rest of the site is
+        // producing — that's a tripped string, not nightfall.
+        if (systemActive && panels.length > 0) {
+          rows.push({ rank: 0, badgeCls: 'bad', badgeText: 'down',
+            msg: `<strong>${meta.stringDisplay}</strong> (${meta.mppt}) — no production while the rest of the system is producing` });
+        }
+        continue;
+      }
       for (const p of panels) {
+        if (p.stale) continue;  // already reported above
         const w = p.power_in || 0;
         const ratio = w / med;
         if (ratio < 0.3) {
-          rows.push({ severity: 'bad', panel: p, label, meta, watts: w, med });
+          rows.push({ rank: 0, badgeCls: 'bad', badgeText: 'low',
+            msg: `<strong>${p.name || p.addr}</strong> (${meta.stringDisplay}) · ${w.toFixed(0)} W — ${(100 * w / med).toFixed(0)}% of string median (${med.toFixed(0)} W)` });
         } else if (ratio < 0.6) {
-          rows.push({ severity: 'warn', panel: p, label, meta, watts: w, med });
+          rows.push({ rank: 2, badgeCls: 'warn', badgeText: 'shaded',
+            msg: `<strong>${p.name || p.addr}</strong> (${meta.stringDisplay}) · ${w.toFixed(0)} W — ${(100 * w / med).toFixed(0)}% of string median (${med.toFixed(0)} W)` });
         }
       }
     }
@@ -1623,19 +1682,15 @@
       return;
     }
 
-    rows.sort((a, b) => (a.severity === 'bad' ? -1 : 1) - (b.severity === 'bad' ? -1 : 1));
+    rows.sort((a, b) => a.rank - b.rank);
     sub.textContent = `${rows.length} flagged`;
 
     for (const row of rows.slice(0, 12)) {  // cap for readability
       const div = document.createElement('div');
       div.className = 'alert-row';
       div.innerHTML = `
-        <span class="alert-badge ${row.severity}">${row.severity === 'bad' ? 'low' : 'shaded'}</span>
-        <span class="alert-msg">
-          <strong>${row.panel.name || row.panel.addr}</strong>
-          (${row.meta.stringDisplay}) · ${row.watts.toFixed(0)} W
-          — ${(100 * row.watts / row.med).toFixed(0)}% of string median (${row.med.toFixed(0)} W)
-        </span>
+        <span class="alert-badge ${row.badgeCls}">${row.badgeText}</span>
+        <span class="alert-msg">${row.msg}</span>
       `;
       target.appendChild(div);
     }
@@ -3041,7 +3096,10 @@
       // in its mppts list.
       const stringPanelsByMppt = {};  // { mppt: { stringLabel: [panel,...] } }
       for (const n of (nodeData.nodes || [])) {
-        if (!n.cca_validated) continue;
+        // A string label alone is sufficient — hand-built node tables are
+        // authoritative without cca_validated (same rule as the firmware
+        // grouping, #18).
+        if (!n.cca_string) continue;
         const mppt = n.cca_inverter || '';
         const sl = n.cca_string || '';
         if (!stringPanelsByMppt[mppt]) stringPanelsByMppt[mppt] = {};
@@ -3056,6 +3114,7 @@
           current: dev.current ?? 0,
           temperature: dev.temperature ?? 0,
           dataAgeMs: dev.data_age_ms ?? 999999999,
+          stale: dev.stale ?? false,
         });
       }
 
@@ -3067,7 +3126,17 @@
       for (const inv of inverters) {
         // Build the panels-per-string map for this inverter by walking each
         // of its strings and pulling from the per-MPPT bucket above.
-        const stringSections = [];
+        // Strings are grouped under their MPPT with a subtotal row whenever
+        // the extra level carries information — more than one MPPT on the
+        // inverter, or more than one string sharing an MPPT (#21).
+        const mpptStringCounts = {};
+        for (const s of (inv.strings || [])) {
+          mpptStringCounts[s.mppt || ''] = (mpptStringCounts[s.mppt || ''] || 0) + 1;
+        }
+        const mpptGrouped = Object.keys(mpptStringCounts).length > 1 ||
+                            Object.values(mpptStringCounts).some(c => c > 1);
+        const mpptGroups = new Map();  // mppt -> {sections, power, active, total, strings}
+        let sectionCount = 0;
         let invPanelCount = 0;
         for (const s of (inv.strings || [])) {
           const panels = (stringPanelsByMppt[s.mppt] || {})[s.label] || [];
@@ -3083,13 +3152,16 @@
 
           let panelHtml = '';
           for (const p of visible) {
-            const cls = topoPanelClass(p.power, median, p.dataAgeMs, opts);
-            const pctText = (rating > 0 && cls !== 'dead')
+            // The firmware stale flag (silent past stale_timeout) outranks the
+            // power-based classes — distinguishes off-the-bus from producing-zero
+            const cls = p.stale ? 'stale' : topoPanelClass(p.power, median, p.dataAgeMs, opts);
+            const pctText = (rating > 0 && cls !== 'dead' && cls !== 'stale')
               ? ` <span style="color:var(--text-dim);font-size:11px">(${Math.round((p.power / rating) * 100)}%)</span>`
               : '';
+            const staleBadge = p.stale ? `<span class="badge stale">stale</span>` : '';
             panelHtml += `<div class="panel-tile ${cls}" title="${topoEscape(p.barcode)}">
               <div class="panel-tile-head">
-                <div class="panel-tile-id">${topoEscape(p.name)}</div>
+                <div class="panel-tile-id">${topoEscape(p.name)} ${staleBadge}</div>
                 <div class="panel-tile-bc">…${topoEscape(topoLast6(p.barcode))}</div>
               </div>
               <div class="panel-tile-power">${Math.round(p.power)}<span class="unit">W</span>${pctText}</div>
@@ -3115,11 +3187,13 @@
             ? `<span class="topo-string-pill">${Math.round((s.total_power || 0) / nameplate * 100)}% of ${(nameplate / 1000).toFixed(2)} kW</span>`
             : '';
 
-          stringSections.push(`<div class="topo-string">
+          // When grouped under an MPPT header, the per-string "· MPPT n"
+          // suffix is redundant — the header already says it.
+          const mpptInline = mpptGrouped ? '' : ` · ${topoEscape(s.mppt)}`;
+          const section = `<div class="topo-string">
             <div class="topo-string-head">
               <strong class="topo-string-name-text">${topoEscape(stringEffective)}</strong>${stringCanonicalSuffix}
-              <button class="topo-inv-name-edit-btn" data-rename-string="${topoEscape(s.label)}" title="Rename string">✎</button>
-              · ${topoEscape(s.mppt)}
+              <button class="topo-inv-name-edit-btn" data-rename-string="${topoEscape(s.label)}" title="Rename string">✎</button>${mpptInline}
               <span class="topo-string-pill">${visible.length} panels</span>
               <span class="topo-string-pill">${topoFmtKW(s.total_power || 0)}</span>
               <span class="topo-string-pill">${(s.active_devices ?? 0)}/${(s.total_devices ?? 0)} active</span>
@@ -3127,13 +3201,43 @@
               ${namePlatePill}
             </div>
             <div class="panel-grid">${panelHtml || '<div style="color:var(--text-faint);padding:12px;font-size:12px">No panels match the filter</div>'}</div>
-          </div>`);
+          </div>`;
+
+          const mpptKey = s.mppt || '';
+          if (!mpptGroups.has(mpptKey)) {
+            mpptGroups.set(mpptKey, { sections: [], power: 0, active: 0, total: 0, strings: 0 });
+          }
+          const g = mpptGroups.get(mpptKey);
+          g.sections.push(section);
+          g.power += s.total_power || 0;
+          g.active += s.active_devices ?? 0;
+          g.total += s.total_devices ?? 0;
+          g.strings += 1;
+          sectionCount += 1;
 
           invPanelCount += panels.length;
           totalStrings += 1;
         }
 
-        if (topoState.filter && stringSections.length === 0) continue;
+        if (topoState.filter && sectionCount === 0) continue;
+
+        // Compose the inverter body: MPPT subtotal wrappers when grouping
+        // carries information, otherwise the flat string list as before.
+        let bodyHtml = '';
+        for (const [mpptKey, g] of mpptGroups) {
+          if (mpptGrouped) {
+            bodyHtml += `<div class="topo-mppt">
+              <div class="topo-mppt-head">${topoEscape(mpptKey || 'Unassigned MPPT')}
+                <strong>${topoFmtKW(g.power)}</strong>
+                <span class="topo-string-pill">${g.strings} string${g.strings === 1 ? '' : 's'}</span>
+                <span class="topo-string-pill">${g.active}/${g.total} active</span>
+              </div>
+              ${g.sections.join('')}
+            </div>`;
+          } else {
+            bodyHtml += g.sections.join('');
+          }
+        }
 
         const collapsed = topoState.collapsed.has(inv.name) ? ' collapsed' : '';
         const effectiveName = inv.display_name || inv.name;
@@ -3155,7 +3259,7 @@
               ${(inv.mppts || []).map(m => topoEscape(m)).join(', ') || '—'}
             </div>
           </div>
-          <div class="topo-inv-body">${stringSections.join('')}</div>
+          <div class="topo-inv-body">${bodyHtml}</div>
         </div>`;
 
         totalPanels += invPanelCount;
