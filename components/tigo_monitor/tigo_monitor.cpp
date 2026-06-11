@@ -950,6 +950,7 @@ void TigoMonitorComponent::process_27_frame(const frame_string &hex_frame, size_
   
   size_t pos = offset + 8;  // Start after starting_index (4) + num_entries (4)
   bool table_changed = false;
+  bool dedup_merged = false;
   
   // Pre-allocate buffers to avoid repeated heap allocations in loop
   char long_addr_buf[17];  // 16 chars + null terminator
@@ -995,11 +996,42 @@ void TigoMonitorComponent::process_27_frame(const frame_string &hex_frame, size_
                  addr.c_str(), long_addr.c_str(), node_table_.size());
         table_changed = true;
       } else {
-        ESP_LOGW(TAG, "Cannot create node entry for %s - table full (%zu >= %d)", 
+        ESP_LOGW(TAG, "Cannot create node entry for %s - table full (%zu >= %d)",
                  addr.c_str(), node_table_.size(), number_of_devices_);
       }
     }
-    
+
+    // Dedup by long address (#25). The gateway's node table just vouched for
+    // (addr <-> long_addr); any OTHER entry carrying the same long address is
+    // a stale alias of the same physical device — ephemeral 802.15.4 short
+    // addresses leak into the data stream during commissioning and can mint a
+    // phantom node entry (e.g. 8002 alongside 0002). Merge the alias's CCA
+    // metadata / sensor index into the authoritative entry, then drop it and
+    // any runtime device row it spawned.
+    for (size_t di = 0; di < node_table_.size(); ++di) {
+      if (node_table_[di].addr == addr || node_table_[di].long_address != long_addr) continue;
+      NodeTableData *keep = find_node_by_addr(addr);
+      if (keep == nullptr) break;  // table was full and addr never got an entry
+      const NodeTableData &dup = node_table_[di];
+      if (keep->sensor_index < 0 && dup.sensor_index >= 0) keep->sensor_index = dup.sensor_index;
+      if (keep->cca_label.empty()) keep->cca_label = dup.cca_label;
+      if (keep->cca_string_label.empty()) keep->cca_string_label = dup.cca_string_label;
+      if (keep->cca_inverter_label.empty()) keep->cca_inverter_label = dup.cca_inverter_label;
+      if (keep->cca_channel.empty()) keep->cca_channel = dup.cca_channel;
+      if (keep->cca_object_id.empty()) keep->cca_object_id = dup.cca_object_id;
+      keep->cca_validated = keep->cca_validated || dup.cca_validated;
+      keep->is_persistent = keep->is_persistent || dup.is_persistent;
+      ESP_LOGW(TAG, "Removing node %s: same long address %s as %s (stale alias)",
+               dup.addr.c_str(), long_addr.c_str(), addr.c_str());
+      for (auto dev_it = devices_.begin(); dev_it != devices_.end(); ++dev_it) {
+        if (dev_it->addr == dup.addr) { devices_.erase(dev_it); break; }
+      }
+      node_table_.erase(node_table_.begin() + di);
+      --di;
+      table_changed = true;
+      dedup_merged = true;
+    }
+
     // Also update existing device if already discovered
     DeviceData* device = find_device_by_addr(addr);
     if (device != nullptr) {
@@ -1021,6 +1053,13 @@ void TigoMonitorComponent::process_27_frame(const frame_string &hex_frame, size_
     }
   }
   
+  // If a dedup merge moved CCA metadata between entries, the string groups
+  // may now be keyed off the wrong entry — rebuild them (safe under the held
+  // state lock, same pattern as the import path, #21).
+  if (dedup_merged) {
+    rebuild_string_groups();
+  }
+
   // Rate limit node table saves to prevent flash/heap exhaustion during CCA discovery floods
   // Only save if changed AND it's been >10 seconds since last save
   if (table_changed) {
@@ -2743,16 +2782,32 @@ bool TigoMonitorComponent::import_node_table(const std::vector<NodeTableData>& n
       continue;
     }
     
-    // Check for duplicate addresses
+    // Check for duplicate addresses — and duplicate long addresses: two
+    // entries sharing a 16-char long address are the same physical device
+    // (a stale short-address alias, #25). Keep the first, fold the alias's
+    // metadata into it where missing.
     bool duplicate = false;
-    for (const auto& existing : node_table_) {
+    for (auto& existing : node_table_) {
       if (existing.addr == node.addr) {
         ESP_LOGW(TAG, "Skipping duplicate node with address: %s", node.addr.c_str());
         duplicate = true;
         break;
       }
+      if (!node.long_address.empty() && existing.long_address == node.long_address) {
+        if (existing.sensor_index < 0 && node.sensor_index >= 0) existing.sensor_index = node.sensor_index;
+        if (existing.cca_label.empty()) existing.cca_label = node.cca_label;
+        if (existing.cca_string_label.empty()) existing.cca_string_label = node.cca_string_label;
+        if (existing.cca_inverter_label.empty()) existing.cca_inverter_label = node.cca_inverter_label;
+        if (existing.cca_channel.empty()) existing.cca_channel = node.cca_channel;
+        if (existing.cca_object_id.empty()) existing.cca_object_id = node.cca_object_id;
+        existing.cca_validated = existing.cca_validated || node.cca_validated;
+        ESP_LOGW(TAG, "Skipping node %s: same long address %s as %s (merged metadata)",
+                 node.addr.c_str(), node.long_address.c_str(), existing.addr.c_str());
+        duplicate = true;
+        break;
+      }
     }
-    
+
     if (duplicate) continue;
     
     // Add node to table
