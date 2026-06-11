@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Per-device staleness zeroing** (#26). New `stale_timeout` option (default 10 min, `0` disables): a device that stops reporting has its production values (power, current, efficiency, duty cycle) zeroed once the timeout passes, instead of polluting HA sensors, string aggregates, the web UI, and TSDB history with its last reading forever — night mode only covered the whole-bus-silent case. Voltage, temperature, and the data-age display keep their last-seen values for diagnostics; a fresh frame clears the flag. `/api/devices` gains a `stale` boolean per device.
+- **Alert-count sensors for HA** (#24). Two new aggregate sensors — name them with "stale" (e.g. `Stale Panel Count`) or "zero production"/"no production"/"failed" (e.g. `Zero Production Count`) — report how many panels are stale vs. reporting-but-producing-nothing, for HA notifications. Both publish 0 in night mode so the dark hours don't generate alert noise.
 - **Per-string power sensors** (#21, #23). `string_label: "A"` on a `tigo_monitor` sensor entry creates one HA entity carrying that string's aggregated power (same value the web UI shows), published every update cycle and zeroed in night mode. One entity per string instead of seven per panel — on a 64-panel install that's ~50-70 KB of internal RAM back at boot. Feed it into an HA Riemann-sum + Utility Meter for per-string daily energy.
 - `allow_partition_access: true` in the example OTA configs — lets ESPHome 2026.5.0+ apply partition-table changes over OTA, so repartitions *after* 2.0 no longer need a serial flash.
 

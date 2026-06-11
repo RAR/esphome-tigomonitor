@@ -419,7 +419,33 @@ void TigoMonitorComponent::update() {
   // This is called every polling interval
   StateLock lock(state_mutex_);
   check_midnight_reset();
+  mark_stale_devices_();
   publish_sensor_data();
+}
+
+void TigoMonitorComponent::mark_stale_devices_() {
+  // Per-device staleness (#26): a device that stops reporting used to keep its
+  // last values forever — polluting the HA sensors, string aggregates, web UI,
+  // and TSDB history (night mode only covers the whole-bus-silent case). Zero
+  // the production values once a device exceeds stale_timeout_; voltage, temp,
+  // and last_update stay as last-seen for diagnostics. A fresh frame clears
+  // the flag implicitly (update_device_data overwrites the whole struct).
+  if (stale_timeout_ == 0) return;  // feature disabled
+  unsigned long now = millis();
+  for (auto &device : devices_) {
+    if (device.last_update == 0 || device.is_stale) continue;
+    if (now - device.last_update <= stale_timeout_) continue;
+    device.is_stale = true;
+    device.power_in = 0.0f;
+    device.power_out = 0.0f;
+    device.current_in = 0.0f;
+    device.current_out = 0.0f;
+    device.efficiency = 0.0f;
+    device.load_factor = 0.0f;
+    device.duty_cycle = 0;
+    ESP_LOGI(TAG, "Device %s stale (no data for %lu min) - zeroing production values",
+             device.addr.c_str(), (now - device.last_update) / 60000UL);
+  }
 }
 
 void TigoMonitorComponent::dump_config() {
@@ -1503,6 +1529,12 @@ void TigoMonitorComponent::publish_sensor_data() {
       for (auto &pair : string_power_sensors_) {
         pair.second->publish_state(0.0f);
       }
+
+      // Zero the alert counts: at night every device legitimately stops
+      // reporting, so "stale" and "zero production" carry no signal and a
+      // truthful count would just be nightly alert noise (#24)
+      if (stale_count_sensor_ != nullptr) stale_count_sensor_->publish_state(0);
+      if (zero_production_count_sensor_ != nullptr) zero_production_count_sensor_->publish_state(0);
       
       // Update cached values for display
       cached_total_power_in_ = 0.0f;
@@ -1676,6 +1708,24 @@ void TigoMonitorComponent::publish_sensor_data() {
     int device_count = devices_.size();
     device_count_sensor_->publish_state(device_count);
     ESP_LOGD(TAG, "Published device count: %d", device_count);
+  }
+
+  // Publish stale / zero-production counts for HA alerting (#24)
+  if (stale_count_sensor_ != nullptr || zero_production_count_sensor_ != nullptr) {
+    int stale_count = 0;
+    int zero_production_count = 0;
+    for (const auto &device : devices_) {
+      if (device.is_stale) {
+        stale_count++;
+      } else if (device.last_update > 0 && device.power_in < 1.0f) {
+        // Reporting fresh data but producing nothing — shaded, failed, or off
+        zero_production_count++;
+      }
+    }
+    if (stale_count_sensor_ != nullptr)
+      stale_count_sensor_->publish_state(stale_count);
+    if (zero_production_count_sensor_ != nullptr)
+      zero_production_count_sensor_->publish_state(zero_production_count);
   }
   
   // Calculate and publish power sum sensor if configured

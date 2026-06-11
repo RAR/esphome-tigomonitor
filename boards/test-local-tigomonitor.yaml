@@ -51,6 +51,13 @@ sensor:
     tigo_monitor_id: tigo_hub
     string_label: "A"
     name: "String A Power"
+  # Exercises the alert-count codegen paths
+  - platform: tigo_monitor
+    tigo_monitor_id: tigo_hub
+    name: "Stale Panel Count"
+  - platform: tigo_monitor
+    tigo_monitor_id: tigo_hub
+    name: "Zero Production Count"
 
 text_sensor:
 

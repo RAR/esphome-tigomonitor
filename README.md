@@ -98,6 +98,7 @@ tigo_monitor:
   update_interval: 30s
   number_of_devices: 20
   cca_ip: "192.168.1.100"  # Optional: Your CCA IP
+  stale_timeout: 10  # Minutes without data before a device's production zeroes (0 = off)
 
 tigo_server:
   tigo_monitor_id: tigo_hub
@@ -139,6 +140,15 @@ sensor:
     tigo_monitor_id: tigo_hub
     string_label: "A"
     name: "String A Power"
+
+  # Alert counts for HA notifications: panels gone silent vs panels
+  # reporting but producing nothing (both publish 0 in night mode)
+  - platform: tigo_monitor
+    tigo_monitor_id: tigo_hub
+    name: "Stale Panel Count"
+  - platform: tigo_monitor
+    tigo_monitor_id: tigo_hub
+    name: "Zero Production Count"
 
 # Required even if empty — ensures ESPHome generates component headers
 text_sensor:

@@ -142,6 +142,10 @@ struct DeviceData {
   float peak_power = 0.0f;  // Historical peak power (watts)
   // True if this device is an optimizer (produces V_out != 0). False for monitor-only modules.
   bool is_optimizer = true;
+  // Set by mark_stale_devices_() when no frame arrives within stale_timeout;
+  // production values are zeroed at the same time. Cleared implicitly when a
+  // fresh frame overwrites the struct (#26).
+  bool is_stale = false;
 };
 
 struct NodeTableData {
@@ -298,9 +302,17 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   void add_energy_sum_sensor(sensor::Sensor *sensor) {
     this->add_energy_in_sum_sensor(sensor);
   }
-  void add_device_count_sensor(sensor::Sensor *sensor) { 
-    this->device_count_sensor_ = sensor; 
+  void add_device_count_sensor(sensor::Sensor *sensor) {
+    this->device_count_sensor_ = sensor;
     ESP_LOGCONFIG("tigo_monitor", "Registered device count sensor");
+  }
+  void add_stale_count_sensor(sensor::Sensor *sensor) {
+    this->stale_count_sensor_ = sensor;
+    ESP_LOGCONFIG("tigo_monitor", "Registered stale panel count sensor");
+  }
+  void add_zero_production_count_sensor(sensor::Sensor *sensor) {
+    this->zero_production_count_sensor_ = sensor;
+    ESP_LOGCONFIG("tigo_monitor", "Registered zero production count sensor");
   }
   void add_invalid_checksum_sensor(sensor::Sensor *sensor) {
     this->invalid_checksum_sensor_ = sensor;
@@ -466,6 +478,7 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   void check_midnight_reset();  // Check if midnight has passed and reset configured sensors
   void set_reset_at_midnight(bool reset) { this->reset_at_midnight_ = reset; }
   void set_night_mode_timeout(unsigned long timeout_ms) { this->night_mode_timeout_ = timeout_ms; }
+  void set_stale_timeout(unsigned long timeout_ms) { this->stale_timeout_ = timeout_ms; }
   
 #ifdef USE_TIME
   void set_time_id(time::RealTimeClock *time_id) { this->time_id_ = time_id; }
@@ -517,6 +530,7 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   // Device management
   void update_device_data(const DeviceData &data);
   void publish_sensor_data();
+  void mark_stale_devices_();
   DeviceData* find_device_by_addr(const std::string &addr);
   
   // String-level aggregation
@@ -668,6 +682,8 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   sensor::Sensor* energy_in_sum_sensor_ = nullptr;
   sensor::Sensor* energy_out_sum_sensor_ = nullptr;
   sensor::Sensor* device_count_sensor_ = nullptr;
+  sensor::Sensor* stale_count_sensor_ = nullptr;
+  sensor::Sensor* zero_production_count_sensor_ = nullptr;
   sensor::Sensor* invalid_checksum_sensor_ = nullptr;
   sensor::Sensor* missed_frame_sensor_ = nullptr;
   binary_sensor::BinarySensor* night_mode_sensor_ = nullptr;
@@ -712,6 +728,7 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   unsigned long last_data_received_ = 0;
   unsigned long last_zero_publish_ = 0;
   unsigned long night_mode_timeout_ = 3600000;  // Default: 1 hour in milliseconds (configurable)
+  unsigned long stale_timeout_ = 600000;  // Per-device staleness cutoff, ms (0 = disabled) (#26)
   static const unsigned long ZERO_PUBLISH_INTERVAL = 600000;  // 10 minutes in milliseconds
   bool in_night_mode_ = false;
   

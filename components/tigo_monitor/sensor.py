@@ -342,6 +342,23 @@ INTERNAL_RAM_MIN_CONFIG_SCHEMA = sensor.sensor_schema(
     cv.GenerateID(CONF_TIGO_MONITOR_ID): cv.use_id(TigoMonitorComponent),
 }).extend(cv.COMPONENT_SCHEMA)
 
+# Alert-count sensors: stale panels and fresh-but-zero-production panels (#24)
+STALE_COUNT_CONFIG_SCHEMA = sensor.sensor_schema(
+    accuracy_decimals=0,
+    state_class=STATE_CLASS_MEASUREMENT,
+    icon="mdi:lan-disconnect",
+).extend({
+    cv.GenerateID(CONF_TIGO_MONITOR_ID): cv.use_id(TigoMonitorComponent),
+}).extend(cv.COMPONENT_SCHEMA)
+
+ZERO_PRODUCTION_COUNT_CONFIG_SCHEMA = sensor.sensor_schema(
+    accuracy_decimals=0,
+    state_class=STATE_CLASS_MEASUREMENT,
+    icon="mdi:solar-panel",
+).extend({
+    cv.GenerateID(CONF_TIGO_MONITOR_ID): cv.use_id(TigoMonitorComponent),
+}).extend(cv.COMPONENT_SCHEMA)
+
 PSRAM_FREE_CONFIG_SCHEMA = sensor.sensor_schema(
     unit_of_measurement="KB",
     accuracy_decimals=1,
@@ -370,6 +387,11 @@ STACK_FREE_CONFIG_SCHEMA = sensor.sensor_schema(
 # checksum/frame precede count so names like "Invalid Checksum Count" /
 # "Missed Frame Count" are not swallowed by the generic "count" keyword.
 _AGGREGATE_RULES = [
+    # Alert counts first — their names ("Stale Panel Count", "Zero Production
+    # Count") contain words the broader rules below would otherwise swallow.
+    ("stale_count",     ["stale"]),
+    ("zero_production", ["zero production", "no production", "zero output",
+                         "dead", "failed"]),
     ("energy_out",   ["energy out", "output energy", "e_out", "e out"]),
     ("energy_in",    ["energy in", "input energy", "e_in", "e in",
                       "energy", "kwh", "kilowatt", "wh"]),
@@ -411,6 +433,8 @@ def _classify_aggregate_sensor(name):
 
 
 _AGGREGATE_SCHEMA_BY_CATEGORY = {
+    "stale_count": STALE_COUNT_CONFIG_SCHEMA,
+    "zero_production": ZERO_PRODUCTION_COUNT_CONFIG_SCHEMA,
     "energy_out": ENERGY_OUT_SUM_CONFIG_SCHEMA,
     "energy_in": ENERGY_IN_SUM_CONFIG_SCHEMA,
     "power_out": POWER_OUT_SUM_CONFIG_SCHEMA,
@@ -477,6 +501,8 @@ async def to_code(config):
         category = _classify_aggregate_sensor(config.get(CONF_NAME, ""))
         sens = await sensor.new_sensor(config)
         register = {
+            "stale_count": hub.add_stale_count_sensor,
+            "zero_production": hub.add_zero_production_count_sensor,
             "energy_out": hub.add_energy_out_sum_sensor,
             "energy_in": hub.add_energy_in_sum_sensor,
             "power_out": hub.add_power_out_sum_sensor,
