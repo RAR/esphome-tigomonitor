@@ -26,6 +26,9 @@ class Logger;
 namespace light {
 class LightState;
 }
+namespace sensor {
+class Sensor;
+}
 }
 
 #endif
@@ -45,6 +48,12 @@ class TigoWebServer : public Component {
   
   void set_tigo_monitor(tigo_monitor::TigoMonitorComponent *parent) { parent_ = parent; }
   void set_backlight(light::LightState *backlight) { backlight_ = backlight; }
+  // Optional: read die temperature from an existing ESPHome internal_temperature
+  // sensor instead of installing our own. The ESP32 has a single temperature
+  // peripheral that can only be installed once, so when the user also runs the
+  // internal_temperature platform our install loses the race and reads nothing
+  // (#28). Wiring that sensor here is the conflict-free path.
+  void set_internal_temperature_sensor(sensor::Sensor *s) { external_temp_sensor_ = s; }
   
   void setup() override;
   void loop() override;
@@ -71,6 +80,7 @@ class TigoWebServer : public Component {
   std::string web_username_{""};
   std::string web_password_{""};
   temperature_sensor_handle_t temp_sensor_handle_{nullptr};
+  sensor::Sensor *external_temp_sensor_{nullptr};  // optional, wins over our own handle
   
   // HTTP handlers
   static esp_err_t dashboard_handler(httpd_req_t *req);

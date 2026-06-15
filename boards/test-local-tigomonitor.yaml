@@ -13,6 +13,12 @@ external_components:
       type: local
       path: ../components
 
+# Exercises the internal_temperature_id codegen + read path (#28): deep-merges
+# into the board's tigo_server block so it reads this sensor instead of
+# installing its own temperature peripheral.
+tigo_server:
+  internal_temperature_id: esp32_die_temp
+
 wifi:
   ssid: !secret wifi_ssid
   password: !secret wifi_password
@@ -58,6 +64,10 @@ sensor:
   - platform: tigo_monitor
     tigo_monitor_id: tigo_hub
     name: "Zero Production Count"
+  # Die-temp source wired into tigo_server via internal_temperature_id (#28)
+  - platform: internal_temperature
+    id: esp32_die_temp
+    name: "ESP32 Die Temperature"
 
 text_sensor:
 

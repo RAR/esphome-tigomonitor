@@ -9,6 +9,7 @@
 #include "esphome/core/time.h"
 #include "esphome/components/network/util.h"
 #include "esphome/components/logger/logger.h"
+#include "esphome/components/sensor/sensor.h"
 #ifdef USE_LIGHT
 #include "esphome/components/light/light_state.h"
 #include "esphome/components/light/light_call.h"
@@ -24,6 +25,7 @@
 #include <lwip/sockets.h>
 #include <lwip/tcp.h>
 #include <cstring>
+#include <cmath>
 #include <sys/time.h>
 #include <mbedtls/base64.h>
 #include <driver/temperature_sensor.h>
@@ -436,9 +438,17 @@ void TigoWebServer::setup() {
       ESP_LOGI(TAG, "Web authentication not configured - pages remain open");
     }
     
-    // Initialize temperature sensor once at startup. Use a wide measurement
-    // range so a hot S3 die (can exceed 80 °C under load) still reads in-range
-    // rather than erroring out and reporting nothing (#28).
+    // Initialize the internal temperature sensor once at startup — but only if
+    // the user hasn't wired an existing internal_temperature sensor. The ESP32
+    // has a single temperature peripheral that installs exactly once, so if
+    // another component (e.g. the internal_temperature platform) already owns
+    // it, our install would lose the race and read nothing (#28). When a sensor
+    // is wired we read its published state instead and skip the install.
+    if (external_temp_sensor_ != nullptr) {
+      ESP_LOGI(TAG, "Using configured internal_temperature sensor for die temp");
+    } else {
+    // Use a wide measurement range so a hot S3 die (can exceed 80 °C under
+    // load) still reads in-range rather than erroring out and reporting nothing.
     temperature_sensor_config_t temp_sensor_config = TEMPERATURE_SENSOR_CONFIG_DEFAULT(-10, 110);
     esp_err_t err = temperature_sensor_install(&temp_sensor_config, &temp_sensor_handle_);
     if (err == ESP_OK) {
@@ -451,10 +461,12 @@ void TigoWebServer::setup() {
         temp_sensor_handle_ = nullptr;
       }
     } else {
-      ESP_LOGW(TAG, "Failed to install temperature sensor: %s", esp_err_to_name(err));
+      ESP_LOGW(TAG, "Failed to install temperature sensor: %s — if you also use the "
+                    "internal_temperature platform, wire it via internal_temperature_id", esp_err_to_name(err));
       temp_sensor_handle_ = nullptr;
     }
-    
+    }  // end else (no external sensor wired)
+
     ESP_LOGI(TAG, "All routes registered");
   } else {
     ESP_LOGE(TAG, "Failed to start web server");
@@ -1945,14 +1957,20 @@ void TigoWebServer::build_esp_status_json(PSRAMString& json) {
   uint32_t command_frames = parent_->get_command_frame_count();
   uint32_t frame_27_count = parent_->get_frame_27_count();
   
-  // ESP32 internal die temperature. Not every target has the peripheral (the
-  // classic ESP32 lacks it, so install fails and the handle stays null) and a
-  // read can fail, so track availability and report null rather than a
-  // misleading 0 °C when there's genuinely nothing to show (#28).
+  // ESP32 internal die temperature. Prefer a user-wired internal_temperature
+  // sensor (the conflict-free path on the single-peripheral ESP32); otherwise
+  // read our own handle. Either source can be unavailable — no peripheral (the
+  // classic ESP32 lacks it), a failed read, or no state yet — so track
+  // availability and report null rather than a misleading 0 °C (#28).
   float internal_temp = 0.0f;
   bool internal_temp_ok = false;
-  if (temp_sensor_handle_ != nullptr &&
-      temperature_sensor_get_celsius(temp_sensor_handle_, &internal_temp) == ESP_OK) {
+  if (external_temp_sensor_ != nullptr) {
+    if (external_temp_sensor_->has_state() && std::isfinite(external_temp_sensor_->state)) {
+      internal_temp = external_temp_sensor_->state;
+      internal_temp_ok = true;
+    }
+  } else if (temp_sensor_handle_ != nullptr &&
+             temperature_sensor_get_celsius(temp_sensor_handle_, &internal_temp) == ESP_OK) {
     internal_temp_ok = true;
   }
   

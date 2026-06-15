@@ -1,6 +1,6 @@
 import esphome.codegen as cg
 import esphome.config_validation as cv
-from esphome.components import tigo_monitor, light
+from esphome.components import tigo_monitor, light, sensor
 from esphome.const import CONF_ID, CONF_PORT
 from pathlib import Path
 
@@ -15,6 +15,7 @@ CONF_API_TOKEN = 'api_token'
 CONF_WEB_USERNAME = 'web_username'
 CONF_WEB_PASSWORD = 'web_password'
 CONF_BACKLIGHT = 'backlight'
+CONF_INTERNAL_TEMPERATURE_ID = 'internal_temperature_id'
 
 CONFIG_SCHEMA = cv.Schema({
     cv.GenerateID(): cv.declare_id(TigoWebServer),
@@ -24,6 +25,10 @@ CONFIG_SCHEMA = cv.Schema({
     cv.Optional(CONF_WEB_USERNAME): cv.string,
     cv.Optional(CONF_WEB_PASSWORD): cv.string,
     cv.Optional(CONF_BACKLIGHT): cv.use_id(light.LightState),
+    # Optional: reference an existing internal_temperature sensor for the
+    # Diagnostics die-temp readout instead of installing our own. Avoids the
+    # single-peripheral install conflict on the ESP32 (#28).
+    cv.Optional(CONF_INTERNAL_TEMPERATURE_ID): cv.use_id(sensor.Sensor),
 }).extend(cv.COMPONENT_SCHEMA)
 
 
@@ -137,3 +142,8 @@ async def to_code(config):
     if CONF_BACKLIGHT in config:
         backlight = await cg.get_variable(config[CONF_BACKLIGHT])
         cg.add(var.set_backlight(backlight))
+
+    # Read die temperature from an existing internal_temperature sensor if given
+    if CONF_INTERNAL_TEMPERATURE_ID in config:
+        temp_sensor = await cg.get_variable(config[CONF_INTERNAL_TEMPERATURE_ID])
+        cg.add(var.set_internal_temperature_sensor(temp_sensor))
