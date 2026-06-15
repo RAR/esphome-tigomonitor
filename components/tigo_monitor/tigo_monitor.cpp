@@ -2551,7 +2551,7 @@ void TigoMonitorComponent::reset_peak_power() {
   
   for (auto &device : devices_) {
     device.peak_power = 0.0f;
-    
+
     // Build key in stack buffer - no heap allocations
     snprintf(pref_key, sizeof(pref_key), "peak_%s", device.addr.c_str());
     uint32_t hash = esphome::fnv1_hash(pref_key);
@@ -2559,10 +2559,22 @@ void TigoMonitorComponent::reset_peak_power() {
     save.save(&zero);
     reset_count++;
   }
-  
+
+  // Also clear the string/inverter rollup peaks — the dashboard "% of peak"
+  // denominator and get_system_peak_power(). These are in-RAM running maxima
+  // (not persisted), so zeroing them re-baselines to live power on the next
+  // update cycle, matching the per-device reset above. Without this the button
+  // left the rollup at its since-boot max until a reboot (#29).
+  for (auto &pair : strings_) {
+    pair.second.peak_power = 0.0f;
+  }
+  for (auto &inverter : inverters_) {
+    inverter.peak_power = 0.0f;
+  }
+
 #ifdef USE_ESP_IDF
   size_t heap_after = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
-  ESP_LOGI(TAG, "Reset %d peak power values (heap: %zu -> %zu, delta: %+zd bytes)", 
+  ESP_LOGI(TAG, "Reset %d peak power values (heap: %zu -> %zu, delta: %+zd bytes)",
            reset_count, heap_before, heap_after, (ssize_t)(heap_after - heap_before));
 #else
   ESP_LOGI(TAG, "Reset %d peak power values", reset_count);
