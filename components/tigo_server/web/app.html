@@ -2609,7 +2609,9 @@
       document.getElementById('diag-psram-sub').textContent =
         `${(100 * status.free_psram / status.total_psram).toFixed(1)}% of ${fmtKB(status.total_psram)} KB`;
       document.getElementById('diag-temp').innerHTML =
-        `${fmtTemp(status.internal_temp || 0)}<span class="hist-stat-unit">${tempUnit()}</span>`;
+        (status.internal_temp == null)
+          ? '<span class="hist-stat-unit">N/A</span>'
+          : `${fmtTemp(status.internal_temp)}<span class="hist-stat-unit">${tempUnit()}</span>`;
 
       // Network / uptime
       document.getElementById('diag-uptime').innerHTML = fmtUptime(status.uptime_sec || 0);

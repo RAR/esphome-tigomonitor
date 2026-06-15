@@ -467,6 +467,10 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   int get_device_count() const { return devices_.size(); }
   int get_online_device_count() const;
   float get_total_power() const;
+  // System-wide peak power (sum of per-inverter high-water marks) — the same
+  // value the dashboard uses as its "% of peak" denominator. Pair with
+  // get_total_power() in a lambda to compute % of peak (#29).
+  float get_system_peak_power() const;
 
 #ifdef TIGO_TSDB_AVAILABLE
   TigoHistory *get_history() { return &history_; }

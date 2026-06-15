@@ -3560,6 +3560,18 @@ float TigoMonitorComponent::get_total_power() const {
   return cached_total_power_in_;
 }
 
+float TigoMonitorComponent::get_system_peak_power() const {
+  // Sum of per-inverter peak-power high-water marks — mirrors the dashboard's
+  // "% of peak" denominator (app.html sums inverter peak_power). Safe from the
+  // main loop task, where lambdas run. Pair with get_total_power() for the
+  // current output to compute % of peak (#29).
+  float total = 0.0f;
+  for (const auto &inv : inverters_) {
+    total += inv.peak_power;
+  }
+  return total;
+}
+
 #ifdef TIGO_TSDB_AVAILABLE
 void TigoMonitorComponent::snapshot_to_history_() {
   if (!history_.initialized()) return;

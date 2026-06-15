@@ -436,8 +436,10 @@ void TigoWebServer::setup() {
       ESP_LOGI(TAG, "Web authentication not configured - pages remain open");
     }
     
-    // Initialize temperature sensor once at startup
-    temperature_sensor_config_t temp_sensor_config = TEMPERATURE_SENSOR_CONFIG_DEFAULT(-10, 80);
+    // Initialize temperature sensor once at startup. Use a wide measurement
+    // range so a hot S3 die (can exceed 80 °C under load) still reads in-range
+    // rather than erroring out and reporting nothing (#28).
+    temperature_sensor_config_t temp_sensor_config = TEMPERATURE_SENSOR_CONFIG_DEFAULT(-10, 110);
     esp_err_t err = temperature_sensor_install(&temp_sensor_config, &temp_sensor_handle_);
     if (err == ESP_OK) {
       err = temperature_sensor_enable(temp_sensor_handle_);
@@ -1943,10 +1945,15 @@ void TigoWebServer::build_esp_status_json(PSRAMString& json) {
   uint32_t command_frames = parent_->get_command_frame_count();
   uint32_t frame_27_count = parent_->get_frame_27_count();
   
-  // Get ESP32 internal temperature (using persistent sensor handle)
+  // ESP32 internal die temperature. Not every target has the peripheral (the
+  // classic ESP32 lacks it, so install fails and the handle stays null) and a
+  // read can fail, so track availability and report null rather than a
+  // misleading 0 °C when there's genuinely nothing to show (#28).
   float internal_temp = 0.0f;
-  if (temp_sensor_handle_ != nullptr) {
-    temperature_sensor_get_celsius(temp_sensor_handle_, &internal_temp);
+  bool internal_temp_ok = false;
+  if (temp_sensor_handle_ != nullptr &&
+      temperature_sensor_get_celsius(temp_sensor_handle_, &internal_temp) == ESP_OK) {
+    internal_temp_ok = true;
   }
   
   // Get network stats
@@ -1956,22 +1963,26 @@ void TigoWebServer::build_esp_status_json(PSRAMString& json) {
   std::string mac_address = "N/A";
   std::string ssid = "N/A";
   
+  // IP and MAC come from the network layer so they populate on Ethernet too,
+  // not only WiFi (#27). RSSI/SSID are inherently WiFi-only and stay "N/A" on a
+  // wired link.
+#ifdef USE_NETWORK
+  for (auto &addr : network::get_ip_addresses()) {
+    if (addr.is_set()) {
+      char buf[40];
+      addr.str_to(buf);
+      ip_address = buf;
+      break;
+    }
+  }
+  mac_address = get_mac_address_pretty();
+#endif
+
 #ifdef USE_WIFI
   if (network_connected && wifi::global_wifi_component != nullptr) {
     wifi_rssi = wifi::global_wifi_component->wifi_rssi();
     char ssid_buf[wifi::SSID_BUFFER_SIZE];
     ssid = wifi::global_wifi_component->wifi_ssid_to(ssid_buf);
-    
-    // Get IP address - use the newer get_ip_addresses() method
-    auto addresses = wifi::global_wifi_component->get_ip_addresses();
-    if (!addresses.empty() && addresses[0].is_set()) {
-      char buf[20];
-      addresses[0].str_to(buf);
-      ip_address = buf;
-    }
-    
-    // Get MAC address via global function
-    mac_address = get_mac_address_pretty();
   }
 #endif
 
@@ -1995,13 +2006,22 @@ void TigoWebServer::build_esp_status_json(PSRAMString& json) {
   int max_sockets = 16;
 #endif
   
+  // Emit a JSON null (not 0) when the die-temperature read isn't available, so
+  // the dashboard can show N/A instead of a misleading 0 °C (#28).
+  char temp_str[16];
+  if (internal_temp_ok) {
+    snprintf(temp_str, sizeof(temp_str), "%.1f", internal_temp);
+  } else {
+    strcpy(temp_str, "null");
+  }
+
   char buffer[1536];
   snprintf(buffer, sizeof(buffer),
     "{\"free_heap\":%zu,\"total_heap\":%zu,\"free_psram\":%zu,\"total_psram\":%zu,"
     "\"min_free_heap\":%zu,\"min_free_psram\":%zu,"
     "\"uptime_sec\":%u,\"uptime_days\":%u,\"uptime_hours\":%u,\"uptime_mins\":%u,"
     "\"esphome_version\":\"%s\",\"compilation_time\":\"%s %s\","
-    "\"task_count\":%u,\"internal_temp\":%.1f,"
+    "\"task_count\":%u,\"internal_temp\":%s,"
     "\"invalid_checksum\":%u,\"missed_frames\":%u,\"total_frames\":%u,"
     "\"command_frames\":%u,\"frame_27_count\":%u,"
     "\"network_connected\":%s,\"wifi_rssi\":%d,\"wifi_ssid\":\"%s\",\"ip_address\":\"%s\",\"mac_address\":\"%s\","
@@ -2010,7 +2030,7 @@ void TigoWebServer::build_esp_status_json(PSRAMString& json) {
     min_free_heap, min_free_psram,
     uptime_sec, uptime_days, uptime_hours, uptime_mins,
     ESPHOME_VERSION, __DATE__, __TIME__,
-    (unsigned int)task_count, internal_temp,
+    (unsigned int)task_count, temp_str,
     invalid_checksum, missed_frames, total_frames,
     command_frames, frame_27_count,
     network_connected ? "true" : "false", wifi_rssi, ssid.c_str(), ip_address.c_str(), mac_address.c_str(),
