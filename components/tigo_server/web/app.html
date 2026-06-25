@@ -2905,17 +2905,49 @@
     const el = document.getElementById('cca-status');
     if (state === 'connected') el.innerHTML = ccaRenderStatus('Connected', 'ok');
     else if (state === 'refreshing') el.innerHTML = ccaRenderStatus('Refreshing', 'warn');
+    else if (state === 'blocked') el.innerHTML = ccaRenderStatus('HTTP locked', 'warn');
     else if (state === 'error') el.innerHTML = ccaRenderStatus('Error', 'bad');
     else if (state === 'failed') el.innerHTML = ccaRenderStatus('Failed', 'bad');
     else el.innerHTML = ccaRenderStatus('Checking…', 'warn');
+  }
+
+  // Tigo CCA firmware 4.0.4+ (incl. 4.0.5-ct) locks down the local HTTP API
+  // this integration reads. The CCA itself answers our request with 401/403 —
+  // it is not an ESP32 or credential problem, so explain rather than alarm.
+  function ccaLockdownMessage(msg) {
+    const m = String(msg);
+    if (!/HTTP\s*(401|403)/.test(m)) return null;
+    const code = m.match(/HTTP\s*(\d+)/)?.[1] || '401';
+    return `<div style="border:1px solid var(--border);background:var(--bg-2);border-radius:10px;padding:16px 18px;line-height:1.55">
+      <div style="font-weight:600;color:var(--warn);margin-bottom:8px">CCA local HTTP access is disabled (HTTP ${code})</div>
+      <div style="color:var(--text-dim)">
+        Your CCA answered the request with <strong>${code} Unauthorized</strong>. Tigo firmware
+        <strong>4.0.4 and later</strong> (including <strong>4.0.5-ct</strong>) closes the local HTTP API
+        that this integration uses to read panel names and layout. This is the CCA rejecting the request —
+        not a problem with your ESP32 or its credentials.
+      </div>
+      <div style="color:var(--text-dim);margin-top:10px">
+        <strong style="color:var(--text)">Live monitoring is unaffected.</strong> Optimizer telemetry
+        still arrives over RS485 — only CCA name/layout import is blocked.
+      </div>
+      <div style="color:var(--text-dim);margin-top:10px">
+        To keep friendly panel names, import the node table manually from the
+        <strong style="color:var(--text)">Tools</strong> page instead of syncing from the CCA.
+      </div>
+    </div>`;
   }
 
   function ccaRenderDeviceInfo(deviceInfo) {
     const target = document.getElementById('cca-device-info');
     if (!deviceInfo || deviceInfo.error) {
       const msg = deviceInfo && deviceInfo.error ? deviceInfo.error : 'Unknown error';
+      const lockdown = ccaLockdownMessage(msg);
+      if (lockdown) {
+        target.innerHTML = lockdown;
+        return 'blocked';
+      }
       target.innerHTML = `<div style="color:var(--bad)">Failed to retrieve CCA information: ${msg}</div>`;
-      return false;
+      return 'error';
     }
 
     const statusItems = Array.isArray(deviceInfo.status) ? deviceInfo.status : [];
@@ -2944,7 +2976,7 @@
 
     html += '</div>';
     target.innerHTML = html;
-    return true;
+    return 'connected';
   }
 
   async function refreshCca() {
@@ -2962,10 +2994,12 @@
       try { deviceInfo = JSON.parse(data.device_info); }
       catch (_) { deviceInfo = null; }
 
-      const ok = ccaRenderDeviceInfo(deviceInfo);
-      ccaSetStatusBadge(ok ? 'connected' : 'error');
+      const state = ccaRenderDeviceInfo(deviceInfo);
+      ccaSetStatusBadge(state);
       document.getElementById('cca-meta').textContent =
-        `last update ${new Date().toLocaleTimeString()}`;
+        state === 'blocked'
+          ? 'CCA HTTP API locked (firmware 4.0.4+)'
+          : `last update ${new Date().toLocaleTimeString()}`;
     } catch (e) {
       ccaSetStatusBadge('failed');
       document.getElementById('cca-device-info').innerHTML =
