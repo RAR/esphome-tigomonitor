@@ -1142,7 +1142,7 @@
       </div>
       <div class="hist-stat-grid">
         <div class="hist-stat-card">
-          <div class="hist-stat-label">CCA IP address</div>
+          <div class="hist-stat-label">CCA address</div>
           <div class="hist-stat-val" id="cca-ip" style="font-size:18px;font-family:ui-monospace,Menlo,monospace">—</div>
           <div class="hist-stat-sub">configured target</div>
         </div>
@@ -2948,6 +2948,12 @@
       }
       target.innerHTML = `<div style="color:var(--bad)">Failed to retrieve CCA information: ${msg}</div>`;
       return 'error';
+    }
+
+    // Empty object — e.g. cca_source: ble before the first refresh has landed.
+    if (Object.keys(deviceInfo).length === 0) {
+      target.innerHTML = `<div style="color:var(--text-dim)">No CCA data yet — connect and refresh over BLE (CCA BLE Connect → CCA BLE Refresh).</div>`;
+      return 'blocked';
     }
 
     const statusItems = Array.isArray(deviceInfo.status) ? deviceInfo.status : [];

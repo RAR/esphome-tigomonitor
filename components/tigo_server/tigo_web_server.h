@@ -4,6 +4,17 @@
 #include "esphome/core/log.h"
 #include "esphome/components/tigo_monitor/tigo_monitor.h"
 
+// Optional CCA-over-BLE client. Defined by tigo_server/__init__.py only when a
+// ble_client_id is configured (cca_source: ble/auto), so plain HTTP builds pull in
+// none of the ble_client stack. When defined, TigoWebServer *is* the BLEClientNode
+// and talks the CCA's mobile_api over Bluetooth.
+#ifdef USE_TIGO_CCA_BLE
+#include <mutex>
+#include <atomic>
+#include "esphome/components/ble_client/ble_client.h"
+#include "esphome/components/esp32_ble_tracker/esp32_ble_tracker.h"
+#endif
+
 #ifdef USE_ESP_IDF
 #include <esp_http_server.h>
 #include <esp_log.h>
@@ -41,11 +52,18 @@ namespace tigo_server {
 // Forward declarations
 class PSRAMString;
 
-class TigoWebServer : public Component {
+// CCA Info page data source (set from cca_source: in YAML).
+enum class CcaSource : uint8_t { HTTP = 0, BLE = 1, AUTO = 2 };
+
+class TigoWebServer : public Component
+#ifdef USE_TIGO_CCA_BLE
+                      , public ble_client::BLEClientNode
+#endif
+{
  public:
   TigoWebServer() = default;
   ~TigoWebServer();
-  
+
   void set_tigo_monitor(tigo_monitor::TigoMonitorComponent *parent) { parent_ = parent; }
   void set_backlight(light::LightState *backlight) { backlight_ = backlight; }
   // Optional: read die temperature from an existing ESPHome internal_temperature
@@ -54,7 +72,23 @@ class TigoWebServer : public Component {
   // internal_temperature platform our install loses the race and reads nothing
   // (#28). Wiring that sensor here is the conflict-free path.
   void set_internal_temperature_sensor(sensor::Sensor *s) { external_temp_sensor_ = s; }
-  
+
+  void set_cca_source(CcaSource source) { cca_source_ = source; }
+
+#ifdef USE_TIGO_CCA_BLE
+  // --- CCA-over-BLE client (mobile_api). Callable from YAML lambdas/buttons. ---
+  void gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t gattc_if,
+                           esp_ble_gattc_cb_param_t *param) override;
+  void cca_ble_connect();      // open the ble_client link
+  void cca_ble_disconnect();   // close it (frees the CCA for the phone app)
+  void cca_device_info();      // unauthenticated; refreshes the CCA Info cache
+  void cca_ble_refresh_once(); // connect → DEVICE_INFO → auto-disconnect (dashboard refresh)
+  void cca_device_ping();      // unauthenticated connectivity check
+  // Protected commands (auto fresh-session sid): DISCOVERY_STATUS / NETWORK_INFO.
+  void cca_send_protected(const std::string &command);
+  bool cca_ble_ready() const { return ble_ready_; }
+#endif
+
   void setup() override;
   void loop() override;
   float get_setup_priority() const override { return setup_priority::WIFI - 1.0f; }
@@ -81,7 +115,61 @@ class TigoWebServer : public Component {
   std::string web_password_{""};
   temperature_sensor_handle_t temp_sensor_handle_{nullptr};
   sensor::Sensor *external_temp_sensor_{nullptr};  // optional, wins over our own handle
-  
+  CcaSource cca_source_{CcaSource::HTTP};
+
+#ifdef USE_TIGO_CCA_BLE
+  // ---- CCA-over-BLE client state (mobile_api over GATT) ----
+  // GATT handles (fallback values from a BLE scan of the CCA)
+  uint16_t ble_char_notify_{0x1A42};
+  uint16_t ble_char_write_{0x1A44};
+  bool ble_connected_{false};
+  bool ble_ready_{false};  // true after the CCCD write succeeds
+
+  std::vector<uint8_t> ble_response_buffer_;
+  uint8_t ble_request_num_{1};
+  uint32_t ble_last_command_time_{0};
+  bool ble_awaiting_response_{false};
+  std::string ble_session_key_;            // SHA512((uts + 159260)) hex, 128 chars
+  std::string ble_pending_protected_cmd_;  // queued while fetching a fresh DEVICE_INFO for sid
+  std::string ble_last_command_;           // command the in-flight response belongs to
+  std::vector<std::string> ble_command_queue_;
+  uint32_t ble_deferred_time_{0};
+  std::string ble_deferred_command_;
+  std::string ble_deferred_params_;
+  bool ble_auto_disconnect_{false};  // cca_ble_refresh_once(): drop the link after the pull
+  uint32_t ble_disconnect_at_{0};    // millis() deadline for the deferred disconnect (0 = none)
+  // Set from the web-server task; consumed on the main loop so all BLE stack calls
+  // (connect/queue) happen on the main loop, not the httpd task.
+  std::atomic<bool> ble_refresh_requested_{false};
+
+  // Cached DEVICE_INFO JSON for the CCA Info page (guarded by cca_info_mutex_)
+  std::string cca_info_json_;
+  uint32_t cca_info_time_{0};  // millis() of last cache update (0 = never)
+  std::mutex cca_info_mutex_;
+
+  // BLE lifecycle, driven from setup()/loop()
+  void ble_setup_();
+  void ble_loop_();
+  void ble_handle_connect_(esp_ble_gattc_cb_param_t *param);
+  void ble_handle_disconnect_();
+  void ble_handle_service_discovery_();
+  void ble_handle_notification_(esp_ble_gattc_cb_param_t *param);
+  void ble_discover_characteristics_(uint16_t svc_start, uint16_t svc_end);
+  void ble_setup_notifications_(uint16_t svc_start, uint16_t svc_end);
+  void ble_setup_notifications_fallback_();
+  void ble_write_cccd_(uint16_t cccd_handle);
+  void ble_queue_command_(const std::string &cmd);
+  void ble_write_command_(const std::string &cmd, const std::string &params = "");
+  void ble_send_payload_(const std::vector<uint8_t> &payload);
+  void ble_generate_session_key_(uint32_t uts);
+  void ble_process_response_(const std::string &data);
+  void ble_store_cca_info_(const std::string &raw_device_info);
+  bool ble_has_cca_info_();
+  std::string ble_get_cca_info_json_();
+  uint32_t ble_get_cca_info_seconds_ago_();
+  std::string ble_address_();
+#endif
+
   // HTTP handlers
   static esp_err_t dashboard_handler(httpd_req_t *req);
   static esp_err_t node_table_handler(httpd_req_t *req);

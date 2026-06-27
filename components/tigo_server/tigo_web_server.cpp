@@ -111,7 +111,11 @@ class PSRAMString {
 
 void TigoWebServer::setup() {
   ESP_LOGI(TAG, "Starting Tigo Web Server on port %d...", port_);
-  
+
+#ifdef USE_TIGO_CCA_BLE
+  this->ble_setup_();
+#endif
+
   // Check PSRAM availability
   size_t total_psram = heap_caps_get_total_size(MALLOC_CAP_SPIRAM);
   size_t free_psram = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
@@ -1148,11 +1152,21 @@ esp_err_t TigoWebServer::api_cca_refresh_handler(httpd_req_t *req) {
     return ESP_OK;
   }
   
-  // Trigger full CCA refresh (device info + config sync with proper sequencing)
-  server->parent_->refresh_cca_data();
-  
-  // Return simple success response
-  const char* response = "{\"status\":\"ok\",\"message\":\"CCA refresh initiated\"}";
+  const char* response;
+#ifdef USE_TIGO_CCA_BLE
+  if (server->cca_source_ == CcaSource::BLE || server->cca_source_ == CcaSource::AUTO) {
+    // BLE-sourced: hand off to the main loop (this handler runs on the httpd task,
+    // and the BLE stack must be driven from the main loop). ble_loop_ picks this up
+    // and runs connect → DEVICE_INFO → auto-disconnect.
+    server->ble_refresh_requested_ = true;
+    response = "{\"status\":\"ok\",\"message\":\"BLE refresh initiated\"}";
+  } else
+#endif
+  {
+    // Trigger full CCA refresh over HTTP (device info + config sync with sequencing)
+    server->parent_->refresh_cca_data();
+    response = "{\"status\":\"ok\",\"message\":\"CCA refresh initiated\"}";
+  }
   httpd_resp_set_type(req, "application/json");
   httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
   httpd_resp_send(req, response, strlen(response));
@@ -2352,30 +2366,52 @@ void TigoWebServer::get_app_html(PSRAMString& html) {
 }
 
 void TigoWebServer::build_cca_info_json(PSRAMString& json) {
-  // Query CCA device info if not cached or stale
-  if (parent_->get_cca_device_info().empty() || 
-      parent_->get_last_cca_sync_time() == 0) {
-    parent_->query_cca_device_info();
-  }
-  
-  // Calculate seconds since last sync (ESP32 millis() to seconds)
-  unsigned long last_sync = parent_->get_last_cca_sync_time();
+  // Source of the device-info payload + freshness, per cca_source_:
+  //   HTTP — tigo_monitor's local HTTP query (401s on CCA firmware 4.0.4+)
+  //   BLE  — this server's own BLE cache (authoritative; no HTTP fallback)
+  //   AUTO — BLE cache if it has data, else HTTP
+  std::string device_info;
+  std::string source_id = parent_->get_cca_ip();
   unsigned long seconds_ago = 0;
-  if (last_sync > 0) {
-    seconds_ago = (millis() - last_sync) / 1000;
+
+  bool use_ble = false;
+#ifdef USE_TIGO_CCA_BLE
+  if (cca_source_ == CcaSource::BLE) {
+    use_ble = true;  // authoritative even before the first refresh (shows "awaiting")
+  } else if (cca_source_ == CcaSource::AUTO && this->ble_has_cca_info_()) {
+    use_ble = true;
   }
-  
+
+  if (use_ble) {
+    device_info = this->ble_get_cca_info_json_();  // "" until first DEVICE_INFO
+    seconds_ago = this->ble_get_cca_info_seconds_ago_();
+    source_id = "BLE " + this->ble_address_();
+  }
+#endif
+
+  if (!use_ble) {
+    // Query CCA device info over HTTP if not cached or stale
+    if (parent_->get_cca_device_info().empty() ||
+        parent_->get_last_cca_sync_time() == 0) {
+      parent_->query_cca_device_info();
+    }
+    device_info = parent_->get_cca_device_info();
+    unsigned long last_sync = parent_->get_last_cca_sync_time();
+    if (last_sync > 0) {
+      seconds_ago = (millis() - last_sync) / 1000;
+    }
+  }
+
   json.append("{\"cca_ip\":\"");
-  json.append(parent_->get_cca_ip().c_str());
+  json.append(source_id.c_str());
   json.append("\",\"last_sync_seconds_ago\":");
-  
+
   char buf[32];
   snprintf(buf, sizeof(buf), "%lu", seconds_ago);
   json.append(buf);
   json.append(",\"device_info\":\"");
-  
+
   // Embed the device info JSON (already a JSON string)
-  const std::string &device_info = parent_->get_cca_device_info();
   if (device_info.empty()) {
     json.append("{}");
   } else {
@@ -2865,7 +2901,9 @@ esp_err_t TigoWebServer::api_tsdb_stats_handler(httpd_req_t *req) {
 #endif  // TIGO_TSDB_AVAILABLE
 
 void TigoWebServer::loop() {
-  // Nothing to do in loop
+#ifdef USE_TIGO_CCA_BLE
+  this->ble_loop_();
+#endif
 }
 
 TigoWebServer::~TigoWebServer() {

@@ -1,6 +1,6 @@
 import esphome.codegen as cg
 import esphome.config_validation as cv
-from esphome.components import tigo_monitor, light, sensor
+from esphome.components import tigo_monitor, light, sensor, ble_client
 from esphome.const import CONF_ID, CONF_PORT
 from pathlib import Path
 
@@ -10,14 +10,32 @@ CODEOWNERS = ['@yourusername']
 tigo_server_ns = cg.esphome_ns.namespace('tigo_server')
 TigoWebServer = tigo_server_ns.class_('TigoWebServer', cg.Component)
 
+# CCA Info page data source. With cca_source: ble (or auto) the web server talks the
+# CCA's mobile_api over Bluetooth itself (TigoWebServer is the BLEClientNode), so the
+# page works when the CCA's local HTTP API is locked down (firmware 4.0.4+).
+CcaSource = tigo_server_ns.enum('CcaSource', is_class=True)
+CCA_SOURCES = {'http': CcaSource.HTTP, 'ble': CcaSource.BLE, 'auto': CcaSource.AUTO}
+
 CONF_TIGO_MONITOR_ID = 'tigo_monitor_id'
 CONF_API_TOKEN = 'api_token'
 CONF_WEB_USERNAME = 'web_username'
 CONF_WEB_PASSWORD = 'web_password'
 CONF_BACKLIGHT = 'backlight'
 CONF_INTERNAL_TEMPERATURE_ID = 'internal_temperature_id'
+CONF_CCA_SOURCE = 'cca_source'
+CONF_BLE_CLIENT_ID = 'ble_client_id'  # matches ble_client.register_ble_node's key
 
-CONFIG_SCHEMA = cv.Schema({
+
+def _validate_cca_source(config):
+    if config[CONF_CCA_SOURCE] in ('ble', 'auto') and CONF_BLE_CLIENT_ID not in config:
+        raise cv.Invalid(
+            f"cca_source: {config[CONF_CCA_SOURCE]} requires a ble_client_id "
+            "pointing at a ble_client: configured with the CCA's BLE MAC"
+        )
+    return config
+
+
+CONFIG_SCHEMA = cv.All(cv.Schema({
     cv.GenerateID(): cv.declare_id(TigoWebServer),
     cv.GenerateID(CONF_TIGO_MONITOR_ID): cv.use_id(tigo_monitor.TigoMonitorComponent),
     cv.Optional(CONF_PORT, default=80): cv.port,
@@ -29,7 +47,12 @@ CONFIG_SCHEMA = cv.Schema({
     # Diagnostics die-temp readout instead of installing our own. Avoids the
     # single-peripheral install conflict on the ESP32 (#28).
     cv.Optional(CONF_INTERNAL_TEMPERATURE_ID): cv.use_id(sensor.Sensor),
-}).extend(cv.COMPONENT_SCHEMA)
+    # CCA Info page source: 'http' (default, CCA local web API), 'ble' (talk the CCA
+    # over Bluetooth — for firmware 4.0.4+ that locks HTTP), or 'auto' (BLE if it has
+    # data, else HTTP). 'ble'/'auto' require ble_client_id.
+    cv.Optional(CONF_CCA_SOURCE, default='http'): cv.one_of(*CCA_SOURCES, lower=True),
+    cv.Optional(CONF_BLE_CLIENT_ID): cv.use_id(ble_client.BLEClient),
+}).extend(cv.COMPONENT_SCHEMA), _validate_cca_source)
 
 
 # ---------------------------------------------------------------------------
@@ -147,3 +170,13 @@ async def to_code(config):
     if CONF_INTERNAL_TEMPERATURE_ID in config:
         temp_sensor = await cg.get_variable(config[CONF_INTERNAL_TEMPERATURE_ID])
         cg.add(var.set_internal_temperature_sensor(temp_sensor))
+
+    # CCA Info page data source
+    cg.add(var.set_cca_source(CCA_SOURCES[config[CONF_CCA_SOURCE]]))
+
+    # When BLE-sourced, register TigoWebServer as a BLE node of the given ble_client
+    # and define USE_TIGO_CCA_BLE so the (guarded) BLE client code compiles in. Plain
+    # HTTP builds skip all of this — no ble_client dependency, no flash cost.
+    if CONF_BLE_CLIENT_ID in config:
+        cg.add_define('USE_TIGO_CCA_BLE')
+        await ble_client.register_ble_node(var, config)

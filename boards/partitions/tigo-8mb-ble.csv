@@ -1,0 +1,24 @@
+# Tigo Monitor partition table for 8 MB flash WITH the CCA-over-BLE bridge.
+# Folding the ble_client/esp32_ble stack into the monitor firmware pushes the app
+# past the stock 1.75 MB slot, so each OTA app slot grows to 2.0 MB. The 8 MB flash
+# has the room: dual 2.0 MB app + 448 KB nvs + 3 MB tsdb = ~7.5 MB of 8.0 MB.
+#
+# Layout (offsets computed by ESP-IDF):
+#   bootloader + partition_table reserve up to 0x9000
+#   otadata    8 KB     OTA selection
+#   phy_init   4 KB     Wi-Fi PHY calibration
+#   app0       2.0 MB   OTA slot A
+#   app1       2.0 MB   OTA slot B
+#   nvs        448 KB   ESPHome credentials, prefs
+#   tsdb       3 MB     LittleFS for time-series data
+#
+# NOTE: changing partition sizes requires a one-time serial reflash (or an OTA with
+# allow_partition_access on ESPHome 2026.5.0+); a plain OTA cannot repartition.
+#
+# Name,    Type, SubType,  Offset, Size,     Flags
+otadata,   data, ota,      ,       0x2000,
+phy_init,  data, phy,      ,       0x1000,
+app0,      app,  ota_0,    ,       0x200000,
+app1,      app,  ota_1,    ,       0x200000,
+nvs,       data, nvs,      ,       0x70000,
+tsdb,      data, littlefs, ,       0x300000,
