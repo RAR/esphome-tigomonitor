@@ -12,11 +12,6 @@ esphome:
 # BLE-aware layout with 2.0 MB app slots (see partitions/tigo-8mb-ble.csv).
 esp32:
   partitions: partitions/tigo-8mb-ble.csv
-  framework:
-    sdkconfig_options:
-      # Push the Bluedroid BLE host stack into PSRAM to relieve internal RAM.
-      CONFIG_BT_ALLOCATION_FROM_SPIRAM_FIRST: "y"
-      CONFIG_BT_BLE_DYNAMIC_ENV_MEMORY: "y"
 
 external_components:
   - source:
@@ -50,6 +45,10 @@ ota:
     allow_partition_access: true
 
 # --- BLE link to the CCA -----------------------------------------------------
+# Allocate the Bluetooth stack's buffers from PSRAM — frees ~40 KB internal RAM.
+esp32_ble:
+  use_psram: true
+
 esp32_ble_tracker:
   scan_parameters:
     interval: 320ms
