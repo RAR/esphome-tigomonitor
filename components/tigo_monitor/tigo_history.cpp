@@ -61,18 +61,27 @@ static const char *kPanelParamNames[kPanelsPerDb] = {
     "p08", "p09", "p10", "p11", "p12", "p13", "p14", "p15",
 };
 
-// Cap system.tsdb at ~2 MB on the 3 MB tsdb partition; leaves ~1 MB shared
-// across the panel DBs and LittleFS overhead.
-static constexpr size_t kSystemFileBytes = 2 * 1024 * 1024;
+// IMPORTANT: LittleFS is copy-on-write — to commit a header write or its
+// block-allocation journal it must write the new copy to a FREE block before
+// freeing the old. If the partition is near-full it cannot commit, so writes
+// stop persisting (headers read back garbage, records vanish on reboot) and the
+// FS spirals to 100% with uncollectable orphans. So the tsdb files must leave
+// LittleFS generous headroom — target ≲55% of the 3 MB partition for file data.
+//
+// system 1 MB + 3 × 192 KB panels = 1.6 MB of 3 MB (~52%), leaving ~1.4 MB for
+// LittleFS metadata, COW scratch, and GC. (Was 2 MB + 3×256 KB ≈ 98% full, which
+// starved LittleFS and broke persistence entirely.)
+static constexpr size_t kSystemFileBytes = 1 * 1024 * 1024;
 
-// 256 KB per panel DB × 3 DBs = 768 KB; plus 2 MB system + ~200 KB LittleFS
-// overhead fits the 3 MB partition with ~60 KB headroom. At 16 panels × 2
-// bytes + 4-byte ts = 36 B/record, this gives ~7200 records per DB ≈ 25 days
-// of 5-min data per panel — short of the design doc's 30-day target but
-// acceptable until a 16 MB hardware variant exists.
-static constexpr size_t kPanelFileBytes = 256 * 1024;
+// 192 KB per panel DB × 3 = 576 KB. At 36 B/record (16×2-byte params + 4-byte
+// ts) that's ~5400 records per DB ≈ 18 days of 5-min data per panel.
+static constexpr size_t kPanelFileBytes = 192 * 1024;
 
 static constexpr const char *kPanelMapPath = "/tsdb/panel_map.json";
+
+// Marker file rewritten after each snapshot to force a LittleFS journal commit
+// (see commit_journal_). Tiny, single block, wear-levelled.
+static constexpr const char *kJournalMarkerPath = "/tsdb/.jcommit";
 
 bool TigoHistory::init() {
   if (!mount_filesystem_())
@@ -118,6 +127,29 @@ bool TigoHistory::mount_filesystem_() {
     }
   }
   return true;
+}
+
+void TigoHistory::commit_journal_() {
+  // Per-record tsdb writes are fsync'd (file data is on flash), but LittleFS only
+  // commits its block-allocation journal on a directory-tree operation or unmount.
+  // The tsdb files re-use one inode for their whole life, so nothing commits the
+  // journal during normal running — and on a stable install save_slot_map_ never
+  // fires either. Without a commit, a reboot that misses the clean-shutdown
+  // unmount (crash, power loss, watchdog, failed unmount) wipes everything.
+  //
+  // Rewriting a tiny marker file is a dir-entry metadata update, which forces that
+  // commit — the same side effect save_slot_map_ relies on for panel_map.json.
+  // One small file per 5-min snapshot; LittleFS wear-levels the block.
+  static uint32_t commit_counter = 0;
+  FILE *f = fopen(kJournalMarkerPath, "wb");
+  if (f == nullptr) {
+    ESP_LOGW(TAG, "commit_journal_: could not open marker file");
+    return;
+  }
+  std::fprintf(f, "%lu\n", (unsigned long) ++commit_counter);
+  fflush(f);
+  fsync(fileno(f));
+  fclose(f);
 }
 
 bool TigoHistory::init_system_db_() {
@@ -501,6 +533,11 @@ void TigoHistory::writer_task_loop_() {
                  esp_err_to_name(perr));
       }
     }
+
+    // Force LittleFS to commit the block-allocation journal for everything just
+    // written, so the data survives a reboot without relying on the clean-shutdown
+    // unmount (which on this rig isn't sticking).
+    this->commit_journal_();
 
     UBaseType_t hwm = uxTaskGetStackHighWaterMark(nullptr);
     if (err != ESP_OK) {

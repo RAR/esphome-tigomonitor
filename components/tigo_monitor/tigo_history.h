@@ -123,6 +123,11 @@ class TigoHistory {
   void writer_task_loop_();
 
   bool mount_filesystem_();
+  // Force LittleFS to commit its block-allocation journal. tsdb files reuse one
+  // inode for life, so per-record writes never trigger a dir-tree op — the only
+  // thing that commits the journal — and a reboot without a clean unmount then
+  // wipes them. Called after each snapshot so data survives any reboot.
+  void commit_journal_();
   bool init_system_db_();
   // Opens panel_db_[idx] if not already open. Lazy: panel DBs only land on
   // flash when the rig actually has a panel mapped into that 16-slot range.
