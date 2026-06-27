@@ -322,14 +322,15 @@ void TigoWebServer::cca_device_ping() { this->ble_queue_command_("DEVICE_PING");
 void TigoWebServer::cca_device_info() { this->ble_queue_command_("DEVICE_INFO"); }
 
 void TigoWebServer::cca_ble_refresh_once() {
-  // Self-contained refresh for the dashboard button: connect (if needed), pull
-  // DEVICE_INFO, then drop the link so the CCA is free for the phone app. The
-  // DEVICE_INFO command queues and fires once the link is ready; the disconnect is
-  // armed when the response lands (see ble_process_response_).
-  ESP_LOGI(BLE_TAG, "One-shot CCA refresh over BLE...");
+  // Self-contained refresh for the dashboard button: connect, pull DEVICE_INFO
+  // (cached for the page + yields the session key) then NETWORK_INFO (protected),
+  // then drop the link so the CCA is free for the phone app. send_protected queues
+  // DEVICE_INFO first, so this gets both in one connection; the auto-disconnect is
+  // armed once the last response lands (see ble_process_response_).
+  ESP_LOGI(BLE_TAG, "One-shot CCA refresh over BLE (DEVICE_INFO + NETWORK_INFO)...");
   this->ble_auto_disconnect_ = true;
   this->cca_ble_connect();
-  this->cca_device_info();
+  this->cca_send_protected("NETWORK_INFO");
 }
 
 void TigoWebServer::cca_send_protected(const std::string &command) {
@@ -422,8 +423,15 @@ void TigoWebServer::ble_process_response_(const std::string &data) {
     return;
   }
 
+  if (this->ble_last_command_ == "NETWORK_INFO") {
+    this->ble_store_network_(data);
+    ESP_LOGI(BLE_TAG, "CCA NETWORK_INFO cached (%d bytes)", (int) data.length());
+    this->ble_arm_auto_disconnect_();  // last command of the refresh — drop the link
+    return;
+  }
+
   if (this->ble_last_command_ != "DEVICE_INFO") {
-    // DISCOVERY_STATUS / NETWORK_INFO etc. — not surfaced on the page (yet).
+    // DISCOVERY_STATUS etc. — not surfaced on the page (yet).
     ESP_LOGD(BLE_TAG, "Response for '%s' (not cached)", this->ble_last_command_.c_str());
     return;
   }
@@ -432,31 +440,37 @@ void TigoWebServer::ble_process_response_(const std::string &data) {
   this->ble_store_cca_info_(data);
   ESP_LOGI(BLE_TAG, "CCA DEVICE_INFO cached (%d bytes) — CCA Info page updated", (int) data.length());
 
-  // One-shot refresh: now that the cache is populated, arm a deferred disconnect
-  // (run from ble_loop_, not here in the BLE callback).
+  // Auth: extract the uts nonce, derive the sid, and fire any queued protected command.
+  size_t uts_pos = data.find("\"uts\":");
+  if (uts_pos != std::string::npos) {
+    size_t val_start = data.find_first_of("0123456789", uts_pos + 6);
+    if (val_start != std::string::npos) {
+      size_t val_end = data.find_first_not_of("0123456789", val_start);
+      uint32_t uts =
+          static_cast<uint32_t>(strtoul(data.substr(val_start, val_end - val_start).c_str(), nullptr, 10));
+      this->ble_generate_session_key_(uts);
+      if (!this->ble_pending_protected_cmd_.empty()) {
+        std::string cmd = this->ble_pending_protected_cmd_;
+        this->ble_pending_protected_cmd_.clear();
+        ESP_LOGI(BLE_TAG, "Auth ready; scheduling %s in 100ms", cmd.c_str());
+        this->ble_deferred_command_ = cmd;
+        this->ble_deferred_params_ = "sid=" + this->ble_session_key_;
+        this->ble_deferred_time_ = millis() + 100;
+      }
+    }
+  }
+
+  // Arm the deferred disconnect only if nothing further is queued (a protected
+  // command like NETWORK_INFO follows DEVICE_INFO; let that one disconnect instead).
+  if (this->ble_pending_protected_cmd_.empty() && this->ble_deferred_command_.empty())
+    this->ble_arm_auto_disconnect_();
+}
+
+void TigoWebServer::ble_arm_auto_disconnect_() {
+  // Deferred (run from ble_loop_, not the BLE callback) so the I/O settles first.
   if (this->ble_auto_disconnect_) {
     this->ble_auto_disconnect_ = false;
     this->ble_disconnect_at_ = millis() + 500;
-  }
-
-  // Auth: extract the uts nonce, derive the sid, and fire any queued protected command.
-  size_t uts_pos = data.find("\"uts\":");
-  if (uts_pos == std::string::npos)
-    return;
-  size_t val_start = data.find_first_of("0123456789", uts_pos + 6);
-  if (val_start == std::string::npos)
-    return;
-  size_t val_end = data.find_first_not_of("0123456789", val_start);
-  uint32_t uts = static_cast<uint32_t>(strtoul(data.substr(val_start, val_end - val_start).c_str(), nullptr, 10));
-  this->ble_generate_session_key_(uts);
-
-  if (!this->ble_pending_protected_cmd_.empty()) {
-    std::string cmd = this->ble_pending_protected_cmd_;
-    this->ble_pending_protected_cmd_.clear();
-    ESP_LOGI(BLE_TAG, "Auth ready; scheduling %s in 100ms", cmd.c_str());
-    this->ble_deferred_command_ = cmd;
-    this->ble_deferred_params_ = "sid=" + this->ble_session_key_;
-    this->ble_deferred_time_ = millis() + 100;
   }
 }
 
@@ -468,6 +482,16 @@ void TigoWebServer::ble_store_cca_info_(const std::string &raw_device_info) {
   std::lock_guard<std::mutex> lock(this->cca_info_mutex_);
   this->cca_info_json_ = raw_device_info;
   this->cca_info_time_ = millis();
+}
+
+void TigoWebServer::ble_store_network_(const std::string &raw_network_info) {
+  std::lock_guard<std::mutex> lock(this->cca_info_mutex_);
+  this->cca_network_json_ = raw_network_info;
+}
+
+std::string TigoWebServer::ble_get_network_json_() {
+  std::lock_guard<std::mutex> lock(this->cca_info_mutex_);
+  return this->cca_network_json_;
 }
 
 bool TigoWebServer::ble_has_cca_info_() {

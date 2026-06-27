@@ -2409,14 +2409,10 @@ void TigoWebServer::build_cca_info_json(PSRAMString& json) {
   char buf[32];
   snprintf(buf, sizeof(buf), "%lu", seconds_ago);
   json.append(buf);
-  json.append(",\"device_info\":\"");
-
-  // Embed the device info JSON (already a JSON string)
-  if (device_info.empty()) {
-    json.append("{}");
-  } else {
-    // Escape the JSON string for embedding
-    for (char c : device_info) {
+  // Embed a JSON document as an escaped string value.
+  auto append_escaped = [&json](const std::string &doc) {
+    if (doc.empty()) { json.append("{}"); return; }
+    for (char c : doc) {
       if (c == '"') json.append("\\\"");
       else if (c == '\\') json.append("\\\\");
       else if (c == '\n') json.append("\\n");
@@ -2427,8 +2423,19 @@ void TigoWebServer::build_cca_info_json(PSRAMString& json) {
         json.append(ch);
       }
     }
-  }
-  
+  };
+
+  json.append(",\"device_info\":\"");
+  append_escaped(device_info);
+
+  // network_info: only populated over BLE (NETWORK_INFO), {} otherwise.
+  std::string network_info;
+#ifdef USE_TIGO_CCA_BLE
+  if (use_ble) network_info = this->ble_get_network_json_();
+#endif
+  json.append("\",\"network_info\":\"");
+  append_escaped(network_info);
+
   json.append("\"}");
 }
 

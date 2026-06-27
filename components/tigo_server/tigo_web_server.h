@@ -142,8 +142,9 @@ class TigoWebServer : public Component
   // (connect/queue) happen on the main loop, not the httpd task.
   std::atomic<bool> ble_refresh_requested_{false};
 
-  // Cached DEVICE_INFO JSON for the CCA Info page (guarded by cca_info_mutex_)
+  // Cached DEVICE_INFO + NETWORK_INFO JSON for the CCA Info page (guarded by cca_info_mutex_)
   std::string cca_info_json_;
+  std::string cca_network_json_;
   uint32_t cca_info_time_{0};  // millis() of last cache update (0 = never)
   std::mutex cca_info_mutex_;
 
@@ -163,9 +164,12 @@ class TigoWebServer : public Component
   void ble_send_payload_(const std::vector<uint8_t> &payload);
   void ble_generate_session_key_(uint32_t uts);
   void ble_process_response_(const std::string &data);
+  void ble_arm_auto_disconnect_();
   void ble_store_cca_info_(const std::string &raw_device_info);
+  void ble_store_network_(const std::string &raw_network_info);
   bool ble_has_cca_info_();
   std::string ble_get_cca_info_json_();
+  std::string ble_get_network_json_();
   uint32_t ble_get_cca_info_seconds_ago_();
   std::string ble_address_();
 #endif

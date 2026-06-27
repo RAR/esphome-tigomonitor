@@ -2830,6 +2830,9 @@
   // ============================================================
 
   const CCA_FIELD_LABELS = {
+    eth_ip: 'Ethernet IP',
+    wlan_ip: 'WiFi IP',
+    wlan_ssid: 'WiFi SSID',
     serial: 'Serial number',
     sw_version: 'Software version',
     sysid: 'System ID',
@@ -2985,27 +2988,39 @@
     return 'connected';
   }
 
+  function applyCcaData(data) {
+    document.getElementById('cca-ip').textContent = data.cca_ip || 'Not configured';
+    document.getElementById('cca-last-sync').textContent =
+      ccaFmtSyncAge(data.last_sync_seconds_ago);
+    let deviceInfo = null;
+    try { deviceInfo = JSON.parse(data.device_info); } catch (_) { deviceInfo = null; }
+    // Fold NETWORK_INFO (BLE only) into the rendered fields.
+    if (deviceInfo && !deviceInfo.error && data.network_info) {
+      try {
+        const net = JSON.parse(data.network_info);
+        if (net?.eth?.ip) deviceInfo.eth_ip = net.eth.ip;
+        if (net?.wlan?.ip) deviceInfo.wlan_ip = net.wlan.ip;
+        if (net?.wlan?.ssid) deviceInfo.wlan_ssid = net.wlan.ssid;
+      } catch (_) {}
+    }
+    const state = ccaRenderDeviceInfo(deviceInfo);
+    ccaSetStatusBadge(state);
+    const overBle = (data.cca_ip || '').startsWith('BLE');
+    document.getElementById('cca-meta').textContent =
+      state === 'blocked'
+        ? (overBle ? 'awaiting CCA refresh over BLE' : 'CCA HTTP API locked (firmware 4.0.4+)')
+        : `last update ${new Date().toLocaleTimeString()}`;
+    return { state, deviceInfo };
+  }
+
+  let ccaBusy = false;  // true during a manual refresh poll — pauses the interval
+
   async function refreshCca() {
     if (!document.getElementById('view-cca').classList.contains('active')) return;
     try {
       const r = await apiFetch('/api/cca');
       if (!r.ok) throw new Error(`/api/cca ${r.status}`);
-      const data = await r.json();
-
-      document.getElementById('cca-ip').textContent = data.cca_ip || 'Not configured';
-      document.getElementById('cca-last-sync').textContent =
-        ccaFmtSyncAge(data.last_sync_seconds_ago);
-
-      let deviceInfo = null;
-      try { deviceInfo = JSON.parse(data.device_info); }
-      catch (_) { deviceInfo = null; }
-
-      const state = ccaRenderDeviceInfo(deviceInfo);
-      ccaSetStatusBadge(state);
-      document.getElementById('cca-meta').textContent =
-        state === 'blocked'
-          ? 'CCA HTTP API locked (firmware 4.0.4+)'
-          : `last update ${new Date().toLocaleTimeString()}`;
+      applyCcaData(await r.json());
     } catch (e) {
       ccaSetStatusBadge('failed');
       document.getElementById('cca-device-info').innerHTML =
@@ -3015,27 +3030,59 @@
   }
 
   document.getElementById('cca-refresh-btn').addEventListener('click', async () => {
+    if (ccaBusy) return;
+    ccaBusy = true;
     ccaSetStatusBadge('refreshing');
-    document.getElementById('cca-device-info').innerHTML =
-      '<div style="color:var(--text-dim)">Refreshing CCA device information…</div>';
+    const info = document.getElementById('cca-device-info');
+    info.innerHTML = '<div style="color:var(--text-dim)">Connecting to the CCA over BLE… (~10 s)</div>';
     try {
       const r = await apiFetch('/api/cca/refresh');
       if (!r.ok) throw new Error('refresh request failed');
-      // Give the CCA a moment to respond before re-fetching.
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      await refreshCca();
+
+      // The refresh is async on the device: HTTP is ~instant, BLE is connect →
+      // DEVICE_INFO → disconnect (~10 s). Poll /api/cca until the cache reports data
+      // younger than how long we've waited (i.e. just refreshed), an error response
+      // (e.g. HTTP 401 lockdown), or we give up.
+      const start = Date.now();
+      const maxWaitMs = 30000;
+      while (Date.now() - start < maxWaitMs) {
+        await new Promise(res => setTimeout(res, 1500));
+        const elapsed = (Date.now() - start) / 1000;
+        let data;
+        try {
+          const rr = await apiFetch('/api/cca');
+          if (!rr.ok) continue;
+          data = await rr.json();
+        } catch (_) { continue; }
+
+        let deviceInfo = null;
+        try { deviceInfo = JSON.parse(data.device_info); } catch (_) {}
+
+        if (deviceInfo && deviceInfo.error) { applyCcaData(data); return; }  // terminal
+        const hasData = deviceInfo && Object.keys(deviceInfo).length > 0;
+        const fresh = data.last_sync_seconds_ago <= elapsed + 3;
+        if (hasData && fresh) { applyCcaData(data); return; }
+
+        info.innerHTML =
+          `<div style="color:var(--text-dim)">Connecting to the CCA over BLE… (${Math.round(elapsed)} s)</div>`;
+      }
+      ccaSetStatusBadge('failed');
+      info.innerHTML =
+        '<div style="color:var(--bad)">BLE refresh timed out — the CCA may be out of range or busy (it allows one BLE client at a time). Try again.</div>';
+      document.getElementById('cca-meta').textContent = 'BLE refresh timed out';
     } catch (e) {
       ccaSetStatusBadge('failed');
-      document.getElementById('cca-device-info').innerHTML =
-        `<div style="color:var(--bad)">Failed to refresh: ${e.message}</div>`;
+      info.innerHTML = `<div style="color:var(--bad)">Failed to refresh: ${e.message}</div>`;
+    } finally {
+      ccaBusy = false;
     }
   });
 
-  document.querySelector('#nav button[data-view="cca"]').addEventListener('click', refreshCca);
+  document.querySelector('#nav button[data-view="cca"]').addEventListener('click', () => { if (!ccaBusy) refreshCca(); });
   if (window.location.hash === '#cca') refreshCca();
   // Same 30s cadence the standalone /cca page used.
   setInterval(() => {
-    if (document.getElementById('view-cca').classList.contains('active')) refreshCca();
+    if (!ccaBusy && document.getElementById('view-cca').classList.contains('active')) refreshCca();
   }, 30000);
 
   // ============================================================

@@ -12,6 +12,11 @@ esphome:
 # BLE-aware layout with 2.0 MB app slots (see partitions/tigo-8mb-ble.csv).
 esp32:
   partitions: partitions/tigo-8mb-ble.csv
+  framework:
+    sdkconfig_options:
+      # We hold one on-demand BLE link (scan + 1 connection ≈ 2 activities), so trim
+      # the controller from its default of 6. Bump back to 6 if connects start failing.
+      CONFIG_BT_CTRL_BLE_MAX_ACT: "4"
 
 external_components:
   - source:
@@ -45,9 +50,12 @@ ota:
     allow_partition_access: true
 
 # --- BLE link to the CCA -----------------------------------------------------
-# Allocate the Bluetooth stack's buffers from PSRAM — frees ~40 KB internal RAM.
+# use_psram: BLE host heap → PSRAM where possible. max_connections: 1 — we hold a
+# single on-demand link, so trim the controller/host from the default of 3-4
+# connections (those buffers are internal-RAM-only; PSRAM can't move them).
 esp32_ble:
   use_psram: true
+  max_connections: 1
 
 esp32_ble_tracker:
   scan_parameters:
