@@ -1167,6 +1167,21 @@
       <div class="tools-card">
         <div id="cca-device-info" style="color:var(--text-dim)">Loading CCA device information…</div>
       </div>
+
+      <div class="section-head">
+        <div class="section-title">Topology discovery</div>
+        <div class="section-sub">
+          <button class="btn" id="cca-discovery-btn">Start discovery</button>
+        </div>
+      </div>
+      <div class="tools-card">
+        <div style="color:var(--text-dim);font-size:13px;margin-bottom:8px">
+          Re-runs the CCA's optimizer/gateway discovery scan. The CCA briefly interrupts
+          normal operation while it re-finds modules — recoverable, but only run it when
+          panels are missing or after hardware changes.
+        </div>
+        <div id="cca-discovery-status" style="color:var(--text-dim)">Idle — no scan running.</div>
+      </div>
     </section>
   </main>
 
@@ -3075,6 +3090,66 @@
       info.innerHTML = `<div style="color:var(--bad)">Failed to refresh: ${e.message}</div>`;
     } finally {
       ccaBusy = false;
+    }
+  });
+
+  // ===== Topology discovery =====
+  function ccaRenderDiscovery(status, ageS) {
+    const el = document.getElementById('cca-discovery-status');
+    if (!status) { el.innerHTML = '<span style="color:var(--text-dim)">Idle — no scan running.</span>'; return false; }
+    const pct = status.discovery_percent ?? status.percent;
+    const running = status.running === true || (typeof pct === 'number' && pct < 100);
+    const found = status.found_modules ?? status.modules_found;
+    const total = status.modules_total;
+    const parts = [];
+    if (typeof pct === 'number') parts.push(`<b>${pct}%</b>`);
+    parts.push(running ? 'scanning…' : 'complete');
+    if (found != null) parts.push(`modules found: ${found}${total != null ? ' / ' + total : ''}`);
+    if (status.found_gateways != null) parts.push(`gateways: ${status.found_gateways}`);
+    if (status.phase) parts.push(`phase: ${status.phase}`);
+    const age = ageS != null ? ` <span style="color:var(--text-dim)">(${ageS}s ago)</span>` : '';
+    const color = running ? 'var(--text)' : 'var(--good)';
+    el.innerHTML = `<span style="color:${color}">${parts.join(' · ')}</span>${age}`;
+    return running;
+  }
+
+  let ccaDiscovering = false;
+  document.getElementById('cca-discovery-btn').addEventListener('click', async () => {
+    if (ccaDiscovering) return;
+    if (!confirm('Start a CCA topology discovery scan?\n\nThe CCA will briefly interrupt normal optimizer operation while it re-discovers modules. This is recoverable but can take a few minutes.')) return;
+    ccaDiscovering = true;
+    ccaBusy = true;  // pause the device-info auto-refresh so we don't fight over the BLE link
+    const el = document.getElementById('cca-discovery-status');
+    const btn = document.getElementById('cca-discovery-btn');
+    btn.disabled = true;
+    el.innerHTML = '<span style="color:var(--text-dim)">Connecting to the CCA over BLE to start the scan… (~10 s)</span>';
+    try {
+      const r = await apiFetch('/api/cca/discovery/start', { method: 'POST' });
+      if (!r.ok) throw new Error(`start failed (${r.status})`);
+
+      // Poll progress: trigger a background DISCOVERY_STATUS read, give the one-shot BLE
+      // round trip time to land, then read the cache. Stop when the CCA reports done or
+      // after a generous ceiling.
+      const start = Date.now();
+      const maxWaitMs = 360000;  // 6 min
+      while (Date.now() - start < maxWaitMs) {
+        await apiFetch('/api/cca/discovery/poll', { method: 'POST' }).catch(() => {});
+        await new Promise(res => setTimeout(res, 6000));  // let the connect→read→disconnect finish
+        let data;
+        try {
+          const rr = await apiFetch('/api/cca/discovery');
+          if (!rr.ok) continue;
+          data = await rr.json();
+        } catch (_) { continue; }
+        const running = ccaRenderDiscovery(data.status, data.age_s);
+        if (data.status && !running) { break; }  // CCA reports complete
+      }
+    } catch (e) {
+      el.innerHTML = `<span style="color:var(--bad)">Discovery failed: ${e.message}</span>`;
+    } finally {
+      ccaDiscovering = false;
+      ccaBusy = false;
+      btn.disabled = false;
     }
   });
 

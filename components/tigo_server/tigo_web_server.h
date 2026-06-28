@@ -87,6 +87,11 @@ class TigoWebServer : public Component
   // Protected commands (auto fresh-session sid): DISCOVERY_STATUS / NETWORK_INFO.
   void cca_send_protected(const std::string &command);
   bool cca_ble_ready() const { return ble_ready_; }
+  // Topology discovery (config action). START_DISCOVERY kicks a recoverable CCA
+  // rescan; DISCOVERY_STATUS polls progress. Both protected (auto fresh-session sid),
+  // each a self-contained one-shot connect → … → auto-disconnect like the refresh.
+  void cca_start_discovery();        // connect → sid → START_DISCOVERY → disconnect
+  void cca_poll_discovery_status();  // connect → sid → DISCOVERY_STATUS → cache → disconnect
 #endif
 
   void setup() override;
@@ -141,11 +146,15 @@ class TigoWebServer : public Component
   // Set from the web-server task; consumed on the main loop so all BLE stack calls
   // (connect/queue) happen on the main loop, not the httpd task.
   std::atomic<bool> ble_refresh_requested_{false};
+  std::atomic<bool> ble_discovery_start_requested_{false};  // POST /api/cca/discovery/start
+  std::atomic<bool> ble_discovery_poll_requested_{false};   // POST /api/cca/discovery/poll
 
   // Cached DEVICE_INFO + NETWORK_INFO JSON for the CCA Info page (guarded by cca_info_mutex_)
   std::string cca_info_json_;
   std::string cca_network_json_;
-  uint32_t cca_info_time_{0};  // millis() of last cache update (0 = never)
+  std::string cca_discovery_json_;  // last DISCOVERY_STATUS payload (scan progress)
+  uint32_t cca_info_time_{0};       // millis() of last cache update (0 = never)
+  uint32_t cca_discovery_time_{0};  // millis() of last discovery poll (0 = never)
   std::mutex cca_info_mutex_;
 
   // BLE lifecycle, driven from setup()/loop()
@@ -170,6 +179,9 @@ class TigoWebServer : public Component
   bool ble_has_cca_info_();
   std::string ble_get_cca_info_json_();
   std::string ble_get_network_json_();
+  void ble_store_discovery_(const std::string &raw_discovery_status);
+  std::string ble_get_discovery_json_();
+  uint32_t ble_get_discovery_seconds_ago_();
   uint32_t ble_get_cca_info_seconds_ago_();
   std::string ble_address_();
 #endif
@@ -198,6 +210,9 @@ class TigoWebServer : public Component
   static esp_err_t cca_info_handler(httpd_req_t *req);
   static esp_err_t api_cca_info_handler(httpd_req_t *req);
   static esp_err_t api_cca_refresh_handler(httpd_req_t *req);
+  static esp_err_t api_cca_discovery_handler(httpd_req_t *req);        // GET cached scan status
+  static esp_err_t api_cca_discovery_start_handler(httpd_req_t *req);  // POST trigger START_DISCOVERY
+  static esp_err_t api_cca_discovery_poll_handler(httpd_req_t *req);   // POST trigger DISCOVERY_STATUS
   static esp_err_t api_node_delete_handler(httpd_req_t *req);
   static esp_err_t api_node_import_handler(httpd_req_t *req);
   static esp_err_t api_restart_handler(httpd_req_t *req);

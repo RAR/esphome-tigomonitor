@@ -158,7 +158,11 @@ void TigoWebServer::setup() {
   httpd_config_t config = HTTPD_DEFAULT_CONFIG();
   config.server_port = port_;
   config.ctrl_port = port_ + 1;
-  config.max_uri_handlers = 35;  // + /api/strings/rating
+  // Must be >= the number of httpd_register_uri_handler() calls below (36 on a TSDB
+  // build: 29 base + 4 TSDB + the 3 CCA-discovery routes). Handlers past this cap
+  // silently fail to register and 404 — TSDB stats registers last, so it's the canary.
+  // Keep generous headroom so adding a route doesn't quietly drop the tail again.
+  config.max_uri_handlers = 48;
   config.stack_size = 8192;
   config.lru_purge_enable = true;  // Enable LRU purging of connections
   config.max_open_sockets = 4;     // Limit concurrent connections to reduce memory
@@ -336,7 +340,31 @@ void TigoWebServer::setup() {
       .user_ctx = this
     };
     httpd_register_uri_handler(server_, &api_cca_refresh_uri);
-    
+
+    httpd_uri_t api_cca_discovery_uri = {
+      .uri = "/api/cca/discovery",
+      .method = HTTP_GET,
+      .handler = api_cca_discovery_handler,
+      .user_ctx = this
+    };
+    httpd_register_uri_handler(server_, &api_cca_discovery_uri);
+
+    httpd_uri_t api_cca_discovery_start_uri = {
+      .uri = "/api/cca/discovery/start",
+      .method = HTTP_POST,
+      .handler = api_cca_discovery_start_handler,
+      .user_ctx = this
+    };
+    httpd_register_uri_handler(server_, &api_cca_discovery_start_uri);
+
+    httpd_uri_t api_cca_discovery_poll_uri = {
+      .uri = "/api/cca/discovery/poll",
+      .method = HTTP_POST,
+      .handler = api_cca_discovery_poll_handler,
+      .user_ctx = this
+    };
+    httpd_register_uri_handler(server_, &api_cca_discovery_poll_uri);
+
     httpd_uri_t api_node_delete_uri = {
       .uri = "/api/nodes/delete",
       .method = HTTP_POST,
@@ -1173,12 +1201,92 @@ esp_err_t TigoWebServer::api_cca_refresh_handler(httpd_req_t *req) {
   return ESP_OK;
 }
 
+esp_err_t TigoWebServer::api_cca_discovery_handler(httpd_req_t *req) {
+  // GET: return the last cached DISCOVERY_STATUS payload + its age. No BLE side effect —
+  // the UI triggers fresh reads via /api/cca/discovery/poll.
+  TigoWebServer *server = static_cast<TigoWebServer *>(req->user_ctx);
+  if (!server->check_api_auth(req)) {
+    return ESP_OK;
+  }
+
+  PSRAMString json;
+#ifdef USE_TIGO_CCA_BLE
+  std::string status = server->ble_get_discovery_json_();
+  if (status.empty()) {
+    json.append("{\"age_s\":null,\"status\":null}");
+  } else {
+    char buf[32];
+    snprintf(buf, sizeof(buf), "%u", server->ble_get_discovery_seconds_ago_());
+    json.append("{\"age_s\":");
+    json.append(buf);
+    json.append(",\"status\":");
+    json.append(status.c_str());  // CCA payload is already a JSON object
+    json.append("}");
+  }
+#else
+  json.append("{\"age_s\":null,\"status\":null}");
+#endif
+  httpd_resp_set_type(req, "application/json");
+  httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+  httpd_resp_send(req, json.c_str(), json.length());
+  return ESP_OK;
+}
+
+esp_err_t TigoWebServer::api_cca_discovery_start_handler(httpd_req_t *req) {
+  // POST: hand off START_DISCOVERY to the main loop (BLE stack must run there).
+  TigoWebServer *server = static_cast<TigoWebServer *>(req->user_ctx);
+  if (!server->check_api_auth(req)) {
+    return ESP_OK;
+  }
+
+  const char *response;
+#ifdef USE_TIGO_CCA_BLE
+  if (server->cca_source_ == CcaSource::BLE || server->cca_source_ == CcaSource::AUTO) {
+    server->ble_discovery_start_requested_ = true;
+    response = "{\"status\":\"ok\",\"message\":\"Discovery start requested\"}";
+  } else
+#endif
+  {
+    httpd_resp_set_status(req, "400 Bad Request");
+    response = "{\"status\":\"error\",\"message\":\"Discovery requires cca_source: ble\"}";
+  }
+  httpd_resp_set_type(req, "application/json");
+  httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+  httpd_resp_send(req, response, strlen(response));
+  return ESP_OK;
+}
+
+esp_err_t TigoWebServer::api_cca_discovery_poll_handler(httpd_req_t *req) {
+  // POST: hand off a DISCOVERY_STATUS read to the main loop; result lands in the cache
+  // for the next GET /api/cca/discovery.
+  TigoWebServer *server = static_cast<TigoWebServer *>(req->user_ctx);
+  if (!server->check_api_auth(req)) {
+    return ESP_OK;
+  }
+
+  const char *response;
+#ifdef USE_TIGO_CCA_BLE
+  if (server->cca_source_ == CcaSource::BLE || server->cca_source_ == CcaSource::AUTO) {
+    server->ble_discovery_poll_requested_ = true;
+    response = "{\"status\":\"ok\",\"message\":\"Discovery status poll requested\"}";
+  } else
+#endif
+  {
+    httpd_resp_set_status(req, "400 Bad Request");
+    response = "{\"status\":\"error\",\"message\":\"Discovery requires cca_source: ble\"}";
+  }
+  httpd_resp_set_type(req, "application/json");
+  httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+  httpd_resp_send(req, response, strlen(response));
+  return ESP_OK;
+}
+
 esp_err_t TigoWebServer::api_node_delete_handler(httpd_req_t *req) {
   TigoWebServer *server = static_cast<TigoWebServer *>(req->user_ctx);
   if (!server->check_api_auth(req)) {
     return ESP_OK;
   }
-  
+
   // Parse query parameter "addr"
   char query_str[64];
   if (httpd_req_get_url_query_str(req, query_str, sizeof(query_str)) != ESP_OK) {

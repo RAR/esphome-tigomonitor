@@ -48,6 +48,12 @@ void TigoWebServer::ble_loop_() {
   if (this->ble_refresh_requested_.exchange(false)) {
     this->cca_ble_refresh_once();
   }
+  if (this->ble_discovery_start_requested_.exchange(false)) {
+    this->cca_start_discovery();
+  }
+  if (this->ble_discovery_poll_requested_.exchange(false)) {
+    this->cca_poll_discovery_status();
+  }
 
   // Drain queued commands once the link is ready.
   if (this->ble_connected_ && this->ble_ready_ && !this->ble_command_queue_.empty()) {
@@ -333,6 +339,25 @@ void TigoWebServer::cca_ble_refresh_once() {
   this->cca_send_protected("NETWORK_INFO");
 }
 
+void TigoWebServer::cca_start_discovery() {
+  // Config action: kick a topology rescan on the CCA. One-shot like the refresh —
+  // connect, DEVICE_INFO for a fresh sid, fire START_DISCOVERY, drop the link so the
+  // scan runs on the CCA on its own. Progress is read separately via DISCOVERY_STATUS.
+  ESP_LOGI(BLE_TAG, "Triggering CCA topology discovery over BLE (START_DISCOVERY)...");
+  this->ble_auto_disconnect_ = true;
+  this->cca_ble_connect();
+  this->cca_send_protected("START_DISCOVERY");
+}
+
+void TigoWebServer::cca_poll_discovery_status() {
+  // Read scan progress: connect, fresh sid, DISCOVERY_STATUS, cache the payload, drop
+  // the link. Called repeatedly by the UI while a discovery is running.
+  ESP_LOGI(BLE_TAG, "Polling CCA discovery status over BLE (DISCOVERY_STATUS)...");
+  this->ble_auto_disconnect_ = true;
+  this->cca_ble_connect();
+  this->cca_send_protected("DISCOVERY_STATUS");
+}
+
 void TigoWebServer::cca_send_protected(const std::string &command) {
   // Proven auth pattern: fetch a fresh DEVICE_INFO (gets the uts nonce), derive the
   // sid, then send `command` with that sid while it's fresh.
@@ -430,8 +455,24 @@ void TigoWebServer::ble_process_response_(const std::string &data) {
     return;
   }
 
+  if (this->ble_last_command_ == "DISCOVERY_STATUS") {
+    this->ble_store_discovery_(data);
+    ESP_LOGI(BLE_TAG, "CCA DISCOVERY_STATUS cached (%d bytes)", (int) data.length());
+    this->ble_arm_auto_disconnect_();
+    return;
+  }
+
+  if (this->ble_last_command_ == "START_DISCOVERY") {
+    // Ack only — progress is read separately via DISCOVERY_STATUS. Cache it too so the
+    // UI can confirm the kickoff, then drop the link and let the scan run on the CCA.
+    this->ble_store_discovery_(data);
+    ESP_LOGI(BLE_TAG, "CCA discovery started: %s", data.c_str());
+    this->ble_arm_auto_disconnect_();
+    return;
+  }
+
   if (this->ble_last_command_ != "DEVICE_INFO") {
-    // DISCOVERY_STATUS etc. — not surfaced on the page (yet).
+    // Any other protected command — not surfaced on the page (yet).
     ESP_LOGD(BLE_TAG, "Response for '%s' (not cached)", this->ble_last_command_.c_str());
     return;
   }
@@ -492,6 +533,24 @@ void TigoWebServer::ble_store_network_(const std::string &raw_network_info) {
 std::string TigoWebServer::ble_get_network_json_() {
   std::lock_guard<std::mutex> lock(this->cca_info_mutex_);
   return this->cca_network_json_;
+}
+
+void TigoWebServer::ble_store_discovery_(const std::string &raw_discovery_status) {
+  std::lock_guard<std::mutex> lock(this->cca_info_mutex_);
+  this->cca_discovery_json_ = raw_discovery_status;
+  this->cca_discovery_time_ = millis();
+}
+
+std::string TigoWebServer::ble_get_discovery_json_() {
+  std::lock_guard<std::mutex> lock(this->cca_info_mutex_);
+  return this->cca_discovery_json_;
+}
+
+uint32_t TigoWebServer::ble_get_discovery_seconds_ago_() {
+  std::lock_guard<std::mutex> lock(this->cca_info_mutex_);
+  if (this->cca_discovery_time_ == 0)
+    return 0;
+  return (millis() - this->cca_discovery_time_) / 1000;
 }
 
 bool TigoWebServer::ble_has_cca_info_() {
