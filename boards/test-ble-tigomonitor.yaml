@@ -27,6 +27,7 @@ external_components:
 tigo_server:
   cca_source: ble
   ble_client_id: tigo_cca_ble
+  cloud_import: true
 
 wifi:
   ssid: !secret wifi_ssid

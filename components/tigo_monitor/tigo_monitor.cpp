@@ -213,6 +213,11 @@ void TigoMonitorComponent::setup() {
   }
 #endif
 
+#ifdef USE_TIGO_CLOUD
+  // Restore any persisted Tigo cloud token so the import works after a reboot.
+  tigo_cloud_load_creds();
+#endif
+
 #ifdef USE_ESP_IDF
   // Log PSRAM availability
   size_t psram_size = heap_caps_get_total_size(MALLOC_CAP_SPIRAM);

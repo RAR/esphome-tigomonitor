@@ -24,6 +24,7 @@ CONF_BACKLIGHT = 'backlight'
 CONF_INTERNAL_TEMPERATURE_ID = 'internal_temperature_id'
 CONF_CCA_SOURCE = 'cca_source'
 CONF_BLE_CLIENT_ID = 'ble_client_id'  # matches ble_client.register_ble_node's key
+CONF_CLOUD_IMPORT = 'cloud_import'
 
 
 def _validate_cca_source(config):
@@ -52,6 +53,9 @@ CONFIG_SCHEMA = cv.All(cv.Schema({
     # data, else HTTP). 'ble'/'auto' require ble_client_id.
     cv.Optional(CONF_CCA_SOURCE, default='http'): cv.one_of(*CCA_SOURCES, lower=True),
     cv.Optional(CONF_BLE_CLIENT_ID): cv.use_id(ble_client.BLEClient),
+    # Enable the Tigo cloud layout import (panel names + string/MPPT structure when the
+    # CCA's local HTTP API is locked down). Credentials are entered in the web UI.
+    cv.Optional(CONF_CLOUD_IMPORT, default=False): cv.boolean,
 }).extend(cv.COMPONENT_SCHEMA), _validate_cca_source)
 
 
@@ -180,3 +184,11 @@ async def to_code(config):
     if CONF_BLE_CLIENT_ID in config:
         cg.add_define('USE_TIGO_CCA_BLE')
         await ble_client.register_ble_node(var, config)
+
+    # Tigo cloud layout import: compile the (guarded) cloud client + UI, and make sure the
+    # mbedTLS certificate bundle is built in so HTTPS to mapi.tigoenergy.com verifies.
+    if config[CONF_CLOUD_IMPORT]:
+        cg.add_define('USE_TIGO_CLOUD')
+        from esphome.components.esp32 import add_idf_sdkconfig_option
+        add_idf_sdkconfig_option('CONFIG_MBEDTLS_CERTIFICATE_BUNDLE', True)
+        add_idf_sdkconfig_option('CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_DEFAULT_FULL', True)

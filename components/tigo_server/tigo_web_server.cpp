@@ -158,8 +158,9 @@ void TigoWebServer::setup() {
   httpd_config_t config = HTTPD_DEFAULT_CONFIG();
   config.server_port = port_;
   config.ctrl_port = port_ + 1;
-  // Must be >= the number of httpd_register_uri_handler() calls below (40 on a TSDB
-  // build: 29 base + 4 TSDB + 3 CCA-discovery + 4 CCA-network routes). Handlers past this cap
+  // Must be >= the number of httpd_register_uri_handler() calls below (44 on a TSDB +
+  // cloud build: 29 base + 4 TSDB + 3 CCA-discovery + 4 CCA-network + 1 CCA data-export
+  // + 3 cloud). Handlers past this cap
   // silently fail to register and 404 — TSDB stats registers last, so it's the canary.
   // Keep generous headroom so adding a route doesn't quietly drop the tail again.
   config.max_uri_handlers = 48;
@@ -396,6 +397,40 @@ void TigoWebServer::setup() {
       .user_ctx = this
     };
     httpd_register_uri_handler(server_, &api_cca_wifi_clear_uri);
+
+    httpd_uri_t api_cca_data_export_uri = {
+      .uri = "/api/cca/data-export",
+      .method = HTTP_POST,
+      .handler = api_cca_data_export_handler,
+      .user_ctx = this
+    };
+    httpd_register_uri_handler(server_, &api_cca_data_export_uri);
+
+#ifdef USE_TIGO_CLOUD
+    httpd_uri_t api_cloud_status_uri = {
+      .uri = "/api/cloud/status",
+      .method = HTTP_GET,
+      .handler = api_cloud_status_handler,
+      .user_ctx = this
+    };
+    httpd_register_uri_handler(server_, &api_cloud_status_uri);
+
+    httpd_uri_t api_cloud_login_uri = {
+      .uri = "/api/cloud/login",
+      .method = HTTP_POST,
+      .handler = api_cloud_login_handler,
+      .user_ctx = this
+    };
+    httpd_register_uri_handler(server_, &api_cloud_login_uri);
+
+    httpd_uri_t api_cloud_import_uri = {
+      .uri = "/api/cloud/import",
+      .method = HTTP_POST,
+      .handler = api_cloud_import_handler,
+      .user_ctx = this
+    };
+    httpd_register_uri_handler(server_, &api_cloud_import_uri);
+#endif
 
     httpd_uri_t api_node_delete_uri = {
       .uri = "/api/nodes/delete",
@@ -1321,11 +1356,12 @@ namespace {
 bool tigo_is_net_read_cmd(const char *cmd) {
   return strcmp(cmd, "NETWORK_WIFI_SCAN") == 0;
 }
-// Anything the GET cache endpoint will echo (read + write results). Gating the cmd here
+// Anything the GET cache endpoint will echo (read + action results). Gating the cmd here
 // keeps an arbitrary query value from being interpolated raw into the JSON response.
 bool tigo_is_known_net_cmd(const char *cmd) {
   return tigo_is_net_read_cmd(cmd) || strcmp(cmd, "NETWORK_WIFI_CONNECT") == 0 ||
-         strcmp(cmd, "NETWORK_WIFI_CLEAR") == 0 || strcmp(cmd, "NETWORK_INFO") == 0;
+         strcmp(cmd, "NETWORK_WIFI_CLEAR") == 0 || strcmp(cmd, "NETWORK_INFO") == 0 ||
+         strcmp(cmd, "DEVICE_DATA_EXPORT") == 0;
 }
 }  // namespace
 
@@ -1493,6 +1529,138 @@ esp_err_t TigoWebServer::api_cca_wifi_clear_handler(httpd_req_t *req) {
   httpd_resp_sendstr(req, response);
   return ESP_OK;
 }
+
+esp_err_t TigoWebServer::api_cca_data_export_handler(httpd_req_t *req) {
+  // POST — ask the CCA to push its data to Tigo's cloud now. Paramless protected action;
+  // the ack caches under DEVICE_DATA_EXPORT for a follow-up GET /api/cca/network.
+  TigoWebServer *server = static_cast<TigoWebServer *>(req->user_ctx);
+  if (!server->check_api_auth(req)) {
+    return ESP_OK;
+  }
+
+  const char *response;
+#ifdef USE_TIGO_CCA_BLE
+  if (server->cca_source_ == CcaSource::BLE || server->cca_source_ == CcaSource::AUTO) {
+    server->ble_enqueue_net_request_("DEVICE_DATA_EXPORT", "");
+    response = "{\"status\":\"ok\",\"message\":\"Cloud export requested\"}";
+  } else
+#endif
+  {
+    httpd_resp_set_status(req, "400 Bad Request");
+    response = "{\"status\":\"error\",\"message\":\"requires cca_source: ble\"}";
+  }
+  httpd_resp_set_type(req, "application/json");
+  httpd_resp_sendstr(req, response);
+  return ESP_OK;
+}
+
+#ifdef USE_TIGO_CLOUD
+esp_err_t TigoWebServer::api_cloud_status_handler(httpd_req_t *req) {
+  // GET — is the cloud token configured, and for whom / until when.
+  TigoWebServer *server = static_cast<TigoWebServer *>(req->user_ctx);
+  if (!server->check_api_auth(req)) {
+    return ESP_OK;
+  }
+  bool configured = server->parent_ && server->parent_->tigo_cloud_has_token();
+  char resp[320];
+  snprintf(resp, sizeof(resp),
+           "{\"configured\":%s,\"email\":\"%s\",\"expires\":\"%s\",\"system_id\":%d}",
+           configured ? "true" : "false",
+           server->parent_ ? server->parent_->tigo_cloud_email().c_str() : "",
+           server->parent_ ? server->parent_->tigo_cloud_expires().c_str() : "",
+           server->parent_ ? server->parent_->tigo_cloud_system_id() : 0);
+  httpd_resp_set_type(req, "application/json");
+  httpd_resp_sendstr(req, resp);
+  return ESP_OK;
+}
+
+esp_err_t TigoWebServer::api_cloud_login_handler(httpd_req_t *req) {
+  // POST {email,password} — log into Tigo's cloud. The password is used only to obtain a
+  // token (which is what gets persisted); it is not stored. Body parsed with cJSON so
+  // special characters in the password are handled correctly.
+  TigoWebServer *server = static_cast<TigoWebServer *>(req->user_ctx);
+  if (!server->check_api_auth(req)) {
+    return ESP_OK;
+  }
+  if (server->parent_ == nullptr) {
+    httpd_resp_set_status(req, "503 Service Unavailable");
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, "{\"status\":\"error\",\"message\":\"monitor not bound\"}");
+    return ESP_OK;
+  }
+
+  char body[512];
+  int ret = httpd_req_recv(req, body, sizeof(body) - 1);
+  if (ret <= 0) {
+    httpd_resp_set_status(req, "400 Bad Request");
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, "{\"status\":\"error\",\"message\":\"empty body\"}");
+    return ESP_OK;
+  }
+  body[ret] = '\0';
+
+  cJSON *root = cJSON_Parse(body);
+  cJSON *e = root ? cJSON_GetObjectItem(root, "email") : nullptr;
+  cJSON *p = root ? cJSON_GetObjectItem(root, "password") : nullptr;
+  if (!e || !cJSON_IsString(e) || !e->valuestring[0] || !p || !cJSON_IsString(p) ||
+      !p->valuestring[0]) {
+    if (root) cJSON_Delete(root);
+    httpd_resp_set_status(req, "400 Bad Request");
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, "{\"status\":\"error\",\"message\":\"email and password required\"}");
+    return ESP_OK;
+  }
+  std::string email = e->valuestring;
+  std::string password = p->valuestring;
+  cJSON_Delete(root);
+  // Scrub the password out of the request buffer once captured.
+  memset(body, 0, sizeof(body));
+
+  bool ok = server->parent_->tigo_cloud_login(email, password);
+  password.clear();
+  if (!ok) {
+    httpd_resp_set_status(req, "502 Bad Gateway");
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(
+        req, "{\"status\":\"error\",\"message\":\"Login failed — check credentials and network\"}");
+    return ESP_OK;
+  }
+  char resp[320];
+  snprintf(resp, sizeof(resp),
+           "{\"status\":\"ok\",\"email\":\"%s\",\"expires\":\"%s\",\"system_id\":%d}",
+           server->parent_->tigo_cloud_email().c_str(),
+           server->parent_->tigo_cloud_expires().c_str(), server->parent_->tigo_cloud_system_id());
+  httpd_resp_set_type(req, "application/json");
+  httpd_resp_sendstr(req, resp);
+  return ESP_OK;
+}
+
+esp_err_t TigoWebServer::api_cloud_import_handler(httpd_req_t *req) {
+  // POST — fetch the system layout from the cloud and apply it to the node table.
+  TigoWebServer *server = static_cast<TigoWebServer *>(req->user_ctx);
+  if (!server->check_api_auth(req)) {
+    return ESP_OK;
+  }
+  if (server->parent_ == nullptr) {
+    httpd_resp_set_status(req, "503 Service Unavailable");
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, "{\"status\":\"error\",\"message\":\"monitor not bound\"}");
+    return ESP_OK;
+  }
+  bool ok = server->parent_->tigo_cloud_import();
+  if (!ok) {
+    httpd_resp_set_status(req, "502 Bad Gateway");
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(
+        req,
+        "{\"status\":\"error\",\"message\":\"Import failed — token may be expired; reconnect\"}");
+    return ESP_OK;
+  }
+  httpd_resp_set_type(req, "application/json");
+  httpd_resp_sendstr(req, "{\"status\":\"ok\",\"message\":\"Layout imported from Tigo cloud\"}");
+  return ESP_OK;
+}
+#endif  // USE_TIGO_CLOUD
 
 esp_err_t TigoWebServer::api_node_delete_handler(httpd_req_t *req) {
   TigoWebServer *server = static_cast<TigoWebServer *>(req->user_ctx);

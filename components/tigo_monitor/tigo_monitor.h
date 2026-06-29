@@ -511,7 +511,22 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   
   // CCA device info query (called by web server)
   void query_cca_device_info();
-  
+
+#ifdef USE_TIGO_CLOUD
+  // Tigo cloud import — fetches the system layout (panel names + string/MPPT/inverter
+  // structure + optimizer serials) from Tigo's cloud and applies it to the node table.
+  // This recovers the device/layout data we can't read locally once CCA firmware 4.0.4+
+  // locks the local HTTP API (BLE gives CCA info/network but not the panel layout).
+  // Credentials are entered in the web UI; only the resulting bearer token is persisted.
+  bool tigo_cloud_login(const std::string &email, const std::string &password);
+  bool tigo_cloud_import();
+  bool tigo_cloud_has_token() const { return !cloud_token_.empty(); }
+  const std::string &tigo_cloud_email() const { return cloud_email_; }
+  const std::string &tigo_cloud_expires() const { return cloud_expires_iso_; }
+  int tigo_cloud_system_id() const { return cloud_system_id_; }
+  void tigo_cloud_load_creds();  // restore persisted token on boot (called from setup())
+#endif
+
  protected:
   // Frame processing
   void process_serial_data();
@@ -562,6 +577,19 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   void query_cca_config();
   void match_cca_to_uart(const std::string &json_response);
   std::string get_barcode_for_node(const NodeTableData &node);
+
+#ifdef USE_TIGO_CLOUD
+  // HTTPS (TLS via the cert bundle) JSON request helper; returns body + status.
+  bool cloud_http_json_(const char *method, const std::string &url, const std::string &body,
+                        const std::string &bearer, std::string &out_body, int &out_status);
+  void match_cloud_layout_to_uart_(const std::string &layout_json);  // apply layout to nodes
+  void cloud_save_creds_();
+  std::string cloud_email_;
+  std::string cloud_token_;
+  std::string cloud_refresh_token_;
+  std::string cloud_expires_iso_;
+  int cloud_system_id_{0};
+#endif
 
   // Thread-safe setter for cca_device_info_. Takes state_mutex_ briefly
   // around the assignment so concurrent get_cca_device_info() callers

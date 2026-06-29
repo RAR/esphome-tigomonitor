@@ -1163,10 +1163,30 @@
         <div class="section-title">Device information</div>
         <div class="section-sub">
           <button class="btn" id="cca-refresh-btn">Refresh from CCA</button>
+          <button class="btn" id="cca-export-btn">Sync to cloud</button>
         </div>
       </div>
       <div class="tools-card">
         <div id="cca-device-info" style="color:var(--text-dim)">Loading CCA device information…</div>
+      </div>
+
+      <div class="section-head" id="cca-cloud-head" style="display:none">
+        <div class="section-title">Tigo Cloud</div>
+        <div class="section-sub" id="cca-cloud-status" style="color:var(--text-dim);font-size:12px">—</div>
+      </div>
+      <div class="tools-card" id="cca-cloud-card" style="display:none">
+        <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">
+          <input id="cca-cloud-email" type="email" placeholder="Tigo email" autocomplete="off"
+            style="flex:1;min-width:160px;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text)">
+          <input id="cca-cloud-pwd" type="password" placeholder="Tigo password" autocomplete="off"
+            style="flex:1;min-width:160px;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text)">
+          <button class="btn" id="cca-cloud-connect-btn">Connect</button>
+          <button class="btn" id="cca-cloud-import-btn">Import layout</button>
+        </div>
+        <div style="color:var(--text-dim);font-size:12px;margin-top:8px">
+          Pulls panel names and string/MPPT layout from Tigo's cloud (for when the CCA's local HTTP API is locked). Only a login token is stored on the device — not your password.
+        </div>
+        <div id="cca-cloud-result" style="margin-top:8px"></div>
       </div>
 
       <div class="section-head">
@@ -3139,6 +3159,40 @@
     }
   });
 
+  // Ask the CCA to push its data to Tigo's cloud now. Best-effort: confirm via the cached
+  // ack if it lands, otherwise leave it at "requested".
+  document.getElementById('cca-export-btn').addEventListener('click', async () => {
+    if (ccaBusy) return;
+    ccaBusy = true;
+    const btn = document.getElementById('cca-export-btn');
+    const orig = btn.textContent;
+    btn.disabled = true; btn.textContent = 'Syncing…';
+    try {
+      const r = await apiFetch('/api/cca/data-export', { method: 'POST' });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.message || `failed (${r.status})`);
+      showToast('Cloud export requested ✓', 'ok');
+      const start = Date.now();
+      while (Date.now() - start < 20000) {
+        await new Promise(res => setTimeout(res, 2500));
+        try {
+          const rr = await apiFetch('/api/cca/network?cmd=DEVICE_DATA_EXPORT');
+          if (!rr.ok) continue;
+          const d = await rr.json();
+          if (d.result && d.age_s != null && d.age_s <= (Date.now() - start) / 1000 + 3) {
+            showToast('CCA acknowledged cloud export ✓', 'ok');
+            break;
+          }
+        } catch (_) {}
+      }
+    } catch (e) {
+      showToast(`Cloud export failed: ${e.message}`, 'err');
+    } finally {
+      btn.disabled = false; btn.textContent = orig;
+      ccaBusy = false;
+    }
+  });
+
   // ===== Topology discovery =====
   function ccaRenderDiscovery(status, ageS) {
     const el = document.getElementById('cca-discovery-status');
@@ -3308,7 +3362,76 @@
     }
   });
 
-  document.querySelector('#nav button[data-view="cca"]').addEventListener('click', () => { if (!ccaBusy) refreshCca(); });
+  // ===== Tigo Cloud (layout import) =====
+  // Reveals the section only when the firmware was built with cloud_import (else the
+  // endpoint 404s and we leave it hidden).
+  async function ccaCloudStatus() {
+    let d;
+    try {
+      const r = await apiFetch('/api/cloud/status');
+      if (!r.ok) return;
+      d = await r.json();
+    } catch (_) { return; }
+    document.getElementById('cca-cloud-head').style.display = '';
+    document.getElementById('cca-cloud-card').style.display = '';
+    const s = document.getElementById('cca-cloud-status');
+    const importBtn = document.getElementById('cca-cloud-import-btn');
+    if (d.configured) {
+      s.textContent = `Connected as ${d.email} · token expires ${d.expires || '—'} · system ${d.system_id || '—'}`;
+      importBtn.disabled = false;
+    } else {
+      s.textContent = 'Not connected — enter your Tigo login to enable layout import.';
+      importBtn.disabled = true;
+    }
+  }
+
+  document.getElementById('cca-cloud-connect-btn').addEventListener('click', async () => {
+    if (ccaBusy) return;
+    const email = document.getElementById('cca-cloud-email').value.trim();
+    const pwd = document.getElementById('cca-cloud-pwd').value;
+    const res = document.getElementById('cca-cloud-result');
+    if (!email || !pwd) { res.innerHTML = '<span style="color:var(--bad)">Enter email and password.</span>'; return; }
+    ccaBusy = true;
+    const btn = document.getElementById('cca-cloud-connect-btn');
+    const orig = btn.textContent; btn.disabled = true; btn.textContent = 'Connecting…';
+    res.innerHTML = '<span style="color:var(--text-dim)">Logging into Tigo cloud… (~10 s)</span>';
+    try {
+      const r = await apiFetch('/api/cloud/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password: pwd }) });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.message || `failed (${r.status})`);
+      document.getElementById('cca-cloud-pwd').value = '';
+      res.innerHTML = '<span style="color:var(--good)">Connected ✓ — now Import layout.</span>';
+      await ccaCloudStatus();
+    } catch (e) {
+      res.innerHTML = `<span style="color:var(--bad)">Connect failed: ${e.message}</span>`;
+    } finally {
+      btn.disabled = false; btn.textContent = orig; ccaBusy = false;
+    }
+  });
+
+  document.getElementById('cca-cloud-import-btn').addEventListener('click', async () => {
+    if (ccaBusy) return;
+    ccaBusy = true;
+    const btn = document.getElementById('cca-cloud-import-btn');
+    const orig = btn.textContent; btn.disabled = true; btn.textContent = 'Importing…';
+    const res = document.getElementById('cca-cloud-result');
+    res.innerHTML = '<span style="color:var(--text-dim)">Fetching layout from Tigo cloud… (~10 s)</span>';
+    try {
+      const r = await apiFetch('/api/cloud/import', { method: 'POST' });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.message || `failed (${r.status})`);
+      res.innerHTML = '<span style="color:var(--good)">Layout imported ✓</span>';
+      showToast('Tigo cloud layout imported ✓', 'ok');
+    } catch (e) {
+      res.innerHTML = `<span style="color:var(--bad)">Import failed: ${e.message}</span>`;
+    } finally {
+      btn.disabled = false; btn.textContent = orig; ccaBusy = false;
+      ccaCloudStatus();
+    }
+  });
+
+  document.querySelector('#nav button[data-view="cca"]').addEventListener('click', () => { if (!ccaBusy) { refreshCca(); ccaCloudStatus(); } });
+  ccaCloudStatus();
   if (window.location.hash === '#cca') refreshCca();
   // Same 30s cadence the standalone /cca page used.
   setInterval(() => {

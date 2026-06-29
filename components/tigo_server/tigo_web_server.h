@@ -232,6 +232,12 @@ class TigoWebServer : public Component
   static esp_err_t api_cca_network_poll_handler(httpd_req_t *req);     // POST trigger read ?cmd=
   static esp_err_t api_cca_wifi_connect_handler(httpd_req_t *req);     // POST {nid,pwd}
   static esp_err_t api_cca_wifi_clear_handler(httpd_req_t *req);       // POST (destructive)
+  static esp_err_t api_cca_data_export_handler(httpd_req_t *req);      // POST trigger cloud push
+#ifdef USE_TIGO_CLOUD
+  static esp_err_t api_cloud_status_handler(httpd_req_t *req);   // GET configured/email/expires
+  static esp_err_t api_cloud_login_handler(httpd_req_t *req);    // POST {email,password}
+  static esp_err_t api_cloud_import_handler(httpd_req_t *req);   // POST trigger layout import
+#endif
   static esp_err_t api_node_delete_handler(httpd_req_t *req);
   static esp_err_t api_node_import_handler(httpd_req_t *req);
   static esp_err_t api_restart_handler(httpd_req_t *req);
