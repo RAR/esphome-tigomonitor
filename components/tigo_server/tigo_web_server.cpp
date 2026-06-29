@@ -1704,8 +1704,58 @@ esp_err_t TigoWebServer::api_node_import_handler(httpd_req_t *req) {
     }
   }
   
+  // Optional manual-Topology overrides. Parse them now (before the JSON is freed); they
+  // are applied after import_node_table() has rebuilt the string/inverter groups, since
+  // the setters no-op when their target isn't present in memory.
+  std::vector<std::pair<std::string, std::string>> inv_overrides;  // name -> display_name
+  struct StrOverride {
+    std::string label, display_label;
+    uint16_t rating;
+    bool has_display, has_rating;
+  };
+  std::vector<StrOverride> str_overrides;
+
+  cJSON *inv_arr = cJSON_GetObjectItem(root, "inverters");
+  if (inv_arr && cJSON_IsArray(inv_arr)) {
+    int n = cJSON_GetArraySize(inv_arr);
+    for (int i = 0; i < n; i++) {
+      cJSON *o = cJSON_GetArrayItem(inv_arr, i);
+      if (!o || !cJSON_IsObject(o)) continue;
+      cJSON *nm = cJSON_GetObjectItem(o, "name");
+      cJSON *dn = cJSON_GetObjectItem(o, "display_name");
+      if (nm && cJSON_IsString(nm) && nm->valuestring[0] && dn && cJSON_IsString(dn))
+        inv_overrides.emplace_back(nm->valuestring, dn->valuestring);
+    }
+  }
+  cJSON *str_arr = cJSON_GetObjectItem(root, "strings");
+  if (str_arr && cJSON_IsArray(str_arr)) {
+    int n = cJSON_GetArraySize(str_arr);
+    for (int i = 0; i < n; i++) {
+      cJSON *o = cJSON_GetArrayItem(str_arr, i);
+      if (!o || !cJSON_IsObject(o)) continue;
+      cJSON *lb = cJSON_GetObjectItem(o, "label");
+      if (!lb || !cJSON_IsString(lb) || !lb->valuestring[0]) continue;
+      StrOverride so;
+      so.label = lb->valuestring;
+      so.rating = 0;
+      so.has_display = false;
+      so.has_rating = false;
+      cJSON *dl = cJSON_GetObjectItem(o, "display_label");
+      if (dl && cJSON_IsString(dl)) {
+        so.display_label = dl->valuestring;
+        so.has_display = true;
+      }
+      cJSON *rt = cJSON_GetObjectItem(o, "panel_rating_w");
+      if (rt && cJSON_IsNumber(rt) && rt->valueint > 0) {
+        so.rating = (uint16_t) rt->valueint;
+        so.has_rating = true;
+      }
+      if (so.has_display || so.has_rating) str_overrides.push_back(so);
+    }
+  }
+
   cJSON_Delete(root);
-  
+
   ESP_LOGI(TAG, "Parsed %d JSON objects, added %zu valid nodes", array_size, nodes.size());
   
   // Free the input buffer immediately after parsing to reduce memory pressure
@@ -1724,8 +1774,24 @@ esp_err_t TigoWebServer::api_node_import_handler(httpd_req_t *req) {
   size_t free_before = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
   ESP_LOGI(TAG, "Free internal RAM before import: %zu bytes", free_before);
   
-  // Import the nodes
+  // Import the nodes (this rebuilds the string/inverter groups synchronously)
   bool success = server->parent_->import_node_table(nodes);
+
+  // Re-apply manual Topology overrides now that the groups exist. Each setter persists to
+  // NVS and no-ops (logs) if its target string/inverter isn't present.
+  int overrides_applied = 0;
+  if (success) {
+    for (const auto &io : inv_overrides)
+      if (server->parent_->set_inverter_display_name(io.first, io.second)) overrides_applied++;
+    for (const auto &so : str_overrides) {
+      if (so.has_display && server->parent_->set_string_display_label(so.label, so.display_label))
+        overrides_applied++;
+      if (so.has_rating && server->parent_->set_string_panel_rating(so.label, so.rating))
+        overrides_applied++;
+    }
+    if (overrides_applied)
+      ESP_LOGI(TAG, "Applied %d Topology override(s) on import", overrides_applied);
+  }
   
   // Log memory status after import
   size_t free_after = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
@@ -1736,8 +1802,8 @@ esp_err_t TigoWebServer::api_node_import_handler(httpd_req_t *req) {
   if (success) {
     char response[256];
     snprintf(response, sizeof(response),
-      "{\"status\":\"ok\",\"message\":\"Successfully imported %zu nodes\",\"imported\":%zu}",
-      nodes.size(), nodes.size());
+      "{\"status\":\"ok\",\"message\":\"Successfully imported %zu nodes\",\"imported\":%zu,\"overrides\":%d}",
+      nodes.size(), nodes.size(), overrides_applied);
     httpd_resp_set_type(req, "application/json");
     httpd_resp_send(req, response, strlen(response));
   } else {
@@ -2231,6 +2297,11 @@ void TigoWebServer::build_node_table_json(PSRAMString& json) {
   
   cJSON *root = cJSON_CreateObject();
   cJSON *nodes_array = cJSON_CreateArray();
+  // Manual Topology overrides travel alongside the nodes so a backup/restore keeps the
+  // user's customizations. Only entries that were actually set are emitted, keyed by the
+  // same canonical identifiers the import re-attaches them by (inverter name / string label).
+  cJSON *inverters_array = cJSON_CreateArray();
+  cJSON *strings_array = cJSON_CreateArray();
 
   parent_->with_state_lock([&]() {
   for (const auto &node : parent_->get_node_table()) {
@@ -2246,12 +2317,36 @@ void TigoWebServer::build_node_table_json(PSRAMString& json) {
     cJSON_AddStringToObject(node_obj, "cca_string", node.cca_string_label.c_str());
     cJSON_AddStringToObject(node_obj, "cca_inverter", node.cca_inverter_label.c_str());
     cJSON_AddStringToObject(node_obj, "cca_channel", node.cca_channel.c_str());
-    
+
     cJSON_AddItemToArray(nodes_array, node_obj);
+  }
+
+  // Inverter display-name overrides.
+  for (const auto &inv : parent_->get_inverters()) {
+    if (inv.display_name.empty()) continue;
+    cJSON *o = cJSON_CreateObject();
+    cJSON_AddStringToObject(o, "name", inv.name.c_str());
+    cJSON_AddStringToObject(o, "display_name", inv.display_name.c_str());
+    cJSON_AddItemToArray(inverters_array, o);
+  }
+
+  // String display-label and panel-rating overrides.
+  for (const auto &pair : parent_->get_strings()) {
+    const auto &s = pair.second;
+    if (s.display_label.empty() && s.panel_rating_w == 0) continue;
+    cJSON *o = cJSON_CreateObject();
+    cJSON_AddStringToObject(o, "label", s.string_label.c_str());
+    if (!s.display_label.empty())
+      cJSON_AddStringToObject(o, "display_label", s.display_label.c_str());
+    if (s.panel_rating_w > 0)
+      cJSON_AddNumberToObject(o, "panel_rating_w", s.panel_rating_w);
+    cJSON_AddItemToArray(strings_array, o);
   }
   });
 
   cJSON_AddItemToObject(root, "nodes", nodes_array);
+  cJSON_AddItemToObject(root, "inverters", inverters_array);
+  cJSON_AddItemToObject(root, "strings", strings_array);
   
   char *json_str = cJSON_Print(root);
   json.append(json_str);

@@ -2592,7 +2592,8 @@
         throw new Error(msg);
       }
       const result = await r.json();
-      showToast(`Imported ${result.imported || data.nodes.length} node(s) ✓`, 'ok');
+      const extra = result.overrides ? `, ${result.overrides} override(s)` : '';
+      showToast(`Imported ${result.imported || data.nodes.length} node(s)${extra} ✓`, 'ok');
       await refreshNodes();
     } catch (e) {
       showToast(`Import failed: ${e.message}`, 'err');
