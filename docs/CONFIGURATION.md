@@ -95,6 +95,8 @@ tigo_monitor:
 
 Applied to: individual device power, string aggregates, total system power, energy calculations.
 
+> **Tip:** `power_calibration` (and `night_mode_timeout`, `reset_at_midnight`, `sync_cca_on_startup`, `cca_ip`) can also be edited live in the web UI under **Tools → Device Configuration** and stored on-device, so you can tune them without reflashing. See [On-device configuration](#on-device-configuration-tools--device-configuration).
+
 ---
 
 ## Tigo Web Server Component
@@ -106,6 +108,11 @@ tigo_server:
   api_token: "your-secret-token"
   web_username: "admin"
   web_password: "secure-password"
+  # Optional: read the CCA over Bluetooth (firmware 4.0.4+ locks local HTTP)
+  cca_source: ble            # http (default) | ble | auto
+  ble_client_id: tigo_cca_ble
+  # Optional: recover the panel/string layout from Tigo's cloud
+  cloud_import: true
 ```
 
 ### Options
@@ -117,6 +124,50 @@ tigo_server:
 | `api_token` | String | None | Bearer token for API auth |
 | `web_username` | String | None | HTTP Basic Auth username |
 | `web_password` | String | None | HTTP Basic Auth password |
+| `cca_source` | Enum | `http` | CCA Info data source: `http`, `ble`, or `auto`. `ble`/`auto` require `ble_client_id` |
+| `ble_client_id` | ID | None | A `ble_client:` for the CCA's BLE MAC. The MAC is a default/seed — reselect it via the **CCA Connection** search and store it on-device |
+| `cloud_import` | Boolean | `false` | Enable the Tigo Cloud page + cloud layout import (compiles the cloud client + TLS cert bundle) |
+
+### CCA over Bluetooth (`cca_source: ble`)
+
+Tigo CCA firmware 4.0.4+ (incl. 4.0.5-ct) locks the local HTTP API, so the CCA Info page can instead source data over Bluetooth. With `cca_source: ble` and a `ble_client_id`, `tigo_server` becomes the BLE client and talks the CCA's `mobile_api` over GATT. The link is opened on demand and dropped after each read so the Tigo phone app can still connect (the CCA allows one BLE central at a time).
+
+```yaml
+ble_client:
+  - mac_address: "04:C0:5B:AA:BB:CC"   # default/seed — required by ble_client, overridable in the UI
+    id: tigo_cca_ble
+    auto_connect: false                 # we connect on demand; don't hold the link at boot
+
+esp32_ble:
+  use_psram: true       # BLE host buffers from PSRAM
+  max_connections: 1
+
+esp32_ble_tracker:
+  scan_parameters:
+    interval: 320ms
+    window: 60ms
+    active: true
+```
+
+You don't have to know the MAC up front: the CCA Info page's **CCA Connection** card scans for the CCA by its Tigo `04:C0:5B` address prefix and lets you pick it. The choice is saved on-device (NVS) and overrides the YAML MAC across reboots; **Revert** restores the YAML value. The `ble_client:` block (with *some* MAC) is still required — `mac_address` is a required field, so leave your real MAC there as the default.
+
+### On-device configuration (Tools → Device Configuration)
+
+These runtime knobs can be set in the web UI and persisted to the ESP32 (NVS) without reflashing — handy for tuning `power_calibration` against a reference meter, or changing behavior on a deployed unit:
+
+| Knob | Notes |
+|------|-------|
+| `power_calibration` | Applied immediately (every power calc reads it live) |
+| `night_mode_timeout` | Minutes of silence before readings are zeroed |
+| `reset_at_midnight` | Reset peaks + daily energy at local midnight (needs a time source) |
+| `sync_cca_on_startup` | Query the CCA over local HTTP at boot (only with a `cca_ip`) |
+| `cca_ip` | CCA IP for local HTTP queries (older firmware) |
+
+The YAML value is the **default**. A stored value overrides it until you press **Revert**, which clears the override so future YAML edits apply again (Revert is enabled only when the live value differs from the default). Structural settings (inverter layout, device count, ports, IDs) and auth (`api_token`/`web_*`) stay YAML-only — the latter because NVS is plaintext-at-rest.
+
+### Tigo cloud import (`cloud_import: true`)
+
+When the CCA's local HTTP is locked, the panel names + string/MPPT/inverter layout can be recovered from Tigo's cloud (the same API the mobile app uses). Enter your Tigo account in the **Configure** modal on the Tigo Cloud page — **only the resulting bearer token is persisted to NVS, never the password**. The page also shows Tigo's own per-equipment health/status/history; layout import is a button on the Topology page. HTTPS is verified against the mbedTLS certificate bundle, which `cloud_import` enables automatically.
 
 ### Authentication
 

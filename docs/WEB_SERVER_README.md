@@ -10,9 +10,10 @@ Tigo Monitor ships a single-page web app and a JSON API on the configured `tigo_
 | History | `/app#history` | TSDB-backed power/energy charts; range tabs (day / week / month / year) |
 | Topology | `/app#topology` | Inverter → string → panel tree with live V/I/W/°C; rename + nameplate editing |
 | Node Table | `/app#nodes` | Device registry with CCA metadata; Export / Import as JSON |
-| Tools | `/app#tools` | YAML generator + Reset Peak / Clear Node Table / Restart |
+| Tools | `/app#tools` | **Device Configuration** (on-device knobs) · YAML generator · Reset Peak / Clear Node Table / Restart |
 | Diagnostics | `/app#diagnostics` | Memory · network · UART telemetry · TSDB stats |
-| CCA Info | `/app#cca` | Live CCA mirror; manual Refresh button |
+| CCA Info | `/app#cca` | Live CCA mirror (HTTP or BLE source); Refresh · **CCA Connection** (BLE search) · Network status · WiFi config · Topology discovery |
+| Tigo Cloud | `/app#cloudstatus` | Tigo-cloud health, per-equipment status + history (shown only when `cloud_import` is set) |
 
 `/`, `/nodes`, `/status`, `/yaml`, `/cca`, `/history` all 302 → `/app#<view>`. The redirects use a relative `Location` so they work standalone *and* under HA Ingress without any extra configuration.
 
@@ -23,6 +24,8 @@ The sidebar's footer carries:
 - **GitHub link** → opens `github.com/RAR/esphome-tigomonitor` in a new tab.
 - **°C / °F toggle** — persists via `localStorage['tempUnit']` (same key the legacy page used). The button shows the unit you'll *get* if you click. Active view re-renders immediately.
 - **Theme toggle** — light/dark, persists via `localStorage['tigoTheme']`.
+
+When `cloud_import` is set and a Tigo cloud token is connected, a **cloud status box** also appears in the sidebar with at-a-glance severity dots for the CCA and panels (refreshed ~10 min while the UI is open); clicking it opens the Tigo Cloud view.
 
 ### Naming overrides
 
@@ -63,6 +66,23 @@ Every column header on the Nodes view is clickable. Click cycles ascending / des
 
 Filters (search, string, state) are applied first; sort sees the filtered set.
 
+### Device Configuration (Tools view)
+
+A handful of runtime knobs can be edited in the UI and persisted to the ESP32 (NVS) without reflashing: `power_calibration` (applied immediately — every power calc reads it live), `night_mode_timeout`, `reset_at_midnight`, `sync_cca_on_startup`, and `cca_ip`. The YAML values remain the **defaults**: at boot the codegen setters populate the members, then any stored overrides are overlaid on top. A field shows a **Revert** button (enabled only when the live value differs from the default) that clears the override and restores the YAML default — after which editing the YAML applies again. Backed by `GET`/`POST /api/config`. Structural settings (inverter layout, device count, ports, IDs) and auth (`api_token`/`web_*`) stay in YAML — the latter because NVS is plaintext-at-rest.
+
+### CCA over BLE
+
+When `cca_source: ble` (or `auto`) and a `ble_client_id` are set, `tigo_server` *is* the BLE client and talks the CCA's `mobile_api` over Bluetooth — so the CCA Info page works on firmware (4.0.4+) that locks the local HTTP API. The link is opened on demand (connect → command → auto-disconnect) so the Tigo phone app can still connect when idle. The CCA Info page then also offers:
+
+- **CCA Connection** — a Bluetooth search that finds the CCA by its Tigo `04:C0:5B` MAC OUI and lets you target it **without hardcoding the MAC in YAML**. The chosen MAC is saved to NVS and applied live via `BLEClient::set_address()`, overriding the compile-time `ble_client:` MAC across reboots; **Revert** restores the YAML MAC. (`tigo_server` registers as an `esp32_ble_tracker` advertisement listener at codegen time so the scan callback is dispatched.)
+- **Network status** — Ethernet/WiFi cards from the CCA's cached `NETWORK_INFO`.
+- **WiFi configuration** — scan / join / clear the CCA's WiFi over BLE.
+- **Topology discovery** — kick the CCA's optimizer/gateway rescan and poll progress.
+
+### Tigo Cloud (`cloud_import`)
+
+Recovers the panel names + string/MPPT/inverter layout from Tigo's cloud (`mapi.tigoenergy.com`, the API the mobile app uses) when the CCA's local HTTP is locked. Credentials are entered in the **Configure** modal; **only the resulting bearer token is persisted to NVS, never the password**. The **Tigo Cloud** page also surfaces Tigo's own per-equipment health, status, and history (`statusCode` 0=ok / 1=warning / 2=error). HTTPS is verified against the mbedTLS certificate bundle (enabled automatically when `cloud_import` is set). Layout import is a button on the Topology page.
+
 ---
 
 ## API endpoints
@@ -87,6 +107,13 @@ All endpoints return JSON unless noted. Optional Bearer-token auth (see Authenti
 | `/api/history/panel?slot=N&range=…` | Single-panel power time series |
 | `/api/panels` | Slot map: array of `{slot, barcode (last 6 chars), label?, mppt?, string?}` keyed off the TSDB panel-slot table; used by the panel detail modal to find the right slot for a given heat tile |
 | `/api/energy/history` | Daily energy history (RAM ring buffer, kept alongside TSDB) |
+| `/api/config` | Runtime config values + YAML defaults + `overridden` flags (Device Configuration) |
+| `/api/cca/ble-scan?rescan=1` | Discovered Tigo CCAs (`04:C0:5B` OUI) with MAC/RSSI/name + active/YAML MAC (BLE builds) |
+| `/api/cca/network?cmd=…` | Cached CCA network read (`{age_s, result}`), no BLE side effect (BLE builds) |
+| `/api/cca/discovery` | Cached CCA topology-discovery status (`{age_s, status}`), no BLE side effect (BLE builds) |
+| `/api/cloud/status` | Cloud token state `{configured, email, expires, system_id}` (`cloud_import`) |
+| `/api/cloud/health` | Tigo per-equipment-type warning/error summary (`cloud_import`) |
+| `/api/cloud/equipment?view=latest\|history` | Tigo per-equipment status feed (`cloud_import`) |
 
 ### Write
 
@@ -101,6 +128,16 @@ All endpoints return JSON unless noted. Optional Bearer-token auth (see Authenti
 | `POST /api/strings/rating` | `{label, rating_w}` | Set per-panel nameplate watts. `rating_w=0` clears |
 | `POST /api/cca/refresh` | none | Triggers a fresh CCA query |
 | `POST /api/backlight` | `state=on\|off\|toggle` | Backlight control (units with backlight wired) |
+| `POST /api/config` | `{key,value}` or `{reset:key}` | Set + persist a runtime knob, or revert it to the YAML default |
+| `POST /api/cca/ble-mac` | `{mac}` or `{reset:true}` | Target + persist a CCA BLE MAC, or revert to the YAML MAC (BLE builds) |
+| `POST /api/cca/network/poll?cmd=…` | none | Trigger an allowlisted CCA network read (WiFi scan) over BLE |
+| `POST /api/cca/network/wifi-connect` | `{nid,pwd}` | Join the CCA to a WiFi network over BLE |
+| `POST /api/cca/network/wifi-clear` | none | Wipe the CCA's WiFi credentials over BLE (destructive) |
+| `POST /api/cca/discovery/start` | none | Kick the CCA's optimizer/gateway rescan (`START_DISCOVERY`) |
+| `POST /api/cca/discovery/poll` | none | Poll `DISCOVERY_STATUS` and cache it |
+| `POST /api/cca/data-export` | none | Ask the CCA to push its data to Tigo's cloud now |
+| `POST /api/cloud/login` | `{email,password}` | Log into Tigo's cloud; persists only the bearer token (`cloud_import`) |
+| `POST /api/cloud/import` | none | Fetch the system layout from Tigo's cloud and apply it to the node table |
 
 ### Example
 
@@ -196,6 +233,9 @@ tigo_server:
   web_username: "optional-user"
   web_password: "optional-pass"
   backlight: backlight_id   # optional — enables /api/backlight
+  cca_source: http          # http (default) | ble | auto
+  ble_client_id: tigo_cca_ble   # required for cca_source: ble/auto
+  cloud_import: false       # enable the Tigo Cloud page + layout import
 ```
 
 | Option | Type | Default | Description |
@@ -206,6 +246,9 @@ tigo_server:
 | `web_username` | String | none | HTTP Basic Auth user |
 | `web_password` | String | none | HTTP Basic Auth pass |
 | `backlight` | ID | none | Light component for the optional `/api/backlight` endpoint |
+| `cca_source` | Enum | `http` | Where the CCA Info page gets data: `http` (CCA local API), `ble` (CCA `mobile_api` over Bluetooth — for firmware 4.0.4+ that locks HTTP), or `auto` (BLE if it has data, else HTTP). `ble`/`auto` require `ble_client_id` |
+| `ble_client_id` | ID | none | A `ble_client:` pointing at the CCA's BLE MAC. The MAC is just the default/seed — it can be reselected via the CCA Connection search and stored on-device |
+| `cloud_import` | Boolean | `false` | Compile in the Tigo cloud client + UI + TLS cert bundle. Enables the Tigo Cloud page and the Topology layout-import button |
 
 ---
 

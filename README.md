@@ -8,11 +8,14 @@ An ESPHome component for monitoring Tigo solar optimizers via RS485/UART. Real-t
 
 - **Device Monitoring** – Voltage, current, power, temperature, RSSI per optimizer
 - **System Aggregation** – Total power, energy (kWh), active device count, peak tracking
-- **Built-in Single-Page Web App** – Dashboard heatmap, history, topology, nodes, tools, diagnostics, CCA info
+- **Built-in Single-Page Web App** – Dashboard heatmap, history, topology, nodes, tools, diagnostics, CCA info, Tigo Cloud
 - **Panel Detail Modal** – Click any panel heat tile to see live readings (V/I/W, temp, RSSI, efficiency, duty cycle) and a power-history chart with a string-median overlay so you can tell a single-panel dip apart from string-wide shading
 - **Sortable Node Table** – Every column header is clickable; arrow indicator marks the active sort; numeric columns default to "biggest first"
 - **On-Flash History** – Per-snapshot rollups + per-panel power persisted via [esp_tsdb](https://github.com/zakery292/esp_tsdb); survives reboots and OTA updates
-- **CCA Integration** – Auto-sync panel names from Tigo Cloud Connect Advanced
+- **CCA Integration** – Auto-sync panel names from Tigo Cloud Connect Advanced (local HTTP, **CCA over Bluetooth** for HTTP-locked firmware 4.0.4+, or **Tigo cloud** layout import)
+- **CCA over Bluetooth** – Read CCA info / network and configure WiFi / run discovery over BLE; a **Bluetooth search** finds the CCA by its address prefix and stores the chosen MAC on-device (no YAML edit)
+- **Tigo Cloud** – Recover the panel/string/MPPT layout and view Tigo's per-equipment health, status, and history (token-only credential storage)
+- **On-Device Configuration** – Tune `power_calibration`, night-mode timeout, midnight reset, and more from the web UI, persisted to NVS over the YAML defaults — no reflash
 - **In-UI Naming** – Friendly inverter and string names settable from Topology view, persisted to NVS (YAML stays the source of truth for identity)
 - **Per-String Nameplate** – Set the rated watts per panel; health classification and "% of rated" readouts use it
 - **Sub-Device YAML Generator** – Tools view emits an `esphome.devices:` block and propagates `device_id` to each child sensor, with per-MPPT / per-inverter / per-panel / flat grouping
@@ -166,9 +169,10 @@ Navigate to `http://<esp32-ip>/` — you land on the Dashboard view of the singl
 | History | `/app#history` | TSDB-backed power & energy charts (day / week / month / year) |
 | Topology | `/app#topology` | Inverter → string → panel hierarchy with live V/I/W/°C, rename + nameplate editing |
 | Node Table | `/app#nodes` | Device registry with CCA labels, export/import |
-| Tools | `/app#tools` | YAML generator + Reset Peak / Clear Nodes / Restart actions |
+| Tools | `/app#tools` | Device Configuration (on-device knobs) + YAML generator + Reset Peak / Clear Nodes / Restart |
 | Diagnostics | `/app#diagnostics` | Memory, network, UART telemetry, TSDB stats |
-| CCA Info | `/app#cca` | Tigo CCA device status with manual refresh |
+| CCA Info | `/app#cca` | CCA status (HTTP or BLE); refresh, Bluetooth search, network/WiFi config, discovery |
+| Tigo Cloud | `/app#cloudstatus` | Tigo-cloud health, per-equipment status + history (when `cloud_import` is set) |
 
 Legacy paths (`/`, `/nodes`, `/status`, `/yaml`, `/cca`, `/history`) all 302 to the corresponding `#view`.
 
@@ -293,6 +297,9 @@ All endpoints return JSON. Optional Bearer token authentication. See [`docs/WEB_
 | `/api/history/power?range=…` | TSDB-backed system power/energy series |
 | `/api/history/panel?slot=N&range=…` | TSDB-backed single-panel power series |
 | `/api/panels` | Slot map (panel barcode → DB slot) |
+| `/api/config` | Runtime config values + defaults; POST to set or revert (Device Configuration) |
+| `/api/cca/ble-scan` | Discovered Tigo CCAs over BLE; POST `/api/cca/ble-mac` to target/save one |
+| `/api/cloud/health` · `/api/cloud/equipment` | Tigo-cloud health + per-equipment status (when `cloud_import` set) |
 | `/api/health` | Health check (no auth) |
 
 ## Documentation
