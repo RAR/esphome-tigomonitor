@@ -85,7 +85,7 @@ class TigoWebServer : public Component
   void cca_ble_refresh_once(); // connect → DEVICE_INFO → auto-disconnect (dashboard refresh)
   void cca_device_ping();      // unauthenticated connectivity check
   // Protected commands (auto fresh-session sid): DISCOVERY_STATUS / NETWORK_INFO.
-  void cca_send_protected(const std::string &command);
+  void cca_send_protected(const std::string &command, const std::string &extra_params = "");
   bool cca_ble_ready() const { return ble_ready_; }
   // Topology discovery (config action). START_DISCOVERY kicks a recoverable CCA
   // rescan; DISCOVERY_STATUS polls progress. Both protected (auto fresh-session sid),
@@ -134,9 +134,10 @@ class TigoWebServer : public Component
   uint8_t ble_request_num_{1};
   uint32_t ble_last_command_time_{0};
   bool ble_awaiting_response_{false};
-  std::string ble_session_key_;            // SHA512((uts + 159260)) hex, 128 chars
-  std::string ble_pending_protected_cmd_;  // queued while fetching a fresh DEVICE_INFO for sid
-  std::string ble_last_command_;           // command the in-flight response belongs to
+  std::string ble_session_key_;             // SHA512((uts + 159260)) hex, 128 chars
+  std::string ble_pending_protected_cmd_;   // queued while fetching a fresh DEVICE_INFO for sid
+  std::string ble_pending_protected_params_;// extra URI-encoded params for the protected cmd
+  std::string ble_last_command_;            // command the in-flight response belongs to
   std::vector<std::string> ble_command_queue_;
   uint32_t ble_deferred_time_{0};
   std::string ble_deferred_command_;
@@ -148,11 +149,18 @@ class TigoWebServer : public Component
   std::atomic<bool> ble_refresh_requested_{false};
   std::atomic<bool> ble_discovery_start_requested_{false};  // POST /api/cca/discovery/start
   std::atomic<bool> ble_discovery_poll_requested_{false};   // POST /api/cca/discovery/poll
+  // Network commands carry string args (cmd + pre-encoded params) the httpd task can't
+  // pass through an atomic flag, so they ride a small mutex-guarded queue to the loop.
+  std::mutex ble_net_req_mutex_;
+  std::vector<std::pair<std::string, std::string>> ble_net_requests_;
 
   // Cached DEVICE_INFO + NETWORK_INFO JSON for the CCA Info page (guarded by cca_info_mutex_)
   std::string cca_info_json_;
   std::string cca_network_json_;
   std::string cca_discovery_json_;  // last DISCOVERY_STATUS payload (scan progress)
+  // Per-command cache for network reads/writes (WIFI_STATUS/SCAN, CELLULAR_INFO, etc.)
+  std::map<std::string, std::string> cca_net_results_;  // command -> raw JSON reply
+  std::map<std::string, uint32_t> cca_net_times_;       // command -> millis() of reply
   uint32_t cca_info_time_{0};       // millis() of last cache update (0 = never)
   uint32_t cca_discovery_time_{0};  // millis() of last discovery poll (0 = never)
   std::mutex cca_info_mutex_;
@@ -182,6 +190,13 @@ class TigoWebServer : public Component
   void ble_store_discovery_(const std::string &raw_discovery_status);
   std::string ble_get_discovery_json_();
   uint32_t ble_get_discovery_seconds_ago_();
+  // Network config commands (mobile_api). cca_run_network_command_ runs on the main
+  // loop: connect → sid → command(+params) → cache by name → disconnect.
+  void cca_run_network_command_(const std::string &command, const std::string &params);
+  void ble_enqueue_net_request_(const std::string &command, const std::string &params);
+  void ble_store_net_result_(const std::string &command, const std::string &json);
+  std::string ble_get_net_result_(const std::string &command, uint32_t &age_s);
+  static std::string ble_uri_encode_(const std::string &value);  // matches the app's CK()
   uint32_t ble_get_cca_info_seconds_ago_();
   std::string ble_address_();
 #endif
@@ -213,6 +228,10 @@ class TigoWebServer : public Component
   static esp_err_t api_cca_discovery_handler(httpd_req_t *req);        // GET cached scan status
   static esp_err_t api_cca_discovery_start_handler(httpd_req_t *req);  // POST trigger START_DISCOVERY
   static esp_err_t api_cca_discovery_poll_handler(httpd_req_t *req);   // POST trigger DISCOVERY_STATUS
+  static esp_err_t api_cca_network_handler(httpd_req_t *req);          // GET cached result ?cmd=
+  static esp_err_t api_cca_network_poll_handler(httpd_req_t *req);     // POST trigger read ?cmd=
+  static esp_err_t api_cca_wifi_connect_handler(httpd_req_t *req);     // POST {nid,pwd}
+  static esp_err_t api_cca_wifi_clear_handler(httpd_req_t *req);       // POST (destructive)
   static esp_err_t api_node_delete_handler(httpd_req_t *req);
   static esp_err_t api_node_import_handler(httpd_req_t *req);
   static esp_err_t api_restart_handler(httpd_req_t *req);

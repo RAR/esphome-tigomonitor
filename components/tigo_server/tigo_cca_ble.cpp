@@ -54,6 +54,21 @@ void TigoWebServer::ble_loop_() {
   if (this->ble_discovery_poll_requested_.exchange(false)) {
     this->cca_poll_discovery_status();
   }
+  // Drain one queued network command per loop, and only when idle, so requests don't
+  // stack overlapping connects (each is a one-shot connect → … → auto-disconnect).
+  if (!this->ble_connected_) {
+    std::string net_cmd, net_params;
+    {
+      std::lock_guard<std::mutex> lock(this->ble_net_req_mutex_);
+      if (!this->ble_net_requests_.empty()) {
+        net_cmd = this->ble_net_requests_.front().first;
+        net_params = this->ble_net_requests_.front().second;
+        this->ble_net_requests_.erase(this->ble_net_requests_.begin());
+      }
+    }
+    if (!net_cmd.empty())
+      this->cca_run_network_command_(net_cmd, net_params);
+  }
 
   // Drain queued commands once the link is ready.
   if (this->ble_connected_ && this->ble_ready_ && !this->ble_command_queue_.empty()) {
@@ -358,12 +373,28 @@ void TigoWebServer::cca_poll_discovery_status() {
   this->cca_send_protected("DISCOVERY_STATUS");
 }
 
-void TigoWebServer::cca_send_protected(const std::string &command) {
+void TigoWebServer::cca_send_protected(const std::string &command, const std::string &extra_params) {
   // Proven auth pattern: fetch a fresh DEVICE_INFO (gets the uts nonce), derive the
-  // sid, then send `command` with that sid while it's fresh.
+  // sid, then send `command` with that sid (plus any extra, already-encoded params)
+  // while it's fresh.
   ESP_LOGI(BLE_TAG, "Protected command '%s': fetching DEVICE_INFO for sid...", command.c_str());
   this->ble_pending_protected_cmd_ = command;
+  this->ble_pending_protected_params_ = extra_params;
   this->cca_device_info();
+}
+
+void TigoWebServer::cca_run_network_command_(const std::string &command, const std::string &params) {
+  // One-shot like the refresh/discovery paths: connect, fresh sid, fire the command,
+  // cache the reply by name, drop the link. Runs on the main loop (BLE stack calls).
+  ESP_LOGI(BLE_TAG, "Network command over BLE: %s", command.c_str());
+  this->ble_auto_disconnect_ = true;
+  this->cca_ble_connect();
+  this->cca_send_protected(command, params);
+}
+
+void TigoWebServer::ble_enqueue_net_request_(const std::string &command, const std::string &params) {
+  std::lock_guard<std::mutex> lock(this->ble_net_req_mutex_);
+  this->ble_net_requests_.emplace_back(command, params);
 }
 
 // ---------------------------------------------------------------------------
@@ -441,10 +472,13 @@ void TigoWebServer::ble_process_response_(const std::string &data) {
   // the cache holds the raw string and the CCA Info page parses it in the browser.
   // We only need two things here: spot the auth-failure reply, and lift `uts`.
 
-  // A bad sid (or rejected command) comes back as {"msg":"Unauthorized request"}.
-  // Normal DEVICE_INFO has no "msg" field, so that key is a reliable discriminator.
-  if (data.find("\"msg\"") != std::string::npos) {
-    ESP_LOGW(BLE_TAG, "CCA rejected '%s': %s", this->ble_last_command_.c_str(), data.c_str());
+  // A bad/expired sid comes back as {"msg":"Unauthorized request"}. Match that string
+  // specifically — action commands (WIFI_CONNECT/CLEAR, RUN_TEST) legitimately report
+  // success/failure in a "msg" field, so the old "any msg = rejected" test would have
+  // wrongly dropped them.
+  if (data.find("Unauthorized request") != std::string::npos) {
+    ESP_LOGW(BLE_TAG, "CCA rejected '%s' (bad/expired sid): %s", this->ble_last_command_.c_str(),
+             data.c_str());
     return;
   }
 
@@ -472,8 +506,13 @@ void TigoWebServer::ble_process_response_(const std::string &data) {
   }
 
   if (this->ble_last_command_ != "DEVICE_INFO") {
-    // Any other protected command — not surfaced on the page (yet).
-    ESP_LOGD(BLE_TAG, "Response for '%s' (not cached)", this->ble_last_command_.c_str());
+    // Any other protected command (network reads/writes: WIFI_STATUS/SCAN, CELLULAR_INFO,
+    // RUN_TEST, WIFI_CONNECT/CLEAR) — cache the reply by command name for the Network
+    // panel, then drop the link.
+    this->ble_store_net_result_(this->ble_last_command_, data);
+    ESP_LOGI(BLE_TAG, "CCA '%s' result cached (%d bytes)", this->ble_last_command_.c_str(),
+             (int) data.length());
+    this->ble_arm_auto_disconnect_();
     return;
   }
 
@@ -492,10 +531,14 @@ void TigoWebServer::ble_process_response_(const std::string &data) {
       this->ble_generate_session_key_(uts);
       if (!this->ble_pending_protected_cmd_.empty()) {
         std::string cmd = this->ble_pending_protected_cmd_;
+        std::string extra = this->ble_pending_protected_params_;
         this->ble_pending_protected_cmd_.clear();
+        this->ble_pending_protected_params_.clear();
         ESP_LOGI(BLE_TAG, "Auth ready; scheduling %s in 100ms", cmd.c_str());
         this->ble_deferred_command_ = cmd;
-        this->ble_deferred_params_ = "sid=" + this->ble_session_key_;
+        // Extra params (already URI-encoded) come before sid, matching the app's order.
+        this->ble_deferred_params_ =
+            extra.empty() ? ("sid=" + this->ble_session_key_) : (extra + " sid=" + this->ble_session_key_);
         this->ble_deferred_time_ = millis() + 100;
       }
     }
@@ -551,6 +594,45 @@ uint32_t TigoWebServer::ble_get_discovery_seconds_ago_() {
   if (this->cca_discovery_time_ == 0)
     return 0;
   return (millis() - this->cca_discovery_time_) / 1000;
+}
+
+void TigoWebServer::ble_store_net_result_(const std::string &command, const std::string &json) {
+  std::lock_guard<std::mutex> lock(this->cca_info_mutex_);
+  this->cca_net_results_[command] = json;
+  this->cca_net_times_[command] = millis();
+}
+
+std::string TigoWebServer::ble_get_net_result_(const std::string &command, uint32_t &age_s) {
+  std::lock_guard<std::mutex> lock(this->cca_info_mutex_);
+  auto it = this->cca_net_results_.find(command);
+  if (it == this->cca_net_results_.end()) {
+    age_s = 0;
+    return "";
+  }
+  auto t = this->cca_net_times_.find(command);
+  age_s = (t != this->cca_net_times_.end() && t->second != 0) ? (millis() - t->second) / 1000 : 0;
+  return it->second;
+}
+
+std::string TigoWebServer::ble_uri_encode_(const std::string &value) {
+  // Match the app's CK(): encodeURIComponent then escape !'()*. Net effect is RFC 3986
+  // unreserved kept (A-Za-z0-9-_.~), everything else percent-encoded (uppercase hex).
+  // Required because params are space-separated on the wire, so a space or special char
+  // in an SSID/password would otherwise split or corrupt the frame.
+  static const char *const HEX = "0123456789ABCDEF";
+  std::string out;
+  out.reserve(value.size() * 3);
+  for (unsigned char c : value) {
+    if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-' ||
+        c == '_' || c == '.' || c == '~') {
+      out.push_back(static_cast<char>(c));
+    } else {
+      out.push_back('%');
+      out.push_back(HEX[c >> 4]);
+      out.push_back(HEX[c & 0x0F]);
+    }
+  }
+  return out;
 }
 
 bool TigoWebServer::ble_has_cca_info_() {

@@ -158,8 +158,8 @@ void TigoWebServer::setup() {
   httpd_config_t config = HTTPD_DEFAULT_CONFIG();
   config.server_port = port_;
   config.ctrl_port = port_ + 1;
-  // Must be >= the number of httpd_register_uri_handler() calls below (36 on a TSDB
-  // build: 29 base + 4 TSDB + the 3 CCA-discovery routes). Handlers past this cap
+  // Must be >= the number of httpd_register_uri_handler() calls below (40 on a TSDB
+  // build: 29 base + 4 TSDB + 3 CCA-discovery + 4 CCA-network routes). Handlers past this cap
   // silently fail to register and 404 — TSDB stats registers last, so it's the canary.
   // Keep generous headroom so adding a route doesn't quietly drop the tail again.
   config.max_uri_handlers = 48;
@@ -364,6 +364,38 @@ void TigoWebServer::setup() {
       .user_ctx = this
     };
     httpd_register_uri_handler(server_, &api_cca_discovery_poll_uri);
+
+    httpd_uri_t api_cca_network_uri = {
+      .uri = "/api/cca/network",
+      .method = HTTP_GET,
+      .handler = api_cca_network_handler,
+      .user_ctx = this
+    };
+    httpd_register_uri_handler(server_, &api_cca_network_uri);
+
+    httpd_uri_t api_cca_network_poll_uri = {
+      .uri = "/api/cca/network/poll",
+      .method = HTTP_POST,
+      .handler = api_cca_network_poll_handler,
+      .user_ctx = this
+    };
+    httpd_register_uri_handler(server_, &api_cca_network_poll_uri);
+
+    httpd_uri_t api_cca_wifi_connect_uri = {
+      .uri = "/api/cca/network/wifi-connect",
+      .method = HTTP_POST,
+      .handler = api_cca_wifi_connect_handler,
+      .user_ctx = this
+    };
+    httpd_register_uri_handler(server_, &api_cca_wifi_connect_uri);
+
+    httpd_uri_t api_cca_wifi_clear_uri = {
+      .uri = "/api/cca/network/wifi-clear",
+      .method = HTTP_POST,
+      .handler = api_cca_wifi_clear_handler,
+      .user_ctx = this
+    };
+    httpd_register_uri_handler(server_, &api_cca_wifi_clear_uri);
 
     httpd_uri_t api_node_delete_uri = {
       .uri = "/api/nodes/delete",
@@ -1278,6 +1310,187 @@ esp_err_t TigoWebServer::api_cca_discovery_poll_handler(httpd_req_t *req) {
   httpd_resp_set_type(req, "application/json");
   httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
   httpd_resp_send(req, response, strlen(response));
+  return ESP_OK;
+}
+
+namespace {
+// Network reads the generic /poll endpoint may trigger (writes get dedicated routes).
+// Only WiFi scan remains: WIFI_STATUS duplicated the NETWORK_INFO wlan block already shown,
+// RUN_TEST returns "Internal error getting test results" on firmware 4.0.5-ct, and cellular
+// status wasn't useful enough to keep its own control.
+bool tigo_is_net_read_cmd(const char *cmd) {
+  return strcmp(cmd, "NETWORK_WIFI_SCAN") == 0;
+}
+// Anything the GET cache endpoint will echo (read + write results). Gating the cmd here
+// keeps an arbitrary query value from being interpolated raw into the JSON response.
+bool tigo_is_known_net_cmd(const char *cmd) {
+  return tigo_is_net_read_cmd(cmd) || strcmp(cmd, "NETWORK_WIFI_CONNECT") == 0 ||
+         strcmp(cmd, "NETWORK_WIFI_CLEAR") == 0 || strcmp(cmd, "NETWORK_INFO") == 0;
+}
+}  // namespace
+
+esp_err_t TigoWebServer::api_cca_network_handler(httpd_req_t *req) {
+  // GET ?cmd=<CMD> — return the cached reply for that network command + its age. No BLE
+  // side effect; the UI triggers fresh reads via /api/cca/network/poll.
+  TigoWebServer *server = static_cast<TigoWebServer *>(req->user_ctx);
+  if (!server->check_api_auth(req)) {
+    return ESP_OK;
+  }
+
+  char query[96] = {};
+  char cmd[48] = {};
+  if (httpd_req_get_url_query_str(req, query, sizeof(query)) != ESP_OK ||
+      httpd_query_key_value(query, "cmd", cmd, sizeof(cmd)) != ESP_OK || !tigo_is_known_net_cmd(cmd)) {
+    httpd_resp_set_status(req, "400 Bad Request");
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, "{\"error\":\"missing or unknown cmd\"}");
+    return ESP_OK;
+  }
+
+  PSRAMString json;
+  json.append("{\"cmd\":\"");
+  json.append(cmd);
+#ifdef USE_TIGO_CCA_BLE
+  uint32_t age = 0;
+  std::string result = server->ble_get_net_result_(cmd, age);
+  if (result.empty()) {
+    json.append("\",\"age_s\":null,\"result\":null}");
+  } else {
+    char buf[32];
+    snprintf(buf, sizeof(buf), "%u", age);
+    json.append("\",\"age_s\":");
+    json.append(buf);
+    json.append(",\"result\":");
+    json.append(result.c_str());  // CCA payload is already a JSON value
+    json.append("}");
+  }
+#else
+  json.append("\",\"age_s\":null,\"result\":null}");
+#endif
+  httpd_resp_set_type(req, "application/json");
+  httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+  httpd_resp_send(req, json.c_str(), json.length());
+  return ESP_OK;
+}
+
+esp_err_t TigoWebServer::api_cca_network_poll_handler(httpd_req_t *req) {
+  // POST ?cmd=<CMD> — queue a network *read* (allowlisted); the reply lands in the cache
+  // for the next GET /api/cca/network.
+  TigoWebServer *server = static_cast<TigoWebServer *>(req->user_ctx);
+  if (!server->check_api_auth(req)) {
+    return ESP_OK;
+  }
+
+  char query[96] = {};
+  char cmd[48] = {};
+  if (httpd_req_get_url_query_str(req, query, sizeof(query)) != ESP_OK ||
+      httpd_query_key_value(query, "cmd", cmd, sizeof(cmd)) != ESP_OK || !tigo_is_net_read_cmd(cmd)) {
+    httpd_resp_set_status(req, "400 Bad Request");
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, "{\"status\":\"error\",\"message\":\"cmd must be a known network read\"}");
+    return ESP_OK;
+  }
+
+  const char *response;
+#ifdef USE_TIGO_CCA_BLE
+  if (server->cca_source_ == CcaSource::BLE || server->cca_source_ == CcaSource::AUTO) {
+    server->ble_enqueue_net_request_(cmd, "");
+    response = "{\"status\":\"ok\",\"message\":\"queued\"}";
+  } else
+#endif
+  {
+    httpd_resp_set_status(req, "400 Bad Request");
+    response = "{\"status\":\"error\",\"message\":\"requires cca_source: ble\"}";
+  }
+  httpd_resp_set_type(req, "application/json");
+  httpd_resp_sendstr(req, response);
+  return ESP_OK;
+}
+
+esp_err_t TigoWebServer::api_cca_wifi_connect_handler(httpd_req_t *req) {
+  // POST {nid, pwd} — join the CCA to a WiFi network. nid/pwd are the exact keys the
+  // Tigo app sends; values are URI-encoded server-side before going on the wire.
+  TigoWebServer *server = static_cast<TigoWebServer *>(req->user_ctx);
+  if (!server->check_api_auth(req)) {
+    return ESP_OK;
+  }
+
+  char body[320];
+  int ret = httpd_req_recv(req, body, sizeof(body) - 1);
+  if (ret <= 0) {
+    httpd_resp_set_status(req, "400 Bad Request");
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, "{\"status\":\"error\",\"message\":\"empty body\"}");
+    return ESP_OK;
+  }
+  body[ret] = '\0';
+
+  // Same hand-rolled extractor the rename handlers use (no JSON parser dependency).
+  auto extract = [](const char *src, const char *key, char *out, size_t outlen) -> bool {
+    char needle[40];
+    snprintf(needle, sizeof(needle), "\"%s\"", key);
+    const char *k = strstr(src, needle);
+    if (!k) return false;
+    const char *colon = strchr(k, ':');
+    if (!colon) return false;
+    const char *q1 = strchr(colon, '"');
+    if (!q1) return false;
+    const char *q2 = strchr(q1 + 1, '"');
+    if (!q2) return false;
+    size_t n = (size_t) (q2 - q1 - 1);
+    if (n >= outlen) n = outlen - 1;
+    memcpy(out, q1 + 1, n);
+    out[n] = '\0';
+    return true;
+  };
+
+  char nid[64] = {};
+  char pwd[128] = {};
+  if (!extract(body, "nid", nid, sizeof(nid)) || nid[0] == '\0') {
+    httpd_resp_set_status(req, "400 Bad Request");
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, "{\"status\":\"error\",\"message\":\"missing 'nid' (SSID)\"}");
+    return ESP_OK;
+  }
+  extract(body, "pwd", pwd, sizeof(pwd));  // open network -> empty password is valid
+
+  const char *response;
+#ifdef USE_TIGO_CCA_BLE
+  if (server->cca_source_ == CcaSource::BLE || server->cca_source_ == CcaSource::AUTO) {
+    std::string params = "nid=" + ble_uri_encode_(nid) + " pwd=" + ble_uri_encode_(pwd);
+    server->ble_enqueue_net_request_("NETWORK_WIFI_CONNECT", params);
+    response = "{\"status\":\"ok\",\"message\":\"WiFi join requested\"}";
+  } else
+#endif
+  {
+    httpd_resp_set_status(req, "400 Bad Request");
+    response = "{\"status\":\"error\",\"message\":\"requires cca_source: ble\"}";
+  }
+  httpd_resp_set_type(req, "application/json");
+  httpd_resp_sendstr(req, response);
+  return ESP_OK;
+}
+
+esp_err_t TigoWebServer::api_cca_wifi_clear_handler(httpd_req_t *req) {
+  // POST — wipe the CCA's saved WiFi settings (destructive). Paramless protected command.
+  TigoWebServer *server = static_cast<TigoWebServer *>(req->user_ctx);
+  if (!server->check_api_auth(req)) {
+    return ESP_OK;
+  }
+
+  const char *response;
+#ifdef USE_TIGO_CCA_BLE
+  if (server->cca_source_ == CcaSource::BLE || server->cca_source_ == CcaSource::AUTO) {
+    server->ble_enqueue_net_request_("NETWORK_WIFI_CLEAR", "");
+    response = "{\"status\":\"ok\",\"message\":\"WiFi clear requested\"}";
+  } else
+#endif
+  {
+    httpd_resp_set_status(req, "400 Bad Request");
+    response = "{\"status\":\"error\",\"message\":\"requires cca_source: ble\"}";
+  }
+  httpd_resp_set_type(req, "application/json");
+  httpd_resp_sendstr(req, response);
   return ESP_OK;
 }
 

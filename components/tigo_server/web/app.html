@@ -128,7 +128,8 @@
     background: var(--bg-3); border: 1px solid var(--border); color: var(--text);
     padding: 7px 12px; border-radius: 6px; cursor: pointer; font-size: 12px;
   }
-  .btn:hover { background: var(--bg-4); }
+  .btn:hover:not(:disabled) { background: var(--bg-4); }
+  .btn:disabled { opacity: 0.45; cursor: not-allowed; }
   .btn.primary { background: var(--accent); color: #061018; border-color: var(--accent); font-weight: 600; }
 
   /* ===== View switching ===== */
@@ -1154,7 +1155,7 @@
         <div class="hist-stat-card">
           <div class="hist-stat-label">Status</div>
           <div class="hist-stat-val" id="cca-status" style="font-size:18px">—</div>
-          <div class="hist-stat-sub">live link state</div>
+          <div class="hist-stat-sub">CCA data</div>
         </div>
       </div>
 
@@ -1169,6 +1170,33 @@
       </div>
 
       <div class="section-head">
+        <div class="section-title">Network status</div>
+      </div>
+      <div class="tools-card">
+        <div id="cca-net-overview" style="color:var(--text-dim)">Refresh the CCA to read its network configuration.</div>
+      </div>
+
+      <div class="section-head">
+        <div class="section-title">WiFi configuration</div>
+      </div>
+      <div class="tools-card">
+        <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">
+          <input id="cca-wifi-ssid" type="text" placeholder="SSID" autocomplete="off"
+            style="flex:1;min-width:140px;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text)">
+          <input id="cca-wifi-pwd" type="password" placeholder="Password (blank = open)" autocomplete="off"
+            style="flex:1;min-width:140px;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text)">
+          <button class="btn" id="cca-wifi-scan-btn">Scan</button>
+          <button class="btn" id="cca-wifi-join-btn">Join WiFi</button>
+          <button class="btn" id="cca-wifi-clear-btn" style="border-color:var(--bad);color:var(--bad)">Clear WiFi</button>
+        </div>
+        <div style="color:var(--text-dim);font-size:12px;margin-top:8px">
+          Scan to list nearby networks (click one to fill the SSID). Changing WiFi can drop the CCA's uplink.
+        </div>
+        <div id="cca-wifi-scan" style="margin-top:8px"></div>
+        <div id="cca-wifi-result" style="margin-top:8px"></div>
+      </div>
+
+      <div class="section-head">
         <div class="section-title">Topology discovery</div>
         <div class="section-sub">
           <button class="btn" id="cca-discovery-btn">Start discovery</button>
@@ -1176,9 +1204,7 @@
       </div>
       <div class="tools-card">
         <div style="color:var(--text-dim);font-size:13px;margin-bottom:8px">
-          Re-runs the CCA's optimizer/gateway discovery scan. The CCA briefly interrupts
-          normal operation while it re-finds modules — recoverable, but only run it when
-          panels are missing or after hardware changes.
+          Re-runs the CCA's optimizer/gateway discovery scan.
         </div>
         <div id="cca-discovery-status" style="color:var(--text-dim)">Idle — no scan running.</div>
       </div>
@@ -2844,41 +2870,6 @@
   // R7 — CCA view (Tigo CCA configuration mirror)
   // ============================================================
 
-  const CCA_FIELD_LABELS = {
-    eth_ip: 'Ethernet IP',
-    wlan_ip: 'WiFi IP',
-    wlan_ssid: 'WiFi SSID',
-    serial: 'Serial number',
-    sw_version: 'Software version',
-    sysid: 'System ID',
-    kernel_version: 'Kernel version',
-    discovery: 'Discovery mode',
-    fw_config_status: 'Firmware config status',
-    sysconfig_ts: 'Last cloud config sync',
-    hw_version: 'Hardware version',
-    model: 'Model',
-    mac_address: 'MAC address',
-    ip_address: 'IP address',
-    subnet_mask: 'Subnet mask',
-    gateway: 'Gateway',
-    dns: 'DNS server',
-    ntp_server: 'NTP server',
-    timezone: 'Timezone',
-    cpu_load: 'CPU load',
-    memory_total: 'Total memory',
-    memory_free: 'Free memory',
-    disk_total: 'Total disk',
-    disk_free: 'Free disk',
-    temperature: 'Temperature',
-    panel_count: 'Panel count',
-    optimizer_count: 'Optimizer count',
-    inverter_count: 'Inverter count',
-    string_count: 'String count',
-    cloud_connected: 'Cloud connected',
-    last_cloud_sync: 'Last cloud sync',
-    api_version: 'API version',
-  };
-
   function ccaFmtSyncAge(seconds) {
     if (seconds == null || seconds === 0 || seconds > 4294967) return 'Never';
     if (seconds < 60) return `${seconds}s ago`;
@@ -2892,37 +2883,15 @@
     return new Date(ts * 1000).toLocaleString();
   }
 
-  function ccaPrettyKey(key) {
-    return key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
-  }
-
   function ccaRenderStatus(label, badgeClass) {
     return `<span class="badge ${badgeClass}">${label}</span>`;
   }
 
-  function ccaFormatValue(key, value) {
-    if (key === 'sysconfig_ts') return ccaFmtTimestamp(value);
-    if (key === 'discovery')
-      return value ? ccaRenderStatus('Active', 'ok') : ccaRenderStatus('Inactive', 'warn');
-    if (key === 'cloud_connected')
-      return value ? ccaRenderStatus('Yes', 'ok') : ccaRenderStatus('No', 'bad');
-    if (typeof value === 'boolean')
-      return value ? ccaRenderStatus('Yes', 'ok') : ccaRenderStatus('No', 'warn');
-    if (typeof value === 'object' && value !== null) return JSON.stringify(value);
-    return String(value);
-  }
-
-  function ccaStatusBadge(code) {
-    if (code === 0) return ccaRenderStatus('OK', 'ok');
-    if (code === 2) return ccaRenderStatus('Warning', 'warn');
-    if (code === -1) return ccaRenderStatus('N/A', 'stale');
-    return ccaRenderStatus('Error', 'bad');
-  }
-
   function ccaSetStatusBadge(state) {
     const el = document.getElementById('cca-status');
-    if (state === 'connected') el.innerHTML = ccaRenderStatus('Connected', 'ok');
+    if (state === 'connected') el.innerHTML = ccaRenderStatus('Synced', 'ok');
     else if (state === 'refreshing') el.innerHTML = ccaRenderStatus('Refreshing', 'warn');
+    else if (state === 'unsynced') el.innerHTML = ccaRenderStatus('Not synced yet', 'warn');
     else if (state === 'blocked') el.innerHTML = ccaRenderStatus('HTTP locked', 'warn');
     else if (state === 'error') el.innerHTML = ccaRenderStatus('Error', 'bad');
     else if (state === 'failed') el.innerHTML = ccaRenderStatus('Failed', 'bad');
@@ -2968,39 +2937,121 @@
       return 'error';
     }
 
-    // Empty object — e.g. cca_source: ble before the first refresh has landed.
+    // Empty object — e.g. cca_source: ble before the first refresh has landed. Distinct
+    // from the HTTP-lockdown 'blocked' state so the badge doesn't read "HTTP locked".
     if (Object.keys(deviceInfo).length === 0) {
-      target.innerHTML = `<div style="color:var(--text-dim)">No CCA data yet — connect and refresh over BLE (CCA BLE Connect → CCA BLE Refresh).</div>`;
-      return 'blocked';
+      target.innerHTML = `<div style="color:var(--text-dim)">No CCA data yet — press <b>Refresh from CCA</b> to pull it over BLE.</div>`;
+      return 'unsynced';
     }
 
+    const esc = s => String(s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+
+    // The CCA crams two kinds of thing into status[]: real health signals (bare names like
+    // "Cloud Connection") and info strings with a colon ("Kernel: 4.1.15", "Discovery: 40/40").
+    // Split them — health → colored-dot chips, info → key/value rows beside the scalars.
     const statusItems = Array.isArray(deviceInfo.status) ? deviceInfo.status : [];
-    let html = '<div class="hist-stat-grid">';
-
-    for (const [key, value] of Object.entries(deviceInfo)) {
-      if (key === 'status' && Array.isArray(value)) continue;
-      if (key === 'code') continue;          // internal
-      if (key === 'UTS' || key === 'uts') continue;  // unreliable
-
-      const label = CCA_FIELD_LABELS[key] || ccaPrettyKey(key);
-      html += `<div class="hist-stat-card">
-        <div class="hist-stat-label">${label}</div>
-        <div class="hist-stat-val" style="font-size:14px;word-break:break-word">${ccaFormatValue(key, value)}</div>
-      </div>`;
-    }
-
+    const health = [], info = [];
     for (const item of statusItems) {
-      const label = item.name || 'Status';
-      if (label.startsWith('S/N:') || label.startsWith('S/W:')) continue;  // dup of main fields
-      html += `<div class="hist-stat-card">
-        <div class="hist-stat-label">${label}</div>
-        <div class="hist-stat-val" style="font-size:14px">${ccaStatusBadge(item.status)}</div>
-      </div>`;
+      const name = item.name || '';
+      const ci = name.indexOf(':');
+      if (ci > -1) {
+        const k = name.slice(0, ci).trim();
+        if (k === 'S/N' || k === 'S/W') continue;  // dup of serial / software
+        info.push([k, name.slice(ci + 1).trim()]);
+      } else {
+        health.push(item);
+      }
     }
 
-    html += '</div>';
-    target.innerHTML = html;
+    const dot = c => c === 0 ? 'var(--good)' : c === -1 ? 'var(--text-faint)' : c === 2 ? 'var(--warn)' : 'var(--bad)';
+    const state = c => c === 0 ? 'OK' : c === -1 ? 'N/A' : c === 2 ? 'Warning' : 'Error';
+    let chips = '';
+    for (const h of health) {
+      chips += `<span title="${state(h.status)}" style="display:inline-flex;align-items:center;gap:6px;padding:5px 10px;border:1px solid var(--border);border-radius:999px;font-size:13px">
+        <span style="width:8px;height:8px;border-radius:50%;background:${dot(h.status)};flex:none"></span>${esc(h.name)}</span>`;
+    }
+
+    const rows = [];
+    if (deviceInfo.serial) rows.push(['Serial', deviceInfo.serial]);
+    if (deviceInfo.sysid != null) rows.push(['System ID', deviceInfo.sysid]);
+    if (deviceInfo.software) rows.push(['Software', deviceInfo.software]);
+    for (const [k, v] of info) rows.push([k, v]);
+    if (deviceInfo.sysconfig_ts) rows.push(['Config synced', ccaFmtTimestamp(deviceInfo.sysconfig_ts)]);
+
+    let detail = '';
+    rows.forEach(([k, v], i) => {
+      const border = i < rows.length - 1 ? 'border-bottom:1px solid var(--border)' : '';
+      detail += `<div style="display:flex;justify-content:space-between;gap:12px;padding:4px 0;${border}"><span style="color:var(--text-dim)">${esc(k)}</span><span style="font-family:ui-monospace,Menlo,monospace;text-align:right;word-break:break-word">${esc(v)}</span></div>`;
+    });
+
+    target.innerHTML =
+      (chips ? `<div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px">${chips}</div>` : '') + detail;
     return 'connected';
+  }
+
+  // Render the Ethernet + WiFi cards from NETWORK_INFO (BLE only). null/empty keeps the
+  // current cards (a later poll without net data shouldn't blank a good render).
+  // RSSI (dBm) -> qualitative word.
+  function ccaSignalWord(dbm) {
+    const n = parseInt(dbm, 10);
+    if (isNaN(n)) return '';
+    return n >= -60 ? 'strong' : n >= -70 ? 'good' : n >= -80 ? 'fair' : 'weak';
+  }
+
+  function ccaRenderNetOverview(net) {
+    const el = document.getElementById('cca-net-overview');
+    if (!net || (!net.eth && !net.wlan)) return;
+    const esc = s => String(s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+    const row = (label, v) => `<div style="display:flex;justify-content:space-between;gap:12px;padding:3px 0"><span style="color:var(--text-dim)">${label}</span><span style="font-family:ui-monospace,Menlo,monospace;text-align:right;word-break:break-word">${esc(v)}</span></div>`;
+
+    // Each interface is its own card: a status header (dot + state word), the IP as the
+    // headline, then details. "Up" = has an IP; WiFi can be saved-but-not-associated.
+    function card(title, obj, kind) {
+      const up = !!obj.ip;
+      const saved = kind === 'wlan' && !!obj.ssid;
+      const dotColor = up ? 'var(--good)' : 'var(--text-faint)';
+      const stateWord = up ? 'Connected' : saved ? 'Not associated' : 'Not connected';
+
+      let body;
+      if (up) {
+        let rows = '';
+        if (kind === 'wlan') {
+          if (obj.ssid) rows += row('SSID', obj.ssid);
+          if (obj.signal_level !== undefined && obj.signal_level !== '') {
+            const w = ccaSignalWord(obj.signal_level);
+            rows += row('Signal', `${obj.signal_level} dBm${w ? ` (${w})` : ''}`);
+          }
+          if (obj.quality_fraction) rows += row('Quality', obj.quality_fraction);
+        }
+        if (obj.subnet) rows += row('Subnet', obj.subnet);
+        const gw = obj.gateway || obj.gw;
+        if (gw) rows += row('Gateway', gw);
+        if (obj.mac) rows += row('MAC', obj.mac);
+        rows += row('Addressing', obj.dhcp ? 'DHCP' : 'Static');
+        body = `<div style="font-size:20px;font-family:ui-monospace,Menlo,monospace;margin:2px 0 8px;word-break:break-all">${esc(obj.ip)}</div>${rows}`;
+      } else if (saved) {
+        body = `<div style="margin:2px 0 4px">${esc(obj.ssid)} <span style="color:var(--text-dim)">(saved)</span></div><div style="color:var(--text-dim);font-size:12px">No IP — not associated yet.</div>`;
+      } else {
+        body = '<div style="color:var(--text-dim)">Not connected</div>';
+      }
+
+      return `<div class="hist-stat-card" style="flex:1;min-width:240px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+          <span style="display:inline-flex;align-items:center;gap:7px;font-weight:600"><span style="width:9px;height:9px;border-radius:50%;background:${dotColor};flex:none"></span>${title}</span>
+          <span style="color:var(--text-dim);font-size:12px">${stateWord}</span>
+        </div>${body}</div>`;
+    }
+
+    const eth = net.eth || {}, wlan = net.wlan || {};
+    let footer = '';
+    if (net.dns1 || net.dns2) footer = `<div style="color:var(--text-dim);font-size:12px;margin-top:8px">DNS: ${esc([net.dns1, net.dns2].filter(Boolean).join(', '))}</div>`;
+    el.innerHTML = `<div style="display:flex;flex-wrap:wrap;gap:12px">${card('Ethernet', eth, 'eth')}${card('WiFi', wlan, 'wlan')}</div>${footer}`;
+    // The CCA can't scan while its radio is associated — disable Scan when WiFi has an IP.
+    const scanBtn = document.getElementById('cca-wifi-scan-btn');
+    if (scanBtn) {
+      scanBtn.disabled = !!wlan.ip;
+      scanBtn.title = wlan.ip ? "Can't scan while connected to WiFi" : '';
+    }
   }
 
   function applyCcaData(data) {
@@ -3009,21 +3060,15 @@
       ccaFmtSyncAge(data.last_sync_seconds_ago);
     let deviceInfo = null;
     try { deviceInfo = JSON.parse(data.device_info); } catch (_) { deviceInfo = null; }
-    // Fold NETWORK_INFO (BLE only) into the rendered fields.
-    if (deviceInfo && !deviceInfo.error && data.network_info) {
-      try {
-        const net = JSON.parse(data.network_info);
-        if (net?.eth?.ip) deviceInfo.eth_ip = net.eth.ip;
-        if (net?.wlan?.ip) deviceInfo.wlan_ip = net.wlan.ip;
-        if (net?.wlan?.ssid) deviceInfo.wlan_ssid = net.wlan.ssid;
-      } catch (_) {}
+    // NETWORK_INFO (BLE only) drives the dedicated Ethernet/WiFi cards above.
+    if (data.network_info) {
+      try { ccaRenderNetOverview(JSON.parse(data.network_info)); } catch (_) {}
     }
     const state = ccaRenderDeviceInfo(deviceInfo);
     ccaSetStatusBadge(state);
-    const overBle = (data.cca_ip || '').startsWith('BLE');
     document.getElementById('cca-meta').textContent =
-      state === 'blocked'
-        ? (overBle ? 'awaiting CCA refresh over BLE' : 'CCA HTTP API locked (firmware 4.0.4+)')
+      state === 'unsynced' ? 'awaiting first CCA refresh over BLE'
+        : state === 'blocked' ? 'CCA HTTP API locked (firmware 4.0.4+)'
         : `last update ${new Date().toLocaleTimeString()}`;
     return { state, deviceInfo };
   }
@@ -3150,6 +3195,115 @@
       ccaDiscovering = false;
       ccaBusy = false;
       btn.disabled = false;
+    }
+  });
+
+  // ===== WiFi scan / config =====
+  function ccaNetRender(label, result, ageS) {
+    const el = document.getElementById('cca-wifi-scan');
+    const esc = s => String(s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+    let rows = '';
+    const add = (k, v) => { rows += `<div style="display:flex;justify-content:space-between;gap:12px;padding:2px 0"><span style="color:var(--text-dim)">${esc(k)}</span><span style="font-family:ui-monospace,Menlo,monospace">${esc(v)}</span></div>`; };
+    if (result && typeof result === 'object') {
+      if (Array.isArray(result.networks)) {
+        if (!result.networks.length) rows = '<span style="color:var(--text-dim)">No networks found (scan may still be running — click again).</span>';
+        // SSID is a clickable link (when not hidden) that fills the WiFi config box below.
+        // Bound by index after render so SSIDs with quotes/specials need no escaping.
+        result.networks.forEach((n, i) => {
+          const sig = esc(`${n.signal ?? ''}${n.protected ? ' 🔒' : ''}${n.connected ? ' ✓' : ''}`);
+          const name = n.ssid
+            ? `<span class="cca-ssid-pick" data-i="${i}" title="Click to use this SSID" style="cursor:pointer;color:var(--accent);text-decoration:underline">${esc(n.ssid)}</span>`
+            : `<span style="color:var(--text-dim)">(hidden)</span>`;
+          rows += `<div style="display:flex;justify-content:space-between;gap:12px;padding:2px 0">${name}<span style="font-family:ui-monospace,Menlo,monospace">${sig}</span></div>`;
+        });
+      } else {
+        Object.entries(result).forEach(([k, v]) => add(k, v !== null && typeof v === 'object' ? JSON.stringify(v) : v));
+      }
+    } else {
+      rows = `<pre style="white-space:pre-wrap;margin:0">${esc(JSON.stringify(result))}</pre>`;
+    }
+    const age = ageS != null ? ` <span style="color:var(--text-dim)">(${ageS}s ago)</span>` : '';
+    el.innerHTML = `<div style="font-weight:600;margin-bottom:6px">${esc(label)}${age}</div>${rows}`;
+    if (result && Array.isArray(result.networks)) {
+      el.querySelectorAll('.cca-ssid-pick').forEach(span => span.addEventListener('click', () => {
+        const ssid = result.networks[+span.dataset.i].ssid || '';
+        if (!ssid) return;
+        const box = document.getElementById('cca-wifi-ssid');
+        box.value = ssid;
+        box.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        document.getElementById('cca-wifi-pwd').focus();
+      }));
+    }
+  }
+
+  async function ccaNetRead(cmd, label) {
+    if (ccaBusy) return;
+    ccaBusy = true;
+    const el = document.getElementById('cca-wifi-scan');
+    el.innerHTML = `<span style="color:var(--text-dim)">Querying ${label} over BLE… (~10 s)</span>`;
+    try {
+      const r = await apiFetch('/api/cca/network/poll?cmd=' + encodeURIComponent(cmd), { method: 'POST' });
+      if (!r.ok) throw new Error(`request failed (${r.status})`);
+      const start = Date.now(), maxWaitMs = 30000;
+      while (Date.now() - start < maxWaitMs) {
+        await new Promise(res => setTimeout(res, 1500));
+        const elapsed = (Date.now() - start) / 1000;
+        let data;
+        try {
+          const rr = await apiFetch('/api/cca/network?cmd=' + encodeURIComponent(cmd));
+          if (!rr.ok) continue;
+          data = await rr.json();
+        } catch (_) { continue; }
+        if (data.result && data.age_s != null && data.age_s <= elapsed + 3) { ccaNetRender(label, data.result, data.age_s); return; }
+        el.innerHTML = `<span style="color:var(--text-dim)">Querying ${label} over BLE… (${Math.round(elapsed)} s)</span>`;
+      }
+      el.innerHTML = `<span style="color:var(--bad)">${label} timed out — the CCA may be out of range or busy (one BLE client at a time).</span>`;
+    } catch (e) {
+      el.innerHTML = `<span style="color:var(--bad)">${label} failed: ${e.message}</span>`;
+    } finally {
+      ccaBusy = false;
+    }
+  }
+
+  document.getElementById('cca-wifi-scan-btn').addEventListener('click', () => ccaNetRead('NETWORK_WIFI_SCAN', 'WiFi scan'));
+
+  document.getElementById('cca-wifi-join-btn').addEventListener('click', async () => {
+    if (ccaBusy) return;
+    const ssid = document.getElementById('cca-wifi-ssid').value.trim();
+    const pwd = document.getElementById('cca-wifi-pwd').value;
+    const res = document.getElementById('cca-wifi-result');
+    if (!ssid) { res.innerHTML = '<span style="color:var(--bad)">Enter an SSID first.</span>'; return; }
+    if (!confirm(`Join the CCA to WiFi "${ssid}"?\n\nIf the network or password is wrong the CCA can lose its uplink — recoverable from the Tigo app.`)) return;
+    ccaBusy = true;
+    res.innerHTML = '<span style="color:var(--text-dim)">Sending WiFi credentials over BLE… (~10 s)</span>';
+    try {
+      const r = await apiFetch('/api/cca/network/wifi-connect', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ nid: ssid, pwd }) });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.message || `failed (${r.status})`);
+      res.innerHTML = 'Requested — give it ~15 s, then <b>Refresh from CCA</b> to confirm in Network status.';
+      document.getElementById('cca-wifi-pwd').value = '';
+    } catch (e) {
+      res.innerHTML = `<span style="color:var(--bad)">Join failed: ${e.message}</span>`;
+    } finally {
+      ccaBusy = false;
+    }
+  });
+
+  document.getElementById('cca-wifi-clear-btn').addEventListener('click', async () => {
+    if (ccaBusy) return;
+    if (!confirm('Clear the CCA\'s saved WiFi settings?\n\nThis wipes its WiFi config. If the CCA relies on WiFi for its uplink it will go offline until reconfigured.')) return;
+    ccaBusy = true;
+    const res = document.getElementById('cca-wifi-result');
+    res.innerHTML = '<span style="color:var(--text-dim)">Clearing WiFi over BLE… (~10 s)</span>';
+    try {
+      const r = await apiFetch('/api/cca/network/wifi-clear', { method: 'POST' });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.message || `failed (${r.status})`);
+      res.innerHTML = '<span style="color:var(--good)">WiFi clear requested.</span>';
+    } catch (e) {
+      res.innerHTML = `<span style="color:var(--bad)">Clear failed: ${e.message}</span>`;
+    } finally {
+      ccaBusy = false;
     }
   });
 
