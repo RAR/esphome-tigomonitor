@@ -218,6 +218,9 @@ void TigoMonitorComponent::setup() {
   tigo_cloud_load_creds();
 #endif
 
+  // Capture the YAML-provided config as defaults, then overlay any user overrides from NVS.
+  tigo_config_load();
+
 #ifdef USE_ESP_IDF
   // Log PSRAM availability
   size_t psram_size = heap_caps_get_total_size(MALLOC_CAP_SPIRAM);

@@ -529,7 +529,16 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   void tigo_cloud_load_creds();  // restore persisted token on boot (called from setup())
 #endif
 
+  // User configuration persisted on-device (NVS) — runtime knobs editable in the web UI.
+  // YAML provides the defaults; stored overrides win until reverted. See tigo_config.cpp.
+  void tigo_config_load();   // capture YAML defaults + apply stored overrides (called from setup())
+  std::string tigo_config_json();                                         // current values/defaults/overridden
+  bool tigo_config_apply(const std::string &key, const std::string &value);  // set + persist (live)
+  bool tigo_config_reset(const std::string &key);                         // revert field to YAML default
+
  protected:
+  void tigo_config_save_();  // write current values + override bitmask to NVS
+
   // Frame processing
   void process_serial_data();
   void process_frame(const frame_string &frame);
@@ -792,6 +801,14 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   std::string cca_ip_;  // Optional CCA IP address for HTTP queries (small, kept in internal RAM)
   bool sync_cca_on_startup_ = true;  // Whether to sync from CCA on boot (default: true)
   unsigned long last_cca_sync_time_ = 0;  // millis() of last successful CCA sync
+
+  // Persisted-config support: YAML defaults captured at boot + override bitmask (tigo_config.cpp)
+  uint32_t cfg_overrides_ = 0;
+  float cfg_def_power_calibration_ = 1.0f;
+  unsigned long cfg_def_night_mode_timeout_ = 3600000;
+  bool cfg_def_reset_at_midnight_ = false;
+  bool cfg_def_sync_cca_on_startup_ = true;
+  std::string cfg_def_cca_ip_;
   
   // No timing variables needed - ESPHome handles update intervals
   

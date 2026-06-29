@@ -58,6 +58,7 @@ enum class CcaSource : uint8_t { HTTP = 0, BLE = 1, AUTO = 2 };
 class TigoWebServer : public Component
 #ifdef USE_TIGO_CCA_BLE
                       , public ble_client::BLEClientNode
+                      , public esp32_ble_tracker::ESPBTDeviceListener
 #endif
 {
  public:
@@ -92,6 +93,14 @@ class TigoWebServer : public Component
   // each a self-contained one-shot connect → … → auto-disconnect like the refresh.
   void cca_start_discovery();        // connect → sid → START_DISCOVERY → disconnect
   void cca_poll_discovery_status();  // connect → sid → DISCOVERY_STATUS → cache → disconnect
+
+  // --- BLE device search: find the CCA by its Tigo MAC OUI without hardcoding the MAC. ---
+  bool parse_device(const esp32_ble_tracker::ESPBTDevice &device) override;  // tracker callback
+  void ble_load_mac_();                       // setup(): capture YAML MAC + apply any saved override
+  void ble_scan_clear();                      // drop accumulated scan hits (rescan)
+  std::string ble_scan_json();                // {active_mac,yaml_mac,saved,devices:[…]}
+  bool ble_set_saved_mac(const std::string &mac_str);  // parse/validate/persist/apply; false on bad MAC
+  void ble_reset_mac();                        // forget the saved MAC, revert to the YAML one
 #endif
 
   void setup() override;
@@ -153,6 +162,14 @@ class TigoWebServer : public Component
   // pass through an atomic flag, so they ride a small mutex-guarded queue to the loop.
   std::mutex ble_net_req_mutex_;
   std::vector<std::pair<std::string, std::string>> ble_net_requests_;
+
+  // BLE device search: accumulated advertisements matching the Tigo MAC OUI (04:C0:5B),
+  // populated by parse_device() on the main loop, read by the httpd task — hence the mutex.
+  struct BleScanHit { uint64_t mac; int rssi; std::string name; uint32_t seen_ms; };
+  std::vector<BleScanHit> ble_scan_hits_;
+  std::mutex ble_scan_mutex_;
+  uint64_t ble_yaml_mac_{0};   // compile-time MAC from ble_client: (revert target)
+  uint64_t ble_saved_mac_{0};  // user-selected MAC persisted to NVS (0 = using YAML)
 
   // Cached DEVICE_INFO + NETWORK_INFO JSON for the CCA Info page (guarded by cca_info_mutex_)
   std::string cca_info_json_;
@@ -233,6 +250,8 @@ class TigoWebServer : public Component
   static esp_err_t api_cca_wifi_connect_handler(httpd_req_t *req);     // POST {nid,pwd}
   static esp_err_t api_cca_wifi_clear_handler(httpd_req_t *req);       // POST (destructive)
   static esp_err_t api_cca_data_export_handler(httpd_req_t *req);      // POST trigger cloud push
+  static esp_err_t api_cca_ble_scan_handler(httpd_req_t *req);         // GET found CCAs (?rescan=1)
+  static esp_err_t api_cca_ble_mac_handler(httpd_req_t *req);          // POST {mac} | {reset:true}
 #ifdef USE_TIGO_CLOUD
   static esp_err_t api_cloud_status_handler(httpd_req_t *req);   // GET configured/email/expires
   static esp_err_t api_cloud_login_handler(httpd_req_t *req);    // POST {email,password}
@@ -240,6 +259,8 @@ class TigoWebServer : public Component
   static esp_err_t api_cloud_health_handler(httpd_req_t *req);   // GET Tigo warning/error counts
   static esp_err_t api_cloud_equipment_handler(httpd_req_t *req);  // GET ?view=latest|history
 #endif
+  static esp_err_t api_config_get_handler(httpd_req_t *req);  // GET runtime config + defaults
+  static esp_err_t api_config_set_handler(httpd_req_t *req);  // POST {key,value} | {reset:key}
   static esp_err_t api_node_delete_handler(httpd_req_t *req);
   static esp_err_t api_node_import_handler(httpd_req_t *req);
   static esp_err_t api_restart_handler(httpd_req_t *req);

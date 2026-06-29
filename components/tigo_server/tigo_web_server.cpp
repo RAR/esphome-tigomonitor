@@ -158,12 +158,12 @@ void TigoWebServer::setup() {
   httpd_config_t config = HTTPD_DEFAULT_CONFIG();
   config.server_port = port_;
   config.ctrl_port = port_ + 1;
-  // Must be >= the number of httpd_register_uri_handler() calls below (46 on a TSDB +
+  // Must be >= the number of httpd_register_uri_handler() calls below (50 on a TSDB +
   // cloud build: 29 base + 4 TSDB + 3 CCA-discovery + 4 CCA-network + 1 CCA data-export
-  // + 5 cloud). Handlers past this cap
+  // + 2 CCA BLE-search + 5 cloud + 2 config). Handlers past this cap
   // silently fail to register and 404 — TSDB stats registers last, so it's the canary.
   // Keep generous headroom so adding a route doesn't quietly drop the tail again.
-  config.max_uri_handlers = 56;
+  config.max_uri_handlers = 60;
   config.stack_size = 8192;
   config.lru_purge_enable = true;  // Enable LRU purging of connections
   config.max_open_sockets = 4;     // Limit concurrent connections to reduce memory
@@ -342,6 +342,22 @@ void TigoWebServer::setup() {
     };
     httpd_register_uri_handler(server_, &api_cca_refresh_uri);
 
+    httpd_uri_t api_cca_ble_scan_uri = {
+      .uri = "/api/cca/ble-scan",
+      .method = HTTP_GET,
+      .handler = api_cca_ble_scan_handler,
+      .user_ctx = this
+    };
+    httpd_register_uri_handler(server_, &api_cca_ble_scan_uri);
+
+    httpd_uri_t api_cca_ble_mac_uri = {
+      .uri = "/api/cca/ble-mac",
+      .method = HTTP_POST,
+      .handler = api_cca_ble_mac_handler,
+      .user_ctx = this
+    };
+    httpd_register_uri_handler(server_, &api_cca_ble_mac_uri);
+
     httpd_uri_t api_cca_discovery_uri = {
       .uri = "/api/cca/discovery",
       .method = HTTP_GET,
@@ -447,6 +463,22 @@ void TigoWebServer::setup() {
     };
     httpd_register_uri_handler(server_, &api_cloud_equipment_uri);
 #endif
+
+    httpd_uri_t api_config_get_uri = {
+      .uri = "/api/config",
+      .method = HTTP_GET,
+      .handler = api_config_get_handler,
+      .user_ctx = this
+    };
+    httpd_register_uri_handler(server_, &api_config_get_uri);
+
+    httpd_uri_t api_config_set_uri = {
+      .uri = "/api/config",
+      .method = HTTP_POST,
+      .handler = api_config_set_handler,
+      .user_ctx = this
+    };
+    httpd_register_uri_handler(server_, &api_config_set_uri);
 
     httpd_uri_t api_node_delete_uri = {
       .uri = "/api/nodes/delete",
@@ -1315,6 +1347,77 @@ esp_err_t TigoWebServer::api_cca_discovery_handler(httpd_req_t *req) {
   return ESP_OK;
 }
 
+esp_err_t TigoWebServer::api_cca_ble_scan_handler(httpd_req_t *req) {
+  // GET: list nearby Tigo CCAs the BLE scanner has seen (matched by the 04:C0:5B OUI),
+  // plus the active/YAML MAC and whether an override is saved. ?rescan=1 clears the list
+  // first so the user gets a fresh sweep (the tracker scans continuously while idle).
+  TigoWebServer *server = static_cast<TigoWebServer *>(req->user_ctx);
+  if (!server->check_api_auth(req)) {
+    return ESP_OK;
+  }
+#ifdef USE_TIGO_CCA_BLE
+  char query[32] = {}, rescan[4] = {};
+  if (httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK)
+    httpd_query_key_value(query, "rescan", rescan, sizeof(rescan));
+  if (rescan[0] == '1')
+    server->ble_scan_clear();
+  std::string json = server->ble_scan_json();
+  httpd_resp_set_type(req, "application/json");
+  httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+  httpd_resp_send(req, json.c_str(), json.length());
+#else
+  httpd_resp_set_status(req, "400 Bad Request");
+  httpd_resp_set_type(req, "application/json");
+  httpd_resp_sendstr(req, "{\"status\":\"error\",\"message\":\"BLE not enabled\"}");
+#endif
+  return ESP_OK;
+}
+
+esp_err_t TigoWebServer::api_cca_ble_mac_handler(httpd_req_t *req) {
+  // POST {mac:"AA:BB:.."} to target+persist a CCA MAC, or {reset:true} to revert to the
+  // YAML MAC. Applies immediately (disconnecting first if a link is up).
+  TigoWebServer *server = static_cast<TigoWebServer *>(req->user_ctx);
+  if (!server->check_api_auth(req)) {
+    return ESP_OK;
+  }
+#ifdef USE_TIGO_CCA_BLE
+  char body[160];
+  int ret = httpd_req_recv(req, body, sizeof(body) - 1);
+  if (ret <= 0) {
+    httpd_resp_set_status(req, "400 Bad Request");
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, "{\"status\":\"error\",\"message\":\"empty body\"}");
+    return ESP_OK;
+  }
+  body[ret] = '\0';
+  cJSON *root = cJSON_Parse(body);
+  cJSON *reset = root ? cJSON_GetObjectItem(root, "reset") : nullptr;
+  cJSON *mac = root ? cJSON_GetObjectItem(root, "mac") : nullptr;
+  bool ok = false;
+  if (reset && cJSON_IsTrue(reset)) {
+    server->ble_reset_mac();
+    ok = true;
+  } else if (mac && cJSON_IsString(mac) && mac->valuestring[0]) {
+    ok = server->ble_set_saved_mac(mac->valuestring);
+  }
+  if (root) cJSON_Delete(root);
+  if (!ok) {
+    httpd_resp_set_status(req, "400 Bad Request");
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, "{\"status\":\"error\",\"message\":\"invalid MAC (expected AA:BB:CC:DD:EE:FF)\"}");
+    return ESP_OK;
+  }
+  std::string json = server->ble_scan_json();  // reflect the new active MAC
+  httpd_resp_set_type(req, "application/json");
+  httpd_resp_sendstr(req, json.c_str());
+#else
+  httpd_resp_set_status(req, "400 Bad Request");
+  httpd_resp_set_type(req, "application/json");
+  httpd_resp_sendstr(req, "{\"status\":\"error\",\"message\":\"BLE not enabled\"}");
+#endif
+  return ESP_OK;
+}
+
 esp_err_t TigoWebServer::api_cca_discovery_start_handler(httpd_req_t *req) {
   // POST: hand off START_DISCOVERY to the main loop (BLE stack must run there).
   TigoWebServer *server = static_cast<TigoWebServer *>(req->user_ctx);
@@ -1733,6 +1836,73 @@ esp_err_t TigoWebServer::api_cloud_equipment_handler(httpd_req_t *req) {
   return ESP_OK;
 }
 #endif  // USE_TIGO_CLOUD
+
+esp_err_t TigoWebServer::api_config_get_handler(httpd_req_t *req) {
+  // GET — current values, YAML defaults, and override flags for the editable runtime knobs.
+  TigoWebServer *server = static_cast<TigoWebServer *>(req->user_ctx);
+  if (!server->check_api_auth(req)) {
+    return ESP_OK;
+  }
+  if (server->parent_ == nullptr) {
+    httpd_resp_set_status(req, "503 Service Unavailable");
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, "{\"status\":\"error\",\"message\":\"monitor not bound\"}");
+    return ESP_OK;
+  }
+  std::string json = server->parent_->tigo_config_json();
+  httpd_resp_set_type(req, "application/json");
+  httpd_resp_sendstr(req, json.c_str());
+  return ESP_OK;
+}
+
+esp_err_t TigoWebServer::api_config_set_handler(httpd_req_t *req) {
+  // POST {key,value} to set+persist a field, or {reset:key} to revert it to the YAML default.
+  // Returns the refreshed config so the UI re-renders from a single source of truth.
+  TigoWebServer *server = static_cast<TigoWebServer *>(req->user_ctx);
+  if (!server->check_api_auth(req)) {
+    return ESP_OK;
+  }
+  if (server->parent_ == nullptr) {
+    httpd_resp_set_status(req, "503 Service Unavailable");
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, "{\"status\":\"error\",\"message\":\"monitor not bound\"}");
+    return ESP_OK;
+  }
+
+  char body[256];
+  int ret = httpd_req_recv(req, body, sizeof(body) - 1);
+  if (ret <= 0) {
+    httpd_resp_set_status(req, "400 Bad Request");
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, "{\"status\":\"error\",\"message\":\"empty body\"}");
+    return ESP_OK;
+  }
+  body[ret] = '\0';
+
+  cJSON *root = cJSON_Parse(body);
+  cJSON *reset = root ? cJSON_GetObjectItem(root, "reset") : nullptr;
+  cJSON *key = root ? cJSON_GetObjectItem(root, "key") : nullptr;
+  cJSON *val = root ? cJSON_GetObjectItem(root, "value") : nullptr;
+
+  bool ok = false;
+  if (reset && cJSON_IsString(reset) && reset->valuestring[0]) {
+    ok = server->parent_->tigo_config_reset(reset->valuestring);
+  } else if (key && cJSON_IsString(key) && key->valuestring[0] && val && cJSON_IsString(val)) {
+    ok = server->parent_->tigo_config_apply(key->valuestring, val->valuestring);
+  }
+  if (root) cJSON_Delete(root);
+
+  if (!ok) {
+    httpd_resp_set_status(req, "400 Bad Request");
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, "{\"status\":\"error\",\"message\":\"invalid key or value out of range\"}");
+    return ESP_OK;
+  }
+  std::string json = server->parent_->tigo_config_json();
+  httpd_resp_set_type(req, "application/json");
+  httpd_resp_sendstr(req, json.c_str());
+  return ESP_OK;
+}
 
 esp_err_t TigoWebServer::api_node_delete_handler(httpd_req_t *req) {
   TigoWebServer *server = static_cast<TigoWebServer *>(req->user_ctx);

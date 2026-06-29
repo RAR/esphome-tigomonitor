@@ -18,6 +18,7 @@
 
 #include "esphome/core/log.h"
 #include "esphome/core/helpers.h"
+#include "esphome/core/preferences.h"
 #include "mbedtls/sha512.h"
 #include <algorithm>
 #include <cstdio>
@@ -40,6 +41,11 @@ static const uint8_t CCA_SERVICE_UUID_BYTES[16] = {
 
 void TigoWebServer::ble_setup_() {
   ESP_LOGCONFIG(BLE_TAG, "CCA-over-BLE client enabled (cca_source: ble/auto)");
+  // Capture the compile-time MAC, then overlay any user-selected MAC from NVS.
+  this->ble_load_mac_();
+  // The advertisement listener is registered at codegen time (esp32_ble_tracker
+  // .register_ble_device in __init__.py) so parse_device() is actually dispatched —
+  // a runtime register_listener() is compiled out unless the LISTENER_COUNT macro is set.
 }
 
 void TigoWebServer::ble_loop_() {
@@ -324,7 +330,10 @@ void TigoWebServer::ble_handle_notification_(esp_ble_gattc_cb_param_t *param) {
 void TigoWebServer::cca_ble_connect() {
   // set_enabled() only flips a gate — connect() is what actually opens the GATT
   // link (the ble_client.connect action does the same). Must run on the main loop.
-  ESP_LOGI(BLE_TAG, "Connecting to CCA over BLE...");
+  // Make sure the link targets the user-selected MAC (defensive against setup ordering).
+  if (this->ble_saved_mac_ != 0 && this->parent()->get_address() != this->ble_saved_mac_)
+    this->parent()->set_address(this->ble_saved_mac_);
+  ESP_LOGI(BLE_TAG, "Connecting to CCA over BLE (%s)...", this->parent()->address_str());
   this->parent()->set_enabled(true);
   this->parent()->connect();
 }
@@ -653,6 +662,130 @@ uint32_t TigoWebServer::ble_get_cca_info_seconds_ago_() {
 }
 
 std::string TigoWebServer::ble_address_() { return this->parent()->address_str(); }
+
+// ---------------------------------------------------------------------------
+// BLE device search + on-device MAC persistence
+// ---------------------------------------------------------------------------
+
+// Tigo Energy's BLE MAC OUI — only the CCA advertises on it, so it's a reliable filter.
+static constexpr uint64_t TIGO_OUI = 0x04C05Bull;
+static const uint32_t CCA_MAC_MAGIC = 0x71C0AC11;  // "tigo cca mac"
+
+struct CcaBleMacPref {
+  uint32_t magic;
+  uint64_t mac;  // 0 = no override (use the YAML MAC)
+};
+
+static uint32_t cca_ble_mac_hash() { return fnv1_hash("tigo_cca_ble_mac_v1"); }
+
+// "AA:BB:CC:DD:EE:FF" -> uint64 (0 on malformed input).
+static uint64_t parse_mac_(const std::string &s) {
+  unsigned b[6];
+  if (sscanf(s.c_str(), "%x:%x:%x:%x:%x:%x", &b[0], &b[1], &b[2], &b[3], &b[4], &b[5]) != 6)
+    return 0;
+  uint64_t mac = 0;
+  for (int i = 0; i < 6; i++) {
+    if (b[i] > 0xFF) return 0;
+    mac = (mac << 8) | b[i];
+  }
+  return mac;
+}
+
+static std::string mac_to_str_(uint64_t mac) {
+  char buf[18];
+  snprintf(buf, sizeof(buf), "%02X:%02X:%02X:%02X:%02X:%02X",
+           (unsigned) ((mac >> 40) & 0xFF), (unsigned) ((mac >> 32) & 0xFF),
+           (unsigned) ((mac >> 24) & 0xFF), (unsigned) ((mac >> 16) & 0xFF),
+           (unsigned) ((mac >> 8) & 0xFF), (unsigned) (mac & 0xFF));
+  return std::string(buf);
+}
+
+// Tracker callback (main loop). Keep it cheap and never log — logging every advertisement
+// starves the loop and drops the web/API (confirmed during BLE bring-up).
+bool TigoWebServer::parse_device(const esp32_ble_tracker::ESPBTDevice &device) {
+  uint64_t mac = device.address_uint64();
+  if ((mac >> 24) != TIGO_OUI)  // top 3 bytes == 04:C0:5B
+    return false;
+  std::lock_guard<std::mutex> lock(this->ble_scan_mutex_);
+  for (auto &h : this->ble_scan_hits_) {
+    if (h.mac == mac) {  // refresh existing hit
+      h.rssi = device.get_rssi();
+      h.seen_ms = millis();
+      if (h.name.empty() && !device.get_name().empty()) h.name = device.get_name();
+      return false;
+    }
+  }
+  if (this->ble_scan_hits_.size() < 16) {
+    this->ble_scan_hits_.push_back({mac, device.get_rssi(), device.get_name(), millis()});
+    // Safe to log: only the CCA advertises on this OUI, so this fires a handful of times.
+    ESP_LOGI(BLE_TAG, "Found Tigo CCA over BLE: %s RSSI=%d %s", device.address_str(),
+             device.get_rssi(), device.get_name().c_str());
+  }
+  return false;  // not consumed — let other listeners see it too
+}
+
+void TigoWebServer::ble_scan_clear() {
+  std::lock_guard<std::mutex> lock(this->ble_scan_mutex_);
+  this->ble_scan_hits_.clear();
+}
+
+std::string TigoWebServer::ble_scan_json() {
+  uint64_t active = this->parent()->get_address();
+  std::string out = "{\"active_mac\":\"" + mac_to_str_(active) + "\",\"yaml_mac\":\"" +
+                    mac_to_str_(this->ble_yaml_mac_) + "\",\"saved\":" +
+                    (this->ble_saved_mac_ != 0 ? "true" : "false") + ",\"devices\":[";
+  std::lock_guard<std::mutex> lock(this->ble_scan_mutex_);
+  bool first = true;
+  for (auto &h : this->ble_scan_hits_) {
+    std::string name = h.name;
+    for (auto &c : name)
+      if (c == '"' || c == '\\') c = '\'';  // keep the JSON well-formed
+    out += first ? "" : ",";
+    first = false;
+    out += "{\"mac\":\"" + mac_to_str_(h.mac) + "\",\"rssi\":" + std::to_string(h.rssi) +
+           ",\"name\":\"" + name + "\",\"age_s\":" + std::to_string((millis() - h.seen_ms) / 1000) + "}";
+  }
+  out += "]}";
+  return out;
+}
+
+void TigoWebServer::ble_load_mac_() {
+  this->ble_yaml_mac_ = this->parent()->get_address();  // compile-time MAC = revert target
+  CcaBleMacPref pref{};
+  auto p = global_preferences->make_preference<CcaBleMacPref>(cca_ble_mac_hash());
+  if (p.load(&pref) && pref.magic == CCA_MAC_MAGIC && pref.mac != 0) {
+    this->ble_saved_mac_ = pref.mac;
+    this->parent()->set_address(pref.mac);
+    ESP_LOGI(BLE_TAG, "Using saved CCA BLE MAC %s (YAML default %s)",
+             mac_to_str_(pref.mac).c_str(), mac_to_str_(this->ble_yaml_mac_).c_str());
+  }
+}
+
+bool TigoWebServer::ble_set_saved_mac(const std::string &mac_str) {
+  uint64_t mac = parse_mac_(mac_str);
+  if (mac == 0)
+    return false;
+  if (this->ble_connected_)  // don't retarget a live link
+    this->cca_ble_disconnect();
+  this->ble_saved_mac_ = mac;
+  this->parent()->set_address(mac);
+  CcaBleMacPref pref{CCA_MAC_MAGIC, mac};
+  auto p = global_preferences->make_preference<CcaBleMacPref>(cca_ble_mac_hash());
+  p.save(&pref);
+  ESP_LOGI(BLE_TAG, "Saved CCA BLE MAC %s", mac_to_str_(mac).c_str());
+  return true;
+}
+
+void TigoWebServer::ble_reset_mac() {
+  if (this->ble_connected_)
+    this->cca_ble_disconnect();
+  this->ble_saved_mac_ = 0;
+  this->parent()->set_address(this->ble_yaml_mac_);
+  CcaBleMacPref pref{CCA_MAC_MAGIC, 0};
+  auto p = global_preferences->make_preference<CcaBleMacPref>(cca_ble_mac_hash());
+  p.save(&pref);
+  ESP_LOGI(BLE_TAG, "Reverted CCA BLE MAC to YAML default %s", mac_to_str_(this->ble_yaml_mac_).c_str());
+}
 
 }  // namespace tigo_server
 }  // namespace esphome
