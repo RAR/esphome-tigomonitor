@@ -251,6 +251,73 @@ bool TigoMonitorComponent::tigo_cloud_import() {
 }
 
 // ---------------------------------------------------------------------------
+// Cloud health rollup (Energy-Intelligence equipment-status/summary)
+// ---------------------------------------------------------------------------
+bool TigoMonitorComponent::tigo_cloud_health(std::string &out_json) {
+  // The summary endpoint returns Tigo's own warning/error counts per equipment type, e.g.
+  // [{"equipmentType":"unit","warning":1,"error":0,"unknown":0},{"equipmentType":"panel",…}].
+  // It's already clean JSON, so we pass it straight through to the web UI.
+  out_json.clear();
+  if (cloud_token_.empty() || cloud_system_id_ == 0) {
+    ESP_LOGW(CLOUD_TAG, "health: not connected");
+    return false;
+  }
+  std::string url = "https://ei.tigoenergy.com/api/v4/equipment-status/summary?systemId=" +
+                    std::to_string(cloud_system_id_);
+  std::string resp;
+  int status = 0;
+  if (!cloud_http_json_("GET", url, "", cloud_token_, resp, status)) {
+    ESP_LOGW(CLOUD_TAG, "health request failed");
+    return false;
+  }
+  if (status == 401) {
+    ESP_LOGW(CLOUD_TAG, "health 401 — token expired; clearing");
+    cloud_token_.clear();
+    cloud_save_creds_();
+    return false;
+  }
+  if (status != 200 || resp.empty() || resp[0] != '[') {
+    ESP_LOGW(CLOUD_TAG, "health HTTP %d", status);
+    return false;
+  }
+  out_json = resp;
+  return true;
+}
+
+bool TigoMonitorComponent::tigo_cloud_equipment(const std::string &view, std::string &out_json) {
+  // Proxy the Energy-Intelligence per-equipment status feeds straight through to the UI.
+  //   view "latest"  -> equipment-status/latest  (current status per equipment)
+  //   view "history" -> equipment-status/history (recent chronological status events)
+  // statusCode classification (confirmed): 0=ok, 1=warning, 2=error.
+  out_json.clear();
+  if (cloud_token_.empty() || cloud_system_id_ == 0) {
+    ESP_LOGW(CLOUD_TAG, "equipment: not connected");
+    return false;
+  }
+  std::string path = (view == "history")
+                         ? "/api/v4/equipment-status/history?limit=50&offset=0&systemId="
+                         : "/api/v4/equipment-status/latest?systemId=";
+  std::string url = "https://ei.tigoenergy.com" + path + std::to_string(cloud_system_id_);
+  std::string resp;
+  int status = 0;
+  if (!cloud_http_json_("GET", url, "", cloud_token_, resp, status)) {
+    ESP_LOGW(CLOUD_TAG, "equipment request failed");
+    return false;
+  }
+  if (status == 401) {
+    cloud_token_.clear();
+    cloud_save_creds_();
+    return false;
+  }
+  if (status != 200 || resp.empty() || resp[0] != '[') {
+    ESP_LOGW(CLOUD_TAG, "equipment HTTP %d", status);
+    return false;
+  }
+  out_json = resp;
+  return true;
+}
+
+// ---------------------------------------------------------------------------
 // Layout -> node table (mirror of match_cca_to_uart)
 // ---------------------------------------------------------------------------
 void TigoMonitorComponent::match_cloud_layout_to_uart_(const std::string &layout_json) {

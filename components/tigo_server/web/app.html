@@ -716,7 +716,14 @@
       <button data-view="tools"><span class="icon">⚙</span> Tools</button>
       <button data-view="diagnostics"><span class="icon">◈</span> Diagnostics</button>
       <button data-view="cca"><span class="icon">◉</span> CCA Info</button>
+      <button data-view="cloudstatus" id="nav-cloudstatus" style="display:none"><span class="icon">☁</span> Tigo Cloud</button>
     </nav>
+
+    <!-- Tigo cloud status box — shown only when a cloud connection is configured. -->
+    <div id="cloud-box" style="display:none;margin:8px 12px;padding:9px 11px;border:1px solid var(--border);border-radius:8px;cursor:pointer" title="Open Cloud Status">
+      <div style="font-size:10px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.05em;margin-bottom:5px">☁ Tigo Cloud</div>
+      <div id="cloud-box-body" style="font-size:12.5px;line-height:1.5;color:var(--text-dim)">checking…</div>
+    </div>
 
     <div class="conn">
       <span class="pill"><span class="dot" id="conn-dot"></span><span id="conn-label">connecting…</span></span>
@@ -888,6 +895,7 @@
         <button class="btn" id="topo-collapse-btn">Collapse all</button>
         <input class="input" id="topo-filter" placeholder="Filter by name, barcode, or string…">
         <span class="topo-summary" id="topo-summary">—</span>
+        <button class="btn" id="topo-cloud-import-btn" style="display:none" title="Pull panel names + layout from Tigo's cloud">Import from Tigo cloud</button>
       </div>
 
       <div id="topo-tree" class="topo-tree">
@@ -1170,25 +1178,6 @@
         <div id="cca-device-info" style="color:var(--text-dim)">Loading CCA device information…</div>
       </div>
 
-      <div class="section-head" id="cca-cloud-head" style="display:none">
-        <div class="section-title">Tigo Cloud</div>
-        <div class="section-sub" id="cca-cloud-status" style="color:var(--text-dim);font-size:12px">—</div>
-      </div>
-      <div class="tools-card" id="cca-cloud-card" style="display:none">
-        <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">
-          <input id="cca-cloud-email" type="email" placeholder="Tigo email" autocomplete="off"
-            style="flex:1;min-width:160px;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text)">
-          <input id="cca-cloud-pwd" type="password" placeholder="Tigo password" autocomplete="off"
-            style="flex:1;min-width:160px;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text)">
-          <button class="btn" id="cca-cloud-connect-btn">Connect</button>
-          <button class="btn" id="cca-cloud-import-btn">Import layout</button>
-        </div>
-        <div style="color:var(--text-dim);font-size:12px;margin-top:8px">
-          Pulls panel names and string/MPPT layout from Tigo's cloud (for when the CCA's local HTTP API is locked). Only a login token is stored on the device — not your password.
-        </div>
-        <div id="cca-cloud-result" style="margin-top:8px"></div>
-      </div>
-
       <div class="section-head">
         <div class="section-title">Network status</div>
       </div>
@@ -1229,10 +1218,75 @@
         <div id="cca-discovery-status" style="color:var(--text-dim)">Idle — no scan running.</div>
       </div>
     </section>
+
+    <!-- CLOUD STATUS -->
+    <section class="view" id="view-cloudstatus">
+      <div class="topbar">
+        <h1>Tigo Cloud</h1>
+        <div class="topbar-meta">
+          <span id="cloudstatus-meta">from Tigo cloud · —</span>
+          <button class="btn" id="cloudstatus-config-btn" style="margin-left:10px">Configure</button>
+          <button class="btn" id="cloudstatus-refresh-btn" style="margin-left:6px">Refresh</button>
+        </div>
+      </div>
+
+      <div class="hist-stat-grid">
+        <div class="hist-stat-card">
+          <div class="hist-stat-label">System</div>
+          <div class="hist-stat-val" id="cloudstatus-overall" style="font-size:16px">—</div>
+          <div class="hist-stat-sub">Tigo cloud assessment</div>
+        </div>
+        <div class="hist-stat-card">
+          <div class="hist-stat-label">CCA</div>
+          <div class="hist-stat-val" id="cloudstatus-cca" style="font-size:16px">—</div>
+          <div class="hist-stat-sub" id="cloudstatus-cca-sub">controller</div>
+        </div>
+        <div class="hist-stat-card">
+          <div class="hist-stat-label">Panels</div>
+          <div class="hist-stat-val" id="cloudstatus-panels" style="font-size:16px">—</div>
+          <div class="hist-stat-sub" id="cloudstatus-panels-sub">optimizers</div>
+        </div>
+      </div>
+
+      <div class="section-head"><div class="section-title">Issues</div></div>
+      <div class="tools-card" id="cloudstatus-issues-card">
+        <div id="cloudstatus-issues" style="color:var(--text-dim)">—</div>
+      </div>
+
+      <div class="section-head"><div class="section-title">Equipment</div></div>
+      <div class="tools-card">
+        <div id="cloudstatus-equipment" style="color:var(--text-dim)">—</div>
+      </div>
+
+      <div class="section-head"><div class="section-title">Recent history</div></div>
+      <div class="tools-card" style="max-height:340px;overflow-y:auto">
+        <div id="cloudstatus-history" style="color:var(--text-dim)">—</div>
+      </div>
+    </section>
   </main>
 
   <!-- Global toast (lives outside any view so it's reachable from any tab) -->
   <div id="app-toast" class="toast"></div>
+
+  <!-- Tigo Cloud connection modal (opened from the Tigo Cloud page's Configure button) -->
+  <div id="cloud-config-modal" style="display:none;position:fixed;inset:0;z-index:1000;align-items:center;justify-content:center;background:rgba(0,0,0,0.5)">
+    <div style="background:var(--bg);border:1px solid var(--border);border-radius:12px;padding:20px;width:min(420px,92vw);box-shadow:0 12px 44px rgba(0,0,0,0.45)">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+        <h2 style="margin:0;font-size:17px">Tigo Cloud connection</h2>
+        <button class="theme-toggle" id="cloud-config-close" title="Close">✕</button>
+      </div>
+      <div id="cloud-config-status" style="color:var(--text-dim);font-size:13px;margin-bottom:12px">—</div>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <input id="cloud-cfg-email" type="email" placeholder="Tigo email" autocomplete="off"
+          style="padding:9px 11px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text)">
+        <input id="cloud-cfg-pwd" type="password" placeholder="Tigo password" autocomplete="off"
+          style="padding:9px 11px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text)">
+        <button class="btn" id="cloud-cfg-connect">Connect</button>
+      </div>
+      <div style="color:var(--text-dim);font-size:12px;margin-top:10px">Only a login token is stored on the device — not your password.</div>
+      <div id="cloud-cfg-result" style="margin-top:8px;font-size:13px"></div>
+    </div>
+  </div>
 
   <!-- Panel detail modal (desktop only — hidden via @media on mobile) -->
   <div id="panel-modal" class="panel-modal" aria-hidden="true">
@@ -3365,73 +3419,230 @@
   // ===== Tigo Cloud (layout import) =====
   // Reveals the section only when the firmware was built with cloud_import (else the
   // endpoint 404s and we leave it hidden).
-  async function ccaCloudStatus() {
-    let d;
-    try {
-      const r = await apiFetch('/api/cloud/status');
-      if (!r.ok) return;
-      d = await r.json();
-    } catch (_) { return; }
-    document.getElementById('cca-cloud-head').style.display = '';
-    document.getElementById('cca-cloud-card').style.display = '';
-    const s = document.getElementById('cca-cloud-status');
-    const importBtn = document.getElementById('cca-cloud-import-btn');
-    if (d.configured) {
-      s.textContent = `Connected as ${d.email} · token expires ${d.expires || '—'} · system ${d.system_id || '—'}`;
-      importBtn.disabled = false;
-    } else {
-      s.textContent = 'Not connected — enter your Tigo login to enable layout import.';
-      importBtn.disabled = true;
-    }
+  // ----- Tigo Cloud connection modal (Configure button on the Tigo Cloud page) -----
+  function cloudConfigOpen() {
+    document.getElementById('cloud-cfg-result').innerHTML = '';
+    const stEl = document.getElementById('cloud-config-status');
+    stEl.textContent = 'checking…';
+    document.getElementById('cloud-config-modal').style.display = 'flex';
+    apiFetch('/api/cloud/status').then(r => r.ok ? r.json() : null).then(d => {
+      stEl.textContent = !d ? 'Cloud feature unavailable.'
+        : d.configured ? `Connected as ${d.email} · token expires ${d.expires || '—'}`
+          : 'Not connected — enter your Tigo login.';
+    }).catch(() => { stEl.textContent = '—'; });
   }
+  function cloudConfigClose() { document.getElementById('cloud-config-modal').style.display = 'none'; }
+  document.getElementById('cloud-config-close').addEventListener('click', cloudConfigClose);
+  document.getElementById('cloud-config-modal').addEventListener('click', e => { if (e.target.id === 'cloud-config-modal') cloudConfigClose(); });
+  document.getElementById('cloudstatus-config-btn').addEventListener('click', cloudConfigOpen);
 
-  document.getElementById('cca-cloud-connect-btn').addEventListener('click', async () => {
-    if (ccaBusy) return;
-    const email = document.getElementById('cca-cloud-email').value.trim();
-    const pwd = document.getElementById('cca-cloud-pwd').value;
-    const res = document.getElementById('cca-cloud-result');
+  document.getElementById('cloud-cfg-connect').addEventListener('click', async () => {
+    const email = document.getElementById('cloud-cfg-email').value.trim();
+    const pwd = document.getElementById('cloud-cfg-pwd').value;
+    const res = document.getElementById('cloud-cfg-result');
     if (!email || !pwd) { res.innerHTML = '<span style="color:var(--bad)">Enter email and password.</span>'; return; }
-    ccaBusy = true;
-    const btn = document.getElementById('cca-cloud-connect-btn');
+    const btn = document.getElementById('cloud-cfg-connect');
     const orig = btn.textContent; btn.disabled = true; btn.textContent = 'Connecting…';
     res.innerHTML = '<span style="color:var(--text-dim)">Logging into Tigo cloud… (~10 s)</span>';
     try {
       const r = await apiFetch('/api/cloud/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password: pwd }) });
       const j = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(j.message || `failed (${r.status})`);
-      document.getElementById('cca-cloud-pwd').value = '';
-      res.innerHTML = '<span style="color:var(--good)">Connected ✓ — now Import layout.</span>';
-      await ccaCloudStatus();
+      document.getElementById('cloud-cfg-pwd').value = '';
+      res.innerHTML = '<span style="color:var(--good)">Connected ✓</span>';
+      showToast('Connected to Tigo cloud ✓', 'ok');
+      cloudUiSync();
+      refreshCloudStatus();
+      setTimeout(cloudConfigClose, 700);
     } catch (e) {
-      res.innerHTML = `<span style="color:var(--bad)">Connect failed: ${e.message}</span>`;
+      res.innerHTML = `<span style="color:var(--bad)">${e.message}</span>`;
     } finally {
-      btn.disabled = false; btn.textContent = orig; ccaBusy = false;
+      btn.disabled = false; btn.textContent = orig;
     }
   });
 
-  document.getElementById('cca-cloud-import-btn').addEventListener('click', async () => {
-    if (ccaBusy) return;
-    ccaBusy = true;
-    const btn = document.getElementById('cca-cloud-import-btn');
+  // Tigo's per-type health as colored dots for the sidebar box — green=OK, amber=warning,
+  // red=error. The actual count is in the tooltip; full detail is on the Cloud Status page.
+  function cloudHealthDots(summary) {
+    if (!Array.isArray(summary)) return '<span style="color:var(--text-dim)">no data</span>';
+    const order = { unit: 0, panel: 1 };
+    return summary.slice()
+      .sort((a, b) => (order[a.equipmentType] ?? 9) - (order[b.equipmentType] ?? 9))
+      .map(s => {
+        const e = s.error || 0, w = s.warning || 0;
+        const col = e ? 'var(--bad)' : w ? '#e6a700' : 'var(--good)';
+        const name = s.equipmentType === 'unit' ? 'CCA' : s.equipmentType === 'panel' ? 'Panels' : s.equipmentType;
+        const detail = e ? `${e} error${e > 1 ? 's' : ''}` : w ? `${w} warning${w > 1 ? 's' : ''}` : 'OK';
+        return `<div style="display:flex;align-items:center;gap:7px;padding:1px 0;color:var(--text)" title="${name}: ${detail}"><span style="width:9px;height:9px;border-radius:50%;background:${col};flex:none"></span>${name}</div>`;
+      }).join('');
+  }
+
+  // Import panel names/layout from Tigo's cloud — lives on the Topology page.
+  document.getElementById('topo-cloud-import-btn').addEventListener('click', async () => {
+    const btn = document.getElementById('topo-cloud-import-btn');
+    if (btn.disabled) return;
     const orig = btn.textContent; btn.disabled = true; btn.textContent = 'Importing…';
-    const res = document.getElementById('cca-cloud-result');
-    res.innerHTML = '<span style="color:var(--text-dim)">Fetching layout from Tigo cloud… (~10 s)</span>';
     try {
       const r = await apiFetch('/api/cloud/import', { method: 'POST' });
       const j = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(j.message || `failed (${r.status})`);
-      res.innerHTML = '<span style="color:var(--good)">Layout imported ✓</span>';
       showToast('Tigo cloud layout imported ✓', 'ok');
+      refreshTopology();
     } catch (e) {
-      res.innerHTML = `<span style="color:var(--bad)">Import failed: ${e.message}</span>`;
+      showToast(`Import failed: ${e.message}`, 'err');
     } finally {
-      btn.disabled = false; btn.textContent = orig; ccaBusy = false;
-      ccaCloudStatus();
+      btn.disabled = false; btn.textContent = orig;
     }
   });
 
-  document.querySelector('#nav button[data-view="cca"]').addEventListener('click', () => { if (!ccaBusy) { refreshCca(); ccaCloudStatus(); } });
-  ccaCloudStatus();
+  document.querySelector('#nav button[data-view="cca"]').addEventListener('click', () => { if (!ccaBusy) refreshCca(); });
+
+  // ===== Cloud Status page + sidebar box =====
+  const CLOUD_CHECK_TITLES = {
+    disconnection: 'Connection', battery_fault: 'Battery', production: 'Production',
+    pv_off: 'PV On', high_voltage: 'Voltage Compliance', wifi_signal_v2: 'WiFi Signal',
+  };
+  const CLOUD_SEV = { 0: ['OK', 'var(--good)'], 1: ['Warning', '#e6a700'], 2: ['Error', 'var(--bad)'] };
+  const cloudSev = c => CLOUD_SEV[c] || ['?', 'var(--text-dim)'];
+  const cloudCheckTitle = t => CLOUD_CHECK_TITLES[t] || t;
+  const cloudEsc = s => String(s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+  function cloudFmtData(d) {
+    if (!d) return '';
+    try { return Object.entries(JSON.parse(d)).map(([k, v]) => `${k}: ${v}`).join(', '); } catch (_) { return String(d); }
+  }
+  const cloudEqName = eq => eq.equipmentType === 'unit' ? 'CCA' : (eq.equipmentId || eq.equipmentSerial || '?');
+  const cloudWorstCode = eq => (eq.equipmentStatusesLatest || []).reduce((m, s) => Math.max(m, s.statusCode || 0), 0);
+
+  // Reveals cloud UI per state: the "Tigo Cloud" nav entry whenever the feature is compiled
+  // in (so config is reachable before connecting); the sidebar box + Topology import button
+  // only once connected; and the box shows Tigo's health dots.
+  async function cloudUiSync() {
+    let st;
+    try { const r = await apiFetch('/api/cloud/status'); if (!r.ok) return; st = await r.json(); } catch (_) { return; }
+    document.getElementById('nav-cloudstatus').style.display = '';  // feature available
+    const connected = !!st.configured;
+    document.getElementById('cloud-box').style.display = connected ? '' : 'none';
+    document.getElementById('topo-cloud-import-btn').style.display = connected ? '' : 'none';
+    if (!connected) return;
+    try {
+      const r = await apiFetch('/api/cloud/health');
+      if (r.ok) document.getElementById('cloud-box-body').innerHTML = cloudHealthDots((await r.json()).summary);
+    } catch (_) {}
+  }
+  document.getElementById('cloud-box').addEventListener('click', () => { showView('cloudstatus'); refreshCloudStatus(); });
+
+  const cloudBadge = (code, text) => `<span class="badge ${code === 2 ? 'bad' : code === 1 ? 'warn' : 'ok'}">${cloudEsc(text)}</span>`;
+  function cloudRenderLatest(list) {
+    const issEl = document.getElementById('cloudstatus-issues');
+    const eqEl = document.getElementById('cloudstatus-equipment');
+    if (!Array.isArray(list)) { document.getElementById('cloudstatus-overall').textContent = 'No data'; return; }
+
+    // --- stat cards ---
+    const cca = list.find(eq => eq.equipmentType === 'unit');
+    const ccaCode = cca ? cloudWorstCode(cca) : 0;
+    const ccaFlag = cca && (cca.equipmentStatusesLatest || []).find(s => (s.statusCode || 0) > 0);
+    document.getElementById('cloudstatus-cca').innerHTML = cloudBadge(ccaCode, cloudSev(ccaCode)[0]);
+    document.getElementById('cloudstatus-cca-sub').textContent = ccaFlag ? cloudCheckTitle(ccaFlag.statusType) : (cca && cca.equipmentModel) || 'controller';
+
+    const panels = list.filter(eq => eq.equipmentType !== 'unit');
+    const flaggedPanels = panels.filter(eq => cloudWorstCode(eq) > 0);
+    const panWorst = flaggedPanels.length ? Math.max(...flaggedPanels.map(cloudWorstCode)) : 0;
+    document.getElementById('cloudstatus-panels').innerHTML = flaggedPanels.length
+      ? cloudBadge(panWorst, `${flaggedPanels.length} flagged`)
+      : cloudBadge(0, `${panels.length} OK`);
+    document.getElementById('cloudstatus-panels-sub').textContent = `${panels.length} optimizers`;
+
+    const worst = Math.max(ccaCode, panWorst);
+    const totFlagged = (ccaCode > 0 ? 1 : 0) + flaggedPanels.length;
+    document.getElementById('cloudstatus-overall').innerHTML = worst === 0
+      ? cloudBadge(0, 'All OK')
+      : cloudBadge(worst, `${totFlagged} ${worst === 2 ? 'error' : 'warning'}${totFlagged > 1 ? 's' : ''}`);
+
+    // --- issues ---
+    const flagged = list.filter(eq => cloudWorstCode(eq) > 0);
+    document.getElementById('cloudstatus-issues-card').style.borderLeft = flagged.length ? `3px solid ${worst === 2 ? 'var(--bad)' : '#e6a700'}` : '';
+    issEl.innerHTML = !flagged.length
+      ? '<span style="color:var(--good)">No issues — all equipment OK.</span>'
+      : flagged.map(eq => {
+        const checks = (eq.equipmentStatusesLatest || []).filter(s => (s.statusCode || 0) > 0).map(s => {
+          const data = cloudFmtData(s.data);
+          return `${cloudBadge(s.statusCode, cloudSev(s.statusCode)[0])} ${cloudEsc(cloudCheckTitle(s.statusType))}${data ? ` <span style="color:var(--text-dim)">(${cloudEsc(data)})</span>` : ''}`;
+        }).join(' · ');
+        const grp = eq.groupId ? ` <span style="color:var(--text-dim)">String ${cloudEsc(eq.groupId)}</span>` : '';
+        return `<div style="padding:4px 0"><b>${cloudEsc(cloudEqName(eq))}</b>${grp} — ${checks}</div>`;
+      }).join('');
+
+    // --- equipment tiles, grouped by string ---
+    const byGroup = {};
+    list.forEach(eq => { const g = eq.equipmentType === 'unit' ? 'CCA' : (eq.groupId || '—'); (byGroup[g] = byGroup[g] || []).push(eq); });
+    const tile = eq => {
+      const c = cloudWorstCode(eq);
+      const border = c === 2 ? 'var(--bad)' : c === 1 ? '#e6a700' : 'var(--good)';
+      const flag = (eq.equipmentStatusesLatest || []).find(s => (s.statusCode || 0) > 0);
+      const title = flag ? `${cloudCheckTitle(flag.statusType)}: ${cloudSev(flag.statusCode)[0]}` : 'OK';
+      return `<span title="${cloudEsc(title)}" style="display:inline-block;padding:5px 9px;margin:3px;border:1px solid var(--border);border-left:3px solid ${border};border-radius:6px;font-size:12.5px">${cloudEsc(cloudEqName(eq))}</span>`;
+    };
+    eqEl.innerHTML = Object.keys(byGroup).sort((a, b) => a === 'CCA' ? -1 : b === 'CCA' ? 1 : a.localeCompare(b)).map(g => {
+      const head = g === 'CCA' ? 'Controller' : 'String ' + cloudEsc(g);
+      return `<div style="margin-bottom:8px"><div style="color:var(--text-dim);font-size:12px;margin-bottom:2px">${head}</div><div>${byGroup[g].map(tile).join('')}</div></div>`;
+    }).join('');
+  }
+  function cloudRenderHistory(list) {
+    const el = document.getElementById('cloudstatus-history');
+    if (!Array.isArray(list) || !list.length) { el.innerHTML = '<span style="color:var(--text-dim)">No recent events.</span>'; return; }
+    // Aligned columns: equipment · check (+ data when flagged) · severity badge · time.
+    el.innerHTML = list.slice(0, 50).map(h => {
+      const eq = h.equipment || {}, name = eq.equipmentType === 'unit' ? 'CCA' : (eq.equipmentId || '?');
+      const data = (h.statusCode || 0) > 0 ? cloudFmtData(h.data) : '';
+      const time = (h.statusTime || '').slice(5, 16);  // MM-DD HH:MM
+      return `<div style="display:grid;grid-template-columns:44px 1fr auto 84px;gap:10px;align-items:center;padding:5px 0;border-bottom:1px solid var(--border);font-size:13px">`
+        + `<span style="font-weight:600">${cloudEsc(name)}</span>`
+        + `<span style="color:var(--text-dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${cloudEsc(cloudCheckTitle(h.statusType))}${data ? ` <span style="color:var(--text-faint)">· ${cloudEsc(data)}</span>` : ''}</span>`
+        + cloudBadge(h.statusCode, cloudSev(h.statusCode)[0])
+        + `<span style="color:var(--text-faint);font-family:ui-monospace,Menlo,monospace;font-size:11.5px;text-align:right;white-space:nowrap">${cloudEsc(time)}</span>`
+        + `</div>`;
+    }).join('');
+  }
+
+  function cloudShowDisconnected() {
+    document.getElementById('cloudstatus-meta').textContent = 'not connected';
+    document.getElementById('cloudstatus-overall').innerHTML = '<span style="color:var(--text-dim)">Not connected</span>';
+    document.getElementById('cloudstatus-cca').textContent = '—';
+    document.getElementById('cloudstatus-cca-sub').textContent = 'controller';
+    document.getElementById('cloudstatus-panels').textContent = '—';
+    document.getElementById('cloudstatus-panels-sub').textContent = 'optimizers';
+    document.getElementById('cloudstatus-issues-card').style.borderLeft = '';
+    document.getElementById('cloudstatus-issues').innerHTML = 'Press <b>Configure</b> to connect to your Tigo account.';
+    document.getElementById('cloudstatus-equipment').innerHTML = '<span style="color:var(--text-dim)">—</span>';
+    document.getElementById('cloudstatus-history').innerHTML = '<span style="color:var(--text-dim)">—</span>';
+  }
+
+  let cloudStatusBusy = false;
+  async function refreshCloudStatus() {
+    if (cloudStatusBusy) return;
+    cloudStatusBusy = true;
+    try {
+      let st = {};
+      try { const r = await apiFetch('/api/cloud/status'); if (r.ok) st = await r.json(); } catch (_) {}
+      if (!st.configured) { cloudShowDisconnected(); return; }
+      document.getElementById('cloudstatus-meta').textContent = 'from Tigo cloud · loading…';
+      const lr = await apiFetch('/api/cloud/equipment?view=latest');
+      if (lr.ok) cloudRenderLatest((await lr.json()).data);
+      else document.getElementById('cloudstatus-overall').innerHTML = '<span style="color:var(--bad)">Failed</span>';
+      const hr = await apiFetch('/api/cloud/equipment?view=history');
+      if (hr.ok) cloudRenderHistory((await hr.json()).data);
+      document.getElementById('cloudstatus-meta').textContent = `from Tigo cloud · ${new Date().toLocaleTimeString()}`;
+    } catch (e) {
+      document.getElementById('cloudstatus-meta').textContent = `error: ${e.message}`;
+    } finally {
+      cloudStatusBusy = false;
+    }
+  }
+  document.getElementById('cloudstatus-refresh-btn').addEventListener('click', refreshCloudStatus);
+  document.querySelector('#nav button[data-view="cloudstatus"]').addEventListener('click', refreshCloudStatus);
+
+  cloudUiSync();
+  setInterval(cloudUiSync, 600000);  // ~10 min while the UI is open
   if (window.location.hash === '#cca') refreshCca();
   // Same 30s cadence the standalone /cca page used.
   setInterval(() => {

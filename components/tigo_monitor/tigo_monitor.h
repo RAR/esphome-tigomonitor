@@ -520,6 +520,8 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   // Credentials are entered in the web UI; only the resulting bearer token is persisted.
   bool tigo_cloud_login(const std::string &email, const std::string &password);
   bool tigo_cloud_import();
+  bool tigo_cloud_health(std::string &out_json);  // Tigo's warning/error counts per type
+  bool tigo_cloud_equipment(const std::string &view, std::string &out_json);  // latest|history
   bool tigo_cloud_has_token() const { return !cloud_token_.empty(); }
   const std::string &tigo_cloud_email() const { return cloud_email_; }
   const std::string &tigo_cloud_expires() const { return cloud_expires_iso_; }
