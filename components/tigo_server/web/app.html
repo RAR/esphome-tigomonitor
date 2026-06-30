@@ -307,6 +307,16 @@
   }
   .panel-modal.open .panel-modal-backdrop { animation: panel-modal-backdrop-in 0.18s ease-out; }
 
+  /* Generic loading spinner */
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .spinner {
+    display: inline-block; width: 18px; height: 18px;
+    border: 2px solid var(--border); border-top-color: var(--accent);
+    border-radius: 50%; animation: spin 0.7s linear infinite; flex: none;
+  }
+  .spinner-box { display: flex; align-items: center; justify-content: center; gap: 10px; padding: 22px 10px; color: var(--text-dim); font-size: 13px; }
+  .btn .spinner { width: 13px; height: 13px; vertical-align: -2px; margin-right: 6px; }
+
   .panel-modal-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 18px; }
   .panel-modal-eyebrow { font-size: 10px; color: var(--text-faint); text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 4px; }
   .panel-modal-title { font-size: 22px; font-weight: 600; line-height: 1.2; }
@@ -604,6 +614,9 @@
     .topbar { flex-wrap: wrap; gap: 6px; margin-bottom: 16px; }
     .topbar-meta { font-size: 11px; flex-basis: 100%; }
     h1 { font-size: 18px; }
+
+    /* CCA Info > Status: stack the cards so the MAC/IP doesn't overrun a narrow column */
+    .cca-status-grid { grid-template-columns: 1fr; }
 
     .hero { grid-template-columns: 1fr; gap: 10px; margin-bottom: 16px; }
     .hero-card { padding: 14px 16px; }
@@ -1170,7 +1183,7 @@
         <div class="section-title">Status</div>
         <div class="section-sub" id="cca-conn-sub">—</div>
       </div>
-      <div class="hist-stat-grid">
+      <div class="hist-stat-grid cca-status-grid">
         <div class="hist-stat-card">
           <div class="hist-stat-label">CCA address</div>
           <div class="hist-stat-val" id="cca-ip" style="font-size:18px;font-family:ui-monospace,Menlo,monospace">—</div>
@@ -1216,7 +1229,7 @@
           <input id="cca-ble-mac" type="text" placeholder="AA:BB:CC:DD:EE:FF" autocomplete="off" spellcheck="false"
                  style="flex:1;min-width:170px;padding:6px 8px;background:var(--bg-2);border:1px solid var(--border);border-radius:5px;color:var(--text);font-family:ui-monospace,Menlo,monospace;font-size:13px">
           <button class="btn" id="cca-ble-scan-btn">Scan</button>
-          <button class="btn primary" id="cca-ble-save-btn">Save MAC</button>
+          <button class="btn" id="cca-ble-save-btn" style="border-color:var(--accent);color:var(--accent)">Save MAC</button>
           <button class="btn" id="cca-ble-revert-btn">Revert to YAML</button>
         </div>
         <div id="cca-ble-list" style="margin-top:10px"></div>
@@ -1233,7 +1246,7 @@
           <input id="cca-wifi-pwd" type="password" placeholder="Password (blank = open)" autocomplete="off"
             style="flex:1;min-width:140px;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text)">
           <button class="btn" id="cca-wifi-scan-btn">Scan</button>
-          <button class="btn" id="cca-wifi-join-btn">Join WiFi</button>
+          <button class="btn" id="cca-wifi-join-btn" style="border-color:var(--accent);color:var(--accent)">Join WiFi</button>
           <button class="btn" id="cca-wifi-clear-btn" style="border-color:var(--bad);color:var(--bad)">Clear WiFi</button>
         </div>
         <div style="color:var(--text-dim);font-size:12px;margin-top:8px">
@@ -3152,7 +3165,7 @@
       if (ci > -1) {
         const k = name.slice(0, ci).trim();
         if (k === 'S/N' || k === 'S/W') continue;  // dup of serial / software
-        info.push([k, name.slice(ci + 1).trim()]);
+        info.push([k, name.slice(ci + 1).trim(), item.status || 0]);  // carry the CCA's flag
       } else {
         health.push(item);
       }
@@ -3170,17 +3183,24 @@
     if (deviceInfo.serial) rows.push(['Serial', deviceInfo.serial]);
     if (deviceInfo.sysid != null) rows.push(['System ID', deviceInfo.sysid]);
     if (deviceInfo.software) rows.push(['Software', deviceInfo.software]);
-    for (const [k, v] of info) rows.push([k, v]);
+    for (const [k, v, st] of info) rows.push([k, v, st]);
     if (deviceInfo.sysconfig_ts) rows.push(['Config synced', ccaFmtTimestamp(deviceInfo.sysconfig_ts)]);
 
     let detail = '';
-    rows.forEach(([k, v], i) => {
+    rows.forEach(([k, v, st], i) => {
       const border = i < rows.length - 1 ? 'border-bottom:1px solid var(--border)' : '';
-      detail += `<div style="display:flex;justify-content:space-between;gap:12px;padding:4px 0;${border}"><span style="color:var(--text-dim)">${esc(k)}</span><span style="font-family:ui-monospace,Menlo,monospace;text-align:right;word-break:break-word">${esc(v)}</span></div>`;
+      // The CCA flags some info rows (e.g. "Last Data Sync") stale via status>0 — amber the value.
+      const flagged = st > 0;
+      const vstyle = flagged ? 'color:var(--warn)' : '';
+      const warn = flagged ? ' <span title="Flagged by the CCA" style="color:var(--warn)">⚠</span>' : '';
+      detail += `<div style="display:flex;justify-content:space-between;gap:12px;padding:4px 0;${border}"><span style="color:var(--text-dim)">${esc(k)}</span><span style="font-family:ui-monospace,Menlo,monospace;text-align:right;word-break:break-word;${vstyle}">${esc(v)}${warn}</span></div>`;
     });
 
+    // These values are the CCA's own snapshot from our last refresh — relative phrases like
+    // "Last Data Sync: 15 min ago" are as the CCA reported them then, not live.
+    const note = '<div style="margin-top:10px;color:var(--text-faint);font-size:11.5px">As of the last CCA sync (see <b>Status</b> above for when).</div>';
     target.innerHTML =
-      (chips ? `<div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px">${chips}</div>` : '') + detail;
+      (chips ? `<div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px">${chips}</div>` : '') + detail + note;
     return 'connected';
   }
 
@@ -3381,7 +3401,7 @@
     ccaBusy = true;
     ccaSetStatusBadge('refreshing');
     const info = document.getElementById('cca-device-info');
-    info.innerHTML = '<div style="color:var(--text-dim)">Connecting to the CCA over BLE… (~10 s)</div>';
+    info.innerHTML = '<div class="spinner-box"><span class="spinner"></span> Connecting to the CCA over BLE… (~10 s)</div>';
     try {
       const r = await apiFetch('/api/cca/refresh');
       if (!r.ok) throw new Error('refresh request failed');
@@ -3411,7 +3431,7 @@
         if (hasData && fresh) { applyCcaData(data); return; }
 
         info.innerHTML =
-          `<div style="color:var(--text-dim)">Connecting to the CCA over BLE… (${Math.round(elapsed)} s)</div>`;
+          `<div class="spinner-box"><span class="spinner"></span> Connecting to the CCA over BLE… (${Math.round(elapsed)} s)</div>`;
       }
       ccaSetStatusBadge('failed');
       info.innerHTML =
@@ -3488,7 +3508,7 @@
     const el = document.getElementById('cca-discovery-status');
     const btn = document.getElementById('cca-discovery-btn');
     btn.disabled = true;
-    el.innerHTML = '<span style="color:var(--text-dim)">Connecting to the CCA over BLE to start the scan… (~10 s)</span>';
+    el.innerHTML = '<span style="color:var(--text-dim)"><span class="spinner" style="width:13px;height:13px;vertical-align:-2px;margin-right:6px"></span>Connecting to the CCA over BLE to start the scan… (~10 s)</span>';
     try {
       const r = await apiFetch('/api/cca/discovery/start', { method: 'POST' });
       if (!r.ok) throw new Error(`start failed (${r.status})`);
@@ -3561,7 +3581,7 @@
     if (ccaBusy) return;
     ccaBusy = true;
     const el = document.getElementById('cca-wifi-scan');
-    el.innerHTML = `<span style="color:var(--text-dim)">Querying ${label} over BLE… (~10 s)</span>`;
+    el.innerHTML = `<span style="color:var(--text-dim)"><span class="spinner" style="width:13px;height:13px;vertical-align:-2px;margin-right:6px"></span>Querying ${label} over BLE… (~10 s)</span>`;
     try {
       const r = await apiFetch('/api/cca/network/poll?cmd=' + encodeURIComponent(cmd), { method: 'POST' });
       if (!r.ok) throw new Error(`request failed (${r.status})`);
@@ -3576,7 +3596,7 @@
           data = await rr.json();
         } catch (_) { continue; }
         if (data.result && data.age_s != null && data.age_s <= elapsed + 3) { ccaNetRender(label, data.result, data.age_s); return; }
-        el.innerHTML = `<span style="color:var(--text-dim)">Querying ${label} over BLE… (${Math.round(elapsed)} s)</span>`;
+        el.innerHTML = `<span style="color:var(--text-dim)"><span class="spinner" style="width:13px;height:13px;vertical-align:-2px;margin-right:6px"></span>Querying ${label} over BLE… (${Math.round(elapsed)} s)</span>`;
       }
       el.innerHTML = `<span style="color:var(--bad)">${label} timed out — the CCA may be out of range or busy (one BLE client at a time).</span>`;
     } catch (e) {
@@ -3596,7 +3616,7 @@
     if (!ssid) { res.innerHTML = '<span style="color:var(--bad)">Enter an SSID first.</span>'; return; }
     if (!confirm(`Join the CCA to WiFi "${ssid}"?\n\nIf the network or password is wrong the CCA can lose its uplink — recoverable from the Tigo app.`)) return;
     ccaBusy = true;
-    res.innerHTML = '<span style="color:var(--text-dim)">Sending WiFi credentials over BLE… (~10 s)</span>';
+    res.innerHTML = '<span style="color:var(--text-dim)"><span class="spinner" style="width:13px;height:13px;vertical-align:-2px;margin-right:6px"></span>Sending WiFi credentials over BLE… (~10 s)</span>';
     try {
       const r = await apiFetch('/api/cca/network/wifi-connect', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ nid: ssid, pwd }) });
       const j = await r.json().catch(() => ({}));
@@ -3615,7 +3635,7 @@
     if (!confirm('Clear the CCA\'s saved WiFi settings?\n\nThis wipes its WiFi config. If the CCA relies on WiFi for its uplink it will go offline until reconfigured.')) return;
     ccaBusy = true;
     const res = document.getElementById('cca-wifi-result');
-    res.innerHTML = '<span style="color:var(--text-dim)">Clearing WiFi over BLE… (~10 s)</span>';
+    res.innerHTML = '<span style="color:var(--text-dim)"><span class="spinner" style="width:13px;height:13px;vertical-align:-2px;margin-right:6px"></span>Clearing WiFi over BLE… (~10 s)</span>';
     try {
       const r = await apiFetch('/api/cca/network/wifi-clear', { method: 'POST' });
       const j = await r.json().catch(() => ({}));
@@ -3860,6 +3880,20 @@
   }
 
   let cloudStatusBusy = false;
+  function cloudSetLoading(on) {
+    const spin = '<div class="spinner-box"><span class="spinner"></span> Loading from Tigo cloud…</div>';
+    const btn = document.getElementById('cloudstatus-refresh-btn');
+    if (on) {
+      ['cloudstatus-issues', 'cloudstatus-equipment', 'cloudstatus-history']
+        .forEach(id => { document.getElementById(id).innerHTML = spin; });
+      ['cloudstatus-overall', 'cloudstatus-cca', 'cloudstatus-panels']
+        .forEach(id => { document.getElementById(id).innerHTML = '<span class="spinner" style="width:14px;height:14px"></span>'; });
+      btn.disabled = true;
+    } else {
+      btn.disabled = false;
+    }
+  }
+
   async function refreshCloudStatus() {
     if (cloudStatusBusy) return;
     cloudStatusBusy = true;
@@ -3867,16 +3901,23 @@
       let st = {};
       try { const r = await apiFetch('/api/cloud/status'); if (r.ok) st = await r.json(); } catch (_) {}
       if (!st.configured) { cloudShowDisconnected(); return; }
+      cloudSetLoading(true);
       document.getElementById('cloudstatus-meta').textContent = 'from Tigo cloud · loading…';
       const lr = await apiFetch('/api/cloud/equipment?view=latest');
       if (lr.ok) cloudRenderLatest((await lr.json()).data);
-      else document.getElementById('cloudstatus-overall').innerHTML = '<span style="color:var(--bad)">Failed</span>';
+      else {
+        document.getElementById('cloudstatus-overall').innerHTML = '<span style="color:var(--bad)">Failed</span>';
+        ['cloudstatus-cca', 'cloudstatus-panels', 'cloudstatus-issues', 'cloudstatus-equipment']
+          .forEach(id => { document.getElementById(id).textContent = '—'; });
+      }
       const hr = await apiFetch('/api/cloud/equipment?view=history');
       if (hr.ok) cloudRenderHistory((await hr.json()).data);
+      else document.getElementById('cloudstatus-history').textContent = '—';
       document.getElementById('cloudstatus-meta').textContent = `from Tigo cloud · ${new Date().toLocaleTimeString()}`;
     } catch (e) {
       document.getElementById('cloudstatus-meta').textContent = `error: ${e.message}`;
     } finally {
+      cloudSetLoading(false);
       cloudStatusBusy = false;
     }
   }
