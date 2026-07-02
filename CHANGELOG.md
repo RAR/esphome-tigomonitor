@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [2.0.0-alpha.2] - 2026-07-02
+## [2.0.0-beta.1] - 2026-07-02
 
 ### Added
 - **Find CCA over Bluetooth (CCA Info page)**. A "Find CCA over Bluetooth" card scans for the Tigo CCA and lets you target it **without hardcoding the MAC in YAML**. `TigoWebServer` registers as an `esp32_ble_tracker` listener and collects advertisements whose MAC matches Tigo Energy's `04:C0:5B` OUI (only the CCA advertises BLE on it — optimizers/gateways don't), surfacing each as MAC + RSSI + name. Picking one (or typing a MAC) saves it to NVS and applies it live via `BLEClient::set_address()`, so it overrides the compile-time `ble_client:` MAC and survives reboots; **Revert** drops the override back to the YAML MAC. The scanner runs continuously while the link is idle, so the card accumulates results over a few seconds; the parse callback is deliberately silent (logging every advertisement starves the main loop and drops the web/API). The previously-RE'd Tigo identifiers — service UUID `D3DADCBA-E4FA-4016-BA33-8BCC671999A7` and `iBTigoCC` manufacturer data — are alternative filters, but the OUI is the cheapest reliable one. New endpoints `GET /api/cca/ble-scan` (`?rescan=1` to clear) and `POST /api/cca/ble-mac` (`{mac}` to set, `{reset:true}` to revert); both BLE-only, and the card self-hides on non-BLE builds. `max_uri_handlers` cap raised to 60.
