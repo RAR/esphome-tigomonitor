@@ -474,12 +474,18 @@ void TigoWebServer::ble_generate_session_key_(uint32_t uts) {
   uint64_t sum = static_cast<uint64_t>(uts) + CCA_SESSION_SEED;
   std::string sum_str = std::to_string(sum);
 
-  unsigned char hash[64];
+  unsigned char hash[64] = {0};
 #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(6, 0, 0)
   // PSA one-shot SHA-512 (mbedtls 4.0 / IDF 6.0+). PSA is auto-initialized by ESP-IDF at startup.
+  // SHA-512 is only available because __init__.py calls esp32.require_mbedtls_sha512();
+  // ESPHome otherwise compiles it out on IDF >= 6.0 and this would return NOT_SUPPORTED.
   size_t hash_len = 0;
-  psa_hash_compute(PSA_ALG_SHA_512, reinterpret_cast<const unsigned char *>(sum_str.c_str()),
-                   sum_str.length(), hash, sizeof(hash), &hash_len);
+  psa_status_t hash_status =
+      psa_hash_compute(PSA_ALG_SHA_512, reinterpret_cast<const unsigned char *>(sum_str.c_str()),
+                       sum_str.length(), hash, sizeof(hash), &hash_len);
+  if (hash_status != PSA_SUCCESS)
+    ESP_LOGE(BLE_TAG, "SHA-512 unavailable (PSA error %d); session key will be invalid",
+             static_cast<int>(hash_status));
 #else
   mbedtls_sha512(reinterpret_cast<const unsigned char *>(sum_str.c_str()), sum_str.length(), hash, 0);
 #endif

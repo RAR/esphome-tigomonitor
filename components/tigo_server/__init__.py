@@ -43,6 +43,29 @@ def _validate_cca_source(config):
     return config
 
 
+def _final_validate(config):
+    # ESPHome disables mbedtls SHA-384/512 on IDF >= 6.0 to save flash. Both of our
+    # crypto paths need them back:
+    #  * cloud_import: everything above the leaf in Tigo's cert chain is SHA-384-signed
+    #    (WE1 is ecdsa-with-SHA384, the pinned GTS roots are SHA-384-self-signed).
+    #    Without SHA-384 the OID table loses those algorithms, the roots fail to parse
+    #    (-0x2100) and TLS silently drops WE1 from the server's chain (-0x3000).
+    #  * CCA BLE: the mobile_api session key is a SHA-512 hash (via PSA on IDF 6.0);
+    #    without SHA-512, psa_hash_compute() fails and the key would be garbage.
+    # This must run before esp32's to_code() reads the flag, hence final-validate and
+    # not our own to_code(). require_mbedtls_sha512() doesn't exist on older ESPHome —
+    # but those versions never disable SHA-384/512, so skipping the call is correct.
+    if config[CONF_CLOUD_IMPORT] or CONF_BLE_CLIENT_ID in config:
+        try:
+            from esphome.components.esp32 import require_mbedtls_sha512
+            require_mbedtls_sha512()
+        except ImportError:
+            pass
+    return config
+
+
+FINAL_VALIDATE_SCHEMA = _final_validate
+
 CONFIG_SCHEMA = cv.All(cv.Schema({
     cv.GenerateID(): cv.declare_id(TigoWebServer),
     cv.GenerateID(CONF_TIGO_MONITOR_ID): cv.use_id(tigo_monitor.TigoMonitorComponent),
@@ -196,16 +219,9 @@ async def to_code(config):
         await esp32_ble_tracker.register_ble_device(var, config)
 
     # Tigo cloud layout import: compile the (guarded) cloud client + UI. HTTPS to
-    # mapi.tigoenergy.com verifies against a small pinned set of Google Trust Services
-    # roots embedded in tigo_cloud_ca.h — not the ESP-IDF cert bundle, whose 6.0 build
-    # dropped the GlobalSign root Tigo's cross-signed chain relies on. This also avoids
-    # compiling in the ~64 KB full bundle.
+    # mapi.tigoenergy.com verifies against pinned Google Trust Services roots
+    # (tigo_cloud_ca.h, attached via cert_pem in tigo_cloud.cpp).
+    # (SHA-384/512 support for the TLS chain / BLE session key is requested in
+    # _final_validate above — it has to happen before esp32's to_code runs.)
     if config[CONF_CLOUD_IMPORT]:
         cg.add_define('USE_TIGO_CLOUD')
-        # Tigo's cert chain is anchored on the ECDSA P-384 GTS Root R4 and the WE1
-        # intermediate is P-384-signed, so mbedtls needs secp384r1 both to *parse* the
-        # pinned root and to *verify* the chain. Some builds (esp. minimal/IDF 6.0 mbedtls
-        # profiles) ship with P-384 off, which makes CA parse fail with -0x2100
-        # (X509_UNKNOWN_OID). Force it on for cloud builds.
-        from esphome.components.esp32 import add_idf_sdkconfig_option
-        add_idf_sdkconfig_option('CONFIG_MBEDTLS_ECP_DP_SECP384R1_ENABLED', True)
