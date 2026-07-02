@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **ESP-IDF 6.0 build with `cca_source: ble`** — `mbedtls/sha512.h` no longer exists on IDF 6.0 (it ships mbedtls 4.0, which removed the legacy `mbedtls_sha512_*` API and its public header in favor of the PSA Crypto API), so BLE builds failed to compile at `tigo_cca_ble.cpp`. The CCA session-key hash now uses PSA (`psa_hash_compute(PSA_ALG_SHA_512, …)`) on IDF ≥ 6.0 and the legacy mbedtls one-shot on 5.x — mirroring esphome's own `sha256` component — so it builds on both. Only affected `cca_source: ble`/`auto` (the include is under `USE_TIGO_CCA_BLE`); the non-BLE IDF-6 path was unaffected, which is why it went unnoticed.
+
 ## [2.0.0-beta.1] - 2026-07-02
 
 ### Added

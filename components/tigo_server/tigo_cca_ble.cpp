@@ -19,7 +19,15 @@
 #include "esphome/core/log.h"
 #include "esphome/core/helpers.h"
 #include "esphome/core/preferences.h"
+// ESP-IDF 6.0 ships mbedtls 4.0, which removed the legacy mbedtls_sha512_* API and
+// its public "mbedtls/sha512.h" header — hashing moved to the PSA Crypto API. Use PSA
+// on 6.0+, the legacy mbedtls one-shot on 5.x. (Mirrors esphome's own sha256 component.)
+#include <esp_idf_version.h>
+#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(6, 0, 0)
+#include <psa/crypto.h>
+#else
 #include "mbedtls/sha512.h"
+#endif
 #include <algorithm>
 #include <cstdio>
 #include <cstdlib>
@@ -467,7 +475,14 @@ void TigoWebServer::ble_generate_session_key_(uint32_t uts) {
   std::string sum_str = std::to_string(sum);
 
   unsigned char hash[64];
+#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(6, 0, 0)
+  // PSA one-shot SHA-512 (mbedtls 4.0 / IDF 6.0+). PSA is auto-initialized by ESP-IDF at startup.
+  size_t hash_len = 0;
+  psa_hash_compute(PSA_ALG_SHA_512, reinterpret_cast<const unsigned char *>(sum_str.c_str()),
+                   sum_str.length(), hash, sizeof(hash), &hash_len);
+#else
   mbedtls_sha512(reinterpret_cast<const unsigned char *>(sum_str.c_str()), sum_str.length(), hash, 0);
+#endif
   char hex[129];
   for (int i = 0; i < 64; i++)
     sprintf(hex + i * 2, "%02x", hash[i]);
