@@ -215,7 +215,6 @@ See the [Web Server & API reference](docs/WEB_SERVER_README.md#api-endpoints) fo
 | [Troubleshooting](docs/TROUBLESHOOTING.md) | Common issues and solutions |
 | [Home Assistant](docs/HOME_ASSISTANT.md) | HA integration and dashboards |
 | [UART Optimization](docs/UART_OPTIMIZATION.md) | Reducing packet loss |
-| [CCA Binary Analysis](docs/CCA_BINARY_ANALYSIS.md) | Protocol reverse-engineering notes (developer reference) |
 
 ## Project Structure
 

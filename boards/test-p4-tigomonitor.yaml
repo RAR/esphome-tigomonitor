@@ -128,7 +128,7 @@ tigo_monitor:
   uart_id: tigo_uart
   update_interval: 30s
   number_of_devices: 36
-  cca_ip: 10.75.0.16
+  cca_ip: 192.168.1.100  # placeholder — set your CCA's IP (older HTTP-capable firmware)
   sync_cca_on_startup: false
   reset_at_midnight: true
   inverters:

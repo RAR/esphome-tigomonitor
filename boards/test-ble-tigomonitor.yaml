@@ -65,7 +65,7 @@ esp32_ble_tracker:
     active: true
 
 ble_client:
-  - mac_address: "04:C0:5B:A1:A9:4B"  # CCA BLE MAC
+  - mac_address: "04:C0:5B:AA:BB:CC"  # placeholder seed MAC — reselect your CCA via the web UI (CCA Connection)
     id: tigo_cca_ble
     auto_connect: false
 
