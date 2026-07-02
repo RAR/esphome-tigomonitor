@@ -87,7 +87,11 @@ Recovers the panel names + string/MPPT/inverter layout from Tigo's cloud (`mapi.
 
 ## API endpoints
 
-All endpoints return JSON unless noted. Optional Bearer-token auth (see Authentication below).
+Conventions for the tables below:
+
+- **Method** — everything under **Read** is `GET`; everything under **Write** is `POST` (the method is shown inline there).
+- **Auth** — when `api_token` is set, every `/api/*` endpoint requires `Authorization: Bearer <token>`. The sole exception is `/api/health`, which never requires auth. HTML pages use HTTP Basic instead (see [Authentication](#authentication)).
+- **Response** — JSON unless noted.
 
 ### Read
 
@@ -225,37 +229,14 @@ Compatible with the [hass_ingress](https://github.com/lovelylain/hass_ingress) i
 
 ## Configuration
 
-```yaml
-tigo_server:
-  tigo_monitor_id: tigo_hub
-  port: 80
-  api_token: "optional-token"
-  web_username: "optional-user"
-  web_password: "optional-pass"
-  backlight: backlight_id   # optional — enables /api/backlight
-  cca_source: http          # http (default) | ble | auto
-  ble_client_id: tigo_cca_ble   # required for cca_source: ble/auto
-  cloud_import: false       # enable the Tigo Cloud page + layout import
-```
-
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `tigo_monitor_id` | ID | required | Reference to `tigo_monitor` |
-| `port` | Integer | 80 | HTTP port |
-| `api_token` | String | none | Bearer token for `/api/*` |
-| `web_username` | String | none | HTTP Basic Auth user |
-| `web_password` | String | none | HTTP Basic Auth pass |
-| `backlight` | ID | none | Light component for the optional `/api/backlight` endpoint |
-| `cca_source` | Enum | `http` | Where the CCA Info page gets data: `http` (CCA local API), `ble` (CCA `mobile_api` over Bluetooth — for firmware 4.0.4+ that locks HTTP), or `auto` (BLE if it has data, else HTTP). `ble`/`auto` require `ble_client_id` |
-| `ble_client_id` | ID | none | A `ble_client:` pointing at the CCA's BLE MAC. The MAC is just the default/seed — it can be reselected via the CCA Connection search and stored on-device |
-| `cloud_import` | Boolean | `false` | Compile in the Tigo cloud client + UI + TLS cert bundle. Enables the Tigo Cloud page and the Topology layout-import button |
+The `tigo_server:` YAML options — `port`, `api_token`, `web_username`/`web_password`, `backlight`, `cca_source`, `ble_client_id`, `cloud_import` — are documented in the **[Configuration Guide → Tigo Web Server component](CONFIGURATION.md#tigo-web-server-component)**, which is the canonical reference (including the full `ble_client:`/`esp32_ble` setup for CCA-over-Bluetooth and the `cloud_import` cloud-layout details). This doc covers what the server *serves*: the SPA views and the JSON API above.
 
 ---
 
 ## Technical notes
 
 - **Framework**: ESP-IDF native `esp_http_server` on a dedicated 8 KB-stack task.
-- **Max URI handlers**: 35 routes registered (raise via `config.max_uri_handlers` in `tigo_web_server.cpp` if adding more).
+- **Max URI handlers**: `config.max_uri_handlers` is raised to 60 in `tigo_web_server.cpp` to fit the CCA/cloud routes (the `httpd` default silently drops handlers past the cap and 404s them — raise it further if you add more).
 - **Connection model**: 4 max open sockets, keep-alive disabled, LRU purge enabled — minimizes internal RAM footprint without much real-world impact at typical poll rates.
 - **HTML assets**: served from `R""` raw-string constants in `web_assets.h`, regenerated from `components/tigo_server/web/*.html` by the Python codegen step. The API token placeholder (`__TIGO_API_TOKEN__`) is substituted at runtime so each device's token stays unique without a recompile.
 - **Memory**: response building and HTML buffers go through `PSRAMString` so large pages don't pressure internal heap.
@@ -266,3 +247,7 @@ tigo_server:
 ## Browser support
 
 Modern Chrome / Firefox / Safari, mobile or desktop. No plugins. The SPA degrades gracefully if the API token is set incorrectly (visible "refresh error" in topbar).
+
+---
+
+**See also:** [Configuration](CONFIGURATION.md) · [Home Assistant](HOME_ASSISTANT.md) · [Troubleshooting](TROUBLESHOOTING.md) · [← Back to README](../README.md)

@@ -1,6 +1,17 @@
 # Configuration Guide
 
-Complete configuration reference for ESPHome Tigo Monitor.
+Complete YAML reference for the ESPHome Tigo Monitor component — every option on the `tigo_monitor` and `tigo_server` platforms, the sensors they expose, and the ESP-IDF/PSRAM settings the firmware needs. New here? Start with the [Quick Start in the README](../README.md#quick-start), then come back for the details.
+
+## Contents
+
+- [Tigo Monitor component](#tigo-monitor-component) — core options, inverter grouping, calibration
+- [Tigo Web Server component](#tigo-web-server-component) — web UI/API, CCA over Bluetooth, cloud import, auth
+- [Sensors](#sensors) — system totals, per-device, HA sub-device grouping
+- [Management buttons](#management-buttons)
+- [Efficiency metrics](#efficiency-metrics)
+- [ESP-IDF framework &amp; PSRAM](#esp-idf-framework) — including [large-install internal-RAM tuning](#large-installs--internal-ram)
+- [On-flash history (esp_tsdb)](#on-flash-history-esp_tsdb)
+- [Filtering and smoothing](#filtering-and-smoothing)
 
 ## Tigo Monitor Component
 
@@ -34,6 +45,7 @@ tigo_monitor:
 | `reset_at_midnight` | Boolean | false | Reset daily totals at midnight |
 | `power_calibration` | Float | 1.0 | Power multiplier (0.5-2.0) |
 | `night_mode_timeout` | Integer | 60 | Minutes before night mode (1-1440) |
+| `stale_timeout` | Integer | 10 | Minutes without data before a device's production values (power, current, efficiency, duty cycle) zero out. `0` disables. Voltage/temperature keep their last reading for diagnostics |
 | `inverters` | List | None | Inverter grouping config |
 
 ### Inverter Grouping
@@ -124,6 +136,7 @@ tigo_server:
 | `api_token` | String | None | Bearer token for API auth |
 | `web_username` | String | None | HTTP Basic Auth username |
 | `web_password` | String | None | HTTP Basic Auth password |
+| `backlight` | ID | None | Light component to expose via the optional `POST /api/backlight` endpoint (units with a backlight wired) |
 | `cca_source` | Enum | `http` | CCA Info data source: `http`, `ble`, or `auto`. `ble`/`auto` require `ble_client_id` |
 | `ble_client_id` | ID | None | A `ble_client:` for the CCA's BLE MAC. The MAC is a default/seed — reselect it via the **CCA Connection** search and store it on-device |
 | `cloud_import` | Boolean | `false` | Enable the Tigo Cloud page + cloud layout import (compiles the cloud client + TLS cert bundle) |
@@ -421,6 +434,27 @@ esp32:
       CONFIG_SPIRAM_SPEED_80M: "y"
 ```
 
+> **Re-flashing to enable PSRAM:** if you previously flashed *without* PSRAM, clean the ESPHome build files **and** erase the ESP32 flash completely (`esptool.py erase_flash`) before re-flashing. ESPHome doesn't rebuild the bootloader automatically when PSRAM settings change.
+
+### Large installs — internal RAM
+
+PSRAM holds the bulk device data, but a few things still come out of the small **internal** (DMA-capable) heap and grow with install size. On a big array (30+ devices) they can exhaust it — the tell-tale symptom is new TCP connections resetting after a few minutes of uptime (OTA fails with `Connection reset by peer`, `esphome logs` won't attach) while the existing Home Assistant connection keeps working and a reboot temporarily clears it.
+
+Check the low-water mark at any time — `heap_min_free` in `curl http://<device-ip>/api/health`. If it drops into the low single-digit KB, tune these:
+
+- **WiFi/lwIP buffers.** Move them into PSRAM to free internal RAM:
+
+  ```yaml
+  esp32:
+    framework:
+      type: esp-idf
+      sdkconfig_options:
+        CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP: "y"
+  ```
+
+- **Entity count.** Every per-panel sensor declared in YAML costs ~110–150 bytes of internal RAM at boot (the sensor object plus API registration). It scales: 64 panels × 7 sensor types ≈ 450 entities ≈ **50–70 KB** — the largest static consumer on a big install. Declare only the per-panel sensors you actually use in Home Assistant; the web dashboard shows every metric for every panel regardless, at no per-entity cost. For HA aggregates, prefer the `string_label:` per-string power sensor (one entity per string) over declaring — or lambda-summing — per-panel sensors.
+- **UART RX buffer.** `CONFIG_UART_RX_BUFFER_SIZE` (and the matching `rx_buffer_size:` on the `uart:` component) allocate from internal RAM, never PSRAM. 2–8 KB is plenty on an ESP32-S3 at 38400 baud; a 32 KB buffer silently spends a sixth of the usable internal heap. See [UART Optimization](UART_OPTIMIZATION.md).
+
 ---
 
 ## On-Flash History (esp_tsdb)
@@ -466,4 +500,8 @@ sensor:
 
 ## Complete Example
 
-See [boards/](../boards/) for complete board-specific configurations.
+See [`boards/`](../boards/) for complete, ready-to-flash board configs — e.g. [`boards/esp32s3-atoms3r.yaml`](../boards/esp32s3-atoms3r.yaml) for the recommended M5Stack AtomS3R (PSRAM + esp_tsdb + tuned UART buffers).
+
+---
+
+**See also:** [Web Server &amp; API](WEB_SERVER_README.md) · [Wiring](WIRING.md) · [Troubleshooting](TROUBLESHOOTING.md) · [← Back to README](../README.md)

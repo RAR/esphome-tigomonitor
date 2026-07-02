@@ -1,5 +1,16 @@
 # CCA Binary Analysis - Tigo Protocol Reverse Engineering
 
+> **Internal developer reference — not user documentation.** This is a reverse-engineering notebook for the Tigo CCA (Cloud Connect Advanced) protocol, derived from disassembly and log-string analysis of the CCA firmware binaries plus RS-485/ZigBee frame observations from the ESPHome monitor. It covers the gateway (TGGW) command set, the 12-byte binary telemetry format, and the frame-type map. Overall status is **mixed**: the 12-byte telemetry format is 100% verified against production samples, while much of the frame-type mapping and command semantics are inferred from strings and remain unconfirmed.
+
+## Confidence legend
+
+Claims in this doc carry one of the following markers. Where a marker is absent, treat the claim as **inferred from binary strings** (plausible but unconfirmed).
+
+- **✅ VERIFIED** — confirmed against production data or working code.
+- **Likely** — strong circumstantial evidence, not yet directly confirmed.
+- **Possibly / speculative** — a working hypothesis; could be wrong.
+- **Unknown** — explicitly undetermined (e.g. unlabelled bytes/fields).
+
 ## Source
 Old Tigo CCA filesystem dump from `/home/rar/old_home/rar/tigo/ffs/`
 
@@ -275,27 +286,27 @@ From log strings, CCA startup includes:
 
 ## Frame Type Mapping (Our Observations)
 
-Based on ESPHome monitoring and CCA binary strings:
+Based on ESPHome monitoring and CCA binary strings. The **Confidence** column applies the legend above; most mappings are inferred from strings and remain unconfirmed.
 
-| Frame Type | Direction | Purpose | CCA Command |
-|------------|-----------|---------|-------------|
-| 0x06 | Controller→Device | Device query request | GET_STAT / GET_INFO / GET_VERSION |
-| 0x07 | Device→Controller | Device query response | (Response to 0x06) |
-| 0x0A | Controller→Gateway | Gateway info request | TGGW_VERSION_REQUEST |
-| 0x0B | Gateway→Controller | Gateway info response | TGGW_VERSION_RESPONSE |
-| 0x0D | Controller→Gateway | Gateway config request | TGGW_SET_CHANNEL / TGGW_SET_PAN |
-| 0x0E | Gateway→Controller | Gateway config response | (Response with encryption key) |
-| 0x14 | Controller (broadcast) | Broadcast poll | (Presence announcement) |
-| 0x22 | Controller (broadcast) | Broadcast command | TGGW_SEND_BROADCAST_REQUEST |
-| 0x23 | Gateway→Controller | Broadcast ack | TGGW_SEND_BROADCAST_RESPONSE |
-| 0x26 | Controller→Gateway | Device list request | TGGW_GET_ADT_REQUEST |
-| 0x27 | Gateway→Controller | Device list response | TGGW_GET_ADT_RESPONSE |
-| 0x2E | Controller→Gateway | Network status request | (Unknown TGGW command) |
-| 0x2F | Gateway→Controller | Network status response | (Unknown TGGW command) |
-| 0x3A | Controller→Gateway | Auth challenge request | (Part of auth sequence) |
-| 0x3B | Gateway→Controller | Auth challenge response | (Contains challenge data) |
-| 0x3C | Controller→Gateway | Auth response | (Echo challenge) |
-| 0x3D | Gateway→Controller | Auth ack | (Accept/reject auth) |
+| Frame Type | Direction | Purpose | CCA Command | Confidence |
+|------------|-----------|---------|-------------|------------|
+| 0x06 | Controller→Device | Device query request | GET_STAT / GET_INFO / GET_VERSION | Likely |
+| 0x07 | Device→Controller | Device query response | (Response to 0x06) | Likely |
+| 0x0A | Controller→Gateway | Gateway info request | TGGW_VERSION_REQUEST | Possibly |
+| 0x0B | Gateway→Controller | Gateway info response | TGGW_VERSION_RESPONSE | Possibly |
+| 0x0D | Controller→Gateway | Gateway config request | TGGW_SET_CHANNEL / TGGW_SET_PAN | Possibly |
+| 0x0E | Gateway→Controller | Gateway config response | (Response with encryption key) | Speculative |
+| 0x14 | Controller (broadcast) | Broadcast poll | (Presence announcement) | Speculative |
+| 0x22 | Controller (broadcast) | Broadcast command | TGGW_SEND_BROADCAST_REQUEST | Possibly |
+| 0x23 | Gateway→Controller | Broadcast ack | TGGW_SEND_BROADCAST_RESPONSE | Possibly |
+| 0x26 | Controller→Gateway | Device list request | TGGW_GET_ADT_REQUEST | Likely |
+| 0x27 | Gateway→Controller | Device list response | TGGW_GET_ADT_RESPONSE | ✅ VERIFIED |
+| 0x2E | Controller→Gateway | Network status request | (Unknown TGGW command) | Unknown |
+| 0x2F | Gateway→Controller | Network status response | (Unknown TGGW command) | Unknown |
+| 0x3A | Controller→Gateway | Auth challenge request | (Part of auth sequence) | Speculative |
+| 0x3B | Gateway→Controller | Auth challenge response | (Contains challenge data) | Speculative |
+| 0x3C | Controller→Gateway | Auth response | (Echo challenge) | Speculative |
+| 0x3D | Gateway→Controller | Auth ack | (Accept/reject auth) | Speculative |
 
 ## Key Insights
 
@@ -425,3 +436,7 @@ This binary analysis provides:
 - ✅ Safety feature implementation details
 
 **Most Valuable Finding**: Frame 0x27 (TGGW_GET_ADT_RESPONSE) contains the complete device list we need for discovery, eliminating the need for Frame 0x09 complex parsing or CCA authentication to get basic device info.
+
+---
+
+**See also:** [← Back to README](../README.md) · [Web Server & API](WEB_SERVER_README.md)

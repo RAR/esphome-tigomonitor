@@ -185,122 +185,24 @@ Legacy paths (`/`, `/nodes`, `/status`, `/yaml`, `/cca`, `/history`) all 302 to 
 | Tools — YAML generator with per-MPPT / per-inverter / per-panel / flat sub-device grouping | ![Tools](docs/images/Tools.png) |
 | Diagnostics — memory / network / UART / per-DB TSDB stats | ![Diagnostics](docs/images/Diagnostics.png) |
 
-## PSRAM Configuration
+## PSRAM & large installs
 
-**Required for 15+ devices.** Example for M5Stack AtomS3R:
-
-```yaml
-esphome:
-  platformio_options:
-    board_build.flash_mode: dio
-
-psram:
-  mode: octal
-  speed: 80MHz
-
-esp32:
-  board: m5stack-atoms3
-  variant: esp32s3
-  framework:
-    type: esp-idf
-    sdkconfig_options:
-      CONFIG_SPIRAM_MODE_OCT: "y"
-      CONFIG_SPIRAM_SPEED_80M: "y"
-```
-
-For generic ESP32-S3 boards (e.g., DevKitC-1):
-
-```yaml
-esp32:
-  board: esp32-s3-devkitc-1
-  variant: esp32s3
-  framework:
-    type: esp-idf
-
-psram:
-  mode: octal
-  speed: 80MHz
-```
-
-> **Tip:** If you previously flashed without PSRAM and are now enabling it, you must
-> clean the ESPHome build files **and** erase the ESP32 flash completely (e.g., `esptool.py erase_flash`).
-> ESPHome does not rebuild the bootloader automatically when PSRAM settings change.
-
-### Large installs (30+ devices)
-
-With many devices the static entity/API state plus WiFi/lwIP buffers can exhaust
-**internal** RAM (PSRAM holds the device data, but network buffers default to internal
-RAM). The symptom is new TCP connections being reset after a few minutes of uptime —
-OTA fails with `Connection reset by peer`, `esphome logs` won't attach — while the
-existing Home Assistant connection keeps working, and a reboot temporarily clears it.
-
-Move the WiFi and lwIP buffers into PSRAM to relieve internal RAM:
-
-```yaml
-esp32:
-  framework:
-    type: esp-idf
-    sdkconfig_options:
-      CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP: "y"
-```
-
-Check the headroom at any time via `curl http://<device-ip>/api/health` — the
-`heap_min_free` field is the low-water mark of internal RAM. If it drops into the
-low single-digit KB, you need this flag (and/or a smaller `CONFIG_UART_RX_BUFFER_SIZE`).
-
-Two more things dominate internal RAM as installs grow:
-
-- **Entity count.** Every per-panel sensor declared in YAML costs roughly
-  110–150 bytes of internal RAM at boot (the sensor object plus API
-  registration). That sounds small until it scales: 64 panels × 7 sensor types
-  ≈ 450 entities ≈ **50–70 KB of internal RAM** — the largest static consumer
-  on a big install. Declare only the per-panel sensors you actually use in
-  Home Assistant; the web dashboard shows every metric for every panel
-  regardless, at no per-entity cost. For HA aggregates, prefer the
-  `string_label:` per-string power sensor (one entity per string) over
-  declaring — or lambda-summing — per-panel sensors.
-- **UART RX buffer.** `CONFIG_UART_RX_BUFFER_SIZE` is allocated from internal
-  (DMA-capable) RAM, never PSRAM. 2–8 KB is plenty on an ESP32-S3 at 38400
-  baud; a 32 KB buffer silently spends a sixth of the usable internal heap.
-
-## Management Buttons
-
-```yaml
-button:
-  - platform: tigo_monitor
-    name: "Generate YAML Config"
-    tigo_monitor_id: tigo_hub
-    button_type: yaml_generator
-  
-  - platform: tigo_monitor
-    name: "Sync from CCA"
-    tigo_monitor_id: tigo_hub
-    button_type: sync_from_cca
-```
+**PSRAM is required for 15+ devices.** The recommended M5Stack AtomS3R has it; on a generic ESP32-S3 (e.g. DevKitC-1) enable the `psram:` component. The full board blocks — octal-mode sdkconfig flags, the erase-flash-when-enabling-PSRAM caveat, and internal-RAM tuning for 30+ device arrays (`CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP`, entity-count budgeting, UART buffer sizing) — live in the [Configuration Guide → ESP-IDF framework & PSRAM](docs/CONFIGURATION.md#esp-idf-framework). Ready-to-flash examples are in [`boards/`](boards/).
 
 ## API Endpoints
 
-All endpoints return JSON. Optional Bearer token authentication. See [`docs/WEB_SERVER_README.md`](docs/WEB_SERVER_README.md#api-endpoints) for the full set.
+All endpoints return JSON with optional Bearer-token auth. Common ones:
 
 | Endpoint | Description |
 |----------|-------------|
 | `/api/overview` | System aggregates (power, energy, device counts) |
-| `/api/devices` | Device metrics with string labels |
-| `/api/inverters` | Per-inverter rollups + embedded strings (incl. `display_name`, `display_label`, `panel_rating_w`) |
-| `/api/nodes` | Node table with CCA metadata; POST `/api/nodes/import` to restore |
-| `/api/strings` | Flat per-string aggregates |
-| `/api/inverters/rename` | POST `{name, display_name}` — set inverter friendly name |
-| `/api/strings/rename` | POST `{label, display_label}` — set string friendly name |
-| `/api/strings/rating` | POST `{label, rating_w}` — set per-panel nameplate watts |
-| `/api/status` | ESP32 status |
-| `/api/tsdb/stats` | LittleFS partition usage + per-DB record counts (only when esp_tsdb enabled) |
+| `/api/devices` | Per-device metrics with string labels |
+| `/api/inverters` | Per-inverter rollups + embedded strings |
 | `/api/history/power?range=…` | TSDB-backed system power/energy series |
-| `/api/history/panel?slot=N&range=…` | TSDB-backed single-panel power series |
-| `/api/panels` | Slot map (panel barcode → DB slot) |
-| `/api/config` | Runtime config values + defaults; POST to set or revert (Device Configuration) |
-| `/api/cca/ble-scan` | Discovered Tigo CCAs over BLE; POST `/api/cca/ble-mac` to target/save one |
-| `/api/cloud/health` · `/api/cloud/equipment` | Tigo-cloud health + per-equipment status (when `cloud_import` set) |
+| `/api/config` | Runtime config values; POST to set/revert (Device Configuration) |
 | `/api/health` | Health check (no auth) |
+
+See the [Web Server & API reference](docs/WEB_SERVER_README.md#api-endpoints) for the full endpoint list (reads, writes, payloads) and the `button:` management actions.
 
 ## Documentation
 
@@ -313,6 +215,7 @@ All endpoints return JSON. Optional Bearer token authentication. See [`docs/WEB_
 | [Troubleshooting](docs/TROUBLESHOOTING.md) | Common issues and solutions |
 | [Home Assistant](docs/HOME_ASSISTANT.md) | HA integration and dashboards |
 | [UART Optimization](docs/UART_OPTIMIZATION.md) | Reducing packet loss |
+| [CCA Binary Analysis](docs/CCA_BINARY_ANALYSIS.md) | Protocol reverse-engineering notes (developer reference) |
 
 ## Project Structure
 

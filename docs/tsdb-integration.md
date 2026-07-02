@@ -1,10 +1,59 @@
 # TSDB Integration
 
-On-flash time-series storage for Tigo Monitor, backed by [`zakery292/esp_tsdb`](https://github.com/zakery292/esp_tsdb). Survives reboots and OTA updates; queryable from the SPA's History view and from the JSON API.
+On-flash time-series storage for Tigo Monitor, backed by [`zakery292/esp_tsdb`](https://github.com/zakery292/esp_tsdb). It gives you persistent panel and system history that survives reboots and OTA updates, queryable from the SPA's History view and from the JSON API.
+
+**Just want to turn it on?** Jump to [Required configuration](#required-configuration) — add two dependencies and a `tsdb` partition, and history starts recording. Everything after that section is reference material on the internals.
 
 > **Status:** Phases 1–3 shipped. Per-snapshot system rollups + per-panel power are persisted at 5-min cadence; up to 48 panels supported across three lazy-opened panel DBs. Daily-rollup phase (Phase 4) and the volatile-history retirement (Phase 6) are tracked separately and not on the critical path.
 
 ---
+
+## Required configuration
+
+Add the `esp_tsdb` and `joltwallet/littlefs` dependencies plus a `tsdb` partition.
+
+`tigo-8mb.csv` (lives under `boards/partitions/`):
+
+```csv
+otadata,   data, ota,      ,       0x2000,
+phy_init,  data, phy,      ,       0x1000,
+app0,      app,  ota_0,    ,       0x1C0000,
+app1,      app,  ota_1,    ,       0x1C0000,
+nvs,       data, nvs,      ,       0x70000,
+tsdb,      data, littlefs, ,       0x300000,
+```
+
+YAML:
+
+```yaml
+esp32:
+  board: m5stack-atoms3   # board-specific — set this to YOUR board
+  variant: esp32s3
+  framework:
+    type: esp-idf
+    components:
+      # Until zakery292/esp_tsdb#1 lands and a release is tagged, this points
+      # at the RAR/esp_tsdb fork's `tigomonitor` branch (handle-based API +
+      # esp32p4 manifest target). Swap for a registry pin once upstream ships.
+      - name: zakery292/esp_tsdb
+        source: https://github.com/RAR/esp_tsdb.git
+        ref: tigomonitor
+      - joltwallet/littlefs^1.16
+    sdkconfig_options:
+      CONFIG_PARTITION_TABLE_CUSTOM: "y"
+      CONFIG_PARTITION_TABLE_FILENAME: "boards/partitions/tigo-8mb.csv"
+      CONFIG_LITTLEFS_FOR_IDF_3_2: "n"
+```
+
+> **Board note:** the `board:` value above (`m5stack-atoms3`) is an example. The reference rig for this project is the **AtomS3R** — set `board:` to whatever board you actually run so you don't flash the wrong target.
+
+The TSDB code is conditionally compiled — without those two dependencies on the include path, `tigo_history.h` short-circuits and the History / TSDB-stats endpoints don't exist. You can run the rest of the component without TSDB; you just lose persistent history.
+
+---
+
+# Reference
+
+Internals for firmware developers: what gets persisted, how it's sized, the write/query paths, and implementation notes. You don't need any of this to enable history.
 
 ## What gets persisted
 
@@ -36,7 +85,7 @@ If 48 slots fill up, additional panels are skipped silently (with a `(W)` log). 
 
 `tigo-8mb.csv` partition layout reserves 3 MB for the LittleFS partition (label `tsdb`):
 
-```
+```text
 otadata    8 KB
 phy_init   4 KB
 app0       1.75 MB   (OTA slot A)
@@ -94,47 +143,6 @@ The Diagnostics view consumes `/api/tsdb/stats` to render the database table (re
 
 ---
 
-## Required configuration
-
-Add the `esp_tsdb` and `joltwallet/littlefs` dependencies plus a `tsdb` partition.
-
-`tigo-8mb.csv` (lives under `boards/partitions/`):
-
-```csv
-otadata,   data, ota,      ,       0x2000,
-phy_init,  data, phy,      ,       0x1000,
-app0,      app,  ota_0,    ,       0x1C0000,
-app1,      app,  ota_1,    ,       0x1C0000,
-nvs,       data, nvs,      ,       0x70000,
-tsdb,      data, littlefs, ,       0x300000,
-```
-
-YAML:
-
-```yaml
-esp32:
-  board: m5stack-atoms3
-  variant: esp32s3
-  framework:
-    type: esp-idf
-    components:
-      # Until zakery292/esp_tsdb#1 lands and a release is tagged, this points
-      # at the RAR/esp_tsdb fork's `tigomonitor` branch (handle-based API +
-      # esp32p4 manifest target). Swap for a registry pin once upstream ships.
-      - name: zakery292/esp_tsdb
-        source: https://github.com/RAR/esp_tsdb.git
-        ref: tigomonitor
-      - joltwallet/littlefs^1.16
-    sdkconfig_options:
-      CONFIG_PARTITION_TABLE_CUSTOM: "y"
-      CONFIG_PARTITION_TABLE_FILENAME: "boards/partitions/tigo-8mb.csv"
-      CONFIG_LITTLEFS_FOR_IDF_3_2: "n"
-```
-
-The TSDB code is conditionally compiled — without those two dependencies on the include path, `tigo_history.h` short-circuits and the History / TSDB-stats endpoints don't exist. You can run the rest of the component without TSDB; you just lose persistent history.
-
----
-
 ## Implementation notes
 
 ### Persistence bug fix (upstream PR `zakery292/esp_tsdb#1`)
@@ -168,3 +176,7 @@ Buffer pools default to internal RAM in upstream esp_tsdb. We override via `cfg.
 - `components/tigo_monitor/tigo_monitor.cpp` `snapshot_to_history_()` — gathers and enqueues snapshots.
 - `components/tigo_server/tigo_web_server.cpp` `api_history_*_handler`, `api_panels_handler`, `api_tsdb_stats_handler` — query/stats endpoints.
 - `components/tigo_server/web/app.html` — History view (charts) + Diagnostics view (TSDB stats table).
+
+---
+
+**See also:** [Configuration](CONFIGURATION.md) · [Web Server & API](WEB_SERVER_README.md) · [← Back to README](../README.md)
