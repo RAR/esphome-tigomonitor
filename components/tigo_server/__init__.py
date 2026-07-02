@@ -202,3 +202,10 @@ async def to_code(config):
     # compiling in the ~64 KB full bundle.
     if config[CONF_CLOUD_IMPORT]:
         cg.add_define('USE_TIGO_CLOUD')
+        # Tigo's cert chain is anchored on the ECDSA P-384 GTS Root R4 and the WE1
+        # intermediate is P-384-signed, so mbedtls needs secp384r1 both to *parse* the
+        # pinned root and to *verify* the chain. Some builds (esp. minimal/IDF 6.0 mbedtls
+        # profiles) ship with P-384 off, which makes CA parse fail with -0x2100
+        # (X509_UNKNOWN_OID). Force it on for cloud builds.
+        from esphome.components.esp32 import add_idf_sdkconfig_option
+        add_idf_sdkconfig_option('CONFIG_MBEDTLS_ECP_DP_SECP384R1_ENABLED', True)
