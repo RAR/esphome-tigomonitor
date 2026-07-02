@@ -22,7 +22,7 @@
 #include "esphome/core/helpers.h"
 #include "esphome/components/network/util.h"
 #include "esp_http_client.h"
-#include "esp_crt_bundle.h"
+#include "tigo_cloud_ca.h"
 #include "esp_heap_caps.h"
 #include "cJSON.h"
 #include <cctype>
@@ -48,7 +48,7 @@ struct CloudCreds {
 static uint32_t cloud_creds_hash() { return fnv1_hash("tigo_cloud_creds_v1"); }
 
 // ---------------------------------------------------------------------------
-// HTTPS JSON request (TLS verified against the ESP-IDF cert bundle)
+// HTTPS JSON request (TLS verified against pinned Google Trust Services roots)
 // ---------------------------------------------------------------------------
 bool TigoMonitorComponent::cloud_http_json_(const char *method, const std::string &url,
                                             const std::string &body, const std::string &bearer,
@@ -66,7 +66,9 @@ bool TigoMonitorComponent::cloud_http_json_(const char *method, const std::strin
   config.timeout_ms = 15000;
   config.buffer_size = 2048;
   config.buffer_size_tx = 1024;
-  config.crt_bundle_attach = esp_crt_bundle_attach;  // verify TLS against the cert bundle
+  // Verify TLS against our pinned Google Trust Services roots (see tigo_cloud_ca.h) rather
+  // than esp_crt_bundle — IDF 6.0's bundle dropped the GlobalSign root Tigo's chain needs.
+  config.cert_pem = TIGO_CLOUD_CA_PEM;
   config.keep_alive_enable = false;
 
   esp_http_client_handle_t client = esp_http_client_init(&config);

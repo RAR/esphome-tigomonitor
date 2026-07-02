@@ -195,10 +195,10 @@ async def to_code(config):
         # (bumps ESPHOME_ESP32_BLE_TRACKER_LISTENER_COUNT and wires up parse_device()).
         await esp32_ble_tracker.register_ble_device(var, config)
 
-    # Tigo cloud layout import: compile the (guarded) cloud client + UI, and make sure the
-    # mbedTLS certificate bundle is built in so HTTPS to mapi.tigoenergy.com verifies.
+    # Tigo cloud layout import: compile the (guarded) cloud client + UI. HTTPS to
+    # mapi.tigoenergy.com verifies against a small pinned set of Google Trust Services
+    # roots embedded in tigo_cloud_ca.h — not the ESP-IDF cert bundle, whose 6.0 build
+    # dropped the GlobalSign root Tigo's cross-signed chain relies on. This also avoids
+    # compiling in the ~64 KB full bundle.
     if config[CONF_CLOUD_IMPORT]:
         cg.add_define('USE_TIGO_CLOUD')
-        from esphome.components.esp32 import add_idf_sdkconfig_option
-        add_idf_sdkconfig_option('CONFIG_MBEDTLS_CERTIFICATE_BUNDLE', True)
-        add_idf_sdkconfig_option('CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_DEFAULT_FULL', True)
