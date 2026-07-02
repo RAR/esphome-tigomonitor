@@ -3457,20 +3457,27 @@
       const r = await apiFetch('/api/cca/data-export', { method: 'POST' });
       const j = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(j.message || `failed (${r.status})`);
-      showToast('Cloud export requested ✓', 'ok');
+      showToast('Cloud export requested — confirming…', 'ok');
+      // The CCA's DEVICE_DATA_EXPORT handler runs `msgsend DCID ExportData` and replies per the
+      // mobile_api contract: success → {"code":0}; failure → {"msg":"Internal error pushing data"}.
+      // Judge the cached reply (BLE round-trip ~10 s) by code:0 — a reply merely existing isn't success.
       const start = Date.now();
+      let confirmed = false;
       while (Date.now() - start < 20000) {
         await new Promise(res => setTimeout(res, 2500));
+        let d;
         try {
           const rr = await apiFetch('/api/cca/network?cmd=DEVICE_DATA_EXPORT');
           if (!rr.ok) continue;
-          const d = await rr.json();
-          if (d.result && d.age_s != null && d.age_s <= (Date.now() - start) / 1000 + 3) {
-            showToast('CCA acknowledged cloud export ✓', 'ok');
-            break;
-          }
-        } catch (_) {}
+          d = await rr.json();
+        } catch (_) { continue; }
+        if (!d.result || d.age_s == null || d.age_s > (Date.now() - start) / 1000 + 3) continue;
+        confirmed = true;
+        if (d.result.code === 0) showToast('Cloud export started ✓', 'ok');
+        else showToast(`Cloud export failed: ${d.result.msg || 'CCA reported an error'}`, 'err');
+        break;
       }
+      if (!confirmed) showToast('Export requested — no confirmation from the CCA yet');
     } catch (e) {
       showToast(`Cloud export failed: ${e.message}`, 'err');
     } finally {
