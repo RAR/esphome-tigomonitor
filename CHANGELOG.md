@@ -207,9 +207,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Log starting_index and entry count when processing Frame 27
   - Warning when node table is full and cannot create new entries
   - Info log when saving node table after Frame 27 updates
-- **CCA Binary Analysis Documentation** (`CCA_BINARY_ANALYSIS.md`)
-  - Complete 12-byte telemetry format decoded (100% verified)
-  - Command code mapping from reverse engineering
 
 ### Fixed
 - **Frame 27 Node Table Parsing**
