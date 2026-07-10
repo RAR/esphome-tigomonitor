@@ -2438,14 +2438,17 @@ void TigoWebServer::build_devices_json(PSRAMString& json) {
 void TigoWebServer::build_overview_json(PSRAMString& json) {
   // In night mode, use cached values (all zeros)
   if (parent_->is_in_night_mode()) {
+    // today_energy is the day-delta of output energy (what History shows), not the
+    // raw lifetime accumulator — it stays valid at night, so report it here too.
+    float today_energy = fmaxf(0.0f, parent_->get_total_energy_out_kwh() - parent_->get_energy_at_day_start());
     char buffer[512];
     snprintf(buffer, sizeof(buffer),
       "{\"total_power\":%.1f,\"total_current\":%.3f,\"avg_efficiency\":%.2f,"
-      "\"avg_temperature\":%.1f,\"active_devices\":%d,\"max_devices\":%d,\"total_energy\":%.3f,\"total_energy_in\":%.3f,\"total_energy_out\":%.3f}",
+      "\"avg_temperature\":%.1f,\"active_devices\":%d,\"max_devices\":%d,\"total_energy\":%.3f,\"total_energy_in\":%.3f,\"total_energy_out\":%.3f,\"today_energy\":%.3f}",
       0.0f, 0.0f, 0.0f, 0.0f,
       0, parent_->get_number_of_devices(),
-      parent_->get_total_energy_out_kwh(), parent_->get_total_energy_in_kwh(), parent_->get_total_energy_out_kwh());
-    
+      parent_->get_total_energy_out_kwh(), parent_->get_total_energy_in_kwh(), parent_->get_total_energy_out_kwh(), today_energy);
+
     json.append(buffer);
     return;
   }
@@ -2473,13 +2476,17 @@ void TigoWebServer::build_overview_json(PSRAMString& json) {
   
   float total_energy_in = parent_->get_total_energy_in_kwh();
   float total_energy_out = parent_->get_total_energy_out_kwh();
-  
+  // "Today's energy" = output produced since the day-start baseline (mirrors the
+  // History view's day-delta). Independent of reset_at_midnight, so it means today
+  // even while total_energy_* keep accumulating monotonically for HA.
+  float today_energy = fmaxf(0.0f, total_energy_out - parent_->get_energy_at_day_start());
+
   char buffer[512];
   snprintf(buffer, sizeof(buffer),
     "{\"total_power\":%.1f,\"total_current\":%.3f,\"avg_efficiency\":%.2f,"
-    "\"avg_temperature\":%.1f,\"active_devices\":%d,\"max_devices\":%d,\"total_energy\":%.3f,\"total_energy_in\":%.3f,\"total_energy_out\":%.3f}",
+    "\"avg_temperature\":%.1f,\"active_devices\":%d,\"max_devices\":%d,\"total_energy\":%.3f,\"total_energy_in\":%.3f,\"total_energy_out\":%.3f,\"today_energy\":%.3f}",
     total_power_out, total_current, avg_efficiency, avg_temp,
-    active_devices, parent_->get_number_of_devices(), total_energy_out, total_energy_in, total_energy_out);
+    active_devices, parent_->get_number_of_devices(), total_energy_out, total_energy_in, total_energy_out, today_energy);
   
   json.append(buffer);
 }

@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Dashboard "Today's energy" no longer shows a runaway lifetime total.** It had been displaying the raw `total_energy_in_kwh_` accumulator from `/api/overview`, which only zeros at midnight when `reset_at_midnight` is enabled (off by default) — so with the flag off it piled up day over day (observed ~1067 kWh for a ~86 kWh day). `/api/overview` now exposes a `today_energy` field computed as `max(0, total_energy_out − energy_at_day_start)` — the same day-delta the History view uses, independent of `reset_at_midnight`, leaving the `total_energy_*` accumulators monotonic for Home Assistant. The dashboard hero and "Today" row read the new field. Also fixed a related double-count in the "This month" hero: `/api/energy/history` already includes today, but the JS was adding today again (and adding the inflated raw accumulator on top).
+
+### Changed
+- **`esp_tsdb` now comes from the upstream registry release** (`zakery292/esp_tsdb^2.1.0`) instead of the `RAR/esp_tsdb` fork's `tigomonitor` branch. Upstream 2.1.0 merged everything this project depended on the fork for: the handle-based multi-instance API (two DBs open at once), the wrapped-ring query fix (day/week panel charts went empty once a DB filled and started evicting), and the internal-RAM pool `MALLOC_CAP_8BIT` fix. Exception: the ESP32-P4 board keeps the fork pin, since 2.1.0's manifest doesn't list the `esp32p4` target yet.
+- **"Sync to cloud" is now "Sync with cloud"** (CCA Info page). The button triggers `DEVICE_DATA_EXPORT`, which Tigo names from the upload side, but the resulting cloud check-in is bidirectional: the CCA pushes its telemetry *and* pulls down any pending system-config changes (verified live — replacing optimizers in the Tigo portal and hitting the button bumped the CCA's `sysconfig_ts` immediately, vs. waiting for the ~10-minute automatic sync). Label, tooltip, and toasts now reflect that.
+
 ## [2.0.0-beta.2] - 2026-07-02
 
 ### Fixed

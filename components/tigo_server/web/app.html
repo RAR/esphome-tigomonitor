@@ -1205,7 +1205,7 @@
         <div class="section-title">Device information</div>
         <div class="section-sub">
           <button class="btn" id="cca-refresh-btn">Refresh from CCA</button>
-          <button class="btn" id="cca-export-btn">Sync to cloud</button>
+          <button class="btn" id="cca-export-btn" title="Tell the CCA to check in with Tigo's cloud now — uploads its data and pulls down any pending config changes">Sync with cloud</button>
         </div>
       </div>
       <div class="tools-card">
@@ -1507,7 +1507,7 @@
       document.getElementById('ov-power').textContent =
         `${(d.total_power ?? 0).toFixed(0)} W`;
       document.getElementById('ov-today').textContent =
-        `${(d.total_energy_in ?? d.total_energy ?? 0).toFixed(1)} kWh`;
+        `${(d.today_energy ?? d.total_energy_in ?? d.total_energy ?? 0).toFixed(1)} kWh`;
       document.getElementById('conn-dot').style.background = 'var(--good)';
       document.getElementById('conn-dot').style.boxShadow = '0 0 8px var(--good)';
       document.getElementById('conn-label').textContent = 'connected';
@@ -1621,7 +1621,7 @@
                        : `${ov.active_devices || 0} of ${ov.max_devices || 0} reporting`;
 
     document.getElementById('hero-energy').textContent =
-      (ov.total_energy_in ?? ov.total_energy ?? 0).toFixed(1);
+      (ov.today_energy ?? ov.total_energy_in ?? ov.total_energy ?? 0).toFixed(1);
     document.getElementById('hero-active').textContent = ov.active_devices ?? 0;
     document.getElementById('hero-active-of').textContent = ` / ${ov.max_devices ?? 0}`;
     const ratio = ov.max_devices ? ((ov.active_devices || 0) / ov.max_devices) : 0;
@@ -1880,8 +1880,11 @@
       const dev  = await devR.json();
       const hist = histR.ok ? await histR.json() : { history: [] };
 
-      // "This month" — sum of daily entries within current YYYY-MM, plus
-      // today's accumulating value (today isn't in history yet).
+      // "This month" — sum of daily entries within current YYYY-MM. The
+      // /api/energy/history feed already includes today as its newest entry
+      // (day-delta of output energy), so we do NOT add today separately —
+      // doing so double-counted it (and previously added the raw lifetime
+      // accumulator on top). Days with actual production count toward the avg.
       const now = new Date();
       const yyyymm = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
       let monthSum = 0;
@@ -1889,14 +1892,9 @@
       for (const e of (hist.history || [])) {
         if (e.date && e.date.startsWith(yyyymm)) {
           monthSum += e.energy || 0;
-          monthDays += 1;
+          if ((e.energy || 0) > 0) monthDays += 1;
         }
       }
-      // Add today's running total (not yet in history). Days-counted gets
-      // +1 only if today actually has any power yet.
-      const today = ov.total_energy_in ?? ov.total_energy ?? 0;
-      monthSum += today;
-      if (today > 0) monthDays += 1;
 
       // Peak power: sum of per-inverter peak_power. Numerator (total_power)
       // is system-wide, so the denominator must be too — using max() here
@@ -3445,8 +3443,11 @@
     }
   });
 
-  // Ask the CCA to push its data to Tigo's cloud now. Best-effort: confirm via the cached
-  // ack if it lands, otherwise leave it at "requested".
+  // Ask the CCA to check in with Tigo's cloud now. The session is bidirectional: telemetry
+  // goes up AND any pending sysconfig (e.g. optimizers replaced in the portal) comes down —
+  // observed live: sysconfig_ts bumps right after this fires. Tigo names the trigger from the
+  // upload side (DEVICE_DATA_EXPORT). Best-effort: confirm via the cached ack if it lands,
+  // otherwise leave it at "requested".
   document.getElementById('cca-export-btn').addEventListener('click', async () => {
     if (ccaBusy) return;
     ccaBusy = true;
@@ -3457,7 +3458,7 @@
       const r = await apiFetch('/api/cca/data-export', { method: 'POST' });
       const j = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(j.message || `failed (${r.status})`);
-      showToast('Cloud export requested — confirming…', 'ok');
+      showToast('Cloud sync requested — confirming…', 'ok');
       // The CCA's DEVICE_DATA_EXPORT handler runs `msgsend DCID ExportData` and replies per the
       // mobile_api contract: success → {"code":0}; failure → {"msg":"Internal error pushing data"}.
       // Judge the cached reply (BLE round-trip ~10 s) by code:0 — a reply merely existing isn't success.
@@ -3473,13 +3474,13 @@
         } catch (_) { continue; }
         if (!d.result || d.age_s == null || d.age_s > (Date.now() - start) / 1000 + 3) continue;
         confirmed = true;
-        if (d.result.code === 0) showToast('Cloud export started ✓', 'ok');
-        else showToast(`Cloud export failed: ${d.result.msg || 'CCA reported an error'}`, 'err');
+        if (d.result.code === 0) showToast('Cloud sync started ✓', 'ok');
+        else showToast(`Cloud sync failed: ${d.result.msg || 'CCA reported an error'}`, 'err');
         break;
       }
-      if (!confirmed) showToast('Export requested — no confirmation from the CCA yet');
+      if (!confirmed) showToast('Sync requested — no confirmation from the CCA yet');
     } catch (e) {
-      showToast(`Cloud export failed: ${e.message}`, 'err');
+      showToast(`Cloud sync failed: ${e.message}`, 'err');
     } finally {
       btn.disabled = false; btn.textContent = orig;
       ccaBusy = false;
