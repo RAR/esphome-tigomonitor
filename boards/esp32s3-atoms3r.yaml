@@ -19,11 +19,9 @@ esp32:
     version: recommended
     components:
       # Time-series database for persistent history (see docs/tsdb-integration.md).
-      # Pinned to the RAR/esp_tsdb fork's `tigomonitor` branch (handle-based API +
-      # esp32p4 manifest target) until both land upstream and a release is tagged.
-      - name: zakery292/esp_tsdb
-        source: https://github.com/RAR/esp_tsdb.git
-        ref: tigomonitor
+      # 2.1.0 is the first upstream release with the handle-based multi-instance
+      # API and the wrapped-ring query fix this project depends on.
+      - zakery292/esp_tsdb^2.1.0
       # LittleFS — backing filesystem for the tsdb partition
       - joltwallet/littlefs^1.16
     sdkconfig_options:

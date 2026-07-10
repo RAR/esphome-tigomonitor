@@ -468,9 +468,7 @@ esp32:
   framework:
     type: esp-idf
     components:
-      - name: zakery292/esp_tsdb
-        source: https://github.com/RAR/esp_tsdb.git
-        ref: tigomonitor              # see tsdb-integration.md re: pinning
+      - zakery292/esp_tsdb^2.1.0    # see tsdb-integration.md re: pinning
       - joltwallet/littlefs^1.16
     sdkconfig_options:
       CONFIG_PARTITION_TABLE_CUSTOM: "y"

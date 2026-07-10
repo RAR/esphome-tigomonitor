@@ -238,7 +238,7 @@ The History view is backed by an on-flash time-series database (`esp_tsdb`) stor
 **Solutions:**
 1. Update to the current firmware (the partition layout is corrected).
 2. **Existing installs may need to erase the tsdb partition once** so LittleFS reformats it at the new size. After that, history persists across reboots.
-3. Confirm your config points esp_tsdb at the `RAR/esp_tsdb` fork's `tigomonitor` branch and uses the custom partition table.
+3. Confirm your config pins `zakery292/esp_tsdb^2.1.0` (or newer) and uses the custom partition table.
 
 See [`docs/tsdb-integration.md`](tsdb-integration.md) for the schema, sizing, and partition setup.
 

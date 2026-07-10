@@ -20,8 +20,9 @@ esp32:
     advanced:
       enable_idf_experimental_features: yes
     components:
-      # RAR/esp_tsdb fork, `tigomonitor` branch (handle-based API + esp32p4
-      # manifest target) — until both land upstream and a release is tagged.
+      # Upstream 2.1.0 has everything we need code-wise, but its manifest still
+      # lacks the esp32p4 target, so P4 stays on the RAR/esp_tsdb fork's
+      # `tigomonitor` branch (= 2.1.0 + esp32p4 manifest entry) until that lands.
       - name: zakery292/esp_tsdb
         source: https://github.com/RAR/esp_tsdb.git
         ref: tigomonitor

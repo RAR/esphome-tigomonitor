@@ -32,12 +32,11 @@ esp32:
   framework:
     type: esp-idf
     components:
-      # Until zakery292/esp_tsdb#1 lands and a release is tagged, this points
-      # at the RAR/esp_tsdb fork's `tigomonitor` branch (handle-based API +
-      # esp32p4 manifest target). Swap for a registry pin once upstream ships.
-      - name: zakery292/esp_tsdb
-        source: https://github.com/RAR/esp_tsdb.git
-        ref: tigomonitor
+      # Upstream 2.1.0+ has everything this project needs (handle-based
+      # multi-instance API, wrapped-ring query fix). ESP32-P4 only: use the
+      # RAR/esp_tsdb fork's `tigomonitor` branch instead (source/ref pin) —
+      # 2.1.0's manifest doesn't list the esp32p4 target yet.
+      - zakery292/esp_tsdb^2.1.0
       - joltwallet/littlefs^1.16
     sdkconfig_options:
       CONFIG_PARTITION_TABLE_CUSTOM: "y"
