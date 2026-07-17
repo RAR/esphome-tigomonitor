@@ -323,6 +323,36 @@ external_components:
 2. Set `framework: type: esp-idf, version: recommended`
 3. Try clean compile: `esphome clean <yaml> && esphome compile <yaml>`
 
+### `fatal error: esp_bt_defs.h: No such file or directory` (BLE build on ESP-IDF 6.0.x)
+
+**Symptom:** `esp32_ble_tracker.h:22:10: fatal error: esp_bt_defs.h: No such file or directory`
+while compiling `ble_client` / `esp32_ble_tracker` — only on BLE builds
+(`cca_source: ble`/`auto`, or any config with `esp32_ble_tracker`).
+
+**Cause:** an explicit `version: "6.0.x"` framework pin. ESPHome 2026.x maps that
+to the pioarduino `prep_IDF6` platform, a **moving branch** that now delivers
+**ESP-IDF 6.0.2**. IDF 6.0.2 relocated the Bluedroid public headers to
+`components/bt/host/bluedroid/api/include/api/` and no longer puts them on the
+global include path, while ESPHome's `esp32_ble_tracker.h` still does
+`#include <esp_bt_defs.h>` without declaring `bt` as a component requirement — so
+every BLE source fails to compile. This is an upstream ESPHome × IDF-6
+incompatibility, not a TigoMonitor issue, and it is independent of the ESPHome
+release (`recommended` is IDF **5.5.4** on both 2026.6.5 and 2026.7.0).
+
+**Solution:** don't pin IDF 6 for BLE builds — use the recommended toolchain:
+
+```yaml
+esp32:
+  framework:
+    type: esp-idf
+    version: recommended   # IDF 5.5.4 — builds cca_source: ble cleanly
+```
+
+IDF 6 is not required for BLE. If you specifically need IDF 6 *and* BLE, it is
+blocked until ESPHome adds `bt` to the BLE component's `REQUIRES` upstream; stay
+on `recommended` in the meantime. (The non-BLE IDF-6 build path is unaffected —
+see `boards/test-idf6-tigomonitor.yaml`.)
+
 ---
 
 ## Reset Commands
