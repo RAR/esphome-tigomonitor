@@ -143,6 +143,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Dependencies
 - New optional dependency: `esp_tsdb` (currently from local fork at `feat/handle-based-api`; will return to a registry pin once `zakery292/esp_tsdb#1` is merged and tagged).
 - New required dependency for history features: `joltwallet/littlefs` (any 1.16+).
+## [1.4.5] - 2026-06-01
+
+### Fixed
+- **Wrong HA units on diagnostic aggregate sensors** (e.g. "Invalid Checksum Count" reported in **W**, "Min Free Internal RAM" in **kWh**). The aggregate-sensor type was inferred by naive substring matching, so `"sum"` matched inside *check`sum`* (→ power/W) and `"e in"` matched inside *fre`e in`ternal* (→ energy/kWh). Classification is now whole-word (regex `\b`) with an explicit rule order, so checksum/frame/RAM names route correctly. Backport of the classifier already on the 2.0 (`next`) line.
+- **Crash (`std::bad_alloc` abort) loading web pages with many devices.** Each HTML page was assembled as a single `html.append(R"html(...)" + api_token_ + R"html(...)")` expression, which built the entire page as one large `std::string` temporary in **internal** RAM before copying it to the PSRAM-backed buffer. On a busy device (e.g. 66 optimizers + TSDB) that internal allocation could throw `bad_alloc` and abort (seen in `get_dashboard_html`). The API-token splice is now three separate `append()`s so each literal streams straight to PSRAM with no large internal temporary. Affected all five HTML pages.
+- **Crash (`IllegalInstruction` abort) on power frames** ([#17](https://github.com/RAR/esphome-tigomonitor/issues/17)). `process_power_frame()` read fixed-offset fields without checking the frame was long enough; a checksum-passing but short frame handed an empty substring to `std::stoi()`, which threw `std::invalid_argument` and aborted the device. Added a length guard that drops short frames instead of crashing.
+- **CCA 4.x power frames not parsed — wrong new-format slot/RSSI offsets** ([#14](https://github.com/RAR/esphome-tigomonitor/discussions/14)/[#17](https://github.com/RAR/esphome-tigomonitor/issues/17)). Decoding real 4.x frames showed the 15-byte "new format" is the legacy 13-byte layout plus 2 trailing pad bytes (`0x0000`) appended **after** RSSI — it does not insert bytes or shift the tail. The code read slot counter at char 40 and RSSI at char 44, both past the end of a 44-char frame (so every new-format frame was dropped, and previously crashed). Slot counter and RSSI now read at the legacy offsets (34 / 38) for both formats; voltage/current/temperature were already correct.
+
+## [1.4.4] - 2026-05-30
+
+> **Bridge release — the recommended hop before 2.0.** Functionally identical
+> to 1.4.3; its only job is to upgrade the OTA receiver. 2.0 reshapes the flash
+> partition layout for the on-flash time-series database, and that repartition
+> can only be applied over OTA by a firmware that already speaks the new OTA
+> protocol. 1.4.3 does not — so without this bridge the 1.x → 2.0 jump needs a
+> serial flash.
+>
+> **Upgrade path:** `1.4.3` → OTA → `1.4.4` → OTA → `2.0.0`. The `1.4.3 → 1.4.4`
+> hop is an ordinary OTA. The `1.4.4 → 2.0` hop then performs the verified
+> partition reshape over OTA — no USB cable. The reshape still wipes NVS, so
+> export your node table (Tools → Export) before the second hop.
+
+### Added
+- `allow_partition_access: true` in the example OTA configs. Built on
+  ESPHome 2026.5.0+, this opts the OTA receiver into the partition-table
+  update protocol so a later firmware can repartition the device over OTA.
+
+### Changed
+- Built against ESPHome 2026.5.0+ (required for the OTA partition-update
+  protocol).
+
+### Fixed
+- **ESP-IDF 6.0 build: `fatal error: cJSON.h: No such file or directory`** ([#15](https://github.com/RAR/esphome-tigomonitor/issues/15)). IDF 6.0 removed the built-in `json` component that bundled cJSON; the C++ still includes `"cJSON.h"`. `tigo_monitor` now declares the `espressif/cjson` managed component (`^1.7.19`) on IDF ≥ 6.0 — guarded by version, since on IDF 5.x cJSON is still built-in and adding it would collide. One declaration covers `tigo_server` too (shared `src` target). Builds on the default/recommended IDF 5.x toolchain are unaffected.
 
 ## [1.4.3] - 2026-04-17
 
