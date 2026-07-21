@@ -11,6 +11,7 @@
 ## Global Constraints
 
 - **Zero runtime/test dependencies.** No npm install; tests use only `node --test` and Node built-ins (`node:fs`, `node:test`, `node:assert`, global `crypto`/`btoa`). Node ≥ 20 assumed in CI.
+- **Canonical full-suite command:** `node --test 'site/test/**/*.test.mjs'` (Node's own glob). Do NOT use a bare-directory arg like `node --test site/test/` — it is not portable (fails with `MODULE_NOT_FOUND` on Node 22). Single-file runs like `node --test site/test/rules.test.mjs` are fine.
 - **ES modules everywhere.** Every `site/*.js` and `site/lib/*.mjs` uses `export`/`import` so the same file loads in the browser (`<script type="module">`) and under Node. Browser-loaded modules use the `.js` extension; Node-only test/lib helpers use `.mjs`.
 - **Client-side only.** No secret, password, or form value is ever sent over the network. No analytics, no external script/CDN.
 - **Generated YAML must compile as-is.** Always emit empty `text_sensor:` and `binary_sensor:` sections (the components fail to compile without them — CLAUDE.md rule). Apply block order exactly: `esphome → esp32 → psram → esp32_hosted → wifi → captive_portal → logger → api → ota → uart → tigo_monitor → tigo_server → sensor → text_sensor → binary_sensor → (display overlay)`.
@@ -897,7 +898,7 @@ Expected: PASS (4 tests).
 
 - [ ] **Step 5: Run the whole suite**
 
-Run: `node --test site/test/`
+Run: `node --test 'site/test/**/*.test.mjs'`
 Expected: PASS (all tests from Tasks 1–6).
 
 - [ ] **Step 6: Commit**
@@ -1146,7 +1147,7 @@ test('AtomS3R display overlay still matches boards/atoms3r-display.yaml', () => 
 
 - [ ] **Step 3: Run the suite**
 
-Run: `node --test site/test/`
+Run: `node --test 'site/test/**/*.test.mjs'`
 Expected: PASS. Then re-run the Task 1 shape test — the display test now exercises a real overlay.
 
 - [ ] **Step 4: Commit**
@@ -1191,7 +1192,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: '20' }
-      - run: node --test site/test/
+      - run: node --test 'site/test/**/*.test.mjs'
   deploy:
     needs: test
     if: github.ref == 'refs/heads/main'
@@ -1210,7 +1211,7 @@ jobs:
 
 - [ ] **Step 2: Verify the workflow lints locally (optional)**
 
-Run: `node --test site/test/`
+Run: `node --test 'site/test/**/*.test.mjs'`
 Expected: PASS — confirms the exact command CI runs is green before pushing.
 
 - [ ] **Step 3: Add README + CHANGELOG entries**
