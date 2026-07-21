@@ -32,6 +32,21 @@ test('extracts P4 safety fields', () => {
   assert.deepEqual(f.components, ['zakery292/esp_tsdb', 'joltwallet/littlefs^1.16']);
 });
 
+test('a commented-out experimental flag reads as NOT enabled', () => {
+  const commented = `
+esp32:
+  framework:
+    # advanced:
+    #   enable_idf_experimental_features: yes
+psram:
+  mode: hex
+  speed: 80MHz
+`;
+  const f = extractBoardFields(commented);
+  assert.equal(f.experimental, false);
+  assert.equal(f.psramSpeed, '80MHz');
+});
+
 test('absent fields come back null/false', () => {
   const f = extractBoardFields('esp32:\n  board: esp32dev\n');
   assert.equal(f.flash_size, null);
