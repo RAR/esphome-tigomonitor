@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { BOARDS, getBoard } from '../boards.js';
+import { getBoard } from '../boards.js';
 import { extractBoardFields } from '../lib/yaml-extract.mjs';
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
