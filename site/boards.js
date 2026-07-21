@@ -159,7 +159,48 @@ display:
         it.filled_circle(118, 10, 3, COLOR_GREEN);
       } else {
         it.filled_circle(118, 10, 3, COLOR_RED);
-      }`,
+      }
+
+# Color definitions
+color:
+  - id: COLOR_BLACK
+    red: 0%
+    green: 0%
+    blue: 0%
+  - id: COLOR_WHITE
+    red: 100%
+    green: 100%
+    blue: 100%
+  - id: COLOR_GREEN
+    red: 0%
+    green: 100%
+    blue: 0%
+  - id: COLOR_RED
+    red: 100%
+    green: 0%
+    blue: 0%
+  - id: COLOR_ORANGE
+    red: 100%
+    green: 65%
+    blue: 0%
+
+# Fonts for the display
+font:
+  - file: "gfonts://Roboto@bold"
+    id: font_title
+    size: 14
+  - file: "gfonts://Roboto@bold"
+    id: font_large
+    size: 28
+  - file: "gfonts://Roboto"
+    id: font_medium
+    size: 18
+  - file: "gfonts://Roboto"
+    id: font_small
+    size: 12
+  - file: "gfonts://Roboto"
+    id: font_tiny
+    size: 9`,
     notes: ['Built-in tail485 RS485 transceiver on GPIO1/GPIO2.'],
   },
   {
