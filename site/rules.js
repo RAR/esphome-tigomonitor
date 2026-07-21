@@ -8,6 +8,17 @@ export function assembleConfig(board, form) {
       ? board.partitions.ble
       : board.partitions?.default ?? null;
 
+  // cca: 'ble' needs the full BLE stack + a ble_client pointing at the CCA's MAC.
+  // tigo_server's own validation rejects cca_source: ble without a ble_client_id.
+  const ble =
+    form.cca === 'ble'
+      ? {
+          mac: form.ccaMac || '04:C0:5B:00:00:00',
+          clientId: 'tigo_cca_ble',
+          usePsram: Boolean(board.psram),
+        }
+      : null;
+
   const secrets = useSecrets
     ? {
         wifi_ssid: form.wifi.ssid,
@@ -54,7 +65,9 @@ export function assembleConfig(board, form) {
     tigoServer: {
       ccaSource: form.cca === 'none' ? null : form.cca,
       cloudImport: Boolean(form.cloudImport),
+      bleClientId: ble ? ble.clientId : null,
     },
+    ble,
     displayOverlay: form.display && board.supports.display ? board.displayOverlay : null,
     secrets,
   };

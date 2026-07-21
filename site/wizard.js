@@ -29,6 +29,7 @@ function readForm() {
       otaPassword: $('ota-pass').value.trim() || 'changeme',
       cca: $('cca').value,
       ccaIp: $('cca-ip').value.trim(),
+      ccaMac: $('cca-mac').value.trim(),
       cloudImport: $('cloud').checked,
       display: $('display').checked,
     },
@@ -52,6 +53,7 @@ let lastYaml = '', lastSecrets = null;
 function render() {
   const { board, form } = readForm();
   $('cca-ip-row').style.display = form.cca === 'http' ? '' : 'none';
+  $('cca-mac-row').style.display = form.cca === 'ble' ? '' : 'none';
   try {
     const cfg = assembleConfig(board, form);
     lastYaml = toYaml(cfg);

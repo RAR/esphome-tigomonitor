@@ -101,3 +101,25 @@ test('Free PSRAM sensor only on PSRAM boards', () => {
   const noPsram = toYaml(assembleConfig(getBoard('esp32s3-atoms3'), { ...form, uart: { tx_pin: 'GPIO6', rx_pin: 'GPIO5' } }));
   assert.ok(!noPsram.includes('Free PSRAM'), 'no-PSRAM board must not emit Free PSRAM');
 });
+
+test('cca:ble emits the full BLE stack + ble_client_id', () => {
+  const y = toYaml(assembleConfig(getBoard('esp32s3-atoms3r'), { ...form, cca: 'ble', ccaMac: '04:C0:5B:A1:A9:4B' }));
+  assert.ok(y.includes('esp32_ble:'), 'esp32_ble block missing');
+  assert.ok(y.includes('esp32_ble_tracker:'), 'esp32_ble_tracker missing');
+  assert.ok(y.includes('ble_client:'), 'ble_client missing');
+  assert.ok(y.includes('mac_address: "04:C0:5B:A1:A9:4B"'), 'CCA MAC missing');
+  assert.ok(y.includes('id: tigo_cca_ble'), 'ble_client id missing');
+  assert.ok(y.includes('ble_client_id: tigo_cca_ble'), 'tigo_server ble_client_id missing');
+  assert.ok(y.includes('use_psram: true'), 'esp32_ble use_psram missing (BLE board has PSRAM)');
+});
+
+test('cca:ble falls back to a placeholder MAC when none given', () => {
+  const y = toYaml(assembleConfig(getBoard('esp32s3-atoms3r'), { ...form, cca: 'ble' }));
+  assert.ok(y.includes('mac_address: "04:C0:5B:00:00:00"'), 'placeholder MAC missing');
+});
+
+test('no BLE blocks or ble_client_id when cca is not ble', () => {
+  const y = toYaml(assembleConfig(getBoard('esp32s3-atoms3r'), form));
+  assert.ok(!y.includes('esp32_ble:'), 'esp32_ble emitted without cca:ble');
+  assert.ok(!y.includes('ble_client_id'), 'ble_client_id emitted without cca:ble');
+});
