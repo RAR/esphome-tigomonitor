@@ -63,3 +63,20 @@ test('displayOverlay is appended verbatim at the end', () => {
   assert.ok(y.includes('# OVERLAY_MARKER'), 'overlay marker missing');
   assert.ok(y.trimEnd().endsWith('platform: st7789v'), 'overlay not appended at end');
 });
+
+test('generated config sources the tigo components via external_components', () => {
+  const y = toYaml(assembleConfig(getBoard('esp32s3-atoms3r'), form));
+  assert.ok(y.includes('external_components:'), 'no external_components block');
+  assert.ok(y.includes('url: https://github.com/RAR/esphome-tigomonitor'), 'tigo url missing');
+  assert.ok(y.includes('ref: next'), 'ref missing');
+  assert.ok(y.includes('components: [tigo_monitor, tigo_server]'), 'tigo components missing');
+  assert.equal((y.match(/^external_components:/gm) || []).length, 1, 'must have exactly one external_components key');
+});
+
+test('display config merges lp5562 into the single external_components block', () => {
+  const cfg = assembleConfig(getBoard('esp32s3-atoms3r'), { ...form, display: true });
+  const y = toYaml(cfg);
+  assert.equal((y.match(/^external_components:/gm) || []).length, 1, 'display config must not duplicate external_components');
+  assert.ok(y.includes('https://github.com/RAR/esphome-lp5562'), 'lp5562 source missing when display on');
+  assert.ok(y.includes('components: [tigo_monitor, tigo_server]'), 'tigo source still present');
+});

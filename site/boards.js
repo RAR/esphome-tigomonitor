@@ -24,13 +24,6 @@ export const BOARDS = [
     numberOfDevices: 30,
     supports: { ble: true, display: true },
     displayOverlay: `# --- AtomS3R-Display overlay (from boards/atoms3r-display.yaml) ---
-# External component for LP5562 LED driver
-external_components:
-  - source:
-      type: git
-      url: https://github.com/RAR/esphome-lp5562
-    components: [ lp5562 ]
-
 # I2C bus for LP5562 (RGB LED + LCD Backlight control)
 i2c:
   sda: GPIO38  # SYS_SDA
