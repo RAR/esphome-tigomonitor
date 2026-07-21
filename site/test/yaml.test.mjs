@@ -22,12 +22,12 @@ test('emits blocks in order with required empty sections', () => {
   assert.ok(!y.includes('\t'), 'no tabs allowed');
 });
 
-test('P4 emits esp32_hosted + safe 80MHz PSRAM (no experimental flag); no psram-less board emits psram', () => {
+test('P4 emits esp32_hosted + 200MHz PSRAM + experimental flag; no psram-less board emits psram', () => {
   const p4 = toYaml(assembleConfig(getBoard('esp32p4-evboard'), { ...form, uart: { tx_pin: 'GPIO20', rx_pin: 'GPIO21' } }));
   assert.ok(p4.includes('esp32_hosted:'));
-  assert.ok(p4.includes('speed: 80MHz'), 'P4 must default to safe 80MHz PSRAM');
-  assert.ok(!p4.includes('enable_idf_experimental_features'), 'default P4 must not emit the experimental flag');
-  assert.ok(!p4.includes('200MHz'), 'default P4 must not emit the EV-board-only 200MHz speed');
+  assert.ok(p4.includes('speed: 200MHz'), 'P4 default is 200MHz (valid P4 speeds: 20/100/200)');
+  assert.ok(p4.includes('enable_idf_experimental_features: true'), 'P4 emits the experimental flag');
+  assert.ok(!p4.includes('80MHz'), 'P4 must not emit 80MHz — invalid for P4 (cv.one_of 20/100/200)');
   const s3lite = toYaml(assembleConfig(getBoard('esp32s3-atoms3'), { ...form, uart: { tx_pin: 'GPIO6', rx_pin: 'GPIO5' } }));
   assert.ok(!s3lite.includes('\npsram:'), 'no-PSRAM board must not emit psram');
 });

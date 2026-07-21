@@ -5,12 +5,13 @@
 #
 # NOTE — the P4 has NO built-in Wi-Fi. It reaches the network through an
 # ESP32-C6/-C5 companion radio over SDIO, configured via `esp32_hosted:` below.
-# NOTE — PSRAM defaults to a safe `speed: 80MHz`, which works on ALL ESP32-P4
-# boards (including the P4-nano). ONLY the genuine Espressif Function-EV-Board's
-# 32MB PSRAM is rated for 200MHz — to use it, set `speed: 200MHz` below AND
-# uncomment `enable_idf_experimental_features` (200MHz is an experimental speed
-# and needs that gate). Running 200MHz on other P4 boards crash-loops at boot
-# with `esp_task_stack_is_sane_cache_disabled` before ESPHome even starts.
+# NOTE — P4 PSRAM is HEX mode only; the only valid speeds are 20 / 100 / 200 MHz.
+# Default is 200MHz, which runs fine on the Function-EV-Board and typical P4
+# modules. If YOUR specific board crash-loops at boot with
+# `esp_task_stack_is_sane_cache_disabled`, its PSRAM chip doesn't tolerate these
+# settings — drop to `speed: 100MHz` or `20MHz`, or remove the psram: block to
+# run without PSRAM. That's a per-board PSRAM/board-definition mismatch, not the
+# speed being universally wrong (see discussion #31).
 
 esphome:
   name: tigo-server
@@ -27,10 +28,10 @@ esp32:
   framework:
     type: esp-idf
     version: recommended
-    # Only needed for the experimental 200MHz PSRAM speed (Function-EV-Board).
-    # Uncomment together with `speed: 200MHz` below.
-    # advanced:
-    #   enable_idf_experimental_features: yes
+    advanced:
+      # P4's experimental-features gate. Harmless, and matches the known-good
+      # TigoMonitorP4 config; some IDF/board combos want it for PSRAM.
+      enable_idf_experimental_features: yes
     components:
       # esp_tsdb backs the History view; littlefs is its filesystem. The P4
       # target still needs the RAR/esp_tsdb fork (upstream 2.1.0's manifest
@@ -62,12 +63,11 @@ esp32:
       CONFIG_LWIP_MAX_ACTIVE_TCP: "16"
       CONFIG_LWIP_MAX_LISTENING_TCP: "16"
       
-# Enable PSRAM. 80MHz is the safe default for all P4 boards. For the Function-EV-
-# Board only, raise to 200MHz AND uncomment enable_idf_experimental_features above
-# (see the note at the top of this file).
+# Enable PSRAM. P4 is hex-mode only; valid speeds are 20 / 100 / 200 MHz.
+# If your board crash-loops at boot, drop to 100MHz or 20MHz, or remove this block.
 psram:
   mode: hex
-  speed: 80MHz
+  speed: 200MHz
 
 # Wi-Fi companion radio — the P4 has no native Wi-Fi, so an ESP32-C6 (or -C5)
 # on the EV board provides it over SDIO. Adjust pins/slot for your wiring.
