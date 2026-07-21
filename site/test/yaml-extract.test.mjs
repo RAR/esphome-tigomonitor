@@ -29,6 +29,7 @@ test('extracts P4 safety fields', () => {
   assert.equal(f.psramSpeed, '200MHz');
   assert.equal(f.experimental, true);
   assert.equal(f.hasHosted, true);
+  assert.deepEqual(f.components, ['zakery292/esp_tsdb', 'joltwallet/littlefs^1.16']);
 });
 
 test('absent fields come back null/false', () => {

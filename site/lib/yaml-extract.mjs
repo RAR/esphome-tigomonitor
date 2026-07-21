@@ -6,10 +6,14 @@ export function extractBoardFields(text) {
     const m = text.match(re);
     return m ? m[1].trim() : null;
   };
+  // NOTE: narrow reader — assumes flash_size/partitions appear only under the
+  // esp32: block (true for all ESPHome board configs) and esp32_hosted: is a
+  // block-form key, not inline. Sufficient for the board files we check.
   const flash_size = line(/^\s*flash_size:\s*(\S+)/m);
   const partitions = line(/^\s*partitions:\s*(\S+)/m);
-  // top-level psram: block
-  const psramBlock = text.match(/^psram:\s*$([\s\S]*?)(?=^\S|\Z)/m);
+  // Capture the top-level `psram:` block: its header line plus all following
+  // indented body lines, stopping at the next unindented line or EOF.
+  const psramBlock = text.match(/^psram:[^\n]*\n((?:[ \t]+[^\n]*\n?)*)/m);
   const pick = (blk, key) => {
     if (!blk) return null;
     const m = blk.match(new RegExp(`^\\s*${key}:\\s*(\\S+)`, 'm'));
