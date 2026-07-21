@@ -1,0 +1,103 @@
+# ESP-IDF 6.0 build-verification target (AtomS3R, headless)
+#
+# Purpose: compile the tigo_monitor / tigo_server components against ESP-IDF 6.0
+# to verify v6 compatibility — chiefly that the cJSON fix pulls espressif/cjson
+# from the registry (the built-in `json` component is gone in IDF 6.0).
+#
+# Everyday builds should stay on `version: recommended` (IDF 5.5.4); this file
+# only exists to exercise the 6.x path. No display package, so display-driver
+# churn on v6 doesn't muddy the signal — just our two components + wifi/api/ota.
+#
+#   esphome compile boards/test-idf6-tigomonitor.yaml
+#
+# Reuses the AtomS3R hardware base (UART pins, PSRAM, esp_tsdb + littlefs,
+# sdkconfig) and overrides only the framework version to 6.0.1.
+#
+# STATUS (2026-05-30): full green build on IDF 6.0.1 — espressif/cjson resolves
+# from the registry, both component sources compile, and the complete firmware
+# image (incl. bootloader.bin) builds. Verified end-to-end. This config is
+# BLE-less (no `cca_source: ble`), so it is NOT hit by the BLE break below.
+#
+# WARNING — BLE + IDF 6 is broken under the current `prep_IDF6` platform.
+# The pioarduino `prep_IDF6` platform is a MOVING branch, and it has since
+# advanced this `version: "6.0.1"` pin to actually deliver IDF **6.0.2**. IDF
+# 6.0.2 relocated the Bluedroid headers (`esp_bt_defs.h` → `bt/host/bluedroid/
+# api/include/api/`) off the global include path, and ESPHome's
+# `esp32_ble_tracker.h` still `#include`s it without requiring the `bt`
+# component — so any BLE build (`cca_source: ble`/`auto`) fails with
+# `fatal error: esp_bt_defs.h: No such file or directory` (see issue #33,
+# docs/TROUBLESHOOTING.md). Upstream ESPHome × IDF-6 issue, not ours. BLE builds
+# must stay on `version: recommended` (IDF 5.5.4). This monitor-only config still
+# compiles on 6.0.x because it pulls in no BLE.
+#
+# Note: the moving `prep_IDF6` branch has bitten before — an earlier run against
+# a STALE cached clone failed at bootloader.bin (esptool 5.2.0 rejected the
+# platform's old `--flash-mode/--flash-freq/--flash-size` args); a fresh platform
+# clone cleared it. If you hit that error, wipe the cached platform
+# (~/.platformio/platforms/*espressif32*) to re-fetch.
+
+packages:
+  board: !include esp32s3-atoms3r.yaml
+
+# Unique node name so this v6 build gets its OWN build dir
+# (.esphome/build/tigo-idf6-test/). The board package names every config
+# `tigo-server`; without this override the 5.x example configs and this 6.x
+# config share .esphome/build/tigo-server/, so switching between them leaves a
+# stale CMake toolchain cache — you get `xtensa-esp32s3-elf-gcc: not found` /
+# `cannot execute 'cc1'` / host-`as` errors from a 5.x-configured dir being
+# built with the 6.0 unified toolchain. Isolating the build dir avoids it.
+esphome:
+  name: tigo-idf6-test
+
+# Force the ESP-IDF 6.0.1 toolchain. esphome 2026.5.0+ maps this to the
+# pioarduino prep_IDF6 platform; `recommended`/`latest`/`dev` all still resolve
+# to 5.5.4, so this override is the only thing selecting v6.
+esp32:
+  framework:
+    type: esp-idf
+    version: "6.0.1"
+
+# Use the in-repo component source
+external_components:
+  - source:
+      type: local
+      path: ../components
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  ap:
+    ssid: "Tigo-Server IDF6 Test"
+    password: !secret ap_password
+
+captive_portal:
+
+logger:
+  level: INFO
+#  baud_rate: 0  # UART is used for the Tigo bus
+
+api:
+  encryption:
+    key: !secret api_encryption_key
+
+ota:
+  - platform: esphome
+    password: !secret ota_password
+    allow_partition_access: true
+
+# Stub sections — required so ESPHome generates the sensor/text_sensor/
+# binary_sensor headers the components include.
+sensor:
+  - platform: tigo_monitor
+    tigo_monitor_id: tigo_hub
+    name: "Total Solar Power"
+  - platform: tigo_monitor
+    tigo_monitor_id: tigo_hub
+    name: "Total System Energy"
+  - platform: tigo_monitor
+    tigo_monitor_id: tigo_hub
+    name: "Active Device Count"
+
+text_sensor:
+
+binary_sensor:

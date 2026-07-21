@@ -1,0 +1,74 @@
+# Local compile-verification target (AtomS3R, recommended IDF 5.5.4).
+# Builds the in-repo components/ source to verify changes compile.
+#   esphome compile boards/test-local-tigomonitor.yaml
+packages:
+  board: !include esp32s3-atoms3r.yaml
+
+esphome:
+  name: tigo-local-test
+
+# Use the in-repo component source (compiles local working-tree changes)
+external_components:
+  - source:
+      type: local
+      path: ../components
+
+# Exercises the internal_temperature_id codegen + read path (#28): deep-merges
+# into the board's tigo_server block so it reads this sensor instead of
+# installing its own temperature peripheral.
+tigo_server:
+  internal_temperature_id: esp32_die_temp
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  ap:
+    ssid: "Tigo-Server Local Test"
+    password: !secret ap_password
+
+captive_portal:
+
+logger:
+  level: INFO
+
+api:
+  encryption:
+    key: !secret api_encryption_key
+
+ota:
+  - platform: esphome
+    password: !secret ota_password
+    allow_partition_access: true
+
+# Stub sections — required so ESPHome generates the sensor/text_sensor/
+# binary_sensor headers the components include.
+sensor:
+  - platform: tigo_monitor
+    tigo_monitor_id: tigo_hub
+    name: "Total Solar Power"
+  - platform: tigo_monitor
+    tigo_monitor_id: tigo_hub
+    name: "Total System Energy"
+  - platform: tigo_monitor
+    tigo_monitor_id: tigo_hub
+    name: "Active Device Count"
+  # Exercises the per-string aggregate codegen path
+  - platform: tigo_monitor
+    tigo_monitor_id: tigo_hub
+    string_label: "A"
+    name: "String A Power"
+  # Exercises the alert-count codegen paths
+  - platform: tigo_monitor
+    tigo_monitor_id: tigo_hub
+    name: "Stale Panel Count"
+  - platform: tigo_monitor
+    tigo_monitor_id: tigo_hub
+    name: "Zero Production Count"
+  # Die-temp source wired into tigo_server via internal_temperature_id (#28)
+  - platform: internal_temperature
+    id: esp32_die_temp
+    name: "ESP32 Die Temperature"
+
+text_sensor:
+
+binary_sensor:

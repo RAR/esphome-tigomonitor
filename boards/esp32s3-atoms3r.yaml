@@ -12,9 +12,18 @@ esphome:
 esp32:
   board: m5stack-atoms3
   variant: esp32s3
+  flash_size: 8MB
+  partitions: partitions/tigo-8mb.csv
   framework:
     type: esp-idf
     version: recommended
+    components:
+      # Time-series database for persistent history (see docs/tsdb-integration.md).
+      # 2.1.0 is the first upstream release with the handle-based multi-instance
+      # API and the wrapped-ring query fix this project depends on.
+      - zakery292/esp_tsdb^2.1.0
+      # LittleFS — backing filesystem for the tsdb partition
+      - joltwallet/littlefs^1.16
     sdkconfig_options:
       CONFIG_ESP32S3_DEFAULT_CPU_FREQ_240: "y"
       # UART optimizations to prevent packet loss
@@ -31,6 +40,10 @@ esp32:
       # Enable PSRAM (8MB on AtomS3R)
       CONFIG_SPIRAM_MODE_OCT: "y"
       CONFIG_SPIRAM_SPEED_80M: "y"
+      # Allocate WiFi + lwIP buffers in PSRAM to free internal RAM.
+      # Recommended for large installs — prevents new-connection resets
+      # (OTA / API) after uptime when internal RAM gets tight.
+      CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP: "y"
 
 
 # Enable PSRAM

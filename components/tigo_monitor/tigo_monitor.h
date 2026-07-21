@@ -2,6 +2,7 @@
 
 #include "esphome/core/component.h"
 #include "esphome/core/defines.h"
+#include "esphome/core/preferences.h"
 #include "esphome/components/uart/uart.h"
 #include "esphome/components/sensor/sensor.h"
 #include "esphome/components/text_sensor/text_sensor.h"
@@ -21,14 +22,23 @@
 #include <limits>
 #include <new>
 
+#include "tigo_history.h"
+
 #ifdef USE_ESP_IDF
 #include <esp_heap_caps.h>
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 
 // Forward declare PSRAM allocation functions
 namespace esphome {
 namespace tigo_monitor {
   void* psram_malloc_impl(size_t size);
   void psram_free_impl(void* ptr);
+  // Logs heap diagnostics and calls abort() — used by PSRAMAllocator when
+  // both PSRAM and internal heap are exhausted. STL containers cannot
+  // handle a null allocator return, so a clean panic-reboot is safer than
+  // continuing into undefined behavior.
+  [[noreturn]] void psram_alloc_failed_abort(size_t bytes_requested);
 }
 }
 
@@ -52,10 +62,17 @@ public:
   PSRAMAllocator(const PSRAMAllocator<U>&) noexcept {}
 
   T* allocate(std::size_t n) {
+    // Size overflow: STL would also UAF here, so abort cleanly.
     if (n > std::numeric_limits<std::size_t>::max() / sizeof(T))
-      return nullptr;  // Can't throw - exceptions disabled
-    
-    void* ptr = esphome::tigo_monitor::psram_malloc_impl(n * sizeof(T));
+      esphome::tigo_monitor::psram_alloc_failed_abort(0);
+
+    const std::size_t bytes = n * sizeof(T);
+    void* ptr = esphome::tigo_monitor::psram_malloc_impl(bytes);
+    if (ptr == nullptr) {
+      // Both PSRAM and internal heap exhausted. STL containers will UAF
+      // on the returned nullptr — abort cleanly with diagnostics instead.
+      esphome::tigo_monitor::psram_alloc_failed_abort(bytes);
+    }
     return static_cast<T*>(ptr);
   }
 
@@ -87,6 +104,18 @@ using psram_string = std::basic_string<char, std::char_traits<char>, PSRAMAlloca
 namespace esphome {
 namespace tigo_monitor {
 
+// Frame-processing strings live in PSRAM on IDF builds. Every UART frame
+// produces a processed copy, a 2x-size hex copy, and per-packet slices; the
+// helpers used to stage those in psram_string but then copied the result back
+// into a std::string on the internal heap, churning it all day at a rate
+// proportional to bus traffic (#23). frame_string keeps the whole pipeline in
+// PSRAM end-to-end.
+#ifdef USE_ESP_IDF
+using frame_string = psram_string;
+#else
+using frame_string = std::string;
+#endif
+
 static const uint16_t CRC_POLYNOMIAL = 0x8408;  // Reversed polynomial (0x1021 reflected)
 static const size_t CRC_TABLE_SIZE = 256;
 
@@ -113,6 +142,10 @@ struct DeviceData {
   float peak_power = 0.0f;  // Historical peak power (watts)
   // True if this device is an optimizer (produces V_out != 0). False for monitor-only modules.
   bool is_optimizer = true;
+  // Set by mark_stale_devices_() when no frame arrives within stale_timeout;
+  // production values are zeroed at the same time. Cleared implicitly when a
+  // fresh frame overwrites the struct (#26).
+  bool is_stale = false;
 };
 
 struct NodeTableData {
@@ -132,7 +165,16 @@ struct NodeTableData {
 };
 
 struct StringData {
-  std::string string_label;       // String name from CCA (e.g., "String 1")
+  std::string string_label;       // Canonical CCA string label (e.g. "String A").
+                                  // Immutable identity used for lookup + NVS keys.
+  std::string display_label;      // Optional override saved via /api/strings/rename;
+                                  // empty = fall back to string_label. UI shows
+                                  // display_label first.
+  uint16_t panel_rating_w = 0;    // Nameplate rating (W) per panel in this string,
+                                  // saved via /api/strings/rating. 0 = not set;
+                                  // the UI then falls back to median-only views.
+                                  // Capped at uint16 to fit any realistic panel
+                                  // (250-450W typical, 1000W headroom).
   std::string inverter_label;     // Parent MPPT name (called "Inverter" in CCA)
   std::vector<std::string> device_addrs; // Device addresses in this string
   float total_power = 0.0f;
@@ -150,7 +192,9 @@ struct StringData {
 };
 
 struct InverterData {
-  std::string name;               // User-defined inverter name
+  std::string name;               // Canonical name from YAML (immutable identity)
+  std::string display_name;       // Optional override saved via /api/inverters/rename;
+                                  // empty = fall back to name. UI shows display_name first.
   std::vector<std::string> mppt_labels;  // List of MPPT labels assigned to this inverter
   float total_power = 0.0f;
   float peak_power = 0.0f;
@@ -237,9 +281,15 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   void add_power_sum_sensor(sensor::Sensor *sensor) {
     this->add_power_in_sum_sensor(sensor);
   }
-  void add_power_out_sum_sensor(sensor::Sensor *sensor) { 
-    this->power_out_sum_sensor_ = sensor; 
+  void add_power_out_sum_sensor(sensor::Sensor *sensor) {
+    this->power_out_sum_sensor_ = sensor;
     ESP_LOGCONFIG("tigo_monitor", "Registered power out sum sensor");
+  }
+  // Per-string aggregate power, keyed by the canonical CCA string label.
+  // Published from update_string_data() each cycle (zeros in night mode).
+  void add_string_power_sensor(const std::string &string_label, sensor::Sensor *sensor) {
+    this->string_power_sensors_[string_label] = sensor;
+    ESP_LOGCONFIG("tigo_monitor", "Registered string power sensor for '%s'", string_label.c_str());
   }
   void add_energy_in_sum_sensor(sensor::Sensor *sensor) {
     this->energy_in_sum_sensor_ = sensor;
@@ -252,9 +302,17 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   void add_energy_sum_sensor(sensor::Sensor *sensor) {
     this->add_energy_in_sum_sensor(sensor);
   }
-  void add_device_count_sensor(sensor::Sensor *sensor) { 
-    this->device_count_sensor_ = sensor; 
+  void add_device_count_sensor(sensor::Sensor *sensor) {
+    this->device_count_sensor_ = sensor;
     ESP_LOGCONFIG("tigo_monitor", "Registered device count sensor");
+  }
+  void add_stale_count_sensor(sensor::Sensor *sensor) {
+    this->stale_count_sensor_ = sensor;
+    ESP_LOGCONFIG("tigo_monitor", "Registered stale panel count sensor");
+  }
+  void add_zero_production_count_sensor(sensor::Sensor *sensor) {
+    this->zero_production_count_sensor_ = sensor;
+    ESP_LOGCONFIG("tigo_monitor", "Registered zero production count sensor");
   }
   void add_invalid_checksum_sensor(sensor::Sensor *sensor) {
     this->invalid_checksum_sensor_ = sensor;
@@ -324,26 +382,70 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   void set_sync_cca_on_startup(bool sync) { sync_cca_on_startup_ = sync; }
   void set_power_calibration(float multiplier) { power_calibration_ = multiplier; }
   void add_inverter(const std::string &name, const std::vector<std::string> &mppt_labels);
+
+  // Set the user-friendly display name for an inverter (looked up by canonical
+  // name). Persists to NVS via global_preferences so it survives reboots.
+  // Returns true on success, false if the canonical name doesn't match an
+  // inverter loaded from YAML.
+  bool set_inverter_display_name(const std::string &canonical, const std::string &display_name);
+
+  // Same pattern, applied to CCA-derived strings. Canonical = the string_label
+  // from CCA (e.g. "String A"); display_label is the UI override. Empty
+  // display_label clears the override.
+  bool set_string_display_label(const std::string &canonical, const std::string &display_label);
+
+  // Per-string panel nameplate rating (W). Used by the UI to compute
+  // % of rated for individual panels and total nameplate roll-ups for
+  // the string. Pass 0 to clear the override.
+  bool set_string_panel_rating(const std::string &canonical, uint16_t rating_w);
   
   // Public getters for web server access
+  // NOTE: get_X() return references and are only safe from the main task (the
+  // single writer). Web server callbacks run on the esp_http_server task; they
+  // MUST use snapshot_X() instead, which returns a locked copy and is safe
+  // against concurrent mutation by the main task.
 #ifdef USE_ESP_IDF
   const psram_vector<DeviceData>& get_devices() const { return devices_; }
   const psram_vector<NodeTableData>& get_node_table() const { return node_table_; }
   const psram_map<std::string, StringData>& get_strings() const { return strings_; }
   const psram_vector<InverterData>& get_inverters() const { return inverters_; }
+
+  psram_vector<DeviceData> snapshot_devices() const;
+  psram_vector<NodeTableData> snapshot_node_table() const;
+  psram_map<std::string, StringData> snapshot_strings() const;
+  psram_vector<InverterData> snapshot_inverters() const;
 #else
   const std::vector<DeviceData>& get_devices() const { return devices_; }
   const std::vector<NodeTableData>& get_node_table() const { return node_table_; }
   const std::map<std::string, StringData>& get_strings() const { return strings_; }
   const std::vector<InverterData>& get_inverters() const { return inverters_; }
+
+  std::vector<DeviceData> snapshot_devices() const { return devices_; }
+  std::vector<NodeTableData> snapshot_node_table() const { return node_table_; }
+  std::map<std::string, StringData> snapshot_strings() const { return strings_; }
+  std::vector<InverterData> snapshot_inverters() const { return inverters_; }
 #endif
+  // Run fn() while holding the state lock so the web-server task can read the
+  // live get_X() containers directly instead of taking a by-value snapshot.
+  // The snapshots copy each struct's std::string members onto the small
+  // internal heap; under dashboard polling that churn fragments internal RAM to
+  // OOM (#23). fn() must only do a quick in-memory serialization — no network
+  // I/O — since the main task is blocked from mutating state for its duration.
+  template<typename Fn> void with_state_lock(Fn &&fn) const {
+    StateLock lock(state_mutex_);
+    fn();
+  }
   int get_number_of_devices() const { return number_of_devices_; }
   const std::string& get_cca_ip() const { return cca_ip_; }
   bool get_sync_cca_on_startup() const { return sync_cca_on_startup_; }
 #ifdef USE_ESP_IDF
-  std::string get_cca_device_info() const { return std::string(cca_device_info_.begin(), cca_device_info_.end()); }
+  // Returns a locked copy of cca_device_info_. Safe to call from any task.
+  std::string get_cca_device_info() const {
+    StateLock lock(state_mutex_);
+    return std::string(cca_device_info_.begin(), cca_device_info_.end());
+  }
 #else
-  const std::string& get_cca_device_info() const { return cca_device_info_; }
+  std::string get_cca_device_info() const { return cca_device_info_; }
 #endif
   unsigned long get_last_cca_sync_time() const { return last_cca_sync_time_; }
   float get_total_energy_in_kwh() const { return total_energy_in_kwh_; }
@@ -365,6 +467,14 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   int get_device_count() const { return devices_.size(); }
   int get_online_device_count() const;
   float get_total_power() const;
+  // System-wide peak power (sum of per-inverter high-water marks) — the same
+  // value the dashboard uses as its "% of peak" denominator. Pair with
+  // get_total_power() in a lambda to compute % of peak (#29).
+  float get_system_peak_power() const;
+
+#ifdef TIGO_TSDB_AVAILABLE
+  TigoHistory *get_history() { return &history_; }
+#endif
   
   // Public methods for web server access
   void reset_peak_power();  // Reset all peak power values to 0
@@ -372,6 +482,7 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   void check_midnight_reset();  // Check if midnight has passed and reset configured sensors
   void set_reset_at_midnight(bool reset) { this->reset_at_midnight_ = reset; }
   void set_night_mode_timeout(unsigned long timeout_ms) { this->night_mode_timeout_ = timeout_ms; }
+  void set_stale_timeout(unsigned long timeout_ms) { this->stale_timeout_ = timeout_ms; }
   
 #ifdef USE_TIME
   void set_time_id(time::RealTimeClock *time_id) { this->time_id_ = time_id; }
@@ -400,20 +511,46 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   
   // CCA device info query (called by web server)
   void query_cca_device_info();
-  
+
+#ifdef USE_TIGO_CLOUD
+  // Tigo cloud import — fetches the system layout (panel names + string/MPPT/inverter
+  // structure + optimizer serials) from Tigo's cloud and applies it to the node table.
+  // This recovers the device/layout data we can't read locally once CCA firmware 4.0.4+
+  // locks the local HTTP API (BLE gives CCA info/network but not the panel layout).
+  // Credentials are entered in the web UI; only the resulting bearer token is persisted.
+  bool tigo_cloud_login(const std::string &email, const std::string &password);
+  bool tigo_cloud_import();
+  bool tigo_cloud_health(std::string &out_json);  // Tigo's warning/error counts per type
+  bool tigo_cloud_equipment(const std::string &view, std::string &out_json);  // latest|history
+  bool tigo_cloud_has_token() const { return !cloud_token_.empty(); }
+  const std::string &tigo_cloud_email() const { return cloud_email_; }
+  const std::string &tigo_cloud_expires() const { return cloud_expires_iso_; }
+  int tigo_cloud_system_id() const { return cloud_system_id_; }
+  void tigo_cloud_load_creds();  // restore persisted token on boot (called from setup())
+#endif
+
+  // User configuration persisted on-device (NVS) — runtime knobs editable in the web UI.
+  // YAML provides the defaults; stored overrides win until reverted. See tigo_config.cpp.
+  void tigo_config_load();   // capture YAML defaults + apply stored overrides (called from setup())
+  std::string tigo_config_json();                                         // current values/defaults/overridden
+  bool tigo_config_apply(const std::string &key, const std::string &value);  // set + persist (live)
+  bool tigo_config_reset(const std::string &key);                         // revert field to YAML default
+
  protected:
+  void tigo_config_save_();  // write current values + override bitmask to NVS
+
   // Frame processing
   void process_serial_data();
-  void process_frame(const std::string &frame);
-  std::string remove_escape_sequences(const std::string &frame);
-  bool verify_checksum(const std::string &frame);
-  std::string frame_to_hex_string(const std::string &frame);
-  
+  void process_frame(const frame_string &frame);
+  frame_string remove_escape_sequences(const frame_string &frame);
+  bool verify_checksum(const frame_string &frame);
+  frame_string frame_to_hex_string(const frame_string &frame);
+
   // Frame type handlers
-  void process_power_frame(const std::string &frame);
-  void process_09_frame(const std::string &frame);
-  void process_27_frame(const std::string &hex_frame, size_t offset);
-  int calculate_header_length(const std::string &hex_frame);
+  void process_power_frame(const frame_string &frame);
+  void process_09_frame(const frame_string &frame);
+  void process_27_frame(const frame_string &hex_frame, size_t offset);
+  int calculate_header_length(const frame_string &hex_frame);
   
   // CRC functions
   void generate_crc_table();
@@ -423,6 +560,7 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   // Device management
   void update_device_data(const DeviceData &data);
   void publish_sensor_data();
+  void mark_stale_devices_();
   DeviceData* find_device_by_addr(const std::string &addr);
   
   // String-level aggregation
@@ -450,12 +588,90 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   void query_cca_config();
   void match_cca_to_uart(const std::string &json_response);
   std::string get_barcode_for_node(const NodeTableData &node);
+
+#ifdef USE_TIGO_CLOUD
+  // HTTPS (TLS via the cert bundle) JSON request helper; returns body + status.
+  bool cloud_http_json_(const char *method, const std::string &url, const std::string &body,
+                        const std::string &bearer, std::string &out_body, int &out_status);
+  void match_cloud_layout_to_uart_(const std::string &layout_json);  // apply layout to nodes
+  void cloud_save_creds_();
+  std::string cloud_email_;
+  std::string cloud_token_;
+  std::string cloud_refresh_token_;
+  std::string cloud_expires_iso_;
+  int cloud_system_id_{0};
+#endif
+
+  // Thread-safe setter for cca_device_info_. Takes state_mutex_ briefly
+  // around the assignment so concurrent get_cca_device_info() callers
+  // never observe a torn psram_string.
+  void set_cca_device_info(const std::string &value) {
+    StateLock lock(state_mutex_);
+#ifdef USE_ESP_IDF
+    cca_device_info_.assign(value.begin(), value.end());
+#else
+    cca_device_info_ = value;
+#endif
+  }
   
   // Energy persistence
   void load_energy_data();
   void save_energy_data();
   
  private:
+#ifdef USE_ESP_IDF
+  // Recursive mutex protecting the structure (size/iterators) of devices_,
+  // node_table_, strings_, inverters_, and cca_device_info_. Held briefly
+  // around mutations and during snapshot copies. Recursive so internal
+  // helpers can re-take it. Created in setup().
+  mutable SemaphoreHandle_t state_mutex_{nullptr};
+
+  // RAII guard for state_mutex_. No-op if mutex is null (defensive: allows
+  // construction on a partially-initialized component to fail safely).
+  class StateLock {
+   public:
+    explicit StateLock(SemaphoreHandle_t sem) : sem_(sem) {
+      if (sem_ != nullptr) xSemaphoreTakeRecursive(sem_, portMAX_DELAY);
+    }
+    ~StateLock() {
+      if (sem_ != nullptr) xSemaphoreGiveRecursive(sem_);
+    }
+    StateLock(const StateLock&) = delete;
+    StateLock& operator=(const StateLock&) = delete;
+   private:
+    SemaphoreHandle_t sem_;
+  };
+#else
+  // Non-ESP-IDF (Arduino) builds are single-threaded; StateLock is a no-op.
+  struct StateLockDummy {};
+  mutable StateLockDummy state_mutex_{};
+  class StateLock {
+   public:
+    explicit StateLock(StateLockDummy &) {}
+  };
+#endif
+
+  // ESPHome's make_preference() heap-allocates a backend object that is never
+  // freed — it is designed to be called once per key at setup, not repeatedly
+  // at runtime. Periodic paths (the peak-power restore in publish_sensor_data,
+  // node-table and energy saves) called it every cycle, leaking ~28 B of
+  // internal RAM per call (#23: ~4 KB/h on installs with silent table nodes).
+  // Route every NVS access through this hash-keyed cache so each key allocates
+  // its backend exactly once. StateLock guards the map — both the main loop
+  // and httpd handlers (renames/ratings) reach it.
+#ifdef USE_ESP_IDF
+  psram_map<uint32_t, ESPPreferenceObject> pref_cache_;
+#else
+  std::map<uint32_t, ESPPreferenceObject> pref_cache_;
+#endif
+  template<typename T> ESPPreferenceObject &cached_pref_(uint32_t hash) {
+    StateLock lock(state_mutex_);
+    auto it = pref_cache_.find(hash);
+    if (it == pref_cache_.end())
+      it = pref_cache_.emplace(hash, global_preferences->make_preference<T>(hash)).first;
+    return it->second;
+  }
+
 #ifdef USE_ESP_IDF
   // Use PSRAM-backed containers for large data structures
   psram_vector<DeviceData> devices_;
@@ -479,6 +695,7 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   psram_map<std::string, sensor::Sensor*> efficiency_sensors_;
   psram_map<std::string, sensor::Sensor*> power_factor_sensors_;
   psram_map<std::string, sensor::Sensor*> load_factor_sensors_;
+  psram_map<std::string, sensor::Sensor*> string_power_sensors_;  // key = canonical string label
 #else
   // Fallback to standard containers on Arduino
   std::vector<DeviceData> devices_;
@@ -501,12 +718,15 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   std::map<std::string, sensor::Sensor*> efficiency_sensors_;
   std::map<std::string, sensor::Sensor*> power_factor_sensors_;
   std::map<std::string, sensor::Sensor*> load_factor_sensors_;
+  std::map<std::string, sensor::Sensor*> string_power_sensors_;  // key = canonical string label
 #endif
   sensor::Sensor* power_in_sum_sensor_ = nullptr;
   sensor::Sensor* power_out_sum_sensor_ = nullptr;
   sensor::Sensor* energy_in_sum_sensor_ = nullptr;
   sensor::Sensor* energy_out_sum_sensor_ = nullptr;
   sensor::Sensor* device_count_sensor_ = nullptr;
+  sensor::Sensor* stale_count_sensor_ = nullptr;
+  sensor::Sensor* zero_production_count_sensor_ = nullptr;
   sensor::Sensor* invalid_checksum_sensor_ = nullptr;
   sensor::Sensor* missed_frame_sensor_ = nullptr;
   binary_sensor::BinarySensor* night_mode_sensor_ = nullptr;
@@ -551,6 +771,7 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   unsigned long last_data_received_ = 0;
   unsigned long last_zero_publish_ = 0;
   unsigned long night_mode_timeout_ = 3600000;  // Default: 1 hour in milliseconds (configurable)
+  unsigned long stale_timeout_ = 600000;  // Per-device staleness cutoff, ms (0 = disabled) (#26)
   static const unsigned long ZERO_PUBLISH_INTERVAL = 600000;  // 10 minutes in milliseconds
   bool in_night_mode_ = false;
   
@@ -580,12 +801,30 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   std::string cca_ip_;  // Optional CCA IP address for HTTP queries (small, kept in internal RAM)
   bool sync_cca_on_startup_ = true;  // Whether to sync from CCA on boot (default: true)
   unsigned long last_cca_sync_time_ = 0;  // millis() of last successful CCA sync
+
+  // Persisted-config support: YAML defaults captured at boot + override bitmask (tigo_config.cpp)
+  uint32_t cfg_overrides_ = 0;
+  float cfg_def_power_calibration_ = 1.0f;
+  unsigned long cfg_def_night_mode_timeout_ = 3600000;
+  bool cfg_def_reset_at_midnight_ = false;
+  bool cfg_def_sync_cca_on_startup_ = true;
+  std::string cfg_def_cca_ip_;
   
   // No timing variables needed - ESPHome handles update intervals
   
   // Character mapping for Tigo CRC
   static constexpr const char* crc_char_map_ = "GHJKLMNPRSTVWXYZ";
   static const uint8_t tigo_crc_table_[256];
+
+#ifdef TIGO_TSDB_AVAILABLE
+  TigoHistory history_;
+  // Captures cumulative readings at the previous snapshot so each tsdb row
+  // stores the per-period (5-min) energy delta rather than running totals.
+  float last_snapshot_total_e_kwh_ = 0.0f;
+  float last_snapshot_inv_e_kwh_[4] = {0, 0, 0, 0};
+  uint32_t last_snapshot_frames_lost_ = 0;
+  void snapshot_to_history_();
+#endif
 };
 
 #ifdef USE_BUTTON

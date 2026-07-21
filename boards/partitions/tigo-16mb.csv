@@ -1,0 +1,21 @@
+# Tigo Monitor partition table for 16 MB flash (e.g. ESP32-P4-Function-EV-Board)
+# Adds a LittleFS-backed `tsdb` partition for esp_tsdb time-series storage.
+# Empty offset column = auto-allocate (ESP-IDF computes sequentially).
+#
+# Layout (offsets computed by ESP-IDF):
+#   bootloader + partition_table reserve up to 0x9000
+#   otadata    8 KB     OTA selection
+#   phy_init   4 KB     Wi-Fi PHY calibration
+#   app0       3 MB     OTA slot A (larger for P4 — esp_hosted + many sensors)
+#   app1       3 MB     OTA slot B
+#   nvs        448 KB   ESPHome credentials, prefs
+#   tsdb       8 MB     LittleFS for time-series data (full retention)
+# Total: ~14.5 MB used of 16 MB
+#
+# Name,    Type, SubType,  Offset, Size,     Flags
+otadata,   data, ota,      ,       0x2000,
+phy_init,  data, phy,      ,       0x1000,
+app0,      app,  ota_0,    ,       0x300000,
+app1,      app,  ota_1,    ,       0x300000,
+nvs,       data, nvs,      ,       0x70000,
+tsdb,      data, littlefs, ,       0x800000,

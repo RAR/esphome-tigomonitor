@@ -5,3 +5,6 @@
 /secrets.yaml
 /.vscode
 **__pycache__**
+
+# Auto-generated from components/tigo_server/web/*.html by __init__.py
+components/tigo_server/web_assets.h

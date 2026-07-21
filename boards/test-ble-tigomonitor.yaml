@@ -1,0 +1,99 @@
+# Compile-verification target for the CCA-over-BLE source (CCA HTTP lockdown, 4.0.4+).
+# The BLE client is folded into tigo_server: cca_source: ble makes the web server talk
+# the CCA's mobile_api over Bluetooth itself (no separate component). One firmware.
+#   esphome compile boards/test-ble-tigomonitor.yaml
+packages:
+  board: !include esp32s3-atoms3r.yaml
+
+esphome:
+  name: tigo-ble-test
+
+# Folding BLE into the firmware overruns the stock 1.75 MB app slot — use the
+# BLE-aware layout with 2.0 MB app slots (see partitions/tigo-8mb-ble.csv).
+esp32:
+  partitions: partitions/tigo-8mb-ble.csv
+  framework:
+    sdkconfig_options:
+      # We hold one on-demand BLE link (scan + 1 connection ≈ 2 activities), so trim
+      # the controller from its default of 6. Bump back to 6 if connects start failing.
+      CONFIG_BT_CTRL_BLE_MAX_ACT: "4"
+
+external_components:
+  - source:
+      type: local
+      path: ../components
+
+# Make the CCA Info page talk to the CCA over BLE (deep-merges into the board block).
+tigo_server:
+  cca_source: ble
+  ble_client_id: tigo_cca_ble
+  cloud_import: true
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  ap:
+    ssid: "Tigo-Server BLE Test"
+    password: !secret ap_password
+
+captive_portal:
+
+logger:
+  level: INFO
+
+api:
+  encryption:
+    key: !secret api_encryption_key
+
+ota:
+  - platform: esphome
+    password: !secret ota_password
+    allow_partition_access: true
+
+# --- BLE link to the CCA -----------------------------------------------------
+# use_psram: BLE host heap → PSRAM where possible. max_connections: 1 — we hold a
+# single on-demand link, so trim the controller/host from the default of 3-4
+# connections (those buffers are internal-RAM-only; PSRAM can't move them).
+esp32_ble:
+  use_psram: true
+  max_connections: 1
+
+esp32_ble_tracker:
+  scan_parameters:
+    interval: 320ms
+    window: 60ms
+    active: true
+
+ble_client:
+  - mac_address: "04:C0:5B:AA:BB:CC"  # placeholder seed MAC — reselect your CCA via the web UI (CCA Connection)
+    id: tigo_cca_ble
+    auto_connect: false
+
+# Manual refresh (no auto-poll, per design): connect, then pull DEVICE_INFO so the
+# CCA Info page has fresh data. These call tigo_server's own BLE methods.
+button:
+  - platform: template
+    name: "CCA BLE Connect"
+    icon: mdi:bluetooth-connect
+    on_press:
+      - lambda: 'id(tigo_web).cca_ble_connect();'
+  - platform: template
+    name: "CCA BLE Refresh"
+    icon: mdi:refresh
+    on_press:
+      - lambda: 'id(tigo_web).cca_device_info();'
+  - platform: template
+    name: "CCA BLE Disconnect"
+    icon: mdi:bluetooth-off
+    on_press:
+      - lambda: 'id(tigo_web).cca_ble_disconnect();'
+
+# Stub sections — required so ESPHome generates the headers the components include.
+sensor:
+  - platform: tigo_monitor
+    tigo_monitor_id: tigo_hub
+    name: "Total Solar Power"
+
+text_sensor:
+
+binary_sensor:

@@ -3,8 +3,7 @@
 CCA 12-Byte Telemetry Decoder
 Decodes raw binary telemetry data from Tigo CCA (Cloud Connect Advanced)
 
-Format verified against 31 production samples (100% match)
-See CCA_BINARY_ANALYSIS.md for complete documentation
+Format verified against 31 production samples (100% match).
 
 Usage:
   ./decode_cca_telemetry.py <hex_string>
@@ -62,7 +61,6 @@ def format_output(result):
     print(f"  byte[10]: 0x{result['unknown']['byte10']:02X}")
     print()
     print("Note: Raw values require version-dependent scaling for real units")
-    print("See CCA_BINARY_ANALYSIS.md for scaling formulas")
 
 
 def main():

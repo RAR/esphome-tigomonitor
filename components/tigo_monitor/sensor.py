@@ -7,6 +7,7 @@ from esphome.components import sensor, text_sensor
 from esphome.const import (
     CONF_ID,
     CONF_ADDRESS,
+    CONF_DEVICE_ID,
     CONF_NAME,
     DEVICE_CLASS_POWER,
     DEVICE_CLASS_VOLTAGE,
@@ -54,6 +55,7 @@ CONF_EFFICIENCY = "efficiency"
 CONF_POWER_FACTOR = "power_factor"
 CONF_LOAD_FACTOR = "load_factor"
 CONF_POWER_OUT = "power_out"
+CONF_STRING_LABEL = "string_label"  # Per-string aggregate sensor (keyed by CCA string label)
 # Memory monitoring (ESP32 only)
 CONF_INTERNAL_RAM_FREE = "internal_ram_free"
 CONF_INTERNAL_RAM_MIN = "internal_ram_min"
@@ -83,7 +85,8 @@ def _tigo_text_sensor_schema(**kwargs):
 def _auto_template_sensor_config(config):
     """Auto-template sensor configs with name and id if not provided"""
     base_name = config[CONF_NAME]
-    
+    parent_device_id = config.get(CONF_DEVICE_ID)
+
     # Sensor configurations with their suffixes
     sensor_configs = [
         (CONF_POWER_IN, "Power In"),
@@ -104,38 +107,45 @@ def _auto_template_sensor_config(config):
         (CONF_POWER_FACTOR, "Power Factor"),
         (CONF_LOAD_FACTOR, "Load Factor"),
     ]
-    
+
     for conf_key, suffix in sensor_configs:
         if conf_key in config:
             sensor_config = config[conf_key]
-            
+
             # Auto-generate name if not provided
             if CONF_NAME not in sensor_config:
                 sensor_config[CONF_NAME] = f"{base_name} {suffix}"
-                
+
             # Auto-generate ID if not provided
             if CONF_ID not in sensor_config:
                 # Create a valid ID by converting to lowercase and replacing spaces/hyphens with underscores
                 base_id = base_name.lower().replace(' ', '_').replace('-', '_')
                 suffix_id = suffix.lower().replace(' ', '_').replace('-', '_')
-                
+
                 # Special handling for power sum sensor (no device-specific suffix)
                 if conf_key == CONF_POWER_SUM:
                     id_string = f"{base_id}_power_sum"
                 else:
                     id_string = f"{base_id}_{suffix_id}"
-                    
+
                 # Use appropriate sensor type for ID declaration
                 if conf_key in [CONF_BARCODE, CONF_FIRMWARE_VERSION, CONF_DEVICE_INFO]:
                     sensor_config[CONF_ID] = cv.declare_id(text_sensor.TextSensor)(id_string)
                 else:
                     sensor_config[CONF_ID] = cv.declare_id(sensor.Sensor)(id_string)
-            
+
+            # Propagate device_id from the parent device entry unless the
+            # child sub-sensor explicitly overrides it. Lets users write
+            # `device_id: inverter_1` once at the device level instead of
+            # repeating it on power_in / peak_power / voltage_in / ...
+            if parent_device_id is not None and CONF_DEVICE_ID not in sensor_config:
+                sensor_config[CONF_DEVICE_ID] = parent_device_id
+
             # Add default fields for text sensors (skip None values to avoid C++ generation issues)
             if conf_key in [CONF_BARCODE, CONF_FIRMWARE_VERSION, CONF_DEVICE_INFO]:
                 if "disabled_by_default" not in sensor_config:
                     sensor_config["disabled_by_default"] = False
-    
+
     return config
 
 # Schema for individual device sensors
@@ -144,6 +154,10 @@ DEVICE_CONFIG_SCHEMA = cv.All(
         cv.GenerateID(CONF_TIGO_MONITOR_ID): cv.use_id(TigoMonitorComponent),
         cv.Required(CONF_ADDRESS): cv.string,
         cv.Required(CONF_NAME): cv.string,
+        # Optional sub-device assignment. Set once here and it propagates to
+        # every selected sub-sensor below (power_in, peak_power, ...). The
+        # per-sensor `device_id` still wins if you want to override one.
+        cv.Optional(CONF_DEVICE_ID): cv.sub_device_id,
         cv.Optional(CONF_POWER_IN): _tigo_sensor_schema(
             unit_of_measurement=UNIT_WATT,
             accuracy_decimals=0,
@@ -240,6 +254,19 @@ POWER_IN_SUM_CONFIG_SCHEMA = sensor.sensor_schema(
     cv.GenerateID(CONF_TIGO_MONITOR_ID): cv.use_id(TigoMonitorComponent),
 }).extend(cv.COMPONENT_SCHEMA)
 
+# Schema for a per-string power sensor — keyed by the CCA string label instead
+# of a device address. One entity per string instead of one per panel; on large
+# installs each dropped panel entity saves ~110-150 B of internal RAM.
+STRING_POWER_CONFIG_SCHEMA = sensor.sensor_schema(
+    unit_of_measurement=UNIT_WATT,
+    accuracy_decimals=1,
+    device_class=DEVICE_CLASS_POWER,
+    state_class=STATE_CLASS_MEASUREMENT,
+).extend({
+    cv.GenerateID(CONF_TIGO_MONITOR_ID): cv.use_id(TigoMonitorComponent),
+    cv.Required(CONF_STRING_LABEL): cv.string_strict,
+}).extend(cv.COMPONENT_SCHEMA)
+
 # Schema for power output sum sensor (no address required)
 POWER_OUT_SUM_CONFIG_SCHEMA = sensor.sensor_schema(
     unit_of_measurement=UNIT_WATT,
@@ -315,6 +342,23 @@ INTERNAL_RAM_MIN_CONFIG_SCHEMA = sensor.sensor_schema(
     cv.GenerateID(CONF_TIGO_MONITOR_ID): cv.use_id(TigoMonitorComponent),
 }).extend(cv.COMPONENT_SCHEMA)
 
+# Alert-count sensors: stale panels and fresh-but-zero-production panels (#24)
+STALE_COUNT_CONFIG_SCHEMA = sensor.sensor_schema(
+    accuracy_decimals=0,
+    state_class=STATE_CLASS_MEASUREMENT,
+    icon="mdi:lan-disconnect",
+).extend({
+    cv.GenerateID(CONF_TIGO_MONITOR_ID): cv.use_id(TigoMonitorComponent),
+}).extend(cv.COMPONENT_SCHEMA)
+
+ZERO_PRODUCTION_COUNT_CONFIG_SCHEMA = sensor.sensor_schema(
+    accuracy_decimals=0,
+    state_class=STATE_CLASS_MEASUREMENT,
+    icon="mdi:solar-panel",
+).extend({
+    cv.GenerateID(CONF_TIGO_MONITOR_ID): cv.use_id(TigoMonitorComponent),
+}).extend(cv.COMPONENT_SCHEMA)
+
 PSRAM_FREE_CONFIG_SCHEMA = sensor.sensor_schema(
     unit_of_measurement="KB",
     accuracy_decimals=1,
@@ -343,6 +387,11 @@ STACK_FREE_CONFIG_SCHEMA = sensor.sensor_schema(
 # checksum/frame precede count so names like "Invalid Checksum Count" /
 # "Missed Frame Count" are not swallowed by the generic "count" keyword.
 _AGGREGATE_RULES = [
+    # Alert counts first — their names ("Stale Panel Count", "Zero Production
+    # Count") contain words the broader rules below would otherwise swallow.
+    ("stale_count",     ["stale"]),
+    ("zero_production", ["zero production", "no production", "zero output",
+                         "dead", "failed"]),
     ("energy_out",   ["energy out", "output energy", "e_out", "e out"]),
     ("energy_in",    ["energy in", "input energy", "e_in", "e in",
                       "energy", "kwh", "kilowatt", "wh"]),
@@ -384,6 +433,8 @@ def _classify_aggregate_sensor(name):
 
 
 _AGGREGATE_SCHEMA_BY_CATEGORY = {
+    "stale_count": STALE_COUNT_CONFIG_SCHEMA,
+    "zero_production": ZERO_PRODUCTION_COUNT_CONFIG_SCHEMA,
     "energy_out": ENERGY_OUT_SUM_CONFIG_SCHEMA,
     "energy_in": ENERGY_IN_SUM_CONFIG_SCHEMA,
     "power_out": POWER_OUT_SUM_CONFIG_SCHEMA,
@@ -401,6 +452,16 @@ _AGGREGATE_SCHEMA_BY_CATEGORY = {
 # Main config schema that handles both types
 def _validate_config(config):
     """Validate configuration and determine sensor type."""
+    if CONF_STRING_LABEL in config:
+        # Per-string aggregate sensor — keyed by CCA string label.
+        if CONF_ADDRESS in config:
+            raise cv.Invalid(
+                "'string_label' and 'address' are mutually exclusive: use "
+                "'address' for a per-panel sensor or 'string_label' for a "
+                "per-string aggregate."
+            )
+        return STRING_POWER_CONFIG_SCHEMA(config)
+
     if CONF_ADDRESS in config:
         # Device sensor — keyed by address.
         return DEVICE_CONFIG_SCHEMA(config)
@@ -426,7 +487,13 @@ CONFIG_SCHEMA = _validate_config
 
 async def to_code(config):
     hub = await cg.get_variable(config[CONF_TIGO_MONITOR_ID])
-    
+
+    # Per-string aggregate sensor — published from update_string_data()
+    if CONF_STRING_LABEL in config:
+        sens = await sensor.new_sensor(config)
+        cg.add(hub.add_string_power_sensor(config[CONF_STRING_LABEL], sens))
+        return
+
     # Check if this is an aggregate sensor (no address) or device sensor (has address)
     if CONF_ADDRESS not in config:
         # Aggregate sensor — route by the same name-keyword classifier used in
@@ -434,6 +501,8 @@ async def to_code(config):
         category = _classify_aggregate_sensor(config.get(CONF_NAME, ""))
         sens = await sensor.new_sensor(config)
         register = {
+            "stale_count": hub.add_stale_count_sensor,
+            "zero_production": hub.add_zero_production_count_sensor,
             "energy_out": hub.add_energy_out_sum_sensor,
             "energy_in": hub.add_energy_in_sum_sensor,
             "power_out": hub.add_power_out_sum_sensor,

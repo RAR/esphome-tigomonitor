@@ -36,8 +36,8 @@ api:
 ota:
   - platform: esphome
     password: "YOUR_OTA_PASSWORD"
-    # Bridge release: enables OTA partition-table updates (ESPHome 2026.5.0+)
-    # so the upgrade to 2.0 can be applied over OTA instead of a serial flash.
+    # Allows future partition-table changes to be applied over OTA
+    # (ESPHome 2026.5.0+). Without it, repartitioning needs a serial flash.
     allow_partition_access: true
 
 # Needed for display fonts

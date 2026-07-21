@@ -1,90 +1,149 @@
 # Web Server & API
 
-The Tigo Monitor includes a built-in web server with dashboard and RESTful API.
+Tigo Monitor ships a single-page web app and a JSON API on the configured `tigo_server` port (default 80). Everything lives at `/app` — the legacy per-page paths still resolve as 302 redirects so existing bookmarks keep working.
 
-## Pages
+## Single-page app
 
-| Page | URL | Description |
-|------|-----|-------------|
-| Dashboard | `/` | Real-time system overview with device cards |
-| Node Table | `/nodes` | Device registry with CCA labels |
-| ESP32 Status | `/status` | System health, memory, uptime |
-| YAML Config | `/yaml` | Auto-generated sensor configuration |
-| CCA Info | `/cca` | Tigo CCA device status |
+| View | URL | Notes |
+|------|-----|-------|
+| Dashboard | `/app#dashboard` | Hero strip · per-string panel heatmap · color legend · alerts |
+| History | `/app#history` | TSDB-backed power/energy charts; range tabs (day / week / month / year) |
+| Topology | `/app#topology` | Inverter → string → panel tree with live V/I/W/°C; rename + nameplate editing |
+| Node Table | `/app#nodes` | Device registry with CCA metadata; Export / Import as JSON |
+| Tools | `/app#tools` | **Device Configuration** (on-device knobs) · YAML generator · Reset Peak / Clear Node Table / Restart |
+| Diagnostics | `/app#diagnostics` | Memory · network · UART telemetry · TSDB stats |
+| CCA Info | `/app#cca` | Live CCA mirror (HTTP or BLE source); Refresh · **CCA Connection** (BLE search) · Network status · WiFi config · Topology discovery |
+| Tigo Cloud | `/app#cloudstatus` | Tigo-cloud health, per-equipment status + history (shown only when `cloud_import` is set) |
 
-![Dashboard](images/Dashboard.png)
+`/`, `/nodes`, `/status`, `/yaml`, `/cca`, `/history` all 302 → `/app#<view>`. The redirects use a relative `Location` so they work standalone *and* under HA Ingress without any extra configuration.
+
+### Sidebar
+
+The sidebar's footer carries:
+
+- **GitHub link** → opens `github.com/RAR/esphome-tigomonitor` in a new tab.
+- **°C / °F toggle** — persists via `localStorage['tempUnit']` (same key the legacy page used). The button shows the unit you'll *get* if you click. Active view re-renders immediately.
+- **Theme toggle** — light/dark, persists via `localStorage['tigoTheme']`.
+
+When `cloud_import` is set and a Tigo cloud token is connected, a **cloud status box** also appears in the sidebar with at-a-glance severity dots for the CCA and panels (refreshed ~10 min while the UI is open); clicking it opens the Tigo Cloud view.
+
+### Naming overrides
+
+Inverters and strings can be renamed live from the Topology view (✎ next to each label). The override is stored in NVS via ESPHome's `global_preferences` API and is keyed by canonical name (the YAML inverter name or CCA string label). YAML stays the source of truth for identity — overrides are purely display labels and are used wherever those names appear: Topology, Dashboard inverter cards, Dashboard alert text, embedded strings inside `/api/inverters`.
+
+Empty override = falls back to canonical.
+
+### Per-string panel nameplate
+
+Each string can carry a per-panel nameplate watts value (uint16, 0 = unset). Set via the click-to-edit pill in Topology. When set:
+
+- Topology and Dashboard tiles display "350 W (88%)" alongside watts.
+- String roll-ups display "Y% of Z kW" (output vs total nameplate).
+- `panelClass` switches to rating-vs-power health classification (`<30%` bad, `<70%` warn, else good) with a "string sleeping" check that flips the whole row to dead when total output is `<5%` of total nameplate (so dawn doesn't paint everything red).
+
+Falls back to median-vs-peer behavior when no rating is set.
+
+### Heatmap
+
+The dashboard uses fixed-size colored tiles per panel grouped by string. Color buckets match the legend strip (good ≥70% of reference, warn ≥30%, bad else, dead = string sleeping or telemetry stale). Each tile shows panel name + watts; hover scales the tile and reveals a tooltip with the full reading and "% of rated" if available.
+
+### Panel detail modal
+
+Click any heat tile on a desktop viewport (>768 px) to open a modal showing:
+
+- **Live readings** — Power in, Voltage in, Current in, Voltage out, Temperature, Efficiency, Duty cycle, RSSI. Re-painted on the dashboard's 5-second refresh tick while the modal stays open.
+- **Power history chart** — fetched from `/api/history/panel?slot=N&range=day|week|month`. The active panel's series is the solid accent line; whenever there are ≥2 peer panels on the same string, the **string median** is overlaid as a dashed dim line so single-panel anomalies are visually separable from string-wide events (e.g. shading, cloud cover).
+
+Slot lookup uses `/api/panels` (barcode last-6 → tsdb slot) and is cached on first fetch. The modal is hidden via `@media (max-width: 768px)` on phones — it would be too cramped — so the heat tile cursor reverts to default on those viewports.
+
+### Sortable Node Table
+
+Every column header on the Nodes view is clickable. Click cycles ascending / descending, with an arrow indicator (`↑` / `↓`) on the active column. Defaults:
+
+- Numeric columns (V, A, Power, Temp) sort **descending** on first click — "biggest first" is usually what you want.
+- Text columns and Age sort **ascending**.
+- State sorts by health order (`ok → warn → bad → stale`), so reversing surfaces problems first.
+
+Filters (search, string, state) are applied first; sort sees the filtered set.
+
+### Device Configuration (Tools view)
+
+A handful of runtime knobs can be edited in the UI and persisted to the ESP32 (NVS) without reflashing: `power_calibration` (applied immediately — every power calc reads it live), `night_mode_timeout`, `reset_at_midnight`, `sync_cca_on_startup`, and `cca_ip`. The YAML values remain the **defaults**: at boot the codegen setters populate the members, then any stored overrides are overlaid on top. A field shows a **Revert** button (enabled only when the live value differs from the default) that clears the override and restores the YAML default — after which editing the YAML applies again. Backed by `GET`/`POST /api/config`. Structural settings (inverter layout, device count, ports, IDs) and auth (`api_token`/`web_*`) stay in YAML — the latter because NVS is plaintext-at-rest.
+
+### CCA over BLE
+
+When `cca_source: ble` (or `auto`) and a `ble_client_id` are set, `tigo_server` *is* the BLE client and talks the CCA's `mobile_api` over Bluetooth — so the CCA Info page works on firmware (4.0.4+) that locks the local HTTP API. The link is opened on demand (connect → command → auto-disconnect) so the Tigo phone app can still connect when idle. The CCA Info page then also offers:
+
+- **CCA Connection** — a Bluetooth search that finds the CCA by its Tigo `04:C0:5B` MAC OUI and lets you target it **without hardcoding the MAC in YAML**. The chosen MAC is saved to NVS and applied live via `BLEClient::set_address()`, overriding the compile-time `ble_client:` MAC across reboots; **Revert** restores the YAML MAC. (`tigo_server` registers as an `esp32_ble_tracker` advertisement listener at codegen time so the scan callback is dispatched.)
+- **Network status** — Ethernet/WiFi cards from the CCA's cached `NETWORK_INFO`.
+- **WiFi configuration** — scan / join / clear the CCA's WiFi over BLE.
+- **Topology discovery** — kick the CCA's optimizer/gateway rescan and poll progress.
+
+### Tigo Cloud (`cloud_import`)
+
+Recovers the panel names + string/MPPT/inverter layout from Tigo's cloud (`mapi.tigoenergy.com`, the API the mobile app uses) when the CCA's local HTTP is locked. Credentials are entered in the **Configure** modal; **only the resulting bearer token is persisted to NVS, never the password**. The **Tigo Cloud** page also surfaces Tigo's own per-equipment health, status, and history (`statusCode` 0=ok / 1=warning / 2=error). HTTPS is verified against the mbedTLS certificate bundle (enabled automatically when `cloud_import` is set). Layout import is a button on the Topology page.
 
 ---
 
-## Dashboard Features
+## API endpoints
 
-### System Statistics
-Six stat cards showing real-time metrics:
-- Total Power (W)
-- Total Current (A)
-- Total Energy (kWh)
-- Active Devices
-- Average Efficiency (%)
-- Average Temperature
+Conventions for the tables below:
 
-### Device Cards
-- CCA-friendly names (e.g., "East Roof Panel 3")
-- Two-line headers: CCA label + barcode/address
-- Power, voltage, current, temperature, efficiency, RSSI
-- Data age indicators
-- Peak power tracking
+- **Method** — everything under **Read** is `GET`; everything under **Write** is `POST` (the method is shown inline there).
+- **Auth** — when `api_token` is set, every `/api/*` endpoint requires `Authorization: Bearer <token>`. The sole exception is `/api/health`, which never requires auth. HTML pages use HTTP Basic instead (see [Authentication](#authentication)).
+- **Response** — JSON unless noted.
 
-### UI Features
-- **Temperature Toggle**: Switch °F/°C (saved to localStorage)
-- **Dark Mode**: Persistent preference
-- **Auto-refresh**: Updates every 5 seconds
-- **Mobile Responsive**: Optimized for all screen sizes
-- **String Grouping**: Devices organized by MPPT/string
+### Read
 
----
-
-## Node Table
-
-![Node Table](images/NodeTable.png)
-
-- Complete device list with sensor assignments
-- CCA panel names and hierarchy (MPPT → String → Panel)
-- Barcode information (Frame 27, 16-char)
-- Validation badges for CCA-matched devices
-- Delete individual nodes with confirmation
-
----
-
-## ESP32 Status
-
-![ESP32 Status](images/ESP32Status.png)
-
-- **System Info**: Uptime, ESPHome version, compile time
-- **Memory**: Heap and PSRAM usage with progress bars
-- **Minimum Free**: Lowest memory (detect leaks)
-- **Task Count**: Active FreeRTOS tasks
-- **Restart Button**: Remote system restart
-
----
-
-## API Endpoints
-
-All endpoints return JSON. Auto-refresh every 5-30 seconds.
-
-| Endpoint | Description |
-|----------|-------------|
-| `/api/devices` | Device metrics with string labels |
-| `/api/overview` | System-wide aggregates |
-| `/api/strings` | Per-string aggregated data |
+| Endpoint | Returns |
+|----------|---------|
+| `/api/health` | `{status, uptime, heap_free, heap_min_free}` — no auth |
+| `/api/status` | ESP32 status + UART counters + RSSI + memory |
+| `/api/overview` | System aggregates (`total_power`, `total_energy_in`, `active_devices`, …) |
+| `/api/devices` | Per-device live telemetry (`power_in`, `voltage_in`, `current`, `temperature`, `data_age_ms`, …) |
+| `/api/strings` | Flat per-string aggregates incl. `display_label`, `panel_rating_w` |
+| `/api/inverters` | Hierarchical inverter rollups with embedded strings (each carries `display_label`, `panel_rating_w`) and inverter `display_name` |
 | `/api/nodes` | Node table with CCA metadata |
-| `/api/status` | ESP32 system status |
-| `/api/yaml` | Generated YAML configuration |
-| `/api/cca` | CCA connection info |
-| `/api/inverters` | Per-inverter aggregates |
-| `/api/restart` | Trigger system restart |
-| `/api/health` | Health check (no auth) |
+| `/api/cca` | CCA connection state + `device_info` (encoded JSON string from CCA) |
+| `/api/yaml?sensors=…&hub_sensors=…&grouping=panel\|mppt\|inverter\|none` | Generated YAML config (Tools view). `grouping` (default `none`) emits an `esphome.devices:` block and propagates `device_id:` to each child sensor at the chosen granularity |
+| `/api/tsdb/stats` | LittleFS partition + per-DB record counts (only when esp_tsdb is compiled in) |
+| `/api/history/power?range=day\|week\|month\|year` | System power/energy time series |
+| `/api/history/panel?slot=N&range=…` | Single-panel power time series |
+| `/api/panels` | Slot map: array of `{slot, barcode (last 6 chars), label?, mppt?, string?}` keyed off the TSDB panel-slot table; used by the panel detail modal to find the right slot for a given heat tile |
+| `/api/energy/history` | Daily energy history (RAM ring buffer, kept alongside TSDB) |
+| `/api/config` | Runtime config values + YAML defaults + `overridden` flags (Device Configuration) |
+| `/api/cca/ble-scan?rescan=1` | Discovered Tigo CCAs (`04:C0:5B` OUI) with MAC/RSSI/name + active/YAML MAC (BLE builds) |
+| `/api/cca/network?cmd=…` | Cached CCA network read (`{age_s, result}`), no BLE side effect (BLE builds) |
+| `/api/cca/discovery` | Cached CCA topology-discovery status (`{age_s, status}`), no BLE side effect (BLE builds) |
+| `/api/cloud/status` | Cloud token state `{configured, email, expires, system_id}` (`cloud_import`) |
+| `/api/cloud/health` | Tigo per-equipment-type warning/error summary (`cloud_import`) |
+| `/api/cloud/equipment?view=latest\|history` | Tigo per-equipment status feed (`cloud_import`) |
 
-### Example Response
+### Write
+
+| Endpoint | Payload | Behaviour |
+|----------|---------|-----------|
+| `POST /api/restart` | none | Calls `App.safe_reboot()` after sending response |
+| `POST /api/reset_peak_power` | none | Clears per-device peak-power high-water marks |
+| `POST /api/reset_node_table` | none | Drops the persisted node table; devices repopulate from telemetry |
+| `POST /api/nodes/import` | JSON `{nodes:[…]}` | Replaces the node table from a previous Export |
+| `POST /api/inverters/rename` | `{name, display_name}` | Set inverter display name. Empty `display_name` clears the override |
+| `POST /api/strings/rename` | `{label, display_label}` | Set string display name. Empty clears the override |
+| `POST /api/strings/rating` | `{label, rating_w}` | Set per-panel nameplate watts. `rating_w=0` clears |
+| `POST /api/cca/refresh` | none | Triggers a fresh CCA query |
+| `POST /api/backlight` | `state=on\|off\|toggle` | Backlight control (units with backlight wired) |
+| `POST /api/config` | `{key,value}` or `{reset:key}` | Set + persist a runtime knob, or revert it to the YAML default |
+| `POST /api/cca/ble-mac` | `{mac}` or `{reset:true}` | Target + persist a CCA BLE MAC, or revert to the YAML MAC (BLE builds) |
+| `POST /api/cca/network/poll?cmd=…` | none | Trigger an allowlisted CCA network read (WiFi scan) over BLE |
+| `POST /api/cca/network/wifi-connect` | `{nid,pwd}` | Join the CCA to a WiFi network over BLE |
+| `POST /api/cca/network/wifi-clear` | none | Wipe the CCA's WiFi credentials over BLE (destructive) |
+| `POST /api/cca/discovery/start` | none | Kick the CCA's optimizer/gateway rescan (`START_DISCOVERY`) |
+| `POST /api/cca/discovery/poll` | none | Poll `DISCOVERY_STATUS` and cache it |
+| `POST /api/cca/data-export` | none | Ask the CCA to push its data to Tigo's cloud now |
+| `POST /api/cloud/login` | `{email,password}` | Log into Tigo's cloud; persists only the bearer token (`cloud_import`) |
+| `POST /api/cloud/import` | none | Fetch the system layout from Tigo's cloud and apply it to the node table |
+
+### Example
 
 ```bash
 curl http://192.168.1.100/api/overview
@@ -94,18 +153,35 @@ curl http://192.168.1.100/api/overview
 {
   "total_power": 4523.5,
   "total_current": 12.3,
-  "total_energy": 45.6,
+  "total_energy_in": 45.6,
   "active_devices": 20,
+  "max_devices": 24,
   "avg_efficiency": 96.2,
   "avg_temperature": 42.5
 }
+```
+
+Renaming an inverter:
+
+```bash
+curl -X POST http://192.168.1.100/api/inverters/rename \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"FlexBoss A","display_name":"South Roof"}'
+```
+
+Setting per-panel nameplate watts on a string:
+
+```bash
+curl -X POST http://192.168.1.100/api/strings/rating \
+  -H 'Content-Type: application/json' \
+  -d '{"label":"String A","rating_w":400}'
 ```
 
 ---
 
 ## Authentication
 
-### API Authentication (Bearer Token)
+### API (Bearer token)
 
 ```yaml
 tigo_server:
@@ -113,12 +189,11 @@ tigo_server:
   api_token: "your-secret-token"
 ```
 
-Usage:
 ```bash
 curl -H "Authorization: Bearer your-secret-token" http://esp32/api/devices
 ```
 
-### Web Authentication (HTTP Basic)
+### Web (HTTP Basic)
 
 ```yaml
 tigo_server:
@@ -129,30 +204,15 @@ tigo_server:
 
 Browser prompts for credentials. Cached per session.
 
-### Health Check
-
-`/api/health` requires no authentication:
-
-```bash
-curl http://esp32/api/health
-```
-
-```json
-{
-  "status": "ok",
-  "uptime": 12345,
-  "heap_free": 245760,
-  "heap_min_free": 198432
-}
-```
+`/api/health` is the only endpoint that ignores both auth schemes.
 
 ---
 
 ## Home Assistant Ingress
 
-The web UI supports proxying through Home Assistant's reverse proxy with a dynamic URL prefix, compatible with both [Home Assistant Ingress](https://developers.home-assistant.io/docs/add-ons/presentation/#ingress) and the community [hass_ingress](https://github.com/lovelylain/hass_ingress) integration.
+The SPA detects ingress prefixes from `window.location.pathname` and prepends the detected `BASE_PATH` to every `apiFetch`. Legacy-page redirects use a relative `Location` so they resolve under any URL prefix.
 
-To enable ingress support, add the following to your `sdkconfig_options` so the ESP-IDF HTTP server can handle the longer URIs and headers that HA Ingress generates:
+To allow the longer URIs HA Ingress generates, add:
 
 ```yaml
 esp32:
@@ -163,62 +223,31 @@ esp32:
       CONFIG_HTTPD_MAX_URI_LEN: "1024"
 ```
 
-The component automatically detects the ingress base path from the `X-Ingress-Path` header and rewrites all internal links accordingly — no additional configuration required.
+Compatible with the [hass_ingress](https://github.com/lovelylain/hass_ingress) integration; native HA add-on Ingress also works.
 
 ---
 
 ## Configuration
 
-```yaml
-tigo_server:
-  tigo_monitor_id: tigo_hub
-  port: 80
-  api_token: "optional-token"
-  web_username: "optional-user"
-  web_password: "optional-pass"
-```
-
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `tigo_monitor_id` | ID | Required | Reference to tigo_monitor |
-| `port` | Integer | 80 | HTTP port |
-| `api_token` | String | None | Bearer token for API |
-| `web_username` | String | None | HTTP Basic Auth user |
-| `web_password` | String | None | HTTP Basic Auth pass |
+The `tigo_server:` YAML options — `port`, `api_token`, `web_username`/`web_password`, `backlight`, `cca_source`, `ble_client_id`, `cloud_import` — are documented in the **[Configuration Guide → Tigo Web Server component](CONFIGURATION.md#tigo-web-server-component)**, which is the canonical reference (including the full `ble_client:`/`esp32_ble` setup for CCA-over-Bluetooth and the `cloud_import` cloud-layout details). This doc covers what the server *serves*: the SPA views and the JSON API above.
 
 ---
 
-## Technical Details
+## Technical notes
 
-- **Framework**: ESP-IDF native HTTP server
-- **Stack size**: 8KB per request
-- **Max handlers**: 16 routes
-- **CORS**: Enabled for external access
-- **Memory**: PSRAM-backed when available
-
----
-
-## Example URLs
-
-If ESP32 IP is `192.168.1.100`:
-
-```
-http://192.168.1.100/           # Dashboard
-http://192.168.1.100/nodes      # Node Table
-http://192.168.1.100/status     # ESP32 Status
-http://192.168.1.100/yaml       # YAML Config
-http://192.168.1.100/cca        # CCA Info
-http://192.168.1.100/api/devices  # JSON API
-```
+- **Framework**: ESP-IDF native `esp_http_server` on a dedicated 8 KB-stack task.
+- **Max URI handlers**: `config.max_uri_handlers` is raised to 60 in `tigo_web_server.cpp` to fit the CCA/cloud routes (the `httpd` default silently drops handlers past the cap and 404s them — raise it further if you add more).
+- **Connection model**: 4 max open sockets, keep-alive disabled, LRU purge enabled — minimizes internal RAM footprint without much real-world impact at typical poll rates.
+- **HTML assets**: served from `R""` raw-string constants in `web_assets.h`, regenerated from `components/tigo_server/web/*.html` by the Python codegen step. The API token placeholder (`__TIGO_API_TOKEN__`) is substituted at runtime so each device's token stays unique without a recompile.
+- **Memory**: response building and HTML buffers go through `PSRAMString` so large pages don't pressure internal heap.
+- **Persistence**: NVS (via `global_preferences`) holds inverter/string display-name overrides and panel nameplate ratings. Node table and energy history live in NVS too. TSDB time-series data lives on a separate LittleFS partition — see [`docs/tsdb-integration.md`](tsdb-integration.md).
 
 ---
 
-## Browser Compatibility
+## Browser support
 
-Works with all modern browsers:
-- Chrome / Edge
-- Firefox
-- Safari
-- Mobile browsers
+Modern Chrome / Firefox / Safari, mobile or desktop. No plugins. The SPA degrades gracefully if the API token is set incorrectly (visible "refresh error" in topbar).
 
-No plugins required. All processing on-device.
+---
+
+**See also:** [Configuration](CONFIGURATION.md) · [Home Assistant](HOME_ASSISTANT.md) · [Troubleshooting](TROUBLESHOOTING.md) · [← Back to README](../README.md)

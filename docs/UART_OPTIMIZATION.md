@@ -1,183 +1,111 @@
-# UART Packet Loss Troubleshooting Guide
+# Reducing RS485 Frame Loss
 
-## Problem
-Missed packets on AtomS3R with display enabled (e.g., 972 missed packets over 7 minutes).
+**What this is:** a how-to for cutting down missed Tigo telemetry frames on the RS485/UART bus. **Who it's for:** solar owners running this component who see the "Missed Packets" counter climbing in the web UI or Home Assistant.
 
-## Root Causes
+Frames arrive continuously at 38400 baud. If the ESP32 can't drain the UART receive buffer fast enough — usually because the display, LEDs, or WiFi are stealing CPU time — the buffer overflows and you lose frames. The fixes below free up that time and give the buffer more headroom. Apply them in order; most people only need the first two.
 
-### 1. Display Updates Competing with UART
-The ST7789V LCD display requires SPI transfers that can delay UART buffer reads:
-- Display updates at 2-5 second intervals
-- Each update transfers ~128×128×1 byte = 16KB over SPI
-- At 40MHz SPI, this takes ~3.2ms per frame
-- During this time, UART RX buffer can overflow if data arrives faster than it's consumed
+## 1. Keep the UART ISR in fast RAM
 
-### 2. I2C Operations (LP5562)
-- RGB LED and backlight updates use I2C bus
-- I2C transactions can block briefly
-- Light effects (pulse, strobe) cause frequent I2C traffic
+This is the single most important setting. It keeps the UART interrupt handler in internal IRAM so it still runs while flash is busy, which dramatically reduces dropped bytes. Every shipping board YAML sets it:
 
-### 3. Processing Bottleneck
-- Default MAX_BYTES_PER_LOOP was 2048 bytes
-- With display overhead, UART processing gets delayed
-- Buffer fills faster than it's drained
-
-## Solutions Applied
-
-### 1. Increased Processing Capacity (Code Change)
-```cpp
-// OLD: const size_t MAX_BYTES_PER_LOOP = 2048;
-// NEW: const size_t MAX_BYTES_PER_LOOP = 4096;
-```
-- Doubled bytes processed per loop iteration
-- Helps drain buffer faster between display updates
-- Still yields to watchdog to prevent timeouts
-
-### 2. Reduced Display Update Frequency
-```yaml
-# OLD: update_interval: 2s
-# NEW: update_interval: 5s
-```
-- Less frequent SPI transactions
-- More CPU time available for UART processing
-- Display still updates reasonably fast for monitoring
-
-### 3. Recommended UART Buffer Sizes
-For AtomS3R with display, increase RX buffer (TX is minimal since we only listen):
-
-```yaml
-esp32:
-  framework:
-    sdkconfig_options:
-      CONFIG_UART_ISR_IN_IRAM: "y"           # Keep UART ISR in fast RAM
-      CONFIG_UART_RX_BUFFER_SIZE: "8192"     # 8KB RX buffer (was 2048)
-      CONFIG_UART_TX_BUFFER_SIZE: "1024"     # 1KB TX buffer (minimal, we only listen)
-```
-
-**Why larger RX buffer helps:**
-- 38400 baud ≈ 4800 bytes/second ≈ 4.8 bytes/ms
-- 8KB buffer provides ~1.7 seconds of buffering
-- Display update takes ~3ms, well within buffer capacity
-- Accounts for occasional FreeRTOS task switching delays
-
-**Why small TX buffer is fine:**
-- Tigo Monitor only **listens** to the RS485 bus
-- No transmission to Tigo devices
-- TX buffer only used for debug logging (if any)
-- 1KB is more than sufficient
-
-## Additional Optimizations
-
-### 4. Disable Light Effects During Peak Hours
-Light effects cause frequent I2C updates:
-```yaml
-light:
-  - platform: rgb
-    name: "RGB LED"
-    id: status_led
-    effects:
-      # Consider commenting out pulse/strobe if seeing packet loss:
-      # - pulse:
-      #     name: "Pulse"
-      # - strobe:
-      #     name: "Strobe"
-```
-
-### 5. Consider Slower Display SPI Speed
-If packet loss persists, reduce SPI clock:
-```yaml
-display:
-  - platform: st7789v
-    data_rate: 20MHz  # Reduce from 40MHz
-```
-**Trade-off:** Slower updates (6.4ms vs 3.2ms per frame)
-
-### 6. FreeRTOS Task Priority (Advanced)
-If packet loss continues, can increase UART task priority in ESP-IDF:
 ```yaml
 esp32:
   framework:
     sdkconfig_options:
       CONFIG_UART_ISR_IN_IRAM: "y"
-      CONFIG_ESP_CONSOLE_UART_CUSTOM: "y"
-      # Force UART processing to higher priority
 ```
 
-## Expected Results
+If you change nothing else, keep this.
 
-### Before Optimizations
-- 972 missed packets / 7 minutes
-- ~139 packets/minute
-- ~2.3 packets/second
+## 2. Size the RX buffer (one consistent setting)
 
-### After Optimizations
-- Should see **significant reduction** (target: <10 packets/minute)
-- 4KB processing + 5s display interval = ~50% less competition
-- 8KB buffer provides ample headroom
+Set the receive buffer in **two** places to the **same** value: the SDK-level `CONFIG_UART_RX_BUFFER_SIZE` and the `rx_buffer_size:` on the `uart:` component. They must match so the driver and the component agree on capacity (the P4 board YAML comment puts it simply: "Match SDK buffer for consistency").
 
-### Monitoring
-Watch the "Missed Packets" counter on web UI:
+```yaml
+esp32:
+  framework:
+    sdkconfig_options:
+      CONFIG_UART_ISR_IN_IRAM: "y"
+      CONFIG_UART_RX_BUFFER_SIZE: "8192"   # match rx_buffer_size below
+
+uart:
+  id: tigo_uart
+  rx_pin: GPIO5          # your board's RX pin
+  baud_rate: 38400
+  rx_buffer_size: 8192   # match CONFIG_UART_RX_BUFFER_SIZE above
 ```
-Current: 972 (after 7 mins) ≈ 139/min
-Target:  <70 (after 7 mins) ≈ <10/min  (93% reduction)
-Ideal:   <7 (after 7 mins) ≈ <1/min   (99% reduction)
+
+**Pick a value for your board:**
+
+| Board | Recommended RX buffer |
+|-------|-----------------------|
+| Memory-tight ESP32-S3 (e.g. AtomS3R with display) | 1–2 KB |
+| ESP32-S3 with headroom | up to 8 KB |
+| ESP32-P4 | 16 KB |
+
+**Why a bigger buffer helps:** at 38400 baud you receive roughly 4800 bytes/second, about 4.8 bytes/ms. An 8 KB buffer holds about 1.7 seconds of data, so a brief 3 ms display refresh or a FreeRTOS task switch can't overflow it. That timing headroom is the whole point.
+
+**The trade-off — don't oversize:** these buffers must live in internal, DMA-capable RAM. They **never** go in PSRAM. Internal RAM is scarce (under ~200 KB total, shared with everything else), so an oversized RX buffer wastes heap you need for the rest of the firmware. Use the smallest value that stops the loss. On a display-equipped AtomS3R, start at 1–2 KB and only go higher if the counter is still climbing.
+
+The TX buffer stays tiny — the component only **listens** to the RS485 bus and never transmits, so the default is plenty.
+
+## 3. Give the CPU back to the UART
+
+On single-core boards like the AtomS3R, the display, I2C LEDs, and UART all share one CPU. Reducing how often the display and LEDs work frees time to drain the buffer.
+
+**Slow the display refresh:**
+
+```yaml
+display:
+  - platform: st7789v
+    update_interval: 5s   # fewer SPI transfers than 1–2s
 ```
 
-## Testing Procedure
+**Slow the display SPI clock** if loss persists:
 
-1. **Update configuration** with new buffer sizes
-2. **Flash device** with updated firmware
-3. **Monitor for 10-15 minutes** to establish baseline
-4. **Check missed packet counter** in web UI
-5. **If still high**, try these in order:
-   - Increase `update_interval` to 10s
-   - Disable light effects
-   - Reduce SPI `data_rate` to 20MHz
-   - Increase `CONFIG_UART_RX_BUFFER_SIZE` to 16384
-
-## Hardware Considerations
-
-### AtomS3R Advantages
-- **8MB PSRAM**: Plenty of room for large buffers
-- **240MHz CPU**: Fast enough for display + UART
-- **Octal PSRAM**: High bandwidth (80MHz)
-
-### AtomS3R Limitations
-- **Single core** (unlike ESP32-P4 dual-core)
-- All tasks compete for one CPU
-- Display, I2C, UART, WiFi all share cycles
-
-### When to Consider ESP32-P4
-If packet loss remains high after optimizations:
-- **Dual 400MHz cores** - dedicated UART processing
-- **32MB PSRAM** - massive buffer capacity
-- Can handle 50+ devices with display without issues
-
-## Validation
-
-After applying fixes, you should see in logs:
+```yaml
+display:
+  - platform: st7789v
+    data_rate: 20MHz   # down from 40MHz; each refresh takes ~6.4ms vs ~3.2ms
 ```
-[D][tigo_monitor:xxx]: Processing frame of X bytes
+
+**Drop animated LED effects,** which trigger frequent I2C traffic:
+
+```yaml
+light:
+  - platform: rgb
+    name: "RGB LED"
+    id: status_led
+    # Avoid pulse/strobe effects if you see frame loss —
+    # they cause constant I2C updates that compete with UART.
+```
+
+## 4. Check whether you need PSRAM
+
+PSRAM is recommended once you track **15 or more devices** — the device list and node table grow with your array and belong in PSRAM, not internal RAM. Enable it in your board config if you're at or above that count.
+
+Higher figures are board-specific: an ESP32-P4 (dual-core, large PSRAM) has been run with 50+ devices while driving a display. That's a ceiling on capable hardware, not a change to the 15+ rule — if you're near or past 15 devices, turn PSRAM on regardless of board.
+
+## Verify it worked
+
+Watch the "Missed Packets" counter in the web UI or Home Assistant after flashing. It should stop climbing (or climb only rarely). In the logs you'll see the RX buffer staying well under its capacity and few or no "Packet missed!" warnings:
+
+```text
 [D][tigo_monitor:xxx]: Heap: Internal 150 KB free, PSRAM 7800 KB free, Buffer: 234 bytes
 ```
 
-**Good signs:**
-- Buffer size stays under 4KB
-- Few/no "Packet missed!" warnings
-- Missed packet counter stops climbing rapidly
+**Good signs:** buffer usage stays low, no steady stream of "Packet missed!" warnings, counter is flat.
 
-**Bad signs:**
-- Buffer frequently >8KB (upgrade RX buffer)
-- Frequent "Buffer too small, resetting!" (increase MAX_BYTES_PER_LOOP further)
-- Continuous "Packet missed!" warnings (try slower display updates)
+**Still losing frames?** Work down this list:
+- Raise the display `update_interval` (e.g. to 10s).
+- Remove animated LED effects.
+- Lower the display `data_rate` to 20 MHz.
+- Bump the RX buffer one step (and keep both values matched) — but stop as soon as the loss stops, to preserve internal RAM.
 
-## Summary of Changes
+## Background
 
-| Item | Before | After | Impact |
-|------|--------|-------|--------|
-| MAX_BYTES_PER_LOOP | 2048 | 4096 | +100% throughput/loop |
-| Display interval | 2s | 5s | -60% SPI overhead |
-| RX buffer (recommended) | 2048 | 8192 | +300% buffer capacity |
-| TX buffer (recommended) | 512 | 1024 | Adequate (listen-only) |
+This guidance came out of a real case: an AtomS3R with its display enabled was dropping frames because 40 MHz SPI refreshes and I2C LED updates kept starving the UART buffer on the single core. Enabling the IRAM ISR, matching the RX buffer, and easing off the display fixed it. The component also drains more bytes per processing pass than it used to; that improvement ships built in and isn't a setting you configure.
 
-**Expected packet loss reduction: 80-95%**
+---
+
+**See also:** [Troubleshooting](TROUBLESHOOTING.md) · [Configuration](CONFIGURATION.md) · [← Back to README](../README.md)

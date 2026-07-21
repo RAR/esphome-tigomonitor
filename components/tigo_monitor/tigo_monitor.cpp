@@ -5,6 +5,7 @@
 #include "esphome/core/preferences.h"
 #include "esphome/components/network/util.h"
 #include <cstring>
+#include <cstdlib>
 #include <numeric>
 
 #ifdef USE_OTA
@@ -62,6 +63,21 @@ void* psram_malloc_impl(size_t size) {
 
 void psram_free_impl(void* ptr) {
   heap_caps_free(ptr);
+}
+
+// Called by PSRAMAllocator when both PSRAM and internal heap are exhausted.
+// Log diagnostics and abort — STL containers cannot tolerate a null return
+// from a non-throwing allocator (next access is UB), so a clean panic-reboot
+// is the safest available option.
+[[noreturn]] void psram_alloc_failed_abort(size_t bytes_requested) {
+  size_t psram_free = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+  size_t internal_free = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+  size_t internal_min = heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL);
+  ESP_LOGE(TAG,
+           "FATAL: PSRAMAllocator exhausted (requested %zu bytes). "
+           "PSRAM free=%zu KB, internal free=%zu KB, internal min=%zu KB. Aborting.",
+           bytes_requested, psram_free / 1024, internal_free / 1024, internal_min / 1024);
+  abort();
 }
 
 // Custom allocator hooks for cJSON to use PSRAM
@@ -133,18 +149,19 @@ inline size_t buffer_find<psram_vector<char>>(const psram_vector<char>& buf, con
 }
 
 template<typename BufferType>
-inline std::string buffer_substr(const BufferType& buf, size_t pos, size_t len);
+inline frame_string buffer_substr(const BufferType& buf, size_t pos, size_t len);
 
 template<>
-inline std::string buffer_substr<std::string>(const std::string& buf, size_t pos, size_t len) {
-  return buf.substr(pos, len);
+inline frame_string buffer_substr<std::string>(const std::string& buf, size_t pos, size_t len) {
+  if (pos >= buf.size()) return "";
+  return frame_string(buf.data() + pos, std::min(len, buf.size() - pos));
 }
 
 template<>
-inline std::string buffer_substr<psram_vector<char>>(const psram_vector<char>& buf, size_t pos, size_t len) {
+inline frame_string buffer_substr<psram_vector<char>>(const psram_vector<char>& buf, size_t pos, size_t len) {
   if (pos >= buf.size()) return "";
   size_t actual_len = std::min(len, buf.size() - pos);
-  return std::string(&buf[pos], actual_len);
+  return frame_string(&buf[pos], actual_len);
 }
 
 template<typename BufferType>
@@ -186,7 +203,24 @@ const uint8_t TigoMonitorComponent::tigo_crc_table_[256] = {
 
 void TigoMonitorComponent::setup() {
   ESP_LOGCONFIG(TAG, "Setting up Tigo Server...");
-  
+
+#ifdef USE_ESP_IDF
+  // Create the recursive mutex protecting shared collections from concurrent
+  // access by the main task (UART/loop) and the esp_http_server task.
+  state_mutex_ = xSemaphoreCreateRecursiveMutex();
+  if (state_mutex_ == nullptr) {
+    ESP_LOGE(TAG, "Failed to create state mutex - shared state will be unprotected!");
+  }
+#endif
+
+#ifdef USE_TIGO_CLOUD
+  // Restore any persisted Tigo cloud token so the import works after a reboot.
+  tigo_cloud_load_creds();
+#endif
+
+  // Capture the YAML-provided config as defaults, then overlay any user overrides from NVS.
+  tigo_config_load();
+
 #ifdef USE_ESP_IDF
   // Log PSRAM availability
   size_t psram_size = heap_caps_get_total_size(MALLOC_CAP_SPIRAM);
@@ -221,12 +255,33 @@ void TigoMonitorComponent::setup() {
   load_node_table();
   load_energy_data();
   load_daily_energy_history();
+
+#ifdef TIGO_TSDB_AVAILABLE
+  // Open the time-series database. Mounts LittleFS on the `tsdb` partition
+  // and creates system.tsdb if absent. On success, start the writer task and
+  // schedule a 5-min snapshot interval.
+  if (history_.init() && history_.start_writer_task()) {
+    last_snapshot_total_e_kwh_ = total_energy_in_kwh_;
+    for (size_t i = 0; i < 4; ++i)
+      last_snapshot_inv_e_kwh_[i] = (i < inverters_.size()) ? inverters_[i].total_energy : 0.0f;
+    last_snapshot_frames_lost_ = missed_frame_count_;
+    this->set_interval("tsdb_snapshot", 5UL * 60UL * 1000UL,
+                       [this]() { this->snapshot_to_history_(); });
+    ESP_LOGI(TAG, "tsdb snapshot interval armed (every 5 min)");
+  } else {
+    ESP_LOGW(TAG, "Time-series history disabled — sensor data still publishes normally");
+  }
+#endif
   
   // Check if we have existing CCA data and rebuild string groups
   bool has_cca_data = false;
   int cca_nodes = 0;
   for (const auto &node : node_table_) {
-    if (!node.cca_string_label.empty() && node.cca_validated) {
+    // Group on the presence of a string label alone. cca_validated is set only
+    // when a node was matched against the CCA API, but hand-built node tables
+    // (imported via /api/nodes/import without CCA access) are authoritative too —
+    // requiring validation here left manual imports stuck at "0 strings". See #18.
+    if (!node.cca_string_label.empty()) {
       has_cca_data = true;
       cca_nodes++;
       ESP_LOGD(TAG, "Loaded node %s with CCA data: label='%s', string='%s', validated=%d",
@@ -269,7 +324,30 @@ void TigoMonitorComponent::setup() {
 }
   
 
+#ifdef USE_ESP_IDF
+psram_vector<DeviceData> TigoMonitorComponent::snapshot_devices() const {
+  StateLock lock(state_mutex_);
+  return devices_;
+}
+
+psram_vector<NodeTableData> TigoMonitorComponent::snapshot_node_table() const {
+  StateLock lock(state_mutex_);
+  return node_table_;
+}
+
+psram_map<std::string, StringData> TigoMonitorComponent::snapshot_strings() const {
+  StateLock lock(state_mutex_);
+  return strings_;
+}
+
+psram_vector<InverterData> TigoMonitorComponent::snapshot_inverters() const {
+  StateLock lock(state_mutex_);
+  return inverters_;
+}
+#endif
+
 void TigoMonitorComponent::loop() {
+  StateLock lock(state_mutex_);
   process_serial_data();
   
 #ifdef USE_ESP_IDF
@@ -305,7 +383,10 @@ void TigoMonitorComponent::loop() {
     last_internal_free = internal_free;
     last_internal_min = internal_min;
     
-    ESP_LOGI(TAG, "Heap: Internal %zu KB free (%zu KB min), PSRAM %zu KB free, Buffer: %zu bytes",
+    // Routine per-minute heap/frame telemetry is debug-level: the same numbers
+    // are on the HA memory sensors, and the actionable signals (memory-drop and
+    // low-RAM below) stay at WARN. Bump the logger to DEBUG to watch a leak (#23).
+    ESP_LOGD(TAG, "Heap: Internal %zu KB free (%zu KB min), PSRAM %zu KB free, Buffer: %zu bytes",
              internal_free / 1024, internal_min / 1024, psram_free / 1024, buffer_size(incoming_data_));
     ESP_LOGD(TAG, "Stack: %u bytes free (warning if < 512 bytes)", stack_free_bytes);
     
@@ -313,7 +394,7 @@ void TigoMonitorComponent::loop() {
     uint32_t total_attempts = total_frames_processed_ + missed_frame_count_;
     if (total_attempts > 0) {
       float miss_rate = (missed_frame_count_ * 100.0f) / total_attempts;
-      ESP_LOGI(TAG, "Frame stats: %u processed, %u missed (%.2f%% miss rate), %u invalid checksums",
+      ESP_LOGD(TAG, "Frame stats: %u processed, %u missed (%.2f%% miss rate), %u invalid checksums",
                total_frames_processed_, missed_frame_count_, miss_rate, invalid_checksum_count_);
     }
     
@@ -347,8 +428,35 @@ void TigoMonitorComponent::loop() {
 
 void TigoMonitorComponent::update() {
   // This is called every polling interval
+  StateLock lock(state_mutex_);
   check_midnight_reset();
+  mark_stale_devices_();
   publish_sensor_data();
+}
+
+void TigoMonitorComponent::mark_stale_devices_() {
+  // Per-device staleness (#26): a device that stops reporting used to keep its
+  // last values forever — polluting the HA sensors, string aggregates, web UI,
+  // and TSDB history (night mode only covers the whole-bus-silent case). Zero
+  // the production values once a device exceeds stale_timeout_; voltage, temp,
+  // and last_update stay as last-seen for diagnostics. A fresh frame clears
+  // the flag implicitly (update_device_data overwrites the whole struct).
+  if (stale_timeout_ == 0) return;  // feature disabled
+  unsigned long now = millis();
+  for (auto &device : devices_) {
+    if (device.last_update == 0 || device.is_stale) continue;
+    if (now - device.last_update <= stale_timeout_) continue;
+    device.is_stale = true;
+    device.power_in = 0.0f;
+    device.power_out = 0.0f;
+    device.current_in = 0.0f;
+    device.current_out = 0.0f;
+    device.efficiency = 0.0f;
+    device.load_factor = 0.0f;
+    device.duty_cycle = 0;
+    ESP_LOGI(TAG, "Device %s stale (no data for %lu min) - zeroing production values",
+             device.addr.c_str(), (now - device.last_update) / 60000UL);
+  }
 }
 
 void TigoMonitorComponent::dump_config() {
@@ -362,6 +470,9 @@ void TigoMonitorComponent::dump_config() {
 void TigoMonitorComponent::on_shutdown() {
   ESP_LOGI(TAG, "System shutdown detected - saving persistent data to flash...");
   save_persistent_data();
+#ifdef TIGO_TSDB_AVAILABLE
+  history_.flush_and_close();
+#endif
 }
 
 float TigoMonitorComponent::get_setup_priority() const {
@@ -473,7 +584,7 @@ void TigoMonitorComponent::process_serial_data() {
       }
       
       // Extract frame without start and end delimiters
-      std::string frame = buffer_substr(incoming_data_, 2, end_pos - 2);
+      frame_string frame = buffer_substr(incoming_data_, 2, end_pos - 2);
       buffer_clear(incoming_data_); // Clear buffer for next frame
       
       // Process the frame with safety checks
@@ -538,15 +649,25 @@ void TigoMonitorComponent::process_serial_data() {
   }
 }
 
-void TigoMonitorComponent::process_frame(const std::string &frame) {
-  // Note: processed_frame and hex_frame are allocated in PSRAM via helper functions
-  // (remove_escape_sequences and frame_to_hex_string use psram_string internally)
-  // This saves 2-4KB of internal RAM per frame processed
-  
+// Parse a fixed-width hex field directly out of the frame — no temporary
+// string allocation, and unlike std::stoi it cannot abort on malformed bus
+// data (exceptions are disabled on ESP-IDF, so a throw is a panic).
+static int parse_hex_field(const frame_string &s, size_t pos, size_t len) {
+  char buf[12];
+  if (len >= sizeof(buf) || pos + len > s.length()) return 0;
+  memcpy(buf, s.c_str() + pos, len);
+  buf[len] = '\0';
+  return static_cast<int>(strtol(buf, nullptr, 16));
+}
+
+void TigoMonitorComponent::process_frame(const frame_string &frame) {
+  // The whole frame pipeline stays in frame_string (PSRAM on IDF builds) —
+  // see the typedef note in the header (#23).
+
   // Increment total frames processed counter for diagnostics
   total_frames_processed_++;
-  
-  std::string processed_frame = remove_escape_sequences(frame);
+
+  frame_string processed_frame = remove_escape_sequences(frame);
   
   if (!verify_checksum(processed_frame)) {
     invalid_checksum_count_++;
@@ -555,23 +676,23 @@ void TigoMonitorComponent::process_frame(const std::string &frame) {
     }
     
     // Enhanced logging for invalid checksum debugging
-    std::string hex_frame = frame_to_hex_string(processed_frame);
+    frame_string hex_frame = frame_to_hex_string(processed_frame);
     uint16_t extracted_crc = 0;
     uint16_t computed_crc = 0;
-    
+
     if (processed_frame.length() >= 2) {
-      std::string checksum_str = processed_frame.substr(processed_frame.length() - 2);
-      extracted_crc = (static_cast<uint8_t>(checksum_str[0]) << 8) | static_cast<uint8_t>(checksum_str[1]);
+      extracted_crc = (static_cast<uint8_t>(processed_frame[processed_frame.length() - 2]) << 8) |
+                      static_cast<uint8_t>(processed_frame[processed_frame.length() - 1]);
       computed_crc = compute_crc16_ccitt(
-        reinterpret_cast<const uint8_t*>(processed_frame.c_str()), 
+        reinterpret_cast<const uint8_t*>(processed_frame.c_str()),
         processed_frame.length() - 2
       );
     }
-    
+
     // Log frame type and length for pattern analysis
-    std::string frame_type = "unknown";
+    frame_string frame_type = "unknown";
     if (hex_frame.length() >= 10) {
-      std::string segment = hex_frame.substr(4, 4);
+      frame_string segment = hex_frame.substr(4, 4);
       if (segment == "0149") frame_type = "power_data";
       else if (segment == "0148") frame_type = "receive_request";
       else if (segment == "0B10" || segment == "0B0F") frame_type = "command";
@@ -586,38 +707,37 @@ void TigoMonitorComponent::process_frame(const std::string &frame) {
   
   // Remove checksum (last 2 bytes)
   processed_frame = processed_frame.substr(0, processed_frame.length() - 2);
-  std::string hex_frame = frame_to_hex_string(processed_frame);
-  
+  frame_string hex_frame = frame_to_hex_string(processed_frame);
+
   if (hex_frame.length() < 10) {
     ESP_LOGW(TAG, "Frame too short: %s", hex_frame.c_str());
     return;
   }
-  
-  std::string segment = hex_frame.substr(4, 4); // Get type segment
-  
+
+  frame_string segment = hex_frame.substr(4, 4); // Get type segment
+
   if (segment == "0149") {
     // Power data frame
     int start_payload = 8 + calculate_header_length(hex_frame.substr(8, 4));
-    std::string payload = hex_frame.substr(start_payload);
-    
+    frame_string payload = hex_frame.substr(start_payload);
+
     size_t pos = 0;
     while (pos < payload.length()) {
       if (pos + 14 > payload.length()) {
         ESP_LOGW(TAG, "Incomplete packet, aborting");
         break;
       }
-      
-      std::string type = payload.substr(pos, 2);
-      std::string length_hex = payload.substr(pos + 12, 2);
-      int length = std::stoi(length_hex, nullptr, 16);
-      
+
+      frame_string type = payload.substr(pos, 2);
+      int length = parse_hex_field(payload, pos + 12, 2);
+
       int packet_length_chars = length * 2 + 14;
       if (pos + packet_length_chars > payload.length()) {
         ESP_LOGW(TAG, "Incomplete packet, aborting at pos %zu", pos);
         break;
       }
-      
-      std::string packet = payload.substr(pos, packet_length_chars);
+
+      frame_string packet = payload.substr(pos, packet_length_chars);
       
       if (type == "31") {
         process_power_frame(packet);
@@ -634,8 +754,8 @@ void TigoMonitorComponent::process_frame(const std::string &frame) {
     // Frame structure: dest(4) + type(4) + len(4) + cmd(4) + seq(2) + payload
     // Position:        0-3      4-7       8-11     12-15    16-17    18+
     command_frame_count_++;
-    std::string cmd = hex_frame.substr(12, 4);  // Full 4-char command (e.g., "0027")
-    std::string cmd_byte = hex_frame.substr(14, 2);  // Just the command byte (e.g., "27")
+    frame_string cmd = hex_frame.substr(12, 4);  // Full 4-char command (e.g., "0027")
+    frame_string cmd_byte = hex_frame.substr(14, 2);  // Just the command byte (e.g., "27")
     
     // Log all command frames to help debug Frame 27 capture
     ESP_LOGD(TAG, "Command frame: segment=%s, cmd=%s, len=%zu", 
@@ -659,7 +779,7 @@ void TigoMonitorComponent::process_frame(const std::string &frame) {
   }
 }
 
-void TigoMonitorComponent::process_power_frame(const std::string &frame) {
+void TigoMonitorComponent::process_power_frame(const frame_string &frame) {
   // Need at least 14 chars to read the format/length byte at offset 12
   if (frame.length() < 14) {
     ESP_LOGW(TAG, "Power frame too short for header (%zu chars), skipping", frame.length());
@@ -669,22 +789,20 @@ void TigoMonitorComponent::process_power_frame(const std::string &frame) {
   DeviceData data;
 
   // Parse frame according to original Arduino logic
-  data.addr = frame.substr(2, 4);
-  data.pv_node_id = frame.substr(6, 4);
+  data.addr.assign(frame.c_str() + 2, 4);
+  data.pv_node_id.assign(frame.c_str() + 6, 4);
 
   // Detect format version based on data length field
   // Old format (pre-CCA 4.x): 13 bytes (0x0D)
   // New format (CCA 4.x+): 15 bytes (0x0F)
-  int data_length = std::stoi(frame.substr(12, 2), nullptr, 16);
+  int data_length = parse_hex_field(frame, 12, 2);
   bool is_new_format = (data_length == 15);
 
-  // Guard every fixed-offset field read below: a frame that passed the checksum
-  // but is shorter than the format requires would otherwise hand an empty
-  // substring to std::stoi() (e.g. the new-format RSSI at offset 44 on a
-  // 44-char packet), which throws std::invalid_argument and aborts the device.
-  // Both formats place slot counter at chars 34-37 and RSSI at 38-39 → need >=40.
-  // New (15-byte / CCA 4.x) frames are 44 chars: they APPEND 2 pad bytes after
-  // RSSI, they do not shift the fields (decoded from real 4.x frames in #14/#17).
+  // Both formats place the slot counter at chars 34-37 and RSSI at 38-39, so
+  // both need >=40 chars. New (15-byte / CCA 4.x) frames are 44 chars: they
+  // APPEND 2 trailing pad bytes after RSSI, they do not shift the fields.
+  // (Decoded from real 4.x frames in #14/#17; the earlier "shift by 6" /
+  // RSSI-at-44 assumption was wrong and could never read a 44-char frame.)
   size_t required = 40;
   if (frame.length() < required) {
     // Dump the raw packet so a too-short frame can be decoded by hand — this is
@@ -695,7 +813,7 @@ void TigoMonitorComponent::process_power_frame(const std::string &frame) {
              required, frame.length(), frame.c_str());
     return;
   }
-
+  
   if (is_new_format) {
     ESP_LOGD(TAG, "Processing power frame (new 15-byte format) for device addr: %s", data.addr.c_str());
   } else {
@@ -703,22 +821,22 @@ void TigoMonitorComponent::process_power_frame(const std::string &frame) {
   }
   
   // Voltage In (scale by 0.05)
-  int voltage_in_raw = std::stoi(frame.substr(14, 3), nullptr, 16);
+  int voltage_in_raw = parse_hex_field(frame, 14, 3);
   data.voltage_in = voltage_in_raw * 0.05f;
-  
+
   // Voltage Out (scale by 0.10)
-  int voltage_out_raw = std::stoi(frame.substr(17, 3), nullptr, 16);
+  int voltage_out_raw = parse_hex_field(frame, 17, 3);
   data.voltage_out = voltage_out_raw * 0.10f;
-  
+
   // Duty Cycle
-  data.duty_cycle = std::stoi(frame.substr(20, 2), nullptr, 16);
-  
+  data.duty_cycle = parse_hex_field(frame, 20, 2);
+
   // Current In (scale by 0.005)
-  int current_in_raw = std::stoi(frame.substr(22, 3), nullptr, 16);
+  int current_in_raw = parse_hex_field(frame, 22, 3);
   data.current_in = current_in_raw * 0.005f;
-  
+
   // Temperature (scale by 0.1) - handle signed 12-bit value in two's complement
-  int temperature_raw = std::stoi(frame.substr(25, 3), nullptr, 16);
+  int temperature_raw = parse_hex_field(frame, 25, 3);
   // Convert from 12-bit two's complement to signed value
   if (temperature_raw & 0x800) {  // Check sign bit (bit 11)
     temperature_raw = temperature_raw - 0x1000;  // Convert to negative
@@ -728,8 +846,8 @@ void TigoMonitorComponent::process_power_frame(const std::string &frame) {
   // Slot counter (chars 34-37) and RSSI (chars 38-39) are at the SAME offsets
   // for both formats. The new 15-byte format only appends 2 trailing pad bytes
   // (chars 40-43, observed 0x0000) after RSSI — it does not relocate these.
-  data.slot_counter = frame.substr(34, 4);
-  data.rssi = std::stoi(frame.substr(38, 2), nullptr, 16);
+  data.slot_counter.assign(frame.c_str() + 34, 4);
+  data.rssi = parse_hex_field(frame, 38, 2);
 
   if (is_new_format) {
     // chars 28-33 carry a 3-byte field of unknown meaning (observed e.g. 830064)
@@ -806,10 +924,15 @@ void TigoMonitorComponent::process_power_frame(const std::string &frame) {
   update_device_data(data);
 }
 
-void TigoMonitorComponent::process_09_frame(const std::string &frame) {
-  std::string addr = frame.substr(14, 4);
-  std::string node_id = frame.substr(18, 4);  
-  std::string barcode = frame.substr(40, 6);
+void TigoMonitorComponent::process_09_frame(const frame_string &frame) {
+  // Need at least 46 chars to read barcode at offset 40 (length 6)
+  if (frame.length() < 46) {
+    ESP_LOGW(TAG, "Frame 09 too short (%zu chars), skipping", frame.length());
+    return;
+  }
+  frame_string addr = frame.substr(14, 4);
+  frame_string node_id = frame.substr(18, 4);
+  frame_string barcode = frame.substr(40, 6);
   
   ESP_LOGD(TAG, "Frame 09 - Device Identity (IGNORED): addr=%s, node_id=%s, barcode=%s", 
            addr.c_str(), node_id.c_str(), barcode.c_str());
@@ -819,7 +942,7 @@ void TigoMonitorComponent::process_09_frame(const std::string &frame) {
   // Only Frame 27 long addresses (16-char) are used for device identification
 }
 
-void TigoMonitorComponent::process_27_frame(const std::string &hex_frame, size_t offset) {
+void TigoMonitorComponent::process_27_frame(const frame_string &hex_frame, size_t offset) {
   // Frame 27 format per taptap protocol:
   // [starting_index:2 bytes (4 hex)] [num_entries:2 bytes (4 hex)] [entries...]
   // Each entry: [long_address:8 bytes (16 hex)] [pv_node_id:2 bytes (4 hex)] = 20 hex chars
@@ -830,14 +953,15 @@ void TigoMonitorComponent::process_27_frame(const std::string &hex_frame, size_t
   }
   
   // Parse starting_index (first 4 hex chars at offset)
-  int starting_index = std::stoi(hex_frame.substr(offset, 4), nullptr, 16);
-  
+  int starting_index = parse_hex_field(hex_frame, offset, 4);
+
   // Parse num_entries (next 4 hex chars)
-  int num_entries = std::stoi(hex_frame.substr(offset + 4, 4), nullptr, 16);
+  int num_entries = parse_hex_field(hex_frame, offset + 4, 4);
   ESP_LOGI(TAG, "Frame 27 received: starting_index=%d, entries=%d", starting_index, num_entries);
   
   size_t pos = offset + 8;  // Start after starting_index (4) + num_entries (4)
   bool table_changed = false;
+  bool dedup_merged = false;
   
   // Pre-allocate buffers to avoid repeated heap allocations in loop
   char long_addr_buf[17];  // 16 chars + null terminator
@@ -883,11 +1007,42 @@ void TigoMonitorComponent::process_27_frame(const std::string &hex_frame, size_t
                  addr.c_str(), long_addr.c_str(), node_table_.size());
         table_changed = true;
       } else {
-        ESP_LOGW(TAG, "Cannot create node entry for %s - table full (%zu >= %d)", 
+        ESP_LOGW(TAG, "Cannot create node entry for %s - table full (%zu >= %d)",
                  addr.c_str(), node_table_.size(), number_of_devices_);
       }
     }
-    
+
+    // Dedup by long address (#25). The gateway's node table just vouched for
+    // (addr <-> long_addr); any OTHER entry carrying the same long address is
+    // a stale alias of the same physical device — ephemeral 802.15.4 short
+    // addresses leak into the data stream during commissioning and can mint a
+    // phantom node entry (e.g. 8002 alongside 0002). Merge the alias's CCA
+    // metadata / sensor index into the authoritative entry, then drop it and
+    // any runtime device row it spawned.
+    for (size_t di = 0; di < node_table_.size(); ++di) {
+      if (node_table_[di].addr == addr || node_table_[di].long_address != long_addr) continue;
+      NodeTableData *keep = find_node_by_addr(addr);
+      if (keep == nullptr) break;  // table was full and addr never got an entry
+      const NodeTableData &dup = node_table_[di];
+      if (keep->sensor_index < 0 && dup.sensor_index >= 0) keep->sensor_index = dup.sensor_index;
+      if (keep->cca_label.empty()) keep->cca_label = dup.cca_label;
+      if (keep->cca_string_label.empty()) keep->cca_string_label = dup.cca_string_label;
+      if (keep->cca_inverter_label.empty()) keep->cca_inverter_label = dup.cca_inverter_label;
+      if (keep->cca_channel.empty()) keep->cca_channel = dup.cca_channel;
+      if (keep->cca_object_id.empty()) keep->cca_object_id = dup.cca_object_id;
+      keep->cca_validated = keep->cca_validated || dup.cca_validated;
+      keep->is_persistent = keep->is_persistent || dup.is_persistent;
+      ESP_LOGW(TAG, "Removing node %s: same long address %s as %s (stale alias)",
+               dup.addr.c_str(), long_addr.c_str(), addr.c_str());
+      for (auto dev_it = devices_.begin(); dev_it != devices_.end(); ++dev_it) {
+        if (dev_it->addr == dup.addr) { devices_.erase(dev_it); break; }
+      }
+      node_table_.erase(node_table_.begin() + di);
+      --di;
+      table_changed = true;
+      dedup_merged = true;
+    }
+
     // Also update existing device if already discovered
     DeviceData* device = find_device_by_addr(addr);
     if (device != nullptr) {
@@ -909,6 +1064,13 @@ void TigoMonitorComponent::process_27_frame(const std::string &hex_frame, size_t
     }
   }
   
+  // If a dedup merge moved CCA metadata between entries, the string groups
+  // may now be keyed off the wrong entry — rebuild them (safe under the held
+  // state lock, same pattern as the import path, #21).
+  if (dedup_merged) {
+    rebuild_string_groups();
+  }
+
   // Rate limit node table saves to prevent flash/heap exhaustion during CCA discovery floods
   // Only save if changed AND it's been >10 seconds since last save
   if (table_changed) {
@@ -955,7 +1117,7 @@ void TigoMonitorComponent::update_device_data(const DeviceData &data) {
     DeviceData* new_device = &devices_.back();
     std::string pref_key = "peak_" + data.addr;
     uint32_t hash = esphome::fnv1_hash(pref_key);
-    auto load = global_preferences->make_preference<float>(hash);
+    auto load = this->cached_pref_<float>(hash);
     float saved_peak = 0.0f;
     if (load.load(&saved_peak) && saved_peak > 0.0f) {
       new_device->peak_power = saved_peak;
@@ -1031,9 +1193,11 @@ void TigoMonitorComponent::rebuild_string_groups() {
   }
   strings_.clear();
   
-  // Group devices by their CCA string label
+  // Group devices by their CCA string label. A non-empty string label is
+  // sufficient — see the note in setup(): manually-imported node tables are
+  // authoritative even without cca_validated (#18).
   for (const auto &node : node_table_) {
-    if (!node.cca_string_label.empty() && node.cca_validated) {
+    if (!node.cca_string_label.empty()) {
       const std::string &string_label = node.cca_string_label;
       
       // Create string entry if it doesn't exist
@@ -1041,15 +1205,43 @@ void TigoMonitorComponent::rebuild_string_groups() {
         StringData string_data;
         string_data.string_label = string_label;
         string_data.inverter_label = node.cca_inverter_label;
+
+        // Pull any saved display label out of NVS, keyed by canonical label.
+        // Same pattern add_inverter uses for inverter display names.
+        char pref_key[80];
+        snprintf(pref_key, sizeof(pref_key), "str_dn:%s", string_label.c_str());
+        uint32_t hash = esphome::fnv1_hash(pref_key);
+        auto pref = this->cached_pref_<char[64]>(hash);
+        char dn_buf[64] = {};
+        if (pref.load(&dn_buf) && dn_buf[0] != '\0') {
+          string_data.display_label = dn_buf;
+        }
+
+        // Per-string panel nameplate rating, same persistence pattern but
+        // stored as uint16. 0 means "not set" → UI ignores it.
+        snprintf(pref_key, sizeof(pref_key), "str_rt:%s", string_label.c_str());
+        uint32_t rt_hash = esphome::fnv1_hash(pref_key);
+        auto rt_pref = this->cached_pref_<uint16_t>(rt_hash);
+        uint16_t rt_val = 0;
+        if (rt_pref.load(&rt_val) && rt_val > 0) {
+          string_data.panel_rating_w = rt_val;
+        }
+
         strings_[string_label] = string_data;
-        
+
         // Restore peak power if available
         if (saved_peaks.count(string_label) > 0) {
           strings_[string_label].peak_power = saved_peaks[string_label];
         }
-        
-        ESP_LOGI(TAG, "Created string group: %s (Inverter: %s)", 
-                 string_label.c_str(), node.cca_inverter_label.c_str());
+
+        if (string_data.display_label.empty()) {
+          ESP_LOGI(TAG, "Created string group: %s (Inverter: %s)",
+                   string_label.c_str(), node.cca_inverter_label.c_str());
+        } else {
+          ESP_LOGI(TAG, "Created string group: %s (Inverter: %s, display='%s')",
+                   string_label.c_str(), node.cca_inverter_label.c_str(),
+                   string_data.display_label.c_str());
+        }
       }
       
       // Add device to string group
@@ -1131,6 +1323,14 @@ void TigoMonitorComponent::update_string_data() {
       string_data.min_efficiency = 0.0f;
       string_data.max_efficiency = 0.0f;
     }
+
+    // Publish the per-string power sensor, if one is configured for this
+    // label. total_power was freshly aggregated above (0 with no active
+    // devices), so HA stays in lockstep with the web UI.
+    auto sens_it = string_power_sensors_.find(pair.first);
+    if (sens_it != string_power_sensors_.end()) {
+      sens_it->second->publish_state(string_data.total_power);
+    }
   }
 }
 
@@ -1138,11 +1338,88 @@ void TigoMonitorComponent::add_inverter(const std::string &name, const std::vect
   InverterData inverter;
   inverter.name = name;
   inverter.mppt_labels = mppt_labels;
+
+  // Pull any previously-saved display name out of NVS. Keyed by canonical name
+  // so renames stick across reboots even if the YAML is untouched.
+  char pref_key[80];
+  snprintf(pref_key, sizeof(pref_key), "inv_dn:%s", name.c_str());
+  uint32_t hash = esphome::fnv1_hash(pref_key);
+  auto pref = this->cached_pref_<char[64]>(hash);
+  char dn_buf[64] = {};
+  if (pref.load(&dn_buf) && dn_buf[0] != '\0') {
+    inverter.display_name = dn_buf;
+    ESP_LOGCONFIG(TAG, "Loaded display name '%s' for inverter '%s'", dn_buf, name.c_str());
+  }
+
   inverters_.push_back(inverter);
   ESP_LOGCONFIG(TAG, "Registered inverter '%s' with %d MPPTs", name.c_str(), mppt_labels.size());
   for (const auto &mppt : mppt_labels) {
     ESP_LOGCONFIG(TAG, "  - MPPT: %s", mppt.c_str());
   }
+}
+
+bool TigoMonitorComponent::set_inverter_display_name(const std::string &canonical,
+                                                    const std::string &display_name) {
+  // Match against the canonical (YAML) name — display_name is purely cosmetic
+  // and never used as a key.
+  for (auto &inv : inverters_) {
+    if (inv.name != canonical) continue;
+    inv.display_name = display_name;
+
+    char pref_key[80];
+    snprintf(pref_key, sizeof(pref_key), "inv_dn:%s", canonical.c_str());
+    uint32_t hash = esphome::fnv1_hash(pref_key);
+    auto pref = this->cached_pref_<char[64]>(hash);
+    char dn_buf[64] = {};
+    // Truncate at 63 chars; UI enforces a similar limit but be defensive.
+    strncpy(dn_buf, display_name.c_str(), sizeof(dn_buf) - 1);
+    pref.save(&dn_buf);
+    ESP_LOGI(TAG, "Renamed inverter '%s' -> '%s' (saved to NVS)",
+             canonical.c_str(), display_name.c_str());
+    return true;
+  }
+  ESP_LOGW(TAG, "set_inverter_display_name: no inverter matches '%s'", canonical.c_str());
+  return false;
+}
+
+bool TigoMonitorComponent::set_string_panel_rating(const std::string &canonical,
+                                                  uint16_t rating_w) {
+  auto it = strings_.find(canonical);
+  if (it == strings_.end()) {
+    ESP_LOGW(TAG, "set_string_panel_rating: no string matches '%s'", canonical.c_str());
+    return false;
+  }
+  it->second.panel_rating_w = rating_w;
+
+  char pref_key[80];
+  snprintf(pref_key, sizeof(pref_key), "str_rt:%s", canonical.c_str());
+  uint32_t hash = esphome::fnv1_hash(pref_key);
+  auto pref = this->cached_pref_<uint16_t>(hash);
+  pref.save(&rating_w);
+  ESP_LOGI(TAG, "Set panel rating for string '%s' = %u W (saved to NVS)",
+           canonical.c_str(), (unsigned) rating_w);
+  return true;
+}
+
+bool TigoMonitorComponent::set_string_display_label(const std::string &canonical,
+                                                   const std::string &display_label) {
+  auto it = strings_.find(canonical);
+  if (it == strings_.end()) {
+    ESP_LOGW(TAG, "set_string_display_label: no string matches '%s'", canonical.c_str());
+    return false;
+  }
+  it->second.display_label = display_label;
+
+  char pref_key[80];
+  snprintf(pref_key, sizeof(pref_key), "str_dn:%s", canonical.c_str());
+  uint32_t hash = esphome::fnv1_hash(pref_key);
+  auto pref = this->cached_pref_<char[64]>(hash);
+  char dn_buf[64] = {};
+  strncpy(dn_buf, display_label.c_str(), sizeof(dn_buf) - 1);
+  pref.save(&dn_buf);
+  ESP_LOGI(TAG, "Renamed string '%s' -> '%s' (saved to NVS)",
+           canonical.c_str(), display_label.c_str());
+  return true;
 }
 
 void TigoMonitorComponent::update_inverter_data() {
@@ -1291,11 +1568,23 @@ void TigoMonitorComponent::publish_sensor_data() {
       if (power_in_sum_sensor_ != nullptr) {
         power_in_sum_sensor_->publish_state(0.0f);
       }
-      
+
       // Publish zero power out sum
       if (power_out_sum_sensor_ != nullptr) {
         power_out_sum_sensor_->publish_state(0.0f);
       }
+
+      // Zero the per-string power sensors (update_string_data doesn't run in
+      // night mode, so they'd otherwise hold the last daylight value)
+      for (auto &pair : string_power_sensors_) {
+        pair.second->publish_state(0.0f);
+      }
+
+      // Zero the alert counts: at night every device legitimately stops
+      // reporting, so "stale" and "zero production" carry no signal and a
+      // truthful count would just be nightly alert noise (#24)
+      if (stale_count_sensor_ != nullptr) stale_count_sensor_->publish_state(0);
+      if (zero_production_count_sensor_ != nullptr) zero_production_count_sensor_->publish_state(0);
       
       // Update cached values for display
       cached_total_power_in_ = 0.0f;
@@ -1470,6 +1759,38 @@ void TigoMonitorComponent::publish_sensor_data() {
     device_count_sensor_->publish_state(device_count);
     ESP_LOGD(TAG, "Published device count: %d", device_count);
   }
+
+  // Publish stale / zero-production counts for HA alerting (#24)
+  if (stale_count_sensor_ != nullptr || zero_production_count_sensor_ != nullptr) {
+    int stale_count = 0;
+    int zero_production_count = 0;
+    for (const auto &device : devices_) {
+      if (device.is_stale) {
+        stale_count++;
+      } else if (device.last_update > 0 && device.power_in < 1.0f) {
+        // Reporting fresh data but producing nothing — shaded, failed, or off
+        zero_production_count++;
+      }
+    }
+    // A panel assigned to a sensor slot but with no runtime row this session
+    // (dead/removed optimizer, or one not yet seen since boot) is shown stale in
+    // the dashboard via build_devices_json's node-only branch, but never appears
+    // in devices_. Count those too so the HA sensor matches the UI's stale tiles
+    // (#24) — otherwise dead panels show stale on the dashboard yet the count
+    // reads 0. Daytime-only: night mode already publishes 0 above and returns.
+    for (const auto &node : node_table_) {
+      if (node.sensor_index < 0) continue;
+      bool has_runtime = false;
+      for (const auto &device : devices_) {
+        if (device.addr == node.addr) { has_runtime = true; break; }
+      }
+      if (!has_runtime) stale_count++;
+    }
+    if (stale_count_sensor_ != nullptr)
+      stale_count_sensor_->publish_state(stale_count);
+    if (zero_production_count_sensor_ != nullptr)
+      zero_production_count_sensor_->publish_state(zero_production_count);
+  }
   
   // Calculate and publish power sum sensor if configured
   if (power_in_sum_sensor_ != nullptr) {
@@ -1628,7 +1949,7 @@ void TigoMonitorComponent::publish_sensor_data() {
     // Try to load saved peak power for this node
     std::string pref_key = "peak_" + node.addr;
     uint32_t hash = esphome::fnv1_hash(pref_key);
-    auto load = global_preferences->make_preference<float>(hash);
+    auto load = this->cached_pref_<float>(hash);
     float saved_peak = 0.0f;
     load.load(&saved_peak);
     
@@ -1719,39 +2040,12 @@ void TigoMonitorComponent::publish_sensor_data() {
   }
 }
 
-std::string TigoMonitorComponent::remove_escape_sequences(const std::string &frame) {
-#ifdef USE_ESP_IDF
-  // Use PSRAM for large temporary buffer to avoid internal RAM fragmentation
-  psram_string result;
+frame_string TigoMonitorComponent::remove_escape_sequences(const frame_string &frame) {
+  // frame_string is PSRAM-backed on IDF builds, so the result stays out of
+  // internal RAM end-to-end (it used to be copied back into a std::string).
+  frame_string result;
   result.reserve(frame.length());
-  
-  for (size_t i = 0; i < frame.length(); ++i) {
-    if (frame[i] == '\x7E' && i < frame.length() - 1) {
-      char next_byte = frame[i + 1];
-      switch (next_byte) {
-        case '\x00': result.push_back('\x7E'); break; // Escaped 7E -> raw 7E
-        case '\x01': result.push_back('\x24'); break; // Escaped 7E 01 -> raw 24
-        case '\x02': result.push_back('\x23'); break; // Escaped 7E 02 -> raw 23
-        case '\x03': result.push_back('\x25'); break; // Escaped 7E 03 -> raw 25
-        case '\x04': result.push_back('\xA4'); break; // Escaped 7E 04 -> raw A4
-        case '\x05': result.push_back('\xA3'); break; // Escaped 7E 05 -> raw A3
-        case '\x06': result.push_back('\xA5'); break; // Escaped 7E 06 -> raw A5
-        default:
-          result.push_back(frame[i]);
-          result.push_back(next_byte);
-          break;
-      }
-      i++; // Skip next byte
-    } else {
-      result.push_back(frame[i]);
-    }
-  }
-  // Convert back to std::string for compatibility with existing code
-  return std::string(result.begin(), result.end());
-#else
-  std::string result;
-  result.reserve(frame.length());
-  
+
   for (size_t i = 0; i < frame.length(); ++i) {
     if (frame[i] == '\x7E' && i < frame.length() - 1) {
       char next_byte = frame[i + 1];
@@ -1774,52 +2068,37 @@ std::string TigoMonitorComponent::remove_escape_sequences(const std::string &fra
     }
   }
   return result;
-#endif
 }
 
-bool TigoMonitorComponent::verify_checksum(const std::string &frame) {
+bool TigoMonitorComponent::verify_checksum(const frame_string &frame) {
   if (frame.length() < 2) {
     ESP_LOGV(TAG, "Frame too short for checksum verification: %zu bytes", frame.length());
     return false;
   }
-  
+
   // Safety check: prevent potential out-of-bounds access
   if (frame.length() > 10000) {
     ESP_LOGW(TAG, "Frame suspiciously large: %zu bytes, rejecting", frame.length());
     return false;
   }
-  
-  std::string checksum_str = frame.substr(frame.length() - 2);
-  uint16_t extracted_checksum = (static_cast<uint8_t>(checksum_str[0]) << 8) | 
-                                static_cast<uint8_t>(checksum_str[1]);
-  
+
+  uint16_t extracted_checksum = (static_cast<uint8_t>(frame[frame.length() - 2]) << 8) |
+                                static_cast<uint8_t>(frame[frame.length() - 1]);
+
   uint16_t computed_checksum = compute_crc16_ccitt(
-    reinterpret_cast<const uint8_t*>(frame.c_str()), 
+    reinterpret_cast<const uint8_t*>(frame.c_str()),
     frame.length() - 2
   );
-  
+
   return extracted_checksum == computed_checksum;
 }
 
-std::string TigoMonitorComponent::frame_to_hex_string(const std::string &frame) {
-#ifdef USE_ESP_IDF
-  // Use PSRAM for hex conversion buffer to save internal RAM
-  // Hex strings can be 2KB+ for large frames
-  psram_string hex_str;
+frame_string TigoMonitorComponent::frame_to_hex_string(const frame_string &frame) {
+  // Hex strings can be 2KB+ for large frames; frame_string keeps them in
+  // PSRAM on IDF builds (no internal-RAM copy-back).
+  frame_string hex_str;
   hex_str.reserve(frame.length() * 2);
-  
-  for (unsigned char byte : frame) {
-    char hex_chars[3];
-    sprintf(hex_chars, "%02X", byte);
-    hex_str.push_back(hex_chars[0]);
-    hex_str.push_back(hex_chars[1]);
-  }
-  // Convert back to std::string for compatibility with existing code
-  return std::string(hex_str.begin(), hex_str.end());
-#else
-  std::string hex_str;
-  hex_str.reserve(frame.length() * 2);
-  
+
   for (unsigned char byte : frame) {
     char hex_chars[3];
     sprintf(hex_chars, "%02X", byte);
@@ -1827,16 +2106,18 @@ std::string TigoMonitorComponent::frame_to_hex_string(const std::string &frame) 
     hex_str.push_back(hex_chars[1]);
   }
   return hex_str;
-#endif
 }
 
-int TigoMonitorComponent::calculate_header_length(const std::string &hex_frame) {
-  // Convert from little-endian: swap bytes
-  std::string low_byte = hex_frame.substr(0, 2);
-  std::string high_byte = hex_frame.substr(2, 2);
-  std::string status_hex = low_byte + high_byte;
-  
-  unsigned int status = std::stoul(status_hex, nullptr, 16);
+int TigoMonitorComponent::calculate_header_length(const frame_string &hex_frame) {
+  // Parse the 4-char status word in place. NOTE: despite the historical
+  // "swap bytes" comment, the original code concatenated substr(0,2) +
+  // substr(2,2) — i.e. the chars in their original order — and every
+  // downstream offset is calibrated against that. Keep it byte-identical.
+  char status_hex[5] = {0};
+  size_t n = std::min<size_t>(4, hex_frame.length());
+  memcpy(status_hex, hex_frame.c_str(), n);
+
+  unsigned int status = static_cast<unsigned int>(strtoul(status_hex, nullptr, 16));
   int length = 2; // Status word is always 2 bytes
   
   // Check bits according to original logic
@@ -2079,7 +2360,7 @@ void TigoMonitorComponent::load_node_table() {
     uint32_t hash = esphome::fnv1_hash(pref_key);
     
     // Use char array for ESPHome preferences
-    auto restore = global_preferences->make_preference<char[256]>(hash);
+    auto restore = this->cached_pref_<char[256]>(hash);
     char node_data[256] = {0};
     
     if (restore.load(&node_data) && strlen(node_data) > 0) {
@@ -2183,7 +2464,7 @@ void TigoMonitorComponent::save_node_table() {
   for (int i = 0; i < slots_needed && i < number_of_devices_; i++) {
     snprintf(pref_key, sizeof(pref_key), "node_%d", i);
     uint32_t hash = esphome::fnv1_hash(pref_key);
-    auto save = global_preferences->make_preference<char[256]>(hash);
+    auto save = this->cached_pref_<char[256]>(hash);
     save.save(&empty_data);
   }
   
@@ -2211,7 +2492,7 @@ void TigoMonitorComponent::save_node_table() {
              node.cca_channel.c_str(),
              node.cca_validated ? 1 : 0);
     
-    auto save = global_preferences->make_preference<char[256]>(hash);
+    auto save = this->cached_pref_<char[256]>(hash);
     save.save(&node_data);
     saved_count++;
     i++;
@@ -2235,7 +2516,7 @@ void TigoMonitorComponent::save_peak_power_data() {
       // Build key in stack buffer - no heap allocations
       snprintf(pref_key, sizeof(pref_key), "peak_%s", device.addr.c_str());
       uint32_t hash = esphome::fnv1_hash(pref_key);
-      auto save = global_preferences->make_preference<float>(hash);
+      auto save = this->cached_pref_<float>(hash);
       save.save(&device.peak_power);
       saved_count++;
     }
@@ -2253,7 +2534,7 @@ void TigoMonitorComponent::load_peak_power_data() {
     // Build key in stack buffer - no heap allocations
     snprintf(pref_key, sizeof(pref_key), "peak_%s", device.addr.c_str());
     uint32_t hash = esphome::fnv1_hash(pref_key);
-    auto load = global_preferences->make_preference<float>(hash);
+    auto load = this->cached_pref_<float>(hash);
     
     float saved_peak = 0.0f;
     if (load.load(&saved_peak) && saved_peak > 0.0f) {
@@ -2266,10 +2547,11 @@ void TigoMonitorComponent::load_peak_power_data() {
 }
 
 void TigoMonitorComponent::reset_peak_power() {
+  StateLock lock(state_mutex_);
 #ifdef USE_ESP_IDF
   size_t heap_before = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
 #endif
-  
+
   // Use stack-allocated buffer instead of heap string to prevent memory leaks
   char pref_key[32];
   int reset_count = 0;
@@ -2277,18 +2559,30 @@ void TigoMonitorComponent::reset_peak_power() {
   
   for (auto &device : devices_) {
     device.peak_power = 0.0f;
-    
+
     // Build key in stack buffer - no heap allocations
     snprintf(pref_key, sizeof(pref_key), "peak_%s", device.addr.c_str());
     uint32_t hash = esphome::fnv1_hash(pref_key);
-    auto save = global_preferences->make_preference<float>(hash);
+    auto save = this->cached_pref_<float>(hash);
     save.save(&zero);
     reset_count++;
   }
-  
+
+  // Also clear the string/inverter rollup peaks — the dashboard "% of peak"
+  // denominator and get_system_peak_power(). These are in-RAM running maxima
+  // (not persisted), so zeroing them re-baselines to live power on the next
+  // update cycle, matching the per-device reset above. Without this the button
+  // left the rollup at its since-boot max until a reboot (#29).
+  for (auto &pair : strings_) {
+    pair.second.peak_power = 0.0f;
+  }
+  for (auto &inverter : inverters_) {
+    inverter.peak_power = 0.0f;
+  }
+
 #ifdef USE_ESP_IDF
   size_t heap_after = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
-  ESP_LOGI(TAG, "Reset %d peak power values (heap: %zu -> %zu, delta: %+zd bytes)", 
+  ESP_LOGI(TAG, "Reset %d peak power values (heap: %zu -> %zu, delta: %+zd bytes)",
            reset_count, heap_before, heap_after, (ssize_t)(heap_after - heap_before));
 #else
   ESP_LOGI(TAG, "Reset %d peak power values", reset_count);
@@ -2434,8 +2728,9 @@ void TigoMonitorComponent::save_persistent_data() {
 }
 
 void TigoMonitorComponent::reset_node_table() {
+  StateLock lock(state_mutex_);
   ESP_LOGI(TAG, "Resetting node table - clearing all persistent device mappings...");
-  
+
   int cleared_count = node_table_.size();
   
   // Clear the in-memory node table
@@ -2445,7 +2740,7 @@ void TigoMonitorComponent::reset_node_table() {
   for (int i = 0; i < number_of_devices_; i++) {
     std::string pref_key = "node_" + std::to_string(i);
     uint32_t hash = esphome::fnv1_hash(pref_key);
-    auto save = global_preferences->make_preference<char[256]>(hash);
+    auto save = this->cached_pref_<char[256]>(hash);
     char empty_data[256] = {0};
     save.save(&empty_data);
   }
@@ -2465,8 +2760,9 @@ void TigoMonitorComponent::reset_node_table() {
 }
 
 bool TigoMonitorComponent::remove_node(uint16_t addr) {
+  StateLock lock(state_mutex_);
   ESP_LOGI(TAG, "Removing node with address: 0x%04X", addr);
-  
+
   // Convert addr to hex string for comparison (lowercase)
   char addr_hex[5];
   snprintf(addr_hex, sizeof(addr_hex), "%04x", addr);
@@ -2505,8 +2801,9 @@ bool TigoMonitorComponent::remove_node(uint16_t addr) {
 }
 
 bool TigoMonitorComponent::import_node_table(const std::vector<NodeTableData>& nodes) {
+  StateLock lock(state_mutex_);
   ESP_LOGI(TAG, "Importing node table with %zu nodes", nodes.size());
-  
+
   // Clear existing node table
   node_table_.clear();
   created_devices_.clear();
@@ -2522,16 +2819,32 @@ bool TigoMonitorComponent::import_node_table(const std::vector<NodeTableData>& n
       continue;
     }
     
-    // Check for duplicate addresses
+    // Check for duplicate addresses — and duplicate long addresses: two
+    // entries sharing a 16-char long address are the same physical device
+    // (a stale short-address alias, #25). Keep the first, fold the alias's
+    // metadata into it where missing.
     bool duplicate = false;
-    for (const auto& existing : node_table_) {
+    for (auto& existing : node_table_) {
       if (existing.addr == node.addr) {
         ESP_LOGW(TAG, "Skipping duplicate node with address: %s", node.addr.c_str());
         duplicate = true;
         break;
       }
+      if (!node.long_address.empty() && existing.long_address == node.long_address) {
+        if (existing.sensor_index < 0 && node.sensor_index >= 0) existing.sensor_index = node.sensor_index;
+        if (existing.cca_label.empty()) existing.cca_label = node.cca_label;
+        if (existing.cca_string_label.empty()) existing.cca_string_label = node.cca_string_label;
+        if (existing.cca_inverter_label.empty()) existing.cca_inverter_label = node.cca_inverter_label;
+        if (existing.cca_channel.empty()) existing.cca_channel = node.cca_channel;
+        if (existing.cca_object_id.empty()) existing.cca_object_id = node.cca_object_id;
+        existing.cca_validated = existing.cca_validated || node.cca_validated;
+        ESP_LOGW(TAG, "Skipping node %s: same long address %s as %s (merged metadata)",
+                 node.addr.c_str(), node.long_address.c_str(), existing.addr.c_str());
+        duplicate = true;
+        break;
+      }
     }
-    
+
     if (duplicate) continue;
     
     // Add node to table
@@ -2546,7 +2859,14 @@ bool TigoMonitorComponent::import_node_table(const std::vector<NodeTableData>& n
   
   // Save imported node table to persistent storage
   save_node_table();
-  
+
+  // Rebuild string groups so Topology/Dashboard reflect the new table without a
+  // reboot. The node table itself is read live, but strings_ is otherwise only
+  // rebuilt in setup() or after a CCA sync — an import without CCA access left
+  // edits invisible until a reboot. Safe under the held state_mutex_:
+  // rebuild_string_groups() doesn't re-lock. See #21.
+  rebuild_string_groups();
+
   ESP_LOGI(TAG, "Successfully imported %zu nodes", node_table_.size());
   return true;
 }
@@ -2619,13 +2939,13 @@ void TigoMonitorComponent::assign_sensor_index_to_node(const std::string &addr) 
 }
 
 void TigoMonitorComponent::load_energy_data() {
-  auto restore = global_preferences->make_preference<float>(ENERGY_DATA_HASH);
+  auto restore = this->cached_pref_<float>(ENERGY_DATA_HASH);
   if (restore.load(&total_energy_in_kwh_)) {
     ESP_LOGI(TAG, "Restored total input energy: %.3f kWh", total_energy_in_kwh_);
     
     // Try to restore energy_at_day_start_ and current_day_key_
     uint32_t baseline_hash = esphome::fnv1_hash("energy_day_baseline");
-    auto restore_baseline = global_preferences->make_preference<float>(baseline_hash);
+    auto restore_baseline = this->cached_pref_<float>(baseline_hash);
     if (restore_baseline.load(&energy_at_day_start_)) {
       ESP_LOGI(TAG, "Restored day start baseline: %.3f kWh", energy_at_day_start_);
     } else {
@@ -2634,7 +2954,7 @@ void TigoMonitorComponent::load_energy_data() {
       ESP_LOGI(TAG, "No baseline found, using current total as baseline: %.3f kWh", energy_at_day_start_);
     }
 
-    auto restore_out = global_preferences->make_preference<float>(ENERGY_DATA_OUT_HASH);
+    auto restore_out = this->cached_pref_<float>(ENERGY_DATA_OUT_HASH);
     if (restore_out.load(&total_energy_out_kwh_)) {
       ESP_LOGI(TAG, "Restored total output energy: %.3f kWh", total_energy_out_kwh_);
     } else {
@@ -2643,7 +2963,7 @@ void TigoMonitorComponent::load_energy_data() {
     }
     
     uint32_t day_key_hash = esphome::fnv1_hash("current_day_key");
-    auto restore_day_key = global_preferences->make_preference<uint32_t>(day_key_hash);
+    auto restore_day_key = this->cached_pref_<uint32_t>(day_key_hash);
     if (restore_day_key.load(&current_day_key_)) {
       ESP_LOGI(TAG, "Restored current day key: %u", current_day_key_);
     } else {
@@ -2660,14 +2980,14 @@ void TigoMonitorComponent::load_energy_data() {
 }
 
 void TigoMonitorComponent::save_energy_data() {
-  auto save = global_preferences->make_preference<float>(ENERGY_DATA_HASH);
+  auto save = this->cached_pref_<float>(ENERGY_DATA_HASH);
   if (save.save(&total_energy_in_kwh_)) {
     ESP_LOGD(TAG, "Saved input energy data: %.3f kWh", total_energy_in_kwh_);
   } else {
     ESP_LOGW(TAG, "Failed to save input energy data");
   }
 
-  auto save_out = global_preferences->make_preference<float>(ENERGY_DATA_OUT_HASH);
+  auto save_out = this->cached_pref_<float>(ENERGY_DATA_OUT_HASH);
   if (save_out.save(&total_energy_out_kwh_)) {
     ESP_LOGD(TAG, "Saved output energy data: %.3f kWh", total_energy_out_kwh_);
   } else {
@@ -2676,7 +2996,7 @@ void TigoMonitorComponent::save_energy_data() {
   
   // Also save energy_at_day_start_ and current_day_key_ for accurate daily tracking after reboots
   uint32_t baseline_hash = esphome::fnv1_hash("energy_day_baseline");
-  auto save_baseline = global_preferences->make_preference<float>(baseline_hash);
+  auto save_baseline = this->cached_pref_<float>(baseline_hash);
   if (save_baseline.save(&energy_at_day_start_)) {
     ESP_LOGD(TAG, "Saved day start baseline: %.3f kWh", energy_at_day_start_);
   } else {
@@ -2684,7 +3004,7 @@ void TigoMonitorComponent::save_energy_data() {
   }
   
   uint32_t day_key_hash = esphome::fnv1_hash("current_day_key");
-  auto save_day_key = global_preferences->make_preference<uint32_t>(day_key_hash);
+  auto save_day_key = this->cached_pref_<uint32_t>(day_key_hash);
   if (save_day_key.save(&current_day_key_)) {
     ESP_LOGD(TAG, "Saved current day key: %u", current_day_key_);
   } else {
@@ -2783,7 +3103,7 @@ void TigoMonitorComponent::save_daily_energy_history() {
   }
   
   uint32_t hash = esphome::fnv1_hash("daily_energy_history");
-  auto save = global_preferences->make_preference<uint8_t[MAX_BUFFER_SIZE]>(hash);
+  auto save = this->cached_pref_<uint8_t[MAX_BUFFER_SIZE]>(hash);
   
   if (save.save(&buffer)) {
     ESP_LOGD(TAG, "Saved %zu daily energy entries to flash (hash=0x%08X)", count, hash);
@@ -2797,7 +3117,7 @@ void TigoMonitorComponent::load_daily_energy_history() {
   uint8_t buffer[MAX_BUFFER_SIZE] = {0};
   
   uint32_t hash = esphome::fnv1_hash("daily_energy_history");
-  auto load = global_preferences->make_preference<uint8_t[MAX_BUFFER_SIZE]>(hash);
+  auto load = this->cached_pref_<uint8_t[MAX_BUFFER_SIZE]>(hash);
   
   if (!load.load(&buffer)) {
     ESP_LOGD(TAG, "No saved daily energy history found");
@@ -2838,6 +3158,7 @@ void TigoMonitorComponent::load_daily_energy_history() {
 }
 
 std::vector<DailyEnergyData> TigoMonitorComponent::get_daily_energy_history() const {
+  StateLock lock(state_mutex_);
   return daily_energy_history_;
 }
 
@@ -2946,18 +3267,27 @@ void TigoMonitorComponent::query_cca_config() {
     }
     
     // Read response in chunks (handles both known and chunked content-length)
+    // Cap response size to protect against malformed/malicious upstream that could exhaust heap.
+    constexpr size_t MAX_CCA_RESPONSE_BYTES = 64 * 1024;
     std::string response;
     response.reserve(content_length > 0 ? content_length : 8192);  // Pre-allocate
     int read_len;
-    
+    bool response_truncated = false;
+
     while ((read_len = esp_http_client_read(client, buffer, buffer_size)) > 0) {
+      if (response.length() + read_len > MAX_CCA_RESPONSE_BYTES) {
+        response_truncated = true;
+        break;
+      }
       response.append(buffer, read_len);
     }
-    
+
     heap_caps_free(buffer);  // Free PSRAM buffer
-    
+
     if (read_len < 0) {
       ESP_LOGE(TAG, "Failed to read HTTP response");
+    } else if (response_truncated) {
+      ESP_LOGE(TAG, "CCA response exceeded %zu byte cap; aborting parse", MAX_CCA_RESPONSE_BYTES);
     } else if (response.empty()) {
       ESP_LOGW(TAG, "CCA returned empty response");
     } else {
@@ -2974,6 +3304,10 @@ void TigoMonitorComponent::query_cca_config() {
 }
 
 void TigoMonitorComponent::match_cca_to_uart(const std::string &json_response) {
+  // Lock around all mutations to node_table_/strings_/inverters_ that this
+  // method performs. Held for the duration of CCA-result application — does
+  // not include the prior HTTP I/O.
+  StateLock lock(state_mutex_);
   // Set custom allocators for cJSON to use PSRAM
   cJSON_Hooks hooks;
   hooks.malloc_fn = cjson_malloc_psram;
@@ -3124,7 +3458,7 @@ void TigoMonitorComponent::query_cca_device_info() {
   // Check if network is available before attempting connection
   if (!network::is_connected()) {
     ESP_LOGW(TAG, "Network not connected, skipping CCA device info query");
-    cca_device_info_ = "{\"error\":\"Network not connected\"}";
+    set_cca_device_info("{\"error\":\"Network not connected\"}");
     return;
   }
   
@@ -3142,7 +3476,7 @@ void TigoMonitorComponent::query_cca_device_info() {
   esp_http_client_handle_t client = esp_http_client_init(&config);
   if (!client) {
     ESP_LOGE(TAG, "Failed to initialize HTTP client");
-    cca_device_info_ = "{\"error\":\"Client init failed\"}";
+    set_cca_device_info("{\"error\":\"Client init failed\"}");
     return;
   }
   
@@ -3154,7 +3488,7 @@ void TigoMonitorComponent::query_cca_device_info() {
   if (err != ESP_OK) {
     ESP_LOGE(TAG, "Failed to open HTTP connection for device info: %s", esp_err_to_name(err));
     esp_http_client_cleanup(client);
-    cca_device_info_ = "{\"error\":\"Failed to connect to CCA\"}";
+    set_cca_device_info("{\"error\":\"Failed to connect to CCA\"}");
     return;
   }
   
@@ -3169,39 +3503,49 @@ void TigoMonitorComponent::query_cca_device_info() {
     char* buffer = static_cast<char*>(psram_malloc(buffer_size));
     if (!buffer) {
       ESP_LOGE(TAG, "Failed to allocate HTTP read buffer");
-      cca_device_info_ = "{\"error\":\"Memory allocation failed\"}";
+      set_cca_device_info("{\"error\":\"Memory allocation failed\"}");
       esp_http_client_close(client);
       esp_http_client_cleanup(client);
       return;
     }
     
     // Read response in chunks
+    // Cap response size to protect against malformed/malicious upstream that could exhaust heap.
+    constexpr size_t MAX_CCA_RESPONSE_BYTES = 64 * 1024;
     std::string response;
     response.reserve(content_length > 0 ? content_length : 2048);  // Pre-allocate
     int read_len;
-    
+    bool response_truncated = false;
+
     while ((read_len = esp_http_client_read(client, buffer, buffer_size)) > 0) {
+      if (response.length() + read_len > MAX_CCA_RESPONSE_BYTES) {
+        response_truncated = true;
+        break;
+      }
       response.append(buffer, read_len);
     }
-    
+
     heap_caps_free(buffer);  // Free PSRAM buffer
-    
+
     if (read_len < 0) {
       ESP_LOGE(TAG, "Failed to read CCA device info response");
-      cca_device_info_ = "{\"error\":\"Failed to read response\"}";
+      set_cca_device_info("{\"error\":\"Failed to read response\"}");
+    } else if (response_truncated) {
+      ESP_LOGE(TAG, "CCA device info exceeded %zu byte cap", MAX_CCA_RESPONSE_BYTES);
+      set_cca_device_info("{\"error\":\"Response too large\"}");
     } else if (response.empty()) {
       ESP_LOGW(TAG, "CCA returned empty device info");
-      cca_device_info_ = "{\"error\":\"Empty response\"}";
+      set_cca_device_info("{\"error\":\"Empty response\"}");
     } else {
       ESP_LOGI(TAG, "Received %d bytes of device info from CCA", response.length());
       ESP_LOGD(TAG, "CCA Device Info: %s", response.c_str());
-      cca_device_info_ = response;
+      set_cca_device_info(response);
     }
   } else {
     ESP_LOGW(TAG, "CCA device info returned status %d", status_code);
     char error_buf[128];
     snprintf(error_buf, sizeof(error_buf), "{\"error\":\"HTTP %d\"}", status_code);
-    cca_device_info_ = error_buf;
+    set_cca_device_info(error_buf);
   }
   
   esp_http_client_close(client);
@@ -3216,7 +3560,7 @@ void TigoMonitorComponent::query_cca_config() {
 
 void TigoMonitorComponent::query_cca_device_info() {
   ESP_LOGW(TAG, "CCA device info query requires ESP-IDF framework - feature not available");
-  cca_device_info_ = "{\"error\":\"ESP-IDF required\"}";
+  set_cca_device_info("{\"error\":\"ESP-IDF required\"}");
 }
 
 void TigoMonitorComponent::match_cca_to_uart(const std::string &json_response) {
@@ -3235,6 +3579,93 @@ float TigoMonitorComponent::get_total_power() const {
   // Return cached value updated during publish_sensor_data()
   return cached_total_power_in_;
 }
+
+float TigoMonitorComponent::get_system_peak_power() const {
+  // Sum of per-inverter peak-power high-water marks — mirrors the dashboard's
+  // "% of peak" denominator (app.html sums inverter peak_power). Safe from the
+  // main loop task, where lambdas run. Pair with get_total_power() for the
+  // current output to compute % of peak (#29).
+  float total = 0.0f;
+  for (const auto &inv : inverters_) {
+    total += inv.peak_power;
+  }
+  return total;
+}
+
+#ifdef TIGO_TSDB_AVAILABLE
+void TigoMonitorComponent::snapshot_to_history_() {
+  if (!history_.initialized()) return;
+
+  // Need a valid wall-clock to key the row. Skip silently before SNTP/HA sync.
+  uint32_t now_ts = 0;
+#ifdef USE_TIME
+  if (time_id_ != nullptr) {
+    auto t = time_id_->now();
+    if (t.is_valid()) now_ts = (uint32_t) t.timestamp;
+  }
+#endif
+  if (now_ts == 0) {
+    ESP_LOGD(TAG, "tsdb snapshot skipped — no valid wall-clock yet");
+    return;
+  }
+
+  SystemSnapshot snap{};
+  snap.timestamp = now_ts;
+
+  // Take the state lock for the gather. The recursive mutex guards the same
+  // aggregates the web-server snapshot getters protect, and matches the pattern
+  // established by fix/state-mutex-snapshots. The actual flash write runs later
+  // on the dedicated writer task — only the in-memory copy happens under lock.
+  {
+    StateLock lock(state_mutex_);
+
+    snap.total_p_w = cached_total_power_in_;
+    snap.period_e_kwh =
+        std::max(0.0f, total_energy_in_kwh_ - last_snapshot_total_e_kwh_);
+    last_snapshot_total_e_kwh_ = total_energy_in_kwh_;
+
+    for (size_t i = 0; i < 4; ++i) {
+      if (i < inverters_.size()) {
+        snap.inv_p_w[i] = inverters_[i].total_power;
+        snap.inv_e_kwh[i] = std::max(
+            0.0f, inverters_[i].total_energy - last_snapshot_inv_e_kwh_[i]);
+        last_snapshot_inv_e_kwh_[i] = inverters_[i].total_energy;
+      }
+    }
+
+    float sum_t = 0.0f;
+    int n = 0;
+    for (const auto &d : devices_) {
+      if (d.temperature > -50.0f && d.temperature < 150.0f) {
+        sum_t += d.temperature;
+        ++n;
+      }
+    }
+    snap.temp_avg_c = (n > 0) ? (sum_t / n) : 0.0f;
+
+    snap.freq_hz = 0.0f;  // not currently extracted from telemetry
+    uint32_t lost_now = missed_frame_count_;
+    uint32_t lost_period =
+        (lost_now >= last_snapshot_frames_lost_) ? (lost_now - last_snapshot_frames_lost_) : 0;
+    snap.frames_lost = (uint16_t) std::min<uint32_t>(lost_period, UINT16_MAX);
+    last_snapshot_frames_lost_ = lost_now;
+    snap.wifi_rssi_dbm = 0;  // TODO: plumb through wifi::global_wifi_component
+
+    // Per-panel powers indexed by stable slot. Devices without a known
+    // barcode (typically: just-joined nodes that haven't reported a frame 27
+    // yet) are skipped — they'll get a slot assignment on the next snapshot.
+    for (const auto &d : devices_) {
+      if (d.barcode.size() < 6) continue;
+      std::string key = d.barcode.substr(d.barcode.size() - 6);
+      uint8_t slot = history_.get_or_assign_slot(key);
+      if (slot >= kMaxPanelSlots) continue;  // table full
+      snap.panel_p_w[slot] = d.power_in;
+    }
+  }
+
+  history_.enqueue_snapshot(snap);
+}
+#endif  // TIGO_TSDB_AVAILABLE
 
 }  // namespace tigo_monitor
 }  // namespace esphome
