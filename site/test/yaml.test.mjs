@@ -80,3 +80,22 @@ test('display config merges lp5562 into the single external_components block', (
   assert.ok(y.includes('https://github.com/RAR/esphome-lp5562'), 'lp5562 source missing when display on');
   assert.ok(y.includes('components: [tigo_monitor, tigo_server]'), 'tigo source still present');
 });
+
+test('AtomS3R+display config defines every id its lambda references', () => {
+  const y = toYaml(assembleConfig(getBoard('esp32s3-atoms3r'), { ...form, display: true }));
+  const referenced = [...new Set([...y.matchAll(/id\((\w+)\)/g)].map((m) => m[1]))];
+  const defined = new Set([...y.matchAll(/^\s*id:\s*(\w+)/gm)].map((m) => m[1]));
+  const missing = referenced.filter((r) => !defined.has(r));
+  assert.deepEqual(missing, [], `display config references undefined ids: ${missing.join(', ')}`);
+});
+
+test('display config wires the backlight into tigo_server', () => {
+  const y = toYaml(assembleConfig(getBoard('esp32s3-atoms3r'), { ...form, display: true }));
+  assert.ok(y.includes('backlight: lcd_backlight'), 'backlight wiring missing');
+});
+
+test('Free PSRAM sensor only on PSRAM boards', () => {
+  assert.ok(toYaml(assembleConfig(getBoard('esp32s3-atoms3r'), form)).includes('Free PSRAM'), 'AtomS3R should emit Free PSRAM');
+  const noPsram = toYaml(assembleConfig(getBoard('esp32s3-atoms3'), { ...form, uart: { tx_pin: 'GPIO6', rx_pin: 'GPIO5' } }));
+  assert.ok(!noPsram.includes('Free PSRAM'), 'no-PSRAM board must not emit Free PSRAM');
+});

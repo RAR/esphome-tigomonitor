@@ -31,6 +31,9 @@ test('every checked board still exists in BOARDS', () => {
   for (const id of Object.keys(FILE)) assert.ok(getBoard(id), `missing board ${id}`);
 });
 
+// NOTE: this is a subset check (overlay lines ⊆ source). It does NOT verify the
+// overlay is complete. Completeness of the generated display config (e.g. that
+// every id its lambda references is defined) is covered in yaml.test.mjs.
 test('AtomS3R display overlay still matches boards/atoms3r-display.yaml', () => {
   const overlay = getBoard('esp32s3-atoms3r').displayOverlay;
   const src = readFileSync(join(repoRoot, 'boards/atoms3r-display.yaml'), 'utf8');

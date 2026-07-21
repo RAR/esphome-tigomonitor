@@ -141,11 +141,15 @@ export function toYaml(cfg) {
   L.push(`${I(1)}port: 80`);
   if (cfg.tigoServer.ccaSource) L.push(`${I(1)}cca_source: ${cfg.tigoServer.ccaSource}`);
   if (cfg.tigoServer.cloudImport) L.push(`${I(1)}cloud_import: true`);
+  // Display board wires the LCD backlight into the web UI (lcd_backlight id is defined in the overlay's light: block)
+  if (cfg.displayOverlay) L.push(`${I(1)}backlight: lcd_backlight`);
   L.push('');
 
   // sensor + required empty sections
   L.push('sensor:');
-  for (const nm of ['Total Output Power', 'Total Energy Out', 'Active Device Count', 'Free Internal RAM', 'Free PSRAM']) {
+  const sensorNames = ['Total Output Power', 'Total Energy Out', 'Active Device Count', 'Free Internal RAM'];
+  if (cfg.psram) sensorNames.push('Free PSRAM');
+  for (const nm of sensorNames) {
     L.push(`${I(1)}- platform: tigo_monitor`);
     L.push(`${I(2)}tigo_monitor_id: tigo_hub`);
     L.push(`${I(2)}name: "${nm}"`);
@@ -154,6 +158,13 @@ export function toYaml(cfg) {
   L.push('text_sensor:');
   L.push('');
   L.push('binary_sensor:');
+  // The AtomS3R display lambda reads id(wifi_status). Define it here — the overlay
+  // omits binary_sensor: to avoid duplicating this always-present top-level section.
+  if (cfg.displayOverlay) {
+    L.push(`${I(1)}- platform: status`);
+    L.push(`${I(2)}id: wifi_status`);
+    L.push(`${I(2)}internal: true`);
+  }
   L.push('');
 
   let out = L.join('\n');
