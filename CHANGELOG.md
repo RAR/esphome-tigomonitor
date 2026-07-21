@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Config Wizard (GitHub Pages).** A static, client-side wizard that generates a complete, board-tailored starter YAML (AtomS3R, AtomS3, ESP32-P4 EVBoard, generic ESP32), encoding the per-board scaffolding (PSRAM mode/speed, partitions, esp_hosted, experimental-features flag) plus CCA (HTTP/BLE), cloud-import, and secrets toggles. Board data is drift-checked against boards/*.yaml in CI. Motivated by discussion #31.
+
 ### Fixed
 - **ESP32-P4 example configs boot-looped and lacked the 2.0 storage scaffolding** (discussion #31). `boards/esp32p4-evboard.yaml` requested `psram: speed: 200MHz` — an *experimental* PSRAM speed on the P4 — without `enable_idf_experimental_features: yes`, so PSRAM came up unstable and the board crash-looped at boot with `assert failed: … esp_task_stack_is_sane_cache_disabled` (a PSRAM-resident task stack failing on its first flash op, before ESPHome starts). The example now sets the experimental-features flag the 200MHz speed requires (drop to `speed: 80MHz` to run without it). It also gained the pieces the History view needs but the pre-2.0 example never had — `flash_size: 16MB`, `partitions/tigo-16mb.csv`, and the `esp_tsdb` (P4 fork `tigomonitor` ref) + `littlefs` managed components — plus the `esp32_hosted:` ESP32-C6 companion-radio block (the P4 has no native Wi-Fi). `boards/example-p4.yaml` documents that the base include now provides all of this.
 

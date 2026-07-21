@@ -47,6 +47,8 @@ An ESPHome component for monitoring Tigo solar optimizers via RS485/UART. Real-t
 
 ## Quick Start
 
+**New to setup?** Generate a starter config for your board with the [Config Wizard](https://RAR.github.io/esphome-tigomonitor/).
+
 ### 1. Hardware Setup
 
 Connect ESP32 to Tigo system via RS485:
