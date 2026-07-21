@@ -43,3 +43,23 @@ test('secrets mode emits !secret refs and a matching secrets.yaml', () => {
 test('toSecretsYaml is null when not using secrets', () => {
   assert.equal(toSecretsYaml(assembleConfig(getBoard('esp32s3-atoms3r'), form)), null);
 });
+
+test('HTTP CCA emits cca_source and cca_ip', () => {
+  const y = toYaml(assembleConfig(getBoard('esp32s3-atoms3r'), { ...form, cca: 'http', ccaIp: '10.0.0.9' }));
+  assert.ok(y.includes('cca_source: http'), 'cca_source: http missing');
+  assert.ok(y.includes('cca_ip: 10.0.0.9'), 'cca_ip missing');
+});
+
+test('static IP emits a manual_ip block', () => {
+  const y = toYaml(assembleConfig(getBoard('esp32s3-atoms3r'), { ...form, wifi: { ssid: 'net', password: 'pw', staticIp: '10.0.0.50' } }));
+  assert.ok(y.includes('manual_ip:'), 'manual_ip block missing');
+  assert.ok(y.includes('static_ip: 10.0.0.50'), 'static_ip missing');
+});
+
+test('displayOverlay is appended verbatim at the end', () => {
+  const cfg = assembleConfig(getBoard('esp32s3-atoms3r'), form);
+  cfg.displayOverlay = '# OVERLAY_MARKER\ndisplay:\n  - platform: st7789v';
+  const y = toYaml(cfg);
+  assert.ok(y.includes('# OVERLAY_MARKER'), 'overlay marker missing');
+  assert.ok(y.trimEnd().endsWith('platform: st7789v'), 'overlay not appended at end');
+});

@@ -33,6 +33,8 @@ export function toYaml(cfg) {
   if (cfg.esp32.hostedComponent || comps.length) {
     L.push(`${I(2)}components:`);
     if (cfg.esp32.hostedComponent) {
+      // hostedComponent is always the esp_tsdb managed component; only its
+      // source/ref vary per board (the P4 uses a git fork), so the name is fixed.
       L.push(`${I(3)}- name: zakery292/esp_tsdb`);
       L.push(`${I(4)}source: ${cfg.esp32.hostedComponent.source}`);
       L.push(`${I(4)}ref: ${cfg.esp32.hostedComponent.ref}`);
