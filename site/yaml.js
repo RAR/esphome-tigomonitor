@@ -125,6 +125,26 @@ export function toYaml(cfg) {
   L.push(`${I(1)}rx_buffer_size: ${cfg.uart.rx_buffer_size}`);
   L.push('');
 
+  // BLE stack — only when cca_source: ble. tigo_server needs a ble_client to
+  // reach the CCA over Bluetooth; without these blocks the config won't validate.
+  if (cfg.ble) {
+    L.push('esp32_ble:');
+    if (cfg.ble.usePsram) L.push(`${I(1)}use_psram: true`);
+    L.push(`${I(1)}max_connections: 1`);
+    L.push('');
+    L.push('esp32_ble_tracker:');
+    L.push(`${I(1)}scan_parameters:`);
+    L.push(`${I(2)}interval: 320ms`);
+    L.push(`${I(2)}window: 60ms`);
+    L.push(`${I(2)}active: true`);
+    L.push('');
+    L.push('ble_client:');
+    L.push(`${I(1)}- mac_address: "${cfg.ble.mac}"`);
+    L.push(`${I(2)}id: ${cfg.ble.clientId}`);
+    L.push(`${I(2)}auto_connect: false`);
+    L.push('');
+  }
+
   // tigo_monitor
   L.push('tigo_monitor:');
   L.push(`${I(1)}id: tigo_hub`);
@@ -140,6 +160,7 @@ export function toYaml(cfg) {
   L.push(`${I(1)}tigo_monitor_id: tigo_hub`);
   L.push(`${I(1)}port: 80`);
   if (cfg.tigoServer.ccaSource) L.push(`${I(1)}cca_source: ${cfg.tigoServer.ccaSource}`);
+  if (cfg.tigoServer.bleClientId) L.push(`${I(1)}ble_client_id: ${cfg.tigoServer.bleClientId}`);
   if (cfg.tigoServer.cloudImport) L.push(`${I(1)}cloud_import: true`);
   // Display board wires the LCD backlight into the web UI (lcd_backlight id is defined in the overlay's light: block)
   if (cfg.displayOverlay) L.push(`${I(1)}backlight: lcd_backlight`);
