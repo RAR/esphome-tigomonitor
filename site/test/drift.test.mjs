@@ -30,3 +30,14 @@ for (const [id, rel] of Object.entries(FILE)) {
 test('every checked board still exists in BOARDS', () => {
   for (const id of Object.keys(FILE)) assert.ok(getBoard(id), `missing board ${id}`);
 });
+
+test('AtomS3R display overlay still matches boards/atoms3r-display.yaml', () => {
+  const overlay = getBoard('esp32s3-atoms3r').displayOverlay;
+  const src = readFileSync(join(repoRoot, 'boards/atoms3r-display.yaml'), 'utf8');
+  // every non-comment, non-blank overlay line must appear in the source file
+  for (const line of overlay.split('\n')) {
+    const t = line.trim();
+    if (!t || t.startsWith('#')) continue;
+    assert.ok(src.includes(line.replace(/\s+$/, '')), `overlay line drifted: ${t}`);
+  }
+});
