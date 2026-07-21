@@ -21,7 +21,9 @@ export function extractBoardFields(text) {
   };
   const psramMode = pick(psramBlock?.[1], 'mode');
   const psramSpeed = pick(psramBlock?.[1], 'speed');
-  const experimental = /enable_idf_experimental_features:\s*(yes|true)\b/.test(text);
+  // `^\s*` anchors to line start so a commented-out `#   enable_idf_...` line
+  // (an opt-in left disabled) is correctly read as NOT enabled.
+  const experimental = /^\s*enable_idf_experimental_features:\s*(yes|true)\b/m.test(text);
   const hasHosted = /^esp32_hosted:\s*$/m.test(text);
   const components = [...text.matchAll(/^\s*-\s*(?:name:\s*)?([A-Za-z0-9_./^-]+)\s*$/gm)]
     .map((m) => m[1])

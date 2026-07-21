@@ -17,10 +17,12 @@ test('board ids are unique and getBoard resolves them', () => {
   for (const id of ids) assert.equal(getBoard(id)?.id, id);
 });
 
-test('P4 carries the experimental flag and a hosted radio', () => {
+test('P4 defines a hosted radio and defaults to no experimental flag', () => {
   const p4 = getBoard('esp32p4-evboard');
-  assert.equal(p4.frameworkAdvanced.enable_idf_experimental_features, true);
   assert.ok(p4.hosted, 'P4 must define an esp32_hosted companion');
+  // Defaults to 80MHz PSRAM, which needs no experimental gate. 200MHz on the
+  // Function-EV-Board is an explicit opt-in, not the wizard's default.
+  assert.equal(p4.frameworkAdvanced.enable_idf_experimental_features, false);
 });
 
 test('BLE is only offered where a BLE partition exists', () => {

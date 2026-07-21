@@ -17,8 +17,11 @@ esp32:
   partitions: partitions/tigo-16mb.csv
   framework:
     type: esp-idf
-    advanced:
-      enable_idf_experimental_features: yes
+    # 80MHz PSRAM (below) needs no experimental gate. Only uncomment this if you
+    # raise psram speed to 200MHz on an Espressif Function-EV-Board (its 32MB
+    # PSRAM is rated for it). Other P4 boards (e.g. P4-nano) can't do 200MHz.
+    # advanced:
+    #   enable_idf_experimental_features: yes
     components:
       # Upstream 2.1.0 has everything we need code-wise, but its manifest still
       # lacks the esp32p4 target, so P4 stays on the RAR/esp_tsdb fork's
@@ -85,7 +88,11 @@ wifi:
 
 psram:
   mode: hex
-  speed: 200MHz
+  # 80MHz is safe on ALL ESP32-P4 boards (incl. the P4-nano). Only the Espressif
+  # Function-EV-Board's 32MB PSRAM is rated for 200MHz — for that, set speed:
+  # 200MHz AND uncomment enable_idf_experimental_features above. 200MHz on other
+  # P4 boards crash-loops at boot (esp_task_stack_is_sane_cache_disabled).
+  speed: 80MHz
 
 logger:
   level: INFO

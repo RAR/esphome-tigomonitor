@@ -225,8 +225,8 @@ font:
     chip: 'esp32p4', board: 'esp32-p4-function-ev-board', variant: 'esp32p4',
     flash_size: '16MB',
     partitions: { default: 'partitions/tigo-16mb.csv' },
-    psram: { mode: 'hex', speed: '200MHz' },
-    frameworkAdvanced: { enable_idf_experimental_features: true },
+    psram: { mode: 'hex', speed: '80MHz' },
+    frameworkAdvanced: { enable_idf_experimental_features: false },
     frameworkComponents: ['joltwallet/littlefs^1.16'],
     hostedComponent: { source: 'https://github.com/RAR/esp_tsdb.git', ref: 'tigomonitor' },
     sdkconfig: {
@@ -253,7 +253,7 @@ font:
     displayOverlay: null,
     notes: [
       'No native Wi-Fi — uses an ESP32-C6 companion over SDIO (esp32_hosted).',
-      '200MHz hex PSRAM requires enable_idf_experimental_features (set automatically).',
+      'PSRAM defaults to 80MHz (safe on all P4 boards incl. the P4-nano). Only the Function-EV-Board can run 200MHz — for that, raise the speed and enable idf experimental features.',
     ],
   },
   {
