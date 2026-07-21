@@ -1,7 +1,15 @@
 # ESP32-P4 Evaluation Board Configuration
-# 32MB PSRAM, 400MHz Dual-Core, Octal PSRAM
+# 32MB PSRAM (hex), 400MHz Dual-Core
 # Recommended for: Large installations (50+ devices)
 # Optimized for maximum performance and minimal packet loss
+#
+# NOTE — the P4 has NO built-in Wi-Fi. It reaches the network through an
+# ESP32-C6/-C5 companion radio over SDIO, configured via `esp32_hosted:` below.
+# NOTE — `psram: speed: 200MHz` is an *experimental* PSRAM speed on the P4 and
+# only works with `enable_idf_experimental_features: yes` (set below). Without
+# that flag, 200MHz PSRAM comes up unstable and the board crash-loops at boot
+# (`esp_task_stack_is_sane_cache_disabled` assert, before ESPHome even starts).
+# If you don't need the speed, drop to `speed: 80MHz` and remove the flag.
 
 esphome:
   name: tigo-server
@@ -12,9 +20,23 @@ esphome:
 esp32:
   board: esp32-p4-function-ev-board
   variant: esp32p4
+  # 16MB flash + a partition table with the esp_tsdb (History) storage region.
+  flash_size: 16MB
+  partitions: partitions/tigo-16mb.csv
   framework:
     type: esp-idf
     version: recommended
+    advanced:
+      # Required for the 200MHz hex PSRAM speed below.
+      enable_idf_experimental_features: yes
+    components:
+      # esp_tsdb backs the History view; littlefs is its filesystem. The P4
+      # target still needs the RAR/esp_tsdb fork (upstream 2.1.0's manifest
+      # doesn't list esp32p4 yet); S3/other targets use `zakery292/esp_tsdb^2.1.0`.
+      - name: zakery292/esp_tsdb
+        source: https://github.com/RAR/esp_tsdb.git
+        ref: tigomonitor
+      - joltwallet/littlefs^1.16
     sdkconfig_options:
       # CPU frequency (P4 runs at 400MHz)
       CONFIG_ESP32P4_DEFAULT_CPU_FREQ_400: "y"
@@ -38,10 +60,25 @@ esp32:
       CONFIG_LWIP_MAX_ACTIVE_TCP: "16"
       CONFIG_LWIP_MAX_LISTENING_TCP: "16"
       
-# Enable PSRAM with maximum speed
+# Enable PSRAM. 200MHz is experimental (see the note at the top of this file and
+# the enable_idf_experimental_features flag above). Drop to 80MHz to run without it.
 psram:
   mode: hex
-  speed: 200MHz  # P4 supports higher PSRAM speeds
+  speed: 200MHz
+
+# Wi-Fi companion radio — the P4 has no native Wi-Fi, so an ESP32-C6 (or -C5)
+# on the EV board provides it over SDIO. Adjust pins/slot for your wiring.
+esp32_hosted:
+  variant: ESP32C6
+  active_high: true
+  slot: 1
+  clk_pin: GPIO18
+  cmd_pin: GPIO19
+  d0_pin: GPIO14
+  d1_pin: GPIO15
+  d2_pin: GPIO16
+  d3_pin: GPIO17
+  reset_pin: GPIO54
 
 # UART configuration for Tigo communication
 uart:

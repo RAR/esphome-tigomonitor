@@ -1,5 +1,11 @@
 # Example Tigo Monitor Configuration using ESP32-P4 EVBoard
-# This demonstrates how to use the board-specific configurations
+# This demonstrates how to use the board-specific configurations.
+#
+# The hardware base (esp32p4-evboard.yaml) provides the P4 essentials:
+#   - 16MB flash + esp_tsdb/littlefs storage for the History view
+#   - the experimental-features flag required by 200MHz hex PSRAM
+#   - the ESP32-C6 companion radio (`esp32_hosted:`) — the P4 has no native Wi-Fi
+# so this file only layers on Wi-Fi credentials, sensors, and app config.
 
 # Include board-specific hardware configuration
 packages:
@@ -7,11 +13,12 @@ packages:
 
 # External components
 external_components:
-  - source: 
+  - source:
       type: local
       path: ../components
 
-# WiFi configuration
+# WiFi configuration. The radio itself is the C6 companion wired up in the
+# board include; this just supplies the network credentials.
 wifi:
   ssid: "YOUR_WIFI_SSID"
   password: "YOUR_WIFI_PASSWORD"
