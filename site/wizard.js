@@ -36,10 +36,11 @@ function readForm() {
 }
 
 function syncBoardConstraints(board) {
+  if (!board) return;
   // prefill uart, toggle ble/display availability
-  if (!$('uart-tx').value) $('uart-tx').value = board.uartDefault.tx_pin;
-  if (!$('uart-rx').value) $('uart-rx').value = board.uartDefault.rx_pin;
-  if (!$('num-devices').value) $('num-devices').value = board.numberOfDevices;
+  $('uart-tx').value = board.uartDefault.tx_pin;
+  $('uart-rx').value = board.uartDefault.rx_pin;
+  $('num-devices').value = board.numberOfDevices;
   const bleOpt = $('cca').querySelector('option[value=ble]');
   bleOpt.disabled = !board.supports.ble;
   if (!board.supports.ble && $('cca').value === 'ble') $('cca').value = 'none';
@@ -59,6 +60,9 @@ function render() {
     $('warn').textContent = '';
     $('dl-secrets').style.display = lastSecrets ? '' : 'none';
   } catch (e) {
+    lastYaml = '';
+    lastSecrets = null;
+    $('dl-secrets').style.display = 'none';
     $('warn').textContent = e.message;
   }
 }
@@ -72,7 +76,10 @@ function download(name, text) {
 boardSel.addEventListener('change', () => { syncBoardConstraints(getBoard(boardSel.value)); render(); });
 $('wizard').addEventListener('input', render);
 $('gen-key').addEventListener('click', () => { $('api-key').value = generateApiKey(); render(); });
-$('copy').addEventListener('click', () => navigator.clipboard.writeText(lastYaml));
+$('copy').addEventListener('click', () =>
+  navigator.clipboard.writeText(lastYaml).catch(() => {
+    $('warn').textContent = 'Copy failed — select the text and copy manually.';
+  }));
 $('dl-yaml').addEventListener('click', () => download(`${boardSel.value}.yaml`, lastYaml));
 $('dl-secrets').addEventListener('click', () => { if (lastSecrets) download('secrets.yaml', lastSecrets); });
 
