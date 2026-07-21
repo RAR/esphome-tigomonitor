@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.0-beta.3] - 2026-07-21
+
 ### Fixed
 - **Dashboard "Today's energy" no longer shows a runaway lifetime total.** It had been displaying the raw `total_energy_in_kwh_` accumulator from `/api/overview`, which only zeros at midnight when `reset_at_midnight` is enabled (off by default) — so with the flag off it piled up day over day (observed ~1067 kWh for a ~86 kWh day). `/api/overview` now exposes a `today_energy` field computed as `max(0, total_energy_out − energy_at_day_start)` — the same day-delta the History view uses, independent of `reset_at_midnight`, leaving the `total_energy_*` accumulators monotonic for Home Assistant. The dashboard hero and "Today" row read the new field. Also fixed a related double-count in the "This month" hero: `/api/energy/history` already includes today, but the JS was adding today again (and adding the inflated raw accumulator on top).
 
