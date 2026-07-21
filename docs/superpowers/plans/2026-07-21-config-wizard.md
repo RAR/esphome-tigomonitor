@@ -11,7 +11,7 @@
 ## Global Constraints
 
 - **Zero runtime/test dependencies.** No npm install; tests use only `node --test` and Node built-ins (`node:fs`, `node:test`, `node:assert`, global `crypto`/`btoa`). Node ≥ 20 assumed in CI.
-- **Canonical full-suite command:** `node --test 'site/test/**/*.test.mjs'` (Node's own glob). Do NOT use a bare-directory arg like `node --test site/test/` — it is not portable (fails with `MODULE_NOT_FOUND` on Node 22). Single-file runs like `node --test site/test/rules.test.mjs` are fine.
+- **Canonical full-suite command:** `node --test site/test/*.test.mjs` (shell-expanded glob — the shell lists the files, so it is portable across Node versions). Do NOT use a bare-directory arg (`node --test site/test/` fails with `MODULE_NOT_FOUND` on Node 22) and do NOT quote a `**` glob (`'site/test/**/*.test.mjs'` relies on Node's own glob, which needs Node 21+ and fails on the Node-20 CI runner with "Could not find"). Single-file runs like `node --test site/test/rules.test.mjs` are fine.
 - **ES modules everywhere.** Every `site/*.js` and `site/lib/*.mjs` uses `export`/`import` so the same file loads in the browser (`<script type="module">`) and under Node. Browser-loaded modules use the `.js` extension; Node-only test/lib helpers use `.mjs`.
 - **Client-side only.** No secret, password, or form value is ever sent over the network. No analytics, no external script/CDN.
 - **Generated YAML must compile as-is.** Always emit empty `text_sensor:` and `binary_sensor:` sections (the components fail to compile without them — CLAUDE.md rule). Apply block order exactly: `esphome → esp32 → psram → esp32_hosted → wifi → captive_portal → logger → api → ota → uart → tigo_monitor → tigo_server → sensor → text_sensor → binary_sensor → (display overlay)`.
