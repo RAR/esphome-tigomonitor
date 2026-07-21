@@ -44,6 +44,12 @@ esp32:
       # Recommended for large installs — prevents new-connection resets
       # (OTA / API) after uptime when internal RAM gets tight.
       CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP: "y"
+      # More lwIP sockets for the web server + API + cloud running together
+      # (avoids "Failed to create socket" under load, #20). Safe here since the
+      # buffers land in PSRAM via SPIRAM_TRY_ALLOCATE_WIFI_LWIP above.
+      CONFIG_LWIP_MAX_SOCKETS: "16"
+      CONFIG_LWIP_MAX_ACTIVE_TCP: "16"
+      CONFIG_LWIP_MAX_LISTENING_TCP: "16"
 
 
 # Enable PSRAM
