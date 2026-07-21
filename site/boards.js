@@ -18,6 +18,12 @@ export const BOARDS = [
       CONFIG_SPIRAM_MODE_OCT: 'y',
       CONFIG_SPIRAM_SPEED_80M: 'y',
       CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP: 'y',
+      // More lwIP sockets for the web server + API + cloud running together
+      // (avoids "Failed to create socket" under load, #20). Safe here: the
+      // buffers land in PSRAM via SPIRAM_TRY_ALLOCATE_WIFI_LWIP above.
+      CONFIG_LWIP_MAX_SOCKETS: '16',
+      CONFIG_LWIP_MAX_ACTIVE_TCP: '16',
+      CONFIG_LWIP_MAX_LISTENING_TCP: '16',
     },
     hosted: null,
     uartDefault: { tx_pin: 'GPIO1', rx_pin: 'GPIO2', rx_buffer_size: 2048 },
