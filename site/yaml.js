@@ -44,9 +44,11 @@ export function toYaml(cfg) {
   L.push(`${I(1)}framework:`);
   L.push(`${I(2)}type: esp-idf`);
   L.push(`${I(2)}version: recommended`);
-  if (cfg.esp32.frameworkAdvanced.enable_idf_experimental_features) {
+  const adv = cfg.esp32.frameworkAdvanced;
+  if (adv.enable_idf_experimental_features || adv.execute_from_psram) {
     L.push(`${I(2)}advanced:`);
-    L.push(`${I(3)}enable_idf_experimental_features: true`);
+    if (adv.enable_idf_experimental_features) L.push(`${I(3)}enable_idf_experimental_features: true`);
+    if (adv.execute_from_psram) L.push(`${I(3)}execute_from_psram: true`);
   }
   const comps = [...cfg.esp32.frameworkComponents];
   if (cfg.esp32.hostedComponent || comps.length) {

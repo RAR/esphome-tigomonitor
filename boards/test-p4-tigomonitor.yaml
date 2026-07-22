@@ -20,6 +20,10 @@ esp32:
     advanced:
       # P4 experimental-features gate (harmless; matches the known-good config).
       enable_idf_experimental_features: yes
+      # XIP-from-PSRAM — keeps PSRAM-resident task stacks reachable during flash
+      # cache-disable windows; without it some P4 boards crash-loop at boot with
+      # esp_task_stack_is_sane_cache_disabled (discussion #31).
+      execute_from_psram: true
     components:
       # Upstream 2.1.0 has everything we need code-wise, but its manifest still
       # lacks the esp32p4 target, so P4 stays on the RAR/esp_tsdb fork's
@@ -87,8 +91,9 @@ wifi:
 psram:
   mode: hex
   # P4 is hex-mode only; valid speeds 20 / 100 / 200 MHz. 200 works on the
-  # EV-board + typical P4 modules. If a board crash-loops at boot, drop to
-  # 100MHz/20MHz or remove this block (per-board PSRAM quirk — see #31).
+  # EV-board + typical P4 modules. Needs execute_from_psram: true (above) to
+  # boot reliably; if a board still crash-loops, drop to 100MHz/20MHz or remove
+  # this block (see #31).
   speed: 200MHz
 
 logger:

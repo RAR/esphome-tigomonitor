@@ -27,6 +27,7 @@ test('P4 emits esp32_hosted + 200MHz PSRAM + experimental flag; no psram-less bo
   assert.ok(p4.includes('esp32_hosted:'));
   assert.ok(p4.includes('speed: 200MHz'), 'P4 default is 200MHz (valid P4 speeds: 20/100/200)');
   assert.ok(p4.includes('enable_idf_experimental_features: true'), 'P4 emits the experimental flag');
+  assert.ok(p4.includes('execute_from_psram: true'), 'P4 emits execute_from_psram (XIP) — fixes #31 boot crash');
   assert.ok(!p4.includes('80MHz'), 'P4 must not emit 80MHz — invalid for P4 (cv.one_of 20/100/200)');
   const s3lite = toYaml(assembleConfig(getBoard('esp32s3-atoms3'), { ...form, uart: { tx_pin: 'GPIO6', rx_pin: 'GPIO5' } }));
   assert.ok(!s3lite.includes('\npsram:'), 'no-PSRAM board must not emit psram');

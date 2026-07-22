@@ -232,7 +232,10 @@ font:
     flash_size: '16MB',
     partitions: { default: 'partitions/tigo-16mb.csv' },
     psram: { mode: 'hex', speed: '200MHz' },
-    frameworkAdvanced: { enable_idf_experimental_features: true },
+    // execute_from_psram (XIP) is required on the P4 so PSRAM-resident task
+    // stacks stay reachable during flash cache-disable windows — without it some
+    // boards crash-loop at boot with esp_task_stack_is_sane_cache_disabled (#31).
+    frameworkAdvanced: { enable_idf_experimental_features: true, execute_from_psram: true },
     frameworkComponents: ['joltwallet/littlefs^1.16'],
     hostedComponent: { source: 'https://github.com/RAR/esp_tsdb.git', ref: 'tigomonitor' },
     sdkconfig: {

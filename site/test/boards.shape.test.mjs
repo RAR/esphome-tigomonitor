@@ -22,6 +22,7 @@ test('P4 defines a hosted radio + 200MHz PSRAM with the experimental flag', () =
   assert.ok(p4.hosted, 'P4 must define an esp32_hosted companion');
   assert.equal(p4.psram.speed, '200MHz', 'P4 valid speeds are 20/100/200 — 200 default');
   assert.equal(p4.frameworkAdvanced.enable_idf_experimental_features, true);
+  assert.equal(p4.frameworkAdvanced.execute_from_psram, true, 'P4 needs XIP-from-PSRAM to boot (#31)');
 });
 
 test('BLE is only offered where a BLE partition exists', () => {

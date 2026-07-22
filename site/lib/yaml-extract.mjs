@@ -24,9 +24,11 @@ export function extractBoardFields(text) {
   // `^\s*` anchors to line start so a commented-out `#   enable_idf_...` line
   // (an opt-in left disabled) is correctly read as NOT enabled.
   const experimental = /^\s*enable_idf_experimental_features:\s*(yes|true)\b/m.test(text);
+  // Same `^\s*` anchoring so a commented-out opt-in reads as NOT enabled.
+  const executeFromPsram = /^\s*execute_from_psram:\s*(yes|true)\b/m.test(text);
   const hasHosted = /^esp32_hosted:\s*$/m.test(text);
   const components = [...text.matchAll(/^\s*-\s*(?:name:\s*)?([A-Za-z0-9_./^-]+)\s*$/gm)]
     .map((m) => m[1])
     .filter((c) => c.includes('/'));
-  return { flash_size, partitions, psramMode, psramSpeed, experimental, hasHosted, components };
+  return { flash_size, partitions, psramMode, psramSpeed, experimental, executeFromPsram, hasHosted, components };
 }
