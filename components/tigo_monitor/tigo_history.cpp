@@ -436,6 +436,12 @@ int TigoHistory::iterate_power(uint32_t start_ts, uint32_t end_ts,
                                const PowerRowCb &cb) {
   if (!initialized_)
     return -1;
+  // An in-flight OTA is writing flash; a concurrent littlefs read here hits the
+  // same flash-vs-OTA collision that faults the writer (the decoded crash was in
+  // lfs_bd_read). Bail so a dashboard poll during OTA can't crash the device —
+  // the web layer returns an error and the chart retries after the OTA (~15 s).
+  if (ota_active_.load(std::memory_order_relaxed))
+    return -1;
   if (end_ts < start_ts)
     return 0;
 
@@ -465,6 +471,7 @@ int TigoHistory::iterate_power(uint32_t start_ts, uint32_t end_ts,
 int TigoHistory::iterate_panel(uint8_t slot, uint32_t start_ts, uint32_t end_ts,
                                const PanelRowCb &cb) {
   if (!initialized_) return -1;
+  if (ota_active_.load(std::memory_order_relaxed)) return -1;  // see iterate_power: no littlefs reads during OTA
   if (slot >= kMaxPanelSlots) return -1;
   if (end_ts < start_ts) return 0;
 
@@ -512,6 +519,18 @@ void TigoHistory::writer_task_loop_() {
       vTaskDelete(nullptr);
       return;  // not reached
     }
+
+    // While an OTA is running, skip this snapshot's flash writes entirely — the
+    // writer's littlefs fsync (lfs_bd_read) otherwise collides with the OTA
+    // image write on the same flash chip and faults in the cache/flash path.
+    // Dropping a sample or two during the ~15 s OTA window is harmless (on OTA
+    // success the device reboots anyway).
+    if (ota_active_.load(std::memory_order_relaxed)) {
+      ESP_LOGD(TAG, "OTA in progress — skipping tsdb write @ %lu",
+               (unsigned long) row.timestamp);
+      continue;
+    }
+
     uint32_t t0 = (uint32_t) (esp_timer_get_time() / 1000);
 
     esp_err_t err = tsdb_write_h(system_db_, row.timestamp, row.system_values);
