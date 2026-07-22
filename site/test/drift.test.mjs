@@ -23,6 +23,7 @@ for (const [id, rel] of Object.entries(FILE)) {
     assert.equal(b.psram?.mode ?? null, f.psramMode, 'psram.mode drift');
     assert.equal(b.psram?.speed ?? null, f.psramSpeed, 'psram.speed drift');
     assert.equal(b.frameworkAdvanced.enable_idf_experimental_features, f.experimental, 'experimental flag drift');
+    assert.equal(Boolean(b.frameworkAdvanced.execute_from_psram), f.executeFromPsram, 'execute_from_psram flag drift');
     assert.equal(Boolean(b.hosted), f.hasHosted, 'esp32_hosted presence drift');
   });
 }
