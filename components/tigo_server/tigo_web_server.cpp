@@ -126,7 +126,7 @@ void TigoWebServer::setup() {
     
 #if defined(CONFIG_IDF_TARGET_ESP32S3) || defined(CONFIG_IDF_TARGET_ESP32P4)
     // On ESP32-S3 and ESP32-P4, check if PSRAM is physically present but not configured
-    ESP_LOGW(TAG, "");
+    ESP_LOGW(TAG, "%s", "");
     ESP_LOGW(TAG, "**************************************************************");
     ESP_LOGW(TAG, "* If your board has PSRAM (e.g., AtomS3R, P4-EVBoard),      *");
     ESP_LOGW(TAG, "* you MUST enable it in your YAML configuration!            *");
@@ -151,7 +151,7 @@ void TigoWebServer::setup() {
     ESP_LOGW(TAG, "* PSRAM is REQUIRED for 15+ devices!                        *");
     ESP_LOGW(TAG, "* See boards/ folder for complete examples.                 *");
     ESP_LOGW(TAG, "**************************************************************");
-    ESP_LOGW(TAG, "");
+    ESP_LOGW(TAG, "%s", "");
 #endif
   }
   
@@ -1331,7 +1331,7 @@ esp_err_t TigoWebServer::api_cca_discovery_handler(httpd_req_t *req) {
     json.append("{\"age_s\":null,\"status\":null}");
   } else {
     char buf[32];
-    snprintf(buf, sizeof(buf), "%u", server->ble_get_discovery_seconds_ago_());
+    snprintf(buf, sizeof(buf), "%u", (unsigned) server->ble_get_discovery_seconds_ago_());
     json.append("{\"age_s\":");
     json.append(buf);
     json.append(",\"status\":");
@@ -1512,7 +1512,7 @@ esp_err_t TigoWebServer::api_cca_network_handler(httpd_req_t *req) {
     json.append("\",\"age_s\":null,\"result\":null}");
   } else {
     char buf[32];
-    snprintf(buf, sizeof(buf), "%u", age);
+    snprintf(buf, sizeof(buf), "%u", (unsigned) age);
     json.append("\",\"age_s\":");
     json.append(buf);
     json.append(",\"result\":");
@@ -2292,9 +2292,9 @@ esp_err_t TigoWebServer::api_health_handler(httpd_req_t *req) {
   char response[256];
   snprintf(response, sizeof(response),
     "{\"status\":\"ok\",\"uptime\":%u,\"heap_free\":%u,\"heap_min_free\":%u}",
-    uptime_seconds,
-    esp_get_free_heap_size(),
-    esp_get_minimum_free_heap_size()
+    (unsigned) uptime_seconds,
+    (unsigned) esp_get_free_heap_size(),
+    (unsigned) esp_get_minimum_free_heap_size()
   );
   
   httpd_resp_set_type(req, "application/json");
@@ -2893,11 +2893,11 @@ void TigoWebServer::build_esp_status_json(PSRAMString& json) {
     "\"active_sockets\":%d,\"max_sockets\":%d}",
     free_heap, total_heap, free_psram, total_psram,
     min_free_heap, min_free_psram,
-    uptime_sec, uptime_days, uptime_hours, uptime_mins,
+    (unsigned) uptime_sec, (unsigned) uptime_days, (unsigned) uptime_hours, (unsigned) uptime_mins,
     ESPHOME_VERSION, __DATE__, __TIME__,
     (unsigned int)task_count, temp_str,
-    invalid_checksum, missed_frames, total_frames,
-    command_frames, frame_27_count,
+    (unsigned) invalid_checksum, (unsigned) missed_frames, (unsigned) total_frames,
+    (unsigned) command_frames, (unsigned) frame_27_count,
     network_connected ? "true" : "false", wifi_rssi, ssid.c_str(), ip_address.c_str(), mac_address.c_str(),
     active_sockets, max_sockets);
   

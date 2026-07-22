@@ -100,7 +100,7 @@ void TigoWebServer::ble_loop_() {
   }
 
   if (this->ble_awaiting_response_ && (millis() - this->ble_last_command_time_ > 60000)) {
-    ESP_LOGW(BLE_TAG, "Response timeout — no reply for request %d", this->ble_last_command_);
+    ESP_LOGW(BLE_TAG, "Response timeout — no reply for request %s", this->ble_last_command_.c_str());
     this->ble_awaiting_response_ = false;
   }
 
@@ -739,7 +739,7 @@ bool TigoWebServer::parse_device(const esp32_ble_tracker::ESPBTDevice &device) {
   if (this->ble_scan_hits_.size() < 16) {
     this->ble_scan_hits_.push_back({mac, device.get_rssi(), device.get_name(), millis()});
     // Safe to log: only the CCA advertises on this OUI, so this fires a handful of times.
-    ESP_LOGI(BLE_TAG, "Found Tigo CCA over BLE: %s RSSI=%d %s", device.address_str(),
+    ESP_LOGI(BLE_TAG, "Found Tigo CCA over BLE: %s RSSI=%d %s", device.address_str().c_str(),
              device.get_rssi(), device.get_name().c_str());
   }
   return false;  // not consumed — let other listeners see it too
