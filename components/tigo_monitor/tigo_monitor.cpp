@@ -42,20 +42,6 @@ static void* psram_malloc(size_t size) {
   return ptr;
 }
 
-static void* psram_calloc(size_t count, size_t size) {
-  void* ptr = heap_caps_calloc(count, size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-  if (ptr) {
-    ESP_LOGV(TAG, "Allocated %zu bytes from PSRAM (calloc)", count * size);
-    return ptr;
-  }
-  // Fallback to regular heap
-  ptr = heap_caps_calloc(count, size, MALLOC_CAP_DEFAULT);
-  if (ptr) {
-    ESP_LOGV(TAG, "Allocated %zu bytes from regular heap (calloc, PSRAM unavailable)", count * size);
-  }
-  return ptr;
-}
-
 // Export for PSRAMAllocator in header
 void* psram_malloc_impl(size_t size) {
   return psram_malloc(size);
@@ -395,7 +381,7 @@ void TigoMonitorComponent::loop() {
     if (total_attempts > 0) {
       float miss_rate = (missed_frame_count_ * 100.0f) / total_attempts;
       ESP_LOGD(TAG, "Frame stats: %u processed, %u missed (%.2f%% miss rate), %u invalid checksums",
-               total_frames_processed_, missed_frame_count_, miss_rate, invalid_checksum_count_);
+               (unsigned) total_frames_processed_, (unsigned) missed_frame_count_, miss_rate, (unsigned) invalid_checksum_count_);
     }
     
     // Publish memory sensors to Home Assistant
@@ -699,8 +685,8 @@ void TigoMonitorComponent::process_frame(const frame_string &frame) {
       else frame_type = segment;
     }
     
-    ESP_LOGW(TAG, "Invalid checksum #%u: type=%s, len=%zu, expected=0x%04X, got=0x%04X, frame=%s", 
-             invalid_checksum_count_, frame_type.c_str(), processed_frame.length(),
+    ESP_LOGW(TAG, "Invalid checksum #%u: type=%s, len=%zu, expected=0x%04X, got=0x%04X, frame=%s",
+             (unsigned) invalid_checksum_count_, frame_type.c_str(), processed_frame.length(),
              computed_crc, extracted_crc, hex_frame.c_str());
     return;
   }
@@ -763,7 +749,7 @@ void TigoMonitorComponent::process_frame(const frame_string &frame) {
     
     if (cmd_byte == "27") {
       frame_27_count_++;
-      ESP_LOGI(TAG, "Frame 27 detected! (#%u) Full frame: %s", frame_27_count_, hex_frame.c_str());
+      ESP_LOGI(TAG, "Frame 27 detected! (#%u) Full frame: %s", (unsigned) frame_27_count_, hex_frame.c_str());
       process_27_frame(hex_frame, 18);  // Payload starts at position 18
     } else if (cmd_byte == "26") {
       ESP_LOGD(TAG, "Frame 26 (device list request) detected");
@@ -2171,10 +2157,10 @@ char TigoMonitorComponent::compute_tigo_crc4(const std::string &hex_string) {
 
 
 void TigoMonitorComponent::generate_sensor_yaml() {
-  ESP_LOGI(TAG, "");
+  ESP_LOGI(TAG, "%s", "");
   ESP_LOGI(TAG, "=== COPY THE FOLLOWING YAML CONFIGURATION ===");
   ESP_LOGI(TAG, "# Add this to your ESPHome YAML file under 'sensor:'");
-  ESP_LOGI(TAG, "");
+  ESP_LOGI(TAG, "%s", "");
   ESP_LOGI(TAG, "sensor:");
   
   // First, generate configs for nodes with assigned sensor indices
@@ -2213,7 +2199,7 @@ void TigoMonitorComponent::generate_sensor_yaml() {
       ESP_LOGI(TAG, "    current_in: {}");
       ESP_LOGI(TAG, "    temperature: {}");
       ESP_LOGI(TAG, "    rssi: {}");
-      ESP_LOGI(TAG, "");
+      ESP_LOGI(TAG, "%s", "");
     }
   }
   
@@ -2237,7 +2223,7 @@ void TigoMonitorComponent::generate_sensor_yaml() {
       ESP_LOGI(TAG, "    current_in: {}");
       ESP_LOGI(TAG, "    temperature: {}");
       ESP_LOGI(TAG, "    rssi: {}");
-      ESP_LOGI(TAG, "");
+      ESP_LOGI(TAG, "%s", "");
     }
   }
   
@@ -2246,7 +2232,7 @@ void TigoMonitorComponent::generate_sensor_yaml() {
   ESP_LOGI(TAG, "# - Generated %d placeholder configs for remaining devices", number_of_devices_ - discovered_count);
   ESP_LOGI(TAG, "# - Total configuration slots: %d", number_of_devices_);
   ESP_LOGI(TAG, "=== END YAML CONFIGURATION ===");
-  ESP_LOGI(TAG, "");
+  ESP_LOGI(TAG, "%s", "");
   ESP_LOGI(TAG, "Auto-templated YAML generated! Each device creates 8 sensors with names based on 'name' field:");
   ESP_LOGI(TAG, "- [name] Power In (W), [name] Power Out (W), [name] Voltage In (V), [name] Voltage Out (V)");
   ESP_LOGI(TAG, "- [name] Current (A), [name] Output Current (A), [name] Temperature (°C), [name] RSSI (dBm)");
@@ -2266,7 +2252,7 @@ void TigoMonitorComponent::print_device_mappings() {
     ESP_LOGI(TAG, "No devices have been assigned sensor indices yet.");
   } else {
     ESP_LOGI(TAG, "Found %d device sensor assignments:", assigned_count);
-    ESP_LOGI(TAG, "");
+    ESP_LOGI(TAG, "%s", "");
     
     // Sort nodes by sensor index for cleaner display
     std::vector<NodeTableData> sorted_nodes;
@@ -2288,7 +2274,7 @@ void TigoMonitorComponent::print_device_mappings() {
       
       ESP_LOGI(TAG, "  Tigo %d: %s", node.sensor_index + 1, info.c_str());
     }
-    ESP_LOGI(TAG, "");
+    ESP_LOGI(TAG, "%s", "");
   }
   
   // Show nodes without sensor assignments (discovered but not active)
@@ -2309,7 +2295,7 @@ void TigoMonitorComponent::print_device_mappings() {
       info += " - waiting for power data";
       ESP_LOGI(TAG, "  %s", info.c_str());
     }
-    ESP_LOGI(TAG, "");
+    ESP_LOGI(TAG, "%s", "");
   }
   
   // Show currently active devices
@@ -2330,7 +2316,7 @@ void TigoMonitorComponent::print_device_mappings() {
       
       ESP_LOGI(TAG, "  Device %s (%s): %s%s", device.addr.c_str(), name.c_str(), status.c_str(), data_sources.c_str());
     }
-    ESP_LOGI(TAG, "");
+    ESP_LOGI(TAG, "%s", "");
   }
   
   // Show next available sensor index
@@ -2752,7 +2738,7 @@ void TigoMonitorComponent::reset_node_table() {
   ESP_LOGI(TAG, "- Cleared %d node table entries", cleared_count);
   ESP_LOGI(TAG, "- Cleared %d persistent storage slots", number_of_devices_);
   ESP_LOGI(TAG, "- Reset device sensor index cache");
-  ESP_LOGI(TAG, "");
+  ESP_LOGI(TAG, "%s", "");
   ESP_LOGI(TAG, "All device mappings have been removed. Devices will be");
   ESP_LOGI(TAG, "rediscovered and reassigned new sensor indices when they");
   ESP_LOGI(TAG, "send power data. Frame 09 and Frame 27 data will be");
@@ -2965,7 +2951,7 @@ void TigoMonitorComponent::load_energy_data() {
     uint32_t day_key_hash = esphome::fnv1_hash("current_day_key");
     auto restore_day_key = this->cached_pref_<uint32_t>(day_key_hash);
     if (restore_day_key.load(&current_day_key_)) {
-      ESP_LOGI(TAG, "Restored current day key: %u", current_day_key_);
+      ESP_LOGI(TAG, "Restored current day key: %u", (unsigned) current_day_key_);
     } else {
       current_day_key_ = 0;
       ESP_LOGI(TAG, "No day key found, will initialize on first time sync");
@@ -3006,7 +2992,7 @@ void TigoMonitorComponent::save_energy_data() {
   uint32_t day_key_hash = esphome::fnv1_hash("current_day_key");
   auto save_day_key = this->cached_pref_<uint32_t>(day_key_hash);
   if (save_day_key.save(&current_day_key_)) {
-    ESP_LOGD(TAG, "Saved current day key: %u", current_day_key_);
+    ESP_LOGD(TAG, "Saved current day key: %u", (unsigned) current_day_key_);
   } else {
     ESP_LOGW(TAG, "Failed to save current day key");
   }
@@ -3106,9 +3092,9 @@ void TigoMonitorComponent::save_daily_energy_history() {
   auto save = this->cached_pref_<uint8_t[MAX_BUFFER_SIZE]>(hash);
   
   if (save.save(&buffer)) {
-    ESP_LOGD(TAG, "Saved %zu daily energy entries to flash (hash=0x%08X)", count, hash);
+    ESP_LOGD(TAG, "Saved %zu daily energy entries to flash (hash=0x%08X)", count, (unsigned) hash);
   } else {
-    ESP_LOGW(TAG, "Failed to save daily energy history (hash=0x%08X)", hash);
+    ESP_LOGW(TAG, "Failed to save daily energy history (hash=0x%08X)", (unsigned) hash);
   }
 }
 

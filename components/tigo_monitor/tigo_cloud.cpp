@@ -439,9 +439,10 @@ void TigoMonitorComponent::match_cloud_layout_to_uart_(const std::string &layout
                      last6.c_str(), panel_label.c_str(), mppt_label.c_str(), string_label.c_str());
             break;
           }
-          if (!found)
+          if (!found) {
             ESP_LOGD(CLOUD_TAG, "No UART node for cloud panel '%s' (serial %s)",
                      panel_label.c_str(), serial_up.c_str());
+          }
         }
       }
     }
