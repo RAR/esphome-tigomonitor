@@ -455,13 +455,13 @@ Check the low-water mark at any time — `heap_min_free` in `curl http://<device
   ```
 
 - **Entity count.** Every per-panel sensor declared in YAML costs ~110–150 bytes of internal RAM at boot (the sensor object plus API registration). It scales: 64 panels × 7 sensor types ≈ 450 entities ≈ **50–70 KB** — the largest static consumer on a big install. Declare only the per-panel sensors you actually use in Home Assistant; the web dashboard shows every metric for every panel regardless, at no per-entity cost. For HA aggregates, prefer the `string_label:` per-string power sensor (one entity per string) over declaring — or lambda-summing — per-panel sensors.
-- **UART RX buffer.** `CONFIG_UART_RX_BUFFER_SIZE` (and the matching `rx_buffer_size:` on the `uart:` component) allocate from internal RAM, never PSRAM. 2–8 KB is plenty on an ESP32-S3 at 38400 baud; a 32 KB buffer silently spends a sixth of the usable internal heap. See [UART Optimization](./uart-optimization.md).
+- **UART RX buffer.** `CONFIG_UART_RX_BUFFER_SIZE` (and the matching `rx_buffer_size:` on the `uart:` component) allocate from internal RAM, never PSRAM. 2–8 KB is plenty on an ESP32-S3 at 38400 baud; a 32 KB buffer silently spends a sixth of the usable internal heap. See [UART Optimization](/esphome-tigomonitor/guides/uart-optimization/).
 
 ---
 
 ## On-Flash History (esp_tsdb)
 
-Persistent time-series history is opt-in via two extra dependencies and a custom partition table. See [TSDB Integration](./tsdb-integration.md) for the full schema, sizing, and query reference.
+Persistent time-series history is opt-in via two extra dependencies and a custom partition table. See [TSDB Integration](/esphome-tigomonitor/guides/tsdb-integration/) for the full schema, sizing, and query reference.
 
 Quick form (8 MB AtomS3R):
 
@@ -504,4 +504,4 @@ See [`boards/`](https://github.com/RAR/esphome-tigomonitor/tree/main/boards) for
 
 ---
 
-**See also:** [Web Server &amp; API](./web-server.md) · [Wiring](./wiring.md) · [Troubleshooting](./troubleshooting.md) · [← Back to README](https://github.com/RAR/esphome-tigomonitor)
+**See also:** [Web Server &amp; API](/esphome-tigomonitor/guides/web-server/) · [Wiring](/esphome-tigomonitor/guides/wiring/) · [Troubleshooting](/esphome-tigomonitor/guides/troubleshooting/) · [← Back to README](https://github.com/RAR/esphome-tigomonitor)

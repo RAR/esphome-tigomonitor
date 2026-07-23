@@ -180,4 +180,4 @@ Buffer pools default to internal RAM in upstream esp_tsdb. We override via `cfg.
 
 ---
 
-**See also:** [Configuration](./configuration.md) · [Web Server & API](./web-server.md) · [← Back to README](https://github.com/RAR/esphome-tigomonitor)
+**See also:** [Configuration](/esphome-tigomonitor/guides/configuration/) · [Web Server & API](/esphome-tigomonitor/guides/web-server/) · [← Back to README](https://github.com/RAR/esphome-tigomonitor)

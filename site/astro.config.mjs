@@ -1,6 +1,7 @@
 // @ts-check
 import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
+import starlightLinksValidator from 'starlight-links-validator';
 
 export default defineConfig({
   site: 'https://rar.github.io',
@@ -8,8 +9,10 @@ export default defineConfig({
   integrations: [
     starlight({
       title: 'Tigo Monitor',
-      // Starlight >=0.30 uses the array form. If the installed version errors
-      // on this, use the object form: social: { github: '<url>' }
+      // Build-time gate: fails the build on broken internal links + anchors,
+      // so relative-link/base-path regressions (see the 2026-07-23 review) can't
+      // silently ship again.
+      plugins: [starlightLinksValidator()],
       social: [
         { icon: 'github', label: 'GitHub', href: 'https://github.com/RAR/esphome-tigomonitor' },
       ],

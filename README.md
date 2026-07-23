@@ -225,7 +225,7 @@ components/
 ├── tigo_monitor/     # Main component (UART parsing, sensors)
 └── tigo_server/      # Web server (dashboard, API)
 boards/               # Example board configurations
-docs/                 # Documentation
+docs/                 # Images + internal specs (guides live at the docs site)
 examples/             # HA dashboards and automations
 ```
 

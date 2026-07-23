@@ -8,14 +8,14 @@ Common issues and solutions for ESPHome Tigo Monitor.
 
 | Symptom | Solution |
 |---------|----------|
-| No devices discovered | Check UART wiring, verify 38400 baud ([Wiring](./wiring.md)) |
-| High packet loss | Add `CONFIG_UART_ISR_IN_IRAM: "y"` ([UART Optimization](./uart-optimization.md)) |
+| No devices discovered | Check UART wiring, verify 38400 baud ([Wiring](/esphome-tigomonitor/guides/wiring/)) |
+| High packet loss | Add `CONFIG_UART_ISR_IN_IRAM: "y"` ([UART Optimization](/esphome-tigomonitor/guides/uart-optimization/)) |
 | Memory exhaustion | Use ESP32-S3 with PSRAM (required for 15+ devices) |
 | CCA sync fails (local HTTP) | Verify CCA IP, check network connectivity |
 | CCA sync returns 401 / "HTTP locked" | Tigo firmware 4.0.4+ closed local HTTP — use `cca_source: ble` or `cloud_import: true` |
 | BLE CCA won't connect | Close the Tigo phone app (one BLE central at a time) |
 | Tigo cloud import fails | Recheck credentials; needs `cloud_import: true`; token may have expired |
-| History reads back empty after reboot | Erase the tsdb partition once ([TSDB](./tsdb-integration.md)) |
+| History reads back empty after reboot | Erase the tsdb partition once ([TSDB](/esphome-tigomonitor/guides/tsdb-integration/)) |
 | Web UI not loading | Confirm `tigo_server` configured, check ESP32 IP |
 
 ---
@@ -27,7 +27,7 @@ Common issues and solutions for ESPHome Tigo Monitor.
 **Symptoms:** No "Frame received" or "New device discovered" log messages.
 
 **Solutions:**
-1. Verify UART wiring (TX→RX, RX→TX) — see the [Wiring Guide](./wiring.md)
+1. Verify UART wiring (TX→RX, RX→TX) — see the [Wiring Guide](/esphome-tigomonitor/guides/wiring/)
 2. Confirm baud rate is 38400
 3. Check Tigo system is powered and communicating
 4. Look for any "Frame" messages in ESPHome logs
@@ -60,7 +60,7 @@ esp32:
       CONFIG_UART_ISR_IN_IRAM: "y"
 ```
 
-**Expected miss rate:** 0.02-0.04% is excellent for multi-drop RS485. For the deep dive, see [UART Optimization](./uart-optimization.md).
+**Expected miss rate:** 0.02-0.04% is excellent for multi-drop RS485. For the deep dive, see [UART Optimization](/esphome-tigomonitor/guides/uart-optimization/).
 
 ### High Frame Loss Rate
 
@@ -70,7 +70,7 @@ esp32:
 3. Check for electrical interference on RS485 line
 4. Verify proper termination on RS485 bus
 
-See [UART Optimization](./uart-optimization.md) for the full tuning guide.
+See [UART Optimization](/esphome-tigomonitor/guides/uart-optimization/) for the full tuning guide.
 
 ### RX Buffer Sizing
 
@@ -91,7 +91,7 @@ uart:
   rx_buffer_size: 4096   # match CONFIG_UART_RX_BUFFER_SIZE
 ```
 
-2-8 KB is plenty on an ESP32-S3 at 38400 baud. This buffer comes from internal (DMA-capable) RAM, never PSRAM, so an oversized value wastes scarce internal heap — a 32 KB buffer silently spends a sixth of the usable internal RAM. See [UART Optimization](./uart-optimization.md).
+2-8 KB is plenty on an ESP32-S3 at 38400 baud. This buffer comes from internal (DMA-capable) RAM, never PSRAM, so an oversized value wastes scarce internal heap — a 32 KB buffer silently spends a sixth of the usable internal RAM. See [UART Optimization](/esphome-tigomonitor/guides/uart-optimization/).
 
 ---
 
@@ -154,8 +154,8 @@ This forces a fresh bootloader build with PSRAM support enabled.
 **Cause:** Newer Tigo CCA firmware (4.0.4 and up, including `4.0.5-ct`) closes the local HTTP API. This is a Tigo change, not a bug in this component. Your local RS485 monitoring is unaffected — only friendly-name import from the CCA is blocked.
 
 **Fix — pick one:**
-1. **Read the CCA over Bluetooth.** Set `cca_source: ble` and add a `ble_client_id`; `tigo_server` talks the CCA's `mobile_api` over BLE instead of HTTP. See [CCA over Bluetooth](./configuration.md#cca-over-bluetooth-cca_source-ble).
-2. **Recover the layout from Tigo's cloud.** Set `cloud_import: true` and sign in on the Tigo Cloud page to pull panel names + string/MPPT/inverter layout. See [Tigo cloud import](./configuration.md#tigo-cloud-import-cloud_import-true).
+1. **Read the CCA over Bluetooth.** Set `cca_source: ble` and add a `ble_client_id`; `tigo_server` talks the CCA's `mobile_api` over BLE instead of HTTP. See [CCA over Bluetooth](/esphome-tigomonitor/guides/configuration/#cca-over-bluetooth-cca_source-ble).
+2. **Recover the layout from Tigo's cloud.** Set `cloud_import: true` and sign in on the Tigo Cloud page to pull panel names + string/MPPT/inverter layout. See [Tigo cloud import](/esphome-tigomonitor/guides/configuration/#tigo-cloud-import-cloud_import-true).
 3. **Enter friendly names manually** from the Tools view — no CCA connection required.
 
 ### BLE CCA Won't Connect / Search Finds Nothing
@@ -166,7 +166,7 @@ This forces a fresh bootloader build with PSRAM support enabled.
 1. **Close the Tigo phone app.** The CCA allows only one BLE central at a time — if the app is connected, the ESP32 can't be.
 2. The CCA advertises on the `04:C0:5B` Tigo MAC prefix; the search card filters for it. If nothing shows, move the ESP32 closer or confirm the CCA has BLE enabled.
 3. Connection is **on demand** — the link opens for each read (~10 s round trip) and drops afterward, so a brief delay is normal; it isn't held open at boot.
-4. Confirm `esp32_ble` and `esp32_ble_tracker` are configured and `ble_client_id` points at a `ble_client:` block. See [CCA over Bluetooth](./configuration.md#cca-over-bluetooth-cca_source-ble).
+4. Confirm `esp32_ble` and `esp32_ble_tracker` are configured and `ble_client_id` points at a `ble_client:` block. See [CCA over Bluetooth](/esphome-tigomonitor/guides/configuration/#cca-over-bluetooth-cca_source-ble).
 
 ### Tigo Cloud Import Fails / Login Rejected
 
@@ -175,7 +175,7 @@ This forces a fresh bootloader build with PSRAM support enabled.
 **Solutions:**
 1. Recheck your Tigo account **credentials** (the same login the Tigo mobile app uses). Only the resulting bearer token is stored on-device — never your password.
 2. The stored **token expires**; if import stops working after it worked before, sign in again to refresh it.
-3. Confirm `cloud_import: true` is set — without it the Tigo Cloud page and cloud client aren't compiled in. See [Tigo cloud import](./configuration.md#tigo-cloud-import-cloud_import-true).
+3. Confirm `cloud_import: true` is set — without it the Tigo Cloud page and cloud client aren't compiled in. See [Tigo cloud import](/esphome-tigomonitor/guides/configuration/#tigo-cloud-import-cloud_import-true).
 
 ### Barcode Mismatch
 
@@ -242,13 +242,13 @@ The History view is backed by an on-flash time-series database (`esp_tsdb`) stor
 2. **Existing installs may need to erase the tsdb partition once** so LittleFS reformats it at the new size. After that, history persists across reboots.
 3. Confirm your config pins `zakery292/esp_tsdb^2.1.0` (or newer) and uses the custom partition table.
 
-See [TSDB Integration](./tsdb-integration.md) for the schema, sizing, and partition setup.
+See [TSDB Integration](/esphome-tigomonitor/guides/tsdb-integration/) for the schema, sizing, and partition setup.
 
 ### History View Empty / No `/api/history` Endpoints
 
 **Cause:** esp_tsdb is opt-in — without the extra components and custom partition table it isn't compiled in.
 
-**Solution:** Add the esp_tsdb + littlefs components and the custom partition table as shown in [TSDB Integration](./tsdb-integration.md). The rest of the component works fine without it; you just lose the History view and the `/api/history/*` and `/api/tsdb/stats` endpoints.
+**Solution:** Add the esp_tsdb + littlefs components and the custom partition table as shown in [TSDB Integration](/esphome-tigomonitor/guides/tsdb-integration/). The rest of the component works fine without it; you just lose the History view and the `/api/history/*` and `/api/tsdb/stats` endpoints.
 
 ---
 
@@ -412,4 +412,4 @@ button:
 
 ---
 
-**See also:** [Wiring](./wiring.md) · [UART Optimization](./uart-optimization.md) · [Configuration](./configuration.md) · [← Back to README](https://github.com/RAR/esphome-tigomonitor)
+**See also:** [Wiring](/esphome-tigomonitor/guides/wiring/) · [UART Optimization](/esphome-tigomonitor/guides/uart-optimization/) · [Configuration](/esphome-tigomonitor/guides/configuration/) · [← Back to README](https://github.com/RAR/esphome-tigomonitor)

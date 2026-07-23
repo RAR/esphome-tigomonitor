@@ -98,7 +98,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Three lazy-opened panel DBs covering up to 48 panels (16 base params each).
   - New endpoints: `/api/history/power?range=day|week|month|year`, `/api/history/panel?slot=N&range=...`, `/api/panels`, `/api/tsdb/stats`.
   - Diagnostics view shows per-DB record counts, range, evictions, plus LittleFS partition usage.
-  - Requires the `esp_tsdb` external component and a `tsdb` LittleFS partition (see [`docs/tsdb-integration.md`](docs/tsdb-integration.md)).
+  - Requires the `esp_tsdb` external component and a `tsdb` LittleFS partition (see [TSDB Integration](https://rar.github.io/esphome-tigomonitor/guides/tsdb-integration/)).
 - **Topology view** — read-only inverter → string → panel hierarchy with live V/I/W/°C, search filter, expand/collapse, color-coded panel tiles.
 - **Heatmap dashboard** — fixed-size colored tiles per panel grouped by string, replacing the old variable-height bar chart. Same good/warn/bad/dead bands so the legend still applies.
 - **Color legend strip** on the dashboard showing the good/warn/bad/dead thresholds.
@@ -186,7 +186,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `apiFetch()` prepends the detected `BASE_PATH` to all `/api/*` requests
   - Post-reset redirect on the Status page returns to the ingress-prefixed root
   - Purely client-side JavaScript change — no C++ or ESPHome config changes required for standalone access
-  - See [`docs/WEB_SERVER_README.md`](docs/WEB_SERVER_README.md#home-assistant-ingress) for setup details
+  - See [Web Server & API](https://rar.github.io/esphome-tigomonitor/guides/web-server/#home-assistant-ingress) for setup details
 
 ## [1.4.2] - 2026-03-19
 

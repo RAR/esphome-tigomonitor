@@ -231,7 +231,7 @@ Compatible with the [hass_ingress](https://github.com/lovelylain/hass_ingress) i
 
 ## Configuration
 
-The `tigo_server:` YAML options — `port`, `api_token`, `web_username`/`web_password`, `backlight`, `cca_source`, `ble_client_id`, `cloud_import` — are documented in the **[Configuration Guide → Tigo Web Server component](./configuration.md#tigo-web-server-component)**, which is the canonical reference (including the full `ble_client:`/`esp32_ble` setup for CCA-over-Bluetooth and the `cloud_import` cloud-layout details). This doc covers what the server *serves*: the SPA views and the JSON API above.
+The `tigo_server:` YAML options — `port`, `api_token`, `web_username`/`web_password`, `backlight`, `cca_source`, `ble_client_id`, `cloud_import` — are documented in the **[Configuration Guide → Tigo Web Server component](/esphome-tigomonitor/guides/configuration/#tigo-web-server-component)**, which is the canonical reference (including the full `ble_client:`/`esp32_ble` setup for CCA-over-Bluetooth and the `cloud_import` cloud-layout details). This doc covers what the server *serves*: the SPA views and the JSON API above.
 
 ---
 
@@ -242,7 +242,7 @@ The `tigo_server:` YAML options — `port`, `api_token`, `web_username`/`web_pas
 - **Connection model**: 4 max open sockets, keep-alive disabled, LRU purge enabled — minimizes internal RAM footprint without much real-world impact at typical poll rates.
 - **HTML assets**: served from `R""` raw-string constants in `web_assets.h`, regenerated from `components/tigo_server/web/*.html` by the Python codegen step. The API token placeholder (`__TIGO_API_TOKEN__`) is substituted at runtime so each device's token stays unique without a recompile.
 - **Memory**: response building and HTML buffers go through `PSRAMString` so large pages don't pressure internal heap.
-- **Persistence**: NVS (via `global_preferences`) holds inverter/string display-name overrides and panel nameplate ratings. Node table and energy history live in NVS too. TSDB time-series data lives on a separate LittleFS partition — see [TSDB Integration](./tsdb-integration.md).
+- **Persistence**: NVS (via `global_preferences`) holds inverter/string display-name overrides and panel nameplate ratings. Node table and energy history live in NVS too. TSDB time-series data lives on a separate LittleFS partition — see [TSDB Integration](/esphome-tigomonitor/guides/tsdb-integration/).
 
 ---
 
@@ -252,4 +252,4 @@ Modern Chrome / Firefox / Safari, mobile or desktop. No plugins. The SPA degrade
 
 ---
 
-**See also:** [Configuration](./configuration.md) · [Home Assistant](./home-assistant.md) · [Troubleshooting](./troubleshooting.md) · [← Back to README](https://github.com/RAR/esphome-tigomonitor)
+**See also:** [Configuration](/esphome-tigomonitor/guides/configuration/) · [Home Assistant](/esphome-tigomonitor/guides/home-assistant/) · [Troubleshooting](/esphome-tigomonitor/guides/troubleshooting/) · [← Back to README](https://github.com/RAR/esphome-tigomonitor)
