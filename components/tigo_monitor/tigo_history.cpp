@@ -384,8 +384,22 @@ bool TigoHistory::start_writer_task() {
   // in practice. Three back-to-back writes per drain (system + 2x panels)
   // adds peak depth but stays well under 8 KB; soak shows ~3.5 KB hwm.
   // Priority 1 matches the main app task, well below UART.
-  BaseType_t ok = xTaskCreate(&TigoHistory::writer_task_entry_, "tsdb_writer",
-                              8192, this, 1, &task_);
+  //
+  // PINNED TO CORE 1 (the ESPHome loop_task core) on purpose. This task's
+  // LittleFS writes erase/program flash, which disables the instruction cache
+  // on BOTH cores for the duration. If the writer floats to core 0 while
+  // loop_task on core 1 is mid-read inside the UART ring buffer
+  // (uart_read_bytes -> xRingbufferReceiveUpTo, code that lives in flash, not
+  // IRAM), that core faults the instant the cache drops — the observed
+  // "Fault - Unknown" in vPortExitCritical / prvReceiveGeneric. CONFIG_
+  // UART_ISR_IN_IRAM only covers the ISR, not this task-context ring read.
+  // Co-locating the writer with loop_task serializes them onto one core so
+  // they can never execute concurrently; the flash op then only stalls core 0
+  // (WiFi, kept IRAM-safe via CONFIG_ESP_WIFI_*_IRAM_OPT). Pairs with
+  // CONFIG_SPI_FLASH_AUTO_SUSPEND as defense in depth.
+  BaseType_t ok = xTaskCreatePinnedToCore(&TigoHistory::writer_task_entry_,
+                              "tsdb_writer", 8192, this, 1, &task_,
+                              1 /* core 1 = ESPHome loop_task core */);
   if (ok != pdPASS) {
     ESP_LOGE(TAG, "Failed to create tsdb writer task");
     vQueueDelete(queue_);
