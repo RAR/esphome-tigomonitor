@@ -9,6 +9,18 @@ export default defineConfig({
   integrations: [
     starlight({
       title: 'Tigo Monitor',
+      customCss: [
+        // Self-hosted fonts (bundled, no CDN). Order matters: fonts first.
+        '@fontsource/ibm-plex-sans/400.css',
+        '@fontsource/ibm-plex-sans/500.css',
+        '@fontsource/ibm-plex-sans/600.css',
+        '@fontsource/ibm-plex-sans/700.css',
+        '@fontsource/ibm-plex-mono/400.css',
+        '@fontsource/ibm-plex-mono/500.css',
+        '@fontsource/ibm-plex-mono/600.css',
+        '@fontsource-variable/big-shoulders-display',
+        './src/styles/theme.css',
+      ],
       // Build-time gate: fails the build on broken internal links + anchors,
       // so relative-link/base-path regressions (see the 2026-07-23 review) can't
       // silently ship again.
@@ -17,7 +29,6 @@ export default defineConfig({
         { icon: 'github', label: 'GitHub', href: 'https://github.com/RAR/esphome-tigomonitor' },
       ],
       sidebar: [
-        { label: 'Config Builder', link: '/config-builder/' },
         {
           label: 'Guides',
           items: [
@@ -30,6 +41,7 @@ export default defineConfig({
             { label: 'Troubleshooting', link: '/guides/troubleshooting/' },
           ],
         },
+        { label: 'Config Builder', link: '/config-builder/' },
       ],
     }),
   ],

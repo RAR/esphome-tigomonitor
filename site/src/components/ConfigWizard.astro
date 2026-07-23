@@ -1,51 +1,88 @@
 ---
 // Renders the config-builder form. The client script imports the UNCHANGED
 // wizard core (site/wizard.js), which binds to these element IDs on load.
+// The IDs and the toggled wrappers (cca-ip-row, cca-mac-row, display-row,
+// dl-secrets) are a hard contract with wizard.js — do not rename them, and
+// keep the toggled wrappers visible by default (JS flips style.display).
 ---
-<div class="tigo-wizard">
-  <form id="wizard">
-    <section>
-      <label>Board
+<div class="tigo-wizard not-content">
+  <p class="tw-intro">
+    Fill in your board and network details, then copy or download a ready-to-flash
+    ESPHome YAML. Everything runs in your browser — nothing is uploaded.
+  </p>
+
+  <form id="wizard" class="tw-form">
+    <fieldset class="tw-card">
+      <legend>Board</legend>
+      <label class="field">
+        <span>Board model</span>
         <select id="board"></select>
       </label>
       <p id="board-notes" class="notes"></p>
-    </section>
-    <section>
-      <label>Device name <input id="name" value="tigo-server" /></label>
-      <label>Number of devices <input id="num-devices" type="number" min="1" /></label>
-      <label>Update interval <input id="update-interval" value="30s" /></label>
-      <label>UART TX pin <input id="uart-tx" /></label>
-      <label>UART RX pin <input id="uart-rx" /></label>
-    </section>
-    <section>
-      <label>Wi-Fi SSID <input id="wifi-ssid" placeholder="YOUR_WIFI_SSID" /></label>
-      <label>Wi-Fi password <input id="wifi-pass" placeholder="YOUR_WIFI_PASSWORD" /></label>
-      <label>Static IP (optional) <input id="static-ip" /></label>
-    </section>
-    <section>
-      <label>CCA source
-        <select id="cca"><option value="none">None</option><option value="http">HTTP (older firmware)</option><option value="ble">Bluetooth (4.0.4+)</option></select>
+    </fieldset>
+
+    <fieldset class="tw-card">
+      <legend>Device &amp; UART</legend>
+      <label class="field"><span>Device name</span><input id="name" value="tigo-server" /></label>
+      <div class="grid2">
+        <label class="field"><span>Number of devices</span><input id="num-devices" type="number" min="1" /></label>
+        <label class="field"><span>Update interval</span><input id="update-interval" value="30s" /></label>
+        <label class="field"><span>UART TX pin</span><input id="uart-tx" /></label>
+        <label class="field"><span>UART RX pin</span><input id="uart-rx" /></label>
+      </div>
+    </fieldset>
+
+    <fieldset class="tw-card">
+      <legend>Networking</legend>
+      <label class="field"><span>Wi-Fi SSID</span><input id="wifi-ssid" placeholder="YOUR_WIFI_SSID" /></label>
+      <label class="field"><span>Wi-Fi password</span><input id="wifi-pass" placeholder="YOUR_WIFI_PASSWORD" /></label>
+      <label class="field"><span>Static IP <em>(optional)</em></span><input id="static-ip" /></label>
+    </fieldset>
+
+    <fieldset class="tw-card">
+      <legend>CCA &amp; extras</legend>
+      <label class="field">
+        <span>CCA source</span>
+        <select id="cca">
+          <option value="none">None</option>
+          <option value="http">HTTP (older firmware)</option>
+          <option value="ble">Bluetooth (4.0.4+)</option>
+        </select>
       </label>
-      <label id="cca-ip-row">CCA IP <input id="cca-ip" /></label>
-      <label id="cca-mac-row">CCA Bluetooth MAC <input id="cca-mac" placeholder="04:C0:5B:XX:XX:XX" /></label>
-      <label><input type="checkbox" id="cloud" /> Enable Tigo cloud import</label>
-      <label id="display-row"><input type="checkbox" id="display" /> Include display (AtomS3R-Display)</label>
-    </section>
-    <section>
-      <label><input type="checkbox" id="use-secrets" checked /> Generate a secrets.yaml</label>
-      <label>API encryption key <input id="api-key" /> <button type="button" id="gen-key">Generate</button></label>
-      <label>OTA password <input id="ota-pass" value="changeme" /></label>
-    </section>
+      <label class="field" id="cca-ip-row"><span>CCA IP</span><input id="cca-ip" /></label>
+      <label class="field" id="cca-mac-row"><span>CCA Bluetooth MAC</span><input id="cca-mac" placeholder="04:C0:5B:XX:XX:XX" /></label>
+      <label class="check"><input type="checkbox" id="cloud" /> <span>Enable Tigo cloud import</span></label>
+      <label class="check" id="display-row"><input type="checkbox" id="display" /> <span>Include display (AtomS3R-Display)</span></label>
+    </fieldset>
+
+    <fieldset class="tw-card">
+      <legend>Security</legend>
+      <label class="check"><input type="checkbox" id="use-secrets" checked /> <span>Generate a <code>secrets.yaml</code></span></label>
+      <label class="field">
+        <span>API encryption key</span>
+        <span class="with-btn"><input id="api-key" /><button type="button" id="gen-key" class="btn-secondary">Generate</button></span>
+      </label>
+      <label class="field"><span>OTA password</span><input id="ota-pass" value="changeme" /></label>
+    </fieldset>
   </form>
-  <div class="preview">
-    <div class="actions">
-      <button id="copy">Copy YAML</button>
-      <button id="dl-yaml">Download config</button>
-      <button id="dl-secrets">Download secrets.yaml</button>
+
+  <aside class="preview">
+    <div class="preview-inner">
+      <div class="preview-head">
+        <div class="preview-title">
+          <span class="tigo-eyebrow">Readout</span>
+          <code class="filename">tigo-monitor.yaml</code>
+        </div>
+        <div class="actions">
+          <button type="button" id="copy" class="btn-primary">Copy</button>
+          <button type="button" id="dl-yaml" class="btn-secondary">Download config</button>
+          <button type="button" id="dl-secrets" class="btn-secondary">secrets.yaml</button>
+        </div>
+      </div>
+      <pre id="out"></pre>
+      <p id="warn" class="warn"></p>
     </div>
-    <pre id="out"></pre>
-    <p id="warn" class="warn"></p>
-  </div>
+  </aside>
 </div>
 
 <script>
@@ -53,19 +90,152 @@
   import '../../wizard.js';
 </script>
 
-<style is:global>
+<style>
   .tigo-wizard {
-    display: grid; grid-template-columns: 1fr 1fr; gap: 16px;
-    --tw-panel:#171c22; --tw-text:#e6edf3; --tw-dim:#8b949e; --tw-accent:#3fb950;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 1.5rem;
+    max-width: 1200px;
+    margin-inline: auto;
+    text-align: start;
   }
-  @media (max-width: 900px) { .tigo-wizard { grid-template-columns: 1fr; } }
-  .tigo-wizard section { background:var(--tw-panel); border:1px solid #222; border-radius:8px; padding:16px; margin-bottom:16px; }
-  .tigo-wizard label { display:block; margin:8px 0; color:var(--tw-dim); }
-  .tigo-wizard input, .tigo-wizard select { width:100%; margin-top:4px; background:#0d1117; color:var(--tw-text); border:1px solid #30363d; border-radius:6px; padding:6px 8px; }
-  .tigo-wizard input[type=checkbox] { width:auto; }
-  .tigo-wizard .preview pre { background:#0d1117; border:1px solid #30363d; border-radius:8px; padding:16px; overflow:auto; max-height:80vh; white-space:pre; color:var(--tw-text); }
-  .tigo-wizard .actions { display:flex; gap:8px; margin-bottom:12px; flex-wrap:wrap; }
-  .tigo-wizard button { background:var(--tw-accent); color:#04240d; border:0; border-radius:6px; padding:8px 12px; cursor:pointer; font-weight:600; }
-  .tigo-wizard .notes, .tigo-wizard .warn { color:var(--tw-dim); font-size:12px; }
-  .tigo-wizard .warn { color:#d29922; }
+  @media (max-width: 72rem) {
+    .tigo-wizard { grid-template-columns: 1fr; }
+  }
+
+  .tw-intro {
+    grid-column: 1 / -1;
+    margin: 0;
+    max-width: 62ch;
+    color: var(--sl-color-gray-2);
+    line-height: 1.6;
+  }
+
+  .tw-form { display: flex; flex-direction: column; gap: 1.25rem; margin: 0; counter-reset: tw-card; }
+
+  .tw-card {
+    margin: 0;
+    counter-increment: tw-card;
+    border: 1px solid var(--sl-color-hairline);
+    border-radius: 0.75rem;
+    background: var(--sl-color-bg-nav);
+    padding: 1.1rem 1.25rem 1.35rem;
+  }
+  .tw-card > legend {
+    font-family: var(--sl-font-mono);
+    font-size: var(--sl-text-xs);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--sl-color-white);
+    padding: 0 0.5rem;
+    margin-inline-start: -0.15rem;
+  }
+  .tw-card > legend::before {
+    content: counter(tw-card, decimal-leading-zero) '  ·  ';
+    color: var(--tigo-amber);
+  }
+
+  /* staggered reveal on load */
+  @media (prefers-reduced-motion: no-preference) {
+    .tw-card, .preview-inner { animation: tw-rise 0.5s cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+    .tw-card:nth-child(2) { animation-delay: 0.05s; }
+    .tw-card:nth-child(3) { animation-delay: 0.10s; }
+    .tw-card:nth-child(4) { animation-delay: 0.15s; }
+    .tw-card:nth-child(5) { animation-delay: 0.20s; }
+    .preview-inner { animation-delay: 0.12s; }
+  }
+  @keyframes tw-rise {
+    from { opacity: 0; transform: translateY(0.5rem); }
+    to   { opacity: 1; transform: none; }
+  }
+
+  .field { display: flex; flex-direction: column; gap: 0.3rem; margin: 0.85rem 0 0; }
+  .tw-card > .field:first-of-type,
+  .grid2 .field { margin-top: 0; }
+  .field > span { font-size: var(--sl-text-sm); font-weight: 500; color: var(--sl-color-gray-2); }
+  .field em { font-style: normal; font-weight: 400; color: var(--sl-color-gray-3); }
+
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0.85rem 1rem; margin-top: 0.85rem; }
+  @media (max-width: 30rem) { .grid2 { grid-template-columns: 1fr; } }
+
+  .tigo-wizard input,
+  .tigo-wizard select {
+    width: 100%;
+    font: inherit;
+    color: var(--sl-color-white);
+    background: var(--sl-color-bg);
+    border: 1px solid var(--sl-color-gray-5);
+    border-radius: 0.5rem;
+    padding: 0.5rem 0.65rem;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  }
+  .tigo-wizard input:focus,
+  .tigo-wizard select:focus {
+    outline: none;
+    border-color: var(--sl-color-accent);
+    box-shadow: 0 0 0 3px var(--sl-color-accent-low);
+  }
+  .tigo-wizard input::placeholder { color: var(--sl-color-gray-4); }
+
+  .check {
+    display: flex; align-items: center; gap: 0.55rem;
+    margin: 0.85rem 0 0; cursor: pointer;
+    font-size: var(--sl-text-sm); color: var(--sl-color-white);
+  }
+  .check input[type=checkbox] { width: 1.05rem; height: 1.05rem; flex: none; accent-color: var(--sl-color-accent); }
+  .check code { font-size: 0.9em; }
+
+  .with-btn { display: flex; gap: 0.5rem; }
+  .with-btn input { flex: 1 1 auto; }
+
+  .tigo-wizard button {
+    /* width/height auto neutralizes Expressive Code's global
+       `button { width:2.5rem; height:2.5rem }` (code-block copy button). */
+    width: auto; height: auto;
+    font: inherit; font-weight: 600; cursor: pointer; white-space: nowrap;
+    border-radius: 0.5rem; padding: 0.5rem 0.9rem; border: 1px solid transparent;
+    transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+  }
+  .btn-primary { background: var(--sl-color-text-accent); color: var(--sl-color-bg); }
+  .btn-primary:hover { background: var(--sl-color-accent-high); }
+  /* subtle surface (not bare outline) so all three read as one equal-weight
+     action group next to the filled primary. */
+  .btn-secondary { background: var(--sl-color-gray-6); color: var(--sl-color-text); border-color: var(--sl-color-gray-5); }
+  .btn-secondary:hover { background: var(--sl-color-gray-5); border-color: var(--sl-color-accent); color: var(--sl-color-text-accent); }
+
+  .preview { min-width: 0; }
+  .preview-inner { position: sticky; top: 1.5rem; display: flex; flex-direction: column; gap: 0.75rem; }
+  .preview-head { display: flex; align-items: end; justify-content: space-between; gap: 0.75rem 1rem; flex-wrap: wrap; }
+  .preview-title { display: flex; flex-direction: column; gap: 0.25rem; }
+  .preview-title .filename {
+    font-family: var(--sl-font-mono);
+    font-size: var(--sl-text-base);
+    font-weight: 600;
+    color: var(--sl-color-white);
+    background: none;
+    padding: 0;
+  }
+  .actions { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+
+  .preview pre {
+    margin: 0;
+    background: var(--sl-color-bg-inline-code);
+    border: 1px solid var(--sl-color-hairline);
+    border-radius: 0.75rem;
+    padding: 1rem 1.1rem;
+    overflow: auto;
+    max-height: min(76vh, 760px);
+    font-size: var(--sl-text-code);
+    line-height: 1.5;
+    white-space: pre;
+    color: var(--sl-color-white);
+  }
+  .preview pre:empty::before {
+    content: 'Fill in the form to generate your YAML…';
+    color: var(--sl-color-gray-3);
+  }
+
+  .notes { margin: 0.85rem 0 0; font-size: var(--sl-text-sm); color: var(--sl-color-gray-3); line-height: 1.5; }
+  .warn { margin: 0; min-height: 1.2em; font-size: var(--sl-text-sm); color: #e0a030; }
 </style>

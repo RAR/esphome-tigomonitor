@@ -1,0 +1,103 @@
+/* ============================================================================
+   Tigo Monitor — "field instrument" theme
+   A technical-editorial identity for a solar/RS485 hardware tool.
+   Body: IBM Plex Sans · Data/labels: IBM Plex Mono · Hero: Big Shoulders Display
+   Duotone: live-green primary + solar-amber signal. Dark-first.
+   ============================================================================ */
+
+/* Fonts are self-hosted and loaded via Starlight `customCss` module specifiers
+   in astro.config.mjs (Vite can't resolve bare @import specifiers from a plain
+   CSS file). Here we only wire them into Starlight's font variables. */
+
+:root {
+  --sl-font: 'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif;
+  --sl-font-mono: 'IBM Plex Mono', ui-monospace, monospace;
+  --tigo-display: 'Big Shoulders Display Variable', 'IBM Plex Sans', sans-serif;
+
+  /* solar-amber signal accent (shared across themes) */
+  --tigo-amber: #f4b23c;
+  --tigo-amber-soft: color-mix(in srgb, var(--tigo-amber) 22%, transparent);
+}
+
+/* Brand accent — live green — over Starlight's gray scale. */
+:root {
+  --sl-color-accent-low: #14311f;
+  --sl-color-accent: #369e57;
+  --sl-color-accent-high: #b6e6c4;
+}
+:root[data-theme='light'] {
+  --sl-color-accent-low: #cbedd5;
+  --sl-color-accent: #1f8043;
+  --sl-color-accent-high: #063118;
+}
+
+/* --- Monospace eyebrow, used for labels/legends/kickers ------------------- */
+.tigo-eyebrow {
+  font-family: var(--sl-font-mono);
+  font-size: var(--sl-text-xs);
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--sl-color-text-accent);
+}
+
+/* --- Splash hero: atmosphere + display type ------------------------------ */
+.hero {
+  position: relative;
+  isolation: isolate;
+}
+/* blueprint grid + twin radial glows (green + amber), faded at the edges */
+.hero::before {
+  content: '';
+  position: absolute;
+  inset: -40% -25% -20%;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(60% 55% at 22% 18%, color-mix(in srgb, var(--sl-color-accent) 30%, transparent), transparent 70%),
+    radial-gradient(45% 45% at 88% 12%, var(--tigo-amber-soft), transparent 70%),
+    repeating-linear-gradient(0deg, transparent 0 47px, color-mix(in srgb, var(--sl-color-gray-4) 30%, transparent) 47px 48px),
+    repeating-linear-gradient(90deg, transparent 0 47px, color-mix(in srgb, var(--sl-color-gray-4) 30%, transparent) 47px 48px);
+  -webkit-mask-image: radial-gradient(120% 90% at 50% 20%, #000 35%, transparent 78%);
+          mask-image: radial-gradient(120% 90% at 50% 20%, #000 35%, transparent 78%);
+}
+.hero h1 {
+  font-family: var(--tigo-display);
+  font-weight: 700;
+  font-size: clamp(3rem, 8vw, 6rem);
+  line-height: 0.92;
+  letter-spacing: 0.005em;
+  text-transform: uppercase;
+}
+.hero .tagline {
+  max-width: 42ch;
+  color: var(--sl-color-gray-2);
+}
+/* amber underline under the primary hero CTA */
+.hero .actions a.primary {
+  position: relative;
+}
+.hero .actions a.primary::after {
+  content: '';
+  position: absolute;
+  left: 1.2rem;
+  right: 1.2rem;
+  bottom: -0.4rem;
+  height: 2px;
+  background: var(--tigo-amber);
+  border-radius: 2px;
+  opacity: 0.85;
+}
+
+/* --- One-shot staggered reveal on load ----------------------------------- */
+@media (prefers-reduced-motion: no-preference) {
+  .hero h1,
+  .hero .tagline,
+  .hero .actions { animation: tigo-rise 0.6s cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+  .hero .tagline { animation-delay: 0.07s; }
+  .hero .actions { animation-delay: 0.14s; }
+}
+@keyframes tigo-rise {
+  from { opacity: 0; transform: translateY(0.6rem); }
+  to   { opacity: 1; transform: none; }
+}
