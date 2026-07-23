@@ -1,4 +1,6 @@
-# Wiring Guide
+---
+title: Wiring Guide
+---
 
 Wire an ESP32 (recommended: M5Stack AtomS3R) inline with your Tigo CCA/TAP RS485 bus so it can passively monitor optimizer telemetry — written for solar owners doing the install themselves.
 
@@ -152,4 +154,4 @@ The UART runs at **38400 baud, 8N1** on TX=GPIO6 / RX=GPIO5.
 
 ---
 
-**See also:** [Troubleshooting](TROUBLESHOOTING.md) · [Configuration](CONFIGURATION.md) · [← Back to README](../README.md)
+**See also:** [Troubleshooting](./troubleshooting.md) · [Configuration](./configuration.md) · [← Back to README](https://github.com/RAR/esphome-tigomonitor)

@@ -1,4 +1,6 @@
-# TSDB Integration
+---
+title: TSDB Integration
+---
 
 On-flash time-series storage for Tigo Monitor, backed by [`zakery292/esp_tsdb`](https://github.com/zakery292/esp_tsdb). It gives you persistent panel and system history that survives reboots and OTA updates, queryable from the SPA's History view and from the JSON API.
 
@@ -178,4 +180,4 @@ Buffer pools default to internal RAM in upstream esp_tsdb. We override via `cfg.
 
 ---
 
-**See also:** [Configuration](CONFIGURATION.md) · [Web Server & API](WEB_SERVER_README.md) · [← Back to README](../README.md)
+**See also:** [Configuration](./configuration.md) · [Web Server & API](./web-server.md) · [← Back to README](https://github.com/RAR/esphome-tigomonitor)

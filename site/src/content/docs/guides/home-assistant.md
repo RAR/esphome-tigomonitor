@@ -1,8 +1,10 @@
-# Home Assistant Integration
+---
+title: Home Assistant Integration
+---
 
 This guide shows you how to surface Tigo Monitor data in Home Assistant — the Energy Dashboard, custom Lovelace views, automations, and the REST API. It's written for hobbyist and prosumer solar owners running Home Assistant alongside the ESPHome device.
 
-> **You may not need any of this.** The device already serves a full built-in web dashboard — a single-page app — at `http://<device-ip>/`. It shows per-string heatmaps, live panel readings, alerts, and topology out of the box, and it works under Home Assistant Ingress with no extra configuration. Hand-building Lovelace cards is an **optional** customization path, not a requirement. See [Web Server & API](WEB_SERVER_README.md) for the SPA and Ingress details.
+> **You may not need any of this.** The device already serves a full built-in web dashboard — a single-page app — at `http://<device-ip>/`. It shows per-string heatmaps, live panel readings, alerts, and topology out of the box, and it works under Home Assistant Ingress with no extra configuration. Hand-building Lovelace cards is an **optional** customization path, not a requirement. See [Web Server & API](./web-server.md) for the SPA and Ingress details.
 
 ## A note on entity names
 
@@ -23,7 +25,7 @@ This guide uses one consistent convention throughout:
 
 The component provides sensors compatible with Home Assistant's Energy Dashboard.
 
-![Home Assistant Energy Dashboard](images/HA.png)
+![Home Assistant Energy Dashboard](./HA.png)
 
 ### Setup
 
@@ -303,7 +305,7 @@ rest:
     scan_interval: 60
 ```
 
-See [Web Server & API](WEB_SERVER_README.md) for the full endpoint list and token setup.
+See [Web Server & API](./web-server.md) for the full endpoint list and token setup.
 
 ---
 
@@ -317,4 +319,4 @@ See [Web Server & API](WEB_SERVER_README.md) for the full endpoint list and toke
 
 ---
 
-**See also:** [Web Server & API](WEB_SERVER_README.md) · [Configuration](CONFIGURATION.md) · [Troubleshooting](TROUBLESHOOTING.md) · [← Back to README](../README.md)
+**See also:** [Web Server & API](./web-server.md) · [Configuration](./configuration.md) · [Troubleshooting](./troubleshooting.md) · [← Back to README](https://github.com/RAR/esphome-tigomonitor)

@@ -1,4 +1,6 @@
-# Reducing RS485 Frame Loss
+---
+title: Reducing RS485 Frame Loss
+---
 
 **What this is:** a how-to for cutting down missed Tigo telemetry frames on the RS485/UART bus. **Who it's for:** solar owners running this component who see the "Missed Packets" counter climbing in the web UI or Home Assistant.
 
@@ -108,4 +110,4 @@ This guidance came out of a real case: an AtomS3R with its display enabled was d
 
 ---
 
-**See also:** [Troubleshooting](TROUBLESHOOTING.md) · [Configuration](CONFIGURATION.md) · [← Back to README](../README.md)
+**See also:** [Troubleshooting](./troubleshooting.md) · [Configuration](./configuration.md) · [← Back to README](https://github.com/RAR/esphome-tigomonitor)

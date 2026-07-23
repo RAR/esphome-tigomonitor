@@ -1,6 +1,8 @@
-# Configuration Guide
+---
+title: Configuration Guide
+---
 
-Complete YAML reference for the ESPHome Tigo Monitor component — every option on the `tigo_monitor` and `tigo_server` platforms, the sensors they expose, and the ESP-IDF/PSRAM settings the firmware needs. New here? Start with the [Quick Start in the README](../README.md#quick-start), then come back for the details.
+Complete YAML reference for the ESPHome Tigo Monitor component — every option on the `tigo_monitor` and `tigo_server` platforms, the sensors they expose, and the ESP-IDF/PSRAM settings the firmware needs. New here? Start with the [Quick Start in the README](https://github.com/RAR/esphome-tigomonitor#quick-start), then come back for the details.
 
 ## Contents
 
@@ -453,13 +455,13 @@ Check the low-water mark at any time — `heap_min_free` in `curl http://<device
   ```
 
 - **Entity count.** Every per-panel sensor declared in YAML costs ~110–150 bytes of internal RAM at boot (the sensor object plus API registration). It scales: 64 panels × 7 sensor types ≈ 450 entities ≈ **50–70 KB** — the largest static consumer on a big install. Declare only the per-panel sensors you actually use in Home Assistant; the web dashboard shows every metric for every panel regardless, at no per-entity cost. For HA aggregates, prefer the `string_label:` per-string power sensor (one entity per string) over declaring — or lambda-summing — per-panel sensors.
-- **UART RX buffer.** `CONFIG_UART_RX_BUFFER_SIZE` (and the matching `rx_buffer_size:` on the `uart:` component) allocate from internal RAM, never PSRAM. 2–8 KB is plenty on an ESP32-S3 at 38400 baud; a 32 KB buffer silently spends a sixth of the usable internal heap. See [UART Optimization](UART_OPTIMIZATION.md).
+- **UART RX buffer.** `CONFIG_UART_RX_BUFFER_SIZE` (and the matching `rx_buffer_size:` on the `uart:` component) allocate from internal RAM, never PSRAM. 2–8 KB is plenty on an ESP32-S3 at 38400 baud; a 32 KB buffer silently spends a sixth of the usable internal heap. See [UART Optimization](./uart-optimization.md).
 
 ---
 
 ## On-Flash History (esp_tsdb)
 
-Persistent time-series history is opt-in via two extra dependencies and a custom partition table. See [`docs/tsdb-integration.md`](tsdb-integration.md) for the full schema, sizing, and query reference.
+Persistent time-series history is opt-in via two extra dependencies and a custom partition table. See [`docs/tsdb-integration.md`](./tsdb-integration.md) for the full schema, sizing, and query reference.
 
 Quick form (8 MB AtomS3R):
 
@@ -502,4 +504,4 @@ See [`boards/`](../boards/) for complete, ready-to-flash board configs — e.g. 
 
 ---
 
-**See also:** [Web Server &amp; API](WEB_SERVER_README.md) · [Wiring](WIRING.md) · [Troubleshooting](TROUBLESHOOTING.md) · [← Back to README](../README.md)
+**See also:** [Web Server &amp; API](./web-server.md) · [Wiring](./wiring.md) · [Troubleshooting](./troubleshooting.md) · [← Back to README](https://github.com/RAR/esphome-tigomonitor)
