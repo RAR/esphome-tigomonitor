@@ -242,13 +242,13 @@ The History view is backed by an on-flash time-series database (`esp_tsdb`) stor
 2. **Existing installs may need to erase the tsdb partition once** so LittleFS reformats it at the new size. After that, history persists across reboots.
 3. Confirm your config pins `zakery292/esp_tsdb^2.1.0` (or newer) and uses the custom partition table.
 
-See [`docs/tsdb-integration.md`](./tsdb-integration.md) for the schema, sizing, and partition setup.
+See [TSDB Integration](./tsdb-integration.md) for the schema, sizing, and partition setup.
 
 ### History View Empty / No `/api/history` Endpoints
 
 **Cause:** esp_tsdb is opt-in — without the extra components and custom partition table it isn't compiled in.
 
-**Solution:** Add the esp_tsdb + littlefs components and the custom partition table as shown in [`docs/tsdb-integration.md`](./tsdb-integration.md). The rest of the component works fine without it; you just lose the History view and the `/api/history/*` and `/api/tsdb/stats` endpoints.
+**Solution:** Add the esp_tsdb + littlefs components and the custom partition table as shown in [TSDB Integration](./tsdb-integration.md). The rest of the component works fine without it; you just lose the History view and the `/api/history/*` and `/api/tsdb/stats` endpoints.
 
 ---
 

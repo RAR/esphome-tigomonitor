@@ -242,7 +242,7 @@ The `tigo_server:` YAML options — `port`, `api_token`, `web_username`/`web_pas
 - **Connection model**: 4 max open sockets, keep-alive disabled, LRU purge enabled — minimizes internal RAM footprint without much real-world impact at typical poll rates.
 - **HTML assets**: served from `R""` raw-string constants in `web_assets.h`, regenerated from `components/tigo_server/web/*.html` by the Python codegen step. The API token placeholder (`__TIGO_API_TOKEN__`) is substituted at runtime so each device's token stays unique without a recompile.
 - **Memory**: response building and HTML buffers go through `PSRAMString` so large pages don't pressure internal heap.
-- **Persistence**: NVS (via `global_preferences`) holds inverter/string display-name overrides and panel nameplate ratings. Node table and energy history live in NVS too. TSDB time-series data lives on a separate LittleFS partition — see [`docs/tsdb-integration.md`](./tsdb-integration.md).
+- **Persistence**: NVS (via `global_preferences`) holds inverter/string display-name overrides and panel nameplate ratings. Node table and energy history live in NVS too. TSDB time-series data lives on a separate LittleFS partition — see [TSDB Integration](./tsdb-integration.md).
 
 ---
 

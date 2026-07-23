@@ -461,7 +461,7 @@ Check the low-water mark at any time — `heap_min_free` in `curl http://<device
 
 ## On-Flash History (esp_tsdb)
 
-Persistent time-series history is opt-in via two extra dependencies and a custom partition table. See [`docs/tsdb-integration.md`](./tsdb-integration.md) for the full schema, sizing, and query reference.
+Persistent time-series history is opt-in via two extra dependencies and a custom partition table. See [TSDB Integration](./tsdb-integration.md) for the full schema, sizing, and query reference.
 
 Quick form (8 MB AtomS3R):
 
@@ -500,7 +500,7 @@ sensor:
 
 ## Complete Example
 
-See [`boards/`](../boards/) for complete, ready-to-flash board configs — e.g. [`boards/esp32s3-atoms3r.yaml`](../boards/esp32s3-atoms3r.yaml) for the recommended M5Stack AtomS3R (PSRAM + esp_tsdb + tuned UART buffers).
+See [`boards/`](https://github.com/RAR/esphome-tigomonitor/tree/main/boards) for complete, ready-to-flash board configs — e.g. [`boards/esp32s3-atoms3r.yaml`](https://github.com/RAR/esphome-tigomonitor/blob/main/boards/esp32s3-atoms3r.yaml) for the recommended M5Stack AtomS3R (PSRAM + esp_tsdb + tuned UART buffers).
 
 ---
 
