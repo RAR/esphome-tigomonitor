@@ -18,7 +18,8 @@ esp32:
     type: esp-idf
     version: recommended
     components:
-      # Time-series database for persistent history (see docs/tsdb-integration.md).
+      # Time-series database for persistent history
+      # (see https://rar.github.io/esphome-tigomonitor/guides/tsdb-integration/).
       # 2.1.0 is the first upstream release with the handle-based multi-instance
       # API and the wrapped-ring query fix this project depends on.
       - zakery292/esp_tsdb^2.1.0

@@ -2,6 +2,8 @@
 
 An ESPHome component for monitoring Tigo solar optimizers via RS485/UART. Real-time monitoring of individual devices with Home Assistant integration.
 
+📖 **[Documentation](https://rar.github.io/esphome-tigomonitor/)** &nbsp;·&nbsp; 🔧 **[Config Builder](https://rar.github.io/esphome-tigomonitor/config-builder/)** — generate a ready-to-flash YAML in your browser
+
 ![Dashboard](docs/images/Dashboard.png)
 
 ## Features
@@ -208,8 +210,11 @@ See the [Web Server & API reference](https://rar.github.io/esphome-tigomonitor/g
 
 ## Documentation
 
+Full documentation lives at **[rar.github.io/esphome-tigomonitor](https://rar.github.io/esphome-tigomonitor/)** (search, dark mode, and the in-browser config builder).
+
 | Document | Description |
 |----------|-------------|
+| [Config Builder](https://rar.github.io/esphome-tigomonitor/config-builder/) | Generate a ready-to-flash ESPHome YAML for your board |
 | [Wiring Guide](https://rar.github.io/esphome-tigomonitor/guides/wiring/) | RS485 connection to Tigo CCA/TAP |
 | [Configuration Guide](https://rar.github.io/esphome-tigomonitor/guides/configuration/) | Full configuration options |
 | [Web Server](https://rar.github.io/esphome-tigomonitor/guides/web-server/) | SPA + API reference |

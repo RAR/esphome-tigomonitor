@@ -26,7 +26,8 @@
 # `esp32_ble_tracker.h` still `#include`s it without requiring the `bt`
 # component — so any BLE build (`cca_source: ble`/`auto`) fails with
 # `fatal error: esp_bt_defs.h: No such file or directory` (see issue #33,
-# docs/TROUBLESHOOTING.md). Upstream ESPHome × IDF-6 issue, not ours. BLE builds
+# https://rar.github.io/esphome-tigomonitor/guides/troubleshooting/). Upstream
+# ESPHome × IDF-6 issue, not ours. BLE builds
 # must stay on `version: recommended` (IDF 5.5.4). This monitor-only config still
 # compiles on 6.0.x because it pulls in no BLE.
 #

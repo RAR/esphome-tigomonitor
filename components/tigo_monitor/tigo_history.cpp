@@ -41,7 +41,7 @@ static int16_t enc_dhz_(float hz) { return enc_clamp_(hz * 10.0f); }
 
 // Schema for system.tsdb — system + per-inverter rollups, 5-min cadence.
 // Order is fixed once data has been written; appending requires migration.
-// See docs/tsdb-integration.md for unit/scaling reference.
+// See https://rar.github.io/esphome-tigomonitor/guides/tsdb-integration/ for unit/scaling reference.
 static const char *kSystemParamNames[] = {
     "total_p",     "total_e",
     "inv1_p",      "inv1_e",
