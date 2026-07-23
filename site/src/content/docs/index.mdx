@@ -1,0 +1,40 @@
+---
+title: Tigo Monitor
+description: ESPHome component for monitoring Tigo solar optimizers over RS485 — per-panel power, a built-in web UI, and Home Assistant integration.
+template: splash
+hero:
+  tagline: Monitor your Tigo solar optimizers with ESPHome — per-panel voltage, current, and power, a built-in web dashboard, and native Home Assistant sensors.
+  actions:
+    - text: Get Started
+      link: /guides/wiring/
+      icon: right-arrow
+      variant: primary
+    - text: Build a Config
+      link: /config-builder/
+      icon: setting
+    - text: View on GitHub
+      link: https://github.com/RAR/esphome-tigomonitor
+      icon: external
+      variant: minimal
+---
+
+import { Card, CardGrid } from '@astrojs/starlight/components';
+
+<CardGrid stagger>
+  <Card title="Per-panel telemetry" icon="approve-check">
+    Reads Tigo optimizer frames off the RS485 bus and publishes voltage, current,
+    power, and temperature for every panel.
+  </Card>
+  <Card title="Built-in web UI" icon="laptop">
+    A five-page web server with a JSON API — overview, per-string layout, node
+    table, live status, and a YAML view. See the [Web Server &amp; API guide](/guides/web-server/).
+  </Card>
+  <Card title="Home Assistant native" icon="puzzle">
+    Sensors surface directly in Home Assistant over the ESPHome API. See the
+    [Home Assistant guide](/guides/home-assistant/).
+  </Card>
+  <Card title="Config builder" icon="setting">
+    Generate a ready-to-flash ESPHome YAML for your board in the browser —
+    [open the builder](/config-builder/).
+  </Card>
+</CardGrid>
