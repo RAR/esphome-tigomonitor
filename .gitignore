@@ -8,3 +8,8 @@
 
 # Auto-generated from components/tigo_server/web/*.html by __init__.py
 components/tigo_server/web_assets.h
+
+# Astro docs site
+site/node_modules/
+site/dist/
+site/.astro/
