@@ -1,5 +1,5 @@
 # .github/workflows/pages.yml
-name: Config Wizard
+name: Docs Site
 on:
   push:
     branches: [main]
@@ -14,27 +14,32 @@ concurrency:
   group: pages
   cancel-in-progress: true
 jobs:
-  test:
+  build:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: site
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with: { node-version: '22' }
-      # Shell-expanded glob (not quoted): portable across Node versions. Node's
-      # own `**` glob needs Node 21+, so a quoted 'site/test/**/*.test.mjs' fails
-      # on older runners with "Could not find". All test files are flat in site/test/.
-      - run: node --test site/test/*.test.mjs
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: site/package-lock.json
+      - run: npm ci
+      - run: node --test test/*.test.mjs
+      - run: npm run build
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: 'site/dist'
   deploy:
-    needs: test
+    needs: build
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     environment:
       name: github-pages
       url: ${{ steps.deploy.outputs.page_url }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/configure-pages@v5
-      - uses: actions/upload-pages-artifact@v3
-        with: { path: 'site' }
       - id: deploy
         uses: actions/deploy-pages@v4

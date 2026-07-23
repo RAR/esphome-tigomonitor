@@ -189,7 +189,7 @@ Legacy paths (`/`, `/nodes`, `/status`, `/yaml`, `/cca`, `/history`) all 302 to 
 
 ## PSRAM & large installs
 
-**PSRAM is required for 15+ devices.** The recommended M5Stack AtomS3R has it; on a generic ESP32-S3 (e.g. DevKitC-1) enable the `psram:` component. The full board blocks — octal-mode sdkconfig flags, the erase-flash-when-enabling-PSRAM caveat, and internal-RAM tuning for 30+ device arrays (`CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP`, entity-count budgeting, UART buffer sizing) — live in the [Configuration Guide → ESP-IDF framework & PSRAM](docs/CONFIGURATION.md#esp-idf-framework). Ready-to-flash examples are in [`boards/`](boards/).
+**PSRAM is required for 15+ devices.** The recommended M5Stack AtomS3R has it; on a generic ESP32-S3 (e.g. DevKitC-1) enable the `psram:` component. The full board blocks — octal-mode sdkconfig flags, the erase-flash-when-enabling-PSRAM caveat, and internal-RAM tuning for 30+ device arrays (`CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP`, entity-count budgeting, UART buffer sizing) — live in the [Configuration Guide → ESP-IDF framework & PSRAM](https://rar.github.io/esphome-tigomonitor/guides/configuration/#esp-idf-framework). Ready-to-flash examples are in [`boards/`](boards/).
 
 ## API Endpoints
 
@@ -204,19 +204,19 @@ All endpoints return JSON with optional Bearer-token auth. Common ones:
 | `/api/config` | Runtime config values; POST to set/revert (Device Configuration) |
 | `/api/health` | Health check (no auth) |
 
-See the [Web Server & API reference](docs/WEB_SERVER_README.md#api-endpoints) for the full endpoint list (reads, writes, payloads) and the `button:` management actions.
+See the [Web Server & API reference](https://rar.github.io/esphome-tigomonitor/guides/web-server/#api-endpoints) for the full endpoint list (reads, writes, payloads) and the `button:` management actions.
 
 ## Documentation
 
 | Document | Description |
 |----------|-------------|
-| [Wiring Guide](docs/WIRING.md) | RS485 connection to Tigo CCA/TAP |
-| [Configuration Guide](docs/CONFIGURATION.md) | Full configuration options |
-| [Web Server](docs/WEB_SERVER_README.md) | SPA + API reference |
-| [TSDB Integration](docs/tsdb-integration.md) | On-flash time-series history (esp_tsdb) |
-| [Troubleshooting](docs/TROUBLESHOOTING.md) | Common issues and solutions |
-| [Home Assistant](docs/HOME_ASSISTANT.md) | HA integration and dashboards |
-| [UART Optimization](docs/UART_OPTIMIZATION.md) | Reducing packet loss |
+| [Wiring Guide](https://rar.github.io/esphome-tigomonitor/guides/wiring/) | RS485 connection to Tigo CCA/TAP |
+| [Configuration Guide](https://rar.github.io/esphome-tigomonitor/guides/configuration/) | Full configuration options |
+| [Web Server](https://rar.github.io/esphome-tigomonitor/guides/web-server/) | SPA + API reference |
+| [TSDB Integration](https://rar.github.io/esphome-tigomonitor/guides/tsdb-integration/) | On-flash time-series history (esp_tsdb) |
+| [Troubleshooting](https://rar.github.io/esphome-tigomonitor/guides/troubleshooting/) | Common issues and solutions |
+| [Home Assistant](https://rar.github.io/esphome-tigomonitor/guides/home-assistant/) | HA integration and dashboards |
+| [UART Optimization](https://rar.github.io/esphome-tigomonitor/guides/uart-optimization/) | Reducing packet loss |
 
 ## Project Structure
 
