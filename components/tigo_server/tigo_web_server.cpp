@@ -594,9 +594,22 @@ void TigoWebServer::setup() {
     if (external_temp_sensor_ != nullptr) {
       ESP_LOGI(TAG, "Using configured internal_temperature sensor for die temp");
     } else {
-    // Use a wide measurement range so a hot S3 die (can exceed 80 °C under
-    // load) still reads in-range rather than erroring out and reporting nothing.
-    temperature_sensor_config_t temp_sensor_config = TEMPERATURE_SENSOR_CONFIG_DEFAULT(-10, 110);
+    // The requested range must be fully contained in ONE hardware range — the driver's
+    // temperature_sensor_choose_best_range() looks for a single table entry with
+    // range_min <= requested_min && range_max >= requested_max, and fails the whole
+    // install with ESP_ERR_INVALID_ARG ("Out of testing range") if none matches.
+    // The ESP32-S3 table is {50..125, 20..100, -10..80, -30..50, -40..20}, so the
+    // old -10..110 request matched nothing and the sensor never installed: die temp
+    // read null on every /api/status. Widening it did the opposite of what its
+    // comment claimed.
+    //
+    // -10..80 is a real entry and the most accurate one (±1 °C); it is also what
+    // ESPHome's own internal_temperature platform requests. A hot die is not a
+    // problem: this range is only the starting hint. temperature_sensor_get_celsius()
+    // reports range_changed and calls s_update_tsens_attribute() to follow the
+    // hardware onto another range at read time, and only hard-fails outside the
+    // sensor's absolute -40..125 span.
+    temperature_sensor_config_t temp_sensor_config = TEMPERATURE_SENSOR_CONFIG_DEFAULT(-10, 80);
     esp_err_t err = temperature_sensor_install(&temp_sensor_config, &temp_sensor_handle_);
     if (err == ESP_OK) {
       err = temperature_sensor_enable(temp_sensor_handle_);
