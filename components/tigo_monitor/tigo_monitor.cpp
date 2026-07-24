@@ -353,7 +353,7 @@ psram_vector<NodeTableData> TigoMonitorComponent::snapshot_node_table() const {
   return node_table_;
 }
 
-psram_map<std::string, StringData> TigoMonitorComponent::snapshot_strings() const {
+psram_map<node_string, StringData> TigoMonitorComponent::snapshot_strings() const {
   StateLock lock(state_mutex_);
   return strings_;
 }
@@ -994,8 +994,8 @@ void TigoMonitorComponent::process_27_frame(const frame_string &hex_frame, size_
     pos += 20;
     
     // Only create strings when actually needed for storage/comparison
-    std::string long_addr(long_addr_buf);
-    std::string addr(addr_buf);
+    node_string long_addr(long_addr_buf);
+    node_string addr(addr_buf);
     
     ESP_LOGD(TAG, "Frame 27 - Device Identity: addr=%s, long_addr=%s", 
              addr.c_str(), long_addr.c_str());
@@ -1016,7 +1016,7 @@ void TigoMonitorComponent::process_27_frame(const frame_string &hex_frame, size_
         new_node.addr = addr;
         new_node.long_address = long_addr;
         // Store checksum as single-char string without temporary allocation
-        char crc_char = compute_tigo_crc4(addr);
+        char crc_char = compute_tigo_crc4(to_std_string(addr));
         new_node.checksum.assign(1, crc_char);
         new_node.sensor_index = -1;  // Will be assigned when device becomes active
         new_node.is_persistent = true;
@@ -1074,7 +1074,7 @@ void TigoMonitorComponent::process_27_frame(const frame_string &hex_frame, size_
       // Always publish the barcode sensor when Frame 27 data arrives
       auto barcode_it = barcode_sensors_.find(addr);
       if (barcode_it != barcode_sensors_.end()) {
-        barcode_it->second->publish_state(long_addr);
+        barcode_it->second->publish_state(to_std_string(long_addr));
         ESP_LOGD(TAG, "Published Frame 27 long address for %s: %s", addr.c_str(), long_addr.c_str());
       }
     } else {
@@ -1133,7 +1133,7 @@ void TigoMonitorComponent::update_device_data(const DeviceData &data) {
     
     // Load saved peak power for this device
     DeviceData* new_device = &devices_.back();
-    std::string pref_key = "peak_" + data.addr;
+    std::string pref_key = "peak_" + to_std_string(data.addr);
     uint32_t hash = esphome::fnv1_hash(pref_key);
     auto load = this->cached_pref_<float>(hash);
     float saved_peak = 0.0f;
@@ -1180,7 +1180,7 @@ void TigoMonitorComponent::update_device_data(const DeviceData &data) {
   }
 }
 
-DeviceData* TigoMonitorComponent::find_device_by_addr(const std::string &addr) {
+DeviceData* TigoMonitorComponent::find_device_by_addr(const node_string &addr) {
   for (auto &device : devices_) {
     if (device.addr == addr) {
       return &device;
@@ -1205,7 +1205,7 @@ void TigoMonitorComponent::rebuild_string_groups() {
   ESP_LOGI(TAG, "%d nodes have CCA validation", cca_validated_count);
   
   // Clear existing string data but preserve peak power
-  std::map<std::string, float> saved_peaks;
+  std::map<node_string, float> saved_peaks;
   for (const auto &pair : strings_) {
     saved_peaks[pair.first] = pair.second.peak_power;
   }
@@ -1216,7 +1216,7 @@ void TigoMonitorComponent::rebuild_string_groups() {
   // authoritative even without cca_validated (#18).
   for (const auto &node : node_table_) {
     if (!node.cca_string_label.empty()) {
-      const std::string &string_label = node.cca_string_label;
+      const node_string &string_label = node.cca_string_label;
       
       // Create string entry if it doesn't exist
       if (strings_.find(string_label) == strings_.end()) {
@@ -1355,7 +1355,10 @@ void TigoMonitorComponent::update_string_data() {
 void TigoMonitorComponent::add_inverter(const std::string &name, const std::vector<std::string> &mppt_labels) {
   InverterData inverter;
   inverter.name = name;
-  inverter.mppt_labels = mppt_labels;
+  inverter.mppt_labels.clear();
+  inverter.mppt_labels.reserve(mppt_labels.size());
+  for (const auto &l : mppt_labels)
+    inverter.mppt_labels.push_back(to_node_string(l));
 
   // Pull any previously-saved display name out of NVS. Keyed by canonical name
   // so renames stick across reboots even if the YAML is untouched.
@@ -1402,7 +1405,7 @@ bool TigoMonitorComponent::set_inverter_display_name(const std::string &canonica
 
 bool TigoMonitorComponent::set_string_panel_rating(const std::string &canonical,
                                                   uint16_t rating_w) {
-  auto it = strings_.find(canonical);
+  auto it = strings_.find(to_node_string(canonical));
   if (it == strings_.end()) {
     ESP_LOGW(TAG, "set_string_panel_rating: no string matches '%s'", canonical.c_str());
     return false;
@@ -1421,7 +1424,7 @@ bool TigoMonitorComponent::set_string_panel_rating(const std::string &canonical,
 
 bool TigoMonitorComponent::set_string_display_label(const std::string &canonical,
                                                    const std::string &display_label) {
-  auto it = strings_.find(canonical);
+  auto it = strings_.find(to_node_string(canonical));
   if (it == strings_.end()) {
     ESP_LOGW(TAG, "set_string_display_label: no string matches '%s'", canonical.c_str());
     return false;
@@ -1475,7 +1478,7 @@ void TigoMonitorComponent::update_inverter_data() {
 }
 
 StringData* TigoMonitorComponent::find_string_by_label(const std::string &label) {
-  auto it = strings_.find(label);
+  auto it = strings_.find(to_node_string(label));
   if (it != strings_.end()) {
     return &it->second;
   }
@@ -1619,7 +1622,7 @@ void TigoMonitorComponent::publish_sensor_data() {
   
   for (size_t i = 0; i < devices_.size(); i++) {
     auto &device = devices_[i];
-    std::string device_id = device.barcode.empty() ? ("mod#" + device.addr) : device.barcode;
+    node_string device_id = device.barcode.empty() ? (node_string("mod#") + device.addr) : device.barcode;
     
     // Publish voltage input sensor
     auto voltage_in_it = voltage_in_sensors_.find(device.addr);
@@ -1693,7 +1696,7 @@ void TigoMonitorComponent::publish_sensor_data() {
     // Publish barcode text sensor
     auto barcode_it = barcode_sensors_.find(device.addr);
     if (barcode_it != barcode_sensors_.end()) {
-      barcode_it->second->publish_state(device.barcode);
+      barcode_it->second->publish_state(to_std_string(device.barcode));
       ESP_LOGD(TAG, "Published barcode for %s: %s", device.addr.c_str(), device.barcode.c_str());
     }
 
@@ -1708,7 +1711,7 @@ void TigoMonitorComponent::publish_sensor_data() {
     // Publish firmware version text sensor
     auto firmware_version_it = firmware_version_sensors_.find(device.addr);
     if (firmware_version_it != firmware_version_sensors_.end()) {
-      firmware_version_it->second->publish_state(device.firmware_version);
+      firmware_version_it->second->publish_state(to_std_string(device.firmware_version));
       ESP_LOGD(TAG, "Published firmware version for %s: %s", device.addr.c_str(), device.firmware_version.c_str());
     }
 
@@ -1965,7 +1968,7 @@ void TigoMonitorComponent::publish_sensor_data() {
     ESP_LOGD(TAG, "Publishing saved data for node %s (no runtime data yet)", node.addr.c_str());
     
     // Try to load saved peak power for this node
-    std::string pref_key = "peak_" + node.addr;
+    std::string pref_key = "peak_" + to_std_string(node.addr);
     uint32_t hash = esphome::fnv1_hash(pref_key);
     auto load = this->cached_pref_<float>(hash);
     float saved_peak = 0.0f;
@@ -2020,7 +2023,7 @@ void TigoMonitorComponent::publish_sensor_data() {
     
     auto barcode_it = barcode_sensors_.find(node.addr);
     if (barcode_it != barcode_sensors_.end()) {
-      barcode_it->second->publish_state(node.long_address);
+      barcode_it->second->publish_state(to_std_string(node.long_address));
     }
     
     auto duty_cycle_it = duty_cycle_sensors_.find(node.addr);
@@ -2297,7 +2300,7 @@ void TigoMonitorComponent::print_device_mappings() {
               [](const auto& a, const auto& b) { return a.sensor_index < b.sensor_index; });
     
     for (const auto& node : sorted_nodes) {
-      std::string info = "Device Address " + node.addr;
+      std::string info = "Device Address " + to_std_string(node.addr);
       
       // Add Frame 27 long address (only barcode source)
       if (!node.long_address.empty()) {
@@ -2320,7 +2323,7 @@ void TigoMonitorComponent::print_device_mappings() {
   if (!unassigned_nodes.empty()) {
     ESP_LOGI(TAG, "Discovered devices without sensor assignments (%d):", unassigned_nodes.size());
     for (const auto& node : unassigned_nodes) {
-      std::string info = "Device " + node.addr;
+      std::string info = "Device " + to_std_string(node.addr);
       if (!node.long_address.empty()) {
         info += " (barcode: " + node.long_address + ")";
       }
@@ -2340,7 +2343,8 @@ void TigoMonitorComponent::print_device_mappings() {
         status = "mapped to Tigo " + std::to_string(node->sensor_index + 1);
       }
       
-      std::string name = device.barcode.empty() ? ("mod#" + device.addr) : device.barcode;
+      std::string name = device.barcode.empty() ? ("mod#" + to_std_string(device.addr))
+                                                 : to_std_string(device.barcode);
       std::string data_sources = "";
       if (node != nullptr && !node->long_address.empty()) {
         data_sources = " [Frame27]";
@@ -2790,7 +2794,7 @@ bool TigoMonitorComponent::remove_node(uint16_t addr) {
   auto it = std::find_if(node_table_.begin(), node_table_.end(),
     [&addr_str](const NodeTableData &node) {
       // Convert both to lowercase for comparison
-      std::string node_addr_lower = node.addr;
+      std::string node_addr_lower = to_std_string(node.addr);
       std::transform(node_addr_lower.begin(), node_addr_lower.end(), node_addr_lower.begin(), ::tolower);
       return node_addr_lower == addr_str;
     });
@@ -2805,7 +2809,7 @@ bool TigoMonitorComponent::remove_node(uint16_t addr) {
   // Remove from created_devices_ cache if it has a sensor index
   if (sensor_index >= 0) {
     std::string device_key = "tigo_" + std::to_string(sensor_index);
-    created_devices_.erase(device_key);
+    created_devices_.erase(to_node_string(device_key));
   }
   
   // Remove from node table
@@ -2910,12 +2914,12 @@ int TigoMonitorComponent::get_next_available_sensor_index() {
 
 std::string TigoMonitorComponent::get_device_name(const DeviceData &device) {
   if (!device.barcode.empty() && device.barcode.length() >= 5) {
-    return "Tigo " + device.barcode;
+    return "Tigo " + to_std_string(device.barcode);
   }
-  return "Tigo Module " + device.addr;
+  return "Tigo Module " + to_std_string(device.addr);
 }
 
-NodeTableData* TigoMonitorComponent::find_node_by_addr(const std::string &addr) {
+NodeTableData* TigoMonitorComponent::find_node_by_addr(const node_string &addr) {
   for (auto &node : node_table_) {
     if (node.addr == addr) {
       return &node;
@@ -2924,7 +2928,7 @@ NodeTableData* TigoMonitorComponent::find_node_by_addr(const std::string &addr) 
   return nullptr;
 }
 
-void TigoMonitorComponent::assign_sensor_index_to_node(const std::string &addr) {
+void TigoMonitorComponent::assign_sensor_index_to_node(const node_string &addr) {
   NodeTableData* node = find_node_by_addr(addr);
   
   if (node == nullptr) {
@@ -3223,7 +3227,7 @@ void TigoMonitorComponent::refresh_cca_data() {
   query_cca_config();
 }
 
-std::string TigoMonitorComponent::get_barcode_for_node(const NodeTableData &node) {
+node_string TigoMonitorComponent::get_barcode_for_node(const NodeTableData &node) {
   // Only use Frame 27 long address (16-char barcode)
   // Frame 09 barcodes are ignored to prevent duplicate entries
   if (!node.long_address.empty() && node.long_address.length() == 16) {
@@ -3413,7 +3417,7 @@ void TigoMonitorComponent::match_cca_to_uart(const char *json_response) {
       // Try to match with UART-discovered nodes
       bool matched = false;
       for (auto &node : node_table_) {
-        std::string uart_barcode = get_barcode_for_node(node);
+        node_string uart_barcode = get_barcode_for_node(node);
         if (uart_barcode.empty()) continue;
         
         // Match: CCA serial should contain or equal UART barcode
@@ -3669,7 +3673,7 @@ void TigoMonitorComponent::snapshot_to_history_() {
     // yet) are skipped — they'll get a slot assignment on the next snapshot.
     for (const auto &d : devices_) {
       if (d.barcode.size() < 6) continue;
-      std::string key = d.barcode.substr(d.barcode.size() - 6);
+      std::string key = to_std_string(d.barcode).substr(d.barcode.size() - 6);
       uint8_t slot = history_.get_or_assign_slot(key);
       if (slot >= kMaxPanelSlots) continue;  // table full
       snap.panel_p_w[slot] = d.power_in;
