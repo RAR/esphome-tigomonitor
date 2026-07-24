@@ -17,6 +17,7 @@
 #include "freertos/queue.h"
 #include "freertos/task.h"
 
+#include <atomic>
 #include <cstdint>
 #include <functional>
 #include <string>
@@ -99,6 +100,12 @@ class TigoHistory {
 
   bool initialized() const { return initialized_; }
 
+  // Pause/resume the writer's flash writes around an OTA. Set true on OTA start
+  // so the writer skips its littlefs writes (which otherwise collide with the
+  // OTA image write on the same flash chip and fault); cleared on OTA abort.
+  // Written from the OTA task, read from the writer task — hence atomic.
+  void set_ota_active(bool active) { ota_active_.store(active, std::memory_order_relaxed); }
+
   // Drains the writer queue (best-effort, with timeout) and closes every open
   // tsdb_t handle. Called from TigoMonitorComponent::on_shutdown() so that
   // user-initiated reboots (incl. /api/restart) commit pending writes to
@@ -136,6 +143,8 @@ class TigoHistory {
   bool save_slot_map_();
 
   bool initialized_{false};
+  // True while an OTA is running — makes the writer task skip flash writes.
+  std::atomic<bool> ota_active_{false};
   // Per-instance handles from the v2.1 multi-DB API. system_db_ holds the
   // 14-param rollups; panel_db_[i] each hold 16 panel powers. Striping across
   // multiple panel DBs sidesteps esp_tsdb's 16-base-param limit.

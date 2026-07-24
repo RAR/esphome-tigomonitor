@@ -233,6 +233,18 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   void update() override;
   void dump_config() override;
   void on_shutdown() override;
+
+  // Forwarded to TigoHistory so an OTA can quiesce TSDB flash writes. Kept
+  // unconditional (no #ifdef) so YAML that calls it always compiles; it is a
+  // no-op when the on-flash history feature isn't built in.
+  void set_ota_active(bool active) {
+#ifdef TIGO_TSDB_AVAILABLE
+    history_.set_ota_active(active);
+#else
+    (void) active;
+#endif
+  }
+
   float get_setup_priority() const override;
 
   // Device name helper

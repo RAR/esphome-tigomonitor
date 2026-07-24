@@ -384,8 +384,22 @@ bool TigoHistory::start_writer_task() {
   // in practice. Three back-to-back writes per drain (system + 2x panels)
   // adds peak depth but stays well under 8 KB; soak shows ~3.5 KB hwm.
   // Priority 1 matches the main app task, well below UART.
-  BaseType_t ok = xTaskCreate(&TigoHistory::writer_task_entry_, "tsdb_writer",
-                              8192, this, 1, &task_);
+  //
+  // PINNED TO CORE 1 (the ESPHome loop_task core) on purpose. This task's
+  // LittleFS writes erase/program flash, which disables the instruction cache
+  // on BOTH cores for the duration. If the writer floats to core 0 while
+  // loop_task on core 1 is mid-read inside the UART ring buffer
+  // (uart_read_bytes -> xRingbufferReceiveUpTo, code that lives in flash, not
+  // IRAM), that core faults the instant the cache drops — the observed
+  // "Fault - Unknown" in vPortExitCritical / prvReceiveGeneric. CONFIG_
+  // UART_ISR_IN_IRAM only covers the ISR, not this task-context ring read.
+  // Co-locating the writer with loop_task serializes them onto one core so
+  // they can never execute concurrently; the flash op then only stalls core 0
+  // (WiFi, kept IRAM-safe via CONFIG_ESP_WIFI_*_IRAM_OPT). Pairs with
+  // CONFIG_SPI_FLASH_AUTO_SUSPEND as defense in depth.
+  BaseType_t ok = xTaskCreatePinnedToCore(&TigoHistory::writer_task_entry_,
+                              "tsdb_writer", 8192, this, 1, &task_,
+                              1 /* core 1 = ESPHome loop_task core */);
   if (ok != pdPASS) {
     ESP_LOGE(TAG, "Failed to create tsdb writer task");
     vQueueDelete(queue_);
@@ -436,6 +450,12 @@ int TigoHistory::iterate_power(uint32_t start_ts, uint32_t end_ts,
                                const PowerRowCb &cb) {
   if (!initialized_)
     return -1;
+  // An in-flight OTA is writing flash; a concurrent littlefs read here hits the
+  // same flash-vs-OTA collision that faults the writer (the decoded crash was in
+  // lfs_bd_read). Bail so a dashboard poll during OTA can't crash the device —
+  // the web layer returns an error and the chart retries after the OTA (~15 s).
+  if (ota_active_.load(std::memory_order_relaxed))
+    return -1;
   if (end_ts < start_ts)
     return 0;
 
@@ -465,6 +485,7 @@ int TigoHistory::iterate_power(uint32_t start_ts, uint32_t end_ts,
 int TigoHistory::iterate_panel(uint8_t slot, uint32_t start_ts, uint32_t end_ts,
                                const PanelRowCb &cb) {
   if (!initialized_) return -1;
+  if (ota_active_.load(std::memory_order_relaxed)) return -1;  // see iterate_power: no littlefs reads during OTA
   if (slot >= kMaxPanelSlots) return -1;
   if (end_ts < start_ts) return 0;
 
@@ -512,6 +533,18 @@ void TigoHistory::writer_task_loop_() {
       vTaskDelete(nullptr);
       return;  // not reached
     }
+
+    // While an OTA is running, skip this snapshot's flash writes entirely — the
+    // writer's littlefs fsync (lfs_bd_read) otherwise collides with the OTA
+    // image write on the same flash chip and faults in the cache/flash path.
+    // Dropping a sample or two during the ~15 s OTA window is harmless (on OTA
+    // success the device reboots anyway).
+    if (ota_active_.load(std::memory_order_relaxed)) {
+      ESP_LOGD(TAG, "OTA in progress — skipping tsdb write @ %lu",
+               (unsigned long) row.timestamp);
+      continue;
+    }
+
     uint32_t t0 = (uint32_t) (esp_timer_get_time() / 1000);
 
     esp_err_t err = tsdb_write_h(system_db_, row.timestamp, row.system_values);
@@ -603,34 +636,32 @@ void TigoHistory::flush_and_close() {
     task_ = nullptr;
   }
 
-  // Close each open tsdb_t. tsdb_close_h calls fclose on the underlying
-  // FILE*, which is what triggers esp_littlefs's per-file commit. After
-  // tsdb_close_h the handle is freed — null the pointer so any racing
-  // /api/tsdb/stats during shutdown returns "no DB" instead of UAF.
-  if (system_db_ != nullptr) {
-    tsdb_close_h(system_db_);
-    system_db_ = nullptr;
-  }
-  for (size_t i = 0; i < kNumPanelDbs; ++i) {
-    if (panel_db_[i] == nullptr) continue;
-    tsdb_close_h(panel_db_[i]);
-    panel_db_[i] = nullptr;
-  }
-
-  // Unmount LittleFS. Per-file fclose commits inode metadata, but the
-  // **filesystem journal** (block allocation map, dir-entry table) only
-  // commits on operations that touch the directory tree — and the tsdb
-  // files re-use one inode for their entire lifetime, so the journal can
-  // sit uncommitted across many writes. esp_vfs_littlefs_unregister()
-  // calls lfs_unmount which does the final journal commit. Without this
-  // every restart wipes the tsdb files; panel_map.json survives only
-  // because save_slot_map_ creates a fresh file each save (the dir-entry
-  // op forces a journal commit as a side effect).
-  esp_err_t uerr = esp_vfs_littlefs_unregister("tsdb");
-  if (uerr != ESP_OK) {
-    ESP_LOGW(TAG, "flush_and_close: LittleFS unmount failed: %s",
-             esp_err_to_name(uerr));
-  }
+  // Deliberately SKIP the heavy clean close (tsdb_close_h + littlefs unmount).
+  //
+  // Durability does not depend on it: the writer runs commit_journal_() after
+  // every snapshot — a dir-entry rewrite that forces LittleFS to commit its
+  // block-allocation journal — so every record but the one in-flight row is
+  // already on flash, and LittleFS's next mount is crash-safe by design (an
+  // unclean unmount is a handled case, not data loss).
+  //
+  // Why skip it: both tsdb_close_h (per-file fclose + header write) and
+  // esp_vfs_littlefs_unregister (lfs_unmount, which can run a multi-second
+  // GC/deorphan pass) are flash operations. on_shutdown() runs them from the
+  // reboot path — and on this rig (WiFi+BLE coex, tsdb+LittleFS on internal
+  // flash) that unmount intermittently panics with a "Fault - Unknown", most
+  // visibly on the reboot that applies an OTA (flash is busiest just after the
+  // new image is written). The OTA's boot partition is already committed before
+  // shutdown hooks run, so the new image still boots — but panicking on every
+  // reboot is a real defect, and the work is redundant: the writer handshake
+  // above guarantees the last real write completed and was journal-committed,
+  // so there is nothing left to flush. Removing it takes the fragile heavy
+  // flash op out of the reboot path entirely.
+  //
+  // Null the handles WITHOUT freeing (we are about to esp_restart, so the
+  // leak is irrelevant) — a racing /api/tsdb/stats then sees "no DB" instead
+  // of touching a torn-down handle, and since we never free there is no UAF.
+  system_db_ = nullptr;
+  for (size_t i = 0; i < kNumPanelDbs; ++i) panel_db_[i] = nullptr;
   initialized_ = false;
 }
 

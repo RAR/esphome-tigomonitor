@@ -245,15 +245,24 @@ void TigoMonitorComponent::setup() {
 #ifdef TIGO_TSDB_AVAILABLE
   // Open the time-series database. Mounts LittleFS on the `tsdb` partition
   // and creates system.tsdb if absent. On success, start the writer task and
-  // schedule a 5-min snapshot interval.
+  // schedule the snapshot interval.
+  //
+  // 30-min cadence (was 5-min): every flash write forces the ESP-IDF cross-core
+  // cache-disable/CPU-stall (spi_flash_disable_interrupts_caches_and_other_cpu),
+  // which intermittently faults under WiFi/BLE coex (the "Fault - Unknown" crash
+  // class). Crash exposure scales with flash-op frequency, so coarsening the
+  // snapshot cadence 6x cuts the race windows ~6x. period_e_kwh is energy-since-
+  // last-snapshot (interval-agnostic — totals stay correct), and the 5400-record
+  // ring now spans ~108 days instead of ~18. Pairs with the BLE scan-off. To
+  // restore 5-min resolution, esp_tsdb needs a deferred-sync write path.
   if (history_.init() && history_.start_writer_task()) {
     last_snapshot_total_e_kwh_ = total_energy_in_kwh_;
     for (size_t i = 0; i < 4; ++i)
       last_snapshot_inv_e_kwh_[i] = (i < inverters_.size()) ? inverters_[i].total_energy : 0.0f;
     last_snapshot_frames_lost_ = missed_frame_count_;
-    this->set_interval("tsdb_snapshot", 5UL * 60UL * 1000UL,
+    this->set_interval("tsdb_snapshot", 30UL * 60UL * 1000UL,
                        [this]() { this->snapshot_to_history_(); });
-    ESP_LOGI(TAG, "tsdb snapshot interval armed (every 5 min)");
+    ESP_LOGI(TAG, "tsdb snapshot interval armed (every 30 min)");
   } else {
     ESP_LOGW(TAG, "Time-series history disabled — sensor data still publishes normally");
   }
