@@ -51,6 +51,12 @@ esp32:
       # ~18.6KB internal-heap floor. Orthogonal to require_mbedtls_sha512()
       # (that only re-enables SHA-384/512 algorithms, not the allocator mode).
       CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC: "y"
+      # VFS directory operations (stat/unlink/rename/opendir). IDF compiles these
+      # out by default, which is why the History "size" column read 0 for every
+      # database: esp_tsdb derives tsdb_stats_t.storage_bytes from stat(), and
+      # esp_tsdb's own corruption-recovery unlink() paths silently no-op without
+      # it. fopen/fread/fwrite live under VFS_SUPPORT_IO and always worked.
+      CONFIG_VFS_SUPPORT_DIR: "y"
       # More lwIP sockets for the web server + API + cloud running together
       # (avoids "Failed to create socket" under load, #20). Safe here since the
       # buffers land in PSRAM via SPIRAM_TRY_ALLOCATE_WIFI_LWIP above.
