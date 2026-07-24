@@ -3673,17 +3673,35 @@ esp_err_t TigoWebServer::api_tsdb_stats_handler(httpd_req_t *req) {
   snprintf(buf, sizeof(buf), "%zu", tigo_monitor::kMaxPanelSlots); json.append(buf);
   json.append("},\"databases\":[");
 
-  // Per-DB stats. tsdb_get_stats_h returns ESP_ERR_INVALID_STATE for nullptr,
-  // so we skip lazy-unopened panel DBs (which is the right behavior — they
-  // have nothing to report yet).
-  auto append_db = [&](const char *label, tsdb_t *db, bool first) {
+  // Per-DB stats. A nullptr handle is a lazy-unopened panel DB — genuinely nothing to
+  // report, so it gets no row at all. A tsdb_get_stats_h failure is a different thing:
+  // the database exists, but its mutex was still held by the writer task when the 5 s
+  // timeout expired ("tsdb_get_stats_h: lock timeout" — the writer holds it across
+  // tsdb_sync_h's fclose/fopen). That used to drop the row entirely, so the table
+  // silently lost a database with no indication why. Emit the row with null fields
+  // instead and let the page render "—".
+  //
+  // `first` is owned by the lambda rather than the caller: the old version had the
+  // caller clear it unconditionally, so a skipped *first* database emitted a leading
+  // comma and produced invalid JSON.
+  bool first = true;
+  auto append_db = [&](const char *label, tsdb_t *db) {
     if (db == nullptr) return;
     tsdb_stats_t stats = {};
-    if (tsdb_get_stats_h(db, &stats) != ESP_OK) return;
+    esp_err_t stats_err = tsdb_get_stats_h(db, &stats);
     if (!first) json.append(",");
+    first = false;
     json.append("{\"label\":\"");
     json.append(label);
-    json.append("\",\"records\":");
+    if (stats_err != ESP_OK) {
+      json.append("\",\"available\":false,\"error\":\"");
+      json.append(esp_err_to_name(stats_err));
+      json.append("\",\"records\":null,\"max_records\":null,\"writes\":null,"
+                  "\"evictions\":null,\"oldest_ts\":null,\"newest_ts\":null,"
+                  "\"size_bytes\":null,\"params\":null}");
+      return;
+    }
+    json.append("\",\"available\":true,\"records\":");
     snprintf(buf, sizeof(buf), "%lu", (unsigned long) stats.total_records); json.append(buf);
     json.append(",\"max_records\":");
     snprintf(buf, sizeof(buf), "%lu", (unsigned long) stats.max_records); json.append(buf);
@@ -3702,18 +3720,13 @@ esp_err_t TigoWebServer::api_tsdb_stats_handler(httpd_req_t *req) {
     json.append("}");
   };
 
-  bool first = true;
-  if (hist->system_db() != nullptr) {
-    append_db("system", hist->system_db(), first);
-    first = false;
-  }
+  append_db("system", hist->system_db());
   for (size_t i = 0; i < hist->panel_db_count(); ++i) {
     tsdb_t *db = hist->panel_db(i);
     if (db == nullptr) continue;
     char label[16];
     snprintf(label, sizeof(label), "panels%zu", i);
-    append_db(label, db, first);
-    first = false;
+    append_db(label, db);
   }
 
   json.append("]}");

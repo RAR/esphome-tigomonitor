@@ -2817,17 +2817,26 @@
           `LittleFS ${fmtKB(t.littlefs.used)} / ${fmtKB(t.littlefs.total)} KB (${fsPct}%) · ` +
           `${t.slots.used}/${t.slots.max} slots assigned`;
         let html = '';
+        // A database whose stats call timed out (writer held the mutex) comes back with
+        // available:false and null fields — render "—" rather than NaN, and say why in
+        // the range column, so the row is visibly present-but-unreadable instead of gone.
+        const num = (v) => (v === null || v === undefined) ? '—' : v.toLocaleString();
         for (const db of (t.databases || [])) {
-          const range = db.oldest_ts > 0
-            ? `${fmtTimestamp(db.oldest_ts)} → ${fmtTimestamp(db.newest_ts)}`
-            : '—';
+          const range = db.available === false
+            ? `stats unavailable (${db.error || 'error'})`
+            : (db.oldest_ts > 0
+                ? `${fmtTimestamp(db.oldest_ts)} → ${fmtTimestamp(db.newest_ts)}`
+                : '—');
+          const params = (db.params === null || db.params === undefined) ? '?p' : `${db.params}p`;
+          const size = (db.size_bytes === null || db.size_bytes === undefined)
+            ? '—' : fmtKB(db.size_bytes);
           html += `<tr>
-            <td><strong>${db.label}</strong> <span class="mono">(${db.params}p)</span></td>
-            <td class="num">${db.records.toLocaleString()}</td>
-            <td class="num">${db.max_records.toLocaleString()}</td>
-            <td class="num">${db.writes.toLocaleString()}</td>
-            <td class="num">${db.evictions.toLocaleString()}</td>
-            <td class="num">${fmtKB(db.size_bytes)}</td>
+            <td><strong>${db.label}</strong> <span class="mono">(${params})</span></td>
+            <td class="num">${num(db.records)}</td>
+            <td class="num">${num(db.max_records)}</td>
+            <td class="num">${num(db.writes)}</td>
+            <td class="num">${num(db.evictions)}</td>
+            <td class="num">${size}</td>
             <td class="mono" style="color:var(--text-dim)">${range}</td>
           </tr>`;
         }
