@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - **ESP32-P4 example configs boot-looped and lacked the 2.0 storage scaffolding** (discussion #31). `boards/esp32p4-evboard.yaml` requested `psram: speed: 200MHz` — an *experimental* PSRAM speed on the P4 — without `enable_idf_experimental_features: yes`, so PSRAM came up unstable and the board crash-looped at boot with `assert failed: … esp_task_stack_is_sane_cache_disabled` (a PSRAM-resident task stack failing on its first flash op, before ESPHome starts). The example now sets the experimental-features flag the 200MHz speed requires (drop to `speed: 80MHz` to run without it). It also gained the pieces the History view needs but the pre-2.0 example never had — `flash_size: 16MB`, `partitions/tigo-16mb.csv`, and the `esp_tsdb` (P4 fork `tigomonitor` ref) + `littlefs` managed components — plus the `esp32_hosted:` ESP32-C6 companion-radio block (the P4 has no native Wi-Fi). `boards/example-p4.yaml` documents that the base include now provides all of this.
 
+### Changed
+- **mbedtls TLS buffers moved to PSRAM** (`CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC`). The cloud (`cloud_import`) TLS path re-parses the pinned CA on every request (keep-alive is off), and mbedtls defaulted its SSL in/out content buffers plus handshake/X.509 state to **internal** heap — dragging the internal-RAM floor down hard during each handshake. Routing mbedtls allocations to PSRAM (dependency satisfied via `SPIRAM_USE_CAPS_ALLOC`) raised the measured idle `min_free_heap` on the AtomS3R reference build from ~50.8 KB to ~62.6 KB (**+~11.8 KB**). Orthogonal to `require_mbedtls_sha512()`, which only re-enables the SHA-384/512 algorithms — not the allocator mode — so the two compose without conflict. Added to `boards/esp32s3-atoms3r.yaml`.
+
 ## [2.0.0-beta.3] - 2026-07-21
 
 ### Fixed
