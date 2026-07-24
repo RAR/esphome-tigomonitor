@@ -18,6 +18,16 @@ export const BOARDS = [
       CONFIG_SPIRAM_MODE_OCT: 'y',
       CONFIG_SPIRAM_SPEED_80M: 'y',
       CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP: 'y',
+      // TLS buffers (SSL in/out content + handshake/X.509 state) to PSRAM. The cloud
+      // path re-parses the pinned CA per request, which otherwise craters the internal
+      // heap floor during each handshake. Requires PSRAM — do not copy to a board
+      // without it.
+      CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC: 'y',
+      // VFS directory ops (stat/unlink/rename/opendir), off by default in IDF.
+      // esp_tsdb reads file sizes via stat(), so without this the History page's
+      // per-database size column reads 0 and esp_tsdb's unlink() recovery paths
+      // silently no-op.
+      CONFIG_VFS_SUPPORT_DIR: 'y',
       // More lwIP sockets for the web server + API + cloud running together
       // (avoids "Failed to create socket" under load, #20). Safe here: the
       // buffers land in PSRAM via SPIRAM_TRY_ALLOCATE_WIFI_LWIP above.
@@ -246,6 +256,9 @@ font:
       CONFIG_FREERTOS_HZ: '1000',
       CONFIG_FREERTOS_QUEUE_REGISTRY_SIZE: '128',
       CONFIG_FREERTOS_USE_TICKLESS_IDLE: 'n',
+      // See the AtomS3R entry — esp_tsdb needs stat() for its size stats, and this
+      // board runs the same History/tsdb stack.
+      CONFIG_VFS_SUPPORT_DIR: 'y',
       CONFIG_LWIP_MAX_SOCKETS: '16',
       CONFIG_LWIP_MAX_ACTIVE_TCP: '16',
       CONFIG_LWIP_MAX_LISTENING_TCP: '16',

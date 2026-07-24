@@ -117,6 +117,27 @@ uart:
 | Without PSRAM | ~10 devices | Not recommended, unstable with web UI |
 | With PSRAM | 36+ devices | Tested stable |
 
+### ESP32 Internal Temperature Reads Nothing
+
+`/api/status` returns `"internal_temp": null` and the Diagnostics view shows no die temperature.
+
+The ESP32 has a single temperature peripheral, and it installs exactly once. Two things break it:
+
+1. **Range must fit one hardware range.** `temperature_sensor_install()` needs the requested range to sit inside a *single* entry of the chip's range table — on the ESP32-S3 that is `{50..125, 20..100, -10..80, -30..50, -40..20}`. A request spanning two entries (e.g. `-10..110`) matches none, fails with `ESP_ERR_INVALID_ARG` ("Out of testing range"), and the sensor never installs. Fixed in 2.0.0-beta.4, which requests `-10..80`. The configured range is only a starting hint — the driver follows the hardware onto another range at read time, so a hot die still reads correctly.
+2. **Another component owns the peripheral.** If you also run ESPHome's `internal_temperature` platform, its install and ours race and the loser reads nothing. Wire the existing sensor into `tigo_server` instead of letting both try:
+
+```yaml
+sensor:
+  - platform: internal_temperature
+    id: die_temp
+    name: "ESP32 Temperature"
+
+tigo_server:
+  internal_temperature_id: die_temp
+```
+
+Look for `Failed to install temperature sensor: <err>` in the boot log to tell the two apart.
+
 ### PSRAM Not Detected After Enabling
 
 **Symptoms:**
@@ -243,6 +264,26 @@ The History view is backed by an on-flash time-series database (`esp_tsdb`) stor
 3. Confirm your config pins `zakery292/esp_tsdb^2.1.0` (or newer) and uses the custom partition table.
 
 See [TSDB Integration](/esphome-tigomonitor/guides/tsdb-integration/) for the schema, sizing, and partition setup.
+
+### Diagnostics Shows 0 KB for Every Database Size
+
+`/api/tsdb/stats` reports `size_bytes: 0` for every database (the Diagnostics table's size column reads `0.0`).
+
+`esp_tsdb` gets the file size from `stat()`, and ESP-IDF leaves **`CONFIG_VFS_SUPPORT_DIR` off by default** — that compiles the VFS directory syscalls out of the build, so `stat()` fails for every path at runtime. `fopen`/`fread`/`fwrite` are unaffected (they live under `VFS_SUPPORT_IO`), which is why the databases themselves work fine and only the size column is dead.
+
+Add to your `esp32: framework: sdkconfig_options:`:
+
+```yaml
+      CONFIG_VFS_SUPPORT_DIR: "y"
+```
+
+Costs about 5.7 KB of flash. The shipped `boards/*.yaml` already set it. It also un-breaks `esp_tsdb`'s corruption-recovery `unlink()` calls, which silently no-op without it.
+
+### A Database Row Says "stats unavailable"
+
+The Diagnostics table shows `—` for a database's counters and `stats unavailable (ESP_ERR_TIMEOUT)` in the range column, and the log has `E TSDB_CORE: tsdb_get_stats_h: lock timeout`.
+
+Not an error condition. `tsdb_get_stats_h()` takes the per-database mutex with a 5-second timeout, and the writer task holds that mutex across `tsdb_sync_h()`'s `fclose`/`fopen`. A stats poll that lands on a flush gives up and the row is rendered as unreadable rather than dropped. It resolves on the next refresh.
 
 ### History View Empty / No `/api/history` Endpoints
 

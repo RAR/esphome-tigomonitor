@@ -69,6 +69,11 @@ esp32:
       CONFIG_FREERTOS_USE_TICKLESS_IDLE: "n"
       
       # Increase lwIP sockets for HTTP operations
+      # VFS directory operations (stat/unlink/rename/opendir), off by default in IDF.
+      # esp_tsdb derives tsdb_stats_t.storage_bytes from stat(), so without this the
+      # History page's per-database size column reads 0; esp_tsdb's corruption-recovery
+      # unlink() paths silently no-op too. ~5.7 KB flash.
+      CONFIG_VFS_SUPPORT_DIR: "y"
       CONFIG_LWIP_MAX_SOCKETS: "16"
       CONFIG_LWIP_MAX_ACTIVE_TCP: "16"
       CONFIG_LWIP_MAX_LISTENING_TCP: "16"

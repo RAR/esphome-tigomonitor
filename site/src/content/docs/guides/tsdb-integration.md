@@ -146,13 +146,20 @@ The SPA's History view and the JSON API both pull from `/api/history/power` (sys
 
 The Diagnostics view consumes `/api/tsdb/stats` to render the database table (records / max records / writes / evictions / size / range).
 
+Two things to know about that endpoint:
+
+- **File sizes need `CONFIG_VFS_SUPPORT_DIR: "y"`.** `esp_tsdb` derives `storage_bytes` from `stat()`, which IDF compiles out by default — without the flag every size reads 0. The shipped boards set it.
+- **A database can report `available: false`.** `tsdb_get_stats_h()` takes the per-DB mutex with a 5-second timeout, and the writer task holds that mutex across `tsdb_sync_h()`'s `fclose`/`fopen`. A stats poll landing on a flush logs `tsdb_get_stats_h: lock timeout` and returns `ESP_ERR_TIMEOUT`. The row is still emitted, with `available: false`, an `error` string, and `null` numeric fields; the Diagnostics table renders those as `—` rather than dropping the database from the list. A database that is simply not open yet (lazily-created panel DBs) gets no row at all.
+
 ---
 
 ## Implementation notes
 
 ### Persistence bug fix (upstream PR `zakery292/esp_tsdb#1`)
 
-Empirical: history was being wiped on every reboot even though `tsdb_write_h` does fflush + fsync after every record. Root cause was in `tsdb_open`'s file-existence detection: it called `stat(filepath)` and went down the create-new path on failure. On joltwallet's `esp_littlefs` (1.21.1), `stat()` returns `ENOENT` for files that `fopen("rb")` immediately reads bytes back from — so every boot took the create-new path and `fopen("w+b")` truncated the existing data.
+Empirical: history was being wiped on every reboot even though `tsdb_write_h` does fflush + fsync after every record. Root cause was in `tsdb_open`'s file-existence detection: it called `stat(filepath)` and went down the create-new path on failure — `stat()` failed for files that `fopen("rb")` immediately read bytes back from, so every boot took the create-new path and `fopen("w+b")` truncated the existing data.
+
+> **Corrected 2026-07-24.** This was originally attributed to a quirk of joltwallet's `esp_littlefs` (1.21.1). It was almost certainly not the filesystem: ESP-IDF leaves **`CONFIG_VFS_SUPPORT_DIR` off by default**, which compiles the VFS directory syscalls — `stat`, `unlink`, `rename`, `opendir`, `mkdir` — out of the build entirely. They then fail at runtime for *every* path, while `fopen`/`fread`/`fwrite` (under `VFS_SUPPORT_IO`) keep working. That matches the observed "`stat()` says ENOENT for a file I can read" behaviour exactly, and explains why the fopen-based probe fixed it. The boards now set `CONFIG_VFS_SUPPORT_DIR: "y"`, which also restores `esp_tsdb`'s size reporting and its corruption-recovery `unlink()` paths.
 
 Fix: probe existence by trying `fopen(path, "r+b")` first; fall through to `fopen("w+b")` only if that fails. The slot map (`panel_map.json`) was unaffected because it uses an `open(wb)+write+close` cycle every save, which never hits the bad code path.
 
