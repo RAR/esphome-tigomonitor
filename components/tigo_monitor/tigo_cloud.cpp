@@ -416,9 +416,9 @@ void TigoMonitorComponent::match_cloud_layout_to_uart_(const char *layout_json) 
           for (char &c : serial_up) c = (char) toupper((unsigned char) c);
           bool found = false;
           for (auto &node : node_table_) {
-            std::string bc = get_barcode_for_node(node);
+            node_string bc = get_barcode_for_node(node);
             if (bc.size() < 6) continue;
-            std::string last6 = bc.substr(bc.size() - 6);
+            std::string last6 = to_std_string(bc).substr(bc.size() - 6);
             for (char &c : last6) c = (char) toupper((unsigned char) c);
             if (serial_up.find(last6) == std::string::npos) continue;
             node.cca_label = panel_label;

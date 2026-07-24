@@ -102,6 +102,18 @@ using psram_set = std::set<T, std::less<T>, PSRAMAllocator<T>>;
 
 // PSRAM-backed string using std::basic_string with PSRAMAllocator
 using psram_string = std::basic_string<char, std::char_traits<char>, PSRAMAllocator<char>>;
+
+// Cross-allocator comparison. libstdc++ only defines operator== / operator< for two
+// basic_strings sharing an allocator, but comparing character sequences is entirely
+// allocator-independent — and PSRAM-resident strings are compared against std::string
+// values all over this component. Supplying the missing overloads avoids forcing a copy
+// (which would defeat the point) at every one of those call sites.
+inline bool operator==(const psram_string &a, const std::string &b) {
+  return a.size() == b.size() && (a.empty() || __builtin_memcmp(a.data(), b.data(), a.size()) == 0);
+}
+inline bool operator==(const std::string &a, const psram_string &b) { return b == a; }
+inline bool operator!=(const psram_string &a, const std::string &b) { return !(a == b); }
+inline bool operator!=(const std::string &a, const psram_string &b) { return !(b == a); }
 #endif
 
 namespace esphome {
@@ -119,22 +131,48 @@ using frame_string = psram_string;
 using frame_string = std::string;
 #endif
 
+// Strings stored *inside* the PSRAM-resident containers. psram_vector/psram_map put the
+// container nodes in PSRAM, but a plain std::string member still allocates its buffer from
+// the internal heap the moment it beats libstdc++'s 15-char SSO limit — which long_address
+// (exactly 16 chars) and barcode do on every node, permanently, and which the CCA labels
+// ("East Roof Panel 3") do in practice. At 40 nodes that was ~80 permanent small internal
+// allocations plus the device_addrs/mppt_labels vector buffers: the fragmentation-prone
+// kind. node_string moves them to PSRAM.
+#ifdef USE_ESP_IDF
+using node_string = psram_string;
+template<typename T> using node_vector = psram_vector<T>;
+#else
+using node_string = std::string;
+template<typename T> using node_vector = std::vector<T>;
+#endif
+
+// Explicit conversions for the boundaries where a std::string from ESPHome codegen, an
+// HTTP query, or a cJSON value meets a node_string (and back, for APIs outside this
+// component). Kept explicit so every allocator crossing is visible at the call site.
+#ifdef USE_ESP_IDF
+inline node_string to_node_string(const std::string &s) { return node_string(s.data(), s.size()); }
+inline std::string to_std_string(const node_string &s) { return std::string(s.data(), s.size()); }
+#else
+inline const std::string &to_node_string(const std::string &s) { return s; }
+inline const std::string &to_std_string(const std::string &s) { return s; }
+#endif
+
 static const uint16_t CRC_POLYNOMIAL = 0x8408;  // Reversed polynomial (0x1021 reflected)
 static const size_t CRC_TABLE_SIZE = 256;
 
 struct DeviceData {
-  std::string pv_node_id;
-  std::string addr;
+  node_string pv_node_id;
+  node_string addr;
   float voltage_in;
   float voltage_out;
   uint8_t duty_cycle;
   float current_in;
   float current_out;
   float temperature;
-  std::string slot_counter;
+  node_string slot_counter;
   int rssi;
-  std::string barcode;
-  std::string firmware_version;
+  node_string barcode;
+  node_string firmware_version;
   float efficiency;
   float power_in;
   float power_out;
@@ -152,25 +190,25 @@ struct DeviceData {
 };
 
 struct NodeTableData {
-  std::string long_address;    // Frame 27: 16-character long address (PRIMARY and ONLY barcode source)
-  std::string addr;            // 4-character short address
-  std::string checksum;        // CRC checksum
+  node_string long_address;    // Frame 27: 16-character long address (PRIMARY and ONLY barcode source)
+  node_string addr;            // 4-character short address
+  node_string checksum;        // CRC checksum
   int sensor_index = -1;       // ESPHome sensor index (-1 = unassigned)
   bool is_persistent = false;  // Whether this mapping should be saved to flash
   
   // CCA-sourced metadata (optional, populated via HTTP query)
-  std::string cca_label;          // Friendly name from CCA (e.g., "East Roof Panel 3")
-  std::string cca_string_label;   // Parent string label (e.g., "String 1")
-  std::string cca_inverter_label; // Parent MPPT label (e.g., "MPPT 1" - CCA calls it "Inverter")
-  std::string cca_channel;        // CCA channel identifier
-  std::string cca_object_id;      // CCA's internal object ID (string type)
+  node_string cca_label;          // Friendly name from CCA (e.g., "East Roof Panel 3")
+  node_string cca_string_label;   // Parent string label (e.g., "String 1")
+  node_string cca_inverter_label; // Parent MPPT label (e.g., "MPPT 1" - CCA calls it "Inverter")
+  node_string cca_channel;        // CCA channel identifier
+  node_string cca_object_id;      // CCA's internal object ID (string type)
   bool cca_validated = false;     // True if matched with CCA configuration
 };
 
 struct StringData {
-  std::string string_label;       // Canonical CCA string label (e.g. "String A").
+  node_string string_label;       // Canonical CCA string label (e.g. "String A").
                                   // Immutable identity used for lookup + NVS keys.
-  std::string display_label;      // Optional override saved via /api/strings/rename;
+  node_string display_label;      // Optional override saved via /api/strings/rename;
                                   // empty = fall back to string_label. UI shows
                                   // display_label first.
   uint16_t panel_rating_w = 0;    // Nameplate rating (W) per panel in this string,
@@ -178,8 +216,8 @@ struct StringData {
                                   // the UI then falls back to median-only views.
                                   // Capped at uint16 to fit any realistic panel
                                   // (250-450W typical, 1000W headroom).
-  std::string inverter_label;     // Parent MPPT name (called "Inverter" in CCA)
-  std::vector<std::string> device_addrs; // Device addresses in this string
+  node_string inverter_label;     // Parent MPPT name (called "Inverter" in CCA)
+  node_vector<node_string> device_addrs; // Device addresses in this string
   float total_power = 0.0f;
   float total_current = 0.0f;
   float avg_voltage_in = 0.0f;
@@ -195,10 +233,10 @@ struct StringData {
 };
 
 struct InverterData {
-  std::string name;               // Canonical name from YAML (immutable identity)
-  std::string display_name;       // Optional override saved via /api/inverters/rename;
+  node_string name;               // Canonical name from YAML (immutable identity)
+  node_string display_name;       // Optional override saved via /api/inverters/rename;
                                   // empty = fall back to name. UI shows display_name first.
-  std::vector<std::string> mppt_labels;  // List of MPPT labels assigned to this inverter
+  node_vector<node_string> mppt_labels;  // List of MPPT labels assigned to this inverter
   float total_power = 0.0f;
   float peak_power = 0.0f;
   float total_energy = 0.0f;
@@ -254,40 +292,40 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   std::string get_device_name(const DeviceData &device);
   
   // Manual sensor registration (for advanced users who want specific configurations)
-  void add_voltage_in_sensor(const std::string &address, sensor::Sensor *sensor) { 
+  void add_voltage_in_sensor(const char *address, sensor::Sensor *sensor) { 
     this->voltage_in_sensors_[address] = sensor; 
-    ESP_LOGCONFIG("tigo_monitor", "Registered voltage_in sensor for address: %s", address.c_str());
+    ESP_LOGCONFIG("tigo_monitor", "Registered voltage_in sensor for address: %s", address);
   }
-  void add_voltage_out_sensor(const std::string &address, sensor::Sensor *sensor) { 
+  void add_voltage_out_sensor(const char *address, sensor::Sensor *sensor) { 
     this->voltage_out_sensors_[address] = sensor; 
-    ESP_LOGCONFIG("tigo_monitor", "Registered voltage_out sensor for address: %s", address.c_str());
+    ESP_LOGCONFIG("tigo_monitor", "Registered voltage_out sensor for address: %s", address);
   }
-  void add_current_in_sensor(const std::string &address, sensor::Sensor *sensor) { 
+  void add_current_in_sensor(const char *address, sensor::Sensor *sensor) { 
     this->current_in_sensors_[address] = sensor; 
-    ESP_LOGCONFIG("tigo_monitor", "Registered current_in sensor for address: %s", address.c_str());
+    ESP_LOGCONFIG("tigo_monitor", "Registered current_in sensor for address: %s", address);
   }
-  void add_current_out_sensor(const std::string &address, sensor::Sensor *sensor) {
+  void add_current_out_sensor(const char *address, sensor::Sensor *sensor) {
     this->current_out_sensors_[address] = sensor;
-    ESP_LOGCONFIG("tigo_monitor", "Registered current_out sensor for address: %s", address.c_str());
+    ESP_LOGCONFIG("tigo_monitor", "Registered current_out sensor for address: %s", address);
   }
-  void add_temperature_sensor(const std::string &address, sensor::Sensor *sensor) { 
+  void add_temperature_sensor(const char *address, sensor::Sensor *sensor) { 
     this->temperature_sensors_[address] = sensor; 
-    ESP_LOGCONFIG("tigo_monitor", "Registered temperature sensor for address: %s", address.c_str());
+    ESP_LOGCONFIG("tigo_monitor", "Registered temperature sensor for address: %s", address);
   }
-  void add_power_in_sensor(const std::string &address, sensor::Sensor *sensor) { 
+  void add_power_in_sensor(const char *address, sensor::Sensor *sensor) { 
     this->power_in_sensors_[address] = sensor; 
-    ESP_LOGCONFIG("tigo_monitor", "Registered power_in sensor for address: %s", address.c_str());
+    ESP_LOGCONFIG("tigo_monitor", "Registered power_in sensor for address: %s", address);
   }
-  void add_power_sensor(const std::string &address, sensor::Sensor *sensor) {
+  void add_power_sensor(const char *address, sensor::Sensor *sensor) {
     this->add_power_in_sensor(address, sensor);
   }
-  void add_power_out_sensor(const std::string &address, sensor::Sensor *sensor) { 
+  void add_power_out_sensor(const char *address, sensor::Sensor *sensor) { 
     this->power_out_sensors_[address] = sensor; 
-    ESP_LOGCONFIG("tigo_monitor", "Registered power_out sensor for address: %s", address.c_str());
+    ESP_LOGCONFIG("tigo_monitor", "Registered power_out sensor for address: %s", address);
   }
-  void add_peak_power_sensor(const std::string &address, sensor::Sensor *sensor) { 
+  void add_peak_power_sensor(const char *address, sensor::Sensor *sensor) { 
     this->peak_power_sensors_[address] = sensor; 
-    ESP_LOGCONFIG("tigo_monitor", "Registered peak_power sensor for address: %s", address.c_str());
+    ESP_LOGCONFIG("tigo_monitor", "Registered peak_power sensor for address: %s", address);
   }
   void add_power_in_sum_sensor(sensor::Sensor *sensor) {
     this->power_in_sum_sensor_ = sensor;
@@ -302,9 +340,9 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   }
   // Per-string aggregate power, keyed by the canonical CCA string label.
   // Published from update_string_data() each cycle (zeros in night mode).
-  void add_string_power_sensor(const std::string &string_label, sensor::Sensor *sensor) {
+  void add_string_power_sensor(const char *string_label, sensor::Sensor *sensor) {
     this->string_power_sensors_[string_label] = sensor;
-    ESP_LOGCONFIG("tigo_monitor", "Registered string power sensor for '%s'", string_label.c_str());
+    ESP_LOGCONFIG("tigo_monitor", "Registered string power sensor for '%s'", string_label);
   }
   void add_energy_in_sum_sensor(sensor::Sensor *sensor) {
     this->energy_in_sum_sensor_ = sensor;
@@ -337,35 +375,35 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
     this->missed_frame_sensor_ = sensor;
     ESP_LOGCONFIG("tigo_monitor", "Registered missed frame sensor");
   }
-  void add_rssi_sensor(const std::string &address, sensor::Sensor *sensor) { 
+  void add_rssi_sensor(const char *address, sensor::Sensor *sensor) { 
     this->rssi_sensors_[address] = sensor; 
-    ESP_LOGCONFIG("tigo_monitor", "Registered rssi sensor for address: %s", address.c_str());
+    ESP_LOGCONFIG("tigo_monitor", "Registered rssi sensor for address: %s", address);
   }
-  void add_barcode_sensor(const std::string &address, text_sensor::TextSensor *sensor) { 
+  void add_barcode_sensor(const char *address, text_sensor::TextSensor *sensor) { 
     this->barcode_sensors_[address] = sensor; 
-    ESP_LOGCONFIG("tigo_monitor", "Registered barcode sensor for address: %s", address.c_str());
+    ESP_LOGCONFIG("tigo_monitor", "Registered barcode sensor for address: %s", address);
   }
-  void add_duty_cycle_sensor(const std::string &address, sensor::Sensor *sensor) { 
+  void add_duty_cycle_sensor(const char *address, sensor::Sensor *sensor) { 
     this->duty_cycle_sensors_[address] = sensor; 
-    ESP_LOGCONFIG("tigo_monitor", "Registered duty_cycle sensor for address: %s", address.c_str());
+    ESP_LOGCONFIG("tigo_monitor", "Registered duty_cycle sensor for address: %s", address);
   }
-  void add_firmware_version_sensor(const std::string &address, text_sensor::TextSensor *sensor) { 
+  void add_firmware_version_sensor(const char *address, text_sensor::TextSensor *sensor) { 
     this->firmware_version_sensors_[address] = sensor; 
-    ESP_LOGCONFIG("tigo_monitor", "Registered firmware_version sensor for address: %s", address.c_str());
+    ESP_LOGCONFIG("tigo_monitor", "Registered firmware_version sensor for address: %s", address);
   }
-  void add_efficiency_sensor(const std::string &address, sensor::Sensor *sensor) { 
+  void add_efficiency_sensor(const char *address, sensor::Sensor *sensor) { 
     this->efficiency_sensors_[address] = sensor; 
-    ESP_LOGCONFIG("tigo_monitor", "Registered efficiency sensor for address: %s", address.c_str());
+    ESP_LOGCONFIG("tigo_monitor", "Registered efficiency sensor for address: %s", address);
   }
-  void add_power_factor_sensor(const std::string &address, sensor::Sensor *sensor) { 
+  void add_power_factor_sensor(const char *address, sensor::Sensor *sensor) { 
     this->power_factor_sensors_[address] = sensor; 
-    ESP_LOGCONFIG("tigo_monitor", "Registered power_factor sensor for address: %s", address.c_str());
+    ESP_LOGCONFIG("tigo_monitor", "Registered power_factor sensor for address: %s", address);
   }
-  void add_load_factor_sensor(const std::string &address, sensor::Sensor *sensor) { 
+  void add_load_factor_sensor(const char *address, sensor::Sensor *sensor) { 
     this->load_factor_sensors_[address] = sensor; 
-    ESP_LOGCONFIG("tigo_monitor", "Registered load_factor sensor for address: %s", address.c_str());
+    ESP_LOGCONFIG("tigo_monitor", "Registered load_factor sensor for address: %s", address);
   }
-  void add_tigo_sensor(const std::string &address, sensor::Sensor *sensor) {
+  void add_tigo_sensor(const char *address, sensor::Sensor *sensor) {
     this->power_in_sensors_[address] = sensor;
   }
   void add_night_mode_sensor(binary_sensor::BinarySensor *sensor) {
@@ -422,22 +460,22 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
 #ifdef USE_ESP_IDF
   const psram_vector<DeviceData>& get_devices() const { return devices_; }
   const psram_vector<NodeTableData>& get_node_table() const { return node_table_; }
-  const psram_map<std::string, StringData>& get_strings() const { return strings_; }
+  const psram_map<node_string, StringData>& get_strings() const { return strings_; }
   const psram_vector<InverterData>& get_inverters() const { return inverters_; }
 
   psram_vector<DeviceData> snapshot_devices() const;
   psram_vector<NodeTableData> snapshot_node_table() const;
-  psram_map<std::string, StringData> snapshot_strings() const;
+  psram_map<node_string, StringData> snapshot_strings() const;
   psram_vector<InverterData> snapshot_inverters() const;
 #else
   const std::vector<DeviceData>& get_devices() const { return devices_; }
   const std::vector<NodeTableData>& get_node_table() const { return node_table_; }
-  const std::map<std::string, StringData>& get_strings() const { return strings_; }
+  const std::map<node_string, StringData>& get_strings() const { return strings_; }
   const std::vector<InverterData>& get_inverters() const { return inverters_; }
 
   std::vector<DeviceData> snapshot_devices() const { return devices_; }
   std::vector<NodeTableData> snapshot_node_table() const { return node_table_; }
-  std::map<std::string, StringData> snapshot_strings() const { return strings_; }
+  std::map<node_string, StringData> snapshot_strings() const { return strings_; }
   std::vector<InverterData> snapshot_inverters() const { return inverters_; }
 #endif
   // Run fn() while holding the state lock so the web-server task can read the
@@ -588,7 +626,7 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   void update_device_data(const DeviceData &data);
   void publish_sensor_data();
   void mark_stale_devices_();
-  DeviceData* find_device_by_addr(const std::string &addr);
+  DeviceData* find_device_by_addr(const node_string &addr);
   
   // String-level aggregation
   void update_string_data();
@@ -608,14 +646,14 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   void update_daily_energy(float energy_kwh);
   void save_persistent_data();  // Save all persistent data (node table + peak power + energy)
   int get_next_available_sensor_index();
-  NodeTableData* find_node_by_addr(const std::string &addr);
-  void assign_sensor_index_to_node(const std::string &addr);
+  NodeTableData* find_node_by_addr(const node_string &addr);
+  void assign_sensor_index_to_node(const node_string &addr);
   
   // CCA HTTP query and matching
   void query_cca_config();
   // Takes a raw pointer so a PSRAM-resident response body needs no std::string copy.
   void match_cca_to_uart(const char *json_response);
-  std::string get_barcode_for_node(const NodeTableData &node);
+  node_string get_barcode_for_node(const NodeTableData &node);
 
 #ifdef USE_TIGO_CLOUD
   // HTTPS (TLS via the cert bundle) JSON request helper; returns body + status.
@@ -719,49 +757,49 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   // Use PSRAM-backed containers for large data structures
   psram_vector<DeviceData> devices_;
   psram_vector<NodeTableData> node_table_;  // Unified table for all device info
-  psram_map<std::string, StringData> strings_;  // String-level aggregation (key = string_label)
+  psram_map<node_string, StringData> strings_;  // String-level aggregation (key = string_label)
   psram_vector<InverterData> inverters_;  // User-defined inverter groupings
   
   // Sensor maps stored in PSRAM to save internal RAM (saves ~6-10KB depending on config)
-  psram_map<std::string, sensor::Sensor*> voltage_in_sensors_;
-  psram_map<std::string, sensor::Sensor*> voltage_out_sensors_;
-  psram_map<std::string, sensor::Sensor*> current_in_sensors_;
-  psram_map<std::string, sensor::Sensor*> temperature_sensors_;
-  psram_map<std::string, sensor::Sensor*> power_in_sensors_;
-  psram_map<std::string, sensor::Sensor*> power_out_sensors_;
-  psram_map<std::string, sensor::Sensor*> current_out_sensors_;
-  psram_map<std::string, sensor::Sensor*> peak_power_sensors_;
-  psram_map<std::string, sensor::Sensor*> rssi_sensors_;
-  psram_map<std::string, text_sensor::TextSensor*> barcode_sensors_;
-  psram_map<std::string, sensor::Sensor*> duty_cycle_sensors_;
-  psram_map<std::string, text_sensor::TextSensor*> firmware_version_sensors_;
-  psram_map<std::string, sensor::Sensor*> efficiency_sensors_;
-  psram_map<std::string, sensor::Sensor*> power_factor_sensors_;
-  psram_map<std::string, sensor::Sensor*> load_factor_sensors_;
-  psram_map<std::string, sensor::Sensor*> string_power_sensors_;  // key = canonical string label
+  psram_map<node_string, sensor::Sensor*> voltage_in_sensors_;
+  psram_map<node_string, sensor::Sensor*> voltage_out_sensors_;
+  psram_map<node_string, sensor::Sensor*> current_in_sensors_;
+  psram_map<node_string, sensor::Sensor*> temperature_sensors_;
+  psram_map<node_string, sensor::Sensor*> power_in_sensors_;
+  psram_map<node_string, sensor::Sensor*> power_out_sensors_;
+  psram_map<node_string, sensor::Sensor*> current_out_sensors_;
+  psram_map<node_string, sensor::Sensor*> peak_power_sensors_;
+  psram_map<node_string, sensor::Sensor*> rssi_sensors_;
+  psram_map<node_string, text_sensor::TextSensor*> barcode_sensors_;
+  psram_map<node_string, sensor::Sensor*> duty_cycle_sensors_;
+  psram_map<node_string, text_sensor::TextSensor*> firmware_version_sensors_;
+  psram_map<node_string, sensor::Sensor*> efficiency_sensors_;
+  psram_map<node_string, sensor::Sensor*> power_factor_sensors_;
+  psram_map<node_string, sensor::Sensor*> load_factor_sensors_;
+  psram_map<node_string, sensor::Sensor*> string_power_sensors_;  // key = canonical string label
 #else
   // Fallback to standard containers on Arduino
   std::vector<DeviceData> devices_;
   std::vector<NodeTableData> node_table_;
-  std::map<std::string, StringData> strings_;
+  std::map<node_string, StringData> strings_;
   std::vector<InverterData> inverters_;
   
-  std::map<std::string, sensor::Sensor*> voltage_in_sensors_;
-  std::map<std::string, sensor::Sensor*> voltage_out_sensors_;
-  std::map<std::string, sensor::Sensor*> current_in_sensors_;
-  std::map<std::string, sensor::Sensor*> temperature_sensors_;
-  std::map<std::string, sensor::Sensor*> power_in_sensors_;
-  std::map<std::string, sensor::Sensor*> power_out_sensors_;
-  std::map<std::string, sensor::Sensor*> current_out_sensors_;
-  std::map<std::string, sensor::Sensor*> peak_power_sensors_;
-  std::map<std::string, sensor::Sensor*> rssi_sensors_;
-  std::map<std::string, text_sensor::TextSensor*> barcode_sensors_;
-  std::map<std::string, sensor::Sensor*> duty_cycle_sensors_;
-  std::map<std::string, text_sensor::TextSensor*> firmware_version_sensors_;
-  std::map<std::string, sensor::Sensor*> efficiency_sensors_;
-  std::map<std::string, sensor::Sensor*> power_factor_sensors_;
-  std::map<std::string, sensor::Sensor*> load_factor_sensors_;
-  std::map<std::string, sensor::Sensor*> string_power_sensors_;  // key = canonical string label
+  std::map<node_string, sensor::Sensor*> voltage_in_sensors_;
+  std::map<node_string, sensor::Sensor*> voltage_out_sensors_;
+  std::map<node_string, sensor::Sensor*> current_in_sensors_;
+  std::map<node_string, sensor::Sensor*> temperature_sensors_;
+  std::map<node_string, sensor::Sensor*> power_in_sensors_;
+  std::map<node_string, sensor::Sensor*> power_out_sensors_;
+  std::map<node_string, sensor::Sensor*> current_out_sensors_;
+  std::map<node_string, sensor::Sensor*> peak_power_sensors_;
+  std::map<node_string, sensor::Sensor*> rssi_sensors_;
+  std::map<node_string, text_sensor::TextSensor*> barcode_sensors_;
+  std::map<node_string, sensor::Sensor*> duty_cycle_sensors_;
+  std::map<node_string, text_sensor::TextSensor*> firmware_version_sensors_;
+  std::map<node_string, sensor::Sensor*> efficiency_sensors_;
+  std::map<node_string, sensor::Sensor*> power_factor_sensors_;
+  std::map<node_string, sensor::Sensor*> load_factor_sensors_;
+  std::map<node_string, sensor::Sensor*> string_power_sensors_;  // key = canonical string label
 #endif
   sensor::Sensor* power_in_sum_sensor_ = nullptr;
   sensor::Sensor* power_out_sum_sensor_ = nullptr;
@@ -831,11 +869,11 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   psram_vector<char> incoming_data_;
   
   // Move large/growing data structures to PSRAM to save internal RAM
-  psram_set<std::string> created_devices_;        // Device creation tracker (~4-8 bytes per device)
+  psram_set<node_string> created_devices_;        // Device creation tracker (~4-8 bytes per device)
   psram_string cca_device_info_;                  // Cached CCA device info JSON (can be several KB)
 #else
   std::string incoming_data_;
-  std::set<std::string> created_devices_;
+  std::set<node_string> created_devices_;
   std::string cca_device_info_;
 #endif
   bool frame_started_ = false;

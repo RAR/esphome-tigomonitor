@@ -2313,15 +2313,16 @@ void TigoWebServer::build_devices_json(PSRAMString& json) {
   // OOM (#23). The pointers are valid only while the state lock below is held.
   struct DeviceWithName {
     const tigo_monitor::DeviceData *device;  // nullptr if node-only (no runtime data)
-    const std::string *addr;
-    const std::string *barcode;
-    const std::string *cca_label;            // nullptr when there is no CCA label
-    const std::string *string_label;
+    // node_string: these point straight at the PSRAM-resident struct members.
+    const tigo_monitor::node_string *addr;
+    const tigo_monitor::node_string *barcode;
+    const tigo_monitor::node_string *cca_label;  // nullptr when there is no CCA label
+    const tigo_monitor::node_string *string_label;
     int sensor_index;
     bool has_runtime_data;
   };
 
-  static const std::string EMPTY_STR;
+  static const tigo_monitor::node_string EMPTY_STR;
 
   parent_->with_state_lock([&]() {
     const auto &devices = parent_->get_devices();
@@ -2947,7 +2948,7 @@ void TigoWebServer::build_yaml_json(PSRAMString& json, const std::set<std::strin
     for (const auto *node_ptr : assigned_nodes) {
       const auto &node = *node_ptr;
       std::string idx_str = std::to_string(node.sensor_index + 1);
-      std::string display = !node.cca_label.empty() ? node.cca_label
+      std::string display = !node.cca_label.empty() ? tigo_monitor::to_std_string(node.cca_label)
                                                     : ("Tigo Panel " + idx_str);
       std::string id = "tigo_panel_" + idx_str;
       node_device_id[node.sensor_index] = id;
@@ -2956,8 +2957,9 @@ void TigoWebServer::build_yaml_json(PSRAMString& json, const std::set<std::strin
   } else if (effective_grouping == "mppt") {
     for (const auto *node_ptr : assigned_nodes) {
       const auto &node = *node_ptr;
-      std::string label = node.cca_inverter_label.empty() ? std::string("Unassigned MPPT")
-                                                          : node.cca_inverter_label;
+      std::string label = node.cca_inverter_label.empty()
+                              ? std::string("Unassigned MPPT")
+                              : tigo_monitor::to_std_string(node.cca_inverter_label);
       std::string id = make_id("mppt", label);
       node_device_id[node.sensor_index] = id;
       register_device(id, label);
@@ -2965,14 +2967,14 @@ void TigoWebServer::build_yaml_json(PSRAMString& json, const std::set<std::strin
   } else if (effective_grouping == "inverter") {
     std::map<std::string, std::string> mppt_to_inverter;
     for (const auto &inv : parent_->get_inverters()) {
-      const std::string &name = inv.display_name.empty() ? inv.name : inv.display_name;
+      const auto &name = inv.display_name.empty() ? inv.name : inv.display_name;
       for (const auto &mppt : inv.mppt_labels) {
-        mppt_to_inverter[mppt] = name;
+        mppt_to_inverter[tigo_monitor::to_std_string(mppt)] = tigo_monitor::to_std_string(name);
       }
     }
     for (const auto *node_ptr : assigned_nodes) {
       const auto &node = *node_ptr;
-      auto it = mppt_to_inverter.find(node.cca_inverter_label);
+      auto it = mppt_to_inverter.find(tigo_monitor::to_std_string(node.cca_inverter_label));
       std::string display = (it != mppt_to_inverter.end()) ? it->second : std::string("Unassigned");
       std::string id = make_id("inverter", display);
       node_device_id[node.sensor_index] = id;
@@ -3569,7 +3571,7 @@ esp_err_t TigoWebServer::api_panels_handler(httpd_req_t *req) {
   std::unordered_map<std::string, const tigo_monitor::NodeTableData *> by_suffix;
   for (const auto &n : nodes) {
     if (n.long_address.size() >= 6) {
-      by_suffix[n.long_address.substr(n.long_address.size() - 6)] = &n;
+      by_suffix[tigo_monitor::to_std_string(n.long_address).substr(n.long_address.size() - 6)] = &n;
     }
   }
 
@@ -3610,9 +3612,9 @@ esp_err_t TigoWebServer::api_panels_handler(httpd_req_t *req) {
              (unsigned) s.slot, s.barcode_last6.c_str());
     json.append(row);
     if (node != nullptr) {
-      std::string label = json_escape(node->cca_label);
-      std::string mppt = json_escape(node->cca_inverter_label);
-      std::string str_lbl = json_escape(node->cca_string_label);
+      std::string label = json_escape(tigo_monitor::to_std_string(node->cca_label));
+      std::string mppt = json_escape(tigo_monitor::to_std_string(node->cca_inverter_label));
+      std::string str_lbl = json_escape(tigo_monitor::to_std_string(node->cca_string_label));
       json.append(",\"label\":\"");
       json.append(label.c_str());
       json.append("\",\"mppt\":\"");
