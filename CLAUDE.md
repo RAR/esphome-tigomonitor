@@ -81,13 +81,13 @@ Fuzzy barcode matching (`match_barcode()`): compares last 6 chars of UART-discov
 
 ## Git Workflow
 
-- **`main`**: Stable releases only (tagged `vX.Y.Z`)
-- **`dev`**: Default development branch
-- **`feature/*`**: Feature branches
+- **`main`**: Trunk. Stable releases are tagged `vX.Y.Z` here, and current development also lands here via short-lived branches. Base for new work and the target for PRs.
+- **`feature/*`, `fix/*`**: Short-lived branches created off `main`, merged back to `main`.
+- Legacy branches `dev` (abandoned ~2026-04) and `next` (lagging, no unique work) are **not** the current line — start new work from `main`.
 
 ### Release Process
 
-1. Update `CHANGELOG.md` on dev (group by Added/Fixed/Changed/Removed)
-2. Update `CURRENT_VERSION` in `tigo_web_server.cpp` JavaScript
-3. Merge dev → main, create annotated tag, push, create GitHub release
-4. Return to dev
+1. Update `CHANGELOG.md` under `## [Unreleased]` (group by Added/Fixed/Changed/Removed).
+2. Move the `## [Unreleased]` entries under a new `## [X.Y.Z]` heading, create an annotated tag `vX.Y.Z`, push, and create the GitHub release.
+
+(The web UI shows ESPHome's own version via `esphome/core/version.h` — there is no project-specific version constant to bump.)
