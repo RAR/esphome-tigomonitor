@@ -51,7 +51,7 @@ static uint32_t cloud_creds_hash() { return fnv1_hash("tigo_cloud_creds_v1"); }
 // HTTPS JSON request (TLS verified against pinned Google Trust Services roots)
 // ---------------------------------------------------------------------------
 bool TigoMonitorComponent::cloud_http_json_(const char *method, const std::string &url,
-                                            const std::string &body, const std::string &bearer,
+                                            const std::string &body, const char *bearer,
                                             psram_string &out_body, int &out_status) {
   out_body.clear();
   out_status = 0;
@@ -77,9 +77,12 @@ bool TigoMonitorComponent::cloud_http_json_(const char *method, const std::strin
     return false;
   }
   esp_http_client_set_header(client, "Accept", "application/json");
-  std::string auth;
-  if (!bearer.empty()) {
-    auth = "Bearer " + bearer;
+  // PSRAM: the token is ~1-1.5 KB, so the header string is too big to want on the
+  // internal heap for the duration of the request.
+  psram_string auth;
+  if (bearer != nullptr && bearer[0] != '\0') {
+    auth = "Bearer ";
+    auth += bearer;
     esp_http_client_set_header(client, "Authorization", auth.c_str());
   }
   if (!body.empty())
@@ -176,7 +179,7 @@ bool TigoMonitorComponent::tigo_cloud_login(const std::string &email, const std:
     cJSON_Delete(root);
     return false;
   }
-  cloud_email_ = email;
+  cloud_email_ = email.c_str();
   cloud_token_ = tok->valuestring;
   if (cloud_token_.size() >= sizeof(((CloudCreds *) nullptr)->token))
     ESP_LOGW(CLOUD_TAG, "token longer than storage buffer — will truncate on persist");
@@ -194,7 +197,7 @@ bool TigoMonitorComponent::tigo_cloud_login(const std::string &email, const std:
       std::string(CLOUD_API_HOST) + "/api/v3/systems/query?limit=100&page=1&sort=-id";
   psram_string sresp;
   int sstatus = 0;
-  if (cloud_http_json_("GET", sys_url, "", cloud_token_, sresp, sstatus) && sstatus == 200) {
+  if (cloud_http_json_("GET", sys_url, "", cloud_token_.c_str(), sresp, sstatus) && sstatus == 200) {
     cJSON *sroot = cJSON_Parse(sresp.c_str());
     if (sroot) {
       cJSON *systems = cJSON_GetObjectItem(sroot, "systems");
@@ -234,7 +237,7 @@ bool TigoMonitorComponent::tigo_cloud_import() {
       std::string(CLOUD_API_HOST) + "/api/v3/systems/layout?id=" + std::to_string(cloud_system_id_);
   psram_string resp;
   int status = 0;
-  if (!cloud_http_json_("GET", url, "", cloud_token_, resp, status)) {
+  if (!cloud_http_json_("GET", url, "", cloud_token_.c_str(), resp, status)) {
     ESP_LOGW(CLOUD_TAG, "layout request failed");
     return false;
   }
@@ -268,7 +271,7 @@ bool TigoMonitorComponent::tigo_cloud_health(psram_string &out_json) {
                     std::to_string(cloud_system_id_);
   psram_string resp;
   int status = 0;
-  if (!cloud_http_json_("GET", url, "", cloud_token_, resp, status)) {
+  if (!cloud_http_json_("GET", url, "", cloud_token_.c_str(), resp, status)) {
     ESP_LOGW(CLOUD_TAG, "health request failed");
     return false;
   }
@@ -302,7 +305,7 @@ bool TigoMonitorComponent::tigo_cloud_equipment(const std::string &view, psram_s
   std::string url = "https://ei.tigoenergy.com" + path + std::to_string(cloud_system_id_);
   psram_string resp;
   int status = 0;
-  if (!cloud_http_json_("GET", url, "", cloud_token_, resp, status)) {
+  if (!cloud_http_json_("GET", url, "", cloud_token_.c_str(), resp, status)) {
     ESP_LOGW(CLOUD_TAG, "equipment request failed");
     return false;
   }

@@ -3287,7 +3287,10 @@ void TigoMonitorComponent::query_cca_config() {
     // Read response in chunks (handles both known and chunked content-length)
     // Cap response size to protect against malformed/malicious upstream that could exhaust heap.
     constexpr size_t MAX_CCA_RESPONSE_BYTES = 64 * 1024;
-    std::string response;
+    // PSRAM: the read chunk buffer above already is, and this accumulator holds up to
+    // MAX_CCA_RESPONSE_BYTES of node list. query_cca_config() runs on the main loop, so a
+    // std::string here spiked the internal floor at the worst possible moment.
+    psram_string response;
     response.reserve(content_length > 0 ? content_length : 8192);  // Pre-allocate
     int read_len;
     bool response_truncated = false;
@@ -3311,7 +3314,7 @@ void TigoMonitorComponent::query_cca_config() {
     } else {
       ESP_LOGI(TAG, "Received %d bytes from CCA", response.length());
       ESP_LOGD(TAG, "CCA Response: %s", response.c_str());
-      match_cca_to_uart(response);
+      match_cca_to_uart(response.c_str());
     }
   } else {
     ESP_LOGW(TAG, "CCA returned status %d", status_code);
@@ -3321,13 +3324,13 @@ void TigoMonitorComponent::query_cca_config() {
   esp_http_client_cleanup(client);
 }
 
-void TigoMonitorComponent::match_cca_to_uart(const std::string &json_response) {
+void TigoMonitorComponent::match_cca_to_uart(const char *json_response) {
   // Lock around all mutations to node_table_/strings_/inverters_ that this
   // method performs. Held for the duration of CCA-result application — does
   // not include the prior HTTP I/O.
   StateLock lock(state_mutex_);
   // cJSON allocates from PSRAM: hooks are installed once, process-wide, in setup().
-  cJSON *root = cJSON_Parse(json_response.c_str());
+  cJSON *root = cJSON_Parse(json_response);
   if (root == NULL) {
     ESP_LOGE(TAG, "Failed to parse CCA JSON response");
     return;
@@ -3520,7 +3523,9 @@ void TigoMonitorComponent::query_cca_device_info() {
     // Read response in chunks
     // Cap response size to protect against malformed/malicious upstream that could exhaust heap.
     constexpr size_t MAX_CCA_RESPONSE_BYTES = 64 * 1024;
-    std::string response;
+    // PSRAM, same reasoning as query_cca_config(); set_cca_device_info() has a psram_string
+    // overload so the document is stored without an internal-heap round trip.
+    psram_string response;
     response.reserve(content_length > 0 ? content_length : 2048);  // Pre-allocate
     int read_len;
     bool response_truncated = false;
@@ -3571,7 +3576,7 @@ void TigoMonitorComponent::query_cca_device_info() {
   set_cca_device_info("{\"error\":\"ESP-IDF required\"}");
 }
 
-void TigoMonitorComponent::match_cca_to_uart(const std::string &json_response) {
+void TigoMonitorComponent::match_cca_to_uart(const char *json_response) {
   // Not implemented for Arduino framework
 }
 #endif

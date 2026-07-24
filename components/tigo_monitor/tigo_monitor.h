@@ -454,14 +454,22 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   const std::string& get_cca_ip() const { return cca_ip_; }
   bool get_sync_cca_on_startup() const { return sync_cca_on_startup_; }
 #ifdef USE_ESP_IDF
-  // Returns a locked copy of cca_device_info_. Safe to call from any task.
-  std::string get_cca_device_info() const {
+  // Returns a locked copy of cca_device_info_. Safe to call from any task. The copy stays
+  // in PSRAM — this document runs to several KB and the old std::string return put every
+  // copy on the internal heap, from the httpd task.
+  psram_string get_cca_device_info() const {
     StateLock lock(state_mutex_);
-    return std::string(cca_device_info_.begin(), cca_device_info_.end());
+    return cca_device_info_;
   }
 #else
   std::string get_cca_device_info() const { return cca_device_info_; }
 #endif
+  // Emptiness probe. Callers that only need to know whether we have a document must not
+  // pay for a full copy of it (the CCA page used to copy it twice per request).
+  bool cca_device_info_empty() const {
+    StateLock lock(state_mutex_);
+    return cca_device_info_.empty();
+  }
   unsigned long get_last_cca_sync_time() const { return last_cca_sync_time_; }
   float get_total_energy_in_kwh() const { return total_energy_in_kwh_; }
   float get_total_energy_out_kwh() const { return total_energy_out_kwh_; }
@@ -540,8 +548,10 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   bool tigo_cloud_health(psram_string &out_json);  // Tigo's warning/error counts per type
   bool tigo_cloud_equipment(const std::string &view, psram_string &out_json);  // latest|history
   bool tigo_cloud_has_token() const { return !cloud_token_.empty(); }
-  const std::string &tigo_cloud_email() const { return cloud_email_; }
-  const std::string &tigo_cloud_expires() const { return cloud_expires_iso_; }
+  // const char* rather than const std::string& — the backing members are psram_string and
+  // every caller only ever wants a C string for snprintf.
+  const char *tigo_cloud_email() const { return cloud_email_.c_str(); }
+  const char *tigo_cloud_expires() const { return cloud_expires_iso_.c_str(); }
   int tigo_cloud_system_id() const { return cloud_system_id_; }
   void tigo_cloud_load_creds();  // restore persisted token on boot (called from setup())
 #endif
@@ -603,7 +613,8 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   
   // CCA HTTP query and matching
   void query_cca_config();
-  void match_cca_to_uart(const std::string &json_response);
+  // Takes a raw pointer so a PSRAM-resident response body needs no std::string copy.
+  void match_cca_to_uart(const char *json_response);
   std::string get_barcode_for_node(const NodeTableData &node);
 
 #ifdef USE_TIGO_CLOUD
@@ -611,28 +622,40 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   // out_body is a psram_string on purpose: the read chunk buffer is already PSRAM, and the
   // accumulator has to be too — MAX_RESP (96 KB) is larger than the whole internal heap, so
   // a std::string here would crater the internal floor (or OOM) on a big layout response.
+  // bearer is a plain pointer so a PSRAM-resident token can be passed without materializing
+  // an internal-heap std::string at every call site.
   bool cloud_http_json_(const char *method, const std::string &url, const std::string &body,
-                        const std::string &bearer, psram_string &out_body, int &out_status);
+                        const char *bearer, psram_string &out_body, int &out_status);
   void match_cloud_layout_to_uart_(const char *layout_json);  // apply layout to nodes
   void cloud_save_creds_();
-  std::string cloud_email_;
-  std::string cloud_token_;
-  std::string cloud_refresh_token_;
-  std::string cloud_expires_iso_;
+  // Credentials live in PSRAM: the bearer is a JWT of ~1-1.5 KB and these members are
+  // resident for the life of the process.
+  psram_string cloud_email_;
+  psram_string cloud_token_;
+  psram_string cloud_refresh_token_;
+  psram_string cloud_expires_iso_;
   int cloud_system_id_{0};
 #endif
 
   // Thread-safe setter for cca_device_info_. Takes state_mutex_ briefly
   // around the assignment so concurrent get_cca_device_info() callers
   // never observe a torn psram_string.
+  // Overloaded rather than templated so the two hot inputs — a string literal and the
+  // PSRAM-resident HTTP read accumulator — both store without an internal-heap temporary.
+  void set_cca_device_info(const char *value) {
+    StateLock lock(state_mutex_);
+    cca_device_info_.assign(value);
+  }
   void set_cca_device_info(const std::string &value) {
     StateLock lock(state_mutex_);
-#ifdef USE_ESP_IDF
     cca_device_info_.assign(value.begin(), value.end());
-#else
-    cca_device_info_ = value;
-#endif
   }
+#ifdef USE_ESP_IDF
+  void set_cca_device_info(const psram_string &value) {
+    StateLock lock(state_mutex_);
+    cca_device_info_ = value;
+  }
+#endif
   
   // Energy persistence
   void load_energy_data();
