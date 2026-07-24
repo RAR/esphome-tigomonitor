@@ -1685,8 +1685,8 @@ esp_err_t TigoWebServer::api_cloud_status_handler(httpd_req_t *req) {
   snprintf(resp, sizeof(resp),
            "{\"configured\":%s,\"email\":\"%s\",\"expires\":\"%s\",\"system_id\":%d}",
            configured ? "true" : "false",
-           server->parent_ ? server->parent_->tigo_cloud_email().c_str() : "",
-           server->parent_ ? server->parent_->tigo_cloud_expires().c_str() : "",
+           server->parent_ ? server->parent_->tigo_cloud_email() : "",
+           server->parent_ ? server->parent_->tigo_cloud_expires() : "",
            server->parent_ ? server->parent_->tigo_cloud_system_id() : 0);
   httpd_resp_set_type(req, "application/json");
   httpd_resp_sendstr(req, resp);
@@ -1747,8 +1747,8 @@ esp_err_t TigoWebServer::api_cloud_login_handler(httpd_req_t *req) {
   char resp[320];
   snprintf(resp, sizeof(resp),
            "{\"status\":\"ok\",\"email\":\"%s\",\"expires\":\"%s\",\"system_id\":%d}",
-           server->parent_->tigo_cloud_email().c_str(),
-           server->parent_->tigo_cloud_expires().c_str(), server->parent_->tigo_cloud_system_id());
+           server->parent_->tigo_cloud_email(),
+           server->parent_->tigo_cloud_expires(), server->parent_->tigo_cloud_system_id());
   httpd_resp_set_type(req, "application/json");
   httpd_resp_sendstr(req, resp);
   return ESP_OK;
@@ -3181,7 +3181,9 @@ void TigoWebServer::build_cca_info_json(PSRAMString& json) {
   //   HTTP — tigo_monitor's local HTTP query (401s on CCA firmware 4.0.4+)
   //   BLE  — this server's own BLE cache (authoritative; no HTTP fallback)
   //   AUTO — BLE cache if it has data, else HTTP
-  std::string device_info;
+  // PSRAM: this document runs to several KB. The BLE branch still hands us a std::string
+  // (see the BLE cache members in the header) — that copy is a separate item.
+  psram_string device_info;
   std::string source_id = parent_->get_cca_ip();
   unsigned long seconds_ago = 0;
 
@@ -3194,7 +3196,10 @@ void TigoWebServer::build_cca_info_json(PSRAMString& json) {
   }
 
   if (use_ble) {
-    device_info = this->ble_get_cca_info_json_();  // "" until first DEVICE_INFO
+    {
+      std::string ble_info = this->ble_get_cca_info_json_();  // "" until first DEVICE_INFO
+      device_info.assign(ble_info.begin(), ble_info.end());
+    }
     seconds_ago = this->ble_get_cca_info_seconds_ago_();
     source_id = "BLE " + this->ble_address_();
   }
@@ -3202,7 +3207,9 @@ void TigoWebServer::build_cca_info_json(PSRAMString& json) {
 
   if (!use_ble) {
     // Query CCA device info over HTTP if not cached or stale
-    if (parent_->get_cca_device_info().empty() ||
+    // Probe, don't copy: this used to copy the whole document just to test it, then copy
+    // it again below.
+    if (parent_->cca_device_info_empty() ||
         parent_->get_last_cca_sync_time() == 0) {
       parent_->query_cca_device_info();
     }
@@ -3221,7 +3228,8 @@ void TigoWebServer::build_cca_info_json(PSRAMString& json) {
   snprintf(buf, sizeof(buf), "%lu", seconds_ago);
   json.append(buf);
   // Embed a JSON document as an escaped string value.
-  auto append_escaped = [&json](const std::string &doc) {
+  // Generic so it takes both the PSRAM device_info and the std::string network_info.
+  auto append_escaped = [&json](const auto &doc) {
     if (doc.empty()) { json.append("{}"); return; }
     for (char c : doc) {
       if (c == '"') json.append("\\\"");
