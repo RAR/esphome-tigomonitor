@@ -1326,7 +1326,7 @@ esp_err_t TigoWebServer::api_cca_discovery_handler(httpd_req_t *req) {
 
   PSRAMString json;
 #ifdef USE_TIGO_CCA_BLE
-  std::string status = server->ble_get_discovery_json_();
+  psram_string status = server->ble_get_discovery_json_();
   if (status.empty()) {
     json.append("{\"age_s\":null,\"status\":null}");
   } else {
@@ -1507,7 +1507,7 @@ esp_err_t TigoWebServer::api_cca_network_handler(httpd_req_t *req) {
   json.append(cmd);
 #ifdef USE_TIGO_CCA_BLE
   uint32_t age = 0;
-  std::string result = server->ble_get_net_result_(cmd, age);
+  psram_string result = server->ble_get_net_result_(cmd, age);
   if (result.empty()) {
     json.append("\",\"age_s\":null,\"result\":null}");
   } else {
@@ -3183,8 +3183,8 @@ void TigoWebServer::build_cca_info_json(PSRAMString& json) {
   //   HTTP — tigo_monitor's local HTTP query (401s on CCA firmware 4.0.4+)
   //   BLE  — this server's own BLE cache (authoritative; no HTTP fallback)
   //   AUTO — BLE cache if it has data, else HTTP
-  // PSRAM: this document runs to several KB. The BLE branch still hands us a std::string
-  // (see the BLE cache members in the header) — that copy is a separate item.
+  // PSRAM end to end: both sources (the BLE cache and tigo_monitor's HTTP cache) hand
+  // back a psram_string, so this document never touches the internal heap.
   psram_string device_info;
   std::string source_id = parent_->get_cca_ip();
   unsigned long seconds_ago = 0;
@@ -3198,10 +3198,7 @@ void TigoWebServer::build_cca_info_json(PSRAMString& json) {
   }
 
   if (use_ble) {
-    {
-      std::string ble_info = this->ble_get_cca_info_json_();  // "" until first DEVICE_INFO
-      device_info.assign(ble_info.begin(), ble_info.end());
-    }
+    device_info = this->ble_get_cca_info_json_();  // "" until first DEVICE_INFO
     seconds_ago = this->ble_get_cca_info_seconds_ago_();
     source_id = "BLE " + this->ble_address_();
   }
@@ -3250,7 +3247,7 @@ void TigoWebServer::build_cca_info_json(PSRAMString& json) {
   append_escaped(device_info);
 
   // network_info: only populated over BLE (NETWORK_INFO), {} otherwise.
-  std::string network_info;
+  psram_string network_info;
 #ifdef USE_TIGO_CCA_BLE
   if (use_ble) network_info = this->ble_get_network_json_();
 #endif
