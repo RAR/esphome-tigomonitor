@@ -39,6 +39,9 @@ namespace tigo_monitor {
   // handle a null allocator return, so a clean panic-reboot is safer than
   // continuing into undefined behavior.
   [[noreturn]] void psram_alloc_failed_abort(size_t bytes_requested);
+  // Installs PSRAM allocation hooks for cJSON, once, process-wide. Called from setup();
+  // every cJSON_Parse in the firmware allocates from PSRAM after that.
+  void tigo_cjson_use_psram();
 }
 }
 
@@ -513,7 +516,7 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   bool remove_node(uint16_t addr);
   
   // Import node table from JSON data
-  bool import_node_table(const std::vector<NodeTableData>& nodes);
+  bool import_node_table(const psram_vector<NodeTableData>& nodes);
   
   // CCA synchronization (called by button or on boot)
   void sync_from_cca();
@@ -532,8 +535,10 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   // Credentials are entered in the web UI; only the resulting bearer token is persisted.
   bool tigo_cloud_login(const std::string &email, const std::string &password);
   bool tigo_cloud_import();
-  bool tigo_cloud_health(std::string &out_json);  // Tigo's warning/error counts per type
-  bool tigo_cloud_equipment(const std::string &view, std::string &out_json);  // latest|history
+  // Response bodies come back as psram_string — these payloads run to tens of KB on a
+  // large system and must never land on the internal heap (see cloud_http_json_).
+  bool tigo_cloud_health(psram_string &out_json);  // Tigo's warning/error counts per type
+  bool tigo_cloud_equipment(const std::string &view, psram_string &out_json);  // latest|history
   bool tigo_cloud_has_token() const { return !cloud_token_.empty(); }
   const std::string &tigo_cloud_email() const { return cloud_email_; }
   const std::string &tigo_cloud_expires() const { return cloud_expires_iso_; }
@@ -603,9 +608,12 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
 
 #ifdef USE_TIGO_CLOUD
   // HTTPS (TLS via the cert bundle) JSON request helper; returns body + status.
+  // out_body is a psram_string on purpose: the read chunk buffer is already PSRAM, and the
+  // accumulator has to be too — MAX_RESP (96 KB) is larger than the whole internal heap, so
+  // a std::string here would crater the internal floor (or OOM) on a big layout response.
   bool cloud_http_json_(const char *method, const std::string &url, const std::string &body,
-                        const std::string &bearer, std::string &out_body, int &out_status);
-  void match_cloud_layout_to_uart_(const std::string &layout_json);  // apply layout to nodes
+                        const std::string &bearer, psram_string &out_body, int &out_status);
+  void match_cloud_layout_to_uart_(const char *layout_json);  // apply layout to nodes
   void cloud_save_creds_();
   std::string cloud_email_;
   std::string cloud_token_;
