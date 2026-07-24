@@ -6,7 +6,9 @@ On-flash time-series storage for Tigo Monitor, backed by [`zakery292/esp_tsdb`](
 
 **Just want to turn it on?** Jump to [Required configuration](#required-configuration) — add two dependencies and a `tsdb` partition, and history starts recording. Everything after that section is reference material on the internals.
 
-> **Status:** Phases 1–3 shipped. Per-snapshot system rollups + per-panel power are persisted at 5-min cadence; up to 48 panels supported across three lazy-opened panel DBs. Daily-rollup phase (Phase 4) and the volatile-history retirement (Phase 6) are tracked separately and not on the critical path.
+> **Status:** Phases 1–3 shipped. Per-snapshot system rollups + per-panel power are persisted at 30-min cadence; up to 48 panels supported across three lazy-opened panel DBs. Daily-rollup phase (Phase 4) and the volatile-history retirement (Phase 6) are tracked separately and not on the critical path.
+>
+> **Cadence note:** the snapshot interval is **30 minutes**, hardcoded in `tigo_monitor.cpp`. It was originally 5 min, but every flash write briefly disables the CPU instruction cache on both cores; at 5-min cadence those windows collided often enough with WiFi/BLE-coex radio ISRs to crash the device. Coarsening to 30 min cut the flash-op frequency ~6× and, together with core-pinning the writer, cut the crash rate ~40× (mean time-to-failure went from ~20 min to ~13 h); a rare residual remains under BLE coex. `period_e_*` energy deltas are interval-agnostic, so totals are unaffected — only history time-resolution changed.
 
 ---
 
@@ -60,19 +62,19 @@ Internals for firmware developers: what gets persisted, how it's sized, the writ
 
 Two logical schemas, three on-disk DBs (panel DB is striped because esp_tsdb caps at 16 base params per file).
 
-### `system.tsdb` — system + per-inverter rollups (5-min cadence, 14 params)
+### `system.tsdb` — system + per-inverter rollups (30-min cadence, 14 params)
 
 | # | Name | Unit | Scale |
 |---|------|------|-------|
 | 0 | `total_p` | W | ×1 |
-| 1 | `total_e` | kWh | ×100 (period delta — energy produced in the 5-min window) |
-| 2–9 | `inv1_p` … `inv4_e` | W or kWh ×100 | per-inverter power and 5-min energy delta |
+| 1 | `total_e` | kWh | ×100 (period delta — energy produced in the 30-min window) |
+| 2–9 | `inv1_p` … `inv4_e` | W or kWh ×100 | per-inverter power and 30-min energy delta |
 | 10 | `temp_avg` | °C | ×1 |
 | 11 | `freq` | dHz | ×10 (currently 0 — wired but not extracted from telemetry) |
 | 12 | `frames_lost` | count | ×1 |
 | 13 | `wifi_rssi` | dBm | ×1 |
 
-### `panels{0,1,2}.tsdb` — per-panel power (5-min cadence, 16 params each)
+### `panels{0,1,2}.tsdb` — per-panel power (30-min cadence, 16 params each)
 
 Each DB covers 16 panel slots. Up to 48 panels total. DBs are opened lazily — `panels1.tsdb` doesn't exist on flash until a 17th slot is assigned.
 
@@ -95,12 +97,14 @@ nvs        448 KB
 tsdb       3 MB      (LittleFS — system.tsdb + 3× panels<N>.tsdb)
 ```
 
-Per-DB allocations in `tigo_history.cpp`:
+Per-DB allocations in `tigo_history.cpp` (record count = `(file_bytes − 2048) / (4 + params×2)`):
 
-| DB | File size | Records | At 5-min cadence | Buffer pool |
-|----|-----------|---------|------------------|-------------|
-| `system.tsdb` | 2 MB | ~65k records | ~227 days at full cadence | 10 KB (PSRAM) |
-| `panels{0,1,2}.tsdb` | 256 KB each | ~7,200 records | ~25 days each | 6 KB each (PSRAM) |
+| DB | File size | Records | At 30-min cadence | Buffer pool |
+|----|-----------|---------|-------------------|-------------|
+| `system.tsdb` | 1 MB | ~32,700 records | ~680 days (~1.9 yr) | 10 KB (PSRAM) |
+| `panels{0,1,2}.tsdb` | 192 KB each | ~5,400 records | ~112 days each | 6 KB each (PSRAM) |
+
+The three panel DBs total 576 KB; with the 1 MB system DB that's ~1.6 MB of the 3 MB partition (~52% used). The rest is deliberate headroom — LittleFS needs free blocks for metadata, copy-on-write scratch, and garbage collection. (An earlier 2 MB + 3×256 KB layout ran the partition ~98% full, which starved LittleFS and wiped history on every reboot — see commit `00366d7`.)
 
 Buffer pools live in PSRAM (`TSDB_ALLOC_PSRAM`) so they don't pressure internal heap; the AtomS3R reference rig reclaimed ~28 KB internal heap by moving them out.
 
@@ -108,11 +112,11 @@ Buffer pools live in PSRAM (`TSDB_ALLOC_PSRAM`) so they don't pressure internal 
 
 ## Write path
 
-A dedicated FreeRTOS task (`tsdb_writer`, priority 1, 8 KB stack) drains a queue of encoded snapshots. Snapshots are produced by a 5-min `set_interval` timer on the main app task:
+A dedicated FreeRTOS task (`tsdb_writer`, priority 1, 8 KB stack, **pinned to core 1** via `xTaskCreatePinnedToCore`) drains a queue of encoded snapshots. Pinning matters: it puts the writer on the same core as the ESPHome main loop and the UART read, so the writer's flash op can never run *concurrently* with the UART ring-buffer read on the other core — one of the flash-vs-cache crash victims (see the cadence note at the top). Snapshots are produced by a 30-min `set_interval` timer on the main app task:
 
 1. Take the state lock briefly to gather aggregates (system, per-inverter, per-panel power).
 2. Encode floats to int16 with the appropriate scale.
-3. `xQueueSend` non-blocking — if the queue is full (4-deep), drop the sample with a log warning. With 5-min cadence the queue should never be more than 1 deep in steady state.
+3. `xQueueSend` non-blocking — if the queue is full (4-deep), drop the sample with a log warning. With 30-min cadence the queue should never be more than 1 deep in steady state.
 
 The writer task pops snapshots and calls `tsdb_write_h(system_db_, …)` followed by `tsdb_write_h(panel_db_[i], …)` for every open panel DB. Each `tsdb_write_h` does fflush + fsync internally.
 
@@ -132,11 +136,11 @@ The SPA's History view and the JSON API both pull from `/api/history/power` (sys
 
 | Endpoint | Source | Resolution | Typical points |
 |----------|--------|------------|----------------|
-| `/api/history/power?range=day` | `system.tsdb` | 5-min | ~288 |
-| `/api/history/power?range=week` | `system.tsdb` | 5-min | ~2,000 |
-| `/api/history/power?range=month` | `system.tsdb` | 5-min | ~8,640 (capped at oldest record on disk) |
-| `/api/history/power?range=year` | `system.tsdb` | 5-min | (covers what's on disk, ≤ ~227 days) |
-| `/api/history/panel?slot=N&range=…` | `panels{slot/16}.tsdb` | 5-min | one column read |
+| `/api/history/power?range=day` | `system.tsdb` | 30-min | ~48 |
+| `/api/history/power?range=week` | `system.tsdb` | 30-min | ~336 |
+| `/api/history/power?range=month` | `system.tsdb` | 30-min | ~1,440 |
+| `/api/history/power?range=year` | `system.tsdb` | 30-min | ~17,500 (a full year fits; the DB holds ~680 days) |
+| `/api/history/panel?slot=N&range=…` | `panels{slot/16}.tsdb` | 30-min | one column read |
 | `/api/panels` | `panel_map.json` | — | full slot map |
 | `/api/tsdb/stats` | live handles | — | per-DB record counts, oldest/newest, evictions, file sizes |
 
