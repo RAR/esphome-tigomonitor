@@ -44,7 +44,7 @@ static const uint32_t CCA_SESSION_SEED = 159260;  // app constant (eZ) for the s
 // forward-declared here because ble_store_cca_info_/ble_store_network_ use them above.
 static uint32_t cca_info_pref_hash();
 static uint32_t cca_network_pref_hash();
-static void cca_persist_save_(uint32_t hash, uint32_t epoch, const std::string &json);
+static void cca_persist_save_(uint32_t hash, uint32_t epoch, const psram_string &json);
 
 // Tigo service UUID d3dadcba-e4fa-4016-ba33-8bcc671999a7 (little-endian bytes)
 static const uint8_t CCA_SERVICE_UUID_BYTES[16] = {
@@ -164,7 +164,7 @@ void TigoWebServer::gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_
       break;
     case ESP_GATTC_READ_CHAR_EVT:
       if (param->read.status == ESP_GATT_OK) {
-        std::string data((char *) param->read.value, param->read.value_len);
+        psram_string data((char *) param->read.value, param->read.value_len);
         this->ble_process_response_(data);
       }
       break;
@@ -332,7 +332,7 @@ void TigoWebServer::ble_handle_notification_(esp_ble_gattc_cb_param_t *param) {
   if (!this->ble_response_buffer_.empty() && this->ble_response_buffer_.back() == '\0') {
     this->ble_awaiting_response_ = false;
     this->ble_response_buffer_.pop_back();
-    std::string json(this->ble_response_buffer_.begin(), this->ble_response_buffer_.end());
+    psram_string json(this->ble_response_buffer_.begin(), this->ble_response_buffer_.end());
     ESP_LOGD(BLE_TAG, "Response to '%s' (%d bytes)", this->ble_last_command_.c_str(), json.length());
     const size_t chunk = 200;
     for (size_t i = 0; i < json.length(); i += chunk)
@@ -429,7 +429,7 @@ void TigoWebServer::ble_enqueue_net_request_(const std::string &command, const s
 // Command writing
 // ---------------------------------------------------------------------------
 
-void TigoWebServer::ble_write_command_(const std::string &cmd, const std::string &params) {
+void TigoWebServer::ble_write_command_(const std::string &cmd, const psram_string &params) {
   if (!this->ble_connected_) {
     ESP_LOGW(BLE_TAG, "Not connected");
     return;
@@ -504,11 +504,11 @@ void TigoWebServer::ble_generate_session_key_(uint32_t uts) {
   for (int i = 0; i < 64; i++)
     sprintf(hex + i * 2, "%02x", hash[i]);
   hex[128] = '\0';
-  this->ble_session_key_ = std::string(hex);
+  this->ble_session_key_ = hex;
   ESP_LOGD(BLE_TAG, "Session key generated from uts=%u", uts);
 }
 
-void TigoWebServer::ble_process_response_(const std::string &data) {
+void TigoWebServer::ble_process_response_(const psram_string &data) {
   // The CCA responses are small, controlled JSON. We don't parse them server-side —
   // the cache holds the raw string and the CCA Info page parses it in the browser.
   // We only need two things here: spot the auth-failure reply, and lift `uts`.
@@ -517,7 +517,7 @@ void TigoWebServer::ble_process_response_(const std::string &data) {
   // specifically — action commands (WIFI_CONNECT/CLEAR, RUN_TEST) legitimately report
   // success/failure in a "msg" field, so the old "any msg = rejected" test would have
   // wrongly dropped them.
-  if (data.find("Unauthorized request") != std::string::npos) {
+  if (data.find("Unauthorized request") != psram_string::npos) {
     ESP_LOGW(BLE_TAG, "CCA rejected '%s' (bad/expired sid): %s", this->ble_last_command_.c_str(),
              data.c_str());
     return;
@@ -563,23 +563,24 @@ void TigoWebServer::ble_process_response_(const std::string &data) {
 
   // Auth: extract the uts nonce, derive the sid, and fire any queued protected command.
   size_t uts_pos = data.find("\"uts\":");
-  if (uts_pos != std::string::npos) {
+  if (uts_pos != psram_string::npos) {
     size_t val_start = data.find_first_of("0123456789", uts_pos + 6);
-    if (val_start != std::string::npos) {
+    if (val_start != psram_string::npos) {
       size_t val_end = data.find_first_not_of("0123456789", val_start);
       uint32_t uts =
           static_cast<uint32_t>(strtoul(data.substr(val_start, val_end - val_start).c_str(), nullptr, 10));
       this->ble_generate_session_key_(uts);
       if (!this->ble_pending_protected_cmd_.empty()) {
         std::string cmd = this->ble_pending_protected_cmd_;
-        std::string extra = this->ble_pending_protected_params_;
+        psram_string extra = this->ble_pending_protected_params_;
         this->ble_pending_protected_cmd_.clear();
         this->ble_pending_protected_params_.clear();
         ESP_LOGI(BLE_TAG, "Auth ready; scheduling %s in 100ms", cmd.c_str());
         this->ble_deferred_command_ = cmd;
         // Extra params (already URI-encoded) come before sid, matching the app's order.
         this->ble_deferred_params_ =
-            extra.empty() ? ("sid=" + this->ble_session_key_) : (extra + " sid=" + this->ble_session_key_);
+            extra.empty() ? (psram_string("sid=") + this->ble_session_key_)
+                          : (extra + " sid=" + this->ble_session_key_);
         this->ble_deferred_time_ = millis() + 100;
       }
     }
@@ -603,7 +604,7 @@ void TigoWebServer::ble_arm_auto_disconnect_() {
 // Cached CCA info (read by build_cca_info_json)
 // ---------------------------------------------------------------------------
 
-void TigoWebServer::ble_store_cca_info_(const std::string &raw_device_info) {
+void TigoWebServer::ble_store_cca_info_(const psram_string &raw_device_info) {
   // Only trust the wall clock once HA/SNTP time is set (epoch past 2023-11), else 0.
   uint32_t epoch = (uint32_t) ::time(nullptr);
   if (epoch < 1700000000) epoch = 0;
@@ -617,7 +618,7 @@ void TigoWebServer::ble_store_cca_info_(const std::string &raw_device_info) {
   cca_persist_save_(cca_info_pref_hash(), epoch, raw_device_info);
 }
 
-void TigoWebServer::ble_store_network_(const std::string &raw_network_info) {
+void TigoWebServer::ble_store_network_(const psram_string &raw_network_info) {
   uint32_t epoch = (uint32_t) ::time(nullptr);
   if (epoch < 1700000000) epoch = 0;
   {
@@ -628,18 +629,18 @@ void TigoWebServer::ble_store_network_(const std::string &raw_network_info) {
   cca_persist_save_(cca_network_pref_hash(), epoch, raw_network_info);
 }
 
-std::string TigoWebServer::ble_get_network_json_() {
+psram_string TigoWebServer::ble_get_network_json_() {
   std::lock_guard<std::mutex> lock(this->cca_info_mutex_);
   return this->cca_network_json_;
 }
 
-void TigoWebServer::ble_store_discovery_(const std::string &raw_discovery_status) {
+void TigoWebServer::ble_store_discovery_(const psram_string &raw_discovery_status) {
   std::lock_guard<std::mutex> lock(this->cca_info_mutex_);
   this->cca_discovery_json_ = raw_discovery_status;
   this->cca_discovery_time_ = millis();
 }
 
-std::string TigoWebServer::ble_get_discovery_json_() {
+psram_string TigoWebServer::ble_get_discovery_json_() {
   std::lock_guard<std::mutex> lock(this->cca_info_mutex_);
   return this->cca_discovery_json_;
 }
@@ -651,13 +652,13 @@ uint32_t TigoWebServer::ble_get_discovery_seconds_ago_() {
   return (millis() - this->cca_discovery_time_) / 1000;
 }
 
-void TigoWebServer::ble_store_net_result_(const std::string &command, const std::string &json) {
+void TigoWebServer::ble_store_net_result_(const std::string &command, const psram_string &json) {
   std::lock_guard<std::mutex> lock(this->cca_info_mutex_);
   this->cca_net_results_[command] = json;
   this->cca_net_times_[command] = millis();
 }
 
-std::string TigoWebServer::ble_get_net_result_(const std::string &command, uint32_t &age_s) {
+psram_string TigoWebServer::ble_get_net_result_(const std::string &command, uint32_t &age_s) {
   std::lock_guard<std::mutex> lock(this->cca_info_mutex_);
   auto it = this->cca_net_results_.find(command);
   if (it == this->cca_net_results_.end()) {
@@ -695,7 +696,7 @@ bool TigoWebServer::ble_has_cca_info_() {
   return this->cca_info_time_ != 0 && !this->cca_info_json_.empty();
 }
 
-std::string TigoWebServer::ble_get_cca_info_json_() {
+psram_string TigoWebServer::ble_get_cca_info_json_() {
   std::lock_guard<std::mutex> lock(this->cca_info_mutex_);
   return this->cca_info_json_;
 }
@@ -751,7 +752,7 @@ struct CcaSnapshotPref {
 static uint32_t cca_info_pref_hash() { return fnv1_hash("tigo_cca_info_snap_v1"); }
 static uint32_t cca_network_pref_hash() { return fnv1_hash("tigo_cca_network_snap_v1"); }
 
-static void cca_persist_save_(uint32_t hash, uint32_t epoch, const std::string &json) {
+static void cca_persist_save_(uint32_t hash, uint32_t epoch, const psram_string &json) {
   if (json.size() > CCA_PERSIST_MAX) {
     ESP_LOGW(BLE_TAG, "CCA snapshot %u B over persist cap %u — not saved",
              (unsigned) json.size(), (unsigned) CCA_PERSIST_MAX);
@@ -766,7 +767,7 @@ static void cca_persist_save_(uint32_t hash, uint32_t epoch, const std::string &
   p.save(&pref);
 }
 
-static bool cca_persist_load_(uint32_t hash, uint32_t &epoch_out, std::string &json_out) {
+static bool cca_persist_load_(uint32_t hash, uint32_t &epoch_out, psram_string &json_out) {
   CcaSnapshotPref pref{};
   auto p = global_preferences->make_preference<CcaSnapshotPref>(hash);
   if (!p.load(&pref) || pref.magic != CCA_SNAP_MAGIC || pref.len > CCA_PERSIST_MAX)
@@ -860,7 +861,7 @@ void TigoWebServer::ble_load_mac_() {
 }
 
 void TigoWebServer::ble_persist_load_() {
-  std::string info, network;
+  psram_string info, network;
   uint32_t info_epoch = 0, net_epoch = 0;
   bool have_info = cca_persist_load_(cca_info_pref_hash(), info_epoch, info) && !info.empty();
   bool have_net = cca_persist_load_(cca_network_pref_hash(), net_epoch, network) && !network.empty();

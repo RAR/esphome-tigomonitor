@@ -139,18 +139,21 @@ class TigoWebServer : public Component
   bool ble_connected_{false};
   bool ble_ready_{false};  // true after the CCCD write succeeds
 
-  std::vector<uint8_t> ble_response_buffer_;
+  // PSRAM: a CCA response reassembles here in ~17-byte GATT notifications, so the vector
+  // regrows repeatedly on its way to ~1.7 KB (DEVICE_INFO) — churn the internal heap can
+  // do without, on a buffer that lives for the life of the process.
+  psram_vector<uint8_t> ble_response_buffer_;
   uint8_t ble_request_num_{1};
   uint32_t ble_last_command_time_{0};
   bool ble_awaiting_response_{false};
-  std::string ble_session_key_;             // SHA512((uts + 159260)) hex, 128 chars
+  psram_string ble_session_key_;  // SHA512((uts + 159260)) hex, 128 chars
   std::string ble_pending_protected_cmd_;   // queued while fetching a fresh DEVICE_INFO for sid
-  std::string ble_pending_protected_params_;// extra URI-encoded params for the protected cmd
+  psram_string ble_pending_protected_params_;  // extra URI-encoded params
   std::string ble_last_command_;            // command the in-flight response belongs to
   std::vector<std::string> ble_command_queue_;
   uint32_t ble_deferred_time_{0};
   std::string ble_deferred_command_;
-  std::string ble_deferred_params_;
+  psram_string ble_deferred_params_;  // carries the 128-char sid
   bool ble_auto_disconnect_{false};  // cca_ble_refresh_once(): drop the link after the pull
   uint32_t ble_disconnect_at_{0};    // millis() deadline for the deferred disconnect (0 = none)
   // Set from the web-server task; consumed on the main loop so all BLE stack calls
@@ -172,12 +175,15 @@ class TigoWebServer : public Component
   uint64_t ble_saved_mac_{0};  // user-selected MAC persisted to NVS (0 = using YAML)
 
   // Cached DEVICE_INFO + NETWORK_INFO JSON for the CCA Info page (guarded by cca_info_mutex_)
-  std::string cca_info_json_;
-  std::string cca_network_json_;
-  std::string cca_discovery_json_;  // last DISCOVERY_STATUS payload (scan progress)
-  // Per-command cache for network reads/writes (WIFI_STATUS/SCAN, CELLULAR_INFO, etc.)
-  std::map<std::string, std::string> cca_net_results_;  // command -> raw JSON reply
-  std::map<std::string, uint32_t> cca_net_times_;       // command -> millis() of reply
+  // PSRAM: these are *persistent* holders, not transients — DEVICE_INFO alone is ~1.7 KB
+  // and they stay resident for the life of the process (and are restored from NVS at boot).
+  psram_string cca_info_json_;
+  psram_string cca_network_json_;
+  psram_string cca_discovery_json_;  // last DISCOVERY_STATUS payload
+  // Per-command cache for network reads/writes (WIFI_STATUS/SCAN, CELLULAR_INFO, etc.).
+  // Keys are short command names (SSO); the values are what needed moving.
+  psram_map<std::string, psram_string> cca_net_results_;
+  psram_map<std::string, uint32_t> cca_net_times_;  // command -> millis()
   uint32_t cca_info_time_{0};       // millis() of last cache update (0 = never)
   uint32_t cca_discovery_time_{0};  // millis() of last discovery poll (0 = never)
   uint32_t cca_saved_epoch_{0};     // wall-clock epoch of last CCA Info/Network fetch
@@ -197,26 +203,27 @@ class TigoWebServer : public Component
   void ble_setup_notifications_fallback_();
   void ble_write_cccd_(uint16_t cccd_handle);
   void ble_queue_command_(const std::string &cmd);
-  void ble_write_command_(const std::string &cmd, const std::string &params = "");
+  // params is a psram_string: it carries the 128-char session id.
+  void ble_write_command_(const std::string &cmd, const psram_string &params = psram_string());
   void ble_send_payload_(const std::vector<uint8_t> &payload);
   void ble_generate_session_key_(uint32_t uts);
-  void ble_process_response_(const std::string &data);
+  void ble_process_response_(const psram_string &data);
   void ble_arm_auto_disconnect_();
-  void ble_store_cca_info_(const std::string &raw_device_info);
-  void ble_store_network_(const std::string &raw_network_info);
+  void ble_store_cca_info_(const psram_string &raw_device_info);
+  void ble_store_network_(const psram_string &raw_network_info);
   void ble_persist_load_();  // restore cca_info_json_/cca_network_json_ from NVS at boot
   bool ble_has_cca_info_();
-  std::string ble_get_cca_info_json_();
-  std::string ble_get_network_json_();
-  void ble_store_discovery_(const std::string &raw_discovery_status);
-  std::string ble_get_discovery_json_();
+  psram_string ble_get_cca_info_json_();
+  psram_string ble_get_network_json_();
+  void ble_store_discovery_(const psram_string &raw_discovery_status);
+  psram_string ble_get_discovery_json_();
   uint32_t ble_get_discovery_seconds_ago_();
   // Network config commands (mobile_api). cca_run_network_command_ runs on the main
   // loop: connect → sid → command(+params) → cache by name → disconnect.
   void cca_run_network_command_(const std::string &command, const std::string &params);
   void ble_enqueue_net_request_(const std::string &command, const std::string &params);
-  void ble_store_net_result_(const std::string &command, const std::string &json);
-  std::string ble_get_net_result_(const std::string &command, uint32_t &age_s);
+  void ble_store_net_result_(const std::string &command, const psram_string &json);
+  psram_string ble_get_net_result_(const std::string &command, uint32_t &age_s);
   static std::string ble_uri_encode_(const std::string &value);  // matches the app's CK()
   uint32_t ble_get_cca_info_seconds_ago_();
   std::string ble_address_();
