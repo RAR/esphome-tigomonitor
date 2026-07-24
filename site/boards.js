@@ -240,7 +240,10 @@ font:
     label: 'ESP32-P4 Function EV Board (32MB PSRAM, C6 Wi-Fi)',
     chip: 'esp32p4', board: 'esp32-p4-function-ev-board', variant: 'esp32p4',
     flash_size: '16MB',
-    partitions: { default: 'partitions/tigo-16mb.csv' },
+    // Same table for both: unlike the 8 MB boards (1.75 -> 2.0 MB slots for BLE), the
+    // P4's 3 MB slots already fit the BLE build with room to spare (measured 1.80 MB,
+    // 49%), so enabling BLE here needs no repartition.
+    partitions: { default: 'partitions/tigo-16mb.csv', ble: 'partitions/tigo-16mb.csv' },
     psram: { mode: 'hex', speed: '200MHz' },
     // execute_from_psram (XIP) is required on the P4 so PSRAM-resident task
     // stacks stay reachable during flash cache-disable windows — without it some
@@ -271,10 +274,15 @@ font:
     },
     uartDefault: { tx_pin: 'GPIO20', rx_pin: 'GPIO21', rx_buffer_size: 16384 },
     numberOfDevices: 100,
-    supports: { ble: false, display: false },
+    // BLE works even though the P4 has no radio: ESPHome's esp32_ble detects an
+    // esp32_hosted config and switches to CONFIG_BT_CONTROLLER_DISABLED +
+    // CONFIG_ESP_HOSTED_ENABLE_BT_BLUEDROID, running the Bluedroid host on the P4
+    // against the C6's controller over VHCI. Requires C6 slave firmware built with BT.
+    supports: { ble: true, display: false },
     displayOverlay: null,
     notes: [
       'No native Wi-Fi — uses an ESP32-C6 companion over SDIO (esp32_hosted).',
+      'BLE runs over the C6 companion (Bluedroid host on the P4, controller on the C6 via VHCI). This path is untested on P4 hardware and needs C6 slave firmware built with Bluetooth support.',
       'PSRAM is hex mode only; valid speeds are 20/100/200 MHz (200 default). If a specific board crash-loops at boot, drop to 100 or 20 MHz — a per-board PSRAM quirk, not a universal limit.',
     ],
   },

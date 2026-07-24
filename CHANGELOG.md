@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **BLE is now offered on the ESP32-P4 in the Config Wizard.** The P4 was marked `supports: { ble: false }` on the reasoning that the chip has no radio — true (there is no `SOC_BT_SUPPORTED` in `soc/esp32p4/include/soc/soc_caps.h`, and IDF's `BT_CONTROLLER_ENABLED` depends on it), but not disqualifying. ESPHome's `esp32_ble` detects an `esp32_hosted` config and switches to `CONFIG_BT_CONTROLLER_DISABLED` + `CONFIG_ESP_HOSTED_ENABLE_BT_BLUEDROID` + `CONFIG_ESP_HOSTED_BLUEDROID_HCI_VHCI`, running the Bluedroid *host* on the P4 against the ESP32-C6 companion's controller over VHCI; `ble.cpp`, `esp32_ble_tracker`, `esp32_ble_beacon` and `bluetooth_proxy` all branch on that symbol. So `cca_source: ble` works on the P4 over the same SDIO link that carries Wi-Fi. No new partition table is needed: unlike the 8 MB boards, where BLE forced the app slots from 1.75 MB to 2.0 MB, the P4's existing `tigo-16mb.csv` 3 MB slots fit the BLE build at 1.80 MB (49%), so enabling BLE on a P4 requires no repartition. Adds `boards/test-p4-ble-tigomonitor.yaml` as a local-components compile check; it builds clean on IDF 5.5.5 with all six hosted-BT sdkconfig symbols resolved on an `esp32p4` target. **Untested on P4 hardware** — the path also requires ESP32-C6 slave firmware built with Bluetooth support.
+
 ## [2.0.0-beta.4] - 2026-07-24
 
 ### Added
