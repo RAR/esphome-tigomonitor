@@ -31,12 +31,20 @@
 #include <algorithm>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
+#include <ctime>
 
 namespace esphome {
 namespace tigo_server {
 
 static const char *const BLE_TAG = "tigo_server.ble";
 static const uint32_t CCA_SESSION_SEED = 159260;  // app constant (eZ) for the session key
+
+// CCA snapshot persistence helpers (defined lower, next to the CcaBleMacPref pattern) —
+// forward-declared here because ble_store_cca_info_/ble_store_network_ use them above.
+static uint32_t cca_info_pref_hash();
+static uint32_t cca_network_pref_hash();
+static void cca_persist_save_(uint32_t hash, uint32_t epoch, const std::string &json);
 
 // Tigo service UUID d3dadcba-e4fa-4016-ba33-8bcc671999a7 (little-endian bytes)
 static const uint8_t CCA_SERVICE_UUID_BYTES[16] = {
@@ -51,6 +59,9 @@ void TigoWebServer::ble_setup_() {
   ESP_LOGCONFIG(BLE_TAG, "CCA-over-BLE client enabled (cca_source: ble/auto)");
   // Capture the compile-time MAC, then overlay any user-selected MAC from NVS.
   this->ble_load_mac_();
+  // Restore the last CCA Info/Network snapshot from NVS so the /cca page renders
+  // immediately after a reboot without needing a fresh BLE round-trip to the CCA.
+  this->ble_persist_load_();
   // The advertisement listener is registered at codegen time (esp32_ble_tracker
   // .register_ble_device in __init__.py) so parse_device() is actually dispatched —
   // a runtime register_listener() is compiled out unless the LISTENER_COUNT macro is set.
@@ -593,14 +604,28 @@ void TigoWebServer::ble_arm_auto_disconnect_() {
 // ---------------------------------------------------------------------------
 
 void TigoWebServer::ble_store_cca_info_(const std::string &raw_device_info) {
-  std::lock_guard<std::mutex> lock(this->cca_info_mutex_);
-  this->cca_info_json_ = raw_device_info;
-  this->cca_info_time_ = millis();
+  // Only trust the wall clock once HA/SNTP time is set (epoch past 2023-11), else 0.
+  uint32_t epoch = (uint32_t) ::time(nullptr);
+  if (epoch < 1700000000) epoch = 0;
+  {
+    std::lock_guard<std::mutex> lock(this->cca_info_mutex_);
+    this->cca_info_json_ = raw_device_info;
+    this->cca_info_time_ = millis();
+    if (epoch != 0) this->cca_saved_epoch_ = epoch;
+  }
+  // Persist outside the lock (NVS write shouldn't hold the cache mutex).
+  cca_persist_save_(cca_info_pref_hash(), epoch, raw_device_info);
 }
 
 void TigoWebServer::ble_store_network_(const std::string &raw_network_info) {
-  std::lock_guard<std::mutex> lock(this->cca_info_mutex_);
-  this->cca_network_json_ = raw_network_info;
+  uint32_t epoch = (uint32_t) ::time(nullptr);
+  if (epoch < 1700000000) epoch = 0;
+  {
+    std::lock_guard<std::mutex> lock(this->cca_info_mutex_);
+    this->cca_network_json_ = raw_network_info;
+    if (epoch != 0 && this->cca_saved_epoch_ == 0) this->cca_saved_epoch_ = epoch;
+  }
+  cca_persist_save_(cca_network_pref_hash(), epoch, raw_network_info);
 }
 
 std::string TigoWebServer::ble_get_network_json_() {
@@ -677,6 +702,14 @@ std::string TigoWebServer::ble_get_cca_info_json_() {
 
 uint32_t TigoWebServer::ble_get_cca_info_seconds_ago_() {
   std::lock_guard<std::mutex> lock(this->cca_info_mutex_);
+  // Prefer wall-clock age: it's correct across reboots (a persisted snapshot keeps
+  // its true age instead of resetting to ~0 on the millis() clock). Fall back to
+  // millis() only before the clock is set / for a same-session fetch with no epoch.
+  if (this->cca_saved_epoch_ != 0) {
+    uint32_t now = (uint32_t) ::time(nullptr);
+    if (now > this->cca_saved_epoch_)
+      return now - this->cca_saved_epoch_;
+  }
   if (this->cca_info_time_ == 0)
     return 0;
   return (millis() - this->cca_info_time_) / 1000;
@@ -698,6 +731,50 @@ struct CcaBleMacPref {
 };
 
 static uint32_t cca_ble_mac_hash() { return fnv1_hash("tigo_cca_ble_mac_v1"); }
+
+// --- Persisted CCA Info/Network snapshots (NVS) --------------------------------
+// The CCA Info + Network pages are sourced over BLE and were RAM-only, so a reboot
+// blanked them until the next BLE round-trip. Persist each raw JSON payload (plus the
+// wall-clock epoch of the fetch) to NVS so the /cca page repopulates on boot. Info and
+// Network live in two separate preferences (each a fixed-size POD blob) so neither
+// overruns and they can be sized/loaded independently.
+static const uint32_t CCA_SNAP_MAGIC = 0x71C05A00;  // "tigo cca snap"
+static constexpr size_t CCA_PERSIST_MAX = 3072;     // per-blob JSON cap (device_info ~1.7KB)
+
+struct CcaSnapshotPref {
+  uint32_t magic;
+  uint32_t epoch;  // wall-clock time of the fetch (0 = clock wasn't set)
+  uint16_t len;    // valid bytes in json[]
+  char json[CCA_PERSIST_MAX];
+};
+
+static uint32_t cca_info_pref_hash() { return fnv1_hash("tigo_cca_info_snap_v1"); }
+static uint32_t cca_network_pref_hash() { return fnv1_hash("tigo_cca_network_snap_v1"); }
+
+static void cca_persist_save_(uint32_t hash, uint32_t epoch, const std::string &json) {
+  if (json.size() > CCA_PERSIST_MAX) {
+    ESP_LOGW(BLE_TAG, "CCA snapshot %u B over persist cap %u — not saved",
+             (unsigned) json.size(), (unsigned) CCA_PERSIST_MAX);
+    return;
+  }
+  CcaSnapshotPref pref{};  // zero-inits the whole blob
+  pref.magic = CCA_SNAP_MAGIC;
+  pref.epoch = epoch;
+  pref.len = (uint16_t) json.size();
+  memcpy(pref.json, json.data(), json.size());
+  auto p = global_preferences->make_preference<CcaSnapshotPref>(hash);
+  p.save(&pref);
+}
+
+static bool cca_persist_load_(uint32_t hash, uint32_t &epoch_out, std::string &json_out) {
+  CcaSnapshotPref pref{};
+  auto p = global_preferences->make_preference<CcaSnapshotPref>(hash);
+  if (!p.load(&pref) || pref.magic != CCA_SNAP_MAGIC || pref.len > CCA_PERSIST_MAX)
+    return false;
+  epoch_out = pref.epoch;
+  json_out.assign(pref.json, pref.len);
+  return true;
+}
 
 // "AA:BB:CC:DD:EE:FF" -> uint64 (0 on malformed input).
 static uint64_t parse_mac_(const std::string &s) {
@@ -780,6 +857,27 @@ void TigoWebServer::ble_load_mac_() {
     ESP_LOGI(BLE_TAG, "Using saved CCA BLE MAC %s (YAML default %s)",
              mac_to_str_(pref.mac).c_str(), mac_to_str_(this->ble_yaml_mac_).c_str());
   }
+}
+
+void TigoWebServer::ble_persist_load_() {
+  std::string info, network;
+  uint32_t info_epoch = 0, net_epoch = 0;
+  bool have_info = cca_persist_load_(cca_info_pref_hash(), info_epoch, info) && !info.empty();
+  bool have_net = cca_persist_load_(cca_network_pref_hash(), net_epoch, network) && !network.empty();
+  if (!have_info && !have_net)
+    return;
+  std::lock_guard<std::mutex> lock(this->cca_info_mutex_);
+  if (have_info) {
+    this->cca_info_json_ = info;
+    this->cca_info_time_ = millis();  // mark "has cached info" for this session
+    this->cca_saved_epoch_ = info_epoch;
+  }
+  if (have_net) {
+    this->cca_network_json_ = network;
+    if (this->cca_saved_epoch_ == 0) this->cca_saved_epoch_ = net_epoch;
+  }
+  ESP_LOGI(BLE_TAG, "Restored persisted CCA snapshot from NVS (info=%s network=%s epoch=%u)",
+           have_info ? "y" : "n", have_net ? "y" : "n", (unsigned) this->cca_saved_epoch_);
 }
 
 bool TigoWebServer::ble_set_saved_mac(const std::string &mac_str) {

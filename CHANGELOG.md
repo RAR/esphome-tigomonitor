@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **CCA Info/Network snapshot survives reboot.** The CCA Info + Network pages (device firmware/status + network topology, sourced over BLE) were RAM-only, so a restart blanked them until the next BLE round-trip to the CCA. `TigoWebServer` now persists each raw JSON payload plus a wall-clock fetch timestamp to NVS (two fixed-size preferences, reusing the `CcaBleMacPref` pattern) on every refresh, and restores them at boot — so `/cca` repopulates instantly with **zero BLE traffic**. The "last synced X ago" badge is now epoch-based, so it reports the true age across a reboot instead of resetting to ~0 on the fresh millis() clock. Info + Network only (transient net-command replies like WiFi scan stay RAM-only); 3 KB/blob cap (oversized payloads skip-with-a-log rather than truncate); the NVS write happens on CCA refresh only, off the tsdb writer path. Verified on-device: after a reboot `/api/cca` returns the cached snapshot with a correctly-climbing age and no BLE traffic.
 - **Config Wizard (GitHub Pages).** A static, client-side wizard that generates a complete, board-tailored starter YAML (AtomS3R, AtomS3, ESP32-P4 EVBoard, generic ESP32), encoding the per-board scaffolding (PSRAM mode/speed, partitions, esp_hosted, experimental-features flag) plus CCA (HTTP/BLE), cloud-import, and secrets toggles. Board data is drift-checked against boards/*.yaml in CI. Motivated by discussion #31.
 
 ### Fixed

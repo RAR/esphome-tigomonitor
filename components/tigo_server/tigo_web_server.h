@@ -180,6 +180,9 @@ class TigoWebServer : public Component
   std::map<std::string, uint32_t> cca_net_times_;       // command -> millis() of reply
   uint32_t cca_info_time_{0};       // millis() of last cache update (0 = never)
   uint32_t cca_discovery_time_{0};  // millis() of last discovery poll (0 = never)
+  uint32_t cca_saved_epoch_{0};     // wall-clock epoch of last CCA Info/Network fetch
+                                    // (persisted to NVS; 0 = unknown). Drives the
+                                    // "last synced X ago" badge correctly across reboot.
   std::mutex cca_info_mutex_;
 
   // BLE lifecycle, driven from setup()/loop()
@@ -201,6 +204,7 @@ class TigoWebServer : public Component
   void ble_arm_auto_disconnect_();
   void ble_store_cca_info_(const std::string &raw_device_info);
   void ble_store_network_(const std::string &raw_network_info);
+  void ble_persist_load_();  // restore cca_info_json_/cca_network_json_ from NVS at boot
   bool ble_has_cca_info_();
   std::string ble_get_cca_info_json_();
   std::string ble_get_network_json_();
