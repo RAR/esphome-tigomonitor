@@ -282,7 +282,7 @@ font:
     displayOverlay: null,
     notes: [
       'No native Wi-Fi — uses an ESP32-C6 companion over SDIO (esp32_hosted).',
-      'BLE runs over the C6 companion (Bluedroid host on the P4, controller on the C6 via VHCI). Verified on an EV board: the stack initializes and issues GATT connects, with Wi-Fi unaffected. A completed CCA session is not yet confirmed.',
+      'BLE runs over the C6 companion (Bluedroid host on the P4, controller on the C6 via VHCI). Verified on an EV board: a full CCA session works, Wi-Fi is unaffected. KNOWN LIMITATION: only one BLE session per boot — the second connect is refused by the C6 with HCI Cmd Disallowed (a link the C6 never releases), so a reboot is needed between CCA refreshes. Prefer cca_source: http on the P4 until this is resolved.',
       'PSRAM is hex mode only; valid speeds are 20/100/200 MHz (200 default). If a specific board crash-loops at boot, drop to 100 or 20 MHz — a per-board PSRAM quirk, not a universal limit.',
     ],
   },
