@@ -52,7 +52,7 @@ static uint32_t cloud_creds_hash() { return fnv1_hash("tigo_cloud_creds_v1"); }
 // ---------------------------------------------------------------------------
 bool TigoMonitorComponent::cloud_http_json_(const char *method, const std::string &url,
                                             const std::string &body, const std::string &bearer,
-                                            std::string &out_body, int &out_status) {
+                                            psram_string &out_body, int &out_status) {
   out_body.clear();
   out_status = 0;
   if (!network::is_connected()) {
@@ -149,7 +149,7 @@ bool TigoMonitorComponent::tigo_cloud_login(const std::string &email, const std:
   cJSON_Delete(req);
 
   std::string url = std::string(CLOUD_API_HOST) + "/api/v3/user/login?type=8";
-  std::string resp;
+  psram_string resp;
   int status = 0;
   if (!cloud_http_json_("POST", url, body, "", resp, status)) {
     ESP_LOGW(CLOUD_TAG, "login request failed");
@@ -192,7 +192,7 @@ bool TigoMonitorComponent::tigo_cloud_login(const std::string &email, const std:
   cloud_system_id_ = 0;
   std::string sys_url =
       std::string(CLOUD_API_HOST) + "/api/v3/systems/query?limit=100&page=1&sort=-id";
-  std::string sresp;
+  psram_string sresp;
   int sstatus = 0;
   if (cloud_http_json_("GET", sys_url, "", cloud_token_, sresp, sstatus) && sstatus == 200) {
     cJSON *sroot = cJSON_Parse(sresp.c_str());
@@ -232,7 +232,7 @@ bool TigoMonitorComponent::tigo_cloud_import() {
 
   std::string url =
       std::string(CLOUD_API_HOST) + "/api/v3/systems/layout?id=" + std::to_string(cloud_system_id_);
-  std::string resp;
+  psram_string resp;
   int status = 0;
   if (!cloud_http_json_("GET", url, "", cloud_token_, resp, status)) {
     ESP_LOGW(CLOUD_TAG, "layout request failed");
@@ -248,14 +248,14 @@ bool TigoMonitorComponent::tigo_cloud_import() {
     ESP_LOGW(CLOUD_TAG, "layout HTTP %d", status);
     return false;
   }
-  match_cloud_layout_to_uart_(resp);
+  match_cloud_layout_to_uart_(resp.c_str());
   return true;
 }
 
 // ---------------------------------------------------------------------------
 // Cloud health rollup (Energy-Intelligence equipment-status/summary)
 // ---------------------------------------------------------------------------
-bool TigoMonitorComponent::tigo_cloud_health(std::string &out_json) {
+bool TigoMonitorComponent::tigo_cloud_health(psram_string &out_json) {
   // The summary endpoint returns Tigo's own warning/error counts per equipment type, e.g.
   // [{"equipmentType":"unit","warning":1,"error":0,"unknown":0},{"equipmentType":"panel",…}].
   // It's already clean JSON, so we pass it straight through to the web UI.
@@ -266,7 +266,7 @@ bool TigoMonitorComponent::tigo_cloud_health(std::string &out_json) {
   }
   std::string url = "https://ei.tigoenergy.com/api/v4/equipment-status/summary?systemId=" +
                     std::to_string(cloud_system_id_);
-  std::string resp;
+  psram_string resp;
   int status = 0;
   if (!cloud_http_json_("GET", url, "", cloud_token_, resp, status)) {
     ESP_LOGW(CLOUD_TAG, "health request failed");
@@ -282,11 +282,11 @@ bool TigoMonitorComponent::tigo_cloud_health(std::string &out_json) {
     ESP_LOGW(CLOUD_TAG, "health HTTP %d", status);
     return false;
   }
-  out_json = resp;
+  out_json = std::move(resp);  // move, not copy — same allocator, no second buffer
   return true;
 }
 
-bool TigoMonitorComponent::tigo_cloud_equipment(const std::string &view, std::string &out_json) {
+bool TigoMonitorComponent::tigo_cloud_equipment(const std::string &view, psram_string &out_json) {
   // Proxy the Energy-Intelligence per-equipment status feeds straight through to the UI.
   //   view "latest"  -> equipment-status/latest  (current status per equipment)
   //   view "history" -> equipment-status/history (recent chronological status events)
@@ -300,7 +300,7 @@ bool TigoMonitorComponent::tigo_cloud_equipment(const std::string &view, std::st
                          ? "/api/v4/equipment-status/history?limit=50&offset=0&systemId="
                          : "/api/v4/equipment-status/latest?systemId=";
   std::string url = "https://ei.tigoenergy.com" + path + std::to_string(cloud_system_id_);
-  std::string resp;
+  psram_string resp;
   int status = 0;
   if (!cloud_http_json_("GET", url, "", cloud_token_, resp, status)) {
     ESP_LOGW(CLOUD_TAG, "equipment request failed");
@@ -315,29 +315,20 @@ bool TigoMonitorComponent::tigo_cloud_equipment(const std::string &view, std::st
     ESP_LOGW(CLOUD_TAG, "equipment HTTP %d", status);
     return false;
   }
-  out_json = resp;
+  out_json = std::move(resp);  // move, not copy — same allocator, no second buffer
   return true;
 }
 
 // ---------------------------------------------------------------------------
 // Layout -> node table (mirror of match_cca_to_uart)
 // ---------------------------------------------------------------------------
-void TigoMonitorComponent::match_cloud_layout_to_uart_(const std::string &layout_json) {
+void TigoMonitorComponent::match_cloud_layout_to_uart_(const char *layout_json) {
   StateLock lock(state_mutex_);
 
-  // PSRAM-backed cJSON parse — the layout can be sizeable on large systems.
-  cJSON_Hooks hooks;
-  hooks.malloc_fn = [](size_t s) -> void * {
-    void *p = heap_caps_malloc(s, MALLOC_CAP_SPIRAM);
-    return p ? p : malloc(s);
-  };
-  hooks.free_fn = [](void *p) { heap_caps_free(p); };
-  cJSON_InitHooks(&hooks);
-
-  cJSON *root = cJSON_Parse(layout_json.c_str());
+  // cJSON allocates from PSRAM: the hooks are installed once, process-wide, in setup().
+  cJSON *root = cJSON_Parse(layout_json);
   if (!root) {
     ESP_LOGE(CLOUD_TAG, "layout parse failed");
-    cJSON_InitHooks(NULL);
     return;
   }
   cJSON *system = cJSON_GetObjectItem(root, "system");
@@ -345,7 +336,6 @@ void TigoMonitorComponent::match_cloud_layout_to_uart_(const std::string &layout
   if (!inverters || !cJSON_IsArray(inverters)) {
     ESP_LOGW(CLOUD_TAG, "layout: no system.inverters array");
     cJSON_Delete(root);
-    cJSON_InitHooks(NULL);
     return;
   }
 
@@ -448,7 +438,6 @@ void TigoMonitorComponent::match_cloud_layout_to_uart_(const std::string &layout
     }
   }
   cJSON_Delete(root);
-  cJSON_InitHooks(NULL);
 
   ESP_LOGI(CLOUD_TAG, "Cloud layout import: %d panels, %d matched to UART devices", panel_count,
            matched);

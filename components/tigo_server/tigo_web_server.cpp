@@ -1787,7 +1787,7 @@ esp_err_t TigoWebServer::api_cloud_health_handler(httpd_req_t *req) {
   if (!server->check_api_auth(req)) {
     return ESP_OK;
   }
-  std::string summary;
+  psram_string summary;
   if (server->parent_ == nullptr || !server->parent_->tigo_cloud_health(summary)) {
     httpd_resp_set_status(req, "502 Bad Gateway");
     httpd_resp_set_type(req, "application/json");
@@ -1817,7 +1817,7 @@ esp_err_t TigoWebServer::api_cloud_equipment_handler(httpd_req_t *req) {
     httpd_query_key_value(query, "view", view, sizeof(view));
   std::string v = (strcmp(view, "history") == 0) ? "history" : "latest";
 
-  std::string data;
+  psram_string data;
   if (server->parent_ == nullptr || !server->parent_->tigo_cloud_equipment(v, data)) {
     httpd_resp_set_status(req, "502 Bad Gateway");
     httpd_resp_set_type(req, "application/json");
@@ -2028,8 +2028,8 @@ esp_err_t TigoWebServer::api_node_import_handler(httpd_req_t *req) {
   ESP_LOGV(TAG, "JSON content (first 200 chars): %.200s", buf);
   
   // Parse JSON using cJSON library
-  std::vector<tigo_monitor::NodeTableData> nodes;
-  
+  psram_vector<tigo_monitor::NodeTableData> nodes;
+
   cJSON *root = cJSON_Parse(buf);
   if (!root) {
     const char *error_ptr = cJSON_GetErrorPtr();
@@ -2694,24 +2694,7 @@ void TigoWebServer::build_energy_history_json(PSRAMString& json) {
 }
 
 void TigoWebServer::build_node_table_json(PSRAMString& json) {
-  // Configure cJSON to use PSRAM if available
-  cJSON_Hooks hooks;
-  bool using_psram = false;
-  size_t total_psram = heap_caps_get_total_size(MALLOC_CAP_SPIRAM);
-  
-  if (total_psram > 0) {
-    hooks.malloc_fn = [](size_t size) -> void* {
-      void* ptr = heap_caps_malloc(size, MALLOC_CAP_SPIRAM);
-      if (!ptr) {
-        ptr = malloc(size);  // Fallback to regular heap
-      }
-      return ptr;
-    };
-    hooks.free_fn = [](void* ptr) { heap_caps_free(ptr); };
-    cJSON_InitHooks(&hooks);
-    using_psram = true;
-  }
-  
+  // cJSON allocates from PSRAM: hooks are installed once, process-wide, in setup().
   cJSON *root = cJSON_CreateObject();
   cJSON *nodes_array = cJSON_CreateArray();
   // Manual Topology overrides travel alongside the nodes so a backup/restore keeps the
@@ -2770,11 +2753,6 @@ void TigoWebServer::build_node_table_json(PSRAMString& json) {
   
   cJSON_free(json_str);
   cJSON_Delete(root);
-  
-  // Reset to default allocators
-  if (using_psram) {
-    cJSON_InitHooks(NULL);
-  }
 }
 
 void TigoWebServer::build_esp_status_json(PSRAMString& json) {

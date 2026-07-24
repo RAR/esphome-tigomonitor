@@ -75,6 +75,26 @@ static void cjson_free_psram(void* ptr) {
   heap_caps_free(ptr);
 }
 
+// Route ALL cJSON allocation to PSRAM, once, process-wide.
+//
+// cJSON's hooks are global state, so the old set-hooks/parse/reset-to-NULL pattern was both
+// incomplete (parses outside those blocks — notably /api/nodes/import, which handles up to
+// 100 KB of JSON — kept using the internal heap) and racy (the httpd task and the main-loop
+// CCA sync could each flip the global hooks mid-parse). Installing once at setup() and never
+// resetting fixes both. Mixing allocators across the boundary is safe on ESP-IDF: heap_caps_free
+// accepts internal pointers and free() accepts PSRAM pointers, so any object allocated before
+// this call still frees correctly afterwards.
+void tigo_cjson_use_psram() {
+  static bool installed = false;
+  if (installed)
+    return;
+  cJSON_Hooks hooks;
+  hooks.malloc_fn = cjson_malloc_psram;
+  hooks.free_fn = cjson_free_psram;
+  cJSON_InitHooks(&hooks);
+  installed = true;
+}
+
 // Helper functions for incoming_data_ buffer (works with both string and vector<char>)
 template<typename BufferType>
 inline size_t buffer_size(const BufferType& buf);
@@ -189,6 +209,9 @@ const uint8_t TigoMonitorComponent::tigo_crc_table_[256] = {
 
 void TigoMonitorComponent::setup() {
   ESP_LOGCONFIG(TAG, "Setting up Tigo Server...");
+
+  // Every cJSON_Parse from here on allocates from PSRAM (node import, CCA sync, cloud layout).
+  tigo_cjson_use_psram();
 
 #ifdef USE_ESP_IDF
   // Create the recursive mutex protecting shared collections from concurrent
@@ -2795,7 +2818,7 @@ bool TigoMonitorComponent::remove_node(uint16_t addr) {
   return true;
 }
 
-bool TigoMonitorComponent::import_node_table(const std::vector<NodeTableData>& nodes) {
+bool TigoMonitorComponent::import_node_table(const psram_vector<NodeTableData>& nodes) {
   StateLock lock(state_mutex_);
   ESP_LOGI(TAG, "Importing node table with %zu nodes", nodes.size());
 
@@ -3303,17 +3326,10 @@ void TigoMonitorComponent::match_cca_to_uart(const std::string &json_response) {
   // method performs. Held for the duration of CCA-result application — does
   // not include the prior HTTP I/O.
   StateLock lock(state_mutex_);
-  // Set custom allocators for cJSON to use PSRAM
-  cJSON_Hooks hooks;
-  hooks.malloc_fn = cjson_malloc_psram;
-  hooks.free_fn = cjson_free_psram;
-  cJSON_InitHooks(&hooks);
-  
+  // cJSON allocates from PSRAM: hooks are installed once, process-wide, in setup().
   cJSON *root = cJSON_Parse(json_response.c_str());
   if (root == NULL) {
     ESP_LOGE(TAG, "Failed to parse CCA JSON response");
-    // Reset to default allocators
-    cJSON_InitHooks(NULL);
     return;
   }
   
@@ -3444,9 +3460,6 @@ void TigoMonitorComponent::match_cca_to_uart(const std::string &json_response) {
   }
   
   cJSON_Delete(root);
-  
-  // Reset cJSON to default allocators
-  cJSON_InitHooks(NULL);
 }
 
 void TigoMonitorComponent::query_cca_device_info() {
