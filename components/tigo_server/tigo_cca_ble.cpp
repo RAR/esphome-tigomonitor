@@ -596,6 +596,13 @@ void TigoWebServer::ble_arm_auto_disconnect_() {
   // Deferred (run from ble_loop_, not the BLE callback) so the I/O settles first.
   if (this->ble_auto_disconnect_) {
     this->ble_auto_disconnect_ = false;
+    // 500 ms is enough on hosted BLE too (ESP32-P4 + C6 companion over VHCI), despite
+    // every HCI command there being an SDIO round trip. Widening it was tried while
+    // chasing the one-CCA-session-per-boot bug and is not the fix: an HCI trace shows
+    // the disconnect (opcode=0x406, rsn:0x13) is sent and fully acknowledged by the C6
+    // — Command Status, then Disconnection Complete — within 115 ms. That bug was the
+    // controller refusing LE_Extended_Create_Connection; see the P4's
+    // CONFIG_BT_BLE_50_FEATURES_SUPPORTED=n.
     this->ble_disconnect_at_ = millis() + 500;
   }
 }

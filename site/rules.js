@@ -40,6 +40,8 @@ export function assembleConfig(board, form) {
       frameworkComponents: board.frameworkComponents,
       hostedComponent: board.hostedComponent,
       sdkconfig: board.sdkconfig,
+      // Merged in by toYaml only when the config actually selects BLE.
+      sdkconfigBle: board.sdkconfigBle ?? null,
     },
     partitions,
     psram: board.psram,

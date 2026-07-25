@@ -124,3 +124,18 @@ test('no BLE blocks or ble_client_id when cca is not ble', () => {
   assert.ok(!y.includes('esp32_ble:'), 'esp32_ble emitted without cca:ble');
   assert.ok(!y.includes('ble_client_id'), 'ble_client_id emitted without cca:ble');
 });
+
+test('board sdkconfigBle is emitted only when the config selects BLE', () => {
+  // The P4 needs CONFIG_BT_BLE_50_FEATURES_SUPPORTED=n for repeatable CCA-over-BLE:
+  // its C6 companion refuses LE_Extended_Create_Connection (0x2043), which Bluedroid
+  // switches to after the first session. Without it only one connect per boot works.
+  const SYM = 'CONFIG_BT_BLE_50_FEATURES_SUPPORTED: "n"';
+  const bleForm = { ...form, cca: 'ble', ccaMac: '04:C0:5B:A1:A9:4B' };
+
+  assert.ok(toYaml(assembleConfig(getBoard('esp32p4-evboard'), bleForm)).includes(SYM),
+    'P4 + BLE must emit the BLE 5.0 opt-out');
+  assert.ok(!toYaml(assembleConfig(getBoard('esp32p4-evboard'), form)).includes(SYM),
+    'P4 without BLE must not carry the inert symbol');
+  assert.ok(!toYaml(assembleConfig(getBoard('esp32s3-atoms3r'), bleForm)).includes(SYM),
+    'boards without sdkconfigBle must be unaffected');
+});

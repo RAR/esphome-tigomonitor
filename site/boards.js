@@ -266,6 +266,17 @@ font:
       CONFIG_LWIP_MAX_ACTIVE_TCP: '16',
       CONFIG_LWIP_MAX_LISTENING_TCP: '16',
     },
+    // Emitted only when BLE is selected. Required for repeatable CCA-over-BLE here:
+    // BLE is hosted (Bluedroid host on the P4, controller on the C6 over VHCI), and
+    // once a session completes Bluedroid switches from LE_Create_Connection (0x200D)
+    // to LE_Extended_Create_Connection (0x2043). The C6 accepts the first and refuses
+    // the second with HCI Cmd Disallowed, so every connect after the first failed with
+    // GATT 133. Dropping BLE 5.0 removes the extended initiator from l2cble_create_conn
+    // and keeps the legacy path the C6 honours. Verified on an EV board: 3/3 refreshes.
+    // Cost is extended advertising/scanning, which the CCA does not use.
+    sdkconfigBle: {
+      CONFIG_BT_BLE_50_FEATURES_SUPPORTED: 'n',
+    },
     hosted: {
       variant: 'ESP32C6', slot: 1, active_high: true,
       clk_pin: 'GPIO18', cmd_pin: 'GPIO19',
@@ -282,7 +293,7 @@ font:
     displayOverlay: null,
     notes: [
       'No native Wi-Fi — uses an ESP32-C6 companion over SDIO (esp32_hosted).',
-      'BLE runs over the C6 companion (Bluedroid host on the P4, controller on the C6 via VHCI). Verified on an EV board: a full CCA session works, Wi-Fi is unaffected. KNOWN LIMITATION: only one BLE session per boot — the second connect is refused by the C6 with HCI Cmd Disallowed (a link the C6 never releases), so a reboot is needed between CCA refreshes. Prefer cca_source: http on the P4 until this is resolved.',
+      'BLE runs over the C6 companion (Bluedroid host on the P4, controller on the C6 via VHCI). Verified on an EV board: repeated CCA sessions work and Wi-Fi is unaffected. Selecting BLE adds CONFIG_BT_BLE_50_FEATURES_SUPPORTED=n, which is required — without it only the first connect per boot succeeds, because Bluedroid switches to LE_Extended_Create_Connection after a session and the C6 refuses that command. This trades away extended advertising/scanning, which the CCA does not use.',
       'PSRAM is hex mode only; valid speeds are 20/100/200 MHz (200 default). If a specific board crash-loops at boot, drop to 100 or 20 MHz — a per-board PSRAM quirk, not a universal limit.',
     ],
   },
