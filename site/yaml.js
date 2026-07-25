@@ -64,6 +64,11 @@ export function toYaml(cfg) {
   }
   L.push(`${I(2)}sdkconfig_options:`);
   for (const [k, v] of Object.entries(cfg.esp32.sdkconfig)) L.push(`${I(3)}${k}: "${v}"`);
+  // Options that only apply once the BT stack is compiled in — kept out of the
+  // base table so non-BLE builds aren't carrying inert symbols.
+  if (cfg.ble && cfg.esp32.sdkconfigBle) {
+    for (const [k, v] of Object.entries(cfg.esp32.sdkconfigBle)) L.push(`${I(3)}${k}: "${v}"`);
+  }
   L.push('');
 
   // psram
