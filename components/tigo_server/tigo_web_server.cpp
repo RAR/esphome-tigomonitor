@@ -3667,6 +3667,19 @@ esp_err_t TigoWebServer::api_tsdb_stats_handler(httpd_req_t *req) {
     return ESP_OK;
   }
 
+  // This handler reaches flash directly rather than through TigoHistory's
+  // iterate_* helpers, so it has to take the flash lock itself: esp_littlefs_info
+  // calls lfs_fs_size, which traverses block metadata (a flash read), and
+  // tsdb_get_stats_h can fall through to the file. Running either concurrently
+  // with the writer's commit faults the writer in the SPI1 cache-disable path.
+  tigo_monitor::TigoHistory::FlashLock lock(hist);
+  if (!lock.held()) {
+    httpd_resp_set_status(req, "503 Service Unavailable");
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, "{\"error\":\"flash busy\"}");
+    return ESP_OK;
+  }
+
   PSRAMString json;
   char buf[160];
 

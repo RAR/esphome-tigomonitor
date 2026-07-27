@@ -18,6 +18,26 @@ namespace tigo_monitor {
 
 static const char *const TAG = "tigo_history";
 
+// How long a reader waits for the flash lock before giving up. Readers now
+// queue behind each other and behind the writer's commit, and a month-range
+// query holds the bus ~2.3 s, so several stacked requests can legitimately
+// wait a while. Generous enough that normal dashboard traffic never trips it;
+// bounded so a wedged holder degrades the API instead of hanging httpd.
+static constexpr uint32_t kFsLockReaderWaitMs = 15000;
+
+// A null handle means the lock does not exist yet (pre-init, single-threaded)
+// and is treated as acquired but never given back.
+TigoHistory::FlashLock::FlashLock(TigoHistory *hist, uint32_t timeout_ms)
+    : mutex_(hist != nullptr ? hist->fs_mutex_ : nullptr) {
+  const TickType_t wait =
+      (timeout_ms == 0) ? portMAX_DELAY : pdMS_TO_TICKS(timeout_ms);
+  held_ = (mutex_ == nullptr) || (xSemaphoreTakeRecursive(mutex_, wait) == pdTRUE);
+}
+
+TigoHistory::FlashLock::~FlashLock() {
+  if (mutex_ != nullptr && held_) xSemaphoreGiveRecursive(mutex_);
+}
+
 // Encoded row pushed onto the writer queue. Layout matches the schemas below:
 // — system_values mirror kSystemParamNames (14 entries)
 // — panel_values is laid out as [panel_db_0 first 16][panel_db_1 next 16]
@@ -84,6 +104,18 @@ static constexpr const char *kPanelMapPath = "/tsdb/panel_map.json";
 static constexpr const char *kJournalMarkerPath = "/tsdb/.jcommit";
 
 bool TigoHistory::init() {
+  // Created before any flash touch so every path below is already covered.
+  // Recursive because get_or_assign_slot() holds it across open_panel_db_()
+  // and save_slot_map_(), which each take it again.
+  if (fs_mutex_ == nullptr) {
+    fs_mutex_ = xSemaphoreCreateRecursiveMutex();
+    if (fs_mutex_ == nullptr) {
+      ESP_LOGE(TAG, "could not create flash mutex");
+      return false;
+    }
+  }
+  FlashLock lock(this, 0);
+
   if (!mount_filesystem_())
     return false;
   if (!init_system_db_())
@@ -331,6 +363,11 @@ uint8_t TigoHistory::get_or_assign_slot(const std::string &barcode_last6) {
   slot_map_[barcode_last6] = slot;
   slot_to_barcode_[slot] = barcode_last6;
 
+  // Runs on the ESPHome loop task. tsdb_open and the panel_map.json write below
+  // both hit flash, so they have to serialize against the writer's commit and
+  // any in-flight history query. Held across both (recursive mutex).
+  FlashLock lock(this, 0);
+
   // Lazy DB open: only commit panels<idx>.tsdb to flash when this slot's
   // bucket actually has its first panel. Pays the ~290ms tsdb_open cost on
   // the slot-assignment path (typically once per ~16 panels at install
@@ -459,6 +496,15 @@ int TigoHistory::iterate_power(uint32_t start_ts, uint32_t end_ts,
   if (end_ts < start_ts)
     return 0;
 
+  // Runs on the esp_http_server task (tskNO_AFFINITY — can be either core).
+  // Held across the whole query: init/next/close are all flash reads, and any
+  // one of them overlapping the writer's commit faults the writer.
+  FlashLock lock(this, kFsLockReaderWaitMs);
+  if (!lock.held()) {
+    ESP_LOGW(TAG, "iterate_power: timed out waiting for flash lock");
+    return -1;
+  }
+
   // Read only columns 0 (total_p) and 1 (total_e). Cuts flash IO roughly 7x
   // versus reading the full 14-param row.
   uint8_t cols[] = {0, 1};
@@ -492,6 +538,13 @@ int TigoHistory::iterate_panel(uint8_t slot, uint32_t start_ts, uint32_t end_ts,
   size_t db_idx = slot / kPanelsPerDb;
   uint8_t col = slot % kPanelsPerDb;
   if (panel_db_[db_idx] == nullptr) return -1;
+
+  // See iterate_power: same httpd-task flash reads, same lock.
+  FlashLock lock(this, kFsLockReaderWaitMs);
+  if (!lock.held()) {
+    ESP_LOGW(TAG, "iterate_panel: timed out waiting for flash lock");
+    return -1;
+  }
 
   tsdb_query_t q;
   uint8_t cols[] = {col};
@@ -544,6 +597,19 @@ void TigoHistory::writer_task_loop_() {
                (unsigned long) row.timestamp);
       continue;
     }
+
+    // Everything from here to the end of the iteration touches flash: the
+    // system write, each panel write, and the journal commit. Take the lock
+    // once for the whole batch rather than per call — a reader slipping in
+    // between two writes is just as fatal as one landing mid-write.
+    //
+    // Deliberately scoped BELOW xQueueReceive: holding this across the
+    // portMAX_DELAY receive would block every reader for the full 30-minute
+    // gap between snapshots. It releases when the iteration ends.
+    //
+    // portMAX_DELAY, not a timeout: dropping a snapshot loses data, and the
+    // only holders are bounded (a query, a slot save).
+    FlashLock lock(this, 0);
 
     uint32_t t0 = (uint32_t) (esp_timer_get_time() / 1000);
 
