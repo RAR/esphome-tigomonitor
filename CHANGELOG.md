@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Opening the web UI could reboot the device.** History pages read the TSDB from the web server's task while the 30-minute snapshot writes it from another — and on the ESP32-S3 every flash access, read included, cuts the instruction cache on both cores, so the two collide and fault (`Fault - Unknown`). All LittleFS access now goes through one lock. History requests can queue briefly (a month-range query holds the flash ~2.3 s) and return an error rather than hang if they wait more than 15 s.
+
 ## [2.0.0-beta.5] - 2026-07-25
 
 ### Added

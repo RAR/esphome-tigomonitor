@@ -15,6 +15,7 @@
 #include "esp_littlefs.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
+#include "freertos/semphr.h"
 #include "freertos/task.h"
 
 #include <atomic>
@@ -65,6 +66,27 @@ struct PanelSlot {
 
 class TigoHistory {
  public:
+  // RAII guard over the component-wide flash lock (see fs_mutex_ below).
+  // ANY code that touches littlefs must hold this for the whole operation —
+  // including callers outside this class that reach flash directly, such as
+  // /api/tsdb/stats (esp_littlefs_info -> lfs_fs_size traverses block
+  // metadata, which is a flash read like any other).
+  //
+  // timeout_ms == 0 means wait forever. Always check held() before proceeding
+  // when you passed a timeout; a false return means "do not touch flash".
+  class FlashLock {
+   public:
+    explicit FlashLock(TigoHistory *hist, uint32_t timeout_ms = 15000);
+    ~FlashLock();
+    FlashLock(const FlashLock &) = delete;
+    FlashLock &operator=(const FlashLock &) = delete;
+    bool held() const { return held_; }
+
+   private:
+    SemaphoreHandle_t mutex_;
+    bool held_;
+  };
+
   // Mounts LittleFS on the `tsdb` partition and opens system + panel DBs.
   // Loads /tsdb/panel_map.json if present. Returns true on success.
   bool init();
@@ -158,6 +180,30 @@ class TigoHistory {
   // Next free slot to assign. Slots are never recycled — replacements keep
   // their position in history forever.
   uint8_t next_free_slot_{0};
+
+  // Serializes EVERY littlefs/SPI-flash access this component makes, across all
+  // three tasks that reach flash: the writer task (tsdb_write_h + journal
+  // commit), the ESPHome loop task (slot assignment -> tsdb_open +
+  // panel_map.json), and the esp_http_server task (history queries).
+  //
+  // Why a component-level lock and not esp_tsdb's own: esp_tsdb's mutex is
+  // per-handle (tsdb_internal.h:137), so a read of panels<N> and a write of
+  // system are never serialized against each other — they are different
+  // handles on the same flash chip. And the httpd task runs at
+  // tskNO_AFFINITY, so it floats to core 0 and escapes the writer's core-1
+  // pin entirely.
+  //
+  // What goes wrong without it (reproduced on the rig 2026-07-27, first try):
+  // with CONFIG_SPI_FLASH_AUTO_SUSPEND off, every SPI1 op — read as well as
+  // write — calls spi_flash_disable_interrupts_caches_and_other_cpu, which
+  // cuts I-cache on BOTH cores and parks the other one. Two tasks entering
+  // that path concurrently fault inside the stall coordination itself:
+  //   spi_flash_disable_interrupts_caches_and_other_cpu (cache_utils.c:176)
+  //     <- cache_disable <- spi1_start <- esp_flash_read <- lfs_bd_read
+  //     <- lfs_file_flush <- vfs fsync <- tsdb_write_block  == "Fault - Unknown"
+  // A month-range history query holds the bus for ~2.3 s, so an open web UI
+  // reliably overlaps the 30-minute snapshot commit.
+  SemaphoreHandle_t fs_mutex_{nullptr};
 
   QueueHandle_t queue_{nullptr};
   TaskHandle_t task_{nullptr};
