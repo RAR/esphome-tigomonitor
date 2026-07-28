@@ -75,7 +75,7 @@ The ESP32 acts as a **passive listener** – it only receives, and it is wired s
 
 | Component | Recommended | Notes |
 |-----------|-------------|-------|
-| ESP32 Board | M5Stack AtomS3R | 8MB PSRAM for 15+ devices |
+| ESP32 Board | M5Stack AtomS3R | 8MB PSRAM — required, don't substitute a board without it |
 | RS485 Adapter | M5Stack Atomic RS485 Base | Built-in level shifter |
 | Wiring | 22-24 AWG twisted pair | For RS485 A/B connections |
 
