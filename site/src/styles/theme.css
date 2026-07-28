@@ -72,7 +72,7 @@
    any viewport and re-tints with the theme. Layers, front to back:
      1-2  atmosphere — indigo bounce light, amber sun high right
      3    busbars — three fine silver lines across each cell
-     4-5  cell gaps — the 58px lattice that makes cells read as cells
+     4-5  cell gaps — the 56px lattice that makes cells read as cells
      6-7  module edges — every 6x4 cells, drawn as frame/gap/frame rather than
           one line, because that is what you actually see where two modules
           meet: two bright aluminium rails with dark air between them. A single
@@ -85,38 +85,43 @@
 .hero::before {
   content: '';
   position: absolute;
-  inset: -60% -70% -30%;
+  /* Bottom is POSITIVE: the array has to stop inside the hero. At a negative
+     bottom it ran on under the "New to this?" tip and the feature cards, and
+     an indigo wash behind body text is too dark to read comfortably. */
+  inset: -55% -70% 8%;
   z-index: -1;
   pointer-events: none;
-  transform: perspective(1000px) rotateX(43deg) scale(1.15);
+  transform: perspective(1000px) rotateX(34deg) scale(1.15);
   transform-origin: 50% 100%;
   background:
     radial-gradient(60% 55% at 22% 18%, color-mix(in srgb, var(--sl-color-accent) 26%, transparent), transparent 70%),
     radial-gradient(45% 45% at 88% 12%, var(--tigo-amber-soft), transparent 70%),
     repeating-linear-gradient(90deg,
-      transparent 0 18px,
-      color-mix(in srgb, var(--tigo-busbar) 16%, transparent) 18px 19px),
+      transparent 0 13px,
+      color-mix(in srgb, var(--tigo-busbar) 16%, transparent) 13px 14px),
     repeating-linear-gradient(0deg,
-      transparent 0 55px,
-      color-mix(in srgb, var(--tigo-busbar) 15%, transparent) 55px 58px),
+      transparent 0 53px,
+      color-mix(in srgb, var(--tigo-busbar) 15%, transparent) 53px 56px),
     repeating-linear-gradient(90deg,
-      transparent 0 55px,
-      color-mix(in srgb, var(--tigo-busbar) 15%, transparent) 55px 58px),
+      transparent 0 53px,
+      color-mix(in srgb, var(--tigo-busbar) 15%, transparent) 53px 56px),
     repeating-linear-gradient(0deg,
-      transparent 0 221px,
-      color-mix(in srgb, var(--tigo-frame) 42%, transparent) 221px 225px,
-      color-mix(in srgb, var(--tigo-gap) 70%, transparent) 225px 228px,
-      color-mix(in srgb, var(--tigo-frame) 42%, transparent) 228px 232px),
+      transparent 0 213px,
+      color-mix(in srgb, var(--tigo-frame) 31%, transparent) 213px 217px,
+      color-mix(in srgb, var(--tigo-gap) 70%, transparent) 217px 220px,
+      color-mix(in srgb, var(--tigo-frame) 31%, transparent) 220px 224px),
     repeating-linear-gradient(90deg,
-      transparent 0 337px,
-      color-mix(in srgb, var(--tigo-frame) 42%, transparent) 337px 341px,
-      color-mix(in srgb, var(--tigo-gap) 70%, transparent) 341px 344px,
-      color-mix(in srgb, var(--tigo-frame) 42%, transparent) 344px 348px),
-    linear-gradient(0deg, color-mix(in srgb, var(--tigo-cell) 67%, transparent), color-mix(in srgb, var(--tigo-cell) 67%, transparent));
-  /* Fades toward the horizon (top) and off both sides, so the array has no
-     visible edge and never fights the headline for contrast. */
-  -webkit-mask-image: radial-gradient(120% 78% at 50% 96%, #000 18%, transparent 82%);
-          mask-image: radial-gradient(120% 78% at 50% 96%, #000 18%, transparent 82%);
+      transparent 0 325px,
+      color-mix(in srgb, var(--tigo-frame) 31%, transparent) 325px 329px,
+      color-mix(in srgb, var(--tigo-gap) 70%, transparent) 329px 332px,
+      color-mix(in srgb, var(--tigo-frame) 31%, transparent) 332px 336px),
+    linear-gradient(0deg, color-mix(in srgb, var(--tigo-cell) 55%, transparent), color-mix(in srgb, var(--tigo-cell) 55%, transparent));
+  /* Centred just past halfway rather than at 96%, so it fades out at the
+     BOTTOM as well as toward the horizon and off both sides. With the focus at
+     the bottom edge the array was at its most opaque exactly where it met the
+     page content — a hard line. Now it dissolves before it gets there. */
+  -webkit-mask-image: radial-gradient(125% 60% at 50% 57%, #000 16%, transparent 78%);
+          mask-image: radial-gradient(125% 60% at 50% 57%, #000 16%, transparent 78%);
 }
 .hero h1 {
   font-family: var(--tigo-display);
