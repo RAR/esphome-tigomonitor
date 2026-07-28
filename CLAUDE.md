@@ -76,7 +76,7 @@ Fuzzy barcode matching (`match_barcode()`): compares last 6 chars of UART-discov
 - **Avoid string allocations in loops** — reuse static buffers to prevent heap fragmentation (see CHANGELOG 1.2.0 for the pattern)
 - **JSON field naming**: `snake_case` in JSON, `kebab-case` in HTML IDs, `camelCase` in JavaScript
 - **When renaming methods** in `tigo_monitor.h`, update all call sites: header → member variable → web server → Python config → JavaScript
-- **When changing any `/api/*` JSON shape** (rename a field, restructure a response), update `site/screenshots/fixtures.mjs` in the same commit. The docs screenshots are rendered from the real `app.html` against those fixtures at build time — a stale fixture doesn't fail the build, it publishes screenshots of a UI rendering `undefined`. Check with `cd site && npm run screenshots`
+- **When changing any `/api/*` JSON shape** (rename a field, restructure a response), update `site/screenshots/fixtures.mjs` in the same commit. The docs screenshots are rendered from the real `app.html` against those fixtures at build time — a stale fixture doesn't fail the build, it publishes screenshots of a UI rendering `undefined`. Check with `cd site && npm run screenshots` — which also refreshes the committed README images in `docs/images/`, so commit those too
 - **Sensor/text_sensor/binary_sensor sections** must be declared in YAML (even if empty) or compilation fails with missing header errors
 - `CONFIG_UART_ISR_IN_IRAM: "y"` in sdkconfig is required for reduced frame loss
 

@@ -186,8 +186,15 @@ Legacy paths (`/`, `/nodes`, `/status`, `/yaml`, `/cca`, `/history`) all 302 to 
 |------|------------|
 | Dashboard — hero strip, per-string heatmap, click any panel for the detail modal | ![Dashboard](docs/images/Dashboard.png) |
 | History — TSDB-backed power chart with gradient fill + daily energy bars | ![History](docs/images/History.png) |
-| Tools — YAML generator with per-MPPT / per-inverter / per-panel / flat sub-device grouping | ![Tools](docs/images/Tools.png) |
+| Topology — inverter → string → panel tree, inline rename and nameplate editing | ![Topology](docs/images/Topology.png) |
+| Node Table — every discovered device, sortable and filterable, JSON export/import | ![Node Table](docs/images/Nodes.png) |
+| Tools — on-device configuration + YAML generator with sub-device grouping | ![Tools](docs/images/Tools.png) |
 | Diagnostics — memory / network / UART / per-DB TSDB stats | ![Diagnostics](docs/images/Diagnostics.png) |
+
+<sub>Screenshots are generated, not captured by hand: `site/screenshots/capture.mjs`
+drives the real `app.html` against synthetic fixtures, so they track the UI and
+contain no real serials, addresses or account details. Regenerate with
+`cd site && npm run screenshots`.</sub>
 
 ## PSRAM & large installs
 

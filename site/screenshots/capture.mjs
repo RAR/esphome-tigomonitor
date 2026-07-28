@@ -5,14 +5,17 @@
 // Views are plain location.hash and the theme is a localStorage key.
 //
 // Run:  npm run screenshots        (from site/)
-// Out:  site/src/assets/screenshots/*.png   — generated, git-ignored
+// Out:  site/src/assets/screenshots/*.png   — git-ignored, for the docs site
+//       docs/images/*.png                   — COMMITTED, for the GitHub README
 //
-// Wired into `npm run build`, so the images can never drift from the UI: they
-// are rebuilt from the current app.html on every docs build.
+// Wired into `npm run build`, so the docs-site images can never drift from the
+// UI. The README set is committed because GitHub renders README.md from the
+// repo and cannot run a build — those DO go stale, so re-run this after any
+// UI change and commit the result.
 
 import { chromium } from 'playwright';
 import { routes, patterns } from './fixtures.mjs';
-import { readFileSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { readFileSync, mkdirSync, writeFileSync, rmSync, copyFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -20,6 +23,21 @@ import { fileURLToPath } from 'node:url';
 const HERE = dirname(fileURLToPath(import.meta.url));
 const APP = resolve(HERE, '../../components/tigo_server/web/app.html');
 const OUT = resolve(HERE, '../src/assets/screenshots');
+// The README is rendered by GitHub straight from the repo, so it cannot use the
+// build-time images — those are git-ignored and never exist in a clone. The
+// dark cut of each view is therefore ALSO written to docs/images/, which IS
+// committed. That is a deliberate exception to "never commit screenshots": the
+// alternative is hand-taken images of a real array, which is what used to be
+// there, complete with the owner's inverter models and room names.
+const README_OUT = resolve(HERE, '../../docs/images');
+const README_SHOTS = {
+  dashboard: 'Dashboard.png',
+  history: 'History.png',
+  topology: 'Topology.png',
+  nodes: 'Nodes.png',
+  tools: 'Tools.png',
+  diagnostics: 'Diagnostics.png',
+};
 
 // Only the views worth putting in front of a reader. CCA Info and Tigo Cloud
 // are deliberately absent: both are mostly account and connection state, which
@@ -29,6 +47,7 @@ const VIEWS = [
   ['topology',    'Topology'],
   ['history',     'History'],
   ['nodes',       'Node Table'],
+  ['tools',       'Tools'],
   ['diagnostics', 'Diagnostics'],
 ];
 
@@ -100,6 +119,9 @@ for (const theme of THEMES) {
     const file = `${view}-${theme}.png`;
     await page.screenshot({ path: `${OUT}/${file}` });
     written.push(file);
+    if (theme === 'dark' && README_SHOTS[view]) {
+      copyFileSync(`${OUT}/${file}`, `${README_OUT}/${README_SHOTS[view]}`);
+    }
     console.log(`  ✓ ${name.padEnd(12)} ${theme.padEnd(5)} → ${file}`);
   }
   await ctx.close();
@@ -117,6 +139,7 @@ writeFileSync(`${OUT}/manifest.json`,
   JSON.stringify({ generated: new Date().toISOString(), views: VIEWS.map(([v]) => v), themes: THEMES, written }, null, 2));
 
 console.log(`\n  ${written.length} screenshots → src/assets/screenshots/`);
+console.log(`  ${Object.keys(README_SHOTS).length} dark cuts → docs/images/ (committed, for the README)`);
 
 // A page error means the SPA threw while rendering, which usually means a
 // fixture no longer matches the firmware's JSON. Fail loudly rather than
