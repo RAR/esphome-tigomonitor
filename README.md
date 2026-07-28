@@ -58,11 +58,6 @@ The full walkthrough — parts list, safety, sensor blocks, PSRAM tuning — is 
 | Tools — on-device configuration + YAML generator with sub-device grouping | ![Tools](docs/images/Tools.png) |
 | Diagnostics — memory / network / UART / per-DB TSDB stats | ![Diagnostics](docs/images/Diagnostics.png) |
 
-<sub>Screenshots are generated, not captured by hand: `site/screenshots/capture.mjs`
-drives the real `app.html` against synthetic fixtures, so they track the UI and
-contain no real serials, addresses or account details. Regenerate with
-`cd site && npm run screenshots`.</sub>
-
 ## Documentation
 
 Full documentation lives at **[rar.github.io/esphome-tigomonitor](https://rar.github.io/esphome-tigomonitor/)**.
