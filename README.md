@@ -80,18 +80,6 @@ Full documentation lives at **[rar.github.io/esphome-tigomonitor](https://rar.gi
 | [UART Optimization](https://rar.github.io/esphome-tigomonitor/guides/uart-optimization/) | Reducing packet loss |
 | [Troubleshooting](https://rar.github.io/esphome-tigomonitor/guides/troubleshooting/) | Common issues and solutions |
 
-## Project Structure
-
-```
-components/
-├── tigo_monitor/     # Main component (UART parsing, sensors)
-└── tigo_server/      # Web server (dashboard, API)
-boards/               # Example board configurations
-docs/                 # Images + internal specs (guides live at the docs site)
-examples/             # HA dashboards and automations
-site/                 # Astro/Starlight documentation site
-```
-
 ## Contributing
 
 Fork, branch off `main`, test on hardware, and open a pull request.
