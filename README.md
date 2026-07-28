@@ -76,7 +76,38 @@ Full documentation lives at **[rar.github.io/esphome-tigomonitor](https://rar.gi
 
 ## Contributing
 
-Fork, branch off `main`, test on hardware, and open a pull request.
+Fork the repo, branch off `main`, and open a pull request back to `main`.
+
+**Firmware changes.** There is no unit-test suite for the C++ — it's compiled and
+run on real hardware:
+
+```bash
+esphome compile boards/esp32s3-atoms3r.yaml   # check it builds
+esphome run boards/esp32s3-atoms3r.yaml       # build, flash, and watch logs
+```
+
+Please say in the PR which board you tested on and roughly how many optimizers were
+on the bus — behaviour differs a lot between a 4-panel bench setup and a 36-panel roof.
+
+**Docs and web UI.** The site is Astro/Starlight under `site/`:
+
+```bash
+cd site
+npm install
+npm run dev          # local docs preview
+npm test             # config-builder, YAML and fixture-privacy checks
+npm run screenshots  # re-render docs/images/ from the real app.html
+```
+
+Screenshots are generated, not hand-captured: `site/screenshots/capture.mjs` drives
+the real `app.html` against synthetic fixtures in `site/screenshots/fixtures.mjs`.
+If you change the shape of an `/api/*` response, update those fixtures in the same
+commit and re-run `npm run screenshots` — a stale fixture doesn't fail the build, it
+just publishes a screenshot of a UI rendering `undefined`. The fixtures must never
+contain real serials, site IDs, MACs, SSIDs or IPs; `npm test` enforces this.
+
+See [CLAUDE.md](CLAUDE.md) for the component architecture and the conventions the
+codebase follows.
 
 ## License
 
