@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Site header mark — "Emitting": an optimizer reporting a telemetry frame.
+
+  Starlight renders this at ~32px, so this is the mid-size cut of the drawing:
+  the six-block frame on the body collapses to two bars (3px blocks are
+  illegible at this scale) but both bus arcs are kept, since they still read.
+
+  Full-detail version:  docs/images/logo.svg
+  16px version:         site/public/favicon.svg
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Tigo Monitor">
+  <defs>
+    <linearGradient id="site-tile" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%"  stop-color="#16213B"/>
+      <stop offset="100%" stop-color="#0B111F"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="14" fill="url(#site-tile)"/>
+  <rect x="9" y="17" width="34" height="28" rx="5"
+        fill="#1D2A63" stroke="#C6D0E2" stroke-width="3.5"/>
+  <rect x="16" y="24" width="20" height="5" rx="1" fill="#C6D0E2" fill-opacity=".65"/>
+  <rect x="16" y="34" width="13" height="5" rx="1" fill="#F4B23C"/>
+  <g fill="none" stroke="#F4B23C" stroke-width="4" stroke-linecap="round">
+    <path d="M48 25 a11 11 0 0 1 0 14"/>
+    <path d="M53 19 a19 19 0 0 1 0 26"/>
+  </g>
+  <g fill="none" stroke="#C6D0E2" stroke-width="4.5" stroke-linecap="round">
+    <path d="M17 45 v5 a4 4 0 0 1 -4 4 h-4"/>
+    <path d="M35 45 v5 a4 4 0 0 0 4 4 h4"/>
+  </g>
+</svg>

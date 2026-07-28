@@ -9,6 +9,12 @@ export default defineConfig({
   integrations: [
     starlight({
       title: 'Tigo Monitor',
+      // "Emitting" brand mark. Three cuts of the same drawing, each tuned to
+      // its render size — see the comments in each file. The favicon matches
+      // the one the device itself serves, so a docs tab and a live-rig tab
+      // carry the same icon.
+      logo: { src: './src/assets/logo.svg' },
+      favicon: '/favicon.svg',
       customCss: [
         // Self-hosted fonts (bundled, no CDN). Order matters: fonts first.
         '@fontsource/ibm-plex-sans/400.css',
