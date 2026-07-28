@@ -1,0 +1,51 @@
+---
+// A device-UI screenshot that follows the reader's theme.
+//
+// capture.mjs renders every view in both themes. Showing only one of them means
+// half the readers see a dark screenshot on a light page (or the reverse), and
+// it also left five generated images unused. Both are emitted here and Starlight's
+// own `light:sl-hidden` / `dark:sl-hidden` utilities pick one — the same
+// mechanism its docs use for theme-specific images, so it stays in sync with
+// the theme toggle without any script of ours.
+//
+// `name` is the view stem: "dashboard" resolves dashboard-light.png and
+// dashboard-dark.png.
+import { Image } from 'astro:assets';
+
+interface Props {
+  name: string;
+  alt: string;
+}
+const { name, alt } = Astro.props;
+
+// import.meta.glob is eager so Astro processes and optimises both files at
+// build time; a runtime import() would leave them unoptimised.
+const shots = import.meta.glob<{ default: ImageMetadata }>(
+  '../assets/screenshots/*.png',
+  { eager: true },
+);
+
+const pick = (theme: string) => {
+  const key = `../assets/screenshots/${name}-${theme}.png`;
+  const mod = shots[key];
+  if (!mod) {
+    throw new Error(
+      `ThemedShot: no screenshot at ${key}. ` +
+      `Run \`npm run screenshots\` — these are generated, not committed.`,
+    );
+  }
+  return mod.default;
+};
+---
+
+<Image src={pick('light')} alt={alt} class="tigo-shot dark:sl-hidden" loading="lazy" />
+<Image src={pick('dark')} alt={alt} class="tigo-shot light:sl-hidden" loading="lazy" />
+
+<style is:global>
+  .tigo-shot {
+    width: 100%;
+    height: auto;
+    border-radius: 0.5rem;
+    border: 1px solid var(--sl-color-gray-5);
+  }
+</style>
