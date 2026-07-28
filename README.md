@@ -28,8 +28,6 @@ per-panel monitoring with a built-in web app and Home Assistant integration.
 | **Framework** | ESP-IDF (not Arduino) |
 | **ESPHome** | 2026.5.0+ (needed for `allow_partition_access` OTA) |
 
-**PSRAM is required.** The recommended AtomS3R has it.
-
 ## Quick Start
 
 1. Wire an ESP32 to the Tigo RS485 bus — see the [Wiring Guide](https://rar.github.io/esphome-tigomonitor/guides/wiring/).
