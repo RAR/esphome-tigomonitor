@@ -141,11 +141,11 @@ tigo_monitor:
   sync_cca_on_startup: false
   reset_at_midnight: true
   inverters:
-    - name: "FlexBoss A"
+    - name: "Inverter 1"
       mppts:
         - "MPPT 1"
         - "MPPT 2"
-    - name: "FlexBoss B"
+    - name: "Inverter 2"
       mppts:
         - "MPPT 3"
         - "MPPT 4"

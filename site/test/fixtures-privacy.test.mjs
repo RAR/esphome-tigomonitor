@@ -37,9 +37,10 @@ test('MACs are inside the RFC 7042 documentation range', () => {
 
 test('bare-hex identifiers use the reserved fake-serial shape', () => {
   // Prefix alone is NOT sufficient. The CCA MAC that leaked into the first
-  // draft of these fixtures was 04C05BA1A94A — it starts with the public Tigo
-  // OUI, so an OUI-only check waves real hardware straight through. Fake
-  // serials must also carry the 0000 block, which no real unit has.
+  // draft of these fixtures began with the public Tigo OUI itself, so an
+  // OUI-only check waves real hardware straight through. Fake serials must
+  // also carry the 0000 block, which no real unit has. (Deliberately not
+  // quoting the leaked value here — that would put it back in the repo.)
   // Scan hex runs inside quoted values only. A bare /[0-9A-F]{10,}/ over the
   // whole blob also matches unquoted epoch timestamps — 1771136965 is ten
   // characters all of which are valid hex digits.

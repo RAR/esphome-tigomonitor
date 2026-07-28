@@ -221,7 +221,7 @@ Renaming an inverter:
 ```bash
 curl -X POST http://192.168.1.100/api/inverters/rename \
   -H 'Content-Type: application/json' \
-  -d '{"name":"FlexBoss A","display_name":"South Roof"}'
+  -d '{"name":"Inverter 1","display_name":"South Roof"}'
 ```
 
 Setting per-panel nameplate watts on a string:

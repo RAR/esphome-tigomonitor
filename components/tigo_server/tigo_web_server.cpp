@@ -2929,7 +2929,7 @@ void TigoWebServer::build_yaml_json(PSRAMString& json, const std::set<std::strin
 
   // Build "tigo_<type>_<slug>", but skip the <type> tag when the slug
   // already starts with it (e.g. label "MPPT 4" -> "tigo_mppt_4", not
-  // "tigo_mppt_mppt_4"). Inverter "FlexBoss A" stays "tigo_inverter_flexboss_a".
+  // "tigo_mppt_mppt_4"). Inverter "South Roof" stays "tigo_inverter_south_roof".
   auto make_id = [&slugify](const char *type_tag, const std::string &label) -> std::string {
     std::string slug = slugify(label);
     std::string tag(type_tag);
