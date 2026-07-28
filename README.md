@@ -1,7 +1,5 @@
 ![Tigo Monitor — per-panel solar data in Home Assistant, read straight off the Tigo RS485 bus. No cloud account, no Tigo API.](docs/images/social-preview.png)
 
-# ESPHome Tigo Monitor
-
 An ESPHome component for monitoring Tigo solar optimizers via RS485/UART. Real-time
 per-panel monitoring with a built-in web app and Home Assistant integration.
 
