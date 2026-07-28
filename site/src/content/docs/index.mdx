@@ -1,12 +1,12 @@
 ---
 title: Tigo Monitor
-description: ESPHome component for monitoring Tigo solar optimizers over RS485 — per-panel power, a built-in web UI, and Home Assistant integration.
+description: See how much power every one of your solar panels is making, on your own hardware, with no cloud account and no subscription.
 template: splash
 hero:
-  tagline: Monitor your Tigo solar optimizers with ESPHome — per-panel voltage, current, and power, a built-in web dashboard, and native Home Assistant sensors.
+  tagline: See how much power every solar panel on your roof is making — on a $30 board you own, with its own dashboard and a direct feed into Home Assistant. No cloud account, no subscription.
   actions:
     - text: Get Started
-      link: /esphome-tigomonitor/guides/wiring/
+      link: /esphome-tigomonitor/guides/getting-started/
       icon: right-arrow
       variant: primary
     - text: Build a Config
@@ -21,20 +21,27 @@ hero:
 import { Card, CardGrid } from '@astrojs/starlight/components';
 
 <CardGrid>
-  <Card title="Per-panel telemetry" icon="approve-check">
-    Reads Tigo optimizer frames off the RS485 bus and publishes voltage, current,
-    power, and temperature for every panel.
+  <Card title="Every panel, individually" icon="approve-check">
+    Watts, volts, amps and temperature for each panel on your roof — so you can
+    see the one that's shaded, dirty, or failing.
   </Card>
-  <Card title="Built-in web UI" icon="laptop">
-    A five-page web server with a JSON API — overview, per-string layout, node
-    table, live status, and a YAML view. See the [Web Server &amp; API guide](/esphome-tigomonitor/guides/web-server/).
+  <Card title="Its own dashboard" icon="laptop">
+    Open the device's IP address in any browser. Live readings, history charts,
+    and a layout view of your array — nothing else to install.
+    [What you get](/esphome-tigomonitor/guides/web-server/).
   </Card>
-  <Card title="Home Assistant native" icon="puzzle">
-    Sensors surface directly in Home Assistant over the ESPHome API. See the
-    [Home Assistant guide](/esphome-tigomonitor/guides/home-assistant/).
+  <Card title="Works with Home Assistant" icon="puzzle">
+    Panels show up as normal sensors, ready for the Energy dashboard and
+    automations. [Set it up](/esphome-tigomonitor/guides/home-assistant/).
   </Card>
-  <Card title="Config builder" icon="setting">
-    Generate a ready-to-flash ESPHome YAML for your board in the browser —
+  <Card title="Nothing to write by hand" icon="setting">
+    Answer a few questions and the builder writes your setup file for you —
     [open the builder](/esphome-tigomonitor/config-builder/).
   </Card>
 </CardGrid>
+
+:::tip[New to this?]
+Read **[Start Here](/esphome-tigomonitor/guides/getting-started/)** first — it
+covers what to buy, what the jargon means, and the five steps from parts on the
+desk to a working dashboard.
+:::

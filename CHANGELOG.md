@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- **Docs rewritten for first-time installers.** A new **Start Here** guide covers what to buy, what the jargon means, and the five steps from parts on the desk to a live dashboard — the "Get Started" button used to drop you into a high-voltage warning and a terminal-block diagram. The sidebar is now ordered by when you need something rather than alphabetically, the Config Builder explains what each field is for, and the reference-heavy pages say up front whether you need to read them. No behaviour changed.
+- **Docs site recoloured to the brand mark.** Link and accent colours moved from green to the mark's silicon indigo and busbar silver; amber keeps its one meaning — this part is live.
 - **New brand mark.** The green-to-blue tile is replaced by an optimizer emitting a telemetry frame, in silicon indigo and amber. It's drawn at three sizes rather than scaled — the device favicon, the device UI sidebar, and the docs — so it stays legible in a browser tab. The docs site had no logo or favicon configured before and now carries the same mark the device serves.
 
 ### Fixed

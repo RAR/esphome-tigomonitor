@@ -2,7 +2,34 @@
 title: Configuration Guide
 ---
 
-Complete YAML reference for the ESPHome Tigo Monitor component — every option on the `tigo_monitor` and `tigo_server` platforms, the sensors they expose, and the ESP-IDF/PSRAM settings the firmware needs. New here? Start with the [Quick Start in the README](https://github.com/RAR/esphome-tigomonitor#quick-start), then come back for the details.
+This is the full list of every setting, for when you need to look one up.
+
+:::tip[You probably don't need to read this]
+The **[Config Builder](/esphome-tigomonitor/config-builder/)** writes a working
+setup file for you, and the settings people actually change day-to-day can be
+changed on the device itself without touching any file — see
+[the handful that matter](#the-settings-most-people-change) below.
+
+Setting up for the first time? Go to
+**[Start Here](/esphome-tigomonitor/guides/getting-started/)** instead.
+:::
+
+## The settings most people change
+
+Everything else on this page has a sensible default. These five are the ones
+worth knowing about:
+
+| Setting | What it does |
+|---------|--------------|
+| `number_of_devices` | How many panels to track. Set it to your panel count (or a bit more). |
+| `power_calibration` | Nudges all power readings up or down if they don't match your inverter. `1.05` = +5%. |
+| `reset_at_midnight` | Starts the daily energy and peak-power figures fresh each night. |
+| `inverters:` | Groups your strings under inverter names so the dashboard mirrors your real layout. |
+| `api_token` / `web_password` | Passwords for the dashboard and API. Worth setting. |
+
+The first three can be changed **live in the web dashboard** (Tools → Device
+Configuration) without rebuilding or reflashing anything — handy for tuning
+`power_calibration` against your inverter's own display.
 
 ## Contents
 
@@ -66,21 +93,30 @@ inverters:
       - "MPPT 4"
 ```
 
-MPPT labels must match CCA labels exactly. The web dashboard shows hierarchy: Inverter → MPPT → String → Panel.
+MPPT labels must match your CCA's labels exactly. The dashboard then shows your array the way it's really built: Inverter → MPPT → String → Panel.
 
-#### Renaming from the UI
+#### Renaming things without editing the file
 
-Inverter and string display names are editable from the Topology view (✎ next to each label). Overrides are persisted to NVS, keyed by canonical YAML/CCA name. The YAML-defined `name:` is still the immutable identity used everywhere internally; the override only affects display. Empty override = falls back to canonical name. Useful when you want friendlier names ("South Roof") without redeploying YAML.
+You can rename inverters and strings directly in the dashboard — click the ✎ next
+to any label on the Topology page. The new name is saved on the device (in NVS,
+its small settings memory) and survives reboots, so you can switch to friendly
+names like "South Roof" without rebuilding your config.
 
-#### Per-string panel nameplate (rating)
+The name in your YAML stays the real identity behind the scenes; the rename only
+changes what's displayed. Clear it to go back to the original.
 
-Click the rating pill in the Topology view to set the per-panel nameplate watts for a string (uint16, 0 = unset). Persisted to NVS. When set:
+#### Telling it how big your panels are
 
-- Panel tiles show "% of rated" alongside watts.
-- Health classification uses rating-vs-power instead of median-vs-peer (with a "string sleeping" check at <5% of total nameplate so dawn doesn't paint everything red).
-- String aggregate roll-up shows output as % of total nameplate.
+Click the rating pill on the Topology page to enter your panel's rated watts —
+the number on the sticker, e.g. 400. Saved on the device. Once set:
 
-Falls back to median-based behavior when unset.
+- Each panel shows what percentage of its rating it's currently making.
+- Underperforming panels are judged against that rating rather than against their
+  neighbours, which is more reliable. (At dawn, when the whole string is below 5%
+  of rated, it's marked as sleeping rather than as broken.)
+- Each string shows its total output as a percentage of what it could be making.
+
+Leave it unset and panels are compared against each other instead.
 
 ### Midnight Reset
 
@@ -145,6 +181,10 @@ tigo_server:
 
 ### CCA over Bluetooth (`cca_source: ble`)
 
+**In plain terms:** newer Tigo CCAs refuse to answer questions over your home
+network. This option asks them over Bluetooth instead, so you can still pull your
+panel names and layout across. If your CCA is on older firmware you don't need it.
+
 Tigo CCA firmware 4.0.4+ (incl. 4.0.5-ct) locks the local HTTP API, so the CCA Info page can instead source data over Bluetooth. With `cca_source: ble` and a `ble_client_id`, `tigo_server` becomes the BLE client and talks the CCA's `mobile_api` over GATT. The link is opened on demand and dropped after each read so the Tigo phone app can still connect (the CCA allows one BLE central at a time).
 
 ```yaml
@@ -181,6 +221,11 @@ These runtime knobs can be set in the web UI and persisted to the ESP32 (NVS) wi
 The YAML value is the **default**. A stored value overrides it until you press **Revert**, which clears the override so future YAML edits apply again (Revert is enabled only when the live value differs from the default). Structural settings (inverter layout, device count, ports, IDs) and auth (`api_token`/`web_*`) stay YAML-only — the latter because NVS is plaintext-at-rest.
 
 ### Tigo cloud import (`cloud_import: true`)
+
+**In plain terms:** your installer already typed your panel names and layout into
+Tigo's system. This pulls that work down so you don't have to retype it. You sign
+in once with your normal Tigo account; only the resulting access token is kept on
+the device, never your password.
 
 When the CCA's local HTTP is locked, the panel names + string/MPPT/inverter layout can be recovered from Tigo's cloud (the same API the mobile app uses). Enter your Tigo account in the **Configure** modal on the Tigo Cloud page — **only the resulting bearer token is persisted to NVS, never the password**. The page also shows Tigo's own per-equipment health/status/history; layout import is a button on the Topology page. HTTPS is verified against the mbedTLS certificate bundle, which `cloud_import` enables automatically.
 
@@ -461,7 +506,7 @@ Check the low-water mark at any time — `heap_min_free` in `curl http://<device
 
 ## On-Flash History (esp_tsdb)
 
-Persistent time-series history is opt-in via two extra dependencies and a custom partition table. See [TSDB Integration](/esphome-tigomonitor/guides/tsdb-integration/) for the full schema, sizing, and query reference.
+Persistent time-series history is opt-in via two extra dependencies and a custom partition table. See [Saving history to flash](/esphome-tigomonitor/guides/tsdb-integration/) for the full schema, sizing, and query reference.
 
 Quick form (8 MB AtomS3R):
 

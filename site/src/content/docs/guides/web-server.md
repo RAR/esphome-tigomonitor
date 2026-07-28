@@ -2,20 +2,53 @@
 title: Web Server & API
 ---
 
-Tigo Monitor ships a single-page web app and a JSON API on the configured `tigo_server` port (default 80). Everything lives at `/app` — the legacy per-page paths still resolve as 302 redirects so existing bookmarks keep working.
+The device serves its own dashboard. Type its IP address into any browser on your
+home network and it's there — no app to install, nothing to sign into, and it
+keeps working if your internet goes down.
 
-## Single-page app
+This page describes what you'll find on it, and the data feed underneath for
+anyone who wants to pull the numbers into their own scripts.
 
-| View | URL | Notes |
-|------|-----|-------|
-| Dashboard | `/app#dashboard` | Hero strip · per-string panel heatmap · color legend · alerts |
-| History | `/app#history` | TSDB-backed power/energy charts; range tabs (day / week / month / year) |
-| Topology | `/app#topology` | Inverter → string → panel tree with live V/I/W/°C; rename + nameplate editing |
-| Node Table | `/app#nodes` | Device registry with CCA metadata; Export / Import as JSON |
-| Tools | `/app#tools` | **Device Configuration** (on-device knobs) · YAML generator · Reset Peak / Clear Node Table / Restart |
-| Diagnostics | `/app#diagnostics` | Memory · network · UART telemetry · TSDB stats |
-| CCA Info | `/app#cca` | Live CCA mirror (HTTP or BLE source); Refresh · **CCA Connection** (BLE search) · Network status · WiFi config · Topology discovery |
-| Tigo Cloud | `/app#cloudstatus` | Tigo-cloud health, per-equipment status + history (shown only when `cloud_import` is set) |
+## The pages you get
+
+| Page | What it's for |
+|------|---------------|
+| **Dashboard** | The main view. A coloured tile per panel, grouped by string, so an underperforming panel stands out at a glance. Click any tile for that panel's detail and history. |
+| **History** | Charts of power and energy over the day, week, month or year. Only present if you enabled [history storage](/esphome-tigomonitor/guides/tsdb-integration/). |
+| **Topology** | Your array laid out as inverter → string → panel, with live readings. This is where you rename things and enter panel ratings. |
+| **Node Table** | The raw list of every panel the device has ever seen. You can export it to a file as a backup. |
+| **Tools** | Change settings, generate config, reset counters, restart the device. |
+| **Diagnostics** | Is it healthy? Memory, WiFi signal, how many messages it's missing. |
+| **CCA Info** | What your Tigo box reports about itself. |
+| **Tigo Cloud** | Tigo's own view of your system, if you've connected your account. |
+
+### Two things worth knowing
+
+- **Temperature units and light/dark theme** are toggles at the bottom of the
+  sidebar. Both remember your choice.
+- **Old bookmarks still work.** Everything now lives under `/app`, but the older
+  addresses (`/nodes`, `/status`, `/yaml`, `/cca`, `/history`) redirect to the
+  right place automatically — including through Home Assistant's Ingress.
+
+---
+
+## Reference
+
+Everything below is detail for people integrating with the device or debugging
+it. You don't need any of it to use the dashboard.
+
+### View addresses
+
+| View | URL |
+|------|-----|
+| Dashboard | `/app#dashboard` |
+| History | `/app#history` |
+| Topology | `/app#topology` |
+| Node Table | `/app#nodes` |
+| Tools | `/app#tools` |
+| Diagnostics | `/app#diagnostics` |
+| CCA Info | `/app#cca` |
+| Tigo Cloud | `/app#cloudstatus` (only when `cloud_import` is set) |
 
 `/`, `/nodes`, `/status`, `/yaml`, `/cca`, `/history` all 302 → `/app#<view>`. The redirects use a relative `Location` so they work standalone *and* under HA Ingress without any extra configuration.
 
@@ -242,7 +275,7 @@ The `tigo_server:` YAML options — `port`, `api_token`, `web_username`/`web_pas
 - **Connection model**: 4 max open sockets, keep-alive disabled, LRU purge enabled — minimizes internal RAM footprint without much real-world impact at typical poll rates.
 - **HTML assets**: served from `R""` raw-string constants in `web_assets.h`, regenerated from `components/tigo_server/web/*.html` by the Python codegen step. The API token placeholder (`__TIGO_API_TOKEN__`) is substituted at runtime so each device's token stays unique without a recompile.
 - **Memory**: response building and HTML buffers go through `PSRAMString` so large pages don't pressure internal heap.
-- **Persistence**: NVS (via `global_preferences`) holds inverter/string display-name overrides and panel nameplate ratings. Node table and energy history live in NVS too. TSDB time-series data lives on a separate LittleFS partition — see [TSDB Integration](/esphome-tigomonitor/guides/tsdb-integration/).
+- **Persistence**: NVS (via `global_preferences`) holds inverter/string display-name overrides and panel nameplate ratings. Node table and energy history live in NVS too. TSDB time-series data lives on a separate LittleFS partition — see [Saving history to flash](/esphome-tigomonitor/guides/tsdb-integration/).
 
 ---
 

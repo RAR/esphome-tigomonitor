@@ -34,20 +34,34 @@ export default defineConfig({
       social: [
         { icon: 'github', label: 'GitHub', href: 'https://github.com/RAR/esphome-tigomonitor' },
       ],
+      // Ordered by when a first-time installer needs it, not alphabetically:
+      // setup you can't skip, then the things you reach for once it's running,
+      // then reference nobody needs to read to get working.
       sidebar: [
         {
-          label: 'Guides',
+          label: 'Setting it up',
           items: [
-            { label: 'Configuration', link: '/guides/configuration/' },
+            { label: 'Start Here', link: '/guides/getting-started/' },
             { label: 'Wiring', link: '/guides/wiring/' },
-            { label: 'Reducing Frame Loss', link: '/guides/uart-optimization/' },
-            { label: 'Web Server & API', link: '/guides/web-server/' },
-            { label: 'TSDB Integration', link: '/guides/tsdb-integration/' },
-            { label: 'Home Assistant', link: '/guides/home-assistant/' },
-            { label: 'Troubleshooting', link: '/guides/troubleshooting/' },
+            { label: 'Config Builder', link: '/config-builder/' },
           ],
         },
-        { label: 'Config Builder', link: '/config-builder/' },
+        {
+          label: 'Once it’s running',
+          items: [
+            { label: 'Home Assistant', link: '/guides/home-assistant/' },
+            { label: 'Troubleshooting', link: '/guides/troubleshooting/' },
+            { label: 'Reducing Frame Loss', link: '/guides/uart-optimization/' },
+          ],
+        },
+        {
+          label: 'Reference',
+          items: [
+            { label: 'Configuration Options', link: '/guides/configuration/' },
+            { label: 'Web Server & API', link: '/guides/web-server/' },
+            { label: 'Saving History to Flash', link: '/guides/tsdb-integration/' },
+          ],
+        },
       ],
     }),
   ],

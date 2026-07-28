@@ -2,7 +2,13 @@
 title: Wiring Guide
 ---
 
-Wire an ESP32 (recommended: M5Stack AtomS3R) inline with your Tigo CCA/TAP RS485 bus so it can passively monitor optimizer telemetry — written for solar owners doing the install themselves.
+You're connecting three wires — **A**, **B** and **ground** — between your Tigo
+equipment and the ESP32 board, so the board can quietly listen in on the
+conversation your panels are already having. Written for solar owners doing it
+themselves.
+
+The wiring itself is genuinely simple. The care is all in step zero: making the
+high-voltage side safe before you open anything.
 
 > ⚠️ **Warning — this bus lives inside a high-voltage PV system.**
 > The RS485 *signal* is low voltage, but you tap it inside or next to a Tigo CCA/TAP and inverter that are part of a **high-voltage PV DC system**. That DC can be **lethal**, and it is **not** switched off just because you turn the inverter off — sunlit panels keep producing voltage.
@@ -12,9 +18,14 @@ Wire an ESP32 (recommended: M5Stack AtomS3R) inline with your Tigo CCA/TAP RS485
 > - **Treat the inverter side as live high-voltage DC** until you have verified it is isolated.
 > - **If you are not comfortable or qualified, stop** and involve a licensed solar installer or electrician. There is no shame in it and it may be a legal requirement where you live.
 
-## Overview
+## Where it goes
 
-The Tigo system uses RS485 for communication between the CCA (Cloud Connect Advanced) or TAP (Tigo Access Point) and the solar optimizers. The ESP32 connects to the **GATEWAY** port to passively monitor this communication.
+Your optimizers talk to your Tigo CCA (the grey wall box) or TAP (the small radio
+box) over a two-wire cable called RS485. You're splicing the ESP32 into that
+existing cable run — at the CCA's **GATEWAY** port — so it hears both sides of the
+conversation without joining in.
+
+Think of it as a wiretap, not a phone extension.
 
 ```text
 ┌─────────────────────────────────────┐      ┌────────────────────────────┐
@@ -41,7 +52,7 @@ The Tigo system uses RS485 for communication between the CCA (Cloud Connect Adva
 
 *Diagram credit: [willglynn/taptap](https://github.com/willglynn/taptap/blob/main/README.md)*
 
-The ESP32 acts as a **passive listener** – it only receives, and it is wired so that it *physically cannot* transmit onto the bus. See [Passive-listener wiring](#why-this-is-read-only) below for the electrical reason why.
+The ESP32 acts as a **passive listener** – it only receives, and it is wired so that it *physically cannot* transmit onto the bus. See [Passive-listener wiring](#why-this-cannot-break-your-solar-system) below for the electrical reason why.
 
 ---
 
@@ -86,7 +97,7 @@ Tigo CCA/TAP                     ESP32 + RS485 Base                    Tigo Opti
                                 └──────────────────┘
 ```
 
-TX is wired but inert — the transceiver's driver is held disabled, so the ESP32 only listens. See [Why this is read-only](#why-this-is-read-only).
+TX is wired but inert — the transceiver's driver is held disabled, so the ESP32 only listens. See [Why this is read-only](#why-this-cannot-break-your-solar-system).
 
 ### Wiring Table
 
@@ -102,7 +113,14 @@ TX is wired but inert — the transceiver's driver is held disabled, so the ESP3
 
 **Ground reference:** RS485 needs a **common ground reference** between the ESP32 and the Tigo bus for reliable signalling — connect GND. It is not optional. (Skip it only if the ESP32 and the Tigo equipment already share a ground through another path, and even then a dedicated GND wire is the safer default.)
 
-### Why this is read-only
+### Why this cannot break your solar system
+
+Short version: the chip that would let the ESP32 speak on the cable has its
+"talk" switch wired permanently off. Not off in software, where a bug could flip
+it — off in the wiring, where nothing can. The ESP32 can shout all it likes and
+not a single volt reaches your solar equipment.
+
+If you want the electrical detail:
 
 The AtomS3R UART wires TX to GPIO6, and the MAX485 example below wires the driver input (DI) to that same TX pin — yet the ESP32 still **cannot** transmit onto the bus. Here's why:
 
@@ -147,7 +165,7 @@ Budget option:
 2. Wire MAX485 GND to ESP32 GND
 3. Wire MAX485 RO to ESP32 GPIO5 (RX)
 4. Wire MAX485 DI to ESP32 GPIO6 (TX)
-5. **Tie MAX485 DE and RE to GND** — this disables the driver and is what makes the ESP32 read-only (step 4 is then harmless; see [Why this is read-only](#why-this-is-read-only))
+5. **Tie MAX485 DE and RE to GND** — this disables the driver and is what makes the ESP32 read-only (step 4 is then harmless; see [Why this is read-only](#why-this-cannot-break-your-solar-system))
 6. Connect A/B to Tigo RS485 bus, and share a common GND with the bus
 
 The UART runs at **38400 baud, 8N1** on TX=GPIO6 / RX=GPIO5.

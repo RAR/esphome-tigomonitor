@@ -2,9 +2,34 @@
 title: Troubleshooting Guide
 ---
 
-Common issues and solutions for ESPHome Tigo Monitor.
+Something not working? Start at the top of this page and work down — the first
+section covers the great majority of problems people actually hit.
 
-## Quick Fixes
+## Start with these four
+
+**1. No panels showing up at all.**
+Nine times out of ten this is the wiring. Check that A goes to A, B goes to B,
+and that you actually connected the ground wire — RS485 won't read reliably
+without it. Then confirm your setup file says `baud_rate: 38400`.
+See [Wiring](/esphome-tigomonitor/guides/wiring/).
+
+**2. Some panels showing, but not all.**
+Give it 10–15 minutes. Panels take turns reporting on the shared cable, so they
+trickle in rather than all appearing at once. If you're still short after that,
+check `number_of_devices` in your config is at least as large as your panel count.
+
+**3. Panels showing as "Module 4F2A" instead of names.**
+That's expected on a fresh install — the device knows a panel is there but
+nobody's told it what to call it. See
+[Putting names on the panels](/esphome-tigomonitor/guides/getting-started/#putting-names-on-the-panels).
+
+**4. It worked, then went unstable or unreachable.**
+Usually a board without enough memory for the number of panels you have. If you
+have 15 or more panels you want a board with PSRAM, such as the AtomS3R.
+
+Still stuck? The rest of this page is organised by symptom.
+
+## Quick reference
 
 | Symptom | Solution |
 |---------|----------|
@@ -15,7 +40,7 @@ Common issues and solutions for ESPHome Tigo Monitor.
 | CCA sync returns 401 / "HTTP locked" | Tigo firmware 4.0.4+ closed local HTTP — use `cca_source: ble` or `cloud_import: true` |
 | BLE CCA won't connect | Close the Tigo phone app (one BLE central at a time) |
 | Tigo cloud import fails | Recheck credentials; needs `cloud_import: true`; token may have expired |
-| History reads back empty after reboot | Erase the tsdb partition once ([TSDB](/esphome-tigomonitor/guides/tsdb-integration/)) |
+| History reads back empty after reboot | Erase the tsdb partition once ([history storage](/esphome-tigomonitor/guides/tsdb-integration/)) |
 | Web UI not loading | Confirm `tigo_server` configured, check ESP32 IP |
 
 ---
@@ -263,7 +288,7 @@ The History view is backed by an on-flash time-series database (`esp_tsdb`) stor
 2. **Existing installs may need to erase the tsdb partition once** so LittleFS reformats it at the new size. After that, history persists across reboots.
 3. Confirm your config pins `zakery292/esp_tsdb^2.1.0` (or newer) and uses the custom partition table.
 
-See [TSDB Integration](/esphome-tigomonitor/guides/tsdb-integration/) for the schema, sizing, and partition setup.
+See [Saving history to flash](/esphome-tigomonitor/guides/tsdb-integration/) for the schema, sizing, and partition setup.
 
 ### Diagnostics Shows 0 KB for Every Database Size
 
@@ -289,7 +314,7 @@ Not an error condition. `tsdb_get_stats_h()` takes the per-database mutex with a
 
 **Cause:** esp_tsdb is opt-in — without the extra components and custom partition table it isn't compiled in.
 
-**Solution:** Add the esp_tsdb + littlefs components and the custom partition table as shown in [TSDB Integration](/esphome-tigomonitor/guides/tsdb-integration/). The rest of the component works fine without it; you just lose the History view and the `/api/history/*` and `/api/tsdb/stats` endpoints.
+**Solution:** Add the esp_tsdb + littlefs components and the custom partition table as shown in [Saving history to flash](/esphome-tigomonitor/guides/tsdb-integration/). The rest of the component works fine without it; you just lose the History view and the `/api/history/*` and `/api/tsdb/stats` endpoints.
 
 ---
 

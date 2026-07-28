@@ -1,14 +1,34 @@
 ---
-title: TSDB Integration
+title: Saving History to Flash
+description: Turn on long-term history so your charts survive a reboot — what to add, and how much it stores.
 ---
 
-On-flash time-series storage for Tigo Monitor, backed by [`zakery292/esp_tsdb`](https://github.com/zakery292/esp_tsdb). It gives you persistent panel and system history that survives reboots and OTA updates, queryable from the SPA's History view and from the JSON API.
+By default the device shows you what's happening *now*. Turn this on and it also
+keeps a **permanent record on the device itself** — nearly two years of system
+history and about four months per panel — so the History charts still work after
+a power cut, a reboot, or a firmware update.
 
-**Just want to turn it on?** Jump to [Required configuration](#required-configuration) — add two dependencies and a `tsdb` partition, and history starts recording. Everything after that section is reference material on the internals.
+It's off by default because it needs a couple of extra lines in your setup file
+and a change to how the device's storage is divided up. The
+[Config Builder](/esphome-tigomonitor/config-builder/) can do that part for you.
 
-> **Status:** Phases 1–3 shipped. Per-snapshot system rollups + per-panel power are persisted at 30-min cadence; up to 48 panels supported across three lazy-opened panel DBs. Daily-rollup phase (Phase 4) and the volatile-history retirement (Phase 6) are tracked separately and not on the critical path.
->
-> **Cadence note:** the snapshot interval is **30 minutes**, hardcoded in `tigo_monitor.cpp`. It was originally 5 min, but every flash write briefly disables the CPU instruction cache on both cores; at 5-min cadence those windows collided often enough with WiFi/BLE-coex radio ISRs to crash the device. Coarsening to 30 min cut the flash-op frequency ~6× and, together with core-pinning the writer, cut the crash rate ~40× (mean time-to-failure went from ~20 min to ~13 h); a rare residual remains under BLE coex. `period_e_*` energy deltas are interval-agnostic, so totals are unaffected — only history time-resolution changed.
+**To turn it on:** copy the block under
+[Required configuration](#required-configuration) into your setup file and
+reflash. That's the whole job — everything after that section is background for
+the curious and for people working on the firmware.
+
+Under the hood this is [`zakery292/esp_tsdb`](https://github.com/zakery292/esp_tsdb),
+a small time-series database that writes to a dedicated area of the ESP32's flash
+memory.
+
+:::note[Two things to expect]
+**A reading every 30 minutes.** Not every few seconds — flash memory wears out
+if you write to it constantly, and frequent writes were destabilising the device.
+Your energy totals are unaffected by this; only how finely the charts are drawn.
+
+**Up to 48 panels.** Beyond that, extra panels still show live readings but don't
+get their own saved history.
+:::
 
 ---
 
@@ -57,6 +77,12 @@ The TSDB code is conditionally compiled — without those two dependencies on th
 # Reference
 
 Internals for firmware developers: what gets persisted, how it's sized, the write/query paths, and implementation notes. You don't need any of this to enable history.
+
+## Status and cadence
+
+Phases 1–3 shipped. Per-snapshot system rollups + per-panel power are persisted at 30-min cadence; up to 48 panels supported across three lazy-opened panel DBs. Daily-rollup phase (Phase 4) and the volatile-history retirement (Phase 6) are tracked separately and not on the critical path.
+
+**Why 30 minutes.** The snapshot interval is hardcoded in `tigo_monitor.cpp`. It was originally 5 min, but every flash write briefly disables the CPU instruction cache on both cores; at 5-min cadence those windows collided often enough with WiFi/BLE-coex radio ISRs to crash the device. Coarsening to 30 min cut the flash-op frequency ~6× and, together with core-pinning the writer, cut the crash rate ~40× (mean time-to-failure went from ~20 min to ~13 h); a rare residual remains under BLE coex. `period_e_*` energy deltas are interval-agnostic, so totals are unaffected — only history time-resolution changed.
 
 ## What gets persisted
 

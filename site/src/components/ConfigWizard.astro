@@ -7,8 +7,10 @@
 ---
 <div class="tigo-wizard not-content">
   <p class="tw-intro">
-    Fill in your board and network details, then copy or download a ready-to-flash
-    ESPHome YAML. Everything runs in your browser — nothing is uploaded.
+    Answer the questions below and this writes your setup file for you — no YAML to
+    learn. Save the result next to your ESPHome install and flash it. Everything runs
+    in your browser; nothing is uploaded anywhere. Not sure what any of this is?
+    Read <a href="/esphome-tigomonitor/guides/getting-started/">Start Here</a> first.
   </p>
 
   <form id="wizard" class="tw-form">
@@ -23,24 +25,28 @@
 
     <fieldset class="tw-card">
       <legend>Device &amp; UART</legend>
-      <label class="field"><span>Device name</span><input id="name" value="tigo-server" /></label>
+      <label class="field"><span>Device name</span><input id="name" value="tigo-server" /><small class="hint">What it'll be called on your network. Lowercase letters and dashes only.</small></label>
       <div class="grid2">
-        <label class="field"><span>Number of devices</span><input id="num-devices" type="number" min="1" /></label>
-        <label class="field"><span>Update interval</span><input id="update-interval" value="30s" /></label>
-        <label class="field"><span>UART TX pin</span><input id="uart-tx" /></label>
-        <label class="field"><span>UART RX pin</span><input id="uart-rx" /></label>
+        <label class="field"><span>Number of devices</span><input id="num-devices" type="number" min="1" /><small class="hint">How many panels you have. Round up a little.</small></label>
+        <label class="field"><span>Update interval</span><input id="update-interval" value="30s" /><small class="hint">How often readings go to Home Assistant.</small></label>
+        <label class="field"><span>UART TX pin</span><input id="uart-tx" /><small class="hint">Already correct for your board.</small></label>
+        <label class="field"><span>UART RX pin</span><input id="uart-rx" /><small class="hint">Leave these alone unless you wired it yourself.</small></label>
       </div>
     </fieldset>
 
     <fieldset class="tw-card">
       <legend>Networking</legend>
-      <label class="field"><span>Wi-Fi SSID</span><input id="wifi-ssid" placeholder="YOUR_WIFI_SSID" /></label>
+      <label class="field"><span>Wi-Fi SSID</span><input id="wifi-ssid" placeholder="YOUR_WIFI_SSID" /><small class="hint">Your home Wi-Fi network name, exactly as it appears.</small></label>
       <label class="field"><span>Wi-Fi password</span><input id="wifi-pass" placeholder="YOUR_WIFI_PASSWORD" /></label>
-      <label class="field"><span>Static IP <em>(optional)</em></span><input id="static-ip" /></label>
+      <label class="field"><span>Static IP <em>(optional)</em></span><input id="static-ip" /><small class="hint">Leave blank and your router picks one. Fill it in if you want the dashboard always at the same address.</small></label>
     </fieldset>
 
     <fieldset class="tw-card">
       <legend>CCA &amp; extras</legend>
+      <p class="notes">
+        Optional. These let the device learn your panels' real names instead of
+        showing codes like "Module 4F2A". You can also type names in by hand later.
+      </p>
       <label class="field">
         <span>CCA source</span>
         <select id="cca">
@@ -48,21 +54,23 @@
           <option value="http">HTTP (older firmware)</option>
           <option value="ble">Bluetooth (4.0.4+)</option>
         </select>
+        <small class="hint">How to reach your Tigo box. Pick Bluetooth if its firmware is 4.0.4 or newer — those refuse network requests.</small>
       </label>
-      <label class="field" id="cca-ip-row"><span>CCA IP</span><input id="cca-ip" /></label>
-      <label class="field" id="cca-mac-row"><span>CCA Bluetooth MAC</span><input id="cca-mac" placeholder="04:C0:5B:XX:XX:XX" /></label>
-      <label class="check"><input type="checkbox" id="cloud" /> <span>Enable Tigo cloud import</span></label>
-      <label class="check" id="display-row"><input type="checkbox" id="display" /> <span>Include display (AtomS3R-Display)</span></label>
+      <label class="field" id="cca-ip-row"><span>CCA IP</span><input id="cca-ip" /><small class="hint">Your Tigo box's address on your network — check your router's device list.</small></label>
+      <label class="field" id="cca-mac-row"><span>CCA Bluetooth MAC</span><input id="cca-mac" placeholder="04:C0:5B:XX:XX:XX" /><small class="hint">A starting guess is fine — the device can search for your CCA and let you pick it.</small></label>
+      <label class="check"><input type="checkbox" id="cloud" /> <span>Enable Tigo cloud import<small class="hint">Pulls the panel layout your installer set up, using your Tigo account.</small></span></label>
+      <label class="check" id="display-row"><input type="checkbox" id="display" /> <span>Include display (AtomS3R-Display)<small class="hint">Only if your board has a screen on it.</small></span></label>
     </fieldset>
 
     <fieldset class="tw-card">
       <legend>Security</legend>
-      <label class="check"><input type="checkbox" id="use-secrets" checked /> <span>Generate a <code>secrets.yaml</code></span></label>
+      <label class="check"><input type="checkbox" id="use-secrets" checked /> <span>Generate a <code>secrets.yaml</code><small class="hint">Keeps your passwords in a separate file. Recommended.</small></span></label>
       <label class="field">
         <span>API encryption key</span>
         <span class="with-btn"><input id="api-key" /><button type="button" id="gen-key" class="btn-secondary">Generate</button></span>
+        <small class="hint">Lets Home Assistant talk to the device securely. Click Generate — you don't need to understand it, just don't lose it.</small>
       </label>
-      <label class="field"><span>OTA password</span><input id="ota-pass" value="changeme" /></label>
+      <label class="field"><span>OTA password</span><input id="ota-pass" value="changeme" /><small class="hint">Needed to update the firmware over Wi-Fi later. Change it from the default.</small></label>
     </fieldset>
   </form>
 
@@ -178,12 +186,24 @@
   }
   .tigo-wizard input::placeholder { color: var(--sl-color-gray-4); }
 
+  /* Plain-language help under a field. Deliberately quiet — it should read as
+     an aside to someone who needs it and be skippable by someone who doesn't. */
+  .hint {
+    font-size: var(--sl-text-xs);
+    line-height: 1.45;
+    color: var(--sl-color-gray-3);
+  }
+  /* Checkbox hints sit inside the label's <span>, so they need to break the line. */
+  .check .hint { display: block; margin-top: 0.15rem; }
+
   .check {
-    display: flex; align-items: center; gap: 0.55rem;
+    /* flex-start, not center: every checkbox here carries a two-line hint, so
+       the box must align to the first line rather than the block's midpoint. */
+    display: flex; align-items: flex-start; gap: 0.55rem;
     margin: 0.85rem 0 0; cursor: pointer;
     font-size: var(--sl-text-sm); color: var(--sl-color-white);
   }
-  .check input[type=checkbox] { width: 1.05rem; height: 1.05rem; flex: none; accent-color: var(--sl-color-accent); }
+  .check input[type=checkbox] { width: 1.05rem; height: 1.05rem; flex: none; margin-top: 0.15rem; accent-color: var(--sl-color-accent); }
   .check code { font-size: 0.9em; }
 
   .with-btn { display: flex; gap: 0.5rem; }

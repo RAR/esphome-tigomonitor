@@ -2,7 +2,11 @@
    Tigo Monitor — "field instrument" theme
    A technical-editorial identity for a solar/RS485 hardware tool.
    Body: IBM Plex Sans · Data/labels: IBM Plex Mono · Hero: Big Shoulders Display
-   Duotone: live-green primary + solar-amber signal. Dark-first.
+   Duotone: silicon-indigo primary + solar-amber signal. Dark-first.
+
+   Palette is taken from the "Emitting" brand mark (site/src/assets/logo.svg):
+   the optimizer body is silicon indigo, its busbars silver, and amber marks
+   the live telemetry. Amber keeps that one meaning site-wide.
    ============================================================================ */
 
 /* Fonts are self-hosted and loaded via Starlight `customCss` module specifiers
@@ -19,16 +23,18 @@
   --tigo-amber-soft: color-mix(in srgb, var(--tigo-amber) 22%, transparent);
 }
 
-/* Brand accent — live green — over Starlight's gray scale. */
+/* Brand accent — silicon indigo — over Starlight's gray scale.
+   Dark: `low` is the mark's body indigo verbatim; `high` is its busbar silver,
+   which is what link text actually renders in. Light inverts the ramp. */
 :root {
-  --sl-color-accent-low: #14311f;
-  --sl-color-accent: #369e57;
-  --sl-color-accent-high: #b6e6c4;
+  --sl-color-accent-low: #1d2a63;
+  --sl-color-accent: #4c63c4;
+  --sl-color-accent-high: #c6d0e2;
 }
 :root[data-theme='light'] {
-  --sl-color-accent-low: #cbedd5;
-  --sl-color-accent: #1f8043;
-  --sl-color-accent-high: #063118;
+  --sl-color-accent-low: #dbe1f5;
+  --sl-color-accent: #33459b;
+  --sl-color-accent-high: #141c48;
 }
 
 /* --- Monospace eyebrow, used for labels/legends/kickers ------------------- */
