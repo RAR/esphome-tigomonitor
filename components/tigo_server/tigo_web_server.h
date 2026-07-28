@@ -191,6 +191,21 @@ class TigoWebServer : public Component
                                     // "last synced X ago" badge correctly across reboot.
   std::mutex cca_info_mutex_;
 
+#ifdef TIGO_TSDB_AVAILABLE
+  // Cached /api/tsdb/stats body. Building it is the ONLY flash access on the
+  // HTTP path, and on this chip flash access is what crashes us — see the long
+  // comment on api_tsdb_stats_handler. Everything in this response changes only
+  // when the history writer commits, so a stale-by-a-minute copy is honest.
+  // Guarded by TigoHistory::FlashLock, which every path through the handler
+  // takes; there is no separate mutex.
+  // psram_string, not PSRAMString: the latter is forward-declared only, and it
+  // owns a raw pointer with no copy constructor — copying one double-frees.
+  static constexpr uint32_t kTsdbStatsCacheMs = 60000;
+  psram_string tsdb_stats_cache_;
+  uint32_t tsdb_stats_cache_time_{0};  // millis() of last build
+  bool tsdb_stats_cached_{false};      // false until the first successful build
+#endif
+
   // BLE lifecycle, driven from setup()/loop()
   void ble_setup_();
   void ble_loop_();
@@ -303,6 +318,11 @@ class TigoWebServer : public Component
   void build_esp_status_json(PSRAMString& json);
   void build_yaml_json(PSRAMString& json, const std::set<std::string>& selected_sensors, const std::set<std::string>& selected_hub_sensors, const std::string& grouping);
   void build_cca_info_json(PSRAMString& json);
+#ifdef TIGO_TSDB_AVAILABLE
+  // Fills tsdb_stats_cache_. CALLER MUST HOLD TigoHistory::FlashLock — this is
+  // the only code on the HTTP path that reaches flash directly.
+  void build_tsdb_stats_json_(tigo_monitor::TigoHistory *hist, psram_string &json);
+#endif
 };
 
 #endif  // USE_ESP_IDF

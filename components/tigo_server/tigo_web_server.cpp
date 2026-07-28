@@ -3658,20 +3658,63 @@ esp_err_t TigoWebServer::api_tsdb_stats_handler(httpd_req_t *req) {
     return ESP_OK;
   }
 
-  // This handler reaches flash directly rather than through TigoHistory's
-  // iterate_* helpers, so it has to take the flash lock itself: esp_littlefs_info
-  // calls lfs_fs_size, which traverses block metadata (a flash read), and
-  // tsdb_get_stats_h can fall through to the file. Running either concurrently
-  // with the writer's commit faults the writer in the SPI1 cache-disable path.
-  tigo_monitor::TigoHistory::FlashLock lock(hist);
-  if (!lock.held()) {
-    httpd_resp_set_status(req, "503 Service Unavailable");
-    httpd_resp_set_type(req, "application/json");
-    httpd_resp_sendstr(req, "{\"error\":\"flash busy\"}");
-    return ESP_OK;
+  // Building this response is the ONLY flash access anywhere on the HTTP path
+  // (esp_littlefs_info calls lfs_fs_size, which traverses block metadata;
+  // tsdb_get_stats_h stats the file), and on this chip flash access is what
+  // kills us. Every esp_flash op runs spi_flash_disable_interrupts_caches_and_
+  // other_cpu, which stalls the OTHER core. FlashLock stops httpd and the
+  // history writer being inside flash simultaneously — but nothing stopped them
+  // ALTERNATING, and a rapid burst of cache-disables from both cores faults the
+  // writer inside IDF's own cross-core stall coordination.
+  //
+  // Measured on the rig 2026-07-28, same build, same 4-concurrent-loop harness:
+  //   4x /api/tsdb/stats  -> crash in ~11 s (writer faults in lfs_file_flush)
+  //   4x /api/status      -> survives indefinitely at a HIGHER request rate
+  // /api/status touches no flash. That is the whole difference, and it is why
+  // adding more locking here would not have helped.
+  //
+  // So: stop generating the traffic. Build at most once per kTsdbStatsCacheMs
+  // and replay from PSRAM in between. Everything in this response — record
+  // counts, write/eviction totals, filesystem size — only moves when the writer
+  // commits, which is far rarer than the UI asks for it.
+  //
+  // The cache is read and written under FlashLock, which every path through
+  // this handler takes, so no second mutex is needed. The response is copied
+  // out and the lock released BEFORE httpd_resp_send: holding a flash lock
+  // across network I/O would stall the writer for as long as the client takes.
+  psram_string json;
+  {
+    tigo_monitor::TigoHistory::FlashLock lock(hist);
+    if (!lock.held()) {
+      httpd_resp_set_status(req, "503 Service Unavailable");
+      httpd_resp_set_type(req, "application/json");
+      httpd_resp_sendstr(req, "{\"error\":\"flash busy\"}");
+      return ESP_OK;
+    }
+
+    const uint32_t now = millis();
+    // Unsigned subtraction, so millis() rollover needs no special case.
+    const bool fresh = server->tsdb_stats_cached_ &&
+                       (now - server->tsdb_stats_cache_time_) < kTsdbStatsCacheMs;
+    if (!fresh) {
+      server->build_tsdb_stats_json_(hist, server->tsdb_stats_cache_);
+      server->tsdb_stats_cache_time_ = now;
+      server->tsdb_stats_cached_ = true;
+    }
+    // Deep copy while still holding the lock, so a concurrent rebuild cannot
+    // reallocate the cache out from under httpd_resp_send below.
+    json = server->tsdb_stats_cache_;
   }
 
-  PSRAMString json;
+  httpd_resp_set_type(req, "application/json");
+  httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+  httpd_resp_send(req, json.c_str(), json.length());
+  return ESP_OK;
+}
+
+void TigoWebServer::build_tsdb_stats_json_(tigo_monitor::TigoHistory *hist,
+                                           psram_string &json) {
+  json.clear();
   char buf[160];
 
   // LittleFS partition info — denominator for "how full is /tsdb".
@@ -3747,11 +3790,6 @@ esp_err_t TigoWebServer::api_tsdb_stats_handler(httpd_req_t *req) {
   }
 
   json.append("]}");
-
-  httpd_resp_set_type(req, "application/json");
-  httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
-  httpd_resp_send(req, json.c_str(), json.length());
-  return ESP_OK;
 }
 #endif  // TIGO_TSDB_AVAILABLE
 

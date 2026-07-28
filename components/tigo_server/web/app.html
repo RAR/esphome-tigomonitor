@@ -2746,13 +2746,27 @@
     return new Date(epochSec * 1000).toLocaleString();
   }
 
-  async function refreshDiagnostics() {
+  // /api/tsdb/stats is the only endpoint in this page that makes the device
+  // touch flash, and flash access is what crashes the ESP32-S3 (four concurrent
+  // callers kill it in ~11 s; see api_tsdb_stats_handler). Polling it on the
+  // same 10 s tick as /api/status was this view generating the most dangerous
+  // traffic in the whole UI, for numbers that only change when the history
+  // writer commits. Fetch it on open and then once a minute; /api/status keeps
+  // the fast tick because it touches no flash at all.
+  // Keep TSDB_STATS_MS >= kTsdbStatsCacheMs in tigo_web_server.h, or every
+  // request misses the server-side cache and the throttle here does nothing.
+  const TSDB_STATS_MS = 60000;
+  let tsdbStatsAt = 0;
+
+  async function refreshDiagnostics(force) {
     if (!document.getElementById('view-diagnostics').classList.contains('active')) return;
     try {
+      const wantTsdb = force || (Date.now() - tsdbStatsAt) >= TSDB_STATS_MS;
       const [statusR, tsdbR] = await Promise.all([
         apiFetch('/api/status'),
-        apiFetch('/api/tsdb/stats'),
+        wantTsdb ? apiFetch('/api/tsdb/stats') : Promise.resolve(null),
       ]);
+      if (wantTsdb) tsdbStatsAt = Date.now();
       if (!statusR.ok) throw new Error('/api/status ' + statusR.status);
       const status = await statusR.json();
 
@@ -2799,10 +2813,13 @@
       document.getElementById('diag-built').textContent =
         status.compilation_time ? `built ${status.compilation_time}` : '—';
 
-      // TSDB
+      // TSDB — only re-rendered on the ticks that actually refetched. On the
+      // skipped ticks the table simply keeps the values already on screen.
       const tbody = document.getElementById('diag-tsdb-tbody');
       const sub = document.getElementById('diag-tsdb-sub');
-      if (tsdbR.ok) {
+      if (tsdbR === null) {
+        // nothing to do
+      } else if (tsdbR.ok) {
         const t = await tsdbR.json();
         const fsPct = t.littlefs && t.littlefs.total > 0
           ? (100 * t.littlefs.used / t.littlefs.total).toFixed(1)
@@ -2850,8 +2867,10 @@
     }
   }
 
-  document.querySelector('#nav button[data-view="diagnostics"]').addEventListener('click', refreshDiagnostics);
-  if (window.location.hash === '#diagnostics') refreshDiagnostics();
+  // Opening the view forces a fetch; the periodic tick does not.
+  document.querySelector('#nav button[data-view="diagnostics"]')
+    .addEventListener('click', () => refreshDiagnostics(true));
+  if (window.location.hash === '#diagnostics') refreshDiagnostics(true);
   setInterval(() => {
     if (document.getElementById('view-diagnostics').classList.contains('active')) refreshDiagnostics();
   }, 10000);
