@@ -1,56 +1,55 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Tigo Monitor">
+  <!--
+    "Emitting" — a Tigo optimizer reporting on the RS485 bus.
+
+    The body is the potted module unit with its two DC leads; the face carries
+    a six-block telemetry frame (leading block amber = the opcode byte) and the
+    amber arcs are that frame leaving on the bus.
+
+    Palette is deliberate, not inherited: silicon indigo body, busbar silver,
+    and amber #F4B23C — the same --tigo-amber already defined in
+    site/src/styles/theme.css. Amber means one thing across the whole identity:
+    this is the part that is live.
+
+    Small-size sibling: the SPA sidebar mark and /favicon.svg drop the six-block
+    frame for a single bar, because 6px blocks disappear below ~40px. See
+    components/tigo_server/web/app.html and tigo_web_server.cpp:favicon_handler.
+  -->
   <defs>
-    <!-- Background gradient — matches the SPA sidebar brand-logo (accent → accent-2). -->
-    <linearGradient id="bgGrad" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%"  stop-color="#4ade80"/>
-      <stop offset="100%" stop-color="#38bdf8"/>
+    <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%"  stop-color="#16213B"/>
+      <stop offset="100%" stop-color="#0B111F"/>
     </linearGradient>
-    <!-- Highlight gradient for the "live" cell — slight glow within the same family. -->
-    <radialGradient id="liveGrad" cx="50%" cy="40%" r="60%">
-      <stop offset="0%"  stop-color="#ffffff" stop-opacity="0.85"/>
-      <stop offset="60%" stop-color="#ffffff" stop-opacity="0.20"/>
-      <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
-    </radialGradient>
   </defs>
 
-  <!-- Rounded background tile -->
-  <rect x="0" y="0" width="64" height="64" rx="14" ry="14" fill="url(#bgGrad)"/>
+  <!-- Tile: dark enough to hold the silver artwork, light enough to still read
+       as a shape against a black browser tab. -->
+  <rect x="0" y="0" width="64" height="64" rx="14" ry="14" fill="url(#tile)"/>
 
-  <!--
-    3×3 panel grid representing a monitored array. Cells are drawn as
-    rounded rects with a subtle inset; one cell carries the "live" highlight
-    (mirroring the dashboard's heatmap "good" tile).
-  -->
-  <g transform="translate(10,10)" fill="#061018" fill-opacity="0.18">
-    <rect x="0"  y="0"  width="13" height="13" rx="2"/>
-    <rect x="15" y="0"  width="13" height="13" rx="2"/>
-    <rect x="30" y="0"  width="13" height="13" rx="2"/>
+  <!-- Optimizer body -->
+  <rect x="9" y="17" width="34" height="28" rx="5"
+        fill="#1D2A63" stroke="#C6D0E2" stroke-width="3.5"/>
 
-    <rect x="0"  y="15" width="13" height="13" rx="2"/>
-    <!-- live cell -->
-    <rect x="15" y="15" width="13" height="13" rx="2" fill="#061018" fill-opacity="0.55"/>
-    <rect x="30" y="15" width="13" height="13" rx="2"/>
-
-    <rect x="0"  y="30" width="13" height="13" rx="2"/>
-    <rect x="15" y="30" width="13" height="13" rx="2"/>
-    <rect x="30" y="30" width="13" height="13" rx="2"/>
+  <!-- Telemetry frame across the face — 3x2 blocks, leading block live -->
+  <g fill="#C6D0E2" fill-opacity="0.65">
+    <rect x="23" y="23" width="6" height="6"/>
+    <rect x="31" y="23" width="6" height="6"/>
+    <rect x="15" y="33" width="6" height="6"/>
+    <rect x="23" y="33" width="6" height="6"/>
+    <rect x="31" y="33" width="6" height="6"/>
   </g>
-  <!-- Glow over the live cell -->
-  <rect x="25" y="25" width="13" height="13" rx="2" fill="url(#liveGrad)"/>
+  <rect x="15" y="23" width="6" height="6" fill="#F4B23C"/>
 
-  <!--
-    Telemetry pulse — a small sparkline crossing the bottom third, rendered
-    in the same off-black so it reads as part of the icon rather than a
-    decoration. Implies "monitoring" without naming it.
-  -->
-  <path d="M 8 50
-           L 18 50
-           L 22 44
-           L 28 52
-           L 34 47
-           L 40 49
-           L 56 49"
-        fill="none" stroke="#061018" stroke-opacity="0.55"
-        stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- The frame leaving on the bus -->
+  <g fill="none" stroke="#F4B23C" stroke-width="4" stroke-linecap="round">
+    <path d="M48 25 a11 11 0 0 1 0 14"/>
+    <path d="M53 19 a19 19 0 0 1 0 26"/>
+  </g>
+
+  <!-- DC leads -->
+  <g fill="none" stroke="#C6D0E2" stroke-width="4.5" stroke-linecap="round">
+    <path d="M17 45 v5 a4 4 0 0 1 -4 4 h-4"/>
+    <path d="M35 45 v5 a4 4 0 0 0 4 4 h4"/>
+  </g>
 </svg>
