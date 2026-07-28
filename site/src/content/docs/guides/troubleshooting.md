@@ -135,6 +135,10 @@ uart:
 1. **Immediate:** Reboot ESP32
 2. **Permanent:** Upgrade to ESP32-S3 with PSRAM (e.g., M5Stack AtomS3R)
 
+### Memory Limits
+
+PSRAM is required.
+
 ### ESP32 Internal Temperature Reads Nothing
 
 `/api/status` returns `"internal_temp": null` and the Diagnostics view shows no die temperature.
