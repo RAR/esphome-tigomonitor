@@ -30,7 +30,8 @@ to memorise them, but they'll show up in the rest of the guides.
 | **Optimizer** | The small box clipped behind each solar panel. Tigo's product. It's what reports the per-panel numbers. |
 | **CCA** | Tigo's green wall box that collects from the optimizers and uploads to Tigo. Short for Cloud Connect Advanced. |
 | **TAP** | A small Tigo radio antenna box that relays between the optimizers and the CCA. Some systems have one, some have several. |
-| **RS485** | The two-wire cable running between the CCA/TAP and your optimizers. This is the conversation we quietly listen to. |
+| **RS485** | The way your Tigo gear talks over that cable, on the two wires labelled **A** and **B**. This is the conversation we quietly listen to. |
+| **The Tigo cable** | Four wires between the CCA/TAP and your optimizers: **+** and **−** carry power, **A** and **B** carry the data. You only tap A, B, and a ground — leave the power pair alone. |
 | **ESP32** | The little WiFi microcontroller board that does the listening. The AtomS3R is the one we recommend. |
 | **ESPHome** | Free software that builds and installs the firmware onto that board for you. You'll use it once at setup. |
 | **String** | One row/chain of panels wired together. |
