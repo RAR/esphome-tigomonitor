@@ -23,8 +23,9 @@ high-voltage side safe before you open anything.
 Your optimizers talk to your Tigo CCA (the green wall box) or TAP (the small radio
 box) over a **four-wire** cable — **+** and **−** carrying power, **A** and **B**
 carrying the data. That data pair is RS485, and it's the only part we're interested
-in. You're splicing the ESP32 into the existing run — at the CCA's **GATEWAY**
-port — so it hears both sides of the conversation without joining in.
+in. You're tapping the ESP32 onto the existing run — at the CCA's **GATEWAY**
+port — so it hears both sides of the conversation without joining in. Nothing gets
+cut or unplugged.
 
 **Tap A and B only, plus a ground.** Leave the power pair connected exactly as you
 found it. The terminals are marked on the port; the diagram below shows the order.
@@ -97,43 +98,57 @@ looking at — the GATEWAY port has **four** terminals, and you only touch three
 the common ground, which is the one you connect. **Leave `+` alone entirely** —
 nothing on the ESP32 side goes anywhere near it.
 
-Now wire it. `A` and `B` pass *through* the module, so it sits inline on the run:
+Now wire it. RS485 is a shared bus, so the ESP32 **hangs off** the existing cable
+rather than sitting in the middle of it — you are adding three short wires, not
+cutting anything:
 
 ```text
-Tigo CCA / TAP                ESP32 + RS485 Base                Optimizer bus
-┌──────────────┐              ┌──────────────────┐              ┌──────────────┐
-│              │              │                  │              │              │
-│  A ──────────┼──────────────┤ A (Terminal)     ├──────────────┼────── A      │
-│  B ──────────┼──────────────┤ B (Terminal)     ├──────────────┼────── B      │
-│              │              │                  │              │              │
-│  - ──────────┼──────────────┤ GND              │              │              │
-│  +  (leave)  │              │                  │              │              │
-└──────────────┘              └──────────────────┘              └──────────────┘
-                                       │
-                                       │ internal
-                                       ▼
-                              ┌──────────────────┐
-                              │  AtomS3R ESP32   │
-                              │  RX: GPIO5       │
-                              │  TX: GPIO6 inert │
-                              │  38400 baud 8N1  │
-                              └──────────────────┘
+Tigo CCA / TAP                                                  TAP / optimizers
+┌──────────────┐                                                ┌──────────────┐
+│              │                                                │              │
+│  A ──────────┼─────┬──────────────────────────────────────────┼────── A      │
+│  B ──────────┼─────┼──┬───────────────────────────────────────┼────── B      │
+│  - ──────────┼─────┼──┼──┬────────────────────────────────────┼────── -      │
+│  +  (leave)  │     │  │  │                                    │  +  (leave)  │
+└──────────────┘     │  │  │                                    └──────────────┘
+                     │  │  │   three short spur wires —
+                     │  │  │   the run itself is never cut
+                     ▼  ▼  ▼
+                 ┌───────────────┐
+                 │   A  B  GND   │
+                 │ ESP32 + RS485 │
+                 └───────────────┘
+                         │ internal
+                         ▼
+                 ┌──────────────────┐
+                 │  AtomS3R ESP32   │
+                 │  RX: GPIO5       │
+                 │  TX: GPIO6 inert │
+                 │  38400 baud 8N1  │
+                 └──────────────────┘
 ```
+
+`┬` marks where a spur joins a wire; `┼` is just one line crossing another.
+
+In practice this usually means landing a second wire under the same screw terminal
+that already holds the run, or using a wago/terminal block alongside it. The CCA
+keeps talking to the TAP exactly as before, whether or not the ESP32 is powered.
 
 TX is wired but inert — the transceiver's driver is held disabled, so the ESP32 only listens. See [Why this is read-only](#why-this-cannot-break-your-solar-system).
 
 ### Wiring Table
 
-| Connection | From | To |
-|------------|------|-----|
-| RS485 A | CCA/TAP **A** terminal | RS485 Base A terminal |
-| RS485 A | RS485 Base A terminal | Optimizer bus A |
-| RS485 B | CCA/TAP **B** terminal | RS485 Base B terminal |
-| RS485 B | RS485 Base B terminal | Optimizer bus B |
-| GND | CCA/TAP **−** terminal | RS485 Base GND |
-| *(none)* | CCA/TAP **+** terminal | *Not connected — leave as found* |
+Three wires, each one a spur off a terminal that stays connected to whatever it
+was already connected to:
 
-**Note:** RS485 A and B are daisy-chained through the ESP32 module. The ESP32 monitors traffic in both directions.
+| Wire | From | To | Notes |
+|------|------|-----|-------|
+| RS485 A | CCA/TAP **A** terminal | RS485 Base **A** | Data |
+| RS485 B | CCA/TAP **B** terminal | RS485 Base **B** | Data |
+| Ground | CCA/TAP **−** terminal | RS485 Base **GND** | Not optional — see below |
+| — | CCA/TAP **+** terminal | *nothing* | Power. Leave exactly as found |
+
+**Note:** the ESP32 is one more listener on a shared bus, not a link in a chain. It sees traffic in both directions, and unplugging it changes nothing for the rest of the system.
 
 **Ground reference:** RS485 needs a **common ground reference** between the ESP32 and the Tigo bus for reliable signalling — connect GND. It is not optional. (Skip it only if the ESP32 and the Tigo equipment already share a ground through another path, and even then a dedicated GND wire is the safer default.)
 
@@ -176,8 +191,8 @@ Once the high-voltage side is safely isolated:
 Simplest setup – just plug together and connect RS485 terminals:
 
 1. Attach AtomS3R to Atomic RS485 Base
-2. Connect A terminal to Tigo RS485 A (daisy-chain)
-3. Connect B terminal to Tigo RS485 B (daisy-chain)
+2. Run a spur wire from the Tigo **A** terminal to the base's A terminal
+3. Run a spur wire from the Tigo **B** terminal to the base's B terminal
 4. Power via USB-C
 5. Flash ESPHome configuration
 

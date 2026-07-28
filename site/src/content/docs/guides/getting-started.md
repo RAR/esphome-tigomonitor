@@ -69,9 +69,12 @@ wiring part. That's a completely reasonable call and in some places it's the law
 
 ### 2. Wire it in
 
-Three wires: **A**, **B**, and **ground**, connecting your CCA or TAP to the
-RS485 base. The board sits in the middle of the existing cable run and eavesdrops.
-Ground is not optional — RS485 needs a shared reference to read reliably.
+Three short wires — **A**, **B** and **ground** — from your CCA or TAP over to the
+RS485 base. Nothing gets cut or unplugged: you're hanging the board off a cable
+that stays exactly as it is, alongside everything already connected to it.
+
+Ground is not optional. RS485 needs a shared reference or the readings won't be
+reliable.
 
 Full diagrams, terminal-by-terminal: **[Wiring guide](/esphome-tigomonitor/guides/wiring/)**.
 
