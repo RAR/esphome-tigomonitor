@@ -22,6 +22,26 @@ anyone who wants to pull the numbers into their own scripts.
 | **CCA Info** | What your Tigo box reports about itself. |
 | **Tigo Cloud** | Tigo's own view of your system, if you've connected your account. |
 
+### What it looks like
+
+![Dashboard — a tile per panel, grouped by string. The amber tile is a shaded
+panel.](../../../assets/screenshots/dashboard-dark.png)
+
+![History — power and energy over the selected range, read from the on-device
+database.](../../../assets/screenshots/history-dark.png)
+
+![Topology — your array as inverter, string and panel, with live
+readings.](../../../assets/screenshots/topology-light.png)
+
+![Node Table — every panel the device has seen, sortable and
+filterable.](../../../assets/screenshots/nodes-dark.png)
+
+![Diagnostics — memory, network, UART counters and time-series database
+stats.](../../../assets/screenshots/diagnostics-dark.png)
+
+These are generated automatically from the current UI against synthetic data —
+no real install's serials, addresses or account details appear in them.
+
 ### Two things worth knowing
 
 - **Temperature units and light/dark theme** are toggles at the bottom of the

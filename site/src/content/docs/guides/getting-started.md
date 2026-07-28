@@ -14,6 +14,9 @@ equipment, so it can't disturb anything.
 
 ## What you'll end up with
 
+![The Tigo Monitor dashboard: a coloured tile per panel, grouped by string, with
+one shaded panel showing amber.](../../../assets/screenshots/dashboard-dark.png)
+
 - A web page on your home network showing **every panel individually** — watts,
   volts, amps, temperature — updating live.
 - Charts of today, this week, this month, and this year, stored on the device

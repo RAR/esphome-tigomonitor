@@ -3,9 +3,11 @@ name: Docs Site
 on:
   push:
     branches: [main]
-    paths: ['site/**', '.github/workflows/pages.yml']
+    # app.html is included because the docs screenshots are rendered from it —
+    # without this a UI change would leave the published images stale.
+    paths: ['site/**', 'components/tigo_server/web/app.html', '.github/workflows/pages.yml']
   pull_request:
-    paths: ['site/**', '.github/workflows/pages.yml']
+    paths: ['site/**', 'components/tigo_server/web/app.html', '.github/workflows/pages.yml']
 permissions:
   contents: read
   pages: write
@@ -29,7 +31,12 @@ jobs:
           cache: 'npm'
           cache-dependency-path: site/package-lock.json
       - run: npm ci
+      # --only-shell: the headless shell is ~115 MB vs ~170 MB for full
+      # Chromium, and nothing here needs a headed browser.
+      - run: npx playwright install --with-deps chromium --only-shell
       - run: node --test test/*.test.mjs
+      # `npm run build` runs screenshots/capture.mjs first, so the images are
+      # always rendered from the app.html in this commit.
       - run: npm run build
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3

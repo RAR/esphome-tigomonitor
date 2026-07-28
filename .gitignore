@@ -13,3 +13,6 @@ components/tigo_server/web_assets.h
 site/node_modules/
 site/dist/
 site/.astro/
+# Docs screenshots are regenerated from components/tigo_server/web/app.html
+# on every docs build — never commit them, they would only go stale.
+site/src/assets/screenshots/

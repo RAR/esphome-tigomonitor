@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Docs screenshots generate themselves.** The guides now show the real device UI — dashboard, history, topology, node table, diagnostics — rendered during the docs build by driving the actual `app.html` against synthetic API responses. No firmware, no hardware, and nothing committed: the images are rebuilt from the current UI every time, so they cannot drift from it. All data is invented, with IPs and MACs from the IETF documentation ranges and a reserved fake-serial prefix, enforced by a test so a real serial, SSID or address can't reach a published page.
+
 ### Changed
 - **Docs rewritten for first-time installers.** A new **Start Here** guide covers what to buy, what the jargon means, and the five steps from parts on the desk to a live dashboard — the "Get Started" button used to drop you into a high-voltage warning and a terminal-block diagram. The sidebar is now ordered by when you need something rather than alphabetically, the Config Builder explains what each field is for, and the reference-heavy pages say up front whether you need to read them. No behaviour changed.
 - **Docs site recoloured to the brand mark.** Link and accent colours moved from green to the mark's silicon indigo and busbar silver; amber keeps its one meaning — this part is live. The blueprint grid behind the headline is now a PV array receding toward the horizon — cells, busbars and module frames, drawn in CSS gradients so it stays sharp at any size and re-tints with the theme.
