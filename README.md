@@ -23,13 +23,12 @@ per-panel monitoring with a built-in web app and Home Assistant integration.
 
 | Requirement | Details |
 |-------------|---------|
-| **Hardware** | ESP32-S3 with PSRAM recommended (e.g. M5Stack AtomS3R) |
+| **Hardware** | ESP32-S3 **with PSRAM** (e.g. M5Stack AtomS3R) |
 | **Connection** | RS485 to Tigo system at 38400 baud |
 | **Framework** | ESP-IDF (not Arduino) |
 | **ESPHome** | 2026.5.0+ (needed for `allow_partition_access` OTA) |
 
-**PSRAM is required for more than 10 devices, and for on-flash history (TSDB) at any
-array size.** Without it, expect instability with web UI use.
+**PSRAM is required.** The recommended AtomS3R has it.
 
 ## Quick Start
 

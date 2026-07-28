@@ -24,9 +24,8 @@ nobody's told it what to call it. See
 [Putting names on the panels](/esphome-tigomonitor/guides/getting-started/#putting-names-on-the-panels).
 
 **4. It worked, then went unstable or unreachable.**
-Usually a board without enough memory for the number of panels you have. If you
-have more than 10 panels — or you turned on the on-flash history at any size —
-you want a board with PSRAM, such as the AtomS3R.
+Usually a board without PSRAM, which this project requires. Use one that has it,
+such as the AtomS3R.
 
 Still stuck? The rest of this page is organised by symptom.
 
@@ -36,7 +35,7 @@ Still stuck? The rest of this page is organised by symptom.
 |---------|----------|
 | No devices discovered | Check UART wiring, verify 38400 baud ([Wiring](/esphome-tigomonitor/guides/wiring/)) |
 | High packet loss | Add `CONFIG_UART_ISR_IN_IRAM: "y"` ([UART Optimization](/esphome-tigomonitor/guides/uart-optimization/)) |
-| Memory exhaustion | Use ESP32-S3 with PSRAM (required past 10 devices, and for TSDB history) |
+| Memory exhaustion | Use an ESP32-S3 with PSRAM — it's required |
 | CCA sync fails (local HTTP) | Verify CCA IP, check network connectivity |
 | CCA sync returns 401 / "HTTP locked" | Tigo firmware 4.0.4+ closed local HTTP — use `cca_source: ble` or `cloud_import: true` |
 | BLE CCA won't connect | Close the Tigo phone app (one BLE central at a time) |
@@ -138,10 +137,8 @@ uart:
 
 ### Memory Limits
 
-| Configuration | Device Limit | Notes |
-|---------------|--------------|-------|
-| Without PSRAM | Up to 10 devices | No on-flash history; unstable with web UI |
-| With PSRAM | 36+ devices | Tested stable |
+PSRAM is required. Without it the device is unsupported and will go unstable;
+with it, 36+ devices is tested stable.
 
 ### ESP32 Internal Temperature Reads Nothing
 

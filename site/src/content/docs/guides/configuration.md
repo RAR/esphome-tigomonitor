@@ -457,7 +457,7 @@ esp32:
 
 ### PSRAM (ESP32-S3)
 
-Required for more than 10 devices, and for on-flash history (TSDB) at any array size:
+Required. Every install needs this:
 
 ```yaml
 esphome:
