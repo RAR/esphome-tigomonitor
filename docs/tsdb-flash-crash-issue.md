@@ -98,7 +98,35 @@ Control: a writer commit on an idle device completes cleanly and repeatedly.
 ## What has been ruled out (with evidence — do not re-propose)
 
 1. **esp_tsdb being a fork** — recurs on the registry build.
-2. **`execute_from_psram`** — recurs without it.
+2. ~~**`execute_from_psram`** — recurs without it.~~ **RETRACTED 2026-07-28.** That
+   experiment only established it was not the *cause*. It was never enabled and
+   measured as a *cure*, and it is the only candidate found so far that removes
+   the mechanism rather than shrinking the window:
+
+   ```c
+   // IDF 5.5.5 spi_flash_os_func_app.c:29
+   #define SPI_FLASH_CACHE_NO_DISABLE (CONFIG_SPI_FLASH_AUTO_SUSPEND \
+     || (CONFIG_SPIRAM_FETCH_INSTRUCTIONS && CONFIG_SPIRAM_RODATA) \
+     || CONFIG_APP_BUILD_TYPE_RAM)
+
+   #if !SPI_FLASH_CACHE_NO_DISABLE      // <- cache_disable is not compiled at all
+   IRAM_ATTR static void cache_disable(void* arg) {
+       spi_flash_disable_interrupts_caches_and_other_cpu();
+   }
+   #endif
+   ```
+
+   `execute_from_psram` sets that middle pair. Verified in the built
+   `sdkconfig.h`: `CONFIG_SPIRAM_FETCH_INSTRUCTIONS 1`, `CONFIG_SPIRAM_RODATA 1`,
+   and `CONFIG_SPI_FLASH_SHARE_SPI1_BUS` undefined so no earlier branch wins —
+   `spi1_start` takes `_lock_acquire(&s_spi1_flash_mutex)` instead. That removes
+   frames BT2/BT3/BT4 of the 14:25 crash backtrace by construction.
+
+   "Harmful on S3" appeared in the working notes with no supporting evidence;
+   ESPHome's own `tests/components/esp32/test.esp32-s3-idf.yaml:6` sets this flag
+   on an S3, and this repo's P4 notes describe it fixing the same failure class
+   (a PSRAM-resident stack unreachable during the cache-disable window, #31).
+   Enabled on the rig 2026-07-28; **soak result not yet in.**
 3. **OOM / heap exhaustion** — `min_free_heap` flat for hours across crashes.
 4. **Caller-side locking of esp_tsdb** — it has its own per-handle recursive mutex.
 5. **`CONFIG_SPI_FLASH_AUTO_SUSPEND`** — the textbook fix; causes a <20 s
