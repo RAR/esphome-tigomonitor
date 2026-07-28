@@ -7,7 +7,8 @@
     "build": "npm run screenshots && astro build",
     "preview": "astro preview",
     "test": "node --test test/*.test.mjs",
-    "screenshots": "node screenshots/capture.mjs"
+    "screenshots": "node screenshots/capture.mjs",
+    "social": "node screenshots/social-preview.mjs"
   },
   "dependencies": {
     "@astrojs/starlight": "^0.41.4",
