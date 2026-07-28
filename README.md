@@ -28,7 +28,8 @@ per-panel monitoring with a built-in web app and Home Assistant integration.
 | **Framework** | ESP-IDF (not Arduino) |
 | **ESPHome** | 2026.5.0+ (needed for `allow_partition_access` OTA) |
 
-**PSRAM is required for 15+ devices.** Without it, expect instability with web UI use.
+**PSRAM is required for more than 10 devices, and for on-flash history (TSDB) at any
+array size.** Without it, expect instability with web UI use.
 
 ## Quick Start
 

@@ -41,7 +41,7 @@ to memorise them, but they'll show up in the rest of the guides.
 | **String** | One row/chain of panels wired together. |
 | **MPPT** | One input on your inverter. Usually one or two strings plug into each. |
 | **Frame** | One short message on the RS485 cable. Each one carries one reading from one panel. |
-| **PSRAM** | Extra memory on the ESP32. You need a board that has it if you have 15 or more panels. |
+| **PSRAM** | Extra memory on the ESP32. You need a board that has it if you have more than 10 panels, or if you want the on-flash history charts. |
 
 ## What to buy
 
@@ -57,8 +57,9 @@ You'll also need somewhere to run [ESPHome](https://esphome.io) — the Home
 Assistant add-on is the easiest, but the command-line tool on a laptop works
 just as well.
 
-Cheaper alternative: any ESP32 dev board plus a MAX485 module. It works, but if
-you have 15+ panels get one with PSRAM. See [Wiring](/esphome-tigomonitor/guides/wiring/).
+Cheaper alternative: any ESP32 dev board plus a MAX485 module. It works, but get one
+with PSRAM if you have more than 10 panels or want the history charts.
+See [Wiring](/esphome-tigomonitor/guides/wiring/).
 
 ## The five steps
 
