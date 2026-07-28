@@ -184,6 +184,9 @@ export const routes = {
   },
   '/api/tsdb/stats': {
     littlefs: { total: 3145728, used: 884736 },
+    // Age of the writer's RAM snapshot these figures came from; the page turns
+    // it into "sampled Nm ago". Fixed value so screenshots stay reproducible.
+    snapshot_age_ms: 240000,
     slots: { used: devices.length, next_free: devices.length, max: 48 },
     databases: [
       { label: 'system', available: true, records: 7840, max_records: 65472,

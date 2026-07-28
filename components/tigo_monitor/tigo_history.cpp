@@ -131,6 +131,11 @@ bool TigoHistory::init() {
     next_free_slot_ = 0;
   }
   initialized_ = true;
+
+  // Populate the snapshot before anything can serve it, so /api/tsdb/stats
+  // has real numbers from boot rather than an empty table until the first
+  // 30-min commit. Still inside this function's FlashLock.
+  refresh_stats_snapshot_();
   return true;
 }
 
@@ -381,6 +386,11 @@ uint8_t TigoHistory::get_or_assign_slot(const std::string &barcode_last6) {
   // of a barcode) and the cost of losing one is "panel rejoins as a new
   // slot, history splits in two", which we want to avoid.
   save_slot_map_();
+
+  // Slot count and a newly-opened panel DB both show up in /api/tsdb/stats.
+  // Refresh here (still under FlashLock, flash already hot) so the Diagnostics
+  // table tracks discovery instead of lagging until the next 30-min commit.
+  refresh_stats_snapshot_();
   return slot;
 }
 
@@ -567,6 +577,40 @@ int TigoHistory::iterate_panel(uint8_t slot, uint32_t start_ts, uint32_t end_ts,
   return count;
 }
 
+void TigoHistory::refresh_stats_snapshot_() {
+  // Build into a local first: tsdb_get_stats_h can block on the per-DB mutex
+  // for up to 5 s, and holding stats_mutex_ across that would make a reader
+  // wait on the writer for no reason. The published copy swaps in at the end.
+  StatsSnapshot snap;
+  snap.valid = true;
+  snap.updated_ms = (uint32_t) (esp_timer_get_time() / 1000);
+
+  size_t total = 0, used = 0;
+  if (esp_littlefs_info("tsdb", &total, &used) == ESP_OK) {
+    snap.fs_total = total;
+    snap.fs_used = used;
+  }
+  snap.slot_count = slot_map_.size();
+  snap.next_free_slot = next_free_slot_;
+
+  auto grab = [](tsdb_t *db, StatsSnapshot::Db &out) {
+    if (db == nullptr) return;  // lazily-unopened panel DB: no row at all
+    out.present = true;
+    out.error = tsdb_get_stats_h(db, &out.stats);
+    out.available = (out.error == ESP_OK);
+  };
+  grab(system_db_, snap.system);
+  for (size_t i = 0; i < kNumPanelDbs; ++i) grab(panel_db_[i], snap.panels[i]);
+
+  std::lock_guard<std::mutex> guard(stats_mutex_);
+  stats_snapshot_ = snap;
+}
+
+void TigoHistory::copy_stats_snapshot(StatsSnapshot &out) {
+  std::lock_guard<std::mutex> guard(stats_mutex_);
+  out = stats_snapshot_;
+}
+
 void TigoHistory::writer_task_entry_(void *arg) {
   static_cast<TigoHistory *>(arg)->writer_task_loop_();
 }
@@ -637,6 +681,12 @@ void TigoHistory::writer_task_loop_() {
     // written, so the data survives a reboot without relying on the clean-shutdown
     // unmount (which on this rig isn't sticking).
     this->commit_journal_();
+
+    // Refresh the diagnostics snapshot here, while we are still holding
+    // FlashLock and the flash is already hot. This is the ONLY place the
+    // numbers behind /api/tsdb/stats are read from flash — doing it from the
+    // HTTP task is what crashed the device (see StatsSnapshot in the header).
+    this->refresh_stats_snapshot_();
 
     UBaseType_t hwm = uxTaskGetStackHighWaterMark(nullptr);
     if (err != ESP_OK) {

@@ -3658,53 +3658,36 @@ esp_err_t TigoWebServer::api_tsdb_stats_handler(httpd_req_t *req) {
     return ESP_OK;
   }
 
-  // Building this response is the ONLY flash access anywhere on the HTTP path
-  // (esp_littlefs_info calls lfs_fs_size, which traverses block metadata;
-  // tsdb_get_stats_h stats the file), and on this chip flash access is what
-  // kills us. Every esp_flash op runs spi_flash_disable_interrupts_caches_and_
-  // other_cpu, which stalls the OTHER core. FlashLock stops httpd and the
-  // history writer being inside flash simultaneously — but nothing stopped them
-  // ALTERNATING, and a rapid burst of cache-disables from both cores faults the
-  // writer inside IDF's own cross-core stall coordination.
+  // THIS HANDLER MUST NEVER TOUCH FLASH. On the ESP32-S3 every flash access
+  // runs spi_flash_disable_interrupts_caches_and_other_cpu, which stalls the
+  // other core, and doing that from the HTTP task is what crashes the device.
   //
-  // Measured on the rig 2026-07-28, same build, same 4-concurrent-loop harness:
-  //   4x /api/tsdb/stats  -> crash in ~11 s (writer faults in lfs_file_flush)
-  //   4x /api/status      -> survives indefinitely at a HIGHER request rate
-  // /api/status touches no flash. That is the whole difference, and it is why
-  // adding more locking here would not have helped.
+  // Measured on the rig 2026-07-28, same build, 4 concurrent loops each:
+  //   4x /api/tsdb/stats reading flash directly -> crash in ~11 s
+  //   4x /api/tsdb/stats with a 60 s response cache -> survived 4 min idle,
+  //      then died the instant a cache rebuild landed on a writer commit
+  //   4x /api/status (touches no flash)         -> survives indefinitely,
+  //      at a HIGHER request rate
+  // FlashLock does NOT prevent the collision — both sides take it and they
+  // still fault. Until that is understood, the only reliable answer is for
+  // this path to have no flash access to collide with.
   //
-  // So: stop generating the traffic. Build at most once per kTsdbStatsCacheMs
-  // and replay from PSRAM in between. Everything in this response — record
-  // counts, write/eviction totals, filesystem size — only moves when the writer
-  // commits, which is far rarer than the UI asks for it.
-  //
-  // The cache is read and written under FlashLock, which every path through
-  // this handler takes, so no second mutex is needed. The response is copied
-  // out and the lock released BEFORE httpd_resp_send: holding a flash lock
-  // across network I/O would stall the writer for as long as the client takes.
-  psram_string json;
-  {
-    tigo_monitor::TigoHistory::FlashLock lock(hist);
-    if (!lock.held()) {
-      httpd_resp_set_status(req, "503 Service Unavailable");
-      httpd_resp_set_type(req, "application/json");
-      httpd_resp_sendstr(req, "{\"error\":\"flash busy\"}");
-      return ESP_OK;
-    }
-
-    const uint32_t now = millis();
-    // Unsigned subtraction, so millis() rollover needs no special case.
-    const bool fresh = server->tsdb_stats_cached_ &&
-                       (now - server->tsdb_stats_cache_time_) < kTsdbStatsCacheMs;
-    if (!fresh) {
-      server->build_tsdb_stats_json_(hist, server->tsdb_stats_cache_);
-      server->tsdb_stats_cache_time_ = now;
-      server->tsdb_stats_cached_ = true;
-    }
-    // Deep copy while still holding the lock, so a concurrent rebuild cannot
-    // reallocate the cache out from under httpd_resp_send below.
-    json = server->tsdb_stats_cache_;
+  // So the numbers come from a RAM snapshot that the history writer refreshes
+  // from inside its own flash batch (TigoHistory::refresh_stats_snapshot_).
+  // The trade is freshness: they update on each commit and on slot assignment,
+  // so they can be up to one snapshot interval stale. `snapshot_age_ms` in the
+  // response says how stale, rather than leaving the UI to guess.
+  tigo_monitor::TigoHistory::StatsSnapshot snap;
+  hist->copy_stats_snapshot(snap);
+  if (!snap.valid) {
+    httpd_resp_set_status(req, "503 Service Unavailable");
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, "{\"error\":\"stats not yet sampled\"}");
+    return ESP_OK;
   }
+
+  psram_string json;
+  server->build_tsdb_stats_json_(snap, json);
 
   httpd_resp_set_type(req, "application/json");
   httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
@@ -3712,81 +3695,79 @@ esp_err_t TigoWebServer::api_tsdb_stats_handler(httpd_req_t *req) {
   return ESP_OK;
 }
 
-void TigoWebServer::build_tsdb_stats_json_(tigo_monitor::TigoHistory *hist,
-                                           psram_string &json) {
+void TigoWebServer::build_tsdb_stats_json_(
+    const tigo_monitor::TigoHistory::StatsSnapshot &snap, psram_string &json) {
   json.clear();
   char buf[160];
 
-  // LittleFS partition info — denominator for "how full is /tsdb".
-  size_t fs_total = 0, fs_used = 0;
-  esp_littlefs_info("tsdb", &fs_total, &fs_used);
+  // Pure formatting: every value here came from the RAM snapshot the writer
+  // refreshed under FlashLock. Nothing in this function may reach flash.
+  const uint32_t now_ms = (uint32_t) (esp_timer_get_time() / 1000);
+  const uint32_t age_ms = now_ms - snap.updated_ms;  // unsigned: rollover-safe
 
   json.append("{\"littlefs\":{\"total\":");
-  snprintf(buf, sizeof(buf), "%zu", fs_total); json.append(buf);
+  snprintf(buf, sizeof(buf), "%zu", snap.fs_total); json.append(buf);
   json.append(",\"used\":");
-  snprintf(buf, sizeof(buf), "%zu", fs_used); json.append(buf);
-  json.append("},\"slots\":{\"used\":");
-  snprintf(buf, sizeof(buf), "%zu", hist->slot_count()); json.append(buf);
+  snprintf(buf, sizeof(buf), "%zu", snap.fs_used); json.append(buf);
+  json.append("},\"snapshot_age_ms\":");
+  snprintf(buf, sizeof(buf), "%lu", (unsigned long) age_ms); json.append(buf);
+  json.append(",\"slots\":{\"used\":");
+  snprintf(buf, sizeof(buf), "%zu", snap.slot_count); json.append(buf);
   json.append(",\"next_free\":");
-  snprintf(buf, sizeof(buf), "%u", (unsigned) hist->next_free_slot()); json.append(buf);
+  snprintf(buf, sizeof(buf), "%u", (unsigned) snap.next_free_slot); json.append(buf);
   json.append(",\"max\":");
   snprintf(buf, sizeof(buf), "%zu", tigo_monitor::kMaxPanelSlots); json.append(buf);
   json.append("},\"databases\":[");
 
-  // Per-DB stats. A nullptr handle is a lazy-unopened panel DB — genuinely nothing to
-  // report, so it gets no row at all. A tsdb_get_stats_h failure is a different thing:
-  // the database exists, but its mutex was still held by the writer task when the 5 s
-  // timeout expired ("tsdb_get_stats_h: lock timeout" — the writer holds it across
-  // tsdb_sync_h's fclose/fopen). That used to drop the row entirely, so the table
-  // silently lost a database with no indication why. Emit the row with null fields
-  // instead and let the page render "—".
+  // A DB that was never opened (lazy panel DB) gets no row at all — there is
+  // genuinely nothing to report. A DB that exists but whose stats read failed
+  // is different: it gets a row with null fields and the error, so the table
+  // shows it as present-but-unreadable instead of silently losing it.
   //
-  // `first` is owned by the lambda rather than the caller: the old version had the
-  // caller clear it unconditionally, so a skipped *first* database emitted a leading
-  // comma and produced invalid JSON.
+  // `first` is owned by the lambda rather than the caller: an earlier version
+  // had the caller clear it unconditionally, so a skipped *first* database
+  // emitted a leading comma and produced invalid JSON.
   bool first = true;
-  auto append_db = [&](const char *label, tsdb_t *db) {
-    if (db == nullptr) return;
-    tsdb_stats_t stats = {};
-    esp_err_t stats_err = tsdb_get_stats_h(db, &stats);
+  auto append_db = [&](const char *label,
+                       const tigo_monitor::TigoHistory::StatsSnapshot::Db &db) {
+    if (!db.present) return;
     if (!first) json.append(",");
     first = false;
     json.append("{\"label\":\"");
     json.append(label);
-    if (stats_err != ESP_OK) {
+    if (!db.available) {
       json.append("\",\"available\":false,\"error\":\"");
-      json.append(esp_err_to_name(stats_err));
+      json.append(esp_err_to_name(db.error));
       json.append("\",\"records\":null,\"max_records\":null,\"writes\":null,"
                   "\"evictions\":null,\"oldest_ts\":null,\"newest_ts\":null,"
                   "\"size_bytes\":null,\"params\":null}");
       return;
     }
+    const tsdb_stats_t &st = db.stats;
     json.append("\",\"available\":true,\"records\":");
-    snprintf(buf, sizeof(buf), "%lu", (unsigned long) stats.total_records); json.append(buf);
+    snprintf(buf, sizeof(buf), "%lu", (unsigned long) st.total_records); json.append(buf);
     json.append(",\"max_records\":");
-    snprintf(buf, sizeof(buf), "%lu", (unsigned long) stats.max_records); json.append(buf);
+    snprintf(buf, sizeof(buf), "%lu", (unsigned long) st.max_records); json.append(buf);
     json.append(",\"writes\":");
-    snprintf(buf, sizeof(buf), "%lu", (unsigned long) stats.total_writes); json.append(buf);
+    snprintf(buf, sizeof(buf), "%lu", (unsigned long) st.total_writes); json.append(buf);
     json.append(",\"evictions\":");
-    snprintf(buf, sizeof(buf), "%lu", (unsigned long) stats.total_evictions); json.append(buf);
+    snprintf(buf, sizeof(buf), "%lu", (unsigned long) st.total_evictions); json.append(buf);
     json.append(",\"oldest_ts\":");
-    snprintf(buf, sizeof(buf), "%lu", (unsigned long) stats.oldest_timestamp); json.append(buf);
+    snprintf(buf, sizeof(buf), "%lu", (unsigned long) st.oldest_timestamp); json.append(buf);
     json.append(",\"newest_ts\":");
-    snprintf(buf, sizeof(buf), "%lu", (unsigned long) stats.newest_timestamp); json.append(buf);
+    snprintf(buf, sizeof(buf), "%lu", (unsigned long) st.newest_timestamp); json.append(buf);
     json.append(",\"size_bytes\":");
-    snprintf(buf, sizeof(buf), "%lu", (unsigned long) stats.storage_bytes); json.append(buf);
+    snprintf(buf, sizeof(buf), "%lu", (unsigned long) st.storage_bytes); json.append(buf);
     json.append(",\"params\":");
-    snprintf(buf, sizeof(buf), "%u", (unsigned) stats.num_params); json.append(buf);
+    snprintf(buf, sizeof(buf), "%u", (unsigned) st.num_params); json.append(buf);
     json.append("}");
   };
 
-  append_db("system", hist->system_db());
-  for (size_t i = 0; i < hist->panel_db_count(); ++i) {
-    tsdb_t *db = hist->panel_db(i);
-    if (db == nullptr) continue;
+  append_db("system", snap.system);
+  for (size_t i = 0; i < tigo_monitor::kNumPanelDbs; ++i) {
     char label[16];
     snprintf(label, sizeof(label), "panels%zu", i);
-    append_db(label, db);
+    append_db(label, snap.panels[i]);
   }
 
   json.append("]}");

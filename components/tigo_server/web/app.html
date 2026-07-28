@@ -2746,15 +2746,12 @@
     return new Date(epochSec * 1000).toLocaleString();
   }
 
-  // /api/tsdb/stats is the only endpoint in this page that makes the device
-  // touch flash, and flash access is what crashes the ESP32-S3 (four concurrent
-  // callers kill it in ~11 s; see api_tsdb_stats_handler). Polling it on the
-  // same 10 s tick as /api/status was this view generating the most dangerous
-  // traffic in the whole UI, for numbers that only change when the history
-  // writer commits. Fetch it on open and then once a minute; /api/status keeps
-  // the fast tick because it touches no flash at all.
-  // Keep TSDB_STATS_MS >= kTsdbStatsCacheMs in tigo_web_server.h, or every
-  // request misses the server-side cache and the throttle here does nothing.
+  // /api/tsdb/stats is now served from a RAM snapshot the history writer
+  // refreshes (it used to read flash on every request, which crashed the
+  // device — see api_tsdb_stats_handler), so polling it is no longer
+  // dangerous. It is still throttled, because the snapshot only changes when
+  // the writer commits: asking every 10 s would return the same bytes 180
+  // times an hour. Fetch on open, then once a minute.
   const TSDB_STATS_MS = 60000;
   let tsdbStatsAt = 0;
 
@@ -2824,9 +2821,14 @@
         const fsPct = t.littlefs && t.littlefs.total > 0
           ? (100 * t.littlefs.used / t.littlefs.total).toFixed(1)
           : '—';
+        // These figures are a snapshot taken at the writer's last commit, not a
+        // live read, so say how old they are rather than implying they're now.
+        const ageMin = Math.floor((t.snapshot_age_ms ?? 0) / 60000);
+        const age = t.snapshot_age_ms == null ? ''
+          : ` · sampled ${ageMin < 1 ? 'just now' : ageMin + 'm ago'}`;
         sub.textContent =
           `LittleFS ${fmtKB(t.littlefs.used)} / ${fmtKB(t.littlefs.total)} KB (${fsPct}%) · ` +
-          `${t.slots.used}/${t.slots.max} slots assigned`;
+          `${t.slots.used}/${t.slots.max} slots assigned${age}`;
         let html = '';
         // A database whose stats call timed out (writer held the mutex) comes back with
         // available:false and null fields — render "—" rather than NaN, and say why in
