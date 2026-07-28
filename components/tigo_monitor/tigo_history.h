@@ -29,6 +29,24 @@
 namespace esphome {
 namespace tigo_monitor {
 
+// How often a snapshot is written to flash. THE SINGLE SOURCE OF TRUTH for the
+// cadence — tigo_monitor.cpp arms the interval from this and derives its log
+// line from it, so the number is never restated anywhere.
+//
+// This is a crash-exposure dial, not a resolution preference. Every flash write
+// forces the ESP-IDF cross-core cache-disable/CPU-stall
+// (spi_flash_disable_interrupts_caches_and_other_cpu), which intermittently
+// faults under WiFi/BLE coex — the "Fault - Unknown" class documented in
+// docs/tsdb-flash-crash-issue.md. Crash exposure scales roughly with how often
+// this fires, so halving the cadence roughly halves the number of race windows.
+//
+// History: 5 min -> 30 min (2026-07-23) -> 60 min (2026-07-28). At 60 min the
+// 5404-record panel ring spans ~225 days. period_e_kwh is energy-since-last-
+// snapshot, so it is interval-agnostic and lifetime totals stay correct across
+// a change. Restoring finer resolution needs a deferred-sync write path in
+// esp_tsdb, not a smaller number here.
+static constexpr uint32_t kSnapshotIntervalMin = 60;
+
 // esp_tsdb caps base params per DB at 16. We cover up to 48 panels by
 // striping across three DB instances (panels0.tsdb, panels1.tsdb, panels2.tsdb).
 // Sized for the user's 36->40 panel rig with 8 slots of growth headroom; bump
@@ -38,14 +56,14 @@ static constexpr size_t kPanelsPerDb = 16;
 static constexpr size_t kNumPanelDbs = 3;
 static constexpr size_t kMaxPanelSlots = kPanelsPerDb * kNumPanelDbs;
 
-// Raw 5-min snapshot. The history layer encodes these to int16_t and writes.
+// One raw snapshot. The history layer encodes these to int16_t and writes.
 // Caller fills this under the TigoMonitorComponent state lock.
 struct SystemSnapshot {
   uint32_t timestamp;          // unix epoch seconds (0 = invalid, will be dropped)
   float total_p_w;             // system power in watts
-  float period_e_kwh;          // energy produced in this 5-min window (kWh)
+  float period_e_kwh;          // energy produced since the last snapshot (kWh)
   float inv_p_w[4];            // per-inverter power
-  float inv_e_kwh[4];          // per-inverter 5-min energy
+  float inv_e_kwh[4];          // per-inverter energy since the last snapshot
   float temp_avg_c;            // average device temperature
   float freq_hz;               // 0 if unavailable
   uint16_t frames_lost;        // missed frames in this window
@@ -244,7 +262,7 @@ class TigoHistory {
   //     <- cache_disable <- spi1_start <- esp_flash_read <- lfs_bd_read
   //     <- lfs_file_flush <- vfs fsync <- tsdb_write_block  == "Fault - Unknown"
   // A month-range history query holds the bus for ~2.3 s, so an open web UI
-  // reliably overlaps the 30-minute snapshot commit.
+  // reliably overlaps the snapshot commit.
   SemaphoreHandle_t fs_mutex_{nullptr};
 
   QueueHandle_t queue_{nullptr};
