@@ -20,7 +20,7 @@ high-voltage side safe before you open anything.
 
 ## Where it goes
 
-Your optimizers talk to your Tigo CCA (the grey wall box) or TAP (the small radio
+Your optimizers talk to your Tigo CCA (the green wall box) or TAP (the small radio
 box) over a two-wire cable called RS485. You're splicing the ESP32 into that
 existing cable run — at the CCA's **GATEWAY** port — so it hears both sides of the
 conversation without joining in.

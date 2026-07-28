@@ -28,7 +28,7 @@ to memorise them, but they'll show up in the rest of the guides.
 | Word | What it actually means |
 |------|------------------------|
 | **Optimizer** | The small box clipped behind each solar panel. Tigo's product. It's what reports the per-panel numbers. |
-| **CCA** | Tigo's grey wall box that collects from the optimizers and uploads to Tigo. Short for Cloud Connect Advanced. |
+| **CCA** | Tigo's green wall box that collects from the optimizers and uploads to Tigo. Short for Cloud Connect Advanced. |
 | **TAP** | A small Tigo radio antenna box that relays between the optimizers and the CCA. Some systems have one, some have several. |
 | **RS485** | The two-wire cable running between the CCA/TAP and your optimizers. This is the conversation we quietly listen to. |
 | **ESP32** | The little WiFi microcontroller board that does the listening. The AtomS3R is the one we recommend. |
