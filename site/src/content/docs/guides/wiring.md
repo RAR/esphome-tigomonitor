@@ -27,9 +27,6 @@ in. You're tapping the ESP32 onto the existing run — at the CCA's **GATEWAY**
 port — so it hears both sides of the conversation without joining in. Nothing gets
 cut or unplugged.
 
-**Tap A and B only, plus a ground.** Leave the power pair connected exactly as you
-found it. The terminals are marked on the port; the diagram below shows the order.
-
 Think of it as a wiretap, not a phone extension.
 
 ```text
@@ -57,6 +54,19 @@ Think of it as a wiretap, not a phone extension.
 
 *Diagram credit: [willglynn/taptap](https://github.com/willglynn/taptap/blob/main/README.md)*
 
+The CCA has several ports — you want **GATEWAY**, the four-terminal one in the
+middle. Reading its terminals left to right:
+
+| Terminal | What it is | What you do with it |
+|----------|------------|---------------------|
+| **−** | Power negative, and the common ground | Connect it — this is your GND |
+| **+** | Power positive, feeding the TAPs and optimizers | **Leave it alone entirely** |
+| **B** | Data | Connect it |
+| **A** | Data | Connect it |
+
+The `Monitor` box at the bottom of the diagram is your ESP32 — note it hangs off
+those wires rather than interrupting them.
+
 The ESP32 acts as a **passive listener** – it only receives, and it is wired so that it *physically cannot* transmit onto the bus. See [Passive-listener wiring](#why-this-cannot-break-your-solar-system) below for the electrical reason why.
 
 ---
@@ -80,27 +90,9 @@ The ESP32 acts as a **passive listener** – it only receives, and it is wired s
 
 ### M5Stack AtomS3R + Atomic RS485 Base
 
-The Atomic RS485 Base plugs directly onto the AtomS3R. First, know what you're
-looking at — the GATEWAY port has **four** terminals, and you only touch three:
-
-```text
-   ┌─────┬─────┬─────┬─────┐
-   │  -  │  +  │  B  │  A  │
-   └─────┴─────┴─────┴─────┘
-      │     │     └──┬──┘
-      │     │        │
-   ground  power   data pair
-     tap    leave   tap both
-    this    alone
-```
-
-`-` and `+` are the power pair that feeds your TAPs and optimizers. `-` doubles as
-the common ground, which is the one you connect. **Leave `+` alone entirely** —
-nothing on the ESP32 side goes anywhere near it.
-
-Now wire it. RS485 is a shared bus, so the ESP32 **hangs off** the existing cable
-rather than sitting in the middle of it — you are adding three short wires, not
-cutting anything:
+The Atomic RS485 Base plugs directly onto the AtomS3R, so all that's left is the
+three spur wires. RS485 is a shared bus — the ESP32 **hangs off** the existing
+cable rather than sitting in the middle of it, so nothing gets cut:
 
 ```text
 Tigo CCA / TAP                                                  TAP / optimizers
