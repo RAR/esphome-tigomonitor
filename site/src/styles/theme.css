@@ -21,6 +21,20 @@
   /* solar-amber signal accent (shared across themes) */
   --tigo-amber: #f4b23c;
   --tigo-amber-soft: color-mix(in srgb, var(--tigo-amber) 22%, transparent);
+
+  /* Hero PV array — see .hero::before. Dark theme reads as modules seen at
+     dusk; light theme has to survive a white ground, so the cell darkens and
+     the busbars invert rather than the whole thing washing out. */
+  --tigo-cell: #1d2a63;
+  --tigo-busbar: #c6d0e2;
+  --tigo-frame: #b9c6e4;
+  --tigo-gap: #05070d;
+}
+:root[data-theme='light'] {
+  --tigo-cell: #2b3a7a;
+  --tigo-busbar: #dfe6f5;
+  --tigo-frame: #e8edf8;
+  --tigo-gap: #46538a;
 }
 
 /* Brand accent — silicon indigo — over Starlight's gray scale.
@@ -52,20 +66,57 @@
   position: relative;
   isolation: isolate;
 }
-/* blueprint grid + twin radial glows (green + amber), faded at the edges */
+/* A PV array receding toward the horizon, lit by a low amber sun.
+
+   Built from stacked repeating gradients rather than an image, so it scales to
+   any viewport and re-tints with the theme. Layers, front to back:
+     1-2  atmosphere — indigo bounce light, amber sun high right
+     3    busbars — three fine silver lines across each cell
+     4-5  cell gaps — the 58px lattice that makes cells read as cells
+     6-7  module edges — every 6x4 cells, drawn as frame/gap/frame rather than
+          one line, because that is what you actually see where two modules
+          meet: two bright aluminium rails with dark air between them. A single
+          line reads as another cell gap and the modules never separate.
+     8    the silicon itself
+
+   The rotateX is what stops it reading as graph paper: perspective from a
+   bottom origin makes near modules large and far ones tight, which is the
+   cue the eye uses for "array on a roof". */
 .hero::before {
   content: '';
   position: absolute;
-  inset: -40% -25% -20%;
+  inset: -60% -70% -30%;
   z-index: -1;
   pointer-events: none;
+  transform: perspective(1000px) rotateX(43deg) scale(1.15);
+  transform-origin: 50% 100%;
   background:
-    radial-gradient(60% 55% at 22% 18%, color-mix(in srgb, var(--sl-color-accent) 30%, transparent), transparent 70%),
+    radial-gradient(60% 55% at 22% 18%, color-mix(in srgb, var(--sl-color-accent) 26%, transparent), transparent 70%),
     radial-gradient(45% 45% at 88% 12%, var(--tigo-amber-soft), transparent 70%),
-    repeating-linear-gradient(0deg, transparent 0 47px, color-mix(in srgb, var(--sl-color-gray-4) 30%, transparent) 47px 48px),
-    repeating-linear-gradient(90deg, transparent 0 47px, color-mix(in srgb, var(--sl-color-gray-4) 30%, transparent) 47px 48px);
-  -webkit-mask-image: radial-gradient(120% 90% at 50% 20%, #000 35%, transparent 78%);
-          mask-image: radial-gradient(120% 90% at 50% 20%, #000 35%, transparent 78%);
+    repeating-linear-gradient(90deg,
+      transparent 0 18px,
+      color-mix(in srgb, var(--tigo-busbar) 16%, transparent) 18px 19px),
+    repeating-linear-gradient(0deg,
+      transparent 0 55px,
+      color-mix(in srgb, var(--tigo-busbar) 15%, transparent) 55px 58px),
+    repeating-linear-gradient(90deg,
+      transparent 0 55px,
+      color-mix(in srgb, var(--tigo-busbar) 15%, transparent) 55px 58px),
+    repeating-linear-gradient(0deg,
+      transparent 0 221px,
+      color-mix(in srgb, var(--tigo-frame) 42%, transparent) 221px 225px,
+      color-mix(in srgb, var(--tigo-gap) 70%, transparent) 225px 228px,
+      color-mix(in srgb, var(--tigo-frame) 42%, transparent) 228px 232px),
+    repeating-linear-gradient(90deg,
+      transparent 0 337px,
+      color-mix(in srgb, var(--tigo-frame) 42%, transparent) 337px 341px,
+      color-mix(in srgb, var(--tigo-gap) 70%, transparent) 341px 344px,
+      color-mix(in srgb, var(--tigo-frame) 42%, transparent) 344px 348px),
+    linear-gradient(0deg, color-mix(in srgb, var(--tigo-cell) 67%, transparent), color-mix(in srgb, var(--tigo-cell) 67%, transparent));
+  /* Fades toward the horizon (top) and off both sides, so the array has no
+     visible edge and never fights the headline for contrast. */
+  -webkit-mask-image: radial-gradient(120% 78% at 50% 96%, #000 18%, transparent 82%);
+          mask-image: radial-gradient(120% 78% at 50% 96%, #000 18%, transparent 82%);
 }
 .hero h1 {
   font-family: var(--tigo-display);
