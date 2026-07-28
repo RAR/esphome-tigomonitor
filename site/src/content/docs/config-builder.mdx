@@ -1,7 +1,10 @@
 ---
 title: Config Builder
 description: Generate a ready-to-flash ESPHome YAML for your Tigo Monitor board, right in the browser.
-template: splash
+# Not `template: splash` — splash is the no-sidebar layout, which left this page
+# as the only one in the site with no way to navigate back out. The wizard needs
+# a wider content column than the 45rem default; ConfigWizard.astro widens it.
+tableOfContents: false
 ---
 
 import ConfigWizard from '../../components/ConfigWizard.astro';

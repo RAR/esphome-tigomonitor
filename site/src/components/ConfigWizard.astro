@@ -99,6 +99,17 @@
 </script>
 
 <style>
+  /* This component renders on exactly one page, so a global rule here is
+     page-scoped in practice. Starlight's 45rem default is sized for prose and
+     would force the form and its YAML preview into a single column on every
+     screen; the wizard is a two-pane tool, not an article. */
+  :root {
+    --sl-content-width: 82rem;
+  }
+  /* Starlight caps the prose column; the wizard needs the full width it was
+     just given, and its own max-width still governs the upper bound. */
+  .sl-markdown-content .tigo-wizard { max-width: none; }
+
   .tigo-wizard {
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
