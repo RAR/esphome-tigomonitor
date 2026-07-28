@@ -65,8 +65,7 @@ contain no real serials, addresses or account details. Regenerate with
 
 ## Documentation
 
-Full documentation lives at **[rar.github.io/esphome-tigomonitor](https://rar.github.io/esphome-tigomonitor/)**
-(search, dark mode, and the in-browser config builder).
+Full documentation lives at **[rar.github.io/esphome-tigomonitor](https://rar.github.io/esphome-tigomonitor/)**.
 
 | Document | Description |
 |----------|-------------|
