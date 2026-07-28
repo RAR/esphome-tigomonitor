@@ -694,7 +694,14 @@ void TigoHistory::writer_task_loop_() {
                (unsigned long) row.timestamp, (unsigned) t_sys,
                esp_err_to_name(err), (unsigned) (hwm * sizeof(StackType_t)));
     } else {
-      ESP_LOGD(TAG,
+      // INFO, not DEBUG: this duration is the single most useful number this
+      // component produces. Every mid-file write makes LittleFS copy from the
+      // write offset to EOF, a byte at a time (lfs.c:3376 in lfs_file_flush),
+      // and esp_tsdb rewrites the header at offset 0 on EVERY record — so a
+      // commit drags most of each file through that loop. Both decoded crash
+      // PCs sit inside it. How long this takes IS the crash exposure, and at
+      // the default INFO log level it was invisible.
+      ESP_LOGI(TAG,
                "tsdb_write @ %lu ok (sys %u ms, panels %u ms, stack hwm %u B)",
                (unsigned long) row.timestamp, (unsigned) t_sys,
                (unsigned) panel_total_ms,
