@@ -79,26 +79,45 @@ The ESP32 acts as a **passive listener** – it only receives, and it is wired s
 
 ### M5Stack AtomS3R + Atomic RS485 Base
 
-The Atomic RS485 Base plugs directly onto the AtomS3R. Connect RS485 terminals:
+The Atomic RS485 Base plugs directly onto the AtomS3R. First, know what you're
+looking at — the GATEWAY port has **four** terminals, and you only touch three:
 
 ```text
-Tigo CCA/TAP                     ESP32 + RS485 Base                    Tigo Optimizers
-┌──────────┐                    ┌──────────────────┐                   ┌──────────────┐
-│          │                    │                  │                   │              │
-│   RS485  │───── A ───────────►│ A (Terminal)     │◄────── A ─────────│   RS485      │
-│   Port   │───── B ───────────►│ B (Terminal)     │◄────── B ─────────│   Bus        │
-│          │                    │                  │                   │              │
-│   GND    │────── GND ─────────│ GND              │                   │              │
-└──────────┘                    └──────────────────┘                   └──────────────┘
-                                        │
-                                        │ Internal
-                                        ▼
-                                ┌──────────────────┐
-                                │  AtomS3R ESP32   │
-                                │  TX: GPIO6       │
-                                │  RX: GPIO5       │
-                                │  38400 baud 8N1  │
-                                └──────────────────┘
+   ┌─────┬─────┬─────┬─────┐
+   │  -  │  +  │  B  │  A  │
+   └─────┴─────┴─────┴─────┘
+      │     │     └──┬──┘
+      │     │        │
+   ground  power   data pair
+     tap    leave   tap both
+    this    alone
+```
+
+`-` and `+` are the power pair that feeds your TAPs and optimizers. `-` doubles as
+the common ground, which is the one you connect. **Leave `+` alone entirely** —
+nothing on the ESP32 side goes anywhere near it.
+
+Now wire it. `A` and `B` pass *through* the module, so it sits inline on the run:
+
+```text
+Tigo CCA / TAP                ESP32 + RS485 Base                Optimizer bus
+┌──────────────┐              ┌──────────────────┐              ┌──────────────┐
+│              │              │                  │              │              │
+│  A ──────────┼──────────────┤ A (Terminal)     ├──────────────┼────── A      │
+│  B ──────────┼──────────────┤ B (Terminal)     ├──────────────┼────── B      │
+│              │              │                  │              │              │
+│  - ──────────┼──────────────┤ GND              │              │              │
+│  +  (leave)  │              │                  │              │              │
+└──────────────┘              └──────────────────┘              └──────────────┘
+                                       │
+                                       │ internal
+                                       ▼
+                              ┌──────────────────┐
+                              │  AtomS3R ESP32   │
+                              │  RX: GPIO5       │
+                              │  TX: GPIO6 inert │
+                              │  38400 baud 8N1  │
+                              └──────────────────┘
 ```
 
 TX is wired but inert — the transceiver's driver is held disabled, so the ESP32 only listens. See [Why this is read-only](#why-this-cannot-break-your-solar-system).
@@ -107,11 +126,12 @@ TX is wired but inert — the transceiver's driver is held disabled, so the ESP3
 
 | Connection | From | To |
 |------------|------|-----|
-| RS485 A | CCA/TAP A terminal | RS485 Base A terminal |
+| RS485 A | CCA/TAP **A** terminal | RS485 Base A terminal |
 | RS485 A | RS485 Base A terminal | Optimizer bus A |
-| RS485 B | CCA/TAP B terminal | RS485 Base B terminal |
+| RS485 B | CCA/TAP **B** terminal | RS485 Base B terminal |
 | RS485 B | RS485 Base B terminal | Optimizer bus B |
-| GND | CCA/TAP GND | RS485 Base GND |
+| GND | CCA/TAP **−** terminal | RS485 Base GND |
+| *(none)* | CCA/TAP **+** terminal | *Not connected — leave as found* |
 
 **Note:** RS485 A and B are daisy-chained through the ESP32 module. The ESP32 monitors traffic in both directions.
 
