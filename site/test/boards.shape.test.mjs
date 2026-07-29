@@ -11,6 +11,14 @@ test('every board has required identity fields', () => {
   }
 });
 
+// PSRAM is a hard requirement, so the builder must not be able to offer a board
+// without it — see boards/README.md and the Troubleshooting guide.
+test('every board defines PSRAM', () => {
+  for (const b of BOARDS) {
+    assert.ok(b.psram?.mode && b.psram?.speed, `${b.id} has no PSRAM — unsupported boards must not be offered`);
+  }
+});
+
 test('board ids are unique and getBoard resolves them', () => {
   const ids = BOARDS.map((b) => b.id);
   assert.equal(new Set(ids).size, ids.length, 'duplicate board id');

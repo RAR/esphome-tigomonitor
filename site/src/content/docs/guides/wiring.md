@@ -188,9 +188,9 @@ Simplest setup – just plug together and connect RS485 terminals:
 4. Power via USB-C
 5. Flash ESPHome configuration
 
-### ESP32-DevKit + MAX485 Module
+### ESP32-S3 + MAX485 Module
 
-Budget option:
+Cheaper transceiver, same board requirement — it still has to be an ESP32-S3 with PSRAM:
 
 1. Wire MAX485 VCC to ESP32 3.3V
 2. Wire MAX485 GND to ESP32 GND
