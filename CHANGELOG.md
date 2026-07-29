@@ -15,6 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Docs site recoloured to the brand mark.** Link and accent colours moved from green to the mark's silicon indigo and busbar silver; amber keeps its one meaning — this part is live. The blueprint grid behind the headline is now a PV array receding toward the horizon — cells, busbars and module frames, drawn in CSS gradients so it stays sharp at any size and re-tints with the theme.
 - **New brand mark.** The green-to-blue tile is replaced by an optimizer emitting a telemetry frame, in silicon indigo and amber. It's drawn at three sizes rather than scaled — the device favicon, the device UI sidebar, and the docs — so it stays legible in a browser tab. The docs site had no logo or favicon configured before and now carries the same mark the device serves.
 
+### Removed
+- **Boards without PSRAM are no longer offered.** The Config Builder listed the M5Stack AtomS3/AtomS3 Lite and a generic ESP32 DevKit, both of which lack PSRAM — so it could hand you a ready-to-flash YAML for a board the project doesn't support. Both are gone from the builder, along with their `boards/*.yaml` reference configs, and a test now blocks a PSRAM-less board from being added back.
+
 ### Fixed
 - **Opening the web UI could reboot the device.** History pages read the TSDB from the web server's task while the 30-minute snapshot writes it from another — and on the ESP32-S3 every flash access, read included, cuts the instruction cache on both cores, so the two collide and fault (`Fault - Unknown`). All LittleFS access now goes through one lock. History requests can queue briefly (a month-range query holds the flash ~2.3 s) and return an error rather than hang if they wait more than 15 s.
 

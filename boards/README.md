@@ -2,16 +2,11 @@
 
 This directory contains optimized ESPHome configurations for different ESP32 boards used with the Tigo Monitor system.
 
+**PSRAM is required.** Only boards that have it are configured here.
+
 ## Available Configurations
 
 ### ESP32-S3 Boards
-
-#### `esp32s3-atoms3.yaml` - M5Stack AtomS3 (No PSRAM)
-- **Board**: M5Stack AtomS3
-- **PSRAM**: None
-- **CPU**: 240MHz
-- **Recommended for**: Standard installations (up to ~30 devices)
-- **UART Buffers**: 2048 RX / 512 TX
 
 #### `esp32s3-atoms3r.yaml` - M5Stack AtomS3R (8MB PSRAM)
 - **Board**: M5Stack AtomS3R (same as AtomS3 with different model)
@@ -30,16 +25,6 @@ This directory contains optimized ESPHome configurations for different ESP32 boa
 - **Recommended for**: Large installations (50+ devices)
 - **UART Buffers**: 16384 RX / 1024 TX (listen-only, no transmission)
 - **Special optimizations**: High-frequency FreeRTOS tick, tickless idle disabled
-
-### Standard ESP32 Boards
-
-#### `esp32-dev.yaml` - Generic ESP32 DevKit (No PSRAM)
-- **Board**: Generic ESP32 DevKit
-- **PSRAM**: None
-- **CPU**: 240MHz
-- **Recommended for**: Small installations (up to ~12 devices)
-- **UART Buffers**: 1024 RX / 256 TX
-- **Note**: Limited by available heap memory
 
 ## Usage
 
@@ -72,8 +57,8 @@ Adjust these in your main configuration if your hardware differs.
 ## Performance Notes
 
 - **ESP32-P4** offers the best performance with massive PSRAM and higher CPU frequency
-- **ESP32-S3** variants are the sweet spot for most installations
-- **Standard ESP32** is adequate for small systems but may struggle with web server + many devices
+- **ESP32-S3 with PSRAM** is the sweet spot for most installations
+- Boards without PSRAM are not supported — the web server and device tables have nowhere to live and the firmware goes unstable
 
 ## Customization
 

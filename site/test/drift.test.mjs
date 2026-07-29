@@ -9,9 +9,7 @@ import { extractBoardFields } from '../lib/yaml-extract.mjs';
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const FILE = {
   'esp32s3-atoms3r': 'boards/esp32s3-atoms3r.yaml',
-  'esp32s3-atoms3': 'boards/esp32s3-atoms3.yaml',
   'esp32p4-evboard': 'boards/esp32p4-evboard.yaml',
-  'esp32-dev': 'boards/esp32-dev.yaml',
 };
 
 for (const [id, rel] of Object.entries(FILE)) {
