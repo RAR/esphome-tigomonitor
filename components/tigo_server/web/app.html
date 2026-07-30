@@ -866,7 +866,7 @@
 
       <div class="chart-card">
         <div class="chart-head">
-          <div class="chart-title">Power · 5-minute resolution</div>
+          <div class="chart-title" id="hist-power-title">Power</div>
           <div class="chart-stat"><strong id="hist-power-now">—</strong> · query took <strong id="hist-power-ms">—</strong></div>
         </div>
         <svg id="hist-chart-power" class="chart-area" viewBox="0 0 1000 220">
@@ -2400,6 +2400,13 @@
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const data = await r.json();
       status.textContent = `${data.count} records · ${data.query_ms} ms · range=${range}`;
+      // Cadence comes from the firmware (kSnapshotIntervalMin) — never hardcode it.
+      const titleEl = document.getElementById('hist-power-title');
+      if (titleEl && data.interval_min) {
+        const m = data.interval_min;
+        const label = m % 60 === 0 ? `${m / 60}-hour` : `${m}-minute`;
+        titleEl.textContent = `Power · ${label} resolution`;
+      }
       const days = bucketByDayHist(data.records);
       lastHistData = { records: data.records, days, queryMs: data.query_ms };
       renderHistPowerChart(data.records, data.query_ms);
