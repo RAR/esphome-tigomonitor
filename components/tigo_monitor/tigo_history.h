@@ -33,19 +33,29 @@ namespace tigo_monitor {
 // cadence — tigo_monitor.cpp arms the interval from this and derives its log
 // line from it, so the number is never restated anywhere.
 //
-// This is a crash-exposure dial, not a resolution preference. Every flash write
-// forces the ESP-IDF cross-core cache-disable/CPU-stall
+// This used to be a crash-exposure dial rather than a resolution preference.
+// Every flash write forces the ESP-IDF cross-core cache-disable/CPU-stall
 // (spi_flash_disable_interrupts_caches_and_other_cpu), which intermittently
-// faults under WiFi/BLE coex — the "Fault - Unknown" class documented in
-// docs/tsdb-flash-crash-issue.md. Crash exposure scales roughly with how often
-// this fires, so halving the cadence roughly halves the number of race windows.
+// faulted under WiFi/BLE coex — the "Fault - Unknown" class documented in
+// docs/tsdb-flash-crash-issue.md — so exposure scaled with how often this
+// fired and the number kept being coarsened to buy stability.
 //
-// History: 5 min -> 30 min (2026-07-23) -> 60 min (2026-07-28). At 60 min the
-// 5404-record panel ring spans ~225 days. period_e_kwh is energy-since-last-
-// snapshot, so it is interval-agnostic and lifetime totals stay correct across
-// a change. Restoring finer resolution needs a deferred-sync write path in
-// esp_tsdb, not a smaller number here.
-static constexpr uint32_t kSnapshotIntervalMin = 60;
+// execute_from_psram (see tigo_monitor/__init__.py) removes that mechanism
+// rather than shrinking its window: with instructions and rodata in PSRAM,
+// IDF compiles the cache-disable out entirely. If that holds, cadence goes
+// back to being a plain resolution/retention decision.
+//
+// History: 5 min -> 30 min (2026-07-23) -> 60 min (2026-07-28) -> 10 min
+// (2026-08-03). The last step is deliberately aggressive: it is 6x the commit
+// rate of the build that ran 142 h clean, so it tests the fix rather than
+// trusting it. If the fault returns at 10 min, the cure is incomplete and this
+// goes back to 60 — that outcome is informative, not a regression.
+//
+// Retention at 10 min: the 5404-record panel rings span ~37.5 days (down from
+// ~225 at 60 min); system.tsdb's 65472 records span ~455 days. period_e_kwh is
+// energy-since-last-snapshot, so it is interval-agnostic and lifetime totals
+// stay correct across a change.
+static constexpr uint32_t kSnapshotIntervalMin = 10;
 
 // esp_tsdb caps base params per DB at 16. We cover up to 48 panels by
 // striping across three DB instances (panels0.tsdb, panels1.tsdb, panels2.tsdb).
