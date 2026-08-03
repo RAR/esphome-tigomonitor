@@ -1,4 +1,6 @@
 """ESPHome external component for Tigo Server communication."""
+import logging
+
 import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome.components import uart, time as time_, esp32
@@ -6,6 +8,8 @@ from esphome.components.esp32.const import VARIANT_ESP32S3
 from esphome.components.psram import DOMAIN as PSRAM_DOMAIN
 from esphome.const import CONF_ID, CONF_UART_ID, CONF_TIME_ID, CONF_NAME
 from esphome.core import coroutine, CORE
+
+_LOGGER = logging.getLogger(__name__)
 
 DEPENDENCIES = ['uart']
 
@@ -22,6 +26,7 @@ CONF_MPPIS = 'mppts'
 CONF_POWER_CALIBRATION = 'power_calibration'
 CONF_NIGHT_MODE_TIMEOUT = 'night_mode_timeout'
 CONF_STALE_TIMEOUT = 'stale_timeout'
+CONF_HISTORY_INTERVAL = 'history_interval'
 
 # Inverter configuration schema
 INVERTER_SCHEMA = cv.Schema({
@@ -29,7 +34,30 @@ INVERTER_SCHEMA = cv.Schema({
     cv.Required(CONF_MPPIS): cv.ensure_list(cv.string),
 })
 
-CONFIG_SCHEMA = cv.Schema({
+def _warn_history_wear(config):
+    """Flag intervals that buy resolution with flash life.
+
+    Every history commit rewrites each database to EOF — esp_tsdb rewrites the
+    header at offset 0, so littlefs byte-copies from there — about 841 KB into a
+    3 MB partition. Wear scales with 1/interval, as do the odds of a chart
+    request colliding with the ~21 s commit. Runs as a validator rather than in
+    to_code so `esphome config` surfaces it too.
+    """
+    minutes = config[CONF_HISTORY_INTERVAL]
+    if minutes < 15:
+        _LOGGER.warning(
+            "history_interval is %d min. Each snapshot rewrites ~841 KB of flash, "
+            "so this writes ~%d MB/day and wears the flash roughly %.1fx faster "
+            "than the 30 min default. Charts also fail more often, since a commit "
+            "holds the filesystem ~21 s and readers give up after 15 s.",
+            minutes,
+            round(841 * (1440 / minutes) / 1024),
+            30 / minutes,
+        )
+    return config
+
+
+CONFIG_SCHEMA = cv.All(cv.Schema({
     cv.GenerateID(): cv.declare_id(TigoMonitorComponent),
     cv.GenerateID(CONF_UART_ID): cv.use_id(uart.UARTComponent),
     cv.Optional(CONF_NUMBER_OF_DEVICES, default=20): cv.int_range(min=1, max=100),
@@ -41,7 +69,11 @@ CONFIG_SCHEMA = cv.Schema({
     cv.Optional(CONF_POWER_CALIBRATION, default=1.0): cv.float_range(min=0.5, max=2.0),
     cv.Optional(CONF_NIGHT_MODE_TIMEOUT, default=60): cv.int_range(min=1, max=1440),  # 1 minute to 24 hours
     cv.Optional(CONF_STALE_TIMEOUT, default=10): cv.int_range(min=0, max=1440),  # minutes; 0 disables staleness zeroing
-}).extend(cv.polling_component_schema('30s')).extend(uart.UART_DEVICE_SCHEMA)
+    # How often on-flash history is written. Bounds mirror kMin/kMaxSnapshotIntervalMin
+    # in tigo_history.h. The floor is not arbitrary: a commit holds the flash lock
+    # ~21 s with the panel rings full, so 5 min is already ~7% duty cycle.
+    cv.Optional(CONF_HISTORY_INTERVAL, default=30): cv.int_range(min=5, max=1440),
+}).extend(cv.polling_component_schema('30s')).extend(uart.UART_DEVICE_SCHEMA), _warn_history_wear)
 
 @coroutine
 def to_code(config):
@@ -50,6 +82,8 @@ def to_code(config):
     yield uart.register_uart_device(var, config)
     
     cg.add(var.set_number_of_devices(config[CONF_NUMBER_OF_DEVICES]))
+    cg.add(var.set_snapshot_interval_min(config[CONF_HISTORY_INTERVAL]))
+
     
     if CONF_CCA_IP in config:
         cg.add(var.set_cca_ip(config[CONF_CCA_IP]))

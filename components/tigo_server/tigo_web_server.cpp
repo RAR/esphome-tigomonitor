@@ -3400,9 +3400,9 @@ esp_err_t TigoWebServer::api_history_power_handler(httpd_req_t *req) {
   snprintf(tmp, sizeof(tmp), "%lu", (unsigned long) now_ts);
   json.append(tmp);
   // Sampling cadence, so the UI can label the chart instead of hardcoding a
-  // number that goes stale the next time kSnapshotIntervalMin moves.
+  // number that the user can now change via `history_interval`.
   json.append(",\"interval_min\":");
-  snprintf(tmp, sizeof(tmp), "%lu", (unsigned long) tigo_monitor::kSnapshotIntervalMin);
+  snprintf(tmp, sizeof(tmp), "%lu", (unsigned long) server->parent_->get_snapshot_interval_min());
   json.append(tmp);
   json.append(",\"records\":[");
 
@@ -3518,9 +3518,9 @@ esp_err_t TigoWebServer::api_history_panel_handler(httpd_req_t *req) {
   snprintf(tmp, sizeof(tmp), "%lu", (unsigned long) now_ts);
   json.append(tmp);
   // Sampling cadence, so the UI can label the chart instead of hardcoding a
-  // number that goes stale the next time kSnapshotIntervalMin moves.
+  // number that the user can now change via `history_interval`.
   json.append(",\"interval_min\":");
-  snprintf(tmp, sizeof(tmp), "%lu", (unsigned long) tigo_monitor::kSnapshotIntervalMin);
+  snprintf(tmp, sizeof(tmp), "%lu", (unsigned long) server->parent_->get_snapshot_interval_min());
   json.append(tmp);
   json.append(",\"records\":[");
 

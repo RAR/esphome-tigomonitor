@@ -2400,7 +2400,7 @@
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const data = await r.json();
       status.textContent = `${data.count} records · ${data.query_ms} ms · range=${range}`;
-      // Cadence comes from the firmware (kSnapshotIntervalMin) — never hardcode it.
+      // Cadence comes from the firmware (`history_interval`) — never hardcode it.
       const titleEl = document.getElementById('hist-power-title');
       if (titleEl && data.interval_min) {
         const m = data.interval_min;

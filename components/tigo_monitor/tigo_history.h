@@ -29,33 +29,52 @@
 namespace esphome {
 namespace tigo_monitor {
 
-// How often a snapshot is written to flash. THE SINGLE SOURCE OF TRUTH for the
-// cadence — tigo_monitor.cpp arms the interval from this and derives its log
-// line from it, so the number is never restated anywhere.
+// How often a snapshot is written to flash — user-settable as `history_interval`
+// in YAML. This is now a resolution/retention decision, but it spent most of
+// this project's life as a crash-exposure dial, which is worth knowing before
+// you turn it down.
 //
-// This used to be a crash-exposure dial rather than a resolution preference.
 // Every flash write forces the ESP-IDF cross-core cache-disable/CPU-stall
 // (spi_flash_disable_interrupts_caches_and_other_cpu), which intermittently
 // faulted under WiFi/BLE coex — the "Fault - Unknown" class documented in
-// docs/tsdb-flash-crash-issue.md — so exposure scaled with how often this
-// fired and the number kept being coarsened to buy stability.
+// docs/tsdb-flash-crash-issue.md. Exposure scaled with how often this fired, so
+// the cadence kept being coarsened to buy stability: 5 min -> 30 (2026-07-23)
+// -> 60 (2026-07-28). execute_from_psram (see tigo_monitor/__init__.py) removes
+// the mechanism rather than shrinking its window — with instructions and rodata
+// in PSRAM, IDF compiles the cache-disable out entirely — which is what makes
+// this safe to expose as a knob at all.
 //
-// execute_from_psram (see tigo_monitor/__init__.py) removes that mechanism
-// rather than shrinking its window: with instructions and rodata in PSRAM,
-// IDF compiles the cache-disable out entirely. If that holds, cadence goes
-// back to being a plain resolution/retention decision.
+// Two costs still scale with it, and neither was fixed by that flag:
 //
-// History: 5 min -> 30 min (2026-07-23) -> 60 min (2026-07-28) -> 10 min
-// (2026-08-03). The last step is deliberately aggressive: it is 6x the commit
-// rate of the build that ran 142 h clean, so it tests the fix rather than
-// trusting it. If the fault returns at 10 min, the cure is incomplete and this
-// goes back to 60 — that outcome is informative, not a regression.
+//   * A commit holds the flash lock ~21 s (sys ~5 s + panels ~16 s, measured
+//     with the panel rings full). Readers wait kFsLockReaderWaitMs, so a
+//     history request landing in a commit fails. Shorter interval, worse odds.
+//   * Each commit rewrites every file to EOF, because esp_tsdb rewrites the
+//     header at offset 0 and littlefs byte-copies from there. That is ~841 KB
+//     per commit into a 3 MB partition, so flash wear scales linearly with
+//     1/interval.
 //
-// Retention at 10 min: the 5404-record panel rings span ~37.5 days (down from
-// ~225 at 60 min); system.tsdb's 65472 records span ~455 days. period_e_kwh is
-// energy-since-last-snapshot, so it is interval-agnostic and lifetime totals
-// stay correct across a change.
-static constexpr uint32_t kSnapshotIntervalMin = 10;
+// Both have the same real fix — a deferred-sync write path in esp_tsdb — not a
+// number here.
+//
+// Retention scales with the interval too, since each DB holds a fixed record
+// count: the 5404-record panel rings span ~112 days at 30 min, ~37.5 at 10;
+// system.tsdb spans ~2.2 yr at 30 min. period_e_kwh is energy-since-last-
+// snapshot, so it is interval-agnostic and lifetime totals stay correct across
+// a change — you can retune this without invalidating stored history.
+//
+// Default only — the effective value is `history_interval` in YAML, held on
+// TigoMonitorComponent and readable via get_snapshot_interval_min(). 30 min is
+// a deliberate middle: twice the detail of the old hourly cadence at half the
+// flash wear of 10 min, which matters because we ship to unknown flash parts.
+static constexpr uint32_t kDefaultSnapshotIntervalMin = 30;
+
+// Bounds enforced by the Python schema; restated here because the retention and
+// duty-cycle maths below depend on them. A commit currently holds the flash
+// ~21 s (see tigo_history.cpp write path), so 5 min is already ~7% duty and
+// anything shorter approaches a writer that is never idle.
+static constexpr uint32_t kMinSnapshotIntervalMin = 5;
+static constexpr uint32_t kMaxSnapshotIntervalMin = 1440;
 
 // esp_tsdb caps base params per DB at 16. We cover up to 48 panels by
 // striping across three DB instances (panels0.tsdb, panels1.tsdb, panels2.tsdb).

@@ -94,7 +94,8 @@ static const char *kPanelParamNames[kPanelsPerDb] = {
 static constexpr size_t kSystemFileBytes = 1 * 1024 * 1024;
 
 // 192 KB per panel DB × 3 = 576 KB. At 36 B/record (16×2-byte params + 4-byte
-// ts) that's ~5400 records per DB — ~37.5 days at the current kSnapshotIntervalMin.
+// ts) that's ~5400 records per DB — ~112 days at the default 30-min cadence,
+// scaling linearly with `history_interval`.
 static constexpr size_t kPanelFileBytes = 192 * 1024;
 
 static constexpr const char *kPanelMapPath = "/tsdb/panel_map.json";
