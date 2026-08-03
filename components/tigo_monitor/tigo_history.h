@@ -46,16 +46,17 @@ namespace tigo_monitor {
 //
 // Two costs still scale with it, and neither was fixed by that flag:
 //
-//   * A commit holds the flash lock ~21 s (sys ~5 s + panels ~16 s, measured
-//     with the panel rings full). Readers wait kFsLockReaderWaitMs, so a
-//     history request landing in a commit fails. Shorter interval, worse odds.
-//   * Each commit rewrites every file to EOF, because esp_tsdb rewrites the
-//     header at offset 0 and littlefs byte-copies from there. That is ~841 KB
-//     per commit into a 3 MB partition, so flash wear scales linearly with
-//     1/interval.
+//   * A commit stalls the writer for seconds and holds the flash lock the whole
+//     time, so history queries queue behind it. Measured at ~21 s (sys 5135 ms
+//     + panels 15854 ms) against upstream esp_tsdb 2.3.0; ~10.5 s once the
+//     redundant fsync is gone (zakery292/esp_tsdb#5, currently pinned as a
+//     fork). The cost is per fsync and per database — NOT per byte: a 1 MB DB
+//     and a 192 KB DB measured the same, appending or evicting.
+//   * Flash wear scales with 1/interval, since the write volume per commit is
+//     roughly fixed. The absolute figure has not been measured; don't quote one.
 //
-// Both have the same real fix — a deferred-sync write path in esp_tsdb — not a
-// number here.
+// The floor is 4 fsyncs per snapshot (one per open database), so going below
+// ~10 s needs either fewer databases or syncing every Nth snapshot.
 //
 // Retention scales with the interval too, since each DB holds a fixed record
 // count: the 5404-record panel rings span ~112 days at 30 min, ~37.5 at 10;

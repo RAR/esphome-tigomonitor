@@ -37,22 +37,24 @@ INVERTER_SCHEMA = cv.Schema({
 def _warn_history_wear(config):
     """Flag intervals that buy resolution with flash life.
 
-    Every history commit rewrites each database to EOF — esp_tsdb rewrites the
-    header at offset 0, so littlefs byte-copies from there — about 841 KB into a
-    3 MB partition. Wear scales with 1/interval, as do the odds of a chart
-    request queueing behind the ~21 s commit. Runs as a validator rather than in
-    to_code so `esphome config` surfaces it too.
+    Each snapshot commits four databases, and every commit stalls the writer for
+    seconds while holding the filesystem lock — measured at ~21 s on upstream
+    esp_tsdb 2.3.0, ~10.5 s with the redundant fsync removed. That cost is per
+    commit, so a shorter interval spends proportionally more of the device's
+    time in it, and flash wear rises the same way. Runs as a validator rather
+    than in to_code so `esphome config` surfaces it too.
     """
     minutes = config[CONF_HISTORY_INTERVAL]
     if minutes < 15:
         _LOGGER.warning(
-            "history_interval is %d min. Each snapshot rewrites ~841 KB of flash, "
-            "so this writes ~%d MB/day and wears the flash roughly %.1fx faster "
-            "than the 30 min default. Chart requests also queue behind the ~21 s "
-            "commit more often, so history pages will feel slower.",
+            "history_interval is %d min, %.1fx more often than the 30 min "
+            "default. Each snapshot takes ~10 s to commit and holds the "
+            "filesystem for all of it, so history pages queue behind it that "
+            "much more often, and flash wear rises by the same factor. "
+            "Per-panel history also shrinks to ~%d days.",
             minutes,
-            round(841 * (1440 / minutes) / 1024),
             30 / minutes,
+            round(5404 * minutes / 1440),
         )
     return config
 

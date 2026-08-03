@@ -80,20 +80,23 @@ esp32:
 `history_interval` accepts 5 to 1440 minutes and defaults to 30. Everything
 scales linearly with it, in both directions:
 
-| Interval | Per-panel history | System history | Flash written | Chart resolution |
-|----------|-------------------|----------------|---------------|------------------|
-| 10 min | ~5 weeks | ~7 months | ~118 MB/day | finest |
-| **30 min (default)** | **~4 months** | **~2 years** | **~39 MB/day** | balanced |
-| 60 min | ~7.5 months | ~3.7 years | ~20 MB/day | coarse |
+| Interval | Per-panel history | System history | Device time spent committing | Chart resolution |
+|----------|-------------------|----------------|------------------------------|------------------|
+| 10 min | ~5 weeks | ~7 months | ~1.8% | finest |
+| **30 min (default)** | **~4 months** | **~2 years** | **~0.6%** | balanced |
+| 60 min | ~7.5 months | ~3.7 years | ~0.3% | coarse |
 
-Two things make the low end more expensive than it looks. Each snapshot rewrites
-every database file end to end — about 841 KB — because `esp_tsdb` rewrites the
-record header at offset 0 and LittleFS copies from there, so flash wear tracks
-1/interval rather than the data volume. And a commit holds the filesystem for
-roughly 21 seconds with the panel rings full, so a shorter interval means a
-larger share of chart loads arrive mid-commit and have to wait it out — readers
-allow 30 s before giving up. Values under 15 minutes log a build-time warning
-saying so.
+The low end costs more than the resolution alone suggests. Writing a snapshot
+takes about 10 seconds — four databases, each needing a filesystem sync that
+LittleFS implements as a full journal commit — and the device holds the history
+lock for all of it, so chart requests arriving mid-commit have to wait it out
+(they allow 30 s before giving up). Flash wear rises by the same factor. Values
+under 15 minutes log a build-time warning.
+
+That cost is per commit rather than per byte: a 1 MB database and a 192 KB one
+were measured taking the same time, whether appending or overwriting. So it
+scales with how *often* you write, not how much you store — which is exactly why
+the interval is the lever that matters.
 
 Changing the interval later is safe: `period_e_*` stores energy since the
 previous snapshot rather than a running total, so lifetime figures stay correct
