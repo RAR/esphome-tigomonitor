@@ -6,7 +6,10 @@ export const BOARDS = [
     flash_size: '8MB',
     partitions: { default: 'partitions/tigo-8mb.csv', ble: 'partitions/tigo-8mb-ble.csv' },
     psram: { mode: 'octal', speed: '80MHz' },
-    frameworkAdvanced: { enable_idf_experimental_features: false },
+    // execute_from_psram is the fix for the tsdb flash-write crash: it compiles
+    // out ESP-IDF's cross-core cache-disable, which was racing WiFi/BLE-coex
+    // ISRs on every history commit (MTTF 13.5-42 h). Costs ~1.7 MiB of PSRAM.
+    frameworkAdvanced: { enable_idf_experimental_features: false, execute_from_psram: true },
     frameworkComponents: ['zakery292/esp_tsdb^2.1.0', 'joltwallet/littlefs^1.16'],
     hostedComponent: null,
     sdkconfig: {
