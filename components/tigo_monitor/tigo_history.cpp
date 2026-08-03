@@ -18,12 +18,25 @@ namespace tigo_monitor {
 
 static const char *const TAG = "tigo_history";
 
-// How long a reader waits for the flash lock before giving up. Readers now
-// queue behind each other and behind the writer's commit, and a month-range
-// query holds the bus ~2.3 s, so several stacked requests can legitimately
-// wait a while. Generous enough that normal dashboard traffic never trips it;
-// bounded so a wedged holder degrades the API instead of hanging httpd.
-static constexpr uint32_t kFsLockReaderWaitMs = 15000;
+// How long a reader waits for the flash lock before giving up. Readers queue
+// behind each other and behind the writer's commit, and a month-range query
+// holds the bus ~2.3 s, so several stacked requests can legitimately wait.
+// Bounded so a wedged holder degrades the API instead of hanging httpd.
+//
+// Must exceed a full commit or every chart request that lands in one fails
+// rather than waits. Measured on the reference rig with the panel rings full
+// (the steady state — they wrap within weeks):
+//
+//   tsdb_write ok (sys 5135 ms, panels 15854 ms)  => ~21 s
+//
+// 15 s was under that, so collisions surfaced as errors. At the 30-min default
+// a commit occupies ~1.2% of wall-clock; at the 5-min floor, ~7% — which is how
+// often a chart load would have hit it. 30 s leaves headroom above 21 without
+// letting a genuinely stuck holder hang the endpoint for long.
+//
+// The real fix is a deferred-sync write path in esp_tsdb so a commit stops
+// costing 21 s at all; this only stops the symptom being a failure.
+static constexpr uint32_t kFsLockReaderWaitMs = 30000;
 
 // A null handle means the lock does not exist yet (pre-init, single-threaded)
 // and is treated as acquired but never given back.
@@ -94,7 +107,8 @@ static const char *kPanelParamNames[kPanelsPerDb] = {
 static constexpr size_t kSystemFileBytes = 1 * 1024 * 1024;
 
 // 192 KB per panel DB × 3 = 576 KB. At 36 B/record (16×2-byte params + 4-byte
-// ts) that's ~5400 records per DB — ~225 days at the current kSnapshotIntervalMin.
+// ts) that's ~5400 records per DB — ~112 days at the default 30-min cadence,
+// scaling linearly with `history_interval`.
 static constexpr size_t kPanelFileBytes = 192 * 1024;
 
 static constexpr const char *kPanelMapPath = "/tsdb/panel_map.json";
@@ -536,6 +550,41 @@ int TigoHistory::iterate_power(uint32_t start_ts, uint32_t end_ts,
   }
   tsdb_query_close(&q);
   return count;
+}
+
+bool TigoHistory::set_ota_active(bool active, uint32_t wait_ms) {
+  ota_active_.store(active, std::memory_order_relaxed);
+
+  // Clearing needs no barrier — nothing is in flight that we care about.
+  if (!active)
+    return true;
+
+  if (fs_mutex_ == nullptr || !initialized_)
+    return true;
+
+  // The flag is now set, so the writer will skip any snapshot it has not yet
+  // started. What it cannot do is abandon one already running, and a commit is
+  // 10-21 s of erases. Taking the lock waits that out; releasing immediately is
+  // fine because the flag keeps the next one from starting.
+  //
+  // Not portMAX_DELAY: if something is genuinely wedged we must tell the caller
+  // rather than hang the OTA task forever.
+  uint32_t t0 = (uint32_t) (esp_timer_get_time() / 1000);
+  FlashLock lock(this, wait_ms);
+  uint32_t waited = (uint32_t) (esp_timer_get_time() / 1000) - t0;
+
+  if (!lock.held()) {
+    // Leave the flag set. The OTA should be refused, but if the caller ignores
+    // us, skipping writes is still better than colliding with them.
+    ESP_LOGE(TAG, "OTA quiesce FAILED — commit still running after %lu ms; "
+                  "proceeding would risk a flash collision", (unsigned long) waited);
+    return false;
+  }
+
+  if (waited > 100)
+    ESP_LOGI(TAG, "OTA quiesce: waited %lu ms for the in-flight commit",
+             (unsigned long) waited);
+  return true;
 }
 
 int TigoHistory::iterate_panel(uint8_t slot, uint32_t start_ts, uint32_t end_ts,

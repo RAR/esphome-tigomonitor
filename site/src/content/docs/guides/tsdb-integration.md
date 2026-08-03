@@ -4,9 +4,9 @@ description: Turn on long-term history so your charts survive a reboot — what 
 ---
 
 By default the device shows you what's happening *now*. Turn this on and it also
-keeps a **permanent record on the device itself** — nearly two years of system
-history and about four months per panel — so the History charts still work after
-a power cut, a reboot, or a firmware update.
+keeps a **permanent record on the device itself** — about two years of system
+history and four months per panel — so the History charts still work after a
+power cut, a reboot, or a firmware update.
 
 It's off by default because it needs a couple of extra lines in your setup file
 and a change to how the device's storage is divided up. The
@@ -22,9 +22,16 @@ a small time-series database that writes to a dedicated area of the ESP32's flas
 memory.
 
 :::note[Two things to expect]
-**A reading every 30 minutes.** Not every few seconds — flash memory wears out
-if you write to it constantly, and frequent writes were destabilising the device.
-Your energy totals are unaffected by this; only how finely the charts are drawn.
+**A reading every 30 minutes,** adjustable. Not every few seconds — flash memory
+wears out if you write to it constantly. Set `history_interval` (in minutes) to
+trade detail against flash life; see [Choosing an
+interval](#choosing-an-interval). Your energy totals are unaffected either way,
+only how finely the charts are drawn.
+
+**About four months of per-panel detail** at the default. Each panel keeps its
+most recent 5,404 readings and then starts overwriting the oldest, so the span
+shrinks proportionally if you ask for finer resolution. System-wide history keeps
+longer — roughly 2 years.
 
 **Up to 48 panels.** Beyond that, extra panels still show live readings but don't
 get their own saved history.
@@ -68,6 +75,39 @@ esp32:
       CONFIG_LITTLEFS_FOR_IDF_3_2: "n"
 ```
 
+### Choosing an interval
+
+`history_interval` accepts 5 to 1440 minutes and defaults to 30. Everything
+scales linearly with it, in both directions:
+
+| Interval | Per-panel history | System history | Device time spent writing | Chart resolution |
+|----------|-------------------|----------------|---------------------------|------------------|
+| 10 min | ~5 weeks | ~7 months | ~3.5% | finest |
+| **30 min (default)** | **~4 months** | **~2 years** | **~1.2%** | balanced |
+| 60 min | ~7.5 months | ~3.7 years | ~0.6% | coarse |
+
+The low end costs more than the resolution alone suggests. Writing a snapshot
+takes about **21 seconds**, and the device holds its history lock for all of it,
+so chart requests arriving mid-write have to wait it out (they allow 30 s before
+giving up). Flash wear rises by the same factor. Values under 15 minutes log a
+build-time warning.
+
+That 21 seconds is a fixed cost per snapshot, not proportional to how much data
+you store — a 1 MB database and a 192 KB one measure the same. So the interval
+controls how much of the device's time goes into writing history, and it's the
+only lever that does.
+
+:::caution[Known limitation]
+21 seconds is slower than it should be and the cause isn't yet understood. Two
+likely explanations were tested and ruled out: it doesn't scale with file size,
+and it isn't the number of filesystem syncs. Until that's solved, treat short
+intervals as genuinely expensive rather than merely finer.
+:::
+
+Changing the interval later is safe: `period_e_*` stores energy since the
+previous snapshot rather than a running total, so lifetime figures stay correct
+across a change and existing history is not invalidated.
+
 > **Board note:** the `board:` value above (`m5stack-atoms3`) is an example. The reference rig for this project is the **AtomS3R** — set `board:` to whatever board you actually run so you don't flash the wrong target.
 
 The TSDB code is conditionally compiled — without those two dependencies on the include path, `tigo_history.h` short-circuits and the History / TSDB-stats endpoints don't exist. You can run the rest of the component without TSDB; you just lose persistent history.
@@ -80,27 +120,33 @@ Internals for firmware developers: what gets persisted, how it's sized, the writ
 
 ## Status and cadence
 
-Phases 1–3 shipped. Per-snapshot system rollups + per-panel power are persisted at 30-min cadence; up to 48 panels supported across three lazy-opened panel DBs. Daily-rollup phase (Phase 4) and the volatile-history retirement (Phase 6) are tracked separately and not on the critical path.
+Phases 1–3 shipped. Per-snapshot system rollups + per-panel power are persisted at a user-settable cadence (`history_interval`, default 30 min); up to 48 panels supported across three lazy-opened panel DBs. Daily-rollup phase (Phase 4) and the volatile-history retirement (Phase 6) are tracked separately and not on the critical path.
 
-**Why 30 minutes.** The snapshot interval is hardcoded in `tigo_monitor.cpp`. It was originally 5 min, but every flash write briefly disables the CPU instruction cache on both cores; at 5-min cadence those windows collided often enough with WiFi/BLE-coex radio ISRs to crash the device. Coarsening to 30 min cut the flash-op frequency ~6× and, together with core-pinning the writer, cut the crash rate ~40× (mean time-to-failure went from ~20 min to ~13 h); a rare residual remains under BLE coex. `period_e_*` energy deltas are interval-agnostic, so totals are unaffected — only history time-resolution changed.
+**Where the interval lives.** `kSnapshotIntervalMin` in `tigo_history.h` is the single source of truth — `tigo_monitor.cpp` arms its timer from it, and `/api/history/*` reports it as `interval_min` so the UI labels charts without hardcoding a number. Change it in one place.
+
+**Why it moved around.** The interval was originally 5 min. Every flash write briefly disables the CPU instruction cache on both cores, and at 5-min cadence those windows collided often enough with WiFi/BLE-coex radio ISRs to crash the device. Coarsening to 30 min (and core-pinning the writer) cut the crash rate ~40×, and 60 min halved the exposure again — but both were probability reductions that left the fault in place, with mean time-to-failure still only 13.5–42 h.
+
+`execute_from_psram` addressed the mechanism instead. With instructions and rodata relocated to PSRAM, ESP-IDF satisfies `SPI_FLASH_CACHE_NO_DISABLE` and compiles the cache-disable out entirely, so a flash write no longer stalls the other core at all — see [the crash investigation](https://github.com/RAR/esphome-tigomonitor/blob/main/docs/tsdb-flash-crash-issue.md). A build with that flag ran 142 h with no fault and no movement in any memory watermark, against a 42 h best beforehand.
+
+Cadence is therefore a resolution/retention decision again rather than a stability lever, and 10 min is deliberately 6× the write rate of that 142 h run — it tests the fix rather than trusting it. `period_e_*` energy deltas are interval-agnostic, so totals stay correct across any of these changes; only time-resolution and retention move.
 
 ## What gets persisted
 
 Two logical schemas, three on-disk DBs (panel DB is striped because esp_tsdb caps at 16 base params per file).
 
-### `system.tsdb` — system + per-inverter rollups (30-min cadence, 14 params)
+### `system.tsdb` — system + per-inverter rollups (14 params)
 
 | # | Name | Unit | Scale |
 |---|------|------|-------|
 | 0 | `total_p` | W | ×1 |
-| 1 | `total_e` | kWh | ×100 (period delta — energy produced in the 30-min window) |
-| 2–9 | `inv1_p` … `inv4_e` | W or kWh ×100 | per-inverter power and 30-min energy delta |
+| 1 | `total_e` | kWh | ×100 (period delta — energy produced since the previous snapshot) |
+| 2–9 | `inv1_p` … `inv4_e` | W or kWh ×100 | per-inverter power and per-period energy delta |
 | 10 | `temp_avg` | °C | ×1 |
 | 11 | `freq` | dHz | ×10 (currently 0 — wired but not extracted from telemetry) |
 | 12 | `frames_lost` | count | ×1 |
 | 13 | `wifi_rssi` | dBm | ×1 |
 
-### `panels{0,1,2}.tsdb` — per-panel power (30-min cadence, 16 params each)
+### `panels{0,1,2}.tsdb` — per-panel power (16 params each)
 
 Each DB covers 16 panel slots. Up to 48 panels total. DBs are opened lazily — `panels1.tsdb` doesn't exist on flash until a 17th slot is assigned.
 
@@ -125,9 +171,9 @@ tsdb       3 MB      (LittleFS — system.tsdb + 3× panels<N>.tsdb)
 
 Per-DB allocations in `tigo_history.cpp` (record count = `(file_bytes − 2048) / (4 + params×2)`):
 
-| DB | File size | Records | At 30-min cadence | Buffer pool |
+| DB | File size | Records | At the 30-min default | Buffer pool |
 |----|-----------|---------|-------------------|-------------|
-| `system.tsdb` | 1 MB | ~32,700 records | ~680 days (~1.9 yr) | 10 KB (PSRAM) |
+| `system.tsdb` | 1 MB | ~32,700 records | ~1.9 yr | 10 KB (PSRAM) |
 | `panels{0,1,2}.tsdb` | 192 KB each | ~5,400 records | ~112 days each | 6 KB each (PSRAM) |
 
 The three panel DBs total 576 KB; with the 1 MB system DB that's ~1.6 MB of the 3 MB partition (~52% used). The rest is deliberate headroom — LittleFS needs free blocks for metadata, copy-on-write scratch, and garbage collection. (An earlier 2 MB + 3×256 KB layout ran the partition ~98% full, which starved LittleFS and wiped history on every reboot — see commit `00366d7`.)
@@ -138,11 +184,11 @@ Buffer pools live in PSRAM (`TSDB_ALLOC_PSRAM`) so they don't pressure internal 
 
 ## Write path
 
-A dedicated FreeRTOS task (`tsdb_writer`, priority 1, 8 KB stack, **pinned to core 1** via `xTaskCreatePinnedToCore`) drains a queue of encoded snapshots. Pinning matters: it puts the writer on the same core as the ESPHome main loop and the UART read, so the writer's flash op can never run *concurrently* with the UART ring-buffer read on the other core — one of the flash-vs-cache crash victims (see the cadence note at the top). Snapshots are produced by a 30-min `set_interval` timer on the main app task:
+A dedicated FreeRTOS task (`tsdb_writer`, priority 1, 8 KB stack, **pinned to core 1** via `xTaskCreatePinnedToCore`) drains a queue of encoded snapshots. Pinning matters: it puts the writer on the same core as the ESPHome main loop and the UART read, so the writer's flash op can never run *concurrently* with the UART ring-buffer read on the other core — one of the flash-vs-cache crash victims (see the cadence note at the top). Snapshots are produced by a `kSnapshotIntervalMin` `set_interval` timer on the main app task:
 
 1. Take the state lock briefly to gather aggregates (system, per-inverter, per-panel power).
 2. Encode floats to int16 with the appropriate scale.
-3. `xQueueSend` non-blocking — if the queue is full (4-deep), drop the sample with a log warning. With 30-min cadence the queue should never be more than 1 deep in steady state.
+3. `xQueueSend` non-blocking — if the queue is full (4-deep), drop the sample with a log warning. Even at the 5-min floor the queue should never be more than 1 deep in steady state.
 
 The writer task pops snapshots and calls `tsdb_write_h(system_db_, …)` followed by `tsdb_write_h(panel_db_[i], …)` for every open panel DB. Each `tsdb_write_h` does fflush + fsync internally.
 
@@ -162,11 +208,11 @@ The SPA's History view and the JSON API both pull from `/api/history/power` (sys
 
 | Endpoint | Source | Resolution | Typical points |
 |----------|--------|------------|----------------|
-| `/api/history/power?range=day` | `system.tsdb` | 30-min | ~48 |
-| `/api/history/power?range=week` | `system.tsdb` | 30-min | ~336 |
-| `/api/history/power?range=month` | `system.tsdb` | 30-min | ~1,440 |
-| `/api/history/power?range=year` | `system.tsdb` | 30-min | ~17,500 (a full year fits; the DB holds ~680 days) |
-| `/api/history/panel?slot=N&range=…` | `panels{slot/16}.tsdb` | 30-min | one column read |
+| `/api/history/power?range=day` | `system.tsdb` | `history_interval` | ~48 |
+| `/api/history/power?range=week` | `system.tsdb` | `history_interval` | ~336 |
+| `/api/history/power?range=month` | `system.tsdb` | `history_interval` | ~1,440 |
+| `/api/history/power?range=year` | `system.tsdb` | `history_interval` | ~17,500 (fits at the default; at 10 min the DB caps out around 227 days, so a year query returns ~7.5 months) |
+| `/api/history/panel?slot=N&range=…` | `panels{slot/16}.tsdb` | `history_interval` | one column read (~112 days available at the default) |
 | `/api/panels` | `panel_map.json` | — | full slot map |
 | `/api/tsdb/stats` | live handles | — | per-DB record counts, oldest/newest, evictions, file sizes |
 
@@ -203,7 +249,7 @@ Buffer pools default to internal RAM in upstream esp_tsdb. We override via `cfg.
 
 - **Full per-panel V/I/T at 5-min** — too many series for the int16-only schema; the live UI shows V/I/T already.
 - **Real-time streaming** — UI polls.
-- **Daily/monthly pre-aggregation** (`daily.tsdb` from the original plan) — month/year queries currently scan the system DB directly. Fine for ~227 days of 5-min data; add aggregation if larger flash is fitted.
+- **Daily/monthly pre-aggregation** (`daily.tsdb` from the original plan) — month/year queries currently scan the system DB directly. Fine at the 30-min default, where a year fits. At shorter `history_interval` values `range=year` becomes capacity-bound (~227 days at 10 min); pre-aggregation or larger flash would be the fix if a true multi-year view is wanted at fine resolution.
 - **Per-string rollups in `system.tsdb`** — there's headroom in the param layout for future strings, but not wired.
 
 ---

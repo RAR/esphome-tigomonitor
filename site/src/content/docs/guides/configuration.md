@@ -23,6 +23,7 @@ worth knowing about:
 |---------|--------------|
 | `number_of_devices` | How many panels to track. Set it to your panel count (or a bit more). |
 | `power_calibration` | Nudges all power readings up or down if they don't match your inverter. `1.05` = +5%. |
+| `history_interval` | How often history is saved to flash, in minutes. Default 30. Lower gives more detailed charts but wears the flash faster and stores fewer days. |
 | `reset_at_midnight` | Starts the daily energy and peak-power figures fresh each night. |
 | `inverters:` | Groups your strings under inverter names so the dashboard mirrors your real layout. |
 | `api_token` / `web_password` | Passwords for the dashboard and API. Worth setting. |
@@ -75,6 +76,7 @@ tigo_monitor:
 | `power_calibration` | Float | 1.0 | Power multiplier (0.5-2.0) |
 | `night_mode_timeout` | Integer | 60 | Minutes before night mode (1-1440) |
 | `stale_timeout` | Integer | 10 | Minutes without data before a device's production values (power, current, efficiency, duty cycle) zero out. `0` disables. Voltage/temperature keep their last reading for diagnostics |
+| `history_interval` | Integer | 30 | Minutes between on-flash history snapshots (5–1440). Lower means finer charts but proportionally more flash wear and shorter retention — see [Saving History to Flash](/esphome-tigomonitor/guides/tsdb-integration/). Values under 15 log a warning at build time |
 | `inverters` | List | None | Inverter grouping config |
 
 ### Inverter Grouping

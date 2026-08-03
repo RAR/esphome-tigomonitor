@@ -278,11 +278,15 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   // Forwarded to TigoHistory so an OTA can quiesce TSDB flash writes. Kept
   // unconditional (no #ifdef) so YAML that calls it always compiles; it is a
   // no-op when the on-flash history feature isn't built in.
-  void set_ota_active(bool active) {
+  // Returns false only when a history commit was still running after the
+  // quiesce timeout — i.e. it is NOT safe to write flash yet. YAML that ignores
+  // the result still gets the pause; checking it just makes the refusal loud.
+  bool set_ota_active(bool active) {
 #ifdef TIGO_TSDB_AVAILABLE
-    history_.set_ota_active(active);
+    return history_.set_ota_active(active);
 #else
     (void) active;
+    return true;
 #endif
   }
 
@@ -434,6 +438,10 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   void set_cca_ip(const std::string &ip) { cca_ip_ = ip; }
   void set_sync_cca_on_startup(bool sync) { sync_cca_on_startup_ = sync; }
   void set_power_calibration(float multiplier) { power_calibration_ = multiplier; }
+  // History snapshot cadence in minutes (`history_interval`). Bounds are
+  // validated in Python; see kDefaultSnapshotIntervalMin in tigo_history.h for
+  // what it costs to lower.
+  void set_snapshot_interval_min(uint32_t minutes) { snapshot_interval_min_ = minutes; }
   void add_inverter(const std::string &name, const std::vector<std::string> &mppt_labels);
 
   // Set the user-friendly display name for an inverter (looked up by canonical
@@ -519,6 +527,7 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   uint32_t get_frame_27_count() const { return frame_27_count_; }
   uint32_t get_command_frame_count() const { return command_frame_count_; }
   float get_power_calibration() const { return power_calibration_; }
+  uint32_t get_snapshot_interval_min() const { return snapshot_interval_min_; }
   bool is_in_night_mode() const { return in_night_mode_; }
   
   // Daily energy history access
@@ -863,6 +872,11 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   
   // Power calibration multiplier (default 1.0 = no adjustment)
   float power_calibration_ = 1.0f;
+#ifdef TIGO_TSDB_AVAILABLE
+  uint32_t snapshot_interval_min_ = kDefaultSnapshotIntervalMin;
+#else
+  uint32_t snapshot_interval_min_ = 30;
+#endif
   
 #ifdef USE_ESP_IDF
   // Use PSRAM-backed buffer for incoming serial data (can grow to 16KB)
