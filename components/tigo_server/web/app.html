@@ -866,7 +866,7 @@
 
       <div class="chart-card">
         <div class="chart-head">
-          <div class="chart-title">Power · 5-minute resolution</div>
+          <div class="chart-title" id="hist-power-title">Power</div>
           <div class="chart-stat"><strong id="hist-power-now">—</strong> · query took <strong id="hist-power-ms">—</strong></div>
         </div>
         <svg id="hist-chart-power" class="chart-area" viewBox="0 0 1000 220">
@@ -2400,6 +2400,13 @@
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const data = await r.json();
       status.textContent = `${data.count} records · ${data.query_ms} ms · range=${range}`;
+      // Cadence comes from the firmware (kSnapshotIntervalMin) — never hardcode it.
+      const titleEl = document.getElementById('hist-power-title');
+      if (titleEl && data.interval_min) {
+        const m = data.interval_min;
+        const label = m % 60 === 0 ? `${m / 60}-hour` : `${m}-minute`;
+        titleEl.textContent = `Power · ${label} resolution`;
+      }
       const days = bucketByDayHist(data.records);
       lastHistData = { records: data.records, days, queryMs: data.query_ms };
       renderHistPowerChart(data.records, data.query_ms);
@@ -2746,13 +2753,24 @@
     return new Date(epochSec * 1000).toLocaleString();
   }
 
-  async function refreshDiagnostics() {
+  // /api/tsdb/stats is now served from a RAM snapshot the history writer
+  // refreshes (it used to read flash on every request, which crashed the
+  // device — see api_tsdb_stats_handler), so polling it is no longer
+  // dangerous. It is still throttled, because the snapshot only changes when
+  // the writer commits: asking every 10 s would return the same bytes 180
+  // times an hour. Fetch on open, then once a minute.
+  const TSDB_STATS_MS = 60000;
+  let tsdbStatsAt = 0;
+
+  async function refreshDiagnostics(force) {
     if (!document.getElementById('view-diagnostics').classList.contains('active')) return;
     try {
+      const wantTsdb = force || (Date.now() - tsdbStatsAt) >= TSDB_STATS_MS;
       const [statusR, tsdbR] = await Promise.all([
         apiFetch('/api/status'),
-        apiFetch('/api/tsdb/stats'),
+        wantTsdb ? apiFetch('/api/tsdb/stats') : Promise.resolve(null),
       ]);
+      if (wantTsdb) tsdbStatsAt = Date.now();
       if (!statusR.ok) throw new Error('/api/status ' + statusR.status);
       const status = await statusR.json();
 
@@ -2799,17 +2817,25 @@
       document.getElementById('diag-built').textContent =
         status.compilation_time ? `built ${status.compilation_time}` : '—';
 
-      // TSDB
+      // TSDB — only re-rendered on the ticks that actually refetched. On the
+      // skipped ticks the table simply keeps the values already on screen.
       const tbody = document.getElementById('diag-tsdb-tbody');
       const sub = document.getElementById('diag-tsdb-sub');
-      if (tsdbR.ok) {
+      if (tsdbR === null) {
+        // nothing to do
+      } else if (tsdbR.ok) {
         const t = await tsdbR.json();
         const fsPct = t.littlefs && t.littlefs.total > 0
           ? (100 * t.littlefs.used / t.littlefs.total).toFixed(1)
           : '—';
+        // These figures are a snapshot taken at the writer's last commit, not a
+        // live read, so say how old they are rather than implying they're now.
+        const ageMin = Math.floor((t.snapshot_age_ms ?? 0) / 60000);
+        const age = t.snapshot_age_ms == null ? ''
+          : ` · sampled ${ageMin < 1 ? 'just now' : ageMin + 'm ago'}`;
         sub.textContent =
           `LittleFS ${fmtKB(t.littlefs.used)} / ${fmtKB(t.littlefs.total)} KB (${fsPct}%) · ` +
-          `${t.slots.used}/${t.slots.max} slots assigned`;
+          `${t.slots.used}/${t.slots.max} slots assigned${age}`;
         let html = '';
         // A database whose stats call timed out (writer held the mutex) comes back with
         // available:false and null fields — render "—" rather than NaN, and say why in
@@ -2850,8 +2876,10 @@
     }
   }
 
-  document.querySelector('#nav button[data-view="diagnostics"]').addEventListener('click', refreshDiagnostics);
-  if (window.location.hash === '#diagnostics') refreshDiagnostics();
+  // Opening the view forces a fetch; the periodic tick does not.
+  document.querySelector('#nav button[data-view="diagnostics"]')
+    .addEventListener('click', () => refreshDiagnostics(true));
+  if (window.location.hash === '#diagnostics') refreshDiagnostics(true);
   setInterval(() => {
     if (document.getElementById('view-diagnostics').classList.contains('active')) refreshDiagnostics();
   }, 10000);

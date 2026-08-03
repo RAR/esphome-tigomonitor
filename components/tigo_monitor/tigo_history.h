@@ -21,12 +21,31 @@
 #include <atomic>
 #include <cstdint>
 #include <functional>
+#include <mutex>
 #include <string>
 #include <unordered_map>
 #include <vector>
 
 namespace esphome {
 namespace tigo_monitor {
+
+// How often a snapshot is written to flash. THE SINGLE SOURCE OF TRUTH for the
+// cadence — tigo_monitor.cpp arms the interval from this and derives its log
+// line from it, so the number is never restated anywhere.
+//
+// This is a crash-exposure dial, not a resolution preference. Every flash write
+// forces the ESP-IDF cross-core cache-disable/CPU-stall
+// (spi_flash_disable_interrupts_caches_and_other_cpu), which intermittently
+// faults under WiFi/BLE coex — the "Fault - Unknown" class documented in
+// docs/tsdb-flash-crash-issue.md. Crash exposure scales roughly with how often
+// this fires, so halving the cadence roughly halves the number of race windows.
+//
+// History: 5 min -> 30 min (2026-07-23) -> 60 min (2026-07-28). At 60 min the
+// 5404-record panel ring spans ~225 days. period_e_kwh is energy-since-last-
+// snapshot, so it is interval-agnostic and lifetime totals stay correct across
+// a change. Restoring finer resolution needs a deferred-sync write path in
+// esp_tsdb, not a smaller number here.
+static constexpr uint32_t kSnapshotIntervalMin = 60;
 
 // esp_tsdb caps base params per DB at 16. We cover up to 48 panels by
 // striping across three DB instances (panels0.tsdb, panels1.tsdb, panels2.tsdb).
@@ -37,14 +56,14 @@ static constexpr size_t kPanelsPerDb = 16;
 static constexpr size_t kNumPanelDbs = 3;
 static constexpr size_t kMaxPanelSlots = kPanelsPerDb * kNumPanelDbs;
 
-// Raw 5-min snapshot. The history layer encodes these to int16_t and writes.
+// One raw snapshot. The history layer encodes these to int16_t and writes.
 // Caller fills this under the TigoMonitorComponent state lock.
 struct SystemSnapshot {
   uint32_t timestamp;          // unix epoch seconds (0 = invalid, will be dropped)
   float total_p_w;             // system power in watts
-  float period_e_kwh;          // energy produced in this 5-min window (kWh)
+  float period_e_kwh;          // energy produced since the last snapshot (kWh)
   float inv_p_w[4];            // per-inverter power
-  float inv_e_kwh[4];          // per-inverter 5-min energy
+  float inv_e_kwh[4];          // per-inverter energy since the last snapshot
   float temp_avg_c;            // average device temperature
   float freq_hz;               // 0 if unavailable
   uint16_t frames_lost;        // missed frames in this window
@@ -147,6 +166,36 @@ class TigoHistory {
   size_t slot_count() const { return slot_map_.size(); }
   uint8_t next_free_slot() const { return next_free_slot_; }
 
+  // Everything /api/tsdb/stats reports, held in RAM.
+  //
+  // This exists because serving those numbers used to make the HTTP task read
+  // flash, and on the ESP32-S3 that is what crashes us: reproduced 2026-07-28,
+  // four concurrent callers of /api/tsdb/stats killed the device in ~11 s, and
+  // caching the response for 60 s only made it rarer — it still died the moment
+  // a cache rebuild landed on a writer commit. FlashLock does not prevent the
+  // collision (why, is still unknown), so the fix is to remove one of the two
+  // colliding parties: the writer refreshes this from inside its own flash
+  // batch, and HTTP handlers only ever read the copy.
+  struct StatsSnapshot {
+    struct Db {
+      bool present{false};    // handle exists (a lazily-unopened panel DB does not)
+      bool available{false};  // the stats read succeeded
+      esp_err_t error{ESP_OK};
+      tsdb_stats_t stats{};
+    };
+    bool valid{false};        // false until the first refresh
+    uint32_t updated_ms{0};   // esp_timer millis at capture; drives snapshot_age_ms
+    size_t fs_total{0};
+    size_t fs_used{0};
+    size_t slot_count{0};
+    uint8_t next_free_slot{0};
+    Db system;
+    Db panels[kNumPanelDbs];
+  };
+
+  // Thread-safe copy for HTTP handlers. Touches NO flash — that is the point.
+  void copy_stats_snapshot(StatsSnapshot &out);
+
  private:
   static void writer_task_entry_(void *arg);
   void writer_task_loop_();
@@ -157,6 +206,10 @@ class TigoHistory {
   // thing that commits the journal — and a reboot without a clean unmount then
   // wipes them. Called after each snapshot so data survives any reboot.
   void commit_journal_();
+  // Recomputes stats_snapshot_ from flash. CALLER MUST HOLD FlashLock. Only
+  // ever called from a context that is already inside a flash batch, so it
+  // adds no new flash access to the system — see StatsSnapshot above.
+  void refresh_stats_snapshot_();
   bool init_system_db_();
   // Opens panel_db_[idx] if not already open. Lazy: panel DBs only land on
   // flash when the rig actually has a panel mapped into that 16-slot range.
@@ -172,6 +225,13 @@ class TigoHistory {
   // multiple panel DBs sidesteps esp_tsdb's 16-base-param limit.
   tsdb_t *system_db_{nullptr};
   tsdb_t *panel_db_[kNumPanelDbs] = {};
+
+  // Written by refresh_stats_snapshot_() (writer/loop task, under FlashLock),
+  // read by HTTP handlers via copy_stats_snapshot(). stats_mutex_ guards only
+  // the struct copy — it is deliberately NOT the flash lock, so a reader never
+  // waits on, or interleaves with, anything touching flash.
+  StatsSnapshot stats_snapshot_;
+  std::mutex stats_mutex_;
 
   // barcode_last6 -> slot index. Persisted as panel_map.json on LittleFS.
   std::unordered_map<std::string, uint8_t> slot_map_;
@@ -202,7 +262,7 @@ class TigoHistory {
   //     <- cache_disable <- spi1_start <- esp_flash_read <- lfs_bd_read
   //     <- lfs_file_flush <- vfs fsync <- tsdb_write_block  == "Fault - Unknown"
   // A month-range history query holds the bus for ~2.3 s, so an open web UI
-  // reliably overlaps the 30-minute snapshot commit.
+  // reliably overlaps the snapshot commit.
   SemaphoreHandle_t fs_mutex_{nullptr};
 
   QueueHandle_t queue_{nullptr};

@@ -2,8 +2,10 @@
 import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome.components import uart, time as time_, esp32
+from esphome.components.esp32.const import VARIANT_ESP32S3
+from esphome.components.psram import DOMAIN as PSRAM_DOMAIN
 from esphome.const import CONF_ID, CONF_UART_ID, CONF_TIME_ID, CONF_NAME
-from esphome.core import coroutine
+from esphome.core import coroutine, CORE
 
 DEPENDENCIES = ['uart']
 
@@ -91,4 +93,27 @@ def to_code(config):
     # declaring the dependency once here covers tigo_server as well.
     if esp32.idf_version() >= cv.Version(6, 0, 0):
         esp32.add_idf_component(name="espressif/cjson", ref="^1.7.19")
+
+    # XIP-from-PSRAM. This is not a performance tuning knob — it is what keeps
+    # the history writer from bricking the device.
+    #
+    # Every tsdb commit takes ESP-IDF's cross-core cache-disable
+    # (spi_flash_disable_interrupts_caches_and_other_cpu). With code executing
+    # from flash, that stall raced WiFi/BLE-coex radio ISRs and produced the
+    # "Fault - Unknown" crashes in docs/tsdb-flash-crash-issue.md — mean
+    # time-to-failure measured at 13.5-42 h on an AtomS3R.
+    #
+    # IDF 5.5.5 spi_flash_os_func_app.c:29 compiles cache_disable out entirely
+    # when SPIRAM_FETCH_INSTRUCTIONS && SPIRAM_RODATA are both set, which is
+    # exactly the pair ESPHome's `execute_from_psram: true` sets. Setting them
+    # here means users get the fix without having to know it exists; a config
+    # that already sets the flag lands on the same two values, so there is no
+    # conflict.
+    #
+    # Gated the same way ESPHome gates its own option (esp32/__init__.py:544):
+    # S3-only, and PSRAM must be configured. It costs ~1.7 MiB of PSRAM, which
+    # moves out of the heap to hold relocated instructions and rodata.
+    if esp32.get_esp32_variant() == VARIANT_ESP32S3 and PSRAM_DOMAIN in CORE.config:
+        esp32.add_idf_sdkconfig_option("CONFIG_SPIRAM_FETCH_INSTRUCTIONS", True)
+        esp32.add_idf_sdkconfig_option("CONFIG_SPIRAM_RODATA", True)
 

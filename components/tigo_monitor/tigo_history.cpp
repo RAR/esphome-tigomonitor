@@ -59,7 +59,7 @@ static int16_t enc_kwh_(float kwh) { return enc_clamp_(kwh * 100.0f); }
 static int16_t enc_temp_(float c) { return enc_clamp_(c); }
 static int16_t enc_dhz_(float hz) { return enc_clamp_(hz * 10.0f); }
 
-// Schema for system.tsdb — system + per-inverter rollups, 5-min cadence.
+// Schema for system.tsdb — system + per-inverter rollups, one row per snapshot.
 // Order is fixed once data has been written; appending requires migration.
 // See https://rar.github.io/esphome-tigomonitor/guides/tsdb-integration/ for unit/scaling reference.
 static const char *kSystemParamNames[] = {
@@ -94,7 +94,7 @@ static const char *kPanelParamNames[kPanelsPerDb] = {
 static constexpr size_t kSystemFileBytes = 1 * 1024 * 1024;
 
 // 192 KB per panel DB × 3 = 576 KB. At 36 B/record (16×2-byte params + 4-byte
-// ts) that's ~5400 records per DB ≈ 18 days of 5-min data per panel.
+// ts) that's ~5400 records per DB — ~225 days at the current kSnapshotIntervalMin.
 static constexpr size_t kPanelFileBytes = 192 * 1024;
 
 static constexpr const char *kPanelMapPath = "/tsdb/panel_map.json";
@@ -131,6 +131,11 @@ bool TigoHistory::init() {
     next_free_slot_ = 0;
   }
   initialized_ = true;
+
+  // Populate the snapshot before anything can serve it, so /api/tsdb/stats
+  // has real numbers from boot rather than an empty table until the first
+  // scheduled commit. Still inside this function's FlashLock.
+  refresh_stats_snapshot_();
   return true;
 }
 
@@ -171,7 +176,7 @@ void TigoHistory::commit_journal_() {
   //
   // Rewriting a tiny marker file is a dir-entry metadata update, which forces that
   // commit — the same side effect save_slot_map_ relies on for panel_map.json.
-  // One small file per 5-min snapshot; LittleFS wear-levels the block.
+  // One small file per snapshot; LittleFS wear-levels the block.
   static uint32_t commit_counter = 0;
   FILE *f = fopen(kJournalMarkerPath, "wb");
   if (f == nullptr) {
@@ -195,7 +200,7 @@ bool TigoHistory::init_system_db_() {
   // PSRAM-backed buffer pool. The S3-PICO-1 has 8 MB octal PSRAM — internal
   // RAM is the constraint (we land at ~110 KB free at low water with the
   // SPA + tsdb stack). Buffer access is fast enough on octal PSRAM that
-  // tsdb_write latency stays well under the 5-min snapshot budget.
+  // tsdb_write latency stays well under the snapshot budget.
   cfg.alloc_strategy = TSDB_ALLOC_PSRAM;
   cfg.use_paged_allocation = false;
   cfg.page_size = 0;
@@ -381,6 +386,11 @@ uint8_t TigoHistory::get_or_assign_slot(const std::string &barcode_last6) {
   // of a barcode) and the cost of losing one is "panel rejoins as a new
   // slot, history splits in two", which we want to avoid.
   save_slot_map_();
+
+  // Slot count and a newly-opened panel DB both show up in /api/tsdb/stats.
+  // Refresh here (still under FlashLock, flash already hot) so the Diagnostics
+  // table tracks discovery instead of lagging until the next scheduled commit.
+  refresh_stats_snapshot_();
   return slot;
 }
 
@@ -402,7 +412,7 @@ bool TigoHistory::start_writer_task() {
   if (task_ != nullptr) {
     return true;  // already running
   }
-  // Queue depth 4 — at 5-min cadence we should never be more than 1 deep.
+  // Queue depth 4 — at the snapshot cadence we should never be more than 1 deep.
   // Extra headroom absorbs transient flash slowdowns without dropping samples.
   queue_ = xQueueCreate(4, sizeof(EncodedRow));
   if (queue_ == nullptr) {
@@ -567,6 +577,40 @@ int TigoHistory::iterate_panel(uint8_t slot, uint32_t start_ts, uint32_t end_ts,
   return count;
 }
 
+void TigoHistory::refresh_stats_snapshot_() {
+  // Build into a local first: tsdb_get_stats_h can block on the per-DB mutex
+  // for up to 5 s, and holding stats_mutex_ across that would make a reader
+  // wait on the writer for no reason. The published copy swaps in at the end.
+  StatsSnapshot snap;
+  snap.valid = true;
+  snap.updated_ms = (uint32_t) (esp_timer_get_time() / 1000);
+
+  size_t total = 0, used = 0;
+  if (esp_littlefs_info("tsdb", &total, &used) == ESP_OK) {
+    snap.fs_total = total;
+    snap.fs_used = used;
+  }
+  snap.slot_count = slot_map_.size();
+  snap.next_free_slot = next_free_slot_;
+
+  auto grab = [](tsdb_t *db, StatsSnapshot::Db &out) {
+    if (db == nullptr) return;  // lazily-unopened panel DB: no row at all
+    out.present = true;
+    out.error = tsdb_get_stats_h(db, &out.stats);
+    out.available = (out.error == ESP_OK);
+  };
+  grab(system_db_, snap.system);
+  for (size_t i = 0; i < kNumPanelDbs; ++i) grab(panel_db_[i], snap.panels[i]);
+
+  std::lock_guard<std::mutex> guard(stats_mutex_);
+  stats_snapshot_ = snap;
+}
+
+void TigoHistory::copy_stats_snapshot(StatsSnapshot &out) {
+  std::lock_guard<std::mutex> guard(stats_mutex_);
+  out = stats_snapshot_;
+}
+
 void TigoHistory::writer_task_entry_(void *arg) {
   static_cast<TigoHistory *>(arg)->writer_task_loop_();
 }
@@ -604,8 +648,8 @@ void TigoHistory::writer_task_loop_() {
     // between two writes is just as fatal as one landing mid-write.
     //
     // Deliberately scoped BELOW xQueueReceive: holding this across the
-    // portMAX_DELAY receive would block every reader for the full 30-minute
-    // gap between snapshots. It releases when the iteration ends.
+    // portMAX_DELAY receive would block every reader for the whole
+    // inter-snapshot gap. It releases when the iteration ends.
     //
     // portMAX_DELAY, not a timeout: dropping a snapshot loses data, and the
     // only holders are bounded (a query, a slot save).
@@ -638,13 +682,26 @@ void TigoHistory::writer_task_loop_() {
     // unmount (which on this rig isn't sticking).
     this->commit_journal_();
 
+    // Refresh the diagnostics snapshot here, while we are still holding
+    // FlashLock and the flash is already hot. This is the ONLY place the
+    // numbers behind /api/tsdb/stats are read from flash — doing it from the
+    // HTTP task is what crashed the device (see StatsSnapshot in the header).
+    this->refresh_stats_snapshot_();
+
     UBaseType_t hwm = uxTaskGetStackHighWaterMark(nullptr);
     if (err != ESP_OK) {
       ESP_LOGW(TAG, "tsdb_write @ %lu failed after %u ms: %s (stack hwm %u B)",
                (unsigned long) row.timestamp, (unsigned) t_sys,
                esp_err_to_name(err), (unsigned) (hwm * sizeof(StackType_t)));
     } else {
-      ESP_LOGD(TAG,
+      // INFO, not DEBUG: this duration is the single most useful number this
+      // component produces. Every mid-file write makes LittleFS copy from the
+      // write offset to EOF, a byte at a time (lfs.c:3376 in lfs_file_flush),
+      // and esp_tsdb rewrites the header at offset 0 on EVERY record — so a
+      // commit drags most of each file through that loop. Both decoded crash
+      // PCs sit inside it. How long this takes IS the crash exposure, and at
+      // the default INFO log level it was invisible.
+      ESP_LOGI(TAG,
                "tsdb_write @ %lu ok (sys %u ms, panels %u ms, stack hwm %u B)",
                (unsigned long) row.timestamp, (unsigned) t_sys,
                (unsigned) panel_total_ms,

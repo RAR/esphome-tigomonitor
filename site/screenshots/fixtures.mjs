@@ -184,6 +184,9 @@ export const routes = {
   },
   '/api/tsdb/stats': {
     littlefs: { total: 3145728, used: 884736 },
+    // Age of the writer's RAM snapshot these figures came from; the page turns
+    // it into "sampled Nm ago". Fixed value so screenshots stay reproducible.
+    snapshot_age_ms: 240000,
     slots: { used: devices.length, next_free: devices.length, max: 48 },
     databases: [
       { label: 'system', available: true, records: 7840, max_records: 65472,
@@ -250,7 +253,7 @@ export const patterns = [
   [/\/api\/history\/power/, (u) => {
     const range = new URL(u, 'http://x').searchParams.get('range') || 'day';
     const hours = { day: 24, week: 168, month: 720, year: 8760 }[range] ?? 24;
-    return { range, records: series(Math.min(hours, 336), 9000), count: 48, query_ms: 118 };
+    return { range, interval_min: 60, records: series(Math.min(hours, 336), 9000), count: 48, query_ms: 118 };
   }],
-  [/\/api\/history\/panel/, () => ({ slot: 0, range: 'day', records: series(24, 392), count: 48, query_ms: 31 })],
+  [/\/api\/history\/panel/, () => ({ slot: 0, range: 'day', interval_min: 60, records: series(24, 392), count: 48, query_ms: 31 })],
 ];

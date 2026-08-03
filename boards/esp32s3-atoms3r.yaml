@@ -17,6 +17,19 @@ esp32:
   framework:
     type: esp-idf
     version: recommended
+    advanced:
+      # XIP-from-PSRAM — the fix for the tsdb flash-write crash
+      # (docs/tsdb-flash-crash-issue.md). Every history commit takes ESP-IDF's
+      # cross-core cache-disable; with code running from flash that stall raced
+      # WiFi/BLE-coex ISRs and faulted, MTTF 13.5-42 h. This flag sets
+      # SPIRAM_FETCH_INSTRUCTIONS + SPIRAM_RODATA, which compiles the
+      # cache-disable out entirely (IDF 5.5.5 spi_flash_os_func_app.c:29).
+      #
+      # tigo_monitor's codegen sets the same two sdkconfig symbols, so this line
+      # is belt-and-braces — it keeps the reference config honest about what the
+      # firmware actually requires. Costs ~1.7 MiB of PSRAM, taken out of the
+      # heap to hold the relocated instructions and rodata.
+      execute_from_psram: true
     components:
       # Time-series database for persistent history
       # (see https://rar.github.io/esphome-tigomonitor/guides/tsdb-integration/).

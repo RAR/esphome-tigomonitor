@@ -191,6 +191,7 @@ class TigoWebServer : public Component
                                     // "last synced X ago" badge correctly across reboot.
   std::mutex cca_info_mutex_;
 
+
   // BLE lifecycle, driven from setup()/loop()
   void ble_setup_();
   void ble_loop_();
@@ -303,6 +304,12 @@ class TigoWebServer : public Component
   void build_esp_status_json(PSRAMString& json);
   void build_yaml_json(PSRAMString& json, const std::set<std::string>& selected_sensors, const std::set<std::string>& selected_hub_sensors, const std::string& grouping);
   void build_cca_info_json(PSRAMString& json);
+#ifdef TIGO_TSDB_AVAILABLE
+  // Pure formatting of a RAM snapshot — must not reach flash. See the comment
+  // in api_tsdb_stats_handler for why that is a hard rule and not a preference.
+  void build_tsdb_stats_json_(const tigo_monitor::TigoHistory::StatsSnapshot &snap,
+                              psram_string &json);
+#endif
 };
 
 #endif  // USE_ESP_IDF
