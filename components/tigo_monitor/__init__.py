@@ -40,7 +40,7 @@ def _warn_history_wear(config):
     Every history commit rewrites each database to EOF — esp_tsdb rewrites the
     header at offset 0, so littlefs byte-copies from there — about 841 KB into a
     3 MB partition. Wear scales with 1/interval, as do the odds of a chart
-    request colliding with the ~21 s commit. Runs as a validator rather than in
+    request queueing behind the ~21 s commit. Runs as a validator rather than in
     to_code so `esphome config` surfaces it too.
     """
     minutes = config[CONF_HISTORY_INTERVAL]
@@ -48,8 +48,8 @@ def _warn_history_wear(config):
         _LOGGER.warning(
             "history_interval is %d min. Each snapshot rewrites ~841 KB of flash, "
             "so this writes ~%d MB/day and wears the flash roughly %.1fx faster "
-            "than the 30 min default. Charts also fail more often, since a commit "
-            "holds the filesystem ~21 s and readers give up after 15 s.",
+            "than the 30 min default. Chart requests also queue behind the ~21 s "
+            "commit more often, so history pages will feel slower.",
             minutes,
             round(841 * (1440 / minutes) / 1024),
             30 / minutes,

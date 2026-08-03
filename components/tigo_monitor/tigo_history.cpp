@@ -18,12 +18,25 @@ namespace tigo_monitor {
 
 static const char *const TAG = "tigo_history";
 
-// How long a reader waits for the flash lock before giving up. Readers now
-// queue behind each other and behind the writer's commit, and a month-range
-// query holds the bus ~2.3 s, so several stacked requests can legitimately
-// wait a while. Generous enough that normal dashboard traffic never trips it;
-// bounded so a wedged holder degrades the API instead of hanging httpd.
-static constexpr uint32_t kFsLockReaderWaitMs = 15000;
+// How long a reader waits for the flash lock before giving up. Readers queue
+// behind each other and behind the writer's commit, and a month-range query
+// holds the bus ~2.3 s, so several stacked requests can legitimately wait.
+// Bounded so a wedged holder degrades the API instead of hanging httpd.
+//
+// Must exceed a full commit or every chart request that lands in one fails
+// rather than waits. Measured on the reference rig with the panel rings full
+// (the steady state — they wrap within weeks):
+//
+//   tsdb_write ok (sys 5135 ms, panels 15854 ms)  => ~21 s
+//
+// 15 s was under that, so collisions surfaced as errors. At the 30-min default
+// a commit occupies ~1.2% of wall-clock; at the 5-min floor, ~7% — which is how
+// often a chart load would have hit it. 30 s leaves headroom above 21 without
+// letting a genuinely stuck holder hang the endpoint for long.
+//
+// The real fix is a deferred-sync write path in esp_tsdb so a commit stops
+// costing 21 s at all; this only stops the symptom being a failure.
+static constexpr uint32_t kFsLockReaderWaitMs = 30000;
 
 // A null handle means the lock does not exist yet (pre-init, single-threaded)
 // and is treated as acquired but never given back.

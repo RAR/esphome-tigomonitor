@@ -124,7 +124,9 @@ class TigoHistory {
   // when you passed a timeout; a false return means "do not touch flash".
   class FlashLock {
    public:
-    explicit FlashLock(TigoHistory *hist, uint32_t timeout_ms = 15000);
+    // Default mirrors kFsLockReaderWaitMs in the .cpp — must stay above a full
+    // commit (~21 s), or readers fail instead of waiting.
+    explicit FlashLock(TigoHistory *hist, uint32_t timeout_ms = 30000);
     ~FlashLock();
     FlashLock(const FlashLock &) = delete;
     FlashLock &operator=(const FlashLock &) = delete;

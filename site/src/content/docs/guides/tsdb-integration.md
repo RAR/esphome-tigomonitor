@@ -90,9 +90,10 @@ Two things make the low end more expensive than it looks. Each snapshot rewrites
 every database file end to end — about 841 KB — because `esp_tsdb` rewrites the
 record header at offset 0 and LittleFS copies from there, so flash wear tracks
 1/interval rather than the data volume. And a commit holds the filesystem for
-roughly 21 seconds with the panel rings full, while history requests give up
-after 15, so a shorter interval means a larger share of chart loads land in a
-commit and fail. Values under 15 minutes log a build-time warning saying so.
+roughly 21 seconds with the panel rings full, so a shorter interval means a
+larger share of chart loads arrive mid-commit and have to wait it out — readers
+allow 30 s before giving up. Values under 15 minutes log a build-time warning
+saying so.
 
 Changing the interval later is safe: `period_e_*` stores energy since the
 previous snapshot rather than a running total, so lifetime figures stay correct
