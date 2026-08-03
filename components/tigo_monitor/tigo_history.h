@@ -46,17 +46,20 @@ namespace tigo_monitor {
 //
 // Two costs still scale with it, and neither was fixed by that flag:
 //
-//   * A commit stalls the writer for seconds and holds the flash lock the whole
-//     time, so history queries queue behind it. Measured at ~21 s (sys 5135 ms
-//     + panels 15854 ms) against upstream esp_tsdb 2.3.0; ~10.5 s once the
-//     redundant fsync is gone (zakery292/esp_tsdb#5, currently pinned as a
-//     fork). The cost is per fsync and per database — NOT per byte: a 1 MB DB
-//     and a 192 KB DB measured the same, appending or evicting.
+//   * A commit stalls the writer ~21 s and holds the flash lock the whole time,
+//     so history queries queue behind it (sys 5349 ms + panels 17269 ms,
+//     esp_tsdb 2.3.0, panel rings full).
 //   * Flash wear scales with 1/interval, since the write volume per commit is
 //     roughly fixed. The absolute figure has not been measured; don't quote one.
 //
-// The floor is 4 fsyncs per snapshot (one per open database), so going below
-// ~10 s needs either fewer databases or syncing every Nth snapshot.
+// The 21 s is NOT understood, and two plausible explanations have been measured
+// and killed. It is not proportional to bytes: a 1 MB DB and a 192 KB DB cost
+// the same, appending or evicting. It is not the fsync count either: halving
+// fsyncs per write (8 -> 4 per snapshot) changed nothing, because the removed
+// sync's work simply moved to the remaining one. Whatever dominates is per
+// commit and per database, ~5.3 s each. Anyone shortening the interval should
+// know this cost is currently a fixed, unexplained tax — measure before
+// theorising, and don't trust a third guess without numbers.
 //
 // Retention scales with the interval too, since each DB holds a fixed record
 // count: the 5404-record panel rings span ~112 days at 30 min, ~37.5 at 10;

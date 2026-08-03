@@ -38,8 +38,7 @@ def _warn_history_wear(config):
     """Flag intervals that buy resolution with flash life.
 
     Each snapshot commits four databases, and every commit stalls the writer for
-    seconds while holding the filesystem lock — measured at ~21 s on upstream
-    esp_tsdb 2.3.0, ~10.5 s with the redundant fsync removed. That cost is per
+    seconds while holding the filesystem lock — measured at ~21 s. That cost is per
     commit, so a shorter interval spends proportionally more of the device's
     time in it, and flash wear rises the same way. Runs as a validator rather
     than in to_code so `esphome config` surfaces it too.
@@ -48,7 +47,7 @@ def _warn_history_wear(config):
     if minutes < 15:
         _LOGGER.warning(
             "history_interval is %d min, %.1fx more often than the 30 min "
-            "default. Each snapshot takes ~10 s to commit and holds the "
+            "default. Each snapshot takes ~21 s to commit and holds the "
             "filesystem for all of it, so history pages queue behind it that "
             "much more often, and flash wear rises by the same factor. "
             "Per-panel history also shrinks to ~%d days.",
