@@ -1,7 +1,7 @@
 // site/test/yaml.test.mjs
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { getBoard } from '../boards.js';
+import { BOARDS, getBoard } from '../boards.js';
 import { assembleConfig } from '../rules.js';
 import { toYaml, toSecretsYaml } from '../yaml.js';
 
@@ -22,15 +22,13 @@ test('emits blocks in order with required empty sections', () => {
   assert.ok(!y.includes('\t'), 'no tabs allowed');
 });
 
-test('P4 emits esp32_hosted + 200MHz PSRAM + experimental flag; no psram-less board emits psram', () => {
+test('P4 emits esp32_hosted + 200MHz PSRAM + experimental flag', () => {
   const p4 = toYaml(assembleConfig(getBoard('esp32p4-evboard'), { ...form, uart: { tx_pin: 'GPIO20', rx_pin: 'GPIO21' } }));
   assert.ok(p4.includes('esp32_hosted:'));
   assert.ok(p4.includes('speed: 200MHz'), 'P4 default is 200MHz (valid P4 speeds: 20/100/200)');
   assert.ok(p4.includes('enable_idf_experimental_features: true'), 'P4 emits the experimental flag');
   assert.ok(p4.includes('execute_from_psram: true'), 'P4 emits execute_from_psram (XIP) — fixes #31 boot crash');
   assert.ok(!p4.includes('80MHz'), 'P4 must not emit 80MHz — invalid for P4 (cv.one_of 20/100/200)');
-  const s3lite = toYaml(assembleConfig(getBoard('esp32s3-atoms3'), { ...form, uart: { tx_pin: 'GPIO6', rx_pin: 'GPIO5' } }));
-  assert.ok(!s3lite.includes('\npsram:'), 'no-PSRAM board must not emit psram');
 });
 
 test('secrets mode emits !secret refs and a matching secrets.yaml', () => {
@@ -97,10 +95,12 @@ test('display config wires the backlight into tigo_server', () => {
   assert.ok(y.includes('backlight: lcd_backlight'), 'backlight wiring missing');
 });
 
-test('Free PSRAM sensor only on PSRAM boards', () => {
-  assert.ok(toYaml(assembleConfig(getBoard('esp32s3-atoms3r'), form)).includes('Free PSRAM'), 'AtomS3R should emit Free PSRAM');
-  const noPsram = toYaml(assembleConfig(getBoard('esp32s3-atoms3'), { ...form, uart: { tx_pin: 'GPIO6', rx_pin: 'GPIO5' } }));
-  assert.ok(!noPsram.includes('Free PSRAM'), 'no-PSRAM board must not emit Free PSRAM');
+test('every board emits a psram block and a Free PSRAM sensor', () => {
+  for (const b of BOARDS) {
+    const y = toYaml(assembleConfig(b, { ...form, uart: b.uartDefault }));
+    assert.ok(y.includes('\npsram:'), `${b.id} must emit psram — PSRAM is required`);
+    assert.ok(y.includes('Free PSRAM'), `${b.id} should emit the Free PSRAM sensor`);
+  }
 });
 
 test('cca:ble emits the full BLE stack + ble_client_id', () => {

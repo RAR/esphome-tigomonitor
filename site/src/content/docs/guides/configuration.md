@@ -457,7 +457,7 @@ esp32:
 
 ### PSRAM (ESP32-S3)
 
-Required for 15+ devices:
+Required. Every install needs this:
 
 ```yaml
 esphome:

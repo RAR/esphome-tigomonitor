@@ -148,7 +148,7 @@ void TigoWebServer::setup() {
     ESP_LOGW(TAG, "*     speed: 200MHz                                          *");
 #endif
     ESP_LOGW(TAG, "*                                                            *");
-    ESP_LOGW(TAG, "* PSRAM is REQUIRED for 15+ devices!                        *");
+    ESP_LOGW(TAG, "* PSRAM is REQUIRED - expect instability without it!        *");
     ESP_LOGW(TAG, "* See boards/ folder for complete examples.                 *");
     ESP_LOGW(TAG, "**************************************************************");
     ESP_LOGW(TAG, "%s", "");

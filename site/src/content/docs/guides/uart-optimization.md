@@ -82,11 +82,9 @@ light:
     # they cause constant I2C updates that compete with UART.
 ```
 
-## 4. Check whether you need PSRAM
+## 4. Confirm PSRAM is on
 
-PSRAM is recommended once you track **15 or more devices** — the device list and node table grow with your array and belong in PSRAM, not internal RAM. Enable it in your board config if you're at or above that count.
-
-Higher figures are board-specific: an ESP32-P4 (dual-core, large PSRAM) has been run with 50+ devices while driving a display. That's a ceiling on capable hardware, not a change to the 15+ rule — if you're near or past 15 devices, turn PSRAM on regardless of board.
+PSRAM is required — check it's actually enabled in your config, not just present on the board. See [Configuration → PSRAM](/esphome-tigomonitor/guides/configuration/#psram-esp32-s3).
 
 ## Verify it worked
 

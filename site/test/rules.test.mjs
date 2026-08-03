@@ -25,8 +25,11 @@ test('BLE swaps to the ble partition', () => {
   assert.equal(cfg.tigoServer.ccaSource, 'ble');
 });
 
+// Every shipping board happens to support BLE, so this guards the rule itself
+// against a future board that doesn't.
 test('BLE on an unsupported board throws', () => {
-  assert.throws(() => assembleConfig(getBoard('esp32-dev'), { ...baseForm, cca: 'ble' }), /BLE/);
+  const noBle = { ...getBoard('esp32s3-atoms3r'), id: 'no-ble', supports: { ble: false, display: false } };
+  assert.throws(() => assembleConfig(noBle, { ...baseForm, cca: 'ble' }), /BLE/);
 });
 
 test('HTTP CCA sets a cca_ip', () => {
