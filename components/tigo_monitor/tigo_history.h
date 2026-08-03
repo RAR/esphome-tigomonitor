@@ -177,7 +177,21 @@ class TigoHistory {
   // so the writer skips its littlefs writes (which otherwise collide with the
   // OTA image write on the same flash chip and fault); cleared on OTA abort.
   // Written from the OTA task, read from the writer task — hence atomic.
-  void set_ota_active(bool active) { ota_active_.store(active, std::memory_order_relaxed); }
+  //
+  // Setting it true BLOCKS until any in-flight commit has finished, and that is
+  // the whole point. The flag alone is advisory: the writer tests it once, then
+  // spends 10-21 s inside tsdb_write_h erasing and syncing. Raising the flag
+  // during that window changed nothing, so an OTA starting mid-commit wrote the
+  // app partition while the writer was still erasing the littlefs partition on
+  // the same chip — which faults:
+  //
+  //   tsdb_write_h -> tsdb_write_header -> fsync -> lfs_ctz_extend
+  //     -> lfs_bd_erase -> esp_flash_erase_region -> esp_rom_delay_us  (Fault)
+  //
+  // Returns false if a commit was still running after the timeout, meaning the
+  // caller must NOT proceed with the OTA. Safe to call from the OTA task: the
+  // lock is only ever held for bounded work.
+  bool set_ota_active(bool active, uint32_t wait_ms = 45000);
 
   // Drains the writer queue (best-effort, with timeout) and closes every open
   // tsdb_t handle. Called from TigoMonitorComponent::on_shutdown() so that

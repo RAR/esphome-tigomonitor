@@ -278,11 +278,15 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   // Forwarded to TigoHistory so an OTA can quiesce TSDB flash writes. Kept
   // unconditional (no #ifdef) so YAML that calls it always compiles; it is a
   // no-op when the on-flash history feature isn't built in.
-  void set_ota_active(bool active) {
+  // Returns false only when a history commit was still running after the
+  // quiesce timeout — i.e. it is NOT safe to write flash yet. YAML that ignores
+  // the result still gets the pause; checking it just makes the refusal loud.
+  bool set_ota_active(bool active) {
 #ifdef TIGO_TSDB_AVAILABLE
-    history_.set_ota_active(active);
+    return history_.set_ota_active(active);
 #else
     (void) active;
+    return true;
 #endif
   }
 

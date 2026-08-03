@@ -552,6 +552,41 @@ int TigoHistory::iterate_power(uint32_t start_ts, uint32_t end_ts,
   return count;
 }
 
+bool TigoHistory::set_ota_active(bool active, uint32_t wait_ms) {
+  ota_active_.store(active, std::memory_order_relaxed);
+
+  // Clearing needs no barrier — nothing is in flight that we care about.
+  if (!active)
+    return true;
+
+  if (fs_mutex_ == nullptr || !initialized_)
+    return true;
+
+  // The flag is now set, so the writer will skip any snapshot it has not yet
+  // started. What it cannot do is abandon one already running, and a commit is
+  // 10-21 s of erases. Taking the lock waits that out; releasing immediately is
+  // fine because the flag keeps the next one from starting.
+  //
+  // Not portMAX_DELAY: if something is genuinely wedged we must tell the caller
+  // rather than hang the OTA task forever.
+  uint32_t t0 = (uint32_t) (esp_timer_get_time() / 1000);
+  FlashLock lock(this, wait_ms);
+  uint32_t waited = (uint32_t) (esp_timer_get_time() / 1000) - t0;
+
+  if (!lock.held()) {
+    // Leave the flag set. The OTA should be refused, but if the caller ignores
+    // us, skipping writes is still better than colliding with them.
+    ESP_LOGE(TAG, "OTA quiesce FAILED — commit still running after %lu ms; "
+                  "proceeding would risk a flash collision", (unsigned long) waited);
+    return false;
+  }
+
+  if (waited > 100)
+    ESP_LOGI(TAG, "OTA quiesce: waited %lu ms for the in-flight commit",
+             (unsigned long) waited);
+  return true;
+}
+
 int TigoHistory::iterate_panel(uint8_t slot, uint32_t start_ts, uint32_t end_ts,
                                const PanelRowCb &cb) {
   if (!initialized_) return -1;
