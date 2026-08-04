@@ -2217,7 +2217,7 @@ void TigoMonitorComponent::generate_sensor_yaml() {
       }
       
       ESP_LOGI(TAG, "  # Tigo Device %s (discovered%s)", index_str.c_str(), barcode_comment.c_str());
-      ESP_LOGI(TAG, "  - platform: tigo_server");
+      ESP_LOGI(TAG, "  - platform: tigo_monitor");
       ESP_LOGI(TAG, "    tigo_monitor_id: tigo_hub");
       ESP_LOGI(TAG, "    address: \"%s\"", node.addr.c_str());
       ESP_LOGI(TAG, "    name: \"Tigo Device %s\"", index_str.c_str());
@@ -2241,7 +2241,7 @@ void TigoMonitorComponent::generate_sensor_yaml() {
       std::string index_str = std::to_string(i + 1);
       
       ESP_LOGI(TAG, "  # Tigo Device %s (placeholder - update address when discovered)", index_str.c_str());
-      ESP_LOGI(TAG, "  - platform: tigo_server");
+      ESP_LOGI(TAG, "  - platform: tigo_monitor");
       ESP_LOGI(TAG, "    tigo_monitor_id: tigo_hub");
       ESP_LOGI(TAG, "    address: \"device_%s\"  # CHANGE THIS to actual device address", index_str.c_str());
       ESP_LOGI(TAG, "    name: \"Tigo Device %s\"", index_str.c_str());
