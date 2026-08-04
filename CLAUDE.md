@@ -62,6 +62,8 @@ PSRAM is required for 15+ devices. Custom STL-compatible allocators (`PSRAMAlloc
 
 Always use PSRAM containers for large data. Internal RAM is <200KB; PSRAM is 8MB. Use `#ifdef USE_ESP_IDF` guards for PSRAM types.
 
+**Boards without PSRAM** (e.g. `boards/esp32-lilygo-t-can485.yaml`) are supported for *sensors-only* builds — `tigo_monitor` without `tigo_server`. The `psram_*` aliases still compile there; `psram_malloc()` keys off the IDF's `CONFIG_SPIRAM` and resolves straight to the internal heap when it is unset, so no call site changes. Keep it that way: gate on `CONFIG_SPIRAM` inside the allocator rather than sprinkling new `#ifdef`s at usage sites, and never assume `USE_ESP_IDF` implies PSRAM exists. The web server genuinely does require PSRAM and must stay out of those configs.
+
 ### Web Server
 
 5 HTML pages (`/`, `/nodes`, `/status`, `/yaml`, `/cca`) + JSON API endpoints (`/api/devices`, `/api/overview`, `/api/strings`, `/api/status`, `/api/health`, `/api/inverters`, `/api/energy-history`). Auth: `api_token` for API, HTTP Basic for HTML pages. All responses built in PSRAM via `PSRAMString`.

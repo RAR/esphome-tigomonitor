@@ -1,0 +1,212 @@
+# Example Tigo Monitor Configuration using the LilyGO T-CAN485
+#
+# This is the "Home Assistant only" profile: no web UI, no REST API, no on-flash
+# history. Every value goes to Home Assistant over the native ESPHome API.
+#
+# The hardware base (esp32-lilygo-t-can485.yaml) provides:
+#   - the ESP32 / 4MB flash / ESP-IDF framework setup, with no PSRAM
+#   - the three GPIOs that power up and enable the RS485 transceiver
+#   - the UART on GPIO21/22 and the tigo_monitor hub itself
+# so this file only layers on WiFi credentials, sensors, and app config.
+#
+# ---------------------------------------------------------------------------
+# FINDING YOUR PANELS (this is the part the web UI would normally do for you)
+# ---------------------------------------------------------------------------
+# Panel addresses are discovered from the bus at runtime, so you cannot know
+# them before the first flash. The workflow:
+#
+#   1. Flash this file as-is. The system-wide sensors below start working
+#      immediately — total power, energy, and device count need no addresses.
+#   2. Let it listen for 10-15 minutes so the node table fills in, then watch
+#      the logs:  esphome logs boards/example-t-can485.yaml
+#   3. Press the "Generate YAML Config" button (it appears in Home Assistant).
+#      It prints a ready-to-paste `sensor:` block, one entry per discovered
+#      panel, with the real addresses filled in.
+#   4. Paste the entries you want under `sensor:` below and re-flash. Trim the
+#      per-panel values you do not care about — see the commented example at the
+#      bottom of the sensor list.
+#
+# "Print Device Mappings" dumps the same node table in a more compact form if
+# you just want to eyeball what has been seen.
+
+packages:
+  board: !include esp32-lilygo-t-can485.yaml
+
+# External components.
+#
+# Only `tigo_monitor` is pulled in — `tigo_server` is deliberately absent, since
+# the web server requires PSRAM this board does not have. Listing it explicitly
+# means ESPHome never even considers it.
+#
+# `refresh: 0s` re-checks the branch on every build. Drop it (or pin `ref:` to a
+# tag) once you are no longer tracking a moving branch.
+external_components:
+  - source:
+      type: git
+      url: https://github.com/rfpronk/esphome-tigomonitor
+      ref: feature/lilygo-t-can485
+    components: [tigo_monitor]
+    refresh: 0s
+
+wifi:
+  ssid: "YOUR_WIFI_SSID"
+  password: "YOUR_WIFI_PASSWORD"
+
+  # Enable fallback hotspot (captive portal) in case wifi connection fails
+  ap:
+    ssid: "Tigo-Monitor Fallback Hotspot"
+    password: "12345678"
+
+captive_portal:
+
+# Enable logging.
+#
+# Unlike the AtomS3R config, do NOT set `baud_rate: 0` here. The RS485 bus is on
+# GPIO21/22, a different hardware UART from the USB console on GPIO1/3, so USB
+# logging costs the Tigo bus nothing — and it is how you read the output of the
+# "Generate YAML Config" button.
+#
+# Keep this at INFO or lower; the button logs at INFO.
+logger:
+  level: INFO
+
+# Enable Home Assistant API — this is how every value below reaches HA.
+api:
+  # Strongly recommended. Generate one at https://esphome.io/components/api.html
+  # encryption:
+  #   key: "YOUR_BASE64_KEY"
+
+ota:
+  - platform: esphome
+    password: "YOUR_OTA_PASSWORD"
+
+# Tigo Monitor control buttons — your discovery tooling on a board with no web UI.
+button:
+  - platform: tigo_monitor
+    name: "Generate YAML Config"
+    id: generate_yaml_button
+    tigo_monitor_id: tigo_hub
+    button_type: yaml_generator
+  - platform: tigo_monitor
+    name: "Print Device Mappings"
+    id: device_mappings_button
+    tigo_monitor_id: tigo_hub
+    button_type: device_mappings
+  - platform: tigo_monitor
+    name: "Reset Node Table"
+    id: reset_node_table_button
+    tigo_monitor_id: tigo_hub
+    button_type: reset_node_table
+
+sensor:
+  # --- System totals (work immediately, no addresses needed) ----------------
+  # Aggregate sensors carry no `address:` — the component picks their type from
+  # keywords in the name, so keep the names' keywords intact if you rename them.
+  - platform: tigo_monitor
+    tigo_monitor_id: tigo_hub
+    name: "Total Solar Power"
+    id: total_solar_power
+    filters:
+      - sliding_window_moving_average:
+          window_size: 5
+          send_every: 1
+
+  - platform: tigo_monitor
+    tigo_monitor_id: tigo_hub
+    name: "Total System Energy"
+    id: total_system_energy
+
+  - platform: tigo_monitor
+    tigo_monitor_id: tigo_hub
+    name: "Discovered Devices Count"
+    id: discovered_devices_count
+
+  # --- Health -------------------------------------------------------------
+  - platform: tigo_monitor
+    tigo_monitor_id: tigo_hub
+    name: "Stale Panel Count"
+    id: stale_panel_count
+
+  - platform: tigo_monitor
+    tigo_monitor_id: tigo_hub
+    name: "Missed Frame Count"
+    id: missed_frame_count
+
+  # The number to watch on this board. There is no PSRAM to fall back on, so
+  # internal heap is the whole memory budget. A healthy install sits well above
+  # 100KB and stays flat; a steady decline means something is leaking.
+  # (Do not add a "PSRAM Free" sensor here — it would always read 0.)
+  - platform: tigo_monitor
+    tigo_monitor_id: tigo_hub
+    name: "Internal RAM Free"
+    id: internal_ram_free
+
+  - platform: tigo_monitor
+    tigo_monitor_id: tigo_hub
+    name: "Internal RAM Minimum"
+    id: internal_ram_min
+
+  # --- Board diagnostics ---------------------------------------------------
+  - platform: wifi_signal
+    name: "Tigo Monitor WiFi Signal"
+    id: wifi_rssi
+    update_interval: 60s
+
+  - platform: uptime
+    name: "Tigo Monitor Uptime"
+    id: uptime_sensor
+
+  # --- Per-panel sensors ---------------------------------------------------
+  # Paste the output of the "Generate YAML Config" button here. Each block looks
+  # like the following — `address` is the 4-character short address from the bus.
+  # Delete the value lines you do not want; every one you keep becomes its own
+  # Home Assistant entity, so 20 panels x 8 values is 160 entities.
+  #
+  # - platform: tigo_monitor
+  #   tigo_monitor_id: tigo_hub
+  #   address: "A1B2"
+  #   name: "Panel 1"
+  #   power_in: {}
+  #   voltage_in: {}
+  #   voltage_out: {}
+  #   power_out: {}
+  #   current_in: {}
+  #   current_out: {}
+  #   temperature: {}
+  #   rssi: {}
+
+text_sensor:
+  - platform: wifi_info
+    ip_address:
+      name: "Tigo Monitor IP Address"
+    ssid:
+      name: "Tigo Monitor Connected SSID"
+
+  - platform: version
+    name: "Tigo Monitor ESPHome Version"
+
+binary_sensor:
+  - platform: status
+    name: "Tigo Monitor Status"
+
+  # True once the bus has been quiet long enough to call it night — useful for
+  # suppressing "no production" alerts after sunset.
+  - platform: tigo_monitor
+    tigo_monitor_id: tigo_hub
+    night_mode:
+      name: "Tigo Night Mode"
+
+switch:
+  - platform: restart
+    name: "Tigo Monitor Restart"
+
+# Optional: gives the component a clock for daily energy rollover.
+time:
+  - platform: homeassistant
+    id: ha_time
+
+# Hand that clock to the hub. This deep-merges into the `tigo_monitor:` block
+# defined in the board package rather than replacing it, so the uart_id and
+# device count set there are preserved.
+tigo_monitor:
+  time_id: ha_time
