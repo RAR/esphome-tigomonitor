@@ -42,6 +42,23 @@ esp32:
   framework:
     type: esp-idf
     version: recommended
+    advanced:
+      # Both of these are ESP32-classic-only options, and both will refuse to
+      # boot if the assumption behind them is wrong. Read the caveats.
+      #
+      # Drop the IDF's workaround code for pre-rev-3.1 silicon bugs, which buys
+      # back flash. ⚠ The bootloader hard-checks this: a chip older than 3.1
+      # halts at boot with "chip revision ... project was configured for minimum
+      # revision". Confirm yours first — the boot log prints `chip revision:
+      # v3.1` — and lower this value if it says anything less.
+      minimum_chip_revision: '3.1'
+      # Hand SRAM1 (previously reserved as bootloader DRAM) to IRAM: +40KB.
+      # Pairs directly with CONFIG_UART_ISR_IN_IRAM below, which spends IRAM to
+      # keep the UART ISR off flash — this is where that budget comes from.
+      # ⚠ Needs an ESP-IDF v5.1+ bootloader. A USB flash updates the bootloader
+      # automatically; an OTA does NOT. So flash this board over USB the first
+      # time, or it will fail to boot.
+      sram1_as_iram: true
     sdkconfig_options:
       # Run the UART ISR from IRAM. This is the single most important setting
       # for frame loss — without it the ISR stalls whenever flash is busy and

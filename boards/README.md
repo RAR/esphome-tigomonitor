@@ -46,6 +46,14 @@ Assistant over the native API; it just cannot serve the dashboard.
   layout wants ~7MB — dual OTA slots plus a 3MB LittleFS partition — which 4MB
   cannot hold; Home Assistant keeps long-term history anyway), CCA/cloud import, BLE
 - **Ready-to-flash example**: `example-t-can485.yaml`
+- **⚠ Flash over USB the first time.** The config sets `sram1_as_iram` (+40KB of
+  IRAM, which is what pays for `CONFIG_UART_ISR_IN_IRAM`), and that needs an
+  ESP-IDF v5.1+ bootloader. A USB flash updates the bootloader automatically; an
+  OTA does not, so an OTA-first device will fail to boot.
+- **⚠ Assumes chip revision 3.1.** `minimum_chip_revision: '3.1'` drops the IDF's
+  workarounds for older silicon. The bootloader hard-checks it — an older chip
+  halts at boot. Your boot log prints `chip revision: v3.1`; lower the value in
+  the board file if yours reports less.
 
 Because there is no web UI on this board, panel discovery happens through the
 **"Generate YAML Config"** button, which prints a paste-ready `sensor:` block to
