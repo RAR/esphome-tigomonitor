@@ -13,6 +13,9 @@
 #endif
 
 #ifdef USE_ESP_IDF
+// Explicit, not incidental: psram_malloc() keys off CONFIG_SPIRAM, and a silently
+// missing sdkconfig.h would compile PSRAM out on boards that do have it.
+#include "sdkconfig.h"
 #include "esp_http_client.h"
 #include <esp_heap_caps.h>
 #include "cJSON.h"
@@ -24,8 +27,18 @@ namespace tigo_monitor {
 static const char *const TAG = "tigo_monitor";
 
 #ifdef USE_ESP_IDF
-// Helper function to allocate from PSRAM if available, falls back to regular heap
+// Helper function to allocate from PSRAM if available, falls back to regular heap.
+//
+// CONFIG_SPIRAM is set by the IDF only when the build actually has PSRAM
+// configured. On boards that have none — the LilyGO T-CAN485 wires GPIO16/17 to
+// its RS485 transceiver, which is exactly where a WROVER's PSRAM would sit —
+// the SPIRAM attempt can never succeed, so it is compiled out rather than paying
+// a doomed heap_caps_malloc (and emitting a "PSRAM unavailable" warning) on
+// every single allocation. The psram_* aliases still work there; they simply
+// resolve to the internal heap, which is sized fine for a sensors-only build
+// without the web server.
 static void* psram_malloc(size_t size) {
+#ifdef CONFIG_SPIRAM
   void* ptr = heap_caps_malloc(size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
   if (ptr) {
     // Only log large allocations to reduce spam
@@ -40,6 +53,9 @@ static void* psram_malloc(size_t size) {
     ESP_LOGW(TAG, "Allocated %zu bytes from regular heap (PSRAM unavailable)", size);
   }
   return ptr;
+#else
+  return heap_caps_malloc(size, MALLOC_CAP_DEFAULT);
+#endif
 }
 
 // Export for PSRAMAllocator in header
@@ -238,7 +254,11 @@ void TigoMonitorComponent::setup() {
     ESP_LOGI(TAG, "PSRAM available: %zu KB total, %zu KB free - using PSRAM for device/node storage", 
              psram_size / 1024, psram_free / 1024);
   } else {
-    ESP_LOGW(TAG, "No PSRAM detected - using regular heap (may limit device capacity)");
+    // A supported configuration for sensors-only builds (no tigo_server), which is
+    // what boards like the LilyGO T-CAN485 run — the device/node tables are a few KB
+    // and fit the internal heap comfortably. The web server is what needs PSRAM.
+    ESP_LOGI(TAG, "No PSRAM - using internal heap for device/node storage (%zu KB free)",
+             heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024);
   }
 #endif
 
@@ -247,14 +267,18 @@ void TigoMonitorComponent::setup() {
   node_table_.reserve(number_of_devices_);
   
 #ifdef USE_ESP_IDF
-  // Pre-allocate PSRAM buffer for incoming serial data (16KB capacity)
+  // Pre-allocate the incoming-serial buffer at its 16KB overflow cap so it never
+  // reallocates while accumulating a frame. Kept at full size on no-PSRAM boards
+  // too: one permanent block up front is precisely what keeps a small internal
+  // heap from fragmenting, and 16KB out of the ~180-200KB an ESP32 has free once
+  // WiFi is up is a cheap price for that.
   incoming_data_.reserve(16384);
   size_t internal_free = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
   size_t psram_free_after = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
   
   // Check stack watermark for this task
   UBaseType_t stack_high_water = uxTaskGetStackHighWaterMark(NULL);
-  ESP_LOGI(TAG, "Pre-allocated 16KB PSRAM buffer for incoming serial data");
+  ESP_LOGI(TAG, "Pre-allocated 16KB buffer for incoming serial data");
   ESP_LOGI(TAG, "Memory after allocation - Internal: %zu KB free, PSRAM: %zu KB free", 
            internal_free / 1024, psram_free_after / 1024);
   ESP_LOGI(TAG, "Stack high water mark: %u bytes free (monitor for stack overflow)", 
