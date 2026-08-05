@@ -97,6 +97,12 @@ button:
     id: reset_node_table_button
     tigo_monitor_id: tigo_hub
     button_type: reset_node_table
+  # Re-runs the CCA query on demand. Only useful with `cca_ip` set below.
+  - platform: tigo_monitor
+    name: "Sync from CCA"
+    id: sync_from_cca_button
+    tigo_monitor_id: tigo_hub
+    button_type: sync_from_cca
 
 sensor:
   # --- System totals (work immediately, no addresses needed) ----------------
@@ -205,8 +211,29 @@ time:
   - platform: homeassistant
     id: ha_time
 
-# Hand that clock to the hub. This deep-merges into the `tigo_monitor:` block
-# defined in the board package rather than replacing it, so the uart_id and
-# device count set there are preserved.
+# Deep-merges into the `tigo_monitor:` block defined in the board package rather
+# than replacing it, so the uart_id and device count set there are preserved.
 tigo_monitor:
   time_id: ha_time
+
+  # --- Panel names from the CCA (optional but recommended) -----------------
+  # Uncomment and set your CCA's IP to get real panel names, string labels and
+  # MPPT/inverter grouping instead of bare barcodes. This is plain HTTP from the
+  # component to the CCA — it needs no PSRAM and no web server, so it works fine
+  # on this board.
+  #
+  # The component GETs http://<ip>/cgi-bin/summary_config with the CCA's default
+  # credentials (Tigo:$olar, hardcoded), then fuzzy-matches the barcodes it finds
+  # against the addresses discovered on the bus.
+  #
+  # Note this is NOT what the BLE CCA bridge does — that only fetches CCA device
+  # and network info (DEVICE_PING / DEVICE_INFO) and never touches panel layout.
+  # If your CCA runs firmware 4.0.4+ it may refuse this endpoint, in which case
+  # layout has to come from the Tigo cloud import, which needs the web UI.
+  #
+  # Verify the endpoint answers before enabling — note the SINGLE quotes, or the
+  # shell eats `$olar`:
+  #   curl -s -u 'Tigo:$olar' http://YOUR-CCA-IP/cgi-bin/summary_config | head
+  #
+  # cca_ip: "192.168.1.50"
+  # sync_cca_on_startup: true   # default; syncs ~15s after boot
