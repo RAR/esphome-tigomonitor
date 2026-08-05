@@ -88,7 +88,8 @@ button:
     on_press:
       - lambda: 'id(tigo_web).cca_ble_disconnect();'
 
-# Stub sections — required so ESPHome generates the headers the components include.
+# Not required any more (tigo_monitor AUTO_LOADs these); kept to cover the
+# explicitly-declared case.
 sensor:
   - platform: tigo_monitor
     tigo_monitor_id: tigo_hub
