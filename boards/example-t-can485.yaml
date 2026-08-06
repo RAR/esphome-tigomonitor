@@ -43,8 +43,8 @@ packages:
 external_components:
   - source:
       type: git
-      url: https://github.com/rfpronk/esphome-tigomonitor
-      ref: feature/lilygo-t-can485
+      url: https://github.com/RAR/esphome-tigomonitor
+      ref: main 
     components: [tigo_monitor]
     refresh: 0s
 
