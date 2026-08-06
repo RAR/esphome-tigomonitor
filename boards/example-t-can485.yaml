@@ -59,6 +59,18 @@ wifi:
 
 captive_portal:
 
+# Onboard led, useful for debugging and simple state display
+light:
+  - platform: esp32_rmt_led_strip
+    rgb_order: GRB
+    pin:
+      number: 4
+    num_leds: 1
+    chipset: ws2812
+    name: "Onboard RGB LED"
+    id: onboard_led
+    icon: mdi:led-on
+
 # Enable logging.
 #
 # Unlike the AtomS3R config, do NOT set `baud_rate: 0` here. The RS485 bus is on
