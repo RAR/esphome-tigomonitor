@@ -43,9 +43,18 @@ esp32:
     type: esp-idf
     version: recommended
     advanced:
-      # Drop the IDF's workaround code for pre-rev-3.1 silicon bugs, which buys
+      # Drop the IDF's workaround code for pre-rev-3 silicon bugs, which buys
       # back flash.
-      minimum_chip_revision: '3.1'
+      #
+      # 3.0 (ECO3), not 3.1 (ECO4), on purpose. Every revision-gated conditional
+      # in IDF 5.5.5 tests `CONFIG_ESP32_REV_MIN_FULL >= 300`, which 3.0 already
+      # satisfies — nothing anywhere in the tree tests >= 301, and REV_MIN_3 and
+      # REV_MIN_3_1 select an identical option set. So 3.1 buys no extra flash,
+      # and ESPHome turns this into a hard floor (it sets CONFIG_ESP32_REV_MIN_*
+      # for the chosen revision and clears the rest). Asking for 3.1 would make
+      # the firmware refuse to boot on ECO3 parts, which are the common ones —
+      # and it fails at boot, not at build, so the user just sees a bootloop.
+      minimum_chip_revision: '3.0'
       # Hand SRAM1 (previously reserved as bootloader DRAM) to IRAM: +40KB.
       # Pairs nicely with CONFIG_UART_ISR_IN_IRAM below, which spends IRAM to
       # keep the UART ISR off flash — this is where that budget comes from.

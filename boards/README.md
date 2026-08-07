@@ -40,8 +40,15 @@ Assistant over the native API; it just cannot serve the dashboard.
 - **RS485**: built-in isolated transceiver on GPIO21 (RX) / GPIO22 (TX), with
   three enable lines (GPIO16 5V boost, GPIO17 `/RE`, GPIO19 `/SHDN`) that the
   board file drives high at boot
-- **Recommended for**: Home-Assistant-only installations (~20 devices, 40 is
-  still comfortable)
+- **Recommended for**: Home-Assistant-only installations. Tested at 18 devices;
+  40 should fit — each optimizer costs roughly 600 bytes across the device and
+  node tables, so 40 is ~24KB of the ~130KB left free once WiFi is up. Those are
+  many small heap allocations rather than one block, so on a board with no PSRAM
+  the practical ceiling is fragmentation, not total bytes
+- **First flash must be over USB**: the board file enables `sram1_as_iram`, which
+  needs an ESP-IDF v5.1+ bootloader. A USB flash updates the bootloader; an OTA
+  does not, so OTA-ing an existing device onto this config leaves it unable to
+  boot
 - **Excludes**: `tigo_server` (needs PSRAM), on-flash history (the smallest tsdb
   layout wants ~7MB — dual OTA slots plus a 3MB LittleFS partition — which 4MB
   cannot hold; Home Assistant keeps long-term history anyway), CCA/cloud import, BLE

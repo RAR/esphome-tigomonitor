@@ -44,7 +44,7 @@ external_components:
   - source:
       type: git
       url: https://github.com/RAR/esphome-tigomonitor
-      ref: main 
+      ref: main
     components: [tigo_monitor]
     refresh: 0s
 
