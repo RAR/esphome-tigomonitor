@@ -62,6 +62,8 @@ PSRAM is required for 15+ devices. Custom STL-compatible allocators (`PSRAMAlloc
 
 Always use PSRAM containers for large data. Internal RAM is <200KB; PSRAM is 8MB. Use `#ifdef USE_ESP_IDF` guards for PSRAM types.
 
+**Boards without PSRAM** (e.g. `boards/esp32-lilygo-t-can485.yaml`) are supported for *sensors-only* builds — `tigo_monitor` without `tigo_server`. The `psram_*` aliases still compile there; `psram_malloc()` keys off the IDF's `CONFIG_SPIRAM` and resolves straight to the internal heap when it is unset, so no call site changes. Keep it that way: gate on `CONFIG_SPIRAM` inside the allocator rather than sprinkling new `#ifdef`s at usage sites, and never assume `USE_ESP_IDF` implies PSRAM exists. The web server genuinely does require PSRAM and must stay out of those configs.
+
 ### Web Server
 
 5 HTML pages (`/`, `/nodes`, `/status`, `/yaml`, `/cca`) + JSON API endpoints (`/api/devices`, `/api/overview`, `/api/strings`, `/api/status`, `/api/health`, `/api/inverters`, `/api/energy-history`). Auth: `api_token` for API, HTTP Basic for HTML pages. All responses built in PSRAM via `PSRAMString`.
@@ -77,7 +79,7 @@ Fuzzy barcode matching (`match_barcode()`): compares last 6 chars of UART-discov
 - **JSON field naming**: `snake_case` in JSON, `kebab-case` in HTML IDs, `camelCase` in JavaScript
 - **When renaming methods** in `tigo_monitor.h`, update all call sites: header → member variable → web server → Python config → JavaScript
 - **When changing any `/api/*` JSON shape** (rename a field, restructure a response), update `site/screenshots/fixtures.mjs` in the same commit. The docs screenshots are rendered from the real `app.html` against those fixtures at build time — a stale fixture doesn't fail the build, it publishes screenshots of a UI rendering `undefined`. Check with `cd site && npm run screenshots` — which also refreshes the committed README images in `docs/images/`, so commit those too
-- **Sensor/text_sensor/binary_sensor sections** must be declared in YAML (even if empty) or compilation fails with missing header errors
+- **Sensor/text_sensor/binary_sensor** are pulled in by `AUTO_LOAD` in `tigo_monitor/__init__.py`, because `tigo_monitor.h` includes all three unconditionally. YAML no longer needs to declare empty stanzas for them. If you add an unconditional `#include` of another ESPHome component to that header, add it to `AUTO_LOAD` too — otherwise configs that don't happen to use it fail with "No such file or directory". Prefer a `USE_*` guard (as `time`/`button` already do) when the dependency is genuinely optional
 - `CONFIG_UART_ISR_IN_IRAM: "y"` in sdkconfig is required for reduced frame loss
 
 ## Git Workflow

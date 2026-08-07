@@ -9,6 +9,18 @@ from esphome.core import coroutine, CORE
 
 DEPENDENCIES = ['uart']
 
+# tigo_monitor.h includes sensor.h, text_sensor.h and binary_sensor.h
+# unconditionally (unlike time/button, which sit behind USE_TIME / USE_BUTTON).
+# ESPHome only copies a component's sources into the build when that component
+# appears in the config, so a YAML without a `text_sensor:` key used to fail with
+# "fatal error: esphome/components/text_sensor/text_sensor.h: No such file or
+# directory" — and the fix was an undiscoverable empty stanza the user had to
+# know to add. AUTO_LOAD pulls the three in whenever tigo_monitor is used, which
+# is what it is for. Note this loads ESPHome's core sensor/text_sensor/
+# binary_sensor components, not this package's same-named platform files; those
+# still load only when a `- platform: tigo_monitor` entry asks for them.
+AUTO_LOAD = ['sensor', 'text_sensor', 'binary_sensor']
+
 tigo_monitor_ns = cg.esphome_ns.namespace('tigo_monitor')
 TigoMonitorComponent = tigo_monitor_ns.class_('TigoMonitorComponent', cg.PollingComponent, uart.UARTDevice)
 
