@@ -15,6 +15,7 @@
 #ifdef USE_ESP_IDF
 #include "esp_http_client.h"
 #include <esp_heap_caps.h>
+#include <esp_system.h>
 #include "cJSON.h"
 #endif
 
@@ -207,8 +208,33 @@ const uint8_t TigoMonitorComponent::tigo_crc_table_[256] = {
   0x6,0x5,0x0,0x3,0xA,0x9,0xC,0xF,0xD,0xE,0xB,0x8,0x1,0x2,0x7,0x4
 };
 
+const char *reset_reason_str() {
+#ifdef USE_ESP_IDF
+  switch (esp_reset_reason()) {
+    case ESP_RST_POWERON:   return "poweron";    // cold power-up
+    case ESP_RST_EXT:       return "external";   // reset pin
+    case ESP_RST_SW:        return "software";   // esp_restart(), incl. OTA
+    case ESP_RST_PANIC:     return "panic";      // exception / abort — a firmware bug
+    case ESP_RST_INT_WDT:   return "int_wdt";    // interrupt watchdog
+    case ESP_RST_TASK_WDT:  return "task_wdt";   // task watchdog — e.g. a stalled commit
+    case ESP_RST_WDT:       return "other_wdt";
+    case ESP_RST_DEEPSLEEP: return "deepsleep";
+    case ESP_RST_BROWNOUT:  return "brownout";   // supply sagged — mains blip or a transient
+    case ESP_RST_SDIO:      return "sdio";
+    default:                return "unknown";    // ESP_RST_UNKNOWN: RTC memory lost the cause
+  }
+#else
+  return "unknown";
+#endif
+}
+
 void TigoMonitorComponent::setup() {
   ESP_LOGCONFIG(TAG, "Setting up Tigo Server...");
+
+  // First thing logged, so it is the top of the boot record. Distinguishes an
+  // environmental reset (brownout) from a firmware one (panic, task_wdt) —
+  // see reset_reason_str() for why /api/status carries this too.
+  ESP_LOGI(TAG, "Reset reason: %s", reset_reason_str());
 
   // Every cJSON_Parse from here on allocates from PSRAM (node import, CCA sync, cloud layout).
   tigo_cjson_use_psram();
