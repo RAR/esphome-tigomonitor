@@ -82,31 +82,36 @@ scales linearly with it, in both directions:
 
 | Interval | Per-panel history | System history | Device time spent writing | Chart resolution |
 |----------|-------------------|----------------|---------------------------|------------------|
-| 10 min | ~5 weeks | ~7 months | ~3.5% | finest |
-| **30 min (default)** | **~4 months** | **~2 years** | **~1.2%** | balanced |
-| 60 min | ~7.5 months | ~3.7 years | ~0.6% | coarse |
+| 10 min | ~5 weeks | ~7 months | ~0.1% | finest |
+| **30 min (default)** | **~4 months** | **~2 years** | **~0.04%** | balanced |
+| 60 min | ~7.5 months | ~3.7 years | ~0.02% | coarse |
 
-The low end costs more than the resolution alone suggests. Writing a snapshot
-takes about **21 seconds**, and the device holds its history lock for all of it,
-so chart requests arriving mid-write have to wait it out (they allow 30 s before
-giving up). Flash wear rises by the same factor. Values under 15 minutes log a
-build-time warning.
+Writing a snapshot takes about **0.65 seconds**, and the device holds its history
+lock for all of it, so a chart request arriving mid-write waits that long. Flash
+wear still rises as the interval shortens. Values under 15 minutes log a
+build-time warning — retention, not write cost, is now the reason to think twice.
 
-That 21 seconds is a fixed cost per snapshot, not proportional to how much data
-you store — a 1 MB database and a 192 KB one measure the same. So the interval
-controls how much of the device's time goes into writing history, and it's the
-only lever that does.
-
-:::caution[Known limitation]
-21 seconds is slower than it should be and the cause isn't yet understood. Two
-likely explanations were tested and ruled out: it doesn't scale with file size,
-and it isn't the number of filesystem syncs. Until that's solved, treat short
-intervals as genuinely expensive rather than merely finer.
-:::
+The main cost of a short interval is span: each database holds a fixed number of
+rows however often you fill it, so twice the detail is half the history.
 
 Changing the interval later is safe: `period_e_*` stores energy since the
 previous snapshot rather than a running total, so lifetime figures stay correct
 across a change and existing history is not invalidated.
+
+:::note[Why this needs a forked esp_tsdb]
+A snapshot used to take **21 seconds**, and the reference config pins a fork of
+`esp_tsdb` to avoid it. Upstream writes the database header in place at offset 0
+on every commit. LittleFS stores a file as a skip-list of block *addresses*, so
+changing byte N forces every block after N to be rewritten — overwrite cost is
+linear at about 20.4 ms/KB, while appends stay flat at ~170 ms whatever the size.
+Rewriting the header at offset 0 is therefore the most expensive write the
+filesystem offers, and it accounted for 15.2 s of the 21 s.
+
+The fork writes the header to an alternating sidecar file (`<db>.h0` / `<db>.h1`)
+so the hot path appends instead. Measured on the reference rig over 132 commits:
+median 633 ms, maximum 1,019 ms, with no upward drift as the databases fill. The
+change is not upstream yet, so the board config pins the fork by commit SHA.
+:::
 
 > **Board note:** the `board:` value above (`m5stack-atoms3`) is an example. The reference rig for this project is the **AtomS3R** — set `board:` to whatever board you actually run so you don't flash the wrong target.
 

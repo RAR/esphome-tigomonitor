@@ -33,10 +33,24 @@ esp32:
     components:
       # Time-series database for persistent history
       # (see https://rar.github.io/esphome-tigomonitor/guides/tsdb-integration/).
-      # 2.1.0 is the first upstream release with the handle-based multi-instance
-      # API and the wrapped-ring query fix this project depends on; the caret
-      # resolves to 2.3.0.
-      - zakery292/esp_tsdb^2.1.0
+      #
+      # Pinned to a fork, not the registry's 2.3.0, for the sidecar header.
+      # Upstream writes the database header in place at offset 0 on every
+      # commit. LittleFS stores a file as a skip-list of block addresses, so
+      # modifying byte N rewrites every block after N — overwrite cost is linear
+      # at ~20.4 ms/KB, measured across a 190x size range. That made a commit
+      # 21.4 s (15.2 s of it header rewrites) and growing as the databases fill.
+      #
+      # The fork writes the header to an alternating sidecar (<db>.h0/.h1), so
+      # the hot path appends instead of rewriting: 21.4 s -> 633 ms median,
+      # 1,019 ms max over 132 commits on the rig, with no drift as they fill.
+      # It also adds tsdb_peek_span. Neither is upstream yet.
+      #
+      # An immutable SHA rather than a branch: a branch can move under a build,
+      # and this is the reference config people copy.
+      - name: zakery292/esp_tsdb
+        source: https://github.com/RAR/esp_tsdb.git
+        ref: 3fb785ffe0e280e7645a598f1cf82f6babe72143
       # LittleFS — backing filesystem for the tsdb partition
       - joltwallet/littlefs^1.16
     sdkconfig_options:
