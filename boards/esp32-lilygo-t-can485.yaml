@@ -1,0 +1,163 @@
+# LilyGO T-CAN485 Configuration
+# Classic ESP32 (dual-core, 240MHz), 4MB flash, NO PSRAM
+# Built-in isolated RS485 transceiver on GPIO21/GPIO22
+# Recommended for: sensors-only installations feeding Home Assistant (max ~40 devices)
+#
+# https://lilygo.cc/en-us/products/t-can485
+#
+# WHY THERE IS NO PSRAM HERE, AND WHY THAT IS FINE
+# ------------------------------------------------
+# The T-CAN485 carries a plain ESP32-WROOM-class module. It cannot have PSRAM:
+# LilyGO wired GPIO16 and GPIO17 to the RS485 front end, and those are exactly
+# the pins a WROVER uses to talk to its PSRAM die.
+#
+# PSRAM is a hard requirement for `tigo_server` (the web UI builds whole HTML
+# pages and JSON API responses in memory — several KB per request, from the
+# httpd task). It is NOT a requirement for `tigo_monitor`, whose device and node
+# tables total a few KB. So this board file omits `tigo_server:` entirely and
+# publishes everything through the native Home Assistant API instead.
+#
+# Do not add `tigo_server:` to a config based on this file. It will compile, and
+# then fragment the internal heap to OOM under dashboard polling.
+#
+# What you give up without the web server: the built-in dashboard, the REST API,
+# the on-flash history graphs, CCA/cloud layout import, and the BLE CCA bridge.
+# (History was out of reach on this board regardless — the smallest tsdb layout,
+# partitions/tigo-8mb.csv, wants ~7MB for dual OTA slots plus a 3MB LittleFS
+# partition. 4MB cannot hold both, and Home Assistant records long-term history
+# far better than the device can anyway.)
+# What you keep: every sensor value, for Home Assistant.
+
+esphome:
+  name: tigo-monitor
+  friendly_name: "Tigo Monitor"
+
+esp32:
+  board: esp32dev
+  flash_size: 4MB
+  # No `partitions:` — the repo's tigo-*.csv tables carve out a `tsdb` partition
+  # for the history database and assume 8/16MB. ESPHome's stock 4MB table (two
+  # 1.75MB OTA slots) is the right choice here, and leaves room to spare once
+  # the web server is out of the build.
+  framework:
+    type: esp-idf
+    version: recommended
+    advanced:
+      # Drop the IDF's workaround code for pre-rev-3 silicon bugs, which buys
+      # back flash.
+      #
+      # 3.0 (ECO3), not 3.1 (ECO4), on purpose. Every revision-gated conditional
+      # in IDF 5.5.5 tests `CONFIG_ESP32_REV_MIN_FULL >= 300`, which 3.0 already
+      # satisfies — nothing anywhere in the tree tests >= 301, and REV_MIN_3 and
+      # REV_MIN_3_1 select an identical option set. So 3.1 buys no extra flash,
+      # and ESPHome turns this into a hard floor (it sets CONFIG_ESP32_REV_MIN_*
+      # for the chosen revision and clears the rest). Asking for 3.1 would make
+      # the firmware refuse to boot on ECO3 parts, which are the common ones —
+      # and it fails at boot, not at build, so the user just sees a bootloop.
+      minimum_chip_revision: '3.0'
+      # Hand SRAM1 (previously reserved as bootloader DRAM) to IRAM: +40KB.
+      # Pairs nicely with CONFIG_UART_ISR_IN_IRAM below, which spends IRAM to
+      # keep the UART ISR off flash — this is where that budget comes from.
+      # ⚠ Needs an ESP-IDF v5.1+ bootloader. A USB flash updates the bootloader
+      # automatically; an OTA does NOT. So flash this board over USB the first
+      # time, or it will fail to boot.
+      sram1_as_iram: true
+    sdkconfig_options:
+      # Run the UART ISR from IRAM. This is the single most important setting
+      # for frame loss — without it the ISR stalls whenever flash is busy and
+      # Tigo frames get dropped mid-burst.
+      CONFIG_UART_ISR_IN_IRAM: "y"
+      # 240MHz. The classic ESP32 defaults to 160MHz under ESP-IDF; the headroom
+      # goes to keeping up with the RS485 bus while WiFi is active.
+      CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240: "y"
+      CONFIG_LOG_DEFAULT_LEVEL_INFO: "y"
+
+# NOTE: deliberately no `psram:` block — see the header comment.
+
+# --- RS485 front end ---------------------------------------------------------
+# The transceiver is a MAX13487E (confirmed from LilyGO's doc/schematic.pdf). At
+# reset the ESP32 leaves these pins as floating inputs, so it comes up in an
+# undefined state and you get no bus data. All three must be driven HIGH — which
+# is what LilyGO's own example does (example/Arduino/RS485/RS485.ino), and per the
+# MAX13487E datasheet HIGH is the correct level for each for a different reason:
+#
+#   GPIO16  5V_EN  — ME2107 boost that feeds the transceiver.
+#   GPIO17  /RE    — receiver enable, and it is NOT simply "active low = on".
+#                    LOW force-enables RO permanently; HIGH hands the receiver to
+#                    the chip's AutoDirection state machine, which is the mode
+#                    this board is built around. HIGH is what you want.
+#   GPIO19  SHDN   — "drive SHDN high for normal operation". Pulling this LOW
+#                    shuts down the ENTIRE transceiver, receiver included — it is
+#                    not a transmit disable. Do not use it to try to enforce
+#                    read-only; you would just go deaf.
+#
+# The MAX13487E has no DE pin — driver enable is generated internally from DI
+# activity — so there is no way to strap this board driver-off in hardware. See
+# the read-only note under the UART section below.
+#
+# `internal: true` keeps them out of Home Assistant — they are board wiring, not
+# something anyone should be able to toggle from a dashboard.
+switch:
+  - platform: gpio
+    id: rs485_power_5v
+    name: "RS485 5V Enable"
+    internal: true
+    pin: GPIO16
+    restore_mode: ALWAYS_ON
+  - platform: gpio
+    id: rs485_auto_direction
+    name: "RS485 AutoDirection Enable"
+    internal: true
+    pin: GPIO17          # /RE high => AutoDirection controls the receiver
+    restore_mode: ALWAYS_ON
+  - platform: gpio
+    id: rs485_chip_enable
+    name: "RS485 Chip Enable"
+    internal: true
+    pin: GPIO19          # SHDN high => normal operation (low = whole chip off)
+    restore_mode: ALWAYS_ON
+
+# --- Tigo bus ----------------------------------------------------------------
+# GPIO21/22 is a hardware UART separate from the USB console on GPIO1/3, so
+# unlike the AtomS3R config you can keep `logger:` on its default UART0 and watch
+# the device over USB while it reads the bus. Do NOT set `logger: baud_rate: 0`.
+#
+# READ-ONLY NOTE. The project's wiring guide guarantees passive listening by
+# strapping a MAX485's DE/RE low, so the driver is off in hardware. That is not
+# available here: the MAX13487E exposes no DE pin, and its AutoDirection state
+# machine enables the driver on its own whenever it sees activity on DI (GPIO22).
+# Neither enable pin above can substitute. /RE appears only in the datasheet's
+# RECEIVING function table — driving it low force-enables RO ("always listening")
+# and does not gate the driver at all. SHDN kills the whole chip, receiver
+# included.
+#
+# So read-only rests on software: tigo_monitor contains no UART write calls at
+# all, it only ever reads. Keep it that way — do not attach any other component
+# to tigo_uart.
+#
+# ⚠ If you harden this by removing tx_pin, you MUST also hold GPIO22 HIGH with a
+# fourth ALWAYS_ON gpio switch. Do not simply delete the line and leave the pin
+# floating. Per the TRANSMITTING function table the driver turns ON when DI is
+# LOW (SHDN=1, DI=0 => "Turn driver ON"), so a floating or low DI can make the
+# board drive your Tigo bus — the exact opposite of what you wanted. HIGH is the
+# UART idle/mark level and leaves the driver off.
+uart:
+  id: tigo_uart
+  tx_pin: GPIO22
+  rx_pin: GPIO21
+  baud_rate: 38400
+  data_bits: 8
+  parity: NONE
+  stop_bits: 1
+  rx_buffer_size: 2048
+
+# --- Tigo Monitor ------------------------------------------------------------
+tigo_monitor:
+  id: tigo_hub
+  uart_id: tigo_uart
+  # Internal heap, not PSRAM. The device + node tables run roughly 600 bytes per
+  # optimizer, so 20 costs ~12KB of the ~180-200KB an ESP32 has free once WiFi is
+  # up — comfortable. Raising this to 40 is still fine on this board; watch the
+  # "Internal RAM Free" sensor if you go further.
+  number_of_devices: 20
+  update_interval: 30s

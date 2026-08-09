@@ -40,8 +40,9 @@ ota:
     password: !secret ota_password
     allow_partition_access: true
 
-# Stub sections — required so ESPHome generates the sensor/text_sensor/
-# binary_sensor headers the components include.
+# tigo_monitor AUTO_LOADs sensor/text_sensor/binary_sensor, so these are no
+# longer required. Kept so this target still covers the explicitly-declared
+# case, and because the sensor entries exercise real codegen paths.
 sensor:
   - platform: tigo_monitor
     tigo_monitor_id: tigo_hub
