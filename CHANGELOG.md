@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.0-rc.1] - 2026-08-09
+
 ### Added
 - **LilyGO T-CAN485 support, for Home-Assistant-only installs.** A board with no PSRAM can now run a sensors-only build — `tigo_monitor` without `tigo_server` — and feed every value to Home Assistant over the native API. PSRAM was never a requirement of the monitor itself: the device and node tables run about 600 bytes per optimizer, so twenty of them cost ~12 KB of the ~180-200 KB an ESP32 has free once WiFi is up. It is the web server that needs PSRAM, and it stays out of these configs. `boards/esp32-lilygo-t-can485.yaml` sets up the board's built-in isolated RS485 transceiver (GPIO21/22, plus the three enable lines LilyGO's own example drives high at boot), and `boards/example-t-can485.yaml` is ready to flash. The Config Builder offers it too, restricted to exactly this shape: selecting it hides the CCA, cloud and display options, because every one of them is a web-server feature, and clears them if you had them set on another board. What you give up: the dashboard, the REST API, on-flash history, CCA/cloud import, and BLE.
 - **Docs screenshots generate themselves.** The guides now show the real device UI — dashboard, history, topology, node table, diagnostics — rendered during the docs build by driving the actual `app.html` against synthetic API responses. No firmware, no hardware, and nothing committed: the images are rebuilt from the current UI every time, so they cannot drift from it. All data is invented, with IPs and MACs from the IETF documentation ranges and a reserved fake-serial prefix, enforced by a test so a real serial, SSID or address can't reach a published page.

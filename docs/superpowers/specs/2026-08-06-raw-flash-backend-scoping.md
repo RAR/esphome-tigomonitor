@@ -1,6 +1,7 @@
 # Raw-flash backend for esp_tsdb — scoping study
 
-**Status:** scoping only. Not a proposal to build. No decision implied.
+**Status:** CLOSED 2026-08-09 — decided against. Kept for the cost model and the
+dead theories, not as a live proposal.
 **Date:** 2026-08-06
 **Question:** do we need littlefs, or can esp_tsdb write directly to a flash partition?
 
@@ -12,9 +13,18 @@ format break**, and the performance case is already largely won by the sidecar
 header (21.4 s → 196 ms + 757 ms per commit). Estimated cost is **2.5–3 weeks
 of engineering plus a week of soak**.
 
-The recommendation is to hold until the open crash has a diagnosed cause. If
-the crash is flash- or cache-related, this becomes the fix and jumps the queue.
-If not, it is a large investment in a number that has stopped hurting.
+**Outcome.** Both conditions this was held on have since resolved against it:
+
+- The crash was diagnosed on 2026-08-08 as **environmental, not flash**. A storm
+  took down everything on a shared PoE-fed 24 V supply, and the device reported
+  `reset_reason: poweron` — a cold start, not a panic or watchdog. Nothing here
+  would have prevented it.
+- The commit cost was fixed a different way. The sidecar header (merged in #45)
+  took a commit from 21.4 s to 633 ms median without a format break, which is
+  the bulk of what raw flash was for.
+
+So this is a large investment in a number that has stopped hurting, to maybe fix
+a crash that turned out to be a power problem. Not proceeding.
 
 ## Why littlefs is the source of the pain
 
@@ -133,26 +143,22 @@ The performance case is mostly spent. The sidecar already took commits from
 is no longer a problem, and it costs a format break plus re-earning the
 crash-safety properties littlefs gives us for free.
 
-The case that *would* justify it is the unexplained reset at 23.5 h uptime
-(2026-08-05 16:32:34). Raw flash cuts total flash-busy time by orders of
-magnitude, so if the crash is flash- or cache-related this becomes the actual
-fix rather than an optimisation. But that cause is currently **undiagnosed** —
-there is no coredump partition and the boot banner was missed. A watcher is now
-running to capture the reset reason on the next event.
-
-Committing 3 weeks of storage-layer rewrite to maybe fix an undiagnosed crash
-is backwards. Diagnose first.
+The case that *would* have justified it was the unexplained reset at 23.5 h
+uptime (2026-08-05 16:32:34). That has since been diagnosed as a power event,
+not a flash one — see the Outcome section above. Diagnosing first was the right
+call: the instrumentation that answered it (`reset_reason` in `/api/status`) cost
+an afternoon, against the three weeks this would have taken.
 
 ## Knock-on
 
-The rolling-files plan
-(`docs/superpowers/plans/2026-08-04-panel-rolling-files.md`, 9 tasks) is a
-littlefs workaround. If raw flash goes ahead, that plan is **deleted rather
-than implemented**. Both should be held on the same signal.
+The rolling-files plan was a littlefs workaround for the same eviction cliff.
+The sidecar header addressed the dominant cost without it, so it was never
+written up as a task list and is not needed.
 
 ## Open questions
 
-- Does the reset reason implicate flash/cache? Decides everything above.
+- ~~Does the reset reason implicate flash/cache?~~ **Answered 2026-08-09: no.**
+  `reset_reason: poweron`, and everything else on the same supply reset with it.
 - Migration: in-firmware converter, or export/reflash/import? Affects the
   2-day estimate and whether a serial reflash is needed.
 - One partition per database, or sub-allocation within the existing 3 MB
