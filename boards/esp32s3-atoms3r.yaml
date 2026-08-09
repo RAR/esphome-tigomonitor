@@ -50,7 +50,7 @@ esp32:
       # and this is the reference config people copy.
       - name: zakery292/esp_tsdb
         source: https://github.com/RAR/esp_tsdb.git
-        ref: 3fb785ffe0e280e7645a598f1cf82f6babe72143
+        ref: ebfc360f00263ab90116ee3e556a9153ab4041a2
       # LittleFS — backing filesystem for the tsdb partition
       - joltwallet/littlefs^1.16
     sdkconfig_options:
