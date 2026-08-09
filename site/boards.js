@@ -18,7 +18,7 @@ export const BOARDS = [
     frameworkComponents: ['joltwallet/littlefs^1.16'],
     hostedComponent: {
       source: 'https://github.com/RAR/esp_tsdb.git',
-      ref: '3fb785ffe0e280e7645a598f1cf82f6babe72143',
+      ref: 'ebfc360f00263ab90116ee3e556a9153ab4041a2',
     },
     sdkconfig: {
       CONFIG_ESP32S3_DEFAULT_CPU_FREQ_240: 'y',
@@ -239,7 +239,9 @@ font:
     // boards crash-loop at boot with esp_task_stack_is_sane_cache_disabled (#31).
     frameworkAdvanced: { enable_idf_experimental_features: true, execute_from_psram: true },
     frameworkComponents: ['joltwallet/littlefs^1.16'],
-    hostedComponent: { source: 'https://github.com/RAR/esp_tsdb.git', ref: 'tigomonitor' },
+    // Same ref as the AtomS3R: the P4 needs the fork for its manifest target,
+    // and every board needs it for the sidecar header. Was `tigomonitor` (2.0.3).
+    hostedComponent: { source: 'https://github.com/RAR/esp_tsdb.git', ref: 'ebfc360f00263ab90116ee3e556a9153ab4041a2' },
     sdkconfig: {
       CONFIG_ESP32P4_DEFAULT_CPU_FREQ_400: 'y',
       CONFIG_UART_ISR_IN_IRAM: 'y',

@@ -25,12 +25,13 @@ esp32:
       # esp_task_stack_is_sane_cache_disabled (discussion #31).
       execute_from_psram: true
     components:
-      # Upstream 2.1.0 has everything we need code-wise, but its manifest still
-      # lacks the esp32p4 target, so P4 stays on the RAR/esp_tsdb fork's
-      # `tigomonitor` branch (= 2.1.0 + esp32p4 manifest entry) until that lands.
+      # Same fork ref as the board configs: needed on P4 because upstream's
+      # manifest still lacks the esp32p4 target, and needed everywhere for the
+      # sidecar header (21.4 s -> 633 ms per history commit). Replaces the
+      # `tigomonitor` branch, which sat at 2.0.3 and had neither.
       - name: zakery292/esp_tsdb
         source: https://github.com/RAR/esp_tsdb.git
-        ref: tigomonitor
+        ref: ebfc360f00263ab90116ee3e556a9153ab4041a2
       # LittleFS — backing filesystem for the tsdb partition
       - joltwallet/littlefs^1.16
     sdkconfig_options:
