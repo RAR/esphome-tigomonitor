@@ -320,17 +320,18 @@ void TigoMonitorComponent::setup() {
   // and creates system.tsdb if absent. On success, start the writer task and
   // schedule the snapshot interval.
   //
-  // Cadence and the reasoning behind it live on kSnapshotIntervalMin in
-  // tigo_history.h — it is a crash-exposure dial, not a resolution preference.
+  // Cadence comes from `history_interval` (default kDefaultSnapshotIntervalMin);
+  // tigo_history.h documents what lowering it costs in flash wear and in the
+  // odds of a history request colliding with a ~21 s commit.
   if (history_.init() && history_.start_writer_task()) {
     last_snapshot_total_e_kwh_ = total_energy_in_kwh_;
     for (size_t i = 0; i < 4; ++i)
       last_snapshot_inv_e_kwh_[i] = (i < inverters_.size()) ? inverters_[i].total_energy : 0.0f;
     last_snapshot_frames_lost_ = missed_frame_count_;
-    this->set_interval("tsdb_snapshot", kSnapshotIntervalMin * 60UL * 1000UL,
+    this->set_interval("tsdb_snapshot", snapshot_interval_min_ * 60UL * 1000UL,
                        [this]() { this->snapshot_to_history_(); });
     ESP_LOGI(TAG, "tsdb snapshot interval armed (every %lu min)",
-             (unsigned long) kSnapshotIntervalMin);
+             (unsigned long) snapshot_interval_min_);
   } else {
     ESP_LOGW(TAG, "Time-series history disabled — sensor data still publishes normally");
   }

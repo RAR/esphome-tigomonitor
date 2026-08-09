@@ -29,23 +29,56 @@
 namespace esphome {
 namespace tigo_monitor {
 
-// How often a snapshot is written to flash. THE SINGLE SOURCE OF TRUTH for the
-// cadence — tigo_monitor.cpp arms the interval from this and derives its log
-// line from it, so the number is never restated anywhere.
+// How often a snapshot is written to flash — user-settable as `history_interval`
+// in YAML. This is now a resolution/retention decision, but it spent most of
+// this project's life as a crash-exposure dial, which is worth knowing before
+// you turn it down.
 //
-// This is a crash-exposure dial, not a resolution preference. Every flash write
-// forces the ESP-IDF cross-core cache-disable/CPU-stall
+// Every flash write forces the ESP-IDF cross-core cache-disable/CPU-stall
 // (spi_flash_disable_interrupts_caches_and_other_cpu), which intermittently
-// faults under WiFi/BLE coex — the "Fault - Unknown" class documented in
-// docs/tsdb-flash-crash-issue.md. Crash exposure scales roughly with how often
-// this fires, so halving the cadence roughly halves the number of race windows.
+// faulted under WiFi/BLE coex — the "Fault - Unknown" class documented in
+// docs/tsdb-flash-crash-issue.md. Exposure scaled with how often this fired, so
+// the cadence kept being coarsened to buy stability: 5 min -> 30 (2026-07-23)
+// -> 60 (2026-07-28). execute_from_psram (see tigo_monitor/__init__.py) removes
+// the mechanism rather than shrinking its window — with instructions and rodata
+// in PSRAM, IDF compiles the cache-disable out entirely — which is what makes
+// this safe to expose as a knob at all.
 //
-// History: 5 min -> 30 min (2026-07-23) -> 60 min (2026-07-28). At 60 min the
-// 5404-record panel ring spans ~225 days. period_e_kwh is energy-since-last-
+// Two costs still scale with it, and neither was fixed by that flag:
+//
+//   * A commit stalls the writer ~21 s and holds the flash lock the whole time,
+//     so history queries queue behind it (sys 5349 ms + panels 17269 ms,
+//     esp_tsdb 2.3.0, panel rings full).
+//   * Flash wear scales with 1/interval, since the write volume per commit is
+//     roughly fixed. The absolute figure has not been measured; don't quote one.
+//
+// The 21 s is NOT understood, and two plausible explanations have been measured
+// and killed. It is not proportional to bytes: a 1 MB DB and a 192 KB DB cost
+// the same, appending or evicting. It is not the fsync count either: halving
+// fsyncs per write (8 -> 4 per snapshot) changed nothing, because the removed
+// sync's work simply moved to the remaining one. Whatever dominates is per
+// commit and per database, ~5.3 s each. Anyone shortening the interval should
+// know this cost is currently a fixed, unexplained tax — measure before
+// theorising, and don't trust a third guess without numbers.
+//
+// Retention scales with the interval too, since each DB holds a fixed record
+// count: the 5404-record panel rings span ~112 days at 30 min, ~37.5 at 10;
+// system.tsdb spans ~2.2 yr at 30 min. period_e_kwh is energy-since-last-
 // snapshot, so it is interval-agnostic and lifetime totals stay correct across
-// a change. Restoring finer resolution needs a deferred-sync write path in
-// esp_tsdb, not a smaller number here.
-static constexpr uint32_t kSnapshotIntervalMin = 60;
+// a change — you can retune this without invalidating stored history.
+//
+// Default only — the effective value is `history_interval` in YAML, held on
+// TigoMonitorComponent and readable via get_snapshot_interval_min(). 30 min is
+// a deliberate middle: twice the detail of the old hourly cadence at half the
+// flash wear of 10 min, which matters because we ship to unknown flash parts.
+static constexpr uint32_t kDefaultSnapshotIntervalMin = 30;
+
+// Bounds enforced by the Python schema; restated here because the retention and
+// duty-cycle maths below depend on them. A commit currently holds the flash
+// ~21 s (see tigo_history.cpp write path), so 5 min is already ~7% duty and
+// anything shorter approaches a writer that is never idle.
+static constexpr uint32_t kMinSnapshotIntervalMin = 5;
+static constexpr uint32_t kMaxSnapshotIntervalMin = 1440;
 
 // esp_tsdb caps base params per DB at 16. We cover up to 48 panels by
 // striping across three DB instances (panels0.tsdb, panels1.tsdb, panels2.tsdb).
@@ -95,7 +128,9 @@ class TigoHistory {
   // when you passed a timeout; a false return means "do not touch flash".
   class FlashLock {
    public:
-    explicit FlashLock(TigoHistory *hist, uint32_t timeout_ms = 15000);
+    // Default mirrors kFsLockReaderWaitMs in the .cpp — must stay above a full
+    // commit (~21 s), or readers fail instead of waiting.
+    explicit FlashLock(TigoHistory *hist, uint32_t timeout_ms = 30000);
     ~FlashLock();
     FlashLock(const FlashLock &) = delete;
     FlashLock &operator=(const FlashLock &) = delete;
@@ -145,7 +180,21 @@ class TigoHistory {
   // so the writer skips its littlefs writes (which otherwise collide with the
   // OTA image write on the same flash chip and fault); cleared on OTA abort.
   // Written from the OTA task, read from the writer task — hence atomic.
-  void set_ota_active(bool active) { ota_active_.store(active, std::memory_order_relaxed); }
+  //
+  // Setting it true BLOCKS until any in-flight commit has finished, and that is
+  // the whole point. The flag alone is advisory: the writer tests it once, then
+  // spends 10-21 s inside tsdb_write_h erasing and syncing. Raising the flag
+  // during that window changed nothing, so an OTA starting mid-commit wrote the
+  // app partition while the writer was still erasing the littlefs partition on
+  // the same chip — which faults:
+  //
+  //   tsdb_write_h -> tsdb_write_header -> fsync -> lfs_ctz_extend
+  //     -> lfs_bd_erase -> esp_flash_erase_region -> esp_rom_delay_us  (Fault)
+  //
+  // Returns false if a commit was still running after the timeout, meaning the
+  // caller must NOT proceed with the OTA. Safe to call from the OTA task: the
+  // lock is only ever held for bounded work.
+  bool set_ota_active(bool active, uint32_t wait_ms = 45000);
 
   // Drains the writer queue (best-effort, with timeout) and closes every open
   // tsdb_t handle. Called from TigoMonitorComponent::on_shutdown() so that

@@ -34,7 +34,8 @@ esp32:
       # Time-series database for persistent history
       # (see https://rar.github.io/esphome-tigomonitor/guides/tsdb-integration/).
       # 2.1.0 is the first upstream release with the handle-based multi-instance
-      # API and the wrapped-ring query fix this project depends on.
+      # API and the wrapped-ring query fix this project depends on; the caret
+      # resolves to 2.3.0.
       - zakery292/esp_tsdb^2.1.0
       # LittleFS — backing filesystem for the tsdb partition
       - joltwallet/littlefs^1.16
