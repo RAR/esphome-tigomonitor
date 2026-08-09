@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.0-rc.2] - 2026-08-09
+
+### Fixed
+- **ESP32-P4 was still writing history the slow way.** The previous release candidate moved only the AtomS3R onto the faster history storage, so a P4 kept the old dependency and its ~21-second snapshot writes — and that dependency was old enough to be missing several releases' worth of fixes besides. Both boards now share one pinned version. The two could not simply be pointed at the same thing before: the faster code was built on a newer upstream release whose package manifest doesn't list the P4 as a supported chip, so asking for it on a P4 failed while resolving dependencies, before anything compiled. The missing line has been added to the pinned build. If you run a P4 and pinned the dependency by hand after reading the 2.0.0-rc.1 notes, update it to `ebfc360f00263ab90116ee3e556a9153ab4041a2` — or just take the board file.
+
 ## [2.0.0-rc.1] - 2026-08-09
 
 ### Added
