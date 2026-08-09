@@ -10,8 +10,16 @@ export const BOARDS = [
     // out ESP-IDF's cross-core cache-disable, which was racing WiFi/BLE-coex
     // ISRs on every history commit (MTTF 13.5-42 h). Costs ~1.7 MiB of PSRAM.
     frameworkAdvanced: { enable_idf_experimental_features: false, execute_from_psram: true },
-    frameworkComponents: ['zakery292/esp_tsdb^2.1.0', 'joltwallet/littlefs^1.16'],
-    hostedComponent: null,
+    // Fork-pinned for the sidecar header: upstream rewrites the db header in
+    // place at offset 0 every commit, which LittleFS turns into a rewrite of
+    // every block to EOF (~20.4 ms/KB). 21.4 s -> 633 ms median on the rig.
+    // Mirrors boards/esp32s3-atoms3r.yaml; SHA, not a branch, so it cannot move
+    // under a build.
+    frameworkComponents: ['joltwallet/littlefs^1.16'],
+    hostedComponent: {
+      source: 'https://github.com/RAR/esp_tsdb.git',
+      ref: '3fb785ffe0e280e7645a598f1cf82f6babe72143',
+    },
     sdkconfig: {
       CONFIG_ESP32S3_DEFAULT_CPU_FREQ_240: 'y',
       CONFIG_UART_ISR_IN_IRAM: 'y',

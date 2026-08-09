@@ -49,20 +49,20 @@ INVERTER_SCHEMA = cv.Schema({
 def _warn_history_wear(config):
     """Flag intervals that buy resolution with flash life.
 
-    Each snapshot commits four databases, and every commit stalls the writer for
-    seconds while holding the filesystem lock — measured at ~21 s. That cost is per
-    commit, so a shorter interval spends proportionally more of the device's
-    time in it, and flash wear rises the same way. Runs as a validator rather
-    than in to_code so `esphome config` surfaces it too.
+    Each snapshot commits four databases while holding the filesystem lock —
+    ~0.65 s measured with the sidecar-header esp_tsdb the reference config pins
+    (it was ~21 s before that). The dominant cost of a short interval is now
+    retention rather than write time: each database holds a fixed row count, so
+    twice the detail is half the span. Flash wear still scales with frequency.
+    Runs as a validator rather than in to_code so `esphome config` surfaces it.
     """
     minutes = config[CONF_HISTORY_INTERVAL]
     if minutes < 15:
         _LOGGER.warning(
             "history_interval is %d min, %.1fx more often than the 30 min "
-            "default. Each snapshot takes ~21 s to commit and holds the "
-            "filesystem for all of it, so history pages queue behind it that "
-            "much more often, and flash wear rises by the same factor. "
-            "Per-panel history also shrinks to ~%d days.",
+            "default. Per-panel history shrinks to ~%d days, and flash wear "
+            "rises by the same factor. (Each snapshot itself is cheap — ~0.65 s "
+            "— so the cost here is span and wear, not stalling.)",
             minutes,
             30 / minutes,
             round(5404 * minutes / 1440),
@@ -83,8 +83,9 @@ CONFIG_SCHEMA = cv.All(cv.Schema({
     cv.Optional(CONF_NIGHT_MODE_TIMEOUT, default=60): cv.int_range(min=1, max=1440),  # 1 minute to 24 hours
     cv.Optional(CONF_STALE_TIMEOUT, default=10): cv.int_range(min=0, max=1440),  # minutes; 0 disables staleness zeroing
     # How often on-flash history is written. Bounds mirror kMin/kMaxSnapshotIntervalMin
-    # in tigo_history.h. The floor is not arbitrary: a commit holds the flash lock
-    # ~21 s with the panel rings full, so 5 min is already ~7% duty cycle.
+    # in tigo_history.h. The 5-minute floor predates the sidecar header (a commit
+    # then held the flash lock ~21 s, making 5 min a ~7% duty cycle); at ~0.65 s
+    # it is now a retention guard — 5 min leaves only ~19 days of panel history.
     cv.Optional(CONF_HISTORY_INTERVAL, default=30): cv.int_range(min=5, max=1440),
 }).extend(cv.polling_component_schema('30s')).extend(uart.UART_DEVICE_SCHEMA), _warn_history_wear)
 
