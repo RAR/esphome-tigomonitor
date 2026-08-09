@@ -26,9 +26,18 @@ export function extractBoardFields(text) {
   const experimental = /^\s*enable_idf_experimental_features:\s*(yes|true)\b/m.test(text);
   // Same `^\s*` anchoring so a commented-out opt-in reads as NOT enabled.
   const executeFromPsram = /^\s*execute_from_psram:\s*(yes|true)\b/m.test(text);
+  // Quoted in the board files ('3.0'), because ESPHome turns this into a hard
+  // boot-time floor and the 3.0-vs-3.1 distinction decides whether the firmware
+  // runs on common ECO3 silicon. Worth drift-guarding precisely.
+  const minimumChipRevision = line(/^\s*minimum_chip_revision:\s*['"]?([0-9.]+)['"]?/m);
+  const sram1AsIram = /^\s*sram1_as_iram:\s*(yes|true)\b/m.test(text);
   const hasHosted = /^esp32_hosted:\s*$/m.test(text);
+  // tigo_server is absent on the no-PSRAM tier; its presence must match the
+  // board catalog's supportsWebServer.
+  const hasWebServer = /^tigo_server:\s*$/m.test(text);
   const components = [...text.matchAll(/^\s*-\s*(?:name:\s*)?([A-Za-z0-9_./^-]+)\s*$/gm)]
     .map((m) => m[1])
     .filter((c) => c.includes('/'));
-  return { flash_size, partitions, psramMode, psramSpeed, experimental, executeFromPsram, hasHosted, components };
+  return { flash_size, partitions, psramMode, psramSpeed, experimental, executeFromPsram,
+           minimumChipRevision, sram1AsIram, hasHosted, hasWebServer, components };
 }

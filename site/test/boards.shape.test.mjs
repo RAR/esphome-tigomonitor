@@ -11,11 +11,29 @@ test('every board has required identity fields', () => {
   }
 });
 
-// PSRAM is a hard requirement, so the builder must not be able to offer a board
-// without it — see boards/README.md and the Troubleshooting guide.
-test('every board defines PSRAM', () => {
+// PSRAM used to be required of every board. PR #44 added a supported no-PSRAM
+// tier (sensors to Home Assistant, no web server), so the invariant is no longer
+// "everything has PSRAM" — it is that PSRAM and the web server travel together.
+// tigo_server builds whole HTML pages and JSON responses in memory from the
+// httpd task; without PSRAM that fragments the internal heap to OOM.
+test('PSRAM and the web server imply each other', () => {
   for (const b of BOARDS) {
-    assert.ok(b.psram?.mode && b.psram?.speed, `${b.id} has no PSRAM — unsupported boards must not be offered`);
+    const hasPsram = Boolean(b.psram?.mode && b.psram?.speed);
+    const webServer = b.supportsWebServer !== false;
+    assert.equal(webServer, hasPsram,
+      `${b.id}: web server ${webServer ? 'offered' : 'withheld'} but PSRAM ${hasPsram ? 'present' : 'absent'}`);
+  }
+});
+
+// Everything in the wizard's "CCA & extras" card is a tigo_server feature, so a
+// board without the web server must not advertise any of them.
+test('a board without the web server offers no server-only features', () => {
+  for (const b of BOARDS) {
+    if (b.supportsWebServer !== false) continue;
+    assert.equal(b.supports.ble, false, `${b.id} offers BLE without a web server`);
+    assert.equal(b.supports.display, false, `${b.id} offers a display without a web server`);
+    assert.equal(b.partitions, null, `${b.id} has tsdb partitions but no web server to serve history`);
+    assert.deepEqual(b.frameworkComponents, [], `${b.id} pulls in tsdb components it cannot use`);
   }
 });
 

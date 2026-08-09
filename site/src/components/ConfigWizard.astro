@@ -41,13 +41,21 @@
       <label class="field"><span>Static IP <em>(optional)</em></span><input id="static-ip" /><small class="hint">Leave blank and your router picks one. Fill it in if you want the dashboard always at the same address.</small></label>
     </fieldset>
 
-    <fieldset class="tw-card">
+    <fieldset class="tw-card" id="cca-card">
       <legend>CCA &amp; extras</legend>
-      <p class="notes">
+      <p class="notes" id="cca-intro">
         Optional. These let the device learn your panels' real names instead of
         showing codes like "Module 4F2A". You can also type names in by hand later.
       </p>
-      <label class="field">
+      <!-- Shown instead of the controls on boards that cannot run the web server.
+           Every option in this card is a tigo_server feature, so on those boards
+           there is nothing here to configure. -->
+      <p class="notes" id="no-server-note" style="display:none">
+        Not available on this board. These are all features of the built-in web
+        server, which needs PSRAM this board does not have. You still get every
+        sensor value in Home Assistant — name your panels there instead.
+      </p>
+      <label class="field" id="cca-row">
         <span>CCA source</span>
         <select id="cca">
           <option value="none">None</option>
@@ -58,7 +66,7 @@
       </label>
       <label class="field" id="cca-ip-row"><span>CCA IP</span><input id="cca-ip" /><small class="hint">Your Tigo box's address on your network — check your router's device list.</small></label>
       <label class="field" id="cca-mac-row"><span>CCA Bluetooth MAC</span><input id="cca-mac" placeholder="04:C0:5B:XX:XX:XX" /><small class="hint">A starting guess is fine — the device can search for your CCA and let you pick it.</small></label>
-      <label class="check"><input type="checkbox" id="cloud" /> <span>Enable Tigo cloud import<small class="hint">Pulls the panel layout your installer set up, using your Tigo account.</small></span></label>
+      <label class="check" id="cloud-row"><input type="checkbox" id="cloud" /> <span>Enable Tigo cloud import<small class="hint">Pulls the panel layout your installer set up, using your Tigo account.</small></span></label>
       <label class="check" id="display-row"><input type="checkbox" id="display" /> <span>Include display (AtomS3R-Display)<small class="hint">Only if your board has a screen on it.</small></span></label>
     </fieldset>
 
