@@ -264,6 +264,17 @@ struct DailyEnergyData {
   }
 };
 
+// Why the ESP last restarted, as a short stable token ("panic", "brownout",
+// "watchdog", ...). ESP-IDF's own reset reason survives a reset in RTC memory,
+// so this is accurate for the whole boot regardless of when it is read.
+//
+// This exists because a boot-time log line alone is not recoverable evidence:
+// ESPHome's network logger only streams live and never replays anything from
+// before the API server comes up, so the reset reason is emitted while nothing
+// is listening. A device that resets unattended therefore leaves no trace of
+// why. Reporting the same token through /api/status makes it pollable for the
+// entire uptime, which is what actually makes an unattended reset diagnosable.
+const char *reset_reason_str();
 
 class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
  public:

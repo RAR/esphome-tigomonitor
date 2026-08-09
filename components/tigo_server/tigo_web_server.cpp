@@ -2873,7 +2873,7 @@ void TigoWebServer::build_esp_status_json(PSRAMString& json) {
     "\"invalid_checksum\":%u,\"missed_frames\":%u,\"total_frames\":%u,"
     "\"command_frames\":%u,\"frame_27_count\":%u,"
     "\"network_connected\":%s,\"wifi_rssi\":%d,\"wifi_ssid\":\"%s\",\"ip_address\":\"%s\",\"mac_address\":\"%s\","
-    "\"active_sockets\":%d,\"max_sockets\":%d}",
+    "\"active_sockets\":%d,\"max_sockets\":%d,\"reset_reason\":\"%s\"}",
     free_heap, total_heap, free_psram, total_psram,
     min_free_heap, min_free_psram,
     (unsigned) uptime_sec, (unsigned) uptime_days, (unsigned) uptime_hours, (unsigned) uptime_mins,
@@ -2882,7 +2882,7 @@ void TigoWebServer::build_esp_status_json(PSRAMString& json) {
     (unsigned) invalid_checksum, (unsigned) missed_frames, (unsigned) total_frames,
     (unsigned) command_frames, (unsigned) frame_27_count,
     network_connected ? "true" : "false", wifi_rssi, ssid.c_str(), ip_address.c_str(), mac_address.c_str(),
-    active_sockets, max_sockets);
+    active_sockets, max_sockets, tigo_monitor::reset_reason_str());
   
   json.append(buffer);
 }
