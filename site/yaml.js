@@ -2,8 +2,12 @@
 const I = (n) => '  '.repeat(n);
 const val = (useSecrets, secretName, raw) => (useSecrets ? `!secret ${secretName}` : raw);
 
-// Git ref the generated config pins for the tigo components. Bump on release.
-const COMPONENT_REF = 'next';
+// Git ref the generated config pins for the tigo components.
+//
+// main, not next: `next` is a lagging legacy branch (see CLAUDE.md) that trunk
+// left behind, so configs from the builder were fetching older components than
+// the docs describe. main is the trunk stable releases are tagged from.
+const COMPONENT_REF = 'main';
 
 export function toYaml(cfg) {
   const L = [];

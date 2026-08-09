@@ -69,7 +69,10 @@ test('generated config sources the tigo components via external_components', () 
   const y = toYaml(assembleConfig(getBoard('esp32s3-atoms3r'), form));
   assert.ok(y.includes('external_components:'), 'no external_components block');
   assert.ok(y.includes('url: https://github.com/RAR/esphome-tigomonitor'), 'tigo url missing');
-  assert.ok(y.includes('ref: next'), 'ref missing');
+  // Must track trunk. `next` is a lagging legacy branch — pinning the builder
+  // there silently shipped users older components than the docs describe.
+  assert.ok(y.includes('ref: main'), 'ref must pin main, not a legacy branch');
+  assert.ok(!y.includes('ref: next'), 'must not pin the abandoned next branch');
   assert.ok(y.includes('components: [tigo_monitor, tigo_server]'), 'tigo components missing');
   assert.equal((y.match(/^external_components:/gm) || []).length, 1, 'must have exactly one external_components key');
 });
