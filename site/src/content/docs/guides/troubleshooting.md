@@ -334,9 +334,11 @@ tigo_monitor:
 
 ### `fatal error: esphome/components/sensor/sensor.h: No such file or directory`
 
-**Cause:** ESPHome only generates `#include` headers for components that are declared in your YAML. The tigo_monitor C++ code includes `sensor/sensor.h`, `text_sensor/text_sensor.h`, and `binary_sensor/binary_sensor.h`, so these must exist in your config.
+**Cause:** ESPHome only copies a component's sources into the build when that component is declared in your YAML. The tigo_monitor C++ code includes `sensor/sensor.h`, `text_sensor/text_sensor.h`, and `binary_sensor/binary_sensor.h` unconditionally, so all three have to be present.
 
-**Solution:** Add stub sections to your YAML (even if empty):
+**Solution:** Update the component — `tigo_monitor` now `AUTO_LOAD`s all three, so nothing is needed in your YAML.
+
+If you are pinned to an older version, add stub sections (empty is enough):
 
 ```yaml
 sensor:
@@ -346,7 +348,7 @@ text_sensor:
 binary_sensor:
 ```
 
-You can add actual sensors later — the empty declarations are enough to trigger header generation.
+Note the error names whichever header the compiler reached first, so you may see `text_sensor.h` or `binary_sensor.h` instead of `sensor.h`. On older versions, fix all three at once — adding them one at a time just moves the error to the next line.
 
 ### "has no member" Error
 

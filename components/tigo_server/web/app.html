@@ -1096,6 +1096,9 @@
         <div class="hist-stat-card">
           <div class="hist-stat-label">Uptime</div>
           <div class="hist-stat-val" id="diag-uptime">—</div>
+          <!-- Names the reset that started this uptime. Uptime is time *since a
+               reset*, so what kind of reset it was belongs here — and it is the
+               first thing worth knowing after an unexpected reboot. -->
           <div class="hist-stat-sub" id="diag-uptime-sub">since boot</div>
         </div>
         <div class="hist-stat-card">
@@ -2744,6 +2747,33 @@
     return `${Math.floor(sec / 86400)}d ${Math.floor((sec % 86400) / 3600)}h`;
   }
 
+  // Why the device last restarted, for the Uptime card's sub-line.
+  //
+  // The distinction that matters is environmental vs firmware: brownout and an
+  // unexpected power-on point outside the box (a supply dropout or a coupled
+  // transient), while panic and the watchdogs mean the firmware itself failed.
+  // Colouring only the latter two groups keeps a routine reboot quiet — a
+  // sub-line that is always yellow stops being read.
+  function resetReason(token) {
+    const map = {
+      poweron:   ['since power-on',        '',           'Cold start — the supply was interrupted, or this is a first boot'],
+      software:  ['since restart',         '',           'Deliberate reboot — an OTA update or a requested restart'],
+      external:  ['since external reset',  '',           'The reset pin was asserted'],
+      deepsleep: ['since deep sleep',      '',           'Woke from deep sleep'],
+      brownout:  ['after brownout',        'var(--warn)','Supply voltage sagged below the brownout threshold'],
+      unknown:   ['cause not recorded',    'var(--warn)','RTC memory lost the reset cause — typical of a hard power interruption'],
+      sdio:      ['after SDIO reset',      'var(--warn)','Reset over the SDIO interface'],
+      panic:     ['after a crash',         'var(--bad)', 'Firmware exception or abort — this is a bug, not the environment'],
+      task_wdt:  ['after task watchdog',   'var(--bad)', 'A task stopped feeding the watchdog — something stalled'],
+      int_wdt:   ['after interrupt watchdog','var(--bad)','Interrupts were blocked too long'],
+      other_wdt: ['after watchdog reset',  'var(--bad)', 'A watchdog fired'],
+    };
+    // Older firmware has no reset_reason field; say nothing rather than guess.
+    const e = map[token];
+    if (!e) return { text: 'since boot', color: '', hint: '' };
+    return { text: e[0], color: e[1], hint: e[2] };
+  }
+
   function fmtKB(bytes) {
     return (bytes / 1024).toFixed(1);
   }
@@ -2792,8 +2822,11 @@
 
       // Network / uptime
       document.getElementById('diag-uptime').innerHTML = fmtUptime(status.uptime_sec || 0);
-      document.getElementById('diag-uptime-sub').textContent =
-        `${status.uptime_days || 0}d ${status.uptime_hours || 0}h ${status.uptime_mins || 0}m`;
+      const reset = resetReason(status.reset_reason);
+      const resetEl = document.getElementById('diag-uptime-sub');
+      resetEl.textContent = reset.text;
+      resetEl.style.color = reset.color;
+      resetEl.title = reset.hint;
       document.getElementById('diag-rssi').innerHTML =
         `${status.wifi_rssi}<span class="hist-stat-unit">dBm</span>`;
       document.getElementById('diag-ssid').textContent = status.wifi_ssid || '—';

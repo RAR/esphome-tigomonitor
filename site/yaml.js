@@ -2,8 +2,12 @@
 const I = (n) => '  '.repeat(n);
 const val = (useSecrets, secretName, raw) => (useSecrets ? `!secret ${secretName}` : raw);
 
-// Git ref the generated config pins for the tigo components. Bump on release.
-const COMPONENT_REF = 'next';
+// Git ref the generated config pins for the tigo components.
+//
+// main, not next: `next` is a lagging legacy branch (see CLAUDE.md) that trunk
+// left behind, so configs from the builder were fetching older components than
+// the docs describe. main is the trunk stable releases are tagged from.
+const COMPONENT_REF = 'main';
 
 export function toYaml(cfg) {
   const L = [];
@@ -26,7 +30,7 @@ export function toYaml(cfg) {
   L.push(`${I(3)}type: git`);
   L.push(`${I(3)}url: https://github.com/RAR/esphome-tigomonitor`);
   L.push(`${I(3)}ref: ${COMPONENT_REF}`);
-  L.push(`${I(2)}components: [tigo_monitor, tigo_server]`);
+  L.push(`${I(2)}components: [${cfg.tigoServer ? 'tigo_monitor, tigo_server' : 'tigo_monitor'}]`);
   if (cfg.displayOverlay) {
     L.push(`${I(1)}- source:`);
     L.push(`${I(3)}type: git`);
@@ -45,10 +49,17 @@ export function toYaml(cfg) {
   L.push(`${I(2)}type: esp-idf`);
   L.push(`${I(2)}version: recommended`);
   const adv = cfg.esp32.frameworkAdvanced;
-  if (adv.enable_idf_experimental_features || adv.execute_from_psram) {
+  if (adv.enable_idf_experimental_features || adv.execute_from_psram ||
+      adv.minimum_chip_revision || adv.sram1_as_iram) {
     L.push(`${I(2)}advanced:`);
     if (adv.enable_idf_experimental_features) L.push(`${I(3)}enable_idf_experimental_features: true`);
     if (adv.execute_from_psram) L.push(`${I(3)}execute_from_psram: true`);
+    // Drops IDF workaround code for pre-rev-3 silicon. ESPHome makes this a hard
+    // boot-time floor, so the value is quoted and deliberately 3.0, not 3.1.
+    if (adv.minimum_chip_revision) L.push(`${I(3)}minimum_chip_revision: '${adv.minimum_chip_revision}'`);
+    // +40KB IRAM. Requires an ESP-IDF v5.1+ bootloader, so the first flash must
+    // be over USB — an OTA does not update the bootloader.
+    if (adv.sram1_as_iram) L.push(`${I(3)}sram1_as_iram: true`);
   }
   const comps = [...cfg.esp32.frameworkComponents];
   if (cfg.esp32.hostedComponent || comps.length) {
@@ -107,7 +118,9 @@ export function toYaml(cfg) {
   // logger
   L.push('logger:');
   L.push(`${I(1)}level: INFO`);
-  L.push(`${I(1)}baud_rate: 0  # UART is the Tigo bus`);
+  // Silencing the console is only needed when the Tigo bus IS the console UART.
+  // Boards with the bus on a second hardware UART keep their USB logs.
+  if (!cfg.keepSerialConsole) L.push(`${I(1)}baud_rate: 0  # UART is the Tigo bus`);
   L.push('');
 
   // api
@@ -122,6 +135,22 @@ export function toYaml(cfg) {
   L.push(`${I(2)}password: ${val(cfg.ota.useSecrets, 'ota_password', cfg.ota.password)}`);
   L.push(`${I(2)}allow_partition_access: true`);
   L.push('');
+
+  // Board wiring: transceiver enables that must be driven at boot, or the front
+  // end comes up in an undefined state and no bus data arrives. `internal: true`
+  // keeps them out of Home Assistant.
+  if (cfg.gpioSwitches) {
+    L.push('switch:');
+    for (const sw of cfg.gpioSwitches) {
+      L.push(`${I(1)}- platform: gpio`);
+      L.push(`${I(2)}id: ${sw.id}`);
+      L.push(`${I(2)}name: "${sw.name}"`);
+      L.push(`${I(2)}internal: true`);
+      L.push(`${I(2)}pin: ${sw.pin}${sw.comment ? `  # ${sw.comment}` : ''}`);
+      L.push(`${I(2)}restore_mode: ALWAYS_ON`);
+    }
+    L.push('');
+  }
 
   // uart
   L.push('uart:');
@@ -161,17 +190,19 @@ export function toYaml(cfg) {
   if (cfg.tigoMonitor.ccaIp) L.push(`${I(1)}cca_ip: ${cfg.tigoMonitor.ccaIp}`);
   L.push('');
 
-  // tigo_server
-  L.push('tigo_server:');
-  L.push(`${I(1)}id: tigo_web`);
-  L.push(`${I(1)}tigo_monitor_id: tigo_hub`);
-  L.push(`${I(1)}port: 80`);
-  if (cfg.tigoServer.ccaSource) L.push(`${I(1)}cca_source: ${cfg.tigoServer.ccaSource}`);
-  if (cfg.tigoServer.bleClientId) L.push(`${I(1)}ble_client_id: ${cfg.tigoServer.bleClientId}`);
-  if (cfg.tigoServer.cloudImport) L.push(`${I(1)}cloud_import: true`);
-  // Display board wires the LCD backlight into the web UI (lcd_backlight id is defined in the overlay's light: block)
-  if (cfg.displayOverlay) L.push(`${I(1)}backlight: lcd_backlight`);
-  L.push('');
+  // tigo_server — omitted entirely on boards without PSRAM, which cannot run it.
+  if (cfg.tigoServer) {
+    L.push('tigo_server:');
+    L.push(`${I(1)}id: tigo_web`);
+    L.push(`${I(1)}tigo_monitor_id: tigo_hub`);
+    L.push(`${I(1)}port: 80`);
+    if (cfg.tigoServer.ccaSource) L.push(`${I(1)}cca_source: ${cfg.tigoServer.ccaSource}`);
+    if (cfg.tigoServer.bleClientId) L.push(`${I(1)}ble_client_id: ${cfg.tigoServer.bleClientId}`);
+    if (cfg.tigoServer.cloudImport) L.push(`${I(1)}cloud_import: true`);
+    // Display board wires the LCD backlight into the web UI (lcd_backlight id is defined in the overlay's light: block)
+    if (cfg.displayOverlay) L.push(`${I(1)}backlight: lcd_backlight`);
+    L.push('');
+  }
 
   // sensor + required empty sections
   L.push('sensor:');

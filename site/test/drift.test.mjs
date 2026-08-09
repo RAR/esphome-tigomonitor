@@ -10,6 +10,7 @@ const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const FILE = {
   'esp32s3-atoms3r': 'boards/esp32s3-atoms3r.yaml',
   'esp32p4-evboard': 'boards/esp32p4-evboard.yaml',
+  'esp32-lilygo-t-can485': 'boards/esp32-lilygo-t-can485.yaml',
 };
 
 for (const [id, rel] of Object.entries(FILE)) {
@@ -23,6 +24,10 @@ for (const [id, rel] of Object.entries(FILE)) {
     assert.equal(b.frameworkAdvanced.enable_idf_experimental_features, f.experimental, 'experimental flag drift');
     assert.equal(Boolean(b.frameworkAdvanced.execute_from_psram), f.executeFromPsram, 'execute_from_psram flag drift');
     assert.equal(Boolean(b.hosted), f.hasHosted, 'esp32_hosted presence drift');
+    assert.equal(b.frameworkAdvanced.minimum_chip_revision ?? null, f.minimumChipRevision,
+      'minimum_chip_revision drift — 3.0 vs 3.1 decides whether ECO3 parts boot');
+    assert.equal(Boolean(b.frameworkAdvanced.sram1_as_iram), f.sram1AsIram, 'sram1_as_iram drift');
+    assert.equal(b.supportsWebServer !== false, f.hasWebServer, 'tigo_server presence drift');
   });
 }
 

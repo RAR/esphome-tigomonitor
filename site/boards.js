@@ -213,6 +213,7 @@ font:
   - file: "gfonts://Roboto"
     id: font_tiny
     size: 9`,
+    supportsWebServer: true,
     notes: ['Built-in tail485 RS485 transceiver on GPIO1/GPIO2.'],
   },
   {
@@ -275,6 +276,81 @@ font:
       'No native Wi-Fi — uses an ESP32-C6 companion over SDIO (esp32_hosted).',
       'BLE runs over the C6 companion (Bluedroid host on the P4, controller on the C6 via VHCI). Verified on an EV board: repeated CCA sessions work and Wi-Fi is unaffected. Selecting BLE adds CONFIG_BT_BLE_50_FEATURES_SUPPORTED=n, which is required — without it only the first connect per boot succeeds, because Bluedroid switches to LE_Extended_Create_Connection after a session and the C6 refuses that command. This trades away extended advertising/scanning, which the CCA does not use.',
       'PSRAM is hex mode only; valid speeds are 20/100/200 MHz (200 default). If a specific board crash-loops at boot, drop to 100 or 20 MHz — a per-board PSRAM quirk, not a universal limit.',
+    ],
+    supportsWebServer: true,
+  },
+  {
+    // Mirrors boards/esp32-lilygo-t-can485.yaml (PR #44). Deliberately the same
+    // narrow tier that file defines: sensors to Home Assistant, nothing else.
+    //
+    // This board cannot have PSRAM — LilyGO wired GPIO16/17 to the RS485 front
+    // end, which are the pins a WROVER uses for its PSRAM die. tigo_server
+    // builds whole HTML pages and JSON responses in memory from the httpd task,
+    // so it needs PSRAM; tigo_monitor's tables are a few KB and do not. Hence
+    // supportsWebServer: false, and with the web server goes the dashboard, the
+    // REST API, CCA/cloud import and the BLE bridge.
+    //
+    // History is out of reach regardless: the smallest tsdb layout wants ~7MB
+    // (dual OTA slots + a 3MB LittleFS partition) and this board has 4MB. So no
+    // partitions, and no esp_tsdb/littlefs in frameworkComponents.
+    id: 'esp32-lilygo-t-can485',
+    label: 'LilyGO T-CAN485 (classic ESP32, no PSRAM — Home Assistant only)',
+    chip: 'esp32', board: 'esp32dev', variant: null,
+    flash_size: '4MB',
+    // Stock ESPHome 4MB table (two 1.75MB OTA slots). The repo's tigo-*.csv
+    // tables carve out a tsdb partition and assume 8/16MB.
+    partitions: null,
+    psram: null,
+    frameworkAdvanced: {
+      enable_idf_experimental_features: false,
+      execute_from_psram: false,
+      // 3.0 (ECO3), not 3.1: every revision gate in IDF 5.5.5 tests
+      // CONFIG_ESP32_REV_MIN_FULL >= 300, nothing tests >= 301, and ESPHome
+      // turns this into a hard boot-time floor. 3.1 would buy no flash and
+      // refuse to boot on the common ECO3 parts.
+      minimum_chip_revision: '3.0',
+      // Hands SRAM1 to IRAM (+40KB), which is where CONFIG_UART_ISR_IN_IRAM's
+      // budget comes from. Needs an ESP-IDF v5.1+ bootloader — see notes.
+      sram1_as_iram: true,
+    },
+    frameworkComponents: [],
+    hostedComponent: null,
+    sdkconfig: {
+      // The single most important setting for frame loss: without it the UART
+      // ISR stalls whenever flash is busy and Tigo frames drop mid-burst.
+      CONFIG_UART_ISR_IN_IRAM: 'y',
+      // The classic ESP32 defaults to 160MHz under ESP-IDF; the headroom goes
+      // to keeping up with the bus while WiFi is active.
+      CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240: 'y',
+      CONFIG_LOG_DEFAULT_LEVEL_INFO: 'y',
+    },
+    hosted: null,
+    uartDefault: { tx_pin: 'GPIO22', rx_pin: 'GPIO21', rx_buffer_size: 2048 },
+    numberOfDevices: 20,
+    supports: { ble: false, display: false },
+    supportsWebServer: false,
+    // The Tigo bus is on GPIO21/22, a different hardware UART from the USB
+    // console on GPIO1/3 — so unlike the AtomS3R this board keeps its serial
+    // console and must NOT get `logger: baud_rate: 0`.
+    keepSerialConsole: true,
+    // MAX13487E front end. At reset the ESP32 leaves these floating, so the
+    // transceiver comes up undefined and you get no bus data. All three must be
+    // driven HIGH, each for a different reason (see the board file). `internal`
+    // keeps them out of Home Assistant — board wiring, not user controls.
+    gpioSwitches: [
+      { id: 'rs485_power_5v', name: 'RS485 5V Enable', pin: 'GPIO16',
+        comment: '5V_EN — ME2107 boost that feeds the transceiver' },
+      { id: 'rs485_auto_direction', name: 'RS485 AutoDirection Enable', pin: 'GPIO17',
+        comment: '/RE high => the AutoDirection state machine owns the receiver' },
+      { id: 'rs485_chip_enable', name: 'RS485 Chip Enable', pin: 'GPIO19',
+        comment: 'SHDN high => normal operation (low shuts the whole chip down)' },
+    ],
+    displayOverlay: null,
+    notes: [
+      'Sensors only, published to Home Assistant. No web dashboard, REST API, on-flash history, CCA import or BLE bridge — all of those live in tigo_server, which needs PSRAM this board cannot have.',
+      'Built-in isolated RS485 transceiver on GPIO21/GPIO22; the USB serial console stays available on UART0.',
+      '⚠ Flash this board over USB the first time. sram1_as_iram needs an ESP-IDF v5.1+ bootloader — a USB flash updates the bootloader, an OTA does not, so OTA-ing an existing device onto this config leaves it unable to boot.',
+      'Tested at 18 devices; 40 should fit. Each optimizer costs roughly 600 bytes across the device and node tables, against the ~130KB free once WiFi is up — the practical ceiling is heap fragmentation, not total bytes.',
     ],
   },
 ];

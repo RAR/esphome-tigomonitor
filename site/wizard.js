@@ -46,6 +46,18 @@ function syncBoardConstraints(board) {
   bleOpt.disabled = !board.supports.ble;
   if (!board.supports.ble && $('cca').value === 'ble') $('cca').value = 'none';
   $('display-row').style.display = board.supports.display ? '' : 'none';
+
+  // Boards without PSRAM cannot run tigo_server, and every control in the CCA
+  // card is a tigo_server feature. Reset the values as well as hiding the rows:
+  // switching boards must not leave a stale selection that rules.js then has to
+  // override silently.
+  const webServer = board.supportsWebServer !== false;
+  if (!webServer) { $('cca').value = 'none'; $('cloud').checked = false; }
+  for (const id of ['cca-intro', 'cca-row', 'cloud-row']) {
+    $(id).style.display = webServer ? '' : 'none';
+  }
+  $('no-server-note').style.display = webServer ? 'none' : '';
+
   $('board-notes').textContent = board.notes.join(' ');
 }
 

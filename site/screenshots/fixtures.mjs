@@ -166,6 +166,7 @@ export const routes = {
     network_connected: true, wifi_rssi: -53, wifi_ssid: 'example-wifi',
     ip_address: '192.0.2.24', mac_address: '00:00:5E:00:53:24',
     active_sockets: 4, max_sockets: 16,
+    reset_reason: 'poweron',
   },
   '/api/health': { status: 'ok', uptime: 187245, heap_free: 98740, heap_min_free: 88440 },
   '/api/panels': {

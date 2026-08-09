@@ -69,7 +69,10 @@ test('generated config sources the tigo components via external_components', () 
   const y = toYaml(assembleConfig(getBoard('esp32s3-atoms3r'), form));
   assert.ok(y.includes('external_components:'), 'no external_components block');
   assert.ok(y.includes('url: https://github.com/RAR/esphome-tigomonitor'), 'tigo url missing');
-  assert.ok(y.includes('ref: next'), 'ref missing');
+  // Must track trunk. `next` is a lagging legacy branch — pinning the builder
+  // there silently shipped users older components than the docs describe.
+  assert.ok(y.includes('ref: main'), 'ref must pin main, not a legacy branch');
+  assert.ok(!y.includes('ref: next'), 'must not pin the abandoned next branch');
   assert.ok(y.includes('components: [tigo_monitor, tigo_server]'), 'tigo components missing');
   assert.equal((y.match(/^external_components:/gm) || []).length, 1, 'must have exactly one external_components key');
 });
@@ -95,12 +98,50 @@ test('display config wires the backlight into tigo_server', () => {
   assert.ok(y.includes('backlight: lcd_backlight'), 'backlight wiring missing');
 });
 
-test('every board emits a psram block and a Free PSRAM sensor', () => {
+// A PSRAM board must emit the psram block and its sensor; a no-PSRAM board must
+// emit neither, and must also leave out everything that depends on the web
+// server. Asserting both directions keeps the two tiers from blurring.
+test('psram block and Free PSRAM sensor track the board tier', () => {
   for (const b of BOARDS) {
     const y = toYaml(assembleConfig(b, { ...form, uart: b.uartDefault }));
-    assert.ok(y.includes('\npsram:'), `${b.id} must emit psram — PSRAM is required`);
-    assert.ok(y.includes('Free PSRAM'), `${b.id} should emit the Free PSRAM sensor`);
+    if (b.psram) {
+      assert.ok(y.includes('\npsram:'), `${b.id} must emit psram`);
+      assert.ok(y.includes('Free PSRAM'), `${b.id} should emit the Free PSRAM sensor`);
+    } else {
+      assert.ok(!y.includes('\npsram:'), `${b.id} has no PSRAM but emitted a psram block`);
+      assert.ok(!y.includes('Free PSRAM'), `${b.id} has no PSRAM but emitted the sensor`);
+    }
   }
+});
+
+test('a no-PSRAM board emits a monitor-only config', () => {
+  const b = getBoard('esp32-lilygo-t-can485');
+  const y = toYaml(assembleConfig(b, { ...form, uart: b.uartDefault }));
+  // tigo_server would compile and then OOM under dashboard polling.
+  assert.ok(!y.includes('tigo_server:'), 'tigo_server must not be emitted');
+  assert.ok(y.includes('components: [tigo_monitor]'), 'external_components must not pull tigo_server');
+  assert.ok(!y.includes('partitions:'), 'no tsdb partitions — 4MB cannot hold them');
+  assert.ok(!y.includes('esp_tsdb'), 'no history components on this tier');
+  // The bus is on a second hardware UART, so the USB console survives.
+  assert.ok(!y.includes('baud_rate: 0'), 'console must stay enabled on this board');
+  // Transceiver enables — without these the front end floats and no data arrives.
+  for (const pin of ['GPIO16', 'GPIO17', 'GPIO19']) {
+    assert.ok(y.includes(`pin: ${pin}`), `missing RS485 enable on ${pin}`);
+  }
+  assert.ok(y.includes('restore_mode: ALWAYS_ON'), 'enables must be ALWAYS_ON');
+  assert.ok(y.includes("minimum_chip_revision: '3.0'"), 'must target ECO3, not ECO4');
+  assert.ok(y.includes('sram1_as_iram: true'), 'sram1_as_iram missing');
+  assert.ok(y.includes('tigo_monitor:'), 'the monitor itself must still be configured');
+});
+
+test('server-only features cannot be forced onto a no-PSRAM board', () => {
+  const b = getBoard('esp32-lilygo-t-can485');
+  // A stale form value must not silently produce a config that OOMs on device.
+  const y = toYaml(assembleConfig(b, { ...form, uart: b.uartDefault, cca: 'http', cloudImport: true }));
+  assert.ok(!y.includes('cca_source'), 'cca_source leaked onto a serverless board');
+  assert.ok(!y.includes('cloud_import'), 'cloud_import leaked onto a serverless board');
+  assert.throws(() => assembleConfig(b, { ...form, uart: b.uartDefault, cca: 'ble' }),
+    /no web server|BLE is not supported/);
 });
 
 test('cca:ble emits the full BLE stack + ble_client_id', () => {
