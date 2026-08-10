@@ -51,7 +51,9 @@ against the new ref and the fetched dependency is the fork — not a cached
 resolve, flash moved 1,432,902 → 1,437,230 bytes" is evidence. "Should work
 on P4" is not. If you didn't run it, say what you didn't run.
 
-End with the session trailer (`Claude-Session: …`).
+No attribution trailers — no `Co-Authored-By`, no `Claude-Session` link. Both
+are off via `attribution` in `~/.claude/settings.json`; if one appears in a
+message you are drafting, drop it.
 
 ## CHANGELOG entries
 
