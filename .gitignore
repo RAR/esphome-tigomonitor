@@ -18,3 +18,7 @@ site/.astro/
 site/src/assets/screenshots/
 # Intermediate artboard for the social card; the PNG it produces IS committed.
 site/screenshots/social-preview.html
+
+# Claude Code — local machine settings (permissions, etc). The skills in
+# .claude/skills/ ARE tracked; this file is per-machine.
+.claude/settings.local.json
