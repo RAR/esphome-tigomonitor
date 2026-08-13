@@ -133,6 +133,11 @@ export function toYaml(cfg) {
   L.push('ota:');
   L.push(`${I(1)}- platform: esphome`);
   L.push(`${I(2)}password: ${val(cfg.ota.useSecrets, 'ota_password', cfg.ota.password)}`);
+  // Permission only — applying a layout change still takes an explicit
+  // `esphome upload --partition-table`; `esphome run` never sends one.
+  L.push(`${I(2)}# Permits a later partition-table change over the air.`);
+  L.push(`${I(2)}# Applying one still needs \`esphome upload --partition-table\`;`);
+  L.push(`${I(2)}# \`esphome run\` never sends a partition table.`);
   L.push(`${I(2)}allow_partition_access: true`);
   L.push('');
 

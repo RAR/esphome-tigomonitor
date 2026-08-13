@@ -117,16 +117,33 @@ per-string ratings, the settings under Tools, and a saved CCA address. Nodes →
 Import restores the lot afterwards, topology overrides included. Anything set
 in YAML comes back on its own.
 
-**Then flash over USB.** An over-the-air update from 1.x won't work on its own,
-because the 1.x image predates `allow_partition_access`. If the board is
-awkward to reach, do it in two OTAs instead: first send your *current* layout
-with `allow_partition_access: true` added and nothing else changed, then send
-the new one. Either way stored history starts empty, and Home Assistant
-entities are unaffected.
+**Then flash over USB.** An over-the-air update from 1.x won't change the flash
+layout, because the 1.x image predates `allow_partition_access`. USB is the
+one-step route and the one to prefer.
+
+If the board is awkward to reach, the wireless route takes three steps — and
+the middle one is easy to miss:
+
+1. OTA your *current* layout with `allow_partition_access: true` added to the
+   `ota:` block and nothing else changed. This is the permission; it grants
+   nothing retroactively, so it has to be its own update.
+2. `esphome upload --partition-table your-config.yaml` — **this is the step
+   that changes the layout.** A plain `esphome run` never sends a partition
+   table, no matter what `allow_partition_access` says. It will report success
+   and leave your layout exactly as it was, which looks like it worked.
+3. OTA the new firmware normally.
+
+If step 2 reports an error, re-run it before rebooting the device — a partition
+table caught mid-update leaves the board unable to boot, and recovering that
+needs a serial cable anyway. `--partition-table` also requires the `esphome`
+OTA platform; the web-server OTA path can only send firmware.
+
+Either way stored history starts empty, and Home Assistant entities are
+unaffected.
 
 The same applies later if you enable `cca_source: ble` on an 8 MB board — that
-needs a bigger app slot, so it is another layout change with the same
-consequences. Export first.
+needs a bigger app slot, so it is another layout change, with the same three
+steps and the same wipe. Export first.
 
 ### 5. Open the dashboard
 

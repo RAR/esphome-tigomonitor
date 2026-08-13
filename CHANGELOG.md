@@ -16,9 +16,11 @@ the question that kept 2.0.0 a candidate.
 then flash over USB. The new flash layout relocates the region holding
 everything set on the device — panel names, inverter and string renames,
 per-string ratings, Tools settings, a saved CCA address — so it does not
-survive the move; Nodes → Import restores it. An over-the-air update from 1.x
-is refused outright, because the running 1.x image predates
-`allow_partition_access`. Full detail in the release notes and
+survive the move; Nodes → Import restores it. Going wirelessly instead takes
+three steps, and the one that actually changes the layout is
+`esphome upload --partition-table` — a plain `esphome run` never sends a
+partition table however `allow_partition_access` is set, and reports success
+while leaving the layout untouched. Full detail in the release notes and
 [Getting started](https://rar.github.io/esphome-tigomonitor/guides/getting-started/).
 
 ### Changed
