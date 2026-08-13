@@ -108,12 +108,25 @@ this config is installed, later updates go over WiFi: it sets
 `allow_partition_access: true`, which is what permits the next layout change
 without a cable.
 
-**Already running an older version?** An over-the-air update from 1.x won't
-work on its own, because the 1.x image predates that setting. Flash once over
-USB — or, if the board is awkward to reach, do it in two OTAs: first send your
-*current* layout with `allow_partition_access: true` added and nothing else
-changed, then send the new one. Either way the history partition starts empty;
-sensors, names, and Home Assistant entities are unaffected.
+**Already running an older version?** Two things to know.
+
+**Export your node table first** — web UI → Nodes → Export. Changing the flash
+layout moves the region holding everything you've set on the device, and the
+old contents don't move with it: panel names, inverter and string renames,
+per-string ratings, the settings under Tools, and a saved CCA address. Nodes →
+Import restores the lot afterwards, topology overrides included. Anything set
+in YAML comes back on its own.
+
+**Then flash over USB.** An over-the-air update from 1.x won't work on its own,
+because the 1.x image predates `allow_partition_access`. If the board is
+awkward to reach, do it in two OTAs instead: first send your *current* layout
+with `allow_partition_access: true` added and nothing else changed, then send
+the new one. Either way stored history starts empty, and Home Assistant
+entities are unaffected.
+
+The same applies later if you enable `cca_source: ble` on an 8 MB board — that
+needs a bigger app slot, so it is another layout change with the same
+consequences. Export first.
 
 ### 5. Open the dashboard
 

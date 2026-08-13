@@ -12,6 +12,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Same firmware as [2.0.0-rc.2] — no code changed. What changed is the answer to
 the question that kept 2.0.0 a candidate.
 
+**Upgrading from 1.x:** export your node table first (web UI → Nodes → Export),
+then flash over USB. The new flash layout relocates the region holding
+everything set on the device — panel names, inverter and string renames,
+per-string ratings, Tools settings, a saved CCA address — so it does not
+survive the move; Nodes → Import restores it. An over-the-air update from 1.x
+is refused outright, because the running 1.x image predates
+`allow_partition_access`. Full detail in the release notes and
+[Getting started](https://rar.github.io/esphome-tigomonitor/guides/getting-started/).
+
 ### Changed
 - **The pinned storage dependency is a supported configuration, not a temporary one.** The release candidates described the pinned `esp_tsdb` fork as the thing keeping 2.0.0 from shipping, on the assumption it would shortly be replaced by an upstream release. That is no longer the plan: the fork is maintained deliberately and pinned by exact commit, and a release will not wait on it. Nothing about your config changes — this is a change of intent, not of YAML. See [What the fork contains](https://github.com/RAR/esphome-tigomonitor/blob/main/docs/esp-tsdb-fork.md) for the three commits it carries and why each one is needed.
 - **The dependency is pinned by commit SHA rather than a version number, on purpose.** `ref: ebfc360f...` is unreadable, and that is the trade: a tag or branch is a name that someone can later point somewhere else, which would silently change what a config builds. A commit cannot move. Copy it from the Config Builder or a `boards/*.yaml` rather than typing it.
