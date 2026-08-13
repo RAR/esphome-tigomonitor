@@ -1,24 +1,42 @@
 # Tigo Monitor partition table for 8 MB flash WITH the CCA-over-BLE bridge.
 # Folding the ble_client/esp32_ble stack into the monitor firmware pushes the app
-# past the stock 1.75 MB slot, so each OTA app slot grows to 2.0 MB. The 8 MB flash
-# has the room: dual 2.0 MB app + 448 KB nvs + 3 MB tsdb = ~7.5 MB of 8.0 MB.
+# past the stock 1.75 MB slot, so each OTA app slot grows to 2.25 MB.
 #
-# Layout (offsets computed by ESP-IDF):
-#   bootloader + partition_table reserve up to 0x9000
-#   otadata    8 KB     OTA selection
-#   phy_init   4 KB     Wi-Fi PHY calibration
-#   app0       2.0 MB   OTA slot A
-#   app1       2.0 MB   OTA slot B
-#   nvs        448 KB   ESPHome credentials, prefs
-#   tsdb       3 MB     LittleFS for time-series data
+# Why 2.25 and not 2.0: at 2.0 MB the BLE image sat at 87.4% of its slot (1.79 MB
+# of 2.00 MB, ~257 KB spare), and the layout left 528 KB of the flash allocated to
+# nothing at all. 2.25 MB slots spend exactly that dead space — the databases need
+# ~2.69 MB at their configured record limits, so tsdb keeps its full 3 MB and
+# retention is unchanged. Headroom doubles to ~513 KB (77.7% used).
 #
-# NOTE: changing partition sizes requires a one-time serial reflash (or an OTA with
-# allow_partition_access on ESPHome 2026.5.0+); a plain OTA cannot repartition.
+# Going further does cost history: 2.5 MB slots would pull tsdb to 2.52 MB, and
+# 3 MB slots to 1.52 MB — under what the databases need, forcing kSystemFileBytes
+# and kPanelFileBytes down ~43% (panel history ~3.7 -> ~2.1 months). 2.25 is the
+# last size that is free.
+#
+# Layout (offsets computed by ESP-IDF; app partitions align up to 64 KB, which is
+# why app0 starts at 0x10000 rather than 0xC000):
+#   bootloader + partition_table  up to 0x9000
+#   otadata    8 KB     OTA selection            0x009000
+#   phy_init   4 KB     Wi-Fi PHY calibration    0x00B000
+#   app0       2.25 MB  OTA slot A               0x010000
+#   app1       2.25 MB  OTA slot B               0x250000
+#   nvs        448 KB   ESPHome credentials, prefs   0x490000
+#   tsdb       3 MB     LittleFS for time-series     0x500000
+# Ends at 0x800000 — exactly 8.0 MB, nothing stranded.
+#
+# NOTE: changing partition sizes requires a one-time serial reflash, or an explicit
+# `esphome upload --partition-table` against an image that already carries
+# allow_partition_access (ESPHome 2026.5.0+). `esphome run` NEVER sends a partition
+# table — it succeeds and silently leaves the old layout in place, which reads as a
+# working repartition until you notice nothing moved.
+# It also moves `nvs`, so everything stored on the device (node table, renames,
+# per-string ratings, Tools settings, saved CCA address) is left behind. Export the
+# node table from the web UI first — Nodes -> Export — and Import it after.
 #
 # Name,    Type, SubType,  Offset, Size,     Flags
 otadata,   data, ota,      ,       0x2000,
 phy_init,  data, phy,      ,       0x1000,
-app0,      app,  ota_0,    ,       0x200000,
-app1,      app,  ota_1,    ,       0x200000,
+app0,      app,  ota_0,    ,       0x240000,
+app1,      app,  ota_1,    ,       0x240000,
 nvs,       data, nvs,      ,       0x70000,
 tsdb,      data, littlefs, ,       0x300000,
