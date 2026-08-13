@@ -63,11 +63,12 @@ esp32:
   framework:
     type: esp-idf
     components:
-      # Upstream 2.1.0+ has everything this project needs (handle-based
-      # multi-instance API, wrapped-ring query fix). ESP32-P4 only: use the
-      # RAR/esp_tsdb fork's `tigomonitor` branch instead (source/ref pin) —
-      # 2.1.0's manifest doesn't list the esp32p4 target yet.
-      - zakery292/esp_tsdb^2.1.0
+      # A fork, pinned by commit SHA — see the note below for why. An
+      # immutable SHA rather than a branch, because a branch can move under
+      # a build and this is the config people copy.
+      - name: zakery292/esp_tsdb
+        source: https://github.com/RAR/esp_tsdb.git
+        ref: ebfc360f00263ab90116ee3e556a9153ab4041a2
       - joltwallet/littlefs^1.16
     sdkconfig_options:
       CONFIG_PARTITION_TABLE_CUSTOM: "y"
@@ -111,6 +112,13 @@ The fork writes the header to an alternating sidecar file (`<db>.h0` / `<db>.h1`
 so the hot path appends instead. Measured on the reference rig over 132 commits:
 median 633 ms, maximum 1,019 ms, with no upward drift as the databases fill. The
 change is not upstream yet, so the board config pins the fork by commit SHA.
+
+The pin is upstream 2.3.0 plus three commits and nothing behind it. On an
+ESP32-P4 it is required for a second reason: upstream's manifest doesn't list
+`esp32p4` as a target, so the component manager refuses to install there at all.
+[What the fork
+contains](https://github.com/RAR/esphome-tigomonitor/blob/main/docs/esp-tsdb-fork.md)
+has the details.
 :::
 
 > **Board note:** the `board:` value above (`m5stack-atoms3`) is an example. The reference rig for this project is the **AtomS3R** — set `board:` to whatever board you actually run so you don't flash the wrong target.
