@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-08-13
+
+Same firmware as [2.0.0-rc.2] — no code changed. What changed is the answer to
+the question that kept 2.0.0 a candidate.
+
+### Changed
+- **The pinned storage dependency is a supported configuration, not a temporary one.** The release candidates described the pinned `esp_tsdb` fork as the thing keeping 2.0.0 from shipping, on the assumption it would shortly be replaced by an upstream release. That is no longer the plan: the fork is maintained deliberately and pinned by exact commit, and a release will not wait on it. Nothing about your config changes — this is a change of intent, not of YAML. See [What the fork contains](https://github.com/RAR/esphome-tigomonitor/blob/main/docs/esp-tsdb-fork.md) for the three commits it carries and why each one is needed.
+- **The dependency is pinned by commit SHA rather than a version number, on purpose.** `ref: ebfc360f...` is unreadable, and that is the trade: a tag or branch is a name that someone can later point somewhere else, which would silently change what a config builds. A commit cannot move. Copy it from the Config Builder or a `boards/*.yaml` rather than typing it.
+
+### Fixed
+- **Docs-site dependencies patched** for three advisories (`js-yaml`, `nanoid`, `postcss`). These affect only the build of this documentation site, never the firmware or your device — no device is running any of this code.
+
 ## [2.0.0-rc.2] - 2026-08-09
 
 ### Fixed
@@ -705,7 +717,8 @@ None - All changes are backward compatible. Web authentication and API tokens ar
 ## Initial Development
 Previous commits were part of the initial development phase. This is the first official release with comprehensive feature set and documentation.
 
-[Unreleased]: https://github.com/RAR/esphome-tigomonitor/compare/v2.0.0-rc.2...HEAD
+[Unreleased]: https://github.com/RAR/esphome-tigomonitor/compare/v2.0.0...HEAD
+[2.0.0]: https://github.com/RAR/esphome-tigomonitor/releases/tag/v2.0.0
 [2.0.0-rc.2]: https://github.com/RAR/esphome-tigomonitor/releases/tag/v2.0.0-rc.2
 [2.0.0-rc.1]: https://github.com/RAR/esphome-tigomonitor/releases/tag/v2.0.0-rc.1
 [2.0.0-beta.5]: https://github.com/RAR/esphome-tigomonitor/releases/tag/v2.0.0-beta.5

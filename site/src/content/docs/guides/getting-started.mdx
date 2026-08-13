@@ -101,6 +101,20 @@ ESPHome downloads everything it needs, builds the firmware, and installs it. The
 first build takes several minutes; later ones are quick. When it finishes it
 prints the device's IP address.
 
+The first flash has to be the wired one. Boards that store history use a custom
+flash layout, and a device can only rewrite its own layout over the network if
+the firmware already on it was built to allow that — a new board's isn't. Once
+this config is installed, later updates go over WiFi: it sets
+`allow_partition_access: true`, which is what permits the next layout change
+without a cable.
+
+**Already running an older version?** An over-the-air update from 1.x won't
+work on its own, because the 1.x image predates that setting. Flash once over
+USB — or, if the board is awkward to reach, do it in two OTAs: first send your
+*current* layout with `allow_partition_access: true` added and nothing else
+changed, then send the new one. Either way the history partition starts empty;
+sensors, names, and Home Assistant entities are unaffected.
+
 ### 5. Open the dashboard
 
 Go to `http://<that-ip-address>/` in a browser.
