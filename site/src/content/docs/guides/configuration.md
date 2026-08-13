@@ -517,7 +517,12 @@ esp32:
   framework:
     type: esp-idf
     components:
-      - zakery292/esp_tsdb^2.1.0    # see tsdb-integration.md re: pinning
+      # A fork, pinned by exact commit — the registry build makes each
+      # snapshot take 21 s instead of under 1 s. See "Saving history to
+      # flash" for why, and copy the pin from there if this looks stale.
+      - name: zakery292/esp_tsdb
+        source: https://github.com/RAR/esp_tsdb.git
+        ref: ebfc360f00263ab90116ee3e556a9153ab4041a2
       - joltwallet/littlefs^1.16
     sdkconfig_options:
       CONFIG_PARTITION_TABLE_CUSTOM: "y"
