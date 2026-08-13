@@ -15,7 +15,7 @@ behind** — it is a rebased topic stack, not a divergent history.
 | Commit | What it does | Why we need it | Upstream |
 |---|---|---|---|
 | `dbf4ebf` | Writes the DB header to an alternating sidecar (`<db>.h0`/`.h1`) instead of in place at offset 0 | A snapshot took 21.4 s; 15.2 s of that was header rewrites. LittleFS overwrite cost is linear at ~20.4 ms/KB, so a byte-0 write rewrites the whole file. Now 633 ms median / 1,019 ms max over 132 commits on the rig, with no drift as the DBs fill. | [PR #6](https://github.com/zakery292/esp_tsdb/pull/6), open since 2026-08-09 |
-| `3fb785f` | Adds `tsdb_peek_span` — read a database's time span without opening it | The Diagnostics page needs each DB's span; opening every DB to get it is the expensive path we just removed. | **Never submitted.** No upstream path exists. |
+| `3fb785f` | Adds `tsdb_peek_span` — read a database's time span without opening it | The Diagnostics page needs each DB's span; opening every DB to get it is the expensive path we just removed. | **Not submitted, by choice** (2026-08-13). Ours to carry indefinitely. |
 | `ebfc360` | Adds `esp32p4` to the manifest's `targets` list | Manifest-only. Without it the component manager refuses to install on a P4; the code itself is target-agnostic. | [PR #4](https://github.com/zakery292/esp_tsdb/pull/4), open since 2026-07-05 |
 
 Upstream's last commit was 2026-07-12, and `development` is identical to `main`.
@@ -68,9 +68,10 @@ before calling a new pin good.
 ## If upstream merges the PRs
 
 Retiring the fork means dropping to a registry version — but only once *all
-three* commits are upstream. Two of the three are in open PRs; `tsdb_peek_span`
-has never been submitted, so a full retirement needs that PR opened and merged
-first. Until then, a partial merge only shortens the stack; it does not remove it.
+three* commits are upstream, and that is not currently on the table. Two of the
+three are in open PRs; `tsdb_peek_span` is deliberately not submitted, so even
+if both PRs merge tomorrow the stack shortens to one commit rather than
+disappearing. Plan for the fork to stay.
 
 ## Open item
 
