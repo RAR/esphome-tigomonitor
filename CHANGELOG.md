@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [2.0.0] - 2026-08-13
+## [2.0.0] - 2026-08-14
 
 Same firmware as [2.0.0-rc.2] — no code changed. What changed is the answer to
 the question that kept 2.0.0 a candidate.

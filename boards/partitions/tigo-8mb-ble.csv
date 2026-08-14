@@ -4,14 +4,20 @@
 #
 # Why 2.25 and not 2.0: at 2.0 MB the BLE image sat at 87.4% of its slot (1.79 MB
 # of 2.00 MB, ~257 KB spare), and the layout left 528 KB of the flash allocated to
-# nothing at all. 2.25 MB slots spend exactly that dead space — the databases need
-# ~2.69 MB at their configured record limits, so tsdb keeps its full 3 MB and
-# retention is unchanged. Headroom doubles to ~513 KB (77.7% used).
+# nothing at all. 2.25 MB slots spend exactly that dead space and end the table at
+# 8.00 MB, so tsdb keeps its full 3 MB and retention is unchanged. App headroom
+# doubles to ~513 KB (77.7% used).
 #
-# Going further does cost history: 2.5 MB slots would pull tsdb to 2.52 MB, and
-# 3 MB slots to 1.52 MB — under what the databases need, forcing kSystemFileBytes
-# and kPanelFileBytes down ~43% (panel history ~3.7 -> ~2.1 months). 2.25 is the
-# last size that is free.
+# Why stop at 2.25: the databases hold 1.6 MB at their configured limits
+# (kSystemFileBytes 1 MB + 3 x kPanelFileBytes 192 KB, in tigo_history.cpp), which
+# is ~52% of a 3 MB tsdb. LittleFS is copy-on-write and needs that slack — commit
+# 00366d7 exists because filling past ~55% broke persistence outright. 2.5 MB slots
+# would pull tsdb to 2.52 MB (63% full) and 3 MB slots to 1.52 MB (below what the
+# databases hold at all). 2.25 is the last size that costs nothing.
+#
+# Read those constants, not a live /api/tsdb/stats: max_records is written into the
+# file header at creation, so a device can report a capacity a newer build no longer
+# specifies until the database is recreated.
 #
 # Layout (offsets computed by ESP-IDF; app partitions align up to 64 KB, which is
 # why app0 starts at 0x10000 rather than 0xC000):
