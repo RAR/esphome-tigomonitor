@@ -34,6 +34,7 @@ Still stuck? The rest of this page is organised by symptom.
 | Symptom | Solution |
 |---------|----------|
 | No devices discovered | Check UART wiring, verify 38400 baud ([Wiring](/esphome-tigomonitor/guides/wiring/)) |
+| No devices discovered on a LilyGO T-CAN485 | Drive GPIO16, 17 and 19 high — the transceiver is unpowered without them (below) |
 | High packet loss | Add `CONFIG_UART_ISR_IN_IRAM: "y"` ([UART Optimization](/esphome-tigomonitor/guides/uart-optimization/)) |
 | Memory exhaustion | Use an ESP32-S3 with PSRAM — it's required |
 | CCA sync fails (local HTTP) | Verify CCA IP, check network connectivity |
@@ -56,6 +57,48 @@ Still stuck? The rest of this page is organised by symptom.
 2. Confirm baud rate is 38400
 3. Check Tigo system is powered and communicating
 4. Look for any "Frame" messages in ESPHome logs
+
+### No Devices Found on a LilyGO T-CAN485
+
+**Symptoms:** Nothing received at all — the log shows no frames, and a UART debug
+block shows only `>>>` (transmit) lines with no `<<<` (receive) lines. An ESP32
+loopback or TX test still passes, because it never leaves the chip.
+
+**Cause:** the board's RS485 front end needs **three** GPIOs held high, and the
+one people miss is GPIO16. It is not an enable — it is `5V_EN`, the ME2107 boost
+that supplies the MAX13487E transceiver. Left floating, the transceiver has no
+power and the receiver is deaf no matter how correct the wiring and baud rate are.
+
+**Solution:** drive all three, and leave them on:
+
+```yaml
+switch:
+  - platform: gpio
+    id: rs485_power_5v
+    pin: GPIO16          # 5V boost that feeds the transceiver
+    internal: true
+    restore_mode: ALWAYS_ON
+  - platform: gpio
+    id: rs485_auto_direction
+    pin: GPIO17          # /RE high => AutoDirection controls the receiver
+    internal: true
+    restore_mode: ALWAYS_ON
+  - platform: gpio
+    id: rs485_chip_enable
+    pin: GPIO19          # SHDN high => normal operation (low = whole chip off)
+    internal: true
+    restore_mode: ALWAYS_ON
+```
+
+Simpler still, include the shipping board file as a package and let it supply the
+front end for you — `boards/esp32-lilygo-t-can485.yaml`, as
+`boards/example-t-can485.yaml` does. The [config builder](/esphome-tigomonitor/config-builder/)
+also emits all three when you pick this board.
+
+**While you are in there:** do not add a test writer that transmits bytes on this
+UART. `tigo_monitor` is receive-only, and the MAX13487E has no driver-enable pin —
+AutoDirection turns the driver on by itself whenever it sees activity, so those
+test bytes go straight onto your live CCA↔TAP bus.
 
 ### Devices Found But No Barcodes
 
