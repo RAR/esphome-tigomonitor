@@ -148,6 +148,40 @@ def _auto_template_sensor_config(config):
 
     return config
 
+# Every measurement a per-device entry can ask for. An entry that names none of
+# these creates no entities at all, so validation rejects it (see
+# _require_device_sub_sensor below).
+_DEVICE_SUB_SENSOR_KEYS = (
+    CONF_POWER_IN, CONF_POWER, CONF_PEAK_POWER, CONF_POWER_OUT,
+    CONF_VOLTAGE_IN, CONF_VOLTAGE_OUT, CONF_CURRENT_IN, CONF_CURRENT_OUT,
+    CONF_DUTY_CYCLE, CONF_TEMPERATURE, CONF_RSSI,
+    CONF_BARCODE, CONF_FIRMWARE_VERSION, CONF_DEVICE_INFO,
+    CONF_EFFICIENCY, CONF_POWER_FACTOR, CONF_LOAD_FACTOR,
+)
+
+
+def _require_device_sub_sensor(config):
+    """Reject a per-device entry that selects no measurements.
+
+    `address` + `name` only say *which* panel and what to call it — the
+    entities come from the sub-keys. Without one, to_code() has nothing to
+    create and the entry is a silent no-op, which reads as "my panels never
+    showed up in Home Assistant" (issue #48).
+    """
+    if not any(key in config for key in _DEVICE_SUB_SENSOR_KEYS):
+        raise cv.Invalid(
+            f"Device sensor '{config[CONF_NAME]}' (address "
+            f"'{config[CONF_ADDRESS]}') selects no measurements, so it would "
+            "create no entities. Add at least one sub-key, e.g.:\n"
+            "    power: {}\n"
+            "    voltage_in: {}\n"
+            "    current_in: {}\n"
+            "    temperature: {}\n"
+            "Available: " + ", ".join(_DEVICE_SUB_SENSOR_KEYS)
+        )
+    return config
+
+
 # Schema for individual device sensors
 DEVICE_CONFIG_SCHEMA = cv.All(
     cv.Schema({
@@ -241,6 +275,7 @@ DEVICE_CONFIG_SCHEMA = cv.All(
             state_class=STATE_CLASS_MEASUREMENT,
         ),
     }).extend(cv.COMPONENT_SCHEMA),
+    _require_device_sub_sensor,
     _auto_template_sensor_config,
 )
 

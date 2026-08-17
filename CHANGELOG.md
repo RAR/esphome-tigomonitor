@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **A per-panel sensor entry that lists no measurements is now a config error instead of a silent no-op.** `address` and `name` say which panel and what to call it; the entities come from the sub-keys (`power: {}`, `voltage_in: {}`, ...). An entry with none produced nothing at all, with no warning — which reads as "my panels never appeared in Home Assistant" and sends people looking at heap limits and device counts ([#48](https://github.com/RAR/esphome-tigomonitor/issues/48)). Validation now names the offending entry and lists the available sub-keys.
+
 ## [2.0.0] - 2026-08-14
 
 Same firmware as [2.0.0-rc.2] — no code changed. What changed is the answer to
