@@ -36,9 +36,14 @@
 
     <fieldset class="tw-card">
       <legend>Networking</legend>
-      <label class="field"><span>Wi-Fi SSID</span><input id="wifi-ssid" placeholder="YOUR_WIFI_SSID" /><small class="hint">Your home Wi-Fi network name, exactly as it appears.</small></label>
-      <label class="field"><span>Wi-Fi password</span><input id="wifi-pass" placeholder="YOUR_WIFI_PASSWORD" /></label>
-      <label class="field"><span>Static IP <em>(optional)</em></span><input id="static-ip" /><small class="hint">Leave blank and your router picks one. Fill it in if you want the dashboard always at the same address.</small></label>
+      <p class="notes" id="ethernet-note" style="display:none">
+        This board is wired — the generated config uses its on-board Ethernet
+        controller and has no Wi-Fi section. For a fixed address, uncomment the
+        <code>manual_ip:</code> block under <code>ethernet:</code>.
+      </p>
+      <label class="field" id="wifi-ssid-row"><span>Wi-Fi SSID</span><input id="wifi-ssid" placeholder="YOUR_WIFI_SSID" /><small class="hint">Your home Wi-Fi network name, exactly as it appears.</small></label>
+      <label class="field" id="wifi-pass-row"><span>Wi-Fi password</span><input id="wifi-pass" placeholder="YOUR_WIFI_PASSWORD" /></label>
+      <label class="field" id="static-ip-row"><span>Static IP <em>(optional)</em></span><input id="static-ip" /><small class="hint">Leave blank and your router picks one. Fill it in if you want the dashboard always at the same address.</small></label>
     </fieldset>
 
     <fieldset class="tw-card" id="cca-card">

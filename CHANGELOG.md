@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **LilyGO T-Connect Pro Lite is a supported board.** ESP32-S3 with 8MB PSRAM, 8MB flash and wired Ethernet (W5500) — the full profile, web UI and on-flash history included, on a wired network. `boards/esp32s3-lilygo-t-connect-pro-lite.yaml` plus a ready-to-flash `boards/example-t-connect-pro-lite.yaml`. Contributed by @davidcoulson from a working install ([discussion #30](https://github.com/RAR/esphome-tigomonitor/discussions/30)); the pin map is theirs, and the config compiles clean here.
+- **The config builder can generate wired configs.** A board that declares an on-board Ethernet PHY now emits an `ethernet:` block and no `wifi:`/`captive_portal:` at all, and the Wi-Fi fields disappear from the form. Bluetooth is compiled out on this board to buy back flash, so CCA-over-BLE is unavailable there; HTTP CCA import is unaffected.
+
 ### Fixed
 - **A per-panel sensor entry that lists no measurements is now a config error instead of a silent no-op.** `address` and `name` say which panel and what to call it; the entities come from the sub-keys (`power: {}`, `voltage_in: {}`, ...). An entry with none produced nothing at all, with no warning — which reads as "my panels never appeared in Home Assistant" and sends people looking at heap limits and device counts ([#48](https://github.com/RAR/esphome-tigomonitor/issues/48)). Validation now names the offending entry and lists the available sub-keys.
 

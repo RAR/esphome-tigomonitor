@@ -180,3 +180,26 @@ test('board sdkconfigBle is emitted only when the config selects BLE', () => {
   assert.ok(!toYaml(assembleConfig(getBoard('esp32s3-atoms3r'), bleForm)).includes(SYM),
     'boards without sdkconfigBle must be unaffected');
 });
+
+test('a wired board emits ethernet and no wifi at all', () => {
+  const b = getBoard('esp32s3-lilygo-t-connect-pro-lite');
+  // A static IP left in the form must not resurrect the wifi block either.
+  const y = toYaml(assembleConfig(b, {
+    ...form, uart: b.uartDefault, wifi: { ...form.wifi, staticIp: '10.0.0.50' },
+  }));
+  assert.ok(y.includes('\nethernet:'), 'ethernet block missing');
+  assert.ok(y.includes('type: W5500'), 'PHY type missing');
+  assert.ok(y.includes('cs_pin: GPIO10'), 'SPI pins missing');
+  // Both would compete for the same lwIP budget, and captive_portal is
+  // meaningless with no radio to fall back to.
+  assert.ok(!y.includes('\nwifi:'), 'wifi emitted on a wired board');
+  assert.ok(!y.includes('captive_portal'), 'captive_portal emitted on a wired board');
+});
+
+test('a wired board keeps wifi credentials out of secrets.yaml', () => {
+  const b = getBoard('esp32s3-lilygo-t-connect-pro-lite');
+  const s = toSecretsYaml(assembleConfig(b, { ...form, uart: b.uartDefault, useSecrets: true }));
+  assert.ok(s.includes('api_encryption_key:'), 'api key missing from secrets');
+  assert.ok(!s.includes('wifi_ssid'), 'wifi_ssid written for a board with no radio');
+  assert.ok(!s.includes('wifi_password'), 'wifi_password written for a board with no radio');
+});
