@@ -334,6 +334,10 @@ sensor:
     load_factor: {}
 ```
 
+`address` and `name` only say *which* panel and what to call it — the entities
+come from the sub-keys, so list at least one. An entry with none creates no
+entities, and is rejected at validation time rather than silently skipped.
+
 ### Grouping panels into HA sub-devices
 
 ESPHome's [sub-devices feature](https://esphome.io/components/esphome/#esphome-devices)
