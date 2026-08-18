@@ -386,8 +386,13 @@ cards, each grouping the entities for its panels.
 
 ### Text Sensors
 
+A panel's barcode, firmware version and device info are text entities, but they
+are declared like every other measurement — as sub-keys of a **`sensor:`** entry.
+There is no `text_sensor:` platform for `tigo_monitor`; the component creates the
+text entities itself.
+
 ```yaml
-text_sensor:
+sensor:
   - platform: tigo_monitor
     tigo_monitor_id: tigo_hub
     address: "1234"
@@ -395,6 +400,19 @@ text_sensor:
     barcode: {}
     firmware_version: {}
     device_info: {}
+```
+
+They mix freely with the numeric sub-keys, so one entry per panel covers both:
+
+```yaml
+sensor:
+  - platform: tigo_monitor
+    tigo_monitor_id: tigo_hub
+    address: "1234"
+    name: "Panel 1"
+    power: {}
+    temperature: {}
+    barcode: {}
 ```
 
 ### Binary Sensors
