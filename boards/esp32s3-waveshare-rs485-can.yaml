@@ -1,0 +1,151 @@
+# Waveshare ESP32-S3-RS485-CAN Configuration
+# ESP32-S3, 16MB flash, 8MB octal PSRAM, isolated RS485 + CAN, 7-36V DC input
+# Recommended for: DIN-rail installs that want the full web UI
+#
+# Verified working by @Brooklyn18m in issue #22 (frames flowing, panels
+# populating). The maintainer has no unit of this board, so the pin map below
+# comes from Waveshare's schematic and that report rather than from bench
+# testing here.
+#
+# WHY THIS BOARD
+# --------------
+# It is the full-fat profile — PSRAM for `tigo_server`, 16MB of flash for the
+# on-device history database — in an industrial package: DIN-rail mountable,
+# opto-isolated RS485, and a 7-36V wide input so it can share the Tigo CCA's own
+# supply instead of needing a separate USB brick.
+#
+# THE ENABLE PIN IS THE WHOLE TRICK
+# ---------------------------------
+# TX/RX alone are not enough here. The SP3485EN's DE and /RE are tied together
+# to one net driven by GPIO21, and it floats at reset — so a config that sets
+# only tx_pin/rx_pin comes up with the *receiver disabled* and reads zero bytes
+# from the bus forever. That is exactly what issue #22 looked like: no frames,
+# no checksum errors, `Buffer: 0 bytes`. The `switch:` block below is the fix.
+#
+# Driving it LOW is also a genuine read-only guarantee, and a stronger one than
+# most boards give you. With DE and /RE tied together, low means "receiver on,
+# driver off" in hardware — the same strapping the project's wiring guide
+# recommends for a discrete MAX485. The ESP32 physically cannot talk onto the
+# Tigo bus while that pin is held down, so it can never contend with the CCA.
+#
+# If you ever see zero bytes after this, the only thing worth trying is
+# inverting it (`restore_mode: ALWAYS_ON`) in case your revision buffers the
+# net through an inverting isolator.
+#
+# OTHER ON-BOARD HARDWARE (not configured here, pins for reference)
+# -----------------------------------------------------------------
+#   CAN (TWAI)      TX GPIO15, RX GPIO16
+#
+# Nothing else is instantiated — those pins stay free.
+
+esphome:
+  name: tigo-server
+  friendly_name: "Tigo Server"
+  # allow_partition_access in the OTA config requires ESPHome 2026.5.0+
+  min_version: "2026.5.0"
+
+esp32:
+  variant: esp32s3
+  board: esp32-s3-devkitc-1
+  # Waveshare ships this board with 16MB. If yours is a variant with 8MB, the
+  # flash will refuse the image at upload time (a loud failure, not a silent
+  # one) — drop to `flash_size: 8MB` and `partitions/tigo-8mb.csv`.
+  flash_size: 16MB
+  partitions: partitions/tigo-16mb.csv
+  framework:
+    type: esp-idf
+    version: recommended
+    advanced:
+      # XIP-from-PSRAM — the fix for the tsdb flash-write crash
+      # (docs/tsdb-flash-crash-issue.md). Every history commit takes ESP-IDF's
+      # cross-core cache-disable; with code running from flash that stall raced
+      # WiFi ISRs and faulted. This flag sets SPIRAM_FETCH_INSTRUCTIONS +
+      # SPIRAM_RODATA, which compiles the cache-disable out entirely. Costs
+      # ~1.7 MiB of PSRAM.
+      execute_from_psram: true
+    components:
+      # Time-series database for persistent history. Pinned to a fork by
+      # immutable SHA — see the long explanation in esp32s3-atoms3r.yaml and
+      # docs/esp-tsdb-fork.md. A branch can move under a build; a commit cannot.
+      - name: zakery292/esp_tsdb
+        source: https://github.com/RAR/esp_tsdb.git
+        ref: ebfc360f00263ab90116ee3e556a9153ab4041a2
+      # LittleFS — backing filesystem for the tsdb partition
+      - joltwallet/littlefs^1.16
+    sdkconfig_options:
+      CONFIG_ESP32S3_DEFAULT_CPU_FREQ_240: "y"
+      # Run the UART ISR from IRAM. The single most important setting for frame
+      # loss — without it the ISR stalls whenever flash is busy and Tigo frames
+      # get dropped mid-burst.
+      CONFIG_UART_ISR_IN_IRAM: "y"
+      CONFIG_UART_RX_BUFFER_SIZE: "2048"
+      # TX stays small: tigo_monitor only ever listens to the bus.
+      CONFIG_UART_TX_BUFFER_SIZE: "512"
+      CONFIG_FREERTOS_QUEUE_REGISTRY_SIZE: "32"
+      CONFIG_LOG_DEFAULT_LEVEL_INFO: "y"
+      # PSRAM: 8MB octal at 80MHz
+      CONFIG_SPIRAM_MODE_OCT: "y"
+      CONFIG_SPIRAM_SPEED_80M: "y"
+      # WiFi + lwIP buffers into PSRAM to spare internal RAM — prevents
+      # new-connection resets (OTA / API) once internal RAM gets tight.
+      CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP: "y"
+      # TLS buffers to PSRAM. The cloud path re-parses the pinned CA per
+      # request, which otherwise craters the internal heap floor mid-handshake.
+      CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC: "y"
+      # VFS directory operations (stat/unlink/rename/opendir), off by default in
+      # IDF. esp_tsdb reads database sizes via stat(), so without this the
+      # History page's size column reads 0 and esp_tsdb's unlink() recovery
+      # paths silently no-op.
+      CONFIG_VFS_SUPPORT_DIR: "y"
+      # More lwIP sockets for the web server + API running together (avoids
+      # "Failed to create socket" under load, #20).
+      CONFIG_LWIP_MAX_SOCKETS: "16"
+      CONFIG_LWIP_MAX_ACTIVE_TCP: "16"
+      CONFIG_LWIP_MAX_LISTENING_TCP: "16"
+
+# Enable PSRAM
+psram:
+  mode: octal
+  speed: 80MHz
+
+# --- RS485 transceiver enable ------------------------------------------------
+# SP3485EN, DE and /RE tied to one net on GPIO21. LOW = receive (driver off).
+# `internal: true` keeps it out of Home Assistant — it is board wiring, not a
+# control anyone should be able to flip from a dashboard. Read the long note at
+# the top of this file before touching it: turning this on enables the driver.
+switch:
+  - platform: gpio
+    id: rs485_enable
+    name: "RS485 Transceiver Enable"
+    internal: true
+    pin: GPIO21          # DE + /RE, low => receiver on and driver off
+    restore_mode: ALWAYS_OFF
+
+# --- Tigo bus ----------------------------------------------------------------
+# The board's isolated RS485 transceiver, on its own hardware UART. That leaves
+# the USB console free, so keep `logger:` on its defaults — do NOT set
+# `baud_rate: 0`.
+uart:
+  id: tigo_uart
+  tx_pin: GPIO17
+  rx_pin: GPIO18
+  baud_rate: 38400
+  data_bits: 8
+  parity: NONE
+  stop_bits: 1
+  rx_buffer_size: 2048
+
+# --- Tigo Monitor ------------------------------------------------------------
+tigo_monitor:
+  id: tigo_hub
+  uart_id: tigo_uart
+  # Device and node tables live in PSRAM here, so this is cheap to raise. Set it
+  # to your optimizer count.
+  number_of_devices: 30
+  update_interval: 30s
+
+# --- Web server --------------------------------------------------------------
+tigo_server:
+  id: tigo_web
+  tigo_monitor_id: tigo_hub
+  port: 80

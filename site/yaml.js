@@ -170,7 +170,10 @@ export function toYaml(cfg) {
       L.push(`${I(2)}name: "${sw.name}"`);
       L.push(`${I(2)}internal: true`);
       L.push(`${I(2)}pin: ${sw.pin}${sw.comment ? `  # ${sw.comment}` : ''}`);
-      L.push(`${I(2)}restore_mode: ALWAYS_ON`);
+      // Default ALWAYS_ON: most transceiver enables are active-high. A board
+      // whose enable is active-low (Waveshare's SP3485EN ties DE and /RE to one
+      // pin, where low means "receive") sets restore_mode explicitly.
+      L.push(`${I(2)}restore_mode: ${sw.restore_mode ?? 'ALWAYS_ON'}`);
     }
     L.push('');
   }

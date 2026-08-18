@@ -12,6 +12,7 @@ const FILE = {
   'esp32p4-evboard': 'boards/esp32p4-evboard.yaml',
   'esp32-lilygo-t-can485': 'boards/esp32-lilygo-t-can485.yaml',
   'esp32s3-lilygo-t-connect-pro-lite': 'boards/esp32s3-lilygo-t-connect-pro-lite.yaml',
+  'esp32s3-waveshare-rs485-can': 'boards/esp32s3-waveshare-rs485-can.yaml',
 };
 
 for (const [id, rel] of Object.entries(FILE)) {
