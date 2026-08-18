@@ -41,6 +41,33 @@ Assistant over the native API; it just cannot serve the dashboard.
 - **Other on-board hardware** (pins documented in the board file, nothing
   instantiated): RS232, CAN, four WS2812 LEDs, two buttons, a relay
 
+#### `esp32s3-waveshare-rs485-can.yaml` - Waveshare ESP32-S3-RS485-CAN (8MB PSRAM, DIN rail)
+- **Board**: Waveshare ESP32-S3-RS485-CAN, 16MB flash, 8MB octal PSRAM
+- **CPU**: 240MHz
+- **Power**: 7-36V DC wide input (or USB-C), DIN-rail mountable — it can run off
+  the same supply as the CCA rather than a separate USB brick
+- **RS485**: on-board *isolated* transceiver (SP3485EN) on GPIO17 (TX) /
+  GPIO18 (RX), on its own hardware UART, so the USB serial console stays available
+- **⚠ The transceiver enable on GPIO21 is not optional.** DE and /RE are tied to
+  one net that floats at reset, so a config setting only `tx_pin`/`rx_pin` boots
+  with the **receiver disabled** and reads zero bytes off the bus forever — no
+  frames, no checksum errors, `Buffer: 0 bytes` ([issue #22](https://github.com/RAR/esphome-tigomonitor/issues/22)).
+  The board file holds it LOW with a `switch:` entry. That also disables the
+  driver, which is the same hardware read-only guarantee the wiring guide gets
+  from strapping a discrete MAX485 — the ESP32 physically cannot transmit onto
+  the Tigo bus
+- **Recommended for**: DIN-rail / cabinet installs that want the full web UI.
+  PSRAM and 16MB of flash mean `tigo_server`, the full 8MB history partition and
+  BLE all fit — BLE needs no repartition here, unlike the 8MB boards
+- **Ready-to-flash example**: `example-waveshare-rs485-can.yaml`
+- **Provenance**: verified working by @Brooklyn18m in
+  [issue #22](https://github.com/RAR/esphome-tigomonitor/issues/22); pin map from
+  Waveshare's schematic plus that report. No maintainer unit exists to bench-test
+  it against, though the config compiles clean here (40.4% of a 3MB slot)
+- **Other on-board hardware** (not instantiated): CAN (TWAI) on GPIO15/GPIO16
+- **Note**: if you have a variant with 8MB flash rather than 16MB, upload will
+  refuse the image — switch to `flash_size: 8MB` and `partitions/tigo-8mb.csv`
+
 ### ESP32-P4 Boards
 
 #### `esp32p4-evboard.yaml` - ESP32-P4 Evaluation Board (32MB PSRAM)

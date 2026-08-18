@@ -429,6 +429,67 @@ font:
       'The screen-equipped "Pro" is a different board; this entry is the Lite and configures no display.',
     ],
   },
+  {
+    // Mirrors boards/esp32s3-waveshare-rs485-can.yaml. Verified working by
+    // @Brooklyn18m in issue #22; the pin map comes from Waveshare's schematic
+    // and that report, not from a maintainer unit.
+    id: 'esp32s3-waveshare-rs485-can',
+    label: 'Waveshare ESP32-S3-RS485-CAN (ESP32-S3, 8MB PSRAM, DIN rail)',
+    chip: 'esp32s3', board: 'esp32-s3-devkitc-1', variant: 'esp32s3',
+    flash_size: '16MB',
+    // One table for both tiers: the 16MB layout gives 3MB OTA slots, and the
+    // BLE build needs 2.25MB (what tigo-8mb-ble.csv carves out on the 8MB
+    // boards). So selecting BLE here needs no repartition.
+    partitions: { default: 'partitions/tigo-16mb.csv', ble: 'partitions/tigo-16mb.csv' },
+    psram: { mode: 'octal', speed: '80MHz' },
+    frameworkAdvanced: { enable_idf_experimental_features: false, execute_from_psram: true },
+    frameworkComponents: ['joltwallet/littlefs^1.16'],
+    hostedComponent: {
+      source: 'https://github.com/RAR/esp_tsdb.git',
+      ref: 'ebfc360f00263ab90116ee3e556a9153ab4041a2',
+    },
+    sdkconfig: {
+      CONFIG_ESP32S3_DEFAULT_CPU_FREQ_240: 'y',
+      CONFIG_UART_ISR_IN_IRAM: 'y',
+      CONFIG_UART_RX_BUFFER_SIZE: '2048',
+      CONFIG_UART_TX_BUFFER_SIZE: '512',
+      CONFIG_FREERTOS_QUEUE_REGISTRY_SIZE: '32',
+      CONFIG_LOG_DEFAULT_LEVEL_INFO: 'y',
+      CONFIG_SPIRAM_MODE_OCT: 'y',
+      CONFIG_SPIRAM_SPEED_80M: 'y',
+      CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP: 'y',
+      CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC: 'y',
+      CONFIG_VFS_SUPPORT_DIR: 'y',
+      CONFIG_LWIP_MAX_SOCKETS: '16',
+      CONFIG_LWIP_MAX_ACTIVE_TCP: '16',
+      CONFIG_LWIP_MAX_LISTENING_TCP: '16',
+    },
+    hosted: null,
+    uartDefault: { tx_pin: 'GPIO17', rx_pin: 'GPIO18', rx_buffer_size: 2048 },
+    numberOfDevices: 30,
+    supports: { ble: true, display: false },
+    // The Tigo bus is on its own hardware UART, so the USB console stays.
+    keepSerialConsole: true,
+    // The one thing that makes or breaks this board. SP3485EN with DE and /RE
+    // tied to a single net on GPIO21, floating at reset — a config that sets
+    // only tx/rx boots with the receiver disabled and reads zero bytes forever
+    // (issue #22). ALWAYS_OFF, not ALWAYS_ON: low is receive here, and holding
+    // it low also disables the driver, which is a hardware guarantee that the
+    // ESP32 can never contend with the CCA on the bus.
+    gpioSwitches: [
+      { id: 'rs485_enable', name: 'RS485 Transceiver Enable', pin: 'GPIO21',
+        restore_mode: 'ALWAYS_OFF',
+        comment: 'DE + /RE, low => receiver on and driver off' },
+    ],
+    displayOverlay: null,
+    supportsWebServer: true,
+    notes: [
+      'Isolated RS485 on GPIO17/GPIO18 with the transceiver enable on GPIO21. That enable pin is not optional — it floats at reset, so without the generated `switch:` block the board reads zero bytes off the bus (issue #22). Holding it low also keeps the driver off, so the ESP32 cannot transmit onto the Tigo bus.',
+      '7-36V DC input and DIN-rail mounting, so it can run off the same supply as the CCA instead of a separate USB brick.',
+      '16MB flash: the history database gets the full 8MB tsdb partition, and BLE fits the standard OTA slots without a repartition.',
+      'Verified working by a user in issue #22; no maintainer unit exists to check the pin map against. CAN is on GPIO15/GPIO16 and is left unconfigured.',
+    ],
+  },
 ];
 
 export function getBoard(id) {

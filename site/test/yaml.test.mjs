@@ -203,3 +203,25 @@ test('a wired board keeps wifi credentials out of secrets.yaml', () => {
   assert.ok(!s.includes('wifi_ssid'), 'wifi_ssid written for a board with no radio');
   assert.ok(!s.includes('wifi_password'), 'wifi_password written for a board with no radio');
 });
+
+// The board reads nothing off the bus without this, and the polarity is the
+// opposite of the T-CAN485's enables — a shared ALWAYS_ON default would have
+// silently produced a config that boots with the receiver disabled (issue #22).
+test('an active-low transceiver enable is emitted OFF, not ON', () => {
+  const b = getBoard('esp32s3-waveshare-rs485-can');
+  const y = toYaml(assembleConfig(b, { ...form, uart: b.uartDefault }));
+  assert.ok(y.includes('id: rs485_enable'), 'enable switch missing');
+  assert.ok(y.includes('pin: GPIO21'), 'enable pin missing');
+  assert.ok(y.includes('restore_mode: ALWAYS_OFF'), 'enable switch left active-high');
+  assert.ok(!y.includes('restore_mode: ALWAYS_ON'), 'ALWAYS_ON leaked onto an active-low pin');
+});
+
+// The other direction still has to work — the T-CAN485's three enables are
+// active-high and carry no explicit restore_mode.
+test('a board with no explicit restore_mode still defaults to ALWAYS_ON', () => {
+  const b = getBoard('esp32-lilygo-t-can485');
+  const y = toYaml(assembleConfig(b, { ...form, uart: b.uartDefault }));
+  assert.ok(y.includes('id: rs485_power_5v'), 'enable switch missing');
+  assert.ok(!y.includes('ALWAYS_OFF'), 'active-high enable emitted OFF');
+  assert.equal((y.match(/restore_mode: ALWAYS_ON/g) ?? []).length, 3, 'expected three active-high enables');
+});
