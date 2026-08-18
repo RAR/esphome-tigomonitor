@@ -1,0 +1,157 @@
+# LilyGO T-Connect Pro Lite Configuration
+# ESP32-S3, 8MB flash, 8MB octal PSRAM, wired Ethernet (W5500), built-in RS485
+# Recommended for: installations that want the web UI on a wired network
+#
+# Contributed by @davidcoulson in discussion #30, from a working install. The
+# maintainer has no unit of this board, so the pin map below is the
+# contributor's, not something verified here — if yours behaves differently,
+# please say so on that discussion.
+#
+# WHAT THIS BOARD BRINGS
+# ----------------------
+# It is the full-fat profile: PSRAM for `tigo_server`, 8MB of flash for the
+# on-device history database, and Ethernet instead of WiFi. The Lite has no
+# screen; the "Pro" (with screen) is a different board and this file does not
+# configure its display.
+#
+# ETHERNET, NOT WIFI
+# ------------------
+# The `ethernet:` block below is board wiring — the W5500 is soldered on. Do NOT
+# also declare `wifi:` in a config that includes this file. ESPHome will let you
+# build both, and the S3's radio then competes for the same lwIP socket budget
+# for no benefit. Leave WiFi out; if you want it instead of Ethernet, remove the
+# `ethernet:` block rather than running the two side by side.
+#
+# OTHER ON-BOARD HARDWARE (not configured here, pins for reference)
+# -----------------------------------------------------------------
+# The board carries more than the Tigo build needs. None of it is instantiated —
+# every unused pin stays free — but the map is here so you can add what you want:
+#
+#   RS232 UART      TX GPIO4,  RX GPIO5
+#   CAN (TWAI)      TX GPIO6,  RX GPIO7
+#   WS2812 LEDs     GPIO46, GPIO3, GPIO21, GPIO41   (one LED each)
+#   Buttons         A GPIO39, B GPIO40
+#   Relay           GPIO8
+#
+# Discussion #30 has a worked example that drives the four LEDs from monitor
+# state (online status, night mode, percentage of optimizers reporting, output
+# versus peak) if you want that.
+
+esphome:
+  name: tigo-server
+  friendly_name: "Tigo Server"
+  # allow_partition_access in the OTA config requires ESPHome 2026.5.0+
+  min_version: "2026.5.0"
+
+esp32:
+  variant: esp32s3
+  board: esp32-s3-devkitc-1
+  flash_size: 8MB
+  partitions: partitions/tigo-8mb.csv
+  framework:
+    type: esp-idf
+    version: recommended
+    advanced:
+      # XIP-from-PSRAM — the fix for the tsdb flash-write crash
+      # (docs/tsdb-flash-crash-issue.md). Every history commit takes ESP-IDF's
+      # cross-core cache-disable; with code running from flash that stall raced
+      # network ISRs and faulted. This flag sets SPIRAM_FETCH_INSTRUCTIONS +
+      # SPIRAM_RODATA, which compiles the cache-disable out entirely. Costs
+      # ~1.7 MiB of PSRAM.
+      execute_from_psram: true
+    components:
+      # Time-series database for persistent history. Pinned to a fork by
+      # immutable SHA — see the long explanation in esp32s3-atoms3r.yaml and
+      # docs/esp-tsdb-fork.md. A branch can move under a build; a commit cannot.
+      - name: zakery292/esp_tsdb
+        source: https://github.com/RAR/esp_tsdb.git
+        ref: ebfc360f00263ab90116ee3e556a9153ab4041a2
+      # LittleFS — backing filesystem for the tsdb partition
+      - joltwallet/littlefs^1.16
+    sdkconfig_options:
+      CONFIG_ESP32S3_DEFAULT_CPU_FREQ_240: "y"
+      # Run the UART ISR from IRAM. The single most important setting for frame
+      # loss — without it the ISR stalls whenever flash is busy and Tigo frames
+      # get dropped mid-burst.
+      CONFIG_UART_ISR_IN_IRAM: "y"
+      CONFIG_UART_RX_BUFFER_SIZE: "4096"
+      # TX stays small: tigo_monitor only ever listens to the bus.
+      CONFIG_UART_TX_BUFFER_SIZE: "256"
+      CONFIG_FREERTOS_QUEUE_REGISTRY_SIZE: "32"
+      CONFIG_LOG_DEFAULT_LEVEL_INFO: "y"
+      # PSRAM: 8MB octal at 80MHz
+      CONFIG_SPIRAM_MODE_OCT: "y"
+      CONFIG_SPIRAM_SPEED_80M: "y"
+      # Left OFF, unlike the WiFi boards. That option relocates the WiFi/lwIP
+      # buffer pool to PSRAM to save internal RAM, which matters when the radio
+      # is up. Here the radio is off and the W5500 driver keeps its buffers
+      # internal regardless, so it buys nothing.
+      CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP: "n"
+      # VFS directory operations (stat/unlink/rename/opendir), off by default in
+      # IDF. esp_tsdb reads database sizes via stat(), so without this the
+      # History page's size column reads 0 and esp_tsdb's unlink() recovery
+      # paths silently no-op.
+      CONFIG_VFS_SUPPORT_DIR: "y"
+      # More lwIP sockets for the web server + API running together (avoids
+      # "Failed to create socket" under load, #20).
+      CONFIG_LWIP_MAX_SOCKETS: "16"
+      CONFIG_LWIP_MAX_ACTIVE_TCP: "16"
+      CONFIG_LWIP_MAX_LISTENING_TCP: "16"
+      # Bluetooth off: it is dead weight on a wired board and buys back a large
+      # slice of flash. Adding the BLE CCA bridge means removing these four
+      # lines AND switching to partitions/tigo-8mb-ble.csv — the BLE stack does
+      # not fit the standard app slot.
+      CONFIG_BT_ENABLED: "n"
+      CONFIG_BLUEDROID_ENABLED: "n"
+      CONFIG_BT_BLE_42_FEATURES_SUPPORTED: "n"
+      CONFIG_BT_BLE_50_FEATURES_SUPPORTED: "n"
+
+# Enable PSRAM
+psram:
+  mode: octal
+  speed: 80MHz
+
+# --- Network -----------------------------------------------------------------
+# On-board W5500 over SPI. These pins are the board's wiring, not a preference.
+ethernet:
+  type: W5500
+  clk_pin: GPIO12
+  mosi_pin: GPIO11
+  miso_pin: GPIO13
+  cs_pin: GPIO10
+  interrupt_pin: GPIO9
+  reset_pin: GPIO48
+  clock_speed: 8MHz
+  # Uncomment for a fixed address (DHCP otherwise):
+  # manual_ip:
+  #   static_ip: 10.0.0.50
+  #   gateway: 10.0.0.1
+  #   subnet: 255.255.255.0
+
+# --- Tigo bus ----------------------------------------------------------------
+# The board's RS485 transceiver, on its own hardware UART. That leaves the USB
+# console free, so keep `logger:` on its defaults — do NOT set `baud_rate: 0`.
+uart:
+  id: tigo_uart
+  tx_pin: GPIO17
+  rx_pin: GPIO18
+  baud_rate: 38400
+  data_bits: 8
+  parity: NONE
+  stop_bits: 1
+  rx_buffer_size: 2048
+
+# --- Tigo Monitor ------------------------------------------------------------
+tigo_monitor:
+  id: tigo_hub
+  uart_id: tigo_uart
+  # Device and node tables live in PSRAM here, so this is cheap to raise —
+  # the contributor's install runs 64. Set it to your optimizer count.
+  number_of_devices: 30
+  update_interval: 30s
+
+# --- Web server --------------------------------------------------------------
+tigo_server:
+  id: tigo_web
+  tigo_monitor_id: tigo_hub
+  port: 80

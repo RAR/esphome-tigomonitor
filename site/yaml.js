@@ -103,17 +103,35 @@ export function toYaml(cfg) {
     L.push('');
   }
 
-  // wifi
-  L.push('wifi:');
-  L.push(`${I(1)}ssid: ${val(cfg.wifi.useSecrets, 'wifi_ssid', cfg.wifi.ssid)}`);
-  L.push(`${I(1)}password: ${val(cfg.wifi.useSecrets, 'wifi_password', cfg.wifi.password)}`);
-  if (cfg.wifi.staticIp) {
-    L.push(`${I(1)}manual_ip:`);
-    L.push(`${I(2)}static_ip: ${cfg.wifi.staticIp}`);
+  // network — ethernet on boards with an on-board PHY, wifi otherwise. Never
+  // both: the two would compete for the same lwIP budget for no benefit, and
+  // captive_portal is meaningless without a radio to fall back to.
+  if (cfg.ethernet) {
+    const e = cfg.ethernet;
+    L.push('ethernet:');
+    L.push(`${I(1)}type: ${e.type}`);
+    for (const p of ['clk_pin', 'mosi_pin', 'miso_pin', 'cs_pin', 'interrupt_pin', 'reset_pin']) {
+      if (e[p]) L.push(`${I(1)}${p}: ${e[p]}`);
+    }
+    if (e.clock_speed) L.push(`${I(1)}clock_speed: ${e.clock_speed}`);
+    L.push(`${I(1)}# For a fixed address, uncomment and fill in:`);
+    L.push(`${I(1)}# manual_ip:`);
+    L.push(`${I(1)}#   static_ip: 10.0.0.50`);
+    L.push(`${I(1)}#   gateway: 10.0.0.1`);
+    L.push(`${I(1)}#   subnet: 255.255.255.0`);
+    L.push('');
+  } else {
+    L.push('wifi:');
+    L.push(`${I(1)}ssid: ${val(cfg.wifi.useSecrets, 'wifi_ssid', cfg.wifi.ssid)}`);
+    L.push(`${I(1)}password: ${val(cfg.wifi.useSecrets, 'wifi_password', cfg.wifi.password)}`);
+    if (cfg.wifi.staticIp) {
+      L.push(`${I(1)}manual_ip:`);
+      L.push(`${I(2)}static_ip: ${cfg.wifi.staticIp}`);
+    }
+    L.push('');
+    L.push('captive_portal:');
+    L.push('');
   }
-  L.push('');
-  L.push('captive_portal:');
-  L.push('');
 
   // logger
   L.push('logger:');

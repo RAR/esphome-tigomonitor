@@ -20,6 +20,27 @@ Assistant over the native API; it just cannot serve the dashboard.
 - **UART Buffers**: 2048 RX / 512 TX (increase RX to 8192 if using display package)
 - **Note**: When using `atoms3r-display.yaml` package, display updates compete with UART. See UART_OPTIMIZATION.md for packet loss mitigation. TX buffer can stay small since we only listen to the bus.
 
+#### `esp32s3-lilygo-t-connect-pro-lite.yaml` - LilyGO T-Connect Pro Lite (8MB PSRAM, wired)
+- **Board**: LilyGO T-Connect Pro Lite (ESP32-S3), 8MB flash, 8MB octal PSRAM
+- **Network**: wired Ethernet via an on-board W5500 — **no `wifi:` block**. Do not
+  add one; the radio would compete for the same lwIP socket budget for nothing
+- **CPU**: 240MHz
+- **RS485**: built-in transceiver on GPIO17 (TX) / GPIO18 (RX), on its own
+  hardware UART, so the USB serial console stays available
+- **Recommended for**: installations that want the full web UI on a wired
+  network. PSRAM and 8MB of flash mean `tigo_server` and on-flash history both fit
+- **Bluetooth**: compiled out to buy back flash, so the CCA-over-BLE bridge is
+  not available. HTTP CCA import works normally. Re-enabling BLE means dropping
+  the four `CONFIG_BT_*` lines *and* switching to `partitions/tigo-8mb-ble.csv`
+- **Ready-to-flash example**: `example-t-connect-pro-lite.yaml`
+- **Provenance**: contributed by @davidcoulson from a working install
+  ([discussion #30](https://github.com/RAR/esphome-tigomonitor/discussions/30)).
+  The pin map is the contributor's — no maintainer unit exists to check it
+  against, though the config compiles clean here. The screen-equipped "Pro" is a
+  different board and is not configured by this file
+- **Other on-board hardware** (pins documented in the board file, nothing
+  instantiated): RS232, CAN, four WS2812 LEDs, two buttons, a relay
+
 ### ESP32-P4 Boards
 
 #### `esp32p4-evboard.yaml` - ESP32-P4 Evaluation Board (32MB PSRAM)

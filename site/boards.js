@@ -363,6 +363,72 @@ font:
       'Tested at 18 devices; 40 should fit. Each optimizer costs roughly 600 bytes across the device and node tables, against the ~130KB free once WiFi is up — the practical ceiling is heap fragmentation, not total bytes.',
     ],
   },
+  {
+    id: 'esp32s3-lilygo-t-connect-pro-lite',
+    label: 'LilyGO T-Connect Pro Lite (ESP32-S3, 8MB PSRAM, wired Ethernet)',
+    chip: 'esp32s3', board: 'esp32-s3-devkitc-1', variant: 'esp32s3',
+    flash_size: '8MB',
+    // No `ble` variant: Bluetooth is compiled out below, so there is nothing
+    // for the larger app slots to hold.
+    partitions: { default: 'partitions/tigo-8mb.csv' },
+    psram: { mode: 'octal', speed: '80MHz' },
+    frameworkAdvanced: { enable_idf_experimental_features: false, execute_from_psram: true },
+    frameworkComponents: ['joltwallet/littlefs^1.16'],
+    hostedComponent: {
+      source: 'https://github.com/RAR/esp_tsdb.git',
+      ref: 'ebfc360f00263ab90116ee3e556a9153ab4041a2',
+    },
+    sdkconfig: {
+      CONFIG_ESP32S3_DEFAULT_CPU_FREQ_240: 'y',
+      CONFIG_UART_ISR_IN_IRAM: 'y',
+      CONFIG_UART_RX_BUFFER_SIZE: '4096',
+      CONFIG_UART_TX_BUFFER_SIZE: '256',
+      CONFIG_FREERTOS_QUEUE_REGISTRY_SIZE: '32',
+      CONFIG_LOG_DEFAULT_LEVEL_INFO: 'y',
+      CONFIG_SPIRAM_MODE_OCT: 'y',
+      CONFIG_SPIRAM_SPEED_80M: 'y',
+      // Off, unlike the WiFi boards: that option moves the WiFi/lwIP buffer
+      // pool to PSRAM to spare internal RAM, and the radio is down here. The
+      // W5500 driver keeps its buffers internal either way.
+      CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP: 'n',
+      CONFIG_VFS_SUPPORT_DIR: 'y',
+      CONFIG_LWIP_MAX_SOCKETS: '16',
+      CONFIG_LWIP_MAX_ACTIVE_TCP: '16',
+      CONFIG_LWIP_MAX_LISTENING_TCP: '16',
+      // Dead weight on a wired board, and worth a large slice of flash.
+      CONFIG_BT_ENABLED: 'n',
+      CONFIG_BLUEDROID_ENABLED: 'n',
+      CONFIG_BT_BLE_42_FEATURES_SUPPORTED: 'n',
+      CONFIG_BT_BLE_50_FEATURES_SUPPORTED: 'n',
+    },
+    hosted: null,
+    // On-board W5500 over SPI. Present => the generator emits `ethernet:` and
+    // omits `wifi:`/`captive_portal:` entirely.
+    ethernet: {
+      type: 'W5500',
+      clk_pin: 'GPIO12',
+      mosi_pin: 'GPIO11',
+      miso_pin: 'GPIO13',
+      cs_pin: 'GPIO10',
+      interrupt_pin: 'GPIO9',
+      reset_pin: 'GPIO48',
+      clock_speed: '8MHz',
+    },
+    uartDefault: { tx_pin: 'GPIO17', rx_pin: 'GPIO18', rx_buffer_size: 2048 },
+    numberOfDevices: 30,
+    // BLE is compiled out, so the CCA-over-BLE bridge is not available here.
+    supports: { ble: false, display: false },
+    // The Tigo bus is on its own hardware UART, so the USB console stays.
+    keepSerialConsole: true,
+    gpioSwitches: null,
+    displayOverlay: null,
+    notes: [
+      'Wired Ethernet (W5500), no WiFi — the generated config has no `wifi:` block. Static addressing goes under `ethernet: manual_ip:`, so the Static IP field is hidden for this board.',
+      'Contributed from a working install (discussion #30). The pin map is the contributor’s; no maintainer unit exists to verify it against.',
+      'Bluetooth is compiled out to buy back flash, so CCA-over-BLE is unavailable. HTTP CCA import still works, and is unaffected by the wired link.',
+      'The screen-equipped "Pro" is a different board; this entry is the Lite and configures no display.',
+    ],
+  },
 ];
 
 export function getBoard(id) {

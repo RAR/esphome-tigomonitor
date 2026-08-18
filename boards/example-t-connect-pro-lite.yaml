@@ -1,0 +1,130 @@
+# Example Tigo Monitor Configuration using the LilyGO T-Connect Pro Lite
+#
+# This is the "wired, full features" profile: web UI, REST API, on-flash
+# history, and Home Assistant over the native API — all over Ethernet.
+#
+# The hardware base (esp32s3-lilygo-t-connect-pro-lite.yaml) provides:
+#   - the ESP32-S3 / 8MB flash / 8MB PSRAM setup and the tsdb history storage
+#   - the on-board W5500 Ethernet controller
+#   - the UART on GPIO17/18, the tigo_monitor hub, and tigo_server
+# so this file only layers on credentials, sensors, and app config.
+#
+# There is deliberately no `wifi:` block — see the note in the board file.
+# Panel addresses come from the web UI once it is up (Nodes view), or from the
+# "Generate YAML Config" button below if you would rather work from the logs.
+
+packages:
+  board: !include esp32s3-lilygo-t-connect-pro-lite.yaml
+
+external_components:
+  - source:
+      type: git
+      url: https://github.com/RAR/esphome-tigomonitor
+      ref: main
+    components: [tigo_monitor, tigo_server]
+
+logger:
+  level: INFO  # Change to DEBUG if you need detailed logs for troubleshooting
+
+api:
+
+ota:
+  - platform: esphome
+    password: "YOUR_OTA_PASSWORD"
+    # Permits a later partition-table change over the air (ESPHome 2026.5.0+).
+    # It is only the permission: applying one still takes an explicit
+    # `esphome upload --partition-table`. A plain `esphome run` never sends a
+    # partition table, and succeeds without changing the layout.
+    allow_partition_access: true
+
+# Timestamps for the history database. Any time source works; SNTP needs no
+# Home Assistant connection.
+time:
+  - platform: sntp
+    id: sntp_time
+    timezone: "America/New_York"  # Adjust for your timezone
+
+button:
+  - platform: tigo_monitor
+    name: "Generate YAML Config"
+    id: generate_yaml_button
+    tigo_monitor_id: tigo_hub
+    button_type: yaml_generator
+  - platform: tigo_monitor
+    name: "Print Device Mappings"
+    id: device_mappings_button
+    tigo_monitor_id: tigo_hub
+    button_type: device_mappings
+  - platform: tigo_monitor
+    name: "Reset Node Table"
+    id: reset_node_table_button
+    tigo_monitor_id: tigo_hub
+    button_type: reset_node_table
+
+sensor:
+  # System-wide sensors — these need no addresses and work from first boot.
+  - platform: tigo_monitor
+    tigo_monitor_id: tigo_hub
+    name: "Total System Power"
+    id: total_system_power
+
+  - platform: tigo_monitor
+    tigo_monitor_id: tigo_hub
+    name: "Total System Energy"
+    id: total_system_energy
+
+  - platform: tigo_monitor
+    tigo_monitor_id: tigo_hub
+    name: "Active Device Count"
+
+  - platform: tigo_monitor
+    tigo_monitor_id: tigo_hub
+    name: "Missed Frame Count"
+
+  - platform: tigo_monitor
+    tigo_monitor_id: tigo_hub
+    name: "Free Internal RAM"
+
+  - platform: tigo_monitor
+    tigo_monitor_id: tigo_hub
+    name: "Free PSRAM"
+
+  - platform: uptime
+    name: "Tigo Server Uptime"
+
+  # Per-panel sensors go here. An entry needs `address:` AND at least one
+  # measurement sub-key — address and name alone create no entities:
+  #
+  # - platform: tigo_monitor
+  #   tigo_monitor_id: tigo_hub
+  #   address: "1234"
+  #   name: "Panel A1"
+  #   power: {}
+  #   voltage_in: {}
+  #   current_in: {}
+  #   temperature: {}
+
+text_sensor:
+  - platform: ethernet_info
+    ip_address:
+      name: "Tigo Server IP Address"
+      entity_category: diagnostic
+    mac_address:
+      name: "Tigo Server MAC Address"
+      entity_category: diagnostic
+
+  - platform: version
+    name: "Tigo Server ESPHome Version"
+
+binary_sensor:
+  - platform: status
+    name: "Tigo Server Status"
+
+  - platform: tigo_monitor
+    tigo_monitor_id: tigo_hub
+    night_mode:
+      name: "Solar Night Mode"
+
+switch:
+  - platform: restart
+    name: "Tigo Server Restart"

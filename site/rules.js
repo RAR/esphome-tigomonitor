@@ -31,10 +31,14 @@ export function assembleConfig(board, form) {
         }
       : null;
 
+  // Wired boards have no radio: the generated config carries an `ethernet:`
+  // block and no `wifi:`, so WiFi credentials are neither emitted nor written
+  // to secrets.yaml.
+  const ethernet = board.ethernet ?? null;
+
   const secrets = useSecrets
     ? {
-        wifi_ssid: form.wifi.ssid,
-        wifi_password: form.wifi.password,
+        ...(ethernet ? {} : { wifi_ssid: form.wifi.ssid, wifi_password: form.wifi.password }),
         api_encryption_key: form.apiKey,
         ota_password: form.otaPassword,
       }
@@ -59,12 +63,16 @@ export function assembleConfig(board, form) {
     partitions,
     psram: board.psram,
     hosted: board.hosted,
-    wifi: {
-      ssid: form.wifi.ssid,
-      password: form.wifi.password,
-      staticIp: form.wifi.staticIp || null,
-      useSecrets,
-    },
+    ethernet,
+    // null on a wired board — yaml.js then omits `wifi:` and `captive_portal:`.
+    wifi: ethernet
+      ? null
+      : {
+          ssid: form.wifi.ssid,
+          password: form.wifi.password,
+          staticIp: form.wifi.staticIp || null,
+          useSecrets,
+        },
     api: { useSecrets, key: form.apiKey },
     ota: { useSecrets, password: form.otaPassword },
     uart: {

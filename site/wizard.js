@@ -58,6 +58,15 @@ function syncBoardConstraints(board) {
   }
   $('no-server-note').style.display = webServer ? 'none' : '';
 
+  // Wired boards have no radio. Hide the WiFi fields rather than generating a
+  // config that quietly ignores them; static addressing on these goes under
+  // `ethernet: manual_ip:`, which the generated YAML carries as a comment.
+  const wired = Boolean(board.ethernet);
+  for (const id of ['wifi-ssid-row', 'wifi-pass-row', 'static-ip-row']) {
+    $(id).style.display = wired ? 'none' : '';
+  }
+  $('ethernet-note').style.display = wired ? '' : 'none';
+
   $('board-notes').textContent = board.notes.join(' ');
 }
 
