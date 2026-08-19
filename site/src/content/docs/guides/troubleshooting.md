@@ -180,13 +180,24 @@ uart:
 
 ### Memory Limits
 
-PSRAM is required.
+PSRAM is required — but only by `tigo_server`, not by `tigo_monitor`.
+
+A config with `tigo_server:` and no `psram:` block is now rejected at validation
+time rather than compiling into a device that runs out of heap hours later. The
+web server builds whole HTML pages and JSON responses in memory; without
+`psram:` ESPHome never sets `CONFIG_SPIRAM`, so those allocations land on the
+~130KB internal heap and fragment it to OOM under dashboard polling.
+
+If your board has no PSRAM, drop `tigo_server:` and run sensors-only to Home
+Assistant over the native API — `boards/esp32-lilygo-t-can485.yaml` is a worked
+example. Panel discovery there uses the **Generate YAML Config** button instead
+of the web UI.
 
 ### ESP32 Internal Temperature Reads Nothing
 
 `/api/status` returns `"internal_temp": null` and the Diagnostics view shows no die temperature.
 
-The ESP32 has a single temperature peripheral, and it installs exactly once. Two things break it:
+Most ESP32s have a single temperature peripheral, and it installs exactly once. Three things break it:
 
 1. **Range must fit one hardware range.** `temperature_sensor_install()` needs the requested range to sit inside a *single* entry of the chip's range table — on the ESP32-S3 that is `{50..125, 20..100, -10..80, -30..50, -40..20}`. A request spanning two entries (e.g. `-10..110`) matches none, fails with `ESP_ERR_INVALID_ARG` ("Out of testing range"), and the sensor never installs. Fixed in 2.0.0-beta.4, which requests `-10..80`. The configured range is only a starting hint — the driver follows the hardware onto another range at read time, so a hot die still reads correctly.
 2. **Another component owns the peripheral.** If you also run ESPHome's `internal_temperature` platform, its install and ours race and the loser reads nothing. Wire the existing sensor into `tigo_server` instead of letting both try:
@@ -201,7 +212,9 @@ tigo_server:
   internal_temperature_id: die_temp
 ```
 
-Look for `Failed to install temperature sensor: <err>` in the boot log to tell the two apart.
+3. **The chip has no such peripheral at all.** The classic ESP32 (including the WROVER modules with PSRAM) has none — only the S2/S3/C-series and P4 do. There is nothing to configure here; the field is simply absent. The boot log says `No die temperature sensor on this chip - Diagnostics will omit it`.
+
+Look for `Failed to install temperature sensor: <err>` in the boot log to tell the first two apart.
 
 ### PSRAM Not Detected After Enabling
 
