@@ -28,7 +28,6 @@
 #include <cmath>
 #include <sys/time.h>
 #include <mbedtls/base64.h>
-#include <driver/temperature_sensor.h>
 #include "cJSON.h"
 
 namespace esphome {
@@ -594,6 +593,11 @@ void TigoWebServer::setup() {
     if (external_temp_sensor_ != nullptr) {
       ESP_LOGI(TAG, "Using configured internal_temperature sensor for die temp");
     } else {
+#ifndef TIGO_HAS_DIE_TEMP
+    // No die-temperature peripheral on this chip (classic ESP32). Diagnostics
+    // reports the field as null; everything else is unaffected.
+    ESP_LOGI(TAG, "No die temperature sensor on this chip - Diagnostics will omit it");
+#else
     // The requested range must be fully contained in ONE hardware range — the driver's
     // temperature_sensor_choose_best_range() looks for a single table entry with
     // range_min <= requested_min && range_max >= requested_max, and fails the whole
@@ -625,6 +629,7 @@ void TigoWebServer::setup() {
                     "internal_temperature platform, wire it via internal_temperature_id", esp_err_to_name(err));
       temp_sensor_handle_ = nullptr;
     }
+#endif  // TIGO_HAS_DIE_TEMP
     }  // end else (no external sensor wired)
 
     ESP_LOGI(TAG, "All routes registered");
@@ -2799,9 +2804,11 @@ void TigoWebServer::build_esp_status_json(PSRAMString& json) {
       internal_temp = external_temp_sensor_->state;
       internal_temp_ok = true;
     }
+#ifdef TIGO_HAS_DIE_TEMP
   } else if (temp_sensor_handle_ != nullptr &&
              temperature_sensor_get_celsius(temp_sensor_handle_, &internal_temp) == ESP_OK) {
     internal_temp_ok = true;
+#endif
   }
   
   // Get network stats
@@ -3791,12 +3798,14 @@ void TigoWebServer::loop() {
 }
 
 TigoWebServer::~TigoWebServer() {
+#ifdef TIGO_HAS_DIE_TEMP
   // Clean up temperature sensor if it was initialized
   if (temp_sensor_handle_ != nullptr) {
     temperature_sensor_disable(temp_sensor_handle_);
     temperature_sensor_uninstall(temp_sensor_handle_);
     temp_sensor_handle_ = nullptr;
   }
+#endif
 }
 
 }  // namespace tigo_server

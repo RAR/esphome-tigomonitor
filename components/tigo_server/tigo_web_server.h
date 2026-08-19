@@ -21,7 +21,25 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
 #include <esp_heap_caps.h>
+#include <soc/soc_caps.h>
+
+// Not every ESP32 has a die-temperature peripheral. The classic ESP32 has none,
+// so IDF compiles esp_driver_tsens out for it — soc/clk_tree_defs.h never
+// defines TEMPERATURE_SENSOR_CLK_SRC_*, and the header's
+// TEMPERATURE_SENSOR_CONFIG_DEFAULT() macro fails to expand ("'TEMPERATURE_
+// SENSOR_CLK_SRC_DEFAULT' was not declared in this scope", #55). Including the
+// header unconditionally therefore broke the build on every classic ESP32 —
+// including the WROVER modules that do have the PSRAM this component needs.
+//
+// The die temperature is one optional field on the Diagnostics page, and
+// /api/status already reports it as null when unavailable (#28), so the whole
+// peripheral is compiled out rather than faked. A user-wired
+// internal_temperature_id still works on any chip: it is a plain
+// sensor::Sensor and never touches this driver.
+#if defined(SOC_TEMP_SENSOR_SUPPORTED) && SOC_TEMP_SENSOR_SUPPORTED
+#define TIGO_HAS_DIE_TEMP 1
 #include <driver/temperature_sensor.h>
+#endif
 #include <vector>
 #include <string>
 #include <set>
@@ -127,7 +145,9 @@ class TigoWebServer : public Component
   std::string api_token_{""};
   std::string web_username_{""};
   std::string web_password_{""};
+#ifdef TIGO_HAS_DIE_TEMP
   temperature_sensor_handle_t temp_sensor_handle_{nullptr};
+#endif
   sensor::Sensor *external_temp_sensor_{nullptr};  // optional, wins over our own handle
   CcaSource cca_source_{CcaSource::HTTP};
 

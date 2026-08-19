@@ -1,5 +1,6 @@
 import esphome.codegen as cg
 import esphome.config_validation as cv
+import esphome.final_validate as fv
 from esphome.components import tigo_monitor, light, sensor, ble_client, esp32_ble_tracker
 from esphome.const import CONF_ID, CONF_PORT
 from pathlib import Path
@@ -43,7 +44,39 @@ def _validate_cca_source(config):
     return config
 
 
+def _require_psram(config):
+    """Refuse to build the web server on a board with no PSRAM.
+
+    tigo_server builds whole HTML pages and JSON API responses in memory from
+    the httpd task; PSRAMString and the psram_* containers assume 8MB of
+    external RAM. Without a `psram:` block ESPHome never sets CONFIG_SPIRAM, so
+    psram_malloc() resolves to the internal heap — the build succeeds, then
+    fragments ~130KB of internal RAM to OOM under dashboard polling. That is a
+    crash hours later on someone's roof, not a compile error, so catch it here.
+
+    tigo_monitor itself is unaffected and needs no PSRAM: its device and node
+    tables are a few KB. A board without PSRAM runs a sensors-only build that
+    feeds Home Assistant over the native API.
+    """
+    if "psram" not in fv.full_config.get():
+        raise cv.Invalid(
+            "tigo_server requires PSRAM, and this configuration has no `psram:` "
+            "block.\n\n"
+            "It builds whole HTML pages and JSON responses in memory, so on a "
+            "board with only internal RAM it compiles and then runs out of heap "
+            "under load. Either:\n"
+            "  * add a `psram:` block, if your board actually has PSRAM, or\n"
+            "  * remove `tigo_server:` and run sensors-only to Home Assistant "
+            "over the native API. tigo_monitor needs no PSRAM.\n\n"
+            "boards/esp32-lilygo-t-can485.yaml is a worked sensors-only example; "
+            "panel discovery there uses the \"Generate YAML Config\" button "
+            "instead of the web UI."
+        )
+    return config
+
+
 def _final_validate(config):
+    _require_psram(config)
     # ESPHome disables mbedtls SHA-384/512 on IDF >= 6.0 to save flash. Both of our
     # crypto paths need them back:
     #  * cloud_import: everything above the leaf in Tigo's cert chain is SHA-384-signed
