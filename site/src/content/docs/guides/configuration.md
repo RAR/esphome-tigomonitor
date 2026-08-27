@@ -71,7 +71,7 @@ tigo_monitor:
 | `number_of_devices` | Integer | 5 | Max devices to track |
 | `cca_ip` | String | None | Tigo CCA IP address |
 | `sync_cca_on_startup` | Boolean | true | Auto-sync CCA on boot |
-| `time_id` | ID | None | Time component for midnight reset |
+| `time_id` | ID | None | Time component to read the wall clock from. **Required for daily energy totals, the midnight reset and on-flash history** — a `time:` block on its own does nothing until you point `time_id` at it |
 | `reset_at_midnight` | Boolean | false | Reset daily totals at midnight |
 | `power_calibration` | Float | 1.0 | Power multiplier (0.5-2.0) |
 | `night_mode_timeout` | Integer | 60 | Minutes before night mode (1-1440) |

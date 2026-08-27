@@ -76,6 +76,25 @@ esp32:
       CONFIG_LITTLEFS_FOR_IDF_3_2: "n"
 ```
 
+### A wall clock, wired in
+
+Every snapshot is keyed by a real timestamp, so history needs a time source —
+and it needs it *linked to the component*, not just present in the file. A
+`time:` block on its own leaves the component's clock pointer null, and
+snapshots are skipped silently ([#58](https://github.com/RAR/esphome-tigomonitor/issues/58)):
+
+```yaml
+time:
+  - platform: sntp        # or homeassistant
+    id: tigo_time
+
+tigo_monitor:
+  time_id: tigo_time      # <- without this line, nothing is ever written
+```
+
+If it's missing, the boot log now says so:
+`No time_id configured - daily energy and history snapshots are disabled.`
+
 ### Choosing an interval
 
 `history_interval` accepts 5 to 1440 minutes and defaults to 30. Everything

@@ -22,6 +22,19 @@ test('emits blocks in order with required empty sections', () => {
   assert.ok(!y.includes('\t'), 'no tabs allowed');
 });
 
+// A `time:` block alone leaves time_id_ null on the C++ side, which silently
+// kills daily energy, the midnight reset and the history snapshots (#58). The
+// two must be emitted together, on every board tier.
+test('every board wires a time source into tigo_monitor', () => {
+  for (const b of BOARDS) {
+    const y = toYaml(assembleConfig(getBoard(b.id), { ...form, cca: 'none', cloudImport: false }));
+    assert.ok(y.includes('time:\n  - platform: sntp\n    id: tigo_time'), `${b.id}: no time block`);
+    assert.ok(/^  time_id: tigo_time$/m.test(y), `${b.id}: tigo_monitor has no time_id`);
+    assert.ok(y.indexOf('time:\n  - platform: sntp') < y.indexOf('tigo_monitor:'),
+      `${b.id}: time block must be defined before it is referenced`);
+  }
+});
+
 test('P4 emits esp32_hosted + 200MHz PSRAM + experimental flag', () => {
   const p4 = toYaml(assembleConfig(getBoard('esp32p4-evboard'), { ...form, uart: { tx_pin: 'GPIO20', rx_pin: 'GPIO21' } }));
   assert.ok(p4.includes('esp32_hosted:'));
