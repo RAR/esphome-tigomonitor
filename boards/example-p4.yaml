@@ -119,8 +119,15 @@ switch:
   - platform: restart
     name: "Tigo Server Restart"
 
-# Time component (optional, for logging timestamps)
+# Wall clock for the daily energy totals, the midnight reset and the on-flash
+# history. Any time source works; SNTP needs no Home Assistant connection.
 time:
   - platform: sntp
     id: sntp_time
     timezone: "America/New_York"  # Adjust for your timezone
+
+# Wire it in. A `time:` block alone leaves the component's clock pointer null,
+# and the daily energy totals, the midnight reset and the on-flash history all
+# silently stop (#58). Deep-merges into the board package's `tigo_monitor:`.
+tigo_monitor:
+  time_id: sntp_time

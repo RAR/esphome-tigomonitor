@@ -207,10 +207,22 @@ export function toYaml(cfg) {
     L.push('');
   }
 
+  // time — daily energy totals, the midnight reset and the on-flash history
+  // all key off a wall clock. A `time:` block alone is not enough: without
+  // `time_id:` below, the component's pointer stays null and every one of them
+  // silently does nothing (#58). Emit both together or neither.
+  L.push('time:');
+  L.push(`${I(1)}- platform: sntp`);
+  L.push(`${I(2)}id: tigo_time`);
+  L.push(`${I(2)}# Uncomment if the daily reset lands at the wrong hour:`);
+  L.push(`${I(2)}# timezone: "America/New_York"`);
+  L.push('');
+
   // tigo_monitor
   L.push('tigo_monitor:');
   L.push(`${I(1)}id: tigo_hub`);
   L.push(`${I(1)}uart_id: tigo_uart`);
+  L.push(`${I(1)}time_id: tigo_time`);
   L.push(`${I(1)}number_of_devices: ${cfg.tigoMonitor.numberOfDevices}`);
   L.push(`${I(1)}update_interval: ${cfg.tigoMonitor.updateInterval}`);
   if (cfg.tigoMonitor.ccaIp) L.push(`${I(1)}cca_ip: ${cfg.tigoMonitor.ccaIp}`);

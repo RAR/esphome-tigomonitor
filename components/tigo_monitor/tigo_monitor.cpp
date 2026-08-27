@@ -528,6 +528,19 @@ void TigoMonitorComponent::dump_config() {
   ESP_LOGCONFIG(TAG, "  Update interval: %lums", this->get_update_interval());
   ESP_LOGCONFIG(TAG, "  Max devices: %d", number_of_devices_);
   ESP_LOGCONFIG(TAG, "  Multi-sensor platform with manual configuration");
+  // A `time:` block in the YAML is not enough — it has to be wired in with
+  // `time_id:`, or time_id_ stays null and every wall-clock feature (daily
+  // energy totals, the midnight reset, on-flash history snapshots) silently
+  // does nothing. That failure used to be invisible; say it out loud (#58).
+#ifdef USE_TIME
+  if (this->time_id_ == nullptr) {
+    ESP_LOGW(TAG, "  No time_id configured - daily energy and history snapshots are disabled.");
+    ESP_LOGW(TAG, "  Add `time_id: <your time component id>` under tigo_monitor:");
+  }
+#else
+  ESP_LOGW(TAG, "  No time component configured - daily energy and history snapshots are disabled.");
+  ESP_LOGW(TAG, "  Add a `time:` block and reference it with `time_id:` under tigo_monitor:");
+#endif
   check_uart_settings(38400);
 }
 

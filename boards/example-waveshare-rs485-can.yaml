@@ -51,6 +51,12 @@ time:
     id: sntp_time
     timezone: "America/New_York"  # Adjust for your timezone
 
+# Wire it in. A `time:` block alone leaves the component's clock pointer null,
+# and the daily energy totals, the midnight reset and the on-flash history all
+# silently stop (#58). Deep-merges into the board package's `tigo_monitor:`.
+tigo_monitor:
+  time_id: sntp_time
+
 button:
   - platform: tigo_monitor
     name: "Generate YAML Config"
