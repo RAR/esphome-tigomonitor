@@ -3,6 +3,7 @@ import esphome.config_validation as cv
 import esphome.final_validate as fv
 from esphome.components import tigo_monitor, light, sensor, ble_client, esp32_ble_tracker
 from esphome.const import CONF_ID, CONF_PORT
+from esphome.core import CORE
 from pathlib import Path
 
 DEPENDENCIES = ['tigo_monitor']
@@ -75,8 +76,78 @@ def _require_psram(config):
     return config
 
 
+# App-slot floor for a BLE build, in bytes. boards/partitions/tigo-8mb-ble.csv
+# exists because folding the ble_client/esp32_ble stack into tigo_server pushes the
+# image past the stock 1.75 MB slot; that file allocates 2.25 MB per OTA slot.
+_BLE_MIN_APP_SLOT = 0x240000
+
+
+def _parse_app_slot_bytes(csv_text):
+    """Smallest `app` partition size in an ESP-IDF partition CSV, or None.
+
+    Deliberately narrow: enough to read the tables in boards/partitions/. Returns
+    None on anything it does not understand, so an unparseable table is not
+    reported as a failure.
+    """
+    sizes = []
+    for line in csv_text.splitlines():
+        line = line.split('#', 1)[0].strip()
+        if not line:
+            continue
+        cols = [c.strip() for c in line.split(',')]
+        if len(cols) < 5 or cols[1] != 'app':
+            continue
+        size = cols[4]
+        try:
+            sizes.append(int(size, 16) if size.lower().startswith('0x') else int(size))
+        except ValueError:
+            return None
+    return min(sizes) if sizes else None
+
+
+def _require_ble_app_slot(config):
+    """Refuse a BLE build against a partition table whose app slots are too small.
+
+    Without this the config is accepted, the whole firmware compiles, and the
+    failure arrives as a linker overflow or -- worse -- as an OTA that is rejected
+    at upload time for not fitting the running device's slot. Neither names the
+    cause, and the fix (a different CSV) is nowhere near where the error appears.
+
+    Only checked when `partitions:` names a readable CSV. With no explicit table we
+    cannot know the slot size, and guessing would reject working configurations.
+    """
+    if config[CONF_CCA_SOURCE] not in ('ble', 'auto'):
+        return config
+    esp32_config = fv.full_config.get().get('esp32') or {}
+    rel = esp32_config.get('partitions')
+    if not rel:
+        return config
+    try:
+        csv_text = Path(CORE.relative_config_path(rel)).read_text()
+    except OSError:
+        return config
+    slot = _parse_app_slot_bytes(csv_text)
+    if slot is None or slot >= _BLE_MIN_APP_SLOT:
+        return config
+    raise cv.Invalid(
+        f"cca_source: {config[CONF_CCA_SOURCE]} needs at least "
+        f"{_BLE_MIN_APP_SLOT // 1024} KB per OTA app slot, but {rel} allocates "
+        f"{slot // 1024} KB.\n\n"
+        "The BLE stack does not fit alongside tigo_server in a 1.75 MB slot. "
+        "Left alone this compiles and then fails at link time, or uploads and is "
+        "rejected by the device for not fitting -- neither of which mentions the "
+        "partition table.\n\n"
+        "Use the BLE table instead: boards/partitions/tigo-8mb-ble.csv (2.25 MB "
+        "slots, same 3 MB tsdb).\n\n"
+        "It also moves `nvs`, so the node table, renames, per-string ratings and "
+        "saved CCA address are left behind. Export the node table from the web UI "
+        "first (Nodes -> Export) and import it after flashing."
+    )
+
+
 def _final_validate(config):
     _require_psram(config)
+    _require_ble_app_slot(config)
     # ESPHome disables mbedtls SHA-384/512 on IDF >= 6.0 to save flash. Both of our
     # crypto paths need them back:
     #  * cloud_import: everything above the leaf in Tigo's cert chain is SHA-384-signed
