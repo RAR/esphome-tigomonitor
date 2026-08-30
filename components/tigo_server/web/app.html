@@ -2237,6 +2237,11 @@
 
   // ============================================================
   // R3 — History view
+  // Shown when the firmware was built without on-flash history. Says which of
+  // the two halves is missing rather than leaving a bare status code.
+  const HISTORY_UNAVAILABLE_MSG =
+    'on-flash history is not compiled into this firmware — add esp_tsdb + littlefs '
+    + 'under esp32.framework.components and a partition table with a tsdb partition';
   // ============================================================
 
   let histRange = 'week';
@@ -2400,6 +2405,12 @@
     status.textContent = `loading ${range}…`;
     try {
       const r = await apiFetch(`/api/history/power?range=${range}`);
+      // A 404 here is not a failed query — the /api/history/* handlers are only
+      // registered when TIGO_TSDB_AVAILABLE is defined, i.e. when the YAML pulls
+      // in esp_tsdb + littlefs and gives them a partition. On a build without
+      // them the route simply does not exist, and reporting a bare "HTTP 404"
+      // sent people looking at their CCA and their wiring (#60).
+      if (r.status === 404) throw new Error(HISTORY_UNAVAILABLE_MSG);
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const data = await r.json();
       status.textContent = `${data.count} records · ${data.query_ms} ms · range=${range}`;
