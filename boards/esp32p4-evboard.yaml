@@ -109,8 +109,12 @@ esp32_hosted:
 # UART configuration for Tigo communication
 uart:
   id: tigo_uart
-  tx_pin: GPIO1   # Adjust based on your P4 board pinout
-  rx_pin: GPIO3   # Adjust based on your P4 board pinout
+  # The pins the P4 was actually brought up and verified on (boards/test-p4-*.yaml
+  # and the config builder both use these). They read GPIO1/GPIO3 until #60, which
+  # was a placeholder nobody had run — and a wrong RX pin here does not error, it
+  # just never receives a frame. Change them if your P4 carrier differs.
+  tx_pin: GPIO20  # unused - we only listen
+  rx_pin: GPIO21
   baud_rate: 38400
   data_bits: 8
   parity: NONE

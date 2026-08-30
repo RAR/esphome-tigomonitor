@@ -31,6 +31,13 @@ export function extractBoardFields(text) {
   // runs on common ECO3 silicon. Worth drift-guarding precisely.
   const minimumChipRevision = line(/^\s*minimum_chip_revision:\s*['"]?([0-9.]+)['"]?/m);
   const sram1AsIram = /^\s*sram1_as_iram:\s*(yes|true)\b/m.test(text);
+  // UART pins, read from inside the top-level `uart:` block only — several board
+  // files mention other pin numbers in comments elsewhere. A wrong pin here is
+  // silent in the worst way: the firmware boots, serves the web UI, and simply
+  // never receives a frame (#60), so it is worth drift-guarding.
+  const uartBlock = text.match(/^uart:[^\n]*\n((?:[ \t]+[^\n]*\n?)*)/m);
+  const txPin = pick(uartBlock?.[1], 'tx_pin');
+  const rxPin = pick(uartBlock?.[1], 'rx_pin');
   const hasHosted = /^esp32_hosted:\s*$/m.test(text);
   // tigo_server is absent on the no-PSRAM tier; its presence must match the
   // board catalog's supportsWebServer.
@@ -39,5 +46,5 @@ export function extractBoardFields(text) {
     .map((m) => m[1])
     .filter((c) => c.includes('/'));
   return { flash_size, partitions, psramMode, psramSpeed, experimental, executeFromPsram,
-           minimumChipRevision, sram1AsIram, hasHosted, hasWebServer, components };
+           minimumChipRevision, sram1AsIram, hasHosted, hasWebServer, txPin, rxPin, components };
 }

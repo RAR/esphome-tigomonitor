@@ -1,6 +1,6 @@
 # ESP32-S3 M5Stack AtomS3R Configuration
 # 8MB PSRAM, 240MHz, Octal PSRAM
-# AtomS3R features built-in tail485 RS485 transceiver (using internal pins GPIO1/GPIO2)
+# RS485 via the M5Stack Atomic RS485 Base (the pairing the wiring guide specifies)
 # Recommended for: Standard installations (up to ~30 devices)
 
 esphome:
@@ -99,11 +99,19 @@ psram:
   speed: 80MHz
 
 # UART configuration for Tigo communication
-# AtomS3R has built-in tail485 RS485 transceiver on GPIO1/GPIO2
+#
+# The AtomS3R has NO built-in RS485 transceiver. These pins are the bottom
+# expansion header (G5/G6/G7/G8/G38/G39), which is what the M5Stack Atomic RS485
+# Base plugs into — G5 is its RS485_RX and G6 its RS485_TX, matching M5's own
+# AtomS3R example and the reference rig this project is developed against.
+#
+# This file used to say GPIO1/GPIO2 and call them a "built-in tail485". G1/G2 are
+# the Grove port, not the base header, so anyone who copied it got a receiver
+# that never heard a byte and no error to explain why (#60).
 uart:
   id: tigo_uart
-  tx_pin: GPIO1   # AtomS3R built-in tail485 TX
-  rx_pin: GPIO2   # AtomS3R built-in tail485 RX
+  tx_pin: GPIO6   # Atomic RS485 Base RS485_TX (unused - we only listen)
+  rx_pin: GPIO5   # Atomic RS485 Base RS485_RX
   baud_rate: 38400
   data_bits: 8
   parity: NONE

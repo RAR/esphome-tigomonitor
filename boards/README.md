@@ -141,8 +141,10 @@ Most configurations assume the standard Tigo UART connection:
 - **Baud Rate**: 38400
 
 Adjust these in your main configuration if your hardware differs. Boards with a
-built-in transceiver already set their own pins — the AtomS3R uses GPIO1/GPIO2,
-and the T-CAN485 uses GPIO22/GPIO21 plus three transceiver enable lines.
+built-in transceiver already set their own pins, and the T-CAN485 uses
+GPIO22/GPIO21 plus three transceiver enable lines. The AtomS3R has no on-board
+transceiver: its config targets the M5Stack Atomic RS485 Base on the bottom
+header, GPIO6 (TX) / GPIO5 (RX).
 
 ## Performance Notes
 
