@@ -25,13 +25,12 @@ esp32:
       # esp_task_stack_is_sane_cache_disabled (discussion #31).
       execute_from_psram: true
     components:
-      # Same fork ref as the board configs: needed on P4 because upstream's
-      # manifest still lacks the esp32p4 target, and needed everywhere for the
-      # sidecar header (21.4 s -> 633 ms per history commit). Replaces the
-      # `tigomonitor` branch, which sat at 2.0.3 and had neither.
-      - name: zakery292/esp_tsdb
-        source: https://github.com/RAR/esp_tsdb.git
-        ref: ebfc360f00263ab90116ee3e556a9153ab4041a2
+      # Time-series database for persistent history. The 2.4.1 floor covers two
+      # separate things the P4 needs: the sidecar header (21.4 s -> 633 ms per
+      # commit — see esp32s3-atoms3r.yaml) and the esp32p4 manifest target,
+      # absent from the registry until 2.4.0, without which the component
+      # manager refuses to install here at all.
+      - zakery292/esp_tsdb^2.4.1
       # LittleFS — backing filesystem for the tsdb partition
       - joltwallet/littlefs^1.16
     sdkconfig_options:

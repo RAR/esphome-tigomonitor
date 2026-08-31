@@ -55,7 +55,6 @@ export function assembleConfig(board, form) {
       flash_size: board.flash_size ?? null,
       frameworkAdvanced: board.frameworkAdvanced,
       frameworkComponents: board.frameworkComponents,
-      hostedComponent: board.hostedComponent,
       sdkconfig: board.sdkconfig,
       // Merged in by toYaml only when the config actually selects BLE.
       sdkconfigBle: board.sdkconfigBle ?? null,

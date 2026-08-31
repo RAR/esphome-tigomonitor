@@ -63,12 +63,8 @@ esp32:
   framework:
     type: esp-idf
     components:
-      # A fork, pinned by commit SHA — see the note below for why. An
-      # immutable SHA rather than a branch, because a branch can move under
-      # a build and this is the config people copy.
-      - name: zakery292/esp_tsdb
-        source: https://github.com/RAR/esp_tsdb.git
-        ref: ebfc360f00263ab90116ee3e556a9153ab4041a2
+      # 2.4.1 is a floor, not a preference — see the note below.
+      - zakery292/esp_tsdb^2.4.1
       - joltwallet/littlefs^1.16
     sdkconfig_options:
       CONFIG_PARTITION_TABLE_CUSTOM: "y"
@@ -118,26 +114,28 @@ Changing the interval later is safe: `period_e_*` stores energy since the
 previous snapshot rather than a running total, so lifetime figures stay correct
 across a change and existing history is not invalidated.
 
-:::note[Why this needs a forked esp_tsdb]
-A snapshot used to take **21 seconds**, and the reference config pins a fork of
-`esp_tsdb` to avoid it. Upstream writes the database header in place at offset 0
-on every commit. LittleFS stores a file as a skip-list of block *addresses*, so
-changing byte N forces every block after N to be rewritten — overwrite cost is
-linear at about 20.4 ms/KB, while appends stay flat at ~170 ms whatever the size.
-Rewriting the header at offset 0 is therefore the most expensive write the
-filesystem offers, and it accounted for 15.2 s of the 21 s.
+:::note[Why the version floor is 2.4.1 and not just "latest"]
+A snapshot used to take **21 seconds**. `esp_tsdb` wrote the database header in
+place at offset 0 on every commit; LittleFS stores a file as a skip-list of block
+*addresses*, so changing byte N forces every block after N to be rewritten —
+overwrite cost is linear at about 20.4 ms/KB, while appends stay flat at ~170 ms
+whatever the size. Rewriting the header at offset 0 is therefore the most
+expensive write the filesystem offers, and it accounted for 15.2 s of the 21 s.
 
-The fork writes the header to an alternating sidecar file (`<db>.h0` / `<db>.h1`)
+Since 2.4.0 the header goes to an alternating sidecar file (`<db>.h0` / `<db>.h1`)
 so the hot path appends instead. Measured on the reference rig over 132 commits:
-median 633 ms, maximum 1,019 ms, with no upward drift as the databases fill. The
-change is not upstream yet, so the board config pins the fork by commit SHA.
+median 633 ms, maximum 1,019 ms, with no upward drift as the databases fill.
 
-The pin is upstream 2.3.0 plus three commits and nothing behind it. On an
-ESP32-P4 it is required for a second reason: upstream's manifest doesn't list
-`esp32p4` as a target, so the component manager refuses to install there at all.
-[What the fork
-contains](https://github.com/RAR/esphome-tigomonitor/blob/main/docs/esp-tsdb-fork.md)
-has the details.
+Anything below 2.4.0 still rewrites in place, and it does not fail loudly — you
+get a device that spends 20 seconds of every snapshot interval inside a flash
+write. On an ESP32-P4 the floor matters for a second reason: `esp32p4` was
+missing from the component's manifest until 2.4.0, so the component manager
+refuses to install older versions there at all.
+
+This used to be a pinned fork; both changes are upstream as of 2.4.1 and the
+fork is retired. [The
+record](https://github.com/RAR/esphome-tigomonitor/blob/main/docs/esp-tsdb-fork.md)
+explains what it carried and why.
 :::
 
 > **Board note:** the `board:` value above (`m5stack-atoms3`) is an example. The reference rig for this project is the **AtomS3R** — set `board:` to whatever board you actually run so you don't flash the wrong target.

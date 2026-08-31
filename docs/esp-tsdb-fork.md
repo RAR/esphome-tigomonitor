@@ -1,87 +1,103 @@
-# Why the board configs pin a fork of esp_tsdb, and how to move the pin
+# The esp_tsdb fork: what it was, and why it is gone
 
 ## One-line statement
 
-The reference configs pin `RAR/esp_tsdb` at an immutable SHA that is upstream
-`main` plus exactly three commits. This is a deliberate, maintained state, not
-a stopgap waiting on a merge.
+**Retired on 2026-08-31.** The board configs pin `zakery292/esp_tsdb^2.4.1` from
+the Espressif component registry — no `source:`, no `ref:`, no fork. Everything
+below is the record of why a fork existed for four weeks and what replaced it.
 
-## What the fork actually contains
+## What the fork carried
 
-As of 2026-08-13 the pin is `ebfc360f00263ab90116ee3e556a9153ab4041a2`, which is
-`zakery292/esp_tsdb` 2.3.0 (`209bcca`) with three commits on top and **nothing
-behind** — it is a rebased topic stack, not a divergent history.
+The pin was `RAR/esp_tsdb` at `ebfc360f00263ab90116ee3e556a9153ab4041a2` —
+upstream 2.3.0 plus three commits, rebased, nothing behind.
 
-| Commit | What it does | Why we need it | Upstream |
-|---|---|---|---|
-| `dbf4ebf` | Writes the DB header to an alternating sidecar (`<db>.h0`/`.h1`) instead of in place at offset 0 | A snapshot took 21.4 s; 15.2 s of that was header rewrites. LittleFS overwrite cost is linear at ~20.4 ms/KB, so a byte-0 write rewrites the whole file. Now 633 ms median / 1,019 ms max over 132 commits on the rig, with no drift as the DBs fill. | [PR #6](https://github.com/zakery292/esp_tsdb/pull/6), open since 2026-08-09 |
-| `3fb785f` | Adds `tsdb_peek_span` — read a database's time span without opening it | The Diagnostics page needs each DB's span; opening every DB to get it is the expensive path we just removed. | **Not submitted, by choice** (2026-08-13). Ours to carry indefinitely. |
-| `ebfc360` | Adds `esp32p4` to the manifest's `targets` list | Manifest-only. Without it the component manager refuses to install on a P4; the code itself is target-agnostic. | [PR #4](https://github.com/zakery292/esp_tsdb/pull/4), open since 2026-07-05 |
+| Commit | What it does | Where it ended up |
+|---|---|---|
+| `dbf4ebf` | Writes the DB header to an alternating sidecar (`<db>.h0`/`.h1`) instead of in place at offset 0 | Upstream via [PR #6](https://github.com/zakery292/esp_tsdb/pull/6), merged 2026-08-31, released in **2.4.0** |
+| `ebfc360` | Adds `esp32p4` to the manifest's `targets` list | Upstream via [PR #4](https://github.com/zakery292/esp_tsdb/pull/4), merged 2026-08-31, released in **2.4.0** |
+| `3fb785f` | Adds `tsdb_peek_span` — read a database's time span without opening it | **Nowhere. Never used.** See below. |
 
-Upstream's last commit was 2026-07-12, and `development` is identical to `main`.
-PRs #1–#3 were merged in a single batch on 2026-07-05, so the maintainer works in
-bursts. Treat a merge as welcome but unscheduled: **nothing in this project should
-block on one.** In particular, the v2.0.0 release does not.
+2.4.1 followed minutes later and adds only a PlatformIO manifest
+(`library.json`), which is inert for an ESP-IDF build. The floor is 2.4.1 rather
+than 2.4.0 simply because it is the newest release with no reason to prefer the
+older one.
 
-## Branch layout on the fork
+## Why `tsdb_peek_span` did not block the retirement
 
-| Branch | Role |
-|---|---|
-| `main` | Mirror of upstream `main`. Never commit here — it exists so that anyone landing on the fork sees the real upstream code. |
-| `tigo/on-<upstream-version>` | The integration branch. Its name states the version it is rebased onto; its tip is the SHA the board configs pin. Currently `tigo/on-2.3.0`. |
-| `feat/manifest-esp32p4`, `upstream/sidecar-header` | PR heads for #4 and #6. Do not delete these — deleting a PR's head branch closes the PR. |
+It was written for a Diagnostics feature that reports each database's time span
+without paying to open it. That feature was built a different way, and
+`tsdb_peek_span` was never called: `git log -S peek_span -- components/` returns
+nothing, and the string does not appear anywhere in the firmware. It sat in the
+pin for four weeks as the sole remaining justification for a fork, protecting a
+call site that did not exist.
 
-One branch per upstream base, rather than one long-lived branch that gets
-rebased in place, means a shipped pin's base is always readable from a branch
-name and old pins never dangle.
+The lesson worth keeping: a fork's cost is not the diff, it is that the diff has
+to be re-justified every time you look at it, and dead entries in it survive
+because nobody re-reads a pin they are not changing.
 
-## Moving the pin to a new upstream release
+## Two things that were wrong in the fork's own documentation
 
-The stack is three commits and must stay that way — **rebase, never merge**. A
-merge commit makes the stack unreadable and the next rebase painful.
+**The P4 rationale looked stale and was not.** Upstream commit `914074ef`
+(2026-07-05) added `esp32p4` to the manifest, which made it look as though the
+fork's copy had been redundant since July. It had not: the 2.2.0 release commit
+rewrote the manifest and dropped the target again, so `esp32p4` is absent from
+the v2.2.0 and v2.3.0 manifests and present only from v2.4.0. Checking a claim
+like this against `main` is worthless — `main` already contains whatever you just
+merged. Check it against the **releases**, which are what a version pin resolves
+to.
 
-```bash
-git clone git@github.com:RAR/esp_tsdb.git && cd esp_tsdb
-git remote add up https://github.com/zakery292/esp_tsdb.git && git fetch up
+**"Upstream works in bursts; nothing should block on a merge."** That was true
+and remains good practice, but the resolution came from neither waiting nor
+forking indefinitely — it came from getting commit access. Worth remembering as
+an option next time rather than treating fork-forever as the only alternative to
+waiting.
 
-# 1. Mirror upstream, then branch the stack onto the new base.
-git checkout main && git merge --ff-only up/main && git push origin main
-git checkout -b tigo/on-<new-version> tigo/on-<old-version>
-git rebase --onto up/main <old-upstream-sha>
+## What replaced it
 
-# 2. Sanity-check the shape before trusting it: expect "0<TAB>3".
-git rev-list --left-right --count up/main...HEAD
-
-# 3. Verify on hardware, not by eye — see below.
-git push origin tigo/on-<new-version>
+```yaml
+esp32:
+  framework:
+    type: esp-idf
+    components:
+      - zakery292/esp_tsdb^2.4.1
+      - joltwallet/littlefs^1.16
 ```
 
-Then update `ref:` in every board config that carries one (`esp32s3-atoms3r`,
-`esp32p4-evboard`, `test-p4-tigomonitor`, `test-p4-ble-tigomonitor`) **and** in
-the deployed rig config, which is a standalone file outside this repo.
+`^2.4.1` is a floor, not a preference. Below 2.4.0 the header is rewritten in
+place, and that failure is silent — no build error, no log line, just a device
+spending ~20 s of every snapshot interval inside a flash write, growing worse as
+the databases fill. Do not relax it to `^2` or to a bare version.
 
-**Verification is a rig run, not a compile.** A clean build proves the ref
-resolved, nothing more. The sidecar change is in the flash hot path, so confirm
-snapshot time is still sub-second in the History logs over several commits
-before calling a new pin good.
+Carried in six board configs (`esp32s3-atoms3r`, `esp32p4-evboard`,
+`esp32s3-lilygo-t-connect-pro-lite`, `esp32s3-waveshare-rs485-can`,
+`test-p4-tigomonitor`, `test-p4-ble-tigomonitor`), in the Config Builder
+(`site/boards.js`), and in the deployed rig config, which is a standalone file
+outside this repo and has to be updated by hand.
 
-## If upstream merges the PRs
+## The fork repository
 
-Retiring the fork means dropping to a registry version — but only once *all
-three* commits are upstream, and that is not currently on the table. Two of the
-three are in open PRs; `tsdb_peek_span` is deliberately not submitted, so even
-if both PRs merge tomorrow the stack shortens to one commit rather than
-disappearing. Plan for the fork to stay.
+`RAR/esp_tsdb` still exists and should be left alone. Its `tigo/on-2.3.0` branch
+is the shipped pin's history, and `feat/manifest-esp32p4` /
+`upstream/sidecar-header` are the merged PRs' head branches — deleting a head
+branch on a merged PR degrades the upstream PR page.
 
-## Open item
+## Verifying a version bump
 
-`idf_component.yml` still declares `version: "2.3.0"`, identical to upstream
-despite the three extra commits, so a build's provenance is not self-describing.
-`2.3.0+tigo.1` is valid semver build metadata and would fix that. Not done yet —
-it touches the manifest that PR #4 also edits, so it is worth doing after that
-PR resolves rather than creating a conflict now.
+A clean compile proves the version resolved, nothing more. The sidecar write is
+in the flash hot path, so confirm snapshot time is still sub-second in the
+History logs over several commits on the rig before calling a new floor good.
+
+To confirm what a build actually resolved, read the lockfile rather than the
+config:
+
+```
+grep -A20 'zakery292/esp_tsdb' boards/.esphome/build/<name>/dependencies.lock
+```
+
+`version:` is the resolved release and `source: type: service` means it came from
+the registry rather than git.
 
 ## See also
 
-- [Saving History to Flash](https://rar.github.io/esphome-tigomonitor/guides/tsdb-integration/) — the user-facing cost model and the reason the sidecar change exists
+- [Saving History to Flash](https://rar.github.io/esphome-tigomonitor/guides/tsdb-integration/) — the user-facing cost model and the measurement behind the 2.4.1 floor
 - [`tsdb-flash-crash-issue.md`](tsdb-flash-crash-issue.md) — the separate flash-write crash investigation (cause was cabinet power, not the filesystem)

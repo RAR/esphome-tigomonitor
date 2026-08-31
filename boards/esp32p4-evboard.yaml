@@ -43,19 +43,12 @@ esp32:
       # `esp_task_stack_is_sane_cache_disabled` (discussion #31).
       execute_from_psram: true
     components:
-      # esp_tsdb backs the History view; littlefs is its filesystem.
-      #
-      # Same fork ref as the AtomS3R, for two reasons at once. The P4 has always
-      # needed the fork because upstream's manifest still doesn't list esp32p4;
-      # every board now also needs it for the sidecar header, without which a
-      # history commit costs 21.4 s instead of 633 ms (see the AtomS3R config).
-      #
-      # This ref replaces `tigomonitor`, which was pinned here before and sat at
-      # 2.0.3 — so the P4 was missing everything since, sidecar included. Pinned
-      # by SHA rather than branch so it cannot move under a build.
-      - name: zakery292/esp_tsdb
-        source: https://github.com/RAR/esp_tsdb.git
-        ref: ebfc360f00263ab90116ee3e556a9153ab4041a2
+      # Time-series database for persistent history. The 2.4.1 floor covers two
+      # separate things the P4 needs: the sidecar header (21.4 s -> 633 ms per
+      # commit — see esp32s3-atoms3r.yaml) and the esp32p4 manifest target,
+      # absent from the registry until 2.4.0, without which the component
+      # manager refuses to install here at all.
+      - zakery292/esp_tsdb^2.4.1
       - joltwallet/littlefs^1.16
     sdkconfig_options:
       # CPU frequency (P4 runs at 400MHz)
