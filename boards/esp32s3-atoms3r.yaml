@@ -31,26 +31,23 @@ esp32:
       # heap to hold the relocated instructions and rodata.
       execute_from_psram: true
     components:
-      # Time-series database for persistent history
-      # (see https://rar.github.io/esphome-tigomonitor/guides/tsdb-integration/).
+      # 2.4.1 is the first registry release carrying the sidecar header, which
+      # is why this is a plain version pin again rather than a fork ref.
       #
-      # Pinned to a fork, not the registry's 2.3.0, for the sidecar header.
-      # Upstream writes the database header in place at offset 0 on every
+      # esp_tsdb used to write the database header in place at offset 0 on every
       # commit. LittleFS stores a file as a skip-list of block addresses, so
       # modifying byte N rewrites every block after N — overwrite cost is linear
       # at ~20.4 ms/KB, measured across a 190x size range. That made a commit
       # 21.4 s (15.2 s of it header rewrites) and growing as the databases fill.
       #
-      # The fork writes the header to an alternating sidecar (<db>.h0/.h1), so
-      # the hot path appends instead of rewriting: 21.4 s -> 633 ms median,
-      # 1,019 ms max over 132 commits on the rig, with no drift as they fill.
-      # It also adds tsdb_peek_span. Neither is upstream yet.
+      # Since 2.4.0 the header goes to an alternating sidecar (<db>.h0/.h1), so
+      # the hot path appends instead of rewriting: 633 ms median, 1,019 ms max
+      # over 132 commits on the rig, with no drift as they fill.
       #
-      # An immutable SHA rather than a branch: a branch can move under a build,
-      # and this is the reference config people copy.
-      - name: zakery292/esp_tsdb
-        source: https://github.com/RAR/esp_tsdb.git
-        ref: ebfc360f00263ab90116ee3e556a9153ab4041a2
+      # Do NOT float this floor down. 2.3.0 and earlier rewrite in place, and
+      # the symptom is not a build error — it is a device that spends 20 s of
+      # every snapshot interval inside a flash write.
+      - zakery292/esp_tsdb^2.4.1
       # LittleFS — backing filesystem for the tsdb partition
       - joltwallet/littlefs^1.16
     sdkconfig_options:

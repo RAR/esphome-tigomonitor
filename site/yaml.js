@@ -61,16 +61,13 @@ export function toYaml(cfg) {
     // be over USB — an OTA does not update the bootloader.
     if (adv.sram1_as_iram) L.push(`${I(3)}sram1_as_iram: true`);
   }
+  // Every entry is a plain registry version spec now. esp_tsdb used to need a
+  // `name:`/`source:`/`ref:` triple here because the sidecar header and the
+  // esp32p4 manifest target only existed on a fork; both shipped in 2.4.0, so
+  // the fork is retired and this is a flat list again.
   const comps = [...cfg.esp32.frameworkComponents];
-  if (cfg.esp32.hostedComponent || comps.length) {
+  if (comps.length) {
     L.push(`${I(2)}components:`);
-    if (cfg.esp32.hostedComponent) {
-      // hostedComponent is always the esp_tsdb managed component; only its
-      // source/ref vary per board (the P4 uses a git fork), so the name is fixed.
-      L.push(`${I(3)}- name: zakery292/esp_tsdb`);
-      L.push(`${I(4)}source: ${cfg.esp32.hostedComponent.source}`);
-      L.push(`${I(4)}ref: ${cfg.esp32.hostedComponent.ref}`);
-    }
     for (const c of comps) L.push(`${I(3)}- ${c}`);
   }
   L.push(`${I(2)}sdkconfig_options:`);

@@ -10,16 +10,13 @@ export const BOARDS = [
     // out ESP-IDF's cross-core cache-disable, which was racing WiFi/BLE-coex
     // ISRs on every history commit (MTTF 13.5-42 h). Costs ~1.7 MiB of PSRAM.
     frameworkAdvanced: { enable_idf_experimental_features: false, execute_from_psram: true },
-    // Fork-pinned for the sidecar header: upstream rewrites the db header in
-    // place at offset 0 every commit, which LittleFS turns into a rewrite of
-    // every block to EOF (~20.4 ms/KB). 21.4 s -> 633 ms median on the rig.
-    // Mirrors boards/esp32s3-atoms3r.yaml; SHA, not a branch, so it cannot move
-    // under a build.
-    frameworkComponents: ['joltwallet/littlefs^1.16'],
-    hostedComponent: {
-      source: 'https://github.com/RAR/esp_tsdb.git',
-      ref: 'ebfc360f00263ab90116ee3e556a9153ab4041a2',
-    },
+    // The esp_tsdb floor is 2.4.1, not the latest-major default: releases before
+    // 2.4.0 rewrite the db header in place at offset 0 every commit, which
+    // LittleFS turns into a rewrite of every block to EOF (~20.4 ms/KB) —
+    // 21.4 s per commit against 633 ms median on the rig. Mirrors
+    // boards/esp32s3-atoms3r.yaml. This replaced a fork pin; see
+    // docs/esp-tsdb-fork.md.
+    frameworkComponents: ['zakery292/esp_tsdb^2.4.1', 'joltwallet/littlefs^1.16'],
     sdkconfig: {
       CONFIG_ESP32S3_DEFAULT_CPU_FREQ_240: 'y',
       CONFIG_UART_ISR_IN_IRAM: 'y',
@@ -238,10 +235,7 @@ font:
     // stacks stay reachable during flash cache-disable windows — without it some
     // boards crash-loop at boot with esp_task_stack_is_sane_cache_disabled (#31).
     frameworkAdvanced: { enable_idf_experimental_features: true, execute_from_psram: true },
-    frameworkComponents: ['joltwallet/littlefs^1.16'],
-    // Same ref as the AtomS3R: the P4 needs the fork for its manifest target,
-    // and every board needs it for the sidecar header. Was `tigomonitor` (2.0.3).
-    hostedComponent: { source: 'https://github.com/RAR/esp_tsdb.git', ref: 'ebfc360f00263ab90116ee3e556a9153ab4041a2' },
+    frameworkComponents: ['zakery292/esp_tsdb^2.4.1', 'joltwallet/littlefs^1.16'],
     sdkconfig: {
       CONFIG_ESP32P4_DEFAULT_CPU_FREQ_400: 'y',
       CONFIG_UART_ISR_IN_IRAM: 'y',
@@ -324,7 +318,6 @@ font:
       sram1_as_iram: true,
     },
     frameworkComponents: [],
-    hostedComponent: null,
     sdkconfig: {
       // The single most important setting for frame loss: without it the UART
       // ISR stalls whenever flash is busy and Tigo frames drop mid-burst.
@@ -373,11 +366,7 @@ font:
     partitions: { default: 'partitions/tigo-8mb.csv' },
     psram: { mode: 'octal', speed: '80MHz' },
     frameworkAdvanced: { enable_idf_experimental_features: false, execute_from_psram: true },
-    frameworkComponents: ['joltwallet/littlefs^1.16'],
-    hostedComponent: {
-      source: 'https://github.com/RAR/esp_tsdb.git',
-      ref: 'ebfc360f00263ab90116ee3e556a9153ab4041a2',
-    },
+    frameworkComponents: ['zakery292/esp_tsdb^2.4.1', 'joltwallet/littlefs^1.16'],
     sdkconfig: {
       CONFIG_ESP32S3_DEFAULT_CPU_FREQ_240: 'y',
       CONFIG_UART_ISR_IN_IRAM: 'y',
@@ -443,11 +432,7 @@ font:
     partitions: { default: 'partitions/tigo-16mb.csv', ble: 'partitions/tigo-16mb.csv' },
     psram: { mode: 'octal', speed: '80MHz' },
     frameworkAdvanced: { enable_idf_experimental_features: false, execute_from_psram: true },
-    frameworkComponents: ['joltwallet/littlefs^1.16'],
-    hostedComponent: {
-      source: 'https://github.com/RAR/esp_tsdb.git',
-      ref: 'ebfc360f00263ab90116ee3e556a9153ab4041a2',
-    },
+    frameworkComponents: ['zakery292/esp_tsdb^2.4.1', 'joltwallet/littlefs^1.16'],
     sdkconfig: {
       CONFIG_ESP32S3_DEFAULT_CPU_FREQ_240: 'y',
       CONFIG_UART_ISR_IN_IRAM: 'y',

@@ -64,12 +64,11 @@ esp32:
       # ~1.7 MiB of PSRAM.
       execute_from_psram: true
     components:
-      # Time-series database for persistent history. Pinned to a fork by
-      # immutable SHA — see the long explanation in esp32s3-atoms3r.yaml and
-      # docs/esp-tsdb-fork.md. A branch can move under a build; a commit cannot.
-      - name: zakery292/esp_tsdb
-        source: https://github.com/RAR/esp_tsdb.git
-        ref: ebfc360f00263ab90116ee3e556a9153ab4041a2
+      # Time-series database for persistent history. The 2.4.1 floor matters:
+      # earlier releases rewrite the database header in place, costing 21.4 s
+      # per commit instead of 633 ms. See esp32s3-atoms3r.yaml for the full
+      # measurement and docs/esp-tsdb-fork.md for the fork this replaced.
+      - zakery292/esp_tsdb^2.4.1
       # LittleFS — backing filesystem for the tsdb partition
       - joltwallet/littlefs^1.16
     sdkconfig_options:
