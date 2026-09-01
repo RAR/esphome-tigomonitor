@@ -358,6 +358,35 @@ void TigoMonitorComponent::setup() {
   } else {
     ESP_LOGI(TAG, "No CCA data found in node table - UI will show barcodes until CCA sync occurs");
   }
+
+  // Say so at boot when the stored table names an MPPT no inverter claims. The
+  // import path checks this too, but a table can predate the YAML `inverters:`
+  // block, and the symptom is a Dashboard that reads 0 strings while
+  // /api/strings returns them all (#60) — silent unless something says it here.
+  // Skipped when no inverters are configured: there is nothing to check against.
+  if (!inverters_.empty()) {
+    std::map<node_string, int> unmatched;
+    for (const auto &node : node_table_) {
+      if (node.cca_inverter_label.empty()) continue;
+      bool known = false;
+      for (const auto &inv : inverters_) {
+        for (const auto &m : inv.mppt_labels) {
+          if (m == node.cca_inverter_label) { known = true; break; }
+        }
+        if (known) break;
+      }
+      if (!known) unmatched[node.cca_inverter_label]++;
+    }
+    if (!unmatched.empty()) {
+      ESP_LOGW(TAG, "Node table names %d MPPT label(s) that no configured inverter claims — "
+                    "those strings will not appear on the Dashboard or Topology:",
+               (int) unmatched.size());
+      for (const auto &u : unmatched)
+        ESP_LOGW(TAG, "  '%s' (%d node%s)", u.first.c_str(), u.second,
+                 u.second == 1 ? "" : "s");
+      ESP_LOGW(TAG, "  cca_inverter holds the MPPT label, not the inverter name");
+    }
+  }
   
   // Initialize night mode tracking
   last_data_received_ = millis();

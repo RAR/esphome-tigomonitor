@@ -26,6 +26,7 @@
 #include <lwip/tcp.h>
 #include <cstring>
 #include <cmath>
+#include <algorithm>
 #include <sys/time.h>
 #include <mbedtls/base64.h>
 #include "cJSON.h"
@@ -2193,6 +2194,55 @@ esp_err_t TigoWebServer::api_node_import_handler(httpd_req_t *req) {
   size_t free_before = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
   ESP_LOGI(TAG, "Free internal RAM before import: %zu bytes", free_before);
   
+  // Nodes whose MPPT label matches no configured inverter.
+  //
+  // import_node_table() will happily build their strings, but /api/inverters
+  // nests a string under an inverter by matching that label against the
+  // inverter's `mppts:` list — so an unmatched label produces strings that
+  // exist and are invisible. Dashboard and Topology both read 0 strings /
+  // 0 panels while /api/strings returns the full set (#60).
+  //
+  // The trap is the field name: `cca_inverter` holds the *MPPT* label, not the
+  // inverter name (the CCA's own vocabulary — see NodeInfo in tigo_monitor.h).
+  // A hand-written file that reads it literally puts the inverter name there
+  // and imports "successfully" into a dashboard that renders nothing.
+  std::map<std::string, int> unmatched_mppts;  // label -> node count
+  int unmatched_node_count = 0;
+  std::vector<std::string> known_mppts;
+  server->parent_->with_state_lock([&]() {
+    for (const auto &inv : server->parent_->get_inverters())
+      for (const auto &m : inv.mppt_labels)
+        known_mppts.push_back(tigo_monitor::to_std_string(m));
+  });
+  // Nothing to validate against when no inverters are configured. Importing a
+  // node table before adding the YAML `inverters:` block is a legitimate order
+  // to work in, so this is silence, not a pass.
+  if (!known_mppts.empty()) {
+    for (const auto &n : nodes) {
+      if (n.cca_inverter_label.empty()) continue;  // unassigned nodes are legal
+      std::string lbl = tigo_monitor::to_std_string(n.cca_inverter_label);
+      if (std::find(known_mppts.begin(), known_mppts.end(), lbl) == known_mppts.end()) {
+        unmatched_mppts[lbl]++;
+        unmatched_node_count++;
+      }
+    }
+  }
+  if (unmatched_node_count > 0) {
+    ESP_LOGW(TAG, "%d imported node(s) name an MPPT that no configured inverter claims — "
+                  "their strings will not appear on the Dashboard or Topology:",
+             unmatched_node_count);
+    for (const auto &u : unmatched_mppts)
+      ESP_LOGW(TAG, "  cca_inverter='%s' (%d node%s)", u.first.c_str(), u.second,
+               u.second == 1 ? "" : "s");
+    std::string expected;
+    for (const auto &k : known_mppts) {
+      if (!expected.empty()) expected += ", ";
+      expected += k;
+    }
+    ESP_LOGW(TAG, "  configured MPPTs are: %s", expected.c_str());
+    ESP_LOGW(TAG, "  cca_inverter must hold the MPPT label, not the inverter name");
+  }
+
   // Import the nodes (this rebuilds the string/inverter groups synchronously)
   bool success = server->parent_->import_node_table(nodes);
 
@@ -2219,12 +2269,51 @@ esp_err_t TigoWebServer::api_node_import_handler(httpd_req_t *req) {
            free_after, free_before - free_after, min_free);
   
   if (success) {
-    char response[256];
-    snprintf(response, sizeof(response),
-      "{\"status\":\"ok\",\"message\":\"Successfully imported %zu nodes\",\"imported\":%zu,\"overrides\":%d}",
+    // PSRAMString rather than a fixed buffer: the warnings carry user-supplied
+    // MPPT labels, so the response has no bounded length.
+    PSRAMString response;
+    char head[160];
+    snprintf(head, sizeof(head),
+      "{\"status\":\"ok\",\"message\":\"Successfully imported %zu nodes\",\"imported\":%zu,\"overrides\":%d",
       nodes.size(), nodes.size(), overrides_applied);
+    response.append(head);
+
+    if (unmatched_node_count > 0) {
+      auto esc = [](const std::string &in) {
+        std::string out;
+        for (char c : in) {
+          if (c == '"' || c == '\\') { out += '\\'; out += c; }
+          else if (c >= 0x20) out += c;
+        }
+        return out;
+      };
+      response.append(",\"warnings\":{\"unmatched_mppts\":[");
+      bool first = true;
+      for (const auto &u : unmatched_mppts) {
+        if (!first) response.append(",");
+        first = false;
+        char item[160];
+        snprintf(item, sizeof(item), "{\"label\":\"%s\",\"nodes\":%d}",
+                 esc(u.first).c_str(), u.second);
+        response.append(item);
+      }
+      response.append("],\"expected_mppts\":[");
+      first = true;
+      for (const auto &k : known_mppts) {
+        if (!first) response.append(",");
+        first = false;
+        response.append("\"");
+        response.append(esc(k).c_str());
+        response.append("\"");
+      }
+      response.append("],\"detail\":\"cca_inverter must hold the MPPT label, not the "
+                      "inverter name. Strings on an unrecognised MPPT are created but do "
+                      "not appear on the Dashboard or Topology.\"}");
+    }
+
+    response.append("}");
     httpd_resp_set_type(req, "application/json");
-    httpd_resp_send(req, response, strlen(response));
+    httpd_resp_send(req, response.c_str(), response.length());
   } else {
     const char* error_response = "{\"status\":\"error\",\"message\":\"Failed to import node table\"}";
     httpd_resp_set_type(req, "application/json");
@@ -2555,6 +2644,23 @@ void TigoWebServer::build_inverters_json(PSRAMString& json) {
 
   ESP_LOGD(TAG, "Building inverters JSON - found %d inverters", inverters.size());
 
+  // Serialise one string object. Shared with the "Unassigned" block below so the
+  // two cannot drift into different shapes.
+  auto append_string_obj = [](PSRAMString &out, const tigo_monitor::StringData &sd) {
+    char buffer[680];
+    snprintf(buffer, sizeof(buffer),
+      "{\"label\":\"%s\",\"display_label\":\"%s\",\"mppt\":\"%s\","
+      "\"panel_rating_w\":%u,"
+      "\"total_power\":%.1f,\"peak_power\":%.1f,"
+      "\"active_devices\":%d,\"total_devices\":%d}",
+      sd.string_label.c_str(), sd.display_label.c_str(),
+      sd.inverter_label.c_str(),
+      (unsigned) sd.panel_rating_w,
+      sd.total_power, sd.peak_power,
+      sd.active_device_count, sd.total_device_count);
+    out.append(buffer);
+  };
+
   bool first_inv = true;
   for (const auto &inverter : inverters) {
     if (!first_inv) json.append(",");
@@ -2589,19 +2695,7 @@ void TigoWebServer::build_inverters_json(PSRAMString& json) {
         if (string_data.inverter_label == mppt_label) {
           if (!first_str) strings_json.append(",");
           first_str = false;
-          
-          char buffer[680];
-          snprintf(buffer, sizeof(buffer),
-            "{\"label\":\"%s\",\"display_label\":\"%s\",\"mppt\":\"%s\","
-            "\"panel_rating_w\":%u,"
-            "\"total_power\":%.1f,\"peak_power\":%.1f,"
-            "\"active_devices\":%d,\"total_devices\":%d}",
-            string_data.string_label.c_str(), string_data.display_label.c_str(),
-            string_data.inverter_label.c_str(),
-            (unsigned) string_data.panel_rating_w,
-            string_data.total_power, string_data.peak_power,
-            string_data.active_device_count, string_data.total_device_count);
-          strings_json.append(buffer);
+          append_string_obj(strings_json, string_data);
         }
       }
     }
@@ -2632,6 +2726,72 @@ void TigoWebServer::build_inverters_json(PSRAMString& json) {
     
     json.append(",\"strings\":");
     json.append(strings_json.c_str());
+    json.append("}");
+  }
+
+  // Strings whose MPPT label matches no configured inverter used to be dropped
+  // here entirely: they exist in strings_ and /api/strings returns them, but
+  // Dashboard and Topology read this endpoint and so showed 0 strings / 0
+  // panels with nothing on screen saying why (#60). Group them under a
+  // synthetic "Unassigned" inverter instead — the same fallback the YAML
+  // generator already uses for an unrecognised MPPT.
+  //
+  // This also covers the case of no `inverters:` block at all, where every
+  // string is unclaimed and the dashboard was previously blank.
+  PSRAMString orphan_strings;
+  orphan_strings.append("[");
+  PSRAMString orphan_mppts;
+  orphan_mppts.append("[");
+  bool first_orphan = true, first_orphan_mppt = true;
+  float orphan_power = 0.0f, orphan_peak = 0.0f;
+  int orphan_active = 0, orphan_total = 0;
+  std::vector<tigo_monitor::node_string> seen_mppts;
+  for (const auto &string_pair : strings) {
+    const auto &sd = string_pair.second;
+    bool claimed = false;
+    for (const auto &inv : inverters) {
+      for (const auto &m : inv.mppt_labels) {
+        if (sd.inverter_label == m) { claimed = true; break; }
+      }
+      if (claimed) break;
+    }
+    if (claimed) continue;
+
+    if (!first_orphan) orphan_strings.append(",");
+    first_orphan = false;
+    append_string_obj(orphan_strings, sd);
+    orphan_power += sd.total_power;
+    orphan_peak += sd.peak_power;
+    orphan_active += sd.active_device_count;
+    orphan_total += sd.total_device_count;
+
+    if (!sd.inverter_label.empty() &&
+        std::find(seen_mppts.begin(), seen_mppts.end(), sd.inverter_label) == seen_mppts.end()) {
+      seen_mppts.push_back(sd.inverter_label);
+      if (!first_orphan_mppt) orphan_mppts.append(",");
+      first_orphan_mppt = false;
+      orphan_mppts.append("\"");
+      orphan_mppts.append(sd.inverter_label.c_str());
+      orphan_mppts.append("\"");
+    }
+  }
+  orphan_strings.append("]");
+  orphan_mppts.append("]");
+
+  if (!first_orphan) {
+    ESP_LOGD(TAG, "Grouping unclaimed strings under 'Unassigned' (%d panels)", orphan_total);
+    if (!first_inv) json.append(",");
+    first_inv = false;
+    char buffer[256];
+    snprintf(buffer, sizeof(buffer),
+      "{\"name\":\"Unassigned\",\"display_name\":\"\",\"unassigned\":true,\"mppts\":");
+    json.append(buffer);
+    json.append(orphan_mppts.c_str());
+    snprintf(buffer, sizeof(buffer),
+      ",\"total_power\":%.1f,\"peak_power\":%.1f,\"active_devices\":%d,\"total_devices\":%d,\"strings\":",
+      orphan_power, orphan_peak, orphan_active, orphan_total);
+    json.append(buffer);
+    json.append(orphan_strings.c_str());
     json.append("}");
   }
   });

@@ -2733,6 +2733,24 @@
       const extra = result.overrides ? `, ${result.overrides} override(s)` : '';
       showToast(`Imported ${result.imported || data.nodes.length} node(s)${extra} ✓`, 'ok');
       await refreshNodes();
+
+      // An unmatched MPPT is the one import outcome that succeeds and still
+      // leaves the Dashboard and Topology empty, so it gets a dialog rather
+      // than a toast — the toast is gone in 2.4 s and this has to be read.
+      const um = result.warnings && result.warnings.unmatched_mppts;
+      if (um && um.length) {
+        const lines = um.map(u => `  • "${u.label}" — ${u.nodes} node(s)`).join('\n');
+        const expected = (result.warnings.expected_mppts || []).join(', ');
+        alert(
+          'Imported, but the topology will not render.\n\n' +
+          'These MPPT labels match no configured inverter:\n' + lines + '\n\n' +
+          (expected ? 'Configured MPPTs: ' + expected + '\n\n' : '') +
+          'In the node JSON, cca_inverter holds the MPPT label — not the inverter ' +
+          'name. The inverter itself comes from the inverters: block in your YAML.\n\n' +
+          'Their strings exist (see /api/strings) but do not appear on the ' +
+          'Dashboard or Topology.'
+        );
+      }
     } catch (e) {
       showToast(`Import failed: ${e.message}`, 'err');
     }
