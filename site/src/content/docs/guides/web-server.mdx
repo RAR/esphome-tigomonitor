@@ -179,7 +179,7 @@ Conventions for the tables below:
 | `POST /api/restart` | none | Calls `App.safe_reboot()` after sending response |
 | `POST /api/reset_peak_power` | none | Clears per-device peak-power high-water marks |
 | `POST /api/reset_node_table` | none | Drops the persisted node table; devices repopulate from telemetry |
-| `POST /api/nodes/import` | JSON `{nodes:[…]}` | Replaces the node table from a previous Export |
+| `POST /api/nodes/import` | JSON `{nodes:[…]}` | Replaces the node table. See [Node table format](#node-table-format) |
 | `POST /api/inverters/rename` | `{name, display_name}` | Set inverter display name. Empty `display_name` clears the override |
 | `POST /api/strings/rename` | `{label, display_label}` | Set string display name. Empty clears the override |
 | `POST /api/strings/rating` | `{label, rating_w}` | Set per-panel nameplate watts. `rating_w=0` clears |
@@ -195,6 +195,65 @@ Conventions for the tables below:
 | `POST /api/cca/data-export` | none | Ask the CCA to push its data to Tigo's cloud now |
 | `POST /api/cloud/login` | `{email,password}` | Log into Tigo's cloud; persists only the bearer token (`cloud_import`) |
 | `POST /api/cloud/import` | none | Fetch the system layout from Tigo's cloud and apply it to the node table |
+
+### Node table format
+
+`GET /api/nodes` returns this shape and `POST /api/nodes/import` accepts it, so
+the normal workflow is Export → edit → Import. Only `addr` and `long_address`
+are required; a node missing either is skipped.
+
+```json
+{
+  "nodes": [
+    {
+      "addr": "0004",
+      "long_address": "04C05B4000C286CC",
+      "sensor_index": 5,
+      "checksum": "R",
+      "cca_label": "A1",
+      "cca_mppt": "MPPT 1",
+      "cca_string": "A",
+      "cca_channel": "",
+      "cca_validated": false
+    }
+  ]
+}
+```
+
+| Field | Meaning |
+|-------|---------|
+| `addr` | Short bus address, as seen on the UART |
+| `long_address` | 16-char radio MAC — the stable identity |
+| `sensor_index` | Which `tigo_monitor` sensor slot this panel publishes to |
+| `checksum` | Frame checksum character, informational |
+| `cca_label` | Panel display name |
+| `cca_mppt` | **The MPPT label**, e.g. `MPPT 1` — see below |
+| `cca_string` | The string within that MPPT |
+| `cca_validated` | Whether this node was matched against a live CCA. Cosmetic — grouping does not depend on it, and a hand-built table is authoritative at `false` |
+
+:::caution[`cca_mppt` is the MPPT, not the inverter]
+The topology has three levels, and only the middle one lives in this file:
+
+**inverter** (from the `inverters:` block in your YAML) → **MPPT** (`cca_mppt`) → **string** (`cca_string`)
+
+A node's `cca_mppt` must exactly match one of the labels in that inverter's
+`mppts:` list. Put the inverter's *name* there instead and the import still
+succeeds — the strings are created, and `/api/strings` returns them — but they
+belong to no inverter, so the Dashboard and Topology views show **0 strings /
+0 panels**.
+
+Since this was reported ([#60](https://github.com/RAR/esphome-tigomonitor/issues/60))
+the import reports unmatched labels back to you, and any string that matches no
+inverter is grouped under **Unassigned** rather than hidden. The confusion comes
+from the CCA itself, which calls an MPPT an "Inverter" — which is also why this
+field used to be named `cca_inverter`. That name is still accepted on import and
+still emitted on export, so older files keep working.
+:::
+
+The optional top-level `inverters` and `strings` arrays carry display-name and
+nameplate overrides only. They are keyed on `name`/`display_name` and
+`label`/`display_label`/`panel_rating_w` respectively; entries with neither
+override are ignored. Groups themselves always come from the nodes.
 
 ### Example
 

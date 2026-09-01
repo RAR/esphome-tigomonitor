@@ -2092,8 +2092,14 @@ esp_err_t TigoWebServer::api_node_import_handler(httpd_req_t *req) {
     if ((item = cJSON_GetObjectItem(node_obj, "cca_string")) && cJSON_IsString(item)) {
       node.cca_string_label = item->valuestring;
     }
+    // cca_mppt is the current name. cca_inverter is the legacy one and is still
+    // accepted so files exported by older firmware keep importing — but it is
+    // read second, so a file carrying both wins on the accurate name.
     if ((item = cJSON_GetObjectItem(node_obj, "cca_inverter")) && cJSON_IsString(item)) {
-      node.cca_inverter_label = item->valuestring;
+      node.cca_mppt_label = item->valuestring;
+    }
+    if ((item = cJSON_GetObjectItem(node_obj, "cca_mppt")) && cJSON_IsString(item)) {
+      node.cca_mppt_label = item->valuestring;
     }
     if ((item = cJSON_GetObjectItem(node_obj, "cca_channel")) && cJSON_IsString(item)) {
       node.cca_channel = item->valuestring;
@@ -2202,7 +2208,8 @@ esp_err_t TigoWebServer::api_node_import_handler(httpd_req_t *req) {
   // exist and are invisible. Dashboard and Topology both read 0 strings /
   // 0 panels while /api/strings returns the full set (#60).
   //
-  // The trap is the field name: `cca_inverter` holds the *MPPT* label, not the
+  // The trap is the field name: `cca_mppt` (`cca_inverter` before this was
+  // renamed) holds the *MPPT* label, not the
   // inverter name (the CCA's own vocabulary — see NodeInfo in tigo_monitor.h).
   // A hand-written file that reads it literally puts the inverter name there
   // and imports "successfully" into a dashboard that renders nothing.
@@ -2219,8 +2226,8 @@ esp_err_t TigoWebServer::api_node_import_handler(httpd_req_t *req) {
   // to work in, so this is silence, not a pass.
   if (!known_mppts.empty()) {
     for (const auto &n : nodes) {
-      if (n.cca_inverter_label.empty()) continue;  // unassigned nodes are legal
-      std::string lbl = tigo_monitor::to_std_string(n.cca_inverter_label);
+      if (n.cca_mppt_label.empty()) continue;  // unassigned nodes are legal
+      std::string lbl = tigo_monitor::to_std_string(n.cca_mppt_label);
       if (std::find(known_mppts.begin(), known_mppts.end(), lbl) == known_mppts.end()) {
         unmatched_mppts[lbl]++;
         unmatched_node_count++;
@@ -2232,7 +2239,7 @@ esp_err_t TigoWebServer::api_node_import_handler(httpd_req_t *req) {
                   "their strings will not appear on the Dashboard or Topology:",
              unmatched_node_count);
     for (const auto &u : unmatched_mppts)
-      ESP_LOGW(TAG, "  cca_inverter='%s' (%d node%s)", u.first.c_str(), u.second,
+      ESP_LOGW(TAG, "  cca_mppt='%s' (%d node%s)", u.first.c_str(), u.second,
                u.second == 1 ? "" : "s");
     std::string expected;
     for (const auto &k : known_mppts) {
@@ -2240,7 +2247,7 @@ esp_err_t TigoWebServer::api_node_import_handler(httpd_req_t *req) {
       expected += k;
     }
     ESP_LOGW(TAG, "  configured MPPTs are: %s", expected.c_str());
-    ESP_LOGW(TAG, "  cca_inverter must hold the MPPT label, not the inverter name");
+    ESP_LOGW(TAG, "  cca_mppt (formerly cca_inverter) must hold the MPPT label, not the inverter name");
   }
 
   // Import the nodes (this rebuilds the string/inverter groups synchronously)
@@ -2306,7 +2313,8 @@ esp_err_t TigoWebServer::api_node_import_handler(httpd_req_t *req) {
         response.append(esc(k).c_str());
         response.append("\"");
       }
-      response.append("],\"detail\":\"cca_inverter must hold the MPPT label, not the "
+      response.append("],\"detail\":\"cca_mppt (formerly cca_inverter) must hold the "
+                      "MPPT label, not the "
                       "inverter name. Strings on an unrecognised MPPT are created but do "
                       "not appear on the Dashboard or Topology.\"}");
     }
@@ -2885,7 +2893,10 @@ void TigoWebServer::build_node_table_json(PSRAMString& json) {
     cJSON_AddBoolToObject(node_obj, "cca_validated", node.cca_validated);
     cJSON_AddStringToObject(node_obj, "cca_label", node.cca_label.c_str());
     cJSON_AddStringToObject(node_obj, "cca_string", node.cca_string_label.c_str());
-    cJSON_AddStringToObject(node_obj, "cca_inverter", node.cca_inverter_label.c_str());
+    cJSON_AddStringToObject(node_obj, "cca_mppt", node.cca_mppt_label.c_str());
+    // Legacy alias, still emitted so a table exported here imports into older
+    // firmware. Drop it once 2.x is the floor.
+    cJSON_AddStringToObject(node_obj, "cca_inverter", node.cca_mppt_label.c_str());
     cJSON_AddStringToObject(node_obj, "cca_channel", node.cca_channel.c_str());
 
     cJSON_AddItemToArray(nodes_array, node_obj);
@@ -3128,9 +3139,9 @@ void TigoWebServer::build_yaml_json(PSRAMString& json, const std::set<std::strin
   } else if (effective_grouping == "mppt") {
     for (const auto *node_ptr : assigned_nodes) {
       const auto &node = *node_ptr;
-      std::string label = node.cca_inverter_label.empty()
+      std::string label = node.cca_mppt_label.empty()
                               ? std::string("Unassigned MPPT")
-                              : tigo_monitor::to_std_string(node.cca_inverter_label);
+                              : tigo_monitor::to_std_string(node.cca_mppt_label);
       std::string id = make_id("mppt", label);
       node_device_id[node.sensor_index] = id;
       register_device(id, label);
@@ -3145,7 +3156,7 @@ void TigoWebServer::build_yaml_json(PSRAMString& json, const std::set<std::strin
     }
     for (const auto *node_ptr : assigned_nodes) {
       const auto &node = *node_ptr;
-      auto it = mppt_to_inverter.find(tigo_monitor::to_std_string(node.cca_inverter_label));
+      auto it = mppt_to_inverter.find(tigo_monitor::to_std_string(node.cca_mppt_label));
       std::string display = (it != mppt_to_inverter.end()) ? it->second : std::string("Unassigned");
       std::string id = make_id("inverter", display);
       node_device_id[node.sensor_index] = id;
@@ -3243,8 +3254,8 @@ void TigoWebServer::build_yaml_json(PSRAMString& json, const std::set<std::strin
     // Prefer CCA label if available, otherwise use generic name
     if (!node.cca_label.empty()) {
       device_name = node.cca_label;
-      if (!node.cca_string_label.empty() || !node.cca_inverter_label.empty()) {
-        barcode_comment = " - CCA: " + node.cca_inverter_label + " / " + node.cca_string_label;
+      if (!node.cca_string_label.empty() || !node.cca_mppt_label.empty()) {
+        barcode_comment = " - CCA: " + node.cca_mppt_label + " / " + node.cca_string_label;
       }
     } else {
       device_name = "Tigo Device " + index_str;
@@ -3791,7 +3802,7 @@ esp_err_t TigoWebServer::api_panels_handler(httpd_req_t *req) {
     json.append(row);
     if (node != nullptr) {
       std::string label = json_escape(tigo_monitor::to_std_string(node->cca_label));
-      std::string mppt = json_escape(tigo_monitor::to_std_string(node->cca_inverter_label));
+      std::string mppt = json_escape(tigo_monitor::to_std_string(node->cca_mppt_label));
       std::string str_lbl = json_escape(tigo_monitor::to_std_string(node->cca_string_label));
       json.append(",\"label\":\"");
       json.append(label.c_str());

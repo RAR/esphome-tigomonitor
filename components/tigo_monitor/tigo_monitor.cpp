@@ -367,15 +367,15 @@ void TigoMonitorComponent::setup() {
   if (!inverters_.empty()) {
     std::map<node_string, int> unmatched;
     for (const auto &node : node_table_) {
-      if (node.cca_inverter_label.empty()) continue;
+      if (node.cca_mppt_label.empty()) continue;
       bool known = false;
       for (const auto &inv : inverters_) {
         for (const auto &m : inv.mppt_labels) {
-          if (m == node.cca_inverter_label) { known = true; break; }
+          if (m == node.cca_mppt_label) { known = true; break; }
         }
         if (known) break;
       }
-      if (!known) unmatched[node.cca_inverter_label]++;
+      if (!known) unmatched[node.cca_mppt_label]++;
     }
     if (!unmatched.empty()) {
       ESP_LOGW(TAG, "Node table names %d MPPT label(s) that no configured inverter claims — "
@@ -384,7 +384,7 @@ void TigoMonitorComponent::setup() {
       for (const auto &u : unmatched)
         ESP_LOGW(TAG, "  '%s' (%d node%s)", u.first.c_str(), u.second,
                  u.second == 1 ? "" : "s");
-      ESP_LOGW(TAG, "  cca_inverter holds the MPPT label, not the inverter name");
+      ESP_LOGW(TAG, "  cca_mppt (formerly cca_inverter) holds the MPPT label, not the inverter name");
     }
   }
   
@@ -1133,7 +1133,7 @@ void TigoMonitorComponent::process_27_frame(const frame_string &hex_frame, size_
       if (keep->sensor_index < 0 && dup.sensor_index >= 0) keep->sensor_index = dup.sensor_index;
       if (keep->cca_label.empty()) keep->cca_label = dup.cca_label;
       if (keep->cca_string_label.empty()) keep->cca_string_label = dup.cca_string_label;
-      if (keep->cca_inverter_label.empty()) keep->cca_inverter_label = dup.cca_inverter_label;
+      if (keep->cca_mppt_label.empty()) keep->cca_mppt_label = dup.cca_mppt_label;
       if (keep->cca_channel.empty()) keep->cca_channel = dup.cca_channel;
       if (keep->cca_object_id.empty()) keep->cca_object_id = dup.cca_object_id;
       keep->cca_validated = keep->cca_validated || dup.cca_validated;
@@ -1310,7 +1310,7 @@ void TigoMonitorComponent::rebuild_string_groups() {
       if (strings_.find(string_label) == strings_.end()) {
         StringData string_data;
         string_data.string_label = string_label;
-        string_data.inverter_label = node.cca_inverter_label;
+        string_data.inverter_label = node.cca_mppt_label;
 
         // Pull any saved display label out of NVS, keyed by canonical label.
         // Same pattern add_inverter uses for inverter display names.
@@ -1342,10 +1342,10 @@ void TigoMonitorComponent::rebuild_string_groups() {
 
         if (string_data.display_label.empty()) {
           ESP_LOGI(TAG, "Created string group: %s (Inverter: %s)",
-                   string_label.c_str(), node.cca_inverter_label.c_str());
+                   string_label.c_str(), node.cca_mppt_label.c_str());
         } else {
           ESP_LOGI(TAG, "Created string group: %s (Inverter: %s, display='%s')",
-                   string_label.c_str(), node.cca_inverter_label.c_str(),
+                   string_label.c_str(), node.cca_mppt_label.c_str(),
                    string_data.display_label.c_str());
         }
       }
@@ -2486,8 +2486,8 @@ void TigoMonitorComponent::load_node_table() {
       }
       parts.push_back(node_str.substr(start)); // Last part
       
-      // Current format (9 fields): addr|long_address|checksum|sensor_index|cca_label|cca_string|cca_inverter|cca_channel|cca_validated
-      // Old format (10 fields): addr|long_address|checksum|frame09_barcode|sensor_index|cca_label|cca_string|cca_inverter|cca_channel|cca_validated
+      // Current format (9 fields): addr|long_address|checksum|sensor_index|cca_label|cca_string|cca_mppt|cca_channel|cca_validated
+      // Old format (10 fields): addr|long_address|checksum|frame09_barcode|sensor_index|cca_label|cca_string|cca_mppt|cca_channel|cca_validated
       // Legacy format (4 fields): addr|long_address|checksum|sensor_index
       if (parts.size() >= 4) {
         NodeTableData node;
@@ -2506,32 +2506,32 @@ void TigoMonitorComponent::load_node_table() {
         
         // Load CCA fields if available
         if (parts.size() >= 10) {
-          // Old format: addr|long_addr|checksum|frame09|sensor_idx|cca_label|cca_string|cca_inverter|cca_channel|cca_validated
+          // Old format: addr|long_addr|checksum|frame09|sensor_idx|cca_label|cca_string|cca_mppt|cca_channel|cca_validated
           node.cca_label = parts[5];
           node.cca_string_label = parts[6];
-          node.cca_inverter_label = parts[7];
+          node.cca_mppt_label = parts[7];
           node.cca_channel = parts[8];
           node.cca_validated = (parts[9] == "1");
           
           // Replace "Inverter" with "MPPT" for more accurate terminology
-          if (node.cca_inverter_label.find("Inverter ") == 0) {
-            node.cca_inverter_label.replace(0, 9, "MPPT ");
+          if (node.cca_mppt_label.find("Inverter ") == 0) {
+            node.cca_mppt_label.replace(0, 9, "MPPT ");
           }
           
           ESP_LOGI(TAG, "Restored node (old format): %s -> Tigo %d (barcode: %s, string: %s, validated: %s)", 
                    node.addr.c_str(), node.sensor_index + 1, node.long_address.c_str(),
                    node.cca_string_label.c_str(), node.cca_validated ? "yes" : "no");
         } else if (parts.size() >= 9) {
-          // Current format: addr|long_addr|checksum|sensor_idx|cca_label|cca_string|cca_inverter|cca_channel|cca_validated
+          // Current format: addr|long_addr|checksum|sensor_idx|cca_label|cca_string|cca_mppt|cca_channel|cca_validated
           node.cca_label = parts[4];
           node.cca_string_label = parts[5];
-          node.cca_inverter_label = parts[6];
+          node.cca_mppt_label = parts[6];
           node.cca_channel = parts[7];
           node.cca_validated = (parts[8] == "1");
           
           // Replace "Inverter" with "MPPT" for more accurate terminology
-          if (node.cca_inverter_label.find("Inverter ") == 0) {
-            node.cca_inverter_label.replace(0, 9, "MPPT ");
+          if (node.cca_mppt_label.find("Inverter ") == 0) {
+            node.cca_mppt_label.replace(0, 9, "MPPT ");
           }
           
           ESP_LOGI(TAG, "Restored node with CCA: %s -> Tigo %d (barcode: %s, string: %s, validated: %s)", 
@@ -2541,7 +2541,7 @@ void TigoMonitorComponent::load_node_table() {
           // Old format without CCA fields - initialize to defaults
           node.cca_label = "";
           node.cca_string_label = "";
-          node.cca_inverter_label = "";
+          node.cca_mppt_label = "";
           node.cca_channel = "";
           node.cca_validated = false;
           
@@ -2589,7 +2589,7 @@ void TigoMonitorComponent::save_node_table() {
     uint32_t hash = esphome::fnv1_hash(pref_key);
     
     // Format node data into buffer - use snprintf for efficiency
-    // Format: "addr|long_addr|checksum|sensor_index|cca_label|cca_string|cca_inverter|cca_channel|cca_validated"
+    // Format: "addr|long_addr|checksum|sensor_index|cca_label|cca_string|cca_mppt|cca_channel|cca_validated"
     char node_data[256];
     snprintf(node_data, sizeof(node_data), "%s|%s|%s|%d|%s|%s|%s|%s|%d",
              node.addr.c_str(),
@@ -2598,7 +2598,7 @@ void TigoMonitorComponent::save_node_table() {
              node.sensor_index,
              node.cca_label.c_str(),
              node.cca_string_label.c_str(),
-             node.cca_inverter_label.c_str(),
+             node.cca_mppt_label.c_str(),
              node.cca_channel.c_str(),
              node.cca_validated ? 1 : 0);
     
@@ -2944,7 +2944,7 @@ bool TigoMonitorComponent::import_node_table(const psram_vector<NodeTableData>& 
         if (existing.sensor_index < 0 && node.sensor_index >= 0) existing.sensor_index = node.sensor_index;
         if (existing.cca_label.empty()) existing.cca_label = node.cca_label;
         if (existing.cca_string_label.empty()) existing.cca_string_label = node.cca_string_label;
-        if (existing.cca_inverter_label.empty()) existing.cca_inverter_label = node.cca_inverter_label;
+        if (existing.cca_mppt_label.empty()) existing.cca_mppt_label = node.cca_mppt_label;
         if (existing.cca_channel.empty()) existing.cca_channel = node.cca_channel;
         if (existing.cca_object_id.empty()) existing.cca_object_id = node.cca_object_id;
         existing.cca_validated = existing.cca_validated || node.cca_validated;
@@ -3520,7 +3520,7 @@ void TigoMonitorComponent::match_cca_to_uart(const char *json_response) {
           
           node.cca_label = cca_label_str;
           node.cca_string_label = string_label;
-          node.cca_inverter_label = inverter_label;
+          node.cca_mppt_label = inverter_label;
           node.cca_channel = cca_channel_str;
           node.cca_object_id = cca_obj_id;
           node.cca_validated = true;

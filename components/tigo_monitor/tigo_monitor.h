@@ -199,7 +199,10 @@ struct NodeTableData {
   // CCA-sourced metadata (optional, populated via HTTP query)
   node_string cca_label;          // Friendly name from CCA (e.g., "East Roof Panel 3")
   node_string cca_string_label;   // Parent string label (e.g., "String 1")
-  node_string cca_inverter_label; // Parent MPPT label (e.g., "MPPT 1" - CCA calls it "Inverter")
+  // Parent MPPT label (e.g. "MPPT 1"). The CCA calls an MPPT an "Inverter",
+  // which is where the old cca_inverter JSON name came from; the actual
+  // inverter is a level above and comes from the YAML `inverters:` block.
+  node_string cca_mppt_label;
   node_string cca_channel;        // CCA channel identifier
   node_string cca_object_id;      // CCA's internal object ID (string type)
   bool cca_validated = false;     // True if matched with CCA configuration

@@ -2536,7 +2536,9 @@
       const barcodeKey = n.long_address || '';
       const barcodeShort = barcodeKey ? barcodeKey.slice(-8) : '—';
       const stringLabel = n.cca_string || dev?.string_label || '—';
-      const mpptLabel = n.cca_inverter || '—';
+      // cca_inverter is the pre-rename name, still emitted by the firmware and
+      // present in any table exported before the rename.
+      const mpptLabel = n.cca_mppt || n.cca_inverter || '—';
       const v = dev?.voltage_in ?? 0;
       const a = dev?.current ?? dev?.current_in ?? 0;
       const w = dev?.power_in ?? 0;
@@ -2745,7 +2747,7 @@
           'Imported, but the topology will not render.\n\n' +
           'These MPPT labels match no configured inverter:\n' + lines + '\n\n' +
           (expected ? 'Configured MPPTs: ' + expected + '\n\n' : '') +
-          'In the node JSON, cca_inverter holds the MPPT label — not the inverter ' +
+          'In the node JSON, cca_mppt holds the MPPT label — not the inverter ' +
           'name. The inverter itself comes from the inverters: block in your YAML.\n\n' +
           'Their strings exist (see /api/strings) but do not appear on the ' +
           'Dashboard or Topology.'
@@ -4128,16 +4130,16 @@
       const devByAddr = {};
       for (const d of (devData.devices || [])) devByAddr[d.addr] = d;
 
-      // Group nodes by inverter (MPPT) → string. A node's cca_inverter is
-      // the MPPT label (e.g. "MPPT 1"); we match the inverter by membership
-      // in its mppts list.
+      // Group nodes by MPPT → string. A node's cca_mppt is the MPPT label
+      // (e.g. "MPPT 1"); we match the inverter by membership in its mppts
+      // list. cca_inverter is the old name for the same field.
       const stringPanelsByMppt = {};  // { mppt: { stringLabel: [panel,...] } }
       for (const n of (nodeData.nodes || [])) {
         // A string label alone is sufficient — hand-built node tables are
         // authoritative without cca_validated (same rule as the firmware
         // grouping, #18).
         if (!n.cca_string) continue;
-        const mppt = n.cca_inverter || '';
+        const mppt = n.cca_mppt || n.cca_inverter || '';
         const sl = n.cca_string || '';
         if (!stringPanelsByMppt[mppt]) stringPanelsByMppt[mppt] = {};
         if (!stringPanelsByMppt[mppt][sl]) stringPanelsByMppt[mppt][sl] = [];
