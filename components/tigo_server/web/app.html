@@ -2411,6 +2411,14 @@
       // them the route simply does not exist, and reporting a bare "HTTP 404"
       // sent people looking at their CCA and their wiring (#60).
       if (r.status === 404) throw new Error(HISTORY_UNAVAILABLE_MSG);
+      // 503 is the other half: history IS compiled in, but init() failed —
+      // usually no `tsdb` partition in the running flash layout. The firmware
+      // sends the reason in `detail`, so show that rather than the code.
+      if (r.status === 503) {
+        let detail = '';
+        try { detail = (await r.json()).detail || ''; } catch (_) {}
+        throw new Error(detail || 'on-flash history failed to start (HTTP 503)');
+      }
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const data = await r.json();
       status.textContent = `${data.count} records · ${data.query_ms} ms · range=${range}`;
@@ -2536,7 +2544,9 @@
       const barcodeKey = n.long_address || '';
       const barcodeShort = barcodeKey ? barcodeKey.slice(-8) : '—';
       const stringLabel = n.cca_string || dev?.string_label || '—';
-      const mpptLabel = n.cca_inverter || '—';
+      // cca_inverter is the pre-rename name, still emitted by the firmware and
+      // present in any table exported before the rename.
+      const mpptLabel = n.cca_mppt || n.cca_inverter || '—';
       const v = dev?.voltage_in ?? 0;
       const a = dev?.current ?? dev?.current_in ?? 0;
       const w = dev?.power_in ?? 0;
@@ -2733,6 +2743,24 @@
       const extra = result.overrides ? `, ${result.overrides} override(s)` : '';
       showToast(`Imported ${result.imported || data.nodes.length} node(s)${extra} ✓`, 'ok');
       await refreshNodes();
+
+      // An unmatched MPPT is the one import outcome that succeeds and still
+      // leaves the Dashboard and Topology empty, so it gets a dialog rather
+      // than a toast — the toast is gone in 2.4 s and this has to be read.
+      const um = result.warnings && result.warnings.unmatched_mppts;
+      if (um && um.length) {
+        const lines = um.map(u => `  • "${u.label}" — ${u.nodes} node(s)`).join('\n');
+        const expected = (result.warnings.expected_mppts || []).join(', ');
+        alert(
+          'Imported, but the topology will not render.\n\n' +
+          'These MPPT labels match no configured inverter:\n' + lines + '\n\n' +
+          (expected ? 'Configured MPPTs: ' + expected + '\n\n' : '') +
+          'In the node JSON, cca_mppt holds the MPPT label — not the inverter ' +
+          'name. The inverter itself comes from the inverters: block in your YAML.\n\n' +
+          'Their strings exist (see /api/strings) but do not appear on the ' +
+          'Dashboard or Topology.'
+        );
+      }
     } catch (e) {
       showToast(`Import failed: ${e.message}`, 'err');
     }
@@ -4110,16 +4138,16 @@
       const devByAddr = {};
       for (const d of (devData.devices || [])) devByAddr[d.addr] = d;
 
-      // Group nodes by inverter (MPPT) → string. A node's cca_inverter is
-      // the MPPT label (e.g. "MPPT 1"); we match the inverter by membership
-      // in its mppts list.
+      // Group nodes by MPPT → string. A node's cca_mppt is the MPPT label
+      // (e.g. "MPPT 1"); we match the inverter by membership in its mppts
+      // list. cca_inverter is the old name for the same field.
       const stringPanelsByMppt = {};  // { mppt: { stringLabel: [panel,...] } }
       for (const n of (nodeData.nodes || [])) {
         // A string label alone is sufficient — hand-built node tables are
         // authoritative without cca_validated (same rule as the firmware
         // grouping, #18).
         if (!n.cca_string) continue;
-        const mppt = n.cca_inverter || '';
+        const mppt = n.cca_mppt || n.cca_inverter || '';
         const sl = n.cca_string || '';
         if (!stringPanelsByMppt[mppt]) stringPanelsByMppt[mppt] = {};
         if (!stringPanelsByMppt[mppt][sl]) stringPanelsByMppt[mppt][sl] = [];

@@ -423,7 +423,7 @@ void TigoMonitorComponent::match_cloud_layout_to_uart_(const char *layout_json) 
             if (serial_up.find(last6) == std::string::npos) continue;
             node.cca_label = panel_label;
             node.cca_string_label = string_label;
-            node.cca_inverter_label = mppt_label;
+            node.cca_mppt_label = mppt_label;
             node.cca_object_id = obj_id;
             node.cca_validated = true;
             matched++;

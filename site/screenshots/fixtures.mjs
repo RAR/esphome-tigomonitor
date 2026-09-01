@@ -148,7 +148,7 @@ export const routes = {
     nodes: devices.map((d, i) => ({
       addr: d.addr, long_address: d.barcode, sensor_index: i, checksum: '',
       cca_validated: true, cca_label: d.name, cca_string: d.string_label,
-      cca_inverter: mpptOf(d.string_label),
+      cca_mppt: mpptOf(d.string_label),
       cca_channel: `04C05B000000.${10 + i}`,
     })),
     inverters: [],
