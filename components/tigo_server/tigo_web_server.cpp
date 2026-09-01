@@ -3587,7 +3587,16 @@ esp_err_t TigoWebServer::api_history_power_handler(httpd_req_t *req) {
   if (now_ts < 1577836800u /* 2020-01-01 */) {
     httpd_resp_set_status(req, "503 Service Unavailable");
     httpd_resp_set_type(req, "application/json");
-    httpd_resp_sendstr(req, "{\"error\":\"system clock not set\"}");
+    // Carry the reason in `detail` like send_history_unavailable() does. Both
+    // 503s reach the same UI branch, and without a detail the page renders
+    // "on-flash history failed to start" — which sent a reporter looking at
+    // their partition table and their tsdb build when the database was open
+    // and healthy and only the clock was unset (#60).
+    httpd_resp_sendstr(req,
+                       "{\"error\":\"system clock not set\",\"detail\":\"the device clock has "
+                       "not been set, so there is no time range to query — check the `time:` "
+                       "block: an SNTP server that does not answer leaves the clock at epoch 0 "
+                       "and nothing is ever recorded\"}");
     return ESP_OK;
   }
   uint32_t start_ts = (now_ts > window_seconds) ? (now_ts - window_seconds) : 0;
@@ -3700,7 +3709,16 @@ esp_err_t TigoWebServer::api_history_panel_handler(httpd_req_t *req) {
   if (now_ts < 1577836800u /* 2020-01-01 */) {
     httpd_resp_set_status(req, "503 Service Unavailable");
     httpd_resp_set_type(req, "application/json");
-    httpd_resp_sendstr(req, "{\"error\":\"system clock not set\"}");
+    // Carry the reason in `detail` like send_history_unavailable() does. Both
+    // 503s reach the same UI branch, and without a detail the page renders
+    // "on-flash history failed to start" — which sent a reporter looking at
+    // their partition table and their tsdb build when the database was open
+    // and healthy and only the clock was unset (#60).
+    httpd_resp_sendstr(req,
+                       "{\"error\":\"system clock not set\",\"detail\":\"the device clock has "
+                       "not been set, so there is no time range to query — check the `time:` "
+                       "block: an SNTP server that does not answer leaves the clock at epoch 0 "
+                       "and nothing is ever recorded\"}");
     return ESP_OK;
   }
   uint32_t start_ts = (now_ts > window_seconds) ? (now_ts - window_seconds) : 0;
