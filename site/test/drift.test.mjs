@@ -30,6 +30,10 @@ for (const [id, rel] of Object.entries(FILE)) {
       'minimum_chip_revision drift — 3.0 vs 3.1 decides whether ECO3 parts boot');
     assert.equal(Boolean(b.frameworkAdvanced.sram1_as_iram), f.sram1AsIram, 'sram1_as_iram drift');
     assert.equal(b.supportsWebServer !== false, f.hasWebServer, 'tigo_server presence drift');
+    // The failure mode of a wrong UART pin is silence, not an error — the board
+    // boots and serves the UI and never receives a frame (#60). Guard both.
+    assert.equal(b.uartDefault.tx_pin, f.txPin, 'uart tx_pin drift');
+    assert.equal(b.uartDefault.rx_pin, f.rxPin, 'uart rx_pin drift');
   });
 }
 

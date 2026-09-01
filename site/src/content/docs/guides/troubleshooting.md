@@ -58,6 +58,30 @@ Still stuck? The rest of this page is organised by symptom.
 3. Check Tigo system is powered and communicating
 4. Look for any "Frame" messages in ESPHome logs
 
+### Tell "nothing is arriving" apart from "arriving but not parsing"
+
+Before you re-check wiring, find out whether the ESP32 is receiving **any** bytes.
+The two faults look identical from Home Assistant — zero devices either way — but
+they have nothing to do with each other.
+
+Set `logger: level: DEBUG`, add the `Missed Frame Count` sensor, and watch the
+per-minute line the component prints:
+
+```
+Heap: Internal 118 KB free (102 KB min), PSRAM 4021 KB free, Buffer: 0 bytes
+```
+
+`Buffer:` is the raw UART accumulator.
+
+| What you see | What it means | Where to look |
+|---|---|---|
+| `Buffer: 0 bytes` every minute, Missed Frame Count stuck at 0, no warnings | **The line is silent.** Not one byte reached the UART | Wiring, A/B polarity, transceiver power, the RX pin number |
+| `Buffer:` non-zero or climbing, `Packet missed!` or `Buffer too small, resetting!` warnings, Missed Frame Count rising | **Bytes are arriving but never frame.** The electrical path works | Baud rate (must be 38400 8N1), then [UART optimization](/esphome-tigomonitor/guides/uart-optimization/) |
+
+If the line is silent, **swap A and B**. Polarity is the single most common cause,
+it is non-destructive, and vendors do not agree on which terminal is which — a
+run that worked on one adapter can be backwards on the next.
+
 ### No Devices Found on a LilyGO T-CAN485
 
 **Symptoms:** Nothing received at all — the log shows no frames, and a UART debug

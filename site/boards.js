@@ -44,7 +44,10 @@ export const BOARDS = [
       CONFIG_LWIP_MAX_LISTENING_TCP: '16',
     },
     hosted: null,
-    uartDefault: { tx_pin: 'GPIO1', rx_pin: 'GPIO2', rx_buffer_size: 2048 },
+    // Bottom expansion header — the M5Stack Atomic RS485 Base's RS485_RX/RS485_TX.
+    // Not G1/G2: those are the Grove port, and emitting them here shipped a
+    // permanently deaf receiver with no error to explain it (#60).
+    uartDefault: { tx_pin: 'GPIO6', rx_pin: 'GPIO5', rx_buffer_size: 2048 },
     numberOfDevices: 30,
     supports: { ble: true, display: true },
     displayOverlay: `# --- AtomS3R-Display overlay (from boards/atoms3r-display.yaml) ---
@@ -219,7 +222,7 @@ font:
     id: font_tiny
     size: 9`,
     supportsWebServer: true,
-    notes: ['Built-in tail485 RS485 transceiver on GPIO1/GPIO2.'],
+    notes: ['No on-board RS485 — pins are for the M5Stack Atomic RS485 Base on the bottom header: GPIO5 (RX) / GPIO6 (TX).'],
   },
   {
     id: 'esp32p4-evboard',
