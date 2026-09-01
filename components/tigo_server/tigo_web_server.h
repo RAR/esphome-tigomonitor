@@ -302,6 +302,9 @@ class TigoWebServer : public Component
   static esp_err_t api_backlight_handler(httpd_req_t *req);
   static esp_err_t api_github_release_handler(httpd_req_t *req);
 #ifdef TIGO_TSDB_AVAILABLE
+  // Shared 503 body for the history routes — see the definition for why the
+  // reason has to travel with the status code.
+  static void send_history_unavailable(httpd_req_t *req, tigo_monitor::TigoHistory *hist);
   static esp_err_t api_history_power_handler(httpd_req_t *req);
   static esp_err_t api_history_panel_handler(httpd_req_t *req);
   static esp_err_t api_panels_handler(httpd_req_t *req);

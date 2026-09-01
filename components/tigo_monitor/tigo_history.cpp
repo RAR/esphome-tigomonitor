@@ -125,11 +125,13 @@ bool TigoHistory::init() {
     fs_mutex_ = xSemaphoreCreateRecursiveMutex();
     if (fs_mutex_ == nullptr) {
       ESP_LOGE(TAG, "could not create flash mutex");
+      init_error_ = "out of memory creating the flash lock";
       return false;
     }
   }
   FlashLock lock(this, 0);
 
+  init_error_ = nullptr;
   if (!mount_filesystem_())
     return false;
   if (!init_system_db_())
@@ -166,6 +168,17 @@ bool TigoHistory::mount_filesystem_() {
     ESP_LOGI(TAG, "LittleFS already mounted on /tsdb");
   } else if (err != ESP_OK) {
     ESP_LOGE(TAG, "LittleFS mount on /tsdb failed: %s", esp_err_to_name(err));
+    // format_if_mount_failed is set, so a corrupt filesystem would have been
+    // reformatted rather than reaching here. In practice this means the running
+    // flash layout has no `tsdb` partition — which is what you get when the
+    // firmware was built with a partitions: line but the table was never sent,
+    // since `esphome run` does not send one and reports success anyway.
+    init_error_ = (err == ESP_ERR_NOT_FOUND)
+                      ? "no `tsdb` partition in the running flash layout — the firmware "
+                        "has history compiled in, but the partition table was never "
+                        "applied (`esphome upload --partition-table`, which is not what "
+                        "`esphome run` does)"
+                      : "the `tsdb` partition exists but LittleFS could not mount it";
     return false;
   } else {
     size_t total = 0;
@@ -222,6 +235,8 @@ bool TigoHistory::init_system_db_() {
   system_db_ = tsdb_open(&cfg);
   if (system_db_ == nullptr) {
     ESP_LOGE(TAG, "tsdb_open for system.tsdb failed");
+    init_error_ = "the `tsdb` partition mounted, but system.tsdb could not be opened "
+                  "or created — check the partition is large enough";
     return false;
   }
   ESP_LOGI(TAG, "tsdb opened: system.tsdb (%zu params, capacity ~%lu records)",

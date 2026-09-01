@@ -176,6 +176,12 @@ class TigoHistory {
 
   bool initialized() const { return initialized_; }
 
+  // Why init() failed, as a short human-readable phrase, or nullptr when it
+  // succeeded. The API returns this with its 503 so the failure names itself:
+  // "history not initialized" is true and useless, and a bare status code sent
+  // people looking at their CCA and their wiring (#60).
+  const char *init_error() const { return init_error_; }
+
   // Pause/resume the writer's flash writes around an OTA. Set true on OTA start
   // so the writer skips its littlefs writes (which otherwise collide with the
   // OTA image write on the same flash chip and fault); cleared on OTA abort.
@@ -267,6 +273,8 @@ class TigoHistory {
   bool save_slot_map_();
 
   bool initialized_{false};
+  // Static strings only — never freed, safe to hand out as a const char *.
+  const char *init_error_{nullptr};
   // True while an OTA is running — makes the writer task skip flash writes.
   std::atomic<bool> ota_active_{false};
   // Per-instance handles from the v2.1 multi-DB API. system_db_ holds the

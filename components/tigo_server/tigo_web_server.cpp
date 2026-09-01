@@ -3515,6 +3515,33 @@ esp_err_t TigoWebServer::api_github_release_handler(httpd_req_t *req) {
 }
 
 #ifdef TIGO_TSDB_AVAILABLE
+// 503 body for every /api/history/* route, carrying the reason init() failed.
+//
+// A bare "history not initialized" is true and tells you nothing to act on. The
+// three failures behind it — no `tsdb` partition, a partition that will not
+// mount, a database that will not open — have completely different fixes, and
+// the status code sent one reporter looking at their CCA and their wiring (#60).
+void TigoWebServer::send_history_unavailable(httpd_req_t *req, tigo_monitor::TigoHistory *hist) {
+  const char *why = (hist != nullptr) ? hist->init_error() : "the monitor has no history object";
+  PSRAMString body;
+  body.append("{\"error\":\"history not initialized\"");
+  if (why != nullptr && *why != '\0') {
+    body.append(",\"detail\":\"");
+    // The strings are ours and contain no quotes or backslashes; escape anyway
+    // so this cannot emit broken JSON if one ever does.
+    for (const char *c = why; *c; ++c) {
+      if (*c == '"' || *c == '\\') body.append("\\");
+      char one[2] = {*c, '\0'};
+      body.append(one);
+    }
+    body.append("\"");
+  }
+  body.append("}");
+  httpd_resp_set_status(req, "503 Service Unavailable");
+  httpd_resp_set_type(req, "application/json");
+  httpd_resp_send(req, body.c_str(), body.length());
+}
+
 esp_err_t TigoWebServer::api_history_power_handler(httpd_req_t *req) {
   TigoWebServer *server = static_cast<TigoWebServer *>(req->user_ctx);
   if (!server->check_api_auth(req))
@@ -3527,9 +3554,7 @@ esp_err_t TigoWebServer::api_history_power_handler(httpd_req_t *req) {
   }
   tigo_monitor::TigoHistory *hist = server->parent_->get_history();
   if (hist == nullptr || !hist->initialized()) {
-    httpd_resp_set_status(req, "503 Service Unavailable");
-    httpd_resp_set_type(req, "application/json");
-    httpd_resp_sendstr(req, "{\"error\":\"history not initialized\"}");
+    send_history_unavailable(req, hist);
     return ESP_OK;
   }
 
@@ -3630,9 +3655,7 @@ esp_err_t TigoWebServer::api_history_panel_handler(httpd_req_t *req) {
   }
   tigo_monitor::TigoHistory *hist = server->parent_->get_history();
   if (hist == nullptr || !hist->initialized()) {
-    httpd_resp_set_status(req, "503 Service Unavailable");
-    httpd_resp_set_type(req, "application/json");
-    httpd_resp_sendstr(req, "{\"error\":\"history not initialized\"}");
+    send_history_unavailable(req, hist);
     return ESP_OK;
   }
 
@@ -3747,9 +3770,7 @@ esp_err_t TigoWebServer::api_panels_handler(httpd_req_t *req) {
   }
   tigo_monitor::TigoHistory *hist = server->parent_->get_history();
   if (hist == nullptr || !hist->initialized()) {
-    httpd_resp_set_status(req, "503 Service Unavailable");
-    httpd_resp_set_type(req, "application/json");
-    httpd_resp_sendstr(req, "{\"error\":\"history not initialized\"}");
+    send_history_unavailable(req, hist);
     return ESP_OK;
   }
 
@@ -3840,9 +3861,7 @@ esp_err_t TigoWebServer::api_tsdb_stats_handler(httpd_req_t *req) {
   }
   tigo_monitor::TigoHistory *hist = server->parent_->get_history();
   if (hist == nullptr || !hist->initialized()) {
-    httpd_resp_set_status(req, "503 Service Unavailable");
-    httpd_resp_set_type(req, "application/json");
-    httpd_resp_sendstr(req, "{\"error\":\"history not initialized\"}");
+    send_history_unavailable(req, hist);
     return ESP_OK;
   }
 
