@@ -91,6 +91,29 @@ tigo_monitor:
 If it's missing, the boot log now says so:
 `No time_id configured - daily energy and history snapshots are disabled.`
 
+Linking it is only half the job — the time source has to actually **reach** a
+server. Two ways that quietly fails:
+
+- **A `manual_ip:` without `dns1:`.** `dns1`/`dns2` are optional and default to
+  `0.0.0.0`, so the device has no resolver and `pool.ntp.org` never resolves.
+  The dashboard still loads over its static IP, which is what makes this so easy
+  to miss. Supply `dns1` and `dns2` alongside the required `gateway` and
+  `subnet` — or use a DHCP reservation instead.
+- **`servers:` pointed at a router that doesn't serve NTP.** Most consumer
+  routers don't. One that never answers is indistinguishable from one that isn't
+  configured.
+
+Either way the clock stays at epoch 0 and every snapshot is skipped: `0 records`
+and `0 writes` on a device that has been up for hours
+([#60](https://github.com/RAR/esphome-tigomonitor/issues/60)). If NTP is awkward
+on your network, `platform: homeassistant` needs neither DNS nor a time server:
+
+```yaml
+time:
+  - platform: homeassistant
+    id: tigo_time
+```
+
 ### Choosing an interval
 
 `history_interval` accepts 5 to 1440 minutes and defaults to 30. Everything

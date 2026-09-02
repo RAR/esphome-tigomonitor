@@ -42,7 +42,75 @@ Still stuck? The rest of this page is organised by symptom.
 | BLE CCA won't connect | Close the Tigo phone app (one BLE central at a time) |
 | Tigo cloud import fails | Recheck credentials; needs `cloud_import: true`; token may have expired |
 | History reads back empty after reboot | Erase the tsdb partition once ([history storage](/esphome-tigomonitor/guides/tsdb-integration/)) |
+| History empty on a device that is otherwise working | The clock never set — check `time:` and DNS (below) |
+| Clock stuck at epoch 0, CCA and cloud both failing | A `manual_ip:` with no `dns1:` (below) |
+| A merged fix doesn't appear after rebuilding | `external_components:` caches for a day — set `refresh: 0s` (below) |
 | Web UI not loading | Confirm `tigo_server` configured, check ESP32 IP |
+
+---
+
+## Network
+
+### Static IP With No DNS Breaks the Clock, CCA Sync and Cloud Import
+
+**Symptoms:** The device is reachable and the dashboard works, but the History
+view is empty, CCA sync by hostname fails, and Tigo cloud import won't log in.
+Nothing in the log names DNS.
+
+**Cause:** `dns1` and `dns2` are optional in ESPHome's `manual_ip:` schema and
+default to `0.0.0.0`. Leave them out and the device has no resolver, so it cannot
+look up `pool.ntp.org`: SNTP never answers, the clock stays at epoch 0, and every
+feature keyed to a hostname or a wall clock dies with it. The device still pings
+fine and the dashboard still loads over its static address, which is what makes
+this so hard to spot.
+
+(`gateway` and `subnet` are *required*, so omitting those fails validation with a
+clear error. It's only DNS that fails silently.)
+
+**Solution:** give `manual_ip:` the whole block, not just an address:
+
+```yaml
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  manual_ip:
+    static_ip: 192.168.1.150
+    gateway: 192.168.1.1
+    subnet: 255.255.255.0
+    dns1: 192.168.1.1     # without this, nothing resolves
+    dns2: 1.1.1.1
+```
+
+Or drop `manual_ip:` entirely and reserve the address on your router by MAC —
+DHCP supplies all five fields correctly and there is nothing to get wrong.
+
+Configs from the [Config Builder](/esphome-tigomonitor/config-builder/) emit the
+full block whenever you give it a static IP; it assumes a `/24` with the router
+at `.1`, so correct those two lines if your network differs.
+
+### A Merged Fix Doesn't Appear After Rebuilding
+
+**Symptoms:** You rebuild against `ref: main` after a fix lands and still get the
+old behaviour — including the old log or error text.
+
+**Cause:** `external_components:` defaults to `refresh: 1d`. ESPHome reuses its
+cached clone for a day and never mentions that it did.
+
+**Solution:** set `refresh: 0s` on the source, then rebuild:
+
+```yaml
+external_components:
+  - source:
+      type: git
+      url: https://github.com/RAR/esphome-tigomonitor
+      ref: main
+    components: [ tigo_monitor, tigo_server ]
+    refresh: 0s
+```
+
+`esphome clean <yaml>` clears the cached clone if you'd rather not change the
+config. Pinning a release tag (`ref: v1.3.1`) makes the cache harmless, since
+the ref can't move.
 
 ---
 
@@ -289,7 +357,11 @@ This forces a fresh bootloader build with PSRAM support enabled.
 1. **Close the Tigo phone app.** The CCA allows only one BLE central at a time — if the app is connected, the ESP32 can't be.
 2. The CCA advertises on the `04:C0:5B` Tigo MAC prefix; the search card filters for it. If nothing shows, move the ESP32 closer or confirm the CCA has BLE enabled.
 3. Connection is **on demand** — the link opens for each read (~10 s round trip) and drops afterward, so a brief delay is normal; it isn't held open at boot.
-4. Confirm `esp32_ble` and `esp32_ble_tracker` are configured and `ble_client_id` points at a `ble_client:` block. See [CCA over Bluetooth](/esphome-tigomonitor/guides/configuration/#cca-over-bluetooth-cca_source-ble).
+4. **Don't hand-type the MAC.** The Tigo OUI is `04:C0:5B`, and transposing a
+   digit produces a config that builds cleanly and simply never connects. Let the
+   **CCA Connection** card scan, then **Use** → **Save MAC** — the choice is
+   stored on-device and overrides the YAML MAC across reboots.
+5. Confirm `esp32_ble` and `esp32_ble_tracker` are configured and `ble_client_id` points at a `ble_client:` block. See [CCA over Bluetooth](/esphome-tigomonitor/guides/configuration/#cca-over-bluetooth-cca_source-ble).
 
 ### Tigo Cloud Import Fails / Login Rejected
 
@@ -354,6 +426,51 @@ This is about the **running energy counter** (total kWh), which is separate from
 
 The History view is backed by an on-flash time-series database (`esp_tsdb`) stored on a LittleFS partition. This is separate from the hourly energy total above — it keeps per-snapshot rollups and per-panel power that survive reboots and OTA updates.
 
+### History Empty on a Device That Is Otherwise Working
+
+**Symptoms:** The History view says **"on-flash history failed to start"** or
+reports `system clock not set`, while the Dashboard, Topology and the Diagnostics
+TSDB table all work normally. `/api/tsdb/stats` shows **0 records and 0 writes**
+even though the device has been up far longer than one `history_interval`.
+
+**Cause:** the wall clock was never set, so there is no timestamp to key a
+snapshot on. Every snapshot is skipped, silently. This is *not* a storage
+problem — if the Diagnostics table renders its rows at all, the database opened
+successfully and the partition is fine.
+
+That distinction used to be invisible: both failures returned HTTP 503 and the
+page blamed storage for either one, which sent one reporter through a partition
+table and a rebuild before the clock turned out to be the cause
+([#60](https://github.com/RAR/esphome-tigomonitor/issues/60)). Current firmware
+says which it is — if yours still blames storage, you're on an older build, or on
+a cached clone (see [above](#a-merged-fix-doesnt-appear-after-rebuilding)).
+
+**Solutions:**
+1. **Check the device can resolve hostnames at all.** A `manual_ip:` without
+   `dns1:` is the usual reason SNTP never answers — see
+   [Static IP With No DNS](#static-ip-with-no-dns-breaks-the-clock-cca-sync-and-cloud-import).
+2. **Check what your `time:` block points at.** Left alone, ESPHome's `sntp`
+   platform uses `pool.ntp.org` and works. If you set `servers:` to your router,
+   confirm it actually serves NTP — most consumer routers do not, and one that
+   never answers looks exactly like one that isn't configured.
+3. **Or take the time from Home Assistant** — no DNS, no NTP server, nothing to
+   misconfigure:
+
+   ```yaml
+   time:
+     - platform: homeassistant
+       id: tigo_time
+   ```
+4. Confirm `time_id:` is set on `tigo_monitor:`. A `time:` block on its own does
+   nothing (see below).
+5. At `logger: level: DEBUG` each skipped snapshot logs
+   `tsdb snapshot skipped — no valid wall-clock yet`. At the default `INFO` this
+   line is compiled out, so its absence proves nothing.
+
+Once the clock sets, the first snapshot lands within one `history_interval`
+(30 minutes by default). Nothing from before it is recoverable — snapshots that
+were skipped were never taken.
+
 ### History Reads Back Empty / "0 records" After Reboot
 
 **Symptoms:** The History view or `/api/tsdb/stats` shows 0 records after every reboot, even though data accumulates while the device is up.
@@ -363,7 +480,7 @@ The History view is backed by an on-flash time-series database (`esp_tsdb`) stor
 **Solutions:**
 1. Update to the current firmware (the partition layout is corrected).
 2. **Existing installs may need to erase the tsdb partition once** so LittleFS reformats it at the new size. After that, history persists across reboots.
-3. Confirm your config pins the forked `esp_tsdb` by commit SHA rather than a registry version, and uses the custom partition table. [Saving history to flash](/esphome-tigomonitor/guides/tsdb-integration/) has the current pin.
+3. Confirm your config requires `zakery292/esp_tsdb^2.4.1` or newer and uses the custom partition table. 2.4.1 is a floor, not a preference — older releases fail silently. (Earlier docs told you to pin a fork by commit SHA; that fork has been retired and its fixes are in the registry release.) [Saving history to flash](/esphome-tigomonitor/guides/tsdb-integration/) has the current pin.
 
 See [Saving history to flash](/esphome-tigomonitor/guides/tsdb-integration/) for the schema, sizing, and partition setup.
 

@@ -31,6 +31,10 @@ export function toYaml(cfg) {
   L.push(`${I(3)}url: https://github.com/RAR/esphome-tigomonitor`);
   L.push(`${I(3)}ref: ${COMPONENT_REF}`);
   L.push(`${I(2)}components: [${cfg.tigoServer ? 'tigo_monitor, tigo_server' : 'tigo_monitor'}]`);
+  // ESPHome caches a git source for `refresh: 1d` by default, so a plain
+  // `ref: main` build can be serving a day-old clone — including one missing a
+  // fix you were just told to pick up (#60). Always re-check.
+  L.push(`${I(2)}refresh: 0s`);
   if (cfg.displayOverlay) {
     L.push(`${I(1)}- source:`);
     L.push(`${I(3)}type: git`);
@@ -122,8 +126,22 @@ export function toYaml(cfg) {
     L.push(`${I(1)}ssid: ${val(cfg.wifi.useSecrets, 'wifi_ssid', cfg.wifi.ssid)}`);
     L.push(`${I(1)}password: ${val(cfg.wifi.useSecrets, 'wifi_password', cfg.wifi.password)}`);
     if (cfg.wifi.staticIp) {
+      // We used to emit static_ip alone, which does not even validate: ESPHome
+      // marks gateway and subnet Required. dns1/dns2 it does default, to
+      // 0.0.0.0 — a device with no resolver cannot look up pool.ntp.org, so the
+      // clock stays at epoch 0 and history records nothing while the dashboard
+      // keeps working over the static address (#60). Emit all five, assuming the
+      // common /24 with the router at .1: a wrong guess is visible in the
+      // comment below, a missing DNS server is not.
+      const gw = `${cfg.wifi.staticIp.split('.').slice(0, 3).join('.')}.1`;
       L.push(`${I(1)}manual_ip:`);
       L.push(`${I(2)}static_ip: ${cfg.wifi.staticIp}`);
+      L.push(`${I(2)}# Assumes a /24 with the router at .1 — correct these if yours differ.`);
+      L.push(`${I(2)}gateway: ${gw}`);
+      L.push(`${I(2)}subnet: 255.255.255.0`);
+      L.push(`${I(2)}# Without dns1 the clock never sets and history stays empty.`);
+      L.push(`${I(2)}dns1: ${gw}`);
+      L.push(`${I(2)}dns2: 1.1.1.1`);
     }
     L.push('');
     L.push('captive_portal:');
@@ -211,6 +229,9 @@ export function toYaml(cfg) {
   L.push('time:');
   L.push(`${I(1)}- platform: sntp`);
   L.push(`${I(2)}id: tigo_time`);
+  L.push(`${I(2)}# Defaults to pool.ntp.org. If you point servers: at your router,`);
+  L.push(`${I(2)}# check it actually serves NTP — most do not, and a server that`);
+  L.push(`${I(2)}# never answers leaves the clock at epoch 0 and history empty.`);
   L.push(`${I(2)}# Uncomment if the daily reset lands at the wrong hour:`);
   L.push(`${I(2)}# timezone: "America/New_York"`);
   L.push('');

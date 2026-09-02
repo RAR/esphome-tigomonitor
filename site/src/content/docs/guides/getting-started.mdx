@@ -178,6 +178,14 @@ Open the **Diagnostics** page on the device and look at two numbers:
   cable. If it's climbing fast, see
   [Reducing frame loss](/esphome-tigomonitor/guides/uart-optimization/).
 
+Then open the **History** tab. It fills one snapshot at a time, so it is empty
+for the first half hour no matter what — but if it reports that the device clock
+has not been set, that's the thing to fix before anything else. Daily energy, the
+midnight reset and all stored history key off a real timestamp, and none of them
+works until the device reaches a time server. The usual cause is a static IP
+configured without a DNS server; see
+[Static IP With No DNS](/esphome-tigomonitor/guides/troubleshooting/#static-ip-with-no-dns-breaks-the-clock-cca-sync-and-cloud-import).
+
 Nothing showing up at all? Start with the
 [Troubleshooting guide](/esphome-tigomonitor/guides/troubleshooting/).
 
