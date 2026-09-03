@@ -90,6 +90,27 @@ test('generated config sources the tigo components via external_components', () 
   assert.equal((y.match(/^external_components:/gm) || []).length, 1, 'must have exactly one external_components key');
 });
 
+// ESPHome caches a git source for a day by default, so a `ref: main` build can
+// quietly serve a stale clone — a reporter rebuilt against a merged fix three
+// times and kept getting the old binary (#60).
+test('the tigo external_components source disables the 1-day refresh cache', () => {
+  const y = toYaml(assembleConfig(getBoard('esp32s3-atoms3r'), form));
+  assert.ok(y.includes('refresh: 0s'), 'tigo source must set refresh: 0s');
+});
+
+// A manual_ip block with only static_ip leaves gateway/subnet/dns at 0.0.0.0.
+// No DNS means SNTP never resolves, the clock stays at epoch 0, and history
+// silently records nothing — the second half of #60.
+test('a static IP emits a gateway, subnet and DNS servers', () => {
+  const y = toYaml(assembleConfig(getBoard('esp32s3-atoms3r'),
+    { ...form, wifi: { ssid: 'net', password: 'pw', staticIp: '192.168.4.50' } }));
+  assert.ok(y.includes('static_ip: 192.168.4.50'), 'static_ip missing');
+  assert.ok(y.includes('gateway: 192.168.4.1'), 'gateway must be derived from the static IP');
+  assert.ok(y.includes('subnet: 255.255.255.0'), 'subnet missing');
+  assert.ok(y.includes('dns1: 192.168.4.1'), 'dns1 missing — without it the clock never sets');
+  assert.ok(y.includes('dns2: 1.1.1.1'), 'dns2 fallback missing');
+});
+
 test('display config merges lp5562 into the single external_components block', () => {
   const cfg = assembleConfig(getBoard('esp32s3-atoms3r'), { ...form, display: true });
   const y = toYaml(cfg);
