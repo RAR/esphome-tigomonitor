@@ -89,6 +89,19 @@ CONFIG_SCHEMA = cv.All(cv.Schema({
     cv.Optional(CONF_HISTORY_INTERVAL, default=30): cv.int_range(min=5, max=1440),
 }).extend(cv.polling_component_schema('30s')).extend(uart.UART_DEVICE_SCHEMA), _warn_history_wear)
 
+# The Tigo bus is 38400 8N1, full stop. This used to be check_uart_settings()
+# in dump_config(), which only logged an error after boot; ESPHome deprecated
+# that in 2026.9.0 (removal 2027.3.0) in favour of failing validation, which is
+# where a wrong baud rate belongs anyway. require_rx: we only ever listen.
+FINAL_VALIDATE_SCHEMA = uart.final_validate_device_schema(
+    "tigo_monitor",
+    baud_rate=38400,
+    require_rx=True,
+    data_bits=8,
+    parity="NONE",
+    stop_bits=1,
+)
+
 @coroutine
 def to_code(config):
     var = cg.new_Pvariable(config[CONF_ID])

@@ -570,7 +570,6 @@ void TigoMonitorComponent::dump_config() {
   ESP_LOGW(TAG, "  No time component configured - daily energy and history snapshots are disabled.");
   ESP_LOGW(TAG, "  Add a `time:` block and reference it with `time_id:` under tigo_monitor:");
 #endif
-  check_uart_settings(38400);
 }
 
 void TigoMonitorComponent::on_shutdown() {
