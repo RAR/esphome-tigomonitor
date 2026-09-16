@@ -89,6 +89,19 @@ CONFIG_SCHEMA = cv.All(cv.Schema({
     cv.Optional(CONF_HISTORY_INTERVAL, default=30): cv.int_range(min=5, max=1440),
 }).extend(cv.polling_component_schema('30s')).extend(uart.UART_DEVICE_SCHEMA), _warn_history_wear)
 
+# The Tigo bus is 38400 8N1, full stop. This used to be check_uart_settings()
+# in dump_config(), which only logged an error after boot; ESPHome deprecated
+# that in 2026.9.0 (removal 2027.3.0) in favour of failing validation, which is
+# where a wrong baud rate belongs anyway. require_rx: we only ever listen.
+FINAL_VALIDATE_SCHEMA = uart.final_validate_device_schema(
+    "tigo_monitor",
+    baud_rate=38400,
+    require_rx=True,
+    data_bits=8,
+    parity="NONE",
+    stop_bits=1,
+)
+
 @coroutine
 def to_code(config):
     var = cg.new_Pvariable(config[CONF_ID])
@@ -133,14 +146,21 @@ def to_code(config):
     # Add ESP-IDF HTTP client component dependency
     esp32.include_builtin_idf_component("esp_http_client")
 
-    # ESP-IDF 6.0 removed the built-in `json` component that bundled cJSON.
-    # Our C++ includes "cJSON.h" (tigo_monitor.cpp, tigo_web_server.cpp), so on
-    # IDF >= 6 we must pull cJSON in as a managed component from the registry.
-    # On IDF 5.x it is still built-in; adding it there would collide, so guard
-    # on the version. Both components compile into the same `src` target, so
-    # declaring the dependency once here covers tigo_server as well.
+    # Our C++ includes "cJSON.h" (tigo_monitor.cpp, tigo_cloud.cpp,
+    # tigo_web_server.cpp). Where it comes from depends on the IDF major:
+    #  * IDF 5.x bundles it as the built-in `json` component — but ESPHome
+    #    2026.9.0 started excluding that from the build by default (it uses
+    #    ArduinoJson itself), so it has to be asked for or the build fails with
+    #    "fatal error: cJSON.h: No such file or directory" (#71).
+    #  * IDF 6.0 removed the built-in component, so there we pull cJSON in as a
+    #    managed component from the registry instead. Adding that on 5.x would
+    #    collide with the built-in one, hence the version guard.
+    # Both components compile into the same `src` target, so declaring the
+    # dependency once here covers tigo_server as well.
     if esp32.idf_version() >= cv.Version(6, 0, 0):
         esp32.add_idf_component(name="espressif/cjson", ref="^1.7.19")
+    else:
+        esp32.include_builtin_idf_component("json")
 
     # XIP-from-PSRAM. This is not a performance tuning knob — it is what keeps
     # the history writer from bricking the device.
