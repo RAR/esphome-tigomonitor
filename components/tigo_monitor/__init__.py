@@ -133,14 +133,21 @@ def to_code(config):
     # Add ESP-IDF HTTP client component dependency
     esp32.include_builtin_idf_component("esp_http_client")
 
-    # ESP-IDF 6.0 removed the built-in `json` component that bundled cJSON.
-    # Our C++ includes "cJSON.h" (tigo_monitor.cpp, tigo_web_server.cpp), so on
-    # IDF >= 6 we must pull cJSON in as a managed component from the registry.
-    # On IDF 5.x it is still built-in; adding it there would collide, so guard
-    # on the version. Both components compile into the same `src` target, so
-    # declaring the dependency once here covers tigo_server as well.
+    # Our C++ includes "cJSON.h" (tigo_monitor.cpp, tigo_cloud.cpp,
+    # tigo_web_server.cpp). Where it comes from depends on the IDF major:
+    #  * IDF 5.x bundles it as the built-in `json` component — but ESPHome
+    #    2026.9.0 started excluding that from the build by default (it uses
+    #    ArduinoJson itself), so it has to be asked for or the build fails with
+    #    "fatal error: cJSON.h: No such file or directory" (#71).
+    #  * IDF 6.0 removed the built-in component, so there we pull cJSON in as a
+    #    managed component from the registry instead. Adding that on 5.x would
+    #    collide with the built-in one, hence the version guard.
+    # Both components compile into the same `src` target, so declaring the
+    # dependency once here covers tigo_server as well.
     if esp32.idf_version() >= cv.Version(6, 0, 0):
         esp32.add_idf_component(name="espressif/cjson", ref="^1.7.19")
+    else:
+        esp32.include_builtin_idf_component("json")
 
     # XIP-from-PSRAM. This is not a performance tuning knob — it is what keeps
     # the history writer from bricking the device.

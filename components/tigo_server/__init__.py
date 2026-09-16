@@ -281,17 +281,22 @@ _generate_web_assets_header()
 async def to_code(config):
     # ESPHome 2026.9.0 excludes most built-in ESP-IDF components from the build
     # unless a component asks for them. tigo_web_server.h includes
-    # <esp_http_server.h> unconditionally and <driver/temperature_sensor.h>
-    # wherever the SoC has a die sensor, so both have to be requested or the
+    # <esp_http_server.h> unconditionally, so it has to be requested or the
     # build fails with "fatal error: esp_http_server.h: No such file or
-    # directory". The exclusion set is written at FINAL coroutine priority, so
-    # requesting from to_code() is early enough. include_builtin_idf_component()
-    # doesn't exist on older ESPHome -- but those versions never excluded these
-    # components, so skipping the call is correct there.
+    # directory" -- unless captive_portal is in the config, which requests it
+    # for its own web server and hid this on most builds. The exclusion set is
+    # written at FINAL coroutine priority, so requesting from to_code() is
+    # early enough. include_builtin_idf_component() doesn't exist on older
+    # ESPHome -- but those versions never excluded these components, so
+    # skipping the call is correct there.
+    #
+    # <driver/temperature_sensor.h> needs nothing: it is provided by
+    # esp_driver_tsens, which is not on the exclusion list (the excluded
+    # `driver` is the legacy shim). Verified by building with `driver` still
+    # excluded.
     try:
         from esphome.components.esp32 import include_builtin_idf_component
         include_builtin_idf_component('esp_http_server')
-        include_builtin_idf_component('driver')
     except ImportError:
         pass
 
