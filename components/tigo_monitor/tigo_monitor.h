@@ -206,6 +206,11 @@ struct NodeTableData {
   node_string cca_channel;        // CCA channel identifier
   node_string cca_object_id;      // CCA's internal object ID (string type)
   bool cca_validated = false;     // True if matched with CCA configuration
+
+  // Runtime only, never persisted: a Frame 27 has confirmed this addr <->
+  // long_address pairing since boot. Import uses it to put labels from an
+  // older backup onto the panels' current short addresses (#74).
+  bool seen_in_frame27 = false;
 };
 
 struct StringData {
@@ -907,6 +912,9 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   bool frame_started_ = false;
   uint16_t crc_table_[CRC_TABLE_SIZE];
   int number_of_devices_ = 5;
+  // CCA metadata of panels that lost their short address in a renumbering and
+  // have not been announced at their new one yet. See tigo_node_identity.h.
+  node_vector<NodeTableData> parked_cca_;
   std::string cca_ip_;  // Optional CCA IP address for HTTP queries (small, kept in internal RAM)
   bool sync_cca_on_startup_ = true;  // Whether to sync from CCA on boot (default: true)
   unsigned long last_cca_sync_time_ = 0;  // millis() of last successful CCA sync

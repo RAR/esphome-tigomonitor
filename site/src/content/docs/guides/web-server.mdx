@@ -207,7 +207,7 @@ are required; a node missing either is skipped.
   "nodes": [
     {
       "addr": "0004",
-      "long_address": "04C05B4000C286CC",
+      "long_address": "04C05B4000A1B2C3",
       "sensor_index": 5,
       "checksum": "R",
       "cca_label": "A1",
@@ -249,6 +249,31 @@ from the CCA itself, which calls an MPPT an "Inverter" — which is also why thi
 field used to be named `cca_inverter`. That name is still accepted on import and
 still emitted on export, so older files keep working.
 :::
+
+#### Old backups after the addresses change
+
+`addr` is handed out by the gateway when it commissions the system, and it can
+change: a rediscovery, or Tigo re-commissioning the CCA, can give every panel a
+new short address at once. `long_address` never changes — it is the panel's
+barcode — so the labels in the node table follow it:
+
+- When the gateway announces a panel at a new address, its labels move with it
+  to that address, rather than staying on the old address and ending up on
+  whichever panel inherited it.
+- An import places each entry by `long_address` when the gateway has confirmed
+  where that barcode is now. That is usually within a couple of minutes of
+  boot. The `addr` in the file is only used for panels that have not been
+  heard from yet.
+
+Before this ([#74](https://github.com/RAR/esphome-tigomonitor/issues/74)),
+restoring a backup taken before a renumbering put every label back on the
+panel's *old* address. If you are on an older firmware, run **Cloud Import**
+instead, which matches by barcode, and export a fresh backup afterwards.
+
+An import is refused if the file has more panels than `number_of_devices` —
+the table cannot hold them, and the extra entries used to disappear at the next
+reboot. Raise `number_of_devices` to at least the number of panels in the file,
+including any listed for panels that are not installed yet.
 
 The optional top-level `inverters` and `strings` arrays carry display-name and
 nameplate overrides only. They are keyed on `name`/`display_name` and
