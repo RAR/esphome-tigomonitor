@@ -1,4 +1,5 @@
 #include "tigo_monitor.h"
+#include "tigo_node_identity.h"
 #include "esphome/core/log.h"
 #include "esphome/core/helpers.h"
 #include "esphome/core/application.h"
@@ -1087,66 +1088,43 @@ void TigoMonitorComponent::process_27_frame(const frame_string &hex_frame, size_
     ESP_LOGD(TAG, "Frame 27 - Device Identity: addr=%s, long_addr=%s", 
              addr.c_str(), long_addr.c_str());
     
-    // Find or create node table entry
-    NodeTableData* node = find_node_by_addr(addr);
-    if (node != nullptr) {
-      // Update existing node with Frame 27 long address
-      if (node->long_address != long_addr) {
-        node->long_address = long_addr;
-        ESP_LOGD(TAG, "Updated Frame 27 long address for node %s: %s", addr.c_str(), long_addr.c_str());
-        table_changed = true;
-      }
-    } else {
-      // Create new node table entry for Frame 27 data
-      if (node_table_.size() < (size_t)number_of_devices_) {
-        NodeTableData new_node;
-        new_node.addr = addr;
-        new_node.long_address = long_addr;
-        // Store checksum as single-char string without temporary allocation
-        char crc_char = compute_tigo_crc4(to_std_string(addr));
-        new_node.checksum.assign(1, crc_char);
-        new_node.sensor_index = -1;  // Will be assigned when device becomes active
-        new_node.is_persistent = true;
-        node_table_.push_back(new_node);
-        ESP_LOGI(TAG, "Created new node entry for Frame 27: addr=%s, long_addr=%s (table size now %zu)", 
-                 addr.c_str(), long_addr.c_str(), node_table_.size());
-        table_changed = true;
-      } else {
-        ESP_LOGW(TAG, "Cannot create node entry for %s - table full (%zu >= %d)",
-                 addr.c_str(), node_table_.size(), number_of_devices_);
-      }
+    // Find or create the entry, keep its CCA metadata with the barcode rather
+    // than the short address (#74), and fold in any stale alias of the same
+    // barcode (#25). The logic lives in tigo_node_identity.h so it can be
+    // tested on the host.
+    auto res = node_identity::apply_frame27_entry(
+        node_table_, parked_cca_, addr, long_addr, (size_t) number_of_devices_,
+        [this](const node_string &a, const node_string &l) {
+          NodeTableData n;
+          n.addr = a;
+          n.long_address = l;
+          char crc_char = compute_tigo_crc4(to_std_string(a));
+          n.checksum.assign(1, crc_char);
+          n.sensor_index = -1;  // Will be assigned when device becomes active
+          n.is_persistent = true;
+          return n;
+        },
+        [&](const NodeTableData &dup) {
+          ESP_LOGW(TAG, "Removing node %s: same long address %s as %s (previous address of this panel)",
+                   dup.addr.c_str(), long_addr.c_str(), addr.c_str());
+          for (auto dev_it = devices_.begin(); dev_it != devices_.end(); ++dev_it) {
+            if (dev_it->addr == dup.addr) { devices_.erase(dev_it); break; }
+          }
+        });
+    if (res.table_full) {
+      ESP_LOGW(TAG, "Cannot create node entry for %s - table full (%zu >= %d); raise number_of_devices",
+               addr.c_str(), node_table_.size(), number_of_devices_);
     }
-
-    // Dedup by long address (#25). The gateway's node table just vouched for
-    // (addr <-> long_addr); any OTHER entry carrying the same long address is
-    // a stale alias of the same physical device — ephemeral 802.15.4 short
-    // addresses leak into the data stream during commissioning and can mint a
-    // phantom node entry (e.g. 8002 alongside 0002). Merge the alias's CCA
-    // metadata / sensor index into the authoritative entry, then drop it and
-    // any runtime device row it spawned.
-    for (size_t di = 0; di < node_table_.size(); ++di) {
-      if (node_table_[di].addr == addr || node_table_[di].long_address != long_addr) continue;
-      NodeTableData *keep = find_node_by_addr(addr);
-      if (keep == nullptr) break;  // table was full and addr never got an entry
-      const NodeTableData &dup = node_table_[di];
-      if (keep->sensor_index < 0 && dup.sensor_index >= 0) keep->sensor_index = dup.sensor_index;
-      if (keep->cca_label.empty()) keep->cca_label = dup.cca_label;
-      if (keep->cca_string_label.empty()) keep->cca_string_label = dup.cca_string_label;
-      if (keep->cca_mppt_label.empty()) keep->cca_mppt_label = dup.cca_mppt_label;
-      if (keep->cca_channel.empty()) keep->cca_channel = dup.cca_channel;
-      if (keep->cca_object_id.empty()) keep->cca_object_id = dup.cca_object_id;
-      keep->cca_validated = keep->cca_validated || dup.cca_validated;
-      keep->is_persistent = keep->is_persistent || dup.is_persistent;
-      ESP_LOGW(TAG, "Removing node %s: same long address %s as %s (stale alias)",
-               dup.addr.c_str(), long_addr.c_str(), addr.c_str());
-      for (auto dev_it = devices_.begin(); dev_it != devices_.end(); ++dev_it) {
-        if (dev_it->addr == dup.addr) { devices_.erase(dev_it); break; }
-      }
-      node_table_.erase(node_table_.begin() + di);
-      --di;
-      table_changed = true;
-      dedup_merged = true;
+    if (res.created) {
+      ESP_LOGI(TAG, "Created new node entry for Frame 27: addr=%s, long_addr=%s (table size now %zu)",
+               addr.c_str(), long_addr.c_str(), node_table_.size());
     }
+    if (res.renumbered) {
+      ESP_LOGW(TAG, "Node %s now reports barcode %s — the gateway reassigned short addresses; "
+                    "moving CCA labels with their panels", addr.c_str(), long_addr.c_str());
+    }
+    if (res.table_changed) table_changed = true;
+    if (res.metadata_moved) dedup_merged = true;
 
     // Also update existing device if already discovered
     DeviceData* device = find_device_by_addr(addr);
@@ -1169,8 +1147,9 @@ void TigoMonitorComponent::process_27_frame(const frame_string &hex_frame, size_
     }
   }
   
-  // If a dedup merge moved CCA metadata between entries, the string groups
-  // may now be keyed off the wrong entry — rebuild them (safe under the held
+  // If CCA metadata moved between entries — a stale alias folded in, or a
+  // renumbering moving labels to their panels' new addresses — the string
+  // groups are keyed off the wrong entries. Rebuild them (safe under the held
   // state lock, same pattern as the import path, #21).
   if (dedup_merged) {
     rebuild_string_groups();
@@ -2913,15 +2892,69 @@ bool TigoMonitorComponent::import_node_table(const psram_vector<NodeTableData>& 
   StateLock lock(state_mutex_);
   ESP_LOGI(TAG, "Importing node table with %zu nodes", nodes.size());
 
+  // Barcode -> short address pairs a Frame 27 has confirmed since boot. A
+  // backup records the short addresses of the day it was exported; if the
+  // gateway has renumbered since, restoring those as-is puts every label on
+  // whichever panel now holds the old address (#74). Confirmed pairs win.
+  std::map<std::string, node_string> live_addr_by_barcode;
+  std::set<std::string> live_addrs;
+  for (const auto &n : node_table_) {
+    if (n.seen_in_frame27 && !n.long_address.empty()) {
+      live_addr_by_barcode[to_std_string(n.long_address)] = n.addr;
+      live_addrs.insert(to_std_string(n.addr));
+    }
+  }
+
   // Clear existing node table
   node_table_.clear();
   created_devices_.clear();
-  
+  parked_cca_.clear();
+
   // Reserve capacity to avoid reallocations during import
   node_table_.reserve(nodes.size());
-  
+
+  // Entries whose barcode is at a confirmed address go first, so the
+  // duplicate-address check below keeps them over a stale entry that names
+  // the same address.
+  psram_vector<NodeTableData> ordered;
+  ordered.reserve(nodes.size());
+  int remapped = 0, parked = 0;
+  for (int pass = 0; pass < 2; pass++) {
+    for (const auto &in : nodes) {
+      auto live = in.long_address.empty() ? live_addr_by_barcode.end()
+                                          : live_addr_by_barcode.find(to_std_string(in.long_address));
+      bool confirmed = live != live_addr_by_barcode.end();
+      if ((pass == 0) != confirmed) continue;
+      NodeTableData node = in;
+      if (confirmed) {
+        node.seen_in_frame27 = true;
+        if (node.addr != live->second) {
+          ESP_LOGW(TAG, "Import: %s (%s) is at %s now, not %s — placing it there",
+                   node.long_address.c_str(), node.cca_label.c_str(), live->second.c_str(),
+                   node.addr.c_str());
+          node.addr = live->second;
+          node.checksum.assign(1, compute_tigo_crc4(to_std_string(node.addr)));
+          remapped++;
+        }
+      } else if (!node.long_address.empty() && live_addrs.count(to_std_string(node.addr))) {
+        // The file puts this panel at an address the gateway has since given
+        // to another one, and it has not been seen at a new address yet. Keep
+        // its labels aside for the Frame 27 that announces it.
+        ESP_LOGW(TAG, "Import: %s (%s) is no longer at %s — holding its labels until it reappears",
+                 node.long_address.c_str(), node.cca_label.c_str(), node.addr.c_str());
+        node_identity::park(parked_cca_, node);
+        parked++;
+        continue;
+      }
+      ordered.push_back(node);
+    }
+  }
+  if (remapped || parked)
+    ESP_LOGW(TAG, "Import: backup predates a renumbering — %d entr%s moved to current addresses, %d held",
+             remapped, remapped == 1 ? "y" : "ies", parked);
+
   // Import all nodes
-  for (const auto& node : nodes) {
+  for (const auto& node : ordered) {
     // Validate node data
     if (node.addr.empty()) {
       ESP_LOGW(TAG, "Skipping node with empty address");

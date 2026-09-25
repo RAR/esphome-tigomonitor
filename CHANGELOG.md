@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Panel labels ended up on the wrong panels after the gateway renumbered them.** The node table keyed a panel's CCA labels (name, string, MPPT) to its short bus address. The gateway assigns those at commissioning and can reassign all of them at once — a rediscovery is enough — so after a renumbering every label stayed on its old address and landed on whichever panel inherited it. In [#74](https://github.com/RAR/esphome-tigomonitor/issues/74), 21 of 30 panels were mislabelled or unlabelled. Labels now follow the panel's barcode: when the gateway announces a panel at a new address, its labels move with it. Nothing to do on upgrade; a table that is already scrambled needs one **Cloud Import** (or a CCA sync) to put the labels back.
+  - Restoring a backup had the same flaw: it put each entry back at the short address recorded in the file, so a backup taken before a renumbering scrambled the labels again every time it was imported. Import now places each entry by barcode wherever the gateway has confirmed that barcode's current address, which is normally within a couple of minutes of boot.
+  - An import with more panels than `number_of_devices` is now refused with a message saying what to set. It used to be accepted and then truncated when saved, so the extra panels lost their labels at the next reboot, and the full table then refused to re-add them.
+
 ## [2.0.1] - 2026-09-16
 
 ### Changed

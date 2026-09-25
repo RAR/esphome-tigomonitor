@@ -2196,6 +2196,33 @@ esp_err_t TigoWebServer::api_node_import_handler(httpd_req_t *req) {
     return ESP_OK;
   }
   
+  // The node table holds at most number_of_devices entries, but import used to
+  // take whatever it was given and the save then kept only the first
+  // number_of_devices. The rest vanished on the next reboot — and because the
+  // table also refuses new entries once full, the panels that lost out stayed
+  // unlabelled. In #74 a 30-entry backup against number_of_devices: 25 dropped
+  // five real panels while keeping five that were not installed yet. Refuse it
+  // outright and say what to change; entries sharing a barcode fold into one,
+  // so count barcodes.
+  {
+    std::set<std::string> barcodes;
+    for (const auto &n : nodes) barcodes.insert(tigo_monitor::to_std_string(n.long_address));
+    int cap = server->parent_->get_number_of_devices();
+    if ((int) barcodes.size() > cap) {
+      char msg[320];
+      snprintf(msg, sizeof(msg),
+               "{\"status\":\"error\",\"message\":\"This file has %zu panels but number_of_devices is %d, "
+               "so %zu would be lost on the next reboot. Set number_of_devices: %zu (or higher) under "
+               "tigo_monitor:, reflash, and import again.\"}",
+               barcodes.size(), cap, barcodes.size() - (size_t) cap, barcodes.size());
+      ESP_LOGW(TAG, "Import refused: %zu panels, number_of_devices %d", barcodes.size(), cap);
+      httpd_resp_set_type(req, "application/json");
+      httpd_resp_set_status(req, "400 Bad Request");
+      httpd_resp_send(req, msg, strlen(msg));
+      return ESP_OK;
+    }
+  }
+
   // Log memory status before import
   size_t free_before = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
   ESP_LOGI(TAG, "Free internal RAM before import: %zu bytes", free_before);
