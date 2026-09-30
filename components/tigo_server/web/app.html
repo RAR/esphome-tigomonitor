@@ -3848,7 +3848,7 @@
   const CLOUD_SEV = { 0: ['OK', 'var(--good)'], 1: ['Warning', '#e6a700'], 2: ['Error', 'var(--bad)'] };
   const cloudSev = c => CLOUD_SEV[c] || ['?', 'var(--text-dim)'];
   const cloudCheckTitle = t => CLOUD_CHECK_TITLES[t] || t;
-  const cloudEsc = s => String(s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+  const cloudEsc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   function cloudFmtData(d, type) {
     if (!d) return '';
     try {
