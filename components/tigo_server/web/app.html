@@ -1023,6 +1023,19 @@
         </div>
       </div>
 
+      <div class="section-head" data-linux-only style="display:none">
+        <div class="section-title">Inverters</div>
+        <div class="section-sub" id="pi-inv-sub">—</div>
+      </div>
+      <div class="tools-card" data-linux-only style="display:none">
+        <p class="hint">Which inverter each MPPT feeds, for the Dashboard and Topology. The MPPT names are the ones in your node table, from the CCA or a backup. Strings on an MPPT no inverter lists appear under Unassigned.</p>
+        <div id="pi-inv-rows"></div>
+        <div class="tools-actions" style="margin-top:12px">
+          <button class="btn" id="pi-inv-add">Add inverter</button>
+          <button class="btn primary" id="pi-inv-save">Save</button>
+        </div>
+      </div>
+
       <div class="section-head" data-esp-only>
         <div class="section-title">Device Configuration</div>
         <div class="section-sub">Stored on-device · overrides YAML</div>
@@ -3118,7 +3131,10 @@
 
   async function refreshTools() {
     if (!document.getElementById('view-tools').classList.contains('active')) return;
-    if (PLATFORM === 'linux') return refreshPiSettings();
+    if (PLATFORM === 'linux') {
+      refreshPiInverters();
+      return refreshPiSettings();
+    }
     try {
       const dev = [...document.querySelectorAll('#tools-dev-grid input:checked')]
         .map(i => i.dataset.toolsDev).join(',');
@@ -3298,6 +3314,54 @@
       document.getElementById('tools-meta').textContent = `error: ${e.message}`;
     }
   }
+  // Inverters: one row per inverter, its MPPTs as a comma-separated list.
+  function piInvRow(inv) {
+    const row = document.createElement('div');
+    row.className = 'cfg-row';
+    row.innerHTML = `
+      <div class="cfg-ctrl"><input class="cfg-input pi-inv-name" style="width:160px" placeholder="Inverter name" autocomplete="off"></div>
+      <div class="cfg-ctrl" style="flex:1"><input class="cfg-input pi-inv-mppts" style="width:100%;min-width:180px" placeholder="MPPT 1, MPPT 2" autocomplete="off"></div>
+      <div class="cfg-ctrl"><button class="btn pi-inv-remove">Remove</button></div>`;
+    row.querySelector('.pi-inv-name').value = inv.name || '';
+    row.querySelector('.pi-inv-mppts').value = (inv.mppts || []).join(', ');
+    row.querySelector('.pi-inv-remove').addEventListener('click', () => row.remove());
+    document.getElementById('pi-inv-rows').appendChild(row);
+  }
+  async function refreshPiInverters() {
+    try {
+      const r = await apiFetch('/api/topology');
+      if (!r.ok) throw new Error('/api/topology ' + r.status);
+      const t = await r.json();
+      document.getElementById('pi-inv-rows').innerHTML = '';
+      t.inverters.forEach(piInvRow);
+      if (!t.inverters.length) piInvRow({});
+      const listed = new Set(t.inverters.flatMap(i => i.mppts));
+      const free = t.mppts_seen.filter(m => !listed.has(m));
+      document.getElementById('pi-inv-sub').textContent = !t.mppts_seen.length ? 'no MPPTs in the node table yet'
+        : free.length ? `not assigned: ${free.join(', ')}` : 'every MPPT assigned';
+    } catch (e) {
+      document.getElementById('pi-inv-sub').textContent = `error: ${e.message}`;
+    }
+  }
+  document.getElementById('pi-inv-add').addEventListener('click', () => piInvRow({}));
+  document.getElementById('pi-inv-save').addEventListener('click', async () => {
+    const inverters = [...document.querySelectorAll('#pi-inv-rows .cfg-row')].map(row => ({
+      name: row.querySelector('.pi-inv-name').value.trim(),
+      mppts: row.querySelector('.pi-inv-mppts').value.split(',').map(m => m.trim()).filter(Boolean),
+    })).filter(i => i.name || i.mppts.length);
+    try {
+      const r = await apiFetch('/api/topology', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ inverters }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || `/api/topology ${r.status}`);
+      showToast('Inverters saved ✓', 'ok');
+      refreshPiInverters();
+    } catch (e) {
+      showToast(`Save failed: ${e.message}`, 'err');
+    }
+  });
+
   document.getElementById('pi-save').addEventListener('click', async () => {
     const mqtt = {
       host: document.getElementById('pi-mqtt-host').value.trim(),

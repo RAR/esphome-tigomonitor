@@ -140,6 +140,8 @@ int main(int argc, char **argv) {
 
   std::atomic<bool> settings_changed{false};
   std::atomic<bool> restart_requested{false};
+  Topology topology(state_dir + "/topology.json");
+  topology.load();
   HttpServer web(HttpContext{
       monitor, web_dir, settings_path, TIGOD_VERSION,
       [&] {
@@ -147,7 +149,7 @@ int main(int argc, char **argv) {
         return settings;
       },
       [&] { return mqtt.connected(); }, [&] { return mqtt.last_error(); }, settings_changed, restart_requested,
-      monitor});
+      monitor, topology});
   if (port > 0 && !web.start(port)) return 1;
 
   auto last_publish = std::chrono::steady_clock::now() - std::chrono::hours(1);

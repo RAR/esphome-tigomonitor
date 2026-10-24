@@ -23,6 +23,7 @@ add_executable(tigomonitord
   src/mqtt_publisher.cpp
   src/serial_port.cpp
   src/settings.cpp
+  src/topology.cpp
 )
 # The decoder and node-identity rules are shared with the ESP32 component.
 target_include_directories(tigomonitord PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../components/tigo_monitor)

@@ -11,6 +11,7 @@
 
 #include "monitor.h"
 #include "settings.h"
+#include "topology.h"
 
 #include <atomic>
 #include <functional>
@@ -36,6 +37,7 @@ struct HttpContext {
   std::atomic<bool> &settings_changed;
   std::atomic<bool> &restart_requested;
   Monitor &mutable_monitor;
+  Topology &topology;
 };
 
 class HttpServer {

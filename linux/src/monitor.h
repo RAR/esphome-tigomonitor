@@ -10,6 +10,7 @@
 
 #include <chrono>
 #include <cstdint>
+#include <map>
 #include <mutex>
 #include <string>
 #include <utility>
@@ -42,6 +43,18 @@ struct Panel {
   uint32_t readings = 0;
 };
 
+// One string's live totals, grouped by the nodes' cca_string label — the
+// firmware's StringData, aggregated the same way (output power, online panels).
+struct StringTotals {
+  std::string label;  // "All panels" for panels no string label claims
+  std::string mppt;   // the nodes' cca_mppt label, if any
+  double total_power = 0, total_current = 0;
+  double avg_voltage_in = 0, avg_voltage_out = 0, avg_temperature = 0;
+  double avg_efficiency = 0, min_efficiency = 0, max_efficiency = 0;
+  double peak_power = 0;  // highest total today
+  int active_devices = 0, total_devices = 0;
+};
+
 struct BusStats {
   uint64_t bytes = 0;
   uint32_t frames = 0;
@@ -71,6 +84,9 @@ class Monitor {
   std::vector<std::pair<std::string, double>> daily_history() const;
   static constexpr size_t HISTORY_DAYS = 90;
   float total_power() const;  // output power of online panels, W
+  std::vector<StringTotals> strings() const;
+  // Panels with no string label are grouped under this one.
+  static constexpr const char *ALL_PANELS = "All panels";
 
   // Integrates total_power into energy_kwh; call periodically.
   void tick();
@@ -100,6 +116,7 @@ class Monitor {
   void on_frame27_(const std::string &hex);
   Panel *find_panel_(const std::string &addr);
   float total_power_locked_() const;
+  std::vector<StringTotals> strings_locked_() const;
   bool save_locked_();
 
   std::string state_path_;
@@ -116,6 +133,7 @@ class Monitor {
   double today_kwh_ = 0;
   std::string today_;  // local date today_kwh_ belongs to
   std::vector<std::pair<std::string, double>> history_;
+  mutable std::map<std::string, double> string_peaks_;  // label -> W, today
   Clock::time_point last_tick_{};
   Clock::time_point last_save_{};
   bool dirty_ = false;

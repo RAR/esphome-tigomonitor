@@ -6,6 +6,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <ctime>
 #include <fstream>
 #include <map>
@@ -194,6 +195,54 @@ float Monitor::total_power() const {
   return total_power_locked_();
 }
 
+std::vector<StringTotals> Monitor::strings() const {
+  std::lock_guard<std::mutex> lock(mu_);
+  return strings_locked_();
+}
+
+std::vector<StringTotals> Monitor::strings_locked_() const {
+  auto now = Clock::now();
+  std::map<std::string, const Node *> node_by_addr;
+  for (const auto &n : nodes_) node_by_addr[n.addr] = &n;
+  std::map<std::string, StringTotals> by_label;
+  for (const auto &p : panels_) {
+    auto it = node_by_addr.find(p.addr);
+    const Node *n = it == node_by_addr.end() ? nullptr : it->second;
+    std::string label = n && !n->cca_string_label.empty() ? n->cca_string_label : ALL_PANELS;
+    StringTotals &s = by_label[label];
+    s.label = label;
+    if (s.mppt.empty() && n) s.mppt = n->cca_mppt_label;
+    s.total_devices++;
+    if (now - p.updated >= ONLINE_WINDOW) continue;
+    const auto &r = p.reading;
+    if (s.active_devices == 0) s.min_efficiency = s.max_efficiency = r.efficiency;
+    s.active_devices++;
+    s.total_power += r.power_out;
+    s.total_current += r.current_in;
+    s.avg_voltage_in += r.voltage_in;
+    s.avg_voltage_out += r.voltage_out;
+    s.avg_temperature += r.temperature;
+    s.avg_efficiency += r.efficiency;
+    s.min_efficiency = std::min<double>(s.min_efficiency, r.efficiency);
+    s.max_efficiency = std::max<double>(s.max_efficiency, r.efficiency);
+  }
+  std::vector<StringTotals> out;
+  for (auto &kv : by_label) {
+    StringTotals &s = kv.second;
+    if (s.active_devices > 0) {
+      s.avg_voltage_in /= s.active_devices;
+      s.avg_voltage_out /= s.active_devices;
+      s.avg_temperature /= s.active_devices;
+      s.avg_efficiency /= s.active_devices;
+    }
+    double &peak = string_peaks_[s.label];
+    peak = std::max(peak, s.total_power);
+    s.peak_power = peak;
+    out.push_back(s);
+  }
+  return out;
+}
+
 void Monitor::set_power_calibration(float c) {
   std::lock_guard<std::mutex> lock(mu_);
   power_calibration_ = c;
@@ -202,6 +251,7 @@ void Monitor::set_power_calibration(float c) {
 void Monitor::reset_peaks() {
   std::lock_guard<std::mutex> lock(mu_);
   for (auto &p : panels_) p.peak_power = p.reading.power_out;
+  string_peaks_.clear();
 }
 
 void Monitor::reset_nodes() {
@@ -209,6 +259,7 @@ void Monitor::reset_nodes() {
   nodes_.clear();
   parked_cca_.clear();
   panels_.clear();
+  string_peaks_.clear();
   dirty_ = true;
   save_locked_();
   LOGW("node table cleared");
@@ -279,6 +330,7 @@ Monitor::ImportResult Monitor::import_nodes(const std::vector<Node> &in) {
     if (!duplicate) nodes_.push_back(std::move(n));
   }
   r.imported = nodes_.size();
+  string_peaks_.clear();  // the strings themselves may have just changed
 
   // Panels already on screen pick up their barcode and label now, not at
   // their next reading.
@@ -314,6 +366,7 @@ void Monitor::tick() {
     today_ = date;
     today_kwh_ = 0;
     for (auto &p : panels_) p.peak_power = 0;
+    string_peaks_.clear();
     dirty_ = true;
   }
   if (last_tick_ != Clock::time_point{}) {
@@ -326,6 +379,7 @@ void Monitor::tick() {
     }
   }
   last_tick_ = now;
+  strings_locked_();  // keeps the string peaks current between page loads
   if (now - last_save_ > std::chrono::minutes(5)) {
     dirty_ = true;
     save_locked_();

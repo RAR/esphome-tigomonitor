@@ -25,6 +25,7 @@ using nlohmann::json;
 
 static double r1(double v) { return std::round(v * 10) / 10; }
 static double r2(double v) { return std::round(v * 100) / 100; }
+static double r3(double v) { return std::round(v * 1000) / 1000; }
 
 static void send_json(httplib::Response &res, const json &j, int status = 200) {
   res.status = status;
@@ -32,39 +33,85 @@ static void send_json(httplib::Response &res, const json &j, int status = 200) {
   res.set_content(j.dump(), "application/json");
 }
 
-// Without a CCA the panels have no string or inverter, and the dashboard,
-// which draws by string, would show nothing. Panels with no CCA string go into
-// one "All panels" string under an "Unassigned" inverter — the same grouping
-// the ESP32 uses for strings no inverter claims (#60).
-static const char *const ALL_PANELS = "All panels";
-
 static std::string string_of(const Monitor &mon, const Panel &p) {
   for (const auto &n : mon.nodes())
     if (n.addr == p.addr && !n.cca_string_label.empty()) return n.cca_string_label;
-  return ALL_PANELS;
+  return Monitor::ALL_PANELS;
 }
 
-static json strings_json(const Monitor &mon) {
-  auto now = Clock::now();
-  std::map<std::string, json> by_label;
-  for (const auto &p : mon.panels()) {
-    std::string label = string_of(mon, p);
-    json &s = by_label[label];
-    if (s.is_null()) {
-      s = {{"label", label}, {"display_label", ""}, {"inverter", ""}, {"mppt", ""}, {"panel_rating_w", 0},
-           {"total_power", 0.0}, {"peak_power", 0.0}, {"total_current", 0.0}, {"active_devices", 0},
-           {"total_devices", 0}};
-    }
-    s["total_devices"] = s["total_devices"].get<int>() + 1;
-    s["peak_power"] = r1(s["peak_power"].get<double>() + p.peak_power);
-    if (now - p.updated < Monitor::ONLINE_WINDOW) {
-      s["active_devices"] = s["active_devices"].get<int>() + 1;
-      s["total_power"] = r1(s["total_power"].get<double>() + p.reading.power_in);
-      s["total_current"] = r2(s["total_current"].get<double>() + p.reading.current_in);
-    }
+// /api/strings carries the MPPT label as "inverter" (the CCA's word for it);
+// /api/inverters nests the same strings with it as "mppt". Same fields as the
+// firmware's build_strings_json() and build_inverters_json().
+static json string_json(const StringTotals &s, const std::map<std::string, StringOverride> &ov, bool nested) {
+  auto it = ov.find(s.label);
+  StringOverride o = it == ov.end() ? StringOverride{} : it->second;
+  json j = {{"label", s.label},
+            {"display_label", o.display_label},
+            {nested ? "mppt" : "inverter", s.mppt},
+            {"panel_rating_w", o.panel_rating_w},
+            {"total_power", r1(s.total_power)},
+            {"peak_power", r1(s.peak_power)},
+            {"active_devices", s.active_devices},
+            {"total_devices", s.total_devices}};
+  if (!nested) {
+    j["total_current"] = r3(s.total_current);
+    j["avg_voltage_in"] = r2(s.avg_voltage_in);
+    j["avg_voltage_out"] = r2(s.avg_voltage_out);
+    j["avg_temperature"] = r1(s.avg_temperature);
+    j["avg_efficiency"] = r2(s.avg_efficiency);
+    j["min_efficiency"] = r2(s.min_efficiency);
+    j["max_efficiency"] = r2(s.max_efficiency);
   }
+  return j;
+}
+
+// Configured inverters, each with the strings whose MPPT it lists, then an
+// "Unassigned" block for strings no inverter claims — which, with no
+// inverters configured, is all of them (#60).
+static json inverters_json(const Monitor &mon, const Topology &topo) {
+  auto strings = mon.strings();
+  auto ov = topo.string_overrides();
+  std::vector<bool> claimed(strings.size(), false);
   json out = json::array();
-  for (auto &kv : by_label) out.push_back(kv.second);
+  auto block = [&](json base, const std::vector<size_t> &idx) {
+    double power = 0, peak = 0;
+    int active = 0, total = 0;
+    json arr = json::array();
+    for (size_t i : idx) {
+      const auto &s = strings[i];
+      power += s.total_power;
+      peak += s.peak_power;
+      active += s.active_devices;
+      total += s.total_devices;
+      arr.push_back(string_json(s, ov, true));
+    }
+    base["total_power"] = r1(power);
+    base["peak_power"] = r1(peak);
+    base["active_devices"] = active;
+    base["total_devices"] = total;
+    base["strings"] = arr;
+    return base;
+  };
+  for (const auto &inv : topo.inverters()) {
+    std::vector<size_t> idx;
+    for (const auto &m : inv.mppts)
+      for (size_t i = 0; i < strings.size(); i++)
+        if (!claimed[i] && strings[i].mppt == m) {
+          claimed[i] = true;
+          idx.push_back(i);
+        }
+    out.push_back(block({{"name", inv.name}, {"display_name", inv.display_name}, {"mppts", inv.mppts}}, idx));
+  }
+  std::vector<size_t> rest;
+  json rest_mppts = json::array();
+  for (size_t i = 0; i < strings.size(); i++) {
+    if (claimed[i]) continue;
+    rest.push_back(i);
+    if (!strings[i].mppt.empty() && std::find(rest_mppts.begin(), rest_mppts.end(), strings[i].mppt) == rest_mppts.end())
+      rest_mppts.push_back(strings[i].mppt);
+  }
+  if (!rest.empty())
+    out.push_back(block({{"name", "Unassigned"}, {"display_name", ""}, {"unassigned", true}, {"mppts", rest_mppts}}, rest));
   return out;
 }
 
@@ -208,13 +255,13 @@ void HttpServer::routes_() {
 
   svr.Get("/api/overview", [&mon](const httplib::Request &, httplib::Response &res) {
     auto now = Clock::now();
-    double power_in = 0, current = 0, eff = 0, temp = 0;
+    double power_out = 0, current = 0, eff = 0, temp = 0;
     int active = 0;
     auto panels = mon.panels();
     for (const auto &p : panels) {
       if (now - p.updated >= Monitor::ONLINE_WINDOW) continue;
       active++;
-      power_in += p.reading.power_in;
+      power_out += p.reading.power_out;
       current += p.reading.current_in;
       eff += p.reading.efficiency;
       temp += p.reading.temperature;
@@ -229,7 +276,7 @@ void HttpServer::routes_() {
     for (const auto &d : mon.daily_history())
       if (d.first.compare(0, 7, ym) == 0) month += d.second;
     size_t known = std::max(panels.size(), mon.nodes().size());
-    send_json(res, {{"total_power", r1(power_in)},
+    send_json(res, {{"total_power", r1(power_out)},
                     {"total_current", r2(current)},
                     {"avg_efficiency", active ? r2(eff / active) : 0.0},
                     {"avg_temperature", active ? r2(temp / active) : 0.0},
@@ -242,35 +289,102 @@ void HttpServer::routes_() {
                     {"month_energy", r1(month)}});
   });
 
-  svr.Get("/api/strings", [&mon](const httplib::Request &, httplib::Response &res) {
-    send_json(res, {{"strings", strings_json(mon)}});
+  svr.Get("/api/strings", [this, &mon](const httplib::Request &, httplib::Response &res) {
+    auto ov = ctx_.topology.string_overrides();
+    json arr = json::array();
+    for (const auto &st : mon.strings()) arr.push_back(string_json(st, ov, false));
+    send_json(res, {{"strings", arr}});
   });
-  svr.Get("/api/inverters", [&mon](const httplib::Request &, httplib::Response &res) {
-    json strings = strings_json(mon);
-    if (strings.empty()) {
-      send_json(res, {{"inverters", json::array()}});
-      return;
-    }
-    double power = 0, peak = 0;
-    int active = 0, total = 0;
-    for (const auto &s : strings) {
-      power += s["total_power"].get<double>();
-      peak += s["peak_power"].get<double>();
-      active += s["active_devices"].get<int>();
-      total += s["total_devices"].get<int>();
-    }
-    send_json(res, {{"inverters", json::array({{{"name", "Unassigned"},
-                                                {"display_name", ""},
-                                                {"unassigned", true},
-                                                {"mppts", json::array()},
-                                                {"total_power", r1(power)},
-                                                {"peak_power", r1(peak)},
-                                                {"active_devices", active},
-                                                {"total_devices", total},
-                                                {"strings", strings}}})}});
+  svr.Get("/api/inverters", [this, &mon](const httplib::Request &, httplib::Response &res) {
+    send_json(res, {{"inverters", inverters_json(mon, ctx_.topology)}});
   });
 
-  svr.Get("/api/nodes", [&mon](const httplib::Request &, httplib::Response &res) {
+  // Topology page edits, as on the ESP32. Bodies: {"name","display_name"},
+  // {"label","display_label"}, {"label","rating_w"}; an empty name clears it.
+  auto body_of = [](const httplib::Request &req, httplib::Response &res, json &j) {
+    j = json::parse(req.body, nullptr, false);
+    if (j.is_discarded() || !j.is_object()) {
+      send_json(res, {{"success", false}, {"error", "body must be a JSON object"}}, 400);
+      return false;
+    }
+    return true;
+  };
+  auto known_string = [&mon](const std::string &label) {
+    for (const auto &st : mon.strings())
+      if (st.label == label) return true;
+    return false;
+  };
+  svr.Post("/api/inverters/rename", [this, body_of](const httplib::Request &req, httplib::Response &res) {
+    json j;
+    if (!body_of(req, res, j)) return;
+    std::string name = j.value("name", ""), display = j.value("display_name", "");
+    if (name.empty()) return send_json(res, {{"success", false}, {"error", "missing 'name'"}}, 400);
+    if (!ctx_.topology.set_inverter_display_name(name, display))
+      return send_json(res, {{"success", false}, {"error", "unknown inverter"}}, 404);
+    send_json(res, {{"success", true}});
+  });
+  svr.Post("/api/strings/rename", [this, body_of, known_string](const httplib::Request &req, httplib::Response &res) {
+    json j;
+    if (!body_of(req, res, j)) return;
+    std::string label = j.value("label", ""), display = j.value("display_label", "");
+    if (label.empty()) return send_json(res, {{"success", false}, {"error", "missing 'label'"}}, 400);
+    if (!known_string(label)) return send_json(res, {{"success", false}, {"error", "unknown string"}}, 404);
+    ctx_.topology.set_string_display_label(label, display);
+    send_json(res, {{"success", true}});
+  });
+  svr.Post("/api/strings/rating", [this, body_of, known_string](const httplib::Request &req, httplib::Response &res) {
+    json j;
+    if (!body_of(req, res, j)) return;
+    std::string label = j.value("label", "");
+    if (label.empty()) return send_json(res, {{"success", false}, {"error", "missing 'label'"}}, 400);
+    if (!j.contains("rating_w") || !j["rating_w"].is_number_integer() || j["rating_w"].get<int>() < 0 ||
+        j["rating_w"].get<int>() > 65535)
+      return send_json(res, {{"success", false}, {"error", "rating_w must be 0-65535"}}, 400);
+    if (!known_string(label)) return send_json(res, {{"success", false}, {"error", "unknown string"}}, 404);
+    ctx_.topology.set_string_rating(label, j["rating_w"].get<int>());
+    send_json(res, {{"success", true}});
+  });
+
+  // Pi-only: the inverters an ESP32 user lists under `inverters:` in YAML,
+  // plus the MPPT labels the node table uses, for the Tools form to offer.
+  svr.Get("/api/topology", [this, &mon](const httplib::Request &, httplib::Response &res) {
+    json inv = json::array();
+    for (const auto &i : ctx_.topology.inverters()) inv.push_back({{"name", i.name}, {"mppts", i.mppts}});
+    std::set<std::string> seen;
+    for (const auto &n : mon.nodes())
+      if (!n.cca_mppt_label.empty()) seen.insert(n.cca_mppt_label);
+    send_json(res, {{"inverters", inv}, {"mppts_seen", seen}});
+  });
+  svr.Post("/api/topology", [this, body_of](const httplib::Request &req, httplib::Response &res) {
+    json j;
+    if (!body_of(req, res, j)) return;
+    if (!j.contains("inverters") || !j["inverters"].is_array())
+      return send_json(res, {{"success", false}, {"error", "expected an \"inverters\" array"}}, 400);
+    std::vector<InverterConfig> list;
+    std::set<std::string> names, mppts;
+    for (const auto &o : j["inverters"]) {
+      InverterConfig inv;
+      if (!o.is_object() || !o.contains("name") || !o["name"].is_string())
+        return send_json(res, {{"success", false}, {"error", "every inverter needs a name"}}, 400);
+      inv.name = o["name"].get<std::string>();
+      if (inv.name.empty() || !names.insert(inv.name).second)
+        return send_json(res, {{"success", false}, {"error", "inverter names must be unique and not empty"}}, 400);
+      for (const auto &m : o.value("mppts", json::array())) {
+        if (!m.is_string() || m.get<std::string>().empty()) continue;
+        if (!mppts.insert(m.get<std::string>()).second)
+          return send_json(res, {{"success", false},
+                                 {"error", "MPPT \"" + m.get<std::string>() + "\" is listed under two inverters"}},
+                           400);
+        inv.mppts.push_back(m.get<std::string>());
+      }
+      list.push_back(std::move(inv));
+    }
+    if (!ctx_.topology.set_inverters(std::move(list)))
+      return send_json(res, {{"success", false}, {"error", "Could not save to disk."}}, 500);
+    send_json(res, {{"success", true}});
+  });
+
+  svr.Get("/api/nodes", [this, &mon](const httplib::Request &, httplib::Response &res) {
     json nodes = json::array();
     for (const auto &n : mon.nodes()) {
       nodes.push_back({{"addr", n.addr},
@@ -281,9 +395,20 @@ void HttpServer::routes_() {
                        {"cca_label", n.cca_label},
                        {"cca_string", n.cca_string_label},
                        {"cca_mppt", n.cca_mppt_label},
+                       {"cca_inverter", n.cca_mppt_label},  // the field's name before #60; older imports read it
                        {"cca_channel", n.cca_channel}});
     }
-    send_json(res, {{"nodes", nodes}, {"inverters", json::array()}, {"strings", json::array()}});
+    // Topology names and ratings ride along, so an export restores them too.
+    json inverters = json::array(), strings = json::array();
+    for (const auto &i : ctx_.topology.inverters())
+      inverters.push_back({{"name", i.name}, {"display_name", i.display_name}});
+    for (const auto &kv : ctx_.topology.string_overrides()) {
+      json o = {{"label", kv.first}};
+      if (!kv.second.display_label.empty()) o["display_label"] = kv.second.display_label;
+      if (kv.second.panel_rating_w > 0) o["panel_rating_w"] = kv.second.panel_rating_w;
+      if (o.size() > 1) strings.push_back(o);
+    }
+    send_json(res, {{"nodes", nodes}, {"inverters", inverters}, {"strings", strings}});
   });
 
   svr.Get("/api/energy/history", [&mon](const httplib::Request &, httplib::Response &res) {
@@ -404,12 +529,34 @@ void HttpServer::routes_() {
       return fail("This file has " + std::to_string(barcodes.size()) + " panels but the node table holds " +
                   std::to_string(cap) + ".");
     auto r = ctx_.mutable_monitor.import_nodes(nodes);
+    // The file's Topology names and ratings, as the firmware applies them.
+    int overrides = 0;
+    const json file_inverters = body.value("inverters", json::array());
+    const json file_strings = body.value("strings", json::array());
+    for (const auto &o : file_inverters) {
+      if (!o.is_object() || o.value("name", "") == "" || !o.contains("display_name") || !o["display_name"].is_string())
+        continue;
+      ctx_.topology.remember_inverter_display_name(o["name"], o["display_name"]);
+      overrides++;
+    }
+    for (const auto &o : file_strings) {
+      if (!o.is_object() || o.value("label", "") == "") continue;
+      std::string label = o["label"];
+      if (o.contains("display_label") && o["display_label"].is_string()) {
+        ctx_.topology.set_string_display_label(label, o["display_label"]);
+        overrides++;
+      }
+      if (o.contains("panel_rating_w") && o["panel_rating_w"].is_number_integer() && o["panel_rating_w"].get<int>() > 0) {
+        ctx_.topology.set_string_rating(label, o["panel_rating_w"].get<int>());
+        overrides++;
+      }
+    }
     send_json(res, {{"status", "ok"},
                     {"message", "Successfully imported " + std::to_string(r.imported) + " nodes"},
                     {"imported", r.imported},
                     {"remapped", r.remapped},
                     {"held", r.parked},
-                    {"overrides", 0}});
+                    {"overrides", overrides}});
   });
   // systemd restarts the service (Restart=always in the unit).
   svr.Post("/api/restart", [this](const httplib::Request &, httplib::Response &res) {
