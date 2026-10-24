@@ -729,12 +729,12 @@
 
     <nav id="nav">
       <button data-view="dashboard" class="active"><span class="icon">▣</span> Dashboard</button>
-      <button data-view="history"><span class="icon">↗</span> History</button>
+      <button data-view="history" data-esp-only><span class="icon">↗</span> History</button>
       <button data-view="topology"><span class="icon">⌘</span> Topology</button>
       <button data-view="nodes"><span class="icon">≡</span> Node Table</button>
       <button data-view="tools"><span class="icon">⚙</span> Tools</button>
       <button data-view="diagnostics"><span class="icon">◈</span> Diagnostics</button>
-      <button data-view="cca"><span class="icon">◉</span> CCA Info</button>
+      <button data-view="cca" data-esp-only><span class="icon">◉</span> CCA Info</button>
       <button data-view="cloudstatus" id="nav-cloudstatus" style="display:none"><span class="icon">☁</span> Tigo Cloud</button>
     </nav>
 
@@ -1001,6 +1001,14 @@
         <div class="cfg-row">
           <div class="cfg-text"><strong>Password</strong><span class="cfg-default" id="pi-mqtt-pass-hint"></span></div>
           <div class="cfg-ctrl"><input class="cfg-input" id="pi-mqtt-pass" type="password" autocomplete="new-password"></div>
+        </div>
+        <div class="cfg-row">
+          <div class="cfg-text"><strong>Topic</strong><span class="cfg-default" id="pi-mqtt-topic-hint"></span></div>
+          <div class="cfg-ctrl"><input class="cfg-input" id="pi-mqtt-topic" placeholder="tigomonitor" autocomplete="off"></div>
+        </div>
+        <div class="cfg-row">
+          <div class="cfg-text"><strong>Discovery prefix</strong><span class="cfg-default">Where Home Assistant looks for new devices; leave it unless you changed it in Home Assistant</span></div>
+          <div class="cfg-ctrl"><input class="cfg-input" id="pi-mqtt-discovery" placeholder="homeassistant" autocomplete="off"></div>
         </div>
         <div class="cfg-row">
           <div class="cfg-text"><strong>Serial port</strong><span class="cfg-default">The RS485 adapter. "auto" finds a USB dongle or the Pi's UART</span></div>
@@ -1970,6 +1978,10 @@
     PLATFORM = 'linux';
     document.querySelectorAll('[data-esp-only]').forEach(el => { el.style.display = 'none'; });
     document.querySelectorAll('[data-linux-only]').forEach(el => { el.style.display = ''; });
+    // History and CCA Info need the ESP32's flash history and CCA link; a
+    // bookmark to either lands on the dashboard instead.
+    const active = document.querySelector('#nav button.active');
+    if (active && active.style.display === 'none') document.querySelector('#nav button[data-view="dashboard"]').click();
     const restart = document.getElementById('tools-restart');
     restart.previousElementSibling.innerHTML =
       '<strong>Restart service</strong><span>Restarts the monitor service. Readings pause for a few seconds.</span>';
@@ -2896,6 +2908,7 @@
     label('diag-psram-free', 'SD card free');
     label('diag-temp', 'CPU temp');
     label('diag-sockets', 'MQTT');
+    label('diag-version', 'Version');
     document.getElementById('diag-mem-sub').textContent = 'system';
     document.getElementById('diag-temp').nextElementSibling.textContent = 'SoC sensor';
     const mb = (b) => (b / 1048576).toFixed(0);
@@ -3272,6 +3285,10 @@
       document.getElementById('pi-mqtt-pass').placeholder = s.mqtt.password_set ? 'unchanged' : '';
       document.getElementById('pi-mqtt-pass-hint').textContent =
         s.mqtt.password_set ? 'Saved. Leave empty to keep it.' : '';
+      document.getElementById('pi-mqtt-topic').value = s.mqtt.base_topic || '';
+      document.getElementById('pi-mqtt-discovery').value = s.mqtt.discovery_prefix || '';
+      document.getElementById('pi-mqtt-topic-hint').textContent =
+        `Readings go to ${s.mqtt.base_topic}/${s.device_id}/panel/<barcode>/state`;
       document.getElementById('pi-serial').value = s.serial_port || '';
       document.getElementById('pi-calibration').value = s.power_calibration ?? 1;
       document.getElementById('pi-mqtt-state').textContent = !s.mqtt.host ? 'MQTT off'
@@ -3286,6 +3303,8 @@
       host: document.getElementById('pi-mqtt-host').value.trim(),
       port: Number(document.getElementById('pi-mqtt-port').value) || 1883,
       username: document.getElementById('pi-mqtt-user').value,
+      base_topic: document.getElementById('pi-mqtt-topic').value.trim() || 'tigomonitor',
+      discovery_prefix: document.getElementById('pi-mqtt-discovery').value.trim() || 'homeassistant',
     };
     const pass = document.getElementById('pi-mqtt-pass').value;
     if (pass !== '') mqtt.password = pass;

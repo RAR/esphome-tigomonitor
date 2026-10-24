@@ -462,6 +462,13 @@ void HttpServer::routes_() {
       err = "A setting has the wrong type.";
     }
     if (err.empty() && (s.mqtt.port < 1 || s.mqtt.port > 65535)) err = "MQTT port must be 1-65535.";
+    // Wildcards would make every publish fail, and an empty or slash-edged
+    // level gives topics nothing in Home Assistant subscribes to.
+    for (const std::string *t : {&s.mqtt.base_topic, &s.mqtt.discovery_prefix}) {
+      if (err.empty() && (t->empty() || t->find_first_of("+#") != std::string::npos || t->front() == '/' ||
+                          t->back() == '/' || t->find("//") != std::string::npos))
+        err = "Topics cannot be empty, contain + or #, or start or end with /.";
+    }
     if (err.empty() && (s.power_calibration <= 0 || s.power_calibration > 5)) err = "Power calibration must be between 0 and 5.";
     if (err.empty() && s.publish_interval_s < 5) err = "Publish interval must be at least 5 seconds.";
     if (!err.empty()) {
