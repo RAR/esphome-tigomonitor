@@ -307,6 +307,137 @@ void HttpServer::routes_() {
     send_json(res, {{"status", "ok"}, {"message", "Node deleted successfully"}});
   });
 
+  // The CCA over Bluetooth, in the firmware's shapes (tigo_web_server.cpp
+  // api_cca_*). Requests only queue work for the CCA thread; the page polls
+  // the cached results, as it does on the ESP32.
+  auto cca_unavailable = [this](httplib::Response &res) {
+    auto v = ctx_.cca.view();
+    if (v.adapter) return false;
+    ctx_.cca.request_probe();  // so the page works on its next load once BlueZ is up
+    send_json(res, {{"status", "error"}, {"message", v.error.empty() ? "Bluetooth is not available" : v.error}}, 400);
+    return true;
+  };
+  svr.Get("/api/cca", [this](const httplib::Request &, httplib::Response &res) {
+    auto v = ctx_.cca.view();
+    std::string info = v.device_info;
+    // A refresh that failed after the last good one shows its reason, which
+    // the page treats as the end of a refresh; otherwise the cached copy.
+    if (!v.adapter || (v.info_failed_epoch > v.info_epoch && !v.busy))
+      info = json({{"error", v.error.empty() ? "Bluetooth is not available" : v.error}}).dump();
+    int64_t age = v.info_epoch ? std::max<int64_t>(0, time(nullptr) - v.info_epoch) : 0;
+    send_json(res, {{"cca_ip", v.active_mac.empty() ? "BLE (nearest CCA)" : "BLE " + v.active_mac},
+                    {"last_sync_seconds_ago", age},
+                    {"device_info", info.empty() ? "{}" : info},
+                    {"network_info", v.network_info.empty() ? "{}" : v.network_info}});
+  });
+  auto refresh = [this, cca_unavailable](const httplib::Request &, httplib::Response &res) {
+    if (cca_unavailable(res)) return;
+    ctx_.cca.request_refresh();
+    send_json(res, {{"status", "ok"}, {"message", "BLE refresh initiated"}});
+  };
+  svr.Get("/api/cca/refresh", refresh);
+  auto scan_json = [this]() {
+    auto v = ctx_.cca.view();
+    json devices = json::array();
+    int64_t now = time(nullptr);
+    for (const auto &h : v.hits)
+      devices.push_back({{"mac", h.mac}, {"rssi", h.rssi}, {"name", h.name}, {"age_s", now - h.seen}});
+    // No YAML on the Pi: without a saved CCA, the nearest one is used.
+    return json({{"active_mac", v.active_mac}, {"yaml_mac", ""}, {"saved", !v.saved_mac.empty()},
+                 {"devices", devices}});
+  };
+  svr.Get("/api/cca/ble-scan", [this, cca_unavailable, scan_json](const httplib::Request &req, httplib::Response &res) {
+    if (cca_unavailable(res)) return;
+    if (req.has_param("rescan") && req.get_param_value("rescan") == "1") {
+      ctx_.cca.clear_hits();
+      ctx_.cca.request_scan();
+    }
+    send_json(res, scan_json());
+  });
+  svr.Post("/api/cca/ble-mac", [this, cca_unavailable, scan_json](const httplib::Request &req, httplib::Response &res) {
+    if (cca_unavailable(res)) return;
+    json j = json::parse(req.body, nullptr, false);
+    bool ok = false;
+    if (j.is_object() && j.value("reset", json(false)).is_boolean() && j.value("reset", false)) {
+      ctx_.cca.reset_mac();
+      ok = true;
+    } else if (j.is_object() && j.contains("mac") && j["mac"].is_string()) {
+      ok = ctx_.cca.set_mac(j["mac"].get<std::string>());
+    }
+    if (!ok)
+      return send_json(res, {{"status", "error"}, {"message", "invalid MAC (expected AA:BB:CC:DD:EE:FF)"}}, 400);
+    send_json(res, scan_json());
+  });
+  svr.Get("/api/cca/discovery", [this](const httplib::Request &, httplib::Response &res) {
+    auto v = ctx_.cca.view();
+    if (v.discovery.empty()) return send_json(res, {{"age_s", nullptr}, {"status", nullptr}});
+    json status = json::parse(v.discovery, nullptr, false);
+    send_json(res, {{"age_s", std::max<int64_t>(0, time(nullptr) - v.discovery_epoch)},
+                    {"status", status.is_discarded() ? json(v.discovery) : status}});
+  });
+  svr.Post("/api/cca/discovery/start", [this, cca_unavailable](const httplib::Request &, httplib::Response &res) {
+    if (cca_unavailable(res)) return;
+    ctx_.cca.request_command("START_DISCOVERY");
+    send_json(res, {{"status", "ok"}, {"message", "Discovery start requested"}});
+  });
+  svr.Post("/api/cca/discovery/poll", [this, cca_unavailable](const httplib::Request &, httplib::Response &res) {
+    if (cca_unavailable(res)) return;
+    ctx_.cca.request_command("DISCOVERY_STATUS");
+    send_json(res, {{"status", "ok"}, {"message", "Discovery status poll requested"}});
+  });
+  // Network commands, allowlisted as on the ESP32 so a query value never
+  // reaches the CCA or the response unchecked.
+  static const std::set<std::string> NET_READS = {"NETWORK_WIFI_SCAN"};
+  static const std::set<std::string> NET_KNOWN = {"NETWORK_WIFI_SCAN", "NETWORK_WIFI_CONNECT", "NETWORK_WIFI_CLEAR",
+                                                  "NETWORK_INFO", "DEVICE_DATA_EXPORT"};
+  svr.Get("/api/cca/network", [this](const httplib::Request &req, httplib::Response &res) {
+    std::string cmd = req.has_param("cmd") ? req.get_param_value("cmd") : "";
+    if (!NET_KNOWN.count(cmd)) return send_json(res, {{"error", "missing or unknown cmd"}}, 400);
+    std::string raw;
+    int64_t epoch = 0;
+    if (cmd == "NETWORK_INFO") {
+      auto v = ctx_.cca.view();
+      raw = v.network_info;
+      epoch = v.info_epoch;
+    } else {
+      ctx_.cca.result(cmd, raw, epoch);
+    }
+    if (raw.empty()) return send_json(res, {{"cmd", cmd}, {"age_s", nullptr}, {"result", nullptr}});
+    json result = json::parse(raw, nullptr, false);
+    send_json(res, {{"cmd", cmd},
+                    {"age_s", std::max<int64_t>(0, time(nullptr) - epoch)},
+                    {"result", result.is_discarded() ? json(raw) : result}});
+  });
+  svr.Post("/api/cca/network/poll", [this, cca_unavailable](const httplib::Request &req, httplib::Response &res) {
+    std::string cmd = req.has_param("cmd") ? req.get_param_value("cmd") : "";
+    if (!NET_READS.count(cmd))
+      return send_json(res, {{"status", "error"}, {"message", "cmd must be a known network read"}}, 400);
+    if (cca_unavailable(res)) return;
+    ctx_.cca.request_command(cmd);
+    send_json(res, {{"status", "ok"}, {"message", "queued"}});
+  });
+  svr.Post("/api/cca/network/wifi-connect", [this, cca_unavailable](const httplib::Request &req,
+                                                                     httplib::Response &res) {
+    json j = json::parse(req.body, nullptr, false);
+    std::string nid = j.is_object() && j.contains("nid") && j["nid"].is_string() ? j["nid"].get<std::string>() : "";
+    std::string pwd = j.is_object() && j.contains("pwd") && j["pwd"].is_string() ? j["pwd"].get<std::string>() : "";
+    if (nid.empty()) return send_json(res, {{"status", "error"}, {"message", "missing 'nid' (SSID)"}}, 400);
+    if (cca_unavailable(res)) return;
+    ctx_.cca.request_command("NETWORK_WIFI_CONNECT",
+                             "nid=" + CcaBle::uri_encode(nid) + " pwd=" + CcaBle::uri_encode(pwd));
+    send_json(res, {{"status", "ok"}, {"message", "WiFi join requested"}});
+  });
+  svr.Post("/api/cca/network/wifi-clear", [this, cca_unavailable](const httplib::Request &, httplib::Response &res) {
+    if (cca_unavailable(res)) return;
+    ctx_.cca.request_command("NETWORK_WIFI_CLEAR");
+    send_json(res, {{"status", "ok"}, {"message", "WiFi clear requested"}});
+  });
+  svr.Post("/api/cca/data-export", [this, cca_unavailable](const httplib::Request &, httplib::Response &res) {
+    if (cca_unavailable(res)) return;
+    ctx_.cca.request_command("DEVICE_DATA_EXPORT");
+    send_json(res, {{"status", "ok"}, {"message", "Cloud export requested"}});
+  });
+
   // Tigo cloud, in the firmware's shapes (tigo_web_server.cpp api_cloud_*).
   svr.Get("/api/cloud/status", [this](const httplib::Request &, httplib::Response &res) {
     auto s = ctx_.cloud.status();

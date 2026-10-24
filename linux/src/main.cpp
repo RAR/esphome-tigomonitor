@@ -5,6 +5,7 @@
 
 #include "log.h"
 #include "monitor.h"
+#include "cca_ble.h"
 #include "cloud.h"
 #include "history.h"
 #include "http_server.h"
@@ -146,6 +147,8 @@ int main(int argc, char **argv) {
   std::atomic<bool> restart_requested{false};
   History history(state_dir + "/history.db");
   history.open();
+  CcaBle cca(state_dir + "/cca.json");
+  cca.start();
   Cloud cloud(state_dir + "/cloud.json");
   cloud.load();
   Topology topology(state_dir + "/topology.json");
@@ -157,7 +160,7 @@ int main(int argc, char **argv) {
         return settings;
       },
       [&] { return mqtt.connected(); }, [&] { return mqtt.last_error(); }, settings_changed, restart_requested,
-      monitor, topology, history, cloud});
+      monitor, topology, history, cloud, cca});
   if (port > 0 && !web.start(port)) return 1;
 
   auto last_publish = std::chrono::steady_clock::now() - std::chrono::hours(1);
@@ -238,6 +241,7 @@ int main(int argc, char **argv) {
   input_stop = true;
   input.join();
   web.stop();
+  cca.stop();
   monitor.save();
   BusStats s = monitor.stats();
   LOGI("stopping: %u frames, %u bad checksums, %u readings, %zu panels, %zu nodes", s.frames, s.bad_checksums,

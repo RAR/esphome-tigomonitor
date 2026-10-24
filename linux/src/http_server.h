@@ -9,6 +9,7 @@
 // Settings changes are written to settings.json and flagged for the main
 // loop to apply, so MQTT is only ever reconfigured from one thread.
 
+#include "cca_ble.h"
 #include "cloud.h"
 #include "history.h"
 #include "monitor.h"
@@ -42,6 +43,7 @@ struct HttpContext {
   Topology &topology;
   History &history;
   Cloud &cloud;
+  CcaBle &cca;
 };
 
 class HttpServer {

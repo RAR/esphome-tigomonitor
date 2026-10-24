@@ -32,7 +32,7 @@ Version: $version
 Architecture: $arch
 Maintainer: Andrew Rankin <andrew@eiknet.com>
 Depends: $deps, ca-certificates
-Recommends: avahi-daemon
+Recommends: avahi-daemon, bluez
 Section: misc
 Priority: optional
 Homepage: https://github.com/RAR/esphome-tigomonitor
@@ -46,6 +46,11 @@ printf '/etc/avahi/services/tigomonitor-http.service\n' > "$root/DEBIAN/conffile
 cat > "$root/DEBIAN/postinst" <<'EOF'
 #!/bin/sh
 set -e
+# The unit joins the bluetooth group, which BlueZ requires of a client, and
+# systemd refuses to start a unit whose group does not exist.
+if [ "$1" = configure ] && ! getent group bluetooth >/dev/null; then
+  groupadd --system bluetooth
+fi
 if [ "$1" = configure ] && [ -d /run/systemd/system ]; then
   systemctl daemon-reload
   systemctl enable tigomonitord.service >/dev/null

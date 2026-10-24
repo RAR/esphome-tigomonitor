@@ -734,7 +734,7 @@
       <button data-view="nodes"><span class="icon">≡</span> Node Table</button>
       <button data-view="tools"><span class="icon">⚙</span> Tools</button>
       <button data-view="diagnostics"><span class="icon">◈</span> Diagnostics</button>
-      <button data-view="cca" data-esp-only><span class="icon">◉</span> CCA Info</button>
+      <button data-view="cca"><span class="icon">◉</span> CCA Info</button>
       <button data-view="cloudstatus" id="nav-cloudstatus" style="display:none"><span class="icon">☁</span> Tigo Cloud</button>
     </nav>
 
@@ -1279,7 +1279,7 @@
         <div class="section-sub" id="cca-ble-active">—</div>
       </div>
       <div class="tools-card" id="cca-ble-card" style="display:none">
-        <p class="hint">Scan for your Tigo CCA over Bluetooth (matched by its <code>04:C0:5B</code> address prefix) and target it without editing YAML. The chosen MAC is saved on the device and survives reboots.</p>
+        <p class="hint" id="cca-ble-hint">Scan for your Tigo CCA over Bluetooth (matched by its <code>04:C0:5B</code> address prefix) and target it without editing YAML. The chosen MAC is saved on the device and survives reboots.</p>
         <div class="tools-actions">
           <input id="cca-ble-mac" type="text" placeholder="AA:BB:CC:DD:EE:FF" autocomplete="off" spellcheck="false"
                  style="flex:1;min-width:170px;padding:6px 8px;background:var(--bg-2);border:1px solid var(--border);border-radius:5px;color:var(--text);font-family:ui-monospace,Menlo,monospace;font-size:13px">
@@ -1992,10 +1992,8 @@
     document.querySelectorAll('[data-esp-only]').forEach(el => { el.style.display = 'none'; });
     document.querySelectorAll('[data-linux-only]').forEach(el => { el.style.display = ''; });
     document.getElementById('hist-backing').textContent = 'Stored on the SD card · persists across reboots';
-    // CCA Info needs the ESP32's CCA link; a bookmark to it lands on the
-    // dashboard instead.
-    const active = document.querySelector('#nav button.active');
-    if (active && active.style.display === 'none') document.querySelector('#nav button[data-view="dashboard"]').click();
+    document.getElementById('cca-ble-hint').innerHTML = 'Scan for your Tigo CCA over Bluetooth (matched by its <code>04:C0:5B</code> address prefix). With none saved, the Pi uses the nearest one; save a MAC to pin it.';
+    document.getElementById('cca-ble-revert-btn').textContent = 'Use nearest';
     const restart = document.getElementById('tools-restart');
     restart.previousElementSibling.innerHTML =
       '<strong>Restart service</strong><span>Restarts the monitor service. Readings pause for a few seconds.</span>';
@@ -3643,7 +3641,7 @@
     document.getElementById('cca-ble-head').style.display = '';
     document.getElementById('cca-ble-card').style.display = '';
     document.getElementById('cca-ble-active').innerHTML =
-      `active <span style="font-family:ui-monospace,Menlo,monospace">${cloudEsc(data.active_mac)}</span> · ${data.saved ? 'saved on device' : 'from YAML'}`;
+      `active <span style="font-family:ui-monospace,Menlo,monospace">${cloudEsc(data.active_mac || 'none yet')}</span> · ${data.saved ? 'saved on device' : PLATFORM === 'linux' ? 'nearest CCA' : 'from YAML'}`;
     document.getElementById('cca-ble-revert-btn').disabled = !data.saved;
     const list = document.getElementById('cca-ble-list');
     const devs = data.devices || [];
@@ -3714,7 +3712,8 @@
     ccaBlePost({ mac });
   });
   document.getElementById('cca-ble-revert-btn').addEventListener('click', () => {
-    if (confirm('Forget the saved CCA MAC and use the one from YAML?')) ccaBlePost({ reset: true });
+    const revertTo = PLATFORM === 'linux' ? 'the nearest CCA' : 'the one from YAML';
+    if (confirm(`Forget the saved CCA MAC and use ${revertTo}?`)) ccaBlePost({ reset: true });
   });
 
   document.getElementById('cca-refresh-btn').addEventListener('click', async () => {
@@ -3749,7 +3748,7 @@
         if (deviceInfo && deviceInfo.error) { applyCcaData(data); return; }  // terminal
         const hasData = deviceInfo && Object.keys(deviceInfo).length > 0;
         const fresh = data.last_sync_seconds_ago <= elapsed + 3;
-        if (hasData && fresh) { applyCcaData(data); return; }
+        if (hasData && fresh) { applyCcaData(data); ccaBleLoad(); return; }
 
         info.innerHTML =
           `<div class="spinner-box"><span class="spinner"></span> Connecting to the CCA over BLE… (${Math.round(elapsed)} s)</div>`;

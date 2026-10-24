@@ -1,7 +1,7 @@
 [Unit]
 Description=Tigo optimizer monitor
 Documentation=https://github.com/RAR/esphome-tigomonitor
-After=network-online.target
+After=network-online.target bluetooth.service
 Wants=network-online.target
 
 [Service]
@@ -11,9 +11,10 @@ Restart=always
 RestartSec=3
 
 # No fixed account: systemd makes one per run. dialout reads the RS485
-# adapter; the capability lets it serve the web UI on port 80.
+# adapter, bluetooth lets BlueZ take its calls for the CCA page, and the
+# capability lets it serve the web UI on port 80.
 DynamicUser=yes
-SupplementaryGroups=dialout
+SupplementaryGroups=dialout bluetooth
 AmbientCapabilities=CAP_NET_BIND_SERVICE
 CapabilityBoundingSet=CAP_NET_BIND_SERVICE
 StateDirectory=tigomonitor
