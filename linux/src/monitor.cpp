@@ -7,6 +7,7 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <cctype>
 #include <ctime>
 #include <fstream>
 #include <map>
@@ -263,6 +264,60 @@ void Monitor::reset_nodes() {
   dirty_ = true;
   save_locked_();
   LOGW("node table cleared");
+}
+
+int Monitor::apply_layout(const std::vector<LayoutPanel> &panels) {
+  std::lock_guard<std::mutex> lock(mu_);
+  auto upper = [](std::string s) {
+    for (char &c : s) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+    return s;
+  };
+  int matched = 0;
+  for (const auto &lp : panels) {
+    std::string serial = upper(lp.serial);
+    for (auto &n : nodes_) {
+      if (n.long_address.size() < 6) continue;
+      if (serial.find(upper(n.long_address.substr(n.long_address.size() - 6))) == std::string::npos) continue;
+      n.cca_label = lp.label;
+      n.cca_string_label = lp.string_label;
+      n.cca_mppt_label = lp.mppt;
+      n.cca_object_id = lp.object_id;
+      n.cca_validated = true;
+      for (auto &p : panels_)
+        if (p.addr == n.addr) p.label = n.cca_label;
+      matched++;
+      break;
+    }
+  }
+  LOGI("layout: %zu panels, %d matched to nodes", panels.size(), matched);
+  if (matched > 0) {
+    string_peaks_.clear();
+    dirty_ = true;
+    save_locked_();
+  }
+  return matched;
+}
+
+bool Monitor::delete_node(const std::string &addr) {
+  std::lock_guard<std::mutex> lock(mu_);
+  bool found = false;
+  for (auto it = nodes_.begin(); it != nodes_.end(); ++it) {
+    if (it->addr != addr) continue;
+    nodes_.erase(it);
+    found = true;
+    break;
+  }
+  for (auto it = panels_.begin(); it != panels_.end(); ++it) {
+    if (it->addr != addr) continue;
+    panels_.erase(it);
+    found = true;
+    break;
+  }
+  if (found) {
+    dirty_ = true;
+    save_locked_();
+  }
+  return found;
 }
 
 Monitor::ImportResult Monitor::import_nodes(const std::vector<Node> &in) {

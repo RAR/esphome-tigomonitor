@@ -55,6 +55,12 @@ struct StringTotals {
   int active_devices = 0, total_devices = 0;
 };
 
+// One panel of a site layout (the Tigo cloud's). mppt is numbered across the
+// whole system (MPPT 1, 2, 3, ...), as the inverters list expects.
+struct LayoutPanel {
+  std::string serial, label, string_label, mppt, object_id;
+};
+
 struct BusStats {
   uint64_t bytes = 0;
   uint32_t frames = 0;
@@ -109,6 +115,14 @@ class Monitor {
   };
   ImportResult import_nodes(const std::vector<Node> &in);
   size_t max_nodes() const { return max_nodes_; }
+
+  // Labels nodes from a layout; returns how many panels matched a node.
+  // A cloud serial embeds the last 6 hex of the panel's barcode (barcode
+  // 04C05B4000BBCC02 -> serial "4-BBCC02K"), which is the only link between
+  // the two, so that is the match — as in the firmware.
+  int apply_layout(const std::vector<LayoutPanel> &panels);
+  // Drops one node (and its panel), as the Nodes page's delete does.
+  bool delete_node(const std::string &addr);
 
  private:
   void on_frame_(const std::string &raw);

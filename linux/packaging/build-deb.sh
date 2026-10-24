@@ -31,7 +31,7 @@ Package: tigomonitord
 Version: $version
 Architecture: $arch
 Maintainer: Andrew Rankin <andrew@eiknet.com>
-Depends: $deps
+Depends: $deps, ca-certificates
 Recommends: avahi-daemon
 Section: misc
 Priority: optional

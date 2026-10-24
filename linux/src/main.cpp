@@ -5,6 +5,7 @@
 
 #include "log.h"
 #include "monitor.h"
+#include "cloud.h"
 #include "history.h"
 #include "http_server.h"
 #include "mqtt_publisher.h"
@@ -145,6 +146,8 @@ int main(int argc, char **argv) {
   std::atomic<bool> restart_requested{false};
   History history(state_dir + "/history.db");
   history.open();
+  Cloud cloud(state_dir + "/cloud.json");
+  cloud.load();
   Topology topology(state_dir + "/topology.json");
   topology.load();
   HttpServer web(HttpContext{
@@ -154,7 +157,7 @@ int main(int argc, char **argv) {
         return settings;
       },
       [&] { return mqtt.connected(); }, [&] { return mqtt.last_error(); }, settings_changed, restart_requested,
-      monitor, topology, history});
+      monitor, topology, history, cloud});
   if (port > 0 && !web.start(port)) return 1;
 
   auto last_publish = std::chrono::steady_clock::now() - std::chrono::hours(1);

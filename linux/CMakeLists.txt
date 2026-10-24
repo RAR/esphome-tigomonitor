@@ -18,6 +18,7 @@ find_package(Threads REQUIRED)
 
 add_executable(tigomonitord
   src/main.cpp
+  src/cloud.cpp
   src/fsutil.cpp
   src/history.cpp
   src/http_server.cpp

@@ -299,6 +299,83 @@ void HttpServer::routes_() {
     send_json(res, {{"inverters", inverters_json(mon, ctx_.topology)}});
   });
 
+  svr.Post("/api/nodes/delete", [this](const httplib::Request &req, httplib::Response &res) {
+    std::string addr = req.has_param("addr") ? req.get_param_value("addr") : "";
+    if (addr.empty()) return send_json(res, {{"status", "error"}, {"message", "Missing addr parameter"}}, 400);
+    if (!ctx_.mutable_monitor.delete_node(addr))
+      return send_json(res, {{"status", "error"}, {"message", "Node not found"}}, 404);
+    send_json(res, {{"status", "ok"}, {"message", "Node deleted successfully"}});
+  });
+
+  // Tigo cloud, in the firmware's shapes (tigo_web_server.cpp api_cloud_*).
+  svr.Get("/api/cloud/status", [this](const httplib::Request &, httplib::Response &res) {
+    auto s = ctx_.cloud.status();
+    send_json(res, {{"configured", s.configured}, {"email", s.email}, {"expires", s.expires},
+                    {"system_id", s.system_id}});
+  });
+  svr.Post("/api/cloud/login", [this](const httplib::Request &req, httplib::Response &res) {
+    json j = json::parse(req.body, nullptr, false);
+    auto field = [&j](const char *k) {
+      auto it = j.is_object() ? j.find(k) : j.end();
+      return it != j.end() && it->is_string() ? it->get<std::string>() : std::string();
+    };
+    std::string email = field("email"), password = field("password");
+    if (email.empty() || password.empty())
+      return send_json(res, {{"status", "error"}, {"message", "email and password required"}}, 400);
+    std::string err;
+    bool ok = ctx_.cloud.login(email, password, err);
+    password.assign(password.size(), '\0');
+    if (!ok) return send_json(res, {{"status", "error"}, {"message", "Login failed: " + err}}, 502);
+    auto s = ctx_.cloud.status();
+    send_json(res, {{"status", "ok"}, {"email", s.email}, {"expires", s.expires}, {"system_id", s.system_id}});
+  });
+  svr.Post("/api/cloud/import", [this](const httplib::Request &, httplib::Response &res) {
+    CloudLayout layout;
+    std::string err;
+    if (!ctx_.cloud.layout(layout, err))
+      return send_json(res, {{"status", "error"}, {"message", "Import failed: " + err}}, 502);
+    int matched = ctx_.mutable_monitor.apply_layout(layout.panels);
+    // The ESP32 takes its inverters from YAML. Here the layout can supply
+    // them, but only on a Pi with none set up, so it never undoes an edit.
+    bool added_inverters = false;
+    if (matched > 0 && ctx_.topology.inverters().empty()) {
+      std::vector<InverterConfig> invs;
+      int n = 0;
+      for (const auto &ci : layout.inverters) {
+        n++;
+        if (ci.mppts.empty()) continue;
+        invs.push_back({ci.label.empty() ? "Inverter " + std::to_string(n) : ci.label, "", ci.mppts});
+      }
+      added_inverters = !invs.empty() && ctx_.topology.set_inverters(invs);
+    }
+    send_json(res, {{"status", "ok"},
+                    {"message", "Layout imported from Tigo cloud: " + std::to_string(matched) + " of " +
+                                    std::to_string(layout.panels.size()) + " panels matched"},
+                    {"panels", layout.panels.size()},
+                    {"matched", matched},
+                    {"inverters_added", added_inverters}});
+  });
+  svr.Get("/api/cloud/health", [this](const httplib::Request &, httplib::Response &res) {
+    std::string body, err;
+    if (!ctx_.cloud.health(body, err))
+      return send_json(res, {{"status", "error"}, {"message", "Health unavailable: " + err}}, 502);
+    json summary = json::parse(body, nullptr, false);
+    if (!summary.is_array())
+      return send_json(res, {{"status", "error"}, {"message", "Health unavailable: unexpected response"}}, 502);
+    send_json(res, {{"status", "ok"}, {"summary", summary}});
+  });
+  svr.Get("/api/cloud/equipment", [this](const httplib::Request &req, httplib::Response &res) {
+    std::string view = req.has_param("view") && req.get_param_value("view") == "history" ? "history" : "latest";
+    std::string body, err;
+    if (!ctx_.cloud.equipment(view, body, err))
+      return send_json(res, {{"status", "error"}, {"message", "Equipment status unavailable: " + err}}, 502);
+    json data = json::parse(body, nullptr, false);
+    if (!data.is_array())
+      return send_json(res, {{"status", "error"}, {"message", "Equipment status unavailable: unexpected response"}},
+                       502);
+    send_json(res, {{"status", "ok"}, {"view", view}, {"data", data}});
+  });
+
   // History, in the firmware's shapes: ?range=day|week|month|year, and for a
   // panel ?slot=N from /api/panels.
   auto history_window = [this](const httplib::Request &req, httplib::Response &res, int64_t &start, int64_t &end,
