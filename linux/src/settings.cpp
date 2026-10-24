@@ -1,0 +1,72 @@
+#include "settings.h"
+
+#include "fsutil.h"
+#include "log.h"
+
+#include <nlohmann/json.hpp>
+
+#include <fstream>
+
+namespace tigod {
+
+using nlohmann::json;
+
+template<class T> static void get(const json &j, const char *key, T &out) {
+  auto it = j.find(key);
+  if (it != j.end() && !it->is_null()) {
+    try {
+      out = it->get<T>();
+    } catch (const json::exception &) {
+      LOGW("settings: ignoring %s, wrong type", key);
+    }
+  }
+}
+
+Settings load_settings(const std::string &path) {
+  Settings s;
+  std::ifstream in(path);
+  if (!in) return s;  // first run
+  json j = json::parse(in, nullptr, false);
+  if (j.is_discarded() || !j.is_object()) {
+    LOGW("settings: %s is not valid JSON, using defaults", path.c_str());
+    return s;
+  }
+  get(j, "serial_port", s.serial_port);
+  get(j, "baud_rate", s.baud_rate);
+  get(j, "power_calibration", s.power_calibration);
+  get(j, "max_nodes", s.max_nodes);
+  get(j, "publish_interval_s", s.publish_interval_s);
+  get(j, "device_id", s.device_id);
+  if (auto m = j.find("mqtt"); m != j.end() && m->is_object()) {
+    get(*m, "host", s.mqtt.host);
+    get(*m, "port", s.mqtt.port);
+    get(*m, "username", s.mqtt.username);
+    get(*m, "password", s.mqtt.password);
+    get(*m, "discovery_prefix", s.mqtt.discovery_prefix);
+    get(*m, "base_topic", s.mqtt.base_topic);
+  }
+  if (s.publish_interval_s < 5) s.publish_interval_s = 5;
+  return s;
+}
+
+bool save_settings(const std::string &path, const Settings &s) {
+  json j = {
+      {"serial_port", s.serial_port},
+      {"baud_rate", s.baud_rate},
+      {"power_calibration", s.power_calibration},
+      {"max_nodes", s.max_nodes},
+      {"publish_interval_s", s.publish_interval_s},
+      {"device_id", s.device_id},
+      {"mqtt",
+       {{"host", s.mqtt.host},
+        {"port", s.mqtt.port},
+        {"username", s.mqtt.username},
+        {"password", s.mqtt.password},
+        {"discovery_prefix", s.mqtt.discovery_prefix},
+        {"base_topic", s.mqtt.base_topic}}},
+  };
+  // The MQTT password is in here: owner-only.
+  return write_file_atomic(path, j.dump(2) + "\n", 0600);
+}
+
+}  // namespace tigod

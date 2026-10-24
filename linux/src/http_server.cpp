@@ -1,0 +1,430 @@
+#include "http_server.h"
+
+#include "log.h"
+
+#include <httplib.h>
+#include <nlohmann/json.hpp>
+
+#include <algorithm>
+#include <cmath>
+#include <ctime>
+#include <fstream>
+#include <ifaddrs.h>
+#include <map>
+#include <arpa/inet.h>
+#include <net/if.h>
+#include <sstream>
+#include <sys/statvfs.h>
+#include <sys/sysinfo.h>
+#include <thread>
+
+namespace tigod {
+
+using nlohmann::json;
+
+static double r1(double v) { return std::round(v * 10) / 10; }
+static double r2(double v) { return std::round(v * 100) / 100; }
+
+static void send_json(httplib::Response &res, const json &j, int status = 200) {
+  res.status = status;
+  res.set_header("Cache-Control", "no-store");
+  res.set_content(j.dump(), "application/json");
+}
+
+// Without a CCA the panels have no string or inverter, and the dashboard,
+// which draws by string, would show nothing. Panels with no CCA string go into
+// one "All panels" string under an "Unassigned" inverter — the same grouping
+// the ESP32 uses for strings no inverter claims (#60).
+static const char *const ALL_PANELS = "All panels";
+
+static std::string string_of(const Monitor &mon, const Panel &p) {
+  for (const auto &n : mon.nodes())
+    if (n.addr == p.addr && !n.cca_string_label.empty()) return n.cca_string_label;
+  return ALL_PANELS;
+}
+
+static json strings_json(const Monitor &mon) {
+  auto now = Clock::now();
+  std::map<std::string, json> by_label;
+  for (const auto &p : mon.panels()) {
+    std::string label = string_of(mon, p);
+    json &s = by_label[label];
+    if (s.is_null()) {
+      s = {{"label", label}, {"display_label", ""}, {"inverter", ""}, {"mppt", ""}, {"panel_rating_w", 0},
+           {"total_power", 0.0}, {"peak_power", 0.0}, {"total_current", 0.0}, {"active_devices", 0},
+           {"total_devices", 0}};
+    }
+    s["total_devices"] = s["total_devices"].get<int>() + 1;
+    s["peak_power"] = r1(s["peak_power"].get<double>() + p.peak_power);
+    if (now - p.updated < Monitor::ONLINE_WINDOW) {
+      s["active_devices"] = s["active_devices"].get<int>() + 1;
+      s["total_power"] = r1(s["total_power"].get<double>() + p.reading.power_in);
+      s["total_current"] = r2(s["total_current"].get<double>() + p.reading.current_in);
+    }
+  }
+  json out = json::array();
+  for (auto &kv : by_label) out.push_back(kv.second);
+  return out;
+}
+
+static std::string panel_name(const Panel &p) {
+  if (!p.label.empty()) return p.label;
+  if (p.barcode.size() >= 6) return p.barcode.substr(p.barcode.size() - 6);
+  return p.addr;
+}
+
+// /proc/meminfo, in bytes.
+static void meminfo(uint64_t &total, uint64_t &available) {
+  total = available = 0;
+  std::ifstream in("/proc/meminfo");
+  std::string key;
+  uint64_t kb;
+  std::string unit;
+  while (in >> key >> kb) {
+    std::getline(in, unit);
+    if (key == "MemTotal:") total = kb * 1024;
+    else if (key == "MemAvailable:") available = kb * 1024;
+  }
+}
+
+static json cpu_temp() {
+  std::ifstream in("/sys/class/thermal/thermal_zone0/temp");
+  long milli;
+  if (in >> milli) return r1(milli / 1000.0);
+  return nullptr;
+}
+
+static std::string ip_address() {
+  ifaddrs *ifs = nullptr;
+  if (getifaddrs(&ifs) != 0) return "";
+  std::string ip;
+  for (ifaddrs *i = ifs; i != nullptr; i = i->ifa_next) {
+    if (i->ifa_addr == nullptr || i->ifa_addr->sa_family != AF_INET) continue;
+    if (i->ifa_flags & IFF_LOOPBACK) continue;
+    char buf[INET_ADDRSTRLEN];
+    inet_ntop(AF_INET, &reinterpret_cast<sockaddr_in *>(i->ifa_addr)->sin_addr, buf, sizeof(buf));
+    ip = buf;
+    break;
+  }
+  freeifaddrs(ifs);
+  return ip;
+}
+
+// Signal level of the first wireless interface, from /proc/net/wireless.
+static json wifi_rssi() {
+  std::ifstream in("/proc/net/wireless");
+  std::string line;
+  for (int i = 0; std::getline(in, line); i++) {
+    if (i < 2) continue;  // two header lines
+    std::istringstream ss(line);
+    std::string iface, status, link, level;
+    if (ss >> iface >> status >> link >> level) return std::atoi(level.c_str());
+  }
+  return nullptr;
+}
+
+static std::string mac_address() {
+  for (const char *iface : {"wlan0", "eth0", "end0"}) {
+    std::ifstream in(std::string("/sys/class/net/") + iface + "/address");
+    std::string mac;
+    if (in >> mac && mac != "00:00:00:00:00:00") return mac;
+  }
+  return "";
+}
+
+static long system_uptime_s() {
+  struct sysinfo si {};
+  return sysinfo(&si) == 0 ? si.uptime : 0;
+}
+
+HttpServer::HttpServer(HttpContext ctx) : ctx_(std::move(ctx)), svr_(std::make_unique<httplib::Server>()) {}
+
+HttpServer::~HttpServer() { stop(); }
+
+bool HttpServer::start(int port) {
+  routes_();
+  if (!svr_->bind_to_port("0.0.0.0", port)) {
+    LOGE("web: cannot listen on port %d", port);
+    return false;
+  }
+  LOGI("web: listening on port %d", port);
+  thread_ = std::make_unique<std::thread>([this] { svr_->listen_after_bind(); });
+  return true;
+}
+
+void HttpServer::stop() {
+  if (!thread_) return;
+  svr_->stop();
+  thread_->join();
+  thread_.reset();
+}
+
+void HttpServer::routes_() {
+  auto &svr = *svr_;
+  const Monitor &mon = ctx_.monitor;
+
+  auto app = [this](const httplib::Request &, httplib::Response &res) {
+    std::ifstream in(ctx_.web_dir + "/app.html", std::ios::binary);
+    if (!in) {
+      res.status = 500;
+      res.set_content("app.html is missing from " + ctx_.web_dir, "text/plain");
+      return;
+    }
+    std::stringstream ss;
+    ss << in.rdbuf();
+    res.set_content(ss.str(), "text/html; charset=utf-8");
+  };
+  svr.Get("/", app);
+  svr.Get("/app", app);
+
+  svr.Get("/api/devices", [&mon](const httplib::Request &, httplib::Response &res) {
+    auto now = Clock::now();
+    json devices = json::array();
+    for (const auto &p : mon.panels()) {
+      const auto &r = p.reading;
+      auto age = std::chrono::duration_cast<std::chrono::milliseconds>(now - p.updated).count();
+      devices.push_back({{"addr", p.addr},
+                         {"barcode", p.barcode},
+                         {"name", panel_name(p)},
+                         {"string_label", string_of(mon, p)},
+                         {"voltage_in", r2(r.voltage_in)},
+                         {"voltage_out", r2(r.voltage_out)},
+                         {"current", r2(r.current_in)},
+                         {"current_out", r2(r.current_out)},
+                         {"power_in", r1(r.power_in)},
+                         {"power", r1(r.power_out)},
+                         {"power_out", r1(r.power_out)},
+                         {"peak_power", r1(p.peak_power)},
+                         {"temperature", r1(r.temperature)},
+                         {"rssi", r.rssi},
+                         {"duty_cycle", r1(r.duty_cycle * 100.0 / 255.0)},
+                         {"efficiency", r2(r.efficiency)},
+                         {"data_age_ms", age},
+                         {"stale", now - p.updated >= Monitor::ONLINE_WINDOW}});
+    }
+    send_json(res, {{"devices", devices}, {"count", devices.size()}});
+  });
+
+  svr.Get("/api/overview", [&mon](const httplib::Request &, httplib::Response &res) {
+    auto now = Clock::now();
+    double power_in = 0, current = 0, eff = 0, temp = 0;
+    int active = 0;
+    auto panels = mon.panels();
+    for (const auto &p : panels) {
+      if (now - p.updated >= Monitor::ONLINE_WINDOW) continue;
+      active++;
+      power_in += p.reading.power_in;
+      current += p.reading.current_in;
+      eff += p.reading.efficiency;
+      temp += p.reading.temperature;
+    }
+    double today = mon.today_kwh();
+    double month = today;
+    char ym[8];
+    time_t t = time(nullptr);
+    tm lt{};
+    localtime_r(&t, &lt);
+    strftime(ym, sizeof(ym), "%Y-%m", &lt);
+    for (const auto &d : mon.daily_history())
+      if (d.first.compare(0, 7, ym) == 0) month += d.second;
+    size_t known = std::max(panels.size(), mon.nodes().size());
+    send_json(res, {{"total_power", r1(power_in)},
+                    {"total_current", r2(current)},
+                    {"avg_efficiency", active ? r2(eff / active) : 0.0},
+                    {"avg_temperature", active ? r2(temp / active) : 0.0},
+                    {"active_devices", active},
+                    {"max_devices", known},
+                    {"total_energy", r2(mon.energy_kwh())},
+                    {"total_energy_in", r2(mon.energy_kwh())},
+                    {"total_energy_out", r2(mon.energy_kwh())},
+                    {"today_energy", r2(today)},
+                    {"month_energy", r1(month)}});
+  });
+
+  svr.Get("/api/strings", [&mon](const httplib::Request &, httplib::Response &res) {
+    send_json(res, {{"strings", strings_json(mon)}});
+  });
+  svr.Get("/api/inverters", [&mon](const httplib::Request &, httplib::Response &res) {
+    json strings = strings_json(mon);
+    if (strings.empty()) {
+      send_json(res, {{"inverters", json::array()}});
+      return;
+    }
+    double power = 0, peak = 0;
+    int active = 0, total = 0;
+    for (const auto &s : strings) {
+      power += s["total_power"].get<double>();
+      peak += s["peak_power"].get<double>();
+      active += s["active_devices"].get<int>();
+      total += s["total_devices"].get<int>();
+    }
+    send_json(res, {{"inverters", json::array({{{"name", "Unassigned"},
+                                                {"display_name", ""},
+                                                {"unassigned", true},
+                                                {"mppts", json::array()},
+                                                {"total_power", r1(power)},
+                                                {"peak_power", r1(peak)},
+                                                {"active_devices", active},
+                                                {"total_devices", total},
+                                                {"strings", strings}}})}});
+  });
+
+  svr.Get("/api/nodes", [&mon](const httplib::Request &, httplib::Response &res) {
+    json nodes = json::array();
+    for (const auto &n : mon.nodes()) {
+      nodes.push_back({{"addr", n.addr},
+                       {"long_address", n.long_address},
+                       {"sensor_index", n.sensor_index},
+                       {"checksum", n.checksum},
+                       {"cca_validated", n.cca_validated},
+                       {"cca_label", n.cca_label},
+                       {"cca_string", n.cca_string_label},
+                       {"cca_mppt", n.cca_mppt_label},
+                       {"cca_channel", n.cca_channel}});
+    }
+    send_json(res, {{"nodes", nodes}, {"inverters", json::array()}, {"strings", json::array()}});
+  });
+
+  svr.Get("/api/energy/history", [&mon](const httplib::Request &, httplib::Response &res) {
+    json days = json::array();
+    for (const auto &d : mon.daily_history()) days.push_back({{"date", d.first}, {"energy", r2(d.second)}});
+    char today[16];
+    time_t t = time(nullptr);
+    tm lt{};
+    localtime_r(&t, &lt);
+    strftime(today, sizeof(today), "%Y-%m-%d", &lt);
+    days.push_back({{"date", today}, {"energy", r2(mon.today_kwh())}});
+    send_json(res, {{"days", days}});
+  });
+
+  auto status = [this, &mon](const httplib::Request &req, httplib::Response &res) {
+    uint64_t total = 0, avail = 0;
+    meminfo(total, avail);
+    static std::atomic<uint64_t> min_seen{UINT64_MAX};
+    uint64_t prev = min_seen.load();
+    while (avail && avail < prev && !min_seen.compare_exchange_weak(prev, avail)) {
+    }
+    uint64_t min_avail = std::min(prev, avail);
+    long up = system_uptime_s();
+    if (req.path == "/api/health") {
+      send_json(res, {{"status", "ok"}, {"uptime", up}, {"heap_free", avail}, {"heap_min_free", min_avail}});
+      return;
+    }
+    BusStats s = mon.stats();
+    struct statvfs fs {};
+    uint64_t disk_free = 0, disk_total = 0;
+    if (statvfs(ctx_.settings_path.c_str(), &fs) == 0) {
+      disk_free = static_cast<uint64_t>(fs.f_bavail) * fs.f_frsize;
+      disk_total = static_cast<uint64_t>(fs.f_blocks) * fs.f_frsize;
+    }
+    send_json(res, {{"platform", "linux"},
+                    {"disk_free", disk_free},
+                    {"disk_total", disk_total},
+                    {"wifi_rssi", wifi_rssi()},
+                    {"mac_address", mac_address()},
+                    {"mqtt_configured", !ctx_.current_settings().mqtt.host.empty()},
+                    {"free_heap", avail},
+                    {"total_heap", total},
+                    {"min_free_heap", min_avail},
+                    {"uptime_sec", up},
+                    {"uptime_days", up / 86400},
+                    {"uptime_hours", (up / 3600) % 24},
+                    {"uptime_mins", (up / 60) % 60},
+                    {"esphome_version", "tigomonitord " + ctx_.version},
+                    {"compilation_time", __DATE__ " " __TIME__},
+                    {"internal_temp", cpu_temp()},
+                    {"invalid_checksum", s.bad_checksums},
+                    {"missed_frames", s.ends_without_start + s.overflows},
+                    {"total_frames", s.frames},
+                    {"command_frames", s.frame27},
+                    {"frame_27_count", s.frame27},
+                    {"network_connected", true},
+                    {"ip_address", ip_address()},
+                    {"reset_reason", "unknown"},
+                    {"mqtt_connected", ctx_.mqtt_connected()},
+                    {"mqtt_error", ctx_.mqtt_error()}});
+  };
+  svr.Get("/api/status", status);
+  svr.Get("/api/health", status);
+
+  svr.Get("/api/config", [this](const httplib::Request &, httplib::Response &res) {
+    Settings s = ctx_.current_settings();
+    send_json(res, {{"power_calibration",
+                     {{"value", s.power_calibration}, {"default", 1.0}, {"overridden", s.power_calibration != 1.0f}}}});
+  });
+
+  svr.Post("/api/reset_peak_power", [this](const httplib::Request &, httplib::Response &res) {
+    ctx_.mutable_monitor.reset_peaks();
+    send_json(res, {{"ok", true}});
+  });
+  svr.Post("/api/reset_node_table", [this](const httplib::Request &, httplib::Response &res) {
+    ctx_.mutable_monitor.reset_nodes();
+    send_json(res, {{"ok", true}});
+  });
+  // systemd restarts the service (Restart=always in the unit).
+  svr.Post("/api/restart", [this](const httplib::Request &, httplib::Response &res) {
+    ctx_.restart_requested = true;
+    send_json(res, {{"ok", true}});
+  });
+
+  // Pi-only: the settings an ESP32 user would put in YAML.
+  svr.Get("/api/settings", [this](const httplib::Request &, httplib::Response &res) {
+    Settings s = ctx_.current_settings();
+    send_json(res, {{"serial_port", s.serial_port},
+                    {"power_calibration", s.power_calibration},
+                    {"publish_interval_s", s.publish_interval_s},
+                    {"device_id", s.device_id},
+                    {"mqtt",
+                     {{"host", s.mqtt.host},
+                      {"port", s.mqtt.port},
+                      {"username", s.mqtt.username},
+                      {"password_set", !s.mqtt.password.empty()},
+                      {"discovery_prefix", s.mqtt.discovery_prefix},
+                      {"base_topic", s.mqtt.base_topic}}},
+                    {"mqtt_connected", ctx_.mqtt_connected()},
+                    {"mqtt_error", ctx_.mqtt_error()}});
+  });
+
+  svr.Post("/api/settings", [this](const httplib::Request &req, httplib::Response &res) {
+    json j = json::parse(req.body, nullptr, false);
+    if (j.is_discarded() || !j.is_object()) {
+      send_json(res, {{"error", "Expected a JSON object."}}, 400);
+      return;
+    }
+    std::lock_guard<std::mutex> lock(settings_mu_);
+    Settings s = ctx_.current_settings();
+    std::string err;
+    try {
+      if (j.contains("serial_port")) s.serial_port = j["serial_port"].get<std::string>();
+      if (j.contains("power_calibration")) s.power_calibration = j["power_calibration"].get<float>();
+      if (j.contains("publish_interval_s")) s.publish_interval_s = j["publish_interval_s"].get<int>();
+      if (j.contains("mqtt") && j["mqtt"].is_object()) {
+        const json &m = j["mqtt"];
+        if (m.contains("host")) s.mqtt.host = m["host"].get<std::string>();
+        if (m.contains("port")) s.mqtt.port = m["port"].get<int>();
+        if (m.contains("username")) s.mqtt.username = m["username"].get<std::string>();
+        // Absent means "keep"; the UI never sees the stored password.
+        if (m.contains("password")) s.mqtt.password = m["password"].get<std::string>();
+        if (m.contains("discovery_prefix")) s.mqtt.discovery_prefix = m["discovery_prefix"].get<std::string>();
+        if (m.contains("base_topic")) s.mqtt.base_topic = m["base_topic"].get<std::string>();
+      }
+    } catch (const json::exception &) {
+      err = "A setting has the wrong type.";
+    }
+    if (err.empty() && (s.mqtt.port < 1 || s.mqtt.port > 65535)) err = "MQTT port must be 1-65535.";
+    if (err.empty() && (s.power_calibration <= 0 || s.power_calibration > 5)) err = "Power calibration must be between 0 and 5.";
+    if (err.empty() && s.publish_interval_s < 5) err = "Publish interval must be at least 5 seconds.";
+    if (!err.empty()) {
+      send_json(res, {{"error", err}}, 400);
+      return;
+    }
+    if (!save_settings(ctx_.settings_path, s)) {
+      send_json(res, {{"error", "Could not save settings to disk."}}, 500);
+      return;
+    }
+    ctx_.settings_changed = true;
+    send_json(res, {{"saved", true}});
+  });
+}
+
+}  // namespace tigod
