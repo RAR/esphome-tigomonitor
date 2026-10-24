@@ -82,6 +82,18 @@ class Monitor {
   // Forgets every node and panel; they come back with the next Frame 27.
   void reset_nodes();
 
+  // Replaces the node table with a backup (the /api/nodes export), the way
+  // the firmware's import_node_table() does: an entry whose barcode a Frame 27
+  // has since placed at another address moves there, one whose address now
+  // belongs to another panel waits for its own Frame 27, and entries sharing
+  // a barcode fold into one.
+  struct ImportResult {
+    size_t imported = 0;
+    int remapped = 0, parked = 0;
+  };
+  ImportResult import_nodes(const std::vector<Node> &in);
+  size_t max_nodes() const { return max_nodes_; }
+
  private:
   void on_frame_(const std::string &raw);
   void on_power_packet_(const std::string &packet);

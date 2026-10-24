@@ -8,6 +8,8 @@
 
 #include <ctime>
 #include <fstream>
+#include <map>
+#include <set>
 
 namespace tigod {
 
@@ -210,6 +212,93 @@ void Monitor::reset_nodes() {
   dirty_ = true;
   save_locked_();
   LOGW("node table cleared");
+}
+
+Monitor::ImportResult Monitor::import_nodes(const std::vector<Node> &in) {
+  std::lock_guard<std::mutex> lock(mu_);
+  ImportResult r;
+
+  // Barcode -> address pairs a Frame 27 has confirmed since start. A backup
+  // records the addresses of the day it was exported; confirmed pairs win (#74).
+  std::map<std::string, std::string> live_addr_by_barcode;
+  std::set<std::string> live_addrs;
+  for (const auto &n : nodes_) {
+    if (n.seen_in_frame27 && !n.long_address.empty()) {
+      live_addr_by_barcode[n.long_address] = n.addr;
+      live_addrs.insert(n.addr);
+    }
+  }
+  nodes_.clear();
+  parked_cca_.clear();
+
+  // Confirmed entries first, so the duplicate-address check keeps them over a
+  // stale entry naming the same address.
+  std::vector<Node> ordered;
+  for (int pass = 0; pass < 2; pass++) {
+    for (const auto &src : in) {
+      auto live = live_addr_by_barcode.find(src.long_address);
+      bool confirmed = !src.long_address.empty() && live != live_addr_by_barcode.end();
+      if ((pass == 0) != confirmed) continue;
+      Node n = src;
+      if (confirmed) {
+        n.seen_in_frame27 = true;
+        if (n.addr != live->second) {
+          LOGW("import: %s (%s) is at %s now, not %s; placing it there", n.long_address.c_str(),
+               n.cca_label.c_str(), live->second.c_str(), n.addr.c_str());
+          n.addr = live->second;
+          r.remapped++;
+        }
+      } else if (!n.long_address.empty() && live_addrs.count(n.addr)) {
+        LOGW("import: %s (%s) is no longer at %s; holding its labels until it reappears",
+             n.long_address.c_str(), n.cca_label.c_str(), n.addr.c_str());
+        identity::park(parked_cca_, n);
+        r.parked++;
+        continue;
+      }
+      n.checksum.assign(1, proto::crc4_char(n.addr.c_str(), n.addr.size()));
+      ordered.push_back(std::move(n));
+    }
+  }
+
+  for (auto &n : ordered) {
+    bool duplicate = false;
+    for (auto &existing : nodes_) {
+      if (existing.addr == n.addr) {
+        LOGW("import: skipping a second entry for address %s", n.addr.c_str());
+        duplicate = true;
+        break;
+      }
+      if (!n.long_address.empty() && existing.long_address == n.long_address) {
+        if (existing.sensor_index < 0) existing.sensor_index = n.sensor_index;
+        identity::fill_cca_metadata(existing, n);
+        LOGW("import: %s has the same barcode as %s; merged", n.addr.c_str(), existing.addr.c_str());
+        duplicate = true;
+        break;
+      }
+    }
+    if (!duplicate) nodes_.push_back(std::move(n));
+  }
+  r.imported = nodes_.size();
+
+  // Panels already on screen pick up their barcode and label now, not at
+  // their next reading.
+  for (auto &p : panels_) {
+    p.barcode.clear();
+    p.label.clear();
+    for (const auto &n : nodes_) {
+      if (n.addr == p.addr) {
+        p.barcode = n.long_address;
+        p.label = n.cca_label;
+        break;
+      }
+    }
+  }
+  if (r.remapped || r.parked)
+    LOGW("import: backup predates a renumbering; %d moved to current addresses, %d held", r.remapped, r.parked);
+  LOGI("import: %zu nodes", r.imported);
+  dirty_ = true;
+  save_locked_();
+  return r;
 }
 
 void Monitor::tick() {

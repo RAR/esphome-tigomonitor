@@ -11,6 +11,7 @@
 #include <fstream>
 #include <ifaddrs.h>
 #include <map>
+#include <set>
 #include <arpa/inet.h>
 #include <net/if.h>
 #include <sstream>
@@ -363,6 +364,52 @@ void HttpServer::routes_() {
   svr.Post("/api/reset_node_table", [this](const httplib::Request &, httplib::Response &res) {
     ctx_.mutable_monitor.reset_nodes();
     send_json(res, {{"ok", true}});
+  });
+  // Restores a node table exported from Nodes (here or on an ESP32). The
+  // same file format and rules as the firmware's /api/nodes/import.
+  svr.Post("/api/nodes/import", [this](const httplib::Request &req, httplib::Response &res) {
+    auto fail = [&res](const std::string &msg) {
+      send_json(res, {{"status", "error"}, {"message", msg}}, 400);
+    };
+    json body = json::parse(req.body, nullptr, false);
+    if (body.is_discarded() || !body.is_object() || !body.contains("nodes") || !body["nodes"].is_array())
+      return fail("Expected a JSON object with a \"nodes\" array");
+    auto str = [](const json &o, const char *k) {
+      auto it = o.find(k);
+      return it != o.end() && it->is_string() ? it->get<std::string>() : std::string();
+    };
+    std::vector<Node> nodes;
+    std::set<std::string> barcodes;
+    for (const auto &o : body["nodes"]) {
+      if (!o.is_object()) continue;
+      Node n;
+      n.addr = str(o, "addr");
+      n.long_address = str(o, "long_address");
+      if (n.addr.empty() || n.long_address.empty()) continue;  // never announced
+      n.cca_label = str(o, "cca_label");
+      n.cca_string_label = str(o, "cca_string");
+      n.cca_mppt_label = str(o, "cca_mppt");
+      if (n.cca_mppt_label.empty()) n.cca_mppt_label = str(o, "cca_inverter");  // before the rename
+      n.cca_channel = str(o, "cca_channel");
+      n.cca_object_id = str(o, "cca_object_id");
+      if (o.contains("sensor_index") && o["sensor_index"].is_number_integer()) n.sensor_index = o["sensor_index"];
+      if (o.contains("cca_validated") && o["cca_validated"].is_boolean()) n.cca_validated = o["cca_validated"];
+      barcodes.insert(n.long_address);
+      nodes.push_back(std::move(n));
+    }
+    if (nodes.empty()) return fail("No valid nodes found in import data");
+    // Entries sharing a barcode fold into one, so count barcodes (#74).
+    size_t cap = ctx_.mutable_monitor.max_nodes();
+    if (barcodes.size() > cap)
+      return fail("This file has " + std::to_string(barcodes.size()) + " panels but the node table holds " +
+                  std::to_string(cap) + ".");
+    auto r = ctx_.mutable_monitor.import_nodes(nodes);
+    send_json(res, {{"status", "ok"},
+                    {"message", "Successfully imported " + std::to_string(r.imported) + " nodes"},
+                    {"imported", r.imported},
+                    {"remapped", r.remapped},
+                    {"held", r.parked},
+                    {"overrides", 0}});
   });
   // systemd restarts the service (Restart=always in the unit).
   svr.Post("/api/restart", [this](const httplib::Request &, httplib::Response &res) {
