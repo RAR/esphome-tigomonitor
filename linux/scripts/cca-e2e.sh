@@ -91,6 +91,7 @@ expect('MAC forgotten', post('/api/cca/ble-mac', {'reset': True})[1]['saved'], F
 mock = dbus.Interface(dbus.SessionBus().get_object('org.bluez', '/test'), 'test.Mock')
 log = [str(x) for x in mock.Log()]
 expect('adapter powered on', bool(mock.Powered()), True)
+expect('first connect timed out, retried', log.count('connect-timeout'), 1)
 expect('every connection closed', (log.count('connect'), log.count('disconnect')), (6, 6))
 expect('LE-only discovery', 'filter:le' in log, True)
 

@@ -563,7 +563,16 @@ bool CcaBle::session_(const std::vector<std::pair<std::string, std::string>> &cm
   }
 
   LOGI("cca: connecting to %s", mac.c_str());
-  if (!call(bus_, dev, "org.bluez.Device1", "Connect", err, 30 * 1000000ULL)) return false;
+  if (!call(bus_, dev, "org.bluez.Device1", "Connect", err, 30 * 1000000ULL)) {
+    // The first LE connection after a scan often times out on BlueZ (seen on
+    // the first real Pi: timed out, then connected on the next try). Hear
+    // the CCA advertise again and try once more before giving up.
+    LOGW("cca: %s; retrying", err.c_str());
+    std::string ignored;
+    scan_(4, ignored);
+    err.clear();
+    if (!call(bus_, dev, "org.bluez.Device1", "Connect", err, 30 * 1000000ULL)) return false;
+  }
   struct Disconnect {
     sd_bus *bus;
     std::string dev;

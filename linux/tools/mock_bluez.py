@@ -113,6 +113,9 @@ def main():
         def Connect(self):
             if self.props['Address'] != CCA_MAC:
                 raise dbus.exceptions.DBusException('org.bluez.Error.Failed', 'not a CCA')
+            if 'connect-timeout' not in log:  # the first try times out, as on a real Pi
+                log.append('connect-timeout')
+                raise dbus.exceptions.DBusException('org.bluez.Error.Failed', 'Connection timed out')
             log.append('connect')
             svc = self.path + '/service0010'
             if svc in root.objs:  # BlueZ keeps the GATT tree between connections
