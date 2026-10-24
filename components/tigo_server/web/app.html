@@ -978,11 +978,48 @@
         <div class="topbar-meta" id="tools-meta">Configuration helpers and maintenance</div>
       </div>
 
-      <div class="section-head">
+      <!-- Raspberry Pi build only (linux/): shown when /api/status reports
+           platform: 'linux'. The ESP32 gets these from YAML instead. -->
+      <div class="section-head" data-linux-only style="display:none">
+        <div class="section-title">Home Assistant</div>
+        <div class="section-sub" id="pi-mqtt-state">—</div>
+      </div>
+      <div class="tools-card" data-linux-only style="display:none">
+        <p class="hint">Panels show up in Home Assistant by themselves over MQTT. Point this at the broker Home Assistant already uses — for most people that is the Mosquitto add-on, at your Home Assistant's address, with the username and password of a Home Assistant user.</p>
+        <div class="cfg-row">
+          <div class="cfg-text"><strong>Broker address</strong><span class="cfg-default">Leave empty to turn MQTT off</span></div>
+          <div class="cfg-ctrl"><input class="cfg-input" id="pi-mqtt-host" placeholder="homeassistant.local" autocomplete="off"></div>
+        </div>
+        <div class="cfg-row">
+          <div class="cfg-text"><strong>Port</strong></div>
+          <div class="cfg-ctrl"><input class="cfg-input" id="pi-mqtt-port" type="number" min="1" max="65535"></div>
+        </div>
+        <div class="cfg-row">
+          <div class="cfg-text"><strong>Username</strong></div>
+          <div class="cfg-ctrl"><input class="cfg-input" id="pi-mqtt-user" autocomplete="off"></div>
+        </div>
+        <div class="cfg-row">
+          <div class="cfg-text"><strong>Password</strong><span class="cfg-default" id="pi-mqtt-pass-hint"></span></div>
+          <div class="cfg-ctrl"><input class="cfg-input" id="pi-mqtt-pass" type="password" autocomplete="new-password"></div>
+        </div>
+        <div class="cfg-row">
+          <div class="cfg-text"><strong>Serial port</strong><span class="cfg-default">The RS485 adapter; a USB dongle is usually /dev/ttyUSB0</span></div>
+          <div class="cfg-ctrl"><input class="cfg-input" id="pi-serial" autocomplete="off"></div>
+        </div>
+        <div class="cfg-row">
+          <div class="cfg-text"><strong>Power calibration</strong><span class="cfg-default">Multiplies every power reading; 1.0 leaves them as reported</span></div>
+          <div class="cfg-ctrl"><input class="cfg-input" id="pi-calibration" type="number" step="0.01" min="0.01" max="5"></div>
+        </div>
+        <div class="tools-actions" style="margin-top:12px">
+          <button class="btn primary" id="pi-save">Save</button>
+        </div>
+      </div>
+
+      <div class="section-head" data-esp-only>
         <div class="section-title">Device Configuration</div>
         <div class="section-sub">Stored on-device · overrides YAML</div>
       </div>
-      <div class="tools-card">
+      <div class="tools-card" data-esp-only>
         <p class="hint">These knobs are saved to the ESP32 and take effect without reflashing. A stored value <b>overrides the YAML default</b> until you revert it — after that, editing the YAML applies again. <span id="cfg-status" style="color:var(--text-dim)"></span></p>
         <div id="cfg-rows"></div>
       </div>
@@ -1015,11 +1052,11 @@
         </div>
       </div>
 
-      <div class="section-head">
+      <div class="section-head" data-esp-only>
         <div class="section-title">YAML Configuration</div>
         <div class="section-sub" id="tools-yaml-sub">— devices</div>
       </div>
-      <div class="tools-card">
+      <div class="tools-card" data-esp-only>
         <p class="hint">Pick the sensors you want exposed to ESPHome / Home Assistant. The block below mirrors what you'd paste into your <code>esphome:</code> YAML.</p>
 
         <h3 style="margin-top:8px">Group panels into HA devices</h3>
@@ -1145,11 +1182,11 @@
         </div>
       </div>
 
-      <div class="section-head">
+      <div class="section-head" data-esp-only>
         <div class="section-title">Time-series database</div>
         <div class="section-sub" id="diag-tsdb-sub">—</div>
       </div>
-      <div class="table-wrap">
+      <div class="table-wrap" data-esp-only>
         <table class="nodes">
           <thead>
             <tr>
@@ -1924,6 +1961,21 @@
   }
   refreshDashboard();
   setInterval(refreshDashboard, 5000);
+
+  // The Raspberry Pi build answers /api/status with platform: 'linux'; the
+  // ESP32 omits it. Swap the ESP32-only Tools sections for the Pi's settings.
+  let PLATFORM = 'esp32';
+  apiFetch('/api/status').then(r => r.ok ? r.json() : {}).then(s => {
+    if (s.platform !== 'linux') return;
+    PLATFORM = 'linux';
+    document.querySelectorAll('[data-esp-only]').forEach(el => { el.style.display = 'none'; });
+    document.querySelectorAll('[data-linux-only]').forEach(el => { el.style.display = ''; });
+    const restart = document.getElementById('tools-restart');
+    restart.previousElementSibling.innerHTML =
+      '<strong>Restart service</strong><span>Restarts the monitor service. Readings pause for a few seconds.</span>';
+    restart.textContent = 'Restart service';
+    refreshTools();
+  }).catch(() => {});
 
   // ===== Panel detail modal =====
   // Click a heat tile → modal with live readings + per-panel power history,
@@ -2831,10 +2883,43 @@
   const TSDB_STATS_MS = 60000;
   let tsdbStatsAt = 0;
 
+  // The Raspberry Pi build (linux/) reports the same /api/status with
+  // platform: 'linux'. It has no PSRAM, sockets pool or FreeRTOS, so those
+  // cards show the SD card and the MQTT link instead.
+  function renderLinuxDiagnostics(status) {
+    const label = (valId, text) => {
+      const l = document.getElementById(valId)?.parentElement?.querySelector('.hist-stat-label');
+      if (l) l.textContent = text;
+    };
+    label('diag-heap-free', 'RAM available');
+    label('diag-heap-min', 'RAM available, lowest');
+    label('diag-psram-free', 'SD card free');
+    label('diag-temp', 'CPU temp');
+    label('diag-sockets', 'MQTT');
+    document.getElementById('diag-mem-sub').textContent = 'system';
+    document.getElementById('diag-temp').nextElementSibling.textContent = 'SoC sensor';
+    const mb = (b) => (b / 1048576).toFixed(0);
+    document.getElementById('diag-heap-free').innerHTML =
+      `${mb(status.free_heap)}<span class="hist-stat-unit">MB</span>`;
+    document.getElementById('diag-heap-sub').textContent =
+      `${(100 * status.free_heap / status.total_heap).toFixed(1)}% of ${mb(status.total_heap)} MB`;
+    document.getElementById('diag-heap-min').innerHTML =
+      `${mb(status.min_free_heap)}<span class="hist-stat-unit">MB</span>`;
+    document.getElementById('diag-psram-free').innerHTML =
+      `${mb(status.disk_free || 0)}<span class="hist-stat-unit">MB</span>`;
+    document.getElementById('diag-psram-sub').textContent = status.disk_total
+      ? `${(100 * status.disk_free / status.disk_total).toFixed(1)}% of ${mb(status.disk_total)} MB` : '—';
+    const mqtt = document.getElementById('diag-sockets');
+    mqtt.textContent = status.mqtt_connected ? 'connected' : (status.mqtt_configured ? 'offline' : 'off');
+    mqtt.style.fontSize = '18px';
+    document.getElementById('diag-tasks').textContent =
+      status.mqtt_error || (status.mqtt_configured ? '' : 'set a broker under Tools');
+  }
+
   async function refreshDiagnostics(force) {
     if (!document.getElementById('view-diagnostics').classList.contains('active')) return;
     try {
-      const wantTsdb = force || (Date.now() - tsdbStatsAt) >= TSDB_STATS_MS;
+      const wantTsdb = PLATFORM !== 'linux' && (force || (Date.now() - tsdbStatsAt) >= TSDB_STATS_MS);
       const [statusR, tsdbR] = await Promise.all([
         apiFetch('/api/status'),
         wantTsdb ? apiFetch('/api/tsdb/stats') : Promise.resolve(null),
@@ -2867,13 +2952,14 @@
       resetEl.style.color = reset.color;
       resetEl.title = reset.hint;
       document.getElementById('diag-rssi').innerHTML =
-        `${status.wifi_rssi}<span class="hist-stat-unit">dBm</span>`;
+        `${status.wifi_rssi ?? '—'}<span class="hist-stat-unit">dBm</span>`;
       document.getElementById('diag-ssid').textContent = status.wifi_ssid || '—';
       document.getElementById('diag-ip').textContent = status.ip_address || '—';
       document.getElementById('diag-mac').textContent = status.mac_address || '—';
       document.getElementById('diag-sockets').innerHTML =
         `${status.active_sockets ?? '—'}<span class="hist-stat-unit" id="diag-sockets-of"> / ${status.max_sockets ?? '—'}</span>`;
       document.getElementById('diag-tasks').textContent = `${status.task_count || 0} FreeRTOS tasks`;
+      if (status.platform === 'linux') renderLinuxDiagnostics(status);
 
       // UART telemetry
       const total = status.total_frames || 0;
@@ -3019,6 +3105,7 @@
 
   async function refreshTools() {
     if (!document.getElementById('view-tools').classList.contains('active')) return;
+    if (PLATFORM === 'linux') return refreshPiSettings();
     try {
       const dev = [...document.querySelectorAll('#tools-dev-grid input:checked')]
         .map(i => i.dataset.toolsDev).join(',');
@@ -3170,7 +3257,56 @@
       'Clear the persisted node table? Devices will repopulate as telemetry arrives.'));
   document.getElementById('tools-restart').addEventListener('click', () =>
     toolsAction('/api/restart', 'Restart issued',
-      'Reboot the ESP32 now?'));
+      PLATFORM === 'linux' ? 'Restart the monitor service now?' : 'Reboot the ESP32 now?'));
+
+  // ===== Raspberry Pi settings (linux/ build) =====
+  async function refreshPiSettings() {
+    try {
+      const r = await apiFetch('/api/settings');
+      if (!r.ok) throw new Error('/api/settings ' + r.status);
+      const s = await r.json();
+      document.getElementById('pi-mqtt-host').value = s.mqtt.host || '';
+      document.getElementById('pi-mqtt-port').value = s.mqtt.port || 1883;
+      document.getElementById('pi-mqtt-user').value = s.mqtt.username || '';
+      document.getElementById('pi-mqtt-pass').value = '';
+      document.getElementById('pi-mqtt-pass').placeholder = s.mqtt.password_set ? 'unchanged' : '';
+      document.getElementById('pi-mqtt-pass-hint').textContent =
+        s.mqtt.password_set ? 'Saved. Leave empty to keep it.' : '';
+      document.getElementById('pi-serial').value = s.serial_port || '';
+      document.getElementById('pi-calibration').value = s.power_calibration ?? 1;
+      document.getElementById('pi-mqtt-state').textContent = !s.mqtt.host ? 'MQTT off'
+        : s.mqtt_connected ? `connected to ${s.mqtt.host}` : `not connected${s.mqtt_error ? ': ' + s.mqtt_error : ''}`;
+      document.getElementById('tools-meta').textContent = `last update ${new Date().toLocaleTimeString()}`;
+    } catch (e) {
+      document.getElementById('tools-meta').textContent = `error: ${e.message}`;
+    }
+  }
+  document.getElementById('pi-save').addEventListener('click', async () => {
+    const mqtt = {
+      host: document.getElementById('pi-mqtt-host').value.trim(),
+      port: Number(document.getElementById('pi-mqtt-port').value) || 1883,
+      username: document.getElementById('pi-mqtt-user').value,
+    };
+    const pass = document.getElementById('pi-mqtt-pass').value;
+    if (pass !== '') mqtt.password = pass;
+    const body = {
+      mqtt,
+      serial_port: document.getElementById('pi-serial').value.trim(),
+      power_calibration: Number(document.getElementById('pi-calibration').value) || 1,
+    };
+    try {
+      const r = await apiFetch('/api/settings', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || `/api/settings ${r.status}`);
+      showToast('Settings saved ✓', 'ok');
+      // The daemon applies them within a second; give MQTT a moment to connect.
+      setTimeout(refreshPiSettings, 2500);
+    } catch (e) {
+      showToast(`Save failed: ${e.message}`, 'err');
+    }
+  });
 
   document.querySelector('#nav button[data-view="tools"]').addEventListener('click', refreshTools);
   if (window.location.hash === '#tools') refreshTools();
