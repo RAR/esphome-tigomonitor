@@ -17,8 +17,10 @@ you saw, working or not.
 
 ## How it differs from the ESP32 build
 
-- **Setup happens in the browser.** You set the MQTT broker, the serial port
-  and power calibration on the Tools page; there is nothing to compile.
+- **Setup happens in the browser.** You set the MQTT broker and the serial
+  port on the Tools page, and what the ESP32 takes from YAML (power
+  calibration, night-mode timeout, reset at midnight, a CCA IP) under
+  **Tools → Device Configuration**. There is nothing to compile.
 - **Home Assistant connects over MQTT**, not the ESPHome integration. Each
   panel appears as its own device, named by its barcode, as soon as the
   gateway announces it. The gateway announces its panels every 15 minutes or
@@ -28,9 +30,10 @@ you saw, working or not.
   set.
 - **History is kept on the SD card**, with a snapshot every 5 minutes
   rather than the ESP32's 30, for two years.
-- **Not in the Pi build yet:** the CCA Info page and syncing names straight
-  from the CCA. Panel names and strings come from a Tigo cloud import or a
-  node table backup from an ESP32 instead.
+- **The CCA Info page talks to the CCA over the Pi's Bluetooth**, as the
+  ESP32 does with `cca_source: ble`. The Pi finds the nearest CCA by itself;
+  there is no MAC to enter. For a CCA on firmware older than 4.0.4, set its
+  IP under Device Configuration to use its local HTTP API instead.
 
 ## What you need
 
@@ -94,7 +97,7 @@ For the Energy dashboard, add the **Tigo Monitor Energy** sensor under
 ## Name your panels and strings
 
 Out of the box every panel is named by its barcode and sits in one group
-called "All panels". There are two ways to get your real layout:
+called "All panels". There are three ways to get your real layout:
 
 - **From Tigo's cloud:** open **Tigo Cloud**, choose **Configure**, and log
   in with the account you use in the Tigo app. Then press **Import from Tigo
@@ -104,6 +107,10 @@ called "All panels". There are two ways to get your real layout:
   then **Import** the file on the Pi's. Names, strings, and your Topology
   renames and panel ratings come across. If you haven't set up inverters on
   the Pi yet, the backup's inverter names wait and apply once you do.
+
+- **From the CCA, on firmware older than 4.0.4:** set the CCA's IP under
+  **Tools → Device Configuration**, then press **Refresh from CCA** on the
+  CCA Info page.
 
 If the strings land under **Unassigned**, go to **Tools → Inverters** and
 list which MPPTs each inverter owns.
