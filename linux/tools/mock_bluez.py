@@ -73,12 +73,16 @@ class Root(dbus.service.Object):
     def __init__(self, bus):
         super().__init__(bus, '/')
         self.objs = {}
+        self.discovering = False
+        self.advertise = lambda: None
 
     def add(self, obj):
         self.objs[obj.path] = obj
 
     @dbus.service.method('org.freedesktop.DBus.ObjectManager', out_signature='a{oa{sa{sv}}}')
     def GetManagedObjects(self):
+        if self.discovering:  # devices keep advertising, so BlueZ keeps (re)adding them
+            self.advertise()
         return {dbus.ObjectPath(p): {o.iface: o.props} for p, o in self.objs.items()}
 
 
@@ -95,18 +99,23 @@ def main():
 
         @dbus.service.method('org.bluez.Adapter1')
         def StartDiscovery(self):
-            for mac, nm, rssi in ((CCA_MAC, 'Tigo CCA', -61), (OTHER_MAC, 'Speaker', -40)):
-                path = ADAPTER + '/dev_' + mac.replace(':', '_')
-                if path in root.objs:
-                    root.objs[path].props['RSSI'] = dbus.Int16(rssi)
-                    continue
-                root.add(Device(bus, path, 'org.bluez.Device1', {
-                    'Address': mac, 'Name': nm, 'RSSI': dbus.Int16(rssi),
-                    'Connected': False, 'ServicesResolved': False}))
+            root.discovering = True
+            root.advertise = advertise
+            advertise()
 
         @dbus.service.method('org.bluez.Adapter1')
         def StopDiscovery(self):
-            pass
+            root.discovering = False
+
+    def advertise():
+        for mac, nm, rssi in ((CCA_MAC, 'Tigo CCA', -61), (OTHER_MAC, 'Speaker', -40)):
+            path = ADAPTER + '/dev_' + mac.replace(':', '_')
+            if path in root.objs:
+                root.objs[path].props['RSSI'] = dbus.Int16(rssi)
+                continue
+            root.add(Device(bus, path, 'org.bluez.Device1', {
+                'Address': mac, 'Name': nm, 'RSSI': dbus.Int16(rssi),
+                'Connected': False, 'ServicesResolved': False}))
 
     class Device(Obj):
         @dbus.service.method('org.bluez.Device1')
@@ -138,6 +147,14 @@ def main():
             log.append('disconnect')
             self.props['Connected'] = False
             self.props['ServicesResolved'] = False
+            # BlueZ forgets an unpaired device soon after it stops hearing it,
+            # GATT tree included; a client calling it then gets UnknownMethod.
+            # Forgetting at once makes every later command cope with that.
+            def forget():
+                for p in [p for p in root.objs if p == self.path or p.startswith(self.path + '/')]:
+                    root.objs.pop(p).remove_from_connection()
+                return False
+            GLib.timeout_add(100, forget)
 
     class Char(Obj):
         def __init__(self, bus, path, iface, props, notify=None):

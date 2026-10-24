@@ -76,6 +76,7 @@ class CcaBle {
   void do_job_(const Job &job);
   bool ensure_adapter_(std::string &err);
   bool scan_(int seconds, std::string &err);
+  bool hear_(const std::string &dev, int max_s);
   bool session_(const std::vector<std::pair<std::string, std::string>> &cmds, std::string &err);
   bool exchange_(const std::string &write_path, const std::string &text, std::string &reply, std::string &err);
   void store_(const std::string &cmd, const std::string &reply);

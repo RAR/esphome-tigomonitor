@@ -470,6 +470,29 @@ bool CcaBle::scan_(int seconds, std::string &err) {
   return err.empty();
 }
 
+// Discovers until BlueZ hears dev advertise (a Device1 with an RSSI) or
+// max_s pass, then stops discovering: connecting while discovering is
+// unreliable on the Pi's controller.
+bool CcaBle::hear_(const std::string &dev, int max_s) {
+  sd_bus_error e = SD_BUS_ERROR_NULL;
+  sd_bus_call_method(bus_, BLUEZ, adapter_path_.c_str(), "org.bluez.Adapter1", "SetDiscoveryFilter", &e, nullptr,
+                     "a{sv}", 1, "Transport", "s", "le");
+  sd_bus_error_free(&e);
+  std::string err;
+  call(bus_, adapter_path_, "org.bluez.Adapter1", "StartDiscovery", err);  // in progress is fine
+  bool heard = false;
+  for (auto end = Clock::now() + std::chrono::seconds(max_s); !heard && Clock::now() < end && !stop_;) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    Objects objs;
+    if (!managed_objects(bus_, objs, err)) break;
+    auto it = objs.find(dev);
+    heard = it != objs.end() && it->second.count("org.bluez.Device1") &&
+            it->second.at("org.bluez.Device1").count("RSSI");
+  }
+  call(bus_, adapter_path_, "org.bluez.Adapter1", "StopDiscovery", err);
+  return heard;
+}
+
 // ---------------------------------------------------------------------------
 // One connection: DEVICE_INFO for the sid, then each command
 // ---------------------------------------------------------------------------
@@ -542,37 +565,38 @@ bool CcaBle::session_(const std::vector<std::pair<std::string, std::string>> &cm
     std::lock_guard<std::mutex> lock(mu_);
     mac = v_.active_mac;
   }
-  std::string dev = mac.empty() ? "" : device_path(adapter_path_, mac);
-  Objects objs;
-  if (!managed_objects(bus_, objs, err)) return false;
-  if (dev.empty() || !objs.count(dev)) {
-    // BlueZ connects only to devices it has seen, and with no saved CCA we
-    // still have to find one: the nearest Tigo CCA wins.
+  if (mac.empty()) {
+    // With no saved CCA we have to find one: the nearest Tigo CCA wins.
     if (!scan_(8, err)) return false;
     std::lock_guard<std::mutex> lock(mu_);
-    if (mac.empty()) {
-      const ScanHit *best = nullptr;
-      for (const auto &h : v_.hits)
-        if (!best || h.rssi > best->rssi) best = &h;
-      if (!best) return err = "no Tigo CCA found over Bluetooth; is it within range?", false;
-      mac = v_.active_mac = best->mac;
-      save_locked_();
-      LOGI("cca: using the nearest CCA, %s", mac.c_str());
-    }
-    dev = device_path(adapter_path_, mac);
+    const ScanHit *best = nullptr;
+    for (const auto &h : v_.hits)
+      if (!best || h.rssi > best->rssi) best = &h;
+    if (!best) return err = "no Tigo CCA found over Bluetooth; is it within range?", false;
+    mac = v_.active_mac = best->mac;
+    save_locked_();
+    LOGI("cca: using the nearest CCA, %s", mac.c_str());
   }
+  std::string dev = device_path(adapter_path_, mac);
 
-  LOGI("cca: connecting to %s", mac.c_str());
-  if (!call(bus_, dev, "org.bluez.Device1", "Connect", err, 30 * 1000000ULL)) {
-    // The first LE connection after a scan often times out on BlueZ (seen on
-    // the first real Pi: timed out, then connected on the next try). Hear
-    // the CCA advertise again and try once more before giving up.
+  // BlueZ forgets a device it is not paired with soon after it last heard
+  // it, and on the first real Pi a connect then failed with Connect "doesn't
+  // exist" — the object was gone — while one right after a scan sometimes
+  // timed out. So every connection starts from a fresh advertisement, and a
+  // failed one gets one more.
+  for (int attempt = 1;; attempt++) {
+    if (!hear_(dev, 10)) {
+      return err = "the CCA is not advertising over Bluetooth. It stops while another device is connected to it, "
+                   "such as the Tigo app or an ESP32 monitor; try again in a minute",
+             false;
+    }
+    LOGI("cca: connecting to %s", mac.c_str());
+    if (call(bus_, dev, "org.bluez.Device1", "Connect", err, 30 * 1000000ULL)) break;
+    if (attempt == 2) return false;
     LOGW("cca: %s; retrying", err.c_str());
-    std::string ignored;
-    scan_(4, ignored);
     err.clear();
-    if (!call(bus_, dev, "org.bluez.Device1", "Connect", err, 30 * 1000000ULL)) return false;
   }
+  Objects objs;
   struct Disconnect {
     sd_bus *bus;
     std::string dev;
