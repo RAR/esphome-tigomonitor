@@ -23,6 +23,7 @@
 #include <new>
 
 #include "tigo_history.h"
+#include "tigo_protocol.h"
 
 #ifdef USE_ESP_IDF
 #include <esp_heap_caps.h>
@@ -156,9 +157,6 @@ inline std::string to_std_string(const node_string &s) { return std::string(s.da
 inline const std::string &to_node_string(const std::string &s) { return s; }
 inline const std::string &to_std_string(const std::string &s) { return s; }
 #endif
-
-static const uint16_t CRC_POLYNOMIAL = 0x8408;  // Reversed polynomial (0x1021 reflected)
-static const size_t CRC_TABLE_SIZE = 256;
 
 struct DeviceData {
   node_string pv_node_id;
@@ -635,20 +633,11 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   // Frame processing
   void process_serial_data();
   void process_frame(const frame_string &frame);
-  frame_string remove_escape_sequences(const frame_string &frame);
-  bool verify_checksum(const frame_string &frame);
-  frame_string frame_to_hex_string(const frame_string &frame);
 
   // Frame type handlers
   void process_power_frame(const frame_string &frame);
   void process_09_frame(const frame_string &frame);
   void process_27_frame(const frame_string &hex_frame, size_t offset);
-  int calculate_header_length(const frame_string &hex_frame);
-  
-  // CRC functions
-  void generate_crc_table();
-  uint16_t compute_crc16_ccitt(const uint8_t *data, size_t length);
-  char compute_tigo_crc4(const std::string &hex_string);
   
   // Device management
   void update_device_data(const DeviceData &data);
@@ -910,7 +899,6 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   std::string cca_device_info_;
 #endif
   bool frame_started_ = false;
-  uint16_t crc_table_[CRC_TABLE_SIZE];
   int number_of_devices_ = 5;
   // CCA metadata of panels that lost their short address in a renumbering and
   // have not been announced at their new one yet. See tigo_node_identity.h.
@@ -928,10 +916,6 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   std::string cfg_def_cca_ip_;
   
   // No timing variables needed - ESPHome handles update intervals
-  
-  // Character mapping for Tigo CRC
-  static constexpr const char* crc_char_map_ = "GHJKLMNPRSTVWXYZ";
-  static const uint8_t tigo_crc_table_[256];
 
 #ifdef TIGO_TSDB_AVAILABLE
   TigoHistory history_;

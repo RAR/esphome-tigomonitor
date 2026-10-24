@@ -205,26 +205,6 @@ inline void buffer_erase_prefix<psram_vector<char>>(psram_vector<char>& buf, siz
 
 #endif
 
-// Tigo CRC table - copied from original Arduino code
-const uint8_t TigoMonitorComponent::tigo_crc_table_[256] = {
-  0x0,0x3,0x6,0x5,0xC,0xF,0xA,0x9,0xB,0x8,0xD,0xE,0x7,0x4,0x1,0x2,
-  0x5,0x6,0x3,0x0,0x9,0xA,0xF,0xC,0xE,0xD,0x8,0xB,0x2,0x1,0x4,0x7,
-  0xA,0x9,0xC,0xF,0x6,0x5,0x0,0x3,0x1,0x2,0x7,0x4,0xD,0xE,0xB,0x8,
-  0xF,0xC,0x9,0xA,0x3,0x0,0x5,0x6,0x4,0x7,0x2,0x1,0x8,0xB,0xE,0xD,
-  0x7,0x4,0x1,0x2,0xB,0x8,0xD,0xE,0xC,0xF,0xA,0x9,0x0,0x3,0x6,0x5,
-  0x2,0x1,0x4,0x7,0xE,0xD,0x8,0xB,0x9,0xA,0xF,0xC,0x5,0x6,0x3,0x0,
-  0xD,0xE,0xB,0x8,0x1,0x2,0x7,0x4,0x6,0x5,0x0,0x3,0xA,0x9,0xC,0xF,
-  0x8,0xB,0xE,0xD,0x4,0x7,0x2,0x1,0x3,0x0,0x5,0x6,0xF,0xC,0x9,0xA,
-  0xE,0xD,0x8,0xB,0x2,0x1,0x4,0x7,0x5,0x6,0x3,0x0,0x9,0xA,0xF,0xC,
-  0xB,0x8,0xD,0xE,0x7,0x4,0x1,0x2,0x0,0x3,0x6,0x5,0xC,0xF,0xA,0x9,
-  0x4,0x7,0x2,0x1,0x8,0xB,0xE,0xD,0xF,0xC,0x9,0xA,0x3,0x0,0x5,0x6,
-  0x1,0x2,0x7,0x4,0xD,0xE,0xB,0x8,0xA,0x9,0xC,0xF,0x6,0x5,0x0,0x3,
-  0x9,0xA,0xF,0xC,0x5,0x6,0x3,0x0,0x2,0x1,0x4,0x7,0xE,0xD,0x8,0xB,
-  0xC,0xF,0xA,0x9,0x0,0x3,0x6,0x5,0x7,0x4,0x1,0x2,0xB,0x8,0xD,0xE,
-  0x3,0x0,0x5,0x6,0xF,0xC,0x9,0xA,0x8,0xB,0xE,0xD,0x4,0x7,0x2,0x1,
-  0x6,0x5,0x0,0x3,0xA,0x9,0xC,0xF,0xD,0xE,0xB,0x8,0x1,0x2,0x7,0x4
-};
-
 const char *reset_reason_str() {
 #ifdef USE_ESP_IDF
   switch (esp_reset_reason()) {
@@ -289,7 +269,6 @@ void TigoMonitorComponent::setup() {
   }
 #endif
 
-  generate_crc_table();
   devices_.reserve(number_of_devices_);
   node_table_.reserve(number_of_devices_);
   
@@ -755,17 +734,6 @@ void TigoMonitorComponent::process_serial_data() {
   }
 }
 
-// Parse a fixed-width hex field directly out of the frame — no temporary
-// string allocation, and unlike std::stoi it cannot abort on malformed bus
-// data (exceptions are disabled on ESP-IDF, so a throw is a panic).
-static int parse_hex_field(const frame_string &s, size_t pos, size_t len) {
-  char buf[12];
-  if (len >= sizeof(buf) || pos + len > s.length()) return 0;
-  memcpy(buf, s.c_str() + pos, len);
-  buf[len] = '\0';
-  return static_cast<int>(strtol(buf, nullptr, 16));
-}
-
 void TigoMonitorComponent::process_frame(const frame_string &frame) {
   // The whole frame pipeline stays in frame_string (PSRAM on IDF builds) —
   // see the typedef note in the header (#23).
@@ -773,27 +741,20 @@ void TigoMonitorComponent::process_frame(const frame_string &frame) {
   // Increment total frames processed counter for diagnostics
   total_frames_processed_++;
 
-  frame_string processed_frame = remove_escape_sequences(frame);
-  
-  if (!verify_checksum(processed_frame)) {
+  frame_string processed_frame = protocol::unescape(frame);
+
+  if (!protocol::checksum_ok(processed_frame)) {
     invalid_checksum_count_++;
     if (invalid_checksum_sensor_ != nullptr) {
       invalid_checksum_sensor_->publish_state(invalid_checksum_count_);
     }
-    
-    // Enhanced logging for invalid checksum debugging
-    frame_string hex_frame = frame_to_hex_string(processed_frame);
-    uint16_t extracted_crc = 0;
-    uint16_t computed_crc = 0;
-
-    if (processed_frame.length() >= 2) {
-      extracted_crc = (static_cast<uint8_t>(processed_frame[processed_frame.length() - 2]) << 8) |
-                      static_cast<uint8_t>(processed_frame[processed_frame.length() - 1]);
-      computed_crc = compute_crc16_ccitt(
-        reinterpret_cast<const uint8_t*>(processed_frame.c_str()),
-        processed_frame.length() - 2
-      );
+    if (processed_frame.length() > 10000) {
+      ESP_LOGW(TAG, "Frame suspiciously large: %zu bytes, rejecting", processed_frame.length());
+      return;
     }
+
+    // Enhanced logging for invalid checksum debugging
+    frame_string hex_frame = protocol::to_hex(processed_frame);
 
     // Log frame type and length for pattern analysis
     frame_string frame_type = "unknown";
@@ -807,204 +768,104 @@ void TigoMonitorComponent::process_frame(const frame_string &frame) {
     
     ESP_LOGW(TAG, "Invalid checksum #%u: type=%s, len=%zu, expected=0x%04X, got=0x%04X, frame=%s",
              (unsigned) invalid_checksum_count_, frame_type.c_str(), processed_frame.length(),
-             computed_crc, extracted_crc, hex_frame.c_str());
+             protocol::computed_crc(processed_frame), protocol::carried_crc(processed_frame),
+             hex_frame.c_str());
     return;
   }
   
   // Remove checksum (last 2 bytes)
   processed_frame = processed_frame.substr(0, processed_frame.length() - 2);
-  frame_string hex_frame = frame_to_hex_string(processed_frame);
+  frame_string hex_frame = protocol::to_hex(processed_frame);
 
-  if (hex_frame.length() < 10) {
-    ESP_LOGW(TAG, "Frame too short: %s", hex_frame.c_str());
-    return;
-  }
-
-  frame_string segment = hex_frame.substr(4, 4); // Get type segment
-
-  if (segment == "0149") {
-    // Power data frame
-    int start_payload = 8 + calculate_header_length(hex_frame.substr(8, 4));
-    frame_string payload = hex_frame.substr(start_payload);
-
-    size_t pos = 0;
-    while (pos < payload.length()) {
-      if (pos + 14 > payload.length()) {
-        ESP_LOGW(TAG, "Incomplete packet, aborting");
-        break;
-      }
-
-      frame_string type = payload.substr(pos, 2);
-      int length = parse_hex_field(payload, pos + 12, 2);
-
-      int packet_length_chars = length * 2 + 14;
-      if (pos + packet_length_chars > payload.length()) {
-        ESP_LOGW(TAG, "Incomplete packet, aborting at pos %zu", pos);
-        break;
-      }
-
-      frame_string packet = payload.substr(pos, packet_length_chars);
-      
-      if (type == "31") {
-        process_power_frame(packet);
-      } else if (type == "09") {
-        process_09_frame(packet);
-      } else if (type != "07" && type != "18") {
-        ESP_LOGD(TAG, "Unknown packet type: %s, packet: %s", type.c_str(), packet.c_str());
-      }
-      
-      pos += packet_length_chars;
+  switch (protocol::frame_type(hex_frame)) {
+    case protocol::FrameType::too_short:
+      ESP_LOGW(TAG, "Frame too short: %s", hex_frame.c_str());
+      break;
+    case protocol::FrameType::power: {
+      bool clean = protocol::walk_power_packets(hex_frame, [this](const frame_string &type, const frame_string &packet) {
+        if (type == "31") {
+          process_power_frame(packet);
+        } else if (type == "09") {
+          process_09_frame(packet);
+        } else if (type != "07" && type != "18") {
+          ESP_LOGD(TAG, "Unknown packet type: %s, packet: %s", type.c_str(), packet.c_str());
+        }
+      });
+      if (!clean) ESP_LOGW(TAG, "Incomplete packet, aborting");
+      break;
     }
-  } else if (segment == "0B10" || segment == "0B0F") {
-    // Command request or response
-    // Frame structure: dest(4) + type(4) + len(4) + cmd(4) + seq(2) + payload
-    // Position:        0-3      4-7       8-11     12-15    16-17    18+
-    command_frame_count_++;
-    frame_string cmd = hex_frame.substr(12, 4);  // Full 4-char command (e.g., "0027")
-    frame_string cmd_byte = hex_frame.substr(14, 2);  // Just the command byte (e.g., "27")
-    
-    // Log all command frames to help debug Frame 27 capture
-    ESP_LOGD(TAG, "Command frame: segment=%s, cmd=%s, len=%zu", 
-             segment.c_str(), cmd.c_str(), hex_frame.length());
-    
-    if (cmd_byte == "27") {
-      frame_27_count_++;
-      ESP_LOGI(TAG, "Frame 27 detected! (#%u) Full frame: %s", (unsigned) frame_27_count_, hex_frame.c_str());
-      process_27_frame(hex_frame, 18);  // Payload starts at position 18
-    } else if (cmd_byte == "26") {
-      ESP_LOGD(TAG, "Frame 26 (device list request) detected");
-    } else if (cmd_byte == "2E" || cmd_byte == "2F") {
-      ESP_LOGV(TAG, "Network status frame %s", cmd_byte.c_str());
+    case protocol::FrameType::command: {
+      // Command request or response
+      command_frame_count_++;
+      frame_string cmd_byte = protocol::command_byte(hex_frame);  // e.g. "27"
+
+      // Log all command frames to help debug Frame 27 capture
+      ESP_LOGD(TAG, "Command frame: segment=%s, cmd=%s, len=%zu",
+               hex_frame.substr(4, 4).c_str(), hex_frame.substr(12, 4).c_str(), hex_frame.length());
+
+      if (cmd_byte == "27") {
+        frame_27_count_++;
+        ESP_LOGI(TAG, "Frame 27 detected! (#%u) Full frame: %s", (unsigned) frame_27_count_, hex_frame.c_str());
+        process_27_frame(hex_frame, protocol::COMMAND_PAYLOAD_OFFSET);
+      } else if (cmd_byte == "26") {
+        ESP_LOGD(TAG, "Frame 26 (device list request) detected");
+      } else if (cmd_byte == "2E" || cmd_byte == "2F") {
+        ESP_LOGV(TAG, "Network status frame %s", cmd_byte.c_str());
+      }
+      // Handle other command types as needed
+      break;
     }
-    // Handle other command types as needed
-  } else if (segment == "0148") {
-    // Receive request packet
-    // ESP_LOGD(TAG, "Receive request packet");
-  } else {
-    ESP_LOGD(TAG, "Unknown frame type: %s", hex_frame.c_str());
+    case protocol::FrameType::receive_request:
+      break;
+    case protocol::FrameType::unknown:
+      ESP_LOGD(TAG, "Unknown frame type: %s", hex_frame.c_str());
+      break;
   }
 }
 
 void TigoMonitorComponent::process_power_frame(const frame_string &frame) {
-  // Need at least 14 chars to read the format/length byte at offset 12
-  if (frame.length() < 14) {
+  protocol::PowerReading r;
+  protocol::PowerDecode result = protocol::decode_power_packet(frame, this->power_calibration_, r);
+  if (result == protocol::PowerDecode::too_short_for_header) {
     ESP_LOGW(TAG, "Power frame too short for header (%zu chars), skipping", frame.length());
     return;
   }
-
-  DeviceData data;
-
-  // Parse frame according to original Arduino logic
-  data.addr.assign(frame.c_str() + 2, 4);
-  data.pv_node_id.assign(frame.c_str() + 6, 4);
-
-  // Detect format version based on data length field
-  // Old format (pre-CCA 4.x): 13 bytes (0x0D)
-  // New format (CCA 4.x+): 15 bytes (0x0F)
-  int data_length = parse_hex_field(frame, 12, 2);
-  bool is_new_format = (data_length == 15);
-
-  // Both formats place the slot counter at chars 34-37 and RSSI at 38-39, so
-  // both need >=40 chars. New (15-byte / CCA 4.x) frames are 44 chars: they
-  // APPEND 2 trailing pad bytes after RSSI, they do not shift the fields.
-  // (Decoded from real 4.x frames in #14/#17; the earlier "shift by 6" /
-  // RSSI-at-44 assumption was wrong and could never read a 44-char frame.)
-  size_t required = 40;
-  if (frame.length() < required) {
+  if (result == protocol::PowerDecode::too_short) {
     // Dump the raw packet so a too-short frame can be decoded by hand — this is
     // how we learn whether a given CCA firmware lays the new-format fields out
     // differently than we assume (e.g. RSSI not actually at offset 44).
     ESP_LOGW(TAG, "Power frame too short for %s format (addr=%s, data_length=%d, need %zu, have %zu), skipping: %s",
-             is_new_format ? "new" : "legacy", data.addr.c_str(), data_length,
-             required, frame.length(), frame.c_str());
+             r.is_new_format ? "new" : "legacy", r.addr, r.data_length,
+             (size_t) 40, frame.length(), frame.c_str());
     return;
   }
-  
-  if (is_new_format) {
-    ESP_LOGD(TAG, "Processing power frame (new 15-byte format) for device addr: %s", data.addr.c_str());
-  } else {
-    ESP_LOGD(TAG, "Processing power frame (legacy 13-byte format) for device addr: %s", data.addr.c_str());
-  }
-  
-  // Voltage In (scale by 0.05)
-  int voltage_in_raw = parse_hex_field(frame, 14, 3);
-  data.voltage_in = voltage_in_raw * 0.05f;
 
-  // Voltage Out (scale by 0.10)
-  int voltage_out_raw = parse_hex_field(frame, 17, 3);
-  data.voltage_out = voltage_out_raw * 0.10f;
+  DeviceData data;
+  data.addr.assign(r.addr, 4);
+  data.pv_node_id.assign(r.pv_node_id, 4);
+  data.slot_counter.assign(r.slot_counter, 4);
+  data.voltage_in = r.voltage_in;
+  data.voltage_out = r.voltage_out;
+  data.current_in = r.current_in;
+  data.current_out = r.current_out;
+  data.power_in = r.power_in;
+  data.power_out = r.power_out;
+  data.temperature = r.temperature;
+  data.duty_cycle = r.duty_cycle;
+  data.efficiency = r.efficiency;
+  data.load_factor = r.load_factor;
+  data.rssi = r.rssi;
+  data.is_optimizer = r.is_optimizer;
 
-  // Duty Cycle
-  data.duty_cycle = parse_hex_field(frame, 20, 2);
-
-  // Current In (scale by 0.005)
-  int current_in_raw = parse_hex_field(frame, 22, 3);
-  data.current_in = current_in_raw * 0.005f;
-
-  // Temperature (scale by 0.1) - handle signed 12-bit value in two's complement
-  int temperature_raw = parse_hex_field(frame, 25, 3);
-  // Convert from 12-bit two's complement to signed value
-  if (temperature_raw & 0x800) {  // Check sign bit (bit 11)
-    temperature_raw = temperature_raw - 0x1000;  // Convert to negative
-  }
-  data.temperature = temperature_raw * 0.1f;
-  
-  // Slot counter (chars 34-37) and RSSI (chars 38-39) are at the SAME offsets
-  // for both formats. The new 15-byte format only appends 2 trailing pad bytes
-  // (chars 40-43, observed 0x0000) after RSSI — it does not relocate these.
-  data.slot_counter.assign(frame.c_str() + 34, 4);
-  data.rssi = parse_hex_field(frame, 38, 2);
-
-  if (is_new_format) {
+  if (r.is_new_format) {
     // chars 28-33 carry a 3-byte field of unknown meaning (observed e.g. 830064)
     ESP_LOGV(TAG, "New-format fields for %s: f1=%s slot=%s rssi=0x%02X pad=%s",
              data.addr.c_str(), frame.substr(28, 6).c_str(),
              data.slot_counter.c_str(), (unsigned int) (data.rssi & 0xFF),
              frame.substr(40, 4).c_str());
-  }
-  
-  // Calculate additional sensor values
-  // Detect optimizer vs monitor-only (TS4-A-S) modules.
-  // Heuristic: if Voltage_out is essentially zero while Voltage_in is valid (>1V),
-  // treat as monitor-only and override output values to mirror input.
-  bool is_monitor_only = (data.voltage_out <= 0.001f && data.voltage_in > 1.0f);
-  data.is_optimizer = !is_monitor_only;
-
-  // Normalize duty cycle to 0..1 (duty cycle is raw 0-255 from device)
-  float duty_norm = static_cast<float>(data.duty_cycle) / 255.0f;
-  if (duty_norm < 0.001f) duty_norm = 0.0f;  // avoid tiny non-zero values
-
-  // Calculate input power (apply calibration)
-  data.power_in = data.voltage_in * data.current_in * this->power_calibration_;
-
-  if (is_monitor_only) {
-    // Monitor-only device: outputs mirror inputs
-    data.voltage_out = data.voltage_in;
-    data.current_out = data.current_in;
-    data.power_out = data.power_in;  // Output power equals input power
-    data.duty_cycle = 255;         // Hard-code duty cycle to 100%
-    duty_norm = 1.0f;
-    data.efficiency = 100.0f;      // Hard-code efficiency to 100%
-    data.load_factor = duty_norm;
+    ESP_LOGD(TAG, "Processing power frame (new 15-byte format) for device addr: %s", data.addr.c_str());
   } else {
-    // Optimizer device: compute based on duty cycle
-    if (duty_norm <= 0.0f) {
-      // Safety: if duty cycle is zero, fallback to input current
-      data.current_out = data.current_in;
-    } else {
-      data.current_out = data.current_in / duty_norm;
-    }
-
-    // Calculate output power and efficiency
-    data.power_out = data.voltage_out * data.current_out * this->power_calibration_;
-    if (data.power_in > 0.0f) {
-      data.efficiency = (data.power_out / data.power_in) * 100.0f;
-    } else {
-      data.efficiency = 0.0f;
-    }
-
-    // Load factor (duty cycle as decimal 0..1)
-    data.load_factor = duty_norm;
+    ESP_LOGD(TAG, "Processing power frame (legacy 13-byte format) for device addr: %s", data.addr.c_str());
   }
 
   // Power factor (assuming unity for DC systems, can be customized)
@@ -1053,35 +914,12 @@ void TigoMonitorComponent::process_27_frame(const frame_string &hex_frame, size_
   // [starting_index:2 bytes (4 hex)] [num_entries:2 bytes (4 hex)] [entries...]
   // Each entry: [long_address:8 bytes (16 hex)] [pv_node_id:2 bytes (4 hex)] = 20 hex chars
   
-  if (offset + 8 > hex_frame.length()) {
-    ESP_LOGW(TAG, "Frame 27 too short for header (need %zu, have %zu)", offset + 8, hex_frame.length());
-    return;
-  }
-  
-  // Parse starting_index (first 4 hex chars at offset)
-  int starting_index = parse_hex_field(hex_frame, offset, 4);
-
-  // Parse num_entries (next 4 hex chars)
-  int num_entries = parse_hex_field(hex_frame, offset + 4, 4);
-  ESP_LOGI(TAG, "Frame 27 received: starting_index=%d, entries=%d", starting_index, num_entries);
-  
-  size_t pos = offset + 8;  // Start after starting_index (4) + num_entries (4)
   bool table_changed = false;
   bool dedup_merged = false;
-  
-  // Pre-allocate buffers to avoid repeated heap allocations in loop
-  char long_addr_buf[17];  // 16 chars + null terminator
-  char addr_buf[5];        // 4 chars + null terminator
-  
-  for (int i = 0; i < num_entries && pos + 20 <= hex_frame.length(); i++) {
-    // Extract to stack buffers instead of creating std::string temporaries
-    memcpy(long_addr_buf, hex_frame.c_str() + pos, 16);
-    long_addr_buf[16] = '\0';
-    memcpy(addr_buf, hex_frame.c_str() + pos + 16, 4);
-    addr_buf[4] = '\0';
-    pos += 20;
-    
-    // Only create strings when actually needed for storage/comparison
+
+  protocol::Frame27Header header;
+  bool have_header = protocol::walk_frame27(hex_frame, offset, header,
+                                            [&](const char *long_addr_buf, const char *addr_buf) {
     node_string long_addr(long_addr_buf);
     node_string addr(addr_buf);
     
@@ -1098,8 +936,7 @@ void TigoMonitorComponent::process_27_frame(const frame_string &hex_frame, size_
           NodeTableData n;
           n.addr = a;
           n.long_address = l;
-          char crc_char = compute_tigo_crc4(to_std_string(a));
-          n.checksum.assign(1, crc_char);
+          n.checksum.assign(1, protocol::crc4_char(a.c_str(), a.length()));
           n.sensor_index = -1;  // Will be assigned when device becomes active
           n.is_persistent = true;
           return n;
@@ -1145,7 +982,12 @@ void TigoMonitorComponent::process_27_frame(const frame_string &hex_frame, size_
     } else {
       ESP_LOGD(TAG, "Frame 27 data for %s received before power data - long address stored in node table", addr.c_str());
     }
+  });
+  if (!have_header) {
+    ESP_LOGW(TAG, "Frame 27 too short for header (need %zu, have %zu)", offset + 8, hex_frame.length());
+    return;
   }
+  ESP_LOGI(TAG, "Frame 27 received: starting_index=%d, entries=%d", header.starting_index, header.num_entries);
   
   // If CCA metadata moved between entries — a stale alias folded in, or a
   // renumbering moving labels to their panels' new addresses — the string
@@ -2127,136 +1969,6 @@ void TigoMonitorComponent::publish_sensor_data() {
   }
 }
 
-frame_string TigoMonitorComponent::remove_escape_sequences(const frame_string &frame) {
-  // frame_string is PSRAM-backed on IDF builds, so the result stays out of
-  // internal RAM end-to-end (it used to be copied back into a std::string).
-  frame_string result;
-  result.reserve(frame.length());
-
-  for (size_t i = 0; i < frame.length(); ++i) {
-    if (frame[i] == '\x7E' && i < frame.length() - 1) {
-      char next_byte = frame[i + 1];
-      switch (next_byte) {
-        case '\x00': result.push_back('\x7E'); break; // Escaped 7E -> raw 7E
-        case '\x01': result.push_back('\x24'); break; // Escaped 7E 01 -> raw 24
-        case '\x02': result.push_back('\x23'); break; // Escaped 7E 02 -> raw 23
-        case '\x03': result.push_back('\x25'); break; // Escaped 7E 03 -> raw 25
-        case '\x04': result.push_back('\xA4'); break; // Escaped 7E 04 -> raw A4
-        case '\x05': result.push_back('\xA3'); break; // Escaped 7E 05 -> raw A3
-        case '\x06': result.push_back('\xA5'); break; // Escaped 7E 06 -> raw A5
-        default:
-          result.push_back(frame[i]);
-          result.push_back(next_byte);
-          break;
-      }
-      i++; // Skip next byte
-    } else {
-      result.push_back(frame[i]);
-    }
-  }
-  return result;
-}
-
-bool TigoMonitorComponent::verify_checksum(const frame_string &frame) {
-  if (frame.length() < 2) {
-    ESP_LOGV(TAG, "Frame too short for checksum verification: %zu bytes", frame.length());
-    return false;
-  }
-
-  // Safety check: prevent potential out-of-bounds access
-  if (frame.length() > 10000) {
-    ESP_LOGW(TAG, "Frame suspiciously large: %zu bytes, rejecting", frame.length());
-    return false;
-  }
-
-  uint16_t extracted_checksum = (static_cast<uint8_t>(frame[frame.length() - 2]) << 8) |
-                                static_cast<uint8_t>(frame[frame.length() - 1]);
-
-  uint16_t computed_checksum = compute_crc16_ccitt(
-    reinterpret_cast<const uint8_t*>(frame.c_str()),
-    frame.length() - 2
-  );
-
-  return extracted_checksum == computed_checksum;
-}
-
-frame_string TigoMonitorComponent::frame_to_hex_string(const frame_string &frame) {
-  // Hex strings can be 2KB+ for large frames; frame_string keeps them in
-  // PSRAM on IDF builds (no internal-RAM copy-back).
-  frame_string hex_str;
-  hex_str.reserve(frame.length() * 2);
-
-  for (unsigned char byte : frame) {
-    char hex_chars[3];
-    sprintf(hex_chars, "%02X", byte);
-    hex_str.push_back(hex_chars[0]);
-    hex_str.push_back(hex_chars[1]);
-  }
-  return hex_str;
-}
-
-int TigoMonitorComponent::calculate_header_length(const frame_string &hex_frame) {
-  // Parse the 4-char status word in place. NOTE: despite the historical
-  // "swap bytes" comment, the original code concatenated substr(0,2) +
-  // substr(2,2) — i.e. the chars in their original order — and every
-  // downstream offset is calibrated against that. Keep it byte-identical.
-  char status_hex[5] = {0};
-  size_t n = std::min<size_t>(4, hex_frame.length());
-  memcpy(status_hex, hex_frame.c_str(), n);
-
-  unsigned int status = static_cast<unsigned int>(strtoul(status_hex, nullptr, 16));
-  int length = 2; // Status word is always 2 bytes
-  
-  // Check bits according to original logic
-  if ((status & (1 << 0)) == 0) length += 1;
-  if ((status & (1 << 1)) == 0) length += 1;
-  if ((status & (1 << 2)) == 0) length += 2;
-  if ((status & (1 << 3)) == 0) length += 2;
-  if ((status & (1 << 4)) == 0) length += 1;
-  length += 1; // Bit 5
-  length += 2; // Bit 6
-  
-  return length * 2; // Convert to hex characters
-}
-
-void TigoMonitorComponent::generate_crc_table() {
-  for (uint16_t i = 0; i < CRC_TABLE_SIZE; ++i) {
-    uint16_t crc = i;
-    for (uint8_t j = 8; j > 0; --j) {
-      if (crc & 1) {
-        crc = (crc >> 1) ^ CRC_POLYNOMIAL;
-      } else {
-        crc >>= 1;
-      }
-    }
-    crc_table_[i] = crc;
-  }
-}
-
-uint16_t TigoMonitorComponent::compute_crc16_ccitt(const uint8_t *data, size_t length) {
-  uint16_t crc = 0x8408; // Initial value
-  for (size_t i = 0; i < length; i++) {
-    uint8_t index = (crc ^ data[i]) & 0xFF;
-    crc = (crc >> 8) ^ crc_table_[index];
-  }
-  crc = (crc >> 8) | (crc << 8);
-  return crc;
-}
-
-char TigoMonitorComponent::compute_tigo_crc4(const std::string &hex_string) {
-  uint8_t crc = 0x2;
-  for (size_t i = 0; i < hex_string.length(); i += 2) {
-    if (i + 1 >= hex_string.length()) break;
-    
-    std::string byte_str = hex_string.substr(i, 2);
-    uint8_t byte_val = std::stoul(byte_str, nullptr, 16);
-    crc = tigo_crc_table_[byte_val ^ (crc << 4)];
-  }
-  return crc_char_map_[crc];
-}
-
-
-
 void TigoMonitorComponent::generate_sensor_yaml() {
   ESP_LOGI(TAG, "%s", "");
   ESP_LOGI(TAG, "=== COPY THE FOLLOWING YAML CONFIGURATION ===");
@@ -2933,7 +2645,7 @@ bool TigoMonitorComponent::import_node_table(const psram_vector<NodeTableData>& 
                    node.long_address.c_str(), node.cca_label.c_str(), live->second.c_str(),
                    node.addr.c_str());
           node.addr = live->second;
-          node.checksum.assign(1, compute_tigo_crc4(to_std_string(node.addr)));
+          node.checksum.assign(1, protocol::crc4_char(node.addr.c_str(), node.addr.length()));
           remapped++;
         }
       } else if (!node.long_address.empty() && live_addrs.count(to_std_string(node.addr))) {
