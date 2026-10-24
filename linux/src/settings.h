@@ -29,6 +29,13 @@ struct Settings {
   // flash; an SD card can take one every 5 and keep two years of them.
   int history_interval_min = 5;
   int history_days = 730;
+  // The firmware's runtime knobs (/api/config, Tools > Device Configuration),
+  // with its defaults.
+  int night_mode_timeout_min = 60;
+  int stale_timeout_min = 10;  // 0: never
+  bool reset_at_midnight = false;
+  bool sync_cca_on_startup = true;
+  std::string cca_ip;  // CCA firmware before 4.0.4 only
   std::string device_id;  // empty: the hostname
   MqttSettings mqtt;
 };

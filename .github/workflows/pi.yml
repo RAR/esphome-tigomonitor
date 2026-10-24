@@ -35,8 +35,8 @@ jobs:
         run: docker run --rm -v "$PWD":/src -w /src tigod-dev linux/scripts/build.sh
       - name: End-to-end replay through MQTT
         run: docker run --rm -v "$PWD":/src -w /src tigod-dev linux/scripts/e2e.sh
-      - name: CCA over Bluetooth, against a mock BlueZ
-        run: docker run --rm -v "$PWD":/src -w /src tigod-dev linux/scripts/ble-e2e.sh
+      - name: CCA over Bluetooth and HTTP, against mocks
+        run: docker run --rm -v "$PWD":/src -w /src tigod-dev linux/scripts/cca-e2e.sh
 
   image:
     if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')

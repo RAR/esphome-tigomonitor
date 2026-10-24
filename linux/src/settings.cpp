@@ -38,6 +38,11 @@ Settings load_settings(const std::string &path) {
   get(j, "publish_interval_s", s.publish_interval_s);
   get(j, "history_interval_min", s.history_interval_min);
   get(j, "history_days", s.history_days);
+  get(j, "night_mode_timeout_min", s.night_mode_timeout_min);
+  get(j, "stale_timeout_min", s.stale_timeout_min);
+  get(j, "reset_at_midnight", s.reset_at_midnight);
+  get(j, "sync_cca_on_startup", s.sync_cca_on_startup);
+  get(j, "cca_ip", s.cca_ip);
   get(j, "device_id", s.device_id);
   if (auto m = j.find("mqtt"); m != j.end() && m->is_object()) {
     get(*m, "host", s.mqtt.host);
@@ -50,6 +55,8 @@ Settings load_settings(const std::string &path) {
   if (s.publish_interval_s < 5) s.publish_interval_s = 5;
   if (s.history_interval_min < 1 || s.history_interval_min > 60) s.history_interval_min = 5;
   if (s.history_days < 1) s.history_days = 730;
+  if (s.night_mode_timeout_min < 1 || s.night_mode_timeout_min > 1440) s.night_mode_timeout_min = 60;
+  if (s.stale_timeout_min < 0 || s.stale_timeout_min > 1440) s.stale_timeout_min = 10;
   return s;
 }
 
@@ -62,6 +69,11 @@ bool save_settings(const std::string &path, const Settings &s) {
       {"publish_interval_s", s.publish_interval_s},
       {"history_interval_min", s.history_interval_min},
       {"history_days", s.history_days},
+      {"night_mode_timeout_min", s.night_mode_timeout_min},
+      {"stale_timeout_min", s.stale_timeout_min},
+      {"reset_at_midnight", s.reset_at_midnight},
+      {"sync_cca_on_startup", s.sync_cca_on_startup},
+      {"cca_ip", s.cca_ip},
       {"device_id", s.device_id},
       {"mqtt",
        {{"host", s.mqtt.host},

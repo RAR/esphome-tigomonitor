@@ -58,7 +58,7 @@ struct StringTotals {
 // One panel of a site layout (the Tigo cloud's). mppt is numbered across the
 // whole system (MPPT 1, 2, 3, ...), as the inverters list expects.
 struct LayoutPanel {
-  std::string serial, label, string_label, mppt, object_id;
+  std::string serial, label, string_label, mppt, object_id, channel;
 };
 
 struct BusStats {
@@ -78,18 +78,28 @@ class Monitor {
 
   void feed(const char *data, size_t len);
 
-  // A panel is online if it reported within this window.
-  static constexpr auto ONLINE_WINDOW = std::chrono::minutes(2);
+  // A panel is online while it reported within stale_timeout (the firmware's
+  // stale_timeout, default 10 minutes; 0 keeps it online forever). Past that
+  // its production reads 0, as on the ESP32.
+  Clock::duration online_window() const;
+  void set_stale_timeout_min(int minutes);
+  // No frame from the bus for night_mode_timeout minutes: the panels have
+  // gone dark for the night. Production reads 0, as on the ESP32.
+  bool night_mode() const;
+  void set_night_mode_timeout_min(int minutes);
 
   std::vector<Panel> panels() const;
   std::vector<Node> nodes() const;
   BusStats stats() const;
-  double energy_kwh() const;    // lifetime
+  double energy_kwh() const;    // lifetime, panel output
+  double energy_in_kwh() const;  // lifetime, panel input
   double today_kwh() const;
+  double today_in_kwh() const;
   // Completed days, oldest first, as {YYYY-MM-DD, kWh}; up to HISTORY_DAYS.
   std::vector<std::pair<std::string, double>> daily_history() const;
   static constexpr size_t HISTORY_DAYS = 90;
-  float total_power() const;  // output power of online panels, W
+  float total_power() const;     // output power of online panels, W
+  float total_power_in() const;  // input power of online panels, W
   std::vector<StringTotals> strings() const;
   // Panels with no string label are grouped under this one.
   static constexpr const char *ALL_PANELS = "All panels";
@@ -129,8 +139,9 @@ class Monitor {
   void on_power_packet_(const std::string &packet);
   void on_frame27_(const std::string &hex);
   Panel *find_panel_(const std::string &addr);
-  float total_power_locked_() const;
+  float total_power_locked_(bool input = false) const;
   std::vector<StringTotals> strings_locked_() const;
+  bool night_locked_() const;
   bool save_locked_();
 
   std::string state_path_;
@@ -144,6 +155,10 @@ class Monitor {
   std::vector<Node> parked_cca_;
   BusStats stats_;
   double energy_kwh_ = 0;
+  double energy_in_kwh_ = 0, today_in_kwh_ = 0;
+  Clock::duration online_window_ = std::chrono::minutes(10);
+  Clock::duration night_timeout_ = std::chrono::minutes(60);
+  Clock::time_point last_frame_{};
   double today_kwh_ = 0;
   std::string today_;  // local date today_kwh_ belongs to
   std::vector<std::pair<std::string, double>> history_;

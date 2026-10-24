@@ -6,6 +6,7 @@
 #include "log.h"
 #include "monitor.h"
 #include "cca_ble.h"
+#include "cca_http.h"
 #include "cloud.h"
 #include "history.h"
 #include "http_server.h"
@@ -105,6 +106,8 @@ int main(int argc, char **argv) {
 
   Monitor monitor(state_dir + "/state.json", settings.power_calibration, static_cast<size_t>(settings.max_nodes));
   monitor.load();
+  monitor.set_stale_timeout_min(settings.stale_timeout_min);
+  monitor.set_night_mode_timeout_min(settings.night_mode_timeout_min);
 
   MqttPublisher mqtt(monitor, TIGOD_VERSION);
   mqtt.configure(settings);
@@ -149,6 +152,10 @@ int main(int argc, char **argv) {
   history.open();
   CcaBle cca(state_dir + "/cca.json");
   cca.start();
+  CcaHttp cca_http(monitor);
+  cca_http.start();
+  // sync_cca_on_startup, for a CCA reached over HTTP.
+  if (settings.sync_cca_on_startup && !settings.cca_ip.empty()) cca_http.request_refresh(settings.cca_ip);
   Cloud cloud(state_dir + "/cloud.json");
   cloud.load();
   Topology topology(state_dir + "/topology.json");
@@ -160,7 +167,7 @@ int main(int argc, char **argv) {
         return settings;
       },
       [&] { return mqtt.connected(); }, [&] { return mqtt.last_error(); }, settings_changed, restart_requested,
-      monitor, topology, history, cloud, cca});
+      monitor, topology, history, cloud, cca, cca_http});
   if (port > 0 && !web.start(port)) return 1;
 
   auto last_publish = std::chrono::steady_clock::now() - std::chrono::hours(1);
@@ -187,6 +194,8 @@ int main(int argc, char **argv) {
       }
       LOGI("settings changed; applying");
       monitor.set_power_calibration(settings.power_calibration);
+      monitor.set_stale_timeout_min(settings.stale_timeout_min);
+      monitor.set_night_mode_timeout_min(settings.night_mode_timeout_min);
       mqtt.configure(settings);
       if (new_port && replay.empty()) {
         input_stop = true;
@@ -210,7 +219,7 @@ int main(int argc, char **argv) {
         for (const auto &p : monitor.panels()) {
           if (p.barcode.empty()) continue;
           // Offline is 0 W, as on the ESP32 once a panel goes stale.
-          panel_power.emplace_back(p.barcode, ago - p.updated < Monitor::ONLINE_WINDOW ? p.reading.power_out : 0.0);
+          panel_power.emplace_back(p.barcode, ago - p.updated < monitor.online_window() ? p.reading.power_out : 0.0);
         }
         double energy = monitor.energy_kwh();
         history.record(next_snapshot, monitor.total_power(), energy - energy_at_snapshot, panel_power);
@@ -242,6 +251,7 @@ int main(int argc, char **argv) {
   input.join();
   web.stop();
   cca.stop();
+  cca_http.stop();
   monitor.save();
   BusStats s = monitor.stats();
   LOGI("stopping: %u frames, %u bad checksums, %u readings, %zu panels, %zu nodes", s.frames, s.bad_checksums,

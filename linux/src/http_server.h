@@ -10,6 +10,7 @@
 // loop to apply, so MQTT is only ever reconfigured from one thread.
 
 #include "cca_ble.h"
+#include "cca_http.h"
 #include "cloud.h"
 #include "history.h"
 #include "monitor.h"
@@ -44,6 +45,7 @@ struct HttpContext {
   History &history;
   Cloud &cloud;
   CcaBle &cca;
+  CcaHttp &cca_http;
 };
 
 class HttpServer {

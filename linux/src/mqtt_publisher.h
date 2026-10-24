@@ -8,7 +8,7 @@
 //
 // Topics, with <base> = base_topic/device_id:
 //   <base>/status                 online / offline (last will)
-//   <base>/system/state           {"power":…,"energy":…,"panels_online":…}
+//   <base>/system/state           {"power":…,"energy":…,"strings":{label:W},…}
 //   <base>/panel/<barcode>/state  {"power":…,"voltage_in":…, …}
 
 #include "monitor.h"
@@ -41,6 +41,7 @@ class MqttPublisher {
   void stop_();
   void publish_discovery_(const Panel &p);
   void publish_system_discovery_();
+  void publish_string_discovery_(const std::string &label);
   bool pub_(const std::string &topic, const std::string &payload, bool retain);
   std::string base_() const;
 
@@ -50,7 +51,7 @@ class MqttPublisher {
   mosquitto *mosq_ = nullptr;
   std::atomic<bool> connected_{false};
   std::atomic<bool> need_discovery_{true};
-  std::set<std::string> announced_;
+  std::set<std::string> announced_, announced_strings_;
   mutable std::mutex err_mu_;
   std::string last_error_;
 

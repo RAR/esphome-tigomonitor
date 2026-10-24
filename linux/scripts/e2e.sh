@@ -29,8 +29,10 @@ summary="$(grep 'stopping:' "$out/daemon.log")"
 expect "readings" "$(echo "$summary" | sed -E 's/.* ([0-9]+) readings.*/\1/')" $((panels * rounds))
 expect "bad checksums" "$(echo "$summary" | sed -E 's/.* ([0-9]+) bad checksums.*/\1/')" 1
 expect "panels" "$(echo "$summary" | sed -E 's/.* ([0-9]+) panels.*/\1/')" $panels
-expect "panel discovery configs" "$(grep -c '^homeassistant/sensor/tigo_04C05B' "$out/mqtt.txt")" $((panels * 9))
-expect "system discovery configs" "$(grep -c '^homeassistant/sensor/tigomonitor_test_' "$out/mqtt.txt")" 3
+# 12 metrics and the barcode per panel; 7 system sensors and night mode.
+expect "panel discovery configs" "$(grep -c '^homeassistant/sensor/tigo_04C05B' "$out/mqtt.txt")" $((panels * 13))
+expect "system discovery configs" "$(grep -c '^homeassistant/sensor/tigomonitor_test_' "$out/mqtt.txt")" 7
+expect "night mode sensor" "$(grep -c '^homeassistant/binary_sensor/tigomonitor_test_night_mode' "$out/mqtt.txt")" 1
 # One publish per interval plus a final one at the end of the replay, so at
 # least one message per panel; how many depends on timing.
 states="$(grep -c '^tigomonitor/test/panel/' "$out/mqtt.txt")"

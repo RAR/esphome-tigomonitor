@@ -225,6 +225,35 @@ void HttpServer::routes_() {
   svr.Get("/", app);
   svr.Get("/app", app);
 
+  svr.Get("/favicon.ico", [this](const httplib::Request &, httplib::Response &res) {
+    std::ifstream in(ctx_.web_dir + "/favicon.svg", std::ios::binary);
+    if (!in) {
+      res.status = 404;
+      return;
+    }
+    std::stringstream ss;
+    ss << in.rdbuf();
+    res.set_header("Cache-Control", "public, max-age=86400");
+    res.set_content(ss.str(), "image/svg+xml");
+  });
+  // The firmware's old page addresses, sent to the matching view. Relative,
+  // as the firmware's are, so a reverse proxy's path prefix survives.
+  for (const auto &page : std::vector<std::pair<const char *, const char *>>{
+           {"/nodes", "nodes"}, {"/status", "diagnostics"}, {"/history", "history"}, {"/cca", "cca"}, {"/yaml", "tools"}}) {
+    std::string loc = std::string("app#") + page.second;
+    svr.Get(page.first, [loc](const httplib::Request &, httplib::Response &res) {
+      res.status = 302;
+      res.set_header("Location", loc);
+      res.set_content("<a href=\"" + loc + "\">" + loc + "</a>", "text/html");
+    });
+  }
+  // The page checks for a newer release from the browser; this only says where.
+  svr.Get("/api/github/release", [](const httplib::Request &, httplib::Response &res) {
+    res.set_header("Cache-Control", "public, max-age=3600");
+    res.set_content(R"({"fetch_url":"https://api.github.com/repos/RAR/esphome-tigomonitor/releases/latest"})",
+                    "application/json");
+  });
+
   svr.Get("/api/devices", [&mon](const httplib::Request &, httplib::Response &res) {
     auto now = Clock::now();
     json devices = json::array();
@@ -248,7 +277,7 @@ void HttpServer::routes_() {
                          {"duty_cycle", r1(r.duty_cycle * 100.0 / 255.0)},
                          {"efficiency", r2(r.efficiency)},
                          {"data_age_ms", age},
-                         {"stale", now - p.updated >= Monitor::ONLINE_WINDOW}});
+                         {"stale", now - p.updated >= mon.online_window()}});
     }
     send_json(res, {{"devices", devices}, {"count", devices.size()}});
   });
@@ -259,7 +288,7 @@ void HttpServer::routes_() {
     int active = 0;
     auto panels = mon.panels();
     for (const auto &p : panels) {
-      if (now - p.updated >= Monitor::ONLINE_WINDOW) continue;
+      if (now - p.updated >= mon.online_window()) continue;
       active++;
       power_out += p.reading.power_out;
       current += p.reading.current_in;
@@ -318,6 +347,18 @@ void HttpServer::routes_() {
     return true;
   };
   svr.Get("/api/cca", [this](const httplib::Request &, httplib::Response &res) {
+    // A CCA IP means its local HTTP API, as cca_source: http does.
+    std::string ip = ctx_.current_settings().cca_ip;
+    if (!ip.empty()) {
+      auto h = ctx_.cca_http.view();
+      if (h.epoch == 0 && !h.busy) ctx_.cca_http.request_refresh(ip);  // first look, as the firmware queries
+      int64_t age = h.epoch ? std::max<int64_t>(0, time(nullptr) - h.epoch) : 0;
+      send_json(res, {{"cca_ip", ip},
+                      {"last_sync_seconds_ago", age},
+                      {"device_info", h.device_info.empty() ? "{}" : h.device_info},
+                      {"network_info", "{}"}});
+      return;
+    }
     auto v = ctx_.cca.view();
     std::string info = v.device_info;
     // A refresh that failed after the last good one shows its reason, which
@@ -331,6 +372,11 @@ void HttpServer::routes_() {
                     {"network_info", v.network_info.empty() ? "{}" : v.network_info}});
   });
   auto refresh = [this, cca_unavailable](const httplib::Request &, httplib::Response &res) {
+    std::string ip = ctx_.current_settings().cca_ip;
+    if (!ip.empty()) {
+      ctx_.cca_http.request_refresh(ip);  // device info, then the node table
+      return send_json(res, {{"status", "ok"}, {"message", "CCA refresh initiated"}});
+    }
     if (cca_unavailable(res)) return;
     ctx_.cca.request_refresh();
     send_json(res, {{"status", "ok"}, {"message", "BLE refresh initiated"}});
@@ -773,10 +819,76 @@ void HttpServer::routes_() {
   svr.Get("/api/status", status);
   svr.Get("/api/health", status);
 
-  svr.Get("/api/config", [this](const httplib::Request &, httplib::Response &res) {
-    Settings s = ctx_.current_settings();
-    send_json(res, {{"power_calibration",
-                     {{"value", s.power_calibration}, {"default", 1.0}, {"overridden", s.power_calibration != 1.0f}}}});
+  // Tools > Device Configuration: the firmware's runtime knobs, in its
+  // shape (tigo_config.cpp). "default" is the built-in default, where the
+  // ESP32 has the YAML value; reverting returns to it.
+  auto config_json = [](const Settings &s) {
+    const Settings d;
+    return json({{"power_calibration",
+                  {{"value", r3(s.power_calibration)},
+                   {"default", r3(d.power_calibration)},
+                   {"overridden", std::fabs(s.power_calibration - d.power_calibration) > 1e-6}}},
+                 {"night_mode_timeout",
+                  {{"value", s.night_mode_timeout_min},
+                   {"default", d.night_mode_timeout_min},
+                   {"overridden", s.night_mode_timeout_min != d.night_mode_timeout_min}}},
+                 {"reset_at_midnight",
+                  {{"value", s.reset_at_midnight},
+                   {"default", d.reset_at_midnight},
+                   {"overridden", s.reset_at_midnight != d.reset_at_midnight}}},
+                 {"sync_cca_on_startup",
+                  {{"value", s.sync_cca_on_startup},
+                   {"default", d.sync_cca_on_startup},
+                   {"overridden", s.sync_cca_on_startup != d.sync_cca_on_startup}}},
+                 {"cca_ip", {{"value", s.cca_ip}, {"default", d.cca_ip}, {"overridden", s.cca_ip != d.cca_ip}}}});
+  };
+  svr.Get("/api/config", [this, config_json](const httplib::Request &, httplib::Response &res) {
+    std::lock_guard<std::mutex> lock(settings_mu_);
+    send_json(res, config_json(load_settings(ctx_.settings_path)));
+  });
+  svr.Post("/api/config", [this, config_json](const httplib::Request &req, httplib::Response &res) {
+    json j = json::parse(req.body, nullptr, false);
+    auto field = [&j](const char *k) {
+      auto it = j.is_object() ? j.find(k) : j.end();
+      return it != j.end() && it->is_string() ? it->get<std::string>() : std::string();
+    };
+    std::string reset = field("reset"), key = field("key"), value = field("value");
+    std::lock_guard<std::mutex> lock(settings_mu_);
+    Settings s = load_settings(ctx_.settings_path);
+    const Settings d;
+    auto truthy = [](const std::string &v) { return v == "1" || v == "true" || v == "on" || v == "yes"; };
+    bool ok = true;
+    if (!reset.empty()) {
+      if (reset == "power_calibration") s.power_calibration = d.power_calibration;
+      else if (reset == "night_mode_timeout") s.night_mode_timeout_min = d.night_mode_timeout_min;
+      else if (reset == "reset_at_midnight") s.reset_at_midnight = d.reset_at_midnight;
+      else if (reset == "sync_cca_on_startup") s.sync_cca_on_startup = d.sync_cca_on_startup;
+      else if (reset == "cca_ip") s.cca_ip = d.cca_ip;
+      else ok = false;
+    } else if (key == "power_calibration") {
+      // Same range as the firmware's.
+      float f = std::strtof(value.c_str(), nullptr);
+      ok = f >= 0.5f && f <= 2.0f;
+      if (ok) s.power_calibration = f;
+    } else if (key == "night_mode_timeout") {
+      long m = std::strtol(value.c_str(), nullptr, 10);
+      ok = m >= 1 && m <= 1440;
+      if (ok) s.night_mode_timeout_min = static_cast<int>(m);
+    } else if (key == "reset_at_midnight") {
+      s.reset_at_midnight = truthy(value);
+    } else if (key == "sync_cca_on_startup") {
+      s.sync_cca_on_startup = truthy(value);
+    } else if (key == "cca_ip") {
+      ok = value.size() < 64;
+      if (ok) s.cca_ip = value;
+    } else {
+      ok = false;
+    }
+    if (!ok) return send_json(res, {{"status", "error"}, {"message", "invalid key or value out of range"}}, 400);
+    if (!save_settings(ctx_.settings_path, s))
+      return send_json(res, {{"status", "error"}, {"message", "Could not save settings to disk."}}, 500);
+    ctx_.settings_changed = true;
+    send_json(res, config_json(s));
   });
 
   svr.Post("/api/reset_peak_power", [this](const httplib::Request &, httplib::Response &res) {
@@ -886,7 +998,9 @@ void HttpServer::routes_() {
       return;
     }
     std::lock_guard<std::mutex> lock(settings_mu_);
-    Settings s = ctx_.current_settings();
+    // The file, not the running copy: a save the main loop has not applied
+    // yet would otherwise be overwritten.
+    Settings s = load_settings(ctx_.settings_path);
     std::string err;
     try {
       if (j.contains("serial_port")) s.serial_port = j["serial_port"].get<std::string>();

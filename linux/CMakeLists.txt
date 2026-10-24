@@ -21,6 +21,7 @@ find_package(Threads REQUIRED)
 add_executable(tigomonitord
   src/main.cpp
   src/cca_ble.cpp
+  src/cca_http.cpp
   src/cloud.cpp
   src/fsutil.cpp
   src/history.cpp
@@ -39,4 +40,6 @@ target_link_libraries(tigomonitord PRIVATE PkgConfig::MOSQUITTO PkgConfig::HTTPL
 
 install(TARGETS tigomonitord RUNTIME DESTINATION bin)
 install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/../components/tigo_server/web/app.html
+              # The 16px cut of the brand mark, the one the firmware inlines.
+              ${CMAKE_CURRENT_SOURCE_DIR}/../site/public/favicon.svg
         DESTINATION share/tigomonitor/web)

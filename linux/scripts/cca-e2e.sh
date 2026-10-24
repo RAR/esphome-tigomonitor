@@ -1,17 +1,23 @@
 #!/bin/sh
-# The CCA page over Bluetooth without a CCA: tigomonitord against a mock BlueZ
-# (linux/tools/mock_bluez.py) on a private D-Bus bus. Starts the daemon before
-# BlueZ, as can happen at boot, then runs every CCA command through it.
+# The CCA page without a CCA. Over Bluetooth: tigomonitord against a mock
+# BlueZ (linux/tools/mock_bluez.py) on a private D-Bus bus, started after the
+# daemon as can happen at boot, then every CCA command through it. Over HTTP:
+# a mock of the older CCAs' local API (linux/tools/mock_cca_http.py).
 # Run from the repo root inside the dev container, after build.sh.
 set -eu
-out=build/ble-e2e
+out=build/cca-e2e
 mkdir -p "$out"
 rm -f "$out"/*.json "$out"/history.db*  # a fresh install every run
 addr="$(dbus-daemon --session --fork --print-address | head -1)"
 TIGOD_DBUS_ADDRESS="$addr" build/linux/tigomonitord --state-dir "$out" --port 18089 --serial /dev/nonexistent \
   2> "$out/daemon.log" &
 daemon=$!
-cleanup() { kill $daemon 2>/dev/null || true; pkill -f mock_bluez.py || true; pkill dbus-daemon || true; }
+cleanup() {
+  kill $daemon 2>/dev/null || true
+  pkill -f mock_bluez.py || true
+  pkill -f mock_cca_http.py || true
+  pkill dbus-daemon || true
+}
 trap cleanup EXIT
 sleep 1
 
@@ -87,6 +93,22 @@ log = [str(x) for x in mock.Log()]
 expect('adapter powered on', bool(mock.Powered()), True)
 expect('every connection closed', (log.count('connect'), log.count('disconnect')), (6, 6))
 expect('LE-only discovery', 'filter:le' in log, True)
+
+# --- the older CCAs' local HTTP API, chosen by setting a CCA IP
+bcs = ['04C05B40000000A1', '04C05B40000000B2']
+post('/api/nodes/import', {'nodes': [{'addr': '0002', 'long_address': bcs[0]}, {'addr': '0003', 'long_address': bcs[1]}]})
+subprocess.Popen([sys.executable, 'linux/tools/mock_cca_http.py', '18782'], stdout=subprocess.DEVNULL)
+time.sleep(1)
+u.urlopen(u.Request('http://127.0.0.1:18782/', data=json.dumps(bcs).encode(), method='POST'))
+expect('CCA IP saved', post('/api/config', {'key': 'cca_ip', 'value': '127.0.0.1:18782'})[1]['cca_ip']['value'],
+       '127.0.0.1:18782')
+time.sleep(1.5)  # settings reach the main loop within a second
+get('/api/cca/refresh')
+info = wait(lambda: (lambda c: c if 'HTTPCCA' in c['device_info'] else None)(get('/api/cca')[1]), 10)
+expect('HTTP device info', info and json.loads(info['device_info'])['serial'], 'HTTPCCA0001')
+nodes = wait(lambda: (lambda n: n if n[0]['cca_label'] else None)(get('/api/nodes')[1]['nodes']), 10) or []
+expect('HTTP sync labels', [(n['cca_label'], n['cca_string'], n['cca_mppt']) for n in nodes],
+       [('P0', 'East', 'MPPT 1'), ('P1', 'East', 'MPPT 1')])
 sys.exit(1 if fail else 0)
 PY
-echo "ble e2e passed"
+echo "cca e2e passed"

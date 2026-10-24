@@ -5,6 +5,7 @@
 #include <mosquitto.h>
 #include <nlohmann/json.hpp>
 
+#include <cctype>
 #include <cmath>
 
 namespace tigod {
@@ -73,6 +74,7 @@ void MqttPublisher::configure(const Settings &settings) {
   stop_();
   settings_ = settings;
   announced_.clear();
+  announced_strings_.clear();
   if (settings_.mqtt.host.empty()) {
     LOGI("MQTT: no broker set; Home Assistant publishing is off");
     return;
@@ -125,16 +127,23 @@ struct Metric {
   int precision;
 };
 
+// The firmware's per-panel sensors (sensor.py), units and precision included.
+// Two are left out: its power_factor is always 1.0 and firmware_version
+// always "unknown". load_factor is sent as a percentage, which is the unit
+// the firmware labels it with.
 static const Metric PANEL_METRICS[] = {
-    {"power", "Power", "W", "power", "measurement", 1},
+    {"power", "Power", "W", "power", "measurement", 0},
+    {"power_in", "Power in", "W", "power", "measurement", 0},
+    {"peak_power", "Peak power", "W", "power", "measurement", 0},
     {"voltage_in", "Voltage in", "V", "voltage", "measurement", 2},
     {"voltage_out", "Voltage out", "V", "voltage", "measurement", 2},
-    {"current_in", "Current in", "A", "current", "measurement", 3},
-    {"current_out", "Current out", "A", "current", "measurement", 3},
+    {"current_in", "Current in", "A", "current", "measurement", 2},
+    {"current_out", "Current out", "A", "current", "measurement", 2},
     {"temperature", "Temperature", "°C", "temperature", "measurement", 1},
-    {"duty_cycle", "Duty cycle", "%", nullptr, "measurement", 0},
+    {"duty_cycle", "Duty cycle", "%", nullptr, "measurement", 1},
     {"efficiency", "Efficiency", "%", nullptr, "measurement", 1},
-    {"rssi", "RSSI", nullptr, nullptr, "measurement", 0},
+    {"load_factor", "Load factor", "%", nullptr, "measurement", 1},
+    {"rssi", "RSSI", "dBm", "signal_strength", "measurement", 0},
 };
 
 void MqttPublisher::publish_discovery_(const Panel &p) {
@@ -160,9 +169,20 @@ void MqttPublisher::publish_discovery_(const Panel &p) {
     if (m.unit) c["unit_of_measurement"] = m.unit;
     if (m.device_class) c["device_class"] = m.device_class;
     if (m.state_class) c["state_class"] = m.state_class;
-    if (std::string(m.key) == "rssi" || std::string(m.key) == "duty_cycle") c["entity_category"] = "diagnostic";
+    std::string key = m.key;
+    if (key == "rssi" || key == "duty_cycle" || key == "load_factor") c["entity_category"] = "diagnostic";
     pub_(settings_.mqtt.discovery_prefix + "/sensor/" + uid + "/config", c.dump(), true);
   }
+  // The barcode as its own entity too, as the firmware's barcode text sensor.
+  std::string uid = "tigo_" + p.barcode + "_barcode";
+  json c = {{"name", "Barcode"},
+            {"unique_id", uid},
+            {"state_topic", state},
+            {"value_template", "{{ value_json.barcode }}"},
+            {"availability_topic", base_() + "/status"},
+            {"entity_category", "diagnostic"},
+            {"device", device}};
+  pub_(settings_.mqtt.discovery_prefix + "/sensor/" + uid + "/config", c.dump(), true);
 }
 
 void MqttPublisher::publish_system_discovery_() {
@@ -171,10 +191,16 @@ void MqttPublisher::publish_system_discovery_() {
   struct Sys {
     const char *key, *name, *unit, *device_class, *state_class;
   };
+  // The firmware's hub sensors: power_sum and power_out_sum, the energy
+  // sums, device_count, invalid_checksum and missed_frame.
   static const Sys SYS[] = {
       {"power", "Power", "W", "power", "measurement"},
+      {"power_in", "Power in", "W", "power", "measurement"},
       {"energy", "Energy", "kWh", "energy", "total_increasing"},
+      {"energy_in", "Energy in", "kWh", "energy", "total_increasing"},
       {"panels_online", "Panels online", nullptr, nullptr, "measurement"},
+      {"invalid_checksum", "Invalid checksums", nullptr, nullptr, "total_increasing"},
+      {"missed_frames", "Missed frames", nullptr, nullptr, "total_increasing"},
   };
   for (const auto &m : SYS) {
     std::string uid = "tigomonitor_" + settings_.device_id + "_" + m.key;
@@ -187,8 +213,37 @@ void MqttPublisher::publish_system_discovery_() {
     if (m.unit) c["unit_of_measurement"] = m.unit;
     if (m.device_class) c["device_class"] = m.device_class;
     if (m.state_class) c["state_class"] = m.state_class;
+    std::string key = m.key;
+    if (key == "invalid_checksum" || key == "missed_frames") c["entity_category"] = "diagnostic";
     pub_(settings_.mqtt.discovery_prefix + "/sensor/" + uid + "/config", c.dump(), true);
   }
+  // Night mode: no frame from the bus for night_mode_timeout.
+  std::string uid = "tigomonitor_" + settings_.device_id + "_night_mode";
+  json c = {{"name", "Night mode"},
+            {"unique_id", uid},
+            {"state_topic", state},
+            {"value_template", "{{ 'ON' if value_json.night_mode else 'OFF' }}"},
+            {"availability_topic", base_() + "/status"},
+            {"device", device}};
+  pub_(settings_.mqtt.discovery_prefix + "/binary_sensor/" + uid + "/config", c.dump(), true);
+}
+
+// One power sensor per string, as the firmware's string_label sensors.
+void MqttPublisher::publish_string_discovery_(const std::string &label) {
+  std::string slug;
+  for (char ch : label)
+    slug += std::isalnum(static_cast<unsigned char>(ch)) ? static_cast<char>(std::tolower(static_cast<unsigned char>(ch))) : '_';
+  std::string uid = "tigomonitor_" + settings_.device_id + "_string_" + slug;
+  json c = {{"name", label + " power"},
+            {"unique_id", uid},
+            {"state_topic", base_() + "/system/state"},
+            {"value_template", "{{ value_json.strings[" + json(label).dump() + "] | default(0) }}"},
+            {"availability_topic", base_() + "/status"},
+            {"unit_of_measurement", "W"},
+            {"device_class", "power"},
+            {"state_class", "measurement"},
+            {"device", monitor_device(settings_, version_)}};
+  pub_(settings_.mqtt.discovery_prefix + "/sensor/" + uid + "/config", c.dump(), true);
 }
 
 static double round_to(double v, int digits) {
@@ -200,32 +255,60 @@ void MqttPublisher::publish() {
   if (!connected_) return;
   if (need_discovery_.exchange(false)) {
     announced_.clear();
+    announced_strings_.clear();
     publish_system_discovery_();
   }
   auto now = Clock::now();
+  auto window = monitor_.online_window();
+  bool night = monitor_.night_mode();
   int online = 0;
   for (const auto &p : monitor_.panels()) {
-    if (now - p.updated >= Monitor::ONLINE_WINDOW) continue;
-    online++;
+    bool live = !night && now - p.updated < window;
+    if (live) online++;
     if (p.barcode.empty()) continue;  // not named by a Frame 27 yet
     // Re-announce when the name changes (a CCA sync labelled it).
     std::string key = p.barcode + "|" + panel_name(p);
     if (announced_.insert(key).second) publish_discovery_(p);
     const auto &r = p.reading;
-    json s = {{"power", round_to(r.power_out, 1)},
-              {"voltage_in", round_to(r.voltage_in, 2)},
-              {"voltage_out", round_to(r.voltage_out, 2)},
-              {"current_in", round_to(r.current_in, 3)},
-              {"current_out", round_to(r.current_out, 3)},
-              {"temperature", round_to(r.temperature, 1)},
-              {"duty_cycle", static_cast<int>(std::lround(r.duty_cycle * 100.0 / 255.0))},
-              {"efficiency", round_to(r.efficiency, 1)},
-              {"rssi", r.rssi}};
+    // A stale panel reads 0 for what it produces and keeps its last voltage
+    // and temperature; at night everything reads 0 and temperature is
+    // unknown. Both as the firmware does, so a chart drops to 0 rather than
+    // holding the last value or going unavailable.
+    auto prod = [live](double v) { return live ? v : 0.0; };
+    json s = {{"power", round_to(prod(r.power_out), 1)},
+              {"power_in", round_to(prod(r.power_in), 1)},
+              {"peak_power", round_to(p.peak_power, 1)},
+              {"voltage_in", round_to(night ? 0 : r.voltage_in, 2)},
+              {"voltage_out", round_to(night ? 0 : r.voltage_out, 2)},
+              {"current_in", round_to(prod(r.current_in), 3)},
+              {"current_out", round_to(prod(r.current_out), 3)},
+              {"temperature", night ? json(nullptr) : json(round_to(r.temperature, 1))},
+              {"duty_cycle", round_to(prod(r.duty_cycle * 100.0 / 255.0), 1)},
+              {"efficiency", round_to(prod(r.efficiency), 1)},
+              {"load_factor", round_to(prod(r.load_factor * 100.0), 1)},
+              {"rssi", live ? r.rssi : 0},
+              {"barcode", p.barcode}};
     pub_(base_() + "/panel/" + p.barcode + "/state", s.dump(), false);
   }
+  json strings = json::object();
+  for (const auto &st : monitor_.strings()) {
+    if (st.label == Monitor::ALL_PANELS) continue;  // not a string the site has
+    if (announced_strings_.insert(st.label).second) publish_string_discovery_(st.label);
+    strings[st.label] = round_to(st.total_power, 1);
+  }
+  BusStats bus = monitor_.stats();
+  // reset_at_midnight: the energy sensors count today, as the firmware's
+  // energy sums do with it on; otherwise the lifetime total.
+  bool daily = settings_.reset_at_midnight;
   json sys = {{"power", round_to(monitor_.total_power(), 1)},
-              {"energy", round_to(monitor_.energy_kwh(), 3)},
-              {"panels_online", online}};
+              {"power_in", round_to(monitor_.total_power_in(), 1)},
+              {"energy", round_to(daily ? monitor_.today_kwh() : monitor_.energy_kwh(), 3)},
+              {"energy_in", round_to(daily ? monitor_.today_in_kwh() : monitor_.energy_in_kwh(), 3)},
+              {"panels_online", online},
+              {"invalid_checksum", bus.bad_checksums},
+              {"missed_frames", bus.ends_without_start + bus.overflows},
+              {"night_mode", night},
+              {"strings", strings}};
   pub_(base_() + "/system/state", sys.dump(), false);
 }
 

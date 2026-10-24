@@ -56,6 +56,7 @@ void Monitor::on_frame_(const std::string &raw) {
     return;
   }
   stats_.last_frame_unix_ms = unix_ms();
+  last_frame_ = Clock::now();
   frame.resize(frame.size() - 2);
   std::string hex = proto::to_hex(frame);
 
@@ -178,17 +179,57 @@ double Monitor::today_kwh() const {
   return today_kwh_;
 }
 
+double Monitor::today_in_kwh() const {
+  std::lock_guard<std::mutex> lock(mu_);
+  return today_in_kwh_;
+}
+
 std::vector<std::pair<std::string, double>> Monitor::daily_history() const {
   std::lock_guard<std::mutex> lock(mu_);
   return history_;
 }
 
-float Monitor::total_power_locked_() const {
+float Monitor::total_power_locked_(bool input) const {
+  if (night_locked_()) return 0;
   auto now = Clock::now();
   float total = 0;
   for (const auto &p : panels_)
-    if (now - p.updated < ONLINE_WINDOW) total += p.reading.power_out;
+    if (now - p.updated < online_window_) total += input ? p.reading.power_in : p.reading.power_out;
   return total;
+}
+
+float Monitor::total_power_in() const {
+  std::lock_guard<std::mutex> lock(mu_);
+  return total_power_locked_(true);
+}
+
+double Monitor::energy_in_kwh() const {
+  std::lock_guard<std::mutex> lock(mu_);
+  return energy_in_kwh_;
+}
+
+Clock::duration Monitor::online_window() const {
+  std::lock_guard<std::mutex> lock(mu_);
+  return online_window_;
+}
+
+void Monitor::set_stale_timeout_min(int minutes) {
+  std::lock_guard<std::mutex> lock(mu_);
+  online_window_ = minutes > 0 ? Clock::duration(std::chrono::minutes(minutes)) : Clock::duration::max() / 2;
+}
+
+bool Monitor::night_locked_() const {
+  return last_frame_ != Clock::time_point{} && Clock::now() - last_frame_ > night_timeout_;
+}
+
+bool Monitor::night_mode() const {
+  std::lock_guard<std::mutex> lock(mu_);
+  return night_locked_();
+}
+
+void Monitor::set_night_mode_timeout_min(int minutes) {
+  std::lock_guard<std::mutex> lock(mu_);
+  night_timeout_ = std::chrono::minutes(minutes);
 }
 
 float Monitor::total_power() const {
@@ -214,7 +255,7 @@ std::vector<StringTotals> Monitor::strings_locked_() const {
     s.label = label;
     if (s.mppt.empty() && n) s.mppt = n->cca_mppt_label;
     s.total_devices++;
-    if (now - p.updated >= ONLINE_WINDOW) continue;
+    if (now - p.updated >= online_window_) continue;
     const auto &r = p.reading;
     if (s.active_devices == 0) s.min_efficiency = s.max_efficiency = r.efficiency;
     s.active_devices++;
@@ -282,6 +323,7 @@ int Monitor::apply_layout(const std::vector<LayoutPanel> &panels) {
       n.cca_string_label = lp.string_label;
       n.cca_mppt_label = lp.mppt;
       n.cca_object_id = lp.object_id;
+      if (!lp.channel.empty()) n.cca_channel = lp.channel;
       n.cca_validated = true;
       for (auto &p : panels_)
         if (p.addr == n.addr) p.label = n.cca_label;
@@ -420,6 +462,7 @@ void Monitor::tick() {
     if (history_.size() > HISTORY_DAYS) history_.erase(history_.begin());
     today_ = date;
     today_kwh_ = 0;
+    today_in_kwh_ = 0;
     for (auto &p : panels_) p.peak_power = 0;
     string_peaks_.clear();
     dirty_ = true;
@@ -429,6 +472,9 @@ void Monitor::tick() {
     // A long gap (suspend, a stalled loop) is not evidence of production.
     if (hours < 0.1) {
       double kwh = total_power_locked_() / 1000.0 * hours;
+      double kwh_in = total_power_locked_(true) / 1000.0 * hours;
+      energy_in_kwh_ += kwh_in;
+      today_in_kwh_ += kwh_in;
       energy_kwh_ += kwh;
       today_kwh_ += kwh;
     }
@@ -467,7 +513,7 @@ bool Monitor::save_locked_() {
   }
   json history = json::array();
   for (const auto &d : history_) history.push_back({d.first, d.second});
-  json j = {{"version", 1},     {"nodes", nodes},           {"energy_kwh", energy_kwh_},
+  json j = {{"version", 1},     {"nodes", nodes},           {"energy_kwh", energy_kwh_}, {"energy_in_kwh", energy_in_kwh_}, {"today_in_kwh", today_in_kwh_},
             {"today", today_},  {"today_kwh", today_kwh_}, {"daily_kwh", history}};
   if (!write_file_atomic(state_path_, j.dump(1) + "\n")) return false;
   dirty_ = false;
@@ -484,6 +530,8 @@ bool Monitor::load() {
     return false;
   }
   energy_kwh_ = j.value("energy_kwh", 0.0);
+  energy_in_kwh_ = j.value("energy_in_kwh", 0.0);
+  today_in_kwh_ = j.value("today_in_kwh", 0.0);
   today_ = j.value("today", "");
   today_kwh_ = j.value("today_kwh", 0.0);
   history_.clear();

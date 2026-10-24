@@ -160,7 +160,7 @@ bool Cloud::layout(CloudLayout &out, std::string &err) {
         if (!s.is_object()) continue;
         for (const auto &p : s.value("panels", json::array())) {
           if (!p.is_object() || str(p, "serial").empty()) continue;
-          out.panels.push_back({str(p, "serial"), str(p, "label"), str(s, "label"), mppt, str(p, "object_id")});
+          out.panels.push_back({str(p, "serial"), str(p, "label"), str(s, "label"), mppt, str(p, "object_id"), ""});
         }
       }
     }

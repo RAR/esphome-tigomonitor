@@ -1014,10 +1014,6 @@
           <div class="cfg-text"><strong>Serial port</strong><span class="cfg-default">The RS485 adapter. "auto" finds a USB dongle or the Pi's UART</span></div>
           <div class="cfg-ctrl"><input class="cfg-input" id="pi-serial" autocomplete="off"></div>
         </div>
-        <div class="cfg-row">
-          <div class="cfg-text"><strong>Power calibration</strong><span class="cfg-default">Multiplies every power reading; 1.0 leaves them as reported</span></div>
-          <div class="cfg-ctrl"><input class="cfg-input" id="pi-calibration" type="number" step="0.01" min="0.01" max="5"></div>
-        </div>
         <div class="tools-actions" style="margin-top:12px">
           <button class="btn primary" id="pi-save">Save</button>
         </div>
@@ -1036,12 +1032,12 @@
         </div>
       </div>
 
-      <div class="section-head" data-esp-only>
+      <div class="section-head">
         <div class="section-title">Device Configuration</div>
-        <div class="section-sub">Stored on-device · overrides YAML</div>
+        <div class="section-sub" id="cfg-sub">Stored on-device · overrides YAML</div>
       </div>
-      <div class="tools-card" data-esp-only>
-        <p class="hint">These knobs are saved to the ESP32 and take effect without reflashing. A stored value <b>overrides the YAML default</b> until you revert it — after that, editing the YAML applies again. <span id="cfg-status" style="color:var(--text-dim)"></span></p>
+      <div class="tools-card">
+        <p class="hint" id="cfg-hint">These knobs are saved to the ESP32 and take effect without reflashing. A stored value <b>overrides the YAML default</b> until you revert it — after that, editing the YAML applies again. <span id="cfg-status" style="color:var(--text-dim)"></span></p>
         <div id="cfg-rows"></div>
       </div>
 
@@ -1986,7 +1982,7 @@
   // The Raspberry Pi build answers /api/status with platform: 'linux'; the
   // ESP32 omits it. Swap the ESP32-only Tools sections for the Pi's settings.
   let PLATFORM = 'esp32';
-  apiFetch('/api/status').then(r => r.ok ? r.json() : {}).then(s => {
+  const platformReady = apiFetch('/api/status').then(r => r.ok ? r.json() : {}).then(s => {
     if (s.platform !== 'linux') return;
     PLATFORM = 'linux';
     document.querySelectorAll('[data-esp-only]').forEach(el => { el.style.display = 'none'; });
@@ -1994,6 +1990,8 @@
     document.getElementById('hist-backing').textContent = 'Stored on the SD card · persists across reboots';
     document.getElementById('cca-ble-hint').innerHTML = 'Scan for your Tigo CCA over Bluetooth (matched by its <code>04:C0:5B</code> address prefix). With none saved, the Pi uses the nearest one; save a MAC to pin it.';
     document.getElementById('cca-ble-revert-btn').textContent = 'Use nearest';
+    document.getElementById('cfg-sub').textContent = 'Saved on the Pi';
+    document.getElementById('cfg-hint').innerHTML = 'Saved on the Pi and applied within a second. Revert returns a setting to its default. <span id="cfg-status" style="color:var(--text-dim)"></span>';
     const restart = document.getElementById('tools-restart');
     restart.previousElementSibling.innerHTML =
       '<strong>Restart service</strong><span>Restarts the monitor service. Readings pause for a few seconds.</span>';
@@ -3132,6 +3130,7 @@
     if (!document.getElementById('view-tools').classList.contains('active')) return;
     if (PLATFORM === 'linux') {
       refreshPiInverters();
+      refreshConfig();
       return refreshPiSettings();
     }
     try {
@@ -3188,12 +3187,12 @@
           <div class="cfg-text">
             <strong>${f.label}</strong>
             <span>${f.desc}</span>
-            <span class="cfg-default">YAML default: ${cloudEsc(def)}</span>
+            <span class="cfg-default">${PLATFORM === 'linux' ? 'Default' : 'YAML default'}: ${cloudEsc(def)}</span>
           </div>
           <div class="cfg-ctrl">
             ${control}
             <button class="btn" data-cfg-save="${f.key}">Save</button>
-            <button class="btn cfg-revert" data-cfg-reset="${f.key}"${ov ? '' : ' disabled'} title="Revert to YAML default">Revert</button>
+            <button class="btn cfg-revert" data-cfg-reset="${f.key}"${ov ? '' : ' disabled'} title="Revert to ${PLATFORM === 'linux' ? '' : 'YAML '}default">Revert</button>
           </div>
         </div>`;
     }).join('');
@@ -3305,7 +3304,6 @@
       document.getElementById('pi-mqtt-topic-hint').textContent =
         `Readings go to ${s.mqtt.base_topic}/${s.device_id}/panel/<barcode>/state`;
       document.getElementById('pi-serial').value = s.serial_port || '';
-      document.getElementById('pi-calibration').value = s.power_calibration ?? 1;
       document.getElementById('pi-mqtt-state').textContent = !s.mqtt.host ? 'MQTT off'
         : s.mqtt_connected ? `connected to ${s.mqtt.host}` : `not connected${s.mqtt_error ? ': ' + s.mqtt_error : ''}`;
       document.getElementById('tools-meta').textContent = `last update ${new Date().toLocaleTimeString()}`;
@@ -3374,7 +3372,6 @@
     const body = {
       mqtt,
       serial_port: document.getElementById('pi-serial').value.trim(),
-      power_calibration: Number(document.getElementById('pi-calibration').value) || 1,
     };
     try {
       const r = await apiFetch('/api/settings', {
@@ -3391,7 +3388,9 @@
   });
 
   document.querySelector('#nav button[data-view="tools"]').addEventListener('click', refreshTools);
-  if (window.location.hash === '#tools') refreshTools();
+  // After the platform probe, which refreshes Tools itself on the Pi: a
+  // bookmark to #tools would otherwise load the ESP32's sections there.
+  platformReady.then(() => { if (PLATFORM !== 'linux' && window.location.hash === '#tools') refreshTools(); });
 
   // ============================================================
   // R7 — CCA view (Tigo CCA configuration mirror)
