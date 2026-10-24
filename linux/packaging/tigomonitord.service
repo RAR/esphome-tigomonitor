@@ -10,10 +10,13 @@ ExecStart=/usr/bin/tigomonitord
 Restart=always
 RestartSec=3
 
-# No fixed account: systemd makes one per run. dialout reads the RS485
-# adapter, bluetooth lets BlueZ take its calls for the CCA page, and the
-# capability lets it serve the web UI on port 80.
-DynamicUser=yes
+# A system account the package creates, in dialout (the RS485 adapter) and
+# bluetooth (the CCA page); the capability serves the web UI on port 80.
+# Not DynamicUser: D-Bus cannot resolve those accounts unless nss-systemd is
+# configured, which Raspberry Pi OS does not do, and drops their connection,
+# so the CCA page could never reach BlueZ.
+User=tigomonitor
+Group=tigomonitor
 SupplementaryGroups=dialout bluetooth
 AmbientCapabilities=CAP_NET_BIND_SERVICE
 CapabilityBoundingSet=CAP_NET_BIND_SERVICE

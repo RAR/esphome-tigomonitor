@@ -46,10 +46,16 @@ printf '/etc/avahi/services/tigomonitor-http.service\n' > "$root/DEBIAN/conffile
 cat > "$root/DEBIAN/postinst" <<'EOF'
 #!/bin/sh
 set -e
-# The unit joins the bluetooth group, which BlueZ requires of a client, and
-# systemd refuses to start a unit whose group does not exist.
-if [ "$1" = configure ] && ! getent group bluetooth >/dev/null; then
-  groupadd --system bluetooth
+# The service runs as this account. The unit also names the bluetooth group,
+# which some BlueZ policies require of a client, and systemd refuses to
+# start a unit whose group does not exist.
+if [ "$1" = configure ]; then
+  getent group bluetooth >/dev/null || groupadd --system bluetooth
+  if ! getent passwd tigomonitor >/dev/null; then
+    useradd --system --user-group --home-dir /var/lib/tigomonitor --no-create-home \
+      --shell /usr/sbin/nologin --comment "Tigo Monitor" tigomonitor
+  fi
+  usermod -a -G dialout,bluetooth tigomonitor
 fi
 if [ "$1" = configure ] && [ -d /run/systemd/system ]; then
   systemctl daemon-reload
