@@ -97,7 +97,6 @@ void Monitor::on_power_packet_(const std::string &packet) {
     LOGI("new panel at address %s", r.addr);
   }
   p->reading = r;
-  if (r.power_out > p->peak_power) p->peak_power = r.power_out;
   p->updated = Clock::now();
   p->updated_unix_ms = unix_ms();
   p->readings++;
@@ -108,6 +107,16 @@ void Monitor::on_power_packet_(const std::string &packet) {
       break;
     }
   }
+  // A peak saved before a restart comes back once the panel has a barcode,
+  // as the firmware restores its peaks; keyed by barcode, not address (#74).
+  if (!p->barcode.empty()) {
+    auto saved = saved_peaks_.find(p->barcode);
+    if (saved != saved_peaks_.end()) {
+      p->peak_power = std::max<float>(p->peak_power, static_cast<float>(saved->second));
+      saved_peaks_.erase(saved);
+    }
+  }
+  if (r.power_out > p->peak_power) p->peak_power = r.power_out;
   LOGD("%s: %.1f W out, %.2f V in, %.1f C", r.addr, r.power_out, r.voltage_in, r.temperature);
 }
 
@@ -227,6 +236,11 @@ bool Monitor::night_mode() const {
   return night_locked_();
 }
 
+void Monitor::set_reset_at_midnight(bool on) {
+  std::lock_guard<std::mutex> lock(mu_);
+  reset_peaks_at_midnight_ = on;
+}
+
 void Monitor::set_night_mode_timeout_min(int minutes) {
   std::lock_guard<std::mutex> lock(mu_);
   night_timeout_ = std::chrono::minutes(minutes);
@@ -293,7 +307,9 @@ void Monitor::set_power_calibration(float c) {
 void Monitor::reset_peaks() {
   std::lock_guard<std::mutex> lock(mu_);
   for (auto &p : panels_) p.peak_power = p.reading.power_out;
+  saved_peaks_.clear();
   string_peaks_.clear();
+  dirty_ = true;
 }
 
 void Monitor::reset_nodes() {
@@ -463,8 +479,12 @@ void Monitor::tick() {
     today_ = date;
     today_kwh_ = 0;
     today_in_kwh_ = 0;
-    for (auto &p : panels_) p.peak_power = 0;
-    string_peaks_.clear();
+    // Peaks are all-time unless reset_at_midnight, as on the ESP32.
+    if (reset_peaks_at_midnight_) {
+      for (auto &p : panels_) p.peak_power = 0;
+      saved_peaks_.clear();
+      string_peaks_.clear();
+    }
     dirty_ = true;
   }
   if (last_tick_ != Clock::time_point{}) {
@@ -513,7 +533,11 @@ bool Monitor::save_locked_() {
   }
   json history = json::array();
   for (const auto &d : history_) history.push_back({d.first, d.second});
-  json j = {{"version", 1},     {"nodes", nodes},           {"energy_kwh", energy_kwh_}, {"energy_in_kwh", energy_in_kwh_}, {"today_in_kwh", today_in_kwh_},
+  json peaks = json::object();
+  for (const auto &kv : saved_peaks_) peaks[kv.first] = kv.second;  // not seen since start
+  for (const auto &p : panels_)
+    if (!p.barcode.empty()) peaks[p.barcode] = p.peak_power;
+  json j = {{"version", 1},     {"nodes", nodes},           {"energy_kwh", energy_kwh_}, {"energy_in_kwh", energy_in_kwh_}, {"today_in_kwh", today_in_kwh_}, {"peaks", peaks},
             {"today", today_},  {"today_kwh", today_kwh_}, {"daily_kwh", history}};
   if (!write_file_atomic(state_path_, j.dump(1) + "\n")) return false;
   dirty_ = false;
@@ -532,6 +556,10 @@ bool Monitor::load() {
   energy_kwh_ = j.value("energy_kwh", 0.0);
   energy_in_kwh_ = j.value("energy_in_kwh", 0.0);
   today_in_kwh_ = j.value("today_in_kwh", 0.0);
+  saved_peaks_.clear();
+  const json peaks = j.value("peaks", json::object());
+  for (const auto &kv : peaks.items())
+    if (kv.value().is_number()) saved_peaks_[kv.key()] = kv.value().get<double>();
   today_ = j.value("today", "");
   today_kwh_ = j.value("today_kwh", 0.0);
   history_.clear();

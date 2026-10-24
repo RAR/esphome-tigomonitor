@@ -87,6 +87,8 @@ class Monitor {
   // gone dark for the night. Production reads 0, as on the ESP32.
   bool night_mode() const;
   void set_night_mode_timeout_min(int minutes);
+  // reset_at_midnight: also clear the peaks when the day rolls over.
+  void set_reset_at_midnight(bool on);
 
   std::vector<Panel> panels() const;
   std::vector<Node> nodes() const;
@@ -162,7 +164,9 @@ class Monitor {
   double today_kwh_ = 0;
   std::string today_;  // local date today_kwh_ belongs to
   std::vector<std::pair<std::string, double>> history_;
-  mutable std::map<std::string, double> string_peaks_;  // label -> W, today
+  mutable std::map<std::string, double> string_peaks_;  // label -> W
+  std::map<std::string, double> saved_peaks_;  // barcode -> W, from state.json until the panel reports
+  bool reset_peaks_at_midnight_ = false;
   Clock::time_point last_tick_{};
   Clock::time_point last_save_{};
   bool dirty_ = false;

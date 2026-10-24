@@ -108,6 +108,7 @@ int main(int argc, char **argv) {
   monitor.load();
   monitor.set_stale_timeout_min(settings.stale_timeout_min);
   monitor.set_night_mode_timeout_min(settings.night_mode_timeout_min);
+  monitor.set_reset_at_midnight(settings.reset_at_midnight);
 
   MqttPublisher mqtt(monitor, TIGOD_VERSION);
   mqtt.configure(settings);
@@ -196,6 +197,7 @@ int main(int argc, char **argv) {
       monitor.set_power_calibration(settings.power_calibration);
       monitor.set_stale_timeout_min(settings.stale_timeout_min);
       monitor.set_night_mode_timeout_min(settings.night_mode_timeout_min);
+      monitor.set_reset_at_midnight(settings.reset_at_midnight);
       mqtt.configure(settings);
       if (new_port && replay.empty()) {
         input_stop = true;

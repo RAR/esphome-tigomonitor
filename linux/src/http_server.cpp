@@ -763,7 +763,8 @@ void HttpServer::routes_() {
     localtime_r(&t, &lt);
     strftime(today, sizeof(today), "%Y-%m-%d", &lt);
     days.push_back({{"date", today}, {"energy", r2(mon.today_kwh())}});
-    send_json(res, {{"days", days}});
+    // The firmware's shape: lifetime total plus the days, today last.
+    send_json(res, {{"current_energy", r3(mon.energy_kwh())}, {"history", days}});
   });
 
   auto status = [this, &mon](const httplib::Request &req, httplib::Response &res) {
