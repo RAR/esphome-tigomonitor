@@ -313,7 +313,10 @@ void HttpServer::routes_() {
     BusStats s = mon.stats();
     struct statvfs fs {};
     uint64_t disk_free = 0, disk_total = 0;
-    if (statvfs(ctx_.settings_path.c_str(), &fs) == 0) {
+    // The state directory, not settings.json: that file only exists once
+    // settings have been saved, and statvfs fails on a missing path.
+    std::string state_dir = ctx_.settings_path.substr(0, ctx_.settings_path.rfind('/') + 1);
+    if (statvfs(state_dir.c_str(), &fs) == 0) {
       disk_free = static_cast<uint64_t>(fs.f_bavail) * fs.f_frsize;
       disk_total = static_cast<uint64_t>(fs.f_blocks) * fs.f_frsize;
     }
