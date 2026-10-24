@@ -58,8 +58,12 @@ void MqttPublisher::stop_() {
   if (connected_) {
     pub_(base_() + "/status", "offline", true);
     mosquitto_disconnect(mosq_);
+    // Let the loop thread send the queued publish and the DISCONNECT. Forcing
+    // it drops the socket first, and the broker then also fires the will.
+    mosquitto_loop_stop(mosq_, false);
+  } else {
+    mosquitto_loop_stop(mosq_, true);
   }
-  mosquitto_loop_stop(mosq_, true);
   mosquitto_destroy(mosq_);
   mosq_ = nullptr;
   connected_ = false;

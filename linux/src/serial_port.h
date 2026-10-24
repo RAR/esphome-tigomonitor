@@ -6,9 +6,10 @@
 
 namespace tigod {
 
-// Reads a serial port (8N1, raw) and hands every chunk to on_data. Survives the
-// dongle being unplugged: it reopens the port every few seconds until it
-// reappears. Blocks until stop is set.
+// Reads a serial port (8N1, raw) and hands every chunk to on_data. device
+// "auto" tries USB adapters first (/dev/ttyUSB*, /dev/ttyACM*), then the Pi's
+// UART (/dev/serial0). Survives the dongle being unplugged: it reopens the
+// port every few seconds until it reappears. Blocks until stop is set.
 void run_serial(const std::string &device, int baud, const std::atomic<bool> &stop,
                 const std::function<void(const char *, size_t)> &on_data);
 

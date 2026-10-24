@@ -17,7 +17,8 @@ struct MqttSettings {
 };
 
 struct Settings {
-  std::string serial_port = "/dev/ttyUSB0";
+  // "auto" picks the first USB serial adapter, then the Pi's own UART.
+  std::string serial_port = "auto";
   int baud_rate = 38400;
   float power_calibration = 1.0f;
   // Plenty of RAM here, so the node table is sized for any real site rather

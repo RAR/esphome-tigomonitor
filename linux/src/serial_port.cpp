@@ -53,6 +53,17 @@ static int open_port(const std::string &device, int baud) {
   return fd;
 }
 
+static std::string resolve_auto() {
+  for (const char *pattern : {"/dev/ttyUSB", "/dev/ttyACM"}) {
+    for (int i = 0; i < 4; i++) {
+      std::string dev = pattern + std::to_string(i);
+      if (::access(dev.c_str(), F_OK) == 0) return dev;
+    }
+  }
+  if (::access("/dev/serial0", F_OK) == 0) return "/dev/serial0";
+  return "";
+}
+
 static void sleep_unless_stopped(const std::atomic<bool> &stop, std::chrono::milliseconds ms) {
   auto until = std::chrono::steady_clock::now() + ms;
   while (!stop && std::chrono::steady_clock::now() < until)
@@ -64,28 +75,32 @@ void run_serial(const std::string &device, int baud, const std::atomic<bool> &st
   bool warned = false;
   char buf[4096];
   while (!stop) {
-    int fd = open_port(device, baud);
+    std::string dev = device == "auto" ? resolve_auto() : device;
+    int fd = dev.empty() ? -1 : open_port(dev, baud);
     if (fd < 0) {
-      if (!warned) LOGW("cannot open %s (%s); retrying every 5 s", device.c_str(), strerror(errno));
+      if (!warned) {
+        if (dev.empty()) LOGW("no serial adapter found; plug in the RS485 adapter (checking every 5 s)");
+        else LOGW("cannot open %s (%s); retrying every 5 s", dev.c_str(), strerror(errno));
+      }
       warned = true;
       sleep_unless_stopped(stop, std::chrono::seconds(5));
       continue;
     }
-    LOGI("listening on %s at %d baud", device.c_str(), baud);
+    LOGI("listening on %s at %d baud", dev.c_str(), baud);
     warned = false;
     while (!stop) {
       pollfd pfd{fd, POLLIN, 0};
       int r = ::poll(&pfd, 1, 500);
       if (r < 0 && errno == EINTR) continue;
       if (r < 0 || (pfd.revents & (POLLERR | POLLHUP | POLLNVAL))) {
-        LOGW("%s went away", device.c_str());
+        LOGW("%s went away", dev.c_str());
         break;
       }
       if (r == 0) continue;
       ssize_t n = ::read(fd, buf, sizeof(buf));
       if (n < 0 && (errno == EINTR || errno == EAGAIN)) continue;
       if (n <= 0) {  // 0 after POLLIN: the device was unplugged
-        LOGW("%s went away", device.c_str());
+        LOGW("%s went away", dev.c_str());
         break;
       }
       on_data(buf, static_cast<size_t>(n));
