@@ -23,10 +23,14 @@ you saw, working or not.
   panel appears as its own device, named by its barcode, as soon as the
   gateway announces it. The gateway announces its panels every 15 minutes or
   so, which is the longest you wait on a fresh install.
-- **Not in the Pi build yet:** CCA sync (string and inverter names), Tigo
-  cloud import, and the History charts. Without a CCA, every panel is shown in
-  one group called "All panels". Daily energy and the Home Assistant Energy
-  dashboard feed do work.
+- **Inverters are set on the Tools page**, not in YAML: each inverter and
+  the MPPTs it owns. A Tigo cloud import fills them in for you when none are
+  set.
+- **History is kept on the SD card**, with a snapshot every 5 minutes
+  rather than the ESP32's 30, for two years.
+- **Not in the Pi build yet:** the CCA Info page and syncing names straight
+  from the CCA. Panel names and strings come from a Tigo cloud import or a
+  node table backup from an ESP32 instead.
 
 ## What you need
 
@@ -86,6 +90,23 @@ it uses `/dev/serial0`.
 
 For the Energy dashboard, add the **Tigo Monitor Energy** sensor under
 **Settings → Dashboards → Energy → Solar production**.
+
+## Name your panels and strings
+
+Out of the box every panel is named by its barcode and sits in one group
+called "All panels". There are two ways to get your real layout:
+
+- **From Tigo's cloud:** open **Tigo Cloud**, choose **Configure**, and log
+  in with the account you use in the Tigo app. Then press **Import from Tigo
+  cloud** on the Topology page. Panel names, strings, MPPTs and inverters
+  all come across. The Pi keeps only the login token, not your password.
+- **From an ESP32:** on the ESP32's **Node Table** page choose **Export**,
+  then **Import** the file on the Pi's. Names, strings, and your Topology
+  renames and panel ratings come across. If you haven't set up inverters on
+  the Pi yet, the backup's inverter names wait and apply once you do.
+
+If the strings land under **Unassigned**, go to **Tools → Inverters** and
+list which MPPTs each inverter owns.
 
 ## If nothing shows up
 
