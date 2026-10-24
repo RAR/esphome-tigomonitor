@@ -1,0 +1,11 @@
+<?xml version="1.0" standalone='no'?>
+<!DOCTYPE service-group SYSTEM "avahi-service.dtd">
+<!-- Advertises the web UI over mDNS, so it shows up in network browsers as
+     well as at http://<hostname>.local. Installed to /etc/avahi/services. -->
+<service-group>
+  <name replace-wildcards="yes">Tigo Monitor on %h</name>
+  <service>
+    <type>_http._tcp</type>
+    <port>80</port>
+  </service>
+</service-group>
