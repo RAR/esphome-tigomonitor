@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **A Raspberry Pi build, as a ready-to-flash SD card image (experimental).** A Pi Zero 2 W with a USB RS485 adapter runs the same panel decoding and the same web dashboard as the ESP32, with no ESPHome or YAML: flash the image with Raspberry Pi Imager, set Wi-Fi there, then set your MQTT broker in the web UI and panels appear in Home Assistant through MQTT discovery. CCA sync, cloud import and the History charts are not in it yet, and it has not yet run on a real bus — see [Raspberry Pi](https://rar.github.io/esphome-tigomonitor/guides/raspberry-pi/). ESP32 users have nothing to do.
+
 ### Fixed
 - **Panel labels ended up on the wrong panels after the gateway renumbered them.** The node table keyed a panel's CCA labels (name, string, MPPT) to its short bus address. The gateway assigns those at commissioning and can reassign all of them at once — a rediscovery is enough — so after a renumbering every label stayed on its old address and landed on whichever panel inherited it. In [#74](https://github.com/RAR/esphome-tigomonitor/issues/74), 21 of 30 panels were mislabelled or unlabelled. Labels now follow the panel's barcode: when the gateway announces a panel at a new address, its labels move with it. Nothing to do on upgrade; a table that is already scrambled needs one **Cloud Import** (or a CCA sync) to put the labels back.
   - Restoring a backup had the same flaw: it put each entry back at the short address recorded in the file, so a backup taken before a renumbering scrambled the labels again every time it was imported. Import now places each entry by barcode wherever the gateway has confirmed that barcode's current address, which is normally within a couple of minutes of boot.
