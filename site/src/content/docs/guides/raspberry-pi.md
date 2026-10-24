@@ -8,8 +8,9 @@ Raspberry Pi, there is a Pi build: the same dashboard and the same panel
 decoding, packaged as an SD card image that needs no ESPHome and no YAML.
 
 :::caution[Experimental]
-The Pi build is new and has not yet run against a real Tigo bus — only
-against recorded and synthetic traffic. If you try it, please
+The Pi build is new and has run on one installation so far: a Pi Zero 2 W
+with a Waveshare RS485 CAN HAT, on a 40-panel bus, where its readings
+matched the ESP32's on the same bus panel for panel. If you try it, please
 [open an issue](https://github.com/RAR/esphome-tigomonitor/issues) with what
 you saw, working or not.
 :::
@@ -32,7 +33,8 @@ you saw, working or not.
 - A **Raspberry Pi Zero 2 W** (any 64-bit Pi works) and a microSD card.
 - A **USB RS485 adapter**, wired to the TAP the same way as the ESP32 build —
   A, B and ground; see [Wiring](/esphome-tigomonitor/guides/wiring/). An RS485
-  HAT on the Pi's own serial pins works too.
+  HAT on the Pi's own serial pins works too; see
+  [Using an RS485 HAT](#using-an-rs485-hat).
 - An **MQTT broker** that Home Assistant uses. If you don't have one, install
   the Mosquitto broker add-on in Home Assistant.
 
@@ -51,6 +53,25 @@ you saw, working or not.
    - a hostname, if you don't want the default `tigomonitor`.
 4. Write the card, put it in the Pi, connect the RS485 adapter, and power it
    on. The first boot takes a few minutes.
+
+## Using an RS485 HAT
+
+A HAT such as Waveshare's
+[RS485 CAN HAT](https://www.waveshare.com/wiki/RS485_CAN_HAT) reads the bus on
+the Pi's own serial port. The monitor only listens, so a HAT that switches
+direction by itself, as that one does by default, needs no extra setup.
+
+The SD card image turns the serial port on for you. On a stock Raspberry Pi
+OS install, turn it on, without a login console on it, and reboot:
+
+```sh
+sudo raspi-config nonint do_serial_cons 1
+sudo raspi-config nonint do_serial_hw 0
+sudo reboot
+```
+
+Leave **Serial port** under Tools at `auto`: with no USB adapter plugged in,
+it uses `/dev/serial0`.
 
 ## Connect it to Home Assistant
 
@@ -75,4 +96,5 @@ For the Energy dashboard, add the **Tigo Monitor Energy** sensor under
   section of Tools shows the broker's error, such as a refused password. Also
   allow up to 15 minutes on a fresh install for the gateway's next
   announcement.
+- **Lots of bad checksums:** A and B are probably swapped.
 - **Logs:** log in over SSH and run `journalctl -u tigomonitord -f`.
