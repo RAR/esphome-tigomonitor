@@ -6,6 +6,6 @@
 FROM debian:trixie-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \
       build-essential cmake pkg-config \
-      libmosquitto-dev nlohmann-json3-dev libcpp-httplib-dev \
+      libmosquitto-dev nlohmann-json3-dev libcpp-httplib-dev libsqlite3-dev \
       mosquitto mosquitto-clients python3 ca-certificates dpkg-dev \
     && rm -rf /var/lib/apt/lists/*

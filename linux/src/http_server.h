@@ -9,6 +9,7 @@
 // Settings changes are written to settings.json and flagged for the main
 // loop to apply, so MQTT is only ever reconfigured from one thread.
 
+#include "history.h"
 #include "monitor.h"
 #include "settings.h"
 #include "topology.h"
@@ -38,6 +39,7 @@ struct HttpContext {
   std::atomic<bool> &restart_requested;
   Monitor &mutable_monitor;
   Topology &topology;
+  History &history;
 };
 
 class HttpServer {

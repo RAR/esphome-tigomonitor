@@ -36,6 +36,8 @@ Settings load_settings(const std::string &path) {
   get(j, "power_calibration", s.power_calibration);
   get(j, "max_nodes", s.max_nodes);
   get(j, "publish_interval_s", s.publish_interval_s);
+  get(j, "history_interval_min", s.history_interval_min);
+  get(j, "history_days", s.history_days);
   get(j, "device_id", s.device_id);
   if (auto m = j.find("mqtt"); m != j.end() && m->is_object()) {
     get(*m, "host", s.mqtt.host);
@@ -46,6 +48,8 @@ Settings load_settings(const std::string &path) {
     get(*m, "base_topic", s.mqtt.base_topic);
   }
   if (s.publish_interval_s < 5) s.publish_interval_s = 5;
+  if (s.history_interval_min < 1 || s.history_interval_min > 60) s.history_interval_min = 5;
+  if (s.history_days < 1) s.history_days = 730;
   return s;
 }
 
@@ -56,6 +60,8 @@ bool save_settings(const std::string &path, const Settings &s) {
       {"power_calibration", s.power_calibration},
       {"max_nodes", s.max_nodes},
       {"publish_interval_s", s.publish_interval_s},
+      {"history_interval_min", s.history_interval_min},
+      {"history_days", s.history_days},
       {"device_id", s.device_id},
       {"mqtt",
        {{"host", s.mqtt.host},

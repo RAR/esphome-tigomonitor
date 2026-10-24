@@ -5,6 +5,7 @@
 
 #include "log.h"
 #include "monitor.h"
+#include "history.h"
 #include "http_server.h"
 #include "mqtt_publisher.h"
 #include "serial_port.h"
@@ -15,6 +16,7 @@
 #include <csignal>
 #include <cstdio>
 #include <cstring>
+#include <ctime>
 #include <fstream>
 #include <memory>
 #include <mutex>
@@ -22,6 +24,7 @@
 #include <sys/stat.h>
 #include <thread>
 #include <unistd.h>
+#include <vector>
 
 #ifndef TIGOD_VERSION
 #define TIGOD_VERSION "dev"
@@ -140,6 +143,8 @@ int main(int argc, char **argv) {
 
   std::atomic<bool> settings_changed{false};
   std::atomic<bool> restart_requested{false};
+  History history(state_dir + "/history.db");
+  history.open();
   Topology topology(state_dir + "/topology.json");
   topology.load();
   HttpServer web(HttpContext{
@@ -149,10 +154,15 @@ int main(int argc, char **argv) {
         return settings;
       },
       [&] { return mqtt.connected(); }, [&] { return mqtt.last_error(); }, settings_changed, restart_requested,
-      monitor, topology});
+      monitor, topology, history});
   if (port > 0 && !web.start(port)) return 1;
 
   auto last_publish = std::chrono::steady_clock::now() - std::chrono::hours(1);
+  // Snapshots land on wall-clock multiples of the interval (:00, :05, ...),
+  // so every panel's rows share timestamps.
+  int64_t next_snapshot = 0;
+  double energy_at_snapshot = monitor.energy_kwh();
+  int64_t last_prune = 0;
   BusStats last_stats{};
   auto last_stats_log = std::chrono::steady_clock::now();
   while (!g_stop) {
@@ -183,6 +193,28 @@ int main(int argc, char **argv) {
     if (now - last_publish >= std::chrono::seconds(settings.publish_interval_s)) {
       mqtt.publish();
       last_publish = now;
+    }
+    int64_t wall = static_cast<int64_t>(time(nullptr));
+    int64_t step = settings.history_interval_min * 60;
+    if (wall > 1577836800 /* 2020: the clock is set */) {
+      if (next_snapshot == 0) next_snapshot = (wall / step + 1) * step;
+      if (wall >= next_snapshot) {
+        auto ago = std::chrono::steady_clock::now();
+        std::vector<std::pair<std::string, double>> panel_power;
+        for (const auto &p : monitor.panels()) {
+          if (p.barcode.empty()) continue;
+          // Offline is 0 W, as on the ESP32 once a panel goes stale.
+          panel_power.emplace_back(p.barcode, ago - p.updated < Monitor::ONLINE_WINDOW ? p.reading.power_out : 0.0);
+        }
+        double energy = monitor.energy_kwh();
+        history.record(next_snapshot, monitor.total_power(), energy - energy_at_snapshot, panel_power);
+        energy_at_snapshot = energy;
+        next_snapshot = (wall / step + 1) * step;
+        if (wall - last_prune > 86400) {
+          history.prune(settings.history_days);
+          last_prune = wall;
+        }
+      }
     }
     if (now - last_stats_log >= std::chrono::minutes(5)) {
       BusStats s = monitor.stats();

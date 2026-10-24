@@ -25,6 +25,10 @@ struct Settings {
   // than to the panel count, as number_of_devices has to be on the ESP32.
   int max_nodes = 512;
   int publish_interval_s = 30;
+  // History snapshots. The ESP32 takes one every 30 minutes to spare its
+  // flash; an SD card can take one every 5 and keep two years of them.
+  int history_interval_min = 5;
+  int history_days = 730;
   std::string device_id;  // empty: the hostname
   MqttSettings mqtt;
 };

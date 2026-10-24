@@ -12,12 +12,14 @@ set(TIGOD_VERSION "dev" CACHE STRING "Version string reported by tigomonitord")
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(MOSQUITTO REQUIRED IMPORTED_TARGET libmosquitto)
 pkg_check_modules(HTTPLIB REQUIRED IMPORTED_TARGET cpp-httplib)
+pkg_check_modules(SQLITE REQUIRED IMPORTED_TARGET sqlite3)
 find_package(nlohmann_json 3 REQUIRED)
 find_package(Threads REQUIRED)
 
 add_executable(tigomonitord
   src/main.cpp
   src/fsutil.cpp
+  src/history.cpp
   src/http_server.cpp
   src/monitor.cpp
   src/mqtt_publisher.cpp
@@ -29,7 +31,7 @@ add_executable(tigomonitord
 target_include_directories(tigomonitord PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../components/tigo_monitor)
 target_compile_definitions(tigomonitord PRIVATE TIGOD_VERSION="${TIGOD_VERSION}")
 target_compile_options(tigomonitord PRIVATE -Wall -Wextra)
-target_link_libraries(tigomonitord PRIVATE PkgConfig::MOSQUITTO PkgConfig::HTTPLIB nlohmann_json::nlohmann_json Threads::Threads)
+target_link_libraries(tigomonitord PRIVATE PkgConfig::MOSQUITTO PkgConfig::HTTPLIB PkgConfig::SQLITE nlohmann_json::nlohmann_json Threads::Threads)
 
 install(TARGETS tigomonitord RUNTIME DESTINATION bin)
 install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/../components/tigo_server/web/app.html

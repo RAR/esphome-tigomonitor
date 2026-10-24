@@ -299,6 +299,95 @@ void HttpServer::routes_() {
     send_json(res, {{"inverters", inverters_json(mon, ctx_.topology)}});
   });
 
+  // History, in the firmware's shapes: ?range=day|week|month|year, and for a
+  // panel ?slot=N from /api/panels.
+  auto history_window = [this](const httplib::Request &req, httplib::Response &res, int64_t &start, int64_t &end,
+                                int64_t &bucket, std::string &range) {
+    range = req.has_param("range") ? req.get_param_value("range") : "day";
+    int64_t window;
+    if (range == "day") window = 86400;
+    else if (range == "week") window = 7 * 86400;
+    else if (range == "month") window = 30 * 86400;
+    else if (range == "year") window = 365 * 86400;
+    else {
+      send_json(res, {{"error", "range must be day|week|month|year"}}, 400);
+      return false;
+    }
+    if (!ctx_.history.ok()) {
+      send_json(res, {{"error", "history not initialized"}, {"detail", ctx_.history.error()}}, 503);
+      return false;
+    }
+    end = static_cast<int64_t>(time(nullptr));
+    if (end < 1577836800) {
+      send_json(res, {{"error", "system clock not set"},
+                      {"detail", "the Pi's clock has not been set, so there is no time range to query — "
+                                 "it sets itself from the network once it is online"}},
+                503);
+      return false;
+    }
+    start = end - window;
+    // Long ranges are averaged into at most MAX_POINTS buckets: the first
+    // round size (the chart names it) that is a whole number of snapshots.
+    int64_t step = ctx_.current_settings().history_interval_min * 60;
+    int64_t need = (window + History::MAX_POINTS - 1) / History::MAX_POINTS;
+    bucket = 0;
+    for (int64_t m : {1, 5, 10, 15, 30, 60, 120, 180, 240, 360, 720, 1440}) {
+      if (m * 60 >= need && m * 60 >= step && (m * 60) % step == 0) {
+        bucket = m * 60;
+        break;
+      }
+    }
+    if (bucket == 0) bucket = std::max(step, (need + step - 1) / step * step);
+    return true;
+  };
+  svr.Get("/api/history/power", [this, history_window](const httplib::Request &req, httplib::Response &res) {
+    int64_t start, end, bucket;
+    std::string range;
+    if (!history_window(req, res, start, end, bucket, range)) return;
+    auto t0 = Clock::now();
+    json rows = json::array();
+    for (const auto &r : ctx_.history.system(start, end, bucket))
+      rows.push_back({{"t", r.t}, {"p", std::lround(r.p)}, {"e", r3(r.e)}});
+    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now() - t0).count();
+    send_json(res, {{"range", range}, {"start", start}, {"end", end}, {"interval_min", bucket / 60},
+                    {"records", rows}, {"count", rows.size()}, {"query_ms", ms}});
+  });
+  svr.Get("/api/history/panel", [this, history_window](const httplib::Request &req, httplib::Response &res) {
+    int slot = req.has_param("slot") ? std::atoi(req.get_param_value("slot").c_str()) : -1;
+    if (slot < 0) return send_json(res, {{"error", "slot is required; see /api/panels"}}, 400);
+    int64_t start, end, bucket;
+    std::string range;
+    if (!history_window(req, res, start, end, bucket, range)) return;
+    auto t0 = Clock::now();
+    json rows = json::array();
+    for (const auto &r : ctx_.history.panel(slot, start, end, bucket))
+      rows.push_back({{"t", r.t}, {"p", std::lround(r.p)}});
+    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now() - t0).count();
+    send_json(res, {{"slot", slot}, {"range", range}, {"start", start}, {"end", end}, {"interval_min", bucket / 60},
+                    {"records", rows}, {"count", rows.size()}, {"query_ms", ms}});
+  });
+  // The panel charts find a panel's slot by the last 6 characters of its
+  // barcode, as on the ESP32.
+  svr.Get("/api/panels", [this, &mon](const httplib::Request &, httplib::Response &res) {
+    if (!ctx_.history.ok())
+      return send_json(res, {{"error", "history not initialized"}, {"detail", ctx_.history.error()}}, 503);
+    std::map<std::string, Node> by_barcode;
+    for (const auto &n : mon.nodes()) by_barcode[n.long_address] = n;
+    json slots = json::array();
+    for (const auto &kv : ctx_.history.slots()) {
+      const std::string &bc = kv.first;
+      json o = {{"slot", kv.second}, {"barcode", bc.size() > 6 ? bc.substr(bc.size() - 6) : bc}};
+      auto it = by_barcode.find(bc);
+      if (it != by_barcode.end()) {
+        o["label"] = it->second.cca_label;
+        o["mppt"] = it->second.cca_mppt_label;
+        o["string"] = it->second.cca_string_label;
+      }
+      slots.push_back(o);
+    }
+    send_json(res, {{"slots", slots}, {"count", slots.size()}, {"max_slots", ctx_.mutable_monitor.max_nodes()}});
+  });
+
   // Topology page edits, as on the ESP32. Bodies: {"name","display_name"},
   // {"label","display_label"}, {"label","rating_w"}; an empty name clears it.
   auto body_of = [](const httplib::Request &req, httplib::Response &res, json &j) {

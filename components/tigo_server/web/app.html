@@ -729,7 +729,7 @@
 
     <nav id="nav">
       <button data-view="dashboard" class="active"><span class="icon">▣</span> Dashboard</button>
-      <button data-view="history" data-esp-only><span class="icon">↗</span> History</button>
+      <button data-view="history"><span class="icon">↗</span> History</button>
       <button data-view="topology"><span class="icon">⌘</span> Topology</button>
       <button data-view="nodes"><span class="icon">≡</span> Node Table</button>
       <button data-view="tools"><span class="icon">⚙</span> Tools</button>
@@ -823,7 +823,7 @@
     <section class="view" id="view-history">
       <div class="topbar">
         <h1>History</h1>
-        <div class="topbar-meta">Backed by esp_tsdb · persists across reboots</div>
+        <div class="topbar-meta" id="hist-backing">Backed by esp_tsdb · persists across reboots</div>
       </div>
 
       <div class="source-banner">
@@ -1991,8 +1991,9 @@
     PLATFORM = 'linux';
     document.querySelectorAll('[data-esp-only]').forEach(el => { el.style.display = 'none'; });
     document.querySelectorAll('[data-linux-only]').forEach(el => { el.style.display = ''; });
-    // History and CCA Info need the ESP32's flash history and CCA link; a
-    // bookmark to either lands on the dashboard instead.
+    document.getElementById('hist-backing').textContent = 'Stored on the SD card · persists across reboots';
+    // CCA Info needs the ESP32's CCA link; a bookmark to it lands on the
+    // dashboard instead.
     const active = document.querySelector('#nav button.active');
     if (active && active.style.display === 'none') document.querySelector('#nav button[data-view="dashboard"]').click();
     const restart = document.getElementById('tools-restart');
