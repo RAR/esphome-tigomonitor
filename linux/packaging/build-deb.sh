@@ -19,6 +19,8 @@ DESTDIR="$PWD/$root" cmake --install build/linux --strip
 install -Dm644 linux/packaging/tigomonitord.service "$root/usr/lib/systemd/system/tigomonitord.service"
 install -Dm644 linux/packaging/tigomonitor-http.service "$root/etc/avahi/services/tigomonitor-http.service"
 install -Dm644 LICENSE "$root/usr/share/doc/tigomonitord/copyright"
+# cpp-httplib is compiled in, so its licence ships too.
+{ printf '\n\ncpp-httplib (linux/third_party/cpp-httplib):\n\n'; cat linux/third_party/cpp-httplib/LICENSE; } >> "$root/usr/share/doc/tigomonitord/copyright"
 
 # Runtime library dependencies, the way debhelper would work them out.
 mkdir -p build/deb/shlibs/debian
