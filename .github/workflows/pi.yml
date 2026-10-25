@@ -1,7 +1,7 @@
 # .github/workflows/pi.yml
 # The Raspberry Pi build (linux/). Every change runs the host tests and the
-# end-to-end replay; a manual run or a version tag also builds the arm64 .deb
-# on GitHub's arm runner, natively — no QEMU. (linux/image/build-image.sh can
+# end-to-end replay; a manual run or a version tag also builds the .deb for
+# arm64 (Pi) and amd64 (any x86 Debian), each on a native runner — no QEMU. (linux/image/build-image.sh can
 # turn it into an SD card image, but we only ship the .deb for now.)
 name: Pi build
 on:
@@ -44,7 +44,14 @@ jobs:
   deb:
     if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
     needs: test
-    runs-on: ubuntu-24.04-arm
+    strategy:
+      matrix:
+        include:
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+          - arch: amd64
+            runner: ubuntu-latest
+    runs-on: ${{ matrix.runner }}
     permissions:
       contents: write  # attaching the .deb to a tag's release
     steps:
@@ -56,11 +63,11 @@ jobs:
         # v2.1.0 → 2.1.0; v2.1.0-3-gabc1234 → 2.1.0+3.gabc1234
         run: echo "version=$(git describe --tags | sed -E 's/^v//; s/-([0-9]+)-g/+\1.g/')" >> "$GITHUB_OUTPUT"
       - run: docker build -t tigod-dev -f linux/Dockerfile.dev linux
-      - name: Build the arm64 .deb
+      - name: Build the ${{ matrix.arch }} .deb
         run: docker run --rm -v "$PWD":/src -w /src tigod-dev linux/packaging/build-deb.sh "${{ steps.version.outputs.version }}"
       - uses: actions/upload-artifact@v4
         with:
-          name: tigomonitor-${{ steps.version.outputs.version }}
+          name: tigomonitord-${{ steps.version.outputs.version }}-${{ matrix.arch }}
           path: build/deb/*.deb
           compression-level: 0  # already compressed
       - name: Attach to the release

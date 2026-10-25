@@ -96,8 +96,9 @@ UART** (`/dev/serial0`).
 ## On a machine that does other things
 
 The same package installs on 64-bit Raspberry Pi OS or Debian 13 (trixie)
-on a machine that already runs other services. It stays out of their way
-until you set it up:
+on a machine that already runs other services. For an x86 machine, take the
+`amd64` package instead of the `arm64` one. It stays out of their way until
+you set it up:
 
 - **It opens no serial port until you choose one.** A Zigbee or Z-Wave stick
   on the same machine is never touched, and listing the ports does not open
