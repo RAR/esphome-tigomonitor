@@ -28,7 +28,7 @@ you saw, working or not.
 - **Inverters are set on the Tools page**, not in YAML: each inverter and
   the MPPTs it owns. A Tigo cloud import fills them in for you when none are
   set.
-- **History is kept on the SD card**, with a snapshot every 5 minutes
+- **History is kept on the SD card**, with a snapshot every minute
   rather than the ESP32's 30, for two years.
 - **The CCA Info page talks to the CCA over the Pi's Bluetooth**, as the
   ESP32 does with `cca_source: ble`. The Pi finds the nearest CCA by itself;

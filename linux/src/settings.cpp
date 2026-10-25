@@ -53,7 +53,7 @@ Settings load_settings(const std::string &path) {
     get(*m, "base_topic", s.mqtt.base_topic);
   }
   if (s.publish_interval_s < 5) s.publish_interval_s = 5;
-  if (s.history_interval_min < 1 || s.history_interval_min > 60) s.history_interval_min = 5;
+  if (s.history_interval_min < 1 || s.history_interval_min > 60) s.history_interval_min = 1;
   if (s.history_days < 1) s.history_days = 730;
   if (s.night_mode_timeout_min < 1 || s.night_mode_timeout_min > 1440) s.night_mode_timeout_min = 60;
   if (s.stale_timeout_min < 0 || s.stale_timeout_min > 1440) s.stale_timeout_min = 10;

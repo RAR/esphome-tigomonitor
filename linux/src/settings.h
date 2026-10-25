@@ -27,7 +27,7 @@ struct Settings {
   int publish_interval_s = 30;
   // History snapshots. The ESP32 takes one every 30 minutes to spare its
   // flash; an SD card can take one every 5 and keep two years of them.
-  int history_interval_min = 5;
+  int history_interval_min = 1;
   int history_days = 730;
   // The firmware's runtime knobs (/api/config, Tools > Device Configuration),
   // with its defaults.
