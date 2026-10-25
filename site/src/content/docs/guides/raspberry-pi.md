@@ -100,6 +100,20 @@ services. It stays out of their way until you set it up:
   `tigomonitor.local` network-browser entry still says port 80: edit
   `/etc/avahi/services/tigomonitor-http.service` to match.
 
+Installing the package starts the service straight away. To keep it off a
+port another service may want, such as 8080, set the port before you
+install. The monitor reads `settings.json` when it first starts, and
+installing never overwrites it:
+
+```sh
+sudo mkdir -p /var/lib/tigomonitor
+echo '{"web_port": 8099}' | sudo tee /var/lib/tigomonitor/settings.json
+sudo apt install ./tigomonitord_VERSION_arm64.deb
+```
+
+The same file takes `"serial_port"` too. Anything left out keeps its
+default, and the web UI edits the file from then on.
+
 ## Connect it to Home Assistant
 
 1. Open `http://tigomonitor.local` (or your hostname). The dashboard fills in
