@@ -24,6 +24,7 @@ struct Node {  // the fields of NodeTableData the helpers touch
   std::string cca_label, cca_string_label, cca_mppt_label, cca_channel, cca_object_id;
   bool cca_validated = false;
   bool seen_in_frame27 = false;
+  bool prepared = false;  // set by import_backup's prepare callback
 };
 
 static int failures = 0;
@@ -181,6 +182,101 @@ static void test_table_full() {
   CHECK(h.at("0002")->cca_label == "A1");
 }
 
+struct Import {
+  std::vector<Node> table, pool;
+  std::vector<std::pair<ImportEvent, std::string>> events;  // event, entry's barcode or address
+  ImportCounts run(const std::vector<Node> &backup) {
+    return import_backup(
+        table, pool, backup, [](Node &n) { n.prepared = true; },
+        [this](ImportEvent e, const Node &n, const std::string &) {
+          events.emplace_back(e, n.long_address.empty() ? n.addr : n.long_address);
+        });
+  }
+  const Node *at(const std::string &addr) const {
+    for (auto &n : table)
+      if (n.addr == addr) return &n;
+    return nullptr;
+  }
+};
+
+static Node seen(const std::string &addr, const std::string &bc) {
+  Node n;
+  n.addr = addr;
+  n.long_address = bc;
+  n.seen_in_frame27 = true;
+  return n;
+}
+
+static void test_import_restores_a_backup() {
+  std::puts("import: a backup is restored as written when nothing has been seen");
+  Import im;
+  auto c = im.run({labelled("0002", "BC0000000000000A", "A1"), labelled("0003", "BC0000000000000B", "A2")});
+  CHECK(c.remapped == 0 && c.parked == 0);
+  CHECK(im.table.size() == 2);
+  CHECK(im.at("0002")->cca_label == "A1" && im.at("0002")->prepared);
+  CHECK(im.at("0003")->cca_label == "A2" && im.at("0003")->prepared);
+  CHECK(im.events.empty());
+}
+
+static void test_import_follows_a_renumbering() {
+  std::puts("import: an entry goes to the address its barcode has now");
+  Import im;
+  im.table = {seen("0005", "BC0000000000000A")};
+  auto c = im.run({labelled("0002", "BC0000000000000A", "A1")});
+  CHECK(c.remapped == 1);
+  CHECK(im.at("0002") == nullptr);
+  CHECK(im.at("0005") && im.at("0005")->cca_label == "A1" && im.at("0005")->seen_in_frame27);
+  CHECK(im.events.size() == 1 && im.events[0].first == ImportEvent::moved);
+}
+
+static void test_import_holds_labels_for_an_unseen_panel() {
+  std::puts("import: labels for an address another panel holds now wait for their panel");
+  Harness h;
+  h.table = {seen("0002", "BC0000000000000B")};
+  Import im;
+  im.table = h.table;
+  auto c = im.run({labelled("0002", "BC0000000000000A", "A1"), labelled("0009", "BC0000000000000B", "B1")});
+  CHECK(c.parked == 1 && c.remapped == 1);
+  CHECK(im.at("0002") && im.at("0002")->cca_label == "B1");  // B is confirmed at 0002
+  CHECK(im.pool.size() == 1 && im.pool[0].cca_label == "A1");
+  // A's Frame 27 arrives at its new address and picks its labels up.
+  h.table = im.table;
+  h.pool = im.pool;
+  h.feed("0007", "BC0000000000000A");
+  CHECK(h.at("0007") && h.at("0007")->cca_label == "A1");
+  CHECK(h.pool.empty());
+}
+
+static void test_import_confirmed_entry_wins_an_address() {
+  std::puts("import: a confirmed entry keeps its address over a stale one listed first");
+  Import im;
+  im.table = {seen("0002", "BC0000000000000B")};
+  Node stale = labelled("0002", "", "old");
+  auto c = im.run({stale, labelled("0005", "BC0000000000000B", "B1")});
+  CHECK(c.remapped == 1);
+  CHECK(im.table.size() == 1);
+  CHECK(im.at("0002")->cca_label == "B1");
+  CHECK(im.events.size() == 2 && im.events[1].first == ImportEvent::duplicate_address);
+}
+
+static void test_import_merges_an_alias_and_skips_no_address() {
+  std::puts("import: two entries for one barcode merge; an entry with no address is skipped");
+  Import im;
+  Node first = labelled("0002", "BC0000000000000A", "A1");
+  first.cca_mppt_label.clear();
+  Node alias = labelled("8002", "BC0000000000000A", "ignored");
+  alias.cca_mppt_label = "MPPT 2";
+  alias.sensor_index = 3;
+  Node nowhere = labelled("", "BC0000000000000C", "C1");
+  im.run({first, alias, nowhere});
+  CHECK(im.table.size() == 1);
+  CHECK(im.at("0002")->cca_label == "A1");
+  CHECK(im.at("0002")->cca_mppt_label == "MPPT 2");
+  CHECK(im.at("0002")->sensor_index == 3);
+  CHECK(im.events.size() == 2 && im.events[0].first == ImportEvent::merged &&
+        im.events[1].first == ImportEvent::no_address);
+}
+
 int main() {
   test_unchanged_frame_is_a_no_op();
   test_two_panels_swap_addresses();
@@ -189,6 +285,11 @@ int main() {
   test_commissioning_alias_is_merged();
   test_first_barcode_keeps_imported_labels();
   test_table_full();
+  test_import_restores_a_backup();
+  test_import_follows_a_renumbering();
+  test_import_holds_labels_for_an_unseen_panel();
+  test_import_confirmed_entry_wins_an_address();
+  test_import_merges_an_alias_and_skips_no_address();
   std::printf(failures ? "\n%d FAILED\n" : "\nall passed\n", failures);
   return failures ? 1 : 0;
 }

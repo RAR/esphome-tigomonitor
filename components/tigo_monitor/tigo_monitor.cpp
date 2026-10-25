@@ -2604,113 +2604,35 @@ bool TigoMonitorComponent::import_node_table(const psram_vector<NodeTableData>& 
   StateLock lock(state_mutex_);
   ESP_LOGI(TAG, "Importing node table with %zu nodes", nodes.size());
 
-  // Barcode -> short address pairs a Frame 27 has confirmed since boot. A
-  // backup records the short addresses of the day it was exported; if the
-  // gateway has renumbered since, restoring those as-is puts every label on
-  // whichever panel now holds the old address (#74). Confirmed pairs win.
-  std::map<std::string, node_string> live_addr_by_barcode;
-  std::set<std::string> live_addrs;
-  for (const auto &n : node_table_) {
-    if (n.seen_in_frame27 && !n.long_address.empty()) {
-      live_addr_by_barcode[to_std_string(n.long_address)] = n.addr;
-      live_addrs.insert(to_std_string(n.addr));
-    }
-  }
-
-  // Clear existing node table
-  node_table_.clear();
+  // Labels follow the barcode, not the backup's short addresses (#74); the
+  // rules are shared with the Raspberry Pi build in tigo_node_identity.h.
   created_devices_.clear();
-  parked_cca_.clear();
-
-  // Reserve capacity to avoid reallocations during import
-  node_table_.reserve(nodes.size());
-
-  // Entries whose barcode is at a confirmed address go first, so the
-  // duplicate-address check below keeps them over a stale entry that names
-  // the same address.
-  psram_vector<NodeTableData> ordered;
-  ordered.reserve(nodes.size());
-  int remapped = 0, parked = 0;
-  for (int pass = 0; pass < 2; pass++) {
-    for (const auto &in : nodes) {
-      auto live = in.long_address.empty() ? live_addr_by_barcode.end()
-                                          : live_addr_by_barcode.find(to_std_string(in.long_address));
-      bool confirmed = live != live_addr_by_barcode.end();
-      if ((pass == 0) != confirmed) continue;
-      NodeTableData node = in;
-      if (confirmed) {
-        node.seen_in_frame27 = true;
-        if (node.addr != live->second) {
-          ESP_LOGW(TAG, "Import: %s (%s) is at %s now, not %s — placing it there",
-                   node.long_address.c_str(), node.cca_label.c_str(), live->second.c_str(),
-                   node.addr.c_str());
-          node.addr = live->second;
-          node.checksum.assign(1, protocol::crc4_char(node.addr.c_str(), node.addr.length()));
-          remapped++;
+  auto counts = node_identity::import_backup(
+      node_table_, parked_cca_, nodes,
+      [](NodeTableData &node) {
+        node.checksum.assign(1, protocol::crc4_char(node.addr.c_str(), node.addr.length()));
+      },
+      [](node_identity::ImportEvent e, const NodeTableData &node, const node_string &addr) {
+        using E = node_identity::ImportEvent;
+        if (e == E::moved) {
+          ESP_LOGW(TAG, "Import: %s (%s) is at %s now, not %s — placing it there", node.long_address.c_str(),
+                   node.cca_label.c_str(), addr.c_str(), node.addr.c_str());
+        } else if (e == E::held) {
+          ESP_LOGW(TAG, "Import: %s (%s) is no longer at %s — holding its labels until it reappears",
+                   node.long_address.c_str(), node.cca_label.c_str(), node.addr.c_str());
+        } else if (e == E::no_address) {
+          ESP_LOGW(TAG, "Skipping node with empty address");
+        } else if (e == E::duplicate_address) {
+          ESP_LOGW(TAG, "Skipping duplicate node with address: %s", node.addr.c_str());
+        } else {
+          ESP_LOGW(TAG, "Skipping node %s: same long address %s as %s (merged metadata)", node.addr.c_str(),
+                   node.long_address.c_str(), addr.c_str());
         }
-      } else if (!node.long_address.empty() && live_addrs.count(to_std_string(node.addr))) {
-        // The file puts this panel at an address the gateway has since given
-        // to another one, and it has not been seen at a new address yet. Keep
-        // its labels aside for the Frame 27 that announces it.
-        ESP_LOGW(TAG, "Import: %s (%s) is no longer at %s — holding its labels until it reappears",
-                 node.long_address.c_str(), node.cca_label.c_str(), node.addr.c_str());
-        node_identity::park(parked_cca_, node);
-        parked++;
-        continue;
-      }
-      ordered.push_back(node);
-    }
-  }
-  if (remapped || parked)
+      });
+  if (counts.remapped || counts.parked)
     ESP_LOGW(TAG, "Import: backup predates a renumbering — %d entr%s moved to current addresses, %d held",
-             remapped, remapped == 1 ? "y" : "ies", parked);
+             counts.remapped, counts.remapped == 1 ? "y" : "ies", counts.parked);
 
-  // Import all nodes
-  for (const auto& node : ordered) {
-    // Validate node data
-    if (node.addr.empty()) {
-      ESP_LOGW(TAG, "Skipping node with empty address");
-      continue;
-    }
-    
-    // Check for duplicate addresses — and duplicate long addresses: two
-    // entries sharing a 16-char long address are the same physical device
-    // (a stale short-address alias, #25). Keep the first, fold the alias's
-    // metadata into it where missing.
-    bool duplicate = false;
-    for (auto& existing : node_table_) {
-      if (existing.addr == node.addr) {
-        ESP_LOGW(TAG, "Skipping duplicate node with address: %s", node.addr.c_str());
-        duplicate = true;
-        break;
-      }
-      if (!node.long_address.empty() && existing.long_address == node.long_address) {
-        if (existing.sensor_index < 0 && node.sensor_index >= 0) existing.sensor_index = node.sensor_index;
-        if (existing.cca_label.empty()) existing.cca_label = node.cca_label;
-        if (existing.cca_string_label.empty()) existing.cca_string_label = node.cca_string_label;
-        if (existing.cca_mppt_label.empty()) existing.cca_mppt_label = node.cca_mppt_label;
-        if (existing.cca_channel.empty()) existing.cca_channel = node.cca_channel;
-        if (existing.cca_object_id.empty()) existing.cca_object_id = node.cca_object_id;
-        existing.cca_validated = existing.cca_validated || node.cca_validated;
-        ESP_LOGW(TAG, "Skipping node %s: same long address %s as %s (merged metadata)",
-                 node.addr.c_str(), node.long_address.c_str(), existing.addr.c_str());
-        duplicate = true;
-        break;
-      }
-    }
-
-    if (duplicate) continue;
-    
-    // Add node to table
-    node_table_.push_back(node);
-    
-    ESP_LOGD(TAG, "Imported node: addr=%s, barcode=%s, sensor_index=%d, cca_label=%s",
-             node.addr.c_str(), 
-             node.long_address.c_str(),
-             node.sensor_index,
-             node.cca_label.c_str());
-  }
-  
   // Save imported node table to persistent storage
   save_node_table();
 

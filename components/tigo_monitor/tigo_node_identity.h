@@ -13,7 +13,8 @@
 // kept its labels and swapped only the barcode, so every label moved to
 // whichever panel inherited the address.
 //
-// The functions here make labels follow the barcode instead. Header-only and
+// The functions here make labels follow the barcode instead, both as Frame 27
+// arrives and when a backup of the table is imported. Header-only and
 // free of ESPHome dependencies so the renumbering cases can be exercised on
 // the host (tests/host/node_identity_test.cpp); Node is NodeTableData in the
 // firmware.
@@ -157,6 +158,99 @@ Result apply_frame27_entry(Table &table, Pool &pool, const Str &addr, const Str 
     }
   }
   return r;
+}
+
+// What import_backup did with an entry of the backup.
+enum class ImportEvent {
+  moved,              // its barcode is at another address now; placed there
+  held,               // its address holds another panel now; labels parked
+  no_address,         // skipped
+  duplicate_address,  // a second entry for one address; skipped
+  merged,             // its barcode was already imported; labels merged there
+};
+
+struct ImportCounts {
+  int remapped = 0;
+  int parked = 0;
+};
+
+// Replace the node table with a backup of it, such as a Node Table export.
+//
+// A backup records the short addresses of the day it was exported. If the
+// gateway has renumbered since, restoring those as-is puts every label on
+// whichever panel holds the old address now. The barcode -> address pairs a
+// Frame 27 has confirmed since start (seen_in_frame27) win: an entry whose
+// barcode is confirmed goes to its confirmed address, and one whose address
+// is confirmed for a different panel, while its own barcode has not been
+// announced yet, has its labels parked until it is. Confirmed entries are
+// placed first, so the duplicate-address check keeps them over a stale entry
+// naming the same address. Two entries sharing a barcode are one panel (a
+// commissioning alias, #25): the first stays, the second fills its gaps.
+//
+// prepare(node) runs on every entry kept (the firmware sets its checksum).
+// on_event(event, entry, addr) reports each entry the backup did not restore
+// as written; addr is where it went (moved, merged) or its own address.
+template<class Table, class Pool, class Prepare, class OnEvent>
+ImportCounts import_backup(Table &table, Pool &pool, const Table &backup, Prepare prepare, OnEvent on_event) {
+  ImportCounts c;
+  Table live;  // the confirmed pairs, from the table being replaced
+  for (const auto &n : table)
+    if (n.seen_in_frame27 && !n.long_address.empty()) live.push_back(n);
+  table.clear();
+  pool.clear();
+
+  for (int pass = 0; pass < 2; pass++) {
+    for (const auto &in : backup) {
+      const typename Table::value_type *confirmed = nullptr;
+      if (!in.long_address.empty())
+        for (const auto &n : live)
+          if (n.long_address == in.long_address) confirmed = &n;
+      if ((pass == 0) != (confirmed != nullptr)) continue;
+
+      auto node = in;
+      if (confirmed != nullptr) {
+        node.seen_in_frame27 = true;
+        if (node.addr != confirmed->addr) {
+          on_event(ImportEvent::moved, in, confirmed->addr);
+          node.addr = confirmed->addr;
+          c.remapped++;
+        }
+      } else if (node.addr.empty()) {
+        on_event(ImportEvent::no_address, in, in.addr);
+        continue;
+      } else if (!node.long_address.empty()) {
+        bool taken = false;
+        for (const auto &n : live)
+          if (n.addr == node.addr) taken = true;
+        if (taken) {
+          on_event(ImportEvent::held, in, in.addr);
+          park(pool, node);
+          c.parked++;
+          continue;
+        }
+      }
+
+      bool placed = false;
+      for (auto &existing : table) {
+        if (existing.addr == node.addr) {
+          on_event(ImportEvent::duplicate_address, in, node.addr);
+          placed = true;
+          break;
+        }
+        if (!node.long_address.empty() && existing.long_address == node.long_address) {
+          if (existing.sensor_index < 0 && node.sensor_index >= 0) existing.sensor_index = node.sensor_index;
+          fill_cca_metadata(existing, node);
+          on_event(ImportEvent::merged, in, existing.addr);
+          placed = true;
+          break;
+        }
+      }
+      if (placed) continue;
+      prepare(node);
+      table.push_back(node);
+    }
+  }
+  return c;
 }
 
 }  // namespace node_identity
