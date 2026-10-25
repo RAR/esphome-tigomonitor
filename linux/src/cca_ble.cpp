@@ -2,6 +2,7 @@
 
 #include "fsutil.h"
 #include "log.h"
+#include "tigo_cca_ble_protocol.h"
 
 #include <nlohmann/json.hpp>
 #include <openssl/evp.h>
@@ -16,12 +17,11 @@
 namespace tigod {
 
 using nlohmann::json;
+namespace wire = esphome::tigo_monitor::cca_ble;
 using Clock = std::chrono::steady_clock;
 
 static const char *const BLUEZ = "org.bluez";
-static const char *const CCA_SERVICE_UUID = "d3dadcba-e4fa-4016-ba33-8bcc671999a7";
 static const char *const TIGO_OUI = "04:C0:5B";  // only the CCA advertises on it
-static const uint32_t CCA_SESSION_SEED = 159260;  // the app's constant
 
 static int64_t now_s() { return static_cast<int64_t>(time(nullptr)); }
 
@@ -173,7 +173,7 @@ static std::string upper(std::string s) {
 }
 
 static std::string session_key(uint64_t uts) {
-  std::string in = std::to_string(uts + CCA_SESSION_SEED);
+  std::string in = wire::session_key_input(uts);
   unsigned char hash[EVP_MAX_MD_SIZE];
   unsigned int len = 0;
   EVP_Digest(in.data(), in.size(), hash, &len, EVP_sha512(), nullptr);
@@ -186,20 +186,7 @@ static std::string session_key(uint64_t uts) {
   return out;
 }
 
-std::string CcaBle::uri_encode(const std::string &v) {
-  static const char *const HEX = "0123456789ABCDEF";
-  std::string out;
-  for (unsigned char c : v) {
-    if (isalnum(c) || c == '-' || c == '_' || c == '.' || c == '~') {
-      out.push_back(static_cast<char>(c));
-    } else {
-      out.push_back('%');
-      out.push_back(HEX[c >> 4]);
-      out.push_back(HEX[c & 0xF]);
-    }
-  }
-  return out;
-}
+std::string CcaBle::uri_encode(const std::string &v) { return wire::uri_encode(v); }
 
 // ---------------------------------------------------------------------------
 // Lifecycle, queue and cache
@@ -510,8 +497,8 @@ int cca_on_properties_changed(sd_bus_message *m, void *userdata, sd_bus_error *)
       size_t len = 0;
       if (sd_bus_message_read_array(m, 'y', &data, &len) >= 0 && len >= 4) {
         auto *b = static_cast<const uint8_t *>(data);
-        self->rx_.insert(self->rx_.end(), b + 3, b + len);  // byte 0 reqNum, 1-2 overhead
-        if (!self->rx_.empty() && self->rx_.back() == '\0') self->rx_done_ = true;
+        wire::append_reply_piece(self->rx_, b, len);
+        if (wire::reply_complete(self->rx_)) self->rx_done_ = true;
       }
       sd_bus_message_exit_container(m);
     } else {
@@ -524,11 +511,8 @@ int cca_on_properties_changed(sd_bus_message *m, void *userdata, sd_bus_error *)
 
 bool CcaBle::exchange_(const std::string &write_path, const std::string &text, std::string &reply,
                        std::string &err) {
-  if (++req_num_ == 0) req_num_ = 1;
-  std::vector<uint8_t> payload;
-  payload.push_back(req_num_);
-  payload.insert(payload.end(), text.begin(), text.end());
-  payload.push_back(0);
+  req_num_ = wire::next_request_number(req_num_);
+  auto payload = wire::request_frame<std::vector<uint8_t>>(req_num_, text);
   rx_.clear();
   rx_done_ = false;
 
@@ -615,7 +599,7 @@ bool CcaBle::session_(const std::vector<std::pair<std::string, std::string>> &cm
     for (const auto &o : objs) {
       auto it = o.second.find("org.bluez.GattService1");
       if (it != o.second.end() && o.first.compare(0, dev.size() + 1, dev + "/") == 0 && it->second.count("UUID") &&
-          it->second.at("UUID").s == CCA_SERVICE_UUID)
+          it->second.at("UUID").s == wire::SERVICE_UUID)
         service = o.first;
     }
     for (const auto &o : objs) {
@@ -638,7 +622,7 @@ bool CcaBle::session_(const std::vector<std::pair<std::string, std::string>> &cm
                       "PropertiesChanged", cca_on_properties_changed, this);
   bool ok = call(bus_, notify_path, "org.bluez.GattCharacteristic1", "StartNotify", err);
   std::string reply;
-  if (ok) ok = exchange_(write_path, "cmd=DEVICE_INFO", reply, err);
+  if (ok) ok = exchange_(write_path, wire::command_text("DEVICE_INFO", "", ""), reply, err);
   if (ok) {
     store_("DEVICE_INFO", reply);
     // uts is the nonce the session key is made from; take it as a number or
@@ -655,10 +639,8 @@ bool CcaBle::session_(const std::vector<std::pair<std::string, std::string>> &cm
     } else {
       std::string sid = session_key(uts);
       for (const auto &c : cmds) {
-        // Extra params come before sid, in the app's order.
-        std::string text = "cmd=" + c.first + " " + (c.second.empty() ? "" : c.second + " ") + "sid=" + sid;
-        if (!(ok = exchange_(write_path, text, reply, err))) break;
-        if (reply.find("Unauthorized request") != std::string::npos) {
+        if (!(ok = exchange_(write_path, wire::command_text(c.first, c.second, sid), reply, err))) break;
+        if (wire::is_unauthorized(reply)) {
           ok = false;
           err = "the CCA rejected the session key for " + c.first;
           break;
