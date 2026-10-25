@@ -67,6 +67,8 @@ expect('refresh queued', get('/api/cca/refresh')[1]['status'], 'ok')
 info = wait(lambda: (lambda c: c if c['device_info'] != '{}' else None)(get('/api/cca')[1]))
 expect('device info', json.loads(info['device_info']).get('serial'), '00000000TEST')
 expect('network info', json.loads(info['network_info'])['eth']['ip'], '192.0.2.10')
+# A non-UTF-8 SSID once ended the daemon when the reply was saved.
+expect('Latin-1 SSID survives', json.loads(info['network_info'])['wlan']['ssid'], 'Caf\ufffd')
 expect('nearest CCA picked', info['cca_ip'], 'BLE 04:C0:5B:12:34:56')
 
 post('/api/cca/discovery/start')
@@ -119,6 +121,41 @@ expect('web port saved', post('/api/settings', {'web_port': 18090})[0], 200)
 time.sleep(1.5)
 s = get('/api/settings')[1]
 expect('web port waits for a restart', (s['web_port'], s['web_port_active']), (18090, 18089))
+
+# --- requests from other sites, the MQTT password, the web login
+import base64
+def code(path, method='GET', body=None, headers=None):
+    r = u.Request(B + path, data=body, headers=headers or {}, method=method)
+    try:
+        return u.urlopen(r).status
+    except u.HTTPError as e:
+        return e.code
+expect('cross-site POST refused', code('/api/restart', 'POST', b'', {'Sec-Fetch-Site': 'cross-site'}), 403)
+expect('cross-site GET refused', code('/api/cca/refresh', headers={'Sec-Fetch-Site': 'cross-site', 'Sec-Fetch-Mode': 'no-cors'}), 403)
+expect('link from another site opens', code('/api/status', headers={'Sec-Fetch-Site': 'cross-site', 'Sec-Fetch-Mode': 'navigate'}), 200)
+expect('foreign Origin refused', code('/api/settings', 'POST', b'{}', {'Origin': 'http://evil.example'}), 403)
+expect('same-origin POST allowed', code('/api/settings', 'POST', b'{}', {'Sec-Fetch-Site': 'same-origin'}), 200)
+expect('oversized body refused', code('/api/nodes/import', 'POST', b'x' * (5 << 20)), 413)
+# GET /api/settings shows the running copy, which takes a save within a second.
+post('/api/settings', {'mqtt': {'host': '127.0.0.1', 'port': 1, 'username': 'ha', 'password': 'secret'}})
+post('/api/settings', {'mqtt': {'host': '127.0.0.1', 'port': 1, 'username': 'ha', 'base_topic': 't2'}})
+time.sleep(1.5)
+expect('MQTT password kept for a topic change', get('/api/settings')[1]['mqtt']['password_set'], True)
+post('/api/settings', {'mqtt': {'host': 'elsewhere.example', 'port': 1, 'username': 'ha'}})
+time.sleep(1.5)
+expect('MQTT password dropped for a new broker', get('/api/settings')[1]['mqtt']['password_set'], False)
+post('/api/settings', {'mqtt': {'host': ''}})
+expect('web username checked', post('/api/settings', {'web_username': 'a:b'})[0], 400)
+post('/api/settings', {'web_password': 'pw'})
+time.sleep(1.5)
+auth = {'Authorization': 'Basic ' + base64.b64encode(b'admin:pw').decode()}
+expect('login required', code('/api/status'), 401)
+expect('wrong password refused', code('/api/status', headers={'Authorization': 'Basic ' + base64.b64encode(b'admin:no').decode()}), 401)
+expect('logged in', code('/api/status', headers=auth), 200)
+code('/api/settings', 'POST', b'{"web_password": ""}', dict(auth, **{'Content-Type': 'application/json'}))
+time.sleep(1.5)
+expect('login removed', code('/api/status'), 200)
+expect('total_energy_in is input energy', 'total_energy_in' in get('/api/overview')[1], True)
 # A fresh install with port 80 taken: the UI moves to 8080, no port is opened.
 busy = subprocess.Popen([sys.executable, '-m', 'http.server', '80'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 time.sleep(1)

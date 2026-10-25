@@ -1029,8 +1029,17 @@
           <div class="cfg-text"><strong>Web UI port</strong><span class="cfg-default">Empty: 80, or 8080 when another web server has 80. Takes effect after a restart</span></div>
           <div class="cfg-ctrl"><input class="cfg-input" id="pi-web-port" type="number" min="1" max="65535" placeholder="80"></div>
         </div>
+        <div class="cfg-row">
+          <div class="cfg-text"><strong>Web UI username</strong><span class="cfg-default">For the login below</span></div>
+          <div class="cfg-ctrl"><input class="cfg-input" id="pi-web-user" autocomplete="off" placeholder="admin"></div>
+        </div>
+        <div class="cfg-row">
+          <div class="cfg-text"><strong>Web UI password</strong><span class="cfg-default" id="pi-web-pass-hint">Empty: anyone on your network can open this page and change settings</span></div>
+          <div class="cfg-ctrl"><input class="cfg-input" id="pi-web-pass" type="password" autocomplete="new-password"></div>
+        </div>
         <div class="tools-actions" style="margin-top:12px">
           <button class="btn primary" id="pi-port-save">Save</button>
+          <button class="btn" id="pi-web-pass-remove" style="display:none">Remove password</button>
         </div>
       </div>
 
@@ -3313,13 +3322,20 @@
       document.getElementById('pi-mqtt-pass').value = '';
       document.getElementById('pi-mqtt-pass').placeholder = s.mqtt.password_set ? 'unchanged' : '';
       document.getElementById('pi-mqtt-pass-hint').textContent =
-        s.mqtt.password_set ? 'Saved. Leave empty to keep it.' : '';
+        s.mqtt.password_set ? 'Saved. Leave empty to keep it; changing the broker or username clears it.' : '';
       document.getElementById('pi-mqtt-topic').value = s.mqtt.base_topic || '';
       document.getElementById('pi-mqtt-discovery').value = s.mqtt.discovery_prefix || '';
       document.getElementById('pi-mqtt-topic-hint').textContent =
         `Readings go to ${s.mqtt.base_topic}/${s.device_id}/panel/<barcode>/state`;
       piWebPortActive = s.web_port_active;
       document.getElementById('pi-web-port').value = s.web_port || '';
+      document.getElementById('pi-web-user').value = s.web_username || 'admin';
+      document.getElementById('pi-web-pass').value = '';
+      document.getElementById('pi-web-pass').placeholder = s.web_password_set ? 'unchanged' : '';
+      document.getElementById('pi-web-pass-hint').textContent = s.web_password_set
+        ? 'Set. Leave empty to keep it.'
+        : 'Empty: anyone on your network can open this page and change settings';
+      document.getElementById('pi-web-pass-remove').style.display = s.web_password_set ? '' : 'none';
       await piFillSerial(s.serial_port || '');
       document.getElementById('pi-mqtt-state').textContent = !s.mqtt.host ? 'MQTT off'
         : s.mqtt_connected ? `connected to ${s.mqtt.host}` : `not connected${s.mqtt_error ? ': ' + s.mqtt_error : ''}`;
@@ -3354,11 +3370,28 @@
     document.getElementById('pi-port-state').textContent = !current ? 'no adapter chosen'
       : `reading ${current} · web UI on port ${piWebPortActive}`;
   }
+  document.getElementById('pi-web-pass-remove').addEventListener('click', async () => {
+    if (!confirm('Remove the web UI password? Anyone on your network will be able to open this page and change settings.')) return;
+    try {
+      const r = await apiFetch('/api/settings', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ web_password: '' }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || `/api/settings ${r.status}`);
+      showToast('Password removed ✓', 'ok');
+      setTimeout(refreshPiSettings, 1500);
+    } catch (e) {
+      showToast(`Save failed: ${e.message}`, 'err');
+    }
+  });
   document.getElementById('pi-serial-rescan').addEventListener('click',
     () => piFillSerial(document.getElementById('pi-serial').value));
   document.getElementById('pi-port-save').addEventListener('click', async () => {
     const webPort = Number(document.getElementById('pi-web-port').value) || 0;
-    const body = { serial_port: document.getElementById('pi-serial').value, web_port: webPort };
+    const body = { serial_port: document.getElementById('pi-serial').value, web_port: webPort,
+                   web_username: document.getElementById('pi-web-user').value.trim() || 'admin' };
+    const webPass = document.getElementById('pi-web-pass').value;
+    if (webPass !== '') body.web_password = webPass;
     try {
       const r = await apiFetch('/api/settings', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),

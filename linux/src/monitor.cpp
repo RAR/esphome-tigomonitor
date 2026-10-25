@@ -428,10 +428,13 @@ void Monitor::tick() {
   std::lock_guard<std::mutex> lock(mu_);
   auto now = Clock::now();
   // Day rollover at local midnight: close out yesterday, reset the peaks.
-  std::string date = local_date();
-  if (today_.empty()) {
+  // Not until the clock is set: a board that boots at 1970 and gets NTP a
+  // minute later would otherwise file today's energy under two dates.
+  bool clock_set = time(nullptr) > 1577836800 /* 2020 */;
+  std::string date = clock_set ? local_date() : today_;
+  if (clock_set && today_.empty()) {
     today_ = date;
-  } else if (date != today_) {
+  } else if (clock_set && date != today_) {
     history_.emplace_back(today_, today_kwh_);
     if (history_.size() > HISTORY_DAYS) history_.erase(history_.begin());
     today_ = date;

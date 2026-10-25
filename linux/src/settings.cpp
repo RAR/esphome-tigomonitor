@@ -34,6 +34,8 @@ Settings load_settings(const std::string &path) {
   get(j, "serial_port", s.serial_port);
   get(j, "baud_rate", s.baud_rate);
   get(j, "web_port", s.web_port);
+  get(j, "web_username", s.web_username);
+  get(j, "web_password", s.web_password);
   get(j, "power_calibration", s.power_calibration);
   get(j, "max_nodes", s.max_nodes);
   get(j, "publish_interval_s", s.publish_interval_s);
@@ -55,6 +57,7 @@ Settings load_settings(const std::string &path) {
   }
   if (s.publish_interval_s < 5) s.publish_interval_s = 5;
   if (s.web_port < 0 || s.web_port > 65535) s.web_port = 0;
+  if (s.web_username.empty()) s.web_username = "admin";
   if (s.history_interval_min < 1 || s.history_interval_min > 60) s.history_interval_min = 1;
   if (s.history_days < 1) s.history_days = 730;
   if (s.night_mode_timeout_min < 1 || s.night_mode_timeout_min > 1440) s.night_mode_timeout_min = 60;
@@ -67,6 +70,8 @@ bool save_settings(const std::string &path, const Settings &s) {
       {"serial_port", s.serial_port},
       {"baud_rate", s.baud_rate},
       {"web_port", s.web_port},
+      {"web_username", s.web_username},
+      {"web_password", s.web_password},
       {"power_calibration", s.power_calibration},
       {"max_nodes", s.max_nodes},
       {"publish_interval_s", s.publish_interval_s},
@@ -86,7 +91,7 @@ bool save_settings(const std::string &path, const Settings &s) {
         {"discovery_prefix", s.mqtt.discovery_prefix},
         {"base_topic", s.mqtt.base_topic}}},
   };
-  // The MQTT password is in here: owner-only.
+  // The MQTT and web passwords are in here: owner-only.
   return write_file_atomic(path, j.dump(2) + "\n", 0600);
 }
 

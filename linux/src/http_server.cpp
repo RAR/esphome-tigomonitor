@@ -33,7 +33,31 @@ static double r3(double v) { return std::round(v * 1000) / 1000; }
 static void send_json(httplib::Response &res, const json &j, int status = 200) {
   res.status = status;
   res.set_header("Cache-Control", "no-store");
-  res.set_content(j.dump(), "application/json");
+  // Replies carry text from the CCA and Tigo's cloud, which need not be UTF-8.
+  res.set_content(j.dump(-1, ' ', false, json::error_handler_t::replace), "application/json");
+}
+
+// Browsers send a saved login with requests other sites' pages make too, and
+// a no-cors POST needs no preflight, so anything on a page the user visits
+// could otherwise drive the API. Sec-Fetch-Site says where a request came
+// from; browsers too old to send it still send Origin on a cross-site POST.
+// Following a link here from another site is a navigation, and allowed.
+static bool from_another_site(const httplib::Request &req) {
+  std::string site = req.get_header_value("Sec-Fetch-Site");
+  if (!site.empty()) {
+    if (site == "same-origin" || site == "none") return false;
+    return !(req.method == "GET" && req.get_header_value("Sec-Fetch-Mode") == "navigate");
+  }
+  std::string origin = req.get_header_value("Origin");
+  if (origin.empty()) return false;  // not a browser, or a same-origin GET
+  size_t p = origin.find("://");
+  return p == std::string::npos || origin.substr(p + 3) != req.get_header_value("Host");
+}
+
+static bool same_secret(const std::string &a, const std::string &b) {
+  unsigned char diff = a.size() != b.size();
+  for (size_t i = 0; i < a.size() && i < b.size(); i++) diff |= a[i] ^ b[i];
+  return diff == 0;
 }
 
 static std::string string_of(const Monitor &mon, const Panel &p) {
@@ -226,6 +250,26 @@ void HttpServer::routes_() {
   auto &svr = *svr_;
   const Monitor &mon = ctx_.monitor;
 
+  // httplib reads a body of any size into memory; the largest real one, a
+  // node table backup, is well under 1 MB.
+  svr.set_payload_max_length(4 << 20);
+  svr.set_pre_routing_handler([this](const httplib::Request &req, httplib::Response &res) {
+    if (from_another_site(req)) {
+      send_json(res, {{"error", "Request from another site refused."}}, 403);
+      return httplib::Server::HandlerResponse::Handled;
+    }
+    Settings s = ctx_.current_settings();
+    if (!s.web_password.empty() &&
+        !same_secret(req.get_header_value("Authorization"),
+                     "Basic " + httplib::detail::base64_encode(s.web_username + ":" + s.web_password))) {
+      res.status = 401;
+      res.set_header("WWW-Authenticate", "Basic realm=\"Tigo Monitor\", charset=\"UTF-8\"");
+      res.set_content("Log in with the web UI username and password set under Tools.", "text/plain");
+      return httplib::Server::HandlerResponse::Handled;
+    }
+    return httplib::Server::HandlerResponse::Unhandled;
+  });
+
   auto app = [this](const httplib::Request &, httplib::Response &res) {
     std::ifstream in(ctx_.web_dir + "/app.html", std::ios::binary);
     if (!in) {
@@ -327,7 +371,7 @@ void HttpServer::routes_() {
                     {"active_devices", active},
                     {"max_devices", known},
                     {"total_energy", r2(mon.energy_kwh())},
-                    {"total_energy_in", r2(mon.energy_kwh())},
+                    {"total_energy_in", r2(mon.energy_in_kwh())},
                     {"total_energy_out", r2(mon.energy_kwh())},
                     {"today_energy", r2(today)},
                     {"month_energy", r1(month)}});
@@ -1003,6 +1047,8 @@ void HttpServer::routes_() {
     send_json(res, {{"serial_port", s.serial_port},
                     {"web_port", s.web_port},
                     {"web_port_active", port_},
+                    {"web_username", s.web_username},
+                    {"web_password_set", !s.web_password.empty()},
                     {"power_calibration", s.power_calibration},
                     {"publish_interval_s", s.publish_interval_s},
                     {"device_id", s.device_id},
@@ -1031,15 +1077,23 @@ void HttpServer::routes_() {
     try {
       if (j.contains("serial_port")) s.serial_port = j["serial_port"].get<std::string>();
       if (j.contains("web_port")) s.web_port = j["web_port"].get<int>();
+      if (j.contains("web_username")) s.web_username = j["web_username"].get<std::string>();
+      // Absent keeps it, and "" turns the login off.
+      if (j.contains("web_password")) s.web_password = j["web_password"].get<std::string>();
       if (j.contains("power_calibration")) s.power_calibration = j["power_calibration"].get<float>();
       if (j.contains("publish_interval_s")) s.publish_interval_s = j["publish_interval_s"].get<int>();
       if (j.contains("mqtt") && j["mqtt"].is_object()) {
         const json &m = j["mqtt"];
+        const MqttSettings before = s.mqtt;
         if (m.contains("host")) s.mqtt.host = m["host"].get<std::string>();
         if (m.contains("port")) s.mqtt.port = m["port"].get<int>();
         if (m.contains("username")) s.mqtt.username = m["username"].get<std::string>();
-        // Absent means "keep"; the UI never sees the stored password.
+        // Absent means "keep"; the UI never sees the stored password. It is
+        // kept only for the same broker and user, though: otherwise anyone
+        // who could save settings could send it to a broker of their own.
         if (m.contains("password")) s.mqtt.password = m["password"].get<std::string>();
+        else if (s.mqtt.host != before.host || s.mqtt.port != before.port || s.mqtt.username != before.username)
+          s.mqtt.password.clear();
         if (m.contains("discovery_prefix")) s.mqtt.discovery_prefix = m["discovery_prefix"].get<std::string>();
         if (m.contains("base_topic")) s.mqtt.base_topic = m["base_topic"].get<std::string>();
       }
@@ -1048,6 +1102,8 @@ void HttpServer::routes_() {
     }
     if (err.empty() && (s.mqtt.port < 1 || s.mqtt.port > 65535)) err = "MQTT port must be 1-65535.";
     if (err.empty() && (s.web_port < 0 || s.web_port > 65535)) err = "Web port must be 1-65535, or empty for the default.";
+    if (err.empty() && (s.web_username.empty() || s.web_username.find(':') != std::string::npos))
+      err = "The web UI username cannot be empty or contain a colon.";
     // Wildcards would make every publish fail, and an empty or slash-edged
     // level gives topics nothing in Home Assistant subscribes to.
     for (const std::string *t : {&s.mqtt.base_topic, &s.mqtt.discovery_prefix}) {

@@ -39,7 +39,8 @@ def replies(cmd, params):
     if params.get('sid') != SID:
         return {'msg': 'Unauthorized request'}
     if cmd == 'NETWORK_INFO':
-        return {'eth': {'state': 'up', 'ip': '192.0.2.10'}, 'wlan': {'state': 'down'}}
+        # LATIN1_SSID goes out as raw Latin-1 below: SSIDs are bytes, not UTF-8.
+        return {'eth': {'state': 'up', 'ip': '192.0.2.10'}, 'wlan': {'state': 'down', 'ssid': 'LATIN1_SSID'}}
     if cmd in ('START_DISCOVERY', 'DEVICE_DATA_EXPORT', 'NETWORK_WIFI_CLEAR'):
         return {'code': 0}
     if cmd == 'DISCOVERY_STATUS':
@@ -179,7 +180,7 @@ def main():
             cmd = fields.pop('cmd')
             params = {k: unquote(v) for k, v in fields.items()}
             log.append(cmd)
-            body = json.dumps(replies(cmd, params)).encode() + b'\0'
+            body = json.dumps(replies(cmd, params)).encode().replace(b'LATIN1_SSID', b'Caf\xe9') + b'\0'
 
             def send(pieces=[body[i:i + 20] for i in range(0, len(body), 20)]):
                 if pieces:

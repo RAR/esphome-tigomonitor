@@ -203,7 +203,12 @@ void CcaBle::start() {
 
 void CcaBle::stop() {
   if (!thread_.joinable()) return;
-  stop_ = true;
+  {
+    // Under the lock, or the worker can test stop_ just before this and then
+    // wait through the notify, so join() never returns.
+    std::lock_guard<std::mutex> lock(mu_);
+    stop_ = true;
+  }
   cv_.notify_all();
   thread_.join();
 }
@@ -225,7 +230,9 @@ void CcaBle::load_() {
 void CcaBle::save_locked_() const {
   json j = {{"mac", v_.saved_mac},          {"last_mac", v_.active_mac},       {"device_info", v_.device_info},
             {"network_info", v_.network_info}, {"info_epoch", v_.info_epoch}};
-  write_file_atomic(path_, j.dump(2) + "\n");
+  // The replies are the CCA's bytes as they came, and an SSID need not be
+  // UTF-8; dump() would throw on one, on the worker thread, and end the daemon.
+  write_file_atomic(path_, j.dump(2, ' ', false, json::error_handler_t::replace) + "\n");
 }
 
 CcaBle::View CcaBle::view() const {
@@ -409,7 +416,7 @@ void CcaBle::do_job_(const Job &job) {
   if (!done) {
     LOGW("cca: %s", err.c_str());
     if (job.kind == Job::REFRESH) v_.info_failed_epoch = now_s();
-    else results_[job.cmd] = {json({{"msg", err}}).dump(), now_s()};
+    else results_[job.cmd] = {json({{"msg", err}}).dump(-1, ' ', false, json::error_handler_t::replace), now_s()};
   }
 }
 

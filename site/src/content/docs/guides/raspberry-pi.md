@@ -40,7 +40,9 @@ you saw, working or not.
 ## What you need
 
 - A **Raspberry Pi Zero 2 W** (any 64-bit Pi works) and a microSD card,
-  running **Raspberry Pi OS (64-bit)**. The Lite version is enough.
+  running **Raspberry Pi OS (64-bit)**, the current release, based on Debian
+  13 (trixie). The Lite version is enough. The package does not install on
+  the older bookworm release, which Imager lists under Legacy.
 - A **USB RS485 adapter**, wired to the TAP the same way as the ESP32 build —
   A, B and ground; see [Wiring](/esphome-tigomonitor/guides/wiring/). An RS485
   HAT on the Pi's own serial pins works too; see
@@ -71,8 +73,8 @@ you saw, working or not.
    The service starts straight away and on every boot after.
 5. Open `http://tigomonitor.local` (your hostname, then `.local`). Under
    **Tools → RS485 adapter and web UI**, choose your adapter. USB adapters
-   are listed by make and model. The page asks to restart the service so it
-   opens the adapter, and the dashboard fills in as panels report.
+   are listed by make and model. It opens the adapter as soon as you save,
+   and the dashboard fills in as panels report.
 
 ## Using an RS485 HAT
 
@@ -122,6 +124,18 @@ sudo apt install ./tigomonitord_VERSION_arm64.deb
 
 The same file takes `"serial_port"` too. Anything left out keeps its
 default, and the web UI edits the file from then on.
+
+## Set a password
+
+Out of the box, as on the ESP32, the web UI has no login: anyone on your
+network can open it and change its settings, including the CCA's Wi-Fi and
+the MQTT broker. To require one, set **Web UI password** under **Tools →
+RS485 adapter and web UI**. The browser then asks for the username (`admin`
+unless you change it) and password. Pages on other websites can't use the
+monitor's settings either way, even with the login saved in your browser.
+
+The MQTT password stays on the Pi: the web UI never shows it, and changing
+the broker's address or username clears it, so it has to be entered again.
 
 ## Connect it to Home Assistant
 

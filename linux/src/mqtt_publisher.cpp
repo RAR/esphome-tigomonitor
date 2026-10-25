@@ -5,6 +5,7 @@
 #include <mosquitto.h>
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <cctype>
 #include <cmath>
 
@@ -162,8 +163,9 @@ void MqttPublisher::publish_discovery_(const Panel &p) {
               {"value_template", std::string("{{ value_json.") + m.key + " }}"},
               {"availability_topic", base_() + "/status"},
               // A panel that stops reporting (night, a fault) goes unavailable
-              // rather than freezing at its last value.
-              {"expire_after", 300},
+              // rather than freezing at its last value; never sooner than the
+              // next publish is due, or it would between every two.
+              {"expire_after", std::max(300, 3 * settings_.publish_interval_s)},
               {"suggested_display_precision", m.precision},
               {"device", device}};
     if (m.unit) c["unit_of_measurement"] = m.unit;
