@@ -1,7 +1,8 @@
 # .github/workflows/pi.yml
 # The Raspberry Pi build (linux/). Every change runs the host tests and the
 # end-to-end replay; a manual run or a version tag also builds the arm64 .deb
-# and the SD card image on GitHub's arm runner, natively — no QEMU.
+# on GitHub's arm runner, natively — no QEMU. (linux/image/build-image.sh can
+# turn it into an SD card image, but we only ship the .deb for now.)
 name: Pi build
 on:
   push:
@@ -11,6 +12,7 @@ on:
       - 'linux/**'
       - 'components/tigo_monitor/tigo_protocol.h'
       - 'components/tigo_monitor/tigo_node_identity.h'
+      - 'components/tigo_monitor/tigo_cca_ble_protocol.h'
       - 'components/tigo_server/web/app.html'
       - 'tests/host/**'
       - '.github/workflows/pi.yml'
@@ -19,6 +21,7 @@ on:
       - 'linux/**'
       - 'components/tigo_monitor/tigo_protocol.h'
       - 'components/tigo_monitor/tigo_node_identity.h'
+      - 'components/tigo_monitor/tigo_cca_ble_protocol.h'
       - 'components/tigo_server/web/app.html'
       - 'tests/host/**'
       - '.github/workflows/pi.yml'
@@ -38,12 +41,12 @@ jobs:
       - name: CCA over Bluetooth and HTTP, against mocks
         run: docker run --rm -v "$PWD":/src -w /src tigod-dev linux/scripts/cca-e2e.sh
 
-  image:
+  deb:
     if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
     needs: test
     runs-on: ubuntu-24.04-arm
     permissions:
-      contents: write  # attaching the image to a tag's release
+      contents: write  # attaching the .deb to a tag's release
     steps:
       - uses: actions/checkout@v4
         with:
@@ -55,16 +58,11 @@ jobs:
       - run: docker build -t tigod-dev -f linux/Dockerfile.dev linux
       - name: Build the arm64 .deb
         run: docker run --rm -v "$PWD":/src -w /src tigod-dev linux/packaging/build-deb.sh "${{ steps.version.outputs.version }}"
-      - name: Build the SD card image
-        run: sudo linux/image/build-image.sh build/deb/tigomonitord_*_arm64.deb
       - uses: actions/upload-artifact@v4
         with:
           name: tigomonitor-${{ steps.version.outputs.version }}
-          path: |
-            build/deb/*.deb
-            build/image/*.img.xz
-            build/image/*.img.xz.sha256
-          compression-level: 0  # already xz
+          path: build/deb/*.deb
+          compression-level: 0  # already compressed
       - name: Attach to the release
         if: startsWith(github.ref, 'refs/tags/v')
         env:
@@ -73,7 +71,7 @@ jobs:
         # only adds the files, and does nothing if there is no release yet.
         run: |
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
-            gh release upload "$GITHUB_REF_NAME" build/deb/*.deb build/image/*.img.xz build/image/*.img.xz.sha256 --clobber
+            gh release upload "$GITHUB_REF_NAME" build/deb/*.deb --clobber
           else
             echo "No release for $GITHUB_REF_NAME yet; files are in the workflow artifact."
           fi

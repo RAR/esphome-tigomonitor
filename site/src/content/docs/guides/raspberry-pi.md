@@ -1,11 +1,11 @@
 ---
 title: Raspberry Pi
-description: Run Tigo Monitor on a Raspberry Pi Zero 2 W instead of an ESP32 — flash a ready-made SD card image, plug in a USB RS485 adapter, and point it at Home Assistant's MQTT broker.
+description: Run Tigo Monitor on a Raspberry Pi Zero 2 W instead of an ESP32 — install one package on Raspberry Pi OS, connect an RS485 adapter, and point it at Home Assistant's MQTT broker.
 ---
 
 The ESP32 is the main way to run Tigo Monitor. If you would rather use a
 Raspberry Pi, there is a Pi build: the same dashboard and the same panel
-decoding, packaged as an SD card image that needs no ESPHome and no YAML.
+decoding, packaged for Raspberry Pi OS, with no ESPHome and no YAML.
 
 :::caution[Experimental]
 The Pi build is new and has run on one installation so far: a Pi Zero 2 W
@@ -39,7 +39,8 @@ you saw, working or not.
 
 ## What you need
 
-- A **Raspberry Pi Zero 2 W** (any 64-bit Pi works) and a microSD card.
+- A **Raspberry Pi Zero 2 W** (any 64-bit Pi works) and a microSD card,
+  running **Raspberry Pi OS (64-bit)**. The Lite version is enough.
 - A **USB RS485 adapter**, wired to the TAP the same way as the ESP32 build —
   A, B and ground; see [Wiring](/esphome-tigomonitor/guides/wiring/). An RS485
   HAT on the Pi's own serial pins works too; see
@@ -47,21 +48,31 @@ you saw, working or not.
 - An **MQTT broker** that Home Assistant uses. If you don't have one, install
   the Mosquitto broker add-on in Home Assistant.
 
-## Flash the card
+## Install it
 
-1. Download `tigomonitor-VERSION-arm64.img.xz` from the
-   [releases page](https://github.com/RAR/esphome-tigomonitor/releases).
-2. Open [Raspberry Pi Imager](https://www.raspberrypi.com/software/), choose
-   **Raspberry Pi Zero 2 W**, then **Use custom** and pick the file.
-3. When Imager offers to apply OS customisation, choose **Edit settings** and
+1. In [Raspberry Pi Imager](https://www.raspberrypi.com/software/), choose
+   **Raspberry Pi Zero 2 W**, then **Raspberry Pi OS Lite (64-bit)**.
+2. When Imager offers to apply OS customisation, choose **Edit settings** and
    fill in:
    - your **Wi-Fi** name and password — the Zero 2 W has no Ethernet port, so
      without this it cannot reach your network;
-   - a **username and password**, which you only need if you want to log in
-     over SSH;
-   - a hostname, if you don't want the default `tigomonitor`.
-4. Write the card, put it in the Pi, connect the RS485 adapter, and power it
-   on. The first boot takes a few minutes.
+   - a **username and password**, and turn on **SSH** under Services;
+   - a hostname such as `tigomonitor`.
+3. Write the card, put it in the Pi, connect the RS485 adapter, and power it
+   on. Once it has joined your Wi-Fi, log in over SSH.
+4. Download `tigomonitord_VERSION_arm64.deb` from the
+   [releases page](https://github.com/RAR/esphome-tigomonitor/releases) and
+   install it:
+
+   ```sh
+   sudo apt install ./tigomonitord_VERSION_arm64.deb
+   ```
+
+   The service starts straight away and on every boot after.
+5. Open `http://tigomonitor.local` (your hostname, then `.local`). Under
+   **Tools → RS485 adapter and web UI**, choose your adapter. USB adapters
+   are listed by make and model. The page asks to restart the service so it
+   opens the adapter, and the dashboard fills in as panels report.
 
 ## Using an RS485 HAT
 
@@ -70,8 +81,8 @@ A HAT such as Waveshare's
 the Pi's own serial port. The monitor only listens, so a HAT that switches
 direction by itself, as that one does by default, needs no extra setup.
 
-The SD card image turns the serial port on for you. On a stock Raspberry Pi
-OS install, turn it on, without a login console on it, and reboot:
+Raspberry Pi OS leaves that serial port off. Turn it on, without a login
+console on it, and reboot:
 
 ```sh
 sudo raspi-config nonint do_serial_cons 1
@@ -79,21 +90,18 @@ sudo raspi-config nonint do_serial_hw 0
 sudo reboot
 ```
 
-Under **Tools → RS485 adapter and web UI**, choose **Raspberry Pi UART**
-(`/dev/serial0`), or leave the SD card image's **Automatic**, which uses it
-when no USB adapter is plugged in.
+Then, under **Tools → RS485 adapter and web UI**, choose **Raspberry Pi
+UART** (`/dev/serial0`).
 
 ## On a machine that does other things
 
-The arm64 `.deb` package from the releases page installs on 64-bit Raspberry
-Pi OS or Debian 13 (trixie), including on a machine that already runs other
-services. It stays out of their way until you set it up:
+The same package installs on 64-bit Raspberry Pi OS or Debian 13 (trixie)
+on a machine that already runs other services. It stays out of their way
+until you set it up:
 
 - **It opens no serial port until you choose one.** A Zigbee or Z-Wave stick
-  on the same machine is never touched. Choose the RS485 adapter under
-  **Tools → RS485 adapter and web UI**; the list names USB adapters by make
-  and model. Listing the ports does not open them. (The SD card image starts
-  at **Automatic** instead, since nothing else runs on it.)
+  on the same machine is never touched, and listing the ports does not open
+  them.
 - **Its web UI moves to port 8080 if port 80 is taken**, and the log says so.
   Set another port in the same card; it takes effect when the service
   restarts, and the page offers to restart and follow it there. The
@@ -116,8 +124,7 @@ default, and the web UI edits the file from then on.
 
 ## Connect it to Home Assistant
 
-1. Open `http://tigomonitor.local` (or your hostname). The dashboard fills in
-   as panels report.
+1. Open `http://tigomonitor.local` (or your hostname).
 2. Go to **Tools → Home Assistant** and enter the broker's address, port, and
    a username and password the broker accepts. With the Mosquitto add-on that
    is your Home Assistant's address, port 1883, and any Home Assistant user.
@@ -152,8 +159,8 @@ list which MPPTs each inverter owns.
 ## If nothing shows up
 
 - **No panels on the dashboard:** check **Diagnostics → Frames processed**.
-  If it stays at 0, the Pi is not receiving the bus: check the wiring and
-  that **Serial port** under Tools names your adapter, or is **Automatic**.
+  If it stays at 0, the Pi is not receiving the bus: check the wiring, and
+  that **Tools → RS485 adapter and web UI** names your adapter.
 - **Panels on the dashboard but not in Home Assistant:** the Home Assistant
   section of Tools shows the broker's error, such as a refused password. Also
   allow up to 15 minutes on a fresh install for the gateway's next
