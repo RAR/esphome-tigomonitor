@@ -1010,12 +1010,27 @@
           <div class="cfg-text"><strong>Discovery prefix</strong><span class="cfg-default">Where Home Assistant looks for new devices; leave it unless you changed it in Home Assistant</span></div>
           <div class="cfg-ctrl"><input class="cfg-input" id="pi-mqtt-discovery" placeholder="homeassistant" autocomplete="off"></div>
         </div>
-        <div class="cfg-row">
-          <div class="cfg-text"><strong>Serial port</strong><span class="cfg-default">The RS485 adapter. "auto" finds a USB dongle or the Pi's UART</span></div>
-          <div class="cfg-ctrl"><input class="cfg-input" id="pi-serial" autocomplete="off"></div>
-        </div>
         <div class="tools-actions" style="margin-top:12px">
           <button class="btn primary" id="pi-save">Save</button>
+        </div>
+      </div>
+
+      <div class="section-head" data-linux-only style="display:none">
+        <div class="section-title">RS485 adapter and web UI</div>
+        <div class="section-sub" id="pi-port-state">—</div>
+      </div>
+      <div class="tools-card" data-linux-only style="display:none">
+        <p class="hint">Nothing is opened until you choose the adapter here, so other serial devices on this machine, such as a Zigbee stick, are left alone. Listing the ports does not open them.</p>
+        <div class="cfg-row">
+          <div class="cfg-text"><strong>Serial port</strong><span class="cfg-default">The RS485 adapter on the Tigo bus</span></div>
+          <div class="cfg-ctrl"><select class="cfg-input" id="pi-serial"></select> <button class="btn" id="pi-serial-rescan">Rescan</button></div>
+        </div>
+        <div class="cfg-row">
+          <div class="cfg-text"><strong>Web UI port</strong><span class="cfg-default">Empty: 80, or 8080 when another web server has 80. Takes effect after a restart</span></div>
+          <div class="cfg-ctrl"><input class="cfg-input" id="pi-web-port" type="number" min="1" max="65535" placeholder="80"></div>
+        </div>
+        <div class="tools-actions" style="margin-top:12px">
+          <button class="btn primary" id="pi-port-save">Save</button>
         </div>
       </div>
 
@@ -3303,7 +3318,9 @@
       document.getElementById('pi-mqtt-discovery').value = s.mqtt.discovery_prefix || '';
       document.getElementById('pi-mqtt-topic-hint').textContent =
         `Readings go to ${s.mqtt.base_topic}/${s.device_id}/panel/<barcode>/state`;
-      document.getElementById('pi-serial').value = s.serial_port || '';
+      piWebPortActive = s.web_port_active;
+      document.getElementById('pi-web-port').value = s.web_port || '';
+      await piFillSerial(s.serial_port || '');
       document.getElementById('pi-mqtt-state').textContent = !s.mqtt.host ? 'MQTT off'
         : s.mqtt_connected ? `connected to ${s.mqtt.host}` : `not connected${s.mqtt_error ? ': ' + s.mqtt_error : ''}`;
       document.getElementById('tools-meta').textContent = `last update ${new Date().toLocaleTimeString()}`;
@@ -3311,6 +3328,59 @@
       document.getElementById('tools-meta').textContent = `error: ${e.message}`;
     }
   }
+  let piWebPortActive = 0;
+  async function piFillSerial(current) {
+    const sel = document.getElementById('pi-serial');
+    let ports = [];
+    try {
+      const r = await apiFetch('/api/serial-ports');
+      if (r.ok) ports = (await r.json()).ports || [];
+    } catch (e) { /* the saved choice still shows */ }
+    const opts = [['', 'Not chosen: nothing is opened'],
+                  ['auto', 'Automatic: first USB adapter, else the Pi UART']];
+    for (const p of ports) {
+      const shown = p.path === p.device ? p.path : `${p.path.replace('/dev/serial/by-id/', '')} (${p.device})`;
+      opts.push([p.path, p.description ? `${p.description} — ${shown}` : shown]);
+    }
+    if (current && !opts.some(o => o[0] === current)) opts.push([current, `${current} (not connected)`]);
+    sel.innerHTML = '';
+    for (const [value, label] of opts) {
+      const o = document.createElement('option');
+      o.value = value;
+      o.textContent = label;
+      sel.appendChild(o);
+    }
+    sel.value = current;
+    document.getElementById('pi-port-state').textContent = !current ? 'no adapter chosen'
+      : `reading ${current} · web UI on port ${piWebPortActive}`;
+  }
+  document.getElementById('pi-serial-rescan').addEventListener('click',
+    () => piFillSerial(document.getElementById('pi-serial').value));
+  document.getElementById('pi-port-save').addEventListener('click', async () => {
+    const webPort = Number(document.getElementById('pi-web-port').value) || 0;
+    const body = { serial_port: document.getElementById('pi-serial').value, web_port: webPort };
+    try {
+      const r = await apiFetch('/api/settings', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || `/api/settings ${r.status}`);
+      showToast('Saved ✓', 'ok');
+      const next = webPort || 80;
+      if (next !== piWebPortActive &&
+          confirm(`Restart the service to move the web UI to port ${next}?\n\nWithout a restart it stays on ${piWebPortActive}.`)) {
+        await apiFetch('/api/restart', { method: 'POST' }).catch(() => {});
+        const url = new URL(window.location.href);
+        url.port = next === 80 ? '' : String(next);
+        setTimeout(() => { window.location.href = url.toString(); }, 5000);
+        showToast(`Restarting; opening port ${next} in 5 s`, 'ok');
+        return;
+      }
+      setTimeout(refreshPiSettings, 1500);
+    } catch (e) {
+      showToast(`Save failed: ${e.message}`, 'err');
+    }
+  });
   // Inverters: one row per inverter, its MPPTs as a comma-separated list.
   function piInvRow(inv) {
     const row = document.createElement('div');
@@ -3369,10 +3439,7 @@
     };
     const pass = document.getElementById('pi-mqtt-pass').value;
     if (pass !== '') mqtt.password = pass;
-    const body = {
-      mqtt,
-      serial_port: document.getElementById('pi-serial').value.trim(),
-    };
+    const body = { mqtt };
     try {
       const r = await apiFetch('/api/settings', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),

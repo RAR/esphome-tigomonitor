@@ -17,16 +17,20 @@ struct MqttSettings {
 };
 
 struct Settings {
-  // "auto" picks the first USB serial adapter, then the Pi's own UART.
-  std::string serial_port = "auto";
+  // Empty until someone picks one, so installing on a host with other serial
+  // devices (a Zigbee stick, say) never touches them. "auto" picks the first
+  // USB serial adapter, then the Pi's own UART; the SD card image starts there.
+  std::string serial_port;
   int baud_rate = 38400;
   float power_calibration = 1.0f;
   // Plenty of RAM here, so the node table is sized for any real site rather
   // than to the panel count, as number_of_devices has to be on the ESP32.
   int max_nodes = 512;
   int publish_interval_s = 30;
+  // 0: port 80, or 8080 when something else already has 80.
+  int web_port = 0;
   // History snapshots. The ESP32 takes one every 30 minutes to spare its
-  // flash; an SD card can take one every 5 and keep two years of them.
+  // flash; an SD card can take one a minute and keep two years of them.
   int history_interval_min = 1;
   int history_days = 730;
   // The firmware's runtime knobs (/api/config, Tools > Device Configuration),

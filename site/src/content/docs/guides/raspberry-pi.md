@@ -17,8 +17,8 @@ you saw, working or not.
 
 ## How it differs from the ESP32 build
 
-- **Setup happens in the browser.** You set the MQTT broker and the serial
-  port on the Tools page, and what the ESP32 takes from YAML (power
+- **Setup happens in the browser.** You set the MQTT broker and choose the
+  serial port on the Tools page, and what the ESP32 takes from YAML (power
   calibration, night-mode timeout, reset at midnight, a CCA IP) under
   **Tools → Device Configuration**. There is nothing to compile.
 - **Home Assistant connects over MQTT**, not the ESPHome integration. Each
@@ -29,7 +29,9 @@ you saw, working or not.
   the MPPTs it owns. A Tigo cloud import fills them in for you when none are
   set.
 - **History is kept on the SD card**, with a snapshot every minute
-  rather than the ESP32's 30, for two years.
+  rather than the ESP32's 30, for two years. Panels are not recorded at
+  night, once the bus has been silent for the night-mode timeout, which
+  roughly halves what the card stores.
 - **The CCA Info page talks to the CCA over the Pi's Bluetooth**, as the
   ESP32 does with `cca_source: ble`. The Pi finds the nearest CCA by itself;
   there is no MAC to enter. For a CCA on firmware older than 4.0.4, set its
@@ -77,8 +79,26 @@ sudo raspi-config nonint do_serial_hw 0
 sudo reboot
 ```
 
-Leave **Serial port** under Tools at `auto`: with no USB adapter plugged in,
-it uses `/dev/serial0`.
+Under **Tools → RS485 adapter and web UI**, choose **Raspberry Pi UART**
+(`/dev/serial0`), or leave the SD card image's **Automatic**, which uses it
+when no USB adapter is plugged in.
+
+## On a machine that does other things
+
+The arm64 `.deb` package from the releases page installs on 64-bit Raspberry
+Pi OS or Debian 13 (trixie), including on a machine that already runs other
+services. It stays out of their way until you set it up:
+
+- **It opens no serial port until you choose one.** A Zigbee or Z-Wave stick
+  on the same machine is never touched. Choose the RS485 adapter under
+  **Tools → RS485 adapter and web UI**; the list names USB adapters by make
+  and model. Listing the ports does not open them. (The SD card image starts
+  at **Automatic** instead, since nothing else runs on it.)
+- **Its web UI moves to port 8080 if port 80 is taken**, and the log says so.
+  Set another port in the same card; it takes effect when the service
+  restarts, and the page offers to restart and follow it there. The
+  `tigomonitor.local` network-browser entry still says port 80: edit
+  `/etc/avahi/services/tigomonitor-http.service` to match.
 
 ## Connect it to Home Assistant
 
@@ -119,7 +139,7 @@ list which MPPTs each inverter owns.
 
 - **No panels on the dashboard:** check **Diagnostics → Frames processed**.
   If it stays at 0, the Pi is not receiving the bus: check the wiring and
-  that **Serial port** under Tools is `auto` or names your adapter.
+  that **Serial port** under Tools names your adapter, or is **Automatic**.
 - **Panels on the dashboard but not in Home Assistant:** the Home Assistant
   section of Tools shows the broker's error, such as a refused password. Also
   allow up to 15 minutes on a fresh install for the gateway's next

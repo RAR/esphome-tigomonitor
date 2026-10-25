@@ -110,6 +110,30 @@ expect('HTTP device info', info and json.loads(info['device_info'])['serial'], '
 nodes = wait(lambda: (lambda n: n if n[0]['cca_label'] else None)(get('/api/nodes')[1]['nodes']), 10) or []
 expect('HTTP sync labels', [(n['cca_label'], n['cca_string'], n['cca_mppt']) for n in nodes],
        [('P0', 'East', 'MPPT 1'), ('P1', 'East', 'MPPT 1')])
+
+# --- the Tools page's adapter and web-port card (not CCA, but this test has
+# the web server up)
+expect('serial ports listed', isinstance(get('/api/serial-ports')[1].get('ports'), list), True)
+expect('web port range checked', post('/api/settings', {'web_port': 70000})[0], 400)
+expect('web port saved', post('/api/settings', {'web_port': 18090})[0], 200)
+time.sleep(1.5)
+s = get('/api/settings')[1]
+expect('web port waits for a restart', (s['web_port'], s['web_port_active']), (18090, 18089))
+# A fresh install with port 80 taken: the UI moves to 8080, no port is opened.
+busy = subprocess.Popen([sys.executable, '-m', 'http.server', '80'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+time.sleep(1)
+fresh = subprocess.Popen(['build/linux/tigomonitord', '--state-dir', 'build/cca-e2e/fresh'],
+                         stderr=open('build/cca-e2e/fresh.log', 'w'))
+s = None
+end = time.time() + 10
+while time.time() < end and s is None:
+    try:
+        s = json.load(u.urlopen('http://127.0.0.1:8080/api/settings'))
+    except OSError:
+        time.sleep(0.5)
+fresh.terminate(); fresh.wait(); busy.terminate()
+expect('port 80 taken: on 8080', s and (s['web_port_active'], s['serial_port']), (8080, ''))
+expect('fresh install opens no port', 'no serial port chosen' in open('build/cca-e2e/fresh.log').read(), True)
 sys.exit(1 if fail else 0)
 PY
 echo "cca e2e passed"

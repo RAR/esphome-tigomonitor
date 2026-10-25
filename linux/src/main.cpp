@@ -48,7 +48,7 @@ static void usage() {
                "usage: tigomonitord [options]\n"
                "  --state-dir DIR   settings and state (default /var/lib/tigomonitor)\n"
                "  --web-dir DIR     where app.html is (default /usr/share/tigomonitor/web)\n"
-               "  --port N          web UI port (default 80; 0 turns it off)\n"
+               "  --port N          web UI port, overriding settings.json (0 turns it off)\n"
                "  --serial DEV      serial port, overriding settings.json\n"
                "  --replay FILE     read bus bytes from a capture instead of a port\n"
                "  --speed X         replay speed (1 = bus speed, 0 = as fast as possible)\n"
@@ -67,7 +67,7 @@ static std::string hostname() {
 int main(int argc, char **argv) {
   std::string state_dir = "/var/lib/tigomonitor";
   std::string web_dir = "/usr/share/tigomonitor/web";
-  int port = 80;
+  int port = -1;  // -1: from settings.json
   std::string serial_override, replay, capture;
   double speed = 1.0;
   for (int i = 1; i < argc; i++) {
@@ -169,7 +169,16 @@ int main(int argc, char **argv) {
       },
       [&] { return mqtt.connected(); }, [&] { return mqtt.last_error(); }, settings_changed, restart_requested,
       monitor, topology, history, cloud, cca, cca_http});
-  if (port > 0 && !web.start(port)) return 1;
+  if (port < 0 && settings.web_port > 0) port = settings.web_port;
+  // Only the default steps aside for another web server; a port someone
+  // chose fails loudly instead, and systemd keeps retrying it.
+  if ((port < 0 && !web.start(80, 8080)) || (port > 0 && !web.start(port))) {
+    input_stop = true;
+    input.join();
+    cca.stop();
+    cca_http.stop();
+    return 1;
+  }
 
   auto last_publish = std::chrono::steady_clock::now() - std::chrono::hours(1);
   // Snapshots land on wall-clock multiples of the interval (:00, :05, ...),
@@ -189,6 +198,7 @@ int main(int argc, char **argv) {
       Settings fresh = load_settings(settings_path);
       if (fresh.device_id.empty()) fresh.device_id = settings.device_id;
       bool new_port = fresh.serial_port != settings.serial_port || fresh.baud_rate != settings.baud_rate;
+      if (fresh.web_port != settings.web_port) LOGI("web: the new port takes effect when the service restarts");
       {
         std::lock_guard<std::mutex> lock(settings_mu);
         settings = fresh;
@@ -218,11 +228,14 @@ int main(int argc, char **argv) {
       if (wall >= next_snapshot) {
         auto ago = std::chrono::steady_clock::now();
         std::vector<std::pair<std::string, double>> panel_power;
-        for (const auto &p : monitor.panels()) {
-          if (p.barcode.empty()) continue;
-          // Offline is 0 W, as on the ESP32 once a panel goes stale.
-          panel_power.emplace_back(p.barcode, ago - p.updated < monitor.online_window() ? p.reading.power_out : 0.0);
-        }
+        // At night every panel reads 0 W; leave their rows out (the system
+        // row still marks the time) and halve what the SD card stores.
+        if (!monitor.night_mode())
+          for (const auto &p : monitor.panels()) {
+            if (p.barcode.empty()) continue;
+            // Offline is 0 W, as on the ESP32 once a panel goes stale.
+            panel_power.emplace_back(p.barcode, ago - p.updated < monitor.online_window() ? p.reading.power_out : 0.0);
+          }
         double energy = monitor.energy_kwh();
         history.record(next_snapshot, monitor.total_power(), energy - energy_at_snapshot, panel_power);
         energy_at_snapshot = energy;

@@ -52,8 +52,9 @@ class HttpServer {
  public:
   explicit HttpServer(HttpContext ctx);
   ~HttpServer();
-  // Listens on port in a background thread. Returns false if it can't bind.
-  bool start(int port);
+  // Listens on port in a background thread, or on fallback (when nonzero)
+  // if port is taken. Returns the port it got, or 0 if it got neither.
+  int start(int port, int fallback = 0);
   void stop();
 
  private:
@@ -61,6 +62,7 @@ class HttpServer {
   HttpContext ctx_;
   std::unique_ptr<httplib::Server> svr_;
   std::unique_ptr<std::thread> thread_;
+  int port_ = 0;
   std::mutex settings_mu_;  // serialises settings.json writes
 };
 

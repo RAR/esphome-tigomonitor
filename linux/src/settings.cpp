@@ -33,6 +33,7 @@ Settings load_settings(const std::string &path) {
   }
   get(j, "serial_port", s.serial_port);
   get(j, "baud_rate", s.baud_rate);
+  get(j, "web_port", s.web_port);
   get(j, "power_calibration", s.power_calibration);
   get(j, "max_nodes", s.max_nodes);
   get(j, "publish_interval_s", s.publish_interval_s);
@@ -53,6 +54,7 @@ Settings load_settings(const std::string &path) {
     get(*m, "base_topic", s.mqtt.base_topic);
   }
   if (s.publish_interval_s < 5) s.publish_interval_s = 5;
+  if (s.web_port < 0 || s.web_port > 65535) s.web_port = 0;
   if (s.history_interval_min < 1 || s.history_interval_min > 60) s.history_interval_min = 1;
   if (s.history_days < 1) s.history_days = 730;
   if (s.night_mode_timeout_min < 1 || s.night_mode_timeout_min > 1440) s.night_mode_timeout_min = 60;
@@ -64,6 +66,7 @@ bool save_settings(const std::string &path, const Settings &s) {
   json j = {
       {"serial_port", s.serial_port},
       {"baud_rate", s.baud_rate},
+      {"web_port", s.web_port},
       {"power_calibration", s.power_calibration},
       {"max_nodes", s.max_nodes},
       {"publish_interval_s", s.publish_interval_s},

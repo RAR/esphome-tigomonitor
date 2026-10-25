@@ -127,8 +127,12 @@ std::vector<HistoryRow> History::system(int64_t start, int64_t end, int64_t buck
 
 std::vector<HistoryRow> History::panel(int slot, int64_t start, int64_t end, int64_t bucket_s) {
   std::lock_guard<std::mutex> lock(mu_);
-  return query_locked_("SELECT (t / ?) * ?, AVG(p) FROM panel WHERE slot = ? AND t BETWEEN ? AND ? "
-                       "GROUP BY t / ?1 ORDER BY 1",
+  // Panel rows are not written at night, but system rows are; dividing by
+  // the bucket's system rows counts those missing night rows as 0 W, so a
+  // long bucket that spans dusk is not averaged over daylight alone.
+  return query_locked_("SELECT b, SUM(p) / MAX(1, (SELECT COUNT(*) FROM system WHERE t >= b AND t < b + ?2)) "
+                       "FROM (SELECT (t / ?1) * ?2 AS b, p FROM panel WHERE slot = ?3 AND t BETWEEN ?4 AND ?5) "
+                       "GROUP BY b ORDER BY b",
                        start, end, bucket_s, slot);
 }
 

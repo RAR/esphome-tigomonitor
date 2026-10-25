@@ -75,6 +75,12 @@ apt-get install -y --no-install-recommends /tmp/tigomonitord.deb avahi-daemon
 apt-get clean
 rm -rf /var/lib/apt/lists/* /tmp/tigomonitord.deb
 test -e /etc/systemd/system/multi-user.target.wants/tigomonitord.service
+# A Pi made for this has no other serial devices to guard, so read the
+# first adapter it finds; a plain install waits to be told which one.
+install -d -o tigomonitor -g tigomonitor -m 755 /var/lib/tigomonitor
+printf '{"serial_port": "auto"}\n' > /var/lib/tigomonitor/settings.json
+chown tigomonitor:tigomonitor /var/lib/tigomonitor/settings.json
+chmod 600 /var/lib/tigomonitor/settings.json
 EOF
 rm -f "$mnt/etc/resolv.conf"
 mv "$mnt/etc/resolv.conf.orig" "$mnt/etc/resolv.conf" 2>/dev/null || true

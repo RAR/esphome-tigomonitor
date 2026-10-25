@@ -1,12 +1,15 @@
 #include "http_server.h"
 
 #include "log.h"
+#include "serial_port.h"
 
 #include <httplib.h>
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <cerrno>
 #include <cmath>
+#include <cstring>
 #include <ctime>
 #include <fstream>
 #include <ifaddrs.h>
@@ -189,15 +192,27 @@ HttpServer::HttpServer(HttpContext ctx) : ctx_(std::move(ctx)), svr_(std::make_u
 
 HttpServer::~HttpServer() { stop(); }
 
-bool HttpServer::start(int port) {
+int HttpServer::start(int port, int fallback) {
   routes_();
   if (!svr_->bind_to_port("0.0.0.0", port)) {
-    LOGE("web: cannot listen on port %d", port);
-    return false;
+    int bind_errno = errno;
+    // A failed bind retires an httplib::Server for good; try on a new one.
+    if (fallback != 0) {
+      svr_ = std::make_unique<httplib::Server>();
+      routes_();
+    }
+    if (fallback == 0 || !svr_->bind_to_port("0.0.0.0", fallback)) {
+      LOGE("web: cannot listen on port %d (%s)", port, strerror(bind_errno));
+      return 0;
+    }
+    LOGW("web: port %d is taken, so the web UI is on port %d; choose another under Tools", port, fallback);
+    port = fallback;
+  } else {
+    LOGI("web: listening on port %d", port);
   }
-  LOGI("web: listening on port %d", port);
+  port_ = port;
   thread_ = std::make_unique<std::thread>([this] { svr_->listen_after_bind(); });
-  return true;
+  return port;
 }
 
 void HttpServer::stop() {
@@ -974,10 +989,20 @@ void HttpServer::routes_() {
     send_json(res, {{"ok", true}});
   });
 
+  // Pi-only: the serial ports to choose the RS485 adapter from.
+  svr.Get("/api/serial-ports", [](const httplib::Request &, httplib::Response &res) {
+    json ports = json::array();
+    for (const auto &p : list_serial_ports())
+      ports.push_back({{"path", p.path}, {"device", p.device}, {"description", p.description}});
+    send_json(res, {{"ports", ports}});
+  });
+
   // Pi-only: the settings an ESP32 user would put in YAML.
   svr.Get("/api/settings", [this](const httplib::Request &, httplib::Response &res) {
     Settings s = ctx_.current_settings();
     send_json(res, {{"serial_port", s.serial_port},
+                    {"web_port", s.web_port},
+                    {"web_port_active", port_},
                     {"power_calibration", s.power_calibration},
                     {"publish_interval_s", s.publish_interval_s},
                     {"device_id", s.device_id},
@@ -1005,6 +1030,7 @@ void HttpServer::routes_() {
     std::string err;
     try {
       if (j.contains("serial_port")) s.serial_port = j["serial_port"].get<std::string>();
+      if (j.contains("web_port")) s.web_port = j["web_port"].get<int>();
       if (j.contains("power_calibration")) s.power_calibration = j["power_calibration"].get<float>();
       if (j.contains("publish_interval_s")) s.publish_interval_s = j["publish_interval_s"].get<int>();
       if (j.contains("mqtt") && j["mqtt"].is_object()) {
@@ -1021,6 +1047,7 @@ void HttpServer::routes_() {
       err = "A setting has the wrong type.";
     }
     if (err.empty() && (s.mqtt.port < 1 || s.mqtt.port > 65535)) err = "MQTT port must be 1-65535.";
+    if (err.empty() && (s.web_port < 0 || s.web_port > 65535)) err = "Web port must be 1-65535, or empty for the default.";
     // Wildcards would make every publish fail, and an empty or slash-edged
     // level gives topics nothing in Home Assistant subscribes to.
     for (const std::string *t : {&s.mqtt.base_topic, &s.mqtt.discovery_prefix}) {
