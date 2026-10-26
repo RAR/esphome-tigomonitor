@@ -36,7 +36,7 @@ printf '{"bus_role": "master", "serial_port": "%s", "gateway_id": 4609, "web_por
   > "$out/state/settings.json"
 build/linux/tigomonitord --state-dir "$out/state" --web-dir components/tigo_server/web 2> "$out/daemon.log" &
 daemon=$!
-trap 'kill -CONT $daemon 2>/dev/null; kill $daemon $tap 2>/dev/null || true' EXIT
+trap 'kill -CONT $daemon 2>/dev/null || true; kill $daemon $tap 2>/dev/null || true' EXIT
 renewals() { stat "$out/tap.json" "len(d['renewals'])"; }
 for _ in $(seq 60); do [ -f "$out/tap.json" ] && [ "$(renewals)" -ge 1 ] && break; sleep 0.5; done
 expect "panels decoded" "$(api 18092 /api/devices | python3 -c 'import json,sys; print(len(json.load(sys.stdin)["devices"]))')" 6
