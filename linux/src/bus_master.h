@@ -15,6 +15,7 @@
 #include <cstdint>
 #include <functional>
 #include <mutex>
+#include <set>
 #include <string>
 
 namespace tigod {
@@ -79,6 +80,8 @@ class BusMaster {
   uint8_t seq_ = 0;
   uint32_t timeouts_in_a_row_ = 0;
   uint32_t replies_logged_ = 0;
+  bool version_asked_ = false;          // bench mode asks the TAP's version first
+  std::set<uint16_t> refusals_logged_;  // commands the TAP NAKed (0x0006), logged once each
   esphome::tigo_monitor::protocol::FrameSplitter<std::string> splitter_;
   mutable std::mutex mu_;
   MasterStatus status_;

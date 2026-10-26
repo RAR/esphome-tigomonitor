@@ -139,6 +139,21 @@ check. Per the analysis session (`docs/ROOF_STEADY_STATE.md`), the bench opcodes
 running. The opcode table above came from a bench TAP and the analysis notes;
 the roof gateway's tunnel supersedes it here.
 
+### What a spare gateway showed (analysis repo, LIVE_TAP_SESSION.md "Second unit")
+
+An older spare, from the roof's G5 generation (24 V only), standalone with no
+optimizers:
+- **SET_NETRUN 0x0058 latches.** Stop (`37 24 92 66 00 01 00 00`) halts the
+  beacon, and neither a start argument nor re-entering running mode brings it
+  back; only RESET 0x0010 plus reconfiguring does. The replacement never sends
+  it, since the allow-list blocks it as a write.
+- **The 0x0B0F tunnel and 0x0B00 session are refused (0x0006)** without a mesh
+  behind the gateway, even configured like the roof's. The lease can only be
+  tested on the roof.
+- Running mode is SET_CHANNEL, SET_PAN and SET_GATEWAY_MODE 0x5030; power-on
+  is 0x5070. The TAP stores these (STORE), so the roof TAP should come back
+  configured after a power cut.
+
 ## How it will be built (decided)
 
 - **Hardware:** a Pi (the Pi build's target) with an auto-direction RS485

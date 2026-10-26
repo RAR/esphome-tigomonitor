@@ -118,4 +118,20 @@ sleep 2
 expect "auto is resolved, not opened" "$(api 18096 /api/master | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["fault"], "no adapter found" in d["detail"])')" "no_port True"
 kill $daemon; wait $daemon 2>/dev/null || true
 
+# --- run 6: bench mode against a TAP with no mesh (the spare): version, refusals ---
+mkdir -p "$out/state6"
+python3 linux/tools/mock_tap.py "$out/tap6" --bare --stats "$out/tap6.json" &
+tap=$!
+sleep 0.5
+printf '{"bus_role": "master", "master_bench": true, "serial_port": "%s", "gateway_id": 4609, "web_port": 18097}\n' \
+  "$PWD/$out/tap6" > "$out/state6/settings.json"
+build/linux/tigomonitord --state-dir "$out/state6" --web-dir components/tigo_server/web 2> "$out/daemon6.log" &
+daemon=$!
+sleep 3
+expect "bench asks the version first" "$(stat "$out/tap6.json" "d['first_frame']")" 000A
+expect "version logged" "$(grep -c 'TAP version: Mgate' "$out/daemon6.log")" 1
+expect "refusal logged, once" "$(grep -c 'the TAP refused command 0B0F' "$out/daemon6.log")" 1
+kill $daemon; wait $daemon 2>/dev/null || true
+kill $tap; wait $tap 2>/dev/null || true
+
 [ $fail = 0 ] && echo "master e2e passed" || { echo "master e2e FAILED; see $out/"; exit 1; }

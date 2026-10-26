@@ -104,9 +104,9 @@ bool BusMaster::transact(uint16_t cmd, const Bytes &payload, Frame &reply) {
   if (on_tx_) on_tx_(reinterpret_cast<const char *>(wire.data()), wire.size());
 
   auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(REPLY_TIMEOUT_MS);
-  bool got = false, foreign = false;
+  bool got = false, foreign = false, refused = false;
   char buf[512];
-  while (!got && !foreign) {
+  while (!got && !foreign && !refused) {
     int left = static_cast<int>(
         std::chrono::duration_cast<std::chrono::milliseconds>(deadline - std::chrono::steady_clock::now()).count());
     if (left <= 0) break;
@@ -121,7 +121,12 @@ bool BusMaster::transact(uint16_t cmd, const Bytes &payload, Frame &reply) {
       splitter_.feed(buf[i], [&](const std::string &body) {
         Frame f;
         if (!master::decode_frame(body, f)) return;
-        if (f.dest == (gateway_ | 0x8000) && f.cmd == cmd + 1) {
+        if (f.dest == (gateway_ | 0x8000) && f.cmd == 0x0006) {
+          // The TAP's NAK. A gateway with no mesh behind it (a spare on the
+          // bench) refuses the tunnel this way.
+          if (refusals_logged_.insert(cmd).second) LOGW("bus master: the TAP refused command %04X (0x0006)", cmd);
+          refused = true;
+        } else if (f.dest == (gateway_ | 0x8000) && f.cmd == cmd + 1) {
           // A late reply to the request before ours is skipped, not taken.
           if (is_reply(cmd, payload, f)) {
             reply = f;
@@ -165,6 +170,13 @@ void BusMaster::tick(uint32_t now_ms) {
     tried_open_ = true;
     last_open_try_ms_ = now_ms;
     if (!open(device_, baud_)) return;
+  }
+  if (bench_ && !version_asked_) {
+    version_asked_ = true;
+    Frame v;
+    if (transact(0x000A, {}, v)) LOGI("bus master: TAP version: %s", std::string(v.payload.begin(), v.payload.end()).c_str());
+    else LOGW("bus master: no answer to VERSION (0x000A)");
+    return;
   }
   master::Request req = master::next_request(lease_, cursor_, seq_, now_ms);
   if (!master::may_send(req.cmd, req.payload, bench_)) {

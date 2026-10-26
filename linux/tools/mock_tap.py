@@ -3,7 +3,7 @@
 
     mock_tap.py PTY_LINK [--lease S] [--renew-to S] [--nodes N] [--panels N]
                          [--foreign-after S] [--echo] [--drop-every N]
-                         [--start-cursor HEX] [--stats FILE]
+                         [--start-cursor HEX] [--bare] [--stats FILE]
 
 Answers requests to gateway 0x1201 the way the rig's TAP did in the capture:
   - 0x0148 polls with 0x0149 power frames: up to two synthetic readings per
@@ -17,7 +17,10 @@ second master would. --echo sends every byte the master writes straight back,
 as an adapter that hears itself does. --drop-every N leaves every Nth poll
 unanswered. --start-cursor gives the TAP a cursor of its own: a poll with any
 other cursor gets no data and a reply whose long header states the TAP's
-cursor (a guess at what a real TAP does; the capture never shows it). Writes what it saw to --stats as JSON every second.
+cursor (a guess at what a real TAP does; the capture never shows it).
+--bare is a gateway with no mesh behind it, like a spare TAP on the bench: it
+answers VERSION and refuses the tunnel with 0x0006, as the analysis repo's
+standalone gateway did. Writes what it saw to --stats as JSON every second.
 Barcodes are made up.
 """
 import argparse
@@ -69,6 +72,7 @@ def main():
     ap.add_argument('--echo', action='store_true')
     ap.add_argument('--drop-every', type=int, default=0)
     ap.add_argument('--start-cursor', type=lambda v: int(v, 16), default=0)
+    ap.add_argument('--bare', action='store_true')
     ap.add_argument('--stats', default=None)
     a = ap.parse_args()
 
@@ -86,7 +90,7 @@ def main():
     sent_table = False
     foreign_sent = False
     stats = {'polls': 0, 'retries': 0, 'cursor_mismatches': 0, 'checks': 0, 'renewals': [], 'other': [],
-             'first_lease_frame': None, 'frames_after_foreign': 0, 'foreign_at': None}
+             'first_lease_frame': None, 'first_frame': None, 'frames_after_foreign': 0, 'foreign_at': None}
     buf = bytearray()
     last_stats = 0.0
 
@@ -130,6 +134,13 @@ def main():
             if dest != GATEWAY:
                 continue
             t = time.monotonic() - start
+            stats['first_frame'] = stats['first_frame'] or f'{cmd:04X}'
+            if cmd == 0x000A:
+                os.write(master_fd, encode(GATEWAY | 0x8000, 0x000B, b'Mgate G1.0000'))
+                continue
+            if a.bare and cmd == 0x0B0F:
+                os.write(master_fd, encode(GATEWAY | 0x8000, 0x0006, b''))
+                continue
             if foreign_sent:
                 stats['frames_after_foreign'] += 1
             if cmd == 0x0148 and len(p) == 5:
