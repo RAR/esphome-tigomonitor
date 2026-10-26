@@ -153,6 +153,15 @@ optimizers:
 - Running mode is SET_CHANNEL, SET_PAN and SET_GATEWAY_MODE 0x5030; power-on
   is 0x5070. The TAP stores these (STORE), so the roof TAP should come back
   configured after a power cut.
+- **Configured is not beaconing on newer gateways.** The G5.26 beacons as soon
+  as it's in running mode; the newer H1.0006 (GW-H158, the roof's model line)
+  shows no beacon from the mode alone. And lmudcd's netrun start is timed to
+  the beacon clock, not a replayable argument. So after a rapid-shutdown power
+  cut, the roof TAP may need a start the master doesn't send. The CCA
+  cold-start capture (plan Task 10) decides this before any takeover.
+  GET_GATEWAY_STAT 0x0300 is the run-state observable (H1.0006: 0xA000
+  running, 0x9000 netrun-stopped; G5.26: 0xB000 running); the LED isn't, on
+  newer units.
 
 ## How it will be built (decided)
 
