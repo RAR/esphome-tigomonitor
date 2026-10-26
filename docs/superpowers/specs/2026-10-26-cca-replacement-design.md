@@ -96,11 +96,16 @@ counters; nothing was put on a bus):
   5. reset, and let the channel settle;
   6. AdvSync (Netrun Stop, TXID, Netrun Start, verify);
   7. mass StartPWM=252.
-- **What survives a power cut:** STORE keeps the channel, RS485 id, device
-  flags, gateway mode, TX power and PAN in the TAP's flash. Netrun and
-  beaconing don't survive. So after every rapid-shutdown cut, the TAP comes
-  back configured but silent until a master re-asserts netrun and StartPWM.
-  That is the fail-safe property goal 2 relies on.
+- **What survives a power cut** (from the binaries; corrected by the roof
+  capture below): the binaries suggested STORE keeps the channel, RS485 id,
+  mode, TX power and PAN. **The roof TAP does not keep its RS485 id:** after
+  a CCA power cycle it answers at the factory address 0x1235 and the CCA
+  re-addresses it. Either way it comes back silent until a master sets it
+  running again. That is the fail-safe property goal 2 relies on. The
+  observed power-up sequence is written up in the analysis repo,
+  `docs/ROOF_STEADY_STATE.md`, "Roof CCA power-up sequence"; the raw capture
+  is `build/roof/coldstart-20261026.bin` (git-ignored, on the owner's
+  machine).
 - **The netrun opcode and arguments are NOT known.** The binary-derived 0x0058
   conflicts with the analysis repo's other docs (0x005A, 0x0054), and the
   start/stop argument bytes were never captured. Do not hardcode them. The
@@ -152,7 +157,8 @@ optimizers:
   tested on the roof.
 - Running mode is SET_CHANNEL, SET_PAN and SET_GATEWAY_MODE 0x5030; power-on
   is 0x5070. The TAP stores these (STORE), so the roof TAP should come back
-  configured after a power cut.
+  configured after a power cut. (The roof capture contradicts this for the
+  RS485 id; see above.)
 - **Configured is not beaconing on newer gateways.** The G5.26 beacons as soon
   as it's in running mode; the newer H1.0006 (GW-H158, the roof's model line)
   shows no beacon from the mode alone. And lmudcd's netrun start is timed to
