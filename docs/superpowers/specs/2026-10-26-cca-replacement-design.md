@@ -220,6 +220,12 @@ optimizers:
 2. **Does the FlexBoss RSS transmitter also gate the optimizers?** If the
    optimizers need it as well as (or instead of) the TAP's signal, goal 2's
    behaviour changes. A daytime capture with the CCA unplugged answers it.
-3. **The TAP's power:** voltage and current over the CCA cable.
+3. **The TAP's power:** voltage and current over the CCA cable. No figure
+   exists in the binaries or captures. The roof gateway is a GW-H158 (G5.27).
+   The analysis repo's newer GW-H158 bench unit takes 5-26 V and its older
+   GW-H150 takes 24 V only; the roof unit's range is unconfirmed. Measure the
+   CCA's output on the cable pair, and the TAP's current in series (steady
+   and peak, since transmit bursts draw more), or read the label, before
+   sizing the Pi-side supply.
 4. **The GET_NEW_BINARY_DATA layout** for real optimizers. The bench TAP had
    none; phase 3 data will pin it, compared against passive readings.
