@@ -71,6 +71,44 @@ don't control. The goal is a replacement on hardware and software we own.
   optimizers actually follow is **not yet known** (see Open questions); goal 2
   holds either way.
 
+### The keep-alive, from the CCA's binaries
+
+From `~/tigo-protocol-analysis/docs/KEEPALIVE_NETRUN.md` (lmudcd strings and
+counters; nothing was put on a bus):
+
+- **Both layers take part.** Once the TAP is in Running mode with netrun
+  started, it sends the mesh timing beacon on its own clock. The master
+  stays in the loop all the same:
+  - it enforces StartPWM=252 on the optimizers continuously ("[Mass
+    StartPWM]", "Changing StartPWM from %d to %d");
+  - it runs an AdvSync about every 12 minutes: Netrun Stop, set TXID,
+    Netrun Start, then a check of GET_GATEWAY_STAT's running flag;
+  - it stops queueing beacons in PV-safe mode.
+- **No optimizer keep-alive timeout exists in lmudcd or meshdcd.** How long an
+  optimizer runs without an enabling beacon lives in the TS4 firmware. Whether
+  the TAP stops beaconing when the master goes quiet lives in the TAP
+  firmware. Measure both; don't assume "set netrun once and walk away".
+- **CCA start-up, PV-safe to producing:**
+  1. verify the gateway's MAC, version, channel and mode;
+  2. set the PAN;
+  3. SET_GATEWAY_MODE to Running (0x5030);
+  4. STORE;
+  5. reset, and let the channel settle;
+  6. AdvSync (Netrun Stop, TXID, Netrun Start, verify);
+  7. mass StartPWM=252.
+- **What survives a power cut:** STORE keeps the channel, RS485 id, device
+  flags, gateway mode, TX power and PAN in the TAP's flash. Netrun and
+  beaconing don't survive. So after every rapid-shutdown cut, the TAP comes
+  back configured but silent until a master re-asserts netrun and StartPWM.
+  That is the fail-safe property goal 2 relies on.
+- **The netrun opcode and arguments are NOT known.** The binary-derived 0x0058
+  conflicts with the analysis repo's other docs (0x005A, 0x0054), and the
+  start/stop argument bytes were never captured. Do not hardcode them. The
+  real CCA does Netrun Stop/Start on every AdvSync, so a passive roof
+  capture of 15 minutes or more contains the exact bytes.
+- GET_GATEWAY_STAT (0x0300, read-only) shows whether netrun took, as lmudcd
+  itself checks.
+
 ## How it will be built (decided)
 
 - **Hardware:** a Pi (the Pi build's target) with an auto-direction RS485
@@ -84,10 +122,15 @@ don't control. The goal is a replacement on hardware and software we own.
   1. **Bench, spare TAP, no array.** Get replies: version, channel, roster.
      Build and check the keep-running command sequence. Nothing reaches the
      roof.
-  2. **Record the real CCA.** A full start-up on the roof bus (power on,
-     wake, steady state) captured passively with the existing `--capture`. This
-     is the reference for what the CCA sends and how often; we copy it rather
-     than guess.
+  2. **Record the real CCA.** Two passive captures on the roof bus, made
+     with the existing `--capture`:
+     - at least 15 minutes of steady state, which covers one AdvSync and
+       gives the netrun and StartPWM bytes;
+     - a full start-up: CCA power on, through to producing.
+
+     These are the reference for what the CCA sends and how often; we copy
+     them rather than guess. The passive decoder needs a classifier for
+     the master's request frames, not just the TAP's replies.
   3. **Roof takeover, daylight, owner present.** CCA unplugged, the Pi powers
      the TAP and replays the start-up sequence. Pass: the array produces
      within the CCA's normal start time, per-panel readings flow, and pulling
@@ -121,10 +164,13 @@ don't control. The goal is a replacement on hardware and software we own.
 
 ## Open questions
 
-1. **Where does the heartbeat come from?** Does the TAP keep the optimizers
-   running on its own once in netrun, or does it need periodic traffic from
-   the master? Is there a timeout? Asked of the protocol-analysis session
-   (lmudcd/meshdcd). Phase 2's capture answers it empirically.
+1. **How long does the array keep running if the master goes quiet?** The
+   TAP beacons on its own clock once netrun is on, but the master
+   re-asserts netrun (AdvSync, about every 12 minutes) and StartPWM, and
+   the drop-out window lives in TAP and TS4 firmware. Measure it in phase 3.
+   The design assumes the master must keep the loop going.
+2a. **The netrun opcode and its start/stop arguments,** from a passive roof
+   capture covering at least one AdvSync. This blocks phase 3.
 2. **Does the FlexBoss RSS transmitter also gate the optimizers?** If the
    optimizers need it as well as (or instead of) the TAP's signal, goal 2's
    behaviour changes. A daytime capture with the CCA unplugged answers it.
