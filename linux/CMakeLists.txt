@@ -21,6 +21,7 @@ find_package(Threads REQUIRED)
 
 add_executable(tigomonitord
   src/main.cpp
+  src/bus_master.cpp
   src/cca_ble.cpp
   src/cca_http.cpp
   src/cloud.cpp

@@ -240,6 +240,29 @@ class PollCursor {
   bool retry_ = false;
 };
 
+// ---- the next request -------------------------------------------------------
+
+// Tunnel sequence numbers, as the CCA counts them: FE is followed by 01.
+inline uint8_t next_seq(uint8_t seq) {
+  seq++;
+  return seq == 0xFF || seq == 0x00 ? 0x01 : seq;
+}
+
+struct Request {
+  uint16_t cmd = 0;
+  Bytes payload;
+};
+
+// What a master sends next: lease work when it's due, a poll otherwise.
+// seq is the last tunnel sequence number used, advanced when one is.
+inline Request next_request(LeaseKeeper &lease, const PollCursor &cursor, uint8_t &seq, uint32_t now_ms) {
+  LeaseAction a = lease.due(now_ms);
+  if (a.kind == LeaseAction::none) return {CMD_POLL, poll_payload(cursor.next(), cursor.retry())};
+  seq = next_seq(seq);
+  if (a.kind == LeaseAction::renew) return {CMD_TUNNEL, tunnel_request(SUB_LEASE_RENEW, seq, lease_renewal_args(a.node_count))};
+  return {CMD_TUNNEL, tunnel_request(SUB_LEASE_CHECK, seq, {})};
+}
+
 // ---- what a master may send ------------------------------------------------
 
 // yes: what the CCA sends in steady state, in the shapes it sends them.

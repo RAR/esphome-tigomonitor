@@ -185,12 +185,34 @@ static void test_allow_list() {
   CHECK(!may_send(0x0058, {}, false) && !may_send(0x0058, {}, true));
 }
 
+static void test_next_request() {
+  LeaseKeeper lease;
+  PollCursor cursor(0x6FC4);
+  uint8_t seq = 0xFD;
+  // The first thing a master sends is a lease check, with the next seq.
+  Request r = next_request(lease, cursor, seq, 0);
+  CHECK(r.cmd == CMD_TUNNEL && r.payload == tunnel_request(SUB_LEASE_CHECK, 0xFE, {}));
+  // Then polls, with the cursor, until the next check is due.
+  r = next_request(lease, cursor, seq, 10);
+  CHECK(r.cmd == CMD_POLL && r.payload == poll_payload(0x6FC4));
+  cursor.on_timeout();
+  r = next_request(lease, cursor, seq, 20);
+  CHECK(r.payload == poll_payload(0x6FC4, true));
+  // A lapsed reading: the renewal goes out next. Seq skips FF and 00, as the
+  // CCA's does.
+  lease.on_lease({false, 0, 44}, 30);
+  r = next_request(lease, cursor, seq, 40);
+  CHECK(r.cmd == CMD_TUNNEL && r.payload == tunnel_request(SUB_LEASE_RENEW, 0x01, lease_renewal_args(44)));
+  CHECK(next_seq(0xFE) == 0x01 && next_seq(0x01) == 0x02);
+}
+
 int main() {
   test_codec();
   test_lease();
   test_poll_cursor();
   test_lease_keeper();
   test_allow_list();
+  test_next_request();
   if (failures) {
     std::printf("%d failed\n", failures);
     return 1;

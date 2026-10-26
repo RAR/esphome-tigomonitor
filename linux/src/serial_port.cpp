@@ -34,13 +34,13 @@ static speed_t to_speed(int baud) {
   }
 }
 
-static int open_port(const std::string &device, int baud) {
+static int open_port(const std::string &device, int baud, int access = O_RDONLY) {
   speed_t speed = to_speed(baud);
   if (speed == 0) {
     LOGE("unsupported baud rate %d", baud);
     return -1;
   }
-  int fd = ::open(device.c_str(), O_RDONLY | O_NOCTTY | O_CLOEXEC);
+  int fd = ::open(device.c_str(), access | O_NOCTTY | O_CLOEXEC);
   if (fd < 0) return -1;
   termios tio{};
   if (tcgetattr(fd, &tio) != 0) {
@@ -61,6 +61,8 @@ static int open_port(const std::string &device, int baud) {
   tcflush(fd, TCIFLUSH);
   return fd;
 }
+
+int open_port_rw(const std::string &device, int baud) { return open_port(device, baud, O_RDWR); }
 
 static std::string resolve_auto() {
   for (const char *pattern : {"/dev/ttyUSB", "/dev/ttyACM"}) {
