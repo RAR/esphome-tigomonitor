@@ -151,11 +151,46 @@ static void test_lease_keeper() {
   CHECK(q.renewals() == 0);
 }
 
+static void test_allow_list() {
+  // What the CCA sends in steady state, in the shapes it sends them.
+  CHECK(classify_request(CMD_POLL, poll_payload(0x6FC4)) == Allow::yes);
+  CHECK(classify_request(CMD_POLL, poll_payload(0x6FC4, true)) == Allow::yes);
+  CHECK(classify_request(CMD_TUNNEL, tunnel_request(SUB_LEASE_CHECK, 7, {})) == Allow::yes);
+  CHECK(classify_request(CMD_TUNNEL, tunnel_request(SUB_LEASE_RENEW, 0x31, lease_renewal_args(44))) == Allow::yes);
+  CHECK(classify_request(CMD_TUNNEL, tunnel_request(0x26, 0x2C, {0x00, 0x0E})) == Allow::yes);
+  CHECK(classify_request(CMD_TUNNEL, tunnel_request(0x06, 0x05, hex("001c5e303056657273696f6e0d"))) == Allow::yes);
+
+  // Near misses are not the same thing: a renewal for 901 s, an ASCII
+  // command that isn't a ^00 read, a poll of the wrong length.
+  Bytes odd = lease_renewal_args(44);
+  odd[4] = 0x85;
+  CHECK(classify_request(CMD_TUNNEL, tunnel_request(SUB_LEASE_RENEW, 1, odd)) == Allow::bench_only);
+  CHECK(classify_request(CMD_TUNNEL, tunnel_request(0x06, 1, hex("001c5e3030536574"))) == Allow::bench_only);
+  CHECK(classify_request(CMD_TUNNEL, tunnel_request(0x06, 1, hex("001c"))) == Allow::bench_only);
+  CHECK(classify_request(CMD_POLL, hex("00016fc40400")) == Allow::bench_only);
+  // Reads and other subs the roof build doesn't use.
+  CHECK(classify_request(0x000A, {}) == Allow::bench_only);
+  CHECK(classify_request(0x0300, {0x00, 0x00}) == Allow::bench_only);
+  CHECK(classify_request(CMD_TUNNEL, tunnel_request(0x41, 1, hex("0023"))) == Allow::bench_only);
+  CHECK(classify_request(CMD_TUNNEL, tunnel_request(0x22, 1, {0x00, 0x00})) == Allow::bench_only);
+
+  // Writes, by command or by the setup key, are never sent.
+  for (uint16_t cmd : {0x0010, 0x0012, 0x0014, 0x003C, 0x011E, 0x0182, 0x0058})
+    CHECK(classify_request(cmd, {}) == Allow::never);
+  CHECK(classify_request(0x000A, hex("37249266")) == Allow::never);
+  CHECK(classify_request(CMD_TUNNEL, tunnel_request(0x41, 1, hex("0037249266"))) == Allow::never);
+
+  CHECK(may_send(CMD_POLL, poll_payload(1), false));
+  CHECK(!may_send(0x000A, {}, false) && may_send(0x000A, {}, true));
+  CHECK(!may_send(0x0058, {}, false) && !may_send(0x0058, {}, true));
+}
+
 int main() {
   test_codec();
   test_lease();
   test_poll_cursor();
   test_lease_keeper();
+  test_allow_list();
   if (failures) {
     std::printf("%d failed\n", failures);
     return 1;

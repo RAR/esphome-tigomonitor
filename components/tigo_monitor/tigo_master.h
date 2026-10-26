@@ -17,6 +17,7 @@
 
 #include "tigo_protocol.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -238,6 +239,56 @@ class PollCursor {
   uint16_t cursor_;
   bool retry_ = false;
 };
+
+// ---- what a master may send ------------------------------------------------
+
+// yes: what the CCA sends in steady state, in the shapes it sends them.
+// bench_only: reads and anything else, for a TAP on the bench.
+// never: writes. The commands that change what a TAP stores or does (reset,
+// store, ids, roster, whitelist, netrun) and anything carrying the setup key
+// 37 24 92 66. Nothing in this code sends them, whatever the settings.
+enum class Allow { yes, bench_only, never };
+
+inline Allow classify_request(uint16_t cmd, const Bytes &payload) {
+  static const uint16_t WRITES[] = {0x0010, 0x0012, 0x0014, 0x003C, 0x011E, 0x0182, 0x0058};
+  for (uint16_t w : WRITES)
+    if (cmd == w) return Allow::never;
+  static const uint8_t KEY[] = {0x37, 0x24, 0x92, 0x66};
+  for (size_t i = 0; i + 4 <= payload.size(); i++)
+    if (std::equal(KEY, KEY + 4, payload.begin() + i)) return Allow::never;
+
+  if (cmd == CMD_POLL)
+    return payload.size() == 5 && payload[0] == 0x00 && payload[1] <= 0x01 && payload[4] == 0x04 ? Allow::yes
+                                                                                               : Allow::bench_only;
+  if (cmd != CMD_TUNNEL || payload.size() < 5 || payload[0] || payload[1] || payload[2]) return Allow::bench_only;
+  Bytes args(payload.begin() + 5, payload.end());
+  switch (payload[3]) {
+    case SUB_LEASE_CHECK:
+      return args.empty() ? Allow::yes : Allow::bench_only;
+    case SUB_LEASE_RENEW:
+      // Only the CCA's renewal, whatever node count it carries.
+      return args.size() == 9 && Bytes(args.begin(), args.begin() + 5) == Bytes{0xBA, 0xBE, 0x02, 0x03, 0x84} &&
+                     args[7] == 0x01 && args[8] == 0x00
+                 ? Allow::yes
+                 : Allow::bench_only;
+    case 0x26:  // a page of the roster, by index
+      return args.size() == 2 ? Allow::yes : Allow::bench_only;
+    case 0x06: {  // a text query to one node: the four the CCA sends
+      if (args.size() < 2) return Allow::bench_only;
+      std::string text(args.begin() + 2, args.end());
+      for (const char *q : {"^00Version\r", "^00Smrt\r", "^00Mppt\r", "^00Info\r"})
+        if (text == q) return Allow::yes;
+      return Allow::bench_only;
+    }
+    default:
+      return Allow::bench_only;
+  }
+}
+
+inline bool may_send(uint16_t cmd, const Bytes &payload, bool bench) {
+  Allow a = classify_request(cmd, payload);
+  return a == Allow::yes || (a == Allow::bench_only && bench);
+}
 
 }  // namespace master
 }  // namespace tigo_monitor
