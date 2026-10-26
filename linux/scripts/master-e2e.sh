@@ -131,6 +131,7 @@ sleep 3
 expect "bench asks the version first" "$(stat "$out/tap6.json" "d['first_frame']")" 000A
 expect "version logged" "$(grep -c 'TAP version: Mgate' "$out/daemon6.log")" 1
 expect "refusal logged, once" "$(grep -c 'the TAP refused command 0B0F' "$out/daemon6.log")" 1
+expect "refused polls named as such" "$(api 18097 /api/master | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["fault"], "refuses polls" in d["detail"])')" "no_reply True"
 kill $daemon; wait $daemon 2>/dev/null || true
 kill $tap; wait $tap 2>/dev/null || true
 

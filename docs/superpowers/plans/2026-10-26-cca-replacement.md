@@ -252,7 +252,7 @@ If no rule reaches 99.9 %, stop and report to the owner with the disagreement li
 - [ ] **Step 1: Hardware.** Spare TAP on the Pi's Waveshare HAT: A/B plus a **shared ground**, with the TAP powered from a bench supply. Measure the roof TAP's supply on the CCA cable first (spec open question 3) and match it. No CCA on this bus.
 - [ ] **Step 2: Reads, in bench mode.** `master_bench: true`, role master, `gateway_id` set to the spare TAP's id (0x1235 per the analysis repo), run with `--capture`. Bench mode asks VERSION first and logs it, the first 20 poll reply headers are logged, and any NAK is logged once per command. Then:
   - **VERSION 0x000A:** a reply proves TX works;
-  - **0x0148 polls:** expect empty or short replies, since there are no optimizers. Record how the TAP answers our starting cursor of 0;
+  - **0x0148 polls:** a gateway with no mesh refuses them with 0x0006 (the analysis repo's spare did, at any cursor), and Diagnostics should say so. How the TAP treats our starting cursor of 0 can only be seen on the roof;
   - **0x2E:** a gateway with no mesh refuses the tunnel with 0x0006, as the analysis repo's standalone G5 unit did. So the lease can't be tested on the bench; it waits for the roof.
 - [ ] **Step 3: Record results** in the note: reply or not, bytes, timing. **Stop here if VERSION gets no reply.** Work through openTAPtoX's checklist (spec, "Working TX hardware") before going further.
 - [ ] **Step 4: Commit** the note.

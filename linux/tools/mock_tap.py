@@ -19,8 +19,8 @@ unanswered. --start-cursor gives the TAP a cursor of its own: a poll with any
 other cursor gets no data and a reply whose long header states the TAP's
 cursor (a guess at what a real TAP does; the capture never shows it).
 --bare is a gateway with no mesh behind it, like a spare TAP on the bench: it
-answers VERSION and refuses the tunnel with 0x0006, as the analysis repo's
-standalone gateway did. Writes what it saw to --stats as JSON every second.
+answers VERSION and refuses polls and the tunnel with 0x0006, as the analysis
+repo's standalone gateways did. Writes what it saw to --stats as JSON every second.
 Barcodes are made up.
 """
 import argparse
@@ -138,7 +138,7 @@ def main():
             if cmd == 0x000A:
                 os.write(master_fd, encode(GATEWAY | 0x8000, 0x000B, b'Mgate G1.0000'))
                 continue
-            if a.bare and cmd == 0x0B0F:
+            if a.bare and cmd in (0x0B0F, 0x0148):
                 os.write(master_fd, encode(GATEWAY | 0x8000, 0x0006, b''))
                 continue
             if foreign_sent:

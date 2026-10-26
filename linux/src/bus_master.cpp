@@ -241,8 +241,13 @@ void BusMaster::tick(uint32_t now_ms) {
     status_.renewals = lease_.renewals();
   }
   update_lease_fault_();
+  // A gateway with no optimizers behind it, or one not running, refuses
+  // polls outright (0x0006); say that rather than "not answering".
   if (timeouts_in_a_row_ == NO_REPLY_FAULT_AFTER)
-    set_fault(Fault::no_reply, "the TAP has not answered " + std::to_string(NO_REPLY_FAULT_AFTER) + " requests in a row");
+    set_fault(Fault::no_reply, refusals_logged_.count(master::CMD_POLL)
+                                   ? "the TAP refuses polls (0x0006): no optimizers behind it, or it isn't running"
+                                   : "the TAP has not answered " + std::to_string(NO_REPLY_FAULT_AFTER) +
+                                         " requests in a row");
 }
 
 // The TAP not taking renewals means the array will drop to safe mode:
