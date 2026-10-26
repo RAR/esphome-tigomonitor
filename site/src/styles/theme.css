@@ -66,6 +66,13 @@
   position: relative;
   isolation: isolate;
 }
+/* The array below overhangs the hero by 70% each side, on purpose, so it
+   bleeds to the window edges. Clip it there, at the frame that spans the
+   window, or the page scrolls sideways into it (850px at 1280 wide). clip, not
+   hidden: hidden makes a scroll container, and the sticky sidebar breaks. */
+[data-has-hero] .main-frame {
+  overflow-x: clip;
+}
 /* A PV array receding toward the horizon, lit by a low amber sun.
 
    Built from stacked repeating gradients rather than an image, so it scales to
