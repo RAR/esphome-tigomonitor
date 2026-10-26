@@ -4,7 +4,7 @@ does on an ESP32. Each connection gets the whole file and is then closed, so a
 second connection shows the daemon reconnecting. Counts every byte a client
 sends, which must stay 0: the daemon only ever reads.
 
-usage: mock_bridge.py CAPTURE PORT CONNECTIONS STATSFILE
+usage: mock_bridge.py CAPTURE PORT CONNECTIONS STATSFILE [BIND_ADDRESS]
 """
 import json
 import socket
@@ -14,7 +14,7 @@ capture, port, connections, stats = sys.argv[1], int(sys.argv[2]), int(sys.argv[
 data = open(capture, 'rb').read()
 srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-srv.bind(('127.0.0.1', port))
+srv.bind((sys.argv[5] if len(sys.argv) > 5 else '127.0.0.1', port))
 srv.listen(1)
 received = 0
 for _ in range(connections):

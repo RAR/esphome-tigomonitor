@@ -151,6 +151,40 @@ sudo apt install ./tigomonitord_VERSION_arm64.deb
 The same file takes `"serial_port"` too. Anything left out keeps its
 default, and the web UI edits the file from then on.
 
+## Run it in Docker
+
+On a machine that already runs containers, use the image instead of the
+package. It's built for arm64 and amd64:
+
+```sh
+docker run -d --name tigomonitord --restart unless-stopped \
+  -p 8080:8080 -v tigomonitor:/var/lib/tigomonitor \
+  ghcr.io/rar/tigomonitord:latest
+```
+
+Then open `http://HOST:8080` and set it up under Tools, as with the package.
+[`linux/docker-compose.yml`](https://github.com/RAR/esphome-tigomonitor/blob/main/linux/docker-compose.yml)
+does the same with Compose.
+
+- **The bus:** a [network bridge](#read-the-bus-over-the-network) needs
+  nothing extra. For a USB adapter, pass it in with
+  `--device /dev/serial/by-id/usb-…:/dev/ttyUSB0` and choose `/dev/ttyUSB0`.
+  The by-id name stays the same across reboots, where the host's own
+  `/dev/ttyUSB0` may change.
+- **Restarts:** use `--restart unless-stopped`, not `on-failure`. The web UI's
+  **Restart service** exits cleanly and relies on Docker starting it again.
+- **The web port** is 8080 inside the container; publish it as any port you
+  like. The web UI's port setting does nothing here.
+- **The CCA page over Bluetooth** needs the host's BlueZ. Mount
+  `/run/dbus/system_bus_socket` into the container, and run it as an account
+  the host knows that is in its `bluetooth` group: `--user UID:GID`, plus
+  `--group-add` with the host's bluetooth group ID. D-Bus drops connections
+  from user IDs the host can't look up, and the image's own account is one of
+  those. That account then also needs to own the state directory, so use a
+  directory it owns in place of the named volume. This hasn't been tried
+  against a CCA yet. The CCA's HTTP API, for firmware older than 4.0.4, needs
+  nothing extra.
+
 ## Set a password
 
 Out of the box, as on the ESP32, the web UI has no login: anyone on your

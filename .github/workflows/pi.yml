@@ -1,8 +1,10 @@
 # .github/workflows/pi.yml
 # The Raspberry Pi build (linux/). Every change runs the host tests and the
-# end-to-end replay; a manual run or a version tag also builds the .deb for
-# arm64 (Pi) and amd64 (any x86 Debian), each on a native runner — no QEMU. (linux/image/build-image.sh can
-# turn it into an SD card image, but we only ship the .deb for now.)
+# end-to-end replay; a manual run or a version tag also builds the .deb and
+# the container image for arm64 (Pi) and amd64 (x86), each on a native runner,
+# no QEMU. A tag pushes the image to ghcr.io/rar/tigomonitord.
+# (linux/image/build-image.sh can turn the .deb into an SD card image, but we
+# only ship the .deb for now.)
 name: Pi build
 on:
   push:
@@ -84,3 +86,63 @@ jobs:
           else
             echo "No release for $GITHUB_REF_NAME yet; files are in the workflow artifact."
           fi
+
+  # The container image, built natively per architecture. A manual run keeps
+  # it as a `docker load` artifact; a version tag pushes it to GHCR and the
+  # image job below joins the two into one multi-arch tag.
+  image:
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
+    needs: test
+    strategy:
+      matrix:
+        include:
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+          - arch: amd64
+            runner: ubuntu-latest
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Version
+        id: version
+        # Image tags can't hold the "+" of a dev version: 2.1.0+3.gabc1234 → 2.1.0-3.gabc1234
+        run: echo "version=$(git describe --tags | sed -E 's/^v//; s/-([0-9]+)-g/-\1.g/')" >> "$GITHUB_OUTPUT"
+      - name: Build the ${{ matrix.arch }} image
+        run: |
+          docker build -f linux/Dockerfile --build-arg VERSION="${{ steps.version.outputs.version }}" \
+            -t "ghcr.io/rar/tigomonitord:${{ steps.version.outputs.version }}-${{ matrix.arch }}" .
+      - name: Save it for a manual run
+        if: "!startsWith(github.ref, 'refs/tags/v')"
+        run: docker save "ghcr.io/rar/tigomonitord:${{ steps.version.outputs.version }}-${{ matrix.arch }}" | gzip > tigomonitord-image-${{ matrix.arch }}.tar.gz
+      - uses: actions/upload-artifact@v4
+        if: "!startsWith(github.ref, 'refs/tags/v')"
+        with:
+          name: tigomonitord-image-${{ steps.version.outputs.version }}-${{ matrix.arch }}
+          path: tigomonitord-image-${{ matrix.arch }}.tar.gz
+          compression-level: 0
+      - name: Push to GHCR
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          echo "${{ github.token }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          docker push "ghcr.io/rar/tigomonitord:${{ steps.version.outputs.version }}-${{ matrix.arch }}"
+
+  image-manifest:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: image
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+    steps:
+      - name: Join the architectures under one tag, and latest
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          echo "${{ github.token }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          for tag in "$v" latest; do
+            docker buildx imagetools create -t "ghcr.io/rar/tigomonitord:$tag" \
+              "ghcr.io/rar/tigomonitord:$v-arm64" "ghcr.io/rar/tigomonitord:$v-amd64"
+          done
