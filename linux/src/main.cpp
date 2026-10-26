@@ -269,7 +269,7 @@ int main(int argc, char **argv) {
       if (fresh.device_id.empty()) fresh.device_id = settings.device_id;
       bool new_port = fresh.serial_port != settings.serial_port || fresh.baud_rate != settings.baud_rate ||
                       fresh.bus_role != settings.bus_role || fresh.gateway_id != settings.gateway_id ||
-                      fresh.master_bench != settings.master_bench;
+                      fresh.master_bench != settings.master_bench || fresh.master_startup != settings.master_startup;
       if (fresh.web_port != settings.web_port) LOGI("web: the new port takes effect when the service restarts");
       {
         std::lock_guard<std::mutex> lock(settings_mu);

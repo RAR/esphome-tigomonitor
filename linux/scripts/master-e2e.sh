@@ -167,4 +167,29 @@ expect "went straight to running" "$(api 18099 /api/master | python3 -c 'import 
 kill $daemon; wait $daemon 2>/dev/null || true
 kill $tap; wait $tap 2>/dev/null || true
 
+# --- run 9: startup switched on while running, then the TAP power-cycled ---
+# Turning on "Bring up the TAP" alone takes effect without a restart; and a
+# TAP that comes back at the factory address is found and re-addressed.
+mkdir -p "$out/state9"
+python3 linux/tools/mock_tap.py "$out/tap9" --lease 600 --nodes 44 --stats "$out/tap9.json" &
+tap=$!
+sleep 0.5
+printf '{"bus_role": "master", "serial_port": "%s", "gateway_id": 4609, "web_port": 18100}\n' \
+  "$PWD/$out/tap9" > "$out/state9/settings.json"
+build/linux/tigomonitord --state-dir "$out/state9" --web-dir components/tigo_server/web 2> "$out/daemon9.log" &
+daemon=$!
+sleep 3
+expect "startup switched on" "$(api 18100 /api/settings '{"master_startup": true}')" 200
+sleep 3
+expect "probed without a restart" "$(grep -c 'the TAP is already at 1201' "$out/daemon9.log")" 1
+kill $tap; wait $tap 2>/dev/null || true
+python3 linux/tools/mock_tap.py "$out/tap9" --factory --lease 600 --nodes 44 --stats "$out/tap9b.json" &
+tap=$!
+for _ in $(seq 40); do [ -f "$out/tap9b.json" ] && [ "$(stat "$out/tap9b.json" "d['addressed_to']")" = 1201 ] && break; sleep 0.5; done
+expect "power-cycled TAP re-addressed" "$(stat "$out/tap9b.json" "d['addressed_to']")" 1201
+sleep 2
+expect "polling it again" "$(api 18100 /api/master | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["phase"], d["fault"])')" "running none"
+kill $daemon; wait $daemon 2>/dev/null || true
+kill $tap; wait $tap 2>/dev/null || true
+
 [ $fail = 0 ] && echo "master e2e passed" || { echo "master e2e FAILED; see $out/"; exit 1; }

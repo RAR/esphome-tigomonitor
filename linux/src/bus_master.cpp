@@ -65,6 +65,8 @@ bool BusMaster::open(const std::string &device, int baud) {
   // before renewing anything, and drop any half-read frame.
   lease_ = master::LeaseKeeper();
   splitter_ = protocol::FrameSplitter<std::string>();
+  // Or it lost power, and came back at the factory address.
+  if (startup_) phase_ = Phase::probing;
   LOGI("bus master on %s for gateway %04X%s", path.c_str(), gateway_, bench_ ? " (bench mode)" : "");
   std::lock_guard<std::mutex> lock(mu_);
   status_ = MasterStatus{};
@@ -259,6 +261,13 @@ void BusMaster::tick(uint32_t now_ms) {
   update_lease_fault_();
   // A gateway with no optimizers behind it, or one not running, refuses
   // polls outright (0x0006); say that rather than "not answering".
+  // A TAP that went quiet may have lost power and come back at the factory
+  // address: in startup mode, go and look for it again.
+  if (startup_ && timeouts_in_a_row_ == NO_REPLY_FAULT_AFTER) {
+    LOGW("bus master: the TAP stopped answering at %04X; looking for it again", gateway_);
+    phase_ = Phase::probing;
+    lease_ = master::LeaseKeeper();
+  }
   if (timeouts_in_a_row_ == NO_REPLY_FAULT_AFTER)
     set_fault(Fault::no_reply, refusals_logged_.count(master::CMD_POLL)
                                    ? "the TAP refuses polls (0x0006): no optimizers behind it, or it isn't running"
@@ -280,10 +289,12 @@ void BusMaster::run_startup() {
     if (transact(gateway_, master::CMD_GET_MAC_NOW, {}, r)) {  // already addressed
       LOGI("bus master: the TAP is already at %04X; polling", gateway_);
       phase_ = Phase::running;
+      timeouts_in_a_row_ = 0;
     } else if (transact(FACTORY_ID, master::CMD_GET_MAC_NOW, {}, r)) {  // at the factory address
       LOGW("bus master: the TAP is at the factory address %04X; re-addressing it to %04X", FACTORY_ID, gateway_);
       discovery_ = std::make_unique<master::Discovery>(FACTORY_ID, gateway_);
       phase_ = Phase::discovering;
+      timeouts_in_a_row_ = 0;
     } else {
       timeouts_in_a_row_++;
       if (timeouts_in_a_row_ == NO_REPLY_FAULT_AFTER)
