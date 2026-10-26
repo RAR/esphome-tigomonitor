@@ -119,8 +119,8 @@ whose payload is `00 00 00 <sub> <seq> ...`:
 | sub | cadence | what it looks like |
 |---|---|---|
 | 0x2e | every 20 s | reads a **run lease**: reply 0x2f carries a countdown in seconds |
-| 0x2d | when the lease hits 0 | `<seq> ba be 02 03 84 00 2c 01 00`: lease back to 900 s; 0x2c = 44 nodes |
-| 0x41 | every ~17.5 s | cycles nodes 1, 16, 17, 35, 38-41; fixed 17-byte tail (StartPWM/MPPT enforce?) |
+| 0x2d | when the lease hits 0 | `<seq> ba be 02 03 84 00 2c 01 00`: lease back to 900 s; 0x2c = 44 nodes. The same frame (with 36 nodes) is in the analysis repo's MESH_COMMANDS.md |
+| 0x41 | every ~17.5 s | telemetry poll spec, read-only: cycles nodes 1, 16, 17, 35, 38-41 with a fixed query template; the data comes back as 0x0149 |
 | 0x06 | occasional | ASCII to one node: `^00Version`, `^00Smrt`, `^00Mppt`, `^00Info` |
 | 0x26 | a burst | reads the roster in pages (index 0, 14, 26, 38, 46) |
 | 0x22, 0x0B00 | once | unknown |
@@ -130,7 +130,9 @@ the TAP's status byte and node count dropped to 0, and the CCA renewed it
 2 s later. What happens if nobody renews it is the question phase 3 answers.
 The 900 s lease is not the rapid-shutdown path: cutting CCA power also cuts
 the TAP's, which silences the mesh at once. It is the "master is alive"
-check. The opcode table above came from a bench TAP and the analysis notes;
+check. Per the analysis session (`docs/ROOF_STEADY_STATE.md`), the bench opcodes
+(netrun, the 37 24 92 66 key) belong to initial gateway setup, not daily
+running. The opcode table above came from a bench TAP and the analysis notes;
 the roof gateway's tunnel supersedes it here.
 
 ## How it will be built (decided)
