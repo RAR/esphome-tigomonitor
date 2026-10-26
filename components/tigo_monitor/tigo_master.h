@@ -334,6 +334,96 @@ inline Request next_request(LeaseKeeper &lease, const PollCursor &cursor, uint8_
   return {CMD_TUNNEL, tunnel_request(SUB_LEASE_CHECK, seq, {})};
 }
 
+// ---- gateway discovery -----------------------------------------------------
+
+// A TAP that has lost power comes up at the factory RS485 address (0x1235 on
+// the roof), not the id the CCA gave it. The CCA re-addresses it every boot:
+// a SET_485_ID broadcast, GET_MAC to read its MAC, SET_ID_BY_MAC to assign the
+// running id, then a read at that id to confirm. This drives the same four
+// steps. It sends re-addressing writes, so BusMaster only runs it after a read
+// has confirmed the TAP is actually at the factory address, and only in the
+// explicit startup mode.
+static const uint16_t CMD_SET_485_ID = 0x0014;
+static const uint16_t CMD_GET_MAC = 0x0038;        // with backoff
+static const uint16_t CMD_GET_MAC_NOW = 0x003A;    // no backoff; also the "where are you" read
+static const uint16_t CMD_SET_ID_BY_MAC = 0x003C;
+static const uint16_t CMD_RESET = 0x0010;
+
+struct DiscoveryRequest {
+  bool send = false;
+  bool done = false;
+  bool failed = false;
+  uint16_t dest = 0;
+  uint16_t cmd = 0;
+  Bytes payload;
+};
+
+class Discovery {
+ public:
+  Discovery(uint16_t factory_id, uint16_t target_id) : factory_(factory_id), target_(target_id) {}
+
+  DiscoveryRequest next() {
+    DiscoveryRequest r;
+    if (state_ == st_failed) { r.failed = true; return r; }
+    if (state_ == st_done) { r.done = true; return r; }
+    r.send = true;
+    switch (state_) {
+      case claim:  // SET_485_ID broadcast: payload = key + factory id (BE)
+        r.dest = 0x0000; r.cmd = CMD_SET_485_ID;
+        r.payload = {0x37, 0x24, 0x92, 0x66, static_cast<uint8_t>(factory_ >> 8), static_cast<uint8_t>(factory_)};
+        break;
+      case get_mac:
+        r.dest = factory_; r.cmd = CMD_GET_MAC;
+        break;
+      case set_id:  // key + MAC (8) + target id (BE)
+        r.dest = factory_; r.cmd = CMD_SET_ID_BY_MAC;
+        r.payload = {0x37, 0x24, 0x92, 0x66};
+        r.payload.insert(r.payload.end(), mac_.begin(), mac_.end());
+        r.payload.push_back(static_cast<uint8_t>(target_ >> 8));
+        r.payload.push_back(static_cast<uint8_t>(target_));
+        break;
+      case verify:
+        r.dest = target_; r.cmd = CMD_GET_MAC_NOW;
+        break;
+      default: break;
+    }
+    return r;
+  }
+
+  void on_reply(const Frame &f) {
+    switch (state_) {
+      case claim:
+        if (f.cmd == CMD_SET_485_ID + 1) state_ = get_mac;
+        break;
+      case get_mac:
+        if (f.cmd == CMD_GET_MAC + 1 && f.payload.size() >= 10) {
+          mac_.assign(f.payload.begin(), f.payload.begin() + 8);
+          state_ = set_id;
+        }
+        break;
+      case set_id:
+        if (f.cmd == CMD_SET_ID_BY_MAC + 1) state_ = verify;
+        break;
+      case verify:
+        if (f.cmd == CMD_GET_MAC_NOW + 1 && f.payload.size() >= 10) {
+          uint16_t id = static_cast<uint16_t>(f.payload[8] << 8 | f.payload[9]);
+          state_ = id == target_ ? st_done : st_failed;
+        }
+        break;
+      default: break;
+    }
+  }
+
+  bool done() const { return state_ == st_done; }
+  bool failed() const { return state_ == st_failed; }
+  const Bytes &mac() const { return mac_; }
+
+ private:
+  enum State { claim, get_mac, set_id, verify, st_done, st_failed } state_ = claim;
+  uint16_t factory_, target_;
+  Bytes mac_;
+};
+
 // ---- what a master may send ------------------------------------------------
 
 // yes: what the CCA sends in steady state, in the shapes it sends them.
@@ -341,12 +431,20 @@ inline Request next_request(LeaseKeeper &lease, const PollCursor &cursor, uint8_
 // never: writes. The commands that change what a TAP stores or does (reset,
 // store, ids, roster, whitelist, netrun) and anything carrying the setup key
 // 37 24 92 66. Nothing in this code sends them, whatever the settings.
-enum class Allow { yes, bench_only, never };
+enum class Allow { yes, bench_only, startup_only, never };
 
 inline Allow classify_request(uint16_t cmd, const Bytes &payload) {
-  static const uint16_t WRITES[] = {0x0010, 0x0012, 0x0014, 0x003C, 0x011E, 0x0182, 0x0058};
-  for (uint16_t w : WRITES)
+  // The re-addressing writes a cold boot needs. Allowed only in startup mode,
+  // and BusMaster only after a read confirms the TAP is at the factory address.
+  static const uint16_t STARTUP_WRITES[] = {CMD_RESET, CMD_SET_485_ID, CMD_SET_ID_BY_MAC};
+  for (uint16_t w : STARTUP_WRITES)
+    if (cmd == w) return Allow::startup_only;
+  // The writes nothing here ever sends: store, clear-roster, whitelist, and
+  // the rapid-shutdown netrun lever.
+  static const uint16_t NEVER[] = {0x0012, 0x011E, 0x0182, 0x0058};
+  for (uint16_t w : NEVER)
     if (cmd == w) return Allow::never;
+  // Any other command carrying the setup key is refused.
   static const uint8_t KEY[] = {0x37, 0x24, 0x92, 0x66};
   for (size_t i = 0; i + 4 <= payload.size(); i++)
     if (std::equal(KEY, KEY + 4, payload.begin() + i)) return Allow::never;
@@ -379,9 +477,14 @@ inline Allow classify_request(uint16_t cmd, const Bytes &payload) {
   }
 }
 
-inline bool may_send(uint16_t cmd, const Bytes &payload, bool bench) {
-  Allow a = classify_request(cmd, payload);
-  return a == Allow::yes || (a == Allow::bench_only && bench);
+inline bool may_send(uint16_t cmd, const Bytes &payload, bool bench, bool startup = false) {
+  switch (classify_request(cmd, payload)) {
+    case Allow::yes: return true;
+    case Allow::bench_only: return bench || startup;
+    case Allow::startup_only: return startup;
+    case Allow::never: return false;
+  }
+  return false;
 }
 
 }  // namespace master

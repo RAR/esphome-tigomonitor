@@ -184,8 +184,10 @@ static void test_allow_list() {
   CHECK(classify_request(CMD_TUNNEL, tunnel_request(0x41, 1, hex("0023"))) == Allow::bench_only);
   CHECK(classify_request(CMD_TUNNEL, tunnel_request(0x22, 1, {0x00, 0x00})) == Allow::bench_only);
 
-  // Writes, by command or by the setup key, are never sent.
-  for (uint16_t cmd : {0x0010, 0x0012, 0x0014, 0x003C, 0x011E, 0x0182, 0x0058})
+  // The writes never sent, in steady state or bench: store, clear-roster,
+  // whitelist, netrun. (The re-addressing writes 0x0010/0x0014/0x003C are
+  // startup_only; see test_startup_allow.)
+  for (uint16_t cmd : {0x0012, 0x011E, 0x0182, 0x0058})
     CHECK(classify_request(cmd, {}) == Allow::never);
   CHECK(classify_request(0x000A, hex("37249266")) == Allow::never);
   CHECK(classify_request(CMD_TUNNEL, tunnel_request(0x41, 1, hex("0037249266"))) == Allow::never);
@@ -277,7 +279,63 @@ static void test_review_fixes() {
   CHECK(fresh.next() == 0x6FD6 && fresh.resyncs() == 1);
 }
 
+// Gateway discovery: a TAP that comes up at the factory address is re-addressed
+// to the configured gateway id, exactly as the CCA did at the roof power-up.
+static void test_discovery() {
+  Discovery d(0x1235, 0x1201);
+  // 1. SET_485_ID broadcast to the factory address.
+  DiscoveryRequest r = d.next();
+  CHECK(r.send && r.dest == 0x0000 && r.cmd == 0x0014 && r.payload == hex("372492661235"));
+  d.on_reply(Frame{0x8000, 0x0015, {}});
+  // 2. GET_MAC to the factory address, which hands back the MAC.
+  r = d.next();
+  CHECK(r.send && r.dest == 0x1235 && r.cmd == 0x0038 && r.payload.empty());
+  d.on_reply(Frame{0x9235, 0x0039, hex("04c05b3000037dfb1235")});
+  // 3. SET_ID_BY_MAC, that MAC to the configured id.
+  r = d.next();
+  CHECK(r.send && r.dest == 0x1235 && r.cmd == 0x003C && r.payload == hex("3724926604c05b3000037dfb1201"));
+  d.on_reply(Frame{0x9235, 0x003D, {}});
+  // 4. Verify with a read at the new id.
+  r = d.next();
+  CHECK(r.send && r.dest == 0x1201 && r.cmd == 0x003A && r.payload.empty());
+  d.on_reply(Frame{0x9201, 0x003B, hex("04c05b3000037dfb1201")});
+  r = d.next();
+  CHECK(r.done && !r.failed);
+
+  // A verify reply at the wrong id fails rather than proceeding.
+  Discovery bad(0x1235, 0x1201);
+  bad.on_reply(Frame{0x8000, 0x0015, {}});
+  bad.on_reply(Frame{0x9235, 0x0039, hex("04c05b3000037dfb1235")});
+  bad.on_reply(Frame{0x9235, 0x003D, {}});
+  bad.on_reply(Frame{0x9201, 0x003B, hex("04c05b3000037dfb9999")});
+  CHECK(bad.next().failed);
+}
+
+// The discovery writes are allowed only in startup mode; the truly dangerous
+// writes never are, startup or not.
+static void test_startup_allow() {
+  for (uint16_t cmd : {0x0014, 0x003C, 0x0010}) {  // SET_485_ID, SET_ID_BY_MAC, RESET
+    CHECK(classify_request(cmd, hex("37249266")) == Allow::startup_only);
+    CHECK(!may_send(cmd, hex("37249266"), false, false));
+    CHECK(!may_send(cmd, hex("37249266"), true, false));   // bench isn't startup
+    CHECK(may_send(cmd, hex("37249266"), false, true));    // startup only
+  }
+  // GET_MAC reads are available in startup (they're bench_only reads).
+  CHECK(may_send(0x0038, {}, false, true) && may_send(0x003A, {}, false, true));
+  // These stay never, even in startup: store, clear-roster, whitelist, netrun.
+  for (uint16_t cmd : {0x0012, 0x011E, 0x0182, 0x0058}) {
+    CHECK(classify_request(cmd, hex("37249266")) == Allow::never);
+    CHECK(!may_send(cmd, hex("37249266"), true, true));
+  }
+  // A foreign command smuggling the key is still never.
+  CHECK(classify_request(0x0200, hex("37249266")) == Allow::never);
+  // Steady-state sends are unchanged by the startup flag.
+  CHECK(may_send(CMD_POLL, poll_payload(1), false, false));
+}
+
 int main() {
+  test_discovery();
+  test_startup_allow();
   test_review_fixes();
   test_codec();
   test_lease();
