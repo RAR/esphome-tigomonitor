@@ -527,11 +527,20 @@
   /* Device Configuration rows */
   .cfg-row { display: flex; gap: 14px; align-items: center; padding: 12px; background: var(--bg-3); border-radius: 6px; margin-bottom: 8px; flex-wrap: wrap; }
   .cfg-row:last-child { margin-bottom: 0; }
-  .cfg-text { flex: 1; min-width: 240px; font-size: 12px; }
+  /* A setting row is a two-column form: the label on the left, its controls
+     starting at the same line on the right, so the fields line up down the
+     card instead of shrinking against the right edge. One column on a phone. */
+  .cfg-row:has(> .cfg-text) { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 3fr); gap: 8px 24px; }
+  @media (max-width: 720px) { .cfg-row:has(> .cfg-text) { grid-template-columns: minmax(0, 1fr); } }
+  .cfg-text { flex: 1; min-width: 0; font-size: 12px; }
   .cfg-text strong { display: block; color: var(--text); margin-bottom: 2px; }
   .cfg-text span { display: block; color: var(--text-dim); }
   .cfg-default { color: var(--text-faint) !important; font-size: 11px; margin-top: 2px; font-family: ui-monospace,Menlo,monospace; }
   .cfg-ctrl { display: flex; align-items: center; gap: 6px; }
+  .cfg-row:has(> .cfg-text) .cfg-ctrl { min-width: 0; }
+  .cfg-row:has(> .cfg-text) .cfg-ctrl .cfg-input { flex: 1 1 auto; width: 100%; max-width: 320px; }
+  .cfg-row:has(> .cfg-text) .cfg-ctrl .cfg-input[type="number"] { max-width: 120px; }
+  .cfg-row:has(> .cfg-text) .cfg-switch { min-width: 120px; }  /* Save lines up with the number rows' */
   .cfg-input { width: 110px; padding: 6px 8px; background: var(--bg-2); border: 1px solid var(--border); border-radius: 5px; color: var(--text); font-size: 13px; }
   .cfg-unit { color: var(--text-dim); font-size: 12px; margin-right: 2px; }
   .cfg-switch { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text); cursor: pointer; min-width: 64px; }
@@ -823,7 +832,7 @@
     <section class="view" id="view-history">
       <div class="topbar">
         <h1>History</h1>
-        <div class="topbar-meta">Backed by esp_tsdb · persists across reboots</div>
+        <div class="topbar-meta" id="hist-backing">Backed by esp_tsdb · persists across reboots</div>
       </div>
 
       <div class="source-banner">
@@ -978,12 +987,94 @@
         <div class="topbar-meta" id="tools-meta">Configuration helpers and maintenance</div>
       </div>
 
+      <!-- Raspberry Pi build only (linux/): shown when /api/status reports
+           platform: 'linux'. The ESP32 gets these from YAML instead. -->
+      <div class="section-head" data-linux-only style="display:none">
+        <div class="section-title">Home Assistant</div>
+        <div class="section-sub" id="pi-mqtt-state">—</div>
+      </div>
+      <div class="tools-card" data-linux-only style="display:none">
+        <p class="hint">Panels show up in Home Assistant by themselves over MQTT. Point this at the broker Home Assistant already uses — for most people that is the Mosquitto add-on, at your Home Assistant's address, with the username and password of a Home Assistant user.</p>
+        <div class="cfg-row">
+          <div class="cfg-text"><strong>Broker address</strong><span class="cfg-default">Leave empty to turn MQTT off</span></div>
+          <div class="cfg-ctrl"><input class="cfg-input" id="pi-mqtt-host" placeholder="homeassistant.local" autocomplete="off"></div>
+        </div>
+        <div class="cfg-row">
+          <div class="cfg-text"><strong>Port</strong></div>
+          <div class="cfg-ctrl"><input class="cfg-input" id="pi-mqtt-port" type="number" min="1" max="65535"></div>
+        </div>
+        <div class="cfg-row">
+          <div class="cfg-text"><strong>Username</strong></div>
+          <div class="cfg-ctrl"><input class="cfg-input" id="pi-mqtt-user" autocomplete="off"></div>
+        </div>
+        <div class="cfg-row">
+          <div class="cfg-text"><strong>Password</strong><span class="cfg-default" id="pi-mqtt-pass-hint"></span></div>
+          <div class="cfg-ctrl"><input class="cfg-input" id="pi-mqtt-pass" type="password" autocomplete="new-password"></div>
+        </div>
+        <div class="cfg-row">
+          <div class="cfg-text"><strong>Topic</strong><span class="cfg-default" id="pi-mqtt-topic-hint"></span></div>
+          <div class="cfg-ctrl"><input class="cfg-input" id="pi-mqtt-topic" placeholder="tigomonitor" autocomplete="off"></div>
+        </div>
+        <div class="cfg-row">
+          <div class="cfg-text"><strong>Discovery prefix</strong><span class="cfg-default">Where Home Assistant looks for new devices; leave it unless you changed it in Home Assistant</span></div>
+          <div class="cfg-ctrl"><input class="cfg-input" id="pi-mqtt-discovery" placeholder="homeassistant" autocomplete="off"></div>
+        </div>
+        <div class="tools-actions" style="margin-top:12px">
+          <button class="btn primary" id="pi-save">Save</button>
+        </div>
+      </div>
+
+      <div class="section-head" data-linux-only style="display:none">
+        <div class="section-title">RS485 adapter and web UI</div>
+        <div class="section-sub" id="pi-port-state">—</div>
+      </div>
+      <div class="tools-card" data-linux-only style="display:none">
+        <p class="hint">Nothing is opened until you choose the adapter here, so other serial devices on this machine, such as a Zigbee stick, are left alone. Listing the ports does not open them.</p>
+        <div class="cfg-row">
+          <div class="cfg-text"><strong>Serial port</strong><span class="cfg-default">The RS485 adapter on the Tigo bus</span></div>
+          <div class="cfg-ctrl"><select class="cfg-input" id="pi-serial"></select> <button class="btn" id="pi-serial-rescan">Rescan</button></div>
+        </div>
+        <div class="cfg-row" id="pi-bridge-row" style="display:none">
+          <div class="cfg-text"><strong>Bridge address</strong><span class="cfg-default">host:port of an ESP32 running stream_server, or an RS485-to-Ethernet converter in TCP server mode</span></div>
+          <div class="cfg-ctrl"><input class="cfg-input" id="pi-bridge" autocomplete="off" placeholder="tigo-bridge.local:6638"></div>
+        </div>
+        <div class="cfg-row">
+          <div class="cfg-text"><strong>Web UI port</strong><span class="cfg-default">Empty: 80, or 8080 when another web server has 80. Takes effect after a restart</span></div>
+          <div class="cfg-ctrl"><input class="cfg-input" id="pi-web-port" type="number" min="1" max="65535" placeholder="80"></div>
+        </div>
+        <div class="cfg-row">
+          <div class="cfg-text"><strong>Web UI username</strong><span class="cfg-default">For the login below</span></div>
+          <div class="cfg-ctrl"><input class="cfg-input" id="pi-web-user" autocomplete="off" placeholder="admin"></div>
+        </div>
+        <div class="cfg-row">
+          <div class="cfg-text"><strong>Web UI password</strong><span class="cfg-default" id="pi-web-pass-hint">Empty: anyone on your network can open this page and change settings</span></div>
+          <div class="cfg-ctrl"><input class="cfg-input" id="pi-web-pass" type="password" autocomplete="new-password"></div>
+        </div>
+        <div class="tools-actions" style="margin-top:12px">
+          <button class="btn primary" id="pi-port-save">Save</button>
+          <button class="btn" id="pi-web-pass-remove" style="display:none">Remove password</button>
+        </div>
+      </div>
+
+      <div class="section-head" data-linux-only style="display:none">
+        <div class="section-title">Inverters</div>
+        <div class="section-sub" id="pi-inv-sub">—</div>
+      </div>
+      <div class="tools-card" data-linux-only style="display:none">
+        <p class="hint">Which inverter each MPPT feeds, for the Dashboard and Topology. The MPPT names are the ones in your node table, from the CCA or a backup. Strings on an MPPT no inverter lists appear under Unassigned.</p>
+        <div id="pi-inv-rows"></div>
+        <div class="tools-actions" style="margin-top:12px">
+          <button class="btn" id="pi-inv-add">Add inverter</button>
+          <button class="btn primary" id="pi-inv-save">Save</button>
+        </div>
+      </div>
+
       <div class="section-head">
         <div class="section-title">Device Configuration</div>
-        <div class="section-sub">Stored on-device · overrides YAML</div>
+        <div class="section-sub" id="cfg-sub">Stored on-device · overrides YAML</div>
       </div>
       <div class="tools-card">
-        <p class="hint">These knobs are saved to the ESP32 and take effect without reflashing. A stored value <b>overrides the YAML default</b> until you revert it — after that, editing the YAML applies again. <span id="cfg-status" style="color:var(--text-dim)"></span></p>
+        <p class="hint" id="cfg-hint">These knobs are saved to the ESP32 and take effect without reflashing. A stored value <b>overrides the YAML default</b> until you revert it — after that, editing the YAML applies again. <span id="cfg-status" style="color:var(--text-dim)"></span></p>
         <div id="cfg-rows"></div>
       </div>
 
@@ -1015,11 +1106,11 @@
         </div>
       </div>
 
-      <div class="section-head">
+      <div class="section-head" data-esp-only>
         <div class="section-title">YAML Configuration</div>
         <div class="section-sub" id="tools-yaml-sub">— devices</div>
       </div>
-      <div class="tools-card">
+      <div class="tools-card" data-esp-only>
         <p class="hint">Pick the sensors you want exposed to ESPHome / Home Assistant. The block below mirrors what you'd paste into your <code>esphome:</code> YAML.</p>
 
         <h3 style="margin-top:8px">Group panels into HA devices</h3>
@@ -1145,11 +1236,11 @@
         </div>
       </div>
 
-      <div class="section-head">
+      <div class="section-head" data-esp-only>
         <div class="section-title">Time-series database</div>
         <div class="section-sub" id="diag-tsdb-sub">—</div>
       </div>
-      <div class="table-wrap">
+      <div class="table-wrap" data-esp-only>
         <table class="nodes">
           <thead>
             <tr>
@@ -1221,7 +1312,7 @@
         <div class="section-sub" id="cca-ble-active">—</div>
       </div>
       <div class="tools-card" id="cca-ble-card" style="display:none">
-        <p class="hint">Scan for your Tigo CCA over Bluetooth (matched by its <code>04:C0:5B</code> address prefix) and target it without editing YAML. The chosen MAC is saved on the device and survives reboots.</p>
+        <p class="hint" id="cca-ble-hint">Scan for your Tigo CCA over Bluetooth (matched by its <code>04:C0:5B</code> address prefix) and target it without editing YAML. The chosen MAC is saved on the device and survives reboots.</p>
         <div class="tools-actions">
           <input id="cca-ble-mac" type="text" placeholder="AA:BB:CC:DD:EE:FF" autocomplete="off" spellcheck="false"
                  style="flex:1;min-width:170px;padding:6px 8px;background:var(--bg-2);border:1px solid var(--border);border-radius:5px;color:var(--text);font-family:ui-monospace,Menlo,monospace;font-size:13px">
@@ -1924,6 +2015,26 @@
   }
   refreshDashboard();
   setInterval(refreshDashboard, 5000);
+
+  // The Raspberry Pi build answers /api/status with platform: 'linux'; the
+  // ESP32 omits it. Swap the ESP32-only Tools sections for the Pi's settings.
+  let PLATFORM = 'esp32';
+  const platformReady = apiFetch('/api/status').then(r => r.ok ? r.json() : {}).then(s => {
+    if (s.platform !== 'linux') return;
+    PLATFORM = 'linux';
+    document.querySelectorAll('[data-esp-only]').forEach(el => { el.style.display = 'none'; });
+    document.querySelectorAll('[data-linux-only]').forEach(el => { el.style.display = ''; });
+    document.getElementById('hist-backing').textContent = 'Stored on the SD card · persists across reboots';
+    document.getElementById('cca-ble-hint').innerHTML = 'Scan for your Tigo CCA over Bluetooth (matched by its <code>04:C0:5B</code> address prefix). With none saved, the Pi uses the nearest one; save a MAC to pin it.';
+    document.getElementById('cca-ble-revert-btn').textContent = 'Use nearest';
+    document.getElementById('cfg-sub').textContent = 'Saved on the Pi';
+    document.getElementById('cfg-hint').innerHTML = 'Saved on the Pi and applied within a second. Revert returns a setting to its default. <span id="cfg-status" style="color:var(--text-dim)"></span>';
+    const restart = document.getElementById('tools-restart');
+    restart.previousElementSibling.innerHTML =
+      '<strong>Restart service</strong><span>Restarts the monitor service. Readings pause for a few seconds.</span>';
+    restart.textContent = 'Restart service';
+    refreshTools();
+  }).catch(() => {});
 
   // ===== Panel detail modal =====
   // Click a heat tile → modal with live readings + per-panel power history,
@@ -2831,10 +2942,44 @@
   const TSDB_STATS_MS = 60000;
   let tsdbStatsAt = 0;
 
+  // The Raspberry Pi build (linux/) reports the same /api/status with
+  // platform: 'linux'. It has no PSRAM, sockets pool or FreeRTOS, so those
+  // cards show the SD card and the MQTT link instead.
+  function renderLinuxDiagnostics(status) {
+    const label = (valId, text) => {
+      const l = document.getElementById(valId)?.parentElement?.querySelector('.hist-stat-label');
+      if (l) l.textContent = text;
+    };
+    label('diag-heap-free', 'RAM available');
+    label('diag-heap-min', 'RAM available, lowest');
+    label('diag-psram-free', 'SD card free');
+    label('diag-temp', 'CPU temp');
+    label('diag-sockets', 'MQTT');
+    label('diag-version', 'Version');
+    document.getElementById('diag-mem-sub').textContent = 'system';
+    document.getElementById('diag-temp').nextElementSibling.textContent = 'SoC sensor';
+    const mb = (b) => (b / 1048576).toFixed(0);
+    document.getElementById('diag-heap-free').innerHTML =
+      `${mb(status.free_heap)}<span class="hist-stat-unit">MB</span>`;
+    document.getElementById('diag-heap-sub').textContent =
+      `${(100 * status.free_heap / status.total_heap).toFixed(1)}% of ${mb(status.total_heap)} MB`;
+    document.getElementById('diag-heap-min').innerHTML =
+      `${mb(status.min_free_heap)}<span class="hist-stat-unit">MB</span>`;
+    document.getElementById('diag-psram-free').innerHTML =
+      `${mb(status.disk_free || 0)}<span class="hist-stat-unit">MB</span>`;
+    document.getElementById('diag-psram-sub').textContent = status.disk_total
+      ? `${(100 * status.disk_free / status.disk_total).toFixed(1)}% of ${mb(status.disk_total)} MB` : '—';
+    const mqtt = document.getElementById('diag-sockets');
+    mqtt.textContent = status.mqtt_connected ? 'connected' : (status.mqtt_configured ? 'offline' : 'off');
+    mqtt.style.fontSize = '18px';
+    document.getElementById('diag-tasks').textContent =
+      status.mqtt_error || (status.mqtt_configured ? '' : 'set a broker under Tools');
+  }
+
   async function refreshDiagnostics(force) {
     if (!document.getElementById('view-diagnostics').classList.contains('active')) return;
     try {
-      const wantTsdb = force || (Date.now() - tsdbStatsAt) >= TSDB_STATS_MS;
+      const wantTsdb = PLATFORM !== 'linux' && (force || (Date.now() - tsdbStatsAt) >= TSDB_STATS_MS);
       const [statusR, tsdbR] = await Promise.all([
         apiFetch('/api/status'),
         wantTsdb ? apiFetch('/api/tsdb/stats') : Promise.resolve(null),
@@ -2867,13 +3012,14 @@
       resetEl.style.color = reset.color;
       resetEl.title = reset.hint;
       document.getElementById('diag-rssi').innerHTML =
-        `${status.wifi_rssi}<span class="hist-stat-unit">dBm</span>`;
+        `${status.wifi_rssi ?? '—'}<span class="hist-stat-unit">dBm</span>`;
       document.getElementById('diag-ssid').textContent = status.wifi_ssid || '—';
       document.getElementById('diag-ip').textContent = status.ip_address || '—';
       document.getElementById('diag-mac').textContent = status.mac_address || '—';
       document.getElementById('diag-sockets').innerHTML =
         `${status.active_sockets ?? '—'}<span class="hist-stat-unit" id="diag-sockets-of"> / ${status.max_sockets ?? '—'}</span>`;
       document.getElementById('diag-tasks').textContent = `${status.task_count || 0} FreeRTOS tasks`;
+      if (status.platform === 'linux') renderLinuxDiagnostics(status);
 
       // UART telemetry
       const total = status.total_frames || 0;
@@ -3019,6 +3165,11 @@
 
   async function refreshTools() {
     if (!document.getElementById('view-tools').classList.contains('active')) return;
+    if (PLATFORM === 'linux') {
+      refreshPiInverters();
+      refreshConfig();
+      return refreshPiSettings();
+    }
     try {
       const dev = [...document.querySelectorAll('#tools-dev-grid input:checked')]
         .map(i => i.dataset.toolsDev).join(',');
@@ -3073,12 +3224,12 @@
           <div class="cfg-text">
             <strong>${f.label}</strong>
             <span>${f.desc}</span>
-            <span class="cfg-default">YAML default: ${cloudEsc(def)}</span>
+            <span class="cfg-default">${PLATFORM === 'linux' ? 'Default' : 'YAML default'}: ${cloudEsc(def)}</span>
           </div>
           <div class="cfg-ctrl">
             ${control}
             <button class="btn" data-cfg-save="${f.key}">Save</button>
-            <button class="btn cfg-revert" data-cfg-reset="${f.key}"${ov ? '' : ' disabled'} title="Revert to YAML default">Revert</button>
+            <button class="btn cfg-revert" data-cfg-reset="${f.key}"${ov ? '' : ' disabled'} title="Revert to ${PLATFORM === 'linux' ? '' : 'YAML '}default">Revert</button>
           </div>
         </div>`;
     }).join('');
@@ -3170,10 +3321,222 @@
       'Clear the persisted node table? Devices will repopulate as telemetry arrives.'));
   document.getElementById('tools-restart').addEventListener('click', () =>
     toolsAction('/api/restart', 'Restart issued',
-      'Reboot the ESP32 now?'));
+      PLATFORM === 'linux' ? 'Restart the monitor service now?' : 'Reboot the ESP32 now?'));
+
+  // ===== Raspberry Pi settings (linux/ build) =====
+  async function refreshPiSettings() {
+    try {
+      const r = await apiFetch('/api/settings');
+      if (!r.ok) throw new Error('/api/settings ' + r.status);
+      const s = await r.json();
+      document.getElementById('pi-mqtt-host').value = s.mqtt.host || '';
+      document.getElementById('pi-mqtt-port').value = s.mqtt.port || 1883;
+      document.getElementById('pi-mqtt-user').value = s.mqtt.username || '';
+      document.getElementById('pi-mqtt-pass').value = '';
+      document.getElementById('pi-mqtt-pass').placeholder = s.mqtt.password_set ? 'unchanged' : '';
+      document.getElementById('pi-mqtt-pass-hint').textContent =
+        s.mqtt.password_set ? 'Saved. Leave empty to keep it; changing the broker or username clears it.' : '';
+      document.getElementById('pi-mqtt-topic').value = s.mqtt.base_topic || '';
+      document.getElementById('pi-mqtt-discovery').value = s.mqtt.discovery_prefix || '';
+      document.getElementById('pi-mqtt-topic-hint').textContent =
+        `Readings go to ${s.mqtt.base_topic}/${s.device_id}/panel/<barcode>/state`;
+      piWebPortActive = s.web_port_active;
+      document.getElementById('pi-web-port').value = s.web_port || '';
+      piWebLogin = { user: s.web_username || 'admin', set: !!s.web_password_set };
+      document.getElementById('pi-web-user').value = piWebLogin.user;
+      document.getElementById('pi-web-pass').value = '';
+      document.getElementById('pi-web-pass').placeholder = s.web_password_set ? 'unchanged' : '';
+      document.getElementById('pi-web-pass-hint').textContent = s.web_password_set
+        ? `Set: log in as "${piWebLogin.user}". Leave empty to keep it.`
+        : 'Empty: anyone on your network can open this page and change settings';
+      document.getElementById('pi-web-pass-remove').style.display = s.web_password_set ? '' : 'none';
+      await piFillSerial(s.serial_port || '');
+      document.getElementById('pi-mqtt-state').textContent = !s.mqtt.host ? 'MQTT off'
+        : s.mqtt_connected ? `connected to ${s.mqtt.host}` : `not connected${s.mqtt_error ? ': ' + s.mqtt_error : ''}`;
+      document.getElementById('tools-meta').textContent = `last update ${new Date().toLocaleTimeString()}`;
+    } catch (e) {
+      document.getElementById('tools-meta').textContent = `error: ${e.message}`;
+    }
+  }
+  let piWebPortActive = 0;
+  let piWebLogin = { user: 'admin', set: false };
+  async function piFillSerial(current) {
+    const sel = document.getElementById('pi-serial');
+    let ports = [];
+    try {
+      const r = await apiFetch('/api/serial-ports');
+      if (r.ok) ports = (await r.json()).ports || [];
+    } catch (e) { /* the saved choice still shows */ }
+    const bridge = current.startsWith('tcp://');
+    const opts = [['', 'Not chosen: nothing is opened'],
+                  ['auto', 'Automatic: first USB adapter, else the Pi UART'],
+                  ['tcp', 'Network bridge (TCP)']];
+    if (bridge) {
+      document.getElementById('pi-bridge').value = current.slice('tcp://'.length);
+      current = 'tcp';
+    }
+    for (const p of ports) {
+      const shown = p.path === p.device ? p.path : `${p.path.replace('/dev/serial/by-id/', '')} (${p.device})`;
+      opts.push([p.path, p.description ? `${p.description} — ${shown}` : shown]);
+    }
+    if (current && !opts.some(o => o[0] === current)) opts.push([current, `${current} (not connected)`]);
+    sel.innerHTML = '';
+    for (const [value, label] of opts) {
+      const o = document.createElement('option');
+      o.value = value;
+      o.textContent = label;
+      sel.appendChild(o);
+    }
+    sel.value = current;
+    piShowBridge();
+    const reading = bridge ? `the bridge at ${document.getElementById('pi-bridge').value}` : current;
+    document.getElementById('pi-port-state').textContent = !current ? 'no adapter chosen'
+      : `reading ${reading} · web UI on port ${piWebPortActive}`;
+  }
+  function piShowBridge() {
+    document.getElementById('pi-bridge-row').style.display =
+      document.getElementById('pi-serial').value === 'tcp' ? '' : 'none';
+  }
+  document.getElementById('pi-serial').addEventListener('change', piShowBridge);
+  document.getElementById('pi-web-pass-remove').addEventListener('click', async () => {
+    if (!confirm('Remove the web UI password? Anyone on your network will be able to open this page and change settings.')) return;
+    try {
+      const r = await apiFetch('/api/settings', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ web_password: '' }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || `/api/settings ${r.status}`);
+      showToast('Password removed ✓', 'ok');
+      setTimeout(refreshPiSettings, 1500);
+    } catch (e) {
+      showToast(`Save failed: ${e.message}`, 'err');
+    }
+  });
+  document.getElementById('pi-serial-rescan').addEventListener('click',
+    () => {
+      const v = document.getElementById('pi-serial').value;
+      piFillSerial(v === 'tcp' ? 'tcp://' + document.getElementById('pi-bridge').value.trim() : v);
+    });
+  document.getElementById('pi-port-save').addEventListener('click', async () => {
+    const webPort = Number(document.getElementById('pi-web-port').value) || 0;
+    let source = document.getElementById('pi-serial').value;
+    if (source === 'tcp') {
+      const addr = document.getElementById('pi-bridge').value.trim().replace(/^tcp:\/\//, '');
+      if (!addr) { showToast('Enter the bridge address, as host:port', 'err'); return; }
+      source = 'tcp://' + addr;
+    }
+    const body = { serial_port: source, web_port: webPort,
+                   web_username: document.getElementById('pi-web-user').value.trim() || 'admin' };
+    const webPass = document.getElementById('pi-web-pass').value;
+    if (webPass !== '') body.web_password = webPass;
+    // Browsers fill a saved login (the Tigo cloud one, say) into a username
+    // box next to a password box, ignoring autocomplete="off", and that
+    // silently becomes the login. So say what the login will be before
+    // turning it on or changing it.
+    if ((webPass !== '' || piWebLogin.set) && (webPass !== '' || body.web_username !== piWebLogin.user) &&
+        !confirm(`Your browser will ask for this login from now on:\n\n` +
+                 `Username: ${body.web_username}\n` +
+                 `Password: ${webPass !== '' ? `the one you typed (${webPass.length} characters)` : 'unchanged'}\n\n` +
+                 `If your browser filled either in for you, cancel and correct them.`)) return;
+    try {
+      const r = await apiFetch('/api/settings', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || `/api/settings ${r.status}`);
+      showToast('Saved ✓', 'ok');
+      const next = webPort || 80;
+      if (next !== piWebPortActive &&
+          confirm(`Restart the service to move the web UI to port ${next}?\n\nWithout a restart it stays on ${piWebPortActive}.`)) {
+        await apiFetch('/api/restart', { method: 'POST' }).catch(() => {});
+        const url = new URL(window.location.href);
+        url.port = next === 80 ? '' : String(next);
+        setTimeout(() => { window.location.href = url.toString(); }, 5000);
+        showToast(`Restarting; opening port ${next} in 5 s`, 'ok');
+        return;
+      }
+      setTimeout(refreshPiSettings, 1500);
+    } catch (e) {
+      showToast(`Save failed: ${e.message}`, 'err');
+    }
+  });
+  // Inverters: one row per inverter, its MPPTs as a comma-separated list.
+  function piInvRow(inv) {
+    const row = document.createElement('div');
+    row.className = 'cfg-row';
+    row.innerHTML = `
+      <div class="cfg-ctrl"><input class="cfg-input pi-inv-name" style="width:160px" placeholder="Inverter name" autocomplete="off"></div>
+      <div class="cfg-ctrl" style="flex:1"><input class="cfg-input pi-inv-mppts" style="width:100%;min-width:180px" placeholder="MPPT 1, MPPT 2" autocomplete="off"></div>
+      <div class="cfg-ctrl"><button class="btn pi-inv-remove">Remove</button></div>`;
+    row.querySelector('.pi-inv-name').value = inv.name || '';
+    row.querySelector('.pi-inv-mppts').value = (inv.mppts || []).join(', ');
+    row.querySelector('.pi-inv-remove').addEventListener('click', () => row.remove());
+    document.getElementById('pi-inv-rows').appendChild(row);
+  }
+  async function refreshPiInverters() {
+    try {
+      const r = await apiFetch('/api/topology');
+      if (!r.ok) throw new Error('/api/topology ' + r.status);
+      const t = await r.json();
+      document.getElementById('pi-inv-rows').innerHTML = '';
+      t.inverters.forEach(piInvRow);
+      if (!t.inverters.length) piInvRow({});
+      const listed = new Set(t.inverters.flatMap(i => i.mppts));
+      const free = t.mppts_seen.filter(m => !listed.has(m));
+      document.getElementById('pi-inv-sub').textContent = !t.mppts_seen.length ? 'no MPPTs in the node table yet'
+        : free.length ? `not assigned: ${free.join(', ')}` : 'every MPPT assigned';
+    } catch (e) {
+      document.getElementById('pi-inv-sub').textContent = `error: ${e.message}`;
+    }
+  }
+  document.getElementById('pi-inv-add').addEventListener('click', () => piInvRow({}));
+  document.getElementById('pi-inv-save').addEventListener('click', async () => {
+    const inverters = [...document.querySelectorAll('#pi-inv-rows .cfg-row')].map(row => ({
+      name: row.querySelector('.pi-inv-name').value.trim(),
+      mppts: row.querySelector('.pi-inv-mppts').value.split(',').map(m => m.trim()).filter(Boolean),
+    })).filter(i => i.name || i.mppts.length);
+    try {
+      const r = await apiFetch('/api/topology', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ inverters }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || `/api/topology ${r.status}`);
+      showToast('Inverters saved ✓', 'ok');
+      refreshPiInverters();
+    } catch (e) {
+      showToast(`Save failed: ${e.message}`, 'err');
+    }
+  });
+
+  document.getElementById('pi-save').addEventListener('click', async () => {
+    const mqtt = {
+      host: document.getElementById('pi-mqtt-host').value.trim(),
+      port: Number(document.getElementById('pi-mqtt-port').value) || 1883,
+      username: document.getElementById('pi-mqtt-user').value,
+      base_topic: document.getElementById('pi-mqtt-topic').value.trim() || 'tigomonitor',
+      discovery_prefix: document.getElementById('pi-mqtt-discovery').value.trim() || 'homeassistant',
+    };
+    const pass = document.getElementById('pi-mqtt-pass').value;
+    if (pass !== '') mqtt.password = pass;
+    const body = { mqtt };
+    try {
+      const r = await apiFetch('/api/settings', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || `/api/settings ${r.status}`);
+      showToast('Settings saved ✓', 'ok');
+      // The daemon applies them within a second; give MQTT a moment to connect.
+      setTimeout(refreshPiSettings, 2500);
+    } catch (e) {
+      showToast(`Save failed: ${e.message}`, 'err');
+    }
+  });
 
   document.querySelector('#nav button[data-view="tools"]').addEventListener('click', refreshTools);
-  if (window.location.hash === '#tools') refreshTools();
+  // After the platform probe, which refreshes Tools itself on the Pi: a
+  // bookmark to #tools would otherwise load the ESP32's sections there.
+  platformReady.then(() => { if (PLATFORM !== 'linux' && window.location.hash === '#tools') refreshTools(); });
 
   // ============================================================
   // R7 — CCA view (Tigo CCA configuration mirror)
@@ -3423,7 +3786,7 @@
     document.getElementById('cca-ble-head').style.display = '';
     document.getElementById('cca-ble-card').style.display = '';
     document.getElementById('cca-ble-active').innerHTML =
-      `active <span style="font-family:ui-monospace,Menlo,monospace">${cloudEsc(data.active_mac)}</span> · ${data.saved ? 'saved on device' : 'from YAML'}`;
+      `active <span style="font-family:ui-monospace,Menlo,monospace">${cloudEsc(data.active_mac || 'none yet')}</span> · ${data.saved ? 'saved on device' : PLATFORM === 'linux' ? 'nearest CCA' : 'from YAML'}`;
     document.getElementById('cca-ble-revert-btn').disabled = !data.saved;
     const list = document.getElementById('cca-ble-list');
     const devs = data.devices || [];
@@ -3494,7 +3857,8 @@
     ccaBlePost({ mac });
   });
   document.getElementById('cca-ble-revert-btn').addEventListener('click', () => {
-    if (confirm('Forget the saved CCA MAC and use the one from YAML?')) ccaBlePost({ reset: true });
+    const revertTo = PLATFORM === 'linux' ? 'the nearest CCA' : 'the one from YAML';
+    if (confirm(`Forget the saved CCA MAC and use ${revertTo}?`)) ccaBlePost({ reset: true });
   });
 
   document.getElementById('cca-refresh-btn').addEventListener('click', async () => {
@@ -3529,7 +3893,7 @@
         if (deviceInfo && deviceInfo.error) { applyCcaData(data); return; }  // terminal
         const hasData = deviceInfo && Object.keys(deviceInfo).length > 0;
         const fresh = data.last_sync_seconds_ago <= elapsed + 3;
-        if (hasData && fresh) { applyCcaData(data); return; }
+        if (hasData && fresh) { applyCcaData(data); ccaBleLoad(); return; }
 
         info.innerHTML =
           `<div class="spinner-box"><span class="spinner"></span> Connecting to the CCA over BLE… (${Math.round(elapsed)} s)</div>`;

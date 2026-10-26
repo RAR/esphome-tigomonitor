@@ -1,0 +1,7 @@
+# The build context is the repo root; only these are needed.
+*
+!linux/
+!components/tigo_monitor/
+!components/tigo_server/web/
+!site/public/favicon.svg
+!LICENSE

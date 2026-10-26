@@ -8,6 +8,7 @@
 //                    space-separated params, one write-with-response / long write)
 //   session key    = SHA512((uts + 159260).toString())  — uts is a nonce from DEVICE_INFO
 //   response       = byte0 reqNum, body from byte3, accumulate until trailing '\0'
+// The wire format is in tigo_monitor/tigo_cca_ble_protocol.h, shared with the Pi build.
 //
 // Vendored from https://github.com/RAR/esphome-tigo-ble (component tigo_ble); the HA
 // entity publishing was dropped — the CCA Info page reads the cached DEVICE_INFO.
@@ -19,6 +20,7 @@
 #include "esphome/core/log.h"
 #include "esphome/core/helpers.h"
 #include "esphome/core/preferences.h"
+#include "esphome/components/tigo_monitor/tigo_cca_ble_protocol.h"
 // ESP-IDF 6.0 ships mbedtls 4.0, which removed the legacy mbedtls_sha512_* API and
 // its public "mbedtls/sha512.h" header — hashing moved to the PSA Crypto API. Use PSA
 // on 6.0+, the legacy mbedtls one-shot on 5.x. (Mirrors esphome's own sha256 component.)
@@ -38,7 +40,7 @@ namespace esphome {
 namespace tigo_server {
 
 static const char *const BLE_TAG = "tigo_server.ble";
-static const uint32_t CCA_SESSION_SEED = 159260;  // app constant (eZ) for the session key
+namespace wire = tigo_monitor::cca_ble;  // the protocol, shared with the Pi build
 
 // CCA snapshot persistence helpers (defined lower, next to the CcaBleMacPref pattern) —
 // forward-declared here because ble_store_cca_info_/ble_store_network_ use them above.
@@ -320,16 +322,12 @@ void TigoWebServer::ble_handle_notification_(esp_ble_gattc_cb_param_t *param) {
   if (param->notify.value_len > 0)
     ESP_LOG_BUFFER_HEX_LEVEL(BLE_TAG, param->notify.value, param->notify.value_len, ESP_LOG_VERBOSE);
 
-  if (param->notify.value_len < 4) {
+  if (!wire::append_reply_piece(this->ble_response_buffer_, param->notify.value, param->notify.value_len)) {
     ESP_LOGW(BLE_TAG, "Short notification (%d bytes)", param->notify.value_len);
     return;
   }
 
-  const uint8_t *body = &param->notify.value[3];
-  size_t body_len = param->notify.value_len - 3;
-  this->ble_response_buffer_.insert(this->ble_response_buffer_.end(), body, body + body_len);
-
-  if (!this->ble_response_buffer_.empty() && this->ble_response_buffer_.back() == '\0') {
+  if (wire::reply_complete(this->ble_response_buffer_)) {
     this->ble_awaiting_response_ = false;
     this->ble_response_buffer_.pop_back();
     psram_string json(this->ble_response_buffer_.begin(), this->ble_response_buffer_.end());
@@ -438,21 +436,10 @@ void TigoWebServer::ble_write_command_(const std::string &cmd, const psram_strin
   // Remember which command this response belongs to (commands are serialized).
   this->ble_last_command_ = cmd;
 
-  this->ble_request_num_++;
-  if (this->ble_request_num_ == 0)
-    this->ble_request_num_ = 1;
-
-  std::string text = "cmd=" + cmd;
-  if (!params.empty())
-    text += " " + params;
-
-  // Plain single-byte ASCII: [reqNum] + "cmd=... [params]" + 0x00 (verified app 5.4.6).
-  std::vector<uint8_t> payload;
-  payload.reserve(1 + text.size() + 1);
-  payload.push_back(this->ble_request_num_);
-  for (char c : text)
-    payload.push_back(static_cast<uint8_t>(c));
-  payload.push_back(0x00);
+  this->ble_request_num_ = wire::next_request_number(this->ble_request_num_);
+  // params already carries the sid, where the command needs one.
+  std::string text = wire::command_text(cmd, std::string(params.data(), params.size()), "");
+  auto payload = wire::request_frame<std::vector<uint8_t>>(this->ble_request_num_, text);
 
   ESP_LOGD(BLE_TAG, ">>> Send [%d]: %s (%d bytes)", this->ble_request_num_, text.c_str(), payload.size());
   ESP_LOG_BUFFER_HEX_LEVEL(BLE_TAG, payload.data(), std::min(payload.size(), (size_t) 64), ESP_LOG_VERBOSE);
@@ -482,8 +469,7 @@ void TigoWebServer::ble_send_payload_(const std::vector<uint8_t> &payload) {
 
 void TigoWebServer::ble_generate_session_key_(uint32_t uts) {
   // sid = SHA512((uts + 159260).toString()) -> 128-char lowercase hex.
-  uint64_t sum = static_cast<uint64_t>(uts) + CCA_SESSION_SEED;
-  std::string sum_str = std::to_string(sum);
+  std::string sum_str = wire::session_key_input(uts);
 
   unsigned char hash[64] = {0};
 #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(6, 0, 0)
@@ -517,7 +503,7 @@ void TigoWebServer::ble_process_response_(const psram_string &data) {
   // specifically — action commands (WIFI_CONNECT/CLEAR, RUN_TEST) legitimately report
   // success/failure in a "msg" field, so the old "any msg = rejected" test would have
   // wrongly dropped them.
-  if (data.find("Unauthorized request") != psram_string::npos) {
+  if (wire::is_unauthorized(data)) {
     ESP_LOGW(BLE_TAG, "CCA rejected '%s' (bad/expired sid): %s", this->ble_last_command_.c_str(),
              data.c_str());
     return;
@@ -677,26 +663,7 @@ psram_string TigoWebServer::ble_get_net_result_(const std::string &command, uint
   return it->second;
 }
 
-std::string TigoWebServer::ble_uri_encode_(const std::string &value) {
-  // Match the app's CK(): encodeURIComponent then escape !'()*. Net effect is RFC 3986
-  // unreserved kept (A-Za-z0-9-_.~), everything else percent-encoded (uppercase hex).
-  // Required because params are space-separated on the wire, so a space or special char
-  // in an SSID/password would otherwise split or corrupt the frame.
-  static const char *const HEX = "0123456789ABCDEF";
-  std::string out;
-  out.reserve(value.size() * 3);
-  for (unsigned char c : value) {
-    if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-' ||
-        c == '_' || c == '.' || c == '~') {
-      out.push_back(static_cast<char>(c));
-    } else {
-      out.push_back('%');
-      out.push_back(HEX[c >> 4]);
-      out.push_back(HEX[c & 0x0F]);
-    }
-  }
-  return out;
-}
+std::string TigoWebServer::ble_uri_encode_(const std::string &value) { return wire::uri_encode(value); }
 
 bool TigoWebServer::ble_has_cca_info_() {
   std::lock_guard<std::mutex> lock(this->cca_info_mutex_);

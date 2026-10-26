@@ -1,0 +1,121 @@
+# Tigo bus network bridge on a LilyGO T-CAN485
+#
+# This board does no decoding. It forwards the raw RS485 bus over TCP to
+# tigomonitord (the Raspberry Pi / Linux build) running somewhere else, which
+# decodes it and serves the dashboard. Pick it when the Tigo cabinet is far
+# from where you want to run the monitor, or when you would rather keep an
+# ESP32 at the cabinet and the history on a bigger machine.
+#
+# In tigomonitord, under Tools -> RS485 adapter and web UI, choose
+# "Network bridge (TCP)" and enter  tigo-bridge.local:6638  (or this board's IP).
+#
+# stream_server (https://github.com/oxan/esphome-stream-server) does the
+# forwarding: every byte the UART receives goes to each connected client.
+#
+# READ-ONLY, IN HARDWARE THIS TIME. stream_server also writes whatever a client
+# sends to the UART. To keep any of that off the roof bus, the UART below has
+# no tx_pin, so there is nowhere for a write to go. tigomonitord never sends
+# anything either; this covers any other program that connects to port 6638.
+#
+# Removing tx_pin is only safe because GPIO22 (the transceiver's DI) is held
+# HIGH by the switch below. The MAX13487E turns its driver ON when DI is LOW
+# (see esp32-lilygo-t-can485.yaml), so a floating DI could drive your bus.
+# Keep that switch.
+
+esphome:
+  name: tigo-bridge
+  friendly_name: "Tigo Bridge"
+
+esp32:
+  board: esp32dev
+  flash_size: 4MB
+  framework:
+    type: esp-idf
+    version: recommended
+    advanced:
+      # See esp32-lilygo-t-can485.yaml for why 3.0 and not 3.1.
+      minimum_chip_revision: '3.0'
+    sdkconfig_options:
+      # The UART ISR from IRAM, so bytes are not dropped while flash is busy.
+      CONFIG_UART_ISR_IN_IRAM: "y"
+      CONFIG_LOG_DEFAULT_LEVEL_INFO: "y"
+
+external_components:
+  - source: github://oxan/esphome-stream-server
+    components: [stream_server]
+
+wifi:
+  ssid: "YOUR_WIFI_SSID"
+  password: "YOUR_WIFI_PASSWORD"
+  # Latency costs nothing here, but dropped Wi-Fi beacons stall the stream.
+  power_save_mode: none
+  ap:
+    ssid: "Tigo-Bridge Fallback Hotspot"
+    password: "12345678"
+
+captive_portal:
+
+logger:
+  level: INFO
+
+# For OTA updates and the sensors below; nothing on the bus goes through it.
+api:
+  # encryption:
+  #   key: "YOUR_BASE64_KEY"
+
+ota:
+  - platform: esphome
+    password: "YOUR_OTA_PASSWORD"
+
+# --- RS485 front end: see esp32-lilygo-t-can485.yaml for each pin ------------
+switch:
+  - platform: gpio
+    id: rs485_power_5v
+    internal: true
+    pin: GPIO16          # 5V boost for the transceiver
+    restore_mode: ALWAYS_ON
+  - platform: gpio
+    id: rs485_auto_direction
+    internal: true
+    pin: GPIO17          # /RE high => AutoDirection controls the receiver
+    restore_mode: ALWAYS_ON
+  - platform: gpio
+    id: rs485_chip_enable
+    internal: true
+    pin: GPIO19          # SHDN high => normal operation
+    restore_mode: ALWAYS_ON
+  - platform: gpio
+    id: rs485_driver_off
+    internal: true
+    pin: GPIO22          # DI high => the driver stays off (no tx_pin below)
+    restore_mode: ALWAYS_ON
+  - platform: restart
+    name: "Tigo Bridge Restart"
+
+uart:
+  id: tigo_uart
+  rx_pin: GPIO21         # no tx_pin: see the read-only note at the top
+  baud_rate: 38400
+  rx_buffer_size: 2048
+
+stream_server:
+  uart_id: tigo_uart
+  port: 6638
+  # Bytes sit here while Wi-Fi is slow; 38400 baud is ~3.8 kB/s, so this
+  # covers about a second.
+  buffer_size: 4096
+
+binary_sensor:
+  - platform: status
+    name: "Tigo Bridge Status"
+  - platform: stream_server
+    connected:
+      name: "Tigo Bridge Client Connected"
+
+sensor:
+  - platform: wifi_signal
+    name: "Tigo Bridge WiFi Signal"
+    update_interval: 60s
+  - platform: stream_server
+    connection_count:
+      name: "Tigo Bridge Clients"

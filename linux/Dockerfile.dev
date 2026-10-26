@@ -1,0 +1,12 @@
+# Build and test environment for tigomonitord: Debian 13, the same release as
+# Raspberry Pi OS trixie. Nothing needs installing on the host.
+#
+#   docker build -t tigod-dev -f linux/Dockerfile.dev linux
+#   docker run --rm -v "$PWD":/src -w /src tigod-dev linux/scripts/build.sh
+FROM debian:trixie-slim
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      build-essential cmake pkg-config \
+      libmosquitto-dev nlohmann-json3-dev zlib1g-dev libsqlite3-dev libsystemd-dev libssl-dev \
+      dbus-daemon python3-dbus python3-gi \
+      mosquitto mosquitto-clients python3 ca-certificates dpkg-dev \
+    && rm -rf /var/lib/apt/lists/*

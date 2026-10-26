@@ -22,3 +22,6 @@ site/screenshots/social-preview.html
 # Claude Code — local machine settings (permissions, etc). The skills in
 # .claude/skills/ ARE tracked; this file is per-machine.
 .claude/settings.local.json
+
+# Linux daemon build output
+/build/

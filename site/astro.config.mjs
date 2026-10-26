@@ -44,6 +44,7 @@ export default defineConfig({
             { label: 'Start Here', link: '/guides/getting-started/' },
             { label: 'Wiring', link: '/guides/wiring/' },
             { label: 'Config Builder', link: '/config-builder/' },
+            { label: 'Raspberry Pi and Linux', link: '/guides/raspberry-pi/' },
           ],
         },
         {

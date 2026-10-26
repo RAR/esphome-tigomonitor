@@ -1,0 +1,34 @@
+# tigomonitord in Docker. Open http://HOST:8080 afterwards, and choose the
+# bus source and MQTT broker under Tools.
+#
+#   docker compose -f linux/docker-compose.yml up -d
+services:
+  tigomonitord:
+    image: ghcr.io/rar/tigomonitord:latest
+    # Or build it from this checkout instead of pulling:
+    # build: { context: .., dockerfile: linux/Dockerfile }
+    container_name: tigomonitord
+    # Not on-failure: the web UI's "Restart service" exits cleanly.
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - tigomonitor:/var/lib/tigomonitor
+    # A USB RS485 adapter. Leave this out when the bus comes from a network
+    # bridge (tcp://host:port under Tools). The by-id name stays the same
+    # across reboots and replugs, where /dev/ttyUSB0 may not.
+    # devices:
+    #   - /dev/serial/by-id/usb-FTDI_FT232R_USB_UART_XXXXXXXX-if00-port0:/dev/ttyUSB0
+    # The CCA page over the host's Bluetooth: BlueZ's D-Bus socket, run as a
+    # host account (D-Bus drops user IDs the host can't look up, such as the
+    # image's own), in the host's bluetooth group (getent group bluetooth).
+    # That account must own the state directory, so bind-mount one it owns
+    # in place of the named volume above.
+    # user: "1000:1000"
+    # group_add:
+    #   - "112"
+    # volumes:
+    #   - /run/dbus/system_bus_socket:/run/dbus/system_bus_socket
+    #   - ./tigomonitor-state:/var/lib/tigomonitor
+volumes:
+  tigomonitor:
