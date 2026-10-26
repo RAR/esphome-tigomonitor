@@ -275,4 +275,26 @@ If no rule reaches 99.9 %, stop and report to the owner with the disagreement li
   - **Rollback:** Pi off, CCA back in, confirm production.
 - [ ] **Step 4: Run it with the owner.** Record the numbers in the runbook. Commit as `docs: roof takeover results`.
 
-Phase 4 (commissioning without a CCA) is a separate plan once Task 10 passes.
+### Task 11: Bring up a TAP at the factory address — PARTLY DONE
+
+Done (commits on feature/cca-replacement): `Discovery` re-addresses a TAP from
+0x1235 to the configured id (SET_485_ID, GET_MAC, SET_ID_BY_MAC, verify); the
+allow-list's `startup_only` class gates the writes; `master_startup` runs a
+read-first probe (already-addressed -> poll; at factory -> re-address) and a
+Tools toggle controls it. Covered by master-e2e runs 7-8 against a `--factory`
+mock.
+
+Still open, for the roof:
+- **Session-init.** The cold-start capture shows the CCA sending 0x0E02, a
+  0x0B00 session open, and two init polls (`00 00 00 00 00`, `00 00 ee ee 00`)
+  before steady polling. The master skips these and hands off to the poll+lease
+  loop. Whether the array produces without them is unknown; capture a takeover
+  and compare, or replay them if production doesn't start.
+- **The 1202-then-RESET step.** The CCA assigns the running id, then a second
+  id, then RESETs (returning to the first). Discovery stops at the verified
+  running id and doesn't RESET. If the TAP needs the reset to clear session
+  state for a clean bring-up, add it after the verify.
+
+Phase 4 (commissioning without a CCA) is a separate plan. The bench gateway
+discovery (GET_MAC_W_BACKOFF + SET_ID_BY_MAC, MAC big-endian) is the same
+machinery; see the analysis repo's DISCOVERY.md.

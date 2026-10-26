@@ -21,7 +21,12 @@ don't control. The goal is a replacement on hardware and software we own.
    put the array in safe mode.
 3. **Keep everything tigomonitor already shows,** now pulled from the TAP
    instead of overheard: per-panel readings, the node table, history, MQTT.
-4. **Later: commission without a CCA.** Wake a new array and enroll its
+4. **Bring up a TAP after a power cut.** A TAP that lost power comes back at
+   the factory address; re-address it to the running id and start it, as the
+   CCA does at every boot. **Partly built** (`master_startup`): the gateway
+   discovery/re-addressing works against a mock; whether the array also needs
+   the CCA's session-init (0x0E02, 0x0B00, the init polls) is a roof question.
+5. **Later: commission without a CCA.** Wake a new array and enroll its
    optimizers, from a barcode list (cloud import or node table backup), with
    no CCA ever involved.
 
