@@ -136,9 +136,53 @@ inline Bytes lease_renewal_args(uint16_t node_count) {
 
 // ---- telemetry polls -------------------------------------------------------
 
-inline Bytes poll_payload(uint16_t cursor) {
-  return {0x00, 0x01, static_cast<uint8_t>(cursor >> 8), static_cast<uint8_t>(cursor), 0x04};
+// retry: the previous poll got no reply; the CCA sends 00 in the second byte
+// then, 01 otherwise (26 of 26 such polls in the capture).
+inline Bytes poll_payload(uint16_t cursor, bool retry = false) {
+  return {0x00, static_cast<uint8_t>(retry ? 0x00 : 0x01), static_cast<uint8_t>(cursor >> 8),
+          static_cast<uint8_t>(cursor), 0x04};
 }
+
+// Complete power packets in a 0x0149 payload. The header is a status word,
+// then fields present when their status bit is clear (bit 0: 1 byte, 1: 1,
+// 2: 2, 3: 2, 4: 1) and two always present (bit 5: 1, bit 6: 2), as
+// protocol::header_length_chars reads it. Each packet is 7 bytes plus the
+// length in its byte 6.
+inline uint16_t power_packet_count(const Bytes &payload) {
+  if (payload.size() < 2) return 0;
+  unsigned status = payload[0] << 8 | payload[1];
+  size_t i = 2 + 3;
+  static const uint8_t sizes[] = {1, 1, 2, 2, 1};
+  for (unsigned bit = 0; bit < 5; bit++)
+    if (!(status & (1u << bit))) i += sizes[bit];
+  uint16_t n = 0;
+  while (i + 7 <= payload.size()) {
+    i += 7 + payload[i + 6];
+    if (i <= payload.size()) n++;
+  }
+  return n;
+}
+
+// The 0x0148 cursor. The TAP keeps power packets queued; each reply hands
+// over some, and the next poll's cursor is the last one plus how many came.
+// That rule matches 101,711 of 101,711 polls in the rig capture, and the
+// retry byte 101,710 (linux/scripts/cursor-check.py).
+class PollCursor {
+ public:
+  explicit PollCursor(uint16_t start) : cursor_(start) {}
+  uint16_t next() const { return cursor_; }
+  bool retry() const { return retry_; }
+  void on_reply(const Frame &reply) {
+    if (reply.cmd != CMD_POLL_REPLY) return;
+    cursor_ = static_cast<uint16_t>(cursor_ + power_packet_count(reply.payload));
+    retry_ = false;
+  }
+  void on_timeout() { retry_ = true; }
+
+ private:
+  uint16_t cursor_;
+  bool retry_ = false;
+};
 
 }  // namespace master
 }  // namespace tigo_monitor

@@ -76,9 +76,47 @@ static void test_lease() {
   CHECK(!parse_tunnel_reply(hex("000e00"), r));
 }
 
+// Six consecutive polls from the capture, each with the TAP's reply: the
+// cursor steps 0, 0, 0, 4, 4, 2, the number of power packets in each reply.
+static void test_poll_cursor() {
+  const char *replies[] = {
+      "41ffcc4be7",
+      "41ffcc4be9",
+      "41ffcc4beb",
+      "41fe04cc4bed3100260081620f32a10eae4e61878400644bb84801003100260081620f31710cb250b1878400644960480100310029003a68"
+      "0f31a111b551917f83006444b03c0100310029003a680f31a111b551817f83006447083c0100",
+      "41ffd04bf4310029003a680f31a10fb351517f83006449603c0100310029003a680f312111b751f17f8300644bb83c010031000c0082140f"
+      "32018cff73315c0100644bb872010031000c0082140f31a18aff74715c0100644960720100",
+      "41fe02d44bfc310028003f6e0f32010fb24fd1768400644bb8480100310028003f6e0f31510bb250b1768400644960480100",
+  };
+  const uint16_t next[] = {0x6FCC, 0x6FCC, 0x6FCC, 0x6FD0, 0x6FD4, 0x6FD6};
+  PollCursor cursor(0x6FCC);
+  CHECK(cursor.next() == 0x6FCC && !cursor.retry());
+  CHECK(poll_payload(cursor.next(), cursor.retry()) == hex("00016fcc04"));
+  for (int i = 0; i < 6; i++) {
+    Frame reply{0x9201, CMD_POLL_REPLY, hex(replies[i])};
+    cursor.on_reply(reply);
+    CHECK(cursor.next() == next[i]);
+  }
+  // No reply: the cursor stays and the next poll is marked as a retry
+  // (second byte 00), as the CCA does; the next answer clears it.
+  cursor.on_timeout();
+  CHECK(cursor.next() == 0x6FD6 && cursor.retry());
+  CHECK(poll_payload(cursor.next(), cursor.retry()) == hex("00006fd604"));
+  cursor.on_reply(Frame{0x9201, CMD_POLL_REPLY, hex("41e0000e000102006fd64c00")});
+  CHECK(cursor.next() == 0x6FD6 && !cursor.retry());
+  // A reply that isn't a power frame changes nothing, and the cursor wraps.
+  cursor.on_reply(Frame{0x9201, CMD_TUNNEL_REPLY, hex("000e002ffd0101a0002c0028002c00")});
+  CHECK(cursor.next() == 0x6FD6);
+  PollCursor end(0xFFFF);
+  end.on_reply(Frame{0x9201, CMD_POLL_REPLY, hex(replies[5])});
+  CHECK(end.next() == 0x0001);
+}
+
 int main() {
   test_codec();
   test_lease();
+  test_poll_cursor();
   if (failures) {
     std::printf("%d failed\n", failures);
     return 1;
