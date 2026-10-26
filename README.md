@@ -38,6 +38,10 @@ per-panel monitoring with a built-in web app and Home Assistant integration.
 The full walkthrough — parts list, safety, sensor blocks, PSRAM tuning — is in
 [Start Here](https://rar.github.io/esphome-tigomonitor/guides/getting-started/).
 
+No ESP32? The same monitor runs on a Raspberry Pi, any Debian or Ubuntu machine,
+or in Docker, with no ESPHome — see
+[Raspberry Pi and Linux](https://rar.github.io/esphome-tigomonitor/guides/raspberry-pi/).
+
 > ⚠ **Upgrading from a pre-TSDB release: one-time data loss + serial flash required.**
 > The partition layout changed to make room for the on-flash time-series database, so
 > the new image can't go over OTA and NVS is wiped. Export your JSON from **Tools →
@@ -62,6 +66,7 @@ Full documentation lives at **[rar.github.io/esphome-tigomonitor](https://rar.gi
 |----------|-------------|
 | [Start Here](https://rar.github.io/esphome-tigomonitor/guides/getting-started/) | Parts, safety, and the five steps to a live dashboard |
 | [Config Builder](https://rar.github.io/esphome-tigomonitor/config-builder/) | Generate a ready-to-flash ESPHome YAML for your board |
+| [Raspberry Pi and Linux](https://rar.github.io/esphome-tigomonitor/guides/raspberry-pi/) | The monitor on a Pi, a Linux machine or in Docker, without ESPHome |
 | [Wiring Guide](https://rar.github.io/esphome-tigomonitor/guides/wiring/) | RS485 connection to Tigo CCA/TAP |
 | [Configuration Guide](https://rar.github.io/esphome-tigomonitor/guides/configuration/) | Full configuration options, PSRAM and large installs |
 | [Web Server](https://rar.github.io/esphome-tigomonitor/guides/web-server/) | SPA views and the full API reference |

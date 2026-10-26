@@ -1,11 +1,15 @@
 ---
-title: Raspberry Pi
-description: Run Tigo Monitor on a Raspberry Pi Zero 2 W instead of an ESP32 — install one package on Raspberry Pi OS, connect an RS485 adapter, and point it at Home Assistant's MQTT broker.
+title: Raspberry Pi and Linux
+description: Run Tigo Monitor on a Raspberry Pi, another Linux machine or in Docker instead of an ESP32 — install one package, connect an RS485 adapter or a network bridge, and point it at Home Assistant's MQTT broker.
 ---
+
 
 The ESP32 is the main way to run Tigo Monitor. If you would rather use a
 Raspberry Pi, there is a Pi build: the same dashboard and the same panel
-decoding, packaged for Raspberry Pi OS, with no ESPHome and no YAML.
+decoding, packaged for Raspberry Pi OS, with no ESPHome and no YAML. The same
+build runs on other Debian and Ubuntu machines and in Docker, and can read the
+bus from a small ESP32 bridge at the Tigo cabinet; see
+[Other ways to run it](#other-ways-to-run-it).
 
 :::caution[Experimental]
 The Pi build is new and has run on one installation so far: a Pi Zero 2 W
@@ -46,7 +50,8 @@ you saw, working or not.
 - A **USB RS485 adapter**, wired to the TAP the same way as the ESP32 build —
   A, B and ground; see [Wiring](/esphome-tigomonitor/guides/wiring/). An RS485
   HAT on the Pi's own serial pins works too; see
-  [Using an RS485 HAT](#using-an-rs485-hat).
+  [Using an RS485 HAT](#using-an-rs485-hat). So does an ESP32 bridge at the
+  cabinet; see [Read the bus over the network](#read-the-bus-over-the-network).
 - An **MQTT broker** that Home Assistant uses. If you don't have one, install
   the Mosquitto broker add-on in Home Assistant.
 
@@ -95,108 +100,6 @@ sudo reboot
 Then, under **Tools → RS485 adapter and web UI**, choose **Raspberry Pi
 UART** (`/dev/serial0`).
 
-## Read the bus over the network
-
-The machine running the monitor doesn't have to be at the Tigo cabinet. A
-small ESP32 there can pass the bus along over Wi-Fi instead, and the monitor
-reads it from the network. The bridge only forwards bytes; the decoding, the
-dashboard and the history all stay on the machine running the monitor.
-
-1. Flash
-   [`boards/example-t-can485-bridge.yaml`](https://github.com/RAR/esphome-tigomonitor/blob/main/boards/example-t-can485-bridge.yaml)
-   to a LilyGO T-CAN485, with your Wi-Fi filled in, and wire its RS485
-   terminals to the TAP as in [Wiring](/esphome-tigomonitor/guides/wiring/).
-   It runs [stream_server](https://github.com/oxan/esphome-stream-server),
-   which sends every byte from the bus to whoever connects on port 6638.
-2. Under **Tools → RS485 adapter and web UI**, choose **Network bridge (TCP)**
-   and enter the bridge's address, `tigo-bridge.local:6638` or its IP and
-   port, then save.
-
-The bridge can't send anything onto the bus: its UART has no transmit pin,
-and the transceiver's driver is held off. If the bridge loses power or Wi-Fi,
-the monitor notices within about a minute and reconnects when it's back.
-
-An RS485-to-Ethernet converter set to TCP server mode, passing bytes through
-unchanged, takes the bridge's place the same way. So far only the T-CAN485
-config has been built, and the monitor's side tested against a simulated
-bridge.
-
-## On a machine that does other things
-
-The same package installs on 64-bit Raspberry Pi OS, Debian 13 (trixie), or
-Ubuntu 24.04 or 26.04, on a machine that already runs other services. For an x86 machine, take the
-`amd64` package instead of the `arm64` one. It stays out of their way until
-you set it up:
-
-- **It opens no serial port until you choose one.** A Zigbee or Z-Wave stick
-  on the same machine is never touched, and listing the ports does not open
-  them.
-- **Its web UI moves to port 8080 if port 80 is taken**, and the log says so.
-  Set another port in the same card; it takes effect when the service
-  restarts, and the page offers to restart and follow it there. The
-  `tigomonitor.local` network-browser entry still says port 80: edit
-  `/etc/avahi/services/tigomonitor-http.service` to match.
-
-Installing the package starts the service straight away. To keep it off a
-port another service may want, such as 8080, set the port before you
-install. The monitor reads `settings.json` when it first starts, and
-installing never overwrites it:
-
-```sh
-sudo mkdir -p /var/lib/tigomonitor
-echo '{"web_port": 8099}' | sudo tee /var/lib/tigomonitor/settings.json
-sudo apt install ./tigomonitord_VERSION_arm64.deb
-```
-
-The same file takes `"serial_port"` too. Anything left out keeps its
-default, and the web UI edits the file from then on.
-
-## Run it in Docker
-
-On a machine that already runs containers, use the image instead of the
-package. It's built for arm64 and amd64:
-
-```sh
-docker run -d --name tigomonitord --restart unless-stopped \
-  -p 8080:8080 -v tigomonitor:/var/lib/tigomonitor \
-  ghcr.io/rar/tigomonitord:latest
-```
-
-Then open `http://HOST:8080` and set it up under Tools, as with the package.
-[`linux/docker-compose.yml`](https://github.com/RAR/esphome-tigomonitor/blob/main/linux/docker-compose.yml)
-does the same with Compose.
-
-- **The bus:** a [network bridge](#read-the-bus-over-the-network) needs
-  nothing extra. For a USB adapter, pass it in with
-  `--device /dev/serial/by-id/usb-…:/dev/ttyUSB0` and choose `/dev/ttyUSB0`.
-  The by-id name stays the same across reboots, where the host's own
-  `/dev/ttyUSB0` may change.
-- **Restarts:** use `--restart unless-stopped`, not `on-failure`. The web UI's
-  **Restart service** exits cleanly and relies on Docker starting it again.
-- **The web port** is 8080 inside the container; publish it as any port you
-  like. The web UI's port setting does nothing here.
-- **The CCA page over Bluetooth** needs the host's BlueZ. Mount
-  `/run/dbus/system_bus_socket` into the container, and run it as an account
-  the host knows that is in its `bluetooth` group: `--user UID:GID`, plus
-  `--group-add` with the host's bluetooth group ID. D-Bus drops connections
-  from user IDs the host can't look up, and the image's own account is one of
-  those. That account then also needs to own the state directory, so use a
-  directory it owns in place of the named volume. This hasn't been tried
-  against a CCA yet. The CCA's HTTP API, for firmware older than 4.0.4, needs
-  nothing extra.
-
-## Set a password
-
-Out of the box, as on the ESP32, the web UI has no login: anyone on your
-network can open it and change its settings, including the CCA's Wi-Fi and
-the MQTT broker. To require one, set **Web UI password** under **Tools →
-RS485 adapter and web UI**. The browser then asks for the username (`admin`
-unless you change it) and password. Pages on other websites can't use the
-monitor's settings either way, even with the login saved in your browser.
-
-The MQTT password stays on the Pi: the web UI never shows it, and changing
-the broker's address or username clears it, so it has to be entered again.
-
 ## Connect it to Home Assistant
 
 1. Open `http://tigomonitor.local` (or your hostname).
@@ -231,6 +134,112 @@ called "All panels". There are three ways to get your real layout:
 If the strings land under **Unassigned**, go to **Tools → Inverters** and
 list which MPPTs each inverter owns.
 
+## Set a password
+
+Out of the box, as on the ESP32, the web UI has no login: anyone on your
+network can open it and change its settings, including the CCA's Wi-Fi and
+the MQTT broker. To require one, set **Web UI password** under **Tools →
+RS485 adapter and web UI**. The browser then asks for the username (`admin`
+unless you change it) and password. Pages on other websites can't use the
+monitor's settings either way, even with the login saved in your browser.
+
+The MQTT password stays on the Pi: the web UI never shows it, and changing
+the broker's address or username clears it, so it has to be entered again.
+
+## Other ways to run it
+
+None of these are needed for a Pi at the Tigo cabinet.
+
+### Read the bus over the network
+
+The machine running the monitor doesn't have to be at the Tigo cabinet. A
+small ESP32 there can pass the bus along over Wi-Fi instead, and the monitor
+reads it from the network. The bridge only forwards bytes; the decoding, the
+dashboard and the history all stay on the machine running the monitor.
+
+1. Flash
+   [`boards/example-t-can485-bridge.yaml`](https://github.com/RAR/esphome-tigomonitor/blob/main/boards/example-t-can485-bridge.yaml)
+   to a LilyGO T-CAN485, with your Wi-Fi filled in, and wire its RS485
+   terminals to the TAP as in [Wiring](/esphome-tigomonitor/guides/wiring/).
+   It runs [stream_server](https://github.com/oxan/esphome-stream-server),
+   which sends every byte from the bus to whoever connects on port 6638.
+2. Under **Tools → RS485 adapter and web UI**, choose **Network bridge (TCP)**
+   and enter the bridge's address, `tigo-bridge.local:6638` or its IP and
+   port, then save.
+
+The bridge can't send anything onto the bus: its UART has no transmit pin,
+and the transceiver's driver is held off. If the bridge loses power or Wi-Fi,
+the monitor notices within about a minute and reconnects when it's back.
+
+An RS485-to-Ethernet converter set to TCP server mode, passing bytes through
+unchanged, takes the bridge's place the same way. So far only the T-CAN485
+config has been built, and the monitor's side tested against a simulated
+bridge.
+
+### On a machine that does other things
+
+The same package installs on 64-bit Raspberry Pi OS, Debian 13 (trixie), or
+Ubuntu 24.04 or 26.04, on a machine that already runs other services. For an x86 machine, take the
+`amd64` package instead of the `arm64` one. It stays out of their way until
+you set it up:
+
+- **It opens no serial port until you choose one.** A Zigbee or Z-Wave stick
+  on the same machine is never touched, and listing the ports does not open
+  them.
+- **Its web UI moves to port 8080 if port 80 is taken**, and the log says so.
+  Set another port in the same card; it takes effect when the service
+  restarts, and the page offers to restart and follow it there. The
+  `tigomonitor.local` network-browser entry still says port 80: edit
+  `/etc/avahi/services/tigomonitor-http.service` to match.
+
+Installing the package starts the service straight away. To keep it off a
+port another service may want, such as 8080, set the port before you
+install. The monitor reads `settings.json` when it first starts, and
+installing never overwrites it:
+
+```sh
+sudo mkdir -p /var/lib/tigomonitor
+echo '{"web_port": 8099}' | sudo tee /var/lib/tigomonitor/settings.json
+sudo apt install ./tigomonitord_VERSION_arm64.deb
+```
+
+The same file takes `"serial_port"` too. Anything left out keeps its
+default, and the web UI edits the file from then on.
+
+### Run it in Docker
+
+On a machine that already runs containers, use the image instead of the
+package. It's built for arm64 and amd64:
+
+```sh
+docker run -d --name tigomonitord --restart unless-stopped \
+  -p 8080:8080 -v tigomonitor:/var/lib/tigomonitor \
+  ghcr.io/rar/tigomonitord:latest
+```
+
+Then open `http://HOST:8080` and set it up under Tools, as with the package.
+[`linux/docker-compose.yml`](https://github.com/RAR/esphome-tigomonitor/blob/main/linux/docker-compose.yml)
+does the same with Compose.
+
+- **The bus:** a [network bridge](#read-the-bus-over-the-network) needs
+  nothing extra. For a USB adapter, pass it in with
+  `--device /dev/serial/by-id/usb-…:/dev/ttyUSB0` and choose `/dev/ttyUSB0`.
+  The by-id name stays the same across reboots, where the host's own
+  `/dev/ttyUSB0` may change.
+- **Restarts:** use `--restart unless-stopped`, not `on-failure`. The web UI's
+  **Restart service** exits cleanly and relies on Docker starting it again.
+- **The web port** is 8080 inside the container; publish it as any port you
+  like. The web UI's port setting does nothing here.
+- **The CCA page over Bluetooth** needs the host's BlueZ. Mount
+  `/run/dbus/system_bus_socket` into the container, and run it as an account
+  the host knows that is in its `bluetooth` group: `--user UID:GID`, plus
+  `--group-add` with the host's bluetooth group ID. D-Bus drops connections
+  from user IDs the host can't look up, and the image's own account is one of
+  those. That account then also needs to own the state directory, so use a
+  directory it owns in place of the named volume. This hasn't been tried
+  against a CCA yet. The CCA's HTTP API, for firmware older than 4.0.4, needs
+  nothing extra.
+
 ## If nothing shows up
 
 - **No panels on the dashboard:** check **Diagnostics → Frames processed**.
@@ -241,4 +250,5 @@ list which MPPTs each inverter owns.
   allow up to 15 minutes on a fresh install for the gateway's next
   announcement.
 - **Lots of bad checksums:** A and B are probably swapped.
-- **Logs:** log in over SSH and run `journalctl -u tigomonitord -f`.
+- **Logs:** log in over SSH and run `journalctl -u tigomonitord -f`, or
+  `docker logs -f tigomonitord` for the container.
