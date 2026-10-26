@@ -135,4 +135,36 @@ expect "refused polls named as such" "$(api 18097 /api/master | python3 -c 'impo
 kill $daemon; wait $daemon 2>/dev/null || true
 kill $tap; wait $tap 2>/dev/null || true
 
+# --- run 7: startup discovery (TAP boots at the factory address) ---
+mkdir -p "$out/state7"
+python3 linux/tools/mock_tap.py "$out/tap7" --factory --lease 600 --nodes 44 --stats "$out/tap7.json" &
+tap=$!
+sleep 0.5
+printf '{"bus_role": "master", "master_startup": true, "serial_port": "%s", "gateway_id": 4609, "web_port": 18098}\n' \
+  "$PWD/$out/tap7" > "$out/state7/settings.json"
+build/linux/tigomonitord --state-dir "$out/state7" --web-dir components/tigo_server/web 2> "$out/daemon7.log" &
+daemon=$!
+sleep 6
+expect "TAP re-addressed from factory to 0x1201" "$(stat "$out/tap7.json" "d['addressed_to']")" 1201
+m7="$(api 18098 /api/master)"
+expect "running after discovery" "$(echo "$m7" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["active"], d["fault"], d["phase"])')" "True none running"
+expect "polling the re-addressed TAP" "$(api 18098 /api/devices | python3 -c 'import json,sys; print(len(json.load(sys.stdin)["devices"]) > 0)')" True
+kill $daemon; wait $daemon 2>/dev/null || true
+kill $tap; wait $tap 2>/dev/null || true
+
+# --- run 8: startup, but the TAP is already addressed -> no re-addressing writes ---
+mkdir -p "$out/state8"
+python3 linux/tools/mock_tap.py "$out/tap8" --lease 600 --nodes 44 --stats "$out/tap8.json" &
+tap=$!
+sleep 0.5
+printf '{"bus_role": "master", "master_startup": true, "serial_port": "%s", "gateway_id": 4609, "web_port": 18099}\n' \
+  "$PWD/$out/tap8" > "$out/state8/settings.json"
+build/linux/tigomonitord --state-dir "$out/state8" --web-dir components/tigo_server/web 2> "$out/daemon8.log" &
+daemon=$!
+sleep 5
+expect "no re-addressing on an addressed TAP" "$(stat "$out/tap8.json" "d['addressed_to']")" None
+expect "went straight to running" "$(api 18099 /api/master | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["phase"], d["polls"] > 0)')" "running True"
+kill $daemon; wait $daemon 2>/dev/null || true
+kill $tap; wait $tap 2>/dev/null || true
+
 [ $fail = 0 ] && echo "master e2e passed" || { echo "master e2e FAILED; see $out/"; exit 1; }

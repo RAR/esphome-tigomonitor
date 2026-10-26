@@ -73,6 +73,7 @@ def main():
     ap.add_argument('--drop-every', type=int, default=0)
     ap.add_argument('--start-cursor', type=lambda v: int(v, 16), default=0)
     ap.add_argument('--bare', action='store_true')
+    ap.add_argument('--factory', action='store_true')  # boot at the factory address 0x1235
     ap.add_argument('--stats', default=None)
     a = ap.parse_args()
 
@@ -83,14 +84,17 @@ def main():
     os.symlink(os.ttyname(slave_fd), a.link)
 
     rng = random.Random(1)
-    panels = [(f"04C05B40{0x0B0000 + i * 7:06X}{rng.randint(0, 255):02X}", 0x0002 + i) for i in range(a.panels)]
+    panels = [(f"04C05B40{0x0B0000 + i * 7:06X}{rng.randint(0, 255):02X}", 0x0002 + i) for i in range(a.panels)]  # (barcode, node id)
     start = time.monotonic()
     lease_end = start + a.lease
     handed_out = a.start_cursor
     sent_table = False
     foreign_sent = False
+    MAC = bytes.fromhex('04c05b3000037dfb')
+    FACTORY = 0x1235
+    addr = FACTORY if a.factory else GATEWAY  # the id the TAP currently answers at
     stats = {'polls': 0, 'retries': 0, 'cursor_mismatches': 0, 'checks': 0, 'renewals': [], 'other': [],
-             'first_lease_frame': None, 'first_frame': None, 'frames_after_foreign': 0, 'foreign_at': None}
+             'first_lease_frame': None, 'first_frame': None, 'addressed_to': None, 'frames_after_foreign': 0, 'foreign_at': None}
     buf = bytearray()
     last_stats = 0.0
 
@@ -131,15 +135,31 @@ def main():
             if len(body) < 6 or crc16(body[:-2]) != (body[-2] << 8 | body[-1]):
                 continue
             dest, cmd, p = body[0] << 8 | body[1], body[2] << 8 | body[3], body[4:-2]
-            if dest != GATEWAY:
-                continue
             t = time.monotonic() - start
+            # Gateway addressing: answers at its current address, or at the
+            # broadcast address for the universal set-id and reset.
+            if cmd == 0x0014 and dest == 0x0000:  # SET_485_ID broadcast
+                os.write(master_fd, encode(0x8000, 0x0015, b''))
+                continue
+            if cmd == 0x0010 and dest == 0x0000:  # RESET broadcast
+                os.write(master_fd, encode(0x8000, 0x0011, b''))
+                continue
+            if cmd in (0x0038, 0x003A) and dest == addr:  # GET_MAC (with/without backoff)
+                os.write(master_fd, encode(addr | 0x8000, cmd + 1, MAC + bytes([addr >> 8, addr & 0xFF])))
+                continue
+            if cmd == 0x003C and dest == addr and len(p) == 14 and p[4:12] == MAC:  # SET_ID_BY_MAC
+                addr = p[12] << 8 | p[13]
+                stats['addressed_to'] = f'{addr:04X}'
+                os.write(master_fd, encode(dest | 0x8000, 0x003D, b''))
+                continue
+            if dest != addr:
+                continue
             stats['first_frame'] = stats['first_frame'] or f'{cmd:04X}'
             if cmd == 0x000A:
-                os.write(master_fd, encode(GATEWAY | 0x8000, 0x000B, b'Mgate G1.0000'))
+                os.write(master_fd, encode(addr | 0x8000, 0x000B, b'Mgate G1.0000'))
                 continue
             if a.bare and cmd in (0x0B0F, 0x0148):
-                os.write(master_fd, encode(GATEWAY | 0x8000, 0x0006, b''))
+                os.write(master_fd, encode(addr | 0x8000, 0x0006, b''))
                 continue
             if foreign_sent:
                 stats['frames_after_foreign'] += 1
@@ -155,27 +175,27 @@ def main():
                     stats['cursor_mismatches'] += 1
                     # 0x41E0: bits 0-4 clear, so the header carries the TAP's whole cursor.
                     reply = bytes.fromhex(f'41E0000E00010200{handed_out & 0xFFFF:04X}4C00')
-                    os.write(master_fd, encode(GATEWAY | 0x8000, 0x0149, reply))
+                    os.write(master_fd, encode(addr | 0x8000, 0x0149, reply))
                     continue
                 n = rng.choice([0, 0, 0, 1, 2])
                 packets = ''.join(power_packet(panels[(handed_out + i) % len(panels)][1], rng, 0.8) for i in range(n))
                 handed_out += n
                 reply = bytes.fromhex(f'41FF{cursor & 0xFF:02X}4B9A' + packets)
-                os.write(master_fd, encode(GATEWAY | 0x8000, 0x0149, reply))
+                os.write(master_fd, encode(addr | 0x8000, 0x0149, reply))
                 if not sent_table:  # the node table, as a reply from the gateway
                     table = '0000002701' + f'{2:04X}{len(panels):04X}' + ''.join(
-                        barcode + f'{addr:04X}' for barcode, addr in panels)
-                    os.write(master_fd, encode(GATEWAY | 0x8000, 0x0B10, bytes.fromhex(table)))
+                        barcode + f'{paddr:04X}' for barcode, paddr in panels)
+                    os.write(master_fd, encode(addr | 0x8000, 0x0B10, bytes.fromhex(table)))
                     sent_table = True
             elif cmd == 0x0B0F and len(p) >= 5 and p[3] == 0x2E:
                 stats['checks'] += 1
                 stats['first_lease_frame'] = stats['first_lease_frame'] or 'check'
-                os.write(master_fd, encode(GATEWAY | 0x8000, 0x0B10, lease_payload(p[4])))
+                os.write(master_fd, encode(addr | 0x8000, 0x0B10, lease_payload(p[4])))
             elif cmd == 0x0B0F and len(p) == 14 and p[3] == 0x2D:
                 stats['first_lease_frame'] = stats['first_lease_frame'] or 'renew'
                 stats['renewals'].append({'t': round(t, 2), 'nodes': p[10] << 8 | p[11]})
                 lease_end = time.monotonic() + a.renew_to
-                os.write(master_fd, encode(GATEWAY | 0x8000, 0x0B10, lease_payload(p[4])))
+                os.write(master_fd, encode(addr | 0x8000, 0x0B10, lease_payload(p[4])))
             else:
                 stats['other'].append(f'{cmd:04X} {p.hex()}')
 
