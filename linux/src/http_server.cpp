@@ -279,7 +279,14 @@ void HttpServer::routes_() {
     }
     std::stringstream ss;
     ss << in.rdbuf();
-    res.set_content(ss.str(), "text/html; charset=utf-8");
+    std::string page = ss.str();
+    // The ESP32 puts its api_token here. The Pi has none, and left in, the
+    // placeholder goes out as "Authorization: Bearer __TIGO_API_TOKEN__" on
+    // every API call, which displaces the browser's login and fails it.
+    static const std::string TOKEN = "__TIGO_API_TOKEN__";
+    size_t at = page.find(TOKEN);
+    if (at != std::string::npos) page.replace(at, TOKEN.size(), "");
+    res.set_content(page, "text/html; charset=utf-8");
   };
   svr.Get("/", app);
   svr.Get("/app", app);

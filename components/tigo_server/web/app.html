@@ -3342,11 +3342,12 @@
         `Readings go to ${s.mqtt.base_topic}/${s.device_id}/panel/<barcode>/state`;
       piWebPortActive = s.web_port_active;
       document.getElementById('pi-web-port').value = s.web_port || '';
-      document.getElementById('pi-web-user').value = s.web_username || 'admin';
+      piWebLogin = { user: s.web_username || 'admin', set: !!s.web_password_set };
+      document.getElementById('pi-web-user').value = piWebLogin.user;
       document.getElementById('pi-web-pass').value = '';
       document.getElementById('pi-web-pass').placeholder = s.web_password_set ? 'unchanged' : '';
       document.getElementById('pi-web-pass-hint').textContent = s.web_password_set
-        ? 'Set. Leave empty to keep it.'
+        ? `Set: log in as "${piWebLogin.user}". Leave empty to keep it.`
         : 'Empty: anyone on your network can open this page and change settings';
       document.getElementById('pi-web-pass-remove').style.display = s.web_password_set ? '' : 'none';
       await piFillSerial(s.serial_port || '');
@@ -3358,6 +3359,7 @@
     }
   }
   let piWebPortActive = 0;
+  let piWebLogin = { user: 'admin', set: false };
   async function piFillSerial(current) {
     const sel = document.getElementById('pi-serial');
     let ports = [];
@@ -3427,6 +3429,15 @@
                    web_username: document.getElementById('pi-web-user').value.trim() || 'admin' };
     const webPass = document.getElementById('pi-web-pass').value;
     if (webPass !== '') body.web_password = webPass;
+    // Browsers fill a saved login (the Tigo cloud one, say) into a username
+    // box next to a password box, ignoring autocomplete="off", and that
+    // silently becomes the login. So say what the login will be before
+    // turning it on or changing it.
+    if ((webPass !== '' || piWebLogin.set) && (webPass !== '' || body.web_username !== piWebLogin.user) &&
+        !confirm(`Your browser will ask for this login from now on:\n\n` +
+                 `Username: ${body.web_username}\n` +
+                 `Password: ${webPass !== '' ? `the one you typed (${webPass.length} characters)` : 'unchanged'}\n\n` +
+                 `If your browser filled either in for you, cancel and correct them.`)) return;
     try {
       const r = await apiFetch('/api/settings', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),

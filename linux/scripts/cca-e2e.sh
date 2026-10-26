@@ -10,6 +10,7 @@ mkdir -p "$out"
 rm -f "$out"/*.json "$out"/history.db*  # a fresh install every run
 addr="$(dbus-daemon --session --fork --print-address | head -1)"
 TIGOD_DBUS_ADDRESS="$addr" build/linux/tigomonitord --state-dir "$out" --port 18089 --serial /dev/nonexistent \
+  --web-dir components/tigo_server/web \
   2> "$out/daemon.log" &
 daemon=$!
 cleanup() {
@@ -152,6 +153,10 @@ auth = {'Authorization': 'Basic ' + base64.b64encode(b'admin:pw').decode()}
 expect('login required', code('/api/status'), 401)
 expect('wrong password refused', code('/api/status', headers={'Authorization': 'Basic ' + base64.b64encode(b'admin:no').decode()}), 401)
 expect('logged in', code('/api/status', headers=auth), 200)
+# The page's API calls carry its token as a Bearer header, which a browser
+# sends instead of the login; the ESP32's placeholder must not go out.
+page = u.urlopen(u.Request(B + '/', headers=auth)).read()
+expect('page has no API token', (b'__TIGO_API_TOKEN__' in page, b'const API_TOKEN = "";' in page), (False, True))
 code('/api/settings', 'POST', b'{"web_password": ""}', dict(auth, **{'Content-Type': 'application/json'}))
 time.sleep(1.5)
 expect('login removed', code('/api/status'), 200)
