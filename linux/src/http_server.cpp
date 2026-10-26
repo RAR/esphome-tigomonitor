@@ -1046,6 +1046,7 @@ void HttpServer::routes_() {
     send_json(res, {{"role", ctx_.current_settings().bus_role},
                     {"active", m.active},
                     {"fault", fault_name(m.fault)},
+                    {"phase", phase_name(m.phase)},
                     {"detail", m.detail},
                     {"lease_read", m.lease_read},
                     {"lease",
@@ -1073,6 +1074,7 @@ void HttpServer::routes_() {
     send_json(res, {{"serial_port", s.serial_port},
                     {"bus_role", s.bus_role},
                     {"master_bench", s.master_bench},
+                    {"master_startup", s.master_startup},
                     {"gateway_id", s.gateway_id},
                     {"web_port", s.web_port},
                     {"web_port_active", port_},
@@ -1107,6 +1109,7 @@ void HttpServer::routes_() {
       if (j.contains("serial_port")) s.serial_port = j["serial_port"].get<std::string>();
       if (j.contains("bus_role")) s.bus_role = j["bus_role"].get<std::string>();
       if (j.contains("master_bench")) s.master_bench = j["master_bench"].get<bool>();
+      if (j.contains("master_startup")) s.master_startup = j["master_startup"].get<bool>();
       if (j.contains("gateway_id")) s.gateway_id = j["gateway_id"].get<int>();
       if (j.contains("web_port")) s.web_port = j["web_port"].get<int>();
       if (j.contains("web_username")) s.web_username = j["web_username"].get<std::string>();

@@ -14,18 +14,22 @@
 
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <mutex>
 #include <set>
 #include <string>
 
 namespace tigod {
 
-enum class Fault { none, no_port, no_reply, second_master, refused, lease_refused };
+enum class Fault { none, no_port, no_reply, second_master, refused, lease_refused, discovery_failed };
+enum class Phase { running, probing, discovering };
+const char *phase_name(Phase p);
 const char *fault_name(Fault f);
 
 struct MasterStatus {
   bool active = false;  // the port is open and nothing has stopped it
   Fault fault = Fault::none;
+  Phase phase = Phase::running;
   esphome::tigo_monitor::master::Lease lease;
   bool lease_read = false;
   uint32_t renewals = 0;
@@ -43,7 +47,9 @@ class BusMaster {
   // on the bench answers (tigo_master.h's bench_only); writes are never sent
   // either way.
   using Sink = std::function<void(const char *, size_t)>;
-  BusMaster(Sink on_rx, Sink on_tx, uint16_t gateway_id, bool bench);
+  // startup: if the TAP is found at the factory address, re-address it to
+  // gateway_id before polling (bus_master re-addressing writes, gated).
+  BusMaster(Sink on_rx, Sink on_tx, uint16_t gateway_id, bool bench, bool startup);
   ~BusMaster();
 
   bool open(const std::string &device, int baud);
@@ -55,21 +61,25 @@ class BusMaster {
   static const int REPLY_TIMEOUT_MS = 50;
   static const uint32_t REOPEN_EVERY_MS = 5000;
   static const uint32_t LOG_FIRST_REPLIES = 20;  // poll reply headers logged at INFO, for the bench
+  static const uint16_t FACTORY_ID = 0x1235;     // the universal factory RS485 address
   static const uint32_t NO_REPLY_FAULT_AFTER = 10;
 
  private:
   // Sends one frame and reads until the gateway's reply ends or the timeout.
   // false on a timeout, a write error or a second master.
-  bool transact(uint16_t cmd, const esphome::tigo_monitor::master::Bytes &payload,
+  bool transact(uint16_t dest, uint16_t cmd, const esphome::tigo_monitor::master::Bytes &payload,
                 esphome::tigo_monitor::master::Frame &reply);
   bool is_reply(uint16_t cmd, const esphome::tigo_monitor::master::Bytes &request,
                 const esphome::tigo_monitor::master::Frame &f) const;
+  void run_startup();  // probe + discovery, before steady state
   void set_fault(Fault f, const std::string &detail);
   void update_lease_fault_();
 
   Sink on_rx_, on_tx_;
   uint16_t gateway_;
-  bool bench_;
+  bool bench_, startup_;
+  Phase phase_;
+  std::unique_ptr<esphome::tigo_monitor::master::Discovery> discovery_;
   int fd_ = -1;
   std::string device_;  // reopened every REOPEN_EVERY_MS while closed, as listening does
   int baud_ = 38400;

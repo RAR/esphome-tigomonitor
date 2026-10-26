@@ -154,7 +154,7 @@ int main(int argc, char **argv) {
     int baud = settings.baud_rate;
     if (replay.empty() && settings.bus_role == "master") {
       auto m = std::make_unique<BusMaster>(on_data, on_sent, static_cast<uint16_t>(settings.gateway_id),
-                                           settings.master_bench);
+                                           settings.master_bench, settings.master_startup);
       if (dev.empty()) LOGW("bus master: no serial port chosen yet; pick the RS485 adapter under Tools");
       else m->open(dev, baud);
       std::lock_guard<std::mutex> lock(master_mu);

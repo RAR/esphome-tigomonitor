@@ -16,6 +16,15 @@ using namespace esphome::tigo_monitor;
 using master::Bytes;
 using master::Frame;
 
+const char *phase_name(Phase p) {
+  switch (p) {
+    case Phase::running: return "running";
+    case Phase::probing: return "probing";
+    case Phase::discovering: return "discovering";
+  }
+  return "unknown";
+}
+
 const char *fault_name(Fault f) {
   switch (f) {
     case Fault::none: return "none";
@@ -24,14 +33,16 @@ const char *fault_name(Fault f) {
     case Fault::second_master: return "second_master";
     case Fault::refused: return "refused";
     case Fault::lease_refused: return "lease_refused";
+    case Fault::discovery_failed: return "discovery_failed";
   }
   return "unknown";
 }
 
 static int64_t unix_now() { return static_cast<int64_t>(time(nullptr)); }
 
-BusMaster::BusMaster(Sink on_rx, Sink on_tx, uint16_t gateway_id, bool bench)
-    : on_rx_(std::move(on_rx)), on_tx_(std::move(on_tx)), gateway_(gateway_id), bench_(bench) {}
+BusMaster::BusMaster(Sink on_rx, Sink on_tx, uint16_t gateway_id, bool bench, bool startup)
+    : on_rx_(std::move(on_rx)), on_tx_(std::move(on_tx)), gateway_(gateway_id), bench_(bench), startup_(startup),
+      phase_(startup ? Phase::probing : Phase::running) {}
 
 BusMaster::~BusMaster() { close(); }
 
@@ -84,8 +95,8 @@ void BusMaster::set_fault(Fault f, const std::string &detail) {
   if (f == Fault::second_master || f == Fault::no_port) status_.active = false;
 }
 
-bool BusMaster::transact(uint16_t cmd, const Bytes &payload, Frame &reply) {
-  master::Bytes wire = master::encode_frame(gateway_, cmd, payload);
+bool BusMaster::transact(uint16_t dest, uint16_t cmd, const Bytes &payload, Frame &reply) {
+  master::Bytes wire = master::encode_frame(dest, cmd, payload);
   // What our own request looks like coming back, if the adapter hears itself.
   std::string sent(wire.begin() + 5, wire.end() - 2);
   size_t off = 0;
@@ -121,12 +132,12 @@ bool BusMaster::transact(uint16_t cmd, const Bytes &payload, Frame &reply) {
       splitter_.feed(buf[i], [&](const std::string &body) {
         Frame f;
         if (!master::decode_frame(body, f)) return;
-        if (f.dest == (gateway_ | 0x8000) && f.cmd == 0x0006) {
+        if (f.dest == (dest | 0x8000) && f.cmd == 0x0006) {
           // The TAP's NAK. A gateway with no mesh behind it (a spare on the
           // bench) refuses the tunnel this way.
           if (refusals_logged_.insert(cmd).second) LOGW("bus master: the TAP refused command %04X (0x0006)", cmd);
           refused = true;
-        } else if (f.dest == (gateway_ | 0x8000) && f.cmd == cmd + 1) {
+        } else if (f.dest == (dest | 0x8000) && f.cmd == cmd + 1) {
           // A late reply to the request before ours is skipped, not taken.
           if (is_reply(cmd, payload, f)) {
             reply = f;
@@ -174,17 +185,22 @@ void BusMaster::tick(uint32_t now_ms) {
   if (bench_ && !version_asked_) {
     version_asked_ = true;
     Frame v;
-    if (transact(0x000A, {}, v)) LOGI("bus master: TAP version: %s", std::string(v.payload.begin(), v.payload.end()).c_str());
+    if (transact(gateway_, 0x000A, {}, v)) LOGI("bus master: TAP version: %s", std::string(v.payload.begin(), v.payload.end()).c_str());
     else LOGW("bus master: no answer to VERSION (0x000A)");
     return;
   }
+  if (startup_ && phase_ != Phase::running) {
+    run_startup();
+    return;
+  }
+  { std::lock_guard<std::mutex> lock(mu_); status_.phase = phase_; }
   master::Request req = master::next_request(lease_, cursor_, seq_, now_ms);
   if (!master::may_send(req.cmd, req.payload, bench_)) {
     set_fault(Fault::refused, "refused to send command " + std::to_string(req.cmd));
     return;
   }
   Frame reply;
-  bool ok = transact(req.cmd, req.payload, reply);
+  bool ok = transact(gateway_, req.cmd, req.payload, reply);
   if (status().fault == Fault::second_master) return;
 
   bool lease_request = req.cmd == master::CMD_TUNNEL;
@@ -248,6 +264,49 @@ void BusMaster::tick(uint32_t now_ms) {
                                    ? "the TAP refuses polls (0x0006): no optimizers behind it, or it isn't running"
                                    : "the TAP has not answered " + std::to_string(NO_REPLY_FAULT_AFTER) +
                                          " requests in a row");
+}
+
+// Startup: bring a TAP up before steady polling. Probe with a read first, so
+// the re-addressing writes only fire when the TAP really is at the factory
+// address. If it already answers at the configured id (a warm reset, or the
+// CCA removed without a power cut), skip discovery.
+void BusMaster::run_startup() {
+  {
+    std::lock_guard<std::mutex> lock(mu_);
+    status_.phase = phase_;
+  }
+  Frame r;
+  if (phase_ == Phase::probing) {
+    if (transact(gateway_, master::CMD_GET_MAC_NOW, {}, r)) {  // already addressed
+      LOGI("bus master: the TAP is already at %04X; polling", gateway_);
+      phase_ = Phase::running;
+    } else if (transact(FACTORY_ID, master::CMD_GET_MAC_NOW, {}, r)) {  // at the factory address
+      LOGW("bus master: the TAP is at the factory address %04X; re-addressing it to %04X", FACTORY_ID, gateway_);
+      discovery_ = std::make_unique<master::Discovery>(FACTORY_ID, gateway_);
+      phase_ = Phase::discovering;
+    } else {
+      timeouts_in_a_row_++;
+      if (timeouts_in_a_row_ == NO_REPLY_FAULT_AFTER)
+        set_fault(Fault::no_reply, "no TAP answered at the configured id or the factory address");
+    }
+    return;
+  }
+  // phase_ == discovering
+  master::DiscoveryRequest d = discovery_->next();
+  if (d.done) {
+    LOGI("bus master: the TAP is now at %04X; polling", gateway_);
+    phase_ = Phase::running;
+    return;
+  }
+  if (d.failed) {
+    set_fault(Fault::discovery_failed, "re-addressing the TAP failed; it did not answer at the new id");
+    return;
+  }
+  if (!master::may_send(d.cmd, d.payload, bench_, /*startup=*/true)) {
+    set_fault(Fault::refused, "refused a discovery command " + std::to_string(d.cmd));
+    return;
+  }
+  if (transact(d.dest, d.cmd, d.payload, r)) discovery_->on_reply(r);
 }
 
 // The TAP not taking renewals means the array will drop to safe mode:

@@ -1038,6 +1038,10 @@
           <div class="cfg-text"><strong>Bus role</strong><span class="cfg-default">Listen beside the CCA, or run the bus in its place with the CCA unplugged (experimental)</span></div>
           <div class="cfg-ctrl"><select class="cfg-input" id="pi-bus-role"><option value="listen">Listen, beside the CCA</option><option value="master">Master, in place of the CCA</option></select></div>
         </div>
+        <div class="cfg-row" id="pi-startup-row" style="display:none">
+          <div class="cfg-text"><strong>Bring up the TAP</strong><span class="cfg-default">If the gateway is found at its factory address (after a power cut), re-address it and start it. Needs the real CCA on hand to recover a stranded gateway (experimental)</span></div>
+          <div class="cfg-ctrl"><label class="cfg-switch"><input type="checkbox" id="pi-startup"> <span>off</span></label></div>
+        </div>
         <div class="cfg-row" id="pi-bridge-row" style="display:none">
           <div class="cfg-text"><strong>Bridge address</strong><span class="cfg-default">host:port of an ESP32 running stream_server, or an RS485-to-Ethernet converter in TCP server mode</span></div>
           <div class="cfg-ctrl"><input class="cfg-input" id="pi-bridge" autocomplete="off" placeholder="tigo-bridge.local:6638"></div>
@@ -3012,9 +3016,11 @@
     if (!show) return;
     const faults = { none: '', no_port: 'cannot open the port', no_reply: 'the TAP is not answering',
                      second_master: 'another master is on the bus: stopped transmitting', refused: 'refused a request',
-                     lease_refused: 'the TAP is not taking lease renewals: the array will go safe' };
+                     lease_refused: 'the TAP is not taking lease renewals: the array will go safe',
+                     discovery_failed: 're-addressing the gateway failed' };
+    const phases = { probing: 'looking for the gateway…', discovering: 're-addressing the gateway…' };
     document.getElementById('diag-master-sub').textContent = m.fault !== 'none' ? faults[m.fault] || m.fault
-      : m.active ? 'running the bus' : 'not running';
+      : phases[m.phase] || (m.active ? 'running the bus' : 'not running');
     document.getElementById('diag-lease').innerHTML = m.lease_read
       ? `${m.lease.remaining_s}<span class="hist-stat-unit">s</span>` : '—<span class="hist-stat-unit">s</span>';
     document.getElementById('diag-lease-sub').textContent = !m.lease_read ? 'not read yet'
@@ -3400,6 +3406,9 @@
       document.getElementById('pi-web-port').value = s.web_port || '';
       piBusRole = s.bus_role || 'listen';
       document.getElementById('pi-bus-role').value = piBusRole;
+      document.getElementById('pi-startup').checked = !!s.master_startup;
+      document.getElementById('pi-startup').nextElementSibling.textContent = s.master_startup ? 'on' : 'off';
+      document.getElementById('pi-startup-row').style.display = piBusRole === 'master' ? '' : 'none';
       piWebLogin = { user: s.web_username || 'admin', set: !!s.web_password_set };
       document.getElementById('pi-web-user').value = piWebLogin.user;
       document.getElementById('pi-web-pass').value = '';
@@ -3425,6 +3434,10 @@
     if (e.target.value === 'master' && piBusRole !== 'master' &&
         !confirm('Master mode transmits on the bus. Unplug the CCA first: two masters on one bus collide.\n\nContinue?'))
       e.target.value = piBusRole;
+    document.getElementById('pi-startup-row').style.display = e.target.value === 'master' ? '' : 'none';
+  });
+  document.getElementById('pi-startup').addEventListener('change', (e) => {
+    e.target.nextElementSibling.textContent = e.target.checked ? 'on' : 'off';
   });
   async function piFillSerial(current) {
     const sel = document.getElementById('pi-serial');
@@ -3492,6 +3505,7 @@
       source = 'tcp://' + addr;
     }
     const body = { serial_port: source, web_port: webPort, bus_role: document.getElementById('pi-bus-role').value,
+                   master_startup: document.getElementById('pi-startup').checked,
                    web_username: document.getElementById('pi-web-user').value.trim() || 'admin' };
     const webPass = document.getElementById('pi-web-pass').value;
     if (webPass !== '') body.web_password = webPass;

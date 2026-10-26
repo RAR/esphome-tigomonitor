@@ -25,7 +25,8 @@ struct Settings {
   // "listen" (the default): only read the bus, beside a CCA. "master": run
   // the bus in the CCA's place, with the CCA unplugged (bus_master.h).
   std::string bus_role = "listen";
-  bool master_bench = false;  // also send the reads a bench TAP answers
+  bool master_bench = false;    // also send the reads a bench TAP answers
+  bool master_startup = false;  // re-address and bring up a TAP found at the factory address
   int gateway_id = 0x1201;    // the TAP's RS485 id, as the CCA addresses it
   float power_calibration = 1.0f;
   // Plenty of RAM here, so the node table is sized for any real site rather
