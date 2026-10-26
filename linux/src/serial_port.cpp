@@ -11,8 +11,12 @@
 #include <dirent.h>
 #include <fcntl.h>
 #include <fstream>
+#include <netdb.h>
+#include <netinet/in.h>
+#include <netinet/tcp.h>
 #include <poll.h>
 #include <set>
+#include <sys/socket.h>
 #include <termios.h>
 #include <thread>
 #include <unistd.h>
@@ -136,8 +140,112 @@ std::vector<SerialPortInfo> list_serial_ports() {
   return out;
 }
 
+bool parse_tcp_source(const std::string &source, std::string &host, std::string &port) {
+  if (source.rfind(TCP_PREFIX, 0) != 0) return false;
+  std::string rest = source.substr(sizeof(TCP_PREFIX) - 1);
+  size_t colon = rest.rfind(':');
+  if (rest.size() > 2 && rest.front() == '[') {  // [IPv6]:port
+    size_t close = rest.find(']');
+    if (close == std::string::npos || close + 1 != colon) return false;
+    host = rest.substr(1, close - 1);
+  } else {
+    if (colon == std::string::npos || rest.find(':') != colon) return false;
+    host = rest.substr(0, colon);
+  }
+  port = rest.substr(colon + 1);
+  if (host.empty() || port.empty() || port.size() > 5 || port.find_first_not_of("0123456789") != std::string::npos)
+    return false;
+  int n = std::atoi(port.c_str());
+  return n >= 1 && n <= 65535;
+}
+
+// Connects within a few seconds or gives up; -1 with errno set on failure.
+static int connect_tcp(const std::string &host, const std::string &port) {
+  addrinfo hints{};
+  hints.ai_family = AF_UNSPEC;
+  hints.ai_socktype = SOCK_STREAM;
+  addrinfo *res = nullptr;
+  int gai = ::getaddrinfo(host.c_str(), port.c_str(), &hints, &res);
+  if (gai != 0) {
+    errno = gai == EAI_SYSTEM ? errno : EHOSTUNREACH;
+    return -1;
+  }
+  int fd = -1;
+  for (addrinfo *ai = res; ai != nullptr; ai = ai->ai_next) {
+    fd = ::socket(ai->ai_family, ai->ai_socktype | SOCK_CLOEXEC | SOCK_NONBLOCK, ai->ai_protocol);
+    if (fd < 0) continue;
+    if (::connect(fd, ai->ai_addr, ai->ai_addrlen) == 0) break;
+    if (errno == EINPROGRESS) {
+      pollfd pfd{fd, POLLOUT, 0};
+      int err = 0;
+      socklen_t len = sizeof(err);
+      if (::poll(&pfd, 1, 5000) == 1 && ::getsockopt(fd, SOL_SOCKET, SO_ERROR, &err, &len) == 0 && err == 0) break;
+      errno = err != 0 ? err : ETIMEDOUT;
+    }
+    int saved = errno;
+    ::close(fd);
+    fd = -1;
+    errno = saved;
+  }
+  ::freeaddrinfo(res);
+  if (fd < 0) return -1;
+  // The bus goes quiet at night, so silence proves nothing; keepalives find
+  // a bridge that lost power or Wi-Fi within about a minute instead.
+  int on = 1, idle = 30, interval = 10, count = 3;
+  ::setsockopt(fd, SOL_SOCKET, SO_KEEPALIVE, &on, sizeof(on));
+  ::setsockopt(fd, IPPROTO_TCP, TCP_KEEPIDLE, &idle, sizeof(idle));
+  ::setsockopt(fd, IPPROTO_TCP, TCP_KEEPINTVL, &interval, sizeof(interval));
+  ::setsockopt(fd, IPPROTO_TCP, TCP_KEEPCNT, &count, sizeof(count));
+  return fd;
+}
+
+// The bus bytes from a network bridge: an ESP32 running stream_server, or an
+// RS485-to-Ethernet converter in TCP server mode. Only ever reads, so nothing
+// reaches the bus from here.
+static void run_tcp(const std::string &source, const std::atomic<bool> &stop,
+                    const std::function<void(const char *, size_t)> &on_data) {
+  std::string host, port;
+  if (!parse_tcp_source(source, host, port)) {
+    LOGE("%s is not a bridge address; expected tcp://host:port", source.c_str());
+    while (!stop) sleep_unless_stopped(stop, std::chrono::seconds(1));
+    return;
+  }
+  bool warned = false;
+  char buf[4096];
+  while (!stop) {
+    int fd = connect_tcp(host, port);
+    if (fd < 0) {
+      if (!warned) LOGW("cannot reach the bridge at %s (%s); retrying every 5 s", source.c_str(), strerror(errno));
+      warned = true;
+      sleep_unless_stopped(stop, std::chrono::seconds(5));
+      continue;
+    }
+    LOGI("listening to the bridge at %s", source.c_str());
+    warned = false;
+    while (!stop) {
+      pollfd pfd{fd, POLLIN, 0};
+      int r = ::poll(&pfd, 1, 500);
+      if (r < 0 && errno == EINTR) continue;
+      if (r == 0) continue;
+      ssize_t n = r < 0 ? -1 : ::recv(fd, buf, sizeof(buf), 0);
+      if (n < 0 && (errno == EINTR || errno == EAGAIN)) continue;
+      if (n <= 0) {
+        LOGW("lost the bridge at %s (%s)", source.c_str(), n == 0 ? "it closed the connection" : strerror(errno));
+        break;
+      }
+      on_data(buf, static_cast<size_t>(n));
+    }
+    ::close(fd);
+    sleep_unless_stopped(stop, std::chrono::seconds(1));
+  }
+}
+
 void run_serial(const std::string &device, int baud, const std::atomic<bool> &stop,
                 const std::function<void(const char *, size_t)> &on_data) {
+  if (device.rfind(TCP_PREFIX, 0) == 0) {
+    run_tcp(device, stop, on_data);
+    return;
+  }
   if (device.empty()) {
     LOGW("no serial port chosen yet; pick the RS485 adapter under Tools in the web UI");
     while (!stop) sleep_unless_stopped(stop, std::chrono::seconds(1));

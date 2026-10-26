@@ -95,6 +95,32 @@ sudo reboot
 Then, under **Tools → RS485 adapter and web UI**, choose **Raspberry Pi
 UART** (`/dev/serial0`).
 
+## Read the bus over the network
+
+The machine running the monitor doesn't have to be at the Tigo cabinet. A
+small ESP32 there can pass the bus along over Wi-Fi instead, and the monitor
+reads it from the network. The bridge only forwards bytes; the decoding, the
+dashboard and the history all stay on the machine running the monitor.
+
+1. Flash
+   [`boards/example-t-can485-bridge.yaml`](https://github.com/RAR/esphome-tigomonitor/blob/main/boards/example-t-can485-bridge.yaml)
+   to a LilyGO T-CAN485, with your Wi-Fi filled in, and wire its RS485
+   terminals to the TAP as in [Wiring](/esphome-tigomonitor/guides/wiring/).
+   It runs [stream_server](https://github.com/oxan/esphome-stream-server),
+   which sends every byte from the bus to whoever connects on port 6638.
+2. Under **Tools → RS485 adapter and web UI**, choose **Network bridge (TCP)**
+   and enter the bridge's address, `tigo-bridge.local:6638` or its IP and
+   port, then save.
+
+The bridge can't send anything onto the bus: its UART has no transmit pin,
+and the transceiver's driver is held off. If the bridge loses power or Wi-Fi,
+the monitor notices within about a minute and reconnects when it's back.
+
+An RS485-to-Ethernet converter set to TCP server mode, passing bytes through
+unchanged, takes the bridge's place the same way. So far only the T-CAN485
+config has been built, and the monitor's side tested against a simulated
+bridge.
+
 ## On a machine that does other things
 
 The same package installs on 64-bit Raspberry Pi OS, Debian 13 (trixie), or

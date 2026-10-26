@@ -114,6 +114,18 @@ Because there is no web UI on this board, panel discovery happens through the
 **"Generate YAML Config"** button, which prints a paste-ready `sensor:` block to
 the logs. `example-t-can485.yaml` documents that workflow.
 
+#### `example-t-can485-bridge.yaml` - LilyGO T-CAN485 as a network bridge
+- **What it does**: no decoding. It forwards the raw bus over TCP (port 6638,
+  via [stream_server](https://github.com/oxan/esphome-stream-server)) to
+  tigomonitord on a Pi or another Linux machine, which does everything else
+- **Read-only in hardware**: the UART has no `tx_pin`, and GPIO22 (the
+  transceiver's DI) is held high so its driver stays off. Keep both; a floating
+  DI turns the MAX13487E's driver *on*
+- **Standalone**: it does not include `esp32-lilygo-t-can485.yaml`, whose UART
+  has a TX pin and whose `tigo_monitor` would compete for the bytes
+- **Footprint**: flash 45.1%, RAM 24.8% (ESPHome 2026.10); compiled, not yet run
+  on a real bus
+
 ## Usage
 
 To use a board configuration, include it in your main YAML file:

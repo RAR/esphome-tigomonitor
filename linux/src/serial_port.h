@@ -7,7 +7,16 @@
 
 namespace tigod {
 
-// Reads a serial port (8N1, raw) and hands every chunk to on_data. device
+// A source of this form reads the bus from a network bridge instead of a
+// local port.
+static const char TCP_PREFIX[] = "tcp://";
+
+// Splits "tcp://host:port" ("tcp://[v6]:port" for IPv6). False for anything
+// else, including a port outside 1-65535.
+bool parse_tcp_source(const std::string &source, std::string &host, std::string &port);
+
+// Reads a serial port (8N1, raw) and hands every chunk to on_data, or a
+// network bridge for a "tcp://host:port" device. device
 // "auto" tries USB adapters first (/dev/ttyUSB*, /dev/ttyACM*), then the Pi's
 // UART (/dev/serial0); empty opens nothing, so a port another program owns
 // is never touched before someone picks ours. Survives the dongle being

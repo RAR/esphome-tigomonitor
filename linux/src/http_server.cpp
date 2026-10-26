@@ -1100,6 +1100,10 @@ void HttpServer::routes_() {
     } catch (const json::exception &) {
       err = "A setting has the wrong type.";
     }
+    std::string bridge_host, bridge_port;
+    if (err.empty() && s.serial_port.rfind(TCP_PREFIX, 0) == 0 &&
+        !parse_tcp_source(s.serial_port, bridge_host, bridge_port))
+      err = "A network bridge is host:port, with a port of 1-65535.";
     if (err.empty() && (s.mqtt.port < 1 || s.mqtt.port > 65535)) err = "MQTT port must be 1-65535.";
     if (err.empty() && (s.web_port < 0 || s.web_port > 65535)) err = "Web port must be 1-65535, or empty for the default.";
     if (err.empty() && (s.web_username.empty() || s.web_username.find(':') != std::string::npos))

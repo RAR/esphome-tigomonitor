@@ -1025,6 +1025,10 @@
           <div class="cfg-text"><strong>Serial port</strong><span class="cfg-default">The RS485 adapter on the Tigo bus</span></div>
           <div class="cfg-ctrl"><select class="cfg-input" id="pi-serial"></select> <button class="btn" id="pi-serial-rescan">Rescan</button></div>
         </div>
+        <div class="cfg-row" id="pi-bridge-row" style="display:none">
+          <div class="cfg-text"><strong>Bridge address</strong><span class="cfg-default">host:port of an ESP32 running stream_server, or an RS485-to-Ethernet converter in TCP server mode</span></div>
+          <div class="cfg-ctrl"><input class="cfg-input" id="pi-bridge" autocomplete="off" placeholder="tigo-bridge.local:6638"></div>
+        </div>
         <div class="cfg-row">
           <div class="cfg-text"><strong>Web UI port</strong><span class="cfg-default">Empty: 80, or 8080 when another web server has 80. Takes effect after a restart</span></div>
           <div class="cfg-ctrl"><input class="cfg-input" id="pi-web-port" type="number" min="1" max="65535" placeholder="80"></div>
@@ -3352,8 +3356,14 @@
       const r = await apiFetch('/api/serial-ports');
       if (r.ok) ports = (await r.json()).ports || [];
     } catch (e) { /* the saved choice still shows */ }
+    const bridge = current.startsWith('tcp://');
     const opts = [['', 'Not chosen: nothing is opened'],
-                  ['auto', 'Automatic: first USB adapter, else the Pi UART']];
+                  ['auto', 'Automatic: first USB adapter, else the Pi UART'],
+                  ['tcp', 'Network bridge (TCP)']];
+    if (bridge) {
+      document.getElementById('pi-bridge').value = current.slice('tcp://'.length);
+      current = 'tcp';
+    }
     for (const p of ports) {
       const shown = p.path === p.device ? p.path : `${p.path.replace('/dev/serial/by-id/', '')} (${p.device})`;
       opts.push([p.path, p.description ? `${p.description} — ${shown}` : shown]);
@@ -3367,9 +3377,16 @@
       sel.appendChild(o);
     }
     sel.value = current;
+    piShowBridge();
+    const reading = bridge ? `the bridge at ${document.getElementById('pi-bridge').value}` : current;
     document.getElementById('pi-port-state').textContent = !current ? 'no adapter chosen'
-      : `reading ${current} · web UI on port ${piWebPortActive}`;
+      : `reading ${reading} · web UI on port ${piWebPortActive}`;
   }
+  function piShowBridge() {
+    document.getElementById('pi-bridge-row').style.display =
+      document.getElementById('pi-serial').value === 'tcp' ? '' : 'none';
+  }
+  document.getElementById('pi-serial').addEventListener('change', piShowBridge);
   document.getElementById('pi-web-pass-remove').addEventListener('click', async () => {
     if (!confirm('Remove the web UI password? Anyone on your network will be able to open this page and change settings.')) return;
     try {
@@ -3385,10 +3402,19 @@
     }
   });
   document.getElementById('pi-serial-rescan').addEventListener('click',
-    () => piFillSerial(document.getElementById('pi-serial').value));
+    () => {
+      const v = document.getElementById('pi-serial').value;
+      piFillSerial(v === 'tcp' ? 'tcp://' + document.getElementById('pi-bridge').value.trim() : v);
+    });
   document.getElementById('pi-port-save').addEventListener('click', async () => {
     const webPort = Number(document.getElementById('pi-web-port').value) || 0;
-    const body = { serial_port: document.getElementById('pi-serial').value, web_port: webPort,
+    let source = document.getElementById('pi-serial').value;
+    if (source === 'tcp') {
+      const addr = document.getElementById('pi-bridge').value.trim().replace(/^tcp:\/\//, '');
+      if (!addr) { showToast('Enter the bridge address, as host:port', 'err'); return; }
+      source = 'tcp://' + addr;
+    }
+    const body = { serial_port: source, web_port: webPort,
                    web_username: document.getElementById('pi-web-user').value.trim() || 'admin' };
     const webPass = document.getElementById('pi-web-pass').value;
     if (webPass !== '') body.web_password = webPass;
