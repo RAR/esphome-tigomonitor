@@ -142,6 +142,16 @@ static void test_lease_keeper() {
   a = k.due(600000);
   CHECK(a.kind == LeaseAction::renew && a.node_count == 45);
 
+  // A lease about to run out is checked again just after it should, not a
+  // whole period later: the CCA's renewal came 2 s after the lease read 0.
+  LeaseKeeper soon;
+  CHECK(soon.due(0).kind == LeaseAction::check);
+  soon.on_lease({true, 12, 44}, 0);
+  CHECK(soon.due(12000).kind == LeaseAction::none);
+  CHECK(soon.due(12500).kind == LeaseAction::check);
+  soon.on_lease({false, 0, 44}, 12500);
+  CHECK(soon.due(12500).kind == LeaseAction::renew);
+
   // No reply is no reading: it never causes a renewal.
   LeaseKeeper q;
   CHECK(q.due(0).kind == LeaseAction::check);

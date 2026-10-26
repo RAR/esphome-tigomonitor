@@ -74,4 +74,18 @@ expect "nothing sent after the second master" "$(stat "$out/tap2.json" "d['frame
 kill $daemon; wait $daemon 2>/dev/null || true
 kill $tap; wait $tap 2>/dev/null || true
 
+# --- run 3: the port appears after the master starts (a late USB adapter) ---
+mkdir -p "$out/state3"
+printf '{"bus_role": "master", "serial_port": "%s", "gateway_id": 4609, "web_port": 18094}\n' "$PWD/$out/tap3" \
+  > "$out/state3/settings.json"
+build/linux/tigomonitord --state-dir "$out/state3" --web-dir components/tigo_server/web 2> "$out/daemon3.log" &
+daemon=$!
+sleep 2
+python3 linux/tools/mock_tap.py "$out/tap3" --stats "$out/tap3.json" &
+tap=$!
+sleep 8
+expect "opens a port that appears later" "$(api 18094 /api/master | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["active"], d["polls"] > 0)')" "True True"
+kill $daemon; wait $daemon 2>/dev/null || true
+kill $tap; wait $tap 2>/dev/null || true
+
 [ $fail = 0 ] && echo "master e2e passed" || { echo "master e2e FAILED; see $out/"; exit 1; }

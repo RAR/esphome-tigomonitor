@@ -49,6 +49,7 @@ class BusMaster {
   MasterStatus status() const;
 
   static const int REPLY_TIMEOUT_MS = 50;
+  static const uint32_t REOPEN_EVERY_MS = 5000;
   static const uint32_t NO_REPLY_FAULT_AFTER = 10;
 
  private:
@@ -62,6 +63,10 @@ class BusMaster {
   uint16_t gateway_;
   bool bench_;
   int fd_ = -1;
+  std::string device_;  // reopened every REOPEN_EVERY_MS while closed, as listening does
+  int baud_ = 38400;
+  bool tried_open_ = false;
+  uint32_t last_open_try_ms_ = 0;
   esphome::tigo_monitor::master::LeaseKeeper lease_;
   esphome::tigo_monitor::master::PollCursor cursor_{0};
   uint8_t seq_ = 0;

@@ -35,6 +35,8 @@ BusMaster::~BusMaster() { close(); }
 
 bool BusMaster::open(const std::string &device, int baud) {
   close();
+  device_ = device;
+  baud_ = baud;
   fd_ = open_port_rw(device, baud);
   if (fd_ < 0) {
     set_fault(Fault::no_port, std::string("cannot open ") + device + ": " + strerror(errno));
@@ -80,6 +82,8 @@ bool BusMaster::transact(uint16_t cmd, const Bytes &payload, Frame &reply) {
     if (n < 0 && errno == EINTR) continue;
     if (n <= 0) {
       set_fault(Fault::no_port, std::string("write failed: ") + strerror(errno));
+      ::close(fd_);
+      fd_ = -1;  // reopened by tick()
       return false;
     }
     off += static_cast<size_t>(n);
@@ -122,9 +126,14 @@ bool BusMaster::transact(uint16_t cmd, const Bytes &payload, Frame &reply) {
 }
 
 void BusMaster::tick(uint32_t now_ms) {
-  {
-    std::lock_guard<std::mutex> lock(mu_);
-    if (fd_ < 0 || status_.fault == Fault::second_master) return;
+  if (status().fault == Fault::second_master) return;
+  if (fd_ < 0) {
+    // A port that isn't there yet (a USB adapter still enumerating) or went
+    // away: try again every few seconds, as listening does.
+    if (device_.empty() || (tried_open_ && now_ms - last_open_try_ms_ < REOPEN_EVERY_MS)) return;
+    tried_open_ = true;
+    last_open_try_ms_ = now_ms;
+    if (!open(device_, baud_)) return;
   }
   master::Request req = master::next_request(lease_, cursor_, seq_, now_ms);
   if (!master::may_send(req.cmd, req.payload, bench_)) {

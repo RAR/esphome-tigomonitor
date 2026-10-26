@@ -135,8 +135,9 @@ inline Bytes lease_renewal_args(uint16_t node_count) {
           0x01, 0x00};
 }
 
-// What to do about the lease, as the CCA does it: read it every 20 s, and
-// renew only once a reading says it ran out, retrying at most once a second
+// What to do about the lease, as the CCA does it: read it every 20 s, or just
+// after it should run out if that's sooner (the CCA's reads lined up with
+// expiry, renewing 2 s after it), and renew only once a reading says it ran out, retrying at most once a second
 // until a reading shows time on it again. It never renews without a reading
 // that asked for it, so a master that restarts checks first, and one that
 // stops calling due() lets the lease lapse.
@@ -149,6 +150,7 @@ class LeaseKeeper {
  public:
   static const uint32_t CHECK_EVERY_MS = 20000;
   static const uint32_t RENEW_RETRY_MS = 1000;
+  static const uint32_t EXPIRY_MARGIN_MS = 500;
 
   // What to send now. Returning an action counts it as sent.
   LeaseAction due(uint32_t now_ms) {
@@ -160,10 +162,10 @@ class LeaseKeeper {
       renewed_ = true;
       last_renew_ms_ = now_ms;
       renewals_++;
-    } else if (!checked_ || now_ms - last_check_ms_ >= CHECK_EVERY_MS) {
+    } else if (!checked_ || static_cast<int32_t>(now_ms - next_check_ms_) >= 0) {
       a.kind = LeaseAction::check;
       checked_ = true;
-      last_check_ms_ = now_ms;
+      next_check_ms_ = now_ms + CHECK_EVERY_MS;
     }
     return a;
   }
@@ -172,7 +174,8 @@ class LeaseKeeper {
     last_ = l;
     ever_read_ = true;
     checked_ = true;
-    last_check_ms_ = now_ms;
+    uint32_t until_out = l.running && l.remaining_s > 0 ? l.remaining_s * 1000u + EXPIRY_MARGIN_MS : CHECK_EVERY_MS;
+    next_check_ms_ = now_ms + (until_out < CHECK_EVERY_MS ? until_out : CHECK_EVERY_MS);
   }
   void on_no_reply(uint32_t) {}
 
@@ -185,7 +188,7 @@ class LeaseKeeper {
   bool ever_read_ = false;
   bool checked_ = false;
   bool renewed_ = false;
-  uint32_t last_check_ms_ = 0;
+  uint32_t next_check_ms_ = 0;
   uint32_t last_renew_ms_ = 0;
   uint32_t renewals_ = 0;
 };
