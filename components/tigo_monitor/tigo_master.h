@@ -134,6 +134,61 @@ inline Bytes lease_renewal_args(uint16_t node_count) {
           0x01, 0x00};
 }
 
+// What to do about the lease, as the CCA does it: read it every 20 s, and
+// renew only once a reading says it ran out, retrying at most once a second
+// until a reading shows time on it again. It never renews without a reading
+// that asked for it, so a master that restarts checks first, and one that
+// stops calling due() lets the lease lapse.
+struct LeaseAction {
+  enum Kind { none, check, renew } kind = none;
+  uint16_t node_count = 0;
+};
+
+class LeaseKeeper {
+ public:
+  static const uint32_t CHECK_EVERY_MS = 20000;
+  static const uint32_t RENEW_RETRY_MS = 1000;
+
+  // What to send now. Returning an action counts it as sent.
+  LeaseAction due(uint32_t now_ms) {
+    LeaseAction a;
+    bool out = ever_read_ && (!last_.running || last_.remaining_s == 0);
+    if (out && (!renewed_ || now_ms - last_renew_ms_ >= RENEW_RETRY_MS)) {
+      a.kind = LeaseAction::renew;
+      a.node_count = last_.node_count;
+      renewed_ = true;
+      last_renew_ms_ = now_ms;
+      renewals_++;
+    } else if (!checked_ || now_ms - last_check_ms_ >= CHECK_EVERY_MS) {
+      a.kind = LeaseAction::check;
+      checked_ = true;
+      last_check_ms_ = now_ms;
+    }
+    return a;
+  }
+  // A reading counts as this period's check.
+  void on_lease(const Lease &l, uint32_t now_ms) {
+    last_ = l;
+    ever_read_ = true;
+    checked_ = true;
+    last_check_ms_ = now_ms;
+  }
+  void on_no_reply(uint32_t) {}
+
+  const Lease &last() const { return last_; }
+  uint32_t renewals() const { return renewals_; }
+  bool ever_read() const { return ever_read_; }
+
+ private:
+  Lease last_;
+  bool ever_read_ = false;
+  bool checked_ = false;
+  bool renewed_ = false;
+  uint32_t last_check_ms_ = 0;
+  uint32_t last_renew_ms_ = 0;
+  uint32_t renewals_ = 0;
+};
+
 // ---- telemetry polls -------------------------------------------------------
 
 // retry: the previous poll got no reply; the CCA sends 00 in the second byte

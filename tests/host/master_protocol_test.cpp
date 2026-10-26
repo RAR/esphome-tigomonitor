@@ -113,10 +113,49 @@ static void test_poll_cursor() {
   CHECK(end.next() == 0x0001);
 }
 
+static void test_lease_keeper() {
+  // A daemon that restarts mid-lease checks first; it never renews blind.
+  LeaseKeeper k;
+  CHECK(k.due(0).kind == LeaseAction::check);
+  CHECK(!k.ever_read());
+  k.on_lease({true, 416, 44}, 0);
+  CHECK(k.ever_read() && k.last().remaining_s == 416);
+  CHECK(k.due(1).kind == LeaseAction::none);
+  CHECK(k.due(19999).kind == LeaseAction::none);
+  CHECK(k.due(20000).kind == LeaseAction::check);
+
+  // Lapsed: renew with the node count it reported, at most once a second,
+  // until a reading shows time on the lease.
+  const uint32_t t = 440000;
+  k.on_lease({false, 0, 44}, t);
+  LeaseAction a = k.due(t);
+  CHECK(a.kind == LeaseAction::renew && a.node_count == 44);
+  CHECK(k.due(t + 500).kind == LeaseAction::none);
+  CHECK(k.due(t + 1000).kind == LeaseAction::renew);
+  CHECK(k.renewals() == 2);
+  k.on_lease({true, 900, 44}, t + 1100);
+  CHECK(k.due(t + 2100).kind == LeaseAction::none);
+  CHECK(k.due(t + 1100 + 20000).kind == LeaseAction::check);
+
+  // Running but at 0 renews too, and a changed node count is carried.
+  k.on_lease({true, 0, 45}, 600000);
+  a = k.due(600000);
+  CHECK(a.kind == LeaseAction::renew && a.node_count == 45);
+
+  // No reply is no reading: it never causes a renewal.
+  LeaseKeeper q;
+  CHECK(q.due(0).kind == LeaseAction::check);
+  q.on_no_reply(0);
+  CHECK(q.due(500).kind == LeaseAction::none);
+  CHECK(q.due(20000).kind == LeaseAction::check);
+  CHECK(q.renewals() == 0);
+}
+
 int main() {
   test_codec();
   test_lease();
   test_poll_cursor();
+  test_lease_keeper();
   if (failures) {
     std::printf("%d failed\n", failures);
     return 1;
