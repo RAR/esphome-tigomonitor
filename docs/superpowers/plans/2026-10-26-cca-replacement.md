@@ -14,7 +14,7 @@
 
 - Wire format: `00 FF FF` preamble, `7E 07`, escaped body, `7E 08`. Body = DEST(2, big-endian) CMD(2, BE) PAYLOAD CRC16. The CRC uses the existing `protocol::crc16` over the unescaped DEST+CMD+PAYLOAD and goes on the wire **low byte first**. The escape set is `{7E,24,23,25,A4,A3,A5}` → `7E <index 0..6>`.
 - A reply's DEST is `request_dest | 0x8000`. The roof gateway id is 0x1201 (requests to 0x1201, replies from 0x9201).
-- Tunnel: request CMD 0x0B0F, reply CMD 0x0B10. Request payload is `00 00 00 <sub> <seq> <args…>`; reply payload is `00 <0d|0e> 00 <sub+1> <seq> <data…>`. seq is one byte, wraps, and is never reused within 255 requests.
+- Tunnel: request CMD 0x0B0F, reply CMD 0x0B10. Request payload is `00 00 00 <sub> <seq> <args…>`; reply payload is `00 <0d|0e> 00 <reply sub> <seq> <data…>`, where the reply sub is usually sub+1, but a renewal (0x2D) is answered with a 0x2F lease reading. seq is one byte, wraps, and is never reused within 255 requests.
 - Lease check: sub 0x2E, no args, every 20 s. The 0x2F reply's data, after seq, is: state(1: 01 running, 00 lapsed), lease remaining in s (2, BE), count A (2), count B (2), count C (2), 00. In the capture, A/B/C read 44/40/44 while running and 0/40/44 at lapse. **The node count is C**: the CCA's renewal carried 44 when A read 0.
 - Lease renewal: sub 0x2D, args `BA BE 02 03 84 <node_count BE16> 01 00`, sent **only after a lease check reads 0**, exactly as the CCA does. The node count comes from the latest 0x2F reply, never a constant.
 - Telemetry poll: CMD 0x0148, payload `00 01 <cursor BE16> 04`, about every 10 ms. Replies are CMD 0x0149, decoded by the existing `Monitor::feed`.

@@ -25,6 +25,10 @@ bool parse_tcp_source(const std::string &source, std::string &host, std::string 
 void run_serial(const std::string &device, int baud, const std::atomic<bool> &stop,
                 const std::function<void(const char *, size_t)> &on_data);
 
+// The port "auto" stands for (first USB adapter, else the Pi UART; "" if
+// none), or device itself.
+std::string resolve_serial_port(const std::string &device);
+
 // Opens a port for reading and writing (8N1, raw), for the bus master; -1
 // with errno set if it can't. Listening opens ports read-only.
 int open_port_rw(const std::string &device, int baud);

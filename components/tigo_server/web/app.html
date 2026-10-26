@@ -3002,6 +3002,7 @@
       status.mqtt_error || (status.mqtt_configured ? '' : 'set a broker under Tools');
   }
 
+  let masterPolls = 0, masterPollsAt = 0;
   async function refreshMasterDiagnostics() {
     const r = await apiFetch('/api/master').catch(() => null);
     const m = r && r.ok ? await r.json() : null;
@@ -3010,7 +3011,8 @@
     document.getElementById('diag-master').style.display = show ? '' : 'none';
     if (!show) return;
     const faults = { none: '', no_port: 'cannot open the port', no_reply: 'the TAP is not answering',
-                     second_master: 'another master is on the bus: stopped transmitting', refused: 'refused a request' };
+                     second_master: 'another master is on the bus: stopped transmitting', refused: 'refused a request',
+                     lease_refused: 'the TAP is not taking lease renewals: the array will go safe' };
     document.getElementById('diag-master-sub').textContent = m.fault !== 'none' ? faults[m.fault] || m.fault
       : m.active ? 'running the bus' : 'not running';
     document.getElementById('diag-lease').innerHTML = m.lease_read
@@ -3018,8 +3020,15 @@
     document.getElementById('diag-lease-sub').textContent = !m.lease_read ? 'not read yet'
       : `${m.lease.running ? 'running' : 'lapsed'} · ${m.lease.node_count} nodes`;
     document.getElementById('diag-renewals').textContent = m.renewals;
-    document.getElementById('diag-polls').textContent = m.polls.toLocaleString();
-    document.getElementById('diag-timeouts').textContent = `${m.timeouts.toLocaleString()} unanswered`;
+    // A rate needs two readings; the first shows the total.
+    const now = Date.now();
+    const rate = masterPollsAt && m.polls >= masterPolls ? (m.polls - masterPolls) / ((now - masterPollsAt) / 1000) : null;
+    masterPolls = m.polls;
+    masterPollsAt = now;
+    document.getElementById('diag-polls').innerHTML = rate === null ? m.polls.toLocaleString()
+      : `${rate.toFixed(0)}<span class="hist-stat-unit">/s</span>`;
+    document.getElementById('diag-timeouts').textContent =
+      `${m.polls.toLocaleString()} sent · ${m.timeouts.toLocaleString()} unanswered`;
   }
 
   async function refreshDiagnostics(force) {

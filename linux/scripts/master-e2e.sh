@@ -88,4 +88,34 @@ expect "opens a port that appears later" "$(api 18094 /api/master | python3 -c '
 kill $daemon; wait $daemon 2>/dev/null || true
 kill $tap; wait $tap 2>/dev/null || true
 
+# --- run 4: an adapter that echoes, lost replies, and a TAP with its own cursor ---
+mkdir -p "$out/state4"
+python3 linux/tools/mock_tap.py "$out/tap4" --echo --drop-every 7 --start-cursor 6FC4 --stats "$out/tap4.json" &
+tap=$!
+sleep 0.5
+printf '{"bus_role": "master", "serial_port": "%s", "gateway_id": 4609, "web_port": 18095}\n' "$PWD/$out/tap4" \
+  > "$out/state4/settings.json"
+build/linux/tigomonitord --state-dir "$out/state4" --web-dir components/tigo_server/web \
+  --capture "$out/bus4.bin" 2> "$out/daemon4.log" &
+daemon=$!
+sleep 6
+m4="$(api 18095 /api/master)"
+expect "echo is not a second master" "$(echo "$m4" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["active"], d["fault"])')" "True none"
+expect "took the TAP's cursor once" "$(echo "$m4" | python3 -c 'import json,sys; print(json.load(sys.stdin)["resyncs"])')" 1
+expect "in step after that" "$(stat "$out/tap4.json" "d['cursor_mismatches']")" 1
+expect "lost replies retried" "$(stat "$out/tap4.json" "d['retries'] >= d.get('dropped', 0) - 1 > 0")" True
+expect "panels decoded" "$(api 18095 /api/devices | python3 -c 'import json,sys; print(len(json.load(sys.stdin)["devices"]))')" 6
+expect "capture holds what was sent" "$(python3 linux/tools/bus_frames.py "$out/bus4.bin" --requests | grep -c ' 0148 ' | awk '{print ($1 > 10)}')" 1
+kill $daemon; wait $daemon 2>/dev/null || true
+kill $tap; wait $tap 2>/dev/null || true
+
+# --- run 5: "auto" is resolved as listening does, not opened as a file ---
+mkdir -p "$out/state5"
+printf '{"bus_role": "master", "serial_port": "auto", "gateway_id": 4609, "web_port": 18096}\n' > "$out/state5/settings.json"
+build/linux/tigomonitord --state-dir "$out/state5" --web-dir components/tigo_server/web 2> "$out/daemon5.log" &
+daemon=$!
+sleep 2
+expect "auto is resolved, not opened" "$(api 18096 /api/master | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["fault"], "no adapter found" in d["detail"])')" "no_port True"
+kill $daemon; wait $daemon 2>/dev/null || true
+
 [ $fail = 0 ] && echo "master e2e passed" || { echo "master e2e FAILED; see $out/"; exit 1; }

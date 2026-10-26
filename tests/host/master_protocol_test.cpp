@@ -216,7 +216,69 @@ static void test_next_request() {
   CHECK(next_seq(0xFE) == 0x01 && next_seq(0x01) == 0x02);
 }
 
+// Fable review fixes.
+static void test_review_fixes() {
+  // A zero node count is never renewed, and the allow-list refuses it.
+  LeaseKeeper zero;
+  zero.due(0);
+  zero.on_lease({false, 0, 0}, 0);
+  CHECK(zero.due(0).kind != LeaseAction::renew);
+  CHECK(classify_request(CMD_TUNNEL, tunnel_request(SUB_LEASE_RENEW, 1, lease_renewal_args(0))) == Allow::bench_only);
+
+  // "Not running" with time left is not a reason to renew: only 0 s is.
+  LeaseKeeper odd;
+  odd.due(0);
+  odd.on_lease({false, 300, 44}, 0);
+  CHECK(odd.due(0).kind != LeaseAction::renew);
+  CHECK(odd.due(5000).kind != LeaseAction::renew);
+
+  // Renewals the TAP doesn't take stop after 3, flagged, until a reading
+  // shows time on the lease again.
+  LeaseKeeper stubborn;
+  stubborn.due(0);
+  uint32_t t = 0;
+  int renewals = 0;
+  for (int i = 0; i < 10; i++, t += 1000) {
+    stubborn.on_lease({false, 0, 44}, t);
+    if (stubborn.due(t).kind == LeaseAction::renew) renewals++;
+  }
+  CHECK(renewals == 3 && stubborn.stuck());
+  stubborn.on_lease({true, 900, 44}, t);
+  CHECK(!stubborn.stuck());
+  stubborn.on_lease({false, 0, 44}, t + 900000);
+  CHECK(stubborn.due(t + 900000).kind == LeaseAction::renew);
+
+  // A check that gets no reply is retried a second later, up to 3 times.
+  LeaseKeeper lost;
+  CHECK(lost.due(0).kind == LeaseAction::check);
+  lost.on_no_reply(0);
+  CHECK(lost.due(999).kind == LeaseAction::none);
+  CHECK(lost.due(1000).kind == LeaseAction::check);
+  lost.on_no_reply(1000);
+  CHECK(lost.due(2000).kind == LeaseAction::check);
+  lost.on_no_reply(2000);
+  CHECK(lost.due(3000).kind == LeaseAction::check);
+  lost.on_no_reply(3000);
+  CHECK(lost.due(4000).kind == LeaseAction::none);  // back to the 20 s period
+  CHECK(lost.due(23000).kind == LeaseAction::check);
+
+  // Poll replies carry the cursor: its low byte always, all of it in the
+  // longer header (status bits 0-4 clear). From the capture: cursor 6FD6.
+  ReplyCursor rc;
+  CHECK(reply_cursor(hex("41ffcc4be7"), rc) && rc.low == 0xCC && !rc.full);
+  CHECK(reply_cursor(hex("41e0000e000102006fd64c00"), rc) && rc.low == 0xD6 && rc.full && rc.cursor == 0x6FD6);
+  PollCursor pc(0x6FCC);
+  CHECK(pc.matches(Frame{0x9201, CMD_POLL_REPLY, hex("41ffcc4be7")}));
+  CHECK(!pc.matches(Frame{0x9201, CMD_POLL_REPLY, hex("41ffcd4be7")}));
+  // A full cursor that differs from ours is the TAP's: adopt it.
+  PollCursor fresh(0x0000);
+  CHECK(!fresh.matches(Frame{0x9201, CMD_POLL_REPLY, hex("41e0000e000102006fd64c00")}));
+  fresh.on_reply(Frame{0x9201, CMD_POLL_REPLY, hex("41e0000e000102006fd64c00")});
+  CHECK(fresh.next() == 0x6FD6 && fresh.resyncs() == 1);
+}
+
 int main() {
+  test_review_fixes();
   test_codec();
   test_lease();
   test_poll_cursor();

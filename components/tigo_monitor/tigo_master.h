@@ -50,7 +50,9 @@ inline Bytes encode_frame(uint16_t dest, uint16_t cmd, const Bytes &payload) {
   Bytes body = {static_cast<uint8_t>(dest >> 8), static_cast<uint8_t>(dest), static_cast<uint8_t>(cmd >> 8),
                 static_cast<uint8_t>(cmd)};
   body.insert(body.end(), payload.begin(), payload.end());
-  uint16_t crc = protocol::crc16(body.data(), body.size());  // byte-swapped: high byte goes first
+  // crc16 returns the CRC byte-swapped, so writing its high byte first puts
+  // the CRC's low byte first on the wire, as the gateway expects.
+  uint16_t crc = protocol::crc16(body.data(), body.size());
   body.push_back(static_cast<uint8_t>(crc >> 8));
   body.push_back(static_cast<uint8_t>(crc));
   Bytes out = {0x00, 0xFF, 0xFF, 0x7E, 0x07};
@@ -135,12 +137,18 @@ inline Bytes lease_renewal_args(uint16_t node_count) {
           0x01, 0x00};
 }
 
-// What to do about the lease, as the CCA does it: read it every 20 s, or just
-// after it should run out if that's sooner (the CCA's reads lined up with
-// expiry, renewing 2 s after it), and renew only once a reading says it ran out, retrying at most once a second
-// until a reading shows time on it again. It never renews without a reading
-// that asked for it, so a master that restarts checks first, and one that
-// stops calling due() lets the lease lapse.
+// What to do about the lease, as the CCA does it: read it every 20 s (or
+// just after it should run out, if that's sooner) and renew only once a
+// reading says 0 s are left. A master that restarts checks first, and one
+// that stops calling due() lets the lease lapse.
+//
+// Guards for frames and loops the CCA never showed:
+//   - no renewal carries a node count of 0;
+//   - "not running" with time left is not a reason to renew; only 0 s is;
+//   - after RENEW_LIMIT renewals with no reading showing time on the lease,
+//     it stops renewing and stuck() says so, until a reading shows time.
+// A check with no reply is retried a second later, up to CHECK_RETRIES
+// times, so one lost reply doesn't leave a lapsed lease for a whole period.
 struct LeaseAction {
   enum Kind { none, check, renew } kind = none;
   uint16_t node_count = 0;
@@ -151,21 +159,28 @@ class LeaseKeeper {
   static const uint32_t CHECK_EVERY_MS = 20000;
   static const uint32_t RENEW_RETRY_MS = 1000;
   static const uint32_t EXPIRY_MARGIN_MS = 500;
+  static const uint32_t CHECK_RETRY_MS = 1000;
+  static const uint32_t CHECK_RETRIES = 3;
+  static const uint32_t RENEW_LIMIT = 3;
 
   // What to send now. Returning an action counts it as sent.
   LeaseAction due(uint32_t now_ms) {
     LeaseAction a;
-    bool out = ever_read_ && (!last_.running || last_.remaining_s == 0);
-    if (out && (!renewed_ || now_ms - last_renew_ms_ >= RENEW_RETRY_MS)) {
+    bool out = ever_read_ && last_.remaining_s == 0 && last_.node_count > 0;
+    if (out && renews_unanswered_ < RENEW_LIMIT &&
+        (!renewed_ || now_ms - last_renew_ms_ >= RENEW_RETRY_MS)) {
       a.kind = LeaseAction::renew;
       a.node_count = last_.node_count;
       renewed_ = true;
       last_renew_ms_ = now_ms;
+      renews_unanswered_++;
       renewals_++;
+      last_sent_ = LeaseAction::renew;
     } else if (!checked_ || static_cast<int32_t>(now_ms - next_check_ms_) >= 0) {
       a.kind = LeaseAction::check;
       checked_ = true;
       next_check_ms_ = now_ms + CHECK_EVERY_MS;
+      last_sent_ = LeaseAction::check;
     }
     return a;
   }
@@ -174,23 +189,34 @@ class LeaseKeeper {
     last_ = l;
     ever_read_ = true;
     checked_ = true;
-    uint32_t until_out = l.running && l.remaining_s > 0 ? l.remaining_s * 1000u + EXPIRY_MARGIN_MS : CHECK_EVERY_MS;
+    check_retries_ = 0;
+    if (l.remaining_s > 0) renews_unanswered_ = 0;
+    uint32_t until_out = l.remaining_s > 0 ? l.remaining_s * 1000u + EXPIRY_MARGIN_MS : CHECK_EVERY_MS;
     next_check_ms_ = now_ms + (until_out < CHECK_EVERY_MS ? until_out : CHECK_EVERY_MS);
   }
-  void on_no_reply(uint32_t) {}
+  void on_no_reply(uint32_t now_ms) {
+    if (last_sent_ == LeaseAction::check && check_retries_ < CHECK_RETRIES) {
+      check_retries_++;
+      next_check_ms_ = now_ms + CHECK_RETRY_MS;
+    }
+  }
 
   const Lease &last() const { return last_; }
   uint32_t renewals() const { return renewals_; }
   bool ever_read() const { return ever_read_; }
+  bool stuck() const { return renews_unanswered_ >= RENEW_LIMIT; }
 
  private:
   Lease last_;
   bool ever_read_ = false;
   bool checked_ = false;
   bool renewed_ = false;
+  LeaseAction::Kind last_sent_ = LeaseAction::none;
   uint32_t next_check_ms_ = 0;
   uint32_t last_renew_ms_ = 0;
   uint32_t renewals_ = 0;
+  uint32_t renews_unanswered_ = 0;
+  uint32_t check_retries_ = 0;
 };
 
 // ---- telemetry polls -------------------------------------------------------
@@ -222,6 +248,33 @@ inline uint16_t power_packet_count(const Bytes &payload) {
   return n;
 }
 
+// The cursor a 0x0149 reply carries: its low byte always (the field for
+// status bit 5), all of it when the longer header is present (bit 4 clear;
+// that field is the high byte). In the rig capture both always equal the
+// poll's cursor.
+struct ReplyCursor {
+  uint8_t low = 0;
+  bool full = false;
+  uint16_t cursor = 0;
+};
+
+inline bool reply_cursor(const Bytes &payload, ReplyCursor &out) {
+  if (payload.size() < 2) return false;
+  unsigned status = payload[0] << 8 | payload[1];
+  static const uint8_t sizes[] = {1, 1, 2, 2, 1};
+  size_t i = 2, high_at = 0;
+  for (unsigned bit = 0; bit < 5; bit++) {
+    if (status & (1u << bit)) continue;
+    if (bit == 4) high_at = i;
+    i += sizes[bit];
+  }
+  if (i >= payload.size()) return false;
+  out.low = payload[i];
+  out.full = high_at != 0;
+  out.cursor = out.full ? static_cast<uint16_t>(payload[high_at] << 8 | out.low) : out.low;
+  return true;
+}
+
 // The 0x0148 cursor. The TAP keeps power packets queued; each reply hands
 // over some, and the next poll's cursor is the last one plus how many came.
 // That rule matches 101,711 of 101,711 polls in the rig capture, and the
@@ -231,16 +284,31 @@ class PollCursor {
   explicit PollCursor(uint16_t start) : cursor_(start) {}
   uint16_t next() const { return cursor_; }
   bool retry() const { return retry_; }
+  // Whether a 0x0149 answers the poll just sent: its cursor's low byte is ours.
+  bool matches(const Frame &reply) const {
+    ReplyCursor rc;
+    return reply.cmd == CMD_POLL_REPLY && reply_cursor(reply.payload, rc) && rc.low == (cursor_ & 0xFF);
+  }
+  // A reply whose full cursor differs from ours states the TAP's, which is
+  // adopted: a new master starts at 0 and can't know it. Unconfirmed on a
+  // real TAP (in the capture the CCA was always in step); resyncs() counts it.
   void on_reply(const Frame &reply) {
     if (reply.cmd != CMD_POLL_REPLY) return;
+    ReplyCursor rc;
+    if (reply_cursor(reply.payload, rc) && rc.full && rc.cursor != cursor_) {
+      cursor_ = rc.cursor;
+      resyncs_++;
+    }
     cursor_ = static_cast<uint16_t>(cursor_ + power_packet_count(reply.payload));
     retry_ = false;
   }
   void on_timeout() { retry_ = true; }
+  uint32_t resyncs() const { return resyncs_; }
 
  private:
   uint16_t cursor_;
   bool retry_ = false;
+  uint32_t resyncs_ = 0;
 };
 
 // ---- the next request -------------------------------------------------------
@@ -292,9 +360,9 @@ inline Allow classify_request(uint16_t cmd, const Bytes &payload) {
     case SUB_LEASE_CHECK:
       return args.empty() ? Allow::yes : Allow::bench_only;
     case SUB_LEASE_RENEW:
-      // Only the CCA's renewal, whatever node count it carries.
+      // Only the CCA's renewal, with a node count; it never sent 0.
       return args.size() == 9 && Bytes(args.begin(), args.begin() + 5) == Bytes{0xBA, 0xBE, 0x02, 0x03, 0x84} &&
-                     args[7] == 0x01 && args[8] == 0x00
+                     (args[5] || args[6]) && args[7] == 0x01 && args[8] == 0x00
                  ? Allow::yes
                  : Allow::bench_only;
     case 0x26:  // a page of the roster, by index

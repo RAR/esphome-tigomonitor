@@ -1055,6 +1055,7 @@ void HttpServer::routes_() {
                     {"renewals", m.renewals},
                     {"polls", m.polls},
                     {"timeouts", m.timeouts},
+                    {"resyncs", m.resyncs},
                     {"last_reply_unix", m.last_reply_unix}});
   });
 
@@ -1136,6 +1137,8 @@ void HttpServer::routes_() {
         !parse_tcp_source(s.serial_port, bridge_host, bridge_port))
       err = "A network bridge is host:port, with a port of 1-65535.";
     if (err.empty() && s.bus_role != "listen" && s.bus_role != "master") err = "Bus role is listen or master.";
+    if (err.empty() && s.bus_role == "master" && s.serial_port.rfind(TCP_PREFIX, 0) == 0)
+      err = "The bus master needs a serial port on the bus, not a network bridge.";
     if (err.empty() && (s.gateway_id < 1 || s.gateway_id > 0x7FFF)) err = "Gateway id must be 1-7FFF.";
     if (err.empty() && (s.mqtt.port < 1 || s.mqtt.port > 65535)) err = "MQTT port must be 1-65535.";
     if (err.empty() && (s.web_port < 0 || s.web_port > 65535)) err = "Web port must be 1-65535, or empty for the default.";

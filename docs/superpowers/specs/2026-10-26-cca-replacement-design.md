@@ -125,9 +125,13 @@ whose payload is `00 00 00 <sub> <seq> ...`:
 | 0x26 | a burst | reads the roster in pages (index 0, 14, 26, 38, 46) |
 | 0x22, 0x0B00 | once | unknown |
 
-**The keep-alive is a 15-minute lease, renewed at expiry.** When it reached 0,
-the TAP's status byte and node count dropped to 0, and the CCA renewed it
-2 s later. What happens if nobody renews it is the question phase 3 answers.
+**The keep-alive is a 15-minute lease, renewed once it reads 0.** The CCA reads
+it on a plain 20 s cycle, not timed to expiry, so the lease sat lapsed for
+about 10 s before the read that saw 0 (12 s left at 418.1 s, 0 at 438.4 s,
+renewed at 440.3 s). During that, the state byte and the first count read 0,
+and power packets kept flowing at their usual rate: a short lapse didn't stop
+telemetry. A renewal (sub 0x2D) is answered with a 0x2F lease reading, not
+0x2E. What happens if nobody renews it is the question phase 3 answers.
 The 900 s lease is not the rapid-shutdown path: cutting CCA power also cuts
 the TAP's, which silences the mesh at once. It is the "master is alive"
 check. Per the analysis session (`docs/ROOF_STEADY_STATE.md`), the bench opcodes

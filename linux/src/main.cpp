@@ -17,6 +17,9 @@
 
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
+#include <deque>
+#include <functional>
 #include <csignal>
 #include <cstdio>
 #include <cstring>
@@ -131,6 +134,11 @@ int main(int argc, char **argv) {
     if (capture_out) capture_out->write(data, static_cast<std::streamsize>(n)).flush();
     monitor.feed(data, n);
   };
+  // What the bus master sends goes in the capture too, for reading back
+  // what was said on the bench.
+  auto on_sent = [&](const char *data, size_t n) {
+    if (capture_out) capture_out->write(data, static_cast<std::streamsize>(n)).flush();
+  };
 
   std::mutex settings_mu;  // settings is read by the web server's threads
   std::atomic<bool> input_done{false};
@@ -145,7 +153,8 @@ int main(int argc, char **argv) {
     std::string dev = settings.serial_port;
     int baud = settings.baud_rate;
     if (replay.empty() && settings.bus_role == "master") {
-      auto m = std::make_unique<BusMaster>(monitor, static_cast<uint16_t>(settings.gateway_id), settings.master_bench);
+      auto m = std::make_unique<BusMaster>(on_data, on_sent, static_cast<uint16_t>(settings.gateway_id),
+                                           settings.master_bench);
       if (dev.empty()) LOGW("bus master: no serial port chosen yet; pick the RS485 adapter under Tools");
       else m->open(dev, baud);
       std::lock_guard<std::mutex> lock(master_mu);
@@ -200,6 +209,33 @@ int main(int argc, char **argv) {
     cca_http.stop();
     return 1;
   }
+
+  // History writes go to the SD card, and the daily prune scans the whole
+  // panel table. A worker does them, so they never hold up the main loop,
+  // which in the master role is also what polls the bus and keeps the lease.
+  std::mutex history_mu;
+  std::condition_variable history_cv;
+  std::deque<std::function<void()>> history_jobs;
+  bool history_done = false;
+  std::thread history_worker([&] {
+    std::unique_lock<std::mutex> lock(history_mu);
+    for (;;) {
+      history_cv.wait(lock, [&] { return history_done || !history_jobs.empty(); });
+      if (history_jobs.empty()) return;  // done, and drained
+      auto job = std::move(history_jobs.front());
+      history_jobs.pop_front();
+      lock.unlock();
+      job();
+      lock.lock();
+    }
+  });
+  auto post_history = [&](std::function<void()> job) {
+    {
+      std::lock_guard<std::mutex> lock(history_mu);
+      history_jobs.push_back(std::move(job));
+    }
+    history_cv.notify_one();
+  };
 
   auto last_publish = std::chrono::steady_clock::now() - std::chrono::hours(1);
   // Snapshots land on wall-clock multiples of the interval (:00, :05, ...),
@@ -273,11 +309,12 @@ int main(int argc, char **argv) {
             panel_power.emplace_back(p.barcode, ago - p.updated < monitor.online_window() ? p.reading.power_out : 0.0);
           }
         double energy = monitor.energy_kwh();
-        history.record(next_snapshot, monitor.total_power(), energy - energy_at_snapshot, panel_power);
+        post_history([&history, t = next_snapshot, w = monitor.total_power(), kwh = energy - energy_at_snapshot,
+                      panel_power = std::move(panel_power)] { history.record(t, w, kwh, panel_power); });
         energy_at_snapshot = energy;
         next_snapshot = (wall / step + 1) * step;
         if (wall - last_prune > 86400) {
-          history.prune(settings.history_days);
+          post_history([&history, days = settings.history_days] { history.prune(days); });
           last_prune = wall;
         }
       }
@@ -300,6 +337,12 @@ int main(int argc, char **argv) {
   g_stop = true;
   input_stop = true;
   if (input.joinable()) input.join();
+  {
+    std::lock_guard<std::mutex> lock(history_mu);
+    history_done = true;
+  }
+  history_cv.notify_one();
+  history_worker.join();
   {
     std::lock_guard<std::mutex> lock(master_mu);
     bus_master.reset();

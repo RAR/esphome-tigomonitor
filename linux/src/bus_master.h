@@ -9,18 +9,17 @@
 // only the main loop's tick() sends anything, so a daemon that hangs stops
 // renewing the lease and the array goes safe.
 
-#include "monitor.h"
-
 #include "tigo_master.h"
 #include "tigo_protocol.h"
 
 #include <cstdint>
+#include <functional>
 #include <mutex>
 #include <string>
 
 namespace tigod {
 
-enum class Fault { none, no_port, no_reply, second_master, refused };
+enum class Fault { none, no_port, no_reply, second_master, refused, lease_refused };
 const char *fault_name(Fault f);
 
 struct MasterStatus {
@@ -31,15 +30,19 @@ struct MasterStatus {
   uint32_t renewals = 0;
   uint32_t polls = 0;
   uint32_t timeouts = 0;
+  uint32_t resyncs = 0;  // times the poll cursor was taken from the TAP's reply
   int64_t last_reply_unix = 0;
   std::string detail;
 };
 
 class BusMaster {
  public:
-  // bench: allow the reads a TAP on the bench answers (tigo_master.h's
-  // bench_only); writes are never sent either way.
-  BusMaster(Monitor &mon, uint16_t gateway_id, bool bench);
+  // on_rx gets every byte read from the bus (the Monitor, and --capture);
+  // on_tx every byte written (--capture only). bench: allow the reads a TAP
+  // on the bench answers (tigo_master.h's bench_only); writes are never sent
+  // either way.
+  using Sink = std::function<void(const char *, size_t)>;
+  BusMaster(Sink on_rx, Sink on_tx, uint16_t gateway_id, bool bench);
   ~BusMaster();
 
   bool open(const std::string &device, int baud);
@@ -50,6 +53,7 @@ class BusMaster {
 
   static const int REPLY_TIMEOUT_MS = 50;
   static const uint32_t REOPEN_EVERY_MS = 5000;
+  static const uint32_t LOG_FIRST_REPLIES = 20;  // poll reply headers logged at INFO, for the bench
   static const uint32_t NO_REPLY_FAULT_AFTER = 10;
 
  private:
@@ -57,9 +61,12 @@ class BusMaster {
   // false on a timeout, a write error or a second master.
   bool transact(uint16_t cmd, const esphome::tigo_monitor::master::Bytes &payload,
                 esphome::tigo_monitor::master::Frame &reply);
+  bool is_reply(uint16_t cmd, const esphome::tigo_monitor::master::Bytes &request,
+                const esphome::tigo_monitor::master::Frame &f) const;
   void set_fault(Fault f, const std::string &detail);
+  void update_lease_fault_();
 
-  Monitor &mon_;
+  Sink on_rx_, on_tx_;
   uint16_t gateway_;
   bool bench_;
   int fd_ = -1;
@@ -71,6 +78,7 @@ class BusMaster {
   esphome::tigo_monitor::master::PollCursor cursor_{0};
   uint8_t seq_ = 0;
   uint32_t timeouts_in_a_row_ = 0;
+  uint32_t replies_logged_ = 0;
   esphome::tigo_monitor::protocol::FrameSplitter<std::string> splitter_;
   mutable std::mutex mu_;
   MasterStatus status_;

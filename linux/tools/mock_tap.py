@@ -2,7 +2,8 @@
 """A TAP for testing the bus master, on a pseudo-terminal.
 
     mock_tap.py PTY_LINK [--lease S] [--renew-to S] [--nodes N] [--panels N]
-                         [--foreign-after S] [--stats FILE]
+                         [--foreign-after S] [--echo] [--drop-every N]
+                         [--start-cursor HEX] [--stats FILE]
 
 Answers requests to gateway 0x1201 the way the rig's TAP did in the capture:
   - 0x0148 polls with 0x0149 power frames: up to two synthetic readings per
@@ -12,7 +13,11 @@ Answers requests to gateway 0x1201 the way the rig's TAP did in the capture:
   - tunnel 0x2D, the renewal, by resetting the lease to --renew-to seconds.
 A Frame 27 node table goes out after the first poll, so panels get barcodes.
 --foreign-after puts a request of its own on the bus after S seconds, as a
-second master would. Writes what it saw to --stats as JSON every second.
+second master would. --echo sends every byte the master writes straight back,
+as an adapter that hears itself does. --drop-every N leaves every Nth poll
+unanswered. --start-cursor gives the TAP a cursor of its own: a poll with any
+other cursor gets no data and a reply whose long header states the TAP's
+cursor (a guess at what a real TAP does; the capture never shows it). Writes what it saw to --stats as JSON every second.
 Barcodes are made up.
 """
 import argparse
@@ -61,6 +66,9 @@ def main():
     ap.add_argument('--nodes', type=int, default=44)
     ap.add_argument('--panels', type=int, default=6)
     ap.add_argument('--foreign-after', type=float, default=None)
+    ap.add_argument('--echo', action='store_true')
+    ap.add_argument('--drop-every', type=int, default=0)
+    ap.add_argument('--start-cursor', type=lambda v: int(v, 16), default=0)
     ap.add_argument('--stats', default=None)
     a = ap.parse_args()
 
@@ -74,7 +82,7 @@ def main():
     panels = [(f"04C05B40{0x0B0000 + i * 7:06X}{rng.randint(0, 255):02X}", 0x0002 + i) for i in range(a.panels)]
     start = time.monotonic()
     lease_end = start + a.lease
-    handed_out = 0
+    handed_out = a.start_cursor
     sent_table = False
     foreign_sent = False
     stats = {'polls': 0, 'retries': 0, 'cursor_mismatches': 0, 'checks': 0, 'renewals': [], 'other': [],
@@ -103,9 +111,12 @@ def main():
         if not r:
             continue
         try:
-            buf += os.read(master_fd, 4096)
+            chunk = os.read(master_fd, 4096)
         except OSError:
             continue
+        if a.echo:
+            os.write(master_fd, chunk)
+        buf += chunk
         while True:
             s = buf.find(b'\x7e\x07')
             e = buf.find(b'\x7e\x08', s + 2) if s >= 0 else -1
@@ -126,8 +137,15 @@ def main():
                 if p[1] == 0:
                     stats['retries'] += 1
                 cursor = p[2] << 8 | p[3]
+                if a.drop_every and stats['polls'] % a.drop_every == 0:
+                    stats['dropped'] = stats.get('dropped', 0) + 1
+                    continue
                 if cursor != handed_out & 0xFFFF:
                     stats['cursor_mismatches'] += 1
+                    # 0x41E0: bits 0-4 clear, so the header carries the TAP's whole cursor.
+                    reply = bytes.fromhex(f'41E0000E00010200{handed_out & 0xFFFF:04X}4C00')
+                    os.write(master_fd, encode(GATEWAY | 0x8000, 0x0149, reply))
+                    continue
                 n = rng.choice([0, 0, 0, 1, 2])
                 packets = ''.join(power_packet(panels[(handed_out + i) % len(panels)][1], rng, 0.8) for i in range(n))
                 handed_out += n

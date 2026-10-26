@@ -64,6 +64,10 @@ static int open_port(const std::string &device, int baud, int access = O_RDONLY)
 
 int open_port_rw(const std::string &device, int baud) { return open_port(device, baud, O_RDWR); }
 
+static std::string resolve_auto();
+
+std::string resolve_serial_port(const std::string &device) { return device == "auto" ? resolve_auto() : device; }
+
 static std::string resolve_auto() {
   for (const char *pattern : {"/dev/ttyUSB", "/dev/ttyACM"}) {
     for (int i = 0; i < 4; i++) {

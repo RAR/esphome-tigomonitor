@@ -149,6 +149,7 @@ post('/api/settings', {'mqtt': {'host': ''}})
 expect('web username checked', post('/api/settings', {'web_username': 'a:b'})[0], 400)
 expect('bus role checked', post('/api/settings', {'bus_role': 'both'})[0], 400)
 expect('gateway id checked', post('/api/settings', {'gateway_id': 0x8001})[0], 400)
+expect('no master on a bridge', post('/api/settings', {'bus_role': 'master', 'serial_port': 'tcp://example.com:6638'})[0], 400)
 post('/api/settings', {'web_password': 'pw'})
 time.sleep(1.5)
 auth = {'Authorization': 'Basic ' + base64.b64encode(b'admin:pw').decode()}
