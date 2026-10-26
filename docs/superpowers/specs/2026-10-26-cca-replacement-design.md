@@ -109,6 +109,30 @@ counters; nothing was put on a bus):
 - GET_GATEWAY_STAT (0x0300, read-only) shows whether netrun took, as lmudcd
   itself checks.
 
+### What the roof CCA actually sends (passive capture, 2026-10-26)
+
+`build/roof/steady-20261026.bin`: 20 minutes, daylight, 203,686 frames, 0 bad,
+gateway id 0x1201. The roof CCA does not use the bench opcode set above. It
+sends only 0x0148 power polls and a tunnel, 0x0B0F with replies on 0x0B10,
+whose payload is `00 00 00 <sub> <seq> ...`:
+
+| sub | cadence | what it looks like |
+|---|---|---|
+| 0x2e | every 20 s | reads a **run lease**: reply 0x2f carries a countdown in seconds |
+| 0x2d | when the lease hits 0 | `<seq> ba be 02 03 84 00 2c 01 00`: lease back to 900 s; 0x2c = 44 nodes |
+| 0x41 | every ~17.5 s | cycles nodes 1, 16, 17, 35, 38-41; fixed 17-byte tail (StartPWM/MPPT enforce?) |
+| 0x06 | occasional | ASCII to one node: `^00Version`, `^00Smrt`, `^00Mppt`, `^00Info` |
+| 0x26 | a burst | reads the roster in pages (index 0, 14, 26, 38, 46) |
+| 0x22, 0x0B00 | once | unknown |
+
+**The keep-alive is a 15-minute lease, renewed at expiry.** When it reached 0,
+the TAP's status byte and node count dropped to 0, and the CCA renewed it
+2 s later. What happens if nobody renews it is the question phase 3 answers.
+The 900 s lease is not the rapid-shutdown path: cutting CCA power also cuts
+the TAP's, which silences the mesh at once. It is the "master is alive"
+check. The opcode table above came from a bench TAP and the analysis notes;
+the roof gateway's tunnel supersedes it here.
+
 ## How it will be built (decided)
 
 - **Hardware:** a Pi (the Pi build's target) with an auto-direction RS485
@@ -169,8 +193,9 @@ counters; nothing was put on a bus):
    re-asserts netrun (AdvSync, about every 12 minutes) and StartPWM, and
    the drop-out window lives in TAP and TS4 firmware. Measure it in phase 3.
    The design assumes the master must keep the loop going.
-2a. **The netrun opcode and its start/stop arguments,** from a passive roof
-   capture covering at least one AdvSync. This blocks phase 3.
+2a. **What the 0x2d fields mean** (02, the trailing 01 00), what stops the
+   run, and what 0x41 sets. The capture gives the bytes; the binaries should
+   give the meaning. Phase 3 can replay the captured renewal as-is.
 2. **Does the FlexBoss RSS transmitter also gate the optimizers?** If the
    optimizers need it as well as (or instead of) the TAP's signal, goal 2's
    behaviour changes. A daytime capture with the CCA unplugged answers it.
