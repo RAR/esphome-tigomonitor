@@ -527,11 +527,20 @@
   /* Device Configuration rows */
   .cfg-row { display: flex; gap: 14px; align-items: center; padding: 12px; background: var(--bg-3); border-radius: 6px; margin-bottom: 8px; flex-wrap: wrap; }
   .cfg-row:last-child { margin-bottom: 0; }
-  .cfg-text { flex: 1; min-width: 240px; font-size: 12px; }
+  /* A setting row is a two-column form: the label on the left, its controls
+     starting at the same line on the right, so the fields line up down the
+     card instead of shrinking against the right edge. One column on a phone. */
+  .cfg-row:has(> .cfg-text) { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 3fr); gap: 8px 24px; }
+  @media (max-width: 720px) { .cfg-row:has(> .cfg-text) { grid-template-columns: minmax(0, 1fr); } }
+  .cfg-text { flex: 1; min-width: 0; font-size: 12px; }
   .cfg-text strong { display: block; color: var(--text); margin-bottom: 2px; }
   .cfg-text span { display: block; color: var(--text-dim); }
   .cfg-default { color: var(--text-faint) !important; font-size: 11px; margin-top: 2px; font-family: ui-monospace,Menlo,monospace; }
   .cfg-ctrl { display: flex; align-items: center; gap: 6px; }
+  .cfg-row:has(> .cfg-text) .cfg-ctrl { min-width: 0; }
+  .cfg-row:has(> .cfg-text) .cfg-ctrl .cfg-input { flex: 1 1 auto; width: 100%; max-width: 320px; }
+  .cfg-row:has(> .cfg-text) .cfg-ctrl .cfg-input[type="number"] { max-width: 120px; }
+  .cfg-row:has(> .cfg-text) .cfg-switch { min-width: 120px; }  /* Save lines up with the number rows' */
   .cfg-input { width: 110px; padding: 6px 8px; background: var(--bg-2); border: 1px solid var(--border); border-radius: 5px; color: var(--text); font-size: 13px; }
   .cfg-unit { color: var(--text-dim); font-size: 12px; margin-right: 2px; }
   .cfg-switch { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text); cursor: pointer; min-width: 64px; }
