@@ -33,6 +33,9 @@ Settings load_settings(const std::string &path) {
   }
   get(j, "serial_port", s.serial_port);
   get(j, "baud_rate", s.baud_rate);
+  get(j, "bus_role", s.bus_role);
+  get(j, "master_bench", s.master_bench);
+  get(j, "gateway_id", s.gateway_id);
   get(j, "web_port", s.web_port);
   get(j, "web_username", s.web_username);
   get(j, "web_password", s.web_password);
@@ -58,6 +61,8 @@ Settings load_settings(const std::string &path) {
   if (s.publish_interval_s < 5) s.publish_interval_s = 5;
   if (s.web_port < 0 || s.web_port > 65535) s.web_port = 0;
   if (s.web_username.empty()) s.web_username = "admin";
+  if (s.bus_role != "master") s.bus_role = "listen";
+  if (s.gateway_id < 1 || s.gateway_id > 0x7FFF) s.gateway_id = 0x1201;
   if (s.history_interval_min < 1 || s.history_interval_min > 60) s.history_interval_min = 1;
   if (s.history_days < 1) s.history_days = 730;
   if (s.night_mode_timeout_min < 1 || s.night_mode_timeout_min > 1440) s.night_mode_timeout_min = 60;
@@ -69,6 +74,9 @@ bool save_settings(const std::string &path, const Settings &s) {
   json j = {
       {"serial_port", s.serial_port},
       {"baud_rate", s.baud_rate},
+      {"bus_role", s.bus_role},
+      {"master_bench", s.master_bench},
+      {"gateway_id", s.gateway_id},
       {"web_port", s.web_port},
       {"web_username", s.web_username},
       {"web_password", s.web_password},

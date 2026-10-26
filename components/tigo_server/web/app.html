@@ -1034,6 +1034,10 @@
           <div class="cfg-text"><strong>Serial port</strong><span class="cfg-default">The RS485 adapter on the Tigo bus</span></div>
           <div class="cfg-ctrl"><select class="cfg-input" id="pi-serial"></select> <button class="btn" id="pi-serial-rescan">Rescan</button></div>
         </div>
+        <div class="cfg-row">
+          <div class="cfg-text"><strong>Bus role</strong><span class="cfg-default">Listen beside the CCA, or run the bus in its place with the CCA unplugged (experimental)</span></div>
+          <div class="cfg-ctrl"><select class="cfg-input" id="pi-bus-role"><option value="listen">Listen, beside the CCA</option><option value="master">Master, in place of the CCA</option></select></div>
+        </div>
         <div class="cfg-row" id="pi-bridge-row" style="display:none">
           <div class="cfg-text"><strong>Bridge address</strong><span class="cfg-default">host:port of an ESP32 running stream_server, or an RS485-to-Ethernet converter in TCP server mode</span></div>
           <div class="cfg-ctrl"><input class="cfg-input" id="pi-bridge" autocomplete="off" placeholder="tigo-bridge.local:6638"></div>
@@ -1206,6 +1210,28 @@
           <div class="hist-stat-label">Active sockets</div>
           <div class="hist-stat-val" id="diag-sockets">—<span class="hist-stat-unit" id="diag-sockets-of">/ —</span></div>
           <div class="hist-stat-sub" id="diag-tasks">— FreeRTOS tasks</div>
+        </div>
+      </div>
+
+      <div class="section-head" id="diag-master-head" style="display:none">
+        <div class="section-title">Bus master</div>
+        <div class="section-sub" id="diag-master-sub">—</div>
+      </div>
+      <div class="hist-stat-grid" id="diag-master" style="display:none">
+        <div class="hist-stat-card">
+          <div class="hist-stat-label">Run lease</div>
+          <div class="hist-stat-val" id="diag-lease">—<span class="hist-stat-unit">s</span></div>
+          <div class="hist-stat-sub" id="diag-lease-sub">—</div>
+        </div>
+        <div class="hist-stat-card">
+          <div class="hist-stat-label">Renewals</div>
+          <div class="hist-stat-val" id="diag-renewals">—</div>
+          <div class="hist-stat-sub">since the service started</div>
+        </div>
+        <div class="hist-stat-card">
+          <div class="hist-stat-label">Polls</div>
+          <div class="hist-stat-val" id="diag-polls">—</div>
+          <div class="hist-stat-sub" id="diag-timeouts">— unanswered</div>
         </div>
       </div>
 
@@ -2976,6 +3002,26 @@
       status.mqtt_error || (status.mqtt_configured ? '' : 'set a broker under Tools');
   }
 
+  async function refreshMasterDiagnostics() {
+    const r = await apiFetch('/api/master').catch(() => null);
+    const m = r && r.ok ? await r.json() : null;
+    const show = !!m && m.role === 'master';
+    document.getElementById('diag-master-head').style.display = show ? '' : 'none';
+    document.getElementById('diag-master').style.display = show ? '' : 'none';
+    if (!show) return;
+    const faults = { none: '', no_port: 'cannot open the port', no_reply: 'the TAP is not answering',
+                     second_master: 'another master is on the bus: stopped transmitting', refused: 'refused a request' };
+    document.getElementById('diag-master-sub').textContent = m.fault !== 'none' ? faults[m.fault] || m.fault
+      : m.active ? 'running the bus' : 'not running';
+    document.getElementById('diag-lease').innerHTML = m.lease_read
+      ? `${m.lease.remaining_s}<span class="hist-stat-unit">s</span>` : '—<span class="hist-stat-unit">s</span>';
+    document.getElementById('diag-lease-sub').textContent = !m.lease_read ? 'not read yet'
+      : `${m.lease.running ? 'running' : 'lapsed'} · ${m.lease.node_count} nodes`;
+    document.getElementById('diag-renewals').textContent = m.renewals;
+    document.getElementById('diag-polls').textContent = m.polls.toLocaleString();
+    document.getElementById('diag-timeouts').textContent = `${m.timeouts.toLocaleString()} unanswered`;
+  }
+
   async function refreshDiagnostics(force) {
     if (!document.getElementById('view-diagnostics').classList.contains('active')) return;
     try {
@@ -2987,6 +3033,7 @@
       if (wantTsdb) tsdbStatsAt = Date.now();
       if (!statusR.ok) throw new Error('/api/status ' + statusR.status);
       const status = await statusR.json();
+      if (PLATFORM === 'linux') await refreshMasterDiagnostics();
 
       // Memory
       document.getElementById('diag-heap-free').innerHTML =
@@ -3342,6 +3389,8 @@
         `Readings go to ${s.mqtt.base_topic}/${s.device_id}/panel/<barcode>/state`;
       piWebPortActive = s.web_port_active;
       document.getElementById('pi-web-port').value = s.web_port || '';
+      piBusRole = s.bus_role || 'listen';
+      document.getElementById('pi-bus-role').value = piBusRole;
       piWebLogin = { user: s.web_username || 'admin', set: !!s.web_password_set };
       document.getElementById('pi-web-user').value = piWebLogin.user;
       document.getElementById('pi-web-pass').value = '';
@@ -3360,6 +3409,14 @@
   }
   let piWebPortActive = 0;
   let piWebLogin = { user: 'admin', set: false };
+  let piBusRole = 'listen';
+  // Two masters on one bus collide, and the master's requests reach the
+  // optimizers, so becoming the master is a deliberate step.
+  document.getElementById('pi-bus-role').addEventListener('change', (e) => {
+    if (e.target.value === 'master' && piBusRole !== 'master' &&
+        !confirm('Master mode transmits on the bus. Unplug the CCA first: two masters on one bus collide.\n\nContinue?'))
+      e.target.value = piBusRole;
+  });
   async function piFillSerial(current) {
     const sel = document.getElementById('pi-serial');
     let ports = [];
@@ -3425,7 +3482,7 @@
       if (!addr) { showToast('Enter the bridge address, as host:port', 'err'); return; }
       source = 'tcp://' + addr;
     }
-    const body = { serial_port: source, web_port: webPort,
+    const body = { serial_port: source, web_port: webPort, bus_role: document.getElementById('pi-bus-role').value,
                    web_username: document.getElementById('pi-web-user').value.trim() || 'admin' };
     const webPass = document.getElementById('pi-web-pass').value;
     if (webPass !== '') body.web_password = webPass;

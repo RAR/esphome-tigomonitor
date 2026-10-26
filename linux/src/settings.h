@@ -22,6 +22,11 @@ struct Settings {
   // USB serial adapter, then the Pi's own UART; the SD card image starts there.
   std::string serial_port;
   int baud_rate = 38400;
+  // "listen" (the default): only read the bus, beside a CCA. "master": run
+  // the bus in the CCA's place, with the CCA unplugged (bus_master.h).
+  std::string bus_role = "listen";
+  bool master_bench = false;  // also send the reads a bench TAP answers
+  int gateway_id = 0x1201;    // the TAP's RS485 id, as the CCA addresses it
   float power_calibration = 1.0f;
   // Plenty of RAM here, so the node table is sized for any real site rather
   // than to the panel count, as number_of_devices has to be on the ESP32.

@@ -1040,6 +1040,24 @@ void HttpServer::routes_() {
     send_json(res, {{"ok", true}});
   });
 
+  // Pi-only: the bus master, when the daemon runs the bus in the CCA's place.
+  svr.Get("/api/master", [this](const httplib::Request &, httplib::Response &res) {
+    MasterStatus m = ctx_.master_status ? ctx_.master_status() : MasterStatus{};
+    send_json(res, {{"role", ctx_.current_settings().bus_role},
+                    {"active", m.active},
+                    {"fault", fault_name(m.fault)},
+                    {"detail", m.detail},
+                    {"lease_read", m.lease_read},
+                    {"lease",
+                     {{"running", m.lease.running},
+                      {"remaining_s", m.lease.remaining_s},
+                      {"node_count", m.lease.node_count}}},
+                    {"renewals", m.renewals},
+                    {"polls", m.polls},
+                    {"timeouts", m.timeouts},
+                    {"last_reply_unix", m.last_reply_unix}});
+  });
+
   // Pi-only: the serial ports to choose the RS485 adapter from.
   svr.Get("/api/serial-ports", [](const httplib::Request &, httplib::Response &res) {
     json ports = json::array();
@@ -1052,6 +1070,9 @@ void HttpServer::routes_() {
   svr.Get("/api/settings", [this](const httplib::Request &, httplib::Response &res) {
     Settings s = ctx_.current_settings();
     send_json(res, {{"serial_port", s.serial_port},
+                    {"bus_role", s.bus_role},
+                    {"master_bench", s.master_bench},
+                    {"gateway_id", s.gateway_id},
                     {"web_port", s.web_port},
                     {"web_port_active", port_},
                     {"web_username", s.web_username},
@@ -1083,6 +1104,9 @@ void HttpServer::routes_() {
     std::string err;
     try {
       if (j.contains("serial_port")) s.serial_port = j["serial_port"].get<std::string>();
+      if (j.contains("bus_role")) s.bus_role = j["bus_role"].get<std::string>();
+      if (j.contains("master_bench")) s.master_bench = j["master_bench"].get<bool>();
+      if (j.contains("gateway_id")) s.gateway_id = j["gateway_id"].get<int>();
       if (j.contains("web_port")) s.web_port = j["web_port"].get<int>();
       if (j.contains("web_username")) s.web_username = j["web_username"].get<std::string>();
       // Absent keeps it, and "" turns the login off.
@@ -1111,6 +1135,8 @@ void HttpServer::routes_() {
     if (err.empty() && s.serial_port.rfind(TCP_PREFIX, 0) == 0 &&
         !parse_tcp_source(s.serial_port, bridge_host, bridge_port))
       err = "A network bridge is host:port, with a port of 1-65535.";
+    if (err.empty() && s.bus_role != "listen" && s.bus_role != "master") err = "Bus role is listen or master.";
+    if (err.empty() && (s.gateway_id < 1 || s.gateway_id > 0x7FFF)) err = "Gateway id must be 1-7FFF.";
     if (err.empty() && (s.mqtt.port < 1 || s.mqtt.port > 65535)) err = "MQTT port must be 1-65535.";
     if (err.empty() && (s.web_port < 0 || s.web_port > 65535)) err = "Web port must be 1-65535, or empty for the default.";
     if (err.empty() && (s.web_username.empty() || s.web_username.find(':') != std::string::npos))

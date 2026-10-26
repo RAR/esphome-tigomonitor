@@ -147,6 +147,8 @@ time.sleep(1.5)
 expect('MQTT password dropped for a new broker', get('/api/settings')[1]['mqtt']['password_set'], False)
 post('/api/settings', {'mqtt': {'host': ''}})
 expect('web username checked', post('/api/settings', {'web_username': 'a:b'})[0], 400)
+expect('bus role checked', post('/api/settings', {'bus_role': 'both'})[0], 400)
+expect('gateway id checked', post('/api/settings', {'gateway_id': 0x8001})[0], 400)
 post('/api/settings', {'web_password': 'pw'})
 time.sleep(1.5)
 auth = {'Authorization': 'Basic ' + base64.b64encode(b'admin:pw').decode()}

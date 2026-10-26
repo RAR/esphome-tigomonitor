@@ -4,6 +4,7 @@
 //                [--capture FILE] [--verbose]
 
 #include "log.h"
+#include "bus_master.h"
 #include "monitor.h"
 #include "cca_ble.h"
 #include "cca_http.h"
@@ -134,11 +135,27 @@ int main(int argc, char **argv) {
   std::mutex settings_mu;  // settings is read by the web server's threads
   std::atomic<bool> input_done{false};
   std::atomic<bool> input_stop{false};
+  // The master role has no input thread: the main loop ticks it below, so
+  // nothing renews the TAP's lease if this loop ever stops.
+  std::mutex master_mu;  // bus_master is read by the web server's threads
+  std::unique_ptr<BusMaster> bus_master;
   auto start_input = [&]() {
     input_stop = false;
     input_done = false;
     std::string dev = settings.serial_port;
     int baud = settings.baud_rate;
+    if (replay.empty() && settings.bus_role == "master") {
+      auto m = std::make_unique<BusMaster>(monitor, static_cast<uint16_t>(settings.gateway_id), settings.master_bench);
+      if (dev.empty()) LOGW("bus master: no serial port chosen yet; pick the RS485 adapter under Tools");
+      else m->open(dev, baud);
+      std::lock_guard<std::mutex> lock(master_mu);
+      bus_master = std::move(m);
+      return std::thread();
+    }
+    {
+      std::lock_guard<std::mutex> lock(master_mu);
+      bus_master.reset();
+    }
     return std::thread([&, dev, baud] {
       if (!replay.empty()) run_replay(replay, speed, input_stop, on_data);
       else run_serial(dev, baud, input_stop, on_data);
@@ -168,13 +185,17 @@ int main(int argc, char **argv) {
         return settings;
       },
       [&] { return mqtt.connected(); }, [&] { return mqtt.last_error(); }, settings_changed, restart_requested,
-      monitor, topology, history, cloud, cca, cca_http});
+      monitor, topology, history, cloud, cca, cca_http,
+      [&] {
+        std::lock_guard<std::mutex> lock(master_mu);
+        return bus_master ? bus_master->status() : MasterStatus{};
+      }});
   if (port < 0 && settings.web_port > 0) port = settings.web_port;
   // Only the default steps aside for another web server; a port someone
   // chose fails loudly instead, and systemd keeps retrying it.
   if ((port < 0 && !web.start(80, 8080)) || (port > 0 && !web.start(port))) {
     input_stop = true;
-    input.join();
+    if (input.joinable()) input.join();
     cca.stop();
     cca_http.stop();
     return 1;
@@ -188,8 +209,21 @@ int main(int argc, char **argv) {
   int64_t last_prune = 0;
   BusStats last_stats{};
   auto last_stats_log = std::chrono::steady_clock::now();
+  const auto started = std::chrono::steady_clock::now();
   while (!g_stop) {
-    std::this_thread::sleep_for(std::chrono::seconds(1));
+    // A second's worth of master ticks, one request each, or a plain sleep.
+    auto second = std::chrono::steady_clock::now() + std::chrono::seconds(1);
+    while (!g_stop && std::chrono::steady_clock::now() < second) {
+      {
+        std::lock_guard<std::mutex> lock(master_mu);
+        if (!bus_master) break;
+        bus_master->tick(static_cast<uint32_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+                                                    std::chrono::steady_clock::now() - started)
+                                                    .count()));
+      }
+      std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    std::this_thread::sleep_until(second);
     if (restart_requested) {
       LOGI("restart requested from the web UI");
       break;
@@ -197,7 +231,9 @@ int main(int argc, char **argv) {
     if (settings_changed.exchange(false)) {
       Settings fresh = load_settings(settings_path);
       if (fresh.device_id.empty()) fresh.device_id = settings.device_id;
-      bool new_port = fresh.serial_port != settings.serial_port || fresh.baud_rate != settings.baud_rate;
+      bool new_port = fresh.serial_port != settings.serial_port || fresh.baud_rate != settings.baud_rate ||
+                      fresh.bus_role != settings.bus_role || fresh.gateway_id != settings.gateway_id ||
+                      fresh.master_bench != settings.master_bench;
       if (fresh.web_port != settings.web_port) LOGI("web: the new port takes effect when the service restarts");
       {
         std::lock_guard<std::mutex> lock(settings_mu);
@@ -211,7 +247,7 @@ int main(int argc, char **argv) {
       mqtt.configure(settings);
       if (new_port && replay.empty()) {
         input_stop = true;
-        input.join();
+        if (input.joinable()) input.join();
         input = start_input();
       }
     }
@@ -263,7 +299,11 @@ int main(int argc, char **argv) {
   }
   g_stop = true;
   input_stop = true;
-  input.join();
+  if (input.joinable()) input.join();
+  {
+    std::lock_guard<std::mutex> lock(master_mu);
+    bus_master.reset();
+  }
   web.stop();
   cca.stop();
   cca_http.stop();

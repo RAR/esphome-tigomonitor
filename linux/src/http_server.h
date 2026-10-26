@@ -14,6 +14,7 @@
 #include "cloud.h"
 #include "history.h"
 #include "monitor.h"
+#include "bus_master.h"
 #include "settings.h"
 #include "topology.h"
 
@@ -46,6 +47,7 @@ struct HttpContext {
   Cloud &cloud;
   CcaBle &cca;
   CcaHttp &cca_http;
+  std::function<MasterStatus()> master_status;  // inactive when listening
 };
 
 class HttpServer {
