@@ -8,7 +8,7 @@
     amber arcs are that frame leaving on the bus.
 
     Palette is deliberate, not inherited: silicon indigo body, busbar silver,
-    and amber #F4B23C — the same --tigo-amber already defined in
+    and amber #F4B23C — the same tigo-amber token already defined in
     site/src/styles/theme.css. Amber means one thing across the whole identity:
     this is the part that is live.
 

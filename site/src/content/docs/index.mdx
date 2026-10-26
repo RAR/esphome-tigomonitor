@@ -3,6 +3,7 @@ title: Tigo Monitor
 description: See how much power every one of your solar panels is making, on your own hardware, with no cloud account and no subscription.
 template: splash
 hero:
+  title: '<span class="wordmark"><span>Tigo</span> <span>Monitor</span></span>'
   tagline: See how much power every solar panel on your roof is making — on a $30 board you own, with its own dashboard and a direct feed into Home Assistant. No cloud account, no subscription.
   actions:
     - text: Get Started
@@ -12,6 +13,9 @@ hero:
     - text: Build a Config
       link: /esphome-tigomonitor/config-builder/
       icon: setting
+      # Starlight's default variant is primary, and only one button should
+      # carry the primary's amber underline.
+      variant: secondary
     - text: View on GitHub
       link: https://github.com/RAR/esphome-tigomonitor
       icon: external

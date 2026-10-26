@@ -130,13 +130,38 @@
   -webkit-mask-image: radial-gradient(125% 60% at 50% 57%, #000 16%, transparent 78%);
           mask-image: radial-gradient(125% 60% at 50% 57%, #000 16%, transparent 78%);
 }
+/* The lockup from the social card (screenshots/social-preview.mjs): the mark
+   beside a stacked two-line wordmark, MONITOR in the second colour. The
+   title's HTML comes from hero.title in index.mdx. The mark is the
+   full-detail cut, referenced rather than copied so it can't drift, and it
+   hangs off TIGO's cap height: centred, it floats in the gap between the lines. */
 .hero h1 {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.2em;
   font-family: var(--tigo-display);
   font-weight: 700;
-  font-size: clamp(3rem, 8vw, 6rem);
-  line-height: 0.92;
-  letter-spacing: 0.005em;
+  font-size: clamp(3.5rem, 9vw, 7.25rem);
+  line-height: 0.84;
+  letter-spacing: -0.005em;
   text-transform: uppercase;
+}
+.hero h1::before {
+  content: '';
+  flex: none;
+  width: 0.93em;
+  height: 0.93em;
+  margin-top: -0.06em;
+  background: url('../../../docs/images/logo.svg') center / contain no-repeat;
+}
+.hero h1 .wordmark > span {
+  display: block;
+}
+.hero h1 .wordmark > span + span {
+  color: var(--sl-color-accent-high);
+}
+:root[data-theme='light'] .hero h1 .wordmark > span + span {
+  color: var(--sl-color-accent);
 }
 .hero .tagline {
   max-width: 42ch;
@@ -156,6 +181,34 @@
   background: var(--tigo-amber);
   border-radius: 2px;
   opacity: 0.85;
+}
+
+/* --- Tips and cards in the brand duotone, not Starlight's stock colours ---
+   Stock tips are purple and stock card icons cycle orange/purple/green/red;
+   neither relates to the mark. Tips take the indigo accent. Card icons go
+   silver, and amber is spent once: on the landing page's first card, the
+   live per-panel readings, which is what amber means everywhere else. */
+.starlight-aside--tip {
+  --sl-color-asides-text-accent: var(--sl-color-accent-high);
+  --sl-color-asides-border: var(--sl-color-accent);
+  background-color: var(--sl-color-accent-low);
+}
+.card {
+  --sl-card-border: color-mix(in srgb, var(--sl-color-accent-high) 35%, transparent);
+  --sl-card-bg: transparent;
+}
+.card .icon {
+  color: var(--sl-color-accent-high);
+}
+[data-has-hero] .card:first-child {
+  --sl-card-border: var(--tigo-amber);
+  --sl-card-bg: var(--tigo-amber-soft);
+}
+[data-has-hero] .card:first-child .icon {
+  color: var(--tigo-amber);
+}
+:root[data-theme='light'][data-has-hero] .card:first-child .icon {
+  color: #8a5a0b;  /* the amber, darkened to hold contrast on white */
 }
 
 /* --- One-shot staggered reveal on load ----------------------------------- */
