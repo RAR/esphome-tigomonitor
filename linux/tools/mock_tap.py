@@ -100,7 +100,7 @@ def main():
     addr = FACTORY if a.factory else GATEWAY  # the id the TAP currently answers at
     stats = {'polls': 0, 'retries': 0, 'cursor_mismatches': 0, 'checks': 0, 'renewals': [], 'other': [],
              'first_lease_frame': None, 'first_frame': None, 'addressed_to': None, 'frames_after_foreign': 0, 'foreign_at': None,
-             'second_asked': 0, 'second_written': 0}
+             'second_asked': 0, 'second_written': 0, 'session': [], 'housekeeping': []}
     buf = bytearray()
     last_stats = 0.0
 
@@ -208,6 +208,12 @@ def main():
                 stats['renewals'].append({'t': round(t, 2), 'nodes': p[10] << 8 | p[11]})
                 lease_end = time.monotonic() + a.renew_to
                 os.write(master_fd, encode(addr | 0x8000, 0x0B10, lease_payload(p[4])))
+            elif cmd == 0x0B00 and len(p) == 1:  # the CCA's session frame; the TAP echoes it
+                stats['session'].append(f'{p[0]:02x}')
+                os.write(master_fd, encode(addr | 0x8000, 0x0B01, p))
+            elif cmd == 0x0B0F and len(p) >= 5 and p[3] == 0x41:  # housekeeping, forwarded to the mesh
+                stats['housekeeping'].append({'t': round(t, 2), 'args': p[5:].hex()})
+                os.write(master_fd, encode(addr | 0x8000, 0x0B10, bytes([0x00, 0x0D, 0x00, 0x41, p[4]])))
             else:
                 stats['other'].append(f'{cmd:04X} {p.hex()}')
 

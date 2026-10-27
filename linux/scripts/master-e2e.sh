@@ -218,4 +218,71 @@ for mode in warm cold; do
   kill $tap; wait $tap 2>/dev/null || true
 done
 
+# --- run 11: housekeeping learned while listening ---
+# A replayed bus with the CCA's 0x41s on it: the requests are learned, one
+# per stream and target, and the TAP's replies and other frames are not.
+# The tail is invented; the roof's isn't committed.
+mkdir -p "$out/state11"
+python3 - "$out/bus11.bin" <<'PY'
+import sys
+sys.path.insert(0, 'linux/tools')
+from mock_tap import encode
+TAIL = bytes(range(0x11, 0x22))
+def h41(seq, tuid, stream):
+    return encode(0x1201, 0x0B0F, bytes([0, 0, 0, 0x41, seq, tuid >> 8, tuid & 0xFF, 0, 0, 0, stream, 0]) + TAIL)
+out = b''
+for seq, (tuid, stream) in enumerate([(0x0001, 1), (0x0027, 2), (0x0009, 4), (0x0001, 1), (0x0028, 1)], 1):
+    out += h41(seq, tuid, stream) + encode(0x9201, 0x0B10, bytes([0, 0x0D, 0, 0x41, seq]))
+out += encode(0x9201, 0x0B0F, bytes([0, 0, 0, 0x41, 9, 0, 0x30, 0, 0, 0, 1, 0]) + TAIL)  # not a request
+out += encode(0x1201, 0x0B0F, bytes([0, 0, 0, 0x41, 9, 0, 0x31, 0, 0, 0, 3, 0]) + TAIL)  # no such stream
+open(sys.argv[1], 'wb').write(out)
+PY
+build/linux/tigomonitord --state-dir "$out/state11" --port 0 --replay "$out/bus11.bin" --speed 0 2> "$out/daemon11.log"
+expect "learned one per stream and target" "$(stat "$out/state11/cca-0x41.json" "[(e['stream'], e['tuid']) for e in d['entries']]")" "[(1, 1), (2, 39), (4, 9), (1, 40)]"
+expect "kept on this machine only" "$(python3 -c "import os; print(oct(os.stat('$out/state11/cca-0x41.json').st_mode)[-3:])")" 600
+
+# --- run 12: housekeeping sent, from what was learned ---
+# Warm: the TAP already at its id, so 0x0B00 01 straight away, then each
+# stream's 0x41 a few seconds apart, 02 then 01 (at 0x0001) then 04, and
+# only the frames learned. Cold: after a re-address, 0x0B00 00 then 01.
+for mode in warm cold; do
+  mkdir -p "$out/state12$mode"
+  cp "$out/state11/cca-0x41.json" "$out/state12$mode/"
+  flag=""; [ $mode = cold ] && flag="--factory"
+  python3 linux/tools/mock_tap.py "$out/tap12$mode" $flag --lease 600 --nodes 44 --stats "$out/tap12$mode.json" &
+  tap=$!
+  sleep 0.5
+  printf '{"bus_role": "master", "master_startup": true, "master_housekeeping": true, "serial_port": "%s", "gateway_id": 4609, "web_port": 18102}\n' \
+    "$PWD/$out/tap12$mode" > "$out/state12$mode/settings.json"
+  build/linux/tigomonitord --state-dir "$out/state12$mode" --web-dir components/tigo_server/web 2> "$out/daemon12$mode.log" &
+  daemon=$!
+  for _ in $(seq 60); do [ -f "$out/tap12$mode.json" ] && [ "$(stat "$out/tap12$mode.json" "len(d['housekeeping'])")" -ge 3 ] && break; sleep 0.5; done
+  want_session="['01']"; [ $mode = cold ] && want_session="['00', '01']"
+  expect "$mode: 0x0B00 at the start" "$(stat "$out/tap12$mode.json" "d['session']")" "$want_session"
+  expect "$mode: one 0x41 per stream, 02 01 04" "$(stat "$out/tap12$mode.json" "[(h['args'][10:12], h['args'][:4]) for h in d['housekeeping'][:3]]")" "[('02', '0027'), ('01', '0001'), ('04', '0009')]"
+  expect "$mode: only learned frames" "$(python3 -c "
+import json
+learned = {e['args'] for e in json.load(open('$out/state11/cca-0x41.json'))['entries']}
+print(all(h['args'] in learned for h in json.load(open('$out/tap12$mode.json'))['housekeeping']))")" True
+  expect "$mode: still polling, nothing else sent" "$(stat "$out/tap12$mode.json" "(d['polls'] > 0, d['other'])")" "(True, [])"
+  expect "$mode: /api/master counts" "$(api 18102 /api/master | python3 -c 'import json,sys; h=json.load(sys.stdin)["housekeeping"]; print(h["on"], h["learned_41"], h["sent_41"] >= 3, h["sent_session"])')" "True 4 True $([ $mode = cold ] && echo 2 || echo 1)"
+  kill $daemon; wait $daemon 2>/dev/null || true
+  kill $tap; wait $tap 2>/dev/null || true
+done
+
+# --- run 13: housekeeping on with nothing learned sends no 0x41 ---
+mkdir -p "$out/state13"
+python3 linux/tools/mock_tap.py "$out/tap13" --lease 600 --nodes 44 --stats "$out/tap13.json" &
+tap=$!
+sleep 0.5
+printf '{"bus_role": "master", "master_housekeeping": true, "serial_port": "%s", "gateway_id": 4609, "web_port": 18103}\n' \
+  "$PWD/$out/tap13" > "$out/state13/settings.json"
+build/linux/tigomonitord --state-dir "$out/state13" --web-dir components/tigo_server/web 2> "$out/daemon13.log" &
+daemon=$!
+sleep 15
+expect "nothing learned: only 0x0B00 01" "$(stat "$out/tap13.json" "(d['session'], d['housekeeping'], d['polls'] > 0)")" "(['01'], [], True)"
+expect "says how to learn them" "$(grep -c 'none yet: listen beside the CCA' "$out/daemon13.log")" 1
+kill $daemon; wait $daemon 2>/dev/null || true
+kill $tap; wait $tap 2>/dev/null || true
+
 [ $fail = 0 ] && echo "master e2e passed" || { echo "master e2e FAILED; see $out/"; exit 1; }

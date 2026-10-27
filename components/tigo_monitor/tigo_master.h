@@ -90,6 +90,9 @@ static const uint16_t CMD_TUNNEL_REPLY = 0x0B10;
 static const uint8_t SUB_LEASE_RENEW = 0x2D;
 static const uint8_t SUB_LEASE_CHECK = 0x2E;
 static const uint8_t SUB_LEASE_REPLY = 0x2F;
+// Sub 0x41 and command 0x0B00: the CCA's housekeeping (Housekeeping, below).
+static const uint8_t SUB_HOUSEKEEPING = 0x41;
+static const uint16_t CMD_SESSION = 0x0B00;
 
 inline Bytes tunnel_request(uint8_t sub, uint8_t seq, const Bytes &args) {
   Bytes out = {0x00, 0x00, 0x00, sub, seq};
@@ -326,11 +329,143 @@ struct Request {
   uint32_t wait_ms = 0;  // how long to wait for the reply; 0 = the usual
 };
 
-// What a master sends next: lease work when it's due, a poll otherwise.
-// seq is the last tunnel sequence number used, advanced when one is.
-inline Request next_request(LeaseKeeper &lease, const PollCursor &cursor, uint8_t &seq, uint32_t now_ms) {
+// ---- housekeeping ----------------------------------------------------------
+
+// Two things the CCA sends that the lease and polls don't cover, from a 24 h
+// capture of the reference rig's bus:
+//   - tunnel sub 0x41, the args a target Tuid then 00 00 00 <stream> 00 and 17
+//     more bytes. Three streams (01, 02, 04), each sent once a minute, each
+//     moving to its next target every 10 minutes. The 17 bytes never changed
+//     in 24 h, across CCA reboots. What it does isn't known, so the bytes are
+//     copied, not composed: a master sends only frames it heard the CCA send.
+//   - 0x0B00 with 01, every hour; after the CCA reboots, 00 then 01 once.
+// The content is the site's own, learned while listening (Learned41); none
+// of it is built in.
+inline bool is_housekeeping_args(const Bytes &args) {
+  return args.size() == 24 && !args[2] && !args[3] && !args[4] && (args[5] == 0x01 || args[5] == 0x02 || args[5] == 0x04) &&
+         !args[6];
+}
+
+// The 0x41s a CCA was heard sending: one entry per stream and target, in the
+// order first heard; newer content for a target replaces the old.
+class Learned41 {
+ public:
+  static const size_t PER_STREAM = 64;
+  struct Entry {
+    uint8_t stream = 0;
+    uint16_t tuid = 0;
+    Bytes args;  // after the seq: the Tuid, then the content
+  };
+
+  // A frame read off the bus. True if it taught something new.
+  bool on_frame(const Frame &f) {
+    if (f.dest & 0x8000 || f.cmd != CMD_TUNNEL || f.payload.size() < 5 || f.payload[0] || f.payload[1] ||
+        f.payload[2] || f.payload[3] != SUB_HOUSEKEEPING)
+      return false;
+    return add(Bytes(f.payload.begin() + 5, f.payload.end()));
+  }
+  // Entries saved earlier; malformed ones are dropped.
+  void load(const std::vector<Entry> &saved) {
+    entries_.clear();
+    for (const Entry &e : saved)
+      if (is_housekeeping_args(e.args) && e.stream == e.args[5] && e.tuid == (e.args[0] << 8 | e.args[1])) add(e.args);
+  }
+  const std::vector<Entry> &entries() const { return entries_; }
+
+ private:
+  bool add(const Bytes &args) {
+    if (!is_housekeeping_args(args)) return false;
+    uint8_t stream = args[5];
+    uint16_t tuid = static_cast<uint16_t>(args[0] << 8 | args[1]);
+    size_t in_stream = 0;
+    for (Entry &e : entries_) {
+      if (e.stream != stream) continue;
+      in_stream++;
+      if (e.tuid != tuid) continue;
+      if (e.args == args) return false;
+      e.args = args;
+      return true;
+    }
+    if (in_stream >= PER_STREAM) return false;
+    entries_.push_back({stream, tuid, args});
+    return true;
+  }
+  std::vector<Entry> entries_;
+};
+
+// Sends the learned 0x41s on the CCA's timing, and 0x0B00 01 at the start
+// and every hour after. session_reset: send 00 before the first 01, as the
+// CCA does after it reboots and re-addresses the TAP.
+class Housekeeping {
+ public:
+  static const uint32_t STREAM_EVERY_MS = 60000;
+  static const uint32_t SLOT_MS = 600000;
+  static const uint32_t SESSION_EVERY_MS = 3600000;
+  // Streams 02, 01, 04 go out in that order, a few seconds apart, as the CCA's do.
+  static constexpr uint8_t STREAMS[3] = {0x02, 0x01, 0x04};
+  static constexpr uint32_t OFFSET_MS[3] = {1000, 6000, 11000};
+
+  Housekeeping(const std::vector<Learned41::Entry> &learned, uint32_t now_ms, bool session_reset)
+      : start_ms_(now_ms), reset_pending_(session_reset), next_session_ms_(now_ms) {
+    for (int i = 0; i < 3; i++) {
+      for (const auto &e : learned)
+        if (e.stream == STREAMS[i]) targets_[i].push_back(e.args);
+      // The CCA's stream 01 starts at 0x0001 after every reboot.
+      if (STREAMS[i] == 0x01)
+        std::stable_partition(targets_[i].begin(), targets_[i].end(),
+                              [](const Bytes &a) { return a[0] == 0x00 && a[1] == 0x01; });
+      next_ms_[i] = now_ms + OFFSET_MS[i];
+    }
+  }
+
+  // The next request due, or one with cmd 0. A 0x41 takes the next seq.
+  Request due(uint32_t now_ms, uint8_t &seq) {
+    if (reset_pending_) {
+      reset_pending_ = false;
+      sent_session_++;
+      return {CMD_SESSION, {0x00}};
+    }
+    if (static_cast<int32_t>(now_ms - next_session_ms_) >= 0) {
+      next_session_ms_ = now_ms + SESSION_EVERY_MS;
+      sent_session_++;
+      return {CMD_SESSION, {0x01}};
+    }
+    for (int i = 0; i < 3; i++) {
+      if (targets_[i].empty() || static_cast<int32_t>(now_ms - next_ms_[i]) < 0) continue;
+      next_ms_[i] = now_ms + STREAM_EVERY_MS;
+      const Bytes &args = targets_[i][((now_ms - start_ms_) / SLOT_MS) % targets_[i].size()];
+      seq = next_seq(seq);
+      sent_41_++;
+      return {CMD_TUNNEL, tunnel_request(SUB_HOUSEKEEPING, seq, args)};
+    }
+    return {};
+  }
+  uint32_t sent_41() const { return sent_41_; }
+  uint32_t sent_session() const { return sent_session_; }
+
+ private:
+  uint32_t start_ms_;
+  bool reset_pending_;
+  uint32_t next_session_ms_;
+  std::vector<Bytes> targets_[3];
+  uint32_t next_ms_[3] = {0, 0, 0};
+  uint32_t sent_41_ = 0;
+  uint32_t sent_session_ = 0;
+};
+
+// What a master sends next: lease work when it's due, then housekeeping (if
+// there is any), a poll otherwise. seq is the last tunnel sequence number
+// used, advanced when one is.
+inline Request next_request(LeaseKeeper &lease, const PollCursor &cursor, uint8_t &seq, uint32_t now_ms,
+                            Housekeeping *housekeeping = nullptr) {
   LeaseAction a = lease.due(now_ms);
-  if (a.kind == LeaseAction::none) return {CMD_POLL, poll_payload(cursor.next(), cursor.retry())};
+  if (a.kind == LeaseAction::none) {
+    if (housekeeping) {
+      Request r = housekeeping->due(now_ms, seq);
+      if (r.cmd) return r;
+    }
+    return {CMD_POLL, poll_payload(cursor.next(), cursor.retry())};
+  }
   seq = next_seq(seq);
   if (a.kind == LeaseAction::renew) return {CMD_TUNNEL, tunnel_request(SUB_LEASE_RENEW, seq, lease_renewal_args(a.node_count))};
   return {CMD_TUNNEL, tunnel_request(SUB_LEASE_CHECK, seq, {})};
@@ -480,6 +615,9 @@ inline Allow classify_request(uint16_t cmd, const Bytes &payload) {
   for (size_t i = 0; i + 4 <= payload.size(); i++)
     if (std::equal(KEY, KEY + 4, payload.begin() + i)) return Allow::never;
 
+  // The CCA's hourly 01; its 00 only follows its own reboot, so bring-up only.
+  if (cmd == CMD_SESSION)
+    return payload == Bytes{0x01} ? Allow::yes : payload == Bytes{0x00} ? Allow::startup_only : Allow::bench_only;
   if (cmd == CMD_POLL)
     return payload.size() == 5 && payload[0] == 0x00 && payload[1] <= 0x01 && payload[4] == 0x04 ? Allow::yes
                                                                                                : Allow::bench_only;
@@ -494,6 +632,8 @@ inline Allow classify_request(uint16_t cmd, const Bytes &payload) {
                      (args[5] || args[6]) && args[7] == 0x01 && args[8] == 0x00
                  ? Allow::yes
                  : Allow::bench_only;
+    case SUB_HOUSEKEEPING:  // only the CCA's shape; Housekeeping sends only learned ones
+      return is_housekeeping_args(args) ? Allow::yes : Allow::bench_only;
     case 0x26:  // a page of the roster, by index
       return args.size() == 2 ? Allow::yes : Allow::bench_only;
     case 0x06: {  // a text query to one node: the four the CCA sends

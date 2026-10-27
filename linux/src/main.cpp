@@ -10,6 +10,7 @@
 #include "cca_http.h"
 #include "cloud.h"
 #include "history.h"
+#include "housekeeping_store.h"
 #include "http_server.h"
 #include "mqtt_publisher.h"
 #include "serial_port.h"
@@ -130,9 +131,17 @@ int main(int argc, char **argv) {
     }
     LOGI("capturing raw bus bytes to %s", capture.c_str());
   }
+  // What the CCA sends that the master copies (its 0x41s) is learned while
+  // listening beside it; the master's own frames teach it nothing.
+  HousekeepingStore housekeeping(state_dir + "/cca-0x41.json");
+  housekeeping.load();
   auto on_data = [&](const char *data, size_t n) {
     if (capture_out) capture_out->write(data, static_cast<std::streamsize>(n)).flush();
     monitor.feed(data, n);
+  };
+  auto on_listen = [&](const char *data, size_t n) {
+    on_data(data, n);
+    housekeeping.feed(data, n);
   };
   // What the bus master sends goes in the capture too, for reading back
   // what was said on the bench.
@@ -154,7 +163,8 @@ int main(int argc, char **argv) {
     int baud = settings.baud_rate;
     if (replay.empty() && settings.bus_role == "master") {
       auto m = std::make_unique<BusMaster>(on_data, on_sent, static_cast<uint16_t>(settings.gateway_id),
-                                           settings.master_bench, settings.master_startup);
+                                           settings.master_bench, settings.master_startup,
+                                           settings.master_housekeeping, housekeeping.entries());
       if (dev.empty()) LOGW("bus master: no serial port chosen yet; pick the RS485 adapter under Tools");
       else m->open(dev, baud);
       std::lock_guard<std::mutex> lock(master_mu);
@@ -166,8 +176,8 @@ int main(int argc, char **argv) {
       bus_master.reset();
     }
     return std::thread([&, dev, baud] {
-      if (!replay.empty()) run_replay(replay, speed, input_stop, on_data);
-      else run_serial(dev, baud, input_stop, on_data);
+      if (!replay.empty()) run_replay(replay, speed, input_stop, on_listen);
+      else run_serial(dev, baud, input_stop, on_listen);
       input_done = true;
     });
   };
@@ -197,7 +207,9 @@ int main(int argc, char **argv) {
       monitor, topology, history, cloud, cca, cca_http,
       [&] {
         std::lock_guard<std::mutex> lock(master_mu);
-        return bus_master ? bus_master->status() : MasterStatus{};
+        MasterStatus m = bus_master ? bus_master->status() : MasterStatus{};
+        if (!bus_master) m.learned_41 = static_cast<uint32_t>(housekeeping.entries().size());
+        return m;
       }});
   if (port < 0 && settings.web_port > 0) port = settings.web_port;
   // Only the default steps aside for another web server; a port someone
@@ -269,7 +281,8 @@ int main(int argc, char **argv) {
       if (fresh.device_id.empty()) fresh.device_id = settings.device_id;
       bool new_port = fresh.serial_port != settings.serial_port || fresh.baud_rate != settings.baud_rate ||
                       fresh.bus_role != settings.bus_role || fresh.gateway_id != settings.gateway_id ||
-                      fresh.master_bench != settings.master_bench || fresh.master_startup != settings.master_startup;
+                      fresh.master_bench != settings.master_bench || fresh.master_startup != settings.master_startup ||
+                      fresh.master_housekeeping != settings.master_housekeeping;
       if (fresh.web_port != settings.web_port) LOGI("web: the new port takes effect when the service restarts");
       {
         std::lock_guard<std::mutex> lock(settings_mu);
@@ -288,6 +301,7 @@ int main(int argc, char **argv) {
       }
     }
     monitor.tick();
+    housekeeping.save_if_changed();
     auto now = std::chrono::steady_clock::now();
     if (now - last_publish >= std::chrono::seconds(settings.publish_interval_s)) {
       mqtt.publish();
@@ -351,6 +365,7 @@ int main(int argc, char **argv) {
   cca.stop();
   cca_http.stop();
   monitor.save();
+  housekeeping.save_if_changed();
   BusStats s = monitor.stats();
   LOGI("stopping: %u frames, %u bad checksums, %u readings, %zu panels, %zu nodes", s.frames, s.bad_checksums,
        s.power_packets, monitor.panels().size(), monitor.nodes().size());

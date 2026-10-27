@@ -41,9 +41,10 @@ const char *fault_name(Fault f) {
 
 static int64_t unix_now() { return static_cast<int64_t>(time(nullptr)); }
 
-BusMaster::BusMaster(Sink on_rx, Sink on_tx, uint16_t gateway_id, bool bench, bool startup)
+BusMaster::BusMaster(Sink on_rx, Sink on_tx, uint16_t gateway_id, bool bench, bool startup, bool housekeeping,
+                     std::vector<master::Learned41::Entry> learned)
     : on_rx_(std::move(on_rx)), on_tx_(std::move(on_tx)), gateway_(gateway_id), bench_(bench), startup_(startup),
-      phase_(startup ? Phase::probing : Phase::running) {}
+      housekeeping_on_(housekeeping), learned_(std::move(learned)), phase_(startup ? Phase::probing : Phase::running) {}
 
 BusMaster::~BusMaster() { close(); }
 
@@ -66,12 +67,15 @@ bool BusMaster::open(const std::string &device, int baud) {
   // before renewing anything, and drop any half-read frame.
   lease_ = master::LeaseKeeper();
   splitter_ = protocol::FrameSplitter<std::string>();
+  drop_housekeeping_();
   // Or it lost power, and came back at the factory address.
   if (startup_) phase_ = Phase::probing;
   LOGI("bus master on %s for gateway %04X%s", path.c_str(), gateway_, bench_ ? " (bench mode)" : "");
   std::lock_guard<std::mutex> lock(mu_);
   status_ = MasterStatus{};
   status_.active = true;
+  status_.housekeeping = housekeeping_on_;
+  status_.learned_41 = static_cast<uint32_t>(learned_.size());
   return true;
 }
 
@@ -198,8 +202,22 @@ void BusMaster::tick(uint32_t now_ms) {
     return;
   }
   { std::lock_guard<std::mutex> lock(mu_); status_.phase = phase_; }
-  master::Request req = master::next_request(lease_, cursor_, seq_, now_ms);
-  if (!master::may_send(req.cmd, req.payload, bench_)) {
+  if (housekeeping_on_ && !housekeeping_) {
+    bool reset = readdressed_ && !session_reset_sent_;
+    session_reset_sent_ = session_reset_sent_ || reset;
+    housekeeping_ = std::make_unique<master::Housekeeping>(learned_, now_ms, reset);
+    LOGI("bus master: housekeeping on: %zu learned 0x41 targets%s", learned_.size(),
+         learned_.empty() ? " (none yet: listen beside the CCA to learn them)" : "");
+  }
+  master::Request req = master::next_request(lease_, cursor_, seq_, now_ms, housekeeping_.get());
+  // The 0x0B00 00 is a bring-up frame: allowed only straight after one.
+  bool bring_up = req.cmd == master::CMD_SESSION && req.payload == master::Bytes{0x00} && readdressed_;
+  if (housekeeping_) {
+    std::lock_guard<std::mutex> lock(mu_);
+    status_.sent_41 = sent_41_before_ + housekeeping_->sent_41();
+    status_.sent_session = sent_session_before_ + housekeeping_->sent_session();
+  }
+  if (!master::may_send(req.cmd, req.payload, bench_, bring_up)) {
     set_fault(Fault::refused, "refused to send command " + std::to_string(req.cmd));
     return;
   }
@@ -207,7 +225,8 @@ void BusMaster::tick(uint32_t now_ms) {
   bool ok = transact(gateway_, req.cmd, req.payload, reply);
   if (status().fault == Fault::second_master) return;
 
-  bool lease_request = req.cmd == master::CMD_TUNNEL;
+  bool lease_request = req.cmd == master::CMD_TUNNEL && req.payload.size() > 3 &&
+                       (req.payload[3] == master::SUB_LEASE_CHECK || req.payload[3] == master::SUB_LEASE_RENEW);
   if (ok) {
     timeouts_in_a_row_ = 0;
     master::Lease lease;
@@ -269,6 +288,7 @@ void BusMaster::tick(uint32_t now_ms) {
     LOGW("bus master: the TAP stopped answering at %04X; looking for it again", gateway_);
     phase_ = Phase::probing;
     lease_ = master::LeaseKeeper();
+    drop_housekeeping_();
   }
   if (timeouts_in_a_row_ == NO_REPLY_FAULT_AFTER)
     set_fault(Fault::no_reply, refusals_logged_.count(master::CMD_POLL)
@@ -288,6 +308,7 @@ void BusMaster::run_startup() {
   }
   Frame r;
   if (phase_ == Phase::probing) {
+    readdressed_ = false;
     if (transact(gateway_, master::CMD_GET_MAC_NOW, {}, r)) {  // already addressed
       LOGI("bus master: the TAP is already at %04X; polling", gateway_);
       discovery_ = std::make_unique<master::Discovery>(FACTORY_ID, gateway_, /*scan_only=*/true);
@@ -296,6 +317,7 @@ void BusMaster::run_startup() {
     } else if (transact(FACTORY_ID, master::CMD_GET_MAC_NOW, {}, r)) {  // at the factory address
       LOGW("bus master: the TAP is at the factory address %04X; re-addressing it to %04X", FACTORY_ID, gateway_);
       discovery_ = std::make_unique<master::Discovery>(FACTORY_ID, gateway_);
+      readdressed_ = true;
       phase_ = Phase::discovering;
       timeouts_in_a_row_ = 0;
     } else {
@@ -322,6 +344,14 @@ void BusMaster::run_startup() {
     return;
   }
   if (transact(d.dest, d.cmd, d.payload, r, d.wait_ms ? d.wait_ms : REPLY_TIMEOUT_MS)) discovery_->on_reply(r);
+}
+
+// Counts carry over; the next one starts again when polling does.
+void BusMaster::drop_housekeeping_() {
+  if (!housekeeping_) return;
+  sent_41_before_ += housekeeping_->sent_41();
+  sent_session_before_ += housekeeping_->sent_session();
+  housekeeping_.reset();
 }
 
 // Only one TAP is supported. One the scan heard at the factory address was

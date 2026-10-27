@@ -1049,6 +1049,11 @@ void HttpServer::routes_() {
                     {"phase", phase_name(m.phase)},
                     {"detail", m.detail},
                     {"extra_taps", m.extra_taps},
+                    {"housekeeping",
+                     {{"on", m.housekeeping},
+                      {"learned_41", m.learned_41},
+                      {"sent_41", m.sent_41},
+                      {"sent_session", m.sent_session}}},
                     {"lease_read", m.lease_read},
                     {"lease",
                      {{"running", m.lease.running},
@@ -1076,6 +1081,7 @@ void HttpServer::routes_() {
                     {"bus_role", s.bus_role},
                     {"master_bench", s.master_bench},
                     {"master_startup", s.master_startup},
+                    {"master_housekeeping", s.master_housekeeping},
                     {"gateway_id", s.gateway_id},
                     {"web_port", s.web_port},
                     {"web_port_active", port_},
@@ -1111,6 +1117,7 @@ void HttpServer::routes_() {
       if (j.contains("bus_role")) s.bus_role = j["bus_role"].get<std::string>();
       if (j.contains("master_bench")) s.master_bench = j["master_bench"].get<bool>();
       if (j.contains("master_startup")) s.master_startup = j["master_startup"].get<bool>();
+      if (j.contains("master_housekeeping")) s.master_housekeeping = j["master_housekeeping"].get<bool>();
       if (j.contains("gateway_id")) s.gateway_id = j["gateway_id"].get<int>();
       if (j.contains("web_port")) s.web_port = j["web_port"].get<int>();
       if (j.contains("web_username")) s.web_username = j["web_username"].get<std::string>();

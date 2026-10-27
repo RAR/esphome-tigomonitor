@@ -1,8 +1,9 @@
 #pragma once
 
 // The daemon as the TAP's bus master, in the CCA's place. It sends what the
-// CCA sends in steady state (tigo_master.h): 0x0148 telemetry polls, and the
-// run lease's check and renewal. Every byte it reads goes to the Monitor, so
+// CCA sends in steady state (tigo_master.h): 0x0148 telemetry polls, the run
+// lease's check and renewal, and, with housekeeping on, the 0x41s learned
+// while listening and the hourly 0x0B00. Every byte it reads goes to the Monitor, so
 // panels, history and MQTT work as they do when listening.
 //
 // One request and its reply per tick(). It has no thread or timer of its own:
@@ -39,6 +40,10 @@ struct MasterStatus {
   uint32_t resyncs = 0;  // times the poll cursor was taken from the TAP's reply
   int64_t last_reply_unix = 0;
   std::vector<std::string> extra_taps;  // MACs (hex) of TAPs left at the factory address
+  bool housekeeping = false;  // the setting
+  uint32_t learned_41 = 0;    // 0x41 targets it has to send
+  uint32_t sent_41 = 0;
+  uint32_t sent_session = 0;  // 0x0B00s
   std::string detail;
 };
 
@@ -51,7 +56,10 @@ class BusMaster {
   using Sink = std::function<void(const char *, size_t)>;
   // startup: if the TAP is found at the factory address, re-address it to
   // gateway_id before polling (bus_master re-addressing writes, gated).
-  BusMaster(Sink on_rx, Sink on_tx, uint16_t gateway_id, bool bench, bool startup);
+  // housekeeping: also send the learned 0x41s and the hourly 0x0B00
+  // (tigo_master.h's Housekeeping); with none learned, only the 0x0B00.
+  BusMaster(Sink on_rx, Sink on_tx, uint16_t gateway_id, bool bench, bool startup, bool housekeeping = false,
+            std::vector<esphome::tigo_monitor::master::Learned41::Entry> learned = {});
   ~BusMaster();
 
   bool open(const std::string &device, int baud);
@@ -76,11 +84,20 @@ class BusMaster {
   void run_startup();  // probe + discovery, before steady state
   void set_fault(Fault f, const std::string &detail);
   void update_lease_fault_();
+  void drop_housekeeping_();
   void report_extra_taps_(const std::vector<esphome::tigo_monitor::master::Bytes> &macs);
 
   Sink on_rx_, on_tx_;
   uint16_t gateway_;
   bool bench_, startup_;
+  bool housekeeping_on_;
+  std::vector<esphome::tigo_monitor::master::Learned41::Entry> learned_;
+  // Made each time polling starts, so a TAP brought up again gets the
+  // 0x0B00 straight away, as the CCA's bring-up sends it.
+  std::unique_ptr<esphome::tigo_monitor::master::Housekeeping> housekeeping_;
+  bool readdressed_ = false;     // the last bring-up moved the TAP off the factory address
+  bool session_reset_sent_ = false;  // the 0x0B00 00, sent once per start, as after a CCA reboot
+  uint32_t sent_41_before_ = 0, sent_session_before_ = 0;  // from earlier Housekeepings
   Phase phase_;
   std::unique_ptr<esphome::tigo_monitor::master::Discovery> discovery_;
   int fd_ = -1;

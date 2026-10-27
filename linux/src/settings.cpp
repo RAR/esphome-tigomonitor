@@ -36,6 +36,7 @@ Settings load_settings(const std::string &path) {
   get(j, "bus_role", s.bus_role);
   get(j, "master_bench", s.master_bench);
   get(j, "master_startup", s.master_startup);
+  get(j, "master_housekeeping", s.master_housekeeping);
   get(j, "gateway_id", s.gateway_id);
   get(j, "web_port", s.web_port);
   get(j, "web_username", s.web_username);
@@ -78,6 +79,7 @@ bool save_settings(const std::string &path, const Settings &s) {
       {"bus_role", s.bus_role},
       {"master_bench", s.master_bench},
       {"master_startup", s.master_startup},
+      {"master_housekeeping", s.master_housekeeping},
       {"gateway_id", s.gateway_id},
       {"web_port", s.web_port},
       {"web_username", s.web_username},

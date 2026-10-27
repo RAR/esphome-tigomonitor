@@ -1042,6 +1042,10 @@
           <div class="cfg-text"><strong>Bring up the TAP</strong><span class="cfg-default">If the gateway is found at its factory address (after a power cut), re-address it and start it. Needs the real CCA on hand to recover a stranded gateway (experimental)</span></div>
           <div class="cfg-ctrl"><label class="cfg-switch"><input type="checkbox" id="pi-startup"> <span>off</span></label></div>
         </div>
+        <div class="cfg-row" id="pi-housekeeping-row" style="display:none">
+          <div class="cfg-text"><strong>Send the CCA's housekeeping</strong><span class="cfg-default" id="pi-housekeeping-hint">Repeat the 0x41 frames the CCA sent while this listened beside it, and its hourly 0x0B00 (experimental)</span></div>
+          <div class="cfg-ctrl"><label class="cfg-switch"><input type="checkbox" id="pi-housekeeping"> <span>off</span></label></div>
+        </div>
         <div class="cfg-row" id="pi-bridge-row" style="display:none">
           <div class="cfg-text"><strong>Bridge address</strong><span class="cfg-default">host:port of an ESP32 running stream_server, or an RS485-to-Ethernet converter in TCP server mode</span></div>
           <div class="cfg-ctrl"><input class="cfg-input" id="pi-bridge" autocomplete="off" placeholder="tigo-bridge.local:6638"></div>
@@ -3410,6 +3414,10 @@
       document.getElementById('pi-startup').checked = !!s.master_startup;
       document.getElementById('pi-startup').nextElementSibling.textContent = s.master_startup ? 'on' : 'off';
       document.getElementById('pi-startup-row').style.display = piBusRole === 'master' ? '' : 'none';
+      document.getElementById('pi-housekeeping').checked = !!s.master_housekeeping;
+      document.getElementById('pi-housekeeping').nextElementSibling.textContent = s.master_housekeeping ? 'on' : 'off';
+      document.getElementById('pi-housekeeping-row').style.display = piBusRole === 'master' ? '' : 'none';
+      piFillHousekeepingHint();
       piWebLogin = { user: s.web_username || 'admin', set: !!s.web_password_set };
       document.getElementById('pi-web-user').value = piWebLogin.user;
       document.getElementById('pi-web-pass').value = '';
@@ -3436,10 +3444,26 @@
         !confirm('Master mode transmits on the bus. Unplug the CCA first: two masters on one bus collide.\n\nContinue?'))
       e.target.value = piBusRole;
     document.getElementById('pi-startup-row').style.display = e.target.value === 'master' ? '' : 'none';
+    document.getElementById('pi-housekeeping-row').style.display = e.target.value === 'master' ? '' : 'none';
   });
-  document.getElementById('pi-startup').addEventListener('change', (e) => {
-    e.target.nextElementSibling.textContent = e.target.checked ? 'on' : 'off';
-  });
+  for (const id of ['pi-startup', 'pi-housekeeping']) {
+    document.getElementById(id).addEventListener('change', (e) => {
+      e.target.nextElementSibling.textContent = e.target.checked ? 'on' : 'off';
+    });
+  }
+  // How many 0x41 targets were learned, so it's plain whether turning
+  // housekeeping on would send any.
+  async function piFillHousekeepingHint() {
+    try {
+      const r = await apiFetch('/api/master');
+      if (!r.ok) return;
+      const h = (await r.json()).housekeeping || {};
+      const n = h.learned_41 || 0;
+      document.getElementById('pi-housekeeping-hint').textContent =
+        'Repeat the 0x41 frames the CCA sent while this listened beside it, and its hourly 0x0B00 (experimental). ' +
+        (n ? `${n} learned.` : 'None learned yet: listen beside the CCA for an hour or more first.');
+    } catch (e) { /* the default text stays */ }
+  }
   async function piFillSerial(current) {
     const sel = document.getElementById('pi-serial');
     let ports = [];
@@ -3507,6 +3531,7 @@
     }
     const body = { serial_port: source, web_port: webPort, bus_role: document.getElementById('pi-bus-role').value,
                    master_startup: document.getElementById('pi-startup').checked,
+                   master_housekeeping: document.getElementById('pi-housekeeping').checked,
                    web_username: document.getElementById('pi-web-user').value.trim() || 'admin' };
     const webPass = document.getElementById('pi-web-pass').value;
     if (webPass !== '') body.web_password = webPass;

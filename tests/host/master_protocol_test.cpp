@@ -365,6 +365,146 @@ static void test_startup_allow() {
   CHECK(may_send(CMD_POLL, poll_payload(1), false, false));
 }
 
+// A 0x41 as the CCA sends it, with an invented tail: the roof's isn't
+// committed. tuid, then 00 00 00 <stream> 00 and 17 more bytes.
+static Bytes args41(uint16_t tuid, uint8_t stream, uint8_t tail = 0x11) {
+  Bytes a = {static_cast<uint8_t>(tuid >> 8), static_cast<uint8_t>(tuid), 0x00, 0x00, 0x00, stream, 0x00};
+  for (int i = 0; i < 17; i++) a.push_back(static_cast<uint8_t>(tail + i));
+  return a;
+}
+
+static Frame cca41(uint8_t seq, uint16_t tuid, uint8_t stream, uint8_t tail = 0x11) {
+  Frame f;
+  f.dest = 0x1201;
+  f.cmd = CMD_TUNNEL;
+  f.payload = tunnel_request(SUB_HOUSEKEEPING, seq, args41(tuid, stream, tail));
+  return f;
+}
+
+static void test_housekeeping_allow() {
+  CHECK(classify_request(CMD_SESSION, {0x01}) == Allow::yes);
+  CHECK(classify_request(CMD_SESSION, {0x00}) == Allow::startup_only);
+  CHECK(classify_request(CMD_SESSION, {0x02}) == Allow::bench_only);
+  CHECK(classify_request(CMD_SESSION, {}) == Allow::bench_only);
+  CHECK(!may_send(CMD_SESSION, {0x00}, false, false) && may_send(CMD_SESSION, {0x00}, false, true));
+  for (uint8_t stream : {0x01, 0x02, 0x04})
+    CHECK(classify_request(CMD_TUNNEL, tunnel_request(SUB_HOUSEKEEPING, 9, args41(0x0001, stream))) == Allow::yes);
+  CHECK(classify_request(CMD_TUNNEL, tunnel_request(SUB_HOUSEKEEPING, 9, args41(0x0001, 0x03))) == Allow::bench_only);
+  Bytes longer = args41(0x0001, 0x01);
+  longer.push_back(0);
+  CHECK(classify_request(CMD_TUNNEL, tunnel_request(SUB_HOUSEKEEPING, 9, longer)) == Allow::bench_only);
+  Bytes marked = args41(0x0001, 0x01);
+  marked[2] = 0x01;
+  CHECK(classify_request(CMD_TUNNEL, tunnel_request(SUB_HOUSEKEEPING, 9, marked)) == Allow::bench_only);
+}
+
+static void test_learner() {
+  Learned41 l;
+  CHECK(l.on_frame(cca41(1, 0x0001, 0x01)));
+  CHECK(!l.on_frame(cca41(2, 0x0001, 0x01)));  // the same frame again, another seq
+  CHECK(l.on_frame(cca41(3, 0x0027, 0x01)));
+  CHECK(l.on_frame(cca41(4, 0x0009, 0x04)));
+  // The TAP's reply, a request of another shape, and another sub teach nothing.
+  Frame reply = cca41(5, 0x0028, 0x01);
+  reply.dest = 0x9201;
+  CHECK(!l.on_frame(reply));
+  Frame odd = cca41(6, 0x0028, 0x03);
+  CHECK(!l.on_frame(odd));
+  Frame lease;
+  lease.dest = 0x1201;
+  lease.cmd = CMD_TUNNEL;
+  lease.payload = tunnel_request(SUB_LEASE_CHECK, 7, {});
+  CHECK(!l.on_frame(lease));
+  CHECK(l.entries().size() == 3);
+  CHECK(l.entries()[0].stream == 0x01 && l.entries()[0].tuid == 0x0001 && l.entries()[0].args == args41(0x0001, 0x01));
+  // New content for a target replaces the old, in place.
+  CHECK(l.on_frame(cca41(8, 0x0001, 0x01, 0x40)));
+  CHECK(l.entries().size() == 3 && l.entries()[0].args == args41(0x0001, 0x01, 0x40));
+  // Capped per stream.
+  Learned41 many;
+  for (int i = 0; i < 100; i++) many.on_frame(cca41(1, static_cast<uint16_t>(0x100 + i), 0x04));
+  CHECK(many.entries().size() == Learned41::PER_STREAM);
+  // Loading what was saved gives the same set, refusing malformed entries.
+  Learned41 back;
+  std::vector<Learned41::Entry> saved = l.entries();
+  saved.push_back({0x01, 0x0055, hex("0055")});
+  back.load(saved);
+  CHECK(back.entries().size() == 3);
+}
+
+// Pull every request due at now_ms.
+static std::vector<Request> drain(Housekeeping &hk, uint32_t now_ms, uint8_t &seq) {
+  std::vector<Request> out;
+  for (Request r = hk.due(now_ms, seq); r.cmd; r = hk.due(now_ms, seq)) out.push_back(r);
+  return out;
+}
+
+static void test_housekeeping() {
+  Learned41 l;
+  l.on_frame(cca41(1, 0x0027, 0x01));
+  l.on_frame(cca41(1, 0x0001, 0x01));  // 0x0001 goes first, as the CCA starts there
+  l.on_frame(cca41(1, 0x0006, 0x02));
+  l.on_frame(cca41(1, 0x0009, 0x04));
+  l.on_frame(cca41(1, 0x0003, 0x04));
+  uint8_t seq = 0xFE;
+  Housekeeping hk(l.entries(), 1000, /*session_reset=*/false);
+  // At the start: 0x0B00 01, then nothing until each stream's offset.
+  std::vector<Request> r = drain(hk, 1000, seq);
+  CHECK(r.size() == 1 && r[0].cmd == CMD_SESSION && r[0].payload == Bytes{0x01});
+  r = drain(hk, 1000 + Housekeeping::OFFSET_MS[0], seq);
+  CHECK(r.size() == 1 && r[0].cmd == CMD_TUNNEL && r[0].payload == tunnel_request(SUB_HOUSEKEEPING, 0x01, args41(0x0006, 0x02)));
+  r = drain(hk, 1000 + 15000, seq);
+  CHECK(r.size() == 2);
+  CHECK(r.size() == 2 && r[0].payload == tunnel_request(SUB_HOUSEKEEPING, 0x02, args41(0x0001, 0x01)));
+  CHECK(r.size() == 2 && r[1].payload == tunnel_request(SUB_HOUSEKEEPING, 0x03, args41(0x0009, 0x04)));
+  CHECK(drain(hk, 1000 + 59000, seq).empty());
+  // A minute on, the same targets again.
+  r = drain(hk, 1000 + 75000, seq);
+  CHECK(r.size() == 3 && r[1].payload == tunnel_request(SUB_HOUSEKEEPING, 0x05, args41(0x0001, 0x01)));
+  // Ten minutes on, every stream moves to its next target, wrapping.
+  r = drain(hk, 1000 + Housekeeping::SLOT_MS + 15000, seq);
+  CHECK(r.size() == 3);
+  CHECK(r.size() == 3 && r[0].payload.size() > 6 && r[0].payload[6] == 0x06);
+  CHECK(r.size() == 3 && r[1].payload.size() > 6 && r[1].payload[6] == 0x27);
+  CHECK(r.size() == 3 && r[2].payload.size() > 6 && r[2].payload[6] == 0x03);
+  r = drain(hk, 1000 + 2 * Housekeeping::SLOT_MS + 15000, seq);
+  CHECK(r.size() == 3 && r[1].payload[6] == 0x01 && r[2].payload[6] == 0x09);
+  // Every hour, 0x0B00 01 again.
+  r = drain(hk, 1000 + Housekeeping::SESSION_EVERY_MS, seq);
+  CHECK(!r.empty() && r[0].cmd == CMD_SESSION && r[0].payload == Bytes{0x01});
+  CHECK(hk.sent_41() > 0 && hk.sent_session() == 2);
+
+  // After a re-address, the CCA's first bring-up sends 00 then 01.
+  Housekeeping fresh(l.entries(), 0, /*session_reset=*/true);
+  r = drain(fresh, 0, seq);
+  CHECK(r.size() == 2 && r[0].payload == Bytes{0x00} && r[1].payload == Bytes{0x01});
+  // Nothing learned: only 0x0B00, never a 0x41 of our own making.
+  Housekeeping bare({}, 0, false);
+  r = drain(bare, 0, seq);
+  CHECK(r.size() == 1 && r[0].cmd == CMD_SESSION);
+  CHECK(drain(bare, 30 * 60000, seq).empty());
+  // Everything it sends is allowed in steady state, apart from the 00.
+  for (const Request &q : drain(hk, 1000 + Housekeeping::SESSION_EVERY_MS + 120000, seq))
+    CHECK(classify_request(q.cmd, q.payload) == Allow::yes);
+}
+
+static void test_next_request_housekeeping() {
+  Learned41 l;
+  l.on_frame(cca41(1, 0x0001, 0x01));
+  Housekeeping hk(l.entries(), 0, false);
+  LeaseKeeper lease;
+  PollCursor cursor(0);
+  uint8_t seq = 0;
+  // The lease comes first, then housekeeping, then polls.
+  CHECK(next_request(lease, cursor, seq, 0, &hk).payload == tunnel_request(SUB_LEASE_CHECK, 1, {}));
+  CHECK(next_request(lease, cursor, seq, 0, &hk).cmd == CMD_SESSION);
+  CHECK(next_request(lease, cursor, seq, 0, &hk).cmd == CMD_POLL);
+  Request r = next_request(lease, cursor, seq, 6000, &hk);
+  CHECK(r.cmd == CMD_TUNNEL && r.payload == tunnel_request(SUB_HOUSEKEEPING, 2, args41(0x0001, 0x01)));
+  // Without it, as before.
+  CHECK(next_request(lease, cursor, seq, 7000).cmd == CMD_POLL);
+}
+
 int main() {
   test_discovery();
   test_discovery_scan();
@@ -376,6 +516,10 @@ int main() {
   test_lease_keeper();
   test_allow_list();
   test_next_request();
+  test_housekeeping_allow();
+  test_learner();
+  test_housekeeping();
+  test_next_request_housekeeping();
   if (failures) {
     std::printf("%d failed\n", failures);
     return 1;
