@@ -66,6 +66,7 @@ struct Frame {
   uint16_t dest = 0;
   uint16_t cmd = 0;
   Bytes payload;
+  uint32_t wait_ms = 0;  // how long to wait for the reply; 0 = the usual
 };
 
 // escaped_body: the bytes between 7E 07 and 7E 08, as FrameSplitter yields
@@ -322,6 +323,7 @@ inline uint8_t next_seq(uint8_t seq) {
 struct Request {
   uint16_t cmd = 0;
   Bytes payload;
+  uint32_t wait_ms = 0;  // how long to wait for the reply; 0 = the usual
 };
 
 // What a master sends next: lease work when it's due, a poll otherwise.
@@ -343,6 +345,12 @@ inline Request next_request(LeaseKeeper &lease, const PollCursor &cursor, uint8_
 // steps. It sends re-addressing writes, so BusMaster only runs it after a read
 // has confirmed the TAP is actually at the factory address, and only in the
 // explicit startup mode.
+//
+// Then, as the CCA does, it scans: five more GET_MACs at the factory address,
+// each waiting out the TAP's reply backoff (the CCA's five take 3-4 s). A TAP
+// that answers is a second one. Only one TAP is supported, so its MAC is
+// noted for BusMaster to report, and nothing is ever sent to it by MAC.
+// scan_only skips straight to the scan, for a TAP already at its id.
 static const uint16_t CMD_SET_485_ID = 0x0014;
 static const uint16_t CMD_GET_MAC = 0x0038;        // with backoff
 static const uint16_t CMD_GET_MAC_NOW = 0x003A;    // no backoff; also the "where are you" read
@@ -356,11 +364,16 @@ struct DiscoveryRequest {
   uint16_t dest = 0;
   uint16_t cmd = 0;
   Bytes payload;
+  uint32_t wait_ms = 0;  // how long to wait for the reply; 0 = the usual
 };
 
 class Discovery {
  public:
-  Discovery(uint16_t factory_id, uint16_t target_id) : factory_(factory_id), target_(target_id) {}
+  static const int SCAN_TRIES = 5;
+  static const uint32_t BACKOFF_WAIT_MS = 800;  // GET_MAC with backoff: the CCA allows ~0.8 s a try
+
+  Discovery(uint16_t factory_id, uint16_t target_id, bool scan_only = false)
+      : state_(scan_only ? scan : claim), factory_(factory_id), target_(target_id) {}
 
   DiscoveryRequest next() {
     DiscoveryRequest r;
@@ -373,7 +386,7 @@ class Discovery {
         r.payload = {0x37, 0x24, 0x92, 0x66, static_cast<uint8_t>(factory_ >> 8), static_cast<uint8_t>(factory_)};
         break;
       case get_mac:
-        r.dest = factory_; r.cmd = CMD_GET_MAC;
+        r.dest = factory_; r.cmd = CMD_GET_MAC; r.wait_ms = BACKOFF_WAIT_MS;
         break;
       case set_id:  // key + MAC (8) + target id (BE)
         r.dest = factory_; r.cmd = CMD_SET_ID_BY_MAC;
@@ -384,6 +397,14 @@ class Discovery {
         break;
       case verify:
         r.dest = target_; r.cmd = CMD_GET_MAC_NOW;
+        break;
+      case scan:
+        if (scans_sent_ == SCAN_TRIES) {
+          state_ = st_done;
+          return next();
+        }
+        scans_sent_++;
+        r.dest = factory_; r.cmd = CMD_GET_MAC; r.wait_ms = BACKOFF_WAIT_MS;
         break;
       default: break;
     }
@@ -407,7 +428,13 @@ class Discovery {
       case verify:
         if (f.cmd == CMD_GET_MAC_NOW + 1 && f.payload.size() >= 10) {
           uint16_t id = static_cast<uint16_t>(f.payload[8] << 8 | f.payload[9]);
-          state_ = id == target_ ? st_done : st_failed;
+          state_ = id == target_ ? scan : st_failed;
+        }
+        break;
+      case scan:
+        if (f.cmd == CMD_GET_MAC + 1 && f.payload.size() >= 10) {
+          Bytes mac(f.payload.begin(), f.payload.begin() + 8);
+          if (mac != mac_ && std::find(extra_.begin(), extra_.end(), mac) == extra_.end()) extra_.push_back(mac);
         }
         break;
       default: break;
@@ -417,11 +444,15 @@ class Discovery {
   bool done() const { return state_ == st_done; }
   bool failed() const { return state_ == st_failed; }
   const Bytes &mac() const { return mac_; }
+  // MACs of other TAPs that answered the scan, in the order heard.
+  const std::vector<Bytes> &extra_taps() const { return extra_; }
 
  private:
-  enum State { claim, get_mac, set_id, verify, st_done, st_failed } state_ = claim;
+  enum State { claim, get_mac, set_id, verify, scan, st_done, st_failed } state_;
   uint16_t factory_, target_;
   Bytes mac_;
+  int scans_sent_ = 0;
+  std::vector<Bytes> extra_;
 };
 
 // ---- what a master may send ------------------------------------------------

@@ -1048,6 +1048,7 @@ void HttpServer::routes_() {
                     {"fault", fault_name(m.fault)},
                     {"phase", phase_name(m.phase)},
                     {"detail", m.detail},
+                    {"extra_taps", m.extra_taps},
                     {"lease_read", m.lease_read},
                     {"lease",
                      {{"running", m.lease.running},

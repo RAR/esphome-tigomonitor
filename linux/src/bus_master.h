@@ -18,10 +18,11 @@
 #include <mutex>
 #include <set>
 #include <string>
+#include <vector>
 
 namespace tigod {
 
-enum class Fault { none, no_port, no_reply, second_master, refused, lease_refused, discovery_failed };
+enum class Fault { none, no_port, no_reply, second_master, refused, lease_refused, discovery_failed, extra_tap };
 enum class Phase { running, probing, discovering };
 const char *phase_name(Phase p);
 const char *fault_name(Fault f);
@@ -37,6 +38,7 @@ struct MasterStatus {
   uint32_t timeouts = 0;
   uint32_t resyncs = 0;  // times the poll cursor was taken from the TAP's reply
   int64_t last_reply_unix = 0;
+  std::vector<std::string> extra_taps;  // MACs (hex) of TAPs left at the factory address
   std::string detail;
 };
 
@@ -68,12 +70,13 @@ class BusMaster {
   // Sends one frame and reads until the gateway's reply ends or the timeout.
   // false on a timeout, a write error or a second master.
   bool transact(uint16_t dest, uint16_t cmd, const esphome::tigo_monitor::master::Bytes &payload,
-                esphome::tigo_monitor::master::Frame &reply);
+                esphome::tigo_monitor::master::Frame &reply, uint32_t timeout_ms = REPLY_TIMEOUT_MS);
   bool is_reply(uint16_t cmd, const esphome::tigo_monitor::master::Bytes &request,
                 const esphome::tigo_monitor::master::Frame &f) const;
   void run_startup();  // probe + discovery, before steady state
   void set_fault(Fault f, const std::string &detail);
   void update_lease_fault_();
+  void report_extra_taps_(const std::vector<esphome::tigo_monitor::master::Bytes> &macs);
 
   Sink on_rx_, on_tx_;
   uint16_t gateway_;

@@ -3,7 +3,8 @@
 
     mock_tap.py PTY_LINK [--lease S] [--renew-to S] [--nodes N] [--panels N]
                          [--foreign-after S] [--echo] [--drop-every N]
-                         [--start-cursor HEX] [--bare] [--stats FILE]
+                         [--start-cursor HEX] [--bare] [--factory]
+                         [--second-tap] [--stats FILE]
 
 Answers requests to gateway 0x1201 the way the rig's TAP did in the capture:
   - 0x0148 polls with 0x0149 power frames: up to two synthetic readings per
@@ -18,6 +19,8 @@ as an adapter that hears itself does. --drop-every N leaves every Nth poll
 unanswered. --start-cursor gives the TAP a cursor of its own: a poll with any
 other cursor gets no data and a reply whose long header states the TAP's
 cursor (a guess at what a real TAP does; the capture never shows it).
+--second-tap puts another TAP behind the same port, left at the factory
+address: it answers GET_MAC there and nothing else.
 --bare is a gateway with no mesh behind it, like a spare TAP on the bench: it
 answers VERSION and refuses polls and the tunnel with 0x0006, as the analysis
 repo's standalone gateways did. Writes what it saw to --stats as JSON every second.
@@ -74,6 +77,7 @@ def main():
     ap.add_argument('--start-cursor', type=lambda v: int(v, 16), default=0)
     ap.add_argument('--bare', action='store_true')
     ap.add_argument('--factory', action='store_true')  # boot at the factory address 0x1235
+    ap.add_argument('--second-tap', action='store_true')
     ap.add_argument('--stats', default=None)
     a = ap.parse_args()
 
@@ -91,10 +95,12 @@ def main():
     sent_table = False
     foreign_sent = False
     MAC = bytes.fromhex('04c05b3000a1b2c3')
+    SECOND_MAC = bytes.fromhex('04c05b3000d4e5f6')
     FACTORY = 0x1235
     addr = FACTORY if a.factory else GATEWAY  # the id the TAP currently answers at
     stats = {'polls': 0, 'retries': 0, 'cursor_mismatches': 0, 'checks': 0, 'renewals': [], 'other': [],
-             'first_lease_frame': None, 'first_frame': None, 'addressed_to': None, 'frames_after_foreign': 0, 'foreign_at': None}
+             'first_lease_frame': None, 'first_frame': None, 'addressed_to': None, 'frames_after_foreign': 0, 'foreign_at': None,
+             'second_asked': 0, 'second_written': 0}
     buf = bytearray()
     last_stats = 0.0
 
@@ -144,8 +150,14 @@ def main():
             if cmd == 0x0010 and dest == 0x0000:  # RESET broadcast
                 os.write(master_fd, encode(0x8000, 0x0011, b''))
                 continue
-            if cmd in (0x0038, 0x003A) and dest == addr:  # GET_MAC (with/without backoff)
-                os.write(master_fd, encode(addr | 0x8000, cmd + 1, MAC + bytes([addr >> 8, addr & 0xFF])))
+            if a.second_tap and cmd == 0x003C and p[4:12] == SECOND_MAC:
+                stats['second_written'] += 1
+            if cmd in (0x0038, 0x003A) and (dest == addr or (a.second_tap and dest == FACTORY)):  # GET_MAC
+                if dest == addr:
+                    os.write(master_fd, encode(addr | 0x8000, cmd + 1, MAC + bytes([addr >> 8, addr & 0xFF])))
+                if a.second_tap and dest == FACTORY:  # the second TAP answers after the first
+                    stats['second_asked'] += 1
+                    os.write(master_fd, encode(FACTORY | 0x8000, cmd + 1, SECOND_MAC + bytes([FACTORY >> 8, FACTORY & 0xFF])))
                 continue
             if cmd == 0x003C and dest == addr and len(p) == 14 and p[4:12] == MAC:  # SET_ID_BY_MAC
                 addr = p[12] << 8 | p[13]

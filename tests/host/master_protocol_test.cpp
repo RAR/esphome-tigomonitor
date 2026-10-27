@@ -299,8 +299,14 @@ static void test_discovery() {
   r = d.next();
   CHECK(r.send && r.dest == 0x1201 && r.cmd == 0x003A && r.payload.empty());
   d.on_reply(Frame{0x9201, 0x003B, hex("04c05b3000a1b2c31201")});
+  // 5. Then, as the CCA does, five more GET_MACs at the factory address,
+  // waiting out each one's backoff, for a second TAP still there.
+  for (int i = 0; i < Discovery::SCAN_TRIES; i++) {
+    r = d.next();
+    CHECK(r.send && r.dest == 0x1235 && r.cmd == 0x0038 && r.payload.empty() && r.wait_ms == 800);
+  }
   r = d.next();
-  CHECK(r.done && !r.failed);
+  CHECK(r.done && !r.failed && d.extra_taps().empty());
 
   // A verify reply at the wrong id fails rather than proceeding.
   Discovery bad(0x1235, 0x1201);
@@ -309,6 +315,32 @@ static void test_discovery() {
   bad.on_reply(Frame{0x9235, 0x003D, {}});
   bad.on_reply(Frame{0x9201, 0x003B, hex("04c05b3000a1b2c39999")});
   CHECK(bad.next().failed);
+}
+
+// The scan after re-addressing: a TAP that answers at the factory address is
+// a second one. It is noted, once, and nothing is sent to it.
+static void test_discovery_scan() {
+  Discovery d(0x1235, 0x1201);
+  d.on_reply(Frame{0x8000, 0x0015, {}});
+  d.on_reply(Frame{0x9235, 0x0039, hex("04c05b3000a1b2c31235")});
+  d.on_reply(Frame{0x9235, 0x003D, {}});
+  d.on_reply(Frame{0x9201, 0x003B, hex("04c05b3000a1b2c31201")});
+  for (int i = 0; i < Discovery::SCAN_TRIES; i++) {
+    DiscoveryRequest r = d.next();
+    CHECK(r.send && r.dest == 0x1235 && r.cmd == 0x0038);
+    if (i < 3) d.on_reply(Frame{0x9235, 0x0039, hex("04c05b3000d4e5f61235")});  // the same one, three times
+    if (i == 3) d.on_reply(Frame{0x9235, 0x0039, hex("04c05b3000a1b2c31235")});  // our own MAC: not another TAP
+  }
+  CHECK(d.next().done);
+  CHECK(d.extra_taps().size() == 1 && d.extra_taps()[0] == hex("04c05b3000d4e5f6"));
+
+  // A TAP already at its id gets the scan alone: no re-addressing writes.
+  Discovery s(0x1235, 0x1201, /*scan_only=*/true);
+  for (int i = 0; i < Discovery::SCAN_TRIES; i++) {
+    DiscoveryRequest r = s.next();
+    CHECK(r.send && r.dest == 0x1235 && r.cmd == 0x0038 && r.payload.empty());
+  }
+  CHECK(s.next().done && s.extra_taps().empty());
 }
 
 // The discovery writes are allowed only in startup mode; the truly dangerous
@@ -335,6 +367,7 @@ static void test_startup_allow() {
 
 int main() {
   test_discovery();
+  test_discovery_scan();
   test_startup_allow();
   test_review_fixes();
   test_codec();

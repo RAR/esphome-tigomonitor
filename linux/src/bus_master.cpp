@@ -34,6 +34,7 @@ const char *fault_name(Fault f) {
     case Fault::refused: return "refused";
     case Fault::lease_refused: return "lease_refused";
     case Fault::discovery_failed: return "discovery_failed";
+    case Fault::extra_tap: return "extra_tap";
   }
   return "unknown";
 }
@@ -97,7 +98,7 @@ void BusMaster::set_fault(Fault f, const std::string &detail) {
   if (f == Fault::second_master || f == Fault::no_port) status_.active = false;
 }
 
-bool BusMaster::transact(uint16_t dest, uint16_t cmd, const Bytes &payload, Frame &reply) {
+bool BusMaster::transact(uint16_t dest, uint16_t cmd, const Bytes &payload, Frame &reply, uint32_t timeout_ms) {
   master::Bytes wire = master::encode_frame(dest, cmd, payload);
   // What our own request looks like coming back, if the adapter hears itself.
   std::string sent(wire.begin() + 5, wire.end() - 2);
@@ -116,7 +117,7 @@ bool BusMaster::transact(uint16_t dest, uint16_t cmd, const Bytes &payload, Fram
   tcdrain(fd_);
   if (on_tx_) on_tx_(reinterpret_cast<const char *>(wire.data()), wire.size());
 
-  auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(REPLY_TIMEOUT_MS);
+  auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
   bool got = false, foreign = false, refused = false;
   char buf[512];
   while (!got && !foreign && !refused) {
@@ -140,8 +141,9 @@ bool BusMaster::transact(uint16_t dest, uint16_t cmd, const Bytes &payload, Fram
           if (refusals_logged_.insert(cmd).second) LOGW("bus master: the TAP refused command %04X (0x0006)", cmd);
           refused = true;
         } else if (f.dest == (dest | 0x8000) && f.cmd == cmd + 1) {
-          // A late reply to the request before ours is skipped, not taken.
-          if (is_reply(cmd, payload, f)) {
+          // A late reply to the request before ours is skipped, not taken;
+          // and so is a second answer (another TAP at the factory address).
+          if (!got && is_reply(cmd, payload, f)) {
             reply = f;
             got = true;
           }
@@ -288,7 +290,8 @@ void BusMaster::run_startup() {
   if (phase_ == Phase::probing) {
     if (transact(gateway_, master::CMD_GET_MAC_NOW, {}, r)) {  // already addressed
       LOGI("bus master: the TAP is already at %04X; polling", gateway_);
-      phase_ = Phase::running;
+      discovery_ = std::make_unique<master::Discovery>(FACTORY_ID, gateway_, /*scan_only=*/true);
+      phase_ = Phase::discovering;  // just the scan for another TAP, then running
       timeouts_in_a_row_ = 0;
     } else if (transact(FACTORY_ID, master::CMD_GET_MAC_NOW, {}, r)) {  // at the factory address
       LOGW("bus master: the TAP is at the factory address %04X; re-addressing it to %04X", FACTORY_ID, gateway_);
@@ -307,6 +310,7 @@ void BusMaster::run_startup() {
   if (d.done) {
     LOGI("bus master: the TAP is now at %04X; polling", gateway_);
     phase_ = Phase::running;
+    report_extra_taps_(discovery_->extra_taps());
     return;
   }
   if (d.failed) {
@@ -317,7 +321,37 @@ void BusMaster::run_startup() {
     set_fault(Fault::refused, "refused a discovery command " + std::to_string(d.cmd));
     return;
   }
-  if (transact(d.dest, d.cmd, d.payload, r)) discovery_->on_reply(r);
+  if (transact(d.dest, d.cmd, d.payload, r, d.wait_ms ? d.wait_ms : REPLY_TIMEOUT_MS)) discovery_->on_reply(r);
+}
+
+// Only one TAP is supported. One the scan heard at the factory address was
+// left there: not re-addressed, not polled. Say so, naming it, until a
+// bring-up finds none.
+void BusMaster::report_extra_taps_(const std::vector<master::Bytes> &macs) {
+  std::vector<std::string> hexes;
+  for (const auto &mac : macs) {
+    std::string h;
+    char b[3];
+    for (uint8_t c : mac) {
+      snprintf(b, sizeof(b), "%02x", c);
+      h += b;
+    }
+    LOGW("bus master: another TAP answered at the factory address (MAC %s); only one TAP is supported, so it "
+         "was left there and is not polled", h.c_str());
+    hexes.push_back(h);
+  }
+  {
+    std::lock_guard<std::mutex> lock(mu_);
+    status_.extra_taps = hexes;
+  }
+  if (!hexes.empty()) {
+    std::string list;
+    for (const auto &h : hexes) list += (list.empty() ? "" : ", ") + h;
+    set_fault(Fault::extra_tap, "another TAP is on the bus at the factory address (MAC " + list +
+                                    "); only one TAP is supported, so its panels are not monitored");
+  } else if (status().fault == Fault::extra_tap) {
+    set_fault(Fault::none, "");
+  }
 }
 
 // The TAP not taking renewals means the array will drop to safe mode:
