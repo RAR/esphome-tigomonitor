@@ -19,6 +19,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -644,15 +645,178 @@ class Housekeeping {
   uint32_t sent_session_ = 0;
 };
 
+// The CCA's text queries to optimizers (tunnel sub 0x06), and its two writes.
+static const char *const QUERY_READS[] = {"^00Version\r", "^00Tests\r", "^00Info\r", "^00Smrt\r", "^00Mppt\r"};
+static const char *const QUERY_W255 = "#00w255\r";
+static const char *const QUERY_SMART_S = "^00Smrt_........S0000...0000\r";
+
+// The CCA's text dialogue with optimizers, tunnel sub 0x06, from the 24 h
+// capture. A query is the node's Tuid and an ASCII line; the TAP only
+// forwards it (status 0d), and the optimizer's answer comes back later as a
+// type 0x07 packet in a 0x0149 poll reply. Many are lost, so the CCA asks
+// again, 3 minutes on, then 2 minutes later each time (up to 30), until
+// one comes. A node first heard gets all five reads (as every node did after
+// a CCA reboot); one heard again after half an hour asleep gets ^00Tests (as
+// each did at sunrise). Two answers bring a write, with writes on: an Info
+// whose ninth word is 00 brings #00w255 (50 of 50 in the capture; its
+// field read FF on 104 other answers), and Info is read again 40 minutes
+// on; a Smrt in mode N brings ^00Smrt_........S0000...0000 (30 of 30), and
+// Smrt is read again to see it took. What the fields mean isn't known.
+class Queries {
+ public:
+  static const uint32_t GAP_MS = 1500;  // the CCA's were 1-2 s apart
+  static const uint32_t INFO_AGAIN_MS = 40 * 60000;
+  static const uint32_t CHECK_AFTER_MS = 3 * 60000;  // a read after a write
+  static const uint32_t ASLEEP_MS = 30 * 60000;
+  enum Kind { version, tests, info, smrt, mppt, w255, smart_s };
+
+  Queries(uint32_t now_ms, bool writes) : writes_(writes), last_sent_ms_(now_ms - GAP_MS) {}
+
+  static uint32_t retry_after_ms(uint32_t tries) {
+    uint32_t m = 3 + 2 * (tries > 0 ? tries - 1 : 0);
+    return (m > 30 ? 30 : m) * 60000;
+  }
+
+  // A 0x0149 payload: who reported, and any answers.
+  void on_poll_reply(const Bytes &payload, uint32_t now_ms) {
+    if (payload.size() < 2) return;
+    unsigned status = payload[0] << 8 | payload[1];
+    size_t i = 2 + 3;
+    static const uint8_t sizes[] = {1, 1, 2, 2, 1};
+    for (unsigned bit = 0; bit < 5; bit++)
+      if (!(status & (1u << bit))) i += sizes[bit];
+    while (i + 7 <= payload.size()) {
+      size_t end = i + 7 + payload[i + 6];
+      if (end > payload.size()) break;
+      uint16_t tuid = static_cast<uint16_t>(payload[i + 1] << 8 | payload[i + 2]);
+      if (tuid > 0x0001 && !(tuid & 0x8000)) {
+        heard_(tuid, now_ms);
+        if (payload[i] == 0x07) answer_(tuid, std::string(payload.begin() + i + 7, payload.begin() + end), now_ms);
+      }
+      i = end;
+    }
+  }
+
+  // The next query due, or one with cmd 0.
+  Request due(uint32_t now_ms, uint8_t &seq) {
+    if (now_ms - last_sent_ms_ < GAP_MS) return {};
+    // Asleep since: its queries go, and wait for it to wake.
+    pending_.erase(std::remove_if(pending_.begin(), pending_.end(),
+                                  [&](const Item &it) {
+                                    auto h = heard_ms_.find(it.tuid);
+                                    return h != heard_ms_.end() && now_ms - h->second >= ASLEEP_MS;
+                                  }),
+                   pending_.end());
+    size_t best = pending_.size();
+    for (size_t k = 0; k < pending_.size(); k++) {
+      if (static_cast<int32_t>(now_ms - pending_[k].next_ms) < 0) continue;
+      if (best == pending_.size() || static_cast<int32_t>(pending_[k].next_ms - pending_[best].next_ms) < 0) best = k;
+    }
+    if (best == pending_.size()) return {};
+    Item &it = pending_[best];
+    Bytes args = {static_cast<uint8_t>(it.tuid >> 8), static_cast<uint8_t>(it.tuid)};
+    const char *text = it.kind == w255 ? QUERY_W255 : it.kind == smart_s ? QUERY_SMART_S : QUERY_READS[it.kind];
+    args.insert(args.end(), text, text + std::char_traits<char>::length(text));
+    if (it.kind == w255 || it.kind == smart_s) {
+      sent_writes_++;
+      pending_.erase(pending_.begin() + static_cast<long>(best));  // once, as the CCA's
+    } else {
+      sent_reads_++;
+      it.tries++;
+      it.next_ms = now_ms + retry_after_ms(it.tries);
+    }
+    last_sent_ms_ = now_ms;
+    seq = next_seq(seq);
+    return {CMD_TUNNEL, tunnel_request(0x06, seq, args)};
+  }
+
+  uint32_t sent_reads() const { return sent_reads_; }
+  uint32_t sent_writes() const { return sent_writes_; }
+  uint32_t answers() const { return answers_; }
+
+ private:
+  struct Item {
+    uint16_t tuid;
+    Kind kind;
+    uint32_t next_ms;
+    uint32_t tries;
+  };
+
+  void heard_(uint16_t tuid, uint32_t now_ms) {
+    auto h = heard_ms_.find(tuid);
+    if (h == heard_ms_.end()) {
+      for (Kind k : {version, tests, info, smrt, mppt}) add_(tuid, k, now_ms);
+    } else if (now_ms - h->second >= ASLEEP_MS) {
+      drop_(tuid);
+      add_(tuid, tests, now_ms);
+    }
+    heard_ms_[tuid] = now_ms;
+  }
+
+  void answer_(uint16_t tuid, const std::string &text, uint32_t now_ms) {
+    std::vector<std::string> f;
+    size_t a = 0;
+    while (a < text.size()) {
+      size_t b = text.find_first_of(" \r", a);
+      if (b == std::string::npos) b = text.size();
+      if (b > a) f.push_back(text.substr(a, b - a));
+      a = b + 1;
+    }
+    if (f.empty()) return;
+    Kind k;
+    if (f[0] == "Mnode") k = version;
+    else if (f[0] == "!Tests") k = tests;
+    else if (f[0] == "!Info") k = info;
+    else if (f[0] == "!Smrt") k = smrt;
+    else if (f[0] == "!Mppt") k = mppt;
+    else return;
+    answers_++;
+    remove_(tuid, k);
+    if (k == info && f.size() > 8 && f[8] == "00") {
+      if (writes_) add_(tuid, w255, now_ms);
+      add_(tuid, info, now_ms + INFO_AGAIN_MS);
+    }
+    if (k == smrt && f.size() > 10 && f[10] == "N" && writes_) {
+      add_(tuid, smart_s, now_ms);
+      add_(tuid, smrt, now_ms + CHECK_AFTER_MS);
+    }
+  }
+
+  void add_(uint16_t tuid, Kind k, uint32_t at_ms) {
+    for (Item &it : pending_)
+      if (it.tuid == tuid && it.kind == k) return;
+    pending_.push_back({tuid, k, at_ms, 0});
+  }
+  void remove_(uint16_t tuid, Kind k) {
+    pending_.erase(std::remove_if(pending_.begin(), pending_.end(),
+                                  [&](const Item &it) { return it.tuid == tuid && it.kind == k; }),
+                   pending_.end());
+  }
+  void drop_(uint16_t tuid) {
+    pending_.erase(std::remove_if(pending_.begin(), pending_.end(), [&](const Item &it) { return it.tuid == tuid; }),
+                   pending_.end());
+  }
+
+  bool writes_;
+  uint32_t last_sent_ms_;
+  std::vector<Item> pending_;
+  std::map<uint16_t, uint32_t> heard_ms_;
+  uint32_t sent_reads_ = 0, sent_writes_ = 0, answers_ = 0;
+};
+
 // What a master sends next: lease work when it's due, then housekeeping (if
-// there is any), a poll otherwise. seq is the last tunnel sequence number
-// used, advanced when one is.
+// there is any), then queries (if there are any), a poll otherwise. seq is
+// the last tunnel sequence number used, advanced when one is.
 inline Request next_request(LeaseKeeper &lease, const PollCursor &cursor, uint8_t &seq, uint32_t now_ms,
-                            Housekeeping *housekeeping = nullptr) {
+                            Housekeeping *housekeeping = nullptr, Queries *queries = nullptr) {
   LeaseAction a = lease.due(now_ms);
   if (a.kind == LeaseAction::none) {
     if (housekeeping) {
       Request r = housekeeping->due(now_ms, seq);
+      if (r.cmd) return r;
+    }
+    if (queries) {
+      Request r = queries->due(now_ms, seq);
       if (r.cmd) return r;
     }
     return {CMD_POLL, poll_payload(cursor.next(), cursor.retry())};
@@ -842,10 +1006,6 @@ class Discovery {
 // replies ask for it (Queries), sent only with that setting on.
 enum class Allow { yes, bench_only, startup_only, optimizer_write, never };
 
-// The CCA's text queries to optimizers (tunnel sub 0x06), and its two writes.
-static const char *const QUERY_READS[] = {"^00Version\r", "^00Tests\r", "^00Info\r", "^00Smrt\r", "^00Mppt\r"};
-static const char *const QUERY_W255 = "#00w255\r";
-static const char *const QUERY_SMART_S = "^00Smrt_........S0000...0000\r";
 
 inline Allow classify_request(uint16_t cmd, const Bytes &payload) {
   // The re-addressing writes a cold boot needs. Allowed only in startup mode,

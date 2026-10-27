@@ -681,6 +681,111 @@ static void test_walks() {
   CHECK(pages <= 2 * Housekeeping::WALK_MAX_PAGES);
 }
 
+
+// A 0x0149 payload with the given packets after a short header (status
+// 0x41FF: no optional fields).
+static Bytes poll_reply_with(const std::vector<Bytes> &packets) {
+  Bytes p = hex("41ff004b9a");
+  for (const Bytes &k : packets) p.insert(p.end(), k.begin(), k.end());
+  return p;
+}
+static Bytes string_packet(uint16_t tuid, const std::string &text) {
+  Bytes k = {0x07, static_cast<uint8_t>(tuid >> 8), static_cast<uint8_t>(tuid), 0x00, 0x02, 0xdb,
+             static_cast<uint8_t>(text.size())};
+  k.insert(k.end(), text.begin(), text.end());
+  return k;
+}
+static Bytes power_from(uint16_t tuid) {  // a 0x31 packet, contents not read
+  Bytes k = {0x31, static_cast<uint8_t>(tuid >> 8), static_cast<uint8_t>(tuid), 0x00, 0x00, 0x00, 0x04, 1, 2, 3, 4};
+  return k;
+}
+static std::string query_text(const Request &r) { return std::string(r.payload.begin() + 7, r.payload.end()); }
+
+// awake: a node that keeps reporting through it, once a minute.
+static std::vector<Request> ask(Queries &q, uint32_t from_ms, uint32_t to_ms, uint8_t &seq, uint16_t awake = 0) {
+  std::vector<Request> out;
+  for (uint32_t t = from_ms; t <= to_ms; t += 100) {
+    if (awake && t % 60000 == 0) q.on_poll_reply(poll_reply_with({power_from(awake)}), t);
+    Request r = q.due(t, seq);
+    if (r.cmd) out.push_back(r);
+  }
+  return out;
+}
+
+// The CCA's 0x06 dialogue with optimizers, from the 24 h capture.
+static void test_queries() {
+  uint8_t seq = 0;
+  Queries q(0, /*writes=*/false);
+  // A node first heard gets all five reads, as after a CCA reboot, a gap apart.
+  q.on_poll_reply(poll_reply_with({power_from(0x14)}), 0);
+  std::vector<Request> r = ask(q, 0, 10000, seq);
+  CHECK(r.size() == 5);
+  std::vector<std::string> texts;
+  for (const Request &x : r) {
+    CHECK(sub_of(x) == 0x06 && x.payload[5] == 0x00 && x.payload[6] == 0x14);
+    CHECK(classify_request(x.cmd, x.payload) == Allow::yes);
+    texts.push_back(query_text(x));
+  }
+  std::sort(texts.begin(), texts.end());
+  CHECK((texts == std::vector<std::string>{"^00Info\r", "^00Mppt\r", "^00Smrt\r", "^00Tests\r", "^00Version\r"}));
+  CHECK(ask(q, 10100, 3 * 60000 - 100, seq).empty());  // nothing more until the first retry
+
+  // Unanswered: again after 3 min, then 5 more, then 7 more.
+  CHECK(ask(q, 3 * 60000, 3 * 60000 + 10000, seq).size() == 5);
+  // Version and Tests answer; the other three keep going.
+  q.on_poll_reply(poll_reply_with({string_packet(0x14, "Mnode Version K8.0120 (2D)\r"),
+                                   string_packet(0x14, "!Tests 1 3 2 0 00 0000 00\r")}),
+                  3 * 60000 + 20000);
+  r = ask(q, 8 * 60000, 8 * 60000 + 10000, seq);
+  CHECK(r.size() == 3);
+  for (const Request &x : r) CHECK(query_text(x) != "^00Version\r" && query_text(x) != "^00Tests\r");
+
+  // An Info that asks for the w255: without writes, no write, but Info is
+  // read again 40 minutes on, as the CCA does.
+  uint32_t t0 = 9 * 60000;
+  q.on_poll_reply(poll_reply_with({string_packet(0x14, "!Info 002E 12 0000 0DC1 00 0000 0000 00 00 0000 0FFF 2C8 B")}), t0);
+  for (const Request &x : ask(q, t0, t0 + Queries::INFO_AGAIN_MS - 100, seq, 0x14)) CHECK(query_text(x) != "^00Info\r" && query_text(x) != QUERY_W255);
+  bool again = false;
+  for (const Request &x : ask(q, t0 + Queries::INFO_AGAIN_MS, t0 + Queries::INFO_AGAIN_MS + 5000, seq, 0x14))
+    again = again || query_text(x) == "^00Info\r";
+  CHECK(again && q.sent_writes() == 0);
+
+  // With writes: Info "00" brings the w255, once; Smrt in mode N brings Smrt_ S.
+  Queries w(0, /*writes=*/true);
+  w.on_poll_reply(poll_reply_with({power_from(0x22)}), 0);
+  ask(w, 0, 10000, seq);
+  w.on_poll_reply(poll_reply_with({string_packet(0x22, "!Info 0027 12 0000 0DC1 00 0000 0000 00 00 0000 0FFF 1F9 B"),
+                                   string_packet(0x22, "!Smrt 0000 0000 0000 0000 0000 0000 0000 0000 0000 N 00 0000 0000 0000 00")}),
+                  20000);
+  r = ask(w, 20000, 30000, seq);
+  int w255 = 0, smart = 0;
+  for (const Request &x : r) {
+    if (query_text(x) == QUERY_W255) w255++;
+    if (query_text(x) == QUERY_SMART_S) smart++;
+    CHECK(may_send(x.cmd, x.payload, false, false, true));
+  }
+  CHECK(w255 == 1 && smart == 1 && w.sent_writes() == 2);
+  // An Info already at FF, a Smrt already S: nothing to write.
+  w.on_poll_reply(poll_reply_with({string_packet(0x22, "!Info 0027 12 0000 0D81 00 0000 0000 FF 00 0000 0FFF 161 B"),
+                                   string_packet(0x22, "!Smrt 0FFF 0000 0FFF 0008 00C8 00C8 000A 0154 0154 S 00 01")}),
+                  40000);
+  for (const Request &x : ask(w, 40000, 50000, seq)) CHECK(query_text(x) != QUERY_W255 && query_text(x) != QUERY_SMART_S);
+
+  // A node quiet for half an hour is asleep: its queries stop. Heard again,
+  // it gets ^00Tests, as each optimizer does at sunrise.
+  Queries s(0, false);
+  s.on_poll_reply(poll_reply_with({power_from(0x05)}), 0);
+  ask(s, 0, 10000, seq);
+  CHECK(ask(s, Queries::ASLEEP_MS + 60000, Queries::ASLEEP_MS + 70000, seq).empty());
+  uint32_t dawn = 10 * 3600000;
+  s.on_poll_reply(poll_reply_with({power_from(0x05)}), dawn);
+  r = ask(s, dawn, dawn + 10000, seq);
+  CHECK(r.size() == 1 && query_text(r[0]) == "^00Tests\r");
+  // Retries stop growing at 30 minutes.
+  CHECK(Queries::retry_after_ms(1) == 3 * 60000 && Queries::retry_after_ms(2) == 5 * 60000 &&
+        Queries::retry_after_ms(100) == 30 * 60000);
+}
+
 static void test_housekeeping() {
   Learned41 l;
   l.on_frame(cca41(1, 0x0027, 0x01, 0x21));
@@ -810,6 +915,7 @@ int main() {
   test_next_request_housekeeping();
   test_bring_up_plan();
   test_walks();
+  test_queries();
   if (failures) {
     std::printf("%d failed\n", failures);
     return 1;
