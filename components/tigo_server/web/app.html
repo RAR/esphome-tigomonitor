@@ -3460,7 +3460,7 @@
       const h = (await r.json()).housekeeping || {};
       const n = h.learned_41 || 0;
       document.getElementById('pi-housekeeping-hint').textContent =
-        'Send the CCA's 0x41, learned while this listened beside it, to each optimizer in turn, and its hourly 0x0B00 (experimental). ' +
+        "Send the CCA's 0x41, learned while this listened beside it, to each optimizer in turn, and its hourly 0x0B00 (experimental). " +
         (n ? `${n} learned.` : 'None learned yet: listen beside the CCA for an hour or more first.');
     } catch (e) { /* the default text stays */ }
   }
