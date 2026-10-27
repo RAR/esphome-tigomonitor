@@ -90,7 +90,7 @@ def main():
     handed_out = a.start_cursor
     sent_table = False
     foreign_sent = False
-    MAC = bytes.fromhex('04c05b3000037dfb')
+    MAC = bytes.fromhex('04c05b3000a1b2c3')
     FACTORY = 0x1235
     addr = FACTORY if a.factory else GATEWAY  # the id the TAP currently answers at
     stats = {'polls': 0, 'retries': 0, 'cursor_mismatches': 0, 'checks': 0, 'renewals': [], 'other': [],

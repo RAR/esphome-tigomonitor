@@ -290,24 +290,24 @@ static void test_discovery() {
   // 2. GET_MAC to the factory address, which hands back the MAC.
   r = d.next();
   CHECK(r.send && r.dest == 0x1235 && r.cmd == 0x0038 && r.payload.empty());
-  d.on_reply(Frame{0x9235, 0x0039, hex("04c05b3000037dfb1235")});
+  d.on_reply(Frame{0x9235, 0x0039, hex("04c05b3000a1b2c31235")});
   // 3. SET_ID_BY_MAC, that MAC to the configured id.
   r = d.next();
-  CHECK(r.send && r.dest == 0x1235 && r.cmd == 0x003C && r.payload == hex("3724926604c05b3000037dfb1201"));
+  CHECK(r.send && r.dest == 0x1235 && r.cmd == 0x003C && r.payload == hex("3724926604c05b3000a1b2c31201"));
   d.on_reply(Frame{0x9235, 0x003D, {}});
   // 4. Verify with a read at the new id.
   r = d.next();
   CHECK(r.send && r.dest == 0x1201 && r.cmd == 0x003A && r.payload.empty());
-  d.on_reply(Frame{0x9201, 0x003B, hex("04c05b3000037dfb1201")});
+  d.on_reply(Frame{0x9201, 0x003B, hex("04c05b3000a1b2c31201")});
   r = d.next();
   CHECK(r.done && !r.failed);
 
   // A verify reply at the wrong id fails rather than proceeding.
   Discovery bad(0x1235, 0x1201);
   bad.on_reply(Frame{0x8000, 0x0015, {}});
-  bad.on_reply(Frame{0x9235, 0x0039, hex("04c05b3000037dfb1235")});
+  bad.on_reply(Frame{0x9235, 0x0039, hex("04c05b3000a1b2c31235")});
   bad.on_reply(Frame{0x9235, 0x003D, {}});
-  bad.on_reply(Frame{0x9201, 0x003B, hex("04c05b3000037dfb9999")});
+  bad.on_reply(Frame{0x9201, 0x003B, hex("04c05b3000a1b2c39999")});
   CHECK(bad.next().failed);
 }
 
