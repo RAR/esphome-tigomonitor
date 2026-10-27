@@ -11,6 +11,7 @@
 #include "tigo_master.h"
 
 #include <algorithm>
+#include <cstring>
 #include <cstdio>
 #include <string>
 #include <vector>
@@ -180,10 +181,9 @@ static void test_allow_list() {
   CHECK(classify_request(CMD_TUNNEL, tunnel_request(0x06, 1, hex("001c"))) == Allow::bench_only);
   CHECK(classify_request(CMD_POLL, hex("00016fc40400")) == Allow::bench_only);
   // Reads and other subs the roof build doesn't use.
-  CHECK(classify_request(0x000A, {}) == Allow::bench_only);
+  CHECK(classify_request(0x000A, {0x00}) == Allow::bench_only);
   CHECK(classify_request(0x0300, {0x00, 0x00}) == Allow::bench_only);
   CHECK(classify_request(CMD_TUNNEL, tunnel_request(0x41, 1, hex("0023"))) == Allow::bench_only);
-  CHECK(classify_request(CMD_TUNNEL, tunnel_request(0x22, 1, {0x00, 0x00})) == Allow::bench_only);
 
   // The writes never sent, in steady state or bench: store, clear-roster,
   // whitelist, netrun. (The re-addressing writes 0x0010/0x0014/0x003C are
@@ -194,8 +194,48 @@ static void test_allow_list() {
   CHECK(classify_request(CMD_TUNNEL, tunnel_request(0x41, 1, hex("0037249266"))) == Allow::never);
 
   CHECK(may_send(CMD_POLL, poll_payload(1), false));
-  CHECK(!may_send(0x000A, {}, false) && may_send(0x000A, {}, true));
+  CHECK(!may_send(0x0300, {}, false) && may_send(0x0300, {}, true));
   CHECK(!may_send(0x0058, {}, false) && !may_send(0x0058, {}, true));
+}
+
+// The rest of what the CCA was seen sending in 24 h: its bring-up reads,
+// the empty 0x22 broadcasts, all five text queries, and the two writes it
+// makes to optimizers that answer a certain way.
+static void test_more_allow() {
+  CHECK(classify_request(0x000A, {}) == Allow::yes);  // VERSION
+  CHECK(classify_request(0x0E02, {}) == Allow::startup_only);
+  CHECK(classify_request(0x0E02, {0x00}) == Allow::bench_only);
+  CHECK(classify_request(CMD_TUNNEL, tunnel_request(0x0D, 3, {0x00, 0x00})) == Allow::startup_only);
+  CHECK(classify_request(CMD_TUNNEL, tunnel_request(0x0D, 3, {0x00, 0x01})) == Allow::startup_only);
+  CHECK(classify_request(CMD_TUNNEL, tunnel_request(0x0D, 3, {0x00, 0x02})) == Allow::bench_only);
+  // 0x22 to the broadcast address and to the TAP, empty. Carrying anything
+  // more is how taptap saw an older CCA send "PV off": never.
+  CHECK(classify_request(CMD_TUNNEL, tunnel_request(0x22, 1, {0x00, 0x00})) == Allow::yes);
+  CHECK(classify_request(CMD_TUNNEL, tunnel_request(0x22, 1, {0x00, 0x01})) == Allow::yes);
+  CHECK(classify_request(CMD_TUNNEL, tunnel_request(0x22, 1, {0x00, 0x05})) == Allow::bench_only);
+  CHECK(classify_request(CMD_TUNNEL, tunnel_request(0x22, 1, {0x00, 0x01, 0x01})) == Allow::never);
+  CHECK(classify_request(CMD_TUNNEL, tunnel_request(0x22, 1, {0x00, 0x00, 0x00})) == Allow::never);
+  for (const char *q : {"^00Tests\r", "^00Mppt\r", "^00Info\r"}) {
+    Bytes a = {0x00, 0x14};
+    a.insert(a.end(), q, q + strlen(q));
+    CHECK(classify_request(CMD_TUNNEL, tunnel_request(0x06, 1, a)) == Allow::yes);
+  }
+  // The writes: only the CCA's two, only with the writes setting.
+  Bytes w255 = {0x00, 0x14};
+  for (char c : std::string(QUERY_W255)) w255.push_back(static_cast<uint8_t>(c));
+  Bytes smart = {0x00, 0x22};
+  for (char c : std::string(QUERY_SMART_S)) smart.push_back(static_cast<uint8_t>(c));
+  CHECK(classify_request(CMD_TUNNEL, tunnel_request(0x06, 1, w255)) == Allow::optimizer_write);
+  CHECK(classify_request(CMD_TUNNEL, tunnel_request(0x06, 1, smart)) == Allow::optimizer_write);
+  CHECK(!may_send(CMD_TUNNEL, tunnel_request(0x06, 1, w255), true, true) &&
+        may_send(CMD_TUNNEL, tunnel_request(0x06, 1, w255), false, false, /*writes=*/true));
+  // Any other write-looking text is never sent: '#' commands, Smrt_ variants.
+  Bytes w254 = w255;
+  w254[w254.size() - 2] = '4';
+  CHECK(classify_request(CMD_TUNNEL, tunnel_request(0x06, 1, w254)) == Allow::never);
+  Bytes smart_n = smart;
+  smart_n[2 + 16] = 'N';
+  CHECK(classify_request(CMD_TUNNEL, tunnel_request(0x06, 1, smart_n)) == Allow::never);
 }
 
 static void test_next_request() {
@@ -563,6 +603,7 @@ int main() {
   test_poll_cursor();
   test_lease_keeper();
   test_allow_list();
+  test_more_allow();
   test_next_request();
   test_housekeeping_allow();
   test_learner();

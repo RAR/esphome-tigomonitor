@@ -660,7 +660,14 @@ class Discovery {
 // never: writes. The commands that change what a TAP stores or does (reset,
 // store, ids, roster, whitelist, netrun) and anything carrying the setup key
 // 37 24 92 66. Nothing in this code sends them, whatever the settings.
-enum class Allow { yes, bench_only, startup_only, never };
+// optimizer_write: the two settings the CCA writes to optimizers whose
+// replies ask for it (Queries), sent only with that setting on.
+enum class Allow { yes, bench_only, startup_only, optimizer_write, never };
+
+// The CCA's text queries to optimizers (tunnel sub 0x06), and its two writes.
+static const char *const QUERY_READS[] = {"^00Version\r", "^00Tests\r", "^00Info\r", "^00Smrt\r", "^00Mppt\r"};
+static const char *const QUERY_W255 = "#00w255\r";
+static const char *const QUERY_SMART_S = "^00Smrt_........S0000...0000\r";
 
 inline Allow classify_request(uint16_t cmd, const Bytes &payload) {
   // The re-addressing writes a cold boot needs. Allowed only in startup mode,
@@ -678,6 +685,9 @@ inline Allow classify_request(uint16_t cmd, const Bytes &payload) {
   for (size_t i = 0; i + 4 <= payload.size(); i++)
     if (std::equal(KEY, KEY + 4, payload.begin() + i)) return Allow::never;
 
+  // Reads: VERSION any time; 0x0E02 only in the CCA's bring-up.
+  if (cmd == 0x000A) return payload.empty() ? Allow::yes : Allow::bench_only;
+  if (cmd == 0x0E02) return payload.empty() ? Allow::startup_only : Allow::bench_only;
   // The CCA's hourly 01; its 00 only follows its own reboot, so bring-up only.
   if (cmd == CMD_SESSION)
     return payload == Bytes{0x01} ? Allow::yes : payload == Bytes{0x00} ? Allow::startup_only : Allow::bench_only;
@@ -699,23 +709,34 @@ inline Allow classify_request(uint16_t cmd, const Bytes &payload) {
       return is_housekeeping_args(args) ? Allow::yes : Allow::bench_only;
     case 0x26:  // a page of the roster, by index
       return args.size() == 2 ? Allow::yes : Allow::bench_only;
-    case 0x06: {  // a text query to one node: the four the CCA sends
+    case 0x06: {  // a text query to one node: the five the CCA sends, and its two writes
       if (args.size() < 2) return Allow::bench_only;
       std::string text(args.begin() + 2, args.end());
-      for (const char *q : {"^00Version\r", "^00Smrt\r", "^00Mppt\r", "^00Info\r"})
+      for (const char *q : QUERY_READS)
         if (text == q) return Allow::yes;
+      if (text == QUERY_W255 || text == QUERY_SMART_S) return Allow::optimizer_write;
+      // Any other write: a '#' command, or Smrt_ with other settings.
+      if (text.rfind("#", 0) == 0 || text.rfind("^00Smrt_", 0) == 0) return Allow::never;
       return Allow::bench_only;
     }
+    case 0x0D:  // the bring-up's pair, 00 00 then 00 01
+      return args == Bytes{0x00, 0x00} || args == Bytes{0x00, 0x01} ? Allow::startup_only : Allow::bench_only;
+    case 0x22:
+      // Empty, to the broadcast address or the TAP. With data after the node
+      // id it is what taptap saw an older CCA use for "PV off": never.
+      if (args.size() > 2) return Allow::never;
+      return args == Bytes{0x00, 0x00} || args == Bytes{0x00, 0x01} ? Allow::yes : Allow::bench_only;
     default:
       return Allow::bench_only;
   }
 }
 
-inline bool may_send(uint16_t cmd, const Bytes &payload, bool bench, bool startup = false) {
+inline bool may_send(uint16_t cmd, const Bytes &payload, bool bench, bool startup = false, bool writes = false) {
   switch (classify_request(cmd, payload)) {
     case Allow::yes: return true;
     case Allow::bench_only: return bench || startup;
     case Allow::startup_only: return startup;
+    case Allow::optimizer_write: return writes;
     case Allow::never: return false;
   }
   return false;
