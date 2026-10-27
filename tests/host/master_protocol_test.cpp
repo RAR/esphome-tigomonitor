@@ -322,6 +322,71 @@ static void test_review_fixes() {
 
 // Gateway discovery: a TAP that comes up at the factory address is re-addressed
 // to the configured gateway id, exactly as the CCA did at the roof power-up.
+// Walks a Discovery through the hop after its scan, checking each frame;
+// true if it got there.
+static bool finish_hop(Discovery &d) {
+  int bad = failures;
+  DiscoveryRequest r = d.next();
+  CHECK(r.send && r.dest == 0x1201 && r.cmd == 0x003C && r.payload == hex("3724926604c05b3000a1b2c31202"));
+  d.on_reply(Frame{0x9201, 0x003D, {}});
+  r = d.next();
+  CHECK(r.send && r.dest == 0x1202 && r.cmd == 0x003A && r.payload.empty());
+  d.on_reply(Frame{0x9202, 0x003B, hex("04c05b3000a1b2c31202")});
+  r = d.next();
+  CHECK(r.send && r.dest == 0x0000 && r.cmd == 0x0010 && r.payload == hex("37249266"));
+  d.on_reply(Frame{0x8000, 0x0011, {}});
+  r = d.next();
+  CHECK(!r.send && !r.done && r.idle_ms == Discovery::RESET_QUIET_MS);
+  r = d.next();
+  CHECK(r.send && r.dest == 0x1201 && r.cmd == 0x003A && r.wait_ms == Discovery::BACK_WAIT_MS);
+  d.on_reply(Frame{0x9201, 0x003B, hex("04c05b3000a1b2c31201")});
+  return failures == bad;
+}
+
+// Up to the RESET, for the failure cases.
+static void to_reset(Discovery &d) {
+  d.on_reply(Frame{0x8000, 0x0015, {}});
+  d.on_reply(Frame{0x9235, 0x0039, hex("04c05b3000a1b2c31235")});
+  d.on_reply(Frame{0x9235, 0x003D, {}});
+  d.on_reply(Frame{0x9201, 0x003B, hex("04c05b3000a1b2c31201")});
+  for (int i = 0; i < Discovery::SCAN_TRIES; i++) d.next();
+  d.next();
+  d.on_reply(Frame{0x9201, 0x003D, {}});
+  d.next();
+  d.on_reply(Frame{0x9202, 0x003B, hex("04c05b3000a1b2c31202")});
+  d.next();
+  d.on_reply(Frame{0x8000, 0x0011, {}});
+  d.next();  // the quiet
+}
+
+static void test_discovery_hop() {
+  // Not back at the configured id after a few tries: failed.
+  Discovery lost(0x1235, 0x1201);
+  to_reset(lost);
+  for (int i = 0; i < Discovery::BACK_TRIES; i++) CHECK(lost.next().send);
+  CHECK(lost.next().failed);
+  // Back, but late: the third try answers.
+  Discovery late(0x1235, 0x1201);
+  to_reset(late);
+  late.next();
+  late.next();
+  late.next();
+  late.on_reply(Frame{0x9201, 0x003B, hex("04c05b3000a1b2c31201")});
+  CHECK(late.next().done);
+  // The hop not taken (the read at 1202 says another id): failed, no RESET.
+  Discovery stuck(0x1235, 0x1201);
+  stuck.on_reply(Frame{0x8000, 0x0015, {}});
+  stuck.on_reply(Frame{0x9235, 0x0039, hex("04c05b3000a1b2c31235")});
+  stuck.on_reply(Frame{0x9235, 0x003D, {}});
+  stuck.on_reply(Frame{0x9201, 0x003B, hex("04c05b3000a1b2c31201")});
+  for (int i = 0; i < Discovery::SCAN_TRIES; i++) stuck.next();
+  stuck.next();
+  stuck.on_reply(Frame{0x9201, 0x003D, {}});
+  stuck.next();
+  stuck.on_reply(Frame{0x9202, 0x003B, hex("04c05b3000a1b2c31201")});
+  CHECK(stuck.next().failed);
+}
+
 static void test_discovery() {
   Discovery d(0x1235, 0x1201);
   // 1. SET_485_ID broadcast to the factory address.
@@ -346,6 +411,9 @@ static void test_discovery() {
     r = d.next();
     CHECK(r.send && r.dest == 0x1235 && r.cmd == 0x0038 && r.payload.empty() && r.wait_ms == 800);
   }
+  // 6. The CCA's hop: the same MAC to the id one up, read there, a RESET
+  // broadcast, 5 s of quiet, and the TAP is back at the configured id.
+  CHECK(finish_hop(d));
   r = d.next();
   CHECK(r.done && !r.failed && d.extra_taps().empty());
 
@@ -372,7 +440,7 @@ static void test_discovery_scan() {
     if (i < 3) d.on_reply(Frame{0x9235, 0x0039, hex("04c05b3000d4e5f61235")});  // the same one, three times
     if (i == 3) d.on_reply(Frame{0x9235, 0x0039, hex("04c05b3000a1b2c31235")});  // our own MAC: not another TAP
   }
-  CHECK(d.next().done);
+  CHECK(finish_hop(d) && d.next().done);
   CHECK(d.extra_taps().size() == 1 && d.extra_taps()[0] == hex("04c05b3000d4e5f6"));
 
   // A TAP already at its id gets the scan alone: no re-addressing writes.
@@ -482,6 +550,136 @@ static std::vector<Request> drain(Housekeeping &hk, uint32_t now_ms, uint8_t &se
 
 static uint16_t tuid_of(const Request &r) { return static_cast<uint16_t>(r.payload[5] << 8 | r.payload[6]); }
 static uint8_t stream_of(const Request &r) { return r.payload[10]; }
+
+
+static uint8_t sub_of(const Request &r) { return r.cmd == CMD_TUNNEL && r.payload.size() > 3 ? r.payload[3] : 0; }
+static Bytes args_of(const Request &r) { return Bytes(r.payload.begin() + 5, r.payload.end()); }
+
+// A node table page reply for a 0x26: start, count, and count entries.
+static Frame page_reply(const Request &q, uint16_t start, uint16_t count) {
+  Bytes p = {0x00, 0x0E, 0x00, 0x27, q.payload[4], static_cast<uint8_t>(start >> 8), static_cast<uint8_t>(start),
+             static_cast<uint8_t>(count >> 8), static_cast<uint8_t>(count)};
+  for (uint16_t i = 0; i < count; i++) {
+    Bytes e = hex("04c05b4000000000");
+    e.push_back(static_cast<uint8_t>((start + i) >> 8));
+    e.push_back(static_cast<uint8_t>(start + i));
+    p.insert(p.end(), e.begin(), e.end());
+  }
+  return Frame{0x9201, CMD_TUNNEL_REPLY, p};
+}
+
+// Sends what is due at now_ms, answering each 0x26 from a table of 40 nodes
+// at 2..41 in pages of 12, as the roof TAP does.
+static std::vector<Request> run(Housekeeping &hk, uint32_t now_ms, uint8_t &seq) {
+  std::vector<Request> out;
+  for (Request r = hk.due(now_ms, seq); r.cmd; r = hk.due(now_ms, seq)) {
+    out.push_back(r);
+    if (sub_of(r) == 0x26) {
+      Bytes a = args_of(r);
+      uint16_t idx = static_cast<uint16_t>(a[0] << 8 | a[1]);
+      uint16_t start = idx < 2 ? 2 : idx;
+      uint16_t count = start > 41 ? 0 : static_cast<uint16_t>(std::min(12, 42 - start));
+      hk.on_reply(r, true, page_reply(r, start, count));
+    } else {
+      hk.on_reply(r, true, Frame{});
+    }
+  }
+  return out;
+}
+
+static std::string shape(const std::vector<Request> &rs) {
+  std::string s;
+  char b[32];
+  for (const Request &r : rs) {
+    if (r.cmd == CMD_TUNNEL) {
+      Bytes a = args_of(r);
+      snprintf(b, sizeof(b), "%02x:", sub_of(r));
+      s += b;
+      for (size_t i = 0; i < a.size() && i < 2; i++) {
+        snprintf(b, sizeof(b), "%02x", a[i]);
+        s += b;
+      }
+    } else {
+      snprintf(b, sizeof(b), "%04x:", r.cmd);
+      s += b;
+      for (uint8_t c : r.payload) {
+        snprintf(b, sizeof(b), "%02x", c);
+        s += b;
+      }
+    }
+    s += r.bring_up ? "* " : " ";
+  }
+  return s;
+}
+
+// The CCA's own order after it re-addresses a TAP (13:47:47 in the capture),
+// and its hourly tick. * marks the bring-up-only frames.
+static void test_bring_up_plan() {
+  HousekeepingPlan plan;
+  plan.bring_up_reads = true;
+  plan.session_reset = true;
+  plan.send_41 = false;
+  Housekeeping hk({}, 0, plan, 1);
+  hk.set_targets({0x02, 0x03});
+  uint8_t seq = 0;
+  std::string got = shape(run(hk, 0, seq));
+  const char *want =
+      "000a: 0e02:* 0b00:00* 0d:0000* 0b00:01 0d:0001* 22:0000 22:0001 "
+      "26:0000 26:000e 26:001a 26:0026 26:002a 26:0000 26:000e 26:001a 26:0026 26:002a ";
+  CHECK(got == want);
+  if (got != want) std::printf("    got  %s\n    want %s\n", got.c_str(), want);
+  CHECK(hk.sent_walk_pages() == 10 && hk.sent_broadcast() == 2 && hk.sent_session() == 2);
+  // A watchdog bring-up: no 00.
+  plan.session_reset = false;
+  Housekeeping wd({}, 0, plan, 1);
+  CHECK(shape(run(wd, 0, seq)).rfind("000a: 0e02:* 0d:0000* 0b00:01 0d:0001* 22:0000 22:0001 26:0000", 0) == 0);
+  // Without a re-address: no bring-up reads.
+  Housekeeping warm({}, 0, HousekeepingPlan{}, 1);
+  CHECK(shape(run(warm, 0, seq)).rfind("0b00:01 22:0000 22:0001 26:0000", 0) == 0);
+
+  // The hourly tick: 0x0B00 01, then the 0x22 pair a second apart.
+  for (uint32_t t = 1000; t < Housekeeping::SESSION_EVERY_MS; t += 1000) run(hk, t, seq);
+  CHECK(shape(run(hk, Housekeeping::SESSION_EVERY_MS, seq)).rfind("0b00:01 ", 0) == 0);
+  CHECK(shape(run(hk, Housekeeping::SESSION_EVERY_MS + 1000, seq)) == "22:0000 ");
+  CHECK(shape(run(hk, Housekeeping::SESSION_EVERY_MS + 2000, seq)) == "22:0001 ");
+}
+
+// Two walks of the node table every 15 minutes, each page from where the
+// reply left off, ending on an empty page.
+static void test_walks() {
+  HousekeepingPlan plan;
+  plan.send_41 = false;
+  Housekeeping hk({}, 0, plan, 1);
+  uint8_t seq = 0;
+  run(hk, 0, seq);
+  CHECK(hk.sent_walk_pages() == 10);
+  CHECK(run(hk, Housekeeping::WALK_EVERY_MS - 1, seq).empty() || hk.sent_walk_pages() == 10);
+  run(hk, Housekeeping::WALK_EVERY_MS, seq);
+  CHECK(hk.sent_walk_pages() == 20);
+
+  // A page with no reply ends that walk; the second still runs.
+  Housekeeping lossy({}, 0, plan, 1);
+  int pages = 0;
+  for (Request r = lossy.due(0, seq); r.cmd; r = lossy.due(0, seq)) {
+    if (sub_of(r) != 0x26) { lossy.on_reply(r, true, Frame{}); continue; }
+    pages++;
+    if (pages == 2) { lossy.on_reply(r, false, Frame{}); continue; }
+    Bytes a = args_of(r);
+    uint16_t idx = static_cast<uint16_t>(a[0] << 8 | a[1]);
+    uint16_t start = idx < 2 ? 2 : idx;
+    lossy.on_reply(r, true, page_reply(r, start, start > 41 ? 0 : static_cast<uint16_t>(std::min(12, 42 - start))));
+  }
+  CHECK(pages == 2 + 5);
+  // A reply that doesn't move forward can't loop: the walk ends.
+  Housekeeping stuck({}, 0, plan, 1);
+  pages = 0;
+  for (Request r = stuck.due(0, seq); r.cmd && pages < 100; r = stuck.due(0, seq)) {
+    if (sub_of(r) != 0x26) { stuck.on_reply(r, true, Frame{}); continue; }
+    pages++;
+    stuck.on_reply(r, true, page_reply(r, 2, 0x0000 + 1));  // always "from 2, one entry"
+  }
+  CHECK(pages <= 2 * Housekeeping::WALK_MAX_PAGES);
+}
 
 static void test_housekeeping() {
   Learned41 l;
@@ -596,6 +794,7 @@ static void test_next_request_housekeeping() {
 int main() {
   test_discovery();
   test_discovery_scan();
+  test_discovery_hop();
   test_startup_allow();
   test_review_fixes();
   test_codec();
@@ -609,6 +808,8 @@ int main() {
   test_learner();
   test_housekeeping();
   test_next_request_housekeeping();
+  test_bring_up_plan();
+  test_walks();
   if (failures) {
     std::printf("%d failed\n", failures);
     return 1;

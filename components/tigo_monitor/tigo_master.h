@@ -326,7 +326,8 @@ inline uint8_t next_seq(uint8_t seq) {
 struct Request {
   uint16_t cmd = 0;
   Bytes payload;
-  uint32_t wait_ms = 0;  // how long to wait for the reply; 0 = the usual
+  uint32_t wait_ms = 0;   // how long to wait for the reply; 0 = the usual
+  bool bring_up = false;  // a frame the CCA sends only straight after re-addressing a TAP
 };
 
 // ---- housekeeping ----------------------------------------------------------
@@ -339,8 +340,14 @@ struct Request {
 //     every optimizer. The 17 bytes never changed in 24 h, across CCA
 //     reboots. What they mean isn't known, so they are copied, not composed.
 //   - 0x0B00 with 01, every hour; after the CCA reboots, 00 then 01 once.
-// The content is the site's own, learned while listening (Learned41); none
-// of it is built in. Only the target is chosen here (Housekeeping).
+//   - tunnel sub 0x22, empty, to the broadcast address then the TAP, a second
+//     apart, a second after each 0x0B00 01.
+//   - tunnel sub 0x26, the TAP's node table a page at a time, each page from
+//     where the last reply ended: twice over, every 15 minutes.
+//   - after re-addressing a TAP: VERSION, 0x0E02 and a tunnel 0x0D pair
+//     around the 0x0B00s (HousekeepingPlan::bring_up_reads).
+// The 0x41 content is learned while listening (Learned41), or else built
+// in. Only the 0x41 target is chosen here (Housekeeping).
 inline bool is_housekeeping_args(const Bytes &args) {
   return args.size() == 24 && !args[2] && !args[3] && !args[4] && (args[5] == 0x01 || args[5] == 0x02 || args[5] == 0x04) &&
          !args[6];
@@ -393,9 +400,20 @@ class Learned41 {
   std::vector<Entry> entries_;
 };
 
+// What a Housekeeping sends. The CCA's order after it re-addresses a TAP
+// (13:47:47 in the capture): VERSION, 0x0E02, [0x0B00 00], 0x0D 00 00,
+// 0x0B00 01, 0x0D 00 01, the 0x22 pair, then two walks of the node table.
+struct HousekeepingPlan {
+  bool send_41 = true;
+  bool session = true;          // 0x0B00 01 at the start and every hour
+  bool session_reset = false;   // 0x0B00 00 first, as after the CCA's own reboot
+  bool bring_up_reads = false;  // VERSION, 0x0E02 and the 0x0D pair: after a re-address
+  bool broadcast = true;        // the empty 0x22 pair with each 0x0B00 01
+  bool walks = true;            // the 0x26 node table walks
+};
+
 // Sends the 0x41s on the CCA's timing, and 0x0B00 01 at the start and every
-// hour after. session_reset: send 00 before the first 01, as the CCA does
-// after it reboots and re-addresses the TAP.
+// hour after, with the rest of its plan (HousekeepingPlan).
 //
 // Each stream's content is the CCA's: learned (Learned41) if heard, else
 // default_content(), the block current CCA firmware sends. Targets are not
@@ -413,9 +431,20 @@ class Housekeeping {
   static constexpr uint8_t STREAMS[3] = {0x02, 0x01, 0x04};
   static constexpr uint32_t OFFSET_MS[3] = {1000, 6000, 11000};
   static const uint16_t TAP_TUID = 0x0001;
+  static const uint32_t BROADCAST_GAP_MS = 1000;  // 0x0B00 01, then each 0x22 a second later
+  static const uint32_t WALK_EVERY_MS = 15 * 60000;
+  static const int WALKS = 2;
+  static const int WALK_MAX_PAGES = 32;
+  static const uint32_t WALK_REPLY_MS = 5000;  // a page unanswered this long ends its walk
 
+  // 0x41s and 0x0B00 only, as before the rest was known.
   Housekeeping(const std::vector<Learned41::Entry> &learned, uint32_t now_ms, bool session_reset, uint32_t seed = 1)
-      : start_ms_(now_ms), reset_pending_(session_reset), next_session_ms_(now_ms), rng_(seed ? seed : 1) {
+      : Housekeeping(learned, now_ms, legacy_plan_(session_reset), seed) {}
+
+  Housekeeping(const std::vector<Learned41::Entry> &learned, uint32_t now_ms, const HousekeepingPlan &plan,
+               uint32_t seed)
+      : plan_(plan), start_ms_(now_ms), next_tick_ms_(now_ms + SESSION_EVERY_MS),
+        next_walk_ms_(now_ms + WALK_EVERY_MS), rng_(seed ? seed : 1) {
     for (int i = 0; i < 3; i++) {
       for (const auto &e : learned)
         if (e.stream == STREAMS[i]) {
@@ -425,6 +454,19 @@ class Housekeeping {
       if (content_[i].empty()) content_[i] = default_content(STREAMS[i]);
       next_ms_[i] = now_ms + OFFSET_MS[i];
     }
+    if (plan.bring_up_reads) {
+      opening_.push_back({0x000A, 0, {}, false, 0});
+      opening_.push_back({0x0E02, 0, {}, true, 0});
+    }
+    if (plan.session && plan.session_reset) opening_.push_back({CMD_SESSION, 0, {0x00}, true, 0});
+    if (plan.bring_up_reads) opening_.push_back({CMD_TUNNEL, 0x0D, {0x00, 0x00}, true, 0});
+    if (plan.session) opening_.push_back({CMD_SESSION, 0, {0x01}, false, 0});
+    if (plan.bring_up_reads) opening_.push_back({CMD_TUNNEL, 0x0D, {0x00, 0x01}, true, 0});
+    if (plan.broadcast) {
+      opening_.push_back({CMD_TUNNEL, 0x22, {0x00, 0x00}, false, 0});
+      opening_.push_back({CMD_TUNNEL, 0x22, {0x00, 0x01}, false, 0});
+    }
+    if (plan.walks) walks_left_ = WALKS;
   }
 
   // A stream's content (the args after the Tuid) as current CCA firmware
@@ -447,19 +489,39 @@ class Housekeeping {
         targets_.push_back(t);
   }
 
-  // The next request due, or one with cmd 0. A 0x41 takes the next seq.
+  // The next request due, or one with cmd 0. A tunnel request takes the next seq.
   Request due(uint32_t now_ms, uint8_t &seq) {
-    if (reset_pending_) {
-      reset_pending_ = false;
-      sent_session_++;
-      return {CMD_SESSION, {0x00}};
+    if (opening_next_ < opening_.size()) return emit_(opening_[opening_next_++], seq);
+    for (size_t k = 0; k < later_.size(); k++)
+      if (static_cast<int32_t>(now_ms - later_[k].at_ms) >= 0) {
+        Item it = later_[k];
+        later_.erase(later_.begin() + static_cast<long>(k));
+        return emit_(it, seq);
+      }
+    if ((plan_.session || plan_.broadcast) && static_cast<int32_t>(now_ms - next_tick_ms_) >= 0) {
+      next_tick_ms_ = now_ms + SESSION_EVERY_MS;
+      if (plan_.broadcast) {
+        later_.push_back({CMD_TUNNEL, 0x22, {0x00, 0x00}, false, now_ms + BROADCAST_GAP_MS});
+        later_.push_back({CMD_TUNNEL, 0x22, {0x00, 0x01}, false, now_ms + 2 * BROADCAST_GAP_MS});
+      }
+      if (plan_.session) return emit_({CMD_SESSION, 0, {0x01}, false, 0}, seq);
     }
-    if (static_cast<int32_t>(now_ms - next_session_ms_) >= 0) {
-      next_session_ms_ = now_ms + SESSION_EVERY_MS;
-      sent_session_++;
-      return {CMD_SESSION, {0x01}};
+    if (plan_.walks) {
+      if (walk_waiting_ && now_ms - walk_sent_ms_ >= WALK_REPLY_MS) end_walk_();  // never answered
+      if (!walk_waiting_ && walks_left_ == 0 && static_cast<int32_t>(now_ms - next_walk_ms_) >= 0) {
+        next_walk_ms_ = now_ms + WALK_EVERY_MS;
+        walks_left_ = WALKS;
+      }
+      if (walks_left_ > 0 && !walk_waiting_) {
+        walk_waiting_ = true;
+        walk_sent_ms_ = now_ms;
+        walk_pages_++;
+        sent_walk_pages_++;
+        return emit_({CMD_TUNNEL, 0x26, {static_cast<uint8_t>(walk_index_ >> 8), static_cast<uint8_t>(walk_index_)}, false, 0},
+                     seq);
+      }
     }
-    for (int i = 0; i < 3; i++) {
+    for (int i = 0; i < 3 && plan_.send_41; i++) {
       if (content_[i].empty() || static_cast<int32_t>(now_ms - next_ms_[i]) < 0) continue;
       next_ms_[i] = now_ms + STREAM_EVERY_MS;
       uint32_t slot = (now_ms - start_ms_) / SLOT_MS;
@@ -477,10 +539,64 @@ class Housekeeping {
     }
     return {};
   }
+  // What came back for a request due() made; ok false if nothing did.
+  void on_reply(const Request &req, bool ok, const Frame &reply) {
+    if (req.cmd == 0x000A && ok) version_.assign(reply.payload.begin(), reply.payload.end());
+    if (req.cmd != CMD_TUNNEL || req.payload.size() < 4 || req.payload[3] != 0x26 || !walk_waiting_) return;
+    walk_waiting_ = false;
+    TunnelReply t;
+    if (!ok || !parse_tunnel_reply(reply.payload, t) || t.sub != 0x27 || t.data.size() < 4) return end_walk_();
+    uint16_t start = static_cast<uint16_t>(t.data[0] << 8 | t.data[1]);
+    uint16_t count = static_cast<uint16_t>(t.data[2] << 8 | t.data[3]);
+    uint32_t next = static_cast<uint32_t>(start) + count;
+    // The end of the table, or a reply that doesn't move on.
+    if (count == 0 || next <= walk_index_ || next > 0xFFFF || walk_pages_ >= WALK_MAX_PAGES) return end_walk_();
+    walk_index_ = static_cast<uint16_t>(next);
+  }
+
   uint32_t sent_41() const { return sent_41_; }
   uint32_t sent_session() const { return sent_session_; }
+  uint32_t sent_broadcast() const { return sent_broadcast_; }
+  uint32_t sent_walk_pages() const { return sent_walk_pages_; }
+  // VERSION's reply, if a bring-up asked.
+  const std::string &version() const { return version_; }
 
  private:
+  struct Item {
+    uint16_t cmd;
+    uint8_t sub;  // for a tunnel request
+    Bytes args;   // the tunnel args, or the payload
+    bool bring_up;
+    uint32_t at_ms;
+  };
+  static HousekeepingPlan legacy_plan_(bool session_reset) {
+    HousekeepingPlan p;
+    p.session_reset = session_reset;
+    p.broadcast = false;
+    p.walks = false;
+    return p;
+  }
+  Request emit_(const Item &it, uint8_t &seq) {
+    Request r;
+    r.cmd = it.cmd;
+    r.bring_up = it.bring_up;
+    if (it.cmd == CMD_TUNNEL) {
+      seq = next_seq(seq);
+      r.payload = tunnel_request(it.sub, seq, it.args);
+      if (it.sub == 0x22) sent_broadcast_++;
+    } else {
+      r.payload = it.args;
+      if (it.cmd == CMD_SESSION) sent_session_++;
+    }
+    return r;
+  }
+  void end_walk_() {
+    walk_waiting_ = false;
+    walk_index_ = 0;
+    walk_pages_ = 0;
+    if (walks_left_ > 0) walks_left_--;
+  }
+
   // The next target from this stream's shuffled pass, 0 if there are none.
   uint16_t draw_(int i) {
     for (int tries = 0; tries < 2; tries++) {
@@ -501,9 +617,21 @@ class Housekeeping {
     return rng_;
   }
 
+  HousekeepingPlan plan_;
   uint32_t start_ms_;
-  bool reset_pending_;
-  uint32_t next_session_ms_;
+  uint32_t next_tick_ms_;
+  uint32_t next_walk_ms_;
+  std::vector<Item> opening_;
+  size_t opening_next_ = 0;
+  std::vector<Item> later_;
+  int walks_left_ = 0;
+  bool walk_waiting_ = false;
+  uint32_t walk_sent_ms_ = 0;
+  uint16_t walk_index_ = 0;
+  int walk_pages_ = 0;
+  uint32_t sent_broadcast_ = 0;
+  uint32_t sent_walk_pages_ = 0;
+  std::string version_;
   uint32_t rng_;
   std::vector<uint16_t> targets_;
   Bytes content_[3];
@@ -563,15 +691,20 @@ struct DiscoveryRequest {
   uint16_t cmd = 0;
   Bytes payload;
   uint32_t wait_ms = 0;  // how long to wait for the reply; 0 = the usual
+  uint32_t idle_ms = 0;  // send nothing at all for this long, then ask again
 };
 
 class Discovery {
  public:
   static const int SCAN_TRIES = 5;
   static const uint32_t BACKOFF_WAIT_MS = 800;  // GET_MAC with backoff: the CCA allows ~0.8 s a try
+  // After its RESET the CCA leaves the bus quiet ~5 s, then reads once.
+  static const uint32_t RESET_QUIET_MS = 5000;
+  static const uint32_t BACK_WAIT_MS = 1000;
+  static const int BACK_TRIES = 5;
 
   Discovery(uint16_t factory_id, uint16_t target_id, bool scan_only = false)
-      : state_(scan_only ? scan : claim), factory_(factory_id), target_(target_id) {}
+      : state_(scan_only ? scan : claim), scan_only_(scan_only), factory_(factory_id), target_(target_id) {}
 
   DiscoveryRequest next() {
     DiscoveryRequest r;
@@ -598,11 +731,40 @@ class Discovery {
         break;
       case scan:
         if (scans_sent_ == SCAN_TRIES) {
-          state_ = st_done;
+          state_ = scan_only_ ? st_done : hop;
           return next();
         }
         scans_sent_++;
         r.dest = factory_; r.cmd = CMD_GET_MAC; r.wait_ms = BACKOFF_WAIT_MS;
+        break;
+      // Then the CCA's hop: the TAP to the id one up, read there, a RESET
+      // broadcast, quiet, and the TAP answers at the configured id again.
+      case hop:
+        r.dest = target_; r.cmd = CMD_SET_ID_BY_MAC;
+        r.payload = {0x37, 0x24, 0x92, 0x66};
+        r.payload.insert(r.payload.end(), mac_.begin(), mac_.end());
+        r.payload.push_back(static_cast<uint8_t>((target_ + 1) >> 8));
+        r.payload.push_back(static_cast<uint8_t>(target_ + 1));
+        break;
+      case hop_verify:
+        r.dest = static_cast<uint16_t>(target_ + 1); r.cmd = CMD_GET_MAC_NOW;
+        break;
+      case reset:
+        r.dest = 0x0000; r.cmd = CMD_RESET;
+        r.payload = {0x37, 0x24, 0x92, 0x66};
+        break;
+      case quiet:
+        state_ = back;
+        r.send = false;
+        r.idle_ms = RESET_QUIET_MS;
+        break;
+      case back:
+        if (back_sent_ == BACK_TRIES) {
+          state_ = st_failed;
+          return next();
+        }
+        back_sent_++;
+        r.dest = target_; r.cmd = CMD_GET_MAC_NOW; r.wait_ms = BACK_WAIT_MS;
         break;
       default: break;
     }
@@ -635,6 +797,20 @@ class Discovery {
           if (mac != mac_ && std::find(extra_.begin(), extra_.end(), mac) == extra_.end()) extra_.push_back(mac);
         }
         break;
+      case hop:
+        if (f.cmd == CMD_SET_ID_BY_MAC + 1) state_ = hop_verify;
+        break;
+      case hop_verify:
+        if (f.cmd == CMD_GET_MAC_NOW + 1 && f.payload.size() >= 10)
+          state_ = (f.payload[8] << 8 | f.payload[9]) == target_ + 1 ? reset : st_failed;
+        break;
+      case reset:
+        if (f.cmd == CMD_RESET + 1) state_ = quiet;
+        break;
+      case back:
+        if (f.cmd == CMD_GET_MAC_NOW + 1 && f.payload.size() >= 10 && (f.payload[8] << 8 | f.payload[9]) == target_)
+          state_ = st_done;
+        break;
       default: break;
     }
   }
@@ -646,10 +822,12 @@ class Discovery {
   const std::vector<Bytes> &extra_taps() const { return extra_; }
 
  private:
-  enum State { claim, get_mac, set_id, verify, scan, st_done, st_failed } state_;
+  enum State { claim, get_mac, set_id, verify, scan, hop, hop_verify, reset, quiet, back, st_done, st_failed } state_;
+  bool scan_only_;
   uint16_t factory_, target_;
   Bytes mac_;
   int scans_sent_ = 0;
+  int back_sent_ = 0;
   std::vector<Bytes> extra_;
 };
 
