@@ -41,7 +41,7 @@ struct MasterStatus {
   int64_t last_reply_unix = 0;
   std::vector<std::string> extra_taps;  // MACs (hex) of TAPs left at the factory address
   bool housekeeping = false;  // the setting
-  uint32_t learned_41 = 0;    // 0x41 targets it has to send
+  uint32_t learned_41 = 0;    // 0x41s heard from the CCA (0: the built-in content)
   uint32_t sent_41 = 0;
   uint32_t sent_session = 0;  // 0x0B00s
   std::string detail;
@@ -56,9 +56,9 @@ class BusMaster {
   using Sink = std::function<void(const char *, size_t)>;
   // startup: if the TAP is found at the factory address, re-address it to
   // gateway_id before polling (bus_master re-addressing writes, gated).
-  // housekeeping: also send the 0x41s, with the learned content, and the
-  // hourly 0x0B00 (tigo_master.h's Housekeeping); with none learned, only
-  // the 0x0B00. targets: the optimizers to send 0x41s to, asked each minute.
+  // housekeeping: also send the 0x41s, with the learned content or else the
+  // built-in, and the hourly 0x0B00 (tigo_master.h's Housekeeping).
+  // targets: the optimizers to send 0x41s to, asked each minute.
   using Targets = std::function<std::vector<uint16_t>()>;
   BusMaster(Sink on_rx, Sink on_tx, uint16_t gateway_id, bool bench, bool startup, bool housekeeping = false,
             std::vector<esphome::tigo_monitor::master::Learned41::Entry> learned = {}, Targets targets = nullptr);

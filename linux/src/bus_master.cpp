@@ -207,8 +207,8 @@ void BusMaster::tick(uint32_t now_ms) {
     session_reset_sent_ = session_reset_sent_ || reset;
     housekeeping_ = std::make_unique<master::Housekeeping>(learned_, now_ms, reset, now_ms ^ unix_now());
     targets_at_ms_ = now_ms - TARGETS_EVERY_MS;
-    LOGI("bus master: housekeeping on: %zu learned 0x41 targets%s", learned_.size(),
-         learned_.empty() ? " (none yet: listen beside the CCA to learn them)" : "");
+    LOGI("bus master: housekeeping on: %zu learned 0x41s%s", learned_.size(),
+         learned_.empty() ? " (none heard: using the built-in content)" : "");
   }
   // Asked each minute, or each second while none have been heard yet.
   if (housekeeping_ && targets_ && now_ms - targets_at_ms_ >= (targets_empty_ ? 1000 : TARGETS_EVERY_MS)) {

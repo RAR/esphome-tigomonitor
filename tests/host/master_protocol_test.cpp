@@ -498,28 +498,40 @@ static void test_housekeeping() {
     for (const Request &q : drain(shrink, slot * Housekeeping::SLOT_MS + 15000, seq))
       if (q.cmd == CMD_TUNNEL) CHECK(tuid_of(q) == 0x0001 || tuid_of(q) == 0x05);
 
-  // No optimizers heard yet: only stream 01's 0x0001. Nothing learned for a
-  // stream: that stream sends nothing.
+  // No optimizers heard yet: only stream 01's 0x0001.
   Learned41 only01;
   only01.on_frame(cca41(1, 0x0001, 0x01));
   Housekeeping empty(only01.entries(), 0, false, 1);
   r = drain(empty, 15000, seq);
   CHECK(r.size() == 2 && r[0].cmd == CMD_SESSION && tuid_of(r[1]) == 0x0001);
+  // A stream with nothing learned sends the built-in content; a learned one
+  // sends what was learned.
   empty.set_targets(roster);
   r = drain(empty, Housekeeping::SLOT_MS + 15000, seq);
-  CHECK(r.size() == 1 && stream_of(r[0]) == 0x01 && tuid_of(r[0]) != 0x0001);
+  CHECK(r.size() == 3);
+  const Bytes learned01 = args41(0, 0x01);
+  for (const Request &q : r) {
+    Bytes content(q.payload.begin() + 7, q.payload.end());
+    Bytes want = stream_of(q) == 0x01 ? Bytes(learned01.begin() + 2, learned01.end())
+                                      : Housekeeping::default_content(stream_of(q));
+    CHECK(content == want);
+  }
 
   // After a re-address, the CCA's first bring-up sends 00 then 01.
   Housekeeping fresh(l.entries(), 0, /*session_reset=*/true);
   r = drain(fresh, 0, seq);
   CHECK(r.size() == 2 && r[0].payload == Bytes{0x00} && r[1].payload == Bytes{0x01});
-  // Nothing learned: only 0x0B00, never a 0x41 of our own making.
+  // Nothing learned: the built-in content on all three streams.
   Housekeeping bare({}, 0, false);
   bare.set_targets(roster);
   r = drain(bare, 0, seq);
   CHECK(r.size() == 1 && r[0].cmd == CMD_SESSION);
-  CHECK(drain(bare, 30 * 60000, seq).empty());
+  r = drain(bare, 15000, seq);
+  CHECK(r.size() == 3);
+  for (const Request &q : r)
+    CHECK(Bytes(q.payload.begin() + 7, q.payload.end()) == Housekeeping::default_content(stream_of(q)));
   // Every hour, 0x0B00 01 again.
+  drain(bare, Housekeeping::SESSION_EVERY_MS - 1, seq);
   r = drain(bare, Housekeeping::SESSION_EVERY_MS, seq);
   CHECK(r.size() == 1 && r[0].payload == Bytes{0x01});
 }

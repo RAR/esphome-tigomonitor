@@ -275,7 +275,7 @@ print(len(panels) > 0, all(h['args'][4:] == content[int(h['args'][10:12], 16)] a
   kill $tap; wait $tap 2>/dev/null || true
 done
 
-# --- run 13: housekeeping on with nothing learned sends no 0x41 ---
+# --- run 13: housekeeping on with nothing learned sends the built-in 0x41 content ---
 mkdir -p "$out/state13"
 python3 linux/tools/mock_tap.py "$out/tap13" --lease 600 --nodes 44 --stats "$out/tap13.json" &
 tap=$!
@@ -284,9 +284,10 @@ printf '{"bus_role": "master", "master_housekeeping": true, "serial_port": "%s",
   "$PWD/$out/tap13" > "$out/state13/settings.json"
 build/linux/tigomonitord --state-dir "$out/state13" --web-dir components/tigo_server/web 2> "$out/daemon13.log" &
 daemon=$!
-sleep 15
-expect "nothing learned: only 0x0B00 01" "$(stat "$out/tap13.json" "(d['session'], d['housekeeping'], d['polls'] > 0)")" "(['01'], [], True)"
-expect "says how to learn them" "$(grep -c 'none yet: listen beside the CCA' "$out/daemon13.log")" 1
+for _ in $(seq 60); do [ -f "$out/tap13.json" ] && [ "$(stat "$out/tap13.json" "len(d['housekeeping'])")" -ge 3 ] && break; sleep 0.5; done
+expect "nothing learned: 0x0B00 01, then the built-in content per stream" "$(stat "$out/tap13.json" "(d['session'], [h['args'][4:] for h in d['housekeeping'][:3]], d['polls'] > 0)")" \
+  "(['01'], ['0000000200aa0000000004050fe808a00a188ff605c7', '0000000100aa0000000004050fe808a00a188ff605c7', '0000000400aa0000000004050fe808a00a188ff605c7'], True)"
+expect "says it uses the built-in content" "$(grep -c 'none heard: using the built-in content' "$out/daemon13.log")" 1
 kill $daemon; wait $daemon 2>/dev/null || true
 kill $tap; wait $tap 2>/dev/null || true
 

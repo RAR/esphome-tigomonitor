@@ -397,9 +397,10 @@ class Learned41 {
 // hour after. session_reset: send 00 before the first 01, as the CCA does
 // after it reboots and re-addresses the TAP.
 //
-// Each stream's content is the CCA's, learned (Learned41); a stream with
-// none learned sends nothing. Targets are not copied: the CCA's own order
-// favours some optimizers for reasons unknown, so each stream instead walks
+// Each stream's content is the CCA's: learned (Learned41) if heard, else
+// default_content(), the block current CCA firmware sends. Targets are not
+// copied: the CCA's own order favours some optimizers for reasons unknown,
+// so each stream instead walks
 // the optimizers heard lately (set_targets) in a random order, a new one
 // every 10 minutes, each visited once a pass. Stream 01 goes to 0x0001 every
 // other slot, starting with the first, as the CCA's does after every reboot.
@@ -421,8 +422,20 @@ class Housekeeping {
           content_[i].assign(e.args.begin() + 2, e.args.end());
           break;
         }
+      if (content_[i].empty()) content_[i] = default_content(STREAMS[i]);
       next_ms_[i] = now_ms + OFFSET_MS[i];
     }
+  }
+
+  // A stream's content (the args after the Tuid) as current CCA firmware
+  // sends it: the same on every target, across CCA reboots, and on two
+  // sites, ours and the one in taptap's issue #20 capture
+  // (src/test_data/issue_20_initial.bin). taptap's protocol.md shows an older
+  // firmware's, without the stream byte and with two values different, so a
+  // learned block wins over this one.
+  static Bytes default_content(uint8_t stream) {
+    return {0x00, 0x00, 0x00, stream, 0x00, 0xaa, 0x00, 0x00, 0x00, 0x00, 0x04, 0x05,
+            0x0f, 0xe8, 0x08, 0xa0, 0x0a, 0x18, 0x8f, 0xf6, 0x05, 0xc7};
   }
 
   // The optimizers to choose from: their Tuids. 0, 0x0001 and anything with
