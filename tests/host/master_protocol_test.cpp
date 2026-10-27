@@ -10,6 +10,7 @@
 
 #include "tigo_master.h"
 
+#include <algorithm>
 #include <cstdio>
 #include <string>
 #include <vector>
@@ -439,40 +440,74 @@ static std::vector<Request> drain(Housekeeping &hk, uint32_t now_ms, uint8_t &se
   return out;
 }
 
+static uint16_t tuid_of(const Request &r) { return static_cast<uint16_t>(r.payload[5] << 8 | r.payload[6]); }
+static uint8_t stream_of(const Request &r) { return r.payload[10]; }
+
 static void test_housekeeping() {
   Learned41 l;
-  l.on_frame(cca41(1, 0x0027, 0x01));
-  l.on_frame(cca41(1, 0x0001, 0x01));  // 0x0001 goes first, as the CCA starts there
-  l.on_frame(cca41(1, 0x0006, 0x02));
-  l.on_frame(cca41(1, 0x0009, 0x04));
-  l.on_frame(cca41(1, 0x0003, 0x04));
+  l.on_frame(cca41(1, 0x0027, 0x01, 0x21));
+  l.on_frame(cca41(1, 0x0006, 0x02, 0x22));
+  l.on_frame(cca41(1, 0x0009, 0x04, 0x24));
+  std::vector<uint16_t> roster;
+  for (uint16_t n = 0x02; n <= 0x29; n++) roster.push_back(n);
   uint8_t seq = 0xFE;
-  Housekeeping hk(l.entries(), 1000, /*session_reset=*/false);
+  Housekeeping hk(l.entries(), 1000, /*session_reset=*/false, /*seed=*/7);
+  hk.set_targets(roster);
   // At the start: 0x0B00 01, then nothing until each stream's offset.
   std::vector<Request> r = drain(hk, 1000, seq);
   CHECK(r.size() == 1 && r[0].cmd == CMD_SESSION && r[0].payload == Bytes{0x01});
   r = drain(hk, 1000 + Housekeeping::OFFSET_MS[0], seq);
-  CHECK(r.size() == 1 && r[0].cmd == CMD_TUNNEL && r[0].payload == tunnel_request(SUB_HOUSEKEEPING, 0x01, args41(0x0006, 0x02)));
+  CHECK(r.size() == 1 && r[0].cmd == CMD_TUNNEL && stream_of(r[0]) == 0x02);
+  // The learned content, for a target from the roster.
+  uint16_t first02 = r.empty() ? 0 : tuid_of(r[0]);
+  CHECK(r.size() == 1 && r[0].payload == tunnel_request(SUB_HOUSEKEEPING, 0x01, args41(first02, 0x02, 0x22)));
+  CHECK(first02 >= 0x02 && first02 <= 0x29);
+  // Stream 01 starts at 0x0001, as the CCA's does.
   r = drain(hk, 1000 + 15000, seq);
-  CHECK(r.size() == 2);
-  CHECK(r.size() == 2 && r[0].payload == tunnel_request(SUB_HOUSEKEEPING, 0x02, args41(0x0001, 0x01)));
-  CHECK(r.size() == 2 && r[1].payload == tunnel_request(SUB_HOUSEKEEPING, 0x03, args41(0x0009, 0x04)));
+  CHECK(r.size() == 2 && r[0].payload == tunnel_request(SUB_HOUSEKEEPING, 0x02, args41(0x0001, 0x01, 0x21)));
+  CHECK(r.size() == 2 && stream_of(r[1]) == 0x04 && tuid_of(r[1]) >= 0x02 && tuid_of(r[1]) <= 0x29);
+  uint16_t first04 = r.size() == 2 ? tuid_of(r[1]) : 0;
   CHECK(drain(hk, 1000 + 59000, seq).empty());
   // A minute on, the same targets again.
   r = drain(hk, 1000 + 75000, seq);
-  CHECK(r.size() == 3 && r[1].payload == tunnel_request(SUB_HOUSEKEEPING, 0x05, args41(0x0001, 0x01)));
-  // Ten minutes on, every stream moves to its next target, wrapping.
-  r = drain(hk, 1000 + Housekeeping::SLOT_MS + 15000, seq);
-  CHECK(r.size() == 3);
-  CHECK(r.size() == 3 && r[0].payload.size() > 6 && r[0].payload[6] == 0x06);
-  CHECK(r.size() == 3 && r[1].payload.size() > 6 && r[1].payload[6] == 0x27);
-  CHECK(r.size() == 3 && r[2].payload.size() > 6 && r[2].payload[6] == 0x03);
-  r = drain(hk, 1000 + 2 * Housekeeping::SLOT_MS + 15000, seq);
-  CHECK(r.size() == 3 && r[1].payload[6] == 0x01 && r[2].payload[6] == 0x09);
-  // Every hour, 0x0B00 01 again.
-  r = drain(hk, 1000 + Housekeeping::SESSION_EVERY_MS, seq);
-  CHECK(!r.empty() && r[0].cmd == CMD_SESSION && r[0].payload == Bytes{0x01});
-  CHECK(hk.sent_41() > 0 && hk.sent_session() == 2);
+  CHECK(r.size() == 3 && tuid_of(r[0]) == first02 && tuid_of(r[1]) == 0x0001 && tuid_of(r[2]) == first04);
+  // Each 10-minute slot, a new target per stream; stream 01 is back at
+  // 0x0001 every other slot. Over 40 slots stream 04 visits all 40, once each.
+  std::vector<uint16_t> seen04 = {first04};
+  for (uint32_t slot = 1; slot < 40; slot++) {
+    r = drain(hk, 1000 + slot * Housekeeping::SLOT_MS + 15000, seq);
+    std::vector<Request> tunnels;
+    for (const Request &q : r)
+      if (q.cmd == CMD_TUNNEL) tunnels.push_back(q);
+    CHECK(tunnels.size() == 3);
+    if (tunnels.size() != 3) break;
+    CHECK(slot % 2 ? tuid_of(tunnels[1]) != 0x0001 : tuid_of(tunnels[1]) == 0x0001);
+    seen04.push_back(tuid_of(tunnels[2]));
+    for (const Request &q : tunnels) CHECK(classify_request(q.cmd, q.payload) == Allow::yes);
+  }
+  std::sort(seen04.begin(), seen04.end());
+  CHECK(seen04 == roster);
+  CHECK(hk.sent_41() > 0 && hk.sent_session() >= 2);
+
+  // A target that drops out of the roster is never picked again.
+  Housekeeping shrink(l.entries(), 0, false, 3);
+  shrink.set_targets(roster);
+  drain(shrink, 15000, seq);
+  shrink.set_targets({0x05});
+  for (uint32_t slot = 1; slot < 8; slot++)
+    for (const Request &q : drain(shrink, slot * Housekeeping::SLOT_MS + 15000, seq))
+      if (q.cmd == CMD_TUNNEL) CHECK(tuid_of(q) == 0x0001 || tuid_of(q) == 0x05);
+
+  // No optimizers heard yet: only stream 01's 0x0001. Nothing learned for a
+  // stream: that stream sends nothing.
+  Learned41 only01;
+  only01.on_frame(cca41(1, 0x0001, 0x01));
+  Housekeeping empty(only01.entries(), 0, false, 1);
+  r = drain(empty, 15000, seq);
+  CHECK(r.size() == 2 && r[0].cmd == CMD_SESSION && tuid_of(r[1]) == 0x0001);
+  empty.set_targets(roster);
+  r = drain(empty, Housekeeping::SLOT_MS + 15000, seq);
+  CHECK(r.size() == 1 && stream_of(r[0]) == 0x01 && tuid_of(r[0]) != 0x0001);
 
   // After a re-address, the CCA's first bring-up sends 00 then 01.
   Housekeeping fresh(l.entries(), 0, /*session_reset=*/true);
@@ -480,12 +515,13 @@ static void test_housekeeping() {
   CHECK(r.size() == 2 && r[0].payload == Bytes{0x00} && r[1].payload == Bytes{0x01});
   // Nothing learned: only 0x0B00, never a 0x41 of our own making.
   Housekeeping bare({}, 0, false);
+  bare.set_targets(roster);
   r = drain(bare, 0, seq);
   CHECK(r.size() == 1 && r[0].cmd == CMD_SESSION);
   CHECK(drain(bare, 30 * 60000, seq).empty());
-  // Everything it sends is allowed in steady state, apart from the 00.
-  for (const Request &q : drain(hk, 1000 + Housekeeping::SESSION_EVERY_MS + 120000, seq))
-    CHECK(classify_request(q.cmd, q.payload) == Allow::yes);
+  // Every hour, 0x0B00 01 again.
+  r = drain(bare, Housekeeping::SESSION_EVERY_MS, seq);
+  CHECK(r.size() == 1 && r[0].payload == Bytes{0x01});
 }
 
 static void test_next_request_housekeeping() {

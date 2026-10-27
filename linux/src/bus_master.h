@@ -56,10 +56,13 @@ class BusMaster {
   using Sink = std::function<void(const char *, size_t)>;
   // startup: if the TAP is found at the factory address, re-address it to
   // gateway_id before polling (bus_master re-addressing writes, gated).
-  // housekeeping: also send the learned 0x41s and the hourly 0x0B00
-  // (tigo_master.h's Housekeeping); with none learned, only the 0x0B00.
+  // housekeeping: also send the 0x41s, with the learned content, and the
+  // hourly 0x0B00 (tigo_master.h's Housekeeping); with none learned, only
+  // the 0x0B00. targets: the optimizers to send 0x41s to, asked each minute.
+  using Targets = std::function<std::vector<uint16_t>()>;
   BusMaster(Sink on_rx, Sink on_tx, uint16_t gateway_id, bool bench, bool startup, bool housekeeping = false,
-            std::vector<esphome::tigo_monitor::master::Learned41::Entry> learned = {});
+            std::vector<esphome::tigo_monitor::master::Learned41::Entry> learned = {}, Targets targets = nullptr);
+  static const uint32_t TARGETS_EVERY_MS = 60000;
   ~BusMaster();
 
   bool open(const std::string &device, int baud);
@@ -95,6 +98,9 @@ class BusMaster {
   // Made each time polling starts, so a TAP brought up again gets the
   // 0x0B00 straight away, as the CCA's bring-up sends it.
   std::unique_ptr<esphome::tigo_monitor::master::Housekeeping> housekeeping_;
+  Targets targets_;
+  uint32_t targets_at_ms_ = 0;
+  bool targets_empty_ = true;
   bool readdressed_ = false;     // the last bring-up moved the TAP off the factory address
   bool session_reset_sent_ = false;  // the 0x0B00 00, sent once per start, as after a CCA reboot
   uint32_t sent_41_before_ = 0, sent_session_before_ = 0;  // from earlier Housekeepings

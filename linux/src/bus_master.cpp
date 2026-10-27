@@ -42,9 +42,9 @@ const char *fault_name(Fault f) {
 static int64_t unix_now() { return static_cast<int64_t>(time(nullptr)); }
 
 BusMaster::BusMaster(Sink on_rx, Sink on_tx, uint16_t gateway_id, bool bench, bool startup, bool housekeeping,
-                     std::vector<master::Learned41::Entry> learned)
+                     std::vector<master::Learned41::Entry> learned, Targets targets)
     : on_rx_(std::move(on_rx)), on_tx_(std::move(on_tx)), gateway_(gateway_id), bench_(bench), startup_(startup),
-      housekeeping_on_(housekeeping), learned_(std::move(learned)), phase_(startup ? Phase::probing : Phase::running) {}
+      housekeeping_on_(housekeeping), learned_(std::move(learned)), targets_(std::move(targets)), phase_(startup ? Phase::probing : Phase::running) {}
 
 BusMaster::~BusMaster() { close(); }
 
@@ -205,9 +205,17 @@ void BusMaster::tick(uint32_t now_ms) {
   if (housekeeping_on_ && !housekeeping_) {
     bool reset = readdressed_ && !session_reset_sent_;
     session_reset_sent_ = session_reset_sent_ || reset;
-    housekeeping_ = std::make_unique<master::Housekeeping>(learned_, now_ms, reset);
+    housekeeping_ = std::make_unique<master::Housekeeping>(learned_, now_ms, reset, now_ms ^ unix_now());
+    targets_at_ms_ = now_ms - TARGETS_EVERY_MS;
     LOGI("bus master: housekeeping on: %zu learned 0x41 targets%s", learned_.size(),
          learned_.empty() ? " (none yet: listen beside the CCA to learn them)" : "");
+  }
+  // Asked each minute, or each second while none have been heard yet.
+  if (housekeeping_ && targets_ && now_ms - targets_at_ms_ >= (targets_empty_ ? 1000 : TARGETS_EVERY_MS)) {
+    std::vector<uint16_t> t = targets_();
+    targets_empty_ = t.empty();
+    housekeeping_->set_targets(t);
+    targets_at_ms_ = now_ms;
   }
   master::Request req = master::next_request(lease_, cursor_, seq_, now_ms, housekeeping_.get());
   // The 0x0B00 00 is a bring-up frame: allowed only straight after one.

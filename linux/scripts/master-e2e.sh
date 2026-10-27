@@ -243,8 +243,9 @@ expect "kept on this machine only" "$(python3 -c "import os; print(oct(os.stat('
 
 # --- run 12: housekeeping sent, from what was learned ---
 # Warm: the TAP already at its id, so 0x0B00 01 straight away, then each
-# stream's 0x41 a few seconds apart, 02 then 01 (at 0x0001) then 04, and
-# only the frames learned. Cold: after a re-address, 0x0B00 00 then 01.
+# stream's 0x41 a few seconds apart, 02 then 01 (at 0x0001) then 04: the
+# learned content, to optimizers the mock's polls reported. Cold: after a
+# re-address, 0x0B00 00 then 01.
 for mode in warm cold; do
   mkdir -p "$out/state12$mode"
   cp "$out/state11/cca-0x41.json" "$out/state12$mode/"
@@ -259,11 +260,15 @@ for mode in warm cold; do
   for _ in $(seq 60); do [ -f "$out/tap12$mode.json" ] && [ "$(stat "$out/tap12$mode.json" "len(d['housekeeping'])")" -ge 3 ] && break; sleep 0.5; done
   want_session="['01']"; [ $mode = cold ] && want_session="['00', '01']"
   expect "$mode: 0x0B00 at the start" "$(stat "$out/tap12$mode.json" "d['session']")" "$want_session"
-  expect "$mode: one 0x41 per stream, 02 01 04" "$(stat "$out/tap12$mode.json" "[(h['args'][10:12], h['args'][:4]) for h in d['housekeeping'][:3]]")" "[('02', '0027'), ('01', '0001'), ('04', '0009')]"
-  expect "$mode: only learned frames" "$(python3 -c "
-import json
-learned = {e['args'] for e in json.load(open('$out/state11/cca-0x41.json'))['entries']}
-print(all(h['args'] in learned for h in json.load(open('$out/tap12$mode.json'))['housekeeping']))")" True
+  expect "$mode: one 0x41 per stream, 02 01 04" "$(stat "$out/tap12$mode.json" "[h['args'][10:12] for h in d['housekeeping'][:3]]")" "['02', '01', '04']"
+  expect "$mode: stream 01 starts at 0x0001" "$(stat "$out/tap12$mode.json" "[h['args'][:4] for h in d['housekeeping'][:3]][1]")" 0001
+  expect "$mode: learned content, to panels heard" "$(python3 -c "
+import json, urllib.request as u
+content = {e['stream']: e['args'][4:] for e in json.load(open('$out/state11/cca-0x41.json'))['entries']}
+panels = {d['addr'].lower() for d in json.load(u.urlopen('http://127.0.0.1:18102/api/devices'))['devices']}
+hk = json.load(open('$out/tap12$mode.json'))['housekeeping']
+print(len(panels) > 0, all(h['args'][4:] == content[int(h['args'][10:12], 16)] and
+      (h['args'][:4] == '0001' or h['args'][:4] in panels) for h in hk))")" "True True"
   expect "$mode: still polling, nothing else sent" "$(stat "$out/tap12$mode.json" "(d['polls'] > 0, d['other'])")" "(True, [])"
   expect "$mode: /api/master counts" "$(api 18102 /api/master | python3 -c 'import json,sys; h=json.load(sys.stdin)["housekeeping"]; print(h["on"], h["learned_41"], h["sent_41"] >= 3, h["sent_session"])')" "True 4 True $([ $mode = cold ] && echo 2 || echo 1)"
   kill $daemon; wait $daemon 2>/dev/null || true

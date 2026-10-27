@@ -335,12 +335,12 @@ struct Request {
 // capture of the reference rig's bus:
 //   - tunnel sub 0x41, the args a target Tuid then 00 00 00 <stream> 00 and 17
 //     more bytes. Three streams (01, 02, 04), each sent once a minute, each
-//     moving to its next target every 10 minutes. The 17 bytes never changed
-//     in 24 h, across CCA reboots. What it does isn't known, so the bytes are
-//     copied, not composed: a master sends only frames it heard the CCA send.
+//     moving to its next target every 10 minutes; between them they reached
+//     every optimizer. The 17 bytes never changed in 24 h, across CCA
+//     reboots. What they mean isn't known, so they are copied, not composed.
 //   - 0x0B00 with 01, every hour; after the CCA reboots, 00 then 01 once.
 // The content is the site's own, learned while listening (Learned41); none
-// of it is built in.
+// of it is built in. Only the target is chosen here (Housekeeping).
 inline bool is_housekeeping_args(const Bytes &args) {
   return args.size() == 24 && !args[2] && !args[3] && !args[4] && (args[5] == 0x01 || args[5] == 0x02 || args[5] == 0x04) &&
          !args[6];
@@ -393,9 +393,16 @@ class Learned41 {
   std::vector<Entry> entries_;
 };
 
-// Sends the learned 0x41s on the CCA's timing, and 0x0B00 01 at the start
-// and every hour after. session_reset: send 00 before the first 01, as the
-// CCA does after it reboots and re-addresses the TAP.
+// Sends the 0x41s on the CCA's timing, and 0x0B00 01 at the start and every
+// hour after. session_reset: send 00 before the first 01, as the CCA does
+// after it reboots and re-addresses the TAP.
+//
+// Each stream's content is the CCA's, learned (Learned41); a stream with
+// none learned sends nothing. Targets are not copied: the CCA's own order
+// favours some optimizers for reasons unknown, so each stream instead walks
+// the optimizers heard lately (set_targets) in a random order, a new one
+// every 10 minutes, each visited once a pass. Stream 01 goes to 0x0001 every
+// other slot, starting with the first, as the CCA's does after every reboot.
 class Housekeeping {
  public:
   static const uint32_t STREAM_EVERY_MS = 60000;
@@ -404,18 +411,27 @@ class Housekeeping {
   // Streams 02, 01, 04 go out in that order, a few seconds apart, as the CCA's do.
   static constexpr uint8_t STREAMS[3] = {0x02, 0x01, 0x04};
   static constexpr uint32_t OFFSET_MS[3] = {1000, 6000, 11000};
+  static const uint16_t TAP_TUID = 0x0001;
 
-  Housekeeping(const std::vector<Learned41::Entry> &learned, uint32_t now_ms, bool session_reset)
-      : start_ms_(now_ms), reset_pending_(session_reset), next_session_ms_(now_ms) {
+  Housekeeping(const std::vector<Learned41::Entry> &learned, uint32_t now_ms, bool session_reset, uint32_t seed = 1)
+      : start_ms_(now_ms), reset_pending_(session_reset), next_session_ms_(now_ms), rng_(seed ? seed : 1) {
     for (int i = 0; i < 3; i++) {
       for (const auto &e : learned)
-        if (e.stream == STREAMS[i]) targets_[i].push_back(e.args);
-      // The CCA's stream 01 starts at 0x0001 after every reboot.
-      if (STREAMS[i] == 0x01)
-        std::stable_partition(targets_[i].begin(), targets_[i].end(),
-                              [](const Bytes &a) { return a[0] == 0x00 && a[1] == 0x01; });
+        if (e.stream == STREAMS[i]) {
+          content_[i].assign(e.args.begin() + 2, e.args.end());
+          break;
+        }
       next_ms_[i] = now_ms + OFFSET_MS[i];
     }
+  }
+
+  // The optimizers to choose from: their Tuids. 0, 0x0001 and anything with
+  // the high bit (a roster entry not yet joined) are left out.
+  void set_targets(const std::vector<uint16_t> &tuids) {
+    targets_.clear();
+    for (uint16_t t : tuids)
+      if (t > TAP_TUID && !(t & 0x8000) && std::find(targets_.begin(), targets_.end(), t) == targets_.end())
+        targets_.push_back(t);
   }
 
   // The next request due, or one with cmd 0. A 0x41 takes the next seq.
@@ -431,9 +447,17 @@ class Housekeeping {
       return {CMD_SESSION, {0x01}};
     }
     for (int i = 0; i < 3; i++) {
-      if (targets_[i].empty() || static_cast<int32_t>(now_ms - next_ms_[i]) < 0) continue;
+      if (content_[i].empty() || static_cast<int32_t>(now_ms - next_ms_[i]) < 0) continue;
       next_ms_[i] = now_ms + STREAM_EVERY_MS;
-      const Bytes &args = targets_[i][((now_ms - start_ms_) / SLOT_MS) % targets_[i].size()];
+      uint32_t slot = (now_ms - start_ms_) / SLOT_MS;
+      if (!picked_[i] || slot != slot_[i] || !target_[i]) {
+        slot_[i] = slot;
+        picked_[i] = true;
+        target_[i] = STREAMS[i] == 0x01 && slot % 2 == 0 ? TAP_TUID : draw_(i);
+      }
+      if (!target_[i]) continue;  // no optimizers heard yet
+      Bytes args = {static_cast<uint8_t>(target_[i] >> 8), static_cast<uint8_t>(target_[i])};
+      args.insert(args.end(), content_[i].begin(), content_[i].end());
       seq = next_seq(seq);
       sent_41_++;
       return {CMD_TUNNEL, tunnel_request(SUB_HOUSEKEEPING, seq, args)};
@@ -444,10 +468,36 @@ class Housekeeping {
   uint32_t sent_session() const { return sent_session_; }
 
  private:
+  // The next target from this stream's shuffled pass, 0 if there are none.
+  uint16_t draw_(int i) {
+    for (int tries = 0; tries < 2; tries++) {
+      while (!bag_[i].empty()) {
+        uint16_t t = bag_[i].back();
+        bag_[i].pop_back();
+        if (std::find(targets_.begin(), targets_.end(), t) != targets_.end()) return t;
+      }
+      bag_[i] = targets_;
+      for (size_t k = bag_[i].size(); k > 1; k--) std::swap(bag_[i][k - 1], bag_[i][next_random_() % k]);
+    }
+    return 0;
+  }
+  uint32_t next_random_() {  // xorshift32: the same sequence on every build
+    rng_ ^= rng_ << 13;
+    rng_ ^= rng_ >> 17;
+    rng_ ^= rng_ << 5;
+    return rng_;
+  }
+
   uint32_t start_ms_;
   bool reset_pending_;
   uint32_t next_session_ms_;
-  std::vector<Bytes> targets_[3];
+  uint32_t rng_;
+  std::vector<uint16_t> targets_;
+  Bytes content_[3];
+  std::vector<uint16_t> bag_[3];
+  uint16_t target_[3] = {0, 0, 0};
+  uint32_t slot_[3] = {0, 0, 0};
+  bool picked_[3] = {false, false, false};
   uint32_t next_ms_[3] = {0, 0, 0};
   uint32_t sent_41_ = 0;
   uint32_t sent_session_ = 0;

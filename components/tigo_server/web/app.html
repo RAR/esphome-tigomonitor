@@ -1043,7 +1043,7 @@
           <div class="cfg-ctrl"><label class="cfg-switch"><input type="checkbox" id="pi-startup"> <span>off</span></label></div>
         </div>
         <div class="cfg-row" id="pi-housekeeping-row" style="display:none">
-          <div class="cfg-text"><strong>Send the CCA's housekeeping</strong><span class="cfg-default" id="pi-housekeeping-hint">Repeat the 0x41 frames the CCA sent while this listened beside it, and its hourly 0x0B00 (experimental)</span></div>
+          <div class="cfg-text"><strong>Send the CCA's housekeeping</strong><span class="cfg-default" id="pi-housekeeping-hint">Send the CCA's 0x41, learned while this listened beside it, to each optimizer in turn, and its hourly 0x0B00 (experimental)</span></div>
           <div class="cfg-ctrl"><label class="cfg-switch"><input type="checkbox" id="pi-housekeeping"> <span>off</span></label></div>
         </div>
         <div class="cfg-row" id="pi-bridge-row" style="display:none">
@@ -3460,7 +3460,7 @@
       const h = (await r.json()).housekeeping || {};
       const n = h.learned_41 || 0;
       document.getElementById('pi-housekeeping-hint').textContent =
-        'Repeat the 0x41 frames the CCA sent while this listened beside it, and its hourly 0x0B00 (experimental). ' +
+        'Send the CCA's 0x41, learned while this listened beside it, to each optimizer in turn, and its hourly 0x0B00 (experimental). ' +
         (n ? `${n} learned.` : 'None learned yet: listen beside the CCA for an hour or more first.');
     } catch (e) { /* the default text stays */ }
   }

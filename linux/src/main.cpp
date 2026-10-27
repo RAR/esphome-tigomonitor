@@ -164,7 +164,16 @@ int main(int argc, char **argv) {
     if (replay.empty() && settings.bus_role == "master") {
       auto m = std::make_unique<BusMaster>(on_data, on_sent, static_cast<uint16_t>(settings.gateway_id),
                                            settings.master_bench, settings.master_startup,
-                                           settings.master_housekeeping, housekeeping.entries());
+                                           settings.master_housekeeping, housekeeping.entries(), [&monitor] {
+                                             // The optimizers heard in the last day, so one
+                                             // removed from the roof drops out by itself.
+                                             std::vector<uint16_t> tuids;
+                                             int64_t since = (static_cast<int64_t>(time(nullptr)) - 86400) * 1000;
+                                             for (const Panel &p : monitor.panels())
+                                               if (p.updated_unix_ms >= since)
+                                                 tuids.push_back(static_cast<uint16_t>(strtoul(p.addr.c_str(), nullptr, 16)));
+                                             return tuids;
+                                           });
       if (dev.empty()) LOGW("bus master: no serial port chosen yet; pick the RS485 adapter under Tools");
       else m->open(dev, baud);
       std::lock_guard<std::mutex> lock(master_mu);
