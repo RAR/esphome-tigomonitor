@@ -1,10 +1,12 @@
 #pragma once
 
 // The daemon as the TAP's bus master, in the CCA's place. It sends what the
-// CCA sends in steady state (tigo_master.h): 0x0148 telemetry polls, the run
-// lease's check and renewal, and, with housekeeping on, the 0x41s learned
-// while listening and the hourly 0x0B00. Every byte it reads goes to the Monitor, so
-// panels, history and MQTT work as they do when listening.
+// CCA sends (tigo_master.h): 0x0148 telemetry polls, the run lease's check
+// and renewal; with housekeeping on, the 0x41s, the hourly 0x0B00 and 0x22s
+// and the node table walks; with queries on, the 0x06 dialogue with
+// optimizers; and after re-addressing a TAP, the CCA's bring-up. Every byte
+// it reads goes to the Monitor, so panels, history and MQTT work as they do
+// when listening.
 //
 // One request and its reply per tick(). It has no thread or timer of its own:
 // only the main loop's tick() sends anything, so a daemon that hangs stops

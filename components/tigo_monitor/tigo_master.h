@@ -10,7 +10,11 @@
 //   - 0x0148 telemetry polls, answered by 0x0149 power frames, and
 //   - a tunnel, 0x0B0F with replies on 0x0B10, whose payload is
 //     00 00 00 <sub> <seq> <args>; the reply is 00 0d|0e 00 <sub+1> <seq> <data>.
-//     Sub 0x2E reads the TAP's run lease, sub 0x2D renews it.
+//     Sub 0x2E reads the TAP's run lease, sub 0x2D renews it; 0x41, 0x22 and
+//     0x26 are housekeeping (Housekeeping), 0x06 the text queries to
+//     optimizers (Queries), 0x0D part of the bring-up.
+//   - 0x0B00, the hourly session frame; VERSION and 0x0E02 at bring-up; and
+//     the re-addressing at the factory address (Discovery).
 //
 // Header-only and free of ESPHome, like tigo_protocol.h, so both builds can
 // use it and tests/host/master_protocol_test.cpp covers it.
@@ -832,15 +836,20 @@ inline Request next_request(LeaseKeeper &lease, const PollCursor &cursor, uint8_
 // the roof), not the id the CCA gave it. The CCA re-addresses it every boot:
 // a SET_485_ID broadcast, GET_MAC to read its MAC, SET_ID_BY_MAC to assign the
 // running id, then a read at that id to confirm. This drives the same four
-// steps. It sends re-addressing writes, so BusMaster only runs it after a read
-// has confirmed the TAP is actually at the factory address, and only in the
-// explicit startup mode.
+// steps, then the scan and the hop below. It sends re-addressing writes, so
+// BusMaster only runs it after a read has confirmed the TAP is actually at
+// the factory address, and only in the explicit startup mode.
 //
 // Then, as the CCA does, it scans: five more GET_MACs at the factory address,
 // each waiting out the TAP's reply backoff (the CCA's five take 3-4 s). A TAP
 // that answers is a second one. Only one TAP is supported, so its MAC is
 // noted for BusMaster to report, and nothing is ever sent to it by MAC.
 // scan_only skips straight to the scan, for a TAP already at its id.
+//
+// Last, the CCA's hop, on every bring-up in the capture (16 of 16): the TAP
+// to the id one up by SET_ID_BY_MAC, a read there, a RESET broadcast, ~5 s
+// of silence, and a read at the configured id, where the RESET puts it back.
+// Why the CCA does this isn't known. Not back after five reads: failed.
 static const uint16_t CMD_SET_485_ID = 0x0014;
 static const uint16_t CMD_GET_MAC = 0x0038;        // with backoff
 static const uint16_t CMD_GET_MAC_NOW = 0x003A;    // no backoff; also the "where are you" read
