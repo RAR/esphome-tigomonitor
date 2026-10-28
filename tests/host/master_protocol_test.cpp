@@ -360,6 +360,22 @@ static void to_reset(Discovery &d) {
 }
 
 static void test_discovery_hop() {
+  // The RESET goes once: no ack (the TAP reset before answering) still
+  // moves on to the quiet, never a second RESET.
+  Discovery once(0x1235, 0x1201);
+  once.on_reply(Frame{0x8000, 0x0015, {}});
+  once.on_reply(Frame{0x9235, 0x0039, hex("04c05b3000a1b2c31235")});
+  once.on_reply(Frame{0x9235, 0x003D, {}});
+  once.on_reply(Frame{0x9201, 0x003B, hex("04c05b3000a1b2c31201")});
+  for (int i = 0; i < Discovery::SCAN_TRIES; i++) once.next();
+  once.next();
+  once.on_reply(Frame{0x9201, 0x003D, {}});
+  once.next();
+  once.on_reply(Frame{0x9202, 0x003B, hex("04c05b3000a1b2c31202")});
+  CHECK(once.next().cmd == 0x0010);
+  DiscoveryRequest q = once.next();
+  CHECK(!q.send && q.idle_ms == Discovery::RESET_QUIET_MS);
+
   // Not back at the configured id after a few tries: failed.
   Discovery lost(0x1235, 0x1201);
   to_reset(lost);
@@ -624,18 +640,20 @@ static void test_bring_up_plan() {
   uint8_t seq = 0;
   std::string got = shape(run(hk, 0, seq));
   const char *want =
-      "000a: 0e02:* 0b00:00* 0d:0000* 0b00:01 0d:0001* 22:0000 22:0001 "
+      "000a: 0e02:* 0b00:00* 0d:0000* 0b00:01 0d:0001* 22:0000 "
       "26:0000 26:000e 26:001a 26:0026 26:002a 26:0000 26:000e 26:001a 26:0026 26:002a ";
   CHECK(got == want);
   if (got != want) std::printf("    got  %s\n    want %s\n", got.c_str(), want);
+  // The second 0x22 a second after the first, as the CCA's (13:47:48, :49).
+  CHECK(shape(run(hk, Housekeeping::BROADCAST_GAP_MS, seq)) == "22:0001 ");
   CHECK(hk.sent_walk_pages() == 10 && hk.sent_broadcast() == 2 && hk.sent_session() == 2);
   // A watchdog bring-up: no 00.
   plan.session_reset = false;
   Housekeeping wd({}, 0, plan, 1);
-  CHECK(shape(run(wd, 0, seq)).rfind("000a: 0e02:* 0d:0000* 0b00:01 0d:0001* 22:0000 22:0001 26:0000", 0) == 0);
+  CHECK(shape(run(wd, 0, seq)).rfind("000a: 0e02:* 0d:0000* 0b00:01 0d:0001* 22:0000 26:0000", 0) == 0);
   // Without a re-address: no bring-up reads.
   Housekeeping warm({}, 0, HousekeepingPlan{}, 1);
-  CHECK(shape(run(warm, 0, seq)).rfind("0b00:01 22:0000 22:0001 26:0000", 0) == 0);
+  CHECK(shape(run(warm, 0, seq)).rfind("0b00:01 22:0000 26:0000", 0) == 0);
 
   // The hourly tick: 0x0B00 01, then the 0x22 pair a second apart.
   for (uint32_t t = 1000; t < Housekeeping::SESSION_EVERY_MS; t += 1000) run(hk, t, seq);
@@ -653,7 +671,8 @@ static void test_walks() {
   uint8_t seq = 0;
   run(hk, 0, seq);
   CHECK(hk.sent_walk_pages() == 10);
-  CHECK(run(hk, Housekeeping::WALK_EVERY_MS - 1, seq).empty() || hk.sent_walk_pages() == 10);
+  run(hk, Housekeeping::WALK_EVERY_MS - 1, seq);
+  CHECK(hk.sent_walk_pages() == 10);
   run(hk, Housekeeping::WALK_EVERY_MS, seq);
   CHECK(hk.sent_walk_pages() == 20);
 
@@ -781,6 +800,16 @@ static void test_queries() {
   s.on_poll_reply(poll_reply_with({power_from(0x05)}), dawn);
   r = ask(s, dawn, dawn + 10000, seq);
   CHECK(r.size() == 1 && query_text(r[0]) == "^00Tests\r");
+  // A reply with the long header (status bits 0-4 clear: seven more bytes)
+  // is read past it, to the packets.
+  Queries l(0, false);
+  Bytes longer = hex("41e0");
+  longer.insert(longer.end(), 10, 0x00);
+  Bytes pk = power_from(0x09);
+  longer.insert(longer.end(), pk.begin(), pk.end());
+  l.on_poll_reply(longer, 0);
+  r = ask(l, 0, 100, seq);
+  CHECK(r.size() == 1 && r[0].payload[6] == 0x09);
   // Retries stop growing at 30 minutes.
   CHECK(Queries::retry_after_ms(1) == 3 * 60000 && Queries::retry_after_ms(2) == 5 * 60000 &&
         Queries::retry_after_ms(100) == 30 * 60000);

@@ -467,9 +467,9 @@ class Housekeeping {
     if (plan.bring_up_reads) opening_.push_back({CMD_TUNNEL, 0x0D, {0x00, 0x00}, true, 0});
     if (plan.session) opening_.push_back({CMD_SESSION, 0, {0x01}, false, 0});
     if (plan.bring_up_reads) opening_.push_back({CMD_TUNNEL, 0x0D, {0x00, 0x01}, true, 0});
-    if (plan.broadcast) {
+    if (plan.broadcast) {  // the second a second later, the walk starting between
       opening_.push_back({CMD_TUNNEL, 0x22, {0x00, 0x00}, false, 0});
-      opening_.push_back({CMD_TUNNEL, 0x22, {0x00, 0x01}, false, 0});
+      later_.push_back({CMD_TUNNEL, 0x22, {0x00, 0x01}, false, now_ms + BROADCAST_GAP_MS});
     }
     if (plan.walks) walks_left_ = WALKS;
   }
@@ -922,9 +922,10 @@ class Discovery {
       case hop_verify:
         r.dest = static_cast<uint16_t>(target_ + 1); r.cmd = CMD_GET_MAC_NOW;
         break;
-      case reset:
+      case reset:  // once, ack or not: the TAP may reset before it answers
         r.dest = 0x0000; r.cmd = CMD_RESET;
         r.payload = {0x37, 0x24, 0x92, 0x66};
+        state_ = quiet;
         break;
       case quiet:
         state_ = back;
@@ -976,9 +977,6 @@ class Discovery {
       case hop_verify:
         if (f.cmd == CMD_GET_MAC_NOW + 1 && f.payload.size() >= 10)
           state_ = (f.payload[8] << 8 | f.payload[9]) == target_ + 1 ? reset : st_failed;
-        break;
-      case reset:
-        if (f.cmd == CMD_RESET + 1) state_ = quiet;
         break;
       case back:
         if (f.cmd == CMD_GET_MAC_NOW + 1 && f.payload.size() >= 10 && (f.payload[8] << 8 | f.payload[9]) == target_)

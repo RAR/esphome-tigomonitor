@@ -1163,7 +1163,9 @@ void HttpServer::routes_() {
     if (err.empty() && s.bus_role != "listen" && s.bus_role != "master") err = "Bus role is listen or master.";
     if (err.empty() && s.bus_role == "master" && s.serial_port.rfind(TCP_PREFIX, 0) == 0)
       err = "The bus master needs a serial port on the bus, not a network bridge.";
-    if (err.empty() && (s.gateway_id < 1 || s.gateway_id > 0x7FFF)) err = "Gateway id must be 1-7FFF.";
+    if (err.empty() && !gateway_id_ok(s.gateway_id))
+      err = "Gateway id must be 1-7FFE, and not 1234 or 1235 (the bring-up moves the TAP to the id one up; 1235 is the factory address).";
+    s.master_optimizer_writes = s.master_optimizer_writes && s.master_queries;
     if (err.empty() && (s.mqtt.port < 1 || s.mqtt.port > 65535)) err = "MQTT port must be 1-65535.";
     if (err.empty() && (s.web_port < 0 || s.web_port > 65535)) err = "Web port must be 1-65535, or empty for the default.";
     if (err.empty() && (s.web_username.empty() || s.web_username.find(':') != std::string::npos))

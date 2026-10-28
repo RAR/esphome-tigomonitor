@@ -19,6 +19,7 @@ as an adapter that hears itself does. --drop-every N leaves every Nth poll
 unanswered. --start-cursor gives the TAP a cursor of its own: a poll with any
 other cursor gets no data and a reply whose long header states the TAP's
 cursor (a guess at what a real TAP does; the capture never shows it).
+--reset-quiet S is how long a RESET leaves it deaf (4.5 s; the roof's was ~5).
 --second-tap puts another TAP behind the same port, left at the factory
 address: it answers GET_MAC there and nothing else.
 It also plays the rest of the CCA's dialogue, as the roof TAP answered it:
@@ -87,6 +88,7 @@ def main():
     ap.add_argument('--bare', action='store_true')
     ap.add_argument('--factory', action='store_true')  # boot at the factory address 0x1235
     ap.add_argument('--second-tap', action='store_true')
+    ap.add_argument('--reset-quiet', type=float, default=4.5)  # seconds deaf after a RESET
     ap.add_argument('--stats', default=None)
     a = ap.parse_args()
 
@@ -172,7 +174,7 @@ def main():
             if cmd == 0x0010 and dest == 0x0000:  # RESET broadcast
                 os.write(master_fd, encode(0x8000, 0x0011, b''))
                 stats['resets'] += 1
-                quiet_until = time.monotonic() + 4.5
+                quiet_until = time.monotonic() + a.reset_quiet
                 addr = home if home is not None else FACTORY
                 stats['addressed_to'] = f'{addr:04X}'
                 continue

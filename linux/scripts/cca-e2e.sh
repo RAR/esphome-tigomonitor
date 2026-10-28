@@ -149,6 +149,13 @@ post('/api/settings', {'mqtt': {'host': ''}})
 expect('web username checked', post('/api/settings', {'web_username': 'a:b'})[0], 400)
 expect('bus role checked', post('/api/settings', {'bus_role': 'both'})[0], 400)
 expect('gateway id checked', post('/api/settings', {'gateway_id': 0x8001})[0], 400)
+# The bring-up's hop moves the TAP to the id one up: not onto the factory
+# address, nor past the top.
+for gid in (0x1234, 0x1235, 0x7FFF):
+    expect(f'gateway id {gid:04X} refused', post('/api/settings', {'gateway_id': gid})[0], 400)
+post('/api/settings', {'master_queries': False, 'master_optimizer_writes': True})
+time.sleep(1.5)
+expect('optimizer writes need queries', get('/api/settings')[1]['master_optimizer_writes'], False)
 expect('no master on a bridge', post('/api/settings', {'bus_role': 'master', 'serial_port': 'tcp://example.com:6638'})[0], 400)
 post('/api/settings', {'web_password': 'pw'})
 time.sleep(1.5)

@@ -377,11 +377,18 @@ void BusMaster::run_startup(uint32_t now_ms) {
   if (d.done) {
     LOGI("bus master: the TAP is now at %04X; polling", gateway_);
     phase_ = Phase::running;
+    if (status().fault == Fault::discovery_failed) set_fault(Fault::none, "");
     report_extra_taps_(discovery_->extra_taps());
     return;
   }
   if (d.failed) {
+    // Say so, wait, and look again: a TAP slow back from the RESET is found
+    // at its id then; one still at the factory address is re-addressed.
     set_fault(Fault::discovery_failed, "re-addressing the TAP failed; it did not answer at the id it was given");
+    discovery_.reset();
+    phase_ = Phase::probing;
+    holding_ = true;
+    hold_until_ms_ = now_ms + RETRY_AFTER_FAIL_MS;
     return;
   }
   if (d.idle_ms) {

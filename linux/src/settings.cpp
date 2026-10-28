@@ -66,7 +66,8 @@ Settings load_settings(const std::string &path) {
   if (s.web_port < 0 || s.web_port > 65535) s.web_port = 0;
   if (s.web_username.empty()) s.web_username = "admin";
   if (s.bus_role != "master") s.bus_role = "listen";
-  if (s.gateway_id < 1 || s.gateway_id > 0x7FFF) s.gateway_id = 0x1201;
+  if (!gateway_id_ok(s.gateway_id)) s.gateway_id = 0x1201;
+  s.master_optimizer_writes = s.master_optimizer_writes && s.master_queries;
   if (s.history_interval_min < 1 || s.history_interval_min > 60) s.history_interval_min = 1;
   if (s.history_days < 1) s.history_days = 730;
   if (s.night_mode_timeout_min < 1 || s.night_mode_timeout_min > 1440) s.night_mode_timeout_min = 60;

@@ -89,6 +89,7 @@ class BusMaster {
   static const uint32_t LOG_FIRST_REPLIES = 20;  // poll reply headers logged at INFO, for the bench
   static const uint16_t FACTORY_ID = 0x1235;     // the universal factory RS485 address
   static const uint32_t NO_REPLY_FAULT_AFTER = 10;
+  static const uint32_t RETRY_AFTER_FAIL_MS = 30000;  // a failed bring-up looks again after this
 
  private:
   // Sends one frame and reads until the gateway's reply ends or the timeout.

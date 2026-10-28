@@ -314,7 +314,8 @@ expect "the hop: to 1202, read there, RESET" "$(log "[x['f'][:9] for x in d['log
 expect "the hop's SET_ID_BY_MAC names 1202" "$(log "[x['f'] for x in d['log'] if x['f'].startswith('1201/003C')][0][-4:]")" 1202
 expect "quiet for 4.5 s after the RESET, nothing sent into it" "$(log "(lambda i: (d['log'][i + 1]['t'] - d['log'][i]['t'] >= 4.4, d['quiet_broken']))([x['f'] for x in d['log']].index('0000/0010'))")" "(True, 0)"
 expect "back at 1201, then the CCA's bring-up order" "$(log "(lambda i: [x['f'] for x in d['log'][i + 1:i + 11]])([x['f'] for x in d['log']].index('0000/0010'))")" \
-  "['1201/003A', '1201/000A', '1201/0E02', '1201/0B00 00', '1201/0B0F 0d 0000', '1201/0B00 01', '1201/0B0F 0d 0001', '1201/0B0F 22 0000', '1201/0B0F 22 0001', '1201/0B0F 26 0000']"
+  "['1201/003A', '1201/000A', '1201/0E02', '1201/0B00 00', '1201/0B0F 0d 0000', '1201/0B00 01', '1201/0B0F 0d 0001', '1201/0B0F 22 0000', '1201/0B0F 26 0000', '1201/0B0F 26 0008']"
+expect "the second 0x22 a second after the first" "$(log "(lambda b: (b[1] - b[0] >= 0.9))([x['t'] for x in d['log'] if x['f'].startswith('1201/0B0F 22')][:2])")" True
 expect "two walks, each page from the last reply's end" "$(log "d['walk'][:4]")" "['0000', '0008', '0000', '0008']"
 expect "all five reads to every panel" "$(log "sorted({(q['node'], q['text']) for q in d['queries'] if q['text'].startswith('^00') and '_' not in q['text']}) == sorted((f'{n:04X}', t) for n in range(2, 8) for t in ('^00Version', '^00Tests', '^00Info', '^00Smrt', '^00Mppt'))")" True
 expect "the writes: w255 to the panel whose Info asked, Smrt_ S to the one in mode N" "$(log "sorted((q['node'], q['text']) for q in d['queries'] if q['text'].startswith(('#', '^00Smrt_')))")" \
@@ -341,6 +342,24 @@ sleep 6
 expect "reads go out and are answered" "$(stat "$out/tap15.json" "(len(d['queries']) >= 20, d['answered'] >= 20)")" "(True, True)"
 expect "no writes without the setting" "$(stat "$out/tap15.json" "[q for q in d['queries'] if q['text'].startswith(('#', '^00Smrt_'))]")" "[]"
 expect "warm, housekeeping off: no bring-up reads, 0x22s or walks" "$(stat "$out/tap15.json" "([x['f'] for x in d['log'] if x['f'][5:9] in ('000A', '0E02', '0010')], d['broadcast'], d['walk'], d['session'])")" "([], [], [], [])"
+kill $daemon; wait $daemon 2>/dev/null || true
+kill $tap; wait $tap 2>/dev/null || true
+
+# --- run 16: a TAP slow back from the bring-up's RESET ---
+# Deaf for 12 s, longer than the reads after the quiet: the bring-up fails,
+# and after a pause the master looks again, finds it at 1201, and polls.
+mkdir -p "$out/state16"
+python3 linux/tools/mock_tap.py "$out/tap16" --factory --reset-quiet 12 --lease 600 --nodes 44 --stats "$out/tap16.json" &
+tap=$!
+sleep 0.5
+printf '{"bus_role": "master", "master_startup": true, "serial_port": "%s", "gateway_id": 4609, "web_port": 18106}\n' \
+  "$PWD/$out/tap16" > "$out/state16/settings.json"
+build/linux/tigomonitord --state-dir "$out/state16" --web-dir components/tigo_server/web 2> "$out/daemon16.log" &
+daemon=$!
+for _ in $(seq 160); do [ -f "$out/tap16.json" ] && [ "$(stat "$out/tap16.json" "d['polls']")" -ge 5 ] && break; sleep 0.5; done
+expect "one RESET, said it failed, then found it at 1201 and polled" "$(stat "$out/tap16.json" "(d['resets'], d['polls'] >= 5, d['addressed_to'])")" "(1, True, '1201')"
+expect "logged the failure" "$(grep -c 'did not answer at the id it was given' "$out/daemon16.log")" 1
+expect "fault cleared once polling" "$(api 18106 /api/master | python3 -c 'import json,sys; m=json.load(sys.stdin); print(m["fault"], m["phase"])')" "none running"
 kill $daemon; wait $daemon 2>/dev/null || true
 kill $tap; wait $tap 2>/dev/null || true
 

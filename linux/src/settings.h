@@ -31,7 +31,7 @@ struct Settings {
   bool master_housekeeping = false;
   bool master_queries = false;           // the CCA's 0x06 reads to optimizers
   bool master_optimizer_writes = false;  // and the two writes its answers call for
-  int gateway_id = 0x1201;    // the TAP's RS485 id, as the CCA addresses it
+  int gateway_id = 0x1201;    // the TAP's RS485 id, as the CCA addresses it (gateway_id_ok)
   float power_calibration = 1.0f;
   // Plenty of RAM here, so the node table is sized for any real site rather
   // than to the panel count, as number_of_devices has to be on the ESP32.
@@ -57,6 +57,10 @@ struct Settings {
   std::string device_id;  // empty: the hostname
   MqttSettings mqtt;
 };
+
+// 1-7FFE, and not 1234 or 1235: the bring-up's hop moves the TAP to the id
+// one up, which must be neither the factory address nor past the top.
+inline bool gateway_id_ok(int id) { return id >= 1 && id <= 0x7FFE && id != 0x1234 && id != 0x1235; }
 
 Settings load_settings(const std::string &path);
 bool save_settings(const std::string &path, const Settings &s);

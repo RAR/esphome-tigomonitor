@@ -3428,6 +3428,7 @@
       document.getElementById('pi-queries').nextElementSibling.textContent = s.master_queries ? 'on' : 'off';
       document.getElementById('pi-writes').checked = !!s.master_optimizer_writes;
       document.getElementById('pi-writes').nextElementSibling.textContent = s.master_optimizer_writes ? 'on' : 'off';
+      document.getElementById('pi-writes').disabled = !s.master_queries;
       for (const row of PI_MASTER_ROWS) document.getElementById(row).style.display = piBusRole === 'master' ? '' : 'none';
       piFillHousekeepingHint();
       piWebLogin = { user: s.web_username || 'admin', set: !!s.web_password_set };
@@ -3457,6 +3458,12 @@
         !confirm('Master mode transmits on the bus. Unplug the CCA first: two masters on one bus collide.\n\nContinue?'))
       e.target.value = piBusRole;
     for (const row of PI_MASTER_ROWS) document.getElementById(row).style.display = e.target.value === 'master' ? '' : 'none';
+  });
+  // The writes only follow the queries' answers.
+  document.getElementById('pi-queries').addEventListener('change', (e) => {
+    const w = document.getElementById('pi-writes');
+    w.disabled = !e.target.checked;
+    if (!e.target.checked) { w.checked = false; w.nextElementSibling.textContent = 'off'; }
   });
   // Changing what optimizers store is a step further than reading them.
   document.getElementById('pi-writes').addEventListener('change', (e) => {
