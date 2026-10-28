@@ -405,6 +405,7 @@ sleep 25
 expect "state saved with a slow fsync" "$(python3 -c "import json; print(len(json.load(open('$out/state18/state.json'))['nodes']) > 0)")" True
 expect "no pause over 300 ms while it saved" "$(api 18108 /api/master | python3 -c 'import json,sys; g=json.load(sys.stdin)["gap_ms"]; print(g["max"] < 300, g["max"])' | cut -d' ' -f1)" True
 api 18108 /api/master | python3 -c 'import json,sys; print("  (longest pause:", json.load(sys.stdin)["gap_ms"]["max"], "ms)")'
+expect "no CCA discovery while the Pi runs the bus" "$(api 18108 /api/cca/discovery/start '{}')" 409
 kill $daemon; wait $daemon 2>/dev/null || true
 kill $tap; wait $tap 2>/dev/null || true
 

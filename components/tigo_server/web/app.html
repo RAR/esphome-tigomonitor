@@ -1334,6 +1334,12 @@
         <div class="topbar-meta" id="cca-meta">Tigo CCA configuration mirror</div>
       </div>
 
+      <div class="tools-card" id="cca-master-banner" style="display:none;border-color:var(--accent)">
+        <div style="font-weight:600;margin-bottom:4px">The Pi is running the bus</div>
+        <div style="color:var(--text-dim);font-size:13px">The CCA is off the bus. Panel names, strings and
+          layout below are from its last sync, and keep working without it.</div>
+      </div>
+
       <div class="section-head">
         <div class="section-title">Status</div>
         <div class="section-sub" id="cca-conn-sub">—</div>
@@ -3950,14 +3956,65 @@
   }
 
   let ccaBusy = false;  // true during a manual refresh poll — pauses the interval
+  // Pi build only: true while the Pi runs the bus in the CCA's place. The
+  // CCA is off the bus then, so discovery is off and an unreachable CCA
+  // shows its last sync rather than an error.
+  let ccaMasterMode = false;
+  let ccaDiscoveryLocked = false;  // disabled here, so re-enabled here
+  let ccaLastGood = null;  // the last /api/cca answer that carried device info
+
+  async function ccaCheckMaster() {
+    let master = false;
+    if (PLATFORM === 'linux') {
+      const r = await apiFetch('/api/master').catch(() => null);
+      const m = r && r.ok ? await r.json().catch(() => null) : null;
+      master = !!m && m.role === 'master';
+    }
+    ccaMasterMode = master;
+    document.getElementById('cca-master-banner').style.display = master ? '' : 'none';
+    const btn = document.getElementById('cca-discovery-btn');
+    if (master) {
+      btn.disabled = true;
+      btn.title = 'Off while the Pi runs the bus';
+      ccaDiscoveryLocked = true;
+      document.getElementById('cca-discovery-status').textContent =
+        'Off while the Pi runs the bus: the CCA is not on it, so its scan has nothing to reach.';
+    } else if (ccaDiscoveryLocked) {
+      ccaDiscoveryLocked = false;
+      btn.disabled = false;
+      btn.title = '';
+      document.getElementById('cca-discovery-status').textContent = 'Idle — no scan running.';
+    }
+  }
+
+  // In master mode an unreachable CCA is expected: say so and keep the last sync on screen.
+  function ccaShowUnreachable(fallback) {
+    if (!ccaMasterMode) return false;
+    if (ccaLastGood) applyCcaData(ccaLastGood);
+    const age = ccaLastGood ? ccaFmtSyncAge(ccaLastGood.last_sync_seconds_ago) : 'never';
+    const note = document.createElement('div');
+    note.style.cssText = 'color:var(--text-dim);margin-bottom:10px';
+    note.textContent = `The CCA isn't reachable (it may be off, or out of Bluetooth range). ` +
+      (ccaLastGood ? `Showing its last sync, ${age}.` : 'It has never synced, so there is nothing to show.');
+    const info = document.getElementById('cca-device-info');
+    if (!ccaLastGood) info.textContent = '';
+    info.prepend(note);
+    ccaSetStatusBadge(ccaLastGood ? 'connected' : 'unsynced');
+    document.getElementById('cca-meta').textContent = ccaLastGood ? fallback : 'CCA not reachable';
+    return true;
+  }
 
   async function refreshCca() {
     if (!document.getElementById('view-cca').classList.contains('active')) return;
     ccaBleLoad();  // reveal + populate the BLE-search card when BLE is enabled
+    await ccaCheckMaster();
     try {
       const r = await apiFetch('/api/cca');
       if (!r.ok) throw new Error(`/api/cca ${r.status}`);
-      applyCcaData(await r.json());
+      const data = await r.json();
+      const { state } = applyCcaData(data);
+      if (state === 'connected') ccaLastGood = data;
+      else if (state === 'error' && ccaShowUnreachable('CCA not reachable · showing last sync')) return;
     } catch (e) {
       ccaSetStatusBadge('failed');
       document.getElementById('cca-device-info').innerHTML =
@@ -4095,11 +4152,13 @@
         info.innerHTML =
           `<div class="spinner-box"><span class="spinner"></span> Connecting to the CCA over BLE… (${Math.round(elapsed)} s)</div>`;
       }
+      if (ccaShowUnreachable('CCA not reachable · showing last sync')) return;
       ccaSetStatusBadge('failed');
       info.innerHTML =
         '<div style="color:var(--bad)">BLE refresh timed out — the CCA may be out of range or busy (it allows one BLE client at a time). Try again.</div>';
       document.getElementById('cca-meta').textContent = 'BLE refresh timed out';
     } catch (e) {
+      if (ccaShowUnreachable('CCA not reachable · showing last sync')) return;
       ccaSetStatusBadge('failed');
       info.innerHTML = `<div style="color:var(--bad)">Failed to refresh: ${e.message}</div>`;
     } finally {
@@ -4142,7 +4201,8 @@
         else showToast(`Cloud sync failed: ${d.result.msg || 'CCA reported an error'}`, 'err');
         break;
       }
-      if (!confirmed) showToast('Sync requested — no confirmation from the CCA yet');
+      if (!confirmed) showToast(ccaMasterMode ? 'No answer from the CCA: it may be off, or out of Bluetooth range'
+                                              : 'Sync requested — no confirmation from the CCA yet');
     } catch (e) {
       showToast(`Cloud sync failed: ${e.message}`, 'err');
     } finally {
@@ -4173,7 +4233,7 @@
 
   let ccaDiscovering = false;
   document.getElementById('cca-discovery-btn').addEventListener('click', async () => {
-    if (ccaDiscovering) return;
+    if (ccaDiscovering || ccaMasterMode) return;
     if (!confirm('Start a CCA topology discovery scan?\n\nThe CCA will briefly interrupt normal optimizer operation while it re-discovers modules. This is recoverable but can take a few minutes.')) return;
     ccaDiscovering = true;
     ccaBusy = true;  // pause the device-info auto-refresh so we don't fight over the BLE link

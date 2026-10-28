@@ -488,6 +488,12 @@ void HttpServer::routes_() {
                     {"status", status.is_discarded() ? json(v.discovery) : status}});
   });
   svr.Post("/api/cca/discovery/start", [this, cca_unavailable](const httplib::Request &, httplib::Response &res) {
+    // The CCA is off the bus while the Pi runs it, so its scan can't reach
+    // anything; plugged back in, it would be a second master.
+    if (ctx_.current_settings().bus_role == "master") {
+      send_json(res, {{"status", "error"}, {"message", "The Pi is running the bus; CCA discovery is off while it does"}}, 409);
+      return;
+    }
     if (cca_unavailable(res)) return;
     ctx_.cca.request_command("START_DISCOVERY");
     send_json(res, {{"status", "ok"}, {"message", "Discovery start requested"}});
