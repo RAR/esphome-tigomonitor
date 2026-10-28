@@ -57,6 +57,7 @@ kill -CONT $daemon
 for _ in $(seq 20); do [ "$(renewals)" -gt "$during" ] && break; sleep 0.5; done
 expect "no renewal while frozen" "$((during - before))" 0
 expect "renews once running again" "$([ "$(renewals)" -gt "$during" ] && echo yes || echo no)" yes
+expect "leases run down and renewed are not losses" "$(api 18092 /api/master | python3 -c 'import json,sys; t=json.load(sys.stdin)["tap"]; print(t["lost"], t["back_without_lease"])')" "0 0"
 kill $daemon; wait $daemon 2>/dev/null || true
 kill $tap; wait $tap 2>/dev/null || true
 
@@ -360,6 +361,27 @@ for _ in $(seq 160); do [ -f "$out/tap16.json" ] && [ "$(stat "$out/tap16.json" 
 expect "one RESET, said it failed, then found it at 1201 and polled" "$(stat "$out/tap16.json" "(d['resets'], d['polls'] >= 5, d['addressed_to'])")" "(1, True, '1201')"
 expect "logged the failure" "$(grep -c 'did not answer at the id it was given' "$out/daemon16.log")" 1
 expect "fault cleared once polling" "$(api 18106 /api/master | python3 -c 'import json,sys; m=json.load(sys.stdin); print(m["fault"], m["phase"])')" "none running"
+kill $daemon; wait $daemon 2>/dev/null || true
+kill $tap; wait $tap 2>/dev/null || true
+
+# --- run 17: a TAP whose power is cut every 15 s ---
+# As on the roof with the CCA unplugged from the bus but still powering the
+# TAP: it goes quiet for 8 s and comes back at 1201 with its lease out. The
+# master finds it, renews, and counts each loss and each return without a
+# lease. Run 1's leases run down to 0 and are renewed: none of those count.
+mkdir -p "$out/state17"
+python3 linux/tools/mock_tap.py "$out/tap17" --power-cut-every 15 --lease 600 --nodes 44 --stats "$out/tap17.json" &
+tap=$!
+sleep 0.5
+printf '{"bus_role": "master", "master_startup": true, "serial_port": "%s", "gateway_id": 4609, "web_port": 18107}\n' \
+  "$PWD/$out/tap17" > "$out/state17/settings.json"
+build/linux/tigomonitord --state-dir "$out/state17" --web-dir components/tigo_server/web 2> "$out/daemon17.log" &
+daemon=$!
+for _ in $(seq 160); do [ -f "$out/tap17.json" ] && [ "$(stat "$out/tap17.json" "len(d['renewals'])")" -ge 2 ] && break; sleep 0.5; done
+sleep 2
+expect "two cuts, renewed after each" "$(stat "$out/tap17.json" "(d['power_cuts'] >= 2, len(d['renewals']) >= 2)")" "(True, True)"
+expect "/api/master counts the losses and returns without a lease" "$(api 18107 /api/master | python3 -c 'import json,sys; m=json.load(sys.stdin); t=m["tap"]; print(t["lost"] >= 2, t["back_without_lease"] >= 2, t["last_lost_unix"] > 0, t["lost"] == len(t["recent_lost_unix"]))')" \
+  "True True True True"
 kill $daemon; wait $daemon 2>/dev/null || true
 kill $tap; wait $tap 2>/dev/null || true
 

@@ -4,7 +4,7 @@
     mock_tap.py PTY_LINK [--lease S] [--renew-to S] [--nodes N] [--panels N]
                          [--foreign-after S] [--echo] [--drop-every N]
                          [--start-cursor HEX] [--bare] [--factory]
-                         [--second-tap] [--stats FILE]
+                         [--second-tap] [--power-cut-every S] [--stats FILE]
 
 Answers requests to gateway 0x1201 the way the rig's TAP did in the capture:
   - 0x0148 polls with 0x0149 power frames: up to two synthetic readings per
@@ -20,6 +20,9 @@ unanswered. --start-cursor gives the TAP a cursor of its own: a poll with any
 other cursor gets no data and a reply whose long header states the TAP's
 cursor (a guess at what a real TAP does; the capture never shows it).
 --reset-quiet S is how long a RESET leaves it deaf (4.5 s; the roof's was ~5).
+--power-cut-every S cuts its power every S seconds, as the CCA did on the
+roof once it could no longer hear the TAP: deaf for --power-off seconds
+(8), then back at the same id with its run lease out.
 --second-tap puts another TAP behind the same port, left at the factory
 address: it answers GET_MAC there and nothing else.
 It also plays the rest of the CCA's dialogue, as the roof TAP answered it:
@@ -89,6 +92,8 @@ def main():
     ap.add_argument('--factory', action='store_true')  # boot at the factory address 0x1235
     ap.add_argument('--second-tap', action='store_true')
     ap.add_argument('--reset-quiet', type=float, default=4.5)  # seconds deaf after a RESET
+    ap.add_argument('--power-cut-every', type=float, default=0)
+    ap.add_argument('--power-off', type=float, default=8)
     ap.add_argument('--stats', default=None)
     a = ap.parse_args()
 
@@ -113,7 +118,7 @@ def main():
              'first_lease_frame': None, 'first_frame': None, 'addressed_to': None, 'frames_after_foreign': 0, 'foreign_at': None,
              'second_asked': 0, 'second_written': 0, 'session': [], 'housekeeping': [],
              'log': [], 'resets': 0, 'quiet_broken': 0, 'broadcast': [], 'walk': [], 'queries': [],
-             'answered': 0}
+             'answered': 0, 'power_cuts': 0}
     home = None  # the id the TAP was first given, which a RESET returns it to
     quiet_until = 0.0
     answers = []  # optimizers' answers, waiting for a poll reply to carry them
@@ -121,6 +126,7 @@ def main():
     smart_n = {panels[1][1]} if len(panels) > 1 else set()
     buf = bytearray()
     last_stats = 0.0
+    next_cut = start + a.power_cut_every if a.power_cut_every else None
 
     def lease_payload(seq):
         left = max(0, int(lease_end - time.monotonic()))
@@ -130,6 +136,11 @@ def main():
 
     while True:
         now = time.monotonic()
+        if next_cut is not None and now >= next_cut:  # off and back on: the id stays, the lease doesn't
+            stats['power_cuts'] += 1
+            quiet_until = now + a.power_off
+            lease_end = now
+            next_cut = now + a.power_cut_every
         if a.foreign_after is not None and not foreign_sent and now - start >= a.foreign_after:
             os.write(master_fd, encode(GATEWAY, 0x0148, bytes.fromhex('0001000004')))
             foreign_sent = True

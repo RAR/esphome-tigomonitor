@@ -41,6 +41,14 @@ struct MasterStatus {
   uint32_t timeouts = 0;
   uint32_t resyncs = 0;  // times the poll cursor was taken from the TAP's reply
   int64_t last_reply_unix = 0;
+  // Times the TAP stopped answering (10 requests in a row), the last few of
+  // them, and times it came back with its lease gone: together, a TAP whose
+  // power is being cut (the CCA does that to one it can't hear). A lease
+  // running down to 0 between renewals is normal and not counted.
+  uint32_t tap_lost = 0;
+  std::vector<int64_t> recent_lost_unix;  // oldest first, at most RECENT_LOST
+  static const size_t RECENT_LOST = 10;
+  uint32_t back_without_lease = 0;
   std::vector<std::string> extra_taps;  // MACs (hex) of TAPs left at the factory address
   bool housekeeping = false;  // the setting
   uint32_t learned_41 = 0;    // 0x41s heard from the CCA (0: the built-in content)
@@ -119,6 +127,7 @@ class BusMaster {
   bool holding_ = false;
   uint32_t targets_at_ms_ = 0;
   bool targets_empty_ = true;
+  bool lost_since_lease_read_ = false;  // the next lease read says whether it came back without one
   bool readdressed_ = false;     // the last bring-up moved the TAP off the factory address
   bool session_reset_sent_ = false;  // the 0x0B00 00, sent once per start, as after a CCA reboot
   uint32_t sent_41_before_ = 0, sent_session_before_ = 0;  // from earlier Housekeepings

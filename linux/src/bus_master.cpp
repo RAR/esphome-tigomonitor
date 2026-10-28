@@ -292,8 +292,13 @@ void BusMaster::tick(uint32_t now_ms) {
       }
     }
     if (lease_read) {
-      if (!lease.running || lease.remaining_s == 0)
-        LOGW("bus master: the TAP's run lease is out (%u nodes); renewing", lease.node_count);
+      // The CCA lets it run down to 0 and renews then, so that's routine;
+      // finding it gone when the TAP comes back is not.
+      bool out = !lease.running || lease.remaining_s == 0;
+      if (out && lost_since_lease_read_)
+        LOGW("bus master: the TAP came back without its run lease (%u nodes); renewing", lease.node_count);
+      else if (out)
+        LOGI("bus master: the TAP's run lease is up (%u nodes); renewing", lease.node_count);
       lease_.on_lease(lease, now_ms);
     }
     update_lease_fault_();
@@ -301,6 +306,8 @@ void BusMaster::tick(uint32_t now_ms) {
     if (req.cmd == master::CMD_POLL) status_.polls++;
     status_.resyncs = cursor_.resyncs();
     if (lease_read) {
+      if (lost_since_lease_read_ && (!lease.running || lease.remaining_s == 0)) status_.back_without_lease++;
+      lost_since_lease_read_ = false;
       status_.lease = lease;
       status_.lease_read = true;
     }
@@ -320,6 +327,13 @@ void BusMaster::tick(uint32_t now_ms) {
     std::lock_guard<std::mutex> lock(mu_);
     status_.timeouts++;
     status_.renewals = lease_.renewals();
+    if (timeouts_in_a_row_ == NO_REPLY_FAULT_AFTER) {
+      status_.tap_lost++;
+      lost_since_lease_read_ = true;
+      auto &recent = status_.recent_lost_unix;
+      if (recent.size() == MasterStatus::RECENT_LOST) recent.erase(recent.begin());
+      recent.push_back(unix_now());
+    }
   }
   update_lease_fault_();
   // A gateway with no optimizers behind it, or one not running, refuses

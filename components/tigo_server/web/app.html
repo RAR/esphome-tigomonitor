@@ -1249,6 +1249,26 @@
           <div class="hist-stat-val" id="diag-polls">—</div>
           <div class="hist-stat-sub" id="diag-timeouts">— unanswered</div>
         </div>
+        <div class="hist-stat-card">
+          <div class="hist-stat-label">Gateway dropouts</div>
+          <div class="hist-stat-val" id="diag-tap-lost">—</div>
+          <div class="hist-stat-sub" id="diag-tap-lost-sub">—</div>
+        </div>
+        <div class="hist-stat-card">
+          <div class="hist-stat-label">Housekeeping</div>
+          <div class="hist-stat-val" id="diag-housekeeping">—</div>
+          <div class="hist-stat-sub" id="diag-housekeeping-sub">—</div>
+        </div>
+        <div class="hist-stat-card">
+          <div class="hist-stat-label">Optimizer queries</div>
+          <div class="hist-stat-val" id="diag-queries">—</div>
+          <div class="hist-stat-sub" id="diag-queries-sub">—</div>
+        </div>
+        <div class="hist-stat-card">
+          <div class="hist-stat-label">Gateway version</div>
+          <div class="hist-stat-val" id="diag-tap-version" style="font-size:18px">—</div>
+          <div class="hist-stat-sub" id="diag-tap-version-sub">—</div>
+        </div>
       </div>
 
       <div class="section-head">
@@ -3047,7 +3067,38 @@
     document.getElementById('diag-polls').innerHTML = rate === null ? m.polls.toLocaleString()
       : `${rate.toFixed(0)}<span class="hist-stat-unit">/s</span>`;
     document.getElementById('diag-timeouts').textContent =
-      `${m.polls.toLocaleString()} sent · ${m.timeouts.toLocaleString()} unanswered`;
+      `${m.polls.toLocaleString()} sent · ${m.timeouts.toLocaleString()} unanswered · ${m.resyncs} resyncs`;
+
+    // A gateway that keeps dropping out at a steady interval is having its
+    // power cut: the CCA does that to one it can no longer hear.
+    const t = m.tap;
+    document.getElementById('diag-tap-lost').textContent = t.lost.toLocaleString();
+    let lostSub = 'none since the service started';
+    if (t.lost) {
+      const at = new Date(t.last_lost_unix * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      const r = t.recent_lost_unix;
+      const every = r.length >= 3 ? Math.round((r[r.length - 1] - r[0]) / (r.length - 1)) : null;
+      lostSub = `last ${at} · back without its lease ${t.back_without_lease}×` +
+                (every !== null && every < 600 && Date.now() / 1000 - t.last_lost_unix < 2 * every
+                 ? ` · every ~${every} s: is its power being cut?` : '');
+    }
+    document.getElementById('diag-tap-lost-sub').textContent = lostSub;
+
+    const h = m.housekeeping;
+    document.getElementById('diag-housekeeping').innerHTML = h.on
+      ? `${h.sent_41.toLocaleString()}<span class="hist-stat-unit">0x41s</span>` : 'off';
+    document.getElementById('diag-housekeeping-sub').textContent = h.on
+      ? `${h.sent_session} 0x0B00 · ${h.sent_broadcast} 0x22 · ${h.sent_walk_pages} table pages` : 'turn on under Tools';
+
+    const q = m.queries;
+    document.getElementById('diag-queries').innerHTML = q.on
+      ? `${q.answers.toLocaleString()}<span class="hist-stat-unit">/ ${q.sent_reads.toLocaleString()} answered</span>` : 'off';
+    document.getElementById('diag-queries-sub').textContent = !q.on ? 'turn on under Tools'
+      : q.writes ? `${q.sent_writes} writes sent` : 'writes off';
+
+    document.getElementById('diag-tap-version').textContent = m.tap_version || '—';
+    document.getElementById('diag-tap-version-sub').textContent = m.tap_version
+      ? 'read in the bring-up' : 'read when the gateway is re-addressed';
   }
 
   async function refreshDiagnostics(force) {
