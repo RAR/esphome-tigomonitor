@@ -1077,6 +1077,7 @@ void HttpServer::routes_() {
                     {"polls", m.polls},
                     {"timeouts", m.timeouts},
                     {"resyncs", m.resyncs},
+                    {"gap_ms", {{"max", m.gap_max_ms}, {"max_at_unix", m.gap_max_at_unix}, {"recent", m.gap_recent_ms}}},
                     {"last_reply_unix", m.last_reply_unix}});
   });
 

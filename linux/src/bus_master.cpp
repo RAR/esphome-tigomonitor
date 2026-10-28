@@ -185,7 +185,35 @@ bool BusMaster::is_reply(uint16_t cmd, const master::Bytes &request, const Frame
   return true;
 }
 
+static int64_t steady_ms() {
+  return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch())
+      .count();
+}
+
 void BusMaster::tick(uint32_t now_ms) {
+  int64_t start = steady_ms();
+  if (last_tick_end_ms_ >= 0) {
+    uint32_t gap = static_cast<uint32_t>(start - last_tick_end_ms_);
+    if (start - gap_window_start_ms_ >= GAP_WINDOW_MS) {
+      gap_prev_window_max_ms_ = gap_window_max_ms_;
+      gap_window_max_ms_ = 0;
+      gap_window_start_ms_ = start;
+    }
+    if (gap > gap_window_max_ms_) gap_window_max_ms_ = gap;
+    std::lock_guard<std::mutex> lock(mu_);
+    if (gap > status_.gap_max_ms) {
+      status_.gap_max_ms = gap;
+      status_.gap_max_at_unix = unix_now();
+    }
+    status_.gap_recent_ms = std::max(gap_window_max_ms_, gap_prev_window_max_ms_);
+  } else {
+    gap_window_start_ms_ = start;
+  }
+  tick_(now_ms);
+  last_tick_end_ms_ = steady_ms();
+}
+
+void BusMaster::tick_(uint32_t now_ms) {
   if (status().fault == Fault::second_master) return;
   if (fd_ < 0) {
     // A port that isn't there yet (a USB adapter still enumerating) or went

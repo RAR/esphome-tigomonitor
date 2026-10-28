@@ -57,6 +57,7 @@ kill -CONT $daemon
 for _ in $(seq 20); do [ "$(renewals)" -gt "$during" ] && break; sleep 0.5; done
 expect "no renewal while frozen" "$((during - before))" 0
 expect "renews once running again" "$([ "$(renewals)" -gt "$during" ] && echo yes || echo no)" yes
+expect "the freeze shows as the longest gap" "$(api 18092 /api/master | python3 -c 'import json,sys; g=json.load(sys.stdin)["gap_ms"]; print(g["max"] >= 25000, g["max_at_unix"] > 0, g["recent"] >= 25000)')" "True True True"
 expect "leases run down and renewed are not losses" "$(api 18092 /api/master | python3 -c 'import json,sys; t=json.load(sys.stdin)["tap"]; print(t["lost"], t["back_without_lease"])')" "0 0"
 kill $daemon; wait $daemon 2>/dev/null || true
 kill $tap; wait $tap 2>/dev/null || true
@@ -382,6 +383,7 @@ sleep 2
 expect "two cuts, renewed after each" "$(stat "$out/tap17.json" "(d['power_cuts'] >= 2, len(d['renewals']) >= 2)")" "(True, True)"
 expect "/api/master counts the losses and returns without a lease" "$(api 18107 /api/master | python3 -c 'import json,sys; m=json.load(sys.stdin); t=m["tap"]; print(t["lost"] >= 2, t["back_without_lease"] >= 2, t["last_lost_unix"] > 0, t["lost"] == len(t["recent_lost_unix"]))')" \
   "True True True True"
+expect "no stalls of its own: under 2 s between requests" "$(api 18107 /api/master | python3 -c 'import json,sys; g=json.load(sys.stdin)["gap_ms"]; print(0 < g["max"] < 2000)')" True
 kill $daemon; wait $daemon 2>/dev/null || true
 kill $tap; wait $tap 2>/dev/null || true
 

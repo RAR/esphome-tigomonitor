@@ -1250,6 +1250,11 @@
           <div class="hist-stat-sub" id="diag-timeouts">— unanswered</div>
         </div>
         <div class="hist-stat-card">
+          <div class="hist-stat-label">Longest pause, last 5–10 min</div>
+          <div class="hist-stat-val" id="diag-gap">—<span class="hist-stat-unit">ms</span></div>
+          <div class="hist-stat-sub" id="diag-gap-sub">—</div>
+        </div>
+        <div class="hist-stat-card">
           <div class="hist-stat-label">Gateway dropouts</div>
           <div class="hist-stat-val" id="diag-tap-lost">—</div>
           <div class="hist-stat-sub" id="diag-tap-lost-sub">—</div>
@@ -3068,6 +3073,15 @@
       : `${rate.toFixed(0)}<span class="hist-stat-unit">/s</span>`;
     document.getElementById('diag-timeouts').textContent =
       `${m.polls.toLocaleString()} sent · ${m.timeouts.toLocaleString()} unanswered · ${m.resyncs} resyncs`;
+
+    // The bus idle on the daemon's account, between one request and the
+    // next: ~10 ms normally; long ones mean something else held the loop.
+    const g = m.gap_ms;
+    document.getElementById('diag-gap').innerHTML =
+      `${g.recent.toLocaleString()}<span class="hist-stat-unit">ms</span>`;
+    document.getElementById('diag-gap-sub').textContent = g.max_at_unix
+      ? `longest ${g.max.toLocaleString()} ms, at ${new Date(g.max_at_unix * 1000).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}`
+      : 'between requests to the gateway';
 
     // A gateway that keeps dropping out at a steady interval is having its
     // power cut: the CCA does that to one it can no longer hear.

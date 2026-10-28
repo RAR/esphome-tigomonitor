@@ -49,6 +49,13 @@ struct MasterStatus {
   std::vector<int64_t> recent_lost_unix;  // oldest first, at most RECENT_LOST
   static const size_t RECENT_LOST = 10;
   uint32_t back_without_lease = 0;
+  // The longest the bus sat idle on our account: from the end of one tick
+  // to the start of the next, so the time waiting on the TAP isn't in it.
+  // Normally ~10 ms; anything long is the rest of the daemon holding the
+  // loop up. recent covers this window and the last (5 to 10 min).
+  uint32_t gap_max_ms = 0;
+  int64_t gap_max_at_unix = 0;
+  uint32_t gap_recent_ms = 0;
   std::vector<std::string> extra_taps;  // MACs (hex) of TAPs left at the factory address
   bool housekeeping = false;  // the setting
   uint32_t learned_41 = 0;    // 0x41s heard from the CCA (0: the built-in content)
@@ -88,7 +95,7 @@ class BusMaster {
 
   bool open(const std::string &device, int baud);
   // Sends at most one request and reads its reply, up to REPLY_TIMEOUT_MS.
-  void tick(uint32_t now_ms);
+  void tick(uint32_t now_ms);  // measures the gap, then tick_()
   void close();
   MasterStatus status() const;
 
@@ -127,6 +134,11 @@ class BusMaster {
   bool holding_ = false;
   uint32_t targets_at_ms_ = 0;
   bool targets_empty_ = true;
+  void tick_(uint32_t now_ms);
+  static const int64_t GAP_WINDOW_MS = 5 * 60000;
+  int64_t last_tick_end_ms_ = -1;  // steady clock
+  int64_t gap_window_start_ms_ = 0;
+  uint32_t gap_window_max_ms_ = 0, gap_prev_window_max_ms_ = 0;
   bool lost_since_lease_read_ = false;  // the next lease read says whether it came back without one
   bool readdressed_ = false;     // the last bring-up moved the TAP off the factory address
   bool session_reset_sent_ = false;  // the 0x0B00 00, sent once per start, as after a CCA reboot
