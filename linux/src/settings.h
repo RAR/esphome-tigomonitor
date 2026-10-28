@@ -27,8 +27,10 @@ struct Settings {
   std::string bus_role = "listen";
   bool master_bench = false;    // also send the reads a bench TAP answers
   bool master_startup = false;  // re-address and bring up a TAP found at the factory address
-  // Also send the CCA's 0x41s (learned while listening) and its hourly 0x0B00.
+  // Also send the CCA's 0x41s, its hourly 0x0B00 and 0x22s, and its 0x26 walks.
   bool master_housekeeping = false;
+  bool master_queries = false;           // the CCA's 0x06 reads to optimizers
+  bool master_optimizer_writes = false;  // and the two writes its answers call for
   int gateway_id = 0x1201;    // the TAP's RS485 id, as the CCA addresses it
   float power_calibration = 1.0f;
   // Plenty of RAM here, so the node table is sized for any real site rather

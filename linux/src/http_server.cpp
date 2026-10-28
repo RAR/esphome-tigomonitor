@@ -1053,7 +1053,16 @@ void HttpServer::routes_() {
                      {{"on", m.housekeeping},
                       {"learned_41", m.learned_41},
                       {"sent_41", m.sent_41},
-                      {"sent_session", m.sent_session}}},
+                      {"sent_session", m.sent_session},
+                      {"sent_broadcast", m.sent_broadcast},
+                      {"sent_walk_pages", m.sent_walk_pages}}},
+                    {"queries",
+                     {{"on", m.queries},
+                      {"writes", m.writes},
+                      {"sent_reads", m.sent_reads},
+                      {"sent_writes", m.sent_writes},
+                      {"answers", m.answers}}},
+                    {"tap_version", m.tap_version},
                     {"lease_read", m.lease_read},
                     {"lease",
                      {{"running", m.lease.running},
@@ -1082,6 +1091,8 @@ void HttpServer::routes_() {
                     {"master_bench", s.master_bench},
                     {"master_startup", s.master_startup},
                     {"master_housekeeping", s.master_housekeeping},
+                    {"master_queries", s.master_queries},
+                    {"master_optimizer_writes", s.master_optimizer_writes},
                     {"gateway_id", s.gateway_id},
                     {"web_port", s.web_port},
                     {"web_port_active", port_},
@@ -1118,6 +1129,8 @@ void HttpServer::routes_() {
       if (j.contains("master_bench")) s.master_bench = j["master_bench"].get<bool>();
       if (j.contains("master_startup")) s.master_startup = j["master_startup"].get<bool>();
       if (j.contains("master_housekeeping")) s.master_housekeeping = j["master_housekeeping"].get<bool>();
+      if (j.contains("master_queries")) s.master_queries = j["master_queries"].get<bool>();
+      if (j.contains("master_optimizer_writes")) s.master_optimizer_writes = j["master_optimizer_writes"].get<bool>();
       if (j.contains("gateway_id")) s.gateway_id = j["gateway_id"].get<int>();
       if (j.contains("web_port")) s.web_port = j["web_port"].get<int>();
       if (j.contains("web_username")) s.web_username = j["web_username"].get<std::string>();

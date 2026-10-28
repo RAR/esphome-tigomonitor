@@ -1043,8 +1043,16 @@
           <div class="cfg-ctrl"><label class="cfg-switch"><input type="checkbox" id="pi-startup"> <span>off</span></label></div>
         </div>
         <div class="cfg-row" id="pi-housekeeping-row" style="display:none">
-          <div class="cfg-text"><strong>Send the CCA's housekeeping</strong><span class="cfg-default" id="pi-housekeeping-hint">Send the CCA's 0x41 to each optimizer in turn, and its hourly 0x0B00 (experimental)</span></div>
+          <div class="cfg-text"><strong>Send the CCA's housekeeping</strong><span class="cfg-default" id="pi-housekeeping-hint">Send the CCA's 0x41 to each optimizer in turn, its hourly 0x0B00 and 0x22, and its reads of the TAP's node table (experimental)</span></div>
           <div class="cfg-ctrl"><label class="cfg-switch"><input type="checkbox" id="pi-housekeeping"> <span>off</span></label></div>
+        </div>
+        <div class="cfg-row" id="pi-queries-row" style="display:none">
+          <div class="cfg-text"><strong>Query the optimizers</strong><span class="cfg-default">Ask each optimizer the CCA's five questions (version, tests, info, smart, MPPT), again until it answers (experimental)</span></div>
+          <div class="cfg-ctrl"><label class="cfg-switch"><input type="checkbox" id="pi-queries"> <span>off</span></label></div>
+        </div>
+        <div class="cfg-row" id="pi-writes-row" style="display:none">
+          <div class="cfg-text"><strong>Let queries change optimizer settings</strong><span class="cfg-default">Send the CCA's two writes when an optimizer's answer calls for them: #00w255 after an Info reading 00, and Smrt mode S after one in mode N. Needs Query the optimizers (experimental)</span></div>
+          <div class="cfg-ctrl"><label class="cfg-switch"><input type="checkbox" id="pi-writes"> <span>off</span></label></div>
         </div>
         <div class="cfg-row" id="pi-bridge-row" style="display:none">
           <div class="cfg-text"><strong>Bridge address</strong><span class="cfg-default">host:port of an ESP32 running stream_server, or an RS485-to-Ethernet converter in TCP server mode</span></div>
@@ -3416,7 +3424,11 @@
       document.getElementById('pi-startup-row').style.display = piBusRole === 'master' ? '' : 'none';
       document.getElementById('pi-housekeeping').checked = !!s.master_housekeeping;
       document.getElementById('pi-housekeeping').nextElementSibling.textContent = s.master_housekeeping ? 'on' : 'off';
-      document.getElementById('pi-housekeeping-row').style.display = piBusRole === 'master' ? '' : 'none';
+      document.getElementById('pi-queries').checked = !!s.master_queries;
+      document.getElementById('pi-queries').nextElementSibling.textContent = s.master_queries ? 'on' : 'off';
+      document.getElementById('pi-writes').checked = !!s.master_optimizer_writes;
+      document.getElementById('pi-writes').nextElementSibling.textContent = s.master_optimizer_writes ? 'on' : 'off';
+      for (const row of PI_MASTER_ROWS) document.getElementById(row).style.display = piBusRole === 'master' ? '' : 'none';
       piFillHousekeepingHint();
       piWebLogin = { user: s.web_username || 'admin', set: !!s.web_password_set };
       document.getElementById('pi-web-user').value = piWebLogin.user;
@@ -3437,16 +3449,21 @@
   let piWebPortActive = 0;
   let piWebLogin = { user: 'admin', set: false };
   let piBusRole = 'listen';
+  const PI_MASTER_ROWS = ['pi-startup-row', 'pi-housekeeping-row', 'pi-queries-row', 'pi-writes-row'];
   // Two masters on one bus collide, and the master's requests reach the
   // optimizers, so becoming the master is a deliberate step.
   document.getElementById('pi-bus-role').addEventListener('change', (e) => {
     if (e.target.value === 'master' && piBusRole !== 'master' &&
         !confirm('Master mode transmits on the bus. Unplug the CCA first: two masters on one bus collide.\n\nContinue?'))
       e.target.value = piBusRole;
-    document.getElementById('pi-startup-row').style.display = e.target.value === 'master' ? '' : 'none';
-    document.getElementById('pi-housekeeping-row').style.display = e.target.value === 'master' ? '' : 'none';
+    for (const row of PI_MASTER_ROWS) document.getElementById(row).style.display = e.target.value === 'master' ? '' : 'none';
   });
-  for (const id of ['pi-startup', 'pi-housekeeping']) {
+  // Changing what optimizers store is a step further than reading them.
+  document.getElementById('pi-writes').addEventListener('change', (e) => {
+    if (e.target.checked && !confirm('This lets the master change two settings on optimizers, as the CCA does when their answers call for it. What the settings do is not known.\n\nContinue?'))
+      e.target.checked = false;
+  });
+  for (const id of ['pi-startup', 'pi-housekeeping', 'pi-queries', 'pi-writes']) {
     document.getElementById(id).addEventListener('change', (e) => {
       e.target.nextElementSibling.textContent = e.target.checked ? 'on' : 'off';
     });
@@ -3460,7 +3477,7 @@
       const h = (await r.json()).housekeeping || {};
       const n = h.learned_41 || 0;
       document.getElementById('pi-housekeeping-hint').textContent =
-        "Send the CCA's 0x41 to each optimizer in turn, and its hourly 0x0B00 (experimental). " +
+        "Send the CCA's 0x41 to each optimizer in turn, its hourly 0x0B00 and 0x22, and its reads of the TAP's node table (experimental). " +
         (n ? `Content learned from the CCA (${n} heard).` : 'Built-in content: none heard from a CCA yet.');
     } catch (e) { /* the default text stays */ }
   }
@@ -3532,6 +3549,8 @@
     const body = { serial_port: source, web_port: webPort, bus_role: document.getElementById('pi-bus-role').value,
                    master_startup: document.getElementById('pi-startup').checked,
                    master_housekeeping: document.getElementById('pi-housekeeping').checked,
+                   master_queries: document.getElementById('pi-queries').checked,
+                   master_optimizer_writes: document.getElementById('pi-writes').checked,
                    web_username: document.getElementById('pi-web-user').value.trim() || 'admin' };
     const webPass = document.getElementById('pi-web-pass').value;
     if (webPass !== '') body.web_password = webPass;

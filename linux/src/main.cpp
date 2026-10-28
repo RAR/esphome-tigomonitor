@@ -173,7 +173,8 @@ int main(int argc, char **argv) {
                                                if (p.updated_unix_ms >= since)
                                                  tuids.push_back(static_cast<uint16_t>(strtoul(p.addr.c_str(), nullptr, 16)));
                                              return tuids;
-                                           });
+                                           },
+                                           settings.master_queries, settings.master_optimizer_writes);
       if (dev.empty()) LOGW("bus master: no serial port chosen yet; pick the RS485 adapter under Tools");
       else m->open(dev, baud);
       std::lock_guard<std::mutex> lock(master_mu);
@@ -291,7 +292,9 @@ int main(int argc, char **argv) {
       bool new_port = fresh.serial_port != settings.serial_port || fresh.baud_rate != settings.baud_rate ||
                       fresh.bus_role != settings.bus_role || fresh.gateway_id != settings.gateway_id ||
                       fresh.master_bench != settings.master_bench || fresh.master_startup != settings.master_startup ||
-                      fresh.master_housekeeping != settings.master_housekeeping;
+                      fresh.master_housekeeping != settings.master_housekeeping ||
+                      fresh.master_queries != settings.master_queries ||
+                      fresh.master_optimizer_writes != settings.master_optimizer_writes;
       if (fresh.web_port != settings.web_port) LOGI("web: the new port takes effect when the service restarts");
       {
         std::lock_guard<std::mutex> lock(settings_mu);

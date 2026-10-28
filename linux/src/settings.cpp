@@ -37,6 +37,8 @@ Settings load_settings(const std::string &path) {
   get(j, "master_bench", s.master_bench);
   get(j, "master_startup", s.master_startup);
   get(j, "master_housekeeping", s.master_housekeeping);
+  get(j, "master_queries", s.master_queries);
+  get(j, "master_optimizer_writes", s.master_optimizer_writes);
   get(j, "gateway_id", s.gateway_id);
   get(j, "web_port", s.web_port);
   get(j, "web_username", s.web_username);
@@ -80,6 +82,8 @@ bool save_settings(const std::string &path, const Settings &s) {
       {"master_bench", s.master_bench},
       {"master_startup", s.master_startup},
       {"master_housekeeping", s.master_housekeeping},
+      {"master_queries", s.master_queries},
+      {"master_optimizer_writes", s.master_optimizer_writes},
       {"gateway_id", s.gateway_id},
       {"web_port", s.web_port},
       {"web_username", s.web_username},

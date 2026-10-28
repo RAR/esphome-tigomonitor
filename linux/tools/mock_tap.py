@@ -21,6 +21,15 @@ other cursor gets no data and a reply whose long header states the TAP's
 cursor (a guess at what a real TAP does; the capture never shows it).
 --second-tap puts another TAP behind the same port, left at the factory
 address: it answers GET_MAC there and nothing else.
+It also plays the rest of the CCA's dialogue, as the roof TAP answered it:
+a SET_ID_BY_MAC away from the id the TAP was first given, then a RESET
+broadcast, brings it back at that first id after ~5 s of silence; VERSION,
+0x0E02 and tunnel 0x0D get fixed (invented) replies; tunnel 0x22 is acked;
+tunnel 0x26 pages the node table from the index asked; and tunnel 0x06
+queries are forwarded (status 0d) with the optimizer's answer in a later
+poll reply, as a type 0x07 packet. The first panel answers Info with 00 in
+its ninth word until it gets #00w255; the second answers Smrt in mode N
+until it gets the Smrt_ write.
 --bare is a gateway with no mesh behind it, like a spare TAP on the bench: it
 answers VERSION and refuses polls and the tunnel with 0x0006, as the analysis
 repo's standalone gateways did. Writes what it saw to --stats as JSON every second.
@@ -100,7 +109,14 @@ def main():
     addr = FACTORY if a.factory else GATEWAY  # the id the TAP currently answers at
     stats = {'polls': 0, 'retries': 0, 'cursor_mismatches': 0, 'checks': 0, 'renewals': [], 'other': [],
              'first_lease_frame': None, 'first_frame': None, 'addressed_to': None, 'frames_after_foreign': 0, 'foreign_at': None,
-             'second_asked': 0, 'second_written': 0, 'session': [], 'housekeeping': []}
+             'second_asked': 0, 'second_written': 0, 'session': [], 'housekeeping': [],
+             'log': [], 'resets': 0, 'quiet_broken': 0, 'broadcast': [], 'walk': [], 'queries': [],
+             'answered': 0}
+    home = None  # the id the TAP was first given, which a RESET returns it to
+    quiet_until = 0.0
+    answers = []  # optimizers' answers, waiting for a poll reply to carry them
+    needs_w255 = {panels[0][1]} if panels else set()
+    smart_n = {panels[1][1]} if len(panels) > 1 else set()
     buf = bytearray()
     last_stats = 0.0
 
@@ -142,6 +158,12 @@ def main():
                 continue
             dest, cmd, p = body[0] << 8 | body[1], body[2] << 8 | body[3], body[4:-2]
             t = time.monotonic() - start
+            if not (cmd == 0x0148 or (cmd == 0x0B0F and len(p) > 3 and p[3] in (0x2E, 0x41))) and len(stats['log']) < 600:
+                sub = f' {p[3]:02x} {p[5:7].hex()}' if cmd == 0x0B0F and len(p) > 3 else (f' {p.hex()}' if cmd in (0x0B00, 0x003C) else '')
+                stats['log'].append({'t': round(t, 2), 'f': f'{dest:04X}/{cmd:04X}{sub}'})
+            if time.monotonic() < quiet_until:  # resetting: deaf and mute
+                stats['quiet_broken'] += 1
+                continue
             # Gateway addressing: answers at its current address, or at the
             # broadcast address for the universal set-id and reset.
             if cmd == 0x0014 and dest == 0x0000:  # SET_485_ID broadcast
@@ -149,6 +171,10 @@ def main():
                 continue
             if cmd == 0x0010 and dest == 0x0000:  # RESET broadcast
                 os.write(master_fd, encode(0x8000, 0x0011, b''))
+                stats['resets'] += 1
+                quiet_until = time.monotonic() + 4.5
+                addr = home if home is not None else FACTORY
+                stats['addressed_to'] = f'{addr:04X}'
                 continue
             if a.second_tap and cmd == 0x003C and p[4:12] == SECOND_MAC:
                 stats['second_written'] += 1
@@ -160,6 +186,8 @@ def main():
                     os.write(master_fd, encode(FACTORY | 0x8000, cmd + 1, SECOND_MAC + bytes([FACTORY >> 8, FACTORY & 0xFF])))
                 continue
             if cmd == 0x003C and dest == addr and len(p) == 14 and p[4:12] == MAC:  # SET_ID_BY_MAC
+                if addr == FACTORY:
+                    home = p[12] << 8 | p[13]
                 addr = p[12] << 8 | p[13]
                 stats['addressed_to'] = f'{addr:04X}'
                 os.write(master_fd, encode(dest | 0x8000, 0x003D, b''))
@@ -168,7 +196,10 @@ def main():
                 continue
             stats['first_frame'] = stats['first_frame'] or f'{cmd:04X}'
             if cmd == 0x000A:
-                os.write(master_fd, encode(addr | 0x8000, 0x000B, b'Mgate G1.0000'))
+                os.write(master_fd, encode(addr | 0x8000, 0x000B, b'Mgate Version G1.00\rJan  1 2026\r'))
+                continue
+            if cmd == 0x0E02 and not p:
+                os.write(master_fd, encode(addr | 0x8000, 0x0E03, bytes(11) + b'\x01\x03'))
                 continue
             if a.bare and cmd in (0x0B0F, 0x0148):
                 os.write(master_fd, encode(addr | 0x8000, 0x0006, b''))
@@ -192,6 +223,10 @@ def main():
                 n = rng.choice([0, 0, 0, 1, 2])
                 packets = ''.join(power_packet(panels[(handed_out + i) % len(panels)][1], rng, 0.8) for i in range(n))
                 handed_out += n
+                for tuid, text in answers:  # optimizers' answers ride along, as type 0x07 packets
+                    packets += bytes([0x07, tuid >> 8, tuid & 0xFF, 0x00, 0x02, 0xDB, len(text)]).hex() + text.hex()
+                    stats['answered'] += 1
+                answers.clear()
                 reply = bytes.fromhex(f'41FF{cursor & 0xFF:02X}4B9A' + packets)
                 os.write(master_fd, encode(addr | 0x8000, 0x0149, reply))
                 if not sent_table:  # the node table, as a reply from the gateway
@@ -211,6 +246,40 @@ def main():
             elif cmd == 0x0B00 and len(p) == 1:  # the CCA's session frame; the TAP echoes it
                 stats['session'].append(f'{p[0]:02x}')
                 os.write(master_fd, encode(addr | 0x8000, 0x0B01, p))
+            elif cmd == 0x0B0F and len(p) == 7 and p[3] == 0x0D:  # bring-up; the real reply's block is the site's
+                os.write(master_fd, encode(addr | 0x8000, 0x0B10, bytes([0x00, 0x0E, 0x00, 0x0E, p[4]]) + bytes(range(37))))
+            elif cmd == 0x0B0F and len(p) == 7 and p[3] == 0x22:  # empty broadcast, acked
+                stats['broadcast'].append(p[5:].hex())
+                os.write(master_fd, encode(addr | 0x8000, 0x0B10, bytes([0x00, 0x0E, 0x00, 0x23, p[4], 0x03])))
+            elif cmd == 0x0B0F and len(p) == 7 and p[3] == 0x26:  # a page of the node table, 12 at most
+                idx = p[5] << 8 | p[6]
+                stats['walk'].append(f'{idx:04X}')
+                page = [(b, n) for b, n in panels if n >= idx][:12]
+                first = page[0][1] if page else idx
+                body = bytes([0x00, 0x0E, 0x00, 0x27, p[4], first >> 8, first & 0xFF, 0x00, len(page)])
+                for barcode, paddr in page:
+                    body += bytes.fromhex(barcode) + bytes([paddr >> 8, paddr & 0xFF])
+                os.write(master_fd, encode(addr | 0x8000, 0x0B10, body))
+            elif cmd == 0x0B0F and len(p) > 7 and p[3] == 0x06:  # a query, forwarded; the answer comes later
+                tuid, text = p[5] << 8 | p[6], p[7:].decode(errors='replace')
+                stats['queries'].append({'t': round(t, 2), 'node': f'{tuid:04X}', 'text': text.strip()})
+                os.write(master_fd, encode(addr | 0x8000, 0x0B10, bytes([0x00, 0x0D, 0x00, 0x07, p[4]])))
+                if text == '#00w255\r':
+                    needs_w255.discard(tuid)
+                elif text.startswith('^00Smrt_') and text[16] == 'S':
+                    smart_n.discard(tuid)
+                elif text == '^00Version\r':
+                    answers.append((tuid, b'Mnode Version K8.0120 (2D)\r'))
+                elif text == '^00Tests\r':
+                    answers.append((tuid, b'!Tests 1 3 2 0 00 0000 00\r'))
+                elif text == '^00Info\r':
+                    w = '00' if tuid in needs_w255 else 'FF'
+                    answers.append((tuid, f'!Info 0027 12 0000 0DC1 00 0000 0000 {w} 00 0000 0FFF 1F9 B'.encode()))
+                elif text == '^00Smrt\r':
+                    mode = 'N' if tuid in smart_n else 'S'
+                    answers.append((tuid, f'!Smrt 0FFF 0000 0FFF 0008 00C8 00C8 000A 0154 0154 {mode} 00 01'.encode()))
+                elif text == '^00Mppt\r':
+                    answers.append((tuid, b'!Mppt 1 0 S M[100 0000 - 3/3] 0 12 40 08 12\r'))
             elif cmd == 0x0B0F and len(p) >= 5 and p[3] == 0x41:  # housekeeping, forwarded to the mesh
                 stats['housekeeping'].append({'t': round(t, 2), 'args': p[5:].hex()})
                 os.write(master_fd, encode(addr | 0x8000, 0x0B10, bytes([0x00, 0x0D, 0x00, 0x41, p[4]])))

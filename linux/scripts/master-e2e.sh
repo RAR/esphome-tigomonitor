@@ -291,4 +291,57 @@ expect "says it uses the built-in content" "$(grep -c 'none heard: using the bui
 kill $daemon; wait $daemon 2>/dev/null || true
 kill $tap; wait $tap 2>/dev/null || true
 
+# --- run 14: a cold bring-up with everything on, in the CCA's order ---
+# The TAP at the factory address: re-addressed, hopped to 1202, RESET, quiet,
+# back at 1201; then VERSION, 0x0E02, 0B00 00, 0D 0000, 0B00 01, 0D 0001, the
+# 0x22 pair and two walks of the node table; then the 0x06 queries, with the
+# CCA's two writes where the mock's answers call for them.
+mkdir -p "$out/state14"
+python3 linux/tools/mock_tap.py "$out/tap14" --factory --lease 600 --nodes 44 --stats "$out/tap14.json" &
+tap=$!
+sleep 0.5
+printf '{"bus_role": "master", "master_startup": true, "master_housekeeping": true, "master_queries": true, "master_optimizer_writes": true, "serial_port": "%s", "gateway_id": 4609, "web_port": 18104}\n' \
+  "$PWD/$out/tap14" > "$out/state14/settings.json"
+build/linux/tigomonitord --state-dir "$out/state14" --web-dir components/tigo_server/web 2> "$out/daemon14.log" &
+daemon=$!
+for _ in $(seq 240); do
+  [ -f "$out/tap14.json" ] && [ "$(stat "$out/tap14.json" "sum(q['text'].startswith(('#00w255', '^00Smrt_')) for q in d['queries'])")" -ge 2 ] && break
+  sleep 0.5
+done
+sleep 2
+log() { stat "$out/tap14.json" "$1"; }
+expect "the hop: to 1202, read there, RESET" "$(log "[x['f'][:9] for x in d['log']][[x['f'] for x in d['log']].index('0000/0010') - 2:][:3]")" "['1201/003C', '1202/003A', '0000/0010']"
+expect "the hop's SET_ID_BY_MAC names 1202" "$(log "[x['f'] for x in d['log'] if x['f'].startswith('1201/003C')][0][-4:]")" 1202
+expect "quiet for 4.5 s after the RESET, nothing sent into it" "$(log "(lambda i: (d['log'][i + 1]['t'] - d['log'][i]['t'] >= 4.4, d['quiet_broken']))([x['f'] for x in d['log']].index('0000/0010'))")" "(True, 0)"
+expect "back at 1201, then the CCA's bring-up order" "$(log "(lambda i: [x['f'] for x in d['log'][i + 1:i + 11]])([x['f'] for x in d['log']].index('0000/0010'))")" \
+  "['1201/003A', '1201/000A', '1201/0E02', '1201/0B00 00', '1201/0B0F 0d 0000', '1201/0B00 01', '1201/0B0F 0d 0001', '1201/0B0F 22 0000', '1201/0B0F 22 0001', '1201/0B0F 26 0000']"
+expect "two walks, each page from the last reply's end" "$(log "d['walk'][:4]")" "['0000', '0008', '0000', '0008']"
+expect "all five reads to every panel" "$(log "sorted({(q['node'], q['text']) for q in d['queries'] if q['text'].startswith('^00') and '_' not in q['text']}) == sorted((f'{n:04X}', t) for n in range(2, 8) for t in ('^00Version', '^00Tests', '^00Info', '^00Smrt', '^00Mppt'))")" True
+expect "the writes: w255 to the panel whose Info asked, Smrt_ S to the one in mode N" "$(log "sorted((q['node'], q['text']) for q in d['queries'] if q['text'].startswith(('#', '^00Smrt_')))")" \
+  "[('0002', '#00w255'), ('0003', '^00Smrt_........S0000...0000')]"
+expect "nothing unrecognised sent" "$(log "d['other']")" "[]"
+expect "/api/master" "$(api 18104 /api/master | python3 -c 'import json,sys; m=json.load(sys.stdin); h=m["housekeeping"]; q=m["queries"]; print(m["tap_version"], h["sent_broadcast"] >= 2, h["sent_walk_pages"] >= 4, q["on"], q["writes"], q["sent_writes"], q["answers"] > 0)')" \
+  "Mgate Version G1.00 Jan  1 2026 True True True True 2 True"
+expect "logs the TAP's version" "$(grep -c 'TAP version: Mgate Version G1.00' "$out/daemon14.log")" 1
+kill $daemon; wait $daemon 2>/dev/null || true
+kill $tap; wait $tap 2>/dev/null || true
+
+# --- run 15: queries without writes, housekeeping off, TAP already at its id ---
+mkdir -p "$out/state15"
+python3 linux/tools/mock_tap.py "$out/tap15" --lease 600 --nodes 44 --stats "$out/tap15.json" &
+tap=$!
+sleep 0.5
+printf '{"bus_role": "master", "master_startup": true, "master_queries": true, "serial_port": "%s", "gateway_id": 4609, "web_port": 18105}\n' \
+  "$PWD/$out/tap15" > "$out/state15/settings.json"
+build/linux/tigomonitord --state-dir "$out/state15" --web-dir components/tigo_server/web 2> "$out/daemon15.log" &
+daemon=$!
+# All 30 first reads (a write would queue behind them), then a few seconds more.
+for _ in $(seq 160); do [ -f "$out/tap15.json" ] && [ "$(stat "$out/tap15.json" "len(d['queries'])")" -ge 30 ] && break; sleep 0.5; done
+sleep 6
+expect "reads go out and are answered" "$(stat "$out/tap15.json" "(len(d['queries']) >= 20, d['answered'] >= 20)")" "(True, True)"
+expect "no writes without the setting" "$(stat "$out/tap15.json" "[q for q in d['queries'] if q['text'].startswith(('#', '^00Smrt_'))]")" "[]"
+expect "warm, housekeeping off: no bring-up reads, 0x22s or walks" "$(stat "$out/tap15.json" "([x['f'] for x in d['log'] if x['f'][5:9] in ('000A', '0E02', '0010')], d['broadcast'], d['walk'], d['session'])")" "([], [], [], [])"
+kill $daemon; wait $daemon 2>/dev/null || true
+kill $tap; wait $tap 2>/dev/null || true
+
 [ $fail = 0 ] && echo "master e2e passed" || { echo "master e2e FAILED; see $out/"; exit 1; }

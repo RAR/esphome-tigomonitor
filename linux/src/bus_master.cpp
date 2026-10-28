@@ -42,9 +42,10 @@ const char *fault_name(Fault f) {
 static int64_t unix_now() { return static_cast<int64_t>(time(nullptr)); }
 
 BusMaster::BusMaster(Sink on_rx, Sink on_tx, uint16_t gateway_id, bool bench, bool startup, bool housekeeping,
-                     std::vector<master::Learned41::Entry> learned, Targets targets)
+                     std::vector<master::Learned41::Entry> learned, Targets targets, bool queries, bool writes)
     : on_rx_(std::move(on_rx)), on_tx_(std::move(on_tx)), gateway_(gateway_id), bench_(bench), startup_(startup),
-      housekeeping_on_(housekeeping), learned_(std::move(learned)), targets_(std::move(targets)), phase_(startup ? Phase::probing : Phase::running) {}
+      housekeeping_on_(housekeeping), learned_(std::move(learned)), targets_(std::move(targets)),
+      queries_on_(queries), writes_on_(queries && writes), phase_(startup ? Phase::probing : Phase::running) {}
 
 BusMaster::~BusMaster() { close(); }
 
@@ -68,6 +69,8 @@ bool BusMaster::open(const std::string &device, int baud) {
   lease_ = master::LeaseKeeper();
   splitter_ = protocol::FrameSplitter<std::string>();
   drop_housekeeping_();
+  queries_.reset();
+  holding_ = false;
   // Or it lost power, and came back at the factory address.
   if (startup_) phase_ = Phase::probing;
   LOGI("bus master on %s for gateway %04X%s", path.c_str(), gateway_, bench_ ? " (bench mode)" : "");
@@ -76,6 +79,8 @@ bool BusMaster::open(const std::string &device, int baud) {
   status_.active = true;
   status_.housekeeping = housekeeping_on_;
   status_.learned_41 = static_cast<uint32_t>(learned_.size());
+  status_.queries = queries_on_;
+  status_.writes = writes_on_;
   return true;
 }
 
@@ -198,17 +203,27 @@ void BusMaster::tick(uint32_t now_ms) {
     return;
   }
   if (startup_ && phase_ != Phase::running) {
-    run_startup();
+    run_startup(now_ms);
     return;
   }
   { std::lock_guard<std::mutex> lock(mu_); status_.phase = phase_; }
-  if (housekeeping_on_ && !housekeeping_) {
-    bool reset = readdressed_ && !session_reset_sent_;
-    session_reset_sent_ = session_reset_sent_ || reset;
-    housekeeping_ = std::make_unique<master::Housekeeping>(learned_, now_ms, reset, now_ms ^ unix_now());
+  // After a re-address the CCA's bring-up reads go out whatever the
+  // housekeeping setting; the rest only with it.
+  if ((housekeeping_on_ || readdressed_) && !housekeeping_) {
+    master::HousekeepingPlan plan;
+    plan.send_41 = plan.session = plan.broadcast = plan.walks = housekeeping_on_;
+    plan.bring_up_reads = readdressed_;
+    plan.session_reset = housekeeping_on_ && readdressed_ && !session_reset_sent_;
+    session_reset_sent_ = session_reset_sent_ || plan.session_reset;
+    housekeeping_ = std::make_unique<master::Housekeeping>(learned_, now_ms, plan, now_ms ^ unix_now());
     targets_at_ms_ = now_ms - TARGETS_EVERY_MS;
-    LOGI("bus master: housekeeping on: %zu learned 0x41s%s", learned_.size(),
-         learned_.empty() ? " (none heard: using the built-in content)" : "");
+    if (housekeeping_on_)
+      LOGI("bus master: housekeeping on: %zu learned 0x41s%s", learned_.size(),
+           learned_.empty() ? " (none heard: using the built-in content)" : "");
+  }
+  if (queries_on_ && !queries_) {
+    queries_ = std::make_unique<master::Queries>(now_ms, writes_on_);
+    LOGI("bus master: queries to optimizers on%s", writes_on_ ? ", with the CCA's two writes" : "");
   }
   // Asked each minute, or each second while none have been heard yet.
   if (housekeeping_ && targets_ && now_ms - targets_at_ms_ >= (targets_empty_ ? 1000 : TARGETS_EVERY_MS)) {
@@ -217,21 +232,40 @@ void BusMaster::tick(uint32_t now_ms) {
     housekeeping_->set_targets(t);
     targets_at_ms_ = now_ms;
   }
-  master::Request req = master::next_request(lease_, cursor_, seq_, now_ms, housekeeping_.get());
-  // The 0x0B00 00 is a bring-up frame: allowed only straight after one.
-  bool bring_up = req.cmd == master::CMD_SESSION && req.payload == master::Bytes{0x00} && readdressed_;
+  master::Request req = master::next_request(lease_, cursor_, seq_, now_ms, housekeeping_.get(), queries_.get());
+  // Bring-up frames are allowed only straight after a re-address.
+  bool bring_up = req.bring_up && readdressed_;
   if (housekeeping_) {
     std::lock_guard<std::mutex> lock(mu_);
     status_.sent_41 = sent_41_before_ + housekeeping_->sent_41();
     status_.sent_session = sent_session_before_ + housekeeping_->sent_session();
+    status_.sent_broadcast = sent_broadcast_before_ + housekeeping_->sent_broadcast();
+    status_.sent_walk_pages = sent_walk_pages_before_ + housekeeping_->sent_walk_pages();
   }
-  if (!master::may_send(req.cmd, req.payload, bench_, bring_up)) {
+  if (queries_) {
+    std::lock_guard<std::mutex> lock(mu_);
+    status_.sent_reads = queries_->sent_reads();
+    status_.sent_writes = queries_->sent_writes();
+    status_.answers = queries_->answers();
+  }
+  if (!master::may_send(req.cmd, req.payload, bench_, bring_up, writes_on_)) {
     set_fault(Fault::refused, "refused to send command " + std::to_string(req.cmd));
     return;
   }
   Frame reply;
   bool ok = transact(gateway_, req.cmd, req.payload, reply);
   if (status().fault == Fault::second_master) return;
+  if (housekeeping_) housekeeping_->on_reply(req, ok, reply);
+  if (ok && queries_ && req.cmd == master::CMD_POLL) queries_->on_poll_reply(reply.payload, now_ms);
+  if (ok && req.cmd == 0x000A) {
+    std::string v(reply.payload.begin(), reply.payload.end());
+    for (char &c : v)
+      if (c == '\r' || c == '\n') c = ' ';
+    while (!v.empty() && v.back() == ' ') v.pop_back();
+    LOGI("bus master: TAP version: %s", v.c_str());
+    std::lock_guard<std::mutex> lock(mu_);
+    status_.tap_version = v;
+  }
 
   bool lease_request = req.cmd == master::CMD_TUNNEL && req.payload.size() > 3 &&
                        (req.payload[3] == master::SUB_LEASE_CHECK || req.payload[3] == master::SUB_LEASE_RENEW);
@@ -309,11 +343,14 @@ void BusMaster::tick(uint32_t now_ms) {
 // the re-addressing writes only fire when the TAP really is at the factory
 // address. If it already answers at the configured id (a warm reset, or the
 // CCA removed without a power cut), skip discovery.
-void BusMaster::run_startup() {
+void BusMaster::run_startup(uint32_t now_ms) {
   {
     std::lock_guard<std::mutex> lock(mu_);
     status_.phase = phase_;
   }
+  // The quiet after the bring-up's RESET: nothing at all goes out.
+  if (holding_ && static_cast<int32_t>(now_ms - hold_until_ms_) < 0) return;
+  holding_ = false;
   Frame r;
   if (phase_ == Phase::probing) {
     readdressed_ = false;
@@ -344,7 +381,12 @@ void BusMaster::run_startup() {
     return;
   }
   if (d.failed) {
-    set_fault(Fault::discovery_failed, "re-addressing the TAP failed; it did not answer at the new id");
+    set_fault(Fault::discovery_failed, "re-addressing the TAP failed; it did not answer at the id it was given");
+    return;
+  }
+  if (d.idle_ms) {
+    holding_ = true;
+    hold_until_ms_ = now_ms + d.idle_ms;
     return;
   }
   if (!master::may_send(d.cmd, d.payload, bench_, /*startup=*/true)) {
@@ -359,6 +401,8 @@ void BusMaster::drop_housekeeping_() {
   if (!housekeeping_) return;
   sent_41_before_ += housekeeping_->sent_41();
   sent_session_before_ += housekeeping_->sent_session();
+  sent_broadcast_before_ += housekeeping_->sent_broadcast();
+  sent_walk_pages_before_ += housekeeping_->sent_walk_pages();
   housekeeping_.reset();
 }
 

@@ -44,6 +44,14 @@ struct MasterStatus {
   uint32_t learned_41 = 0;    // 0x41s heard from the CCA (0: the built-in content)
   uint32_t sent_41 = 0;
   uint32_t sent_session = 0;  // 0x0B00s
+  uint32_t sent_broadcast = 0;   // empty 0x22s
+  uint32_t sent_walk_pages = 0;  // 0x26 node table pages
+  bool queries = false;  // the settings
+  bool writes = false;
+  uint32_t sent_reads = 0;  // 0x06s
+  uint32_t sent_writes = 0;
+  uint32_t answers = 0;     // optimizers' answers heard
+  std::string tap_version;  // VERSION's reply, from a bring-up
   std::string detail;
 };
 
@@ -57,11 +65,14 @@ class BusMaster {
   // startup: if the TAP is found at the factory address, re-address it to
   // gateway_id before polling (bus_master re-addressing writes, gated).
   // housekeeping: also send the 0x41s, with the learned content or else the
-  // built-in, and the hourly 0x0B00 (tigo_master.h's Housekeeping).
-  // targets: the optimizers to send 0x41s to, asked each minute.
+  // built-in, the hourly 0x0B00 and 0x22s, and the 0x26 walks
+  // (tigo_master.h's Housekeeping). targets: the optimizers to send 0x41s
+  // to, asked each minute. queries: the CCA's 0x06 reads to optimizers;
+  // writes: and the two writes their answers call for (Queries).
   using Targets = std::function<std::vector<uint16_t>()>;
   BusMaster(Sink on_rx, Sink on_tx, uint16_t gateway_id, bool bench, bool startup, bool housekeeping = false,
-            std::vector<esphome::tigo_monitor::master::Learned41::Entry> learned = {}, Targets targets = nullptr);
+            std::vector<esphome::tigo_monitor::master::Learned41::Entry> learned = {}, Targets targets = nullptr,
+            bool queries = false, bool writes = false);
   static const uint32_t TARGETS_EVERY_MS = 60000;
   ~BusMaster();
 
@@ -84,7 +95,7 @@ class BusMaster {
                 esphome::tigo_monitor::master::Frame &reply, uint32_t timeout_ms = REPLY_TIMEOUT_MS);
   bool is_reply(uint16_t cmd, const esphome::tigo_monitor::master::Bytes &request,
                 const esphome::tigo_monitor::master::Frame &f) const;
-  void run_startup();  // probe + discovery, before steady state
+  void run_startup(uint32_t now_ms);  // probe + discovery, before steady state
   void set_fault(Fault f, const std::string &detail);
   void update_lease_fault_();
   void drop_housekeeping_();
@@ -99,11 +110,16 @@ class BusMaster {
   // 0x0B00 straight away, as the CCA's bring-up sends it.
   std::unique_ptr<esphome::tigo_monitor::master::Housekeeping> housekeeping_;
   Targets targets_;
+  bool queries_on_, writes_on_;
+  std::unique_ptr<esphome::tigo_monitor::master::Queries> queries_;
+  uint32_t hold_until_ms_ = 0;  // discovery's quiet after a RESET
+  bool holding_ = false;
   uint32_t targets_at_ms_ = 0;
   bool targets_empty_ = true;
   bool readdressed_ = false;     // the last bring-up moved the TAP off the factory address
   bool session_reset_sent_ = false;  // the 0x0B00 00, sent once per start, as after a CCA reboot
   uint32_t sent_41_before_ = 0, sent_session_before_ = 0;  // from earlier Housekeepings
+  uint32_t sent_broadcast_before_ = 0, sent_walk_pages_before_ = 0;
   Phase phase_;
   std::unique_ptr<esphome::tigo_monitor::master::Discovery> discovery_;
   int fd_ = -1;
