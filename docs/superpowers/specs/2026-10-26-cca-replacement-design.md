@@ -149,6 +149,49 @@ check. Per the analysis session (`docs/ROOF_STEADY_STATE.md`), the bench opcodes
 running. The opcode table above came from a bench TAP and the analysis notes;
 the roof gateway's tunnel supersedes it here.
 
+### The rest of the CCA's schedule (24 h passive capture, 2026-10-26/27)
+
+Every request the CCA sent in 24 h, by count: 0x0148 polls (7.7 M), tunnel
+0x2E (4,223), 0x41 (2,265), 0x06 (1,761), 0x26 (970), 0x2D (97), 0x22 (72),
+0x0B00 (41), 0x0D (32), and the bring-up frames (16 bring-ups: four CCA
+reboots and twelve overnight watchdog cuts). What each is, and what the
+master now does about it:
+
+- **0x41**: three streams, once a minute each, a new target every
+  10 minutes. Its 22 content bytes are the same for every target, and the
+  same on another site (taptap issue #20's capture); taptap's protocol.md
+  shows an older firmware's version, which differs in two 16-bit values. So
+  they look like a firmware constant: built in, and a learned copy wins.
+  Targets: random over the optimizers heard (the CCA favours 0x0001 and the
+  four undersized optimizers on streams 01/02 for reasons unknown).
+- **0x0B00 01**: hourly. The overnight watchdog is the same tick: with no
+  data for an hour, the CCA cuts the TAP's power right after it. 00 then 01
+  only after a CCA reboot.
+- **0x22**, empty, to node 0000 then 0001, a second apart, a second after
+  each 0x0B00 01 and in each bring-up. taptap: an older CCA used 0x22 *with
+  data* for "PV off", and sent it empty when PV off was not asserted. Only
+  the empty form is ever sent; with data, never.
+- **0x26**: the node table, twice over, every ~15 minutes and after each
+  bring-up; each page starts at the last reply's start + count, ending on
+  an empty page. The replies are the Frame 27s the Monitor turns into
+  barcodes.
+- **Bring-up**, after re-addressing: SET_ID_BY_MAC to 1202, a read there, a
+  RESET broadcast, ~5 s silence, back at 1201; then VERSION, 0x0E02,
+  [0x0B00 00], 0x0D 00 00, 0x0B00 01, 0x0D 00 01, the 0x22 pair, the walks,
+  the lease renewal. The 0x0D reply holds 16 random-looking bytes (probably
+  the network key): never logged or committed.
+- **0x06**: ASCII queries to optimizers, answered later as type 0x07
+  packets in 0x0149 (668 answers). Reads: ^00Version, ^00Tests, ^00Info,
+  ^00Smrt, ^00Mppt, repeated 3, 5, 7… up to 30 minutes apart until answered.
+  All five to every node after a CCA reboot; ^00Tests to each at sunrise.
+  Two writes, each only after a particular answer: #00w255 after an Info
+  whose ninth word is 00 (50 of 50), ^00Smrt_........S0000...0000 after a
+  Smrt in mode N (30 of 30; the two H9.0018 optimizers). What the fields
+  mean is not known.
+
+Not replicated: the watchdog power cut itself, which needs a switch on the
+TAP's supply.
+
 ### What a spare gateway showed (analysis repo, LIVE_TAP_SESSION.md "Second unit")
 
 An older spare, from the roof's G5 generation (24 V only), standalone with no
