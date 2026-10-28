@@ -8,11 +8,14 @@
 
 #include "tigo_protocol.h"
 
+#include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <cstdint>
 #include <map>
 #include <mutex>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -75,6 +78,7 @@ struct BusStats {
 class Monitor {
  public:
   Monitor(std::string state_path, float power_calibration, size_t max_nodes);
+  ~Monitor();  // writes any state still waiting
 
   void feed(const char *data, size_t len);
 
@@ -145,6 +149,7 @@ class Monitor {
   std::vector<StringTotals> strings_locked_() const;
   bool night_locked_() const;
   bool save_locked_();
+  void writer_loop_();
 
   std::string state_path_;
   float power_calibration_;
@@ -170,6 +175,17 @@ class Monitor {
   Clock::time_point last_tick_{};
   Clock::time_point last_save_{};
   bool dirty_ = false;
+
+  // state.json is written on its own thread, outside mu_: an fsync on a slow
+  // SD card took 0.9 s, and in the master role feed() and tick() run on the
+  // loop that drives the bus. save_locked_() hands over the text; the newest
+  // waiting copy wins.
+  std::mutex write_mu_;
+  std::condition_variable write_cv_;
+  std::string pending_;
+  bool has_pending_ = false, writing_ = false, stop_writer_ = false;
+  std::atomic<bool> write_failed_{false};
+  std::thread writer_;
 };
 
 }  // namespace tigod

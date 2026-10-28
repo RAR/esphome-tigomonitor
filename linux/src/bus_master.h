@@ -49,8 +49,8 @@ struct MasterStatus {
   std::vector<int64_t> recent_lost_unix;  // oldest first, at most RECENT_LOST
   static const size_t RECENT_LOST = 10;
   uint32_t back_without_lease = 0;
-  // The longest the bus sat idle on our account: from the end of one tick
-  // to the start of the next, so the time waiting on the TAP isn't in it.
+  // The longest the bus waited on the daemon rather than the TAP: from the
+  // end of one tick to the start of the next, or inside on_rx (decoding).
   // Normally ~10 ms; anything long is the rest of the daemon holding the
   // loop up. recent covers this window and the last (5 to 10 min).
   uint32_t gap_max_ms = 0;
@@ -135,6 +135,7 @@ class BusMaster {
   uint32_t targets_at_ms_ = 0;
   bool targets_empty_ = true;
   void tick_(uint32_t now_ms);
+  void note_pause_(uint32_t ms, int64_t now_steady_ms);
   static const int64_t GAP_WINDOW_MS = 5 * 60000;
   int64_t last_tick_end_ms_ = -1;  // steady clock
   int64_t gap_window_start_ms_ = 0;

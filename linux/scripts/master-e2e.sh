@@ -387,4 +387,25 @@ expect "no stalls of its own: under 2 s between requests" "$(api 18107 /api/mast
 kill $daemon; wait $daemon 2>/dev/null || true
 kill $tap; wait $tap 2>/dev/null || true
 
+# --- run 18: a slow SD card ---
+# Every fsync takes 0.9 s (linux/tools/slow_fsync.c). Saving state.json,
+# on the Frame 27 the mock sends and every 10 s after, must not hold the
+# bus up: no pause over 300 ms, and the state still lands on disk.
+mkdir -p "$out/state18"
+cc -shared -fPIC -o "$out/slow_fsync.so" linux/tools/slow_fsync.c -ldl
+python3 linux/tools/mock_tap.py "$out/tap18" --lease 600 --nodes 44 --stats "$out/tap18.json" &
+tap=$!
+sleep 0.5
+printf '{"bus_role": "master", "serial_port": "%s", "gateway_id": 4609, "web_port": 18108}\n' \
+  "$PWD/$out/tap18" > "$out/state18/settings.json"
+LD_PRELOAD="$PWD/$out/slow_fsync.so" build/linux/tigomonitord --state-dir "$out/state18" --web-dir components/tigo_server/web 2> "$out/daemon18.log" &
+daemon=$!
+for _ in $(seq 60); do [ -f "$out/state18/state.json" ] && break; sleep 0.5; done
+sleep 25
+expect "state saved with a slow fsync" "$(python3 -c "import json; print(len(json.load(open('$out/state18/state.json'))['nodes']) > 0)")" True
+expect "no pause over 300 ms while it saved" "$(api 18108 /api/master | python3 -c 'import json,sys; g=json.load(sys.stdin)["gap_ms"]; print(g["max"] < 300, g["max"])' | cut -d' ' -f1)" True
+api 18108 /api/master | python3 -c 'import json,sys; print("  (longest pause:", json.load(sys.stdin)["gap_ms"]["max"], "ms)")'
+kill $daemon; wait $daemon 2>/dev/null || true
+kill $tap; wait $tap 2>/dev/null || true
+
 [ $fail = 0 ] && echo "master e2e passed" || { echo "master e2e FAILED; see $out/"; exit 1; }

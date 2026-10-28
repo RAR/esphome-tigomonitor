@@ -33,7 +33,33 @@ static int64_t unix_ms() {
 }
 
 Monitor::Monitor(std::string state_path, float power_calibration, size_t max_nodes)
-    : state_path_(std::move(state_path)), power_calibration_(power_calibration), max_nodes_(max_nodes) {}
+    : state_path_(std::move(state_path)), power_calibration_(power_calibration), max_nodes_(max_nodes),
+      writer_([this] { writer_loop_(); }) {}
+
+Monitor::~Monitor() {
+  {
+    std::lock_guard<std::mutex> lock(write_mu_);
+    stop_writer_ = true;
+  }
+  write_cv_.notify_all();
+  writer_.join();
+}
+
+void Monitor::writer_loop_() {
+  std::unique_lock<std::mutex> lock(write_mu_);
+  for (;;) {
+    write_cv_.wait(lock, [this] { return has_pending_ || stop_writer_; });
+    if (!has_pending_) return;  // stopping, and nothing left to write
+    std::string text = std::move(pending_);
+    has_pending_ = false;
+    writing_ = true;
+    lock.unlock();
+    if (!write_file_atomic(state_path_, text)) write_failed_ = true;  // the next save marks it dirty again
+    lock.lock();
+    writing_ = false;
+    write_cv_.notify_all();
+  }
+}
 
 void Monitor::feed(const char *data, size_t len) {
   std::lock_guard<std::mutex> lock(mu_);
@@ -470,14 +496,21 @@ void Monitor::tick() {
   }
 }
 
+// Waits for the write, for the save at shutdown.
 bool Monitor::save() {
-  std::lock_guard<std::mutex> lock(mu_);
-  dirty_ = true;
-  return save_locked_();
+  {
+    std::lock_guard<std::mutex> lock(mu_);
+    dirty_ = true;
+    save_locked_();
+  }
+  std::unique_lock<std::mutex> lock(write_mu_);
+  write_cv_.wait(lock, [this] { return !has_pending_ && !writing_; });
+  return !write_failed_;
 }
 
 bool Monitor::save_locked_() {
   last_save_ = Clock::now();
+  if (write_failed_.exchange(false)) dirty_ = true;
   if (!dirty_) return true;
   json nodes = json::array();
   for (const auto &n : nodes_) {
@@ -500,7 +533,12 @@ bool Monitor::save_locked_() {
     if (!p.barcode.empty()) peaks[p.barcode] = p.peak_power;
   json j = {{"version", 1},     {"nodes", nodes},           {"energy_kwh", energy_kwh_}, {"energy_in_kwh", energy_in_kwh_}, {"today_in_kwh", today_in_kwh_}, {"peaks", peaks},
             {"today", today_},  {"today_kwh", today_kwh_}, {"daily_kwh", history}};
-  if (!write_file_atomic(state_path_, j.dump(1) + "\n")) return false;
+  {
+    std::lock_guard<std::mutex> lock(write_mu_);
+    pending_ = j.dump(1) + "\n";
+    has_pending_ = true;
+  }
+  write_cv_.notify_all();
   dirty_ = false;
   return true;
 }
