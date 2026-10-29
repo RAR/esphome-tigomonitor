@@ -137,6 +137,9 @@ class BusMaster {
   void tick_(uint32_t now_ms);
   void note_pause_(uint32_t ms, int64_t now_steady_ms);
   static const int64_t GAP_WINDOW_MS = 5 * 60000;
+  // How far past its due a wait inside a request may run before the excess
+  // counts as a pause: the process was not running (stopped, or starved).
+  static const int64_t OVERRUN_SLACK_MS = 20;
   int64_t last_tick_end_ms_ = -1;  // steady clock
   int64_t gap_window_start_ms_ = 0;
   uint32_t gap_window_max_ms_ = 0, gap_prev_window_max_ms_ = 0;

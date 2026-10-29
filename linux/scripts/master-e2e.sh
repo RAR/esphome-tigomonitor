@@ -103,10 +103,21 @@ printf '{"bus_role": "master", "serial_port": "%s", "gateway_id": 4609, "web_por
 build/linux/tigomonitord --state-dir "$out/state3" --web-dir components/tigo_server/web 2> "$out/daemon3.log" &
 daemon=$!
 sleep 2
-python3 linux/tools/mock_tap.py "$out/tap3" --stats "$out/tap3.json" &
+# Every second reply lost: the master spends most of its time waiting on
+# the TAP, where the freezes below then mostly land.
+python3 linux/tools/mock_tap.py "$out/tap3" --drop-every 2 --stats "$out/tap3.json" &
 tap=$!
 sleep 8
 expect "opens a port that appears later" "$(api 18094 /api/master | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["active"], d["polls"] > 0)')" "True True"
+# Freezes land wherever the daemon happens to be, mostly waiting on the
+# TAP's reply: each must still raise the longest pause past its length.
+missed=""
+for secs in 2 3 4 5; do
+  kill -STOP $daemon; sleep $secs; kill -CONT $daemon; sleep 1
+  max="$(api 18094 /api/master | python3 -c 'import json,sys; print(json.load(sys.stdin)["gap_ms"]["max"])')"
+  [ "$max" -ge $((secs * 1000 - 100)) ] || missed="$missed ${secs}s(max $max)"
+done
+expect "every freeze counted, mid-request too" "${missed:-none}" none
 kill $daemon; wait $daemon 2>/dev/null || true
 kill $tap; wait $tap 2>/dev/null || true
 

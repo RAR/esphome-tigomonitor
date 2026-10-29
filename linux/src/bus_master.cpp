@@ -127,7 +127,14 @@ bool BusMaster::transact(uint16_t dest, uint16_t cmd, const Bytes &payload, Fram
     }
     off += static_cast<size_t>(n);
   }
+  // A frame takes 10 bits a byte on the wire; past that, tcdrain() waited
+  // on the daemon, not the line.
+  int64_t drain_from = steady_ms();
   tcdrain(fd_);
+  int64_t drained = steady_ms();
+  int64_t on_wire_ms = static_cast<int64_t>(wire.size()) * 10 * 1000 / (baud_ > 0 ? baud_ : 38400);
+  if (drained - drain_from > on_wire_ms + OVERRUN_SLACK_MS)
+    note_pause_(static_cast<uint32_t>(drained - drain_from - on_wire_ms), drained);
   if (on_tx_) on_tx_(reinterpret_cast<const char *>(wire.data()), wire.size());
 
   auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
@@ -138,7 +145,13 @@ bool BusMaster::transact(uint16_t dest, uint16_t cmd, const Bytes &payload, Fram
         std::chrono::duration_cast<std::chrono::milliseconds>(deadline - std::chrono::steady_clock::now()).count());
     if (left <= 0) break;
     pollfd pfd{fd_, POLLIN, 0};
+    int64_t polled_from = steady_ms();
     int r = ::poll(&pfd, 1, left);
+    // A wait that ran past its timeout: the daemon was held up mid-request,
+    // which the gap between ticks never sees.
+    int64_t polled = steady_ms();
+    if (polled - polled_from > left + OVERRUN_SLACK_MS)
+      note_pause_(static_cast<uint32_t>(polled - polled_from - left), polled);
     if (r < 0 && errno == EINTR) continue;
     if (r <= 0) break;
     ssize_t n = ::read(fd_, buf, sizeof(buf));
