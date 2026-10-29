@@ -42,9 +42,9 @@ takes over when the first one fails, and that can be serviced in daylight.
   master's power stopped the array. **With a standby, cutting one master's power
   only hands the bus to the other one.** So rapid shutdown must not depend on a
   master dying. Since 2026-10-29 the TAP is fed from the RSD supply, and cutting
-  that silences the mesh whatever the masters are doing. That has to be the
-  shutdown procedure, and it has to be confirmed before a standby is ever left
-  armed on the roof (open question 1).
+  that silences the mesh whatever the masters are doing. **Confirmed by the owner
+  (2026-10-29): the RSD cuts the TAP's power directly, so the array shuts down
+  regardless of the Pi.** A standby doesn't change that.
 - **A takeover that strands hardware.** The standby must not re-address, store
   or reset a TAP that is already running. It continues the session that is
   running; it doesn't start a new one.
@@ -60,8 +60,16 @@ takes over when the first one fails, and that can be serviced in daylight.
   and restart on the Pi so far stopped the bus for ~2 s, and the daemon resumed
   without any bring-up. The TAP can't tell one master from another: requests
   carry only the destination, never a source. A different device is new; the
-  bytes on the wire are not. Tonight's shutdown for the enclosure lasted
-  minutes, not seconds, and is the first longer test. Check how it recovered.
+  bytes on the wire are not. **The outage while the Pi
+  was being mounted (2026-10-29, after dark)** was the first long one. The TAP
+  stayed on its RSD supply, and when the Pi came back:
+  - it found the TAP still at 1201 and took the poll cursor (E717);
+  - it found the lease run out (44 nodes) and renewed it, 10 s after the
+    daemon started;
+  - telemetry came straight back.
+
+  There was no re-addressing and no bring-up: a master that comes along after
+  minutes of silence can take the session over.
 - **The state a master carries can all be learned by listening:**
   - the poll cursor, which `resyncs` already takes from the TAP's reply;
   - the lease, from the 0x2F replies on the bus;
@@ -185,13 +193,14 @@ seconds of telemetry. It's listed under Later, behind fencing.
 
 ## Open questions (the owner's)
 
-1. **Is cutting the RSD supply (and with it the TAP) now the shutdown
-   procedure,** and has it been checked that this alone puts the array in safe
-   mode with a master still running? This gates arming a standby on the roof.
-2. Which device is the standby: a second Pi, or an ESP32
-   ([ESP32 bus master design](2026-10-29-esp32-bus-master-design.md))?
-3. How long can the TAP go without a master before it needs the bring-up
-   again? Tonight's outage for the enclosure gives the first data point.
+1. ~~Is cutting the RSD supply the shutdown procedure?~~ Yes: the RSD cuts
+   the TAP's power directly (the owner, 2026-10-29).
+2. Which device is the standby? The owner has an M5Stack AtomS3R, so an ESP32
+   ([ESP32 bus master design](2026-10-29-esp32-bus-master-design.md)).
+3. How long can the TAP go without a master and still be picked up without
+   the bring-up? So far: minutes, with the lease lapsed (the 2026-10-29
+   outage). The upper limit is unknown, and a TAP that lost power always
+   needs the bring-up.
 
 ## Later
 

@@ -71,7 +71,7 @@ run the roof alone since the CCA died (2026-10-29). Pairs with
   |---|---|---|---|---|
   | LilyGO T-CAN485 | MAX13487E, **auto-direction** | yes | none | **The thin standby.** Its UART TX is already wired; the driver turns itself on |
   | Waveshare ESP32-S3-RS485-CAN | SP3485, DE+/RE on GPIO21 | yes | 8 MB | Full build possible. Needs DE driven by the IDF RS485 half-duplex mode (RTS on GPIO21) |
-  | AtomS3R + Atomic RS485 Base | auto-direction (unverified) | no | 8 MB | Possible; unverified wiring |
+  | **M5Stack AtomS3R** + Atomic RS485 Base | auto-direction (unverified) | no | 8 MB | **The owner's board, so the first target.** It's the reference rig's pairing; TX is on GPIO6, so far unused |
 
 ## How it will be built (decided)
 
@@ -156,8 +156,9 @@ firmware doesn't enforce it.
 1. **The refactor (Linux):** `master-e2e.sh` and `cca-e2e.sh` pass unchanged
    after `BusMasterCore` is split out.
 2. **ESP32 against a mock, hardware in the loop:**
-   - The test rig is a T-CAN485 wired to a USB RS485 adapter on the PC. The PC
-     runs `mock_tap.py` on that adapter.
+   - The test rig is the AtomS3R and RS485 Base wired to a USB RS485 adapter
+     on the PC. The PC runs `mock_tap.py` on that adapter. The first check is
+     whether the Base's transmit reaches the adapter at all (auto-direction).
    - Check that it is taking the role, that its polls are answered, that the
      lease is renewed when the mock reads 0, and the gap/overrun counters.
    - Then force flash writes (an OTA upload aborted halfway) and Wi-Fi
@@ -174,9 +175,12 @@ firmware doesn't enforce it.
 
 ## Calls I made (check these)
 
-- The **T-CAN485 is the first target:** auto-direction, a CAN port for later
-  fencing, and no PSRAM, which suits a device that does only this. Its
-  classic-ESP32 flash freeze matters least on a board that writes no flash.
+- **The AtomS3R is the first target** because the owner has one. It's an S3
+  with 8 MB of PSRAM, so `execute_from_psram` is on the table if the flash
+  freeze is ever a problem. It has no CAN port, but CAN is a later item. A
+  thin config (no web server, no history) keeps it from writing flash. The
+  T-CAN485 (auto-direction, CAN, no PSRAM) is the fallback if the RS485 Base
+  turns out not to switch direction by itself.
 - **A separate component** rather than a role on `tigo_monitor`, to keep the
   read-only promise literally true.
 - **The role and options are set in YAML, not switchable from HA.**
@@ -185,10 +189,12 @@ firmware doesn't enforce it.
 
 ## Open questions
 
-1. Which boards does the owner have on hand? The T-CAN485 plan assumes one is
-   available, or bought.
+1. ~~Which boards?~~ An M5Stack AtomS3R (the owner, 2026-10-29). Is it the
+   reference rig that runs the full firmware with history, or a spare? The
+   master device should run a thin config, so it can't be the rig as it is
+   now.
 2. Does the Atomic RS485 Base turn its driver on by itself? It's unverified,
-   and if so, it would be a second candidate board.
+   and the first bench step answers it.
 3. Does the Waveshare S3's SP3485 work with the IDF's RTS-timed DE, at 38400
    baud, without clipping the last byte? It only matters if the full build is
    wanted on the master device.
