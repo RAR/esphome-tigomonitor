@@ -71,7 +71,11 @@ run the roof alone since the CCA died (2026-10-29). Pairs with
   |---|---|---|---|---|
   | LilyGO T-CAN485 | MAX13487E, **auto-direction** | yes | none | **The thin standby.** Its UART TX is already wired; the driver turns itself on |
   | Waveshare ESP32-S3-RS485-CAN | SP3485, DE+/RE on GPIO21 | yes | 8 MB | Full build possible. Needs DE driven by the IDF RS485 half-duplex mode (RTS on GPIO21) |
-  | **M5Stack AtomS3R** + Atomic RS485 Base | auto-direction (unverified) | no | 8 MB | **The owner's board, so the first target.** It's the reference rig's pairing; TX is on GPIO6, so far unused |
+  | M5Stack AtomS3R + Atomic RS485 Base | auto-direction (unverified) | no | 8 MB | The reference rig's pairing; TX is on GPIO6, so far unused |
+  | **Waveshare ESP32-S3-Relay-1CH** | isolated; direction "by the main controller's hardware flow" (most likely the UART's RTS, IDF RS485 half-duplex mode) | no | 8 MB (ESP32-S3R8) | **The owner's board, and the target.** It adds a relay that can restart the TAP. It runs on 5 V only, and its RS485 and relay GPIOs are not on the wiki page: read them off the schematic |
+
+  The relay is **1NO only**, rated 10 A at 30 V DC, with an RTC on the board
+  ([Waveshare wiki](https://www.waveshare.com/wiki/ESP32-S3-Relay-1CH)).
 
 ## How it will be built (decided)
 
@@ -144,6 +148,41 @@ run the roof alone since the CCA died (2026-10-29). Pairs with
   request's write, drain and read ran past what the wire needs. These are
   the numbers that tell us whether the ESP32's timing is actually better.
 
+### Restarting the TAP (the relay)
+
+The CCA restarted the TAP by cutting its power whenever it couldn't hear it.
+That's what the TAP resets in the 2026-10-28 captures were. The relay gives us
+the same ability, under our control. A TAP that loses power comes back at the
+factory address, so every restart depends on the bring-up (`startup`).
+**The bring-up has not been run on the roof TAP yet.**
+
+**Wiring (decided).** The board's relay contact is normally open. Putting the
+TAP's feed straight through it would mean the TAP is only powered while the
+relay is energized. Every reboot, OTA, crash or brown-out of the ESP32 would
+then cut the TAP, including while the Pi is the active master. So the board's
+contact drives an **external normally-closed relay** in the TAP's feed instead:
+- idle, nothing energized, the TAP is powered;
+- energizing cuts it.
+The contact sits **in series after the RSD cut**. The RSD still removes the
+TAP's power whatever the relay does, so rapid shutdown is unchanged.
+
+**When it fires (decided for the first version):**
+- **Only on request:** a `restart_tap` action, a button entity, held
+  `restart_tap_off` (default 10 s) before power is restored.
+- **Never automatically.** An automatic restart on `no_reply`, as the CCA did,
+  waits until the bring-up has been proven on the roof. Even then it gets
+  limits: at most once an hour, never at night, and only on the active master.
+- **Only from the active master.** A standby restarting the TAP under the Pi
+  would pull the bus out from under a healthy master. A request on a device
+  that isn't the active master is refused and logged.
+- After a restart, the device runs the bring-up as at boot.
+- `/api/master` / the entities report `tap_restarts` and `last_tap_restart`,
+  so the restarts are visible and can't be mistaken for TAP faults.
+
+**First roof test.** Have the backup CCA on hand as the recovery path, since a
+failed bring-up leaves the array without a master that can start it. Do it in
+daylight, so that production coming back shows the bring-up worked.
+
 ### OTA
 
 An OTA reboot stops the bus for a few seconds, the same as a Pi install. With
@@ -156,9 +195,14 @@ firmware doesn't enforce it.
 1. **The refactor (Linux):** `master-e2e.sh` and `cca-e2e.sh` pass unchanged
    after `BusMasterCore` is split out.
 2. **ESP32 against a mock, hardware in the loop:**
-   - The test rig is the AtomS3R and RS485 Base wired to a USB RS485 adapter
-     on the PC. The PC runs `mock_tap.py` on that adapter. The first check is
-     whether the Base's transmit reaches the adapter at all (auto-direction).
+   - The test rig is the Relay-1CH wired to a USB RS485 adapter on the PC.
+     The PC runs `mock_tap.py` on that adapter. The first check is whether the
+     board's transmit reaches the adapter at all: the direction control, and
+     that the last byte of each frame isn't clipped at 38400 baud.
+   - The relay: `restart_tap` on a standby is refused; on the active master,
+     it energizes for `restart_tap_off` and then releases. Measure it with a
+     meter on the external NC relay's contact, with no TAP attached.
+   - A reboot or OTA of the board leaves the NC contact closed (meter).
    - Check that it is taking the role, that its polls are answered, that the
      lease is renewed when the mock reads 0, and the gap/overrun counters.
    - Then force flash writes (an OTA upload aborted halfway) and Wi-Fi
@@ -175,12 +219,17 @@ firmware doesn't enforce it.
 
 ## Calls I made (check these)
 
-- **The AtomS3R is the first target** because the owner has one. It's an S3
-  with 8 MB of PSRAM, so `execute_from_psram` is on the table if the flash
-  freeze is ever a problem. It has no CAN port, but CAN is a later item. A
-  thin config (no web server, no history) keeps it from writing flash. The
-  T-CAN485 (auto-direction, CAN, no PSRAM) is the fallback if the RS485 Base
-  turns out not to switch direction by itself.
+- **The Waveshare ESP32-S3-Relay-1CH is the target** (the owner's choice; it
+  has RS485 and a relay to restart the TAP).
+  - It's an S3 with 8 MB of PSRAM, so `execute_from_psram` is on the table if
+    the flash freeze is ever a problem.
+  - A thin config (no web server, no history) keeps it from writing flash.
+  - It has no CAN port; CAN is a later item.
+  - The AtomS3R stays the test rig.
+- **The external NC relay.** Without it, the board's NO-only relay makes the
+  TAP depend on the ESP32 staying up.
+- **The relay fires only on request** at first, and only on the active
+  master.
 - **A separate component** rather than a role on `tigo_monitor`, to keep the
   read-only promise literally true.
 - **The role and options are set in YAML, not switchable from HA.**
@@ -189,12 +238,14 @@ firmware doesn't enforce it.
 
 ## Open questions
 
-1. ~~Which boards?~~ An M5Stack AtomS3R (the owner, 2026-10-29). Is it the
-   reference rig that runs the full firmware with history, or a spare? The
-   master device should run a thin config, so it can't be the rig as it is
-   now.
-2. Does the Atomic RS485 Base turn its driver on by itself? It's unverified,
-   and the first bench step answers it.
-3. Does the Waveshare S3's SP3485 work with the IDF's RTS-timed DE, at 38400
-   baud, without clipping the last byte? It only matters if the full build is
-   wanted on the master device.
+1. ~~Which boards?~~ A Waveshare ESP32-S3-Relay-1CH (the owner, 2026-10-29).
+2. Its RS485 TX/RX, direction and relay GPIOs, and its flash size, aren't on
+   Waveshare's wiki page. Read them off the schematic or the board itself
+   before writing the board file.
+3. What voltage is the TAP fed from the RSD supply? The external NC relay's
+   contacts must be rated for it. And what will feed the board's 5 V? If it
+   is fed from the RSD-switched supply, the RSD cuts the board too, which is
+   fine.
+4. Should the restart button be exposed in Home Assistant at all, or only on
+   the device (its BOOT button, or a long press)? A one-tap TAP restart from a
+   dashboard is easy to press by mistake.
