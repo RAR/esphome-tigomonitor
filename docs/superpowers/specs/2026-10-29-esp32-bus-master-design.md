@@ -72,7 +72,7 @@ run the roof alone since the CCA died (2026-10-29). Pairs with
   | LilyGO T-CAN485 | MAX13487E, **auto-direction** | yes | none | **The thin standby.** Its UART TX is already wired; the driver turns itself on |
   | Waveshare ESP32-S3-RS485-CAN | SP3485, DE+/RE on GPIO21 | yes | 8 MB | Full build possible. Needs DE driven by the IDF RS485 half-duplex mode (RTS on GPIO21) |
   | M5Stack AtomS3R + Atomic RS485 Base | auto-direction (unverified) | no | 8 MB | The reference rig's pairing; TX is on GPIO6, so far unused |
-  | **Waveshare ESP32-S3-Relay-1CH** | isolated; direction "by the main controller's hardware flow" (most likely the UART's RTS, IDF RS485 half-duplex mode) | no | 8 MB (ESP32-S3R8) | **The owner's board, and the target.** It adds a relay that can restart the TAP. It runs on 5 V only, and its RS485 and relay GPIOs are not on the wiki page: read them off the schematic |
+  | **Waveshare ESP32-S3-Relay-1CH** | isolated; TX GPIO7, RX GPIO8, DE/RE on **GPIO21**, driven as the UART's RTS in the IDF RS485 half-duplex mode (Waveshare's "hardware flow") | no | 8 MB (ESP32-S3R8) | **The owner's board, and the target.** Its relay is left unwired (see below). It runs on 5 V only. The relay is GPIO47, with an RTC (PCF85063A) on I2C GPIO39/38 |
 
   The relay is **1NO only**, rated 10 A at 30 V DC, with an RTC on the board
   ([Waveshare wiki](https://www.waveshare.com/wiki/ESP32-S3-Relay-1CH)).
@@ -171,9 +171,12 @@ firmware doesn't enforce it.
    after `BusMasterCore` is split out.
 2. **ESP32 against a mock, hardware in the loop:**
    - The test rig is the Relay-1CH wired to a USB RS485 adapter on the PC.
-     The PC runs `mock_tap.py` on that adapter. The first check is whether the
-     board's transmit reaches the adapter at all: the direction control, and
-     that the last byte of each frame isn't clipped at 38400 baud.
+     The PC runs `mock_tap.py` on that adapter. The first checks:
+     - whether the board's transmit reaches the adapter at all, which tests
+       RTS-driven DE on GPIO21;
+     - that the last byte of each frame isn't clipped at 38400 baud;
+     - that the board doesn't drive the bus while it resets (bad checksums
+       on the adapter during a reboot).
    - Check that it is taking the role, that its polls are answered, that the
      lease is renewed when the mock reads 0, and the gap/overrun counters.
    - Then force flash writes (an OTA upload aborted halfway) and Wi-Fi
@@ -191,7 +194,7 @@ firmware doesn't enforce it.
 ## Calls I made (check these)
 
 - **The Waveshare ESP32-S3-Relay-1CH is the target** (the owner's choice; it
-  has RS485 and a relay to restart the TAP).
+  has RS485 in an industrial package).
   - It's an S3 with 8 MB of PSRAM, so `execute_from_psram` is on the table if
     the flash freeze is ever a problem.
   - A thin config (no web server, no history) keeps it from writing flash.
@@ -208,9 +211,13 @@ firmware doesn't enforce it.
 ## Open questions
 
 1. ~~Which boards?~~ A Waveshare ESP32-S3-Relay-1CH (the owner, 2026-10-29).
-2. Its RS485 TX/RX, direction and relay GPIOs, and its flash size, aren't on
-   Waveshare's wiki page. Read them off the schematic or the board itself
-   before writing the board file.
+2. ~~The GPIOs?~~ From the owner's config for the board: RS485 TX 7, RX 8,
+   DE/RE 21, relay 47 (held off), RTC on I2C 39/38. Still unknown:
+   - the flash size;
+   - whether GPIO21 has a pull-down. If DE floats high while the ESP32 is
+     resetting, the board drives the bus during every boot and corrupts the
+     active master's exchanges. The first bench step checks this: reboot
+     the board on a bus the mock is running, and look for bad checksums.
 3. What will feed the board's 5 V? If it is fed from the RSD-switched
    supply, the RSD cuts the board too, which is fine.
 
