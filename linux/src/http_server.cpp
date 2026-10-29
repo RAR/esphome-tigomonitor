@@ -1132,6 +1132,7 @@ void HttpServer::routes_() {
                       {"port", s.mqtt.port},
                       {"username", s.mqtt.username},
                       {"password_set", !s.mqtt.password.empty()},
+                      {"discovery", s.mqtt.discovery},
                       {"discovery_prefix", s.mqtt.discovery_prefix},
                       {"base_topic", s.mqtt.base_topic}}},
                     {"mqtt_connected", ctx_.mqtt_connected()},
@@ -1176,6 +1177,7 @@ void HttpServer::routes_() {
         if (m.contains("password")) s.mqtt.password = m["password"].get<std::string>();
         else if (s.mqtt.host != before.host || s.mqtt.port != before.port || s.mqtt.username != before.username)
           s.mqtt.password.clear();
+        if (m.contains("discovery")) s.mqtt.discovery = m["discovery"].get<bool>();
         if (m.contains("discovery_prefix")) s.mqtt.discovery_prefix = m["discovery_prefix"].get<std::string>();
         if (m.contains("base_topic")) s.mqtt.base_topic = m["base_topic"].get<std::string>();
       }

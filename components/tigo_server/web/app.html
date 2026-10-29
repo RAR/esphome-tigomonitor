@@ -1037,6 +1037,10 @@
           <div class="cfg-ctrl"><input class="cfg-input" id="pi-mqtt-topic" placeholder="tigomonitor" autocomplete="off"></div>
         </div>
         <div class="cfg-row">
+          <div class="cfg-text"><strong>Home Assistant discovery</strong><span class="cfg-default">Off: readings still go to the topic above, but Home Assistant does not add them as devices, and the ones it already added are removed</span></div>
+          <div class="cfg-ctrl"><label class="cfg-switch"><input type="checkbox" id="pi-mqtt-disc-on"> <span>on</span></label></div>
+        </div>
+        <div class="cfg-row">
           <div class="cfg-text"><strong>Discovery prefix</strong><span class="cfg-default">Where Home Assistant looks for new devices; leave it unless you changed it in Home Assistant</span></div>
           <div class="cfg-ctrl"><input class="cfg-input" id="pi-mqtt-discovery" placeholder="homeassistant" autocomplete="off"></div>
         </div>
@@ -3616,6 +3620,8 @@
         s.mqtt.password_set ? 'Saved. Leave empty to keep it; changing the broker or username clears it.' : '';
       document.getElementById('pi-mqtt-topic').value = s.mqtt.base_topic || '';
       document.getElementById('pi-mqtt-discovery').value = s.mqtt.discovery_prefix || '';
+      document.getElementById('pi-mqtt-disc-on').checked = s.mqtt.discovery !== false;
+      document.getElementById('pi-mqtt-disc-on').nextElementSibling.textContent = s.mqtt.discovery !== false ? 'on' : 'off';
       document.getElementById('pi-mqtt-topic-hint').textContent =
         `Readings go to ${s.mqtt.base_topic}/${s.device_id}/panel/<barcode>/state`;
       piWebPortActive = s.web_port_active;
@@ -3673,7 +3679,12 @@
     if (e.target.checked && !confirm('This lets the master change two settings on optimizers, as the CCA does when their answers call for it. What the settings do is not known.\n\nContinue?'))
       e.target.checked = false;
   });
-  for (const id of ['pi-startup', 'pi-housekeeping', 'pi-queries', 'pi-writes']) {
+  // Turning discovery off removes the entities Home Assistant already has.
+  document.getElementById('pi-mqtt-disc-on').addEventListener('change', (e) => {
+    if (!e.target.checked && !confirm('Home Assistant will remove the Tigo devices and entities this Pi added, once you save. Readings keep going to the MQTT topic.\n\nContinue?'))
+      e.target.checked = true;
+  });
+  for (const id of ['pi-startup', 'pi-housekeeping', 'pi-queries', 'pi-writes', 'pi-mqtt-disc-on']) {
     document.getElementById(id).addEventListener('change', (e) => {
       e.target.nextElementSibling.textContent = e.target.checked ? 'on' : 'off';
     });
@@ -3850,6 +3861,7 @@
       username: document.getElementById('pi-mqtt-user').value,
       base_topic: document.getElementById('pi-mqtt-topic').value.trim() || 'tigomonitor',
       discovery_prefix: document.getElementById('pi-mqtt-discovery').value.trim() || 'homeassistant',
+      discovery: document.getElementById('pi-mqtt-disc-on').checked,
     };
     const pass = document.getElementById('pi-mqtt-pass').value;
     if (pass !== '') mqtt.password = pass;

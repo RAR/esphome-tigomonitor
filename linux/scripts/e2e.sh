@@ -19,7 +19,6 @@ sleep 0.3
 build/linux/tigomonitord --state-dir "$out/state" --port 0 --replay "$out/bus.bin" --speed 0 2> "$out/daemon.log"
 sleep 0.5
 kill $sub
-pkill mosquitto || true
 
 fail=0
 expect() {  # expect DESCRIPTION ACTUAL WANTED
@@ -40,4 +39,27 @@ expect "panel state messages >= $panels" "$([ "$states" -ge $panels ] && echo ye
 expect "went online" "$(grep -c '^tigomonitor/test/status online' "$out/mqtt.txt")" 1
 expect "went offline" "$(grep -c '^tigomonitor/test/status offline' "$out/mqtt.txt")" 1
 expect "nodes saved" "$(grep -c '"long_address"' "$out/state/state.json")" $panels
+
+# Discovery off: the same readings still go out, and every config the first
+# run left retained is cleared, so Home Assistant drops those entities.
+python3 - "$out/state/settings.json" <<'PY'
+import json, sys
+s = json.load(open(sys.argv[1]))
+s["mqtt"]["discovery"] = False
+json.dump(s, open(sys.argv[1], "w"))
+PY
+mosquitto_sub -p 18830 -v -R -t '#' > "$out/mqtt-off.txt" &
+sub=$!
+sleep 0.3
+build/linux/tigomonitord --state-dir "$out/state" --port 0 --replay "$out/bus.bin" --speed 0 2> "$out/daemon-off.log"
+sleep 0.5
+kill $sub
+mosquitto_sub -p 18830 -v --retained-only -W 1 -t 'homeassistant/#' > "$out/retained-off.txt" 2>/dev/null || true
+pkill mosquitto || true
+cleared="$(grep -c '^homeassistant/[a-z_]*/tigo[a-zA-Z0-9_]*/config (null)$' "$out/mqtt-off.txt" || true)"
+expect "discovery off: configs cleared" "$cleared" $((panels * 13 + 7 + 1))
+expect "discovery off: nothing left retained" "$(grep -c . "$out/retained-off.txt" || true)" 0
+expect "discovery off: no configs sent" "$(grep -c '^homeassistant/.*{' "$out/mqtt-off.txt" || true)" 0
+states="$(grep -c '^tigomonitor/test/panel/' "$out/mqtt-off.txt")"
+expect "discovery off: panel states >= $panels" "$([ "$states" -ge $panels ] && echo yes || echo "no ($states)")" yes
 [ $fail = 0 ] && echo "e2e passed" || { echo "e2e FAILED; see $out/"; exit 1; }

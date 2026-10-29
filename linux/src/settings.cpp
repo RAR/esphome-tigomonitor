@@ -59,6 +59,7 @@ Settings load_settings(const std::string &path) {
     get(*m, "port", s.mqtt.port);
     get(*m, "username", s.mqtt.username);
     get(*m, "password", s.mqtt.password);
+    get(*m, "discovery", s.mqtt.discovery);
     get(*m, "discovery_prefix", s.mqtt.discovery_prefix);
     get(*m, "base_topic", s.mqtt.base_topic);
   }
@@ -105,6 +106,7 @@ bool save_settings(const std::string &path, const Settings &s) {
         {"port", s.mqtt.port},
         {"username", s.mqtt.username},
         {"password", s.mqtt.password},
+        {"discovery", s.mqtt.discovery},
         {"discovery_prefix", s.mqtt.discovery_prefix},
         {"base_topic", s.mqtt.base_topic}}},
   };

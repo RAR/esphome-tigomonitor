@@ -110,6 +110,11 @@ bool MqttPublisher::pub_(const std::string &topic, const std::string &payload, b
   return rc == MOSQ_ERR_SUCCESS;
 }
 
+void MqttPublisher::announce_(const std::string &component, const std::string &uid, const json &config) {
+  pub_(settings_.mqtt.discovery_prefix + "/" + component + "/" + uid + "/config",
+       settings_.mqtt.discovery ? config.dump() : "", true);
+}
+
 static json monitor_device(const Settings &s, const std::string &version) {
   return {{"identifiers", json::array({"tigomonitor_" + s.device_id})},
           {"name", "Tigo Monitor"},
@@ -173,7 +178,7 @@ void MqttPublisher::publish_discovery_(const Panel &p) {
     if (m.state_class) c["state_class"] = m.state_class;
     std::string key = m.key;
     if (key == "rssi" || key == "duty_cycle" || key == "load_factor") c["entity_category"] = "diagnostic";
-    pub_(settings_.mqtt.discovery_prefix + "/sensor/" + uid + "/config", c.dump(), true);
+    announce_("sensor", uid, c);
   }
   // The barcode as its own entity too, as the firmware's barcode text sensor.
   std::string uid = "tigo_" + p.barcode + "_barcode";
@@ -184,7 +189,7 @@ void MqttPublisher::publish_discovery_(const Panel &p) {
             {"availability_topic", base_() + "/status"},
             {"entity_category", "diagnostic"},
             {"device", device}};
-  pub_(settings_.mqtt.discovery_prefix + "/sensor/" + uid + "/config", c.dump(), true);
+  announce_("sensor", uid, c);
 }
 
 void MqttPublisher::publish_system_discovery_() {
@@ -217,7 +222,7 @@ void MqttPublisher::publish_system_discovery_() {
     if (m.state_class) c["state_class"] = m.state_class;
     std::string key = m.key;
     if (key == "invalid_checksum" || key == "missed_frames") c["entity_category"] = "diagnostic";
-    pub_(settings_.mqtt.discovery_prefix + "/sensor/" + uid + "/config", c.dump(), true);
+    announce_("sensor", uid, c);
   }
   // Night mode: no frame from the bus for night_mode_timeout.
   std::string uid = "tigomonitor_" + settings_.device_id + "_night_mode";
@@ -227,7 +232,7 @@ void MqttPublisher::publish_system_discovery_() {
             {"value_template", "{{ 'ON' if value_json.night_mode else 'OFF' }}"},
             {"availability_topic", base_() + "/status"},
             {"device", device}};
-  pub_(settings_.mqtt.discovery_prefix + "/binary_sensor/" + uid + "/config", c.dump(), true);
+  announce_("binary_sensor", uid, c);
 }
 
 // One power sensor per string, as the firmware's string_label sensors.
@@ -245,7 +250,7 @@ void MqttPublisher::publish_string_discovery_(const std::string &label) {
             {"device_class", "power"},
             {"state_class", "measurement"},
             {"device", monitor_device(settings_, version_)}};
-  pub_(settings_.mqtt.discovery_prefix + "/sensor/" + uid + "/config", c.dump(), true);
+  announce_("sensor", uid, c);
 }
 
 static double round_to(double v, int digits) {

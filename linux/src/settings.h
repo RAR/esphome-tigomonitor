@@ -12,6 +12,9 @@ struct MqttSettings {
   int port = 1883;
   std::string username;
   std::string password;
+  // Off: the readings still go out on the state topics, but Home Assistant
+  // is not told about them, and the configs sent before are cleared.
+  bool discovery = true;
   std::string discovery_prefix = "homeassistant";
   std::string base_topic = "tigomonitor";
 };

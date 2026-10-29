@@ -14,6 +14,8 @@
 #include "monitor.h"
 #include "settings.h"
 
+#include <nlohmann/json.hpp>
+
 #include <atomic>
 #include <mutex>
 #include <set>
@@ -43,6 +45,9 @@ class MqttPublisher {
   void publish_system_discovery_();
   void publish_string_discovery_(const std::string &label);
   bool pub_(const std::string &topic, const std::string &payload, bool retain);
+  // A discovery config, or with discovery off the empty retained message
+  // that removes it.
+  void announce_(const std::string &component, const std::string &uid, const nlohmann::json &config);
   std::string base_() const;
 
   const Monitor &monitor_;
