@@ -524,9 +524,9 @@
   /* ===== Tools view ===== */
   .tools-card { background: var(--bg-2); border: 1px solid var(--border); border-radius: 10px; padding: 18px 20px; margin-bottom: 16px; }
   .tools-card h3 { font-size: 14px; font-weight: 600; margin-bottom: 12px; }
-  .tools-card p.hint { font-size: 12px; color: var(--text-dim); margin-bottom: 12px; }
+  .tools-card p.hint { font-size: 13px; line-height: 1.5; color: var(--text-dim); margin-bottom: 14px; max-width: 75ch; }
   .checkbox-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 6px; margin-bottom: 12px; }
-  .checkbox-grid label { display: flex; align-items: center; gap: 8px; padding: 6px 8px; background: var(--bg-3); border-radius: 4px; cursor: pointer; font-size: 12px; transition: background 0.1s; }
+  .checkbox-grid label { display: flex; align-items: center; gap: 8px; padding: 6px 8px; background: var(--bg-3); border-radius: 4px; cursor: pointer; font-size: 13px; transition: background 0.1s; }
   .checkbox-grid label:hover { background: var(--bg-4); }
   .checkbox-grid input[type="checkbox"] { width: 14px; height: 14px; cursor: pointer; accent-color: var(--accent); }
   .tools-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
@@ -539,8 +539,8 @@
   }
   .danger-row { display: flex; gap: 12px; align-items: center; padding: 12px; background: var(--bg-3); border-radius: 6px; margin-bottom: 8px; }
   .danger-row:last-child { margin-bottom: 0; }
-  .danger-text { flex: 1; font-size: 12px; }
-  .danger-text strong { display: block; color: var(--text); margin-bottom: 2px; }
+  .danger-text { flex: 1; font-size: 13px; line-height: 1.45; }
+  .danger-text strong { display: block; color: var(--text); font-size: 14px; margin-bottom: 3px; }
   .danger-text span { color: var(--text-dim); }
   .btn.danger { background: rgba(248,113,113,0.15); border-color: rgba(248,113,113,0.4); color: var(--bad); }
   .btn.danger:hover { background: rgba(248,113,113,0.25); }
@@ -552,16 +552,17 @@
      card instead of shrinking against the right edge. One column on a phone. */
   .cfg-row:has(> .cfg-text) { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 3fr); gap: 8px 24px; }
   @media (max-width: 720px) { .cfg-row:has(> .cfg-text) { grid-template-columns: minmax(0, 1fr); } }
-  .cfg-text { flex: 1; min-width: 0; font-size: 12px; }
-  .cfg-text strong { display: block; color: var(--text); margin-bottom: 2px; }
+  .cfg-text { flex: 1; min-width: 0; font-size: 13px; line-height: 1.45; }
+  .cfg-text strong { display: block; color: var(--text); font-size: 14px; margin-bottom: 3px; }
   .cfg-text span { display: block; color: var(--text-dim); }
-  .cfg-default { color: var(--text-faint) !important; font-size: 11px; margin-top: 2px; font-family: ui-monospace,Menlo,monospace; }
+  .cfg-default { color: var(--text-dim) !important; font-size: 12px; margin-top: 4px; font-variant-numeric: tabular-nums; }
   .cfg-ctrl { display: flex; align-items: center; gap: 6px; }
   .cfg-row:has(> .cfg-text) .cfg-ctrl { min-width: 0; }
   .cfg-row:has(> .cfg-text) .cfg-ctrl .cfg-input { flex: 1 1 auto; width: 100%; max-width: 320px; }
   .cfg-row:has(> .cfg-text) .cfg-ctrl .cfg-input[type="number"] { max-width: 120px; }
+  .cfg-row:has(> .cfg-text) .cfg-ctrl select.cfg-input { max-width: 480px; }
   .cfg-row:has(> .cfg-text) .cfg-switch { min-width: 120px; }  /* Save lines up with the number rows' */
-  .cfg-input { width: 110px; padding: 6px 8px; background: var(--bg-2); border: 1px solid var(--border); border-radius: 5px; color: var(--text); font-size: 13px; }
+  .cfg-input { width: 110px; padding: 7px 9px; background: var(--bg-2); border: 1px solid var(--border); border-radius: 5px; color: var(--text); font-size: 13px; }
   .cfg-unit { color: var(--text-dim); font-size: 12px; margin-right: 2px; }
   .cfg-switch { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text); cursor: pointer; min-width: 64px; }
   .btn.cfg-revert:disabled { opacity: .4; cursor: default; }
@@ -570,9 +571,10 @@
     background: var(--bg-3); border: 1px solid var(--border); color: var(--text);
     padding: 10px 16px; border-radius: 6px; font-size: 13px;
     box-shadow: 0 8px 24px rgba(0,0,0,0.3);
-    transition: transform 0.2s; z-index: 1000;
+    transition: transform 0.2s, opacity 0.2s, visibility 0.2s; z-index: 1000;
+    opacity: 0; visibility: hidden;
   }
-  .toast.show { transform: translateX(-50%) translateY(0); }
+  .toast.show { transform: translateX(-50%) translateY(0); opacity: 1; visibility: visible; }
   .toast.ok { border-color: var(--good); }
   .toast.err { border-color: var(--bad); }
 
@@ -1017,7 +1019,7 @@
       <div class="tools-card" data-linux-only style="display:none">
         <p class="hint">Panels show up in Home Assistant by themselves over MQTT. Point this at the broker Home Assistant already uses — for most people that is the Mosquitto add-on, at your Home Assistant's address, with the username and password of a Home Assistant user.</p>
         <div class="cfg-row">
-          <div class="cfg-text"><strong>Broker address</strong><span class="cfg-default">Leave empty to turn MQTT off</span></div>
+          <div class="cfg-text"><strong>Broker address</strong><span>Leave empty to turn MQTT off</span></div>
           <div class="cfg-ctrl"><input class="cfg-input" id="pi-mqtt-host" placeholder="homeassistant.local" autocomplete="off"></div>
         </div>
         <div class="cfg-row">
@@ -1029,19 +1031,19 @@
           <div class="cfg-ctrl"><input class="cfg-input" id="pi-mqtt-user" autocomplete="off"></div>
         </div>
         <div class="cfg-row">
-          <div class="cfg-text"><strong>Password</strong><span class="cfg-default" id="pi-mqtt-pass-hint"></span></div>
+          <div class="cfg-text"><strong>Password</strong><span id="pi-mqtt-pass-hint"></span></div>
           <div class="cfg-ctrl"><input class="cfg-input" id="pi-mqtt-pass" type="password" autocomplete="new-password"></div>
         </div>
         <div class="cfg-row">
-          <div class="cfg-text"><strong>Topic</strong><span class="cfg-default" id="pi-mqtt-topic-hint"></span></div>
+          <div class="cfg-text"><strong>Topic</strong><span id="pi-mqtt-topic-hint"></span></div>
           <div class="cfg-ctrl"><input class="cfg-input" id="pi-mqtt-topic" placeholder="tigomonitor" autocomplete="off"></div>
         </div>
         <div class="cfg-row">
-          <div class="cfg-text"><strong>Home Assistant discovery</strong><span class="cfg-default">Off: readings still go to the topic above, but Home Assistant does not add them as devices, and the ones it already added are removed</span></div>
-          <div class="cfg-ctrl"><label class="cfg-switch"><input type="checkbox" id="pi-mqtt-disc-on"> <span>on</span></label></div>
+          <div class="cfg-text"><strong>Home Assistant discovery</strong><span>Off: readings still go to the topic above, but Home Assistant does not add them as devices, and the ones it already added are removed</span></div>
+          <div class="cfg-ctrl"><label class="cfg-switch"><input type="checkbox" id="pi-mqtt-disc-on"> <span>On</span></label></div>
         </div>
         <div class="cfg-row">
-          <div class="cfg-text"><strong>Discovery prefix</strong><span class="cfg-default">Where Home Assistant looks for new devices; leave it unless you changed it in Home Assistant</span></div>
+          <div class="cfg-text"><strong>Discovery prefix</strong><span>Where Home Assistant looks for new devices; leave it unless you changed it in Home Assistant</span></div>
           <div class="cfg-ctrl"><input class="cfg-input" id="pi-mqtt-discovery" placeholder="homeassistant" autocomplete="off"></div>
         </div>
         <div class="tools-actions" style="margin-top:12px">
@@ -1056,43 +1058,43 @@
       <div class="tools-card" data-linux-only style="display:none">
         <p class="hint">Nothing is opened until you choose the adapter here, so other serial devices on this machine, such as a Zigbee stick, are left alone. Listing the ports does not open them.</p>
         <div class="cfg-row">
-          <div class="cfg-text"><strong>Serial port</strong><span class="cfg-default">The RS485 adapter on the Tigo bus</span></div>
+          <div class="cfg-text"><strong>Serial port</strong><span>The RS485 adapter on the Tigo bus</span></div>
           <div class="cfg-ctrl"><select class="cfg-input" id="pi-serial"></select> <button class="btn" id="pi-serial-rescan">Rescan</button></div>
         </div>
         <div class="cfg-row">
-          <div class="cfg-text"><strong>Bus role</strong><span class="cfg-default">Listen beside the CCA, or run the bus in its place with the CCA unplugged (experimental)</span></div>
+          <div class="cfg-text"><strong>Bus role</strong><span>Listen beside the CCA, or run the bus in its place with the CCA unplugged (experimental)</span></div>
           <div class="cfg-ctrl"><select class="cfg-input" id="pi-bus-role"><option value="listen">Listen, beside the CCA</option><option value="master">Master, in place of the CCA</option></select></div>
         </div>
         <div class="cfg-row" id="pi-startup-row" style="display:none">
-          <div class="cfg-text"><strong>Bring up the TAP</strong><span class="cfg-default">If the gateway is found at its factory address (after a power cut), re-address it and start it. Needs the real CCA on hand to recover a stranded gateway (experimental)</span></div>
-          <div class="cfg-ctrl"><label class="cfg-switch"><input type="checkbox" id="pi-startup"> <span>off</span></label></div>
+          <div class="cfg-text"><strong>Bring up the TAP</strong><span>If the gateway is found at its factory address (after a power cut), re-address it and start it. Needs the real CCA on hand to recover a stranded gateway (experimental)</span></div>
+          <div class="cfg-ctrl"><label class="cfg-switch"><input type="checkbox" id="pi-startup"> <span>Off</span></label></div>
         </div>
         <div class="cfg-row" id="pi-housekeeping-row" style="display:none">
-          <div class="cfg-text"><strong>Send the CCA's housekeeping</strong><span class="cfg-default" id="pi-housekeeping-hint">Send the CCA's 0x41 to each optimizer in turn, its hourly 0x0B00 and 0x22, and its reads of the TAP's node table (experimental)</span></div>
-          <div class="cfg-ctrl"><label class="cfg-switch"><input type="checkbox" id="pi-housekeeping"> <span>off</span></label></div>
+          <div class="cfg-text"><strong>Send the CCA's housekeeping</strong><span id="pi-housekeeping-hint">Send the CCA's 0x41 to each optimizer in turn, its hourly 0x0B00 and 0x22, and its reads of the TAP's node table (experimental)</span></div>
+          <div class="cfg-ctrl"><label class="cfg-switch"><input type="checkbox" id="pi-housekeeping"> <span>Off</span></label></div>
         </div>
         <div class="cfg-row" id="pi-queries-row" style="display:none">
-          <div class="cfg-text"><strong>Query the optimizers</strong><span class="cfg-default">Ask each optimizer the CCA's five questions (version, tests, info, smart, MPPT), again until it answers (experimental)</span></div>
-          <div class="cfg-ctrl"><label class="cfg-switch"><input type="checkbox" id="pi-queries"> <span>off</span></label></div>
+          <div class="cfg-text"><strong>Query the optimizers</strong><span>Ask each optimizer the CCA's five questions (version, tests, info, smart, MPPT), again until it answers (experimental)</span></div>
+          <div class="cfg-ctrl"><label class="cfg-switch"><input type="checkbox" id="pi-queries"> <span>Off</span></label></div>
         </div>
         <div class="cfg-row" id="pi-writes-row" style="display:none">
-          <div class="cfg-text"><strong>Let queries change optimizer settings</strong><span class="cfg-default">Send the CCA's two writes when an optimizer's answer calls for them: #00w255 after an Info reading 00, and Smrt mode S after one in mode N. Needs Query the optimizers (experimental)</span></div>
-          <div class="cfg-ctrl"><label class="cfg-switch"><input type="checkbox" id="pi-writes"> <span>off</span></label></div>
+          <div class="cfg-text"><strong>Let queries change optimizer settings</strong><span>Send the CCA's two writes when an optimizer's answer calls for them: #00w255 after an Info reading 00, and Smrt mode S after one in mode N. Needs Query the optimizers (experimental)</span></div>
+          <div class="cfg-ctrl"><label class="cfg-switch"><input type="checkbox" id="pi-writes"> <span>Off</span></label></div>
         </div>
         <div class="cfg-row" id="pi-bridge-row" style="display:none">
-          <div class="cfg-text"><strong>Bridge address</strong><span class="cfg-default">host:port of an ESP32 running stream_server, or an RS485-to-Ethernet converter in TCP server mode</span></div>
+          <div class="cfg-text"><strong>Bridge address</strong><span>host:port of an ESP32 running stream_server, or an RS485-to-Ethernet converter in TCP server mode</span></div>
           <div class="cfg-ctrl"><input class="cfg-input" id="pi-bridge" autocomplete="off" placeholder="tigo-bridge.local:6638"></div>
         </div>
         <div class="cfg-row">
-          <div class="cfg-text"><strong>Web UI port</strong><span class="cfg-default">Empty: 80, or 8080 when another web server has 80. Takes effect after a restart</span></div>
+          <div class="cfg-text"><strong>Web UI port</strong><span>Empty: 80, or 8080 when another web server has 80. Takes effect after a restart</span></div>
           <div class="cfg-ctrl"><input class="cfg-input" id="pi-web-port" type="number" min="1" max="65535" placeholder="80"></div>
         </div>
         <div class="cfg-row">
-          <div class="cfg-text"><strong>Web UI username</strong><span class="cfg-default">For the login below</span></div>
+          <div class="cfg-text"><strong>Web UI username</strong><span>For the login below</span></div>
           <div class="cfg-ctrl"><input class="cfg-input" id="pi-web-user" autocomplete="off" placeholder="admin"></div>
         </div>
         <div class="cfg-row">
-          <div class="cfg-text"><strong>Web UI password</strong><span class="cfg-default" id="pi-web-pass-hint">Empty: anyone on your network can open this page and change settings</span></div>
+          <div class="cfg-text"><strong>Web UI password</strong><span id="pi-web-pass-hint">Empty: anyone on your network can open this page and change settings</span></div>
           <div class="cfg-ctrl"><input class="cfg-input" id="pi-web-pass" type="password" autocomplete="new-password"></div>
         </div>
         <div class="tools-actions" style="margin-top:12px">
@@ -3621,7 +3623,7 @@
       document.getElementById('pi-mqtt-topic').value = s.mqtt.base_topic || '';
       document.getElementById('pi-mqtt-discovery').value = s.mqtt.discovery_prefix || '';
       document.getElementById('pi-mqtt-disc-on').checked = s.mqtt.discovery !== false;
-      document.getElementById('pi-mqtt-disc-on').nextElementSibling.textContent = s.mqtt.discovery !== false ? 'on' : 'off';
+      document.getElementById('pi-mqtt-disc-on').nextElementSibling.textContent = s.mqtt.discovery !== false ? 'On' : 'Off';
       document.getElementById('pi-mqtt-topic-hint').textContent =
         `Readings go to ${s.mqtt.base_topic}/${s.device_id}/panel/<barcode>/state`;
       piWebPortActive = s.web_port_active;
@@ -3629,14 +3631,14 @@
       piBusRole = s.bus_role || 'listen';
       document.getElementById('pi-bus-role').value = piBusRole;
       document.getElementById('pi-startup').checked = !!s.master_startup;
-      document.getElementById('pi-startup').nextElementSibling.textContent = s.master_startup ? 'on' : 'off';
+      document.getElementById('pi-startup').nextElementSibling.textContent = s.master_startup ? 'On' : 'Off';
       document.getElementById('pi-startup-row').style.display = piBusRole === 'master' ? '' : 'none';
       document.getElementById('pi-housekeeping').checked = !!s.master_housekeeping;
-      document.getElementById('pi-housekeeping').nextElementSibling.textContent = s.master_housekeeping ? 'on' : 'off';
+      document.getElementById('pi-housekeeping').nextElementSibling.textContent = s.master_housekeeping ? 'On' : 'Off';
       document.getElementById('pi-queries').checked = !!s.master_queries;
-      document.getElementById('pi-queries').nextElementSibling.textContent = s.master_queries ? 'on' : 'off';
+      document.getElementById('pi-queries').nextElementSibling.textContent = s.master_queries ? 'On' : 'Off';
       document.getElementById('pi-writes').checked = !!s.master_optimizer_writes;
-      document.getElementById('pi-writes').nextElementSibling.textContent = s.master_optimizer_writes ? 'on' : 'off';
+      document.getElementById('pi-writes').nextElementSibling.textContent = s.master_optimizer_writes ? 'On' : 'Off';
       document.getElementById('pi-writes').disabled = !s.master_queries;
       for (const row of PI_MASTER_ROWS) document.getElementById(row).style.display = piBusRole === 'master' ? '' : 'none';
       piFillHousekeepingHint();
@@ -3686,7 +3688,7 @@
   });
   for (const id of ['pi-startup', 'pi-housekeeping', 'pi-queries', 'pi-writes', 'pi-mqtt-disc-on']) {
     document.getElementById(id).addEventListener('change', (e) => {
-      e.target.nextElementSibling.textContent = e.target.checked ? 'on' : 'off';
+      e.target.nextElementSibling.textContent = e.target.checked ? 'On' : 'Off';
     });
   }
   // How many 0x41 targets were learned, so it's plain whether turning
