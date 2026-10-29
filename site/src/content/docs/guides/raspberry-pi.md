@@ -113,6 +113,12 @@ UART** (`/dev/serial0`).
 For the Energy dashboard, add the **Tigo Monitor Energy** sensor under
 **Settings → Dashboards → Energy → Solar production**.
 
+To keep the readings on MQTT without Home Assistant adding them as devices,
+for example while an ESP32 on the same bus already provides them, turn
+**Home Assistant discovery** off. Home Assistant then removes the devices the
+Pi added. The readings keep going to `tigomonitor/<device id>/…` for MQTT
+sensors you define yourself.
+
 ## Name your panels and strings
 
 Out of the box every panel is named by its barcode and sits in one group
