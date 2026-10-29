@@ -1046,6 +1046,20 @@ void HttpServer::routes_() {
     send_json(res, {{"ok", true}});
   });
 
+  // Pi-only: the daemon's last log lines, for the Logs page. ?after=N skips
+  // what the page already has; "next" is the N to ask with next time.
+  svr.Get("/api/logs", [](const httplib::Request &req, httplib::Response &res) {
+    uint64_t after = 0;
+    if (req.has_param("after")) after = std::strtoull(req.get_param_value("after").c_str(), nullptr, 10);
+    uint64_t next = 0;
+    json lines = json::array();
+    for (const LogLine &l : log_since(after, &next)) {
+      const char *level = l.prio <= 3 ? "error" : l.prio == 4 ? "warning" : l.prio == 7 ? "debug" : "info";
+      lines.push_back({{"seq", l.seq}, {"t", l.unix_ms}, {"level", level}, {"msg", l.msg}});
+    }
+    send_json(res, {{"lines", lines}, {"next", next}});
+  });
+
   // Pi-only: the bus master, when the daemon runs the bus in the CCA's place.
   svr.Get("/api/master", [this](const httplib::Request &, httplib::Response &res) {
     MasterStatus m = ctx_.master_status ? ctx_.master_status() : MasterStatus{};

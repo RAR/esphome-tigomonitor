@@ -123,6 +123,20 @@ time.sleep(1.5)
 s = get('/api/settings')[1]
 expect('web port waits for a restart', (s['web_port'], s['web_port_active']), (18090, 18089))
 
+# --- the Logs page: the daemon's own log, kept in memory
+lg = get('/api/logs')[1]
+expect('startup line in the log', any(l['msg'].startswith('tigomonitord ') and l['level'] == 'info' for l in lg['lines']), True)
+expect('seqs ascend', [l['seq'] for l in lg['lines']] == sorted(l['seq'] for l in lg['lines']), True)
+expect('next is past the last line', lg['next'], lg['lines'][-1]['seq'] + 1)
+expect('nothing new yet', get(f"/api/logs?after={lg['next']}")[1]['lines'], [])
+post('/api/settings', {'web_port': 18089})
+time.sleep(1.5)
+new = get(f"/api/logs?after={lg['next']}")[1]['lines']
+expect('a new line arrives', any(l['msg'] == 'settings changed; applying' for l in new), True)
+expect('and only new ones', all(l['seq'] >= lg['next'] for l in new), True)
+expect('journal still gets it', 'settings changed; applying' in open('build/cca-e2e/daemon.log').read(), True)
+expect('timestamps in ms', abs(new[-1]['t'] / 1000 - time.time()) < 60, True)
+
 # --- requests from other sites, the MQTT password, the web login
 import base64
 def code(path, method='GET', body=None, headers=None):

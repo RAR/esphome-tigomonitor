@@ -405,6 +405,26 @@
   .table-toolbar .input.compact { min-width: auto; }
   .table-meta { font-size: 12px; color: var(--text-dim); }
 
+  /* ===== Logs view (Raspberry Pi build) ===== */
+  .logs-box {
+    background: var(--bg); border: 1px solid var(--border); border-radius: 10px;
+    padding: 10px 0; height: calc(100vh - 230px); min-height: 280px; overflow: auto;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px; line-height: 1.55;
+  }
+  .log-line { display: grid; grid-template-columns: 9.5ch 7ch minmax(0, 1fr); gap: 10px; padding: 0 14px; }
+  .log-line:hover { background: var(--bg-2); }
+  .log-time { color: var(--text-faint); font-variant-numeric: tabular-nums; }
+  .log-lvl { text-transform: uppercase; font-size: 10.5px; letter-spacing: .04em; padding-top: 1px; color: var(--text-dim); }
+  .log-msg { white-space: pre-wrap; word-break: break-word; color: var(--text); }
+  .log-line.warning .log-lvl, .log-line.warning .log-msg { color: var(--warn); }
+  .log-line.error .log-lvl, .log-line.error .log-msg { color: var(--bad); }
+  .log-line.debug .log-lvl, .log-line.debug .log-msg { color: var(--text-faint); }
+  .logs-empty { padding: 24px 14px; color: var(--text-faint); font-family: inherit; }
+  @media (max-width: 768px) {
+    .log-line { grid-template-columns: 9.5ch minmax(0, 1fr); }
+    .log-lvl { display: none; }
+  }
+
   .table-wrap { background: var(--bg-2); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
   table.nodes { width: 100%; border-collapse: collapse; font-size: 14px; }
   table.nodes th[data-sort] { cursor: pointer; user-select: none; }
@@ -743,6 +763,7 @@
       <button data-view="nodes"><span class="icon">≡</span> Node Table</button>
       <button data-view="tools"><span class="icon">⚙</span> Tools</button>
       <button data-view="diagnostics"><span class="icon">◈</span> Diagnostics</button>
+      <button data-view="logs" data-linux-only style="display:none"><span class="icon">☰</span> Logs</button>
       <button data-view="cca"><span class="icon">◉</span> CCA Info</button>
       <button data-view="cloudstatus" id="nav-cloudstatus" style="display:none"><span class="icon">☁</span> Tigo Cloud</button>
     </nav>
@@ -1325,6 +1346,27 @@
           </tbody>
         </table>
       </div>
+    </section>
+
+    <!-- LOGS (Raspberry Pi build) -->
+    <section class="view" id="view-logs">
+      <div class="topbar">
+        <h1>Logs</h1>
+        <div class="topbar-meta" id="logs-meta">—</div>
+      </div>
+      <div class="table-toolbar">
+        <input class="input" id="logs-search" placeholder="Filter, e.g. lease or bus:">
+        <select class="input compact" id="logs-level">
+          <option value="7">Everything</option>
+          <option value="6" selected>Info and above</option>
+          <option value="4">Warnings and errors</option>
+          <option value="3">Errors only</option>
+        </select>
+        <button class="btn" id="logs-pause">Pause</button>
+        <button class="btn" id="logs-download">Download</button>
+      </div>
+      <div class="logs-box" id="logs-box"><div class="logs-empty">Loading…</div></div>
+      <p class="table-meta" style="margin-top:10px">The last 2,000 lines since the service started, about two days. Older ones are in the journal (<code>journalctl -u tigomonitord</code>). Debug lines appear only when the service runs <span style="white-space:nowrap">with <code>--verbose</code></span>, and only the last 500 are kept.</p>
     </section>
 
     <!-- CCA -->
@@ -3468,6 +3510,96 @@
   document.getElementById('tools-restart').addEventListener('click', () =>
     toolsAction('/api/restart', 'Restart issued',
       PLATFORM === 'linux' ? 'Restart the monitor service now?' : 'Reboot the ESP32 now?'));
+
+  // ===== Logs (linux/ build) =====
+  // Polls /api/logs every 2 s while the view is open, asking only for lines
+  // past the last one it has. The daemon keeps 2,000 plus 500 debug lines;
+  // so does the page.
+  const LOGS_KEEP = 2500;
+  const LOG_PRIO = { error: 3, warning: 4, info: 6, debug: 7 };
+  let logLines = [], logNext = 0, logsPaused = false, logsTimer = null;
+  const logsBox = document.getElementById('logs-box');
+  const logEsc = s => String(s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+  function logTime(ms) {
+    const d = new Date(ms);
+    return d.toLocaleTimeString([], { hour12: false });
+  }
+  function logShown(l) {
+    if (LOG_PRIO[l.level] > +document.getElementById('logs-level').value) return false;
+    const q = document.getElementById('logs-search').value.trim().toLowerCase();
+    return !q || l.msg.toLowerCase().includes(q);
+  }
+  function logRow(l) {
+    const d = new Date(l.t);
+    return `<div class="log-line ${l.level}" title="${d.toLocaleString()}"><span class="log-time">${logTime(l.t)}</span>` +
+      `<span class="log-lvl">${l.level === 'warning' ? 'warn' : l.level}</span><span class="log-msg">${logEsc(l.msg)}</span></div>`;
+  }
+  function logsAtBottom() { return logsBox.scrollHeight - logsBox.scrollTop - logsBox.clientHeight < 40; }
+  function renderLogs() {
+    const shown = logLines.filter(logShown);
+    logsBox.innerHTML = shown.length ? shown.map(logRow).join('')
+      : `<div class="logs-empty">${logLines.length ? 'No lines match the filter.' : 'No log lines yet.'}</div>`;
+    logsBox.scrollTop = logsBox.scrollHeight;
+  }
+  function updateLogsMeta() {
+    const shown = logLines.filter(logShown).length;
+    document.getElementById('logs-meta').textContent =
+      (logsPaused ? 'paused · ' : 'live · ') + (shown === logLines.length ? `${shown} lines` : `${shown} of ${logLines.length} lines`);
+  }
+  async function pollLogs() {
+    if (logsPaused || !document.getElementById('view-logs').classList.contains('active')) return;
+    try {
+      const r = await apiFetch('/api/logs?after=' + logNext);
+      if (!r.ok) throw new Error('/api/logs ' + r.status);
+      const j = await r.json();
+      // A smaller next means the service restarted: start over.
+      if (j.next < logNext) { logLines = []; logNext = 0; delete logsBox.dataset.loaded; return pollLogs(); }
+      const fresh = j.lines.filter(l => l.seq >= logNext);
+      logNext = j.next;
+      if (!fresh.length && logsBox.dataset.loaded) { updateLogsMeta(); return; }
+      logLines = logLines.concat(fresh);
+      const trimmed = logLines.length > LOGS_KEEP;
+      if (trimmed) logLines = logLines.slice(-LOGS_KEEP);
+      if (!logsBox.dataset.loaded || trimmed) {
+        logsBox.dataset.loaded = '1';
+        renderLogs();
+      } else {
+        const stick = logsAtBottom();
+        const rows = fresh.filter(logShown);
+        if (rows.length) {
+          logsBox.querySelector('.logs-empty')?.remove();
+          logsBox.insertAdjacentHTML('beforeend', rows.map(logRow).join(''));
+          if (stick) logsBox.scrollTop = logsBox.scrollHeight;
+        }
+      }
+      updateLogsMeta();
+    } catch (e) {
+      document.getElementById('logs-meta').textContent = 'error: ' + e.message;
+    }
+  }
+  function startLogs() {
+    if (logsTimer) return;
+    pollLogs();
+    logsTimer = setInterval(pollLogs, 2000);
+  }
+  document.querySelector('#nav button[data-view="logs"]').addEventListener('click', startLogs);
+  if (window.location.hash === '#logs') startLogs();
+  document.getElementById('logs-level').addEventListener('change', () => { renderLogs(); updateLogsMeta(); });
+  document.getElementById('logs-search').addEventListener('input', () => { renderLogs(); updateLogsMeta(); });
+  document.getElementById('logs-pause').addEventListener('click', e => {
+    logsPaused = !logsPaused;
+    e.currentTarget.textContent = logsPaused ? 'Resume' : 'Pause';
+    updateLogsMeta();
+    if (!logsPaused) pollLogs();
+  });
+  document.getElementById('logs-download').addEventListener('click', () => {
+    const text = logLines.map(l => `${new Date(l.t).toISOString()} ${l.level.toUpperCase().padEnd(7)} ${l.msg}`).join('\n') + '\n';
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([text], { type: 'text/plain' }));
+    a.download = `tigomonitor-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.log`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  });
 
   // ===== Raspberry Pi settings (linux/ build) =====
   async function refreshPiSettings() {
