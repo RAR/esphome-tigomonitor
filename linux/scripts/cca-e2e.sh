@@ -182,6 +182,10 @@ auth = {'Authorization': 'Basic ' + base64.b64encode(b'admin:pw').decode()}
 expect('login required', code('/api/status'), 401)
 expect('wrong password refused', code('/api/status', headers={'Authorization': 'Basic ' + base64.b64encode(b'admin:no').decode()}), 401)
 expect('logged in', code('/api/status', headers=auth), 200)
+# A monitor polls health with no login; it says only whether all is well.
+health = get('/api/health')
+expect('health needs no login', (health[0] in (200, 503), health[1].get('status') in ('ok', 'problem')), (True, True))
+expect('health answers 503 for a problem', (health[0] == 503) == (health[1].get('status') == 'problem'), True)
 # The page's API calls carry its token as a Bearer header, which a browser
 # sends instead of the login; the ESP32's placeholder must not go out.
 page = u.urlopen(u.Request(B + '/', headers=auth)).read()

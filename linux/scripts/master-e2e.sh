@@ -29,6 +29,16 @@ mqtt_state() { mosquitto_sub -p 18831 -C 1 -W 15 -t tigomonitor/test/master/stat
 mqtt_configs() { mosquitto_sub -p 18831 -v --retained-only -W 1 -t 'homeassistant/#' 2>/dev/null | grep -c "_bus_master" || true; }
 field() { python3 -c "import json,sys; d=json.load(sys.stdin); print(eval(sys.argv[1]))" "$1"; }
 mosquitto -p 18831 -d
+health() {  # health PORT: "<HTTP code> <status> <problems>"
+  python3 - "$1" <<'PY'
+import json, sys, urllib.error, urllib.request as u
+try:
+    r = u.urlopen(f'http://127.0.0.1:{sys.argv[1]}/api/health', timeout=5); code, d = r.status, json.load(r)
+except urllib.error.HTTPError as e:
+    code, d = e.code, json.load(e)
+print(code, d['status'], json.dumps(d['problems']))
+PY
+}
 stat() { python3 -c "import json,sys; d=json.load(open('$1')); print(eval(sys.argv[1]))" "$2"; }
 
 # --- run 1: polls, lease, renewal, and a frozen daemon ---
@@ -53,6 +63,7 @@ master="$(api 18092 /api/master)"
 expect "/api/master active" "$(echo "$master" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["active"], d["fault"], d["renewals"] >= 1, d["lease"]["node_count"])')" "True none True 45"
 expect "MQTT: master active" "$(mqtt_state | field '(d["status"], d["problem"], d["lease_nodes"], d["renewals"] >= 1)')" "('active', False, 45, True)"
 expect "MQTT: master entities announced" "$(mqtt_configs)" 8
+expect "healthy" "$(health 18092)" '200 ok []'
 # Frozen across the next renewal it would make (the 20 s check after this
 # one): nothing renews the lease until the daemon runs again.
 before="$(renewals)"
@@ -81,6 +92,7 @@ sleep 6
 expect "second master stops it" "$(api 18093 /api/master | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["active"], d["fault"])')" "False second_master"
 expect "nothing sent after the second master" "$(stat "$out/tap2.json" "d['frames_after_foreign'] <= 1")" True
 expect "MQTT: the fault shows" "$(mqtt_state | field '(d["status"], d["problem"])')" "('second_master', True)"
+expect "health names the fault" "$(health 18093 | cut -c1-39)" '503 problem ["bus master: second_master'
 kill $daemon; wait $daemon 2>/dev/null || true
 kill $tap; wait $tap 2>/dev/null || true
 

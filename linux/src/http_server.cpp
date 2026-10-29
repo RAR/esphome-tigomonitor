@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <cerrno>
+#include <chrono>
 #include <cmath>
 #include <cstring>
 #include <ctime>
@@ -29,6 +30,11 @@ using nlohmann::json;
 static double r1(double v) { return std::round(v * 10) / 10; }
 static double r2(double v) { return std::round(v * 100) / 100; }
 static double r3(double v) { return std::round(v * 1000) / 1000; }
+
+static int64_t unix_ms() {
+  return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch())
+      .count();
+}
 
 static void send_json(httplib::Response &res, const json &j, int status = 200) {
   res.status = status;
@@ -212,7 +218,8 @@ static long system_uptime_s() {
   return sysinfo(&si) == 0 ? si.uptime : 0;
 }
 
-HttpServer::HttpServer(HttpContext ctx) : ctx_(std::move(ctx)), svr_(std::make_unique<httplib::Server>()) {}
+HttpServer::HttpServer(HttpContext ctx)
+    : ctx_(std::move(ctx)), started_unix_ms_(unix_ms()), svr_(std::make_unique<httplib::Server>()) {}
 
 HttpServer::~HttpServer() { stop(); }
 
@@ -246,6 +253,35 @@ void HttpServer::stop() {
   thread_.reset();
 }
 
+// What a monitor polling /api/health is told is wrong, in words; empty when
+// all is well. Bus traffic is judged by role: as master the daemon polls the
+// TAP all night and the TAP always answers, so a minute's silence is a
+// fault; listening, a quiet bus is normal once night mode says so.
+std::vector<std::string> HttpServer::health_problems_() const {
+  std::vector<std::string> problems;
+  Settings s = ctx_.current_settings();
+  bool master = s.bus_role == "master";
+  if (s.serial_port.empty()) problems.push_back("no serial port chosen");
+  if (master) {
+    MasterStatus m = ctx_.master_status ? ctx_.master_status() : MasterStatus{};
+    if (m.fault != Fault::none) {
+      problems.push_back(std::string("bus master: ") + fault_name(m.fault) + (m.detail.empty() ? "" : " (" + m.detail + ")"));
+    } else if (!m.active) {
+      problems.push_back("bus master: stopped");
+    }
+  }
+  int64_t now = unix_ms();
+  int64_t last = ctx_.monitor.stats().last_frame_unix_ms;
+  int64_t quiet_s = (now - (last > 0 ? last : started_unix_ms_)) / 1000;
+  int64_t limit_s = master ? 60 : 300;
+  if (!s.serial_port.empty() && quiet_s > limit_s && (master || !ctx_.monitor.night_mode()))
+    problems.push_back(last > 0 ? "no frames from the bus for " + std::to_string(quiet_s) + " s"
+                                : "no frames from the bus since it started");
+  if (!s.mqtt.host.empty() && !ctx_.mqtt_connected())
+    problems.push_back("MQTT: not connected to " + s.mqtt.host + (ctx_.mqtt_error().empty() ? "" : " (" + ctx_.mqtt_error() + ")"));
+  return problems;
+}
+
 void HttpServer::routes_() {
   auto &svr = *svr_;
   const Monitor &mon = ctx_.monitor;
@@ -259,7 +295,9 @@ void HttpServer::routes_() {
       return httplib::Server::HandlerResponse::Handled;
     }
     Settings s = ctx_.current_settings();
-    if (!s.web_password.empty() &&
+    // Health is for a monitor to poll, so it needs no login; it tells only
+    // whether all is well, and what is not.
+    if (!s.web_password.empty() && !(req.method == "GET" && req.path == "/api/health") &&
         !same_secret(req.get_header_value("Authorization"),
                      "Basic " + httplib::detail::base64_encode(s.web_username + ":" + s.web_password))) {
       res.status = 401;
@@ -849,7 +887,14 @@ void HttpServer::routes_() {
     uint64_t min_avail = std::min(prev, avail);
     long up = system_uptime_s();
     if (req.path == "/api/health") {
-      send_json(res, {{"status", "ok"}, {"uptime", up}, {"heap_free", avail}, {"heap_min_free", min_avail}});
+      std::vector<std::string> problems = health_problems_();
+      send_json(res,
+                {{"status", problems.empty() ? "ok" : "problem"},
+                 {"problems", problems},
+                 {"uptime", up},
+                 {"heap_free", avail},
+                 {"heap_min_free", min_avail}},
+                problems.empty() ? 200 : 503);
       return;
     }
     BusStats s = mon.stats();

@@ -152,6 +152,24 @@ monitor's settings either way, even with the login saved in your browser.
 The MQTT password stays on the Pi: the web UI never shows it, and changing
 the broker's address or username clears it, so it has to be entered again.
 
+## Watch it from a monitor
+
+`http://tigomonitor.local/api/health` answers HTTP 200 with
+`"status": "ok"` while everything works, and HTTP 503 with
+`"status": "problem"` and a `problems` list when something doesn't:
+
+- No serial port chosen.
+- No frames from the bus for 5 minutes, unless night mode explains the
+  quiet. Running the bus in the CCA's place, the TAP answers all night, so
+  the limit there is 1 minute.
+- In the CCA's place, the bus master stopped or reports a fault, such as
+  `no_reply` or `second_master`.
+- An MQTT broker set but not connected.
+
+Point Uptime Kuma, or anything that checks a URL, at it. It needs no login
+even with a web UI password set, and tells only whether all is well and
+what isn't.
+
 ## Other ways to run it
 
 None of these are needed for a Pi at the Tigo cabinet.

@@ -1743,7 +1743,8 @@
     return parts.join(' ');
   }
   function refreshBrandUptime() {
-    apiFetch('/api/health').then(r => r.ok ? r.json() : null).then(d => {
+    // A problem answers 503, with the same JSON: the uptime still shows.
+    apiFetch('/api/health').then(r => r.ok || r.status === 503 ? r.json() : null).then(d => {
       if (d && d.uptime !== undefined) {
         document.getElementById('brand-sub').textContent = `up ${fmtBrandUptime(d.uptime)}`;
       }

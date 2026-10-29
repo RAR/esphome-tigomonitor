@@ -61,7 +61,9 @@ class HttpServer {
 
  private:
   void routes_();
+  std::vector<std::string> health_problems_() const;
   HttpContext ctx_;
+  int64_t started_unix_ms_;
   std::unique_ptr<httplib::Server> svr_;
   std::unique_ptr<std::thread> thread_;
   int port_ = 0;
