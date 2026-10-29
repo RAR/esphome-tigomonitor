@@ -11,10 +11,15 @@
 // One request and its reply per tick(). It has no thread or timer of its own:
 // only the main loop's tick() sends anything, so a daemon that hangs stops
 // renewing the lease and the array goes safe.
+//
+// As a standby (bus_role standby) it only listens while another master runs
+// the bus, ours or a CCA, and takes the bus over once no master has been
+// heard for takeover_s. Any master it hears, it yields to: a CCA can't.
 
 #include "tigo_master.h"
 #include "tigo_protocol.h"
 
+#include <atomic>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -27,8 +32,13 @@ namespace tigod {
 
 enum class Fault { none, no_port, no_reply, second_master, refused, lease_refused, discovery_failed, extra_tap };
 enum class Phase { running, probing, discovering };
+// off: not a standby. standing_by: listening, another master runs the bus;
+// taking_over: none heard for takeover_s, listening a moment longer before
+// sending; active: running the bus.
+enum class Standby { off, standing_by, taking_over, active };
 const char *phase_name(Phase p);
 const char *fault_name(Fault f);
+const char *standby_name(Standby s);
 
 struct MasterStatus {
   bool active = false;  // the port is open and nothing has stopped it
@@ -70,6 +80,12 @@ struct MasterStatus {
   uint32_t answers = 0;     // optimizers' answers heard
   std::string tap_version;  // VERSION's reply, from a bring-up
   std::string detail;
+  Standby standby = Standby::off;
+  uint32_t takeover_s = 0;
+  int64_t master_heard_ms_ago = -1;  // standing by: since another master's last request (-1: none yet)
+  uint32_t takeovers = 0;
+  uint32_t yields = 0;  // times it gave the bus back to another master
+  int64_t last_takeover_unix = 0;
 };
 
 class BusMaster {
@@ -93,6 +109,13 @@ class BusMaster {
   static const uint32_t TARGETS_EVERY_MS = 60000;
   ~BusMaster();
 
+  // Stand by rather than run the bus (bus_role standby); call before open().
+  // on_listen gets the bytes read while standing by (the Monitor, and the
+  // 0x41 learning); learned is asked for the 0x41s at each takeover.
+  using Learned = std::function<std::vector<esphome::tigo_monitor::master::Learned41::Entry>()>;
+  void set_standby(uint32_t takeover_s, Sink on_listen, Learned learned);
+  static const uint32_t TAKEOVER_JITTER_MS = 500;  // at most, so two standbys starting together don't tie
+
   bool open(const std::string &device, int baud);
   // Sends at most one request and reads its reply, up to REPLY_TIMEOUT_MS.
   void tick(uint32_t now_ms);  // measures the gap, then tick_()
@@ -114,6 +137,11 @@ class BusMaster {
   bool is_reply(uint16_t cmd, const esphome::tigo_monitor::master::Bytes &request,
                 const esphome::tigo_monitor::master::Frame &f) const;
   void run_startup(uint32_t now_ms);  // probe + discovery, before steady state
+  void stand_by_(uint32_t now_ms);   // listen for another master; take over when there is none
+  void take_over_(int64_t quiet_ms);
+  void yield_();
+  void set_standby_(Standby s);
+  bool standing_by_() const { return standby_ == Standby::standing_by || standby_ == Standby::taking_over; }
   void set_fault(Fault f, const std::string &detail);
   void update_lease_fault_();
   void drop_housekeeping_();
@@ -163,6 +191,12 @@ class BusMaster {
   bool version_asked_ = false;          // bench mode asks the TAP's version first
   std::set<uint16_t> refusals_logged_;  // commands the TAP NAKed (0x0006), logged once each
   esphome::tigo_monitor::protocol::FrameSplitter<std::string> splitter_;
+  Standby standby_ = Standby::off;
+  uint32_t takeover_ms_ = 0;
+  uint32_t jitter_ms_ = 0;
+  Sink on_listen_;
+  Learned learned_cb_;
+  std::atomic<int64_t> heard_at_ms_{-1};  // steady clock: another master's last request
   mutable std::mutex mu_;
   MasterStatus status_;
 };

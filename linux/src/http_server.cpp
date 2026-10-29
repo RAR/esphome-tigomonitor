@@ -260,7 +260,7 @@ void HttpServer::stop() {
 std::vector<std::string> HttpServer::health_problems_() const {
   std::vector<std::string> problems;
   Settings s = ctx_.current_settings();
-  bool master = s.bus_role == "master";
+  bool master = runs_bus(s);  // a standby is judged as a master: either it or another runs the bus
   if (s.serial_port.empty()) problems.push_back("no serial port chosen");
   if (master) {
     MasterStatus m = ctx_.master_status ? ctx_.master_status() : MasterStatus{};
@@ -1143,7 +1143,14 @@ void HttpServer::routes_() {
                     {"timeouts", m.timeouts},
                     {"resyncs", m.resyncs},
                     {"gap_ms", {{"max", m.gap_max_ms}, {"max_at_unix", m.gap_max_at_unix}, {"recent", m.gap_recent_ms}}},
-                    {"last_reply_unix", m.last_reply_unix}});
+                    {"last_reply_unix", m.last_reply_unix},
+                    {"standby",
+                     {{"state", standby_name(m.standby)},
+                      {"takeover_s", m.takeover_s},
+                      {"master_heard_ms_ago", m.master_heard_ms_ago},
+                      {"takeovers", m.takeovers},
+                      {"last_takeover_unix", m.last_takeover_unix},
+                      {"yields", m.yields}}}});
   });
 
   // Pi-only: the serial ports to choose the RS485 adapter from.
@@ -1159,6 +1166,7 @@ void HttpServer::routes_() {
     Settings s = ctx_.current_settings();
     send_json(res, {{"serial_port", s.serial_port},
                     {"bus_role", s.bus_role},
+                    {"standby_takeover_s", s.standby_takeover_s},
                     {"master_bench", s.master_bench},
                     {"master_startup", s.master_startup},
                     {"master_housekeeping", s.master_housekeeping},
@@ -1198,6 +1206,7 @@ void HttpServer::routes_() {
     try {
       if (j.contains("serial_port")) s.serial_port = j["serial_port"].get<std::string>();
       if (j.contains("bus_role")) s.bus_role = j["bus_role"].get<std::string>();
+      if (j.contains("standby_takeover_s")) s.standby_takeover_s = j["standby_takeover_s"].get<int>();
       if (j.contains("master_bench")) s.master_bench = j["master_bench"].get<bool>();
       if (j.contains("master_startup")) s.master_startup = j["master_startup"].get<bool>();
       if (j.contains("master_housekeeping")) s.master_housekeeping = j["master_housekeeping"].get<bool>();
@@ -1233,8 +1242,10 @@ void HttpServer::routes_() {
     if (err.empty() && s.serial_port.rfind(TCP_PREFIX, 0) == 0 &&
         !parse_tcp_source(s.serial_port, bridge_host, bridge_port))
       err = "A network bridge is host:port, with a port of 1-65535.";
-    if (err.empty() && s.bus_role != "listen" && s.bus_role != "master") err = "Bus role is listen or master.";
-    if (err.empty() && s.bus_role == "master" && s.serial_port.rfind(TCP_PREFIX, 0) == 0)
+    if (err.empty() && s.bus_role != "listen" && s.bus_role != "master" && s.bus_role != "standby")
+      err = "Bus role is listen, master or standby.";
+    if (err.empty() && !standby_takeover_ok(s.standby_takeover_s)) err = "The standby's takeover time is 2-60 s.";
+    if (err.empty() && runs_bus(s) && s.serial_port.rfind(TCP_PREFIX, 0) == 0)
       err = "The bus master needs a serial port on the bus, not a network bridge.";
     if (err.empty() && !gateway_id_ok(s.gateway_id))
       err = "Gateway id must be 1-7FFE, and not 1234 or 1235 (the bring-up moves the TAP to the id one up; 1235 is the factory address).";

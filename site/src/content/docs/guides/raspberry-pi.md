@@ -163,7 +163,9 @@ the broker's address or username clears it, so it has to be entered again.
   quiet. Running the bus in the CCA's place, the TAP answers all night, so
   the limit there is 1 minute.
 - In the CCA's place, the bus master stopped or reports a fault, such as
-  `no_reply` or `second_master`.
+  `no_reply` or `second_master`. A standby listening while another master
+  runs the bus is healthy. One that has taken the bus over is judged as a
+  master.
 - An MQTT broker set but not connected.
 
 Point Uptime Kuma, or anything that checks a URL, at it. It needs no login

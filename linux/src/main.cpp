@@ -161,7 +161,7 @@ int main(int argc, char **argv) {
     input_done = false;
     std::string dev = settings.serial_port;
     int baud = settings.baud_rate;
-    if (replay.empty() && settings.bus_role == "master") {
+    if (replay.empty() && runs_bus(settings)) {
       auto m = std::make_unique<BusMaster>(on_data, on_sent, static_cast<uint16_t>(settings.gateway_id),
                                            settings.master_bench, settings.master_startup,
                                            settings.master_housekeeping, housekeeping.entries(), [&monitor] {
@@ -175,6 +175,11 @@ int main(int argc, char **argv) {
                                              return tuids;
                                            },
                                            settings.master_queries, settings.master_optimizer_writes);
+      // Standing by, it listens as the listen role does, learning the 0x41s
+      // another master sends, and takes the latest of them when it takes over.
+      if (settings.bus_role == "standby")
+        m->set_standby(static_cast<uint32_t>(settings.standby_takeover_s), on_listen,
+                       [&housekeeping] { return housekeeping.entries(); });
       if (dev.empty()) LOGW("bus master: no serial port chosen yet; pick the RS485 adapter under Tools");
       else m->open(dev, baud);
       std::lock_guard<std::mutex> lock(master_mu);
@@ -294,6 +299,7 @@ int main(int argc, char **argv) {
       if (fresh.device_id.empty()) fresh.device_id = settings.device_id;
       bool new_port = fresh.serial_port != settings.serial_port || fresh.baud_rate != settings.baud_rate ||
                       fresh.bus_role != settings.bus_role || fresh.gateway_id != settings.gateway_id ||
+                      fresh.standby_takeover_s != settings.standby_takeover_s ||
                       fresh.master_bench != settings.master_bench || fresh.master_startup != settings.master_startup ||
                       fresh.master_housekeeping != settings.master_housekeeping ||
                       fresh.master_queries != settings.master_queries ||

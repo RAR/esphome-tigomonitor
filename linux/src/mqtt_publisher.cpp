@@ -307,7 +307,12 @@ void MqttPublisher::publish_master_discovery_(bool remove) {
 
 void MqttPublisher::publish_master_() {
   MasterStatus m = master_status_();
-  std::string status = m.fault != Fault::none ? fault_name(m.fault) : m.active ? "active" : "stopped";
+  // A standby listening while another master runs the bus is as it should be.
+  bool standing_by = m.standby == Standby::standing_by || m.standby == Standby::taking_over;
+  std::string status = m.fault != Fault::none ? fault_name(m.fault)
+                       : !m.active            ? "stopped"
+                       : standing_by          ? standby_name(m.standby)
+                                              : "active";
   json last_reply = nullptr;
   if (m.last_reply_unix > 0) {
     time_t t = static_cast<time_t>(m.last_reply_unix);
@@ -318,7 +323,7 @@ void MqttPublisher::publish_master_() {
     last_reply = buf;
   }
   json s = {{"status", status},
-            {"problem", status != "active"},
+            {"problem", status != "active" && status != "standing_by" && status != "taking_over"},
             {"phase", phase_name(m.phase)},
             {"detail", m.detail},
             {"lease_remaining_s", m.lease.remaining_s},
@@ -327,6 +332,10 @@ void MqttPublisher::publish_master_() {
             {"tap_lost", m.tap_lost},
             {"gap_recent_ms", m.gap_recent_ms},
             {"last_reply", last_reply}};
+  if (m.standby != Standby::off) {
+    s["takeovers"] = m.takeovers;
+    s["yields"] = m.yields;
+  }
   pub_(base_() + "/master/state", s.dump(), false);
 }
 
@@ -341,9 +350,9 @@ void MqttPublisher::publish() {
     announced_.clear();
     announced_strings_.clear();
     publish_system_discovery_();
-    publish_master_discovery_(settings_.bus_role != "master" || !master_status_);
+    publish_master_discovery_(!runs_bus(settings_) || !master_status_);
   }
-  if (settings_.bus_role == "master" && master_status_) publish_master_();
+  if (runs_bus(settings_) && master_status_) publish_master_();
   auto now = Clock::now();
   auto window = monitor_.online_window();
   bool night = monitor_.night_mode();

@@ -7,6 +7,7 @@
 #include <chrono>
 #include <cstring>
 #include <poll.h>
+#include <random>
 #include <termios.h>
 #include <unistd.h>
 
@@ -39,6 +40,16 @@ const char *fault_name(Fault f) {
   return "unknown";
 }
 
+const char *standby_name(Standby s) {
+  switch (s) {
+    case Standby::off: return "off";
+    case Standby::standing_by: return "standing_by";
+    case Standby::taking_over: return "taking_over";
+    case Standby::active: return "active";
+  }
+  return "unknown";
+}
+
 static int64_t unix_now() { return static_cast<int64_t>(time(nullptr)); }
 static int64_t steady_ms() {
   return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch())
@@ -52,6 +63,13 @@ BusMaster::BusMaster(Sink on_rx, Sink on_tx, uint16_t gateway_id, bool bench, bo
       queries_on_(queries), writes_on_(queries && writes), phase_(startup ? Phase::probing : Phase::running) {}
 
 BusMaster::~BusMaster() { close(); }
+
+void BusMaster::set_standby(uint32_t takeover_s, Sink on_listen, Learned learned) {
+  standby_ = Standby::standing_by;
+  takeover_ms_ = takeover_s * 1000;
+  on_listen_ = std::move(on_listen);
+  learned_cb_ = std::move(learned);
+}
 
 bool BusMaster::open(const std::string &device, int baud) {
   close();
@@ -85,6 +103,14 @@ bool BusMaster::open(const std::string &device, int baud) {
   status_.learned_41 = static_cast<uint32_t>(learned_.size());
   status_.queries = queries_on_;
   status_.writes = writes_on_;
+  // A standby listens for its full takeover time before ever sending, so
+  // one that comes back finds the other already running the bus.
+  if (standby_ != Standby::off) {
+    standby_ = Standby::standing_by;
+    status_.standby = standby_;
+    status_.takeover_s = takeover_ms_ / 1000;
+    heard_at_ms_ = steady_ms();
+  }
   return true;
 }
 
@@ -97,7 +123,11 @@ void BusMaster::close() {
 
 MasterStatus BusMaster::status() const {
   std::lock_guard<std::mutex> lock(mu_);
-  return status_;
+  MasterStatus m = status_;
+  int64_t heard = heard_at_ms_;
+  if (m.standby == Standby::standing_by || m.standby == Standby::taking_over)
+    m.master_heard_ms_ago = heard >= 0 ? steady_ms() - heard : -1;
+  return m;
 }
 
 void BusMaster::set_fault(Fault f, const std::string &detail) {
@@ -112,6 +142,7 @@ void BusMaster::set_fault(Fault f, const std::string &detail) {
 }
 
 bool BusMaster::transact(uint16_t dest, uint16_t cmd, const Bytes &payload, Frame &reply, uint32_t timeout_ms) {
+  if (standing_by_()) return false;  // a standby that just yielded sends nothing more
   master::Bytes wire = master::encode_frame(dest, cmd, payload);
   // What our own request looks like coming back, if the adapter hears itself.
   std::string sent(wire.begin() + 5, wire.end() - 2);
@@ -184,6 +215,10 @@ bool BusMaster::transact(uint16_t dest, uint16_t cmd, const Bytes &payload, Fram
       });
     }
   }
+  if (foreign && standby_ != Standby::off) {
+    yield_();
+    return false;
+  }
   if (foreign) {
     set_fault(Fault::second_master,
               "another master is on the bus (is the CCA still connected?); stopped transmitting");
@@ -249,6 +284,10 @@ void BusMaster::tick_(uint32_t now_ms) {
     else LOGW("bus master: no answer to VERSION (0x000A)");
     return;
   }
+  if (standing_by_()) {
+    stand_by_(now_ms);
+    return;
+  }
   if (startup_ && phase_ != Phase::running) {
     run_startup(now_ms);
     return;
@@ -301,7 +340,7 @@ void BusMaster::tick_(uint32_t now_ms) {
   }
   Frame reply;
   bool ok = transact(gateway_, req.cmd, req.payload, reply);
-  if (status().fault == Fault::second_master) return;
+  if (status().fault == Fault::second_master || standing_by_()) return;
   if (housekeeping_) housekeeping_->on_reply(req, ok, reply);
   if (ok && queries_ && req.cmd == master::CMD_POLL) queries_->on_poll_reply(reply.payload, now_ms);
   if (ok && req.cmd == 0x000A) {
@@ -462,6 +501,89 @@ void BusMaster::run_startup(uint32_t now_ms) {
     return;
   }
   if (transact(d.dest, d.cmd, d.payload, r, d.wait_ms ? d.wait_ms : REPLY_TIMEOUT_MS)) discovery_->on_reply(r);
+}
+
+// Standing by: read what is on the bus, for the Monitor, and note each
+// request another master sends. None for takeover_s, then a random moment
+// more, and this one takes the bus over.
+void BusMaster::stand_by_(uint32_t) {
+  char buf[512];
+  pollfd pfd{fd_, POLLIN, 0};
+  int r = ::poll(&pfd, 1, REPLY_TIMEOUT_MS);
+  if (r < 0 && errno != EINTR) return;
+  if (r > 0) {
+    ssize_t n = ::read(fd_, buf, sizeof(buf));
+    if (n <= 0) {
+      set_fault(Fault::no_port, std::string("read failed: ") + (n < 0 ? strerror(errno) : "the port closed"));
+      ::close(fd_);
+      fd_ = -1;  // reopened by tick()
+      return;
+    }
+    const Sink &sink = on_listen_ ? on_listen_ : on_rx_;
+    if (sink) sink(buf, static_cast<size_t>(n));
+    bool heard = false;
+    for (ssize_t i = 0; i < n; i++) {
+      splitter_.feed(buf[i], [&](const std::string &body) {
+        Frame f;
+        if (master::decode_frame(body, f) && !(f.dest & 0x8000)) heard = true;
+      });
+    }
+    if (heard) {
+      heard_at_ms_ = steady_ms();
+      if (standby_ == Standby::taking_over) {
+        LOGI("standby: a master is running the bus again; standing by");
+        set_standby_(Standby::standing_by);
+      }
+    }
+  }
+  int64_t quiet = steady_ms() - heard_at_ms_;
+  if (standby_ == Standby::standing_by && quiet >= takeover_ms_) {
+    static std::minstd_rand rng(static_cast<uint32_t>(steady_ms()));
+    jitter_ms_ = rng() % (TAKEOVER_JITTER_MS + 1);
+    set_standby_(Standby::taking_over);
+  }
+  if (standby_ == Standby::taking_over && quiet >= static_cast<int64_t>(takeover_ms_) + jitter_ms_) take_over_(quiet);
+}
+
+// As at start, minus the open: the lease is read before anything renews
+// it, the poll cursor is taken from the TAP's reply, and a TAP that lost
+// power is brought up only if startup is on.
+void BusMaster::take_over_(int64_t quiet_ms) {
+  LOGW("standby: no master heard for %.1f s; taking over the bus", quiet_ms / 1000.0);
+  lease_ = master::LeaseKeeper();
+  drop_housekeeping_();
+  queries_.reset();
+  holding_ = false;
+  readdressed_ = false;
+  timeouts_in_a_row_ = 0;
+  if (learned_cb_) learned_ = learned_cb_();
+  phase_ = startup_ ? Phase::probing : Phase::running;
+  set_standby_(Standby::active);
+  std::lock_guard<std::mutex> lock(mu_);
+  status_.takeovers++;
+  status_.last_takeover_unix = unix_now();
+  status_.learned_41 = static_cast<uint32_t>(learned_.size());
+  if (status_.fault != Fault::extra_tap) {
+    status_.fault = Fault::none;
+    status_.detail.clear();
+  }
+}
+
+// Another master's request, heard while running the bus: it wins, whoever
+// it is. The other side, if it is a standby too, yields as well; their
+// takeover times differ, so they don't tie again.
+void BusMaster::yield_() {
+  LOGW("standby: another master is on the bus; standing by");
+  heard_at_ms_ = steady_ms();
+  set_standby_(Standby::standing_by);
+  std::lock_guard<std::mutex> lock(mu_);
+  status_.yields++;
+}
+
+void BusMaster::set_standby_(Standby s) {
+  standby_ = s;
+  std::lock_guard<std::mutex> lock(mu_);
+  status_.standby = s;
 }
 
 // Counts carry over; the next one starts again when polling does.

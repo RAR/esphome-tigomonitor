@@ -1062,8 +1062,12 @@
           <div class="cfg-ctrl"><select class="cfg-input" id="pi-serial"></select> <button class="btn" id="pi-serial-rescan">Rescan</button></div>
         </div>
         <div class="cfg-row">
-          <div class="cfg-text"><strong>Bus role</strong><span>Listen beside the CCA, or run the bus in its place with the CCA unplugged (experimental)</span></div>
-          <div class="cfg-ctrl"><select class="cfg-input" id="pi-bus-role"><option value="listen">Listen, beside the CCA</option><option value="master">Master, in place of the CCA</option></select></div>
+          <div class="cfg-text"><strong>Bus role</strong><span>Listen beside the CCA; run the bus in its place with the CCA unplugged; or stand by, beside a CCA or another master, and take the bus over if it stops (experimental)</span></div>
+          <div class="cfg-ctrl"><select class="cfg-input" id="pi-bus-role"><option value="listen">Listen, beside the CCA</option><option value="master">Master, in place of the CCA</option><option value="standby">Standby, takes over if the master stops</option></select></div>
+        </div>
+        <div class="cfg-row" id="pi-takeover-row" style="display:none">
+          <div class="cfg-text"><strong>Take over after</strong><span>Seconds with no master heard before this one runs the bus. Of two standbys, give the one you prefer the shorter time. Losing power on one master no longer stops the array: the other takes over, so rapid shutdown must cut the TAP's own power</span></div>
+          <div class="cfg-ctrl"><input class="cfg-input" id="pi-takeover" type="number" min="2" max="60" placeholder="3"></div>
         </div>
         <div class="cfg-row" id="pi-startup-row" style="display:none">
           <div class="cfg-text"><strong>Bring up the TAP</strong><span>If the gateway is found at its factory address (after a power cut), re-address it and start it. Needs the real CCA on hand to recover a stranded gateway (experimental)</span></div>
@@ -3102,7 +3106,7 @@
   async function refreshMasterDiagnostics() {
     const r = await apiFetch('/api/master').catch(() => null);
     const m = r && r.ok ? await r.json() : null;
-    const show = !!m && m.role === 'master';
+    const show = !!m && (m.role === 'master' || m.role === 'standby');
     document.getElementById('diag-master-head').style.display = show ? '' : 'none';
     document.getElementById('diag-master').style.display = show ? '' : 'none';
     if (!show) return;
@@ -3112,11 +3116,20 @@
                      discovery_failed: 're-addressing the gateway failed',
                      extra_tap: 'another TAP is on the bus: only one is supported, so its panels are not monitored' };
     const phases = { probing: 'looking for the gateway…', discovering: 're-addressing the gateway…' };
-    document.getElementById('diag-master-sub').textContent = m.fault !== 'none' ? faults[m.fault] || m.fault
-      : phases[m.phase] || (m.active ? 'running the bus' : 'not running');
+    const sb = m.standby || {};
+    const standingBy = sb.state === 'standing_by' || sb.state === 'taking_over';
+    const heard = sb.master_heard_ms_ago >= 0 ? `master heard ${(sb.master_heard_ms_ago / 1000).toFixed(1)} s ago` : 'no master heard yet';
+    const takeovers = sb.state && sb.state !== 'off'
+      ? ` · ${sb.takeovers} takeover${sb.takeovers === 1 ? '' : 's'}, gave the bus back ${sb.yields}×` : '';
+    document.getElementById('diag-master-sub').textContent = (m.fault !== 'none' ? faults[m.fault] || m.fault
+      : sb.state === 'standing_by' ? `standing by: ${heard}`
+      : sb.state === 'taking_over' ? `taking over: ${heard}`
+      : phases[m.phase] || (m.active ? 'running the bus' : 'not running')) + takeovers;
     document.getElementById('diag-lease').innerHTML = m.lease_read
       ? `${m.lease.remaining_s}<span class="hist-stat-unit">s</span>` : '—<span class="hist-stat-unit">s</span>';
-    document.getElementById('diag-lease-sub').textContent = !m.lease_read ? 'not read yet'
+    // Standing by, the lease and counts are from this one's last turn on the bus.
+    document.getElementById('diag-lease-sub').textContent = standingBy ? 'another master has the bus'
+      : !m.lease_read ? 'not read yet'
       : `${m.lease.running ? 'running' : 'lapsed'} · ${m.lease.node_count} nodes`;
     document.getElementById('diag-renewals').textContent = m.renewals;
     // A rate needs two readings; the first shows the total.
@@ -3633,7 +3646,9 @@
       document.getElementById('pi-bus-role').value = piBusRole;
       document.getElementById('pi-startup').checked = !!s.master_startup;
       document.getElementById('pi-startup').nextElementSibling.textContent = s.master_startup ? 'On' : 'Off';
-      document.getElementById('pi-startup-row').style.display = piBusRole === 'master' ? '' : 'none';
+      document.getElementById('pi-startup-row').style.display = piBusRole !== 'listen' ? '' : 'none';
+      document.getElementById('pi-takeover').value = s.standby_takeover_s || 3;
+      document.getElementById('pi-takeover-row').style.display = piBusRole === 'standby' ? '' : 'none';
       document.getElementById('pi-housekeeping').checked = !!s.master_housekeeping;
       document.getElementById('pi-housekeeping').nextElementSibling.textContent = s.master_housekeeping ? 'On' : 'Off';
       document.getElementById('pi-queries').checked = !!s.master_queries;
@@ -3641,7 +3656,7 @@
       document.getElementById('pi-writes').checked = !!s.master_optimizer_writes;
       document.getElementById('pi-writes').nextElementSibling.textContent = s.master_optimizer_writes ? 'On' : 'Off';
       document.getElementById('pi-writes').disabled = !s.master_queries;
-      for (const row of PI_MASTER_ROWS) document.getElementById(row).style.display = piBusRole === 'master' ? '' : 'none';
+      for (const row of PI_MASTER_ROWS) document.getElementById(row).style.display = piBusRole !== 'listen' ? '' : 'none';
       piFillHousekeepingHint();
       piWebLogin = { user: s.web_username || 'admin', set: !!s.web_password_set };
       document.getElementById('pi-web-user').value = piWebLogin.user;
@@ -3669,7 +3684,11 @@
     if (e.target.value === 'master' && piBusRole !== 'master' &&
         !confirm('Master mode transmits on the bus. Unplug the CCA first: two masters on one bus collide.\n\nContinue?'))
       e.target.value = piBusRole;
-    for (const row of PI_MASTER_ROWS) document.getElementById(row).style.display = e.target.value === 'master' ? '' : 'none';
+    else if (e.target.value === 'standby' && piBusRole !== 'standby' &&
+        !confirm('A standby takes the bus over whenever it hears no master, and transmits then. With one, cutting power to a master no longer stops the array: rapid shutdown must cut the TAP\'s own power.\n\nContinue?'))
+      e.target.value = piBusRole;
+    for (const row of PI_MASTER_ROWS) document.getElementById(row).style.display = e.target.value !== 'listen' ? '' : 'none';
+    document.getElementById('pi-takeover-row').style.display = e.target.value === 'standby' ? '' : 'none';
   });
   // The writes only follow the queries' answers.
   document.getElementById('pi-queries').addEventListener('change', (e) => {
@@ -3771,6 +3790,7 @@
       source = 'tcp://' + addr;
     }
     const body = { serial_port: source, web_port: webPort, bus_role: document.getElementById('pi-bus-role').value,
+                   standby_takeover_s: Number(document.getElementById('pi-takeover').value) || 3,
                    master_startup: document.getElementById('pi-startup').checked,
                    master_housekeeping: document.getElementById('pi-housekeeping').checked,
                    master_queries: document.getElementById('pi-queries').checked,

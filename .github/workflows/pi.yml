@@ -48,6 +48,8 @@ jobs:
         run: docker run --rm -v "$PWD":/src -w /src tigod-dev linux/scripts/bridge-e2e.sh
       - name: The bus master, against a mock TAP
         run: docker run --rm -v "$PWD":/src -w /src tigod-dev linux/scripts/master-e2e.sh
+      - name: Two masters on one bus, a standby taking over
+        run: docker run --rm -v "$PWD":/src -w /src tigod-dev linux/scripts/standby-e2e.sh
 
   deb:
     if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')

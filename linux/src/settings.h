@@ -27,7 +27,10 @@ struct Settings {
   int baud_rate = 38400;
   // "listen" (the default): only read the bus, beside a CCA. "master": run
   // the bus in the CCA's place, with the CCA unplugged (bus_master.h).
+  // "standby": listen while another master runs the bus, and take it over
+  // once none has been heard for standby_takeover_s.
   std::string bus_role = "listen";
+  int standby_takeover_s = 3;  // 2-60; the preferred of two standbys has the shorter time
   bool master_bench = false;    // also send the reads a bench TAP answers
   bool master_startup = false;  // re-address and bring up a TAP found at the factory address
   // Also send the CCA's 0x41s, its hourly 0x0B00 and 0x22s, and its 0x26 walks.
@@ -63,6 +66,10 @@ struct Settings {
 
 // 1-7FFE, and not 1234 or 1235: the bring-up's hop moves the TAP to the id
 // one up, which must be neither the factory address nor past the top.
+// The roles that transmit, and so run a BusMaster.
+inline bool runs_bus(const Settings &s) { return s.bus_role == "master" || s.bus_role == "standby"; }
+inline bool standby_takeover_ok(int s) { return s >= 2 && s <= 60; }
+
 inline bool gateway_id_ok(int id) { return id >= 1 && id <= 0x7FFE && id != 0x1234 && id != 0x1235; }
 
 Settings load_settings(const std::string &path);
