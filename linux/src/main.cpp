@@ -207,6 +207,14 @@ int main(int argc, char **argv) {
   cloud.load();
   Topology topology(state_dir + "/topology.json");
   topology.load();
+  // The bus master's status, for the web UI and Home Assistant alike.
+  auto master_status = [&] {
+    std::lock_guard<std::mutex> lock(master_mu);
+    MasterStatus m = bus_master ? bus_master->status() : MasterStatus{};
+    if (!bus_master) m.learned_41 = static_cast<uint32_t>(housekeeping.entries().size());
+    return m;
+  };
+  mqtt.set_master_status(master_status);
   HttpServer web(HttpContext{
       monitor, web_dir, settings_path, TIGOD_VERSION,
       [&] {
@@ -215,12 +223,7 @@ int main(int argc, char **argv) {
       },
       [&] { return mqtt.connected(); }, [&] { return mqtt.last_error(); }, settings_changed, restart_requested,
       monitor, topology, history, cloud, cca, cca_http,
-      [&] {
-        std::lock_guard<std::mutex> lock(master_mu);
-        MasterStatus m = bus_master ? bus_master->status() : MasterStatus{};
-        if (!bus_master) m.learned_41 = static_cast<uint32_t>(housekeeping.entries().size());
-        return m;
-      }});
+      master_status});
   if (port < 0 && settings.web_port > 0) port = settings.web_port;
   // Only the default steps aside for another web server; a port someone
   // chose fails loudly instead, and systemd keeps retrying it.

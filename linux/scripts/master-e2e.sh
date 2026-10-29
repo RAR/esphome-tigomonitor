@@ -24,6 +24,11 @@ except urllib.error.HTTPError as e:
     print(e.code)
 PY
 }
+# The master's status over MQTT: one state message, and the retained configs.
+mqtt_state() { mosquitto_sub -p 18831 -C 1 -W 15 -t tigomonitor/test/master/state 2>/dev/null || true; }
+mqtt_configs() { mosquitto_sub -p 18831 -v --retained-only -W 1 -t 'homeassistant/#' 2>/dev/null | grep -c "_bus_master" || true; }
+field() { python3 -c "import json,sys; d=json.load(sys.stdin); print(eval(sys.argv[1]))" "$1"; }
+mosquitto -p 18831 -d
 stat() { python3 -c "import json,sys; d=json.load(open('$1')); print(eval(sys.argv[1]))" "$2"; }
 
 # --- run 1: polls, lease, renewal, and a frozen daemon ---
@@ -32,11 +37,11 @@ stat() { python3 -c "import json,sys; d=json.load(open('$1')); print(eval(sys.ar
 python3 linux/tools/mock_tap.py "$out/tap" --lease 3 --renew-to 3 --nodes 45 --stats "$out/tap.json" &
 tap=$!
 sleep 0.5
-printf '{"bus_role": "master", "serial_port": "%s", "gateway_id": 4609, "web_port": 18092}\n' "$PWD/$out/tap" \
+printf '{"bus_role": "master", "serial_port": "%s", "gateway_id": 4609, "web_port": 18092, "device_id": "test", "publish_interval_s": 5, "mqtt": {"host": "127.0.0.1", "port": 18831}}\n' "$PWD/$out/tap" \
   > "$out/state/settings.json"
 build/linux/tigomonitord --state-dir "$out/state" --web-dir components/tigo_server/web 2> "$out/daemon.log" &
 daemon=$!
-trap 'kill -CONT $daemon 2>/dev/null || true; kill $daemon $tap 2>/dev/null || true' EXIT
+trap 'kill -CONT $daemon 2>/dev/null || true; kill $daemon $tap 2>/dev/null || true; pkill mosquitto || true' EXIT
 renewals() { stat "$out/tap.json" "len(d['renewals'])"; }
 for _ in $(seq 60); do [ -f "$out/tap.json" ] && [ "$(renewals)" -ge 1 ] && break; sleep 0.5; done
 expect "panels decoded" "$(api 18092 /api/devices | python3 -c 'import json,sys; print(len(json.load(sys.stdin)["devices"]))')" 6
@@ -46,6 +51,8 @@ expect "cursor followed the TAP" "$(stat "$out/tap.json" "d['cursor_mismatches']
 expect "nothing outside the allow-list" "$(stat "$out/tap.json" "d['other']")" "[]"
 master="$(api 18092 /api/master)"
 expect "/api/master active" "$(echo "$master" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["active"], d["fault"], d["renewals"] >= 1, d["lease"]["node_count"])')" "True none True 45"
+expect "MQTT: master active" "$(mqtt_state | field '(d["status"], d["problem"], d["lease_nodes"], d["renewals"] >= 1)')" "('active', False, 45, True)"
+expect "MQTT: master entities announced" "$(mqtt_configs)" 8
 # Frozen across the next renewal it would make (the 20 s check after this
 # one): nothing renews the lease until the daemon runs again.
 before="$(renewals)"
@@ -66,13 +73,14 @@ kill $tap; wait $tap 2>/dev/null || true
 python3 linux/tools/mock_tap.py "$out/tap2" --foreign-after 3 --stats "$out/tap2.json" &
 tap=$!
 sleep 0.5
-printf '{"bus_role": "master", "serial_port": "%s", "gateway_id": 4609, "web_port": 18093}\n' "$PWD/$out/tap2" \
+printf '{"bus_role": "master", "serial_port": "%s", "gateway_id": 4609, "web_port": 18093, "device_id": "test", "publish_interval_s": 5, "mqtt": {"host": "127.0.0.1", "port": 18831}}\n' "$PWD/$out/tap2" \
   > "$out/state2/settings.json"
 build/linux/tigomonitord --state-dir "$out/state2" --web-dir components/tigo_server/web 2> "$out/daemon2.log" &
 daemon=$!
 sleep 6
 expect "second master stops it" "$(api 18093 /api/master | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["active"], d["fault"])')" "False second_master"
 expect "nothing sent after the second master" "$(stat "$out/tap2.json" "d['frames_after_foreign'] <= 1")" True
+expect "MQTT: the fault shows" "$(mqtt_state | field '(d["status"], d["problem"])')" "('second_master', True)"
 kill $daemon; wait $daemon 2>/dev/null || true
 kill $tap; wait $tap 2>/dev/null || true
 

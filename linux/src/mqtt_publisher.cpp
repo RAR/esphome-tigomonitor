@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <ctime>
 
 namespace tigod {
 
@@ -110,9 +111,10 @@ bool MqttPublisher::pub_(const std::string &topic, const std::string &payload, b
   return rc == MOSQ_ERR_SUCCESS;
 }
 
-void MqttPublisher::announce_(const std::string &component, const std::string &uid, const json &config) {
+void MqttPublisher::announce_(const std::string &component, const std::string &uid, const json &config,
+                              bool remove) {
   pub_(settings_.mqtt.discovery_prefix + "/" + component + "/" + uid + "/config",
-       settings_.mqtt.discovery ? config.dump() : "", true);
+       settings_.mqtt.discovery && !remove ? config.dump() : "", true);
 }
 
 static json monitor_device(const Settings &s, const std::string &version) {
@@ -253,6 +255,81 @@ void MqttPublisher::publish_string_discovery_(const std::string &label) {
   announce_("sensor", uid, c);
 }
 
+// The bus master, on the monitor device. remove: the listen role, where a
+// master announced before would otherwise stay in Home Assistant, frozen.
+void MqttPublisher::publish_master_discovery_(bool remove) {
+  json device = monitor_device(settings_, version_);
+  std::string state = base_() + "/master/state";
+  // Unavailable once the daemon stops publishing (frozen, or the Pi gone)
+  // as well as through the last will.
+  int expire = std::max(300, 3 * settings_.publish_interval_s);
+  std::string uid = "tigomonitor_" + settings_.device_id + "_bus_master_problem";
+  // On for a fault or a stopped master: what to alert on, with the CCA gone.
+  announce_("binary_sensor", uid,
+            {{"name", "Bus master problem"},
+             {"unique_id", uid},
+             {"state_topic", state},
+             {"value_template", "{{ 'ON' if value_json.problem else 'OFF' }}"},
+             {"availability_topic", base_() + "/status"},
+             {"expire_after", expire},
+             {"device_class", "problem"},
+             {"device", device}},
+            remove);
+  struct Sys {
+    const char *key, *name, *unit, *device_class, *state_class;
+    bool diagnostic;
+  };
+  static const Sys SYS[] = {
+      {"status", "Bus master", nullptr, nullptr, nullptr, false},
+      {"lease_remaining_s", "Bus master lease remaining", "s", "duration", "measurement", true},
+      {"lease_nodes", "Bus master lease nodes", nullptr, nullptr, "measurement", true},
+      {"renewals", "Bus master lease renewals", nullptr, nullptr, "total_increasing", true},
+      {"tap_lost", "TAP lost", nullptr, nullptr, "total_increasing", true},
+      {"gap_recent_ms", "Bus master longest pause", "ms", "duration", "measurement", true},
+      {"last_reply", "TAP last reply", nullptr, "timestamp", nullptr, true},
+  };
+  for (const auto &m : SYS) {
+    uid = "tigomonitor_" + settings_.device_id + "_bus_master_" + m.key;
+    json c = {{"name", m.name},
+              {"unique_id", uid},
+              {"state_topic", state},
+              {"value_template", std::string("{{ value_json.") + m.key + " }}"},
+              {"availability_topic", base_() + "/status"},
+              {"expire_after", expire},
+              {"device", device}};
+    if (m.unit) c["unit_of_measurement"] = m.unit;
+    if (m.device_class) c["device_class"] = m.device_class;
+    if (m.state_class) c["state_class"] = m.state_class;
+    if (m.diagnostic) c["entity_category"] = "diagnostic";
+    announce_("sensor", uid, c, remove);
+  }
+}
+
+void MqttPublisher::publish_master_() {
+  MasterStatus m = master_status_();
+  std::string status = m.fault != Fault::none ? fault_name(m.fault) : m.active ? "active" : "stopped";
+  json last_reply = nullptr;
+  if (m.last_reply_unix > 0) {
+    time_t t = static_cast<time_t>(m.last_reply_unix);
+    struct tm tm;
+    gmtime_r(&t, &tm);
+    char buf[32];
+    strftime(buf, sizeof buf, "%Y-%m-%dT%H:%M:%S+00:00", &tm);
+    last_reply = buf;
+  }
+  json s = {{"status", status},
+            {"problem", status != "active"},
+            {"phase", phase_name(m.phase)},
+            {"detail", m.detail},
+            {"lease_remaining_s", m.lease.remaining_s},
+            {"lease_nodes", m.lease.node_count},
+            {"renewals", m.renewals},
+            {"tap_lost", m.tap_lost},
+            {"gap_recent_ms", m.gap_recent_ms},
+            {"last_reply", last_reply}};
+  pub_(base_() + "/master/state", s.dump(), false);
+}
+
 static double round_to(double v, int digits) {
   double f = std::pow(10.0, digits);
   return std::round(v * f) / f;
@@ -264,7 +341,9 @@ void MqttPublisher::publish() {
     announced_.clear();
     announced_strings_.clear();
     publish_system_discovery_();
+    publish_master_discovery_(settings_.bus_role != "master" || !master_status_);
   }
+  if (settings_.bus_role == "master" && master_status_) publish_master_();
   auto now = Clock::now();
   auto window = monitor_.online_window();
   bool night = monitor_.night_mode();
