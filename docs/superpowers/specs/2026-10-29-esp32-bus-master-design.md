@@ -212,8 +212,11 @@ firmware doesn't enforce it.
 
 1. ~~Which boards?~~ A Waveshare ESP32-S3-Relay-1CH (the owner, 2026-10-29).
 2. ~~The GPIOs?~~ From the owner's config for the board: RS485 TX 7, RX 8,
-   DE/RE 21, relay 47 (held off), RTC on I2C 39/38. Still unknown:
-   - the flash size;
+   DE/RE 21, relay 47 (held off), RTC on I2C 39/38. Flash is 16 MB. The
+   board ran the owner's Solar Assistant proxy (`yambms/sa-proxy.yaml`):
+   RS485 on these pins at 115200 baud, with GPIO21 as the flow-control pin.
+   So RTS-driven DE has worked on this board, though not yet at 38400 or
+   with our framing. Still unknown:
    - whether GPIO21 has a pull-down. If DE floats high while the ESP32 is
      resetting, the board drives the bus during every boot and corrupts the
      active master's exchanges. The first bench step checks this: reboot
