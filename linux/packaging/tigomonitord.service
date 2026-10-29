@@ -10,6 +10,13 @@ ExecStart=/usr/bin/tigomonitord
 Restart=always
 RestartSec=3
 
+# As bus master the daemon must answer the TAP on time, and on a Pi Zero
+# the daily apt list refresh stalled it for 1.1 s. Ahead of other work for
+# the CPU and the SD card; its own disk writes are a few KB a minute.
+Nice=-10
+IOSchedulingClass=realtime
+IOSchedulingPriority=4
+
 # A system account the package creates, in dialout (the RS485 adapter) and
 # bluetooth (the CCA page); the capability serves the web UI on port 80.
 # Not DynamicUser: D-Bus cannot resolve those accounts unless nss-systemd is
