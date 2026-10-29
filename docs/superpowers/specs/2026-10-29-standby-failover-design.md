@@ -1,6 +1,8 @@
 # Standby failover: a second bus master that takes over
 
-Branch: `feature/cca-replacement`. Status: design, not started. Builds on
+Branch: `feature/cca-replacement`. Status: built on the Pi (997adf7) and
+tested against the mock, `linux/scripts/standby-e2e.sh`; not yet run on the
+roof. See "As built" at the end. Builds on
 [the CCA replacement design](2026-10-26-cca-replacement-design.md).
 
 ## Why
@@ -209,3 +211,26 @@ seconds of telemetry. It's listed under Later, behind fencing.
 - **Fencing:** the standby cuts a jammed master's transceiver power through a
   relay, for the stuck-driver case. The Waveshare and LilyGO boards' CAN ports
   could carry that command too.
+
+## As built (2026-10-29)
+
+Departures from the design above, each a call made while building it:
+
+- **The lease isn't learned while standing by.** The takeover starts with a
+  fresh LeaseKeeper, which reads the lease before renewing anything, as at
+  every start. The 0x2F replies a standby hears add nothing to that. If this
+  is wrong, one lease check is lost (20 s at worst), well inside the 900 s.
+- **taking_over is only the random 0-500 ms wait.** The first request after
+  it goes through the normal schedule, which reads the lease first. It isn't
+  a dedicated lease check.
+- **The takeover also clears faults left from before** (except `extra_tap`),
+  and resets the no-reply count, so a standby doesn't carry an old
+  `no_reply` into its turn.
+- **The MQTT state gains `takeovers` and `yields`** (no new entities). The
+  existing status sensor reads `standing_by` or `taking_over`, and the
+  problem sensor stays off for both.
+- **Test infrastructure:** `mock_tap.py --extra-link` puts a second master's
+  pty on the same bus. Every byte one master writes reaches the others, and
+  every reply reaches all of them. `--foreign-every`/`--foreign-until` play
+  a CCA beside it.
+

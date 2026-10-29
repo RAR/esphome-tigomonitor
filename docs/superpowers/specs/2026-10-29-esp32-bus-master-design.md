@@ -1,6 +1,8 @@
 # ESP32 as the TAP's bus master
 
-Branch: `feature/cca-replacement`. Status: design, not started. Builds on
+Branch: `feature/cca-replacement`. Status: built, and compiles for the
+Relay-1CH (`boards/example-waveshare-relay-1ch-standby.yaml`). It has not run
+on hardware yet. See "As built" at the end. Builds on
 [the CCA replacement design](2026-10-26-cca-replacement-design.md), which kept
 an ESP32 version out of scope "until the Pi version proves out". The Pi has now
 run the roof alone since the CCA died (2026-10-29). Pairs with
@@ -232,3 +234,30 @@ firmware doesn't enforce it.
     an ESP32 reboot can't cut it.
   - On request only, and only from the active master.
   - It needs the bring-up proven on the roof first.
+
+## As built (2026-10-29)
+
+- **The core:** `components/tigo_master/master_core.{h,cpp}`, split out of
+  the Pi's bus master with a `Transport` interface and a log callback. The
+  Pi's `linux/src/bus_master.{h,cpp}` is now a serial-port transport and a
+  thin wrapper. Every Linux e2e suite passes on it unchanged.
+- **The ESP32 uses ESPHome's own `uart:`, not raw IDF calls.** On ESP-IDF it
+  already runs the RS485 half-duplex mode when `flow_control_pin` is set. It
+  has no loop or event task of its own, so the master task can be its only
+  user.
+- **tigo_monitor reads the bus through tigo_master,** which is also a
+  `uart::UARTComponent`. Its read side is a lock-free ring (8 KB), filled by
+  the master task and drained by tigo_monitor in the ESPHome loop, so
+  tigo_monitor is unchanged. Writes through it are refused and logged.
+  tigo_master's config carries the four 38400 8N1 keys that tigo_monitor's
+  uart check reads.
+- **The liveness gate is at the task:** the core isn't ticked at all while
+  the ESPHome loop has been silent for 5 s, so a hung loop stops every
+  request, not only the renewals.
+- **The 0x41s heard while standing by are learned in RAM only.** After a
+  reboot it uses the built-in content until it hears them again.
+- **The config refuses `tigo_server` and an `esp_tsdb` framework
+  component** (the flash writes).
+- Compiled with ESPHome 2026.10.0: 908 KB flash, 122 KB static RAM. The new
+  component builds with no warnings.
+

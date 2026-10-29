@@ -1,0 +1,132 @@
+# Example: the Waveshare ESP32-S3-Relay-1CH as a standby bus master
+#
+# EXPERIMENTAL. This board transmits on the Tigo bus. It listens beside the
+# master that runs the bus (the Pi, or a CCA) and takes the bus over when it
+# hears no master for `takeover_after`; it hands the bus back to any master
+# it hears. See docs/superpowers/specs/2026-10-29-esp32-bus-master-design.md.
+#
+# With a standby on the bus, cutting power to one master no longer stops the
+# array: the other takes over. Rapid shutdown must cut the TAP's own power.
+#
+# A thin config on purpose: no tigo_server and no on-flash history. A flash
+# write stops both cores for up to a second, the bus master with them;
+# tigo_master refuses to build alongside either.
+#
+# Board facts (Waveshare's wiki and the owner's earlier config for it):
+# ESP32-S3R8 (8 MB octal PSRAM), 16 MB flash, isolated RS485 on TX GPIO7 /
+# RX GPIO8 with DE/RE on GPIO21, relay on GPIO47, PCF85063A RTC on I2C
+# GPIO39/38, 5 V in only. The relay is left unwired and held off.
+
+esphome:
+  name: tigo-standby
+  friendly_name: "Tigo Standby"
+  min_version: "2026.5.0"
+
+esp32:
+  variant: esp32s3
+  board: esp32-s3-devkitc-1
+  flash_size: 16MB
+  framework:
+    type: esp-idf
+    version: recommended
+    sdkconfig_options:
+      CONFIG_ESP32S3_DEFAULT_CPU_FREQ_240: "y"
+      # The UART ISR from IRAM, so a busy flash never stalls it.
+      CONFIG_UART_ISR_IN_IRAM: "y"
+      CONFIG_LOG_DEFAULT_LEVEL_INFO: "y"
+      CONFIG_SPIRAM_MODE_OCT: "y"
+      CONFIG_SPIRAM_SPEED_80M: "y"
+
+psram:
+  mode: octal
+  speed: 80MHz
+
+external_components:
+  - source:
+      type: git
+      url: https://github.com/RAR/esphome-tigomonitor
+      ref: main
+    components: [tigo_monitor, tigo_master]
+
+logger:
+  level: INFO
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+api:
+
+ota:
+  - platform: esphome
+    password: "YOUR_OTA_PASSWORD"
+
+# The relay: not wired, and held off.
+switch:
+  - platform: gpio
+    id: relay_1
+    internal: true
+    pin: GPIO47
+    restore_mode: ALWAYS_OFF
+  - platform: restart
+    name: "Tigo Standby Restart"
+
+# --- Tigo bus ----------------------------------------------------------------
+# The real RS485 UART. GPIO21 is the transceiver's DE/RE: as flow_control_pin
+# the IDF runs it in RS485 half-duplex mode, raising it for each frame and
+# dropping it as the last bit leaves.
+uart:
+  id: rs485
+  tx_pin: GPIO7
+  rx_pin: GPIO8
+  flow_control_pin: GPIO21
+  baud_rate: 38400
+  data_bits: 8
+  parity: NONE
+  stop_bits: 1
+  rx_buffer_size: 2048
+
+tigo_master:
+  id: bus
+  uart_id: rs485
+  monitor_id: tigo_hub
+  role: standby
+  # Longer than the Pi's 3 s, so with both standing by the Pi is preferred.
+  takeover_after: 8s
+  # The rest as the Pi runs the roof.
+  housekeeping: true
+  queries: true
+  optimizer_writes: true
+  status:
+    name: "Bus master"
+  problem:
+    name: "Bus master problem"
+  lease_remaining:
+    name: "Bus master lease remaining"
+  takeovers:
+    name: "Bus master takeovers"
+  longest_pause:
+    name: "Bus master longest pause"
+
+# Reads the bus through tigo_master, which owns the UART.
+tigo_monitor:
+  id: tigo_hub
+  uart_id: bus
+  number_of_devices: 48
+
+sensor:
+  - platform: tigo_monitor
+    tigo_monitor_id: tigo_hub
+    name: "Total System Power"
+  - platform: tigo_monitor
+    tigo_monitor_id: tigo_hub
+    name: "Missed Frame Count"
+  - platform: uptime
+    name: "Tigo Standby Uptime"
+  - platform: wifi_signal
+    name: "Tigo Standby WiFi Signal"
+    update_interval: 60s
+
+binary_sensor:
+  - platform: status
+    name: "Tigo Standby Status"
