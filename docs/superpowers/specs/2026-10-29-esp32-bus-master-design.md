@@ -220,10 +220,10 @@ firmware doesn't enforce it.
    RS485 at 115200 baud, with GPIO21 as the flow-control pin.
    So RTS-driven DE has worked on this board, though not yet at 38400 or
    with our framing. Still unknown:
-   - whether GPIO21 has a pull-down. If DE floats high while the ESP32 is
-     resetting, the board drives the bus during every boot and corrupts the
-     active master's exchanges. The first bench step checks this: reboot
-     the board on a bus the mock is running, and look for bad checksums.
+   - ~~whether GPIO21 has a pull-down.~~ It has none that wins: it floats
+     high, and the driver is on until the UART takes the pin (measured
+     2026-10-30, below). The board needs a 10 kΩ pull-down before it goes
+     on a live bus.
 3. What will feed the board's 5 V? If it is fed from the RSD-switched
    supply, the RSD cuts the board too, which is fine.
 
@@ -302,9 +302,20 @@ USB-RS485 cable (bridged to the mock's pty), A to A, B to B and GND to GND.
   that the core starts a request without waiting for a quiet line; a
   short idle check before sending would help if another master were
   mid-frame. Not built: the standby's yield already covers that case.
-- **Not yet measured:** GPIO21 while the board resets. On the Waveshare
-  ESP32-S3-RS485-CAN, GPIO21 drives DE and /RE together and floats at
-  reset; if the Relay-1CH is wired the same, its driver may be on for the
-  reboot window. The cable heard nothing across several resets, but a
-  driver holding the line idle wouldn't show that way; a scope on DE
-  would.
+- **GPIO21 floats high, and that turns the driver on.** Measured with a
+  test firmware that toggled TX by hand and cycled GPIO21's pull every
+  6 s: floating, GPIO21 read 1 and the cable heard 58-60 bytes per phase;
+  with the internal pull-up, 1 and 60 bytes; with the internal pull-down
+  (~45 kΩ), 0 and 1 byte. So from reset until the UART takes GPIO21,
+  about 0.6 s on every boot, the board holds the bus. The internal
+  pull-down winning means a 10 kΩ resistor from GPIO21 to GND holds the
+  driver off through reset with margin; software can't, since the ROM
+  bootloader runs first.
+- **Safe mode would jam the bus.** After 10 quick reboots ESPHome's safe
+  mode sets up only Wi-Fi, OTA and the logger: the generated `setup()`
+  returns before the UART is registered, so GPIO21 floats for the whole
+  5 minutes safe mode lasts, then the board retries, and a board that
+  keeps crashing spends most of its time there. The example config now
+  drives GPIO21 low from `safe_mode: on_safe_mode:`. Bench check: 11
+  resets in a row, and boot 11 logged "Boot loop detected", "SAFE MODE IS
+  ACTIVE" and the hold's own line.

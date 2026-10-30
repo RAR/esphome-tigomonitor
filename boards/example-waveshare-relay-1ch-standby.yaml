@@ -61,6 +61,21 @@ ota:
   - platform: esphome
     password: "YOUR_OTA_PASSWORD"
 
+# Safe mode (after 10 quick reboots) sets up only Wi-Fi, OTA and the logger,
+# so the UART never takes GPIO21. Left floating, GPIO21 reads high, which
+# turns the RS485 driver on and holds the bus for the 5 minutes safe mode
+# lasts, every time the board crash-loops into it. Hold it low instead.
+# This can't cover the ~0.6 s from reset to setup on every boot: a 10 kΩ
+# resistor from GPIO21 to GND does, and this board needs one before it goes
+# on a live bus.
+safe_mode:
+  on_safe_mode:
+    - lambda: |-
+        gpio_reset_pin(GPIO_NUM_21);
+        gpio_set_direction(GPIO_NUM_21, GPIO_MODE_OUTPUT);
+        gpio_set_level(GPIO_NUM_21, 0);
+        ESP_LOGW("tigo_master", "Safe mode: GPIO21 held low, the RS485 driver is off");
+
 # The relay: not wired, and held off.
 switch:
   - platform: gpio
