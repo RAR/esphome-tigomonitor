@@ -1,0 +1,44 @@
+# M5Stack AtomS3R Display Package — M5Unified-backed alternative
+#
+# Short version: atoms3r-display.yaml's i2c:/spi:/lp5562:/display: stack could
+# not be made to drive this board's backlight, even after matching every
+# register, value, write order, bus frequency, pull-up setting, and the
+# open-drain CTR bits M5's own firmware sets — confirmed via I2C readback that
+# the LP5562 held every value correctly, with zero visible light. M5GFX's own
+# I2C code turned out to be a from-scratch register-poking driver that bypasses
+# ESP-IDF's standard i2c_master driver entirely, not a thin wrapper around it —
+# so no combination of config on top of ESPHome's generic i2c: component
+# reproduced it.
+#
+# This file instead pulls in the real M5Unified/M5GFX library as an ESP-IDF
+# managed component (via the m5_backlight external component, which just calls
+# esp32.add_idf_component) and calls M5.begin()/M5.Display directly. Confirmed
+# working on real hardware: screen + backlight both function correctly, and
+# tigo_monitor/tigo_server still build and run fine alongside it — M5Unified
+# builds cleanly under plain ESP-IDF, no Arduino framework needed.
+#
+# Usage: this file replaces atoms3r-display.yaml's i2c:/spi:/lp5562:/display:/
+# light:/output: blocks entirely. Don't combine both packages — M5Unified needs
+# to own the display/backlight pins exclusively; ESPHome's own i2c:/spi:/
+# display: components fighting it for the same hardware is the likely reason
+# a from-scratch register-level ESPHome implementation didn't work either.
+
+external_components:
+  - source:
+      type: local
+      path: components
+    components: [m5_backlight]
+
+m5_backlight:
+
+esphome:
+  includes:
+    - "components/m5_backlight/m5_include.h"
+  on_boot:
+    priority: -200
+    then:
+      - lambda: |-
+          auto cfg = M5.config();
+          M5.begin(cfg);
+          M5.Display.setBrightness(255);
+          M5.Display.setRotation(0);
