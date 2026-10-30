@@ -277,6 +277,7 @@ def main():
                 for tuid, text in answers:  # optimizers' answers ride along, as type 0x07 packets
                     packets += bytes([0x07, tuid >> 8, tuid & 0xFF, 0x00, 0x02, 0xDB, len(text)]).hex() + text.hex()
                     stats['answered'] += 1
+                handed_out += len(answers)  # counted in the cursor too, as in the rig capture (7 of 7)
                 answers.clear()
                 reply = bytes.fromhex(f'41FF{cursor & 0xFF:02X}4B9A' + packets)
                 send(encode(addr | 0x8000, 0x0149, reply))

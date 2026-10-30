@@ -373,6 +373,8 @@ daemon=$!
 for _ in $(seq 160); do [ -f "$out/tap15.json" ] && [ "$(stat "$out/tap15.json" "len(d['queries'])")" -ge 30 ] && break; sleep 0.5; done
 sleep 6
 expect "reads go out and are answered" "$(stat "$out/tap15.json" "(len(d['queries']) >= 20, d['answered'] >= 20)")" "(True, True)"
+# The TAP counts the answers in its cursor, as power packets: 7 of 7 in the rig capture.
+expect "the cursor counts the answers too" "$(stat "$out/tap15.json" "d['cursor_mismatches']")" 0
 expect "no writes without the setting" "$(stat "$out/tap15.json" "[q for q in d['queries'] if q['text'].startswith(('#', '^00Smrt_'))]")" "[]"
 expect "warm, housekeeping off: no bring-up reads, 0x22s or walks" "$(stat "$out/tap15.json" "([x['f'] for x in d['log'] if x['f'][5:9] in ('000A', '0E02', '0010')], d['broadcast'], d['walk'], d['session'])")" "([], [], [], [])"
 kill $daemon; wait $daemon 2>/dev/null || true

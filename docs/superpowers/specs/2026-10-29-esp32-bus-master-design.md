@@ -74,7 +74,7 @@ run the roof alone since the CCA died (2026-10-29). Pairs with
   | LilyGO T-CAN485 | MAX13487E, **auto-direction** | yes | none | **The thin standby.** Its UART TX is already wired; the driver turns itself on |
   | Waveshare ESP32-S3-RS485-CAN | SP3485, DE+/RE on GPIO21 | yes | 8 MB | Full build possible. Needs DE driven by the IDF RS485 half-duplex mode (RTS on GPIO21) |
   | M5Stack AtomS3R + Atomic RS485 Base | auto-direction (unverified) | no | 8 MB | The reference rig's pairing; TX is on GPIO6, so far unused |
-  | **Waveshare ESP32-S3-Relay-1CH** | isolated; TX GPIO7, RX GPIO8, DE/RE on **GPIO21**, driven as the UART's RTS in the IDF RS485 half-duplex mode (Waveshare's "hardware flow") | no | 8 MB (ESP32-S3R8) | **The owner's board, and the target.** Its relay is left unwired (see below). It runs on 5 V only. The relay is GPIO47, with an RTC (PCF85063A) on I2C GPIO39/38 |
+  | **Waveshare ESP32-S3-Relay-1CH** | isolated; TX GPIO17, RX GPIO18, DE/RE on **GPIO21**, driven as the UART's RTS in the IDF RS485 half-duplex mode (Waveshare's "hardware flow") | no | 8 MB (ESP32-S3R8) | **The owner's board, and the target.** Its relay is left unwired (see below). It runs on 5 V only. The relay is GPIO47, with an RTC (PCF85063A) on I2C GPIO39/38 |
 
   The relay is **1NO only**, rated 10 A at 30 V DC, with an RTC on the board
   ([Waveshare wiki](https://www.waveshare.com/wiki/ESP32-S3-Relay-1CH)).
@@ -213,10 +213,11 @@ firmware doesn't enforce it.
 ## Open questions
 
 1. ~~Which boards?~~ A Waveshare ESP32-S3-Relay-1CH (the owner, 2026-10-29).
-2. ~~The GPIOs?~~ From the owner's config for the board: RS485 TX 7, RX 8,
-   DE/RE 21, relay 47 (held off), RTC on I2C 39/38. Flash is 16 MB. The
+2. ~~The GPIOs?~~ RS485 TX 17, RX 18 (found on the bench, 2026-10-30:
+   the owner's earlier config said TX 7, RX 8, and on those the board
+   neither heard nor reached the bus), DE/RE 21, relay 47 (held off), RTC on I2C 39/38. Flash is 16 MB. The
    board ran the owner's Solar Assistant proxy (`yambms/sa-proxy.yaml`):
-   RS485 on these pins at 115200 baud, with GPIO21 as the flow-control pin.
+   RS485 at 115200 baud, with GPIO21 as the flow-control pin.
    So RTS-driven DE has worked on this board, though not yet at 38400 or
    with our framing. Still unknown:
    - whether GPIO21 has a pull-down. If DE floats high while the ESP32 is
@@ -261,3 +262,28 @@ firmware doesn't enforce it.
 - Compiled with ESPHome 2026.10.0: 908 KB flash, 122 KB static RAM. The new
   component builds with no warnings.
 
+
+## On the bench (2026-10-30)
+
+The Relay-1CH, USB-powered, against `mock_tap.py` through an FTDI
+USB-RS485 cable (bridged to the mock's pty), A to A, B to B and GND to GND.
+
+- **The RS485 pins are TX 17, RX 18.** On 7/8 it neither heard nor reached
+  the cable. The ground matters too: without it, nothing in either
+  direction (the isolated side has no other reference).
+- **Standing by:** with a foreign master polling once a second, it stood
+  by for 30 s and sent nothing.
+- **Taking over:** with the bus silent, it took over at 8.2-8.5 s
+  (`takeover_after: 8s` plus the jitter), took the TAP's poll cursor once
+  and stayed in step. Over 2.5 min: 4,261 polls, 8 lease checks, 30
+  optimizer answers, 3 retries (0.07 %), longest gap between its frames
+  64 ms, no resets. tigo_monitor decoded the panels through tigo_master.
+- **The mock was wrong about the cursor, not the core.** The core counts
+  the optimizers' type 0x07 answers in the poll cursor; the mock didn't,
+  so every answer cost a resync. The rig capture settles it: 7 replies
+  carried a 0x07, and the next poll counted it all 7 times. The mock now
+  counts them, and master-e2e checks the cursor in its query run.
+- **Not yet measured:** the pause a tigo_monitor flash save (node table,
+  hourly energy) puts on the bus; GPIO21 while the board resets. A last
+  byte clipped at the DE drop wasn't seen: 4,315 frames from the board in
+  that run, 0 with a bad CRC.

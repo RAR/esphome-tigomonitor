@@ -5,8 +5,8 @@ RS485 uart, and tigo_monitor reads the bus through it:
 
     uart:
       id: rs485
-      tx_pin: GPIO7
-      rx_pin: GPIO8
+      tx_pin: GPIO17
+      rx_pin: GPIO18
       flow_control_pin: GPIO21   # DE/RE, for a transceiver without auto-direction
       baud_rate: 38400
 
