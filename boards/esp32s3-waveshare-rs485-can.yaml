@@ -22,11 +22,18 @@
 # from the bus forever. That is exactly what issue #22 looked like: no frames,
 # no checksum errors, `Buffer: 0 bytes`. The `switch:` block below is the fix.
 #
-# Driving it LOW is also a genuine read-only guarantee, and a stronger one than
-# most boards give you. With DE and /RE tied together, low means "receiver on,
-# driver off" in hardware — the same strapping the project's wiring guide
-# recommends for a discrete MAX485. The ESP32 physically cannot talk onto the
-# Tigo bus while that pin is held down, so it can never contend with the CCA.
+# Driving it LOW is also a read-only guarantee, once the switch is set up. With
+# DE and /RE tied together, low means "receiver on, driver off" in hardware —
+# the same strapping the project's wiring guide recommends for a discrete
+# MAX485. While that pin is held down, the ESP32 cannot talk onto the Tigo bus.
+#
+# Two gaps, both while GPIO21 floats. From reset until the switch is set up,
+# under a second on every boot, the driver is on and holds the bus at idle;
+# a frame from the CCA or the TAP in that window is lost. And ESPHome's safe
+# mode (after 10 quick reboots) never sets the switch up at all, so the
+# `safe_mode:` block below holds the pin low there. Measured on a Waveshare
+# ESP32-S3-Relay-1CH, which wires GPIO21 the same way, not on this board. To
+# close the boot window as well, fit a 10 kΩ resistor from GPIO21 to GND.
 #
 # If you ever see zero bytes after this, the only thing worth trying is
 # inverting it (`restore_mode: ALWAYS_ON`) in case your revision buffers the
@@ -119,6 +126,16 @@ switch:
     internal: true
     pin: GPIO21          # DE + /RE, low => receiver on and driver off
     restore_mode: ALWAYS_OFF
+
+# Safe mode sets up only Wi-Fi, OTA and the logger, so the switch above never
+# runs and GPIO21 floats high: driver on, for the 5 minutes safe mode lasts.
+safe_mode:
+  on_safe_mode:
+    - lambda: |-
+        gpio_reset_pin(GPIO_NUM_21);
+        gpio_set_direction(GPIO_NUM_21, GPIO_MODE_OUTPUT);
+        gpio_set_level(GPIO_NUM_21, 0);
+        ESP_LOGW("tigo_monitor", "Safe mode: GPIO21 held low, the RS485 driver is off");
 
 # --- Tigo bus ----------------------------------------------------------------
 # The board's isolated RS485 transceiver, on its own hardware UART. That leaves
