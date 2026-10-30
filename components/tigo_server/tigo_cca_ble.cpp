@@ -20,6 +20,7 @@
 #include "esphome/core/log.h"
 #include "esphome/core/helpers.h"
 #include "esphome/core/preferences.h"
+#include "esphome/core/version.h"
 #include "esphome/components/tigo_monitor/tigo_cca_ble_protocol.h"
 // ESP-IDF 6.0 ships mbedtls 4.0, which removed the legacy mbedtls_sha512_* API and
 // its public "mbedtls/sha512.h" header — hashing moved to the PSA Crypto API. Use PSA
@@ -791,8 +792,15 @@ bool TigoWebServer::parse_device(const esp32_ble_tracker::ESPBTDevice &device) {
   if (this->ble_scan_hits_.size() < 16) {
     this->ble_scan_hits_.push_back({mac, device.get_rssi(), device.get_name(), millis()});
     // Safe to log: only the CCA advertises on this OUI, so this fires a handful of times.
-    ESP_LOGI(BLE_TAG, "Found Tigo CCA over BLE: %s RSSI=%d %s", device.address_str().c_str(),
-             device.get_rssi(), device.get_name().c_str());
+#if ESPHOME_VERSION_CODE >= VERSION_CODE(2026, 8, 0)
+    // address_str() is deprecated from 2026.8.0 and goes in 2027.2.0 (#91).
+    char addr[MAC_ADDRESS_PRETTY_BUFFER_SIZE];
+    device.address_str_to(addr);
+#else
+    const std::string addr_str = device.address_str();
+    const char *addr = addr_str.c_str();
+#endif
+    ESP_LOGI(BLE_TAG, "Found Tigo CCA over BLE: %s RSSI=%d %s", addr, device.get_rssi(), device.get_name().c_str());
   }
   return false;  // not consumed — let other listeners see it too
 }
