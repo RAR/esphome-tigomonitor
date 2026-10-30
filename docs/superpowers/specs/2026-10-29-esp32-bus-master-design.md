@@ -283,7 +283,28 @@ USB-RS485 cable (bridged to the mock's pty), A to A, B to B and GND to GND.
   so every answer cost a resync. The rig capture settles it: 7 replies
   carried a 0x07, and the next poll counted it all 7 times. The mock now
   counts them, and master-e2e checks the cursor in its query run.
-- **Not yet measured:** the pause a tigo_monitor flash save (node table,
-  hourly energy) puts on the bus; GPIO21 while the board resets. A last
-  byte clipped at the DE drop wasn't seen: 4,315 frames from the board in
-  that run, 0 with a bad CRC.
+- **A last byte clipped at the DE drop wasn't seen:** 4,315 frames from
+  the board in that run, 0 with a bad CRC.
+- **tigo_monitor's flash saves don't pause the bus.** Three new panels
+  in a walk made it save the node table (the save is real: the next boot
+  loaded 12 entries, not 9). In the 75 s after, which covers ESPHome's
+  60 s flush to NVS, the longest gap between the board's frames was 48 ms,
+  its usual polling rhythm. So the thin-config rule stays as it is: no
+  tigo_server and no esp_tsdb, and the small NVS saves are fine.
+- **70 minutes as master:** 120,719 polls, 214 lease checks, 4 renewals
+  (every 15 min, all taken), 1 retry, 1 cursor resync (the takeover),
+  longest gap 64 ms, no resets.
+- **Two invalid checksums in tigo_monitor were the mock colliding with
+  the board, not the board.** After its first poll the mock pushes a node
+  table nobody asked for (75-113 bytes, 20-30 ms on the wire). The board
+  sends its next request ~30 ms after a reply, into it; on half-duplex
+  RS485 both sides lose the overlap. A real TAP only answers. It does show
+  that the core starts a request without waiting for a quiet line; a
+  short idle check before sending would help if another master were
+  mid-frame. Not built: the standby's yield already covers that case.
+- **Not yet measured:** GPIO21 while the board resets. On the Waveshare
+  ESP32-S3-RS485-CAN, GPIO21 drives DE and /RE together and floats at
+  reset; if the Relay-1CH is wired the same, its driver may be on for the
+  reboot window. The cable heard nothing across several resets, but a
+  driver holding the line idle wouldn't show that way; a scope on DE
+  would.
