@@ -91,9 +91,11 @@ display:
     id: atoms3r_lcd
     model: CUSTOM
     height: 128
-    width: 128
+    # 129 wide from column 0: with 128 from column 1, the panel showed a
+    # 2-pixel white column on the left edge, controller memory never drawn.
+    width: 129
     offset_height: 2
-    offset_width: 1
+    offset_width: 0
     cs_pin: GPIO14
     dc_pin: GPIO42
     reset_pin: GPIO48
