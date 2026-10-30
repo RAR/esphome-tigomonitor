@@ -12,6 +12,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /src
 COPY linux linux
 COPY components/tigo_monitor components/tigo_monitor
+COPY components/tigo_master components/tigo_master
 COPY components/tigo_server/web components/tigo_server/web
 COPY site/public/favicon.svg site/public/favicon.svg
 ARG VERSION=dev
