@@ -16,10 +16,18 @@ external_components:
       url: https://github.com/RAR/esphome-lp5562
     components: [ lp5562 ]
 
-# I2C bus for LP5562 (RGB LED + LCD Backlight control)
+# I2C bus for LP5562 (RGB LED + LCD Backlight control). The AtomS3R's internal
+# bus is GPIO45/GPIO0. GPIO38/39 are the plain AtomS3's, and on the AtomS3R they
+# are the bottom expansion header: there the LP5562 never answers and the
+# screen stays dark (#93). Both are strapping pins, but the board wires them
+# to its own bus, so ESPHome's warning about them doesn't apply.
 i2c:
-  sda: GPIO38  # SYS_SDA
-  scl: GPIO39  # SYS_SCL
+  sda:  # SYS_SDA
+    number: GPIO45
+    ignore_strapping_warning: true
+  scl:  # SYS_SCL
+    number: GPIO0
+    ignore_strapping_warning: true
   scan: true
 
 # LP5562 LED driver (controls RGB indicator LED + LCD backlight)
