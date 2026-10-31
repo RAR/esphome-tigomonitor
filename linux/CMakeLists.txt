@@ -31,6 +31,7 @@ add_executable(tigomonitord
   src/mqtt_publisher.cpp
   src/serial_port.cpp
   src/settings.cpp
+  src/tls.cpp
   src/topology.cpp
 )
 # The decoder and node-identity rules are shared with the ESP32 component.
@@ -38,7 +39,7 @@ target_include_directories(tigomonitord PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../c
 # cpp-httplib is compiled in from its single header, not linked: distros
 # rename its library with every version (Ubuntu 24.04 has 0.14, 26.04 has
 # 0.26), so depending on one would tie the package to one release. HTTPS for
-# the Tigo cloud needs OpenSSL; zlib lets the web UI be served gzipped.
+# the Tigo cloud and the web UI need OpenSSL; zlib lets the web UI be served gzipped.
 target_include_directories(tigomonitord SYSTEM PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/third_party/cpp-httplib)
 target_compile_definitions(tigomonitord PRIVATE TIGOD_VERSION="${TIGOD_VERSION}"
   CPPHTTPLIB_OPENSSL_SUPPORT CPPHTTPLIB_ZLIB_SUPPORT)

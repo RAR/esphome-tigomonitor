@@ -15,6 +15,7 @@
 #include "history.h"
 #include "monitor.h"
 #include "settings.h"
+#include "tls.h"
 #include "topology.h"
 
 #include <atomic>
@@ -46,6 +47,7 @@ struct HttpContext {
   Cloud &cloud;
   CcaBle &cca;
   CcaHttp &cca_http;
+  TlsCerts *tls = nullptr;  // HTTPS with these; null: plain HTTP
 };
 
 class HttpServer {
@@ -59,6 +61,7 @@ class HttpServer {
 
  private:
   void routes_();
+  void new_server_();
   HttpContext ctx_;
   std::unique_ptr<httplib::Server> svr_;
   std::unique_ptr<std::thread> thread_;

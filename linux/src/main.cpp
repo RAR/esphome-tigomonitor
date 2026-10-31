@@ -161,6 +161,17 @@ int main(int argc, char **argv) {
   cloud.load();
   Topology topology(state_dir + "/topology.json");
   topology.load();
+  // HTTPS, if a certificate is set and loads. One that doesn't is no reason
+  // to lock everyone out of the web UI they would fix it from.
+  std::unique_ptr<TlsCerts> tls;
+  if (!settings.tls_cert.empty() && !settings.tls_key.empty()) {
+    tls = std::make_unique<TlsCerts>(settings.tls_cert, settings.tls_key);
+    std::string err = tls->load();
+    if (!err.empty()) {
+      LOGE("web: HTTPS is off, serving plain HTTP: %s", err.c_str());
+      tls.reset();
+    }
+  }
   HttpServer web(HttpContext{
       monitor, web_dir, settings_path, TIGOD_VERSION,
       [&] {
@@ -168,11 +179,11 @@ int main(int argc, char **argv) {
         return settings;
       },
       [&] { return mqtt.connected(); }, [&] { return mqtt.last_error(); }, settings_changed, restart_requested,
-      monitor, topology, history, cloud, cca, cca_http});
+      monitor, topology, history, cloud, cca, cca_http, tls.get()});
   if (port < 0 && settings.web_port > 0) port = settings.web_port;
   // Only the default steps aside for another web server; a port someone
   // chose fails loudly instead, and systemd keeps retrying it.
-  if ((port < 0 && !web.start(80, 8080)) || (port > 0 && !web.start(port))) {
+  if ((port < 0 && !(tls ? web.start(443, 8443) : web.start(80, 8080))) || (port > 0 && !web.start(port))) {
     input_stop = true;
     input.join();
     cca.stop();
@@ -188,6 +199,7 @@ int main(int argc, char **argv) {
   int64_t last_prune = 0;
   BusStats last_stats{};
   auto last_stats_log = std::chrono::steady_clock::now();
+  auto last_tls_check = std::chrono::steady_clock::now();
   while (!g_stop) {
     std::this_thread::sleep_for(std::chrono::seconds(1));
     if (restart_requested) {
@@ -199,6 +211,8 @@ int main(int argc, char **argv) {
       if (fresh.device_id.empty()) fresh.device_id = settings.device_id;
       bool new_port = fresh.serial_port != settings.serial_port || fresh.baud_rate != settings.baud_rate;
       if (fresh.web_port != settings.web_port) LOGI("web: the new port takes effect when the service restarts");
+      if (fresh.tls_cert != settings.tls_cert || fresh.tls_key != settings.tls_key)
+        LOGI("web: the HTTPS change takes effect when the service restarts");
       {
         std::lock_guard<std::mutex> lock(settings_mu);
         settings = fresh;
@@ -253,6 +267,11 @@ int main(int argc, char **argv) {
            s.power_packets - last_stats.power_packets, s.frame27 - last_stats.frame27, monitor.total_power());
       last_stats = s;
       last_stats_log = now;
+    }
+    // Two stat() calls: cheap enough to notice a renewal within seconds.
+    if (tls && now - last_tls_check >= std::chrono::seconds(10)) {
+      tls->reload_if_changed();
+      last_tls_check = now;
     }
     // A finished replay leaves the state for one last publish, then exits.
     if (input_done && !replay.empty()) {

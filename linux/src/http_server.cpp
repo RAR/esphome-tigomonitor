@@ -212,7 +212,14 @@ static long system_uptime_s() {
   return sysinfo(&si) == 0 ? si.uptime : 0;
 }
 
-HttpServer::HttpServer(HttpContext ctx) : ctx_(std::move(ctx)), svr_(std::make_unique<httplib::Server>()) {}
+HttpServer::HttpServer(HttpContext ctx) : ctx_(std::move(ctx)) { new_server_(); }
+
+void HttpServer::new_server_() {
+  if (ctx_.tls)
+    svr_ = std::make_unique<httplib::SSLServer>([this](SSL_CTX &c) { return ctx_.tls->install(c); });
+  else
+    svr_ = std::make_unique<httplib::Server>();
+}
 
 HttpServer::~HttpServer() { stop(); }
 
@@ -222,7 +229,7 @@ int HttpServer::start(int port, int fallback) {
     int bind_errno = errno;
     // A failed bind retires an httplib::Server for good; try on a new one.
     if (fallback != 0) {
-      svr_ = std::make_unique<httplib::Server>();
+      new_server_();
       routes_();
     }
     if (fallback == 0 || !svr_->bind_to_port("0.0.0.0", fallback)) {
@@ -232,7 +239,7 @@ int HttpServer::start(int port, int fallback) {
     LOGW("web: port %d is taken, so the web UI is on port %d; choose another under Tools", port, fallback);
     port = fallback;
   } else {
-    LOGI("web: listening on port %d", port);
+    LOGI("web: listening on port %d%s", port, ctx_.tls ? " (HTTPS)" : "");
   }
   port_ = port;
   thread_ = std::make_unique<std::thread>([this] { svr_->listen_after_bind(); });
@@ -1056,6 +1063,10 @@ void HttpServer::routes_() {
                     {"web_port_active", port_},
                     {"web_username", s.web_username},
                     {"web_password_set", !s.web_password.empty()},
+                    {"tls_cert", s.tls_cert},
+                    {"tls_key", s.tls_key},
+                    {"tls_active", ctx_.tls != nullptr},
+                    {"tls_expires", ctx_.tls ? ctx_.tls->not_after() : 0},
                     {"power_calibration", s.power_calibration},
                     {"publish_interval_s", s.publish_interval_s},
                     {"device_id", s.device_id},
@@ -1087,6 +1098,8 @@ void HttpServer::routes_() {
       if (j.contains("web_username")) s.web_username = j["web_username"].get<std::string>();
       // Absent keeps it, and "" turns the login off.
       if (j.contains("web_password")) s.web_password = j["web_password"].get<std::string>();
+      if (j.contains("tls_cert")) s.tls_cert = j["tls_cert"].get<std::string>();
+      if (j.contains("tls_key")) s.tls_key = j["tls_key"].get<std::string>();
       if (j.contains("power_calibration")) s.power_calibration = j["power_calibration"].get<float>();
       if (j.contains("publish_interval_s")) s.publish_interval_s = j["publish_interval_s"].get<int>();
       if (j.contains("mqtt") && j["mqtt"].is_object()) {
@@ -1113,6 +1126,14 @@ void HttpServer::routes_() {
       err = "A network bridge is host:port, with a port of 1-65535.";
     if (err.empty() && (s.mqtt.port < 1 || s.mqtt.port > 65535)) err = "MQTT port must be 1-65535.";
     if (err.empty() && (s.web_port < 0 || s.web_port > 65535)) err = "Web port must be 1-65535, or empty for the default.";
+    if (err.empty() && s.tls_cert.empty() != s.tls_key.empty())
+      err = "HTTPS needs both a certificate and a key, or neither for plain HTTP.";
+    // Checked now, while the person who typed the paths is looking: a pair
+    // that fails at the next start leaves the web UI on plain HTTP.
+    if (err.empty() && !s.tls_cert.empty()) {
+      std::string tls_err = TlsCerts::check(s.tls_cert, s.tls_key);
+      if (!tls_err.empty()) err = "The certificate did not load: " + tls_err + ".";
+    }
     if (err.empty() && (s.web_username.empty() || s.web_username.find(':') != std::string::npos))
       err = "The web UI username cannot be empty or contain a colon.";
     // Wildcards would make every publish fail, and an empty or slash-edged

@@ -142,9 +142,58 @@ the MQTT broker. To require one, set **Web UI password** under **Tools →
 RS485 adapter and web UI**. The browser then asks for the username (`admin`
 unless you change it) and password. Pages on other websites can't use the
 monitor's settings either way, even with the login saved in your browser.
+Over plain HTTP the password crosses your network readable by anything on
+it; [HTTPS](#use-https) closes that.
 
 The MQTT password stays on the Pi: the web UI never shows it, and changing
 the broker's address or username clears it, so it has to be entered again.
+
+## Use HTTPS
+
+The web UI serves HTTPS once you give it a certificate and its key. Browsers
+trust a certificate only for a name, not an IP address, so you need a domain
+name pointing at the Pi, `tigo.example.com` say. Let's Encrypt issues
+certificates for free and can do it without the Pi being reachable from the
+internet: its DNS challenge proves you own the domain through a TXT record,
+which certbot writes through your DNS provider's API.
+
+1. Point the name at the Pi's address on your network, with an A record at
+   your DNS provider or an override in your router's DNS.
+2. Install certbot and the plugin for your DNS provider (on Raspberry Pi OS,
+   `python3-certbot-dns-cloudflare` for Cloudflare, for example), and give it
+   an API token as the plugin's instructions say.
+3. Save this as `/usr/local/bin/tigomonitor-cert-hook`, and make it
+   executable with `sudo chmod +x`. It copies the certificate where the
+   monitor can read it, since `/etc/letsencrypt` is root's alone:
+
+   ```sh
+   #!/bin/sh
+   set -e
+   for f in fullchain.pem privkey.pem; do
+     install -m 600 -o tigomonitor -g tigomonitor "$RENEWED_LINEAGE/$f" /var/lib/tigomonitor/$f.new
+     mv /var/lib/tigomonitor/$f.new /var/lib/tigomonitor/$f
+   done
+   ```
+
+4. Get the certificate, with the hook:
+
+   ```sh
+   sudo certbot certonly --dns-cloudflare --dns-cloudflare-credentials /root/cloudflare.ini \
+     -d tigo.example.com --deploy-hook /usr/local/bin/tigomonitor-cert-hook
+   ```
+
+5. Under **Tools → RS485 adapter and web UI**, set **HTTPS certificate** to
+   `/var/lib/tigomonitor/fullchain.pem` and **HTTPS key** to
+   `/var/lib/tigomonitor/privkey.pem`, save, and let it restart. The page
+   reopens at `https://` on port 443, or 8443 if something else has 443.
+
+certbot renews the certificate on its own and runs the hook each time. The
+monitor checks the two files every 10 seconds and uses a renewed pair for new
+connections, with no restart. A pair that doesn't load (a key that isn't the
+certificate's, say) is logged on the Logs page and the previous one kept. If
+the pair won't load when the service starts, the web UI comes up on plain
+HTTP instead and the log says why, so you can still reach it to fix the
+paths.
 
 ## Other ways to run it
 
@@ -230,6 +279,14 @@ does the same with Compose.
   **Restart service** exits cleanly and relies on Docker starting it again.
 - **The web port** is 8080 inside the container; publish it as any port you
   like. The web UI's port setting does nothing here.
+- **HTTPS:** mount the certificate and key into the container, readable by
+  user ID 999 (the image's account), and set their paths inside the container
+  under Tools. With
+  `-v /srv/tigo-certs:/certs:ro`, those are `/certs/fullchain.pem` and
+  `/certs/privkey.pem`. The container port stays 8080, now serving HTTPS:
+  publish it as `-p 443:8080`. Have your certificate tool's renewal hook copy
+  the new files into the mounted directory; the monitor picks them up as it
+  does on the package.
 - **The CCA page over Bluetooth** needs the host's BlueZ. Mount
   `/run/dbus/system_bus_socket` into the container, and run it as an account
   the host knows that is in its `bluetooth` group: `--user UID:GID`, plus

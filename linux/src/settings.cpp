@@ -36,6 +36,8 @@ Settings load_settings(const std::string &path) {
   get(j, "web_port", s.web_port);
   get(j, "web_username", s.web_username);
   get(j, "web_password", s.web_password);
+  get(j, "tls_cert", s.tls_cert);
+  get(j, "tls_key", s.tls_key);
   get(j, "power_calibration", s.power_calibration);
   get(j, "max_nodes", s.max_nodes);
   get(j, "publish_interval_s", s.publish_interval_s);
@@ -72,6 +74,8 @@ bool save_settings(const std::string &path, const Settings &s) {
       {"web_port", s.web_port},
       {"web_username", s.web_username},
       {"web_password", s.web_password},
+      {"tls_cert", s.tls_cert},
+      {"tls_key", s.tls_key},
       {"power_calibration", s.power_calibration},
       {"max_nodes", s.max_nodes},
       {"publish_interval_s", s.publish_interval_s},
