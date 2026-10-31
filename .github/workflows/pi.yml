@@ -83,6 +83,8 @@ jobs:
       - run: docker build -t tigod-dev -f linux/Dockerfile.dev linux
       - name: Build the ${{ matrix.arch }} .deb
         run: docker run --rm -v "$PWD":/src -w /src tigod-dev linux/packaging/build-deb.sh "${{ steps.version.outputs.version }}"
+      - name: The certbot hook it ships, in a clean install
+        run: linux/scripts/cert-hook-test.sh build/deb/*.deb
       - uses: actions/upload-artifact@v4
         with:
           name: tigomonitord-${{ steps.version.outputs.version }}-${{ matrix.arch }}

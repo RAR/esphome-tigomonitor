@@ -1,0 +1,23 @@
+#!/bin/sh
+# certbot deploy hook: copies a new certificate where tigomonitord can read
+# it, since /etc/letsencrypt is root's alone. Point certbot at it with
+#   --deploy-hook /usr/libexec/tigomonitor/cert-hook
+# and set the web UI's HTTPS certificate and key to the two files below.
+#
+# Both files are staged before either is replaced, so a lineage missing one
+# leaves the pair in use whole. tigomonitord checks the files every 10
+# seconds and serves a renewed pair without a restart.
+set -eu
+src="${RENEWED_LINEAGE:?run by certbot as a --deploy-hook, which sets RENEWED_LINEAGE}"
+dir=/var/lib/tigomonitor
+# Before the service's first start, systemd hasn't made its state directory.
+[ -d "$dir" ] || install -d -m 755 -o tigomonitor -g tigomonitor "$dir"
+
+trap 'rm -f "$dir/fullchain.pem.new" "$dir/privkey.pem.new"' EXIT
+for f in fullchain.pem privkey.pem; do
+  install -m 600 -o tigomonitor -g tigomonitor "$src/$f" "$dir/$f.new"
+done
+for f in fullchain.pem privkey.pem; do
+  mv "$dir/$f.new" "$dir/$f"
+done
+echo "tigomonitor: copied the certificate from $src"

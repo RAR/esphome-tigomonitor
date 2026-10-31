@@ -197,34 +197,24 @@ which certbot writes through your DNS provider's API.
      `route53:ChangeResourceRecordSets` only on
      `arn:aws:route53:::hostedzone/YOUR_ZONE_ID`. Put its access key in
      `/root/.aws/credentials`, readable by root only, under `[default]`.
-3. Save this as `/usr/local/bin/tigomonitor-cert-hook`, and make it
-   executable with `sudo chmod +x`. It copies the certificate where the
-   monitor can read it, since `/etc/letsencrypt` is root's alone:
-
-   ```sh
-   #!/bin/sh
-   set -e
-   for f in fullchain.pem privkey.pem; do
-     install -m 600 -o tigomonitor -g tigomonitor "$RENEWED_LINEAGE/$f" /var/lib/tigomonitor/$f.new
-     mv /var/lib/tigomonitor/$f.new /var/lib/tigomonitor/$f
-   done
-   ```
-
-4. Get the certificate, with the hook. For Cloudflare:
+3. Get the certificate, with the deploy hook the package installs. The hook
+   copies the certificate where the monitor can read it, since
+   `/etc/letsencrypt` is root's alone, and certbot runs it again after each
+   renewal. For Cloudflare:
 
    ```sh
    sudo certbot certonly --dns-cloudflare --dns-cloudflare-credentials /root/cloudflare.ini \
-     -d tigo.example.com --deploy-hook /usr/local/bin/tigomonitor-cert-hook
+     -d tigo.example.com --deploy-hook /usr/libexec/tigomonitor/cert-hook
    ```
 
    For Route 53, which finds the key in `/root/.aws/credentials` by itself:
 
    ```sh
    sudo certbot certonly --dns-route53 \
-     -d tigo.example.com --deploy-hook /usr/local/bin/tigomonitor-cert-hook
+     -d tigo.example.com --deploy-hook /usr/libexec/tigomonitor/cert-hook
    ```
 
-5. Under **Tools → RS485 adapter and web UI**, set **HTTPS certificate** to
+4. Under **Tools → RS485 adapter and web UI**, set **HTTPS certificate** to
    `/var/lib/tigomonitor/fullchain.pem` and **HTTPS key** to
    `/var/lib/tigomonitor/privkey.pem`, save, and let it restart. The page
    reopens at `https://` on port 443, or 8443 if something else has 443.
