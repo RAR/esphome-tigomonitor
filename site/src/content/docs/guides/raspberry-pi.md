@@ -294,7 +294,7 @@ On a machine that already runs containers, use the image instead of the
 package. It's built for arm64 and amd64:
 
 ```sh
-docker run -d --name tigomonitord --restart unless-stopped \
+docker run -d --name tigomonitord --hostname tigomonitor --restart unless-stopped \
   -p 8080:8080 -v tigomonitor:/var/lib/tigomonitor \
   ghcr.io/rar/tigomonitord:latest
 ```
@@ -304,10 +304,17 @@ Then open `http://HOST:8080` and set it up under Tools, as with the package.
 does the same with Compose.
 
 - **The bus:** a [network bridge](#read-the-bus-over-the-network) needs
-  nothing extra. For a USB adapter, pass it in with
-  `--device /dev/serial/by-id/usb-…:/dev/ttyUSB0` and choose `/dev/ttyUSB0`.
-  The by-id name stays the same across reboots, where the host's own
-  `/dev/ttyUSB0` may change.
+  nothing extra. For a USB adapter, mount the host's `/dev` and allow USB
+  serial devices: `-v /dev:/dev --device-cgroup-rule 'c 188:* rw'
+  --device-cgroup-rule 'c 166:* rw'`. Then choose the adapter's
+  `/dev/serial/by-id/` name under Tools. That name stays the same across
+  reboots, where `/dev/ttyUSB0` may change, and the container sees the
+  adapter again after you unplug it, which `--device` doesn't.
+- **The hostname:** give the container a fixed one, such as
+  `--hostname tigomonitor`. Home Assistant's device ID comes from it, and
+  Docker's default, the container ID, changes each time the container is
+  recreated, which would add the panels to Home Assistant again under a new
+  device.
 - **Restarts:** use `--restart unless-stopped`, not `on-failure`. The web UI's
   **Restart service** exits cleanly and relies on Docker starting it again.
 - **The web port** is 8080 inside the container; publish it as any port you

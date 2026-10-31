@@ -27,6 +27,8 @@ services:
   tigomonitord:
     image: ghcr.io/rar/tigomonitord:latest
     container_name: tigomonitord
+    # A fixed name: Home Assistant's device ID comes from it.
+    hostname: tigomonitor
     # Not on-failure: the web UI's "Restart service" exits cleanly, as does
     # the switch to HTTPS once the certificate arrives.
     restart: unless-stopped
