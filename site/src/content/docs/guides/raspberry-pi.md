@@ -159,9 +159,18 @@ which certbot writes through your DNS provider's API.
 
 1. Point the name at the Pi's address on your network, with an A record at
    your DNS provider or an override in your router's DNS.
-2. Install certbot and the plugin for your DNS provider (on Raspberry Pi OS,
-   `python3-certbot-dns-cloudflare` for Cloudflare, for example), and give it
-   an API token as the plugin's instructions say.
+2. Install certbot and the plugin for your DNS provider, and give the
+   plugin credentials that can edit your domain's records. On Raspberry Pi
+   OS, for example:
+   - **Cloudflare:** `sudo apt install certbot python3-certbot-dns-cloudflare`,
+     then put an API token in `/root/cloudflare.ini` as the plugin's
+     instructions say.
+   - **Amazon Route 53:** `sudo apt install certbot python3-certbot-dns-route53`.
+     Create an IAM user for it alone, with a policy that allows
+     `route53:ListHostedZones` and `route53:GetChange` on `*`, and
+     `route53:ChangeResourceRecordSets` only on
+     `arn:aws:route53:::hostedzone/YOUR_ZONE_ID`. Put its access key in
+     `/root/.aws/credentials`, readable by root only, under `[default]`.
 3. Save this as `/usr/local/bin/tigomonitor-cert-hook`, and make it
    executable with `sudo chmod +x`. It copies the certificate where the
    monitor can read it, since `/etc/letsencrypt` is root's alone:
@@ -175,10 +184,17 @@ which certbot writes through your DNS provider's API.
    done
    ```
 
-4. Get the certificate, with the hook:
+4. Get the certificate, with the hook. For Cloudflare:
 
    ```sh
    sudo certbot certonly --dns-cloudflare --dns-cloudflare-credentials /root/cloudflare.ini \
+     -d tigo.example.com --deploy-hook /usr/local/bin/tigomonitor-cert-hook
+   ```
+
+   For Route 53, which finds the key in `/root/.aws/credentials` by itself:
+
+   ```sh
+   sudo certbot certonly --dns-route53 \
      -d tigo.example.com --deploy-hook /usr/local/bin/tigomonitor-cert-hook
    ```
 
