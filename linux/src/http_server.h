@@ -48,6 +48,7 @@ struct HttpContext {
   CcaBle &cca;
   CcaHttp &cca_http;
   TlsCerts *tls = nullptr;  // HTTPS with these; null: plain HTTP
+  bool tls_from_args = false;  // set by --tls-cert/--tls-key, not the web UI
 };
 
 class HttpServer {

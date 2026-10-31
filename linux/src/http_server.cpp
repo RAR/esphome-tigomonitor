@@ -1066,6 +1066,7 @@ void HttpServer::routes_() {
                     {"tls_cert", s.tls_cert},
                     {"tls_key", s.tls_key},
                     {"tls_active", ctx_.tls != nullptr},
+                    {"tls_from_args", ctx_.tls_from_args},
                     {"tls_expires", ctx_.tls ? ctx_.tls->not_after() : 0},
                     {"power_calibration", s.power_calibration},
                     {"publish_interval_s", s.publish_interval_s},
@@ -1098,8 +1099,9 @@ void HttpServer::routes_() {
       if (j.contains("web_username")) s.web_username = j["web_username"].get<std::string>();
       // Absent keeps it, and "" turns the login off.
       if (j.contains("web_password")) s.web_password = j["web_password"].get<std::string>();
-      if (j.contains("tls_cert")) s.tls_cert = j["tls_cert"].get<std::string>();
-      if (j.contains("tls_key")) s.tls_key = j["tls_key"].get<std::string>();
+      // Set on the command line, they are not the web UI's to change.
+      if (j.contains("tls_cert") && !ctx_.tls_from_args) s.tls_cert = j["tls_cert"].get<std::string>();
+      if (j.contains("tls_key") && !ctx_.tls_from_args) s.tls_key = j["tls_key"].get<std::string>();
       if (j.contains("power_calibration")) s.power_calibration = j["power_calibration"].get<float>();
       if (j.contains("publish_interval_s")) s.publish_interval_s = j["publish_interval_s"].get<int>();
       if (j.contains("mqtt") && j["mqtt"].is_object()) {

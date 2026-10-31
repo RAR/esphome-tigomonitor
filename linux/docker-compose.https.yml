@@ -1,0 +1,103 @@
+# tigomonitord in Docker with HTTPS: a certbot container beside it gets a
+# Let's Encrypt certificate through your DNS provider and renews it. Nothing
+# is installed on the host, and the host needn't be reachable from the
+# internet: the DNS challenge proves you own the domain with a TXT record.
+#
+# Point the domain at this host's address on your network first (a DNS
+# record, or an override in your router), then set these, in a .env file
+# beside this one or as Portainer's stack environment variables:
+#
+#   DOMAIN=tigo.example.com
+#   DNS_PROVIDER=route53        # or cloudflare
+#   EMAIL=you@example.com       # optional: Let's Encrypt's expiry warnings
+#   # Route 53: an IAM user allowed route53:ListHostedZones and
+#   # route53:GetChange on *, and route53:ChangeResourceRecordSets on your
+#   # zone alone.
+#   AWS_ACCESS_KEY_ID=...
+#   AWS_SECRET_ACCESS_KEY=...
+#   # Cloudflare: an API token with Zone:DNS:Edit on the zone.
+#   CLOUDFLARE_API_TOKEN=...
+#
+#   docker compose -f linux/docker-compose.https.yml up -d
+#
+# Then open https://DOMAIN:8443. The web UI serves plain HTTP for the minute
+# or two the first certificate takes, and restarts on HTTPS once it lands.
+# `docker compose logs certbot` says what happened if it doesn't.
+services:
+  tigomonitord:
+    image: ghcr.io/rar/tigomonitord:latest
+    container_name: tigomonitord
+    # Not on-failure: the web UI's "Restart service" exits cleanly, as does
+    # the switch to HTTPS once the certificate arrives.
+    restart: unless-stopped
+    command: ["--tls-cert", "/certs/fullchain.pem", "--tls-key", "/certs/privkey.pem"]
+    ports:
+      - "8443:8080"
+    volumes:
+      - tigomonitor:/var/lib/tigomonitor
+      - certs:/certs:ro
+    # For the bus adapter and the CCA page over Bluetooth, see
+    # docker-compose.yml.
+
+  certbot:
+    image: certbot/dns-${DNS_PROVIDER:-route53}:v5.9.0
+    restart: unless-stopped
+    environment:
+      DOMAIN: ${DOMAIN:?set DOMAIN to the web UI's name}
+      DNS_PROVIDER: ${DNS_PROVIDER:-route53}
+      EMAIL: ${EMAIL:-}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      CLOUDFLARE_API_TOKEN: ${CLOUDFLARE_API_TOKEN:-}
+    volumes:
+      - letsencrypt:/etc/letsencrypt
+      - certs:/certs
+    # Gets the certificate, then tries a renewal twice a day; certbot only
+    # renews within 30 days of expiry. A failure is retried an hour later
+    # rather than at once, to stay inside Let's Encrypt's rate limits. Each
+    # new certificate is copied to the certs volume for tigomonitord, which
+    # runs as user ID 999 and picks a renewal up without a restart.
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -eu
+        case "$$DNS_PROVIDER" in
+          route53) dns="--dns-route53" ;;
+          cloudflare)
+            umask 077
+            printf 'dns_cloudflare_api_token = %s\n' "$$CLOUDFLARE_API_TOKEN" > /tmp/cloudflare.ini
+            dns="--dns-cloudflare --dns-cloudflare-credentials /tmp/cloudflare.ini" ;;
+          *) echo "DNS_PROVIDER must be route53 or cloudflare"; exit 1 ;;
+        esac
+        if [ -n "$$EMAIL" ]; then account="-m $$EMAIL"; else account="--register-unsafely-without-email"; fi
+        cat > /usr/local/bin/copy-to-tigomonitor <<'HOOK'
+        #!/bin/sh
+        set -e
+        for f in fullchain.pem privkey.pem; do
+          cp "$$RENEWED_LINEAGE/$$f" "/certs/$$f.new"
+          chown 999 "/certs/$$f.new"
+          chmod 600 "/certs/$$f.new"
+          mv "/certs/$$f.new" "/certs/$$f"
+        done
+        echo "copied the certificate for tigomonitord"
+        HOOK
+        chmod +x /usr/local/bin/copy-to-tigomonitor
+        trap 'exit 0' TERM INT
+        until certbot certonly --non-interactive --agree-tos $$account $$dns \
+              --cert-name "$$DOMAIN" -d "$$DOMAIN" --keep-until-expiring \
+              --deploy-hook /usr/local/bin/copy-to-tigomonitor; do
+          echo "no certificate yet; trying again in an hour"
+          sleep 3600 & wait $$!
+        done
+        # A certificate kept from an earlier run: copy it again, in case the
+        # certs volume is new.
+        RENEWED_LINEAGE="/etc/letsencrypt/live/$$DOMAIN" /usr/local/bin/copy-to-tigomonitor
+        while :; do
+          sleep 43200 & wait $$!
+          certbot renew --deploy-hook /usr/local/bin/copy-to-tigomonitor || echo "renewal failed; trying again in 12 hours"
+        done
+
+volumes:
+  tigomonitor:
+  letsencrypt:
+  certs:

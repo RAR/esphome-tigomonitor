@@ -46,6 +46,10 @@ jobs:
         run: docker run --rm -v "$PWD":/src -w /src tigod-dev linux/scripts/bridge-e2e.sh
       - name: HTTPS, with test certificates
         run: docker run --rm -v "$PWD":/src -w /src tigod-dev linux/scripts/https-e2e.sh
+      - name: HTTPS in Docker Compose, with a stand-in for certbot
+        run: |
+          docker build -t tigomonitord:https-test -f linux/Dockerfile .
+          linux/scripts/https-compose-test.sh
 
   deb:
     if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')

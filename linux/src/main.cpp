@@ -50,6 +50,8 @@ static void usage() {
                "  --web-dir DIR     where app.html is (default /usr/share/tigomonitor/web)\n"
                "  --port N          web UI port, overriding settings.json (0 turns it off)\n"
                "  --serial DEV      serial port, overriding settings.json\n"
+               "  --tls-cert FILE   HTTPS certificate (with its chain), overriding settings.json\n"
+               "  --tls-key FILE    its private key\n"
                "  --replay FILE     read bus bytes from a capture instead of a port\n"
                "  --speed X         replay speed (1 = bus speed, 0 = as fast as possible)\n"
                "  --capture FILE    also append every byte read to FILE\n"
@@ -69,6 +71,7 @@ int main(int argc, char **argv) {
   std::string web_dir = "/usr/share/tigomonitor/web";
   int port = -1;  // -1: from settings.json
   std::string serial_override, replay, capture;
+  std::string tls_cert_override, tls_key_override;
   double speed = 1.0;
   for (int i = 1; i < argc; i++) {
     std::string a = argv[i];
@@ -83,6 +86,8 @@ int main(int argc, char **argv) {
     else if (a == "--web-dir") web_dir = next();
     else if (a == "--port") port = std::atoi(next().c_str());
     else if (a == "--serial") serial_override = next();
+    else if (a == "--tls-cert") tls_cert_override = next();
+    else if (a == "--tls-key") tls_key_override = next();
     else if (a == "--replay") replay = next();
     else if (a == "--speed") speed = std::atof(next().c_str());
     else if (a == "--capture") capture = next();
@@ -102,6 +107,15 @@ int main(int argc, char **argv) {
   Settings settings = load_settings(settings_path);
   if (settings.device_id.empty()) settings.device_id = hostname();
   if (!serial_override.empty()) settings.serial_port = serial_override;
+  // As the Docker compose file with certbot sets them: the certificate
+  // comes with the deployment, not from the web UI.
+  const bool tls_from_args = !tls_cert_override.empty() || !tls_key_override.empty();
+  auto apply_tls_override = [&](Settings &s) {
+    if (!tls_from_args) return;
+    s.tls_cert = tls_cert_override;
+    s.tls_key = tls_key_override;
+  };
+  apply_tls_override(settings);
   LOGI("tigomonitord %s, device id %s", TIGOD_VERSION, settings.device_id.c_str());
 
   Monitor monitor(state_dir + "/state.json", settings.power_calibration, static_cast<size_t>(settings.max_nodes));
@@ -162,14 +176,17 @@ int main(int argc, char **argv) {
   Topology topology(state_dir + "/topology.json");
   topology.load();
   // HTTPS, if a certificate is set and loads. One that doesn't is no reason
-  // to lock everyone out of the web UI they would fix it from.
-  std::unique_ptr<TlsCerts> tls;
+  // to lock everyone out of the web UI they would fix it from. It is tried
+  // again every 10 s, and once it loads the service restarts to serve it:
+  // a certbot container issuing the first certificate takes a minute or
+  // two, and starts alongside this one.
+  std::unique_ptr<TlsCerts> tls, tls_waiting;
   if (!settings.tls_cert.empty() && !settings.tls_key.empty()) {
     tls = std::make_unique<TlsCerts>(settings.tls_cert, settings.tls_key);
     std::string err = tls->load();
     if (!err.empty()) {
-      LOGE("web: HTTPS is off, serving plain HTTP: %s", err.c_str());
-      tls.reset();
+      LOGE("web: HTTPS is off, serving plain HTTP until the certificate loads: %s", err.c_str());
+      tls_waiting = std::move(tls);
     }
   }
   HttpServer web(HttpContext{
@@ -179,7 +196,7 @@ int main(int argc, char **argv) {
         return settings;
       },
       [&] { return mqtt.connected(); }, [&] { return mqtt.last_error(); }, settings_changed, restart_requested,
-      monitor, topology, history, cloud, cca, cca_http, tls.get()});
+      monitor, topology, history, cloud, cca, cca_http, tls.get(), tls_from_args});
   if (port < 0 && settings.web_port > 0) port = settings.web_port;
   // Only the default steps aside for another web server; a port someone
   // chose fails loudly instead, and systemd keeps retrying it.
@@ -209,6 +226,7 @@ int main(int argc, char **argv) {
     if (settings_changed.exchange(false)) {
       Settings fresh = load_settings(settings_path);
       if (fresh.device_id.empty()) fresh.device_id = settings.device_id;
+      apply_tls_override(fresh);
       bool new_port = fresh.serial_port != settings.serial_port || fresh.baud_rate != settings.baud_rate;
       if (fresh.web_port != settings.web_port) LOGI("web: the new port takes effect when the service restarts");
       if (fresh.tls_cert != settings.tls_cert || fresh.tls_key != settings.tls_key)
@@ -272,6 +290,13 @@ int main(int argc, char **argv) {
     if (tls && now - last_tls_check >= std::chrono::seconds(10)) {
       tls->reload_if_changed();
       last_tls_check = now;
+    }
+    if (tls_waiting && now - last_tls_check >= std::chrono::seconds(10)) {
+      last_tls_check = now;
+      if (tls_waiting->load().empty()) {
+        LOGI("web: the certificate loads now; restarting to serve HTTPS");
+        break;
+      }
     }
     // A finished replay leaves the state for one last publish, then exits.
     if (input_done && !replay.empty()) {

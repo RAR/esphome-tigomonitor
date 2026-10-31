@@ -3350,14 +3350,18 @@
         `Readings go to ${s.mqtt.base_topic}/${s.device_id}/panel/<barcode>/state`;
       piWebPortActive = s.web_port_active;
       document.getElementById('pi-web-port').value = s.web_port || '';
-      piTls = { cert: s.tls_cert || '', key: s.tls_key || '', active: !!s.tls_active };
+      piTls = { cert: s.tls_cert || '', key: s.tls_key || '', active: !!s.tls_active, fixed: !!s.tls_from_args };
       document.getElementById('pi-tls-cert').value = piTls.cert;
       document.getElementById('pi-tls-key').value = piTls.key;
+      document.getElementById('pi-tls-cert').disabled = piTls.fixed;
+      document.getElementById('pi-tls-key').disabled = piTls.fixed;
       document.getElementById('pi-web-port').placeholder = piTls.cert ? '443' : '80';
-      document.getElementById('pi-tls-hint').textContent = s.tls_active
+      document.getElementById('pi-tls-hint').textContent = (s.tls_active
         ? `On, valid until ${new Date(s.tls_expires * 1000).toLocaleDateString()}. A renewed certificate is used without a restart`
+        : piTls.fixed ? 'Waiting for the certificate; HTTPS starts once it loads'
         : piTls.cert ? 'Saved, but not in use: restart the service, or see Logs if it did not load'
-        : 'Empty: plain HTTP. A PEM certificate with its chain, such as Let\'s Encrypt\'s fullchain.pem';
+        : 'Empty: plain HTTP. A PEM certificate with its chain, such as Let\'s Encrypt\'s fullchain.pem')
+        + (piTls.fixed ? '. Set by the service\'s command line, not here' : '');
       piWebLogin = { user: s.web_username || 'admin', set: !!s.web_password_set };
       document.getElementById('pi-web-user').value = piWebLogin.user;
       document.getElementById('pi-web-pass').value = '';
@@ -3376,7 +3380,7 @@
   }
   let piWebPortActive = 0;
   let piWebLogin = { user: 'admin', set: false };
-  let piTls = { cert: '', key: '', active: false };
+  let piTls = { cert: '', key: '', active: false, fixed: false };
   async function piFillSerial(current) {
     const sel = document.getElementById('pi-serial');
     let ports = [];
@@ -3444,8 +3448,9 @@
     }
     const tlsCert = document.getElementById('pi-tls-cert').value.trim();
     const tlsKey = document.getElementById('pi-tls-key').value.trim();
-    const body = { serial_port: source, web_port: webPort, tls_cert: tlsCert, tls_key: tlsKey,
+    const body = { serial_port: source, web_port: webPort,
                    web_username: document.getElementById('pi-web-user').value.trim() || 'admin' };
+    if (!piTls.fixed) Object.assign(body, { tls_cert: tlsCert, tls_key: tlsKey });
     const webPass = document.getElementById('pi-web-pass').value;
     if (webPass !== '') body.web_password = webPass;
     // Browsers fill a saved login (the Tigo cloud one, say) into a username
