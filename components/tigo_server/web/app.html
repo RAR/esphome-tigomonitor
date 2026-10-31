@@ -1090,8 +1090,16 @@
           <div class="cfg-ctrl"><input class="cfg-input" id="pi-bridge" autocomplete="off" placeholder="tigo-bridge.local:6638"></div>
         </div>
         <div class="cfg-row">
-          <div class="cfg-text"><strong>Web UI port</strong><span>Empty: 80, or 8080 when another web server has 80. Takes effect after a restart</span></div>
+          <div class="cfg-text"><strong>Web UI port</strong><span>Empty: 80, or 8080 when another web server has 80; with HTTPS, 443 or 8443. Takes effect after a restart</span></div>
           <div class="cfg-ctrl"><input class="cfg-input" id="pi-web-port" type="number" min="1" max="65535" placeholder="80"></div>
+        </div>
+        <div class="cfg-row">
+          <div class="cfg-text"><strong>HTTPS certificate</strong><span id="pi-tls-hint">Empty: plain HTTP</span></div>
+          <div class="cfg-ctrl"><input class="cfg-input" id="pi-tls-cert" autocomplete="off" placeholder="/var/lib/tigomonitor/fullchain.pem"></div>
+        </div>
+        <div class="cfg-row">
+          <div class="cfg-text"><strong>HTTPS key</strong><span>The certificate's private key, unencrypted PEM</span></div>
+          <div class="cfg-ctrl"><input class="cfg-input" id="pi-tls-key" autocomplete="off" placeholder="/var/lib/tigomonitor/privkey.pem"></div>
         </div>
         <div class="cfg-row">
           <div class="cfg-text"><strong>Web UI username</strong><span>For the login below</span></div>
@@ -3658,6 +3666,18 @@
       document.getElementById('pi-writes').disabled = !s.master_queries;
       for (const row of PI_MASTER_ROWS) document.getElementById(row).style.display = piBusRole !== 'listen' ? '' : 'none';
       piFillHousekeepingHint();
+      piTls = { cert: s.tls_cert || '', key: s.tls_key || '', active: !!s.tls_active, fixed: !!s.tls_from_args };
+      document.getElementById('pi-tls-cert').value = piTls.cert;
+      document.getElementById('pi-tls-key').value = piTls.key;
+      document.getElementById('pi-tls-cert').disabled = piTls.fixed;
+      document.getElementById('pi-tls-key').disabled = piTls.fixed;
+      document.getElementById('pi-web-port').placeholder = piTls.cert ? '443' : '80';
+      document.getElementById('pi-tls-hint').textContent = (s.tls_active
+        ? `On, valid until ${new Date(s.tls_expires * 1000).toLocaleDateString()}. A renewed certificate is used without a restart`
+        : piTls.fixed ? 'Waiting for the certificate; HTTPS starts once it loads'
+        : piTls.cert ? 'Saved, but not in use: restart the service, or see Logs if it did not load'
+        : 'Empty: plain HTTP. A PEM certificate with its chain, such as Let\'s Encrypt\'s fullchain.pem')
+        + (piTls.fixed ? '. Set by the service\'s command line, not here' : '');
       piWebLogin = { user: s.web_username || 'admin', set: !!s.web_password_set };
       document.getElementById('pi-web-user').value = piWebLogin.user;
       document.getElementById('pi-web-pass').value = '';
@@ -3724,6 +3744,7 @@
         (n ? `Content learned from the CCA (${n} heard).` : 'Built-in content: none heard from a CCA yet.');
     } catch (e) { /* the default text stays */ }
   }
+  let piTls = { cert: '', key: '', active: false, fixed: false };
   async function piFillSerial(current) {
     const sel = document.getElementById('pi-serial');
     let ports = [];
@@ -3755,7 +3776,7 @@
     piShowBridge();
     const reading = bridge ? `the bridge at ${document.getElementById('pi-bridge').value}` : current;
     document.getElementById('pi-port-state').textContent = !current ? 'no adapter chosen'
-      : `reading ${reading} · web UI on port ${piWebPortActive}`;
+      : `reading ${reading} · web UI on port ${piWebPortActive}${piTls.active ? ' (HTTPS)' : ''}`;
   }
   function piShowBridge() {
     document.getElementById('pi-bridge-row').style.display =
@@ -3789,13 +3810,17 @@
       if (!addr) { showToast('Enter the bridge address, as host:port', 'err'); return; }
       source = 'tcp://' + addr;
     }
-    const body = { serial_port: source, web_port: webPort, bus_role: document.getElementById('pi-bus-role').value,
+    const tlsCert = document.getElementById('pi-tls-cert').value.trim();
+    const tlsKey = document.getElementById('pi-tls-key').value.trim();
+    const body = { serial_port: source, web_port: webPort,
+                   bus_role: document.getElementById('pi-bus-role').value,
                    standby_takeover_s: Number(document.getElementById('pi-takeover').value) || 3,
                    master_startup: document.getElementById('pi-startup').checked,
                    master_housekeeping: document.getElementById('pi-housekeeping').checked,
                    master_queries: document.getElementById('pi-queries').checked,
                    master_optimizer_writes: document.getElementById('pi-writes').checked,
                    web_username: document.getElementById('pi-web-user').value.trim() || 'admin' };
+    if (!piTls.fixed) Object.assign(body, { tls_cert: tlsCert, tls_key: tlsKey });
     const webPass = document.getElementById('pi-web-pass').value;
     if (webPass !== '') body.web_password = webPass;
     // Browsers fill a saved login (the Tigo cloud one, say) into a username
@@ -3814,14 +3839,18 @@
       const j = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(j.error || `/api/settings ${r.status}`);
       showToast('Saved ✓', 'ok');
-      const next = webPort || 80;
-      if (next !== piWebPortActive &&
-          confirm(`Restart the service to move the web UI to port ${next}?\n\nWithout a restart it stays on ${piWebPortActive}.`)) {
+      const https = tlsCert !== '';
+      const next = webPort || (https ? 443 : 80);
+      const tlsChanged = tlsCert !== piTls.cert || tlsKey !== piTls.key;
+      const where = `${https ? 'https' : 'http'} on port ${next}`;
+      if ((next !== piWebPortActive || tlsChanged) &&
+          confirm(`Restart the service to serve the web UI over ${where}?\n\nWithout a restart it stays as it is.`)) {
         await apiFetch('/api/restart', { method: 'POST' }).catch(() => {});
         const url = new URL(window.location.href);
-        url.port = next === 80 ? '' : String(next);
+        url.protocol = https ? 'https:' : 'http:';
+        url.port = next === (https ? 443 : 80) ? '' : String(next);
         setTimeout(() => { window.location.href = url.toString(); }, 5000);
-        showToast(`Restarting; opening port ${next} in 5 s`, 'ok');
+        showToast(`Restarting; opening ${where} in 5 s`, 'ok');
         return;
       }
       setTimeout(refreshPiSettings, 1500);

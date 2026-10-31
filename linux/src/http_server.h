@@ -16,6 +16,7 @@
 #include "monitor.h"
 #include "bus_master.h"
 #include "settings.h"
+#include "tls.h"
 #include "topology.h"
 
 #include <atomic>
@@ -48,6 +49,8 @@ struct HttpContext {
   CcaBle &cca;
   CcaHttp &cca_http;
   std::function<MasterStatus()> master_status;  // inactive when listening
+  TlsCerts *tls = nullptr;  // HTTPS with these; null: plain HTTP
+  bool tls_from_args = false;  // set by --tls-cert/--tls-key, not the web UI
 };
 
 class HttpServer {
@@ -62,6 +65,7 @@ class HttpServer {
  private:
   void routes_();
   std::vector<std::string> health_problems_() const;
+  void new_server_();
   HttpContext ctx_;
   int64_t started_unix_ms_;
   std::unique_ptr<httplib::Server> svr_;

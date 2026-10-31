@@ -43,12 +43,17 @@ struct Settings {
   // than to the panel count, as number_of_devices has to be on the ESP32.
   int max_nodes = 512;
   int publish_interval_s = 30;
-  // 0: port 80, or 8080 when something else already has 80.
+  // 0: port 80, or 8080 when something else already has 80; with HTTPS,
+  // 443 or 8443.
   int web_port = 0;
   // A login for the web UI and API, as web_username/web_password on the
   // ESP32. An empty password leaves it open to the LAN, the default there too.
   std::string web_username = "admin";
   std::string web_password;
+  // HTTPS: a PEM certificate (with its chain, as fullchain.pem) and its
+  // key. Both empty: plain HTTP.
+  std::string tls_cert;
+  std::string tls_key;
   // History snapshots. The ESP32 takes one every 30 minutes to spare its
   // flash; an SD card can take one a minute and keep two years of them.
   int history_interval_min = 1;

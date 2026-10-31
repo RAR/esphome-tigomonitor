@@ -148,6 +148,8 @@ the MQTT broker. To require one, set **Web UI password** under **Tools →
 RS485 adapter and web UI**. The browser then asks for the username (`admin`
 unless you change it) and password. Pages on other websites can't use the
 monitor's settings either way, even with the login saved in your browser.
+Over plain HTTP the password crosses your network readable by anything on
+it; [HTTPS](#use-https) closes that.
 
 The MQTT password stays on the Pi: the web UI never shows it, and changing
 the broker's address or username clears it, so it has to be entered again.
@@ -171,6 +173,70 @@ the broker's address or username clears it, so it has to be entered again.
 Point Uptime Kuma, or anything that checks a URL, at it. It needs no login
 even with a web UI password set, and tells only whether all is well and
 what isn't.
+
+## Use HTTPS
+
+The web UI serves HTTPS once you give it a certificate and its key. Browsers
+trust a certificate only for a name, not an IP address, so you need a domain
+name pointing at the Pi, `tigo.example.com` say. Let's Encrypt issues
+certificates for free and can do it without the Pi being reachable from the
+internet: its DNS challenge proves you own the domain through a TXT record,
+which certbot writes through your DNS provider's API.
+
+1. Point the name at the Pi's address on your network, with an A record at
+   your DNS provider or an override in your router's DNS.
+2. Install certbot and the plugin for your DNS provider, and give the
+   plugin credentials that can edit your domain's records. On Raspberry Pi
+   OS, for example:
+   - **Cloudflare:** `sudo apt install certbot python3-certbot-dns-cloudflare`,
+     then put an API token in `/root/cloudflare.ini` as the plugin's
+     instructions say.
+   - **Amazon Route 53:** `sudo apt install certbot python3-certbot-dns-route53`.
+     Create an IAM user for it alone, with a policy that allows
+     `route53:ListHostedZones` and `route53:GetChange` on `*`, and
+     `route53:ChangeResourceRecordSets` only on
+     `arn:aws:route53:::hostedzone/YOUR_ZONE_ID`. Put its access key in
+     `/root/.aws/credentials`, readable by root only, under `[default]`.
+3. Save this as `/usr/local/bin/tigomonitor-cert-hook`, and make it
+   executable with `sudo chmod +x`. It copies the certificate where the
+   monitor can read it, since `/etc/letsencrypt` is root's alone:
+
+   ```sh
+   #!/bin/sh
+   set -e
+   for f in fullchain.pem privkey.pem; do
+     install -m 600 -o tigomonitor -g tigomonitor "$RENEWED_LINEAGE/$f" /var/lib/tigomonitor/$f.new
+     mv /var/lib/tigomonitor/$f.new /var/lib/tigomonitor/$f
+   done
+   ```
+
+4. Get the certificate, with the hook. For Cloudflare:
+
+   ```sh
+   sudo certbot certonly --dns-cloudflare --dns-cloudflare-credentials /root/cloudflare.ini \
+     -d tigo.example.com --deploy-hook /usr/local/bin/tigomonitor-cert-hook
+   ```
+
+   For Route 53, which finds the key in `/root/.aws/credentials` by itself:
+
+   ```sh
+   sudo certbot certonly --dns-route53 \
+     -d tigo.example.com --deploy-hook /usr/local/bin/tigomonitor-cert-hook
+   ```
+
+5. Under **Tools → RS485 adapter and web UI**, set **HTTPS certificate** to
+   `/var/lib/tigomonitor/fullchain.pem` and **HTTPS key** to
+   `/var/lib/tigomonitor/privkey.pem`, save, and let it restart. The page
+   reopens at `https://` on port 443, or 8443 if something else has 443.
+
+certbot renews the certificate on its own and runs the hook each time. The
+monitor checks the two files every 10 seconds and uses a renewed pair for new
+connections, with no restart. A pair that doesn't load (a key that isn't the
+certificate's, say) is logged on the Logs page and the previous one kept. If
+the pair won't load when the service starts, the web UI comes up on plain
+HTTP instead and the log says why, so you can still reach it to fix the
+paths. It keeps trying the pair every 10 seconds, and restarts on HTTPS once
+it loads.
 
 ## Other ways to run it
 
@@ -256,6 +322,17 @@ does the same with Compose.
   **Restart service** exits cleanly and relies on Docker starting it again.
 - **The web port** is 8080 inside the container; publish it as any port you
   like. The web UI's port setting does nothing here.
+- **HTTPS:** use
+  [`linux/docker-compose.https.yml`](https://github.com/RAR/esphome-tigomonitor/blob/main/linux/docker-compose.https.yml)
+  instead. It adds a certbot container that gets a Let's Encrypt certificate
+  through Route 53 or Cloudflare and renews it, with nothing installed on the
+  host. Set `DOMAIN`, `DNS_PROVIDER` and the provider's keys as the file's
+  header says, in a `.env` file or as Portainer's stack environment
+  variables, and point the domain at the host. The web UI serves plain HTTP
+  for the minute or two the first certificate takes, then restarts on HTTPS
+  at `https://DOMAIN:8443`. The certificate's paths are set by the compose
+  file, so the fields under Tools are locked. If it stays on HTTP,
+  `docker compose logs certbot` says why.
 - **The CCA page over Bluetooth** needs the host's BlueZ. Mount
   `/run/dbus/system_bus_socket` into the container, and run it as an account
   the host knows that is in its `bluetooth` group: `--user UID:GID`, plus
