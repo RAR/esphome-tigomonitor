@@ -5,10 +5,14 @@ After=network-online.target bluetooth.service
 Wants=network-online.target
 
 [Service]
+Type=notify
 ExecStart=/usr/bin/tigomonitord
 # The web UI's "Restart service" exits cleanly and relies on this.
 Restart=always
 RestartSec=3
+# The main loop checks in every second; one that stops for a minute is
+# restarted, rather than left running and publishing nothing.
+WatchdogSec=60
 
 # A system account the package creates, in dialout (the RS485 adapter) and
 # bluetooth (the CCA page); the capability serves the web UI on port 80.

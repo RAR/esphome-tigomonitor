@@ -25,6 +25,7 @@
 #include <mutex>
 #include <string>
 #include <sys/stat.h>
+#include <systemd/sd-daemon.h>
 #include <thread>
 #include <unistd.h>
 #include <vector>
@@ -188,8 +189,19 @@ int main(int argc, char **argv) {
   int64_t last_prune = 0;
   BusStats last_stats{};
   auto last_stats_log = std::chrono::steady_clock::now();
+  // systemd (Type=notify, WatchdogSec= in the unit) restarts the service if
+  // this loop stops checking in. Without systemd, as in Docker, these do
+  // nothing.
+  sd_notify(0, "READY=1");
+  uint64_t watchdog_usec = 0;
+  const bool watchdog = sd_watchdog_enabled(0, &watchdog_usec) > 0;
+  if (watchdog)
+    LOGI("watchdog: restarted if the main loop stops for %llu s",
+         static_cast<unsigned long long>(watchdog_usec / 1000000));
   while (!g_stop) {
     std::this_thread::sleep_for(std::chrono::seconds(1));
+    // Once per pass: anything below that hangs stops it.
+    if (watchdog) sd_notify(0, "WATCHDOG=1");
     if (restart_requested) {
       LOGI("restart requested from the web UI");
       break;
@@ -261,6 +273,7 @@ int main(int argc, char **argv) {
       break;
     }
   }
+  sd_notify(0, "STOPPING=1");
   g_stop = true;
   input_stop = true;
   input.join();

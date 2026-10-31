@@ -44,6 +44,8 @@ jobs:
         run: docker run --rm -v "$PWD":/src -w /src tigod-dev linux/scripts/cca-e2e.sh
       - name: The bus over a network bridge, against a mock
         run: docker run --rm -v "$PWD":/src -w /src tigod-dev linux/scripts/bridge-e2e.sh
+      - name: The systemd watchdog, against a stand-in notify socket
+        run: docker run --rm -v "$PWD":/src -w /src tigod-dev linux/scripts/watchdog-e2e.sh
 
   deb:
     if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
