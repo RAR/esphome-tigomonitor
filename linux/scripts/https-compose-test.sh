@@ -9,10 +9,12 @@
 # Runs on a host with Docker Compose (not in the dev container), from the
 # repo root, after: docker build -t tigomonitord:https-test -f linux/Dockerfile .
 set -eu
-out=build/https-compose
+# Not under build/: the steps before this one run as root in the dev
+# container and leave it root-owned.
+out=$(mktemp -d "${TMPDIR:-/tmp}/https-compose.XXXXXX")
 project=tigo-https-test
 port=18443
-rm -rf "$out" && mkdir -p "$out/pki"
+mkdir -p "$out/pki"
 pki="$out/pki"
 
 openssl req -x509 -newkey rsa:2048 -nodes -days 2 -subj "/CN=Test CA" \
@@ -52,8 +54,8 @@ services:
       - "127.0.0.1:$port:8080"
   certbot:
     volumes:
-      - $PWD/$out/certbot:/usr/local/bin/certbot:ro
-      - $PWD/$pki:/pki:ro
+      - $out/certbot:/usr/local/bin/certbot:ro
+      - $pki:/pki:ro
 EOF
 compose() {
   DOMAIN=tigo.test DNS_PROVIDER=route53 docker compose -p $project \
