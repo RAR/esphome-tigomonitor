@@ -295,14 +295,25 @@ does the same with Compose.
   **Restart service** exits cleanly and relies on Docker starting it again.
 - **The web port** is 8080 inside the container; publish it as any port you
   like. The web UI's port setting does nothing here.
-- **HTTPS:** mount the certificate and key into the container, readable by
-  user ID 999 (the image's account), and set their paths inside the container
-  under Tools. With
-  `-v /srv/tigo-certs:/certs:ro`, those are `/certs/fullchain.pem` and
-  `/certs/privkey.pem`. The container port stays 8080, now serving HTTPS:
-  publish it as `-p 443:8080`. Have your certificate tool's renewal hook copy
-  the new files into the mounted directory; the monitor picks them up as it
-  does on the package.
+- **HTTPS:** get the certificate on the host as in [Use HTTPS](#use-https),
+  but with this hook instead, since the host has no `tigomonitor` account.
+  The image's account is user ID 999:
+
+  ```sh
+  #!/bin/sh
+  set -e
+  install -d -m 700 -o 999 /srv/tigo-certs
+  for f in fullchain.pem privkey.pem; do
+    install -m 600 -o 999 "$RENEWED_LINEAGE/$f" /srv/tigo-certs/$f.new
+    mv /srv/tigo-certs/$f.new /srv/tigo-certs/$f
+  done
+  ```
+
+  Mount the directory with `-v /srv/tigo-certs:/certs:ro`, and set
+  `/certs/fullchain.pem` and `/certs/privkey.pem` under Tools. The container
+  port stays 8080, now serving HTTPS: publish it as `-p 443:8080` if nothing
+  on the host has 443. Renewals reach the container through the mount, and
+  the monitor picks them up as it does on the package.
 - **The CCA page over Bluetooth** needs the host's BlueZ. Mount
   `/run/dbus/system_bus_socket` into the container, and run it as an account
   the host knows that is in its `bluetooth` group: `--user UID:GID`, plus
