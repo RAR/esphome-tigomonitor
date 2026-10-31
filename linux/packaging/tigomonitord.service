@@ -5,10 +5,16 @@ After=network-online.target bluetooth.service
 Wants=network-online.target
 
 [Service]
+Type=notify
 ExecStart=/usr/bin/tigomonitord
 # The web UI's "Restart service" exits cleanly and relies on this.
 Restart=always
 RestartSec=3
+# The main loop checks in every second; one that stops for a minute is
+# restarted, rather than left running and publishing nothing. As bus master
+# that loop also polls the bus: a hang lets the lease lapse, so the array
+# goes safe, and the restart brings the master back.
+WatchdogSec=60
 
 # As bus master the daemon must answer the TAP on time, and on a Pi Zero
 # the daily apt list refresh stalled it for 1.1 s. Ahead of other work for

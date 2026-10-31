@@ -30,6 +30,7 @@
 #include <mutex>
 #include <string>
 #include <sys/stat.h>
+#include <systemd/sd-daemon.h>
 #include <thread>
 #include <unistd.h>
 #include <vector>
@@ -305,6 +306,15 @@ int main(int argc, char **argv) {
   auto last_stats_log = std::chrono::steady_clock::now();
   const auto started = std::chrono::steady_clock::now();
   auto last_tls_check = std::chrono::steady_clock::now();
+  // systemd (Type=notify, WatchdogSec= in the unit) restarts the service if
+  // this loop stops checking in. Without systemd, as in Docker, these do
+  // nothing.
+  sd_notify(0, "READY=1");
+  uint64_t watchdog_usec = 0;
+  const bool watchdog = sd_watchdog_enabled(0, &watchdog_usec) > 0;
+  if (watchdog)
+    LOGI("watchdog: restarted if the main loop stops for %llu s",
+         static_cast<unsigned long long>(watchdog_usec / 1000000));
   while (!g_stop) {
     // A second's worth of master ticks, one request each, or a plain sleep.
     auto second = std::chrono::steady_clock::now() + std::chrono::seconds(1);
@@ -319,6 +329,9 @@ int main(int argc, char **argv) {
       std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
     std::this_thread::sleep_until(second);
+    // Once per pass, after the second's master ticks: a hang anywhere in
+    // this loop, the master's tick included, stops it.
+    if (watchdog) sd_notify(0, "WATCHDOG=1");
     if (restart_requested) {
       LOGI("restart requested from the web UI");
       break;
@@ -413,6 +426,7 @@ int main(int argc, char **argv) {
       break;
     }
   }
+  sd_notify(0, "STOPPING=1");
   g_stop = true;
   input_stop = true;
   if (input.joinable()) input.join();
