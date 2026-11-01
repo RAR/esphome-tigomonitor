@@ -32,6 +32,7 @@ function readForm() {
       ccaMac: $('cca-mac').value.trim(),
       cloudImport: $('cloud').checked,
       display: $('display').checked,
+      displayPanel: $('display-panel').value,
     },
   };
 }
@@ -75,6 +76,7 @@ function render() {
   const { board, form } = readForm();
   $('cca-ip-row').style.display = form.cca === 'http' ? '' : 'none';
   $('cca-mac-row').style.display = form.cca === 'ble' ? '' : 'none';
+  $('display-panel-row').style.display = form.display && board.supports.display ? '' : 'none';
   try {
     const cfg = assembleConfig(board, form);
     lastYaml = toYaml(cfg);

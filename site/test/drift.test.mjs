@@ -44,19 +44,24 @@ test('every checked board still exists in BOARDS', () => {
 // NOTE: this is a subset check (overlay lines ⊆ source). It does NOT verify the
 // overlay is complete. Completeness of the generated display config (e.g. that
 // every id its lambda references is defined) is covered in yaml.test.mjs.
-// The package is split in two: atoms3r-display.yaml holds the panel, and
-// includes atoms3r-display-common.yaml for the rest (#93).
-test('AtomS3R display overlay still matches boards/atoms3r-display.yaml', () => {
-  const overlay = getBoard('esp32s3-atoms3r').displayOverlay;
-  const src = ['boards/atoms3r-display.yaml', 'boards/atoms3r-display-common.yaml']
-    .map((f) => readFileSync(join(repoRoot, f), 'utf8')).join('\n');
-  // every non-comment, non-blank overlay line must appear in the source file
-  for (const line of overlay.split('\n')) {
-    const t = line.trim();
-    if (!t || t.startsWith('#')) continue;
-    assert.ok(src.includes(line.replace(/\s+$/, '')), `overlay line drifted: ${t}`);
-  }
-});
+// Each panel's package is its own file plus atoms3r-display-common.yaml, which
+// it includes for everything but the display: block (#93).
+for (const [panel, file] of Object.entries({ st7789v: 'atoms3r-display.yaml', st7735: 'atoms3r-display-st7735.yaml' })) {
+  test(`AtomS3R ${panel} display overlay still matches boards/${file}`, async () => {
+    const { assembleConfig } = await import('../rules.js');
+    const overlay = assembleConfig(getBoard('esp32s3-atoms3r'), {
+      uart: {}, wifi: {}, cca: 'none', display: true, displayPanel: panel,
+    }).displayOverlay;
+    const src = [`boards/${file}`, 'boards/atoms3r-display-common.yaml']
+      .map((f) => readFileSync(join(repoRoot, f), 'utf8')).join('\n');
+    // every non-comment, non-blank overlay line must appear in the source files
+    for (const line of overlay.split('\n')) {
+      const t = line.trim();
+      if (!t || t.startsWith('#')) continue;
+      assert.ok(src.includes(line.replace(/\s+$/, '')), `overlay line drifted: ${t}`);
+    }
+  });
+}
 
 // A board file's safe-mode hold must reach the builder too. #97 added one to
 // the RS485-CAN file; the builder never got it, because nothing compared them.

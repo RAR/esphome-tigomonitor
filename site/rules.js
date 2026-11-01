@@ -93,7 +93,9 @@ export function assembleConfig(board, form) {
         }
       : null,
     ble,
-    displayOverlay: form.display && board.supports.display ? board.displayOverlay : null,
+    displayOverlay: form.display && board.supports.display
+      ? `${board.displayOverlay.trimEnd()}\n\n${board.displayPanels[form.displayPanel] ?? board.displayPanels.st7789v}`
+      : null,
     keepSerialConsole: Boolean(board.keepSerialConsole),
     gpioSwitches: board.gpioSwitches ?? null,
     secrets,
