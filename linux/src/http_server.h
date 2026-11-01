@@ -51,7 +51,12 @@ struct HttpContext {
   std::function<MasterStatus()> master_status;  // inactive when listening
   TlsCerts *tls = nullptr;  // HTTPS with these; null: plain HTTP
   bool tls_from_args = false;  // set by --tls-cert/--tls-key, not the web UI
+  std::function<int64_t()> main_loop_late_ms;  // since the main loop's last pass
 };
+
+// tigomonitord --health-check PORT, the container's HEALTHCHECK: GETs
+// /api/health from the daemon on this machine and returns 0 for a 200.
+int health_check(int port);
 
 class HttpServer {
  public:

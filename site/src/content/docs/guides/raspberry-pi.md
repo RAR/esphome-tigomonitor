@@ -169,6 +169,8 @@ the broker's address or username clears it, so it has to be entered again.
   runs the bus is healthy. One that has taken the bus over is judged as a
   master.
 - An MQTT broker set but not connected.
+- The main loop, which polls the bus and saves history, stuck for over 10
+  seconds while the web UI still answers.
 
 Point Uptime Kuma, or anything that checks a URL, at it. It needs no login
 even with a web UI password set, and tells only whether all is well and
@@ -316,7 +318,12 @@ does the same with Compose.
   recreated, which would add the panels to Home Assistant again under a new
   device.
 - **Restarts:** use `--restart unless-stopped`, not `on-failure`. The web UI's
-  **Restart service** exits cleanly and relies on Docker starting it again.
+  **Restart service** exits cleanly and relies on Docker starting it again,
+  as does the monitor's own watchdog: with no systemd to restart it, it exits
+  if its main loop has been stuck for a minute. The image's healthcheck shows
+  the container unhealthy whenever [`/api/health`](#watch-it-from-a-monitor)
+  reports a problem, a stuck loop included. Docker only reports that; the
+  watchdog is what restarts it.
 - **The web port** is 8080 inside the container; publish it as any port you
   like. The web UI's port setting does nothing here.
 - **HTTPS:** use

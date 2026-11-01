@@ -10,6 +10,7 @@
 #include <cerrno>
 #include <chrono>
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 #include <ctime>
 #include <fstream>
@@ -283,6 +284,10 @@ std::vector<std::string> HttpServer::health_problems_() const {
   if (!s.serial_port.empty() && quiet_s > limit_s && (master || !ctx_.monitor.night_mode()))
     problems.push_back(last > 0 ? "no frames from the bus for " + std::to_string(quiet_s) + " s"
                                 : "no frames from the bus since it started");
+  // The web threads answer even when the loop that polls the bus and writes
+  // history has stuck; a pass takes about a second.
+  int64_t late_ms = ctx_.main_loop_late_ms ? ctx_.main_loop_late_ms() : 0;
+  if (late_ms > 10000) problems.push_back("main loop: no pass for " + std::to_string(late_ms / 1000) + " s");
   if (!s.mqtt.host.empty() && !ctx_.mqtt_connected())
     problems.push_back("MQTT: not connected to " + s.mqtt.host + (ctx_.mqtt_error().empty() ? "" : " (" + ctx_.mqtt_error() + ")"));
   return problems;
@@ -1296,6 +1301,28 @@ void HttpServer::routes_() {
     ctx_.settings_changed = true;
     send_json(res, {{"saved", true}});
   });
+}
+
+int health_check(int port) {
+  // It can't tell whether HTTPS is on, so it tries HTTPS, then plain HTTP.
+  // The certificate goes unchecked: it names the web UI, not 127.0.0.1.
+  auto report = [](const httplib::Result &r) {
+    std::printf("%s\n", r->body.c_str());
+    return r->status == 200 ? 0 : 1;
+  };
+  {
+    httplib::SSLClient tls("127.0.0.1", port);
+    tls.enable_server_certificate_verification(false);
+    tls.set_connection_timeout(3);
+    tls.set_read_timeout(5);
+    if (auto r = tls.Get("/api/health")) return report(r);
+  }
+  httplib::Client plain("127.0.0.1", port);
+  plain.set_connection_timeout(3);
+  plain.set_read_timeout(5);
+  if (auto r = plain.Get("/api/health")) return report(r);
+  std::fprintf(stderr, "nothing answered on port %d\n", port);
+  return 1;
 }
 
 }  // namespace tigod

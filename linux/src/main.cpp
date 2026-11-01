@@ -23,6 +23,7 @@
 #include <functional>
 #include <csignal>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <ctime>
 #include <fstream>
@@ -58,11 +59,19 @@ static void usage() {
                "  --serial DEV      serial port, overriding settings.json\n"
                "  --tls-cert FILE   HTTPS certificate (with its chain), overriding settings.json\n"
                "  --tls-key FILE    its private key\n"
+               "  --watchdog S      without systemd's watchdog, exit if the main loop stops\n"
+               "                    for S seconds, for Docker to restart it (default 60, 0 off)\n"
+               "  --health-check P  check the daemon on port P, as Docker's HEALTHCHECK does\n"
                "  --replay FILE     read bus bytes from a capture instead of a port\n"
                "  --speed X         replay speed (1 = bus speed, 0 = as fast as possible)\n"
                "  --capture FILE    also append every byte read to FILE\n"
                "  --verbose         debug logging\n"
                "  --version\n");
+}
+
+static int64_t steady_ms() {
+  return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch())
+      .count();
 }
 
 static std::string hostname() {
@@ -79,6 +88,7 @@ int main(int argc, char **argv) {
   std::string serial_override, replay, capture;
   std::string tls_cert_override, tls_key_override;
   double speed = 1.0;
+  int watchdog_s = 60;
   for (int i = 1; i < argc; i++) {
     std::string a = argv[i];
     auto next = [&]() -> std::string {
@@ -94,6 +104,8 @@ int main(int argc, char **argv) {
     else if (a == "--serial") serial_override = next();
     else if (a == "--tls-cert") tls_cert_override = next();
     else if (a == "--tls-key") tls_key_override = next();
+    else if (a == "--watchdog") watchdog_s = std::atoi(next().c_str());
+    else if (a == "--health-check") return health_check(std::atoi(next().c_str()));
     else if (a == "--replay") replay = next();
     else if (a == "--speed") speed = std::atof(next().c_str());
     else if (a == "--capture") capture = next();
@@ -249,6 +261,7 @@ int main(int argc, char **argv) {
       tls_waiting = std::move(tls);
     }
   }
+  std::atomic<int64_t> loop_pass_ms{steady_ms()};
   HttpServer web(HttpContext{
       monitor, web_dir, settings_path, TIGOD_VERSION,
       [&] {
@@ -257,7 +270,7 @@ int main(int argc, char **argv) {
       },
       [&] { return mqtt.connected(); }, [&] { return mqtt.last_error(); }, settings_changed, restart_requested,
       monitor, topology, history, cloud, cca, cca_http,
-      master_status, tls.get(), tls_from_args});
+      master_status, tls.get(), tls_from_args, [&] { return steady_ms() - loop_pass_ms; }});
   if (port < 0 && settings.web_port > 0) port = settings.web_port;
   // Only the default steps aside for another web server; a port someone
   // chose fails loudly instead, and systemd keeps retrying it.
@@ -315,6 +328,27 @@ int main(int argc, char **argv) {
   if (watchdog)
     LOGI("watchdog: restarted if the main loop stops for %llu s",
          static_cast<unsigned long long>(watchdog_usec / 1000000));
+  // Without it, as in Docker, its own: a thread that ends the process once
+  // the loop has stuck, for the restart policy to bring it back. As bus
+  // master a stuck loop has stopped renewing the lease, so the array goes
+  // safe either way; this gets the master back. It writes straight to
+  // stderr and exits without unwinding, since whatever stuck the loop may
+  // hold a lock the log or a clean shutdown would wait on.
+  std::atomic<bool> own_watchdog_stop{false};
+  std::thread own_watchdog;
+  if (!watchdog && watchdog_s > 0) {
+    LOGI("watchdog: exits if the main loop stops for %d s, for whatever started it to restart it", watchdog_s);
+    loop_pass_ms = steady_ms();
+    own_watchdog = std::thread([&] {
+      while (!own_watchdog_stop) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(500));
+        if (steady_ms() - loop_pass_ms > watchdog_s * 1000LL) {
+          dprintf(STDERR_FILENO, "<3>watchdog: the main loop has not run for %d s; exiting\n", watchdog_s);
+          std::_Exit(1);
+        }
+      }
+    });
+  }
   while (!g_stop) {
     // A second's worth of master ticks, one request each, or a plain sleep.
     auto second = std::chrono::steady_clock::now() + std::chrono::seconds(1);
@@ -332,6 +366,7 @@ int main(int argc, char **argv) {
     // Once per pass, after the second's master ticks: a hang anywhere in
     // this loop, the master's tick included, stops it.
     if (watchdog) sd_notify(0, "WATCHDOG=1");
+    loop_pass_ms = steady_ms();
     if (restart_requested) {
       LOGI("restart requested from the web UI");
       break;
@@ -340,6 +375,7 @@ int main(int argc, char **argv) {
       Settings fresh = load_settings(settings_path);
       if (fresh.device_id.empty()) fresh.device_id = settings.device_id;
       apply_tls_override(fresh);
+      if (!serial_override.empty()) fresh.serial_port = serial_override;
       bool new_port = fresh.serial_port != settings.serial_port || fresh.baud_rate != settings.baud_rate ||
                       fresh.bus_role != settings.bus_role || fresh.gateway_id != settings.gateway_id ||
                       fresh.standby_takeover_s != settings.standby_takeover_s ||
@@ -426,6 +462,8 @@ int main(int argc, char **argv) {
       break;
     }
   }
+  own_watchdog_stop = true;
+  if (own_watchdog.joinable()) own_watchdog.join();
   sd_notify(0, "STOPPING=1");
   g_stop = true;
   input_stop = true;
