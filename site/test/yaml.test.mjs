@@ -120,11 +120,23 @@ test('display config merges lp5562 into the single external_components block', (
 });
 
 test('AtomS3R+display config defines every id its lambda references', () => {
-  const y = toYaml(assembleConfig(getBoard('esp32s3-atoms3r'), { ...form, display: true }));
-  const referenced = [...new Set([...y.matchAll(/id\((\w+)\)/g)].map((m) => m[1]))];
-  const defined = new Set([...y.matchAll(/^\s*id:\s*(\w+)/gm)].map((m) => m[1]));
-  const missing = referenced.filter((r) => !defined.has(r));
-  assert.deepEqual(missing, [], `display config references undefined ids: ${missing.join(', ')}`);
+  for (const displayPanel of ['st7789v', 'st7735']) {
+    const y = toYaml(assembleConfig(getBoard('esp32s3-atoms3r'), { ...form, display: true, displayPanel }));
+    const referenced = [...new Set([...y.matchAll(/id\((\w+)\)/g)].map((m) => m[1]))];
+    const defined = new Set([...y.matchAll(/^\s*id:\s*(\w+)/gm)].map((m) => m[1]));
+    const missing = referenced.filter((r) => !defined.has(r));
+    assert.deepEqual(missing, [], `${displayPanel} display config references undefined ids: ${missing.join(', ')}`);
+  }
+});
+
+// AtomS3R units ship with either panel, and the wrong driver leaves the screen
+// dark with the backlight on (#93).
+test('display panel choice picks the driver, ST7789V by default', () => {
+  const atoms3r = getBoard('esp32s3-atoms3r');
+  const platforms = (y) => [...y.matchAll(/^\s*- platform: (st77\w+)/gm)].map((m) => m[1]);
+  assert.deepEqual(platforms(toYaml(assembleConfig(atoms3r, { ...form, display: true }))), ['st7789v']);
+  assert.deepEqual(platforms(toYaml(assembleConfig(atoms3r, { ...form, display: true, displayPanel: 'st7789v' }))), ['st7789v']);
+  assert.deepEqual(platforms(toYaml(assembleConfig(atoms3r, { ...form, display: true, displayPanel: 'st7735' }))), ['st7735']);
 });
 
 test('display config wires the backlight into tigo_server', () => {
