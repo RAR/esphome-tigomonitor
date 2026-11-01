@@ -198,6 +198,9 @@ void MqttPublisher::publish_discovery_(const Panel &p) {
 void MqttPublisher::publish_system_discovery_() {
   json device = monitor_device(settings_, version_);
   std::string state = base_() + "/system/state";
+  // A standby sends no system state while it stands by, so its entities go
+  // unavailable then rather than freeze on their last values.
+  int expire = std::max(300, 3 * settings_.publish_interval_s);
   struct Sys {
     const char *key, *name, *unit, *device_class, *state_class;
   };
@@ -219,6 +222,7 @@ void MqttPublisher::publish_system_discovery_() {
               {"state_topic", state},
               {"value_template", std::string("{{ value_json.") + m.key + " }}"},
               {"availability_topic", base_() + "/status"},
+              {"expire_after", expire},
               {"device", device}};
     if (m.unit) c["unit_of_measurement"] = m.unit;
     if (m.device_class) c["device_class"] = m.device_class;
@@ -234,6 +238,7 @@ void MqttPublisher::publish_system_discovery_() {
             {"state_topic", state},
             {"value_template", "{{ 'ON' if value_json.night_mode else 'OFF' }}"},
             {"availability_topic", base_() + "/status"},
+            {"expire_after", expire},
             {"device", device}};
   announce_("binary_sensor", uid, c);
 }

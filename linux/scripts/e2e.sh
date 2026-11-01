@@ -35,6 +35,9 @@ expect "system discovery configs" "$(grep '^homeassistant/sensor/tigomonitor_tes
 expect "bus master configs cleared" "$(grep -c '^homeassistant/[a-z_]*/tigomonitor_test_bus_master_[a-z_]*/config (null)$' "$out/mqtt.txt")" 8
 expect "no bus master state" "$(grep -c '^tigomonitor/test/master/' "$out/mqtt.txt" || true)" 0
 expect "night mode sensor" "$(grep -c '^homeassistant/binary_sensor/tigomonitor_test_night_mode' "$out/mqtt.txt")" 1
+# A standby publishes no system state while it stands by: its entities must
+# go unavailable rather than freeze on their last values.
+expect "system entities expire" "$(grep -E '^homeassistant/(sensor|binary_sensor)/tigomonitor_test_' "$out/mqtt.txt" | grep -v _bus_master | grep -c '"expire_after":300')" 8
 # One publish per interval plus a final one at the end of the replay, so at
 # least one message per panel; how many depends on timing.
 states="$(grep -c '^tigomonitor/test/panel/' "$out/mqtt.txt")"
