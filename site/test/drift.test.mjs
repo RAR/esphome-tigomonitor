@@ -44,9 +44,12 @@ test('every checked board still exists in BOARDS', () => {
 // NOTE: this is a subset check (overlay lines ⊆ source). It does NOT verify the
 // overlay is complete. Completeness of the generated display config (e.g. that
 // every id its lambda references is defined) is covered in yaml.test.mjs.
+// The package is split in two: atoms3r-display.yaml holds the panel, and
+// includes atoms3r-display-common.yaml for the rest (#93).
 test('AtomS3R display overlay still matches boards/atoms3r-display.yaml', () => {
   const overlay = getBoard('esp32s3-atoms3r').displayOverlay;
-  const src = readFileSync(join(repoRoot, 'boards/atoms3r-display.yaml'), 'utf8');
+  const src = ['boards/atoms3r-display.yaml', 'boards/atoms3r-display-common.yaml']
+    .map((f) => readFileSync(join(repoRoot, f), 'utf8')).join('\n');
   // every non-comment, non-blank overlay line must appear in the source file
   for (const line of overlay.split('\n')) {
     const t = line.trim();

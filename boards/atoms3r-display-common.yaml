@@ -1,8 +1,9 @@
 # M5Stack AtomS3R Display Package - shared config
 #
 # Everything the AtomS3R display needs except the panel driver itself:
-# the LP5562 backlight/RGB LED, its I2C bus, the SPI bus, the dashboard
-# lambda, colors, fonts, and the WiFi/backlight wiring tigo_server uses.
+# the LP5562 backlight/RGB LED, its I2C bus, the SPI bus, the colors and
+# fonts the dashboard lambda uses, and the WiFi/backlight wiring tigo_server
+# uses. The lambda itself is in each panel's own file.
 # Included by atoms3r-display.yaml (ST7789V panel) and
 # atoms3r-display-st7735.yaml (ST7735 panel, #93) - pick whichever one
 # matches your unit's own label; both pull this file in for everything
