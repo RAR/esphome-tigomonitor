@@ -220,6 +220,8 @@ which certbot writes through your DNS provider's API.
    `/var/lib/tigomonitor/fullchain.pem` and **HTTPS key** to
    `/var/lib/tigomonitor/privkey.pem`, save, and let it restart. The page
    reopens at `https://` on port 443, or 8443 if something else has 443.
+   Port 80 then redirects to it, so `http://` bookmarks and the
+   `tigomonitor.local` network-browser entry still work.
 
 certbot renews the certificate on its own and runs the hook each time. The
 monitor checks the two files every 10 seconds and uses a renewed pair for new

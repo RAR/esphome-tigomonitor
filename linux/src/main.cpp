@@ -281,7 +281,10 @@ int main(int argc, char **argv) {
   if (port < 0 && settings.web_port > 0) port = settings.web_port;
   // Only the default steps aside for another web server; a port someone
   // chose fails loudly instead, and systemd keeps retrying it.
-  if ((port < 0 && !(tls ? web.start(443, 8443) : web.start(80, 8080))) || (port > 0 && !web.start(port))) {
+  int web_port = port < 0 ? (tls ? web.start(443, 8443) : web.start(80, 8080)) : web.start(port);
+  HttpsRedirect redirect;
+  if (port < 0 && tls && web_port) redirect.start(80, web_port);
+  if (!web_port) {
     input_stop = true;
     if (input.joinable()) input.join();
     cca.stop();
@@ -486,6 +489,7 @@ int main(int argc, char **argv) {
     std::lock_guard<std::mutex> lock(master_mu);
     bus_master.reset();
   }
+  redirect.stop();
   web.stop();
   cca.stop();
   cca_http.stop();

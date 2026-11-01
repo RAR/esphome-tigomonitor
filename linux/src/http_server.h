@@ -58,6 +58,21 @@ struct HttpContext {
 // /api/health from the daemon on this machine and returns 0 for a 200.
 int health_check(int port);
 
+// With HTTPS on the default ports, port 80 answers every request with a
+// redirect to the same path over HTTPS, so http:// bookmarks and the mDNS
+// advert (which names port 80) still lead to the web UI.
+class HttpsRedirect {
+ public:
+  HttpsRedirect();
+  ~HttpsRedirect();
+  bool start(int port, int https_port);
+  void stop();
+
+ private:
+  std::unique_ptr<httplib::Server> svr_;
+  std::unique_ptr<std::thread> thread_;
+};
+
 class HttpServer {
  public:
   explicit HttpServer(HttpContext ctx);

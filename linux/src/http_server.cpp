@@ -253,6 +253,41 @@ int HttpServer::start(int port, int fallback) {
   return port;
 }
 
+HttpsRedirect::HttpsRedirect() = default;
+HttpsRedirect::~HttpsRedirect() { stop(); }
+
+bool HttpsRedirect::start(int port, int https_port) {
+  svr_ = std::make_unique<httplib::Server>();
+  svr_->set_keep_alive_max_count(1);
+  auto to_https = [https_port](const httplib::Request &req, httplib::Response &res) {
+    // The name the browser used, without its port; an IPv6 literal keeps its brackets.
+    std::string host = req.get_header_value("Host");
+    size_t colon = host.rfind(':');
+    if (colon != std::string::npos && host.find(']', colon) == std::string::npos) host.erase(colon);
+    if (host.empty()) host = "localhost";
+    std::string url = "https://" + host + (https_port == 443 ? "" : ":" + std::to_string(https_port)) +
+                      (req.target.empty() ? "/" : req.target);
+    res.set_redirect(url, 301);
+  };
+  for (auto m : {&httplib::Server::Get, &httplib::Server::Post, &httplib::Server::Put, &httplib::Server::Delete})
+    (svr_.get()->*m)(".*", to_https);
+  if (!svr_->bind_to_port("0.0.0.0", port)) {
+    LOGW("web: port %d is taken, so it can't send people to HTTPS (%s)", port, strerror(errno));
+    svr_.reset();
+    return false;
+  }
+  LOGI("web: port %d redirects to HTTPS on %d", port, https_port);
+  thread_ = std::make_unique<std::thread>([this] { svr_->listen_after_bind(); });
+  return true;
+}
+
+void HttpsRedirect::stop() {
+  if (!thread_) return;
+  svr_->stop();
+  thread_->join();
+  thread_.reset();
+}
+
 void HttpServer::stop() {
   if (!thread_) return;
   svr_->stop();

@@ -125,4 +125,27 @@ start
 expect "falls back to HTTP" "$(client http)" 200
 expect "says why" "$(grep -c 'HTTPS is off, serving plain HTTP' "$out/daemon.log")" 1
 
+# On the default ports, as the package runs it: HTTPS on 443, and port 80,
+# which the mDNS advert and http:// bookmarks point at, sends people there.
+kill $daemon
+wait $daemon 2>/dev/null || true
+install_pair "$pki/first.full.pem" "$pki/first.key"
+: > "$out/daemon.log"
+build/linux/tigomonitord --state-dir "$out/state" --serial /dev/nonexistent 2>> "$out/daemon.log" &
+daemon=$!
+for _ in $(seq 50); do grep -q "web: listening on port 443" "$out/daemon.log" 2>/dev/null && break; sleep 0.1; done
+sleep 0.3
+redirect() {  # redirect PATH: the status and Location port 80 answers with
+  python3 - "$1" <<'PY'
+import http.client, sys
+c = http.client.HTTPConnection('127.0.0.1', 80, timeout=5)
+c.request('GET', sys.argv[1], headers={'Host': 'tigomonitor.local'})
+r = c.getresponse()
+print(r.status, r.getheader('Location'))
+PY
+}
+expect "port 80 redirects to HTTPS" "$(redirect '/api/health?x=1')" "301 https://tigomonitor.local/api/health?x=1"
+port=443
+expect "and HTTPS answers on 443" "$(client cn)" first
+
 [ $fail = 0 ] && echo "https e2e passed" || { echo "https e2e FAILED; see $out/"; exit 1; }
