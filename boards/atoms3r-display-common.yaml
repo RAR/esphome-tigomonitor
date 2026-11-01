@@ -1,0 +1,143 @@
+# M5Stack AtomS3R Display Package - shared config
+#
+# Everything the AtomS3R display needs except the panel driver itself:
+# the LP5562 backlight/RGB LED, its I2C bus, the SPI bus, the dashboard
+# lambda, colors, fonts, and the WiFi/backlight wiring tigo_server uses.
+# Included by atoms3r-display.yaml (ST7789V panel) and
+# atoms3r-display-st7735.yaml (ST7735 panel, #93) - pick whichever one
+# matches your unit's own label; both pull this file in for everything
+# but the display: block.
+#
+# IMPORTANT: Display updates compete with UART processing. To minimize missed packets:
+# 1. Increase UART RX buffer: CONFIG_UART_RX_BUFFER_SIZE: "8192" or higher
+# 2. TX buffer can stay small (1024) since we only listen to the bus
+# 3. Increase display update_interval to 5s or more (set in each panel's own file)
+# 4. Consider disabling light effects during peak solar hours
+# 5. The component automatically processes 4KB per loop to handle display overhead
+
+# External component for LP5562 LED driver
+external_components:
+  - source:
+      type: git
+      url: https://github.com/RAR/esphome-lp5562
+    components: [ lp5562 ]
+
+# I2C bus for LP5562 (RGB LED + LCD Backlight control). The AtomS3R's internal
+# bus is GPIO45/GPIO0. GPIO38/39 are the plain AtomS3's, and on the AtomS3R they
+# are the bottom expansion header: there the LP5562 never answers and the
+# screen stays dark (#93). Both are strapping pins, but the board wires them
+# to its own bus, so ESPHome's warning about them doesn't apply.
+i2c:
+  sda:  # SYS_SDA
+    number: GPIO45
+    ignore_strapping_warning: true
+  scl:  # SYS_SCL
+    number: GPIO0
+    ignore_strapping_warning: true
+  scan: true
+
+# LP5562 LED driver (controls RGB indicator LED + LCD backlight)
+lp5562:
+  id: rgb_driver
+  address: 0x30
+
+# SPI bus for the LCD
+spi:
+  clk_pin: GPIO15
+  mosi_pin: GPIO21
+
+# Outputs for LP5562 channels
+output:
+  - platform: lp5562
+    id: lp5562_red
+    lp5562_id: rgb_driver
+    channel: 0  # Red channel
+  - platform: lp5562
+    id: lp5562_green
+    lp5562_id: rgb_driver
+    channel: 1  # Green channel
+  - platform: lp5562
+    id: lp5562_blue
+    lp5562_id: rgb_driver
+    channel: 2  # Blue channel
+  - platform: lp5562
+    id: backlight_output
+    lp5562_id: rgb_driver
+    channel: 3  # White channel (LCD backlight)
+
+# Light entities
+light:
+  # RGB indicator LED
+  - platform: rgb
+    name: "RGB LED"
+    id: status_led
+    red: lp5562_red
+    green: lp5562_green
+    blue: lp5562_blue
+    restore_mode: RESTORE_DEFAULT_OFF
+    effects:
+      - pulse:
+          name: "Pulse"
+          transition_length: 1s
+          update_interval: 1s
+      - strobe:
+          name: "Strobe"
+
+  # LCD Backlight (LP5562 White Channel)
+  - platform: monochromatic
+    name: "LCD Backlight"
+    id: lcd_backlight
+    output: backlight_output
+    restore_mode: RESTORE_DEFAULT_ON
+    default_transition_length: 0.5s
+
+# Color definitions
+color:
+  - id: COLOR_BLACK
+    red: 0%
+    green: 0%
+    blue: 0%
+  - id: COLOR_WHITE
+    red: 100%
+    green: 100%
+    blue: 100%
+  - id: COLOR_GREEN
+    red: 0%
+    green: 100%
+    blue: 0%
+  - id: COLOR_RED
+    red: 100%
+    green: 0%
+    blue: 0%
+  - id: COLOR_ORANGE
+    red: 100%
+    green: 65%
+    blue: 0%
+
+# Fonts for the display
+font:
+  - file: "gfonts://Roboto@bold"
+    id: font_title
+    size: 14
+  - file: "gfonts://Roboto@bold"
+    id: font_large
+    size: 28
+  - file: "gfonts://Roboto"
+    id: font_medium
+    size: 18
+  - file: "gfonts://Roboto"
+    id: font_small
+    size: 12
+  - file: "gfonts://Roboto"
+    id: font_tiny
+    size: 9
+
+# WiFi status sensor for display indicator
+binary_sensor:
+  - platform: status
+    id: wifi_status
+    internal: true
+
+# Configure tigo_server to control the backlight from web UI
+tigo_server:
+  backlight: lcd_backlight
