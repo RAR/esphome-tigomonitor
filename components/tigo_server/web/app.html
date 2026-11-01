@@ -3182,7 +3182,7 @@
     document.getElementById('diag-housekeeping').innerHTML = h.on
       ? `${h.sent_41.toLocaleString()}<span class="hist-stat-unit">0x41s</span>` : 'off';
     document.getElementById('diag-housekeeping-sub').textContent = h.on
-      ? `${h.sent_session} 0x0B00 · ${h.sent_broadcast} 0x22 · ${h.sent_walk_pages} table pages` : 'turn on under Tools';
+      ? `${h.sent_session} 0x0B00 · ${h.sent_broadcast} 0x22 · ${h.sent_walk_pages} table pages, ${h.walks_done ?? 0} walks read to the end` : 'turn on under Tools';
 
     const q = m.queries;
     document.getElementById('diag-queries').innerHTML = q.on

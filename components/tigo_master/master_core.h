@@ -80,6 +80,7 @@ struct MasterStatus {
   uint32_t sent_session = 0;  // 0x0B00s
   uint32_t sent_broadcast = 0;   // empty 0x22s
   uint32_t sent_walk_pages = 0;  // 0x26 node table pages
+  uint32_t walks_done = 0;       // walks read to the end of the table
   bool queries = false;  // the settings
   bool writes = false;
   uint32_t sent_reads = 0;  // 0x06s
@@ -206,7 +207,7 @@ class MasterCore {
   bool readdressed_ = false;     // the last bring-up moved the TAP off the factory address
   bool session_reset_sent_ = false;  // the 0x0B00 00, sent once per start, as after a CCA reboot
   uint32_t sent_41_before_ = 0, sent_session_before_ = 0;  // from earlier Housekeepings
-  uint32_t sent_broadcast_before_ = 0, sent_walk_pages_before_ = 0;
+  uint32_t sent_broadcast_before_ = 0, sent_walk_pages_before_ = 0, walks_done_before_ = 0;
   Phase phase_;
   std::unique_ptr<esphome::tigo_monitor::master::Discovery> discovery_;
   Transport *port_;  // reopened every REOPEN_EVERY_MS while closed, as listening does

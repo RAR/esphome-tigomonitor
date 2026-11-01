@@ -446,6 +446,7 @@ class Housekeeping {
   static const int WALKS = 2;
   static const int WALK_MAX_PAGES = 32;
   static const uint32_t WALK_REPLY_MS = 5000;  // a page unanswered this long ends its walk
+  static const uint32_t WALK_PAGE_WAIT_MS = 500;
 
   // 0x41s and 0x0B00 only, as before the rest was known.
   Housekeeping(const std::vector<Learned41::Entry> &learned, uint32_t now_ms, bool session_reset, uint32_t seed = 1)
@@ -554,13 +555,23 @@ class Housekeeping {
     if (req.cmd == 0x000A && ok) version_.assign(reply.payload.begin(), reply.payload.end());
     if (req.cmd != CMD_TUNNEL || req.payload.size() < 4 || req.payload[3] != 0x26 || !walk_waiting_) return;
     walk_waiting_ = false;
+    // No reply: ask for the same page once more before giving the walk up.
+    if (!ok && !walk_retried_) {
+      walk_retried_ = true;
+      return;
+    }
     TunnelReply t;
     if (!ok || !parse_tunnel_reply(reply.payload, t) || t.sub != 0x27 || t.data.size() < 4) return end_walk_();
+    walk_retried_ = false;
     uint16_t start = static_cast<uint16_t>(t.data[0] << 8 | t.data[1]);
     uint16_t count = static_cast<uint16_t>(t.data[2] << 8 | t.data[3]);
     uint32_t next = static_cast<uint32_t>(start) + count;
-    // The end of the table, or a reply that doesn't move on.
-    if (count == 0 || next <= walk_index_ || next > 0xFFFF || walk_pages_ >= WALK_MAX_PAGES) return end_walk_();
+    if (count == 0) {  // the end of the table
+      walks_done_++;
+      return end_walk_();
+    }
+    // A reply that doesn't move on.
+    if (next <= walk_index_ || next > 0xFFFF || walk_pages_ >= WALK_MAX_PAGES) return end_walk_();
     walk_index_ = static_cast<uint16_t>(next);
   }
 
@@ -568,6 +579,7 @@ class Housekeeping {
   uint32_t sent_session() const { return sent_session_; }
   uint32_t sent_broadcast() const { return sent_broadcast_; }
   uint32_t sent_walk_pages() const { return sent_walk_pages_; }
+  uint32_t walks_done() const { return walks_done_; }
   // VERSION's reply, if a bring-up asked.
   const std::string &version() const { return version_; }
 
@@ -594,6 +606,9 @@ class Housekeeping {
       seq = next_seq(seq);
       r.payload = tunnel_request(it.sub, seq, it.args);
       if (it.sub == 0x22) sent_broadcast_++;
+      // A page is up to ~150 bytes, ~40 ms on the wire before the TAP turns
+      // round: the poll's 50 ms cut most of them off.
+      if (it.sub == 0x26) r.wait_ms = WALK_PAGE_WAIT_MS;
     } else {
       r.payload = it.args;
       if (it.cmd == CMD_SESSION) sent_session_++;
@@ -602,6 +617,7 @@ class Housekeeping {
   }
   void end_walk_() {
     walk_waiting_ = false;
+    walk_retried_ = false;
     walk_index_ = 0;
     walk_pages_ = 0;
     if (walks_left_ > 0) walks_left_--;
@@ -636,11 +652,13 @@ class Housekeeping {
   std::vector<Item> later_;
   int walks_left_ = 0;
   bool walk_waiting_ = false;
+  bool walk_retried_ = false;
   uint32_t walk_sent_ms_ = 0;
   uint16_t walk_index_ = 0;
   int walk_pages_ = 0;
   uint32_t sent_broadcast_ = 0;
   uint32_t sent_walk_pages_ = 0;
+  uint32_t walks_done_ = 0;
   std::string version_;
   uint32_t rng_;
   std::vector<uint16_t> targets_;

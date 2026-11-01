@@ -501,4 +501,23 @@ expect "no renewal between the third and the fourth for 30 s" "$(stat "$out/tap2
 kill $daemon; wait $daemon 2>/dev/null || true
 kill $tap; wait $tap 2>/dev/null || true
 
+# --- run 21: node table pages that take 120 ms to come back ---
+# Longer than a poll's 50 ms reply wait, as a real 12-entry page is close
+# to. Each page is waited for, so both walks read the whole table: from 0,
+# each page from the last reply's end, to the empty page past the end.
+mkdir -p "$out/state21"
+python3 linux/tools/mock_tap.py "$out/tap21" --page-delay 0.12 --panels 30 --lease 600 --nodes 44 --stats "$out/tap21.json" &
+tap=$!
+sleep 0.5
+printf '{"bus_role": "master", "master_housekeeping": true, "serial_port": "%s", "gateway_id": 4609, "web_port": 18112}\n' \
+  "$PWD/$out/tap21" > "$out/state21/settings.json"
+build/linux/tigomonitord --state-dir "$out/state21" --web-dir components/tigo_server/web 2> "$out/daemon21.log" &
+daemon=$!
+for _ in $(seq 40); do [ -f "$out/tap21.json" ] && [ "$(stat "$out/tap21.json" "len(d['walk'])")" -ge 8 ] && break; sleep 0.5; done
+sleep 1
+expect "slow pages: both walks read to the end" "$(stat "$out/tap21.json" "d['walk'][:8]")" "['0000', '000E', '001A', '0020', '0000', '000E', '001A', '0020']"
+expect "/api/master counts them" "$(api 18112 /api/master | python3 -c 'import json,sys; print(json.load(sys.stdin)["housekeeping"]["walks_done"])')" 2
+kill $daemon; wait $daemon 2>/dev/null || true
+kill $tap; wait $tap 2>/dev/null || true
+
 [ $fail = 0 ] && echo "master e2e passed" || { echo "master e2e FAILED; see $out/"; exit 1; }

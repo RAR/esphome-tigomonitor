@@ -101,6 +101,7 @@ def main():
     ap.add_argument('--reset-quiet', type=float, default=4.5)  # seconds deaf after a RESET
     ap.add_argument('--power-cut-every', type=float, default=0)
     ap.add_argument('--power-off', type=float, default=8)
+    ap.add_argument('--page-delay', type=float, default=0)  # seconds before answering a 0x26 page
     ap.add_argument('--refuse-renewals', type=int, default=0)  # ack this many renewals, lease left out
     ap.add_argument('--mute-claims', type=int, default=0)  # ignore this many SET_485_ID broadcasts
     ap.add_argument('--deaf-hop', action='store_true')  # moved one id up by the hop, answers nothing there
@@ -320,6 +321,8 @@ def main():
                 body = bytes([0x00, 0x0E, 0x00, 0x27, p[4], first >> 8, first & 0xFF, 0x00, len(page)])
                 for barcode, paddr in page:
                     body += bytes.fromhex(barcode) + bytes([paddr >> 8, paddr & 0xFF])
+                if a.page_delay:
+                    time.sleep(a.page_delay)
                 send(encode(addr | 0x8000, 0x0B10, body))
             elif cmd == 0x0B0F and len(p) > 7 and p[3] == 0x06:  # a query, forwarded; the answer comes later
                 tuid, text = p[5] << 8 | p[6], p[7:].decode(errors='replace')

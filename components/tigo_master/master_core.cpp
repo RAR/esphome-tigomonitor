@@ -321,6 +321,7 @@ void MasterCore::tick_(uint32_t now_ms) {
     status_.sent_session = sent_session_before_ + housekeeping_->sent_session();
     status_.sent_broadcast = sent_broadcast_before_ + housekeeping_->sent_broadcast();
     status_.sent_walk_pages = sent_walk_pages_before_ + housekeeping_->sent_walk_pages();
+    status_.walks_done = walks_done_before_ + housekeeping_->walks_done();
   }
   if (queries_) {
     std::lock_guard<std::mutex> lock(mu_);
@@ -333,7 +334,7 @@ void MasterCore::tick_(uint32_t now_ms) {
     return;
   }
   Frame reply;
-  bool ok = transact(gateway_, req.cmd, req.payload, reply);
+  bool ok = transact(gateway_, req.cmd, req.payload, reply, req.wait_ms ? req.wait_ms : REPLY_TIMEOUT_MS);
   if (status().fault == Fault::second_master || standing_by_()) return;
   if (housekeeping_) housekeeping_->on_reply(req, ok, reply);
   if (ok && queries_ && req.cmd == master::CMD_POLL) queries_->on_poll_reply(reply.payload, now_ms);
@@ -587,6 +588,7 @@ void MasterCore::drop_housekeeping_() {
   sent_session_before_ += housekeeping_->sent_session();
   sent_broadcast_before_ += housekeeping_->sent_broadcast();
   sent_walk_pages_before_ += housekeeping_->sent_walk_pages();
+  walks_done_before_ += housekeeping_->walks_done();
   housekeeping_.reset();
 }
 

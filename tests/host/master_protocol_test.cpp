@@ -761,19 +761,49 @@ static void test_walks() {
   run(hk, Housekeeping::WALK_EVERY_MS, seq);
   CHECK(hk.sent_walk_pages() == 20);
 
-  // A page with no reply ends that walk; the second still runs.
+  CHECK(hk.walks_done() == 4);
+
+  // A page waits WALK_PAGE_WAIT_MS for its reply, not the poll's 50 ms: a
+  // 12-entry page is ~40 ms on the wire before the TAP even turns round.
+  Housekeeping timed({}, 0, plan, 1);
+  bool waited = false;
+  for (Request r = timed.due(0, seq); r.cmd; r = timed.due(0, seq)) {
+    if (sub_of(r) == 0x26) waited = r.wait_ms == Housekeeping::WALK_PAGE_WAIT_MS;
+    if (sub_of(r) == 0x26) break;
+    timed.on_reply(r, true, Frame{});
+  }
+  CHECK(waited && Housekeeping::WALK_PAGE_WAIT_MS >= 500);
+
+  // A page with no reply is asked again, once, and that walk goes on; it
+  // used to end the walk, so the pages after it went unread.
   Housekeeping lossy({}, 0, plan, 1);
   int pages = 0;
+  std::vector<uint16_t> asked;
   for (Request r = lossy.due(0, seq); r.cmd; r = lossy.due(0, seq)) {
     if (sub_of(r) != 0x26) { lossy.on_reply(r, true, Frame{}); continue; }
     pages++;
-    if (pages == 2) { lossy.on_reply(r, false, Frame{}); continue; }
     Bytes a = args_of(r);
     uint16_t idx = static_cast<uint16_t>(a[0] << 8 | a[1]);
+    asked.push_back(idx);
+    if (pages == 2) { lossy.on_reply(r, false, Frame{}); continue; }
     uint16_t start = idx < 2 ? 2 : idx;
     lossy.on_reply(r, true, page_reply(r, start, start > 41 ? 0 : static_cast<uint16_t>(std::min(12, 42 - start))));
   }
-  CHECK(pages == 2 + 5);
+  CHECK(pages == 6 + 5 && asked.size() > 2 && asked[1] == asked[2]);
+  CHECK(lossy.walks_done() == 2);
+  // Two in a row with no reply end that walk; the second still runs.
+  Housekeeping lost({}, 0, plan, 1);
+  pages = 0;
+  for (Request r = lost.due(0, seq); r.cmd; r = lost.due(0, seq)) {
+    if (sub_of(r) != 0x26) { lost.on_reply(r, true, Frame{}); continue; }
+    pages++;
+    if (pages == 2 || pages == 3) { lost.on_reply(r, false, Frame{}); continue; }
+    Bytes a = args_of(r);
+    uint16_t idx = static_cast<uint16_t>(a[0] << 8 | a[1]);
+    uint16_t start = idx < 2 ? 2 : idx;
+    lost.on_reply(r, true, page_reply(r, start, start > 41 ? 0 : static_cast<uint16_t>(std::min(12, 42 - start))));
+  }
+  CHECK(pages == 3 + 5 && lost.walks_done() == 1);
   // A reply that doesn't move forward can't loop: the walk ends.
   Housekeeping stuck({}, 0, plan, 1);
   pages = 0;
