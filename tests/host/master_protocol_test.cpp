@@ -389,7 +389,9 @@ static void test_discovery_hop() {
   late.next();
   late.on_reply(Frame{0x9201, 0x003B, hex("04c05b3000a1b2c31201")});
   CHECK(late.next().done);
-  // The hop not taken (the read at 1202 says another id): failed, no RESET.
+  // The hop not taken (the read at 1202 says another id): the RESET goes out
+  // anyway, since it is what puts the TAP back at its stored id, and the
+  // reads at 1201 decide.
   Discovery stuck(0x1235, 0x1201);
   stuck.on_reply(Frame{0x8000, 0x0015, {}});
   stuck.on_reply(Frame{0x9235, 0x0039, hex("04c05b3000a1b2c31235")});
@@ -400,7 +402,73 @@ static void test_discovery_hop() {
   stuck.on_reply(Frame{0x9201, 0x003D, {}});
   stuck.next();
   stuck.on_reply(Frame{0x9202, 0x003B, hex("04c05b3000a1b2c31201")});
-  CHECK(stuck.next().failed);
+  CHECK(stuck.next().cmd == 0x0010);
+}
+
+// Answers in the order Discovery asks for them, for the steps before `upto`.
+// Steps: 0 claim, 1 get_mac, 2 set_id, 3 verify, 4 the scan, 5 hop, 6 hop_verify.
+static void answer_until(Discovery &d, int upto) {
+  if (upto > 0) d.on_reply(Frame{0x8000, 0x0015, {}});
+  if (upto > 1) d.on_reply(Frame{0x9235, 0x0039, hex("04c05b3000a1b2c31235")});
+  if (upto > 2) d.on_reply(Frame{0x9235, 0x003D, {}});
+  if (upto > 3) d.on_reply(Frame{0x9201, 0x003B, hex("04c05b3000a1b2c31201")});
+  if (upto > 4)
+    for (int i = 0; i < Discovery::SCAN_TRIES; i++) d.next();
+  if (upto > 5) {
+    d.next();
+    d.on_reply(Frame{0x9201, 0x003D, {}});
+  }
+}
+
+static void test_discovery_lost_replies() {
+  // A step whose reply never comes is asked STEP_TRIES times, then the
+  // bring-up fails, so the core can say so and stop sending (it used to ask
+  // forever, with no fault).
+  for (int step = 0; step <= 3; step++) {
+    Discovery d(0x1235, 0x1201);
+    answer_until(d, step);
+    DiscoveryRequest first = d.next();
+    CHECK(first.send);
+    for (int i = 1; i < Discovery::STEP_TRIES; i++) {
+      DiscoveryRequest r = d.next();
+      CHECK(r.send && r.dest == first.dest && r.cmd == first.cmd);
+    }
+    CHECK(d.next().failed);
+    CHECK(std::string(d.unanswered()) != "");
+  }
+  // A late answer still counts: the third try answered, so on to the next step.
+  Discovery late(0x1235, 0x1201);
+  late.next();
+  late.next();
+  late.next();
+  late.on_reply(Frame{0x8000, 0x0015, {}});
+  DiscoveryRequest r = late.next();
+  CHECK(r.send && r.cmd == 0x0038);
+  // Each step gets its own tries: four lost claims and four lost GET_MACs
+  // are not a failure.
+  Discovery each(0x1235, 0x1201);
+  for (int i = 0; i < Discovery::STEP_TRIES - 1; i++) each.next();
+  each.on_reply(Frame{0x8000, 0x0015, {}});
+  for (int i = 0; i < Discovery::STEP_TRIES - 1; i++) CHECK(each.next().cmd == 0x0038);
+  each.on_reply(Frame{0x9235, 0x0039, hex("04c05b3000a1b2c31235")});
+  CHECK(each.next().cmd == 0x003C);
+
+  // The hop, or the read at the id one up, unanswered: the TAP may already be
+  // at 1202, where nothing looks for it again, so the RESET that puts it back
+  // goes out anyway, then the quiet and the reads at 1201.
+  for (int step = 5; step <= 6; step++) {
+    Discovery d(0x1235, 0x1201);
+    answer_until(d, step);
+    for (int i = 0; i < Discovery::STEP_TRIES; i++) CHECK(d.next().cmd == (step == 5 ? 0x003C : 0x003A));
+    r = d.next();
+    CHECK(r.send && r.dest == 0x0000 && r.cmd == 0x0010);
+    r = d.next();
+    CHECK(!r.send && r.idle_ms == Discovery::RESET_QUIET_MS);
+    r = d.next();
+    CHECK(r.send && r.dest == 0x1201 && r.cmd == 0x003A);
+    d.on_reply(Frame{0x9201, 0x003B, hex("04c05b3000a1b2c31201")});
+    CHECK(d.next().done);
+  }
 }
 
 static void test_discovery() {
@@ -929,6 +997,7 @@ int main() {
   test_discovery();
   test_discovery_scan();
   test_discovery_hop();
+  test_discovery_lost_replies();
   test_startup_allow();
   test_review_fixes();
   test_codec();

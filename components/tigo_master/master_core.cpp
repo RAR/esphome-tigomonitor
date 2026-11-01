@@ -478,7 +478,11 @@ void MasterCore::run_startup(uint32_t now_ms) {
   if (d.failed) {
     // Say so, wait, and look again: a TAP slow back from the RESET is found
     // at its id then; one still at the factory address is re-addressed.
-    set_fault(Fault::discovery_failed, "re-addressing the TAP failed; it did not answer at the id it was given");
+    std::string step = discovery_->unanswered();
+    set_fault(Fault::discovery_failed, step.empty() ? "re-addressing the TAP failed; it did not answer at the id it was given"
+                                                    : "re-addressing the TAP failed: no answer to " + step +
+                                                          "; looking again in " +
+                                                          std::to_string(RETRY_AFTER_FAIL_MS / 1000) + " s");
     discovery_.reset();
     phase_ = Phase::probing;
     holding_ = true;

@@ -393,7 +393,7 @@ build/linux/tigomonitord --state-dir "$out/state16" --web-dir components/tigo_se
 daemon=$!
 for _ in $(seq 160); do [ -f "$out/tap16.json" ] && [ "$(stat "$out/tap16.json" "d['polls']")" -ge 5 ] && break; sleep 0.5; done
 expect "one RESET, said it failed, then found it at 1201 and polled" "$(stat "$out/tap16.json" "(d['resets'], d['polls'] >= 5, d['addressed_to'])")" "(1, True, '1201')"
-expect "logged the failure" "$(grep -c 'did not answer at the id it was given' "$out/daemon16.log")" 1
+expect "logged the failure" "$(grep -c 'no answer to the read at the configured id after the RESET' "$out/daemon16.log")" 1
 expect "fault cleared once polling" "$(api 18106 /api/master | python3 -c 'import json,sys; m=json.load(sys.stdin); print(m["fault"], m["phase"])')" "none running"
 kill $daemon; wait $daemon 2>/dev/null || true
 kill $tap; wait $tap 2>/dev/null || true
@@ -439,6 +439,43 @@ expect "state saved with a slow fsync" "$(python3 -c "import json; print(len(jso
 expect "no pause over 300 ms while it saved" "$(api 18108 /api/master | python3 -c 'import json,sys; g=json.load(sys.stdin)["gap_ms"]; print(g["max"] < 300, g["max"])' | cut -d' ' -f1)" True
 api 18108 /api/master | python3 -c 'import json,sys; print("  (longest pause:", json.load(sys.stdin)["gap_ms"]["max"], "ms)")'
 expect "no CCA discovery while the Pi runs the bus" "$(api 18108 /api/cca/discovery/start '{}')" 409
+kill $daemon; wait $daemon 2>/dev/null || true
+kill $tap; wait $tap 2>/dev/null || true
+
+# --- run 19: a bring-up whose replies never come ---
+# (a) A TAP at the factory address that never acks the SET_485_ID broadcast.
+# The master asks a few times, says which step went unanswered, and stops
+# sending until it looks again 30 s later; it used to ask ~20 times a second
+# forever with the fault still "none".
+mkdir -p "$out/state19"
+python3 linux/tools/mock_tap.py "$out/tap19" --factory --mute-claims 1000 --lease 600 --nodes 44 --stats "$out/tap19.json" &
+tap=$!
+sleep 0.5
+printf '{"bus_role": "master", "master_startup": true, "serial_port": "%s", "gateway_id": 4609, "web_port": 18109}\n' \
+  "$PWD/$out/tap19" > "$out/state19/settings.json"
+build/linux/tigomonitord --state-dir "$out/state19" --web-dir components/tigo_server/web 2> "$out/daemon19.log" &
+daemon=$!
+for _ in $(seq 40); do [ "$(api 18109 /api/master 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin)["fault"])' 2>/dev/null)" = discovery_failed ] && break; sleep 0.5; done
+expect "unanswered claim: fault names the step" "$(api 18109 /api/master | python3 -c 'import json,sys; m=json.load(sys.stdin); print(m["fault"], "SET_485_ID" in m["detail"])')" "discovery_failed True"
+sleep 1
+claims="$(stat "$out/tap19.json" "d['claims']")"
+sleep 5
+expect "asked five times, then stopped sending" "$claims $(stat "$out/tap19.json" "d['claims']")" "5 5"
+kill $daemon; wait $daemon 2>/dev/null || true
+kill $tap; wait $tap 2>/dev/null || true
+# (b) The hop taken, then nothing answers at 1202. The TAP is somewhere the
+# master never looks again, so the RESET that puts it back goes out anyway,
+# and the TAP is polled at 1201.
+mkdir -p "$out/state19b"
+python3 linux/tools/mock_tap.py "$out/tap19b" --factory --deaf-hop --lease 600 --nodes 44 --stats "$out/tap19b.json" &
+tap=$!
+sleep 0.5
+printf '{"bus_role": "master", "master_startup": true, "serial_port": "%s", "gateway_id": 4609, "web_port": 18110}\n' \
+  "$PWD/$out/tap19b" > "$out/state19b/settings.json"
+build/linux/tigomonitord --state-dir "$out/state19b" --web-dir components/tigo_server/web 2> "$out/daemon19b.log" &
+daemon=$!
+for _ in $(seq 60); do [ -f "$out/tap19b.json" ] && [ "$(stat "$out/tap19b.json" "d['polls']")" -ge 5 ] && break; sleep 0.5; done
+expect "deaf after the hop: RESET anyway, then polled at 1201" "$(stat "$out/tap19b.json" "(d['deaf'], d['resets'], d['polls'] >= 5, d['addressed_to'])")" "(5, 1, True, '1201')"
 kill $daemon; wait $daemon 2>/dev/null || true
 kill $tap; wait $tap 2>/dev/null || true
 

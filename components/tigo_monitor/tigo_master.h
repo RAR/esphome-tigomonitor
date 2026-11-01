@@ -875,6 +875,7 @@ class Discovery {
   static const uint32_t RESET_QUIET_MS = 5000;
   static const uint32_t BACK_WAIT_MS = 1000;
   static const int BACK_TRIES = 5;
+  static const int STEP_TRIES = 5;  // each step before the RESET, unanswered this often: failed
 
   Discovery(uint16_t factory_id, uint16_t target_id, bool scan_only = false)
       : state_(scan_only ? scan : claim), scan_only_(scan_only), factory_(factory_id), target_(target_id) {}
@@ -883,6 +884,22 @@ class Discovery {
     DiscoveryRequest r;
     if (state_ == st_failed) { r.failed = true; return r; }
     if (state_ == st_done) { r.done = true; return r; }
+    // Each step before the RESET is asked STEP_TRIES times. The hop's two
+    // then go on to the RESET, since the TAP may already be one id up, where
+    // nothing looks for it again; the others fail.
+    if (state_ == claim || state_ == get_mac || state_ == set_id || state_ == verify || state_ == hop ||
+        state_ == hop_verify) {
+      if (state_ != tries_state_) {
+        tries_state_ = state_;
+        tries_ = 0;
+      }
+      if (tries_ == STEP_TRIES) {
+        unanswered_ = step_name_(state_);
+        state_ = state_ == hop || state_ == hop_verify ? reset : st_failed;
+        return next();
+      }
+      tries_++;
+    }
     r.send = true;
     switch (state_) {
       case claim:  // SET_485_ID broadcast: payload = key + factory id (BE)
@@ -934,6 +951,7 @@ class Discovery {
         break;
       case back:
         if (back_sent_ == BACK_TRIES) {
+          unanswered_ = step_name_(back);
           state_ = st_failed;
           return next();
         }
@@ -976,7 +994,7 @@ class Discovery {
         break;
       case hop_verify:
         if (f.cmd == CMD_GET_MAC_NOW + 1 && f.payload.size() >= 10)
-          state_ = (f.payload[8] << 8 | f.payload[9]) == target_ + 1 ? reset : st_failed;
+          state_ = reset;  // at 1202 or not, the RESET puts it back at its stored id
         break;
       case back:
         if (f.cmd == CMD_GET_MAC_NOW + 1 && f.payload.size() >= 10 && (f.payload[8] << 8 | f.payload[9]) == target_)
@@ -988,6 +1006,8 @@ class Discovery {
 
   bool done() const { return state_ == st_done; }
   bool failed() const { return state_ == st_failed; }
+  // The last step that went unanswered after all its tries, or "" if none.
+  const char *unanswered() const { return unanswered_; }
   const Bytes &mac() const { return mac_; }
   // MACs of other TAPs that answered the scan, in the order heard.
   const std::vector<Bytes> &extra_taps() const { return extra_; }
@@ -998,6 +1018,22 @@ class Discovery {
   uint16_t factory_, target_;
   Bytes mac_;
   int scans_sent_ = 0;
+  State tries_state_ = st_done;
+  int tries_ = 0;
+  const char *unanswered_ = "";
+
+  static const char *step_name_(State s) {
+    switch (s) {
+      case claim: return "the SET_485_ID broadcast";
+      case get_mac: return "GET_MAC at the factory address";
+      case set_id: return "SET_ID_BY_MAC";
+      case verify: return "the read at the new id";
+      case hop: return "the hop to the id one up";
+      case hop_verify: return "the read at the id one up";
+      case back: return "the read at the configured id after the RESET";
+      default: return "";
+    }
+  }
   int back_sent_ = 0;
   std::vector<Bytes> extra_;
 };

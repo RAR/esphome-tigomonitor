@@ -101,6 +101,8 @@ def main():
     ap.add_argument('--reset-quiet', type=float, default=4.5)  # seconds deaf after a RESET
     ap.add_argument('--power-cut-every', type=float, default=0)
     ap.add_argument('--power-off', type=float, default=8)
+    ap.add_argument('--mute-claims', type=int, default=0)  # ignore this many SET_485_ID broadcasts
+    ap.add_argument('--deaf-hop', action='store_true')  # moved one id up by the hop, answers nothing there
     ap.add_argument('--stats', default=None)
     ap.add_argument('--extra-link', action='append', default=[])
     a = ap.parse_args()
@@ -143,7 +145,7 @@ def main():
     stats = {'polls': 0, 'retries': 0, 'cursor_mismatches': 0, 'checks': 0, 'renewals': [], 'other': [],
              'first_lease_frame': None, 'first_frame': None, 'addressed_to': None, 'frames_after_foreign': 0, 'foreign_at': None,
              'second_asked': 0, 'second_written': 0, 'session': [], 'housekeeping': [],
-             'log': [], 'resets': 0, 'quiet_broken': 0, 'broadcast': [], 'walk': [], 'queries': [],
+             'log': [], 'claims': 0, 'deaf': 0, 'resets': 0, 'quiet_broken': 0, 'broadcast': [], 'walk': [], 'queries': [],
              'answered': 0, 'power_cuts': 0, 'frames_by_link': [0] * len(fds),
              'last_frame_t_by_link': [None] * len(fds)}
     home = None  # the id the TAP was first given, which a RESET returns it to
@@ -218,7 +220,9 @@ def main():
             # Gateway addressing: answers at its current address, or at the
             # broadcast address for the universal set-id and reset.
             if cmd == 0x0014 and dest == 0x0000:  # SET_485_ID broadcast
-                send(encode(0x8000, 0x0015, b''))
+                stats['claims'] += 1
+                if stats['claims'] > a.mute_claims:
+                    send(encode(0x8000, 0x0015, b''))
                 continue
             if cmd == 0x0010 and dest == 0x0000:  # RESET broadcast
                 send(encode(0x8000, 0x0011, b''))
@@ -229,6 +233,9 @@ def main():
                 continue
             if a.second_tap and cmd == 0x003C and p[4:12] == SECOND_MAC:
                 stats['second_written'] += 1
+            if a.deaf_hop and home is not None and addr == home + 1 and dest == addr:
+                stats['deaf'] += 1
+                continue
             if cmd in (0x0038, 0x003A) and (dest == addr or (a.second_tap and dest == FACTORY)):  # GET_MAC
                 if dest == addr:
                     send(encode(addr | 0x8000, cmd + 1, MAC + bytes([addr >> 8, addr & 0xFF])))
