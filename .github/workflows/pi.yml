@@ -12,20 +12,22 @@ on:
     tags: ['v*']
     paths:
       - 'linux/**'
-      - 'components/tigo_monitor/tigo_protocol.h'
-      - 'components/tigo_monitor/tigo_node_identity.h'
-      - 'components/tigo_monitor/tigo_cca_ble_protocol.h'
-      - 'components/tigo_monitor/tigo_master.h'
+      # Everything the daemon compiles: any header on its include path, and
+      # the bus-master core (linux/CMakeLists.txt). Listing headers one by one
+      # missed master_core.cpp, so a change to it ran no tests at all.
+      - 'components/tigo_monitor/*.h'
+      - 'components/tigo_master/**'
       - 'components/tigo_server/web/app.html'
       - 'tests/host/**'
       - '.github/workflows/pi.yml'
   pull_request:
     paths:
       - 'linux/**'
-      - 'components/tigo_monitor/tigo_protocol.h'
-      - 'components/tigo_monitor/tigo_node_identity.h'
-      - 'components/tigo_monitor/tigo_cca_ble_protocol.h'
-      - 'components/tigo_monitor/tigo_master.h'
+      # Everything the daemon compiles: any header on its include path, and
+      # the bus-master core (linux/CMakeLists.txt). Listing headers one by one
+      # missed master_core.cpp, so a change to it ran no tests at all.
+      - 'components/tigo_monitor/*.h'
+      - 'components/tigo_master/**'
       - 'components/tigo_server/web/app.html'
       - 'tests/host/**'
       - '.github/workflows/pi.yml'
