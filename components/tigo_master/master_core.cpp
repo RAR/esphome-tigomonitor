@@ -271,15 +271,17 @@ void MasterCore::tick_(uint32_t now_ms) {
     last_open_try_ms_ = now_ms;
     if (!open()) return;
   }
+  if (standing_by_()) {
+    stand_by_(now_ms);
+    return;
+  }
+  // After the standby check: transact() sends nothing while standing by, so
+  // asked there, the probe was spent with nothing sent.
   if (bench_ && !version_asked_) {
     version_asked_ = true;
     Frame v;
     if (transact(gateway_, 0x000A, {}, v)) LOGI("bus master: TAP version: %s", std::string(v.payload.begin(), v.payload.end()).c_str());
     else LOGW("bus master: no answer to VERSION (0x000A)");
-    return;
-  }
-  if (standing_by_()) {
-    stand_by_(now_ms);
     return;
   }
   if (startup_ && phase_ != Phase::running) {

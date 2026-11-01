@@ -98,7 +98,9 @@ wait_owner b 12
 expect "MQTT: Home Assistant follows the takeover" "$(panel_owner)" b
 expect "MQTT: and the new master's panels" "$(some "$(panel_states b 7)")" some
 
-# The old primary comes back: it stands by, and stays standing by.
+# The old primary comes back: it stands by, and stays standing by. With
+# master_bench on, too: its VERSION probe waits until it runs the bus.
+python3 -c 'import json,sys; p=sys.argv[1]; d=json.load(open(p)); d["master_bench"]=True; json.dump(d, open(p, "w"))' "$out/a/settings.json"
 before=$(frames 0)
 start "$out/a"; a=$pid
 sleep 8
@@ -125,6 +127,9 @@ expect "the setting is saved" "$(api 18110 /api/settings | python3 -c 'import js
 kill -STOP $b
 wait_state 18110 active 8
 expect "a hung master is replaced" "$(standby 18110)" "active 1 0"
+sleep 1
+expect "the bench standby asked VERSION once it ran the bus, not before" \
+  "$(grep -c 'TAP version: Mgate' "$out/a/daemon.log") $(grep -c 'no answer to VERSION' "$out/a/daemon.log")" "1 0"
 kill -CONT $b
 wait_state 18111 standing_by 5
 sleep 1
