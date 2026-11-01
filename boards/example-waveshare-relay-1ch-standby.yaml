@@ -108,10 +108,13 @@ tigo_master:
   role: standby
   # Longer than the Pi's 3 s, so with both standing by the Pi is preferred.
   takeover_after: 8s
-  # The rest as the Pi runs the roof.
+  # The CCA's housekeeping and read queries, as the Pi runs the roof.
   housekeeping: true
   queries: true
-  optimizer_writes: true
+  # Off here, as everywhere by default: these are the CCA's two optimizer
+  # writes, and what their fields do isn't understood. Turn it on only if
+  # the monitor it stands in for has it on.
+  optimizer_writes: false
   status:
     name: "Bus master"
   problem:
