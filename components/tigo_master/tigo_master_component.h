@@ -115,8 +115,10 @@ class TigoMasterComponent : public Component, public uart::UARTComponent {
   void setup() override;
   void loop() override;
   void dump_config() override;
-  // Before tigo_monitor, which reads this component's UART side in its loop.
-  float get_setup_priority() const override { return setup_priority::BUS; }
+  // After the bus UART, which setup() starts the master task on, whatever
+  // order the YAML lists them in; before tigo_monitor, which reads this
+  // component's UART side in its loop.
+  float get_setup_priority() const override { return setup_priority::BUS - 1.0f; }
 
   MasterStatus status() const { return core_ ? core_->status() : MasterStatus{}; }
 
