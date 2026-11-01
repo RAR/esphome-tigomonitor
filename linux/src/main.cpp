@@ -283,8 +283,8 @@ int main(int argc, char **argv) {
   // chose fails loudly instead, and systemd keeps retrying it.
   int web_port = port < 0 ? (tls ? web.start(443, 8443) : web.start(80, 8080)) : web.start(port);
   HttpsRedirect redirect;
-  if (port < 0 && tls && web_port) redirect.start(80, web_port);
-  if (!web_port) {
+  if (port < 0 && tls && web_port > 0) redirect.start(80, web_port);
+  if (web_port < 0) {
     input_stop = true;
     if (input.joinable()) input.join();
     cca.stop();

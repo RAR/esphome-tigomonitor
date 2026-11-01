@@ -78,7 +78,8 @@ class HttpServer {
   explicit HttpServer(HttpContext ctx);
   ~HttpServer();
   // Listens on port in a background thread, or on fallback (when nonzero)
-  // if port is taken. Returns the port it got, or 0 if it got neither.
+  // if port is taken. Returns the port it got, or -1 if it got neither
+  // (port 0, any free port, returns 0).
   int start(int port, int fallback = 0);
   void stop();
 

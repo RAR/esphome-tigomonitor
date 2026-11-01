@@ -241,7 +241,7 @@ int HttpServer::start(int port, int fallback) {
     }
     if (fallback == 0 || !svr_->bind_to_port("0.0.0.0", fallback)) {
       LOGE("web: cannot listen on port %d (%s)", port, strerror(bind_errno));
-      return 0;
+      return -1;
     }
     LOGW("web: port %d is taken, so the web UI is on port %d; choose another under Tools", port, fallback);
     port = fallback;
