@@ -234,3 +234,28 @@ Departures from the design above, each a call made while building it:
   every reply reaches all of them. `--foreign-every`/`--foreign-until` play
   a CCA beside it.
 
+
+## MQTT with two monitors (2026-11-01)
+
+The owner asked for only the master to publish panel data. Panel entities in
+Home Assistant are keyed by barcode (`tigo_<barcode>_<metric>`), not by
+monitor; only their state topic names the monitor. So the two monitors
+share one set of panel entities, and whichever announced last owns it.
+
+- **Standing by** (or taking over), a standby publishes only its status and
+  master state. `mqtt.standby_panels` (web UI: "Panel readings while
+  standing by", off by default) adds its readings on its own topics, but it
+  still announces no panels: announcing would point Home Assistant's
+  entities at a monitor that isn't running the bus.
+- **On taking the bus** it announces every panel again with its own topics,
+  so the entities, their history and any dashboards follow it. A monitor
+  that never announced does so anyway; the explicit re-announce is for one
+  that ran the bus, stood by, and takes it again in the same MQTT session.
+- **Not shared:** the system entities (power, energy, strings) stay per
+  monitor, `tigomonitor_<device>_…`. Each counts its own kWh, and handing one
+  monitor's lifetime total to the other's entity would read in Home
+  Assistant's energy dashboard as a reset and a spike. A failover therefore
+  freezes one monitor's energy entity and starts the other's.
+- `standby-e2e.sh` checks all of this against a real broker: no panels from
+  the one standing by, Home Assistant's config following each of three
+  takeovers, and the setting publishing readings without announcing.

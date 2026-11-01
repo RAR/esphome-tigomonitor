@@ -17,6 +17,10 @@ struct MqttSettings {
   bool discovery = true;
   std::string discovery_prefix = "homeassistant";
   std::string base_topic = "tigomonitor";
+  // A standby that's standing by publishes only its own status unless this
+  // is on; then its readings too, though Home Assistant isn't told of its
+  // panels until it takes the bus over.
+  bool standby_panels = false;
 };
 
 struct Settings {

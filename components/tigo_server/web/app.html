@@ -1046,6 +1046,10 @@
           <div class="cfg-text"><strong>Discovery prefix</strong><span>Where Home Assistant looks for new devices; leave it unless you changed it in Home Assistant</span></div>
           <div class="cfg-ctrl"><input class="cfg-input" id="pi-mqtt-discovery" placeholder="homeassistant" autocomplete="off"></div>
         </div>
+        <div class="cfg-row">
+          <div class="cfg-text"><strong>Panel readings while standing by</strong><span>For a standby: off, it sends only its own status until it takes the bus, so the panels come from the master alone. On, it sends its readings to the topic above too. Home Assistant's panels follow whichever one runs the bus either way</span></div>
+          <div class="cfg-ctrl"><label class="cfg-switch"><input type="checkbox" id="pi-mqtt-standby-panels"> <span>Off</span></label></div>
+        </div>
         <div class="tools-actions" style="margin-top:12px">
           <button class="btn primary" id="pi-save">Save</button>
         </div>
@@ -3646,6 +3650,8 @@
       document.getElementById('pi-mqtt-discovery').value = s.mqtt.discovery_prefix || '';
       document.getElementById('pi-mqtt-disc-on').checked = s.mqtt.discovery !== false;
       document.getElementById('pi-mqtt-disc-on').nextElementSibling.textContent = s.mqtt.discovery !== false ? 'On' : 'Off';
+      document.getElementById('pi-mqtt-standby-panels').checked = !!s.mqtt.standby_panels;
+      document.getElementById('pi-mqtt-standby-panels').nextElementSibling.textContent = s.mqtt.standby_panels ? 'On' : 'Off';
       document.getElementById('pi-mqtt-topic-hint').textContent =
         `Readings go to ${s.mqtt.base_topic}/${s.device_id}/panel/<barcode>/state`;
       piWebPortActive = s.web_port_active;
@@ -3726,7 +3732,7 @@
     if (!e.target.checked && !confirm('Home Assistant will remove the Tigo devices and entities this Pi added, once you save. Readings keep going to the MQTT topic.\n\nContinue?'))
       e.target.checked = true;
   });
-  for (const id of ['pi-startup', 'pi-housekeeping', 'pi-queries', 'pi-writes', 'pi-mqtt-disc-on']) {
+  for (const id of ['pi-startup', 'pi-housekeeping', 'pi-queries', 'pi-writes', 'pi-mqtt-disc-on', 'pi-mqtt-standby-panels']) {
     document.getElementById(id).addEventListener('change', (e) => {
       e.target.nextElementSibling.textContent = e.target.checked ? 'On' : 'Off';
     });
@@ -3914,6 +3920,7 @@
       base_topic: document.getElementById('pi-mqtt-topic').value.trim() || 'tigomonitor',
       discovery_prefix: document.getElementById('pi-mqtt-discovery').value.trim() || 'homeassistant',
       discovery: document.getElementById('pi-mqtt-disc-on').checked,
+      standby_panels: document.getElementById('pi-mqtt-standby-panels').checked,
     };
     const pass = document.getElementById('pi-mqtt-pass').value;
     if (pass !== '') mqtt.password = pass;

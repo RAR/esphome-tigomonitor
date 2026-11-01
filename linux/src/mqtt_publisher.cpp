@@ -77,6 +77,7 @@ void MqttPublisher::configure(const Settings &settings) {
   settings_ = settings;
   announced_.clear();
   announced_strings_.clear();
+  standing_by_ = false;
   if (settings_.mqtt.host.empty()) {
     LOGI("MQTT: no broker set; Home Assistant publishing is off");
     return;
@@ -353,6 +354,19 @@ void MqttPublisher::publish() {
     publish_master_discovery_(!runs_bus(settings_) || !master_status_);
   }
   if (runs_bus(settings_) && master_status_) publish_master_();
+  bool standing_by = false;
+  if (settings_.bus_role == "standby" && master_status_) {
+    Standby st = master_status_().standby;
+    standing_by = st == Standby::standing_by || st == Standby::taking_over;
+  }
+  // Taking the bus: announce every panel again, with this monitor's topics,
+  // over whatever the last master announced.
+  if (standing_by_ && !standing_by) {
+    LOGI("MQTT: running the bus; announcing the panels to Home Assistant with this monitor's topics");
+    announced_.clear();
+  }
+  standing_by_ = standing_by;
+  if (standing_by && !settings_.mqtt.standby_panels) return;
   auto now = Clock::now();
   auto window = monitor_.online_window();
   bool night = monitor_.night_mode();
@@ -363,7 +377,7 @@ void MqttPublisher::publish() {
     if (p.barcode.empty()) continue;  // not named by a Frame 27 yet
     // Re-announce when the name changes (a CCA sync labelled it).
     std::string key = p.barcode + "|" + panel_name(p);
-    if (announced_.insert(key).second) publish_discovery_(p);
+    if (!standing_by && announced_.insert(key).second) publish_discovery_(p);
     const auto &r = p.reading;
     // A stale panel reads 0 for what it produces and keeps its last voltage
     // and temperature; at night everything reads 0 and temperature is

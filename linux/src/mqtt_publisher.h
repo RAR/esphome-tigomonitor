@@ -12,6 +12,12 @@
 //   <base>/panel/<barcode>/state  {"power":…,"voltage_in":…, …}
 //   <base>/master/state           {"status":"active","problem":false,…}
 //                                 (the bus master role only)
+//
+// A standby that's standing by sends only its status and master state; the
+// panels are the active master's (mqtt.standby_panels sends its readings
+// too, without announcing them). Panel entities are keyed by barcode, not by
+// monitor, so the one that takes the bus re-announces them with its own
+// topics and Home Assistant's entities follow it.
 
 #include "bus_master.h"
 #include "monitor.h"
@@ -67,6 +73,7 @@ class MqttPublisher {
   std::atomic<bool> connected_{false};
   std::atomic<bool> need_discovery_{true};
   std::set<std::string> announced_, announced_strings_;
+  bool standing_by_ = false;
   std::function<MasterStatus()> master_status_;
   mutable std::mutex err_mu_;
   std::string last_error_;

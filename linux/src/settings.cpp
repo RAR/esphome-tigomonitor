@@ -65,6 +65,7 @@ Settings load_settings(const std::string &path) {
     get(*m, "discovery", s.mqtt.discovery);
     get(*m, "discovery_prefix", s.mqtt.discovery_prefix);
     get(*m, "base_topic", s.mqtt.base_topic);
+    get(*m, "standby_panels", s.mqtt.standby_panels);
   }
   if (s.publish_interval_s < 5) s.publish_interval_s = 5;
   if (s.web_port < 0 || s.web_port > 65535) s.web_port = 0;
@@ -115,7 +116,8 @@ bool save_settings(const std::string &path, const Settings &s) {
         {"password", s.mqtt.password},
         {"discovery", s.mqtt.discovery},
         {"discovery_prefix", s.mqtt.discovery_prefix},
-        {"base_topic", s.mqtt.base_topic}}},
+        {"base_topic", s.mqtt.base_topic},
+        {"standby_panels", s.mqtt.standby_panels}}},
   };
   // The MQTT and web passwords are in here: owner-only.
   return write_file_atomic(path, j.dump(2) + "\n", 0600);
