@@ -281,11 +281,28 @@ static void test_review_fixes() {
   stubborn.due(0);
   uint32_t t = 0;
   int renewals = 0;
+  uint32_t last = 0;
   for (int i = 0; i < 10; i++, t += 1000) {
     stubborn.on_lease({false, 0, 44}, t);
-    if (stubborn.due(t).kind == LeaseAction::renew) renewals++;
+    if (stubborn.due(t).kind == LeaseAction::renew) {
+      renewals++;
+      last = t;
+    }
   }
   CHECK(renewals == 3 && stubborn.stuck());
+  // Stuck is not for good: one more try each RENEW_BACKOFF_MS, still flagged,
+  // so a TAP that refused while browning out is renewed once it is back. It
+  // used to stop until the process restarted.
+  for (int i = 0; i < 10; i++, t += 5000) {
+    stubborn.on_lease({false, 0, 44}, t);
+    LeaseAction a = stubborn.due(t);
+    if (a.kind == LeaseAction::renew) {
+      renewals++;
+      CHECK(t - last >= LeaseKeeper::RENEW_BACKOFF_MS);
+      last = t;
+    }
+  }
+  CHECK(renewals == 4 && stubborn.stuck());
   stubborn.on_lease({true, 900, 44}, t);
   CHECK(!stubborn.stuck());
   stubborn.on_lease({false, 0, 44}, t + 900000);

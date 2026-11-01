@@ -101,6 +101,7 @@ def main():
     ap.add_argument('--reset-quiet', type=float, default=4.5)  # seconds deaf after a RESET
     ap.add_argument('--power-cut-every', type=float, default=0)
     ap.add_argument('--power-off', type=float, default=8)
+    ap.add_argument('--refuse-renewals', type=int, default=0)  # ack this many renewals, lease left out
     ap.add_argument('--mute-claims', type=int, default=0)  # ignore this many SET_485_ID broadcasts
     ap.add_argument('--deaf-hop', action='store_true')  # moved one id up by the hop, answers nothing there
     ap.add_argument('--stats', default=None)
@@ -300,7 +301,8 @@ def main():
             elif cmd == 0x0B0F and len(p) == 14 and p[3] == 0x2D:
                 stats['first_lease_frame'] = stats['first_lease_frame'] or 'renew'
                 stats['renewals'].append({'t': round(t, 2), 'nodes': p[10] << 8 | p[11]})
-                lease_end = time.monotonic() + a.renew_to
+                if len(stats['renewals']) > a.refuse_renewals:
+                    lease_end = time.monotonic() + a.renew_to
                 send(encode(addr | 0x8000, 0x0B10, lease_payload(p[4])))
             elif cmd == 0x0B00 and len(p) == 1:  # the CCA's session frame; the TAP echoes it
                 stats['session'].append(f'{p[0]:02x}')

@@ -155,7 +155,8 @@ inline Bytes lease_renewal_args(uint16_t node_count) {
 //   - no renewal carries a node count of 0;
 //   - "not running" with time left is not a reason to renew; only 0 s is;
 //   - after RENEW_LIMIT renewals with no reading showing time on the lease,
-//     it stops renewing and stuck() says so, until a reading shows time.
+//     stuck() says so until a reading shows time, and it renews only once
+//     each RENEW_BACKOFF_MS.
 // A check with no reply is retried a second later, up to CHECK_RETRIES
 // times, so one lost reply doesn't leave a lapsed lease for a whole period.
 struct LeaseAction {
@@ -171,13 +172,17 @@ class LeaseKeeper {
   static const uint32_t CHECK_RETRY_MS = 1000;
   static const uint32_t CHECK_RETRIES = 3;
   static const uint32_t RENEW_LIMIT = 3;
+  static const uint32_t RENEW_BACKOFF_MS = 30000;
 
   // What to send now. Returning an action counts it as sent.
   LeaseAction due(uint32_t now_ms) {
     LeaseAction a;
     bool out = ever_read_ && last_.remaining_s == 0 && last_.node_count > 0;
-    if (out && renews_unanswered_ < RENEW_LIMIT &&
-        (!renewed_ || now_ms - last_renew_ms_ >= RENEW_RETRY_MS)) {
+    // Past RENEW_LIMIT, one try each RENEW_BACKOFF_MS: a TAP that refused
+    // while browning out takes a renewal once it is back.
+    bool may = renews_unanswered_ < RENEW_LIMIT ? !renewed_ || now_ms - last_renew_ms_ >= RENEW_RETRY_MS
+                                                 : now_ms - last_renew_ms_ >= RENEW_BACKOFF_MS;
+    if (out && may) {
       a.kind = LeaseAction::renew;
       a.node_count = last_.node_count;
       renewed_ = true;

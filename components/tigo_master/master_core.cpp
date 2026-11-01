@@ -626,7 +626,8 @@ void MasterCore::update_lease_fault_() {
   Fault f = status().fault;
   if (lease_.stuck() && f != Fault::lease_refused && f != Fault::second_master)
     set_fault(Fault::lease_refused, "the TAP did not take " + std::to_string(master::LeaseKeeper::RENEW_LIMIT) +
-                                        " lease renewals in a row; stopped renewing until it shows time on the lease");
+                                        " lease renewals in a row; trying again every " +
+                                        std::to_string(master::LeaseKeeper::RENEW_BACKOFF_MS / 1000) + " s");
   else if (!lease_.stuck() && f == Fault::lease_refused)
     set_fault(Fault::none, "");
 }

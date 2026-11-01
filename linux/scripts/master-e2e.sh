@@ -479,4 +479,26 @@ expect "deaf after the hop: RESET anyway, then polled at 1201" "$(stat "$out/tap
 kill $daemon; wait $daemon 2>/dev/null || true
 kill $tap; wait $tap 2>/dev/null || true
 
+# --- run 20: a TAP that refuses renewals for a while ---
+# Its first three renewals are acked but leave the lease out. The master
+# flags lease_refused, then tries once each 30 s rather than stopping until
+# a restart, and the fourth renewal brings the lease back.
+mkdir -p "$out/state20"
+python3 linux/tools/mock_tap.py "$out/tap20" --lease 2 --refuse-renewals 3 --nodes 44 --stats "$out/tap20.json" &
+tap=$!
+sleep 0.5
+printf '{"bus_role": "master", "serial_port": "%s", "gateway_id": 4609, "web_port": 18111}\n' \
+  "$PWD/$out/tap20" > "$out/state20/settings.json"
+build/linux/tigomonitord --state-dir "$out/state20" --web-dir components/tigo_server/web 2> "$out/daemon20.log" &
+daemon=$!
+for _ in $(seq 40); do [ -f "$out/tap20.json" ] && [ "$(stat "$out/tap20.json" "len(d['renewals'])")" -ge 3 ] && break; sleep 0.5; done
+sleep 2
+expect "three renewals refused: flagged" "$(api 18111 /api/master | python3 -c 'import json,sys; print(json.load(sys.stdin)["fault"])')" lease_refused
+for _ in $(seq 90); do [ "$(stat "$out/tap20.json" "len(d['renewals'])")" -ge 4 ] && break; sleep 0.5; done
+sleep 2
+expect "tried again after the backoff, and the lease is back" "$(api 18111 /api/master | python3 -c 'import json,sys; m=json.load(sys.stdin); print(m["fault"], m["lease"]["remaining_s"] > 0)')" "none True"
+expect "no renewal between the third and the fourth for 30 s" "$(stat "$out/tap20.json" "round(d['renewals'][3]['t'] - d['renewals'][2]['t']) >= 29")" True
+kill $daemon; wait $daemon 2>/dev/null || true
+kill $tap; wait $tap 2>/dev/null || true
+
 [ $fail = 0 ] && echo "master e2e passed" || { echo "master e2e FAILED; see $out/"; exit 1; }
