@@ -104,6 +104,11 @@ States: **standing_by** → **taking_over** → **active** → back to standing_
   goes to **taking_over**. Defaults: 3 s for the preferred device and 8 s for
   the other; the setting is all that makes a device "primary". It listens for
   one more random 0–500 ms, and only transmits if the bus is still silent.
+  The 3 s default is for monitors standing by for each other, and stays
+  (decided 2026-11-01). Beside a working CCA, set 30 s or more: a CCA that
+  reboots is quiet for longer than 3 s and never yields, so a 3 s standby
+  would talk over it until it heard the CCA's first frame. The Tools page
+  and settings.h say so.
 - **taking_over:** the first request is a lease check, not a poll. If the TAP
   answers at the running id, it goes to active and runs the usual schedule. If
   the TAP answers only at the factory address, the TAP was power-cycled, and

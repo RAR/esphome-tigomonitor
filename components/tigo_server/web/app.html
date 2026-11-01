@@ -1070,7 +1070,7 @@
           <div class="cfg-ctrl"><select class="cfg-input" id="pi-bus-role"><option value="listen">Listen, beside the CCA</option><option value="master">Master, in place of the CCA</option><option value="standby">Standby, takes over if the master stops</option></select></div>
         </div>
         <div class="cfg-row" id="pi-takeover-row" style="display:none">
-          <div class="cfg-text"><strong>Take over after</strong><span>Seconds with no master heard before this one runs the bus. Of two standbys, give the one you prefer the shorter time. Losing power on one master no longer stops the array: the other takes over, so rapid shutdown must cut the TAP's own power</span></div>
+          <div class="cfg-text"><strong>Take over after</strong><span>Seconds with no master heard before this one runs the bus. Of two standbys, give the one you prefer the shorter time. The default 3 s suits two monitors; beside a working CCA use 30 s or more, since a CCA that reboots is quiet for longer than that and never gives the bus back. Losing power on one master no longer stops the array: the other takes over, so rapid shutdown must cut the TAP's own power</span></div>
           <div class="cfg-ctrl"><input class="cfg-input" id="pi-takeover" type="number" min="2" max="60" placeholder="3"></div>
         </div>
         <div class="cfg-row" id="pi-startup-row" style="display:none">

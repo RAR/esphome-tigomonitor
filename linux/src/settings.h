@@ -34,7 +34,11 @@ struct Settings {
   // "standby": listen while another master runs the bus, and take it over
   // once none has been heard for standby_takeover_s.
   std::string bus_role = "listen";
-  int standby_takeover_s = 3;  // 2-60; the preferred of two standbys has the shorter time
+  // 2-60; the preferred of two standbys has the shorter time. 3 s is for
+  // monitors standing by for each other. Beside a working CCA it wants 30 s
+  // or more: a rebooting CCA is quiet for longer than 3 s, and a CCA never
+  // yields, so the two would talk over each other until the standby hears it.
+  int standby_takeover_s = 3;
   bool master_bench = false;    // also send the reads a bench TAP answers
   bool master_startup = false;  // re-address and bring up a TAP found at the factory address
   // Also send the CCA's 0x41s, its hourly 0x0B00 and 0x22s, and its 0x26 walks.
