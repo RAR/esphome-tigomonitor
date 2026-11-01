@@ -520,4 +520,35 @@ expect "/api/master counts them" "$(api 18112 /api/master | python3 -c 'import j
 kill $daemon; wait $daemon 2>/dev/null || true
 kill $tap; wait $tap 2>/dev/null || true
 
+# --- run 22: the web API while the master waits on the bus ---
+# Pages that take 400 ms to come back, as run 21's: /api/master (and the
+# healthcheck's /api/health) must not wait for the reply with it.
+mkdir -p "$out/state22"
+python3 linux/tools/mock_tap.py "$out/tap22" --page-delay 0.4 --panels 30 --lease 600 --nodes 44 --stats "$out/tap22.json" &
+tap=$!
+sleep 0.5
+printf '{"bus_role": "master", "master_housekeeping": true, "serial_port": "%s", "gateway_id": 4609, "web_port": 18113}\n' \
+  "$PWD/$out/tap22" > "$out/state22/settings.json"
+build/linux/tigomonitord --state-dir "$out/state22" --web-dir components/tigo_server/web 2> "$out/daemon22.log" &
+daemon=$!
+slowest="$(python3 - <<'PY'
+import time, urllib.request as u
+worst, end = 0.0, time.monotonic() + 8
+while time.monotonic() < end:
+    t = time.monotonic()
+    try:
+        u.urlopen('http://127.0.0.1:18113/api/master', timeout=5).read()
+    except OSError:
+        time.sleep(0.05)
+        continue
+    worst = max(worst, time.monotonic() - t)
+    time.sleep(0.02)
+print(round(worst * 1000))
+PY
+)"
+expect "/api/master answers while a page is awaited: under 150 ms" "$([ "$slowest" -lt 150 ] && echo yes || echo "no ($slowest ms)")" yes
+expect "and the pages were awaited meanwhile" "$(stat "$out/tap22.json" "len(d['walk']) >= 4")" True
+kill $daemon; wait $daemon 2>/dev/null || true
+kill $tap; wait $tap 2>/dev/null || true
+
 [ $fail = 0 ] && echo "master e2e passed" || { echo "master e2e FAILED; see $out/"; exit 1; }

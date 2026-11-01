@@ -181,8 +181,11 @@ int main(int argc, char **argv) {
   std::atomic<bool> input_stop{false};
   // The master role has no input thread: the main loop ticks it below, so
   // nothing renews the TAP's lease if this loop ever stops.
-  std::mutex master_mu;  // bus_master is read by the web server's threads
-  std::unique_ptr<BusMaster> bus_master;
+  // bus_master is read by the web server's threads. The mutex guards the
+  // pointer only: each side takes a copy and works on that, so the web UI and
+  // the healthcheck never wait on a tick that is waiting on the bus.
+  std::mutex master_mu;
+  std::shared_ptr<BusMaster> bus_master;
   auto start_input = [&]() {
     input_stop = false;
     input_done = false;
@@ -241,9 +244,13 @@ int main(int argc, char **argv) {
   topology.load();
   // The bus master's status, for the web UI and Home Assistant alike.
   auto master_status = [&] {
-    std::lock_guard<std::mutex> lock(master_mu);
-    MasterStatus m = bus_master ? bus_master->status() : MasterStatus{};
-    if (!bus_master) m.learned_41 = static_cast<uint32_t>(housekeeping.entries().size());
+    std::shared_ptr<BusMaster> bm;
+    {
+      std::lock_guard<std::mutex> lock(master_mu);
+      bm = bus_master;
+    }
+    MasterStatus m = bm ? bm->status() : MasterStatus{};
+    if (!bm) m.learned_41 = static_cast<uint32_t>(housekeeping.entries().size());
     return m;
   };
   mqtt.set_master_status(master_status);
@@ -353,13 +360,14 @@ int main(int argc, char **argv) {
     // A second's worth of master ticks, one request each, or a plain sleep.
     auto second = std::chrono::steady_clock::now() + std::chrono::seconds(1);
     while (!g_stop && std::chrono::steady_clock::now() < second) {
+      std::shared_ptr<BusMaster> bm;
       {
         std::lock_guard<std::mutex> lock(master_mu);
-        if (!bus_master) break;
-        bus_master->tick(static_cast<uint32_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
-                                                    std::chrono::steady_clock::now() - started)
-                                                    .count()));
+        bm = bus_master;
       }
+      if (!bm) break;
+      bm->tick(static_cast<uint32_t>(
+          std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - started).count()));
       std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
     std::this_thread::sleep_until(second);
