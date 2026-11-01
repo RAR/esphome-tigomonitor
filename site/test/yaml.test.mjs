@@ -250,6 +250,23 @@ test('an active-low transceiver enable is emitted OFF, not ON', () => {
   assert.ok(!y.includes('restore_mode: ALWAYS_ON'), 'ALWAYS_ON leaked onto an active-low pin');
 });
 
+// Safe mode sets up only Wi-Fi, OTA and the logger, so the switch never runs and
+// GPIO21 floats high: driver on, holding the bus for the 5 minutes safe mode
+// lasts (#97). The board file holds it low from on_safe_mode; so must we.
+test('an active-low transceiver enable is held low in safe mode too', () => {
+  const b = getBoard('esp32s3-waveshare-rs485-can');
+  const y = toYaml(assembleConfig(b, { ...form, uart: b.uartDefault }));
+  assert.ok(y.includes('\nsafe_mode:\n  on_safe_mode:'), 'no on_safe_mode block');
+  assert.ok(y.includes('gpio_set_direction(GPIO_NUM_21, GPIO_MODE_OUTPUT);'), 'GPIO21 not made an output');
+  assert.ok(y.includes('gpio_set_level(GPIO_NUM_21, 0);'), 'GPIO21 not driven low');
+});
+
+test('active-high enables get no safe-mode hold', () => {
+  const b = getBoard('esp32-lilygo-t-can485');
+  const y = toYaml(assembleConfig(b, { ...form, uart: b.uartDefault }));
+  assert.ok(!y.includes('safe_mode:'), 'safe_mode emitted for a board whose file has none');
+});
+
 // The other direction still has to work — the T-CAN485's three enables are
 // active-high and carry no explicit restore_mode.
 test('a board with no explicit restore_mode still defaults to ALWAYS_ON', () => {

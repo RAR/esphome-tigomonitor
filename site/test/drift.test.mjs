@@ -54,3 +54,23 @@ test('AtomS3R display overlay still matches boards/atoms3r-display.yaml', () => 
     assert.ok(src.includes(line.replace(/\s+$/, '')), `overlay line drifted: ${t}`);
   }
 });
+
+// A board file's safe-mode hold must reach the builder too. #97 added one to
+// the RS485-CAN file; the builder never got it, because nothing compared them.
+test('every board file with on_safe_mode has it in the builder output', async () => {
+  const { assembleConfig } = await import('../rules.js');
+  const { toYaml } = await import('../yaml.js');
+  for (const [id, rel] of Object.entries(FILE)) {
+    const src = readFileSync(join(repoRoot, rel), 'utf8');
+    const b = getBoard(id);
+    const y = toYaml(assembleConfig(b, {
+      name: 'x', numberOfDevices: 10, updateInterval: '30s', uart: b.uartDefault,
+      wifi: { ssid: 'n', password: 'p' }, useSecrets: false, apiKey: 'K==', otaPassword: 'o',
+      cca: 'none', cloudImport: false, display: false,
+    }));
+    assert.equal(y.includes('on_safe_mode:'), src.includes('on_safe_mode:'), `${id}: on_safe_mode drift`);
+    for (const m of src.matchAll(/gpio_set_level\([^)]*\);/g)) {
+      assert.ok(y.includes(m[0]), `${id}: builder lacks ${m[0]}`);
+    }
+  }
+});

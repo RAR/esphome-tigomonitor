@@ -193,6 +193,24 @@ export function toYaml(cfg) {
     L.push('');
   }
 
+  // Safe mode sets up only Wi-Fi, OTA and the logger, so the switches above never
+  // run. An enable that must stay low (the RS485-CAN's GPIO21 floats high, which
+  // turns its driver on and holds the bus) is driven low here instead (#97).
+  const holdLow = (cfg.gpioSwitches ?? []).filter((sw) => sw.safeModeLow);
+  if (holdLow.length) {
+    L.push('safe_mode:');
+    L.push(`${I(1)}on_safe_mode:`);
+    L.push(`${I(2)}- lambda: |-`);
+    for (const sw of holdLow) {
+      const n = sw.pin.replace('GPIO', 'GPIO_NUM_');
+      L.push(`${I(4)}gpio_reset_pin(${n});`);
+      L.push(`${I(4)}gpio_set_direction(${n}, GPIO_MODE_OUTPUT);`);
+      L.push(`${I(4)}gpio_set_level(${n}, 0);`);
+      L.push(`${I(4)}ESP_LOGW("tigo_monitor", "Safe mode: ${sw.pin} held low, the RS485 driver is off");`);
+    }
+    L.push('');
+  }
+
   // uart
   L.push('uart:');
   L.push(`${I(1)}id: tigo_uart`);

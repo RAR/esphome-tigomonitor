@@ -51,10 +51,15 @@ export const BOARDS = [
     numberOfDevices: 30,
     supports: { ble: true, display: true },
     displayOverlay: `# --- AtomS3R-Display overlay (from boards/atoms3r-display.yaml) ---
-# I2C bus for LP5562 (RGB LED + LCD Backlight control)
+# I2C bus for LP5562 (RGB LED + LCD Backlight control). The AtomS3R's internal
+# bus is GPIO45/GPIO0; GPIO38/39 are the plain AtomS3's (#93).
 i2c:
-  sda: GPIO38  # SYS_SDA
-  scl: GPIO39  # SYS_SCL
+  sda:  # SYS_SDA
+    number: GPIO45
+    ignore_strapping_warning: true
+  scl:  # SYS_SCL
+    number: GPIO0
+    ignore_strapping_warning: true
   scan: true
 
 # LP5562 LED driver (controls RGB indicator LED + LCD backlight)
@@ -118,9 +123,10 @@ display:
     id: atoms3r_lcd
     model: CUSTOM
     height: 128
-    width: 128
+    # 129 wide from column 0: 128 from column 1 left a white column on the left.
+    width: 129
     offset_height: 2
-    offset_width: 1
+    offset_width: 0
     cs_pin: GPIO14
     dc_pin: GPIO42
     reset_pin: GPIO48
@@ -466,7 +472,7 @@ font:
     // ESP32 can never contend with the CCA on the bus.
     gpioSwitches: [
       { id: 'rs485_enable', name: 'RS485 Transceiver Enable', pin: 'GPIO21',
-        restore_mode: 'ALWAYS_OFF',
+        restore_mode: 'ALWAYS_OFF', safeModeLow: true,
         comment: 'DE + /RE, low => receiver on and driver off' },
     ],
     displayOverlay: null,
