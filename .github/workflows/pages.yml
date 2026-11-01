@@ -5,9 +5,11 @@ on:
     branches: [main]
     # app.html is included because the docs screenshots are rendered from it —
     # without this a UI change would leave the published images stale.
-    paths: ['site/**', 'components/tigo_server/web/app.html', '.github/workflows/pages.yml']
+    # boards/** because the builder's tests compare its copies of the board
+    # files with the files themselves; without it they drifted unseen (#98).
+    paths: ['site/**', 'boards/**', 'components/tigo_server/web/app.html', '.github/workflows/pages.yml']
   pull_request:
-    paths: ['site/**', 'components/tigo_server/web/app.html', '.github/workflows/pages.yml']
+    paths: ['site/**', 'boards/**', 'components/tigo_server/web/app.html', '.github/workflows/pages.yml']
 permissions:
   contents: read
   pages: write
