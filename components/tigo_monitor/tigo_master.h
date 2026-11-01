@@ -1089,8 +1089,9 @@ inline Allow classify_request(uint16_t cmd, const Bytes &payload) {
   for (size_t i = 0; i + 4 <= payload.size(); i++)
     if (std::equal(KEY, KEY + 4, payload.begin() + i)) return Allow::never;
 
-  // Reads: VERSION any time; 0x0E02 only in the CCA's bring-up.
+  // Reads: VERSION any time; 0x0E02 and the GET_MACs only in the CCA's bring-up.
   if (cmd == 0x000A) return payload.empty() ? Allow::yes : Allow::bench_only;
+  if (cmd == CMD_GET_MAC || cmd == CMD_GET_MAC_NOW) return payload.empty() ? Allow::startup_only : Allow::bench_only;
   if (cmd == 0x0E02) return payload.empty() ? Allow::startup_only : Allow::bench_only;
   // The CCA's hourly 01; its 00 only follows its own reboot, so bring-up only.
   if (cmd == CMD_SESSION)
@@ -1138,7 +1139,7 @@ inline Allow classify_request(uint16_t cmd, const Bytes &payload) {
 inline bool may_send(uint16_t cmd, const Bytes &payload, bool bench, bool startup = false, bool writes = false) {
   switch (classify_request(cmd, payload)) {
     case Allow::yes: return true;
-    case Allow::bench_only: return bench || startup;
+    case Allow::bench_only: return bench;  // startup is not bench: a bring-up sends only its own
     case Allow::startup_only: return startup;
     case Allow::optimizer_write: return writes;
     case Allow::never: return false;

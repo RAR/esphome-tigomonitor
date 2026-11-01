@@ -562,8 +562,15 @@ static void test_startup_allow() {
     CHECK(!may_send(cmd, hex("37249266"), true, false));   // bench isn't startup
     CHECK(may_send(cmd, hex("37249266"), false, true));    // startup only
   }
-  // GET_MAC reads are available in startup (they're bench_only reads).
+  // The bring-up's GET_MAC reads, with no payload, are startup reads.
   CHECK(may_send(0x0038, {}, false, true) && may_send(0x003A, {}, false, true));
+  CHECK(classify_request(0x0038, {}) == Allow::startup_only && classify_request(0x003A, {}) == Allow::startup_only);
+  CHECK(classify_request(0x0038, {0x00}) == Allow::bench_only);
+  // Startup is not bench: a command nothing here sends stays refused in a
+  // bring-up. (Startup used to let every bench-only command through.)
+  CHECK(!may_send(0x0300, {}, false, true));
+  CHECK(!may_send(CMD_TUNNEL, tunnel_request(0x41, 1, hex("0023")), false, true));
+  CHECK(!may_send(0x0E02, {0x00}, false, true) && may_send(0x0E02, {0x00}, true, false));
   // These stay never, even in startup: store, clear-roster, whitelist, netrun.
   for (uint16_t cmd : {0x0012, 0x011E, 0x0182, 0x0058}) {
     CHECK(classify_request(cmd, hex("37249266")) == Allow::never);
