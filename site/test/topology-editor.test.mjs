@@ -155,6 +155,19 @@ test('dropping on a panel puts the dragged one before it and renumbers', async (
   await ctx.close();
 });
 
+test('picking a panel up and dropping it on itself leaves the string as it was', async () => {
+  const { page, ctx } = await open();
+  await edit(page);
+  const box = await page.locator(`[data-barcode="${P[0]}"]`).boundingBox();
+  await page.mouse.move(box.x + 20, box.y + 20);
+  await page.mouse.down();
+  await page.mouse.move(box.x + 30, box.y + 24, { steps: 3 });
+  await page.mouse.up();
+  assert.deepEqual(await barcodes(page, 'A'), [P[0], P[1]]);
+  assert.deepEqual(await names(page, 'A'), ['A1', 'A2']);
+  await ctx.close();
+});
+
 test('Save posts the tree with panels as barcodes in order', async () => {
   const { page, ctx, api } = await open();
   await edit(page);

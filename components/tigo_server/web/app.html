@@ -5655,6 +5655,8 @@
     const zone = target && target.closest('.topo-ed-drop');
     if (!zone) return false;
     const before = target.closest('.topo-ed-panel');
+    // Put down where it was picked up: nothing moved.
+    if (before && before.dataset.barcode === topoDrag.barcode) return false;
     let from = null, fromIdx = -1;
     for (const key of ['tray', ...topoEdZoneKeys()]) {
       const list = topoEdListOf(key);
