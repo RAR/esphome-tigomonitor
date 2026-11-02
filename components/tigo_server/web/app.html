@@ -547,7 +547,17 @@
     box-shadow: 0 8px 24px rgba(0,0,0,0.35); transform: rotate(2deg);
   }
   .topo-ed-drop { min-height: 58px; border-radius: 6px; }
-  .topo-ed-drop.over { outline: 2px solid var(--accent-2); outline-offset: 2px; }
+  .topo-ed-drop.over, .topo-mppt.over, .topo-inv.over { outline: 2px solid var(--accent-2); outline-offset: 2px; }
+  .topo-ed-handle {
+    cursor: grab; touch-action: pan-y; user-select: none; -webkit-user-select: none;
+    color: var(--text-faint); font-size: 16px; line-height: 1; padding: 4px 2px;
+  }
+  .topo-ed-handle:hover { color: var(--text); }
+  .topo-string.lifting, .topo-mppt.lifting { outline: 1px solid var(--accent-2); }
+  .topo-string.dragging, .topo-mppt.dragging { opacity: 0.35; }
+  .topo-ed-ghost-block {
+    background: var(--bg-2); border: 1px solid var(--accent-2); border-radius: 8px; padding: 8px 12px;
+  }
   .topo-ed-empty { color: var(--text-faint); font-size: 12px; padding: 12px; }
   .topo-ed-name {
     background: var(--bg); border: 1px solid var(--border); color: var(--text);
@@ -5530,8 +5540,9 @@
         let strings = '';
         m.strings.forEach((s, si) => {
           const panels = s.panels.map((p, pi) => topoEdPanelHtml(p, topoEdPanelName(s, pi))).join('');
-          strings += `<div class="topo-string" data-string-label="${topoEscape(s.label)}">
+          strings += `<div class="topo-string" data-string-label="${topoEscape(s.label)}" data-i="${ii}" data-m="${mi}" data-s="${si}">
             <div class="topo-string-head">
+              <span class="topo-ed-handle" data-kind="string" title="Drag to move this string to another MPPT">⠿</span>
               <input class="topo-ed-name topo-ed-string-name" data-i="${ii}" data-m="${mi}" data-s="${si}"
                 value="${topoEscape(s.display_label)}" placeholder="${topoEscape(s.label)}" maxlength="28" aria-label="String name">
               ${s.display_label ? `<span class="topo-ed-canon">(${topoEscape(s.label)})</span>` : ''}
@@ -5542,8 +5553,9 @@
               panels || '<div class="topo-ed-empty">Drag panels here</div>'}</div>
           </div>`;
         });
-        body += `<div class="topo-mppt" data-mppt-label="${topoEscape(m.label)}">
+        body += `<div class="topo-mppt" data-mppt-label="${topoEscape(m.label)}" data-i="${ii}" data-m="${mi}">
           <div class="topo-mppt-head">
+            <span class="topo-ed-handle" data-kind="mppt" title="Drag to move this MPPT to another inverter">⠿</span>
             <input class="topo-ed-name topo-ed-mppt-name" data-i="${ii}" data-m="${mi}" value="${topoEscape(m.label)}"
               maxlength="32" aria-label="MPPT name">
             ${m.strings.length ? '' : `<button class="topo-del" data-del="mppt" data-i="${ii}" data-m="${mi}">Delete</button>`}
@@ -5553,7 +5565,7 @@
           </div>
         </div>`;
       });
-      html += `<div class="topo-inv" data-inv-name="${topoEscape(inv.name)}">
+      html += `<div class="topo-inv" data-inv-name="${topoEscape(inv.name)}" data-i="${ii}">
         <div class="topo-inv-head">
           <input class="topo-ed-name topo-ed-inv-name" data-i="${ii}" value="${topoEscape(inv.display_name)}"
             placeholder="${topoEscape(inv.name)}" maxlength="32" aria-label="Inverter name">
@@ -5619,7 +5631,11 @@
   // ---- Dragging. Mouse: pointer events, lifted after a 5 px move. Touch: a
   // 300 ms press lifts the panel, so a swipe that starts on a card still
   // scrolls the page; once lifted, touchmove is cancelled so it doesn't.
-  const topoDrag = { el: null, barcode: null, ghost: null, timer: null, startX: 0, startY: 0, lifted: false, over: null };
+  // A panel card drags itself; a string or MPPT drags by the handle in its
+  // header and lands in an MPPT or an inverter respectively.
+  const topoDrag = { kind: null, el: null, barcode: null, ghost: null, timer: null, startX: 0, startY: 0, lifted: false, over: null,
+                    x: 0, y: 0, scroll: null };
+  const TOPO_DROP_ZONE = { panel: '.topo-ed-drop', string: '.topo-mppt', mppt: '.topo-inv' };
 
   function topoEdListOf(dropKey) {
     if (dropKey === 'tray') return topoEditor.tree.unassigned;
@@ -5630,28 +5646,74 @@
   function topoEdLift(x, y) {
     topoDrag.lifted = true;
     const r = topoDrag.el.getBoundingClientRect();
-    const g = topoDrag.el.cloneNode(true);
+    // A string or MPPT can be tall: its header stands in for it.
+    const g = topoDrag.kind === 'panel' ? topoDrag.el.cloneNode(true)
+      : topoDrag.el.querySelector('.topo-string-head, .topo-mppt-head').cloneNode(true);
     g.classList.add('topo-ed-ghost');
-    g.style.width = r.width + 'px';
+    if (topoDrag.kind !== 'panel') g.classList.add('topo-ed-ghost-block');
+    g.style.width = (topoDrag.kind === 'panel' ? r.width : Math.min(r.width, 360)) + 'px';
     document.body.appendChild(g);
     topoDrag.ghost = g;
     topoDrag.el.classList.add('dragging');
     topoEdMoveGhost(x, y);
+    topoDrag.scroll = requestAnimationFrame(topoEdEdgeScroll);
+  }
+
+  // Held near the top or bottom of the window, a lifted drag scrolls the page:
+  // on a phone nothing else can while the finger is down. Faster nearer the edge.
+  function topoEdEdgeScroll() {
+    if (!topoDrag.lifted) return;
+    const edge = 60, h = window.innerHeight, y = topoDrag.y;
+    const dy = y < edge ? -Math.ceil((edge - y) / 3) : y > h - edge ? Math.ceil((y - (h - edge)) / 3) : 0;
+    if (dy) {
+      window.scrollBy(0, dy);
+      topoEdMoveGhost(topoDrag.x, topoDrag.y);
+    }
+    topoDrag.scroll = requestAnimationFrame(topoEdEdgeScroll);
   }
 
   function topoEdMoveGhost(x, y) {
+    topoDrag.x = x;
+    topoDrag.y = y;
     if (!topoDrag.ghost) return;
     topoDrag.ghost.style.left = (x - 20) + 'px';
     topoDrag.ghost.style.top = (y - 20) + 'px';
     const target = document.elementFromPoint(x, y);
-    const zone = target && target.closest('.topo-ed-drop');
+    const zone = target && target.closest(TOPO_DROP_ZONE[topoDrag.kind]);
     if (topoDrag.over && topoDrag.over !== zone) topoDrag.over.classList.remove('over');
     topoDrag.over = zone;
     if (zone) zone.classList.add('over');
   }
 
+  // Moves the dragged string or MPPT into the list zone's element holds,
+  // before the block of the same kind under the pointer, else at the end.
+  function topoEdDropBlock(target) {
+    const t = topoEditor.tree;
+    const zone = target && target.closest(TOPO_DROP_ZONE[topoDrag.kind]);
+    if (!zone) return false;
+    const isString = topoDrag.kind === 'string';
+    const listAt = d => isString ? t.inverters[+d.i].mppts[+d.m].strings : t.inverters[+d.i].mppts;
+    const itemAt = d => listAt(d)[isString ? +d.s : +d.m];
+    const item = itemAt(topoDrag.el.dataset);
+    const src = listAt(topoDrag.el.dataset);
+    const dest = isString ? t.inverters[+zone.dataset.i].mppts[+zone.dataset.m].strings : t.inverters[+zone.dataset.i].mppts;
+    const beforeEl = target.closest(isString ? '.topo-string' : '.topo-mppt');
+    const before = beforeEl && zone.contains(beforeEl) ? itemAt(beforeEl.dataset) : null;
+    const from = src.indexOf(item);
+    // Put down where it was picked up, or just past itself: nothing moved.
+    if (before === item) return false;
+    if (src === dest && (before ? src.indexOf(before) === from + 1 : from === src.length - 1)) return false;
+    src.splice(from, 1);
+    let at = before ? dest.indexOf(before) : dest.length;
+    if (at < 0) at = dest.length;
+    dest.splice(at, 0, item);
+    topoEdMarkDirty();
+    return true;
+  }
+
   function topoEdDrop(x, y) {
     const target = document.elementFromPoint(x, y);
+    if (topoDrag.kind !== 'panel') return topoEdDropBlock(target);
     const zone = target && target.closest('.topo-ed-drop');
     if (!zone) return false;
     const before = target.closest('.topo-ed-panel');
@@ -5685,15 +5747,19 @@
 
   function topoEdEndDrag(x, y) {
     clearTimeout(topoDrag.timer);
+    cancelAnimationFrame(topoDrag.scroll);
     const dropped = topoDrag.lifted && topoEdDrop(x, y);
     if (topoDrag.ghost) topoDrag.ghost.remove();
     if (topoDrag.over) topoDrag.over.classList.remove('over');
     if (topoDrag.el) topoDrag.el.classList.remove('dragging', 'lifting');
-    Object.assign(topoDrag, { el: null, barcode: null, ghost: null, timer: null, lifted: false, over: null });
+    Object.assign(topoDrag, { kind: null, el: null, barcode: null, ghost: null, timer: null, lifted: false, over: null, scroll: null });
     if (dropped) renderTopoEditor();
   }
 
+  // el: a panel card, or the handle of a string or MPPT (the block is dragged).
   function topoEdStart(el, x, y) {
+    topoDrag.kind = el.classList.contains('topo-ed-handle') ? el.dataset.kind : 'panel';
+    if (topoDrag.kind !== 'panel') el = el.closest(topoDrag.kind === 'string' ? '.topo-string' : '.topo-mppt');
     topoDrag.el = el;
     topoDrag.barcode = el.dataset.barcode;
     topoDrag.startX = x;
@@ -5703,7 +5769,7 @@
 
   document.getElementById('topo-tree').addEventListener('pointerdown', e => {
     if (!topoEditor.active || e.pointerType === 'touch' || e.button !== 0) return;
-    const el = e.target.closest('.topo-ed-panel');
+    const el = e.target.closest('.topo-ed-panel, .topo-ed-handle');
     if (!el) return;
     e.preventDefault();
     topoEdStart(el, e.clientX, e.clientY);
@@ -5721,10 +5787,11 @@
 
   document.getElementById('topo-tree').addEventListener('touchstart', e => {
     if (!topoEditor.active || e.touches.length !== 1) return;
-    const el = e.target.closest('.topo-ed-panel');
-    if (!el) return;
+    const handle = e.target.closest('.topo-ed-panel, .topo-ed-handle');
+    if (!handle) return;
     const t = e.touches[0];
-    topoEdStart(el, t.clientX, t.clientY);
+    topoEdStart(handle, t.clientX, t.clientY);
+    const el = topoDrag.el;
     el.classList.add('lifting');
     topoDrag.timer = setTimeout(() => {
       if (topoDrag.el === el) topoEdLift(topoDrag.startX, topoDrag.startY);

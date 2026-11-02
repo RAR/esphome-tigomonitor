@@ -16,7 +16,7 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const html = readFileSync(resolve(HERE, '../../components/tigo_server/web/app.html'), 'utf8')
   .replaceAll('__TIGO_API_TOKEN__', '');
 
-const P = ['04C05B0000300001', '04C05B0000300002', '04C05B0000300003'];
+const P = ['04C05B0000300001', '04C05B0000300002', '04C05B0000300003', '04C05B0000300004'];
 
 // Inverter 1 / MPPT 1 / A (P1, P2) and B (empty); P3 in no string.
 function startLayout() {
@@ -53,13 +53,22 @@ after(async () => {
   server.close();
 });
 
+// Two inverters: Inverter 1 / MPPT 1 / A (P1, P2), B (empty); Inverter 2 /
+// MPPT 2 / C (P4).
+function twoInverters() {
+  const l = startLayout();
+  l.inverters.push({ name: 'Inverter 2', display_name: '', mppts: [{ label: 'MPPT 2', strings: [
+    { label: 'C', display_label: 'West', rating_w: 0, panels: [{ barcode: P[3], addr: '0005', name: 'West1' }] }] }] });
+  return l;
+}
+
 // A page on the Topology view. api.posts collects POST bodies; api.saveStatus
 // and api.saveError make the next layout save fail; api.power sets P1's watts.
 async function open(opts = {}) {
   const touch = !!opts.touch;
-  const api = { layout: startLayout(), posts: [], saveStatus: 200, saveError: '', power: 300,
+  const api = { layout: opts.layout || startLayout(), posts: [], saveStatus: 200, saveError: '', power: 300,
     pending: null, actions: [] };
-  const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 }, hasTouch: touch });
+  const ctx = await browser.newContext({ viewport: { width: 1280, height: opts.height || 900 }, hasTouch: touch });
   await ctx.route('**/api/**', async (route) => {
     const req = route.request();
     const path = new URL(req.url()).pathname.replace(/^.*(\/api\/)/, '$1');
@@ -357,5 +366,136 @@ test('Use theirs waits while the editor has unsaved changes', async () => {
   assert.equal(await page.isDisabled('#topo-pending-use'), false);
   await page.locator(`[data-barcode="${P[0]}"]`).dragTo(page.locator('[data-string-label="B"] .panel-grid'));
   assert.equal(await page.isDisabled('#topo-pending-use'), true);
+  await ctx.close();
+});
+
+// ---- Moving whole strings and MPPTs by the handle in their header.
+const stringsIn = (page, mppt) => page.$$eval(
+  `[data-mppt-label="${mppt}"] .topo-string`, (els) => els.map((e) => e.dataset.stringLabel));
+const mpptsIn = (page, inv) => page.$$eval(
+  `[data-inv-name="${inv}"] .topo-mppt`, (els) => els.map((e) => e.dataset.mpptLabel));
+const handle = (kind, label) => kind === 'string'
+  ? `[data-string-label="${label}"] .topo-ed-handle[data-kind="string"]`
+  : `[data-mppt-label="${label}"] .topo-ed-handle[data-kind="mppt"]`;
+
+// Drops near the bottom of a block, past its last child: the end of its list.
+async function dragToEnd(page, fromSel, toSel) {
+  const box = await page.locator(toSel).boundingBox();
+  await page.locator(fromSel).dragTo(page.locator(toSel), { targetPosition: { x: box.width / 2, y: box.height - 4 } });
+}
+
+test('a string dragged by its handle onto another inverter\'s MPPT moves there with its panels', async () => {
+  const { page, ctx, api, errors } = await open({ layout: twoInverters() });
+  await edit(page);
+  await dragToEnd(page, handle('string', 'A'), '[data-mppt-label="MPPT 2"]');
+  assert.deepEqual(await stringsIn(page, 'MPPT 1'), ['B']);
+  assert.deepEqual(await stringsIn(page, 'MPPT 2'), ['C', 'A']);
+  assert.deepEqual(await barcodes(page, 'A'), [P[0], P[1]]);
+  assert.deepEqual(await names(page, 'A'), ['A1', 'A2']);
+  await page.click('#topo-save-btn');
+  await page.waitForFunction(() => !document.getElementById('topo-unassigned'));
+  assert.deepEqual(api.posts[0].inverters.map((i) => i.mppts.map((m) => [m.label, m.strings.map((s) => [s.label, s.rating_w, s.panels])])), [
+    [['MPPT 1', [['B', 0, []]]]],
+    [['MPPT 2', [['C', 0, [P[3]]], ['A', 400, [P[0], P[1]]]]]],
+  ]);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test('a string dropped on another string goes before it', async () => {
+  const { page, ctx } = await open({ layout: twoInverters() });
+  await edit(page);
+  await page.locator(handle('string', 'B')).dragTo(page.locator('[data-string-label="A"] .topo-string-head'));
+  assert.deepEqual(await stringsIn(page, 'MPPT 1'), ['B', 'A']);
+  await page.locator(handle('string', 'C')).dragTo(page.locator('[data-string-label="A"] .panel-grid'));
+  assert.deepEqual(await stringsIn(page, 'MPPT 1'), ['B', 'C', 'A']);
+  assert.deepEqual(await stringsIn(page, 'MPPT 2'), []);
+  assert.deepEqual(await names(page, 'C'), ['West1']);
+  await ctx.close();
+});
+
+test('a string put down where it was picked up stays put', async () => {
+  const { page, ctx } = await open({ layout: twoInverters() });
+  await edit(page);
+  const box = await page.locator(handle('string', 'A')).boundingBox();
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width / 2 + 10, box.y + box.height / 2 + 4, { steps: 3 });
+  await page.mouse.up();
+  assert.deepEqual(await stringsIn(page, 'MPPT 1'), ['A', 'B']);
+  await ctx.close();
+});
+
+test('an MPPT dragged onto another inverter takes its strings; the inverter it left can be deleted', async () => {
+  const { page, ctx, api } = await open({ layout: twoInverters() });
+  await edit(page);
+  await dragToEnd(page, handle('mppt', 'MPPT 1'), '[data-inv-name="Inverter 2"]');
+  assert.deepEqual(await mpptsIn(page, 'Inverter 1'), []);
+  assert.deepEqual(await mpptsIn(page, 'Inverter 2'), ['MPPT 2', 'MPPT 1']);
+  assert.deepEqual(await stringsIn(page, 'MPPT 1'), ['A', 'B']);
+  assert.ok(await page.$('[data-inv-name="Inverter 1"] .topo-del[data-del="inverter"]'));
+  await page.click('#topo-save-btn');
+  await page.waitForFunction(() => !document.getElementById('topo-unassigned'));
+  assert.deepEqual(api.posts[0].inverters.map((i) => [i.name, i.mppts.map((m) => m.label)]),
+    [['Inverter 1', []], ['Inverter 2', ['MPPT 2', 'MPPT 1']]]);
+  await ctx.close();
+});
+
+test('an MPPT dropped on another MPPT goes before it', async () => {
+  const { page, ctx } = await open({ layout: twoInverters() });
+  await edit(page);
+  await page.locator(handle('mppt', 'MPPT 2')).dragTo(page.locator('[data-mppt-label="MPPT 1"] .topo-mppt-head'));
+  assert.deepEqual(await mpptsIn(page, 'Inverter 1'), ['MPPT 2', 'MPPT 1']);
+  assert.deepEqual(await mpptsIn(page, 'Inverter 2'), []);
+  await ctx.close();
+});
+
+test('a string dropped outside any MPPT, or an MPPT outside any inverter, goes nowhere', async () => {
+  const { page, ctx } = await open({ layout: twoInverters() });
+  await edit(page);
+  await page.locator(handle('string', 'A')).dragTo(page.locator('#topo-unassigned'));
+  await page.locator(handle('mppt', 'MPPT 1')).dragTo(page.locator('#topo-unassigned'));
+  assert.deepEqual(await stringsIn(page, 'MPPT 1'), ['A', 'B']);
+  assert.deepEqual(await mpptsIn(page, 'Inverter 1'), ['MPPT 1']);
+  await ctx.close();
+});
+
+test('touch: long-press a string handle then move drops the string; a quick swipe does not', async () => {
+  const { page, ctx } = await open({ layout: twoInverters(), touch: true, height: 1400 });
+  await edit(page);
+  await touchDrag(page, handle('string', 'A'), '[data-mppt-label="MPPT 2"] .topo-add-string', 50);
+  assert.deepEqual(await stringsIn(page, 'MPPT 2'), ['C']);
+  await touchDrag(page, handle('string', 'A'), '[data-mppt-label="MPPT 2"] .topo-add-string', 400);
+  assert.deepEqual(await stringsIn(page, 'MPPT 2'), ['C', 'A']);
+  await ctx.close();
+});
+
+// Once a drag is lifted on a phone the page can't scroll under the finger, so
+// holding it near the top or bottom edge scrolls for it.
+test('touch: holding a lifted drag near the bottom edge scrolls the page down to more drop targets', async () => {
+  const { page, ctx } = await open({ layout: twoInverters(), touch: true });
+  await edit(page);
+  const sel = handle('string', 'A');
+  const from = await page.locator(sel).boundingBox();
+  const scrolled = await page.evaluate(async ({ from, sel }) => {
+    const el = document.querySelector(sel);
+    const t = (x, y) => new Touch({ identifier: 1, target: el, clientX: x, clientY: y });
+    const fire = (type, x, y) => el.dispatchEvent(new TouchEvent(type, {
+      bubbles: true, cancelable: true, touches: type === 'touchend' ? [] : [t(x, y)],
+      targetTouches: type === 'touchend' ? [] : [t(x, y)], changedTouches: [t(x, y)] }));
+    const x = from.x + from.width / 2;
+    fire('touchstart', x, from.y + from.height / 2);
+    await new Promise((r) => setTimeout(r, 400));
+    fire('touchmove', x, window.innerHeight - 8);
+    await new Promise((r) => setTimeout(r, 800));
+    const y = window.scrollY;
+    // Now MPPT 2 is in view: drop on its + String.
+    const b = document.querySelector('[data-mppt-label="MPPT 2"] .topo-add-string').getBoundingClientRect();
+    fire('touchmove', b.x + 5, b.y + 5);
+    fire('touchend', b.x + 5, b.y + 5);
+    return y;
+  }, { from, sel });
+  assert.ok(scrolled > 0, `scrollY ${scrolled}`);
+  assert.deepEqual(await stringsIn(page, 'MPPT 2'), ['C', 'A']);
   await ctx.close();
 });
