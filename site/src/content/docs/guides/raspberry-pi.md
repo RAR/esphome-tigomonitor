@@ -29,9 +29,9 @@ you saw, working or not.
   panel appears as its own device, named by its barcode, as soon as the
   gateway announces it. The gateway announces its panels every 15 minutes or
   so, which is the longest you wait on a fresh install.
-- **Inverters are set on the Tools page**, not in YAML: each inverter and
-  the MPPTs it owns. A Tigo cloud import fills them in for you when none are
-  set.
+- **Inverters are set on the Topology page**, not in YAML: **Edit layout**
+  adds inverters, MPPTs and strings and drags panels into them. A Tigo cloud
+  import fills them in for you when none are set.
 - **History is kept on the SD card**, with a snapshot every minute
   rather than the ESP32's 30, for two years. Panels are not recorded at
   night, once the bus has been silent for the night-mode timeout, which
@@ -122,7 +122,12 @@ sensors you define yourself.
 ## Name your panels and strings
 
 Out of the box every panel is named by its barcode and sits in one group
-called "All panels". There are three ways to get your real layout:
+called "All panels". There are four ways to get your real layout:
+
+- **By hand:** on the Topology page choose **Edit layout**, add your
+  inverters, MPPTs and strings, and drag each panel into its string. Panels
+  are named after their string and position (A1, A2, …). See
+  [Laying out the array by hand](/esphome-tigomonitor/guides/web-server/#laying-out-the-array-by-hand).
 
 - **From Tigo's cloud:** open **Tigo Cloud**, choose **Configure**, and log
   in with the account you use in the Tigo app. Then press **Import from Tigo
@@ -137,8 +142,9 @@ called "All panels". There are three ways to get your real layout:
   **Tools → Device Configuration**, then press **Refresh from CCA** on the
   CCA Info page.
 
-If the strings land under **Unassigned**, go to **Tools → Inverters** and
-list which MPPTs each inverter owns.
+If the strings land under **Unassigned**, open **Edit layout** on the
+Topology page: strings whose MPPT no inverter lists arrive there in an
+inverter of their own, ready to rename or move.
 
 ## Set a password
 

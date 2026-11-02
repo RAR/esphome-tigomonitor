@@ -17,7 +17,7 @@ anyone who wants to pull the numbers into their own scripts.
 |------|---------------|
 | **Dashboard** | The main view. A coloured tile per panel, grouped by string, so an underperforming panel stands out at a glance. Click any tile for that panel's detail and history. |
 | **History** | Charts of power and energy over the day, week, month or year. Only present if you enabled [history storage](/esphome-tigomonitor/guides/tsdb-integration/). |
-| **Topology** | Your array laid out as inverter → string → panel, with live readings. This is where you rename things and enter panel ratings. |
+| **Topology** | Your array laid out as inverter → string → panel, with live readings. This is where you rename things, enter panel ratings, and lay the array out by hand. |
 | **Node Table** | The raw list of every panel the device has ever seen. You can export it to a file as a backup. |
 | **Tools** | Change settings, generate config, reset counters, restart the device. |
 | **Diagnostics** | Is it healthy? Memory, WiFi signal, how many messages it's missing. |
@@ -85,6 +85,28 @@ When `cloud_import` is set and a Tigo cloud token is connected, a **cloud status
 Inverters and strings can be renamed live from the Topology view (✎ next to each label). The override is stored in NVS via ESPHome's `global_preferences` API and is keyed by canonical name (the YAML inverter name or CCA string label). YAML stays the source of truth for identity — overrides are purely display labels and are used wherever those names appear: Topology, Dashboard inverter cards, Dashboard alert text, embedded strings inside `/api/inverters`.
 
 Empty override = falls back to canonical.
+
+### Laying out the array by hand
+
+You don't need a CCA or a Tigo account to tell the monitor which panel is where. On the Topology page, **Edit layout** opens the layout for editing:
+
+- **Unassigned** at the top holds every panel the bus has reported that is in no string yet. A panel shows up there once the gateway has announced its barcode.
+- Drag panels into a string, between strings, within a string to reorder them, or back to Unassigned. On a phone or tablet, press and hold a panel for a moment to pick it up; a quick swipe still scrolls.
+- **+ Inverter**, **+ MPPT** and **+ String** add the next free name (Inverter 2, MPPT 3, string C). Inverter, MPPT and string names are edited in place, and an empty one can be deleted.
+- Panels are named after their string and position: the third panel in string A is **A3**. Rename the string to "East" and its panels become East1, East2, and so on. Panel names aren't edited one by one.
+- Live watts keep updating while you edit. Nothing is stored until **Save layout**, which sends the whole layout at once. **Cancel** throws your changes away, and leaving the page asks first if there are any.
+
+A string keeps the label it was created with; renaming it changes only the name shown. Per-string history and peaks follow that label, so a rename never loses them. Home Assistant entities are keyed on the panel's barcode, so moving or renaming a panel doesn't break them either.
+
+Names are limited to 32 characters, without `|`. On the ESP32 the inverters, MPPTs and strings are stored in 2 KB of flash; a save that doesn't fit is refused with a message saying so.
+
+**Once you save a layout, it's yours.** A CCA sync, a Tigo cloud import or a node-table import that would change it doesn't overwrite it. On the ESP32, neither does a YAML `inverters:` block that differs. The Topology page instead says where the other layout came from and how many panels it would move:
+
+- **Review** lists each panel's move.
+- **Keep mine** turns that layout down. The same layout won't ask again, so a daily CCA sync that never changes stays quiet. A different one will ask.
+- **Use theirs** takes it and hands the layout back to that source, as before you edited it.
+
+Until you save a layout by hand, every sync and import works exactly as it always has.
 
 ### Per-string panel nameplate
 
@@ -157,6 +179,8 @@ Conventions for the tables below:
 | `/api/strings` | Flat per-string aggregates incl. `display_label`, `panel_rating_w` |
 | `/api/inverters` | Hierarchical inverter rollups with embedded strings (each carries `display_label`, `panel_rating_w`) and inverter `display_name` |
 | `/api/nodes` | Node table with CCA metadata |
+| `/api/layout` | The Topology editor's tree: `inverters → mppts → strings → panels` (`barcode`, `addr`, `name`), plus `unplaced_mppts`, `unassigned`, `manual` (the layout is the user's) and `pending` (`null`, or `{source, changes}`) |
+| `/api/layout/pending` | A layout that arrived after the user's own: `{source, changes:[{barcode, now, then}], inverters_now, inverters_then}`, or `{pending: null}` |
 | `/api/cca` | CCA connection state + `device_info` (encoded JSON string from CCA) |
 | `/api/yaml?sensors=…&hub_sensors=…&grouping=panel\|mppt\|inverter\|none` | Generated YAML config (Tools view). `grouping` (default `none`) emits an `esphome.devices:` block and propagates `device_id:` to each child sensor at the chosen granularity |
 | `/api/tsdb/stats` | LittleFS partition + per-DB record counts (only when esp_tsdb is compiled in) |
@@ -183,6 +207,8 @@ Conventions for the tables below:
 | `POST /api/inverters/rename` | `{name, display_name}` | Set inverter display name. Empty `display_name` clears the override |
 | `POST /api/strings/rename` | `{label, display_label}` | Set string display name. Empty clears the override |
 | `POST /api/strings/rating` | `{label, rating_w}` | Set per-panel nameplate watts. `rating_w=0` clears |
+| `POST /api/layout` | `{inverters:[{name, display_name, mppts:[{label, strings:[{label, display_label, rating_w, panels:[barcode…]}]}]}]}` | Replaces the whole layout and marks it the user's. Panels by barcode, in order. `400 {error}` and nothing written if it isn't valid |
+| `POST /api/layout/pending` | `{action: "keep"\|"use"}` | Answers a waiting layout. `409` when nothing waits |
 | `POST /api/cca/refresh` | none | Triggers a fresh CCA query |
 | `POST /api/backlight` | `state=on\|off\|toggle` | Backlight control (units with backlight wired) |
 | `POST /api/config` | `{key,value}` or `{reset:key}` | Set + persist a runtime knob, or revert it to the YAML default |
