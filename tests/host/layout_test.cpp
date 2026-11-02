@@ -282,6 +282,49 @@ static void test_build_tree() {
   CHECK(t.unassigned.size() == 1 && t.unassigned[0].barcode == BC[3]);
 }
 
+// Each inverter numbers its own MPPTs: the label stays unique across the site
+// (nodes carry it), and the name shown need only be unique in its inverter.
+static void test_mppt_display_names() {
+  std::printf("mppt display names\n");
+  Layout l = good();
+  InverterSpec two;
+  two.name = "Inverter 2";
+  MpptSpec m3;
+  m3.label = "MPPT 3";
+  m3.display_label = "MPPT 1";
+  two.mppts.push_back(m3);
+  l.inverters.push_back(two);
+  CHECK(validate(l, known).empty());
+  CHECK(mppt_name(l.inverters[1].mppts[0]) == "MPPT 1");
+  CHECK(mppt_name(l.inverters[0].mppts[1]) == "MPPT 2");
+  {
+    Layout bad = l;
+    bad.inverters[0].mppts[1].display_label = "MPPT 1";  // shown twice in Inverter 1
+    CHECK(mentions(validate(bad, known), "MPPT 1"));
+  }
+  {
+    Layout bad = l;
+    bad.inverters[1].mppts[0].display_label = "MP|PT";
+    CHECK(mentions(validate(bad, known), "MP|PT"));
+  }
+  {
+    Layout bad = l;
+    bad.inverters[1].mppts[0].label = "MPPT 1";  // labels still unique site-wide
+    CHECK(!validate(bad, known).empty());
+  }
+  // The name rides the skeleton; a skeleton saved before it still reads.
+  Layout out;
+  bool manual = false;
+  Declined fp;
+  CHECK(decode_skeleton(encode_skeleton(l, true, {}), out, manual, fp));
+  CHECK(out.inverters.size() == 2 && out.inverters[1].mppts.size() == 1 &&
+        out.inverters[1].mppts[0].label == "MPPT 3" && out.inverters[1].mppts[0].display_label == "MPPT 1");
+  CHECK(decode_skeleton("v1|1|\nI|Inverter 1|\nM|MPPT 1\nS|A||0\n", out, manual, fp));
+  CHECK(out.inverters.size() == 1 && out.inverters[0].mppts.size() == 1 &&
+        out.inverters[0].mppts[0].label == "MPPT 1" && out.inverters[0].mppts[0].display_label.empty() &&
+        out.inverters[0].mppts[0].strings.size() == 1);
+}
+
 int main() {
   test_panel_names_follow_position();
   test_validate_accepts_a_good_layout();
@@ -293,6 +336,7 @@ int main() {
   test_decide();
   test_skeleton_round_trips();
   test_build_tree();
+  test_mppt_display_names();
   std::printf(failures ? "\n%d FAILED\n" : "\nall passed\n", failures);
   return failures ? 1 : 0;
 }

@@ -2056,7 +2056,7 @@
               data-barcode6="${bc6}"
               data-name="${id}"
               data-string="${s.display_label || s.label}"
-              data-mppt="${s.mppt || ''}"
+              data-mppt="${mpptName(s.mppt) || ''}"
               data-power="${w.toFixed(1)}">
               <span class="pht-id">${id}</span>
               <span class="pht-w">${wText}${pctText}</span>
@@ -2075,7 +2075,7 @@
           : '';
         html += `
           <div class="panel-string-row">
-            <div class="panel-string-label">${stringLabel}<br><span style="color:var(--text-faint);font-size:10px">${s.mppt}</span>${stringRatedPct}</div>
+            <div class="panel-string-label">${stringLabel}<br><span style="color:var(--text-faint);font-size:10px">${mpptName(s.mppt)}</span>${stringRatedPct}</div>
             <div class="panel-string-bars">${tiles}</div>
           </div>
         `;
@@ -2099,7 +2099,7 @@
         stringMap[s.label] = {
           inv: inv.name,
           invDisplay: inv.display_name || inv.name,
-          mppt: s.mppt,
+          mppt: mpptName(s.mppt),
           stringDisplay: s.display_label || s.label,
         };
       }
@@ -2187,6 +2187,12 @@
   }
 
   let dashLastErr = null;
+  // MPPT label -> the name the Topology editor gave it, from /api/inverters
+  // (mppt_names). Each inverter can have its own MPPT 1; the label, which
+  // panels carry, stays unique across the site. Pages show the name.
+  let mpptNames = {};
+  const mpptName = label => (label && mpptNames[label]) || label;
+
   async function refreshDashboard() {
     if (!document.getElementById('view-dashboard').classList.contains('active')) {
       // Page hidden — don't pay for the fetches.
@@ -2201,6 +2207,7 @@
       ]);
       const ov   = await ovR.json();
       const inv  = await invR.json();
+      mpptNames = inv.mppt_names || {};
       const dev  = await devR.json();
       const hist = histR.ok ? await histR.json() : { history: [] };
 
@@ -2894,7 +2901,7 @@
       const stringLabel = n.cca_string || dev?.string_label || '—';
       // cca_inverter is the pre-rename name, still emitted by the firmware and
       // present in any table exported before the rename.
-      const mpptLabel = n.cca_mppt || n.cca_inverter || '—';
+      const mpptLabel = mpptName(n.cca_mppt) || n.cca_inverter || '—';
       const v = dev?.voltage_in ?? 0;
       const a = dev?.current ?? dev?.current_in ?? 0;
       const w = dev?.power_in ?? 0;
@@ -5102,6 +5109,7 @@
       if (!nodeR.ok) throw new Error('/api/nodes ' + nodeR.status);
 
       const invData = await invR.json();
+      mpptNames = invData.mppt_names || {};
       const devData = await devR.json();
       const nodeData = await nodeR.json();
 
@@ -5209,7 +5217,7 @@
 
           // When grouped under an MPPT header, the per-string "· MPPT n"
           // suffix is redundant — the header already says it.
-          const mpptInline = mpptGrouped ? '' : ` · ${topoEscape(s.mppt)}`;
+          const mpptInline = mpptGrouped ? '' : ` · ${topoEscape(mpptName(s.mppt))}`;
           const section = `<div class="topo-string">
             <div class="topo-string-head">
               <strong class="topo-string-name-text">${topoEscape(stringEffective)}</strong>${stringCanonicalSuffix}
@@ -5247,7 +5255,7 @@
         for (const [mpptKey, g] of mpptGroups) {
           if (mpptGrouped) {
             bodyHtml += `<div class="topo-mppt">
-              <div class="topo-mppt-head">${topoEscape(mpptKey || 'Unassigned MPPT')}
+              <div class="topo-mppt-head">${topoEscape(mpptName(mpptKey) || 'Unassigned MPPT')}
                 <strong>${topoFmtKW(g.power)}</strong>
                 <span class="topo-string-pill">${g.strings} string${g.strings === 1 ? '' : 's'}</span>
                 <span class="topo-string-pill">${g.active}/${g.total} active</span>
@@ -5276,7 +5284,7 @@
             <div class="topo-inv-stats">
               <strong>${topoFmtKW(inv.total_power || 0)}</strong> ·
               ${(inv.active_devices ?? 0)}/${(inv.total_devices ?? 0)} panels ·
-              ${(inv.mppts || []).map(m => topoEscape(m)).join(', ') || '—'}
+              ${(inv.mppts || []).map(m => topoEscape(mpptName(m))).join(', ') || '—'}
             </div>
           </div>
           <div class="topo-inv-body">${bodyHtml}</div>
@@ -5487,6 +5495,10 @@
     return `${prefix} ${max + 1}`;
   }
 
+  // An MPPT's name as shown: unique within its inverter, so each inverter can
+  // have its own MPPT 1. Its label stays unique across the site.
+  function topoEdMpptName(m) { return m.display_label || m.label; }
+
   function topoEdAllMppts() {
     return topoEditor.tree.inverters.flatMap(inv => inv.mppts.map(m => m.label));
   }
@@ -5512,7 +5524,7 @@
       if (!r.ok) throw new Error('/api/layout ' + r.status);
       const l = await r.json();
       const strip = ms => ms.map(m => ({
-        label: m.label,
+        label: m.label, display_label: m.display_label || '',
         strings: m.strings.map(s => ({
           label: s.label, display_label: s.display_label || '', rating_w: s.rating_w || 0,
           panels: s.panels.map(p => ({ barcode: p.barcode, addr: p.addr })),
@@ -5554,7 +5566,7 @@
       inverters: topoEditor.tree.inverters.map(inv => ({
         name: inv.name, display_name: inv.display_name,
         mppts: inv.mppts.map(m => ({
-          label: m.label,
+          label: m.label, display_label: m.display_label,
           strings: m.strings.map(s => ({
             label: s.label, display_label: s.display_label, rating_w: s.rating_w,
             panels: s.panels.map(p => p.barcode),
@@ -5622,8 +5634,9 @@
         body += `<div class="topo-mppt" data-mppt-label="${topoEscape(m.label)}" data-i="${ii}" data-m="${mi}">
           <div class="topo-mppt-head">
             <span class="topo-ed-handle" data-kind="mppt" title="Drag to move this MPPT to another inverter">⠿</span>
-            <input class="topo-ed-name topo-ed-mppt-name" data-i="${ii}" data-m="${mi}" value="${topoEscape(m.label)}"
-              maxlength="32" aria-label="MPPT name">
+            <input class="topo-ed-name topo-ed-mppt-name" data-i="${ii}" data-m="${mi}" value="${topoEscape(m.display_label)}"
+              placeholder="${topoEscape(m.label)}" maxlength="32" aria-label="MPPT name">
+            ${m.display_label ? `<span class="topo-ed-canon">(${topoEscape(m.label)})</span>` : ''}
             ${m.strings.length ? '' : `<button class="topo-del" data-del="mppt" data-i="${ii}" data-m="${mi}">Delete</button>`}
           </div>
           <div class="topo-inv-body">${strings}
@@ -5658,7 +5671,7 @@
     if (el.classList.contains('topo-ed-inv-name')) {
       t.inverters[+d.i].display_name = el.value.trim();
     } else if (el.classList.contains('topo-ed-mppt-name')) {
-      t.inverters[+d.i].mppts[+d.m].label = el.value.trim();
+      t.inverters[+d.i].mppts[+d.m].display_label = el.value.trim();
     } else if (el.classList.contains('topo-ed-string-name')) {
       const s = t.inverters[+d.i].mppts[+d.m].strings[+d.s];
       s.display_label = el.value.trim();
@@ -5679,7 +5692,10 @@
     if (btn.classList.contains('topo-add-string')) {
       t.inverters[+d.i].mppts[+d.m].strings.push({ label: topoEdNextString(), display_label: '', rating_w: 0, panels: [] });
     } else if (btn.classList.contains('topo-add-mppt')) {
-      t.inverters[+d.i].mppts.push({ label: topoEdNextNumbered('MPPT', topoEdAllMppts()), strings: [] });
+      const inv = t.inverters[+d.i];
+      const label = topoEdNextNumbered('MPPT', topoEdAllMppts());
+      const shown = topoEdNextNumbered('MPPT', inv.mppts.map(topoEdMpptName));
+      inv.mppts.push({ label, display_label: shown === label ? '' : shown, strings: [] });
     } else if (btn.classList.contains('topo-add-inverter')) {
       t.inverters.push({ name: topoEdNextNumbered('Inverter', t.inverters.map(i => i.name)), display_name: '', mppts: [] });
     } else if (d.del === 'string') {
@@ -5778,6 +5794,12 @@
     src.splice(from, 1);
     let at = before ? dest.indexOf(before) : dest.length;
     if (at < 0) at = dest.length;
+    // An MPPT moving to an inverter that already shows its name takes the
+    // next free one there, rather than a save the server would refuse.
+    if (kind === 'mppt' && src !== dest && dest.some(m => topoEdMpptName(m) === topoEdMpptName(item))) {
+      const shown = topoEdNextNumbered('MPPT', dest.map(topoEdMpptName));
+      item.display_label = shown === item.label ? '' : shown;
+    }
     dest.splice(at, 0, item);
     topoEdMarkDirty();
     return true;

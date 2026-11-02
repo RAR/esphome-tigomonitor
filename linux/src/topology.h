@@ -73,6 +73,8 @@ class Topology {
   bool set_skeleton(const esphome::tigo_monitor::layout::Layout &l);
   // Forgets the editor's strings (back to the node table's alone).
   bool clear_skeleton_strings();
+  // MPPT label -> the name the editor gave it, for the MPPTs it renamed.
+  std::map<std::string, std::string> mppt_names() const;
   void set_pending(PendingLayout p);
   std::optional<PendingLayout> pending() const;
   void clear_pending();
@@ -85,6 +87,7 @@ class Topology {
   std::map<std::string, std::string> pending_names_;  // inverter name -> display name
   std::map<std::string, StringOverride> strings_;
   std::map<std::string, std::vector<std::string>> mppt_strings_;  // MPPT label -> string labels, in order
+  std::map<std::string, std::string> mppt_names_;  // MPPT label -> display name, unique within its inverter
   bool manual_ = false;
   esphome::tigo_monitor::layout::Declined declined_;
   std::optional<PendingLayout> pending_;

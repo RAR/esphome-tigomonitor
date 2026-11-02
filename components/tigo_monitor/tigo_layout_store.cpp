@@ -110,7 +110,7 @@ layout::Layout TigoMonitorComponent::current_skeleton_() const {
     layout::InverterSpec s;
     s.name = to_std_string(inv.name);
     s.display_name = to_std_string(inv.display_name);
-    for (const auto &m : inv.mppt_labels) s.mppts.push_back({to_std_string(m), {}});
+    for (const auto &m : inv.mppt_labels) s.mppts.push_back({to_std_string(m), "", {}});
     l.inverters.push_back(std::move(s));
   }
   return l;
@@ -148,6 +148,21 @@ void TigoMonitorComponent::write_assignments_(const std::vector<layout::Assignme
 bool TigoMonitorComponent::layout_manual() const {
   StateLock lock(state_mutex_);
   return layout_manual_;
+}
+
+std::map<std::string, std::string> TigoMonitorComponent::layout_mppt_names() const {
+  StateLock lock(state_mutex_);
+  std::map<std::string, std::string> out;
+  for (const auto &inv : skeleton_.inverters)
+    for (const auto &m : inv.mppts) {
+      if (m.display_label.empty()) continue;
+      // Only for an MPPT an inverter in use lists: after "Use theirs" brings
+      // the YAML's inverters back, the saved names are not theirs.
+      for (const auto &live : inverters_)
+        for (const auto &label : live.mppt_labels)
+          if (to_std_string(label) == m.label) out[m.label] = m.display_label;
+    }
+  return out;
 }
 
 std::vector<layout::Assignment> TigoMonitorComponent::current_assignments() const {

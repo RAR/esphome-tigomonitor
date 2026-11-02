@@ -40,7 +40,9 @@ struct StringSpec {
 };
 
 struct MpptSpec {
-  std::string label;  // "MPPT 1", unique across the site
+  std::string label;          // identity: what nodes carry as cca_mppt_label; unique across the site
+  std::string display_label;  // empty: show label. Unique within its inverter only, so each
+                              // inverter can number its own MPPT 1, MPPT 2, ...
   std::vector<StringSpec> strings;
 };
 
@@ -71,6 +73,8 @@ using Declined = std::map<std::string, uint32_t>;
 constexpr size_t kMaxName = 32;
 // The skeleton fits eight 256-byte NVS slots on the ESP32.
 constexpr size_t kMaxSkeleton = 2048;
+
+inline const std::string &mppt_name(const MpptSpec &m) { return m.display_label.empty() ? m.label : m.display_label; }
 
 inline std::string panel_name(const StringSpec &s, size_t index) {
   return (s.display_label.empty() ? s.label : s.display_label) + std::to_string(index + 1);
@@ -105,9 +109,14 @@ inline std::string validate(const Layout &l, const std::function<bool(const std:
     if (p.empty()) p = detail::name_problem("The inverter name", inv.display_name, false);
     if (!p.empty()) return p;
     if (!inverters.insert(inv.name).second) return "Two inverters are called \"" + inv.name + "\".";
+    std::set<std::string> shown;  // MPPT names as this inverter shows them
     for (const auto &m : inv.mppts) {
       if (!(p = detail::name_problem("An MPPT", m.label, true)).empty()) return p;
+      if (!(p = detail::name_problem("The MPPT name", m.display_label, false)).empty()) return p;
       if (!mppts.insert(m.label).second) return "\"" + m.label + "\" is listed twice; each MPPT belongs to one inverter.";
+      if (!shown.insert(mppt_name(m)).second)
+        return "Two MPPTs in \"" + (inv.display_name.empty() ? inv.name : inv.display_name) + "\" are called \"" +
+               mppt_name(m) + "\".";
       for (const auto &s : m.strings) {
         if (!(p = detail::name_problem("A string", s.label, true)).empty()) return p;
         if (!(p = detail::name_problem("The string name", s.display_label, false)).empty()) return p;
@@ -181,7 +190,7 @@ inline Tree build_tree(Layout skeleton, const std::vector<NodeView> &nodes,
     if (!known.insert(n.string_label).second) continue;
     MpptSpec *m = find_mppt(n.mppt_label);
     if (!m) {
-      t.unplaced.push_back({n.mppt_label, {}});
+      t.unplaced.push_back({n.mppt_label, "", {}});
       m = &t.unplaced.back();
     }
     StringSpec s;
@@ -251,7 +260,7 @@ inline Offer decide(bool manual, bool has_changes, uint32_t incoming_fp, uint32_
 // Inverters, MPPTs and strings without their panels, one per line:
 //   v1|<manual 0/1>|<source>=<declined fingerprint, hex>,...
 //   I|<name>|<display name>
-//   M|<label>
+//   M|<label>|<display label>   (older skeletons: M|<label>)
 //   S|<label>|<display label>|<rating W>
 // validate() keeps '|' and newlines out of every field.
 inline std::string encode_skeleton(const Layout &l, bool manual, const Declined &declined) {
@@ -267,7 +276,7 @@ inline std::string encode_skeleton(const Layout &l, bool manual, const Declined 
   for (const auto &inv : l.inverters) {
     out += "I|" + inv.name + "|" + inv.display_name + "\n";
     for (const auto &m : inv.mppts) {
-      out += "M|" + m.label + "\n";
+      out += "M|" + m.label + "|" + m.display_label + "\n";
       for (const auto &s : m.strings)
         out += "S|" + s.label + "|" + s.display_label + "|" + std::to_string(s.rating_w) + "\n";
     }
@@ -311,8 +320,8 @@ inline bool decode_skeleton(const std::string &text, Layout &l, bool &manual, De
       head = true;
     } else if (f[0] == "I" && f.size() == 3) {
       out.inverters.push_back({f[1], f[2], {}});
-    } else if (f[0] == "M" && f.size() == 2 && !out.inverters.empty()) {
-      out.inverters.back().mppts.push_back({f[1], {}});
+    } else if (f[0] == "M" && (f.size() == 2 || f.size() == 3) && !out.inverters.empty()) {
+      out.inverters.back().mppts.push_back({f[1], f.size() == 3 ? f[2] : "", {}});
     } else if (f[0] == "S" && f.size() == 4 && !out.inverters.empty() && !out.inverters.back().mppts.empty()) {
       StringSpec s;
       s.label = f[1];

@@ -132,6 +132,10 @@ function series(hours, peak) {
 // The Topology editor's tree (/api/layout): the same site as /api/inverters,
 // CCA-derived (not yet saved by hand), plus one panel the bus has found that
 // no string holds yet. That panel is not in /api/devices: it hasn't reported.
+// The second inverter numbers its own MPPTs: labels stay unique across the
+// site (panels carry them), names need only be unique in their inverter.
+const MPPT_NAMES = { 'MPPT 3': 'MPPT 1', 'MPPT 4': 'MPPT 2' };
+
 const layout = {
   manual: false,
   inverters: INVERTERS.map((inv, ii) => ({
@@ -139,6 +143,7 @@ const layout = {
     display_name: inv.display_name,
     mppts: STRINGS.filter((s) => s.inv === ii).map((s) => ({
       label: s.mppt,
+      display_label: MPPT_NAMES[s.mppt] || '',
       strings: [{
         label: s.label, display_label: '', rating_w: RATING,
         panels: of(s.label).map((d) => ({ barcode: d.barcode, addr: d.addr, name: d.name })),
@@ -164,7 +169,7 @@ export const routes = {
   },
   '/api/devices': { devices, count: devices.length },
   '/api/strings': { strings },
-  '/api/inverters': { inverters },
+  '/api/inverters': { inverters, mppt_names: MPPT_NAMES },
   '/api/layout': layout,
   '/api/layout/pending': { pending: null },
   '/api/nodes': {

@@ -147,6 +147,39 @@ after = get('/api/layout')[1]
 expect('restart: same layout', after, before)
 expect('restart: empty B still there', strings_of(after).get('B'), [])
 
+# --- each inverter numbers its own MPPTs: the label stays site-unique,
+# the name shown need only be unique in its inverter
+def two_inverters(name_3='MPPT 1', name_1=''):
+    t = tree([BC[0]], [])
+    t['inverters'][0]['mppts'][0]['display_label'] = name_1
+    t['inverters'].append({'name': 'Inverter 2', 'display_name': '', 'mppts': [
+        {'label': 'MPPT 3', 'display_label': name_3, 'strings': [
+            {'label': 'C', 'display_label': '', 'rating_w': 0, 'panels': [BC[1]]}]}]})
+    return t
+expect('two MPPT 1s, one per inverter', post('/api/layout', two_inverters())[0], 200)
+l = get('/api/layout')[1]
+expect('MPPT names in the layout', [[(m['label'], m['display_label']) for m in i['mppts']] for i in l['inverters']],
+       [[('MPPT 1', '')], [('MPPT 3', 'MPPT 1')]])
+nodes = {n['long_address']: n for n in get('/api/nodes')[1]['nodes']}
+expect('panel keeps the MPPT label', nodes[BC[1]]['cca_mppt'], 'MPPT 3')
+inv = get('/api/inverters')[1]
+expect('/api/inverters names the MPPT', inv.get('mppt_names'), {'MPPT 3': 'MPPT 1'})
+c, r = post('/api/layout', two_inverters(name_1='X'))
+expect('a name taken by another inverter is fine', c, 200)
+bad = two_inverters()
+bad['inverters'][1]['mppts'].append({'label': 'MPPT 4', 'display_label': 'MPPT 1', 'strings': []})
+c, r = post('/api/layout', bad)
+expect('the same name twice in one inverter refused', (c, 'MPPT 1' in r.get('error', '')), (400, True))
+post('/api/layout', two_inverters())
+restart()
+l = get('/api/layout')[1]
+expect('restart: MPPT names kept', [[(m['label'], m['display_label']) for m in i['mppts']] for i in l['inverters']],
+       [[('MPPT 1', '')], [('MPPT 3', 'MPPT 1')]])
+expect('restart: /api/inverters too', get('/api/inverters')[1].get('mppt_names'), {'MPPT 3': 'MPPT 1'})
+post('/api/layout', tree([BC[0]], []))
+expect('back to one inverter: no MPPT names', get('/api/inverters')[1].get('mppt_names'), {})
+expect('back to one inverter: layout as before', get('/api/layout')[1], before)
+
 # --- what arrives after a hand-made layout waits for the user
 def wait(fn, secs=10):
     end = time.time() + secs

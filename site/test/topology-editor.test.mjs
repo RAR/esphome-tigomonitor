@@ -185,7 +185,7 @@ test('Save posts the tree with panels as barcodes in order', async () => {
   await page.waitForFunction(() => !document.getElementById('topo-unassigned'));
   assert.deepEqual(api.posts, [{ inverters: [{
     name: 'Inverter 1', display_name: 'South Roof',
-    mppts: [{ label: 'MPPT 1', strings: [
+    mppts: [{ label: 'MPPT 1', display_label: '', strings: [
       { label: 'A', display_label: '', rating_w: 400, panels: [P[1]] },
       { label: 'B', display_label: '', rating_w: 0, panels: [P[0]] },
     ] }],
@@ -546,5 +546,78 @@ test('touch: long-press an inverter handle then move reorders; a quick swipe doe
   assert.deepEqual(await invOrder(page), ['Inverter 1', 'Inverter 2']);
   await touchDrag(page, invHandle('Inverter 2'), '[data-inv-name="Inverter 1"] .topo-inv-head', 400);
   assert.deepEqual(await invOrder(page), ['Inverter 2', 'Inverter 1']);
+  await ctx.close();
+});
+
+// ---- MPPT names: each inverter numbers its own; the label stays site-unique.
+const mpptField = (label) => `[data-mppt-label="${label}"] .topo-ed-mppt-name`;
+
+test('the MPPT field names it; its label stays, so two inverters can each have an MPPT 1', async () => {
+  const { page, ctx, api } = await open({ layout: twoInverters() });
+  await edit(page);
+  assert.equal(await page.inputValue(mpptField('MPPT 2')), '');
+  assert.equal(await page.getAttribute(mpptField('MPPT 2'), 'placeholder'), 'MPPT 2');
+  await page.fill(mpptField('MPPT 2'), 'MPPT 1');
+  await page.click('#topo-save-btn');
+  await page.waitForFunction(() => !document.getElementById('topo-unassigned'));
+  assert.deepEqual(api.posts[0].inverters.map((i) => i.mppts.map((m) => [m.label, m.display_label])),
+    [[['MPPT 1', '']], [['MPPT 2', 'MPPT 1']]]);
+  await ctx.close();
+});
+
+test('+ MPPT in a new inverter shows MPPT 1 there, with a label no other MPPT has', async () => {
+  const { page, ctx, api } = await open({ layout: twoInverters() });
+  await edit(page);
+  await page.click('.topo-add-inverter');
+  await page.click('[data-inv-name="Inverter 3"] .topo-add-mppt');
+  assert.equal(await page.inputValue(mpptField('MPPT 3')), 'MPPT 1');
+  await page.click('[data-inv-name="Inverter 3"] .topo-add-mppt');
+  assert.equal(await page.inputValue(mpptField('MPPT 4')), 'MPPT 2');
+  await page.click('#topo-save-btn');
+  await page.waitForFunction(() => !document.getElementById('topo-unassigned'));
+  assert.deepEqual(api.posts[0].inverters[2].mppts.map((m) => [m.label, m.display_label]),
+    [['MPPT 3', 'MPPT 1'], ['MPPT 4', 'MPPT 2']]);
+  await ctx.close();
+});
+
+test('a saved MPPT name fills the field, with its label beside it', async () => {
+  const l = twoInverters();
+  l.inverters[1].mppts[0].display_label = 'MPPT 1';
+  const { page, ctx } = await open({ layout: l });
+  await edit(page);
+  assert.equal(await page.inputValue(mpptField('MPPT 2')), 'MPPT 1');
+  assert.match(await page.textContent('[data-mppt-label="MPPT 2"] .topo-mppt-head'), /\(MPPT 2\)/);
+  await ctx.close();
+});
+
+// The fixtures' North Roof inverter has MPPTs labelled 3 and 4, named 1 and 2.
+test('Topology, Dashboard and Node Table show an MPPT by its name', async () => {
+  const { page, ctx } = await open();
+  await page.waitForSelector('[data-inv-name="Inverter 2"], .topo-inv');
+  const topo = await page.textContent('#topo-tree');
+  assert.match(topo, /North Roof[\s\S]*MPPT 1, MPPT 2/);
+  assert.doesNotMatch(topo, /MPPT 3|MPPT 4/);
+  await page.evaluate(() => { window.location.hash = '#dashboard'; });
+  await page.waitForFunction(() => /String C/.test(document.getElementById('view-dashboard').textContent));
+  const dash = await page.textContent('#view-dashboard');
+  assert.doesNotMatch(dash, /MPPT 3|MPPT 4/);
+  await page.evaluate(() => { window.location.hash = '#nodes'; });
+  await page.waitForFunction(() => /String C/.test(document.getElementById('nodes-tbody').textContent));
+  const nodes = await page.textContent('#nodes-tbody');
+  assert.doesNotMatch(nodes, /MPPT 3|MPPT 4/);
+  assert.match(nodes, /MPPT 1/);
+  await ctx.close();
+});
+
+test('an MPPT dragged into an inverter that already shows its name takes the next free one there', async () => {
+  const l = twoInverters();
+  l.inverters[1].mppts[0].label = 'MPPT 7';
+  l.inverters[1].mppts[0].display_label = 'MPPT 1';
+  const { page, ctx } = await open({ layout: l });
+  await edit(page);
+  await dragToEnd(page, handle('mppt', 'MPPT 7'), '[data-inv-name="Inverter 1"]');
+  assert.deepEqual(await mpptsIn(page, 'Inverter 1'), ['MPPT 1', 'MPPT 7']);
+  assert.equal(await page.inputValue(mpptField('MPPT 1')), '');
+  assert.equal(await page.inputValue(mpptField('MPPT 7')), 'MPPT 2');
   await ctx.close();
 });

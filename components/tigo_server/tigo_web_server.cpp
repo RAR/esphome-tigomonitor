@@ -2725,6 +2725,10 @@ void TigoWebServer::build_strings_json(PSRAMString& json) {
   json.append("]}");
 }
 
+namespace {
+void append_json_str(PSRAMString &out, const std::string &in);  // with the layout handlers below
+}  // namespace
+
 void TigoWebServer::build_inverters_json(PSRAMString& json) {
   json.append("{\"inverters\":[");
 
@@ -2886,7 +2890,18 @@ void TigoWebServer::build_inverters_json(PSRAMString& json) {
   }
   });
 
-  json.append("]}");
+  // MPPT label -> the name the Topology editor gave it; each inverter can
+  // have its own MPPT 1. The page shows these in place of the labels.
+  json.append("],\"mppt_names\":{");
+  bool first_name = true;
+  for (const auto &kv : parent_->layout_mppt_names()) {
+    if (!first_name) json.append(",");
+    first_name = false;
+    append_json_str(json, kv.first);
+    json.append(":");
+    append_json_str(json, kv.second);
+  }
+  json.append("}}");
 }
 
 void TigoWebServer::build_energy_history_json(PSRAMString& json) {
@@ -4178,6 +4193,7 @@ std::string parse_layout_body(cJSON *root, layout::Layout &out) {
       if (!cJSON_IsObject(m)) return "every MPPT must be an object";
       layout::MpptSpec ms;
       ms.label = str_item(m, "label");
+      ms.display_label = str_item(m, "display_label");
       cJSON *s;
       cJSON_ArrayForEach(s, cJSON_GetObjectItem(m, "strings")) {
         if (!cJSON_IsObject(s)) return "every string must be an object";
@@ -4211,6 +4227,8 @@ void append_mppts(PSRAMString &out, const std::vector<layout::MpptSpec> &ms, lay
     out.append(first_m ? "{\"label\":" : ",{\"label\":");
     first_m = false;
     append_json_str(out, m.label);
+    out.append(",\"display_label\":");
+    append_json_str(out, m.display_label);
     out.append(",\"strings\":[");
     bool first_s = true;
     for (const auto &s : m.strings) {

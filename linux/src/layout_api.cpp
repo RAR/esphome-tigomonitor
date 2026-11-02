@@ -37,7 +37,7 @@ json layout_json(const Monitor &mon, const Topology &topo) {
         strings.push_back(
             {{"label", s.label}, {"display_label", s.display_label}, {"rating_w", s.rating_w}, {"panels", panels}});
       }
-      arr.push_back({{"label", m.label}, {"strings", strings}});
+      arr.push_back({{"label", m.label}, {"display_label", m.display_label}, {"strings", strings}});
     }
     return arr;
   };
@@ -75,6 +75,7 @@ std::string parse_layout(const json &body, layout::Layout &out) {
       if (!m.is_object()) return "every MPPT must be an object";
       layout::MpptSpec ms;
       ms.label = str(m, "label");
+      ms.display_label = str(m, "display_label");
       for (const auto &s : m.value("strings", json::array())) {
         if (!s.is_object()) return "every string must be an object";
         layout::StringSpec ss;

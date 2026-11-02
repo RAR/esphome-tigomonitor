@@ -6,6 +6,7 @@
 #include <nlohmann/json.hpp>
 
 #include <fstream>
+#include <iterator>
 
 namespace tigod {
 
@@ -27,6 +28,9 @@ void Topology::load() {
     const json pending = j.value("pending_inverter_names", json::object());
     const json ms = j.value("mppt_strings", json::object());
     for (const auto &kv : ms.items()) mppt_strings_[kv.key()] = kv.value().get<std::vector<std::string>>();
+    const json mn = j.value("mppt_names", json::object());
+    for (const auto &kv : mn.items())
+      if (kv.value().is_string()) mppt_names_[kv.key()] = kv.value();
     manual_ = j.value("manual", false);
     const json declined = j.value("declined", json::object());
     for (const auto &kv : declined.items())
@@ -65,6 +69,7 @@ bool Topology::save_locked_() const {
                                         {"strings", str},
                                         {"pending_inverter_names", pending_names_},
                                         {"mppt_strings", mppt_strings_},
+                                        {"mppt_names", mppt_names_},
                                         {"manual", manual_},
                                         {"declined", declined_}})
                                       .dump(2) +
@@ -93,6 +98,14 @@ bool Topology::set_inverters(std::vector<InverterConfig> inverters) {
     }
   }
   inverters_ = std::move(inverters);
+  // A name is for an MPPT in a given inverter; one no inverter lists any
+  // more must not name a different MPPT that later takes its label.
+  for (auto it = mppt_names_.begin(); it != mppt_names_.end();) {
+    bool listed = false;
+    for (const auto &i : inverters_)
+      for (const auto &m : i.mppts) listed = listed || m == it->first;
+    it = listed ? std::next(it) : mppt_names_.erase(it);
+  }
   return save_locked_();
 }
 
@@ -170,6 +183,8 @@ layout::Layout Topology::skeleton() const {
     for (const auto &m : i.mppts) {
       layout::MpptSpec ms;
       ms.label = m;
+      auto name = mppt_names_.find(m);
+      if (name != mppt_names_.end()) ms.display_label = name->second;
       auto it = mppt_strings_.find(m);
       if (it != mppt_strings_.end()) {
         for (const auto &label : it->second) {
@@ -194,6 +209,7 @@ bool Topology::set_skeleton(const layout::Layout &l) {
   std::lock_guard<std::mutex> lock(mu_);
   inverters_.clear();
   mppt_strings_.clear();
+  mppt_names_.clear();
   for (const auto &inv : l.inverters) {
     InverterConfig ic;
     ic.name = inv.name;
@@ -201,6 +217,7 @@ bool Topology::set_skeleton(const layout::Layout &l) {
     pending_names_.erase(inv.name);
     for (const auto &m : inv.mppts) {
       ic.mppts.push_back(m.label);
+      if (!m.display_label.empty()) mppt_names_[m.label] = m.display_label;
       auto &labels = mppt_strings_[m.label];
       for (const auto &s : m.strings) {
         labels.push_back(s.label);
@@ -211,6 +228,11 @@ bool Topology::set_skeleton(const layout::Layout &l) {
     inverters_.push_back(std::move(ic));
   }
   return save_locked_();
+}
+
+std::map<std::string, std::string> Topology::mppt_names() const {
+  std::lock_guard<std::mutex> lock(mu_);
+  return mppt_names_;
 }
 
 bool Topology::clear_skeleton_strings() {

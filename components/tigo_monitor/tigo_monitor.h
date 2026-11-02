@@ -487,6 +487,9 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   // Saves a layout from the editor; "" or what is wrong with it.
   std::string set_layout(const layout::Layout &l);
   bool layout_manual() const;
+  // MPPT label -> its name from the Topology editor, for the MPPTs of the
+  // inverters in use that it renamed.
+  std::map<std::string, std::string> layout_mppt_names() const;
   // Every node with a barcode, as the labels it carries now.
   std::vector<layout::Assignment> current_assignments() const;
   // An incoming layout: decides with layout::decide() and holds it if the

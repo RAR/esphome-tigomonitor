@@ -476,7 +476,7 @@ void HttpServer::routes_() {
     send_json(res, {{"strings", arr}});
   });
   svr.Get("/api/inverters", [this, &mon](const httplib::Request &, httplib::Response &res) {
-    send_json(res, {{"inverters", inverters_json(mon, ctx_.topology)}});
+    send_json(res, {{"inverters", inverters_json(mon, ctx_.topology)}, {"mppt_names", ctx_.topology.mppt_names()}});
   });
 
   svr.Post("/api/nodes/delete", [this](const httplib::Request &req, httplib::Response &res) {
