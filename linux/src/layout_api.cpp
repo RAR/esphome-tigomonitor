@@ -136,7 +136,7 @@ layout::Offer offer_layout(Monitor &mon, Topology &topo, PendingLayout in, bool 
   bool changes = !layout::diff(mon.current_assignments(), in.assignments).empty();
   if (!in.inverters.empty() && inverter_mppts(in.inverters) != inverter_mppts(topo.inverters())) changes = true;
   in.fp = layout::fingerprint(in.assignments, inverter_mppts(in.inverters));
-  layout::Offer o = layout::decide(topo.manual(), changes, in.fp, topo.declined_fp());
+  layout::Offer o = layout::decide(topo.manual(), changes, in.fp, topo.declined_fp(in.source));
   if (o == layout::Offer::apply) apply_incoming(mon, topo, in, false, inverters_added);
   LOGI("layout: from %s, %zu panels matched: %s", in.source.c_str(), in.assignments.size(), offer_name(o));
   if (o == layout::Offer::hold) topo.set_pending(std::move(in));
@@ -174,7 +174,7 @@ bool resolve_pending(Monitor &mon, Topology &topo, bool use) {
     topo.clear_skeleton_strings();
     LOGI("layout: the user took the %s layout", p->source.c_str());
   } else {
-    topo.set_declined_fp(p->fp);
+    topo.set_declined_fp(p->source, p->fp);
     LOGI("layout: the user kept theirs over the %s layout", p->source.c_str());
   }
   topo.clear_pending();

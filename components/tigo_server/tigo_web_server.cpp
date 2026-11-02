@@ -2312,7 +2312,8 @@ esp_err_t TigoWebServer::api_node_import_handler(httpd_req_t *req) {
   // them like a sync's; its addresses still restore at once, carrying the
   // labels each panel has now (as the Raspberry Pi build does).
   std::vector<tigo_monitor::layout::Assignment> held_labels;
-  if (server->parent_->layout_manual()) {
+  const bool layout_manual = server->parent_->layout_manual();
+  if (layout_manual) {
     std::map<std::string, tigo_monitor::layout::Assignment> now;
     for (const auto &a : server->parent_->current_assignments()) now[a.barcode] = a;
     for (auto &node : nodes) {
@@ -2335,7 +2336,8 @@ esp_err_t TigoWebServer::api_node_import_handler(httpd_req_t *req) {
   // Re-apply manual Topology overrides now that the groups exist. Each setter persists to
   // NVS and no-ops (logs) if its target string/inverter isn't present.
   int overrides_applied = 0;
-  if (success) {
+  // Not over a layout the user made: its string names name its panels.
+  if (success && !layout_manual) {
     for (const auto &io : inv_overrides)
       if (server->parent_->set_inverter_display_name(io.first, io.second)) overrides_applied++;
     for (const auto &so : str_overrides) {

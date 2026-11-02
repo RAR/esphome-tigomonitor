@@ -1308,6 +1308,7 @@ bool TigoMonitorComponent::set_inverter_display_name(const std::string &canonica
              canonical.c_str(), display_name.c_str());
     // A saved Topology layout stands in for the YAML at boot, so it carries the name too.
     if (layout_manual_) {
+      StateLock lock(state_mutex_);
       for (auto &s : skeleton_.inverters)
         if (s.name == canonical) s.display_name = display_name;
       save_skeleton_();
@@ -1335,6 +1336,7 @@ bool TigoMonitorComponent::set_string_panel_rating(const std::string &canonical,
   ESP_LOGI(TAG, "Set panel rating for string '%s' = %u W (saved to NVS)",
            canonical.c_str(), (unsigned) rating_w);
   if (layout_manual_) {
+    StateLock lock(state_mutex_);
     for (auto &inv : skeleton_.inverters)
       for (auto &m : inv.mppts)
         for (auto &st : m.strings)
@@ -1363,6 +1365,7 @@ bool TigoMonitorComponent::set_string_display_label(const std::string &canonical
   ESP_LOGI(TAG, "Renamed string '%s' -> '%s' (saved to NVS)",
            canonical.c_str(), display_label.c_str());
   if (layout_manual_) {
+    StateLock lock(state_mutex_);
     for (auto &inv : skeleton_.inverters)
       for (auto &m : inv.mppts)
         for (auto &st : m.strings)

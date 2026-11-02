@@ -61,6 +61,11 @@ struct Assignment {
 // (inverter name, its MPPT labels): an incoming inverter list on both builds.
 using InverterMppts = std::vector<std::pair<std::string, std::vector<std::string>>>;
 
+// The layout the user last turned down, per source ("cca", "cloud",
+// "import", "yaml"): one shared value would let a CCA sync and the YAML read
+// at boot overwrite each other's answer and ask again forever.
+using Declined = std::map<std::string, uint32_t>;
+
 // The ESP32 keeps a node in a '|'-delimited 256-byte NVS slot with three of
 // these in it, so every name is capped and may not hold the delimiter.
 constexpr size_t kMaxName = 32;
@@ -244,15 +249,21 @@ inline Offer decide(bool manual, bool has_changes, uint32_t incoming_fp, uint32_
 }
 
 // Inverters, MPPTs and strings without their panels, one per line:
-//   v1|<manual 0/1>|<declined fingerprint, hex>
+//   v1|<manual 0/1>|<source>=<declined fingerprint, hex>,...
 //   I|<name>|<display name>
 //   M|<label>
 //   S|<label>|<display label>|<rating W>
 // validate() keeps '|' and newlines out of every field.
-inline std::string encode_skeleton(const Layout &l, bool manual, uint32_t declined_fp) {
-  char head[32];
-  std::snprintf(head, sizeof(head), "v1|%d|%08x\n", manual ? 1 : 0, static_cast<unsigned>(declined_fp));
-  std::string out = head;
+inline std::string encode_skeleton(const Layout &l, bool manual, const Declined &declined) {
+  std::string out = std::string("v1|") + (manual ? "1" : "0") + "|";
+  bool first = true;
+  for (const auto &kv : declined) {
+    char fp[12];
+    std::snprintf(fp, sizeof(fp), "%08x", static_cast<unsigned>(kv.second));
+    out += (first ? "" : ",") + kv.first + "=" + fp;
+    first = false;
+  }
+  out += "\n";
   for (const auto &inv : l.inverters) {
     out += "I|" + inv.name + "|" + inv.display_name + "\n";
     for (const auto &m : inv.mppts) {
@@ -264,7 +275,7 @@ inline std::string encode_skeleton(const Layout &l, bool manual, uint32_t declin
   return out;
 }
 
-inline bool decode_skeleton(const std::string &text, Layout &l, bool &manual, uint32_t &declined_fp) {
+inline bool decode_skeleton(const std::string &text, Layout &l, bool &manual, Declined &declined) {
   auto split = [](const std::string &line) {
     std::vector<std::string> f;
     size_t start = 0;
@@ -287,7 +298,16 @@ inline bool decode_skeleton(const std::string &text, Layout &l, bool &manual, ui
     if (!head) {
       if (f.size() != 3 || f[0] != "v1") return false;
       manual = f[1] == "1";
-      declined_fp = static_cast<uint32_t>(std::strtoul(f[2].c_str(), nullptr, 16));
+      declined.clear();
+      size_t at = 0;
+      while (at < f[2].size()) {
+        size_t comma = f[2].find(',', at);
+        std::string item = f[2].substr(at, comma == std::string::npos ? std::string::npos : comma - at);
+        size_t eq = item.find('=');
+        if (eq == std::string::npos) return false;
+        declined[item.substr(0, eq)] = static_cast<uint32_t>(std::strtoul(item.c_str() + eq + 1, nullptr, 16));
+        at = comma == std::string::npos ? f[2].size() : comma + 1;
+      }
       head = true;
     } else if (f[0] == "I" && f.size() == 3) {
       out.inverters.push_back({f[1], f[2], {}});

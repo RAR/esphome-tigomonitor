@@ -63,8 +63,9 @@ class Topology {
   // arrives later is held for them (tigo_layout.h decide()).
   bool manual() const;
   bool set_manual(bool manual);
-  uint32_t declined_fp() const;
-  bool set_declined_fp(uint32_t fp);
+  // The layout last turned down from each source (tigo_layout.h Declined).
+  uint32_t declined_fp(const std::string &source) const;
+  bool set_declined_fp(const std::string &source, uint32_t fp);
   // Inverters -> MPPTs -> strings with their names and ratings, no panels.
   esphome::tigo_monitor::layout::Layout skeleton() const;
   // Replaces the inverters and each MPPT's strings; sets the strings' names
@@ -85,7 +86,7 @@ class Topology {
   std::map<std::string, StringOverride> strings_;
   std::map<std::string, std::vector<std::string>> mppt_strings_;  // MPPT label -> string labels, in order
   bool manual_ = false;
-  uint32_t declined_fp_ = 0;
+  esphome::tigo_monitor::layout::Declined declined_;
   std::optional<PendingLayout> pending_;
 };
 

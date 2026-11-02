@@ -190,6 +190,13 @@ restart()
 sync()
 expect('after a restart: still not asked', get('/api/layout')[1]['pending'], None)
 expect('after a restart: labels still mine', labels(), mine)
+# Turning down an import doesn't forget the CCA layout already turned down.
+imp = [{'addr': a, 'long_address': b, 'cca_label': 'Y' + str(i + 1), 'cca_string': 'Y', 'cca_mppt': 'MPPT 8'}
+       for i, (a, b) in enumerate(zip(['0011', '0012', '0013', '0014'], BC))]
+expect('import held', post('/api/nodes/import', {'nodes': imp})[1].get('layout_held'), True)
+post('/api/layout/pending', {'action': 'keep'})
+sync()
+expect('after keeping an import: the same CCA layout still not asked', get('/api/layout')[1]['pending'], None)
 
 cca_has(list(reversed(BC)))
 get('/api/cca/refresh')
@@ -208,7 +215,7 @@ post('/api/config', {'key': 'cca_ip', 'value': ''})
 time.sleep(1.5)
 
 # --- a node-table import while manual: its labels wait, its addresses don't
-post('/api/layout', tree([BC[0], BC[1]], [BC[2]]))
+post('/api/layout', tree([BC[0], BC[1]], [BC[2]], display_a='East'))
 mine = labels()
 same = [{'addr': a, 'long_address': b, 'cca_label': mine[b][0], 'cca_string': mine[b][1], 'cca_mppt': mine[b][2]}
         for a, b in zip(['0021', '0022', '0023', '0024'], BC)]
@@ -217,9 +224,11 @@ expect('identical import: nothing waiting', get('/api/layout')[1]['pending'], No
 expect('identical import: new addresses taken', sorted(n['addr'] for n in get('/api/nodes')[1]['nodes']),
        ['0021', '0022', '0023', '0024'])
 other = [dict(e, cca_label='Z' + str(i + 1), cca_string='Z', cca_mppt='MPPT 9') for i, e in enumerate(same)]
-c, r = post('/api/nodes/import', {'nodes': other})
+c, r = post('/api/nodes/import', {'nodes': other, 'strings': [{'label': 'A', 'display_label': '', 'panel_rating_w': 250}]})
 expect('different import: held', (r.get('layout_held'), get('/api/layout')[1]['pending']['source']), (True, 'import'))
 expect('different import: labels unchanged', labels(), mine)
+a = [s for inv in get('/api/layout')[1]['inverters'] for m in inv['mppts'] for s in m['strings'] if s['label'] == 'A'][0]
+expect("different import: the file's string name and rating wait too", (a['display_label'], a['rating_w']), ('East', 400))
 expect('use the import', post('/api/layout/pending', {'action': 'use'})[0], 200)
 expect('import used', labels()[BC[0]], ('Z1', 'Z', 'MPPT 9'))
 

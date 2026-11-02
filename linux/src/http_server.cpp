@@ -1149,7 +1149,8 @@ void HttpServer::routes_() {
     // the labels each panel has now.
     PendingLayout in;
     in.source = "import";
-    if (ctx_.topology.manual()) {
+    const bool manual = ctx_.topology.manual();
+    if (manual) {
       std::map<std::string, esphome::tigo_monitor::layout::Assignment> now;
       for (const auto &a : ctx_.mutable_monitor.current_assignments()) now[a.barcode] = a;
       for (auto &n : nodes) {
@@ -1165,10 +1166,11 @@ void HttpServer::routes_() {
     bool held = !in.assignments.empty() &&
                 offer_layout(ctx_.mutable_monitor, ctx_.topology, std::move(in)) ==
                     esphome::tigo_monitor::layout::Offer::hold;
-    // The file's Topology names and ratings, as the firmware applies them.
+    // The file's Topology names and ratings, as the firmware applies them;
+    // not over a layout the user made, whose string names name its panels.
     int overrides = 0;
-    const json file_inverters = body.value("inverters", json::array());
-    const json file_strings = body.value("strings", json::array());
+    const json file_inverters = manual ? json::array() : body.value("inverters", json::array());
+    const json file_strings = manual ? json::array() : body.value("strings", json::array());
     for (const auto &o : file_inverters) {
       if (!o.is_object() || o.value("name", "") == "" || !o.contains("display_name") || !o["display_name"].is_string())
         continue;

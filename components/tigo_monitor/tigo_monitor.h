@@ -853,7 +853,7 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   };
   layout::Layout skeleton_;
   bool layout_manual_ = false;
-  uint32_t layout_declined_fp_ = 0;
+  layout::Declined layout_declined_;  // per source
   std::optional<HeldLayout> held_layout_;
   decltype(inverters_) yaml_inverters_;  // the YAML's, while a saved layout stands in for them
   void load_layout_();

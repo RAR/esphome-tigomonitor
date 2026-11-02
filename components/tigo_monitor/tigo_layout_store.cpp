@@ -41,14 +41,14 @@ void TigoMonitorComponent::load_layout_() {
   if (text.empty()) return;
   layout::Layout sk;
   bool manual = false;
-  uint32_t fp = 0;
-  if (!layout::decode_skeleton(text, sk, manual, fp)) {
+  layout::Declined declined;
+  if (!layout::decode_skeleton(text, sk, manual, declined)) {
     ESP_LOGW(LTAG, "Saved layout unreadable; using the YAML's");
     return;
   }
   skeleton_ = std::move(sk);
   layout_manual_ = manual;
-  layout_declined_fp_ = fp;
+  layout_declined_ = std::move(declined);
   bool yaml_has_inverters = !inverters_.empty();
   if (!manual && yaml_has_inverters) {
     skeleton_.inverters.clear();  // the YAML's inverters stand
@@ -61,7 +61,7 @@ void TigoMonitorComponent::load_layout_() {
   // A YAML inverters: block that disagrees waits for the user, like a sync.
   if (manual && yaml_has_inverters && yaml != inverter_mppts_()) {
     uint32_t yfp = layout::fingerprint({}, yaml);
-    if (yfp != layout_declined_fp_) {
+    if (yfp != layout_declined_["yaml"]) {
       held_layout_ = HeldLayout{"yaml", {}, yaml, yfp};
       ESP_LOGW(LTAG, "The YAML's inverters differ from the saved layout; the Topology page asks which to keep");
     }
@@ -69,7 +69,7 @@ void TigoMonitorComponent::load_layout_() {
 }
 
 bool TigoMonitorComponent::save_skeleton_() {
-  std::string text = layout::encode_skeleton(skeleton_, layout_manual_, layout_declined_fp_);
+  std::string text = layout::encode_skeleton(skeleton_, layout_manual_, layout_declined_);
   if (text.size() > kSkeletonSlots * (kSlotBytes - 1)) return false;
   for (int i = 0; i < kSkeletonSlots; i++) {
     char buf[kSlotBytes] = {};
@@ -194,7 +194,7 @@ std::string TigoMonitorComponent::set_layout(const layout::Layout &l) {
   for (auto &inv : sk.inverters)
     for (auto &m : inv.mppts)
       for (auto &s : m.strings) s.panels.clear();
-  if (layout::encode_skeleton(sk, true, layout_declined_fp_).size() > kSkeletonSlots * (kSlotBytes - 1))
+  if (layout::encode_skeleton(sk, true, layout_declined_).size() > kSkeletonSlots * (kSlotBytes - 1))
     return "This layout has too many inverters, MPPTs or strings to store on this device.";
 
   write_assignments_(layout::assignments(l), true);
@@ -218,7 +218,7 @@ layout::Offer TigoMonitorComponent::offer_layout(const char *source, std::vector
   bool changes = !layout::diff(current_assignments(), incoming).empty() ||
                  (!inverters.empty() && inverters != inverter_mppts_());
   uint32_t fp = layout::fingerprint(incoming, inverters);
-  layout::Offer o = layout::decide(layout_manual_, changes, fp, layout_declined_fp_);
+  layout::Offer o = layout::decide(layout_manual_, changes, fp, layout_declined_[source]);
   if (o == layout::Offer::hold) {
     held_layout_ = HeldLayout{source, std::move(incoming), std::move(inverters), fp};
     ESP_LOGW(LTAG, "A layout from %s differs from the user's; the Topology page asks which to keep", source);
@@ -247,7 +247,7 @@ bool TigoMonitorComponent::resolve_layout_pending(bool use) {
   HeldLayout h = std::move(*held_layout_);
   held_layout_.reset();
   if (!use) {
-    layout_declined_fp_ = h.fp;
+    layout_declined_[h.source] = h.fp;
     save_skeleton_();
     ESP_LOGI(LTAG, "Kept the user's layout over the one from %s", h.source.c_str());
     return true;

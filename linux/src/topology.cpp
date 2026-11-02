@@ -28,7 +28,9 @@ void Topology::load() {
     const json ms = j.value("mppt_strings", json::object());
     for (const auto &kv : ms.items()) mppt_strings_[kv.key()] = kv.value().get<std::vector<std::string>>();
     manual_ = j.value("manual", false);
-    declined_fp_ = j.value("declined_fp", 0u);
+    const json declined = j.value("declined", json::object());
+    for (const auto &kv : declined.items())
+      if (kv.value().is_number_unsigned()) declined_[kv.key()] = kv.value().get<uint32_t>();
     for (const auto &o : invs) {
       InverterConfig inv;
       inv.name = o.value("name", "");
@@ -64,7 +66,7 @@ bool Topology::save_locked_() const {
                                         {"pending_inverter_names", pending_names_},
                                         {"mppt_strings", mppt_strings_},
                                         {"manual", manual_},
-                                        {"declined_fp", declined_fp_}})
+                                        {"declined", declined_}})
                                       .dump(2) +
                                       "\n");
 }
@@ -146,14 +148,15 @@ bool Topology::set_manual(bool manual) {
   return save_locked_();
 }
 
-uint32_t Topology::declined_fp() const {
+uint32_t Topology::declined_fp(const std::string &source) const {
   std::lock_guard<std::mutex> lock(mu_);
-  return declined_fp_;
+  auto it = declined_.find(source);
+  return it == declined_.end() ? 0 : it->second;
 }
 
-bool Topology::set_declined_fp(uint32_t fp) {
+bool Topology::set_declined_fp(const std::string &source, uint32_t fp) {
   std::lock_guard<std::mutex> lock(mu_);
-  declined_fp_ = fp;
+  declined_[source] = fp;
   return save_locked_();
 }
 

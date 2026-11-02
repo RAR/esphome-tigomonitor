@@ -210,13 +210,19 @@ static void test_skeleton_round_trips() {
   bare.name = "Inverter 2";
   l.inverters.push_back(bare);
 
-  std::string enc = encode_skeleton(l, true, 0xDEADBEEF);
+  // One turned-down layout per source, so a recurring CCA sync and the
+  // YAML read at every boot don't overwrite each other's answer.
+  Declined declined = {{"cca", 0xDEADBEEF}, {"yaml", 0x12345678}};
+  std::string enc = encode_skeleton(l, true, declined);
   CHECK(enc.size() <= kMaxSkeleton);
   Layout out;
   bool manual = false;
-  uint32_t fp = 0;
+  Declined fp;
   CHECK(decode_skeleton(enc, out, manual, fp));
-  CHECK(manual && fp == 0xDEADBEEF);
+  CHECK(manual && fp == declined);
+  Declined none;
+  CHECK(decode_skeleton(encode_skeleton(l, false, none), out, manual, fp) && !manual && fp.empty());
+  CHECK(decode_skeleton(encode_skeleton(l, true, declined), out, manual, fp));
   CHECK(out.inverters.size() == 2);
   if (out.inverters.size() == 2) {
     const auto &i0 = out.inverters[0];
