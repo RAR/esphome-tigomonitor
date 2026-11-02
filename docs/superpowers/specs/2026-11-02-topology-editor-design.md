@@ -206,10 +206,9 @@ cross-site refusal; ESP32: `api_token`).
 - NVS encoding on the ESP32 and its limits.
 - Whether the Pi's Tools-page inverter form stays, or points to the editor.
 
-## Open question for the user
+## Branch (decided)
 
-- **Branch.** The Topology page and both HTTP servers differ heavily between
-  `main` and the unmerged `feature/cca-replacement` (~760 changed lines in
-  `app.html`, `http_server.cpp`, `monitor.cpp`). Building on `main` means a
-  painful merge later; building on `feature/cca-replacement` ties this to that
-  branch's release.
+Built on `feature/cca-replacement` (branch `feature/topology-editor` off it),
+because the Topology page and both HTTP servers differ heavily between it and
+`main` (~760 changed lines in `app.html`, `http_server.cpp`, `monitor.cpp`).
+It ships when that branch does.
