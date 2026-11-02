@@ -521,6 +521,15 @@
 
   .topo-empty { padding: 60px 24px; text-align: center; color: var(--text-dim); font-size: 13px; }
 
+  /* A layout that arrived after the user's own, waiting for them */
+  .topo-pending {
+    background: var(--bg-2); border: 1px solid var(--warn); border-radius: 10px;
+    padding: 10px 14px; margin-bottom: 16px; font-size: 13px;
+  }
+  .topo-pending-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .topo-pending-row span { margin-right: auto; }
+  .topo-pending-list { margin: 10px 0 0 18px; color: var(--text-dim); font-size: 12px; line-height: 1.6; }
+
   /* Topology editor (Edit layout) */
   .topo-ed-error { color: var(--bad); font-size: 13px; margin: -8px 0 12px; }
   .topo-ed-error:empty { display: none; }
@@ -988,6 +997,15 @@
         <button class="btn primary" id="topo-save-btn" style="display:none">Save layout</button>
       </div>
       <div id="topo-ed-error" class="topo-ed-error" role="alert"></div>
+      <div id="topo-pending" class="topo-pending" style="display:none" role="status">
+        <div class="topo-pending-row">
+          <span id="topo-pending-text"></span>
+          <button class="btn" id="topo-pending-review">Review</button>
+          <button class="btn" id="topo-pending-keep" title="Keep your layout; the same one won't ask again">Keep mine</button>
+          <button class="btn" id="topo-pending-use">Use theirs</button>
+        </div>
+        <ul id="topo-pending-list" class="topo-pending-list" style="display:none"></ul>
+      </div>
 
       <div id="topo-tree" class="topo-tree">
         <div class="topo-empty">Loading topology…</div>
@@ -4994,6 +5012,7 @@
     // input mid-keystroke; the blur listener would then save a half-typed
     // name. Auto-refresh resumes once the user commits or cancels.
     if (topoState.editing) return;
+    topoRefreshPending();
     // In the editor only the readings refresh; the tree is the user's.
     if (topoEditor.active) return topoEdRefreshReadings();
     try {
@@ -5399,6 +5418,7 @@
   function topoEdMarkDirty() {
     topoEditor.dirty = true;
     document.getElementById('topo-ed-error').textContent = '';
+    topoRenderPending();
   }
 
   function topoEdToolbar(on) {
@@ -5742,6 +5762,66 @@
       });
     } catch (_) { /* the next refresh tries again */ }
   }
+
+  // ---- A layout that arrived after the user saved their own (a CCA sync,
+  // a cloud or file import, the ESP32's YAML) waits here for their answer.
+  const TOPO_SOURCES = { cca: "The CCA's", cloud: "Tigo cloud's", import: "The imported file's", yaml: "The YAML's" };
+  let topoPending = null;
+
+  function topoRenderPending() {
+    const box = document.getElementById('topo-pending');
+    if (!topoPending) { box.style.display = 'none'; return; }
+    const n = (topoPending.changes || []).length;
+    const invs = topoPending.inverters_then ? ' and its inverters' : '';
+    document.getElementById('topo-pending-text').textContent =
+      `${TOPO_SOURCES[topoPending.source] || 'An incoming'} layout differs from yours: ${n} panel${n === 1 ? '' : 's'}${invs} would change.`;
+    const where = p => p.string ? `${p.string} / ${p.mppt || 'no MPPT'} as ${p.name || '(unnamed)'}` : 'no string';
+    let items = (topoPending.changes || []).map(c =>
+      `<li><strong>${topoEscape(c.now.name || '…' + topoLast6(c.barcode))}</strong> → ${topoEscape(where(c.then))}</li>`);
+    if (topoPending.inverters_then) {
+      const fmt = l => l.map(i => `${i.name} (${i.mppts.join(', ') || 'no MPPTs'})`).join('; ') || 'none';
+      items.push(`<li>Inverters: ${topoEscape(fmt(topoPending.inverters_now || []))} → ${topoEscape(fmt(topoPending.inverters_then))}</li>`);
+    }
+    document.getElementById('topo-pending-list').innerHTML = items.join('');
+    const use = document.getElementById('topo-pending-use');
+    use.disabled = topoEditor.active && topoEditor.dirty;
+    use.title = use.disabled ? 'Save or cancel your edits first' : 'Replace your layout with this one';
+    box.style.display = '';
+  }
+
+  async function topoRefreshPending() {
+    try {
+      const r = await apiFetch('/api/layout/pending');
+      if (!r.ok) return;
+      const j = await r.json();
+      topoPending = j && j.source ? j : null;
+      topoRenderPending();
+    } catch (_) { /* the next refresh tries again */ }
+  }
+
+  async function topoAnswerPending(action) {
+    try {
+      const r = await apiFetch('/api/layout/pending', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || r.status);
+      topoPending = null;
+      topoRenderPending();
+      showToast(action === 'keep' ? 'Kept your layout ✓' : 'Layout replaced ✓', 'ok');
+      if (action === 'use' && topoEditor.active) exitTopoEdit();
+      else if (!topoEditor.active) refreshTopology();
+    } catch (e) {
+      showToast(`Failed: ${e.message}`, 'err');
+    }
+  }
+
+  document.getElementById('topo-pending-review').addEventListener('click', () => {
+    const list = document.getElementById('topo-pending-list');
+    list.style.display = list.style.display === 'none' ? '' : 'none';
+  });
+  document.getElementById('topo-pending-keep').addEventListener('click', () => topoAnswerPending('keep'));
+  document.getElementById('topo-pending-use').addEventListener('click', () => topoAnswerPending('use'));
 
   document.getElementById('topo-edit-btn').addEventListener('click', enterTopoEdit);
   document.getElementById('topo-save-btn').addEventListener('click', saveTopoEdit);

@@ -55,8 +55,10 @@ after(async () => {
 
 // A page on the Topology view. api.posts collects POST bodies; api.saveStatus
 // and api.saveError make the next layout save fail; api.power sets P1's watts.
-async function open({ touch = false } = {}) {
-  const api = { layout: startLayout(), posts: [], saveStatus: 200, saveError: '', power: 300 };
+async function open(opts = {}) {
+  const touch = !!opts.touch;
+  const api = { layout: startLayout(), posts: [], saveStatus: 200, saveError: '', power: 300,
+    pending: null, actions: [] };
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 }, hasTouch: touch });
   await ctx.route('**/api/**', async (route) => {
     const req = route.request();
@@ -67,7 +69,14 @@ async function open({ touch = false } = {}) {
       return api.saveStatus === 200 ? json(200, { success: true })
         : json(api.saveStatus, { success: false, error: api.saveError });
     }
-    if (path === '/api/layout') return json(200, api.layout);
+    if (path === '/api/layout/pending' && req.method() === 'POST') {
+      api.actions.push(JSON.parse(req.postData()));
+      api.pending = null;
+      return json(200, { success: true });
+    }
+    if (path === '/api/layout/pending') return json(200, api.pending || { pending: null });
+    if (path === '/api/layout') return json(200, { ...api.layout,
+      pending: api.pending ? { source: api.pending.source, changes: api.pending.changes.length } : null });
     if (path === '/api/devices') {
       return json(200, { devices: [{ addr: '0002', barcode: P[0], name: 'A1', power_in: api.power, power: api.power,
         voltage_in: 38, current: 8, temperature: 40, data_age_ms: 1000, stale: false }], count: 1 });
@@ -75,6 +84,7 @@ async function open({ touch = false } = {}) {
     if (routes[path] !== undefined) return json(200, routes[path]);
     return route.fulfill({ status: 404, body: 'no fixture' });
   });
+  if (opts.pending) api.pending = opts.pending;
   const page = await ctx.newPage();
   const errors = [];
   page.on('pageerror', (e) => errors.push(e.message));
@@ -276,5 +286,63 @@ test('touch: long-press then move drops the panel; a quick swipe on a card does 
   assert.deepEqual(await barcodes(page, 'B'), []);
   await touchDrag(page, `[data-barcode="${P[2]}"]`, '[data-string-label="B"] .panel-grid', 400);
   assert.deepEqual(await barcodes(page, 'B'), [P[2]]);
+  await ctx.close();
+});
+
+// ---- The banner: a layout that arrived after the user's own and waits.
+function held(source) {
+  return {
+    source,
+    changes: [{ barcode: P[0], now: { name: 'A1', string: 'A', mppt: 'MPPT 1' },
+                then: { name: 'P0', string: 'East', mppt: 'MPPT 2' } }],
+    inverters_now: null, inverters_then: null,
+  };
+}
+
+test('no banner when nothing waits', async () => {
+  const { page, ctx } = await open();
+  await page.waitForTimeout(300);
+  assert.equal(await page.isVisible('#topo-pending'), false);
+  await ctx.close();
+});
+
+test('the banner names where the layout came from', async () => {
+  for (const [source, words] of [['cca', 'The CCA'], ['cloud', 'Tigo cloud'], ['import', 'imported file'], ['yaml', 'YAML']]) {
+    const { page, ctx } = await open({ pending: held(source) });
+    await page.waitForSelector('#topo-pending', { state: 'visible' });
+    assert.match(await page.textContent('#topo-pending'), new RegExp(words), source);
+    await ctx.close();
+  }
+});
+
+test('Review lists what would change', async () => {
+  const { page, ctx } = await open({ pending: held('cca') });
+  await page.waitForSelector('#topo-pending', { state: 'visible' });
+  await page.click('#topo-pending-review');
+  const text = await page.textContent('#topo-pending-list');
+  assert.match(text, /A1/);
+  assert.match(text, /East \/ MPPT 2/);
+  assert.match(text, /P0/);
+  await ctx.close();
+});
+
+test('Keep mine and Use theirs send the answer and clear the banner', async () => {
+  for (const [btn, action] of [['#topo-pending-keep', 'keep'], ['#topo-pending-use', 'use']]) {
+    const { page, ctx, api } = await open({ pending: held('cca') });
+    await page.waitForSelector('#topo-pending', { state: 'visible' });
+    await page.click(btn);
+    await page.waitForSelector('#topo-pending', { state: 'hidden' });
+    assert.deepEqual(api.actions, [{ action }]);
+    await ctx.close();
+  }
+});
+
+test('Use theirs waits while the editor has unsaved changes', async () => {
+  const { page, ctx } = await open({ pending: held('cca') });
+  await edit(page);
+  await page.waitForSelector('#topo-pending', { state: 'visible' });
+  assert.equal(await page.isDisabled('#topo-pending-use'), false);
+  await page.locator(`[data-barcode="${P[0]}"]`).dragTo(page.locator('[data-string-label="B"] .panel-grid'));
+  assert.equal(await page.isDisabled('#topo-pending-use'), true);
   await ctx.close();
 });
