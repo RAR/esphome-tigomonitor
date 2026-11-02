@@ -146,6 +146,11 @@ If the strings land under **Unassigned**, open **Edit layout** on the
 Topology page: strings whose MPPT no inverter lists arrive there in an
 inverter of their own, ready to rename or move.
 
+No CCA, or no Tigo account? Under **Tools → Sidebar**, switch off the
+**CCA Info** or **Tigo Cloud** page and it leaves the sidebar; a link to it
+opens the Dashboard instead. Hiding a page stops nothing behind it, such as
+a CCA sync at startup.
+
 ## Set a password
 
 Out of the box, as on the ESP32, the web UI has no login: anyone on your

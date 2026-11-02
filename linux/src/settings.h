@@ -74,6 +74,10 @@ struct Settings {
   bool sync_cca_on_startup = true;
   std::string cca_ip;  // CCA firmware before 4.0.4 only
   std::string device_id;  // empty: the hostname
+  // The CCA Info and Tigo Cloud pages in the web UI's sidebar, for a site
+  // without a CCA or a Tigo account. Hiding one stops nothing behind it.
+  bool show_cca_page = true;
+  bool show_cloud_page = true;
   MqttSettings mqtt;
 };
 
@@ -86,6 +90,9 @@ inline bool standby_takeover_ok(int s) { return s >= 2 && s <= 60; }
 inline bool gateway_id_ok(int id) { return id >= 1 && id <= 0x7FFE && id != 0x1234 && id != 0x1235; }
 
 Settings load_settings(const std::string &path);
+// a and b differ in nothing but the page switches above, which only the web
+// UI reads: applying them needs nothing restarted or reconnected.
+bool differ_only_in_pages(const Settings &a, const Settings &b);
 bool save_settings(const std::string &path, const Settings &s);
 
 }  // namespace tigod

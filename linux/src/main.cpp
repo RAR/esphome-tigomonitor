@@ -387,30 +387,39 @@ int main(int argc, char **argv) {
       if (fresh.device_id.empty()) fresh.device_id = settings.device_id;
       apply_tls_override(fresh);
       if (!serial_override.empty()) fresh.serial_port = serial_override;
-      bool new_port = fresh.serial_port != settings.serial_port || fresh.baud_rate != settings.baud_rate ||
-                      fresh.bus_role != settings.bus_role || fresh.gateway_id != settings.gateway_id ||
-                      fresh.standby_takeover_s != settings.standby_takeover_s ||
-                      fresh.master_bench != settings.master_bench || fresh.master_startup != settings.master_startup ||
-                      fresh.master_housekeeping != settings.master_housekeeping ||
-                      fresh.master_queries != settings.master_queries ||
-                      fresh.master_optimizer_writes != settings.master_optimizer_writes;
-      if (fresh.web_port != settings.web_port) LOGI("web: the new port takes effect when the service restarts");
-      if (fresh.tls_cert != settings.tls_cert || fresh.tls_key != settings.tls_key)
-        LOGI("web: the HTTPS change takes effect when the service restarts");
-      {
+      if (differ_only_in_pages(fresh, settings)) {
+        // The web UI's sidebar: nothing to restart, and no reason to make
+        // MQTT reconnect and Home Assistant hear every entity again.
         std::lock_guard<std::mutex> lock(settings_mu);
         settings = fresh;
-      }
-      LOGI("settings changed; applying");
-      monitor.set_power_calibration(settings.power_calibration);
-      monitor.set_stale_timeout_min(settings.stale_timeout_min);
-      monitor.set_night_mode_timeout_min(settings.night_mode_timeout_min);
-      monitor.set_reset_at_midnight(settings.reset_at_midnight);
-      mqtt.configure(settings);
-      if (new_port && replay.empty()) {
-        input_stop = true;
-        if (input.joinable()) input.join();
-        input = start_input();
+        LOGI("settings changed: the CCA Info page %s, the Tigo Cloud page %s",
+             settings.show_cca_page ? "shown" : "hidden", settings.show_cloud_page ? "shown" : "hidden");
+      } else {
+        bool new_port = fresh.serial_port != settings.serial_port || fresh.baud_rate != settings.baud_rate ||
+                        fresh.bus_role != settings.bus_role || fresh.gateway_id != settings.gateway_id ||
+                        fresh.standby_takeover_s != settings.standby_takeover_s ||
+                        fresh.master_bench != settings.master_bench || fresh.master_startup != settings.master_startup ||
+                        fresh.master_housekeeping != settings.master_housekeeping ||
+                        fresh.master_queries != settings.master_queries ||
+                        fresh.master_optimizer_writes != settings.master_optimizer_writes;
+        if (fresh.web_port != settings.web_port) LOGI("web: the new port takes effect when the service restarts");
+        if (fresh.tls_cert != settings.tls_cert || fresh.tls_key != settings.tls_key)
+          LOGI("web: the HTTPS change takes effect when the service restarts");
+        {
+          std::lock_guard<std::mutex> lock(settings_mu);
+          settings = fresh;
+        }
+        LOGI("settings changed; applying");
+        monitor.set_power_calibration(settings.power_calibration);
+        monitor.set_stale_timeout_min(settings.stale_timeout_min);
+        monitor.set_night_mode_timeout_min(settings.night_mode_timeout_min);
+        monitor.set_reset_at_midnight(settings.reset_at_midnight);
+        mqtt.configure(settings);
+        if (new_port && replay.empty()) {
+          input_stop = true;
+          if (input.joinable()) input.join();
+          input = start_input();
+        }
       }
     }
     monitor.tick();

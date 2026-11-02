@@ -1297,6 +1297,8 @@ void HttpServer::routes_() {
                     {"tls_expires", ctx_.tls ? ctx_.tls->not_after() : 0},
                     {"power_calibration", s.power_calibration},
                     {"publish_interval_s", s.publish_interval_s},
+                    {"show_cca_page", s.show_cca_page},
+                    {"show_cloud_page", s.show_cloud_page},
                     {"device_id", s.device_id},
                     {"mqtt",
                      {{"host", s.mqtt.host},
@@ -1341,6 +1343,8 @@ void HttpServer::routes_() {
       if (j.contains("tls_key") && !ctx_.tls_from_args) s.tls_key = j["tls_key"].get<std::string>();
       if (j.contains("power_calibration")) s.power_calibration = j["power_calibration"].get<float>();
       if (j.contains("publish_interval_s")) s.publish_interval_s = j["publish_interval_s"].get<int>();
+      if (j.contains("show_cca_page")) s.show_cca_page = j["show_cca_page"].get<bool>();
+      if (j.contains("show_cloud_page")) s.show_cloud_page = j["show_cloud_page"].get<bool>();
       if (j.contains("mqtt") && j["mqtt"].is_object()) {
         const json &m = j["mqtt"];
         const MqttSettings before = s.mqtt;

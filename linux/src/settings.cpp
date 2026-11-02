@@ -57,6 +57,8 @@ Settings load_settings(const std::string &path) {
   get(j, "sync_cca_on_startup", s.sync_cca_on_startup);
   get(j, "cca_ip", s.cca_ip);
   get(j, "device_id", s.device_id);
+  get(j, "show_cca_page", s.show_cca_page);
+  get(j, "show_cloud_page", s.show_cloud_page);
   if (auto m = j.find("mqtt"); m != j.end() && m->is_object()) {
     get(*m, "host", s.mqtt.host);
     get(*m, "port", s.mqtt.port);
@@ -81,8 +83,8 @@ Settings load_settings(const std::string &path) {
   return s;
 }
 
-bool save_settings(const std::string &path, const Settings &s) {
-  json j = {
+static json to_json(const Settings &s) {
+  return {
       {"serial_port", s.serial_port},
       {"baud_rate", s.baud_rate},
       {"bus_role", s.bus_role},
@@ -109,6 +111,8 @@ bool save_settings(const std::string &path, const Settings &s) {
       {"sync_cca_on_startup", s.sync_cca_on_startup},
       {"cca_ip", s.cca_ip},
       {"device_id", s.device_id},
+      {"show_cca_page", s.show_cca_page},
+      {"show_cloud_page", s.show_cloud_page},
       {"mqtt",
        {{"host", s.mqtt.host},
         {"port", s.mqtt.port},
@@ -119,8 +123,18 @@ bool save_settings(const std::string &path, const Settings &s) {
         {"base_topic", s.mqtt.base_topic},
         {"standby_panels", s.mqtt.standby_panels}}},
   };
+}
+
+bool save_settings(const std::string &path, const Settings &s) {
   // The MQTT and web passwords are in here: owner-only.
-  return write_file_atomic(path, j.dump(2) + "\n", 0600);
+  return write_file_atomic(path, to_json(s).dump(2) + "\n", 0600);
+}
+
+bool differ_only_in_pages(const Settings &a, const Settings &b) {
+  Settings same = b;
+  same.show_cca_page = a.show_cca_page;
+  same.show_cloud_page = a.show_cloud_page;
+  return to_json(a) == to_json(same);
 }
 
 }  // namespace tigod

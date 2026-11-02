@@ -1188,6 +1188,22 @@
       </div>
 
       <div class="section-head" data-linux-only style="display:none">
+        <div class="section-title">Sidebar</div>
+        <div class="section-sub" id="pi-pages-status"></div>
+      </div>
+      <div class="tools-card" data-linux-only style="display:none">
+        <p class="hint">Leave out the pages a site without a CCA or a Tigo account has no use for. A switch saves as you flip it. Hiding a page only takes it out of the sidebar: anything set up there, such as a CCA sync at startup, carries on.</p>
+        <div class="cfg-row">
+          <div class="cfg-text"><strong>CCA Info page</strong><span>The CCA's status, its connection, Wi-Fi setup and topology discovery</span></div>
+          <div class="cfg-ctrl"><label class="cfg-switch"><input type="checkbox" id="pi-show-cca" checked> <span>On</span></label></div>
+        </div>
+        <div class="cfg-row">
+          <div class="cfg-text"><strong>Tigo Cloud page</strong><span>Your Tigo account's status, and its box in the sidebar</span></div>
+          <div class="cfg-ctrl"><label class="cfg-switch"><input type="checkbox" id="pi-show-cloud" checked> <span>On</span></label></div>
+        </div>
+      </div>
+
+      <div class="section-head" data-linux-only style="display:none">
         <div class="section-title">Inverters</div>
         <div class="section-sub" id="pi-inv-sub">—</div>
       </div>
@@ -1756,7 +1772,11 @@
   });
 
   // ===== View switching with hash routing =====
+  // Pages the Pi's settings leave out of the sidebar (show_cca_page,
+  // show_cloud_page). A link to one opens the Dashboard instead.
+  const hiddenPages = new Set();
   function showView(id) {
+    if (hiddenPages.has(id)) id = 'dashboard';
     // Leaving the Topology editor with changes not saved asks first.
     if (id !== 'topology' && typeof topoEditor !== 'undefined' && topoEditor.active) {
       if (topoEditor.dirty && !confirm('Leave the Topology editor? Your layout changes are not saved.')) {
@@ -2238,6 +2258,7 @@
   const platformReady = apiFetch('/api/status').then(r => r.ok ? r.json() : {}).then(s => {
     if (s.platform !== 'linux') return;
     PLATFORM = 'linux';
+    apiFetch('/api/settings').then(r => r.ok ? r.json() : null).then(st => { if (st) piApplyPages(st); }).catch(() => {});
     document.querySelectorAll('[data-esp-only]').forEach(el => { el.style.display = 'none'; });
     document.querySelectorAll('[data-linux-only]').forEach(el => { el.style.display = ''; });
     document.getElementById('hist-backing').textContent = 'Stored on the SD card · persists across reboots';
@@ -3717,6 +3738,7 @@
       const r = await apiFetch('/api/settings');
       if (!r.ok) throw new Error('/api/settings ' + r.status);
       const s = await r.json();
+      piApplyPages(s);
       document.getElementById('pi-mqtt-host').value = s.mqtt.host || '';
       document.getElementById('pi-mqtt-port').value = s.mqtt.port || 1883;
       document.getElementById('pi-mqtt-user').value = s.mqtt.username || '';
@@ -3810,6 +3832,49 @@
     if (!e.target.checked && !confirm('Home Assistant will remove the Tigo devices and entities this Pi added, once you save. Readings keep going to the MQTT topic.\n\nContinue?'))
       e.target.checked = true;
   });
+  // The sidebar's page switches save on their own, at once.
+  const piPages = { show_cca_page: true, show_cloud_page: true };
+  function piApplyPages(st) {
+    piPages.show_cca_page = st.show_cca_page !== false;
+    piPages.show_cloud_page = st.show_cloud_page !== false;
+    hiddenPages.clear();
+    if (!piPages.show_cca_page) hiddenPages.add('cca');
+    if (!piPages.show_cloud_page) hiddenPages.add('cloudstatus');
+    document.querySelector('#nav button[data-view="cca"]').style.display = piPages.show_cca_page ? '' : 'none';
+    if (piPages.show_cloud_page) {
+      cloudUiSync();
+    } else {
+      document.getElementById('nav-cloudstatus').style.display = 'none';
+      document.getElementById('cloud-box').style.display = 'none';
+    }
+    for (const [id, on] of [['pi-show-cca', piPages.show_cca_page], ['pi-show-cloud', piPages.show_cloud_page]]) {
+      const box = document.getElementById(id);
+      box.checked = on;
+      box.nextElementSibling.textContent = on ? 'On' : 'Off';
+    }
+    const active = document.querySelector('.view.active');
+    if (active && hiddenPages.has(active.id.replace(/^view-/, ''))) showView('dashboard');
+  }
+  for (const [id, key] of [['pi-show-cca', 'show_cca_page'], ['pi-show-cloud', 'show_cloud_page']]) {
+    document.getElementById(id).addEventListener('change', async (e) => {
+      const on = e.target.checked;
+      const status = document.getElementById('pi-pages-status');
+      e.target.nextElementSibling.textContent = on ? 'On' : 'Off';
+      try {
+        const r = await apiFetch('/api/settings', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ [key]: on }),
+        });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(j.error || `/api/settings ${r.status}`);
+        piApplyPages({ ...piPages, [key]: on });
+        status.textContent = 'Saved';
+      } catch (err) {
+        e.target.checked = !on;
+        e.target.nextElementSibling.textContent = !on ? 'On' : 'Off';
+        status.textContent = `Not saved: ${err.message}`;
+      }
+    });
+  }
   for (const id of ['pi-startup', 'pi-housekeeping', 'pi-queries', 'pi-writes', 'pi-mqtt-disc-on', 'pi-mqtt-standby-panels']) {
     document.getElementById(id).addEventListener('change', (e) => {
       e.target.nextElementSibling.textContent = e.target.checked ? 'On' : 'Off';
@@ -4771,6 +4836,7 @@
   async function cloudUiSync() {
     let st;
     try { const r = await apiFetch('/api/cloud/status'); if (!r.ok) return; st = await r.json(); } catch (_) { return; }
+    if (hiddenPages.has('cloudstatus')) return;  // turned off on the Pi
     document.getElementById('nav-cloudstatus').style.display = '';  // feature available
     const connected = !!st.configured;
     document.getElementById('cloud-box').style.display = connected ? '' : 'none';

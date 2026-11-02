@@ -123,6 +123,25 @@ time.sleep(1.5)
 s = get('/api/settings')[1]
 expect('web port waits for a restart', (s['web_port'], s['web_port_active']), (18090, 18089))
 
+# --- hiding the CCA Info and Tigo Cloud pages: shown until turned off, and
+# turning one off doesn't reconnect MQTT
+s = get('/api/settings')[1]
+expect('pages shown by default', (s.get('show_cca_page'), s.get('show_cloud_page')), (True, True))
+expect('page switch must be true or false', post('/api/settings', {'show_cca_page': 'no'})[0], 400)
+mark = get('/api/logs')[1]['next']
+expect('hide the CCA page', post('/api/settings', {'show_cca_page': False})[0], 200)
+time.sleep(1.5)
+s = get('/api/settings')[1]
+expect('CCA page hidden, cloud still shown', (s['show_cca_page'], s['show_cloud_page']), (False, True))
+expect('saved to the file', json.load(open('build/cca-e2e/settings.json')).get('show_cca_page'), False)
+quiet = [l['msg'] for l in get(f'/api/logs?after={mark}')[1]['lines']]
+expect('no MQTT reconnect for a page switch', [m for m in quiet if m.startswith('MQTT')], [])
+post('/api/settings', {'show_cca_page': True, 'show_cloud_page': False})
+time.sleep(1.5)
+s = get('/api/settings')[1]
+expect('switched the other way', (s['show_cca_page'], s['show_cloud_page']), (True, False))
+post('/api/settings', {'show_cloud_page': True})
+
 # --- the Logs page: the daemon's own log, kept in memory
 lg = get('/api/logs')[1]
 expect('startup line in the log', any(l['msg'].startswith('tigomonitord ') and l['level'] == 'info' for l in lg['lines']), True)
