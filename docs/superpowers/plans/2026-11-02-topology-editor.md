@@ -60,7 +60,8 @@
   - `std::vector<Assignment> assignments(const Layout &);`
   - `int position_of(const std::string &panel_label);` — trailing integer, or `INT_MAX` if none.
   - `struct Change { std::string barcode; Assignment now, then; };` and `std::vector<Change> diff(const std::vector<Assignment> &current, const std::vector<Assignment> &incoming);` — one entry per incoming barcode whose label/string/MPPT differs from current (a barcode absent from current counts as `now` all-empty).
-  - `uint32_t fingerprint(const std::vector<Assignment> &, const std::vector<std::pair<std::string, std::vector<std::string>>> &inverters);` — FNV-1a over the sorted canonical text; order-independent.
+  - `using InverterMppts = std::vector<std::pair<std::string, std::vector<std::string>>>;` — (inverter name, its MPPT labels), the form an incoming inverter list takes on both builds.
+  - `uint32_t fingerprint(const std::vector<Assignment> &, const InverterMppts &inverters);` — FNV-1a over the sorted canonical text; order-independent.
   - `enum class Offer { apply, hold, unchanged, declined };` `Offer decide(bool manual, bool has_changes, uint32_t incoming_fp, uint32_t declined_fp);`
   - `std::string encode_skeleton(const Layout &, bool manual, uint32_t declined_fp);` / `bool decode_skeleton(const std::string &, Layout &, bool &manual, uint32_t &declined_fp);` — panels are NOT encoded (they live on the nodes). Line format: `v1|<manual 0/1>|<declined_fp hex>`, then `I|name|display`, `M|label`, `S|label|display|rating`, nested in order. Max encoded size `kMaxSkeleton = 2048`.
 
@@ -183,7 +184,7 @@
 - Produces on `TigoMonitorComponent` (all under `state_mutex_`):
   - `layout::Layout layout_tree() const` (skeleton ∪ nodes, as Task 2's tree rule) and the `unplaced`/`unassigned` lists the handler needs.
   - `std::string set_layout(const layout::Layout &)` — validate (known barcode = a node with that barcode), write node labels by barcode (`clear_unlisted`), replace `inverters_` from the skeleton (display names via the existing `inv_dn:` NVS keys), string display labels/ratings via the existing setters' storage, `manual_ = true`, save skeleton + node table once, `rebuild_string_groups()`. Returns "" or the error.
-  - `layout::Offer offer_layout(const char *source, std::vector<layout::Assignment> incoming, std::vector<…> inverters)`; `match_cca_to_uart`, the cloud import in `tigo_cloud.cpp`, and the web server's node import collect assignments and call it instead of writing labels directly (not-manual path behaves exactly as today, including `save_node_table()` + `rebuild_string_groups()` only when something matched).
+  - `layout::Offer offer_layout(const char *source, std::vector<layout::Assignment> incoming, layout::InverterMppts inverters)`; `match_cca_to_uart`, the cloud import in `tigo_cloud.cpp`, and the web server's node import collect assignments and call it instead of writing labels directly (not-manual path behaves exactly as today, including `save_node_table()` + `rebuild_string_groups()` only when something matched).
   - `pending_` (in PSRAM containers), `bool resolve_pending(bool use)`, and the pending JSON for the handler.
   - Skeleton in NVS: `encode_skeleton` split over up to 8 `char[256]` prefs keyed `fnv1_hash("layout_<i>")`; loaded in `setup()` after `load_node_table()`. If a skeleton with `manual` is present, it replaces the YAML `inverters_`; YAML inverters are kept in `yaml_inverters_`; if they differ from the skeleton's, `offer_layout("yaml", {}, yaml list)` holds them. "Use theirs" for source `yaml` restores `yaml_inverters_` and clears `manual`.
 - Produces on `TigoWebServer`: handlers for `GET/POST /api/layout` and `GET/POST /api/layout/pending` (4 more URIs → 55 of 60), `check_api_auth` first, bodies read into PSRAM as `api_nodes_import_handler` does (cap 32 KB), responses built in `PSRAMString`, cJSON for parsing.
@@ -216,6 +217,9 @@ Behaviour (from the spec): normal view unchanged; `refreshTopology` keeps live r
 
 - [ ] **Step 1: Write the failing browser test** `site/test/topology-editor.test.mjs` (Node test runner + Playwright, serving `app.html` with `page.route` answers from `screenshots/fixtures.mjs` plus an in-memory `/api/layout` that records POST bodies):
   - `Edit layout shows the tray and add buttons; normal view has neither`.
+  - `live readings keep updating on cards in edit mode without undoing a drag` (change the `/api/devices` fixture between refreshes).
+  - `an empty string, MPPT or inverter can be deleted; one with panels has no delete button`.
+  - `leaving the view with unsaved edits asks first` (dialog handler asserts the prompt; dismissing keeps edit mode).
   - `dragging a tray panel into string A appends it and names it A<n>` (mouse `dragTo`).
   - `Save posts the tree with panels as barcodes in order` — assert exact POST body.
   - `Cancel discards a drag` — no POST; tree equals the fetched one.
@@ -242,7 +246,7 @@ Behaviour (from the spec): normal view unchanged; `refreshTopology` keeps live r
 
 **Interfaces:**
 - Consumes: `layout.pending`, `GET/POST /api/layout/pending` (Task 3 shape).
-- Produces: `#topo-pending` banner on the Topology view: "The {CCA | Tigo cloud | imported file | YAML}'s layout differs from yours — Review"; Review expands a list of changes ("A3 → String B / MPPT 2 as B1"), plus inverter changes when present; buttons `Keep mine` / `Use theirs`. Hidden in edit mode? No — shown, but Use theirs is disabled while there are unsaved edits (title explains).
+- Produces: `#topo-pending` banner on the Topology view: "The {CCA | Tigo cloud | imported file | YAML}'s layout differs from yours — Review"; Review expands a list of changes ("A3 → String B / MPPT 2 as B1"), plus inverter changes when present; buttons `Keep mine` / `Use theirs`. The banner also shows in edit mode; there, Use theirs is disabled while there are unsaved edits, with a title saying to save or cancel first.
 
 - [ ] **Step 1: Failing tests** added to the browser test: banner hidden when `pending` null; shown with the source wording for each of the four sources; Review lists the changes from the pending fixture; Keep mine POSTs `{"action":"keep"}` and hides it; Use theirs POSTs `{"action":"use"}` and re-renders; Use theirs disabled while `dirty`.
 - [ ] **Step 2: Run, expect FAIL** (`#topo-pending` missing).
