@@ -11,93 +11,41 @@ namespace tigod {
 using nlohmann::json;
 namespace layout = esphome::tigo_monitor::layout;
 
-namespace {
-
-struct TreePanel {
-  std::string barcode, addr, name;
-};
-
-json panels_json(std::vector<TreePanel> panels) {
-  std::sort(panels.begin(), panels.end(), [](const TreePanel &a, const TreePanel &b) {
-    int pa = layout::position_of(a.name), pb = layout::position_of(b.name);
-    return pa != pb ? pa < pb : a.barcode < b.barcode;
-  });
-  json out = json::array();
-  for (const auto &p : panels) out.push_back({{"barcode", p.barcode}, {"addr", p.addr}, {"name", p.name}});
-  return out;
-}
-
-}  // namespace
-
-// The skeleton first, then whatever the nodes say that it doesn't: a string
-// it lacks goes under its nodes' MPPT, and an MPPT no inverter lists goes in
-// unplaced_mppts (label "" for strings with no MPPT at all).
+// The tree rule is tigo_layout.h's build_tree(), shared with the firmware.
 json layout_json(const Monitor &mon, const Topology &topo) {
-  layout::Layout tree = topo.skeleton();
-  std::vector<layout::MpptSpec> unplaced;
   auto ov = topo.string_overrides();
-  std::map<std::string, std::vector<TreePanel>> panels;  // string label -> panels
-  json unassigned = json::array();
-
-  auto find_mppt = [&](const std::string &label) -> layout::MpptSpec * {
-    for (auto &inv : tree.inverters)
-      for (auto &m : inv.mppts)
-        if (m.label == label) return &m;
-    for (auto &m : unplaced)
-      if (m.label == label) return &m;
-    return nullptr;
-  };
-  auto has_string = [&](const std::string &label) {
-    auto in = [&](const std::vector<layout::MpptSpec> &ms) {
-      for (const auto &m : ms)
-        for (const auto &s : m.strings)
-          if (s.label == label) return true;
-      return false;
-    };
-    for (const auto &inv : tree.inverters)
-      if (in(inv.mppts)) return true;
-    return in(unplaced);
-  };
-
-  for (const auto &n : mon.nodes()) {
-    if (n.long_address.empty()) continue;
-    if (n.cca_string_label.empty()) {
-      unassigned.push_back({{"barcode", n.long_address}, {"addr", n.addr}, {"name", n.cca_label}});
-      continue;
-    }
-    panels[n.cca_string_label].push_back({n.long_address, n.addr, n.cca_label});
-    if (has_string(n.cca_string_label)) continue;
-    layout::MpptSpec *m = find_mppt(n.cca_mppt_label);
-    if (!m) {
-      unplaced.push_back({n.cca_mppt_label, {}});
-      m = &unplaced.back();
-    }
-    layout::StringSpec s;
-    s.label = n.cca_string_label;
+  std::vector<layout::NodeView> nodes;
+  for (const auto &n : mon.nodes())
+    nodes.push_back({n.long_address, n.addr, n.cca_label, n.cca_string_label, n.cca_mppt_label});
+  layout::Tree t = layout::build_tree(topo.skeleton(), nodes, [&ov](layout::StringSpec &s) {
     auto it = ov.find(s.label);
-    if (it != ov.end()) {
-      s.display_label = it->second.display_label;
-      s.rating_w = it->second.panel_rating_w;
-    }
-    m->strings.push_back(s);
-  }
+    if (it == ov.end()) return;
+    s.display_label = it->second.display_label;
+    s.rating_w = it->second.panel_rating_w;
+  });
 
+  auto panel = [](const layout::NodeView &n) {
+    return json{{"barcode", n.barcode}, {"addr", n.addr}, {"name", n.label}};
+  };
   auto mppts_json = [&](const std::vector<layout::MpptSpec> &ms) {
     json arr = json::array();
     for (const auto &m : ms) {
       json strings = json::array();
-      for (const auto &s : m.strings)
-        strings.push_back({{"label", s.label},
-                           {"display_label", s.display_label},
-                           {"rating_w", s.rating_w},
-                           {"panels", panels_json(panels[s.label])}});
+      for (const auto &s : m.strings) {
+        json panels = json::array();
+        for (const auto &n : t.panels[s.label]) panels.push_back(panel(n));
+        strings.push_back(
+            {{"label", s.label}, {"display_label", s.display_label}, {"rating_w", s.rating_w}, {"panels", panels}});
+      }
       arr.push_back({{"label", m.label}, {"strings", strings}});
     }
     return arr;
   };
   json inverters = json::array();
-  for (const auto &inv : tree.inverters)
+  for (const auto &inv : t.layout.inverters)
     inverters.push_back({{"name", inv.name}, {"display_name", inv.display_name}, {"mppts", mppts_json(inv.mppts)}});
+  json unassigned = json::array();
+  for (const auto &n : t.unassigned) unassigned.push_back(panel(n));
 
   json pending = nullptr;
   if (auto p = topo.pending())
@@ -105,7 +53,7 @@ json layout_json(const Monitor &mon, const Topology &topo) {
 
   return {{"manual", topo.manual()},
           {"inverters", inverters},
-          {"unplaced_mppts", mppts_json(unplaced)},
+          {"unplaced_mppts", mppts_json(t.unplaced)},
           {"unassigned", unassigned},
           {"pending", pending}};
 }

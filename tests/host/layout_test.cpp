@@ -234,6 +234,48 @@ static void test_skeleton_round_trips() {
   CHECK(!decode_skeleton("", out, manual, fp));
 }
 
+static void test_build_tree() {
+  std::printf("build_tree\n");
+  // Skeleton: Inverter 1 / MPPT 1 / strings A (has panels) and B (empty).
+  Layout sk;
+  InverterSpec inv;
+  inv.name = "Inverter 1";
+  MpptSpec m1;
+  m1.label = "MPPT 1";
+  StringSpec a, b;
+  a.label = "A";
+  b.label = "B";
+  m1.strings = {a, b};
+  inv.mppts = {m1};
+  sk.inverters = {inv};
+  std::vector<NodeView> nodes = {
+      {BC[1], "0003", "A2", "A", "MPPT 1"},
+      {BC[0], "0002", "A1", "A", "MPPT 1"},
+      {BC[2], "0004", "W1", "West", "MPPT 7"},  // a string and MPPT the skeleton lacks
+      {BC[3], "0005", "", "", ""},              // in no string
+      {"", "0006", "", "", ""},                 // no barcode yet: left out
+      {"04C05B0000000A05", "0007", "Q", "Q", ""},  // a string with no MPPT
+  };
+  int filled = 0;
+  Tree t = build_tree(sk, nodes, [&filled](StringSpec &s) {
+    if (s.label == "West") s.display_label = "Back";
+    filled++;
+  });
+  CHECK(t.layout.inverters.size() == 1);
+  CHECK(t.layout.inverters[0].mppts.size() == 1);
+  CHECK(t.layout.inverters[0].mppts[0].strings.size() == 2);
+  CHECK(t.panels["A"].size() == 2 && t.panels["A"][0].barcode == BC[0] && t.panels["A"][1].barcode == BC[1]);
+  CHECK(t.panels["B"].empty());
+  CHECK(t.unplaced.size() == 2);
+  if (t.unplaced.size() == 2) {
+    CHECK(t.unplaced[0].label == "MPPT 7" && t.unplaced[0].strings.size() == 1 &&
+          t.unplaced[0].strings[0].label == "West" && t.unplaced[0].strings[0].display_label == "Back");
+    CHECK(t.unplaced[1].label == "" && t.unplaced[1].strings.size() == 1 && t.unplaced[1].strings[0].label == "Q");
+  }
+  CHECK(filled == 2);  // only strings the skeleton didn't already describe
+  CHECK(t.unassigned.size() == 1 && t.unassigned[0].barcode == BC[3]);
+}
+
 int main() {
   test_panel_names_follow_position();
   test_validate_accepts_a_good_layout();
@@ -244,6 +286,7 @@ int main() {
   test_fingerprint_is_order_independent();
   test_decide();
   test_skeleton_round_trips();
+  test_build_tree();
   std::printf(failures ? "\n%d FAILED\n" : "\nall passed\n", failures);
   return failures ? 1 : 0;
 }

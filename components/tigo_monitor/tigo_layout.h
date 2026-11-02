@@ -131,6 +131,67 @@ inline std::vector<Assignment> assignments(const Layout &l) {
   return out;
 }
 
+// A node as the tree needs it: its barcode, short address and labels.
+struct NodeView {
+  std::string barcode, addr, label, string_label, mppt_label;
+};
+
+// GET /api/layout's tree: the skeleton, then whatever the nodes say that it
+// doesn't. A string the skeleton lacks goes under its nodes' MPPT; an MPPT
+// no inverter lists goes in unplaced (label "" for strings with no MPPT).
+// fill_string names and rates a string only the nodes knew of.
+struct Tree {
+  Layout layout;
+  std::vector<MpptSpec> unplaced;
+  std::vector<NodeView> unassigned;
+  std::map<std::string, std::vector<NodeView>> panels;  // string label -> panels, in order
+};
+
+inline Tree build_tree(Layout skeleton, const std::vector<NodeView> &nodes,
+                       const std::function<void(StringSpec &)> &fill_string) {
+  Tree t;
+  t.layout = std::move(skeleton);
+  auto find_mppt = [&t](const std::string &label) -> MpptSpec * {
+    for (auto &inv : t.layout.inverters)
+      for (auto &m : inv.mppts)
+        if (m.label == label) return &m;
+    for (auto &m : t.unplaced)
+      if (m.label == label) return &m;
+    return nullptr;
+  };
+  std::set<std::string> known;
+  for (const auto &inv : t.layout.inverters)
+    for (const auto &m : inv.mppts)
+      for (const auto &s : m.strings) {
+        known.insert(s.label);
+        t.panels[s.label];
+      }
+  for (const auto &n : nodes) {
+    if (n.barcode.empty()) continue;
+    if (n.string_label.empty()) {
+      t.unassigned.push_back(n);
+      continue;
+    }
+    t.panels[n.string_label].push_back(n);
+    if (!known.insert(n.string_label).second) continue;
+    MpptSpec *m = find_mppt(n.mppt_label);
+    if (!m) {
+      t.unplaced.push_back({n.mppt_label, {}});
+      m = &t.unplaced.back();
+    }
+    StringSpec s;
+    s.label = n.string_label;
+    fill_string(s);
+    m->strings.push_back(std::move(s));
+  }
+  for (auto &kv : t.panels)
+    std::sort(kv.second.begin(), kv.second.end(), [](const NodeView &a, const NodeView &b) {
+      int pa = position_of(a.label), pb = position_of(b.label);
+      return pa != pb ? pa < pb : a.barcode < b.barcode;
+    });
+  return t;
+}
+
 struct Change {
   std::string barcode;
   Assignment now, then;  // now: as it stands; then: as the incoming layout has it
