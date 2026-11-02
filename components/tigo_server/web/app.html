@@ -521,6 +521,42 @@
 
   .topo-empty { padding: 60px 24px; text-align: center; color: var(--text-dim); font-size: 13px; }
 
+  /* Topology editor (Edit layout) */
+  .topo-ed-error { color: var(--bad); font-size: 13px; margin: -8px 0 12px; }
+  .topo-ed-error:empty { display: none; }
+  .topo-tray {
+    background: var(--bg-2); border: 1px dashed var(--warn); border-radius: 10px; padding: 12px 14px;
+  }
+  .topo-tray-head { font-size: 12px; color: var(--text-dim); margin-bottom: 10px; }
+  .topo-tray-head strong { color: var(--text); }
+  .topo-ed-panel { cursor: grab; touch-action: pan-y; user-select: none; -webkit-user-select: none; }
+  .topo-ed-panel .panel-tile-id::before { content: '⠿ '; color: var(--text-faint); }
+  .topo-ed-panel.lifting { border-color: var(--accent-2); }
+  .topo-ed-panel.dragging { opacity: 0.35; }
+  .topo-ed-ghost {
+    position: fixed; z-index: 1000; pointer-events: none; opacity: 0.9;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.35); transform: rotate(2deg);
+  }
+  .topo-ed-drop { min-height: 58px; border-radius: 6px; }
+  .topo-ed-drop.over { outline: 2px solid var(--accent-2); outline-offset: 2px; }
+  .topo-ed-empty { color: var(--text-faint); font-size: 12px; padding: 12px; }
+  .topo-ed-name {
+    background: var(--bg); border: 1px solid var(--border); color: var(--text);
+    border-radius: 4px; padding: 3px 8px; font-size: 13px; font-weight: 600; min-width: 120px; max-width: 220px;
+  }
+  .topo-ed-name:focus { border-color: var(--accent-2); outline: none; }
+  .topo-ed-canon { color: var(--text-faint); font-size: 11px; }
+  .topo-add {
+    background: none; border: 1px dashed var(--border); color: var(--text-dim);
+    border-radius: 6px; padding: 6px 12px; font-size: 12px; cursor: pointer; align-self: flex-start;
+  }
+  .topo-add:hover { color: var(--text); border-color: var(--accent-2); }
+  .topo-del {
+    background: none; border: 1px solid var(--border); color: var(--text-dim);
+    border-radius: 4px; padding: 2px 8px; font-size: 11px; cursor: pointer; margin-left: auto;
+  }
+  .topo-del:hover { color: var(--bad); border-color: var(--bad); }
+
   /* ===== Tools view ===== */
   .tools-card { background: var(--bg-2); border: 1px solid var(--border); border-radius: 10px; padding: 18px 20px; margin-bottom: 16px; }
   .tools-card h3 { font-size: 14px; font-weight: 600; margin-bottom: 12px; }
@@ -947,7 +983,11 @@
         <input class="input" id="topo-filter" placeholder="Filter by name, barcode, or string…">
         <span class="topo-summary" id="topo-summary">—</span>
         <button class="btn" id="topo-cloud-import-btn" style="display:none" title="Pull panel names + layout from Tigo's cloud">Import from Tigo cloud</button>
+        <button class="btn" id="topo-edit-btn" title="Add inverters, MPPTs and strings, and drag panels into place">Edit layout</button>
+        <button class="btn" id="topo-cancel-btn" style="display:none">Cancel</button>
+        <button class="btn primary" id="topo-save-btn" style="display:none">Save layout</button>
       </div>
+      <div id="topo-ed-error" class="topo-ed-error" role="alert"></div>
 
       <div id="topo-tree" class="topo-tree">
         <div class="topo-empty">Loading topology…</div>
@@ -1689,6 +1729,16 @@
 
   // ===== View switching with hash routing =====
   function showView(id) {
+    // Leaving the Topology editor with changes not saved asks first.
+    if (id !== 'topology' && typeof topoEditor !== 'undefined' && topoEditor.active) {
+      if (topoEditor.dirty && !confirm('Leave the Topology editor? Your layout changes are not saved.')) {
+        if (window.location.hash !== '#topology') history.replaceState(null, '', '#topology');
+        return;
+      }
+      topoEditor.active = false;
+      topoEditor.dirty = false;
+      topoEdToolbar(false);
+    }
     document.querySelectorAll('#nav button').forEach(b => b.classList.toggle('active', b.dataset.view === id));
     document.querySelectorAll('.view').forEach(v => v.classList.toggle('active', v.id === 'view-' + id));
     if (window.location.hash !== '#' + id) {
@@ -4944,6 +4994,8 @@
     // input mid-keystroke; the blur listener would then save a half-typed
     // name. Auto-refresh resumes once the user commits or cancels.
     if (topoState.editing) return;
+    // In the editor only the readings refresh; the tree is the user's.
+    if (topoEditor.active) return topoEdRefreshReadings();
     try {
       const [invR, devR, nodeR] = await Promise.all([
         apiFetch('/api/inverters'),
@@ -5301,6 +5353,402 @@
       document.getElementById('topo-meta').textContent = `error: ${e.message}`;
     }
   }
+
+  // ===== Topology editor (Edit layout) =====
+  // Lays the site out by hand: inverters, MPPTs, strings, and panels dragged
+  // into strings. Nothing is written until Save, which sends the whole tree
+  // to POST /api/layout in one request (the server checks it with the rules
+  // in tigo_layout.h, shared by the ESP32 and the Pi). Panels are named from
+  // their string and position: the third panel in string A is A3.
+  var topoEditor = {  // var: showView() runs before this line and checks it
+    active: false,
+    dirty: false,
+    tree: null,       // { inverters: [...], unassigned: [{barcode, addr}] }
+    readings: {},     // barcode -> device, from /api/devices
+  };
+
+  function topoEdPanelName(str, i) {
+    return (str.display_label || str.label) + (i + 1);
+  }
+
+  // Next free string label: A..Z, then AA, AB, ...
+  function topoEdNextString() {
+    const used = new Set();
+    for (const inv of topoEditor.tree.inverters)
+      for (const m of inv.mppts) for (const s of m.strings) used.add(s.label);
+    for (let n = 0; ; n++) {
+      let label = '', k = n;
+      do { label = String.fromCharCode(65 + (k % 26)) + label; k = Math.floor(k / 26) - 1; } while (k >= 0);
+      if (!used.has(label)) return label;
+    }
+  }
+
+  function topoEdNextNumbered(prefix, used) {
+    let max = 0;
+    for (const u of used) {
+      const m = String(u).match(new RegExp('^' + prefix + ' (\\d+)$'));
+      if (m) max = Math.max(max, +m[1]);
+    }
+    return `${prefix} ${max + 1}`;
+  }
+
+  function topoEdAllMppts() {
+    return topoEditor.tree.inverters.flatMap(inv => inv.mppts.map(m => m.label));
+  }
+
+  function topoEdMarkDirty() {
+    topoEditor.dirty = true;
+    document.getElementById('topo-ed-error').textContent = '';
+  }
+
+  function topoEdToolbar(on) {
+    document.getElementById('topo-edit-btn').style.display = on ? 'none' : '';
+    document.getElementById('topo-save-btn').style.display = on ? '' : 'none';
+    document.getElementById('topo-cancel-btn').style.display = on ? '' : 'none';
+    for (const id of ['topo-expand-btn', 'topo-collapse-btn', 'topo-filter'])
+      document.getElementById(id).style.display = on ? 'none' : '';
+    if (!on) document.getElementById('topo-ed-error').textContent = '';
+  }
+
+  async function enterTopoEdit() {
+    try {
+      const r = await apiFetch('/api/layout');
+      if (!r.ok) throw new Error('/api/layout ' + r.status);
+      const l = await r.json();
+      const strip = ms => ms.map(m => ({
+        label: m.label,
+        strings: m.strings.map(s => ({
+          label: s.label, display_label: s.display_label || '', rating_w: s.rating_w || 0,
+          panels: s.panels.map(p => ({ barcode: p.barcode, addr: p.addr })),
+        })),
+      }));
+      const tree = {
+        inverters: (l.inverters || []).map(inv => ({
+          name: inv.name, display_name: inv.display_name || '', mppts: strip(inv.mppts || []),
+        })),
+        unassigned: (l.unassigned || []).map(p => ({ barcode: p.barcode, addr: p.addr })),
+      };
+      topoEditor.tree = tree;
+      // MPPTs no inverter lists get one of their own, so every panel has a home.
+      for (const m of strip(l.unplaced_mppts || [])) {
+        if (!m.label) m.label = topoEdNextNumbered('MPPT', topoEdAllMppts());
+        const name = topoEdNextNumbered('Inverter', tree.inverters.map(i => i.name));
+        tree.inverters.push({ name, display_name: '', mppts: [m] });
+      }
+      topoEditor.active = true;
+      topoEditor.dirty = false;
+      topoEdToolbar(true);
+      renderTopoEditor();
+      topoEdRefreshReadings();
+    } catch (e) {
+      showToast(`Could not open the editor: ${e.message}`, 'err');
+    }
+  }
+
+  function exitTopoEdit() {
+    topoEditor.active = false;
+    topoEditor.dirty = false;
+    topoEditor.tree = null;
+    topoEdToolbar(false);
+    refreshTopology();
+  }
+
+  async function saveTopoEdit() {
+    const body = {
+      inverters: topoEditor.tree.inverters.map(inv => ({
+        name: inv.name, display_name: inv.display_name,
+        mppts: inv.mppts.map(m => ({
+          label: m.label,
+          strings: m.strings.map(s => ({
+            label: s.label, display_label: s.display_label, rating_w: s.rating_w,
+            panels: s.panels.map(p => p.barcode),
+          })),
+        })),
+      })),
+    };
+    const btn = document.getElementById('topo-save-btn');
+    btn.disabled = true;
+    try {
+      const r = await apiFetch('/api/layout', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || `save failed (${r.status})`);
+      showToast('Layout saved ✓', 'ok');
+      exitTopoEdit();
+    } catch (e) {
+      document.getElementById('topo-ed-error').textContent = e.message;
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  function topoEdPanelHtml(p, name) {
+    const d = topoEditor.readings[p.barcode];
+    const watts = d ? `${Math.round(d.power_in ?? d.power ?? 0)}<span class="unit">W</span>` : '—';
+    return `<div class="panel-tile topo-ed-panel" data-barcode="${topoEscape(p.barcode)}" title="${topoEscape(p.barcode)}">
+      <div class="panel-tile-head">
+        <div class="panel-tile-id">${topoEscape(name)}</div>
+        <div class="panel-tile-bc">…${topoEscape(topoLast6(p.barcode))}</div>
+      </div>
+      <div class="panel-tile-power">${watts}</div>
+    </div>`;
+  }
+
+  function renderTopoEditor() {
+    const t = topoEditor.tree;
+    const tree = document.getElementById('topo-tree');
+    let html = `<div class="topo-tray" id="topo-unassigned">
+      <div class="topo-tray-head"><strong>Unassigned</strong> · ${t.unassigned.length} panel${t.unassigned.length === 1 ? '' : 's'}
+        the bus has found that no string holds. Drag them into a string; drag one back here to take it out.</div>
+      <div class="panel-grid topo-ed-drop" data-drop="tray">${
+        t.unassigned.map(p => topoEdPanelHtml(p, p.addr)).join('') || '<div class="topo-ed-empty">None</div>'}</div>
+    </div>`;
+    t.inverters.forEach((inv, ii) => {
+      let body = '';
+      inv.mppts.forEach((m, mi) => {
+        let strings = '';
+        m.strings.forEach((s, si) => {
+          const panels = s.panels.map((p, pi) => topoEdPanelHtml(p, topoEdPanelName(s, pi))).join('');
+          strings += `<div class="topo-string" data-string-label="${topoEscape(s.label)}">
+            <div class="topo-string-head">
+              <input class="topo-ed-name topo-ed-string-name" data-i="${ii}" data-m="${mi}" data-s="${si}"
+                value="${topoEscape(s.display_label)}" placeholder="${topoEscape(s.label)}" maxlength="28" aria-label="String name">
+              ${s.display_label ? `<span class="topo-ed-canon">(${topoEscape(s.label)})</span>` : ''}
+              <span class="topo-string-pill">${s.panels.length} panel${s.panels.length === 1 ? '' : 's'}</span>
+              ${s.panels.length ? '' : `<button class="topo-del" data-del="string" data-i="${ii}" data-m="${mi}" data-s="${si}">Delete</button>`}
+            </div>
+            <div class="panel-grid topo-ed-drop" data-drop="${ii}:${mi}:${si}">${
+              panels || '<div class="topo-ed-empty">Drag panels here</div>'}</div>
+          </div>`;
+        });
+        body += `<div class="topo-mppt" data-mppt-label="${topoEscape(m.label)}">
+          <div class="topo-mppt-head">
+            <input class="topo-ed-name topo-ed-mppt-name" data-i="${ii}" data-m="${mi}" value="${topoEscape(m.label)}"
+              maxlength="32" aria-label="MPPT name">
+            ${m.strings.length ? '' : `<button class="topo-del" data-del="mppt" data-i="${ii}" data-m="${mi}">Delete</button>`}
+          </div>
+          <div class="topo-inv-body">${strings}
+            <button class="topo-add topo-add-string" data-i="${ii}" data-m="${mi}">+ String</button>
+          </div>
+        </div>`;
+      });
+      html += `<div class="topo-inv" data-inv-name="${topoEscape(inv.name)}">
+        <div class="topo-inv-head">
+          <input class="topo-ed-name topo-ed-inv-name" data-i="${ii}" value="${topoEscape(inv.display_name)}"
+            placeholder="${topoEscape(inv.name)}" maxlength="32" aria-label="Inverter name">
+          ${inv.display_name ? `<span class="topo-ed-canon">(${topoEscape(inv.name)})</span>` : ''}
+          ${inv.mppts.length ? '' : `<button class="topo-del" data-del="inverter" data-i="${ii}">Delete</button>`}
+        </div>
+        <div class="topo-inv-body">${body}
+          <button class="topo-add topo-add-mppt" data-i="${ii}">+ MPPT</button>
+        </div>
+      </div>`;
+    });
+    html += `<button class="topo-add topo-add-inverter">+ Inverter</button>`;
+    tree.innerHTML = html;
+    document.getElementById('topo-summary').textContent =
+      `Editing · ${t.inverters.length} inverter${t.inverters.length === 1 ? '' : 's'} · ${t.unassigned.length} unassigned`;
+  }
+
+  // Names: inverter and string fields set the display name; an MPPT's field is
+  // its label. Panel names follow as you type, without a re-render stealing focus.
+  document.getElementById('topo-tree').addEventListener('input', e => {
+    if (!topoEditor.active) return;
+    const el = e.target, d = el.dataset, t = topoEditor.tree;
+    if (el.classList.contains('topo-ed-inv-name')) {
+      t.inverters[+d.i].display_name = el.value.trim();
+    } else if (el.classList.contains('topo-ed-mppt-name')) {
+      t.inverters[+d.i].mppts[+d.m].label = el.value.trim();
+    } else if (el.classList.contains('topo-ed-string-name')) {
+      const s = t.inverters[+d.i].mppts[+d.m].strings[+d.s];
+      s.display_label = el.value.trim();
+      el.closest('.topo-string').querySelectorAll('.topo-ed-panel .panel-tile-id').forEach((idEl, pi) => {
+        idEl.textContent = topoEdPanelName(s, pi);
+      });
+    } else {
+      return;
+    }
+    topoEdMarkDirty();
+  });
+
+  document.getElementById('topo-tree').addEventListener('click', e => {
+    if (!topoEditor.active) return;
+    const btn = e.target.closest('button');
+    if (!btn) return;
+    const d = btn.dataset, t = topoEditor.tree;
+    if (btn.classList.contains('topo-add-string')) {
+      t.inverters[+d.i].mppts[+d.m].strings.push({ label: topoEdNextString(), display_label: '', rating_w: 0, panels: [] });
+    } else if (btn.classList.contains('topo-add-mppt')) {
+      t.inverters[+d.i].mppts.push({ label: topoEdNextNumbered('MPPT', topoEdAllMppts()), strings: [] });
+    } else if (btn.classList.contains('topo-add-inverter')) {
+      t.inverters.push({ name: topoEdNextNumbered('Inverter', t.inverters.map(i => i.name)), display_name: '', mppts: [] });
+    } else if (d.del === 'string') {
+      t.inverters[+d.i].mppts[+d.m].strings.splice(+d.s, 1);
+    } else if (d.del === 'mppt') {
+      t.inverters[+d.i].mppts.splice(+d.m, 1);
+    } else if (d.del === 'inverter') {
+      t.inverters.splice(+d.i, 1);
+    } else {
+      return;
+    }
+    topoEdMarkDirty();
+    renderTopoEditor();
+  });
+
+  // ---- Dragging. Mouse: pointer events, lifted after a 5 px move. Touch: a
+  // 300 ms press lifts the panel, so a swipe that starts on a card still
+  // scrolls the page; once lifted, touchmove is cancelled so it doesn't.
+  const topoDrag = { el: null, barcode: null, ghost: null, timer: null, startX: 0, startY: 0, lifted: false, over: null };
+
+  function topoEdListOf(dropKey) {
+    if (dropKey === 'tray') return topoEditor.tree.unassigned;
+    const [i, m, s] = dropKey.split(':').map(Number);
+    return topoEditor.tree.inverters[i].mppts[m].strings[s].panels;
+  }
+
+  function topoEdLift(x, y) {
+    topoDrag.lifted = true;
+    const r = topoDrag.el.getBoundingClientRect();
+    const g = topoDrag.el.cloneNode(true);
+    g.classList.add('topo-ed-ghost');
+    g.style.width = r.width + 'px';
+    document.body.appendChild(g);
+    topoDrag.ghost = g;
+    topoDrag.el.classList.add('dragging');
+    topoEdMoveGhost(x, y);
+  }
+
+  function topoEdMoveGhost(x, y) {
+    if (!topoDrag.ghost) return;
+    topoDrag.ghost.style.left = (x - 20) + 'px';
+    topoDrag.ghost.style.top = (y - 20) + 'px';
+    const target = document.elementFromPoint(x, y);
+    const zone = target && target.closest('.topo-ed-drop');
+    if (topoDrag.over && topoDrag.over !== zone) topoDrag.over.classList.remove('over');
+    topoDrag.over = zone;
+    if (zone) zone.classList.add('over');
+  }
+
+  function topoEdDrop(x, y) {
+    const target = document.elementFromPoint(x, y);
+    const zone = target && target.closest('.topo-ed-drop');
+    if (!zone) return false;
+    const before = target.closest('.topo-ed-panel');
+    let from = null, fromIdx = -1;
+    for (const key of ['tray', ...topoEdZoneKeys()]) {
+      const list = topoEdListOf(key);
+      const i = list.findIndex(p => p.barcode === topoDrag.barcode);
+      if (i >= 0) { from = list; fromIdx = i; break; }
+    }
+    if (!from) return false;
+    const [panel] = from.splice(fromIdx, 1);
+    const to = topoEdListOf(zone.dataset.drop);
+    let at = to.length;
+    if (before && before.dataset.barcode !== panel.barcode) {
+      const j = to.findIndex(p => p.barcode === before.dataset.barcode);
+      if (j >= 0) at = j;
+    }
+    to.splice(at, 0, panel);
+    topoEdMarkDirty();
+    return true;
+  }
+
+  function topoEdZoneKeys() {
+    const keys = [];
+    topoEditor.tree.inverters.forEach((inv, i) => inv.mppts.forEach((m, mi) =>
+      m.strings.forEach((s, si) => keys.push(`${i}:${mi}:${si}`))));
+    return keys;
+  }
+
+  function topoEdEndDrag(x, y) {
+    clearTimeout(topoDrag.timer);
+    const dropped = topoDrag.lifted && topoEdDrop(x, y);
+    if (topoDrag.ghost) topoDrag.ghost.remove();
+    if (topoDrag.over) topoDrag.over.classList.remove('over');
+    if (topoDrag.el) topoDrag.el.classList.remove('dragging', 'lifting');
+    Object.assign(topoDrag, { el: null, barcode: null, ghost: null, timer: null, lifted: false, over: null });
+    if (dropped) renderTopoEditor();
+  }
+
+  function topoEdStart(el, x, y) {
+    topoDrag.el = el;
+    topoDrag.barcode = el.dataset.barcode;
+    topoDrag.startX = x;
+    topoDrag.startY = y;
+    topoDrag.lifted = false;
+  }
+
+  document.getElementById('topo-tree').addEventListener('pointerdown', e => {
+    if (!topoEditor.active || e.pointerType === 'touch' || e.button !== 0) return;
+    const el = e.target.closest('.topo-ed-panel');
+    if (!el) return;
+    e.preventDefault();
+    topoEdStart(el, e.clientX, e.clientY);
+  });
+  window.addEventListener('pointermove', e => {
+    if (!topoDrag.el || e.pointerType === 'touch') return;
+    if (!topoDrag.lifted && Math.hypot(e.clientX - topoDrag.startX, e.clientY - topoDrag.startY) > 5)
+      topoEdLift(e.clientX, e.clientY);
+    if (topoDrag.lifted) topoEdMoveGhost(e.clientX, e.clientY);
+  });
+  window.addEventListener('pointerup', e => {
+    if (!topoDrag.el || e.pointerType === 'touch') return;
+    topoEdEndDrag(e.clientX, e.clientY);
+  });
+
+  document.getElementById('topo-tree').addEventListener('touchstart', e => {
+    if (!topoEditor.active || e.touches.length !== 1) return;
+    const el = e.target.closest('.topo-ed-panel');
+    if (!el) return;
+    const t = e.touches[0];
+    topoEdStart(el, t.clientX, t.clientY);
+    el.classList.add('lifting');
+    topoDrag.timer = setTimeout(() => {
+      if (topoDrag.el === el) topoEdLift(topoDrag.startX, topoDrag.startY);
+    }, 300);
+  }, { passive: true });
+  window.addEventListener('touchmove', e => {
+    if (!topoDrag.el) return;
+    const t = e.touches[0];
+    if (!topoDrag.lifted) {
+      // Moved before the press lifted it: a scroll. Let it go.
+      if (Math.hypot(t.clientX - topoDrag.startX, t.clientY - topoDrag.startY) > 8) topoEdEndDrag(-1, -1);
+      return;
+    }
+    e.preventDefault();
+    topoEdMoveGhost(t.clientX, t.clientY);
+  }, { passive: false });
+  window.addEventListener('touchend', e => {
+    if (!topoDrag.el) return;
+    const t = e.changedTouches[0];
+    topoEdEndDrag(t.clientX, t.clientY);
+  });
+  window.addEventListener('touchcancel', () => { if (topoDrag.el) topoEdEndDrag(-1, -1); });
+
+  // Live watts while editing: only the numbers change, so a drag in progress
+  // and the tree being edited are left alone.
+  async function topoEdRefreshReadings() {
+    try {
+      const r = await apiFetch('/api/devices');
+      if (!r.ok) return;
+      const j = await r.json();
+      topoEditor.readings = {};
+      for (const d of (j.devices || [])) if (d.barcode) topoEditor.readings[d.barcode] = d;
+      document.querySelectorAll('#topo-tree .topo-ed-panel').forEach(el => {
+        const d = topoEditor.readings[el.dataset.barcode];
+        const p = el.querySelector('.panel-tile-power');
+        if (p) p.innerHTML = d ? `${Math.round(d.power_in ?? d.power ?? 0)}<span class="unit">W</span>` : '—';
+      });
+    } catch (_) { /* the next refresh tries again */ }
+  }
+
+  document.getElementById('topo-edit-btn').addEventListener('click', enterTopoEdit);
+  document.getElementById('topo-save-btn').addEventListener('click', saveTopoEdit);
+  document.getElementById('topo-cancel-btn').addEventListener('click', exitTopoEdit);
+  window.addEventListener('beforeunload', e => {
+    if (topoEditor.active && topoEditor.dirty) { e.preventDefault(); e.returnValue = ''; }
+  });
 
   document.getElementById('topo-expand-btn').addEventListener('click', () => {
     topoState.collapsed.clear();
