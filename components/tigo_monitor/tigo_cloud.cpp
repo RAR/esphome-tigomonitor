@@ -372,6 +372,10 @@ void TigoMonitorComponent::match_cloud_layout_to_uart_(const char *layout_json) 
   }
 
   int panel_count = 0, matched = 0, global_mppt = 0;
+  // A layout the user saved by hand holds this one for them instead
+  // (tigo_layout_store.cpp), so collect rather than write.
+  bool hold = layout_manual();
+  std::vector<layout::Assignment> incoming;
   cJSON *inv;
   cJSON_ArrayForEach(inv, inverters) {
     cJSON *mppts = cJSON_GetObjectItem(inv, "mppts");
@@ -421,11 +425,15 @@ void TigoMonitorComponent::match_cloud_layout_to_uart_(const char *layout_json) 
             std::string last6 = to_std_string(bc).substr(bc.size() - 6);
             for (char &c : last6) c = (char) toupper((unsigned char) c);
             if (serial_up.find(last6) == std::string::npos) continue;
-            node.cca_label = panel_label;
-            node.cca_string_label = string_label;
-            node.cca_mppt_label = mppt_label;
-            node.cca_object_id = obj_id;
-            node.cca_validated = true;
+            if (hold) {
+              incoming.push_back({to_std_string(bc), panel_label, string_label, mppt_label});
+            } else {
+              node.cca_label = panel_label;
+              node.cca_string_label = string_label;
+              node.cca_mppt_label = mppt_label;
+              node.cca_object_id = obj_id;
+              node.cca_validated = true;
+            }
             matched++;
             found = true;
             ESP_LOGD(CLOUD_TAG, "Matched %s (...%s) -> '%s' [%s / %s]", node.addr.c_str(),
@@ -444,7 +452,9 @@ void TigoMonitorComponent::match_cloud_layout_to_uart_(const char *layout_json) 
 
   ESP_LOGI(CLOUD_TAG, "Cloud layout import: %d panels, %d matched to UART devices", panel_count,
            matched);
-  if (matched > 0) {
+  if (hold) {
+    if (matched > 0) offer_layout("cloud", std::move(incoming), {});
+  } else if (matched > 0) {
     save_node_table();
     last_cca_sync_time_ = millis();
     rebuild_string_groups();

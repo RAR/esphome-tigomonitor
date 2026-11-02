@@ -309,6 +309,36 @@ void TigoWebServer::setup() {
       .user_ctx = this
     };
     httpd_register_uri_handler(server_, &api_strings_rating_uri);
+
+    // The Topology editor: the whole layout, and what waits for the user.
+    httpd_uri_t api_layout_get_uri = {
+      .uri = "/api/layout",
+      .method = HTTP_GET,
+      .handler = api_layout_get_handler,
+      .user_ctx = this
+    };
+    httpd_register_uri_handler(server_, &api_layout_get_uri);
+    httpd_uri_t api_layout_post_uri = {
+      .uri = "/api/layout",
+      .method = HTTP_POST,
+      .handler = api_layout_post_handler,
+      .user_ctx = this
+    };
+    httpd_register_uri_handler(server_, &api_layout_post_uri);
+    httpd_uri_t api_layout_pending_get_uri = {
+      .uri = "/api/layout/pending",
+      .method = HTTP_GET,
+      .handler = api_layout_pending_get_handler,
+      .user_ctx = this
+    };
+    httpd_register_uri_handler(server_, &api_layout_pending_get_uri);
+    httpd_uri_t api_layout_pending_post_uri = {
+      .uri = "/api/layout/pending",
+      .method = HTTP_POST,
+      .handler = api_layout_pending_post_handler,
+      .user_ctx = this
+    };
+    httpd_register_uri_handler(server_, &api_layout_pending_post_uri);
     
     httpd_uri_t api_esp_status_uri = {
       .uri = "/api/status",
@@ -2278,7 +2308,29 @@ esp_err_t TigoWebServer::api_node_import_handler(httpd_req_t *req) {
   }
 
   // Import the nodes (this rebuilds the string/inverter groups synchronously)
+  // Once the user has laid the site out by hand, a file's labels wait for
+  // them like a sync's; its addresses still restore at once, carrying the
+  // labels each panel has now (as the Raspberry Pi build does).
+  std::vector<tigo_monitor::layout::Assignment> held_labels;
+  if (server->parent_->layout_manual()) {
+    std::map<std::string, tigo_monitor::layout::Assignment> now;
+    for (const auto &a : server->parent_->current_assignments()) now[a.barcode] = a;
+    for (auto &node : nodes) {
+      std::string bc(node.long_address.data(), node.long_address.size());
+      if (!node.cca_string_label.empty())
+        held_labels.push_back({bc, std::string(node.cca_label.data(), node.cca_label.size()),
+                               std::string(node.cca_string_label.data(), node.cca_string_label.size()),
+                               std::string(node.cca_mppt_label.data(), node.cca_mppt_label.size())});
+      auto it = now.find(bc);
+      node.cca_label = it == now.end() ? "" : it->second.label.c_str();
+      node.cca_string_label = it == now.end() ? "" : it->second.string_label.c_str();
+      node.cca_mppt_label = it == now.end() ? "" : it->second.mppt_label.c_str();
+    }
+  }
   bool success = server->parent_->import_node_table(nodes);
+  bool layout_held = success && !held_labels.empty() &&
+                     server->parent_->offer_layout("import", std::move(held_labels), {}) ==
+                         tigo_monitor::layout::Offer::hold;
 
   // Re-apply manual Topology overrides now that the groups exist. Each setter persists to
   // NVS and no-ops (logs) if its target string/inverter isn't present.
@@ -2308,8 +2360,9 @@ esp_err_t TigoWebServer::api_node_import_handler(httpd_req_t *req) {
     PSRAMString response;
     char head[160];
     snprintf(head, sizeof(head),
-      "{\"status\":\"ok\",\"message\":\"Successfully imported %zu nodes\",\"imported\":%zu,\"overrides\":%d",
-      nodes.size(), nodes.size(), overrides_applied);
+      "{\"status\":\"ok\",\"message\":\"Successfully imported %zu nodes\",\"imported\":%zu,\"overrides\":%d,"
+      "\"layout_held\":%s",
+      nodes.size(), nodes.size(), overrides_applied, layout_held ? "true" : "false");
     response.append(head);
 
     if (unmatched_node_count > 0) {
@@ -4041,6 +4094,322 @@ TigoWebServer::~TigoWebServer() {
     temp_sensor_handle_ = nullptr;
   }
 #endif
+}
+
+// ---- The Topology editor. Same JSON as the Raspberry Pi build's
+// linux/src/layout_api.cpp; the rules are tigo_layout.h's.
+
+namespace {
+
+namespace layout = tigo_monitor::layout;
+
+void append_json_str(PSRAMString &out, const std::string &in) {
+  out.append("\"");
+  std::string esc;
+  esc.reserve(in.size());
+  for (char c : in) {
+    if (c == '"' || c == '\\') {
+      esc.push_back('\\');
+      esc.push_back(c);
+    } else if (static_cast<unsigned char>(c) >= 0x20) {
+      esc.push_back(c);
+    }
+  }
+  out.append(esc);
+  out.append("\"");
+}
+
+void send_layout_error(httpd_req_t *req, const char *status, const std::string &msg) {
+  PSRAMString out;
+  out.append("{\"success\":false,\"error\":");
+  append_json_str(out, msg);
+  out.append("}");
+  httpd_resp_set_status(req, status);
+  httpd_resp_set_type(req, "application/json");
+  httpd_resp_send(req, out.c_str(), out.length());
+}
+
+// Reads a request body into PSRAM; nullptr (reply sent) if it can't.
+char *read_layout_body(httpd_req_t *req) {
+  size_t len = req->content_len;
+  if (len == 0 || len > 32768) {
+    send_layout_error(req, "400 Bad Request", "body must be 1 byte to 32 KB of JSON");
+    return nullptr;
+  }
+  char *buf = static_cast<char *>(heap_caps_malloc(len + 1, MALLOC_CAP_SPIRAM));
+  if (!buf) buf = static_cast<char *>(heap_caps_malloc(len + 1, MALLOC_CAP_DEFAULT));
+  if (!buf) {
+    send_layout_error(req, "500 Internal Server Error", "out of memory");
+    return nullptr;
+  }
+  size_t got = 0;
+  while (got < len) {
+    int r = httpd_req_recv(req, buf + got, len - got);
+    if (r <= 0) {
+      heap_caps_free(buf);
+      send_layout_error(req, "400 Bad Request", "could not read the body");
+      return nullptr;
+    }
+    got += r;
+  }
+  buf[got] = '\0';
+  return buf;
+}
+
+std::string str_item(cJSON *o, const char *k) {
+  cJSON *it = cJSON_GetObjectItem(o, k);
+  return it && cJSON_IsString(it) ? it->valuestring : "";
+}
+
+// The POST body's shape; tigo_layout.h validate() judges the content.
+std::string parse_layout_body(cJSON *root, layout::Layout &out) {
+  cJSON *invs = root ? cJSON_GetObjectItem(root, "inverters") : nullptr;
+  if (!invs || !cJSON_IsArray(invs)) return "expected an \"inverters\" array";
+  cJSON *i;
+  cJSON_ArrayForEach(i, invs) {
+    if (!cJSON_IsObject(i)) return "every inverter must be an object";
+    layout::InverterSpec inv;
+    inv.name = str_item(i, "name");
+    inv.display_name = str_item(i, "display_name");
+    cJSON *m;
+    cJSON_ArrayForEach(m, cJSON_GetObjectItem(i, "mppts")) {
+      if (!cJSON_IsObject(m)) return "every MPPT must be an object";
+      layout::MpptSpec ms;
+      ms.label = str_item(m, "label");
+      cJSON *s;
+      cJSON_ArrayForEach(s, cJSON_GetObjectItem(m, "strings")) {
+        if (!cJSON_IsObject(s)) return "every string must be an object";
+        layout::StringSpec ss;
+        ss.label = str_item(s, "label");
+        ss.display_label = str_item(s, "display_label");
+        cJSON *r = cJSON_GetObjectItem(s, "rating_w");
+        if (r) {
+          if (!cJSON_IsNumber(r) || r->valuedouble != static_cast<double>(r->valueint))
+            return "rating_w must be a whole number";
+          ss.rating_w = r->valueint;
+        }
+        cJSON *p;
+        cJSON_ArrayForEach(p, cJSON_GetObjectItem(s, "panels")) {
+          if (!cJSON_IsString(p)) return "panels must be barcodes";
+          ss.panels.push_back(p->valuestring);
+        }
+        ms.strings.push_back(std::move(ss));
+      }
+      inv.mppts.push_back(std::move(ms));
+    }
+    out.inverters.push_back(std::move(inv));
+  }
+  return "";
+}
+
+void append_mppts(PSRAMString &out, const std::vector<layout::MpptSpec> &ms, layout::Tree &t) {
+  out.append("[");
+  bool first_m = true;
+  for (const auto &m : ms) {
+    out.append(first_m ? "{\"label\":" : ",{\"label\":");
+    first_m = false;
+    append_json_str(out, m.label);
+    out.append(",\"strings\":[");
+    bool first_s = true;
+    for (const auto &s : m.strings) {
+      out.append(first_s ? "{\"label\":" : ",{\"label\":");
+      first_s = false;
+      append_json_str(out, s.label);
+      out.append(",\"display_label\":");
+      append_json_str(out, s.display_label);
+      char num[48];
+      snprintf(num, sizeof(num), ",\"rating_w\":%d,\"panels\":[", s.rating_w);
+      out.append(num);
+      bool first_p = true;
+      for (const auto &n : t.panels[s.label]) {
+        out.append(first_p ? "{\"barcode\":" : ",{\"barcode\":");
+        first_p = false;
+        append_json_str(out, n.barcode);
+        out.append(",\"addr\":");
+        append_json_str(out, n.addr);
+        out.append(",\"name\":");
+        append_json_str(out, n.label);
+        out.append("}");
+      }
+      out.append("]}");
+    }
+    out.append("]}");
+  }
+  out.append("]");
+}
+
+void append_inverter_mppts(PSRAMString &out, const layout::InverterMppts &invs) {
+  out.append("[");
+  bool first = true;
+  for (const auto &inv : invs) {
+    out.append(first ? "{\"name\":" : ",{\"name\":");
+    first = false;
+    append_json_str(out, inv.first);
+    out.append(",\"mppts\":[");
+    for (size_t k = 0; k < inv.second.size(); k++) {
+      if (k) out.append(",");
+      append_json_str(out, inv.second[k]);
+    }
+    out.append("]}");
+  }
+  out.append("]");
+}
+
+}  // namespace
+
+esp_err_t TigoWebServer::api_layout_get_handler(httpd_req_t *req) {
+  TigoWebServer *server = static_cast<TigoWebServer *>(req->user_ctx);
+  if (!server->check_api_auth(req)) return ESP_OK;
+  if (!server->parent_) {
+    send_layout_error(req, "503 Service Unavailable", "monitor not bound");
+    return ESP_OK;
+  }
+  bool manual = false;
+  std::string source;
+  size_t changes = 0;
+  layout::Tree t = server->parent_->layout_tree(manual, source, changes);
+  PSRAMString out;
+  out.append(manual ? "{\"manual\":true,\"inverters\":[" : "{\"manual\":false,\"inverters\":[");
+  bool first = true;
+  for (const auto &inv : t.layout.inverters) {
+    out.append(first ? "{\"name\":" : ",{\"name\":");
+    first = false;
+    append_json_str(out, inv.name);
+    out.append(",\"display_name\":");
+    append_json_str(out, inv.display_name);
+    out.append(",\"mppts\":");
+    append_mppts(out, inv.mppts, t);
+    out.append("}");
+  }
+  out.append("],\"unplaced_mppts\":");
+  append_mppts(out, t.unplaced, t);
+  out.append(",\"unassigned\":[");
+  first = true;
+  for (const auto &n : t.unassigned) {
+    out.append(first ? "{\"barcode\":" : ",{\"barcode\":");
+    first = false;
+    append_json_str(out, n.barcode);
+    out.append(",\"addr\":");
+    append_json_str(out, n.addr);
+    out.append(",\"name\":");
+    append_json_str(out, n.label);
+    out.append("}");
+  }
+  out.append("],\"pending\":");
+  if (source.empty()) {
+    out.append("null}");
+  } else {
+    out.append("{\"source\":");
+    append_json_str(out, source);
+    char num[40];
+    snprintf(num, sizeof(num), ",\"changes\":%u}}", static_cast<unsigned>(changes));
+    out.append(num);
+  }
+  httpd_resp_set_type(req, "application/json");
+  httpd_resp_send(req, out.c_str(), out.length());
+  return ESP_OK;
+}
+
+esp_err_t TigoWebServer::api_layout_post_handler(httpd_req_t *req) {
+  TigoWebServer *server = static_cast<TigoWebServer *>(req->user_ctx);
+  if (!server->check_api_auth(req)) return ESP_OK;
+  if (!server->parent_) {
+    send_layout_error(req, "503 Service Unavailable", "monitor not bound");
+    return ESP_OK;
+  }
+  char *buf = read_layout_body(req);
+  if (!buf) return ESP_OK;
+  cJSON *root = cJSON_Parse(buf);
+  heap_caps_free(buf);
+  layout::Layout l;
+  std::string err = root ? parse_layout_body(root, l) : "body must be a JSON object";
+  if (root) cJSON_Delete(root);
+  if (err.empty()) err = server->parent_->set_layout(l);
+  if (!err.empty()) {
+    send_layout_error(req, "400 Bad Request", err);
+    return ESP_OK;
+  }
+  httpd_resp_set_type(req, "application/json");
+  httpd_resp_sendstr(req, "{\"success\":true}");
+  return ESP_OK;
+}
+
+esp_err_t TigoWebServer::api_layout_pending_get_handler(httpd_req_t *req) {
+  TigoWebServer *server = static_cast<TigoWebServer *>(req->user_ctx);
+  if (!server->check_api_auth(req)) return ESP_OK;
+  if (!server->parent_) {
+    send_layout_error(req, "503 Service Unavailable", "monitor not bound");
+    return ESP_OK;
+  }
+  std::string source;
+  std::vector<layout::Change> changes;
+  layout::InverterMppts now, then;
+  httpd_resp_set_type(req, "application/json");
+  if (!server->parent_->layout_pending(source, changes, now, then)) {
+    httpd_resp_sendstr(req, "{\"pending\":null}");
+    return ESP_OK;
+  }
+  auto place = [](PSRAMString &out, const layout::Assignment &a) {
+    out.append("{\"name\":");
+    append_json_str(out, a.label);
+    out.append(",\"string\":");
+    append_json_str(out, a.string_label);
+    out.append(",\"mppt\":");
+    append_json_str(out, a.mppt_label);
+    out.append("}");
+  };
+  PSRAMString out;
+  out.append("{\"source\":");
+  append_json_str(out, source);
+  out.append(",\"changes\":[");
+  bool first = true;
+  for (const auto &c : changes) {
+    out.append(first ? "{\"barcode\":" : ",{\"barcode\":");
+    first = false;
+    append_json_str(out, c.barcode);
+    out.append(",\"now\":");
+    place(out, c.now);
+    out.append(",\"then\":");
+    place(out, c.then);
+    out.append("}");
+  }
+  out.append("],\"inverters_now\":");
+  if (then.empty()) {
+    out.append("null,\"inverters_then\":null}");
+  } else {
+    append_inverter_mppts(out, now);
+    out.append(",\"inverters_then\":");
+    append_inverter_mppts(out, then);
+    out.append("}");
+  }
+  httpd_resp_send(req, out.c_str(), out.length());
+  return ESP_OK;
+}
+
+esp_err_t TigoWebServer::api_layout_pending_post_handler(httpd_req_t *req) {
+  TigoWebServer *server = static_cast<TigoWebServer *>(req->user_ctx);
+  if (!server->check_api_auth(req)) return ESP_OK;
+  if (!server->parent_) {
+    send_layout_error(req, "503 Service Unavailable", "monitor not bound");
+    return ESP_OK;
+  }
+  char *buf = read_layout_body(req);
+  if (!buf) return ESP_OK;
+  cJSON *root = cJSON_Parse(buf);
+  heap_caps_free(buf);
+  std::string action = root ? str_item(root, "action") : "";
+  if (root) cJSON_Delete(root);
+  if (action != "keep" && action != "use") {
+    send_layout_error(req, "400 Bad Request", "action must be \"keep\" or \"use\"");
+    return ESP_OK;
+  }
+  if (!server->parent_->resolve_layout_pending(action == "use")) {
+    send_layout_error(req, "409 Conflict", "nothing is waiting");
+    return ESP_OK;
+  }
+  httpd_resp_set_type(req, "application/json");
+  httpd_resp_sendstr(req, "{\"success\":true}");
+  return ESP_OK;
 }
 
 }  // namespace tigo_server

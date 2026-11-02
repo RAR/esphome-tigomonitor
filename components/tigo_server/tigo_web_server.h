@@ -267,6 +267,11 @@ class TigoWebServer : public Component
   static esp_err_t api_energy_history_handler(httpd_req_t *req);
   static esp_err_t api_inverters_handler(httpd_req_t *req);
   static esp_err_t api_inverters_rename_handler(httpd_req_t *req);
+  // The Topology editor (bottom of tigo_web_server.cpp).
+  static esp_err_t api_layout_get_handler(httpd_req_t *req);
+  static esp_err_t api_layout_post_handler(httpd_req_t *req);
+  static esp_err_t api_layout_pending_get_handler(httpd_req_t *req);
+  static esp_err_t api_layout_pending_post_handler(httpd_req_t *req);
   static esp_err_t api_strings_rename_handler(httpd_req_t *req);
   static esp_err_t api_strings_rating_handler(httpd_req_t *req);
   static esp_err_t api_esp_status_handler(httpd_req_t *req);
