@@ -499,3 +499,52 @@ test('touch: holding a lifted drag near the bottom edge scrolls the page down to
   assert.deepEqual(await stringsIn(page, 'MPPT 2'), ['C', 'A']);
   await ctx.close();
 });
+
+// ---- Reordering inverters by the handle beside their name.
+const invOrder = (page) => page.$$eval('#topo-tree .topo-inv', (els) => els.map((e) => e.dataset.invName));
+const invHandle = (name) => `[data-inv-name="${name}"] .topo-ed-handle[data-kind="inverter"]`;
+
+test('an inverter dropped on another goes in front of it, and Save sends that order', async () => {
+  const { page, ctx, api, errors } = await open({ layout: twoInverters() });
+  await edit(page);
+  await page.locator(invHandle('Inverter 2')).dragTo(page.locator('[data-inv-name="Inverter 1"] .topo-inv-head'));
+  assert.deepEqual(await invOrder(page), ['Inverter 2', 'Inverter 1']);
+  assert.deepEqual(await stringsIn(page, 'MPPT 1'), ['A', 'B']);
+  await page.click('#topo-save-btn');
+  await page.waitForFunction(() => !document.getElementById('topo-unassigned'));
+  assert.deepEqual(api.posts[0].inverters.map((i) => [i.name, i.mppts.map((m) => m.label)]),
+    [['Inverter 2', ['MPPT 2']], ['Inverter 1', ['MPPT 1']]]);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test('an inverter dropped on + Inverter goes last', async () => {
+  const { page, ctx } = await open({ layout: twoInverters() });
+  await edit(page);
+  await page.locator(invHandle('Inverter 1')).dragTo(page.locator('.topo-add-inverter'));
+  assert.deepEqual(await invOrder(page), ['Inverter 2', 'Inverter 1']);
+  await ctx.close();
+});
+
+test('an inverter put back in place, or dropped on the tray, stays put', async () => {
+  const { page, ctx } = await open({ layout: twoInverters() });
+  await edit(page);
+  const box = await page.locator(invHandle('Inverter 1')).boundingBox();
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width / 2 + 10, box.y + box.height / 2 + 4, { steps: 3 });
+  await page.mouse.up();
+  await page.locator(invHandle('Inverter 2')).dragTo(page.locator('#topo-unassigned'));
+  assert.deepEqual(await invOrder(page), ['Inverter 1', 'Inverter 2']);
+  await ctx.close();
+});
+
+test('touch: long-press an inverter handle then move reorders; a quick swipe does not', async () => {
+  const { page, ctx } = await open({ layout: twoInverters(), touch: true, height: 1400 });
+  await edit(page);
+  await touchDrag(page, invHandle('Inverter 2'), '[data-inv-name="Inverter 1"] .topo-inv-head', 50);
+  assert.deepEqual(await invOrder(page), ['Inverter 1', 'Inverter 2']);
+  await touchDrag(page, invHandle('Inverter 2'), '[data-inv-name="Inverter 1"] .topo-inv-head', 400);
+  assert.deepEqual(await invOrder(page), ['Inverter 2', 'Inverter 1']);
+  await ctx.close();
+});

@@ -547,14 +547,14 @@
     box-shadow: 0 8px 24px rgba(0,0,0,0.35); transform: rotate(2deg);
   }
   .topo-ed-drop { min-height: 58px; border-radius: 6px; }
-  .topo-ed-drop.over, .topo-mppt.over, .topo-inv.over { outline: 2px solid var(--accent-2); outline-offset: 2px; }
+  .topo-ed-drop.over, .topo-mppt.over, .topo-inv.over, .topo-add-inverter.over { outline: 2px solid var(--accent-2); outline-offset: 2px; }
   .topo-ed-handle {
     cursor: grab; touch-action: pan-y; user-select: none; -webkit-user-select: none;
     color: var(--text-faint); font-size: 16px; line-height: 1; padding: 4px 2px;
   }
   .topo-ed-handle:hover { color: var(--text); }
-  .topo-string.lifting, .topo-mppt.lifting { outline: 1px solid var(--accent-2); }
-  .topo-string.dragging, .topo-mppt.dragging { opacity: 0.35; }
+  .topo-string.lifting, .topo-mppt.lifting, .topo-inv.lifting { outline: 1px solid var(--accent-2); }
+  .topo-string.dragging, .topo-mppt.dragging, .topo-inv.dragging { opacity: 0.35; }
   .topo-ed-ghost-block {
     background: var(--bg-2); border: 1px solid var(--accent-2); border-radius: 8px; padding: 8px 12px;
   }
@@ -5567,6 +5567,7 @@
       });
       html += `<div class="topo-inv" data-inv-name="${topoEscape(inv.name)}" data-i="${ii}">
         <div class="topo-inv-head">
+          <span class="topo-ed-handle" data-kind="inverter" title="Drag to reorder inverters">⠿</span>
           <input class="topo-ed-name topo-ed-inv-name" data-i="${ii}" value="${topoEscape(inv.display_name)}"
             placeholder="${topoEscape(inv.name)}" maxlength="32" aria-label="Inverter name">
           ${inv.display_name ? `<span class="topo-ed-canon">(${topoEscape(inv.name)})</span>` : ''}
@@ -5631,11 +5632,13 @@
   // ---- Dragging. Mouse: pointer events, lifted after a 5 px move. Touch: a
   // 300 ms press lifts the panel, so a swipe that starts on a card still
   // scrolls the page; once lifted, touchmove is cancelled so it doesn't.
-  // A panel card drags itself; a string or MPPT drags by the handle in its
-  // header and lands in an MPPT or an inverter respectively.
+  // A panel card drags itself; a string, MPPT or inverter drags by the handle
+  // in its header. A string lands in an MPPT, an MPPT in an inverter; an
+  // inverter goes before another, or last on + Inverter.
   const topoDrag = { kind: null, el: null, barcode: null, ghost: null, timer: null, startX: 0, startY: 0, lifted: false, over: null,
                     x: 0, y: 0, scroll: null };
-  const TOPO_DROP_ZONE = { panel: '.topo-ed-drop', string: '.topo-mppt', mppt: '.topo-inv' };
+  const TOPO_DROP_ZONE = { panel: '.topo-ed-drop', string: '.topo-mppt', mppt: '.topo-inv', inverter: '.topo-inv, .topo-add-inverter' };
+  const TOPO_BLOCK = { string: '.topo-string', mppt: '.topo-mppt', inverter: '.topo-inv' };
 
   function topoEdListOf(dropKey) {
     if (dropKey === 'tray') return topoEditor.tree.unassigned;
@@ -5648,7 +5651,7 @@
     const r = topoDrag.el.getBoundingClientRect();
     // A string or MPPT can be tall: its header stands in for it.
     const g = topoDrag.kind === 'panel' ? topoDrag.el.cloneNode(true)
-      : topoDrag.el.querySelector('.topo-string-head, .topo-mppt-head').cloneNode(true);
+      : topoDrag.el.querySelector(':scope > .topo-string-head, :scope > .topo-mppt-head, :scope > .topo-inv-head').cloneNode(true);
     g.classList.add('topo-ed-ghost');
     if (topoDrag.kind !== 'panel') g.classList.add('topo-ed-ghost-block');
     g.style.width = (topoDrag.kind === 'panel' ? r.width : Math.min(r.width, 360)) + 'px';
@@ -5685,19 +5688,22 @@
     if (zone) zone.classList.add('over');
   }
 
-  // Moves the dragged string or MPPT into the list zone's element holds,
-  // before the block of the same kind under the pointer, else at the end.
+  // Moves the dragged string, MPPT or inverter into the list the zone's
+  // element holds, before the block of the same kind under the pointer, else
+  // at the end. Inverters have one list: the zone is the inverter itself, or
+  // + Inverter for the end.
   function topoEdDropBlock(target) {
-    const t = topoEditor.tree;
-    const zone = target && target.closest(TOPO_DROP_ZONE[topoDrag.kind]);
+    const t = topoEditor.tree, kind = topoDrag.kind;
+    const zone = target && target.closest(TOPO_DROP_ZONE[kind]);
     if (!zone) return false;
-    const isString = topoDrag.kind === 'string';
-    const listAt = d => isString ? t.inverters[+d.i].mppts[+d.m].strings : t.inverters[+d.i].mppts;
-    const itemAt = d => listAt(d)[isString ? +d.s : +d.m];
+    const listAt = d => kind === 'string' ? t.inverters[+d.i].mppts[+d.m].strings
+      : kind === 'mppt' ? t.inverters[+d.i].mppts : t.inverters;
+    const itemAt = d => listAt(d)[kind === 'string' ? +d.s : kind === 'mppt' ? +d.m : +d.i];
     const item = itemAt(topoDrag.el.dataset);
     const src = listAt(topoDrag.el.dataset);
-    const dest = isString ? t.inverters[+zone.dataset.i].mppts[+zone.dataset.m].strings : t.inverters[+zone.dataset.i].mppts;
-    const beforeEl = target.closest(isString ? '.topo-string' : '.topo-mppt');
+    const dest = kind === 'inverter' ? t.inverters : kind === 'string'
+      ? t.inverters[+zone.dataset.i].mppts[+zone.dataset.m].strings : t.inverters[+zone.dataset.i].mppts;
+    const beforeEl = target.closest(TOPO_BLOCK[kind]);
     const before = beforeEl && zone.contains(beforeEl) ? itemAt(beforeEl.dataset) : null;
     const from = src.indexOf(item);
     // Put down where it was picked up, or just past itself: nothing moved.
@@ -5759,7 +5765,7 @@
   // el: a panel card, or the handle of a string or MPPT (the block is dragged).
   function topoEdStart(el, x, y) {
     topoDrag.kind = el.classList.contains('topo-ed-handle') ? el.dataset.kind : 'panel';
-    if (topoDrag.kind !== 'panel') el = el.closest(topoDrag.kind === 'string' ? '.topo-string' : '.topo-mppt');
+    if (topoDrag.kind !== 'panel') el = el.closest(TOPO_BLOCK[topoDrag.kind]);
     topoDrag.el = el;
     topoDrag.barcode = el.dataset.barcode;
     topoDrag.startX = x;
