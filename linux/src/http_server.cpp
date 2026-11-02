@@ -668,26 +668,29 @@ void HttpServer::routes_() {
     std::string err;
     if (!ctx_.cloud.layout(layout, err))
       return send_json(res, {{"status", "error"}, {"message", "Import failed: " + err}}, 502);
-    int matched = ctx_.mutable_monitor.apply_layout(layout.panels);
     // The ESP32 takes its inverters from YAML. Here the layout can supply
     // them, but only on a Pi with none set up, so it never undoes an edit.
-    bool added_inverters = false;
-    if (matched > 0 && ctx_.topology.inverters().empty()) {
-      std::vector<InverterConfig> invs;
-      int n = 0;
-      for (const auto &ci : layout.inverters) {
-        n++;
-        if (ci.mppts.empty()) continue;
-        invs.push_back({ci.label.empty() ? "Inverter " + std::to_string(n) : ci.label, "", ci.mppts});
-      }
-      added_inverters = !invs.empty() && ctx_.topology.set_inverters(invs);
+    PendingLayout in;
+    in.source = "cloud";
+    in.panels = layout.panels;
+    in.assignments = ctx_.mutable_monitor.resolve_layout(layout.panels);
+    int matched = static_cast<int>(in.assignments.size());
+    int n = 0;
+    for (const auto &ci : layout.inverters) {
+      n++;
+      if (ci.mppts.empty()) continue;
+      in.inverters.push_back({ci.label.empty() ? "Inverter " + std::to_string(n) : ci.label, "", ci.mppts});
     }
+    bool added_inverters = false;
+    bool held = offer_layout(ctx_.mutable_monitor, ctx_.topology, std::move(in), &added_inverters) ==
+                esphome::tigo_monitor::layout::Offer::hold;
     send_json(res, {{"status", "ok"},
                     {"message", "Layout imported from Tigo cloud: " + std::to_string(matched) + " of " +
                                     std::to_string(layout.panels.size()) + " panels matched"},
                     {"panels", layout.panels.size()},
                     {"matched", matched},
-                    {"inverters_added", added_inverters}});
+                    {"inverters_added", added_inverters},
+                    {"held", held}});
   });
   svr.Get("/api/cloud/health", [this](const httplib::Request &, httplib::Response &res) {
     std::string body, err;
@@ -909,6 +912,20 @@ void HttpServer::routes_() {
     send_json(res, {{"success", true}});
   });
 
+  svr.Get("/api/layout/pending", [this, &mon](const httplib::Request &, httplib::Response &res) {
+    send_json(res, pending_json(mon, ctx_.topology));
+  });
+  svr.Post("/api/layout/pending", [this, body_of](const httplib::Request &req, httplib::Response &res) {
+    json j;
+    if (!body_of(req, res, j)) return;
+    std::string action = j.contains("action") && j["action"].is_string() ? j["action"].get<std::string>() : "";
+    if (action != "keep" && action != "use")
+      return send_json(res, {{"success", false}, {"error", "action must be \"keep\" or \"use\""}}, 400);
+    if (!resolve_pending(ctx_.mutable_monitor, ctx_.topology, action == "use"))
+      return send_json(res, {{"success", false}, {"error", "nothing is waiting"}}, 409);
+    send_json(res, {{"success", true}});
+  });
+
   svr.Get("/api/nodes", [this, &mon](const httplib::Request &, httplib::Response &res) {
     json nodes = json::array();
     for (const auto &n : mon.nodes()) {
@@ -1127,7 +1144,27 @@ void HttpServer::routes_() {
     if (barcodes.size() > cap)
       return fail("This file has " + std::to_string(barcodes.size()) + " panels but the node table holds " +
                   std::to_string(cap) + ".");
+    // Once the user has laid the site out by hand, a file's labels wait
+    // for them like a sync's; its addresses still restore at once, carrying
+    // the labels each panel has now.
+    PendingLayout in;
+    in.source = "import";
+    if (ctx_.topology.manual()) {
+      std::map<std::string, esphome::tigo_monitor::layout::Assignment> now;
+      for (const auto &a : ctx_.mutable_monitor.current_assignments()) now[a.barcode] = a;
+      for (auto &n : nodes) {
+        if (!n.cca_string_label.empty())
+          in.assignments.push_back({n.long_address, n.cca_label, n.cca_string_label, n.cca_mppt_label});
+        auto it = now.find(n.long_address);
+        n.cca_label = it == now.end() ? "" : it->second.label;
+        n.cca_string_label = it == now.end() ? "" : it->second.string_label;
+        n.cca_mppt_label = it == now.end() ? "" : it->second.mppt_label;
+      }
+    }
     auto r = ctx_.mutable_monitor.import_nodes(nodes);
+    bool held = !in.assignments.empty() &&
+                offer_layout(ctx_.mutable_monitor, ctx_.topology, std::move(in)) ==
+                    esphome::tigo_monitor::layout::Offer::hold;
     // The file's Topology names and ratings, as the firmware applies them.
     int overrides = 0;
     const json file_inverters = body.value("inverters", json::array());
@@ -1155,6 +1192,7 @@ void HttpServer::routes_() {
                     {"imported", r.imported},
                     {"remapped", r.remapped},
                     {"held", r.parked},
+                    {"layout_held", held},
                     {"overrides", overrides}});
   });
   // systemd restarts the service (Restart=always in the unit).

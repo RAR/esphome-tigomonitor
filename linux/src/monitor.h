@@ -138,6 +138,8 @@ class Monitor {
   // 04C05B4000BBCC02 -> serial "4-BBCC02K"), which is the only link between
   // the two, so that is the match — as in the firmware.
   int apply_layout(const std::vector<LayoutPanel> &panels);
+  // Where apply_layout would put each panel it matches, without writing.
+  std::vector<esphome::tigo_monitor::layout::Assignment> resolve_layout(const std::vector<LayoutPanel> &panels) const;
   // The Topology editor's: places nodes by exact barcode. With clear_unlisted,
   // a node the list leaves out loses its panel name, string and MPPT.
   // Returns how many nodes matched.

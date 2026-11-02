@@ -7,6 +7,7 @@
 // Used when Device Configuration has a CCA IP, as cca_source: http is.
 
 #include "monitor.h"
+#include "topology.h"
 
 #include <condition_variable>
 #include <cstdint>
@@ -18,7 +19,7 @@ namespace tigod {
 
 class CcaHttp {
  public:
-  explicit CcaHttp(Monitor &monitor);
+  CcaHttp(Monitor &monitor, Topology &topology);
   ~CcaHttp();
   void start();
   void stop();
@@ -39,6 +40,7 @@ class CcaHttp {
  private:
   void run_();
   Monitor &monitor_;
+  Topology &topology_;
   mutable std::mutex mu_;
   std::condition_variable cv_;
   std::string pending_ip_;

@@ -8,6 +8,7 @@
 // a layout saved from the Topology editor also keeps its strings here, so an
 // MPPT or string with no panels yet survives.
 
+#include "monitor.h"
 #include "tigo_layout.h"
 
 #include <cstdint>
@@ -34,7 +35,8 @@ struct StringOverride {
 // in memory only: the next sync produces it again.
 struct PendingLayout {
   std::string source;  // "cca", "cloud", "import"
-  std::vector<esphome::tigo_monitor::layout::Assignment> assignments;
+  std::vector<LayoutPanel> panels;  // a CCA's or the cloud's, as sent; empty for an import
+  std::vector<esphome::tigo_monitor::layout::Assignment> assignments;  // as they land on the nodes
   std::vector<InverterConfig> inverters;  // empty: the source has none
   uint32_t fp = 0;
 };

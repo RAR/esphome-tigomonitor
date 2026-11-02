@@ -166,6 +166,7 @@ export const routes = {
   '/api/strings': { strings },
   '/api/inverters': { inverters },
   '/api/layout': layout,
+  '/api/layout/pending': { pending: null },
   '/api/nodes': {
     nodes: devices.map((d, i) => ({
       addr: d.addr, long_address: d.barcode, sensor_index: i, checksum: '',

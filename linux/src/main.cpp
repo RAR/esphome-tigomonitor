@@ -234,14 +234,14 @@ int main(int argc, char **argv) {
   history.open();
   CcaBle cca(state_dir + "/cca.json");
   cca.start();
-  CcaHttp cca_http(monitor);
+  Topology topology(state_dir + "/topology.json");
+  topology.load();
+  CcaHttp cca_http(monitor, topology);
   cca_http.start();
   // sync_cca_on_startup, for a CCA reached over HTTP.
   if (settings.sync_cca_on_startup && !settings.cca_ip.empty()) cca_http.request_refresh(settings.cca_ip);
   Cloud cloud(state_dir + "/cloud.json");
   cloud.load();
-  Topology topology(state_dir + "/topology.json");
-  topology.load();
   // The bus master's status, for the web UI and Home Assistant alike.
   auto master_status = [&] {
     std::shared_ptr<BusMaster> bm;

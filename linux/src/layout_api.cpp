@@ -1,5 +1,7 @@
 #include "layout_api.h"
 
+#include "log.h"
+
 #include <algorithm>
 #include <climits>
 #include <map>
@@ -145,6 +147,90 @@ std::string parse_layout(const json &body, layout::Layout &out) {
     out.inverters.push_back(std::move(inv));
   }
   return "";
+}
+
+namespace {
+
+layout::InverterMppts inverter_mppts(const std::vector<InverterConfig> &invs) {
+  layout::InverterMppts out;
+  for (const auto &i : invs) out.push_back({i.name, i.mppts});
+  return out;
+}
+
+const char *offer_name(layout::Offer o) {
+  switch (o) {
+    case layout::Offer::apply: return "applied";
+    case layout::Offer::hold: return "held for the user";
+    case layout::Offer::unchanged: return "no different";
+    case layout::Offer::declined: return "already turned down";
+  }
+  return "";
+}
+
+// Applies an incoming layout the way its source always has.
+void apply_incoming(Monitor &mon, Topology &topo, const PendingLayout &in, bool replace_inverters,
+                    bool *inverters_added) {
+  if (!in.panels.empty()) mon.apply_layout(in.panels);
+  else mon.set_assignments(in.assignments, false);
+  // The cloud's inverters only on a Pi with none set up, so they never undo
+  // an edit, unless the user chose them.
+  if (!in.inverters.empty() && !in.assignments.empty() && (replace_inverters || topo.inverters().empty())) {
+    bool ok = topo.set_inverters(in.inverters);
+    if (inverters_added) *inverters_added = ok;
+  }
+}
+
+}  // namespace
+
+layout::Offer offer_layout(Monitor &mon, Topology &topo, PendingLayout in, bool *inverters_added) {
+  if (inverters_added) *inverters_added = false;
+  if (in.assignments.empty() && !in.panels.empty()) in.assignments = mon.resolve_layout(in.panels);
+  bool changes = !layout::diff(mon.current_assignments(), in.assignments).empty();
+  if (!in.inverters.empty() && inverter_mppts(in.inverters) != inverter_mppts(topo.inverters())) changes = true;
+  in.fp = layout::fingerprint(in.assignments, inverter_mppts(in.inverters));
+  layout::Offer o = layout::decide(topo.manual(), changes, in.fp, topo.declined_fp());
+  if (o == layout::Offer::apply) apply_incoming(mon, topo, in, false, inverters_added);
+  LOGI("layout: from %s, %zu panels matched: %s", in.source.c_str(), in.assignments.size(), offer_name(o));
+  if (o == layout::Offer::hold) topo.set_pending(std::move(in));
+  return o;
+}
+
+json pending_json(const Monitor &mon, const Topology &topo) {
+  auto p = topo.pending();
+  if (!p) return {{"pending", nullptr}};
+  auto place = [](const layout::Assignment &a) {
+    return json{{"name", a.label}, {"string", a.string_label}, {"mppt", a.mppt_label}};
+  };
+  json changes = json::array();
+  for (const auto &c : layout::diff(mon.current_assignments(), p->assignments))
+    changes.push_back({{"barcode", c.barcode}, {"now", place(c.now)}, {"then", place(c.then)}});
+  auto invs = [](const std::vector<InverterConfig> &v) {
+    json arr = json::array();
+    for (const auto &i : v) arr.push_back({{"name", i.name}, {"mppts", i.mppts}});
+    return arr;
+  };
+  json out = {{"source", p->source}, {"changes", changes}, {"inverters_now", nullptr}, {"inverters_then", nullptr}};
+  if (!p->inverters.empty()) {
+    out["inverters_now"] = invs(topo.inverters());
+    out["inverters_then"] = invs(p->inverters);
+  }
+  return out;
+}
+
+bool resolve_pending(Monitor &mon, Topology &topo, bool use) {
+  auto p = topo.pending();
+  if (!p) return false;
+  if (use) {
+    apply_incoming(mon, topo, *p, true, nullptr);
+    topo.set_manual(false);
+    topo.clear_skeleton_strings();
+    LOGI("layout: the user took the %s layout", p->source.c_str());
+  } else {
+    topo.set_declined_fp(p->fp);
+    LOGI("layout: the user kept theirs over the %s layout", p->source.c_str());
+  }
+  topo.clear_pending();
+  return true;
 }
 
 }  // namespace tigod

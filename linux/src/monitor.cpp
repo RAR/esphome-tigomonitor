@@ -403,6 +403,26 @@ bool Monitor::delete_node(const std::string &addr) {
   return found;
 }
 
+std::vector<esphome::tigo_monitor::layout::Assignment> Monitor::resolve_layout(
+    const std::vector<LayoutPanel> &panels) const {
+  std::lock_guard<std::mutex> lock(mu_);
+  auto upper = [](std::string s) {
+    for (char &c : s) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+    return s;
+  };
+  std::vector<esphome::tigo_monitor::layout::Assignment> out;
+  for (const auto &lp : panels) {
+    std::string serial = upper(lp.serial);
+    for (const auto &n : nodes_) {
+      if (n.long_address.size() < 6) continue;
+      if (serial.find(upper(n.long_address.substr(n.long_address.size() - 6))) == std::string::npos) continue;
+      out.push_back({n.long_address, lp.label, lp.string_label, lp.mppt});
+      break;
+    }
+  }
+  return out;
+}
+
 int Monitor::set_assignments(const std::vector<esphome::tigo_monitor::layout::Assignment> &as,
                              bool clear_unlisted) {
   std::lock_guard<std::mutex> lock(mu_);
