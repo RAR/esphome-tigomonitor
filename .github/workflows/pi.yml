@@ -46,6 +46,8 @@ jobs:
         run: docker run --rm -v "$PWD":/src -w /src tigod-dev linux/scripts/e2e.sh
       - name: CCA over Bluetooth and HTTP, against mocks
         run: docker run --rm -v "$PWD":/src -w /src tigod-dev linux/scripts/cca-e2e.sh
+      - name: The Topology editor's layout
+        run: docker run --rm -v "$PWD":/src -w /src tigod-dev linux/scripts/layout-e2e.sh
       - name: The bus over a network bridge, against a mock
         run: docker run --rm -v "$PWD":/src -w /src tigod-dev linux/scripts/bridge-e2e.sh
       - name: The bus master, against a mock TAP

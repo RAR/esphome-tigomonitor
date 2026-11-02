@@ -31,6 +31,7 @@ add_executable(tigomonitord
   src/fsutil.cpp
   src/history.cpp
   src/http_server.cpp
+  src/layout_api.cpp
   src/monitor.cpp
   src/mqtt_publisher.cpp
   src/serial_port.cpp

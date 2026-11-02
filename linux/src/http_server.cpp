@@ -1,5 +1,6 @@
 #include "http_server.h"
 
+#include "layout_api.h"
 #include "log.h"
 #include "serial_port.h"
 
@@ -880,6 +881,31 @@ void HttpServer::routes_() {
     }
     if (!ctx_.topology.set_inverters(std::move(list)))
       return send_json(res, {{"success", false}, {"error", "Could not save to disk."}}, 500);
+    send_json(res, {{"success", true}});
+  });
+
+  // The Topology editor: the whole tree, and saving one. A save replaces the
+  // layout in one go and marks it the user's own (tigo_layout.h).
+  svr.Get("/api/layout", [this, &mon](const httplib::Request &, httplib::Response &res) {
+    send_json(res, layout_json(mon, ctx_.topology));
+  });
+  svr.Post("/api/layout", [this, &mon, body_of](const httplib::Request &req, httplib::Response &res) {
+    json j;
+    if (!body_of(req, res, j)) return;
+    namespace layout = esphome::tigo_monitor::layout;
+    layout::Layout l;
+    std::string err = parse_layout(j, l);
+    if (err.empty()) {
+      std::set<std::string> known;
+      for (const auto &n : mon.nodes())
+        if (!n.long_address.empty()) known.insert(n.long_address);
+      err = layout::validate(l, [&known](const std::string &bc) { return known.count(bc) > 0; });
+    }
+    if (!err.empty()) return send_json(res, {{"success", false}, {"error", err}}, 400);
+    if (!ctx_.topology.set_skeleton(l) || !ctx_.topology.set_manual(true))
+      return send_json(res, {{"success", false}, {"error", "Could not save to disk."}}, 500);
+    ctx_.mutable_monitor.set_assignments(layout::assignments(l), true);
+    ctx_.topology.clear_pending();
     send_json(res, {{"success", true}});
   });
 

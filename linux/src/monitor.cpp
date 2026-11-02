@@ -403,6 +403,45 @@ bool Monitor::delete_node(const std::string &addr) {
   return found;
 }
 
+int Monitor::set_assignments(const std::vector<esphome::tigo_monitor::layout::Assignment> &as,
+                             bool clear_unlisted) {
+  std::lock_guard<std::mutex> lock(mu_);
+  std::map<std::string, const esphome::tigo_monitor::layout::Assignment *> by_bc;
+  for (const auto &a : as) by_bc[a.barcode] = &a;
+  int matched = 0;
+  for (auto &n : nodes_) {
+    if (n.long_address.empty()) continue;
+    auto it = by_bc.find(n.long_address);
+    if (it != by_bc.end()) {
+      n.cca_label = it->second->label;
+      n.cca_string_label = it->second->string_label;
+      n.cca_mppt_label = it->second->mppt_label;
+      matched++;
+    } else if (clear_unlisted) {
+      n.cca_label.clear();
+      n.cca_string_label.clear();
+      n.cca_mppt_label.clear();
+    } else {
+      continue;
+    }
+    for (auto &p : panels_)
+      if (p.addr == n.addr) p.label = n.cca_label;
+  }
+  string_peaks_.clear();
+  dirty_ = true;
+  save_locked_();
+  return matched;
+}
+
+std::vector<esphome::tigo_monitor::layout::Assignment> Monitor::current_assignments() const {
+  std::lock_guard<std::mutex> lock(mu_);
+  std::vector<esphome::tigo_monitor::layout::Assignment> out;
+  for (const auto &n : nodes_)
+    if (!n.long_address.empty())
+      out.push_back({n.long_address, n.cca_label, n.cca_string_label, n.cca_mppt_label});
+  return out;
+}
+
 Monitor::ImportResult Monitor::import_nodes(const std::vector<Node> &in) {
   std::lock_guard<std::mutex> lock(mu_);
   ImportResult r;

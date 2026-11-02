@@ -129,6 +129,27 @@ function series(hours, peak) {
   return out;
 }
 
+// The Topology editor's tree (/api/layout): the same site as /api/inverters,
+// CCA-derived (not yet saved by hand), plus one panel the bus has found that
+// no string holds yet. That panel is not in /api/devices: it hasn't reported.
+const layout = {
+  manual: false,
+  inverters: INVERTERS.map((inv, ii) => ({
+    name: inv.name,
+    display_name: inv.display_name,
+    mppts: STRINGS.filter((s) => s.inv === ii).map((s) => ({
+      label: s.mppt,
+      strings: [{
+        label: s.label, display_label: '', rating_w: RATING,
+        panels: of(s.label).map((d) => ({ barcode: d.barcode, addr: d.addr, name: d.name })),
+      }],
+    })),
+  })),
+  unplaced_mppts: [],
+  unassigned: [{ barcode: '04C05B0000200001', addr: '0080', name: '' }],
+  pending: null,
+};
+
 export const routes = {
   '/api/overview': {
     total_power: sum(devices, 'power_in'),
@@ -144,6 +165,7 @@ export const routes = {
   '/api/devices': { devices, count: devices.length },
   '/api/strings': { strings },
   '/api/inverters': { inverters },
+  '/api/layout': layout,
   '/api/nodes': {
     nodes: devices.map((d, i) => ({
       addr: d.addr, long_address: d.barcode, sensor_index: i, checksum: '',

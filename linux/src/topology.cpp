@@ -25,6 +25,10 @@ void Topology::load() {
   try {
     const json invs = j.value("inverters", json::array()), strs = j.value("strings", json::object());
     const json pending = j.value("pending_inverter_names", json::object());
+    const json ms = j.value("mppt_strings", json::object());
+    for (const auto &kv : ms.items()) mppt_strings_[kv.key()] = kv.value().get<std::vector<std::string>>();
+    manual_ = j.value("manual", false);
+    declined_fp_ = j.value("declined_fp", 0u);
     for (const auto &o : invs) {
       InverterConfig inv;
       inv.name = o.value("name", "");
@@ -55,8 +59,14 @@ bool Topology::save_locked_() const {
     if (kv.second.display_label.empty() && kv.second.panel_rating_w == 0) continue;
     str[kv.first] = {{"display_label", kv.second.display_label}, {"panel_rating_w", kv.second.panel_rating_w}};
   }
-  return write_file_atomic(
-      path_, json({{"inverters", inv}, {"strings", str}, {"pending_inverter_names", pending_names_}}).dump(2) + "\n");
+  return write_file_atomic(path_, json({{"inverters", inv},
+                                        {"strings", str},
+                                        {"pending_inverter_names", pending_names_},
+                                        {"mppt_strings", mppt_strings_},
+                                        {"manual", manual_},
+                                        {"declined_fp", declined_fp_}})
+                                      .dump(2) +
+                                      "\n");
 }
 
 std::vector<InverterConfig> Topology::inverters() const {
@@ -117,6 +127,108 @@ bool Topology::set_string_rating(const std::string &label, int rating_w) {
   std::lock_guard<std::mutex> lock(mu_);
   strings_[label].panel_rating_w = rating_w;
   return save_locked_();
+}
+
+}  // namespace tigod
+
+namespace tigod {
+
+namespace layout = esphome::tigo_monitor::layout;
+
+bool Topology::manual() const {
+  std::lock_guard<std::mutex> lock(mu_);
+  return manual_;
+}
+
+bool Topology::set_manual(bool manual) {
+  std::lock_guard<std::mutex> lock(mu_);
+  manual_ = manual;
+  return save_locked_();
+}
+
+uint32_t Topology::declined_fp() const {
+  std::lock_guard<std::mutex> lock(mu_);
+  return declined_fp_;
+}
+
+bool Topology::set_declined_fp(uint32_t fp) {
+  std::lock_guard<std::mutex> lock(mu_);
+  declined_fp_ = fp;
+  return save_locked_();
+}
+
+layout::Layout Topology::skeleton() const {
+  std::lock_guard<std::mutex> lock(mu_);
+  layout::Layout l;
+  for (const auto &i : inverters_) {
+    layout::InverterSpec inv;
+    inv.name = i.name;
+    inv.display_name = i.display_name;
+    for (const auto &m : i.mppts) {
+      layout::MpptSpec ms;
+      ms.label = m;
+      auto it = mppt_strings_.find(m);
+      if (it != mppt_strings_.end()) {
+        for (const auto &label : it->second) {
+          layout::StringSpec ss;
+          ss.label = label;
+          auto so = strings_.find(label);
+          if (so != strings_.end()) {
+            ss.display_label = so->second.display_label;
+            ss.rating_w = so->second.panel_rating_w;
+          }
+          ms.strings.push_back(std::move(ss));
+        }
+      }
+      inv.mppts.push_back(std::move(ms));
+    }
+    l.inverters.push_back(std::move(inv));
+  }
+  return l;
+}
+
+bool Topology::set_skeleton(const layout::Layout &l) {
+  std::lock_guard<std::mutex> lock(mu_);
+  inverters_.clear();
+  mppt_strings_.clear();
+  for (const auto &inv : l.inverters) {
+    InverterConfig ic;
+    ic.name = inv.name;
+    ic.display_name = inv.display_name;
+    pending_names_.erase(inv.name);
+    for (const auto &m : inv.mppts) {
+      ic.mppts.push_back(m.label);
+      auto &labels = mppt_strings_[m.label];
+      for (const auto &s : m.strings) {
+        labels.push_back(s.label);
+        strings_[s.label].display_label = s.display_label;
+        strings_[s.label].panel_rating_w = s.rating_w;
+      }
+    }
+    inverters_.push_back(std::move(ic));
+  }
+  return save_locked_();
+}
+
+bool Topology::clear_skeleton_strings() {
+  std::lock_guard<std::mutex> lock(mu_);
+  mppt_strings_.clear();
+  return save_locked_();
+}
+
+void Topology::set_pending(PendingLayout p) {
+  std::lock_guard<std::mutex> lock(mu_);
+  pending_ = std::move(p);
+}
+
+std::optional<PendingLayout> Topology::pending() const {
+  std::lock_guard<std::mutex> lock(mu_);
+  return pending_;
+}
+
+void Topology::clear_pending() {
+  std::lock_guard<std::mutex> lock(mu_);
+  pending_.reset();
 }
 
 }  // namespace tigod

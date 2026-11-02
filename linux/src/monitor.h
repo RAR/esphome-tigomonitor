@@ -6,6 +6,7 @@
 // the ESP32 (#74). Thread-safe: the serial thread feeds it, the publisher and
 // web server read snapshots.
 
+#include "tigo_layout.h"
 #include "tigo_protocol.h"
 
 #include <atomic>
@@ -137,6 +138,12 @@ class Monitor {
   // 04C05B4000BBCC02 -> serial "4-BBCC02K"), which is the only link between
   // the two, so that is the match — as in the firmware.
   int apply_layout(const std::vector<LayoutPanel> &panels);
+  // The Topology editor's: places nodes by exact barcode. With clear_unlisted,
+  // a node the list leaves out loses its panel name, string and MPPT.
+  // Returns how many nodes matched.
+  int set_assignments(const std::vector<esphome::tigo_monitor::layout::Assignment> &as, bool clear_unlisted);
+  // Every node that has a barcode, as the labels it carries now.
+  std::vector<esphome::tigo_monitor::layout::Assignment> current_assignments() const;
   // Drops one node (and its panel), as the Nodes page's delete does.
   bool delete_node(const std::string &addr);
 
