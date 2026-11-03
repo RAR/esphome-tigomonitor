@@ -1131,8 +1131,12 @@ inline Allow classify_request(uint16_t cmd, const Bytes &payload) {
       for (const char *q : QUERY_READS)
         if (text == q) return Allow::yes;
       if (text == QUERY_W255 || text == QUERY_SMART_S) return Allow::optimizer_write;
-      // Any other write: a '#' command, or Smrt_ with other settings.
-      if (text.rfind("#", 0) == 0 || text.rfind("^00Smrt_", 0) == 0) return Allow::never;
+      // Any other write: a '#' command, or a '^' text in the write form
+      // (name, '_', values), Smrt_ with other settings among them. A CCA's
+      // sendbeacon CGI passes any text through, so "a CCA could send it"
+      // proves nothing for these.
+      if (text.rfind("#", 0) == 0 || (text.rfind("^", 0) == 0 && text.find('_') != std::string::npos))
+        return Allow::never;
       return Allow::bench_only;
     }
     case 0x0D:  // the bring-up's pair, 00 00 then 00 01

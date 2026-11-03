@@ -242,6 +242,20 @@ static void test_more_allow() {
   Bytes smart_n = smart;
   smart_n[2 + 16] = 'N';
   CHECK(classify_request(CMD_TUNNEL, tunnel_request(0x06, 1, smart_n)) == Allow::never);
+  // A '^' text in the write form (name, '_', values) is never sent unless it
+  // is the one Smrt_ above: the CCA's sendbeacon CGI passes any text through,
+  // so Mppt_, Discharge_ and the rest are reachable on a CCA and must not be
+  // here, bench or not.
+  for (const char *t : {"^00Mppt_1.1\r", "^00Discharge_01\r", "^00StartPWM_1\r", "^22Smrt_\r", "^00X_\r"}) {
+    Bytes args = {0x00, 0x22};
+    for (const char *c = t; *c; c++) args.push_back(static_cast<uint8_t>(*c));
+    CHECK(classify_request(CMD_TUNNEL, tunnel_request(0x06, 1, args)) == Allow::never &&
+          !may_send(CMD_TUNNEL, tunnel_request(0x06, 1, args), true, true, true));
+  }
+  // A read the CCA never sent stays bench-only: no '_', so not a write.
+  Bytes other_read = {0x00, 0x22};
+  for (char c : std::string("^00Status\r")) other_read.push_back(static_cast<uint8_t>(c));
+  CHECK(classify_request(CMD_TUNNEL, tunnel_request(0x06, 1, other_read)) == Allow::bench_only);
 }
 
 static void test_next_request() {
