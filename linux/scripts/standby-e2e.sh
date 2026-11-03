@@ -269,4 +269,35 @@ expect "ON turns it back on" "$(stat "$out/tap4.json" "d['pv']")" on
 kill $a; wait $a 2>/dev/null || true
 kill $tap; wait $tap 2>/dev/null || true
 
+# --- run 5: a standby that has heard no PV state yet says nothing about it ---
+# A runs the bus and holds PV off, confirmed. B joins after that (a fresh
+# install: no pv.json), so it hears no 0x0B00 before A dies: the next is an
+# hour away. Taking over, B must not send its own default, 01.
+mkdir -p "$out/ra" "$out/rb"
+python3 linux/tools/mock_tap.py "$out/link-ra" --extra-link "$out/link-rb" --lease 600 --nodes 44 --stats "$out/tap5.json" &
+tap=$!
+sleep 0.5
+for d in ra:2:18117 rb:6:18118; do
+  n=${d%%:*} rest=${d#*:}
+  printf '{"bus_role": "standby", "standby_takeover_s": %s, "master_housekeeping": true, "serial_port": "%s", "gateway_id": 4609, "web_port": %s, "web_password": "pw"}\n' \
+    "${rest%%:*}" "$PWD/$out/link-$n" "${rest#*:}" > "$out/$n/settings.json"
+done
+start "$out/ra"; a=$pid
+trap 'kill $a $b $tap 2>/dev/null || true; pkill mosquitto || true' EXIT
+for _ in $(seq 40); do [ "$(authed 18117 /api/master 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin)["standby"]["state"])' 2>/dev/null)" = active ] && break; sleep 0.25; done
+sleep 2
+pvreq 18117 false >/dev/null
+for _ in $(seq 40); do [ "$(stat "$out/tap5.json" "d['pv']")" = off ] && break; sleep 0.25; done
+sleep 1
+start "$out/rb"; b=$pid
+sleep 4
+expect "the late standby heard no PV state" "$(pvof 18118)" "True setting"
+before="$(stat "$out/tap5.json" "len(d['session'])")"
+kill $a; wait $a 2>/dev/null || true
+for _ in $(seq 60); do [ "$(authed 18118 /api/master 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin)["standby"]["state"])' 2>/dev/null)" = active ] && break; sleep 0.25; done
+sleep 8
+expect "taking over, it sends no 01" "$(stat "$out/tap5.json" "('01' in d['session'][$before:], d['pv'])")" "(False, 'off')"
+kill $b; wait $b 2>/dev/null || true
+kill $tap; wait $tap 2>/dev/null || true
+
 [ $fail = 0 ] && echo "standby e2e passed" || { echo "standby e2e FAILED; see $out/"; exit 1; }

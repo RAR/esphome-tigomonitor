@@ -189,7 +189,10 @@ While it's off:
 - it stays off across a restart, an update, a TAP that loses power and
   comes back (an RSD release included) and a standby taking over, until
   someone turns it on. A standby learns it from the master it hears, and
-  can't change it while it stands by.
+  can't change it while it stands by. One that takes over before it has
+  heard anything (the running master repeats the state only hourly, so a
+  standby started minutes earlier may not have) says nothing to the TAP
+  about PV until you switch it, so the array stays as it was.
 
 To control it from Home Assistant, turn on **PV output switch** under
 **Tools → Home Assistant**. A *PV output* switch then appears with the

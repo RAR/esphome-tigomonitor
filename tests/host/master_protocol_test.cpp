@@ -1162,6 +1162,23 @@ static void test_pv_switch() {
   same.set_pv(&on);
   CHECK(shape(run(same, 0, seq)).rfind("000a: 0e02:* 0b00:00* 0d:0000* 0b00:01 0d:0001*", 0) == 0);
 
+  // Silent: a master that took over without hearing a PV state says nothing
+  // about it (the TAP keeps what it was last told) until the owner asks.
+  PvSwitch mute(false, /*hourly=*/true, 0, /*silent=*/true);
+  CHECK(mute.silent() && mute.due(0).cmd == 0 && mute.due(PvSwitch::HOURLY_MS).cmd == 0);
+  Housekeeping hush({}, 0, HousekeepingPlan{}, 1);
+  hush.set_pv(&mute);
+  got = shape(run(hush, 0, seq));
+  CHECK(got.find("0b00") == std::string::npos && got.rfind("22:0000", 0) == 0);
+  for (uint32_t t2 = 1000; t2 < Housekeeping::SESSION_EVERY_MS; t2 += 1000) run(hush, t2, seq);
+  CHECK(shape(run(hush, Housekeeping::SESSION_EVERY_MS, seq)).find("0b00") == std::string::npos);
+  // A bring-up after a re-address still sends the CCA's 00 then 01.
+  Housekeeping wake({}, 0, plan, 1);
+  wake.set_pv(&mute);
+  CHECK(shape(run(wake, 0, seq)).rfind("000a: 0e02:* 0b00:00* 0d:0000* 0b00:01 0d:0001*", 0) == 0);
+  mute.set_off(true, 10);
+  CHECK(!mute.silent() && mute.due(10).payload == Bytes{PV_OFF});
+
   // A pending switch goes ahead of the lease.
   LeaseKeeper lease;
   PollCursor cursor(0);

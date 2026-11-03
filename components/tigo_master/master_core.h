@@ -216,6 +216,10 @@ class MasterCore {
   std::unique_ptr<esphome::tigo_monitor::master::PvSwitch> pv_;
   PvState pv_state_;       // under mu_
   bool pv_changed_ = false;  // under mu_: request_pv's, for the next tick
+  // Standing by: whether a 0x0B00 has been heard since it began. A takeover
+  // without one leaves the switch silent (tigo_master.h's PvSwitch).
+  bool pv_heard_since_standby_ = false;  // under mu_
+  bool pv_silent_ = false;               // under mu_
   PvSaved pv_saved_;
   void sync_pv_status_();
   void hear_pv_(bool off);

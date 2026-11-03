@@ -98,6 +98,7 @@ bool MasterCore::request_pv(bool off) {
     pv_state_ = {off, false, unix_now()};
     status_.pv = pv_state_;
     pv_changed_ = true;
+    pv_silent_ = false;
     s = pv_state_;
   }
   LOGW("PV output: %s, asked from this monitor", off ? "off" : "on");
@@ -111,6 +112,7 @@ void MasterCore::hear_pv_(bool off) {
   PvState s;
   {
     std::lock_guard<std::mutex> lock(mu_);
+    pv_heard_since_standby_ = true;
     if (pv_state_.off == off && pv_state_.heard) return;
     pv_state_ = {off, true, unix_now()};
     status_.pv = pv_state_;
@@ -339,17 +341,19 @@ void MasterCore::tick_(uint32_t now_ms) {
   // After a re-address the CCA's bring-up reads go out whatever the
   // housekeeping setting; the rest only with it.
   {
-    bool changed, off;
+    bool changed, off, silent;
     {
       std::lock_guard<std::mutex> lock(mu_);
       changed = pv_changed_;
       pv_changed_ = false;
       off = pv_state_.off;
+      silent = pv_silent_;
     }
     // No housekeeping, no hourly 0x0B00 but the switch's own.
     if (!pv_) {
-      pv_ = std::make_unique<master::PvSwitch>(off, !housekeeping_on_, now_ms);
-      if (off) LOGI("PV output is held off; telling the TAP");
+      pv_ = std::make_unique<master::PvSwitch>(off, !housekeeping_on_, now_ms, silent);
+      if (silent) LOGW("PV output: took the bus without hearing what the TAP was told; saying nothing about it until asked");
+      else if (off) LOGI("PV output is held off; telling the TAP");
     } else if (changed) {
       pv_->set_off(off, now_ms);
     }
@@ -627,6 +631,10 @@ void MasterCore::take_over_(int64_t quiet_ms) {
   timeouts_in_a_row_ = 0;
   if (learned_cb_) learned_ = learned_cb_();
   phase_ = startup_ ? Phase::probing : Phase::running;
+  {
+    std::lock_guard<std::mutex> lock(mu_);
+    pv_silent_ = !pv_heard_since_standby_;
+  }
   set_standby_(Standby::active);
   std::lock_guard<std::mutex> lock(mu_);
   status_.takeovers++;

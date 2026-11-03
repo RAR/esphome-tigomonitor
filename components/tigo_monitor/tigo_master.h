@@ -432,17 +432,24 @@ class Learned41 {
 // 0x0B00), and Housekeeping takes its byte from value() (set_pv), so no 01
 // goes out while off is held. An unconfirmed hourly 01 from housekeeping
 // with PV on is left as before: no retries.
+//
+// silent: a master that took over without hearing any 0x0B00 doesn't know
+// what the TAP was last told, so it says nothing about PV, neither at once
+// nor hourly, and Housekeeping drops its 0x0B00s too, but for a bring-up's
+// after a re-address. The owner's set_off ends it.
 class PvSwitch {
  public:
   static const uint32_t RETRY_MS = 5000;
   static const uint32_t RETRIES = 5;
   static const uint32_t HOURLY_MS = 3600000;
 
-  PvSwitch(bool off, bool hourly, uint32_t now_ms)
-      : off_(off), hourly_(hourly), pending_(off), due_ms_(now_ms), next_hourly_ms_(now_ms + HOURLY_MS) {}
+  PvSwitch(bool off, bool hourly, uint32_t now_ms, bool silent = false)
+      : off_(off), hourly_(hourly), silent_(silent), pending_(off && !silent), due_ms_(now_ms),
+        next_hourly_ms_(now_ms + HOURLY_MS) {}
 
   void set_off(bool off, uint32_t now_ms) {
     off_ = off;
+    silent_ = false;
     pending_ = true;
     due_ms_ = now_ms;
     next_hourly_ms_ = now_ms + HOURLY_MS;
@@ -451,12 +458,13 @@ class PvSwitch {
     confirmed_ = unconfirmed_ = false;
   }
   bool off() const { return off_; }
+  bool silent() const { return silent_; }
   uint8_t value() const { return off_ ? PV_OFF : PV_ON; }
 
   // The 0x0B00 due now, or one with cmd 0. One at a time: the next waits
   // for on_reply.
   Request due(uint32_t now_ms) {
-    if (awaiting_) return {};
+    if (awaiting_ || silent_) return {};
     if (!pending_ && hourly_ && off_ && static_cast<int32_t>(now_ms - next_hourly_ms_) >= 0) {
       pending_ = true;
       due_ms_ = now_ms;
@@ -503,6 +511,7 @@ class PvSwitch {
  private:
   bool off_;
   bool hourly_;
+  bool silent_;
   bool pending_;
   uint32_t due_ms_;
   uint32_t next_hourly_ms_;
@@ -611,6 +620,7 @@ class Housekeeping {
   Request due(uint32_t now_ms, uint8_t &seq) {
     while (opening_next_ < opening_.size()) {
       Item it = opening_[opening_next_++];
+      if (it.cmd == CMD_SESSION && pv_ && pv_->silent() && !plan_.bring_up_reads) continue;
       if (it.cmd == CMD_SESSION && pv_ && pv_->off() && it.args == Bytes{PV_ON}) {
         if (opening_reset_) continue;
         it.args = {PV_OFF};
@@ -629,7 +639,7 @@ class Housekeeping {
         later_.push_back({CMD_TUNNEL, 0x22, {0x00, 0x00}, false, now_ms + BROADCAST_GAP_MS});
         later_.push_back({CMD_TUNNEL, 0x22, {0x00, 0x01}, false, now_ms + 2 * BROADCAST_GAP_MS});
       }
-      if (plan_.session) return emit_({CMD_SESSION, 0, {pv_ ? pv_->value() : PV_ON}, false, 0}, seq);
+      if (plan_.session && !(pv_ && pv_->silent())) return emit_({CMD_SESSION, 0, {pv_ ? pv_->value() : PV_ON}, false, 0}, seq);
     }
     if (plan_.walks) {
       if (walk_waiting_ && now_ms - walk_sent_ms_ >= WALK_REPLY_MS) end_walk_();  // never answered
