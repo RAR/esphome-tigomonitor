@@ -142,8 +142,15 @@ standby that was off for a week isn't.
 - **API:** `POST /api/master/pv` `{"on": false}`. The Pi refuses it (403)
   while no web password is set: anyone on the LAN could otherwise turn the
   array off. The existing cross-site refusal applies.
-- **MQTT / Home Assistant:** not in the first version. Later, an opt-in
-  `mqtt.pv_switch` setting adds a switch entity.
+- **MQTT / Home Assistant (first version, owner 2026-11-03):** a switch
+  entity, `tigomonitor_<device>_pv_output`, with a command topic
+  `<base>/pv/set` (`ON`/`OFF`) and its state from `pv.on`. It's behind an
+  opt-in setting, `mqtt.pv_switch`, off by default (**ruling, mine**):
+  anyone who can publish to the broker could otherwise stop the array, so
+  the owner turns it on knowing that, and gives each monitor its own broker
+  login. A standby that's standing by publishes the state it heard and
+  ignores commands, logging why. The entity is per monitor, like the
+  system entities, not shared like the panels.
 - **ESP32:** a `pv_output` switch in the `tigo_master` YAML (optional),
   restored from flash, which Home Assistant gets through the native API.
 
@@ -181,6 +188,9 @@ PV state from the 0x0B00s it gets and answers with it.
 - Two masters: the active one holds off; kill it; the standby takes over
   and sends `00`.
 - No web password: the API answers 403.
+- MQTT, with `mqtt.pv_switch` on: `OFF` on `<base>/pv/set` sends `00`
+  and the state topic follows; with it off, the command is ignored and no
+  switch is announced; a standby ignores it.
 
 **On the roof, in daylight, with the owner present:**
 
@@ -201,6 +211,7 @@ Only after that does the switch show up for anyone but the owner.
    2026-11-03): PV was stopped on purpose before the RSD, so the TAP's
    bring-up sends `00` only and it stays off until someone turns it on.
    With the switch on, a release brings PV back as the CCA did.
-3. Home Assistant switch in the first version, or later as above?
-4. Is a confirm step enough for off, or should turning it off need the web
-   password typed again?
+3. ~~Home Assistant switch now or later?~~ Now (owner, 2026-11-03), behind
+   `mqtt.pv_switch`.
+4. ~~Confirm step, or the password again?~~ A confirm step (owner,
+   2026-11-03).
