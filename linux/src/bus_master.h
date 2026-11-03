@@ -6,10 +6,10 @@
 //
 // One request and its reply per tick(). It has no thread or timer of its own:
 // only the main loop's tick() sends anything, so a daemon that hangs stops
-// renewing the lease. That is no fail-safe: on the roof's TS4-A-O optimizers
-// the array kept producing with no master and the lease run out, RSS on or
-// off (measured 2026-11-03). The lease is the TAP's discovery window; rapid
-// shutdown is the RSD cutting the TAP's power.
+// renewing the TAP's discovery window. That is no fail-safe: on the roof's
+// TS4-A-O optimizers the array kept producing with no master and the window
+// closed, RSS on or off (measured 2026-11-03). Rapid shutdown is the RSD
+// cutting the TAP's power.
 
 #include "../../components/tigo_master/master_core.h"
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """A TAP for testing the bus master, on a pseudo-terminal.
 
-    mock_tap.py PTY_LINK [--lease S] [--renew-to S] [--nodes N] [--panels N]
+    mock_tap.py PTY_LINK [--window S] [--renew-to S] [--nodes N] [--panels N]
                          [--foreign-after S] [--echo] [--drop-every N]
                          [--start-cursor HEX] [--bare] [--factory]
                          [--second-tap] [--power-cut-every S] [--stats FILE]
@@ -10,9 +10,9 @@
 Answers requests to gateway 0x1201 the way the rig's TAP did in the capture:
   - 0x0148 polls with 0x0149 power frames: up to two synthetic readings per
     reply, and it checks the poll's cursor against how many it has handed out;
-  - tunnel 0x2E with the run lease (a countdown from --lease seconds; state
+  - tunnel 0x2E with the discovery window (a countdown from --window seconds; state
     and the first count drop to 0 when it runs out);
-  - tunnel 0x2D, the renewal, by resetting the lease to --renew-to seconds.
+  - tunnel 0x2D, the renewal, by resetting the discovery window to --renew-to seconds.
 A Frame 27 node table goes out after the first poll, so panels get barcodes.
 --foreign-after puts a request of its own on the bus after S seconds, as a
 second master would; with --foreign-every, one every S seconds from then on,
@@ -24,7 +24,7 @@ cursor (a guess at what a real TAP does; the capture never shows it).
 --reset-quiet S is how long a RESET leaves it deaf (4.5 s; the roof's was ~5).
 --power-cut-every S cuts its power every S seconds, as the CCA did on the
 roof once it could no longer hear the TAP: deaf for --power-off seconds
-(8), then back at the same id with its run lease out.
+(8), then back at the same id with its discovery window out.
 --second-tap puts another TAP behind the same port, left at the factory
 address: it answers GET_MAC there and nothing else.
 --extra-link adds another port on the same bus, for a second master: every
@@ -85,7 +85,7 @@ def unescape(b):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('link')
-    ap.add_argument('--lease', type=float, default=900)
+    ap.add_argument('--window', type=float, default=900)
     ap.add_argument('--renew-to', type=float, default=900)
     ap.add_argument('--nodes', type=int, default=44)
     ap.add_argument('--panels', type=int, default=6)
@@ -102,7 +102,7 @@ def main():
     ap.add_argument('--power-cut-every', type=float, default=0)
     ap.add_argument('--power-off', type=float, default=8)
     ap.add_argument('--page-delay', type=float, default=0)  # seconds before answering a 0x26 page
-    ap.add_argument('--refuse-renewals', type=int, default=0)  # ack this many renewals, lease left out
+    ap.add_argument('--refuse-renewals', type=int, default=0)  # ack this many renewals, window left closed
     ap.add_argument('--mute-claims', type=int, default=0)  # ignore this many SET_485_ID broadcasts
     ap.add_argument('--deaf-hop', action='store_true')  # moved one id up by the hop, answers nothing there
     ap.add_argument('--stats', default=None)
@@ -136,7 +136,7 @@ def main():
     rng = random.Random(1)
     panels = [(f"04C05B40{0x0B0000 + i * 7:06X}{rng.randint(0, 255):02X}", 0x0002 + i) for i in range(a.panels)]  # (barcode, node id)
     start = time.monotonic()
-    lease_end = start + a.lease
+    window_end = start + a.window
     handed_out = a.start_cursor
     sent_table = False
     foreign_sent = False
@@ -146,7 +146,7 @@ def main():
     FACTORY = 0x1235
     addr = FACTORY if a.factory else GATEWAY  # the id the TAP currently answers at
     stats = {'polls': 0, 'retries': 0, 'cursor_mismatches': 0, 'checks': 0, 'renewals': [], 'other': [],
-             'first_lease_frame': None, 'first_frame': None, 'addressed_to': None, 'frames_after_foreign': 0, 'foreign_at': None,
+             'first_discovery_frame': None, 'first_frame': None, 'addressed_to': None, 'frames_after_foreign': 0, 'foreign_at': None,
              'second_asked': 0, 'second_written': 0, 'session': [], 'cut_marks': [], 'pv': 'on', 'housekeeping': [],
              'log': [], 'claims': 0, 'deaf': 0, 'resets': 0, 'quiet_broken': 0, 'broadcast': [], 'walk': [], 'queries': [],
              'answered': 0, 'power_cuts': 0, 'frames_by_link': [0] * len(fds),
@@ -160,19 +160,19 @@ def main():
     last_stats = 0.0
     next_cut = start + a.power_cut_every if a.power_cut_every else None
 
-    def lease_payload(seq):
-        left = max(0, int(lease_end - time.monotonic()))
+    def window_payload(seq):
+        left = max(0, int(window_end - time.monotonic()))
         state, count_a = (1, a.nodes) if left > 0 else (0, 0)
         return bytes([0x00, 0x0E, 0x00, 0x2F, seq, state, left >> 8, left & 0xFF, count_a >> 8, count_a & 0xFF,
                       0x00, 0x28, a.nodes >> 8, a.nodes & 0xFF, 0x00])
 
     while True:
         now = time.monotonic()
-        if next_cut is not None and now >= next_cut:  # off and back on: the id stays, the lease doesn't
+        if next_cut is not None and now >= next_cut:  # off and back on: the id stays, the discovery window doesn't
             stats['power_cuts'] += 1
             stats['cut_marks'].append(len(stats['session']))  # where each cut fell in the session list
             quiet_until = now + a.power_off
-            lease_end = now
+            window_end = now
             next_cut = now + a.power_cut_every
         if a.foreign_after is not None and not foreign_sent and now - start >= a.foreign_after:
             send(encode(GATEWAY, 0x0148, bytes.fromhex('0001000004')))
@@ -299,14 +299,14 @@ def main():
                     sent_table = True
             elif cmd == 0x0B0F and len(p) >= 5 and p[3] == 0x2E:
                 stats['checks'] += 1
-                stats['first_lease_frame'] = stats['first_lease_frame'] or 'check'
-                send(encode(addr | 0x8000, 0x0B10, lease_payload(p[4])))
+                stats['first_discovery_frame'] = stats['first_discovery_frame'] or 'check'
+                send(encode(addr | 0x8000, 0x0B10, window_payload(p[4])))
             elif cmd == 0x0B0F and len(p) == 14 and p[3] == 0x2D:
-                stats['first_lease_frame'] = stats['first_lease_frame'] or 'renew'
+                stats['first_discovery_frame'] = stats['first_discovery_frame'] or 'renew'
                 stats['renewals'].append({'t': round(t, 2), 'nodes': p[10] << 8 | p[11]})
                 if len(stats['renewals']) > a.refuse_renewals:
-                    lease_end = time.monotonic() + a.renew_to
-                send(encode(addr | 0x8000, 0x0B10, lease_payload(p[4])))
+                    window_end = time.monotonic() + a.renew_to
+                send(encode(addr | 0x8000, 0x0B10, window_payload(p[4])))
             elif cmd == 0x0B00 and len(p) == 1:  # the PV switch, 00 off; the TAP echoes it
                 stats['session'].append(f'{p[0]:02x}')
                 stats['pv'] = 'off' if p[0] == 0 else 'on'

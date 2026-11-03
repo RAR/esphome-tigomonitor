@@ -302,9 +302,9 @@ void MqttPublisher::publish_master_discovery_(bool remove) {
   };
   static const Sys SYS[] = {
       {"status", "Bus master", nullptr, nullptr, nullptr, false},
-      {"lease_remaining_s", "Bus master lease remaining", "s", "duration", "measurement", true},
-      {"lease_nodes", "Bus master lease nodes", nullptr, nullptr, "measurement", true},
-      {"renewals", "Bus master lease renewals", nullptr, nullptr, "total_increasing", true},
+      {"discovery_remaining_s", "Bus master discovery window remaining", "s", "duration", "measurement", true},
+      {"discovery_nodes", "Bus master discovery nodes", nullptr, nullptr, "measurement", true},
+      {"renewals", "Bus master discovery renewals", nullptr, nullptr, "total_increasing", true},
       {"tap_lost", "TAP lost", nullptr, nullptr, "total_increasing", true},
       {"gap_recent_ms", "Bus master longest pause", "ms", "duration", "measurement", true},
       {"last_reply", "TAP last reply", nullptr, "timestamp", nullptr, true},
@@ -337,6 +337,10 @@ void MqttPublisher::publish_master_discovery_(bool remove) {
     if (m.diagnostic) c["entity_category"] = "diagnostic";
     announce_("sensor", uid, c, remove);
   }
+  // Renamed 2026-11-03, when the "lease" turned out to be the TAP's discovery
+  // window: clear what earlier builds announced, or HA keeps them, frozen.
+  for (const char *old : {"lease_remaining_s", "lease_nodes"})
+    announce_("sensor", "tigomonitor_" + settings_.device_id + "_bus_master_" + old, json::object(), true);
 }
 
 // Home Assistant's PV output switch. Ignored (and logged) unless the setting
@@ -370,8 +374,8 @@ void MqttPublisher::publish_master_() {
             {"problem", status != "active" && status != "standing_by" && status != "taking_over"},
             {"phase", phase_name(m.phase)},
             {"detail", m.detail},
-            {"lease_remaining_s", m.lease.remaining_s},
-            {"lease_nodes", m.lease.node_count},
+            {"discovery_remaining_s", m.discovery.remaining_s},
+            {"discovery_nodes", m.discovery.node_count},
             {"renewals", m.renewals},
             {"tap_lost", m.tap_lost},
             {"gap_recent_ms", m.gap_recent_ms},

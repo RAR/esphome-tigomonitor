@@ -87,7 +87,7 @@ expect "heard again: not missing" "$(tail -1 "$out/system3.txt" | python3 -c 'im
 
 # Setup answers: running the bus with queries on, the master keeps each
 # optimizer's last !Mppt and !Info answers, and /api/nodes carries them.
-python3 linux/tools/mock_tap.py "$out/tap.tty" --lease 600 --nodes 44 --stats "$out/tap.json" &
+python3 linux/tools/mock_tap.py "$out/tap.tty" --window 600 --nodes 44 --stats "$out/tap.json" &
 tap=$!
 sleep 0.5
 mkdir -p "$out/m"

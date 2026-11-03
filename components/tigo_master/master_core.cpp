@@ -33,7 +33,7 @@ const char *fault_name(Fault f) {
     case Fault::no_reply: return "no_reply";
     case Fault::second_master: return "second_master";
     case Fault::refused: return "refused";
-    case Fault::lease_refused: return "lease_refused";
+    case Fault::discovery_refused: return "discovery_refused";
     case Fault::discovery_failed: return "discovery_failed";
     case Fault::extra_tap: return "extra_tap";
   }
@@ -138,9 +138,9 @@ bool MasterCore::open() {
     set_fault(Fault::no_port, error);
     return false;
   }
-  // The TAP may have moved on while the port was closed: read the lease
+  // The TAP may have moved on while the port was closed: read the discovery window
   // before renewing anything, and drop any half-read frame.
-  lease_ = master::LeaseKeeper();
+  window_ = master::WindowKeeper();
   splitter_ = protocol::FrameSplitter<std::string>();
   drop_housekeeping_();
   queries_.reset();
@@ -190,7 +190,8 @@ MasterStatus MasterCore::status() const {
 void MasterCore::set_fault(Fault f, const std::string &detail) {
   std::lock_guard<std::mutex> lock(mu_);
   if (status_.fault != f) {
-    if (f == Fault::second_master || f == Fault::refused || f == Fault::no_port || f == Fault::lease_refused) LOGE("bus master: %s", detail.c_str());
+    if (f == Fault::second_master || f == Fault::refused || f == Fault::no_port || f == Fault::discovery_refused)
+      LOGE("bus master: %s", detail.c_str());
     else if (f != Fault::none) LOGW("bus master: %s", detail.c_str());
   }
   status_.fault = f;
@@ -388,7 +389,8 @@ void MasterCore::tick_(uint32_t now_ms) {
     housekeeping_->set_targets(t);
     targets_at_ms_ = now_ms;
   }
-  master::Request req = master::next_request(lease_, cursor_, seq_, now_ms, housekeeping_.get(), queries_.get(), pv_.get());
+  master::Request req =
+      master::next_request(window_, cursor_, seq_, now_ms, housekeeping_.get(), queries_.get(), pv_.get());
   // Bring-up frames are allowed only straight after a re-address.
   bool bring_up = req.bring_up && readdressed_;
   if (housekeeping_) {
@@ -439,14 +441,15 @@ void MasterCore::tick_(uint32_t now_ms) {
     status_.tap_version = v;
   }
 
-  bool lease_request = req.cmd == master::CMD_TUNNEL && req.payload.size() > 3 &&
-                       (req.payload[3] == master::SUB_LEASE_CHECK || req.payload[3] == master::SUB_LEASE_RENEW);
+  bool window_request = req.cmd == master::CMD_TUNNEL && req.payload.size() > 3 &&
+                        (req.payload[3] == master::SUB_DISCOVERY_STATUS ||
+                         req.payload[3] == master::SUB_DISCOVERY_START);
   if (ok) {
     timeouts_in_a_row_ = 0;
-    master::Lease lease;
+    master::DiscoveryWindow window;
     master::TunnelReply tunnel;
-    bool lease_read = lease_request && master::parse_tunnel_reply(reply.payload, tunnel) &&
-                      master::parse_lease(tunnel, lease);
+    bool discovery_read = window_request && master::parse_tunnel_reply(reply.payload, tunnel) &&
+                      master::parse_discovery_window(tunnel, window);
     if (req.cmd == master::CMD_POLL) {
       uint32_t before = cursor_.resyncs();
       cursor_.on_reply(reply);
@@ -463,27 +466,29 @@ void MasterCore::tick_(uint32_t now_ms) {
              reply.payload.size(), cursor_.next());
       }
     }
-    if (lease_read) {
+    if (discovery_read) {
       // The CCA lets it run down to 0 and renews then, so that's routine;
       // finding it gone when the TAP comes back is not.
-      bool out = !lease.running || lease.remaining_s == 0;
-      if (out && lost_since_lease_read_)
-        LOGW("bus master: the TAP came back without its run lease (%u nodes); renewing", static_cast<unsigned>(lease.node_count));
+      bool out = !window.running || window.remaining_s == 0;
+      if (out && lost_since_window_read_)
+        LOGW("bus master: the TAP came back with its discovery window closed (%u nodes); renewing",
+             static_cast<unsigned>(window.node_count));
       else if (out)
-        LOGI("bus master: the TAP's run lease is up (%u nodes); renewing", static_cast<unsigned>(lease.node_count));
-      lease_.on_lease(lease, now_ms);
+        LOGI("bus master: the TAP's discovery window has closed (%u nodes); renewing",
+             static_cast<unsigned>(window.node_count));
+      window_.on_window(window, now_ms);
     }
-    update_lease_fault_();
+    update_discovery_fault_();
     std::lock_guard<std::mutex> lock(mu_);
     if (req.cmd == master::CMD_POLL) status_.polls++;
     status_.resyncs = cursor_.resyncs();
-    if (lease_read) {
-      if (lost_since_lease_read_ && (!lease.running || lease.remaining_s == 0)) status_.back_without_lease++;
-      lost_since_lease_read_ = false;
-      status_.lease = lease;
-      status_.lease_read = true;
+    if (discovery_read) {
+      if (lost_since_window_read_ && (!window.running || window.remaining_s == 0)) status_.back_without_discovery++;
+      lost_since_window_read_ = false;
+      status_.discovery = window;
+      status_.discovery_read = true;
     }
-    status_.renewals = lease_.renewals();
+    status_.renewals = window_.renewals();
     status_.last_reply_unix = unix_now();
     if (status_.fault == Fault::no_reply) {
       status_.fault = Fault::none;
@@ -493,21 +498,21 @@ void MasterCore::tick_(uint32_t now_ms) {
     return;
   }
   if (req.cmd == master::CMD_POLL) cursor_.on_timeout();
-  if (lease_request) lease_.on_no_reply(now_ms);
+  if (window_request) window_.on_no_reply(now_ms);
   timeouts_in_a_row_++;
   {
     std::lock_guard<std::mutex> lock(mu_);
     status_.timeouts++;
-    status_.renewals = lease_.renewals();
+    status_.renewals = window_.renewals();
     if (timeouts_in_a_row_ == NO_REPLY_FAULT_AFTER) {
       status_.tap_lost++;
-      lost_since_lease_read_ = true;
+      lost_since_window_read_ = true;
       auto &recent = status_.recent_lost_unix;
       if (recent.size() == MasterStatus::RECENT_LOST) recent.erase(recent.begin());
       recent.push_back(unix_now());
     }
   }
-  update_lease_fault_();
+  update_discovery_fault_();
   // A gateway with no optimizers behind it, or one not running, refuses
   // polls outright (0x0006); say that rather than "not answering".
   // A TAP that went quiet may have lost power and come back at the factory
@@ -515,7 +520,7 @@ void MasterCore::tick_(uint32_t now_ms) {
   if (startup_ && timeouts_in_a_row_ == NO_REPLY_FAULT_AFTER) {
     LOGW("bus master: the TAP stopped answering at %04X; looking for it again", gateway_);
     phase_ = Phase::probing;
-    lease_ = master::LeaseKeeper();
+    window_ = master::WindowKeeper();
     drop_housekeeping_();
   }
   if (timeouts_in_a_row_ == NO_REPLY_FAULT_AFTER)
@@ -635,12 +640,12 @@ void MasterCore::stand_by_(uint32_t) {
   if (standby_ == Standby::taking_over && quiet >= static_cast<int64_t>(takeover_ms_) + jitter_ms_) take_over_(quiet);
 }
 
-// As at start, minus the open: the lease is read before anything renews
+// As at start, minus the open: the discovery window is read before anything renews
 // it, the poll cursor is taken from the TAP's reply, and a TAP that lost
 // power is brought up only if startup is on.
 void MasterCore::take_over_(int64_t quiet_ms) {
   LOGW("standby: no master heard for %.1f s; taking over the bus", quiet_ms / 1000.0);
-  lease_ = master::LeaseKeeper();
+  window_ = master::WindowKeeper();
   drop_housekeeping_();
   queries_.reset();
   holding_ = false;
@@ -723,15 +728,15 @@ void MasterCore::report_extra_taps_(const std::vector<master::Bytes> &macs) {
 }
 
 // The TAP not taking renewals: say so, and clear it once a reading shows
-// time on the lease. (It doesn't stop production: the lease is the TAP's
-// discovery window, measured 2026-11-03.)
-void MasterCore::update_lease_fault_() {
+// time on the discovery window. (A closed window doesn't stop production,
+// measured 2026-11-03.)
+void MasterCore::update_discovery_fault_() {
   Fault f = status().fault;
-  if (lease_.stuck() && f != Fault::lease_refused && f != Fault::second_master)
-    set_fault(Fault::lease_refused, "the TAP did not take " + std::to_string(master::LeaseKeeper::RENEW_LIMIT) +
-                                        " lease renewals in a row; trying again every " +
-                                        std::to_string(master::LeaseKeeper::RENEW_BACKOFF_MS / 1000) + " s");
-  else if (!lease_.stuck() && f == Fault::lease_refused)
+  if (window_.stuck() && f != Fault::discovery_refused && f != Fault::second_master)
+    set_fault(Fault::discovery_refused, "the TAP did not take " + std::to_string(master::WindowKeeper::RENEW_LIMIT) +
+                                        " discovery renewals in a row; trying again every " +
+                                        std::to_string(master::WindowKeeper::RENEW_BACKOFF_MS / 1000) + " s");
+  else if (!window_.stuck() && f == Fault::discovery_refused)
     set_fault(Fault::none, "");
 }
 

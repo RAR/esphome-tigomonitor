@@ -10,7 +10,7 @@
 //   - 0x0148 telemetry polls, answered by 0x0149 power frames, and
 //   - a tunnel, 0x0B0F with replies on 0x0B10, whose payload is
 //     00 00 00 <sub> <seq> <args>; the reply is 00 0d|0e 00 <sub+1> <seq> <data>.
-//     Sub 0x2E reads the TAP's run lease, sub 0x2D renews it; 0x41, 0x22 and
+//     Sub 0x2E reads the TAP's discovery window, sub 0x2D renews it; 0x41, 0x22 and
 //     0x26 are housekeeping (Housekeeping), 0x06 the text queries to
 //     optimizers (Queries), 0x0D part of the bring-up.
 //   - 0x0B00, the hourly session frame; VERSION and 0x0E02 at bring-up; and
@@ -93,12 +93,13 @@ static const uint16_t CMD_POLL = 0x0148;
 static const uint16_t CMD_POLL_REPLY = 0x0149;
 static const uint16_t CMD_TUNNEL = 0x0B0F;
 static const uint16_t CMD_TUNNEL_REPLY = 0x0B10;
-static const uint8_t SUB_LEASE_RENEW = 0x2D;
-static const uint8_t SUB_LEASE_CHECK = 0x2E;
-// Clears the run lease, which idles every optimizer: never sent. (The
-// gateway firmware's lease handler takes 2B clear, 2D renew, 2E check.)
-static const uint8_t SUB_LEASE_CLEAR = 0x2B;
-static const uint8_t SUB_LEASE_REPLY = 0x2F;
+static const uint8_t SUB_DISCOVERY_START = 0x2D;
+static const uint8_t SUB_DISCOVERY_STATUS = 0x2E;
+// Stops discovery: never sent. (The gateway firmware's names: 2D Start
+// Discovery, 2B Stop Discovery, 2E its status. We once read these as a "run
+// lease" that kept the optimizers producing; the roof showed it doesn't.)
+static const uint8_t SUB_DISCOVERY_STOP = 0x2B;
+static const uint8_t SUB_DISCOVERY_STATUS_REPLY = 0x2F;
 // Sub 0x41 and command 0x0B00: the CCA's housekeeping (Housekeeping, below).
 static const uint8_t SUB_HOUSEKEEPING = 0x41;
 // The PV switch, though we first copied it as a "session" frame: one byte,
@@ -132,20 +133,20 @@ inline bool parse_tunnel_reply(const Bytes &payload, TunnelReply &out) {
   return true;
 }
 
-// ---- the run lease ---------------------------------------------------------
+// ---- the discovery window --------------------------------------------------
 
-// The 0x2F reply's data: state (01 running, 00 lapsed), seconds left (BE),
+// The 0x2F reply's data: state (01 open, 00 closed), seconds left (BE),
 // then three counts. On the rig they read 44/40/44 while running and 0/40/44
 // at lapse; the CCA's renewal carried 44 with the first at 0, so the node
 // count is the third.
-struct Lease {
+struct DiscoveryWindow {
   bool running = false;
   uint16_t remaining_s = 0;
   uint16_t node_count = 0;
 };
 
-inline bool parse_lease(const TunnelReply &r, Lease &out) {
-  if (r.sub != SUB_LEASE_REPLY || r.data.size() < 9) return false;
+inline bool parse_discovery_window(const TunnelReply &r, DiscoveryWindow &out) {
+  if (r.sub != SUB_DISCOVERY_STATUS_REPLY || r.data.size() < 9) return false;
   out.running = r.data[0] == 0x01;
   out.remaining_s = static_cast<uint16_t>(r.data[1] << 8 | r.data[2]);
   out.node_count = static_cast<uint16_t>(r.data[7] << 8 | r.data[8]);
@@ -154,30 +155,30 @@ inline bool parse_lease(const TunnelReply &r, Lease &out) {
 
 // The CCA's renewal, byte for byte: BA BE, 02, 900 s, the node count, 01 00.
 // What BA BE, 02 and 01 00 mean isn't known; they are copied, not composed.
-inline Bytes lease_renewal_args(uint16_t node_count) {
+inline Bytes discovery_renewal_args(uint16_t node_count) {
   return {0xBA, 0xBE, 0x02, 0x03, 0x84, static_cast<uint8_t>(node_count >> 8), static_cast<uint8_t>(node_count),
           0x01, 0x00};
 }
 
-// What to do about the lease, as the CCA does it: read it every 20 s (or
+// What to do about the discovery window, as the CCA does it: read it every 20 s (or
 // just after it should run out, if that's sooner) and renew only once a
 // reading says 0 s are left. A master that restarts checks first, and one
-// that stops calling due() lets the lease lapse.
+// that stops calling due() lets the discovery window lapse.
 //
 // Guards for frames and loops the CCA never showed:
 //   - no renewal carries a node count of 0;
 //   - "not running" with time left is not a reason to renew; only 0 s is;
-//   - after RENEW_LIMIT renewals with no reading showing time on the lease,
+//   - after RENEW_LIMIT renewals with no reading showing time on the discovery window,
 //     stuck() says so until a reading shows time, and it renews only once
 //     each RENEW_BACKOFF_MS.
 // A check with no reply is retried a second later, up to CHECK_RETRIES
-// times, so one lost reply doesn't leave a lapsed lease for a whole period.
-struct LeaseAction {
+// times, so one lost reply doesn't leave a closed discovery window for a whole period.
+struct WindowAction {
   enum Kind { none, check, renew } kind = none;
   uint16_t node_count = 0;
 };
 
-class LeaseKeeper {
+class WindowKeeper {
  public:
   static const uint32_t CHECK_EVERY_MS = 20000;
   static const uint32_t RENEW_RETRY_MS = 1000;
@@ -188,31 +189,31 @@ class LeaseKeeper {
   static const uint32_t RENEW_BACKOFF_MS = 30000;
 
   // What to send now. Returning an action counts it as sent.
-  LeaseAction due(uint32_t now_ms) {
-    LeaseAction a;
+  WindowAction due(uint32_t now_ms) {
+    WindowAction a;
     bool out = ever_read_ && last_.remaining_s == 0 && last_.node_count > 0;
     // Past RENEW_LIMIT, one try each RENEW_BACKOFF_MS: a TAP that refused
     // while browning out takes a renewal once it is back.
     bool may = renews_unanswered_ < RENEW_LIMIT ? !renewed_ || now_ms - last_renew_ms_ >= RENEW_RETRY_MS
                                                  : now_ms - last_renew_ms_ >= RENEW_BACKOFF_MS;
     if (out && may) {
-      a.kind = LeaseAction::renew;
+      a.kind = WindowAction::renew;
       a.node_count = last_.node_count;
       renewed_ = true;
       last_renew_ms_ = now_ms;
       renews_unanswered_++;
       renewals_++;
-      last_sent_ = LeaseAction::renew;
+      last_sent_ = WindowAction::renew;
     } else if (!checked_ || static_cast<int32_t>(now_ms - next_check_ms_) >= 0) {
-      a.kind = LeaseAction::check;
+      a.kind = WindowAction::check;
       checked_ = true;
       next_check_ms_ = now_ms + CHECK_EVERY_MS;
-      last_sent_ = LeaseAction::check;
+      last_sent_ = WindowAction::check;
     }
     return a;
   }
   // A reading counts as this period's check.
-  void on_lease(const Lease &l, uint32_t now_ms) {
+  void on_window(const DiscoveryWindow &l, uint32_t now_ms) {
     last_ = l;
     ever_read_ = true;
     checked_ = true;
@@ -222,23 +223,23 @@ class LeaseKeeper {
     next_check_ms_ = now_ms + (until_out < CHECK_EVERY_MS ? until_out : CHECK_EVERY_MS);
   }
   void on_no_reply(uint32_t now_ms) {
-    if (last_sent_ == LeaseAction::check && check_retries_ < CHECK_RETRIES) {
+    if (last_sent_ == WindowAction::check && check_retries_ < CHECK_RETRIES) {
       check_retries_++;
       next_check_ms_ = now_ms + CHECK_RETRY_MS;
     }
   }
 
-  const Lease &last() const { return last_; }
+  const DiscoveryWindow &last() const { return last_; }
   uint32_t renewals() const { return renewals_; }
   bool ever_read() const { return ever_read_; }
   bool stuck() const { return renews_unanswered_ >= RENEW_LIMIT; }
 
  private:
-  Lease last_;
+  DiscoveryWindow last_;
   bool ever_read_ = false;
   bool checked_ = false;
   bool renewed_ = false;
-  LeaseAction::Kind last_sent_ = LeaseAction::none;
+  WindowAction::Kind last_sent_ = WindowAction::none;
   uint32_t next_check_ms_ = 0;
   uint32_t last_renew_ms_ = 0;
   uint32_t renewals_ = 0;
@@ -355,7 +356,7 @@ struct Request {
 
 // ---- housekeeping ----------------------------------------------------------
 
-// Two things the CCA sends that the lease and polls don't cover, from a 24 h
+// Two things the CCA sends that the discovery window and polls don't cover, from a 24 h
 // capture of the reference rig's bus:
 //   - tunnel sub 0x41, the args a target Tuid then 00 00 00 <stream> 00 and 17
 //     more bytes. Three streams (01, 02, 04), each sent once a minute, each
@@ -974,19 +975,19 @@ class Queries {
   uint32_t sent_reads_ = 0, sent_writes_ = 0, answers_ = 0;
 };
 
-// What a master sends next: lease work when it's due, then housekeeping (if
+// What a master sends next: discovery work when it's due, then housekeeping (if
 // there is any), then queries (if there are any), a poll otherwise. seq is
 // the last tunnel sequence number used, advanced when one is.
-inline Request next_request(LeaseKeeper &lease, const PollCursor &cursor, uint8_t &seq, uint32_t now_ms,
+inline Request next_request(WindowKeeper &window, const PollCursor &cursor, uint8_t &seq, uint32_t now_ms,
                             Housekeeping *housekeeping = nullptr, Queries *queries = nullptr, PvSwitch *pv = nullptr) {
-  // A PV switch goes in the next slot, ahead even of the lease: one
-  // request's delay is nothing to a 900 s lease.
+  // A PV switch goes in the next slot, ahead even of the discovery window: one
+  // request's delay is nothing to a 900 s window.
   if (pv) {
     Request r = pv->due(now_ms);
     if (r.cmd) return r;
   }
-  LeaseAction a = lease.due(now_ms);
-  if (a.kind == LeaseAction::none) {
+  WindowAction a = window.due(now_ms);
+  if (a.kind == WindowAction::none) {
     if (housekeeping) {
       Request r = housekeeping->due(now_ms, seq);
       if (r.cmd) return r;
@@ -998,8 +999,9 @@ inline Request next_request(LeaseKeeper &lease, const PollCursor &cursor, uint8_
     return {CMD_POLL, poll_payload(cursor.next(), cursor.retry())};
   }
   seq = next_seq(seq);
-  if (a.kind == LeaseAction::renew) return {CMD_TUNNEL, tunnel_request(SUB_LEASE_RENEW, seq, lease_renewal_args(a.node_count))};
-  return {CMD_TUNNEL, tunnel_request(SUB_LEASE_CHECK, seq, {})};
+  if (a.kind == WindowAction::renew)
+    return {CMD_TUNNEL, tunnel_request(SUB_DISCOVERY_START, seq, discovery_renewal_args(a.node_count))};
+  return {CMD_TUNNEL, tunnel_request(SUB_DISCOVERY_STATUS, seq, {})};
 }
 
 // ---- gateway discovery -----------------------------------------------------
@@ -1254,11 +1256,11 @@ inline Allow classify_request(uint16_t cmd, const Bytes &payload) {
   if (cmd != CMD_TUNNEL || payload.size() < 5 || payload[0] || payload[1] || payload[2]) return Allow::bench_only;
   Bytes args(payload.begin() + 5, payload.end());
   switch (payload[3]) {
-    case SUB_LEASE_CLEAR:
+    case SUB_DISCOVERY_STOP:
       return Allow::never;
-    case SUB_LEASE_CHECK:
+    case SUB_DISCOVERY_STATUS:
       return args.empty() ? Allow::yes : Allow::bench_only;
-    case SUB_LEASE_RENEW:
+    case SUB_DISCOVERY_START:
       // Only the CCA's renewal, with a node count; it never sent 0.
       return args.size() == 9 && Bytes(args.begin(), args.begin() + 5) == Bytes{0xBA, 0xBE, 0x02, 0x03, 0x84} &&
                      (args[5] || args[6]) && args[7] == 0x01 && args[8] == 0x00

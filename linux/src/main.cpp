@@ -193,7 +193,7 @@ int main(int argc, char **argv) {
   std::atomic<bool> input_done{false};
   std::atomic<bool> input_stop{false};
   // The master role has no input thread: the main loop ticks it below, so
-  // nothing renews the TAP's lease if this loop ever stops.
+  // nothing renews the TAP's discovery window if this loop ever stops.
   // bus_master is read by the web server's threads. The mutex guards the
   // pointer only: each side takes a copy and works on that, so the web UI and
   // the healthcheck never wait on a tick that is waiting on the bus.
@@ -338,7 +338,7 @@ int main(int argc, char **argv) {
 
   // History writes go to the SD card, and the daily prune scans the whole
   // panel table. A worker does them, so they never hold up the main loop,
-  // which in the master role is also what polls the bus and keeps the lease.
+  // which in the master role is also what polls the bus and keeps the discovery window.
   std::mutex history_mu;
   std::condition_variable history_cv;
   std::deque<std::function<void()>> history_jobs;

@@ -1,8 +1,8 @@
 #!/bin/sh
 # The bus master without a TAP: tigomonitord in the master role against a
 # mock TAP on a pseudo-terminal (linux/tools/mock_tap.py). Checks it polls and
-# decodes, checks the lease before ever renewing it, renews with the TAP's
-# node count, lets the lease lapse while it's frozen, and stops transmitting
+# decodes, checks the discovery window before ever renewing it, renews with the TAP's
+# node count, lets the discovery window lapse while it's frozen, and stops transmitting
 # when another master appears.
 # Run from the repo root inside the dev container, after build.sh.
 set -eu
@@ -41,10 +41,10 @@ PY
 }
 stat() { python3 -c "import json,sys; d=json.load(open('$1')); print(eval(sys.argv[1]))" "$2"; }
 
-# --- run 1: polls, lease, renewal, and a frozen daemon ---
-# The master reads the lease every 20 s, as the CCA does, so a 3 s lease is
-# renewed at the 20 s check, and again at each check after.
-python3 linux/tools/mock_tap.py "$out/tap" --lease 3 --renew-to 3 --nodes 45 --stats "$out/tap.json" &
+# --- run 1: polls, discovery window, renewal, and a frozen daemon ---
+# The master reads the discovery window every 20 s, as the CCA does, so a
+# 3 s window is renewed at the 20 s check, and again at each check after.
+python3 linux/tools/mock_tap.py "$out/tap" --window 3 --renew-to 3 --nodes 45 --stats "$out/tap.json" &
 tap=$!
 sleep 0.5
 printf '{"bus_role": "master", "serial_port": "%s", "gateway_id": 4609, "web_port": 18092, "device_id": "test", "publish_interval_s": 5, "mqtt": {"host": "127.0.0.1", "port": 18831}}\n' "$PWD/$out/tap" \
@@ -55,17 +55,17 @@ trap 'kill -CONT $daemon 2>/dev/null || true; kill $daemon $tap 2>/dev/null || t
 renewals() { stat "$out/tap.json" "len(d['renewals'])"; }
 for _ in $(seq 60); do [ -f "$out/tap.json" ] && [ "$(renewals)" -ge 1 ] && break; sleep 0.5; done
 expect "panels decoded" "$(api 18092 /api/devices | python3 -c 'import json,sys; print(len(json.load(sys.stdin)["devices"]))')" 6
-expect "first lease frame is a check" "$(stat "$out/tap.json" "d['first_lease_frame']")" check
+expect "first discovery frame is a check" "$(stat "$out/tap.json" "d['first_discovery_frame']")" check
 expect "renewed with the TAP's node count" "$(stat "$out/tap.json" "[r['nodes'] for r in d['renewals']][:1]")" "[45]"
 expect "cursor followed the TAP" "$(stat "$out/tap.json" "d['cursor_mismatches']")" 0
 expect "nothing outside the allow-list" "$(stat "$out/tap.json" "d['other']")" "[]"
 master="$(api 18092 /api/master)"
-expect "/api/master active" "$(echo "$master" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["active"], d["fault"], d["renewals"] >= 1, d["lease"]["node_count"])')" "True none True 45"
-expect "MQTT: master active" "$(mqtt_state | field '(d["status"], d["problem"], d["lease_nodes"], d["renewals"] >= 1)')" "('active', False, 45, True)"
+expect "/api/master active" "$(echo "$master" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["active"], d["fault"], d["renewals"] >= 1, d["discovery"]["node_count"])')" "True none True 45"
+expect "MQTT: master active" "$(mqtt_state | field '(d["status"], d["problem"], d["discovery_nodes"], d["renewals"] >= 1)')" "('active', False, 45, True)"
 expect "MQTT: master entities announced" "$(mqtt_configs)" 8
 expect "healthy" "$(health 18092)" '200 ok []'
 # Frozen across the next renewal it would make (the 20 s check after this
-# one): nothing renews the lease until the daemon runs again.
+# one): nothing renews the discovery window until the daemon runs again.
 before="$(renewals)"
 kill -STOP $daemon
 sleep 25
@@ -76,7 +76,7 @@ for _ in $(seq 20); do [ "$(renewals)" -gt "$during" ] && break; sleep 0.5; done
 expect "no renewal while frozen" "$((during - before))" 0
 expect "renews once running again" "$([ "$(renewals)" -gt "$during" ] && echo yes || echo no)" yes
 expect "the freeze shows as the longest gap" "$(api 18092 /api/master | python3 -c 'import json,sys; g=json.load(sys.stdin)["gap_ms"]; print(g["max"] >= 25000, g["max_at_unix"] > 0, g["recent"] >= 25000)')" "True True True"
-expect "leases run down and renewed are not losses" "$(api 18092 /api/master | python3 -c 'import json,sys; t=json.load(sys.stdin)["tap"]; print(t["lost"], t["back_without_lease"])')" "0 0"
+expect "windows run down and renewed are not losses" "$(api 18092 /api/master | python3 -c 'import json,sys; t=json.load(sys.stdin)["tap"]; print(t["lost"], t["back_without_discovery"])')" "0 0"
 kill $daemon; wait $daemon 2>/dev/null || true
 kill $tap; wait $tap 2>/dev/null || true
 
@@ -170,7 +170,7 @@ kill $tap; wait $tap 2>/dev/null || true
 
 # --- run 7: startup discovery (TAP boots at the factory address) ---
 mkdir -p "$out/state7"
-python3 linux/tools/mock_tap.py "$out/tap7" --factory --lease 600 --nodes 44 --stats "$out/tap7.json" &
+python3 linux/tools/mock_tap.py "$out/tap7" --factory --window 600 --nodes 44 --stats "$out/tap7.json" &
 tap=$!
 sleep 0.5
 printf '{"bus_role": "master", "master_startup": true, "serial_port": "%s", "gateway_id": 4609, "web_port": 18098}\n' \
@@ -188,7 +188,7 @@ kill $tap; wait $tap 2>/dev/null || true
 
 # --- run 8: startup, but the TAP is already addressed -> no re-addressing writes ---
 mkdir -p "$out/state8"
-python3 linux/tools/mock_tap.py "$out/tap8" --lease 600 --nodes 44 --stats "$out/tap8.json" &
+python3 linux/tools/mock_tap.py "$out/tap8" --window 600 --nodes 44 --stats "$out/tap8.json" &
 tap=$!
 sleep 0.5
 printf '{"bus_role": "master", "master_startup": true, "serial_port": "%s", "gateway_id": 4609, "web_port": 18099}\n' \
@@ -206,7 +206,7 @@ kill $tap; wait $tap 2>/dev/null || true
 # Turning on "Bring up the TAP" alone takes effect without a restart; and a
 # TAP that comes back at the factory address is found and re-addressed.
 mkdir -p "$out/state9"
-python3 linux/tools/mock_tap.py "$out/tap9" --lease 600 --nodes 44 --stats "$out/tap9.json" &
+python3 linux/tools/mock_tap.py "$out/tap9" --window 600 --nodes 44 --stats "$out/tap9.json" &
 tap=$!
 sleep 0.5
 printf '{"bus_role": "master", "serial_port": "%s", "gateway_id": 4609, "web_port": 18100}\n' \
@@ -218,7 +218,7 @@ expect "startup switched on" "$(api 18100 /api/settings '{"master_startup": true
 sleep 3
 expect "probed without a restart" "$(grep -c 'the TAP is already at 1201' "$out/daemon9.log")" 1
 kill $tap; wait $tap 2>/dev/null || true
-python3 linux/tools/mock_tap.py "$out/tap9" --factory --lease 600 --nodes 44 --stats "$out/tap9b.json" &
+python3 linux/tools/mock_tap.py "$out/tap9" --factory --window 600 --nodes 44 --stats "$out/tap9b.json" &
 tap=$!
 for _ in $(seq 40); do [ -f "$out/tap9b.json" ] && [ "$(stat "$out/tap9b.json" "d['addressed_to']")" = 1201 ] && break; sleep 0.5; done
 expect "power-cycled TAP re-addressed" "$(stat "$out/tap9b.json" "d['addressed_to']")" 1201
@@ -234,7 +234,7 @@ kill $tap; wait $tap 2>/dev/null || true
 for mode in warm cold; do
   mkdir -p "$out/state10$mode"
   flag=""; [ $mode = cold ] && flag="--factory"
-  python3 linux/tools/mock_tap.py "$out/tap10$mode" $flag --second-tap --lease 600 --nodes 44 --stats "$out/tap10$mode.json" &
+  python3 linux/tools/mock_tap.py "$out/tap10$mode" $flag --second-tap --window 600 --nodes 44 --stats "$out/tap10$mode.json" &
   tap=$!
   sleep 0.5
   printf '{"bus_role": "master", "master_startup": true, "serial_port": "%s", "gateway_id": 4609, "web_port": 18101}\n' \
@@ -283,7 +283,7 @@ for mode in warm cold; do
   mkdir -p "$out/state12$mode"
   cp "$out/state11/cca-0x41.json" "$out/state12$mode/"
   flag=""; [ $mode = cold ] && flag="--factory"
-  python3 linux/tools/mock_tap.py "$out/tap12$mode" $flag --lease 600 --nodes 44 --stats "$out/tap12$mode.json" &
+  python3 linux/tools/mock_tap.py "$out/tap12$mode" $flag --window 600 --nodes 44 --stats "$out/tap12$mode.json" &
   tap=$!
   sleep 0.5
   printf '{"bus_role": "master", "master_startup": true, "master_housekeeping": true, "serial_port": "%s", "gateway_id": 4609, "web_port": 18102}\n' \
@@ -310,7 +310,7 @@ done
 
 # --- run 13: housekeeping on with nothing learned sends the built-in 0x41 content ---
 mkdir -p "$out/state13"
-python3 linux/tools/mock_tap.py "$out/tap13" --lease 600 --nodes 44 --stats "$out/tap13.json" &
+python3 linux/tools/mock_tap.py "$out/tap13" --window 600 --nodes 44 --stats "$out/tap13.json" &
 tap=$!
 sleep 0.5
 printf '{"bus_role": "master", "master_housekeeping": true, "serial_port": "%s", "gateway_id": 4609, "web_port": 18103}\n' \
@@ -330,7 +330,7 @@ kill $tap; wait $tap 2>/dev/null || true
 # 0x22 pair and two walks of the node table; then the 0x06 queries, with the
 # CCA's two writes where the mock's answers call for them.
 mkdir -p "$out/state14"
-python3 linux/tools/mock_tap.py "$out/tap14" --factory --lease 600 --nodes 44 --stats "$out/tap14.json" &
+python3 linux/tools/mock_tap.py "$out/tap14" --factory --window 600 --nodes 44 --stats "$out/tap14.json" &
 tap=$!
 sleep 0.5
 printf '{"bus_role": "master", "master_startup": true, "master_housekeeping": true, "master_queries": true, "master_optimizer_writes": true, "serial_port": "%s", "gateway_id": 4609, "web_port": 18104}\n' \
@@ -362,7 +362,7 @@ kill $tap; wait $tap 2>/dev/null || true
 
 # --- run 15: queries without writes, housekeeping off, TAP already at its id ---
 mkdir -p "$out/state15"
-python3 linux/tools/mock_tap.py "$out/tap15" --lease 600 --nodes 44 --stats "$out/tap15.json" &
+python3 linux/tools/mock_tap.py "$out/tap15" --window 600 --nodes 44 --stats "$out/tap15.json" &
 tap=$!
 sleep 0.5
 printf '{"bus_role": "master", "master_startup": true, "master_queries": true, "serial_port": "%s", "gateway_id": 4609, "web_port": 18105}\n' \
@@ -384,7 +384,7 @@ kill $tap; wait $tap 2>/dev/null || true
 # Deaf for 12 s, longer than the reads after the quiet: the bring-up fails,
 # and after a pause the master looks again, finds it at 1201, and polls.
 mkdir -p "$out/state16"
-python3 linux/tools/mock_tap.py "$out/tap16" --factory --reset-quiet 12 --lease 600 --nodes 44 --stats "$out/tap16.json" &
+python3 linux/tools/mock_tap.py "$out/tap16" --factory --reset-quiet 12 --window 600 --nodes 44 --stats "$out/tap16.json" &
 tap=$!
 sleep 0.5
 printf '{"bus_role": "master", "master_startup": true, "serial_port": "%s", "gateway_id": 4609, "web_port": 18106}\n' \
@@ -400,11 +400,11 @@ kill $tap; wait $tap 2>/dev/null || true
 
 # --- run 17: a TAP whose power is cut every 15 s ---
 # As on the roof with the CCA unplugged from the bus but still powering the
-# TAP: it goes quiet for 8 s and comes back at 1201 with its lease out. The
-# master finds it, renews, and counts each loss and each return without a
-# lease. Run 1's leases run down to 0 and are renewed: none of those count.
+# TAP: it goes quiet for 8 s and comes back at 1201 with its discovery
+# window closed. The master finds it, renews, and counts each loss and each
+# return with discovery closed. Run 1's windows run down to 0 and are renewed: none of those count.
 mkdir -p "$out/state17"
-python3 linux/tools/mock_tap.py "$out/tap17" --power-cut-every 15 --lease 600 --nodes 44 --stats "$out/tap17.json" &
+python3 linux/tools/mock_tap.py "$out/tap17" --power-cut-every 15 --window 600 --nodes 44 --stats "$out/tap17.json" &
 tap=$!
 sleep 0.5
 printf '{"bus_role": "master", "master_startup": true, "serial_port": "%s", "gateway_id": 4609, "web_port": 18107}\n' \
@@ -414,7 +414,7 @@ daemon=$!
 for _ in $(seq 160); do [ -f "$out/tap17.json" ] && [ "$(stat "$out/tap17.json" "len(d['renewals'])")" -ge 2 ] && break; sleep 0.5; done
 sleep 2
 expect "two cuts, renewed after each" "$(stat "$out/tap17.json" "(d['power_cuts'] >= 2, len(d['renewals']) >= 2)")" "(True, True)"
-expect "/api/master counts the losses and returns without a lease" "$(api 18107 /api/master | python3 -c 'import json,sys; m=json.load(sys.stdin); t=m["tap"]; print(t["lost"] >= 2, t["back_without_lease"] >= 2, t["last_lost_unix"] > 0, t["lost"] == len(t["recent_lost_unix"]))')" \
+expect "/api/master counts the losses and returns with discovery closed" "$(api 18107 /api/master | python3 -c 'import json,sys; m=json.load(sys.stdin); t=m["tap"]; print(t["lost"] >= 2, t["back_without_discovery"] >= 2, t["last_lost_unix"] > 0, t["lost"] == len(t["recent_lost_unix"]))')" \
   "True True True True"
 expect "no stalls of its own: under 2 s between requests" "$(api 18107 /api/master | python3 -c 'import json,sys; g=json.load(sys.stdin)["gap_ms"]; print(0 < g["max"] < 2000)')" True
 kill $daemon; wait $daemon 2>/dev/null || true
@@ -426,7 +426,7 @@ kill $tap; wait $tap 2>/dev/null || true
 # bus up: no pause over 300 ms, and the state still lands on disk.
 mkdir -p "$out/state18"
 cc -shared -fPIC -o "$out/slow_fsync.so" linux/tools/slow_fsync.c -ldl
-python3 linux/tools/mock_tap.py "$out/tap18" --lease 600 --nodes 44 --stats "$out/tap18.json" &
+python3 linux/tools/mock_tap.py "$out/tap18" --window 600 --nodes 44 --stats "$out/tap18.json" &
 tap=$!
 sleep 0.5
 printf '{"bus_role": "master", "serial_port": "%s", "gateway_id": 4609, "web_port": 18108}\n' \
@@ -448,7 +448,7 @@ kill $tap; wait $tap 2>/dev/null || true
 # sending until it looks again 30 s later; it used to ask ~20 times a second
 # forever with the fault still "none".
 mkdir -p "$out/state19"
-python3 linux/tools/mock_tap.py "$out/tap19" --factory --mute-claims 1000 --lease 600 --nodes 44 --stats "$out/tap19.json" &
+python3 linux/tools/mock_tap.py "$out/tap19" --factory --mute-claims 1000 --window 600 --nodes 44 --stats "$out/tap19.json" &
 tap=$!
 sleep 0.5
 printf '{"bus_role": "master", "master_startup": true, "serial_port": "%s", "gateway_id": 4609, "web_port": 18109}\n' \
@@ -467,7 +467,7 @@ kill $tap; wait $tap 2>/dev/null || true
 # master never looks again, so the RESET that puts it back goes out anyway,
 # and the TAP is polled at 1201.
 mkdir -p "$out/state19b"
-python3 linux/tools/mock_tap.py "$out/tap19b" --factory --deaf-hop --lease 600 --nodes 44 --stats "$out/tap19b.json" &
+python3 linux/tools/mock_tap.py "$out/tap19b" --factory --deaf-hop --window 600 --nodes 44 --stats "$out/tap19b.json" &
 tap=$!
 sleep 0.5
 printf '{"bus_role": "master", "master_startup": true, "serial_port": "%s", "gateway_id": 4609, "web_port": 18110}\n' \
@@ -480,11 +480,11 @@ kill $daemon; wait $daemon 2>/dev/null || true
 kill $tap; wait $tap 2>/dev/null || true
 
 # --- run 20: a TAP that refuses renewals for a while ---
-# Its first three renewals are acked but leave the lease out. The master
-# flags lease_refused, then tries once each 30 s rather than stopping until
-# a restart, and the fourth renewal brings the lease back.
+# Its first three renewals are acked but leave the discovery window out. The master
+# flags discovery_refused, then tries once each 30 s rather than stopping until
+# a restart, and the fourth renewal brings the discovery window back.
 mkdir -p "$out/state20"
-python3 linux/tools/mock_tap.py "$out/tap20" --lease 2 --refuse-renewals 3 --nodes 44 --stats "$out/tap20.json" &
+python3 linux/tools/mock_tap.py "$out/tap20" --window 2 --refuse-renewals 3 --nodes 44 --stats "$out/tap20.json" &
 tap=$!
 sleep 0.5
 printf '{"bus_role": "master", "serial_port": "%s", "gateway_id": 4609, "web_port": 18111}\n' \
@@ -493,10 +493,10 @@ build/linux/tigomonitord --state-dir "$out/state20" --web-dir components/tigo_se
 daemon=$!
 for _ in $(seq 40); do [ -f "$out/tap20.json" ] && [ "$(stat "$out/tap20.json" "len(d['renewals'])")" -ge 3 ] && break; sleep 0.5; done
 sleep 2
-expect "three renewals refused: flagged" "$(api 18111 /api/master | python3 -c 'import json,sys; print(json.load(sys.stdin)["fault"])')" lease_refused
+expect "three renewals refused: flagged" "$(api 18111 /api/master | python3 -c 'import json,sys; print(json.load(sys.stdin)["fault"])')" discovery_refused
 for _ in $(seq 90); do [ "$(stat "$out/tap20.json" "len(d['renewals'])")" -ge 4 ] && break; sleep 0.5; done
 sleep 2
-expect "tried again after the backoff, and the lease is back" "$(api 18111 /api/master | python3 -c 'import json,sys; m=json.load(sys.stdin); print(m["fault"], m["lease"]["remaining_s"] > 0)')" "none True"
+expect "tried again after the backoff, and the discovery window is back" "$(api 18111 /api/master | python3 -c 'import json,sys; m=json.load(sys.stdin); print(m["fault"], m["discovery"]["remaining_s"] > 0)')" "none True"
 expect "no renewal between the third and the fourth for 30 s" "$(stat "$out/tap20.json" "round(d['renewals'][3]['t'] - d['renewals'][2]['t']) >= 29")" True
 kill $daemon; wait $daemon 2>/dev/null || true
 kill $tap; wait $tap 2>/dev/null || true
@@ -506,7 +506,7 @@ kill $tap; wait $tap 2>/dev/null || true
 # to. Each page is waited for, so both walks read the whole table: from 0,
 # each page from the last reply's end, to the empty page past the end.
 mkdir -p "$out/state21"
-python3 linux/tools/mock_tap.py "$out/tap21" --page-delay 0.12 --panels 30 --lease 600 --nodes 44 --stats "$out/tap21.json" &
+python3 linux/tools/mock_tap.py "$out/tap21" --page-delay 0.12 --panels 30 --window 600 --nodes 44 --stats "$out/tap21.json" &
 tap=$!
 sleep 0.5
 printf '{"bus_role": "master", "master_housekeeping": true, "serial_port": "%s", "gateway_id": 4609, "web_port": 18112}\n' \
@@ -524,7 +524,7 @@ kill $tap; wait $tap 2>/dev/null || true
 # Pages that take 400 ms to come back, as run 21's: /api/master (and the
 # healthcheck's /api/health) must not wait for the reply with it.
 mkdir -p "$out/state22"
-python3 linux/tools/mock_tap.py "$out/tap22" --page-delay 0.4 --panels 30 --lease 600 --nodes 44 --stats "$out/tap22.json" &
+python3 linux/tools/mock_tap.py "$out/tap22" --page-delay 0.4 --panels 30 --window 600 --nodes 44 --stats "$out/tap22.json" &
 tap=$!
 sleep 0.5
 printf '{"bus_role": "master", "master_housekeeping": true, "serial_port": "%s", "gateway_id": 4609, "web_port": 18113}\n' \

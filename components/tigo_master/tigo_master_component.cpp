@@ -186,7 +186,8 @@ void TigoMasterComponent::publish_() {
   if (problem_sensor_ != nullptr) problem_sensor_->publish_state(problem);
 #endif
 #ifdef USE_SENSOR
-  if (lease_sensor_ != nullptr && m.lease_read && !standing_by) lease_sensor_->publish_state(m.lease.remaining_s);
+  if (discovery_sensor_ != nullptr && m.discovery_read && !standing_by)
+    discovery_sensor_->publish_state(m.discovery.remaining_s);
   if (takeovers_sensor_ != nullptr) takeovers_sensor_->publish_state(m.takeovers);
   if (pause_sensor_ != nullptr) pause_sensor_->publish_state(m.gap_recent_ms);
 #endif

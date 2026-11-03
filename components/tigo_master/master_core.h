@@ -6,7 +6,7 @@
 // its own and no Linux or IDF calls.
 //
 // The daemon as the TAP's bus master, in the CCA's place. It sends what the
-// CCA sends (tigo_master.h): 0x0148 telemetry polls, the run lease's check
+// CCA sends (tigo_master.h): 0x0148 telemetry polls, the discovery window's status read
 // and renewal; with housekeeping on, the 0x41s, the hourly 0x0B00 and 0x22s
 // and the node table walks; with queries on, the 0x06 dialogue with
 // optimizers; and after re-addressing a TAP, the CCA's bring-up. Every byte
@@ -15,10 +15,10 @@
 //
 // One request and its reply per tick(). It has no thread or timer of its own:
 // only the main loop's tick() sends anything, so a daemon that hangs stops
-// renewing the lease. That is no fail-safe: on the roof's TS4-A-O optimizers
-// the array kept producing with no master and the lease run out, RSS on or
-// off (measured 2026-11-03). The lease is the TAP's discovery window; rapid
-// shutdown is the RSD cutting the TAP's power.
+// renewing the TAP's discovery window. That is no fail-safe: on the roof's
+// TS4-A-O optimizers the array kept producing with no master and the window
+// closed, RSS on or off (measured 2026-11-03). Rapid shutdown is the RSD
+// cutting the TAP's power.
 //
 // As a standby (bus_role standby) it only listens while another master runs
 // the bus, ours or a CCA, and takes the bus over once no master has been
@@ -40,7 +40,7 @@
 namespace esphome {
 namespace tigo_master {
 
-enum class Fault { none, no_port, no_reply, second_master, refused, lease_refused, discovery_failed, extra_tap };
+enum class Fault { none, no_port, no_reply, second_master, refused, discovery_refused, discovery_failed, extra_tap };
 enum class Phase { running, probing, discovering };
 // off: not a standby. standing_by: listening, another master runs the bus;
 // taking_over: none heard for takeover_s, listening a moment longer before
@@ -63,21 +63,21 @@ struct MasterStatus {
   bool active = false;  // the port is open and nothing has stopped it
   Fault fault = Fault::none;
   Phase phase = Phase::running;
-  esphome::tigo_monitor::master::Lease lease;
-  bool lease_read = false;
+  esphome::tigo_monitor::master::DiscoveryWindow discovery;
+  bool discovery_read = false;
   uint32_t renewals = 0;
   uint32_t polls = 0;
   uint32_t timeouts = 0;
   uint32_t resyncs = 0;  // times the poll cursor was taken from the TAP's reply
   int64_t last_reply_unix = 0;
   // Times the TAP stopped answering (10 requests in a row), the last few of
-  // them, and times it came back with its lease gone: together, a TAP whose
-  // power is being cut (the CCA does that to one it can't hear). A lease
+  // them, and times it came back with its discovery window gone: together, a TAP whose
+  // power is being cut (the CCA does that to one it can't hear). A discovery window
   // running down to 0 between renewals is normal and not counted.
   uint32_t tap_lost = 0;
   std::vector<int64_t> recent_lost_unix;  // oldest first, at most RECENT_LOST
   static const size_t RECENT_LOST = 10;
-  uint32_t back_without_lease = 0;
+  uint32_t back_without_discovery = 0;
   // The longest the bus waited on the daemon rather than the TAP: from the
   // end of one tick to the start of the next, or inside on_rx (decoding).
   // Normally ~10 ms; anything long is the rest of the daemon holding the
@@ -201,7 +201,7 @@ class MasterCore {
   bool standing_by_() const { return standby_ == Standby::standing_by || standby_ == Standby::taking_over; }
   void set_fault(Fault f, const std::string &detail);
   void log_(int prio, const char *fmt, ...) __attribute__((format(printf, 3, 4)));
-  void update_lease_fault_();
+  void update_discovery_fault_();
   void drop_housekeeping_();
   void report_extra_taps_(const std::vector<esphome::tigo_monitor::master::Bytes> &macs);
 
@@ -245,7 +245,7 @@ class MasterCore {
   int64_t last_tick_end_ms_ = -1;  // steady clock
   int64_t gap_window_start_ms_ = 0;
   uint32_t gap_window_max_ms_ = 0, gap_prev_window_max_ms_ = 0;
-  bool lost_since_lease_read_ = false;  // the next lease read says whether it came back without one
+  bool lost_since_window_read_ = false;  // the next discovery read says whether it came back without one
   bool readdressed_ = false;     // the last bring-up moved the TAP off the factory address
   bool session_reset_sent_ = false;  // the 0x0B00 00, sent once per start, as after a CCA reboot
   uint32_t sent_41_before_ = 0, sent_session_before_ = 0;  // from earlier Housekeepings
@@ -256,7 +256,7 @@ class MasterCore {
   Log log_sink_;
   bool tried_open_ = false;
   uint32_t last_open_try_ms_ = 0;
-  esphome::tigo_monitor::master::LeaseKeeper lease_;
+  esphome::tigo_monitor::master::WindowKeeper window_;
   esphome::tigo_monitor::master::PollCursor cursor_{0};
   uint8_t seq_ = 0;
   uint32_t timeouts_in_a_row_ = 0;

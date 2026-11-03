@@ -124,8 +124,8 @@ tigo_master:
     name: "Bus master"
   problem:
     name: "Bus master problem"
-  lease_remaining:
-    name: "Bus master lease remaining"
+  discovery_remaining:
+    name: "Bus master discovery window remaining"
   takeovers:
     name: "Bus master takeovers"
   longest_pause:

@@ -42,7 +42,7 @@ start() {  # start NAME PORT EXTRA-SETTINGS [MOCK FLAGS...]
   name=$1 port=$2 extra=$3
   shift 3
   mkdir -p "$out/$name"
-  python3 linux/tools/mock_tap.py "$out/$name.tty" --lease 600 --nodes 44 --stats "$out/$name.json" "$@" &
+  python3 linux/tools/mock_tap.py "$out/$name.tty" --window 600 --nodes 44 --stats "$out/$name.json" "$@" &
   tap=$!
   sleep 0.5
   printf '{"bus_role": "master", "master_startup": true, "serial_port": "%s", "gateway_id": 4609, "web_port": %s, "web_password": "pw"%s}\n' \
@@ -149,7 +149,7 @@ stop_all
 mkdir -p "$out/seven"
 printf '{"off": false, "heard": false, "since_unix": 1}\n' > "$out/seven/pv.json"
 chmod 600 "$out/seven/pv.json"
-python3 linux/tools/mock_tap.py "$out/seven.tty" --lease 600 --nodes 44 --stats "$out/seven.json" &
+python3 linux/tools/mock_tap.py "$out/seven.tty" --window 600 --nodes 44 --stats "$out/seven.json" &
 tap=$!
 sleep 0.5
 chmod 666 "$(readlink -f "$out/seven.tty")"

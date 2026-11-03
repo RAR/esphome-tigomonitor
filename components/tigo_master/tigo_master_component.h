@@ -127,7 +127,7 @@ class TigoMasterComponent : public Component, public uart::UARTComponent {
   void set_problem_sensor(binary_sensor::BinarySensor *s) { problem_sensor_ = s; }
 #endif
 #ifdef USE_SENSOR
-  void set_lease_sensor(sensor::Sensor *s) { lease_sensor_ = s; }
+  void set_discovery_sensor(sensor::Sensor *s) { discovery_sensor_ = s; }
   void set_takeovers_sensor(sensor::Sensor *s) { takeovers_sensor_ = s; }
   void set_pause_sensor(sensor::Sensor *s) { pause_sensor_ = s; }
 #endif
@@ -156,7 +156,7 @@ class TigoMasterComponent : public Component, public uart::UARTComponent {
   void load_settings(bool) override {}
 
   // The ESPHome loop must have run this recently for the master to send
-  // anything: a device whose loop hangs goes quiet, and the lease lapses.
+  // anything: a device whose loop hangs goes quiet, and the discovery window lapses.
   static const uint32_t LOOP_DEAD_MS = 5000;
   static const uint32_t TICK_EVERY_MS = 10;  // as the Pi's main loop
   static const uint32_t PUBLISH_EVERY_MS = 5000;
@@ -222,7 +222,7 @@ class TigoMasterComponent : public Component, public uart::UARTComponent {
   binary_sensor::BinarySensor *problem_sensor_ = nullptr;
 #endif
 #ifdef USE_SENSOR
-  sensor::Sensor *lease_sensor_ = nullptr;
+  sensor::Sensor *discovery_sensor_ = nullptr;
   sensor::Sensor *takeovers_sensor_ = nullptr;
   sensor::Sensor *pause_sensor_ = nullptr;
 #endif

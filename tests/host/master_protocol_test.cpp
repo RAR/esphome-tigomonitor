@@ -5,7 +5,7 @@
 //       tests/host/master_protocol_test.cpp -o /tmp/master_protocol_test && /tmp/master_protocol_test
 //
 // The byte strings are frames from a 20-minute capture of the reference rig's
-// bus with its CCA running (gateway 0x1201). Only polls and lease frames are
+// bus with its CCA running (gateway 0x1201). Only polls and discovery frames are
 // used: they carry no serials, barcodes or MACs.
 
 #include "tigo_master.h"
@@ -44,9 +44,9 @@ static void test_codec() {
   // A 0x0148 poll, cursor 0x6FC4, exactly as the CCA sent it. Its CRC low
   // byte is A4, which goes out escaped as 7E 04.
   CHECK(encode_frame(0x1201, 0x0148, poll_payload(0x6FC4)) == hex("00ffff7e071201014800016fc4047e04437e08"));
-  // The CCA's lease renewal: seq 0x31, 44 nodes.
-  CHECK(tunnel_request(0x2D, 0x31, lease_renewal_args(44)) == hex("0000002d31babe020384002c0100"));
-  CHECK(encode_frame(0x1201, 0x0B0F, tunnel_request(0x2D, 0x31, lease_renewal_args(44))) ==
+  // The CCA's discovery renewal: seq 0x31, 44 nodes.
+  CHECK(tunnel_request(0x2D, 0x31, discovery_renewal_args(44)) == hex("0000002d31babe020384002c0100"));
+  CHECK(encode_frame(0x1201, 0x0B0F, tunnel_request(0x2D, 0x31, discovery_renewal_args(44))) ==
         hex("00ffff7e0712010b0f0000002d31babe020384002c0100be967e08"));
 
   Frame f;
@@ -62,19 +62,19 @@ static void test_codec() {
   CHECK(!decode_frame(std::string("\x12\x01\x01", 3), f));
 }
 
-static void test_lease() {
+static void test_discovery_window() {
   TunnelReply r;
-  Lease l;
+  DiscoveryWindow l;
   // Running, 416 s left; counts A/B/C 44/40/44.
   CHECK(parse_tunnel_reply(hex("000e002ffd0101a0002c0028002c00"), r));
   CHECK(r.sub == 0x2F && r.seq == 0xFD);
-  CHECK(parse_lease(r, l) && l.running && l.remaining_s == 416 && l.node_count == 44);
+  CHECK(parse_discovery_window(r, l) && l.running && l.remaining_s == 416 && l.node_count == 44);
   // Lapsed: state 0, count A drops to 0, count C still 44.
   CHECK(parse_tunnel_reply(hex("000e002f0000000000000028002c00"), r));
-  CHECK(parse_lease(r, l) && !l.running && l.remaining_s == 0 && l.node_count == 44);
-  // Not a lease reply, and a truncated one.
-  CHECK(parse_tunnel_reply(hex("000d0041fc"), r) && !parse_lease(r, l));
-  CHECK(parse_tunnel_reply(hex("000e002ffd0101a0002c"), r) && !parse_lease(r, l));
+  CHECK(parse_discovery_window(r, l) && !l.running && l.remaining_s == 0 && l.node_count == 44);
+  // Not a discovery reply, and a truncated one.
+  CHECK(parse_tunnel_reply(hex("000d0041fc"), r) && !parse_discovery_window(r, l));
+  CHECK(parse_tunnel_reply(hex("000e002ffd0101a0002c"), r) && !parse_discovery_window(r, l));
   CHECK(!parse_tunnel_reply(hex("000e00"), r));
 }
 
@@ -115,51 +115,51 @@ static void test_poll_cursor() {
   CHECK(end.next() == 0x0001);
 }
 
-static void test_lease_keeper() {
-  // A daemon that restarts mid-lease checks first; it never renews blind.
-  LeaseKeeper k;
-  CHECK(k.due(0).kind == LeaseAction::check);
+static void test_window_keeper() {
+  // A daemon that restarts mid-window checks first; it never renews blind.
+  WindowKeeper k;
+  CHECK(k.due(0).kind == WindowAction::check);
   CHECK(!k.ever_read());
-  k.on_lease({true, 416, 44}, 0);
+  k.on_window({true, 416, 44}, 0);
   CHECK(k.ever_read() && k.last().remaining_s == 416);
-  CHECK(k.due(1).kind == LeaseAction::none);
-  CHECK(k.due(19999).kind == LeaseAction::none);
-  CHECK(k.due(20000).kind == LeaseAction::check);
+  CHECK(k.due(1).kind == WindowAction::none);
+  CHECK(k.due(19999).kind == WindowAction::none);
+  CHECK(k.due(20000).kind == WindowAction::check);
 
   // Lapsed: renew with the node count it reported, at most once a second,
-  // until a reading shows time on the lease.
+  // until a reading shows time on the discovery window.
   const uint32_t t = 440000;
-  k.on_lease({false, 0, 44}, t);
-  LeaseAction a = k.due(t);
-  CHECK(a.kind == LeaseAction::renew && a.node_count == 44);
-  CHECK(k.due(t + 500).kind == LeaseAction::none);
-  CHECK(k.due(t + 1000).kind == LeaseAction::renew);
+  k.on_window({false, 0, 44}, t);
+  WindowAction a = k.due(t);
+  CHECK(a.kind == WindowAction::renew && a.node_count == 44);
+  CHECK(k.due(t + 500).kind == WindowAction::none);
+  CHECK(k.due(t + 1000).kind == WindowAction::renew);
   CHECK(k.renewals() == 2);
-  k.on_lease({true, 900, 44}, t + 1100);
-  CHECK(k.due(t + 2100).kind == LeaseAction::none);
-  CHECK(k.due(t + 1100 + 20000).kind == LeaseAction::check);
+  k.on_window({true, 900, 44}, t + 1100);
+  CHECK(k.due(t + 2100).kind == WindowAction::none);
+  CHECK(k.due(t + 1100 + 20000).kind == WindowAction::check);
 
   // Running but at 0 renews too, and a changed node count is carried.
-  k.on_lease({true, 0, 45}, 600000);
+  k.on_window({true, 0, 45}, 600000);
   a = k.due(600000);
-  CHECK(a.kind == LeaseAction::renew && a.node_count == 45);
+  CHECK(a.kind == WindowAction::renew && a.node_count == 45);
 
-  // A lease about to run out is checked again just after it should, not a
-  // whole period later: the CCA's renewal came 2 s after the lease read 0.
-  LeaseKeeper soon;
-  CHECK(soon.due(0).kind == LeaseAction::check);
-  soon.on_lease({true, 12, 44}, 0);
-  CHECK(soon.due(12000).kind == LeaseAction::none);
-  CHECK(soon.due(12500).kind == LeaseAction::check);
-  soon.on_lease({false, 0, 44}, 12500);
-  CHECK(soon.due(12500).kind == LeaseAction::renew);
+  // A discovery window about to run out is checked again just after it should, not a
+  // whole period later: the CCA's renewal came 2 s after the discovery read 0.
+  WindowKeeper soon;
+  CHECK(soon.due(0).kind == WindowAction::check);
+  soon.on_window({true, 12, 44}, 0);
+  CHECK(soon.due(12000).kind == WindowAction::none);
+  CHECK(soon.due(12500).kind == WindowAction::check);
+  soon.on_window({false, 0, 44}, 12500);
+  CHECK(soon.due(12500).kind == WindowAction::renew);
 
   // No reply is no reading: it never causes a renewal.
-  LeaseKeeper q;
-  CHECK(q.due(0).kind == LeaseAction::check);
+  WindowKeeper q;
+  CHECK(q.due(0).kind == WindowAction::check);
   q.on_no_reply(0);
-  CHECK(q.due(500).kind == LeaseAction::none);
-  CHECK(q.due(20000).kind == LeaseAction::check);
+  CHECK(q.due(500).kind == WindowAction::none);
+  CHECK(q.due(20000).kind == WindowAction::check);
   CHECK(q.renewals() == 0);
 }
 
@@ -167,16 +167,17 @@ static void test_allow_list() {
   // What the CCA sends in steady state, in the shapes it sends them.
   CHECK(classify_request(CMD_POLL, poll_payload(0x6FC4)) == Allow::yes);
   CHECK(classify_request(CMD_POLL, poll_payload(0x6FC4, true)) == Allow::yes);
-  CHECK(classify_request(CMD_TUNNEL, tunnel_request(SUB_LEASE_CHECK, 7, {})) == Allow::yes);
-  CHECK(classify_request(CMD_TUNNEL, tunnel_request(SUB_LEASE_RENEW, 0x31, lease_renewal_args(44))) == Allow::yes);
+  CHECK(classify_request(CMD_TUNNEL, tunnel_request(SUB_DISCOVERY_STATUS, 7, {})) == Allow::yes);
+  CHECK(classify_request(CMD_TUNNEL, tunnel_request(SUB_DISCOVERY_START, 0x31, discovery_renewal_args(44))) ==
+        Allow::yes);
   CHECK(classify_request(CMD_TUNNEL, tunnel_request(0x26, 0x2C, {0x00, 0x0E})) == Allow::yes);
   CHECK(classify_request(CMD_TUNNEL, tunnel_request(0x06, 0x05, hex("001c5e303056657273696f6e0d"))) == Allow::yes);
 
   // Near misses are not the same thing: a renewal for 901 s, an ASCII
   // command that isn't a ^00 read, a poll of the wrong length.
-  Bytes odd = lease_renewal_args(44);
+  Bytes odd = discovery_renewal_args(44);
   odd[4] = 0x85;
-  CHECK(classify_request(CMD_TUNNEL, tunnel_request(SUB_LEASE_RENEW, 1, odd)) == Allow::bench_only);
+  CHECK(classify_request(CMD_TUNNEL, tunnel_request(SUB_DISCOVERY_START, 1, odd)) == Allow::bench_only);
   CHECK(classify_request(CMD_TUNNEL, tunnel_request(0x06, 1, hex("001c5e3030536574"))) == Allow::bench_only);
   CHECK(classify_request(CMD_TUNNEL, tunnel_request(0x06, 1, hex("001c"))) == Allow::bench_only);
   CHECK(classify_request(CMD_POLL, hex("00016fc40400")) == Allow::bench_only);
@@ -216,9 +217,8 @@ static void test_more_allow() {
   CHECK(classify_request(CMD_TUNNEL, tunnel_request(0x22, 1, {0x00, 0x05})) == Allow::bench_only);
   CHECK(classify_request(CMD_TUNNEL, tunnel_request(0x22, 1, {0x00, 0x01, 0x01})) == Allow::never);
   CHECK(classify_request(CMD_TUNNEL, tunnel_request(0x22, 1, {0x00, 0x00, 0x00})) == Allow::never);
-  // Sub 0x2B clears the TAP's run lease (the gateway firmware's lease
-  // handler: 2B clear, 2D renew, 2E check), which would idle every
-  // optimizer. Never, bench or not, with or without the lease key.
+  // Sub 0x2B is the gateway firmware's Stop Discovery (2D starts it, 2E reads
+  // it). Never, bench or not, with or without the renewal's BA BE.
   for (const Bytes &args : {Bytes{}, Bytes{0xBA, 0xBE}, hex("babe02038400300100")})
     CHECK(classify_request(CMD_TUNNEL, tunnel_request(0x2B, 1, args)) == Allow::never &&
           !may_send(CMD_TUNNEL, tunnel_request(0x2B, 1, args), true, true, true));
@@ -260,52 +260,53 @@ static void test_more_allow() {
 }
 
 static void test_next_request() {
-  LeaseKeeper lease;
+  WindowKeeper window;
   PollCursor cursor(0x6FC4);
   uint8_t seq = 0xFD;
-  // The first thing a master sends is a lease check, with the next seq.
-  Request r = next_request(lease, cursor, seq, 0);
-  CHECK(r.cmd == CMD_TUNNEL && r.payload == tunnel_request(SUB_LEASE_CHECK, 0xFE, {}));
+  // The first thing a master sends is a discovery check, with the next seq.
+  Request r = next_request(window, cursor, seq, 0);
+  CHECK(r.cmd == CMD_TUNNEL && r.payload == tunnel_request(SUB_DISCOVERY_STATUS, 0xFE, {}));
   // Then polls, with the cursor, until the next check is due.
-  r = next_request(lease, cursor, seq, 10);
+  r = next_request(window, cursor, seq, 10);
   CHECK(r.cmd == CMD_POLL && r.payload == poll_payload(0x6FC4));
   cursor.on_timeout();
-  r = next_request(lease, cursor, seq, 20);
+  r = next_request(window, cursor, seq, 20);
   CHECK(r.payload == poll_payload(0x6FC4, true));
   // A lapsed reading: the renewal goes out next. Seq skips FF and 00, as the
   // CCA's does.
-  lease.on_lease({false, 0, 44}, 30);
-  r = next_request(lease, cursor, seq, 40);
-  CHECK(r.cmd == CMD_TUNNEL && r.payload == tunnel_request(SUB_LEASE_RENEW, 0x01, lease_renewal_args(44)));
+  window.on_window({false, 0, 44}, 30);
+  r = next_request(window, cursor, seq, 40);
+  CHECK(r.cmd == CMD_TUNNEL && r.payload == tunnel_request(SUB_DISCOVERY_START, 0x01, discovery_renewal_args(44)));
   CHECK(next_seq(0xFE) == 0x01 && next_seq(0x01) == 0x02);
 }
 
 // Fable review fixes.
 static void test_review_fixes() {
   // A zero node count is never renewed, and the allow-list refuses it.
-  LeaseKeeper zero;
+  WindowKeeper zero;
   zero.due(0);
-  zero.on_lease({false, 0, 0}, 0);
-  CHECK(zero.due(0).kind != LeaseAction::renew);
-  CHECK(classify_request(CMD_TUNNEL, tunnel_request(SUB_LEASE_RENEW, 1, lease_renewal_args(0))) == Allow::bench_only);
+  zero.on_window({false, 0, 0}, 0);
+  CHECK(zero.due(0).kind != WindowAction::renew);
+  CHECK(classify_request(CMD_TUNNEL, tunnel_request(SUB_DISCOVERY_START, 1, discovery_renewal_args(0))) ==
+        Allow::bench_only);
 
   // "Not running" with time left is not a reason to renew: only 0 s is.
-  LeaseKeeper odd;
+  WindowKeeper odd;
   odd.due(0);
-  odd.on_lease({false, 300, 44}, 0);
-  CHECK(odd.due(0).kind != LeaseAction::renew);
-  CHECK(odd.due(5000).kind != LeaseAction::renew);
+  odd.on_window({false, 300, 44}, 0);
+  CHECK(odd.due(0).kind != WindowAction::renew);
+  CHECK(odd.due(5000).kind != WindowAction::renew);
 
   // Renewals the TAP doesn't take stop after 3, flagged, until a reading
-  // shows time on the lease again.
-  LeaseKeeper stubborn;
+  // shows time on the discovery window again.
+  WindowKeeper stubborn;
   stubborn.due(0);
   uint32_t t = 0;
   int renewals = 0;
   uint32_t last = 0;
   for (int i = 0; i < 10; i++, t += 1000) {
-    stubborn.on_lease({false, 0, 44}, t);
-    if (stubborn.due(t).kind == LeaseAction::renew) {
+    stubborn.on_window({false, 0, 44}, t);
+    if (stubborn.due(t).kind == WindowAction::renew) {
       renewals++;
       last = t;
     }
@@ -315,33 +316,33 @@ static void test_review_fixes() {
   // so a TAP that refused while browning out is renewed once it is back. It
   // used to stop until the process restarted.
   for (int i = 0; i < 10; i++, t += 5000) {
-    stubborn.on_lease({false, 0, 44}, t);
-    LeaseAction a = stubborn.due(t);
-    if (a.kind == LeaseAction::renew) {
+    stubborn.on_window({false, 0, 44}, t);
+    WindowAction a = stubborn.due(t);
+    if (a.kind == WindowAction::renew) {
       renewals++;
-      CHECK(t - last >= LeaseKeeper::RENEW_BACKOFF_MS);
+      CHECK(t - last >= WindowKeeper::RENEW_BACKOFF_MS);
       last = t;
     }
   }
   CHECK(renewals == 4 && stubborn.stuck());
-  stubborn.on_lease({true, 900, 44}, t);
+  stubborn.on_window({true, 900, 44}, t);
   CHECK(!stubborn.stuck());
-  stubborn.on_lease({false, 0, 44}, t + 900000);
-  CHECK(stubborn.due(t + 900000).kind == LeaseAction::renew);
+  stubborn.on_window({false, 0, 44}, t + 900000);
+  CHECK(stubborn.due(t + 900000).kind == WindowAction::renew);
 
   // A check that gets no reply is retried a second later, up to 3 times.
-  LeaseKeeper lost;
-  CHECK(lost.due(0).kind == LeaseAction::check);
+  WindowKeeper lost;
+  CHECK(lost.due(0).kind == WindowAction::check);
   lost.on_no_reply(0);
-  CHECK(lost.due(999).kind == LeaseAction::none);
-  CHECK(lost.due(1000).kind == LeaseAction::check);
+  CHECK(lost.due(999).kind == WindowAction::none);
+  CHECK(lost.due(1000).kind == WindowAction::check);
   lost.on_no_reply(1000);
-  CHECK(lost.due(2000).kind == LeaseAction::check);
+  CHECK(lost.due(2000).kind == WindowAction::check);
   lost.on_no_reply(2000);
-  CHECK(lost.due(3000).kind == LeaseAction::check);
+  CHECK(lost.due(3000).kind == WindowAction::check);
   lost.on_no_reply(3000);
-  CHECK(lost.due(4000).kind == LeaseAction::none);  // back to the 20 s period
-  CHECK(lost.due(23000).kind == LeaseAction::check);
+  CHECK(lost.due(4000).kind == WindowAction::none);  // back to the 20 s period
+  CHECK(lost.due(23000).kind == WindowAction::check);
 
   // Poll replies carry the cursor: its low byte always, all of it in the
   // longer header (status bits 0-4 clear). From the capture: cursor 6FD6.
@@ -648,11 +649,11 @@ static void test_learner() {
   CHECK(!l.on_frame(reply));
   Frame odd = cca41(6, 0x0028, 0x03);
   CHECK(!l.on_frame(odd));
-  Frame lease;
-  lease.dest = 0x1201;
-  lease.cmd = CMD_TUNNEL;
-  lease.payload = tunnel_request(SUB_LEASE_CHECK, 7, {});
-  CHECK(!l.on_frame(lease));
+  Frame check;
+  check.dest = 0x1201;
+  check.cmd = CMD_TUNNEL;
+  check.payload = tunnel_request(SUB_DISCOVERY_STATUS, 7, {});
+  CHECK(!l.on_frame(check));
   CHECK(l.entries().size() == 3);
   CHECK(l.entries()[0].stream == 0x01 && l.entries()[0].tuid == 0x0001 && l.entries()[0].args == args41(0x0001, 0x01));
   // New content for a target replaces the old, in place.
@@ -1063,17 +1064,17 @@ static void test_next_request_housekeeping() {
   Learned41 l;
   l.on_frame(cca41(1, 0x0001, 0x01));
   Housekeeping hk(l.entries(), 0, false);
-  LeaseKeeper lease;
+  WindowKeeper window;
   PollCursor cursor(0);
   uint8_t seq = 0;
-  // The lease comes first, then housekeeping, then polls.
-  CHECK(next_request(lease, cursor, seq, 0, &hk).payload == tunnel_request(SUB_LEASE_CHECK, 1, {}));
-  CHECK(next_request(lease, cursor, seq, 0, &hk).cmd == CMD_SESSION);
-  CHECK(next_request(lease, cursor, seq, 0, &hk).cmd == CMD_POLL);
-  Request r = next_request(lease, cursor, seq, 6000, &hk);
+  // The discovery window comes first, then housekeeping, then polls.
+  CHECK(next_request(window, cursor, seq, 0, &hk).payload == tunnel_request(SUB_DISCOVERY_STATUS, 1, {}));
+  CHECK(next_request(window, cursor, seq, 0, &hk).cmd == CMD_SESSION);
+  CHECK(next_request(window, cursor, seq, 0, &hk).cmd == CMD_POLL);
+  Request r = next_request(window, cursor, seq, 6000, &hk);
   CHECK(r.cmd == CMD_TUNNEL && r.payload == tunnel_request(SUB_HOUSEKEEPING, 2, args41(0x0001, 0x01)));
   // Without it, as before.
-  CHECK(next_request(lease, cursor, seq, 7000).cmd == CMD_POLL);
+  CHECK(next_request(window, cursor, seq, 7000).cmd == CMD_POLL);
 }
 
 // The PV switch: 0x0B00 00 off, 01 on (the CCA's CUpdaterPvOff; the roof's
@@ -1180,15 +1181,15 @@ static void test_pv_switch() {
   mute.set_off(true, 10);
   CHECK(!mute.silent() && mute.due(10).payload == Bytes{PV_OFF});
 
-  // A pending switch goes ahead of the lease.
-  LeaseKeeper lease;
+  // A pending switch goes ahead of the discovery window.
+  WindowKeeper window;
   PollCursor cursor(0);
   PvSwitch now(false, true, 0);
   now.set_off(true, 0);
-  r = next_request(lease, cursor, seq, 0, nullptr, nullptr, &now);
+  r = next_request(window, cursor, seq, 0, nullptr, nullptr, &now);
   CHECK(r.cmd == CMD_SESSION && r.payload == Bytes{PV_OFF});
-  r = next_request(lease, cursor, seq, 0, nullptr, nullptr, &now);
-  CHECK(r.payload == tunnel_request(SUB_LEASE_CHECK, seq, {}));
+  r = next_request(window, cursor, seq, 0, nullptr, nullptr, &now);
+  CHECK(r.payload == tunnel_request(SUB_DISCOVERY_STATUS, seq, {}));
 }
 
 int main() {
@@ -1199,9 +1200,9 @@ int main() {
   test_startup_allow();
   test_review_fixes();
   test_codec();
-  test_lease();
+  test_discovery_window();
   test_poll_cursor();
-  test_lease_keeper();
+  test_window_keeper();
   test_allow_list();
   test_more_allow();
   test_next_request();

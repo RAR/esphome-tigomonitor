@@ -60,7 +60,7 @@ start() {  # start DIR: the daemon's pid in $pid
 }
 
 # --- run 1: two standbys, a 2 s one (the primary) and a 6 s one ---
-python3 linux/tools/mock_tap.py "$out/link-a" --extra-link "$out/link-b" --lease 600 --nodes 44 --stats "$out/tap.json" &
+python3 linux/tools/mock_tap.py "$out/link-a" --extra-link "$out/link-b" --window 600 --nodes 44 --stats "$out/tap.json" &
 tap=$!
 sleep 0.5
 settings "$out/a" link-a 18110 2
@@ -85,7 +85,7 @@ expect "MQTT: none from the one standing by" "$(some "$(panel_states b 7)")" non
 wait_owner a 5
 expect "MQTT: Home Assistant reads the active one" "$(panel_owner)" a
 
-# The primary stops: the 6 s one takes over within its time, and the lease
+# The primary stops: the 6 s one takes over within its time, and the discovery window
 # and polls are answered.
 kill $a; wait $a 2>/dev/null || true
 t0=$(date +%s)
@@ -93,7 +93,7 @@ wait_state 18111 active 12
 expect "the standby takes over when the master stops" "$(standby 18111)" "active 1 0"
 expect "within its takeover time and a bit" "$([ $(( $(date +%s) - t0 )) -le 9 ] && echo yes || echo no)" yes
 sleep 3
-expect "its polls are answered" "$(api 18111 /api/master | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["polls"] > 0, d["fault"], d["lease_read"])')" "True none True"
+expect "its polls are answered" "$(api 18111 /api/master | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["polls"] > 0, d["fault"], d["discovery_read"])')" "True none True"
 wait_owner b 12
 expect "MQTT: Home Assistant follows the takeover" "$(panel_owner)" b
 expect "MQTT: and the new master's panels" "$(some "$(panel_states b 7)")" some
@@ -157,7 +157,7 @@ kill $tap; wait $tap 2>/dev/null || true
 # standby yields to it, stands by while it runs, and takes over once it
 # goes quiet.
 python3 linux/tools/mock_tap.py "$out/link-c" --foreign-after 8 --foreign-every 0.2 --foreign-until 16 \
-  --lease 600 --nodes 44 --stats "$out/tap.json" &
+  --window 600 --nodes 44 --stats "$out/tap.json" &
 tap=$!
 sleep 0.5
 settings "$out/c" link-c 18112 2
@@ -181,7 +181,7 @@ kill $tap; wait $tap 2>/dev/null || true
 # reaches the TAP; B hears it, saves it, and refuses to change it; when A
 # dies, B takes over and its first word to the TAP is 00, with no 01 after.
 mkdir -p "$out/pa" "$out/pb"
-python3 linux/tools/mock_tap.py "$out/link-pa" --extra-link "$out/link-pb" --lease 600 --nodes 44 --stats "$out/tap3.json" &
+python3 linux/tools/mock_tap.py "$out/link-pa" --extra-link "$out/link-pb" --window 600 --nodes 44 --stats "$out/tap3.json" &
 tap=$!
 sleep 0.5
 for d in pa:2:18113 pb:6:18114; do
@@ -231,7 +231,7 @@ kill $tap; wait $tap 2>/dev/null || true
 # switch is announced, OFF reaches the TAP and the state follows. A standby
 # standing by ignores it.
 mkdir -p "$out/qa" "$out/qb"
-python3 linux/tools/mock_tap.py "$out/link-qa" --extra-link "$out/link-qb" --lease 600 --nodes 44 --stats "$out/tap4.json" &
+python3 linux/tools/mock_tap.py "$out/link-qa" --extra-link "$out/link-qb" --window 600 --nodes 44 --stats "$out/tap4.json" &
 tap=$!
 sleep 0.5
 qsettings() {  # qsettings NAME TAKEOVER PORT PV_SWITCH
@@ -274,7 +274,7 @@ kill $tap; wait $tap 2>/dev/null || true
 # install: no pv.json), so it hears no 0x0B00 before A dies: the next is an
 # hour away. Taking over, B must not send its own default, 01.
 mkdir -p "$out/ra" "$out/rb"
-python3 linux/tools/mock_tap.py "$out/link-ra" --extra-link "$out/link-rb" --lease 600 --nodes 44 --stats "$out/tap5.json" &
+python3 linux/tools/mock_tap.py "$out/link-ra" --extra-link "$out/link-rb" --window 600 --nodes 44 --stats "$out/tap5.json" &
 tap=$!
 sleep 0.5
 for d in ra:2:18117 rb:6:18118; do

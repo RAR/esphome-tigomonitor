@@ -60,7 +60,7 @@ CONF_HOUSEKEEPING = "housekeeping"
 CONF_QUERIES = "queries"
 CONF_OPTIMIZER_WRITES = "optimizer_writes"
 CONF_PROBLEM = "problem"
-CONF_LEASE_REMAINING = "lease_remaining"
+CONF_DISCOVERY_REMAINING = "discovery_remaining"
 CONF_TAKEOVERS = "takeovers"
 CONF_LONGEST_PAUSE = "longest_pause"
 CONF_PV_OUTPUT = "pv_output"
@@ -116,7 +116,7 @@ CONFIG_SCHEMA = cv.All(
                 icon="mdi:transit-connection-variant"
             ),
             cv.Optional(CONF_PROBLEM): binary_sensor.binary_sensor_schema(device_class=DEVICE_CLASS_PROBLEM),
-            cv.Optional(CONF_LEASE_REMAINING): sensor.sensor_schema(
+            cv.Optional(CONF_DISCOVERY_REMAINING): sensor.sensor_schema(
                 unit_of_measurement=UNIT_SECOND,
                 device_class=DEVICE_CLASS_DURATION,
                 state_class=STATE_CLASS_MEASUREMENT,
@@ -204,8 +204,8 @@ async def to_code(config):
         cg.add(var.set_status_sensor(await text_sensor.new_text_sensor(config[CONF_STATUS])))
     if CONF_PROBLEM in config:
         cg.add(var.set_problem_sensor(await binary_sensor.new_binary_sensor(config[CONF_PROBLEM])))
-    if CONF_LEASE_REMAINING in config:
-        cg.add(var.set_lease_sensor(await sensor.new_sensor(config[CONF_LEASE_REMAINING])))
+    if CONF_DISCOVERY_REMAINING in config:
+        cg.add(var.set_discovery_sensor(await sensor.new_sensor(config[CONF_DISCOVERY_REMAINING])))
     if CONF_TAKEOVERS in config:
         cg.add(var.set_takeovers_sensor(await sensor.new_sensor(config[CONF_TAKEOVERS])))
     if CONF_LONGEST_PAUSE in config:

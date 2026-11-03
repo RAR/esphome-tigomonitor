@@ -1354,9 +1354,9 @@
       </div>
       <div class="hist-stat-grid" id="diag-master">
         <div class="hist-stat-card">
-          <div class="hist-stat-label">Run lease</div>
-          <div class="hist-stat-val" id="diag-lease">—<span class="hist-stat-unit">s</span></div>
-          <div class="hist-stat-sub" id="diag-lease-sub">—</div>
+          <div class="hist-stat-label">Discovery window</div>
+          <div class="hist-stat-val" id="diag-discovery">—<span class="hist-stat-unit">s</span></div>
+          <div class="hist-stat-sub" id="diag-discovery-sub">—</div>
         </div>
         <div class="hist-stat-card">
           <div class="hist-stat-label">Renewals</div>
@@ -1518,7 +1518,7 @@
         <div class="topbar-meta" id="logs-meta">—</div>
       </div>
       <div class="table-toolbar">
-        <input class="input" id="logs-search" placeholder="Filter, e.g. lease or bus:">
+        <input class="input" id="logs-search" placeholder="Filter, e.g. discovery or bus:">
         <select class="input compact" id="logs-level">
           <option value="7">Everything</option>
           <option value="6" selected>Info and above</option>
@@ -3311,7 +3311,7 @@
     if (!m || (m.role !== 'master' && m.role !== 'standby')) return;
     const faults = { none: '', no_port: 'cannot open the port', no_reply: 'the TAP is not answering',
                      second_master: 'another master is on the bus: stopped transmitting', refused: 'refused a request',
-                     lease_refused: 'the TAP is not taking lease renewals',
+                     discovery_refused: 'the TAP is not taking discovery renewals',
                      discovery_failed: 're-addressing the gateway failed',
                      extra_tap: 'another TAP is on the bus: only one is supported, so its panels are not monitored' };
     const phases = { probing: 'looking for the gateway…', discovering: 're-addressing the gateway…' };
@@ -3324,12 +3324,12 @@
       : sb.state === 'standing_by' ? `standing by: ${heard}`
       : sb.state === 'taking_over' ? `taking over: ${heard}`
       : phases[m.phase] || (m.active ? 'running the bus' : 'not running')) + takeovers;
-    document.getElementById('diag-lease').innerHTML = m.lease_read
-      ? `${m.lease.remaining_s}<span class="hist-stat-unit">s</span>` : '—<span class="hist-stat-unit">s</span>';
-    // Standing by, the lease and counts are from this one's last turn on the bus.
-    document.getElementById('diag-lease-sub').textContent = standingBy ? 'another master has the bus'
-      : !m.lease_read ? 'not read yet'
-      : `${m.lease.running ? 'running' : 'lapsed'} · ${m.lease.node_count} nodes`;
+    document.getElementById('diag-discovery').innerHTML = m.discovery_read
+      ? `${m.discovery.remaining_s}<span class="hist-stat-unit">s</span>` : '—<span class="hist-stat-unit">s</span>';
+    // Standing by, the discovery window and counts are from this one's last turn on the bus.
+    document.getElementById('diag-discovery-sub').textContent = standingBy ? 'another master has the bus'
+      : !m.discovery_read ? 'not read yet'
+      : `${m.discovery.running ? 'open' : 'closed'} · ${m.discovery.node_count} nodes`;
     document.getElementById('diag-renewals').textContent = m.renewals;
     // A rate needs two readings; the first shows the total.
     const now = Date.now();
@@ -3359,7 +3359,7 @@
       const at = new Date(t.last_lost_unix * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
       const r = t.recent_lost_unix;
       const every = r.length >= 3 ? Math.round((r[r.length - 1] - r[0]) / (r.length - 1)) : null;
-      lostSub = `last ${at} · back without its lease ${t.back_without_lease}×` +
+      lostSub = `last ${at} · back with discovery closed ${t.back_without_discovery}×` +
                 (every !== null && every < 600 && Date.now() / 1000 - t.last_lost_unix < 2 * every
                  ? ` · every ~${every} s: is its power being cut?` : '');
     }
