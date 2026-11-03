@@ -17,6 +17,7 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include <set>
 #include <utility>
 #include <vector>
 
@@ -97,6 +98,20 @@ class Monitor {
 
   std::vector<Panel> panels() const;
   std::vector<Node> nodes() const;
+  // A new optimizer: a barcode first heard (in a Frame 27) more than a day
+  // after this monitor first heard any, so a fresh install's own panels
+  // aren't news. When each was first heard, by barcode (unix s).
+  std::map<std::string, int64_t> first_heard() const;
+  // Those heard in the last NEW_FOR_S that no string holds yet: the ones to
+  // place in the layout. A replacement shows up here.
+  int new_optimizers(int64_t now_unix) const;
+  static const int64_t NEW_AFTER_S = 86400;
+  static const int64_t NEW_FOR_S = 7 * 86400;
+  // Added to the new optimizer log line (main.cpp's new_optimizer_note).
+  void set_new_optimizer_note(std::string note) {
+    std::lock_guard<std::mutex> lock(mu_);
+    new_note_ = std::move(note);
+  }
   BusStats stats() const;
   double energy_kwh() const;    // lifetime, panel output
   double energy_in_kwh() const;  // lifetime, panel input
@@ -184,6 +199,13 @@ class Monitor {
   Clock::time_point last_tick_{};
   Clock::time_point last_save_{};
   bool dirty_ = false;
+  // Every barcode this monitor has heard, since seen_since_; and when each
+  // one heard after the first day was first heard.
+  std::set<std::string> seen_barcodes_;
+  int64_t seen_since_ = 0;
+  std::map<std::string, int64_t> first_heard_;
+  std::string new_note_;
+  void note_barcode_(const std::string &barcode, const std::string &addr);
 
   // state.json is written on its own thread, outside mu_: an fsync on a slow
   // SD card took 0.9 s, and in the master role feed() and tick() run on the

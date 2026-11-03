@@ -28,9 +28,9 @@ summary="$(grep 'stopping:' "$out/daemon.log")"
 expect "readings" "$(echo "$summary" | sed -E 's/.* ([0-9]+) readings.*/\1/')" $((panels * rounds))
 expect "bad checksums" "$(echo "$summary" | sed -E 's/.* ([0-9]+) bad checksums.*/\1/')" 1
 expect "panels" "$(echo "$summary" | sed -E 's/.* ([0-9]+) panels.*/\1/')" $panels
-# 12 metrics and the barcode per panel; 7 system sensors and night mode.
+# 12 metrics and the barcode per panel; 8 system sensors and night mode.
 expect "panel discovery configs" "$(grep -c '^homeassistant/sensor/tigo_04C05B' "$out/mqtt.txt")" $((panels * 13))
-expect "system discovery configs" "$(grep '^homeassistant/sensor/tigomonitor_test_' "$out/mqtt.txt" | grep -vc _bus_master)" 7
+expect "system discovery configs" "$(grep '^homeassistant/sensor/tigomonitor_test_' "$out/mqtt.txt" | grep -vc _bus_master)" 8
 # Listening, the bus master's 8 entities are cleared, in case it ran the bus before.
 expect "bus master configs cleared" "$(grep -c '^homeassistant/[a-z_]*/tigomonitor_test_bus_master_[a-z_]*/config (null)$' "$out/mqtt.txt")" 8
 # And its PV output switch, in case it was announced (mqtt.pv_switch).
@@ -39,7 +39,7 @@ expect "no bus master state" "$(grep -c '^tigomonitor/test/master/' "$out/mqtt.t
 expect "night mode sensor" "$(grep -c '^homeassistant/binary_sensor/tigomonitor_test_night_mode' "$out/mqtt.txt")" 1
 # A standby publishes no system state while it stands by: its entities must
 # go unavailable rather than freeze on their last values.
-expect "system entities expire" "$(grep -E '^homeassistant/(sensor|binary_sensor)/tigomonitor_test_' "$out/mqtt.txt" | grep -v _bus_master | grep -c '"expire_after":300')" 8
+expect "system entities expire" "$(grep -E '^homeassistant/(sensor|binary_sensor)/tigomonitor_test_' "$out/mqtt.txt" | grep -v _bus_master | grep -c '"expire_after":300')" 9
 # One publish per interval plus a final one at the end of the replay, so at
 # least one message per panel; how many depends on timing.
 states="$(grep -c '^tigomonitor/test/panel/' "$out/mqtt.txt")"
@@ -65,7 +65,7 @@ kill $sub
 mosquitto_sub -p 18830 -v --retained-only -W 1 -t 'homeassistant/#' > "$out/retained-off.txt" 2>/dev/null || true
 pkill mosquitto || true
 cleared="$(grep -c '^homeassistant/[a-z_]*/tigo[a-zA-Z0-9_]*/config (null)$' "$out/mqtt-off.txt" || true)"
-expect "discovery off: configs cleared" "$cleared" $((panels * 13 + 7 + 1 + 8 + 1))
+expect "discovery off: configs cleared" "$cleared" $((panels * 13 + 8 + 1 + 8 + 1))
 expect "discovery off: nothing left retained" "$(grep -c . "$out/retained-off.txt" || true)" 0
 expect "discovery off: no configs sent" "$(grep -c '^homeassistant/.*{' "$out/mqtt-off.txt" || true)" 0
 states="$(grep -c '^tigomonitor/test/panel/' "$out/mqtt-off.txt")"

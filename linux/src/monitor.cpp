@@ -175,6 +175,7 @@ void Monitor::on_frame27_(const std::string &hex) {
     if (res.renumbered) LOGW("address %s now belongs to barcode %s (gateway renumbered)", a.c_str(), l.c_str());
     if (res.table_changed) changed = true;
     if (Panel *p = find_panel_(a)) p->barcode = l;
+    note_barcode_(l, a);
   });
   if (!ok) {
     LOGW("Frame 27 too short for its header");
@@ -191,6 +192,35 @@ void Monitor::on_frame27_(const std::string &hex) {
 std::vector<Panel> Monitor::panels() const {
   std::lock_guard<std::mutex> lock(mu_);
   return panels_;
+}
+
+void Monitor::note_barcode_(const std::string &barcode, const std::string &addr) {
+  if (barcode.empty() || !seen_barcodes_.insert(barcode).second) return;
+  dirty_ = true;
+  int64_t now = static_cast<int64_t>(time(nullptr));
+  if (seen_since_ == 0) {
+    seen_since_ = now;
+    return;
+  }
+  if (now - seen_since_ < NEW_AFTER_S) return;
+  first_heard_[barcode] = now;
+  LOGW("new optimizer heard: %s at node %s; place it in the layout (Topology, Edit layout)%s", barcode.c_str(), addr.c_str(),
+       new_note_.c_str());
+}
+
+std::map<std::string, int64_t> Monitor::first_heard() const {
+  std::lock_guard<std::mutex> lock(mu_);
+  return first_heard_;
+}
+
+int Monitor::new_optimizers(int64_t now_unix) const {
+  std::lock_guard<std::mutex> lock(mu_);
+  int n = 0;
+  for (const auto &node : nodes_) {
+    auto it = first_heard_.find(node.long_address);
+    if (it != first_heard_.end() && now_unix - it->second < NEW_FOR_S && node.cca_string_label.empty()) n++;
+  }
+  return n;
 }
 
 std::vector<Node> Monitor::nodes() const {
@@ -590,8 +620,11 @@ bool Monitor::save_locked_() {
   for (const auto &kv : saved_peaks_) peaks[kv.first] = kv.second;  // not seen since start
   for (const auto &p : panels_)
     if (!p.barcode.empty()) peaks[p.barcode] = p.peak_power;
+  json first = json::object();
+  for (const auto &kv : first_heard_) first[kv.first] = kv.second;
   json j = {{"version", 1},     {"nodes", nodes},           {"energy_kwh", energy_kwh_}, {"energy_in_kwh", energy_in_kwh_}, {"today_in_kwh", today_in_kwh_}, {"peaks", peaks},
-            {"today", today_},  {"today_kwh", today_kwh_}, {"daily_kwh", history}};
+            {"today", today_},  {"today_kwh", today_kwh_}, {"daily_kwh", history},
+            {"seen_barcodes", seen_barcodes_}, {"seen_since", seen_since_}, {"first_heard", first}};
   {
     std::lock_guard<std::mutex> lock(write_mu_);
     pending_ = j.dump(1) + "\n";
@@ -641,6 +674,22 @@ bool Monitor::load() {
     n.cca_object_id = e.value("cca_object_id", "");
     n.cca_validated = e.value("cca_validated", false);
     nodes_.push_back(std::move(n));
+  }
+  // Before seen_barcodes was kept, the node table was all it had heard, and
+  // long enough ago that a barcode heard now is news.
+  seen_barcodes_.clear();
+  first_heard_.clear();
+  if (j.contains("seen_barcodes") && j["seen_barcodes"].is_array()) {
+    for (const auto &b : j["seen_barcodes"])
+      if (b.is_string()) seen_barcodes_.insert(b.get<std::string>());
+    seen_since_ = j.value("seen_since", static_cast<int64_t>(0));
+    const json first = j.value("first_heard", json::object());  // items() of a temporary would dangle
+    for (const auto &kv : first.items())
+      if (kv.value().is_number_integer()) first_heard_[kv.key()] = kv.value().get<int64_t>();
+  } else {
+    for (const auto &n : nodes_)
+      if (!n.long_address.empty()) seen_barcodes_.insert(n.long_address);
+    seen_since_ = seen_barcodes_.empty() ? 0 : 1;
   }
   LOGI("state: %zu nodes, %.3f kWh", nodes_.size(), energy_kwh_);
   return true;

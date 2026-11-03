@@ -82,6 +82,13 @@ static std::string hostname() {
   return h.substr(0, h.find('.'));
 }
 
+// Said with a new optimizer: running the bus without the CCA's optimizer
+// writes, it gets no #00w255, and a fresh one may then produce nothing.
+static std::string new_optimizer_note(const Settings &s) {
+  if (!runs_bus(s) || s.master_optimizer_writes) return "";
+  return "; master_optimizer_writes is off, so it gets no w255 and may produce nothing until it's on";
+}
+
 int main(int argc, char **argv) {
   std::string state_dir = "/var/lib/tigomonitor";
   std::string web_dir = "/usr/share/tigomonitor/web";
@@ -142,6 +149,7 @@ int main(int argc, char **argv) {
   monitor.set_stale_timeout_min(settings.stale_timeout_min);
   monitor.set_night_mode_timeout_min(settings.night_mode_timeout_min);
   monitor.set_reset_at_midnight(settings.reset_at_midnight);
+  monitor.set_new_optimizer_note(new_optimizer_note(settings));
 
   MqttPublisher mqtt(monitor, TIGOD_VERSION);
   mqtt.configure(settings);
@@ -442,6 +450,7 @@ int main(int argc, char **argv) {
         monitor.set_stale_timeout_min(settings.stale_timeout_min);
         monitor.set_night_mode_timeout_min(settings.night_mode_timeout_min);
         monitor.set_reset_at_midnight(settings.reset_at_midnight);
+        monitor.set_new_optimizer_note(new_optimizer_note(settings));
         mqtt.configure(settings);
         if (new_port && replay.empty()) {
           input_stop = true;

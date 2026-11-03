@@ -24,8 +24,13 @@ json layout_json(const Monitor &mon, const Topology &topo) {
     s.rating_w = it->second.panel_rating_w;
   });
 
-  auto panel = [](const layout::NodeView &n) {
-    return json{{"barcode", n.barcode}, {"addr", n.addr}, {"name", n.label}};
+  // first_heard_unix: when a new optimizer (Monitor::first_heard) was first
+  // heard; 0 for the panels the monitor started out with.
+  auto heard = mon.first_heard();
+  auto panel = [&heard](const layout::NodeView &n) {
+    auto it = heard.find(n.barcode);
+    return json{{"barcode", n.barcode}, {"addr", n.addr}, {"name", n.label},
+                {"first_heard_unix", it == heard.end() ? 0 : it->second}};
   };
   auto mppts_json = [&](const std::vector<layout::MpptSpec> &ms) {
     json arr = json::array();

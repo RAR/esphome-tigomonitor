@@ -941,8 +941,11 @@ void HttpServer::routes_() {
 
   svr.Get("/api/nodes", [this, &mon](const httplib::Request &, httplib::Response &res) {
     json nodes = json::array();
+    auto heard = mon.first_heard();
     for (const auto &n : mon.nodes()) {
+      auto fh = heard.find(n.long_address);
       nodes.push_back({{"addr", n.addr},
+                       {"first_heard_unix", fh == heard.end() ? 0 : fh->second},
                        {"long_address", n.long_address},
                        {"sensor_index", n.sensor_index},
                        {"checksum", n.checksum},
