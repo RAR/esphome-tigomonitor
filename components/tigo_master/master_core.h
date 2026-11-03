@@ -106,6 +106,9 @@ struct MasterStatus {
   uint32_t takeovers = 0;
   uint32_t yields = 0;  // times it gave the bus back to another master
   int64_t last_takeover_unix = 0;
+  // False after the owner's "let it close" (request_discovery): read, not
+  // renewed. Not saved: a restart or a new master renews again.
+  bool discovery_renewing = true;
   PvState pv;
   bool pv_confirmed = false;    // the TAP's last reply carried the byte
   bool pv_unconfirmed = false;  // it didn't, after PvSwitch::RETRIES
@@ -170,6 +173,10 @@ class MasterCore {
   // The owner's off or on, sent in the next tick. False while standing by:
   // only the master running the bus may change it.
   bool request_pv(bool off);
+  // The owner's discovery switch, for testing: false lets the window close
+  // (no renewals; status reads go on), true renews it again. False while
+  // standing by, like request_pv.
+  bool request_discovery(bool renew);
 
   bool open();
   // Sends at most one request and reads its reply, up to REPLY_TIMEOUT_MS.
@@ -224,6 +231,7 @@ class MasterCore {
   // hears the held state first.
   std::unique_ptr<esphome::tigo_monitor::master::PvSwitch> pv_;
   PvState pv_state_;       // under mu_
+  bool discovery_renewing_ = true;  // under mu_
   bool pv_changed_ = false;  // under mu_: request_pv's, for the next tick
   // Standing by: whether a 0x0B00 has been heard since it began. A takeover
   // without one leaves the switch silent (tigo_master.h's PvSwitch).

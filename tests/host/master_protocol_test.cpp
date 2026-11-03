@@ -115,6 +115,25 @@ static void test_poll_cursor() {
   CHECK(end.next() == 0x0001);
 }
 
+// The owner's "let it close", for testing: a closed window is still read
+// every period, never renewed, and nothing counts as refused; turned back on,
+// the next due() renews.
+static void test_window_keeper_not_renewing() {
+  WindowKeeper k;
+  k.set_renewing(false);
+  CHECK(!k.renewing());
+  CHECK(k.due(0).kind == WindowAction::check);
+  k.on_window({false, 0, 44}, 0);
+  for (uint32_t t = 1; t < 200000; t += 500) CHECK(k.due(t).kind != WindowAction::renew);
+  CHECK(k.renewals() == 0 && !k.stuck());
+  k.on_window({false, 0, 44}, 200000);
+  CHECK(k.due(200500).kind == WindowAction::none);
+  CHECK(k.due(220000).kind == WindowAction::check);
+  k.set_renewing(true);
+  WindowAction a = k.due(220001);
+  CHECK(a.kind == WindowAction::renew && a.node_count == 44);
+}
+
 static void test_window_keeper() {
   // A daemon that restarts mid-window checks first; it never renews blind.
   WindowKeeper k;
@@ -1203,6 +1222,7 @@ int main() {
   test_discovery_window();
   test_poll_cursor();
   test_window_keeper();
+  test_window_keeper_not_renewing();
   test_allow_list();
   test_more_allow();
   test_next_request();

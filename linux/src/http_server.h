@@ -59,6 +59,9 @@ struct HttpContext {
   // The optimizers' last !Info/!Mppt answers by short id, while this monitor
   // runs the bus with queries on.
   std::function<std::map<uint16_t, esphome::tigo_monitor::master::Queries::Setup>()> setups;
+  // The owner's discovery switch (renew or let it close): 200, or 409 with
+  // why, as request_pv.
+  std::function<int(bool renew, std::string &why)> request_discovery;
 };
 
 // tigomonitord --health-check PORT, the container's HEALTHCHECK: GETs

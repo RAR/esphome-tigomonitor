@@ -39,7 +39,7 @@ function master(role, pv = {}, standby = 'off') {
     housekeeping: { on: true, learned_41: 0, sent_41: 3, sent_session: 1, sent_broadcast: 2, sent_walk_pages: 4, walks_done: 2 },
     queries: { on: false, writes: false, sent_reads: 0, sent_writes: 0, answers: 0 },
     tap_version: '', tap: { lost: 0, last_lost_unix: 0, recent_lost_unix: [], back_without_discovery: 0 },
-    discovery_read: true, discovery: { running: true, remaining_s: 400, node_count: 44 }, renewals: 2,
+    discovery_read: true, discovery: { running: true, remaining_s: 400, node_count: 44 }, renewals: 2, discovery_renewing: true,
     polls: 1000, timeouts: 0, resyncs: 0, gap_ms: { max: 10, max_at_unix: 0, recent: 9 }, last_reply_unix: 0,
     pv: { on: true, source: 'setting', since: 0, confirmed: true, unconfirmed: false, last_sent: '01', last_reply: '01', ...pv },
     standby: { state: standby, takeover_s: 3, master_heard_ms_ago: standby === 'standing_by' ? 200 : -1, takeovers: 0, last_takeover_unix: 0, yields: 0 },
@@ -62,7 +62,7 @@ function settings() {
 // opts.role: 'master' | 'standby' | 'listen'. opts.standby: the standby state.
 // opts.pv: the PV fields. api.pvStatus: the POST's answer.
 async function open(opts = {}) {
-  const api = { master: master(opts.role || 'master', opts.pv, opts.standby), posts: [], settingsPosts: [], pvStatus: 200 };
+  const api = { master: master(opts.role || 'master', opts.pv, opts.standby), posts: [], settingsPosts: [], discoveryPosts: [], pvStatus: 200 };
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
   await ctx.route('**/api/**', async (route) => {
     const req = route.request();
@@ -76,6 +76,12 @@ async function open(opts = {}) {
       if (api.pvStatus !== 200) return json(api.pvStatus, { error: 'set a web password first' });
       api.master.pv = { ...api.master.pv, on: body.on, source: 'setting', since: 1762200000, confirmed: true };
       return json(200, { on: body.on });
+    }
+    if (path === '/api/master/discovery' && req.method() === 'POST') {
+      const body = JSON.parse(req.postData());
+      api.discoveryPosts.push(body);
+      api.master.discovery_renewing = body.renew;
+      return json(200, { renew: body.renew });
     }
     if (path === '/api/settings') {
       if (req.method() === 'POST') { api.settingsPosts.push(JSON.parse(req.postData())); return json(200, { saved: true }); }
@@ -224,4 +230,28 @@ test('in the first minute it is still checking, and with PV on it says nothing',
   await on.page.waitForTimeout(600);
   assert.equal((await on.page.textContent('#pv-still')).trim(), '');
   await on.ctx.close();
+});
+
+test('the discovery window can be left to close, and renewed again', async () => {
+  const { page, ctx, api, errors } = await open({ hash: '#busmaster' });
+  await page.waitForSelector('#disc-card', { state: 'visible' });
+  assert.equal(await page.textContent('#disc-state'), 'Renewed when it runs out');
+  assert.equal(await page.textContent('#disc-toggle'), 'Let it close');
+  await page.click('#disc-toggle');
+  await page.waitForFunction(() => document.getElementById('disc-toggle').textContent === 'Renew again');
+  assert.deepEqual(api.discoveryPosts, [{ renew: false }]);
+  assert.match(await page.textContent('#disc-state'), /^Left to close/);
+  assert.match(await page.textContent('#diag-discovery-sub'), /not renewing/);
+  await page.click('#disc-toggle');
+  await page.waitForFunction(() => document.getElementById('disc-toggle').textContent === 'Let it close');
+  assert.deepEqual(api.discoveryPosts, [{ renew: false }, { renew: true }]);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test('standing by, the discovery switch is disabled', async () => {
+  const { page, ctx } = await open({ role: 'standby', standby: 'standing_by', hash: '#busmaster' });
+  await page.waitForSelector('#disc-card', { state: 'visible' });
+  await page.waitForFunction(() => document.getElementById('disc-toggle').disabled);
+  await ctx.close();
 });

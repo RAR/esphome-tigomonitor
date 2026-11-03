@@ -1352,6 +1352,18 @@
         <p class="pv-note">The CCA's PV-safe button, sent through the TAP. Not rapid shutdown: the RSD does that. Optimizers that also follow the RSS signal keep producing while the inverter's transmitter runs.</p>
       </div>
 
+      <div class="section-head">
+        <div class="section-title">Discovery window</div>
+      </div>
+      <div class="tools-card" id="disc-card">
+        <div class="pv-row">
+          <div class="cfg-text"><strong id="disc-state">Renewed when it runs out</strong><span id="disc-detail">—</span></div>
+          <button class="btn" id="disc-toggle">Let it close</button>
+        </div>
+        <div class="pv-msg" id="disc-status"></div>
+        <p class="pv-note">For testing. The TAP's window for new optimizers to join, which the CCA always renewed. The panels keep reporting either way, and a closed window didn't stop production on the roof.</p>
+      </div>
+
       <div class="section-head" id="diag-master-head">
         <div class="section-title">Bus master</div>
         <div class="section-sub" id="diag-master-sub">—</div>
@@ -3333,7 +3345,8 @@
     // Standing by, the discovery window and counts are from this one's last turn on the bus.
     document.getElementById('diag-discovery-sub').textContent = standingBy ? 'another master has the bus'
       : !m.discovery_read ? 'not read yet'
-      : `${m.discovery.running ? 'open' : 'closed'} · ${m.discovery.node_count} nodes`;
+      : `${m.discovery.running ? 'open' : 'closed'} · ${m.discovery.node_count} nodes` +
+        (m.discovery_renewing === false ? ' · not renewing' : '');
     document.getElementById('diag-renewals').textContent = m.renewals;
     // A rate needs two readings; the first shows the total.
     const now = Date.now();
@@ -3537,6 +3550,18 @@
     else if (status.dataset.standby) status.textContent = '';
     status.dataset.standby = standingBy ? '1' : '';
     document.getElementById('bm-meta').textContent = standingBy ? 'standing by' : m.active ? 'running the bus' : 'not running';
+    const renewing = m.discovery_renewing !== false;
+    const w = m.discovery || {};
+    const left = m.discovery_read ? (w.running && w.remaining_s > 0 ? `open, ${w.remaining_s} s left` : 'closed') : 'not read yet';
+    document.getElementById('disc-state').textContent = renewing ? 'Renewed when it runs out' : 'Left to close';
+    document.getElementById('disc-detail').textContent = renewing ? `Now ${left}` : `Now ${left} · a restart renews it`;
+    const disc = document.getElementById('disc-toggle');
+    disc.textContent = renewing ? 'Let it close' : 'Renew again';
+    disc.disabled = standingBy;
+    const ds = document.getElementById('disc-status');
+    if (standingBy) ds.textContent = 'Standing by: change it on the device running the bus.';
+    else if (ds.dataset.standby) ds.textContent = '';
+    ds.dataset.standby = standingBy ? '1' : '';
   }
   // A minute after an off, the panels still producing: the switch reaches
   // only the optimizers that take their keep-alive from the mesh. Ones that
@@ -3574,6 +3599,19 @@
     try {
       const r = await apiFetch('/api/master/pv', { method: 'POST', headers: { 'Content-Type': 'application/json' },
                                                    body: JSON.stringify({ on: !on }) });
+      const j = await r.json().catch(() => ({}));
+      status.textContent = r.ok ? '' : (j.error || `refused (${r.status})`);
+    } catch (e) {
+      status.textContent = 'not sent: ' + e.message;
+    }
+    await refreshPv();
+  });
+  document.getElementById('disc-toggle').addEventListener('click', async () => {
+    const renew = !!(pvLast && pvLast.discovery_renewing === false);  // closing it unless it's left closed now
+    const status = document.getElementById('disc-status');
+    try {
+      const r = await apiFetch('/api/master/discovery', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                                          body: JSON.stringify({ renew }) });
       const j = await r.json().catch(() => ({}));
       status.textContent = r.ok ? '' : (j.error || `refused (${r.status})`);
     } catch (e) {

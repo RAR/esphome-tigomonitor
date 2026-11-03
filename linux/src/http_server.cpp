@@ -1270,6 +1270,7 @@ void HttpServer::routes_() {
                       {"recent_lost_unix", m.recent_lost_unix},
                       {"back_without_discovery", m.back_without_discovery}}},
                     {"discovery_read", m.discovery_read},
+                    {"discovery_renewing", m.discovery_renewing},
                     {"discovery",
                      {{"running", m.discovery.running},
                       {"remaining_s", m.discovery.remaining_s},
@@ -1313,6 +1314,25 @@ void HttpServer::routes_() {
     std::string why;
     int code = ctx_.request_pv ? ctx_.request_pv(!on, why) : 409;
     if (code == 200) send_json(res, {{"on", on}});
+    else send_json(res, {{"error", why.empty() ? "not running the bus" : why}}, code);
+  });
+
+  // Pi-only: keep renewing the TAP's discovery window, or let it close (for
+  // testing; not saved). Behind the web password, as PV output is.
+  svr.Post("/api/master/discovery", [this](const httplib::Request &req, httplib::Response &res) {
+    if (ctx_.current_settings().web_password.empty()) {
+      send_json(res, {{"error", "set a web password first"}}, 403);
+      return;
+    }
+    json j = json::parse(req.body, nullptr, false);
+    if (j.is_discarded() || !j.is_object() || !j.contains("renew") || !j["renew"].is_boolean()) {
+      send_json(res, {{"error", "expected {\"renew\": true|false}"}}, 400);
+      return;
+    }
+    bool renew = j["renew"].get<bool>();
+    std::string why;
+    int code = ctx_.request_discovery ? ctx_.request_discovery(renew, why) : 409;
+    if (code == 200) send_json(res, {{"renew", renew}});
     else send_json(res, {{"error", why.empty() ? "not running the bus" : why}}, code);
   });
 

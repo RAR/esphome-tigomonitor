@@ -106,6 +106,18 @@ bool MasterCore::request_pv(bool off) {
   return true;
 }
 
+bool MasterCore::request_discovery(bool renew) {
+  {
+    std::lock_guard<std::mutex> lock(mu_);
+    if (status_.standby == Standby::standing_by || status_.standby == Standby::taking_over) return false;
+    discovery_renewing_ = renew;
+    status_.discovery_renewing = renew;
+  }
+  LOGW("bus master: discovery window %s, asked from this monitor",
+       renew ? "renewed again" : "left to close (not renewed until asked, or a restart)");
+  return true;
+}
+
 // Standing by: the PV state another master gave the TAP, kept so a takeover
 // carries it on (it beats this device's own: the bus is what the TAP heard).
 void MasterCore::hear_pv_(bool off) {
@@ -152,6 +164,7 @@ bool MasterCore::open() {
   status_ = MasterStatus{};
   status_.active = true;
   status_.pv = pv_state_;
+  status_.discovery_renewing = discovery_renewing_;
   status_.housekeeping = housekeeping_on_;
   status_.learned_41 = static_cast<uint32_t>(learned_.size());
   status_.queries = queries_on_;
@@ -389,6 +402,10 @@ void MasterCore::tick_(uint32_t now_ms) {
     housekeeping_->set_targets(t);
     targets_at_ms_ = now_ms;
   }
+  {
+    std::lock_guard<std::mutex> lock(mu_);
+    window_.set_renewing(discovery_renewing_);
+  }
   master::Request req =
       master::next_request(window_, cursor_, seq_, now_ms, housekeeping_.get(), queries_.get(), pv_.get());
   // Bring-up frames are allowed only straight after a re-address.
@@ -470,12 +487,14 @@ void MasterCore::tick_(uint32_t now_ms) {
       // The CCA lets it run down to 0 and renews then, so that's routine;
       // finding it gone when the TAP comes back is not.
       bool out = !window.running || window.remaining_s == 0;
+      const char *then = window_.renewing() ? "renewing" : "left closed, as asked";
+      bool was_out = window_.ever_read() && (!window_.last().running || window_.last().remaining_s == 0);
       if (out && lost_since_window_read_)
-        LOGW("bus master: the TAP came back with its discovery window closed (%u nodes); renewing",
-             static_cast<unsigned>(window.node_count));
-      else if (out)
-        LOGI("bus master: the TAP's discovery window has closed (%u nodes); renewing",
-             static_cast<unsigned>(window.node_count));
+        LOGW("bus master: the TAP came back with its discovery window closed (%u nodes); %s",
+             static_cast<unsigned>(window.node_count), then);
+      else if (out && (window_.renewing() || !was_out))
+        LOGI("bus master: the TAP's discovery window has closed (%u nodes); %s",
+             static_cast<unsigned>(window.node_count), then);
       window_.on_window(window, now_ms);
     }
     update_discovery_fault_();

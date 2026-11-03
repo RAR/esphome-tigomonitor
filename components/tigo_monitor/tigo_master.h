@@ -172,7 +172,9 @@ inline Bytes discovery_renewal_args(uint16_t node_count) {
 //     stuck() says so until a reading shows time, and it renews only once
 //     each RENEW_BACKOFF_MS.
 // A check with no reply is retried a second later, up to CHECK_RETRIES
-// times, so one lost reply doesn't leave a closed discovery window for a whole period.
+// times, so one lost reply doesn't leave the window closed for a whole period.
+// set_renewing(false) is the owner's "let it close", for testing: it keeps
+// reading the window and sends no renewal (and never 2B) until turned back on.
 struct WindowAction {
   enum Kind { none, check, renew } kind = none;
   uint16_t node_count = 0;
@@ -196,7 +198,7 @@ class WindowKeeper {
     // while browning out takes a renewal once it is back.
     bool may = renews_unanswered_ < RENEW_LIMIT ? !renewed_ || now_ms - last_renew_ms_ >= RENEW_RETRY_MS
                                                  : now_ms - last_renew_ms_ >= RENEW_BACKOFF_MS;
-    if (out && may) {
+    if (out && may && renewing_) {
       a.kind = WindowAction::renew;
       a.node_count = last_.node_count;
       renewed_ = true;
@@ -229,6 +231,8 @@ class WindowKeeper {
     }
   }
 
+  void set_renewing(bool on) { renewing_ = on; }
+  bool renewing() const { return renewing_; }
   const DiscoveryWindow &last() const { return last_; }
   uint32_t renewals() const { return renewals_; }
   bool ever_read() const { return ever_read_; }
@@ -239,6 +243,7 @@ class WindowKeeper {
   bool ever_read_ = false;
   bool checked_ = false;
   bool renewed_ = false;
+  bool renewing_ = true;
   WindowAction::Kind last_sent_ = WindowAction::none;
   uint32_t next_check_ms_ = 0;
   uint32_t last_renew_ms_ = 0;

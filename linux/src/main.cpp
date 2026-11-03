@@ -321,6 +321,18 @@ int main(int argc, char **argv) {
           bm = bus_master;
         }
         return bm ? bm->setups() : std::map<uint16_t, esphome::tigo_monitor::master::Queries::Setup>{};
+      },
+      [&](bool renew, std::string &why) {
+        std::lock_guard<std::mutex> lock(master_mu);
+        if (!bus_master) {
+          why = "this monitor isn't running the bus";
+          return 409;
+        }
+        if (!bus_master->request_discovery(renew)) {
+          why = "standing by: change it on the device running the bus";
+          return 409;
+        }
+        return 200;
       }});
   if (port < 0 && settings.web_port > 0) port = settings.web_port;
   // Only the default steps aside for another web server; a port someone

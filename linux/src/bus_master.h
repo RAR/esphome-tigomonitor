@@ -69,6 +69,7 @@ class BusMaster {
     core_.set_pv(state, std::move(saved));
   }
   bool request_pv(bool off) { return core_.request_pv(off); }
+  bool request_discovery(bool renew) { return core_.request_discovery(renew); }
   std::map<uint16_t, esphome::tigo_monitor::master::Queries::Setup> setups() const { return core_.setups(); }
   void tick(uint32_t now_ms) { core_.tick(now_ms); }
   void close() { core_.close(); }

@@ -166,4 +166,33 @@ expect "can't open pv.json: 00, no 01" "$(stat "$out/seven.json" "sorted(set(d['
 expect "and says so" "$(body GET 18207 /api/health | python3 -c 'import json,sys; print(any("pv.json" in p for p in json.load(sys.stdin)["problems"]))')" True
 stop_all
 
+# --- run 8: the discovery switch (not PV, but the same kind of owner's switch) ---
+# A 2 s window renewed to 2 s, so renewals come every few seconds. Let it
+# close: reads go on, renewals stop, and nothing else is sent in their place;
+# renew again: they resume. Not saved: a restart renews.
+start eight 18208 '' --window 2 --renew-to 2
+waitfor 60 "len(d['renewals']) >= 2" "$out/eight.json"
+expect "renewing to start with" "$(body GET 18208 /api/master '' admin:pw | python3 -c 'import json,sys; print(json.load(sys.stdin)["discovery_renewing"])')" True
+expect "no password, no switch" "$(code POST 18208 /api/master/discovery '{"renew": false}')" 401
+expect "a bad body is refused" "$(code POST 18208 /api/master/discovery '{"renew": 0}' admin:pw)" 400
+expect "let it close" "$(req POST 18208 /api/master/discovery '{"renew": false}' admin:pw)" '200 {"renew":false}'
+sleep 1
+n="$(stat "$out/eight.json" "len(d['renewals'])")"
+c="$(stat "$out/eight.json" "d['checks']")"
+o="$(stat "$out/eight.json" "len(d['other'])")"
+sleep 25
+expect "no renewals while it's left to close" "$(stat "$out/eight.json" "len(d['renewals'])")" "$n"
+expect "but it's still read" "$(stat "$out/eight.json" "d['checks'] > $c")" True
+expect "and nothing new is sent" "$(stat "$out/eight.json" "len(d['other'])")" "$o"
+expect "/api/master says so" "$(body GET 18208 /api/master '' admin:pw | python3 -c 'import json,sys; m=json.load(sys.stdin); print(m["discovery_renewing"], m["discovery"]["remaining_s"], m["fault"])')" "False 0 none"
+expect "logged" "$(grep -c 'discovery window left to close' "$out/eight.log")" 1
+expect "renew again" "$(req POST 18208 /api/master/discovery '{"renew": true}' admin:pw)" '200 {"renew":true}'
+waitfor 120 "len(d['renewals']) > $n" "$out/eight.json"
+expect "renewals resume" "$(stat "$out/eight.json" "len(d['renewals']) > $n")" True
+req POST 18208 /api/master/discovery '{"renew": false}' admin:pw > /dev/null
+stop
+restart eight
+expect "not saved: a restart renews" "$(body GET 18208 /api/master '' admin:pw | python3 -c 'import json,sys; print(json.load(sys.stdin)["discovery_renewing"])')" True
+stop_all
+
 [ $fail = 0 ] && echo "pv e2e passed" || { echo "pv e2e FAILED; see $out/"; exit 1; }
