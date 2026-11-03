@@ -536,6 +536,12 @@
     background: var(--bg-2); border: 1px solid var(--accent); border-radius: 10px;
     padding: 10px 14px; margin-bottom: 16px; font-size: 13px;
   }
+  .node-missing, .node-unset {
+    display: inline-block; margin-left: 6px; padding: 0 6px; border-radius: 6px; font-size: 10.5px;
+    font-weight: 600; text-transform: uppercase; letter-spacing: .04em; border: 1px solid currentColor;
+  }
+  .node-missing { color: var(--bad); }
+  .node-unset { color: var(--warn); }
   .node-new {
     display: inline-block; margin-left: 6px; padding: 0 6px; border-radius: 6px; font-size: 10.5px;
     font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--accent); border: 1px solid var(--accent);
@@ -2914,6 +2920,24 @@
     return !!firstHeard && !placed && Date.now() / 1000 - firstHeard < NEW_OPTIMIZER_S;
   }
 
+  // Missing: no reading for 3 days, or the TAP's roster stopped listing it a
+  // day before its newest entry (a dead or removed optimizer). Not set up:
+  // its !Mppt answer's flag is N, its config items not all set (the CCA's
+  // enrollment writes them). The Pi reports all three; the ESP32 none.
+  const NODE_MISSING_S = 3 * 86400, NODE_OFF_ROSTER_S = 86400;
+  function nodeTags(n, newestRoster) {
+    let html = '';
+    const now = Date.now() / 1000;
+    const when = t => new Date(t * 1000).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+    if (n.last_heard_unix && now - n.last_heard_unix >= NODE_MISSING_S)
+      html += ` <span class="node-missing" title="no reading since ${when(n.last_heard_unix)}">Missing</span>`;
+    else if (n.last_roster_unix && newestRoster - n.last_roster_unix >= NODE_OFF_ROSTER_S)
+      html += ` <span class="node-missing" title="the TAP last listed it ${when(n.last_roster_unix)}">Not on the TAP</span>`;
+    const f = n.setup && n.setup.mppt ? n.setup.mppt.split(/\s+/)[3] : null;
+    if (f === 'N') html += ` <span class="node-unset" title="${topoEscape(n.setup.mppt)}">Not set up</span>`;
+    return html;
+  }
+
   function renderNodesTable() {
     const tbody = document.getElementById('nodes-tbody');
     const countEl = document.getElementById('nodes-count');
@@ -2921,6 +2945,7 @@
 
     const nodes = nodesData.nodes || [];
     const devices = nodesData.devices || [];
+    const newestRoster = Math.max(0, ...nodes.map(n => n.last_roster_unix || 0));
 
     // Index devices by long_address (the persistent key) and by addr.
     const byLong = {};
@@ -3016,8 +3041,8 @@
                          r.state === 'bad' ? 'fault' : 'stale';
       html += `
         <tr>
-          <td><strong>${r.name}</strong>${isNewOptimizer(r.n.first_heard_unix, !!r.n.cca_string)
-            ? ` <span class="node-new" title="First heard ${new Date(r.n.first_heard_unix * 1000).toLocaleString()}">New</span>` : ''}</td>
+          <td><strong${r.n.setup ? ` title="${topoEscape([r.n.setup.mppt, r.n.setup.info].filter(Boolean).join('\n'))}"` : ''}>${r.name}</strong>${isNewOptimizer(r.n.first_heard_unix, !!r.n.cca_string)
+            ? ` <span class="node-new" title="First heard ${new Date(r.n.first_heard_unix * 1000).toLocaleString()}">New</span>` : ''}${nodeTags(r.n, newestRoster)}</td>
           <td class="mono">${r.addr}</td>
           <td class="mono">…${r.barcodeShort}</td>
           <td>${r.stringLabel} <span style="color:var(--text-faint)">·</span> ${r.mpptLabel}</td>
