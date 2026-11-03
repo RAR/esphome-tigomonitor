@@ -705,8 +705,9 @@ void MasterCore::report_extra_taps_(const std::vector<master::Bytes> &macs) {
   }
 }
 
-// The TAP not taking renewals means the array will drop to safe mode:
-// say so, and clear it once a reading shows time on the lease.
+// The TAP not taking renewals: say so, and clear it once a reading shows
+// time on the lease. (It doesn't stop production: the lease is the TAP's
+// discovery window, measured 2026-11-03.)
 void MasterCore::update_lease_fault_() {
   Fault f = status().fault;
   if (lease_.stuck() && f != Fault::lease_refused && f != Fault::second_master)

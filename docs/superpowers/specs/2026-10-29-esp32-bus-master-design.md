@@ -27,6 +27,9 @@ run the roof alone since the CCA died (2026-10-29). Pairs with
 2. **First as the standby** in the failover design; only later, once it has
    proven itself, as the primary.
 3. **The fail-safe heartbeat holds:** a hung ESP32 stops renewing the lease.
+   *(2026-11-03: that stops monitoring, not production. On the roof the array
+   kept producing with no master and the lease run out, RSS on or off; see
+   the CCA replacement design's correction.)*
 4. **Listening-only configs stay listening-only, provably:**
    - the transmit code isn't compiled into them;
    - and the boards' "read-only rests on software" notes stay true for them.

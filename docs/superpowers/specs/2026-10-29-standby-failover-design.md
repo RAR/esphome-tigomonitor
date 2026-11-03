@@ -5,6 +5,18 @@ tested against the mock, `linux/scripts/standby-e2e.sh`; not yet run on the
 roof. See "As built" at the end. Builds on
 [the CCA replacement design](2026-10-26-cca-replacement-design.md).
 
+> **Correction (measured 2026-11-03).** A silent or dead master does not make
+> the array go safe. On the roof (TS4-A-O optimizers, D6–D10 also RSS-capable)
+> the Zero was set to listen-only and the lease ran out. Both inverters kept
+> producing, following the sun, for 10 minutes and more past the expiry: once
+> with the FlexBoss RSS transmitters on (lease out 14:44:45), once with both
+> unplugged (lease out 15:12:17). The TAP alone keeps these optimizers running;
+> the lease is the TAP's discovery window (the gateway firmware handles a
+> renewal as "Start Discovery"). Only the RSD cutting the TAP's power, or a
+> PV off (`0x0B00 00`), stops them. Where this document says a hung master "fails safe", read it as "the master renews the lease as the CCA did", nothing
+> more. Untested: TS4-A-S units, and whether a TAP that lost power stays
+> silent until a master brings it up.
+
 ## Why
 
 Since the CCA died (2026-10-29) one Pi is the only bus master, with nothing
@@ -85,7 +97,9 @@ takes over when the first one fails, and that can be serviced in daylight.
   mean "go back to standing by".
 - **A hung master that keeps its driver on fails safe.** It jams the bus,
   nobody's lease renewal gets through, and the array goes safe. That costs
-  availability, not safety, which is why fencing can wait.
+  availability, not safety, which is why fencing can wait. *(2026-11-03: the
+  array doesn't go safe without renewals; see the correction at the top. A
+  jammed bus costs monitoring and PV control, not production.)*
 
 ## How it works (decided)
 
@@ -136,6 +150,8 @@ different delays a tie can't repeat. If it ever does, the attempt counter shows
 it.
 
 ### The fail-safe heartbeat is unchanged
+
+*(2026-11-03: "fail-safe" overstated it. See the correction at the top.)*
 
 Each device keeps the rule that only its main loop renews the lease. A hung
 standby renews nothing, and a hung active master stops renewing and gets

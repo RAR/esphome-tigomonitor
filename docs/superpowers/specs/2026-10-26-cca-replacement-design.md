@@ -3,6 +3,19 @@
 Branch: `feature/cca-replacement` (off `feature/pi-zero-build`). Status: design,
 exploratory.
 
+> **Correction (measured 2026-11-03).** A silent or dead master does not make
+> the array go safe. On the roof (TS4-A-O optimizers, D6–D10 also RSS-capable)
+> the Zero was set to listen-only and the lease ran out. Both inverters kept
+> producing, following the sun, for 10 minutes and more past the expiry: once
+> with the FlexBoss RSS transmitters on (lease out 14:44:45), once with both
+> unplugged (lease out 15:12:17). The TAP alone keeps these optimizers running;
+> the lease is the TAP's discovery window (the gateway firmware handles a
+> renewal as "Start Discovery"). Only the RSD cutting the TAP's power, or a
+> PV off (`0x0B00 00`), stops them. Where this document calls the heartbeat a
+> fail-safe, read it as "the master renews the lease as the CCA did", nothing
+> more. Untested: TS4-A-S units, and whether a TAP that lost power stays
+> silent until a master brings it up.
+
 ## Why
 
 The owner doesn't want the array tied to vendor cloud hardware. Today the Tigo
@@ -16,7 +29,9 @@ don't control. The goal is a replacement on hardware and software we own.
 1. **Take over the bus with the CCA removed.** The Pi build (tigomonitord) is
    the RS485 master to the TAP, and the array produces as it does under the CCA.
 2. **Own the heartbeat.** The optimizers stay out of safe mode only while our
-   master is alive and on. The owner's work procedure stays valid: cutting
+   master is alive and on. *(Wrong for this roof; see the correction at the
+   top. The procedure below holds because cutting the CCA's power also cut
+   the TAP's, which the CCA powered.)* The owner's work procedure stays valid: cutting
    power to the master (today the CCA), then opening the PV disconnect, must
    put the array in safe mode.
 3. **Keep everything tigomonitor already shows,** now pulled from the TAP
@@ -243,6 +258,8 @@ optimizers:
      the TAP and replays the start-up sequence. Pass: the array produces
      within the CCA's normal start time, per-panel readings flow, and pulling
      the Pi's power drops the array to safe mode. Rollback: CCA back in.
+     *(2026-11-03: it doesn't. With the TAP on its own supply, the array
+     keeps producing with no master. See the correction at the top.)*
   4. **Commissioning without a CCA** (goal 4), starting from the wake wall.
 - **Safety rules, enforced in code:**
   - The roof build sends only commands on an allow-list: reads plus the

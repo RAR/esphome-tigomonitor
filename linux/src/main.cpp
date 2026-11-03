@@ -376,8 +376,9 @@ int main(int argc, char **argv) {
          static_cast<unsigned long long>(watchdog_usec / 1000000));
   // Without it, as in Docker, its own: a thread that ends the process once
   // the loop has stuck, for the restart policy to bring it back. As bus
-  // master a stuck loop has stopped renewing the lease, so the array goes
-  // safe either way; this gets the master back. It writes straight to
+  // master a stuck loop sends nothing (the array keeps producing all the
+  // same; the TAP needs no master for that); this gets the master back,
+  // and with it the monitoring. It writes straight to
   // stderr and exits without unwinding, since whatever stuck the loop may
   // hold a lock the log or a clean shutdown would wait on.
   std::atomic<bool> own_watchdog_stop{false};

@@ -3286,7 +3286,7 @@
     if (!m || (m.role !== 'master' && m.role !== 'standby')) return;
     const faults = { none: '', no_port: 'cannot open the port', no_reply: 'the TAP is not answering',
                      second_master: 'another master is on the bus: stopped transmitting', refused: 'refused a request',
-                     lease_refused: 'the TAP is not taking lease renewals: the array will go safe',
+                     lease_refused: 'the TAP is not taking lease renewals',
                      discovery_failed: 're-addressing the gateway failed',
                      extra_tap: 'another TAP is on the bus: only one is supported, so its panels are not monitored' };
     const phases = { probing: 'looking for the gateway…', discovering: 're-addressing the gateway…' };
