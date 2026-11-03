@@ -1218,9 +1218,10 @@ inline Allow classify_request(uint16_t cmd, const Bytes &payload) {
   static const uint16_t STARTUP_WRITES[] = {CMD_RESET, CMD_SET_485_ID, CMD_SET_ID_BY_MAC};
   for (uint16_t w : STARTUP_WRITES)
     if (cmd == w) return Allow::startup_only;
-  // The writes nothing here ever sends: store, clear-roster, whitelist, and
-  // the rapid-shutdown netrun lever.
-  static const uint16_t NEVER[] = {0x0012, 0x011E, 0x0182, 0x0058};
+  // The writes nothing here ever sends: store, clear-roster, whitelist, the
+  // rapid-shutdown netrun lever, and the gateway's mode (SET_GATEWAY_MODE,
+  // 0x0054, and its response number 0x0055, from lmudcd's opcode switch).
+  static const uint16_t NEVER[] = {0x0012, 0x011E, 0x0182, 0x0058, 0x0054, 0x0055};
   for (uint16_t w : NEVER)
     if (cmd == w) return Allow::never;
   // Any other command carrying the setup key is refused.

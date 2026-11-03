@@ -186,10 +186,11 @@ static void test_allow_list() {
   CHECK(classify_request(CMD_TUNNEL, tunnel_request(0x41, 1, hex("0023"))) == Allow::bench_only);
 
   // The writes never sent, in steady state or bench: store, clear-roster,
-  // whitelist, netrun. (The re-addressing writes 0x0010/0x0014/0x003C are
-  // startup_only; see test_startup_allow.)
-  for (uint16_t cmd : {0x0012, 0x011E, 0x0182, 0x0058})
-    CHECK(classify_request(cmd, {}) == Allow::never);
+  // whitelist, netrun, and the gateway mode (SET_GATEWAY_MODE 0x0054, its
+  // response 0x0055: lmudcd's opcode switch). (The re-addressing writes
+  // 0x0010/0x0014/0x003C are startup_only; see test_startup_allow.)
+  for (uint16_t cmd : {0x0012, 0x011E, 0x0182, 0x0058, 0x0054, 0x0055})
+    CHECK(classify_request(cmd, {}) == Allow::never && !may_send(cmd, {}, true, true, true, true));
   CHECK(classify_request(0x000A, hex("37249266")) == Allow::never);
   CHECK(classify_request(CMD_TUNNEL, tunnel_request(0x41, 1, hex("0037249266"))) == Allow::never);
 
