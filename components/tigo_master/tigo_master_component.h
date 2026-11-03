@@ -25,6 +25,10 @@
 #ifdef USE_BINARY_SENSOR
 #include "esphome/components/binary_sensor/binary_sensor.h"
 #endif
+#ifdef USE_SWITCH
+#include "esphome/components/switch/switch.h"
+#endif
+#include "esphome/core/preferences.h"
 
 #include "esphome/components/tigo_monitor/tigo_monitor.h"
 
@@ -85,6 +89,22 @@ class ByteRing {
   std::atomic<uint32_t> dropped_{0};
 };
 
+class TigoMasterComponent;
+
+#ifdef USE_SWITCH
+// PV output, on (producing) or off: a view of the bus master's PV state
+// (master_core.h's PvState), kept in this component's own preference.
+// restore_mode is DISABLED, so a boot never turns into a fresh command.
+class PvOutputSwitch : public switch_::Switch {
+ public:
+  void set_parent(TigoMasterComponent *p) { parent_ = p; }
+
+ protected:
+  void write_state(bool on) override;
+  TigoMasterComponent *parent_ = nullptr;
+};
+#endif
+
 class TigoMasterComponent : public Component, public uart::UARTComponent {
  public:
   void set_bus(uart::UARTComponent *bus) { bus_ = bus; }
@@ -121,6 +141,11 @@ class TigoMasterComponent : public Component, public uart::UARTComponent {
   float get_setup_priority() const override { return setup_priority::BUS - 1.0f; }
 
   MasterStatus status() const { return core_ ? core_->status() : MasterStatus{}; }
+  // The owner's PV off or on; false while standing by.
+  bool request_pv(bool off) { return core_ && core_->request_pv(off); }
+#ifdef USE_SWITCH
+  void set_pv_switch(PvOutputSwitch *s) { pv_switch_ = s; }
+#endif
 
   // The UART side tigo_monitor reads: what the master read off the bus.
   void write_array(const uint8_t *data, size_t len) override;
@@ -174,6 +199,21 @@ class TigoMasterComponent : public Component, public uart::UARTComponent {
   uint32_t published_at_ms_ = 0;
   bool write_refused_logged_ = false;
   bool loop_dead_logged_ = false;
+
+  // The PV state, in flash: a change (rare: the owner's, or heard) is one
+  // preference write, made from the loop, never from the master task.
+  struct PvPref {
+    uint8_t off;
+    uint8_t heard;
+    int64_t since_unix;
+  };
+  ESPPreferenceObject pv_pref_;
+  std::mutex pv_mu_;
+  bool pv_dirty_ = false;  // under pv_mu_
+  PvState pv_to_save_;     // under pv_mu_
+#ifdef USE_SWITCH
+  PvOutputSwitch *pv_switch_ = nullptr;
+#endif
 
 #ifdef USE_TEXT_SENSOR
   text_sensor::TextSensor *status_sensor_ = nullptr;

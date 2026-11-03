@@ -25,7 +25,7 @@ See docs/superpowers/specs/2026-10-29-esp32-bus-master-design.md.
 import esphome.codegen as cg
 import esphome.config_validation as cv
 import esphome.final_validate as fv
-from esphome.components import binary_sensor, sensor, text_sensor, uart
+from esphome.components import binary_sensor, sensor, switch, text_sensor, uart
 from esphome.components.uart import CONF_DATA_BITS, CONF_PARITY, CONF_STOP_BITS
 from esphome.const import (
     CONF_BAUD_RATE,
@@ -43,10 +43,11 @@ from esphome.const import (
 
 CODEOWNERS = ["@RAR"]
 DEPENDENCIES = ["uart"]
-AUTO_LOAD = ["sensor", "text_sensor", "binary_sensor", "tigo_monitor"]
+AUTO_LOAD = ["sensor", "text_sensor", "binary_sensor", "switch", "tigo_monitor"]
 
 tigo_master_ns = cg.esphome_ns.namespace("tigo_master")
 TigoMasterComponent = tigo_master_ns.class_("TigoMasterComponent", cg.Component, uart.UARTComponent)
+PvOutputSwitch = tigo_master_ns.class_("PvOutputSwitch", switch.Switch)
 tigo_monitor_ns = cg.esphome_ns.namespace("tigo_monitor")
 TigoMonitorComponent = tigo_monitor_ns.class_("TigoMonitorComponent")
 
@@ -62,6 +63,16 @@ CONF_PROBLEM = "problem"
 CONF_LEASE_REMAINING = "lease_remaining"
 CONF_TAKEOVERS = "takeovers"
 CONF_LONGEST_PAUSE = "longest_pause"
+CONF_PV_OUTPUT = "pv_output"
+CONF_RESTORE_MODE = "restore_mode"
+
+
+def _pv_output_view_only(config):
+    # The switch shows the master's PV state, kept by the component itself; a
+    # restored switch state would be a fresh command at every boot.
+    if config.get(CONF_RESTORE_MODE, "DISABLED") != "DISABLED":
+        raise cv.Invalid("pv_output keeps its state itself: leave restore_mode out")
+    return config
 
 
 def _gateway_id(value):
@@ -116,6 +127,12 @@ CONFIG_SCHEMA = cv.All(
                 state_class=STATE_CLASS_TOTAL_INCREASING,
                 entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
                 accuracy_decimals=0,
+            ),
+            # Off: the optimizers' output off, through the TAP (0x0B00 00).
+            # Not rapid shutdown: the RSD cuts the TAP's power.
+            cv.Optional(CONF_PV_OUTPUT): cv.All(
+                switch.switch_schema(PvOutputSwitch, icon="mdi:solar-power", default_restore_mode="DISABLED"),
+                _pv_output_view_only,
             ),
             cv.Optional(CONF_LONGEST_PAUSE): sensor.sensor_schema(
                 unit_of_measurement=UNIT_MILLISECOND,
@@ -193,3 +210,7 @@ async def to_code(config):
         cg.add(var.set_takeovers_sensor(await sensor.new_sensor(config[CONF_TAKEOVERS])))
     if CONF_LONGEST_PAUSE in config:
         cg.add(var.set_pause_sensor(await sensor.new_sensor(config[CONF_LONGEST_PAUSE])))
+    if CONF_PV_OUTPUT in config:
+        sw = await switch.new_switch(config[CONF_PV_OUTPUT])
+        cg.add(sw.set_parent(var))
+        cg.add(var.set_pv_switch(sw))

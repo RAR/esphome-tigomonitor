@@ -115,6 +115,11 @@ tigo_master:
   # writes, and what their fields do isn't understood. Turn it on only if
   # the monitor it stands in for has it on.
   optimizer_writes: false
+  # PV output off and on from Home Assistant, as the CCA's PV-safe button
+  # did (0x0B00 00/01 through the TAP). Not rapid shutdown: the RSD cuts the
+  # TAP's power. Off stays off across reboots and takeovers until turned on.
+  pv_output:
+    name: PV output
   status:
     name: "Bus master"
   problem:

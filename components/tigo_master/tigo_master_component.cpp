@@ -65,6 +65,15 @@ void TigoMasterComponent::setup() {
         return targets_;
       },
       queries_, writes_);
+  pv_pref_ = global_preferences->make_preference<PvPref>(fnv1_hash("tigo_master_pv"));
+  PvPref saved{};
+  PvState pv;
+  if (pv_pref_.load(&saved)) pv = {saved.off != 0, saved.heard != 0, saved.since_unix};
+  core_->set_pv(pv, [this](const PvState &s) {
+    std::lock_guard<std::mutex> lock(pv_mu_);
+    pv_to_save_ = s;
+    pv_dirty_ = true;
+  });
   if (standby_)
     core_->set_standby(takeover_s_, [this](const char *d, size_t n) { on_listen_(d, n); },
                        [this] { return learned_.entries(); });
@@ -123,11 +132,31 @@ void TigoMasterComponent::loop() {
     targets_at_ms_ = now;
     refresh_targets_();
   }
+  {
+    std::lock_guard<std::mutex> lock(pv_mu_);
+    if (pv_dirty_) {
+      PvPref p{static_cast<uint8_t>(pv_to_save_.off), static_cast<uint8_t>(pv_to_save_.heard), pv_to_save_.since_unix};
+      pv_pref_.save(&p);
+      pv_dirty_ = false;
+    }
+  }
   if (now - published_at_ms_ >= PUBLISH_EVERY_MS) {
     published_at_ms_ = now;
     publish_();
   }
 }
+
+#ifdef USE_SWITCH
+void PvOutputSwitch::write_state(bool on) {
+  // Standing by, it can't: show the state the bus has instead.
+  if (parent_ == nullptr || !parent_->request_pv(!on)) {
+    ESP_LOGW(TAG, "PV output: not changed: standing by, or not running the bus");
+    if (parent_ != nullptr) publish_state(!parent_->status().pv.off);
+    return;
+  }
+  publish_state(on);
+}
+#endif
 
 // The optimizers heard in the last day, so one removed from the roof drops
 // out by itself, as on the Pi.
@@ -160,6 +189,9 @@ void TigoMasterComponent::publish_() {
   if (lease_sensor_ != nullptr && m.lease_read && !standing_by) lease_sensor_->publish_state(m.lease.remaining_s);
   if (takeovers_sensor_ != nullptr) takeovers_sensor_->publish_state(m.takeovers);
   if (pause_sensor_ != nullptr) pause_sensor_->publish_state(m.gap_recent_ms);
+#endif
+#ifdef USE_SWITCH
+  if (pv_switch_ != nullptr && pv_switch_->state != !m.pv.off) pv_switch_->publish_state(!m.pv.off);
 #endif
 }
 
