@@ -105,6 +105,21 @@ bool MasterCore::request_pv(bool off) {
   return true;
 }
 
+// Standing by: the PV state another master gave the TAP, kept so a takeover
+// carries it on (it beats this device's own: the bus is what the TAP heard).
+void MasterCore::hear_pv_(bool off) {
+  PvState s;
+  {
+    std::lock_guard<std::mutex> lock(mu_);
+    if (pv_state_.off == off && pv_state_.heard) return;
+    pv_state_ = {off, true, unix_now()};
+    status_.pv = pv_state_;
+    s = pv_state_;
+  }
+  LOGW("PV output: %s, heard from the master running the bus", off ? "off" : "on");
+  if (pv_saved_) pv_saved_(s);
+}
+
 void MasterCore::sync_pv_status_() {
   if (!pv_) return;
   std::lock_guard<std::mutex> lock(mu_);
@@ -572,12 +587,16 @@ void MasterCore::stand_by_(uint32_t) {
     const Sink &sink = on_listen_ ? on_listen_ : on_rx_;
     if (sink) sink(buf, static_cast<size_t>(n));
     bool heard = false;
+    int pv_heard = -1;  // the byte of a 0x0B00 another master sent: what the TAP was last told
     for (int i = 0; i < n; i++) {
       splitter_.feed(buf[i], [&](const std::string &body) {
         Frame f;
-        if (master::decode_frame(body, f) && !(f.dest & 0x8000)) heard = true;
+        if (!master::decode_frame(body, f) || (f.dest & 0x8000)) return;
+        heard = true;
+        if (f.cmd == master::CMD_SESSION && f.payload.size() == 1) pv_heard = f.payload[0];
       });
     }
+    if (pv_heard >= 0) hear_pv_(pv_heard == master::PV_OFF);
     if (heard) {
       heard_at_ms_ = steady_ms();
       if (standby_ == Standby::taking_over) {

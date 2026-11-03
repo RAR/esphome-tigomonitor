@@ -218,6 +218,7 @@ class MasterCore {
   bool pv_changed_ = false;  // under mu_: request_pv's, for the next tick
   PvSaved pv_saved_;
   void sync_pv_status_();
+  void hear_pv_(bool off);
   uint32_t hold_until_ms_ = 0;  // discovery's quiet after a RESET
   bool holding_ = false;
   uint32_t targets_at_ms_ = 0;

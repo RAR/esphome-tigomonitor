@@ -176,4 +176,54 @@ expect "no fault from any of it" "$(api 18112 /api/master | python3 -c 'import j
 kill $c; wait $c 2>/dev/null || true
 kill $tap; wait $tap 2>/dev/null || true
 
+# --- run 3: PV off held across a takeover ---
+# A runs the bus and B stands by, both with a web password. Off asked of A
+# reaches the TAP; B hears it, saves it, and refuses to change it; when A
+# dies, B takes over and its first word to the TAP is 00, with no 01 after.
+mkdir -p "$out/pa" "$out/pb"
+python3 linux/tools/mock_tap.py "$out/link-pa" --extra-link "$out/link-pb" --lease 600 --nodes 44 --stats "$out/tap3.json" &
+tap=$!
+sleep 0.5
+for d in pa:2:18113 pb:6:18114; do
+  n=${d%%:*} rest=${d#*:}
+  printf '{"bus_role": "standby", "standby_takeover_s": %s, "master_housekeeping": true, "serial_port": "%s", "gateway_id": 4609, "web_port": %s, "web_password": "pw"}\n' \
+    "${rest%%:*}" "$PWD/$out/link-$n" "${rest#*:}" > "$out/$n/settings.json"
+done
+start "$out/pa"; a=$pid
+start "$out/pb"; b=$pid
+trap 'kill $a $b $tap 2>/dev/null || true; pkill mosquitto || true' EXIT
+pvreq() {  # pvreq PORT ON: the HTTP code
+  python3 - "$1" "$2" <<'PY'
+import base64, sys, urllib.error, urllib.request as u
+h = {'Content-Type': 'application/json', 'Authorization': 'Basic ' + base64.b64encode(b'admin:pw').decode()}
+body = ('{"on": %s}' % sys.argv[2]).encode()
+try:
+    print(u.urlopen(u.Request(f'http://127.0.0.1:{sys.argv[1]}/api/master/pv', body, h), timeout=5).status)
+except urllib.error.HTTPError as e:
+    print(e.code)
+PY
+}
+authed() {  # authed PORT PATH
+  python3 -c "import base64,sys,urllib.request as u; r=u.Request(f'http://127.0.0.1:{sys.argv[1]}{sys.argv[2]}', headers={'Authorization': 'Basic ' + base64.b64encode(b'admin:pw').decode()}); print(u.urlopen(r, timeout=5).read().decode())" "$@"
+}
+pvof() { authed "$1" /api/master | python3 -c "import json,sys; p=json.load(sys.stdin)['pv']; print(p['on'], p['source'])"; }
+for _ in $(seq 40); do [ "$(authed 18113 /api/master 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin)["standby"]["state"])' 2>/dev/null)" = active ] && break; sleep 0.25; done
+sleep 2
+expect "off, asked of the one running the bus" "$(pvreq 18113 false)" 200
+for _ in $(seq 40); do [ "$(pvof 18114 2>/dev/null)" = "False heard" ] && break; sleep 0.25; done
+expect "the standby heard it" "$(pvof 18114)" "False heard"
+expect "and saved it" "$(stat "$out/pb/pv.json" "(d['off'], d['heard'])")" "(True, True)"
+expect "the standby won't change it" "$(pvreq 18114 true)" 409
+before="$(stat "$out/tap3.json" "len(d['session'])")"
+kill $a; wait $a 2>/dev/null || true
+for _ in $(seq 60); do [ "$(authed 18114 /api/master 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin)["standby"]["state"])' 2>/dev/null)" = active ] && break; sleep 0.25; done
+for _ in $(seq 40); do [ "$(stat "$out/tap3.json" "len(d['session']) > $before")" = True ] && break; sleep 0.25; done
+sleep 10
+expect "after the takeover: 00, and no 01" "$(stat "$out/tap3.json" "sorted(set(d['session'][$before:]))")" "['00']"
+expect "on, asked of the new master" "$(pvreq 18114 true)" 200
+for _ in $(seq 40); do [ "$(stat "$out/tap3.json" "d['pv']")" = on ] && break; sleep 0.25; done
+expect "the TAP got 01" "$(stat "$out/tap3.json" "(d['pv'], d['session'][-1])")" "('on', '01')"
+kill $b; wait $b 2>/dev/null || true
+kill $tap; wait $tap 2>/dev/null || true
+
 [ $fail = 0 ] && echo "standby e2e passed" || { echo "standby e2e FAILED; see $out/"; exit 1; }
