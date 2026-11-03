@@ -47,6 +47,15 @@ const char *phase_name(Phase p);
 const char *fault_name(Fault f);
 const char *standby_name(Standby s);
 
+// The PV switch's state (tigo_master.h's PvSwitch): what the owner asked for,
+// or, heard, what another master last told the TAP. Saved by the caller, and
+// passed back at the next start.
+struct PvState {
+  bool off = false;
+  bool heard = false;
+  int64_t since_unix = 0;
+};
+
 struct MasterStatus {
   bool active = false;  // the port is open and nothing has stopped it
   Fault fault = Fault::none;
@@ -94,6 +103,10 @@ struct MasterStatus {
   uint32_t takeovers = 0;
   uint32_t yields = 0;  // times it gave the bus back to another master
   int64_t last_takeover_unix = 0;
+  PvState pv;
+  bool pv_confirmed = false;    // the TAP's last reply carried the byte
+  bool pv_unconfirmed = false;  // it didn't, after PvSwitch::RETRIES
+  int pv_last_sent = -1, pv_last_reply = -1;
 };
 
 // The serial port on the bus. The core calls it only from tick().
@@ -147,6 +160,14 @@ class MasterCore {
   void set_standby(uint32_t takeover_s, Sink on_listen, Learned learned);
   static const uint32_t TAKEOVER_JITTER_MS = 500;  // at most, so two standbys starting together don't tie
 
+  // The PV state to start from (the one saved), and where to save a change;
+  // call before open().
+  using PvSaved = std::function<void(const PvState &)>;
+  void set_pv(const PvState &state, PvSaved saved);
+  // The owner's off or on, sent in the next tick. False while standing by:
+  // only the master running the bus may change it.
+  bool request_pv(bool off);
+
   bool open();
   // Sends at most one request and reads its reply, up to REPLY_TIMEOUT_MS.
   void tick(uint32_t now_ms);  // measures the gap, then tick_()
@@ -190,6 +211,13 @@ class MasterCore {
   Targets targets_;
   bool queries_on_, writes_on_;
   std::unique_ptr<esphome::tigo_monitor::master::Queries> queries_;
+  // Made each time polling starts, from pv_state_, so a TAP brought up again
+  // hears the held state first.
+  std::unique_ptr<esphome::tigo_monitor::master::PvSwitch> pv_;
+  PvState pv_state_;       // under mu_
+  bool pv_changed_ = false;  // under mu_: request_pv's, for the next tick
+  PvSaved pv_saved_;
+  void sync_pv_status_();
   uint32_t hold_until_ms_ = 0;  // discovery's quiet after a RESET
   bool holding_ = false;
   uint32_t targets_at_ms_ = 0;

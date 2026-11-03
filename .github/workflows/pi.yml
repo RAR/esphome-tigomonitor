@@ -54,6 +54,8 @@ jobs:
         run: docker run --rm -v "$PWD":/src -w /src tigod-dev linux/scripts/master-e2e.sh
       - name: Two masters on one bus, a standby taking over
         run: docker run --rm -v "$PWD":/src -w /src tigod-dev linux/scripts/standby-e2e.sh
+      - name: PV output off and on, against a mock TAP
+        run: docker run --rm -v "$PWD":/src -w /src tigod-dev linux/scripts/pv-e2e.sh
       - name: HTTPS, with test certificates
         run: docker run --rm -v "$PWD":/src -w /src tigod-dev linux/scripts/https-e2e.sh
       - name: HTTPS in Docker Compose, with a stand-in for certbot

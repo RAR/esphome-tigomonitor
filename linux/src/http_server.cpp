@@ -38,6 +38,14 @@ static int64_t unix_ms() {
       .count();
 }
 
+// A PV switch byte as /api/master shows it: "00" (off), "01" (on), or null.
+static json pv_byte(int b) {
+  if (b < 0) return nullptr;
+  char h[3];
+  snprintf(h, sizeof(h), "%02X", b);
+  return h;
+}
+
 static void send_json(httplib::Response &res, const json &j, int status = 200) {
   res.status = status;
   res.set_header("Cache-Control", "no-store");
@@ -316,6 +324,11 @@ std::vector<std::string> HttpServer::health_problems_() const {
   int64_t now = unix_ms();
   int64_t last = ctx_.monitor.stats().last_frame_unix_ms;
   int64_t quiet_s = (now - (last > 0 ? last : started_unix_ms_)) / 1000;
+  if (master) {
+    MasterStatus m = ctx_.master_status ? ctx_.master_status() : MasterStatus{};
+    if (m.pv_unconfirmed) problems.push_back("PV output: the TAP didn't confirm it is " + std::string(m.pv.off ? "off" : "on"));
+  }
+  if (ctx_.pv_unreadable && ctx_.pv_unreadable()) problems.push_back("PV output: pv.json is unreadable; holding PV off");
   int64_t limit_s = master ? 60 : 300;
   if (!s.serial_port.empty() && quiet_s > limit_s && (master || !ctx_.monitor.night_mode()))
     problems.push_back(last > 0 ? "no frames from the bus for " + std::to_string(quiet_s) + " s"
@@ -1257,6 +1270,14 @@ void HttpServer::routes_() {
                     {"resyncs", m.resyncs},
                     {"gap_ms", {{"max", m.gap_max_ms}, {"max_at_unix", m.gap_max_at_unix}, {"recent", m.gap_recent_ms}}},
                     {"last_reply_unix", m.last_reply_unix},
+                    {"pv",
+                     {{"on", !m.pv.off},
+                      {"source", m.pv.heard ? "heard" : "setting"},
+                      {"since", m.pv.since_unix},
+                      {"confirmed", m.pv_confirmed},
+                      {"unconfirmed", m.pv_unconfirmed},
+                      {"last_sent", pv_byte(m.pv_last_sent)},
+                      {"last_reply", pv_byte(m.pv_last_reply)}}},
                     {"standby",
                      {{"state", standby_name(m.standby)},
                       {"takeover_s", m.takeover_s},
@@ -1264,6 +1285,25 @@ void HttpServer::routes_() {
                       {"takeovers", m.takeovers},
                       {"last_takeover_unix", m.last_takeover_unix},
                       {"yields", m.yields}}}});
+  });
+
+  // Pi-only: PV output off or on, through the bus master. Turning an array
+  // off is not for anyone on the LAN: refused until a web password is set.
+  svr.Post("/api/master/pv", [this](const httplib::Request &req, httplib::Response &res) {
+    if (ctx_.current_settings().web_password.empty()) {
+      send_json(res, {{"error", "set a web password first"}}, 403);
+      return;
+    }
+    json j = json::parse(req.body, nullptr, false);
+    if (j.is_discarded() || !j.is_object() || !j.contains("on") || !j["on"].is_boolean()) {
+      send_json(res, {{"error", "expected {\"on\": true|false}"}}, 400);
+      return;
+    }
+    bool on = j["on"].get<bool>();
+    std::string why;
+    int code = ctx_.request_pv ? ctx_.request_pv(!on, why) : 409;
+    if (code == 200) send_json(res, {{"on", on}});
+    else send_json(res, {{"error", why.empty() ? "not running the bus" : why}}, code);
   });
 
   // Pi-only: the serial ports to choose the RS485 adapter from.

@@ -52,6 +52,10 @@ struct HttpContext {
   TlsCerts *tls = nullptr;  // HTTPS with these; null: plain HTTP
   bool tls_from_args = false;  // set by --tls-cert/--tls-key, not the web UI
   std::function<int64_t()> main_loop_late_ms;  // since the main loop's last pass
+  // The owner's PV off or on: 200, or 409 with why (no bus master running,
+  // or it is standing by).
+  std::function<int(bool off, std::string &why)> request_pv;
+  std::function<bool()> pv_unreadable;  // pv.json couldn't be read: PV held off
 };
 
 // tigomonitord --health-check PORT, the container's HEALTHCHECK: GETs

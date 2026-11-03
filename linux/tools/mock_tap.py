@@ -107,6 +107,7 @@ def main():
     ap.add_argument('--deaf-hop', action='store_true')  # moved one id up by the hop, answers nothing there
     ap.add_argument('--stats', default=None)
     ap.add_argument('--extra-link', action='append', default=[])
+    ap.add_argument('--pv-wrong-reply', action='store_true')  # answer 0x0B00 with the other byte
     a = ap.parse_args()
 
     # One pty per master on the bus. The slave ends stay open here, so a
@@ -146,7 +147,7 @@ def main():
     addr = FACTORY if a.factory else GATEWAY  # the id the TAP currently answers at
     stats = {'polls': 0, 'retries': 0, 'cursor_mismatches': 0, 'checks': 0, 'renewals': [], 'other': [],
              'first_lease_frame': None, 'first_frame': None, 'addressed_to': None, 'frames_after_foreign': 0, 'foreign_at': None,
-             'second_asked': 0, 'second_written': 0, 'session': [], 'housekeeping': [],
+             'second_asked': 0, 'second_written': 0, 'session': [], 'cut_marks': [], 'pv': 'on', 'housekeeping': [],
              'log': [], 'claims': 0, 'deaf': 0, 'resets': 0, 'quiet_broken': 0, 'broadcast': [], 'walk': [], 'queries': [],
              'answered': 0, 'power_cuts': 0, 'frames_by_link': [0] * len(fds),
              'last_frame_t_by_link': [None] * len(fds)}
@@ -169,6 +170,7 @@ def main():
         now = time.monotonic()
         if next_cut is not None and now >= next_cut:  # off and back on: the id stays, the lease doesn't
             stats['power_cuts'] += 1
+            stats['cut_marks'].append(len(stats['session']))  # where each cut fell in the session list
             quiet_until = now + a.power_off
             lease_end = now
             next_cut = now + a.power_cut_every
@@ -305,9 +307,10 @@ def main():
                 if len(stats['renewals']) > a.refuse_renewals:
                     lease_end = time.monotonic() + a.renew_to
                 send(encode(addr | 0x8000, 0x0B10, lease_payload(p[4])))
-            elif cmd == 0x0B00 and len(p) == 1:  # the CCA's session frame; the TAP echoes it
+            elif cmd == 0x0B00 and len(p) == 1:  # the PV switch, 00 off; the TAP echoes it
                 stats['session'].append(f'{p[0]:02x}')
-                send(encode(addr | 0x8000, 0x0B01, p))
+                stats['pv'] = 'off' if p[0] == 0 else 'on'
+                send(encode(addr | 0x8000, 0x0B01, bytes([p[0] ^ 1]) if a.pv_wrong_reply else p))
             elif cmd == 0x0B0F and len(p) == 7 and p[3] == 0x0D:  # bring-up; the real reply's block is the site's
                 send(encode(addr | 0x8000, 0x0B10, bytes([0x00, 0x0E, 0x00, 0x0E, p[4]]) + bytes(range(37))))
             elif cmd == 0x0B0F and len(p) == 7 and p[3] == 0x22:  # empty broadcast, acked

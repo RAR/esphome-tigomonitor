@@ -83,6 +83,37 @@ void MasterCore::set_standby(uint32_t takeover_s, Sink on_listen, Learned learne
   learned_cb_ = std::move(learned);
 }
 
+void MasterCore::set_pv(const PvState &state, PvSaved saved) {
+  std::lock_guard<std::mutex> lock(mu_);
+  pv_state_ = state;
+  status_.pv = state;
+  pv_saved_ = std::move(saved);
+}
+
+bool MasterCore::request_pv(bool off) {
+  PvState s;
+  {
+    std::lock_guard<std::mutex> lock(mu_);
+    if (status_.standby == Standby::standing_by || status_.standby == Standby::taking_over) return false;
+    pv_state_ = {off, false, unix_now()};
+    status_.pv = pv_state_;
+    pv_changed_ = true;
+    s = pv_state_;
+  }
+  LOGW("PV output: %s, asked from this monitor", off ? "off" : "on");
+  if (pv_saved_) pv_saved_(s);
+  return true;
+}
+
+void MasterCore::sync_pv_status_() {
+  if (!pv_) return;
+  std::lock_guard<std::mutex> lock(mu_);
+  status_.pv_confirmed = pv_->confirmed();
+  status_.pv_unconfirmed = pv_->unconfirmed();
+  status_.pv_last_sent = pv_->last_sent();
+  status_.pv_last_reply = pv_->last_reply();
+}
+
 bool MasterCore::open() {
   close();
   std::string error;
@@ -103,6 +134,7 @@ bool MasterCore::open() {
   std::lock_guard<std::mutex> lock(mu_);
   status_ = MasterStatus{};
   status_.active = true;
+  status_.pv = pv_state_;
   status_.housekeeping = housekeeping_on_;
   status_.learned_41 = static_cast<uint32_t>(learned_.size());
   status_.queries = queries_on_;
@@ -291,6 +323,22 @@ void MasterCore::tick_(uint32_t now_ms) {
   { std::lock_guard<std::mutex> lock(mu_); status_.phase = phase_; }
   // After a re-address the CCA's bring-up reads go out whatever the
   // housekeeping setting; the rest only with it.
+  {
+    bool changed, off;
+    {
+      std::lock_guard<std::mutex> lock(mu_);
+      changed = pv_changed_;
+      pv_changed_ = false;
+      off = pv_state_.off;
+    }
+    // No housekeeping, no hourly 0x0B00 but the switch's own.
+    if (!pv_) {
+      pv_ = std::make_unique<master::PvSwitch>(off, !housekeeping_on_, now_ms);
+      if (off) LOGI("PV output is held off; telling the TAP");
+    } else if (changed) {
+      pv_->set_off(off, now_ms);
+    }
+  }
   if ((housekeeping_on_ || readdressed_) && !housekeeping_) {
     master::HousekeepingPlan plan;
     plan.send_41 = plan.session = plan.broadcast = plan.walks = housekeeping_on_;
@@ -298,6 +346,7 @@ void MasterCore::tick_(uint32_t now_ms) {
     plan.session_reset = housekeeping_on_ && readdressed_ && !session_reset_sent_;
     session_reset_sent_ = session_reset_sent_ || plan.session_reset;
     housekeeping_ = std::make_unique<master::Housekeeping>(learned_, now_ms, plan, now_ms ^ unix_now());
+    housekeeping_->set_pv(pv_.get());
     targets_at_ms_ = now_ms - TARGETS_EVERY_MS;
     if (housekeeping_on_)
       LOGI("bus master: housekeeping on: %zu learned 0x41s%s", learned_.size(),
@@ -314,7 +363,7 @@ void MasterCore::tick_(uint32_t now_ms) {
     housekeeping_->set_targets(t);
     targets_at_ms_ = now_ms;
   }
-  master::Request req = master::next_request(lease_, cursor_, seq_, now_ms, housekeeping_.get(), queries_.get());
+  master::Request req = master::next_request(lease_, cursor_, seq_, now_ms, housekeeping_.get(), queries_.get(), pv_.get());
   // Bring-up frames are allowed only straight after a re-address.
   bool bring_up = req.bring_up && readdressed_;
   if (housekeeping_) {
@@ -331,7 +380,7 @@ void MasterCore::tick_(uint32_t now_ms) {
     status_.sent_writes = queries_->sent_writes();
     status_.answers = queries_->answers();
   }
-  if (!master::may_send(req.cmd, req.payload, bench_, bring_up, writes_on_)) {
+  if (!master::may_send(req.cmd, req.payload, bench_, bring_up, writes_on_, pv_->off())) {
     set_fault(Fault::refused, "refused to send command " + std::to_string(req.cmd));
     return;
   }
@@ -339,6 +388,10 @@ void MasterCore::tick_(uint32_t now_ms) {
   bool ok = transact(gateway_, req.cmd, req.payload, reply, req.wait_ms ? req.wait_ms : REPLY_TIMEOUT_MS);
   if (status().fault == Fault::second_master || standing_by_()) return;
   if (housekeeping_) housekeeping_->on_reply(req, ok, reply);
+  if (req.cmd == master::CMD_SESSION) {
+    pv_->on_reply(req, ok, reply, now_ms);
+    sync_pv_status_();
+  }
   if (ok && queries_ && req.cmd == master::CMD_POLL) queries_->on_poll_reply(reply.payload, now_ms);
   if (ok && req.cmd == 0x000A) {
     std::string v(reply.payload.begin(), reply.payload.end());
@@ -585,6 +638,7 @@ void MasterCore::set_standby_(Standby s) {
 
 // Counts carry over; the next one starts again when polling does.
 void MasterCore::drop_housekeeping_() {
+  pv_.reset();  // made again with the next start, sending the held state first
   if (!housekeeping_) return;
   sent_41_before_ += housekeeping_->sent_41();
   sent_session_before_ += housekeeping_->sent_session();

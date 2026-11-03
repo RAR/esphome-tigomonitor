@@ -5,6 +5,7 @@
 
 #include "log.h"
 #include "bus_master.h"
+#include "pv_store.h"
 #include "monitor.h"
 #include "cca_ble.h"
 #include "cca_http.h"
@@ -162,6 +163,10 @@ int main(int argc, char **argv) {
   // listening beside it; the master's own frames teach it nothing.
   HousekeepingStore housekeeping(state_dir + "/cca-0x41.json");
   housekeeping.load();
+  // PV output off or on, as last asked or heard: each new bus master starts
+  // from it, so a restart or a settings save never turns PV back on.
+  PvStore pv(state_dir + "/pv.json");
+  pv.load();
   auto on_data = [&](const char *data, size_t n) {
     if (capture_out) capture_out->write(data, static_cast<std::streamsize>(n)).flush();
     monitor.feed(data, n);
@@ -205,6 +210,7 @@ int main(int argc, char **argv) {
                                              return tuids;
                                            },
                                            settings.master_queries, settings.master_optimizer_writes);
+      m->set_pv(pv.state(), [&pv](const PvState &s) { pv.save(s); });
       // Standing by, it listens as the listen role does, learning the 0x41s
       // another master sends, and takes the latest of them when it takes over.
       if (settings.bus_role == "standby")
@@ -277,7 +283,24 @@ int main(int argc, char **argv) {
       },
       [&] { return mqtt.connected(); }, [&] { return mqtt.last_error(); }, settings_changed, restart_requested,
       monitor, topology, history, cloud, cca, cca_http,
-      master_status, tls.get(), tls_from_args, [&] { return steady_ms() - loop_pass_ms; }});
+      master_status, tls.get(), tls_from_args, [&] { return steady_ms() - loop_pass_ms; },
+      [&](bool off, std::string &why) {
+        std::shared_ptr<BusMaster> bm;
+        {
+          std::lock_guard<std::mutex> lock(master_mu);
+          bm = bus_master;
+        }
+        if (!bm) {
+          why = "this monitor isn't running the bus";
+          return 409;
+        }
+        if (!bm->request_pv(off)) {
+          why = "standing by: change it on the device running the bus";
+          return 409;
+        }
+        return 200;
+      },
+      [&] { return pv.unreadable(); }});
   if (port < 0 && settings.web_port > 0) port = settings.web_port;
   // Only the default steps aside for another web server; a port someone
   // chose fails loudly instead, and systemd keeps retrying it.
