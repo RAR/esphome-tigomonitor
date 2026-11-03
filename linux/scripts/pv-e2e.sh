@@ -143,4 +143,27 @@ restart six
 expect "listening: 409" "$(code POST 18206 /api/master/pv '{"on": false}' admin:pw)" 409
 stop_all
 
+# --- run 7: a pv.json the daemon can't open counts as unreadable, not missing ---
+# Root's file, mode 600, and the daemon running as nobody: PV held off, the
+# health problem, and no 01 (a missing file would be PV on).
+mkdir -p "$out/seven"
+printf '{"off": false, "heard": false, "since_unix": 1}\n' > "$out/seven/pv.json"
+chmod 600 "$out/seven/pv.json"
+python3 linux/tools/mock_tap.py "$out/seven.tty" --lease 600 --nodes 44 --stats "$out/seven.json" &
+tap=$!
+sleep 0.5
+chmod 666 "$(readlink -f "$out/seven.tty")"
+printf '{"bus_role": "master", "master_startup": true, "master_housekeeping": true, "serial_port": "%s", "gateway_id": 4609, "web_port": 18207, "web_password": "pw"}\n' \
+  "$PWD/$out/seven.tty" > "$out/seven/settings.json"
+chown 65534:65534 "$out/seven" "$out/seven/settings.json"
+setpriv --reuid=65534 --regid=65534 --clear-groups build/linux/tigomonitord --state-dir "$out/seven" \
+  --web-dir components/tigo_server/web 2>> "$out/seven.log" &
+daemon=$!
+port=18207
+waitfor 60 "len(d['session']) >= 1" "$out/seven.json"
+sleep 2
+expect "can't open pv.json: 00, no 01" "$(stat "$out/seven.json" "sorted(set(d['session']))")" "['00']"
+expect "and says so" "$(body GET 18207 /api/health | python3 -c 'import json,sys; print(any("pv.json" in p for p in json.load(sys.stdin)["problems"]))')" True
+stop_all
+
 [ $fail = 0 ] && echo "pv e2e passed" || { echo "pv e2e FAILED; see $out/"; exit 1; }

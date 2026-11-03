@@ -5,18 +5,26 @@
 
 #include <nlohmann/json.hpp>
 
+#include <cerrno>
+#include <cstring>
 #include <fstream>
+#include <stdexcept>
+#include <sys/stat.h>
 #include <sstream>
 
 namespace tigod {
 
 bool PvStore::load() {
-  std::ifstream f(path_);
   std::lock_guard<std::mutex> lock(mu_);
-  if (!f) return true;
-  std::stringstream ss;
-  ss << f.rdbuf();
+  // Only a file that isn't there is PV on. One that is there but can't be
+  // opened (its owner or mode changed, say) is as unreadable as a damaged one.
+  struct stat st;
+  if (stat(path_.c_str(), &st) != 0 && errno == ENOENT) return true;
   try {
+    std::ifstream f(path_);
+    if (!f) throw std::runtime_error(std::string("cannot open: ") + strerror(errno));
+    std::stringstream ss;
+    ss << f.rdbuf();
     nlohmann::json j = nlohmann::json::parse(ss.str());
     state_.off = j.at("off").get<bool>();
     state_.heard = j.value("heard", false);
