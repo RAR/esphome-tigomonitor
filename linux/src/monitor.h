@@ -35,6 +35,10 @@ struct Node {
   std::string cca_label, cca_string_label, cca_mppt_label, cca_channel, cca_object_id;
   bool cca_validated = false;
   bool seen_in_frame27 = false;  // runtime only
+  // When it last reported a reading, and when the TAP's roster (a Frame 27)
+  // last listed it: unix s, saved to the hour. 0: not yet.
+  int64_t last_heard_unix = 0;
+  int64_t last_roster_unix = 0;
 };
 
 struct Panel {
@@ -107,6 +111,13 @@ class Monitor {
   int new_optimizers(int64_t now_unix) const;
   static const int64_t NEW_AFTER_S = 86400;
   static const int64_t NEW_FOR_S = 7 * 86400;
+  // Missing: a node with a barcode that hasn't reported for MISSING_AFTER_S,
+  // or that the roster stopped listing OFF_ROSTER_AFTER_S before its newest
+  // entry. A dead or removed optimizer shows up here.
+  int missing_optimizers(int64_t now_unix) const;
+  static const int64_t MISSING_AFTER_S = 3 * 86400;
+  static const int64_t OFF_ROSTER_AFTER_S = 86400;
+  static const int64_t SEEN_SAVE_EVERY_S = 3600;  // how stale a saved last_heard/last_roster may be
   // Added to the new optimizer log line (main.cpp's new_optimizer_note).
   void set_new_optimizer_note(std::string note) {
     std::lock_guard<std::mutex> lock(mu_);

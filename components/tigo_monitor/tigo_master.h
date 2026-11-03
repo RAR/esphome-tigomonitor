@@ -890,6 +890,12 @@ class Queries {
   uint32_t sent_reads() const { return sent_reads_; }
   uint32_t sent_writes() const { return sent_writes_; }
   uint32_t answers() const { return answers_; }
+  // Each optimizer's last !Info and !Mppt answers, as text: how the CCA left
+  // it set up (the !Mppt flag is S once its config items are all set).
+  struct Setup {
+    std::string info, mppt;
+  };
+  const std::map<uint16_t, Setup> &setups() const { return setups_; }
 
  private:
   struct Item {
@@ -929,6 +935,11 @@ class Queries {
     else return;
     answers_++;
     remove_(tuid, k);
+    if (k == info || k == mppt) {
+      std::string t = text;
+      while (!t.empty() && (t.back() == '\r' || t.back() == '\n' || t.back() == ' ')) t.pop_back();
+      (k == info ? setups_[tuid].info : setups_[tuid].mppt) = t;
+    }
     if (k == info && f.size() > 8 && f[8] == "00") {
       if (writes_) add_(tuid, w255, now_ms);
       add_(tuid, info, now_ms + INFO_AGAIN_MS);
@@ -957,6 +968,7 @@ class Queries {
   bool writes_;
   uint32_t last_sent_ms_;
   std::vector<Item> pending_;
+  std::map<uint16_t, Setup> setups_;
   std::map<uint16_t, uint32_t> heard_ms_;
   std::set<uint16_t> smart_written_;  // nodes sent the Smrt write this session
   uint32_t sent_reads_ = 0, sent_writes_ = 0, answers_ = 0;

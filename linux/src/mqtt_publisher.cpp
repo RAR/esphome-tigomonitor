@@ -227,6 +227,8 @@ void MqttPublisher::publish_system_discovery_() {
       {"missed_frames", "Missed frames", nullptr, nullptr, "total_increasing"},
       // Heard in the last week and in no string yet: a replacement, say.
       {"new_optimizers", "New optimizers", nullptr, nullptr, "measurement"},
+      // No reading for 3 days, or dropped from the TAP's roster: a dead one.
+      {"missing_optimizers", "Missing optimizers", nullptr, nullptr, "measurement"},
   };
   for (const auto &m : SYS) {
     std::string uid = "tigomonitor_" + settings_.device_id + "_" + m.key;
@@ -460,6 +462,7 @@ void MqttPublisher::publish() {
               {"missed_frames", bus.ends_without_start + bus.overflows},
               {"night_mode", night},
               {"new_optimizers", monitor_.new_optimizers(static_cast<int64_t>(time(nullptr)))},
+              {"missing_optimizers", monitor_.missing_optimizers(static_cast<int64_t>(time(nullptr)))},
               {"strings", strings}};
   pub_(base_() + "/system/state", sys.dump(), false);
 }

@@ -313,7 +313,15 @@ int main(int argc, char **argv) {
         }
         return 200;
       },
-      [&] { return pv.unreadable(); }});
+      [&] { return pv.unreadable(); },
+      [&] {
+        std::shared_ptr<BusMaster> bm;
+        {
+          std::lock_guard<std::mutex> lock(master_mu);
+          bm = bus_master;
+        }
+        return bm ? bm->setups() : std::map<uint16_t, esphome::tigo_monitor::master::Queries::Setup>{};
+      }});
   if (port < 0 && settings.web_port > 0) port = settings.web_port;
   // Only the default steps aside for another web server; a port someone
   // chose fails loudly instead, and systemd keeps retrying it.

@@ -56,6 +56,9 @@ struct HttpContext {
   // or it is standing by).
   std::function<int(bool off, std::string &why)> request_pv;
   std::function<bool()> pv_unreadable;  // pv.json couldn't be read: PV held off
+  // The optimizers' last !Info/!Mppt answers by short id, while this monitor
+  // runs the bus with queries on.
+  std::function<std::map<uint16_t, esphome::tigo_monitor::master::Queries::Setup>()> setups;
 };
 
 // tigomonitord --health-check PORT, the container's HEALTHCHECK: GETs

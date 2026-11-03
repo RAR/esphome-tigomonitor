@@ -176,6 +176,8 @@ class MasterCore {
   void tick(uint32_t now_ms);  // measures the gap, then tick_()
   void close();
   MasterStatus status() const;
+  // The optimizers' last !Info and !Mppt answers, by short id (queries on).
+  std::map<uint16_t, esphome::tigo_monitor::master::Queries::Setup> setups() const;
 
   static const int REPLY_TIMEOUT_MS = 50;
   static const uint32_t REOPEN_EVERY_MS = 5000;
@@ -214,6 +216,10 @@ class MasterCore {
   Targets targets_;
   bool queries_on_, writes_on_;
   std::unique_ptr<esphome::tigo_monitor::master::Queries> queries_;
+  // queries_'s answers, kept across a restart of queries_ (a takeover, a TAP
+  // power cut); under mu_.
+  std::map<uint16_t, esphome::tigo_monitor::master::Queries::Setup> setups_;
+  uint32_t setups_at_answers_ = 0;
   // Made each time polling starts, from pv_state_, so a TAP brought up again
   // hears the held state first.
   std::unique_ptr<esphome::tigo_monitor::master::PvSwitch> pv_;

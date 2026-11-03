@@ -53,4 +53,52 @@ expect "a New optimizers sensor" "$(mosquitto_sub -p 18833 -v --retained-only -W
 replay "$out/thirteen.bin"
 expect "not logged again" "$(grep -c 'new optimizer heard' "$out/daemon.log")" 1
 
+# A missing optimizer: the 13th stops reporting (a bus of 12 again) and the
+# TAP's roster stops listing it. Its last reading 4 days ago: missing, and
+# off the roster, counted for Home Assistant until it's heard again.
+python3 - "$out/state/state.json" <<'PY'
+import json, sys, time
+p = sys.argv[1]
+d = json.load(open(p))
+gone = d['seen_barcodes'][-1]
+for n in d['nodes']:
+    if n['long_address'] == gone:
+        n['last_heard_unix'] = int(time.time()) - 4 * 86400
+        n['last_roster_unix'] = int(time.time()) - 4 * 86400
+json.dump(d, open(p, 'w'))
+PY
+mosquitto_sub -p 18833 -t tigomonitor/test/system/state -W 20 > "$out/system2.txt" 2>/dev/null &
+sub=$!
+sleep 0.3
+replay "$out/twelve.bin"
+sleep 0.5
+kill $sub 2>/dev/null || true
+expect "a reading and a roster entry kept per node" "$(stat "$out/state/state.json" "sum(1 for n in d['nodes'] if n.get('last_heard_unix', 0) > 0 and n.get('last_roster_unix', 0) > 0)")" 13
+expect "Home Assistant counts the missing one" "$(tail -1 "$out/system2.txt" | python3 -c 'import json,sys; print(json.load(sys.stdin)["missing_optimizers"])')" 1
+expect "a Missing optimizers sensor" "$(mosquitto_sub -p 18833 -v --retained-only -W 2 -t 'homeassistant/sensor/tigomonitor_test_missing_optimizers/config' 2>/dev/null | wc -l)" 1
+# Heard again: not missing.
+mosquitto_sub -p 18833 -t tigomonitor/test/system/state -W 20 > "$out/system3.txt" 2>/dev/null &
+sub=$!
+sleep 0.3
+replay "$out/thirteen.bin"
+sleep 0.5
+kill $sub 2>/dev/null || true
+expect "heard again: not missing" "$(tail -1 "$out/system3.txt" | python3 -c 'import json,sys; print(json.load(sys.stdin)["missing_optimizers"])')" 0
+
+# Setup answers: running the bus with queries on, the master keeps each
+# optimizer's last !Mppt and !Info answers, and /api/nodes carries them.
+python3 linux/tools/mock_tap.py "$out/tap.tty" --lease 600 --nodes 44 --stats "$out/tap.json" &
+tap=$!
+sleep 0.5
+mkdir -p "$out/m"
+printf '{"bus_role": "master", "master_queries": true, "serial_port": "%s", "gateway_id": 4609, "web_port": 18208}\n' "$PWD/$out/tap.tty" > "$out/m/settings.json"
+build/linux/tigomonitord --state-dir "$out/m" --web-dir components/tigo_server/web 2> "$out/m.log" &
+daemon=$!
+trap 'kill $daemon $tap 2>/dev/null || true; pkill mosquitto || true' EXIT
+setup() { python3 -c "import json,urllib.request as u; d=json.load(u.urlopen('http://127.0.0.1:18208/api/nodes', timeout=5)); print(eval(__import__('sys').argv[1]))" "$1"; }
+for _ in $(seq 120); do [ "$(setup "sum(1 for n in d['nodes'] if (n.get('setup') or {}).get('mppt'))" 2>/dev/null)" -ge 2 ] 2>/dev/null && break; sleep 0.5; done
+expect "the master keeps the !Mppt answers" "$(setup "sorted({n['setup']['mppt'].split()[3] for n in d['nodes'] if (n.get('setup') or {}).get('mppt')})")" "['S']"
+expect "and the !Info ones" "$(setup "all(n['setup']['info'].startswith('!Info ') for n in d['nodes'] if (n.get('setup') or {}).get('info'))")" True
+kill $daemon $tap; wait $daemon $tap 2>/dev/null || true
+
 [ $fail = 0 ] && echo "new optimizer e2e passed" || { echo "new optimizer e2e FAILED; see $out/"; exit 1; }

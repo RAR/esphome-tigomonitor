@@ -178,6 +178,7 @@ export const routes = {
       cca_validated: true, cca_label: d.name, cca_string: d.string_label,
       cca_mppt: mpptOf(d.string_label),
       cca_channel: `04C05B000000.${10 + i}`,
+      last_heard_unix: 0, last_roster_unix: 0, setup: null,
     })),
     inverters: [],
     strings: strings.map((s) => ({ label: s.label, panel_rating_w: RATING })),

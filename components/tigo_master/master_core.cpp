@@ -173,6 +173,11 @@ void MasterCore::close() {
   status_.active = false;
 }
 
+std::map<uint16_t, master::Queries::Setup> MasterCore::setups() const {
+  std::lock_guard<std::mutex> lock(mu_);
+  return setups_;
+}
+
 MasterStatus MasterCore::status() const {
   std::lock_guard<std::mutex> lock(mu_);
   MasterStatus m = status_;
@@ -373,6 +378,7 @@ void MasterCore::tick_(uint32_t now_ms) {
   }
   if (queries_on_ && !queries_) {
     queries_ = std::make_unique<master::Queries>(now_ms, writes_on_);
+    setups_at_answers_ = 0;
     LOGI("bus master: queries to optimizers on%s", writes_on_ ? ", with the CCA's two writes" : "");
   }
   // Asked each minute, or each second while none have been heard yet.
@@ -411,7 +417,18 @@ void MasterCore::tick_(uint32_t now_ms) {
     pv_->on_reply(req, ok, reply, now_ms);
     sync_pv_status_();
   }
-  if (ok && queries_ && req.cmd == master::CMD_POLL) queries_->on_poll_reply(reply.payload, now_ms);
+  if (ok && queries_ && req.cmd == master::CMD_POLL) {
+    queries_->on_poll_reply(reply.payload, now_ms);
+    if (queries_->answers() != setups_at_answers_) {
+      setups_at_answers_ = queries_->answers();
+      std::lock_guard<std::mutex> lock(mu_);
+      for (const auto &kv : queries_->setups()) {
+        auto &s = setups_[kv.first];
+        if (!kv.second.info.empty()) s.info = kv.second.info;
+        if (!kv.second.mppt.empty()) s.mppt = kv.second.mppt;
+      }
+    }
+  }
   if (ok && req.cmd == 0x000A) {
     std::string v(reply.payload.begin(), reply.payload.end());
     for (char &c : v)

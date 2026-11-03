@@ -125,8 +125,11 @@ void Monitor::on_power_packet_(const std::string &packet) {
   p->updated = Clock::now();
   p->updated_unix_ms = unix_ms();
   p->readings++;
-  for (const auto &n : nodes_) {
+  int64_t now_s = p->updated_unix_ms / 1000;
+  for (auto &n : nodes_) {
     if (n.addr == p->addr) {
+      if (now_s - n.last_heard_unix >= SEEN_SAVE_EVERY_S) dirty_ = true;
+      n.last_heard_unix = now_s;
       p->barcode = n.long_address;
       p->label = n.cca_label;
       break;
@@ -176,6 +179,12 @@ void Monitor::on_frame27_(const std::string &hex) {
     if (res.table_changed) changed = true;
     if (Panel *p = find_panel_(a)) p->barcode = l;
     note_barcode_(l, a);
+    int64_t now_s = static_cast<int64_t>(time(nullptr));
+    for (auto &n : nodes_)
+      if (n.addr == a) {
+        if (now_s - n.last_roster_unix >= SEEN_SAVE_EVERY_S) dirty_ = true;
+        n.last_roster_unix = now_s;
+      }
   });
   if (!ok) {
     LOGW("Frame 27 too short for its header");
@@ -211,6 +220,20 @@ void Monitor::note_barcode_(const std::string &barcode, const std::string &addr)
 std::map<std::string, int64_t> Monitor::first_heard() const {
   std::lock_guard<std::mutex> lock(mu_);
   return first_heard_;
+}
+
+int Monitor::missing_optimizers(int64_t now_unix) const {
+  std::lock_guard<std::mutex> lock(mu_);
+  int64_t newest_roster = 0;
+  for (const auto &n : nodes_) newest_roster = std::max(newest_roster, n.last_roster_unix);
+  int count = 0;
+  for (const auto &n : nodes_) {
+    if (n.long_address.empty()) continue;
+    bool silent = n.last_heard_unix > 0 && now_unix - n.last_heard_unix >= MISSING_AFTER_S;
+    bool off_roster = n.last_roster_unix > 0 && newest_roster - n.last_roster_unix >= OFF_ROSTER_AFTER_S;
+    if (silent || off_roster) count++;
+  }
+  return count;
 }
 
 int Monitor::new_optimizers(int64_t now_unix) const {
@@ -612,7 +635,9 @@ bool Monitor::save_locked_() {
                      {"cca_mppt_label", n.cca_mppt_label},
                      {"cca_channel", n.cca_channel},
                      {"cca_object_id", n.cca_object_id},
-                     {"cca_validated", n.cca_validated}});
+                     {"cca_validated", n.cca_validated},
+                     {"last_heard_unix", n.last_heard_unix},
+                     {"last_roster_unix", n.last_roster_unix}});
   }
   json history = json::array();
   for (const auto &d : history_) history.push_back({d.first, d.second});
@@ -673,6 +698,8 @@ bool Monitor::load() {
     n.cca_channel = e.value("cca_channel", "");
     n.cca_object_id = e.value("cca_object_id", "");
     n.cca_validated = e.value("cca_validated", false);
+    n.last_heard_unix = e.value("last_heard_unix", static_cast<int64_t>(0));
+    n.last_roster_unix = e.value("last_roster_unix", static_cast<int64_t>(0));
     nodes_.push_back(std::move(n));
   }
   // Before seen_barcodes was kept, the node table was all it had heard, and

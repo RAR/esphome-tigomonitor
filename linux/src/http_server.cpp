@@ -942,6 +942,7 @@ void HttpServer::routes_() {
   svr.Get("/api/nodes", [this, &mon](const httplib::Request &, httplib::Response &res) {
     json nodes = json::array();
     auto heard = mon.first_heard();
+    auto setups = ctx_.setups ? ctx_.setups() : std::map<uint16_t, esphome::tigo_monitor::master::Queries::Setup>{};
     for (const auto &n : mon.nodes()) {
       auto fh = heard.find(n.long_address);
       nodes.push_back({{"addr", n.addr},
@@ -954,7 +955,13 @@ void HttpServer::routes_() {
                        {"cca_string", n.cca_string_label},
                        {"cca_mppt", n.cca_mppt_label},
                        {"cca_inverter", n.cca_mppt_label},  // the field's name before #60; older imports read it
-                       {"cca_channel", n.cca_channel}});
+                       {"cca_channel", n.cca_channel},
+                       {"last_heard_unix", n.last_heard_unix},
+                       {"last_roster_unix", n.last_roster_unix}});
+      // How it is set up, from its last answers to the master's reads.
+      auto st = setups.find(static_cast<uint16_t>(strtoul(n.addr.c_str(), nullptr, 16)));
+      nodes.back()["setup"] = st == setups.end() ? json(nullptr)
+                                                 : json{{"info", st->second.info}, {"mppt", st->second.mppt}};
     }
     // Topology names and ratings ride along, so an export restores them too.
     json inverters = json::array(), strings = json::array();
