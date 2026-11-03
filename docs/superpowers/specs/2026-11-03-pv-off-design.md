@@ -127,10 +127,18 @@ standby that was off for a week isn't.
 
 ### Who can switch it
 
-- **Web UI:** a "PV output" card on the Tools page, with a confirm step
-  for off ("Turn the array's output off? This is not rapid shutdown.").
-  While off is held, every page shows a banner: "PV output is off, turned
-  off from <device> at <time>", with a button to turn it back on.
+- **Web UI: a new Bus master page.** It appears only when the device
+  runs the bus or stands by for it (as the CCA page hides itself), and
+  takes over the master card now on Diagnostics: role and standby state,
+  lease, takeovers, faults, housekeeping counts. The "PV output" control
+  sits at the top, with a confirm step for off ("Turn the array's output
+  off? This is not rapid shutdown."). On a standby that's standing by it
+  is read-only.
+- **Sidebar:** a "PV on / PV off" pill, always visible, red while off,
+  linking to the Bus master page. It shows the state; it doesn't switch
+  it, so a misclick while reaching for a page link can't stop the array.
+  While off is held, every page also shows a banner: "PV output is off,
+  turned off from <device> at <time>", with a link to the control.
 - **API:** `POST /api/master/pv` `{"on": false}`. The Pi refuses it (403)
   while no web password is set: anyone on the LAN could otherwise turn the
   array off. The existing cross-site refusal applies.
@@ -186,8 +194,9 @@ Only after that does the switch show up for anyone but the owner.
 
 ## Open questions (the owner's)
 
-1. Where should the control live: the Tools page (as above), or the
-   dashboard?
+1. ~~Where should the control live?~~ A new Bus master page, with a
+   state-only pill in the sidebar (owner leaning, 2026-11-03; the pill
+   that doesn't toggle is my call).
 2. After an RSD release (the TAP powers back up), should held-off stay off
    (as above) or should PV come back on?
 3. Home Assistant switch in the first version, or later as above?
