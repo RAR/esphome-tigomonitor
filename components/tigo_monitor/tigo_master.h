@@ -95,6 +95,9 @@ static const uint16_t CMD_TUNNEL = 0x0B0F;
 static const uint16_t CMD_TUNNEL_REPLY = 0x0B10;
 static const uint8_t SUB_LEASE_RENEW = 0x2D;
 static const uint8_t SUB_LEASE_CHECK = 0x2E;
+// Clears the run lease, which idles every optimizer: never sent. (The
+// gateway firmware's lease handler takes 2B clear, 2D renew, 2E check.)
+static const uint8_t SUB_LEASE_CLEAR = 0x2B;
 static const uint8_t SUB_LEASE_REPLY = 0x2F;
 // Sub 0x41 and command 0x0B00: the CCA's housekeeping (Housekeeping, below).
 static const uint8_t SUB_HOUSEKEEPING = 0x41;
@@ -1108,6 +1111,8 @@ inline Allow classify_request(uint16_t cmd, const Bytes &payload) {
   if (cmd != CMD_TUNNEL || payload.size() < 5 || payload[0] || payload[1] || payload[2]) return Allow::bench_only;
   Bytes args(payload.begin() + 5, payload.end());
   switch (payload[3]) {
+    case SUB_LEASE_CLEAR:
+      return Allow::never;
     case SUB_LEASE_CHECK:
       return args.empty() ? Allow::yes : Allow::bench_only;
     case SUB_LEASE_RENEW:
