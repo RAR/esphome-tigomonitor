@@ -911,6 +911,14 @@ static void test_queries() {
                                    string_packet(0x22, "!Smrt 0FFF 0000 0FFF 0008 00C8 00C8 000A 0154 0154 S 00 01")}),
                   40000);
   for (const Request &x : ask(w, 40000, 50000, seq)) CHECK(query_text(x) != QUERY_W255 && query_text(x) != QUERY_SMART_S);
+  // Its next read still says N: an H9 answers N to every read and
+  // reports S only in its reply to the write (its firmware, 3.5.0 and
+  // 4.0.3), so the write is sent once a session, not after every read.
+  w.on_poll_reply(poll_reply_with({string_packet(0x22, "!Smrt 0000 0000 0000 0000 0000 0000 0000 0000 0000 N 00 0000 0000 0000 00")}),
+                  60000 + Queries::CHECK_AFTER_MS);
+  for (const Request &x : ask(w, 60000 + Queries::CHECK_AFTER_MS, 60000 + 2 * Queries::CHECK_AFTER_MS + 10000, seq, 0x22))
+    CHECK(query_text(x) != QUERY_SMART_S);
+  CHECK(w.sent_writes() == 2);
 
   // A node quiet for half an hour is asleep: its queries stop. Heard again,
   // it gets ^00Tests, as each optimizer does at sunrise.

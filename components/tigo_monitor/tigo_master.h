@@ -24,6 +24,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <map>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -689,6 +690,10 @@ static const char *const QUERY_SMART_S = "^00Smrt_........S0000...0000\r";
 // field read FF on 104 other answers), and Info is read again 40 minutes
 // on; a Smrt in mode N brings ^00Smrt_........S0000...0000 (30 of 30), and
 // Smrt is read again to see it took. What the fields mean isn't known.
+// Unlike the CCA, which rewrote the same nodes all day, the Smrt write goes
+// once a node a session: an H9 answers N to every read and reports S only
+// in its reply to the write itself (its firmware, 3.5.0 and 4.0.3), so a
+// read can never show the write took.
 class Queries {
  public:
   static const uint32_t GAP_MS = 1500;  // the CCA's were 1-2 s apart
@@ -803,7 +808,7 @@ class Queries {
       if (writes_) add_(tuid, w255, now_ms);
       add_(tuid, info, now_ms + INFO_AGAIN_MS);
     }
-    if (k == smrt && f.size() > 10 && f[10] == "N" && writes_) {
+    if (k == smrt && f.size() > 10 && f[10] == "N" && writes_ && smart_written_.insert(tuid).second) {
       add_(tuid, smart_s, now_ms);
       add_(tuid, smrt, now_ms + CHECK_AFTER_MS);
     }
@@ -828,6 +833,7 @@ class Queries {
   uint32_t last_sent_ms_;
   std::vector<Item> pending_;
   std::map<uint16_t, uint32_t> heard_ms_;
+  std::set<uint16_t> smart_written_;  // nodes sent the Smrt write this session
   uint32_t sent_reads_ = 0, sent_writes_ = 0, answers_ = 0;
 };
 

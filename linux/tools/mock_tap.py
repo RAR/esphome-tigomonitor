@@ -38,7 +38,7 @@ tunnel 0x26 pages the node table from the index asked; and tunnel 0x06
 queries are forwarded (status 0d) with the optimizer's answer in a later
 poll reply, as a type 0x07 packet. The first panel answers Info with 00 in
 its ninth word until it gets #00w255; the second answers Smrt in mode N
-until it gets the Smrt_ write.
+always, as an H9 does (it reports S only in its reply to the write).
 --bare is a gateway with no mesh behind it, like a spare TAP on the bench: it
 answers VERSION and refuses polls and the tunnel with 0x0006, as the analysis
 repo's standalone gateways did. Writes what it saw to --stats as JSON every second.
@@ -330,8 +330,6 @@ def main():
                 send(encode(addr | 0x8000, 0x0B10, bytes([0x00, 0x0D, 0x00, 0x07, p[4]])))
                 if text == '#00w255\r':
                     needs_w255.discard(tuid)
-                elif text.startswith('^00Smrt_') and text[16] == 'S':
-                    smart_n.discard(tuid)
                 elif text == '^00Version\r':
                     answers.append((tuid, b'Mnode Version K8.0120 (2D)\r'))
                 elif text == '^00Tests\r':
