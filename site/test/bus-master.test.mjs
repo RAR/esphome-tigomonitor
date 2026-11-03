@@ -82,6 +82,7 @@ async function open(opts = {}) {
       return json(200, settings());
     }
     if (path === '/api/serial-ports') return json(200, { ports: [] });
+    if (path === '/api/devices' && opts.devices) return json(200, { devices: opts.devices, count: opts.devices.length });
     if (path === '/api/cloud/status') return json(200, { configured: false });
     if (routes[path] !== undefined) return json(200, routes[path]);
     return route.fulfill({ status: 404, body: 'no fixture' });
@@ -181,4 +182,46 @@ test('the Home Assistant PV switch setting is on the Tools MQTT card', async () 
   await page.waitForTimeout(500);
   assert.equal(api.settingsPosts.length > 0 && api.settingsPosts.at(-1).mqtt.pv_switch, true);
   await ctx.close();
+});
+
+test('the page says optimizers that also follow the RSS signal keep producing', async () => {
+  const { page, ctx } = await open({ hash: '#busmaster' });
+  await page.waitForSelector('#pv-card', { state: 'visible' });
+  assert.match(await page.textContent('#view-busmaster'), /also follow the RSS signal.*keep producing/s);
+  await ctx.close();
+});
+
+// The fixture's panels, all producing but for the ones named.
+function devicesProducing(names) {
+  return routes['/api/devices'].devices.map((d) => ({ ...d, power: names.includes(d.name) ? d.power : 0,
+    power_out: names.includes(d.name) ? d.power_out : 0, power_in: names.includes(d.name) ? d.power_in : 0 }));
+}
+
+test('a minute after off, it lists the panels still producing', async () => {
+  const since = Math.floor(Date.now() / 1000) - 120;
+  const { page, ctx } = await open({ hash: '#busmaster', pv: { on: false, since }, devices: devicesProducing(['D5', 'D6']) });
+  await page.waitForFunction(() => /still producing/.test(document.getElementById('pv-still').textContent));
+  assert.match(await page.textContent('#pv-still'), /^2 panels are still producing: D5, D6\./);
+  assert.match(await page.textContent('#pv-banner'), /2 panels still producing/);
+  await ctx.close();
+});
+
+test('all stopped: it says so', async () => {
+  const since = Math.floor(Date.now() / 1000) - 120;
+  const { page, ctx } = await open({ hash: '#busmaster', pv: { on: false, since }, devices: devicesProducing([]) });
+  await page.waitForFunction(() => /stopped/.test(document.getElementById('pv-still').textContent));
+  assert.match(await page.textContent('#pv-still'), /^Every panel has stopped producing\./);
+  await ctx.close();
+});
+
+test('in the first minute it is still checking, and with PV on it says nothing', async () => {
+  const since = Math.floor(Date.now() / 1000) - 10;
+  const { page, ctx } = await open({ hash: '#busmaster', pv: { on: false, since }, devices: devicesProducing(['D6']) });
+  await page.waitForFunction(() => /checking/i.test(document.getElementById('pv-still').textContent));
+  await ctx.close();
+  const on = await open({ hash: '#busmaster', devices: devicesProducing(['D6']) });
+  await on.page.waitForSelector('#pv-card', { state: 'visible' });
+  await on.page.waitForTimeout(600);
+  assert.equal((await on.page.textContent('#pv-still')).trim(), '');
+  await on.ctx.close();
 });

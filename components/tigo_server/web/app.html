@@ -1331,7 +1331,7 @@
 
       <div class="section-head">
         <div class="section-title">PV output</div>
-        <div class="section-sub">Turns the optimizers' output off and on through the TAP, as the CCA's PV-safe button did. It is not rapid shutdown: that is the RSD's job, which cuts the TAP's power.</div>
+        <div class="section-sub">Turns the optimizers' output off and on through the TAP, as the CCA's PV-safe button did. It is not rapid shutdown: that is the RSD's job, which cuts the TAP's power. Optimizers that also follow the RSS signal on the DC wiring keep producing while the inverter's transmitter runs; only the RSD stops those.</div>
       </div>
       <div class="tools-card" id="pv-card">
         <div class="cfg-row">
@@ -1339,6 +1339,7 @@
           <div class="cfg-ctrl"><button class="btn" id="pv-toggle">Turn off</button></div>
         </div>
         <div class="hint" id="pv-status"></div>
+        <div class="hint" id="pv-still"></div>
       </div>
 
       <div class="section-head" id="diag-master-head">
@@ -3508,12 +3509,33 @@
     status.dataset.standby = standingBy ? '1' : '';
     document.getElementById('bm-meta').textContent = standingBy ? 'standing by' : m.active ? 'running the bus' : 'not running';
   }
+  // A minute after an off, the panels still producing: the switch reaches
+  // only the optimizers that take their keep-alive from the mesh. Ones that
+  // also follow the RSS signal on the DC wiring keep going.
+  const PV_SETTLE_S = 60, PV_STILL_W = 5;
+  async function pvStillProducing(m) {
+    const el = document.getElementById('pv-still');
+    const pv = m && m.pv;
+    if (!pv || pv.on) { el.textContent = ''; return 0; }
+    if (Date.now() / 1000 - pv.since < PV_SETTLE_S) { el.textContent = 'Checking which panels stopped…'; return 0; }
+    const r = await apiFetch('/api/devices').catch(() => null);
+    const d = r && r.ok ? await r.json().catch(() => null) : null;
+    if (!d) return 0;
+    const still = (d.devices || []).filter(x => !x.stale && (x.power_out ?? x.power ?? 0) > PV_STILL_W)
+      .map(x => x.name || x.addr).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+    el.textContent = !still.length ? 'Every panel has stopped producing.'
+      : `${still.length} panel${still.length === 1 ? ' is' : 's are'} still producing: ${still.join(', ')}. ` +
+        'Optimizers that also follow the RSS signal on the DC wiring keep going while the inverter\'s transmitter runs.';
+    return still.length;
+  }
   async function refreshPv() {
     if (PLATFORM !== 'linux') return;
     const r = await apiFetch('/api/master').catch(() => null);
     const m = r && r.ok ? await r.json().catch(() => null) : null;
     pvLast = m;
     pvApply(m);
+    const still = await pvStillProducing(m && (m.role === 'master' || m.role === 'standby') ? m : null);
+    if (still) document.getElementById('pv-banner-text').textContent += ` · ${still} panel${still === 1 ? '' : 's'} still producing`;
     if (document.getElementById('view-busmaster').classList.contains('active')) refreshMasterDiagnostics(m);
   }
   document.getElementById('pv-toggle').addEventListener('click', async () => {

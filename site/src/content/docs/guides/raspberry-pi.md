@@ -178,6 +178,12 @@ array whatever the Pi is doing, and nothing here can stand in its way. A
 crashed Pi or a TAP that forgets could bring production back, so don't work
 on the array relying on it.
 
+It reaches only the optimizers that take their keep-alive from the TAP's
+mesh. Newer ones can also follow the RSS signal that an inverter's
+transmitter sends on the DC wiring, and those keep producing while the
+transmitter runs. A minute after you turn output off, the page lists any
+panels still producing, so you can see which ones on your site those are.
+
 The switch is on the **Bus master** page, which appears in the sidebar
 while the Pi runs or stands by for the bus. It needs a
 [web UI password](#set-a-password): without one anyone on your network
