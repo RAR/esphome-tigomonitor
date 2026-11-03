@@ -197,8 +197,10 @@ Only after that does the switch show up for anyone but the owner.
 1. ~~Where should the control live?~~ A new Bus master page, with a
    state-only pill in the sidebar (owner leaning, 2026-11-03; the pill
    that doesn't toggle is my call).
-2. After an RSD release (the TAP powers back up), should held-off stay off
-   (as above) or should PV come back on?
+2. ~~After an RSD release, should held-off stay off?~~ Yes (owner,
+   2026-11-03): PV was stopped on purpose before the RSD, so the TAP's
+   bring-up sends `00` only and it stays off until someone turns it on.
+   With the switch on, a release brings PV back as the CCA did.
 3. Home Assistant switch in the first version, or later as above?
 4. Is a confirm step enough for off, or should turning it off need the web
    password typed again?
