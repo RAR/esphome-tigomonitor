@@ -165,6 +165,41 @@ it; [HTTPS](#use-https) closes that.
 The MQTT password stays on the Pi: the web UI never shows it, and changing
 the broker's address or username clears it, so it has to be entered again.
 
+## Turn the array's output off
+
+When the Pi runs the bus in the CCA's place (bus role *master* or
+*standby* under **Tools**), it can do what the CCA's PV-safe button did:
+tell the TAP to turn the optimizers' output off, and on again later. It is
+the same command the CCA sends, and the TAP answers each one, so the Pi
+knows it arrived.
+
+This is not rapid shutdown. The RSD cuts the TAP's power, which stops the
+array whatever the Pi is doing, and nothing here can stand in its way. A
+crashed Pi or a TAP that forgets could bring production back, so don't work
+on the array relying on it.
+
+The switch is on the **Bus master** page, which appears in the sidebar
+while the Pi runs or stands by for the bus. It needs a
+[web UI password](#set-a-password): without one anyone on your network
+could turn the array off, so the Pi refuses. Turning output off asks first.
+While it's off:
+
+- the sidebar's **PV off** pill turns red, and every page says when and
+  from where it was turned off;
+- it stays off across a restart, an update, a TAP that loses power and
+  comes back (an RSD release included) and a standby taking over, until
+  someone turns it on. A standby learns it from the master it hears, and
+  can't change it while it stands by.
+
+To control it from Home Assistant, turn on **PV output switch** under
+**Tools → Home Assistant**. A *PV output* switch then appears with the
+monitor's other entities. Anyone who can publish to your broker can use
+it, so give the Pi its own broker login.
+
+On an ESP32 running the bus, `pv_output:` under `tigo_master:` adds the
+same switch; see the
+[Relay-1CH standby example](https://github.com/RAR/esphome-tigomonitor/blob/main/boards/example-waveshare-relay-1ch-standby.yaml).
+
 ## Watch it from a monitor
 
 `http://tigomonitor.local/api/health` answers HTTP 200 with
