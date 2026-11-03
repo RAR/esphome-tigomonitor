@@ -210,6 +210,10 @@ int main(int argc, char **argv) {
                                              return tuids;
                                            },
                                            settings.master_queries, settings.master_optimizer_writes);
+      // From reading the PV state to swapping the new master in, no request
+      // may land: one taken by the old master would be lost, and the new one
+      // would start from the state before it. The requests take this too.
+      std::unique_lock<std::mutex> swap(master_mu);
       m->set_pv(pv.state(), [&pv](const PvState &s) { pv.save(s); });
       // Standing by, it listens as the listen role does, learning the 0x41s
       // another master sends, and takes the latest of them when it takes over.
@@ -218,7 +222,6 @@ int main(int argc, char **argv) {
                        [&housekeeping] { return housekeeping.entries(); });
       if (dev.empty()) LOGW("bus master: no serial port chosen yet; pick the RS485 adapter under Tools");
       else m->open(dev, baud);
-      std::lock_guard<std::mutex> lock(master_mu);
       bus_master = std::move(m);
       return std::thread();
     }
@@ -260,13 +263,11 @@ int main(int argc, char **argv) {
     return m;
   };
   mqtt.set_master_status(master_status);
+  // Under master_mu, so it can't fall between start_input's read of the
+  // state and its swap. request_pv never waits on the bus.
   mqtt.set_pv_command([&](bool off) {
-    std::shared_ptr<BusMaster> bm;
-    {
-      std::lock_guard<std::mutex> lock(master_mu);
-      bm = bus_master;
-    }
-    return bm && bm->request_pv(off);
+    std::lock_guard<std::mutex> lock(master_mu);
+    return bus_master && bus_master->request_pv(off);
   });
   // HTTPS, if a certificate is set and loads. One that doesn't is no reason
   // to lock everyone out of the web UI they would fix it from. It is tried
@@ -293,16 +294,12 @@ int main(int argc, char **argv) {
       monitor, topology, history, cloud, cca, cca_http,
       master_status, tls.get(), tls_from_args, [&] { return steady_ms() - loop_pass_ms; },
       [&](bool off, std::string &why) {
-        std::shared_ptr<BusMaster> bm;
-        {
-          std::lock_guard<std::mutex> lock(master_mu);
-          bm = bus_master;
-        }
-        if (!bm) {
+        std::lock_guard<std::mutex> lock(master_mu);  // as the MQTT command's
+        if (!bus_master) {
           why = "this monitor isn't running the bus";
           return 409;
         }
-        if (!bm->request_pv(off)) {
+        if (!bus_master->request_pv(off)) {
           why = "standing by: change it on the device running the bus";
           return 409;
         }
