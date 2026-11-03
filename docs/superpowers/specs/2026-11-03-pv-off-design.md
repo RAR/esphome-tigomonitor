@@ -78,7 +78,9 @@ Still unproven:
 ### The state
 
 `pv_off`: false (default) or true. The owner sets it. On the Pi it's kept
-in `settings.json`; on the ESP32 in flash (an ESPHome preference).
+in `<state_dir>/pv.json` (not `settings.json`: a settings save rebuilds the
+bus master, and a heard state is state, not a setting; ruling in the plan);
+on the ESP32 in flash (an ESPHome preference).
 
 ### What the master sends
 
