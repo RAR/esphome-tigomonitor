@@ -10,8 +10,9 @@
 //   <base>/status                 online / offline (last will)
 //   <base>/system/state           {"power":…,"energy":…,"strings":{label:W},…}
 //   <base>/panel/<barcode>/state  {"power":…,"voltage_in":…, …}
-//   <base>/master/state           {"status":"active","problem":false,…}
+//   <base>/master/state           {"status":"active","problem":false,"pv":"ON",…}
 //                                 (the bus master role only)
+//   <base>/pv/set                 ON / OFF, from Home Assistant (mqtt.pv_switch only)
 //
 // A standby that's standing by sends only its status and master state; the
 // panels are the active master's (mqtt.standby_panels sends its readings
@@ -48,6 +49,8 @@ class MqttPublisher {
 
   // Where publish() reads the bus master's status, in the master role.
   void set_master_status(std::function<MasterStatus()> f) { master_status_ = std::move(f); }
+  // Where a PV switch command goes (true: off); false if it was refused.
+  void set_pv_command(std::function<bool(bool off)> f) { pv_command_ = std::move(f); }
 
   bool connected() const { return connected_; }
   std::string last_error() const;
@@ -75,6 +78,8 @@ class MqttPublisher {
   std::set<std::string> announced_, announced_strings_;
   bool standing_by_ = false;
   std::function<MasterStatus()> master_status_;
+  std::function<bool(bool off)> pv_command_;
+  void on_pv_command_(const std::string &payload);
   mutable std::mutex err_mu_;
   std::string last_error_;
 

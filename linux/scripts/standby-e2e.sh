@@ -226,4 +226,47 @@ expect "the TAP got 01" "$(stat "$out/tap3.json" "(d['pv'], d['session'][-1])")"
 kill $b; wait $b 2>/dev/null || true
 kill $tap; wait $tap 2>/dev/null || true
 
+# --- run 4: the PV switch in Home Assistant (mqtt.pv_switch) ---
+# Off by default: no switch announced, and a command does nothing. On: the
+# switch is announced, OFF reaches the TAP and the state follows. A standby
+# standing by ignores it.
+mkdir -p "$out/qa" "$out/qb"
+python3 linux/tools/mock_tap.py "$out/link-qa" --extra-link "$out/link-qb" --lease 600 --nodes 44 --stats "$out/tap4.json" &
+tap=$!
+sleep 0.5
+qsettings() {  # qsettings NAME TAKEOVER PORT PV_SWITCH
+  printf '{"bus_role": "standby", "standby_takeover_s": %s, "serial_port": "%s", "gateway_id": 4609, "web_port": %s, "web_password": "pw", "device_id": "%s", "publish_interval_s": 2, "mqtt": {"host": "127.0.0.1", "port": 18832, "pv_switch": %s}}\n' \
+    "$2" "$PWD/$out/link-$1" "$3" "$1" "$4" > "$out/$1/settings.json"
+}
+pvconfig() { mosquitto_sub -p 18832 -v --retained-only -W 2 -t "homeassistant/switch/tigomonitor_$1_pv_output/config" 2>/dev/null | wc -l; }
+qsettings qa 2 18115 false
+qsettings qb 6 18116 true
+start "$out/qa"; a=$pid
+start "$out/qb"; b=$pid
+trap 'kill $a $b $tap 2>/dev/null || true; pkill mosquitto || true' EXIT
+sleep 8
+expect "pv_switch off: no switch announced" "$(pvconfig qa)" 0
+mosquitto_pub -p 18832 -t tigomonitor/qa/pv/set -m OFF
+sleep 3
+expect "and OFF does nothing" "$(stat "$out/tap4.json" "d['pv']")" on
+expect "the standby announces its switch" "$(pvconfig qb)" 1
+mosquitto_pub -p 18832 -t tigomonitor/qb/pv/set -m OFF
+sleep 3
+expect "a standby standing by ignores OFF" "$(stat "$out/tap4.json" "d['pv']") $(grep -c 'PV switch: ignored' "$out/qb/daemon.log")" "on 1"
+kill $a $b; wait $a $b 2>/dev/null || true
+qsettings qa 2 18115 true
+start "$out/qa"; a=$pid
+b=0
+sleep 12
+expect "pv_switch on: announced" "$(pvconfig qa)" 1
+mosquitto_pub -p 18832 -t tigomonitor/qa/pv/set -m OFF
+for _ in $(seq 40); do [ "$(stat "$out/tap4.json" "d['pv']")" = off ] && break; sleep 0.25; done
+expect "OFF reaches the TAP" "$(stat "$out/tap4.json" "(d['pv'], d['session'][-1])")" "('off', '00')"
+expect "and the state says so" "$(mosquitto_sub -p 18832 -C 1 -W 10 -t tigomonitor/qa/master/state 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin)["pv"])')" OFF
+mosquitto_pub -p 18832 -t tigomonitor/qa/pv/set -m ON
+for _ in $(seq 40); do [ "$(stat "$out/tap4.json" "d['pv']")" = on ] && break; sleep 0.25; done
+expect "ON turns it back on" "$(stat "$out/tap4.json" "d['pv']")" on
+kill $a; wait $a 2>/dev/null || true
+kill $tap; wait $tap 2>/dev/null || true
+
 [ $fail = 0 ] && echo "standby e2e passed" || { echo "standby e2e FAILED; see $out/"; exit 1; }

@@ -31,6 +31,16 @@ struct MqttCallbacks {
     self->connected_ = true;
     self->need_discovery_ = true;  // the broker may have lost retained configs
     self->pub_(self->base_() + "/status", "online", true);
+    if (self->settings_.mqtt.pv_switch && runs_bus(self->settings_)) {
+      std::string t = self->base_() + "/pv/set";
+      mosquitto_subscribe(self->mosq_, nullptr, t.c_str(), 1);
+    }
+  }
+  static void on_message(mosquitto *, void *obj, const mosquitto_message *msg) {
+    auto *self = static_cast<MqttPublisher *>(obj);
+    if (msg->topic == nullptr || self->base_() + "/pv/set" != msg->topic) return;
+    std::string payload(static_cast<const char *>(msg->payload), static_cast<size_t>(msg->payloadlen));
+    self->on_pv_command_(payload);
   }
   static void on_disconnect(mosquitto *, void *obj, int rc) {
     auto *self = static_cast<MqttPublisher *>(obj);
@@ -90,6 +100,7 @@ void MqttPublisher::configure(const Settings &settings) {
   }
   mosquitto_connect_callback_set(mosq_, MqttCallbacks::on_connect);
   mosquitto_disconnect_callback_set(mosq_, MqttCallbacks::on_disconnect);
+  mosquitto_message_callback_set(mosq_, MqttCallbacks::on_message);
   mosquitto_reconnect_delay_set(mosq_, 2, 60, true);
   if (!settings_.mqtt.username.empty())
     mosquitto_username_pw_set(mosq_, settings_.mqtt.username.c_str(), settings_.mqtt.password.c_str());
@@ -294,6 +305,19 @@ void MqttPublisher::publish_master_discovery_(bool remove) {
       {"gap_recent_ms", "Bus master longest pause", "ms", "duration", "measurement", true},
       {"last_reply", "TAP last reply", nullptr, "timestamp", nullptr, true},
   };
+  uid = "tigomonitor_" + settings_.device_id + "_pv_output";
+  announce_("switch", uid,
+            {{"name", "PV output"},
+             {"unique_id", uid},
+             {"icon", "mdi:solar-power"},
+             {"command_topic", base_() + "/pv/set"},
+             {"state_topic", state},
+             {"value_template", "{{ value_json.pv }}"},
+             {"payload_on", "ON"},
+             {"payload_off", "OFF"},
+             {"availability_topic", base_() + "/status"},
+             {"device", device}},
+            remove || !settings_.mqtt.pv_switch);
   for (const auto &m : SYS) {
     uid = "tigomonitor_" + settings_.device_id + "_bus_master_" + m.key;
     json c = {{"name", m.name},
@@ -309,6 +333,16 @@ void MqttPublisher::publish_master_discovery_(bool remove) {
     if (m.diagnostic) c["entity_category"] = "diagnostic";
     announce_("sensor", uid, c, remove);
   }
+}
+
+// Home Assistant's PV output switch. Ignored (and logged) unless the setting
+// is on and this monitor runs the bus; then the state goes out at once.
+void MqttPublisher::on_pv_command_(const std::string &payload) {
+  if (!settings_.mqtt.pv_switch) return LOGW("MQTT PV switch: ignored %s: mqtt.pv_switch is off", payload.c_str());
+  if (payload != "ON" && payload != "OFF") return LOGW("MQTT PV switch: ignored \"%s\": not ON or OFF", payload.c_str());
+  if (!pv_command_ || !pv_command_(payload == "OFF"))
+    return LOGW("MQTT PV switch: ignored %s: standing by, or not running the bus", payload.c_str());
+  if (master_status_) publish_master_();
 }
 
 void MqttPublisher::publish_master_() {
@@ -337,7 +371,8 @@ void MqttPublisher::publish_master_() {
             {"renewals", m.renewals},
             {"tap_lost", m.tap_lost},
             {"gap_recent_ms", m.gap_recent_ms},
-            {"last_reply", last_reply}};
+            {"last_reply", last_reply},
+            {"pv", m.pv.off ? "OFF" : "ON"}};
   if (m.standby != Standby::off) {
     s["takeovers"] = m.takeovers;
     s["yields"] = m.yields;

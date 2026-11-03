@@ -260,6 +260,14 @@ int main(int argc, char **argv) {
     return m;
   };
   mqtt.set_master_status(master_status);
+  mqtt.set_pv_command([&](bool off) {
+    std::shared_ptr<BusMaster> bm;
+    {
+      std::lock_guard<std::mutex> lock(master_mu);
+      bm = bus_master;
+    }
+    return bm && bm->request_pv(off);
+  });
   // HTTPS, if a certificate is set and loads. One that doesn't is no reason
   // to lock everyone out of the web UI they would fix it from. It is tried
   // again every 10 s, and once it loads the service restarts to serve it:

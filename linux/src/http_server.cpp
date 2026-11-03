@@ -1348,7 +1348,8 @@ void HttpServer::routes_() {
                       {"discovery", s.mqtt.discovery},
                       {"discovery_prefix", s.mqtt.discovery_prefix},
                       {"base_topic", s.mqtt.base_topic},
-                      {"standby_panels", s.mqtt.standby_panels}}},
+                      {"standby_panels", s.mqtt.standby_panels},
+                      {"pv_switch", s.mqtt.pv_switch}}},
                     {"mqtt_connected", ctx_.mqtt_connected()},
                     {"mqtt_error", ctx_.mqtt_error()}});
   });
@@ -1401,6 +1402,7 @@ void HttpServer::routes_() {
         if (m.contains("discovery_prefix")) s.mqtt.discovery_prefix = m["discovery_prefix"].get<std::string>();
         if (m.contains("base_topic")) s.mqtt.base_topic = m["base_topic"].get<std::string>();
         if (m.contains("standby_panels")) s.mqtt.standby_panels = m["standby_panels"].get<bool>();
+        if (m.contains("pv_switch")) s.mqtt.pv_switch = m["pv_switch"].get<bool>();
       }
     } catch (const json::exception &) {
       err = "A setting has the wrong type.";

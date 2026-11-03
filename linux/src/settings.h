@@ -21,6 +21,9 @@ struct MqttSettings {
   // is on; then its readings too, though Home Assistant isn't told of its
   // panels until it takes the bus over.
   bool standby_panels = false;
+  // A PV output switch in Home Assistant (<base>/pv/set). Off by default:
+  // anyone who can publish to the broker could turn the array off with it.
+  bool pv_switch = false;
 };
 
 struct Settings {

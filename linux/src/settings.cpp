@@ -68,6 +68,7 @@ Settings load_settings(const std::string &path) {
     get(*m, "discovery_prefix", s.mqtt.discovery_prefix);
     get(*m, "base_topic", s.mqtt.base_topic);
     get(*m, "standby_panels", s.mqtt.standby_panels);
+    get(*m, "pv_switch", s.mqtt.pv_switch);
   }
   if (s.publish_interval_s < 5) s.publish_interval_s = 5;
   if (s.web_port < 0 || s.web_port > 65535) s.web_port = 0;
@@ -121,7 +122,8 @@ static json to_json(const Settings &s) {
         {"discovery", s.mqtt.discovery},
         {"discovery_prefix", s.mqtt.discovery_prefix},
         {"base_topic", s.mqtt.base_topic},
-        {"standby_panels", s.mqtt.standby_panels}}},
+        {"standby_panels", s.mqtt.standby_panels},
+        {"pv_switch", s.mqtt.pv_switch}}},
   };
 }
 
