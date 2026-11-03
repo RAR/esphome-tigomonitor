@@ -620,7 +620,7 @@ static Frame cca41(uint8_t seq, uint16_t tuid, uint8_t stream, uint8_t tail = 0x
 
 static void test_housekeeping_allow() {
   CHECK(classify_request(CMD_SESSION, {0x01}) == Allow::yes);
-  CHECK(classify_request(CMD_SESSION, {0x00}) == Allow::startup_only);
+  CHECK(classify_request(CMD_SESSION, {PV_OFF}) == Allow::pv_off);
   CHECK(classify_request(CMD_SESSION, {0x02}) == Allow::bench_only);
   CHECK(classify_request(CMD_SESSION, {}) == Allow::bench_only);
   CHECK(!may_send(CMD_SESSION, {0x00}, false, false) && may_send(CMD_SESSION, {0x00}, false, true));
@@ -1075,6 +1075,104 @@ static void test_next_request_housekeeping() {
   CHECK(next_request(lease, cursor, seq, 7000).cmd == CMD_POLL);
 }
 
+// The PV switch: 0x0B00 00 off, 01 on (the CCA's CUpdaterPvOff; the roof's
+// 0x0B00 [01] -> 0x0B01 [01]). Off goes out at once, is retried until the
+// TAP's reply carries it, and no 01 goes out while it is held.
+static Frame session_reply(uint8_t v) {
+  Frame f;
+  f.cmd = CMD_SESSION_REPLY;
+  f.payload = {v};
+  return f;
+}
+
+static void test_pv_switch() {
+  // The guard: 00 only while off is held, or in a bring-up.
+  CHECK(classify_request(CMD_SESSION, {PV_OFF}) == Allow::pv_off);
+  CHECK(!may_send(CMD_SESSION, {PV_OFF}, true, false, true, false));  // bench and writes don't open it
+  CHECK(may_send(CMD_SESSION, {PV_OFF}, false, false, false, /*pv_off=*/true));
+  CHECK(may_send(CMD_SESSION, {PV_OFF}, false, /*startup=*/true));
+  CHECK(classify_request(CMD_SESSION, {PV_ON}) == Allow::yes);
+  CHECK(classify_request(CMD_SESSION, {0x02}) == Allow::bench_only);
+
+  // Immediate, one at a time, retried, then flagged.
+  PvSwitch pv(false, /*hourly=*/true, 0);
+  CHECK(pv.due(0).cmd == 0 && !pv.off() && pv.value() == PV_ON);
+  pv.set_off(true, 1000);
+  Request r = pv.due(1000);
+  CHECK(r.cmd == CMD_SESSION && r.payload == Bytes{PV_OFF});
+  CHECK(pv.due(1001).cmd == 0);
+  CHECK(pv.last_sent() == PV_OFF && pv.last_reply() == -1 && !pv.confirmed());
+  pv.on_reply(r, false, {}, 1001);
+  CHECK(pv.due(1001 + PvSwitch::RETRY_MS - 1).cmd == 0);
+  uint32_t t = 1001 + PvSwitch::RETRY_MS;
+  for (uint32_t i = 0; i < PvSwitch::RETRIES; i++) {
+    r = pv.due(t);
+    CHECK(r.cmd == CMD_SESSION && r.payload == Bytes{PV_OFF});
+    CHECK(!pv.unconfirmed());
+    pv.on_reply(r, true, session_reply(PV_ON), t);  // the wrong byte
+    t += PvSwitch::RETRY_MS;
+  }
+  CHECK(pv.unconfirmed() && !pv.confirmed() && pv.last_reply() == PV_ON);
+  CHECK(pv.due(t).cmd == 0);  // no more retries until the hour
+  // The hourly re-assert, with no housekeeping to send it: 00, never 01.
+  r = pv.due(1000 + PvSwitch::HOURLY_MS);
+  CHECK(r.cmd == CMD_SESSION && r.payload == Bytes{PV_OFF});
+  pv.on_reply(r, true, session_reply(PV_OFF), 1000 + PvSwitch::HOURLY_MS);
+  CHECK(pv.confirmed() && !pv.unconfirmed() && pv.last_reply() == PV_OFF);
+  CHECK(pv.due(1000 + PvSwitch::HOURLY_MS + PvSwitch::RETRY_MS).cmd == 0);
+
+  // The latest wins: off then on before any reply leaves one pending 01.
+  PvSwitch l(false, true, 0);
+  l.set_off(true, 0);
+  l.set_off(false, 10);
+  r = l.due(10);
+  CHECK(r.cmd == CMD_SESSION && r.payload == Bytes{PV_ON} && l.due(11).cmd == 0);
+  l.on_reply(r, true, session_reply(PV_ON), 11);
+  CHECK(l.confirmed());
+  // On, and housekeeping sends the hourly: nothing from the switch itself.
+  PvSwitch quiet(false, /*hourly=*/false, 0);
+  CHECK(quiet.due(PvSwitch::HOURLY_MS).cmd == 0);
+  // Off held at start: 00 at once.
+  PvSwitch held(true, false, 0);
+  r = held.due(0);
+  CHECK(r.cmd == CMD_SESSION && r.payload == Bytes{PV_OFF});
+
+  // Housekeeping takes its byte from the switch.
+  HousekeepingPlan plan;
+  plan.bring_up_reads = true;
+  plan.session_reset = true;
+  plan.send_41 = false;
+  plan.walks = false;
+  uint8_t seq = 0;
+  PvSwitch off(true, false, 0);
+  Housekeeping hk({}, 0, plan, 1);
+  hk.set_pv(&off);
+  std::string got = shape(run(hk, 0, seq));
+  CHECK(got.rfind("000a: 0e02:* 0b00:00* 0d:0000* 0d:0001* 22:0000", 0) == 0);  // 00 once, no 01
+  if (got.find("0b00:01") != std::string::npos) std::printf("    got  %s\n", got.c_str());
+  for (uint32_t t2 = 1000; t2 < Housekeeping::SESSION_EVERY_MS; t2 += 1000) run(hk, t2, seq);
+  CHECK(shape(run(hk, Housekeeping::SESSION_EVERY_MS, seq)).rfind("0b00:00 ", 0) == 0);
+  CHECK(shape(run(hk, Housekeeping::SESSION_EVERY_MS + 1000, seq)) == "22:0000 ");
+  Housekeeping warm({}, 0, HousekeepingPlan{}, 1);
+  warm.set_pv(&off);
+  CHECK(shape(run(warm, 0, seq)).rfind("0b00:00 22:0000", 0) == 0);
+  // On: today's sequence.
+  PvSwitch on(false, false, 0);
+  Housekeeping same({}, 0, plan, 1);
+  same.set_pv(&on);
+  CHECK(shape(run(same, 0, seq)).rfind("000a: 0e02:* 0b00:00* 0d:0000* 0b00:01 0d:0001*", 0) == 0);
+
+  // A pending switch goes ahead of the lease.
+  LeaseKeeper lease;
+  PollCursor cursor(0);
+  PvSwitch now(false, true, 0);
+  now.set_off(true, 0);
+  r = next_request(lease, cursor, seq, 0, nullptr, nullptr, &now);
+  CHECK(r.cmd == CMD_SESSION && r.payload == Bytes{PV_OFF});
+  r = next_request(lease, cursor, seq, 0, nullptr, nullptr, &now);
+  CHECK(r.payload == tunnel_request(SUB_LEASE_CHECK, seq, {}));
+}
+
 int main() {
   test_discovery();
   test_discovery_scan();
@@ -1096,6 +1194,7 @@ int main() {
   test_bring_up_plan();
   test_walks();
   test_queries();
+  test_pv_switch();
   if (failures) {
     std::printf("%d failed\n", failures);
     return 1;

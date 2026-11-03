@@ -101,7 +101,16 @@ static const uint8_t SUB_LEASE_CLEAR = 0x2B;
 static const uint8_t SUB_LEASE_REPLY = 0x2F;
 // Sub 0x41 and command 0x0B00: the CCA's housekeeping (Housekeeping, below).
 static const uint8_t SUB_HOUSEKEEPING = 0x41;
+// The PV switch, though we first copied it as a "session" frame: one byte,
+// 00 off, anything else on (the CCA sends 01). From the 4.0.3 CCA's
+// CUpdaterPvOff (FillPvOffCommand: command 0x0B00, one payload byte; "OFF"
+// when it is 0). The roof CCA sent 01 every hour and 00 then 01 after each
+// of its reboots; the TAP answers 0x0B01 with the same byte (the roof
+// capture: 0x0B00 [01] -> 0x0B01 [01]). Zero is off: never write a bare byte.
 static const uint16_t CMD_SESSION = 0x0B00;
+static const uint16_t CMD_SESSION_REPLY = 0x0B01;
+static const uint8_t PV_OFF = 0x00;
+static const uint8_t PV_ON = 0x01;
 
 inline Bytes tunnel_request(uint8_t sub, uint8_t seq, const Bytes &args) {
   Bytes out = {0x00, 0x00, 0x00, sub, seq};
@@ -355,7 +364,7 @@ struct Request {
 //     reboots. What they mean isn't known, so they are copied, not composed.
 //   - 0x0B00 with 01, every hour; after the CCA reboots, 00 then 01 once.
 //   - tunnel sub 0x22, empty, to the broadcast address then the TAP, a second
-//     apart, a second after each 0x0B00 01.
+//     apart, a second after each 0x0B00 01 (the PV switch, CMD_SESSION).
 //   - tunnel sub 0x26, the TAP's node table a page at a time, each page from
 //     where the last reply ended: twice over, every 15 minutes.
 //   - after re-addressing a TAP: VERSION, 0x0E02 and a tunnel 0x0D pair
@@ -412,6 +421,95 @@ class Learned41 {
     return true;
   }
   std::vector<Entry> entries_;
+};
+
+// The PV state the master holds, and every 0x0B00 that isn't housekeeping's.
+// A change goes out in the next request slot, as the CCA's PV-OFF overrides
+// its queue. The TAP's reply must carry the byte that was sent; one that
+// doesn't (or no reply) is sent again RETRY_MS later, up to RETRIES times,
+// then unconfirmed() says so until a reply matches. While off is held it
+// re-asserts 00 every HOURLY_MS if hourly (no housekeeping sends the hourly
+// 0x0B00), and Housekeeping takes its byte from value() (set_pv), so no 01
+// goes out while off is held. An unconfirmed hourly 01 from housekeeping
+// with PV on is left as before: no retries.
+class PvSwitch {
+ public:
+  static const uint32_t RETRY_MS = 5000;
+  static const uint32_t RETRIES = 5;
+  static const uint32_t HOURLY_MS = 3600000;
+
+  PvSwitch(bool off, bool hourly, uint32_t now_ms)
+      : off_(off), hourly_(hourly), pending_(off), due_ms_(now_ms), next_hourly_ms_(now_ms + HOURLY_MS) {}
+
+  void set_off(bool off, uint32_t now_ms) {
+    off_ = off;
+    pending_ = true;
+    due_ms_ = now_ms;
+    next_hourly_ms_ = now_ms + HOURLY_MS;
+    awaiting_ = false;
+    retries_ = 0;
+    confirmed_ = unconfirmed_ = false;
+  }
+  bool off() const { return off_; }
+  uint8_t value() const { return off_ ? PV_OFF : PV_ON; }
+
+  // The 0x0B00 due now, or one with cmd 0. One at a time: the next waits
+  // for on_reply.
+  Request due(uint32_t now_ms) {
+    if (awaiting_) return {};
+    if (!pending_ && hourly_ && off_ && static_cast<int32_t>(now_ms - next_hourly_ms_) >= 0) {
+      pending_ = true;
+      due_ms_ = now_ms;
+      retries_ = 0;
+    }
+    if (!pending_ || static_cast<int32_t>(now_ms - due_ms_) < 0) return {};
+    if (static_cast<int32_t>(now_ms - next_hourly_ms_) >= 0) next_hourly_ms_ = now_ms + HOURLY_MS;
+    pending_ = false;
+    awaiting_ = true;
+    last_sent_ = value();
+    return {CMD_SESSION, {value()}};
+  }
+  // Every 0x0B00 sent, whoever built it.
+  void on_reply(const Request &req, bool ok, const Frame &reply, uint32_t now_ms) {
+    if (req.cmd != CMD_SESSION || req.payload.size() != 1) return;
+    uint8_t sent = req.payload[0];
+    bool ours = awaiting_ && sent == last_sent_;
+    if (ours) awaiting_ = false;
+    bool answered = ok && reply.cmd == CMD_SESSION_REPLY && reply.payload.size() == 1;
+    if (answered) last_reply_ = reply.payload[0];
+    if (sent != value()) return;  // the bring-up's 00 with PV on, or a superseded send
+    if (answered && reply.payload[0] == sent) {
+      confirmed_ = true;
+      unconfirmed_ = false;
+      retries_ = 0;
+      return;
+    }
+    if (!ours && !off_) return;
+    confirmed_ = false;
+    if (retries_ < RETRIES) {
+      retries_++;
+      pending_ = true;
+      due_ms_ = now_ms + RETRY_MS;
+    } else {
+      unconfirmed_ = true;
+    }
+  }
+
+  bool confirmed() const { return confirmed_; }
+  bool unconfirmed() const { return unconfirmed_; }
+  int last_sent() const { return last_sent_; }
+  int last_reply() const { return last_reply_; }
+
+ private:
+  bool off_;
+  bool hourly_;
+  bool pending_;
+  uint32_t due_ms_;
+  uint32_t next_hourly_ms_;
+  bool awaiting_ = false;
+  uint32_t retries_ = 0;
+  bool confirmed_ = false, unconfirmed_ = false;
+  int last_sent_ = -1, last_reply_ = -1;
 };
 
 // What a Housekeeping sends. The CCA's order after it re-addresses a TAP
@@ -473,9 +571,10 @@ class Housekeeping {
       opening_.push_back({0x000A, 0, {}, false, 0});
       opening_.push_back({0x0E02, 0, {}, true, 0});
     }
-    if (plan.session && plan.session_reset) opening_.push_back({CMD_SESSION, 0, {0x00}, true, 0});
+    opening_reset_ = plan.session && plan.session_reset;
+    if (opening_reset_) opening_.push_back({CMD_SESSION, 0, {PV_OFF}, true, 0});
     if (plan.bring_up_reads) opening_.push_back({CMD_TUNNEL, 0x0D, {0x00, 0x00}, true, 0});
-    if (plan.session) opening_.push_back({CMD_SESSION, 0, {0x01}, false, 0});
+    if (plan.session) opening_.push_back({CMD_SESSION, 0, {PV_ON}, false, 0});
     if (plan.bring_up_reads) opening_.push_back({CMD_TUNNEL, 0x0D, {0x00, 0x01}, true, 0});
     if (plan.broadcast) {  // the second a second later, the walk starting between
       opening_.push_back({CMD_TUNNEL, 0x22, {0x00, 0x00}, false, 0});
@@ -505,8 +604,19 @@ class Housekeeping {
   }
 
   // The next request due, or one with cmd 0. A tunnel request takes the next seq.
+  // Where the 0x0B00s take their byte: with PV off held, the hourly and
+  // the opening's 01 become 00, and after a bring-up's 00 the 01 is dropped.
+  void set_pv(const PvSwitch *pv) { pv_ = pv; }
+
   Request due(uint32_t now_ms, uint8_t &seq) {
-    if (opening_next_ < opening_.size()) return emit_(opening_[opening_next_++], seq);
+    while (opening_next_ < opening_.size()) {
+      Item it = opening_[opening_next_++];
+      if (it.cmd == CMD_SESSION && pv_ && pv_->off() && it.args == Bytes{PV_ON}) {
+        if (opening_reset_) continue;
+        it.args = {PV_OFF};
+      }
+      return emit_(it, seq);
+    }
     for (size_t k = 0; k < later_.size(); k++)
       if (static_cast<int32_t>(now_ms - later_[k].at_ms) >= 0) {
         Item it = later_[k];
@@ -519,7 +629,7 @@ class Housekeeping {
         later_.push_back({CMD_TUNNEL, 0x22, {0x00, 0x00}, false, now_ms + BROADCAST_GAP_MS});
         later_.push_back({CMD_TUNNEL, 0x22, {0x00, 0x01}, false, now_ms + 2 * BROADCAST_GAP_MS});
       }
-      if (plan_.session) return emit_({CMD_SESSION, 0, {0x01}, false, 0}, seq);
+      if (plan_.session) return emit_({CMD_SESSION, 0, {pv_ ? pv_->value() : PV_ON}, false, 0}, seq);
     }
     if (plan_.walks) {
       if (walk_waiting_ && now_ms - walk_sent_ms_ >= WALK_REPLY_MS) end_walk_();  // never answered
@@ -648,6 +758,8 @@ class Housekeeping {
   }
 
   HousekeepingPlan plan_;
+  const PvSwitch *pv_ = nullptr;
+  bool opening_reset_ = false;  // the opening has the bring-up's 00
   uint32_t start_ms_;
   uint32_t next_tick_ms_;
   uint32_t next_walk_ms_;
@@ -844,7 +956,13 @@ class Queries {
 // there is any), then queries (if there are any), a poll otherwise. seq is
 // the last tunnel sequence number used, advanced when one is.
 inline Request next_request(LeaseKeeper &lease, const PollCursor &cursor, uint8_t &seq, uint32_t now_ms,
-                            Housekeeping *housekeeping = nullptr, Queries *queries = nullptr) {
+                            Housekeeping *housekeeping = nullptr, Queries *queries = nullptr, PvSwitch *pv = nullptr) {
+  // A PV switch goes in the next slot, ahead even of the lease: one
+  // request's delay is nothing to a 900 s lease.
+  if (pv) {
+    Request r = pv->due(now_ms);
+    if (r.cmd) return r;
+  }
   LeaseAction a = lease.due(now_ms);
   if (a.kind == LeaseAction::none) {
     if (housekeeping) {
@@ -1079,7 +1197,9 @@ class Discovery {
 // 37 24 92 66. Nothing in this code sends them, whatever the settings.
 // optimizer_write: the two settings the CCA writes to optimizers whose
 // replies ask for it (Queries), sent only with that setting on.
-enum class Allow { yes, bench_only, startup_only, optimizer_write, never };
+// pv_off: the PV switch's 00, sent only while the owner holds PV off (or
+// in a bring-up, as the CCA's after its reboot).
+enum class Allow { yes, bench_only, startup_only, optimizer_write, pv_off, never };
 
 
 inline Allow classify_request(uint16_t cmd, const Bytes &payload) {
@@ -1104,7 +1224,7 @@ inline Allow classify_request(uint16_t cmd, const Bytes &payload) {
   if (cmd == 0x0E02) return payload.empty() ? Allow::startup_only : Allow::bench_only;
   // The CCA's hourly 01; its 00 only follows its own reboot, so bring-up only.
   if (cmd == CMD_SESSION)
-    return payload == Bytes{0x01} ? Allow::yes : payload == Bytes{0x00} ? Allow::startup_only : Allow::bench_only;
+    return payload == Bytes{PV_ON} ? Allow::yes : payload == Bytes{PV_OFF} ? Allow::pv_off : Allow::bench_only;
   if (cmd == CMD_POLL)
     return payload.size() == 5 && payload[0] == 0x00 && payload[1] <= 0x01 && payload[4] == 0x04 ? Allow::yes
                                                                                                : Allow::bench_only;
@@ -1151,12 +1271,14 @@ inline Allow classify_request(uint16_t cmd, const Bytes &payload) {
   }
 }
 
-inline bool may_send(uint16_t cmd, const Bytes &payload, bool bench, bool startup = false, bool writes = false) {
+inline bool may_send(uint16_t cmd, const Bytes &payload, bool bench, bool startup = false, bool writes = false,
+                     bool pv_off = false) {
   switch (classify_request(cmd, payload)) {
     case Allow::yes: return true;
     case Allow::bench_only: return bench;  // startup is not bench: a bring-up sends only its own
     case Allow::startup_only: return startup;
     case Allow::optimizer_write: return writes;
+    case Allow::pv_off: return pv_off || startup;
     case Allow::never: return false;
   }
   return false;
