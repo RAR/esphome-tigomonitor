@@ -623,6 +623,10 @@
   /* Device Configuration rows */
   .cfg-row { display: flex; gap: 14px; align-items: center; padding: 12px; background: var(--bg-3); border-radius: 6px; margin-bottom: 8px; flex-wrap: wrap; }
   .cfg-row:last-child { margin-bottom: 0; }
+  .pv-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+  .pv-msg { font-size: 13px; line-height: 1.5; color: var(--text-dim); }
+  .pv-msg:not(:empty) { margin-top: 10px; }
+  .pv-note { font-size: 12px; line-height: 1.5; color: var(--text-dim); margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); max-width: 75ch; }
   /* A setting row is a two-column form: the label on the left, its controls
      starting at the same line on the right, so the fields line up down the
      card instead of shrinking against the right edge. One column on a phone. */
@@ -1337,15 +1341,15 @@
 
       <div class="section-head">
         <div class="section-title">PV output</div>
-        <div class="section-sub">Turns the optimizers' output off and on through the TAP, as the CCA's PV-safe button did. It is not rapid shutdown: that is the RSD's job, which cuts the TAP's power. Optimizers that also follow the RSS signal on the DC wiring keep producing while the inverter's transmitter runs; only the RSD stops those.</div>
       </div>
       <div class="tools-card" id="pv-card">
-        <div class="cfg-row">
+        <div class="pv-row">
           <div class="cfg-text"><strong id="pv-state">PV output is on</strong><span id="pv-detail">—</span></div>
-          <div class="cfg-ctrl"><button class="btn" id="pv-toggle">Turn off</button></div>
+          <button class="btn" id="pv-toggle">Turn off</button>
         </div>
-        <div class="hint" id="pv-status"></div>
-        <div class="hint" id="pv-still"></div>
+        <div class="pv-msg" id="pv-status"></div>
+        <div class="pv-msg" id="pv-still"></div>
+        <p class="pv-note">The CCA's PV-safe button, sent through the TAP. Not rapid shutdown: the RSD does that. Optimizers that also follow the RSS signal keep producing while the inverter's transmitter runs.</p>
       </div>
 
       <div class="section-head" id="diag-master-head">
