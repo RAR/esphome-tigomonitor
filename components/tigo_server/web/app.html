@@ -111,6 +111,12 @@
 
   .conn { padding: 12px 20px; border-top: 1px solid var(--border); font-size: 11px; color: var(--text-dim); display: flex; justify-content: space-between; align-items: center; }
   .pill { display: inline-flex; align-items: center; gap: 6px; }
+  .pv-pill { display: block; margin: 8px 12px; padding: 6px 11px; border: 1px solid var(--border); border-radius: 8px;
+             font-size: 12.5px; font-weight: 600; color: var(--text-dim); text-decoration: none; }
+  .pv-pill.off { color: var(--bad); border-color: var(--bad); }
+  .pv-banner { display: flex; gap: 12px; align-items: center; margin: 0 0 16px; padding: 10px 14px; border-radius: 8px;
+               border: 1px solid var(--bad); color: var(--bad); font-weight: 600; font-size: 14px; }
+  .pv-banner a { color: inherit; }
   .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--good); box-shadow: 0 0 8px var(--good); }
   .theme-toggle {
     background: none; border: 1px solid var(--border); color: var(--text-dim);
@@ -820,10 +826,15 @@
       <button data-view="nodes"><span class="icon">≡</span> Node Table</button>
       <button data-view="tools"><span class="icon">⚙</span> Tools</button>
       <button data-view="diagnostics"><span class="icon">◈</span> Diagnostics</button>
+      <button data-view="busmaster" id="nav-busmaster" style="display:none"><span class="icon">◎</span> Bus master</button>
       <button data-view="logs" data-linux-only style="display:none"><span class="icon">☰</span> Logs</button>
       <button data-view="cca"><span class="icon">◉</span> CCA Info</button>
       <button data-view="cloudstatus" id="nav-cloudstatus" style="display:none"><span class="icon">☁</span> Tigo Cloud</button>
     </nav>
+
+    <!-- The PV output state, on the Pi running (or standing by for) the bus.
+         It shows the state and links to the switch; it never switches it. -->
+    <a id="pv-pill" class="pv-pill" href="#busmaster" style="display:none" title="PV output: open Bus master">PV on</a>
 
     <!-- Tigo cloud status box — shown only when a cloud connection is configured. -->
     <div id="cloud-box" style="display:none;margin:8px 12px;padding:9px 11px;border:1px solid var(--border);border-radius:8px;cursor:pointer" title="Open Cloud Status">
@@ -848,6 +859,10 @@
 
   <!-- ===== Main content ===== -->
   <main>
+    <div id="pv-banner" class="pv-banner" style="display:none">
+      <span id="pv-banner-text">PV output is off</span>
+      <a href="#busmaster">Bus master</a>
+    </div>
     <!-- DASHBOARD -->
     <section class="view active" id="view-dashboard">
       <div class="topbar">
@@ -1118,6 +1133,10 @@
           <div class="cfg-text"><strong>Panel readings while standing by</strong><span>For a standby: off, it sends only its own status until it takes the bus, so the panels come from the master alone. On, it sends its readings to the topic above too. Home Assistant's panels follow whichever one runs the bus either way</span></div>
           <div class="cfg-ctrl"><label class="cfg-switch"><input type="checkbox" id="pi-mqtt-standby-panels"> <span>Off</span></label></div>
         </div>
+        <div class="cfg-row">
+          <div class="cfg-text"><strong>PV output switch</strong><span>A switch in Home Assistant that turns the array's output off and on (Bus master page). Anyone who can publish to the broker can use it: give this monitor its own broker login</span></div>
+          <div class="cfg-ctrl"><label class="cfg-switch"><input type="checkbox" id="pi-mqtt-pv-switch"> <span>Off</span></label></div>
+        </div>
         <div class="tools-actions" style="margin-top:12px">
           <button class="btn primary" id="pi-save">Save</button>
         </div>
@@ -1293,6 +1312,74 @@
     </section>
 
     <!-- DIAGNOSTICS -->
+    <!-- BUS MASTER (the Pi, running or standing by for the bus) -->
+    <section class="view" id="view-busmaster">
+      <div class="topbar">
+        <h1>Bus master</h1>
+        <div class="topbar-meta" id="bm-meta">—</div>
+      </div>
+
+      <div class="section-head">
+        <div class="section-title">PV output</div>
+        <div class="section-sub">Turns the optimizers' output off and on through the TAP, as the CCA's PV-safe button did. It is not rapid shutdown: that is the RSD's job, which cuts the TAP's power.</div>
+      </div>
+      <div class="tools-card" id="pv-card">
+        <div class="cfg-row">
+          <div class="cfg-text"><strong id="pv-state">PV output is on</strong><span id="pv-detail">—</span></div>
+          <div class="cfg-ctrl"><button class="btn" id="pv-toggle">Turn off</button></div>
+        </div>
+        <div class="hint" id="pv-status"></div>
+      </div>
+
+      <div class="section-head" id="diag-master-head">
+        <div class="section-title">Bus master</div>
+        <div class="section-sub" id="diag-master-sub">—</div>
+      </div>
+      <div class="hist-stat-grid" id="diag-master">
+        <div class="hist-stat-card">
+          <div class="hist-stat-label">Run lease</div>
+          <div class="hist-stat-val" id="diag-lease">—<span class="hist-stat-unit">s</span></div>
+          <div class="hist-stat-sub" id="diag-lease-sub">—</div>
+        </div>
+        <div class="hist-stat-card">
+          <div class="hist-stat-label">Renewals</div>
+          <div class="hist-stat-val" id="diag-renewals">—</div>
+          <div class="hist-stat-sub">since the service started</div>
+        </div>
+        <div class="hist-stat-card">
+          <div class="hist-stat-label">Polls</div>
+          <div class="hist-stat-val" id="diag-polls">—</div>
+          <div class="hist-stat-sub" id="diag-timeouts">— unanswered</div>
+        </div>
+        <div class="hist-stat-card">
+          <div class="hist-stat-label">Longest pause, last 5–10 min</div>
+          <div class="hist-stat-val" id="diag-gap">—<span class="hist-stat-unit">ms</span></div>
+          <div class="hist-stat-sub" id="diag-gap-sub">—</div>
+        </div>
+        <div class="hist-stat-card">
+          <div class="hist-stat-label">Gateway dropouts</div>
+          <div class="hist-stat-val" id="diag-tap-lost">—</div>
+          <div class="hist-stat-sub" id="diag-tap-lost-sub">—</div>
+        </div>
+        <div class="hist-stat-card">
+          <div class="hist-stat-label">Housekeeping</div>
+          <div class="hist-stat-val" id="diag-housekeeping">—</div>
+          <div class="hist-stat-sub" id="diag-housekeeping-sub">—</div>
+        </div>
+        <div class="hist-stat-card">
+          <div class="hist-stat-label">Optimizer queries</div>
+          <div class="hist-stat-val" id="diag-queries">—</div>
+          <div class="hist-stat-sub" id="diag-queries-sub">—</div>
+        </div>
+        <div class="hist-stat-card">
+          <div class="hist-stat-label">Gateway version</div>
+          <div class="hist-stat-val" id="diag-tap-version" style="font-size:18px">—</div>
+          <div class="hist-stat-sub" id="diag-tap-version-sub">—</div>
+        </div>
+      </div>
+
+    </section>
+
     <section class="view" id="view-diagnostics">
       <div class="topbar">
         <h1>Diagnostics</h1>
@@ -1353,53 +1440,6 @@
           <div class="hist-stat-label">Active sockets</div>
           <div class="hist-stat-val" id="diag-sockets">—<span class="hist-stat-unit" id="diag-sockets-of">/ —</span></div>
           <div class="hist-stat-sub" id="diag-tasks">— FreeRTOS tasks</div>
-        </div>
-      </div>
-
-      <div class="section-head" id="diag-master-head" style="display:none">
-        <div class="section-title">Bus master</div>
-        <div class="section-sub" id="diag-master-sub">—</div>
-      </div>
-      <div class="hist-stat-grid" id="diag-master" style="display:none">
-        <div class="hist-stat-card">
-          <div class="hist-stat-label">Run lease</div>
-          <div class="hist-stat-val" id="diag-lease">—<span class="hist-stat-unit">s</span></div>
-          <div class="hist-stat-sub" id="diag-lease-sub">—</div>
-        </div>
-        <div class="hist-stat-card">
-          <div class="hist-stat-label">Renewals</div>
-          <div class="hist-stat-val" id="diag-renewals">—</div>
-          <div class="hist-stat-sub">since the service started</div>
-        </div>
-        <div class="hist-stat-card">
-          <div class="hist-stat-label">Polls</div>
-          <div class="hist-stat-val" id="diag-polls">—</div>
-          <div class="hist-stat-sub" id="diag-timeouts">— unanswered</div>
-        </div>
-        <div class="hist-stat-card">
-          <div class="hist-stat-label">Longest pause, last 5–10 min</div>
-          <div class="hist-stat-val" id="diag-gap">—<span class="hist-stat-unit">ms</span></div>
-          <div class="hist-stat-sub" id="diag-gap-sub">—</div>
-        </div>
-        <div class="hist-stat-card">
-          <div class="hist-stat-label">Gateway dropouts</div>
-          <div class="hist-stat-val" id="diag-tap-lost">—</div>
-          <div class="hist-stat-sub" id="diag-tap-lost-sub">—</div>
-        </div>
-        <div class="hist-stat-card">
-          <div class="hist-stat-label">Housekeeping</div>
-          <div class="hist-stat-val" id="diag-housekeeping">—</div>
-          <div class="hist-stat-sub" id="diag-housekeeping-sub">—</div>
-        </div>
-        <div class="hist-stat-card">
-          <div class="hist-stat-label">Optimizer queries</div>
-          <div class="hist-stat-val" id="diag-queries">—</div>
-          <div class="hist-stat-sub" id="diag-queries-sub">—</div>
-        </div>
-        <div class="hist-stat-card">
-          <div class="hist-stat-label">Gateway version</div>
-          <div class="hist-stat-val" id="diag-tap-version" style="font-size:18px">—</div>
-          <div class="hist-stat-sub" id="diag-tap-version-sub">—</div>
         </div>
       </div>
 
@@ -3221,13 +3261,9 @@
   }
 
   let masterPolls = 0, masterPollsAt = 0;
-  async function refreshMasterDiagnostics() {
-    const r = await apiFetch('/api/master').catch(() => null);
-    const m = r && r.ok ? await r.json() : null;
-    const show = !!m && (m.role === 'master' || m.role === 'standby');
-    document.getElementById('diag-master-head').style.display = show ? '' : 'none';
-    document.getElementById('diag-master').style.display = show ? '' : 'none';
-    if (!show) return;
+  // The Bus master page's figures, from an /api/master answer.
+  function refreshMasterDiagnostics(m) {
+    if (!m || (m.role !== 'master' && m.role !== 'standby')) return;
     const faults = { none: '', no_port: 'cannot open the port', no_reply: 'the TAP is not answering',
                      second_master: 'another master is on the bus: stopped transmitting', refused: 'refused a request',
                      lease_refused: 'the TAP is not taking lease renewals: the array will go safe',
@@ -3312,7 +3348,6 @@
       if (wantTsdb) tsdbStatsAt = Date.now();
       if (!statusR.ok) throw new Error('/api/status ' + statusR.status);
       const status = await statusR.json();
-      if (PLATFORM === 'linux') await refreshMasterDiagnostics();
 
       // Memory
       document.getElementById('diag-heap-free').innerHTML =
@@ -3419,6 +3454,66 @@
       document.getElementById('diag-meta').textContent = `refresh error: ${e.message}`;
     }
   }
+
+  // ---- Bus master: PV output, the sidebar pill and the banner (Pi) ----
+  // Every 5 s on the Pi, whatever page is open: the pill and the banner
+  // must say PV is off wherever you are.
+  let pvLast = null;
+  function pvWhen(unix) {
+    return unix ? new Date(unix * 1000).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'an unknown time';
+  }
+  function pvApply(m) {
+    const show = !!m && (m.role === 'master' || m.role === 'standby');
+    document.getElementById('nav-busmaster').style.display = show ? '' : 'none';
+    document.getElementById('pv-pill').style.display = show ? '' : 'none';
+    const pv = show && m.pv ? m.pv : { on: true };
+    const banner = document.getElementById('pv-banner');
+    banner.style.display = show && !pv.on ? '' : 'none';
+    if (!show) return;
+    const pill = document.getElementById('pv-pill');
+    pill.textContent = pv.on ? 'PV on' : 'PV off';
+    pill.classList.toggle('off', !pv.on);
+    const from = pv.source === 'heard' ? 'the monitor running the bus' : 'this monitor';
+    document.getElementById('pv-banner-text').textContent = `PV output is off, turned off from ${from} at ${pvWhen(pv.since)}`;
+    const sb = m.standby || {};
+    const standingBy = sb.state === 'standing_by' || sb.state === 'taking_over';
+    document.getElementById('pv-state').textContent = pv.on ? 'PV output is on' : 'PV output is off';
+    document.getElementById('pv-detail').textContent = pv.unconfirmed ? "The TAP didn't confirm it; asked again every hour"
+      : pv.confirmed ? 'The TAP confirmed it' : pv.last_sent ? 'Waiting for the TAP to confirm' : 'Nothing sent to the TAP yet';
+    const toggle = document.getElementById('pv-toggle');
+    toggle.textContent = pv.on ? 'Turn off' : 'Turn on';
+    toggle.disabled = standingBy;
+    const status = document.getElementById('pv-status');
+    if (standingBy) status.textContent = 'Standing by: change it on the device running the bus.';
+    else if (status.dataset.standby) status.textContent = '';
+    status.dataset.standby = standingBy ? '1' : '';
+    document.getElementById('bm-meta').textContent = standingBy ? 'standing by' : m.active ? 'running the bus' : 'not running';
+  }
+  async function refreshPv() {
+    if (PLATFORM !== 'linux') return;
+    const r = await apiFetch('/api/master').catch(() => null);
+    const m = r && r.ok ? await r.json().catch(() => null) : null;
+    pvLast = m;
+    pvApply(m);
+    if (document.getElementById('view-busmaster').classList.contains('active')) refreshMasterDiagnostics(m);
+  }
+  document.getElementById('pv-toggle').addEventListener('click', async () => {
+    const on = !(pvLast && pvLast.pv && pvLast.pv.on === false);  // as it is now
+    if (on && !confirm("Turn the array's output off? This is not rapid shutdown.")) return;
+    const status = document.getElementById('pv-status');
+    try {
+      const r = await apiFetch('/api/master/pv', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                                   body: JSON.stringify({ on: !on }) });
+      const j = await r.json().catch(() => ({}));
+      status.textContent = r.ok ? '' : (j.error || `refused (${r.status})`);
+    } catch (e) {
+      status.textContent = 'not sent: ' + e.message;
+    }
+    await refreshPv();
+  });
+  platformReady.then(refreshPv);
+  setInterval(refreshPv, 5000);
+  document.querySelector('#nav button[data-view="busmaster"]').addEventListener('click', refreshPv);
 
   // Opening the view forces a fetch; the periodic tick does not.
   document.querySelector('#nav button[data-view="diagnostics"]')
@@ -3759,6 +3854,8 @@
       document.getElementById('pi-mqtt-disc-on').nextElementSibling.textContent = s.mqtt.discovery !== false ? 'On' : 'Off';
       document.getElementById('pi-mqtt-standby-panels').checked = !!s.mqtt.standby_panels;
       document.getElementById('pi-mqtt-standby-panels').nextElementSibling.textContent = s.mqtt.standby_panels ? 'On' : 'Off';
+      document.getElementById('pi-mqtt-pv-switch').checked = !!s.mqtt.pv_switch;
+      document.getElementById('pi-mqtt-pv-switch').nextElementSibling.textContent = s.mqtt.pv_switch ? 'On' : 'Off';
       document.getElementById('pi-mqtt-topic-hint').textContent =
         `Readings go to ${s.mqtt.base_topic}/${s.device_id}/panel/<barcode>/state`;
       piWebPortActive = s.web_port_active;
@@ -4071,6 +4168,7 @@
       discovery_prefix: document.getElementById('pi-mqtt-discovery').value.trim() || 'homeassistant',
       discovery: document.getElementById('pi-mqtt-disc-on').checked,
       standby_panels: document.getElementById('pi-mqtt-standby-panels').checked,
+      pv_switch: document.getElementById('pi-mqtt-pv-switch').checked,
     };
     const pass = document.getElementById('pi-mqtt-pass').value;
     if (pass !== '') mqtt.password = pass;
