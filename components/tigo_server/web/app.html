@@ -3554,7 +3554,7 @@
     const w = m.discovery || {};
     const left = m.discovery_read ? (w.running && w.remaining_s > 0 ? `open, ${w.remaining_s} s left` : 'closed') : 'not read yet';
     document.getElementById('disc-state').textContent = renewing ? 'Renewed when it runs out' : 'Left to close';
-    document.getElementById('disc-detail').textContent = renewing ? `Now ${left}` : `Now ${left} · a restart renews it`;
+    document.getElementById('disc-detail').textContent = renewing ? `Now ${left}` : `Now ${left} · kept through a restart`;
     const disc = document.getElementById('disc-toggle');
     disc.textContent = renewing ? 'Let it close' : 'Renew again';
     disc.disabled = standingBy;

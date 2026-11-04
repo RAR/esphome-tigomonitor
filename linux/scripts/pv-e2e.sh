@@ -169,7 +169,8 @@ stop_all
 # --- run 8: the discovery switch (not PV, but the same kind of owner's switch) ---
 # A 2 s window renewed to 2 s, so renewals come every few seconds. Let it
 # close: reads go on, renewals stop, and nothing else is sent in their place;
-# renew again: they resume. Not saved: a restart renews.
+# renew again: they resume. Saved: a restart keeps it, and so does a
+# settings save, which builds a new bus master.
 start eight 18208 '' --window 2 --renew-to 2
 waitfor 60 "len(d['renewals']) >= 2" "$out/eight.json"
 expect "renewing to start with" "$(body GET 18208 /api/master '' admin:pw | python3 -c 'import json,sys; print(json.load(sys.stdin)["discovery_renewing"])')" True
@@ -190,9 +191,20 @@ expect "renew again" "$(req POST 18208 /api/master/discovery '{"renew": true}' a
 waitfor 120 "len(d['renewals']) > $n" "$out/eight.json"
 expect "renewals resume" "$(stat "$out/eight.json" "len(d['renewals']) > $n")" True
 req POST 18208 /api/master/discovery '{"renew": false}' admin:pw > /dev/null
+expect "saved" "$(python3 -c "import json; print(json.load(open('$out/eight/discovery.json')))")" "{'renew': False}"
 stop
 restart eight
-expect "not saved: a restart renews" "$(body GET 18208 /api/master '' admin:pw | python3 -c 'import json,sys; print(json.load(sys.stdin)["discovery_renewing"])')" True
+expect "a restart keeps it" "$(body GET 18208 /api/master '' admin:pw | python3 -c 'import json,sys; print(json.load(sys.stdin)["discovery_renewing"])')" False
+n="$(stat "$out/eight.json" "len(d['renewals'])")"
+sleep 8
+expect "and renews nothing" "$(stat "$out/eight.json" "len(d['renewals'])")" "$n"
+expect "a settings save keeps it" "$(code POST 18208 /api/settings '{"master_housekeeping": false}' admin:pw)" 200
+sleep 2
+expect "and the new master says so" "$(body GET 18208 /api/master '' admin:pw | python3 -c 'import json,sys; print(json.load(sys.stdin)["discovery_renewing"])')" False
+expect "renew again, saved" "$(req POST 18208 /api/master/discovery '{"renew": true}' admin:pw)" '200 {"renew":true}'
+stop
+restart eight
+expect "and a restart keeps that too" "$(body GET 18208 /api/master '' admin:pw | python3 -c 'import json,sys; print(json.load(sys.stdin)["discovery_renewing"])')" True
 stop_all
 
 [ $fail = 0 ] && echo "pv e2e passed" || { echo "pv e2e FAILED; see $out/"; exit 1; }

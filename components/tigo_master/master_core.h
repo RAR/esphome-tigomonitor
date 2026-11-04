@@ -107,7 +107,7 @@ struct MasterStatus {
   uint32_t yields = 0;  // times it gave the bus back to another master
   int64_t last_takeover_unix = 0;
   // False after the owner's "let it close" (request_discovery): read, not
-  // renewed. Not saved: a restart or a new master renews again.
+  // renewed. Saved where set_discovery says, so a restart keeps it.
   bool discovery_renewing = true;
   PvState pv;
   bool pv_confirmed = false;    // the TAP's last reply carried the byte
@@ -177,6 +177,10 @@ class MasterCore {
   // (no renewals; status reads go on), true renews it again. False while
   // standing by, like request_pv.
   bool request_discovery(bool renew);
+  // The discovery switch as last saved, and where to save a change; call
+  // before open(). Without it the window is renewed and nothing is saved.
+  using DiscoverySaved = std::function<void(bool renew)>;
+  void set_discovery(bool renew, DiscoverySaved saved);
 
   bool open();
   // Sends at most one request and reads its reply, up to REPLY_TIMEOUT_MS.
@@ -238,6 +242,7 @@ class MasterCore {
   bool pv_heard_since_standby_ = false;  // under mu_
   bool pv_silent_ = false;               // under mu_
   PvSaved pv_saved_;
+  DiscoverySaved discovery_saved_;
   void sync_pv_status_();
   void hear_pv_(bool off);
   uint32_t hold_until_ms_ = 0;  // discovery's quiet after a RESET

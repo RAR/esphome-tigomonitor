@@ -114,8 +114,19 @@ bool MasterCore::request_discovery(bool renew) {
     status_.discovery_renewing = renew;
   }
   LOGW("bus master: discovery window %s, asked from this monitor",
-       renew ? "renewed again" : "left to close (not renewed until asked, or a restart)");
+       renew ? "renewed again" : "left to close (not renewed until asked)");
+  if (discovery_saved_) discovery_saved_(renew);
   return true;
+}
+
+void MasterCore::set_discovery(bool renew, DiscoverySaved saved) {
+  {
+    std::lock_guard<std::mutex> lock(mu_);
+    discovery_renewing_ = renew;
+    status_.discovery_renewing = renew;
+    discovery_saved_ = std::move(saved);
+  }
+  if (!renew) LOGW("bus master: discovery window left to close, as last asked");
 }
 
 // Standing by: the PV state another master gave the TAP, kept so a takeover

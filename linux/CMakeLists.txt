@@ -25,6 +25,7 @@ add_executable(tigomonitord
   ../components/tigo_master/master_core.cpp
   src/housekeeping_store.cpp
   src/pv_store.cpp
+  src/discovery_store.cpp
   src/log.cpp
   src/cca_ble.cpp
   src/cca_http.cpp

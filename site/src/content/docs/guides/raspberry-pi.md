@@ -216,8 +216,10 @@ to join, every time it runs out, and so does the Pi. For testing, the
 **Bus master** page can stop renewing it: **Let it close**. The Pi keeps
 polling, so every panel still reports, and nothing new goes to the TAP; it
 just stops sending the renewal. On the roof we measured, a closed window
-didn't stop production. **Renew again** undoes it, and so does a restart:
-the choice isn't saved. It needs the web UI password too.
+didn't stop production, and every optimizer came back at sunrise and after
+a TAP power cycle. **Renew again** undoes it. The choice is saved in
+`discovery.json` beside `settings.json`, so a restart or an update keeps
+it. It needs the web UI password too.
 
 ## Watch it from a monitor
 

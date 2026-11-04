@@ -6,6 +6,7 @@
 #include "log.h"
 #include "bus_master.h"
 #include "pv_store.h"
+#include "discovery_store.h"
 #include "monitor.h"
 #include "cca_ble.h"
 #include "cca_http.h"
@@ -175,6 +176,9 @@ int main(int argc, char **argv) {
   // from it, so a restart or a settings save never turns PV back on.
   PvStore pv(state_dir + "/pv.json");
   pv.load();
+  // And the discovery switch, for the same reason.
+  DiscoveryStore discovery(state_dir + "/discovery.json");
+  discovery.load();
   auto on_data = [&](const char *data, size_t n) {
     if (capture_out) capture_out->write(data, static_cast<std::streamsize>(n)).flush();
     monitor.feed(data, n);
@@ -223,6 +227,7 @@ int main(int argc, char **argv) {
       // would start from the state before it. The requests take this too.
       std::unique_lock<std::mutex> swap(master_mu);
       m->set_pv(pv.state(), [&pv](const PvState &s) { pv.save(s); });
+      m->set_discovery(discovery.renew(), [&discovery](bool renew) { discovery.save(renew); });
       // Standing by, it listens as the listen role does, learning the 0x41s
       // another master sends, and takes the latest of them when it takes over.
       if (settings.bus_role == "standby")

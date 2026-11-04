@@ -70,6 +70,9 @@ class BusMaster {
   }
   bool request_pv(bool off) { return core_.request_pv(off); }
   bool request_discovery(bool renew) { return core_.request_discovery(renew); }
+  void set_discovery(bool renew, esphome::tigo_master::MasterCore::DiscoverySaved saved) {
+    core_.set_discovery(renew, std::move(saved));
+  }
   std::map<uint16_t, esphome::tigo_monitor::master::Queries::Setup> setups() const { return core_.setups(); }
   void tick(uint32_t now_ms) { core_.tick(now_ms); }
   void close() { core_.close(); }
