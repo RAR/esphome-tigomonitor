@@ -292,6 +292,13 @@ void TigoMonitorComponent::setup() {
 #endif
   
   load_node_table();
+  // Resolve any barcode-keyed (long_address:) YAML sensors against pairings
+  // the node table already knows from before this boot - otherwise they sit
+  // unplaced until the gateway happens to broadcast a fresh Frame 27, which
+  // can be a long wait if it was last sent before our own restart.
+  for (const auto &entry : node_table_) {
+    if (!entry.long_address.empty()) place_barcode_sensors_(entry.long_address, entry.addr);
+  }
   load_energy_data();
   load_daily_energy_history();
 
