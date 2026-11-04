@@ -909,6 +909,35 @@ void TigoMonitorComponent::process_09_frame(const frame_string &frame) {
   // Only Frame 27 long addresses (16-char) are used for device identification
 }
 
+void TigoMonitorComponent::place_barcode_sensors_(const node_string &barcode, const node_string &addr) {
+  auto prev_it = this->barcode_sensor_addr_.find(barcode);
+  node_string old_addr = (prev_it != this->barcode_sensor_addr_.end()) ? prev_it->second : node_string();
+  if (prev_it != this->barcode_sensor_addr_.end() && old_addr == addr) return;  // already placed here
+  this->barcode_sensor_addr_[barcode] = addr;
+
+  auto num_it = this->barcode_numeric_bindings_.find(barcode);
+  if (num_it != this->barcode_numeric_bindings_.end()) {
+    for (auto &binding : num_it->second) {
+      if (!old_addr.empty()) binding.target->erase(old_addr);
+      (*binding.target)[addr] = binding.sensor;
+    }
+  }
+  auto txt_it = this->barcode_text_bindings_.find(barcode);
+  if (txt_it != this->barcode_text_bindings_.end()) {
+    for (auto &binding : txt_it->second) {
+      if (!old_addr.empty()) binding.target->erase(old_addr);
+      (*binding.target)[addr] = binding.sensor;
+    }
+  }
+  if (!old_addr.empty()) {
+    ESP_LOGW(TAG, "Barcode %s moved from address %s to %s - re-pointing its YAML-configured sensors",
+             barcode.c_str(), old_addr.c_str(), addr.c_str());
+  } else if (num_it != this->barcode_numeric_bindings_.end() || txt_it != this->barcode_text_bindings_.end()) {
+    ESP_LOGI(TAG, "Barcode %s confirmed at address %s - placing its YAML-configured sensors",
+             barcode.c_str(), addr.c_str());
+  }
+}
+
 void TigoMonitorComponent::process_27_frame(const frame_string &hex_frame, size_t offset) {
   // Frame 27 format per taptap protocol:
   // [starting_index:2 bytes (4 hex)] [num_entries:2 bytes (4 hex)] [entries...]
@@ -962,6 +991,11 @@ void TigoMonitorComponent::process_27_frame(const frame_string &hex_frame, size_
     }
     if (res.table_changed) table_changed = true;
     if (res.metadata_moved) dedup_merged = true;
+
+    // Place (or move) any YAML sensors registered against this barcode onto
+    // its now-confirmed address - independent of res.renumbered, since this
+    // is the first time we see this pairing on a fresh boot too.
+    place_barcode_sensors_(long_addr, addr);
 
     // Also update existing device if already discovered
     DeviceData* device = find_device_by_addr(addr);
