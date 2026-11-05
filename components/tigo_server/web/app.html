@@ -536,16 +536,15 @@
     background: var(--bg-2); border: 1px solid var(--accent); border-radius: 10px;
     padding: 10px 14px; margin-bottom: 16px; font-size: 13px;
   }
-  .node-missing, .node-unset {
-    display: inline-block; margin-left: 6px; padding: 0 6px; border-radius: 6px; font-size: 10.5px;
-    font-weight: 600; text-transform: uppercase; letter-spacing: .04em; border: 1px solid currentColor;
+  /* Node Table tags: the same tinted chip as the State column's badges */
+  .node-new, .node-missing, .node-unset {
+    display: inline-block; margin-left: 6px; padding: 2px 7px; border-radius: 4px; font-size: 10.5px;
+    font-weight: 600; text-transform: uppercase; letter-spacing: .04em; white-space: nowrap; vertical-align: 1px;
   }
-  .node-missing { color: var(--bad); }
-  .node-unset { color: var(--warn); }
-  .node-new {
-    display: inline-block; margin-left: 6px; padding: 0 6px; border-radius: 6px; font-size: 10.5px;
-    font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--accent); border: 1px solid var(--accent);
-  }
+  .node-new { background: rgba(74,222,128,0.15); color: var(--accent); }
+  .node-missing { background: rgba(248,113,113,0.15); color: var(--bad); }
+  .node-unset { background: rgba(251,191,36,0.15); color: var(--warn); }
+  .topo-new strong { color: var(--accent); }
   .topo-ed-replace, .topo-ed-replace-pick { margin-top: 4px; font-size: 11.5px; max-width: 100%; }
   .topo-pending-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
   .topo-pending-row span { margin-right: auto; }
@@ -626,6 +625,12 @@
   .pv-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
   .pv-msg { font-size: 13px; line-height: 1.5; color: var(--text-dim); }
   .pv-msg:not(:empty) { margin-top: 10px; }
+  .cfg-text strong.pv-title { display: flex; align-items: center; gap: 9px; }
+  .cfg-text .pv-title > span { display: inline-block; color: inherit; }
+  .cfg-text .pv-title > .dot { flex: none; }
+  .dot.off { background: var(--bad); box-shadow: 0 0 8px var(--bad); }
+  .dot.idle { background: var(--warn); box-shadow: 0 0 8px var(--warn); }
+  .dot.dim { background: var(--text-faint); box-shadow: none; }
   .pv-note { font-size: 12px; line-height: 1.5; color: var(--text-dim); margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); max-width: 75ch; }
   /* A setting row is a two-column form: the label on the left, its controls
      starting at the same line on the right, so the fields line up down the
@@ -1336,7 +1341,7 @@
     <section class="view" id="view-busmaster">
       <div class="topbar">
         <h1>Bus master</h1>
-        <div class="topbar-meta" id="bm-meta">—</div>
+        <div class="topbar-meta"><span class="badge stale" id="bm-meta">—</span></div>
       </div>
 
       <div class="section-head">
@@ -1344,7 +1349,7 @@
       </div>
       <div class="tools-card" id="pv-card">
         <div class="pv-row">
-          <div class="cfg-text"><strong id="pv-state">PV output is on</strong><span id="pv-detail">—</span></div>
+          <div class="cfg-text"><strong class="pv-title"><span class="dot dim" id="pv-dot"></span><span id="pv-state">PV output is on</span></strong><span id="pv-detail">—</span></div>
           <button class="btn" id="pv-toggle">Turn off</button>
         </div>
         <div class="pv-msg" id="pv-status"></div>
@@ -1357,7 +1362,7 @@
       </div>
       <div class="tools-card" id="disc-card">
         <div class="pv-row">
-          <div class="cfg-text"><strong id="disc-state">Renewed when it runs out</strong><span id="disc-detail">—</span></div>
+          <div class="cfg-text"><strong class="pv-title"><span class="dot dim" id="disc-dot"></span><span id="disc-state">Renewed when it runs out</span></strong><span id="disc-detail">—</span></div>
           <button class="btn" id="disc-toggle">Let it close</button>
         </div>
         <div class="pv-msg" id="disc-status"></div>
@@ -1365,8 +1370,8 @@
       </div>
 
       <div class="section-head" id="diag-master-head">
-        <div class="section-title">Bus master</div>
-        <div class="section-sub" id="diag-master-sub">—</div>
+        <div class="section-title">Health</div>
+        <div class="section-sub" id="diag-master-sub"></div>
       </div>
       <div class="hist-stat-grid" id="diag-master">
         <div class="hist-stat-card">
@@ -1385,7 +1390,7 @@
           <div class="hist-stat-sub" id="diag-timeouts">— unanswered</div>
         </div>
         <div class="hist-stat-card">
-          <div class="hist-stat-label">Longest pause, last 5–10 min</div>
+          <div class="hist-stat-label">Longest pause</div>
           <div class="hist-stat-val" id="diag-gap">—<span class="hist-stat-unit">ms</span></div>
           <div class="hist-stat-sub" id="diag-gap-sub">—</div>
         </div>
@@ -1406,7 +1411,7 @@
         </div>
         <div class="hist-stat-card">
           <div class="hist-stat-label">Gateway version</div>
-          <div class="hist-stat-val" id="diag-tap-version" style="font-size:18px">—</div>
+          <div class="hist-stat-val" id="diag-tap-version">—</div>
           <div class="hist-stat-sub" id="diag-tap-version-sub">—</div>
         </div>
       </div>
@@ -3336,10 +3341,12 @@
     const heard = sb.master_heard_ms_ago >= 0 ? `master heard ${(sb.master_heard_ms_ago / 1000).toFixed(1)} s ago` : 'no master heard yet';
     const takeovers = sb.state && sb.state !== 'off'
       ? ` · ${sb.takeovers} takeover${sb.takeovers === 1 ? '' : 's'}, gave the bus back ${sb.yields}×` : '';
-    document.getElementById('diag-master-sub').textContent = (m.fault !== 'none' ? faults[m.fault] || m.fault
+    // Running normally, the page's badge says so: this line is for anything more.
+    const masterSub = m.fault !== 'none' ? faults[m.fault] || m.fault
       : sb.state === 'standing_by' ? `standing by: ${heard}`
       : sb.state === 'taking_over' ? `taking over: ${heard}`
-      : phases[m.phase] || (m.active ? 'running the bus' : 'not running')) + takeovers;
+      : phases[m.phase] || (m.active ? '' : 'not running');
+    document.getElementById('diag-master-sub').textContent = masterSub ? masterSub + takeovers : takeovers.replace(/^ · /, '');
     document.getElementById('diag-discovery').innerHTML = m.discovery_read
       ? `${m.discovery.remaining_s}<span class="hist-stat-unit">s</span>` : '—<span class="hist-stat-unit">s</span>';
     // Standing by, the discovery window and counts are from this one's last turn on the bus.
@@ -3364,8 +3371,8 @@
     document.getElementById('diag-gap').innerHTML =
       `${g.recent.toLocaleString()}<span class="hist-stat-unit">ms</span>`;
     document.getElementById('diag-gap-sub').textContent = g.max_at_unix
-      ? `longest ${g.max.toLocaleString()} ms, at ${new Date(g.max_at_unix * 1000).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}`
-      : 'between requests to the gateway';
+      ? `last 5–10 min · longest ${g.max.toLocaleString()} ms, ${new Date(g.max_at_unix * 1000).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}`
+      : 'last 5–10 min, between requests to the gateway';
 
     // A gateway that keeps dropping out at a steady interval is having its
     // power cut: the CCA does that to one it can no longer hear.
@@ -3376,7 +3383,7 @@
       const at = new Date(t.last_lost_unix * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
       const r = t.recent_lost_unix;
       const every = r.length >= 3 ? Math.round((r[r.length - 1] - r[0]) / (r.length - 1)) : null;
-      lostSub = `last ${at} · back with discovery closed ${t.back_without_discovery}×` +
+      lostSub = `last ${at}` + (t.back_without_discovery ? ` · came back with discovery closed ${t.back_without_discovery}×` : '') +
                 (every !== null && every < 600 && Date.now() / 1000 - t.last_lost_unix < 2 * every
                  ? ` · every ~${every} s: is its power being cut?` : '');
     }
@@ -3394,9 +3401,11 @@
     document.getElementById('diag-queries-sub').textContent = !q.on ? 'turn on under Tools'
       : q.writes ? `${q.sent_writes} writes sent` : 'writes off';
 
-    document.getElementById('diag-tap-version').textContent = m.tap_version || '—';
-    document.getElementById('diag-tap-version-sub').textContent = m.tap_version
-      ? 'read in the bring-up' : 'read when the gateway is re-addressed';
+    // "Mgate Version G8.65": the version is the figure, the family its label.
+    const ver = (m.tap_version || '').match(/^(\S+) Version (.+)$/);
+    document.getElementById('diag-tap-version').textContent = ver ? ver[2] : m.tap_version || '—';
+    document.getElementById('diag-tap-version-sub').textContent = !m.tap_version ? 'read when the gateway is re-addressed'
+      : (ver ? ver[1] + ' · ' : '') + 'read in the bring-up';
   }
 
   async function refreshDiagnostics(force) {
@@ -3544,12 +3553,17 @@
       : pv.confirmed ? 'The TAP confirmed it' : pv.last_sent ? 'Waiting for the TAP to confirm' : 'Nothing sent to the TAP yet';
     const toggle = document.getElementById('pv-toggle');
     toggle.textContent = pv.on ? 'Turn off' : 'Turn on';
+    toggle.classList.toggle('danger', pv.on);
+    toggle.classList.toggle('primary', !pv.on);
     toggle.disabled = standingBy;
+    document.getElementById('pv-dot').className = 'dot ' + (pv.on ? '' : 'off');
     const status = document.getElementById('pv-status');
     if (standingBy) status.textContent = 'Standing by: change it on the device running the bus.';
     else if (status.dataset.standby) status.textContent = '';
     status.dataset.standby = standingBy ? '1' : '';
-    document.getElementById('bm-meta').textContent = standingBy ? 'standing by' : m.active ? 'running the bus' : 'not running';
+    const meta = document.getElementById('bm-meta');
+    meta.textContent = m.fault && m.fault !== 'none' ? 'fault' : standingBy ? 'standing by' : m.active ? 'running the bus' : 'not running';
+    meta.className = 'badge ' + (m.fault && m.fault !== 'none' ? 'bad' : standingBy || !m.active ? 'stale' : 'ok');
     const renewing = m.discovery_renewing !== false;
     const w = m.discovery || {};
     const left = m.discovery_read ? (w.running && w.remaining_s > 0 ? `open, ${w.remaining_s} s left` : 'closed') : 'not read yet';
@@ -3557,6 +3571,7 @@
     document.getElementById('disc-detail').textContent = renewing ? `Now ${left}` : `Now ${left} · kept through a restart`;
     const disc = document.getElementById('disc-toggle');
     disc.textContent = renewing ? 'Let it close' : 'Renew again';
+    document.getElementById('disc-dot').className = 'dot ' + (!m.discovery_read ? 'dim' : renewing ? '' : 'idle');
     disc.disabled = standingBy;
     const ds = document.getElementById('disc-status');
     if (standingBy) ds.textContent = 'Standing by: change it on the device running the bus.';
@@ -3577,9 +3592,9 @@
     if (!d) return 0;
     const still = (d.devices || []).filter(x => !x.stale && (x.power_out ?? x.power ?? 0) > PV_STILL_W)
       .map(x => x.name || x.addr).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+    // Why they keep going is in the card's note.
     el.textContent = !still.length ? 'Every panel has stopped producing.'
-      : `${still.length} panel${still.length === 1 ? ' is' : 's are'} still producing: ${still.join(', ')}. ` +
-        'Optimizers that also follow the RSS signal on the DC wiring keep going while the inverter\'s transmitter runs.';
+      : `${still.length} panel${still.length === 1 ? ' is' : 's are'} still producing: ${still.join(', ')}.`;
     return still.length;
   }
   async function refreshPv() {
@@ -5302,7 +5317,7 @@
     if (!fresh.length) return;
     const which = fresh.map(n => `…${topoLast6(n.long_address)} (node ${n.addr}, first heard ${
       new Date(n.first_heard_unix * 1000).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })})`).join(', ');
-    box.textContent = `${fresh.length === 1 ? 'New optimizer heard' : fresh.length + ' new optimizers heard'}: ${which}. ` +
+    box.innerHTML = `<strong>${fresh.length === 1 ? 'New optimizer heard' : fresh.length + ' new optimizers heard'}:</strong> ${topoEscape(which)}. ` +
       'Choose Edit layout to put it in a string, or use Replace on its tile to give it the place of the panel it replaced.';
   }
 
