@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <climits>
 #include <map>
+#include <set>
 
 namespace tigod {
 
@@ -15,8 +16,11 @@ namespace layout = esphome::tigo_monitor::layout;
 json layout_json(const Monitor &mon, const Topology &topo) {
   auto ov = topo.string_overrides();
   std::vector<layout::NodeView> nodes;
-  for (const auto &n : mon.nodes())
+  std::set<std::string> known;
+  for (const auto &n : mon.nodes()) {
     nodes.push_back({n.long_address, n.addr, n.cca_label, n.cca_string_label, n.cca_mppt_label});
+    if (n.known) known.insert(n.long_address);
+  }
   layout::Tree t = layout::build_tree(topo.skeleton(), nodes, [&ov](layout::StringSpec &s) {
     auto it = ov.find(s.label);
     if (it == ov.end()) return;
@@ -27,10 +31,11 @@ json layout_json(const Monitor &mon, const Topology &topo) {
   // first_heard_unix: when a new optimizer (Monitor::first_heard) was first
   // heard; 0 for the panels the monitor started out with.
   auto heard = mon.first_heard();
-  auto panel = [&heard](const layout::NodeView &n) {
+  // known: the owner marked it as not reporting, and expected not to.
+  auto panel = [&heard, &known](const layout::NodeView &n) {
     auto it = heard.find(n.barcode);
     return json{{"barcode", n.barcode}, {"addr", n.addr}, {"name", n.label},
-                {"first_heard_unix", it == heard.end() ? 0 : it->second}};
+                {"first_heard_unix", it == heard.end() ? 0 : it->second}, {"known", known.count(n.barcode) > 0}};
   };
   auto mppts_json = [&](const std::vector<layout::MpptSpec> &ms) {
     json arr = json::array();

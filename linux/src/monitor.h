@@ -39,6 +39,10 @@ struct Node {
   // last listed it: unix s, saved to the hour. 0: not yet.
   int64_t last_heard_unix = 0;
   int64_t last_roster_unix = 0;
+  // The owner marked it known: listed by the TAP but not reporting, and
+  // expected not to (one that never joined, say). Not missing, not counted.
+  // Cleared by its first reading.
+  bool known = false;
 };
 
 struct Panel {
@@ -115,6 +119,8 @@ class Monitor {
   // or that the roster stopped listing OFF_ROSTER_AFTER_S before its newest
   // entry. A dead or removed optimizer shows up here.
   int missing_optimizers(int64_t now_unix) const;
+  // Marks the node with this barcode known (or not). False: no such node.
+  bool set_known(const std::string &barcode, bool known);
   static const int64_t MISSING_AFTER_S = 3 * 86400;
   static const int64_t OFF_ROSTER_AFTER_S = 86400;
   static const int64_t SEEN_SAVE_EVERY_S = 3600;  // how stale a saved last_heard/last_roster may be

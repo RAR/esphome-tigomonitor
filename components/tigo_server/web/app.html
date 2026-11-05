@@ -566,6 +566,8 @@
   .node-new { background: rgba(74,222,128,0.15); color: var(--accent); }
   .node-missing { background: rgba(248,113,113,0.15); color: var(--bad); }
   .node-unset { background: rgba(251,191,36,0.15); color: var(--warn); }
+  .node-known-btn { margin-left: 8px; padding: 1px 8px; font-size: 11.5px; white-space: nowrap; vertical-align: 1px; }
+  .panel-tile.known { opacity: .55; }
   .topo-new strong { color: var(--accent); }
   .topo-ed-replace, .topo-ed-replace-pick { margin-top: 4px; font-size: 11.5px; max-width: 100%; }
   .topo-pending-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
@@ -2972,7 +2974,8 @@
     let html = '';
     const now = Date.now() / 1000;
     const when = t => new Date(t * 1000).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-    if (n.last_heard_unix && now - n.last_heard_unix >= NODE_MISSING_S)
+    if (n.known) {}  // the owner knows it isn't reporting: the State column says so
+    else if (n.last_heard_unix && now - n.last_heard_unix >= NODE_MISSING_S)
       html += ` <span class="node-missing" title="no reading since ${when(n.last_heard_unix)}">Missing</span>`;
     else if (n.last_roster_unix && newestRoster - n.last_roster_unix >= NODE_OFF_ROSTER_S)
       html += ` <span class="node-missing" title="the TAP last listed it ${when(n.last_roster_unix)}">Not on the TAP</span>`;
@@ -3080,12 +3083,18 @@
 
     let html = '';
     for (const r of rows) {
-      const stateLabel = r.state === 'ok' ? 'active' : r.state === 'warn' ? 'shaded' :
+      const stateLabel = r.n.known ? 'known' : r.state === 'ok' ? 'active' : r.state === 'warn' ? 'shaded' :
                          r.state === 'bad' ? 'fault' : 'stale';
+      // The Pi can mark one with no reading known: not missing, not counted.
+      const knownBtn = PLATFORM === 'linux' && r.n.long_address && (r.n.known || r.state === 'stale')
+        ? `<button class="btn node-known-btn" data-known-bc="${topoEscape(r.n.long_address)}" data-known="${r.n.known ? '0' : '1'}"
+             title="${r.n.known ? 'Count it again, and flag it if it goes missing'
+                                : "You know it isn't reporting: don't flag it as missing, and leave it out of the counts"}">${r.n.known ? 'Unmark' : 'Mark known'}</button>`
+        : '';
       html += `
         <tr>
           <td><strong${r.n.setup ? ` title="${topoEscape([r.n.setup.mppt, r.n.setup.info].filter(Boolean).join('\n'))}"` : ''}>${r.name}</strong>${isNewOptimizer(r.n.first_heard_unix, !!r.n.cca_string)
-            ? ` <span class="node-new" title="First heard ${new Date(r.n.first_heard_unix * 1000).toLocaleString()}">New</span>` : ''}${nodeTags(r.n, newestRoster)}</td>
+            ? ` <span class="node-new" title="First heard ${new Date(r.n.first_heard_unix * 1000).toLocaleString()}">New</span>` : ''}${nodeTags(r.n, newestRoster)}${knownBtn}</td>
           <td class="mono">${r.addr}</td>
           <td class="mono">…${r.barcodeShort}</td>
           <td>${r.stringLabel} <span style="color:var(--text-faint)">·</span> ${r.mpptLabel}</td>
@@ -3094,7 +3103,7 @@
           <td class="num"><strong>${r.w.toFixed(0)} W</strong></td>
           <td class="num">${fmtTemp(r.t, 0)} ${tempUnit()}</td>
           <td class="num">${fmtAge(r.age)}</td>
-          <td><span class="badge ${r.state}">${stateLabel}</span></td>
+          <td><span class="badge ${r.n.known ? 'stale' : r.state}"${r.n.known ? ' title="Marked known: not reporting, not counted, not flagged as missing"' : ''}>${stateLabel}</span></td>
         </tr>
       `;
     }
@@ -3104,7 +3113,9 @@
     }
     tbody.innerHTML = html;
     countEl.textContent = `${rows.length} of ${nodes.length} shown`;
-    metaEl.textContent = `${nodes.length} discovered · ${devices.filter(d => (d.data_age_ms ?? 999999) < 60000).length} reporting`;
+    const knownCount = nodes.filter(n => n.known).length;
+    metaEl.textContent = `${nodes.length - knownCount} discovered · ${devices.filter(d => (d.data_age_ms ?? 999999) < 60000).length} reporting` +
+      (knownCount ? ` · ${knownCount} known, not reporting` : '');
     updateNodesSortIndicators();
   }
 
@@ -3148,6 +3159,20 @@
         `<tr><td colspan="10" style="text-align:center;color:var(--bad);padding:40px 0">refresh error: ${e.message}</td></tr>`;
     }
   }
+
+  document.getElementById('nodes-tbody').addEventListener('click', async e => {
+    const b = e.target.closest('button.node-known-btn');
+    if (!b) return;
+    b.disabled = true;
+    try {
+      const r = await apiFetch('/api/nodes/known', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ barcode: b.dataset.knownBc, known: b.dataset.known === '1' }) });
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `refused (${r.status})`);
+    } catch (err) {
+      showToast('Not saved: ' + err.message, 'err');
+    }
+    await refreshNodes();
+  });
 
   document.getElementById('nodes-search').addEventListener('input', e => {
     nodesFilters.search = e.target.value;
@@ -5398,6 +5423,7 @@
           temperature: dev.temperature ?? 0,
           dataAgeMs: dev.data_age_ms ?? 999999999,
           stale: dev.stale ?? false,
+          known: !!n.known,  // marked known on the Node Table: not counted
         });
       }
 
@@ -5431,23 +5457,27 @@
           const powers = panels.map(p => p.power).filter(v => v > 0);
           const median = topoMedian(powers);
           const rating = s.panel_rating_w || 0;
-          const opts = { rating, stringTotal: s.total_power || 0, panelCount: panels.length };
+          const counted = panels.filter(p => !p.known);
+          const knownHere = panels.length - counted.length;
+          const opts = { rating, stringTotal: s.total_power || 0, panelCount: counted.length };
 
           let panelHtml = '';
           for (const p of visible) {
             // The firmware stale flag (silent past stale_timeout) outranks the
             // power-based classes — distinguishes off-the-bus from producing-zero
-            const cls = p.stale ? 'stale' : topoPanelClass(p.power, median, p.dataAgeMs, opts);
-            const pctText = (rating > 0 && cls !== 'dead' && cls !== 'stale')
+            const cls = p.known ? 'known' : p.stale ? 'stale' : topoPanelClass(p.power, median, p.dataAgeMs, opts);
+            const pctText = (rating > 0 && cls !== 'dead' && cls !== 'stale' && cls !== 'known')
               ? ` <span style="color:var(--text-dim);font-size:11px">(${Math.round((p.power / rating) * 100)}%)</span>`
               : '';
-            const staleBadge = p.stale ? `<span class="badge stale">stale</span>` : '';
+            const staleBadge = p.stale && !p.known ? `<span class="badge stale">stale</span>` : '';
             panelHtml += `<div class="panel-tile ${cls}" title="${topoEscape(p.barcode)}">
               <div class="panel-tile-head">
                 <div class="panel-tile-id">${topoEscape(p.name)} ${staleBadge}</div>
                 <div class="panel-tile-bc">…${topoEscape(topoLast6(p.barcode))}</div>
               </div>
-              <div class="panel-tile-power">${Math.round(p.power)}<span class="unit">W</span>${pctText}</div>
+              <div class="panel-tile-power">${p.known
+                ? '<span class="badge stale" title="Marked known on the Node Table: not counted">known</span>'
+                : `${Math.round(p.power)}<span class="unit">W</span>${pctText}`}</div>
               <div class="panel-tile-detail">
                 <span>${p.voltage.toFixed(1)} V</span>
                 <span>${p.current.toFixed(1)} A</span>
@@ -5462,7 +5492,7 @@
             : '';
           // Rating pill: shows current value + click-to-edit. When unset, shows
           // a dimmed "+ rating" prompt so users know it's settable.
-          const nameplate = rating * panels.length;
+          const nameplate = rating * counted.length;
           const ratingPill = rating > 0
             ? `<span class="topo-string-pill" data-rating-string="${topoEscape(s.label)}" style="cursor:pointer" title="Click to edit panel nameplate">${rating} W/panel</span>`
             : `<span class="topo-string-pill" data-rating-string="${topoEscape(s.label)}" style="cursor:pointer;color:var(--text-faint);border-style:dashed" title="Click to set panel nameplate">+ rating</span>`;
@@ -5477,7 +5507,8 @@
             <div class="topo-string-head">
               <strong class="topo-string-name-text">${topoEscape(stringEffective)}</strong>${stringCanonicalSuffix}
               <button class="topo-inv-name-edit-btn" data-rename-string="${topoEscape(s.label)}" title="Rename string">✎</button>${mpptInline}
-              <span class="topo-string-pill">${visible.length} panels</span>
+              <span class="topo-string-pill">${visible.filter(p => !p.known).length} panels</span>
+              ${knownHere ? `<span class="topo-string-pill" style="color:var(--text-faint)" title="Marked known on the Node Table">${knownHere} known</span>` : ''}
               <span class="topo-string-pill">${topoFmtKW(s.total_power || 0)}</span>
               <span class="topo-string-pill">${(s.active_devices ?? 0)}/${(s.total_devices ?? 0)} active</span>
               ${ratingPill}
@@ -5498,7 +5529,7 @@
           g.strings += 1;
           sectionCount += 1;
 
-          invPanelCount += panels.length;
+          invPanelCount += counted.length;
           totalStrings += 1;
         }
 

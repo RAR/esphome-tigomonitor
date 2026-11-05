@@ -905,6 +905,22 @@ void HttpServer::routes_() {
   svr.Get("/api/layout", [this, &mon](const httplib::Request &, httplib::Response &res) {
     send_json(res, layout_json(mon, ctx_.topology));
   });
+  // The Node Table's "Mark as known": {"barcode": "...", "known": true|false}.
+  svr.Post("/api/nodes/known", [this](const httplib::Request &req, httplib::Response &res) {
+    json j = json::parse(req.body, nullptr, false);
+    if (j.is_discarded() || !j.is_object() || !j.contains("barcode") || !j["barcode"].is_string() ||
+        !j.contains("known") || !j["known"].is_boolean()) {
+      send_json(res, {{"error", "expected {\"barcode\": \"...\", \"known\": true|false}"}}, 400);
+      return;
+    }
+    bool known = j["known"].get<bool>();
+    if (!ctx_.mutable_monitor.set_known(j["barcode"].get<std::string>(), known)) {
+      send_json(res, {{"error", "no optimizer with that barcode"}}, 404);
+      return;
+    }
+    send_json(res, {{"known", known}});
+  });
+
   svr.Post("/api/layout", [this, &mon, body_of](const httplib::Request &req, httplib::Response &res) {
     json j;
     if (!body_of(req, res, j)) return;
@@ -957,7 +973,8 @@ void HttpServer::routes_() {
                        {"cca_inverter", n.cca_mppt_label},  // the field's name before #60; older imports read it
                        {"cca_channel", n.cca_channel},
                        {"last_heard_unix", n.last_heard_unix},
-                       {"last_roster_unix", n.last_roster_unix}});
+                       {"last_roster_unix", n.last_roster_unix},
+                       {"known", n.known}});
       // How it is set up, from its last answers to the master's reads.
       auto st = setups.find(static_cast<uint16_t>(strtoul(n.addr.c_str(), nullptr, 16)));
       nodes.back()["setup"] = st == setups.end() ? json(nullptr)

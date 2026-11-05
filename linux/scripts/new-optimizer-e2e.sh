@@ -76,7 +76,26 @@ kill $sub 2>/dev/null || true
 expect "a reading and a roster entry kept per node" "$(stat "$out/state/state.json" "sum(1 for n in d['nodes'] if n.get('last_heard_unix', 0) > 0 and n.get('last_roster_unix', 0) > 0)")" 13
 expect "Home Assistant counts the missing one" "$(tail -1 "$out/system2.txt" | python3 -c 'import json,sys; print(json.load(sys.stdin)["missing_optimizers"])')" 1
 expect "a Missing optimizers sensor" "$(mosquitto_sub -p 18833 -v --retained-only -W 2 -t 'homeassistant/sensor/tigomonitor_test_missing_optimizers/config' 2>/dev/null | wc -l)" 1
-# Heard again: not missing.
+# Marked as known (the owner knows it isn't reporting): not counted as missing.
+python3 - "$out/state/state.json" <<'PY'
+import json, sys
+p = sys.argv[1]
+d = json.load(open(p))
+gone = d['seen_barcodes'][-1]
+for n in d['nodes']:
+    if n['long_address'] == gone:
+        n['known'] = True
+json.dump(d, open(p, 'w'))
+PY
+mosquitto_sub -p 18833 -t tigomonitor/test/system/state -W 20 > "$out/system2k.txt" 2>/dev/null &
+sub=$!
+sleep 0.3
+replay "$out/twelve.bin"
+sleep 0.5
+kill $sub 2>/dev/null || true
+expect "known: not counted as missing" "$(tail -1 "$out/system2k.txt" | python3 -c 'import json,sys; print(json.load(sys.stdin)["missing_optimizers"])')" 0
+expect "the mark is kept" "$(stat "$out/state/state.json" "sum(1 for n in d['nodes'] if n.get('known'))")" 1
+# Heard again: not missing, and no longer marked known.
 mosquitto_sub -p 18833 -t tigomonitor/test/system/state -W 20 > "$out/system3.txt" 2>/dev/null &
 sub=$!
 sleep 0.3
@@ -84,6 +103,7 @@ replay "$out/thirteen.bin"
 sleep 0.5
 kill $sub 2>/dev/null || true
 expect "heard again: not missing" "$(tail -1 "$out/system3.txt" | python3 -c 'import json,sys; print(json.load(sys.stdin)["missing_optimizers"])')" 0
+expect "heard again: the mark is cleared" "$(stat "$out/state/state.json" "sum(1 for n in d['nodes'] if n.get('known'))")" 0
 
 # Setup answers: running the bus with queries on, the master keeps each
 # optimizer's last !Mppt and !Info answers, and /api/nodes carries them.
@@ -99,6 +119,30 @@ setup() { python3 -c "import json,urllib.request as u; d=json.load(u.urlopen('ht
 for _ in $(seq 120); do [ "$(setup "sum(1 for n in d['nodes'] if (n.get('setup') or {}).get('mppt'))" 2>/dev/null)" -ge 2 ] 2>/dev/null && break; sleep 0.5; done
 expect "the master keeps the !Mppt answers" "$(setup "sorted({n['setup']['mppt'].split()[3] for n in d['nodes'] if (n.get('setup') or {}).get('mppt')})")" "['S']"
 expect "and the !Info ones" "$(setup "all(n['setup']['info'].startswith('!Info ') for n in d['nodes'] if (n.get('setup') or {}).get('info'))")" True
-kill $daemon $tap; wait $daemon $tap 2>/dev/null || true
+
+# Marking one known from the Node Table: POST /api/nodes/known. The mock TAP
+# goes first, so no reading clears the mark (a reading does: tested above).
+kill $tap; wait $tap 2>/dev/null || true
+post() {  # post JSON: prints "<code> <body>"
+  python3 - "$1" <<'PY'
+import sys, urllib.error, urllib.request as u
+r = u.Request('http://127.0.0.1:18208/api/nodes/known', sys.argv[1].encode(), {'Content-Type': 'application/json'}, method='POST')
+try:
+    x = u.urlopen(r, timeout=5); print(x.status, x.read().decode())
+except urllib.error.HTTPError as e:
+    print(e.code, e.read().decode())
+PY
+}
+bc="$(setup "d['nodes'][0]['long_address']")"
+expect "unmarked to start with" "$(setup "sum(1 for n in d['nodes'] if n.get('known'))")" 0
+expect "a bad body is refused" "$(post '{"barcode": "x"}' | cut -d' ' -f1)" 400
+expect "an unknown barcode is refused" "$(post '{"barcode": "04C05B00000000FF", "known": true}' | cut -d' ' -f1)" 404
+expect "mark it known" "$(post "{\"barcode\": \"$bc\", \"known\": true}")" '200 {"known":true}'
+expect "/api/nodes says so" "$(setup "[n['known'] for n in d['nodes'] if n['long_address'] == '$bc']")" "[True]"
+layout() { python3 -c "import json,urllib.request as u; d=json.load(u.urlopen('http://127.0.0.1:18208/api/layout', timeout=5)); print(eval(__import__('sys').argv[1]))" "$1"; }
+expect "and /api/layout" "$(layout "[p.get('known') for p in d['unassigned'] + [p for i in d['inverters'] for m in i['mppts'] for s in m['strings'] for p in s['panels']] if p['barcode'] == '$bc']")" "[True]"
+expect "unmark it" "$(post "{\"barcode\": \"$bc\", \"known\": false}")" '200 {"known":false}'
+expect "unmarked" "$(setup "sum(1 for n in d['nodes'] if n.get('known'))")" 0
+kill $daemon; wait $daemon 2>/dev/null || true
 
 [ $fail = 0 ] && echo "new optimizer e2e passed" || { echo "new optimizer e2e FAILED; see $out/"; exit 1; }

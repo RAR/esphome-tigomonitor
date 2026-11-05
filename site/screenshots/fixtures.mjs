@@ -146,12 +146,12 @@ const layout = {
       display_label: MPPT_NAMES[s.mppt] || '',
       strings: [{
         label: s.label, display_label: '', rating_w: RATING,
-        panels: of(s.label).map((d) => ({ barcode: d.barcode, addr: d.addr, name: d.name, first_heard_unix: 0 })),
+        panels: of(s.label).map((d) => ({ barcode: d.barcode, addr: d.addr, name: d.name, first_heard_unix: 0, known: false })),
       }],
     })),
   })),
   unplaced_mppts: [],
-  unassigned: [{ barcode: '04C05B0000200001', addr: '0080', name: '', first_heard_unix: 0 }],
+  unassigned: [{ barcode: '04C05B0000200001', addr: '0080', name: '', first_heard_unix: 0, known: false }],
   pending: null,
 };
 
@@ -178,7 +178,7 @@ export const routes = {
       cca_validated: true, cca_label: d.name, cca_string: d.string_label,
       cca_mppt: mpptOf(d.string_label),
       cca_channel: `04C05B000000.${10 + i}`,
-      last_heard_unix: 0, last_roster_unix: 0, setup: null,
+      last_heard_unix: 0, last_roster_unix: 0, known: false, setup: null,
     })),
     inverters: [],
     strings: strings.map((s) => ({ label: s.label, panel_rating_w: RATING })),

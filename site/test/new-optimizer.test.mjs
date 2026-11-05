@@ -30,7 +30,8 @@ after(async () => { await browser.close(); server.close(); });
 
 // heard: the new panel's first_heard_unix (0: one the monitor started with).
 // mutate(nodes): change /api/nodes' nodes before the page sees them.
-async function open(hash, heard = Math.floor(Date.now() / 1000) - 3600, mutate = null) {
+// linux: answer /api/status as the Pi build, which can mark an optimizer known.
+async function open(hash, heard = Math.floor(Date.now() / 1000) - 3600, mutate = null, linux = false) {
   const clone = (o) => JSON.parse(JSON.stringify(o));
   const layout = clone(routes['/api/layout']);
   layout.unassigned = [{ barcode: NEW_BC, addr: '0080', name: '', first_heard_unix: heard }];
@@ -40,7 +41,7 @@ async function open(hash, heard = Math.floor(Date.now() / 1000) - 3600, mutate =
   if (mutate) mutate(nodes.nodes);
   const devices = clone(routes['/api/devices']);
   devices.devices = devices.devices.filter((d) => d.barcode !== A2);
-  const api = { posts: [] };
+  const api = { posts: [], known: [] };
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 1400 } });
   await ctx.route('**/api/**', async (route) => {
     const req = route.request();
@@ -48,6 +49,13 @@ async function open(hash, heard = Math.floor(Date.now() / 1000) - 3600, mutate =
     const json = (status, body) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
     if (path === '/api/layout' && req.method() === 'POST') { api.posts.push(JSON.parse(req.postData())); return json(200, { saved: true }); }
     if (path === '/api/layout') return json(200, layout);
+    if (path === '/api/status' && linux) return json(200, { ...routes['/api/status'], platform: 'linux' });
+    if (path === '/api/nodes/known' && req.method() === 'POST') {
+      const b = JSON.parse(req.postData());
+      api.known.push(b);
+      for (const n of nodes.nodes) if (n.long_address === b.barcode) n.known = b.known;
+      return json(200, { known: b.known });
+    }
     if (path === '/api/nodes') return json(200, nodes);
     if (path === '/api/devices') return json(200, devices);
     if (path === '/api/layout/pending') return json(200, null);
@@ -143,6 +151,65 @@ test('the Node Table tags a missing optimizer, one off the TAP\'s roster, and on
   assert.match(await row('C5').locator('.node-unset').getAttribute('title'), /!Mppt 1 0 N/);
   assert.equal(await row('C6').locator('.node-unset').count(), 0);
   assert.match(await row('C6').locator('strong').first().getAttribute('title'), /!Mppt 1 0 S/);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test('an optimizer marked known: a grey Known badge, no Missing tag, and left out of the count', async () => {
+  const now = Math.floor(Date.now() / 1000);
+  const { page, ctx, errors } = await open('#nodes', 0, (nodes) => {
+    const a2 = nodes.find((n) => n.long_address === A2);
+    a2.known = true;
+    a2.last_heard_unix = now - 4 * 86400;  // missing, but known
+  });
+  await page.waitForFunction(() => /A2/.test(document.getElementById('nodes-tbody').textContent));
+  const row = page.locator('#nodes-tbody tr', { has: page.locator('strong', { hasText: /^A2$/ }) });
+  assert.equal((await row.locator('.badge').textContent()).trim(), 'known');
+  assert.equal(await row.locator('.node-missing').count(), 0);
+  // 25 nodes, one known: 24 discovered, and the known one said separately.
+  assert.match(await page.textContent('#nodes-meta'), /^24 discovered · \d+ reporting · 1 known, not reporting$/);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test('on the Pi, a row with no reading can be marked known, and unmarked', async () => {
+  const { page, ctx, api, errors } = await open('#nodes', 0, null, true);
+  await page.waitForFunction(() => /A2/.test(document.getElementById('nodes-tbody').textContent));
+  const row = () => page.locator('#nodes-tbody tr', { has: page.locator('strong', { hasText: /^A2$/ }) });
+  // A reporting row has no such button.
+  const a1 = page.locator('#nodes-tbody tr', { has: page.locator('strong', { hasText: /^A1$/ }) });
+  assert.equal(await a1.locator('button.node-known-btn').count(), 0);
+  await row().locator('button.node-known-btn').click();
+  await page.waitForFunction(() => /known/.test(document.getElementById('nodes-meta').textContent));
+  assert.deepEqual(api.known, [{ barcode: A2, known: true }]);
+  assert.equal((await row().locator('.badge').textContent()).trim(), 'known');
+  assert.equal((await row().locator('button.node-known-btn').textContent()).trim(), 'Unmark');
+  await row().locator('button.node-known-btn').click();
+  await page.waitForFunction(() => !/known/.test(document.getElementById('nodes-meta').textContent));
+  assert.deepEqual(api.known[1], { barcode: A2, known: false });
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test('the ESP32 shows no Mark known button', async () => {
+  const { page, ctx } = await open('#nodes', 0);
+  await page.waitForFunction(() => /A2/.test(document.getElementById('nodes-tbody').textContent));
+  assert.equal(await page.locator('#nodes-tbody button.node-known-btn').count(), 0);
+  await ctx.close();
+});
+
+test('on Topology a known panel is a muted tile and is not counted as a panel', async () => {
+  const { page, ctx, errors } = await open('#topology', 0, (nodes) => {
+    nodes.find((n) => n.long_address === A2).known = true;
+  });
+  await page.waitForSelector('.panel-tile.known');
+  const tile = page.locator('.panel-tile.known');
+  assert.equal(await tile.count(), 1);
+  assert.match(await tile.textContent(), /A2/);
+  assert.match(await tile.locator('.badge').textContent(), /known/);
+  const head = page.locator('.topo-string', { has: page.locator('.panel-tile.known') }).locator('.topo-string-head');
+  assert.match(await head.textContent(), /5 panels/);
+  assert.match(await head.textContent(), /1 known/);
   assert.deepEqual(errors, []);
   await ctx.close();
 });

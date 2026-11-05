@@ -130,6 +130,12 @@ void Monitor::on_power_packet_(const std::string &packet) {
     if (n.addr == p->addr) {
       if (now_s - n.last_heard_unix >= SEEN_SAVE_EVERY_S) dirty_ = true;
       n.last_heard_unix = now_s;
+      if (n.known) {
+        n.known = false;
+        dirty_ = true;
+        LOGI("%s (%s) is reporting: no longer marked known", n.cca_label.empty() ? n.addr.c_str() : n.cca_label.c_str(),
+             n.addr.c_str());
+      }
       p->barcode = n.long_address;
       p->label = n.cca_label;
       break;
@@ -228,12 +234,27 @@ int Monitor::missing_optimizers(int64_t now_unix) const {
   for (const auto &n : nodes_) newest_roster = std::max(newest_roster, n.last_roster_unix);
   int count = 0;
   for (const auto &n : nodes_) {
-    if (n.long_address.empty()) continue;
+    if (n.long_address.empty() || n.known) continue;
     bool silent = n.last_heard_unix > 0 && now_unix - n.last_heard_unix >= MISSING_AFTER_S;
     bool off_roster = n.last_roster_unix > 0 && newest_roster - n.last_roster_unix >= OFF_ROSTER_AFTER_S;
     if (silent || off_roster) count++;
   }
   return count;
+}
+
+bool Monitor::set_known(const std::string &barcode, bool known) {
+  std::lock_guard<std::mutex> lock(mu_);
+  for (auto &n : nodes_) {
+    if (n.long_address != barcode) continue;
+    if (n.known != known) {
+      n.known = known;
+      dirty_ = true;
+      LOGI("%s (%s) %s", n.cca_label.empty() ? n.addr.c_str() : n.cca_label.c_str(), n.addr.c_str(),
+           known ? "marked known: not reporting, and not counted as missing" : "no longer marked known");
+    }
+    return true;
+  }
+  return false;
 }
 
 int Monitor::new_optimizers(int64_t now_unix) const {
@@ -637,7 +658,8 @@ bool Monitor::save_locked_() {
                      {"cca_object_id", n.cca_object_id},
                      {"cca_validated", n.cca_validated},
                      {"last_heard_unix", n.last_heard_unix},
-                     {"last_roster_unix", n.last_roster_unix}});
+                     {"last_roster_unix", n.last_roster_unix},
+                     {"known", n.known}});
   }
   json history = json::array();
   for (const auto &d : history_) history.push_back({d.first, d.second});
@@ -700,6 +722,7 @@ bool Monitor::load() {
     n.cca_validated = e.value("cca_validated", false);
     n.last_heard_unix = e.value("last_heard_unix", static_cast<int64_t>(0));
     n.last_roster_unix = e.value("last_roster_unix", static_cast<int64_t>(0));
+    n.known = e.value("known", false);
     nodes_.push_back(std::move(n));
   }
   // Before seen_barcodes was kept, the node table was all it had heard, and
