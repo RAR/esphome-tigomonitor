@@ -596,6 +596,9 @@ void MasterCore::run_startup(uint32_t now_ms) {
   // phase_ == discovering
   master::DiscoveryRequest d = discovery_->next();
   if (d.done) {
+    if (discovery_->dropped_back())
+      LOGW("bus master: the TAP was back at the factory address after the RESET (it keeps no id); re-addressed it "
+           "again without one");
     LOGI("bus master: the TAP is now at %04X; polling", gateway_);
     phase_ = Phase::running;
     if (status().fault == Fault::discovery_failed) set_fault(Fault::none, "");

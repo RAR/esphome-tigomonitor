@@ -393,7 +393,7 @@ build/linux/tigomonitord --state-dir "$out/state16" --web-dir components/tigo_se
 daemon=$!
 for _ in $(seq 160); do [ -f "$out/tap16.json" ] && [ "$(stat "$out/tap16.json" "d['polls']")" -ge 5 ] && break; sleep 0.5; done
 expect "one RESET, said it failed, then found it at 1201 and polled" "$(stat "$out/tap16.json" "(d['resets'], d['polls'] >= 5, d['addressed_to'])")" "(1, True, '1201')"
-expect "logged the failure" "$(grep -c 'no answer to the read at the configured id after the RESET' "$out/daemon16.log")" 1
+expect "logged the failure" "$(grep -c 'no answer to the reads at the configured id and the factory address after the RESET' "$out/daemon16.log")" 1
 expect "fault cleared once polling" "$(api 18106 /api/master | python3 -c 'import json,sys; m=json.load(sys.stdin); print(m["fault"], m["phase"])')" "none running"
 kill $daemon; wait $daemon 2>/dev/null || true
 kill $tap; wait $tap 2>/dev/null || true

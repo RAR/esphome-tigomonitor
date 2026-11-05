@@ -1067,7 +1067,7 @@ class Discovery {
     // then go on to the RESET, since the TAP may already be one id up, where
     // nothing looks for it again; the others fail.
     if (state_ == claim || state_ == get_mac || state_ == set_id || state_ == verify || state_ == hop ||
-        state_ == hop_verify) {
+        state_ == hop_verify || state_ == back_factory || state_ == re_set_id || state_ == re_verify) {
       if (state_ != tries_state_) {
         tries_state_ = state_;
         tries_ = 0;
@@ -1129,13 +1129,28 @@ class Discovery {
         r.idle_ms = RESET_QUIET_MS;
         break;
       case back:
-        if (back_sent_ == BACK_TRIES) {
-          unanswered_ = step_name_(back);
-          state_ = st_failed;
+        if (back_sent_ == BACK_TRIES) {  // not at the configured id: back at the factory address?
+          state_ = back_factory;
           return next();
         }
         back_sent_++;
         r.dest = target_; r.cmd = CMD_GET_MAC_NOW; r.wait_ms = BACK_WAIT_MS;
+        break;
+      // A TAP with no stored id (the bench H1.0006, with no optimizer table)
+      // is back at the factory address after the RESET. Re-address it once
+      // more, with no hop and no second RESET.
+      case back_factory:
+        r.dest = factory_; r.cmd = CMD_GET_MAC_NOW;
+        break;
+      case re_set_id:
+        r.dest = factory_; r.cmd = CMD_SET_ID_BY_MAC;
+        r.payload = {0x37, 0x24, 0x92, 0x66};
+        r.payload.insert(r.payload.end(), mac_.begin(), mac_.end());
+        r.payload.push_back(static_cast<uint8_t>(target_ >> 8));
+        r.payload.push_back(static_cast<uint8_t>(target_));
+        break;
+      case re_verify:
+        r.dest = target_; r.cmd = CMD_GET_MAC_NOW;
         break;
       default: break;
     }
@@ -1179,6 +1194,21 @@ class Discovery {
         if (f.cmd == CMD_GET_MAC_NOW + 1 && f.payload.size() >= 10 && (f.payload[8] << 8 | f.payload[9]) == target_)
           state_ = st_done;
         break;
+      case back_factory:  // ours, at the factory address; another TAP's MAC is not re-addressed
+        if (f.cmd == CMD_GET_MAC_NOW + 1 && f.payload.size() >= 10) {
+          bool ours = Bytes(f.payload.begin(), f.payload.begin() + 8) == mac_ &&
+                      (f.payload[8] << 8 | f.payload[9]) == factory_;
+          if (ours) dropped_back_ = true;
+          state_ = ours ? re_set_id : st_failed;
+        }
+        break;
+      case re_set_id:
+        if (f.cmd == CMD_SET_ID_BY_MAC + 1) state_ = re_verify;
+        break;
+      case re_verify:
+        if (f.cmd == CMD_GET_MAC_NOW + 1 && f.payload.size() >= 10 && (f.payload[8] << 8 | f.payload[9]) == target_)
+          state_ = st_done;
+        break;
       default: break;
     }
   }
@@ -1188,11 +1218,16 @@ class Discovery {
   // The last step that went unanswered after all its tries, or "" if none.
   const char *unanswered() const { return unanswered_; }
   const Bytes &mac() const { return mac_; }
+  // True once the TAP came back at the factory address after the RESET and was re-addressed again.
+  bool dropped_back() const { return dropped_back_; }
   // MACs of other TAPs that answered the scan, in the order heard.
   const std::vector<Bytes> &extra_taps() const { return extra_; }
 
  private:
-  enum State { claim, get_mac, set_id, verify, scan, hop, hop_verify, reset, quiet, back, st_done, st_failed } state_;
+  enum State {
+    claim, get_mac, set_id, verify, scan, hop, hop_verify, reset, quiet, back,
+    back_factory, re_set_id, re_verify, st_done, st_failed
+  } state_;
   bool scan_only_;
   uint16_t factory_, target_;
   Bytes mac_;
@@ -1210,10 +1245,14 @@ class Discovery {
       case hop: return "the hop to the id one up";
       case hop_verify: return "the read at the id one up";
       case back: return "the read at the configured id after the RESET";
+      case back_factory: return "the reads at the configured id and the factory address after the RESET";
+      case re_set_id: return "SET_ID_BY_MAC after the RESET";
+      case re_verify: return "the read at the new id after the RESET";
       default: return "";
     }
   }
   int back_sent_ = 0;
+  bool dropped_back_ = false;
   std::vector<Bytes> extra_;
 };
 

@@ -434,11 +434,47 @@ static void test_discovery_hop() {
   DiscoveryRequest q = once.next();
   CHECK(!q.send && q.idle_ms == Discovery::RESET_QUIET_MS);
 
-  // Not back at the configured id after a few tries: failed.
+  // Not back at the configured id after a few tries, nor at the factory
+  // address: failed.
   Discovery lost(0x1235, 0x1201);
   to_reset(lost);
   for (int i = 0; i < Discovery::BACK_TRIES; i++) CHECK(lost.next().send);
+  for (int i = 0; i < Discovery::STEP_TRIES; i++) {
+    DiscoveryRequest r = lost.next();
+    CHECK(r.send && r.dest == 0x1235 && r.cmd == 0x003A);
+  }
   CHECK(lost.next().failed);
+  CHECK(std::string(lost.unanswered()) != "");
+
+  // Back at the factory address after the RESET, as the bench H1.0006 is: a
+  // TAP that keeps no stored id. Re-addressed once more, with no hop and no
+  // second RESET, then done.
+  Discovery dropped(0x1235, 0x1201);
+  to_reset(dropped);
+  for (int i = 0; i < Discovery::BACK_TRIES; i++) dropped.next();
+  DiscoveryRequest r = dropped.next();
+  CHECK(r.send && r.dest == 0x1235 && r.cmd == 0x003A && r.payload.empty());
+  dropped.on_reply(Frame{0x9235, 0x003B, hex("04c05b3000a1b2c31235")});
+  r = dropped.next();
+  CHECK(r.send && r.dest == 0x1235 && r.cmd == 0x003C && r.payload == hex("3724926604c05b3000a1b2c31201"));
+  dropped.on_reply(Frame{0x9235, 0x003D, {}});
+  r = dropped.next();
+  CHECK(r.send && r.dest == 0x1201 && r.cmd == 0x003A);
+  dropped.on_reply(Frame{0x9201, 0x003B, hex("04c05b3000a1b2c31201")});
+  CHECK(dropped.next().done && dropped.dropped_back());
+  // A TAP that comes back where it was put never takes that path.
+  Discovery kept(0x1235, 0x1201);
+  to_reset(kept);
+  kept.next();
+  kept.on_reply(Frame{0x9201, 0x003B, hex("04c05b3000a1b2c31201")});
+  CHECK(kept.next().done && !kept.dropped_back());
+  // Another TAP's MAC at the factory address is not ours: failed, not re-addressed.
+  Discovery other(0x1235, 0x1201);
+  to_reset(other);
+  for (int i = 0; i < Discovery::BACK_TRIES; i++) other.next();
+  other.next();
+  other.on_reply(Frame{0x9235, 0x003B, hex("04c05b3000ffffff1235")});
+  CHECK(other.next().failed);
   // Back, but late: the third try answers.
   Discovery late(0x1235, 0x1201);
   to_reset(late);
