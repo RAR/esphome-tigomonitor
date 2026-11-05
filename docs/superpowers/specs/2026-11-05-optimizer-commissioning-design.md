@@ -49,7 +49,11 @@ The backup CCA stays on the bench bus only. It re-PANs any TAP it can reach.
 
 - **An "Add optimizer" action in the Topology editor.** Enter the barcode by typing it or by scanning it with the phone camera, using the browser's barcode-reader API where it exists and typing where it doesn't. Place it at the same time: inverter, string, panel.
 - **The entry starts as pending.** This builds on the existing `known` flag: listed, left out of counts, no alerts, and cleared by the first reading.
-- **Open: does the barcode map directly to the long address the TAP reports?** The fixtures suggest it does. Confirm with one real optimizer before relying on it.
+- **The printed barcode is not the long address.** Tigo labels use a short form, `N-XXXXXC`: a digit, a dash, five hex digits and a trailing letter. Our UI keys optimizers by the 16-character long address from Frame 27.
+  - The existing CCA matcher (`match_barcode()`: last 6 chars, 1-char tolerance) already bridges the two forms.
+  - That suggests `N` plus the five hex digits are the tail of the MAC, and the letter is a check character.
+  - So the Add form has to resolve a scanned or typed short code against the long addresses it hears, and keep the short code as the label.
+  - Confirm the mapping, and how the check letter is computed, on the bench TAP, comparing and printing booleans only.
 - **Enabling discovery is part of the flow.** The UI offers to enable it while anything is pending and to disable it when nothing is.
 
 ## Phase 2 — a commissioning step in the bus master (only if Phase 0 step 2 fails)
@@ -81,7 +85,7 @@ UI: commissioning progress on the pending tile or row. A dry-run mode prints eac
 3. How the ID reaches the optimizer: through the table entry, or a separate frame.
 4. Whether entries survive a TAP restart without STORE.
 5. Which corrective writes a factory-fresh optimizer needs, if any.
-6. Whether the barcode maps to the long address.
+6. Exactly how the printed short code (`N-XXXXXC`) maps to the long address, and how the check letter is computed. Check on the bench TAP first.
 
 ## Out of scope
 
