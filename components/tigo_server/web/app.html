@@ -3572,7 +3572,7 @@
     const standingBy = sb.state === 'standing_by' || sb.state === 'taking_over';
     document.getElementById('pv-state').textContent = pv.on ? 'PV output is on' : 'PV output is off';
     document.getElementById('pv-detail').textContent = pv.unconfirmed ? "The TAP didn't confirm it; asked again every hour"
-      : pv.confirmed ? 'The TAP confirmed it' : pv.last_sent ? 'Waiting for the TAP to confirm' : 'Nothing sent to the TAP yet';
+      : pv.confirmed ? 'The TAP confirmed it' : pv.last_sent ? 'Waiting for the TAP to confirm' : '';
     const toggle = document.getElementById('pv-toggle');
     toggle.textContent = pv.on ? 'Turn off' : 'Turn on';
     toggle.classList.toggle('danger', pv.on);
