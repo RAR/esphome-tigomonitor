@@ -1384,11 +1384,11 @@
       </div>
       <div class="tools-card" id="disc-card">
         <div class="pv-row">
-          <div class="cfg-text"><strong class="pv-title"><span class="dot dim" id="disc-dot"></span><span id="disc-state">Renewed when it runs out</span></strong><span id="disc-detail">—</span></div>
-          <button class="btn" id="disc-toggle">Let it close</button>
+          <div class="cfg-text"><strong class="pv-title"><span class="dot dim" id="disc-dot"></span><span id="disc-state">Enabled</span></strong><span id="disc-detail">—</span></div>
+          <button class="btn" id="disc-toggle">Disable</button>
         </div>
         <div class="pv-msg" id="disc-status"></div>
-        <p class="pv-note">For testing. The TAP's window for new optimizers to join, which the CCA always renewed. The panels keep reporting either way, and a closed window didn't stop production on the roof.</p>
+        <p class="pv-note">The TAP's window for new optimizers to join. Disabled, the panels keep reporting and producing; enable it before adding an optimizer.</p>
       </div>
 
       <div class="section-head" id="diag-master-head">
@@ -3375,7 +3375,7 @@
     document.getElementById('diag-discovery-sub').textContent = standingBy ? 'another master has the bus'
       : !m.discovery_read ? 'not read yet'
       : `${m.discovery.running ? 'open' : 'closed'} · ${m.discovery.node_count} nodes` +
-        (m.discovery_renewing === false ? ' · not renewing' : '');
+        (m.discovery_renewing === false ? ' · disabled' : '');
     document.getElementById('diag-renewals').textContent = m.renewals;
     // A rate needs two readings; the first shows the total.
     const now = Date.now();
@@ -3589,10 +3589,10 @@
     const renewing = m.discovery_renewing !== false;
     const w = m.discovery || {};
     const left = m.discovery_read ? (w.running && w.remaining_s > 0 ? `open, ${w.remaining_s} s left` : 'closed') : 'not read yet';
-    document.getElementById('disc-state').textContent = renewing ? 'Renewed when it runs out' : 'Left to close';
+    document.getElementById('disc-state').textContent = renewing ? 'Enabled' : 'Disabled';
     document.getElementById('disc-detail').textContent = renewing ? `Now ${left}` : `Now ${left} · kept through a restart`;
     const disc = document.getElementById('disc-toggle');
-    disc.textContent = renewing ? 'Let it close' : 'Renew again';
+    disc.textContent = renewing ? 'Disable' : 'Enable';
     document.getElementById('disc-dot').className = 'dot ' + (!m.discovery_read ? 'dim' : renewing ? '' : 'idle');
     disc.disabled = standingBy;
     const ds = document.getElementById('disc-status');

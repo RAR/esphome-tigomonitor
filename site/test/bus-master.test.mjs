@@ -235,15 +235,15 @@ test('in the first minute it is still checking, and with PV on it says nothing',
 test('the discovery window can be left to close, and renewed again', async () => {
   const { page, ctx, api, errors } = await open({ hash: '#busmaster' });
   await page.waitForSelector('#disc-card', { state: 'visible' });
-  assert.equal(await page.textContent('#disc-state'), 'Renewed when it runs out');
-  assert.equal(await page.textContent('#disc-toggle'), 'Let it close');
+  assert.equal(await page.textContent('#disc-state'), 'Enabled');
+  assert.equal(await page.textContent('#disc-toggle'), 'Disable');
   await page.click('#disc-toggle');
-  await page.waitForFunction(() => document.getElementById('disc-toggle').textContent === 'Renew again');
+  await page.waitForFunction(() => document.getElementById('disc-toggle').textContent === 'Enable');
   assert.deepEqual(api.discoveryPosts, [{ renew: false }]);
-  assert.match(await page.textContent('#disc-state'), /^Left to close/);
-  assert.match(await page.textContent('#diag-discovery-sub'), /not renewing/);
+  assert.match(await page.textContent('#disc-state'), /^Disabled$/);
+  assert.match(await page.textContent('#diag-discovery-sub'), /disabled/);
   await page.click('#disc-toggle');
-  await page.waitForFunction(() => document.getElementById('disc-toggle').textContent === 'Let it close');
+  await page.waitForFunction(() => document.getElementById('disc-toggle').textContent === 'Disable');
   assert.deepEqual(api.discoveryPosts, [{ renew: false }, { renew: true }]);
   assert.deepEqual(errors, []);
   await ctx.close();

@@ -209,15 +209,15 @@ On an ESP32 running the bus, `pv_output:` under `tigo_master:` adds the
 same switch; see the
 [Relay-1CH standby example](https://github.com/RAR/esphome-tigomonitor/blob/main/boards/example-waveshare-relay-1ch-standby.yaml).
 
-### Let the discovery window close
+### Disable the discovery window
 
 The CCA renews the TAP's *discovery window*, its window for new optimizers
-to join, every time it runs out, and so does the Pi. For testing, the
-**Bus master** page can stop renewing it: **Let it close**. The Pi keeps
+to join, every time it runs out, and so does the Pi by default. The
+**Bus master** page can stop renewing it: **Disable**. The Pi keeps
 polling, so every panel still reports, and nothing new goes to the TAP; it
 just stops sending the renewal. On the roof we measured, a closed window
 didn't stop production, and every optimizer came back at sunrise and after
-a TAP power cycle. **Renew again** undoes it. The choice is saved in
+a TAP power cycle. **Enable** it again before adding an optimizer. The choice is saved in
 `discovery.json` beside `settings.json`, so a restart or an update keeps
 it. It needs the web UI password too.
 
