@@ -85,7 +85,9 @@ UI: commissioning progress on the pending tile or row. A dry-run mode prints eac
 3. How the ID reaches the optimizer: through the table entry, or a separate frame.
 4. Whether entries survive a TAP restart without STORE.
 5. Which corrective writes a factory-fresh optimizer needs, if any.
-6. Exactly how the printed short code (`N-XXXXXC`) maps to the long address, and how the check letter is computed. Check on the bench TAP first.
+6. How the printed short code (`N-XXXXXC`) maps to the long address.
+   - Partly answered on the bench H1.0006 TAP (2026-11-05): its five hex digits are the last five hex digits of the MAC, and the MAC starts `04C05B`.
+   - Still unknown: the leading digit, which is not simply the MAC nibble before those five, and how the trailing letter is computed. Matching on the five hex digits is enough to find a device.
 
 ## Out of scope
 
