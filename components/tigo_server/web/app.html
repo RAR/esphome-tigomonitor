@@ -111,9 +111,31 @@
 
   .conn { padding: 12px 20px; border-top: 1px solid var(--border); font-size: 11px; color: var(--text-dim); display: flex; justify-content: space-between; align-items: center; }
   .pill { display: inline-flex; align-items: center; gap: 6px; }
-  .pv-pill { display: block; margin: 8px 12px; padding: 6px 11px; border: 1px solid var(--border); border-radius: 8px;
-             font-size: 12.5px; font-weight: 600; color: var(--text-dim); text-decoration: none; }
-  .pv-pill.off { color: var(--bad); border-color: var(--bad); }
+  /* The sidebar's PV output state, on every page. Off is the state that must
+     be noticed: it turns red and its dot pulses. */
+  .pv-pill { display: flex; align-items: center; gap: 9px; margin: 8px 12px; padding: 8px 10px 8px 12px;
+             border: 1px solid rgba(74,222,128,0.28); border-radius: 8px; background: rgba(74,222,128,0.07);
+             font-size: 13px; font-weight: 600; color: var(--text); text-decoration: none;
+             transition: background .15s ease-out, border-color .15s ease-out; }
+  .pv-pill::before { content: ''; flex: none; width: 8px; height: 8px; border-radius: 50%;
+                     background: var(--good); box-shadow: 0 0 0 3px rgba(74,222,128,0.18); }
+  .pv-pill:hover { background: rgba(74,222,128,0.13); border-color: rgba(74,222,128,0.45); }
+  .pv-pill:focus-visible { outline: 2px solid var(--good); outline-offset: 2px; }
+  .pv-pill-label { flex: 1; }
+  .pv-pill-state { padding: 2px 7px; border-radius: 4px; font-size: 10.5px; letter-spacing: .06em; text-transform: uppercase;
+                   color: var(--good); background: rgba(74,222,128,0.15); }
+  .pv-pill.off { border-color: rgba(248,113,113,0.5); background: rgba(248,113,113,0.1); }
+  .pv-pill.off:hover { background: rgba(248,113,113,0.16); border-color: rgba(248,113,113,0.7); }
+  .pv-pill.off:focus-visible { outline-color: var(--bad); }
+  .pv-pill.off::before { background: var(--bad); animation: pv-pulse 2s ease-out infinite; }
+  .pv-pill.off .pv-pill-state { color: var(--bad); background: rgba(248,113,113,0.18); }
+  body.light-mode .pv-pill-state { color: #15803d; }
+  body.light-mode .pv-pill.off .pv-pill-state { color: #b91c1c; }
+  @keyframes pv-pulse {
+    0% { box-shadow: 0 0 0 0 rgba(248,113,113,0.55); }
+    70%, 100% { box-shadow: 0 0 0 7px rgba(248,113,113,0); }
+  }
+  @media (prefers-reduced-motion: reduce) { .pv-pill.off::before { animation: none; box-shadow: 0 0 0 3px rgba(248,113,113,0.25); } }
   .pv-banner { display: flex; gap: 12px; align-items: center; margin: 0 0 16px; padding: 10px 14px; border-radius: 8px;
                border: 1px solid var(--bad); color: var(--bad); font-weight: 600; font-size: 14px; }
   .pv-banner a { color: inherit; }
@@ -858,7 +880,7 @@
 
     <!-- The PV output state, on the Pi running (or standing by for) the bus.
          It shows the state and links to the switch; it never switches it. -->
-    <a id="pv-pill" class="pv-pill" href="#busmaster" style="display:none" title="PV output: open Bus master">PV on</a>
+    <a id="pv-pill" class="pv-pill" href="#busmaster" style="display:none" title="PV output: open Bus master"><span class="pv-pill-label">PV</span> <span class="pv-pill-state">on</span></a>
 
     <!-- Tigo cloud status box — shown only when a cloud connection is configured. -->
     <div id="cloud-box" style="display:none;margin:8px 12px;padding:9px 11px;border:1px solid var(--border);border-radius:8px;cursor:pointer" title="Open Cloud Status">
@@ -3542,7 +3564,7 @@
     banner.style.display = show && !pv.on ? '' : 'none';
     if (!show) return;
     const pill = document.getElementById('pv-pill');
-    pill.textContent = pv.on ? 'PV on' : 'PV off';
+    pill.querySelector('.pv-pill-state').textContent = pv.on ? 'on' : 'off';
     pill.classList.toggle('off', !pv.on);
     const from = pv.source === 'heard' ? 'the monitor running the bus' : 'this monitor';
     document.getElementById('pv-banner-text').textContent = `PV output is off, turned off from ${from} at ${pvWhen(pv.since)}`;
