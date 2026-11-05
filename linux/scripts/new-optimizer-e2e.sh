@@ -134,10 +134,13 @@ except urllib.error.HTTPError as e:
 PY
 }
 bc="$(setup "d['nodes'][0]['long_address']")"
+overview() { python3 -c "import json,urllib.request as u; print(json.load(u.urlopen('http://127.0.0.1:18208/api/overview', timeout=5))['max_devices'])"; }
+before="$(overview)"
 expect "unmarked to start with" "$(setup "sum(1 for n in d['nodes'] if n.get('known'))")" 0
 expect "a bad body is refused" "$(post '{"barcode": "x"}' | cut -d' ' -f1)" 400
 expect "an unknown barcode is refused" "$(post '{"barcode": "04C05B00000000FF", "known": true}' | cut -d' ' -f1)" 404
 expect "mark it known" "$(post "{\"barcode\": \"$bc\", \"known\": true}")" '200 {"known":true}'
+expect "the sidebar's total leaves it out" "$(overview)" "$((before - 1))"
 expect "/api/nodes says so" "$(setup "[n['known'] for n in d['nodes'] if n['long_address'] == '$bc']")" "[True]"
 layout() { python3 -c "import json,urllib.request as u; d=json.load(u.urlopen('http://127.0.0.1:18208/api/layout', timeout=5)); print(eval(__import__('sys').argv[1]))" "$1"; }
 expect "and /api/layout" "$(layout "[p.get('known') for p in d['unassigned'] + [p for i in d['inverters'] for m in i['mppts'] for s in m['strings'] for p in s['panels']] if p['barcode'] == '$bc']")" "[True]"

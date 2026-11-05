@@ -468,7 +468,17 @@ void HttpServer::routes_() {
     strftime(ym, sizeof(ym), "%Y-%m", &lt);
     for (const auto &d : mon.daily_history())
       if (d.first.compare(0, 7, ym) == 0) month += d.second;
-    size_t known = std::max(panels.size(), mon.nodes().size());
+    // Every optimizer the TAP lists, less the ones marked known (not
+    // reporting, and expected not to): the sidebar's and dashboard's "of N".
+    size_t listed = 0, heard = 0;
+    std::set<std::string> marked;
+    for (const auto &n : mon.nodes()) {
+      if (!n.known) listed++;
+      else marked.insert(n.long_address);
+    }
+    for (const auto &p : panels)
+      if (!marked.count(p.barcode)) heard++;
+    size_t known = std::max(heard, listed);
     send_json(res, {{"total_power", r1(power_out)},
                     {"total_current", r2(current)},
                     {"avg_efficiency", active ? r2(eff / active) : 0.0},
