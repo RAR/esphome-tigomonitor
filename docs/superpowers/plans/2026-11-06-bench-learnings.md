@@ -137,6 +137,12 @@ When a TAP answers polls with 0x0006 (refused), say so once and back off; don't 
 
 When a text query (tunnel sub 06) gets 0x0146 back from the TAP instead of 0x0B10, end that transaction at once: no retry, no wait for a timeout. Count it per node, and don't let it look like a lost TAP or a second master. Test: a mock TAP that answers sub 06 to node 2 with `0146 00 02` → one "node 2 unreachable" result, no retries, polling unaffected. Commit: `fix(master): a query to an unreachable optimizer ends at the TAP's answer`
 
+### Task 8: Ban the GatewayCfg write, and rename sub 0x2B
+
+The CCA's own UI (Mesh → History, 2026-11-06) names tunnel sub 0x0D `GatewayCfg Req`. With args `00 00` or `00 01` it's a read. With `01 00` and a 36-byte blob it's a **write of the TAP's whole network config** (PAN, channel and what is probably key material). That's how a CCA re-PANs a TAP. Our gate returns `bench_only` for it today; make it `never`. The same UI names sub 0x2B `EraseFlash`, not "Stop Discovery". It's already `never`; rename `SUB_DISCOVERY_STOP` and fix its comment.
+- Test: `classify_request` of sub 0x0D with `01 00` + 36 bytes → `never`, in every mode including bench; `00 00`/`00 01` unchanged.
+- Commit: `fix(master): never send a TAP's network config write`
+
 ---
 
 ## Bench sessions (with the owner)
