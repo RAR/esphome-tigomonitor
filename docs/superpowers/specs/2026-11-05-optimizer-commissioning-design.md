@@ -149,14 +149,15 @@ The owner worked through the backup CCA's local web UI while we recorded the bus
 
 | Bytes | Field |
 |---|---|
+| 0 | status (00) |
 | 1 | channel (802.15.4, 11–26; the bench TAPs used 15, 20 and 23) |
 | 2–3 | PAN |
-| 4–7, 11–12 | slot map (12-2-2-1/28/3) |
-| 9–10 (and 11) | change on every rewrite: a revision or nonce |
-| 13 | SLT (90), the signal-level threshold for admitting a node |
-| 14–29 | **16-byte network key** |
-| 30 | changes with the key: probably a check value |
-| 31–35 | Optimizn 00000200, SLm 60 |
+| 4–7, 12–13 | slot map (12-2-2-1/28/3) |
+| 9–11 | change on every write; identical on both TAPs when one operation re-keyed both (22:13), so a per-operation value the CCA picks, not a checksum |
+| 14 | SLT (90), the signal-level threshold for admitting a node |
+| 15–30 | **16-byte network key** (matches the UI's "Security Key" column byte for byte) |
+| 31–34 | Optimizn 00000200 |
+| 35 | SLm (60) |
 
 A fresh TAP's factory block has PAN 0x1234 and channel 0x14. **The PAN is not a fixed function of the CCA serial:** the CCA chose new ones on several rewrites tonight. Only one nibble of it changed between rewrites, so the earlier serial rule describes only the PAN it set first.
 
