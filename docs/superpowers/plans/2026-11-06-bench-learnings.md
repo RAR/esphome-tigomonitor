@@ -123,14 +123,19 @@ Don't build it until the owner says yes: it widens a bring-up read to every star
 
 ## Bench sessions (with the owner)
 
-In order. B1 needs the backup CCA on the bench bus; B2–B4 need it unplugged and the Pi as the bench master.
+In order. B0 (below) comes before anything else touches the old TAP. B1 and B5 need the backup CCA on the bench bus; B2–B4 need it unplugged and the Pi as the bench master.
 
 - **B1. Removal, captured.** Two spare optimizers in the bench Tigo EI system, both joined. Remove one in the cloud and record the bus. Expected from the analysis: 0x2B erase, then a 0x29 rewrite of the survivor. Then power-cycle the TAP. If the rewrite set the survivor's spare word back to FFFF, it comes back provisional and needs the window to rejoin. That's the main thing to learn.
 - **B2. A long TAP power-off, Pi as master.** Several minutes off. Expect: the table and joins intact, the window closed, and our master renewing it on the first 0-second reading if discovery is enabled. Also confirm on hardware: the bring-up sends 0x000E (not 0x0E02) to the H1.0006, and no STORE because the TAP keeps 1201.
 - **B3. An optimizer not in the table, Pi as master.** The bench TAP keeps its one record, so the renewal count is 1. Window open, power an optimizer the TAP has never listed. **If it joins and reports, Phase 2 isn't needed and the feature is Phase 1 only.**
 - **B4. Short code check letter.** For each spare, compare the label's short code to the long address the TAP reports; print booleans only. Settles Open question 6.
 
-Not testable now: the drop-back STORE path itself. The only spare TAP is already stored.
+With the old TAP as well (first B0, then B5):
+
+- **B0. Our STORE path on hardware, the old TAP alone, Pi as master, before any CCA sees it.** If it drops back to the factory id on a RESET as the H1.0006 did, our bring-up should re-address it, send the key-only STORE and log "stored the id". Then power-cycle it: it must come back at 1201. **This has to run first:** once a CCA STOREs the old TAP, it no longer drops back and the path can't be tested. If it was ever on the roof system, run it at night, because its table and PAN may still be the roof's.
+- **B5. Two TAPs, with the backup CCA.** Learn how a CCA addresses two: expected 1201 and 1202, a STORE for each, and how the hop changes when the id one up is taken. That would also explain why the hop exists. Then see which TAP each optimizer joins, and what each TAP's table gets. Our master supports one TAP: it reports a second one found in the scan and sends it nothing, so B5 is CCA-only.
+
+Putting 1202 on the current bench TAP by hand doesn't exercise the path: it's already stored, so it never drops back.
 
 ## Roof sessions (with the owner)
 
