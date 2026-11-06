@@ -170,6 +170,8 @@ With the never-used TAP as well (B0 first, then B5):
 
 Storing 1202 would not help: the TAP would come back at 1202, where our master never looks. Storing 1235 is what reproduces a fall-back.
 
+- **B6. The CCA UI's Gateway Tuner, captured.** The local UI has per-TAP Rediscover Nodes, Disable Gateway and Delete Gateway buttons, plus SLT-lowering discovery. Press each on the bench with the recorder running, starting with Rediscover Nodes on the TAP with the empty table. This shows how a CCA removes a TAP and rebuilds a node table directly, and may cover what B1 was going to show about removal. Don't save edits to channel, PAN or key: that writes the TAP's network config.
+
 ## Roof sessions (with the owner)
 
 - **R1. Swap in the remaining replacement optimizers with a raw capture.** The four are 802A–802D; 002D has already joined. Record on the Pi5 (stopping stack 68 needs a go-ahead). Open the window, swap, wait for each join, close. Compare their `Info` and `Mppt` replies with the other 40's, including 002D's. If they match, no corrective write is ever needed.
