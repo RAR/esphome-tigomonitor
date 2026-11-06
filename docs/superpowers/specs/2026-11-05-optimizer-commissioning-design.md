@@ -18,10 +18,10 @@ What we want:
 | 1. Register | Scan the barcode on Tigo's site | The Topology editor holds inverters, strings, panels, Replace and the "known" tag |
 | 2. Send the config down | Cloud → CCA (sysconfig) | Not needed: the config lives on the Pi |
 | 3. Update the TAP | The CCA builds an "ideal table" from sysconfig, compares it with the gateway's table, then rewrites the differences (`SET_LIST_ENTRIES` 0x0182) or wipes and rewrites (`CLEAR_ADT` 0x011E). It assigns each node an ID: preferred, else random, kept in a permanent table | Never sent; unknown territory |
-| 4. Join | The optimizer joins the TAP. Joins don't appear to be gated by discovery. The discovery window lets the master learn about the new node | We already see joins (new-optimizer handling) |
+| 4. Join | The optimizer joins the TAP, but only while the discovery window is open (measured 2026-11-05, below). The TAP then clears the entry's 0x8000 bit | We already see joins (new-optimizer handling) |
 | 5. Configure | The updaters read `Version`, `Info`, `Mppt`, `Smrt`, `Tests`. The Info updater also corrects settings (`Mppt_..1.…`, `Mppt_%X.1`, `Discharge_%02X`) | We send the reads; none of the corrective writes |
 
-Sources: the owner's RE write-ups of CCA 4.0.3-nd (`meshdcd`, `lmudcd`), summarised in memory under *cca-enrollment-static-findings*. Treat the table rewrite and the ID choice as firmware-confirmed. Treat "joins aren't gated" as resting on gateway log text plus what we've seen on the roof.
+Sources: the owner's RE write-ups of CCA 4.0.3-nd (`meshdcd`, `lmudcd`), summarised in memory under *cca-enrollment-static-findings*. Treat the table rewrite and the ID choice as firmware-confirmed. The write-ups' "joins aren't gated, only the discover bit is" came from log strings; the roof measurement below contradicts it for a registered node that has never joined.
 
 Rejecting unknown optimizers ("not in SysConfig and Discovery not Promiscuous") is a CCA setting, not a TAP rule. The Pi has no such filter.
 
@@ -33,6 +33,14 @@ Each observation below decides how much of what follows is needed.
    - whether each address drops the 0x8000 bit;
    - whether the Info and Mppt replies match the other 40;
    - which queries run, in what order.
+
+   **Result (2026-11-05, one of the four, powered on a bench supply at night, no raw capture):**
+   - Powered with the window closed, the TAP never passed it on.
+   - With the window open, its first reading arrived 26 s later at 002D.
+   - The next Frame 27 listed it at 002D, and the 802D entry was gone. So 0x8000 on a table entry means "registered, not yet joined", and the TAP clears it itself on the join.
+   - After the window closed again, it kept reporting.
+
+   So for an optimizer already in the TAP's table, commissioning is: open the window, power it, wait for the join, close the window. No frames beyond the ones we already send. Still worth capturing raw for the other three: the join frames, and the Info and Mppt comparison with the other 40.
 2. **Bench: an unregistered spare optimizer, no CCA.** A spare TAP on a PAN and channel that aren't the roof's (the roof uses channel 24), on its own RS485 adapter, with the Pi as master and discovery enabled. Does the spare join and report even though nothing added it to the TAP's table? **If it does, the feature is Phase 1 only.**
 3. **Bench: the backup CCA doing a real add, captured.** The owner registers the spare on Tigo's site for the bench CCA, and the Pi records every byte. This gives us:
    - the exact `SET_LIST_ENTRIES` payloads (the 11-byte entry);
