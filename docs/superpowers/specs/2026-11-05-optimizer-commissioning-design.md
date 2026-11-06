@@ -166,7 +166,10 @@ UI: commissioning progress on the pending tile or row. A dry-run mode prints eac
 
 Still open:
 - the TUID the CCA chose (2) doesn't match 4.0.3's preferred-then-random allocator;
-- how the TAP rebuilds its RAM "joined" bitmap at boot. After a quick power cycle it read joined = 1 with the window closed.
+
+**Answered: a TAP power cycle keeps every join.** Each slot's spare word holds a persistent "joined" bit: FFFF when written, FFFE once joined. At boot the TAP rebuilds both bitmaps from the table. The bench read joined = 1 about a second after power-on, with no window. A reboot loses only the open window.
+
+**One consequence for step 3:** any successful 0x29 write stores the spare word as FFFF, so rewriting an already-joined record silently turns it back into a provisional one at the next boot. Step 1's "stop if the MAC is already listed" is what prevents that, and it must never be skipped.
 
 ## Guardrails
 
