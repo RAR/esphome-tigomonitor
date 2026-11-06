@@ -174,7 +174,7 @@ In order. B1 and B5 need the backup CCA on the bench bus; B2–B4 need it unplug
 
 With the never-used TAP as well (B0 first, then B5):
 
-- **B0 result (2026-11-06 20:19–20:21 EST): passed.** Our master ran on this PC through the FTDI USB-RS485 cable, with the never-used TAP alone on the bus (Gateway G5.26, 2017). Our bring-up found it at 1235, re-addressed it and hopped. After the RESET it was back at 1235, so the master re-addressed it again and the TAP acked the STORE. After a bench power cycle it answered at 1201, with no second fall-back. Found along the way:
+- **B0 result (2026-11-06 20:19–20:21 UTC): passed.** Our master ran on this PC through the FTDI USB-RS485 cable, with the never-used TAP alone on the bus (Gateway G5.26, 2017). Our bring-up found it at 1235, re-addressed it and hopped. After the RESET it was back at 1235, so the master re-addressed it again and the TAP acked the STORE. After a bench power cycle it answered at 1201, with no second fall-back. Found along the way:
   - This TAP refuses the tunnel, 0E02 and polls with 0x0006: it has no table or slot map until a CCA configures it.
   - Our master treats the refused polls as "stopped answering" and loops re-probing every ~4 s. That's reads only, but noisy. Fix: Task 6.
   - 0E02 is refused by G5.26 as well as H1.0006; only the roof's G8.65 is known to take it. No change until there's more evidence.

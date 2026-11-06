@@ -120,6 +120,8 @@ Open:
 
 ### Bench, 2026-11-06 evening: our STORE on a new TAP, then a CCA with two TAPs
 
+Times in this section are UTC (the recording machine's clock); subtract 5 h for Eastern.
+
 **Our bring-up on a never-used TAP (20:19–20:29).** The master ran on a PC through an FTDI USB-RS485 cable, with no Pi involved. On the bus was a TAP no CCA had ever touched (Gateway G5.26, 2017), alone and on bench power.
 - **First run:** found at 1235, re-addressed, hopped. After the RESET it was back at 1235. The master re-addressed it again and the TAP acked the STORE. After a power cycle it answered at 1201.
 - **The stored address can be changed back.** A one-off bench script (SET_ID_BY_MAC to 1235, then the key-only STORE there) put the TAP back at 1235, and it held through a RESET and a power cycle. A second run of our bring-up went exactly like the first, and the TAP again kept 1201 through a power cycle. So STORE can be re-run, and a TAP that has stored 1235 behaves like one that never stored anything.
@@ -140,6 +142,8 @@ Open:
 Capture: `~/tigo-protocol-analysis/captures/cca-two-taps-20261106-2035.bin` (git-excluded, never committed; it holds MACs and the key).
 
 ### Bench, 2026-11-06 night: the CCA's local UI, driven by hand
+
+Times in this section are UTC (the recording machine's clock); subtract 5 h for Eastern.
 
 The owner worked through the backup CCA's local web UI while we recorded the bus listen-only (21:09–23:20). The UI's diagnostic pages name the opcodes and decode the frames, so this section uses its names. Capture: `~/tigo-protocol-analysis/captures/cca-ui-session-20261106-2109.bin`. The owner's pastes of the UI pages are in `cca-ui-mesh-history-20261106-2110.txt` next to it. Both are git-excluded; they hold MACs, PANs and network keys.
 
