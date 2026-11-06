@@ -47,7 +47,9 @@
 | STORE only after a failed check (two-TAP capture) | No action: our drop-back path already does this |
 | The hop goes to the next free id, not "one up" | No action while we support one TAP (one up = next free). Revisit with multi-TAP support |
 | A CCA reflashes a TAP over RS485 (0x0520/0x0522/0x0526) | No action: never sent. Another reason to keep CCAs off the roof bus |
-| 0x0146 `00 02` = text query to an unreachable node | Task 7 |
+| 0x0146 `00 02`: the TAP not taking a text query (unreachable or busy; not settled) | Task 7 |
+| The 3.6 CCA also sends the roof's `Smrt_........S0000...0000` (21:37:09), not only `S....0000` | No action: the shape we allowlist is one this CCA sends too |
+| The CCA UI can install a TAP firmware version you pick | Not tried (the owner chose not to risk it). Never sent by us |
 | An optimizer power-off keeps its join | No action: confirms we need nothing for a rejoin |
 | The window read closed 23 s after the CCA opened it | Watch for it; no theory yet |
 | Short code → long address check letter | Session B4 |
@@ -133,9 +135,9 @@ When a TAP answers polls with 0x0006 (refused), say so once and back off; don't 
 
 ---
 
-### Task 7: Treat 0x0146 as "that optimizer isn't reachable"
+### Task 7: Treat 0x0146 as "the TAP didn't take that query"
 
-When a text query (tunnel sub 06) gets 0x0146 back from the TAP instead of 0x0B10, end that transaction at once: no retry, no wait for a timeout. Count it per node, and don't let it look like a lost TAP or a second master. Test: a mock TAP that answers sub 06 to node 2 with `0146 00 02` → one "node 2 unreachable" result, no retries, polling unaffected. Commit: `fix(master): a query to an unreachable optimizer ends at the TAP's answer`
+When a text query (tunnel sub 06) gets 0x0146 `00 02` back from the TAP instead of 0x0B10, end that transaction at once. What 0x0146 means isn't settled: the TAP sent it while the optimizer was off, but also at 21:37:03–06 for `Version` and `Info`, two seconds before it acked `Smrt` and `Smrt_` to the same node, just after a RESET. So it could be "unreachable" or "busy". Either way, end the transaction: no retry, no wait for a timeout. Count it per node, and don't let it look like a lost TAP or a second master. Test: a mock TAP that answers sub 06 to node 2 with `0146 00 02` → one "query not taken" result, no retries, polling unaffected. Commit: `fix(master): a query to an unreachable optimizer ends at the TAP's answer`
 
 ### Task 8: Ban the GatewayCfg write, and rename sub 0x2B
 
