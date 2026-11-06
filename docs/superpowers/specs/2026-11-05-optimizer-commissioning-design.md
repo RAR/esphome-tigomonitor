@@ -53,6 +53,34 @@ Each observation below decides how much of what follows is needed.
 
 The backup CCA stays on the bench bus only. It re-PANs any TAP it can reach.
 
+### Bench capture, 2026-11-06: the CCA saves the TAP's address with STORE
+
+The setup: the backup CCA (firmware 3.6.0-ct, on its own new system in Tigo EI) with the spare H1.0006 TAP, recorded read-only from the bench RS485 pair. Payloads were compared against ours as booleans only; the capture stays out of the repo.
+
+The CCA's bring-up writes have the same shapes as ours:
+- broadcast SET_485_ID: key + factory address;
+- SET_ID_BY_MAC: key + MAC + target;
+- broadcast RESET: key only.
+
+It sends one frame we don't. **Right after verifying the TAP at 1201, it sends STORE (0x0012) to 1201 with the 4-byte key as the whole payload; the TAP acks with 0x0013.** The full sequence, all within 50 ms:
+
+1. read at 1201;
+2. STORE;
+3. SET_ID_BY_MAC to 1202;
+4. read at 1202;
+5. broadcast RESET.
+
+1.4 s later the TAP answered at **1201**. So STORE commits the RS485 address to the TAP's flash, and the hop then RESET is the CCA checking that the commit took. Our bring-up does the hop and the RESET without the STORE, which is why the bench TAP fell back to the factory address. The fallback in 32ce89b re-addresses it, but only until the next power cycle.
+
+**Decision (owner, 2026-11-06): add the STORE to our bring-up; documented here, not built yet.** When it's built:
+- **Exact captured shape only:** dest = the target address, cmd 0x0012, payload = the key and nothing else.
+- **Placement:** sent once per bring-up, after the verify at the target and before the hop.
+- **Guards:** a startup-only exception alongside RESET, SET_485_ID and SET_ID_BY_MAC. Every other STORE, including the structured channel/PAN/slot form from the 4.0.3 analysis, stays never-send.
+- **Logging:** never log the payload.
+- **Test:** on the bench, the TAP answers at its configured address after a RESET *and* after a power cycle, with no re-addressing.
+
+After that burst the 3.6 CCA went back to re-addressing in a loop and never moved on to polling. That loop is still unexplained; a full CCA restart is being captured.
+
 ## Phase 1 — our "scan it on the website"
 
 - **An "Add optimizer" action in the Topology editor.** Enter the barcode by typing it or by scanning it with the phone camera, using the browser's barcode-reader API where it exists and typing where it doesn't. Place it at the same time: inverter, string, panel.
