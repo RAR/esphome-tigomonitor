@@ -37,7 +37,7 @@
 | A TAP power loss keeps joins, loses the window | Task 1 (docs); Session B2 confirms our re-open |
 | 0x8000 = in the table, not joined | Task 4 (the Node Table tag wording) |
 | PAN = bytes 2–3 of the 0x0D blob, set by whichever CCA last ran the TAP | Task 5 (owner's call) |
-| Channel at blob byte 4 | No action until confirmed (the roof reads 14, the notes say channel 24) |
+| The 0x0D (GatewayCfg) blob layout, from the CCA UI's own decode | Byte 1 is the channel (bench TAPs 15 and 23, one per TAP), 2–3 the PAN, 4–7 and 11–12 the slot map, 13 SLT, **14–29 a 16-byte network key**, then Optimizn and SLm. Byte 4 was never the channel. Task 5 reads only bytes 2–3; the key must never be logged |
 | 0x29 table write, ack codes, first-fit, never rewrite a listed MAC | Phase 2 of the design doc; not approved |
 | 0x2B is a real erase | Stays banned. No action |
 | 0x13, 0x17, 3.6's `Smrt_` shape | No action: 002D and the roof's 40 report correctly without them |
