@@ -131,23 +131,47 @@ Subs 0x2B and 0x29, and 0x22 with data after the node ID, stay on the never-send
   - Confirm the mapping, and how the check letter is computed, on the bench TAP, comparing and printing booleans only.
 - **Enabling discovery is part of the flow.** The UI offers to enable it while anything is pending and to disable it when nothing is.
 
-## Phase 2 — a commissioning step in the bus master (only if Phase 0 step 2 fails)
+## Phase 2 — adding an optimizer the TAP has never seen
 
-A per-optimizer state machine in `components/tigo_master/master_core`, for one barcode at a time:
+Only for an optimizer that isn't in the TAP's table. One already listed (with the 0x8000 bit, like the roof's spares) needs Phase 1 alone. The frame shapes come from the 2026-11-06 bench capture; the TAP's behaviour comes from the owner's analysis of the Mgate H1.0007 image, one build newer than the bench H1.0006.
 
-1. **Choose an ID.** A preferred ID if it's free, otherwise a random one, checked against the TAP's table (the 0x26 paging). Keep it in our own permanent table in the state dir.
-2. **Write one table entry**, with bytes copied exactly from the Phase 0 step 3 capture. Add only: **never `CLEAR_ADT`**, and never rewrite the whole table.
-3. **Read back** the TAP's node table. The new entry must be present and every other entry unchanged; otherwise stop and report.
-4. **Wait for the join** with discovery enabled, with a timeout.
-5. **Run the usual reads.** Compare its settings with the fleet's. Send a corrective write only if the settings differ *and* the capture showed the CCA sending that write.
-6. **Done** at its first reading. On the bench, power-cycle the TAP once to show the entry survives. That answers whether STORE matters.
+**How the TAP stores the table.**
+- The table is 1024 slots of `MAC(8) + TUID(2) + FFFF`, in non-volatile storage, filled first-fit.
+- Two RAM bitmaps sit beside it: "in table" and "joined". A read sets 0x8000 on any TUID that is in the table but not joined.
+- Sub 0x29 *adds* records; it never replaces by ID. The TAP acks only after the record is committed to storage.
+
+The 0x29 ack byte:
+
+| Byte | Meaning |
+|---|---|
+| 0 | done |
+| 1 | TUID outside 2..1023 |
+| 2 | table full |
+| 3 | commit failed |
+| 4 | TUID already in use |
+| 5 | MAC already listed under another TUID |
+
+The steps, one optimizer at a time:
+
+1. **Read the whole table** with 0x26, which we already send. Stop if the MAC is already in it: that's Phase 1's case.
+2. **Choose a TUID** that isn't in the table, in 2..1023. Keep it in our own permanent table in the state dir.
+3. **Write one record**, `0x29 01 <MAC> <0x8000 | TUID>`.
+   - **Always with bit 15 set.** That reserves the ID without marking the optimizer joined. A write with bit 15 clear marks it joined immediately, which the CCA never does.
+   - Any ack other than 0 stops the process. Code 5 is reported as an identity conflict.
+4. **Read back** with 0x26. The new record must be present with 0x8000 set, and every other record unchanged.
+5. **Open the window** with the 0x2D renewal we already send, and wait for the join (the 0x8000 bit clears) with a timeout. Then close the window.
+6. **Run the usual reads.** We send none of the CCA's post-join writes: Smrt_, 0x13, 0x17. The roof's 40 have reported for weeks without them.
 
 UI: commissioning progress on the pending tile or row. A dry-run mode prints each frame it would send, without sending.
+
+Still open:
+- the TUID the CCA chose (2) doesn't match 4.0.3's preferred-then-random allocator;
+- how the TAP rebuilds its RAM "joined" bitmap at boot. After a quick power cycle it read joined = 1 with the window closed.
 
 ## Guardrails
 
 - **A new setting, `master_commissioning`.** Off by default, and it requires `master_optimizer_writes`, which requires `master_queries`.
-- **Allowlist by exact captured shape**, not by opcode. `CLEAR_ADT` stays banned outright.
+- **Allowlist by exact captured shape**, not by opcode. Only a single-record 0x29 with bit 15 set is ever allowed. `CLEAR_ADT` and sub 0x2B, the table erase (unrecoverable, and the TAP's flash sectors really are wiped), stay banned outright.
 - **STORE (0x0012) stays banned** unless the power-cycle test proves entries are lost without it. Even then it needs the owner's explicit decision: its payload carries a key. Never log STORE or that key.
 - **Bench before roof**, every time, including the TAP power cycle. The roof's discovery window and rapid shutdown behaviour must not change.
 - **One optimizer at a time.** Stop on any unexpected reply, including one the master doesn't match ("nobody cared").
