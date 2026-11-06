@@ -626,6 +626,9 @@ class Housekeeping {
   Request due(uint32_t now_ms, uint8_t &seq) {
     while (opening_next_ < opening_.size()) {
       Item it = opening_[opening_next_++];
+      // An H-series TAP (the bench H1.0006) refuses 0x0E02 and answers the
+      // 3.6 CCA's 0x000E; the version read just before tells which.
+      if (it.cmd == 0x0E02 && version_.find("Version H") != std::string::npos) it.cmd = 0x000E;
       if (it.cmd == CMD_SESSION && pv_ && pv_->silent() && !plan_.bring_up_reads) continue;
       if (it.cmd == CMD_SESSION && pv_ && pv_->off() && it.args == Bytes{PV_ON}) {
         if (opening_reset_) continue;
@@ -1034,6 +1037,10 @@ static const uint16_t CMD_GET_MAC = 0x0038;        // with backoff
 static const uint16_t CMD_GET_MAC_NOW = 0x003A;    // no backoff; also the "where are you" read
 static const uint16_t CMD_SET_ID_BY_MAC = 0x003C;
 static const uint16_t CMD_RESET = 0x0010;
+// The gateway's store, in the one form a bring-up sends: the key and nothing
+// else, to the TAP at its new id. It commits the id, so the next RESET or
+// power cycle brings the TAP back there (the 3.6 CCA, bench capture 2026-11-06).
+static const uint16_t CMD_STORE = 0x0012;
 
 struct DiscoveryRequest {
   bool send = false;
@@ -1067,14 +1074,16 @@ class Discovery {
     // then go on to the RESET, since the TAP may already be one id up, where
     // nothing looks for it again; the others fail.
     if (state_ == claim || state_ == get_mac || state_ == set_id || state_ == verify || state_ == hop ||
-        state_ == hop_verify || state_ == back_factory || state_ == re_set_id || state_ == re_verify) {
+        state_ == hop_verify || state_ == back_factory || state_ == re_set_id || state_ == re_verify ||
+        state_ == store) {
       if (state_ != tries_state_) {
         tries_state_ = state_;
         tries_ = 0;
       }
       if (tries_ == STEP_TRIES) {
         unanswered_ = step_name_(state_);
-        state_ = state_ == hop || state_ == hop_verify ? reset : st_failed;
+        // An unanswered STORE leaves the TAP at its id, only not kept there.
+        state_ = state_ == hop || state_ == hop_verify ? reset : state_ == store ? st_done : st_failed;
         return next();
       }
       tries_++;
@@ -1152,6 +1161,12 @@ class Discovery {
       case re_verify:
         r.dest = target_; r.cmd = CMD_GET_MAC_NOW;
         break;
+      // Only for a TAP that dropped back, so one that keeps its id (the roof's
+      // G8.65) never gets a frame its CCA never sent it.
+      case store:
+        r.dest = target_; r.cmd = CMD_STORE;
+        r.payload = {0x37, 0x24, 0x92, 0x66};
+        break;
       default: break;
     }
     return r;
@@ -1207,7 +1222,13 @@ class Discovery {
         break;
       case re_verify:
         if (f.cmd == CMD_GET_MAC_NOW + 1 && f.payload.size() >= 10 && (f.payload[8] << 8 | f.payload[9]) == target_)
+          state_ = store;
+        break;
+      case store:
+        if (f.cmd == CMD_STORE + 1) {
+          stored_ = true;
           state_ = st_done;
+        }
         break;
       default: break;
     }
@@ -1220,13 +1241,15 @@ class Discovery {
   const Bytes &mac() const { return mac_; }
   // True once the TAP came back at the factory address after the RESET and was re-addressed again.
   bool dropped_back() const { return dropped_back_; }
+  // True once such a TAP acked the STORE of its new id.
+  bool stored() const { return stored_; }
   // MACs of other TAPs that answered the scan, in the order heard.
   const std::vector<Bytes> &extra_taps() const { return extra_; }
 
  private:
   enum State {
     claim, get_mac, set_id, verify, scan, hop, hop_verify, reset, quiet, back,
-    back_factory, re_set_id, re_verify, st_done, st_failed
+    back_factory, re_set_id, re_verify, store, st_done, st_failed
   } state_;
   bool scan_only_;
   uint16_t factory_, target_;
@@ -1248,11 +1271,13 @@ class Discovery {
       case back_factory: return "the reads at the configured id and the factory address after the RESET";
       case re_set_id: return "SET_ID_BY_MAC after the RESET";
       case re_verify: return "the read at the new id after the RESET";
+      case store: return "the STORE of the new id";
       default: return "";
     }
   }
   int back_sent_ = 0;
   bool dropped_back_ = false;
+  bool stored_ = false;
   std::vector<Bytes> extra_;
 };
 
@@ -1262,7 +1287,9 @@ class Discovery {
 // bench_only: reads and anything else, for a TAP on the bench.
 // never: writes. The commands that change what a TAP stores or does (reset,
 // store, ids, roster, whitelist, netrun) and anything carrying the setup key
-// 37 24 92 66. Nothing in this code sends them, whatever the settings.
+// 37 24 92 66. Nothing in this code sends them, whatever the settings,
+// except the bring-up's own: RESET, SET_485_ID, SET_ID_BY_MAC and the
+// key-only STORE (startup_only).
 // optimizer_write: the two settings the CCA writes to optimizers whose
 // replies ask for it (Queries), sent only with that setting on.
 // pv_off: the PV switch's 00, sent only while the owner holds PV off (or
@@ -1276,6 +1303,9 @@ inline Allow classify_request(uint16_t cmd, const Bytes &payload) {
   static const uint16_t STARTUP_WRITES[] = {CMD_RESET, CMD_SET_485_ID, CMD_SET_ID_BY_MAC};
   for (uint16_t w : STARTUP_WRITES)
     if (cmd == w) return Allow::startup_only;
+  static const uint8_t STORE_KEY[] = {0x37, 0x24, 0x92, 0x66};
+  if (cmd == CMD_STORE && payload.size() == 4 && std::equal(STORE_KEY, STORE_KEY + 4, payload.begin()))
+    return Allow::startup_only;
   // The writes nothing here ever sends: store, clear-roster, whitelist, the
   // rapid-shutdown netrun lever, and the gateway's mode (SET_GATEWAY_MODE,
   // 0x0054, and its response number 0x0055, from lmudcd's opcode switch).
@@ -1287,10 +1317,11 @@ inline Allow classify_request(uint16_t cmd, const Bytes &payload) {
   for (size_t i = 0; i + 4 <= payload.size(); i++)
     if (std::equal(KEY, KEY + 4, payload.begin() + i)) return Allow::never;
 
-  // Reads: VERSION any time; 0x0E02 and the GET_MACs only in the CCA's bring-up.
+  // Reads: VERSION any time; 0x0E02 (0x000E on an H-series TAP) and the
+  // GET_MACs only in the CCA's bring-up.
   if (cmd == 0x000A) return payload.empty() ? Allow::yes : Allow::bench_only;
   if (cmd == CMD_GET_MAC || cmd == CMD_GET_MAC_NOW) return payload.empty() ? Allow::startup_only : Allow::bench_only;
-  if (cmd == 0x0E02) return payload.empty() ? Allow::startup_only : Allow::bench_only;
+  if (cmd == 0x0E02 || cmd == 0x000E) return payload.empty() ? Allow::startup_only : Allow::bench_only;
   // The CCA's hourly 01; its 00 only follows its own reboot, so bring-up only.
   if (cmd == CMD_SESSION)
     return payload == Bytes{PV_ON} ? Allow::yes : payload == Bytes{PV_OFF} ? Allow::pv_off : Allow::bench_only;

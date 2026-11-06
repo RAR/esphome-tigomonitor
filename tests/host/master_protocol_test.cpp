@@ -225,6 +225,14 @@ static void test_allow_list() {
 static void test_more_allow() {
   CHECK(classify_request(0x000A, {}) == Allow::yes);  // VERSION
   CHECK(classify_request(0x0E02, {}) == Allow::startup_only);
+  // 0x000E, the H-series TAP's form of 0x0E02 (the 3.6 CCA's), the same way.
+  CHECK(classify_request(0x000E, {}) == Allow::startup_only);
+  CHECK(classify_request(0x000E, {0x00}) == Allow::bench_only);
+  // STORE only as the CCA's key-only frame, and only in a bring-up.
+  CHECK(classify_request(0x0012, hex("37249266")) == Allow::startup_only);
+  CHECK(classify_request(0x0012, {}) == Allow::never);
+  CHECK(classify_request(0x0012, hex("3724926600")) == Allow::never);
+  CHECK(classify_request(0x0012, hex("feed")) == Allow::never);
   CHECK(classify_request(0x0E02, {0x00}) == Allow::bench_only);
   CHECK(classify_request(CMD_TUNNEL, tunnel_request(0x0D, 3, {0x00, 0x00})) == Allow::startup_only);
   CHECK(classify_request(CMD_TUNNEL, tunnel_request(0x0D, 3, {0x00, 0x01})) == Allow::startup_only);
@@ -461,13 +469,30 @@ static void test_discovery_hop() {
   r = dropped.next();
   CHECK(r.send && r.dest == 0x1201 && r.cmd == 0x003A);
   dropped.on_reply(Frame{0x9201, 0x003B, hex("04c05b3000a1b2c31201")});
-  CHECK(dropped.next().done && dropped.dropped_back());
+  // Then the key-only STORE the backup CCA sends (bench capture, 2026-11-06),
+  // so the TAP keeps the id through its next RESET or power cycle.
+  r = dropped.next();
+  CHECK(r.send && r.dest == 0x1201 && r.cmd == 0x0012 && r.payload == hex("37249266"));
+  dropped.on_reply(Frame{0x9201, 0x0013, {}});
+  CHECK(dropped.next().done && dropped.dropped_back() && dropped.stored());
+  // An unanswered STORE leaves the TAP re-addressed: done, not stored.
+  Discovery unstored(0x1235, 0x1201);
+  to_reset(unstored);
+  for (int i = 0; i < Discovery::BACK_TRIES; i++) unstored.next();
+  unstored.next();
+  unstored.on_reply(Frame{0x9235, 0x003B, hex("04c05b3000a1b2c31235")});
+  unstored.next();
+  unstored.on_reply(Frame{0x9235, 0x003D, {}});
+  unstored.next();
+  unstored.on_reply(Frame{0x9201, 0x003B, hex("04c05b3000a1b2c31201")});
+  for (int i = 0; i < Discovery::STEP_TRIES; i++) CHECK(unstored.next().cmd == 0x0012);
+  CHECK(unstored.next().done && !unstored.stored());
   // A TAP that comes back where it was put never takes that path.
   Discovery kept(0x1235, 0x1201);
   to_reset(kept);
   kept.next();
   kept.on_reply(Frame{0x9201, 0x003B, hex("04c05b3000a1b2c31201")});
-  CHECK(kept.next().done && !kept.dropped_back());
+  CHECK(kept.next().done && !kept.dropped_back() && !kept.stored());  // no STORE for a TAP that keeps its id
   // Another TAP's MAC at the factory address is not ours: failed, not re-addressed.
   Discovery other(0x1235, 0x1201);
   to_reset(other);
@@ -648,11 +673,14 @@ static void test_startup_allow() {
   CHECK(!may_send(0x0300, {}, false, true));
   CHECK(!may_send(CMD_TUNNEL, tunnel_request(0x41, 1, hex("0023")), false, true));
   CHECK(!may_send(0x0E02, {0x00}, false, true) && may_send(0x0E02, {0x00}, true, false));
-  // These stay never, even in startup: store, clear-roster, whitelist, netrun.
-  for (uint16_t cmd : {0x0012, 0x011E, 0x0182, 0x0058}) {
+  // These stay never, even in startup: clear-roster, whitelist, netrun, and
+  // any STORE but the bring-up's key-only one.
+  for (uint16_t cmd : {0x011E, 0x0182, 0x0058}) {
     CHECK(classify_request(cmd, hex("37249266")) == Allow::never);
     CHECK(!may_send(cmd, hex("37249266"), true, true));
   }
+  CHECK(may_send(0x0012, hex("37249266"), false, true) && !may_send(0x0012, hex("37249266"), true, false));
+  CHECK(!may_send(0x0012, hex("372492661201"), true, true));
   // A foreign command smuggling the key is still never.
   CHECK(classify_request(0x0200, hex("37249266")) == Allow::never);
   // Steady-state sends are unchanged by the startup flag.
@@ -813,6 +841,17 @@ static void test_bring_up_plan() {
       "26:0000 26:000e 26:001a 26:0026 26:002a 26:0000 26:000e 26:001a 26:0026 26:002a ";
   CHECK(got == want);
   if (got != want) std::printf("    got  %s\n    want %s\n", got.c_str(), want);
+  // An H-series TAP (the bench H1.0006) refuses 0x0E02 and takes 0x000E, as
+  // the 3.6 CCA sends it; the version read just before decides.
+  for (const char *v : {"Mgate Version H1.0006\r", "Mgate Version G8.65\r"}) {
+    Housekeeping h2({}, 0, plan, 1);
+    uint8_t s2 = 0;
+    Request r = h2.due(0, s2);
+    CHECK(r.cmd == 0x000A);
+    Frame vr{0x9201, 0x000B, Bytes(v, v + strlen(v))};
+    h2.on_reply(r, true, vr);
+    CHECK(h2.due(0, s2).cmd == (v[14] == 'H' ? 0x000E : 0x0E02));
+  }
   // The second 0x22 a second after the first, as the CCA's (13:47:48, :49).
   CHECK(shape(run(hk, Housekeeping::BROADCAST_GAP_MS, seq)) == "22:0001 ");
   CHECK(hk.sent_walk_pages() == 10 && hk.sent_broadcast() == 2 && hk.sent_session() == 2);

@@ -598,7 +598,8 @@ void MasterCore::run_startup(uint32_t now_ms) {
   if (d.done) {
     if (discovery_->dropped_back())
       LOGW("bus master: the TAP was back at the factory address after the RESET (it keeps no id); re-addressed it "
-           "again without one");
+           "again without one, %s",
+           discovery_->stored() ? "and stored the id so it keeps it" : "but it did not ack storing the id");
     LOGI("bus master: the TAP is now at %04X; polling", gateway_);
     phase_ = Phase::running;
     if (status().fault == Fault::discovery_failed) set_fault(Fault::none, "");
