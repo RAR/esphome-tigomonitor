@@ -44,13 +44,19 @@
 | 0x22 with data, `Cal` | No action (`Cal` is a read we could add later if a reply turns out useful) |
 | 0x0149 layout | No action: confirms the parser we have |
 | No single-entry delete | Session B1 captures what the CCA does instead |
+| STORE only after a failed check (two-TAP capture) | No action: our drop-back path already does this |
+| The hop goes to the next free id, not "one up" | No action while we support one TAP (one up = next free). Revisit with multi-TAP support |
+| A CCA reflashes a TAP over RS485 (0x0520/0x0522/0x0526) | No action: never sent. Another reason to keep CCAs off the roof bus |
+| 0x0146 `00 02` = text query to an unreachable node | Task 7 |
+| An optimizer power-off keeps its join | No action: confirms we need nothing for a rejoin |
+| The window read closed 23 s after the CCA opened it | Watch for it; no theory yet |
 | Short code → long address check letter | Session B4 |
 | An optimizer not in the table: does it join? | Session B3; decides whether Phase 2 is needed at all |
 | CCA allocates TUID 2, not preferred-then-random | No action; Phase 2 picks its own free TUID |
 
 ---
 
-### Task 1: Bring the commissioning design doc up to date
+### Task 1: Bring the commissioning design doc up to date — done 2026-11-06 with the evening's write-up
 
 **Files:**
 - Modify: `docs/superpowers/specs/2026-11-05-optimizer-commissioning-design.md`
@@ -127,6 +133,12 @@ When a TAP answers polls with 0x0006 (refused), say so once and back off; don't 
 
 ---
 
+### Task 7: Treat 0x0146 as "that optimizer isn't reachable"
+
+When a text query (tunnel sub 06) gets 0x0146 back from the TAP instead of 0x0B10, end that transaction at once: no retry, no wait for a timeout. Count it per node, and don't let it look like a lost TAP or a second master. Test: a mock TAP that answers sub 06 to node 2 with `0146 00 02` → one "node 2 unreachable" result, no retries, polling unaffected. Commit: `fix(master): a query to an unreachable optimizer ends at the TAP's answer`
+
+---
+
 ## Bench sessions (with the owner)
 
 In order. B1 and B5 need the backup CCA on the bench bus; B2–B4 need it unplugged and the Pi as the bench master.
@@ -145,6 +157,7 @@ With the never-used TAP as well (B0 first, then B5):
   - **Repeatable, 20:23–20:29:** a scratchpad script moved the TAP back to 1235 and STOREd it there (SET_ID_BY_MAC to 1235, then the key-only STORE). It held through a RESET and a power cycle. A second B0 run then went exactly like the first, and the TAP kept 1201 through another power cycle. So a stored id can be re-stored, and a TAP storing 1235 behaves like a never-stored one.
   - With both bench TAPs on the bus, the stored one went silent and came back with its window closed, probably restarted by the CCA powering its port. Unconfirmed.
 - **B0. Our STORE path on hardware, Pi as master, with the never-used TAP.** It has never run with any CCA, so it should come back at the factory id after a RESET, as the H1.0006 did before the backup CCA stored it. Power it alone on the bench bus with our master. Expected: our bring-up re-addresses it, hops, sees it fall back, sends the key-only STORE at 1201 and logs "stored the id". A power cycle must then bring it back at 1201. Run it before the backup CCA ever sees this TAP, since the CCA stores it on its first bring-up. If it turns out to keep its id without a STORE, or the chance is missed, the fallback is a bench-only one-off script outside the master (its send gate doesn't allow this pair): SET_ID_BY_MAC to 1235, then the key-only STORE there. That needs the owner's OK, and it's unproven that a TAP storing 1235 behaves like one that never stored.
+- **B5 result (2026-11-06 20:35–20:55): done, captured.** The CCA moved both TAPs to 1235 with its broadcast, gave the known TAP 1201 and the new one 1202, and hopped each to the next free id (1203, 1204). It sent STORE only to the TAP that failed the check after the RESET. It **reflashed the new TAP from G5.26 to G8.59** over RS485 (about 37 KB in 292 blocks). It erased the new TAP's table, left the optimizer only in the H1.0006's table, and opened the window only there. A text query to the switched-off optimizer got `0x0146 00 02`. Once powered, the optimizer rejoined with the window closed and reported through 1201 within about 2 minutes. Details are in the design doc.
 - **B5. Two TAPs, with the backup CCA.** Learn how a CCA addresses two: expected 1201 and 1202, a STORE for each, and how the hop changes when the id one up is taken. That would also explain why the hop exists. Then see which TAP each optimizer joins, and what each TAP's table gets. Our master supports one TAP: it reports a second one found in the scan and sends it nothing, so B5 is CCA-only.
 
 Storing 1202 would not help: the TAP would come back at 1202, where our master never looks. Storing 1235 is what reproduces a fall-back.

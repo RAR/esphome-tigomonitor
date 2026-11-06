@@ -1,6 +1,6 @@
 # Adding optimizers without a CCA — design sketch
 
-2026-11-05 · branch `feature/cca-replacement` · **status: sketch, not started.** The plan is ordered so the observations come first; nothing beyond Phase 0 gets built until they're done.
+2026-11-05 · branch `feature/cca-replacement` · **status: Phase 0 observations 1 and 3 done, 2 open; the STORE is built (2720da4) and passed on the bench.** The plan is ordered so the observations come first; nothing beyond Phase 0 gets built until they're done. What's left is planned in `docs/superpowers/plans/2026-11-06-bench-learnings.md`.
 
 ## Why
 
@@ -72,9 +72,9 @@ It sends one frame we don't. **Right after verifying the TAP at 1201, it sends S
 
 1.4 s later the TAP answered at **1201**. So STORE commits the RS485 address to the TAP's flash, and the hop then RESET is the CCA checking that the commit took. Our bring-up does the hop and the RESET without the STORE, which is why the bench TAP fell back to the factory address. The fallback in 32ce89b re-addresses it, but only until the next power cycle.
 
-**Decision (owner, 2026-11-06): add the STORE to our bring-up; documented here, not built yet.** When it's built:
+**Decision (owner, 2026-11-06): add the STORE to our bring-up. Built in 2720da4, and it passed on the bench the same evening (below).** As built:
 - **Exact captured shape only:** dest = the target address, cmd 0x0012, payload = the key and nothing else.
-- **Placement:** sent once per bring-up, after the verify at the target and before the hop.
+- **Placement:** only on the drop-back path: when the TAP is back at the factory address after the hop's RESET, the master re-addresses it and then sends the STORE. A TAP that keeps its address (the roof's G8.65) never gets one. This matches what the CCA does with two TAPs (below): it sends STORE only to a TAP that failed the check after the RESET.
 - **Guards:** a startup-only exception alongside RESET, SET_485_ID and SET_ID_BY_MAC. Every other STORE, including the structured channel/PAN/slot form from the 4.0.3 analysis, stays never-send.
 - **Logging:** never log the payload.
 - **Test:** on the bench, the TAP answers at its configured address after a RESET *and* after a power cycle, with no re-addressing.
@@ -90,14 +90,14 @@ Tunnel arguments are shown after the seq byte; `<MAC>` is the optimizer's 8-byte
 | # | CCA sends | TAP answers | Reading |
 |---|---|---|---|
 | 1 | 0x26 table read | empty | |
-| 2 | sub 0x2B `BA BE` | `00` | probably clears the table |
+| 2 | sub 0x2B `BA BE` | `00` | erases the table (a real flash erase, per the H1.0007 analysis) |
 | 3 | 0x26 | empty | |
 | 4 | sub 0x22 `00 00` | `0B` | |
 | 5 | sub 0x22 `01 00 02` | `02` | something for node 2 |
 | 6 | **sub 0x29 `01 <MAC> 80 02`** | `00` | **the table write**: count, MAC, node ID with the 0x8000 "registered, not joined" bit |
 | 7 | sub 0x22 `00 01` | `02` | |
 | 8 | 0x26 | `00 01 <MAC> 80 02` | the entry is in |
-| 9 | **sub 0x2D `BA BE 02 03 84 00 01 01`** | window open | 0x384 = 900 s; **`00 01` is the number of optimizers the CCA expects** (44 on the roof) |
+| 9 | **sub 0x2D `BA BE 02 03 84 00 01 01`** | window open | 0x384 = 900 s; `00 01` is the number of optimizers the CCA expects (44 on the roof). The TAP stores and echoes it but never compares it: the window closes on time only |
 | — | 0x2E every 20 s, 0x41 every minute | | waiting |
 | 10 | (join at 10:53:52, 10 min later) | entry now `<MAC> 00 02`; joined count 1 | the TAP clears 0x8000 itself |
 | 11 | `^00Version`, `^00Info`, `^00Smrt`, `^00Cal`, `^00Mppt` | | reads, starting within 1 s of the join |
@@ -107,7 +107,7 @@ Tunnel arguments are shown after the seq byte; `<MAC>` is the optimizer's 8-byte
 
 The CCA chose node ID 2, not a random one. Its cloud view afterwards: 44.9 V in, 0 A, RSSI 205.
 
-**TAP power cycle (10:57:59, a quick unplug).** The TAP came back at 1201 with the entry `<MAC> 00 02` intact, and its first poll reply carried the optimizer's data. The CCA did no re-addressing; it re-read the window and the table and resent sub 0x17. Both the STORE'd address and the table entry survive a power cycle. A longer power-off is still to test.
+**TAP power cycle (10:57:59, a quick unplug).** The TAP came back at 1201 with the entry `<MAC> 00 02` intact, and its first poll reply carried the optimizer's data. The CCA did no re-addressing; it re-read the window and the table and resent sub 0x17. Both the STORE'd address and the table entry survive a power cycle. A longer TAP power-off is still to test. A long *optimizer* power-off was tested that evening (below): it rejoined with the window closed.
 
 **What this means for Phase 2.** Steps 1–6 are now known shapes:
 - the table write is sub 0x29, not `SET_LIST_ENTRIES` 0x0182, on this firmware;
@@ -117,6 +117,27 @@ Open:
 - the meaning of 0x22's extra byte, of 0x17 and of 0x13;
 - `Cal`;
 - which of the post-join writes a 4.0.7-configured optimizer actually needs. The roof-swap capture with the Pi as master answers that.
+
+### Bench, 2026-11-06 evening: our STORE on a new TAP, then a CCA with two TAPs
+
+**Our bring-up on a never-used TAP (20:19–20:29).** The master ran on a PC through an FTDI USB-RS485 cable, with no Pi involved. On the bus was a TAP no CCA had ever touched (Gateway G5.26, 2017), alone and on bench power.
+- **First run:** found at 1235, re-addressed, hopped. After the RESET it was back at 1235. The master re-addressed it again and the TAP acked the STORE. After a power cycle it answered at 1201.
+- **The stored address can be changed back.** A one-off bench script (SET_ID_BY_MAC to 1235, then the key-only STORE there) put the TAP back at 1235, and it held through a RESET and a power cycle. A second run of our bring-up went exactly like the first, and the TAP again kept 1201 through a power cycle. So STORE can be re-run, and a TAP that has stored 1235 behaves like one that never stored anything.
+- **Until a CCA configures it, this TAP refuses the tunnel, 0E02 and polls (reply 0x0006).** Our master reads the refused polls as a lost TAP and re-probes every few seconds; the plan has the fix.
+
+**The backup CCA with two TAPs (20:35–20:55).** The H1.0006 (stored at 1201, holding the bench optimizer) and the G5.26 (stored back at 1235) shared the bus with the CCA. The owner set the bench system in Tigo EI to two TAPs. The CCA had pulled that config by 20:39:09, and its first frame came at 20:39:15.
+
+1. **The SET_485_ID broadcast moves every TAP to 1235,** including one that has stored 1201. GET_MAC with backoff then gets one answer per TAP.
+2. **It assigns ids by MAC:** the TAP it already knew got 1201, and the new one got 1202, even though the new one answered first.
+3. **The hop goes to the next free ids:** 1202 → 1203 and 1201 → 1204, then a RESET broadcast and a read at each home id. With one TAP, "one up" and "next free" are the same thing, which is why our single-TAP hop matches the CCA.
+4. **STORE only after a failed check.** In the first round the G5.26 came back at 1235 (its stored id), not 1202. The CCA started over and this time sent STORE to 1202 before the hop. The H1.0006 kept 1201 and never got a STORE. This is the gate on STORE that the morning capture couldn't explain, and it's what our drop-back path already does.
+5. **The CCA reflashed the new TAP.** After a version read (G5.26), it sent 0x0520, then 292 × 0x0522 data blocks of 136 bytes (about 37 KB) with 0x0526 reads between, then a RESET to 1202. That took 20:39:47 to about 20:40:05. Afterwards the TAP reported `Mgate Version G8.59` (2020). The CCA itself was blocked from updating, but it still updated the TAP. **Any CCA that reaches a bus can silently reflash its TAPs,** which is one more reason to keep it off the roof bus.
+6. **Each TAP gets its own opcodes:** 0x000E (empty) to the H-series, version and 0x0D reads to both.
+7. **Tables are per TAP.** The H1.0006 kept its one joined entry. The CCA erased the new TAP's table (sub 0x2B, 20:40:57) and wrote nothing to it. It opened the window only on 1201 (sub 0x2D, 900 s). That window read closed 23 s later (20:40:58), for a reason we don't know.
+8. **New reply: 0x0146, payload `00 02`.** The H1.0006 sends it instead of the tunnel reply when the CCA sends a text query (sub 06) to an optimizer it can't reach. The bench optimizer was off at the time, and the replies stopped once it was powered. Meaning "node unreachable": very likely, not proven.
+9. **An optimizer power-off keeps its join.** The bench optimizer had been off for hours. Powered at about 20:52, it was reporting through 1201 by 20:53:48, with the window closed. The second TAP never heard from it. The CCA sent it no text queries or writes after it came back.
+
+Capture: `~/tigo-protocol-analysis/captures/cca-two-taps-20261106-2035.bin` (git-excluded, never committed; it holds MACs and the key).
 
 Subs 0x2B and 0x29, and 0x22 with data after the node ID, stay on the never-send list until the owner decides otherwise.
 
@@ -175,18 +196,18 @@ Still open:
 
 - **A new setting, `master_commissioning`.** Off by default, and it requires `master_optimizer_writes`, which requires `master_queries`.
 - **Allowlist by exact captured shape**, not by opcode. Only a single-record 0x29 with bit 15 set is ever allowed. `CLEAR_ADT` and sub 0x2B, the table erase (unrecoverable, and the TAP's flash sectors really are wiped), stay banned outright.
-- **STORE (0x0012) stays banned** unless the power-cycle test proves entries are lost without it. Even then it needs the owner's explicit decision: its payload carries a key. Never log STORE or that key.
+- **STORE (0x0012):** only the key-only form, only on the bring-up's drop-back path (2720da4). Every other form stays banned. Never log STORE or the key.
 - **Bench before roof**, every time, including the TAP power cycle. The roof's discovery window and rapid shutdown behaviour must not change.
 - **One optimizer at a time.** Stop on any unexpected reply, including one the master doesn't match ("nobody cared").
 - **No real barcodes, MACs or IDs** in fixtures, tests or this repo.
 
 ## Open questions (all answered by the Phase 0 captures)
 
-1. Does an unregistered optimizer join and report with no table write? This sets the scope.
-2. The 11-byte table entry: its fields, and whether the ID is inside it.
-3. How the ID reaches the optimizer: through the table entry, or a separate frame.
-4. Whether entries survive a TAP restart without STORE.
-5. Which corrective writes a factory-fresh optimizer needs, if any.
+1. Does an unregistered optimizer join and report with no table write? This sets the scope. **Still open** (plan session B3).
+2. ~~The 11-byte table entry~~ **Answered:** sub 0x29's record is count + MAC + TUID, with bit 15 meaning provisional.
+3. ~~How the ID reaches the optimizer~~ **Answered:** through the table record; the optimizer takes it when it joins.
+4. ~~Whether entries survive a TAP restart~~ **Answered:** the table and the joined flags are in flash and survive. STORE is about the RS485 address, not the table.
+5. Which corrective writes a factory-fresh optimizer needs, if any. **So far none:** 002D reported accurately without any, and the roof's 40 have run for weeks without 0x13 or 0x17. The roof swap's Info/Mppt comparison is the last check.
 6. How the printed short code (`N-XXXXXC`) maps to the long address.
    - Partly answered on the bench H1.0006 TAP (2026-11-05): its five hex digits are the last five hex digits of the MAC, and the MAC starts `04C05B`.
    - Still unknown: the leading digit, which is not simply the MAC nibble before those five, and how the trailing letter is computed. Matching on the five hex digits is enough to find a device.
@@ -194,6 +215,6 @@ Still open:
 ## Out of scope
 
 - Tigo cloud integration of any kind.
-- Removing an optimizer from the TAP's table.
+- Removing an optimizer from the TAP's table. The TAP has no single-entry delete; removal would mean an erase (sub 0x2B) and a rewrite, which we ban.
 - Changing a TAP's channel or PAN.
-- Firmware updates (`Remup`).
+- Firmware updates (`Remup`), and TAP firmware updates (0x0520/0x0522/0x0526, seen on the bench 2026-11-06). Never sent.
