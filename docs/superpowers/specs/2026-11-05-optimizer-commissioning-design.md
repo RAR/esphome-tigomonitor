@@ -18,7 +18,7 @@ What we want:
 | 1. Register | Scan the barcode on Tigo's site | The Topology editor holds inverters, strings, panels, Replace and the "known" tag |
 | 2. Send the config down | Cloud → CCA (sysconfig) | Not needed: the config lives on the Pi |
 | 3. Update the TAP | The CCA builds an "ideal table" from sysconfig, compares it with the gateway's table, then rewrites the differences (`SET_LIST_ENTRIES` 0x0182) or wipes and rewrites (`CLEAR_ADT` 0x011E). It assigns each node an ID: preferred, else random, kept in a permanent table | Never sent; unknown territory |
-| 4. Join | The optimizer joins the TAP, but only while the discovery window is open (measured 2026-11-05, below). The TAP then clears the entry's 0x8000 bit | We already see joins (new-optimizer handling) |
+| 4. Join | The optimizer joins the TAP, but only while the discovery window is open (measured 2026-11-05 and 2026-11-06, below). The TAP then clears the entry's 0x8000 bit | We already see joins (new-optimizer handling) |
 | 5. Configure | The updaters read `Version`, `Info`, `Mppt`, `Smrt`, `Tests`. The Info updater also corrects settings (`Mppt_..1.…`, `Mppt_%X.1`, `Discharge_%02X`) | We send the reads; none of the corrective writes |
 
 Sources: the owner's RE write-ups of CCA 4.0.3-nd (`meshdcd`, `lmudcd`), summarised in memory under *cca-enrollment-static-findings*. Treat the table rewrite and the ID choice as firmware-confirmed. The write-ups' "joins aren't gated, only the discover bit is" came from log strings; the roof measurement below contradicts it for a registered node that has never joined.
@@ -79,7 +79,46 @@ It sends one frame we don't. **Right after verifying the TAP at 1201, it sends S
 - **Logging:** never log the payload.
 - **Test:** on the bench, the TAP answers at its configured address after a RESET *and* after a power cycle, with no re-addressing.
 
-After that burst the 3.6 CCA went back to re-addressing in a loop and never moved on to polling. That loop is still unexplained; a full CCA restart is being captured.
+After that burst the 3.6 CCA went back to re-addressing in a loop and never moved on to polling. After a full restart (10:30), the first hop-and-RESET check passed with no STORE, because the TAP still held 1201 from the earlier STORE. Then the CCA went straight into the usual bring-up and polling. The loop was probably the failing check; the gateway was not missing from the cloud config.
+
+### Bench capture, 2026-11-06: a CCA adds an unknown optimizer
+
+Steps the owner took: they added one of the spare optimizers to the bench system in Tigo EI, then powered it on a bench supply. The cloud pushed the config at 10:43:21 (seen on the CCA's HTTPS through a MITM). Fourteen seconds later the CCA restarted its bus daemon and ran the frames below.
+
+Tunnel arguments are shown after the seq byte; `<MAC>` is the optimizer's 8-byte long address.
+
+| # | CCA sends | TAP answers | Reading |
+|---|---|---|---|
+| 1 | 0x26 table read | empty | |
+| 2 | sub 0x2B `BA BE` | `00` | probably clears the table |
+| 3 | 0x26 | empty | |
+| 4 | sub 0x22 `00 00` | `0B` | |
+| 5 | sub 0x22 `01 00 02` | `02` | something for node 2 |
+| 6 | **sub 0x29 `01 <MAC> 80 02`** | `00` | **the table write**: count, MAC, node ID with the 0x8000 "registered, not joined" bit |
+| 7 | sub 0x22 `00 01` | `02` | |
+| 8 | 0x26 | `00 01 <MAC> 80 02` | the entry is in |
+| 9 | **sub 0x2D `BA BE 02 03 84 00 01 01`** | window open | 0x384 = 900 s; **`00 01` is the number of optimizers the CCA expects** (44 on the roof) |
+| — | 0x2E every 20 s, 0x41 every minute | | waiting |
+| 10 | (join at 10:53:52, 10 min later) | entry now `<MAC> 00 02`; joined count 1 | the TAP clears 0x8000 itself |
+| 11 | `^00Version`, `^00Info`, `^00Smrt`, `^00Cal`, `^00Mppt` | | reads, starting within 1 s of the join |
+| 12 | `^00Smrt_........S....0000` | | a settings write; **not the roof's `^00Smrt_........S0000...0000`** |
+| 13 | sub 0x17 `00 02 0F` | ack | resent after a TAP restart |
+| 14 | sub 0x13 `00 02` + 22 bytes | ack | looks like a config block |
+
+The CCA chose node ID 2, not a random one. Its cloud view afterwards: 44.9 V in, 0 A, RSSI 205.
+
+**TAP power cycle (10:57:59, a quick unplug).** The TAP came back at 1201 with the entry `<MAC> 00 02` intact, and its first poll reply carried the optimizer's data. The CCA did no re-addressing; it re-read the window and the table and resent sub 0x17. Both the STORE'd address and the table entry survive a power cycle. A longer power-off is still to test.
+
+**What this means for Phase 2.** Steps 1–6 are now known shapes:
+- the table write is sub 0x29, not `SET_LIST_ENTRIES` 0x0182, on this firmware;
+- the window renewal carries the expected count.
+
+Open:
+- the meaning of 0x22's extra byte, of 0x17 and of 0x13;
+- `Cal`;
+- which of the post-join writes a 4.0.7-configured optimizer actually needs. The roof-swap capture with the Pi as master answers that.
+
+Subs 0x2B and 0x29, and 0x22 with data after the node ID, stay on the never-send list until the owner decides otherwise.
 
 ## Phase 1 — our "scan it on the website"
 
