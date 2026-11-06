@@ -123,7 +123,7 @@ Don't build it until the owner says yes: it widens a bring-up read to every star
 
 ## Bench sessions (with the owner)
 
-In order. B0 (below) comes before anything else touches the old TAP. B1 and B5 need the backup CCA on the bench bus; B2–B4 need it unplugged and the Pi as the bench master.
+In order. B1 and B5 need the backup CCA on the bench bus; B2–B4 need it unplugged and the Pi as the bench master.
 
 - **B1. Removal, captured.** Two spare optimizers in the bench Tigo EI system, both joined. Remove one in the cloud and record the bus. Expected from the analysis: 0x2B erase, then a 0x29 rewrite of the survivor. Then power-cycle the TAP. If the rewrite set the survivor's spare word back to FFFF, it comes back provisional and needs the window to rejoin. That's the main thing to learn.
 - **B2. A long TAP power-off, Pi as master.** Several minutes off. Expect: the table and joins intact, the window closed, and our master renewing it on the first 0-second reading if discovery is enabled. Also confirm on hardware: the bring-up sends 0x000E (not 0x0E02) to the H1.0006, and no STORE because the TAP keeps 1201.
@@ -132,10 +132,10 @@ In order. B0 (below) comes before anything else touches the old TAP. B1 and B5 n
 
 With the old TAP as well (first B0, then B5):
 
-- **B0. Our STORE path on hardware, the old TAP alone, Pi as master, before any CCA sees it.** If it drops back to the factory id on a RESET as the H1.0006 did, our bring-up should re-address it, send the key-only STORE and log "stored the id". Then power-cycle it: it must come back at 1201. **This has to run first:** once a CCA STOREs the old TAP, it no longer drops back and the path can't be tested. If it was ever on the roof system, run it at night, because its table and PAN may still be the roof's.
+- **B0. Our STORE path on hardware, Pi as master.** It needs a TAP that comes back at the factory id after a RESET. The old TAP may already behave that way; if not, STORE can be re-run like any write, so store the factory id on either TAP first: SET_ID_BY_MAC to 1235, then the key-only STORE there. That pair is a bench-only, one-off script outside the master, because the master's send gate doesn't allow it. Then our bring-up should re-address the TAP, hop, see it fall back, send the STORE at 1201 and log "stored the id". A power cycle must then bring it back at 1201. Unproven: that a TAP storing 1235 behaves like one that never stored. If the old TAP was ever on the roof system, power it at night, because its table and PAN may still be the roof's.
 - **B5. Two TAPs, with the backup CCA.** Learn how a CCA addresses two: expected 1201 and 1202, a STORE for each, and how the hop changes when the id one up is taken. That would also explain why the hop exists. Then see which TAP each optimizer joins, and what each TAP's table gets. Our master supports one TAP: it reports a second one found in the scan and sends it nothing, so B5 is CCA-only.
 
-Putting 1202 on the current bench TAP by hand doesn't exercise the path: it's already stored, so it never drops back.
+Storing 1202 would not help: the TAP would come back at 1202, where our master never looks. Storing 1235 is what reproduces a fall-back.
 
 ## Roof sessions (with the owner)
 
