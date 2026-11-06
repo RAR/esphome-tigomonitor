@@ -139,6 +139,49 @@ Open:
 
 Capture: `~/tigo-protocol-analysis/captures/cca-two-taps-20261106-2035.bin` (git-excluded, never committed; it holds MACs and the key).
 
+### Bench, 2026-11-06 night: the CCA's local UI, driven by hand
+
+The owner worked through the backup CCA's local web UI while we recorded the bus listen-only (21:09–23:20). The UI's diagnostic pages name the opcodes and decode the frames, so this section uses its names. Capture: `~/tigo-protocol-analysis/captures/cca-ui-session-20261106-2109.bin`. The owner's pastes of the UI pages are in `cca-ui-mesh-history-20261106-2110.txt` next to it. Both are git-excluded; they hold MACs, PANs and network keys.
+
+**The CCA's names for the tunnel subs:** 0D/0E GatewayCfg, 22/23 SamplingRate, 26/27 GetTable, 2B/2C **EraseFlash**, 2D DiscState Write, 2E/2F DiscState, 06 EncapString, 17 PeriodicCfg. Optimizer reports: 31 Power (every 2 s, delivered in pairs), 09 NetDiag (once per join), NetDebug (off). Text replies (`!Smrt …`) come back inside the poll replies as queue type 07, not as tunnel replies.
+
+**GatewayCfg (0x0D) is also a write.** With args `01 00` plus the 36-byte block, it sets a TAP's whole network config. From the UI's own decode of the block:
+
+| Bytes | Field |
+|---|---|
+| 1 | channel (802.15.4, 11–26; the bench TAPs used 15, 20 and 23) |
+| 2–3 | PAN |
+| 4–7, 11–12 | slot map (12-2-2-1/28/3) |
+| 9–10 (and 11) | change on every rewrite: a revision or nonce |
+| 13 | SLT (90), the signal-level threshold for admitting a node |
+| 14–29 | **16-byte network key** |
+| 30 | changes with the key: probably a check value |
+| 31–35 | Optimizn 00000200, SLm 60 |
+
+A fresh TAP's factory block has PAN 0x1234 and channel 0x14. **The PAN is not a fixed function of the CCA serial:** the CCA chose new ones on several rewrites tonight. Only one nibble of it changed between rewrites, so the earlier serial rule describes only the PAN it set first.
+
+**What each UI action sent:**
+
+| Action | On the bus |
+|---|---|
+| Disable gateway (1201) | `SET_CHANNEL 0x000C 00 00` + key-only STORE to 1201. Then the CCA moved the optimizer: EraseFlash on 1202, sub 0x29 writing it as `8002` (same TUID), window on 1202. Readings returned via 1202 ~3 min later |
+| Re-enable | one `SET_CHANNEL 20 00`, no STORE. 1201 had kept the optimizer in its table as joined, so it was listed joined on both TAPs |
+| Change channel (1202, 23 → 20) | a GatewayCfg write (channel byte + bytes 9–10), no STORE, RESET; EraseFlash on 1202 and a window on 1201. The optimizer went back to 1201 |
+| Node Placement: A1 on both TAPs | GatewayCfg writes to both TAPs (new PAN and key each), RESET, EraseFlash + sub 0x29 `8002` on both, windows on both. A1 joined 1201 in ~45 s. **When 1202's window ran out, the CCA erased 1202's table and wrote nothing back** |
+| Rediscover Nodes (1202) | a re-key of 1202 (new PAN and key), two RESETs, EraseFlash |
+| Delete Gateway (1202, still on the bus) | the TAP is rediscovered as new: re-detect, re-key (both TAPs), EraseFlash. It stays in service |
+| Channel Scan (1202, G8.59+ only) | RESET, SamplingRate `01 01 0c`/`01 00 0c`, `SET_CHANNEL 00 00`, **60 s with no bus traffic at all**. Then **0x0070** `<type> 08 07 FF F8 00` starts a sweep (type 01 Active, 00 Energy; mask = channels 11–26), polled with **0x0072** → **0x0073** (40 bytes). One active sweep, then three energy sweeps, ~62 s each. Energy result = 16 signed dBm bytes (the UI shows their rounded mean, +256). Active result = n × (PAN, channel, RSSI) |
+| Firmware page | 0x0526 lists the TAP's firmware partitions. The page can also install a chosen image or erase one. Not used |
+| Discharge Enabled | rides in `Smrt_` field 14: Default and Off write `0000`, On leaves it `.` |
+
+**What this settles:**
+- **Removal (B1):** a CCA removes an optimizer from a TAP by erasing the whole table and rewriting what should stay. There is no single-entry delete, even for the CCA.
+- **Moving between TAPs:** erase, rewrite as provisional, open the window on the target. That's our Phase 2 sequence, done by the CCA itself.
+- **When the CCA opens windows:** only while an expected node is missing. Once every node is discovered, it sits in "Idle Final" with discovery off.
+- **STORE commits a TAP's current settings** (RS485 id, channel), not only the address.
+- **Our `Smrt_` form is the CCA's Default.** The 3.6 and 4.0.7 shapes differ by settings (field 14 Discharge, field 10 unmapped), not by firmware.
+- **Timing:** power reports carry a slot counter (top 2 bits = Hslot 0–3, low 14 = 5 ms ticks; a 2 s bin = 400 ticks, an Hslot = 60 s). The CCA polls each TAP ~44 times a second; >98% of polls are empty; TAP turnaround averages 10–13 ms with spikes to ~140 ms.
+
 Subs 0x2B and 0x29, and 0x22 with data after the node ID, stay on the never-send list until the owner decides otherwise.
 
 ## Phase 1 — our "scan it on the website"

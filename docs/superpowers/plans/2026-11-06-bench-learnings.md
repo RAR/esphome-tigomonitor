@@ -58,6 +58,16 @@
 
 ---
 
+### Task 9: Decode the report fields the CCA UI named (later)
+
+From the 2026-11-06 UI pages, none urgent:
+- **The power report's slot counter** (`slot_counter`, already parsed as text): top 2 bits = Hslot, low 14 = 5 ms ticks. That gives each reading's measured time.
+- **The report sequence number:** true per-optimizer loss and duplicate detection.
+- **The status byte** (e.g. 0x68 = Over Vout + AC Loss + VMPE Change; the bit order needs one more sample). Shows per-optimizer AC-loss (rapid-shutdown) state.
+- **NetDiag** (sent on each join): parent node and RSSI.
+
+Check our reply timeout against the CCA's measured TAP turnaround (max ~142 ms).
+
 ### Task 1: Bring the commissioning design doc up to date — done 2026-11-06 with the evening's write-up
 
 **Files:**
@@ -139,10 +149,15 @@ When a TAP answers polls with 0x0006 (refused), say so once and back off; don't 
 
 When a text query (tunnel sub 06) gets 0x0146 `00 02` back from the TAP instead of 0x0B10, end that transaction at once. What 0x0146 means isn't settled: the TAP sent it while the optimizer was off, but also at 21:37:03–06 for `Version` and `Info`, two seconds before it acked `Smrt` and `Smrt_` to the same node, just after a RESET. So it could be "unreachable" or "busy". Either way, end the transaction: no retry, no wait for a timeout. Count it per node, and don't let it look like a lost TAP or a second master. Test: a mock TAP that answers sub 06 to node 2 with `0146 00 02` → one "query not taken" result, no retries, polling unaffected. Commit: `fix(master): a query to an unreachable optimizer ends at the TAP's answer`
 
-### Task 8: Ban the GatewayCfg write, and rename sub 0x2B
+### Task 8: Ban the TAP-reconfiguring frames, and rename sub 0x2B
 
 The CCA's own UI (Mesh → History, 2026-11-06) names tunnel sub 0x0D `GatewayCfg Req`. With args `00 00` or `00 01` it's a read. With `01 00` and a 36-byte blob it's a **write of the TAP's whole network config** (PAN, channel and what is probably key material). That's how a CCA re-PANs a TAP. Our gate returns `bench_only` for it today; make it `never`. The same UI names sub 0x2B `EraseFlash`, not "Stop Discovery". It's already `never`; rename `SUB_DISCOVERY_STOP` and fix its comment.
-- Test: `classify_request` of sub 0x0D with `01 00` + 36 bytes → `never`, in every mode including bench; `00 00`/`00 01` unchanged.
+Also never, in every mode, from the 2026-11-06 UI session:
+- **`SET_CHANNEL` 0x000C**, any payload. `00 00` + STORE turns a TAP's radio off for good; on the roof that silences all 40.
+- **The channel scan, 0x0070 and 0x0072.** A scan takes the TAP off its channel and stops all bus traffic for ~5 min.
+- **The TAP firmware family 0x0520–0x0527** (install, list, erase). An erase of every partition bricks the TAP.
+Today 0x000C, 0x0070 and 0x052x fall to the default (`bench_only`).
+- Test: `classify_request` of sub 0x0D with `01 00` + 36 bytes → `never`, in every mode including bench; `00 00`/`00 01` unchanged. 0x000C (`00 00`, `20 00`), 0x0070, 0x0072, 0x0520, 0x0522, 0x0526 → `never`.
 - Commit: `fix(master): never send a TAP's network config write`
 
 ---
