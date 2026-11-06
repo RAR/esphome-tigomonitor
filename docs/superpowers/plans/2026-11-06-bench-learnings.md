@@ -121,6 +121,12 @@ Don't build it until the owner says yes: it widens a bring-up read to every star
 
 ---
 
+### Task 6: Don't loop on a TAP that refuses polls
+
+When a TAP answers polls with 0x0006 (refused), say so once and back off; don't treat it as a lost TAP and re-probe every few seconds. Test: a mock TAP that refuses 0148 gets one warning and no re-probe loop within 60 s. Commit: `fix(master): a TAP that refuses polls is not a lost TAP`
+
+---
+
 ## Bench sessions (with the owner)
 
 In order. B1 and B5 need the backup CCA on the bench bus; B2–B4 need it unplugged and the Pi as the bench master.
@@ -132,6 +138,11 @@ In order. B1 and B5 need the backup CCA on the bench bus; B2–B4 need it unplug
 
 With the never-used TAP as well (B0 first, then B5):
 
+- **B0 result (2026-11-06 20:19–20:21 EST): passed.** Our master ran on this PC through the FTDI USB-RS485 cable, with the never-used TAP alone on the bus (Gateway G5.26, 2017). Our bring-up found it at 1235, re-addressed it and hopped. After the RESET it was back at 1235, so the master re-addressed it again and the TAP acked the STORE. After a bench power cycle it answered at 1201, with no second fall-back. Found along the way:
+  - This TAP refuses the tunnel, 0E02 and polls with 0x0006: it has no table or slot map until a CCA configures it.
+  - Our master treats the refused polls as "stopped answering" and loops re-probing every ~4 s. That's reads only, but noisy. Fix: Task 6.
+  - 0E02 is refused by G5.26 as well as H1.0006; only the roof's G8.65 is known to take it. No change until there's more evidence.
+  - With both bench TAPs on the bus, the stored one went silent and came back with its window closed, probably restarted by the CCA powering its port. Unconfirmed.
 - **B0. Our STORE path on hardware, Pi as master, with the never-used TAP.** It has never run with any CCA, so it should come back at the factory id after a RESET, as the H1.0006 did before the backup CCA stored it. Power it alone on the bench bus with our master. Expected: our bring-up re-addresses it, hops, sees it fall back, sends the key-only STORE at 1201 and logs "stored the id". A power cycle must then bring it back at 1201. Run it before the backup CCA ever sees this TAP, since the CCA stores it on its first bring-up. If it turns out to keep its id without a STORE, or the chance is missed, the fallback is a bench-only one-off script outside the master (its send gate doesn't allow this pair): SET_ID_BY_MAC to 1235, then the key-only STORE there. That needs the owner's OK, and it's unproven that a TAP storing 1235 behaves like one that never stored.
 - **B5. Two TAPs, with the backup CCA.** Learn how a CCA addresses two: expected 1201 and 1202, a STORE for each, and how the hop changes when the id one up is taken. That would also explain why the hop exists. Then see which TAP each optimizer joins, and what each TAP's table gets. Our master supports one TAP: it reports a second one found in the scan and sends it nothing, so B5 is CCA-only.
 
