@@ -224,7 +224,7 @@ void MasterCore::set_fault(Fault f, const std::string &detail) {
 }
 
 bool MasterCore::transact(uint16_t dest, uint16_t cmd, const Bytes &payload, Frame &reply, uint32_t timeout_ms) {
-  refused_ = false;
+  refused_ = not_taken_ = false;
   if (standing_by_()) return false;  // a standby that just yielded sends nothing more
   master::Bytes wire = master::encode_frame(dest, cmd, payload);
   // What our own request looks like coming back, if the adapter hears itself.
@@ -247,9 +247,10 @@ bool MasterCore::transact(uint16_t dest, uint16_t cmd, const Bytes &payload, Fra
   if (on_tx_) on_tx_(reinterpret_cast<const char *>(wire.data()), wire.size());
 
   auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
-  bool got = false, foreign = false, refused = false;
+  bool got = false, foreign = false, refused = false, not_taken = false;
+  bool query = cmd == master::CMD_TUNNEL && payload.size() > 3 && payload[3] == 0x06;
   char buf[512];
-  while (!got && !foreign && !refused) {
+  while (!got && !foreign && !refused && !not_taken) {
     int left = static_cast<int>(
         std::chrono::duration_cast<std::chrono::milliseconds>(deadline - std::chrono::steady_clock::now()).count());
     if (left <= 0) break;
@@ -276,6 +277,8 @@ bool MasterCore::transact(uint16_t dest, uint16_t cmd, const Bytes &payload, Fra
           // bench) refuses the tunnel this way.
           if (refusals_logged_.insert(cmd).second) LOGW("bus master: the TAP refused command %04X (0x0006)", cmd);
           refused = true;
+        } else if (query && f.dest == (dest | 0x8000) && f.cmd == master::CMD_NOT_TAKEN) {
+          not_taken = true;  // the TAP's answer, not a late one: nothing else was asked
         } else if (f.dest == (dest | 0x8000) && f.cmd == cmd + 1) {
           // A late reply to the request before ours is skipped, not taken;
           // and so is a second answer (another TAP at the factory address).
@@ -299,6 +302,7 @@ bool MasterCore::transact(uint16_t dest, uint16_t cmd, const Bytes &payload, Fra
     return false;
   }
   refused_ = refused && !got;
+  not_taken_ = not_taken && !got;
   return got;
 }
 
@@ -529,6 +533,18 @@ void MasterCore::tick_(uint32_t now_ms) {
       status_.detail.clear();
       LOGI("bus master: the TAP is answering again");
     }
+    return;
+  }
+  // A query the TAP couldn't deliver (0x0146): it answered, so the TAP is
+  // there. Queries asks again on its usual schedule.
+  if (not_taken_) {
+    timeouts_in_a_row_ = refusals_in_a_row_ = 0;
+    uint16_t node = req.payload.size() > 6 ? static_cast<uint16_t>(req.payload[5] << 8 | req.payload[6]) : 0;
+    if (not_taken_logged_.insert(node).second)
+      LOGI("bus master: optimizer %04X: the TAP couldn't deliver a query (0x0146); it may be off or rejoining", node);
+    std::lock_guard<std::mutex> lock(mu_);
+    status_.not_taken++;
+    status_.last_reply_unix = unix_now();
     return;
   }
   if (req.cmd == master::CMD_POLL) cursor_.on_timeout();

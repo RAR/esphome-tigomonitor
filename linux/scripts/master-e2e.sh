@@ -403,6 +403,27 @@ expect "warm, housekeeping off: no bring-up reads, 0x22s or walks" "$(stat "$out
 kill $daemon; wait $daemon 2>/dev/null || true
 kill $tap; wait $tap 2>/dev/null || true
 
+# --- run 15b: queries to a node the TAP can't reach (0x0146 00 02) ---
+# The TAP's 0x0146 is its answer: the query ends there, with no timeout, no
+# retry before the usual schedule, and a count, not a lost TAP.
+mkdir -p "$out/state15b"
+python3 linux/tools/mock_tap.py "$out/tap15b" --window 600 --nodes 44 --not-taken 0003 --stats "$out/tap15b.json" &
+tap=$!
+sleep 0.5
+printf '{"bus_role": "master", "master_queries": true, "serial_port": "%s", "gateway_id": 4609, "web_port": 18126}\n' \
+  "$PWD/$out/tap15b" > "$out/state15b/settings.json"
+build/linux/tigomonitord --state-dir "$out/state15b" --web-dir components/tigo_server/web 2> "$out/daemon15b.log" &
+daemon=$!
+for _ in $(seq 160); do [ -f "$out/tap15b.json" ] && [ "$(stat "$out/tap15b.json" "len(d['queries'])")" -ge 30 ] && break; sleep 0.5; done
+sleep 3
+expect "node 0003 was asked its five reads, once each" "$(stat "$out/tap15b.json" "(d['not_taken'], sorted(q['text'] for q in d['queries'] if q['node'] == '0003'))")" \
+  "(5, ['^00Info', '^00Mppt', '^00Smrt', '^00Tests', '^00Version'])"
+expect "counted as not taken, not as timeouts" "$(api 18126 /api/master | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["queries"]["not_taken"], d["timeouts"], d["tap"]["lost"], d["fault"])')" "5 0 0 none"
+expect "said once, naming the node" "$(grep -c "optimizer 0003: the TAP couldn't deliver a query" "$out/daemon15b.log" || true)" 1
+expect "the other nodes still answered" "$(stat "$out/tap15b.json" "d['answered'] >= 20")" True
+kill $daemon; wait $daemon 2>/dev/null || true
+kill $tap; wait $tap 2>/dev/null || true
+
 # --- run 16: a TAP slow back from the bring-up's RESET ---
 # Deaf for 12 s, longer than the reads after the quiet: the bring-up fails,
 # and after a pause the master looks again, finds it at 1201, and polls.

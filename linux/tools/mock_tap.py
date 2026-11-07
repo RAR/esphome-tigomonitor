@@ -107,6 +107,7 @@ def main():
     ap.add_argument('--deaf-hop', action='store_true')  # moved one id up by the hop, answers nothing there
     ap.add_argument('--stats', default=None)
     ap.add_argument('--extra-link', action='append', default=[])
+    ap.add_argument('--not-taken', type=lambda v: int(v, 16), action='append', default=[])  # node ids whose queries get 0x0146 00 02
     ap.add_argument('--pv-wrong-reply', action='store_true')  # answer 0x0B00 with the other byte
     a = ap.parse_args()
 
@@ -145,7 +146,7 @@ def main():
     SECOND_MAC = bytes.fromhex('04c05b3000d4e5f6')
     FACTORY = 0x1235
     addr = FACTORY if a.factory else GATEWAY  # the id the TAP currently answers at
-    stats = {'refused': 0, 'probes': 0, 'polls': 0, 'retries': 0, 'cursor_mismatches': 0, 'checks': 0, 'renewals': [], 'other': [],
+    stats = {'refused': 0, 'probes': 0, 'not_taken': 0, 'polls': 0, 'retries': 0, 'cursor_mismatches': 0, 'checks': 0, 'renewals': [], 'other': [],
              'first_discovery_frame': None, 'first_frame': None, 'addressed_to': None, 'frames_after_foreign': 0, 'foreign_at': None,
              'second_asked': 0, 'second_written': 0, 'session': [], 'cut_marks': [], 'pv': 'on', 'housekeeping': [],
              'log': [], 'claims': 0, 'deaf': 0, 'resets': 0, 'quiet_broken': 0, 'broadcast': [], 'walk': [], 'queries': [],
@@ -332,6 +333,10 @@ def main():
             elif cmd == 0x0B0F and len(p) > 7 and p[3] == 0x06:  # a query, forwarded; the answer comes later
                 tuid, text = p[5] << 8 | p[6], p[7:].decode(errors='replace')
                 stats['queries'].append({'t': round(t, 2), 'node': f'{tuid:04X}', 'text': text.strip()})
+                if tuid in a.not_taken:  # the H1.0006's answer for a node it can't reach (bench, 2026-11-06)
+                    stats['not_taken'] += 1
+                    send(encode(addr | 0x8000, 0x0146, b'\x00\x02'))
+                    continue
                 send(encode(addr | 0x8000, 0x0B10, bytes([0x00, 0x0D, 0x00, 0x07, p[4]])))
                 if text == '#00w255\r':
                     needs_w255.discard(tuid)

@@ -93,6 +93,10 @@ static const uint16_t CMD_POLL = 0x0148;
 static const uint16_t CMD_POLL_REPLY = 0x0149;
 static const uint16_t CMD_TUNNEL = 0x0B0F;
 static const uint16_t CMD_TUNNEL_REPLY = 0x0B10;
+// An H-series TAP's answer to a text query (sub 06) it couldn't deliver, in
+// place of the 0x0B10: 00 02, with no seq. Seen on the bench (H1.0006,
+// 2026-11-06) for a node powered off, and for one just after a RESET.
+static const uint16_t CMD_NOT_TAKEN = 0x0146;
 static const uint8_t SUB_DISCOVERY_START = 0x2D;
 static const uint8_t SUB_DISCOVERY_STATUS = 0x2E;
 // EraseFlash: wipes the TAP's optimizer table. Never sent. The CCA's own UI

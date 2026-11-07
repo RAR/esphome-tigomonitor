@@ -1288,6 +1288,7 @@ void HttpServer::routes_() {
                      {{"on", m.queries},
                       {"writes", m.writes},
                       {"sent_reads", m.sent_reads},
+                      {"not_taken", m.not_taken},
                       {"sent_writes", m.sent_writes},
                       {"answers", m.answers}}},
                     {"tap_version", m.tap_version},

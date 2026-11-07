@@ -96,6 +96,7 @@ struct MasterStatus {
   bool queries = false;  // the settings
   bool writes = false;
   uint32_t sent_reads = 0;  // 0x06s
+  uint32_t not_taken = 0;   // 0x06s the TAP answered 0x0146: it couldn't deliver them
   uint32_t sent_writes = 0;
   uint32_t answers = 0;     // optimizers' answers heard
   std::string tap_version;  // VERSION's reply, from a bring-up
@@ -279,6 +280,8 @@ class MasterCore {
   uint32_t refusals_in_a_row_ = 0;
   uint32_t refused_at_ms_ = 0;
   bool refused_ = false;  // the last transact() got the TAP's 0x0006
+  bool not_taken_ = false;  // the last transact(), a text query, got the TAP's 0x0146
+  std::set<uint16_t> not_taken_logged_;  // nodes whose queries the TAP couldn't deliver, logged once each
   uint32_t replies_logged_ = 0;
   bool version_asked_ = false;          // bench mode asks the TAP's version first
   std::set<uint16_t> refusals_logged_;  // commands the TAP NAKed (0x0006), logged once each
