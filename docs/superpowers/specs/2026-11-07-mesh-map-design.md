@@ -11,7 +11,7 @@ The owner picked a free-form network graph ("C"): each TAP a hub, its optimizers
 ## Goals
 
 - A **Mesh** tab on the Topology page (tabs: Layout | Mesh, the `.page-tabs` pattern Settings and Diagnostics use). Linux only (`data-linux-only`); the ESP32 UI keeps Topology as it is.
-- One node per optimizer, one hub per TAP. A line from each optimizer to its parent: the TAP, or a neighbour when NetDiag says it relays.
+- One node per optimizer, one hub per TAP, a line from each optimizer to the TAP it reports through. (Drawing a relay hop to a neighbour waits for the parent field; see NetDiag.)
 - Each line and node coloured by link quality: good, fair, poor, or silent.
 - Hover (and tap, on touch) fills a side panel: label and string, RSSI now, a 24-hour RSSI sparkline, reports lost today, the TAP it reports through (and "via X" for a relay), and when it last joined.
 - Read-only. **No new bus frames.** Everything comes from what the Pi already hears, as master or as listener.
@@ -38,29 +38,35 @@ The owner picked a free-form network graph ("C"): each TAP a hub, its optimizers
 |---|---|
 | Which TAP | the poll reply's address (reply address with 0x8000 cleared): 1201, 1202, … |
 | RSSI per report | `PowerReading::rssi`, already decoded |
-| Reports lost | the per-report sequence number (below) |
-| Parent, last join | type-`09` NetDiag packets in the same replies |
+| Reports lost | gaps in the slot counter (below) |
+| Last join | type-`09` NetDiag packets in the same replies |
 
 ### Reports lost
 
-Each power report carries a sequence number; the CCA's own UI numbered them 0000, 0001, … per node. Its byte position in the packet is **not yet established**. First implementation task: find it by lining up the 2026-11-06 bench capture (`~/tigo-protocol-analysis/captures/`, our own recording) against the CCA UI's numbered rows. Analysing our own bus captures is allowed; Tigo binaries are not to be touched.
+**There is no per-report sequence number in the packet** (checked 2026-11-07 against the bench captures: no byte or 16-bit word steps by one between consecutive reports; the CCA UI's "serial" column is the CCA's own count). Loss comes from the slot counter instead:
 
-- If found: lost = gaps in the sequence, duplicates ignored, counted per optimizer per local day.
-- If not: fall back to gaps in the slot counter (`slot_counter`, 2 s bins of 400 × 5 ms ticks, wrapping every 4 min), counting expected reports from the cadence each optimizer actually shows. The doc for the API says which method is in use.
+- `slot_counter` is 2 bytes: top 2 bits Hslot (60 s each), low 14 bits 5 ms ticks, so 48,000 ticks wrap every 4 min. Reports land on 400-tick (2 s) bins: on the bench, gaps of 400 were the norm, 800/1200/1600 meant 1/2/3 bins missed, and 0 meant a duplicate.
+- Per optimizer: lost += round(gap / cadence) − 1, where cadence is the smallest non-zero gap seen today (never below 400). Duplicates and out-of-order arrivals are ignored. A gap whose wall-clock time is 200 s or more isn't counted (the counter may have wrapped, and an optimizer that stops at dusk hasn't lost anything).
+- `/api/mesh` reports `"loss_method": "slot"`.
 
 ### NetDiag (type 09)
 
-Sent once per (re)join, which on a roof is mostly once per sunrise. The analyst's notes give the field list (NWID, TUID, ParN, Stat, MAC, RSSI, Algn, Fver, Aver) but warn their offsets came from a different binary. We hold one real sample, from the bench.
+Sent once per (re)join, which on a roof is mostly once per sunrise. What the bench captures show (2026-11-07, 13 packets):
+- packet header bytes 3–4 repeat the TUID; the data is 23 bytes;
+- data bytes 8–15 are the joining optimizer's own MAC (they match its TAP table entry);
+- data bytes 0–7 are an 8-byte ID that is neither in the table nor a TAP MAC from GET_MAC. It may be a network-wide ID, so it is **never** logged or exposed;
+- data bytes 16–22 vary between joins and hold the rest (RSSI and probably the parent). Their layout isn't known.
+
+So the decoder confirms *who joined and when*, nothing more. The analyst's field list (NWID, TUID, ParN, Stat, MAC, RSSI, Algn) names what is in there but their offsets came from a different binary.
 
 - Decode NetDiag as a pure function in `components/tigo_monitor/tigo_protocol.h`, host-tested with a synthetic packet built from the fake prefix `04C05B0000`.
-- **The parent field is confirmed against one roof sunrise before it drives the drawing.** Until then the decoder records it, the API exposes it as `parent_unconfirmed`, and the UI ignores it.
-- A parent equal to the reporting TAP (or the TAP's own NWID) means "direct". Anything else names a neighbour, matched by TUID to a known optimizer.
+- **Parent: not decoded in this work.** The API sends `"parent": null` and `"parent_confirmed": false`, and every optimizer is drawn to the TAP it reports through. Finding the parent needs a roof capture across a sunrise; that is a follow-up, not part of this plan.
 
 ### Per-optimizer state (in the Monitor)
 
 - `rssi_now`, plus a ring of 288 five-minute averages (24 h). About 0.6 KB per optimizer.
 - `reports_today`, `lost_today`, reset at local midnight.
-- `tap` (RS485 id it was last heard through), `parent_tuid`, `last_join_unix`.
+- `tap` (RS485 id it was last heard through), `last_join_unix`.
 
 ## API
 
@@ -68,9 +74,9 @@ Sent once per (re)join, which on a roof is mostly once per sunrise. The analyst'
 
 ```json
 {
-  "loss_method": "sequence",
+  "loss_method": "slot",
   "parent_confirmed": false,
-  "taps": [{"id": "1201", "version": "…"}],
+  "taps": [{"id": "1201"}],
   "nodes": [{
     "addr": "0012", "label": "C9", "string": "C",
     "tap": "1201", "parent": null,
@@ -100,14 +106,14 @@ The sparkline array is oldest first, `null` where nothing was heard. This is a n
 
 ## Testing
 
-- Host tests: NetDiag decode, sequence/loss counting (gap, duplicate, wrap, midnight reset), the 5-minute ring.
+- Host tests: NetDiag decode, slot-gap loss counting (gap, duplicate, out of order, wrap, dusk, midnight reset), the 5-minute ring.
 - Site tests (Playwright, `site/test/`): the Mesh tab appears only on Linux, renders a node per fixture optimizer, colours by tier, fills the side panel on hover, and shows the "parent not yet reported" note.
 - Screenshot: `pi-mesh` added to `PI_VIEWS`.
-- Hardware: run on the Pi5 through a sunrise; confirm the parent field and the sequence byte against what the roof sends before `parent_confirmed` flips to true.
+- Hardware: run on the Pi5 for a day; check the roof's gap distribution is dominated by 400 ticks and that today's loss figures look sane against the raw RSSI.
 
 ## Left to the builder
 
-- How `parent_confirmed` becomes true: my call is a code constant, flipped in the commit that confirms the field against a roof sunrise, not runtime detection.
+- How `parent_confirmed` becomes true (follow-up): my call is a code constant, flipped in the commit that confirms the field against a roof sunrise, not runtime detection.
 - Exact sizing, spacing and label collision handling in the graph.
 - Where the per-optimizer state struct lives (inside `Panel` or alongside it).
 - Wording of empty states and tooltips, in the UI's existing voice.
