@@ -54,7 +54,7 @@ or in Docker, with no ESPHome — see
 | Dashboard — hero strip, per-string heatmap, click any panel for the detail modal | ![Dashboard](docs/images/Dashboard.png) |
 | History — TSDB-backed power chart with gradient fill + daily energy bars | ![History](docs/images/History.png) |
 | Topology — inverter → string → panel tree, inline rename and nameplate editing | ![Topology](docs/images/Topology.png) |
-| Node Table — every discovered device, sortable and filterable, JSON export/import | ![Node Table](docs/images/Nodes.png) |
+| Devices — every discovered device, sortable and filterable, JSON export/import | ![Devices](docs/images/Nodes.png) |
 | Tools — on-device configuration + YAML generator with sub-device grouping | ![Tools](docs/images/Tools.png) |
 | Diagnostics — memory / network / UART / per-DB TSDB stats | ![Diagnostics](docs/images/Diagnostics.png) |
 

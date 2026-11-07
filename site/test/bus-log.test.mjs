@@ -91,7 +91,10 @@ async function open(opts = {}) {
 
 test('the Bus log: the strip, one row per exchange, and a row opens to its bytes', async () => {
   const { page, ctx, errors } = await open({ hash: '#buslog' });
-  await page.waitForSelector('#nav button[data-view="buslog"]', { state: 'visible' });
+  await page.waitForSelector('#nav button[data-view="bus"]', { state: 'visible' });
+  // Listening: the Bus item is the traffic alone, no Control tab.
+  assert.equal((await page.textContent('#nav button[data-view="bus"]')).trim().replace(/^\S+\s*/, ''), 'Bus');
+  assert.equal(await page.isVisible('#view-buslog .bus-tabs'), false);
   await page.waitForFunction(() => document.querySelectorAll('#bus-rows .bx-row').length === 4);
   const strip = await page.textContent('#bus-strip');
   assert.match(strip, /Polls13,23044\.1\/s · 2 lost/);

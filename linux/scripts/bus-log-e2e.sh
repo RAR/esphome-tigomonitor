@@ -52,6 +52,9 @@ expect "VERSION's reply" "$(bus 18140 "sorted({e['summary'] for e in d['exchange
 expect "payloads in hex" "$(bus 18140 "sorted({(e['request_hex'][:12], e['reply_hex'][:12]) for e in d['exchanges'] if e['sub_name'] == 'EncapString' and e['reply_hex']})")" "[('00 00 00 06 ', '00 0D 00 07 ')]"
 expect "the strip" "$(bus 18140 "(d['stats']['window_s'], d['stats']['polls_empty'] > 20, d['stats']['count']['discovery'] > 0, d['stats']['rt_median_ms'] is not None, d['stats']['discovery'])")" \
   "(300, True, True, True, 'Open, 900 s left · 2 of the 2 in the table have joined')"
+versions() { api "$1" /api/versions | python3 -c "import json,sys; d=json.load(sys.stdin); print([(k, e['addr'], e['model'], e['version'], e['since_unix_ms'] > 0) for k in ('taps', 'optimizers') for e in d[k]])"; }
+expect "versions heard" "$(versions 18140)" \
+  "[('taps', '1201', 'Mgate', 'G8.59 Jan  1 2026', True), ('optimizers', '0003', 'Mnode', 'K8.0120 (2D)', True)]"
 expect "listening: nothing ours, no other master" "$(bus 18140 "any(e['ours'] or e['other_master'] for e in d['exchanges'])")" False
 expect "steady state: no alarm" "$(bus 18140 "d['alarm']")" "{'active': False, 'count': 0, 'first_unix_ms': 0, 'recent': []}"
 expect "steady state: healthy" "$(health 18140)" "ok []"
@@ -76,6 +79,7 @@ expect "health names it" "$(api 18140 /api/health | python3 -c "import json,sys;
 expect "logged as an error" "$(grep -c 'another device sent the TAP a reconfiguration: GatewayCfg write' "$out/daemon2.log" || true)" 1
 expect "MQTT: alarm on" "$(mosquitto_sub -p 18834 -C 1 -W 10 -t tigomonitor/test/system/state 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin)["tap_reconfigured"])')" True
 kill $daemon; wait $daemon 2>/dev/null || true
+expect "versions kept" "$(python3 -c "import json; d=json.load(open('$out/state/versions.json')); print(len(d['taps']), len(d['optimizers']))")" "1 1"
 expect "kept by name only" "$(python3 -c "import json; d=json.load(open('$out/state/bus-alarm.json')); print(d['count'], sorted(d['recent'][0]))")" "2 ['unix_ms', 'what']"
 
 # --- run 3: a restart keeps it; clearing ends it ---

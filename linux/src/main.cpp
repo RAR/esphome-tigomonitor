@@ -180,7 +180,7 @@ int main(int argc, char **argv) {
   DiscoveryStore discovery(state_dir + "/discovery.json");
   discovery.load();
   // Every frame, named, and an alarm for one that reconfigures the TAP.
-  BusLog bus_log(state_dir + "/bus-alarm.json");
+  BusLog bus_log(state_dir + "/bus-alarm.json", state_dir + "/versions.json");
   bus_log.load();
   auto on_data = [&](const char *data, size_t n) {
     if (capture_out) capture_out->write(data, static_cast<std::streamsize>(n)).flush();

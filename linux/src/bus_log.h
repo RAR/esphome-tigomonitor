@@ -6,6 +6,9 @@
 // The alarm latches: once a frame that reconfigures a TAP is heard, it stays
 // on through restarts (kept in <state_dir>/bus-alarm.json: when, and which
 // frame by name, never its bytes) until the owner clears it.
+//
+// It also keeps the firmware versions heard (the optimizers' answers to
+// ^00Version, the TAP's to VERSION) in <state_dir>/versions.json.
 
 #include "bus_watch.h"
 #include "tigo_protocol.h"
@@ -23,7 +26,8 @@ class BusLog {
  public:
   static const size_t KEEP_ALARMS = 20;
 
-  explicit BusLog(std::string alarm_path) : path_(std::move(alarm_path)) {}
+  explicit BusLog(std::string alarm_path, std::string versions_path = "")
+      : path_(std::move(alarm_path)), versions_path_(std::move(versions_path)) {}
   void load();
   void feed_rx(const char *data, size_t n);  // read off the bus
   // This monitor's master sent it; its last byte left late_ms before now.
@@ -38,6 +42,8 @@ class BusLog {
   // /api/bus: the alarm, the last 5 minutes in numbers, then up to limit of
   // the newest exchanges.
   nlohmann::json to_json(size_t limit) const;
+  // /api/versions: {taps: [...], optimizers: [...]}, each by address.
+  nlohmann::json versions_json() const;
 
  private:
   struct Alarm {
@@ -45,8 +51,11 @@ class BusLog {
     std::string what;
   };
   void on_frame_(const esphome::tigo_monitor::master::Frame &f, bool ours, int64_t now);
+  void load_versions_();
 
-  std::string path_;
+  std::string path_, versions_path_;
+  esphome::tigo_monitor::master::VersionBook versions_;
+  bool versions_dirty_ = false;
   mutable std::mutex mu_;
   esphome::tigo_monitor::master::BusWatch watch_;
   esphome::tigo_monitor::protocol::FrameSplitter<std::string> rx_, tx_;

@@ -202,6 +202,62 @@ struct Exchange {
   int answer_after_ms = -1;
 };
 
+// A firmware version heard on the bus: an optimizer's answer to ^00Version
+// ("Mnode Version K8.0120 (2D)"), or a TAP's to VERSION ("Mgate Version G8").
+struct VersionSeen {
+  bool tap = false;
+  uint16_t addr = 0;     // the optimizer's node id, or the TAP's RS485 id
+  std::string model;     // the word before "Version": Mnode, Mgate
+  std::string version;   // the rest
+};
+
+// "<model> Version <version>", or false.
+inline bool parse_version(const std::string &text, VersionSeen &v) {
+  size_t at = text.find(" Version ");
+  if (at == 0 || at == std::string::npos || text.find(' ') < at) return false;
+  std::string rest = text.substr(at + 9);
+  while (!rest.empty() && (rest.back() == ' ' || rest.back() == '\r' || rest.back() == '\n')) rest.pop_back();
+  if (rest.empty()) return false;
+  v.model = text.substr(0, at);
+  v.version = rest;
+  return true;
+}
+
+// Each device's version, from when it was first seen, and the one it
+// replaced: kept by the caller across restarts (the Pi's versions.json).
+class VersionBook {
+ public:
+  enum Result { first, same, changed };
+  struct Entry {
+    bool tap = false;
+    uint16_t addr = 0;
+    std::string model, version, previous;
+    int64_t since_ms = 0, last_ms = 0;  // seen at this version from, and last
+  };
+  Result record(const VersionSeen &v, int64_t now_ms) {
+    Entry &e = entries_[{v.tap, v.addr}];
+    e.last_ms = now_ms;
+    if (e.version == v.version) return same;
+    Result r = e.version.empty() ? first : changed;
+    e.tap = v.tap;
+    e.addr = v.addr;
+    e.model = v.model;
+    e.previous = e.version;
+    e.version = v.version;
+    e.since_ms = now_ms;
+    return r;
+  }
+  void restore(const Entry &e) { entries_[{e.tap, e.addr}] = e; }
+  const Entry *find(bool tap, uint16_t addr) const {
+    auto it = entries_.find({tap, addr});
+    return it == entries_.end() ? nullptr : &it->second;
+  }
+  const std::map<std::pair<bool, uint16_t>, Entry> &entries() const { return entries_; }
+
+ private:
+  std::map<std::pair<bool, uint16_t>, Entry> entries_;
+};
+
 // The last WINDOW_MS of the bus, for the Bus log's strip.
 struct BusStats {
   uint32_t polls = 0, polls_lost = 0, polls_empty = 0, polls_refused = 0;
@@ -400,6 +456,12 @@ class BusWatch {
     return out;
   }
   uint64_t polls() const { return polls_; }
+  // The versions heard since the last call.
+  std::vector<VersionSeen> take_versions() {
+    std::vector<VersionSeen> out;
+    out.swap(versions_);
+    return out;
+  }
 
   BusStats stats(int64_t now_ms) const {
     BusStats s;
@@ -513,12 +575,17 @@ class BusWatch {
       bool empty = true;
       for_each_poll_packet(f.payload, [&](uint8_t type, uint16_t tuid, const uint8_t *data, size_t n) {
         empty = false;
-        if (type == 0x07) answer_(tuid, bus_text(data, n), now);
+        if (type == 0x07) {
+          std::string text = bus_text(data, n);
+          version_(false, tuid, text);
+          answer_(tuid, text, now);
+        }
       });
       mark_poll_(poll_sent_ms_, static_cast<int>(now - poll_sent_ms_), empty);
       return;
     }
     if (f.cmd == CMD_POLL_REPLY) return;  // a poll we didn't hear asked
+    if (f.cmd == 0x000B) version_(true, f.dest & 0x7FFF, bus_text(f.payload.data(), f.payload.size()));
     if (open_id_ && answers_(open_req_, f)) {
       if (Exchange *e = find_(open_id_)) fill_(*e, open_req_, f, now);
       open_id_ = 0;
@@ -552,6 +619,14 @@ class BusWatch {
     e.reply_hex = bus_hex(f);
     push_(e);
   }
+  void version_(bool tap, uint16_t addr, const std::string &text) {
+    VersionSeen v;
+    if (!parse_version(text, v)) return;
+    v.tap = tap;
+    v.addr = addr;
+    versions_.push_back(v);
+    if (versions_.size() > 64) versions_.erase(versions_.begin());  // nobody taking them
+  }
   void answer_(uint16_t tuid, std::string text, int64_t now) {
     for (auto it = exchanges_.rbegin(); it != exchanges_.rend(); ++it) {
       if (now - it->unix_ms > ANSWER_WITHIN_MS) return;
@@ -571,6 +646,7 @@ class BusWatch {
   int64_t poll_sent_ms_ = 0, last_ours_ms_ = -1;
   uint64_t polls_ = 0;
   std::string discovery_;
+  std::vector<VersionSeen> versions_;
 };
 
 }  // namespace master

@@ -46,7 +46,7 @@ const VIEWS = [
   ['dashboard',   'Dashboard'],
   ['topology',    'Topology'],
   ['history',     'History'],
-  ['nodes',       'Node Table'],
+  ['nodes',       'Devices'],
   ['tools',       'Tools'],
   ['diagnostics', 'Diagnostics'],
 ];

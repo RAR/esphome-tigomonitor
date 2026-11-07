@@ -18,7 +18,7 @@ anyone who wants to pull the numbers into their own scripts.
 | **Dashboard** | The main view. A coloured tile per panel, grouped by string, so an underperforming panel stands out at a glance. Click any tile for that panel's detail and history. |
 | **History** | Charts of power and energy over the day, week, month or year. Only present if you enabled [history storage](/esphome-tigomonitor/guides/tsdb-integration/). |
 | **Topology** | Your array laid out as inverter → string → panel, with live readings. This is where you rename things, enter panel ratings, and lay the array out by hand. |
-| **Node Table** | The raw list of every panel the device has ever seen. You can export it to a file as a backup. |
+| **Devices** | The raw list of every panel the device has ever seen. You can export it to a file as a backup. On the Raspberry Pi build it also lists the TAP, and each optimizer's and the TAP's firmware as heard on the bus. |
 | **Tools** | Change settings, generate config, reset counters, restart the device. |
 | **Diagnostics** | Is it healthy? Memory, WiFi signal, how many messages it's missing. |
 | **CCA Info** | What your Tigo box reports about itself. |
@@ -32,7 +32,7 @@ anyone who wants to pull the numbers into their own scripts.
 
 <ThemedShot name="topology" alt="Topology — your array as inverter, string and panel, with live readings." />
 
-<ThemedShot name="nodes" alt="Node Table — every panel the device has seen, sortable and filterable." />
+<ThemedShot name="nodes" alt="Devices — every panel the device has seen, sortable and filterable." />
 
 <ThemedShot name="diagnostics" alt="Diagnostics — memory, network, UART counters and time-series database stats." />
 
@@ -62,7 +62,7 @@ it. You don't need any of it to use the dashboard.
 | Dashboard | `/app#dashboard` |
 | History | `/app#history` |
 | Topology | `/app#topology` |
-| Node Table | `/app#nodes` |
+| Devices | `/app#nodes` |
 | Tools | `/app#tools` |
 | Diagnostics | `/app#diagnostics` |
 | CCA Info | `/app#cca` |
@@ -99,9 +99,9 @@ You don't need a CCA or a Tigo account to tell the monitor which panel is where.
 - **Replace…** on an unassigned panel swaps it in for a placed one: it takes that panel's place in its string, and so its name, and the panel it replaced goes to Unassigned. The list puts the panels with no reading first, since the dead one is usually among them. Each panel's history stays with its own barcode, so the old optimizer's record isn't credited to the new one.
 - Live watts keep updating while you edit. Nothing is stored until **Save layout**, which sends the whole layout at once. **Cancel** throws your changes away, and leaving the page asks first if there are any.
 
-**A new optimizer** (a replacement, or one added) joins the gateway's network on its own and appears in Unassigned once the gateway announces its barcode. On the Raspberry Pi build, one first heard after the monitor's own first day is marked **New** for a week, in the Node Table and the editor, until it's placed in a string. The Topology page says so too, and the log names it. In Home Assistant, the **New optimizers** sensor counts them, for an automation to tell you.
+**A new optimizer** (a replacement, or one added) joins the gateway's network on its own and appears in Unassigned once the gateway announces its barcode. On the Raspberry Pi build, one first heard after the monitor's own first day is marked **New** for a week, on the Devices page and in the editor, until it's placed in a string. The Topology page says so too, and the log names it. In Home Assistant, the **New optimizers** sensor counts them, for an automation to tell you.
 
-The Raspberry Pi build also marks the other end. An optimizer with no reading for three days is tagged **Missing** in the Node Table, and one the TAP's roster has stopped listing is tagged **Not on the TAP**. Either usually means it died or was removed. The **Missing optimizers** sensor in Home Assistant counts both. Removing a dead one from the TAP's own list isn't done: the only commands for it can wipe the whole list, and a stale entry costs nothing but a little radio time. If you already know one isn't reporting, such as one that never joined, choose **Mark known** on its row: it shows as **known**, isn't flagged or counted as missing, and is left out of the panel counts here and on Topology. Its first reading clears the mark, and **Unmark** does it by hand. While the Pi runs the bus with queries on, it keeps each optimizer's last answers about its setup. Hover a name in the Node Table to see them. One whose configuration was never completed, as the CCA would on enrolling it, is tagged **Not set up**. A replacement put in since the CCA has gone may show it.
+The Raspberry Pi build also marks the other end. An optimizer with no reading for three days is tagged **Missing** on the Devices page, and one the TAP's roster has stopped listing is tagged **Not on the TAP**. Either usually means it died or was removed. The **Missing optimizers** sensor in Home Assistant counts both. Removing a dead one from the TAP's own list isn't done: the only commands for it can wipe the whole list, and a stale entry costs nothing but a little radio time. If you already know one isn't reporting, such as one that never joined, choose **Mark known** on its row: it shows as **known**, isn't flagged or counted as missing, and is left out of the panel counts here and on Topology. Its first reading clears the mark, and **Unmark** does it by hand. While the Pi runs the bus with queries on, it keeps each optimizer's last answers about its setup. Hover a name on the Devices page to see them. One whose configuration was never completed, as the CCA would on enrolling it, is tagged **Not set up**. A replacement put in since the CCA has gone may show it.
 
 A string keeps the label it was created with; renaming it changes only the name shown. MPPTs work the same way: each keeps a label no other MPPT has, which a node-table export shows, while the name you give it only has to be unique within its inverter. An MPPT dragged into an inverter that already has one by its name takes the next free number there. Per-string history and peaks follow that label, so a rename never loses them. Home Assistant entities are keyed on the panel's barcode, so moving or renaming a panel doesn't break them either.
 
@@ -138,9 +138,9 @@ Click any heat tile on a desktop viewport (>768 px) to open a modal showing:
 
 Slot lookup uses `/api/panels` (barcode last-6 → tsdb slot) and is cached on first fetch. The modal is hidden via `@media (max-width: 768px)` on phones — it would be too cramped — so the heat tile cursor reverts to default on those viewports.
 
-### Sortable Node Table
+### Sortable device table
 
-Every column header on the Nodes view is clickable. Click cycles ascending / descending, with an arrow indicator (`↑` / `↓`) on the active column. Defaults:
+Every column header on the Devices page is clickable. Click cycles ascending / descending, with an arrow indicator (`↑` / `↓`) on the active column. Defaults:
 
 - Numeric columns (V, A, Power, Temp) sort **descending** on first click — "biggest first" is usually what you want.
 - Text columns and Age sort **ascending**.

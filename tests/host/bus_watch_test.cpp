@@ -236,6 +236,51 @@ static void test_an_answer_joins_its_query() {
   CHECK(last(w).answer == "!Info 0027 12 FF" && last(w).answer_after_ms == 1900);
 }
 
+// Versions: an optimizer's answer to ^00Version, which a poll brings back,
+// and the TAP's to VERSION. Taken once each; heard, not asked, is enough.
+static void test_versions_are_picked_out() {
+  BusWatch w;
+  CHECK(w.take_versions().empty());
+  w.on_frame(request(0x0148, hex("00016fc404")), true, 1000);
+  w.on_frame(reply(0x0149, poll_reply_with_answer(0x10, "Mnode Version K8.0120 (2D)\r")), false, 1010);
+  w.on_frame(request(0x0148, hex("00016fc504")), true, 1100);
+  w.on_frame(reply(0x0149, poll_reply_with_answer(0x11, "!Info 0027 12 FF\r")), false, 1110);
+  w.on_frame(request(0x000A, {}), false, 1200);
+  w.on_frame(reply(0x000B, Bytes{'M', 'g', 'a', 't', 'e', ' ', 'V', 'e', 'r', 's', 'i', 'o', 'n', ' ', 'G', '8', '\r'}), false,
+             1210);
+  auto v = w.take_versions();
+  CHECK(v.size() == 2);
+  if (v.size() == 2) {
+    CHECK(!v[0].tap && v[0].addr == 0x10 && v[0].model == "Mnode" && v[0].version == "K8.0120 (2D)");
+    CHECK(v[1].tap && v[1].addr == 0x1201 && v[1].model == "Mgate" && v[1].version == "G8");
+  }
+  CHECK(w.take_versions().empty());
+}
+
+// The book of versions: the first time each is seen, and a change keeps
+// what it replaced.
+static void test_version_book() {
+  VersionBook b;
+  VersionSeen v;
+  v.addr = 0x10;
+  v.model = "Mnode";
+  v.version = "K8.0120 (2D)";
+  CHECK(b.record(v, 1000) == VersionBook::first);
+  CHECK(b.record(v, 5000) == VersionBook::same);
+  const VersionBook::Entry *e = b.find(false, 0x10);
+  CHECK(e && e->version == "K8.0120 (2D)" && e->since_ms == 1000 && e->last_ms == 5000 && e->previous.empty());
+  v.version = "K8.0130 (2D)";
+  CHECK(b.record(v, 9000) == VersionBook::changed);
+  e = b.find(false, 0x10);
+  CHECK(e && e->version == "K8.0130 (2D)" && e->since_ms == 9000 && e->previous == "K8.0120 (2D)");
+  CHECK(!b.find(true, 0x10));  // a TAP at the same number is another device
+  v.tap = true;
+  v.model = "Mgate";
+  v.version = "G8";
+  CHECK(b.record(v, 9500) == VersionBook::first);
+  CHECK(b.entries().size() == 2);
+}
+
 // Listening, every request is the master's. Running the bus, one that isn't
 // ours is another master's.
 static void test_another_master() {
@@ -287,6 +332,8 @@ int main() {
   test_a_late_reply_finds_its_request();
   test_summaries();
   test_an_answer_joins_its_query();
+  test_versions_are_picked_out();
+  test_version_book();
   test_another_master();
   test_stats_cover_five_minutes();
   test_log_is_bounded();

@@ -101,7 +101,24 @@ async function open(opts = {}) {
   return { page, ctx, api, errors };
 }
 
-const nav = (page) => page.isVisible('#nav button[data-view="busmaster"]');
+// The Bus page's Control tab: there only while this monitor runs the bus.
+const nav = (page) => page.$eval('#view-busmaster .bus-tabs', (e) => getComputedStyle(e).display !== 'none');
+
+test('the Bus nav item opens Control, and the tabs switch to Traffic and back', async () => {
+  const { page, ctx, errors } = await open();
+  await page.waitForSelector('#pv-pill', { state: 'visible' });
+  await page.click('#nav button[data-view="bus"]');
+  await page.waitForSelector('#view-busmaster.active');
+  assert.equal(await page.getAttribute('#nav button[data-view="bus"]', 'class'), 'active');
+  await page.click('#view-busmaster .bus-tabs a[href="#buslog"]');
+  await page.waitForSelector('#view-buslog.active');
+  assert.equal(await page.getAttribute('#nav button[data-view="bus"]', 'class'), 'active');
+  assert.equal(await page.getAttribute('#view-buslog .bus-tabs a[href="#buslog"]', 'aria-selected'), 'true');
+  await page.click('#view-buslog .bus-tabs a[href="#busmaster"]');
+  await page.waitForSelector('#view-busmaster.active');
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
 
 test('listening, there is no Bus master page and no PV pill', async () => {
   const { page, ctx, errors } = await open({ role: 'listen' });

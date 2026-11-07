@@ -183,6 +183,13 @@ export const routes = {
     inverters: [],
     strings: strings.map((s) => ({ label: s.label, panel_rating_w: RATING })),
   },
+  // Pi build only: firmware heard on the bus. One optimizer was updated.
+  '/api/versions': {
+    taps: [{ addr: '1201', model: 'Mgate', version: 'G8.59 Jan  1 2026', previous: '',
+             since_unix_ms: 1767225600000, last_unix_ms: 1767225600000 }],
+    optimizers: devices.map((d, i) => ({ addr: d.addr, model: 'Mnode', version: i === 4 ? 'K8.0130 (2D)' : 'K8.0120 (2D)',
+      previous: i === 4 ? 'K8.0120 (2D)' : '', since_unix_ms: 1767225600000 + i * 60000, last_unix_ms: 1767225600000 + i * 60000 })),
+  },
   '/api/status': {
     free_heap: 98740, total_heap: 310652,
     free_psram: 8289756, total_psram: 8388608,

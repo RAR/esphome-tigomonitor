@@ -133,7 +133,7 @@ called "All panels". There are four ways to get your real layout:
   in with the account you use in the Tigo app. Then press **Import from Tigo
   cloud** on the Topology page. Panel names, strings, MPPTs and inverters
   all come across. The Pi keeps only the login token, not your password.
-- **From an ESP32:** on the ESP32's **Node Table** page choose **Export**,
+- **From an ESP32:** on the ESP32's **Devices** page (**Node Table** in older versions) choose **Export**,
   then **Import** the file on the Pi's. Names, strings, and your Topology
   renames and panel ratings come across. If you haven't set up inverters on
   the Pi yet, the backup's inverter names wait and apply once you do.
@@ -184,8 +184,8 @@ transmitter sends on the DC wiring, and those keep producing while the
 transmitter runs. A minute after you turn output off, the page lists any
 panels still producing, so you can see which ones on your site those are.
 
-The switch is on the **Bus master** page, which appears in the sidebar
-while the Pi runs or stands by for the bus. It needs a
+The switch is on the **Bus** page's **Control** tab, which appears while
+the Pi runs or stands by for the bus. It needs a
 [web UI password](#set-a-password): without one anyone on your network
 could turn the array off, so the Pi refuses. Turning output off asks first.
 While it's off:
@@ -213,7 +213,7 @@ same switch; see the
 
 The CCA renews the TAP's *discovery window*, its window for new optimizers
 to join, every time it runs out, and so does the Pi by default. The
-**Bus master** page can stop renewing it: **Disable**. The Pi keeps
+**Bus** page's **Control** tab can stop renewing it: **Disable**. The Pi keeps
 polling, so every panel still reports, and nothing new goes to the TAP; it
 just stops sending the renewal. On the roof we measured, a closed window
 didn't stop production, and every optimizer came back at sunrise and after

@@ -4,6 +4,7 @@
 #include "log.h"
 
 #include <chrono>
+#include <cstdlib>
 #include <ctime>
 #include <fstream>
 
@@ -13,6 +14,7 @@ using nlohmann::json;
 using esphome::tigo_monitor::master::BusStats;
 using esphome::tigo_monitor::master::Exchange;
 using esphome::tigo_monitor::master::Frame;
+using esphome::tigo_monitor::master::VersionBook;
 
 static int64_t unix_ms_now() {
   return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch())
@@ -25,7 +27,38 @@ static std::string hex4(unsigned v) {
   return b;
 }
 
+static json entry_json(const VersionBook::Entry &e) {
+  return {{"addr", hex4(e.addr)},     {"model", e.model},       {"version", e.version},
+          {"previous", e.previous},   {"since_unix_ms", e.since_ms}, {"last_unix_ms", e.last_ms}};
+}
+
+void BusLog::load_versions_() {
+  if (versions_path_.empty()) return;
+  std::ifstream in(versions_path_);
+  if (!in) return;
+  json j = json::parse(in, nullptr, false);
+  if (!j.is_object()) {
+    LOGW("bus log: %s is unreadable; starting with no versions", versions_path_.c_str());
+    return;
+  }
+  std::lock_guard<std::mutex> lock(mu_);
+  for (const char *kind : {"taps", "optimizers"})
+    for (const auto &o : j.value(kind, json::array())) {
+      if (!o.is_object()) continue;
+      VersionBook::Entry e;
+      e.tap = std::string(kind) == "taps";
+      e.addr = static_cast<uint16_t>(std::strtoul(o.value("addr", std::string("0")).c_str(), nullptr, 16));
+      e.model = o.value("model", std::string());
+      e.version = o.value("version", std::string());
+      e.previous = o.value("previous", std::string());
+      e.since_ms = o.value("since_unix_ms", int64_t{0});
+      e.last_ms = o.value("last_unix_ms", int64_t{0});
+      if (!e.version.empty()) versions_.restore(e);
+    }
+}
+
 void BusLog::load() {
+  load_versions_();
   std::ifstream in(path_);
   if (!in) return;
   json j = json::parse(in, nullptr, false);
@@ -46,6 +79,16 @@ void BusLog::load() {
 
 void BusLog::on_frame_(const Frame &f, bool ours, int64_t now) {
   std::string what = watch_.on_frame(f, ours, now);
+  for (const auto &v : watch_.take_versions()) {
+    VersionBook::Result r = versions_.record(v, now);
+    versions_dirty_ = true;
+    if (r == VersionBook::changed)
+      LOGW("bus: %s %s's firmware changed: %s, was %s", v.tap ? "TAP" : "optimizer", hex4(v.addr).c_str(),
+           v.version.c_str(), versions_.find(v.tap, v.addr)->previous.c_str());
+    else if (r == VersionBook::first)
+      LOGI("bus: %s %s runs %s %s", v.tap ? "TAP" : "optimizer", hex4(v.addr).c_str(), v.model.c_str(),
+           v.version.c_str());
+  }
   if (what.empty()) return;
   if (!alarm_count_) first_alarm_ms_ = now;
   alarm_count_++;
@@ -95,7 +138,24 @@ void BusLog::feed_tx(const char *data, size_t n, uint32_t late_ms) {
   }
 }
 
+json BusLog::versions_json() const {
+  std::lock_guard<std::mutex> lock(mu_);
+  json taps = json::array(), optimizers = json::array();
+  for (const auto &kv : versions_.entries()) (kv.second.tap ? taps : optimizers).push_back(entry_json(kv.second));
+  return {{"taps", taps}, {"optimizers", optimizers}};
+}
+
 void BusLog::save_if_changed() {
+  if (!versions_path_.empty()) {
+    bool write;
+    {
+      std::lock_guard<std::mutex> lock(mu_);
+      write = versions_dirty_;
+      versions_dirty_ = false;
+    }
+    if (write && !write_file_atomic(versions_path_, versions_json().dump(1) + "\n", 0644))
+      LOGW("bus log: cannot write %s", versions_path_.c_str());
+  }
   json j;
   {
     std::lock_guard<std::mutex> lock(mu_);

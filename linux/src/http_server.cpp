@@ -1383,6 +1383,14 @@ void HttpServer::routes_() {
     }
     send_json(res, ctx_.bus_log->to_json(limit));
   });
+  // The TAPs' and optimizers' firmware, as heard on the bus.
+  svr.Get("/api/versions", [this](const httplib::Request &, httplib::Response &res) {
+    if (!ctx_.bus_log) {
+      send_json(res, {{"error", "no bus log"}}, 404);
+      return;
+    }
+    send_json(res, ctx_.bus_log->versions_json());
+  });
   // Clearing only forgets the alarm; it sends nothing on the bus.
   svr.Post("/api/bus/alarm/clear", [this](const httplib::Request &, httplib::Response &res) {
     if (!ctx_.bus_log) {

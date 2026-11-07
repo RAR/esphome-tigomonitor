@@ -45,8 +45,13 @@ def main():
         seq = (seq + 1) & 0xFF
         if seq % 40 == 1:
             say([encode(TAP, 0x000A, b''), encode(TAP | 0x8000, 0x000B, b'Mgate Version G8.59\rJan  1 2026\r')])
+        # Now and then a poll brings back optimizer 0003's answer to ^00Version.
+        answer = b''
+        if seq % 40 == 2:
+            text = b'Mnode Version K8.0120 (2D)\r'
+            answer = bytes([0x07, 0x00, 0x03, 0x00, 0x00, 0x00, len(text)]) + text
         say([encode(TAP, 0x0148, bytes([0x00, 0x01, cursor >> 8, cursor & 0xFF, 0x04])),
-             encode(TAP | 0x8000, 0x0149, bytes([0x00, 0x1F, 0x00, 0x00, 0x00]))])
+             encode(TAP | 0x8000, 0x0149, bytes([0x00, 0x1F, 0x00, 0x00, 0x00]) + answer)])
         cursor += 1
         if seq % 10 == 0:
             say([encode(TAP, 0x0B0F, bytes([0, 0, 0, 0x2E, seq])),

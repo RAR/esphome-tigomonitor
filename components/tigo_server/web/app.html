@@ -158,6 +158,13 @@
   .topbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; }
   h1 { font-size: 20px; font-weight: 600; }
   .topbar-meta { font-size: 12px; color: var(--text-dim); }
+  /* The Bus page's two halves: shown only when there are both. */
+  .bus-tabs { display: none; gap: 4px; margin: -12px 0 20px; border-bottom: 1px solid var(--border); }
+  body.bus-both .bus-tabs { display: flex; }
+  .bus-tabs a { padding: 8px 14px; margin-bottom: -1px; text-decoration: none; color: var(--text-dim); font-weight: 600;
+                border-bottom: 2px solid transparent; }
+  .bus-tabs a:hover { color: var(--text); }
+  .bus-tabs a[aria-selected="true"] { color: var(--text); border-bottom-color: var(--accent-2); }
   .btn {
     display: inline-flex; align-items: center; gap: 6px;
     background: var(--bg-3); border: 1px solid var(--border); color: var(--text);
@@ -533,6 +540,9 @@
   table.nodes tr:hover td { background: var(--bg-3); }
   table.nodes .mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; color: var(--text-dim); font-size: 13px; }
   table.nodes .num { text-align: right; }
+  table.nodes:not(.with-fw) .fw { display: none; }
+  .devices-head { margin: 4px 0 10px; color: var(--text-dim); }
+  #devices-taps .table-wrap { margin-bottom: 22px; }
   table.nodes td strong { color: var(--text); }
 
   .badge {
@@ -934,12 +944,11 @@
       <button data-view="dashboard" class="active"><span class="icon">▣</span> Dashboard</button>
       <button data-view="history"><span class="icon">↗</span> History</button>
       <button data-view="topology"><span class="icon">⌘</span> Topology</button>
-      <button data-view="nodes"><span class="icon">≡</span> Node Table</button>
+      <button data-view="nodes"><span class="icon">≡</span> Devices</button>
       <button data-view="tools"><span class="icon">⚙</span> Tools</button>
       <button data-view="diagnostics"><span class="icon">◈</span> Diagnostics</button>
-      <button data-view="busmaster" id="nav-busmaster" style="display:none"><span class="icon">◎</span> Bus master</button>
       <button data-view="logs" data-linux-only style="display:none"><span class="icon">☰</span> Logs</button>
-      <button data-view="buslog" data-linux-only style="display:none"><span class="icon">⇄</span> Bus log</button>
+      <button data-view="bus" id="nav-bus" data-linux-only style="display:none"><span class="icon">⇄</span> Bus</button>
       <button data-view="cca"><span class="icon">◉</span> CCA Info</button>
       <button data-view="cloudstatus" id="nav-cloudstatus" style="display:none"><span class="icon">☁</span> Tigo Cloud</button>
     </nav>
@@ -1159,8 +1168,20 @@
     <!-- NODES -->
     <section class="view" id="view-nodes">
       <div class="topbar">
-        <h1>Node Table</h1>
+        <h1>Devices</h1>
         <div class="topbar-meta" id="nodes-meta">—</div>
+      </div>
+
+      <!-- Pi build: the TAPs, from /api/versions. -->
+      <div id="devices-taps" style="display:none">
+        <div class="section-title devices-head">TAPs</div>
+        <div class="table-wrap">
+          <table class="nodes">
+            <thead><tr><th>Addr</th><th>Model</th><th>Firmware</th><th>Since</th><th>Last read</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <div class="section-title devices-head">Optimizers</div>
       </div>
 
       <div class="table-toolbar">
@@ -1196,6 +1217,7 @@
               <th class="num" data-sort="temp">Temp</th>
               <th class="num" data-sort="age">Age</th>
               <th data-sort="state">State</th>
+              <th class="fw" data-sort="fw">Firmware</th>
             </tr>
           </thead>
           <tbody id="nodes-tbody">
@@ -1434,8 +1456,12 @@
     <!-- BUS MASTER (the Pi, running or standing by for the bus) -->
     <section class="view" id="view-busmaster">
       <div class="topbar">
-        <h1>Bus master</h1>
+        <h1>Bus</h1>
         <div class="topbar-meta"><span class="badge stale" id="bm-meta">—</span></div>
+      </div>
+      <div class="bus-tabs" role="tablist">
+        <a href="#busmaster" role="tab" aria-selected="true">Control</a>
+        <a href="#buslog" role="tab" aria-selected="false">Traffic</a>
       </div>
 
       <div class="section-head">
@@ -1650,8 +1676,12 @@
     <!-- BUS LOG (the Pi): each request with what came back; polls counted -->
     <section class="view" id="view-buslog">
       <div class="topbar">
-        <h1>Bus log</h1>
+        <h1>Bus</h1>
         <div class="topbar-meta" id="buslog-meta">—</div>
+      </div>
+      <div class="bus-tabs" role="tablist">
+        <a href="#busmaster" role="tab" aria-selected="false">Control</a>
+        <a href="#buslog" role="tab" aria-selected="true">Traffic</a>
       </div>
       <div class="tools-card" id="bus-alarm-card" style="display:none">
         <div class="pv-row">
@@ -1974,7 +2004,10 @@
   // Pages the Pi's settings leave out of the sidebar (show_cca_page,
   // show_cloud_page). A link to one opens the Dashboard instead.
   const hiddenPages = new Set();
+  // The Bus item: Control while this monitor runs the bus, else Traffic.
+  let busControl = false;
   function showView(id) {
+    if (id === 'bus') id = busControl ? 'busmaster' : 'buslog';
     if (hiddenPages.has(id)) id = 'dashboard';
     // Leaving the Topology editor with changes not saved asks first.
     if (id !== 'topology' && typeof topoEditor !== 'undefined' && topoEditor.active) {
@@ -1986,7 +2019,8 @@
       topoEditor.dirty = false;
       topoEdToolbar(false);
     }
-    document.querySelectorAll('#nav button').forEach(b => b.classList.toggle('active', b.dataset.view === id));
+    const navId = id === 'busmaster' || id === 'buslog' ? 'bus' : id;
+    document.querySelectorAll('#nav button').forEach(b => b.classList.toggle('active', b.dataset.view === navId));
     document.querySelectorAll('.view').forEach(v => v.classList.toggle('active', v.id === 'view-' + id));
     if (window.location.hash !== '#' + id) {
       history.replaceState(null, '', '#' + id);
@@ -1994,6 +2028,7 @@
     window.scrollTo(0, 0);
     // Auto-close the mobile drawer on view selection.
     document.querySelector('.app').classList.remove('menu-open');
+    document.dispatchEvent(new CustomEvent('viewshown', { detail: id }));
   }
 
   document.querySelectorAll('#nav button').forEach(btn => {
@@ -3112,6 +3147,10 @@
       stringMedians[k] = filtered.length % 2 ? filtered[m] : (filtered[m - 1] + filtered[m]) / 2;
     }
 
+    const fwByAddr = {};
+    for (const o of (nodesData.versions && nodesData.versions.optimizers) || []) fwByAddr[o.addr.toUpperCase()] = o;
+    document.querySelector('#view-nodes table.nodes:not(#devices-taps table)').classList.toggle('with-fw', !!nodesData.versions);
+
     const search = nodesFilters.search.toLowerCase();
     const filterString = nodesFilters.stringLabel;
     const filterState = nodesFilters.state;
@@ -3143,8 +3182,9 @@
       if (filterString && stringLabel !== filterString) continue;
       if (filterState && state !== filterState) continue;
 
+      const fw = fwByAddr[String(n.addr).toUpperCase()] || null;
       rows.push({ n, name, addr: n.addr, barcodeKey, barcodeShort,
-                  stringLabel, mpptLabel, v, a, w, t, age, state });
+                  stringLabel, mpptLabel, v, a, w, t, age, state, fw });
     }
 
     // Sort by current column. Numeric columns sort numerically; string
@@ -3164,6 +3204,7 @@
         case 'temp':    return r.t;
         case 'age':     return r.age;
         case 'state':   return stateOrder[r.state] ?? 99;
+        case 'fw':      return r.fw ? r.fw.version : '';
         default:        return r.name;
       }
     };
@@ -3189,7 +3230,7 @@
                                 : "You know it isn't reporting: don't flag it as missing, and leave it out of the counts"}">${r.n.known ? 'Unmark' : 'Mark known'}</button>`
         : '';
       html += `
-        <tr>
+        <tr data-addr="${topoEscape(String(r.addr))}">
           <td><strong${r.n.setup ? ` title="${topoEscape([r.n.setup.mppt, r.n.setup.info].filter(Boolean).join('\n'))}"` : ''}>${r.name}</strong>${isNewOptimizer(r.n.first_heard_unix, !!r.n.cca_string)
             ? ` <span class="node-new" title="First heard ${new Date(r.n.first_heard_unix * 1000).toLocaleString()}">New</span>` : ''}${nodeTags(r.n, newestRoster)}${knownBtn}</td>
           <td class="mono">${r.addr}</td>
@@ -3201,6 +3242,7 @@
           <td class="num">${fmtTemp(r.t, 0)} ${tempUnit()}</td>
           <td class="num">${fmtAge(r.age)}</td>
           <td><span class="badge ${r.n.known ? 'stale' : r.state}"${r.n.known ? ' title="Marked known: not reporting, not counted, not flagged as missing"' : ''}>${stateLabel}</span></td>
+          <td class="mono fw"${r.fw ? ` title="${topoEscape(fwTitle(r.fw))}"` : ''}>${r.fw ? topoEscape(r.fw.version) : '—'}</td>
         </tr>
       `;
     }
@@ -3238,6 +3280,24 @@
     if (labels.includes(current)) sel.value = current;
   }
 
+  // "Mnode since Jan 1, 12:00, was K8.0120 (2D)": a version's tooltip.
+  function fwTitle(v) {
+    const when = ms => new Date(ms).toLocaleString([], { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+    return `${v.model} since ${when(v.since_unix_ms)}` + (v.previous ? `, was ${v.previous}` : '');
+  }
+  function renderTaps() {
+    const box = document.getElementById('devices-taps');
+    const v = nodesData.versions;
+    box.style.display = v ? '' : 'none';
+    if (!v) return;
+    const when = ms => new Date(ms).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+    box.querySelector('tbody').innerHTML = (v.taps || []).length ? v.taps.map(t => `<tr>
+        <td class="mono">${topoEscape(t.addr)}</td><td>${topoEscape(t.model)}</td>
+        <td class="mono"${t.previous ? ` title="was ${topoEscape(t.previous)}"` : ''}><strong>${topoEscape(t.version)}</strong></td>
+        <td>${when(t.since_unix_ms)}</td><td>${when(t.last_unix_ms)}</td></tr>`).join('')
+      : `<tr><td colspan="5" style="color:var(--text-faint)">Not heard yet. A TAP gives its version when it is brought up, or on the bench; the optimizers give theirs to the bus master's queries.</td></tr>`;
+  }
+
   async function refreshNodes() {
     if (!document.getElementById('view-nodes').classList.contains('active')) return;
     try {
@@ -3248,7 +3308,11 @@
       nodesData = {
         nodes: (await nR.json()).nodes || [],
         devices: (await dR.json()).devices || [],
+        // Pi build: each device's firmware, as heard on the bus.
+        versions: PLATFORM === 'linux'
+          ? await apiFetch('/api/versions').then(r => r.ok ? r.json() : null).catch(() => null) : null,
       };
+      renderTaps();
       rebuildNodesStringFilter();
       renderNodesTable();
     } catch (e) {
@@ -3679,7 +3743,9 @@
   }
   function pvApply(m) {
     const show = !!m && (m.role === 'master' || m.role === 'standby');
-    document.getElementById('nav-busmaster').style.display = show ? '' : 'none';
+    busControl = show;
+    document.getElementById('nav-bus').style.display = show || PLATFORM === 'linux' ? '' : 'none';
+    document.body.classList.toggle('bus-both', show && PLATFORM === 'linux');
     document.getElementById('pv-pill').style.display = show ? '' : 'none';
     const pv = show && m.pv ? m.pv : { on: true };
     const banner = document.getElementById('pv-banner');
@@ -3784,7 +3850,7 @@
   });
   platformReady.then(refreshPv);
   setInterval(refreshPv, 5000);
-  document.querySelector('#nav button[data-view="busmaster"]').addEventListener('click', refreshPv);
+  document.addEventListener('viewshown', e => { if (e.detail === 'busmaster') refreshPv(); });
 
   // Opening the view forces a fetch; the periodic tick does not.
   document.querySelector('#nav button[data-view="diagnostics"]')
@@ -4232,8 +4298,7 @@
     if (busLast) renderBus();
   });
   document.getElementById('buslog-search').addEventListener('input', () => renderBus());
-  document.querySelector('#nav button[data-view="buslog"]').addEventListener('click', () => refreshBus(true));
-  window.addEventListener('hashchange', () => { if (window.location.hash === '#buslog') refreshBus(true); });
+  document.addEventListener('viewshown', e => { if (e.detail === 'buslog') refreshBus(true); });
   platformReady.then(() => refreshBus(true));
   let busTick = 0;
   setInterval(() => {
