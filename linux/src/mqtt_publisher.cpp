@@ -256,6 +256,18 @@ void MqttPublisher::publish_system_discovery_() {
             {"expire_after", expire},
             {"device", device}};
   announce_("binary_sensor", uid, c);
+  // Another device sent the TAP a reconfiguration (a CCA on the bus): on
+  // until cleared on the Bus log page.
+  uid = "tigomonitor_" + settings_.device_id + "_tap_reconfigured";
+  announce_("binary_sensor", uid,
+            {{"name", "TAP reconfigured by another device"},
+             {"unique_id", uid},
+             {"state_topic", state},
+             {"value_template", "{{ 'ON' if value_json.tap_reconfigured else 'OFF' }}"},
+             {"availability_topic", base_() + "/status"},
+             {"expire_after", expire},
+             {"device_class", "problem"},
+             {"device", device}});
 }
 
 // One power sensor per string, as the firmware's string_label sensors.
@@ -465,6 +477,7 @@ void MqttPublisher::publish() {
               {"invalid_checksum", bus.bad_checksums},
               {"missed_frames", bus.ends_without_start + bus.overflows},
               {"night_mode", night},
+              {"tap_reconfigured", tap_reconfigured_ && tap_reconfigured_()},
               {"new_optimizers", monitor_.new_optimizers(static_cast<int64_t>(time(nullptr)))},
               {"missing_optimizers", monitor_.missing_optimizers(static_cast<int64_t>(time(nullptr)))},
               {"strings", strings}};

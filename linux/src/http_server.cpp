@@ -329,6 +329,10 @@ std::vector<std::string> HttpServer::health_problems_() const {
     if (m.pv_unconfirmed) problems.push_back("PV output: the TAP didn't confirm it is " + std::string(m.pv.off ? "off" : "on"));
   }
   if (ctx_.pv_unreadable && ctx_.pv_unreadable()) problems.push_back("PV output: pv.json is unreadable; holding PV off");
+  // Latched until the owner clears it: a CCA on the bus may have re-PANned
+  // the TAP, which every optimizer then drops off.
+  if (ctx_.bus_log && ctx_.bus_log->alarm_active())
+    problems.push_back("bus: another device reconfigured the TAP (" + ctx_.bus_log->alarm_summary() + ")");
   int64_t limit_s = master ? 60 : 300;
   if (!s.serial_port.empty() && quiet_s > limit_s && (master || !ctx_.monitor.night_mode()))
     problems.push_back(last > 0 ? "no frames from the bus for " + std::to_string(quiet_s) + " s"
@@ -1364,6 +1368,29 @@ void HttpServer::routes_() {
     int code = ctx_.request_discovery ? ctx_.request_discovery(renew, why) : 409;
     if (code == 200) send_json(res, {{"renew", renew}});
     else send_json(res, {{"error", why.empty() ? "not running the bus" : why}}, code);
+  });
+
+  // The decoded bus log, newest last, and the TAP-reconfiguration alarm.
+  svr.Get("/api/bus", [this](const httplib::Request &req, httplib::Response &res) {
+    if (!ctx_.bus_log) {
+      send_json(res, {{"error", "no bus log"}}, 404);
+      return;
+    }
+    size_t limit = esphome::tigo_monitor::master::BusWatch::KEEP;
+    if (req.has_param("limit")) {
+      long v = std::strtol(req.get_param_value("limit").c_str(), nullptr, 10);
+      if (v > 0 && static_cast<size_t>(v) < limit) limit = static_cast<size_t>(v);
+    }
+    send_json(res, ctx_.bus_log->to_json(limit));
+  });
+  // Clearing only forgets the alarm; it sends nothing on the bus.
+  svr.Post("/api/bus/alarm/clear", [this](const httplib::Request &, httplib::Response &res) {
+    if (!ctx_.bus_log) {
+      send_json(res, {{"error", "no bus log"}}, 404);
+      return;
+    }
+    ctx_.bus_log->clear_alarm();
+    send_json(res, {{"cleared", true}});
   });
 
   // Pi-only: the serial ports to choose the RS485 adapter from.

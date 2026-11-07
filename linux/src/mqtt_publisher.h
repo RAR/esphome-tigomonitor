@@ -49,6 +49,8 @@ class MqttPublisher {
 
   // Where publish() reads the bus master's status, in the master role.
   void set_master_status(std::function<MasterStatus()> f) { master_status_ = std::move(f); }
+  // Whether the TAP-reconfiguration alarm is on (BusLog).
+  void set_tap_reconfigured(std::function<bool()> f) { tap_reconfigured_ = std::move(f); }
   // Where a PV switch command goes (true: off); false if it was refused.
   void set_pv_command(std::function<bool(bool off)> f) { pv_command_ = std::move(f); }
 
@@ -78,6 +80,7 @@ class MqttPublisher {
   std::set<std::string> announced_, announced_strings_;
   bool standing_by_ = false;
   std::function<MasterStatus()> master_status_;
+  std::function<bool()> tap_reconfigured_;
   std::function<bool(bool off)> pv_command_;
   void on_pv_command_(const std::string &payload);
   mutable std::mutex err_mu_;

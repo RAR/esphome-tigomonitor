@@ -17,6 +17,7 @@
 #include "bus_master.h"
 #include "settings.h"
 #include "tls.h"
+#include "bus_log.h"
 #include "topology.h"
 
 #include <atomic>
@@ -62,6 +63,8 @@ struct HttpContext {
   // The owner's discovery switch (renew or let it close): 200, or 409 with
   // why, as request_pv.
   std::function<int(bool renew, std::string &why)> request_discovery;
+  // The decoded bus log and the TAP-reconfiguration alarm.
+  BusLog *bus_log = nullptr;
 };
 
 // tigomonitord --health-check PORT, the container's HEALTHCHECK: GETs

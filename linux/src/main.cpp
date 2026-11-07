@@ -179,9 +179,13 @@ int main(int argc, char **argv) {
   // And the discovery switch, for the same reason.
   DiscoveryStore discovery(state_dir + "/discovery.json");
   discovery.load();
+  // Every frame, named, and an alarm for one that reconfigures the TAP.
+  BusLog bus_log(state_dir + "/bus-alarm.json");
+  bus_log.load();
   auto on_data = [&](const char *data, size_t n) {
     if (capture_out) capture_out->write(data, static_cast<std::streamsize>(n)).flush();
     monitor.feed(data, n);
+    bus_log.feed_rx(data, n);
   };
   auto on_listen = [&](const char *data, size_t n) {
     on_data(data, n);
@@ -191,6 +195,7 @@ int main(int argc, char **argv) {
   // what was said on the bench.
   auto on_sent = [&](const char *data, size_t n) {
     if (capture_out) capture_out->write(data, static_cast<std::streamsize>(n)).flush();
+    bus_log.feed_tx(data, n);
   };
 
   std::mutex settings_mu;  // settings is read by the web server's threads
@@ -276,6 +281,7 @@ int main(int argc, char **argv) {
     return m;
   };
   mqtt.set_master_status(master_status);
+  mqtt.set_tap_reconfigured([&bus_log] { return bus_log.alarm_active(); });
   // Under master_mu, so it can't fall between start_input's read of the
   // state and its swap. request_pv never waits on the bus.
   mqtt.set_pv_command([&](bool off) {
@@ -338,7 +344,8 @@ int main(int argc, char **argv) {
           return 409;
         }
         return 200;
-      }});
+      },
+      &bus_log});
   if (port < 0 && settings.web_port > 0) port = settings.web_port;
   // Only the default steps aside for another web server; a port someone
   // chose fails loudly instead, and systemd keeps retrying it.
@@ -487,6 +494,7 @@ int main(int argc, char **argv) {
     }
     monitor.tick();
     housekeeping.save_if_changed();
+    bus_log.save_if_changed();
     auto now = std::chrono::steady_clock::now();
     if (now - last_publish >= std::chrono::seconds(settings.publish_interval_s)) {
       mqtt.publish();
@@ -567,6 +575,7 @@ int main(int argc, char **argv) {
   cca_http.stop();
   monitor.save();
   housekeeping.save_if_changed();
+  bus_log.save_if_changed();
   BusStats s = monitor.stats();
   LOGI("stopping: %u frames, %u bad checksums, %u readings, %zu panels, %zu nodes", s.frames, s.bad_checksums,
        s.power_packets, monitor.panels().size(), monitor.nodes().size());

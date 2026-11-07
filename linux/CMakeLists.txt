@@ -22,6 +22,7 @@ find_package(Threads REQUIRED)
 add_executable(tigomonitord
   src/main.cpp
   src/bus_master.cpp
+  src/bus_log.cpp
   ../components/tigo_master/master_core.cpp
   src/housekeeping_store.cpp
   src/pv_store.cpp
