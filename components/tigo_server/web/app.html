@@ -4241,7 +4241,8 @@
       `<span class="bx-mono t">${busTime(e.unix_ms)}</span>` +
       `<span class="bx-src${e.other_master ? ' other' : ''}">${from}</span>` +
       `<span class="bx-mono tap">${tap}</span>` +
-      `<span class="bx-ex">${logEsc(e.name)}${e.sub_name ? `<small>${logEsc(e.sub_name)}</small>` : ''}</span>` +
+      // A tunnel's sub says what it does, so it leads and Tunnel goes under it.
+      `<span class="bx-ex">${e.sub_name ? `${logEsc(e.sub_name)}<small>${logEsc(e.name)}</small>` : logEsc(e.name)}</span>` +
       `<span class="bx-mono node">${e.node || '—'}${busName(e.node) ? `<small>${logEsc(busName(e.node))}</small>` : ''}</span>` +
       `<span class="bx-res ${res[0]}">${res[1]}</span>` +
       `<span class="bx-mono rt${e.rt_ms != null && e.rt_ms > 30 ? ' slow' : ''}">${rt}</span>` +
