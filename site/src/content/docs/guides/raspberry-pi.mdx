@@ -175,6 +175,30 @@ For one you know isn't reporting, such as a spare the TAP knows but that
 isn't on the roof, press **Mark known** on the Devices page. It stops
 counting as missing, and leaves the panel totals.
 
+## See which optimizers have a weak link
+
+**Topology › Mesh** draws each TAP with its optimizers around it, one line
+per optimizer to the TAP its reports come through. The colour of the line
+says how well that optimizer is getting through:
+
+- **Reports lost today.** Each report carries Tigo's slot counter, which
+  places it in a 2-second slot, so a skipped slot is a report that never
+  arrived. Only gaps while it is reporting count: the night, or a
+  restart of the Pi, isn't loss.
+- **Signal.** The number each report carries, from 0 to 255, higher is
+  better. It is Tigo's own scale, not dBm, so the Pi shows it as it is. On
+  one 40-optimizer roof it runs from 66 to 222.
+
+**Poor** is more than 5% of today's reports lost or a signal under 80;
+**fair** is 1–5% lost or a signal under 110; **silent** is nothing heard
+for 10 minutes. Hover over or tap an optimizer for its numbers, a day of
+its signal, and when it last joined the network.
+
+<ThemedShot name="pi-mesh" alt="Topology › Mesh — the optimizers around their TAP, each line coloured by link quality, with one optimizer's signal over a day, reports lost today and when it last joined." />
+
+Relays between optimizers aren't shown yet; every optimizer is drawn
+straight to its TAP.
+
 ## Set a password
 
 Out of the box, as on the ESP32, the web UI has no login: anyone on your

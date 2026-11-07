@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **See which optimizers have a weak link (Raspberry Pi).** Topology has a
+  new Mesh tab: each TAP with its optimizers around it, every line coloured
+  by how many of that optimizer's reports went missing today and by Tigo's
+  raw signal number. Hover or tap one for a day of its signal and when it
+  last joined. Lost reports are counted from gaps in each report's slot
+  counter, and the night doesn't count. Read-only: it adds nothing to the
+  bus. See [Running on a Raspberry Pi](https://rar.github.io/esphome-tigomonitor/guides/raspberry-pi/#see-which-optimizers-have-a-weak-link).
+
 ## [2.1.0] - 2026-11-07
 
 ### Added
