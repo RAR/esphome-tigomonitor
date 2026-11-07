@@ -1,5 +1,5 @@
 // site/test/pi-pages.test.mjs
-// The Settings page's tabs, and the Raspberry Pi build's switches for the CCA
+// The Settings and Diagnostics pages' tabs, and the Raspberry Pi build's switches for the CCA
 // Info and Tigo Cloud pages, in the real app.html, in Chromium, against a mock API: /api/status says
 // platform 'linux', /api/settings is in memory and records every POST. The
 // rest of the API comes from the screenshot fixtures.
@@ -67,6 +67,7 @@ async function open(opts = {}) {
       }
       return json(200, api.settings);
     }
+    if (path === '/api/logs') { api.logReads = (api.logReads || 0) + 1; return json(200, { lines: [], next: 0 }); }
     if (path === '/api/cloud/status') return json(200, { configured: true });
     if (path === '/api/cloud/health') return json(200, { summary: {} });
     if (routes[path] !== undefined) return json(200, routes[path]);
@@ -225,5 +226,31 @@ test('the Web UI card saves the web settings with the bus ones', async () => {
   const body = api.posts.at(-1);
   assert.equal(body.web_port, 8080);
   assert.equal(body.bus_role, 'listen');
+  await ctx.close();
+});
+
+const diagTabs = (page, view) => page.$$eval(`#view-${view} .page-tabs a`,
+  (as) => as.filter((a) => a.offsetParent).map((a) => `${a.textContent}${a.getAttribute('aria-selected') === 'true' ? '*' : ''}`));
+
+test('on the Pi, Logs is a tab of Diagnostics, not a sidebar item', async () => {
+  const { page, ctx, api, errors } = await open({ hash: '#diagnostics' });
+  await page.waitForSelector('#view-diagnostics .page-tabs', { state: 'visible' });
+  assert.deepEqual(await diagTabs(page, 'diagnostics'), ['Health*', 'Logs']);
+  assert.equal(await page.$('#nav button[data-view="logs"]'), null);
+  await page.click('#view-diagnostics .page-tabs a[href="#logs"]');
+  await page.waitForFunction(() => document.querySelector('.view.active').id === 'view-logs');
+  assert.deepEqual(await diagTabs(page, 'logs'), ['Health', 'Logs*']);
+  assert.equal(await page.textContent('#view-logs h1'), 'Diagnostics');
+  assert.equal(await page.isVisible('#nav button[data-view="diagnostics"].active'), true);
+  await page.waitForFunction(() => document.getElementById('logs-meta').textContent !== '—');
+  assert.ok(api.logReads > 0);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test('the ESP32 has no Logs, so Diagnostics has no tabs', async () => {
+  const { page, ctx } = await open({ linux: false, hash: '#diagnostics' });
+  await page.waitForTimeout(500);
+  assert.deepEqual(await diagTabs(page, 'diagnostics'), []);
   await ctx.close();
 });

@@ -164,12 +164,13 @@
   /* A page's own tabs (Settings): scroll sideways on a phone rather than wrap. */
   .page-tabs { display: flex; overflow-x: auto; scrollbar-width: none; }
   .page-tabs::-webkit-scrollbar { display: none; }
-  .bus-tabs a, .page-tabs button { padding: 8px 14px; margin-bottom: -1px; text-decoration: none; color: var(--text-dim); font-weight: 600;
+  .bus-tabs a, .page-tabs a, .page-tabs button { padding: 8px 14px; margin-bottom: -1px; text-decoration: none; color: var(--text-dim); font-weight: 600;
                 border-bottom: 2px solid transparent; }
   .page-tabs button { background: none; border-top: 0; border-left: 0; border-right: 0; font: inherit; font-weight: 600;
                       white-space: nowrap; cursor: pointer; }
-  .bus-tabs a:hover, .page-tabs button:hover { color: var(--text); }
-  .bus-tabs a[aria-selected="true"], .page-tabs button[aria-selected="true"] { color: var(--text); border-bottom-color: var(--accent-2); }
+  .page-tabs a { white-space: nowrap; }
+  .bus-tabs a:hover, .page-tabs a:hover, .page-tabs button:hover { color: var(--text); }
+  .bus-tabs a[aria-selected="true"], .page-tabs a[aria-selected="true"], .page-tabs button[aria-selected="true"] { color: var(--text); border-bottom-color: var(--accent-2); }
   .page-tabs button:focus-visible { outline: 2px solid var(--accent-2); outline-offset: -2px; border-radius: 4px 4px 0 0; }
   .btn {
     display: inline-flex; align-items: center; gap: 6px;
@@ -953,7 +954,6 @@
       <button data-view="nodes"><span class="icon">≡</span> Devices</button>
       <button data-view="settings"><span class="icon">⚙</span> Settings</button>
       <button data-view="diagnostics"><span class="icon">◈</span> Diagnostics</button>
-      <button data-view="logs" data-linux-only style="display:none"><span class="icon">☰</span> Logs</button>
       <button data-view="bus" id="nav-bus" data-linux-only style="display:none"><span class="icon">⇄</span> Bus</button>
       <button data-view="cca"><span class="icon">◉</span> CCA Info</button>
       <button data-view="cloudstatus" id="nav-cloudstatus" style="display:none"><span class="icon">☁</span> Tigo Cloud</button>
@@ -1580,6 +1580,11 @@
         <h1>Diagnostics</h1>
         <div class="topbar-meta" id="diag-meta">—</div>
       </div>
+      <!-- Logs is the Pi's alone: the ESP32 keeps one page, without tabs. -->
+      <div class="page-tabs" role="tablist" data-linux-only style="display:none">
+        <a href="#diagnostics" role="tab" aria-selected="true">Health</a>
+        <a href="#logs" role="tab" aria-selected="false">Logs</a>
+      </div>
 
       <div class="section-head">
         <div class="section-title">Memory</div>
@@ -1692,8 +1697,13 @@
     <!-- LOGS (Raspberry Pi build) -->
     <section class="view" id="view-logs">
       <div class="topbar">
-        <h1>Logs</h1>
+        <h1>Diagnostics</h1>
         <div class="topbar-meta" id="logs-meta">—</div>
+      </div>
+      <!-- Logs is the Pi's alone: the ESP32 keeps one page, without tabs. -->
+      <div class="page-tabs" role="tablist" data-linux-only style="display:none">
+        <a href="#diagnostics" role="tab" aria-selected="false">Health</a>
+        <a href="#logs" role="tab" aria-selected="true">Logs</a>
       </div>
       <div class="table-toolbar">
         <input class="input" id="logs-search" placeholder="Filter, e.g. discovery or bus:">
@@ -2059,7 +2069,7 @@
       topoEditor.dirty = false;
       topoEdToolbar(false);
     }
-    const navId = id === 'busmaster' || id === 'buslog' ? 'bus' : id;
+    const navId = id === 'busmaster' || id === 'buslog' ? 'bus' : id === 'logs' ? 'diagnostics' : id;
     document.querySelectorAll('#nav button').forEach(b => b.classList.toggle('active', b.dataset.view === navId));
     document.querySelectorAll('.view').forEach(v => v.classList.toggle('active', v.id === 'view-' + id));
     if (window.location.hash !== '#' + id) {
@@ -3895,8 +3905,7 @@
   document.addEventListener('viewshown', e => { if (e.detail === 'busmaster') refreshPv(); });
 
   // Opening the view forces a fetch; the periodic tick does not.
-  document.querySelector('#nav button[data-view="diagnostics"]')
-    .addEventListener('click', () => refreshDiagnostics(true));
+  document.addEventListener('viewshown', e => { if (e.detail === 'diagnostics') refreshDiagnostics(true); });
   if (window.location.hash === '#diagnostics') refreshDiagnostics(true);
   setInterval(() => {
     if (document.getElementById('view-diagnostics').classList.contains('active')) refreshDiagnostics();
@@ -4194,7 +4203,7 @@
     pollLogs();
     logsTimer = setInterval(pollLogs, 2000);
   }
-  document.querySelector('#nav button[data-view="logs"]').addEventListener('click', startLogs);
+  document.addEventListener('viewshown', e => { if (e.detail === 'logs') startLogs(); });
   if (window.location.hash === '#logs') startLogs();
   document.getElementById('logs-level').addEventListener('change', () => { renderLogs(); updateLogsMeta(); });
   document.getElementById('logs-search').addEventListener('input', () => { renderLogs(); updateLogsMeta(); });

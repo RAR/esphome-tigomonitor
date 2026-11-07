@@ -293,7 +293,7 @@ which certbot writes through your DNS provider's API.
 certbot renews the certificate on its own and runs the hook each time. The
 monitor checks the two files every 10 seconds and uses a renewed pair for new
 connections, with no restart. A pair that doesn't load (a key that isn't the
-certificate's, say) is logged on the Logs page and the previous one kept. If
+certificate's, say) is logged under Diagnostics → Logs and the previous one kept. If
 the pair won't load when the service starts, the web UI comes up on plain
 HTTP instead and the log says why, so you can still reach it to fix the
 paths. It keeps trying the pair every 10 seconds, and restarts on HTTPS once

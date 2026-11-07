@@ -20,7 +20,7 @@ anyone who wants to pull the numbers into their own scripts.
 | **Topology** | Your array laid out as inverter → string → panel, with live readings. This is where you rename things, enter panel ratings, and lay the array out by hand. |
 | **Devices** | The raw list of every panel the device has ever seen. You can export it to a file as a backup. On the Raspberry Pi build it also lists the TAP, and each optimizer's and the TAP's firmware as heard on the bus. |
 | **Settings** | Change settings, generate config, reset counters, restart the device. One tab per area; on the Raspberry Pi build, Bus, MQTT, Inverters and Web UI too. |
-| **Diagnostics** | Is it healthy? Memory, WiFi signal, how many messages it's missing. |
+| **Diagnostics** | Is it healthy? Memory, WiFi signal, how many messages it's missing. On the Raspberry Pi build, its Logs tab shows the service's log. |
 | **CCA Info** | What your Tigo box reports about itself. |
 | **Tigo Cloud** | Tigo's own view of your system, if you've connected your account. |
 
@@ -65,6 +65,7 @@ it. You don't need any of it to use the dashboard.
 | Devices | `/app#nodes` |
 | Settings | `/app#settings` (the old `/app#tools` still works) |
 | Diagnostics | `/app#diagnostics` |
+| Diagnostics › Logs (Raspberry Pi) | `/app#logs` |
 | CCA Info | `/app#cca` |
 | Tigo Cloud | `/app#cloudstatus` (only when `cloud_import` is set) |
 
