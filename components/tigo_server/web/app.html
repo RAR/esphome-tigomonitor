@@ -448,11 +448,57 @@
   .log-line.error .log-lvl, .log-line.error .log-msg { color: var(--bad); }
   .log-line.debug .log-lvl, .log-line.debug .log-msg { color: var(--text-faint); }
   .logs-empty { padding: 24px 14px; color: var(--text-faint); font-family: inherit; }
-  /* The Bus log: time, then who to whom and the frame, in one column. */
-  #bus-box .log-line { grid-template-columns: 9.5ch minmax(0, 1fr); }
-  .bus-dir { display: inline-block; min-width: 14ch; color: var(--text-dim); }
-  .bus-hex { display: block; padding-left: 14ch; color: var(--text-faint); }
-  @media (max-width: 768px) { .bus-hex { padding-left: 0; } }
+  /* The Bus log: the last 5 minutes in a strip, then one row per exchange. */
+  .bx-strip { display: grid; grid-template-columns: repeat(auto-fit, minmax(128px, 1fr)); gap: 1px; background: var(--border);
+              border: 1px solid var(--border); border-radius: 10px; overflow: hidden; margin-bottom: 16px; }
+  .bx-tile { background: var(--bg-2); padding: 12px 14px; display: grid; gap: 2px; min-width: 0; }
+  .bx-tile .k { font-size: 11px; letter-spacing: .05em; text-transform: uppercase; color: var(--text-faint); }
+  .bx-tile .v { font-size: 20px; font-weight: 650; font-variant-numeric: tabular-nums; }
+  .bx-tile .s { font-size: 12px; color: var(--text-dim); overflow-wrap: anywhere; }
+  .bx-tile.bad { background: rgba(248,113,113,0.10); }
+  .bx-tile.bad .k, .bx-tile.bad .v { color: var(--bad); }
+  .bx-chip { font-family: inherit; font-size: 12.5px; font-weight: 500; border: 1px solid var(--border); background: var(--bg-2); color: var(--text-dim);
+             border-radius: 999px; padding: 5px 11px; cursor: pointer; display: inline-flex; gap: 6px; align-items: center; }
+  .bx-chip .n { font-variant-numeric: tabular-nums; color: var(--text-faint); }
+  .bx-chip[aria-pressed="true"] { background: var(--bg-3); color: var(--text); border-color: var(--text-faint); }
+  .bx-chip.bad[aria-pressed="true"] { border-color: var(--bad); color: var(--bad); }
+  .bx-table { border: 1px solid var(--border); border-radius: 10px; background: var(--bg-2); overflow: auto;
+              max-height: calc(100vh - 380px); min-height: 280px; }
+  /* px, not ch: the header's smaller font would make its ch columns narrower than the rows'. */
+  .bx-cols, .bx-row { display: grid; grid-template-columns: 96px 108px 40px minmax(120px, 1.1fr) 40px 104px 84px minmax(0, 2fr);
+                      gap: 12px; align-items: baseline; padding: 8px 14px; }
+  .bx-cols { position: sticky; top: 0; z-index: 1; font-size: 11px; letter-spacing: .05em; text-transform: uppercase;
+             color: var(--text-faint); border-bottom: 1px solid var(--border); background: var(--bg-3); white-space: nowrap; }
+  .bx-row { border-bottom: 1px solid var(--border); cursor: pointer; font-size: 13px; position: relative; }
+  .bx-row:hover { background: var(--bg-3); }
+  .bx-row:focus-visible { outline: 2px solid var(--accent-2); outline-offset: -2px; }
+  .bx-row.reconfig { background: rgba(248,113,113,0.10); }
+  .bx-row.reconfig::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 3px; background: var(--bad); }
+  .bx-mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px; font-variant-numeric: tabular-nums; color: var(--text-dim); }
+  .bx-mono.slow { color: var(--warn); }
+  .bx-src { font-size: 12.5px; color: var(--text-dim); }
+  .bx-src.other { color: var(--bad); font-weight: 600; }
+  .bx-ex { font-weight: 600; min-width: 0; }
+  .bx-ex small { display: block; font-weight: 400; color: var(--text-faint); font-size: 11.5px; }
+  .bx-res { font-size: 12px; font-weight: 600; border-radius: 6px; padding: 1px 7px; justify-self: start; white-space: nowrap; }
+  .bx-res.ok { background: rgba(74,222,128,0.15); color: var(--good); }
+  .bx-res.warn { background: rgba(251,191,36,0.15); color: var(--warn); }
+  .bx-res.bad { background: rgba(248,113,113,0.15); color: var(--bad); }
+  .bx-res.none { background: var(--bg-3); color: var(--text-dim); }
+  .bx-sum { min-width: 0; overflow-wrap: anywhere; }
+  .bx-sum .q { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px; color: var(--accent-2); }
+  .bx-detail { display: grid; gap: 4px; border-bottom: 1px solid var(--border); background: var(--bg); padding: 10px 14px 12px 122px;
+               font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px; color: var(--text-dim); overflow-wrap: anywhere; }
+  .bx-detail .lbl { color: var(--text-faint); display: inline-block; min-width: 9ch; }
+  .bx-empty { padding: 24px 14px; color: var(--text-faint); }
+  @media (max-width: 860px) {
+    .bx-cols { display: none; }
+    .bx-row { grid-template-columns: auto 1fr auto; grid-template-areas: "t src rt" "ex ex res" "sum sum sum"; row-gap: 4px; }
+    .bx-row > .t { grid-area: t; } .bx-row > .bx-src { grid-area: src; } .bx-row > .rt { grid-area: rt; }
+    .bx-row > .bx-ex { grid-area: ex; } .bx-row > .bx-res { grid-area: res; justify-self: end; } .bx-row > .bx-sum { grid-area: sum; }
+    .bx-row > .tap, .bx-row > .node { display: none; }
+    .bx-detail { padding-left: 14px; }
+  }
   #bus-alarm-card { border-color: var(--bad); }
   #bus-alarm-card .pv-title { color: var(--bad); }
   .bus-alarm-list { margin: 10px 0 0; padding: 0; list-style: none; font-size: 13px; line-height: 1.6; }
@@ -1593,7 +1639,7 @@
       <p class="table-meta" style="margin-top:10px">The last 2,000 lines since the service started, about two days. Older ones are in the journal (<code>journalctl -u tigomonitord</code>). Debug lines appear only when the service runs <span style="white-space:nowrap">with <code>--verbose</code></span>, and only the last 500 are kept.</p>
     </section>
 
-    <!-- BUS LOG (the Pi): every frame but the polls, by name -->
+    <!-- BUS LOG (the Pi): each request with what came back; polls counted -->
     <section class="view" id="view-buslog">
       <div class="topbar">
         <h1>Bus log</h1>
@@ -1607,12 +1653,17 @@
         <ul class="bus-alarm-list" id="bus-alarm-list"></ul>
         <p class="pv-note">No master here sends these frames, so another device on the bus did: most likely a CCA. A CCA rewrites the TAP's network ID and key, and can change its channel or reflash it; the optimizers then drop off. Unplug it, check every panel is reporting, then clear this.</p>
       </div>
+      <section class="bx-strip" id="bus-strip" aria-label="The last 5 minutes"></section>
       <div class="table-toolbar">
-        <input class="input" id="buslog-search" placeholder="Filter, e.g. GatewayCfg or 1201">
+        <span id="bus-chips" role="group" aria-label="Show" style="display:flex;gap:6px;flex-wrap:wrap"></span>
+        <input class="input" id="buslog-search" placeholder="Filter, e.g. 0002 or GatewayCfg">
         <button class="btn" id="buslog-pause">Pause</button>
       </div>
-      <div class="logs-box" id="bus-box"><div class="logs-empty">Loading…</div></div>
-      <p class="table-meta" style="margin-top:10px">The last 300 frames heard or sent, newest last. Polls and their replies are counted, not listed. Each payload is shown in hex, but for the TAP's network config block, which holds its network key: only its length is kept.</p>
+      <div class="bx-table" id="bus-box" role="table" aria-label="Exchanges">
+        <div class="bx-cols" role="row"><span>Time</span><span>From</span><span>TAP</span><span>Exchange</span><span>Node</span><span>Result</span><span>Round trip</span><span>Summary</span></div>
+        <div id="bus-rows"><div class="bx-empty">Loading…</div></div>
+      </div>
+      <p class="table-meta" style="margin-top:10px">The last 300 exchanges, newest last: each request with what came back, paired by the tunnel's sequence number or the reply's command. Polls are counted in the strip, not listed. Click a row for its bytes; the TAP's network config block, which holds its network key, is the only thing hidden. Round trips are exact when this monitor runs the bus; listening, they are only as fine as the reads, about 16 ms.</p>
     </section>
 
     <!-- CCA -->
@@ -4035,19 +4086,47 @@
   // ---- Bus log and the reconfiguration alarm (Pi) ----
   // The banner is checked every 10 s wherever you are; the page polls every
   // 2 s while open.
-  let busLast = null, busPaused = false;
+  let busLast = null, busPaused = false, busCat = 'all';
+  const busOpen = new Set();  // exchanges whose bytes are showing, by id
   const busWhen = ms => new Date(ms).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  const BUS_CATS = [['all', 'All'], ['discovery', 'Discovery'], ['queries', 'Queries'], ['housekeeping', 'Housekeeping'],
+                    ['bringup', 'Bring-up'], ['other_master', 'Other master'], ['reconfig', 'Reconfigures the TAP']];
+  const BUS_RESULT = {
+    answered: ['ok', 'answered'], delivered: ['ok', 'delivered'], not_delivered: ['warn', 'not delivered'],
+    refused: ['warn', 'refused'], no_reply: ['bad', 'no reply'], broadcast: ['none', 'broadcast'],
+    waiting: ['none', 'waiting'], unasked: ['warn', 'unasked'],
+  };
+  const busIn = (e, c) => c === 'all' || (c === 'other_master' ? e.other_master : e.category === c);
+  function busTime(ms) {
+    const d = new Date(ms);
+    return d.toLocaleTimeString([], { hour12: false }) + '.' + String(d.getMilliseconds()).padStart(3, '0');
+  }
   function busRow(e) {
-    const dir = e.from_tap ? `TAP ${e.addr}` : `${e.ours ? 'this monitor' : 'master'} → ${e.addr === 'FFFF' ? 'all' : e.addr}`;
-    const detail = (e.node ? ` · node ${e.node}` : '') + (e.text ? ` · ${e.text}` : '') + (e.reconfig ? ` · reconfigures the TAP` : '');
-    return `<div class="log-line${e.reconfig ? ' error' : ''}" title="${topoEscape(new Date(e.unix_ms).toLocaleString())} · ${e.cmd}">` +
-      `<span class="log-time">${logTime(e.unix_ms)}</span>` +
-      `<span class="log-msg"><span class="bus-dir">${logEsc(dir)}</span> ${logEsc(e.name)} · ${e.len} B${logEsc(detail)}` +
-      `${e.hex ? `<span class="bus-hex">${logEsc(e.hex)}</span>` : ''}</span></div>`;
+    const res = e.reconfig ? ['bad', 'reconfigures'] : BUS_RESULT[e.result] || ['none', e.result];
+    const from = e.result === 'unasked' ? 'TAP' : e.ours ? 'this monitor' : e.other_master ? 'another master' : 'master';
+    const tap = e.addr === 'FFFF' ? 'all' : e.addr;
+    let sum = e.sub_name === 'EncapString' && e.summary.startsWith('^') ? `<span class="q">${logEsc(e.summary.split(' · ')[0])}</span>` +
+      logEsc(e.summary.slice(e.summary.split(' · ')[0].length)) : logEsc(e.summary);
+    if (e.answer) sum += ` → <span class="q">${logEsc(e.answer)}</span> ${(e.answer_after_ms / 1000).toFixed(1)} s later`;
+    const rt = e.rt_ms == null ? '—' : `${e.rt_ms} ms${e.late ? ', late' : ''}`;
+    const open = busOpen.has(e.id);
+    return `<div class="bx-row${e.reconfig ? ' reconfig' : ''}" role="row" tabindex="0" data-id="${e.id}" aria-expanded="${open}" title="${topoEscape(busWhen(e.unix_ms))} · ${e.cmd}">` +
+      `<span class="bx-mono t">${busTime(e.unix_ms)}</span>` +
+      `<span class="bx-src${e.other_master ? ' other' : ''}">${from}</span>` +
+      `<span class="bx-mono tap">${tap}</span>` +
+      `<span class="bx-ex">${logEsc(e.name)}${e.sub_name ? `<small>${logEsc(e.sub_name)}</small>` : ''}</span>` +
+      `<span class="bx-mono node">${e.node || '—'}</span>` +
+      `<span class="bx-res ${res[0]}">${res[1]}</span>` +
+      `<span class="bx-mono rt${e.rt_ms != null && e.rt_ms > 30 ? ' slow' : ''}">${rt}</span>` +
+      `<span class="bx-sum">${sum}</span></div>` +
+      (open ? `<div class="bx-detail"><div><span class="lbl">request</span>${logEsc(e.request_hex || (e.result === 'unasked' ? '(not heard)' : '(no payload)'))}</div>` +
+        `<div><span class="lbl">reply</span>${logEsc(e.reply_hex || (e.rt_ms == null ? '(none)' : '(no payload)'))}</div></div>` : '');
   }
   function busShown(e) {
+    if (!busIn(e, busCat)) return false;
     const q = document.getElementById('buslog-search').value.trim().toLowerCase();
-    return !q || [e.name, e.addr, e.cmd, e.text, e.node || '', e.reconfig, e.hex || ''].join(' ').toLowerCase().includes(q);
+    return !q || [e.name, e.sub_name, e.addr, e.cmd, e.node || '', e.summary, e.answer, e.request_hex, e.reply_hex]
+      .join(' ').toLowerCase().includes(q);
   }
   function busApply(b) {
     const a = b && b.alarm && b.alarm.active ? b.alarm : null;
@@ -4062,18 +4141,57 @@
     document.getElementById('bus-alarm-list').innerHTML = a.recent.slice().reverse()
       .map(r => `<li><time>${logEsc(busWhen(r.unix_ms))}</time>${logEsc(r.what)}</li>`).join('');
   }
-  function renderBus() {
-    const box = document.getElementById('bus-box');
-    if (!busLast) return;
-    const shown = busLast.events.filter(busShown);
-    const stick = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
-    box.innerHTML = shown.length ? shown.map(busRow).join('')
-      : `<div class="logs-empty">${busLast.events.length ? 'No frames match the filter.' : 'No frames heard yet.'}</div>`;
-    if (stick) box.scrollTop = box.scrollHeight;
-    document.getElementById('buslog-meta').textContent = (busPaused ? 'paused · ' : 'live · ') +
-      `${shown.length === busLast.events.length ? shown.length : `${shown.length} of ${busLast.events.length}`} frames · ` +
-      `${busLast.polls.toLocaleString()} polls`;
+  function busStrip(s) {
+    const n = v => (v || 0).toLocaleString();
+    const per = s.window_s ? (s.polls / s.window_s).toFixed(1) : '0';
+    const c = s.count || {};
+    const tile = (k, v, sub, bad) => `<div class="bx-tile${bad ? ' bad' : ''}"><span class="k">${k}</span><span class="v">${v}</span><span class="s">${logEsc(sub)}</span></div>`;
+    document.getElementById('bus-strip').innerHTML =
+      tile('Polls', n(s.polls), `${per}/s · ${n(s.polls_lost)} lost${s.polls_refused ? ` · ${n(s.polls_refused)} refused` : ''}`) +
+      tile('Discovery', n(c.discovery), s.discovery || 'not read yet') +
+      tile('Queries', n(c.queries), `${n(s.delivered)} delivered · ${n(s.not_delivered)} not`) +
+      tile('Housekeeping', n(c.housekeeping), 'table pages, 0x41, PV') +
+      tile('Round trip', s.rt_median_ms == null ? '—' : `${s.rt_median_ms} ms`, s.rt_max_ms == null ? 'median' : `median · max ${s.rt_max_ms} ms`) +
+      tile('Other master', n(s.other_master), s.reconfig ? `${n(s.reconfig)} reconfigure the TAP` : 'none heard', s.other_master || s.reconfig);
   }
+  function renderBus() {
+    if (!busLast) return;
+    const all = busLast.exchanges;
+    document.getElementById('bus-chips').innerHTML = BUS_CATS.map(([k, l]) =>
+      `<button type="button" class="bx-chip${k === 'reconfig' || k === 'other_master' ? ' bad' : ''}" data-c="${k}" aria-pressed="${k === busCat}">` +
+      `${l}<span class="n">${all.filter(e => busIn(e, k)).length}</span></button>`).join('');
+    busStrip(busLast.stats || {});
+    const shown = all.filter(busShown);
+    const box = document.getElementById('bus-box');
+    const stick = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
+    // Re-rendered every 2 s: keep the row the keyboard is on.
+    const focused = document.activeElement && document.activeElement.closest && document.activeElement.closest('#bus-rows .bx-row');
+    const focusId = focused ? focused.dataset.id : null;
+    document.getElementById('bus-rows').innerHTML = shown.length ? shown.map(busRow).join('')
+      : `<div class="bx-empty">${all.length ? 'No exchanges match.' : 'Nothing heard yet.'}</div>`;
+    if (focusId) document.querySelector(`#bus-rows .bx-row[data-id="${focusId}"]`)?.focus({ preventScroll: true });
+    else if (stick) box.scrollTop = box.scrollHeight;
+    const s = busLast.stats || {};
+    document.getElementById('buslog-meta').textContent = (busPaused ? 'paused · ' : 'live · ') +
+      `${shown.length === all.length ? `${all.length} exchanges` : `${shown.length} of ${all.length} exchanges`}` +
+      (s.window_s ? ` · polls ${(s.polls / s.window_s).toFixed(1)}/s` : '');
+  }
+  document.getElementById('bus-chips').addEventListener('click', e => {
+    const b = e.target.closest('.bx-chip');
+    if (!b) return;
+    busCat = b.dataset.c;
+    renderBus();
+  });
+  function busToggle(row) {
+    const id = +row.dataset.id;
+    if (busOpen.has(id)) busOpen.delete(id); else busOpen.add(id);
+    renderBus();
+  }
+  document.getElementById('bus-rows').addEventListener('click', e => { const r = e.target.closest('.bx-row'); if (r) busToggle(r); });
+  document.getElementById('bus-rows').addEventListener('keydown', e => {
+    const r = e.target.closest('.bx-row');
+    if (r && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); busToggle(r); }
+  });
   async function refreshBus(force) {
     if (PLATFORM !== 'linux') return;
     const open = document.getElementById('view-buslog').classList.contains('active');

@@ -40,14 +40,19 @@ printf '{"bus_role": "listen", "serial_port": "%s", "web_port": 18140, "device_i
 build/linux/tigomonitord --state-dir "$out/state" --web-dir components/tigo_server/web 2> "$out/daemon.log" &
 daemon=$!
 sleep 6
-expect "polls counted, not logged" "$(bus 18140 "(d['polls'] > 20, [e for e in d['events'] if e['cmd'] in ('0148', '0149')])")" "(True, [])"
-expect "frames named" "$(bus 18140 "sorted({e['name'] for e in d['events']})")" \
-  "['Tunnel reply · DiscState reply', 'Tunnel reply · EncapString reply', 'Tunnel · DiscState', 'Tunnel · EncapString', 'VERSION', 'VERSION reply']"
-expect "payloads in hex" "$(bus 18140 "sorted({e['hex'][:12] for e in d['events'] if e['cmd'] == '0B10' and e['sub'] == 7})")" "['00 0D 00 07 ']"
-expect "a query's text and node" "$(bus 18140 "[(e['text'], e['node']) for e in d['events'] if e['sub'] == 6][:1]")" "[('^00Info', '0002')]"
-expect "VERSION's reply text" "$(bus 18140 "sorted({e['text'] for e in d['events'] if e['cmd'] == '000B'})")" "['Mgate G8.59 Jan  1 2026']"
-expect "no other text" "$(bus 18140 "[e['name'] for e in d['events'] if e['text'] and e['sub'] != 6 and e['cmd'] != '000B']")" "[]"
-expect "listening: nothing is ours" "$(bus 18140 "any(e['ours'] for e in d['events'])")" False
+expect "polls counted, not listed" "$(bus 18140 "(d['stats']['polls'] > 20, [e for e in d['exchanges'] if e['cmd'] in ('0148', '0149')])")" "(True, [])"
+expect "one row per exchange, named" "$(bus 18140 "sorted({(e['name'], e['sub_name']) for e in d['exchanges']})")" \
+  "[('Tunnel', 'DiscState'), ('Tunnel', 'EncapString'), ('VERSION', '')]"
+expect "each answered, timed" "$(bus 18140 "sorted({(e['sub_name'] or e['name'], e['result'], e['rt_ms'] is not None and e['rt_ms'] < 200) for e in d['exchanges'][:-1]})")" \
+  "[('DiscState', 'answered', True), ('EncapString', 'delivered', True), ('VERSION', 'answered', True)]"
+expect "the window decoded" "$(bus 18140 "sorted({e['summary'] for e in d['exchanges'] if e['sub_name'] == 'DiscState' and e['result'] == 'answered'})")" \
+  "['Open, 900 s left · 2 of the 2 in the table have joined']"
+expect "a query's text and node" "$(bus 18140 "[(e['summary'], e['node']) for e in d['exchanges'] if e['sub_name'] == 'EncapString'][:1]")" "[('^00Info', '0002')]"
+expect "VERSION's reply" "$(bus 18140 "sorted({e['summary'] for e in d['exchanges'] if e['name'] == 'VERSION' and e['result'] == 'answered'})")" "['Mgate G8.59 Jan  1 2026']"
+expect "payloads in hex" "$(bus 18140 "sorted({(e['request_hex'][:12], e['reply_hex'][:12]) for e in d['exchanges'] if e['sub_name'] == 'EncapString' and e['reply_hex']})")" "[('00 00 00 06 ', '00 0D 00 07 ')]"
+expect "the strip" "$(bus 18140 "(d['stats']['window_s'], d['stats']['polls_empty'] > 20, d['stats']['count']['discovery'] > 0, d['stats']['rt_median_ms'] is not None, d['stats']['discovery'])")" \
+  "(300, True, True, True, 'Open, 900 s left · 2 of the 2 in the table have joined')"
+expect "listening: nothing ours, no other master" "$(bus 18140 "any(e['ours'] or e['other_master'] for e in d['exchanges'])")" False
 expect "steady state: no alarm" "$(bus 18140 "d['alarm']")" "{'active': False, 'count': 0, 'first_unix_ms': 0, 'recent': []}"
 expect "steady state: healthy" "$(health 18140)" "ok []"
 expect "MQTT: alarm sensor announced" "$(mosquitto_sub -p 18834 -v --retained-only -W 1 -t 'homeassistant/binary_sensor/#' 2>/dev/null | grep -c '_tap_reconfigured' || true)" 1
@@ -63,10 +68,10 @@ daemon=$!
 sleep 6
 expect "alarm on, both named" "$(bus 18140 "(d['alarm']['active'], d['alarm']['count'], [a['what'] for a in d['alarm']['recent']])")" \
   "(True, 2, [\"GatewayCfg write (the TAP's channel, network ID and key)\", 'SET_CHANNEL'])"
-expect "the log marks them" "$(bus 18140 "[e['reconfig'] for e in d['events'] if e['reconfig']]")" \
+expect "the log marks them" "$(bus 18140 "[e['reconfig'] for e in d['exchanges'] if e['reconfig']]")" \
   "[\"GatewayCfg write (the TAP's channel, network ID and key)\", 'SET_CHANNEL']"
-expect "the write's block isn't shown" "$(bus 18140 "[(e['len'], e['hex'][:12], e['hex'][14:]) for e in d['events'] if e['sub'] == 13]")" \
-  "[(43, '00 00 00 0D ', \" 01 00 + 36 bytes hidden (the TAP's network config and key)\")]"
+expect "the write's block isn't shown" "$(bus 18140 "[(e['request_hex'][:12], e['request_hex'][14:], e['result']) for e in d['exchanges'] if e['sub_name'] == 'GatewayCfg write']")" \
+  "[('00 00 00 0D ', \" 01 00 + 36 bytes hidden (the TAP's network config and key)\", 'answered')]"
 expect "health names it" "$(api 18140 /api/health | python3 -c "import json,sys; d=json.load(sys.stdin); print(d['status'], any('another device reconfigured the TAP (SET_CHANNEL, 2 frames' in p for p in d['problems']))")" "problem True"
 expect "logged as an error" "$(grep -c 'another device sent the TAP a reconfiguration: GatewayCfg write' "$out/daemon2.log" || true)" 1
 expect "MQTT: alarm on" "$(mosquitto_sub -p 18834 -C 1 -W 10 -t tigomonitor/test/system/state 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin)["tap_reconfigured"])')" True

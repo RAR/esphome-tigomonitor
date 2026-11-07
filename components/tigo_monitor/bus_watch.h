@@ -16,10 +16,15 @@
 
 #include "tigo_master.h"
 
+#include <algorithm>
 #include <cctype>
 #include <cstdio>
 #include <deque>
+#include <iterator>
+#include <map>
 #include <string>
+#include <utility>
+#include <vector>
 
 namespace esphome {
 namespace tigo_monitor {
@@ -139,8 +144,11 @@ inline std::string bus_hex(const Frame &f) {
 
 // The reconfiguration a request is, by name, or "" if a master here might
 // send it.
+// A reply goes to the TAP's id with the 0x8000 bit; 0xFFFF is a broadcast request.
+inline bool is_reply(const Frame &f) { return (f.dest & 0x8000) && f.dest != 0xFFFF; }
+
 inline std::string reconfiguration(const Frame &f) {
-  if (f.dest & 0x8000) return "";  // a reply
+  if (is_reply(f)) return "";
   if (classify_request(f.cmd, f.payload) != Allow::never) return "";
   char buf[64];
   if (f.cmd == CMD_TUNNEL && f.payload.size() >= 5) {
@@ -169,79 +177,400 @@ inline std::string reconfiguration(const Frame &f) {
   return buf;
 }
 
-struct BusEvent {
-  int64_t unix_ms = 0;
-  bool from_tap = false;  // a reply (dest has 0x8000)
-  bool ours = false;      // sent by this monitor's own master
-  uint16_t addr = 0;      // the gateway's RS485 id (0xFFFF a broadcast)
+// One request and what came back: the unit the Bus log shows.
+struct Exchange {
+  uint64_t id = 0;
+  int64_t unix_ms = 0;        // the request's time (an unasked reply's own)
+  bool ours = false;          // sent by this monitor's master
+  bool other_master = false;  // a request not ours while this monitor runs the bus
+  uint16_t addr = 0;          // the TAP's RS485 id; 0xFFFF a broadcast
   uint16_t cmd = 0;
-  int sub = -1;           // a tunnel frame's sub
-  int node = -1;          // a text query's optimizer id
-  uint16_t len = 0;       // payload bytes
-  std::string name;       // "Tunnel · DiscState"
-  std::string text;       // a query's text or VERSION's reply
-  std::string hex;        // the payload, but for a GatewayCfg block (bus_hex)
-  std::string reconfig;   // what it reconfigures, if it does
+  uint8_t seq = 0;            // a tunnel request's
+  int sub = -1;
+  int node = -1;              // a text query's optimizer
+  std::string name;           // "Tunnel", "SET_CHANNEL"
+  std::string sub_name;       // "DiscState"
+  std::string category;       // discovery, queries, housekeeping, bringup, reconfig, other
+  // waiting, answered, delivered, not_delivered, refused, no_reply, broadcast, unasked
+  std::string result = "waiting";
+  bool late = false;          // answered after the next request went out
+  int rt_ms = -1;
+  std::string summary;
+  std::string request_hex, reply_hex;
+  std::string reconfig;
+  std::string answer;         // an optimizer's text answer to a query, from a later poll
+  int answer_after_ms = -1;
 };
 
-// The last KEEP frames other than polls, which are counted instead (the CCA
-// sends ~44 a second; they would push everything else out in seconds).
+// The last WINDOW_MS of the bus, for the Bus log's strip.
+struct BusStats {
+  uint32_t polls = 0, polls_lost = 0, polls_empty = 0, polls_refused = 0;
+  std::map<std::string, uint32_t> count;  // exchanges by category
+  uint32_t delivered = 0, not_delivered = 0;
+  uint32_t other_master = 0, reconfig = 0;
+  int rt_median_ms = -1, rt_max_ms = -1;
+  std::string discovery;  // the latest DiscState read, however old
+};
+
+inline std::string exchange_category(uint16_t cmd, int sub, const std::string &reconfig) {
+  if (!reconfig.empty()) return "reconfig";
+  switch (sub) {
+    case 0x2D: case 0x2E: return "discovery";
+    case 0x06: return "queries";
+    case 0x41: case 0x22: case 0x26: case 0x17: return "housekeeping";
+    case 0x0D: return "bringup";
+    default: break;
+  }
+  switch (cmd) {
+    case CMD_SESSION: return "housekeeping";
+    case 0x000A: case 0x000E: case 0x0E02: case CMD_RESET: case CMD_STORE: case CMD_SET_485_ID:
+    case CMD_GET_MAC: case CMD_GET_MAC_NOW: case CMD_SET_ID_BY_MAC:
+      return "bringup";
+    default: return "other";
+  }
+}
+
+inline std::string hex16(const uint8_t *p, size_t n) {
+  std::string out;
+  char b[3];
+  for (size_t i = 0; i < n; i++) {
+    std::snprintf(b, sizeof(b), "%02X", p[i]);
+    out += b;
+  }
+  return out;
+}
+
+// "Open, 408 s left · 40 of the 44 in the table have joined"
+inline std::string window_summary(const DiscoveryWindow &w) {
+  bool open = w.running && w.remaining_s > 0;
+  return (open ? "Open, " + std::to_string(w.remaining_s) + " s left" : std::string("Closed")) + " · " +
+         std::to_string(w.joined) + " of the " + std::to_string(w.node_count) + " in the table have joined";
+}
+
+// What the request asks, before any reply.
+inline std::string request_summary(const Frame &f) {
+  const Bytes &p = f.payload;
+  char b[64];
+  if (f.cmd == CMD_TUNNEL && p.size() >= 5) {
+    Bytes a(p.begin() + 5, p.end());
+    switch (p[3]) {
+      case 0x06:
+        return a.size() > 2 ? bus_text(a.data() + 2, a.size() - 2) : "";
+      case 0x2D:
+        if (a.size() >= 7) {
+          std::snprintf(b, sizeof(b), "Renew for %u s, %u in the table", a[3] << 8 | a[4], a[5] << 8 | a[6]);
+          return b;
+        }
+        return "";
+      case 0x22:
+        return a == Bytes{0x00, 0x00} ? "To every optimizer" : a == Bytes{0x00, 0x01} ? "To the TAP" : "";
+      case 0x0D:
+        if (a.size() == 2 && a[0] == 0x00) return "Read the TAP's network config (part " + std::to_string(a[1]) + ")";
+        return "";
+      case 0x41:
+        if (a.size() >= 2) {
+          std::snprintf(b, sizeof(b), "Housekeeping for %04X", a[0] << 8 | a[1]);
+          return b;
+        }
+        return "";
+      default:
+        return "";
+    }
+  }
+  switch (f.cmd) {
+    case CMD_SESSION:
+      return p.size() == 1 ? (p[0] ? "PV on" : "PV off") : "";
+    case CMD_RESET:
+      return "Reset";
+    case CMD_STORE:
+      return "Store the TAP's RS485 id";
+    case CMD_SET_485_ID:
+      if (p.size() == 6) {
+        std::snprintf(b, sizeof(b), "Every TAP to %04X", p[4] << 8 | p[5]);
+        return b;
+      }
+      return "";
+    case CMD_SET_ID_BY_MAC:
+      if (p.size() == 14) {
+        std::snprintf(b, sizeof(b), " to %04X", p[12] << 8 | p[13]);
+        return "TAP " + hex16(p.data() + 4, 8) + b;
+      }
+      return "";
+    default:
+      return "";
+  }
+}
+
+// The request's summary, finished with what came back.
+inline std::string reply_summary(const Frame &req, const Frame &rep, const std::string &asked) {
+  if (rep.cmd == 0x0006) return "The TAP refused it (0x0006)";
+  if (rep.cmd == CMD_NOT_TAKEN)
+    return (asked.empty() ? std::string() : asked + " · ") +
+           "the TAP couldn't deliver it (0x0146): the optimizer may be off or rejoining";
+  char b[64];
+  TunnelReply t;
+  if (rep.cmd == CMD_TUNNEL_REPLY && parse_tunnel_reply(rep.payload, t)) {
+    DiscoveryWindow w;
+    if (parse_discovery_window(t, w)) return window_summary(w);
+    if (t.sub == 0x27 && t.data.size() >= 4) {
+      unsigned start = t.data[0] << 8 | t.data[1], n = t.data[2] << 8 | t.data[3];
+      if (!n) std::snprintf(b, sizeof(b), "The end of the table, from index %04X", start);
+      else std::snprintf(b, sizeof(b), "%u entr%s from index %04X", n, n == 1 ? "y" : "ies", start);
+      return b;
+    }
+    return asked;
+  }
+  if (rep.cmd == 0x000B) {
+    std::string v = bus_text(rep.payload.data(), rep.payload.size());
+    size_t at = v.find(" Version");
+    if (at != std::string::npos) v.erase(at, 8);
+    return v;
+  }
+  if (rep.cmd == CMD_SESSION_REPLY && rep.payload.size() == 1 && req.payload.size() == 1)
+    return asked + (rep.payload[0] == req.payload[0] ? " · the TAP confirmed"
+                                                     : std::string(" · the TAP answered ") + (rep.payload[0] ? "on" : "off"));
+  if ((rep.cmd == 0x0039 || rep.cmd == 0x003B) && rep.payload.size() >= 10) {
+    std::snprintf(b, sizeof(b), " at %04X", rep.payload[8] << 8 | rep.payload[9]);
+    return hex16(rep.payload.data(), 8) + b;
+  }
+  return asked;
+}
+
+// The bus as exchanges: each request with what came back, the last KEEP of
+// them. Polls (the CCA's ~44 a second) are only counted, in stats(); an
+// optimizer's answer that a poll brings back goes on the query that asked.
 class BusWatch {
  public:
   static const size_t KEEP = 300;
+  static const int64_t WINDOW_MS = 5 * 60000;
+  static const int64_t NO_REPLY_MS = 1000;       // still open this long: nothing came
+  static const int64_t OURS_RECENT_MS = 10000;   // we sent within this: we run the bus
+  static const int64_t ANSWER_WITHIN_MS = 60000;
 
   // Returns the frame's reconfiguration, or "".
   std::string on_frame(const Frame &f, bool ours, int64_t unix_ms) {
-    if (f.cmd == CMD_POLL || f.cmd == CMD_POLL_REPLY) {
-      polls_++;
+    if (is_reply(f)) {
+      on_reply_(f, unix_ms);
       return "";
     }
-    BusEvent e;
+    close_open_(unix_ms);
+    if (ours) last_ours_ms_ = unix_ms;
+    if (f.cmd == CMD_POLL) {
+      polls_++;
+      poll_open_ = true;
+      poll_sent_ms_ = unix_ms;
+      return "";
+    }
+    Exchange e;
+    e.id = ++next_id_;
     e.unix_ms = unix_ms;
-    e.from_tap = f.dest & 0x8000;
     e.ours = ours;
-    e.addr = f.dest & 0x7FFF;
-    if (f.dest == 0xFFFF) e.addr = 0xFFFF;
+    e.other_master = !ours && last_ours_ms_ >= 0 && unix_ms - last_ours_ms_ < OURS_RECENT_MS;
+    e.addr = f.dest;
     e.cmd = f.cmd;
-    e.len = static_cast<uint16_t>(f.payload.size());
     e.name = cmd_name(f.cmd);
-    if (e.name.empty()) {
-      char b[16];
-      std::snprintf(b, sizeof(b), "0x%04X", f.cmd);
-      e.name = b;
-    }
-    if ((f.cmd == CMD_TUNNEL || f.cmd == CMD_TUNNEL_REPLY) && f.payload.size() >= 5) {
+    if (e.name.empty()) e.name = hex_cmd_(f.cmd);
+    if (f.cmd == CMD_TUNNEL && f.payload.size() >= 5) {
       e.sub = f.payload[3];
-      const char *s = sub_name(f.payload[3]);
-      char b[16];
-      if (!*s) {
-        std::snprintf(b, sizeof(b), "sub 0x%02X", f.payload[3]);
-        s = b;
-      }
-      e.name += std::string(" · ") + s;
-      if (f.cmd == CMD_TUNNEL && f.payload[3] == 0x06 && f.payload.size() > 7) {
-        e.node = f.payload[5] << 8 | f.payload[6];
-        e.text = bus_text(f.payload.data() + 7, f.payload.size() - 7);
-      }
+      e.seq = f.payload[4];
+      e.sub_name = sub_name(f.payload[3]);
+      if (e.sub_name.empty()) e.sub_name = "sub " + hex_cmd_(f.payload[3]).substr(4);
+      if (f.payload[3] == 0x06 && f.payload.size() > 7) e.node = f.payload[5] << 8 | f.payload[6];
     }
-    if (f.cmd == 0x000B) e.text = bus_text(f.payload.data(), f.payload.size());
-    if (f.cmd == 0x000B) {  // "Mgate Version G8.59": the word Version adds nothing
-      size_t v = e.text.find(" Version");
-      if (v != std::string::npos) e.text.erase(v, 8);
-    }
-    e.hex = bus_hex(f);
     e.reconfig = reconfiguration(f);
-    events_.push_back(e);
-    if (events_.size() > KEEP) events_.pop_front();
+    if (e.sub == 0x0D && !e.reconfig.empty()) e.sub_name = "GatewayCfg write";
+    e.category = exchange_category(f.cmd, e.sub, e.reconfig);
+    e.summary = e.reconfig.empty() ? request_summary(f) : e.reconfig;
+    e.request_hex = bus_hex(f);
+    if (f.dest == 0xFFFF) e.result = "broadcast";
+    else {
+      open_id_ = e.id;
+      open_req_ = f;
+    }
+    push_(e);
     return e.reconfig;
   }
 
-  const std::deque<BusEvent> &events() const { return events_; }
+  const std::deque<Exchange> &exchanges() const { return exchanges_; }
+  // As they stand at now_ms: one still open past NO_REPLY_MS got nothing.
+  std::deque<Exchange> exchanges_at(int64_t now_ms) const {
+    std::deque<Exchange> out = exchanges_;
+    for (Exchange &e : out)
+      if (e.result == "waiting" && now_ms - e.unix_ms >= NO_REPLY_MS) no_reply_(e);
+    return out;
+  }
   uint64_t polls() const { return polls_; }
 
+  BusStats stats(int64_t now_ms) const {
+    BusStats s;
+    for (const char *c : {"discovery", "queries", "housekeeping", "bringup", "reconfig", "other"}) s.count[c] = 0;
+    int64_t from = now_ms - WINDOW_MS;
+    std::vector<int> rts;
+    for (const PollMark &p : poll_marks_) {
+      if (p.unix_ms < from) continue;
+      s.polls++;
+      if (p.rt_ms == LOST) s.polls_lost++;
+      else if (p.rt_ms == REFUSED) s.polls_refused++;
+      else {
+        rts.push_back(p.rt_ms);
+        if (p.empty) s.polls_empty++;
+      }
+    }
+    for (const Exchange &e : exchanges_at(now_ms)) {
+      if (e.unix_ms < from) continue;
+      s.count[e.category]++;
+      if (e.result == "delivered") s.delivered++;
+      if (e.result == "not_delivered") s.not_delivered++;
+      if (e.other_master) s.other_master++;
+      if (!e.reconfig.empty()) s.reconfig++;
+      if (e.rt_ms >= 0) rts.push_back(e.rt_ms);
+    }
+    if (!rts.empty()) {
+      std::sort(rts.begin(), rts.end());
+      s.rt_median_ms = rts[(rts.size() - 1) / 2];
+      s.rt_max_ms = rts.back();
+    }
+    s.discovery = discovery_;
+    return s;
+  }
+
  private:
-  std::deque<BusEvent> events_;
+  static const int LOST = -1, REFUSED = -2;
+  struct PollMark {
+    int64_t unix_ms;
+    int rt_ms;  // or LOST, REFUSED
+    bool empty;
+  };
+
+  static std::string hex_cmd_(uint16_t cmd) {
+    char b[8];
+    std::snprintf(b, sizeof(b), "0x%04X", cmd);
+    return b;
+  }
+  static void no_reply_(Exchange &e) {
+    e.result = "no_reply";
+    if (e.summary.empty()) e.summary = "Nothing back";
+  }
+  Exchange *find_(uint64_t id) {
+    for (auto it = exchanges_.rbegin(); it != exchanges_.rend(); ++it)
+      if (it->id == id) return &*it;
+    return nullptr;
+  }
+  void push_(const Exchange &e) {
+    exchanges_.push_back(e);
+    if (exchanges_.size() > KEEP) exchanges_.pop_front();
+  }
+  void mark_poll_(int64_t at, int rt, bool empty) {
+    poll_marks_.push_back({at, rt, empty});
+    while (!poll_marks_.empty() && poll_marks_.front().unix_ms < at - WINDOW_MS) poll_marks_.pop_front();
+  }
+  // A new request: whatever was still open got nothing back.
+  void close_open_(int64_t now) {
+    if (poll_open_) mark_poll_(poll_sent_ms_, LOST, false);
+    poll_open_ = false;
+    if (open_id_) {
+      Exchange *e = find_(open_id_);
+      if (e) {
+        no_reply_(*e);
+        recent_unanswered_.push_back({open_id_, open_req_});
+        if (recent_unanswered_.size() > 4) recent_unanswered_.pop_front();
+      }
+    }
+    open_id_ = 0;
+    (void) now;
+  }
+  static bool answers_(const Frame &req, const Frame &rep) {
+    if ((rep.dest & 0x7FFF) != req.dest) return false;
+    if (rep.cmd == 0x0006) return true;
+    if (rep.cmd == CMD_NOT_TAKEN) return req.cmd == CMD_TUNNEL && req.payload.size() > 3 && req.payload[3] == 0x06;
+    if (rep.cmd != req.cmd + 1) return false;
+    if (req.cmd != CMD_TUNNEL) return true;
+    TunnelReply t;
+    return req.payload.size() > 4 && parse_tunnel_reply(rep.payload, t) && t.seq == req.payload[4];
+  }
+  void fill_(Exchange &e, const Frame &req, const Frame &rep, int64_t now) {
+    e.rt_ms = static_cast<int>(now - e.unix_ms);
+    e.reply_hex = bus_hex(rep);
+    std::string asked = e.reconfig.empty() ? request_summary(req) : e.reconfig;
+    if (rep.cmd == 0x0006) e.result = "refused";
+    else if (rep.cmd == CMD_NOT_TAKEN) e.result = "not_delivered";
+    else if (e.sub == 0x06) e.result = "delivered";
+    else e.result = "answered";
+    e.summary = e.reconfig.empty() || rep.cmd == 0x0006 ? reply_summary(req, rep, asked) : e.reconfig;
+    TunnelReply t;
+    DiscoveryWindow w;
+    if (rep.cmd == CMD_TUNNEL_REPLY && parse_tunnel_reply(rep.payload, t) && parse_discovery_window(t, w))
+      discovery_ = window_summary(w);
+  }
+  void on_reply_(const Frame &f, int64_t now) {
+    // The poll's own reply.
+    if (poll_open_ && (f.cmd == CMD_POLL_REPLY || f.cmd == 0x0006)) {
+      poll_open_ = false;
+      if (f.cmd == 0x0006) {
+        mark_poll_(poll_sent_ms_, REFUSED, false);
+        return;
+      }
+      bool empty = true;
+      for_each_poll_packet(f.payload, [&](uint8_t type, uint16_t tuid, const uint8_t *data, size_t n) {
+        empty = false;
+        if (type == 0x07) answer_(tuid, bus_text(data, n), now);
+      });
+      mark_poll_(poll_sent_ms_, static_cast<int>(now - poll_sent_ms_), empty);
+      return;
+    }
+    if (f.cmd == CMD_POLL_REPLY) return;  // a poll we didn't hear asked
+    if (open_id_ && answers_(open_req_, f)) {
+      if (Exchange *e = find_(open_id_)) fill_(*e, open_req_, f, now);
+      open_id_ = 0;
+      return;
+    }
+    // Late: the reply to a request the next one already closed.
+    for (auto it = recent_unanswered_.rbegin(); it != recent_unanswered_.rend(); ++it) {
+      if (!answers_(it->second, f)) continue;
+      if (Exchange *e = find_(it->first)) {
+        fill_(*e, it->second, f, now);
+        e->late = true;
+      }
+      recent_unanswered_.erase(std::next(it).base());
+      return;
+    }
+    Exchange e;
+    e.id = ++next_id_;
+    e.unix_ms = now;
+    e.addr = f.dest & 0x7FFF;
+    e.cmd = f.cmd;
+    e.name = cmd_name(f.cmd);
+    if (e.name.empty()) e.name = hex_cmd_(f.cmd);
+    TunnelReply t;
+    if (f.cmd == CMD_TUNNEL_REPLY && parse_tunnel_reply(f.payload, t)) {
+      e.sub = t.sub;
+      e.sub_name = sub_name(t.sub);
+    }
+    e.category = "other";
+    e.result = "unasked";
+    e.summary = "A reply to no request heard";
+    e.reply_hex = bus_hex(f);
+    push_(e);
+  }
+  void answer_(uint16_t tuid, std::string text, int64_t now) {
+    for (auto it = exchanges_.rbegin(); it != exchanges_.rend(); ++it) {
+      if (now - it->unix_ms > ANSWER_WITHIN_MS) return;
+      if (it->sub != 0x06 || it->node != tuid || it->result != "delivered" || !it->answer.empty()) continue;
+      it->answer = text;
+      it->answer_after_ms = static_cast<int>(now - (it->unix_ms + it->rt_ms));
+      return;
+    }
+  }
+
+  std::deque<Exchange> exchanges_;
+  std::deque<PollMark> poll_marks_;
+  std::deque<std::pair<uint64_t, Frame>> recent_unanswered_;
+  uint64_t next_id_ = 0, open_id_ = 0;
+  Frame open_req_;
+  bool poll_open_ = false;
+  int64_t poll_sent_ms_ = 0, last_ours_ms_ = -1;
   uint64_t polls_ = 0;
+  std::string discovery_;
 };
 
 }  // namespace master

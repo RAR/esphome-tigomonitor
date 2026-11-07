@@ -840,6 +840,23 @@ static const char *const QUERY_SMART_S = "^00Smrt_........S0000...0000\r";
 // once a node a session: an H9 answers N to every read and reports S only
 // in its reply to the write itself (its firmware, 3.5.0 and 4.0.3), so a
 // read can never show the write took.
+// Each packet in a 0x0149 payload: its type (0x31 a power report, 0x07 an
+// optimizer's text answer, ...), the node it came from, and its data.
+template <class Fn> inline void for_each_poll_packet(const Bytes &payload, Fn fn) {
+  if (payload.size() < 2) return;
+  unsigned status = payload[0] << 8 | payload[1];
+  size_t i = 2 + 3;
+  static const uint8_t sizes[] = {1, 1, 2, 2, 1};
+  for (unsigned bit = 0; bit < 5; bit++)
+    if (!(status & (1u << bit))) i += sizes[bit];
+  while (i + 7 <= payload.size()) {
+    size_t end = i + 7 + payload[i + 6];
+    if (end > payload.size()) break;
+    fn(payload[i], static_cast<uint16_t>(payload[i + 1] << 8 | payload[i + 2]), payload.data() + i + 7, end - i - 7);
+    i = end;
+  }
+}
+
 class Queries {
  public:
   static const uint32_t GAP_MS = 1500;  // the CCA's were 1-2 s apart
@@ -857,22 +874,11 @@ class Queries {
 
   // A 0x0149 payload: who reported, and any answers.
   void on_poll_reply(const Bytes &payload, uint32_t now_ms) {
-    if (payload.size() < 2) return;
-    unsigned status = payload[0] << 8 | payload[1];
-    size_t i = 2 + 3;
-    static const uint8_t sizes[] = {1, 1, 2, 2, 1};
-    for (unsigned bit = 0; bit < 5; bit++)
-      if (!(status & (1u << bit))) i += sizes[bit];
-    while (i + 7 <= payload.size()) {
-      size_t end = i + 7 + payload[i + 6];
-      if (end > payload.size()) break;
-      uint16_t tuid = static_cast<uint16_t>(payload[i + 1] << 8 | payload[i + 2]);
-      if (tuid > 0x0001 && !(tuid & 0x8000)) {
-        heard_(tuid, now_ms);
-        if (payload[i] == 0x07) answer_(tuid, std::string(payload.begin() + i + 7, payload.begin() + end), now_ms);
-      }
-      i = end;
-    }
+    for_each_poll_packet(payload, [&](uint8_t type, uint16_t tuid, const uint8_t *data, size_t n) {
+      if (tuid <= 0x0001 || (tuid & 0x8000)) return;
+      heard_(tuid, now_ms);
+      if (type == 0x07) answer_(tuid, std::string(data, data + n), now_ms);
+    });
   }
 
   // The next query due, or one with cmd 0.

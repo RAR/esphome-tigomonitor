@@ -34,7 +34,8 @@ class BusLog {
   bool alarm_active() const;
   // "GatewayCfg write (…), 3 frames, last 2026-11-07 01:02:03 UTC" for health.
   std::string alarm_summary() const;
-  // /api/bus: the alarm, then up to limit of the newest events.
+  // /api/bus: the alarm, the last 5 minutes in numbers, then up to limit of
+  // the newest exchanges.
   nlohmann::json to_json(size_t limit) const;
 
  private:

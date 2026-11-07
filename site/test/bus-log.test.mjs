@@ -31,22 +31,34 @@ after(async () => {
 });
 
 const T = 1762480000000;
-const ev = (o) => ({ unix_ms: T, from_tap: false, ours: false, addr: '1201', cmd: '0B0F', sub: null, node: null,
-  len: 5, name: 'Tunnel · DiscState', text: '', reconfig: '', ...o });
+let nextId = 1;
+const ex = (o) => ({ id: nextId++, unix_ms: T, ours: false, other_master: false, addr: '1201', cmd: '0B0F', name: 'Tunnel',
+  sub_name: 'DiscState', node: null, category: 'discovery', result: 'answered', late: false, rt_ms: 12,
+  summary: 'Open, 412 s left · 40 of the 44 in the table have joined', answer: '', answer_after_ms: null,
+  request_hex: '00 00 00 2E 05', reply_hex: '00 0E 00 2F 05 01 01 9C 00 2C 00 28 00 2C 00', reconfig: '', ...o });
 const steady = [
-  ev({ sub: 46, hex: '00 00 00 2E 05' }),
-  ev({ from_tap: true, cmd: '0B10', sub: 47, len: 15, name: 'Tunnel reply · DiscState reply' }),
-  ev({ sub: 6, node: '0002', len: 15, name: 'Tunnel · EncapString', text: '^00Info' }),
+  ex({}),
+  ex({ sub_name: 'EncapString', category: 'queries', node: '0002', result: 'delivered', rt_ms: 13, summary: '^00Info',
+       answer: '!Info 0027 12 0000', answer_after_ms: 1900, request_hex: '00 00 00 06 07 00 02 5E 30 30 49 6E 66 6F 0D', reply_hex: '00 0D 00 07 07' }),
+  ex({ sub_name: 'EncapString', category: 'queries', node: '0007', result: 'not_delivered', rt_ms: 9,
+       summary: "^00Version · the TAP couldn't deliver it (0x0146): the optimizer may be off or rejoining", reply_hex: '00 02' }),
+  ex({ name: 'VERSION', sub_name: '', cmd: '000A', category: 'bringup', result: 'no_reply', rt_ms: null, summary: 'Nothing back', request_hex: '', reply_hex: '' }),
 ];
 const reconfig = "GatewayCfg write (the TAP's channel, network ID and key)";
+const stats = (o) => ({ window_s: 300, polls: 13230, polls_lost: 2, polls_empty: 13000, polls_refused: 0,
+  count: { discovery: 1, queries: 2, housekeeping: 0, bringup: 1, reconfig: 0, other: 0 }, delivered: 1, not_delivered: 1,
+  other_master: 0, reconfig: 0, rt_median_ms: 12, rt_max_ms: 41, discovery: 'Open, 412 s left · 40 of the 44 in the table have joined', ...o });
 
 function bus(alarm) {
   return {
     alarm: alarm ? { active: true, count: 2, first_unix_ms: T, recent: [{ unix_ms: T, what: reconfig }, { unix_ms: T + 1000, what: 'SET_CHANNEL' }] }
       : { active: false, count: 0, first_unix_ms: 0, recent: [] },
-    polls: 1234,
-    events: alarm ? [...steady, ev({ sub: 13, len: 43, name: 'Tunnel · GatewayCfg', reconfig, hex: "00 00 00 0D 05 01 00 + 36 bytes hidden (the TAP's network config and key)" }),
-      ev({ cmd: '000C', len: 2, name: 'SET_CHANNEL', reconfig: 'SET_CHANNEL', unix_ms: T + 1000 })] : steady,
+    stats: alarm ? stats({ other_master: 2, reconfig: 2 }) : stats({}),
+    exchanges: alarm ? [...steady,
+      ex({ other_master: true, sub_name: 'GatewayCfg write', category: 'reconfig', summary: reconfig, reconfig,
+           request_hex: "00 00 00 0D 32 01 00 + 36 bytes hidden (the TAP's network config and key)", reply_hex: '00 06 00 0E 32 01' }),
+      ex({ other_master: true, name: 'SET_CHANNEL', sub_name: '', cmd: '000C', category: 'reconfig', rt_ms: 6, summary: 'SET_CHANNEL',
+           reconfig: 'SET_CHANNEL', request_hex: '20 00', reply_hex: '', unix_ms: T + 1000 })] : steady,
   };
 }
 
@@ -77,18 +89,31 @@ async function open(opts = {}) {
   return { page, ctx, api, errors };
 }
 
-test('the Bus log lists the frames by name, with the poll count, and no alarm', async () => {
+test('the Bus log: the strip, one row per exchange, and a row opens to its bytes', async () => {
   const { page, ctx, errors } = await open({ hash: '#buslog' });
   await page.waitForSelector('#nav button[data-view="buslog"]', { state: 'visible' });
-  await page.waitForFunction(() => document.querySelectorAll('#bus-box .log-line').length === 3);
-  const rows = await page.$$eval('#bus-box .log-line', (els) => els.map((e) => e.textContent));
-  assert.match(rows[0], /master → 1201.*Tunnel · DiscState · 5 B00 00 00 2E 05$/);
-  assert.match(rows[1], /TAP 1201.*Tunnel reply · DiscState reply · 15 B/);
-  assert.match(rows[2], /Tunnel · EncapString · 15 B · node 0002 · \^00Info/);
-  assert.match(await page.textContent('#buslog-meta'), /3 frames · 1,234 polls/);
+  await page.waitForFunction(() => document.querySelectorAll('#bus-rows .bx-row').length === 4);
+  const strip = await page.textContent('#bus-strip');
+  assert.match(strip, /Polls13,23044\.1\/s · 2 lost/);
+  assert.match(strip, /Round trip12 msmedian · max 41 ms/);
+  assert.match(strip, /Other master0none heard/);
+  const rows = await page.$$eval('#bus-rows .bx-row', (els) => els.map((e) => e.textContent));
+  assert.match(rows[0], /master1201TunnelDiscState—answered12 msOpen, 412 s left · 40 of the 44 in the table have joined/);
+  assert.match(rows[1], /0002delivered13 ms\^00Info → !Info 0027 12 0000 1\.9 s later/);
+  assert.match(rows[2], /0007not delivered9 ms/);
+  assert.match(rows[3], /VERSION—no reply—Nothing back/);
+  assert.match(await page.textContent('#buslog-meta'), /4 exchanges · polls 44\.1\/s/);
+  // A row opens to its bytes, and stays open through the next refresh.
+  await page.click('#bus-rows .bx-row >> nth=0');
+  assert.match(await page.textContent('#bus-rows .bx-detail'), /request00 00 00 2E 05reply00 0E 00 2F 05/);
+  await page.waitForTimeout(2300);
+  assert.equal(await page.locator('#bus-rows .bx-detail').count(), 1);
+  // The chips filter.
+  await page.click('#bus-chips .bx-chip[data-c="queries"]');
+  assert.equal(await page.locator('#bus-rows .bx-row').count(), 2);
   assert.equal(await page.isVisible('#bus-alarm-card'), false);
   assert.equal(await page.isVisible('#bus-alarm-banner'), false);
-  assert.equal(await page.locator('#bus-box').textContent().then((t) => /undefined|null/.test(t)), false);
+  assert.equal(/undefined|null|NaN/.test(await page.textContent('#view-buslog')), false);
   assert.deepEqual(errors, []);
   await ctx.close();
 });
@@ -101,10 +126,14 @@ test('a reconfiguration: the banner on every page, the alarm card, the rows mark
   await page.waitForSelector('#bus-alarm-card', { state: 'visible' });
   const card = await page.textContent('#bus-alarm-card');
   assert.match(card, /GatewayCfg write \(the TAP's channel, network ID and key\)/);
-  assert.match(card, /SET_CHANNEL/);
   assert.match(card, /2 frames/);
-  await page.waitForFunction(() => document.querySelectorAll('#bus-box .log-line.error').length === 2);
-  assert.match(await page.locator('#bus-box .log-line.error .bus-hex').first().textContent(), /\+ 36 bytes hidden \(the TAP's network config and key\)$/);
+  await page.waitForFunction(() => document.querySelectorAll('#bus-rows .bx-row.reconfig').length === 2);
+  assert.match(await page.textContent('#bus-rows .bx-row.reconfig >> nth=0'), /another master.*GatewayCfg write.*reconfigures/);
+  assert.match(await page.textContent('#bus-strip'), /Other master22 reconfigure the TAP/);
+  await page.click('#bus-chips .bx-chip[data-c="reconfig"]');
+  assert.equal(await page.locator('#bus-rows .bx-row').count(), 2);
+  await page.click('#bus-rows .bx-row >> nth=0');
+  assert.match(await page.textContent('#bus-rows .bx-detail'), /\+ 36 bytes hidden \(the TAP's network config and key\)/);
   await page.click('#bus-alarm-clear');
   await page.waitForSelector('#bus-alarm-card', { state: 'hidden' });
   assert.equal(api.clears, 1);
@@ -113,10 +142,12 @@ test('a reconfiguration: the banner on every page, the alarm card, the rows mark
   await ctx.close();
 });
 
-test('the Bus log at phone width: no sideways scroll', async () => {
+test('the Bus log at phone width: rows stack, no sideways scroll', async () => {
   const { page, ctx, errors } = await open({ hash: '#buslog', alarm: true, width: 390 });
   await page.waitForSelector('#bus-alarm-card', { state: 'visible' });
+  await page.waitForFunction(() => document.querySelectorAll('#bus-rows .bx-row').length === 6);
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= 390));
+  assert.equal(await page.isVisible('#bus-box .bx-cols'), false);
   assert.deepEqual(errors, []);
   await ctx.close();
 });

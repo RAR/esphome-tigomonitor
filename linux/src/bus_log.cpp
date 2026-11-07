@@ -10,7 +10,8 @@
 namespace tigod {
 
 using nlohmann::json;
-using esphome::tigo_monitor::master::BusEvent;
+using esphome::tigo_monitor::master::BusStats;
+using esphome::tigo_monitor::master::Exchange;
 using esphome::tigo_monitor::master::Frame;
 
 static int64_t unix_ms_now() {
@@ -69,7 +70,7 @@ void BusLog::feed_rx(const char *data, size_t n) {
       Frame f;
       if (!esphome::tigo_monitor::master::decode_frame(body, f)) return;
       // An adapter that hears itself gives our own requests back.
-      if (!(f.dest & 0x8000))
+      if (!esphome::tigo_monitor::master::is_reply(f))
         for (auto it = sent_.begin(); it != sent_.end(); ++it)
           if (*it == body) {
             sent_.erase(it);
@@ -139,31 +140,53 @@ json BusLog::to_json(size_t limit) const {
   std::lock_guard<std::mutex> lock(mu_);
   json recent = json::array();
   for (const Alarm &a : alarms_) recent.push_back({{"unix_ms", a.unix_ms}, {"what", a.what}});
-  json events = json::array();
-  const auto &ev = watch_.events();
-  size_t from = ev.size() > limit ? ev.size() - limit : 0;
-  for (size_t i = from; i < ev.size(); i++) {
-    const BusEvent &e = ev[i];
-    events.push_back({{"unix_ms", e.unix_ms},
-                      {"from_tap", e.from_tap},
-                      {"ours", e.ours},
-                      {"addr", hex4(e.addr)},
-                      {"cmd", hex4(e.cmd)},
-                      {"sub", e.sub < 0 ? json(nullptr) : json(e.sub)},
-                      {"node", e.node < 0 ? json(nullptr) : json(hex4(static_cast<unsigned>(e.node)))},
-                      {"len", e.len},
-                      {"name", e.name},
-                      {"text", e.text},
-                      {"hex", e.hex},
-                      {"reconfig", e.reconfig}});
+  int64_t now = unix_ms_now();
+  json exchanges = json::array();
+  std::deque<Exchange> ex = watch_.exchanges_at(now);
+  size_t from = ex.size() > limit ? ex.size() - limit : 0;
+  for (size_t i = from; i < ex.size(); i++) {
+    const Exchange &e = ex[i];
+    exchanges.push_back({{"id", e.id},
+                         {"unix_ms", e.unix_ms},
+                         {"ours", e.ours},
+                         {"other_master", e.other_master},
+                         {"addr", hex4(e.addr)},
+                         {"cmd", hex4(e.cmd)},
+                         {"name", e.name},
+                         {"sub_name", e.sub_name},
+                         {"node", e.node < 0 ? json(nullptr) : json(hex4(static_cast<unsigned>(e.node)))},
+                         {"category", e.category},
+                         {"result", e.result},
+                         {"late", e.late},
+                         {"rt_ms", e.rt_ms < 0 ? json(nullptr) : json(e.rt_ms)},
+                         {"summary", e.summary},
+                         {"answer", e.answer},
+                         {"answer_after_ms", e.answer_after_ms < 0 ? json(nullptr) : json(e.answer_after_ms)},
+                         {"request_hex", e.request_hex},
+                         {"reply_hex", e.reply_hex},
+                         {"reconfig", e.reconfig}});
   }
+  BusStats st = watch_.stats(now);
+  json stats = {{"window_s", esphome::tigo_monitor::master::BusWatch::WINDOW_MS / 1000},
+                {"polls", st.polls},
+                {"polls_lost", st.polls_lost},
+                {"polls_empty", st.polls_empty},
+                {"polls_refused", st.polls_refused},
+                {"count", st.count},
+                {"delivered", st.delivered},
+                {"not_delivered", st.not_delivered},
+                {"other_master", st.other_master},
+                {"reconfig", st.reconfig},
+                {"rt_median_ms", st.rt_median_ms < 0 ? json(nullptr) : json(st.rt_median_ms)},
+                {"rt_max_ms", st.rt_max_ms < 0 ? json(nullptr) : json(st.rt_max_ms)},
+                {"discovery", st.discovery}};
   return {{"alarm",
            {{"active", alarm_count_ > 0},
             {"count", alarm_count_},
             {"first_unix_ms", first_alarm_ms_},
             {"recent", recent}}},
-          {"polls", watch_.polls()},
-          {"events", events}};
+          {"stats", stats},
+          {"exchanges", exchanges}};
 }
 
 }  // namespace tigod
