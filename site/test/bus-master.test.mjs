@@ -63,6 +63,7 @@ function settings() {
 // opts.pv: the PV fields. api.pvStatus: the POST's answer.
 async function open(opts = {}) {
   const api = { master: master(opts.role || 'master', opts.pv, opts.standby), posts: [], settingsPosts: [], discoveryPosts: [], pvStatus: 200 };
+  if (opts.discovery) api.master.discovery = { ...api.master.discovery, ...opts.discovery };
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
   await ctx.route('**/api/**', async (route) => {
     const req = route.request();
@@ -245,6 +246,27 @@ test('the discovery window can be left to close, and renewed again', async () =>
   await page.click('#disc-toggle');
   await page.waitForFunction(() => document.getElementById('disc-toggle').textContent === 'Disable');
   assert.deepEqual(api.discoveryPosts, [{ renew: false }, { renew: true }]);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test('the discovery window card says how many of the TAP\'s table have joined', async () => {
+  const { page, ctx, errors } = await open({ hash: '#busmaster', discovery: { joined: 40, in_table: 44 } });
+  await page.waitForFunction(() => /left/.test(document.getElementById('disc-detail').textContent));
+  assert.equal(await page.textContent('#disc-detail'), 'Now open, 400 s left · 40 of the 44 in the TAP\'s table have joined');
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test('an empty table is said as such, and a reply without the counts shows none', async () => {
+  const empty = await open({ hash: '#busmaster', discovery: { joined: 0, in_table: 0 } });
+  await empty.page.waitForFunction(() => /left/.test(document.getElementById('disc-detail').textContent));
+  assert.equal(await empty.page.textContent('#disc-detail'), 'Now open, 400 s left · the TAP\'s table is empty');
+  await empty.ctx.close();
+  // An older daemon: no joined or in_table.
+  const { page, ctx, errors } = await open({ hash: '#busmaster' });
+  await page.waitForFunction(() => /left/.test(document.getElementById('disc-detail').textContent));
+  assert.equal(await page.textContent('#disc-detail'), 'Now open, 400 s left');
   assert.deepEqual(errors, []);
   await ctx.close();
 });

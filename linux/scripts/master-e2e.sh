@@ -60,7 +60,7 @@ expect "renewed with the TAP's node count" "$(stat "$out/tap.json" "[r['nodes'] 
 expect "cursor followed the TAP" "$(stat "$out/tap.json" "d['cursor_mismatches']")" 0
 expect "nothing outside the allow-list" "$(stat "$out/tap.json" "d['other']")" "[]"
 master="$(api 18092 /api/master)"
-expect "/api/master active" "$(echo "$master" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["active"], d["fault"], d["renewals"] >= 1, d["discovery"]["node_count"])')" "True none True 45"
+expect "/api/master active" "$(echo "$master" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["active"], d["fault"], d["renewals"] >= 1, d["discovery"]["node_count"], d["discovery"]["joined"], d["discovery"]["in_table"])')" "True none True 45 40 45"
 expect "MQTT: master active" "$(mqtt_state | field '(d["status"], d["problem"], d["discovery_nodes"], d["renewals"] >= 1)')" "('active', False, 45, True)"
 expect "MQTT: master entities announced" "$(mqtt_configs)" 8
 expect "healthy" "$(health 18092)" '200 ok []'

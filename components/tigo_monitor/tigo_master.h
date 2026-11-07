@@ -141,19 +141,24 @@ inline bool parse_tunnel_reply(const Bytes &payload, TunnelReply &out) {
 // ---- the discovery window --------------------------------------------------
 
 // The 0x2F reply's data: state (01 open, 00 closed), seconds left (BE),
-// then three counts. On the rig they read 44/40/44 while running and 0/40/44
-// at lapse; the CCA's renewal carried 44 with the first at 0, so the node
-// count is the third.
+// then three counts: the count the last renewal carried (echoed), how many
+// have joined, how many are in the TAP's table. On the rig they read
+// 44/40/44 while running and 0/40/44 at lapse. Joined is the TAP's flag,
+// kept through power cuts: a dead optimizer still counts.
 struct DiscoveryWindow {
   bool running = false;
   uint16_t remaining_s = 0;
-  uint16_t node_count = 0;
+  uint16_t node_count = 0;  // in the table: what a renewal carries
+  uint16_t requested = 0;   // after node_count, so {running, left, count} still initialises
+  uint16_t joined = 0;
 };
 
 inline bool parse_discovery_window(const TunnelReply &r, DiscoveryWindow &out) {
   if (r.sub != SUB_DISCOVERY_STATUS_REPLY || r.data.size() < 9) return false;
   out.running = r.data[0] == 0x01;
   out.remaining_s = static_cast<uint16_t>(r.data[1] << 8 | r.data[2]);
+  out.requested = static_cast<uint16_t>(r.data[3] << 8 | r.data[4]);
+  out.joined = static_cast<uint16_t>(r.data[5] << 8 | r.data[6]);
   out.node_count = static_cast<uint16_t>(r.data[7] << 8 | r.data[8]);
   return true;
 }
@@ -171,7 +176,9 @@ inline Bytes discovery_renewal_args(uint16_t node_count) {
 // that stops calling due() lets the discovery window lapse.
 //
 // Guards for frames and loops the CCA never showed:
-//   - no renewal carries a node count of 0;
+//   - no renewal carries a node count of 0, so a TAP with an empty table
+//     never has its window opened by us (Phase 2's first table write is what
+//     would make the count non-zero);
 //   - "not running" with time left is not a reason to renew; only 0 s is;
 //   - after RENEW_LIMIT renewals with no reading showing time on the discovery window,
 //     stuck() says so until a reading shows time, and it renews only once

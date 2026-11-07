@@ -80,6 +80,37 @@ static void test_discovery_window() {
 
 // Six consecutive polls from the capture, each with the TAP's reply: the
 // cursor steps 0, 0, 0, 4, 4, 2, the number of power packets in each reply.
+// The 0x2F reply, in order: flag, remaining, the count echoed from the
+// renewal, joined, in the table (the owner's analysis; the roof's 44/40/44).
+static void test_discovery_window_counts() {
+  TunnelReply r;
+  DiscoveryWindow l;
+  r.sub = SUB_DISCOVERY_STATUS_REPLY;
+  r.data = hex("010384002c0028002c");
+  CHECK(parse_discovery_window(r, l) && l.running && l.remaining_s == 900);
+  CHECK(l.requested == 44 && l.joined == 40 && l.node_count == 44);
+  r.data = hex("010384000100000001");  // the bench: one in the table, not joined yet
+  CHECK(parse_discovery_window(r, l) && l.requested == 1 && l.joined == 0 && l.node_count == 1);
+  r.data = hex("010384002c0028002c");
+  r.data.pop_back();  // 8 bytes: one short
+  CHECK(!parse_discovery_window(r, l));
+  CHECK(discovery_renewal_args(44) == hex("babe020384002c0100"));
+}
+
+// A TAP with an empty table reads 0 in the table, and the renewal never
+// carries 0 (the CCA never sent it): a window there is never renewed.
+static void test_no_renewal_for_an_empty_table() {
+  WindowKeeper k;
+  CHECK(k.due(0).kind == WindowAction::check);
+  DiscoveryWindow closed;
+  closed.running = false;
+  closed.remaining_s = 0;
+  closed.node_count = 0;
+  k.on_window(closed, 1);
+  for (uint32_t t = 1; t < 200000; t += 500) CHECK(k.due(t).kind != WindowAction::renew);
+  CHECK(k.renewals() == 0);
+}
+
 static void test_poll_cursor() {
   const char *replies[] = {
       "41ffcc4be7",
@@ -1345,6 +1376,8 @@ int main() {
   test_learner();
   test_housekeeping();
   test_tap_reconfiguring_frames_are_never_sent();
+  test_discovery_window_counts();
+  test_no_renewal_for_an_empty_table();
   test_next_request_housekeeping();
   test_bring_up_plan();
   test_walks();

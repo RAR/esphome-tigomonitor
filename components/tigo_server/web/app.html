@@ -3614,8 +3614,12 @@
     const renewing = m.discovery_renewing !== false;
     const w = m.discovery || {};
     const left = m.discovery_read ? (w.running && w.remaining_s > 0 ? `open, ${w.remaining_s} s left` : 'closed') : 'not read yet';
+    // Joined is the TAP's flag, kept for good: a dead optimizer still counts.
+    const joined = !m.discovery_read || w.joined == null || w.in_table == null ? ''
+      : w.in_table === 0 ? " · the TAP's table is empty"
+      : ` · ${w.joined} of the ${w.in_table} in the TAP's table have joined`;
     document.getElementById('disc-state').textContent = renewing ? 'Enabled' : 'Disabled';
-    document.getElementById('disc-detail').textContent = renewing ? `Now ${left}` : `Now ${left} · kept through a restart`;
+    document.getElementById('disc-detail').textContent = (renewing ? `Now ${left}` : `Now ${left} · kept through a restart`) + joined;
     const disc = document.getElementById('disc-toggle');
     disc.textContent = renewing ? 'Disable' : 'Enable';
     document.getElementById('disc-dot').className = 'dot ' + (!m.discovery_read ? 'dim' : renewing ? '' : 'idle');
