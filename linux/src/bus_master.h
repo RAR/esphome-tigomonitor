@@ -52,9 +52,10 @@ class SerialTransport : public esphome::tigo_master::Transport {
 class BusMaster {
  public:
   using Sink = esphome::tigo_master::MasterCore::Sink;
+  using SentSink = esphome::tigo_master::MasterCore::SentSink;
   using Targets = esphome::tigo_master::MasterCore::Targets;
   using Learned = esphome::tigo_master::MasterCore::Learned;
-  BusMaster(Sink on_rx, Sink on_tx, uint16_t gateway_id, bool bench, bool startup, bool housekeeping = false,
+  BusMaster(Sink on_rx, SentSink on_tx, uint16_t gateway_id, bool bench, bool startup, bool housekeeping = false,
             std::vector<esphome::tigo_monitor::master::Learned41::Entry> learned = {}, Targets targets = nullptr,
             bool queries = false, bool writes = false);
 

@@ -81,8 +81,8 @@ void BusLog::feed_rx(const char *data, size_t n) {
   }
 }
 
-void BusLog::feed_tx(const char *data, size_t n) {
-  int64_t now = unix_ms_now();
+void BusLog::feed_tx(const char *data, size_t n, uint32_t late_ms) {
+  int64_t now = unix_ms_now() - late_ms;
   std::lock_guard<std::mutex> lock(mu_);
   for (size_t i = 0; i < n; i++) {
     tx_.feed(data[i], [&](const std::string &body) {

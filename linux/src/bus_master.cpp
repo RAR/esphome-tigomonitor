@@ -11,7 +11,7 @@
 
 namespace tigod {
 
-BusMaster::BusMaster(Sink on_rx, Sink on_tx, uint16_t gateway_id, bool bench, bool startup, bool housekeeping,
+BusMaster::BusMaster(Sink on_rx, SentSink on_tx, uint16_t gateway_id, bool bench, bool startup, bool housekeeping,
                      std::vector<esphome::tigo_monitor::master::Learned41::Entry> learned, Targets targets,
                      bool queries, bool writes)
     : core_(&port_, [](int prio, const std::string &msg) { log_line(prio, "%s", msg.c_str()); }, std::move(on_rx),

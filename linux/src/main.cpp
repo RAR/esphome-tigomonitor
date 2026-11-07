@@ -193,9 +193,9 @@ int main(int argc, char **argv) {
   };
   // What the bus master sends goes in the capture too, for reading back
   // what was said on the bench.
-  auto on_sent = [&](const char *data, size_t n) {
+  auto on_sent = [&](const char *data, size_t n, uint32_t late_ms) {
     if (capture_out) capture_out->write(data, static_cast<std::streamsize>(n)).flush();
-    bus_log.feed_tx(data, n);
+    bus_log.feed_tx(data, n, late_ms);
   };
 
   std::mutex settings_mu;  // settings is read by the web server's threads

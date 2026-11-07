@@ -15,3 +15,12 @@ for t in protocol_test node_identity_test cca_ble_protocol_test master_protocol_
   fi
   tail -1 "build/linux/$t.log"
 done
+# The bus master's core, against a fake port.
+g++ -std=c++17 -O2 -Wall -Wextra -I components/tigo_monitor tests/host/master_core_test.cpp \
+  components/tigo_master/master_core.cpp -lpthread -o build/linux/master_core_test
+if ! build/linux/master_core_test >build/linux/master_core_test.log 2>&1; then
+  cat build/linux/master_core_test.log
+  echo "master_core_test failed" >&2
+  exit 1
+fi
+tail -1 build/linux/master_core_test.log

@@ -56,7 +56,7 @@ static int64_t steady_ms() {
       .count();
 }
 
-MasterCore::MasterCore(Transport *port, Log log, Sink on_rx, Sink on_tx, uint16_t gateway_id, bool bench,
+MasterCore::MasterCore(Transport *port, Log log, Sink on_rx, SentSink on_tx, uint16_t gateway_id, bool bench,
                        bool startup, bool housekeeping, std::vector<master::Learned41::Entry> learned,
                        Targets targets, bool queries, bool writes)
     : on_rx_(std::move(on_rx)), on_tx_(std::move(on_tx)), gateway_(gateway_id), bench_(bench), startup_(startup),
@@ -230,6 +230,7 @@ bool MasterCore::transact(uint16_t dest, uint16_t cmd, const Bytes &payload, Fra
   // What our own request looks like coming back, if the adapter hears itself.
   std::string sent(wire.begin() + 5, wire.end() - 2);
   std::string error;
+  int64_t written_from = steady_ms();
   if (!port_->write(wire.data(), wire.size(), error)) {
     set_fault(Fault::no_port, "write failed: " + error);
     port_->close();  // reopened by tick()
@@ -244,7 +245,10 @@ bool MasterCore::transact(uint16_t dest, uint16_t cmd, const Bytes &payload, Fra
   int64_t on_wire_ms = static_cast<int64_t>(wire.size()) * 10 * 1000 / (baud > 0 ? baud : 38400);
   if (drained - drain_from > on_wire_ms + OVERRUN_SLACK_MS)
     note_pause_(static_cast<uint32_t>(drained - drain_from - on_wire_ms), drained);
-  if (on_tx_) on_tx_(reinterpret_cast<const char *>(wire.data()), wire.size());
+  if (on_tx_) {
+    int64_t late = drained - (written_from + on_wire_ms);
+    on_tx_(reinterpret_cast<const char *>(wire.data()), wire.size(), late > 0 ? static_cast<uint32_t>(late) : 0);
+  }
 
   auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
   bool got = false, foreign = false, refused = false, not_taken = false;

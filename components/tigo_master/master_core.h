@@ -140,10 +140,14 @@ class Transport {
 class MasterCore {
  public:
   // on_rx gets every byte read from the bus (the Monitor, and --capture);
-  // on_tx every byte written (--capture only). bench: allow the reads a TAP
+  // on_tx every frame written (--capture and the Bus log), once the port's
+  // drain returns, with how many ms after its last byte left that was: a
+  // Linux UART's drain checks once a scheduler tick, so it can come back
+  // after the reply is in. bench: allow the reads a TAP
   // on the bench answers (tigo_master.h's bench_only); writes are never sent
   // either way.
   using Sink = std::function<void(const char *, size_t)>;
+  using SentSink = std::function<void(const char *, size_t, uint32_t late_ms)>;
   // startup: if the TAP is found at the factory address, re-address it to
   // gateway_id before polling (bus_master re-addressing writes, gated).
   // housekeeping: also send the 0x41s, with the learned content or else the
@@ -154,7 +158,7 @@ class MasterCore {
   using Targets = std::function<std::vector<uint16_t>()>;
   // prio: 3 error, 4 warning, 6 info, as syslog.
   using Log = std::function<void(int prio, const std::string &msg)>;
-  MasterCore(Transport *port, Log log, Sink on_rx, Sink on_tx, uint16_t gateway_id, bool bench, bool startup,
+  MasterCore(Transport *port, Log log, Sink on_rx, SentSink on_tx, uint16_t gateway_id, bool bench, bool startup,
              bool housekeeping = false, std::vector<esphome::tigo_monitor::master::Learned41::Entry> learned = {},
              Targets targets = nullptr, bool queries = false, bool writes = false);
   static const uint32_t TARGETS_EVERY_MS = 60000;
@@ -220,7 +224,8 @@ class MasterCore {
   void drop_housekeeping_();
   void report_extra_taps_(const std::vector<esphome::tigo_monitor::master::Bytes> &macs);
 
-  Sink on_rx_, on_tx_;
+  Sink on_rx_;
+  SentSink on_tx_;
   uint16_t gateway_;
   bool bench_, startup_;
   bool housekeeping_on_;
