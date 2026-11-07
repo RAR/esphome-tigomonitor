@@ -17,6 +17,7 @@ cmake --build build/linux -j"$(nproc)"
 DESTDIR="$PWD/$root" cmake --install build/linux --strip
 
 install -Dm644 linux/packaging/tigomonitord.service "$root/usr/lib/systemd/system/tigomonitord.service"
+install -Dm755 linux/packaging/cert-hook "$root/usr/libexec/tigomonitor/cert-hook"
 install -Dm644 linux/packaging/tigomonitor-http.service "$root/etc/avahi/services/tigomonitor-http.service"
 install -Dm644 LICENSE "$root/usr/share/doc/tigomonitord/copyright"
 # cpp-httplib is compiled in, so its licence ships too.

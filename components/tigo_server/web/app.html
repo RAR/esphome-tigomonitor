@@ -7,14 +7,14 @@
 <style>
   /* ===== Theme tokens ===== */
   :root {
-    --bg: #0b0f17;
-    --bg-2: #121826;
-    --bg-3: #1a2233;
-    --bg-4: #243047;
-    --border: #243047;
+    --bg: #151b27;
+    --bg-2: #1c2433;
+    --bg-3: #252f42;
+    --bg-4: #303c54;
+    --border: #2f3a51;
     --text: #e6ecf5;
-    --text-dim: #8a96ad;
-    --text-faint: #5a6478;
+    --text-dim: #94a0b6;
+    --text-faint: #6b768b;
     --accent: #4ade80;
     --accent-2: #38bdf8;
     --accent-3: #a78bfa;
@@ -22,7 +22,8 @@
     --bad: #f87171;
     --good: #4ade80;
   }
-  body.light-mode {
+  /* On html too: the page's own scrollbar takes its colours from there. */
+  body.light-mode, html:has(> body.light-mode) {
     --bg: #f5f7fa;
     --bg-2: #ffffff;
     --bg-3: #f1f5f9;
@@ -34,6 +35,12 @@
   }
 
   * { box-sizing: border-box; margin: 0; padding: 0; }
+  /* Scrollbars in the theme's colours, not the browser's white. */
+  * { scrollbar-color: var(--bg-4) transparent; }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track, ::-webkit-scrollbar-corner { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--bg-4); border-radius: 5px; border: 2px solid transparent; background-clip: padding-box; }
+  ::-webkit-scrollbar-thumb:hover { background-color: var(--text-faint); }
   html, body { height: 100%; }
   body {
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
@@ -111,6 +118,34 @@
 
   .conn { padding: 12px 20px; border-top: 1px solid var(--border); font-size: 11px; color: var(--text-dim); display: flex; justify-content: space-between; align-items: center; }
   .pill { display: inline-flex; align-items: center; gap: 6px; }
+  /* The sidebar's PV output state, on every page. Off is the state that must
+     be noticed: it turns red and its dot pulses. */
+  .pv-pill { display: flex; align-items: center; gap: 9px; margin: 8px 12px; padding: 8px 10px 8px 12px;
+             border: 1px solid rgba(74,222,128,0.28); border-radius: 8px; background: rgba(74,222,128,0.07);
+             font-size: 13px; font-weight: 600; color: var(--text); text-decoration: none;
+             transition: background .15s ease-out, border-color .15s ease-out; }
+  .pv-pill::before { content: ''; flex: none; width: 8px; height: 8px; border-radius: 50%;
+                     background: var(--good); box-shadow: 0 0 0 3px rgba(74,222,128,0.18); }
+  .pv-pill:hover { background: rgba(74,222,128,0.13); border-color: rgba(74,222,128,0.45); }
+  .pv-pill:focus-visible { outline: 2px solid var(--good); outline-offset: 2px; }
+  .pv-pill-label { flex: 1; }
+  .pv-pill-state { padding: 2px 7px; border-radius: 4px; font-size: 10.5px; letter-spacing: .06em; text-transform: uppercase;
+                   color: var(--good); background: rgba(74,222,128,0.15); }
+  .pv-pill.off { border-color: rgba(248,113,113,0.5); background: rgba(248,113,113,0.1); }
+  .pv-pill.off:hover { background: rgba(248,113,113,0.16); border-color: rgba(248,113,113,0.7); }
+  .pv-pill.off:focus-visible { outline-color: var(--bad); }
+  .pv-pill.off::before { background: var(--bad); animation: pv-pulse 2s ease-out infinite; }
+  .pv-pill.off .pv-pill-state { color: var(--bad); background: rgba(248,113,113,0.18); }
+  body.light-mode .pv-pill-state { color: #15803d; }
+  body.light-mode .pv-pill.off .pv-pill-state { color: #b91c1c; }
+  @keyframes pv-pulse {
+    0% { box-shadow: 0 0 0 0 rgba(248,113,113,0.55); }
+    70%, 100% { box-shadow: 0 0 0 7px rgba(248,113,113,0); }
+  }
+  @media (prefers-reduced-motion: reduce) { .pv-pill.off::before { animation: none; box-shadow: 0 0 0 3px rgba(248,113,113,0.25); } }
+  .pv-banner { display: flex; gap: 12px; align-items: center; margin: 0 0 16px; padding: 10px 14px; border-radius: 8px;
+               border: 1px solid var(--bad); color: var(--bad); font-weight: 600; font-size: 14px; }
+  .pv-banner a { color: inherit; white-space: nowrap; }
   .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--good); box-shadow: 0 0 8px var(--good); }
   .theme-toggle {
     background: none; border: 1px solid var(--border); color: var(--text-dim);
@@ -123,6 +158,20 @@
   .topbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; }
   h1 { font-size: 20px; font-weight: 600; }
   .topbar-meta { font-size: 12px; color: var(--text-dim); }
+  /* The Bus page's two halves: shown only when there are both. */
+  .bus-tabs, .page-tabs { display: none; gap: 4px; margin: -12px 0 20px; border-bottom: 1px solid var(--border); }
+  body.bus-both .bus-tabs { display: flex; }
+  /* A page's own tabs (Settings): scroll sideways on a phone rather than wrap. */
+  .page-tabs { display: flex; overflow-x: auto; scrollbar-width: none; }
+  .page-tabs::-webkit-scrollbar { display: none; }
+  .bus-tabs a, .page-tabs a, .page-tabs button { padding: 8px 14px; margin-bottom: -1px; text-decoration: none; color: var(--text-dim); font-weight: 600;
+                border-bottom: 2px solid transparent; }
+  .page-tabs button { background: none; border-top: 0; border-left: 0; border-right: 0; font: inherit; font-weight: 600;
+                      white-space: nowrap; cursor: pointer; }
+  .page-tabs a { white-space: nowrap; }
+  .bus-tabs a:hover, .page-tabs a:hover, .page-tabs button:hover { color: var(--text); }
+  .bus-tabs a[aria-selected="true"], .page-tabs a[aria-selected="true"], .page-tabs button[aria-selected="true"] { color: var(--text); border-bottom-color: var(--accent-2); }
+  .page-tabs button:focus-visible { outline: 2px solid var(--accent-2); outline-offset: -2px; border-radius: 4px 4px 0 0; }
   .btn {
     display: inline-flex; align-items: center; gap: 6px;
     background: var(--bg-3); border: 1px solid var(--border); color: var(--text);
@@ -405,6 +454,82 @@
   .table-toolbar .input.compact { min-width: auto; }
   .table-meta { font-size: 12px; color: var(--text-dim); }
 
+  /* ===== Logs view (Raspberry Pi build) ===== */
+  .logs-box {
+    background: var(--bg); border: 1px solid var(--border); border-radius: 10px;
+    padding: 10px 0; height: calc(100vh - 230px); min-height: 280px; overflow: auto;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px; line-height: 1.55;
+  }
+  .log-line { display: grid; grid-template-columns: 9.5ch 7ch minmax(0, 1fr); gap: 10px; padding: 0 14px; }
+  .log-line:hover { background: var(--bg-2); }
+  .log-time { color: var(--text-faint); font-variant-numeric: tabular-nums; }
+  .log-lvl { text-transform: uppercase; font-size: 10.5px; letter-spacing: .04em; padding-top: 1px; color: var(--text-dim); }
+  .log-msg { white-space: pre-wrap; word-break: break-word; color: var(--text); }
+  .log-line.warning .log-lvl, .log-line.warning .log-msg { color: var(--warn); }
+  .log-line.error .log-lvl, .log-line.error .log-msg { color: var(--bad); }
+  .log-line.debug .log-lvl, .log-line.debug .log-msg { color: var(--text-faint); }
+  .logs-empty { padding: 24px 14px; color: var(--text-faint); font-family: inherit; }
+  /* The Bus log: the last 5 minutes in a strip, then one row per exchange. */
+  .bx-strip { display: grid; grid-template-columns: repeat(auto-fit, minmax(128px, 1fr)); gap: 1px; background: var(--border);
+              border: 1px solid var(--border); border-radius: 10px; overflow: hidden; margin-bottom: 16px; }
+  .bx-tile { background: var(--bg-2); padding: 12px 14px; display: grid; gap: 2px; min-width: 0; }
+  .bx-tile .k { font-size: 11px; letter-spacing: .05em; text-transform: uppercase; color: var(--text-faint); }
+  .bx-tile .v { font-size: 20px; font-weight: 650; font-variant-numeric: tabular-nums; }
+  .bx-tile .s { font-size: 12px; color: var(--text-dim); overflow-wrap: anywhere; }
+  .bx-tile.bad { background: rgba(248,113,113,0.10); }
+  .bx-tile.bad .k, .bx-tile.bad .v { color: var(--bad); }
+  .bx-chip { font-family: inherit; font-size: 12.5px; font-weight: 500; border: 1px solid var(--border); background: var(--bg-2); color: var(--text-dim);
+             border-radius: 999px; padding: 5px 11px; cursor: pointer; display: inline-flex; gap: 6px; align-items: center; }
+  .bx-chip .n { font-variant-numeric: tabular-nums; color: var(--text-faint); }
+  .bx-chip[aria-pressed="true"] { background: var(--bg-3); color: var(--text); border-color: var(--text-faint); }
+  .bx-chip.bad[aria-pressed="true"] { border-color: var(--bad); color: var(--bad); }
+  .bx-table { border: 1px solid var(--border); border-radius: 10px; background: var(--bg-2); overflow: auto;
+              max-height: calc(100vh - 380px); min-height: 280px; }
+  /* px, not ch: the header's smaller font would make its ch columns narrower than the rows'. */
+  .bx-cols, .bx-row { display: grid; grid-template-columns: 96px 108px 40px minmax(120px, 1.1fr) 40px 104px 84px minmax(0, 2fr);
+                      gap: 12px; align-items: baseline; padding: 8px 14px; }
+  .bx-cols { position: sticky; top: 0; z-index: 1; font-size: 11px; letter-spacing: .05em; text-transform: uppercase;
+             color: var(--text-faint); border-bottom: 1px solid var(--border); background: var(--bg-3); white-space: nowrap; }
+  .bx-row { border-bottom: 1px solid var(--border); cursor: pointer; font-size: 13px; position: relative; }
+  .bx-row:hover { background: var(--bg-3); }
+  .bx-row:focus-visible { outline: 2px solid var(--accent-2); outline-offset: -2px; }
+  .bx-row.reconfig { background: rgba(248,113,113,0.10); }
+  .bx-row.reconfig::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 3px; background: var(--bad); }
+  .bx-mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px; font-variant-numeric: tabular-nums; color: var(--text-dim); }
+  .bx-mono.slow { color: var(--warn); }
+  .bx-src { font-size: 12.5px; color: var(--text-dim); }
+  .bx-src.other { color: var(--bad); font-weight: 600; }
+  .bx-ex { font-weight: 600; min-width: 0; }
+  .bx-ex small, .bx-mono.node small { display: block; font-weight: 400; color: var(--text-faint); font-size: 11.5px; }
+  .bx-mono.node small { font-family: inherit; }
+  .bx-res { font-size: 12px; font-weight: 600; border-radius: 6px; padding: 1px 7px; justify-self: start; white-space: nowrap; }
+  .bx-res.ok { background: rgba(74,222,128,0.15); color: var(--good); }
+  .bx-res.warn { background: rgba(251,191,36,0.15); color: var(--warn); }
+  .bx-res.bad { background: rgba(248,113,113,0.15); color: var(--bad); }
+  .bx-res.none { background: var(--bg-3); color: var(--text-dim); }
+  .bx-sum { min-width: 0; overflow-wrap: anywhere; }
+  .bx-sum .q { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px; color: var(--accent-2); }
+  .bx-detail { display: grid; gap: 4px; border-bottom: 1px solid var(--border); background: var(--bg); padding: 10px 14px 12px 122px;
+               font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px; color: var(--text-dim); overflow-wrap: anywhere; }
+  .bx-detail .lbl { color: var(--text-faint); display: inline-block; min-width: 9ch; }
+  .bx-empty { padding: 24px 14px; color: var(--text-faint); }
+  @media (max-width: 860px) {
+    .bx-cols { display: none; }
+    .bx-row { grid-template-columns: auto 1fr auto; grid-template-areas: "t src rt" "ex ex res" "sum sum sum"; row-gap: 4px; }
+    .bx-row > .t { grid-area: t; } .bx-row > .bx-src { grid-area: src; } .bx-row > .rt { grid-area: rt; }
+    .bx-row > .bx-ex { grid-area: ex; } .bx-row > .bx-res { grid-area: res; justify-self: end; } .bx-row > .bx-sum { grid-area: sum; }
+    .bx-row > .tap, .bx-row > .node { display: none; }
+    .bx-detail { padding-left: 14px; }
+  }
+  #bus-alarm-card { border-color: var(--bad); }
+  #bus-alarm-card .pv-title { color: var(--bad); }
+  .bus-alarm-list { margin: 10px 0 0; padding: 0; list-style: none; font-size: 13px; line-height: 1.6; }
+  .bus-alarm-list time { color: var(--text-dim); font-variant-numeric: tabular-nums; margin-right: 8px; }
+  @media (max-width: 768px) {
+    .log-line { grid-template-columns: 9.5ch minmax(0, 1fr); }
+    .log-lvl { display: none; }
+  }
+
   .table-wrap { background: var(--bg-2); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
   table.nodes { width: 100%; border-collapse: collapse; font-size: 14px; }
   table.nodes th[data-sort] { cursor: pointer; user-select: none; }
@@ -422,6 +547,9 @@
   table.nodes tr:hover td { background: var(--bg-3); }
   table.nodes .mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; color: var(--text-dim); font-size: 13px; }
   table.nodes .num { text-align: right; }
+  table.nodes:not(.with-fw) .fw { display: none; }
+  .devices-head { margin: 4px 0 10px; color: var(--text-dim); }
+  #devices-taps .table-wrap { margin-bottom: 22px; }
   table.nodes td strong { color: var(--text); }
 
   .badge {
@@ -501,12 +629,83 @@
 
   .topo-empty { padding: 60px 24px; text-align: center; color: var(--text-dim); font-size: 13px; }
 
-  /* ===== Tools view ===== */
+  /* A layout that arrived after the user's own, waiting for them */
+  .topo-pending {
+    background: var(--bg-2); border: 1px solid var(--warn); border-radius: 10px;
+    padding: 10px 14px; margin-bottom: 16px; font-size: 13px;
+  }
+  .topo-new {
+    background: var(--bg-2); border: 1px solid var(--accent); border-radius: 10px;
+    padding: 10px 14px; margin-bottom: 16px; font-size: 13px;
+  }
+  /* Node Table tags: the same tinted chip as the State column's badges */
+  .node-new, .node-missing, .node-unset {
+    display: inline-block; margin-left: 6px; padding: 2px 7px; border-radius: 4px; font-size: 10.5px;
+    font-weight: 600; text-transform: uppercase; letter-spacing: .04em; white-space: nowrap; vertical-align: 1px;
+  }
+  .node-new { background: rgba(74,222,128,0.15); color: var(--accent); }
+  .node-missing { background: rgba(248,113,113,0.15); color: var(--bad); }
+  .node-unset { background: rgba(251,191,36,0.15); color: var(--warn); }
+  .node-known-btn { margin-left: 8px; padding: 1px 8px; font-size: 11.5px; white-space: nowrap; vertical-align: 1px; }
+  .panel-tile.known { opacity: .55; }
+  .topo-new strong { color: var(--accent); }
+  .topo-ed-replace, .topo-ed-replace-pick { margin-top: 4px; font-size: 11.5px; max-width: 100%; }
+  .topo-pending-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .topo-pending-row span { margin-right: auto; }
+  .topo-pending-list { margin: 10px 0 0 18px; color: var(--text-dim); font-size: 12px; line-height: 1.6; }
+
+  /* Topology editor (Edit layout) */
+  .topo-ed-error { color: var(--bad); font-size: 13px; margin: -8px 0 12px; }
+  .topo-ed-error:empty { display: none; }
+  .topo-tray {
+    background: var(--bg-2); border: 1px dashed var(--warn); border-radius: 10px; padding: 12px 14px;
+  }
+  .topo-tray-head { font-size: 12px; color: var(--text-dim); margin-bottom: 10px; }
+  .topo-tray-head strong { color: var(--text); }
+  .topo-ed-panel { cursor: grab; touch-action: pan-y; user-select: none; -webkit-user-select: none; }
+  .topo-ed-panel .panel-tile-id::before { content: '⠿ '; color: var(--text-faint); }
+  .topo-ed-panel.lifting { border-color: var(--accent-2); }
+  .topo-ed-panel.dragging { opacity: 0.35; }
+  .topo-ed-ghost {
+    position: fixed; z-index: 1000; pointer-events: none; opacity: 0.9;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.35); transform: rotate(2deg);
+  }
+  .topo-ed-drop { min-height: 58px; border-radius: 6px; }
+  .topo-ed-drop.over, .topo-mppt.over, .topo-inv.over, .topo-add-inverter.over { outline: 2px solid var(--accent-2); outline-offset: 2px; }
+  .topo-ed-handle {
+    cursor: grab; touch-action: pan-y; user-select: none; -webkit-user-select: none;
+    color: var(--text-faint); font-size: 16px; line-height: 1; padding: 4px 2px;
+  }
+  .topo-ed-handle:hover { color: var(--text); }
+  .topo-string.lifting, .topo-mppt.lifting, .topo-inv.lifting { outline: 1px solid var(--accent-2); }
+  .topo-string.dragging, .topo-mppt.dragging, .topo-inv.dragging { opacity: 0.35; }
+  .topo-ed-ghost-block {
+    background: var(--bg-2); border: 1px solid var(--accent-2); border-radius: 8px; padding: 8px 12px;
+  }
+  .topo-ed-empty { color: var(--text-faint); font-size: 12px; padding: 12px; }
+  .topo-ed-name {
+    background: var(--bg); border: 1px solid var(--border); color: var(--text);
+    border-radius: 4px; padding: 3px 8px; font-size: 13px; font-weight: 600; min-width: 120px; max-width: 220px;
+  }
+  .topo-ed-name:focus { border-color: var(--accent-2); outline: none; }
+  .topo-ed-canon { color: var(--text-faint); font-size: 11px; }
+  .topo-add {
+    background: none; border: 1px dashed var(--border); color: var(--text-dim);
+    border-radius: 6px; padding: 6px 12px; font-size: 12px; cursor: pointer; align-self: flex-start;
+  }
+  .topo-add:hover { color: var(--text); border-color: var(--accent-2); }
+  .topo-del {
+    background: none; border: 1px solid var(--border); color: var(--text-dim);
+    border-radius: 4px; padding: 2px 8px; font-size: 11px; cursor: pointer; margin-left: auto;
+  }
+  .topo-del:hover { color: var(--bad); border-color: var(--bad); }
+
+  /* ===== Settings view ===== */
   .tools-card { background: var(--bg-2); border: 1px solid var(--border); border-radius: 10px; padding: 18px 20px; margin-bottom: 16px; }
   .tools-card h3 { font-size: 14px; font-weight: 600; margin-bottom: 12px; }
-  .tools-card p.hint { font-size: 12px; color: var(--text-dim); margin-bottom: 12px; }
+  .tools-card p.hint { font-size: 13px; line-height: 1.5; color: var(--text-dim); margin-bottom: 14px; max-width: 75ch; }
   .checkbox-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 6px; margin-bottom: 12px; }
-  .checkbox-grid label { display: flex; align-items: center; gap: 8px; padding: 6px 8px; background: var(--bg-3); border-radius: 4px; cursor: pointer; font-size: 12px; transition: background 0.1s; }
+  .checkbox-grid label { display: flex; align-items: center; gap: 8px; padding: 6px 8px; background: var(--bg-3); border-radius: 4px; cursor: pointer; font-size: 13px; transition: background 0.1s; }
   .checkbox-grid label:hover { background: var(--bg-4); }
   .checkbox-grid input[type="checkbox"] { width: 14px; height: 14px; cursor: pointer; accent-color: var(--accent); }
   .tools-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
@@ -519,29 +718,40 @@
   }
   .danger-row { display: flex; gap: 12px; align-items: center; padding: 12px; background: var(--bg-3); border-radius: 6px; margin-bottom: 8px; }
   .danger-row:last-child { margin-bottom: 0; }
-  .danger-text { flex: 1; font-size: 12px; }
-  .danger-text strong { display: block; color: var(--text); margin-bottom: 2px; }
+  .danger-text { flex: 1; font-size: 13px; line-height: 1.45; }
+  .danger-text strong { display: block; color: var(--text); font-size: 14px; margin-bottom: 3px; }
   .danger-text span { color: var(--text-dim); }
   .btn.danger { background: rgba(248,113,113,0.15); border-color: rgba(248,113,113,0.4); color: var(--bad); }
   .btn.danger:hover { background: rgba(248,113,113,0.25); }
   /* Device Configuration rows */
   .cfg-row { display: flex; gap: 14px; align-items: center; padding: 12px; background: var(--bg-3); border-radius: 6px; margin-bottom: 8px; flex-wrap: wrap; }
   .cfg-row:last-child { margin-bottom: 0; }
+  .pv-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+  .pv-msg { font-size: 13px; line-height: 1.5; color: var(--text-dim); }
+  .pv-msg:not(:empty) { margin-top: 10px; }
+  .cfg-text strong.pv-title { display: flex; align-items: center; gap: 9px; }
+  .cfg-text .pv-title > span { display: inline-block; color: inherit; }
+  .cfg-text .pv-title > .dot { flex: none; }
+  .dot.off { background: var(--bad); box-shadow: 0 0 8px var(--bad); }
+  .dot.idle { background: var(--warn); box-shadow: 0 0 8px var(--warn); }
+  .dot.dim { background: var(--text-faint); box-shadow: none; }
+  .pv-note { font-size: 12px; line-height: 1.5; color: var(--text-dim); margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); max-width: 75ch; }
   /* A setting row is a two-column form: the label on the left, its controls
      starting at the same line on the right, so the fields line up down the
      card instead of shrinking against the right edge. One column on a phone. */
   .cfg-row:has(> .cfg-text) { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 3fr); gap: 8px 24px; }
   @media (max-width: 720px) { .cfg-row:has(> .cfg-text) { grid-template-columns: minmax(0, 1fr); } }
-  .cfg-text { flex: 1; min-width: 0; font-size: 12px; }
-  .cfg-text strong { display: block; color: var(--text); margin-bottom: 2px; }
+  .cfg-text { flex: 1; min-width: 0; font-size: 13px; line-height: 1.45; }
+  .cfg-text strong { display: block; color: var(--text); font-size: 14px; margin-bottom: 3px; }
   .cfg-text span { display: block; color: var(--text-dim); }
-  .cfg-default { color: var(--text-faint) !important; font-size: 11px; margin-top: 2px; font-family: ui-monospace,Menlo,monospace; }
+  .cfg-default { color: var(--text-dim) !important; font-size: 12px; margin-top: 4px; font-variant-numeric: tabular-nums; }
   .cfg-ctrl { display: flex; align-items: center; gap: 6px; }
   .cfg-row:has(> .cfg-text) .cfg-ctrl { min-width: 0; }
   .cfg-row:has(> .cfg-text) .cfg-ctrl .cfg-input { flex: 1 1 auto; width: 100%; max-width: 320px; }
   .cfg-row:has(> .cfg-text) .cfg-ctrl .cfg-input[type="number"] { max-width: 120px; }
+  .cfg-row:has(> .cfg-text) .cfg-ctrl select.cfg-input { max-width: 480px; }
   .cfg-row:has(> .cfg-text) .cfg-switch { min-width: 120px; }  /* Save lines up with the number rows' */
-  .cfg-input { width: 110px; padding: 6px 8px; background: var(--bg-2); border: 1px solid var(--border); border-radius: 5px; color: var(--text); font-size: 13px; }
+  .cfg-input { width: 110px; padding: 7px 9px; background: var(--bg-2); border: 1px solid var(--border); border-radius: 5px; color: var(--text); font-size: 13px; }
   .cfg-unit { color: var(--text-dim); font-size: 12px; margin-right: 2px; }
   .cfg-switch { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text); cursor: pointer; min-width: 64px; }
   .btn.cfg-revert:disabled { opacity: .4; cursor: default; }
@@ -550,9 +760,10 @@
     background: var(--bg-3); border: 1px solid var(--border); color: var(--text);
     padding: 10px 16px; border-radius: 6px; font-size: 13px;
     box-shadow: 0 8px 24px rgba(0,0,0,0.3);
-    transition: transform 0.2s; z-index: 1000;
+    transition: transform 0.2s, opacity 0.2s, visibility 0.2s; z-index: 1000;
+    opacity: 0; visibility: hidden;
   }
-  .toast.show { transform: translateX(-50%) translateY(0); }
+  .toast.show { transform: translateX(-50%) translateY(0); opacity: 1; visibility: visible; }
   .toast.ok { border-color: var(--good); }
   .toast.err { border-color: var(--bad); }
 
@@ -675,7 +886,7 @@
     .topo-string-head { font-size: 11px; }
     .panel-grid { grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); }
 
-    /* Tools view buttons */
+    /* Settings view buttons */
     .checkbox-grid { grid-template-columns: 1fr; }
 
     /* Buttons — bigger tap targets across the board. */
@@ -740,12 +951,17 @@
       <button data-view="dashboard" class="active"><span class="icon">▣</span> Dashboard</button>
       <button data-view="history"><span class="icon">↗</span> History</button>
       <button data-view="topology"><span class="icon">⌘</span> Topology</button>
-      <button data-view="nodes"><span class="icon">≡</span> Node Table</button>
-      <button data-view="tools"><span class="icon">⚙</span> Tools</button>
+      <button data-view="nodes"><span class="icon">≡</span> Devices</button>
+      <button data-view="settings"><span class="icon">⚙</span> Settings</button>
       <button data-view="diagnostics"><span class="icon">◈</span> Diagnostics</button>
+      <button data-view="bus" id="nav-bus" data-linux-only style="display:none"><span class="icon">⇄</span> Bus</button>
       <button data-view="cca"><span class="icon">◉</span> CCA Info</button>
       <button data-view="cloudstatus" id="nav-cloudstatus" style="display:none"><span class="icon">☁</span> Tigo Cloud</button>
     </nav>
+
+    <!-- The PV output state, on the Pi running (or standing by for) the bus.
+         It shows the state and links to the switch; it never switches it. -->
+    <a id="pv-pill" class="pv-pill" href="#busmaster" style="display:none" title="PV output: open Bus master"><span class="pv-pill-label">PV</span> <span class="pv-pill-state">on</span></a>
 
     <!-- Tigo cloud status box — shown only when a cloud connection is configured. -->
     <div id="cloud-box" style="display:none;margin:8px 12px;padding:9px 11px;border:1px solid var(--border);border-radius:8px;cursor:pointer" title="Open Cloud Status">
@@ -770,6 +986,16 @@
 
   <!-- ===== Main content ===== -->
   <main>
+    <div id="pv-banner" class="pv-banner" style="display:none">
+      <span id="pv-banner-text">PV output is off</span>
+      <a href="#busmaster">Bus master</a>
+    </div>
+    <!-- Latched until cleared on the Bus log page: a CCA on the bus may have
+         re-PANned the TAP, and then every optimizer drops off. -->
+    <div id="bus-alarm-banner" class="pv-banner" style="display:none">
+      <span id="bus-alarm-banner-text">Another device reconfigured the TAP</span>
+      <a href="#buslog">Bus log</a>
+    </div>
     <!-- DASHBOARD -->
     <section class="view active" id="view-dashboard">
       <div class="topbar">
@@ -924,6 +1150,20 @@
         <input class="input" id="topo-filter" placeholder="Filter by name, barcode, or string…">
         <span class="topo-summary" id="topo-summary">—</span>
         <button class="btn" id="topo-cloud-import-btn" style="display:none" title="Pull panel names + layout from Tigo's cloud">Import from Tigo cloud</button>
+        <button class="btn" id="topo-edit-btn" title="Add inverters, MPPTs and strings, and drag panels into place">Edit layout</button>
+        <button class="btn" id="topo-cancel-btn" style="display:none">Cancel</button>
+        <button class="btn primary" id="topo-save-btn" style="display:none">Save layout</button>
+      </div>
+      <div id="topo-ed-error" class="topo-ed-error" role="alert"></div>
+      <div id="topo-new" class="topo-new" style="display:none" role="status"></div>
+      <div id="topo-pending" class="topo-pending" style="display:none" role="status">
+        <div class="topo-pending-row">
+          <span id="topo-pending-text"></span>
+          <button class="btn" id="topo-pending-review">Review</button>
+          <button class="btn" id="topo-pending-keep" title="Keep your layout; the same one won't ask again">Keep mine</button>
+          <button class="btn" id="topo-pending-use">Use theirs</button>
+        </div>
+        <ul id="topo-pending-list" class="topo-pending-list" style="display:none"></ul>
       </div>
 
       <div id="topo-tree" class="topo-tree">
@@ -934,8 +1174,20 @@
     <!-- NODES -->
     <section class="view" id="view-nodes">
       <div class="topbar">
-        <h1>Node Table</h1>
+        <h1>Devices</h1>
         <div class="topbar-meta" id="nodes-meta">—</div>
+      </div>
+
+      <!-- Pi build: the TAPs, from /api/versions. -->
+      <div id="devices-taps" style="display:none">
+        <div class="section-title devices-head">TAPs</div>
+        <div class="table-wrap">
+          <table class="nodes">
+            <thead><tr><th>Addr</th><th>Model</th><th>Firmware</th><th>Since</th><th>Last read</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <div class="section-title devices-head">Optimizers</div>
       </div>
 
       <div class="table-toolbar">
@@ -971,6 +1223,7 @@
               <th class="num" data-sort="temp">Temp</th>
               <th class="num" data-sort="age">Age</th>
               <th data-sort="state">State</th>
+              <th class="fw" data-sort="fw">Firmware</th>
             </tr>
           </thead>
           <tbody id="nodes-tbody">
@@ -980,23 +1233,78 @@
       </div>
     </section>
 
-    <!-- TOOLS -->
-    <section class="view" id="view-tools">
+    <!-- SETTINGS -->
+    <section class="view" id="view-settings">
       <div class="topbar">
-        <h1>Tools</h1>
-        <div class="topbar-meta" id="tools-meta">Configuration helpers and maintenance</div>
+        <h1>Settings</h1>
+        <div class="topbar-meta" id="settings-meta"></div>
+      </div>
+      <!-- The Pi's tabs show when /api/status reports platform: 'linux';
+           the ESP32 takes those settings from YAML instead. -->
+      <div class="page-tabs" role="tablist" aria-label="Settings" id="settings-tabs">
+        <button role="tab" id="settings-tab-bus" aria-controls="settings-bus" aria-selected="false" data-tab="bus" data-linux-only style="display:none">Bus</button>
+        <button role="tab" id="settings-tab-ha" aria-controls="settings-ha" aria-selected="false" data-tab="ha" data-linux-only style="display:none">MQTT</button>
+        <button role="tab" id="settings-tab-inverters" aria-controls="settings-inverters" aria-selected="false" data-tab="inverters" data-linux-only style="display:none">Inverters</button>
+        <button role="tab" id="settings-tab-web" aria-controls="settings-web" aria-selected="false" data-tab="web" data-linux-only style="display:none">Web UI</button>
+        <button role="tab" id="settings-tab-general" aria-controls="settings-general" aria-selected="false" data-tab="general">General</button>
+        <button role="tab" id="settings-tab-yaml" aria-controls="settings-yaml" aria-selected="false" data-tab="yaml" data-esp-only>YAML</button>
+        <button role="tab" id="settings-tab-maintenance" aria-controls="settings-maintenance" aria-selected="false" data-tab="maintenance">Maintenance</button>
       </div>
 
-      <!-- Raspberry Pi build only (linux/): shown when /api/status reports
-           platform: 'linux'. The ESP32 gets these from YAML instead. -->
+      <div class="settings-panel" id="settings-bus" role="tabpanel" aria-labelledby="settings-tab-bus" hidden>
       <div class="section-head" data-linux-only style="display:none">
-        <div class="section-title">Home Assistant</div>
+        <div class="section-title">RS485 adapter</div>
+        <div class="section-sub" id="pi-port-state">—</div>
+      </div>
+      <div class="tools-card" data-linux-only style="display:none">
+        <p class="hint">Nothing is opened until you choose the adapter here, so other serial devices on this machine, such as a Zigbee stick, are left alone. Listing the ports does not open them.</p>
+        <div class="cfg-row">
+          <div class="cfg-text"><strong>Serial port</strong><span>The RS485 adapter on the Tigo bus</span></div>
+          <div class="cfg-ctrl"><select class="cfg-input" id="pi-serial"></select> <button class="btn" id="pi-serial-rescan">Rescan</button></div>
+        </div>
+        <div class="cfg-row">
+          <div class="cfg-text"><strong>Bus role</strong><span>Listen beside the CCA; run the bus in its place with the CCA unplugged; or stand by, beside a CCA or another master, and take the bus over if it stops (experimental)</span></div>
+          <div class="cfg-ctrl"><select class="cfg-input" id="pi-bus-role"><option value="listen">Listen, beside the CCA</option><option value="master">Master, in place of the CCA</option><option value="standby">Standby, takes over if the master stops</option></select></div>
+        </div>
+        <div class="cfg-row" id="pi-takeover-row" style="display:none">
+          <div class="cfg-text"><strong>Take over after</strong><span>Seconds with no master heard before this one runs the bus. Of two standbys, give the one you prefer the shorter time. The default 3 s suits two monitors; beside a working CCA use 30 s or more, since a CCA that reboots is quiet for longer than that and never gives the bus back. Losing power on one master no longer stops the array: the other takes over, so rapid shutdown must cut the TAP's own power</span></div>
+          <div class="cfg-ctrl"><input class="cfg-input" id="pi-takeover" type="number" min="2" max="60" placeholder="3"></div>
+        </div>
+        <div class="cfg-row" id="pi-startup-row" style="display:none">
+          <div class="cfg-text"><strong>Bring up the TAP</strong><span>If the gateway is found at its factory address (after a power cut), re-address it and start it. Needs the real CCA on hand to recover a stranded gateway (experimental)</span></div>
+          <div class="cfg-ctrl"><label class="cfg-switch"><input type="checkbox" id="pi-startup"> <span>Off</span></label></div>
+        </div>
+        <div class="cfg-row" id="pi-housekeeping-row" style="display:none">
+          <div class="cfg-text"><strong>Send the CCA's housekeeping</strong><span id="pi-housekeeping-hint">Send the CCA's 0x41 to each optimizer in turn, its hourly 0x0B00 and 0x22, and its reads of the TAP's node table (experimental)</span></div>
+          <div class="cfg-ctrl"><label class="cfg-switch"><input type="checkbox" id="pi-housekeeping"> <span>Off</span></label></div>
+        </div>
+        <div class="cfg-row" id="pi-queries-row" style="display:none">
+          <div class="cfg-text"><strong>Query the optimizers</strong><span>Ask each optimizer the CCA's five questions (version, tests, info, smart, MPPT), again until it answers (experimental)</span></div>
+          <div class="cfg-ctrl"><label class="cfg-switch"><input type="checkbox" id="pi-queries"> <span>Off</span></label></div>
+        </div>
+        <div class="cfg-row" id="pi-writes-row" style="display:none">
+          <div class="cfg-text"><strong>Let queries change optimizer settings</strong><span>Send the CCA's two writes when an optimizer's answer calls for them: #00w255 after an Info reading 00, and Smrt mode S after one in mode N. Needs Query the optimizers (experimental)</span></div>
+          <div class="cfg-ctrl"><label class="cfg-switch"><input type="checkbox" id="pi-writes"> <span>Off</span></label></div>
+        </div>
+        <div class="cfg-row" id="pi-bridge-row" style="display:none">
+          <div class="cfg-text"><strong>Bridge address</strong><span>host:port of an ESP32 running stream_server, or an RS485-to-Ethernet converter in TCP server mode</span></div>
+          <div class="cfg-ctrl"><input class="cfg-input" id="pi-bridge" autocomplete="off" placeholder="tigo-bridge.local:6638"></div>
+        </div>
+        <div class="tools-actions" style="margin-top:12px">
+          <button class="btn primary" id="pi-port-save">Save</button>
+        </div>
+      </div>
+      </div>
+
+      <div class="settings-panel" id="settings-ha" role="tabpanel" aria-labelledby="settings-tab-ha" hidden>
+      <div class="section-head" data-linux-only style="display:none">
+        <div class="section-title">MQTT</div>
         <div class="section-sub" id="pi-mqtt-state">—</div>
       </div>
       <div class="tools-card" data-linux-only style="display:none">
         <p class="hint">Panels show up in Home Assistant by themselves over MQTT. Point this at the broker Home Assistant already uses — for most people that is the Mosquitto add-on, at your Home Assistant's address, with the username and password of a Home Assistant user.</p>
         <div class="cfg-row">
-          <div class="cfg-text"><strong>Broker address</strong><span class="cfg-default">Leave empty to turn MQTT off</span></div>
+          <div class="cfg-text"><strong>Broker address</strong><span>Leave empty to turn MQTT off</span></div>
           <div class="cfg-ctrl"><input class="cfg-input" id="pi-mqtt-host" placeholder="homeassistant.local" autocomplete="off"></div>
         </div>
         <div class="cfg-row">
@@ -1008,54 +1316,36 @@
           <div class="cfg-ctrl"><input class="cfg-input" id="pi-mqtt-user" autocomplete="off"></div>
         </div>
         <div class="cfg-row">
-          <div class="cfg-text"><strong>Password</strong><span class="cfg-default" id="pi-mqtt-pass-hint"></span></div>
+          <div class="cfg-text"><strong>Password</strong><span id="pi-mqtt-pass-hint"></span></div>
           <div class="cfg-ctrl"><input class="cfg-input" id="pi-mqtt-pass" type="password" autocomplete="new-password"></div>
         </div>
         <div class="cfg-row">
-          <div class="cfg-text"><strong>Topic</strong><span class="cfg-default" id="pi-mqtt-topic-hint"></span></div>
+          <div class="cfg-text"><strong>Topic</strong><span id="pi-mqtt-topic-hint"></span></div>
           <div class="cfg-ctrl"><input class="cfg-input" id="pi-mqtt-topic" placeholder="tigomonitor" autocomplete="off"></div>
         </div>
         <div class="cfg-row">
-          <div class="cfg-text"><strong>Discovery prefix</strong><span class="cfg-default">Where Home Assistant looks for new devices; leave it unless you changed it in Home Assistant</span></div>
+          <div class="cfg-text"><strong>Home Assistant discovery</strong><span>Off: readings still go to the topic above, but Home Assistant does not add them as devices, and the ones it already added are removed</span></div>
+          <div class="cfg-ctrl"><label class="cfg-switch"><input type="checkbox" id="pi-mqtt-disc-on"> <span>On</span></label></div>
+        </div>
+        <div class="cfg-row">
+          <div class="cfg-text"><strong>Discovery prefix</strong><span>Where Home Assistant looks for new devices; leave it unless you changed it in Home Assistant</span></div>
           <div class="cfg-ctrl"><input class="cfg-input" id="pi-mqtt-discovery" placeholder="homeassistant" autocomplete="off"></div>
+        </div>
+        <div class="cfg-row">
+          <div class="cfg-text"><strong>Panel readings while standing by</strong><span>For a standby: off, it sends only its own status until it takes the bus, so the panels come from the master alone. On, it sends its readings to the topic above too. Home Assistant's panels follow whichever one runs the bus either way</span></div>
+          <div class="cfg-ctrl"><label class="cfg-switch"><input type="checkbox" id="pi-mqtt-standby-panels"> <span>Off</span></label></div>
+        </div>
+        <div class="cfg-row">
+          <div class="cfg-text"><strong>PV output switch</strong><span>A switch in Home Assistant that turns the array's output off and on, as on the Bus page. Anyone who can publish to the broker can use it: give this monitor its own broker login</span></div>
+          <div class="cfg-ctrl"><label class="cfg-switch"><input type="checkbox" id="pi-mqtt-pv-switch"> <span>Off</span></label></div>
         </div>
         <div class="tools-actions" style="margin-top:12px">
           <button class="btn primary" id="pi-save">Save</button>
         </div>
       </div>
-
-      <div class="section-head" data-linux-only style="display:none">
-        <div class="section-title">RS485 adapter and web UI</div>
-        <div class="section-sub" id="pi-port-state">—</div>
-      </div>
-      <div class="tools-card" data-linux-only style="display:none">
-        <p class="hint">Nothing is opened until you choose the adapter here, so other serial devices on this machine, such as a Zigbee stick, are left alone. Listing the ports does not open them.</p>
-        <div class="cfg-row">
-          <div class="cfg-text"><strong>Serial port</strong><span class="cfg-default">The RS485 adapter on the Tigo bus</span></div>
-          <div class="cfg-ctrl"><select class="cfg-input" id="pi-serial"></select> <button class="btn" id="pi-serial-rescan">Rescan</button></div>
-        </div>
-        <div class="cfg-row" id="pi-bridge-row" style="display:none">
-          <div class="cfg-text"><strong>Bridge address</strong><span class="cfg-default">host:port of an ESP32 running stream_server, or an RS485-to-Ethernet converter in TCP server mode</span></div>
-          <div class="cfg-ctrl"><input class="cfg-input" id="pi-bridge" autocomplete="off" placeholder="tigo-bridge.local:6638"></div>
-        </div>
-        <div class="cfg-row">
-          <div class="cfg-text"><strong>Web UI port</strong><span class="cfg-default">Empty: 80, or 8080 when another web server has 80. Takes effect after a restart</span></div>
-          <div class="cfg-ctrl"><input class="cfg-input" id="pi-web-port" type="number" min="1" max="65535" placeholder="80"></div>
-        </div>
-        <div class="cfg-row">
-          <div class="cfg-text"><strong>Web UI username</strong><span class="cfg-default">For the login below</span></div>
-          <div class="cfg-ctrl"><input class="cfg-input" id="pi-web-user" autocomplete="off" placeholder="admin"></div>
-        </div>
-        <div class="cfg-row">
-          <div class="cfg-text"><strong>Web UI password</strong><span class="cfg-default" id="pi-web-pass-hint">Empty: anyone on your network can open this page and change settings</span></div>
-          <div class="cfg-ctrl"><input class="cfg-input" id="pi-web-pass" type="password" autocomplete="new-password"></div>
-        </div>
-        <div class="tools-actions" style="margin-top:12px">
-          <button class="btn primary" id="pi-port-save">Save</button>
-          <button class="btn" id="pi-web-pass-remove" style="display:none">Remove password</button>
-        </div>
       </div>
 
+      <div class="settings-panel" id="settings-inverters" role="tabpanel" aria-labelledby="settings-tab-inverters" hidden>
       <div class="section-head" data-linux-only style="display:none">
         <div class="section-title">Inverters</div>
         <div class="section-sub" id="pi-inv-sub">—</div>
@@ -1068,46 +1358,70 @@
           <button class="btn primary" id="pi-inv-save">Save</button>
         </div>
       </div>
+      </div>
 
+      <div class="settings-panel" id="settings-web" role="tabpanel" aria-labelledby="settings-tab-web" hidden>
       <div class="section-head">
-        <div class="section-title">Device Configuration</div>
+        <div class="section-title">Web UI</div>
+      </div>
+      <div class="tools-card">
+        <div class="cfg-row">
+          <div class="cfg-text"><strong>Web UI port</strong><span>Empty: 80, or 8080 when another web server has 80; with HTTPS, 443 or 8443. Takes effect after a restart</span></div>
+          <div class="cfg-ctrl"><input class="cfg-input" id="pi-web-port" type="number" min="1" max="65535" placeholder="80"></div>
+        </div>
+        <div class="cfg-row">
+          <div class="cfg-text"><strong>HTTPS certificate</strong><span id="pi-tls-hint">Empty: plain HTTP</span></div>
+          <div class="cfg-ctrl"><input class="cfg-input" id="pi-tls-cert" autocomplete="off" placeholder="/var/lib/tigomonitor/fullchain.pem"></div>
+        </div>
+        <div class="cfg-row">
+          <div class="cfg-text"><strong>HTTPS key</strong><span>The certificate's private key, unencrypted PEM</span></div>
+          <div class="cfg-ctrl"><input class="cfg-input" id="pi-tls-key" autocomplete="off" placeholder="/var/lib/tigomonitor/privkey.pem"></div>
+        </div>
+        <div class="cfg-row">
+          <div class="cfg-text"><strong>Web UI username</strong><span>For the login below</span></div>
+          <div class="cfg-ctrl"><input class="cfg-input" id="pi-web-user" autocomplete="off" placeholder="admin"></div>
+        </div>
+        <div class="cfg-row">
+          <div class="cfg-text"><strong>Web UI password</strong><span id="pi-web-pass-hint">Empty: anyone on your network can open this page and change settings</span></div>
+          <div class="cfg-ctrl"><input class="cfg-input" id="pi-web-pass" type="password" autocomplete="new-password"></div>
+        </div>
+        <div class="tools-actions" style="margin-top:12px">
+          <button class="btn primary" id="pi-web-save">Save</button>
+          <button class="btn" id="pi-web-pass-remove" style="display:none">Remove password</button>
+        </div>
+      </div>
+
+      <div class="section-head" data-linux-only style="display:none">
+        <div class="section-title">Sidebar</div>
+        <div class="section-sub" id="pi-pages-status"></div>
+      </div>
+      <div class="tools-card" data-linux-only style="display:none">
+        <p class="hint">Leave out the pages a site without a CCA or a Tigo account has no use for. A switch saves as you flip it. Hiding a page only takes it out of the sidebar: anything set up there, such as a CCA sync at startup, carries on.</p>
+        <div class="cfg-row">
+          <div class="cfg-text"><strong>CCA Info page</strong><span>The CCA's status, its connection, Wi-Fi setup and topology discovery</span></div>
+          <div class="cfg-ctrl"><label class="cfg-switch"><input type="checkbox" id="pi-show-cca" checked> <span>On</span></label></div>
+        </div>
+        <div class="cfg-row">
+          <div class="cfg-text"><strong>Tigo Cloud page</strong><span>Your Tigo account's status, and its box in the sidebar</span></div>
+          <div class="cfg-ctrl"><label class="cfg-switch"><input type="checkbox" id="pi-show-cloud" checked> <span>On</span></label></div>
+        </div>
+      </div>
+      </div>
+
+      <div class="settings-panel" id="settings-general" role="tabpanel" aria-labelledby="settings-tab-general" hidden>
+      <div class="section-head">
+        <div class="section-title">Device configuration</div>
         <div class="section-sub" id="cfg-sub">Stored on-device · overrides YAML</div>
       </div>
       <div class="tools-card">
         <p class="hint" id="cfg-hint">These knobs are saved to the ESP32 and take effect without reflashing. A stored value <b>overrides the YAML default</b> until you revert it — after that, editing the YAML applies again. <span id="cfg-status" style="color:var(--text-dim)"></span></p>
         <div id="cfg-rows"></div>
       </div>
-
-      <div class="section-head">
-        <div class="section-title">Maintenance</div>
-        <div class="section-sub">Resets and reboot</div>
-      </div>
-      <div class="tools-card">
-        <div class="danger-row">
-          <div class="danger-text">
-            <strong>Reset peak power</strong>
-            <span>Clears the per-device peak-power high-water marks back to live readings.</span>
-          </div>
-          <button class="btn" id="tools-reset-peak">Reset peaks</button>
-        </div>
-        <div class="danger-row">
-          <div class="danger-text">
-            <strong>Clear node table</strong>
-            <span>Drops the persisted UART/CCA node table. Devices repopulate as their next telemetry frames arrive.</span>
-          </div>
-          <button class="btn danger" id="tools-reset-nodes">Clear nodes</button>
-        </div>
-        <div class="danger-row">
-          <div class="danger-text">
-            <strong>Restart device</strong>
-            <span>Reboots the ESP32. UART will drop briefly; the dashboard will reconnect on its own.</span>
-          </div>
-          <button class="btn danger" id="tools-restart">Restart</button>
-        </div>
       </div>
 
+      <div class="settings-panel" id="settings-yaml" role="tabpanel" aria-labelledby="settings-tab-yaml" hidden>
       <div class="section-head" data-esp-only>
-        <div class="section-title">YAML Configuration</div>
+        <div class="section-title">YAML configuration</div>
         <div class="section-sub" id="tools-yaml-sub">— devices</div>
       </div>
       <div class="tools-card" data-esp-only>
@@ -1142,14 +1456,134 @@
           <button class="btn primary" id="tools-yaml-copy">Copy to clipboard</button>
         </div>
       </div>
+      </div>
 
+      <div class="settings-panel" id="settings-maintenance" role="tabpanel" aria-labelledby="settings-tab-maintenance" hidden>
+      <div class="section-head">
+        <div class="section-title">Maintenance</div>
+        <div class="section-sub">Resets and reboot</div>
+      </div>
+      <div class="tools-card">
+        <div class="danger-row">
+          <div class="danger-text">
+            <strong>Reset peak power</strong>
+            <span>Clears the per-device peak-power high-water marks back to live readings.</span>
+          </div>
+          <button class="btn" id="tools-reset-peak">Reset peaks</button>
+        </div>
+        <div class="danger-row">
+          <div class="danger-text">
+            <strong>Clear node table</strong>
+            <span>Drops the persisted UART/CCA node table. Devices repopulate as their next telemetry frames arrive.</span>
+          </div>
+          <button class="btn danger" id="tools-reset-nodes">Clear nodes</button>
+        </div>
+        <div class="danger-row">
+          <div class="danger-text">
+            <strong>Restart device</strong>
+            <span>Reboots the ESP32. UART will drop briefly; the dashboard will reconnect on its own.</span>
+          </div>
+          <button class="btn danger" id="tools-restart">Restart</button>
+        </div>
+      </div>
+      </div>
     </section>
 
     <!-- DIAGNOSTICS -->
+    <!-- BUS MASTER (the Pi, running or standing by for the bus) -->
+    <section class="view" id="view-busmaster">
+      <div class="topbar">
+        <h1>Bus</h1>
+        <div class="topbar-meta"><span class="badge stale" id="bm-meta">—</span></div>
+      </div>
+      <div class="bus-tabs" role="tablist">
+        <a href="#busmaster" role="tab" aria-selected="true">Control</a>
+        <a href="#buslog" role="tab" aria-selected="false">Traffic</a>
+      </div>
+
+      <div class="section-head">
+        <div class="section-title">PV output</div>
+      </div>
+      <div class="tools-card" id="pv-card">
+        <div class="pv-row">
+          <div class="cfg-text"><strong class="pv-title"><span class="dot dim" id="pv-dot"></span><span id="pv-state">PV output is on</span></strong><span id="pv-detail">—</span></div>
+          <button class="btn" id="pv-toggle">Turn off</button>
+        </div>
+        <div class="pv-msg" id="pv-status"></div>
+        <div class="pv-msg" id="pv-still"></div>
+        <p class="pv-note">The CCA's PV-safe button, sent through the TAP. This should not be used as rapid shutdown. Optimizers that also follow the RSS signal keep producing while the inverter's transmitter runs.</p>
+      </div>
+
+      <div class="section-head">
+        <div class="section-title">Discovery window</div>
+      </div>
+      <div class="tools-card" id="disc-card">
+        <div class="pv-row">
+          <div class="cfg-text"><strong class="pv-title"><span class="dot dim" id="disc-dot"></span><span id="disc-state">Enabled</span></strong><span id="disc-detail">—</span></div>
+          <button class="btn" id="disc-toggle">Disable</button>
+        </div>
+        <div class="pv-msg" id="disc-status"></div>
+        <p class="pv-note">The TAP's window for new optimizers to join. Disabled, the panels keep reporting and producing; enable it before adding an optimizer.</p>
+      </div>
+
+      <div class="section-head" id="diag-master-head">
+        <div class="section-title">Health</div>
+        <div class="section-sub" id="diag-master-sub"></div>
+      </div>
+      <div class="hist-stat-grid" id="diag-master">
+        <div class="hist-stat-card">
+          <div class="hist-stat-label">Discovery window</div>
+          <div class="hist-stat-val" id="diag-discovery">—<span class="hist-stat-unit">s</span></div>
+          <div class="hist-stat-sub" id="diag-discovery-sub">—</div>
+        </div>
+        <div class="hist-stat-card">
+          <div class="hist-stat-label">Renewals</div>
+          <div class="hist-stat-val" id="diag-renewals">—</div>
+          <div class="hist-stat-sub">since the service started</div>
+        </div>
+        <div class="hist-stat-card">
+          <div class="hist-stat-label">Polls</div>
+          <div class="hist-stat-val" id="diag-polls">—</div>
+          <div class="hist-stat-sub" id="diag-timeouts">— unanswered</div>
+        </div>
+        <div class="hist-stat-card">
+          <div class="hist-stat-label">Longest pause</div>
+          <div class="hist-stat-val" id="diag-gap">—<span class="hist-stat-unit">ms</span></div>
+          <div class="hist-stat-sub" id="diag-gap-sub">—</div>
+        </div>
+        <div class="hist-stat-card">
+          <div class="hist-stat-label">Gateway dropouts</div>
+          <div class="hist-stat-val" id="diag-tap-lost">—</div>
+          <div class="hist-stat-sub" id="diag-tap-lost-sub">—</div>
+        </div>
+        <div class="hist-stat-card">
+          <div class="hist-stat-label">Housekeeping</div>
+          <div class="hist-stat-val" id="diag-housekeeping">—</div>
+          <div class="hist-stat-sub" id="diag-housekeeping-sub">—</div>
+        </div>
+        <div class="hist-stat-card">
+          <div class="hist-stat-label">Optimizer queries</div>
+          <div class="hist-stat-val" id="diag-queries">—</div>
+          <div class="hist-stat-sub" id="diag-queries-sub">—</div>
+        </div>
+        <div class="hist-stat-card">
+          <div class="hist-stat-label">Gateway version</div>
+          <div class="hist-stat-val" id="diag-tap-version">—</div>
+          <div class="hist-stat-sub" id="diag-tap-version-sub">—</div>
+        </div>
+      </div>
+
+    </section>
+
     <section class="view" id="view-diagnostics">
       <div class="topbar">
         <h1>Diagnostics</h1>
         <div class="topbar-meta" id="diag-meta">—</div>
+      </div>
+      <!-- Logs is the Pi's alone: the ESP32 keeps one page, without tabs. -->
+      <div class="page-tabs" role="tablist" data-linux-only style="display:none">
+        <a href="#diagnostics" role="tab" aria-selected="true">Health</a>
+        <a href="#logs" role="tab" aria-selected="false">Logs</a>
       </div>
 
       <div class="section-head">
@@ -1260,11 +1694,74 @@
       </div>
     </section>
 
+    <!-- LOGS (Raspberry Pi build) -->
+    <section class="view" id="view-logs">
+      <div class="topbar">
+        <h1>Diagnostics</h1>
+        <div class="topbar-meta" id="logs-meta">—</div>
+      </div>
+      <!-- Logs is the Pi's alone: the ESP32 keeps one page, without tabs. -->
+      <div class="page-tabs" role="tablist" data-linux-only style="display:none">
+        <a href="#diagnostics" role="tab" aria-selected="false">Health</a>
+        <a href="#logs" role="tab" aria-selected="true">Logs</a>
+      </div>
+      <div class="table-toolbar">
+        <input class="input" id="logs-search" placeholder="Filter, e.g. discovery or bus:">
+        <select class="input compact" id="logs-level">
+          <option value="7">Everything</option>
+          <option value="6" selected>Info and above</option>
+          <option value="4">Warnings and errors</option>
+          <option value="3">Errors only</option>
+        </select>
+        <button class="btn" id="logs-pause">Pause</button>
+        <button class="btn" id="logs-download">Download</button>
+      </div>
+      <div class="logs-box" id="logs-box"><div class="logs-empty">Loading…</div></div>
+      <p class="table-meta" style="margin-top:10px">The last 2,000 lines since the service started, about two days. Older ones are in the journal (<code>journalctl -u tigomonitord</code>). Debug lines appear only when the service runs <span style="white-space:nowrap">with <code>--verbose</code></span>, and only the last 500 are kept.</p>
+    </section>
+
+    <!-- BUS LOG (the Pi): each request with what came back; polls counted -->
+    <section class="view" id="view-buslog">
+      <div class="topbar">
+        <h1>Bus</h1>
+        <div class="topbar-meta" id="buslog-meta">—</div>
+      </div>
+      <div class="bus-tabs" role="tablist">
+        <a href="#busmaster" role="tab" aria-selected="false">Control</a>
+        <a href="#buslog" role="tab" aria-selected="true">Traffic</a>
+      </div>
+      <div class="tools-card" id="bus-alarm-card" style="display:none">
+        <div class="pv-row">
+          <div class="cfg-text"><strong class="pv-title">Another device reconfigured the TAP</strong><span id="bus-alarm-detail">—</span></div>
+          <button class="btn" id="bus-alarm-clear">Clear</button>
+        </div>
+        <ul class="bus-alarm-list" id="bus-alarm-list"></ul>
+        <p class="pv-note">No master here sends these frames, so another device on the bus did: most likely a CCA. A CCA rewrites the TAP's network ID and key, and can change its channel or reflash it; the optimizers then drop off. Unplug it, check every panel is reporting, then clear this.</p>
+      </div>
+      <section class="bx-strip" id="bus-strip" aria-label="The last 5 minutes"></section>
+      <div class="table-toolbar">
+        <span id="bus-chips" role="group" aria-label="Show" style="display:flex;gap:6px;flex-wrap:wrap"></span>
+        <input class="input" id="buslog-search" placeholder="Filter, e.g. 0002 or GatewayCfg">
+        <button class="btn" id="buslog-pause">Pause</button>
+      </div>
+      <div class="bx-table" id="bus-box" role="table" aria-label="Exchanges">
+        <div class="bx-cols" role="row"><span>Time</span><span>From</span><span>TAP</span><span>Exchange</span><span>Node</span><span>Result</span><span>Round trip</span><span>Summary</span></div>
+        <div id="bus-rows"><div class="bx-empty">Loading…</div></div>
+      </div>
+      <p class="table-meta" style="margin-top:10px">The last 300 exchanges, newest last: each request with what came back, paired by the tunnel's sequence number or the reply's command. Polls are counted in the strip, not listed. Click a row for its bytes; the TAP's network config block, which holds its network key, is the only thing hidden. Round trips are exact when this monitor runs the bus; listening, they are only as fine as the reads, about 16 ms.</p>
+    </section>
+
     <!-- CCA -->
     <section class="view" id="view-cca">
       <div class="topbar">
         <h1>CCA Info</h1>
         <div class="topbar-meta" id="cca-meta">Tigo CCA configuration mirror</div>
+      </div>
+
+      <div class="tools-card" id="cca-master-banner" style="display:none;border-color:var(--accent)">
+        <div style="font-weight:600;margin-bottom:4px">The Pi is running the bus</div>
+        <div style="color:var(--text-dim);font-size:13px">The CCA is off the bus. Panel names, strings and
+          layout below are from its last sync, and keep working without it.</div>
       </div>
 
       <div class="section-head">
@@ -1551,8 +2048,29 @@
   });
 
   // ===== View switching with hash routing =====
+  // Pages the Pi's settings leave out of the sidebar (show_cca_page,
+  // show_cloud_page). A link to one opens the Dashboard instead.
+  const hiddenPages = new Set();
+  // The Bus item: Control while this monitor runs the bus, else Traffic.
+  let busControl = false;
+  // Old names of pages, so links and bookmarks to them still work.
+  const viewAliases = { tools: 'settings' };
   function showView(id) {
-    document.querySelectorAll('#nav button').forEach(b => b.classList.toggle('active', b.dataset.view === id));
+    id = viewAliases[id] || id;
+    if (id === 'bus') id = busControl ? 'busmaster' : 'buslog';
+    if (hiddenPages.has(id)) id = 'dashboard';
+    // Leaving the Topology editor with changes not saved asks first.
+    if (id !== 'topology' && typeof topoEditor !== 'undefined' && topoEditor.active) {
+      if (topoEditor.dirty && !confirm('Leave the Topology editor? Your layout changes are not saved.')) {
+        if (window.location.hash !== '#topology') history.replaceState(null, '', '#topology');
+        return;
+      }
+      topoEditor.active = false;
+      topoEditor.dirty = false;
+      topoEdToolbar(false);
+    }
+    const navId = id === 'busmaster' || id === 'buslog' ? 'bus' : id === 'logs' ? 'diagnostics' : id;
+    document.querySelectorAll('#nav button').forEach(b => b.classList.toggle('active', b.dataset.view === navId));
     document.querySelectorAll('.view').forEach(v => v.classList.toggle('active', v.id === 'view-' + id));
     if (window.location.hash !== '#' + id) {
       history.replaceState(null, '', '#' + id);
@@ -1560,6 +2078,7 @@
     window.scrollTo(0, 0);
     // Auto-close the mobile drawer on view selection.
     document.querySelector('.app').classList.remove('menu-open');
+    document.dispatchEvent(new CustomEvent('viewshown', { detail: id }));
   }
 
   document.querySelectorAll('#nav button').forEach(btn => {
@@ -1574,12 +2093,14 @@
   sidebarOverlay.addEventListener('click', () => appShell.classList.remove('menu-open'));
 
   window.addEventListener('hashchange', () => {
-    const v = window.location.hash.replace(/^#/, '') || 'dashboard';
+    const h = window.location.hash.replace(/^#/, '') || 'dashboard';
+    const v = viewAliases[h] || h;
     if (document.getElementById('view-' + v)) showView(v);
   });
 
   // Initial view from hash, default 'dashboard'.
-  const initialView = window.location.hash.replace(/^#/, '') || 'dashboard';
+  const initialHash = window.location.hash.replace(/^#/, '') || 'dashboard';
+  const initialView = viewAliases[initialHash] || initialHash;
   if (document.getElementById('view-' + initialView)) showView(initialView);
 
   // ===== Sidebar overview live data =====
@@ -1622,7 +2143,8 @@
     return parts.join(' ');
   }
   function refreshBrandUptime() {
-    apiFetch('/api/health').then(r => r.ok ? r.json() : null).then(d => {
+    // A problem answers 503, with the same JSON: the uptime still shows.
+    apiFetch('/api/health').then(r => r.ok || r.status === 503 ? r.json() : null).then(d => {
       if (d && d.uptime !== undefined) {
         document.getElementById('brand-sub').textContent = `up ${fmtBrandUptime(d.uptime)}`;
       }
@@ -1820,7 +2342,7 @@
               data-barcode6="${bc6}"
               data-name="${id}"
               data-string="${s.display_label || s.label}"
-              data-mppt="${s.mppt || ''}"
+              data-mppt="${mpptName(s.mppt) || ''}"
               data-power="${w.toFixed(1)}">
               <span class="pht-id">${id}</span>
               <span class="pht-w">${wText}${pctText}</span>
@@ -1839,7 +2361,7 @@
           : '';
         html += `
           <div class="panel-string-row">
-            <div class="panel-string-label">${stringLabel}<br><span style="color:var(--text-faint);font-size:10px">${s.mppt}</span>${stringRatedPct}</div>
+            <div class="panel-string-label">${stringLabel}<br><span style="color:var(--text-faint);font-size:10px">${mpptName(s.mppt)}</span>${stringRatedPct}</div>
             <div class="panel-string-bars">${tiles}</div>
           </div>
         `;
@@ -1863,7 +2385,7 @@
         stringMap[s.label] = {
           inv: inv.name,
           invDisplay: inv.display_name || inv.name,
-          mppt: s.mppt,
+          mppt: mpptName(s.mppt),
           stringDisplay: s.display_label || s.label,
         };
       }
@@ -1951,6 +2473,12 @@
   }
 
   let dashLastErr = null;
+  // MPPT label -> the name the Topology editor gave it, from /api/inverters
+  // (mppt_names). Each inverter can have its own MPPT 1; the label, which
+  // panels carry, stays unique across the site. Pages show the name.
+  let mpptNames = {};
+  const mpptName = label => (label && mpptNames[label]) || label;
+
   async function refreshDashboard() {
     if (!document.getElementById('view-dashboard').classList.contains('active')) {
       // Page hidden — don't pay for the fetches.
@@ -1965,6 +2493,7 @@
       ]);
       const ov   = await ovR.json();
       const inv  = await invR.json();
+      mpptNames = inv.mppt_names || {};
       const dev  = await devR.json();
       const hist = histR.ok ? await histR.json() : { history: [] };
 
@@ -2017,11 +2546,12 @@
   setInterval(refreshDashboard, 5000);
 
   // The Raspberry Pi build answers /api/status with platform: 'linux'; the
-  // ESP32 omits it. Swap the ESP32-only Tools sections for the Pi's settings.
+  // ESP32 omits it. Swap the ESP32-only Settings tabs for the Pi's.
   let PLATFORM = 'esp32';
   const platformReady = apiFetch('/api/status').then(r => r.ok ? r.json() : {}).then(s => {
     if (s.platform !== 'linux') return;
     PLATFORM = 'linux';
+    apiFetch('/api/settings').then(r => r.ok ? r.json() : null).then(st => { if (st) piApplyPages(st); }).catch(() => {});
     document.querySelectorAll('[data-esp-only]').forEach(el => { el.style.display = 'none'; });
     document.querySelectorAll('[data-linux-only]').forEach(el => { el.style.display = ''; });
     document.getElementById('hist-backing').textContent = 'Stored on the SD card · persists across reboots';
@@ -2033,7 +2563,7 @@
     restart.previousElementSibling.innerHTML =
       '<strong>Restart service</strong><span>Restarts the monitor service. Readings pause for a few seconds.</span>';
     restart.textContent = 'Restart service';
-    refreshTools();
+    refreshSettings();
   }).catch(() => {});
 
   // ===== Panel detail modal =====
@@ -2611,6 +3141,33 @@
     return Math.floor(s / 3600) + 'h';
   }
 
+  // A new optimizer: one the monitor first heard in the last week (after its
+  // own first day; first_heard_unix 0 otherwise) that no string holds yet.
+  // A replacement shows up as one. The Pi reports first_heard_unix.
+  const NEW_OPTIMIZER_S = 7 * 86400;
+  function isNewOptimizer(firstHeard, placed) {
+    return !!firstHeard && !placed && Date.now() / 1000 - firstHeard < NEW_OPTIMIZER_S;
+  }
+
+  // Missing: no reading for 3 days, or the TAP's roster stopped listing it a
+  // day before its newest entry (a dead or removed optimizer). Not set up:
+  // its !Mppt answer's flag is N, its config items not all set (the CCA's
+  // enrollment writes them). The Pi reports all three; the ESP32 none.
+  const NODE_MISSING_S = 3 * 86400, NODE_OFF_ROSTER_S = 86400;
+  function nodeTags(n, newestRoster) {
+    let html = '';
+    const now = Date.now() / 1000;
+    const when = t => new Date(t * 1000).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+    if (n.known) {}  // the owner knows it isn't reporting: the State column says so
+    else if (n.last_heard_unix && now - n.last_heard_unix >= NODE_MISSING_S)
+      html += ` <span class="node-missing" title="no reading since ${when(n.last_heard_unix)}">Missing</span>`;
+    else if (n.last_roster_unix && newestRoster - n.last_roster_unix >= NODE_OFF_ROSTER_S)
+      html += ` <span class="node-missing" title="the TAP last listed it ${when(n.last_roster_unix)}">Not on the TAP</span>`;
+    const f = n.setup && n.setup.mppt ? n.setup.mppt.split(/\s+/)[3] : null;
+    if (f === 'N') html += ` <span class="node-unset" title="Its settings aren't all written: its !Mppt answer's flag is N. A CCA writes them when it enrolls an optimizer. ${topoEscape(n.setup.mppt)}">Not set up</span>`;
+    return html;
+  }
+
   function renderNodesTable() {
     const tbody = document.getElementById('nodes-tbody');
     const countEl = document.getElementById('nodes-count');
@@ -2618,6 +3175,7 @@
 
     const nodes = nodesData.nodes || [];
     const devices = nodesData.devices || [];
+    const newestRoster = Math.max(0, ...nodes.map(n => n.last_roster_unix || 0));
 
     // Index devices by long_address (the persistent key) and by addr.
     const byLong = {};
@@ -2641,6 +3199,10 @@
       stringMedians[k] = filtered.length % 2 ? filtered[m] : (filtered[m - 1] + filtered[m]) / 2;
     }
 
+    const fwByAddr = {};
+    for (const o of (nodesData.versions && nodesData.versions.optimizers) || []) fwByAddr[o.addr.toUpperCase()] = o;
+    document.querySelector('#view-nodes table.nodes:not(#devices-taps table)').classList.toggle('with-fw', !!nodesData.versions);
+
     const search = nodesFilters.search.toLowerCase();
     const filterString = nodesFilters.stringLabel;
     const filterState = nodesFilters.state;
@@ -2657,7 +3219,7 @@
       const stringLabel = n.cca_string || dev?.string_label || '—';
       // cca_inverter is the pre-rename name, still emitted by the firmware and
       // present in any table exported before the rename.
-      const mpptLabel = n.cca_mppt || n.cca_inverter || '—';
+      const mpptLabel = mpptName(n.cca_mppt) || n.cca_inverter || '—';
       const v = dev?.voltage_in ?? 0;
       const a = dev?.current ?? dev?.current_in ?? 0;
       const w = dev?.power_in ?? 0;
@@ -2672,8 +3234,9 @@
       if (filterString && stringLabel !== filterString) continue;
       if (filterState && state !== filterState) continue;
 
+      const fw = fwByAddr[String(n.addr).toUpperCase()] || null;
       rows.push({ n, name, addr: n.addr, barcodeKey, barcodeShort,
-                  stringLabel, mpptLabel, v, a, w, t, age, state });
+                  stringLabel, mpptLabel, v, a, w, t, age, state, fw });
     }
 
     // Sort by current column. Numeric columns sort numerically; string
@@ -2693,6 +3256,7 @@
         case 'temp':    return r.t;
         case 'age':     return r.age;
         case 'state':   return stateOrder[r.state] ?? 99;
+        case 'fw':      return r.fw ? r.fw.version : '';
         default:        return r.name;
       }
     };
@@ -2709,11 +3273,18 @@
 
     let html = '';
     for (const r of rows) {
-      const stateLabel = r.state === 'ok' ? 'active' : r.state === 'warn' ? 'shaded' :
+      const stateLabel = r.n.known ? 'known' : r.state === 'ok' ? 'active' : r.state === 'warn' ? 'shaded' :
                          r.state === 'bad' ? 'fault' : 'stale';
+      // The Pi can mark one with no reading known: not missing, not counted.
+      const knownBtn = PLATFORM === 'linux' && r.n.long_address && (r.n.known || r.state === 'stale')
+        ? `<button class="btn node-known-btn" data-known-bc="${topoEscape(r.n.long_address)}" data-known="${r.n.known ? '0' : '1'}"
+             title="${r.n.known ? 'Count it again, and flag it if it goes missing'
+                                : "You know it isn't reporting: don't flag it as missing, and leave it out of the counts"}">${r.n.known ? 'Unmark' : 'Mark known'}</button>`
+        : '';
       html += `
-        <tr>
-          <td><strong>${r.name}</strong></td>
+        <tr data-addr="${topoEscape(String(r.addr))}">
+          <td><strong${r.n.setup ? ` title="${topoEscape([r.n.setup.mppt, r.n.setup.info].filter(Boolean).join('\n'))}"` : ''}>${r.name}</strong>${isNewOptimizer(r.n.first_heard_unix, !!r.n.cca_string)
+            ? ` <span class="node-new" title="First heard ${new Date(r.n.first_heard_unix * 1000).toLocaleString()}">New</span>` : ''}${nodeTags(r.n, newestRoster)}${knownBtn}</td>
           <td class="mono">${r.addr}</td>
           <td class="mono">…${r.barcodeShort}</td>
           <td>${r.stringLabel} <span style="color:var(--text-faint)">·</span> ${r.mpptLabel}</td>
@@ -2722,7 +3293,8 @@
           <td class="num"><strong>${r.w.toFixed(0)} W</strong></td>
           <td class="num">${fmtTemp(r.t, 0)} ${tempUnit()}</td>
           <td class="num">${fmtAge(r.age)}</td>
-          <td><span class="badge ${r.state}">${stateLabel}</span></td>
+          <td><span class="badge ${r.n.known ? 'stale' : r.state}"${r.n.known ? ' title="Marked known: not reporting, not counted, not flagged as missing"' : ''}>${stateLabel}</span></td>
+          <td class="mono fw"${r.fw ? ` title="${topoEscape(fwTitle(r.fw))}"` : ''}>${r.fw ? topoEscape(r.fw.version) : '—'}</td>
         </tr>
       `;
     }
@@ -2732,7 +3304,9 @@
     }
     tbody.innerHTML = html;
     countEl.textContent = `${rows.length} of ${nodes.length} shown`;
-    metaEl.textContent = `${nodes.length} discovered · ${devices.filter(d => (d.data_age_ms ?? 999999) < 60000).length} reporting`;
+    const knownCount = nodes.filter(n => n.known).length;
+    metaEl.textContent = `${nodes.length - knownCount} discovered · ${devices.filter(d => (d.data_age_ms ?? 999999) < 60000).length} reporting` +
+      (knownCount ? ` · ${knownCount} known, not reporting` : '');
     updateNodesSortIndicators();
   }
 
@@ -2758,6 +3332,24 @@
     if (labels.includes(current)) sel.value = current;
   }
 
+  // "Mnode since Jan 1, 12:00, was K8.0120 (2D)": a version's tooltip.
+  function fwTitle(v) {
+    const when = ms => new Date(ms).toLocaleString([], { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+    return `${v.model} since ${when(v.since_unix_ms)}` + (v.previous ? `, was ${v.previous}` : '');
+  }
+  function renderTaps() {
+    const box = document.getElementById('devices-taps');
+    const v = nodesData.versions;
+    box.style.display = v ? '' : 'none';
+    if (!v) return;
+    const when = ms => new Date(ms).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+    box.querySelector('tbody').innerHTML = (v.taps || []).length ? v.taps.map(t => `<tr>
+        <td class="mono">${topoEscape(t.addr)}</td><td>${topoEscape(t.model)}</td>
+        <td class="mono"${t.previous ? ` title="was ${topoEscape(t.previous)}"` : ''}><strong>${topoEscape(t.version)}</strong></td>
+        <td>${when(t.since_unix_ms)}</td><td>${when(t.last_unix_ms)}</td></tr>`).join('')
+      : `<tr><td colspan="5" style="color:var(--text-faint)">Not heard yet. The bus master asks the TAP once each time it starts, and the optimizers as it first hears each one.</td></tr>`;
+  }
+
   async function refreshNodes() {
     if (!document.getElementById('view-nodes').classList.contains('active')) return;
     try {
@@ -2768,7 +3360,11 @@
       nodesData = {
         nodes: (await nR.json()).nodes || [],
         devices: (await dR.json()).devices || [],
+        // Pi build: each device's firmware, as heard on the bus.
+        versions: PLATFORM === 'linux'
+          ? await apiFetch('/api/versions').then(r => r.ok ? r.json() : null).catch(() => null) : null,
       };
+      renderTaps();
       rebuildNodesStringFilter();
       renderNodesTable();
     } catch (e) {
@@ -2776,6 +3372,20 @@
         `<tr><td colspan="10" style="text-align:center;color:var(--bad);padding:40px 0">refresh error: ${e.message}</td></tr>`;
     }
   }
+
+  document.getElementById('nodes-tbody').addEventListener('click', async e => {
+    const b = e.target.closest('button.node-known-btn');
+    if (!b) return;
+    b.disabled = true;
+    try {
+      const r = await apiFetch('/api/nodes/known', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ barcode: b.dataset.knownBc, known: b.dataset.known === '1' }) });
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `refused (${r.status})`);
+    } catch (err) {
+      showToast('Not saved: ' + err.message, 'err');
+    }
+    await refreshNodes();
+  });
 
   document.getElementById('nodes-search').addEventListener('input', e => {
     nodesFilters.search = e.target.value;
@@ -2973,7 +3583,89 @@
     mqtt.textContent = status.mqtt_connected ? 'connected' : (status.mqtt_configured ? 'offline' : 'off');
     mqtt.style.fontSize = '18px';
     document.getElementById('diag-tasks').textContent =
-      status.mqtt_error || (status.mqtt_configured ? '' : 'set a broker under Tools');
+      status.mqtt_error || (status.mqtt_configured ? '' : 'set a broker under Settings › MQTT');
+  }
+
+  let masterPolls = 0, masterPollsAt = 0;
+  // The Bus master page's figures, from an /api/master answer.
+  function refreshMasterDiagnostics(m) {
+    if (!m || (m.role !== 'master' && m.role !== 'standby')) return;
+    const faults = { none: '', no_port: 'cannot open the port', no_reply: 'the TAP is not answering',
+                     second_master: 'another master is on the bus: stopped transmitting', refused: 'refused a request',
+                     discovery_refused: 'the TAP is not taking discovery renewals',
+                     discovery_failed: 're-addressing the gateway failed',
+                     extra_tap: 'another TAP is on the bus: only one is supported, so its panels are not monitored' };
+    const phases = { probing: 'looking for the gateway…', discovering: 're-addressing the gateway…' };
+    const sb = m.standby || {};
+    const standingBy = sb.state === 'standing_by' || sb.state === 'taking_over';
+    const heard = sb.master_heard_ms_ago >= 0 ? `master heard ${(sb.master_heard_ms_ago / 1000).toFixed(1)} s ago` : 'no master heard yet';
+    const takeovers = sb.state && sb.state !== 'off'
+      ? ` · ${sb.takeovers} takeover${sb.takeovers === 1 ? '' : 's'}, gave the bus back ${sb.yields}×` : '';
+    // Running normally, the page's badge says so: this line is for anything more.
+    const masterSub = m.fault !== 'none' ? faults[m.fault] || m.fault
+      : sb.state === 'standing_by' ? `standing by: ${heard}`
+      : sb.state === 'taking_over' ? `taking over: ${heard}`
+      : phases[m.phase] || (m.active ? '' : 'not running');
+    document.getElementById('diag-master-sub').textContent = masterSub ? masterSub + takeovers : takeovers.replace(/^ · /, '');
+    document.getElementById('diag-discovery').innerHTML = m.discovery_read
+      ? `${m.discovery.remaining_s}<span class="hist-stat-unit">s</span>` : '—<span class="hist-stat-unit">s</span>';
+    // Standing by, the discovery window and counts are from this one's last turn on the bus.
+    document.getElementById('diag-discovery-sub').textContent = standingBy ? 'another master has the bus'
+      : !m.discovery_read ? 'not read yet'
+      : `${m.discovery.running ? 'open' : 'closed'} · ${m.discovery.node_count} nodes` +
+        (m.discovery_renewing === false ? ' · disabled' : '');
+    document.getElementById('diag-renewals').textContent = m.renewals;
+    // A rate needs two readings; the first shows the total.
+    const now = Date.now();
+    const rate = masterPollsAt && m.polls >= masterPolls ? (m.polls - masterPolls) / ((now - masterPollsAt) / 1000) : null;
+    masterPolls = m.polls;
+    masterPollsAt = now;
+    document.getElementById('diag-polls').innerHTML = rate === null ? m.polls.toLocaleString()
+      : `${rate.toFixed(0)}<span class="hist-stat-unit">/s</span>`;
+    document.getElementById('diag-timeouts').textContent =
+      `${m.polls.toLocaleString()} sent · ${m.timeouts.toLocaleString()} unanswered · ${m.resyncs} resyncs`;
+
+    // The bus idle on the daemon's account, between one request and the
+    // next: ~10 ms normally; long ones mean something else held the loop.
+    const g = m.gap_ms;
+    document.getElementById('diag-gap').innerHTML =
+      `${g.recent.toLocaleString()}<span class="hist-stat-unit">ms</span>`;
+    document.getElementById('diag-gap-sub').textContent = g.max_at_unix
+      ? `last 5–10 min · longest ${g.max.toLocaleString()} ms, ${new Date(g.max_at_unix * 1000).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}`
+      : 'last 5–10 min, between requests to the gateway';
+
+    // A gateway that keeps dropping out at a steady interval is having its
+    // power cut: the CCA does that to one it can no longer hear.
+    const t = m.tap;
+    document.getElementById('diag-tap-lost').textContent = t.lost.toLocaleString();
+    let lostSub = 'none since the service started';
+    if (t.lost) {
+      const at = new Date(t.last_lost_unix * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      const r = t.recent_lost_unix;
+      const every = r.length >= 3 ? Math.round((r[r.length - 1] - r[0]) / (r.length - 1)) : null;
+      lostSub = `last ${at}` + (t.back_without_discovery ? ` · came back with discovery closed ${t.back_without_discovery}×` : '') +
+                (every !== null && every < 600 && Date.now() / 1000 - t.last_lost_unix < 2 * every
+                 ? ` · every ~${every} s: is its power being cut?` : '');
+    }
+    document.getElementById('diag-tap-lost-sub').textContent = lostSub;
+
+    const h = m.housekeeping;
+    document.getElementById('diag-housekeeping').innerHTML = h.on
+      ? `${h.sent_41.toLocaleString()}<span class="hist-stat-unit">0x41s</span>` : 'off';
+    document.getElementById('diag-housekeeping-sub').textContent = h.on
+      ? `${h.sent_session} 0x0B00 · ${h.sent_broadcast} 0x22 · ${h.sent_walk_pages} table pages, ${h.walks_done ?? 0} walks read to the end` : 'turn on under Settings › Bus';
+
+    const q = m.queries;
+    document.getElementById('diag-queries').innerHTML = q.on
+      ? `${q.answers.toLocaleString()}<span class="hist-stat-unit">/ ${q.sent_reads.toLocaleString()} answered</span>` : 'off';
+    document.getElementById('diag-queries-sub').textContent = !q.on ? 'turn on under Settings › Bus'
+      : q.writes ? `${q.sent_writes} writes sent` : 'writes off';
+
+    // "Mgate Version G8.65": the version is the figure, the family its label.
+    const ver = (m.tap_version || '').match(/^(\S+) Version (.+)$/);
+    document.getElementById('diag-tap-version').textContent = ver ? ver[2] : m.tap_version || '—';
+    document.getElementById('diag-tap-version-sub').textContent = !m.tap_version ? 'asked once each time the bus master starts'
+      : (ver ? ver[1] + ' · ' : '') + 'read in the bring-up';
   }
 
   async function refreshDiagnostics(force) {
@@ -3094,16 +3786,136 @@
     }
   }
 
+  // ---- Bus master: PV output, the sidebar pill and the banner (Pi) ----
+  // Every 5 s on the Pi, whatever page is open: the pill and the banner
+  // must say PV is off wherever you are.
+  let pvLast = null;
+  function pvWhen(unix) {
+    return unix ? new Date(unix * 1000).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'an unknown time';
+  }
+  function pvApply(m) {
+    const show = !!m && (m.role === 'master' || m.role === 'standby');
+    busControl = show;
+    document.getElementById('nav-bus').style.display = show || PLATFORM === 'linux' ? '' : 'none';
+    document.body.classList.toggle('bus-both', show && PLATFORM === 'linux');
+    document.getElementById('pv-pill').style.display = show ? '' : 'none';
+    const pv = show && m.pv ? m.pv : { on: true };
+    const banner = document.getElementById('pv-banner');
+    banner.style.display = show && !pv.on ? '' : 'none';
+    if (!show) return;
+    const pill = document.getElementById('pv-pill');
+    pill.querySelector('.pv-pill-state').textContent = pv.on ? 'on' : 'off';
+    pill.classList.toggle('off', !pv.on);
+    const from = pv.source === 'heard' ? 'the monitor running the bus' : 'this monitor';
+    document.getElementById('pv-banner-text').textContent = `PV output is off, turned off from ${from} at ${pvWhen(pv.since)}`;
+    const sb = m.standby || {};
+    const standingBy = sb.state === 'standing_by' || sb.state === 'taking_over';
+    document.getElementById('pv-state').textContent = pv.on ? 'PV output is on' : 'PV output is off';
+    document.getElementById('pv-detail').textContent = pv.unconfirmed ? "The TAP didn't confirm it; asked again every hour"
+      : pv.confirmed ? 'The TAP confirmed it' : pv.last_sent ? 'Waiting for the TAP to confirm' : '';
+    const toggle = document.getElementById('pv-toggle');
+    toggle.textContent = pv.on ? 'Turn off' : 'Turn on';
+    toggle.classList.toggle('danger', pv.on);
+    toggle.classList.toggle('primary', !pv.on);
+    toggle.disabled = standingBy;
+    document.getElementById('pv-dot').className = 'dot ' + (pv.on ? '' : 'off');
+    const status = document.getElementById('pv-status');
+    if (standingBy) status.textContent = 'Standing by: change it on the device running the bus.';
+    else if (status.dataset.standby) status.textContent = '';
+    status.dataset.standby = standingBy ? '1' : '';
+    const meta = document.getElementById('bm-meta');
+    meta.textContent = m.fault && m.fault !== 'none' ? 'fault' : standingBy ? 'standing by' : m.active ? 'running the bus' : 'not running';
+    meta.className = 'badge ' + (m.fault && m.fault !== 'none' ? 'bad' : standingBy || !m.active ? 'stale' : 'ok');
+    const renewing = m.discovery_renewing !== false;
+    const w = m.discovery || {};
+    const left = m.discovery_read ? (w.running && w.remaining_s > 0 ? `open, ${w.remaining_s} s left` : 'closed') : 'not read yet';
+    // Joined is the TAP's flag, kept for good: a dead optimizer still counts.
+    const joined = !m.discovery_read || w.joined == null || w.in_table == null ? ''
+      : w.in_table === 0 ? " · the TAP's table is empty"
+      : ` · ${w.joined} of the ${w.in_table} in the TAP's table have joined`;
+    document.getElementById('disc-state').textContent = renewing ? 'Enabled' : 'Disabled';
+    document.getElementById('disc-detail').textContent = (renewing ? `Now ${left}` : `Now ${left} · kept through a restart`) + joined;
+    const disc = document.getElementById('disc-toggle');
+    disc.textContent = renewing ? 'Disable' : 'Enable';
+    document.getElementById('disc-dot').className = 'dot ' + (!m.discovery_read ? 'dim' : renewing ? '' : 'idle');
+    disc.disabled = standingBy;
+    const ds = document.getElementById('disc-status');
+    if (standingBy) ds.textContent = 'Standing by: change it on the device running the bus.';
+    else if (ds.dataset.standby) ds.textContent = '';
+    ds.dataset.standby = standingBy ? '1' : '';
+  }
+  // A minute after an off, the panels still producing: the switch reaches
+  // only the optimizers that take their keep-alive from the mesh. Ones that
+  // also follow the RSS signal on the DC wiring keep going.
+  const PV_SETTLE_S = 60, PV_STILL_W = 5;
+  async function pvStillProducing(m) {
+    const el = document.getElementById('pv-still');
+    const pv = m && m.pv;
+    if (!pv || pv.on) { el.textContent = ''; return 0; }
+    if (Date.now() / 1000 - pv.since < PV_SETTLE_S) { el.textContent = 'Checking which panels stopped…'; return 0; }
+    const r = await apiFetch('/api/devices').catch(() => null);
+    const d = r && r.ok ? await r.json().catch(() => null) : null;
+    if (!d) return 0;
+    const still = (d.devices || []).filter(x => !x.stale && (x.power_out ?? x.power ?? 0) > PV_STILL_W)
+      .map(x => x.name || x.addr).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+    // Why they keep going is in the card's note.
+    el.textContent = !still.length ? 'Every panel has stopped producing.'
+      : `${still.length} panel${still.length === 1 ? ' is' : 's are'} still producing: ${still.join(', ')}.`;
+    return still.length;
+  }
+  async function refreshPv() {
+    if (PLATFORM !== 'linux') return;
+    const r = await apiFetch('/api/master').catch(() => null);
+    const m = r && r.ok ? await r.json().catch(() => null) : null;
+    // One poll lost (a restart, a dropped connection) keeps what was shown:
+    // a PV off banner shouldn't blink away for 5 s.
+    if (!m && pvLast) return;
+    pvLast = m;
+    pvApply(m);
+    const still = await pvStillProducing(m && (m.role === 'master' || m.role === 'standby') ? m : null);
+    if (still) document.getElementById('pv-banner-text').textContent += ` · ${still} panel${still === 1 ? '' : 's'} still producing`;
+    if (document.getElementById('view-busmaster').classList.contains('active')) refreshMasterDiagnostics(m);
+  }
+  document.getElementById('pv-toggle').addEventListener('click', async () => {
+    const on = !(pvLast && pvLast.pv && pvLast.pv.on === false);  // as it is now
+    if (on && !confirm("Turn the array's output off? This is not rapid shutdown.")) return;
+    const status = document.getElementById('pv-status');
+    try {
+      const r = await apiFetch('/api/master/pv', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                                   body: JSON.stringify({ on: !on }) });
+      const j = await r.json().catch(() => ({}));
+      status.textContent = r.ok ? '' : (j.error || `refused (${r.status})`);
+    } catch (e) {
+      status.textContent = 'not sent: ' + e.message;
+    }
+    await refreshPv();
+  });
+  document.getElementById('disc-toggle').addEventListener('click', async () => {
+    const renew = !!(pvLast && pvLast.discovery_renewing === false);  // closing it unless it's left closed now
+    const status = document.getElementById('disc-status');
+    try {
+      const r = await apiFetch('/api/master/discovery', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                                          body: JSON.stringify({ renew }) });
+      const j = await r.json().catch(() => ({}));
+      status.textContent = r.ok ? '' : (j.error || `refused (${r.status})`);
+    } catch (e) {
+      status.textContent = 'not sent: ' + e.message;
+    }
+    await refreshPv();
+  });
+  platformReady.then(refreshPv);
+  setInterval(refreshPv, 5000);
+  document.addEventListener('viewshown', e => { if (e.detail === 'busmaster') refreshPv(); });
+
   // Opening the view forces a fetch; the periodic tick does not.
-  document.querySelector('#nav button[data-view="diagnostics"]')
-    .addEventListener('click', () => refreshDiagnostics(true));
+  document.addEventListener('viewshown', e => { if (e.detail === 'diagnostics') refreshDiagnostics(true); });
   if (window.location.hash === '#diagnostics') refreshDiagnostics(true);
   setInterval(() => {
     if (document.getElementById('view-diagnostics').classList.contains('active')) refreshDiagnostics();
   }, 10000);
 
   // ============================================================
-  // R6 — Tools view (YAML generator + maintenance)
+  // R6 — Settings view (YAML generator + maintenance)
   // ============================================================
 
   const TOOLS_DEV_SENSORS = [
@@ -3145,8 +3957,8 @@
     hub.innerHTML = TOOLS_HUB_SENSORS.map(s =>
       `<label><input type="checkbox" data-tools-hub="${s.id}">${s.label}</label>`
     ).join('');
-    dev.querySelectorAll('input').forEach(i => i.addEventListener('change', refreshTools));
-    hub.querySelectorAll('input').forEach(i => i.addEventListener('change', refreshTools));
+    dev.querySelectorAll('input').forEach(i => i.addEventListener('change', refreshSettings));
+    hub.querySelectorAll('input').forEach(i => i.addEventListener('change', refreshSettings));
   }
 
   function toolsPick(kind) {
@@ -3160,11 +3972,11 @@
     }
     else if (kind === 'hub-all')  hub.forEach(i => i.checked = true);
     else if (kind === 'hub-none') hub.forEach(i => i.checked = false);
-    refreshTools();
+    refreshSettings();
   }
 
-  async function refreshTools() {
-    if (!document.getElementById('view-tools').classList.contains('active')) return;
+  async function refreshSettings() {
+    if (!document.getElementById('view-settings').classList.contains('active')) return;
     if (PLATFORM === 'linux') {
       refreshPiInverters();
       refreshConfig();
@@ -3183,11 +3995,11 @@
       const data = await r.json();
       document.getElementById('tools-yaml').textContent = data.yaml || '';
       document.getElementById('tools-yaml-sub').textContent = `${data.device_count ?? '—'} devices`;
-      document.getElementById('tools-meta').textContent =
+      document.getElementById('settings-meta').textContent =
         `last update ${new Date().toLocaleTimeString()}`;
     } catch (e) {
       document.getElementById('tools-yaml').textContent = `Error: ${e.message}`;
-      document.getElementById('tools-meta').textContent = `error: ${e.message}`;
+      document.getElementById('settings-meta').textContent = `error: ${e.message}`;
     }
     refreshConfig();
   }
@@ -3302,7 +4114,7 @@
     }
   } catch (e) {}
   document.querySelectorAll('#tools-grouping input').forEach(r =>
-    r.addEventListener('change', refreshTools));
+    r.addEventListener('change', refreshSettings));
   document.querySelectorAll('[data-tools-pick]').forEach(btn => {
     btn.addEventListener('click', () => toolsPick(btn.dataset.toolsPick));
   });
@@ -3323,12 +4135,253 @@
     toolsAction('/api/restart', 'Restart issued',
       PLATFORM === 'linux' ? 'Restart the monitor service now?' : 'Reboot the ESP32 now?'));
 
+  // ===== Logs (linux/ build) =====
+  // Polls /api/logs every 2 s while the view is open, asking only for lines
+  // past the last one it has. The daemon keeps 2,000 plus 500 debug lines;
+  // so does the page.
+  const LOGS_KEEP = 2500;
+  const LOG_PRIO = { error: 3, warning: 4, info: 6, debug: 7 };
+  let logLines = [], logNext = 0, logsPaused = false, logsTimer = null;
+  const logsBox = document.getElementById('logs-box');
+  const logEsc = s => String(s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+  function logTime(ms) {
+    const d = new Date(ms);
+    return d.toLocaleTimeString([], { hour12: false });
+  }
+  function logShown(l) {
+    if (LOG_PRIO[l.level] > +document.getElementById('logs-level').value) return false;
+    const q = document.getElementById('logs-search').value.trim().toLowerCase();
+    return !q || l.msg.toLowerCase().includes(q);
+  }
+  function logRow(l) {
+    const d = new Date(l.t);
+    return `<div class="log-line ${l.level}" title="${d.toLocaleString()}"><span class="log-time">${logTime(l.t)}</span>` +
+      `<span class="log-lvl">${l.level === 'warning' ? 'warn' : l.level}</span><span class="log-msg">${logEsc(l.msg)}</span></div>`;
+  }
+  function logsAtBottom() { return logsBox.scrollHeight - logsBox.scrollTop - logsBox.clientHeight < 40; }
+  function renderLogs() {
+    const shown = logLines.filter(logShown);
+    logsBox.innerHTML = shown.length ? shown.map(logRow).join('')
+      : `<div class="logs-empty">${logLines.length ? 'No lines match the filter.' : 'No log lines yet.'}</div>`;
+    logsBox.scrollTop = logsBox.scrollHeight;
+  }
+  function updateLogsMeta() {
+    const shown = logLines.filter(logShown).length;
+    document.getElementById('logs-meta').textContent =
+      (logsPaused ? 'paused · ' : 'live · ') + (shown === logLines.length ? `${shown} lines` : `${shown} of ${logLines.length} lines`);
+  }
+  async function pollLogs() {
+    if (logsPaused || !document.getElementById('view-logs').classList.contains('active')) return;
+    try {
+      const r = await apiFetch('/api/logs?after=' + logNext);
+      if (!r.ok) throw new Error('/api/logs ' + r.status);
+      const j = await r.json();
+      // A smaller next means the service restarted: start over.
+      if (j.next < logNext) { logLines = []; logNext = 0; delete logsBox.dataset.loaded; return pollLogs(); }
+      const fresh = j.lines.filter(l => l.seq >= logNext);
+      logNext = j.next;
+      if (!fresh.length && logsBox.dataset.loaded) { updateLogsMeta(); return; }
+      logLines = logLines.concat(fresh);
+      const trimmed = logLines.length > LOGS_KEEP;
+      if (trimmed) logLines = logLines.slice(-LOGS_KEEP);
+      if (!logsBox.dataset.loaded || trimmed) {
+        logsBox.dataset.loaded = '1';
+        renderLogs();
+      } else {
+        const stick = logsAtBottom();
+        const rows = fresh.filter(logShown);
+        if (rows.length) {
+          logsBox.querySelector('.logs-empty')?.remove();
+          logsBox.insertAdjacentHTML('beforeend', rows.map(logRow).join(''));
+          if (stick) logsBox.scrollTop = logsBox.scrollHeight;
+        }
+      }
+      updateLogsMeta();
+    } catch (e) {
+      document.getElementById('logs-meta').textContent = 'error: ' + e.message;
+    }
+  }
+  function startLogs() {
+    if (logsTimer) return;
+    pollLogs();
+    logsTimer = setInterval(pollLogs, 2000);
+  }
+  document.addEventListener('viewshown', e => { if (e.detail === 'logs') startLogs(); });
+  if (window.location.hash === '#logs') startLogs();
+  document.getElementById('logs-level').addEventListener('change', () => { renderLogs(); updateLogsMeta(); });
+  document.getElementById('logs-search').addEventListener('input', () => { renderLogs(); updateLogsMeta(); });
+
+  // ---- Bus log and the reconfiguration alarm (Pi) ----
+  // The banner is checked every 10 s wherever you are; the page polls every
+  // 2 s while open.
+  let busLast = null, busPaused = false, busCat = 'all';
+  const busOpen = new Set();  // exchanges whose bytes are showing, by id
+  let busNames = {}, busNamesAt = 0;  // node id (upper-case hex) → panel name, from /api/devices
+  const busName = node => node ? busNames[node.toUpperCase()] || '' : '';
+  const busWhen = ms => new Date(ms).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  const BUS_CATS = [['all', 'All'], ['discovery', 'Discovery'], ['queries', 'Queries'], ['housekeeping', 'Housekeeping'],
+                    ['bringup', 'Bring-up'], ['other_master', 'Other master'], ['reconfig', 'Reconfigures the TAP']];
+  const BUS_RESULT = {
+    answered: ['ok', 'answered'], delivered: ['ok', 'delivered'], not_delivered: ['warn', 'not delivered'],
+    refused: ['warn', 'refused'], no_reply: ['bad', 'no reply'], broadcast: ['none', 'broadcast'],
+    waiting: ['none', 'waiting'], unasked: ['warn', 'unasked'],
+  };
+  const busIn = (e, c) => c === 'all' || (c === 'other_master' ? e.other_master : e.category === c);
+  function busTime(ms) {
+    const d = new Date(ms);
+    return d.toLocaleTimeString([], { hour12: false }) + '.' + String(d.getMilliseconds()).padStart(3, '0');
+  }
+  function busRow(e) {
+    const res = e.reconfig ? ['bad', 'reconfigures'] : BUS_RESULT[e.result] || ['none', e.result];
+    const from = e.result === 'unasked' ? 'TAP' : e.ours ? 'this monitor' : e.other_master ? 'another master' : 'master';
+    const tap = e.addr === 'FFFF' ? 'all' : e.addr;
+    let sum = e.sub_name === 'EncapString' && e.summary.startsWith('^') ? `<span class="q">${logEsc(e.summary.split(' · ')[0])}</span>` +
+      logEsc(e.summary.slice(e.summary.split(' · ')[0].length)) : logEsc(e.summary);
+    if (e.answer) sum += ` → <span class="q">${logEsc(e.answer)}</span> ${(e.answer_after_ms / 1000).toFixed(1)} s later`;
+    const rt = e.rt_ms == null ? '—' : `${e.rt_ms} ms${e.late ? ', late' : ''}`;
+    const open = busOpen.has(e.id);
+    return `<div class="bx-row${e.reconfig ? ' reconfig' : ''}" role="row" tabindex="0" data-id="${e.id}" aria-expanded="${open}" title="${topoEscape(busWhen(e.unix_ms))} · ${e.cmd}">` +
+      `<span class="bx-mono t">${busTime(e.unix_ms)}</span>` +
+      `<span class="bx-src${e.other_master ? ' other' : ''}">${from}</span>` +
+      `<span class="bx-mono tap">${tap}</span>` +
+      // A tunnel's sub says what it does, so it leads and Tunnel goes under it.
+      `<span class="bx-ex">${e.sub_name ? `${logEsc(e.sub_name)}<small>${logEsc(e.name)}</small>` : logEsc(e.name)}</span>` +
+      `<span class="bx-mono node">${e.node || '—'}${busName(e.node) ? `<small>${logEsc(busName(e.node))}</small>` : ''}</span>` +
+      `<span class="bx-res ${res[0]}">${res[1]}</span>` +
+      `<span class="bx-mono rt${e.rt_ms != null && e.rt_ms > 30 ? ' slow' : ''}">${rt}</span>` +
+      `<span class="bx-sum">${sum}</span></div>` +
+      (open ? `<div class="bx-detail"><div><span class="lbl">request</span>${logEsc(e.request_hex || (e.result === 'unasked' ? '(not heard)' : '(no payload)'))}</div>` +
+        `<div><span class="lbl">reply</span>${logEsc(e.reply_hex || (e.rt_ms == null ? '(none)' : '(no payload)'))}</div></div>` : '');
+  }
+  function busShown(e) {
+    if (!busIn(e, busCat)) return false;
+    const q = document.getElementById('buslog-search').value.trim().toLowerCase();
+    return !q || [e.name, e.sub_name, e.addr, e.cmd, e.node || '', busName(e.node), e.summary, e.answer, e.request_hex, e.reply_hex]
+      .join(' ').toLowerCase().includes(q);
+  }
+  function busApply(b) {
+    const a = b && b.alarm && b.alarm.active ? b.alarm : null;
+    const last = a && a.recent.length ? a.recent[a.recent.length - 1] : null;
+    document.getElementById('bus-alarm-banner').style.display = a ? '' : 'none';
+    if (a) document.getElementById('bus-alarm-banner-text').textContent =
+      `Another device reconfigured the TAP: ${last ? last.what : 'see the Bus log'}`;
+    document.getElementById('bus-alarm-card').style.display = a ? '' : 'none';
+    if (!a) return;
+    document.getElementById('bus-alarm-detail').textContent =
+      `${a.count.toLocaleString()} frame${a.count === 1 ? '' : 's'} since ${busWhen(a.first_unix_ms)}`;
+    document.getElementById('bus-alarm-list').innerHTML = a.recent.slice().reverse()
+      .map(r => `<li><time>${logEsc(busWhen(r.unix_ms))}</time>${logEsc(r.what)}</li>`).join('');
+  }
+  function busStrip(s) {
+    const n = v => (v || 0).toLocaleString();
+    const per = s.window_s ? (s.polls / s.window_s).toFixed(1) : '0';
+    const c = s.count || {};
+    const tile = (k, v, sub, bad) => `<div class="bx-tile${bad ? ' bad' : ''}"><span class="k">${k}</span><span class="v">${v}</span><span class="s">${logEsc(sub)}</span></div>`;
+    document.getElementById('bus-strip').innerHTML =
+      tile('Polls', n(s.polls), `${per}/s · ${n(s.polls_lost)} lost${s.polls_refused ? ` · ${n(s.polls_refused)} refused` : ''}`) +
+      tile('Discovery', n(c.discovery), s.discovery || 'not read yet') +
+      tile('Queries', n(c.queries), `${n(s.delivered)} delivered · ${n(s.not_delivered)} not`) +
+      tile('Housekeeping', n(c.housekeeping), 'table pages, preferred gateways, PV') +
+      tile('Round trip', s.rt_median_ms == null ? '—' : `${s.rt_median_ms} ms`, s.rt_max_ms == null ? 'median' : `median · max ${s.rt_max_ms} ms`) +
+      tile('Other master', n(s.other_master), s.reconfig ? `${n(s.reconfig)} reconfigure the TAP` : 'none heard', s.other_master || s.reconfig);
+  }
+  function renderBus() {
+    if (!busLast) return;
+    const all = busLast.exchanges;
+    document.getElementById('bus-chips').innerHTML = BUS_CATS.map(([k, l]) =>
+      `<button type="button" class="bx-chip${k === 'reconfig' || k === 'other_master' ? ' bad' : ''}" data-c="${k}" aria-pressed="${k === busCat}">` +
+      `${l}<span class="n">${all.filter(e => busIn(e, k)).length}</span></button>`).join('');
+    busStrip(busLast.stats || {});
+    const shown = all.filter(busShown);
+    const box = document.getElementById('bus-box');
+    const stick = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
+    // Re-rendered every 2 s: keep the row the keyboard is on.
+    const focused = document.activeElement && document.activeElement.closest && document.activeElement.closest('#bus-rows .bx-row');
+    const focusId = focused ? focused.dataset.id : null;
+    document.getElementById('bus-rows').innerHTML = shown.length ? shown.map(busRow).join('')
+      : `<div class="bx-empty">${all.length ? 'No exchanges match.' : 'Nothing heard yet.'}</div>`;
+    if (focusId) document.querySelector(`#bus-rows .bx-row[data-id="${focusId}"]`)?.focus({ preventScroll: true });
+    else if (stick) box.scrollTop = box.scrollHeight;
+    const s = busLast.stats || {};
+    document.getElementById('buslog-meta').textContent = (busPaused ? 'paused · ' : 'live · ') +
+      `${shown.length === all.length ? `${all.length} exchanges` : `${shown.length} of ${all.length} exchanges`}` +
+      (s.window_s ? ` · polls ${(s.polls / s.window_s).toFixed(1)}/s` : '');
+  }
+  document.getElementById('bus-chips').addEventListener('click', e => {
+    const b = e.target.closest('.bx-chip');
+    if (!b) return;
+    busCat = b.dataset.c;
+    renderBus();
+  });
+  function busToggle(row) {
+    const id = +row.dataset.id;
+    if (busOpen.has(id)) busOpen.delete(id); else busOpen.add(id);
+    renderBus();
+  }
+  document.getElementById('bus-rows').addEventListener('click', e => { const r = e.target.closest('.bx-row'); if (r) busToggle(r); });
+  document.getElementById('bus-rows').addEventListener('keydown', e => {
+    const r = e.target.closest('.bx-row');
+    if (r && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); busToggle(r); }
+  });
+  async function refreshBus(force) {
+    if (PLATFORM !== 'linux') return;
+    const open = document.getElementById('view-buslog').classList.contains('active');
+    if (!force && open && busPaused) return;
+    try {
+      const r = await apiFetch(open ? '/api/bus' : '/api/bus?limit=1');
+      if (!r.ok) throw new Error('/api/bus ' + r.status);
+      const b = await r.json();
+      if (open && Date.now() - busNamesAt > 60000) {
+        busNamesAt = Date.now();
+        const d = await apiFetch('/api/devices').then(x => x.ok ? x.json() : null).catch(() => null);
+        if (d) busNames = Object.fromEntries((d.devices || []).filter(p => p.name).map(p => [String(p.addr).toUpperCase(), p.name]));
+      }
+      busApply(b);
+      if (open) { busLast = b; renderBus(); }
+    } catch (e) {
+      if (open) document.getElementById('buslog-meta').textContent = 'error: ' + e.message;
+    }
+  }
+  document.getElementById('bus-alarm-clear').addEventListener('click', async () => {
+    if (!confirm('Clear the alarm? Do it once the other device is off the bus and every panel is reporting.')) return;
+    await apiFetch('/api/bus/alarm/clear', { method: 'POST' }).catch(() => null);
+    await refreshBus(true);
+  });
+  document.getElementById('buslog-pause').addEventListener('click', () => {
+    busPaused = !busPaused;
+    document.getElementById('buslog-pause').textContent = busPaused ? 'Resume' : 'Pause';
+    if (busLast) renderBus();
+  });
+  document.getElementById('buslog-search').addEventListener('input', () => renderBus());
+  document.addEventListener('viewshown', e => { if (e.detail === 'buslog') refreshBus(true); });
+  platformReady.then(() => refreshBus(true));
+  let busTick = 0;
+  setInterval(() => {
+    busTick++;
+    if (document.getElementById('view-buslog').classList.contains('active') || busTick % 5 === 0) refreshBus();
+  }, 2000);
+  document.getElementById('logs-pause').addEventListener('click', e => {
+    logsPaused = !logsPaused;
+    e.currentTarget.textContent = logsPaused ? 'Resume' : 'Pause';
+    updateLogsMeta();
+    if (!logsPaused) pollLogs();
+  });
+  document.getElementById('logs-download').addEventListener('click', () => {
+    const text = logLines.map(l => `${new Date(l.t).toISOString()} ${l.level.toUpperCase().padEnd(7)} ${l.msg}`).join('\n') + '\n';
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([text], { type: 'text/plain' }));
+    a.download = `tigomonitor-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.log`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  });
+
   // ===== Raspberry Pi settings (linux/ build) =====
   async function refreshPiSettings() {
     try {
       const r = await apiFetch('/api/settings');
       if (!r.ok) throw new Error('/api/settings ' + r.status);
       const s = await r.json();
+      piApplyPages(s);
       document.getElementById('pi-mqtt-host').value = s.mqtt.host || '';
       document.getElementById('pi-mqtt-port').value = s.mqtt.port || 1883;
       document.getElementById('pi-mqtt-user').value = s.mqtt.username || '';
@@ -3338,10 +4391,44 @@
         s.mqtt.password_set ? 'Saved. Leave empty to keep it; changing the broker or username clears it.' : '';
       document.getElementById('pi-mqtt-topic').value = s.mqtt.base_topic || '';
       document.getElementById('pi-mqtt-discovery').value = s.mqtt.discovery_prefix || '';
+      document.getElementById('pi-mqtt-disc-on').checked = s.mqtt.discovery !== false;
+      document.getElementById('pi-mqtt-disc-on').nextElementSibling.textContent = s.mqtt.discovery !== false ? 'On' : 'Off';
+      document.getElementById('pi-mqtt-standby-panels').checked = !!s.mqtt.standby_panels;
+      document.getElementById('pi-mqtt-standby-panels').nextElementSibling.textContent = s.mqtt.standby_panels ? 'On' : 'Off';
+      document.getElementById('pi-mqtt-pv-switch').checked = !!s.mqtt.pv_switch;
+      document.getElementById('pi-mqtt-pv-switch').nextElementSibling.textContent = s.mqtt.pv_switch ? 'On' : 'Off';
       document.getElementById('pi-mqtt-topic-hint').textContent =
         `Readings go to ${s.mqtt.base_topic}/${s.device_id}/panel/<barcode>/state`;
       piWebPortActive = s.web_port_active;
       document.getElementById('pi-web-port').value = s.web_port || '';
+      piBusRole = s.bus_role || 'listen';
+      document.getElementById('pi-bus-role').value = piBusRole;
+      document.getElementById('pi-startup').checked = !!s.master_startup;
+      document.getElementById('pi-startup').nextElementSibling.textContent = s.master_startup ? 'On' : 'Off';
+      document.getElementById('pi-startup-row').style.display = piBusRole !== 'listen' ? '' : 'none';
+      document.getElementById('pi-takeover').value = s.standby_takeover_s || 3;
+      document.getElementById('pi-takeover-row').style.display = piBusRole === 'standby' ? '' : 'none';
+      document.getElementById('pi-housekeeping').checked = !!s.master_housekeeping;
+      document.getElementById('pi-housekeeping').nextElementSibling.textContent = s.master_housekeeping ? 'On' : 'Off';
+      document.getElementById('pi-queries').checked = !!s.master_queries;
+      document.getElementById('pi-queries').nextElementSibling.textContent = s.master_queries ? 'On' : 'Off';
+      document.getElementById('pi-writes').checked = !!s.master_optimizer_writes;
+      document.getElementById('pi-writes').nextElementSibling.textContent = s.master_optimizer_writes ? 'On' : 'Off';
+      document.getElementById('pi-writes').disabled = !s.master_queries;
+      for (const row of PI_MASTER_ROWS) document.getElementById(row).style.display = piBusRole !== 'listen' ? '' : 'none';
+      piFillHousekeepingHint();
+      piTls = { cert: s.tls_cert || '', key: s.tls_key || '', active: !!s.tls_active, fixed: !!s.tls_from_args };
+      document.getElementById('pi-tls-cert').value = piTls.cert;
+      document.getElementById('pi-tls-key').value = piTls.key;
+      document.getElementById('pi-tls-cert').disabled = piTls.fixed;
+      document.getElementById('pi-tls-key').disabled = piTls.fixed;
+      document.getElementById('pi-web-port').placeholder = piTls.cert ? '443' : '80';
+      document.getElementById('pi-tls-hint').textContent = (s.tls_active
+        ? `On, valid until ${new Date(s.tls_expires * 1000).toLocaleDateString()}. A renewed certificate is used without a restart`
+        : piTls.fixed ? 'Waiting for the certificate; HTTPS starts once it loads'
+        : piTls.cert ? 'Saved, but not in use: restart the service, or see Logs if it did not load'
+        : 'Empty: plain HTTP. A PEM certificate with its chain, such as Let\'s Encrypt\'s fullchain.pem')
+        + (piTls.fixed ? '. Set by the service\'s command line, not here' : '');
       piWebLogin = { user: s.web_username || 'admin', set: !!s.web_password_set };
       document.getElementById('pi-web-user').value = piWebLogin.user;
       document.getElementById('pi-web-pass').value = '';
@@ -3353,13 +4440,105 @@
       await piFillSerial(s.serial_port || '');
       document.getElementById('pi-mqtt-state').textContent = !s.mqtt.host ? 'MQTT off'
         : s.mqtt_connected ? `connected to ${s.mqtt.host}` : `not connected${s.mqtt_error ? ': ' + s.mqtt_error : ''}`;
-      document.getElementById('tools-meta').textContent = `last update ${new Date().toLocaleTimeString()}`;
+      document.getElementById('settings-meta').textContent = `last update ${new Date().toLocaleTimeString()}`;
     } catch (e) {
-      document.getElementById('tools-meta').textContent = `error: ${e.message}`;
+      document.getElementById('settings-meta').textContent = `error: ${e.message}`;
     }
   }
   let piWebPortActive = 0;
   let piWebLogin = { user: 'admin', set: false };
+  let piBusRole = 'listen';
+  const PI_MASTER_ROWS = ['pi-startup-row', 'pi-housekeeping-row', 'pi-queries-row', 'pi-writes-row'];
+  // Two masters on one bus collide, and the master's requests reach the
+  // optimizers, so becoming the master is a deliberate step.
+  document.getElementById('pi-bus-role').addEventListener('change', (e) => {
+    if (e.target.value === 'master' && piBusRole !== 'master' &&
+        !confirm('Master mode transmits on the bus. Unplug the CCA first: two masters on one bus collide.\n\nContinue?'))
+      e.target.value = piBusRole;
+    else if (e.target.value === 'standby' && piBusRole !== 'standby' &&
+        !confirm('A standby takes the bus over whenever it hears no master, and transmits then. With one, cutting power to a master no longer stops the array: rapid shutdown must cut the TAP\'s own power.\n\nContinue?'))
+      e.target.value = piBusRole;
+    for (const row of PI_MASTER_ROWS) document.getElementById(row).style.display = e.target.value !== 'listen' ? '' : 'none';
+    document.getElementById('pi-takeover-row').style.display = e.target.value === 'standby' ? '' : 'none';
+  });
+  // The writes only follow the queries' answers.
+  document.getElementById('pi-queries').addEventListener('change', (e) => {
+    const w = document.getElementById('pi-writes');
+    w.disabled = !e.target.checked;
+    if (!e.target.checked) { w.checked = false; w.nextElementSibling.textContent = 'off'; }
+  });
+  // Changing what optimizers store is a step further than reading them.
+  document.getElementById('pi-writes').addEventListener('change', (e) => {
+    if (e.target.checked && !confirm('This lets the master change two settings on optimizers, as the CCA does when their answers call for it. What the settings do is not known.\n\nContinue?'))
+      e.target.checked = false;
+  });
+  // Turning discovery off removes the entities Home Assistant already has.
+  document.getElementById('pi-mqtt-disc-on').addEventListener('change', (e) => {
+    if (!e.target.checked && !confirm('Home Assistant will remove the Tigo devices and entities this Pi added, once you save. Readings keep going to the MQTT topic.\n\nContinue?'))
+      e.target.checked = true;
+  });
+  // The sidebar's page switches save on their own, at once.
+  const piPages = { show_cca_page: true, show_cloud_page: true };
+  function piApplyPages(st) {
+    piPages.show_cca_page = st.show_cca_page !== false;
+    piPages.show_cloud_page = st.show_cloud_page !== false;
+    hiddenPages.clear();
+    if (!piPages.show_cca_page) hiddenPages.add('cca');
+    if (!piPages.show_cloud_page) hiddenPages.add('cloudstatus');
+    document.querySelector('#nav button[data-view="cca"]').style.display = piPages.show_cca_page ? '' : 'none';
+    if (piPages.show_cloud_page) {
+      cloudUiSync();
+    } else {
+      document.getElementById('nav-cloudstatus').style.display = 'none';
+      document.getElementById('cloud-box').style.display = 'none';
+    }
+    for (const [id, on] of [['pi-show-cca', piPages.show_cca_page], ['pi-show-cloud', piPages.show_cloud_page]]) {
+      const box = document.getElementById(id);
+      box.checked = on;
+      box.nextElementSibling.textContent = on ? 'On' : 'Off';
+    }
+    const active = document.querySelector('.view.active');
+    if (active && hiddenPages.has(active.id.replace(/^view-/, ''))) showView('dashboard');
+  }
+  for (const [id, key] of [['pi-show-cca', 'show_cca_page'], ['pi-show-cloud', 'show_cloud_page']]) {
+    document.getElementById(id).addEventListener('change', async (e) => {
+      const on = e.target.checked;
+      const status = document.getElementById('pi-pages-status');
+      e.target.nextElementSibling.textContent = on ? 'On' : 'Off';
+      try {
+        const r = await apiFetch('/api/settings', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ [key]: on }),
+        });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(j.error || `/api/settings ${r.status}`);
+        piApplyPages({ ...piPages, [key]: on });
+        status.textContent = 'Saved';
+      } catch (err) {
+        e.target.checked = !on;
+        e.target.nextElementSibling.textContent = !on ? 'On' : 'Off';
+        status.textContent = `Not saved: ${err.message}`;
+      }
+    });
+  }
+  for (const id of ['pi-startup', 'pi-housekeeping', 'pi-queries', 'pi-writes', 'pi-mqtt-disc-on', 'pi-mqtt-standby-panels']) {
+    document.getElementById(id).addEventListener('change', (e) => {
+      e.target.nextElementSibling.textContent = e.target.checked ? 'On' : 'Off';
+    });
+  }
+  // How many 0x41 targets were learned, so it's plain whether turning
+  // housekeeping on would send any.
+  async function piFillHousekeepingHint() {
+    try {
+      const r = await apiFetch('/api/master');
+      if (!r.ok) return;
+      const h = (await r.json()).housekeeping || {};
+      const n = h.learned_41 || 0;
+      document.getElementById('pi-housekeeping-hint').textContent =
+        "Send the CCA's 0x41 to each optimizer in turn, its hourly 0x0B00 and 0x22, and its reads of the TAP's node table (experimental). " +
+        (n ? `Content learned from the CCA (${n} heard).` : 'Built-in content: none heard from a CCA yet.');
+    } catch (e) { /* the default text stays */ }
+  }
+  let piTls = { cert: '', key: '', active: false, fixed: false };
   async function piFillSerial(current) {
     const sel = document.getElementById('pi-serial');
     let ports = [];
@@ -3391,7 +4570,7 @@
     piShowBridge();
     const reading = bridge ? `the bridge at ${document.getElementById('pi-bridge').value}` : current;
     document.getElementById('pi-port-state').textContent = !current ? 'no adapter chosen'
-      : `reading ${reading} · web UI on port ${piWebPortActive}`;
+      : `reading ${reading} · web UI on port ${piWebPortActive}${piTls.active ? ' (HTTPS)' : ''}`;
   }
   function piShowBridge() {
     document.getElementById('pi-bridge-row').style.display =
@@ -3417,7 +4596,7 @@
       const v = document.getElementById('pi-serial').value;
       piFillSerial(v === 'tcp' ? 'tcp://' + document.getElementById('pi-bridge').value.trim() : v);
     });
-  document.getElementById('pi-port-save').addEventListener('click', async () => {
+  async function piSavePort() {
     const webPort = Number(document.getElementById('pi-web-port').value) || 0;
     let source = document.getElementById('pi-serial').value;
     if (source === 'tcp') {
@@ -3425,8 +4604,17 @@
       if (!addr) { showToast('Enter the bridge address, as host:port', 'err'); return; }
       source = 'tcp://' + addr;
     }
+    const tlsCert = document.getElementById('pi-tls-cert').value.trim();
+    const tlsKey = document.getElementById('pi-tls-key').value.trim();
     const body = { serial_port: source, web_port: webPort,
+                   bus_role: document.getElementById('pi-bus-role').value,
+                   standby_takeover_s: Number(document.getElementById('pi-takeover').value) || 3,
+                   master_startup: document.getElementById('pi-startup').checked,
+                   master_housekeeping: document.getElementById('pi-housekeeping').checked,
+                   master_queries: document.getElementById('pi-queries').checked,
+                   master_optimizer_writes: document.getElementById('pi-writes').checked,
                    web_username: document.getElementById('pi-web-user').value.trim() || 'admin' };
+    if (!piTls.fixed) Object.assign(body, { tls_cert: tlsCert, tls_key: tlsKey });
     const webPass = document.getElementById('pi-web-pass').value;
     if (webPass !== '') body.web_password = webPass;
     // Browsers fill a saved login (the Tigo cloud one, say) into a username
@@ -3445,21 +4633,28 @@
       const j = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(j.error || `/api/settings ${r.status}`);
       showToast('Saved ✓', 'ok');
-      const next = webPort || 80;
-      if (next !== piWebPortActive &&
-          confirm(`Restart the service to move the web UI to port ${next}?\n\nWithout a restart it stays on ${piWebPortActive}.`)) {
+      const https = tlsCert !== '';
+      const next = webPort || (https ? 443 : 80);
+      const tlsChanged = tlsCert !== piTls.cert || tlsKey !== piTls.key;
+      const where = `${https ? 'https' : 'http'} on port ${next}`;
+      if ((next !== piWebPortActive || tlsChanged) &&
+          confirm(`Restart the service to serve the web UI over ${where}?\n\nWithout a restart it stays as it is.`)) {
         await apiFetch('/api/restart', { method: 'POST' }).catch(() => {});
         const url = new URL(window.location.href);
-        url.port = next === 80 ? '' : String(next);
+        url.protocol = https ? 'https:' : 'http:';
+        url.port = next === (https ? 443 : 80) ? '' : String(next);
         setTimeout(() => { window.location.href = url.toString(); }, 5000);
-        showToast(`Restarting; opening port ${next} in 5 s`, 'ok');
+        showToast(`Restarting; opening ${where} in 5 s`, 'ok');
         return;
       }
       setTimeout(refreshPiSettings, 1500);
     } catch (e) {
       showToast(`Save failed: ${e.message}`, 'err');
     }
-  });
+  }
+  // The Bus and Web UI cards post the same settings, so either saves both.
+  document.getElementById('pi-port-save').addEventListener('click', piSavePort);
+  document.getElementById('pi-web-save').addEventListener('click', piSavePort);
   // Inverters: one row per inverter, its MPPTs as a comma-separated list.
   function piInvRow(inv) {
     const row = document.createElement('div');
@@ -3515,6 +4710,9 @@
       username: document.getElementById('pi-mqtt-user').value,
       base_topic: document.getElementById('pi-mqtt-topic').value.trim() || 'tigomonitor',
       discovery_prefix: document.getElementById('pi-mqtt-discovery').value.trim() || 'homeassistant',
+      discovery: document.getElementById('pi-mqtt-disc-on').checked,
+      standby_panels: document.getElementById('pi-mqtt-standby-panels').checked,
+      pv_switch: document.getElementById('pi-mqtt-pv-switch').checked,
     };
     const pass = document.getElementById('pi-mqtt-pass').value;
     if (pass !== '') mqtt.password = pass;
@@ -3533,10 +4731,45 @@
     }
   });
 
-  document.querySelector('#nav button[data-view="tools"]').addEventListener('click', refreshTools);
-  // After the platform probe, which refreshes Tools itself on the Pi: a
-  // bookmark to #tools would otherwise load the ESP32's sections there.
-  platformReady.then(() => { if (PLATFORM !== 'linux' && window.location.hash === '#tools') refreshTools(); });
+  // Settings tabs. The last one opened is remembered; one this platform
+  // leaves out (the Pi's on an ESP32, YAML on the Pi) falls back to the first.
+  function settingsTabsShown() {
+    return [...document.querySelectorAll('#settings-tabs [role="tab"]')].filter(t => t.style.display !== 'none');
+  }
+  function settingsTab(name) {
+    if (!name) { try { name = localStorage.getItem('settings-tab'); } catch (e) {} }
+    const shown = settingsTabsShown();
+    const tab = shown.find(t => t.dataset.tab === name) || shown[0];
+    document.querySelectorAll('#settings-tabs [role="tab"]').forEach(t => {
+      const on = t === tab;
+      t.setAttribute('aria-selected', String(on));
+      t.tabIndex = on ? 0 : -1;
+      document.getElementById(t.getAttribute('aria-controls')).hidden = !on;
+    });
+  }
+  document.querySelectorAll('#settings-tabs [role="tab"]').forEach(t => t.addEventListener('click', () => {
+    settingsTab(t.dataset.tab);
+    try { localStorage.setItem('settings-tab', t.dataset.tab); } catch (e) {}
+  }));
+  // Left and right arrows move along the tabs, as in any tablist.
+  document.getElementById('settings-tabs').addEventListener('keydown', e => {
+    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+    const shown = settingsTabsShown();
+    const i = shown.indexOf(document.activeElement);
+    if (i < 0) return;
+    const next = shown[(i + (e.key === 'ArrowRight' ? 1 : shown.length - 1)) % shown.length];
+    next.click();
+    next.focus();
+    e.preventDefault();
+  });
+  settingsTab();
+  document.querySelector('#nav button[data-view="settings"]').addEventListener('click', refreshSettings);
+  // After the platform probe, which refreshes Settings itself on the Pi: a
+  // bookmark to #settings would otherwise load the ESP32's sections there.
+  platformReady.then(() => {
+    settingsTab();
+    if (PLATFORM !== 'linux' && window.location.hash === '#settings') refreshSettings();
+  });
 
   // ============================================================
   // R7 — CCA view (Tigo CCA configuration mirror)
@@ -3591,7 +4824,7 @@
       </div>
       <div style="color:var(--text-dim);margin-top:10px">
         To keep friendly panel names, import the node table manually from the
-        <strong style="color:var(--text)">Tools</strong> page instead of syncing from the CCA.
+        <strong style="color:var(--text)">Devices</strong> page instead of syncing from the CCA.
       </div>
     </div>`;
   }
@@ -3753,14 +4986,65 @@
   }
 
   let ccaBusy = false;  // true during a manual refresh poll — pauses the interval
+  // Pi build only: true while the Pi runs the bus in the CCA's place. The
+  // CCA is off the bus then, so discovery is off and an unreachable CCA
+  // shows its last sync rather than an error.
+  let ccaMasterMode = false;
+  let ccaDiscoveryLocked = false;  // disabled here, so re-enabled here
+  let ccaLastGood = null;  // the last /api/cca answer that carried device info
+
+  async function ccaCheckMaster() {
+    let master = false;
+    if (PLATFORM === 'linux') {
+      const r = await apiFetch('/api/master').catch(() => null);
+      const m = r && r.ok ? await r.json().catch(() => null) : null;
+      master = !!m && m.role === 'master';
+    }
+    ccaMasterMode = master;
+    document.getElementById('cca-master-banner').style.display = master ? '' : 'none';
+    const btn = document.getElementById('cca-discovery-btn');
+    if (master) {
+      btn.disabled = true;
+      btn.title = 'Off while the Pi runs the bus';
+      ccaDiscoveryLocked = true;
+      document.getElementById('cca-discovery-status').textContent =
+        'Off while the Pi runs the bus: the CCA is not on it, so its scan has nothing to reach.';
+    } else if (ccaDiscoveryLocked) {
+      ccaDiscoveryLocked = false;
+      btn.disabled = false;
+      btn.title = '';
+      document.getElementById('cca-discovery-status').textContent = 'Idle — no scan running.';
+    }
+  }
+
+  // In master mode an unreachable CCA is expected: say so and keep the last sync on screen.
+  function ccaShowUnreachable(fallback) {
+    if (!ccaMasterMode) return false;
+    if (ccaLastGood) applyCcaData(ccaLastGood);
+    const age = ccaLastGood ? ccaFmtSyncAge(ccaLastGood.last_sync_seconds_ago) : 'never';
+    const note = document.createElement('div');
+    note.style.cssText = 'color:var(--text-dim);margin-bottom:10px';
+    note.textContent = `The CCA isn't reachable (it may be off, or out of Bluetooth range). ` +
+      (ccaLastGood ? `Showing its last sync, ${age}.` : 'It has never synced, so there is nothing to show.');
+    const info = document.getElementById('cca-device-info');
+    if (!ccaLastGood) info.textContent = '';
+    info.prepend(note);
+    ccaSetStatusBadge(ccaLastGood ? 'connected' : 'unsynced');
+    document.getElementById('cca-meta').textContent = ccaLastGood ? fallback : 'CCA not reachable';
+    return true;
+  }
 
   async function refreshCca() {
     if (!document.getElementById('view-cca').classList.contains('active')) return;
     ccaBleLoad();  // reveal + populate the BLE-search card when BLE is enabled
+    await ccaCheckMaster();
     try {
       const r = await apiFetch('/api/cca');
       if (!r.ok) throw new Error(`/api/cca ${r.status}`);
-      applyCcaData(await r.json());
+      const data = await r.json();
+      const { state } = applyCcaData(data);
+      if (state === 'connected') ccaLastGood = data;
+      else if (state === 'error' && ccaShowUnreachable('CCA not reachable · showing last sync')) return;
     } catch (e) {
       ccaSetStatusBadge('failed');
       document.getElementById('cca-device-info').innerHTML =
@@ -3898,11 +5182,13 @@
         info.innerHTML =
           `<div class="spinner-box"><span class="spinner"></span> Connecting to the CCA over BLE… (${Math.round(elapsed)} s)</div>`;
       }
+      if (ccaShowUnreachable('CCA not reachable · showing last sync')) return;
       ccaSetStatusBadge('failed');
       info.innerHTML =
         '<div style="color:var(--bad)">BLE refresh timed out — the CCA may be out of range or busy (it allows one BLE client at a time). Try again.</div>';
       document.getElementById('cca-meta').textContent = 'BLE refresh timed out';
     } catch (e) {
+      if (ccaShowUnreachable('CCA not reachable · showing last sync')) return;
       ccaSetStatusBadge('failed');
       info.innerHTML = `<div style="color:var(--bad)">Failed to refresh: ${e.message}</div>`;
     } finally {
@@ -3945,7 +5231,8 @@
         else showToast(`Cloud sync failed: ${d.result.msg || 'CCA reported an error'}`, 'err');
         break;
       }
-      if (!confirmed) showToast('Sync requested — no confirmation from the CCA yet');
+      if (!confirmed) showToast(ccaMasterMode ? 'No answer from the CCA: it may be off, or out of Bluetooth range'
+                                              : 'Sync requested — no confirmation from the CCA yet');
     } catch (e) {
       showToast(`Cloud sync failed: ${e.message}`, 'err');
     } finally {
@@ -3976,7 +5263,7 @@
 
   let ccaDiscovering = false;
   document.getElementById('cca-discovery-btn').addEventListener('click', async () => {
-    if (ccaDiscovering) return;
+    if (ccaDiscovering || ccaMasterMode) return;
     if (!confirm('Start a CCA topology discovery scan?\n\nThe CCA will briefly interrupt normal optimizer operation while it re-discovers modules. This is recoverable but can take a few minutes.')) return;
     ccaDiscovering = true;
     ccaBusy = true;  // pause the device-info auto-refresh so we don't fight over the BLE link
@@ -4233,6 +5520,7 @@
   async function cloudUiSync() {
     let st;
     try { const r = await apiFetch('/api/cloud/status'); if (!r.ok) return; st = await r.json(); } catch (_) { return; }
+    if (hiddenPages.has('cloudstatus')) return;  // turned off on the Pi
     document.getElementById('nav-cloudstatus').style.display = '';  // feature available
     const connected = !!st.configured;
     document.getElementById('cloud-box').style.display = connected ? '' : 'none';
@@ -4478,12 +5766,26 @@
       || (stringLabel || '').toLowerCase().includes(f);
   }
 
+  function topoShowNew(nodes) {
+    const fresh = nodes.filter(n => isNewOptimizer(n.first_heard_unix, !!n.cca_string));
+    const box = document.getElementById('topo-new');
+    box.style.display = fresh.length ? '' : 'none';
+    if (!fresh.length) return;
+    const which = fresh.map(n => `…${topoLast6(n.long_address)} (node ${n.addr}, first heard ${
+      new Date(n.first_heard_unix * 1000).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })})`).join(', ');
+    box.innerHTML = `<strong>${fresh.length === 1 ? 'New optimizer heard' : fresh.length + ' new optimizers heard'}:</strong> ${topoEscape(which)}. ` +
+      'Choose Edit layout to put it in a string, or use Replace on its tile to give it the place of the panel it replaced.';
+  }
+
   async function refreshTopology() {
     if (!document.getElementById('view-topology').classList.contains('active')) return;
     // Bail if a rename input is currently open. Re-rendering would kill the
     // input mid-keystroke; the blur listener would then save a half-typed
     // name. Auto-refresh resumes once the user commits or cancels.
     if (topoState.editing) return;
+    topoRefreshPending();
+    // In the editor only the readings refresh; the tree is the user's.
+    if (topoEditor.active) return topoEdRefreshReadings();
     try {
       const [invR, devR, nodeR] = await Promise.all([
         apiFetch('/api/inverters'),
@@ -4495,8 +5797,10 @@
       if (!nodeR.ok) throw new Error('/api/nodes ' + nodeR.status);
 
       const invData = await invR.json();
+      mpptNames = invData.mppt_names || {};
       const devData = await devR.json();
       const nodeData = await nodeR.json();
+      topoShowNew(nodeData.nodes || []);
 
       // Index runtime telemetry by addr — nodes carry the CCA mapping;
       // devices carry the live V/I/P/T. Joining them locally rather than
@@ -4528,6 +5832,7 @@
           temperature: dev.temperature ?? 0,
           dataAgeMs: dev.data_age_ms ?? 999999999,
           stale: dev.stale ?? false,
+          known: !!n.known,  // marked known on the Node Table: not counted
         });
       }
 
@@ -4561,23 +5866,27 @@
           const powers = panels.map(p => p.power).filter(v => v > 0);
           const median = topoMedian(powers);
           const rating = s.panel_rating_w || 0;
-          const opts = { rating, stringTotal: s.total_power || 0, panelCount: panels.length };
+          const counted = panels.filter(p => !p.known);
+          const knownHere = panels.length - counted.length;
+          const opts = { rating, stringTotal: s.total_power || 0, panelCount: counted.length };
 
           let panelHtml = '';
           for (const p of visible) {
             // The firmware stale flag (silent past stale_timeout) outranks the
             // power-based classes — distinguishes off-the-bus from producing-zero
-            const cls = p.stale ? 'stale' : topoPanelClass(p.power, median, p.dataAgeMs, opts);
-            const pctText = (rating > 0 && cls !== 'dead' && cls !== 'stale')
+            const cls = p.known ? 'known' : p.stale ? 'stale' : topoPanelClass(p.power, median, p.dataAgeMs, opts);
+            const pctText = (rating > 0 && cls !== 'dead' && cls !== 'stale' && cls !== 'known')
               ? ` <span style="color:var(--text-dim);font-size:11px">(${Math.round((p.power / rating) * 100)}%)</span>`
               : '';
-            const staleBadge = p.stale ? `<span class="badge stale">stale</span>` : '';
+            const staleBadge = p.stale && !p.known ? `<span class="badge stale">stale</span>` : '';
             panelHtml += `<div class="panel-tile ${cls}" title="${topoEscape(p.barcode)}">
               <div class="panel-tile-head">
                 <div class="panel-tile-id">${topoEscape(p.name)} ${staleBadge}</div>
                 <div class="panel-tile-bc">…${topoEscape(topoLast6(p.barcode))}</div>
               </div>
-              <div class="panel-tile-power">${Math.round(p.power)}<span class="unit">W</span>${pctText}</div>
+              <div class="panel-tile-power">${p.known
+                ? '<span class="badge stale" title="Marked known on the Node Table: not counted">known</span>'
+                : `${Math.round(p.power)}<span class="unit">W</span>${pctText}`}</div>
               <div class="panel-tile-detail">
                 <span>${p.voltage.toFixed(1)} V</span>
                 <span>${p.current.toFixed(1)} A</span>
@@ -4592,7 +5901,7 @@
             : '';
           // Rating pill: shows current value + click-to-edit. When unset, shows
           // a dimmed "+ rating" prompt so users know it's settable.
-          const nameplate = rating * panels.length;
+          const nameplate = rating * counted.length;
           const ratingPill = rating > 0
             ? `<span class="topo-string-pill" data-rating-string="${topoEscape(s.label)}" style="cursor:pointer" title="Click to edit panel nameplate">${rating} W/panel</span>`
             : `<span class="topo-string-pill" data-rating-string="${topoEscape(s.label)}" style="cursor:pointer;color:var(--text-faint);border-style:dashed" title="Click to set panel nameplate">+ rating</span>`;
@@ -4602,12 +5911,13 @@
 
           // When grouped under an MPPT header, the per-string "· MPPT n"
           // suffix is redundant — the header already says it.
-          const mpptInline = mpptGrouped ? '' : ` · ${topoEscape(s.mppt)}`;
+          const mpptInline = mpptGrouped ? '' : ` · ${topoEscape(mpptName(s.mppt))}`;
           const section = `<div class="topo-string">
             <div class="topo-string-head">
               <strong class="topo-string-name-text">${topoEscape(stringEffective)}</strong>${stringCanonicalSuffix}
               <button class="topo-inv-name-edit-btn" data-rename-string="${topoEscape(s.label)}" title="Rename string">✎</button>${mpptInline}
-              <span class="topo-string-pill">${visible.length} panels</span>
+              <span class="topo-string-pill">${visible.filter(p => !p.known).length} panels</span>
+              ${knownHere ? `<span class="topo-string-pill" style="color:var(--text-faint)" title="Marked known on the Node Table">${knownHere} known</span>` : ''}
               <span class="topo-string-pill">${topoFmtKW(s.total_power || 0)}</span>
               <span class="topo-string-pill">${(s.active_devices ?? 0)}/${(s.total_devices ?? 0)} active</span>
               ${ratingPill}
@@ -4628,7 +5938,7 @@
           g.strings += 1;
           sectionCount += 1;
 
-          invPanelCount += panels.length;
+          invPanelCount += counted.length;
           totalStrings += 1;
         }
 
@@ -4640,7 +5950,7 @@
         for (const [mpptKey, g] of mpptGroups) {
           if (mpptGrouped) {
             bodyHtml += `<div class="topo-mppt">
-              <div class="topo-mppt-head">${topoEscape(mpptKey || 'Unassigned MPPT')}
+              <div class="topo-mppt-head">${topoEscape(mpptName(mpptKey) || 'Unassigned MPPT')}
                 <strong>${topoFmtKW(g.power)}</strong>
                 <span class="topo-string-pill">${g.strings} string${g.strings === 1 ? '' : 's'}</span>
                 <span class="topo-string-pill">${g.active}/${g.total} active</span>
@@ -4669,7 +5979,7 @@
             <div class="topo-inv-stats">
               <strong>${topoFmtKW(inv.total_power || 0)}</strong> ·
               ${(inv.active_devices ?? 0)}/${(inv.total_devices ?? 0)} panels ·
-              ${(inv.mppts || []).map(m => topoEscape(m)).join(', ') || '—'}
+              ${(inv.mppts || []).map(m => topoEscape(mpptName(m))).join(', ') || '—'}
             </div>
           </div>
           <div class="topo-inv-body">${bodyHtml}</div>
@@ -4841,6 +6151,592 @@
       document.getElementById('topo-meta').textContent = `error: ${e.message}`;
     }
   }
+
+  // ===== Topology editor (Edit layout) =====
+  // Lays the site out by hand: inverters, MPPTs, strings, and panels dragged
+  // into strings. Nothing is written until Save, which sends the whole tree
+  // to POST /api/layout in one request (the server checks it with the rules
+  // in tigo_layout.h, shared by the ESP32 and the Pi). Panels are named from
+  // their string and position: the third panel in string A is A3.
+  var topoEditor = {  // var: showView() runs before this line and checks it
+    active: false,
+    dirty: false,
+    tree: null,       // { inverters: [...], unassigned: [{barcode, addr}] }
+    readings: {},     // barcode -> device, from /api/devices
+  };
+
+  function topoEdPanelName(str, i) {
+    return (str.display_label || str.label) + (i + 1);
+  }
+
+  // Next free string label: A..Z, then AA, AB, ...
+  function topoEdNextString() {
+    const used = new Set();
+    for (const inv of topoEditor.tree.inverters)
+      for (const m of inv.mppts) for (const s of m.strings) used.add(s.label);
+    for (let n = 0; ; n++) {
+      let label = '', k = n;
+      do { label = String.fromCharCode(65 + (k % 26)) + label; k = Math.floor(k / 26) - 1; } while (k >= 0);
+      if (!used.has(label)) return label;
+    }
+  }
+
+  function topoEdNextNumbered(prefix, used) {
+    let max = 0;
+    for (const u of used) {
+      const m = String(u).match(new RegExp('^' + prefix + ' (\\d+)$'));
+      if (m) max = Math.max(max, +m[1]);
+    }
+    return `${prefix} ${max + 1}`;
+  }
+
+  // An MPPT's name as shown: unique within its inverter, so each inverter can
+  // have its own MPPT 1. Its label stays unique across the site.
+  function topoEdMpptName(m) { return m.display_label || m.label; }
+
+  function topoEdAllMppts() {
+    return topoEditor.tree.inverters.flatMap(inv => inv.mppts.map(m => m.label));
+  }
+
+  function topoEdMarkDirty() {
+    topoEditor.dirty = true;
+    document.getElementById('topo-ed-error').textContent = '';
+    topoRenderPending();
+  }
+
+  function topoEdToolbar(on) {
+    document.getElementById('topo-edit-btn').style.display = on ? 'none' : '';
+    document.getElementById('topo-save-btn').style.display = on ? '' : 'none';
+    document.getElementById('topo-cancel-btn').style.display = on ? '' : 'none';
+    for (const id of ['topo-expand-btn', 'topo-collapse-btn', 'topo-filter'])
+      document.getElementById(id).style.display = on ? 'none' : '';
+    if (!on) document.getElementById('topo-ed-error').textContent = '';
+  }
+
+  async function enterTopoEdit() {
+    try {
+      const r = await apiFetch('/api/layout');
+      if (!r.ok) throw new Error('/api/layout ' + r.status);
+      const l = await r.json();
+      const strip = ms => ms.map(m => ({
+        label: m.label, display_label: m.display_label || '',
+        strings: m.strings.map(s => ({
+          label: s.label, display_label: s.display_label || '', rating_w: s.rating_w || 0,
+          panels: s.panels.map(p => ({ barcode: p.barcode, addr: p.addr })),
+        })),
+      }));
+      const tree = {
+        inverters: (l.inverters || []).map(inv => ({
+          name: inv.name, display_name: inv.display_name || '', mppts: strip(inv.mppts || []),
+        })),
+        unassigned: (l.unassigned || []).map(p => ({ barcode: p.barcode, addr: p.addr, first_heard_unix: p.first_heard_unix || 0 })),
+      };
+      topoEditor.tree = tree;
+      // MPPTs no inverter lists get one of their own, so every panel has a home.
+      for (const m of strip(l.unplaced_mppts || [])) {
+        if (!m.label) m.label = topoEdNextNumbered('MPPT', topoEdAllMppts());
+        const name = topoEdNextNumbered('Inverter', tree.inverters.map(i => i.name));
+        tree.inverters.push({ name, display_name: '', mppts: [m] });
+      }
+      topoEditor.active = true;
+      topoEditor.dirty = false;
+      topoEdToolbar(true);
+      renderTopoEditor();
+      topoEdRefreshReadings();
+    } catch (e) {
+      showToast(`Could not open the editor: ${e.message}`, 'err');
+    }
+  }
+
+  function exitTopoEdit() {
+    topoEditor.active = false;
+    topoEditor.dirty = false;
+    topoEditor.tree = null;
+    topoEdToolbar(false);
+    refreshTopology();
+  }
+
+  async function saveTopoEdit() {
+    const body = {
+      inverters: topoEditor.tree.inverters.map(inv => ({
+        name: inv.name, display_name: inv.display_name,
+        mppts: inv.mppts.map(m => ({
+          label: m.label, display_label: m.display_label,
+          strings: m.strings.map(s => ({
+            label: s.label, display_label: s.display_label, rating_w: s.rating_w,
+            panels: s.panels.map(p => p.barcode),
+          })),
+        })),
+      })),
+    };
+    const btn = document.getElementById('topo-save-btn');
+    btn.disabled = true;
+    try {
+      const r = await apiFetch('/api/layout', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || `save failed (${r.status})`);
+      showToast('Layout saved ✓', 'ok');
+      exitTopoEdit();
+    } catch (e) {
+      document.getElementById('topo-ed-error').textContent = e.message;
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  // inTray: an unassigned panel, which can take a placed one's spot (Replace).
+  function topoEdPanelHtml(p, name, inTray) {
+    const d = topoEditor.readings[p.barcode];
+    const watts = d ? `${Math.round(d.power_in ?? d.power ?? 0)}<span class="unit">W</span>` : '—';
+    const isNew = inTray && isNewOptimizer(p.first_heard_unix, false);
+    return `<div class="panel-tile topo-ed-panel" data-barcode="${topoEscape(p.barcode)}" title="${topoEscape(p.barcode)}">
+      <div class="panel-tile-head">
+        <div class="panel-tile-id">${topoEscape(name)}${isNew ? '<span class="node-new">New</span>' : ''}</div>
+        <div class="panel-tile-bc">…${topoEscape(topoLast6(p.barcode))}</div>
+      </div>
+      <div class="panel-tile-power">${watts}</div>
+      ${inTray ? '<button type="button" class="btn topo-ed-replace" title="Give it the place, name and string of a panel it replaced">Replace…</button>' : ''}
+    </div>`;
+  }
+
+  // Replace: the placed panels to choose from, the ones with no reading
+  // (likely the dead one) first, then by name.
+  function topoEdReplacePick(tile) {
+    const t = topoEditor.tree;
+    const opts = [];
+    t.inverters.forEach(inv => inv.mppts.forEach(m => m.strings.forEach(s => s.panels.forEach((p, pi) => {
+      const d = topoEditor.readings[p.barcode];
+      opts.push({ barcode: p.barcode, name: topoEdPanelName(s, pi), dead: !d,
+                  text: `${topoEdPanelName(s, pi)} · ${d ? Math.round(d.power_in ?? d.power ?? 0) + ' W' : 'no reading'}` });
+    }))));
+    opts.sort((a, b) => (b.dead - a.dead) || a.name.localeCompare(b.name, undefined, { numeric: true }));
+    const sel = document.createElement('select');
+    sel.className = 'cfg-input topo-ed-replace-pick';
+    sel.innerHTML = '<option value="">Replace which panel?</option>' +
+      opts.map(o => `<option value="${topoEscape(o.barcode)}">${topoEscape(o.text)}</option>`).join('');
+    sel.addEventListener('change', () => {
+      if (sel.value) topoEdReplace(tile.dataset.barcode, sel.value);
+      else renderTopoEditor();
+    });
+    tile.querySelector('.topo-ed-replace').replaceWith(sel);
+    sel.focus();
+  }
+
+  // The new panel takes the old one's place in its string (and so its name);
+  // the old one goes to Unassigned. History stays with each barcode.
+  function topoEdReplace(newBc, oldBc) {
+    const t = topoEditor.tree;
+    const i = t.unassigned.findIndex(p => p.barcode === newBc);
+    if (i < 0) return;
+    for (const inv of t.inverters) for (const m of inv.mppts) for (const s of m.strings) {
+      const j = s.panels.findIndex(p => p.barcode === oldBc);
+      if (j < 0) continue;
+      const [fresh] = t.unassigned.splice(i, 1);
+      const [old] = s.panels.splice(j, 1, fresh);
+      t.unassigned.push(old);
+      topoEdMarkDirty();
+      renderTopoEditor();
+      return;
+    }
+  }
+
+  function renderTopoEditor() {
+    const t = topoEditor.tree;
+    const tree = document.getElementById('topo-tree');
+    let html = `<div class="topo-tray" id="topo-unassigned">
+      <div class="topo-tray-head"><strong>Unassigned</strong> · ${t.unassigned.length} panel${t.unassigned.length === 1 ? '' : 's'}
+        the bus has found that no string holds. Drag them into a string; drag one back here to take it out.</div>
+      <div class="panel-grid topo-ed-drop" data-drop="tray">${
+        t.unassigned.map(p => topoEdPanelHtml(p, p.addr, true)).join('') || '<div class="topo-ed-empty">None</div>'}</div>
+    </div>`;
+    t.inverters.forEach((inv, ii) => {
+      let body = '';
+      inv.mppts.forEach((m, mi) => {
+        let strings = '';
+        m.strings.forEach((s, si) => {
+          const panels = s.panels.map((p, pi) => topoEdPanelHtml(p, topoEdPanelName(s, pi))).join('');
+          strings += `<div class="topo-string" data-string-label="${topoEscape(s.label)}" data-i="${ii}" data-m="${mi}" data-s="${si}">
+            <div class="topo-string-head">
+              <span class="topo-ed-handle" data-kind="string" title="Drag to move this string to another MPPT">⠿</span>
+              <input class="topo-ed-name topo-ed-string-name" data-i="${ii}" data-m="${mi}" data-s="${si}"
+                value="${topoEscape(s.display_label)}" placeholder="${topoEscape(s.label)}" maxlength="28" aria-label="String name">
+              ${s.display_label ? `<span class="topo-ed-canon">(${topoEscape(s.label)})</span>` : ''}
+              <span class="topo-string-pill">${s.panels.length} panel${s.panels.length === 1 ? '' : 's'}</span>
+              ${s.panels.length ? '' : `<button class="topo-del" data-del="string" data-i="${ii}" data-m="${mi}" data-s="${si}">Delete</button>`}
+            </div>
+            <div class="panel-grid topo-ed-drop" data-drop="${ii}:${mi}:${si}">${
+              panels || '<div class="topo-ed-empty">Drag panels here</div>'}</div>
+          </div>`;
+        });
+        body += `<div class="topo-mppt" data-mppt-label="${topoEscape(m.label)}" data-i="${ii}" data-m="${mi}">
+          <div class="topo-mppt-head">
+            <span class="topo-ed-handle" data-kind="mppt" title="Drag to move this MPPT to another inverter">⠿</span>
+            <input class="topo-ed-name topo-ed-mppt-name" data-i="${ii}" data-m="${mi}" value="${topoEscape(m.display_label)}"
+              placeholder="${topoEscape(m.label)}" maxlength="32" aria-label="MPPT name">
+            ${m.display_label ? `<span class="topo-ed-canon">(${topoEscape(m.label)})</span>` : ''}
+            ${m.strings.length ? '' : `<button class="topo-del" data-del="mppt" data-i="${ii}" data-m="${mi}">Delete</button>`}
+          </div>
+          <div class="topo-inv-body">${strings}
+            <button class="topo-add topo-add-string" data-i="${ii}" data-m="${mi}">+ String</button>
+          </div>
+        </div>`;
+      });
+      html += `<div class="topo-inv" data-inv-name="${topoEscape(inv.name)}" data-i="${ii}">
+        <div class="topo-inv-head">
+          <span class="topo-ed-handle" data-kind="inverter" title="Drag to reorder inverters">⠿</span>
+          <input class="topo-ed-name topo-ed-inv-name" data-i="${ii}" value="${topoEscape(inv.display_name)}"
+            placeholder="${topoEscape(inv.name)}" maxlength="32" aria-label="Inverter name">
+          ${inv.display_name ? `<span class="topo-ed-canon">(${topoEscape(inv.name)})</span>` : ''}
+          ${inv.mppts.length ? '' : `<button class="topo-del" data-del="inverter" data-i="${ii}">Delete</button>`}
+        </div>
+        <div class="topo-inv-body">${body}
+          <button class="topo-add topo-add-mppt" data-i="${ii}">+ MPPT</button>
+        </div>
+      </div>`;
+    });
+    html += `<button class="topo-add topo-add-inverter">+ Inverter</button>`;
+    tree.innerHTML = html;
+    document.getElementById('topo-summary').textContent =
+      `Editing · ${t.inverters.length} inverter${t.inverters.length === 1 ? '' : 's'} · ${t.unassigned.length} unassigned`;
+  }
+
+  // Names: inverter and string fields set the display name; an MPPT's field is
+  // its label. Panel names follow as you type, without a re-render stealing focus.
+  document.getElementById('topo-tree').addEventListener('input', e => {
+    if (!topoEditor.active) return;
+    const el = e.target, d = el.dataset, t = topoEditor.tree;
+    if (el.classList.contains('topo-ed-inv-name')) {
+      t.inverters[+d.i].display_name = el.value.trim();
+    } else if (el.classList.contains('topo-ed-mppt-name')) {
+      t.inverters[+d.i].mppts[+d.m].display_label = el.value.trim();
+    } else if (el.classList.contains('topo-ed-string-name')) {
+      const s = t.inverters[+d.i].mppts[+d.m].strings[+d.s];
+      s.display_label = el.value.trim();
+      el.closest('.topo-string').querySelectorAll('.topo-ed-panel .panel-tile-id').forEach((idEl, pi) => {
+        idEl.textContent = topoEdPanelName(s, pi);
+      });
+    } else {
+      return;
+    }
+    topoEdMarkDirty();
+  });
+
+  document.getElementById('topo-tree').addEventListener('click', e => {
+    if (!topoEditor.active) return;
+    const btn = e.target.closest('button');
+    if (!btn) return;
+    const d = btn.dataset, t = topoEditor.tree;
+    if (btn.classList.contains('topo-add-string')) {
+      t.inverters[+d.i].mppts[+d.m].strings.push({ label: topoEdNextString(), display_label: '', rating_w: 0, panels: [] });
+    } else if (btn.classList.contains('topo-add-mppt')) {
+      const inv = t.inverters[+d.i];
+      const label = topoEdNextNumbered('MPPT', topoEdAllMppts());
+      const shown = topoEdNextNumbered('MPPT', inv.mppts.map(topoEdMpptName));
+      inv.mppts.push({ label, display_label: shown === label ? '' : shown, strings: [] });
+    } else if (btn.classList.contains('topo-add-inverter')) {
+      t.inverters.push({ name: topoEdNextNumbered('Inverter', t.inverters.map(i => i.name)), display_name: '', mppts: [] });
+    } else if (d.del === 'string') {
+      t.inverters[+d.i].mppts[+d.m].strings.splice(+d.s, 1);
+    } else if (d.del === 'mppt') {
+      t.inverters[+d.i].mppts.splice(+d.m, 1);
+    } else if (d.del === 'inverter') {
+      t.inverters.splice(+d.i, 1);
+    } else {
+      return;
+    }
+    topoEdMarkDirty();
+    renderTopoEditor();
+  });
+
+  // ---- Dragging. Mouse: pointer events, lifted after a 5 px move. Touch: a
+  // 300 ms press lifts the panel, so a swipe that starts on a card still
+  // scrolls the page; once lifted, touchmove is cancelled so it doesn't.
+  // A panel card drags itself; a string, MPPT or inverter drags by the handle
+  // in its header. A string lands in an MPPT, an MPPT in an inverter; an
+  // inverter goes before another, or last on + Inverter.
+  const topoDrag = { kind: null, el: null, barcode: null, ghost: null, timer: null, startX: 0, startY: 0, lifted: false, over: null,
+                    x: 0, y: 0, scroll: null };
+  const TOPO_DROP_ZONE = { panel: '.topo-ed-drop', string: '.topo-mppt', mppt: '.topo-inv', inverter: '.topo-inv, .topo-add-inverter' };
+  const TOPO_BLOCK = { string: '.topo-string', mppt: '.topo-mppt', inverter: '.topo-inv' };
+
+  function topoEdListOf(dropKey) {
+    if (dropKey === 'tray') return topoEditor.tree.unassigned;
+    const [i, m, s] = dropKey.split(':').map(Number);
+    return topoEditor.tree.inverters[i].mppts[m].strings[s].panels;
+  }
+
+  function topoEdLift(x, y) {
+    topoDrag.lifted = true;
+    const r = topoDrag.el.getBoundingClientRect();
+    // A string or MPPT can be tall: its header stands in for it.
+    const g = topoDrag.kind === 'panel' ? topoDrag.el.cloneNode(true)
+      : topoDrag.el.querySelector(':scope > .topo-string-head, :scope > .topo-mppt-head, :scope > .topo-inv-head').cloneNode(true);
+    g.classList.add('topo-ed-ghost');
+    if (topoDrag.kind !== 'panel') g.classList.add('topo-ed-ghost-block');
+    g.style.width = (topoDrag.kind === 'panel' ? r.width : Math.min(r.width, 360)) + 'px';
+    document.body.appendChild(g);
+    topoDrag.ghost = g;
+    topoDrag.el.classList.add('dragging');
+    topoEdMoveGhost(x, y);
+    topoDrag.scroll = requestAnimationFrame(topoEdEdgeScroll);
+  }
+
+  // Held near the top or bottom of the window, a lifted drag scrolls the page:
+  // on a phone nothing else can while the finger is down. Faster nearer the edge.
+  function topoEdEdgeScroll() {
+    if (!topoDrag.lifted) return;
+    const edge = 60, h = window.innerHeight, y = topoDrag.y;
+    const dy = y < edge ? -Math.ceil((edge - y) / 3) : y > h - edge ? Math.ceil((y - (h - edge)) / 3) : 0;
+    if (dy) {
+      window.scrollBy(0, dy);
+      topoEdMoveGhost(topoDrag.x, topoDrag.y);
+    }
+    topoDrag.scroll = requestAnimationFrame(topoEdEdgeScroll);
+  }
+
+  function topoEdMoveGhost(x, y) {
+    topoDrag.x = x;
+    topoDrag.y = y;
+    if (!topoDrag.ghost) return;
+    topoDrag.ghost.style.left = (x - 20) + 'px';
+    topoDrag.ghost.style.top = (y - 20) + 'px';
+    const target = document.elementFromPoint(x, y);
+    const zone = target && target.closest(TOPO_DROP_ZONE[topoDrag.kind]);
+    if (topoDrag.over && topoDrag.over !== zone) topoDrag.over.classList.remove('over');
+    topoDrag.over = zone;
+    if (zone) zone.classList.add('over');
+  }
+
+  // Moves the dragged string, MPPT or inverter into the list the zone's
+  // element holds, before the block of the same kind under the pointer, else
+  // at the end. Inverters have one list: the zone is the inverter itself, or
+  // + Inverter for the end.
+  function topoEdDropBlock(target) {
+    const t = topoEditor.tree, kind = topoDrag.kind;
+    const zone = target && target.closest(TOPO_DROP_ZONE[kind]);
+    if (!zone) return false;
+    const listAt = d => kind === 'string' ? t.inverters[+d.i].mppts[+d.m].strings
+      : kind === 'mppt' ? t.inverters[+d.i].mppts : t.inverters;
+    const itemAt = d => listAt(d)[kind === 'string' ? +d.s : kind === 'mppt' ? +d.m : +d.i];
+    const item = itemAt(topoDrag.el.dataset);
+    const src = listAt(topoDrag.el.dataset);
+    const dest = kind === 'inverter' ? t.inverters : kind === 'string'
+      ? t.inverters[+zone.dataset.i].mppts[+zone.dataset.m].strings : t.inverters[+zone.dataset.i].mppts;
+    const beforeEl = target.closest(TOPO_BLOCK[kind]);
+    const before = beforeEl && zone.contains(beforeEl) ? itemAt(beforeEl.dataset) : null;
+    const from = src.indexOf(item);
+    // Put down where it was picked up, or just past itself: nothing moved.
+    if (before === item) return false;
+    if (src === dest && (before ? src.indexOf(before) === from + 1 : from === src.length - 1)) return false;
+    src.splice(from, 1);
+    let at = before ? dest.indexOf(before) : dest.length;
+    if (at < 0) at = dest.length;
+    // An MPPT moving to an inverter that already shows its name takes the
+    // next free one there, rather than a save the server would refuse.
+    if (kind === 'mppt' && src !== dest && dest.some(m => topoEdMpptName(m) === topoEdMpptName(item))) {
+      const shown = topoEdNextNumbered('MPPT', dest.map(topoEdMpptName));
+      item.display_label = shown === item.label ? '' : shown;
+    }
+    dest.splice(at, 0, item);
+    topoEdMarkDirty();
+    return true;
+  }
+
+  function topoEdDrop(x, y) {
+    const target = document.elementFromPoint(x, y);
+    if (topoDrag.kind !== 'panel') return topoEdDropBlock(target);
+    const zone = target && target.closest('.topo-ed-drop');
+    if (!zone) return false;
+    const before = target.closest('.topo-ed-panel');
+    // Put down where it was picked up: nothing moved.
+    if (before && before.dataset.barcode === topoDrag.barcode) return false;
+    let from = null, fromIdx = -1;
+    for (const key of ['tray', ...topoEdZoneKeys()]) {
+      const list = topoEdListOf(key);
+      const i = list.findIndex(p => p.barcode === topoDrag.barcode);
+      if (i >= 0) { from = list; fromIdx = i; break; }
+    }
+    if (!from) return false;
+    const [panel] = from.splice(fromIdx, 1);
+    const to = topoEdListOf(zone.dataset.drop);
+    let at = to.length;
+    if (before && before.dataset.barcode !== panel.barcode) {
+      const j = to.findIndex(p => p.barcode === before.dataset.barcode);
+      if (j >= 0) at = j;
+    }
+    to.splice(at, 0, panel);
+    topoEdMarkDirty();
+    return true;
+  }
+
+  function topoEdZoneKeys() {
+    const keys = [];
+    topoEditor.tree.inverters.forEach((inv, i) => inv.mppts.forEach((m, mi) =>
+      m.strings.forEach((s, si) => keys.push(`${i}:${mi}:${si}`))));
+    return keys;
+  }
+
+  function topoEdEndDrag(x, y) {
+    clearTimeout(topoDrag.timer);
+    cancelAnimationFrame(topoDrag.scroll);
+    const dropped = topoDrag.lifted && topoEdDrop(x, y);
+    if (topoDrag.ghost) topoDrag.ghost.remove();
+    if (topoDrag.over) topoDrag.over.classList.remove('over');
+    if (topoDrag.el) topoDrag.el.classList.remove('dragging', 'lifting');
+    Object.assign(topoDrag, { kind: null, el: null, barcode: null, ghost: null, timer: null, lifted: false, over: null, scroll: null });
+    if (dropped) renderTopoEditor();
+  }
+
+  // el: a panel card, or the handle of a string or MPPT (the block is dragged).
+  function topoEdStart(el, x, y) {
+    topoDrag.kind = el.classList.contains('topo-ed-handle') ? el.dataset.kind : 'panel';
+    if (topoDrag.kind !== 'panel') el = el.closest(TOPO_BLOCK[topoDrag.kind]);
+    topoDrag.el = el;
+    topoDrag.barcode = el.dataset.barcode;
+    topoDrag.startX = x;
+    topoDrag.startY = y;
+    topoDrag.lifted = false;
+  }
+
+  document.getElementById('topo-tree').addEventListener('click', e => {
+    const b = e.target.closest('.topo-ed-replace');
+    if (b && topoEditor.active) topoEdReplacePick(b.closest('.topo-ed-panel'));
+  });
+  document.getElementById('topo-tree').addEventListener('pointerdown', e => {
+    if (!topoEditor.active || e.pointerType === 'touch' || e.button !== 0) return;
+    if (e.target.closest('.topo-ed-replace, .topo-ed-replace-pick')) return;  // a click, not a drag
+    const el = e.target.closest('.topo-ed-panel, .topo-ed-handle');
+    if (!el) return;
+    e.preventDefault();
+    topoEdStart(el, e.clientX, e.clientY);
+  });
+  window.addEventListener('pointermove', e => {
+    if (!topoDrag.el || e.pointerType === 'touch') return;
+    if (!topoDrag.lifted && Math.hypot(e.clientX - topoDrag.startX, e.clientY - topoDrag.startY) > 5)
+      topoEdLift(e.clientX, e.clientY);
+    if (topoDrag.lifted) topoEdMoveGhost(e.clientX, e.clientY);
+  });
+  window.addEventListener('pointerup', e => {
+    if (!topoDrag.el || e.pointerType === 'touch') return;
+    topoEdEndDrag(e.clientX, e.clientY);
+  });
+
+  document.getElementById('topo-tree').addEventListener('touchstart', e => {
+    if (!topoEditor.active || e.touches.length !== 1) return;
+    if (e.target.closest('.topo-ed-replace, .topo-ed-replace-pick')) return;
+    const handle = e.target.closest('.topo-ed-panel, .topo-ed-handle');
+    if (!handle) return;
+    const t = e.touches[0];
+    topoEdStart(handle, t.clientX, t.clientY);
+    const el = topoDrag.el;
+    el.classList.add('lifting');
+    topoDrag.timer = setTimeout(() => {
+      if (topoDrag.el === el) topoEdLift(topoDrag.startX, topoDrag.startY);
+    }, 300);
+  }, { passive: true });
+  window.addEventListener('touchmove', e => {
+    if (!topoDrag.el) return;
+    const t = e.touches[0];
+    if (!topoDrag.lifted) {
+      // Moved before the press lifted it: a scroll. Let it go.
+      if (Math.hypot(t.clientX - topoDrag.startX, t.clientY - topoDrag.startY) > 8) topoEdEndDrag(-1, -1);
+      return;
+    }
+    e.preventDefault();
+    topoEdMoveGhost(t.clientX, t.clientY);
+  }, { passive: false });
+  window.addEventListener('touchend', e => {
+    if (!topoDrag.el) return;
+    const t = e.changedTouches[0];
+    topoEdEndDrag(t.clientX, t.clientY);
+  });
+  window.addEventListener('touchcancel', () => { if (topoDrag.el) topoEdEndDrag(-1, -1); });
+
+  // Live watts while editing: only the numbers change, so a drag in progress
+  // and the tree being edited are left alone.
+  async function topoEdRefreshReadings() {
+    try {
+      const r = await apiFetch('/api/devices');
+      if (!r.ok) return;
+      const j = await r.json();
+      topoEditor.readings = {};
+      for (const d of (j.devices || [])) if (d.barcode) topoEditor.readings[d.barcode] = d;
+      document.querySelectorAll('#topo-tree .topo-ed-panel').forEach(el => {
+        const d = topoEditor.readings[el.dataset.barcode];
+        const p = el.querySelector('.panel-tile-power');
+        if (p) p.innerHTML = d ? `${Math.round(d.power_in ?? d.power ?? 0)}<span class="unit">W</span>` : '—';
+      });
+    } catch (_) { /* the next refresh tries again */ }
+  }
+
+  // ---- A layout that arrived after the user saved their own (a CCA sync,
+  // a cloud or file import, the ESP32's YAML) waits here for their answer.
+  const TOPO_SOURCES = { cca: "The CCA's", cloud: "Tigo cloud's", import: "The imported file's", yaml: "The YAML's" };
+  let topoPending = null;
+
+  function topoRenderPending() {
+    const box = document.getElementById('topo-pending');
+    if (!topoPending) { box.style.display = 'none'; return; }
+    const n = (topoPending.changes || []).length;
+    const invs = topoPending.inverters_then ? ' and its inverters' : '';
+    document.getElementById('topo-pending-text').textContent =
+      `${TOPO_SOURCES[topoPending.source] || 'An incoming'} layout differs from yours: ${n} panel${n === 1 ? '' : 's'}${invs} would change.`;
+    const where = p => p.string ? `${p.string} / ${p.mppt || 'no MPPT'} as ${p.name || '(unnamed)'}` : 'no string';
+    let items = (topoPending.changes || []).map(c =>
+      `<li><strong>${topoEscape(c.now.name || '…' + topoLast6(c.barcode))}</strong> → ${topoEscape(where(c.then))}</li>`);
+    if (topoPending.inverters_then) {
+      const fmt = l => l.map(i => `${i.name} (${i.mppts.join(', ') || 'no MPPTs'})`).join('; ') || 'none';
+      items.push(`<li>Inverters: ${topoEscape(fmt(topoPending.inverters_now || []))} → ${topoEscape(fmt(topoPending.inverters_then))}</li>`);
+    }
+    document.getElementById('topo-pending-list').innerHTML = items.join('');
+    const use = document.getElementById('topo-pending-use');
+    use.disabled = topoEditor.active && topoEditor.dirty;
+    use.title = use.disabled ? 'Save or cancel your edits first' : 'Replace your layout with this one';
+    box.style.display = '';
+  }
+
+  async function topoRefreshPending() {
+    try {
+      const r = await apiFetch('/api/layout/pending');
+      if (!r.ok) return;
+      const j = await r.json();
+      topoPending = j && j.source ? j : null;
+      topoRenderPending();
+    } catch (_) { /* the next refresh tries again */ }
+  }
+
+  async function topoAnswerPending(action) {
+    try {
+      const r = await apiFetch('/api/layout/pending', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || r.status);
+      topoPending = null;
+      topoRenderPending();
+      showToast(action === 'keep' ? 'Kept your layout ✓' : 'Layout replaced ✓', 'ok');
+      if (action === 'use' && topoEditor.active) exitTopoEdit();
+      else if (!topoEditor.active) refreshTopology();
+    } catch (e) {
+      showToast(`Failed: ${e.message}`, 'err');
+    }
+  }
+
+  document.getElementById('topo-pending-review').addEventListener('click', () => {
+    const list = document.getElementById('topo-pending-list');
+    list.style.display = list.style.display === 'none' ? '' : 'none';
+  });
+  document.getElementById('topo-pending-keep').addEventListener('click', () => topoAnswerPending('keep'));
+  document.getElementById('topo-pending-use').addEventListener('click', () => topoAnswerPending('use'));
+
+  document.getElementById('topo-edit-btn').addEventListener('click', enterTopoEdit);
+  document.getElementById('topo-save-btn').addEventListener('click', saveTopoEdit);
+  document.getElementById('topo-cancel-btn').addEventListener('click', exitTopoEdit);
+  window.addEventListener('beforeunload', e => {
+    if (topoEditor.active && topoEditor.dirty) { e.preventDefault(); e.returnValue = ''; }
+  });
 
   document.getElementById('topo-expand-btn').addEventListener('click', () => {
     topoState.collapsed.clear();

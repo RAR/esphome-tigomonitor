@@ -123,6 +123,39 @@ time.sleep(1.5)
 s = get('/api/settings')[1]
 expect('web port waits for a restart', (s['web_port'], s['web_port_active']), (18090, 18089))
 
+# --- hiding the CCA Info and Tigo Cloud pages: shown until turned off, and
+# turning one off doesn't reconnect MQTT
+s = get('/api/settings')[1]
+expect('pages shown by default', (s.get('show_cca_page'), s.get('show_cloud_page')), (True, True))
+expect('page switch must be true or false', post('/api/settings', {'show_cca_page': 'no'})[0], 400)
+mark = get('/api/logs')[1]['next']
+expect('hide the CCA page', post('/api/settings', {'show_cca_page': False})[0], 200)
+time.sleep(1.5)
+s = get('/api/settings')[1]
+expect('CCA page hidden, cloud still shown', (s['show_cca_page'], s['show_cloud_page']), (False, True))
+expect('saved to the file', json.load(open('build/cca-e2e/settings.json')).get('show_cca_page'), False)
+quiet = [l['msg'] for l in get(f'/api/logs?after={mark}')[1]['lines']]
+expect('no MQTT reconnect for a page switch', [m for m in quiet if m.startswith('MQTT')], [])
+post('/api/settings', {'show_cca_page': True, 'show_cloud_page': False})
+time.sleep(1.5)
+s = get('/api/settings')[1]
+expect('switched the other way', (s['show_cca_page'], s['show_cloud_page']), (True, False))
+post('/api/settings', {'show_cloud_page': True})
+
+# --- the Logs page: the daemon's own log, kept in memory
+lg = get('/api/logs')[1]
+expect('startup line in the log', any(l['msg'].startswith('tigomonitord ') and l['level'] == 'info' for l in lg['lines']), True)
+expect('seqs ascend', [l['seq'] for l in lg['lines']] == sorted(l['seq'] for l in lg['lines']), True)
+expect('next is past the last line', lg['next'], lg['lines'][-1]['seq'] + 1)
+expect('nothing new yet', get(f"/api/logs?after={lg['next']}")[1]['lines'], [])
+post('/api/settings', {'web_port': 18089})
+time.sleep(1.5)
+new = get(f"/api/logs?after={lg['next']}")[1]['lines']
+expect('a new line arrives', any(l['msg'] == 'settings changed; applying' for l in new), True)
+expect('and only new ones', all(l['seq'] >= lg['next'] for l in new), True)
+expect('journal still gets it', 'settings changed; applying' in open('build/cca-e2e/daemon.log').read(), True)
+expect('timestamps in ms', abs(new[-1]['t'] / 1000 - time.time()) < 60, True)
+
 # --- requests from other sites, the MQTT password, the web login
 import base64
 def code(path, method='GET', body=None, headers=None):
@@ -145,14 +178,33 @@ expect('MQTT password kept for a topic change', get('/api/settings')[1]['mqtt'][
 post('/api/settings', {'mqtt': {'host': 'elsewhere.example', 'port': 1, 'username': 'ha'}})
 time.sleep(1.5)
 expect('MQTT password dropped for a new broker', get('/api/settings')[1]['mqtt']['password_set'], False)
-post('/api/settings', {'mqtt': {'host': ''}})
+expect('MQTT discovery on by default', get('/api/settings')[1]['mqtt']['discovery'], True)
+post('/api/settings', {'mqtt': {'discovery': False}})
+time.sleep(1.5)
+expect('MQTT discovery turned off', get('/api/settings')[1]['mqtt']['discovery'], False)
+expect('MQTT discovery checked', post('/api/settings', {'mqtt': {'discovery': 'no'}})[0], 400)
+post('/api/settings', {'mqtt': {'host': '', 'discovery': True}})
 expect('web username checked', post('/api/settings', {'web_username': 'a:b'})[0], 400)
+expect('bus role checked', post('/api/settings', {'bus_role': 'both'})[0], 400)
+expect('gateway id checked', post('/api/settings', {'gateway_id': 0x8001})[0], 400)
+# The bring-up's hop moves the TAP to the id one up: not onto the factory
+# address, nor past the top.
+for gid in (0x1234, 0x1235, 0x7FFF):
+    expect(f'gateway id {gid:04X} refused', post('/api/settings', {'gateway_id': gid})[0], 400)
+post('/api/settings', {'master_queries': False, 'master_optimizer_writes': True})
+time.sleep(1.5)
+expect('optimizer writes need queries', get('/api/settings')[1]['master_optimizer_writes'], False)
+expect('no master on a bridge', post('/api/settings', {'bus_role': 'master', 'serial_port': 'tcp://example.com:6638'})[0], 400)
 post('/api/settings', {'web_password': 'pw'})
 time.sleep(1.5)
 auth = {'Authorization': 'Basic ' + base64.b64encode(b'admin:pw').decode()}
 expect('login required', code('/api/status'), 401)
 expect('wrong password refused', code('/api/status', headers={'Authorization': 'Basic ' + base64.b64encode(b'admin:no').decode()}), 401)
 expect('logged in', code('/api/status', headers=auth), 200)
+# A monitor polls health with no login; it says only whether all is well.
+health = get('/api/health')
+expect('health needs no login', (health[0] in (200, 503), health[1].get('status') in ('ok', 'problem')), (True, True))
+expect('health answers 503 for a problem', (health[0] == 503) == (health[1].get('status') == 'problem'), True)
 # The page's API calls carry its token as a Bearer header, which a browser
 # sends instead of the login; the ESP32's placeholder must not go out.
 page = u.urlopen(u.Request(B + '/', headers=auth)).read()

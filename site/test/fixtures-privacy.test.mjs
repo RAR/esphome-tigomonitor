@@ -9,10 +9,11 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { routes, patterns, devices } from '../screenshots/fixtures.mjs';
+import { routes, patterns, devices, piRoutes } from '../screenshots/fixtures.mjs';
 
 const blob = JSON.stringify({
   routes,
+  piRoutes,
   devices,
   patterns: patterns.map(([re, fn]) => [String(re), fn('/api/history/power?range=day')]),
 });

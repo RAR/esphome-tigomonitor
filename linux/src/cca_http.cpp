@@ -1,5 +1,6 @@
 #include "cca_http.h"
 
+#include "layout_api.h"
 #include "log.h"
 
 #include <httplib.h>
@@ -32,7 +33,7 @@ static bool get(const std::string &ip, const std::string &path, std::string &bod
   return true;
 }
 
-CcaHttp::CcaHttp(Monitor &monitor) : monitor_(monitor) {}
+CcaHttp::CcaHttp(Monitor &monitor, Topology &topology) : monitor_(monitor), topology_(topology) {}
 
 CcaHttp::~CcaHttp() { stop(); }
 
@@ -117,7 +118,13 @@ void CcaHttp::run_() {
     std::vector<LayoutPanel> panels;
     if (!get(ip, "/cgi-bin/summary_config", body, err)) LOGW("cca: summary_config from %s: %s", ip.c_str(), err.c_str());
     else if (!CcaHttp::parse_summary_config(body, panels)) LOGW("cca: summary_config from %s is not a JSON array", ip.c_str());
-    else LOGI("cca: sync from %s: %zu panels, %d matched", ip.c_str(), panels.size(), monitor_.apply_layout(panels));
+    else {
+      LOGI("cca: sync from %s: %zu panels", ip.c_str(), panels.size());
+      PendingLayout in;
+      in.source = "cca";
+      in.panels = std::move(panels);
+      offer_layout(monitor_, topology_, std::move(in));
+    }
     std::lock_guard<std::mutex> lock(mu_);
     v_.busy = !pending_ip_.empty();
   }

@@ -9,8 +9,10 @@ per-panel monitoring with a built-in web app and Home Assistant integration.
 
 - **Per-Device Monitoring** – Voltage, current, power, temperature, RSSI per optimizer,
   plus system aggregates (total power, energy, active count, peak tracking)
-- **Built-in Single-Page Web App** – Dashboard heatmap, history, topology, node table,
-  tools, diagnostics, CCA info, Tigo Cloud
+- **Built-in Single-Page Web App** – Dashboard heatmap, history, topology, devices,
+  settings, diagnostics, CCA info, Tigo Cloud
+- **Lay Out the Array by Hand** – Drag panels into strings and strings onto inverters
+  on the Topology page; no CCA or Tigo account needed
 - **On-Flash History** – Per-snapshot rollups and per-panel power persisted via
   [esp_tsdb](https://github.com/zakery292/esp_tsdb); survives reboots and OTA
 - **CCA Integration** – Auto-sync panel names over local HTTP, **Bluetooth** (for
@@ -18,6 +20,10 @@ per-panel monitoring with a built-in web app and Home Assistant integration.
 - **On-Device Configuration** – Calibration, night mode, friendly names and per-string
   nameplate set from the web UI and persisted to NVS — no reflash
 - **Home Assistant** – Energy Dashboard compatible, full API integration, Ingress-friendly
+- **Run the Bus Without a CCA** *(Raspberry Pi, experimental)* – Poll the TAP in the
+  CCA's place, or stand by to take over if the master stops; turn the array's output
+  off and on; watch the bus traffic live. See
+  [Run the bus in the CCA's place](https://rar.github.io/esphome-tigomonitor/guides/raspberry-pi/#run-the-bus-in-the-ccas-place)
 
 ## Requirements
 
@@ -44,7 +50,7 @@ or in Docker, with no ESPHome — see
 
 > ⚠ **Upgrading from a pre-TSDB release: one-time data loss + serial flash required.**
 > The partition layout changed to make room for the on-flash time-series database, so
-> the new image can't go over OTA and NVS is wiped. Export your JSON from **Tools →
+> the new image can't go over OTA and NVS is wiped. Export your JSON from **Devices →
 > Export** first, flash over USB/serial, then re-import. Later updates use OTA again.
 
 ## Gallery
@@ -53,9 +59,9 @@ or in Docker, with no ESPHome — see
 |------|------------|
 | Dashboard — hero strip, per-string heatmap, click any panel for the detail modal | ![Dashboard](docs/images/Dashboard.png) |
 | History — TSDB-backed power chart with gradient fill + daily energy bars | ![History](docs/images/History.png) |
-| Topology — inverter → string → panel tree, inline rename and nameplate editing | ![Topology](docs/images/Topology.png) |
-| Node Table — every discovered device, sortable and filterable, JSON export/import | ![Node Table](docs/images/Nodes.png) |
-| Tools — on-device configuration + YAML generator with sub-device grouping | ![Tools](docs/images/Tools.png) |
+| Topology — inverter → string → panel tree, inline rename and nameplate editing, drag-and-drop layout | ![Topology](docs/images/Topology.png) |
+| Devices — every discovered device, sortable and filterable, JSON export/import | ![Devices](docs/images/Nodes.png) |
+| Settings — on-device configuration, maintenance, and a YAML generator with sub-device grouping | ![Settings](docs/images/Settings.png) |
 | Diagnostics — memory / network / UART / per-DB TSDB stats | ![Diagnostics](docs/images/Diagnostics.png) |
 
 ## Documentation
@@ -66,7 +72,7 @@ Full documentation lives at **[rar.github.io/esphome-tigomonitor](https://rar.gi
 |----------|-------------|
 | [Start Here](https://rar.github.io/esphome-tigomonitor/guides/getting-started/) | Parts, safety, and the five steps to a live dashboard |
 | [Config Builder](https://rar.github.io/esphome-tigomonitor/config-builder/) | Generate a ready-to-flash ESPHome YAML for your board |
-| [Raspberry Pi and Linux](https://rar.github.io/esphome-tigomonitor/guides/raspberry-pi/) | The monitor on a Pi, a Linux machine or in Docker, without ESPHome |
+| [Raspberry Pi and Linux](https://rar.github.io/esphome-tigomonitor/guides/raspberry-pi/) | The monitor on a Pi, a Linux machine or in Docker, without ESPHome, or in place of the CCA |
 | [Wiring Guide](https://rar.github.io/esphome-tigomonitor/guides/wiring/) | RS485 connection to Tigo CCA/TAP |
 | [Configuration Guide](https://rar.github.io/esphome-tigomonitor/guides/configuration/) | Full configuration options, PSRAM and large installs |
 | [Web Server](https://rar.github.io/esphome-tigomonitor/guides/web-server/) | SPA views and the full API reference |

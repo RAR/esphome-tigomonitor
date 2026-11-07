@@ -8,17 +8,27 @@ services:
     # Or build it from this checkout instead of pulling:
     # build: { context: .., dockerfile: linux/Dockerfile }
     container_name: tigomonitord
+    # The device ID in Home Assistant comes from the hostname, and Docker's
+    # default is the container ID, which changes each time it's recreated.
+    hostname: tigomonitor
     # Not on-failure: the web UI's "Restart service" exits cleanly.
     restart: unless-stopped
     ports:
       - "8080:8080"
     volumes:
       - tigomonitor:/var/lib/tigomonitor
-    # A USB RS485 adapter. Leave this out when the bus comes from a network
-    # bridge (tcp://host:port under Tools). The by-id name stays the same
-    # across reboots and replugs, where /dev/ttyUSB0 may not.
-    # devices:
-    #   - /dev/serial/by-id/usb-FTDI_FT232R_USB_UART_XXXXXXXX-if00-port0:/dev/ttyUSB0
+      # - /dev:/dev    # a USB RS485 adapter: see device_cgroup_rules below
+    # A USB RS485 adapter: uncomment these and the /dev line above. Leave
+    # them out when the bus comes from a network bridge (tcp://host:port
+    # under Tools). With /dev mounted the container sees the adapter again
+    # after a replug, which a devices: entry doesn't; the rules allow USB
+    # serial adapters (major 188, ttyUSB) and USB modems (166, ttyACM) and
+    # nothing else. Pick the adapter's /dev/serial/by-id name under Tools:
+    # it stays the same across reboots and replugs, where /dev/ttyUSB0 may
+    # not.
+    # device_cgroup_rules:
+    #   - "c 188:* rw"
+    #   - "c 166:* rw"
     # The CCA page over the host's Bluetooth: BlueZ's D-Bus socket, run as a
     # host account (D-Bus drops user IDs the host can't look up, such as the
     # image's own), in the host's bluetooth group (getent group bluetooth).

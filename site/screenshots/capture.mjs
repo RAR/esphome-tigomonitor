@@ -14,7 +14,7 @@
 // UI change and commit the result.
 
 import { chromium } from 'playwright';
-import { routes, patterns } from './fixtures.mjs';
+import { routes, patterns, piRoutes } from './fixtures.mjs';
 import { readFileSync, mkdirSync, writeFileSync, rmSync, copyFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { resolve, dirname } from 'node:path';
@@ -35,7 +35,7 @@ const README_SHOTS = {
   history: 'History.png',
   topology: 'Topology.png',
   nodes: 'Nodes.png',
-  tools: 'Tools.png',
+  settings: 'Settings.png',
   diagnostics: 'Diagnostics.png',
 };
 
@@ -46,9 +46,18 @@ const VIEWS = [
   ['dashboard',   'Dashboard'],
   ['topology',    'Topology'],
   ['history',     'History'],
-  ['nodes',       'Node Table'],
-  ['tools',       'Tools'],
+  ['nodes',       'Devices'],
+  ['settings',    'Settings'],
   ['diagnostics', 'Diagnostics'],
+];
+
+// The Raspberry Pi build's own pages, captured with /api/status saying
+// platform 'linux' and piRoutes on top of the rest: [file stem, label, what
+// to click]. Docs only; the README keeps the ESP32's views.
+const PI_VIEWS = [
+  ['pi-bus-control', 'Bus Control', 'button[data-view="bus"]'],
+  ['pi-bus-traffic', 'Bus Traffic', '#view-busmaster .bus-tabs a[href="#buslog"]'],
+  ['pi-devices',     'Pi Devices',  'button[data-view="nodes"]'],
 ];
 
 const THEMES = ['dark', 'light'];
@@ -72,7 +81,7 @@ const missing = new Set();
 const written = [];
 let pageErrors = 0;
 
-for (const theme of THEMES) {
+for (const theme of THEMES) for (const pi of [false, true]) {
   const ctx = await browser.newContext({
     viewport: { width: 1440, height: 900 },
     deviceScaleFactor: 2,
@@ -83,7 +92,7 @@ for (const theme of THEMES) {
   await ctx.route('**/api/**', async (route) => {
     const url = route.request().url();
     const path = new URL(url).pathname.replace(/^.*(\/api\/)/, '$1');
-    let body = routes[path];
+    let body = (pi && piRoutes[path]) ?? routes[path];
     if (body === undefined) {
       const hit = patterns.find(([re]) => re.test(path));
       if (hit) body = hit[1](url);
@@ -112,14 +121,15 @@ for (const theme of THEMES) {
   await page.goto(`http://127.0.0.1:${port}/app`, { waitUntil: 'networkidle' });
   await page.waitForTimeout(1500);
 
-  for (const [view, name] of VIEWS) {
-    await page.click(`button[data-view="${view}"]`);
+  const views = pi ? PI_VIEWS : VIEWS.map(([v, name]) => [v, name, `button[data-view="${v}"]`]);
+  for (const [view, name, click] of views) {
+    await page.click(click);
     await page.waitForLoadState('networkidle');
     await page.waitForTimeout(1500);
     const file = `${view}-${theme}.png`;
     await page.screenshot({ path: `${OUT}/${file}` });
     written.push(file);
-    if (theme === 'dark' && README_SHOTS[view]) {
+    if (theme === 'dark' && !pi && README_SHOTS[view]) {
       copyFileSync(`${OUT}/${file}`, `${README_OUT}/${README_SHOTS[view]}`);
     }
     console.log(`  ✓ ${name.padEnd(12)} ${theme.padEnd(5)} → ${file}`);
@@ -136,7 +146,7 @@ if (missing.size) {
 }
 
 writeFileSync(`${OUT}/manifest.json`,
-  JSON.stringify({ generated: new Date().toISOString(), views: VIEWS.map(([v]) => v), themes: THEMES, written }, null, 2));
+  JSON.stringify({ generated: new Date().toISOString(), views: [...VIEWS, ...PI_VIEWS].map(([v]) => v), themes: THEMES, written }, null, 2));
 
 console.log(`\n  ${written.length} screenshots → src/assets/screenshots/`);
 console.log(`  ${Object.keys(README_SHOTS).length} dark cuts → docs/images/ (committed, for the README)`);

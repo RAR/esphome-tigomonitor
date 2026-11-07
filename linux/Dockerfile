@@ -12,6 +12,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /src
 COPY linux linux
 COPY components/tigo_monitor components/tigo_monitor
+COPY components/tigo_master components/tigo_master
 COPY components/tigo_server/web components/tigo_server/web
 COPY site/public/favicon.svg site/public/favicon.svg
 ARG VERSION=dev
@@ -34,4 +35,10 @@ VOLUME /var/lib/tigomonitor
 # A fixed port inside the container; publish it as whatever you like. The
 # web UI's port setting has no effect here.
 EXPOSE 8080
+# /api/health, HTTPS or not. Unhealthy means a problem it lists, such as no
+# frames from the bus or a stuck main loop; Docker only reports it. The
+# restart comes from --watchdog, which ends the process once the main loop
+# has stuck for a minute, and the container's restart policy.
+HEALTHCHECK --interval=30s --timeout=20s --start-period=60s --retries=3 \
+  CMD ["/usr/bin/tigomonitord", "--health-check", "8080"]
 ENTRYPOINT ["/usr/bin/tigomonitord", "--port", "8080"]

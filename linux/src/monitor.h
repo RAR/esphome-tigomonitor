@@ -6,13 +6,18 @@
 // the ESP32 (#74). Thread-safe: the serial thread feeds it, the publisher and
 // web server read snapshots.
 
+#include "tigo_layout.h"
 #include "tigo_protocol.h"
 
+#include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <cstdint>
 #include <map>
 #include <mutex>
 #include <string>
+#include <thread>
+#include <set>
 #include <utility>
 #include <vector>
 
@@ -30,6 +35,14 @@ struct Node {
   std::string cca_label, cca_string_label, cca_mppt_label, cca_channel, cca_object_id;
   bool cca_validated = false;
   bool seen_in_frame27 = false;  // runtime only
+  // When it last reported a reading, and when the TAP's roster (a Frame 27)
+  // last listed it: unix s, saved to the hour. 0: not yet.
+  int64_t last_heard_unix = 0;
+  int64_t last_roster_unix = 0;
+  // The owner marked it known: listed by the TAP but not reporting, and
+  // expected not to (one that never joined, say). Not missing, not counted.
+  // Cleared by its first reading.
+  bool known = false;
 };
 
 struct Panel {
@@ -75,6 +88,7 @@ struct BusStats {
 class Monitor {
  public:
   Monitor(std::string state_path, float power_calibration, size_t max_nodes);
+  ~Monitor();  // writes any state still waiting
 
   void feed(const char *data, size_t len);
 
@@ -92,6 +106,29 @@ class Monitor {
 
   std::vector<Panel> panels() const;
   std::vector<Node> nodes() const;
+  // A new optimizer: a barcode first heard (in a Frame 27) more than a day
+  // after this monitor first heard any, so a fresh install's own panels
+  // aren't news. When each was first heard, by barcode (unix s).
+  std::map<std::string, int64_t> first_heard() const;
+  // Those heard in the last NEW_FOR_S that no string holds yet: the ones to
+  // place in the layout. A replacement shows up here.
+  int new_optimizers(int64_t now_unix) const;
+  static const int64_t NEW_AFTER_S = 86400;
+  static const int64_t NEW_FOR_S = 7 * 86400;
+  // Missing: a node with a barcode that hasn't reported for MISSING_AFTER_S,
+  // or that the roster stopped listing OFF_ROSTER_AFTER_S before its newest
+  // entry. A dead or removed optimizer shows up here.
+  int missing_optimizers(int64_t now_unix) const;
+  // Marks the node with this barcode known (or not). False: no such node.
+  bool set_known(const std::string &barcode, bool known);
+  static const int64_t MISSING_AFTER_S = 3 * 86400;
+  static const int64_t OFF_ROSTER_AFTER_S = 86400;
+  static const int64_t SEEN_SAVE_EVERY_S = 3600;  // how stale a saved last_heard/last_roster may be
+  // Added to the new optimizer log line (main.cpp's new_optimizer_note).
+  void set_new_optimizer_note(std::string note) {
+    std::lock_guard<std::mutex> lock(mu_);
+    new_note_ = std::move(note);
+  }
   BusStats stats() const;
   double energy_kwh() const;    // lifetime, panel output
   double energy_in_kwh() const;  // lifetime, panel input
@@ -133,6 +170,14 @@ class Monitor {
   // 04C05B4000BBCC02 -> serial "4-BBCC02K"), which is the only link between
   // the two, so that is the match — as in the firmware.
   int apply_layout(const std::vector<LayoutPanel> &panels);
+  // Where apply_layout would put each panel it matches, without writing.
+  std::vector<esphome::tigo_monitor::layout::Assignment> resolve_layout(const std::vector<LayoutPanel> &panels) const;
+  // The Topology editor's: places nodes by exact barcode. With clear_unlisted,
+  // a node the list leaves out loses its panel name, string and MPPT.
+  // Returns how many nodes matched.
+  int set_assignments(const std::vector<esphome::tigo_monitor::layout::Assignment> &as, bool clear_unlisted);
+  // Every node that has a barcode, as the labels it carries now.
+  std::vector<esphome::tigo_monitor::layout::Assignment> current_assignments() const;
   // Drops one node (and its panel), as the Nodes page's delete does.
   bool delete_node(const std::string &addr);
 
@@ -145,6 +190,7 @@ class Monitor {
   std::vector<StringTotals> strings_locked_() const;
   bool night_locked_() const;
   bool save_locked_();
+  void writer_loop_();
 
   std::string state_path_;
   float power_calibration_;
@@ -170,6 +216,24 @@ class Monitor {
   Clock::time_point last_tick_{};
   Clock::time_point last_save_{};
   bool dirty_ = false;
+  // Every barcode this monitor has heard, since seen_since_; and when each
+  // one heard after the first day was first heard.
+  std::set<std::string> seen_barcodes_;
+  int64_t seen_since_ = 0;
+  std::map<std::string, int64_t> first_heard_;
+  std::string new_note_;
+  void note_barcode_(const std::string &barcode, const std::string &addr);
+
+  // state.json is written on its own thread, outside mu_: an fsync on a slow
+  // SD card took 0.9 s, and in the master role feed() and tick() run on the
+  // loop that drives the bus. save_locked_() hands over the text; the newest
+  // waiting copy wins.
+  std::mutex write_mu_;
+  std::condition_variable write_cv_;
+  std::string pending_;
+  bool has_pending_ = false, writing_ = false, stop_writer_ = false;
+  std::atomic<bool> write_failed_{false};
+  std::thread writer_;
 };
 
 }  // namespace tigod

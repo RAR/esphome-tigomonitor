@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <ctime>
 
 namespace tigod {
 
@@ -30,6 +31,16 @@ struct MqttCallbacks {
     self->connected_ = true;
     self->need_discovery_ = true;  // the broker may have lost retained configs
     self->pub_(self->base_() + "/status", "online", true);
+    if (self->settings_.mqtt.pv_switch && runs_bus(self->settings_)) {
+      std::string t = self->base_() + "/pv/set";
+      mosquitto_subscribe(self->mosq_, nullptr, t.c_str(), 1);
+    }
+  }
+  static void on_message(mosquitto *, void *obj, const mosquitto_message *msg) {
+    auto *self = static_cast<MqttPublisher *>(obj);
+    if (msg->topic == nullptr || self->base_() + "/pv/set" != msg->topic) return;
+    std::string payload(static_cast<const char *>(msg->payload), static_cast<size_t>(msg->payloadlen));
+    self->on_pv_command_(payload);
   }
   static void on_disconnect(mosquitto *, void *obj, int rc) {
     auto *self = static_cast<MqttPublisher *>(obj);
@@ -76,6 +87,7 @@ void MqttPublisher::configure(const Settings &settings) {
   settings_ = settings;
   announced_.clear();
   announced_strings_.clear();
+  standing_by_ = false;
   if (settings_.mqtt.host.empty()) {
     LOGI("MQTT: no broker set; Home Assistant publishing is off");
     return;
@@ -88,6 +100,7 @@ void MqttPublisher::configure(const Settings &settings) {
   }
   mosquitto_connect_callback_set(mosq_, MqttCallbacks::on_connect);
   mosquitto_disconnect_callback_set(mosq_, MqttCallbacks::on_disconnect);
+  mosquitto_message_callback_set(mosq_, MqttCallbacks::on_message);
   mosquitto_reconnect_delay_set(mosq_, 2, 60, true);
   if (!settings_.mqtt.username.empty())
     mosquitto_username_pw_set(mosq_, settings_.mqtt.username.c_str(), settings_.mqtt.password.c_str());
@@ -108,6 +121,12 @@ bool MqttPublisher::pub_(const std::string &topic, const std::string &payload, b
   int rc = mosquitto_publish(mosq_, nullptr, topic.c_str(), static_cast<int>(payload.size()), payload.data(), 1,
                              retain);
   return rc == MOSQ_ERR_SUCCESS;
+}
+
+void MqttPublisher::announce_(const std::string &component, const std::string &uid, const json &config,
+                              bool remove) {
+  pub_(settings_.mqtt.discovery_prefix + "/" + component + "/" + uid + "/config",
+       settings_.mqtt.discovery && !remove ? config.dump() : "", true);
 }
 
 static json monitor_device(const Settings &s, const std::string &version) {
@@ -173,7 +192,7 @@ void MqttPublisher::publish_discovery_(const Panel &p) {
     if (m.state_class) c["state_class"] = m.state_class;
     std::string key = m.key;
     if (key == "rssi" || key == "duty_cycle" || key == "load_factor") c["entity_category"] = "diagnostic";
-    pub_(settings_.mqtt.discovery_prefix + "/sensor/" + uid + "/config", c.dump(), true);
+    announce_("sensor", uid, c);
   }
   // The barcode as its own entity too, as the firmware's barcode text sensor.
   std::string uid = "tigo_" + p.barcode + "_barcode";
@@ -184,12 +203,15 @@ void MqttPublisher::publish_discovery_(const Panel &p) {
             {"availability_topic", base_() + "/status"},
             {"entity_category", "diagnostic"},
             {"device", device}};
-  pub_(settings_.mqtt.discovery_prefix + "/sensor/" + uid + "/config", c.dump(), true);
+  announce_("sensor", uid, c);
 }
 
 void MqttPublisher::publish_system_discovery_() {
   json device = monitor_device(settings_, version_);
   std::string state = base_() + "/system/state";
+  // A standby sends no system state while it stands by, so its entities go
+  // unavailable then rather than freeze on their last values.
+  int expire = std::max(300, 3 * settings_.publish_interval_s);
   struct Sys {
     const char *key, *name, *unit, *device_class, *state_class;
   };
@@ -203,6 +225,10 @@ void MqttPublisher::publish_system_discovery_() {
       {"panels_online", "Panels online", nullptr, nullptr, "measurement"},
       {"invalid_checksum", "Invalid checksums", nullptr, nullptr, "total_increasing"},
       {"missed_frames", "Missed frames", nullptr, nullptr, "total_increasing"},
+      // Heard in the last week and in no string yet: a replacement, say.
+      {"new_optimizers", "New optimizers", nullptr, nullptr, "measurement"},
+      // No reading for 3 days, or dropped from the TAP's roster: a dead one.
+      {"missing_optimizers", "Missing optimizers", nullptr, nullptr, "measurement"},
   };
   for (const auto &m : SYS) {
     std::string uid = "tigomonitor_" + settings_.device_id + "_" + m.key;
@@ -211,13 +237,14 @@ void MqttPublisher::publish_system_discovery_() {
               {"state_topic", state},
               {"value_template", std::string("{{ value_json.") + m.key + " }}"},
               {"availability_topic", base_() + "/status"},
+              {"expire_after", expire},
               {"device", device}};
     if (m.unit) c["unit_of_measurement"] = m.unit;
     if (m.device_class) c["device_class"] = m.device_class;
     if (m.state_class) c["state_class"] = m.state_class;
     std::string key = m.key;
     if (key == "invalid_checksum" || key == "missed_frames") c["entity_category"] = "diagnostic";
-    pub_(settings_.mqtt.discovery_prefix + "/sensor/" + uid + "/config", c.dump(), true);
+    announce_("sensor", uid, c);
   }
   // Night mode: no frame from the bus for night_mode_timeout.
   std::string uid = "tigomonitor_" + settings_.device_id + "_night_mode";
@@ -226,8 +253,21 @@ void MqttPublisher::publish_system_discovery_() {
             {"state_topic", state},
             {"value_template", "{{ 'ON' if value_json.night_mode else 'OFF' }}"},
             {"availability_topic", base_() + "/status"},
+            {"expire_after", expire},
             {"device", device}};
-  pub_(settings_.mqtt.discovery_prefix + "/binary_sensor/" + uid + "/config", c.dump(), true);
+  announce_("binary_sensor", uid, c);
+  // Another device sent the TAP a reconfiguration (a CCA on the bus): on
+  // until cleared on the Bus log page.
+  uid = "tigomonitor_" + settings_.device_id + "_tap_reconfigured";
+  announce_("binary_sensor", uid,
+            {{"name", "TAP reconfigured by another device"},
+             {"unique_id", uid},
+             {"state_topic", state},
+             {"value_template", "{{ 'ON' if value_json.tap_reconfigured else 'OFF' }}"},
+             {"availability_topic", base_() + "/status"},
+             {"expire_after", expire},
+             {"device_class", "problem"},
+             {"device", device}});
 }
 
 // One power sensor per string, as the firmware's string_label sensors.
@@ -245,7 +285,119 @@ void MqttPublisher::publish_string_discovery_(const std::string &label) {
             {"device_class", "power"},
             {"state_class", "measurement"},
             {"device", monitor_device(settings_, version_)}};
-  pub_(settings_.mqtt.discovery_prefix + "/sensor/" + uid + "/config", c.dump(), true);
+  announce_("sensor", uid, c);
+}
+
+// The bus master, on the monitor device. remove: the listen role, where a
+// master announced before would otherwise stay in Home Assistant, frozen.
+void MqttPublisher::publish_master_discovery_(bool remove) {
+  json device = monitor_device(settings_, version_);
+  std::string state = base_() + "/master/state";
+  // Unavailable once the daemon stops publishing (frozen, or the Pi gone)
+  // as well as through the last will.
+  int expire = std::max(300, 3 * settings_.publish_interval_s);
+  std::string uid = "tigomonitor_" + settings_.device_id + "_bus_master_problem";
+  // On for a fault or a stopped master: what to alert on, with the CCA gone.
+  announce_("binary_sensor", uid,
+            {{"name", "Bus master problem"},
+             {"unique_id", uid},
+             {"state_topic", state},
+             {"value_template", "{{ 'ON' if value_json.problem else 'OFF' }}"},
+             {"availability_topic", base_() + "/status"},
+             {"expire_after", expire},
+             {"device_class", "problem"},
+             {"device", device}},
+            remove);
+  struct Sys {
+    const char *key, *name, *unit, *device_class, *state_class;
+    bool diagnostic;
+  };
+  static const Sys SYS[] = {
+      {"status", "Bus master", nullptr, nullptr, nullptr, false},
+      {"discovery_remaining_s", "Bus master discovery window remaining", "s", "duration", "measurement", true},
+      {"discovery_nodes", "Bus master discovery nodes", nullptr, nullptr, "measurement", true},
+      {"renewals", "Bus master discovery renewals", nullptr, nullptr, "total_increasing", true},
+      {"tap_lost", "TAP lost", nullptr, nullptr, "total_increasing", true},
+      {"gap_recent_ms", "Bus master longest pause", "ms", "duration", "measurement", true},
+      {"last_reply", "TAP last reply", nullptr, "timestamp", nullptr, true},
+  };
+  uid = "tigomonitor_" + settings_.device_id + "_pv_output";
+  announce_("switch", uid,
+            {{"name", "PV output"},
+             {"unique_id", uid},
+             {"icon", "mdi:solar-power"},
+             {"command_topic", base_() + "/pv/set"},
+             {"state_topic", state},
+             {"value_template", "{{ value_json.pv }}"},
+             {"payload_on", "ON"},
+             {"payload_off", "OFF"},
+             {"availability_topic", base_() + "/status"},
+             {"device", device}},
+            remove || !settings_.mqtt.pv_switch);
+  for (const auto &m : SYS) {
+    uid = "tigomonitor_" + settings_.device_id + "_bus_master_" + m.key;
+    json c = {{"name", m.name},
+              {"unique_id", uid},
+              {"state_topic", state},
+              {"value_template", std::string("{{ value_json.") + m.key + " }}"},
+              {"availability_topic", base_() + "/status"},
+              {"expire_after", expire},
+              {"device", device}};
+    if (m.unit) c["unit_of_measurement"] = m.unit;
+    if (m.device_class) c["device_class"] = m.device_class;
+    if (m.state_class) c["state_class"] = m.state_class;
+    if (m.diagnostic) c["entity_category"] = "diagnostic";
+    announce_("sensor", uid, c, remove);
+  }
+  // Renamed 2026-11-03, when the "lease" turned out to be the TAP's discovery
+  // window: clear what earlier builds announced, or HA keeps them, frozen.
+  for (const char *old : {"lease_remaining_s", "lease_nodes"})
+    announce_("sensor", "tigomonitor_" + settings_.device_id + "_bus_master_" + old, json::object(), true);
+}
+
+// Home Assistant's PV output switch. Ignored (and logged) unless the setting
+// is on and this monitor runs the bus; then the state goes out at once.
+void MqttPublisher::on_pv_command_(const std::string &payload) {
+  if (!settings_.mqtt.pv_switch) return LOGW("MQTT PV switch: ignored %s: mqtt.pv_switch is off", payload.c_str());
+  if (payload != "ON" && payload != "OFF") return LOGW("MQTT PV switch: ignored \"%s\": not ON or OFF", payload.c_str());
+  if (!pv_command_ || !pv_command_(payload == "OFF"))
+    return LOGW("MQTT PV switch: ignored %s: standing by, or not running the bus", payload.c_str());
+  if (master_status_) publish_master_();
+}
+
+void MqttPublisher::publish_master_() {
+  MasterStatus m = master_status_();
+  // A standby listening while another master runs the bus is as it should be.
+  bool standing_by = m.standby == Standby::standing_by || m.standby == Standby::taking_over;
+  std::string status = m.fault != Fault::none ? fault_name(m.fault)
+                       : !m.active            ? "stopped"
+                       : standing_by          ? standby_name(m.standby)
+                                              : "active";
+  json last_reply = nullptr;
+  if (m.last_reply_unix > 0) {
+    time_t t = static_cast<time_t>(m.last_reply_unix);
+    struct tm tm;
+    gmtime_r(&t, &tm);
+    char buf[32];
+    strftime(buf, sizeof buf, "%Y-%m-%dT%H:%M:%S+00:00", &tm);
+    last_reply = buf;
+  }
+  json s = {{"status", status},
+            {"problem", status != "active" && status != "standing_by" && status != "taking_over"},
+            {"phase", phase_name(m.phase)},
+            {"detail", m.detail},
+            {"discovery_remaining_s", m.discovery.remaining_s},
+            {"discovery_nodes", m.discovery.node_count},
+            {"renewals", m.renewals},
+            {"tap_lost", m.tap_lost},
+            {"gap_recent_ms", m.gap_recent_ms},
+            {"last_reply", last_reply},
+            {"pv", m.pv.off ? "OFF" : "ON"}};
+  if (m.standby != Standby::off) {
+    s["takeovers"] = m.takeovers;
+    s["yields"] = m.yields;
+  }
+  pub_(base_() + "/master/state", s.dump(), false);
 }
 
 static double round_to(double v, int digits) {
@@ -259,7 +411,22 @@ void MqttPublisher::publish() {
     announced_.clear();
     announced_strings_.clear();
     publish_system_discovery_();
+    publish_master_discovery_(!runs_bus(settings_) || !master_status_);
   }
+  if (runs_bus(settings_) && master_status_) publish_master_();
+  bool standing_by = false;
+  if (settings_.bus_role == "standby" && master_status_) {
+    Standby st = master_status_().standby;
+    standing_by = st == Standby::standing_by || st == Standby::taking_over;
+  }
+  // Taking the bus: announce every panel again, with this monitor's topics,
+  // over whatever the last master announced.
+  if (standing_by_ && !standing_by) {
+    LOGI("MQTT: running the bus; announcing the panels to Home Assistant with this monitor's topics");
+    announced_.clear();
+  }
+  standing_by_ = standing_by;
+  if (standing_by && !settings_.mqtt.standby_panels) return;
   auto now = Clock::now();
   auto window = monitor_.online_window();
   bool night = monitor_.night_mode();
@@ -270,7 +437,7 @@ void MqttPublisher::publish() {
     if (p.barcode.empty()) continue;  // not named by a Frame 27 yet
     // Re-announce when the name changes (a CCA sync labelled it).
     std::string key = p.barcode + "|" + panel_name(p);
-    if (announced_.insert(key).second) publish_discovery_(p);
+    if (!standing_by && announced_.insert(key).second) publish_discovery_(p);
     const auto &r = p.reading;
     // A stale panel reads 0 for what it produces and keeps its last voltage
     // and temperature; at night everything reads 0 and temperature is
@@ -310,6 +477,9 @@ void MqttPublisher::publish() {
               {"invalid_checksum", bus.bad_checksums},
               {"missed_frames", bus.ends_without_start + bus.overflows},
               {"night_mode", night},
+              {"tap_reconfigured", tap_reconfigured_ && tap_reconfigured_()},
+              {"new_optimizers", monitor_.new_optimizers(static_cast<int64_t>(time(nullptr)))},
+              {"missing_optimizers", monitor_.missing_optimizers(static_cast<int64_t>(time(nullptr)))},
               {"strings", strings}};
   pub_(base_() + "/system/state", sys.dump(), false);
 }

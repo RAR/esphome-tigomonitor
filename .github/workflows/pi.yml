@@ -12,18 +12,22 @@ on:
     tags: ['v*']
     paths:
       - 'linux/**'
-      - 'components/tigo_monitor/tigo_protocol.h'
-      - 'components/tigo_monitor/tigo_node_identity.h'
-      - 'components/tigo_monitor/tigo_cca_ble_protocol.h'
+      # Everything the daemon compiles: any header on its include path, and
+      # the bus-master core (linux/CMakeLists.txt). Listing headers one by one
+      # missed master_core.cpp, so a change to it ran no tests at all.
+      - 'components/tigo_monitor/*.h'
+      - 'components/tigo_master/**'
       - 'components/tigo_server/web/app.html'
       - 'tests/host/**'
       - '.github/workflows/pi.yml'
   pull_request:
     paths:
       - 'linux/**'
-      - 'components/tigo_monitor/tigo_protocol.h'
-      - 'components/tigo_monitor/tigo_node_identity.h'
-      - 'components/tigo_monitor/tigo_cca_ble_protocol.h'
+      # Everything the daemon compiles: any header on its include path, and
+      # the bus-master core (linux/CMakeLists.txt). Listing headers one by one
+      # missed master_core.cpp, so a change to it ran no tests at all.
+      - 'components/tigo_monitor/*.h'
+      - 'components/tigo_master/**'
       - 'components/tigo_server/web/app.html'
       - 'tests/host/**'
       - '.github/workflows/pi.yml'
@@ -42,8 +46,28 @@ jobs:
         run: docker run --rm -v "$PWD":/src -w /src tigod-dev linux/scripts/e2e.sh
       - name: CCA over Bluetooth and HTTP, against mocks
         run: docker run --rm -v "$PWD":/src -w /src tigod-dev linux/scripts/cca-e2e.sh
+      - name: The Topology editor's layout
+        run: docker run --rm -v "$PWD":/src -w /src tigod-dev linux/scripts/layout-e2e.sh
       - name: The bus over a network bridge, against a mock
         run: docker run --rm -v "$PWD":/src -w /src tigod-dev linux/scripts/bridge-e2e.sh
+      - name: The bus master, against a mock TAP
+        run: docker run --rm -v "$PWD":/src -w /src tigod-dev linux/scripts/master-e2e.sh
+      - name: Two masters on one bus, a standby taking over
+        run: docker run --rm -v "$PWD":/src -w /src tigod-dev linux/scripts/standby-e2e.sh
+      - name: The bus log, and a CCA reconfiguring the TAP
+        run: docker run --rm -v "$PWD":/src -w /src tigod-dev linux/scripts/bus-log-e2e.sh
+      - name: PV output off and on, against a mock TAP
+        run: docker run --rm -v "$PWD":/src -w /src tigod-dev linux/scripts/pv-e2e.sh
+      - name: A new optimizer heard, against a synthetic bus
+        run: docker run --rm -v "$PWD":/src -w /src tigod-dev linux/scripts/new-optimizer-e2e.sh
+      - name: HTTPS, with test certificates
+        run: docker run --rm -v "$PWD":/src -w /src tigod-dev linux/scripts/https-e2e.sh
+      - name: HTTPS in Docker Compose, with a stand-in for certbot
+        run: |
+          docker build -t tigomonitord:https-test -f linux/Dockerfile .
+          linux/scripts/https-compose-test.sh
+      - name: The systemd watchdog, against a stand-in notify socket
+        run: docker run --rm -v "$PWD":/src -w /src tigod-dev linux/scripts/watchdog-e2e.sh
 
   deb:
     if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
@@ -69,6 +93,8 @@ jobs:
       - run: docker build -t tigod-dev -f linux/Dockerfile.dev linux
       - name: Build the ${{ matrix.arch }} .deb
         run: docker run --rm -v "$PWD":/src -w /src tigod-dev linux/packaging/build-deb.sh "${{ steps.version.outputs.version }}"
+      - name: The certbot hook it ships, in a clean install
+        run: linux/scripts/cert-hook-test.sh build/deb/*.deb
       - uses: actions/upload-artifact@v4
         with:
           name: tigomonitord-${{ steps.version.outputs.version }}-${{ matrix.arch }}

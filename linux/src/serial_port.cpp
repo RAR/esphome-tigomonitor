@@ -34,13 +34,15 @@ static speed_t to_speed(int baud) {
   }
 }
 
-static int open_port(const std::string &device, int baud) {
+static int open_port(const std::string &device, int baud, int access = O_RDONLY) {
   speed_t speed = to_speed(baud);
   if (speed == 0) {
     LOGE("unsupported baud rate %d", baud);
     return -1;
   }
-  int fd = ::open(device.c_str(), O_RDONLY | O_NOCTTY | O_CLOEXEC);
+  // O_NONBLOCK for the open only: without CLOCAL already set, a tty open
+  // waits for carrier, and a UART with no DCD line wired never has one.
+  int fd = ::open(device.c_str(), access | O_NOCTTY | O_CLOEXEC | O_NONBLOCK);
   if (fd < 0) return -1;
   termios tio{};
   if (tcgetattr(fd, &tio) != 0) {
@@ -59,8 +61,20 @@ static int open_port(const std::string &device, int baud) {
     return -1;
   }
   tcflush(fd, TCIFLUSH);
+  // CLOCAL is set now; back to blocking, which the writes and the drain need.
+  int flags = fcntl(fd, F_GETFL);
+  if (flags < 0 || fcntl(fd, F_SETFL, flags & ~O_NONBLOCK) != 0) {
+    ::close(fd);
+    return -1;
+  }
   return fd;
 }
+
+int open_port_rw(const std::string &device, int baud) { return open_port(device, baud, O_RDWR); }
+
+static std::string resolve_auto();
+
+std::string resolve_serial_port(const std::string &device) { return device == "auto" ? resolve_auto() : device; }
 
 static std::string resolve_auto() {
   for (const char *pattern : {"/dev/ttyUSB", "/dev/ttyACM"}) {

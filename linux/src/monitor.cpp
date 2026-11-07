@@ -33,7 +33,33 @@ static int64_t unix_ms() {
 }
 
 Monitor::Monitor(std::string state_path, float power_calibration, size_t max_nodes)
-    : state_path_(std::move(state_path)), power_calibration_(power_calibration), max_nodes_(max_nodes) {}
+    : state_path_(std::move(state_path)), power_calibration_(power_calibration), max_nodes_(max_nodes),
+      writer_([this] { writer_loop_(); }) {}
+
+Monitor::~Monitor() {
+  {
+    std::lock_guard<std::mutex> lock(write_mu_);
+    stop_writer_ = true;
+  }
+  write_cv_.notify_all();
+  writer_.join();
+}
+
+void Monitor::writer_loop_() {
+  std::unique_lock<std::mutex> lock(write_mu_);
+  for (;;) {
+    write_cv_.wait(lock, [this] { return has_pending_ || stop_writer_; });
+    if (!has_pending_) return;  // stopping, and nothing left to write
+    std::string text = std::move(pending_);
+    has_pending_ = false;
+    writing_ = true;
+    lock.unlock();
+    if (!write_file_atomic(state_path_, text)) write_failed_ = true;  // the next save marks it dirty again
+    lock.lock();
+    writing_ = false;
+    write_cv_.notify_all();
+  }
+}
 
 void Monitor::feed(const char *data, size_t len) {
   std::lock_guard<std::mutex> lock(mu_);
@@ -99,8 +125,17 @@ void Monitor::on_power_packet_(const std::string &packet) {
   p->updated = Clock::now();
   p->updated_unix_ms = unix_ms();
   p->readings++;
-  for (const auto &n : nodes_) {
+  int64_t now_s = p->updated_unix_ms / 1000;
+  for (auto &n : nodes_) {
     if (n.addr == p->addr) {
+      if (now_s - n.last_heard_unix >= SEEN_SAVE_EVERY_S) dirty_ = true;
+      n.last_heard_unix = now_s;
+      if (n.known) {
+        n.known = false;
+        dirty_ = true;
+        LOGI("%s (%s) is reporting: no longer marked known", n.cca_label.empty() ? n.addr.c_str() : n.cca_label.c_str(),
+             n.addr.c_str());
+      }
       p->barcode = n.long_address;
       p->label = n.cca_label;
       break;
@@ -149,6 +184,13 @@ void Monitor::on_frame27_(const std::string &hex) {
     if (res.renumbered) LOGW("address %s now belongs to barcode %s (gateway renumbered)", a.c_str(), l.c_str());
     if (res.table_changed) changed = true;
     if (Panel *p = find_panel_(a)) p->barcode = l;
+    note_barcode_(l, a);
+    int64_t now_s = static_cast<int64_t>(time(nullptr));
+    for (auto &n : nodes_)
+      if (n.addr == a) {
+        if (now_s - n.last_roster_unix >= SEEN_SAVE_EVERY_S) dirty_ = true;
+        n.last_roster_unix = now_s;
+      }
   });
   if (!ok) {
     LOGW("Frame 27 too short for its header");
@@ -165,6 +207,64 @@ void Monitor::on_frame27_(const std::string &hex) {
 std::vector<Panel> Monitor::panels() const {
   std::lock_guard<std::mutex> lock(mu_);
   return panels_;
+}
+
+void Monitor::note_barcode_(const std::string &barcode, const std::string &addr) {
+  if (barcode.empty() || !seen_barcodes_.insert(barcode).second) return;
+  dirty_ = true;
+  int64_t now = static_cast<int64_t>(time(nullptr));
+  if (seen_since_ == 0) {
+    seen_since_ = now;
+    return;
+  }
+  if (now - seen_since_ < NEW_AFTER_S) return;
+  first_heard_[barcode] = now;
+  LOGW("new optimizer heard: %s at node %s; place it in the layout (Topology, Edit layout)%s", barcode.c_str(), addr.c_str(),
+       new_note_.c_str());
+}
+
+std::map<std::string, int64_t> Monitor::first_heard() const {
+  std::lock_guard<std::mutex> lock(mu_);
+  return first_heard_;
+}
+
+int Monitor::missing_optimizers(int64_t now_unix) const {
+  std::lock_guard<std::mutex> lock(mu_);
+  int64_t newest_roster = 0;
+  for (const auto &n : nodes_) newest_roster = std::max(newest_roster, n.last_roster_unix);
+  int count = 0;
+  for (const auto &n : nodes_) {
+    if (n.long_address.empty() || n.known) continue;
+    bool silent = n.last_heard_unix > 0 && now_unix - n.last_heard_unix >= MISSING_AFTER_S;
+    bool off_roster = n.last_roster_unix > 0 && newest_roster - n.last_roster_unix >= OFF_ROSTER_AFTER_S;
+    if (silent || off_roster) count++;
+  }
+  return count;
+}
+
+bool Monitor::set_known(const std::string &barcode, bool known) {
+  std::lock_guard<std::mutex> lock(mu_);
+  for (auto &n : nodes_) {
+    if (n.long_address != barcode) continue;
+    if (n.known != known) {
+      n.known = known;
+      dirty_ = true;
+      LOGI("%s (%s) %s", n.cca_label.empty() ? n.addr.c_str() : n.cca_label.c_str(), n.addr.c_str(),
+           known ? "marked known: not reporting, and not counted as missing" : "no longer marked known");
+    }
+    return true;
+  }
+  return false;
+}
+
+int Monitor::new_optimizers(int64_t now_unix) const {
+  std::lock_guard<std::mutex> lock(mu_);
+  int n = 0;
+  for (const auto &node : nodes_) {
+    auto it = first_heard_.find(node.long_address);
+    if (it != first_heard_.end() && now_unix - it->second < NEW_FOR_S && node.cca_string_label.empty()) n++;
+  }
+  return n;
 }
 
 std::vector<Node> Monitor::nodes() const {
@@ -377,6 +477,65 @@ bool Monitor::delete_node(const std::string &addr) {
   return found;
 }
 
+std::vector<esphome::tigo_monitor::layout::Assignment> Monitor::resolve_layout(
+    const std::vector<LayoutPanel> &panels) const {
+  std::lock_guard<std::mutex> lock(mu_);
+  auto upper = [](std::string s) {
+    for (char &c : s) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+    return s;
+  };
+  std::vector<esphome::tigo_monitor::layout::Assignment> out;
+  for (const auto &lp : panels) {
+    std::string serial = upper(lp.serial);
+    for (const auto &n : nodes_) {
+      if (n.long_address.size() < 6) continue;
+      if (serial.find(upper(n.long_address.substr(n.long_address.size() - 6))) == std::string::npos) continue;
+      out.push_back({n.long_address, lp.label, lp.string_label, lp.mppt});
+      break;
+    }
+  }
+  return out;
+}
+
+int Monitor::set_assignments(const std::vector<esphome::tigo_monitor::layout::Assignment> &as,
+                             bool clear_unlisted) {
+  std::lock_guard<std::mutex> lock(mu_);
+  std::map<std::string, const esphome::tigo_monitor::layout::Assignment *> by_bc;
+  for (const auto &a : as) by_bc[a.barcode] = &a;
+  int matched = 0;
+  for (auto &n : nodes_) {
+    if (n.long_address.empty()) continue;
+    auto it = by_bc.find(n.long_address);
+    if (it != by_bc.end()) {
+      n.cca_label = it->second->label;
+      n.cca_string_label = it->second->string_label;
+      n.cca_mppt_label = it->second->mppt_label;
+      matched++;
+    } else if (clear_unlisted) {
+      n.cca_label.clear();
+      n.cca_string_label.clear();
+      n.cca_mppt_label.clear();
+    } else {
+      continue;
+    }
+    for (auto &p : panels_)
+      if (p.addr == n.addr) p.label = n.cca_label;
+  }
+  string_peaks_.clear();
+  dirty_ = true;
+  save_locked_();
+  return matched;
+}
+
+std::vector<esphome::tigo_monitor::layout::Assignment> Monitor::current_assignments() const {
+  std::lock_guard<std::mutex> lock(mu_);
+  std::vector<esphome::tigo_monitor::layout::Assignment> out;
+  for (const auto &n : nodes_)
+    if (!n.long_address.empty())
+      out.push_back({n.long_address, n.cca_label, n.cca_string_label, n.cca_mppt_label});
+  return out;
+}
+
 Monitor::ImportResult Monitor::import_nodes(const std::vector<Node> &in) {
   std::lock_guard<std::mutex> lock(mu_);
   ImportResult r;
@@ -470,14 +629,21 @@ void Monitor::tick() {
   }
 }
 
+// Waits for the write, for the save at shutdown.
 bool Monitor::save() {
-  std::lock_guard<std::mutex> lock(mu_);
-  dirty_ = true;
-  return save_locked_();
+  {
+    std::lock_guard<std::mutex> lock(mu_);
+    dirty_ = true;
+    save_locked_();
+  }
+  std::unique_lock<std::mutex> lock(write_mu_);
+  write_cv_.wait(lock, [this] { return !has_pending_ && !writing_; });
+  return !write_failed_;
 }
 
 bool Monitor::save_locked_() {
   last_save_ = Clock::now();
+  if (write_failed_.exchange(false)) dirty_ = true;
   if (!dirty_) return true;
   json nodes = json::array();
   for (const auto &n : nodes_) {
@@ -490,7 +656,10 @@ bool Monitor::save_locked_() {
                      {"cca_mppt_label", n.cca_mppt_label},
                      {"cca_channel", n.cca_channel},
                      {"cca_object_id", n.cca_object_id},
-                     {"cca_validated", n.cca_validated}});
+                     {"cca_validated", n.cca_validated},
+                     {"last_heard_unix", n.last_heard_unix},
+                     {"last_roster_unix", n.last_roster_unix},
+                     {"known", n.known}});
   }
   json history = json::array();
   for (const auto &d : history_) history.push_back({d.first, d.second});
@@ -498,9 +667,17 @@ bool Monitor::save_locked_() {
   for (const auto &kv : saved_peaks_) peaks[kv.first] = kv.second;  // not seen since start
   for (const auto &p : panels_)
     if (!p.barcode.empty()) peaks[p.barcode] = p.peak_power;
+  json first = json::object();
+  for (const auto &kv : first_heard_) first[kv.first] = kv.second;
   json j = {{"version", 1},     {"nodes", nodes},           {"energy_kwh", energy_kwh_}, {"energy_in_kwh", energy_in_kwh_}, {"today_in_kwh", today_in_kwh_}, {"peaks", peaks},
-            {"today", today_},  {"today_kwh", today_kwh_}, {"daily_kwh", history}};
-  if (!write_file_atomic(state_path_, j.dump(1) + "\n")) return false;
+            {"today", today_},  {"today_kwh", today_kwh_}, {"daily_kwh", history},
+            {"seen_barcodes", seen_barcodes_}, {"seen_since", seen_since_}, {"first_heard", first}};
+  {
+    std::lock_guard<std::mutex> lock(write_mu_);
+    pending_ = j.dump(1) + "\n";
+    has_pending_ = true;
+  }
+  write_cv_.notify_all();
   dirty_ = false;
   return true;
 }
@@ -543,7 +720,26 @@ bool Monitor::load() {
     n.cca_channel = e.value("cca_channel", "");
     n.cca_object_id = e.value("cca_object_id", "");
     n.cca_validated = e.value("cca_validated", false);
+    n.last_heard_unix = e.value("last_heard_unix", static_cast<int64_t>(0));
+    n.last_roster_unix = e.value("last_roster_unix", static_cast<int64_t>(0));
+    n.known = e.value("known", false);
     nodes_.push_back(std::move(n));
+  }
+  // Before seen_barcodes was kept, the node table was all it had heard, and
+  // long enough ago that a barcode heard now is news.
+  seen_barcodes_.clear();
+  first_heard_.clear();
+  if (j.contains("seen_barcodes") && j["seen_barcodes"].is_array()) {
+    for (const auto &b : j["seen_barcodes"])
+      if (b.is_string()) seen_barcodes_.insert(b.get<std::string>());
+    seen_since_ = j.value("seen_since", static_cast<int64_t>(0));
+    const json first = j.value("first_heard", json::object());  // items() of a temporary would dangle
+    for (const auto &kv : first.items())
+      if (kv.value().is_number_integer()) first_heard_[kv.key()] = kv.value().get<int64_t>();
+  } else {
+    for (const auto &n : nodes_)
+      if (!n.long_address.empty()) seen_barcodes_.insert(n.long_address);
+    seen_since_ = seen_barcodes_.empty() ? 0 : 1;
   }
   LOGI("state: %zu nodes, %.3f kWh", nodes_.size(), energy_kwh_);
   return true;

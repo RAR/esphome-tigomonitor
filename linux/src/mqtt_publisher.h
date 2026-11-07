@@ -10,11 +10,24 @@
 //   <base>/status                 online / offline (last will)
 //   <base>/system/state           {"power":…,"energy":…,"strings":{label:W},…}
 //   <base>/panel/<barcode>/state  {"power":…,"voltage_in":…, …}
+//   <base>/master/state           {"status":"active","problem":false,"pv":"ON",…}
+//                                 (the bus master role only)
+//   <base>/pv/set                 ON / OFF, from Home Assistant (mqtt.pv_switch only)
+//
+// A standby that's standing by sends only its status and master state; the
+// panels are the active master's (mqtt.standby_panels sends its readings
+// too, without announcing them). Panel entities are keyed by barcode, not by
+// monitor, so the one that takes the bus re-announces them with its own
+// topics and Home Assistant's entities follow it.
 
+#include "bus_master.h"
 #include "monitor.h"
 #include "settings.h"
 
+#include <nlohmann/json.hpp>
+
 #include <atomic>
+#include <functional>
 #include <mutex>
 #include <set>
 #include <string>
@@ -34,6 +47,13 @@ class MqttPublisher {
   // publish_interval_s.
   void publish();
 
+  // Where publish() reads the bus master's status, in the master role.
+  void set_master_status(std::function<MasterStatus()> f) { master_status_ = std::move(f); }
+  // Whether the TAP-reconfiguration alarm is on (BusLog).
+  void set_tap_reconfigured(std::function<bool()> f) { tap_reconfigured_ = std::move(f); }
+  // Where a PV switch command goes (true: off); false if it was refused.
+  void set_pv_command(std::function<bool(bool off)> f) { pv_command_ = std::move(f); }
+
   bool connected() const { return connected_; }
   std::string last_error() const;
 
@@ -42,7 +62,13 @@ class MqttPublisher {
   void publish_discovery_(const Panel &p);
   void publish_system_discovery_();
   void publish_string_discovery_(const std::string &label);
+  void publish_master_discovery_(bool remove);
+  void publish_master_();
   bool pub_(const std::string &topic, const std::string &payload, bool retain);
+  // A discovery config, or with discovery off the empty retained message
+  // that removes it.
+  void announce_(const std::string &component, const std::string &uid, const nlohmann::json &config,
+                 bool remove = false);
   std::string base_() const;
 
   const Monitor &monitor_;
@@ -52,6 +78,11 @@ class MqttPublisher {
   std::atomic<bool> connected_{false};
   std::atomic<bool> need_discovery_{true};
   std::set<std::string> announced_, announced_strings_;
+  bool standing_by_ = false;
+  std::function<MasterStatus()> master_status_;
+  std::function<bool()> tap_reconfigured_;
+  std::function<bool(bool off)> pv_command_;
+  void on_pv_command_(const std::string &payload);
   mutable std::mutex err_mu_;
   std::string last_error_;
 

@@ -1,0 +1,65 @@
+# .github/workflows/esp32.yml
+# Compiles the ESP32 components from this tree, so a change to the shared
+# headers or the bus master core that breaks the firmware build fails here.
+# The Pi build compiles the same headers, but not tigo_monitor's, tigo_server's
+# or tigo_master's ESPHome side.
+name: ESP32 build
+on:
+  push:
+    branches: [main]
+    paths: ['components/**', 'boards/**', '.github/workflows/esp32.yml']
+  pull_request:
+    paths: ['components/**', 'boards/**', '.github/workflows/esp32.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: esp32-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  compile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        # test-local: tigo_monitor and tigo_server on the AtomS3R, from
+        # components/. relay-standby: tigo_master, from the standby example.
+        config: [test-local-tigomonitor, relay-standby]
+    env:
+      ESPHOME_VERSION: '2026.10.1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install "esphome==$ESPHOME_VERSION"
+      - uses: actions/cache@v4
+        with:
+          path: ~/.platformio
+          key: platformio-${{ env.ESPHOME_VERSION }}-${{ matrix.config }}
+      # Throwaway values: nothing here is flashed.
+      - name: Secrets
+        run: |
+          printf '%s\n' 'wifi_ssid: "ci"' 'wifi_password: "ci-password"' 'ap_password: "ci-password"' \
+            'api_encryption_key: "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="' 'ota_password: "ci"' \
+            > boards/secrets.yaml
+      # The example pulls tigo_master from main on GitHub; point it at this tree.
+      - name: The standby example, from this tree
+        if: matrix.config == 'relay-standby'
+        run: |
+          python3 - <<'PY'
+          s = open('boards/example-waveshare-relay-1ch-standby.yaml').read()
+          old = """  - source:
+                type: git
+                url: https://github.com/RAR/esphome-tigomonitor
+                ref: main
+              components: [tigo_monitor, tigo_master]"""
+          new = """  - source:
+                type: local
+                path: ../components
+              components: [tigo_monitor, tigo_master]"""
+          assert s.count(old) == 1, 'the example no longer has the git source this rewrites'
+          open('boards/relay-standby.yaml', 'w').write(s.replace(old, new))
+          PY
+      - run: esphome compile boards/${{ matrix.config }}.yaml
