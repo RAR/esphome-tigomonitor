@@ -294,3 +294,88 @@ export const patterns = [
   }],
   [/\/api\/history\/panel/, () => ({ slot: 0, range: 'day', interval_min: 60, records: series(24, 392), count: 48, query_ms: 31 })],
 ];
+
+// ---------------------------------------------------------------------------
+// The Raspberry Pi build's pages (Bus › Control, Bus › Traffic, Devices with
+// the TAP), served on top of `routes` when capture.mjs runs in Pi mode.
+// Invented, like everything here: gateway 1201, the panels' own node numbers.
+// Fixed times, so the pixels are the same on every run.
+const PI_T = 1767268800000;  // 2026-01-01 12:00 UTC
+const node = (i) => devices[i].addr;
+let exId = 1;
+const exch = (dt_ms, o) => ({
+  id: exId++, unix_ms: PI_T + dt_ms, ours: true, other_master: false, addr: '1201', cmd: '0B0F', name: 'Tunnel',
+  sub_name: '', node: null, category: 'other', result: 'answered', late: false, rt_ms: 4,
+  summary: '', answer: '', answer_after_ms: null, request_hex: '', reply_hex: '', reconfig: '', ...o,
+});
+const disc = (dt) => exch(dt, {
+  sub_name: 'DiscState', category: 'discovery', rt_ms: 5,
+  summary: `Open, ${612 - Math.round(dt / 1000)} s left · 24 of the 24 in the table have joined`,
+  request_hex: '00 00 00 2E 05', reply_hex: '00 0E 00 2F 05 01 01 9C 00 18 00 18 00 18 00',
+});
+const pgw = (dt, i) => exch(dt, {
+  sub_name: 'SetPgw', category: 'housekeeping', node: node(i), rt_ms: 4,
+  summary: `Preferred gateway for node ${node(i)} · stream 01`,
+  request_hex: `00 00 00 41 0A 00 ${node(i).slice(0, 2)} ${node(i).slice(2)} 00 00 00 01 00`, reply_hex: '00 0E 00 42 0A',
+});
+const query = (dt, i, q, answer) => exch(dt, {
+  sub_name: 'EncapString', category: 'queries', node: node(i), result: 'delivered', rt_ms: 6,
+  summary: q, answer, answer_after_ms: answer ? 1840 : null,
+  request_hex: `00 00 00 06 0B 00 ${node(i).slice(2)} 5E 30 30`, reply_hex: '00 0D 00 07 0B',
+});
+const page = (dt, from, n) => exch(dt, {
+  sub_name: 'GetTable', category: 'housekeeping', rt_ms: n ? 31 : 8,
+  summary: n ? `${n} entries from index ${from}` : `The end of the table, from index ${from}`,
+  request_hex: `00 00 00 26 0C 00 ${from.slice(2)}`, reply_hex: '00 0E 00 27 0C',
+});
+const piExchanges = [
+  disc(0),
+  pgw(2100, 3),
+  query(4300, 5, '^00Version', 'Mnode Version K8.0130 (2D)'),
+  pgw(19600, 9),
+  disc(20000),
+  query(22400, 11, '^00Info', '!Info 0027 12 0000'),
+  page(30000, '0002', 12),
+  page(30400, '000E', 12),
+  page(30800, '001A', 0),
+  pgw(37100, 14),
+  disc(40000),
+  query(41900, 17, '^00Mppt', ''),
+  exch(43500, { sub_name: 'EncapString', category: 'queries', node: node(20), result: 'not_delivered', rt_ms: 5,
+    summary: "^00Version · the TAP couldn't deliver it (0x0146): the optimizer may be off or rejoining",
+    request_hex: `00 00 00 06 0E 00 ${node(20).slice(2)} 5E 30 30`, reply_hex: '00 02' }),
+  pgw(54600, 21),
+  disc(60000),
+];
+
+export const piRoutes = {
+  '/api/status': { ...routes['/api/status'], platform: 'linux' },
+  '/api/settings': {
+    serial_port: '/dev/serial/by-id/usb-FTDI_USB_RS485-if00-port0', bus_role: 'master', standby_takeover_s: 3,
+    master_startup: true, master_housekeeping: true, master_queries: true, master_optimizer_writes: false,
+    gateway_id: 0x1201, web_port: 0, web_port_active: 80, web_username: 'admin', web_password_set: true,
+    tls_cert: '', tls_key: '', tls_active: false, tls_from_args: false, power_calibration: 1, publish_interval_s: 30,
+    device_id: 'tigomonitor', show_cca_page: true, show_cloud_page: true,
+    mqtt: { host: '192.0.2.10', port: 1883, username: 'tigomonitor', password_set: true, discovery: true,
+      discovery_prefix: 'homeassistant', base_topic: 'tigomonitor', standby_panels: false, pv_switch: true },
+    mqtt_connected: true, mqtt_error: '',
+  },
+  '/api/master': {
+    role: 'master', active: true, fault: 'none', phase: 'running', detail: '', extra_taps: [],
+    housekeeping: { on: true, learned_41: 24, sent_41: 1412, sent_session: 3, sent_broadcast: 6, sent_walk_pages: 96, walks_done: 32 },
+    queries: { on: true, writes: false, sent_reads: 640, sent_writes: 0, answers: 598 },
+    tap_version: 'Mgate Version G8.59 Jan  1 2026', tap: { lost: 0, last_lost_unix: 0, recent_lost_unix: [], back_without_discovery: 0 },
+    discovery_read: true, discovery: { running: true, remaining_s: 552, node_count: 24 }, renewals: 41, discovery_renewing: true,
+    polls: 712400, timeouts: 3, resyncs: 0, gap_ms: { max: 39, max_at_unix: 1767225600, recent: 12 }, last_reply_unix: PI_T / 1000,
+    pv: { on: true, source: 'setting', since: 0, confirmed: true, unconfirmed: false, last_sent: '01', last_reply: '01' },
+    standby: { state: 'off', takeover_s: 3, master_heard_ms_ago: -1, takeovers: 0, last_takeover_unix: 0, yields: 0 },
+  },
+  '/api/bus': {
+    alarm: { active: false, count: 0, first_unix_ms: 0, recent: [] },
+    stats: { window_s: 300, polls: 13180, polls_lost: 0, polls_empty: 12950, polls_refused: 0,
+      count: { discovery: 4, queries: 4, housekeeping: 7, bringup: 0, reconfig: 0, other: 0 }, delivered: 3, not_delivered: 1,
+      other_master: 0, reconfig: 0, rt_median_ms: 4, rt_max_ms: 31,
+      discovery: 'Open, 552 s left · 24 of the 24 in the table have joined' },
+    exchanges: piExchanges,
+  },
+};

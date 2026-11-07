@@ -3,6 +3,8 @@ title: Raspberry Pi and Linux
 description: Run Tigo Monitor on a Raspberry Pi, another Linux machine or in Docker instead of an ESP32 — install one package, connect an RS485 adapter or a network bridge, and point it at Home Assistant's MQTT broker.
 ---
 
+import ThemedShot from '../../../components/ThemedShot.astro';
+
 
 The ESP32 is the main way to run Tigo Monitor. If you would rather use a
 Raspberry Pi, there is a Pi build: the same dashboard and the same panel
@@ -236,7 +238,12 @@ power, whatever the Pi is doing.
 
 The sidebar's **Bus** page has the switches and the master's health on its
 **Control** tab, and what is said on the bus on its **Traffic** tab; see
-[the web UI's pages](/esphome-tigomonitor/guides/web-server/#the-pages-you-get). An ESP32 can run
+[the web UI's pages](/esphome-tigomonitor/guides/web-server/#the-pages-you-get).
+
+<ThemedShot name="pi-bus-control" alt="Bus › Control — the PV output and discovery window switches, and the bus master's health: polls, the longest pause, gateway dropouts, housekeeping, optimizer queries and the TAP's firmware." />
+
+<ThemedShot name="pi-bus-traffic" alt="Bus › Traffic — a strip of the last 5 minutes, then each request on the bus with its reply, round trip and what it means: discovery window reads, node table pages, preferred gateways and optimizer queries." />
+ An ESP32 can run
 the bus too, with `tigo_master:`
 ([example](https://github.com/RAR/esphome-tigomonitor/blob/main/boards/example-waveshare-relay-1ch-standby.yaml)),
 but that hasn't been run on hardware yet.
