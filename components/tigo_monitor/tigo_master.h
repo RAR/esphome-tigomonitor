@@ -95,10 +95,11 @@ static const uint16_t CMD_TUNNEL = 0x0B0F;
 static const uint16_t CMD_TUNNEL_REPLY = 0x0B10;
 static const uint8_t SUB_DISCOVERY_START = 0x2D;
 static const uint8_t SUB_DISCOVERY_STATUS = 0x2E;
-// Stops discovery: never sent. (The gateway firmware's names: 2D Start
-// Discovery, 2B Stop Discovery, 2E its status. We once read these as a "run
-// lease" that kept the optimizers producing; the roof showed it doesn't.)
-static const uint8_t SUB_DISCOVERY_STOP = 0x2B;
+// EraseFlash: wipes the TAP's optimizer table. Never sent. The CCA's own UI
+// names it (Mesh History, 2026-11-06); we first read it as "Stop Discovery",
+// and before that 2D and 2B as a "run lease" that kept the optimizers
+// producing, which the roof showed it doesn't.
+static const uint8_t SUB_ERASE_FLASH = 0x2B;
 static const uint8_t SUB_DISCOVERY_STATUS_REPLY = 0x2F;
 // Sub 0x41 and command 0x0B00: the CCA's housekeeping (Housekeeping, below).
 static const uint8_t SUB_HOUSEKEEPING = 0x41;
@@ -1286,7 +1287,8 @@ class Discovery {
 // yes: what the CCA sends in steady state, in the shapes it sends them.
 // bench_only: reads and anything else, for a TAP on the bench.
 // never: writes. The commands that change what a TAP stores or does (reset,
-// store, ids, roster, whitelist, netrun) and anything carrying the setup key
+// store, ids, roster, whitelist, netrun, its channel, network config and
+// firmware, the table write and erase) and anything carrying the setup key
 // 37 24 92 66. Nothing in this code sends them, whatever the settings,
 // except the bring-up's own: RESET, SET_485_ID, SET_ID_BY_MAC and the
 // key-only STORE (startup_only).
@@ -1312,6 +1314,11 @@ inline Allow classify_request(uint16_t cmd, const Bytes &payload) {
   static const uint16_t NEVER[] = {0x0012, 0x011E, 0x0182, 0x0058, 0x0054, 0x0055};
   for (uint16_t w : NEVER)
     if (cmd == w) return Allow::never;
+  // What the CCA's local UI sends to reconfigure a TAP (2026-11-06): SET_CHANNEL
+  // (00 00 then a STORE turns its radio off for good), the channel scan (it
+  // takes the TAP off its channel and the bus goes quiet for minutes), and the
+  // TAP firmware family 0x0520-0x0527 (install, list, erase).
+  if (cmd == 0x000C || cmd == 0x0070 || cmd == 0x0072 || (cmd >= 0x0520 && cmd <= 0x0527)) return Allow::never;
   // Any other command carrying the setup key is refused.
   static const uint8_t KEY[] = {0x37, 0x24, 0x92, 0x66};
   for (size_t i = 0; i + 4 <= payload.size(); i++)
@@ -1331,7 +1338,13 @@ inline Allow classify_request(uint16_t cmd, const Bytes &payload) {
   if (cmd != CMD_TUNNEL || payload.size() < 5 || payload[0] || payload[1] || payload[2]) return Allow::bench_only;
   Bytes args(payload.begin() + 5, payload.end());
   switch (payload[3]) {
-    case SUB_DISCOVERY_STOP:
+    case SUB_ERASE_FLASH:
+    case 0x29:  // SetTable, the optimizer table write (Phase 2, not approved)
+    case 0x1D:  // ResetNode
+    case 0x13:  // PeriodicCfg Write
+    case 0xE1:  // SetKnownNetworks
+    case 0xE5:  // EraseStackTrace
+    case 0x1B:  // unnamed in the CCA's UI; its neighbours are all writes
       return Allow::never;
     case SUB_DISCOVERY_STATUS:
       return args.empty() ? Allow::yes : Allow::bench_only;
@@ -1359,7 +1372,10 @@ inline Allow classify_request(uint16_t cmd, const Bytes &payload) {
         return Allow::never;
       return Allow::bench_only;
     }
-    case 0x0D:  // the bring-up's pair, 00 00 then 00 01
+    case 0x0D:  // GatewayCfg. The bring-up's pair of reads, 00 00 then 00 01.
+      // A first byte of 01 is the write of the TAP's whole network config
+      // (channel, PAN, key): how a CCA re-PANs a TAP.
+      if (!args.empty() && args[0] != 0x00) return Allow::never;
       return args == Bytes{0x00, 0x00} || args == Bytes{0x00, 0x01} ? Allow::startup_only : Allow::bench_only;
     case 0x22:
       // Empty, to the broadcast address or the TAP. With data after the node

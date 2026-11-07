@@ -286,6 +286,46 @@ static void test_more_allow() {
   CHECK(classify_request(CMD_TUNNEL, tunnel_request(0x06, 1, other_read)) == Allow::bench_only);
 }
 
+// The frames the CCA's local UI sends to reconfigure a TAP (2026-11-06):
+// never, in every mode, bench included.
+static void test_tap_reconfiguring_frames_are_never_sent() {
+  auto never_anywhere = [](uint16_t cmd, const Bytes &p) {
+    return classify_request(cmd, p) == Allow::never && !may_send(cmd, p, true, true, true, true);
+  };
+  // GatewayCfg write: 01 00 and the 36-byte block. The two reads stay as they were.
+  Bytes cfg = {0x01, 0x00};
+  cfg.resize(2 + 36, 0x00);
+  CHECK(never_anywhere(CMD_TUNNEL, tunnel_request(0x0D, 3, cfg)));
+  CHECK(never_anywhere(CMD_TUNNEL, tunnel_request(0x0D, 3, {0x01, 0x00})));
+  CHECK(never_anywhere(CMD_TUNNEL, tunnel_request(0x0D, 3, {0x01})));
+  CHECK(classify_request(CMD_TUNNEL, tunnel_request(0x0D, 3, {0x00, 0x00})) == Allow::startup_only);
+  CHECK(classify_request(CMD_TUNNEL, tunnel_request(0x0D, 3, {0x00, 0x01})) == Allow::startup_only);
+  // SET_CHANNEL, any payload; the channel scan; the TAP firmware family.
+  for (const Bytes &p : {Bytes{}, Bytes{0x00, 0x00}, Bytes{0x20, 0x00}, Bytes{0x14, 0x00}})
+    CHECK(never_anywhere(0x000C, p));
+  CHECK(never_anywhere(0x0070, hex("010807fff800")));
+  CHECK(never_anywhere(0x0070, hex("000807fff800")));
+  CHECK(never_anywhere(0x0072, {}));
+  for (uint16_t cmd = 0x0520; cmd <= 0x0527; cmd++) {
+    CHECK(never_anywhere(cmd, {}));
+    CHECK(never_anywhere(cmd, {0x00, 0x01}));
+  }
+  // The tunnel subs that write a TAP's or a node's config, or erase: ResetNode,
+  // PeriodicCfg Write, SetKnownNetworks, EraseStackTrace, 0x1B, EraseFlash and
+  // SetTable (Phase 2 would change this line, and only on the bench).
+  for (uint8_t sub : {uint8_t{0x1D}, uint8_t{0x13}, uint8_t{0xE1}, uint8_t{0xE5}, uint8_t{0x1B}, SUB_ERASE_FLASH,
+                      uint8_t{0x29}})
+    for (const Bytes &args : {Bytes{}, Bytes{0x00, 0x02}, Bytes{0x00, 0x02, 0x80, 0x00}})
+      CHECK(never_anywhere(CMD_TUNNEL, tunnel_request(sub, 1, args)));
+  CHECK(SUB_ERASE_FLASH == 0x2B);
+  // Neighbours stay as they were: the reads around them are bench-only.
+  CHECK(classify_request(0x000B, {}) == Allow::bench_only);
+  CHECK(classify_request(0x0071, {}) == Allow::bench_only);
+  CHECK(classify_request(0x0528, {}) == Allow::bench_only);
+  CHECK(classify_request(CMD_TUNNEL, tunnel_request(0x17, 1, {})) == Allow::bench_only);
+  CHECK(classify_request(CMD_TUNNEL, tunnel_request(0x27, 1, {})) == Allow::bench_only);
+}
+
 static void test_next_request() {
   WindowKeeper window;
   PollCursor cursor(0x6FC4);
@@ -1304,6 +1344,7 @@ int main() {
   test_housekeeping_allow();
   test_learner();
   test_housekeeping();
+  test_tap_reconfiguring_frames_are_never_sent();
   test_next_request_housekeeping();
   test_bring_up_plan();
   test_walks();
