@@ -223,6 +223,22 @@ void MasterCore::set_fault(Fault f, const std::string &detail) {
   if (f == Fault::second_master || f == Fault::no_port) status_.active = false;
 }
 
+void MasterCore::ask_version_() {
+  version_asked_ = true;
+  Frame v;
+  if (!transact(gateway_, 0x000A, {}, v)) {
+    LOGW("bus master: no answer to VERSION (0x000A)");
+    return;
+  }
+  std::string text(v.payload.begin(), v.payload.end());
+  for (char &c : text)
+    if (c == '\r' || c == '\n') c = ' ';
+  while (!text.empty() && text.back() == ' ') text.pop_back();
+  LOGI("bus master: TAP version: %s", text.c_str());
+  std::lock_guard<std::mutex> lock(mu_);
+  status_.tap_version = text;
+}
+
 bool MasterCore::transact(uint16_t dest, uint16_t cmd, const Bytes &payload, Frame &reply, uint32_t timeout_ms) {
   refused_ = not_taken_ = false;
   if (standing_by_()) return false;  // a standby that just yielded sends nothing more
@@ -366,16 +382,25 @@ void MasterCore::tick_(uint32_t now_ms) {
   }
   // After the standby check: transact() sends nothing while standing by, so
   // asked there, the probe was spent with nothing sent.
+  // The TAP's version, once per start: on the bench before anything else,
+  // running the bus after any bring-up, so it goes to the address the TAP
+  // has. The CCA asks it at its own bring-up; it changes nothing.
   if (bench_ && !version_asked_) {
-    version_asked_ = true;
-    Frame v;
-    if (transact(gateway_, 0x000A, {}, v)) LOGI("bus master: TAP version: %s", std::string(v.payload.begin(), v.payload.end()).c_str());
-    else LOGW("bus master: no answer to VERSION (0x000A)");
+    ask_version_();
     return;
   }
   if (startup_ && phase_ != Phase::running) {
     run_startup(now_ms);
     return;
+  }
+  if (!version_asked_) {
+    // A TAP just re-addressed gets the CCA's bring-up, which asks it anyway.
+    if (readdressed_) {
+      version_asked_ = true;
+    } else {
+      ask_version_();
+      return;
+    }
   }
   { std::lock_guard<std::mutex> lock(mu_); status_.phase = phase_; }
   // After a re-address the CCA's bring-up reads go out whatever the

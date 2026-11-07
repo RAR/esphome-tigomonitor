@@ -138,6 +138,11 @@ void BusLog::feed_tx(const char *data, size_t n, uint32_t late_ms) {
   }
 }
 
+bool BusLog::needs_save() const {
+  std::lock_guard<std::mutex> lock(mu_);
+  return dirty_ || versions_dirty_;
+}
+
 json BusLog::versions_json() const {
   std::lock_guard<std::mutex> lock(mu_);
   json taps = json::array(), optimizers = json::array();

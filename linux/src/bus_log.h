@@ -32,8 +32,10 @@ class BusLog {
   void feed_rx(const char *data, size_t n);  // read off the bus
   // This monitor's master sent it; its last byte left late_ms before now.
   void feed_tx(const char *data, size_t n, uint32_t late_ms = 0);
-  // Writes the alarm file if it changed since the last save.
+  // Writes the alarm and versions files if they changed since the last
+  // save. It can wait on the SD card: call it off the bus master's loop.
   void save_if_changed();
+  bool needs_save() const;
   void clear_alarm();
 
   bool alarm_active() const;

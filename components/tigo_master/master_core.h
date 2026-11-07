@@ -99,7 +99,7 @@ struct MasterStatus {
   uint32_t not_taken = 0;   // 0x06s the TAP answered 0x0146: it couldn't deliver them
   uint32_t sent_writes = 0;
   uint32_t answers = 0;     // optimizers' answers heard
-  std::string tap_version;  // VERSION's reply, from a bring-up
+  std::string tap_version;  // VERSION's reply, asked once per start
   std::string detail;
   Standby standby = Standby::off;
   uint32_t takeover_s = 0;
@@ -213,6 +213,7 @@ class MasterCore {
   bool is_reply(uint16_t cmd, const esphome::tigo_monitor::master::Bytes &request,
                 const esphome::tigo_monitor::master::Frame &f) const;
   void run_startup(uint32_t now_ms);  // probe + discovery, before steady state
+  void ask_version_();               // VERSION (0x000A), into status().tap_version
   void stand_by_(uint32_t now_ms);   // listen for another master; take over when there is none
   void take_over_(int64_t quiet_ms);
   void yield_();
@@ -288,7 +289,7 @@ class MasterCore {
   bool not_taken_ = false;  // the last transact(), a text query, got the TAP's 0x0146
   std::set<uint16_t> not_taken_logged_;  // nodes whose queries the TAP couldn't deliver, logged once each
   uint32_t replies_logged_ = 0;
-  bool version_asked_ = false;          // bench mode asks the TAP's version first
+  bool version_asked_ = false;          // the TAP's version, asked once per start
   std::set<uint16_t> refusals_logged_;  // commands the TAP NAKed (0x0006), logged once each
   esphome::tigo_monitor::protocol::FrameSplitter<std::string> splitter_;
   Standby standby_ = Standby::off;

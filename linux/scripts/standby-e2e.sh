@@ -129,7 +129,7 @@ wait_state 18110 active 8
 expect "a hung master is replaced" "$(standby 18110)" "active 1 0"
 sleep 1
 expect "the bench standby asked VERSION once it ran the bus, not before" \
-  "$(grep -c 'TAP version: Mgate' "$out/a/daemon.log") $(grep -c 'no answer to VERSION' "$out/a/daemon.log")" "1 0"
+  "$(sed -n '/(bench mode)/,$p' "$out/a/daemon.log" | grep -c 'TAP version: Mgate') $(grep -c 'no answer to VERSION' "$out/a/daemon.log")" "1 0"
 kill -CONT $b
 wait_state 18111 standing_by 5
 sleep 1
