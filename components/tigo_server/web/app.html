@@ -628,6 +628,48 @@
   .panel-tile-detail { display: flex; justify-content: space-between; gap: 4px; font-size: 10px; color: var(--text-dim); margin-top: 4px; font-variant-numeric: tabular-nums; }
 
   .topo-empty { padding: 60px 24px; text-align: center; color: var(--text-dim); font-size: 13px; }
+  /* The mesh map (Pi): optimizers around the TAP each reports through. */
+  .mesh-note { margin: 0 0 14px; color: var(--text-dim); font-size: 13px; max-width: 760px; }
+  .mesh-stage { display: grid; grid-template-columns: minmax(0, 1fr) 260px; background: var(--bg-2);
+                border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+  .mesh-graph { min-width: 0; }
+  #mesh-svg { display: block; width: 100%; height: auto; max-height: 560px; margin: 0 auto; }
+  .mesh-empty { padding: 80px 24px; text-align: center; color: var(--text-dim); font-size: 13px; }
+  .mesh-side { border-left: 1px solid var(--border); padding: 16px; font-size: 13px; background: var(--bg); }
+  .mesh-side h3 { margin: 0 0 2px; font-size: 15px; display: flex; gap: 8px; align-items: center; }
+  .mesh-side .mesh-sub { color: var(--text-dim); }
+  .mesh-side .mesh-k { color: var(--text-faint); font-size: 11px; text-transform: uppercase; letter-spacing: .05em; margin-top: 12px; }
+  .mesh-side .mesh-v { font-variant-numeric: tabular-nums; }
+  .mesh-side .mesh-faint { color: var(--text-faint); font-size: 11px; }
+  .mesh-spark { display: block; width: 100%; height: 42px; margin-top: 4px; }
+  .mesh-spark polyline { fill: none; stroke: var(--accent-2); stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+  .mesh-pill { padding: 1px 8px; border-radius: 99px; font-size: 11.5px; font-weight: 600; }
+  .mesh-pill.tier-good { color: var(--good); background: color-mix(in srgb, var(--good) 16%, transparent); }
+  .mesh-pill.tier-fair { color: var(--warn); background: color-mix(in srgb, var(--warn) 16%, transparent); }
+  .mesh-pill.tier-poor { color: var(--bad); background: color-mix(in srgb, var(--bad) 16%, transparent); }
+  .mesh-pill.tier-silent { color: var(--text-dim); background: var(--bg-3); }
+  .mesh-link { stroke-width: 1.3; opacity: .7; }
+  .mesh-link.tier-good { stroke: var(--good); } .mesh-link.tier-fair { stroke: var(--warn); }
+  .mesh-link.tier-poor { stroke: var(--bad); stroke-width: 2; } .mesh-link.tier-silent { stroke: var(--text-faint); stroke-dasharray: 3 3; }
+  .mesh-node { cursor: pointer; outline: none; }
+  .mesh-node .mesh-hit { fill: transparent; }
+  .mesh-node .mesh-dot { fill: var(--bg-3); stroke-width: 1.5; }
+  .mesh-node.tier-good .mesh-dot { stroke: var(--good); } .mesh-node.tier-fair .mesh-dot { stroke: var(--warn); }
+  .mesh-node.tier-poor .mesh-dot { stroke: var(--bad); } .mesh-node.tier-silent .mesh-dot { stroke: var(--text-faint); }
+  .mesh-node text { font-size: 10px; fill: var(--text-dim); }
+  .mesh-node:hover .mesh-dot, .mesh-node:focus-visible .mesh-dot, .mesh-node.selected .mesh-dot { stroke: var(--text); stroke-width: 2.5; }
+  .mesh-node.selected text { fill: var(--text); font-weight: 600; }
+  .mesh-tap rect { fill: var(--bg-4); stroke: var(--accent-2); stroke-width: 1.5; }
+  .mesh-tap text { fill: var(--text); font-size: 12px; font-weight: 600; }
+  .mesh-bus { stroke: var(--accent-2); stroke-width: 2; stroke-dasharray: 1 5; stroke-linecap: round; }
+  .mesh-legend { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: 10px; color: var(--text-dim); font-size: 12px; }
+  .mesh-sw { display: inline-block; width: 18px; height: 3px; border-radius: 2px; vertical-align: middle; margin-right: 6px; }
+  .mesh-sw.tier-good { background: var(--good); } .mesh-sw.tier-fair { background: var(--warn); }
+  .mesh-sw.tier-poor { background: var(--bad); } .mesh-sw.tier-silent { border-top: 2px dashed var(--text-faint); height: 0; }
+  @media (max-width: 760px) {
+    .mesh-stage { grid-template-columns: minmax(0, 1fr); }
+    .mesh-side { border-left: 0; border-top: 1px solid var(--border); }
+  }
 
   /* A layout that arrived after the user's own, waiting for them */
   .topo-pending {
@@ -1144,6 +1186,12 @@
         <div class="topbar-meta" id="topo-meta">CCA-derived inverter → string → panel hierarchy</div>
       </div>
 
+      <div class="page-tabs" role="tablist" aria-label="Topology" id="topology-tabs" data-linux-only style="display:none">
+        <button role="tab" id="topology-tab-layout" aria-controls="topology-layout" aria-selected="true" data-tab="layout">Layout</button>
+        <button role="tab" id="topology-tab-mesh" aria-controls="topology-mesh" aria-selected="false" data-tab="mesh" tabindex="-1">Mesh</button>
+      </div>
+
+      <div id="topology-layout" role="tabpanel" aria-labelledby="topology-tab-layout">
       <div class="topo-toolbar">
         <button class="btn" id="topo-expand-btn">Expand all</button>
         <button class="btn" id="topo-collapse-btn">Collapse all</button>
@@ -1168,6 +1216,21 @@
 
       <div id="topo-tree" class="topo-tree">
         <div class="topo-empty">Loading topology…</div>
+      </div>
+      </div>
+
+      <div id="topology-mesh" role="tabpanel" aria-labelledby="topology-tab-mesh" hidden>
+        <p class="mesh-note" id="mesh-note">Each line runs to the TAP an optimizer reports through, coloured by its link: reports lost today, and Tigo's raw signal number (higher is better). Relays between optimizers aren't decoded yet.</p>
+        <div class="mesh-stage">
+          <div class="mesh-graph"><svg id="mesh-svg" viewBox="0 0 760 460" role="group" aria-label="Optimizers around the TAP each reports through"></svg></div>
+          <div class="mesh-side" id="mesh-side" aria-live="polite"></div>
+        </div>
+        <div class="mesh-legend" aria-hidden="true">
+          <span><i class="mesh-sw tier-good"></i>Good</span>
+          <span><i class="mesh-sw tier-fair"></i>Fair: 1–5% lost, or signal under 110</span>
+          <span><i class="mesh-sw tier-poor"></i>Poor: over 5% lost, or signal under 80</span>
+          <span><i class="mesh-sw tier-silent"></i>Silent: not heard for 10 minutes</span>
+        </div>
       </div>
     </section>
 
@@ -5775,6 +5838,190 @@
       new Date(n.first_heard_unix * 1000).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })})`).join(', ');
     box.innerHTML = `<strong>${fresh.length === 1 ? 'New optimizer heard' : fresh.length + ' new optimizers heard'}:</strong> ${topoEscape(which)}. ` +
       'Choose Edit layout to put it in a string, or use Replace on its tile to give it the place of the panel it replaced.';
+  }
+
+  // ============================================================
+  // Topology tabs (Pi): Layout, the panel layout below, and Mesh, the
+  // optimizers around the TAP each reports through. The ESP32 has no
+  // /api/mesh and shows Layout alone.
+  function topologyTab(name) {
+    if (!name) { try { name = localStorage.getItem('topology-tab'); } catch (e) {} }
+    if (PLATFORM !== 'linux' || name !== 'mesh') name = 'layout';
+    document.querySelectorAll('#topology-tabs [role="tab"]').forEach(t => {
+      const on = t.dataset.tab === name;
+      t.setAttribute('aria-selected', String(on));
+      t.tabIndex = on ? 0 : -1;
+      document.getElementById(t.getAttribute('aria-controls')).hidden = !on;
+    });
+    if (name === 'mesh') refreshMesh();
+  }
+  document.querySelectorAll('#topology-tabs [role="tab"]').forEach(t => t.addEventListener('click', () => {
+    topologyTab(t.dataset.tab);
+    try { localStorage.setItem('topology-tab', t.dataset.tab); } catch (e) {}
+  }));
+  document.getElementById('topology-tabs').addEventListener('keydown', e => {
+    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+    const tabs = [...document.querySelectorAll('#topology-tabs [role="tab"]')];
+    const i = tabs.indexOf(document.activeElement);
+    if (i < 0) return;
+    const next = tabs[(i + 1) % tabs.length];
+    next.click();
+    next.focus();
+    e.preventDefault();
+  });
+  platformReady.then(() => topologyTab());
+  document.querySelector('#nav button[data-view="topology"]').addEventListener('click', () => {
+    if (!document.getElementById('topology-mesh').hidden) refreshMesh();
+  });
+
+  // ---- the mesh map ----
+  // Tiers from reports lost today (measured) and the raw RSSI byte, which
+  // only flags the weak tail: its scale is Tigo's, not dBm.
+  const MESH_TIERS = { poorLoss: 5, fairLoss: 1, poorRssi: 80, fairRssi: 110, silentS: 600 };
+  const MESH_NAMES = { good: 'Good', fair: 'Fair', poor: 'Poor', silent: 'Silent' };
+  const meshEsc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  let meshData = null, meshSelected = null;
+
+  function meshLossPct(n) {
+    const sent = n.reports_today + n.lost_today;
+    return sent > 0 ? n.lost_today * 100 / sent : null;
+  }
+  function meshTier(n) {
+    if (n.last_heard_s == null || n.last_heard_s >= MESH_TIERS.silentS) return 'silent';
+    const loss = meshLossPct(n) ?? 0;
+    if (loss > MESH_TIERS.poorLoss || n.rssi < MESH_TIERS.poorRssi) return 'poor';
+    if (loss >= MESH_TIERS.fairLoss || n.rssi < MESH_TIERS.fairRssi) return 'fair';
+    return 'good';
+  }
+
+  async function refreshMesh() {
+    try {
+      const r = await apiFetch('/api/mesh');
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      meshData = await r.json();
+    } catch (e) {
+      if (!meshData) document.querySelector('#topology-mesh .mesh-graph').innerHTML =
+        `<div class="mesh-empty">Couldn't load the mesh: ${meshEsc(e.message)}</div>`;
+      return;
+    }
+    renderMesh();
+  }
+  setInterval(() => {
+    const panel = document.getElementById('topology-mesh');
+    if (!panel.hidden && document.getElementById('view-topology').classList.contains('active')) refreshMesh();
+  }, 10000);
+
+  function renderMesh() {
+    const graph = document.querySelector('#topology-mesh .mesh-graph');
+    const nodes = meshData.nodes || [];
+    if (!nodes.length) {
+      graph.innerHTML = '<div class="mesh-empty">Waiting for the first reports…</div>';
+      document.getElementById('mesh-side').innerHTML = '';
+      return;
+    }
+    if (!document.getElementById('mesh-svg'))
+      graph.innerHTML = '<svg id="mesh-svg" viewBox="0 0 760 460" role="group" aria-label="Optimizers around the TAP each reports through"></svg>';
+    const svg = document.getElementById('mesh-svg');
+    svg.replaceChildren();
+    const W = 760, H = 460, NS = 'http://www.w3.org/2000/svg';
+    const el = (tag, attrs, parent) => {
+      const e = document.createElementNS(NS, tag);
+      for (const k in attrs) e.setAttribute(k, attrs[k]);
+      parent.appendChild(e);
+      return e;
+    };
+    // One hub per TAP, side by side; a node with no TAP yet joins the first.
+    const tapIds = (meshData.taps || []).map(t => t.id);
+    for (const n of nodes) if (n.tap && !tapIds.includes(n.tap)) tapIds.push(n.tap);
+    if (!tapIds.length) tapIds.push('?');
+    const hub = {};
+    tapIds.forEach((id, k) => { hub[id] = [W * (k + 1) / (tapIds.length + 1), H / 2]; });
+    const rMin = 54, rMax = Math.min(H / 2 - 34, W / (2 * tapIds.length) - 34);
+    // Each TAP's optimizers by golden angle, in address order so the same
+    // data draws the same picture; further out as the signal falls.
+    const pos = new Map();
+    for (const id of tapIds) {
+      const group = nodes.filter(n => (n.tap && hub[n.tap] ? n.tap : tapIds[0]) === id)
+                         .sort((a, b) => a.addr.localeCompare(b.addr));
+      group.forEach((n, i) => {
+        const weak = n.rssi == null ? 1 : 1 - Math.min(1, Math.max(0, (n.rssi - 60) / 170));
+        const r = meshTier(n) === 'silent' ? rMax : rMin + weak * (rMax - rMin - 14) + (i % 3) * 7;
+        const a = i * 137.508 * Math.PI / 180;
+        pos.set(n, [hub[id][0] + r * Math.cos(a), hub[id][1] + r * Math.sin(a) * 0.92]);
+      });
+    }
+    if (tapIds.length > 1)
+      el('line', { class: 'mesh-bus', x1: hub[tapIds[0]][0], y1: H / 2, x2: hub[tapIds.at(-1)][0], y2: H / 2 }, svg);
+    for (const n of nodes) {
+      const [x, y] = pos.get(n), [hx, hy] = hub[n.tap && hub[n.tap] ? n.tap : tapIds[0]];
+      el('line', { class: `mesh-link tier-${meshTier(n)}`, x1: hx, y1: hy, x2: x, y2: y }, svg);
+    }
+    for (const n of nodes) {
+      const [x, y] = pos.get(n), tier = meshTier(n);
+      const g = el('g', { class: `mesh-node tier-${tier}`, 'data-label': n.label, 'data-addr': n.addr, tabindex: '0',
+                          role: 'button', 'aria-label': `${n.label}: ${MESH_NAMES[tier]}` }, svg);
+      // A bigger, invisible target than the dot, reaching the label.
+      el('circle', { class: 'mesh-hit', cx: x, cy: y, r: 12 }, g);
+      el('circle', { class: 'mesh-dot', cx: x, cy: y, r: 7 }, g);
+      const right = x >= hub[n.tap && hub[n.tap] ? n.tap : tapIds[0]][0];
+      el('text', { x: right ? x + 10 : x - 10, y: y + 3.5, 'text-anchor': right ? 'start' : 'end' }, g).textContent = n.label;
+      const pick = () => meshSide(n);
+      g.addEventListener('mouseenter', pick);
+      g.addEventListener('focus', pick);
+      g.addEventListener('click', pick);
+    }
+    // Fit the view to what was drawn, labels included, so a phone zooms in
+    // rather than showing the graph small in an empty frame.
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (const [x, y] of [...pos.values(), ...Object.values(hub)]) {
+      x0 = Math.min(x0, x - 48); x1 = Math.max(x1, x + 48); y0 = Math.min(y0, y - 22); y1 = Math.max(y1, y + 22);
+    }
+    svg.setAttribute('viewBox', `${x0.toFixed(0)} ${y0.toFixed(0)} ${(x1 - x0).toFixed(0)} ${(y1 - y0).toFixed(0)}`);
+    for (const id of tapIds) {
+      const [x, y] = hub[id], g = el('g', { class: 'mesh-tap' }, svg);
+      el('rect', { x: x - 38, y: y - 16, width: 76, height: 32, rx: 7 }, g);
+      el('text', { x, y: y + 4.5, 'text-anchor': 'middle' }, g).textContent = `TAP ${id}`;
+    }
+    // Keep the one being looked at; else open on the worst.
+    const order = { poor: 0, silent: 1, fair: 2, good: 3 };
+    const keep = meshSelected && nodes.find(n => n.addr === meshSelected);
+    meshSide(keep || [...nodes].sort((a, b) => order[meshTier(a)] - order[meshTier(b)])[0]);
+  }
+
+  function meshSide(n) {
+    meshSelected = n.addr;
+    document.querySelectorAll('#mesh-svg .mesh-node').forEach(g => g.classList.toggle('selected', g.dataset.addr === n.addr));
+    const tier = meshTier(n), loss = meshLossPct(n);
+    const hist = (n.rssi_24h || []).filter(v => v != null);
+    let spark = '<div class="mesh-faint">No history yet</div>';
+    if (hist.length) {
+      const lo = Math.min(...hist) - 4, hi = Math.max(...hist) + 4, len = n.rssi_24h.length;
+      // A gap (no reports, e.g. the night) breaks the line.
+      const runs = [[]];
+      n.rssi_24h.forEach((v, i) => {
+        if (v == null) { if (runs.at(-1).length) runs.push([]); return; }
+        runs.at(-1).push(`${(i * 200 / (len - 1)).toFixed(1)},${(40 - (v - lo) * 38 / (hi - lo)).toFixed(1)}`);
+      });
+      spark = `<svg class="mesh-spark" viewBox="0 0 200 42" preserveAspectRatio="none">${
+        runs.filter(r => r.length).map(r => `<polyline points="${r.length === 1 ? r[0] + ' ' + r[0] : r.join(' ')}"/>`).join('')
+      }</svg><div class="mesh-faint">last 24 h · ${Math.min(...hist)}–${Math.max(...hist)}</div>`;
+    }
+    const sent = n.reports_today + n.lost_today;
+    const lossText = loss == null ? '— no reports today'
+      : `${n.lost_today.toLocaleString('en-US')} of ${sent.toLocaleString('en-US')} reports (${loss < 0.1 && loss > 0 ? '<0.1' : loss.toFixed(1)}%)`;
+    const ago = s => s == null ? '—' : s < 90 ? `${s} s ago` : s < 5400 ? `${Math.round(s / 60)} min ago` : `${Math.round(s / 3600)} h ago`;
+    const joined = n.last_join_unix ? new Date(n.last_join_unix * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                                    : 'Not since this Pi started';
+    document.getElementById('mesh-side').innerHTML = `
+      <h3>${meshEsc(n.label)} <span class="mesh-pill tier-${tier}">${MESH_NAMES[tier]}</span></h3>
+      <div class="mesh-sub">${n.string ? meshEsc(n.string) + ' · ' : ''}address ${meshEsc(n.addr)}</div>
+      <div class="mesh-k">Signal</div>
+      <div class="mesh-v">${n.rssi == null ? '—' : n.rssi} <span class="mesh-faint">Tigo's raw number, higher is better</span></div>
+      ${spark}
+      <div class="mesh-k">Reports lost today</div><div class="mesh-v mesh-loss">${lossText}</div>
+      <div class="mesh-k">Reports through</div><div class="mesh-v">${n.tap ? 'TAP ' + meshEsc(n.tap) : '—'}</div>
+      <div class="mesh-k">Last heard</div><div class="mesh-v">${ago(n.last_heard_s)}</div>
+      <div class="mesh-k">Last joined</div><div class="mesh-v">${joined}</div>`;
   }
 
   async function refreshTopology() {

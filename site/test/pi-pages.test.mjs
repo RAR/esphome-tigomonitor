@@ -10,7 +10,7 @@ import { createServer } from 'node:http';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
-import { routes } from '../screenshots/fixtures.mjs';
+import { routes, piRoutes } from '../screenshots/fixtures.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const html = readFileSync(resolve(HERE, '../../components/tigo_server/web/app.html'), 'utf8')
@@ -67,6 +67,7 @@ async function open(opts = {}) {
       }
       return json(200, api.settings);
     }
+    if (path === '/api/mesh' && linux) return json(200, opts.mesh ?? piRoutes['/api/mesh']);
     if (path === '/api/logs') { api.logReads = (api.logReads || 0) + 1; return json(200, { lines: [], next: 0 }); }
     if (path === '/api/cloud/status') return json(200, { configured: true });
     if (path === '/api/cloud/health') return json(200, { summary: {} });
@@ -252,5 +253,89 @@ test('the ESP32 has no Logs, so Diagnostics has no tabs', async () => {
   const { page, ctx } = await open({ linux: false, hash: '#diagnostics' });
   await page.waitForTimeout(500);
   assert.deepEqual(await diagTabs(page, 'diagnostics'), []);
+  await ctx.close();
+});
+
+// ---- the mesh map --------------------------------------------------------
+
+async function openMesh(opts = {}) {
+  const o = await open(opts);
+  await o.page.click('#nav button[data-view="topology"]');
+  await o.page.click('#topology-tabs [data-tab="mesh"]');
+  await o.page.waitForSelector('#topology-mesh .mesh-node, #topology-mesh .mesh-empty', { state: 'attached' });
+  return o;
+}
+const meshNode = (page, label) => page.locator(`#mesh-svg .mesh-node[data-label="${label}"]`);
+const fixtureNodes = piRoutes['/api/mesh'].nodes;
+
+test('mesh: tab only on the Pi', async () => {
+  const { page, ctx } = await open({ linux: false });
+  await page.click('#nav button[data-view="topology"]');
+  assert.equal(await page.isVisible('#topology-tabs [data-tab="mesh"]'), false);
+  assert.equal(await page.isVisible('#topo-tree'), true);
+  await ctx.close();
+});
+
+test('mesh: one node per optimizer around its TAP', async () => {
+  const { page, ctx, errors } = await openMesh();
+  assert.equal(await page.locator('#mesh-svg .mesh-node').count(), fixtureNodes.length);
+  assert.deepEqual(await page.locator('#mesh-svg .mesh-tap').allTextContents(), ['TAP 1201']);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test('mesh: tiers', async () => {
+  const { page, ctx } = await openMesh();
+  const tier = (i) => meshNode(page, fixtureNodes[i].label).getAttribute('class');
+  assert.match(await tier(4), /tier-poor/);    // 6 % lost
+  assert.match(await tier(9), /tier-poor/);    // RSSI 72
+  assert.match(await tier(15), /tier-silent/); // 900 s since heard
+  assert.match(await tier(0), /tier-good/);
+  await ctx.close();
+});
+
+test('mesh: side panel', async () => {
+  const { page, ctx } = await openMesh();
+  const n = fixtureNodes[4];
+  await meshNode(page, n.label).hover();
+  const side = await page.textContent('#mesh-side');
+  assert.match(side, new RegExp(`\\b${n.label}\\b`));
+  assert.match(side, new RegExp(`\\b${n.rssi}\\b`));
+  assert.match(side, new RegExp(`${n.lost_today.toLocaleString('en-US')} of ${(n.reports_today + n.lost_today).toLocaleString('en-US')} reports`));
+  assert.doesNotMatch(side, /dBm/);
+  await ctx.close();
+});
+
+test('mesh: keyboard focus fills the side panel too', async () => {
+  const { page, ctx } = await openMesh();
+  await meshNode(page, fixtureNodes[9].label).focus();
+  assert.match(await page.textContent('#mesh-side'), new RegExp(`\\b${fixtureNodes[9].label}\\b`));
+  await ctx.close();
+});
+
+test('mesh: no reports today', async () => {
+  const { page, ctx } = await openMesh();
+  await meshNode(page, fixtureNodes[20].label).hover();
+  assert.match(await page.textContent('#mesh-side .mesh-loss'), /^—/);
+  await ctx.close();
+});
+
+test('mesh: empty history', async () => {
+  const { page, ctx } = await openMesh();
+  await meshNode(page, fixtureNodes[20].label).hover();
+  assert.match(await page.textContent('#mesh-side'), /No history yet/);
+  await ctx.close();
+});
+
+test('mesh: empty', async () => {
+  const { page, ctx, errors } = await openMesh({ mesh: { loss_method: 'slot', parent_confirmed: false, taps: [], nodes: [] } });
+  assert.match(await page.textContent('#topology-mesh'), /Waiting for the first reports/);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test('mesh: the note', async () => {
+  const { page, ctx } = await openMesh();
+  assert.equal(await page.isVisible('#mesh-note'), true);
   await ctx.close();
 });

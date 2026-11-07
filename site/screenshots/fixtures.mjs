@@ -348,6 +348,29 @@ const piExchanges = [
   disc(60000),
 ];
 
+// The mesh map: every fixture panel behind one TAP, with a few problems
+// planted so the colours mean something. RSSI is Tigo's raw byte (higher is
+// better), spread like the roof's 66-222. A day of 5-minute averages, empty
+// overnight. Addresses and labels only; the API never carries a MAC.
+const meshRssi = (base, i) => Array.from({ length: 288 }, (_, k) => {
+  const hour = new Date(PI_T - (287 - k) * 300000).getUTCHours();
+  return hour >= 7 && hour < 18 ? Math.round(base + Math.sin(k / 9 + i) * 4 + (wob(i * 31 + k) - 0.5) * 3) : null;
+});
+const meshNodes = devices.map((d, i) => {
+  const rssi = Math.round(92 + wob(i + 410) * 110);
+  const node = {
+    addr: d.addr, label: d.name, string: d.string_label, tap: '1201', parent: null,
+    rssi, rssi_24h: meshRssi(rssi, i), reports_today: 10800 - Math.round(wob(i + 450) * 60),
+    lost_today: Math.round(wob(i + 470) * 40), last_heard_s: 1 + Math.round(wob(i + 490) * 3),
+    last_join_unix: PI_T / 1000 - 5 * 3600 - i * 37,
+  };
+  if (i === 4) Object.assign(node, { lost_today: 680 });                     // poor: 6 % lost
+  if (i === 9) Object.assign(node, { rssi: 72, rssi_24h: meshRssi(72, i) }); // poor: weak signal
+  if (i === 15) Object.assign(node, { last_heard_s: 900 });                 // silent
+  if (i === 20) Object.assign(node, { reports_today: 0, lost_today: 0, rssi_24h: Array(288).fill(null), last_heard_s: 64000 });
+  return node;
+});
+
 export const piRoutes = {
   '/api/status': { ...routes['/api/status'], platform: 'linux' },
   '/api/settings': {
@@ -378,4 +401,5 @@ export const piRoutes = {
       discovery: 'Open, 552 s left · 24 of the 24 in the table have joined' },
     exchanges: piExchanges,
   },
+  '/api/mesh': { loss_method: 'slot', parent_confirmed: false, taps: [{ id: '1201' }], nodes: meshNodes },
 };

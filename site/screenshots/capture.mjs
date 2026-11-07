@@ -53,11 +53,13 @@ const VIEWS = [
 
 // The Raspberry Pi build's own pages, captured with /api/status saying
 // platform 'linux' and piRoutes on top of the rest: [file stem, label, what
-// to click]. Docs only; the README keeps the ESP32's views.
+// to click, or a list clicked in turn]. Docs only; the README keeps the
+// ESP32's views.
 const PI_VIEWS = [
   ['pi-bus-control', 'Bus Control', 'button[data-view="bus"]'],
   ['pi-bus-traffic', 'Bus Traffic', '#view-busmaster .bus-tabs a[href="#buslog"]'],
   ['pi-devices',     'Pi Devices',  'button[data-view="nodes"]'],
+  ['pi-mesh',        'Mesh',        ['button[data-view="topology"]', '#topology-tabs [data-tab="mesh"]']],
 ];
 
 const THEMES = ['dark', 'light'];
@@ -123,7 +125,7 @@ for (const theme of THEMES) for (const pi of [false, true]) {
 
   const views = pi ? PI_VIEWS : VIEWS.map(([v, name]) => [v, name, `button[data-view="${v}"]`]);
   for (const [view, name, click] of views) {
-    await page.click(click);
+    for (const c of [].concat(click)) await page.click(c);
     await page.waitForLoadState('networkidle');
     await page.waitForTimeout(1500);
     const file = `${view}-${theme}.png`;
