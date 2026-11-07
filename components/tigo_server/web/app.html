@@ -2980,7 +2980,7 @@
     else if (n.last_roster_unix && newestRoster - n.last_roster_unix >= NODE_OFF_ROSTER_S)
       html += ` <span class="node-missing" title="the TAP last listed it ${when(n.last_roster_unix)}">Not on the TAP</span>`;
     const f = n.setup && n.setup.mppt ? n.setup.mppt.split(/\s+/)[3] : null;
-    if (f === 'N') html += ` <span class="node-unset" title="${topoEscape(n.setup.mppt)}">Not set up</span>`;
+    if (f === 'N') html += ` <span class="node-unset" title="Its settings aren't all written: its !Mppt answer's flag is N. A CCA writes them when it enrolls an optimizer. ${topoEscape(n.setup.mppt)}">Not set up</span>`;
     return html;
   }
 
