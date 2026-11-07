@@ -451,6 +451,8 @@
   /* The Bus log: time, then who to whom and the frame, in one column. */
   #bus-box .log-line { grid-template-columns: 9.5ch minmax(0, 1fr); }
   .bus-dir { display: inline-block; min-width: 14ch; color: var(--text-dim); }
+  .bus-hex { display: block; padding-left: 14ch; color: var(--text-faint); }
+  @media (max-width: 768px) { .bus-hex { padding-left: 0; } }
   #bus-alarm-card { border-color: var(--bad); }
   #bus-alarm-card .pv-title { color: var(--bad); }
   .bus-alarm-list { margin: 10px 0 0; padding: 0; list-style: none; font-size: 13px; line-height: 1.6; }
@@ -1610,7 +1612,7 @@
         <button class="btn" id="buslog-pause">Pause</button>
       </div>
       <div class="logs-box" id="bus-box"><div class="logs-empty">Loading…</div></div>
-      <p class="table-meta" style="margin-top:10px">The last 300 frames heard or sent, newest last. Polls and their replies are counted, not listed. No payload is shown: only each frame's name and length, and the text of a query or of VERSION's reply, with long hex runs hidden.</p>
+      <p class="table-meta" style="margin-top:10px">The last 300 frames heard or sent, newest last. Polls and their replies are counted, not listed. Each payload is shown in hex, but for the TAP's network config block, which holds its network key: only its length is kept.</p>
     </section>
 
     <!-- CCA -->
@@ -4040,11 +4042,12 @@
     const detail = (e.node ? ` · node ${e.node}` : '') + (e.text ? ` · ${e.text}` : '') + (e.reconfig ? ` · reconfigures the TAP` : '');
     return `<div class="log-line${e.reconfig ? ' error' : ''}" title="${topoEscape(new Date(e.unix_ms).toLocaleString())} · ${e.cmd}">` +
       `<span class="log-time">${logTime(e.unix_ms)}</span>` +
-      `<span class="log-msg"><span class="bus-dir">${logEsc(dir)}</span> ${logEsc(e.name)} · ${e.len} B${logEsc(detail)}</span></div>`;
+      `<span class="log-msg"><span class="bus-dir">${logEsc(dir)}</span> ${logEsc(e.name)} · ${e.len} B${logEsc(detail)}` +
+      `${e.hex ? `<span class="bus-hex">${logEsc(e.hex)}</span>` : ''}</span></div>`;
   }
   function busShown(e) {
     const q = document.getElementById('buslog-search').value.trim().toLowerCase();
-    return !q || [e.name, e.addr, e.cmd, e.text, e.node || '', e.reconfig].join(' ').toLowerCase().includes(q);
+    return !q || [e.name, e.addr, e.cmd, e.text, e.node || '', e.reconfig, e.hex || ''].join(' ').toLowerCase().includes(q);
   }
   function busApply(b) {
     const a = b && b.alarm && b.alarm.active ? b.alarm : null;

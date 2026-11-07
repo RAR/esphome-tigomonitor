@@ -154,6 +154,7 @@ json BusLog::to_json(size_t limit) const {
                       {"len", e.len},
                       {"name", e.name},
                       {"text", e.text},
+                      {"hex", e.hex},
                       {"reconfig", e.reconfig}});
   }
   return {{"alarm",

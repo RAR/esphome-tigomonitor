@@ -109,10 +109,35 @@ static void test_log_skips_polls_and_names_frames() {
   CHECK(w.events().back().text.empty() && w.events().back().name == "SET_ID_BY_MAC");
 }
 
-static void test_text_masks_long_hex_runs() {
+// The device's own UI already shows every address and barcode, so text is
+// shown as it is.
+static void test_text_is_shown_as_it_is() {
   BusWatch w;
   w.on_frame(request(CMD_TUNNEL, tunnel_request(0x06, 1, text_query(2, "^00X 04C05B0000AB12CD ab12\r"))), false, 1);
-  CHECK(w.events().back().text == "^00X <hex> ab12");
+  CHECK(w.events().back().text == "^00X 04C05B0000AB12CD ab12");
+}
+
+// Every payload in hex, but for the GatewayCfg block, which holds the
+// network key: hidden in the write and in the TAP's reply, read or not.
+static void test_payload_hex_hides_only_the_config_block() {
+  BusWatch w;
+  w.on_frame(request(0x003C, hex("3724926604c05b0000ab12cd1202")), false, 1);
+  CHECK(w.events().back().hex == "37 24 92 66 04 C0 5B 00 00 AB 12 CD 12 02");
+  w.on_frame(request(CMD_TUNNEL, tunnel_request(0x0D, 3, {0x00, 0x01})), false, 2);
+  CHECK(w.events().back().hex == "00 00 00 0D 03 00 01");  // a read asks for nothing secret
+  Bytes cfg = {0x01, 0x00};
+  for (int i = 0; i < 36; i++) cfg.push_back(static_cast<uint8_t>(0xA0 + i));
+  w.on_frame(request(CMD_TUNNEL, tunnel_request(0x0D, 4, cfg)), false, 3);
+  CHECK(w.events().back().hex == "00 00 00 0D 04 01 00 + 36 bytes hidden (the TAP's network config and key)");
+  Bytes reply_payload = {0x00, 0x0E, 0x00, 0x0E, 0x03};
+  for (int i = 0; i < 37; i++) reply_payload.push_back(static_cast<uint8_t>(0xB0 + i));
+  w.on_frame(reply(0x0B10, reply_payload), false, 4);
+  CHECK(w.events().back().hex == "00 0E 00 0E 03 + 37 bytes hidden (the TAP's network config and key)");
+  for (const BusEvent &e : w.events()) CHECK(e.hex.find("A5") == std::string::npos && e.hex.find("B5") == std::string::npos);
+  w.on_frame(request(CMD_TUNNEL, tunnel_request(0xE1, 5, hex("12345678aabbccdd"))), false, 5);
+  CHECK(w.events().back().hex == "00 00 00 E1 05 + 8 bytes hidden (a list of networks, perhaps with keys)");
+  w.on_frame(request(0x000A, {}), false, 6);
+  CHECK(w.events().back().hex.empty());
 }
 
 static void test_reconfiguration_is_kept_on_the_event() {
@@ -133,7 +158,8 @@ int main() {
   test_no_alarm_for_what_a_master_here_sends();
   test_alarm_names_the_reconfiguration();
   test_log_skips_polls_and_names_frames();
-  test_text_masks_long_hex_runs();
+  test_text_is_shown_as_it_is();
+  test_payload_hex_hides_only_the_config_block();
   test_reconfiguration_is_kept_on_the_event();
   test_log_is_bounded();
   if (failures) {

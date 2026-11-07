@@ -1,7 +1,8 @@
 #!/bin/sh
 # The bus log and the TAP-reconfiguration alarm, without hardware: tigomonitord
 # listening on a pseudo-terminal where linux/tools/cca_on_bus.py plays a CCA.
-# Checks the log names the frames and keeps no payload; that a GatewayCfg
+# Checks the log names the frames and shows their payloads but for the
+# GatewayCfg block, which holds the network key; that a GatewayCfg
 # write and a SET_CHANNEL raise the alarm in /api/bus, /api/health and MQTT;
 # that it survives a restart; that clearing it ends it; and that a CCA in its
 # steady state raises nothing.
@@ -42,6 +43,7 @@ sleep 6
 expect "polls counted, not logged" "$(bus 18140 "(d['polls'] > 20, [e for e in d['events'] if e['cmd'] in ('0148', '0149')])")" "(True, [])"
 expect "frames named" "$(bus 18140 "sorted({e['name'] for e in d['events']})")" \
   "['Tunnel reply · DiscState reply', 'Tunnel reply · EncapString reply', 'Tunnel · DiscState', 'Tunnel · EncapString', 'VERSION', 'VERSION reply']"
+expect "payloads in hex" "$(bus 18140 "sorted({e['hex'][:12] for e in d['events'] if e['cmd'] == '0B10' and e['sub'] == 7})")" "['00 0D 00 07 ']"
 expect "a query's text and node" "$(bus 18140 "[(e['text'], e['node']) for e in d['events'] if e['sub'] == 6][:1]")" "[('^00Info', '0002')]"
 expect "VERSION's reply text" "$(bus 18140 "sorted({e['text'] for e in d['events'] if e['cmd'] == '000B'})")" "['Mgate G8.59 Jan  1 2026']"
 expect "no other text" "$(bus 18140 "[e['name'] for e in d['events'] if e['text'] and e['sub'] != 6 and e['cmd'] != '000B']")" "[]"
@@ -63,7 +65,8 @@ expect "alarm on, both named" "$(bus 18140 "(d['alarm']['active'], d['alarm']['c
   "(True, 2, [\"GatewayCfg write (the TAP's channel, network ID and key)\", 'SET_CHANNEL'])"
 expect "the log marks them" "$(bus 18140 "[e['reconfig'] for e in d['events'] if e['reconfig']]")" \
   "[\"GatewayCfg write (the TAP's channel, network ID and key)\", 'SET_CHANNEL']"
-expect "the write's block isn't shown" "$(bus 18140 "[(e['len'], e['text']) for e in d['events'] if e['sub'] == 13]")" "[(43, '')]"
+expect "the write's block isn't shown" "$(bus 18140 "[(e['len'], e['hex'][:12], e['hex'][14:]) for e in d['events'] if e['sub'] == 13]")" \
+  "[(43, '00 00 00 0D ', \" 01 00 + 36 bytes hidden (the TAP's network config and key)\")]"
 expect "health names it" "$(api 18140 /api/health | python3 -c "import json,sys; d=json.load(sys.stdin); print(d['status'], any('another device reconfigured the TAP (SET_CHANNEL, 2 frames' in p for p in d['problems']))")" "problem True"
 expect "logged as an error" "$(grep -c 'another device sent the TAP a reconfiguration: GatewayCfg write' "$out/daemon2.log" || true)" 1
 expect "MQTT: alarm on" "$(mosquitto_sub -p 18834 -C 1 -W 10 -t tigomonitor/test/system/state 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin)["tap_reconfigured"])')" True

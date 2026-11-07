@@ -9,9 +9,10 @@
 // own master can't send one, so hearing one means another device (a CCA,
 // most likely) is on the bus and changing the TAP.
 //
-// Nothing here keeps a payload. An event holds the frame's names, its length,
-// and text only for a text query and VERSION's reply, with any long hex run
-// masked: no MAC, PAN, key or table entry gets into the log.
+// An event keeps the frame's payload in hex, as the rest of the device's UI
+// shows addresses and barcodes, but for one thing: the GatewayCfg block (the
+// write, and the TAP's reply to any GatewayCfg request) holds the network key
+// the monitor shows nowhere else, so it is never kept, only its length.
 
 #include "tigo_master.h"
 
@@ -104,26 +105,35 @@ inline const char *sub_name(uint8_t sub) {
   }
 }
 
-// Text from the bus, made safe to show: printable only, CR/LF trimmed, and
-// any run of 8 or more hex digits (a MAC, a barcode) replaced with <hex>.
+// Text from the bus, made printable: CR/LF as spaces, trailing ones trimmed.
 inline std::string bus_text(const uint8_t *p, size_t n) {
-  std::string raw;
-  for (size_t i = 0; i < n; i++) raw += p[i] == '\r' || p[i] == '\n' ? ' ' : std::isprint(p[i]) ? char(p[i]) : '.';
   std::string out;
-  for (size_t i = 0; i < raw.size();) {
-    size_t j = i;
-    while (j < raw.size() && std::isxdigit(static_cast<unsigned char>(raw[j]))) j++;
-    if (j - i >= 8) {
-      out += "<hex>";
-      i = j;
-    } else if (j > i) {
-      out.append(raw, i, j - i);
-      i = j;
-    } else {
-      out += raw[i++];
-    }
-  }
+  for (size_t i = 0; i < n; i++) out += p[i] == '\r' || p[i] == '\n' ? ' ' : std::isprint(p[i]) ? char(p[i]) : '.';
   while (!out.empty() && out.back() == ' ') out.pop_back();
+  return out;
+}
+
+// The payload as "37 24 92 66 …", but for the GatewayCfg block (a write's
+// 36 bytes after its 01 00, or all of a 0x0E reply's data) and
+// SetKnownNetworks' args, shown by length.
+inline std::string bus_hex(const Frame &f) {
+  size_t keep = f.payload.size();
+  bool tunnel = (f.cmd == CMD_TUNNEL || f.cmd == CMD_TUNNEL_REPLY) && f.payload.size() >= 5;
+  if (tunnel && f.cmd == CMD_TUNNEL && f.payload[3] == 0x0D && f.payload.size() > 7) keep = 7;
+  if (tunnel && f.cmd == CMD_TUNNEL_REPLY && f.payload[3] == 0x0E && f.payload.size() > 5) keep = 5;
+  // SetKnownNetworks: never decoded, and by its name a list of networks,
+  // perhaps with their keys.
+  bool known_networks = tunnel && f.cmd == CMD_TUNNEL && f.payload[3] == 0xE1 && f.payload.size() > 5;
+  if (known_networks) keep = 5;
+  std::string out;
+  char b[4];
+  for (size_t i = 0; i < keep; i++) {
+    std::snprintf(b, sizeof(b), "%s%02X", i ? " " : "", f.payload[i]);
+    out += b;
+  }
+  if (keep < f.payload.size())
+    out += " + " + std::to_string(f.payload.size() - keep) + " bytes hidden (" +
+           (known_networks ? "a list of networks, perhaps with keys" : "the TAP's network config and key") + ")";
   return out;
 }
 
@@ -169,7 +179,8 @@ struct BusEvent {
   int node = -1;          // a text query's optimizer id
   uint16_t len = 0;       // payload bytes
   std::string name;       // "Tunnel · DiscState"
-  std::string text;       // a query's text or VERSION's reply, masked
+  std::string text;       // a query's text or VERSION's reply
+  std::string hex;        // the payload, but for a GatewayCfg block (bus_hex)
   std::string reconfig;   // what it reconfigures, if it does
 };
 
@@ -218,6 +229,7 @@ class BusWatch {
       size_t v = e.text.find(" Version");
       if (v != std::string::npos) e.text.erase(v, 8);
     }
+    e.hex = bus_hex(f);
     e.reconfig = reconfiguration(f);
     events_.push_back(e);
     if (events_.size() > KEEP) events_.pop_front();

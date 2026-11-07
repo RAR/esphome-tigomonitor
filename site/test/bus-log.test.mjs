@@ -34,7 +34,7 @@ const T = 1762480000000;
 const ev = (o) => ({ unix_ms: T, from_tap: false, ours: false, addr: '1201', cmd: '0B0F', sub: null, node: null,
   len: 5, name: 'Tunnel · DiscState', text: '', reconfig: '', ...o });
 const steady = [
-  ev({ sub: 46 }),
+  ev({ sub: 46, hex: '00 00 00 2E 05' }),
   ev({ from_tap: true, cmd: '0B10', sub: 47, len: 15, name: 'Tunnel reply · DiscState reply' }),
   ev({ sub: 6, node: '0002', len: 15, name: 'Tunnel · EncapString', text: '^00Info' }),
 ];
@@ -45,7 +45,7 @@ function bus(alarm) {
     alarm: alarm ? { active: true, count: 2, first_unix_ms: T, recent: [{ unix_ms: T, what: reconfig }, { unix_ms: T + 1000, what: 'SET_CHANNEL' }] }
       : { active: false, count: 0, first_unix_ms: 0, recent: [] },
     polls: 1234,
-    events: alarm ? [...steady, ev({ sub: 13, len: 43, name: 'Tunnel · GatewayCfg', reconfig }),
+    events: alarm ? [...steady, ev({ sub: 13, len: 43, name: 'Tunnel · GatewayCfg', reconfig, hex: "00 00 00 0D 05 01 00 + 36 bytes hidden (the TAP's network config and key)" }),
       ev({ cmd: '000C', len: 2, name: 'SET_CHANNEL', reconfig: 'SET_CHANNEL', unix_ms: T + 1000 })] : steady,
   };
 }
@@ -82,7 +82,7 @@ test('the Bus log lists the frames by name, with the poll count, and no alarm', 
   await page.waitForSelector('#nav button[data-view="buslog"]', { state: 'visible' });
   await page.waitForFunction(() => document.querySelectorAll('#bus-box .log-line').length === 3);
   const rows = await page.$$eval('#bus-box .log-line', (els) => els.map((e) => e.textContent));
-  assert.match(rows[0], /master → 1201.*Tunnel · DiscState · 5 B/);
+  assert.match(rows[0], /master → 1201.*Tunnel · DiscState · 5 B00 00 00 2E 05$/);
   assert.match(rows[1], /TAP 1201.*Tunnel reply · DiscState reply · 15 B/);
   assert.match(rows[2], /Tunnel · EncapString · 15 B · node 0002 · \^00Info/);
   assert.match(await page.textContent('#buslog-meta'), /3 frames · 1,234 polls/);
@@ -104,6 +104,7 @@ test('a reconfiguration: the banner on every page, the alarm card, the rows mark
   assert.match(card, /SET_CHANNEL/);
   assert.match(card, /2 frames/);
   await page.waitForFunction(() => document.querySelectorAll('#bus-box .log-line.error').length === 2);
+  assert.match(await page.locator('#bus-box .log-line.error .bus-hex').first().textContent(), /\+ 36 bytes hidden \(the TAP's network config and key\)$/);
   await page.click('#bus-alarm-clear');
   await page.waitForSelector('#bus-alarm-card', { state: 'hidden' });
   assert.equal(api.clears, 1);
