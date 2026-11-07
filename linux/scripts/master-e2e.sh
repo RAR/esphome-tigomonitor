@@ -168,6 +168,29 @@ expect "refused polls named as such" "$(api 18097 /api/master | python3 -c 'impo
 kill $daemon; wait $daemon 2>/dev/null || true
 kill $tap; wait $tap 2>/dev/null || true
 
+# --- run 6b: startup mode against a TAP that refuses polls: one warning, no re-probe loop ---
+# A refusal (0x0006) is the TAP answering. It isn't lost, so startup mode must
+# not go looking for it again, and the master backs off to a request a second.
+mkdir -p "$out/state6b"
+python3 linux/tools/mock_tap.py "$out/tap6b" --bare --stats "$out/tap6b.json" &
+tap=$!
+sleep 0.5
+printf '{"bus_role": "master", "master_startup": true, "serial_port": "%s", "gateway_id": 4609, "web_port": 18125}\n' \
+  "$PWD/$out/tap6b" > "$out/state6b/settings.json"
+build/linux/tigomonitord --state-dir "$out/state6b" --web-dir components/tigo_server/web 2> "$out/daemon6b.log" &
+daemon=$!
+sleep 6
+before=$(stat "$out/tap6b.json" "d['refused']")
+sleep 10
+after=$(stat "$out/tap6b.json" "d['refused']")
+expect "refusing TAP probed once" "$(stat "$out/tap6b.json" "d['probes']")" 1
+expect "no looking for it again" "$(grep -c 'looking for it again' "$out/daemon6b.log" || true)" 0
+expect "refused polls warned once" "$(grep -c 'refuses polls' "$out/daemon6b.log" || true)" 1
+expect "refusing TAP not counted lost" "$(api 18125 /api/master | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["tap"]["lost"], d["fault"], "refuses polls" in d["detail"])')" "0 no_reply True"
+expect "backed off to about one a second" "$(python3 -c "print($after - $before <= 15)")" True
+kill $daemon; wait $daemon 2>/dev/null || true
+kill $tap; wait $tap 2>/dev/null || true
+
 # --- run 7: startup discovery (TAP boots at the factory address) ---
 mkdir -p "$out/state7"
 python3 linux/tools/mock_tap.py "$out/tap7" --factory --window 600 --nodes 44 --stats "$out/tap7.json" &

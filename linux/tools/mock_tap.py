@@ -145,7 +145,7 @@ def main():
     SECOND_MAC = bytes.fromhex('04c05b3000d4e5f6')
     FACTORY = 0x1235
     addr = FACTORY if a.factory else GATEWAY  # the id the TAP currently answers at
-    stats = {'polls': 0, 'retries': 0, 'cursor_mismatches': 0, 'checks': 0, 'renewals': [], 'other': [],
+    stats = {'refused': 0, 'probes': 0, 'polls': 0, 'retries': 0, 'cursor_mismatches': 0, 'checks': 0, 'renewals': [], 'other': [],
              'first_discovery_frame': None, 'first_frame': None, 'addressed_to': None, 'frames_after_foreign': 0, 'foreign_at': None,
              'second_asked': 0, 'second_written': 0, 'session': [], 'cut_marks': [], 'pv': 'on', 'housekeeping': [],
              'log': [], 'claims': 0, 'deaf': 0, 'resets': 0, 'quiet_broken': 0, 'broadcast': [], 'walk': [], 'queries': [],
@@ -242,6 +242,7 @@ def main():
                 continue
             if cmd in (0x0038, 0x003A) and (dest == addr or (a.second_tap and dest == FACTORY)):  # GET_MAC
                 if dest == addr:
+                    stats['probes'] += 1
                     send(encode(addr | 0x8000, cmd + 1, MAC + bytes([addr >> 8, addr & 0xFF])))
                 if a.second_tap and dest == FACTORY:  # the second TAP answers after the first
                     stats['second_asked'] += 1
@@ -264,6 +265,7 @@ def main():
                 send(encode(addr | 0x8000, 0x0E03, bytes(11) + b'\x01\x03'))
                 continue
             if a.bare and cmd in (0x0B0F, 0x0148):
+                stats['refused'] += 1
                 send(encode(addr | 0x8000, 0x0006, b''))
                 continue
             if foreign_sent:

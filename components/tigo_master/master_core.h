@@ -195,6 +195,9 @@ class MasterCore {
   static const uint32_t LOG_FIRST_REPLIES = 20;  // poll reply headers logged at INFO, for the bench
   static const uint16_t FACTORY_ID = 0x1235;     // the universal factory RS485 address
   static const uint32_t NO_REPLY_FAULT_AFTER = 10;
+  // A TAP that refuses every request (0x0006) is asked once a second, not
+  // forty times: it is answering, so this isn't a TAP lost.
+  static const uint32_t REFUSED_RETRY_MS = 1000;
   static const uint32_t RETRY_AFTER_FAIL_MS = 30000;  // a failed bring-up looks again after this
 
  private:
@@ -273,6 +276,9 @@ class MasterCore {
   esphome::tigo_monitor::master::PollCursor cursor_{0};
   uint8_t seq_ = 0;
   uint32_t timeouts_in_a_row_ = 0;
+  uint32_t refusals_in_a_row_ = 0;
+  uint32_t refused_at_ms_ = 0;
+  bool refused_ = false;  // the last transact() got the TAP's 0x0006
   uint32_t replies_logged_ = 0;
   bool version_asked_ = false;          // bench mode asks the TAP's version first
   std::set<uint16_t> refusals_logged_;  // commands the TAP NAKed (0x0006), logged once each

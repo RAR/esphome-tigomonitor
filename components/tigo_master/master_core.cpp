@@ -224,6 +224,7 @@ void MasterCore::set_fault(Fault f, const std::string &detail) {
 }
 
 bool MasterCore::transact(uint16_t dest, uint16_t cmd, const Bytes &payload, Frame &reply, uint32_t timeout_ms) {
+  refused_ = false;
   if (standing_by_()) return false;  // a standby that just yielded sends nothing more
   master::Bytes wire = master::encode_frame(dest, cmd, payload);
   // What our own request looks like coming back, if the adapter hears itself.
@@ -297,6 +298,7 @@ bool MasterCore::transact(uint16_t dest, uint16_t cmd, const Bytes &payload, Fra
               "another master is on the bus (is the CCA still connected?); stopped transmitting");
     return false;
   }
+  refused_ = refused && !got;
   return got;
 }
 
@@ -417,6 +419,7 @@ void MasterCore::tick_(uint32_t now_ms) {
     std::lock_guard<std::mutex> lock(mu_);
     window_.set_renewing(discovery_renewing_);
   }
+  if (refusals_in_a_row_ >= NO_REPLY_FAULT_AFTER && now_ms - refused_at_ms_ < REFUSED_RETRY_MS) return;
   master::Request req =
       master::next_request(window_, cursor_, seq_, now_ms, housekeeping_.get(), queries_.get(), pv_.get());
   // Bring-up frames are allowed only straight after a re-address.
@@ -474,6 +477,7 @@ void MasterCore::tick_(uint32_t now_ms) {
                          req.payload[3] == master::SUB_DISCOVERY_START);
   if (ok) {
     timeouts_in_a_row_ = 0;
+    refusals_in_a_row_ = 0;
     master::DiscoveryWindow window;
     master::TunnelReply tunnel;
     bool discovery_read = window_request && master::parse_tunnel_reply(reply.payload, tunnel) &&
@@ -529,6 +533,19 @@ void MasterCore::tick_(uint32_t now_ms) {
   }
   if (req.cmd == master::CMD_POLL) cursor_.on_timeout();
   if (window_request) window_.on_no_reply(now_ms);
+  // A refusal is the TAP answering: no optimizers behind it, or it isn't
+  // running. Say so once, ask once a second, and don't go looking for it.
+  if (refused_) {
+    timeouts_in_a_row_ = 0;
+    refused_at_ms_ = now_ms;
+    if (++refusals_in_a_row_ == NO_REPLY_FAULT_AFTER)
+      set_fault(Fault::no_reply, req.cmd == master::CMD_POLL || refusals_logged_.count(master::CMD_POLL)
+                                     ? "the TAP refuses polls (0x0006): no optimizers behind it, or it isn't running"
+                                     : "the TAP refuses every request (0x0006)");
+    update_discovery_fault_();
+    return;
+  }
+  refusals_in_a_row_ = 0;
   timeouts_in_a_row_++;
   {
     std::lock_guard<std::mutex> lock(mu_);
@@ -543,8 +560,6 @@ void MasterCore::tick_(uint32_t now_ms) {
     }
   }
   update_discovery_fault_();
-  // A gateway with no optimizers behind it, or one not running, refuses
-  // polls outright (0x0006); say that rather than "not answering".
   // A TAP that went quiet may have lost power and come back at the factory
   // address: in startup mode, go and look for it again.
   if (startup_ && timeouts_in_a_row_ == NO_REPLY_FAULT_AFTER) {
@@ -554,10 +569,8 @@ void MasterCore::tick_(uint32_t now_ms) {
     drop_housekeeping_();
   }
   if (timeouts_in_a_row_ == NO_REPLY_FAULT_AFTER)
-    set_fault(Fault::no_reply, refusals_logged_.count(master::CMD_POLL)
-                                   ? "the TAP refuses polls (0x0006): no optimizers behind it, or it isn't running"
-                                   : "the TAP has not answered " + std::to_string(NO_REPLY_FAULT_AFTER) +
-                                         " requests in a row");
+    set_fault(Fault::no_reply,
+              "the TAP has not answered " + std::to_string(NO_REPLY_FAULT_AFTER) + " requests in a row");
 }
 
 // Startup: bring a TAP up before steady polling. Probe with a read first, so
