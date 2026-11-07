@@ -120,11 +120,23 @@ test('display config merges lp5562 into the single external_components block', (
 });
 
 test('AtomS3R+display config defines every id its lambda references', () => {
-  const y = toYaml(assembleConfig(getBoard('esp32s3-atoms3r'), { ...form, display: true }));
-  const referenced = [...new Set([...y.matchAll(/id\((\w+)\)/g)].map((m) => m[1]))];
-  const defined = new Set([...y.matchAll(/^\s*id:\s*(\w+)/gm)].map((m) => m[1]));
-  const missing = referenced.filter((r) => !defined.has(r));
-  assert.deepEqual(missing, [], `display config references undefined ids: ${missing.join(', ')}`);
+  for (const displayPanel of ['st7789v', 'st7735']) {
+    const y = toYaml(assembleConfig(getBoard('esp32s3-atoms3r'), { ...form, display: true, displayPanel }));
+    const referenced = [...new Set([...y.matchAll(/id\((\w+)\)/g)].map((m) => m[1]))];
+    const defined = new Set([...y.matchAll(/^\s*id:\s*(\w+)/gm)].map((m) => m[1]));
+    const missing = referenced.filter((r) => !defined.has(r));
+    assert.deepEqual(missing, [], `${displayPanel} display config references undefined ids: ${missing.join(', ')}`);
+  }
+});
+
+// AtomS3R units ship with either panel, and the wrong driver leaves the screen
+// dark with the backlight on (#93).
+test('display panel choice picks the driver, ST7789V by default', () => {
+  const atoms3r = getBoard('esp32s3-atoms3r');
+  const platforms = (y) => [...y.matchAll(/^\s*- platform: (st77\w+)/gm)].map((m) => m[1]);
+  assert.deepEqual(platforms(toYaml(assembleConfig(atoms3r, { ...form, display: true }))), ['st7789v']);
+  assert.deepEqual(platforms(toYaml(assembleConfig(atoms3r, { ...form, display: true, displayPanel: 'st7789v' }))), ['st7789v']);
+  assert.deepEqual(platforms(toYaml(assembleConfig(atoms3r, { ...form, display: true, displayPanel: 'st7735' }))), ['st7735']);
 });
 
 test('display config wires the backlight into tigo_server', () => {
@@ -248,6 +260,23 @@ test('an active-low transceiver enable is emitted OFF, not ON', () => {
   assert.ok(y.includes('pin: GPIO21'), 'enable pin missing');
   assert.ok(y.includes('restore_mode: ALWAYS_OFF'), 'enable switch left active-high');
   assert.ok(!y.includes('restore_mode: ALWAYS_ON'), 'ALWAYS_ON leaked onto an active-low pin');
+});
+
+// Safe mode sets up only Wi-Fi, OTA and the logger, so the switch never runs and
+// GPIO21 floats high: driver on, holding the bus for the 5 minutes safe mode
+// lasts (#97). The board file holds it low from on_safe_mode; so must we.
+test('an active-low transceiver enable is held low in safe mode too', () => {
+  const b = getBoard('esp32s3-waveshare-rs485-can');
+  const y = toYaml(assembleConfig(b, { ...form, uart: b.uartDefault }));
+  assert.ok(y.includes('\nsafe_mode:\n  on_safe_mode:'), 'no on_safe_mode block');
+  assert.ok(y.includes('gpio_set_direction(GPIO_NUM_21, GPIO_MODE_OUTPUT);'), 'GPIO21 not made an output');
+  assert.ok(y.includes('gpio_set_level(GPIO_NUM_21, 0);'), 'GPIO21 not driven low');
+});
+
+test('active-high enables get no safe-mode hold', () => {
+  const b = getBoard('esp32-lilygo-t-can485');
+  const y = toYaml(assembleConfig(b, { ...form, uart: b.uartDefault }));
+  assert.ok(!y.includes('safe_mode:'), 'safe_mode emitted for a board whose file has none');
 });
 
 // The other direction still has to work — the T-CAN485's three enables are

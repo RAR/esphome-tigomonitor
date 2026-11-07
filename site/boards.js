@@ -1,3 +1,99 @@
+// The AtomS3R's display: block, one per panel chip. Units ship with either an
+// ST7789V or an ST7735, and the wrong driver leaves the screen dark with the
+// backlight on (#93). Both draw with the same lambda.
+const ATOMS3R_LAMBDA = `    lambda: |-
+      // Use cached values from tigo_monitor (updated during sensor publish)
+      // This avoids iterating through 30+ devices on every display update
+      int device_count = id(tigo_hub)->get_device_count();
+      int online_count = id(tigo_hub)->get_online_device_count();
+      float total_power = id(tigo_hub)->get_total_power();
+
+      // Background
+      it.fill(COLOR_BLACK);
+
+      // Header - Title
+      it.print(64, 5, id(font_title), COLOR_WHITE, TextAlign::TOP_CENTER, "TIGO");
+      it.print(64, 20, id(font_small), Color(150, 150, 150), TextAlign::TOP_CENTER, "Solar Monitor");
+
+      // Divider line
+      it.line(10, 35, 118, 35, Color(100, 100, 100));
+
+      // Main stats
+      if (device_count > 0) {
+        // Total Power - Large and prominent
+        it.printf(64, 45, id(font_large), COLOR_ORANGE, TextAlign::TOP_CENTER, "%.0fW", total_power);
+
+        // Device status
+        it.printf(64, 75, id(font_medium), COLOR_WHITE, TextAlign::TOP_CENTER, "%d/%d", online_count, device_count);
+        it.print(64, 92, id(font_tiny), Color(150, 150, 150), TextAlign::TOP_CENTER, "devices online");
+
+        // Status indicator
+        if (online_count == device_count) {
+          it.filled_circle(10, 110, 4, COLOR_GREEN);
+          it.print(20, 107, id(font_small), COLOR_GREEN, TextAlign::CENTER_LEFT, "All OK");
+        } else if (online_count > 0) {
+          it.filled_circle(10, 110, 4, COLOR_ORANGE);
+          it.printf(20, 107, id(font_small), COLOR_ORANGE, TextAlign::CENTER_LEFT, "%d Offline", device_count - online_count);
+        } else {
+          it.filled_circle(10, 110, 4, COLOR_RED);
+          it.print(20, 107, id(font_small), COLOR_RED, TextAlign::CENTER_LEFT, "No Data");
+        }
+      } else {
+        // No devices discovered yet
+        it.print(64, 55, id(font_medium), Color(200, 200, 0), TextAlign::TOP_CENTER, "WAITING");
+        it.print(64, 80, id(font_small), Color(150, 150, 150), TextAlign::TOP_CENTER, "for devices...");
+        it.filled_circle(10, 110, 4, Color(200, 200, 0));
+        it.print(20, 107, id(font_small), Color(200, 200, 0), TextAlign::CENTER_LEFT, "Scanning");
+      }
+
+      // WiFi status indicator (top right)
+      if (id(wifi_status).state) {
+        it.filled_circle(118, 10, 3, COLOR_GREEN);
+      } else {
+        it.filled_circle(118, 10, 3, COLOR_RED);
+      }
+`;
+
+const ATOMS3R_PANELS = {
+  st7789v: `# Display configuration
+display:
+  - platform: st7789v
+    id: atoms3r_lcd
+    model: CUSTOM
+    height: 128
+    # 129 wide from column 0: 128 from column 1 left a white column on the left.
+    width: 129
+    offset_height: 2
+    offset_width: 0
+    cs_pin: GPIO14
+    dc_pin: GPIO42
+    reset_pin: GPIO48
+    rotation: 0
+    eightbitcolor: true
+    data_rate: 40MHz
+    update_interval: 5s  # Increased from 2s to reduce CPU load and minimize missed UART packets
+    setup_priority: -100  # Initialize display after everything else to avoid WDT timeout
+${ATOMS3R_LAMBDA}`,
+  st7735: `# Display configuration
+display:
+  - platform: st7735
+    id: atoms3r_lcd
+    model: INITR_BLACKTAB
+    cs_pin: GPIO14
+    dc_pin: GPIO42
+    reset_pin: GPIO48
+    device_width: 128
+    device_height: 128
+    col_start: 2
+    row_start: 1
+    eight_bit_color: false
+    invert_colors: true
+    rotation: 0
+    update_interval: 5s  # Increased from 2s to reduce CPU load and minimize missed UART packets
+    setup_priority: -100  # Initialize display after everything else to avoid WDT timeout
+${ATOMS3R_LAMBDA}`,
+};
+
 export const BOARDS = [
   {
     id: 'esp32s3-atoms3r',
@@ -50,11 +146,18 @@ export const BOARDS = [
     uartDefault: { tx_pin: 'GPIO6', rx_pin: 'GPIO5', rx_buffer_size: 2048 },
     numberOfDevices: 30,
     supports: { ble: true, display: true },
-    displayOverlay: `# --- AtomS3R-Display overlay (from boards/atoms3r-display.yaml) ---
-# I2C bus for LP5562 (RGB LED + LCD Backlight control)
+    // Everything but the display: block, which comes from displayPanels.
+    displayPanels: ATOMS3R_PANELS,
+    displayOverlay: `# --- AtomS3R-Display overlay (from boards/atoms3r-display-common.yaml) ---
+# I2C bus for LP5562 (RGB LED + LCD Backlight control). The AtomS3R's internal
+# bus is GPIO45/GPIO0; GPIO38/39 are the plain AtomS3's (#93).
 i2c:
-  sda: GPIO38  # SYS_SDA
-  scl: GPIO39  # SYS_SCL
+  sda:  # SYS_SDA
+    number: GPIO45
+    ignore_strapping_warning: true
+  scl:  # SYS_SCL
+    number: GPIO0
+    ignore_strapping_warning: true
   scan: true
 
 # LP5562 LED driver (controls RGB indicator LED + LCD backlight)
@@ -111,75 +214,6 @@ light:
     output: backlight_output
     restore_mode: RESTORE_DEFAULT_ON
     default_transition_length: 0.5s
-
-# Display configuration
-display:
-  - platform: st7789v
-    id: atoms3r_lcd
-    model: CUSTOM
-    height: 128
-    width: 128
-    offset_height: 2
-    offset_width: 1
-    cs_pin: GPIO14
-    dc_pin: GPIO42
-    reset_pin: GPIO48
-    rotation: 0
-    eightbitcolor: true
-    data_rate: 40MHz
-    update_interval: 5s  # Increased from 2s to reduce CPU load and minimize missed UART packets
-    setup_priority: -100  # Initialize display after everything else to avoid WDT timeout
-    lambda: |-
-      // Use cached values from tigo_monitor (updated during sensor publish)
-      // This avoids iterating through 30+ devices on every display update
-      int device_count = id(tigo_hub)->get_device_count();
-      int online_count = id(tigo_hub)->get_online_device_count();
-      float total_power = id(tigo_hub)->get_total_power();
-
-      // Background
-      it.fill(COLOR_BLACK);
-
-      // Header - Title
-      it.print(64, 5, id(font_title), COLOR_WHITE, TextAlign::TOP_CENTER, "TIGO");
-      it.print(64, 20, id(font_small), Color(150, 150, 150), TextAlign::TOP_CENTER, "Solar Monitor");
-
-      // Divider line
-      it.line(10, 35, 118, 35, Color(100, 100, 100));
-
-      // Main stats
-      if (device_count > 0) {
-        // Total Power - Large and prominent
-        it.printf(64, 45, id(font_large), COLOR_ORANGE, TextAlign::TOP_CENTER, "%.0fW", total_power);
-
-        // Device status
-        it.printf(64, 75, id(font_medium), COLOR_WHITE, TextAlign::TOP_CENTER, "%d/%d", online_count, device_count);
-        it.print(64, 92, id(font_tiny), Color(150, 150, 150), TextAlign::TOP_CENTER, "devices online");
-
-        // Status indicator
-        if (online_count == device_count) {
-          it.filled_circle(10, 110, 4, COLOR_GREEN);
-          it.print(20, 107, id(font_small), COLOR_GREEN, TextAlign::CENTER_LEFT, "All OK");
-        } else if (online_count > 0) {
-          it.filled_circle(10, 110, 4, COLOR_ORANGE);
-          it.printf(20, 107, id(font_small), COLOR_ORANGE, TextAlign::CENTER_LEFT, "%d Offline", device_count - online_count);
-        } else {
-          it.filled_circle(10, 110, 4, COLOR_RED);
-          it.print(20, 107, id(font_small), COLOR_RED, TextAlign::CENTER_LEFT, "No Data");
-        }
-      } else {
-        // No devices discovered yet
-        it.print(64, 55, id(font_medium), Color(200, 200, 0), TextAlign::TOP_CENTER, "WAITING");
-        it.print(64, 80, id(font_small), Color(150, 150, 150), TextAlign::TOP_CENTER, "for devices...");
-        it.filled_circle(10, 110, 4, Color(200, 200, 0));
-        it.print(20, 107, id(font_small), Color(200, 200, 0), TextAlign::CENTER_LEFT, "Scanning");
-      }
-
-      // WiFi status indicator (top right)
-      if (id(wifi_status).state) {
-        it.filled_circle(118, 10, 3, COLOR_GREEN);
-      } else {
-        it.filled_circle(118, 10, 3, COLOR_RED);
-      }
 
 # Color definitions
 color:
@@ -466,7 +500,7 @@ font:
     // ESP32 can never contend with the CCA on the bus.
     gpioSwitches: [
       { id: 'rs485_enable', name: 'RS485 Transceiver Enable', pin: 'GPIO21',
-        restore_mode: 'ALWAYS_OFF',
+        restore_mode: 'ALWAYS_OFF', safeModeLow: true,
         comment: 'DE + /RE, low => receiver on and driver off' },
     ],
     displayOverlay: null,

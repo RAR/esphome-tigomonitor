@@ -2,7 +2,7 @@
 // Renders the config-builder form. The client script imports the UNCHANGED
 // wizard core (site/wizard.js), which binds to these element IDs on load.
 // The IDs and the toggled wrappers (cca-ip-row, cca-mac-row, display-row,
-// dl-secrets) are a hard contract with wizard.js — do not rename them, and
+// display-panel-row, dl-secrets) are a hard contract with wizard.js — do not rename them, and
 // keep the toggled wrappers visible by default (JS flips style.display).
 ---
 <div class="tigo-wizard not-content">
@@ -73,6 +73,14 @@
       <label class="field" id="cca-mac-row"><span>CCA Bluetooth MAC</span><input id="cca-mac" placeholder="04:C0:5B:XX:XX:XX" /><small class="hint">A starting guess is fine — the device can search for your CCA and let you pick it.</small></label>
       <label class="check" id="cloud-row"><input type="checkbox" id="cloud" /> <span>Enable Tigo cloud import<small class="hint">Pulls the panel layout your installer set up, using your Tigo account.</small></span></label>
       <label class="check" id="display-row"><input type="checkbox" id="display" /> <span>Include display (AtomS3R-Display)<small class="hint">Only if your board has a screen on it.</small></span></label>
+      <label class="field" id="display-panel-row">
+        <span>Screen chip</span>
+        <select id="display-panel">
+          <option value="st7789v">ST7789</option>
+          <option value="st7735">ST7735</option>
+        </select>
+        <small class="hint">AtomS3R units come with either. If the label on the back names one, pick that; if not, try ST7789 first. A screen that stays dark with its backlight on means you have the other one.</small>
+      </label>
     </fieldset>
 
     <fieldset class="tw-card">
