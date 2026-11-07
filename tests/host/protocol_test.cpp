@@ -316,12 +316,37 @@ static void test_against_reference() {
   }
 }
 
+// A NetDiag join, built from fake values: type 09, the node's address, 3
+// header bytes (the first two repeat the address), length 23, then 23 data
+// bytes: an 8-byte ID that is never kept, the node's MAC, 7 more.
+static const std::string NETDIAG_PACKET = std::string("09" "0012" "001200" "17") +
+                                          "AAAAAAAAAAAAAAAA" "04C05B0000000012" "C7012C1E001728";
+
+static void test_netdiag() {
+  NetDiagJoin j;
+  CHECK(decode_netdiag_packet(NETDIAG_PACKET, j));
+  CHECK(std::string(j.addr) == "0012");
+  CHECK(std::string(j.node_mac) == "04C05B0000000012");
+  // The first 8 data bytes aren't kept anywhere.
+  CHECK(std::string(j.addr).find("AAAA") == std::string::npos);
+  CHECK(std::string(j.node_mac).find("AAAA") == std::string::npos);
+
+  std::string wrong_length = NETDIAG_PACKET;
+  wrong_length.replace(12, 2, "10");
+  CHECK(!decode_netdiag_packet(wrong_length.substr(0, 14 + 32), j));
+  std::string wrong_type = NETDIAG_PACKET;
+  wrong_type.replace(0, 2, "31");
+  CHECK(!decode_netdiag_packet(wrong_type, j));
+  CHECK(!decode_netdiag_packet(NETDIAG_PACKET.substr(0, 40), j));
+}
+
 int main() {
   test_power_frame_end_to_end();
   test_calibration_and_short_packets();
   test_frame27();
   test_splitter();
   test_against_reference();
+  test_netdiag();
   if (failures) {
     std::printf("%d failure(s)\n", failures);
     return 1;

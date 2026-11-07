@@ -312,6 +312,31 @@ template<class S> PowerDecode decode_power_packet(const S &packet, float calibra
   return PowerDecode::ok;
 }
 
+// ---- NetDiag joins ---------------------------------------------------------
+
+// An optimizer sends one type-09 NetDiag packet each time it (re)joins: on a
+// roof, mostly once a sunrise. From 13 in the 2026-11-06 bench captures: the
+// header's bytes 3-4 repeat the node's address, the data is 23 bytes, and data
+// bytes 8-15 are the joining node's MAC (they match its TAP table entry).
+// Bytes 0-7 are an 8-byte ID that is neither in the table nor a TAP's MAC; it
+// may be network-wide, so it is never copied out. Bytes 16-22 vary between
+// joins and hold the rest (RSSI, probably the parent), not yet decoded.
+struct NetDiagJoin {
+  char addr[5] = {0};       // short address, hex
+  char node_mac[17] = {0};  // 16 hex chars
+};
+
+// packet: the whole type-09 packet as hex, as walk_power_packets hands it.
+template<class S> bool decode_netdiag_packet(const S &packet, NetDiagJoin &j) {
+  if (packet.length() < 14 + 46 || packet.compare(0, 2, "09") != 0) return false;
+  if (parse_hex_field(packet, 12, 2) != 23) return false;
+  memcpy(j.addr, packet.c_str() + 2, 4);
+  j.addr[4] = '\0';
+  memcpy(j.node_mac, packet.c_str() + 14 + 16, 16);
+  j.node_mac[16] = '\0';
+  return true;
+}
+
 // ---- addresses -------------------------------------------------------------
 
 // The check character Tigo appends to a short address (e.g. "1234" → "1234K").
