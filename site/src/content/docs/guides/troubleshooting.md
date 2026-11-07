@@ -347,7 +347,7 @@ This forces a fresh bootloader build with PSRAM support enabled.
 **Fix — pick one:**
 1. **Read the CCA over Bluetooth.** Set `cca_source: ble` and add a `ble_client_id`; `tigo_server` talks the CCA's `mobile_api` over BLE instead of HTTP. See [CCA over Bluetooth](/esphome-tigomonitor/guides/configuration/#cca-over-bluetooth-cca_source-ble).
 2. **Recover the layout from Tigo's cloud.** Set `cloud_import: true` and sign in on the Tigo Cloud page to pull panel names + string/MPPT/inverter layout. See [Tigo cloud import](/esphome-tigomonitor/guides/configuration/#tigo-cloud-import-cloud_import-true).
-3. **Enter friendly names manually** from the Tools view — no CCA connection required.
+3. **Enter friendly names manually** on the Topology page — no CCA connection required.
 
 ### BLE CCA Won't Connect / Search Finds Nothing
 

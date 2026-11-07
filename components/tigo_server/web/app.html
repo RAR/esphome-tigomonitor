@@ -159,12 +159,18 @@
   h1 { font-size: 20px; font-weight: 600; }
   .topbar-meta { font-size: 12px; color: var(--text-dim); }
   /* The Bus page's two halves: shown only when there are both. */
-  .bus-tabs { display: none; gap: 4px; margin: -12px 0 20px; border-bottom: 1px solid var(--border); }
+  .bus-tabs, .page-tabs { display: none; gap: 4px; margin: -12px 0 20px; border-bottom: 1px solid var(--border); }
   body.bus-both .bus-tabs { display: flex; }
-  .bus-tabs a { padding: 8px 14px; margin-bottom: -1px; text-decoration: none; color: var(--text-dim); font-weight: 600;
+  /* A page's own tabs (Settings): scroll sideways on a phone rather than wrap. */
+  .page-tabs { display: flex; overflow-x: auto; scrollbar-width: none; }
+  .page-tabs::-webkit-scrollbar { display: none; }
+  .bus-tabs a, .page-tabs button { padding: 8px 14px; margin-bottom: -1px; text-decoration: none; color: var(--text-dim); font-weight: 600;
                 border-bottom: 2px solid transparent; }
-  .bus-tabs a:hover { color: var(--text); }
-  .bus-tabs a[aria-selected="true"] { color: var(--text); border-bottom-color: var(--accent-2); }
+  .page-tabs button { background: none; border-top: 0; border-left: 0; border-right: 0; font: inherit; font-weight: 600;
+                      white-space: nowrap; cursor: pointer; }
+  .bus-tabs a:hover, .page-tabs button:hover { color: var(--text); }
+  .bus-tabs a[aria-selected="true"], .page-tabs button[aria-selected="true"] { color: var(--text); border-bottom-color: var(--accent-2); }
+  .page-tabs button:focus-visible { outline: 2px solid var(--accent-2); outline-offset: -2px; border-radius: 4px 4px 0 0; }
   .btn {
     display: inline-flex; align-items: center; gap: 6px;
     background: var(--bg-3); border: 1px solid var(--border); color: var(--text);
@@ -693,7 +699,7 @@
   }
   .topo-del:hover { color: var(--bad); border-color: var(--bad); }
 
-  /* ===== Tools view ===== */
+  /* ===== Settings view ===== */
   .tools-card { background: var(--bg-2); border: 1px solid var(--border); border-radius: 10px; padding: 18px 20px; margin-bottom: 16px; }
   .tools-card h3 { font-size: 14px; font-weight: 600; margin-bottom: 12px; }
   .tools-card p.hint { font-size: 13px; line-height: 1.5; color: var(--text-dim); margin-bottom: 14px; max-width: 75ch; }
@@ -879,7 +885,7 @@
     .topo-string-head { font-size: 11px; }
     .panel-grid { grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); }
 
-    /* Tools view buttons */
+    /* Settings view buttons */
     .checkbox-grid { grid-template-columns: 1fr; }
 
     /* Buttons — bigger tap targets across the board. */
@@ -945,7 +951,7 @@
       <button data-view="history"><span class="icon">↗</span> History</button>
       <button data-view="topology"><span class="icon">⌘</span> Topology</button>
       <button data-view="nodes"><span class="icon">≡</span> Devices</button>
-      <button data-view="tools"><span class="icon">⚙</span> Tools</button>
+      <button data-view="settings"><span class="icon">⚙</span> Settings</button>
       <button data-view="diagnostics"><span class="icon">◈</span> Diagnostics</button>
       <button data-view="logs" data-linux-only style="display:none"><span class="icon">☰</span> Logs</button>
       <button data-view="bus" id="nav-bus" data-linux-only style="display:none"><span class="icon">⇄</span> Bus</button>
@@ -1227,17 +1233,72 @@
       </div>
     </section>
 
-    <!-- TOOLS -->
-    <section class="view" id="view-tools">
+    <!-- SETTINGS -->
+    <section class="view" id="view-settings">
       <div class="topbar">
-        <h1>Tools</h1>
-        <div class="topbar-meta" id="tools-meta">Configuration helpers and maintenance</div>
+        <h1>Settings</h1>
+        <div class="topbar-meta" id="settings-meta"></div>
+      </div>
+      <!-- The Pi's tabs show when /api/status reports platform: 'linux';
+           the ESP32 takes those settings from YAML instead. -->
+      <div class="page-tabs" role="tablist" aria-label="Settings" id="settings-tabs">
+        <button role="tab" id="settings-tab-bus" aria-controls="settings-bus" aria-selected="false" data-tab="bus" data-linux-only style="display:none">Bus</button>
+        <button role="tab" id="settings-tab-ha" aria-controls="settings-ha" aria-selected="false" data-tab="ha" data-linux-only style="display:none">MQTT</button>
+        <button role="tab" id="settings-tab-inverters" aria-controls="settings-inverters" aria-selected="false" data-tab="inverters" data-linux-only style="display:none">Inverters</button>
+        <button role="tab" id="settings-tab-web" aria-controls="settings-web" aria-selected="false" data-tab="web" data-linux-only style="display:none">Web UI</button>
+        <button role="tab" id="settings-tab-general" aria-controls="settings-general" aria-selected="false" data-tab="general">General</button>
+        <button role="tab" id="settings-tab-yaml" aria-controls="settings-yaml" aria-selected="false" data-tab="yaml" data-esp-only>YAML</button>
+        <button role="tab" id="settings-tab-maintenance" aria-controls="settings-maintenance" aria-selected="false" data-tab="maintenance">Maintenance</button>
       </div>
 
-      <!-- Raspberry Pi build only (linux/): shown when /api/status reports
-           platform: 'linux'. The ESP32 gets these from YAML instead. -->
+      <div class="settings-panel" id="settings-bus" role="tabpanel" aria-labelledby="settings-tab-bus" hidden>
       <div class="section-head" data-linux-only style="display:none">
-        <div class="section-title">Home Assistant</div>
+        <div class="section-title">RS485 adapter</div>
+        <div class="section-sub" id="pi-port-state">—</div>
+      </div>
+      <div class="tools-card" data-linux-only style="display:none">
+        <p class="hint">Nothing is opened until you choose the adapter here, so other serial devices on this machine, such as a Zigbee stick, are left alone. Listing the ports does not open them.</p>
+        <div class="cfg-row">
+          <div class="cfg-text"><strong>Serial port</strong><span>The RS485 adapter on the Tigo bus</span></div>
+          <div class="cfg-ctrl"><select class="cfg-input" id="pi-serial"></select> <button class="btn" id="pi-serial-rescan">Rescan</button></div>
+        </div>
+        <div class="cfg-row">
+          <div class="cfg-text"><strong>Bus role</strong><span>Listen beside the CCA; run the bus in its place with the CCA unplugged; or stand by, beside a CCA or another master, and take the bus over if it stops (experimental)</span></div>
+          <div class="cfg-ctrl"><select class="cfg-input" id="pi-bus-role"><option value="listen">Listen, beside the CCA</option><option value="master">Master, in place of the CCA</option><option value="standby">Standby, takes over if the master stops</option></select></div>
+        </div>
+        <div class="cfg-row" id="pi-takeover-row" style="display:none">
+          <div class="cfg-text"><strong>Take over after</strong><span>Seconds with no master heard before this one runs the bus. Of two standbys, give the one you prefer the shorter time. The default 3 s suits two monitors; beside a working CCA use 30 s or more, since a CCA that reboots is quiet for longer than that and never gives the bus back. Losing power on one master no longer stops the array: the other takes over, so rapid shutdown must cut the TAP's own power</span></div>
+          <div class="cfg-ctrl"><input class="cfg-input" id="pi-takeover" type="number" min="2" max="60" placeholder="3"></div>
+        </div>
+        <div class="cfg-row" id="pi-startup-row" style="display:none">
+          <div class="cfg-text"><strong>Bring up the TAP</strong><span>If the gateway is found at its factory address (after a power cut), re-address it and start it. Needs the real CCA on hand to recover a stranded gateway (experimental)</span></div>
+          <div class="cfg-ctrl"><label class="cfg-switch"><input type="checkbox" id="pi-startup"> <span>Off</span></label></div>
+        </div>
+        <div class="cfg-row" id="pi-housekeeping-row" style="display:none">
+          <div class="cfg-text"><strong>Send the CCA's housekeeping</strong><span id="pi-housekeeping-hint">Send the CCA's 0x41 to each optimizer in turn, its hourly 0x0B00 and 0x22, and its reads of the TAP's node table (experimental)</span></div>
+          <div class="cfg-ctrl"><label class="cfg-switch"><input type="checkbox" id="pi-housekeeping"> <span>Off</span></label></div>
+        </div>
+        <div class="cfg-row" id="pi-queries-row" style="display:none">
+          <div class="cfg-text"><strong>Query the optimizers</strong><span>Ask each optimizer the CCA's five questions (version, tests, info, smart, MPPT), again until it answers (experimental)</span></div>
+          <div class="cfg-ctrl"><label class="cfg-switch"><input type="checkbox" id="pi-queries"> <span>Off</span></label></div>
+        </div>
+        <div class="cfg-row" id="pi-writes-row" style="display:none">
+          <div class="cfg-text"><strong>Let queries change optimizer settings</strong><span>Send the CCA's two writes when an optimizer's answer calls for them: #00w255 after an Info reading 00, and Smrt mode S after one in mode N. Needs Query the optimizers (experimental)</span></div>
+          <div class="cfg-ctrl"><label class="cfg-switch"><input type="checkbox" id="pi-writes"> <span>Off</span></label></div>
+        </div>
+        <div class="cfg-row" id="pi-bridge-row" style="display:none">
+          <div class="cfg-text"><strong>Bridge address</strong><span>host:port of an ESP32 running stream_server, or an RS485-to-Ethernet converter in TCP server mode</span></div>
+          <div class="cfg-ctrl"><input class="cfg-input" id="pi-bridge" autocomplete="off" placeholder="tigo-bridge.local:6638"></div>
+        </div>
+        <div class="tools-actions" style="margin-top:12px">
+          <button class="btn primary" id="pi-port-save">Save</button>
+        </div>
+      </div>
+      </div>
+
+      <div class="settings-panel" id="settings-ha" role="tabpanel" aria-labelledby="settings-tab-ha" hidden>
+      <div class="section-head" data-linux-only style="display:none">
+        <div class="section-title">MQTT</div>
         <div class="section-sub" id="pi-mqtt-state">—</div>
       </div>
       <div class="tools-card" data-linux-only style="display:none">
@@ -1275,52 +1336,35 @@
           <div class="cfg-ctrl"><label class="cfg-switch"><input type="checkbox" id="pi-mqtt-standby-panels"> <span>Off</span></label></div>
         </div>
         <div class="cfg-row">
-          <div class="cfg-text"><strong>PV output switch</strong><span>A switch in Home Assistant that turns the array's output off and on (Bus master page). Anyone who can publish to the broker can use it: give this monitor its own broker login</span></div>
+          <div class="cfg-text"><strong>PV output switch</strong><span>A switch in Home Assistant that turns the array's output off and on, as on the Bus page. Anyone who can publish to the broker can use it: give this monitor its own broker login</span></div>
           <div class="cfg-ctrl"><label class="cfg-switch"><input type="checkbox" id="pi-mqtt-pv-switch"> <span>Off</span></label></div>
         </div>
         <div class="tools-actions" style="margin-top:12px">
           <button class="btn primary" id="pi-save">Save</button>
         </div>
       </div>
+      </div>
 
+      <div class="settings-panel" id="settings-inverters" role="tabpanel" aria-labelledby="settings-tab-inverters" hidden>
       <div class="section-head" data-linux-only style="display:none">
-        <div class="section-title">RS485 adapter and web UI</div>
-        <div class="section-sub" id="pi-port-state">—</div>
+        <div class="section-title">Inverters</div>
+        <div class="section-sub" id="pi-inv-sub">—</div>
       </div>
       <div class="tools-card" data-linux-only style="display:none">
-        <p class="hint">Nothing is opened until you choose the adapter here, so other serial devices on this machine, such as a Zigbee stick, are left alone. Listing the ports does not open them.</p>
-        <div class="cfg-row">
-          <div class="cfg-text"><strong>Serial port</strong><span>The RS485 adapter on the Tigo bus</span></div>
-          <div class="cfg-ctrl"><select class="cfg-input" id="pi-serial"></select> <button class="btn" id="pi-serial-rescan">Rescan</button></div>
+        <p class="hint">Which inverter each MPPT feeds, for the Dashboard and Topology. The MPPT names are the ones in your node table, from the CCA or a backup. Strings on an MPPT no inverter lists appear under Unassigned.</p>
+        <div id="pi-inv-rows"></div>
+        <div class="tools-actions" style="margin-top:12px">
+          <button class="btn" id="pi-inv-add">Add inverter</button>
+          <button class="btn primary" id="pi-inv-save">Save</button>
         </div>
-        <div class="cfg-row">
-          <div class="cfg-text"><strong>Bus role</strong><span>Listen beside the CCA; run the bus in its place with the CCA unplugged; or stand by, beside a CCA or another master, and take the bus over if it stops (experimental)</span></div>
-          <div class="cfg-ctrl"><select class="cfg-input" id="pi-bus-role"><option value="listen">Listen, beside the CCA</option><option value="master">Master, in place of the CCA</option><option value="standby">Standby, takes over if the master stops</option></select></div>
-        </div>
-        <div class="cfg-row" id="pi-takeover-row" style="display:none">
-          <div class="cfg-text"><strong>Take over after</strong><span>Seconds with no master heard before this one runs the bus. Of two standbys, give the one you prefer the shorter time. The default 3 s suits two monitors; beside a working CCA use 30 s or more, since a CCA that reboots is quiet for longer than that and never gives the bus back. Losing power on one master no longer stops the array: the other takes over, so rapid shutdown must cut the TAP's own power</span></div>
-          <div class="cfg-ctrl"><input class="cfg-input" id="pi-takeover" type="number" min="2" max="60" placeholder="3"></div>
-        </div>
-        <div class="cfg-row" id="pi-startup-row" style="display:none">
-          <div class="cfg-text"><strong>Bring up the TAP</strong><span>If the gateway is found at its factory address (after a power cut), re-address it and start it. Needs the real CCA on hand to recover a stranded gateway (experimental)</span></div>
-          <div class="cfg-ctrl"><label class="cfg-switch"><input type="checkbox" id="pi-startup"> <span>Off</span></label></div>
-        </div>
-        <div class="cfg-row" id="pi-housekeeping-row" style="display:none">
-          <div class="cfg-text"><strong>Send the CCA's housekeeping</strong><span id="pi-housekeeping-hint">Send the CCA's 0x41 to each optimizer in turn, its hourly 0x0B00 and 0x22, and its reads of the TAP's node table (experimental)</span></div>
-          <div class="cfg-ctrl"><label class="cfg-switch"><input type="checkbox" id="pi-housekeeping"> <span>Off</span></label></div>
-        </div>
-        <div class="cfg-row" id="pi-queries-row" style="display:none">
-          <div class="cfg-text"><strong>Query the optimizers</strong><span>Ask each optimizer the CCA's five questions (version, tests, info, smart, MPPT), again until it answers (experimental)</span></div>
-          <div class="cfg-ctrl"><label class="cfg-switch"><input type="checkbox" id="pi-queries"> <span>Off</span></label></div>
-        </div>
-        <div class="cfg-row" id="pi-writes-row" style="display:none">
-          <div class="cfg-text"><strong>Let queries change optimizer settings</strong><span>Send the CCA's two writes when an optimizer's answer calls for them: #00w255 after an Info reading 00, and Smrt mode S after one in mode N. Needs Query the optimizers (experimental)</span></div>
-          <div class="cfg-ctrl"><label class="cfg-switch"><input type="checkbox" id="pi-writes"> <span>Off</span></label></div>
-        </div>
-        <div class="cfg-row" id="pi-bridge-row" style="display:none">
-          <div class="cfg-text"><strong>Bridge address</strong><span>host:port of an ESP32 running stream_server, or an RS485-to-Ethernet converter in TCP server mode</span></div>
-          <div class="cfg-ctrl"><input class="cfg-input" id="pi-bridge" autocomplete="off" placeholder="tigo-bridge.local:6638"></div>
-        </div>
+      </div>
+      </div>
+
+      <div class="settings-panel" id="settings-web" role="tabpanel" aria-labelledby="settings-tab-web" hidden>
+      <div class="section-head">
+        <div class="section-title">Web UI</div>
+      </div>
+      <div class="tools-card">
         <div class="cfg-row">
           <div class="cfg-text"><strong>Web UI port</strong><span>Empty: 80, or 8080 when another web server has 80; with HTTPS, 443 or 8443. Takes effect after a restart</span></div>
           <div class="cfg-ctrl"><input class="cfg-input" id="pi-web-port" type="number" min="1" max="65535" placeholder="80"></div>
@@ -1342,7 +1386,7 @@
           <div class="cfg-ctrl"><input class="cfg-input" id="pi-web-pass" type="password" autocomplete="new-password"></div>
         </div>
         <div class="tools-actions" style="margin-top:12px">
-          <button class="btn primary" id="pi-port-save">Save</button>
+          <button class="btn primary" id="pi-web-save">Save</button>
           <button class="btn" id="pi-web-pass-remove" style="display:none">Remove password</button>
         </div>
       </div>
@@ -1362,59 +1406,22 @@
           <div class="cfg-ctrl"><label class="cfg-switch"><input type="checkbox" id="pi-show-cloud" checked> <span>On</span></label></div>
         </div>
       </div>
-
-      <div class="section-head" data-linux-only style="display:none">
-        <div class="section-title">Inverters</div>
-        <div class="section-sub" id="pi-inv-sub">—</div>
-      </div>
-      <div class="tools-card" data-linux-only style="display:none">
-        <p class="hint">Which inverter each MPPT feeds, for the Dashboard and Topology. The MPPT names are the ones in your node table, from the CCA or a backup. Strings on an MPPT no inverter lists appear under Unassigned.</p>
-        <div id="pi-inv-rows"></div>
-        <div class="tools-actions" style="margin-top:12px">
-          <button class="btn" id="pi-inv-add">Add inverter</button>
-          <button class="btn primary" id="pi-inv-save">Save</button>
-        </div>
       </div>
 
+      <div class="settings-panel" id="settings-general" role="tabpanel" aria-labelledby="settings-tab-general" hidden>
       <div class="section-head">
-        <div class="section-title">Device Configuration</div>
+        <div class="section-title">Device configuration</div>
         <div class="section-sub" id="cfg-sub">Stored on-device · overrides YAML</div>
       </div>
       <div class="tools-card">
         <p class="hint" id="cfg-hint">These knobs are saved to the ESP32 and take effect without reflashing. A stored value <b>overrides the YAML default</b> until you revert it — after that, editing the YAML applies again. <span id="cfg-status" style="color:var(--text-dim)"></span></p>
         <div id="cfg-rows"></div>
       </div>
-
-      <div class="section-head">
-        <div class="section-title">Maintenance</div>
-        <div class="section-sub">Resets and reboot</div>
-      </div>
-      <div class="tools-card">
-        <div class="danger-row">
-          <div class="danger-text">
-            <strong>Reset peak power</strong>
-            <span>Clears the per-device peak-power high-water marks back to live readings.</span>
-          </div>
-          <button class="btn" id="tools-reset-peak">Reset peaks</button>
-        </div>
-        <div class="danger-row">
-          <div class="danger-text">
-            <strong>Clear node table</strong>
-            <span>Drops the persisted UART/CCA node table. Devices repopulate as their next telemetry frames arrive.</span>
-          </div>
-          <button class="btn danger" id="tools-reset-nodes">Clear nodes</button>
-        </div>
-        <div class="danger-row">
-          <div class="danger-text">
-            <strong>Restart device</strong>
-            <span>Reboots the ESP32. UART will drop briefly; the dashboard will reconnect on its own.</span>
-          </div>
-          <button class="btn danger" id="tools-restart">Restart</button>
-        </div>
       </div>
 
+      <div class="settings-panel" id="settings-yaml" role="tabpanel" aria-labelledby="settings-tab-yaml" hidden>
       <div class="section-head" data-esp-only>
-        <div class="section-title">YAML Configuration</div>
+        <div class="section-title">YAML configuration</div>
         <div class="section-sub" id="tools-yaml-sub">— devices</div>
       </div>
       <div class="tools-card" data-esp-only>
@@ -1449,7 +1456,37 @@
           <button class="btn primary" id="tools-yaml-copy">Copy to clipboard</button>
         </div>
       </div>
+      </div>
 
+      <div class="settings-panel" id="settings-maintenance" role="tabpanel" aria-labelledby="settings-tab-maintenance" hidden>
+      <div class="section-head">
+        <div class="section-title">Maintenance</div>
+        <div class="section-sub">Resets and reboot</div>
+      </div>
+      <div class="tools-card">
+        <div class="danger-row">
+          <div class="danger-text">
+            <strong>Reset peak power</strong>
+            <span>Clears the per-device peak-power high-water marks back to live readings.</span>
+          </div>
+          <button class="btn" id="tools-reset-peak">Reset peaks</button>
+        </div>
+        <div class="danger-row">
+          <div class="danger-text">
+            <strong>Clear node table</strong>
+            <span>Drops the persisted UART/CCA node table. Devices repopulate as their next telemetry frames arrive.</span>
+          </div>
+          <button class="btn danger" id="tools-reset-nodes">Clear nodes</button>
+        </div>
+        <div class="danger-row">
+          <div class="danger-text">
+            <strong>Restart device</strong>
+            <span>Reboots the ESP32. UART will drop briefly; the dashboard will reconnect on its own.</span>
+          </div>
+          <button class="btn danger" id="tools-restart">Restart</button>
+        </div>
+      </div>
+      </div>
     </section>
 
     <!-- DIAGNOSTICS -->
@@ -2006,7 +2043,10 @@
   const hiddenPages = new Set();
   // The Bus item: Control while this monitor runs the bus, else Traffic.
   let busControl = false;
+  // Old names of pages, so links and bookmarks to them still work.
+  const viewAliases = { tools: 'settings' };
   function showView(id) {
+    id = viewAliases[id] || id;
     if (id === 'bus') id = busControl ? 'busmaster' : 'buslog';
     if (hiddenPages.has(id)) id = 'dashboard';
     // Leaving the Topology editor with changes not saved asks first.
@@ -2043,12 +2083,14 @@
   sidebarOverlay.addEventListener('click', () => appShell.classList.remove('menu-open'));
 
   window.addEventListener('hashchange', () => {
-    const v = window.location.hash.replace(/^#/, '') || 'dashboard';
+    const h = window.location.hash.replace(/^#/, '') || 'dashboard';
+    const v = viewAliases[h] || h;
     if (document.getElementById('view-' + v)) showView(v);
   });
 
   // Initial view from hash, default 'dashboard'.
-  const initialView = window.location.hash.replace(/^#/, '') || 'dashboard';
+  const initialHash = window.location.hash.replace(/^#/, '') || 'dashboard';
+  const initialView = viewAliases[initialHash] || initialHash;
   if (document.getElementById('view-' + initialView)) showView(initialView);
 
   // ===== Sidebar overview live data =====
@@ -2494,7 +2536,7 @@
   setInterval(refreshDashboard, 5000);
 
   // The Raspberry Pi build answers /api/status with platform: 'linux'; the
-  // ESP32 omits it. Swap the ESP32-only Tools sections for the Pi's settings.
+  // ESP32 omits it. Swap the ESP32-only Settings tabs for the Pi's.
   let PLATFORM = 'esp32';
   const platformReady = apiFetch('/api/status').then(r => r.ok ? r.json() : {}).then(s => {
     if (s.platform !== 'linux') return;
@@ -2511,7 +2553,7 @@
     restart.previousElementSibling.innerHTML =
       '<strong>Restart service</strong><span>Restarts the monitor service. Readings pause for a few seconds.</span>';
     restart.textContent = 'Restart service';
-    refreshTools();
+    refreshSettings();
   }).catch(() => {});
 
   // ===== Panel detail modal =====
@@ -3531,7 +3573,7 @@
     mqtt.textContent = status.mqtt_connected ? 'connected' : (status.mqtt_configured ? 'offline' : 'off');
     mqtt.style.fontSize = '18px';
     document.getElementById('diag-tasks').textContent =
-      status.mqtt_error || (status.mqtt_configured ? '' : 'set a broker under Tools');
+      status.mqtt_error || (status.mqtt_configured ? '' : 'set a broker under Settings › MQTT');
   }
 
   let masterPolls = 0, masterPollsAt = 0;
@@ -3601,12 +3643,12 @@
     document.getElementById('diag-housekeeping').innerHTML = h.on
       ? `${h.sent_41.toLocaleString()}<span class="hist-stat-unit">0x41s</span>` : 'off';
     document.getElementById('diag-housekeeping-sub').textContent = h.on
-      ? `${h.sent_session} 0x0B00 · ${h.sent_broadcast} 0x22 · ${h.sent_walk_pages} table pages, ${h.walks_done ?? 0} walks read to the end` : 'turn on under Tools';
+      ? `${h.sent_session} 0x0B00 · ${h.sent_broadcast} 0x22 · ${h.sent_walk_pages} table pages, ${h.walks_done ?? 0} walks read to the end` : 'turn on under Settings › Bus';
 
     const q = m.queries;
     document.getElementById('diag-queries').innerHTML = q.on
       ? `${q.answers.toLocaleString()}<span class="hist-stat-unit">/ ${q.sent_reads.toLocaleString()} answered</span>` : 'off';
-    document.getElementById('diag-queries-sub').textContent = !q.on ? 'turn on under Tools'
+    document.getElementById('diag-queries-sub').textContent = !q.on ? 'turn on under Settings › Bus'
       : q.writes ? `${q.sent_writes} writes sent` : 'writes off';
 
     // "Mgate Version G8.65": the version is the figure, the family its label.
@@ -3861,7 +3903,7 @@
   }, 10000);
 
   // ============================================================
-  // R6 — Tools view (YAML generator + maintenance)
+  // R6 — Settings view (YAML generator + maintenance)
   // ============================================================
 
   const TOOLS_DEV_SENSORS = [
@@ -3903,8 +3945,8 @@
     hub.innerHTML = TOOLS_HUB_SENSORS.map(s =>
       `<label><input type="checkbox" data-tools-hub="${s.id}">${s.label}</label>`
     ).join('');
-    dev.querySelectorAll('input').forEach(i => i.addEventListener('change', refreshTools));
-    hub.querySelectorAll('input').forEach(i => i.addEventListener('change', refreshTools));
+    dev.querySelectorAll('input').forEach(i => i.addEventListener('change', refreshSettings));
+    hub.querySelectorAll('input').forEach(i => i.addEventListener('change', refreshSettings));
   }
 
   function toolsPick(kind) {
@@ -3918,11 +3960,11 @@
     }
     else if (kind === 'hub-all')  hub.forEach(i => i.checked = true);
     else if (kind === 'hub-none') hub.forEach(i => i.checked = false);
-    refreshTools();
+    refreshSettings();
   }
 
-  async function refreshTools() {
-    if (!document.getElementById('view-tools').classList.contains('active')) return;
+  async function refreshSettings() {
+    if (!document.getElementById('view-settings').classList.contains('active')) return;
     if (PLATFORM === 'linux') {
       refreshPiInverters();
       refreshConfig();
@@ -3941,11 +3983,11 @@
       const data = await r.json();
       document.getElementById('tools-yaml').textContent = data.yaml || '';
       document.getElementById('tools-yaml-sub').textContent = `${data.device_count ?? '—'} devices`;
-      document.getElementById('tools-meta').textContent =
+      document.getElementById('settings-meta').textContent =
         `last update ${new Date().toLocaleTimeString()}`;
     } catch (e) {
       document.getElementById('tools-yaml').textContent = `Error: ${e.message}`;
-      document.getElementById('tools-meta').textContent = `error: ${e.message}`;
+      document.getElementById('settings-meta').textContent = `error: ${e.message}`;
     }
     refreshConfig();
   }
@@ -4060,7 +4102,7 @@
     }
   } catch (e) {}
   document.querySelectorAll('#tools-grouping input').forEach(r =>
-    r.addEventListener('change', refreshTools));
+    r.addEventListener('change', refreshSettings));
   document.querySelectorAll('[data-tools-pick]').forEach(btn => {
     btn.addEventListener('click', () => toolsPick(btn.dataset.toolsPick));
   });
@@ -4385,9 +4427,9 @@
       await piFillSerial(s.serial_port || '');
       document.getElementById('pi-mqtt-state').textContent = !s.mqtt.host ? 'MQTT off'
         : s.mqtt_connected ? `connected to ${s.mqtt.host}` : `not connected${s.mqtt_error ? ': ' + s.mqtt_error : ''}`;
-      document.getElementById('tools-meta').textContent = `last update ${new Date().toLocaleTimeString()}`;
+      document.getElementById('settings-meta').textContent = `last update ${new Date().toLocaleTimeString()}`;
     } catch (e) {
-      document.getElementById('tools-meta').textContent = `error: ${e.message}`;
+      document.getElementById('settings-meta').textContent = `error: ${e.message}`;
     }
   }
   let piWebPortActive = 0;
@@ -4541,7 +4583,7 @@
       const v = document.getElementById('pi-serial').value;
       piFillSerial(v === 'tcp' ? 'tcp://' + document.getElementById('pi-bridge').value.trim() : v);
     });
-  document.getElementById('pi-port-save').addEventListener('click', async () => {
+  async function piSavePort() {
     const webPort = Number(document.getElementById('pi-web-port').value) || 0;
     let source = document.getElementById('pi-serial').value;
     if (source === 'tcp') {
@@ -4596,7 +4638,10 @@
     } catch (e) {
       showToast(`Save failed: ${e.message}`, 'err');
     }
-  });
+  }
+  // The Bus and Web UI cards post the same settings, so either saves both.
+  document.getElementById('pi-port-save').addEventListener('click', piSavePort);
+  document.getElementById('pi-web-save').addEventListener('click', piSavePort);
   // Inverters: one row per inverter, its MPPTs as a comma-separated list.
   function piInvRow(inv) {
     const row = document.createElement('div');
@@ -4673,10 +4718,45 @@
     }
   });
 
-  document.querySelector('#nav button[data-view="tools"]').addEventListener('click', refreshTools);
-  // After the platform probe, which refreshes Tools itself on the Pi: a
-  // bookmark to #tools would otherwise load the ESP32's sections there.
-  platformReady.then(() => { if (PLATFORM !== 'linux' && window.location.hash === '#tools') refreshTools(); });
+  // Settings tabs. The last one opened is remembered; one this platform
+  // leaves out (the Pi's on an ESP32, YAML on the Pi) falls back to the first.
+  function settingsTabsShown() {
+    return [...document.querySelectorAll('#settings-tabs [role="tab"]')].filter(t => t.style.display !== 'none');
+  }
+  function settingsTab(name) {
+    if (!name) { try { name = localStorage.getItem('settings-tab'); } catch (e) {} }
+    const shown = settingsTabsShown();
+    const tab = shown.find(t => t.dataset.tab === name) || shown[0];
+    document.querySelectorAll('#settings-tabs [role="tab"]').forEach(t => {
+      const on = t === tab;
+      t.setAttribute('aria-selected', String(on));
+      t.tabIndex = on ? 0 : -1;
+      document.getElementById(t.getAttribute('aria-controls')).hidden = !on;
+    });
+  }
+  document.querySelectorAll('#settings-tabs [role="tab"]').forEach(t => t.addEventListener('click', () => {
+    settingsTab(t.dataset.tab);
+    try { localStorage.setItem('settings-tab', t.dataset.tab); } catch (e) {}
+  }));
+  // Left and right arrows move along the tabs, as in any tablist.
+  document.getElementById('settings-tabs').addEventListener('keydown', e => {
+    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+    const shown = settingsTabsShown();
+    const i = shown.indexOf(document.activeElement);
+    if (i < 0) return;
+    const next = shown[(i + (e.key === 'ArrowRight' ? 1 : shown.length - 1)) % shown.length];
+    next.click();
+    next.focus();
+    e.preventDefault();
+  });
+  settingsTab();
+  document.querySelector('#nav button[data-view="settings"]').addEventListener('click', refreshSettings);
+  // After the platform probe, which refreshes Settings itself on the Pi: a
+  // bookmark to #settings would otherwise load the ESP32's sections there.
+  platformReady.then(() => {
+    settingsTab();
+    if (PLATFORM !== 'linux' && window.location.hash === '#settings') refreshSettings();
+  });
 
   // ============================================================
   // R7 — CCA view (Tigo CCA configuration mirror)
@@ -4731,7 +4811,7 @@
       </div>
       <div style="color:var(--text-dim);margin-top:10px">
         To keep friendly panel names, import the node table manually from the
-        <strong style="color:var(--text)">Tools</strong> page instead of syncing from the CCA.
+        <strong style="color:var(--text)">Devices</strong> page instead of syncing from the CCA.
       </div>
     </div>`;
   }

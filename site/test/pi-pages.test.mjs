@@ -1,6 +1,6 @@
 // site/test/pi-pages.test.mjs
-// The Raspberry Pi build's switches for the CCA Info and Tigo Cloud pages, in
-// the real app.html, in Chromium, against a mock API: /api/status says
+// The Settings page's tabs, and the Raspberry Pi build's switches for the CCA
+// Info and Tigo Cloud pages, in the real app.html, in Chromium, against a mock API: /api/status says
 // platform 'linux', /api/settings is in memory and records every POST. The
 // rest of the API comes from the screenshot fixtures.
 import { test, before, after } from 'node:test';
@@ -118,8 +118,9 @@ test('a link to a hidden page opens the Dashboard instead', async () => {
   await ctx.close();
 });
 
-test('the Tools switches save at once and show or hide the page', async () => {
-  const { page, ctx, api } = await open({ hash: '#tools' });
+test('the Settings switches save at once and show or hide the page', async () => {
+  const { page, ctx, api } = await open({ hash: '#settings' });
+  await page.click('#settings-tab-web');
   await page.waitForSelector('#pi-show-cca', { state: 'attached' });
   await page.waitForFunction(() => document.getElementById('pi-show-cca').checked);
   await page.click('label:has(#pi-show-cca)');
@@ -130,12 +131,13 @@ test('the Tools switches save at once and show or hide the page', async () => {
   await page.click('label:has(#pi-show-cca)');
   await page.waitForSelector('#nav button[data-view="cca"]', { state: 'visible' });
   assert.deepEqual(api.posts, [{ show_cca_page: false }, { show_cloud_page: false }, { show_cca_page: true }]);
-  assert.equal(await activeView(page), 'view-tools');
+  assert.equal(await activeView(page), 'view-settings');
   await ctx.close();
 });
 
 test('a switch whose save fails flips back and says why', async () => {
-  const { page, ctx, api } = await open({ hash: '#tools' });
+  const { page, ctx, api } = await open({ hash: '#settings' });
+  await page.click('#settings-tab-web');
   await page.waitForFunction(() => document.getElementById('pi-show-cca').checked);
   api.saveStatus = 500;
   await page.click('label:has(#pi-show-cca)');
@@ -146,9 +148,82 @@ test('a switch whose save fails flips back and says why', async () => {
 });
 
 test('the ESP32 has no such switches and keeps CCA Info', async () => {
-  const { page, ctx } = await open({ linux: false, hash: '#tools' });
+  const { page, ctx } = await open({ linux: false, hash: '#settings' });
   await page.waitForTimeout(500);
   assert.equal(await page.isVisible('#pi-show-cca'), false);
   assert.equal(await navShown(page, 'cca'), true);
+  await ctx.close();
+});
+
+const tabsShown = (page) => page.$$eval('#settings-tabs [role="tab"]',
+  (ts) => ts.filter((t) => t.offsetParent).map((t) => t.textContent));
+const tabSelected = (page) => page.$eval('#settings-tabs [aria-selected="true"]', (t) => t.textContent);
+const panelShown = (page, name) => page.isVisible(`#settings-${name}`);
+
+test('the Pi\'s Settings opens on Bus, one tab at a time', async () => {
+  const { page, ctx, errors } = await open({ hash: '#settings' });
+  await page.waitForSelector('#settings-tab-bus', { state: 'visible' });
+  assert.deepEqual(await tabsShown(page), ['Bus', 'MQTT', 'Inverters', 'Web UI', 'General', 'Maintenance']);
+  assert.equal(await tabSelected(page), 'Bus');
+  assert.equal(await page.isVisible('#pi-serial'), true);
+  assert.equal(await panelShown(page, 'ha'), false);
+  await page.click('#settings-tab-ha');
+  assert.equal(await page.isVisible('#pi-mqtt-host'), true);
+  assert.equal(await page.isVisible('#pi-serial'), false);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test('the ESP32\'s Settings has General, YAML and Maintenance', async () => {
+  const { page, ctx } = await open({ linux: false, hash: '#settings' });
+  await page.waitForSelector('#settings-tab-yaml', { state: 'visible' });
+  await page.waitForTimeout(300);
+  assert.deepEqual(await tabsShown(page), ['General', 'YAML', 'Maintenance']);
+  assert.equal(await tabSelected(page), 'General');
+  await page.click('#settings-tab-yaml');
+  assert.equal(await page.isVisible('#tools-yaml'), true);
+  await ctx.close();
+});
+
+test('an old link to Tools opens Settings', async () => {
+  const { page, ctx } = await open({ hash: '#tools' });
+  await page.waitForFunction(() => document.querySelector('.view.active').id === 'view-settings');
+  assert.equal(page.url().endsWith('#settings'), true);
+  assert.equal(await page.isVisible('#nav button[data-view="settings"].active'), true);
+  await ctx.close();
+});
+
+test('Settings reopens on the tab last opened', async () => {
+  const { page, ctx } = await open({ hash: '#settings' });
+  await page.click('#settings-tab-web');
+  await page.reload({ waitUntil: 'networkidle' });
+  await page.waitForSelector('#settings-tab-web', { state: 'visible' });
+  assert.equal(await tabSelected(page), 'Web UI');
+  assert.equal(await page.isVisible('#pi-web-port'), true);
+  await ctx.close();
+});
+
+test('the arrow keys move along the tabs', async () => {
+  const { page, ctx } = await open({ hash: '#settings' });
+  await page.click('#settings-tab-bus');
+  await page.keyboard.press('ArrowLeft');
+  assert.equal(await tabSelected(page), 'Maintenance');
+  await page.keyboard.press('ArrowRight');
+  await page.keyboard.press('ArrowRight');
+  assert.equal(await tabSelected(page), 'MQTT');
+  await ctx.close();
+});
+
+test('the Web UI card saves the web settings with the bus ones', async () => {
+  const { page, ctx, api } = await open({ hash: '#settings' });
+  await page.click('#settings-tab-web');
+  page.on('dialog', (d) => d.dismiss());
+  await page.fill('#pi-web-port', '8080');
+  await page.click('#pi-web-save');
+  await page.waitForFunction(() => true);
+  await page.waitForTimeout(300);
+  const body = api.posts.at(-1);
+  assert.equal(body.web_port, 8080);
+  assert.equal(body.bus_role, 'listen');
   await ctx.close();
 });

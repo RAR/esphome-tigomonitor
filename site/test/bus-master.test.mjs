@@ -197,8 +197,9 @@ test('the bus master figures moved from Diagnostics to Bus master', async () => 
   await ctx.close();
 });
 
-test('the Home Assistant PV switch setting is on the Tools MQTT card', async () => {
-  const { page, ctx, api } = await open({ hash: '#tools' });
+test('the Home Assistant PV switch setting is on the Settings MQTT card', async () => {
+  const { page, ctx, api } = await open({ hash: '#settings' });
+  await page.click('#settings-tab-ha');
   await page.waitForSelector('#pi-mqtt-pv-switch', { state: 'attached' });
   await page.click('label:has(#pi-mqtt-pv-switch)');
   await page.click('#pi-save');

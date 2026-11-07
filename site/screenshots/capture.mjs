@@ -35,7 +35,7 @@ const README_SHOTS = {
   history: 'History.png',
   topology: 'Topology.png',
   nodes: 'Nodes.png',
-  tools: 'Tools.png',
+  settings: 'Settings.png',
   diagnostics: 'Diagnostics.png',
 };
 
@@ -47,7 +47,7 @@ const VIEWS = [
   ['topology',    'Topology'],
   ['history',     'History'],
   ['nodes',       'Devices'],
-  ['tools',       'Tools'],
+  ['settings',    'Settings'],
   ['diagnostics', 'Diagnostics'],
 ];
 

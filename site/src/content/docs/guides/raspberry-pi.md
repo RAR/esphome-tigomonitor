@@ -22,9 +22,9 @@ you saw, working or not.
 ## How it differs from the ESP32 build
 
 - **Setup happens in the browser.** You set the MQTT broker and choose the
-  serial port on the Tools page, and what the ESP32 takes from YAML (power
+  serial port on the Settings page, and what the ESP32 takes from YAML (power
   calibration, night-mode timeout, reset at midnight, a CCA IP) under
-  **Tools → Device Configuration**. There is nothing to compile.
+  **Settings → General**. There is nothing to compile.
 - **Home Assistant connects over MQTT**, not the ESPHome integration. Each
   panel appears as its own device, named by its barcode, as soon as the
   gateway announces it. The gateway announces its panels every 15 minutes or
@@ -77,7 +77,7 @@ you saw, working or not.
 
    The service starts straight away and on every boot after.
 5. Open `http://tigomonitor.local` (your hostname, then `.local`). Under
-   **Tools → RS485 adapter and web UI**, choose your adapter. USB adapters
+   **Settings → Bus**, choose your adapter. USB adapters
    are listed by make and model. It opens the adapter as soon as you save,
    and the dashboard fills in as panels report.
 
@@ -97,13 +97,13 @@ sudo raspi-config nonint do_serial_hw 0
 sudo reboot
 ```
 
-Then, under **Tools → RS485 adapter and web UI**, choose **Raspberry Pi
+Then, under **Settings → Bus**, choose **Raspberry Pi
 UART** (`/dev/serial0`).
 
 ## Connect it to Home Assistant
 
 1. Open `http://tigomonitor.local` (or your hostname).
-2. Go to **Tools → Home Assistant** and enter the broker's address, port, and
+2. Go to **Settings → MQTT** and enter the broker's address, port, and
    a username and password the broker accepts. With the Mosquitto add-on that
    is your Home Assistant's address, port 1883, and any Home Assistant user.
 3. Save. The section header changes to *connected* within a few seconds, and
@@ -139,14 +139,14 @@ called "All panels". There are four ways to get your real layout:
   the Pi yet, the backup's inverter names wait and apply once you do.
 
 - **From the CCA, on firmware older than 4.0.4:** set the CCA's IP under
-  **Tools → Device Configuration**, then press **Refresh from CCA** on the
+  **Settings → General**, then press **Refresh from CCA** on the
   CCA Info page.
 
 If the strings land under **Unassigned**, open **Edit layout** on the
 Topology page: strings whose MPPT no inverter lists arrive there in an
 inverter of their own, ready to rename or move.
 
-No CCA, or no Tigo account? Under **Tools → Sidebar**, switch off the
+No CCA, or no Tigo account? Under **Settings → Web UI**, switch off the
 **CCA Info** or **Tigo Cloud** page and it leaves the sidebar; a link to it
 opens the Dashboard instead. Hiding a page stops nothing behind it, such as
 a CCA sync at startup.
@@ -155,8 +155,8 @@ a CCA sync at startup.
 
 Out of the box, as on the ESP32, the web UI has no login: anyone on your
 network can open it and change its settings, including the CCA's Wi-Fi and
-the MQTT broker. To require one, set **Web UI password** under **Tools →
-RS485 adapter and web UI**. The browser then asks for the username (`admin`
+the MQTT broker. To require one, set **Web UI password** under **Settings →
+Web UI**. The browser then asks for the username (`admin`
 unless you change it) and password. Pages on other websites can't use the
 monitor's settings either way, even with the login saved in your browser.
 Over plain HTTP the password crosses your network readable by anything on
@@ -168,7 +168,7 @@ the broker's address or username clears it, so it has to be entered again.
 ## Turn the array's output off
 
 When the Pi runs the bus in the CCA's place (bus role *master* or
-*standby* under **Tools**), it can do what the CCA's PV-safe button did:
+*standby* under **Settings → Bus**), it can do what the CCA's PV-safe button did:
 tell the TAP to turn the optimizers' output off, and on again later. It is
 the same command the CCA sends, and the TAP answers each one, so the Pi
 knows it arrived.
@@ -201,7 +201,7 @@ While it's off:
   about PV until you switch it, so the array stays as it was.
 
 To control it from Home Assistant, turn on **PV output switch** under
-**Tools → Home Assistant**. A *PV output* switch then appears with the
+**Settings → MQTT**. A *PV output* switch then appears with the
 monitor's other entities. Anyone who can publish to your broker can use
 it, so give the Pi its own broker login.
 
@@ -283,7 +283,7 @@ which certbot writes through your DNS provider's API.
      -d tigo.example.com --deploy-hook /usr/libexec/tigomonitor/cert-hook
    ```
 
-4. Under **Tools → RS485 adapter and web UI**, set **HTTPS certificate** to
+4. Under **Settings → Web UI**, set **HTTPS certificate** to
    `/var/lib/tigomonitor/fullchain.pem` and **HTTPS key** to
    `/var/lib/tigomonitor/privkey.pem`, save, and let it restart. The page
    reopens at `https://` on port 443, or 8443 if something else has 443.
@@ -316,7 +316,7 @@ dashboard and the history all stay on the machine running the monitor.
    terminals to the TAP as in [Wiring](/esphome-tigomonitor/guides/wiring/).
    It runs [stream_server](https://github.com/oxan/esphome-stream-server),
    which sends every byte from the bus to whoever connects on port 6638.
-2. Under **Tools → RS485 adapter and web UI**, choose **Network bridge (TCP)**
+2. Under **Settings → Bus**, choose **Network bridge (TCP)**
    and enter the bridge's address, `tigo-bridge.local:6638` or its IP and
    port, then save.
 
@@ -370,7 +370,7 @@ docker run -d --name tigomonitord --hostname tigomonitor --restart unless-stoppe
   ghcr.io/rar/tigomonitord:latest
 ```
 
-Then open `http://HOST:8080` and set it up under Tools, as with the package.
+Then open `http://HOST:8080` and set it up under Settings, as with the package.
 [`linux/docker-compose.yml`](https://github.com/RAR/esphome-tigomonitor/blob/main/linux/docker-compose.yml)
 does the same with Compose.
 
@@ -378,7 +378,7 @@ does the same with Compose.
   nothing extra. For a USB adapter, mount the host's `/dev` and allow USB
   serial devices: `-v /dev:/dev --device-cgroup-rule 'c 188:* rw'
   --device-cgroup-rule 'c 166:* rw'`. Then choose the adapter's
-  `/dev/serial/by-id/` name under Tools. That name stays the same across
+  `/dev/serial/by-id/` name under Settings → Bus. That name stays the same across
   reboots, where `/dev/ttyUSB0` may change, and the container sees the
   adapter again after you unplug it, which `--device` doesn't.
 - **The hostname:** give the container a fixed one, such as
@@ -404,7 +404,7 @@ does the same with Compose.
   variables, and point the domain at the host. The web UI serves plain HTTP
   for the minute or two the first certificate takes, then restarts on HTTPS
   at `https://DOMAIN:8443`. The certificate's paths are set by the compose
-  file, so the fields under Tools are locked. If it stays on HTTP,
+  file, so the fields under Settings → Web UI are locked. If it stays on HTTP,
   `docker compose logs certbot` says why.
 - **The CCA page over Bluetooth** needs the host's BlueZ. Mount
   `/run/dbus/system_bus_socket` into the container, and run it as an account
@@ -420,9 +420,9 @@ does the same with Compose.
 
 - **No panels on the dashboard:** check **Diagnostics → Frames processed**.
   If it stays at 0, the Pi is not receiving the bus: check the wiring, and
-  that **Tools → RS485 adapter and web UI** names your adapter.
-- **Panels on the dashboard but not in Home Assistant:** the Home Assistant
-  section of Tools shows the broker's error, such as a refused password. Also
+  that **Settings → Bus** names your adapter.
+- **Panels on the dashboard but not in Home Assistant:** the MQTT tab of
+  Settings shows the broker's error, such as a refused password. Also
   allow up to 15 minutes on a fresh install for the gateway's next
   announcement.
 - **Lots of bad checksums:** A and B are probably swapped.

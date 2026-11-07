@@ -10,7 +10,7 @@ per-panel monitoring with a built-in web app and Home Assistant integration.
 - **Per-Device Monitoring** – Voltage, current, power, temperature, RSSI per optimizer,
   plus system aggregates (total power, energy, active count, peak tracking)
 - **Built-in Single-Page Web App** – Dashboard heatmap, history, topology, node table,
-  tools, diagnostics, CCA info, Tigo Cloud
+  settings, diagnostics, CCA info, Tigo Cloud
 - **On-Flash History** – Per-snapshot rollups and per-panel power persisted via
   [esp_tsdb](https://github.com/zakery292/esp_tsdb); survives reboots and OTA
 - **CCA Integration** – Auto-sync panel names over local HTTP, **Bluetooth** (for
@@ -44,7 +44,7 @@ or in Docker, with no ESPHome — see
 
 > ⚠ **Upgrading from a pre-TSDB release: one-time data loss + serial flash required.**
 > The partition layout changed to make room for the on-flash time-series database, so
-> the new image can't go over OTA and NVS is wiped. Export your JSON from **Tools →
+> the new image can't go over OTA and NVS is wiped. Export your JSON from **Devices →
 > Export** first, flash over USB/serial, then re-import. Later updates use OTA again.
 
 ## Gallery
@@ -55,7 +55,7 @@ or in Docker, with no ESPHome — see
 | History — TSDB-backed power chart with gradient fill + daily energy bars | ![History](docs/images/History.png) |
 | Topology — inverter → string → panel tree, inline rename and nameplate editing | ![Topology](docs/images/Topology.png) |
 | Devices — every discovered device, sortable and filterable, JSON export/import | ![Devices](docs/images/Nodes.png) |
-| Tools — on-device configuration + YAML generator with sub-device grouping | ![Tools](docs/images/Tools.png) |
+| Settings — on-device configuration, maintenance, and a YAML generator with sub-device grouping | ![Settings](docs/images/Settings.png) |
 | Diagnostics — memory / network / UART / per-DB TSDB stats | ![Diagnostics](docs/images/Diagnostics.png) |
 
 ## Documentation

@@ -407,7 +407,7 @@ void HttpServer::routes_() {
   // The firmware's old page addresses, sent to the matching view. Relative,
   // as the firmware's are, so a reverse proxy's path prefix survives.
   for (const auto &page : std::vector<std::pair<const char *, const char *>>{
-           {"/nodes", "nodes"}, {"/status", "diagnostics"}, {"/history", "history"}, {"/cca", "cca"}, {"/yaml", "tools"}}) {
+           {"/nodes", "nodes"}, {"/status", "diagnostics"}, {"/history", "history"}, {"/cca", "cca"}, {"/yaml", "settings"}}) {
     std::string loc = std::string("app#") + page.second;
     svr.Get(page.first, [loc](const httplib::Request &, httplib::Response &res) {
       res.status = 302;

@@ -913,8 +913,8 @@ esp_err_t TigoWebServer::app_handler(httpd_req_t *req) {
 }
 
 esp_err_t TigoWebServer::yaml_config_handler(httpd_req_t *req) {
-  // /yaml (R6) — /api/yaml stays live, consumed from #view-tools.
-  return redirect_to_app_view(req, "tools");
+  // /yaml (R6) — /api/yaml stays live, consumed from #view-settings.
+  return redirect_to_app_view(req, "settings");
 }
 
 // ===== API Handlers (JSON) =====
