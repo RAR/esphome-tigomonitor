@@ -174,7 +174,9 @@ class MasterCore {
   // The PV state to start from (the one saved), and where to save a change;
   // call before open().
   using PvSaved = std::function<void(const PvState &)>;
-  void set_pv(const PvState &state, PvSaved saved);
+  // silent: the saved state couldn't be read, so say nothing to the TAP
+  // about PV until it is switched, as after a takeover that heard nothing.
+  void set_pv(const PvState &state, PvSaved saved, bool silent = false);
   // The owner's off or on, sent in the next tick. False while standing by:
   // only the master running the bus may change it.
   bool request_pv(bool off);
@@ -200,6 +202,9 @@ class MasterCore {
   static const uint32_t LOG_FIRST_REPLIES = 20;  // poll reply headers logged at INFO, for the bench
   static const uint16_t FACTORY_ID = 0x1235;     // the universal factory RS485 address
   static const uint32_t NO_REPLY_FAULT_AFTER = 10;
+  // Missed answers in a row at the TAP's own address before the factory
+  // address is tried: one lost reply is not a TAP that forgot its id.
+  static const uint32_t PROBE_MISSES_BEFORE_FACTORY = 3;
   // A TAP that refuses every request (0x0006) is asked once a second, not
   // forty times: it is answering, so this isn't a TAP lost.
   static const uint32_t REFUSED_RETRY_MS = 1000;
@@ -217,6 +222,12 @@ class MasterCore {
   void stand_by_(uint32_t now_ms);   // listen for another master; take over when there is none
   void take_over_(int64_t quiet_ms);
   void yield_();
+  void listen_stopped_();
+  // A master's request: to a TAP, or to 0xFFFF, a broadcast. A reply's
+  // address has the high bit set, and 0xFFFF has it too.
+  static bool is_request_(const esphome::tigo_monitor::master::Frame &f) {
+    return !(f.dest & 0x8000) || f.dest == 0xFFFF;
+  }
   void set_standby_(Standby s);
   bool standing_by_() const { return standby_ == Standby::standing_by || standby_ == Standby::taking_over; }
   void set_fault(Fault f, const std::string &detail);
@@ -283,6 +294,8 @@ class MasterCore {
   esphome::tigo_monitor::master::PollCursor cursor_{0};
   uint8_t seq_ = 0;
   uint32_t timeouts_in_a_row_ = 0;
+  uint32_t probe_misses_ = 0;          // GET_MAC_NOWs in a row unanswered at gateway_
+  esphome::tigo_monitor::master::Bytes tap_mac_;  // the TAP that answered at gateway_, once one has
   uint32_t refusals_in_a_row_ = 0;
   uint32_t refused_at_ms_ = 0;
   bool refused_ = false;  // the last transact() got the TAP's 0x0006

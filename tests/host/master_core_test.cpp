@@ -6,7 +6,9 @@
 
 #include "../../components/tigo_master/master_core.h"
 
+#include <algorithm>
 #include <chrono>
+#include <functional>
 #include <cstdio>
 #include <string>
 #include <thread>
@@ -121,10 +123,238 @@ static void test_a_prompt_drain_is_not_late() {
   core.close();
 }
 
+// PV held off: the switch tells the TAP 00 at the start.
+static int sessions_sent(bool silent) {
+  RecordingPort port;
+  MasterCore core(&port, [](int, const std::string &) {}, nullptr, nullptr, 0x1201, false, false, /*housekeeping=*/true);
+  core.set_pv({true, false, 0}, nullptr, silent);
+  CHECK(core.open());
+  for (uint32_t t = 0; t < 3000; t += 100) core.tick(t);
+  core.close();
+  int n = 0;
+  for (uint16_t c : port.cmds) n += c == 0x0B00;
+  return n;
+}
+
+// A pv.json that couldn't be read says nothing to the TAP about PV, not
+// even the hourly frame's 01: the TAP keeps what it was last told.
+static void test_an_unreadable_pv_state_says_nothing() {
+  CHECK(sessions_sent(false) >= 1);
+  CHECK(sessions_sent(true) == 0);
+}
+
+// A port where another master is running the bus: every read returns one
+// of its poll requests.
+class OtherMasterPort : public Transport {
+ public:
+  explicit OtherMasterPort(uint16_t dest = 0x1201) : dest_(dest) {}
+  bool configured() const override { return true; }
+  bool open(std::string &) override { return open_ = true; }
+  void close() override { open_ = false; }
+  bool is_open() const override { return open_; }
+  bool write(const uint8_t *, size_t, std::string &) override {
+    writes++;
+    return true;
+  }
+  void drain() override {}
+  int read(char *buf, size_t n, int) override {
+    auto f = esphome::tigo_monitor::master::encode_frame(dest_, 0x0148, {0x00, 0x00});
+    size_t k = std::min(n, f.size());
+    std::copy(f.begin(), f.begin() + k, buf);
+    return static_cast<int>(k);
+  }
+  int baud() const override { return 38400; }
+  std::string name() const override { return "fake"; }
+  int writes = 0;
+
+ private:
+  uint16_t dest_;
+  bool open_ = false;
+};
+
+// Stopped by another master, this one sends nothing more but goes on reading,
+// so the panels the other polls still reach the Monitor (and Home Assistant)
+// rather than going stale.
+static void test_a_master_stopped_by_another_keeps_reading() {
+  OtherMasterPort port;
+  size_t rx = 0;
+  MasterCore core(&port, [](int, const std::string &) {}, [&](const char *, size_t n) { rx += n; }, nullptr, 0x1201,
+                  false, false);
+  CHECK(core.open());
+  for (uint32_t t = 0; t < 1000; t += 100) core.tick(t);
+  CHECK(core.status().fault == Fault::second_master);
+  int writes = port.writes;
+  size_t before = rx;
+  for (uint32_t t = 1000; t < 2000; t += 100) core.tick(t);
+  CHECK(port.writes == writes);
+  CHECK(rx > before);
+  core.close();
+}
+
+namespace mp = esphome::tigo_monitor::master;
+
+// A port with a TAP behind it: each request written is answered, or not, by
+// answer(). Keeps what was sent, as dest/cmd.
+class TapPort : public Transport {
+ public:
+  std::function<bool(const mp::Frame &, mp::Frame &)> answer;
+  std::vector<std::pair<uint16_t, uint16_t>> sent;
+  bool configured() const override { return true; }
+  bool open(std::string &) override { return open_ = true; }
+  void close() override { open_ = false; }
+  bool is_open() const override { return open_; }
+  bool write(const uint8_t *data, size_t n, std::string &) override {
+    for (size_t i = 0; i < n; i++)
+      splitter_.feed(static_cast<char>(data[i]), [&](const std::string &body) {
+        mp::Frame f, r;
+        if (!mp::decode_frame(body, f)) return;
+        sent.push_back({f.dest, f.cmd});
+        if (answer && answer(f, r)) {
+          auto w = mp::encode_frame(r.dest, r.cmd, r.payload);
+          pending_.insert(pending_.end(), w.begin(), w.end());
+        }
+      });
+    return true;
+  }
+  void drain() override {}
+  int read(char *buf, size_t n, int) override {
+    size_t k = std::min(n, pending_.size());
+    std::copy(pending_.begin(), pending_.begin() + k, buf);
+    pending_.erase(pending_.begin(), pending_.begin() + k);
+    return static_cast<int>(k);
+  }
+  int baud() const override { return 38400; }
+  std::string name() const override { return "fake"; }
+  bool sent_cmd(uint16_t cmd) const {
+    for (auto &s : sent)
+      if (s.second == cmd) return true;
+    return false;
+  }
+
+ private:
+  bool open_ = false;
+  std::vector<uint8_t> pending_;
+  esphome::tigo_monitor::protocol::FrameSplitter<std::string> splitter_;
+};
+
+static const uint16_t GW = 0x1201, FACTORY = 0x1235;
+// GET_MAC_NOW's answer: the TAP's MAC (fake, last byte varied) and its id.
+static mp::Frame mac_reply(uint16_t at, uint8_t which) {
+  mp::Frame r;
+  r.dest = at | 0x8000;
+  r.cmd = 0x003B;
+  r.payload = {0x04, 0xC0, 0x5B, 0x00, 0x00, 0x00, 0x00, which, static_cast<uint8_t>(at >> 8), static_cast<uint8_t>(at)};
+  return r;
+}
+static bool readdressed(const TapPort &port) { return port.sent_cmd(0x003C) || port.sent_cmd(0x0014); }
+
+// One missed answer at the TAP's own address is not a TAP gone back to the
+// factory address: whatever answers there (another TAP) is left alone.
+static void test_one_missed_probe_readdresses_nothing() {
+  TapPort port;
+  int asked = 0;
+  port.answer = [&](const mp::Frame &f, mp::Frame &r) {
+    if (f.cmd != 0x003A) return false;
+    if (f.dest == GW && asked++ == 0) return false;  // the first answer is lost
+    r = mac_reply(f.dest, f.dest == GW ? 1 : 2);
+    return true;
+  };
+  MasterCore core(&port, [](int, const std::string &) {}, nullptr, nullptr, GW, false, /*startup=*/true);
+  CHECK(core.open());
+  for (uint32_t t = 0; t < 3000; t += 100) core.tick(t);
+  CHECK(!readdressed(port));
+  core.close();
+}
+
+// The TAP polled goes quiet and one answers at the factory address: the same
+// TAP (its address lost in a power cut) is brought up; a different one is not.
+static bool readdresses_after_loss(uint8_t factory_mac) {
+  TapPort port;
+  bool lost = false;
+  port.answer = [&](const mp::Frame &f, mp::Frame &r) {
+    if (f.cmd == 0x0148 && f.dest == GW) lost = true;  // running: from now on the TAP is gone from GW
+    if (f.cmd != 0x003A) return false;
+    if (f.dest == GW && !lost) {
+      r = mac_reply(GW, 1);
+      return true;
+    }
+    if (f.dest == FACTORY && lost) {
+      r = mac_reply(FACTORY, factory_mac);
+      return true;
+    }
+    return false;
+  };
+  MasterCore core(&port, [](int, const std::string &) {}, nullptr, nullptr, GW, false, /*startup=*/true);
+  CHECK(core.open());
+  for (uint32_t t = 0; t < 20000; t += 100) core.tick(t);
+  core.close();
+  return readdressed(port);
+}
+
+static void test_only_the_same_tap_is_readdressed() {
+  CHECK(readdresses_after_loss(1));
+  CHECK(!readdresses_after_loss(2));
+}
+
+// A request to 0xFFFF is a broadcast, not a reply: a standby that hears only
+// another master's broadcasts is hearing a master, and doesn't take over.
+static void test_a_broadcast_is_a_master_heard() {
+  OtherMasterPort port(0xFFFF);
+  MasterCore core(&port, [](int, const std::string &) {}, nullptr, nullptr, 0x1201, false, false);
+  core.set_standby(1, nullptr, nullptr);
+  CHECK(core.open());
+  auto end = std::chrono::steady_clock::now() + std::chrono::milliseconds(2500);
+  for (uint32_t t = 0; std::chrono::steady_clock::now() < end; t += 50) {
+    core.tick(t);
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+  }
+  CHECK(port.writes == 0);
+  core.close();
+}
+
+// A master stopped by another sends nothing more, so it can't take a PV
+// request: saying yes would show a switch that never reached the TAP.
+static void test_a_stopped_master_refuses_pv() {
+  OtherMasterPort port;
+  MasterCore core(&port, [](int, const std::string &) {}, nullptr, nullptr, 0x1201, false, false);
+  CHECK(core.open());
+  for (uint32_t t = 0; t < 500; t += 100) core.tick(t);
+  CHECK(core.status().fault == Fault::second_master);
+  CHECK(!core.request_pv(true));
+  core.close();
+}
+
+// A new PV request isn't confirmed until the TAP answers it.
+static void test_a_pv_request_clears_the_last_confirmation() {
+  TapPort port;
+  port.answer = [](const mp::Frame &f, mp::Frame &r) {
+    if (f.cmd != 0x0B00) return false;
+    r.dest = f.dest | 0x8000;
+    r.cmd = 0x0B01;
+    r.payload = f.payload;
+    return true;
+  };
+  MasterCore core(&port, [](int, const std::string &) {}, nullptr, nullptr, GW, false, false);
+  core.set_pv({true, false, 0}, nullptr);
+  CHECK(core.open());
+  for (uint32_t t = 0; t < 3000; t += 100) core.tick(t);
+  CHECK(core.status().pv_confirmed);
+  CHECK(core.request_pv(false));
+  CHECK(!core.status().pv_confirmed);
+  core.close();
+}
+
 int main() {
   test_a_late_drain_is_reported();
   test_a_prompt_drain_is_not_late();
   test_the_tap_version_is_asked_once_at_start();
+  test_an_unreadable_pv_state_says_nothing();
+  test_a_master_stopped_by_another_keeps_reading();
+  test_one_missed_probe_readdresses_nothing();
+  test_only_the_same_tap_is_readdressed();
+  test_a_broadcast_is_a_master_heard();
+  test_a_stopped_master_refuses_pv();
+  test_a_pv_request_clears_the_last_confirmation();
   if (failures) {
     std::printf("%d failed\n", failures);
     return 1;

@@ -198,7 +198,8 @@ While it's off:
   can't change it while it stands by. One that takes over before it has
   heard anything (the running master repeats the state only hourly, so a
   standby started minutes earlier may not have) says nothing to the TAP
-  about PV until you switch it, so the array stays as it was.
+  about PV until you switch it, so the array stays as it was. So does a
+  Pi whose `pv.json` can't be read, and `/api/health` reports it.
 
 To control it from Home Assistant, turn on **PV output switch** under
 **Settings → MQTT**. A *PV output* switch then appears with the

@@ -70,7 +70,7 @@ async function open(opts = {}) {
     const path = new URL(req.url()).pathname.replace(/^.*(\/api\/)/, '$1');
     const json = (status, body) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
     if (path === '/api/status') return json(200, { ...routes['/api/status'], platform: 'linux' });
-    if (path === '/api/master') return json(200, api.master);
+    if (path === '/api/master') return api.masterFails ? json(500, {}) : json(200, api.master);
     if (path === '/api/master/pv' && req.method() === 'POST') {
       const body = JSON.parse(req.postData());
       api.posts.push(body);
@@ -293,5 +293,15 @@ test('standing by, the discovery switch is disabled', async () => {
   const { page, ctx } = await open({ role: 'standby', standby: 'standing_by', hash: '#busmaster' });
   await page.waitForSelector('#disc-card', { state: 'visible' });
   await page.waitForFunction(() => document.getElementById('disc-toggle').disabled);
+  await ctx.close();
+});
+
+test('a failed poll keeps the PV off banner up', async () => {
+  const { page, ctx, api } = await open({ pv: { on: false, source: 'heard', since: 1762200000 } });
+  await page.waitForSelector('#pv-banner', { state: 'visible' });
+  api.masterFails = true;
+  await page.evaluate(() => refreshPv());
+  assert.equal(await page.isVisible('#pv-banner'), true);
+  assert.equal(await page.isVisible('#pv-pill'), true);
   await ctx.close();
 });

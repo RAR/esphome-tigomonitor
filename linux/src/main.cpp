@@ -231,7 +231,7 @@ int main(int argc, char **argv) {
       // may land: one taken by the old master would be lost, and the new one
       // would start from the state before it. The requests take this too.
       std::unique_lock<std::mutex> swap(master_mu);
-      m->set_pv(pv.state(), [&pv](const PvState &s) { pv.save(s); });
+      m->set_pv(pv.state(), [&pv](const PvState &s) { pv.save(s); }, pv.unreadable());
       m->set_discovery(discovery.renew(), [&discovery](bool renew) { discovery.save(renew); });
       // Standing by, it listens as the listen role does, learning the 0x41s
       // another master sends, and takes the latest of them when it takes over.
@@ -319,7 +319,9 @@ int main(int argc, char **argv) {
           return 409;
         }
         if (!bus_master->request_pv(off)) {
-          why = "standing by: change it on the device running the bus";
+          why = bus_master->status().fault == esphome::tigo_master::Fault::second_master
+                    ? "stopped: another master is on the bus"
+                    : "standing by: change it on the device running the bus";
           return 409;
         }
         return 200;
@@ -387,7 +389,8 @@ int main(int argc, char **argv) {
     history_cv.notify_one();
   };
 
-  std::atomic<bool> bus_log_saving{false};
+  std::atomic<bool> bus_log_saving{false}, housekeeping_saving{false};
+
   auto last_publish = std::chrono::steady_clock::now() - std::chrono::hours(1);
   // Snapshots land on wall-clock multiples of the interval (:00, :05, ...),
   // so every panel's rows share timestamps.
@@ -494,8 +497,12 @@ int main(int argc, char **argv) {
       }
     }
     monitor.tick();
-    housekeeping.save_if_changed();
     // On the history worker: an fsync can take a second on a slow SD card.
+    if (housekeeping.needs_save() && !housekeeping_saving.exchange(true))
+      post_history([&] {
+        housekeeping.save_if_changed();
+        housekeeping_saving = false;
+      });
     if (bus_log.needs_save() && !bus_log_saving.exchange(true))
       post_history([&] {
         bus_log.save_if_changed();

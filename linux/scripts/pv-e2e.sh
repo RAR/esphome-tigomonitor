@@ -121,13 +121,15 @@ sleep 1
 expect "restarted mid-retry: 00, no 01" "$(stat "$out/four.json" "sorted(set(d['session'][$before:]))")" "['00']"
 stop_all
 
-# --- run 5: an unreadable pv.json holds off ---
+# --- run 5: an unreadable pv.json says nothing about PV ---
+# Neither 00 nor 01, the housekeeping's included: the TAP keeps what it was
+# last told. Holding off would make a disk fault stop the roof.
 mkdir -p "$out/five"
 printf '{' > "$out/five/pv.json"
 start five 18205 ', "master_housekeeping": true'
-waitfor 60 "len(d['session']) >= 1" "$out/five.json"
+waitfor 60 "d['polls'] >= 20" "$out/five.json"
 sleep 2
-expect "unreadable: 00, no 01" "$(stat "$out/five.json" "sorted(set(d['session']))")" "['00']"
+expect "unreadable: no 0x0B00" "$(stat "$out/five.json" "d['session']")" "[]"
 expect "and says so" "$(body GET 18205 /api/health | python3 -c 'import json,sys; print(any("pv.json" in p for p in json.load(sys.stdin)["problems"]))')" True
 stop_all
 
@@ -144,8 +146,8 @@ expect "listening: 409" "$(code POST 18206 /api/master/pv '{"on": false}' admin:
 stop_all
 
 # --- run 7: a pv.json the daemon can't open counts as unreadable, not missing ---
-# Root's file, mode 600, and the daemon running as nobody: PV held off, the
-# health problem, and no 01 (a missing file would be PV on).
+# Root's file, mode 600, and the daemon running as nobody: nothing said about
+# PV, and the health problem (a missing file would be PV on, and say 01).
 mkdir -p "$out/seven"
 printf '{"off": false, "heard": false, "since_unix": 1}\n' > "$out/seven/pv.json"
 chmod 600 "$out/seven/pv.json"
@@ -160,9 +162,9 @@ setpriv --reuid=65534 --regid=65534 --clear-groups build/linux/tigomonitord --st
   --web-dir components/tigo_server/web 2>> "$out/seven.log" &
 daemon=$!
 port=18207
-waitfor 60 "len(d['session']) >= 1" "$out/seven.json"
+waitfor 60 "d['polls'] >= 20" "$out/seven.json"
 sleep 2
-expect "can't open pv.json: 00, no 01" "$(stat "$out/seven.json" "sorted(set(d['session']))")" "['00']"
+expect "can't open pv.json: no 0x0B00" "$(stat "$out/seven.json" "d['session']")" "[]"
 expect "and says so" "$(body GET 18207 /api/health | python3 -c 'import json,sys; print(any("pv.json" in p for p in json.load(sys.stdin)["problems"]))')" True
 stop_all
 

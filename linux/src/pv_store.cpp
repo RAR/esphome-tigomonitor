@@ -31,8 +31,9 @@ bool PvStore::load() {
     state_.since_unix = j.value("since_unix", static_cast<int64_t>(0));
     return true;
   } catch (const std::exception &e) {
-    LOGE("%s is unreadable (%s); holding PV output off", path_.c_str(), e.what());
-    state_ = {true, false, 0};
+    LOGE("%s is unreadable (%s); saying nothing to the TAP about PV output until it is switched", path_.c_str(),
+         e.what());
+    state_ = {false, false, 0};
     unreadable_ = true;
     return false;
   }

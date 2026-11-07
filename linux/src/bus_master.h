@@ -66,8 +66,9 @@ class BusMaster {
     port_.set_device(device, baud);
     return core_.open();
   }
-  void set_pv(const esphome::tigo_master::PvState &state, esphome::tigo_master::MasterCore::PvSaved saved) {
-    core_.set_pv(state, std::move(saved));
+  void set_pv(const esphome::tigo_master::PvState &state, esphome::tigo_master::MasterCore::PvSaved saved,
+              bool silent = false) {
+    core_.set_pv(state, std::move(saved), silent);
   }
   bool request_pv(bool off) { return core_.request_pv(off); }
   bool request_discovery(bool renew) { return core_.request_discovery(renew); }

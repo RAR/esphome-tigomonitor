@@ -22,6 +22,7 @@ class HousekeepingStore {
   void feed(const char *data, size_t n);
   // Writes the file if anything new was learned since the last save.
   void save_if_changed();
+  bool needs_save() const;
   std::vector<esphome::tigo_monitor::master::Learned41::Entry> entries() const;
 
  private:

@@ -56,7 +56,7 @@ struct HttpContext {
   // The owner's PV off or on: 200, or 409 with why (no bus master running,
   // or it is standing by).
   std::function<int(bool off, std::string &why)> request_pv;
-  std::function<bool()> pv_unreadable;  // pv.json couldn't be read: PV held off
+  std::function<bool()> pv_unreadable;  // pv.json couldn't be read: nothing said about PV
   // The optimizers' last !Info/!Mppt answers by short id, while this monitor
   // runs the bus with queries on.
   std::function<std::map<uint16_t, esphome::tigo_monitor::master::Queries::Setup>()> setups;

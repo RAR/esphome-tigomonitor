@@ -328,7 +328,7 @@ std::vector<std::string> HttpServer::health_problems_() const {
     MasterStatus m = ctx_.master_status ? ctx_.master_status() : MasterStatus{};
     if (m.pv_unconfirmed) problems.push_back("PV output: the TAP didn't confirm it is " + std::string(m.pv.off ? "off" : "on"));
   }
-  if (ctx_.pv_unreadable && ctx_.pv_unreadable()) problems.push_back("PV output: pv.json is unreadable; holding PV off");
+  if (ctx_.pv_unreadable && ctx_.pv_unreadable()) problems.push_back("PV output: pv.json is unreadable; saying nothing to the TAP about PV until it is switched");
   // Latched until the owner clears it: a CCA on the bus may have re-PANned
   // the TAP, which every optimizer then drops off.
   if (ctx_.bus_log && ctx_.bus_log->alarm_active())
@@ -1352,7 +1352,7 @@ void HttpServer::routes_() {
   });
 
   // Pi-only: keep renewing the TAP's discovery window, or let it close (for
-  // testing; not saved). Behind the web password, as PV output is.
+  // testing; saved in discovery.json). Behind the web password, as PV output is.
   svr.Post("/api/master/discovery", [this](const httplib::Request &req, httplib::Response &res) {
     if (ctx_.current_settings().web_password.empty()) {
       send_json(res, {{"error", "set a web password first"}}, 403);

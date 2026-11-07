@@ -3867,6 +3867,9 @@
     if (PLATFORM !== 'linux') return;
     const r = await apiFetch('/api/master').catch(() => null);
     const m = r && r.ok ? await r.json().catch(() => null) : null;
+    // One poll lost (a restart, a dropped connection) keeps what was shown:
+    // a PV off banner shouldn't blink away for 5 s.
+    if (!m && pvLast) return;
     pvLast = m;
     pvApply(m);
     const still = await pvStillProducing(m && (m.role === 'master' || m.role === 'standby') ? m : null);

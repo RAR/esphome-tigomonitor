@@ -1,5 +1,7 @@
 #include "master_core.h"
 
+#include <algorithm>
+
 #include <chrono>
 #include <cstdarg>
 #include <cstdio>
@@ -83,9 +85,10 @@ void MasterCore::set_standby(uint32_t takeover_s, Sink on_listen, Learned learne
   learned_cb_ = std::move(learned);
 }
 
-void MasterCore::set_pv(const PvState &state, PvSaved saved) {
+void MasterCore::set_pv(const PvState &state, PvSaved saved, bool silent) {
   std::lock_guard<std::mutex> lock(mu_);
   pv_state_ = state;
+  pv_silent_ = silent;
   status_.pv = state;
   pv_saved_ = std::move(saved);
 }
@@ -95,8 +98,11 @@ bool MasterCore::request_pv(bool off) {
   {
     std::lock_guard<std::mutex> lock(mu_);
     if (status_.standby == Standby::standing_by || status_.standby == Standby::taking_over) return false;
+    // Stopped by another master: nothing more goes out, so it can't be done.
+    if (status_.fault == Fault::second_master) return false;
     pv_state_ = {off, false, unix_now()};
     status_.pv = pv_state_;
+    status_.pv_confirmed = status_.pv_unconfirmed = false;  // until the TAP answers this one
     pv_changed_ = true;
     pv_silent_ = false;
     s = pv_state_;
@@ -306,7 +312,7 @@ bool MasterCore::transact(uint16_t dest, uint16_t cmd, const Bytes &payload, Fra
             reply = f;
             got = true;
           }
-        } else if (!(f.dest & 0x8000) && body != sent) {
+        } else if (is_request_(f) && body != sent) {
           foreign = true;  // a request we didn't send: another master
         }
       });
@@ -367,7 +373,10 @@ void MasterCore::note_pause_(uint32_t ms, int64_t now) {
 }
 
 void MasterCore::tick_(uint32_t now_ms) {
-  if (status().fault == Fault::second_master) return;
+  if (status().fault == Fault::second_master) {
+    listen_stopped_();
+    return;
+  }
   if (!port_->is_open()) {
     // A port that isn't there yet (a USB adapter still enumerating) or went
     // away: try again every few seconds, as listening does.
@@ -634,11 +643,23 @@ void MasterCore::run_startup(uint32_t now_ms) {
   if (phase_ == Phase::probing) {
     readdressed_ = false;
     if (transact(gateway_, master::CMD_GET_MAC_NOW, {}, r)) {  // already addressed
+      probe_misses_ = 0;
+      if (r.payload.size() >= 8) tap_mac_.assign(r.payload.begin(), r.payload.begin() + 8);
       LOGI("bus master: the TAP is already at %04X; polling", gateway_);
       discovery_ = std::make_unique<master::Discovery>(FACTORY_ID, gateway_, /*scan_only=*/true);
       phase_ = Phase::discovering;  // just the scan for another TAP, then running
       timeouts_in_a_row_ = 0;
+    } else if (++probe_misses_ < PROBE_MISSES_BEFORE_FACTORY) {
+      return;  // ask at its own address again before looking anywhere else
     } else if (transact(FACTORY_ID, master::CMD_GET_MAC_NOW, {}, r)) {  // at the factory address
+      // Only the TAP this monitor was polling: another one there (a second
+      // TAP on the bus) is never given the roof TAP's id.
+      if (!tap_mac_.empty() &&
+          (r.payload.size() < 8 || !std::equal(tap_mac_.begin(), tap_mac_.end(), r.payload.begin()))) {
+        set_fault(Fault::extra_tap, "a different TAP answers at the factory address; not re-addressing it");
+        return;
+      }
+      probe_misses_ = 0;
       LOGW("bus master: the TAP is at the factory address %04X; re-addressing it to %04X", FACTORY_ID, gateway_);
       discovery_ = std::make_unique<master::Discovery>(FACTORY_ID, gateway_);
       readdressed_ = true;
@@ -690,6 +711,18 @@ void MasterCore::run_startup(uint32_t now_ms) {
   if (transact(d.dest, d.cmd, d.payload, r, d.wait_ms ? d.wait_ms : REPLY_TIMEOUT_MS)) discovery_->on_reply(r);
 }
 
+// Stopped by another master: nothing more goes out, but the bus is still
+// read, so the panels the other one polls reach the Monitor (and Home
+// Assistant) instead of going stale there. It never starts sending again
+// by itself; a restart or a settings save does that.
+void MasterCore::listen_stopped_() {
+  if (!port_->is_open()) return;
+  char buf[512];
+  int n = port_->read(buf, sizeof(buf), REPLY_TIMEOUT_MS);
+  const Sink &sink = on_listen_ ? on_listen_ : on_rx_;
+  if (n > 0 && sink) sink(buf, static_cast<size_t>(n));
+}
+
 // Standing by: read what is on the bus, for the Monitor, and note each
 // request another master sends. None for takeover_s, then a random moment
 // more, and this one takes the bus over.
@@ -709,7 +742,7 @@ void MasterCore::stand_by_(uint32_t) {
     for (int i = 0; i < n; i++) {
       splitter_.feed(buf[i], [&](const std::string &body) {
         Frame f;
-        if (!master::decode_frame(body, f) || (f.dest & 0x8000)) return;
+        if (!master::decode_frame(body, f) || !is_request_(f)) return;
         heard = true;
         if (f.cmd == master::CMD_SESSION && f.payload.size() == 1) pv_heard = f.payload[0];
       });

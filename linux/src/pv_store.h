@@ -3,8 +3,10 @@
 // The PV switch's state (master_core.h's PvState), kept in <state_dir>/pv.json
 // rather than settings.json: a settings save rebuilds the bus master, and a
 // state heard off the bus is state, not a setting. A missing file is PV on.
-// One that can't be read holds PV off, and says so on /api/health: better
-// an array left off than one turned back on by a damaged file.
+// One that can't be read says nothing to the TAP about PV, so the TAP keeps
+// what it was last told, and says so on /api/health. Holding PV off instead
+// would turn a disk or permissions fault into a roof that stops producing,
+// for no safety: PV off is not rapid shutdown.
 
 #include "bus_master.h"
 

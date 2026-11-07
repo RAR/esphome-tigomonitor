@@ -84,6 +84,11 @@ void HousekeepingStore::save_if_changed() {
     LOGW("housekeeping: cannot write %s", path_.c_str());
 }
 
+bool HousekeepingStore::needs_save() const {
+  std::lock_guard<std::mutex> lock(mu_);
+  return dirty_;
+}
+
 std::vector<Learned41::Entry> HousekeepingStore::entries() const {
   std::lock_guard<std::mutex> lock(mu_);
   return learned_.entries();
