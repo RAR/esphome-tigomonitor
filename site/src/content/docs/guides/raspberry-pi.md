@@ -39,7 +39,7 @@ you saw, working or not.
 - **The CCA Info page talks to the CCA over the Pi's Bluetooth**, as the
   ESP32 does with `cca_source: ble`. The Pi finds the nearest CCA by itself;
   there is no MAC to enter. For a CCA on firmware older than 4.0.4, set its
-  IP under Device Configuration to use its local HTTP API instead.
+  IP under Settings → General to use its local HTTP API instead.
 
 ## What you need
 
@@ -151,6 +151,28 @@ No CCA, or no Tigo account? Under **Settings → Web UI**, switch off the
 opens the Dashboard instead. Hiding a page stops nothing behind it, such as
 a CCA sync at startup.
 
+## New and missing optimizers
+
+The Pi keeps track of when it first and last heard each optimizer, so it
+can point out the ones that need you:
+
+- **A new optimizer**, first heard in the last week and in no string yet,
+  gets a notice on the Topology page, and a line in the log. A replacement
+  shows up as one. In **Edit layout**, drag it into its string, or use
+  **Replace…** on its tile to give it the place, name and string of the
+  panel it replaced.
+- The **Devices** page tags an optimizer **Missing** after 3 days with no
+  reading, and **Not on the TAP** once the TAP's node table has stopped
+  listing it for a day. **Not set up** means its answers say the settings a
+  CCA writes when it enrolls an optimizer aren't all written; it needs
+  **Query the optimizers** on.
+- Home Assistant gets both counts, as *New optimizers* and *Missing
+  optimizers*.
+
+For one you know isn't reporting, such as a spare the TAP knows but that
+isn't on the roof, press **Mark known** on the Devices page. It stops
+counting as missing, and leaves the panel totals.
+
 ## Set a password
 
 Out of the box, as on the ESP32, the web UI has no login: anyone on your
@@ -164,6 +186,60 @@ it; [HTTPS](#use-https) closes that.
 
 The MQTT password stays on the Pi: the web UI never shows it, and changing
 the broker's address or username clears it, so it has to be entered again.
+
+## Run the bus in the CCA's place
+
+*Experimental.* The Pi can do the CCA's job on the bus: poll the TAP for
+the panels' readings and keep the TAP running, so the CCA can come off the
+bus. It sends only the requests the CCA sends, in the CCA's shapes, and
+refuses anything that would change the TAP's network settings. It has been
+the only master on one 40-panel roof since 2026-10-29, when that site's CCA
+failed.
+
+Under **Settings → Bus**, set **Bus role**:
+
+- **Listen, beside the CCA**, the default. The Pi only reads.
+- **Master, in place of the CCA.** Unplug the CCA first: two masters on one
+  bus talk over each other. If the Pi hears another master anyway, it stops
+  sending and goes on reading, so its readings stay real, and says so on
+  `/api/health`. Restarting it, or saving a setting, starts it sending
+  again.
+- **Standby, takes over if the master stops.** It listens beside a CCA or
+  another monitor, and runs the bus itself once it has heard no master for
+  **Take over after** seconds. The default 3 s suits two monitors. Beside a
+  CCA use 30 s or more: a CCA that reboots is quiet for longer than that,
+  and never gets the bus back. Of two standbys, give the one you prefer the
+  shorter time. A standby sends only its own status over MQTT until it
+  takes over, unless **Panel readings while standing by** is on under
+  Settings → MQTT, so Home Assistant follows whichever one runs the bus.
+
+Running the bus, the Pi polls the TAP and renews its
+[discovery window](#disable-the-discovery-window). The rest of what the CCA
+did is behind four switches on the same tab, all off until you turn them on:
+
+- **Bring up the TAP.** After a power cut a TAP can come back at its
+  factory address, where nothing polls it. This re-addresses it and starts
+  it again. It only re-addresses the TAP it was polling, never a second one
+  on the bus, and a TAP stranded some other way may still need the real CCA.
+- **Send the CCA's housekeeping:** its regular 0x41 to each optimizer, its
+  hourly 0x0B00 and 0x22, and its reads of the TAP's node table.
+- **Query the optimizers:** the CCA's five questions to each one. The
+  firmware on the Devices page comes from the answers.
+- **Let queries change optimizer settings:** the two writes the CCA sends
+  when an answer calls for them. Needs **Query the optimizers**.
+
+**A dead master is not a fail-safe.** On the roof we measured, with no
+master at all, the array kept producing for the 8 to 10 minutes we watched
+after the TAP's window ran out, with the inverters' RSS transmitters on and
+with them unplugged. Rapid shutdown is the RSD's job: it cuts the TAP's
+power, whatever the Pi is doing.
+
+The sidebar's **Bus** page has the switches and the master's health on its
+**Control** tab, and what is said on the bus on its **Traffic** tab; see
+[the web UI's pages](/esphome-tigomonitor/guides/web-server/#the-pages-you-get). An ESP32 can run
+the bus too, with `tigo_master:`
+([example](https://github.com/RAR/esphome-tigomonitor/blob/main/boards/example-waveshare-relay-1ch-standby.yaml)),
+but that hasn't been run on hardware yet.
 
 ## Turn the array's output off
 
