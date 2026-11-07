@@ -450,6 +450,50 @@ void HttpServer::routes_() {
     send_json(res, {{"devices", devices}, {"count", devices.size()}});
   });
 
+  // The mesh map: each optimizer's TAP, reports lost today and a day of RSSI
+  // (the raw byte, not dBm). Short addresses and labels only, never a MAC.
+  // The parent field of a NetDiag join isn't decoded yet, so parent is null.
+  svr.Get("/api/mesh", [&mon](const httplib::Request &, httplib::Response &res) {
+    auto stats = mon.links();
+    auto panels = mon.panels();
+    int64_t now_s = std::chrono::duration_cast<std::chrono::seconds>(
+                        std::chrono::system_clock::now().time_since_epoch()).count();
+    std::set<uint16_t> tap_ids;
+    json nodes = json::array();
+    for (const auto &e : stats.links()) {
+      const auto &l = e.second;
+      const Panel *p = nullptr;
+      for (const auto &q : panels)
+        if (q.addr == e.first) p = &q;
+      char tap[8] = "";
+      if (l.tap) {
+        snprintf(tap, sizeof(tap), "%04X", l.tap);
+        tap_ids.insert(l.tap);
+      }
+      json rssi_24h = json::array();
+      for (int v : stats.rssi_24h(e.first, now_s)) rssi_24h.push_back(v < 0 ? json(nullptr) : json(v));
+      bool heard = l.last_heard_s > 0;
+      nodes.push_back({{"addr", e.first},
+                       {"label", p ? panel_name(*p) : e.first},
+                       {"string", p ? string_of(mon, *p) : ""},
+                       {"tap", l.tap ? json(tap) : json(nullptr)},
+                       {"parent", nullptr},
+                       {"rssi", heard ? json(l.rssi) : json(nullptr)},
+                       {"rssi_24h", rssi_24h},
+                       {"reports_today", l.reports_today},
+                       {"lost_today", l.lost_today},
+                       {"last_heard_s", heard ? json(now_s - l.last_heard_s) : json(nullptr)},
+                       {"last_join_unix", l.last_join_s ? json(l.last_join_s) : json(nullptr)}});
+    }
+    json taps = json::array();
+    for (uint16_t t : tap_ids) {
+      char id[8];
+      snprintf(id, sizeof(id), "%04X", t);
+      taps.push_back({{"id", id}});
+    }
+    send_json(res, {{"loss_method", "slot"}, {"parent_confirmed", false}, {"taps", taps}, {"nodes", nodes}});
+  });
+
   svr.Get("/api/overview", [&mon](const httplib::Request &, httplib::Response &res) {
     auto now = Clock::now();
     double power_out = 0, current = 0, eff = 0, temp = 0;

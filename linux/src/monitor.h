@@ -6,6 +6,7 @@
 // the ESP32 (#74). Thread-safe: the serial thread feeds it, the publisher and
 // web server read snapshots.
 
+#include "link_stats.h"
 #include "tigo_layout.h"
 #include "tigo_protocol.h"
 
@@ -106,6 +107,8 @@ class Monitor {
 
   std::vector<Panel> panels() const;
   std::vector<Node> nodes() const;
+  // Each optimizer's link: its TAP, reports lost today, RSSI over a day.
+  esphome::tigo_monitor::link::LinkStats links() const;
   // A new optimizer: a barcode first heard (in a Frame 27) more than a day
   // after this monitor first heard any, so a fresh install's own panels
   // aren't news. When each was first heard, by barcode (unix s).
@@ -183,7 +186,8 @@ class Monitor {
 
  private:
   void on_frame_(const std::string &raw);
-  void on_power_packet_(const std::string &packet);
+  void on_power_packet_(const std::string &packet, uint16_t tap);
+  void on_netdiag_(const std::string &packet);
   void on_frame27_(const std::string &hex);
   Panel *find_panel_(const std::string &addr);
   float total_power_locked_(bool input = false) const;
@@ -201,6 +205,7 @@ class Monitor {
   std::vector<Panel> panels_;
   std::vector<Node> nodes_;
   std::vector<Node> parked_cca_;
+  esphome::tigo_monitor::link::LinkStats links_;
   BusStats stats_;
   double energy_kwh_ = 0;
   double energy_in_kwh_ = 0, today_in_kwh_ = 0;

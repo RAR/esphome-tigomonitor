@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdlib>
 #include <ctime>
 #include <fstream>
 #include <map>
@@ -25,6 +26,14 @@ static std::string local_date() {
   char buf[16];
   strftime(buf, sizeof(buf), "%Y-%m-%d", &lt);
   return buf;
+}
+
+// Today as YYYYMMDD in local time, for counters that restart at midnight.
+static int local_day() {
+  time_t t = time(nullptr);
+  tm lt{};
+  localtime_r(&t, &lt);
+  return (lt.tm_year + 1900) * 10000 + (lt.tm_mon + 1) * 100 + lt.tm_mday;
 }
 
 static int64_t unix_ms() {
@@ -87,8 +96,13 @@ void Monitor::on_frame_(const std::string &raw) {
 
   switch (proto::frame_type(hex)) {
     case proto::FrameType::power:
-      if (!proto::walk_power_packets(hex, [this](const std::string &type, const std::string &packet) {
-            if (type == "31") on_power_packet_(packet);
+      // The TAP it came through: a reply's address is the TAP's RS485 id
+      // with 0x8000 set.
+      if (!proto::walk_power_packets(hex, [this, tap = static_cast<uint16_t>(
+                                                     std::strtoul(hex.substr(0, 4).c_str(), nullptr, 16) & 0x7FFF)](
+                                                const std::string &type, const std::string &packet) {
+            if (type == "31") on_power_packet_(packet, tap);
+            else if (type == "09") on_netdiag_(packet);
           }))
         LOGD("power frame ended in a truncated packet");
       break;
@@ -106,7 +120,7 @@ Panel *Monitor::find_panel_(const std::string &addr) {
   return nullptr;
 }
 
-void Monitor::on_power_packet_(const std::string &packet) {
+void Monitor::on_power_packet_(const std::string &packet, uint16_t tap) {
   proto::PowerReading r;
   auto result = proto::decode_power_packet(packet, power_calibration_, r);
   if (result != proto::PowerDecode::ok) {
@@ -126,6 +140,8 @@ void Monitor::on_power_packet_(const std::string &packet) {
   p->updated_unix_ms = unix_ms();
   p->readings++;
   int64_t now_s = p->updated_unix_ms / 1000;
+  links_.on_report(r.addr, tap, r.rssi, static_cast<uint16_t>(std::strtoul(r.slot_counter, nullptr, 16)), now_s,
+                   local_day());
   for (auto &n : nodes_) {
     if (n.addr == p->addr) {
       if (now_s - n.last_heard_unix >= SEEN_SAVE_EVERY_S) dirty_ = true;
@@ -152,6 +168,18 @@ void Monitor::on_power_packet_(const std::string &packet) {
   }
   if (r.power_out > p->peak_power) p->peak_power = r.power_out;
   LOGD("%s: %.1f W out, %.2f V in, %.1f C", r.addr, r.power_out, r.voltage_in, r.temperature);
+}
+
+// A NetDiag join: the optimizer named by its MAC, else by the packet's
+// address. Only who and when are known; see decode_netdiag_packet.
+void Monitor::on_netdiag_(const std::string &packet) {
+  proto::NetDiagJoin j;
+  if (!proto::decode_netdiag_packet(packet, j)) return;
+  std::string addr = j.addr;
+  for (const auto &n : nodes_)
+    if (n.long_address == j.node_mac) addr = n.addr;
+  links_.on_join(addr, unix_ms() / 1000);
+  LOGI("%s joined (NetDiag)", addr.c_str());
 }
 
 void Monitor::on_frame27_(const std::string &hex) {
@@ -270,6 +298,11 @@ int Monitor::new_optimizers(int64_t now_unix) const {
 std::vector<Node> Monitor::nodes() const {
   std::lock_guard<std::mutex> lock(mu_);
   return nodes_;
+}
+
+esphome::tigo_monitor::link::LinkStats Monitor::links() const {
+  std::lock_guard<std::mutex> lock(mu_);
+  return links_;
 }
 
 BusStats Monitor::stats() const {
