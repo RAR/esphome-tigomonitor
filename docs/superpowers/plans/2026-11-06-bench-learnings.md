@@ -58,7 +58,7 @@
 
 ---
 
-### Task 9: Decode the report fields the CCA UI named (later)
+### Task 9: Decode the report fields the CCA UI named (later) — not started 2026-11-07: the sequence number's offset isn't established, and a slot-counter decode alone would have no consumer
 
 From the 2026-11-06 UI pages, none urgent:
 - **The power report's slot counter** (`slot_counter`, already parsed as text): top 2 bits = Hslot, low 14 = 5 ms ticks. That gives each reading's measured time.
@@ -82,7 +82,7 @@ Docs only; no tests.
 - [ ] **Step 5:** Out of scope, "Removing an optimizer": add that the TAP has no single-entry delete; removal would be erase + rewrite, which we ban.
 - [ ] **Step 6:** Commit: `docs: the commissioning doc catches up with 2720da4 and the H1.0007 analysis`
 
-### Task 2: Name the 0x2F counts and show them
+### Task 2: Name the 0x2F counts and show them — done 2026-11-07 (b688358)
 
 The parser already takes the third count (`data[7..8]`, in table) for the renewal, which the analysis confirms. The other two are discarded.
 
@@ -107,7 +107,7 @@ The parser already takes the third count (`data[7..8]`, in table) for the renewa
 - [ ] **Step 6:** `node --check` on app.html's script, `cd site && npm test`, then `npm run screenshots`; open the Bus master PNG.
 - [ ] **Step 7:** Commit: `feat(master): show how many of the TAP's table have joined`
 
-### Task 3: Record the empty-table renewal gap
+### Task 3: Record the empty-table renewal gap — done 2026-11-07 (b688358)
 
 **Files:**
 - Modify: `components/tigo_monitor/tigo_master.h` (the guard comment near `discovery_renewal_args`)
@@ -117,7 +117,7 @@ The parser already takes the third count (`data[7..8]`, in table) for the renewa
 - [ ] **Step 2:** Comment: the CCA never sent 0, and a TAP with an empty table therefore can't have its window opened by us. Phase 2's first table write is what makes the count non-zero.
 - [ ] **Step 3:** Commit with Task 2 or on its own: `test(master): pin that an empty table gets no renewal`
 
-### Task 4: Node Table tag wording for 0x8000 entries
+### Task 4: Node Table tag wording for 0x8000 entries — done differently 2026-11-07 (8ce0dd8): the "Not set up" tag is the !Mppt N flag, not a 0x8000 entry, so its tooltip now says that; nothing marks 0x8000 entries yet
 
 **Files:**
 - Modify: `components/tigo_server/web/app.html` (the "not set up" tag and its tooltip)
@@ -127,7 +127,11 @@ The parser already takes the third count (`data[7..8]`, in table) for the renewa
 - [ ] **Step 2:** `node --check`, `cd site && npm test`.
 - [ ] **Step 3:** Commit: `style(ui): say what a not-set-up optimizer is waiting for`
 
-### Task 5 (owner's call): Watch the TAP's PAN
+### Task 5 (owner's call): Watch the TAP's PAN — superseded 2026-11-07
+
+The reconfiguration alarm (8665308, a6e48f7) covers the risk without reading or storing the PAN: any request our gate classes `never` raises it, on any role. Replayed against the 2026-11-06 captures it fired on the reflash, every re-key, erase, SET_CHANNEL and scan, and on nothing in the CCA's steady state or the bring-up. The PAN changes on every re-key, so a PAN watch would have needed a baseline it can't keep.
+
+Original note:
 
 A CCA writes the TAP's PAN from its own serial ([[backup-cca-repans-tap]]). If a CCA ever reaches the roof bus, every optimizer drops off. A watch would say so directly.
 
@@ -139,17 +143,17 @@ Don't build it until the owner says yes: it widens a bring-up read to every star
 
 ---
 
-### Task 6: Don't loop on a TAP that refuses polls
+### Task 6: Don't loop on a TAP that refuses polls — done 2026-11-07 (2f196c6)
 
 When a TAP answers polls with 0x0006 (refused), say so once and back off; don't treat it as a lost TAP and re-probe every few seconds. Test: a mock TAP that refuses 0148 gets one warning and no re-probe loop within 60 s. Commit: `fix(master): a TAP that refuses polls is not a lost TAP`
 
 ---
 
-### Task 7: Treat 0x0146 as "the TAP didn't take that query"
+### Task 7: Treat 0x0146 as "the TAP didn't take that query" — done 2026-11-07 (eb04ff8)
 
 When a text query (tunnel sub 06) gets 0x0146 `00 02` back from the TAP instead of 0x0B10, end that transaction at once. What 0x0146 means isn't settled: the TAP sent it while the optimizer was off, but also at 21:37:03–06 for `Version` and `Info`, two seconds before it acked `Smrt` and `Smrt_` to the same node, just after a RESET. So it could be "unreachable" or "busy". Either way, end the transaction: no retry, no wait for a timeout. Count it per node, and don't let it look like a lost TAP or a second master. Test: a mock TAP that answers sub 06 to node 2 with `0146 00 02` → one "query not taken" result, no retries, polling unaffected. Commit: `fix(master): a query to an unreachable optimizer ends at the TAP's answer`
 
-### Task 8: Ban the TAP-reconfiguring frames, and rename sub 0x2B
+### Task 8: Ban the TAP-reconfiguring frames, and rename sub 0x2B — done 2026-11-07 (5c27cf9; also ResetNode, PeriodicCfg Write, SetKnownNetworks, EraseStackTrace, 0x1B and SetTable)
 
 The CCA's own UI (Mesh → History, 2026-11-06) names tunnel sub 0x0D `GatewayCfg Req`. With args `00 00` or `00 01` it's a read. With `01 00` and a 36-byte blob it's a **write of the TAP's whole network config** (PAN, channel and what is probably key material). That's how a CCA re-PANs a TAP. Our gate returns `bench_only` for it today; make it `never`. The same UI names sub 0x2B `EraseFlash`, not "Stop Discovery". It's already `never`; rename `SUB_DISCOVERY_STOP` and fix its comment.
 Also never, in every mode, from the 2026-11-06 UI session:
