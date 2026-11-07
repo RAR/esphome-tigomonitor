@@ -301,8 +301,15 @@ std::vector<Node> Monitor::nodes() const {
 }
 
 esphome::tigo_monitor::link::LinkStats Monitor::links() const {
-  std::lock_guard<std::mutex> lock(mu_);
-  return links_;
+  esphome::tigo_monitor::link::LinkStats copy;
+  {
+    std::lock_guard<std::mutex> lock(mu_);
+    copy = links_;
+  }
+  // An optimizer not heard since midnight reads today's zeros, not
+  // yesterday's counts.
+  copy.roll(local_day());
+  return copy;
 }
 
 BusStats Monitor::stats() const {

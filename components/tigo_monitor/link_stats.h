@@ -31,6 +31,8 @@ static const size_t BUCKETS = 288;         // a day of them
 // A gap at least this long in wall-clock time isn't counted: the counter may
 // have wrapped, and an optimizer that stopped at dusk lost nothing.
 static const int64_t LONG_GAP_S = 200;
+// A report at most this far behind the newest is a late one, not a wrap.
+static const uint32_t LATE_TICKS = 4 * BIN_TICKS;
 
 inline uint32_t slot_ticks(uint16_t slot) { return (slot >> 14) * 12000u + (slot & 0x3FFF); }
 
@@ -45,7 +47,7 @@ struct Link {
   // Internal.
   struct Bucket {
     int32_t index = -1;  // unix_s / BUCKET_S
-    uint16_t sum = 0;    // at most 150 reports of 255
+    uint16_t sum = 0;    // at most 255 reports of 255
     uint8_t n = 0;
   };
   int day = 0;
@@ -60,24 +62,33 @@ class LinkStats {
   // day: anything that changes at local midnight (the daemon passes YYYYMMDD).
   void on_report(const std::string &addr, uint16_t tap, int rssi, uint16_t slot, int64_t unix_s, int day) {
     Link &l = links_[addr];
-    if (l.day != day) {
-      l.day = day;
-      l.reports_today = 0;
-      l.lost_today = 0;
-      l.cadence = 0;
-    }
+    roll_(l, day);
     uint32_t ticks = slot_ticks(slot);
+    bool late = false;
     if (l.have_slot && unix_s - l.last_heard_s < LONG_GAP_S) {
       uint32_t gap = (ticks + WRAP_TICKS - l.last_ticks) % WRAP_TICKS;
-      if (gap == 0 || gap > WRAP_TICKS / 2) return;  // a duplicate, or out of order
-      uint32_t step = gap < BIN_TICKS ? BIN_TICKS : gap;
-      // The first gap of the day only teaches the cadence, so a loss in it
-      // goes uncounted.
-      if (l.cadence == 0 || step < l.cadence) l.cadence = step;
-      l.lost_today += (gap + l.cadence / 2) / l.cadence - 1;
+      if (gap == 0) {  // the same report again
+        l.last_heard_s = unix_s;
+        return;
+      }
+      if (gap > WRAP_TICKS - LATE_TICKS) {
+        // Up to 4 bins behind the newest: a report that arrived late (they
+        // come in pairs), filling a hole already counted as lost.
+        late = true;
+        if (l.lost_today) l.lost_today--;
+      } else if (gap <= WRAP_TICKS / 2) {
+        uint32_t step = gap < BIN_TICKS ? BIN_TICKS : gap;
+        // The first gap of the day only teaches the cadence, so a loss in it
+        // goes uncounted; and while the cadence is still a multiple of the
+        // bin, a smaller gap counts nothing.
+        if (l.cadence == 0 || step < l.cadence) l.cadence = step;
+        l.lost_today += (gap + l.cadence / 2) / l.cadence - 1;
+      }
+      // Otherwise more than half the wrap: a silence of 2 minutes or so,
+      // too long to tell from the counter alone. Not counted.
     }
     l.have_slot = true;
-    l.last_ticks = ticks;
+    if (!late) l.last_ticks = ticks;
     l.tap = tap;
     l.rssi = rssi;
     l.last_heard_s = unix_s;
@@ -89,6 +100,13 @@ class LinkStats {
       b.sum = static_cast<uint16_t>(b.sum + rssi);
       b.n++;
     }
+  }
+
+  // Starts a new day's counts for every optimizer not heard since midnight,
+  // which on_report alone would leave reading yesterday's. Call before
+  // reading the counts.
+  void roll(int day) {
+    for (auto &e : links_) roll_(e.second, day);
   }
 
   void on_join(const std::string &addr, int64_t unix_s) { links_[addr].last_join_s = unix_s; }
@@ -112,6 +130,13 @@ class LinkStats {
   const std::map<std::string, Link> &links() const { return links_; }
 
  private:
+  static void roll_(Link &l, int day) {
+    if (l.day == day) return;
+    l.day = day;
+    l.reports_today = 0;
+    l.lost_today = 0;
+    l.cadence = 0;
+  }
   static size_t bucket_of_(int64_t unix_s) { return static_cast<size_t>(unix_s / BUCKET_S); }
   std::map<std::string, Link> links_;
 };

@@ -144,6 +144,46 @@ static void test_tap_and_last_heard() {
   CHECK(s.links().at("0001").last_heard_s == T0);
 }
 
+// Review fixes, 2026-11-07.
+static void test_a_late_report_fills_its_hole() {
+  LinkStats s;
+  reports(s, "0001", {0, 400});
+  s.on_report("0001", 0x1201, 120, slot_of(1200), T0 + 4, DAY);
+  s.on_report("0001", 0x1201, 120, slot_of(800), T0 + 4, DAY);
+  CHECK(s.links().at("0001").lost_today == 0);
+  CHECK(s.links().at("0001").reports_today == 4);
+}
+
+static void test_a_short_silence_keeps_counting() {
+  LinkStats s;
+  reports(s, "0001", {0, 400});
+  // 150 s quiet: a modular gap past half the wrap, but no wrap.
+  s.on_report("0001", 0x1201, 120, slot_of(30400), T0 + 152, DAY);
+  s.on_report("0001", 0x1201, 120, slot_of(30800), T0 + 154, DAY);
+  CHECK(s.links().at("0001").reports_today == 4);
+  CHECK(s.links().at("0001").lost_today == 0);
+  CHECK(s.links().at("0001").last_heard_s == T0 + 154);
+}
+
+static void test_a_duplicate_is_still_heard() {
+  LinkStats s;
+  s.on_report("0001", 0x1201, 120, slot_of(400), T0, DAY);
+  s.on_report("0001", 0x1201, 120, slot_of(400), T0 + 1, DAY);
+  CHECK(s.links().at("0001").last_heard_s == T0 + 1);
+  CHECK(s.links().at("0001").reports_today == 1);
+}
+
+static void test_a_silent_optimizer_reads_zero_after_midnight() {
+  LinkStats s;
+  reports(s, "0001", {0, 400, 1200});
+  s.roll(DAY + 1);
+  CHECK(s.links().at("0001").reports_today == 0);
+  CHECK(s.links().at("0001").lost_today == 0);
+  s.roll(DAY + 1);  // again on the same day: nothing changes
+  s.on_report("0001", 0x1201, 120, slot_of(1600), T0 + 8, DAY + 1);
+  CHECK(s.links().at("0001").reports_today == 1);
+}
+
 int main() {
   test_slot_ticks();
   test_steady_reports_lose_nothing();
@@ -159,6 +199,10 @@ int main() {
   test_ring_forgets_after_a_day();
   test_join_is_recorded();
   test_tap_and_last_heard();
+  test_a_late_report_fills_its_hole();
+  test_a_short_silence_keeps_counting();
+  test_a_duplicate_is_still_heard();
+  test_a_silent_optimizer_reads_zero_after_midnight();
   if (failures) {
     std::printf("%d failed\n", failures);
     return 1;
