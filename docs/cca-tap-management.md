@@ -110,7 +110,7 @@ Our master does steps 1–6 for one TAP. Its STORE runs only on that drop-back p
 ## Reports and timing
 
 - **Power reports carry a slot counter:** top 2 bits = Hslot 0–3, low 14 bits = 5 ms ticks. One report per 2 s bin (400 ticks); an Hslot is 60 s; the counter wraps every 4 min. `tigo_protocol.h` keeps it as text (`slot_counter`).
-- **Each report has a sequence number,** so loss and duplicates can be counted: 120 good, 1 lost in 4 min on the bench.
+- **Reports carry no sequence number.** No byte steps by one from report to report in the bench captures; the CCA UI's "serial" column is the CCA's own count. Loss shows in the slot counter instead: reports land on 400-tick (2 s) bins, so a gap of 800, 1200 or 1600 ticks means 1, 2 or 3 reports missed, and 0 a duplicate. `link_stats.h` counts it per optimizer.
 - **The CCA polls each TAP about 44 times a second,** about 22.8 ms apart, alternating between TAPs. Over 98% of replies are empty.
   - TAP turnaround averages 10–13 ms, worst case about 142 ms.
   - Our master polls at a similar rate, one request per tick with a 10 ms sleep. Its reply timeout is 50 ms, so the rare slow reply is retried, and the late one is discarded by `transact`'s request match.
