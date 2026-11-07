@@ -200,6 +200,10 @@ static void test_summaries() {
   CHECK(ask(0x000A, {}, 0x000B, Bytes{'M', 'g', 'a', 't', 'e', ' ', 'V', 'e', 'r', 's', 'i', 'o', 'n', ' ', 'G', '8', '\r'},
             500) == "Mgate G8");
   CHECK(ask(CMD_TUNNEL, tunnel_request(0x22, 4, {0x00, 0x00}), 0x0B10, hex("0005002304"), 600) == "To every optimizer");
+  // SetPgw: the target node, then 00 00 00 <stream> 00 and content copied from a CCA.
+  CHECK(ask(CMD_TUNNEL, tunnel_request(0x41, 7, hex("00270000000400aa00000000040500000000000000000000")), 0x0B10,
+            hex("000d004107"), 650) == "Preferred gateway for node 0027 · stream 04");
+  CHECK(last(w).node == 0x27 && last(w).category == "housekeeping");
   CHECK(ask(CMD_TUNNEL, tunnel_request(0x0D, 5, {0x00, 0x01}), 0x0B10, hex("0006000e0501"), 700) ==
         "Read the TAP's network config (part 1)");
   CHECK(ask(0x003C, hex("3724926604c05b0000ab12cd1202"), 0x003D, {}, 800) == "TAP 04C05B0000AB12CD to 1202");

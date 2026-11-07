@@ -479,7 +479,8 @@
   .bx-src { font-size: 12.5px; color: var(--text-dim); }
   .bx-src.other { color: var(--bad); font-weight: 600; }
   .bx-ex { font-weight: 600; min-width: 0; }
-  .bx-ex small { display: block; font-weight: 400; color: var(--text-faint); font-size: 11.5px; }
+  .bx-ex small, .bx-mono.node small { display: block; font-weight: 400; color: var(--text-faint); font-size: 11.5px; }
+  .bx-mono.node small { font-family: inherit; }
   .bx-res { font-size: 12px; font-weight: 600; border-radius: 6px; padding: 1px 7px; justify-self: start; white-space: nowrap; }
   .bx-res.ok { background: rgba(74,222,128,0.15); color: var(--good); }
   .bx-res.warn { background: rgba(251,191,36,0.15); color: var(--warn); }
@@ -4088,6 +4089,8 @@
   // 2 s while open.
   let busLast = null, busPaused = false, busCat = 'all';
   const busOpen = new Set();  // exchanges whose bytes are showing, by id
+  let busNames = {}, busNamesAt = 0;  // node id (upper-case hex) → panel name, from /api/devices
+  const busName = node => node ? busNames[node.toUpperCase()] || '' : '';
   const busWhen = ms => new Date(ms).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' });
   const BUS_CATS = [['all', 'All'], ['discovery', 'Discovery'], ['queries', 'Queries'], ['housekeeping', 'Housekeeping'],
                     ['bringup', 'Bring-up'], ['other_master', 'Other master'], ['reconfig', 'Reconfigures the TAP']];
@@ -4115,7 +4118,7 @@
       `<span class="bx-src${e.other_master ? ' other' : ''}">${from}</span>` +
       `<span class="bx-mono tap">${tap}</span>` +
       `<span class="bx-ex">${logEsc(e.name)}${e.sub_name ? `<small>${logEsc(e.sub_name)}</small>` : ''}</span>` +
-      `<span class="bx-mono node">${e.node || '—'}</span>` +
+      `<span class="bx-mono node">${e.node || '—'}${busName(e.node) ? `<small>${logEsc(busName(e.node))}</small>` : ''}</span>` +
       `<span class="bx-res ${res[0]}">${res[1]}</span>` +
       `<span class="bx-mono rt${e.rt_ms != null && e.rt_ms > 30 ? ' slow' : ''}">${rt}</span>` +
       `<span class="bx-sum">${sum}</span></div>` +
@@ -4125,7 +4128,7 @@
   function busShown(e) {
     if (!busIn(e, busCat)) return false;
     const q = document.getElementById('buslog-search').value.trim().toLowerCase();
-    return !q || [e.name, e.sub_name, e.addr, e.cmd, e.node || '', e.summary, e.answer, e.request_hex, e.reply_hex]
+    return !q || [e.name, e.sub_name, e.addr, e.cmd, e.node || '', busName(e.node), e.summary, e.answer, e.request_hex, e.reply_hex]
       .join(' ').toLowerCase().includes(q);
   }
   function busApply(b) {
@@ -4150,7 +4153,7 @@
       tile('Polls', n(s.polls), `${per}/s · ${n(s.polls_lost)} lost${s.polls_refused ? ` · ${n(s.polls_refused)} refused` : ''}`) +
       tile('Discovery', n(c.discovery), s.discovery || 'not read yet') +
       tile('Queries', n(c.queries), `${n(s.delivered)} delivered · ${n(s.not_delivered)} not`) +
-      tile('Housekeeping', n(c.housekeeping), 'table pages, 0x41, PV') +
+      tile('Housekeeping', n(c.housekeeping), 'table pages, preferred gateways, PV') +
       tile('Round trip', s.rt_median_ms == null ? '—' : `${s.rt_median_ms} ms`, s.rt_max_ms == null ? 'median' : `median · max ${s.rt_max_ms} ms`) +
       tile('Other master', n(s.other_master), s.reconfig ? `${n(s.reconfig)} reconfigure the TAP` : 'none heard', s.other_master || s.reconfig);
   }
@@ -4200,6 +4203,11 @@
       const r = await apiFetch(open ? '/api/bus' : '/api/bus?limit=1');
       if (!r.ok) throw new Error('/api/bus ' + r.status);
       const b = await r.json();
+      if (open && Date.now() - busNamesAt > 60000) {
+        busNamesAt = Date.now();
+        const d = await apiFetch('/api/devices').then(x => x.ok ? x.json() : null).catch(() => null);
+        if (d) busNames = Object.fromEntries((d.devices || []).filter(p => p.name).map(p => [String(p.addr).toUpperCase(), p.name]));
+      }
       busApply(b);
       if (open) { busLast = b; renderBus(); }
     } catch (e) {

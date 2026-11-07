@@ -99,7 +99,9 @@ test('the Bus log: the strip, one row per exchange, and a row opens to its bytes
   assert.match(strip, /Other master0none heard/);
   const rows = await page.$$eval('#bus-rows .bx-row', (els) => els.map((e) => e.textContent));
   assert.match(rows[0], /master1201TunnelDiscState—answered12 msOpen, 412 s left · 40 of the 44 in the table have joined/);
-  assert.match(rows[1], /0002delivered13 ms\^00Info → !Info 0027 12 0000 1\.9 s later/);
+  // A node id carries its panel's name, from /api/devices.
+  const panel = routes['/api/devices'].devices.find((d) => d.addr === '0002').name;
+  assert.match(rows[1], new RegExp(`0002${panel}delivered13 ms\\^00Info → !Info 0027 12 0000 1\\.9 s later`));
   assert.match(rows[2], /0007not delivered9 ms/);
   assert.match(rows[3], /VERSION—no reply—Nothing back/);
   assert.match(await page.textContent('#buslog-meta'), /4 exchanges · polls 44\.1\/s/);

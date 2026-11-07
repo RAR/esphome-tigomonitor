@@ -267,9 +267,9 @@ inline std::string request_summary(const Frame &f) {
       case 0x0D:
         if (a.size() == 2 && a[0] == 0x00) return "Read the TAP's network config (part " + std::to_string(a[1]) + ")";
         return "";
-      case 0x41:
-        if (a.size() >= 2) {
-          std::snprintf(b, sizeof(b), "Housekeeping for %04X", a[0] << 8 | a[1]);
+      case 0x41:  // SetPgw: the node, then 00 00 00 <stream> 00 (Housekeeping in tigo_master.h)
+        if (a.size() >= 6) {
+          std::snprintf(b, sizeof(b), "Preferred gateway for node %04X · stream %02X", a[0] << 8 | a[1], a[5]);
           return b;
         }
         return "";
@@ -375,7 +375,7 @@ class BusWatch {
       e.seq = f.payload[4];
       e.sub_name = sub_name(f.payload[3]);
       if (e.sub_name.empty()) e.sub_name = "sub " + hex_cmd_(f.payload[3]).substr(4);
-      if (f.payload[3] == 0x06 && f.payload.size() > 7) e.node = f.payload[5] << 8 | f.payload[6];
+      if ((f.payload[3] == 0x06 || f.payload[3] == 0x41) && f.payload.size() > 7) e.node = f.payload[5] << 8 | f.payload[6];
     }
     e.reconfig = reconfiguration(f);
     if (e.sub == 0x0D && !e.reconfig.empty()) e.sub_name = "GatewayCfg write";
