@@ -138,7 +138,7 @@
   @media (prefers-reduced-motion: reduce) { .pv-pill.off::before { animation: none; box-shadow: 0 0 0 3px rgba(248,113,113,0.25); } }
   .pv-banner { display: flex; gap: 12px; align-items: center; margin: 0 0 16px; padding: 10px 14px; border-radius: 8px;
                border: 1px solid var(--bad); color: var(--bad); font-weight: 600; font-size: 14px; }
-  .pv-banner a { color: inherit; }
+  .pv-banner a { color: inherit; white-space: nowrap; }
   .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--good); box-shadow: 0 0 8px var(--good); }
   .theme-toggle {
     background: none; border: 1px solid var(--border); color: var(--text-dim);
@@ -448,6 +448,13 @@
   .log-line.error .log-lvl, .log-line.error .log-msg { color: var(--bad); }
   .log-line.debug .log-lvl, .log-line.debug .log-msg { color: var(--text-faint); }
   .logs-empty { padding: 24px 14px; color: var(--text-faint); font-family: inherit; }
+  /* The Bus log: time, then who to whom and the frame, in one column. */
+  #bus-box .log-line { grid-template-columns: 9.5ch minmax(0, 1fr); }
+  .bus-dir { display: inline-block; min-width: 14ch; color: var(--text-dim); }
+  #bus-alarm-card { border-color: var(--bad); }
+  #bus-alarm-card .pv-title { color: var(--bad); }
+  .bus-alarm-list { margin: 10px 0 0; padding: 0; list-style: none; font-size: 13px; line-height: 1.6; }
+  .bus-alarm-list time { color: var(--text-dim); font-variant-numeric: tabular-nums; margin-right: 8px; }
   @media (max-width: 768px) {
     .log-line { grid-template-columns: 9.5ch minmax(0, 1fr); }
     .log-lvl { display: none; }
@@ -876,6 +883,7 @@
       <button data-view="diagnostics"><span class="icon">◈</span> Diagnostics</button>
       <button data-view="busmaster" id="nav-busmaster" style="display:none"><span class="icon">◎</span> Bus master</button>
       <button data-view="logs" data-linux-only style="display:none"><span class="icon">☰</span> Logs</button>
+      <button data-view="buslog" data-linux-only style="display:none"><span class="icon">⇄</span> Bus log</button>
       <button data-view="cca"><span class="icon">◉</span> CCA Info</button>
       <button data-view="cloudstatus" id="nav-cloudstatus" style="display:none"><span class="icon">☁</span> Tigo Cloud</button>
     </nav>
@@ -910,6 +918,12 @@
     <div id="pv-banner" class="pv-banner" style="display:none">
       <span id="pv-banner-text">PV output is off</span>
       <a href="#busmaster">Bus master</a>
+    </div>
+    <!-- Latched until cleared on the Bus log page: a CCA on the bus may have
+         re-PANned the TAP, and then every optimizer drops off. -->
+    <div id="bus-alarm-banner" class="pv-banner" style="display:none">
+      <span id="bus-alarm-banner-text">Another device reconfigured the TAP</span>
+      <a href="#buslog">Bus log</a>
     </div>
     <!-- DASHBOARD -->
     <section class="view active" id="view-dashboard">
@@ -1575,6 +1589,28 @@
       </div>
       <div class="logs-box" id="logs-box"><div class="logs-empty">Loading…</div></div>
       <p class="table-meta" style="margin-top:10px">The last 2,000 lines since the service started, about two days. Older ones are in the journal (<code>journalctl -u tigomonitord</code>). Debug lines appear only when the service runs <span style="white-space:nowrap">with <code>--verbose</code></span>, and only the last 500 are kept.</p>
+    </section>
+
+    <!-- BUS LOG (the Pi): every frame but the polls, by name -->
+    <section class="view" id="view-buslog">
+      <div class="topbar">
+        <h1>Bus log</h1>
+        <div class="topbar-meta" id="buslog-meta">—</div>
+      </div>
+      <div class="tools-card" id="bus-alarm-card" style="display:none">
+        <div class="pv-row">
+          <div class="cfg-text"><strong class="pv-title">Another device reconfigured the TAP</strong><span id="bus-alarm-detail">—</span></div>
+          <button class="btn" id="bus-alarm-clear">Clear</button>
+        </div>
+        <ul class="bus-alarm-list" id="bus-alarm-list"></ul>
+        <p class="pv-note">No master here sends these frames, so another device on the bus did: most likely a CCA. A CCA rewrites the TAP's network ID and key, and can change its channel or reflash it; the optimizers then drop off. Unplug it, check every panel is reporting, then clear this.</p>
+      </div>
+      <div class="table-toolbar">
+        <input class="input" id="buslog-search" placeholder="Filter, e.g. GatewayCfg or 1201">
+        <button class="btn" id="buslog-pause">Pause</button>
+      </div>
+      <div class="logs-box" id="bus-box"><div class="logs-empty">Loading…</div></div>
+      <p class="table-meta" style="margin-top:10px">The last 300 frames heard or sent, newest last. Polls and their replies are counted, not listed. No payload is shown: only each frame's name and length, and the text of a query or of VERSION's reply, with long hex runs hidden.</p>
     </section>
 
     <!-- CCA -->
@@ -3993,6 +4029,81 @@
   if (window.location.hash === '#logs') startLogs();
   document.getElementById('logs-level').addEventListener('change', () => { renderLogs(); updateLogsMeta(); });
   document.getElementById('logs-search').addEventListener('input', () => { renderLogs(); updateLogsMeta(); });
+
+  // ---- Bus log and the reconfiguration alarm (Pi) ----
+  // The banner is checked every 10 s wherever you are; the page polls every
+  // 2 s while open.
+  let busLast = null, busPaused = false;
+  const busWhen = ms => new Date(ms).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  function busRow(e) {
+    const dir = e.from_tap ? `TAP ${e.addr}` : `${e.ours ? 'this monitor' : 'master'} → ${e.addr === 'FFFF' ? 'all' : e.addr}`;
+    const detail = (e.node ? ` · node ${e.node}` : '') + (e.text ? ` · ${e.text}` : '') + (e.reconfig ? ` · reconfigures the TAP` : '');
+    return `<div class="log-line${e.reconfig ? ' error' : ''}" title="${topoEscape(new Date(e.unix_ms).toLocaleString())} · ${e.cmd}">` +
+      `<span class="log-time">${logTime(e.unix_ms)}</span>` +
+      `<span class="log-msg"><span class="bus-dir">${logEsc(dir)}</span> ${logEsc(e.name)} · ${e.len} B${logEsc(detail)}</span></div>`;
+  }
+  function busShown(e) {
+    const q = document.getElementById('buslog-search').value.trim().toLowerCase();
+    return !q || [e.name, e.addr, e.cmd, e.text, e.node || '', e.reconfig].join(' ').toLowerCase().includes(q);
+  }
+  function busApply(b) {
+    const a = b && b.alarm && b.alarm.active ? b.alarm : null;
+    const last = a && a.recent.length ? a.recent[a.recent.length - 1] : null;
+    document.getElementById('bus-alarm-banner').style.display = a ? '' : 'none';
+    if (a) document.getElementById('bus-alarm-banner-text').textContent =
+      `Another device reconfigured the TAP: ${last ? last.what : 'see the Bus log'}`;
+    document.getElementById('bus-alarm-card').style.display = a ? '' : 'none';
+    if (!a) return;
+    document.getElementById('bus-alarm-detail').textContent =
+      `${a.count.toLocaleString()} frame${a.count === 1 ? '' : 's'} since ${busWhen(a.first_unix_ms)}`;
+    document.getElementById('bus-alarm-list').innerHTML = a.recent.slice().reverse()
+      .map(r => `<li><time>${logEsc(busWhen(r.unix_ms))}</time>${logEsc(r.what)}</li>`).join('');
+  }
+  function renderBus() {
+    const box = document.getElementById('bus-box');
+    if (!busLast) return;
+    const shown = busLast.events.filter(busShown);
+    const stick = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
+    box.innerHTML = shown.length ? shown.map(busRow).join('')
+      : `<div class="logs-empty">${busLast.events.length ? 'No frames match the filter.' : 'No frames heard yet.'}</div>`;
+    if (stick) box.scrollTop = box.scrollHeight;
+    document.getElementById('buslog-meta').textContent = (busPaused ? 'paused · ' : 'live · ') +
+      `${shown.length === busLast.events.length ? shown.length : `${shown.length} of ${busLast.events.length}`} frames · ` +
+      `${busLast.polls.toLocaleString()} polls`;
+  }
+  async function refreshBus(force) {
+    if (PLATFORM !== 'linux') return;
+    const open = document.getElementById('view-buslog').classList.contains('active');
+    if (!force && open && busPaused) return;
+    try {
+      const r = await apiFetch(open ? '/api/bus' : '/api/bus?limit=1');
+      if (!r.ok) throw new Error('/api/bus ' + r.status);
+      const b = await r.json();
+      busApply(b);
+      if (open) { busLast = b; renderBus(); }
+    } catch (e) {
+      if (open) document.getElementById('buslog-meta').textContent = 'error: ' + e.message;
+    }
+  }
+  document.getElementById('bus-alarm-clear').addEventListener('click', async () => {
+    if (!confirm('Clear the alarm? Do it once the other device is off the bus and every panel is reporting.')) return;
+    await apiFetch('/api/bus/alarm/clear', { method: 'POST' }).catch(() => null);
+    await refreshBus(true);
+  });
+  document.getElementById('buslog-pause').addEventListener('click', () => {
+    busPaused = !busPaused;
+    document.getElementById('buslog-pause').textContent = busPaused ? 'Resume' : 'Pause';
+    if (busLast) renderBus();
+  });
+  document.getElementById('buslog-search').addEventListener('input', () => renderBus());
+  document.querySelector('#nav button[data-view="buslog"]').addEventListener('click', () => refreshBus(true));
+  window.addEventListener('hashchange', () => { if (window.location.hash === '#buslog') refreshBus(true); });
+  platformReady.then(() => refreshBus(true));
+  let busTick = 0;
+  setInterval(() => {
+    busTick++;
+    if (document.getElementById('view-buslog').classList.contains('active') || busTick % 5 === 0) refreshBus();
+  }, 2000);
   document.getElementById('logs-pause').addEventListener('click', e => {
     logsPaused = !logsPaused;
     e.currentTarget.textContent = logsPaused ? 'Resume' : 'Pause';
