@@ -738,9 +738,16 @@ bool Monitor::save_locked_() {
   for (const auto &kv : links_.links())
     if (kv.second.last_join_s)
       joins.push_back({{"addr", kv.first}, {"parent", kv.second.parent}, {"unix", kv.second.last_join_s}});
+  // And a day of each one's signal, which the mesh map draws.
+  json rssi = json::array();
+  const int64_t now_s = unix_ms() / 1000;
+  for (const auto &kv : links_.links()) {
+    std::string b = links_.rssi_dump(kv.first, now_s);
+    if (!b.empty()) rssi.push_back({{"addr", kv.first}, {"to", now_s / esphome::tigo_monitor::link::BUCKET_S}, {"b", b}});
+  }
   json j = {{"version", 1},     {"nodes", nodes},           {"energy_kwh", energy_kwh_}, {"energy_in_kwh", energy_in_kwh_}, {"today_in_kwh", today_in_kwh_}, {"peaks", peaks},
             {"today", today_},  {"today_kwh", today_kwh_}, {"daily_kwh", history},
-            {"seen_barcodes", seen_barcodes_}, {"seen_since", seen_since_}, {"first_heard", first}, {"joins", joins}};
+            {"seen_barcodes", seen_barcodes_}, {"seen_since", seen_since_}, {"first_heard", first}, {"joins", joins}, {"rssi_24h", rssi}};
   {
     std::lock_guard<std::mutex> lock(write_mu_);
     pending_ = j.dump(1) + "\n";
@@ -777,6 +784,9 @@ bool Monitor::load() {
   for (const auto &e : j.value("joins", json::array()))
     if (e.is_object() && !e.value("addr", "").empty())
       links_.on_join(e.value("addr", ""), e.value("unix", static_cast<int64_t>(0)), e.value("parent", ""));
+  for (const auto &e : j.value("rssi_24h", json::array()))
+    if (e.is_object() && !e.value("addr", "").empty() && e.value("to", 0) > 0)
+      links_.rssi_restore(e.value("addr", ""), e.value("to", 0), e.value("b", ""));
   nodes_.clear();
   for (const auto &e : j.value("nodes", json::array())) {
     if (!e.is_object()) continue;

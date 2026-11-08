@@ -177,7 +177,8 @@ counting as missing, and leaves the panel totals.
 
 ## See which optimizers have a weak link
 
-**Topology › Mesh** draws each TAP with its optimizers around it, one line
+**Topology › Mesh**, the tab Topology opens on (the panel layout is the
+Layout tab beside it), draws each TAP with its optimizers around it, one line
 per optimizer to the TAP its reports come through. The colour of the line
 says how well that optimizer is getting through:
 
@@ -192,7 +193,8 @@ says how well that optimizer is getting through:
 **Poor** is more than 5% of today's reports lost or a signal under 80;
 **fair** is 1–5% lost or a signal under 110; **silent** is nothing heard
 for 10 minutes. Hover over or tap an optimizer for its numbers, a day of
-its signal, and when it last joined the network.
+its signal (kept across a restart of the Pi), and when it last joined the
+network.
 
 <ThemedShot name="pi-mesh" alt="Topology › Mesh — the optimizers around their TAP, each line coloured by link quality, with one optimizer's signal over a day, reports lost today and when it last joined." />
 
