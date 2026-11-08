@@ -184,6 +184,17 @@ static void test_a_silent_optimizer_reads_zero_after_midnight() {
   CHECK(s.links().at("0001").reports_today == 1);
 }
 
+static void test_a_deleted_optimizer_is_forgotten() {
+  LinkStats s;
+  reports(s, "0001", {0, 400});
+  reports(s, "0002", {0, 400});
+  s.erase("0001");
+  CHECK(s.links().count("0001") == 0);
+  CHECK(s.links().count("0002") == 1);
+  s.erase("0009");  // unknown: nothing happens
+  CHECK(s.links().size() == 1);
+}
+
 int main() {
   test_slot_ticks();
   test_steady_reports_lose_nothing();
@@ -203,6 +214,7 @@ int main() {
   test_a_short_silence_keeps_counting();
   test_a_duplicate_is_still_heard();
   test_a_silent_optimizer_reads_zero_after_midnight();
+  test_a_deleted_optimizer_is_forgotten();
   if (failures) {
     std::printf("%d failed\n", failures);
     return 1;

@@ -29,11 +29,18 @@ static std::string local_date() {
 }
 
 // Today as YYYYMMDD in local time, for counters that restart at midnight.
+// Asked for each power report (20-40 a second), so worked out once a second.
 static int local_day() {
+  static thread_local time_t last = 0;
+  static thread_local int day = 0;
   time_t t = time(nullptr);
-  tm lt{};
-  localtime_r(&t, &lt);
-  return (lt.tm_year + 1900) * 10000 + (lt.tm_mon + 1) * 100 + lt.tm_mday;
+  if (t != last) {
+    last = t;
+    tm lt{};
+    localtime_r(&t, &lt);
+    day = (lt.tm_year + 1900) * 10000 + (lt.tm_mon + 1) * 100 + lt.tm_mday;
+  }
+  return day;
 }
 
 static int64_t unix_ms() {
@@ -525,6 +532,7 @@ bool Monitor::delete_node(const std::string &addr) {
     found = true;
     break;
   }
+  links_.erase(addr);
   if (found) {
     dirty_ = true;
     save_locked_();

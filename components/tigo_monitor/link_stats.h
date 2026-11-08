@@ -111,6 +111,9 @@ class LinkStats {
 
   void on_join(const std::string &addr, int64_t unix_s) { links_[addr].last_join_s = unix_s; }
 
+  // An optimizer deleted from the node table is forgotten here too.
+  void erase(const std::string &addr) { links_.erase(addr); }
+
   // The last day of 5-minute RSSI averages, oldest first; -1 where nothing
   // was heard.
   std::vector<int> rssi_24h(const std::string &addr, int64_t unix_s) const {
