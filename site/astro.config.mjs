@@ -42,6 +42,7 @@ export default defineConfig({
           label: 'Setting it up',
           items: [
             { label: 'Start Here', link: '/guides/getting-started/' },
+            { label: 'ESP32 or Raspberry Pi?', link: '/guides/esp32-or-pi/' },
             { label: 'Wiring', link: '/guides/wiring/' },
             { label: 'Config Builder', link: '/config-builder/' },
             { label: 'Raspberry Pi and Linux', link: '/guides/raspberry-pi/' },
