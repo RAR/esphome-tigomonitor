@@ -151,6 +151,54 @@ class LinkStats {
     return out;
   }
 
+  // The last day of the RSSI ring as text, for the daemon's state file: 4 hex
+  // digits a bucket, its mean then how many reports made it, oldest first,
+  // ending at the bucket holding unix_s. Empty if nothing was heard that day.
+  std::string rssi_dump(const std::string &addr, int64_t unix_s) const {
+    auto it = links_.find(addr);
+    if (it == links_.end()) return "";
+    static const char HEX[] = "0123456789abcdef";
+    int64_t now = unix_s / BUCKET_S;
+    std::string out;
+    bool any = false;
+    for (size_t i = 0; i < BUCKETS; i++) {
+      int64_t index = now - static_cast<int64_t>(BUCKETS - 1 - i);
+      int mean = 0, n = 0;
+      if (index >= 0) {
+        const Link::Bucket &b = it->second.ring[index % BUCKETS];
+        if (b.index == index && b.n) {
+          n = b.n;
+          mean = (b.sum + n / 2) / n;
+          any = true;
+        }
+      }
+      for (int v : {mean, n}) {
+        out += HEX[v >> 4];
+        out += HEX[v & 15];
+      }
+    }
+    return any ? out : "";
+  }
+
+  // Puts back what rssi_dump wrote; `to` is the index (unix_s / BUCKET_S)
+  // of its last bucket. Anything else is ignored.
+  void rssi_restore(const std::string &addr, int32_t to, const std::string &hex) {
+    if (hex.size() != BUCKETS * 4) return;
+    std::vector<int> v(hex.size());
+    for (size_t i = 0; i < hex.size(); i++) {
+      char c = hex[i];
+      v[i] = c >= '0' && c <= '9' ? c - '0' : c >= 'a' && c <= 'f' ? c - 'a' + 10 : -1;
+      if (v[i] < 0) return;
+    }
+    Link &l = links_[addr];
+    for (size_t i = 0; i < BUCKETS; i++) {
+      int32_t index = to - static_cast<int32_t>(BUCKETS - 1 - i);
+      int mean = v[i * 4] * 16 + v[i * 4 + 1], n = v[i * 4 + 2] * 16 + v[i * 4 + 3];
+      if (index < 0 || !n) continue;
+      l.ring[index % BUCKETS] = Link::Bucket{index, static_cast<uint16_t>(mean * n), static_cast<uint8_t>(n)};
+    }
+  }
+
   const std::map<std::string, Link> &links() const { return links_; }
 
  private:

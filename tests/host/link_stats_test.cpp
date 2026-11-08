@@ -234,6 +234,45 @@ static void test_a_late_report_heard_twice_counts_once() {
   CHECK(s.links().at("0001").reports_today == 8);
 }
 
+// The ring as state.json keeps it: a restart restores the day, and a
+// report after it still averages with what the bucket held.
+static void test_rssi_survives_a_restart() {
+  LinkStats s;
+  int64_t t = (T0 / 300) * 300;
+  s.on_report("0001", 0x1201, 90, slot_of(0), t - 3 * BUCKET_S, DAY);
+  s.on_report("0001", 0x1201, 100, slot_of(400), t, DAY);
+  s.on_report("0001", 0x1201, 120, slot_of(800), t + 2, DAY);
+  std::string hex = s.rssi_dump("0001", t + 10);
+  CHECK(hex.size() == BUCKETS * 4);
+  LinkStats back;
+  back.rssi_restore("0001", static_cast<int32_t>((t + 10) / BUCKET_S), hex);
+  CHECK(back.rssi_24h("0001", t + 10) == s.rssi_24h("0001", t + 10));
+  back.on_report("0001", 0x1201, 140, slot_of(1200), t + 4, DAY);
+  CHECK(back.rssi_24h("0001", t + 10).back() == 120);  // (100 + 120 + 140) / 3
+}
+
+static void test_nothing_heard_today_dumps_nothing() {
+  LinkStats s;
+  CHECK(s.rssi_dump("0009", T0).empty());
+  s.on_report("0001", 0x1201, 100, slot_of(0), T0, DAY);
+  CHECK(s.rssi_dump("0001", T0 + 86400).empty());
+}
+
+static void test_a_stale_or_broken_dump_restores_nothing() {
+  LinkStats s;
+  s.on_report("0001", 0x1201, 100, slot_of(0), T0, DAY);
+  std::string hex = s.rssi_dump("0001", T0);
+  LinkStats back;
+  back.rssi_restore("0001", static_cast<int32_t>(T0 / BUCKET_S), hex);
+  bool all = true;
+  for (int v : back.rssi_24h("0001", T0 + 86400)) all = all && v == -1;
+  CHECK(all);
+  LinkStats broken;
+  broken.rssi_restore("0002", static_cast<int32_t>(T0 / BUCKET_S), "64zz");
+  broken.rssi_restore("0003", static_cast<int32_t>(T0 / BUCKET_S), std::string(BUCKETS * 4, 'g'));
+  CHECK(broken.links().empty());
+}
+
 int main() {
   test_slot_ticks();
   test_steady_reports_lose_nothing();
@@ -258,6 +297,9 @@ int main() {
   test_a_report_far_behind_fills_its_hole();
   test_a_late_report_keeps_the_newest();
   test_a_late_report_heard_twice_counts_once();
+  test_rssi_survives_a_restart();
+  test_nothing_heard_today_dumps_nothing();
+  test_a_stale_or_broken_dump_restores_nothing();
   if (failures) {
     std::printf("%d failed\n", failures);
     return 1;

@@ -2,7 +2,7 @@
 # /api/mesh end to end: a synthetic bus with real slot counters, two reports
 # dropped and two NetDiag joins (one direct, one through a relay), served by the mock bridge to the daemon. Checks
 # each optimizer's TAP, reports lost today, the joins and parents (kept
-# across a restart), the RSSI history's shape,
+# across a restart), the RSSI history's shape (kept across a restart too),
 # that no MAC leaks into the response, and the empty answer of a quiet bus.
 # Run from the repo root inside the dev container, after build.sh.
 set -eu
@@ -67,6 +67,8 @@ expect "no MACs in the answer" "$(grep -c 04C05B "$out/mesh.json" || true)" 0
 get 18092 /api/mesh > "$out/quiet.json"
 expect "a quiet bus" "$(python3 -c "import json; d = json.load(open('$out/quiet.json')); print(d['nodes'], d['taps'])")" "[] []"
 # A restart keeps where each optimizer joined: joins come only at sunrise.
+# And the day of signal history, which would otherwise start empty.
+rssi_before="$(q "{a: n[a]['rssi_24h'][-1] for a in sorted(n)}")"
 kill $daemon; wait $daemon 2>/dev/null || true
 build/linux/tigomonitord --state-dir "$out/state" --port 18093 --serial /dev/nonexistent 2> "$out/restart.log" &
 daemon=$!
@@ -74,4 +76,6 @@ sleep 1
 get 18093 /api/mesh > "$out/mesh.json"
 expect "parents kept after a restart" "$(q "{a: n[a]['parent'] for a in sorted(n) if n[a]['parent']}")" "{'0002': '0001', '0004': '0002'}"
 expect "join times kept" "$(q "sorted(a for a in n if isinstance(n[a]['last_join_unix'], int))")" "['0002', '0004']"
+expect "signal history kept" "$(q "{a: n[a]['rssi_24h'][-1] for a in sorted(n)}")" "$rssi_before"
+expect "signal history not empty" "$(q "all(x['rssi_24h'][-1] is not None for x in d['nodes'])")" True
 [ $fail = 0 ] && echo "mesh e2e passed" || { echo "mesh e2e FAILED; see $out/"; exit 1; }
