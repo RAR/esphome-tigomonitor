@@ -2,11 +2,12 @@
 """Write a synthetic Tigo RS485 byte stream, for testing without a bus.
 
     synth_bus.py OUT [--panels N] [--rounds R] [--seed S] [--slots]
-                     [--drop ADDR:ROUND ...] [--netdiag ADDR ...]
+                     [--drop ADDR:ROUND ...] [--netdiag ADDR[:PARENT] ...]
 
 --slots gives each report a real slot counter (one 400-tick bin a round)
 instead of a random one; --drop leaves one panel's report out of one round;
---netdiag adds a NetDiag join from that panel before the first round. Power
+--netdiag adds a NetDiag join from that panel before the first round,
+through PARENT (default 0001, the TAP). Power
 frames come from TAP 1201 (address 9201).
 
 The stream is what a listener on the bus would see: a Frame 27 node table,
@@ -75,7 +76,7 @@ def main() -> None:
     ap.add_argument("--seed", type=int, default=1)
     ap.add_argument("--slots", action="store_true")
     ap.add_argument("--drop", action="append", default=[], metavar="ADDR:ROUND")
-    ap.add_argument("--netdiag", action="append", default=[], metavar="ADDR")
+    ap.add_argument("--netdiag", action="append", default=[], metavar="ADDR[:PARENT]")
     a = ap.parse_args()
     drops = {(int(d.split(":")[0], 16), int(d.split(":")[1])) for d in a.drop}
     rng = random.Random(a.seed)
@@ -85,9 +86,11 @@ def main() -> None:
     for start in range(0, len(panels), 12):  # the gateway sends 12 entries per chunk
         out += frame27(start + 2, panels[start:start + 12])
     for barcode, addr in panels:
-        if f"{addr:04X}" in [x.upper().zfill(4) for x in a.netdiag]:
-            # 23 data bytes: an 8-byte ID (zeros here), the node's MAC, 7 more.
-            data = "00" * 8 + barcode + "C7012C1E001728"
+        joins = {x.split(":")[0].upper().zfill(4): (x.split(":") + ["0001"])[1].upper().zfill(4) for x in a.netdiag}
+        if f"{addr:04X}" in joins:
+            # 23 data bytes: an unknown word, the node's own NWID, its
+            # parent's, another unknown word, the node's MAC, 7 more.
+            data = "0000" + f"{addr:04X}" + joins[f"{addr:04X}"] + "0000" + barcode + "C7012C1E001728"
             out += wire("9201" "0149" "FFFF" "000000" + f"09{addr:04X}{addr:04X}0017" + data)
     for rnd in range(a.rounds):
         sun = 0.5 + 0.4 * (rnd / max(1, a.rounds - 1))

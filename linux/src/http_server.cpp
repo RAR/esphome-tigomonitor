@@ -477,7 +477,7 @@ void HttpServer::routes_() {
                        {"label", p ? panel_name(*p) : e.first},
                        {"string", p ? string_of(mon, *p) : ""},
                        {"tap", l.tap ? json(tap) : json(nullptr)},
-                       {"parent", nullptr},
+                       {"parent", l.parent.empty() ? json(nullptr) : json(l.parent)},
                        {"rssi", heard ? json(l.rssi) : json(nullptr)},
                        {"rssi_24h", rssi_24h},
                        {"reports_today", l.reports_today},
@@ -491,7 +491,7 @@ void HttpServer::routes_() {
       snprintf(id, sizeof(id), "%04X", t);
       taps.push_back({{"id", id}});
     }
-    send_json(res, {{"loss_method", "slot"}, {"parent_confirmed", false}, {"taps", taps}, {"nodes", nodes}});
+    send_json(res, {{"loss_method", "slot"}, {"parent_confirmed", true}, {"taps", taps}, {"nodes", nodes}});
   });
 
   svr.Get("/api/overview", [&mon](const httplib::Request &, httplib::Response &res) {

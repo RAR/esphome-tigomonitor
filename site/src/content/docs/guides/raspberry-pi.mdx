@@ -196,8 +196,23 @@ its signal, and when it last joined the network.
 
 <ThemedShot name="pi-mesh" alt="Topology › Mesh — the optimizers around their TAP, each line coloured by link quality, with one optimizer's signal over a day, reports lost today and when it last joined." />
 
-Relays between optimizers aren't shown yet; every optimizer is drawn
-straight to its TAP.
+An optimizer that can't hear the TAP well joins through another one, which
+relays for it. Each optimizer says where it joined when it joins, so the line
+runs from that relay, and the side panel names it ("Joined through") and
+lists the ones a relay carries ("Relays for"). A relay whose network ID
+matches no optimizer the TAP lists is drawn as a dashed line to the TAP:
+"a relay not identified yet". Joins come at sunrise and when an optimizer
+rejoins; the Pi keeps the last one across restarts, so only a new install
+says "Not known" until the next sunrise.
+
+**By string**, above the map, lays the same optimizers out a row per string,
+its panels in order, with each one's share of reports lost and its signal. A
+row is tinted when its median loss is over 5%, so a whole string with a weak
+link stands out from one bad panel. A tag on a card names the optimizer it
+joined through, or "via ?" for a relay not identified yet. The Pi remembers
+which of the two you last looked at, in this browser.
+
+<ThemedShot name="pi-mesh-strings" alt="Topology › Mesh › By string — a row per string with its median loss, and a card per optimizer with its loss, signal and the optimizer it joined through." />
 
 ## Set a password
 

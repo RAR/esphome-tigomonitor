@@ -324,12 +324,18 @@ template<class S> PowerDecode decode_power_packet(const S &packet, float calibra
 struct NetDiagJoin {
   char addr[5] = {0};       // short address, hex
   char node_mac[17] = {0};  // 16 hex chars
+  char parent[5] = {0};     // the parent's NWID, hex: 0001 is the TAP
 };
 
 // packet: the whole type-09 packet as hex, as walk_power_packets hands it.
+// Data words 1 and 2 are the node's own NWID and its parent's (the CCA's
+// meshdcd reads them so, and drops a report whose own NWID isn't the node's).
 template<class S> bool decode_netdiag_packet(const S &packet, NetDiagJoin &j) {
   if (packet.length() < 14 + 46 || packet.compare(0, 2, "09") != 0) return false;
   if (parse_hex_field(packet, 12, 2) != 23) return false;
+  if (packet.compare(14 + 4, 4, packet, 2, 4) != 0) return false;
+  memcpy(j.parent, packet.c_str() + 14 + 8, 4);
+  j.parent[4] = '\0';
   memcpy(j.addr, packet.c_str() + 2, 4);
   j.addr[4] = '\0';
   memcpy(j.node_mac, packet.c_str() + 14 + 16, 16);

@@ -60,6 +60,7 @@ const PI_VIEWS = [
   ['pi-bus-traffic', 'Bus Traffic', '#view-busmaster .bus-tabs a[href="#buslog"]'],
   ['pi-devices',     'Pi Devices',  'button[data-view="nodes"]'],
   ['pi-mesh',        'Mesh',        ['button[data-view="topology"]', '#topology-tabs [data-tab="mesh"]']],
+  ['pi-mesh-strings', 'Mesh by string', ['button[data-view="topology"]', '#topology-tabs [data-tab="mesh"]', '#mesh-view button[data-mode="strings"]']],
 ];
 
 const THEMES = ['dark', 'light'];

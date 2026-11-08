@@ -340,6 +340,121 @@ test('mesh: keyboard focus fills the side panel too', async () => {
   await ctx.close();
 });
 
+test('mesh: an optimizer joined through another is drawn from it', async () => {
+  const { page, ctx, errors } = await openMesh();
+  const relay = fixtureNodes[2], via = fixtureNodes[7];
+  const link = page.locator(`#mesh-svg .mesh-link[data-addr="${via.addr}"]`);
+  assert.equal(await link.getAttribute('data-via'), 'node');
+  const dot = meshNode(page, relay.label).locator('.mesh-dot');
+  assert.equal(await link.getAttribute('x1'), await dot.getAttribute('cx'));
+  assert.equal(await link.getAttribute('y1'), await dot.getAttribute('cy'));
+  await meshNode(page, via.label).hover();
+  assert.match(await page.textContent('#mesh-side .mesh-via'), new RegExp(`^${relay.label}, another optimizer`));
+  await meshNode(page, relay.label).hover();
+  assert.match(await page.textContent('#mesh-side'), new RegExp(`Relays for\\s*${via.label}`));
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test('mesh: an optimizer through a relay sits just beyond it, away from the TAP', async () => {
+  const node = (addr, parent, rssi = 150) => ({ addr, label: 'N' + addr, string: '', tap: '1201', parent, rssi,
+    rssi_24h: Array(288).fill(null), reports_today: 100, lost_today: 0, last_heard_s: 2, last_join_unix: 1 });
+  const nodes = [];
+  for (let i = 2; i < 14; i++) nodes.push(node(i.toString(16).toUpperCase().padStart(4, '0'), '0001'));
+  // Two through 0005, one through one of those, and a pair naming each other.
+  nodes.push(node('0010', '0005', 70), node('0011', '0005', 90), node('0012', '0010', 60), node('0013', '0014'), node('0014', '0013'));
+  const { page, ctx, errors } = await openMesh({ mesh: { loss_method: 'slot', parent_confirmed: true, taps: [{ id: '1201' }], nodes } });
+  const at = async (addr) => { const d = meshNode(page, 'N' + addr).locator('.mesh-dot');
+    return [+await d.getAttribute('cx'), +await d.getAttribute('cy')]; };
+  const r = await page.locator('#mesh-svg .mesh-tap rect').first();
+  const hub = [+await r.getAttribute('x') + 38, +await r.getAttribute('y') + 16];
+  const polar = ([x, y]) => [Math.hypot(x - hub[0], y - hub[1]), Math.atan2(y - hub[1], x - hub[0])];
+  for (const [child, parent] of [['0010', '0005'], ['0011', '0005'], ['0012', '0010']]) {
+    const c = await at(child), p = await at(parent), [rc, ac] = polar(c), [rp, ap] = polar(p);
+    assert.ok(rc > rp + 20, `${child} (${rc.toFixed(0)}) beyond ${parent} (${rp.toFixed(0)})`);
+    const da = Math.abs(Math.atan2(Math.sin(ac - ap), Math.cos(ac - ap)));
+    assert.ok(da < 0.6, `${child} within 0.6 rad of ${parent}'s bearing, was ${da.toFixed(2)}`);
+    assert.ok(Math.hypot(c[0] - p[0], c[1] - p[1]) < 80, `${child} close to ${parent}`);
+  }
+  const [a, b] = [await at('0010'), await at('0011')];
+  assert.ok(Math.hypot(a[0] - b[0], a[1] - b[1]) > 18, 'siblings fanned apart');
+  assert.equal(await meshNode(page, 'N0013').count(), 1);
+  assert.equal(await meshNode(page, 'N0014').count(), 1);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test('mesh: direct, unidentified relay, and not known', async () => {
+  const { page, ctx } = await openMesh();
+  const via = async (i) => { await meshNode(page, fixtureNodes[i].label).hover(); return page.textContent('#mesh-side .mesh-via'); };
+  assert.equal(await page.locator(`#mesh-svg .mesh-link[data-addr="${fixtureNodes[0].addr}"]`).getAttribute('data-via'), 'tap');
+  assert.match(await via(0), /^The TAP directly/);
+  assert.equal(await page.locator(`#mesh-svg .mesh-link[data-addr="${fixtureNodes[11].addr}"]`).getAttribute('data-via'), 'unknown');
+  assert.match(await via(11), /^A relay not identified yet \(network ID 0091\)/);
+  assert.match(await via(20), /^Not known: no join heard yet/);
+  await ctx.close();
+});
+
+test('mesh: last joined says when, with the date once it is not today', async () => {
+  const now = Date.now() / 1000;
+  const node = (label, join) => ({ addr: label === 'old' ? '0002' : label === 'new' ? '0003' : '0004', label, string: '', tap: '1201', parent: join ? '0001' : null,
+    rssi: 120, rssi_24h: Array(288).fill(null), reports_today: 100, lost_today: 0, last_heard_s: 2, last_join_unix: join });
+  const nodes = [node('old', now - 3 * 86400), node('new', now - 60), node('never', null)];
+  const { page, ctx, errors } = await openMesh({ mesh: { loss_method: 'slot', parent_confirmed: true, taps: [{ id: '1201' }], nodes } });
+  const joined = async (label) => { await meshNode(page, label).hover(); return page.textContent('#mesh-side .mesh-joined'); };
+  assert.equal(await joined('never'), 'No join heard yet');
+  assert.doesNotMatch(await joined('new'), /[A-Z][a-z]{2}/);
+  assert.match(await joined('old'), /[A-Z][a-z]{2} \d+/);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test('mesh: by string puts each string on a row, panels in order', async () => {
+  const { page, ctx, errors } = await openMesh();
+  await page.click('#mesh-view button[data-mode="strings"]');
+  await page.waitForSelector('#mesh-strings .mesh-row');
+  assert.equal(await page.getAttribute('#mesh-view button[data-mode="strings"]', 'aria-pressed'), 'true');
+  assert.equal(await page.isVisible('#mesh-svg'), false);
+  const strings = [...new Set(fixtureNodes.map((n) => n.string || 'Not in a string'))];
+  assert.equal(await page.locator('#mesh-strings .mesh-row').count(), strings.length);
+  const first = page.locator('#mesh-strings .mesh-row').first();
+  const name = await first.locator('.mesh-row-name').textContent();
+  const want = fixtureNodes.filter((n) => (n.string || 'Not in a string') === name).map((n) => n.label)
+    .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  assert.deepEqual(await first.locator('.mesh-card').evaluateAll((cs) => cs.map((c) => c.dataset.label)), want);
+  const card = (i) => page.locator(`#mesh-strings .mesh-card[data-addr="${fixtureNodes[i].addr}"]`);
+  assert.equal(await card(7).locator('.mesh-card-via').textContent(), `via ${fixtureNodes[2].label}`);
+  assert.equal(await card(11).locator('.mesh-card-via').textContent(), 'via ?');
+  assert.equal(await card(0).locator('.mesh-card-via').count(), 0);
+  await card(4).click();
+  assert.match(await page.textContent('#mesh-side h3'), new RegExp(`^${fixtureNodes[4].label}`));
+  assert.equal(await card(4).getAttribute('aria-pressed'), 'true');
+  await page.reload();
+  await page.click('#nav button[data-view="topology"]');
+  await page.click('#topology-tabs [data-tab="mesh"]');
+  await page.waitForSelector('#mesh-strings .mesh-row');
+  await page.click('#mesh-view button[data-mode="map"]');
+  await page.waitForSelector('#mesh-svg .mesh-node');
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test('mesh: by string marks a string losing over 5% of its reports', async () => {
+  const node = (label, string, lost) => ({ addr: (0x10 + parseInt(label.slice(1), 10) + (string === 'S1' ? 0 : 0x20)).toString(16).toUpperCase().padStart(4, '0'),
+    label, string, tap: '1201', parent: null, rssi: 150, rssi_24h: Array(288).fill(null),
+    reports_today: 100 - lost, lost_today: lost, last_heard_s: 2, last_join_unix: null });
+  const nodes = [node('A1', 'S1', 9), node('A2', 'S1', 8), node('A3', 'S1', 0), node('B1', 'S2', 0), node('B2', 'S2', 1)];
+  const { page, ctx, errors } = await openMesh({ mesh: { loss_method: 'slot', parent_confirmed: true, taps: [{ id: '1201' }], nodes } });
+  await page.click('#mesh-view button[data-mode="strings"]');
+  await page.waitForSelector('#mesh-strings .mesh-row');
+  const rows = page.locator('#mesh-strings .mesh-row');
+  assert.match(await rows.nth(0).getAttribute('class'), /\bpoor\b/);
+  assert.match(await rows.nth(0).locator('.mesh-row-med').textContent(), /^8\.0%/);
+  assert.doesNotMatch(await rows.nth(1).getAttribute('class'), /\bpoor\b/);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
 test('mesh: no reports today', async () => {
   const { page, ctx } = await openMesh();
   await meshNode(page, fixtureNodes[20].label).hover();

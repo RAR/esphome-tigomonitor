@@ -43,6 +43,7 @@ struct Link {
   int rssi = 0;      // the raw byte, higher is better; not dBm
   int64_t last_heard_s = 0;
   int64_t last_join_s = 0;  // 0 until a NetDiag join is heard
+  std::string parent;       // its parent's NWID from that join, hex; 0001 is the TAP
   uint32_t reports_today = 0;
   uint32_t lost_today = 0;
 
@@ -125,7 +126,11 @@ class LinkStats {
     for (auto &e : links_) roll_(e.second, day);
   }
 
-  void on_join(const std::string &addr, int64_t unix_s) { links_[addr].last_join_s = unix_s; }
+  void on_join(const std::string &addr, int64_t unix_s, const std::string &parent) {
+    Link &l = links_[addr];
+    l.last_join_s = unix_s;
+    l.parent = parent;
+  }
 
   // An optimizer deleted from the node table is forgotten here too.
   void erase(const std::string &addr) { links_.erase(addr); }
