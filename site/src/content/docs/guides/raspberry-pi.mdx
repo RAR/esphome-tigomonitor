@@ -241,7 +241,7 @@ Under **Settings → Bus**, set **Bus role**:
 
 Running the bus, the Pi polls the TAP and renews its
 [discovery window](#disable-the-discovery-window). The rest of what the CCA
-did is behind four switches on the same tab, all off until you turn them on:
+did is behind six switches on the same tab, all off until you turn them on:
 
 - **Bring up the TAP.** After a power cut a TAP can come back at its
   factory address, where nothing polls it. This re-addresses it and starts
@@ -253,6 +253,12 @@ did is behind four switches on the same tab, all off until you turn them on:
   firmware on the Devices page comes from the answers.
 - **Let queries change optimizer settings:** the two writes the CCA sends
   when an answer calls for them. Needs **Query the optimizers**.
+- **Read the TAP's radio settings:** once each time the master starts, the
+  read the CCA makes when it brings a TAP up. The Devices page then shows
+  the TAP's channel and the signal level it admits optimizers at. A
+  listening Pi shows them too whenever it hears any master make that read.
+- **Open discovery only when needed:** see
+  [below](#disable-the-discovery-window).
 
 **A dead master is not a fail-safe.** On the roof we measured, with no
 master at all, the array kept producing for the 8 to 10 minutes we watched
@@ -319,8 +325,10 @@ same switch; see the
 
 ### Disable the discovery window
 
-The CCA renews the TAP's *discovery window*, its window for new optimizers
-to join, every time it runs out, and so does the Pi by default. The
+The TAP's *discovery window* is its window for new optimizers to join. The
+Pi renews it every time it runs out, by default. The CCA we watched on the
+bench renewed it only while an optimizer it expected was missing, and kept
+it closed once all were found. The
 **Bus** page's **Control** tab can stop renewing it: **Disable**. The Pi keeps
 polling, so every panel still reports, and nothing new goes to the TAP; it
 just stops sending the renewal. On the roof we measured, a closed window
@@ -328,6 +336,15 @@ didn't stop production, and every optimizer came back at sunrise and after
 a TAP power cycle. **Enable** it again before adding an optimizer. The choice is saved in
 `discovery.json` beside `settings.json`, so a restart or an update keeps
 it. It needs the web UI password too.
+
+To do what that CCA did, turn on **Open discovery only when needed** under
+Settings → Bus. The Pi then checks once a minute: in daylight, while any
+optimizer you've placed in a string in the layout hasn't reported since
+midnight, it renews the window; once all have, it lets the window close. At
+night nothing is held open, since the optimizers rejoin by themselves at
+sunrise. With nothing placed in the layout it renews as before, and a spare
+you've marked known doesn't count. The Bus page says which it's doing and
+how many it's waiting for. **Disable** still wins over it.
 
 ## Watch it from a monitor
 

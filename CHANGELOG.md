@@ -16,6 +16,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   last joined. Lost reports are counted from gaps in each report's slot
   counter, and the night doesn't count. Read-only: it adds nothing to the
   bus. See [Running on a Raspberry Pi](https://rar.github.io/esphome-tigomonitor/guides/raspberry-pi/#see-which-optimizers-have-a-weak-link).
+- **The TAP's radio channel and admission level on the Devices page
+  (Raspberry Pi).** Read from the TAP's own config block whenever a master
+  reads it: ours with the new, opt-in **Read the TAP's radio settings**
+  (Settings → Bus), or a CCA's. Only the channel and the two signal levels
+  are kept; the block's network ID and key never leave the decoder.
+- **Discovery like the CCA's (Raspberry Pi, opt-in).** **Open discovery
+  only when needed** renews the TAP's join window only while an optimizer
+  in your layout hasn't reported today, in daylight, as the CCA we watched
+  on the bench did, instead of all day. Off by default; see
+  [Disable the discovery window](https://rar.github.io/esphome-tigomonitor/guides/raspberry-pi/#disable-the-discovery-window).
 
 ## [2.1.0] - 2026-11-07
 
