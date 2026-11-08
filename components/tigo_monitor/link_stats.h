@@ -31,8 +31,10 @@ static const size_t BUCKETS = 288;         // a day of them
 // A gap at least this long in wall-clock time isn't counted: the counter may
 // have wrapped, and an optimizer that stopped at dusk lost nothing.
 static const int64_t LONG_GAP_S = 200;
-// A report at most this far behind the newest is a late one, not a wrap.
-static const uint32_t LATE_TICKS = 4 * BIN_TICKS;
+// A report behind the newest by under half the wrap, heard this soon after the
+// last one, is a late one: a silence that long would take 2 minutes. On the
+// roof they arrive up to 3,000 ticks (15 s) behind.
+static const int64_t LATE_WITHIN_S = 60;
 
 inline uint32_t slot_ticks(uint16_t slot) { return (slot >> 14) * 12000u + (slot & 0x3FFF); }
 
@@ -71,9 +73,9 @@ class LinkStats {
         l.last_heard_s = unix_s;
         return;
       }
-      if (gap > WRAP_TICKS - LATE_TICKS) {
-        // Up to 4 bins behind the newest: a report that arrived late (they
-        // come in pairs), filling a hole already counted as lost.
+      if (gap > WRAP_TICKS / 2 && unix_s - l.last_heard_s < LATE_WITHIN_S) {
+        // Behind the newest: a report that arrived late, filling a hole
+        // already counted as lost.
         late = true;
         if (l.lost_today) l.lost_today--;
       } else if (gap <= WRAP_TICKS / 2) {

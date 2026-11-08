@@ -195,6 +195,22 @@ static void test_a_deleted_optimizer_is_forgotten() {
   CHECK(s.links().size() == 1);
 }
 
+// The roof at sunrise, 2026-11-08: a 600-tick cadence, and reports that
+// arrive up to 3,000 ticks behind the newest. Each late one fills a hole the
+// jump over it counted, and the next report is measured from the newest.
+static void test_a_report_far_behind_fills_its_hole() {
+  LinkStats s;
+  reports(s, "0001", {0, 600, 1200, 1800, 2400, 6000, 3000, 3600, 4200, 4800, 5400, 6600});
+  CHECK(s.links().at("0001").lost_today == 0);
+  CHECK(s.links().at("0001").reports_today == 12);
+}
+
+static void test_a_late_report_keeps_the_newest() {
+  LinkStats s;
+  reports(s, "0001", {0, 600, 1200, 1800, 2400, 4800, 3000, 3600, 4200, 5400});
+  CHECK(s.links().at("0001").lost_today == 0);
+}
+
 int main() {
   test_slot_ticks();
   test_steady_reports_lose_nothing();
@@ -215,6 +231,8 @@ int main() {
   test_a_duplicate_is_still_heard();
   test_a_silent_optimizer_reads_zero_after_midnight();
   test_a_deleted_optimizer_is_forgotten();
+  test_a_report_far_behind_fills_its_hole();
+  test_a_late_report_keeps_the_newest();
   if (failures) {
     std::printf("%d failed\n", failures);
     return 1;
