@@ -125,6 +125,20 @@ bool MasterCore::request_discovery(bool renew) {
   return true;
 }
 
+void MasterCore::set_window_wanted(bool wanted, int missing) {
+  bool changed;
+  {
+    std::lock_guard<std::mutex> lock(mu_);
+    changed = wanted != window_wanted_;
+    window_wanted_ = wanted;
+    status_.window_wanted = wanted;
+    status_.missing_expected = missing;
+  }
+  if (changed)
+    LOGI("bus master: automatic discovery: %s", wanted ? "an optimizer is missing, renewing the window"
+                                                       : "every optimizer reported today, letting the window close");
+}
+
 void MasterCore::set_discovery(bool renew, DiscoverySaved saved) {
   {
     std::lock_guard<std::mutex> lock(mu_);
@@ -461,7 +475,7 @@ void MasterCore::tick_(uint32_t now_ms) {
   }
   {
     std::lock_guard<std::mutex> lock(mu_);
-    window_.set_renewing(discovery_renewing_);
+    window_.set_renewing(discovery_renewing_ && window_wanted_);
   }
   if (refusals_in_a_row_ >= NO_REPLY_FAULT_AFTER && now_ms - refused_at_ms_ < REFUSED_RETRY_MS) return;
   master::Request req =

@@ -5,6 +5,7 @@
 
 #include "log.h"
 #include "bus_master.h"
+#include "discovery_policy.h"
 #include "pv_store.h"
 #include "discovery_store.h"
 #include "monitor.h"
@@ -391,6 +392,7 @@ int main(int argc, char **argv) {
   };
 
   std::atomic<bool> bus_log_saving{false}, housekeeping_saving{false};
+  auto last_discovery_check = std::chrono::steady_clock::now() - std::chrono::seconds(60);
 
   auto last_publish = std::chrono::steady_clock::now() - std::chrono::hours(1);
   // Snapshots land on wall-clock multiples of the interval (:00, :05, ...),
@@ -499,6 +501,31 @@ int main(int argc, char **argv) {
       }
     }
     monitor.tick();
+    // Automatic discovery, once a minute: renew the TAP's join window only
+    // while an optimizer placed in the layout hasn't reported today, in
+    // daylight (discovery_policy.h). Off, the window is renewed as always.
+    if (std::chrono::steady_clock::now() - last_discovery_check >= std::chrono::seconds(60)) {
+      last_discovery_check = std::chrono::steady_clock::now();
+      bool wanted = true;
+      int missing = 0;
+      if (settings.discovery_auto) {
+        int64_t t = static_cast<int64_t>(time(nullptr));
+        tm lt{};
+        time_t tt = static_cast<time_t>(t);
+        localtime_r(&tt, &lt);
+        int64_t midnight = t - (lt.tm_hour * 3600 + lt.tm_min * 60 + lt.tm_sec);
+        auto expected = monitor.expected_last_heard();
+        for (int64_t h : expected) missing += h < midnight;
+        wanted = esphome::tigo_monitor::discovery::window_wanted(
+            expected, midnight, esphome::tigo_monitor::discovery::daylight(monitor.last_report_unix(), t));
+      }
+      std::shared_ptr<BusMaster> m;
+      {
+        std::lock_guard<std::mutex> lock(master_mu);
+        m = bus_master;
+      }
+      if (m) m->set_window_wanted(wanted, missing);
+    }
     // On the history worker: an fsync can take a second on a slow SD card.
     if (housekeeping.needs_save() && !housekeeping_saving.exchange(true))
       post_history([&] {

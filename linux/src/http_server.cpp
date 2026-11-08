@@ -1347,6 +1347,9 @@ void HttpServer::routes_() {
                       {"back_without_discovery", m.back_without_discovery}}},
                     {"discovery_read", m.discovery_read},
                     {"discovery_renewing", m.discovery_renewing},
+                    {"window_wanted", m.window_wanted},
+                    {"discovery_auto", ctx_.current_settings().discovery_auto},
+                    {"missing_expected", m.missing_expected},
                     {"discovery",
                      {{"running", m.discovery.running},
                       {"remaining_s", m.discovery.remaining_s},
@@ -1464,6 +1467,7 @@ void HttpServer::routes_() {
                     {"master_housekeeping", s.master_housekeeping},
                     {"master_queries", s.master_queries},
                     {"master_read_tap_config", s.master_read_tap_config},
+                    {"discovery_auto", s.discovery_auto},
                     {"master_optimizer_writes", s.master_optimizer_writes},
                     {"gateway_id", s.gateway_id},
                     {"web_port", s.web_port},
@@ -1514,6 +1518,7 @@ void HttpServer::routes_() {
       if (j.contains("master_housekeeping")) s.master_housekeeping = j["master_housekeeping"].get<bool>();
       if (j.contains("master_queries")) s.master_queries = j["master_queries"].get<bool>();
       if (j.contains("master_read_tap_config")) s.master_read_tap_config = j["master_read_tap_config"].get<bool>();
+      if (j.contains("discovery_auto")) s.discovery_auto = j["discovery_auto"].get<bool>();
       if (j.contains("master_optimizer_writes")) s.master_optimizer_writes = j["master_optimizer_writes"].get<bool>();
       if (j.contains("gateway_id")) s.gateway_id = j["gateway_id"].get<int>();
       if (j.contains("web_port")) s.web_port = j["web_port"].get<int>();

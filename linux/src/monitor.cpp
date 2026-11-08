@@ -295,6 +295,21 @@ int Monitor::new_optimizers(int64_t now_unix) const {
   return n;
 }
 
+std::vector<int64_t> Monitor::expected_last_heard() const {
+  std::lock_guard<std::mutex> lock(mu_);
+  std::vector<int64_t> out;
+  for (const auto &n : nodes_)
+    if (!n.cca_string_label.empty() && !n.known) out.push_back(n.last_heard_unix);
+  return out;
+}
+
+int64_t Monitor::last_report_unix() const {
+  std::lock_guard<std::mutex> lock(mu_);
+  int64_t newest = 0;
+  for (const auto &p : panels_) newest = std::max(newest, p.updated_unix_ms / 1000);
+  return newest;
+}
+
 std::vector<Node> Monitor::nodes() const {
   std::lock_guard<std::mutex> lock(mu_);
   return nodes_;

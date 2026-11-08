@@ -243,6 +243,19 @@ test('the bus master can be asked to read the TAP\'s radio settings, off unless 
   await ctx.close();
 });
 
+test('automatic discovery is a switch on the Bus card, off unless turned on', async () => {
+  const { page, ctx, api } = await open({ hash: '#settings', pages: { bus_role: 'master', discovery_auto: false } });
+  await page.click('#settings-tab-bus');
+  await page.waitForSelector('#pi-discauto-row', { state: 'visible' });
+  assert.equal(await page.isChecked('#pi-discauto'), false);
+  await page.check('#pi-discauto');
+  page.on('dialog', (d) => d.dismiss());
+  await page.click('#pi-port-save');
+  await page.waitForTimeout(300);
+  assert.equal(api.posts.at(-1).discovery_auto, true);
+  await ctx.close();
+});
+
 const diagTabs = (page, view) => page.$$eval(`#view-${view} .page-tabs a`,
   (as) => as.filter((a) => a.offsetParent).map((a) => `${a.textContent}${a.getAttribute('aria-selected') === 'true' ? '*' : ''}`));
 

@@ -64,6 +64,7 @@ function settings() {
 async function open(opts = {}) {
   const api = { master: master(opts.role || 'master', opts.pv, opts.standby), posts: [], settingsPosts: [], discoveryPosts: [], pvStatus: 200 };
   if (opts.discovery) api.master.discovery = { ...api.master.discovery, ...opts.discovery };
+  if (opts.master) Object.assign(api.master, opts.master);
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
   await ctx.route('**/api/**', async (route) => {
     const req = route.request();
@@ -303,5 +304,28 @@ test('a failed poll keeps the PV off banner up', async () => {
   await page.evaluate(() => refreshPv());
   assert.equal(await page.isVisible('#pv-banner'), true);
   assert.equal(await page.isVisible('#pv-pill'), true);
+  await ctx.close();
+});
+
+test('automatic discovery, all reported: the card says it is letting the window close', async () => {
+  const { page, ctx } = await open({ master: { discovery_auto: true, window_wanted: false, missing_expected: 0 } });
+  await page.waitForFunction(() => /Automatic/.test(document.getElementById('disc-detail').textContent));
+  assert.match(await page.textContent('#disc-detail'), /Automatic: every optimizer in your layout has reported today, so the window is left to close/);
+  assert.equal(await page.textContent('#disc-state'), 'Automatic');
+  await ctx.close();
+});
+
+test('automatic discovery, some missing: the card says how many it is waiting for', async () => {
+  const { page, ctx } = await open({ master: { discovery_auto: true, window_wanted: true, missing_expected: 3 } });
+  await page.waitForFunction(() => /Automatic/.test(document.getElementById('disc-detail').textContent));
+  assert.match(await page.textContent('#disc-detail'), /Automatic: kept open while 3 optimizers in your layout haven't reported today/);
+  await ctx.close();
+});
+
+test('automatic discovery off: the card is as before', async () => {
+  const { page, ctx } = await open({ master: { discovery_auto: false, window_wanted: true, missing_expected: 0 } });
+  await page.waitForFunction(() => /Now/.test(document.getElementById('disc-detail').textContent));
+  assert.doesNotMatch(await page.textContent('#disc-detail'), /Automatic/);
+  assert.equal(await page.textContent('#disc-state'), 'Enabled');
   await ctx.close();
 });

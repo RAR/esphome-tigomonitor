@@ -378,7 +378,41 @@ static void test_the_tap_config_is_read_once_when_asked() {
   CHECK(config_reads(tunnels) == 1);
 }
 
+// Automatic discovery: the window is renewed only while wanted, and the
+// owner's "let it close" still wins. The TAP here says its window has run
+// out (0 s left), which is when a renewal goes.
+static int renewals_sent(bool owner_renew, bool wanted) {
+  TapPort port;
+  int renewals = 0;
+  port.answer = [&](const mp::Frame &f, mp::Frame &r) {
+    if (f.cmd != 0x0B0F || f.payload.size() < 5) return false;
+    uint8_t sub = f.payload[3], seq = f.payload[4];
+    if (sub == 0x2D) renewals++;
+    if (sub != 0x2E && sub != 0x2D) return false;
+    r.dest = GW | 0x8000;
+    r.cmd = 0x0B10;
+    r.payload = {0x00, 0x0E, 0x00, 0x2F, seq, 0x00, 0x00, 0x00, 0x00, 0x2C, 0x00, 0x28, 0x00, 0x2C};
+    return true;
+  };
+  MasterCore core(&port, [](int, const std::string &) {}, nullptr, nullptr, GW, false, false);
+  core.set_discovery(owner_renew, nullptr);
+  core.set_window_wanted(wanted);
+  CHECK(core.open());
+  for (uint32_t t = 0; t < 8000; t += 50) core.tick(t);
+  core.close();
+  return renewals;
+}
+static void test_discovery_renews_only_while_wanted() {
+  CHECK(renewals_sent(true, true) > 0);
+  CHECK(renewals_sent(true, false) == 0);
+}
+static void test_the_owner_switch_beats_wanted() {
+  CHECK(renewals_sent(false, true) == 0);
+}
+
 int main() {
+  test_discovery_renews_only_while_wanted();
+  test_the_owner_switch_beats_wanted();
   test_the_tap_config_is_not_read_unless_asked();
   test_the_tap_config_is_read_once_when_asked();
   test_a_late_drain_is_reported();

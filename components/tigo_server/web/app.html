@@ -1349,6 +1349,10 @@
           <div class="cfg-text"><strong>Let queries change optimizer settings</strong><span>Send the CCA's two writes when an optimizer's answer calls for them: #00w255 after an Info reading 00, and Smrt mode S after one in mode N. Needs Query the optimizers (experimental)</span></div>
           <div class="cfg-ctrl"><label class="cfg-switch"><input type="checkbox" id="pi-writes"> <span>Off</span></label></div>
         </div>
+        <div class="cfg-row" id="pi-discauto-row" style="display:none">
+          <div class="cfg-text"><strong>Open discovery only when needed</strong><span>As the CCA does: keep the TAP's join window open only while an optimizer placed in your layout hasn't reported today, in daylight. With none placed, it stays open as now. The Bus page's Disable still wins (experimental)</span></div>
+          <div class="cfg-ctrl"><label class="cfg-switch"><input type="checkbox" id="pi-discauto"> <span>Off</span></label></div>
+        </div>
         <div class="cfg-row" id="pi-tapcfg-row" style="display:none">
           <div class="cfg-text"><strong>Read the TAP's radio settings</strong><span>Once each time the master starts, read the TAP's channel and the signal level it admits optimizers at, as the CCA does when it brings a TAP up. Shown on the Devices page. Reads only (experimental)</span></div>
           <div class="cfg-ctrl"><label class="cfg-switch"><input type="checkbox" id="pi-tapcfg"> <span>Off</span></label></div>
@@ -3907,8 +3911,15 @@
     const joined = !m.discovery_read || w.joined == null || w.in_table == null ? ''
       : w.in_table === 0 ? " · the TAP's table is empty"
       : ` · ${w.joined} of the ${w.in_table} in the TAP's table have joined`;
-    document.getElementById('disc-state').textContent = renewing ? 'Enabled' : 'Disabled';
-    document.getElementById('disc-detail').textContent = (renewing ? `Now ${left}` : `Now ${left} · kept through a restart`) + joined;
+    // Automatic (Settings › Bus): renewed only while an optimizer in the
+    // layout hasn't reported today. The Disable switch still wins.
+    const auto = renewing && m.discovery_auto;
+    const autoText = !auto ? ''
+      : m.window_wanted === false ? 'Automatic: every optimizer in your layout has reported today, so the window is left to close · '
+      : m.missing_expected > 0 ? `Automatic: kept open while ${m.missing_expected} optimizer${m.missing_expected === 1 ? '' : 's'} in your layout haven't reported today · `
+      : 'Automatic: kept open (nothing placed in the layout to judge by) · ';
+    document.getElementById('disc-state').textContent = auto ? 'Automatic' : renewing ? 'Enabled' : 'Disabled';
+    document.getElementById('disc-detail').textContent = autoText + (renewing ? `Now ${left}` : `Now ${left} · kept through a restart`) + joined;
     const disc = document.getElementById('disc-toggle');
     disc.textContent = renewing ? 'Disable' : 'Enable';
     document.getElementById('disc-dot').className = 'dot ' + (!m.discovery_read ? 'dim' : renewing ? '' : 'idle');
@@ -4486,6 +4497,8 @@
       document.getElementById('pi-housekeeping').nextElementSibling.textContent = s.master_housekeeping ? 'On' : 'Off';
       document.getElementById('pi-queries').checked = !!s.master_queries;
       document.getElementById('pi-tapcfg').checked = !!s.master_read_tap_config;
+      document.getElementById('pi-discauto').checked = !!s.discovery_auto;
+      document.getElementById('pi-discauto').nextElementSibling.textContent = s.discovery_auto ? 'On' : 'Off';
       document.getElementById('pi-tapcfg').nextElementSibling.textContent = s.master_read_tap_config ? 'On' : 'Off';
       document.getElementById('pi-queries').nextElementSibling.textContent = s.master_queries ? 'On' : 'Off';
       document.getElementById('pi-writes').checked = !!s.master_optimizer_writes;
@@ -4524,7 +4537,7 @@
   let piWebPortActive = 0;
   let piWebLogin = { user: 'admin', set: false };
   let piBusRole = 'listen';
-  const PI_MASTER_ROWS = ['pi-startup-row', 'pi-housekeeping-row', 'pi-queries-row', 'pi-writes-row', 'pi-tapcfg-row'];
+  const PI_MASTER_ROWS = ['pi-startup-row', 'pi-housekeeping-row', 'pi-queries-row', 'pi-writes-row', 'pi-tapcfg-row', 'pi-discauto-row'];
   // Two masters on one bus collide, and the master's requests reach the
   // optimizers, so becoming the master is a deliberate step.
   document.getElementById('pi-bus-role').addEventListener('change', (e) => {
@@ -4596,7 +4609,7 @@
       }
     });
   }
-  for (const id of ['pi-startup', 'pi-housekeeping', 'pi-queries', 'pi-writes', 'pi-tapcfg', 'pi-mqtt-disc-on', 'pi-mqtt-standby-panels']) {
+  for (const id of ['pi-startup', 'pi-housekeeping', 'pi-queries', 'pi-writes', 'pi-tapcfg', 'pi-discauto', 'pi-mqtt-disc-on', 'pi-mqtt-standby-panels']) {
     document.getElementById(id).addEventListener('change', (e) => {
       e.target.nextElementSibling.textContent = e.target.checked ? 'On' : 'Off';
     });
@@ -4690,6 +4703,7 @@
                    master_queries: document.getElementById('pi-queries').checked,
                    master_optimizer_writes: document.getElementById('pi-writes').checked,
                    master_read_tap_config: document.getElementById('pi-tapcfg').checked,
+                   discovery_auto: document.getElementById('pi-discauto').checked,
                    web_username: document.getElementById('pi-web-user').value.trim() || 'admin' };
     if (!piTls.fixed) Object.assign(body, { tls_cert: tlsCert, tls_key: tlsKey });
     const webPass = document.getElementById('pi-web-pass').value;

@@ -122,6 +122,11 @@ class Monitor {
   // or that the roster stopped listing OFF_ROSTER_AFTER_S before its newest
   // entry. A dead or removed optimizer shows up here.
   int missing_optimizers(int64_t now_unix) const;
+  // For automatic discovery (discovery_policy.h): when each optimizer placed
+  // in the layout (a string label, not marked known) last reported, and the
+  // newest report from any panel (unix s, 0 = none).
+  std::vector<int64_t> expected_last_heard() const;
+  int64_t last_report_unix() const;
   // Marks the node with this barcode known (or not). False: no such node.
   bool set_known(const std::string &barcode, bool known);
   static const int64_t MISSING_AFTER_S = 3 * 86400;

@@ -110,6 +110,8 @@ struct MasterStatus {
   // False after the owner's "let it close" (request_discovery): read, not
   // renewed. Saved where set_discovery says, so a restart keeps it.
   bool discovery_renewing = true;
+  bool window_wanted = true;  // what automatic discovery wants (true when it's off)
+  int missing_expected = 0;   // and how many in the layout it is waiting for
   PvState pv;
   bool pv_confirmed = false;    // the TAP's last reply carried the byte
   bool pv_unconfirmed = false;  // it didn't, after PvSwitch::RETRIES
@@ -192,6 +194,11 @@ class MasterCore {
   // read, 0x0D 00 00), for its channel and SLT. Off unless the owner asks;
   // call before open().
   void set_read_tap_config(bool on) { read_tap_config_ = on; }
+  // Automatic discovery (discovery_policy.h): false lets the window close,
+  // as the CCA does with every expected optimizer found. The owner's switch
+  // (request_discovery) still wins: renewed only when both want it.
+  // missing: how many expected optimizers haven't reported today, for the UI.
+  void set_window_wanted(bool wanted, int missing = 0);
 
   bool open();
   // Sends at most one request and reads its reply, up to REPLY_TIMEOUT_MS.
@@ -263,6 +270,7 @@ class MasterCore {
   std::unique_ptr<esphome::tigo_monitor::master::PvSwitch> pv_;
   PvState pv_state_;       // under mu_
   bool discovery_renewing_ = true;  // under mu_
+  bool window_wanted_ = true;       // under mu_
   bool pv_changed_ = false;  // under mu_: request_pv's, for the next tick
   // Standing by: whether a 0x0B00 has been heard since it began. A takeover
   // without one leaves the switch silent (tigo_master.h's PvSwitch).
