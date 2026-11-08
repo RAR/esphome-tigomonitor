@@ -26,6 +26,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   in your layout hasn't reported today, in daylight, as the CCA we watched
   on the bench did, instead of all day. Off by default; see
   [Disable the discovery window](https://rar.github.io/esphome-tigomonitor/guides/raspberry-pi/#disable-the-discovery-window).
+- **Spot an optimizer whose settings differ (Raspberry Pi).** The Devices
+  page has a Settings column: whether each optimizer has its settings
+  stored, and "differs" for one whose answer isn't the one most of them
+  give. It comes from the answers to the optimizer queries the CCA asks,
+  ours or a CCA's; the raw answer is in the tooltip.
 
 ## [2.1.0] - 2026-11-07
 

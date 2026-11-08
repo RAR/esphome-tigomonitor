@@ -250,7 +250,9 @@ did is behind six switches on the same tab, all off until you turn them on:
 - **Send the CCA's housekeeping:** its regular 0x41 to each optimizer, its
   hourly 0x0B00 and 0x22, and its reads of the TAP's node table.
 - **Query the optimizers:** the CCA's five questions to each one. The
-  firmware on the Devices page comes from the answers.
+  firmware and the Settings column on the Devices page come from the
+  answers: whether each optimizer has its settings stored, and "differs"
+  for one whose settings aren't what most of the others report.
 - **Let queries change optimizer settings:** the two writes the CCA sends
   when an answer calls for them. Needs **Query the optimizers**.
 - **Read the TAP's radio settings:** once each time the master starts, the

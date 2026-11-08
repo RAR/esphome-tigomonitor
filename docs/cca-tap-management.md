@@ -109,8 +109,9 @@ Our master does steps 1–6 for one TAP. Its STORE runs only on that drop-back p
 
 ## Reports and timing
 
-- **Power reports carry a slot counter:** top 2 bits = Hslot 0–3, low 14 bits = 5 ms ticks. One report per 2 s bin (400 ticks); an Hslot is 60 s; the counter wraps every 4 min. `tigo_protocol.h` keeps it as text (`slot_counter`).
+- **Power reports carry a slot counter:** top 2 bits = Hslot 0–3, low 14 bits = 5 ms ticks. One report per 2 s bin (400 ticks) on the bench, per 3 s (600 ticks) on the roof; an Hslot is 60 s; the counter wraps every 4 min. `tigo_protocol.h` keeps it as text (`slot_counter`).
 - **Reports carry no sequence number.** No byte steps by one from report to report in the bench captures; the CCA UI's "serial" column is the CCA's own count. Loss shows in the slot counter instead: a gap of twice the cadence means one report missed, and 0 a duplicate. `link_stats.h` counts it per optimizer, taking the smallest gap of the day as the cadence. On the bench that was 400 ticks (2 s); on the roof at sunrise, 2026-11-08, it was 600 ticks (3 s) on a 200-tick grid, and about one report in six reached the bus behind a newer one: 600, 1,800 or 3,000 ticks behind. Counting only up to 1,600 ticks behind as late read 20% loss (median of 40) where the slots seen showed 0.9%; anything behind by under half the wrap and heard within 60 s now counts as late, which reads 1.1%.
+- **NetDiag (type 09), once per join, 23 data bytes:** 8–15 the node's MAC. Byte 16 is the node's signal at the join: across 21 roof joins at sunrise, 2026-11-08, it tracked the RSSI of the node's next power reports (correlation 0.93, within 4.9 on average). Byte 22 splits two forms: 39 (15 joins), where bytes 20–21 match no node or TAP, and 40 (6), where they all name the same node, but a small `00 xx` value matches some node address by chance easily and those joiners hear better than the node named. The parent isn't placed; the Mesh tab draws no relays.
 - **The CCA polls each TAP about 44 times a second,** about 22.8 ms apart, alternating between TAPs. Over 98% of replies are empty.
   - TAP turnaround averages 10–13 ms, worst case about 142 ms.
   - Our master polls at a similar rate, one request per tick with a 10 ms sleep. Its reply timeout is 50 ms, so the rare slow reply is retried, and the late one is discarded by `transact`'s request match.
@@ -134,7 +135,7 @@ Data collection from every TAP stops for the whole scan, about 5½ min. The acti
 - **The field after `S`** is AcLoss, the rapid-shutdown-on-AC-loss setting: `0000` in the 4.0.7 and night forms, `.` in the morning form.
 - **Our allowlisted `^00Smrt_........S0000...0000` is the CCA's Default.**
 
-The read-back `!Smrt …` has 16 tokens: token 3 HwVout, 10 the store-done flag (`S`), 11 AcLoss, 15 BaseOverride. The CCA compares them with what it wants and re-sends on a mismatch.
+The read-back `!Smrt …` has 16 tokens on the bench: token 3 HwVout, 10 the store-done flag (`S`), 11 AcLoss, 15 BaseOverride. The CCA compares them with what it wants and re-sends on a mismatch. The roof answers two ways (sunrise, 2026-11-08, 22 optimizers): 13 tokens with values (17, all identical: `0FFF 0000 0FFF 0008 00C8 00C8 000A 0154 0154 S 00 01`), or 16 tokens of zeros (5). Token 10 is `S` or `N` in both; the other positions don't line up, so the Pi names only the flag and shows the rest as heard. Two of the zero-form five went `N` → `S` after the Zero's allowlisted `Smrt_`.
 
 ## What the Pi must never send
 
