@@ -363,7 +363,7 @@ test('mesh: direct, unidentified relay, and not known', async () => {
   assert.match(await via(0), /^The TAP directly/);
   assert.equal(await page.locator(`#mesh-svg .mesh-link[data-addr="${fixtureNodes[11].addr}"]`).getAttribute('data-via'), 'unknown');
   assert.match(await via(11), /^A relay not identified yet \(network ID 0091\)/);
-  assert.match(await via(20), /^Not known: no join heard since this Pi started/);
+  assert.match(await via(20), /^Not known: no join heard yet/);
   await ctx.close();
 });
 

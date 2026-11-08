@@ -6090,7 +6090,7 @@
     const viaText = via.kind === 'tap' ? 'The TAP directly'
       : via.kind === 'node' ? `${meshEsc(via.relay.label)}, another optimizer, which relays it to the TAP`
       : via.kind === 'unknown' ? `A relay not identified yet (network ID ${meshEsc(via.id)})`
-      : 'Not known: no join heard since this Pi started';
+      : 'Not known: no join heard yet';
     const relays = (meshData.nodes || []).filter(m => m !== n && m.parent === n.addr).map(m => meshEsc(m.label));
     document.getElementById('mesh-side').innerHTML = `
       <h3>${meshEsc(n.label)} <span class="mesh-pill tier-${tier}">${MESH_NAMES[tier]}</span></h3>

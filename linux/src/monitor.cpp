@@ -186,6 +186,7 @@ void Monitor::on_netdiag_(const std::string &packet) {
   for (const auto &n : nodes_)
     if (n.long_address == j.node_mac) addr = n.addr;
   links_.on_join(addr, unix_ms() / 1000, j.parent);
+  dirty_ = true;  // kept in state.json: the next join may be tomorrow's sunrise
   LOGI("%s joined (NetDiag)", addr.c_str());
 }
 
@@ -732,9 +733,14 @@ bool Monitor::save_locked_() {
     if (!p.barcode.empty()) peaks[p.barcode] = p.peak_power;
   json first = json::object();
   for (const auto &kv : first_heard_) first[kv.first] = kv.second;
+  // Where each optimizer last joined the mesh, and when.
+  json joins = json::array();
+  for (const auto &kv : links_.links())
+    if (kv.second.last_join_s)
+      joins.push_back({{"addr", kv.first}, {"parent", kv.second.parent}, {"unix", kv.second.last_join_s}});
   json j = {{"version", 1},     {"nodes", nodes},           {"energy_kwh", energy_kwh_}, {"energy_in_kwh", energy_in_kwh_}, {"today_in_kwh", today_in_kwh_}, {"peaks", peaks},
             {"today", today_},  {"today_kwh", today_kwh_}, {"daily_kwh", history},
-            {"seen_barcodes", seen_barcodes_}, {"seen_since", seen_since_}, {"first_heard", first}};
+            {"seen_barcodes", seen_barcodes_}, {"seen_since", seen_since_}, {"first_heard", first}, {"joins", joins}};
   {
     std::lock_guard<std::mutex> lock(write_mu_);
     pending_ = j.dump(1) + "\n";
@@ -768,6 +774,9 @@ bool Monitor::load() {
     if (d.is_array() && d.size() == 2 && d[0].is_string() && d[1].is_number())
       history_.emplace_back(d[0].get<std::string>(), d[1].get<double>());
   }
+  for (const auto &e : j.value("joins", json::array()))
+    if (e.is_object() && !e.value("addr", "").empty())
+      links_.on_join(e.value("addr", ""), e.value("unix", static_cast<int64_t>(0)), e.value("parent", ""));
   nodes_.clear();
   for (const auto &e : j.value("nodes", json::array())) {
     if (!e.is_object()) continue;

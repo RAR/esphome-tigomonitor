@@ -202,7 +202,8 @@ runs from that relay, and the side panel names it ("Joined through") and
 lists the ones a relay carries ("Relays for"). A relay whose network ID
 matches no optimizer the TAP lists is drawn as a dashed line to the TAP:
 "a relay not identified yet". Joins come at sunrise and when an optimizer
-rejoins, so after the Pi restarts the side panel says "Not known" until then.
+rejoins; the Pi keeps the last one across restarts, so only a new install
+says "Not known" until the next sunrise.
 
 ## Set a password
 
