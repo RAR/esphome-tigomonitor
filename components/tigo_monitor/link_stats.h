@@ -56,6 +56,13 @@ struct Link {
   bool have_slot = false;
   uint32_t last_ticks = 0;
   uint32_t cadence = 0;  // 0 = not learned today
+  // The last few late reports, so one heard twice fills its hole once.
+  struct Late {
+    uint32_t ticks = 0;
+    int64_t unix_s = 0;  // 0 = empty
+  };
+  std::array<Late, 8> late{};
+  uint8_t late_next = 0;
   std::array<Bucket, BUCKETS> ring{};
 };
 
@@ -75,7 +82,14 @@ class LinkStats {
       }
       if (gap > WRAP_TICKS / 2 && unix_s - l.last_heard_s < LATE_WITHIN_S) {
         // Behind the newest: a report that arrived late, filling a hole
-        // already counted as lost.
+        // already counted as lost; or the same late report again.
+        for (const auto &e : l.late)
+          if (e.unix_s && e.ticks == ticks && unix_s - e.unix_s < LATE_WITHIN_S) {
+            l.last_heard_s = unix_s;
+            return;
+          }
+        l.late[l.late_next] = {ticks, unix_s};
+        l.late_next = (l.late_next + 1) % l.late.size();
         late = true;
         if (l.lost_today) l.lost_today--;
       } else if (gap <= WRAP_TICKS / 2) {

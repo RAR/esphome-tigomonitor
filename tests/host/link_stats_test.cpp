@@ -211,6 +211,15 @@ static void test_a_late_report_keeps_the_newest() {
   CHECK(s.links().at("0001").lost_today == 0);
 }
 
+// A late report heard twice fills its hole once, and counts once.
+static void test_a_late_report_heard_twice_counts_once() {
+  LinkStats s;
+  // 3600 to 5400 never come: 4 lost, however often 3000 is heard.
+  reports(s, "0001", {0, 600, 1200, 1800, 2400, 6000, 3000, 3000, 3000, 6600});
+  CHECK(s.links().at("0001").lost_today == 4);
+  CHECK(s.links().at("0001").reports_today == 8);
+}
+
 int main() {
   test_slot_ticks();
   test_steady_reports_lose_nothing();
@@ -233,6 +242,7 @@ int main() {
   test_a_deleted_optimizer_is_forgotten();
   test_a_report_far_behind_fills_its_hole();
   test_a_late_report_keeps_the_newest();
+  test_a_late_report_heard_twice_counts_once();
   if (failures) {
     std::printf("%d failed\n", failures);
     return 1;
