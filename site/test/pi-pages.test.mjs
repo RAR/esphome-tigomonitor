@@ -356,6 +356,34 @@ test('mesh: an optimizer joined through another is drawn from it', async () => {
   await ctx.close();
 });
 
+test('mesh: an optimizer through a relay sits just beyond it, away from the TAP', async () => {
+  const node = (addr, parent, rssi = 150) => ({ addr, label: 'N' + addr, string: '', tap: '1201', parent, rssi,
+    rssi_24h: Array(288).fill(null), reports_today: 100, lost_today: 0, last_heard_s: 2, last_join_unix: 1 });
+  const nodes = [];
+  for (let i = 2; i < 14; i++) nodes.push(node(i.toString(16).toUpperCase().padStart(4, '0'), '0001'));
+  // Two through 0005, one through one of those, and a pair naming each other.
+  nodes.push(node('0010', '0005', 70), node('0011', '0005', 90), node('0012', '0010', 60), node('0013', '0014'), node('0014', '0013'));
+  const { page, ctx, errors } = await openMesh({ mesh: { loss_method: 'slot', parent_confirmed: true, taps: [{ id: '1201' }], nodes } });
+  const at = async (addr) => { const d = meshNode(page, 'N' + addr).locator('.mesh-dot');
+    return [+await d.getAttribute('cx'), +await d.getAttribute('cy')]; };
+  const r = await page.locator('#mesh-svg .mesh-tap rect').first();
+  const hub = [+await r.getAttribute('x') + 38, +await r.getAttribute('y') + 16];
+  const polar = ([x, y]) => [Math.hypot(x - hub[0], y - hub[1]), Math.atan2(y - hub[1], x - hub[0])];
+  for (const [child, parent] of [['0010', '0005'], ['0011', '0005'], ['0012', '0010']]) {
+    const c = await at(child), p = await at(parent), [rc, ac] = polar(c), [rp, ap] = polar(p);
+    assert.ok(rc > rp + 20, `${child} (${rc.toFixed(0)}) beyond ${parent} (${rp.toFixed(0)})`);
+    const da = Math.abs(Math.atan2(Math.sin(ac - ap), Math.cos(ac - ap)));
+    assert.ok(da < 0.6, `${child} within 0.6 rad of ${parent}'s bearing, was ${da.toFixed(2)}`);
+    assert.ok(Math.hypot(c[0] - p[0], c[1] - p[1]) < 80, `${child} close to ${parent}`);
+  }
+  const [a, b] = [await at('0010'), await at('0011')];
+  assert.ok(Math.hypot(a[0] - b[0], a[1] - b[1]) > 18, 'siblings fanned apart');
+  assert.equal(await meshNode(page, 'N0013').count(), 1);
+  assert.equal(await meshNode(page, 'N0014').count(), 1);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
 test('mesh: direct, unidentified relay, and not known', async () => {
   const { page, ctx } = await openMesh();
   const via = async (i) => { await meshNode(page, fixtureNodes[i].label).hover(); return page.textContent('#mesh-side .mesh-via'); };

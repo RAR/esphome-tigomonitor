@@ -6066,17 +6066,60 @@
     const hub = {};
     tapIds.forEach((id, k) => { hub[id] = [spacing * (k + 0.5), H / 2]; });
     // Each TAP's optimizers by golden angle, in address order so the same
-    // data draws the same picture; further out as the signal falls.
-    const pos = new Map();
+    // data draws the same picture; further out as the signal falls. One that
+    // joined through another optimizer is placed after, off its relay.
+    const pos = new Map(), polar = new Map(), golden = 137.508 * Math.PI / 180;
+    const hubOf = n => n.tap && hub[n.tap] ? n.tap : tapIds[0];
+    const relayOf = n => { const v = meshVia(n); return v.kind === 'node' ? v.relay : null; };
+    const place = (n, id, r, a) => {
+      polar.set(n, [r, a, id]);
+      pos.set(n, [hub[id][0] + r * Math.cos(a), hub[id][1] + r * Math.sin(a) * 0.92]);
+    };
+    const ringCount = {};
     for (const id of tapIds) {
-      const group = nodes.filter(n => (n.tap && hub[n.tap] ? n.tap : tapIds[0]) === id)
-                         .sort((a, b) => a.addr.localeCompare(b.addr));
+      // Slots come from every optimizer on this TAP, so one moving off to its
+      // relay leaves the rest where they were.
+      const group = nodes.filter(n => hubOf(n) === id).sort((a, b) => a.addr.localeCompare(b.addr));
       group.forEach((n, i) => {
+        if (relayOf(n)) return;
         const weak = n.rssi == null ? 1 : 1 - Math.min(1, Math.max(0, (n.rssi - 60) / 170));
-        const r = meshTier(n) === 'silent' ? rMax : rMin + weak * (rMax - rMin - 14) + (i % 3) * 7;
-        const a = i * 137.508 * Math.PI / 180;
-        pos.set(n, [hub[id][0] + r * Math.cos(a), hub[id][1] + r * Math.sin(a) * 0.92]);
+        place(n, id, meshTier(n) === 'silent' ? rMax : rMin + weak * (rMax - rMin - 14) + (i % 3) * 7, i * golden);
       });
+      ringCount[id] = group.length;
+    }
+    // Then each one through a relay: just beyond it, on the side away from
+    // the TAP, fanned out when a relay carries several, so its line is a short
+    // spoke rather than one crossing the map. Relays of relays follow in turn;
+    // ones whose relay is never placed (two naming each other) go on the ring.
+    let left = nodes.filter(relayOf).sort((a, b) => a.addr.localeCompare(b.addr));
+    while (left.length) {
+      const ready = left.filter(n => polar.has(relayOf(n)));
+      if (!ready.length) {
+        const n = left.shift(), id = hubOf(n);
+        place(n, id, rMax, ringCount[id]++ * golden);
+        continue;
+      }
+      for (const relay of new Set(ready.map(relayOf))) {
+        const kids = ready.filter(n => relayOf(n) === relay), [rr, ar, id] = polar.get(relay);
+        kids.forEach((n, k) => {
+          // The first spot clear of every dot placed so far, nearest first:
+          // fanned beside the relay, then a step further out. A dot with its
+          // label wants about 34 px; none clear, the nearest.
+          const step = Math.min(0.35, 28 / (rr + 40)), base = ar + (k - (kids.length - 1) / 2) * step;
+          let best = null;
+          for (const r of [rr + 40, rr + 62, rr + 84]) {
+            for (const j of [0, 1, -1, 2, -2]) {
+              const a = base + j * step * 0.8, x = hub[id][0] + r * Math.cos(a), y = hub[id][1] + r * Math.sin(a) * 0.92;
+              const gap = Math.min(...[...pos.values()].map(([px, py]) => Math.hypot(x - px, (y - py) * 2.2)));
+              if (!best || gap > best.gap) best = { r, a, gap };
+              if (gap >= 34) break;
+            }
+            if (best.gap >= 34) break;
+          }
+          place(n, id, best.r, best.a);
+        });
+      }
+      left = left.filter(n => !ready.includes(n));
     }
     if (tapIds.length > 1)
       el('line', { class: 'mesh-bus', x1: hub[tapIds[0]][0], y1: H / 2, x2: hub[tapIds.at(-1)][0], y2: H / 2 }, svg);
@@ -6095,7 +6138,7 @@
       // A bigger, invisible target than the dot, reaching the label.
       el('circle', { class: 'mesh-hit', cx: x, cy: y, r: 12 }, g);
       el('circle', { class: 'mesh-dot', cx: x, cy: y, r: 7 }, g);
-      const right = x >= hub[n.tap && hub[n.tap] ? n.tap : tapIds[0]][0];
+      const right = x >= hub[polar.get(n)[2]][0];
       el('text', { x: right ? x + 10 : x - 10, y: y + 3.5, 'text-anchor': right ? 'start' : 'end' }, g).textContent = n.label;
       const pick = () => meshSide(n);
       g.addEventListener('mouseenter', pick);
