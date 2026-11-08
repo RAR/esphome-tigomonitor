@@ -1246,7 +1246,7 @@
         <div class="section-title devices-head">TAPs</div>
         <div class="table-wrap">
           <table class="nodes">
-            <thead><tr><th>Addr</th><th>Model</th><th>Firmware</th><th>Since</th><th>Last read</th></tr></thead>
+            <thead><tr><th>Addr</th><th>Model</th><th>Firmware</th><th>Radio</th><th>Since</th><th>Last read</th></tr></thead>
             <tbody></tbody>
           </table>
         </div>
@@ -3406,11 +3406,18 @@
     box.style.display = v ? '' : 'none';
     if (!v) return;
     const when = ms => new Date(ms).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+    // The TAP's radio as last read from its GatewayCfg block: the 802.15.4
+    // channel, and SLT, the signal level an optimizer must beat to be let in.
+    const radio = addr => {
+      const r = (v.radios || []).find(x => x.tap === addr);
+      return r ? `<td title="SLm ${r.slm}, read ${when(r.heard_unix_ms)}">Channel ${r.channel} · admits above ${r.slt}</td>`
+               : '<td title="Read from the TAP when a bus master brings it up">—</td>';
+    };
     box.querySelector('tbody').innerHTML = (v.taps || []).length ? v.taps.map(t => `<tr>
         <td class="mono">${topoEscape(t.addr)}</td><td>${topoEscape(t.model)}</td>
         <td class="mono"${t.previous ? ` title="was ${topoEscape(t.previous)}"` : ''}><strong>${topoEscape(t.version)}</strong></td>
-        <td>${when(t.since_unix_ms)}</td><td>${when(t.last_unix_ms)}</td></tr>`).join('')
-      : `<tr><td colspan="5" style="color:var(--text-faint)">Not heard yet. The bus master asks the TAP once each time it starts, and the optimizers as it first hears each one.</td></tr>`;
+        ${radio(t.addr)}<td>${when(t.since_unix_ms)}</td><td>${when(t.last_unix_ms)}</td></tr>`).join('')
+      : `<tr><td colspan="6" style="color:var(--text-faint)">Not heard yet. The bus master asks the TAP once each time it starts, and the optimizers as it first hears each one.</td></tr>`;
   }
 
   async function refreshNodes() {

@@ -79,3 +79,21 @@ test('Devices, on the ESP32: no TAP list and no firmware column', async () => {
   assert.deepEqual(errors, []);
   await ctx.close();
 });
+
+test("Devices, on the Pi: the TAP's radio channel and admission level, once read", async () => {
+  const { page, ctx } = await open(true);
+  await page.waitForSelector('#devices-taps', { state: 'visible' });
+  const row = await page.textContent('#devices-taps tbody tr');
+  assert.match(row, /Channel 18/);
+  assert.match(row, /admits above 90/);
+  await ctx.close();
+});
+
+test('Devices, on the Pi: a TAP whose radio was never read says so', async () => {
+  const { page, ctx } = await open(true, { ...routes['/api/versions'], radios: [] });
+  await page.waitForSelector('#devices-taps', { state: 'visible' });
+  const cells = await page.$$eval('#devices-taps tbody tr td', tds => tds.map(td => td.textContent.trim()));
+  assert.ok(cells.includes('—'));
+  assert.doesNotMatch(cells.join(' '), /Channel/);
+  await ctx.close();
+});

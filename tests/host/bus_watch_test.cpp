@@ -322,6 +322,46 @@ static void test_log_is_bounded() {
   CHECK(w.exchanges().size() == BusWatch::KEEP && w.exchanges().front().unix_ms == 1000 - (int64_t)BusWatch::KEEP);
 }
 
+// The TAP's radio settings from a GatewayCfg read heard on the bus: the
+// channel, SLT and SLm only. The block also carries the PAN and the network
+// key; here they are made up (12 34, EE × 16) and must not come out.
+static std::string gateway_cfg_block(uint8_t channel) {
+  char b[80];
+  std::snprintf(b, sizeof(b), "00%02X1234" "0C020201" "00" "AABBCC" "1C03" "5A", channel);
+  return std::string(b) + std::string(32, 'E') + "00000200" "3C" "00";
+}
+
+static void test_tap_radio_from_a_read() {
+  BusWatch w;
+  w.on_frame(request(0x0B0F, hex("0000000D070000")), true, 1000);
+  w.on_frame(reply(0x0B10, hex(("0000000E07" + gateway_cfg_block(0x12)).c_str())), false, 1012);
+  auto r = w.take_radios();
+  CHECK(r.size() == 1);
+  if (r.size() == 1) {
+    CHECK(r[0].tap == 0x1201);
+    CHECK(r[0].channel == 18);
+    CHECK(r[0].slt == 90);
+    CHECK(r[0].slm == 60);
+  }
+  CHECK(w.take_radios().empty());
+}
+
+static void test_tap_radio_not_from_a_write() {
+  BusWatch w;
+  // 01 00 + 36 bytes writes the block; its echo looks like a read's reply.
+  w.on_frame(request(0x0B0F, hex(("0000000D08" "0100" + gateway_cfg_block(0x14).substr(2)).c_str())), false, 1000);
+  w.on_frame(reply(0x0B10, hex(("0000000E08" + gateway_cfg_block(0x14)).c_str())), false, 1012);
+  CHECK(w.take_radios().empty());
+}
+
+static void test_tap_radio_needs_the_whole_block() {
+  BusWatch w;
+  w.on_frame(request(0x0B0F, hex("0000000D090001")), true, 1000);
+  std::string short_block = gateway_cfg_block(0x12).substr(0, 72);
+  w.on_frame(reply(0x0B10, hex(("0000000E09" + short_block).c_str())), false, 1012);
+  CHECK(w.take_radios().empty());
+}
+
 int main() {
   test_names();
   test_no_alarm_for_what_a_master_here_sends();
@@ -337,6 +377,9 @@ int main() {
   test_another_master();
   test_stats_cover_five_minutes();
   test_log_is_bounded();
+  test_tap_radio_from_a_read();
+  test_tap_radio_not_from_a_write();
+  test_tap_radio_needs_the_whole_block();
   if (failures) {
     std::printf("%d failed\n", failures);
     return 1;

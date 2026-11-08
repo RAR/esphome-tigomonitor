@@ -225,6 +225,30 @@ inline bool parse_version(const std::string &text, VersionSeen &v) {
 
 // Each device's version, from when it was first seen, and the one it
 // replaced: kept by the caller across restarts (the Pi's versions.json).
+// The TAP's radio settings, from the 37-byte GatewayCfg block a read returns
+// (docs/cca-tap-management.md): byte 1 the 802.15.4 channel, 14 SLT (the
+// signal a node must beat to be admitted), 35 SLm. The same block holds the
+// PAN and the 16-byte network key; those are never copied out.
+struct TapRadio {
+  uint16_t tap = 0;
+  int channel = 0, slt = 0, slm = 0;
+};
+
+// req and rep: a tunnel request and the reply paired with it. Only a read
+// (args 00 00 or 00 01) counts: a write (01 00 + the block) is echoed back
+// with the same block, and isn't the TAP's own setting until it's read.
+inline bool parse_gateway_cfg(const Frame &req, const Frame &rep, TapRadio &r) {
+  TunnelReply t;
+  if (req.cmd != CMD_TUNNEL || req.payload.size() < 7 || req.payload[3] != 0x0D || req.payload[5] != 0x00) return false;
+  if (rep.cmd != CMD_TUNNEL_REPLY || !parse_tunnel_reply(rep.payload, t) || t.sub != 0x0E) return false;
+  if (t.data.size() != 37 || t.data[0] != 0x00) return false;
+  r.tap = rep.dest & 0x7FFF;
+  r.channel = t.data[1];
+  r.slt = t.data[14];
+  r.slm = t.data[35];
+  return true;
+}
+
 class VersionBook {
  public:
   enum Result { first, same, changed };
@@ -456,6 +480,12 @@ class BusWatch {
     return out;
   }
   uint64_t polls() const { return polls_; }
+  // The TAP radio settings read since the last call.
+  std::vector<TapRadio> take_radios() {
+    std::vector<TapRadio> out;
+    out.swap(radios_);
+    return out;
+  }
   // The versions heard since the last call.
   std::vector<VersionSeen> take_versions() {
     std::vector<VersionSeen> out;
@@ -551,6 +581,11 @@ class BusWatch {
     return req.payload.size() > 4 && parse_tunnel_reply(rep.payload, t) && t.seq == req.payload[4];
   }
   void fill_(Exchange &e, const Frame &req, const Frame &rep, int64_t now) {
+    TapRadio radio;
+    if (parse_gateway_cfg(req, rep, radio)) {
+      radios_.push_back(radio);
+      if (radios_.size() > 16) radios_.erase(radios_.begin());  // nobody taking them
+    }
     e.rt_ms = static_cast<int>(now - e.unix_ms);
     e.reply_hex = bus_hex(rep);
     std::string asked = e.reconfig.empty() ? request_summary(req) : e.reconfig;
@@ -647,6 +682,7 @@ class BusWatch {
   uint64_t polls_ = 0;
   std::string discovery_;
   std::vector<VersionSeen> versions_;
+  std::vector<TapRadio> radios_;
 };
 
 }  // namespace master

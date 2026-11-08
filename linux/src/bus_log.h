@@ -18,6 +18,7 @@
 #include <cstdint>
 #include <deque>
 #include <mutex>
+#include <map>
 #include <string>
 
 namespace tigod {
@@ -44,7 +45,8 @@ class BusLog {
   // /api/bus: the alarm, the last 5 minutes in numbers, then up to limit of
   // the newest exchanges.
   nlohmann::json to_json(size_t limit) const;
-  // /api/versions: {taps: [...], optimizers: [...]}, each by address.
+  // /api/versions: {taps: [...], optimizers: [...], radios: [...]}, each by
+  // address; radios are the TAPs' channel, SLT and SLm as last read.
   nlohmann::json versions_json() const;
 
  private:
@@ -57,6 +59,8 @@ class BusLog {
 
   std::string path_, versions_path_;
   esphome::tigo_monitor::master::VersionBook versions_;
+  // Each TAP's radio settings, as last read (by anyone), and when.
+  std::map<uint16_t, std::pair<esphome::tigo_monitor::master::TapRadio, int64_t>> radios_;
   bool versions_dirty_ = false;
   mutable std::mutex mu_;
   esphome::tigo_monitor::master::BusWatch watch_;
