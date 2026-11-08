@@ -3800,11 +3800,14 @@
     document.getElementById('diag-queries-sub').textContent = !q.on ? 'turn on under Settings › Bus'
       : q.writes ? `${q.sent_writes} writes sent` : 'writes off';
 
-    // "Mgate Version G8.65": the version is the figure, the family its label.
-    const ver = (m.tap_version || '').match(/^(\S+) Version (.+)$/);
-    document.getElementById('diag-tap-version').textContent = ver ? ver[2] : m.tap_version || '—';
+    // "Mgate Version G8.65 May  9 2025 13:52:34 GW-H1": the version is the
+    // figure; the family and the build's date and model go beneath it.
+    const ver = (m.tap_version || '').match(/^(\S+) Version (\S+)\s*(.*)$/);
+    const verEl = document.getElementById('diag-tap-version');
+    verEl.textContent = ver ? ver[2] : m.tap_version || '—';
+    verEl.title = m.tap_version || '';
     document.getElementById('diag-tap-version-sub').textContent = !m.tap_version ? 'asked once each time the bus master starts'
-      : (ver ? ver[1] + ' · ' : '') + 'read in the bring-up';
+      : ver ? [ver[1], ver[3].replace(/\s+/g, ' ')].filter(Boolean).join(' · ') : 'read in the bring-up';
   }
 
   async function refreshDiagnostics(force) {

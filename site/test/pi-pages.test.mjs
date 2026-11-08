@@ -67,6 +67,7 @@ async function open(opts = {}) {
       }
       return json(200, api.settings);
     }
+    if (path === '/api/master' && linux && opts.master) return json(200, piRoutes['/api/master']);
     if (path === '/api/mesh' && linux) { api.meshReads = (api.meshReads || 0) + 1; return json(200, opts.mesh ?? piRoutes['/api/mesh']); }
     if (path === '/api/logs') { api.logReads = (api.logReads || 0) + 1; return json(200, { lines: [], next: 0 }); }
     if (path === '/api/cloud/status') return json(200, { configured: true });
@@ -284,6 +285,17 @@ test('the ESP32 has no Logs, so Diagnostics has no tabs', async () => {
 });
 
 // ---- the mesh map --------------------------------------------------------
+
+test('bus: the gateway version is the figure, its build details beneath', async () => {
+  const { page, ctx, errors } = await open({ master: true });
+  await page.click('#nav button[data-view="bus"]');
+  await page.waitForFunction(() => document.getElementById('diag-tap-version').textContent !== '—');
+  assert.equal(await page.textContent('#diag-tap-version'), 'G8.59');
+  assert.equal(await page.textContent('#diag-tap-version-sub'), 'Mgate · Jan 1 2026 10:00:00 GW-H1');
+  assert.equal(await page.getAttribute('#diag-tap-version', 'title'), 'Mgate Version G8.59 Jan  1 2026 10:00:00 GW-H1');
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
 
 async function openMesh(opts = {}) {
   const o = await open(opts);

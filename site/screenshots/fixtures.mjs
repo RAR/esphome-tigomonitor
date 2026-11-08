@@ -398,7 +398,7 @@ export const piRoutes = {
     role: 'master', active: true, fault: 'none', phase: 'running', detail: '', extra_taps: [],
     housekeeping: { on: true, learned_41: 24, sent_41: 1412, sent_session: 3, sent_broadcast: 6, sent_walk_pages: 96, walks_done: 32 },
     queries: { on: true, writes: false, sent_reads: 640, sent_writes: 0, answers: 598 },
-    tap_version: 'Mgate Version G8.59 Jan  1 2026', tap: { lost: 0, last_lost_unix: 0, recent_lost_unix: [], back_without_discovery: 0 },
+    tap_version: 'Mgate Version G8.59 Jan  1 2026 10:00:00 GW-H1', tap: { lost: 0, last_lost_unix: 0, recent_lost_unix: [], back_without_discovery: 0 },
     discovery_read: true, discovery: { running: true, remaining_s: 552, node_count: 24 }, renewals: 41, discovery_renewing: true, discovery_auto: false, window_wanted: true, missing_expected: 0,
     polls: 712400, timeouts: 3, resyncs: 0, gap_ms: { max: 39, max_at_unix: 1767225600, recent: 12 }, last_reply_unix: PI_T / 1000,
     pv: { on: true, source: 'setting', since: 0, confirmed: true, unconfirmed: false, last_sent: '01', last_reply: '01' },
