@@ -1349,6 +1349,10 @@
           <div class="cfg-text"><strong>Let queries change optimizer settings</strong><span>Send the CCA's two writes when an optimizer's answer calls for them: #00w255 after an Info reading 00, and Smrt mode S after one in mode N. Needs Query the optimizers (experimental)</span></div>
           <div class="cfg-ctrl"><label class="cfg-switch"><input type="checkbox" id="pi-writes"> <span>Off</span></label></div>
         </div>
+        <div class="cfg-row" id="pi-tapcfg-row" style="display:none">
+          <div class="cfg-text"><strong>Read the TAP's radio settings</strong><span>Once each time the master starts, read the TAP's channel and the signal level it admits optimizers at, as the CCA does when it brings a TAP up. Shown on the Devices page. Reads only (experimental)</span></div>
+          <div class="cfg-ctrl"><label class="cfg-switch"><input type="checkbox" id="pi-tapcfg"> <span>Off</span></label></div>
+        </div>
         <div class="cfg-row" id="pi-bridge-row" style="display:none">
           <div class="cfg-text"><strong>Bridge address</strong><span>host:port of an ESP32 running stream_server, or an RS485-to-Ethernet converter in TCP server mode</span></div>
           <div class="cfg-ctrl"><input class="cfg-input" id="pi-bridge" autocomplete="off" placeholder="tigo-bridge.local:6638"></div>
@@ -4481,6 +4485,8 @@
       document.getElementById('pi-housekeeping').checked = !!s.master_housekeeping;
       document.getElementById('pi-housekeeping').nextElementSibling.textContent = s.master_housekeeping ? 'On' : 'Off';
       document.getElementById('pi-queries').checked = !!s.master_queries;
+      document.getElementById('pi-tapcfg').checked = !!s.master_read_tap_config;
+      document.getElementById('pi-tapcfg').nextElementSibling.textContent = s.master_read_tap_config ? 'On' : 'Off';
       document.getElementById('pi-queries').nextElementSibling.textContent = s.master_queries ? 'On' : 'Off';
       document.getElementById('pi-writes').checked = !!s.master_optimizer_writes;
       document.getElementById('pi-writes').nextElementSibling.textContent = s.master_optimizer_writes ? 'On' : 'Off';
@@ -4518,7 +4524,7 @@
   let piWebPortActive = 0;
   let piWebLogin = { user: 'admin', set: false };
   let piBusRole = 'listen';
-  const PI_MASTER_ROWS = ['pi-startup-row', 'pi-housekeeping-row', 'pi-queries-row', 'pi-writes-row'];
+  const PI_MASTER_ROWS = ['pi-startup-row', 'pi-housekeeping-row', 'pi-queries-row', 'pi-writes-row', 'pi-tapcfg-row'];
   // Two masters on one bus collide, and the master's requests reach the
   // optimizers, so becoming the master is a deliberate step.
   document.getElementById('pi-bus-role').addEventListener('change', (e) => {
@@ -4590,7 +4596,7 @@
       }
     });
   }
-  for (const id of ['pi-startup', 'pi-housekeeping', 'pi-queries', 'pi-writes', 'pi-mqtt-disc-on', 'pi-mqtt-standby-panels']) {
+  for (const id of ['pi-startup', 'pi-housekeeping', 'pi-queries', 'pi-writes', 'pi-tapcfg', 'pi-mqtt-disc-on', 'pi-mqtt-standby-panels']) {
     document.getElementById(id).addEventListener('change', (e) => {
       e.target.nextElementSibling.textContent = e.target.checked ? 'On' : 'Off';
     });
@@ -4683,6 +4689,7 @@
                    master_housekeeping: document.getElementById('pi-housekeeping').checked,
                    master_queries: document.getElementById('pi-queries').checked,
                    master_optimizer_writes: document.getElementById('pi-writes').checked,
+                   master_read_tap_config: document.getElementById('pi-tapcfg').checked,
                    web_username: document.getElementById('pi-web-user').value.trim() || 'admin' };
     if (!piTls.fixed) Object.assign(body, { tls_cert: tlsCert, tls_key: tlsKey });
     const webPass = document.getElementById('pi-web-pass').value;

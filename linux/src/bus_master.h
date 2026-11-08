@@ -75,6 +75,7 @@ class BusMaster {
   void set_discovery(bool renew, esphome::tigo_master::MasterCore::DiscoverySaved saved) {
     core_.set_discovery(renew, std::move(saved));
   }
+  void set_read_tap_config(bool on) { core_.set_read_tap_config(on); }
   std::map<uint16_t, esphome::tigo_monitor::master::Queries::Setup> setups() const { return core_.setups(); }
   void tick(uint32_t now_ms) { core_.tick(now_ms); }
   void close() { core_.close(); }

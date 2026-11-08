@@ -48,6 +48,7 @@ struct Settings {
   bool master_housekeeping = false;
   bool master_queries = false;           // the CCA's 0x06 reads to optimizers
   bool master_optimizer_writes = false;  // and the two writes its answers call for
+  bool master_read_tap_config = false;   // the bring-up's GatewayCfg read, once at start
   int gateway_id = 0x1201;    // the TAP's RS485 id, as the CCA addresses it (gateway_id_ok)
   float power_calibration = 1.0f;
   // Plenty of RAM here, so the node table is sized for any real site rather

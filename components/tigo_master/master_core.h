@@ -188,6 +188,10 @@ class MasterCore {
   // before open(). Without it the window is renewed and nothing is saved.
   using DiscoverySaved = std::function<void(bool renew)>;
   void set_discovery(bool renew, DiscoverySaved saved);
+  // Read the TAP's GatewayCfg once at the start (the CCA's own bring-up
+  // read, 0x0D 00 00), for its channel and SLT. Off unless the owner asks;
+  // call before open().
+  void set_read_tap_config(bool on) { read_tap_config_ = on; }
 
   bool open();
   // Sends at most one request and reads its reply, up to REPLY_TIMEOUT_MS.
@@ -241,6 +245,8 @@ class MasterCore {
   uint16_t gateway_;
   bool bench_, startup_;
   bool housekeeping_on_;
+  bool read_tap_config_ = false;
+  bool config_read_sent_ = false;  // once a master lifetime, not at each takeover
   std::vector<esphome::tigo_monitor::master::Learned41::Entry> learned_;
   // Made each time polling starts, so a TAP brought up again gets the
   // 0x0B00 straight away, as the CCA's bring-up sends it.

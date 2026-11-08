@@ -547,6 +547,7 @@ struct HousekeepingPlan {
   bool session = true;          // 0x0B00 01 at the start and every hour
   bool session_reset = false;   // 0x0B00 00 first, as after the CCA's own reboot
   bool bring_up_reads = false;  // VERSION, 0x0E02 and the 0x0D pair: after a re-address
+  bool config_read = false;     // 0x0D 00 00 alone: the TAP's radio settings (owner's setting)
   bool broadcast = true;        // the empty 0x22 pair with each 0x0B00 01
   bool walks = true;            // the 0x26 node table walks
 };
@@ -600,7 +601,7 @@ class Housekeeping {
     }
     opening_reset_ = plan.session && plan.session_reset;
     if (opening_reset_) opening_.push_back({CMD_SESSION, 0, {PV_OFF}, true, 0});
-    if (plan.bring_up_reads) opening_.push_back({CMD_TUNNEL, 0x0D, {0x00, 0x00}, true, 0});
+    if (plan.bring_up_reads || plan.config_read) opening_.push_back({CMD_TUNNEL, 0x0D, {0x00, 0x00}, true, 0});
     if (plan.session) opening_.push_back({CMD_SESSION, 0, {PV_ON}, false, 0});
     if (plan.bring_up_reads) opening_.push_back({CMD_TUNNEL, 0x0D, {0x00, 0x01}, true, 0});
     if (plan.broadcast) {  // the second a second later, the walk starting between
@@ -1402,6 +1403,14 @@ inline Allow classify_request(uint16_t cmd, const Bytes &payload) {
     default:
       return Allow::bench_only;
   }
+}
+
+// The bring-up's GatewayCfg read, 0x0D 00 00 in a tunnel request: the one
+// bring-up frame the owner can ask for outside a bring-up (the TAP's radio
+// settings). The write (01 00 + block) is never sent.
+inline bool is_config_read(uint16_t cmd, const Bytes &payload) {
+  return cmd == CMD_TUNNEL && payload.size() == 7 && payload[0] == 0 && payload[1] == 0 && payload[2] == 0 &&
+         payload[3] == 0x0D && payload[5] == 0x00 && payload[6] == 0x00;
 }
 
 inline bool may_send(uint16_t cmd, const Bytes &payload, bool bench, bool startup = false, bool writes = false,

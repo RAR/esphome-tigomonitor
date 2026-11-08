@@ -377,7 +377,7 @@ export const piRoutes = {
   '/api/settings': {
     serial_port: '/dev/serial/by-id/usb-FTDI_USB_RS485-if00-port0', bus_role: 'master', standby_takeover_s: 3,
     master_startup: true, master_housekeeping: true, master_queries: true, master_optimizer_writes: false,
-    gateway_id: 0x1201, web_port: 0, web_port_active: 80, web_username: 'admin', web_password_set: true,
+    master_read_tap_config: false, gateway_id: 0x1201, web_port: 0, web_port_active: 80, web_username: 'admin', web_password_set: true,
     tls_cert: '', tls_key: '', tls_active: false, tls_from_args: false, power_calibration: 1, publish_interval_s: 30,
     device_id: 'tigomonitor', show_cca_page: true, show_cloud_page: true,
     mqtt: { host: '192.0.2.10', port: 1883, username: 'tigomonitor', password_set: true, discovery: true,

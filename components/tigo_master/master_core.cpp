@@ -436,6 +436,8 @@ void MasterCore::tick_(uint32_t now_ms) {
     master::HousekeepingPlan plan;
     plan.send_41 = plan.session = plan.broadcast = plan.walks = housekeeping_on_;
     plan.bring_up_reads = readdressed_;
+    plan.config_read = read_tap_config_ && !config_read_sent_;
+    config_read_sent_ = config_read_sent_ || plan.config_read || plan.bring_up_reads;
     plan.session_reset = housekeeping_on_ && readdressed_ && !session_reset_sent_;
     session_reset_sent_ = session_reset_sent_ || plan.session_reset;
     housekeeping_ = std::make_unique<master::Housekeeping>(learned_, now_ms, plan, now_ms ^ unix_now());
@@ -464,8 +466,9 @@ void MasterCore::tick_(uint32_t now_ms) {
   if (refusals_in_a_row_ >= NO_REPLY_FAULT_AFTER && now_ms - refused_at_ms_ < REFUSED_RETRY_MS) return;
   master::Request req =
       master::next_request(window_, cursor_, seq_, now_ms, housekeeping_.get(), queries_.get(), pv_.get());
-  // Bring-up frames are allowed only straight after a re-address.
-  bool bring_up = req.bring_up && readdressed_;
+  // Bring-up frames are allowed only straight after a re-address, but for
+  // the one GatewayCfg read the owner asked for (set_read_tap_config).
+  bool bring_up = req.bring_up && (readdressed_ || (read_tap_config_ && master::is_config_read(req.cmd, req.payload)));
   if (housekeeping_) {
     std::lock_guard<std::mutex> lock(mu_);
     status_.sent_41 = sent_41_before_ + housekeeping_->sent_41();

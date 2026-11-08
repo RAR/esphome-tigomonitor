@@ -1463,6 +1463,7 @@ void HttpServer::routes_() {
                     {"master_startup", s.master_startup},
                     {"master_housekeeping", s.master_housekeeping},
                     {"master_queries", s.master_queries},
+                    {"master_read_tap_config", s.master_read_tap_config},
                     {"master_optimizer_writes", s.master_optimizer_writes},
                     {"gateway_id", s.gateway_id},
                     {"web_port", s.web_port},
@@ -1512,6 +1513,7 @@ void HttpServer::routes_() {
       if (j.contains("master_startup")) s.master_startup = j["master_startup"].get<bool>();
       if (j.contains("master_housekeeping")) s.master_housekeeping = j["master_housekeeping"].get<bool>();
       if (j.contains("master_queries")) s.master_queries = j["master_queries"].get<bool>();
+      if (j.contains("master_read_tap_config")) s.master_read_tap_config = j["master_read_tap_config"].get<bool>();
       if (j.contains("master_optimizer_writes")) s.master_optimizer_writes = j["master_optimizer_writes"].get<bool>();
       if (j.contains("gateway_id")) s.gateway_id = j["gateway_id"].get<int>();
       if (j.contains("web_port")) s.web_port = j["web_port"].get<int>();

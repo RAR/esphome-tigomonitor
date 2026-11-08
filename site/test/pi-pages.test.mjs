@@ -230,6 +230,19 @@ test('the Web UI card saves the web settings with the bus ones', async () => {
   await ctx.close();
 });
 
+test('the bus master can be asked to read the TAP\'s radio settings, off unless turned on', async () => {
+  const { page, ctx, api } = await open({ hash: '#settings', pages: { bus_role: 'master', master_read_tap_config: false } });
+  await page.click('#settings-tab-bus');
+  await page.waitForSelector('#pi-tapcfg-row', { state: 'visible' });
+  assert.equal(await page.isChecked('#pi-tapcfg'), false);
+  await page.check('#pi-tapcfg');
+  page.on('dialog', (d) => d.dismiss());
+  await page.click('#pi-port-save');
+  await page.waitForTimeout(300);
+  assert.equal(api.posts.at(-1).master_read_tap_config, true);
+  await ctx.close();
+});
+
 const diagTabs = (page, view) => page.$$eval(`#view-${view} .page-tabs a`,
   (as) => as.filter((a) => a.offsetParent).map((a) => `${a.textContent}${a.getAttribute('aria-selected') === 'true' ? '*' : ''}`));
 

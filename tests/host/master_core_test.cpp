@@ -344,7 +344,43 @@ static void test_a_pv_request_clears_the_last_confirmation() {
   core.close();
 }
 
+// The TAP's radio settings: read once at the start (tunnel 0x0D 00 00, the
+// CCA's own bring-up read) only when asked; off, no 0x0D goes out.
+static int config_reads(const std::vector<std::vector<uint8_t>> &tunnels) {
+  int n = 0;
+  for (auto &p : tunnels) n += p.size() >= 7 && p[3] == 0x0D && p[5] == 0x00 && p[6] == 0x00;
+  return n;
+}
+static void run_opening(bool read_config, std::vector<std::vector<uint8_t>> &tunnels) {
+  TapPort port;
+  // The TAP answers the startup probe at its own address, as on the roof.
+  port.answer = [&](const mp::Frame &f, mp::Frame &r) {
+    if (f.cmd == 0x0B0F) tunnels.push_back(f.payload);
+    if (f.cmd != 0x003A || f.dest != GW) return false;
+    r = mac_reply(GW, 1);
+    return true;
+  };
+  // Startup on, as the read is a bring-up frame the send gate allows only then.
+  MasterCore core(&port, [](int, const std::string &) {}, nullptr, nullptr, GW, false, true, true);
+  if (read_config) core.set_read_tap_config(true);
+  CHECK(core.open());
+  for (uint32_t t = 0; t < 20000; t += 50) core.tick(t);
+  core.close();
+}
+static void test_the_tap_config_is_not_read_unless_asked() {
+  std::vector<std::vector<uint8_t>> tunnels;
+  run_opening(false, tunnels);
+  CHECK(config_reads(tunnels) == 0);
+}
+static void test_the_tap_config_is_read_once_when_asked() {
+  std::vector<std::vector<uint8_t>> tunnels;
+  run_opening(true, tunnels);
+  CHECK(config_reads(tunnels) == 1);
+}
+
 int main() {
+  test_the_tap_config_is_not_read_unless_asked();
+  test_the_tap_config_is_read_once_when_asked();
   test_a_late_drain_is_reported();
   test_a_prompt_drain_is_not_late();
   test_the_tap_version_is_asked_once_at_start();

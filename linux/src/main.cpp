@@ -233,6 +233,7 @@ int main(int argc, char **argv) {
       std::unique_lock<std::mutex> swap(master_mu);
       m->set_pv(pv.state(), [&pv](const PvState &s) { pv.save(s); }, pv.unreadable());
       m->set_discovery(discovery.renew(), [&discovery](bool renew) { discovery.save(renew); });
+      m->set_read_tap_config(settings.master_read_tap_config);
       // Standing by, it listens as the listen role does, learning the 0x41s
       // another master sends, and takes the latest of them when it takes over.
       if (settings.bus_role == "standby")
@@ -474,7 +475,8 @@ int main(int argc, char **argv) {
                         fresh.master_bench != settings.master_bench || fresh.master_startup != settings.master_startup ||
                         fresh.master_housekeeping != settings.master_housekeeping ||
                         fresh.master_queries != settings.master_queries ||
-                        fresh.master_optimizer_writes != settings.master_optimizer_writes;
+                        fresh.master_optimizer_writes != settings.master_optimizer_writes ||
+                        fresh.master_read_tap_config != settings.master_read_tap_config;
         if (fresh.web_port != settings.web_port) LOGI("web: the new port takes effect when the service restarts");
         if (fresh.tls_cert != settings.tls_cert || fresh.tls_key != settings.tls_key)
           LOGI("web: the HTTPS change takes effect when the service restarts");
