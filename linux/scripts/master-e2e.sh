@@ -419,7 +419,9 @@ for _ in $(seq 160); do [ -f "$out/tap15b.json" ] && [ "$(stat "$out/tap15b.json
 sleep 3
 expect "node 0003 was asked its five reads, once each" "$(stat "$out/tap15b.json" "(d['not_taken'], sorted(q['text'] for q in d['queries'] if q['node'] == '0003'))")" \
   "(5, ['^00Info', '^00Mppt', '^00Smrt', '^00Tests', '^00Version'])"
-expect "counted as not taken, not as timeouts" "$(api 18126 /api/master | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["queries"]["not_taken"], d["timeouts"], d["tap"]["lost"], d["fault"])')" "5 0 0 none"
+# Not as timeouts: if they were, there'd be at least 5. A busy CI runner can
+# still time out the odd poll (once in the v2.1.0 tag build), so not 0.
+expect "counted as not taken, not as timeouts" "$(api 18126 /api/master | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["queries"]["not_taken"], d["timeouts"] < 5, d["tap"]["lost"], d["fault"])')" "5 True 0 none"
 expect "said once, naming the node" "$(grep -c "optimizer 0003: the TAP couldn't deliver a query" "$out/daemon15b.log" || true)" 1
 expect "the other nodes still answered" "$(stat "$out/tap15b.json" "d['answered'] >= 20")" True
 kill $daemon; wait $daemon 2>/dev/null || true
