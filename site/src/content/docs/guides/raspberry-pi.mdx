@@ -205,6 +205,15 @@ matches no optimizer the TAP lists is drawn as a dashed line to the TAP:
 rejoins; the Pi keeps the last one across restarts, so only a new install
 says "Not known" until the next sunrise.
 
+**By string**, above the map, lays the same optimizers out a row per string,
+its panels in order, with each one's share of reports lost and its signal. A
+row is tinted when its median loss is over 5%, so a whole string with a weak
+link stands out from one bad panel. A tag on a card names the optimizer it
+joined through, or "via ?" for a relay not identified yet. The Pi remembers
+which of the two you last looked at, in this browser.
+
+<ThemedShot name="pi-mesh-strings" alt="Topology › Mesh › By string — a row per string with its median loss, and a card per optimizer with its loss, signal and the optimizer it joined through." />
+
 ## Set a password
 
 Out of the box, as on the ESP32, the web UI has no login: anyone on your

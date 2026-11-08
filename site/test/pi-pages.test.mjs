@@ -381,6 +381,52 @@ test('mesh: last joined says when, with the date once it is not today', async ()
   await ctx.close();
 });
 
+test('mesh: by string puts each string on a row, panels in order', async () => {
+  const { page, ctx, errors } = await openMesh();
+  await page.click('#mesh-view button[data-mode="strings"]');
+  await page.waitForSelector('#mesh-strings .mesh-row');
+  assert.equal(await page.getAttribute('#mesh-view button[data-mode="strings"]', 'aria-pressed'), 'true');
+  assert.equal(await page.isVisible('#mesh-svg'), false);
+  const strings = [...new Set(fixtureNodes.map((n) => n.string || 'Not in a string'))];
+  assert.equal(await page.locator('#mesh-strings .mesh-row').count(), strings.length);
+  const first = page.locator('#mesh-strings .mesh-row').first();
+  const name = await first.locator('.mesh-row-name').textContent();
+  const want = fixtureNodes.filter((n) => (n.string || 'Not in a string') === name).map((n) => n.label)
+    .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  assert.deepEqual(await first.locator('.mesh-card').evaluateAll((cs) => cs.map((c) => c.dataset.label)), want);
+  const card = (i) => page.locator(`#mesh-strings .mesh-card[data-addr="${fixtureNodes[i].addr}"]`);
+  assert.equal(await card(7).locator('.mesh-card-via').textContent(), `via ${fixtureNodes[2].label}`);
+  assert.equal(await card(11).locator('.mesh-card-via').textContent(), 'via ?');
+  assert.equal(await card(0).locator('.mesh-card-via').count(), 0);
+  await card(4).click();
+  assert.match(await page.textContent('#mesh-side h3'), new RegExp(`^${fixtureNodes[4].label}`));
+  assert.equal(await card(4).getAttribute('aria-pressed'), 'true');
+  await page.reload();
+  await page.click('#nav button[data-view="topology"]');
+  await page.click('#topology-tabs [data-tab="mesh"]');
+  await page.waitForSelector('#mesh-strings .mesh-row');
+  await page.click('#mesh-view button[data-mode="map"]');
+  await page.waitForSelector('#mesh-svg .mesh-node');
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test('mesh: by string marks a string losing over 5% of its reports', async () => {
+  const node = (label, string, lost) => ({ addr: (0x10 + parseInt(label.slice(1), 10) + (string === 'S1' ? 0 : 0x20)).toString(16).toUpperCase().padStart(4, '0'),
+    label, string, tap: '1201', parent: null, rssi: 150, rssi_24h: Array(288).fill(null),
+    reports_today: 100 - lost, lost_today: lost, last_heard_s: 2, last_join_unix: null });
+  const nodes = [node('A1', 'S1', 9), node('A2', 'S1', 8), node('A3', 'S1', 0), node('B1', 'S2', 0), node('B2', 'S2', 1)];
+  const { page, ctx, errors } = await openMesh({ mesh: { loss_method: 'slot', parent_confirmed: true, taps: [{ id: '1201' }], nodes } });
+  await page.click('#mesh-view button[data-mode="strings"]');
+  await page.waitForSelector('#mesh-strings .mesh-row');
+  const rows = page.locator('#mesh-strings .mesh-row');
+  assert.match(await rows.nth(0).getAttribute('class'), /\bpoor\b/);
+  assert.match(await rows.nth(0).locator('.mesh-row-med').textContent(), /^8\.0%/);
+  assert.doesNotMatch(await rows.nth(1).getAttribute('class'), /\bpoor\b/);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
 test('mesh: no reports today', async () => {
   const { page, ctx } = await openMesh();
   await meshNode(page, fixtureNodes[20].label).hover();

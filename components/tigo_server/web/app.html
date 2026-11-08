@@ -668,7 +668,39 @@
   .mesh-sw.tier-good { background: var(--good); } .mesh-sw.tier-fair { background: var(--warn); }
   .mesh-sw.tier-poor { background: var(--bad); } .mesh-sw.tier-silent { border-top: 2px dashed var(--text-faint); height: 0; }
   .mesh-sw.via-unknown { background: repeating-linear-gradient(90deg, var(--text-dim) 0 8px, transparent 8px 12px); }
+  .mesh-view { margin: 0 0 12px; }
+  /* By string: a row per string, a card per optimizer in panel order. */
+  .mesh-strings { padding: 14px; display: flex; flex-direction: column; gap: 12px; }
+  .mesh-row { display: flex; gap: 18px; padding: 12px 14px; border-radius: 10px; background: var(--bg); border: 1px solid var(--border); }
+  .mesh-row.poor { background: color-mix(in srgb, var(--bad) 7%, var(--bg)); border-color: color-mix(in srgb, var(--bad) 40%, transparent); }
+  .mesh-row-head { width: 120px; flex: none; display: flex; flex-direction: column; gap: 3px; }
+  .mesh-row-name { font-size: 14px; font-weight: 600; }
+  .mesh-row-med { font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .mesh-row.fair .mesh-row-med { color: var(--warn); } .mesh-row.poor .mesh-row-med { color: var(--bad); }
+  .mesh-row-k { font-size: 11px; color: var(--text-dim); }
+  .mesh-row.poor .mesh-row-poor { color: var(--bad); }
+  .mesh-cards { flex: 1; min-width: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); gap: 8px; }
+  .mesh-card { font: inherit; text-align: left; color: inherit; cursor: pointer; display: flex; flex-direction: column; gap: 5px;
+               padding: 8px 9px; border-radius: 8px; background: var(--bg-3); border: 1px solid var(--border); min-height: 96px; }
+  .mesh-card:hover, .mesh-card:focus-visible { border-color: var(--text-faint); outline: none; }
+  .mesh-card[aria-pressed="true"] { border-color: var(--text); box-shadow: 0 0 0 1px var(--text); }
+  .mesh-card.tier-poor { border-color: color-mix(in srgb, var(--bad) 55%, transparent); }
+  .mesh-card-top { display: flex; justify-content: space-between; align-items: center; font-size: 12px; font-weight: 600; }
+  .mesh-card-dot { width: 8px; height: 8px; border-radius: 50%; }
+  .mesh-card.tier-good .mesh-card-dot { background: var(--good); } .mesh-card.tier-fair .mesh-card-dot { background: var(--warn); }
+  .mesh-card.tier-poor .mesh-card-dot { background: var(--bad); } .mesh-card.tier-silent .mesh-card-dot { border: 1.5px dashed var(--text-faint); }
+  .mesh-card-loss { font-size: 16px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .mesh-card-loss.fair { color: var(--warn); } .mesh-card-loss.poor { color: var(--bad); }
+  .mesh-card-bar { display: block; height: 4px; border-radius: 2px; background: var(--bg-4); overflow: hidden; }
+  .mesh-card-bar i { display: block; height: 100%; background: var(--text-dim); }
+  .mesh-card-bar i.fair { background: var(--warn); } .mesh-card-bar i.poor { background: var(--bad); }
+  .mesh-card-sig { font-size: 10px; color: var(--text-faint); }
+  .mesh-card-via { align-self: flex-start; font-size: 10px; padding: 0 6px; border-radius: 4px; color: var(--accent-3);
+                   background: color-mix(in srgb, var(--accent-3) 16%, transparent); }
+  .mesh-card-via.unknown { color: var(--text-dim); background: none; border: 1px dashed var(--text-dim); }
   @media (max-width: 760px) {
+    .mesh-row { flex-direction: column; gap: 10px; }
+    .mesh-row-head { width: auto; flex-direction: row; align-items: baseline; flex-wrap: wrap; gap: 4px 10px; }
     .mesh-stage { grid-template-columns: minmax(0, 1fr); }
     .mesh-side { border-left: 0; border-top: 1px solid var(--border); }
   }
@@ -1223,6 +1255,10 @@
 
       <div id="topology-mesh" role="tabpanel" aria-labelledby="topology-tab-mesh" hidden>
         <p class="mesh-note" id="mesh-note">Each line runs from where an optimizer joined the mesh, its TAP or another optimizer relaying for it, coloured by its link: reports lost today, and Tigo's raw signal number (higher is better).</p>
+        <div class="seg mesh-view" id="mesh-view" role="group" aria-label="Show the mesh">
+          <button type="button" data-mode="map" class="active" aria-pressed="true">Radio map</button>
+          <button type="button" data-mode="strings" aria-pressed="false">By string</button>
+        </div>
         <div class="mesh-stage">
           <div class="mesh-graph"><svg id="mesh-svg" viewBox="0 0 760 460" role="group" aria-label="Optimizers around the TAP each reports through"></svg></div>
           <div class="mesh-side" id="mesh-side" aria-live="polite"></div>
@@ -5940,6 +5976,26 @@
   const MESH_NAMES = { good: 'Good', fair: 'Fair', poor: 'Poor', silent: 'Silent' };
   const meshEsc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   let meshData = null, meshSelected = null;
+  // Radio map or by string; a per-viewer convenience, so storage may fail.
+  let meshMode = 'map';
+  try { if (localStorage.getItem('meshMode') === 'strings') meshMode = 'strings'; } catch (e) {}
+  const MESH_NOTES = {
+    map: 'Each line runs from where an optimizer joined the mesh, its TAP or another optimizer relaying for it, coloured by its link: reports lost today, and Tigo\'s raw signal number (higher is better).',
+    strings: 'Each string on a row, its panels in order, coloured by link: reports lost today, and Tigo\'s raw signal number (higher is better). A tag says which optimizer an optimizer joined through, when it wasn\'t the TAP.',
+  };
+  function setMeshMode(mode) {
+    meshMode = mode;
+    try { localStorage.setItem('meshMode', mode); } catch (e) {}
+    if (meshData) renderMesh(); else meshModeButtons();
+  }
+  function meshModeButtons() {
+    document.querySelectorAll('#mesh-view button').forEach(b => {
+      b.classList.toggle('active', b.dataset.mode === meshMode);
+      b.setAttribute('aria-pressed', String(b.dataset.mode === meshMode));
+    });
+    document.getElementById('mesh-note').textContent = MESH_NOTES[meshMode];
+  }
+  document.querySelectorAll('#mesh-view button').forEach(b => b.addEventListener('click', () => setMeshMode(b.dataset.mode)));
 
   function meshLossPct(n) {
     const sent = n.reports_today + n.lost_today;
@@ -5987,6 +6043,8 @@
       document.getElementById('mesh-side').innerHTML = '';
       return;
     }
+    meshModeButtons();
+    if (meshMode === 'strings') return renderMeshStrings(graph, nodes);
     if (!document.getElementById('mesh-svg'))
       graph.innerHTML = '<svg id="mesh-svg" viewBox="0 0 760 460" role="group" aria-label="Optimizers around the TAP each reports through"></svg>';
     const svg = document.getElementById('mesh-svg');
@@ -6062,9 +6120,65 @@
     meshSide(keep || [...nodes].sort((a, b) => order[meshTier(a)] - order[meshTier(b)])[0]);
   }
 
+  // Each string on a row, its panels in label order; the row's median loss
+  // sets its colour, so one bad panel doesn't paint the whole string.
+  function renderMeshStrings(graph, nodes) {
+    const NONE = 'Not in a string', natural = (a, b) => a.localeCompare(b, undefined, { numeric: true });
+    const groups = new Map();
+    for (const n of nodes) {
+      const k = n.string || NONE;
+      if (!groups.has(k)) groups.set(k, []);
+      groups.get(k).push(n);
+    }
+    const names = [...groups.keys()].sort((a, b) => (a === NONE) - (b === NONE) || natural(a, b));
+    const pct = v => v == null ? '—' : `${v > 0 && v < 0.1 ? '<0.1' : v.toFixed(1)}%`;
+    const rows = names.map(name => {
+      const list = groups.get(name).sort((a, b) => natural(a.label, b.label));
+      const losses = list.map(meshLossPct).filter(v => v != null).sort((a, b) => a - b);
+      const h = losses.length >> 1;
+      const med = !losses.length ? null : losses.length % 2 ? losses[h] : (losses[h - 1] + losses[h]) / 2;
+      const rowTier = med == null ? '' : med > MESH_TIERS.poorLoss ? 'poor' : med >= MESH_TIERS.fairLoss ? 'fair' : '';
+      const poor = list.filter(n => meshTier(n) === 'poor').length;
+      const cards = list.map(n => {
+        const tier = meshTier(n), loss = meshLossPct(n), via = meshVia(n);
+        const lossCls = loss == null ? '' : loss > MESH_TIERS.poorLoss ? 'poor' : loss >= MESH_TIERS.fairLoss ? 'fair' : '';
+        const sigCls = n.rssi == null ? '' : n.rssi < MESH_TIERS.poorRssi ? 'poor' : n.rssi < MESH_TIERS.fairRssi ? 'fair' : '';
+        const tag = via.kind === 'node' ? `<span class="mesh-card-via">via ${meshEsc(via.relay.label)}</span>`
+          : via.kind === 'unknown' ? '<span class="mesh-card-via unknown">via ?</span>' : '';
+        return `<button type="button" class="mesh-card tier-${tier}" data-addr="${meshEsc(n.addr)}" data-label="${meshEsc(n.label)}"
+            aria-pressed="false" aria-label="${meshEsc(n.label)}: ${MESH_NAMES[tier]}, ${pct(loss)} lost">
+          <span class="mesh-card-top">${meshEsc(n.label)}<span class="mesh-card-dot"></span></span>
+          <span class="mesh-card-loss ${lossCls}">${tier === 'silent' ? 'Silent' : pct(loss)}</span>
+          <span class="mesh-card-bar"><i class="${sigCls}" style="width:${n.rssi == null ? 0 : Math.round(Math.min(1, n.rssi / 255) * 100)}%"></i></span>
+          <span class="mesh-card-sig">signal ${n.rssi == null ? '—' : n.rssi}</span>${tag}
+        </button>`;
+      }).join('');
+      return `<div class="mesh-row ${rowTier}">
+        <div class="mesh-row-head">
+          <span class="mesh-row-name">${meshEsc(name)}</span>
+          <span class="mesh-row-med">${pct(med)}</span>
+          <span class="mesh-row-k">median lost today</span>
+          <span class="mesh-row-k mesh-row-poor">${poor ? `${poor} of ${list.length} poor` : 'none poor'}</span>
+        </div>
+        <div class="mesh-cards">${cards}</div>
+      </div>`;
+    }).join('');
+    graph.innerHTML = `<div class="mesh-strings" id="mesh-strings">${rows}</div>`;
+    graph.querySelectorAll('.mesh-card').forEach(c => {
+      const n = nodes.find(m => m.addr === c.dataset.addr), pick = () => meshSide(n);
+      c.addEventListener('mouseenter', pick);
+      c.addEventListener('focus', pick);
+      c.addEventListener('click', pick);
+    });
+    const order = { poor: 0, silent: 1, fair: 2, good: 3 };
+    const keep = meshSelected && nodes.find(n => n.addr === meshSelected);
+    meshSide(keep || [...nodes].sort((a, b) => order[meshTier(a)] - order[meshTier(b)])[0]);
+  }
+
   function meshSide(n) {
     meshSelected = n.addr;
     document.querySelectorAll('#mesh-svg .mesh-node').forEach(g => g.classList.toggle('selected', g.dataset.addr === n.addr));
+    document.querySelectorAll('#mesh-strings .mesh-card').forEach(c => c.setAttribute('aria-pressed', String(c.dataset.addr === n.addr)));
     const tier = meshTier(n), loss = meshLossPct(n);
     const hist = (n.rssi_24h || []).filter(v => v != null);
     let spark = '<div class="mesh-faint">No history yet</div>';
