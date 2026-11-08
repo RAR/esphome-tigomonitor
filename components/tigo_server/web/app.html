@@ -1221,8 +1221,8 @@
       </div>
 
       <div class="page-tabs" role="tablist" aria-label="Topology" id="topology-tabs" data-linux-only style="display:none">
-        <button role="tab" id="topology-tab-layout" aria-controls="topology-layout" aria-selected="true" data-tab="layout">Layout</button>
         <button role="tab" id="topology-tab-mesh" aria-controls="topology-mesh" aria-selected="false" data-tab="mesh" tabindex="-1">Mesh</button>
+        <button role="tab" id="topology-tab-layout" aria-controls="topology-layout" aria-selected="true" data-tab="layout">Layout</button>
       </div>
 
       <div id="topology-layout" role="tabpanel" aria-labelledby="topology-tab-layout">
@@ -5935,12 +5935,14 @@
   }
 
   // ============================================================
-  // Topology tabs (Pi): Layout, the panel layout below, and Mesh, the
-  // optimizers around the TAP each reports through. The ESP32 has no
+  // Topology tabs (Pi): Mesh, the optimizers around the TAP each reports
+  // through, and Layout, the panel layout below. The ESP32 has no
   // /api/mesh and shows Layout alone.
   function topologyTab(name) {
     if (!name) { try { name = localStorage.getItem('topology-tab'); } catch (e) {} }
-    if (PLATFORM !== 'linux' || name !== 'mesh') name = 'layout';
+    // The Pi opens on Mesh unless Layout was picked; the ESP32 has only Layout.
+    if (PLATFORM !== 'linux') name = 'layout';
+    else if (name !== 'layout') name = 'mesh';
     document.querySelectorAll('#topology-tabs [role="tab"]').forEach(t => {
       const on = t.dataset.tab === name;
       t.setAttribute('aria-selected', String(on));

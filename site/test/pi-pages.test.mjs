@@ -303,6 +303,22 @@ test('mesh: tab only on the Pi', async () => {
   await ctx.close();
 });
 
+test('mesh: the Pi opens Topology on Mesh, first of the tabs, until Layout is picked', async () => {
+  const { page, ctx, errors } = await open();
+  await page.click('#nav button[data-view="topology"]');
+  await page.waitForSelector('#topology-mesh .mesh-node', { state: 'attached' });
+  assert.deepEqual(await page.locator('#topology-tabs [role="tab"]').evaluateAll((ts) => ts.map((t) => t.dataset.tab)), ['mesh', 'layout']);
+  assert.equal(await page.getAttribute('#topology-tab-mesh', 'aria-selected'), 'true');
+  assert.equal(await page.isVisible('#topology-layout'), false);
+  await page.click('#topology-tabs [data-tab="layout"]');
+  await page.reload();
+  await page.click('#nav button[data-view="topology"]');
+  assert.equal(await page.getAttribute('#topology-tab-layout', 'aria-selected'), 'true');
+  assert.equal(await page.isVisible('#topology-mesh'), false);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
 test('mesh: one node per optimizer around its TAP', async () => {
   const { page, ctx, errors } = await openMesh();
   assert.equal(await page.locator('#mesh-svg .mesh-node').count(), fixtureNodes.length);

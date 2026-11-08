@@ -9,8 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **See which optimizers have a weak link (Raspberry Pi).** Topology has a
-  new Mesh tab: each TAP with its optimizers around it, every line coloured
+- **See which optimizers have a weak link (Raspberry Pi).** Topology opens
+  on a new Mesh tab, Layout beside it: each TAP with its optimizers around it, every line coloured
   by how many of that optimizer's reports went missing today and by Tigo's
   raw signal number. An optimizer that joined through another is drawn from
   that relay, as each says when it joins. Hover or tap one for a day of its
