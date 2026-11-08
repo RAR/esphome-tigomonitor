@@ -132,9 +132,23 @@ static void test_ring_forgets_after_a_day() {
 
 static void test_join_is_recorded() {
   LinkStats s;
-  s.on_join("0012", 1794049920);
+  s.on_join("0012", 1794049920, "0001");
   CHECK(s.links().at("0012").last_join_s == 1794049920);
   CHECK(s.links().at("0012").reports_today == 0);
+  CHECK(s.links().at("0012").parent == "0001");
+}
+
+// A node that rejoins through another parent is drawn through the new one,
+// and its parent outlives midnight: it's where it is, not a count.
+static void test_a_rejoin_moves_the_parent() {
+  LinkStats s;
+  reports(s, "0012", {0, 400});
+  CHECK(s.links().at("0012").parent.empty());
+  s.on_join("0012", T0 + 10, "0018");
+  s.on_join("0012", T0 + 20, "0091");
+  CHECK(s.links().at("0012").parent == "0091");
+  s.on_report("0012", 0x1201, 120, slot_of(800), T0 + 30, DAY + 1);
+  CHECK(s.links().at("0012").parent == "0091");
 }
 
 static void test_tap_and_last_heard() {
@@ -234,6 +248,7 @@ int main() {
   test_empty_ring_is_all_missing();
   test_ring_forgets_after_a_day();
   test_join_is_recorded();
+  test_a_rejoin_moves_the_parent();
   test_tap_and_last_heard();
   test_a_late_report_fills_its_hole();
   test_a_short_silence_keeps_counting();

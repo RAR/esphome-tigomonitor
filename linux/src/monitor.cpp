@@ -178,14 +178,14 @@ void Monitor::on_power_packet_(const std::string &packet, uint16_t tap) {
 }
 
 // A NetDiag join: the optimizer named by its MAC, else by the packet's
-// address. Only who and when are known; see decode_netdiag_packet.
+// address, and the parent it joined through; see decode_netdiag_packet.
 void Monitor::on_netdiag_(const std::string &packet) {
   proto::NetDiagJoin j;
   if (!proto::decode_netdiag_packet(packet, j)) return;
   std::string addr = j.addr;
   for (const auto &n : nodes_)
     if (n.long_address == j.node_mac) addr = n.addr;
-  links_.on_join(addr, unix_ms() / 1000);
+  links_.on_join(addr, unix_ms() / 1000, j.parent);
   LOGI("%s joined (NetDiag)", addr.c_str());
 }
 

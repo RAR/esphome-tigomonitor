@@ -340,6 +340,33 @@ test('mesh: keyboard focus fills the side panel too', async () => {
   await ctx.close();
 });
 
+test('mesh: an optimizer joined through another is drawn from it', async () => {
+  const { page, ctx, errors } = await openMesh();
+  const relay = fixtureNodes[2], via = fixtureNodes[7];
+  const link = page.locator(`#mesh-svg .mesh-link[data-addr="${via.addr}"]`);
+  assert.equal(await link.getAttribute('data-via'), 'node');
+  const dot = meshNode(page, relay.label).locator('.mesh-dot');
+  assert.equal(await link.getAttribute('x1'), await dot.getAttribute('cx'));
+  assert.equal(await link.getAttribute('y1'), await dot.getAttribute('cy'));
+  await meshNode(page, via.label).hover();
+  assert.match(await page.textContent('#mesh-side .mesh-via'), new RegExp(`^${relay.label}, another optimizer`));
+  await meshNode(page, relay.label).hover();
+  assert.match(await page.textContent('#mesh-side'), new RegExp(`Relays for\\s*${via.label}`));
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test('mesh: direct, unidentified relay, and not known', async () => {
+  const { page, ctx } = await openMesh();
+  const via = async (i) => { await meshNode(page, fixtureNodes[i].label).hover(); return page.textContent('#mesh-side .mesh-via'); };
+  assert.equal(await page.locator(`#mesh-svg .mesh-link[data-addr="${fixtureNodes[0].addr}"]`).getAttribute('data-via'), 'tap');
+  assert.match(await via(0), /^The TAP directly/);
+  assert.equal(await page.locator(`#mesh-svg .mesh-link[data-addr="${fixtureNodes[11].addr}"]`).getAttribute('data-via'), 'unknown');
+  assert.match(await via(11), /^A relay not identified yet \(network ID 0091\)/);
+  assert.match(await via(20), /^Not known: no join heard since this Pi started/);
+  await ctx.close();
+});
+
 test('mesh: no reports today', async () => {
   const { page, ctx } = await openMesh();
   await meshNode(page, fixtureNodes[20].label).hover();

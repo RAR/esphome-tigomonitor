@@ -651,6 +651,7 @@
   .mesh-link { stroke-width: 1.3; opacity: .7; }
   .mesh-link.tier-good { stroke: var(--good); } .mesh-link.tier-fair { stroke: var(--warn); }
   .mesh-link.tier-poor { stroke: var(--bad); stroke-width: 2; } .mesh-link.tier-silent { stroke: var(--text-faint); stroke-dasharray: 3 3; }
+  .mesh-link.via-unknown { stroke-dasharray: 8 4; }
   .mesh-node { cursor: pointer; outline: none; }
   .mesh-node .mesh-hit { fill: transparent; }
   .mesh-node .mesh-dot { fill: var(--bg-3); stroke-width: 1.5; }
@@ -666,6 +667,7 @@
   .mesh-sw { display: inline-block; width: 18px; height: 3px; border-radius: 2px; vertical-align: middle; margin-right: 6px; }
   .mesh-sw.tier-good { background: var(--good); } .mesh-sw.tier-fair { background: var(--warn); }
   .mesh-sw.tier-poor { background: var(--bad); } .mesh-sw.tier-silent { border-top: 2px dashed var(--text-faint); height: 0; }
+  .mesh-sw.via-unknown { background: repeating-linear-gradient(90deg, var(--text-dim) 0 8px, transparent 8px 12px); }
   @media (max-width: 760px) {
     .mesh-stage { grid-template-columns: minmax(0, 1fr); }
     .mesh-side { border-left: 0; border-top: 1px solid var(--border); }
@@ -1220,7 +1222,7 @@
       </div>
 
       <div id="topology-mesh" role="tabpanel" aria-labelledby="topology-tab-mesh" hidden>
-        <p class="mesh-note" id="mesh-note">Each line runs to the TAP an optimizer reports through, coloured by its link: reports lost today, and Tigo's raw signal number (higher is better). Relays between optimizers aren't decoded yet.</p>
+        <p class="mesh-note" id="mesh-note">Each line runs from where an optimizer joined the mesh, its TAP or another optimizer relaying for it, coloured by its link: reports lost today, and Tigo's raw signal number (higher is better).</p>
         <div class="mesh-stage">
           <div class="mesh-graph"><svg id="mesh-svg" viewBox="0 0 760 460" role="group" aria-label="Optimizers around the TAP each reports through"></svg></div>
           <div class="mesh-side" id="mesh-side" aria-live="polite"></div>
@@ -1230,6 +1232,7 @@
           <span><i class="mesh-sw tier-fair"></i>Fair: 1–5% lost, or signal under 110</span>
           <span><i class="mesh-sw tier-poor"></i>Poor: over 5% lost, or signal under 80</span>
           <span><i class="mesh-sw tier-silent"></i>Silent: not heard for 10 minutes</span>
+          <span><i class="mesh-sw via-unknown"></i>Through a relay not identified yet</span>
         </div>
       </div>
     </section>
@@ -5967,6 +5970,15 @@
     if (!panel.hidden && document.getElementById('view-topology').classList.contains('active')) refreshMesh();
   }, 10000);
 
+  // Where an optimizer joined the mesh, from its last NetDiag join: the TAP
+  // (NWID 0001), another optimizer we know, or a relay we can't name yet.
+  function meshVia(n) {
+    if (!n.parent) return { kind: 'none' };
+    if (n.parent === '0001') return { kind: 'tap' };
+    const relay = (meshData.nodes || []).find(m => m.addr === n.parent && m !== n);
+    return relay ? { kind: 'node', relay } : { kind: 'unknown', id: n.parent };
+  }
+
   function renderMesh() {
     const graph = document.querySelector('#topology-mesh .mesh-graph');
     const nodes = meshData.nodes || [];
@@ -6010,9 +6022,13 @@
     }
     if (tapIds.length > 1)
       el('line', { class: 'mesh-bus', x1: hub[tapIds[0]][0], y1: H / 2, x2: hub[tapIds.at(-1)][0], y2: H / 2 }, svg);
+    // Each line runs from where the optimizer joined: its relay if we know
+    // it, else its TAP.
     for (const n of nodes) {
-      const [x, y] = pos.get(n), [hx, hy] = hub[n.tap && hub[n.tap] ? n.tap : tapIds[0]];
-      el('line', { class: `mesh-link tier-${meshTier(n)}`, x1: hx, y1: hy, x2: x, y2: y }, svg);
+      const via = meshVia(n);
+      const [x, y] = pos.get(n), [hx, hy] = via.kind === 'node' ? pos.get(via.relay) : hub[n.tap && hub[n.tap] ? n.tap : tapIds[0]];
+      el('line', { class: `mesh-link tier-${meshTier(n)}${via.kind === 'unknown' ? ' via-unknown' : ''}`,
+                   'data-addr': n.addr, 'data-via': via.kind, x1: hx, y1: hy, x2: x, y2: y }, svg);
     }
     for (const n of nodes) {
       const [x, y] = pos.get(n), tier = meshTier(n);
@@ -6070,6 +6086,12 @@
     const ago = s => s == null ? '—' : s < 90 ? `${s} s ago` : s < 5400 ? `${Math.round(s / 60)} min ago` : `${Math.round(s / 3600)} h ago`;
     const joined = n.last_join_unix ? new Date(n.last_join_unix * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
                                     : 'Not since this Pi started';
+    const via = meshVia(n);
+    const viaText = via.kind === 'tap' ? 'The TAP directly'
+      : via.kind === 'node' ? `${meshEsc(via.relay.label)}, another optimizer, which relays it to the TAP`
+      : via.kind === 'unknown' ? `A relay not identified yet (network ID ${meshEsc(via.id)})`
+      : 'Not known: no join heard since this Pi started';
+    const relays = (meshData.nodes || []).filter(m => m !== n && m.parent === n.addr).map(m => meshEsc(m.label));
     document.getElementById('mesh-side').innerHTML = `
       <h3>${meshEsc(n.label)} <span class="mesh-pill tier-${tier}">${MESH_NAMES[tier]}</span></h3>
       <div class="mesh-sub">${n.string ? meshEsc(n.string) + ' · ' : ''}address ${meshEsc(n.addr)}</div>
@@ -6078,6 +6100,8 @@
       ${spark}
       <div class="mesh-k">Reports lost today</div><div class="mesh-v mesh-loss">${lossText}</div>
       <div class="mesh-k">Reports through</div><div class="mesh-v">${n.tap ? 'TAP ' + meshEsc(n.tap) : '—'}</div>
+      <div class="mesh-k">Joined through</div><div class="mesh-v mesh-via">${viaText}</div>
+      ${relays.length ? `<div class="mesh-k">Relays for</div><div class="mesh-v">${relays.join(', ')}</div>` : ''}
       <div class="mesh-k">Last heard</div><div class="mesh-v">${ago(n.last_heard_s)}</div>
       <div class="mesh-k">Last joined</div><div class="mesh-v">${joined}</div>`;
   }

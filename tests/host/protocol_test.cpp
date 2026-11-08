@@ -318,16 +318,25 @@ static void test_against_reference() {
 
 // A NetDiag join, built from fake values: type 09, the node's address, 3
 // header bytes (the first two repeat the address), length 23, then 23 data
-// bytes: an 8-byte ID that is never kept, the node's MAC, 7 more.
-static const std::string NETDIAG_PACKET = std::string("09" "0012" "001200" "17") +
-                                          "AAAAAAAAAAAAAAAA" "04C05B0000000012" "C7012C1E001728";
+// bytes: an unknown word, the node's own NWID, its parent's NWID (0001, the
+// TAP), another unknown word, the node's MAC, 7 more.
+static std::string netdiag(const char *own, const char *parent) {
+  return std::string("09" "0012" "001200" "17") + "AAAA" + own + parent + "AAAA" + "04C05B0000000012" "C7012C1E001728";
+}
+static const std::string NETDIAG_PACKET = netdiag("0012", "0001");
 
 static void test_netdiag() {
   NetDiagJoin j;
   CHECK(decode_netdiag_packet(NETDIAG_PACKET, j));
   CHECK(std::string(j.addr) == "0012");
   CHECK(std::string(j.node_mac) == "04C05B0000000012");
-  // The first 8 data bytes aren't kept anywhere.
+  CHECK(std::string(j.parent) == "0001");
+  // Through a relay, optimizer 0018.
+  CHECK(decode_netdiag_packet(netdiag("0012", "0018"), j));
+  CHECK(std::string(j.parent) == "0018");
+  // A report naming some other node as itself is dropped, as the CCA does.
+  CHECK(!decode_netdiag_packet(netdiag("0013", "0001"), j));
+  // The two unknown words aren't kept anywhere.
   CHECK(std::string(j.addr).find("AAAA") == std::string::npos);
   CHECK(std::string(j.node_mac).find("AAAA") == std::string::npos);
 
