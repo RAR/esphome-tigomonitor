@@ -367,6 +367,20 @@ test('mesh: direct, unidentified relay, and not known', async () => {
   await ctx.close();
 });
 
+test('mesh: last joined says when, with the date once it is not today', async () => {
+  const now = Date.now() / 1000;
+  const node = (label, join) => ({ addr: label === 'old' ? '0002' : label === 'new' ? '0003' : '0004', label, string: '', tap: '1201', parent: join ? '0001' : null,
+    rssi: 120, rssi_24h: Array(288).fill(null), reports_today: 100, lost_today: 0, last_heard_s: 2, last_join_unix: join });
+  const nodes = [node('old', now - 3 * 86400), node('new', now - 60), node('never', null)];
+  const { page, ctx, errors } = await openMesh({ mesh: { loss_method: 'slot', parent_confirmed: true, taps: [{ id: '1201' }], nodes } });
+  const joined = async (label) => { await meshNode(page, label).hover(); return page.textContent('#mesh-side .mesh-joined'); };
+  assert.equal(await joined('never'), 'No join heard yet');
+  assert.doesNotMatch(await joined('new'), /[A-Z][a-z]{2}/);
+  assert.match(await joined('old'), /[A-Z][a-z]{2} \d+/);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
 test('mesh: no reports today', async () => {
   const { page, ctx } = await openMesh();
   await meshNode(page, fixtureNodes[20].label).hover();

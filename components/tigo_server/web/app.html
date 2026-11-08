@@ -6084,8 +6084,10 @@
     const lossText = loss == null ? '— no reports today'
       : `${n.lost_today.toLocaleString('en-US')} of ${sent.toLocaleString('en-US')} reports (${loss < 0.1 && loss > 0 ? '<0.1' : loss.toFixed(1)}%)`;
     const ago = s => s == null ? '—' : s < 90 ? `${s} s ago` : s < 5400 ? `${Math.round(s / 60)} min ago` : `${Math.round(s / 3600)} h ago`;
-    const joined = n.last_join_unix ? new Date(n.last_join_unix * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-                                    : 'Not since this Pi started';
+    const joinedAt = n.last_join_unix ? new Date(n.last_join_unix * 1000) : null;
+    const joined = !joinedAt ? 'No join heard yet'
+      : joinedAt.toDateString() === new Date().toDateString() ? joinedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      : joinedAt.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
     const via = meshVia(n);
     const viaText = via.kind === 'tap' ? 'The TAP directly'
       : via.kind === 'node' ? `${meshEsc(via.relay.label)}, another optimizer, which relays it to the TAP`
@@ -6103,7 +6105,7 @@
       <div class="mesh-k">Joined through</div><div class="mesh-v mesh-via">${viaText}</div>
       ${relays.length ? `<div class="mesh-k">Relays for</div><div class="mesh-v">${relays.join(', ')}</div>` : ''}
       <div class="mesh-k">Last heard</div><div class="mesh-v">${ago(n.last_heard_s)}</div>
-      <div class="mesh-k">Last joined</div><div class="mesh-v">${joined}</div>`;
+      <div class="mesh-k">Last joined</div><div class="mesh-v mesh-joined">${joined}</div>`;
   }
 
   async function refreshTopology() {
