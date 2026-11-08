@@ -4291,8 +4291,9 @@
     pollLogs();
     logsTimer = setInterval(pollLogs, 2000);
   }
-  document.addEventListener('viewshown', e => { if (e.detail === 'logs') startLogs(); });
-  if (window.location.hash === '#logs') startLogs();
+  // The log is the Pi's (/api/logs); an ESP32 has none to poll.
+  document.addEventListener('viewshown', e => { if (e.detail === 'logs' && PLATFORM === 'linux') startLogs(); });
+  platformReady.then(() => { if (PLATFORM === 'linux' && window.location.hash === '#logs') startLogs(); });
   document.getElementById('logs-level').addEventListener('change', () => { renderLogs(); updateLogsMeta(); });
   document.getElementById('logs-search').addEventListener('input', () => { renderLogs(); updateLogsMeta(); });
 
@@ -4373,9 +4374,13 @@
   function renderBus() {
     if (!busLast) return;
     const all = busLast.exchanges;
+    // Re-rendered every 2 s and on a click: keep the chip the keyboard is on.
+    const chipFocus = document.activeElement && document.activeElement.closest && document.activeElement.closest('#bus-chips .bx-chip');
+    const chipId = chipFocus ? chipFocus.dataset.c : null;
     document.getElementById('bus-chips').innerHTML = BUS_CATS.map(([k, l]) =>
       `<button type="button" class="bx-chip${k === 'reconfig' || k === 'other_master' ? ' bad' : ''}" data-c="${k}" aria-pressed="${k === busCat}">` +
       `${l}<span class="n">${all.filter(e => busIn(e, k)).length}</span></button>`).join('');
+    if (chipId) document.querySelector(`#bus-chips .bx-chip[data-c="${chipId}"]`)?.focus({ preventScroll: true });
     busStrip(busLast.stats || {});
     const shown = all.filter(busShown);
     const box = document.getElementById('bus-box');
@@ -5881,7 +5886,8 @@
       t.tabIndex = on ? 0 : -1;
       document.getElementById(t.getAttribute('aria-controls')).hidden = !on;
     });
-    if (name === 'mesh') refreshMesh();
+    // Fetched only when it's on screen, not for a tab remembered from before.
+    if (name === 'mesh' && document.getElementById('view-topology').classList.contains('active')) refreshMesh();
   }
   document.querySelectorAll('#topology-tabs [role="tab"]').forEach(t => t.addEventListener('click', () => {
     topologyTab(t.dataset.tab);
@@ -5951,7 +5957,7 @@
       graph.innerHTML = '<svg id="mesh-svg" viewBox="0 0 760 460" role="group" aria-label="Optimizers around the TAP each reports through"></svg>';
     const svg = document.getElementById('mesh-svg');
     svg.replaceChildren();
-    const W = 760, H = 460, NS = 'http://www.w3.org/2000/svg';
+    const H = 460, NS = 'http://www.w3.org/2000/svg';
     const el = (tag, attrs, parent) => {
       const e = document.createElementNS(NS, tag);
       for (const k in attrs) e.setAttribute(k, attrs[k]);
@@ -5962,9 +5968,11 @@
     const tapIds = (meshData.taps || []).map(t => t.id);
     for (const n of nodes) if (n.tap && !tapIds.includes(n.tap)) tapIds.push(n.tap);
     if (!tapIds.length) tapIds.push('?');
+    // Each TAP gets room for a full ring; the viewBox fits whatever is drawn,
+    // so more TAPs widen the picture rather than shrinking the rings.
+    const rMin = 54, rMax = H / 2 - 34, spacing = 2 * rMax + 60;
     const hub = {};
-    tapIds.forEach((id, k) => { hub[id] = [W * (k + 1) / (tapIds.length + 1), H / 2]; });
-    const rMin = 54, rMax = Math.min(H / 2 - 34, W / (2 * tapIds.length) - 34);
+    tapIds.forEach((id, k) => { hub[id] = [spacing * (k + 0.5), H / 2]; });
     // Each TAP's optimizers by golden angle, in address order so the same
     // data draws the same picture; further out as the signal falls.
     const pos = new Map();

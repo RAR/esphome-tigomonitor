@@ -116,6 +116,11 @@ test('the Bus log: the strip, one row per exchange, and a row opens to its bytes
   // The chips filter.
   await page.click('#bus-chips .bx-chip[data-c="queries"]');
   assert.equal(await page.locator('#bus-rows .bx-row').count(), 2);
+  // The chip pressed keeps the keyboard, through its click and the next refresh.
+  const focusedChip = () => page.evaluate(() => document.activeElement && document.activeElement.dataset.c);
+  assert.equal(await focusedChip(), 'queries');
+  await page.waitForTimeout(2300);
+  assert.equal(await focusedChip(), 'queries');
   assert.equal(await page.isVisible('#bus-alarm-card'), false);
   assert.equal(await page.isVisible('#bus-alarm-banner'), false);
   assert.equal(/undefined|null|NaN/.test(await page.textContent('#view-buslog')), false);

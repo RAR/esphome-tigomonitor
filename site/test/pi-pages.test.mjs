@@ -67,13 +67,14 @@ async function open(opts = {}) {
       }
       return json(200, api.settings);
     }
-    if (path === '/api/mesh' && linux) return json(200, opts.mesh ?? piRoutes['/api/mesh']);
+    if (path === '/api/mesh' && linux) { api.meshReads = (api.meshReads || 0) + 1; return json(200, opts.mesh ?? piRoutes['/api/mesh']); }
     if (path === '/api/logs') { api.logReads = (api.logReads || 0) + 1; return json(200, { lines: [], next: 0 }); }
     if (path === '/api/cloud/status') return json(200, { configured: true });
     if (path === '/api/cloud/health') return json(200, { summary: {} });
     if (routes[path] !== undefined) return json(200, routes[path]);
     return route.fulfill({ status: 404, body: 'no fixture' });
   });
+  if (opts.init) await ctx.addInitScript(opts.init);
   const page = await ctx.newPage();
   const errors = [];
   page.on('pageerror', (e) => errors.push(e.message));
@@ -363,5 +364,43 @@ test('mesh: empty', async () => {
 test('mesh: the note', async () => {
   const { page, ctx } = await openMesh();
   assert.equal(await page.isVisible('#mesh-note'), true);
+  await ctx.close();
+});
+
+test('mesh: remembered as the last tab, it is not fetched until Topology opens', async () => {
+  const { page, ctx, api } = await open({ init: () => localStorage.setItem('topology-tab', 'mesh') });
+  await page.waitForTimeout(1500);
+  assert.equal(api.meshReads || 0, 0);
+  await page.click('#nav button[data-view="topology"]');
+  await page.waitForSelector('#topology-mesh .mesh-node', { state: 'attached' });
+  assert.ok(api.meshReads >= 1);
+  await ctx.close();
+});
+
+test('mesh: six TAPs side by side, each optimizer clear of its hub', async () => {
+  const nodes = [];
+  const taps = ['1201', '1202', '1203', '1204', '1205', '1206'];
+  taps.forEach((t, k) => { for (let i = 0; i < 8; i++) nodes.push({
+    addr: (k * 16 + i + 2).toString(16).toUpperCase().padStart(4, '0'), label: `T${k}-${i}`, string: '', tap: t, parent: null,
+    rssi: 90 + i * 10, rssi_24h: Array(288).fill(null), reports_today: 100, lost_today: 0, last_heard_s: 2, last_join_unix: null }); });
+  const { page, ctx, errors } = await openMesh({ mesh: { loss_method: 'slot', parent_confirmed: false, taps: taps.map((id) => ({ id })), nodes } });
+  const gaps = await page.$$eval('#mesh-svg .mesh-link', (ls) => ls.map((l) => Math.hypot(l.x2.baseVal.value - l.x1.baseVal.value, l.y2.baseVal.value - l.y1.baseVal.value)));
+  assert.equal(gaps.length, nodes.length);
+  assert.ok(Math.min(...gaps) >= 40, `closest optimizer ${Math.min(...gaps).toFixed(1)} from its hub`);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test('on the ESP32 a #logs link polls nothing (it has no /api/logs)', async () => {
+  const { page, ctx, api } = await open({ linux: false, hash: '#logs' });
+  await page.waitForTimeout(4500);
+  assert.equal(api.logReads || 0, 0);
+  await ctx.close();
+});
+
+test('on the Pi a #logs link still polls the log', async () => {
+  const { page, ctx, api } = await open({ hash: '#logs' });
+  await page.waitForTimeout(2500);
+  assert.ok((api.logReads || 0) >= 1);
   await ctx.close();
 });
