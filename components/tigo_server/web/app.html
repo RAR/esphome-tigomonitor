@@ -1287,10 +1287,11 @@
               <th class="num" data-sort="age">Age</th>
               <th data-sort="state">State</th>
               <th class="fw" data-sort="fw">Firmware</th>
+              <th class="fw smart" data-sort="smart" title="Each optimizer's answer to a settings read: whether it has its settings stored, and whether they differ from most of the others">Settings</th>
             </tr>
           </thead>
           <tbody id="nodes-tbody">
-            <tr><td colspan="10" style="text-align:center;color:var(--text-faint);padding:40px 0">Loading…</td></tr>
+            <tr><td colspan="11" style="text-align:center;color:var(--text-faint);padding:40px 0">Loading…</td></tr>
           </tbody>
         </table>
       </div>
@@ -3273,6 +3274,15 @@
     const fwByAddr = {};
     for (const o of (nodesData.versions && nodesData.versions.optimizers) || []) fwByAddr[o.addr.toUpperCase()] = o;
     document.querySelector('#view-nodes table.nodes:not(#devices-taps table)').classList.toggle('with-fw', !!nodesData.versions);
+    // Settings as each optimizer last answered them, and the answer most of
+    // them give: one that differs is worth a look.
+    const smartByAddr = {}, smartCount = {};
+    for (const o of (nodesData.versions && nodesData.versions.settings) || []) {
+      smartByAddr[o.addr.toUpperCase()] = o;
+      smartCount[o.settings] = (smartCount[o.settings] || 0) + 1;
+    }
+    const smartAnswered = Object.values(smartCount).reduce((a, b) => a + b, 0);
+    const smartUsual = Object.keys(smartCount).sort((a, b) => smartCount[b] - smartCount[a])[0];
 
     const search = nodesFilters.search.toLowerCase();
     const filterString = nodesFilters.stringLabel;
@@ -3306,8 +3316,10 @@
       if (filterState && state !== filterState) continue;
 
       const fw = fwByAddr[String(n.addr).toUpperCase()] || null;
+      const smart = smartByAddr[String(n.addr).toUpperCase()] || null;
+      const differs = !!smart && smart.settings !== smartUsual && smartCount[smartUsual] > smartCount[smart.settings];
       rows.push({ n, name, addr: n.addr, barcodeKey, barcodeShort,
-                  stringLabel, mpptLabel, v, a, w, t, age, state, fw });
+                  stringLabel, mpptLabel, v, a, w, t, age, state, fw, smart, differs });
     }
 
     // Sort by current column. Numeric columns sort numerically; string
@@ -3328,6 +3340,7 @@
         case 'age':     return r.age;
         case 'state':   return stateOrder[r.state] ?? 99;
         case 'fw':      return r.fw ? r.fw.version : '';
+        case 'smart':   return r.smart ? `${r.smart.stored ? 1 : 0}${r.differs ? 0 : 1}` : '2';
         default:        return r.name;
       }
     };
@@ -3366,12 +3379,14 @@
           <td class="num">${fmtAge(r.age)}</td>
           <td><span class="badge ${r.n.known ? 'stale' : r.state}"${r.n.known ? ' title="Marked known: not reporting, not counted, not flagged as missing"' : ''}>${stateLabel}</span></td>
           <td class="mono fw"${r.fw ? ` title="${topoEscape(fwTitle(r.fw))}"` : ''}>${r.fw ? topoEscape(r.fw.version) : '—'}</td>
+          <td class="fw smart"${r.smart ? ` title="${topoEscape(smartTitle(r.smart, r.differs, smartCount[smartUsual], smartAnswered))}"` : ''}>${r.smart
+            ? `<span${r.smart.stored && !r.differs ? '' : ' style="color:var(--warn)"'}>${r.smart.stored ? 'Stored' : 'Not stored'}${r.differs ? ' · differs' : ''}</span>` : '—'}</td>
         </tr>
       `;
     }
 
     if (rows.length === 0) {
-      html = '<tr><td colspan="10" style="text-align:center;color:var(--text-faint);padding:40px 0">No nodes match the current filters.</td></tr>';
+      html = '<tr><td colspan="11" style="text-align:center;color:var(--text-faint);padding:40px 0">No nodes match the current filters.</td></tr>';
     }
     tbody.innerHTML = html;
     countEl.textContent = `${rows.length} of ${nodes.length} shown`;
@@ -3401,6 +3416,13 @@
     sel.innerHTML = '<option value="">All strings</option>' +
       labels.map(l => `<option value="${l}">${l}</option>`).join('');
     if (labels.includes(current)) sel.value = current;
+  }
+
+  // A settings answer's tooltip: stored or not, how it compares, the tokens.
+  function smartTitle(o, differs, usual, answered) {
+    return (o.stored ? 'Settings stored' : "Settings not stored: its store-done flag reads N") +
+      (differs ? ` · Differs from ${usual} of the ${answered} that answered` : ` · The same as ${usual} of the ${answered} that answered`) +
+      `\n${o.settings}` + (o.heard_unix_ms ? `\nHeard ${new Date(o.heard_unix_ms).toLocaleString()}` : '');
   }
 
   // "Mnode since Jan 1, 12:00, was K8.0120 (2D)": a version's tooltip.

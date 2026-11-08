@@ -190,6 +190,13 @@ export const routes = {
     radios: [{ tap: '1201', channel: 18, slt: 90, slm: 60, heard_unix_ms: 1767225600000 }],
     optimizers: devices.map((d, i) => ({ addr: d.addr, model: 'Mnode', version: i === 4 ? 'K8.0130 (2D)' : 'K8.0120 (2D)',
       previous: i === 4 ? 'K8.0120 (2D)' : '', since_unix_ms: 1767225600000 + i * 60000, last_unix_ms: 1767225600000 + i * 60000 })),
+    // Answers to ^00Smrt: the roof's usual 13 tokens; one optimizer in the
+    // all-zero form not yet stored, one stored; the rest not answered yet.
+    settings: devices.slice(0, 8).map((d, i) => ({ addr: d.addr,
+      settings: i === 5 ? '0000 0000 0000 0000 0000 0000 0000 0000 0000 N 00 0000 0000 0000 00'
+              : i === 6 ? '0000 0000 0000 0000 0000 0000 0000 0000 0000 S 00 0000 0000 0000 00'
+              : '0FFF 0000 0FFF 0008 00C8 00C8 000A 0154 0154 S 00 01',
+      stored: i !== 5, heard_unix_ms: 1767225600000 + i * 60000 })),
   },
   '/api/status': {
     free_heap: 98740, total_heap: 310652,

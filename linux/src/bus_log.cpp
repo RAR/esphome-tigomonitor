@@ -22,6 +22,7 @@ static int64_t unix_ms_now() {
 }
 
 using esphome::tigo_monitor::master::TapRadio;
+using esphome::tigo_monitor::master::SmartSeen;
 
 static std::string hex4(unsigned v) {
   char b[8];
@@ -66,6 +67,14 @@ void BusLog::load_versions_() {
     r.slm = o.value("slm", 0);
     if (r.tap) radios_[r.tap] = {r, o.value("heard_unix_ms", int64_t{0})};
   }
+  for (const auto &o : j.value("settings", json::array())) {
+    if (!o.is_object()) continue;
+    SmartSeen m;
+    m.addr = static_cast<uint16_t>(std::strtoul(o.value("addr", std::string("0")).c_str(), nullptr, 16));
+    m.settings = o.value("settings", std::string());
+    m.stored = o.value("stored", false);
+    if (!m.settings.empty()) smarts_[m.addr] = {m, o.value("heard_unix_ms", int64_t{0})};
+  }
 }
 
 void BusLog::load() {
@@ -97,6 +106,14 @@ void BusLog::on_frame_(const Frame &f, bool ours, int64_t now) {
     if (changed)
       LOGI("bus: TAP %s radio: channel %d, SLT %d, SLm %d", hex4(r.tap).c_str(), r.channel, r.slt, r.slm);
     radios_[r.tap] = {r, now};
+    versions_dirty_ = true;
+  }
+  for (const auto &m : watch_.take_smarts()) {
+    auto it = smarts_.find(m.addr);
+    if (it == smarts_.end() || it->second.first.settings != m.settings)
+      LOGI("bus: optimizer %s settings: %s (%s)", hex4(m.addr).c_str(), m.settings.c_str(),
+           m.stored ? "stored" : "not stored");
+    smarts_[m.addr] = {m, now};
     versions_dirty_ = true;
   }
   for (const auto &v : watch_.take_versions()) {
@@ -174,7 +191,13 @@ json BusLog::versions_json() const {
                       {"slt", kv.second.first.slt},
                       {"slm", kv.second.first.slm},
                       {"heard_unix_ms", kv.second.second}});
-  return {{"taps", taps}, {"optimizers", optimizers}, {"radios", radios}};
+  json settings = json::array();
+  for (const auto &kv : smarts_)
+    settings.push_back({{"addr", hex4(kv.first)},
+                        {"settings", kv.second.first.settings},
+                        {"stored", kv.second.first.stored},
+                        {"heard_unix_ms", kv.second.second}});
+  return {{"taps", taps}, {"optimizers", optimizers}, {"radios", radios}, {"settings", settings}};
 }
 
 void BusLog::save_if_changed() {

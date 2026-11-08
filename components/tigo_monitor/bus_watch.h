@@ -223,6 +223,35 @@ inline bool parse_version(const std::string &text, VersionSeen &v) {
   return true;
 }
 
+// An optimizer's settings, from its answer to ^00Smrt. The roof answers in
+// two forms (2026-11-08): 13 tokens with values, or 16 of zeros, so only the
+// stored flag is named: token 10, S (stored) or N, the same in both. The rest
+// is kept as heard, for telling an optimizer that differs from the others.
+struct SmartSeen {
+  uint16_t addr = 0;
+  std::string settings;  // the tokens after "!Smrt", one space apart
+  bool stored = false;
+};
+
+inline bool parse_smart(const std::string &text, SmartSeen &s) {
+  std::vector<std::string> tok;
+  std::string cur;
+  for (char c : text) {
+    if (c == ' ' || c == '\r' || c == '\n') {
+      if (!cur.empty()) tok.push_back(cur);
+      cur.clear();
+    } else {
+      cur += c;
+    }
+  }
+  if (!cur.empty()) tok.push_back(cur);
+  if (tok.size() < 11 || tok[0] != "!Smrt" || (tok[10] != "S" && tok[10] != "N")) return false;
+  s.settings.clear();
+  for (size_t i = 1; i < tok.size(); i++) s.settings += (i > 1 ? " " : "") + tok[i];
+  s.stored = tok[10] == "S";
+  return true;
+}
+
 // Each device's version, from when it was first seen, and the one it
 // replaced: kept by the caller across restarts (the Pi's versions.json).
 // The TAP's radio settings, from the 37-byte GatewayCfg block a read returns
@@ -486,6 +515,12 @@ class BusWatch {
     out.swap(radios_);
     return out;
   }
+  // The optimizer settings heard since the last call.
+  std::vector<SmartSeen> take_smarts() {
+    std::vector<SmartSeen> out;
+    out.swap(smarts_);
+    return out;
+  }
   // The versions heard since the last call.
   std::vector<VersionSeen> take_versions() {
     std::vector<VersionSeen> out;
@@ -613,6 +648,7 @@ class BusWatch {
         if (type == 0x07) {
           std::string text = bus_text(data, n);
           version_(false, tuid, text);
+          smart_(tuid, text);
           answer_(tuid, text, now);
         }
       });
@@ -662,6 +698,13 @@ class BusWatch {
     versions_.push_back(v);
     if (versions_.size() > 64) versions_.erase(versions_.begin());  // nobody taking them
   }
+  void smart_(uint16_t addr, const std::string &text) {
+    SmartSeen s;
+    if (!parse_smart(text, s)) return;
+    s.addr = addr;
+    smarts_.push_back(s);
+    if (smarts_.size() > 64) smarts_.erase(smarts_.begin());  // nobody taking them
+  }
   void answer_(uint16_t tuid, std::string text, int64_t now) {
     for (auto it = exchanges_.rbegin(); it != exchanges_.rend(); ++it) {
       if (now - it->unix_ms > ANSWER_WITHIN_MS) return;
@@ -683,6 +726,7 @@ class BusWatch {
   std::string discovery_;
   std::vector<VersionSeen> versions_;
   std::vector<TapRadio> radios_;
+  std::vector<SmartSeen> smarts_;
 };
 
 }  // namespace master

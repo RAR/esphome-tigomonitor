@@ -362,6 +362,37 @@ static void test_tap_radio_needs_the_whole_block() {
   CHECK(w.take_radios().empty());
 }
 
+// An optimizer's settings, from its answer to ^00Smrt. The roof answers two
+// ways (2026-11-08): 13 tokens with values, or 16 of zeros. Token 10 is the
+// stored flag in both, S or N.
+static void test_smart_settings_are_picked_out() {
+  BusWatch w;
+  CHECK(w.take_smarts().empty());
+  w.on_frame(request(0x0148, hex("00016fc404")), true, 1000);
+  w.on_frame(reply(0x0149, poll_reply_with_answer(0x10, "!Smrt 0FFF 0000 0FFF 0008 00C8 00C8 000A 0154 0154 S 00 01\r")),
+             false, 1010);
+  w.on_frame(request(0x0148, hex("00016fc504")), true, 1100);
+  w.on_frame(reply(0x0149, poll_reply_with_answer(0x11, "!Smrt 0000 0000 0000 0000 0000 0000 0000 0000 0000 N 00 0000  0000 0000 00")),
+             false, 1110);
+  w.on_frame(request(0x0148, hex("00016fc604")), true, 1200);
+  w.on_frame(reply(0x0149, poll_reply_with_answer(0x12, "!Info 0027 12 FF\r")), false, 1210);
+  auto s = w.take_smarts();
+  CHECK(s.size() == 2);
+  if (s.size() == 2) {
+    CHECK(s[0].addr == 0x10 && s[0].stored && s[0].settings == "0FFF 0000 0FFF 0008 00C8 00C8 000A 0154 0154 S 00 01");
+    CHECK(s[1].addr == 0x11 && !s[1].stored &&
+          s[1].settings == "0000 0000 0000 0000 0000 0000 0000 0000 0000 N 00 0000 0000 0000 00");
+  }
+  CHECK(w.take_smarts().empty());
+}
+
+static void test_smart_needs_the_flag() {
+  SmartSeen v;
+  CHECK(!parse_smart("!Smrt 0FFF 0000", v));
+  CHECK(!parse_smart("!Smrtx 0FFF 0000 0FFF 0008 00C8 00C8 000A 0154 0154 S 00 01", v));
+  CHECK(!parse_smart("!Smrt 0FFF 0000 0FFF 0008 00C8 00C8 000A 0154 0154 X 00 01", v));
+}
+
 int main() {
   test_names();
   test_no_alarm_for_what_a_master_here_sends();
@@ -380,6 +411,8 @@ int main() {
   test_tap_radio_from_a_read();
   test_tap_radio_not_from_a_write();
   test_tap_radio_needs_the_whole_block();
+  test_smart_settings_are_picked_out();
+  test_smart_needs_the_flag();
   if (failures) {
     std::printf("%d failed\n", failures);
     return 1;

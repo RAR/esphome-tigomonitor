@@ -45,8 +45,9 @@ class BusLog {
   // /api/bus: the alarm, the last 5 minutes in numbers, then up to limit of
   // the newest exchanges.
   nlohmann::json to_json(size_t limit) const;
-  // /api/versions: {taps: [...], optimizers: [...], radios: [...]}, each by
-  // address; radios are the TAPs' channel, SLT and SLm as last read.
+  // /api/versions: {taps: [...], optimizers: [...], radios: [...],
+  // settings: [...]}, each by address; radios are the TAPs' channel, SLT and
+  // SLm as last read, settings each optimizer's answer to ^00Smrt.
   nlohmann::json versions_json() const;
 
  private:
@@ -61,6 +62,8 @@ class BusLog {
   esphome::tigo_monitor::master::VersionBook versions_;
   // Each TAP's radio settings, as last read (by anyone), and when.
   std::map<uint16_t, std::pair<esphome::tigo_monitor::master::TapRadio, int64_t>> radios_;
+  // Each optimizer's answer to ^00Smrt, as last heard, and when.
+  std::map<uint16_t, std::pair<esphome::tigo_monitor::master::SmartSeen, int64_t>> smarts_;
   bool versions_dirty_ = false;
   mutable std::mutex mu_;
   esphome::tigo_monitor::master::BusWatch watch_;

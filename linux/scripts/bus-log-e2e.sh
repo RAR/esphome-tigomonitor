@@ -55,6 +55,8 @@ expect "the strip" "$(bus 18140 "(d['stats']['window_s'], d['stats']['polls_empt
 versions() { api "$1" /api/versions | python3 -c "import json,sys; d=json.load(sys.stdin); print([(k, e['addr'], e['model'], e['version'], e['since_unix_ms'] > 0) for k in ('taps', 'optimizers') for e in d[k]])"; }
 expect "versions heard" "$(versions 18140)" \
   "[('taps', '1201', 'Mgate', 'G8.59 Jan  1 2026', True), ('optimizers', '0003', 'Mnode', 'K8.0120 (2D)', True)]"
+smarts() { api "$1" /api/versions | python3 -c "import json,sys; d=json.load(sys.stdin); print([(o['addr'], o['settings'], o['stored'], o['heard_unix_ms'] > 0) for o in d['settings']])"; }
+expect "an optimizer's settings, from its answer" "$(smarts 18140)" "[('0003', '0FFF 0000 0FFF 0008 00C8 00C8 000A 0154 0154 S 00 01', True, True)]"
 expect "listening: nothing ours, no other master" "$(bus 18140 "any(e['ours'] or e['other_master'] for e in d['exchanges'])")" False
 expect "steady state: no alarm" "$(bus 18140 "d['alarm']")" "{'active': False, 'count': 0, 'first_unix_ms': 0, 'recent': []}"
 expect "steady state: healthy" "$(health 18140)" "ok []"
@@ -84,6 +86,7 @@ expect "MQTT: alarm on" "$(mosquitto_sub -p 18834 -C 1 -W 10 -t tigomonitor/test
 kill $daemon; wait $daemon 2>/dev/null || true
 expect "versions kept" "$(python3 -c "import json; d=json.load(open('$out/state/versions.json')); print(len(d['taps']), len(d['optimizers']))")" "1 1"
 expect "radio kept" "$(python3 -c "import json; d=json.load(open('$out/state/versions.json')); print([(r['tap'], r['channel']) for r in d['radios']])")" "[('1201', 18)]"
+expect "settings kept" "$(python3 -c "import json; d=json.load(open('$out/state/versions.json')); print([(o['addr'], o['stored']) for o in d['settings']])")" "[('0003', True)]"
 expect "no key on disk" "$(grep -ci 'eeee\|238, 238' "$out/state/versions.json" || true)" 0
 expect "kept by name only" "$(python3 -c "import json; d=json.load(open('$out/state/bus-alarm.json')); print(d['count'], sorted(d['recent'][0]))")" "2 ['unix_ms', 'what']"
 
@@ -93,6 +96,7 @@ daemon=$!
 sleep 3
 expect "still on after a restart" "$(bus 18140 "(d['alarm']['active'], d['alarm']['count'])")" "(True, 2)"
 expect "radio back after a restart" "$(radios 18140)" "[('1201', 18, 90, 60, True)]"
+expect "settings back after a restart" "$(smarts 18140)" "[('0003', '0FFF 0000 0FFF 0008 00C8 00C8 000A 0154 0154 S 00 01', True, True)]"
 expect "said at startup" "$(grep -c 'alarm is still on from before the restart' "$out/daemon3.log" || true)" 1
 expect "cleared" "$(api 18140 /api/bus/alarm/clear post)" '{"cleared":true}'
 expect "off after clearing" "$(bus 18140 "d['alarm']['active']")" False

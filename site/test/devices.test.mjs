@@ -63,6 +63,23 @@ test('Devices, on the Pi: the TAP, and each optimizer with its firmware', async 
   await ctx.close();
 });
 
+test("Devices, on the Pi: each optimizer's settings, stored or not, and the odd ones out", async () => {
+  const { page, ctx, errors } = await open(true);
+  await page.waitForFunction(() => /Not stored/.test(document.getElementById('nodes-tbody').textContent));
+  const dev = routes['/api/devices'].devices;
+  const cell = (addr) => page.$eval(`#nodes-tbody tr[data-addr="${addr}"] td.smart`, (td) => [td.textContent.trim(), td.title]);
+  assert.deepEqual((await cell(dev[0].addr))[0], 'Stored');
+  const [n5, t5] = await cell(dev[5].addr);
+  assert.equal(n5, 'Not stored · differs');
+  assert.match(t5, /Differs from 6 of the 8 that answered/);
+  assert.match(t5, /0000 0000 0000 0000 0000 0000 0000 0000 0000 N 00 0000 0000 0000 00/);
+  assert.equal((await cell(dev[6].addr))[0], 'Stored · differs');
+  assert.equal((await cell(dev[9].addr))[0], '—');
+  assert.equal(await page.isVisible('table.nodes thead th.smart'), true);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
 test('Devices, on the Pi with no TAP version heard yet, says where it comes from', async () => {
   const { page, ctx, errors } = await open(true, { taps: [], optimizers: [] });
   await page.waitForSelector('#devices-taps', { state: 'visible' });
@@ -76,6 +93,7 @@ test('Devices, on the ESP32: no TAP list and no firmware column', async () => {
   await page.waitForTimeout(500);
   assert.equal(await page.isVisible('#devices-taps'), false);
   assert.equal(await page.isVisible('table.nodes thead th.fw'), false);
+  assert.equal(await page.isVisible('table.nodes thead th.smart'), false);
   assert.deepEqual(errors, []);
   await ctx.close();
 });
