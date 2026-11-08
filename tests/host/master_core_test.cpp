@@ -351,7 +351,7 @@ static int config_reads(const std::vector<std::vector<uint8_t>> &tunnels) {
   for (auto &p : tunnels) n += p.size() >= 7 && p[3] == 0x0D && p[5] == 0x00 && p[6] == 0x00;
   return n;
 }
-static void run_opening(bool read_config, std::vector<std::vector<uint8_t>> &tunnels) {
+static void run_opening(bool read_config, std::vector<std::vector<uint8_t>> &tunnels, bool housekeeping = true) {
   TapPort port;
   // The TAP answers the startup probe at its own address, as on the roof.
   port.answer = [&](const mp::Frame &f, mp::Frame &r) {
@@ -361,7 +361,7 @@ static void run_opening(bool read_config, std::vector<std::vector<uint8_t>> &tun
     return true;
   };
   // Startup on, as the read is a bring-up frame the send gate allows only then.
-  MasterCore core(&port, [](int, const std::string &) {}, nullptr, nullptr, GW, false, true, true);
+  MasterCore core(&port, [](int, const std::string &) {}, nullptr, nullptr, GW, false, true, housekeeping);
   if (read_config) core.set_read_tap_config(true);
   CHECK(core.open());
   for (uint32_t t = 0; t < 20000; t += 50) core.tick(t);
@@ -376,6 +376,14 @@ static void test_the_tap_config_is_read_once_when_asked() {
   std::vector<std::vector<uint8_t>> tunnels;
   run_opening(true, tunnels);
   CHECK(config_reads(tunnels) == 1);
+}
+// The switch says "once each time the master starts", housekeeping or not.
+static void test_the_tap_config_is_read_without_housekeeping() {
+  std::vector<std::vector<uint8_t>> tunnels;
+  run_opening(true, tunnels, false);
+  CHECK(config_reads(tunnels) == 1);
+  // Nothing of housekeeping's comes with it: only the window's own reads.
+  for (auto &p : tunnels) CHECK(p.size() >= 4 && (p[3] == 0x0D || p[3] == 0x2E));
 }
 
 // Automatic discovery: the window is renewed only while wanted, and the
@@ -415,6 +423,7 @@ int main() {
   test_the_owner_switch_beats_wanted();
   test_the_tap_config_is_not_read_unless_asked();
   test_the_tap_config_is_read_once_when_asked();
+  test_the_tap_config_is_read_without_housekeeping();
   test_a_late_drain_is_reported();
   test_a_prompt_drain_is_not_late();
   test_the_tap_version_is_asked_once_at_start();

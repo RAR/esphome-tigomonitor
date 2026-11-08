@@ -446,7 +446,9 @@ void MasterCore::tick_(uint32_t now_ms) {
       pv_->set_off(off, now_ms);
     }
   }
-  if ((housekeeping_on_ || readdressed_) && !housekeeping_) {
+  // The radio-settings read rides in a housekeeping opening, with or without
+  // the rest of housekeeping.
+  if ((housekeeping_on_ || readdressed_ || (read_tap_config_ && !config_read_sent_)) && !housekeeping_) {
     master::HousekeepingPlan plan;
     plan.send_41 = plan.session = plan.broadcast = plan.walks = housekeeping_on_;
     plan.bring_up_reads = readdressed_;
