@@ -668,6 +668,12 @@
   .mesh-sw.tier-good { background: var(--good); } .mesh-sw.tier-fair { background: var(--warn); }
   .mesh-sw.tier-poor { background: var(--bad); } .mesh-sw.tier-silent { border-top: 2px dashed var(--text-faint); height: 0; }
   .mesh-sw.via-unknown { background: repeating-linear-gradient(90deg, var(--text-dim) 0 8px, transparent 8px 12px); }
+  /* By string, the legend speaks the cards' language: dots and tags. */
+  .mesh-legend .mesh-strings-only, .mesh-legend.strings .mesh-map-only { display: none; }
+  .mesh-legend.strings .mesh-strings-only { display: inline; }
+  .mesh-legend.strings .mesh-sw { width: 8px; height: 8px; border-radius: 50%; }
+  .mesh-legend.strings .mesh-sw.tier-silent { border: 1.5px dashed var(--text-faint); box-sizing: border-box; }
+  .mesh-legend .mesh-card-via { font-style: normal; display: inline-block; margin-right: 6px; }
   .mesh-view { margin: 0 0 12px; }
   /* By string: a row per string, a card per optimizer in panel order. */
   .mesh-strings { padding: 14px; display: flex; flex-direction: column; gap: 12px; }
@@ -1263,12 +1269,14 @@
           <div class="mesh-graph"><svg id="mesh-svg" viewBox="0 0 760 460" role="group" aria-label="Optimizers around the TAP each reports through"></svg></div>
           <div class="mesh-side" id="mesh-side" aria-live="polite"></div>
         </div>
-        <div class="mesh-legend" aria-hidden="true">
+        <div class="mesh-legend" id="mesh-legend" aria-hidden="true">
           <span><i class="mesh-sw tier-good"></i>Good</span>
           <span><i class="mesh-sw tier-fair"></i>Fair: 1–5% lost, or signal under 110</span>
           <span><i class="mesh-sw tier-poor"></i>Poor: over 5% lost, or signal under 80</span>
           <span><i class="mesh-sw tier-silent"></i>Silent: not heard for 10 minutes</span>
-          <span><i class="mesh-sw via-unknown"></i>Through a relay not identified yet</span>
+          <span class="mesh-map-only"><i class="mesh-sw via-unknown"></i>Through a relay not identified yet</span>
+          <span class="mesh-strings-only"><i class="mesh-card-via">via D9</i>Joined through another optimizer</span>
+          <span class="mesh-strings-only"><i class="mesh-card-via unknown">via ?</i>Through a relay not identified yet</span>
         </div>
       </div>
     </section>
@@ -3822,7 +3830,7 @@
     verEl.textContent = ver ? ver[2] : m.tap_version || '—';
     verEl.title = m.tap_version || '';
     document.getElementById('diag-tap-version-sub').textContent = !m.tap_version ? 'asked once each time the bus master starts'
-      : ver ? [ver[1], ver[3].replace(/\s+/g, ' ')].filter(Boolean).join(' · ') : 'read in the bring-up';
+      : ver ? [ver[1], ver[3].replace(/\s+/g, ' ').replace(/-/g, '\u2011')].filter(Boolean).join(' · ') : 'read in the bring-up';
   }
 
   async function refreshDiagnostics(force) {
@@ -6014,6 +6022,7 @@
       b.setAttribute('aria-pressed', String(b.dataset.mode === meshMode));
     });
     document.getElementById('mesh-note').textContent = MESH_NOTES[meshMode];
+    document.getElementById('mesh-legend').classList.toggle('strings', meshMode === 'strings');
   }
   document.querySelectorAll('#mesh-view button').forEach(b => b.addEventListener('click', () => setMeshMode(b.dataset.mode)));
 
