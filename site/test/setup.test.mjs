@@ -142,3 +142,57 @@ test('System setup: with changes off, a check still works and the button says wh
   assert.deepEqual(errors, []);
   await ctx.close();
 });
+
+// Picking an optimizer far down the list keeps the list where it was: a
+// click, and the page's own refresh, used to send it back to the top.
+test('System setup: the list stays where it was scrolled', async () => {
+  const w = world();
+  const { page, ctx, errors } = await open(w);
+  await page.setViewportSize({ width: 1280, height: 700 });
+  await page.click('.setup-task[data-setup-start="replace"]');
+  await page.waitForSelector('.setup-pick');
+  await page.$eval('.setup-pick', (el) => { el.scrollTop = el.scrollHeight; });
+  const before = await page.$eval('.setup-pick', (el) => el.scrollTop);
+  assert.ok(before > 100, `the list scrolls (${before})`);
+  const last = w.nodes[w.nodes.length - 1].long_address;
+  await page.click(`.setup-pick input[value="${last}"]`);
+  assert.equal(await page.$eval('.setup-pick', (el) => el.scrollTop), before);
+  assert.equal(await page.isDisabled('button[data-setup-next]'), false);
+  await page.waitForTimeout(11000);  // past the page's 10 s refresh
+  assert.equal(await page.$eval('.setup-pick', (el) => el.scrollTop), before);
+  assert.equal(await page.isChecked(`.setup-pick input[value="${last}"]`), true);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+// The list's search: every word typed must match the row (name, string,
+// label, address); a choice made and hidden by the search stays made; Back
+// from the label step comes back to the list.
+test('System setup: search the list, and Back returns to it', async () => {
+  const w = world();
+  const { page, ctx, errors } = await open(w);
+  await page.click('.setup-task[data-setup-start="replace"]');
+  await page.waitForSelector('.setup-pick');
+  const visible = () => page.$$eval('.setup-pick label', (ls) => ls.filter((l) => !l.hidden).map((l) => l.querySelector('strong').textContent));
+  assert.equal((await visible()).length, 24);
+  await page.fill('#setup-search', 'string b');
+  const sb = await visible();  // String B, plus any whose label holds a b
+  assert.ok(['B1', 'B2', 'B3', 'B4', 'B5', 'B6'].every((n) => sb.includes(n)) && !sb.some((n) => n.startsWith('A')), sb.join(','));
+  await page.fill('#setup-search', 'B4');
+  const b4 = await visible();
+  assert.ok(b4.includes('B4') && b4.length < 24, b4.join(','));
+  await page.click('.setup-pick label:not([hidden]):has(strong:text-is("B4")) input');
+  await page.fill('#setup-search', 'nothing like this');
+  assert.deepEqual(await visible(), []);
+  assert.equal(await page.isVisible('#setup-none'), true);
+  assert.equal(await page.isDisabled('button[data-setup-next]'), false);  // B4 is still chosen
+  await page.click('button[data-setup-next]');
+  await page.waitForSelector('#setup-label');
+  assert.match(await page.textContent('.setup-rail'), /Removing B4/);
+  await page.click('button[data-setup-back]');
+  await page.waitForSelector('#setup-search');
+  assert.equal(await page.inputValue('#setup-search'), 'nothing like this');  // the search is kept
+  assert.equal(await page.$eval('.setup-pick input:checked', (i) => i.closest('label').querySelector('strong').textContent), 'B4');
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});

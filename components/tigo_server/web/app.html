@@ -690,6 +690,9 @@
   .setup-body h3 { margin: 0; font-size: 20px; font-weight: 600; }
   .setup-body .sub { font-size: 13px; color: var(--text-dim); line-height: 1.5; max-width: 66ch; }
   .setup-pick { display: flex; flex-direction: column; gap: 8px; max-height: 340px; overflow-y: auto; }
+  .setup-pick label[hidden] { display: none; }
+  .setup-search { max-width: 420px; }
+  .setup-none { font-size: 13px; color: var(--text-dim); }
   .setup-pick label { display: grid; grid-template-columns: 20px 64px minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 11px 14px;
                       border: 1px solid var(--border); border-radius: 8px; font-size: 13px; cursor: pointer; }
   .setup-pick label:has(input:checked) { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 6%, transparent); }
@@ -3987,6 +3990,13 @@
       `<li class="${k < i ? 'done' : k === i ? 'on' : ''}"${k === i ? ' aria-current="step"' : ''}><span class="n">${k < i ? '✓' : k + 1}</span>${topoEscape(name(s))}</li>`).join('')}</ol></nav>`;
   }
 
+  // The pick list's search: every word typed must appear in the row.
+  function setupHidden(f, o) {
+    const words = (f.search || '').toLowerCase().split(/\s+/).filter(Boolean);
+    const hay = [o.name, o.string, o.label, o.addr].join(' ').toLowerCase();  // not the MAC: every one holds 5B
+    return words.some(w => !hay.includes(w));
+  }
+
   function setupJob() {
     const m = setup.data.master;
     return (m && m.table && m.table.edit) || {};
@@ -4023,10 +4033,12 @@
       const opts = d.opts.slice().sort((a, b) => (b.quiet - a.quiet) || (b.placed - a.placed) || a.name.localeCompare(b.name, undefined, { numeric: true }));
       body = `<h3>Which optimizer should be removed?</h3>
         <div class="sub">${f.task === 'retire' ? 'It will be removed from the TAP\'s optimizer list.' : 'Optimizers that have stopped reporting are listed first. The replacement takes over this optimizer\'s position in the layout.'}</div>
+        <input class="input setup-search" id="setup-search" type="search" placeholder="Search by name, string, label or address" aria-label="Search optimizers" autocomplete="off" value="${topoEscape(f.search || '')}">
         <fieldset class="setup-pick" style="border:0;margin:0;padding:0"><legend class="sr-only">Optimizer</legend>${opts.map(o => `
-          <label><input type="radio" name="setup-old" value="${topoEscape(o.mac)}"${f.old && f.old.mac === o.mac ? ' checked' : ''}>
+          <label data-search="${topoEscape([o.name, o.string, o.label, o.addr].join(' ').toLowerCase())}"${setupHidden(f, o) ? ' hidden' : ''}><input type="radio" name="setup-old" value="${topoEscape(o.mac)}"${f.old && f.old.mac === o.mac ? ' checked' : ''}>
             <strong>${topoEscape(o.name)}</strong><span class="dim">${o.string ? topoEscape(o.string) : 'Not placed'} · <span class="mono">${topoEscape(o.label)}</span></span>
             <span class="${o.quiet ? 'quiet' : 'dim'}">${o.quiet ? 'Last reported ' + topoEscape(setupAgo(o.ageMs)) : 'Reporting'}</span></label>`).join('')}</fieldset>
+        <div class="setup-none" id="setup-none"${opts.some(o => !setupHidden(f, o)) ? ' hidden' : ''}>No optimizer matches that.</div>
         <div class="setup-actions">${back('Cancel')}<button type="button" class="btn primary" data-setup-next${f.old ? '' : ' disabled'}>Next</button></div>`;
     } else if (f.step === 'label') {
       const mac = macOfLabel(f.label || '');
@@ -4094,7 +4106,11 @@
           <div class="setup-actions">${f.task === 'add' ? '<a class="btn" href="#topology">Assign in Topology</a>' : `<button type="button" class="btn" data-setup-start="replace">Replace another</button>`}<button type="button" class="btn primary" data-setup-back>Finish</button></div>`;
       }
     }
+    const scrolled = root.querySelector('.setup-pick');
+    const top = scrolled ? scrolled.scrollTop : 0;
     root.innerHTML = `<div class="setup-flow">${setupRail(f)}<div class="setup-body">${body}</div></div>`;
+    const pick = root.querySelector('.setup-pick');
+    if (pick) pick.scrollTop = top;
     if (f.step === 'label') {
       const input = document.getElementById('setup-label');
       input.focus();
@@ -4103,7 +4119,8 @@
   }
 
   // Follows the change while one is being checked, done or waited for.
-  async function refreshSetup() {
+  // force: redraw even while choosing or typing (a step changed).
+  async function refreshSetup(force = false) {
     clearTimeout(setup.timer);
     if (PLATFORM !== 'linux') return;
     await setupLoad();
@@ -4114,7 +4131,8 @@
         f.step = f.task === 'retire' ? 'done' : (t.waiting || []).some(x => x.mac === f.mac) ? 'wait' : 'done';
       if (f.step === 'wait' && (t.joins || []).some(x => x.mac === f.mac && x.joined && x.unix >= f.startedAt)) f.step = 'done';
     }
-    renderSetup();
+    // While choosing or typing, nothing on screen depends on the bus: leave it be.
+    if (force || !(f && (f.step === 'pick' || f.step === 'label') && document.getElementById('setup-root').childElementCount)) renderSetup();
     const busy = f && (f.step === 'check' || f.step === 'do' || f.step === 'wait' || f.step === 'done');
     if (document.getElementById('view-setup').classList.contains('active'))
       setup.timer = setTimeout(refreshSetup, busy ? 1500 : 10000);
@@ -4143,7 +4161,7 @@
       // From a finished or failed change, back is home; from a check, the step before it.
       if (f.step === 'pick' || f.step === 'done' || f.step === 'do' || f.step === 'wait' || (f.step === 'label' && f.task === 'add')) setup.flow = null;
       else f.step = steps[i - 1];
-      return refreshSetup();
+      return refreshSetup(true);
     }
     if (b.hasAttribute('data-setup-next')) {
       const steps = SETUP_STEPS[f.task];
@@ -4153,26 +4171,40 @@
         f.checkedAt = Math.floor(Date.now() / 1000) - 1;
         try { await setupRequest(f, true); } catch (err) { showToast('Not checked: ' + err.message, 'err'); f.step = steps[steps.indexOf('check') - 1]; }
       }
-      return refreshSetup();
+      return refreshSetup(true);
     }
     if (b.hasAttribute('data-setup-go')) {
       b.disabled = true;
       f.startedAt = Math.floor(Date.now() / 1000) - 1;
       try { await setupRequest(f, false); f.step = 'do'; } catch (err) { showToast('Not started: ' + err.message, 'err'); }
-      return refreshSetup();
+      return refreshSetup(true);
     }
     if (b.hasAttribute('data-setup-stop')) {
       try { await setupPost('/api/master/table/stop', { mac: f.mac }); } catch (err) { showToast('Not stopped: ' + err.message, 'err'); }
       setup.flow = null;
-      return refreshSetup();
+      return refreshSetup(true);
     }
   });
+  // Picking one only enables Next: a re-render would send the list back to the top.
   document.getElementById('setup-root').addEventListener('change', ev => {
     if (ev.target.name !== 'setup-old') return;
     setup.flow.old = setup.data.opts.find(o => o.mac === ev.target.value) || null;
-    renderSetup();
+    const next = document.querySelector('#setup-root button[data-setup-next]');
+    if (next) next.disabled = !setup.flow.old;
   });
   document.getElementById('setup-root').addEventListener('input', ev => {
+    if (ev.target.id === 'setup-search') {
+      // Filtered in place: the selection and the scroll stay as they are.
+      setup.flow.search = ev.target.value;
+      let shown = 0;
+      document.querySelectorAll('#setup-root .setup-pick label').forEach(l => {
+        const words = ev.target.value.toLowerCase().split(/\s+/).filter(Boolean);
+        l.hidden = words.some(w => !l.dataset.search.includes(w));
+        if (!l.hidden) shown++;
+      });
+      document.getElementById('setup-none').hidden = shown > 0;
+      return;
+    }
     if (ev.target.id !== 'setup-label') return;
     setup.flow.label = ev.target.value.trim();
     const pos = ev.target.selectionStart;
