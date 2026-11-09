@@ -71,17 +71,22 @@ test('Devices, on the Pi: the TAP, and each optimizer with its firmware', async 
 
 test("Devices, on the Pi: each optimizer's settings, stored or not, and the odd ones out", async () => {
   const { page, ctx, errors } = await open(true);
-  await page.waitForFunction(() => /Not stored/.test(document.getElementById('nodes-tbody').textContent));
+  await page.waitForFunction(() => /Not reported/.test(document.getElementById('nodes-tbody').textContent));
   const dev = routes['/api/devices'].devices;
-  const cell = (addr) => page.$eval(`#nodes-tbody tr[data-addr="${addr}"] td.smart`, (td) => [td.textContent.trim(), td.title]);
+  const cell = (addr) => page.$eval(`#nodes-tbody tr[data-addr="${addr}"] td.smart`, (td) => [td.textContent.trim(), td.title,
+    !!(td.querySelector('button') && td.querySelector('button').style.color)]);
   assert.deepEqual((await cell(dev[0].addr))[0], 'Stored');
-  // Compared only with the same firmware family, and not on the stored flag,
-  // which the cell already shows: the two H9s agree with each other.
-  const [n5, t5] = await cell(dev[5].addr);
-  assert.equal(n5, 'Not stored');
-  assert.match(t5, /The same as 2 of the 2 on H9 firmware that answered/);
+  // An H9 answers with fixed zeros and a flag that reads N on every read (S
+  // only in the reply to a write), so neither says what it holds: "Not
+  // reported", in no warning colour, whichever flag it last gave, and never
+  // compared.
+  const [n5, t5, warn5] = await cell(dev[5].addr);
+  assert.equal(n5, 'Not reported');
+  assert.equal(warn5, false);
+  assert.doesNotMatch(t5, /The same as|Differs|not stored/i);
+  assert.match(t5, /H9 firmware answers fixed zeros/);
   assert.match(t5, /0000 0000 0000 0000 0000 0000 0000 0000 0000 N 00 0000 0000 0000 00/);
-  assert.equal((await cell(dev[6].addr))[0], 'Stored');
+  assert.equal((await cell(dev[6].addr))[0], 'Not reported');
   const [n7, t7] = await cell(dev[7].addr);
   assert.equal(n7, 'Stored · differs');
   assert.match(t7, /Differs from 5 of the 6 on K8 firmware that answered/);
@@ -95,7 +100,6 @@ test("Devices, on the Pi: each optimizer's settings, stored or not, and the odd 
   assert.match(t0, /UvinLvHi 17\.00 V/);
   assert.match(t0, /AcLoss 0/);
   assert.doesNotMatch(t0, /UclLimit|BaseOverride|\b01\b/);
-  assert.match(t5, /Settings not reported by H9 firmware/);
   assert.equal((await cell(dev[9].addr))[0], '—');
   assert.equal(await page.isVisible('table.nodes thead th.smart'), true);
   assert.deepEqual(errors, []);
@@ -104,7 +108,7 @@ test("Devices, on the Pi: each optimizer's settings, stored or not, and the odd 
 
 test("Devices, on the Pi: a Settings cell opens that optimizer's settings, named, beside what its family has", async () => {
   const { page, ctx, errors } = await open(true);
-  await page.waitForFunction(() => /Not stored/.test(document.getElementById('nodes-tbody').textContent));
+  await page.waitForFunction(() => /Not reported/.test(document.getElementById('nodes-tbody').textContent));
   const dev = routes['/api/devices'].devices;
   const openFor = async (i) => {
     await page.click(`#nodes-tbody tr[data-addr="${dev[i].addr}"] td.smart button`);
@@ -126,11 +130,14 @@ test("Devices, on the Pi: a Settings cell opens that optimizer's settings, named
   assert.match(await page.textContent('#smart-panel .smart-raw'), /0E00 .* S 00 …$/);
   await page.keyboard.press('Escape');
   await page.waitForSelector('#smart-panel:not([open])', { state: 'attached' });
-  // An H9: no table, it says the firmware answers zeros.
+  // An H9: no table, no stored or not; it says the firmware answers fixed
+  // zeros and a flag that can't be checked.
   await openFor(5);
   assert.equal((await rows()).length, 0);
+  assert.equal((await page.textContent('#smart-panel h3 .smart-pill')).trim(), 'Not reported');
+  assert.equal(await page.$eval('#smart-panel h3 .smart-pill', (p) => p.classList.contains('warn')), false);
   assert.match(await page.textContent('#smart-panel'), /H9 firmware doesn't report its settings/);
-  assert.match(await page.textContent('#smart-panel .smart-verdict'), /not stored yet/i);
+  assert.doesNotMatch(await page.textContent('#smart-panel'), /not stored/i);
   await page.click('#smart-panel .smart-close');
   await page.waitForSelector('#smart-panel:not([open])', { state: 'attached' });
   // A phone: the same panel, as a sheet along the bottom.

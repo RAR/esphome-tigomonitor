@@ -730,6 +730,7 @@
   .smart-pill { font-size: 11.5px; font-weight: 600; padding: 2px 9px; border-radius: 99px; color: var(--good);
                 background: color-mix(in srgb, var(--good) 14%, transparent); }
   .smart-pill.warn { color: var(--warn); background: color-mix(in srgb, var(--warn) 14%, transparent); }
+  .smart-pill.quiet { color: var(--text-dim); background: var(--bg-4); }
   .smart-verdict { font-size: 13px; line-height: 1.45; padding: 10px 12px; border-radius: 8px; background: var(--bg-2); border: 1px solid var(--border); }
   .smart-verdict.warn { color: var(--warn); background: color-mix(in srgb, var(--warn) 8%, var(--bg)); border-color: color-mix(in srgb, var(--warn) 35%, transparent); }
   .smart-table { display: flex; flex-direction: column; }
@@ -3391,6 +3392,7 @@
     for (const o of (nodesData.versions && nodesData.versions.settings) || []) {
       const addr = o.addr.toUpperCase(), fam = smartFamily(addr);
       smartByAddr[addr] = o;
+      if (smartPlaceholder(o.settings)) continue;
       const c = smartCount[fam] = smartCount[fam] || { n: 0, by: {} };
       c.n++;
       c.by[smartValues(o)] = (c.by[smartValues(o)] || 0) + 1;
@@ -3438,8 +3440,10 @@
       const smart = smartByAddr[String(n.addr).toUpperCase()] || null;
       const fam = smart ? smartFamily(String(n.addr).toUpperCase()) : '';
       const c = smart && smartCount[fam], usual = smart && smartUsual[fam];
-      const differs = !!smart && smartValues(smart) !== usual && c.by[usual] > c.by[smartValues(smart)];
-      const smartPeers = smart ? { family: fam, usual: c.by[usual], answered: c.n, usualSettings: smartUsualSettings[fam] } : null;
+      const placeholder = !!smart && smartPlaceholder(smart.settings);
+      const differs = !!smart && !placeholder && smartValues(smart) !== usual && c.by[usual] > c.by[smartValues(smart)];
+      const smartPeers = smart ? (placeholder ? { family: fam, placeholder: true }
+        : { family: fam, usual: c.by[usual], answered: c.n, usualSettings: smartUsualSettings[fam] }) : null;
       rows.push({ n, name, addr: n.addr, barcodeKey, barcodeShort,
                   stringLabel, mpptLabel, v, a, w, t, age, state, fw, smart, differs, smartPeers });
     }
@@ -3462,7 +3466,7 @@
         case 'age':     return r.age;
         case 'state':   return stateOrder[r.state] ?? 99;
         case 'fw':      return r.fw ? r.fw.version : '';
-        case 'smart':   return r.smart ? `${r.smart.stored ? 1 : 0}${r.differs ? 0 : 1}` : '2';
+        case 'smart':   return r.smart ? (r.smartPeers.placeholder ? '15' : `${r.smart.stored ? 1 : 0}${r.differs ? 0 : 1}`) : '2';
         default:        return r.name;
       }
     };
@@ -3502,7 +3506,8 @@
           <td><span class="badge ${r.n.known ? 'stale' : r.state}"${r.n.known ? ' title="Marked known: not reporting, not counted, not flagged as missing"' : ''}>${stateLabel}</span></td>
           <td class="mono fw"${r.fw ? ` title="${topoEscape(fwTitle(r.fw))}"` : ''}>${r.fw ? topoEscape(r.fw.version) : '—'}</td>
           <td class="fw smart"${r.smart ? ` title="${topoEscape(smartTitle(r.smart, r.differs, r.smartPeers))}"` : ''}>${r.smart
-            ? `<button type="button" aria-haspopup="dialog"${r.smart.stored && !r.differs ? '' : ' style="color:var(--warn)"'}>${r.smart.stored ? 'Stored' : 'Not stored'}${r.differs ? ' · differs' : ''}</button>` : '—'}</td>
+            ? (r.smartPeers.placeholder ? '<button type="button" aria-haspopup="dialog">Not reported</button>'
+              : `<button type="button" aria-haspopup="dialog"${r.smart.stored && !r.differs ? '' : ' style="color:var(--warn)"'}>${r.smart.stored ? 'Stored' : 'Not stored'}${r.differs ? ' · differs' : ''}</button>`) : '—'}</td>
         </tr>
       `;
     }
@@ -3555,6 +3560,14 @@
     ['OvMinPwm', 1, 0, ''], ['BaseOverride', null, 0, ''],
   ];
   const SMRT_WHOLE = [0, 1, 2, 3, 4, 5, 6, 7, 8, 10];  // in every answer, whole
+  // The H9's answer is a placeholder: fixed zeros, and a flag that reads N on
+  // every read and S only in its reply to a write (the owner's analysis of
+  // its firmware). Nothing in it says what the optimizer holds, so it's
+  // shown as not reported and never compared.
+  function smartPlaceholder(settings) {
+    const t = settings.split(' ');
+    return SMRT_WHOLE.every(i => i === 10 || /^0+$/.test(t[i] || ''));
+  }
   // 0FFF is the most an output voltage field holds, about 205 V, far beyond
   // what one panel's optimizer can put out: no limit set, not a real one.
   const SMRT_NO_LIMIT = ['SwVout', 'HwVout'];
@@ -3588,23 +3601,24 @@
     const dlg = document.getElementById('smart-panel');
     const o = r.smart, peers = r.smartPeers, fam = peers.family || 'this';
     const t = o.settings.split(' ');
-    const zeros = SMRT_WHOLE.every(i => i === 10 || /^0+$/.test(t[i] || ''));
+    const zeros = !!peers.placeholder;
     const mine = Object.fromEntries(smartFields(o.settings));
     const most = peers.usualSettings ? Object.fromEntries(smartFields(peers.usualSettings)) : {};
-    dlg.querySelector('h3').innerHTML = `${topoEscape(r.name)} <span class="smart-pill${o.stored ? '' : ' warn'}">${o.stored ? 'Stored' : 'Not stored'}</span>`;
+    dlg.querySelector('h3').innerHTML = `${topoEscape(r.name)} ` + (zeros ? '<span class="smart-pill quiet">Not reported</span>'
+      : `<span class="smart-pill${o.stored ? '' : ' warn'}">${o.stored ? 'Stored' : 'Not stored'}</span>`);
     dlg.querySelector('.smart-sub').textContent = [r.stringLabel !== '—' ? r.stringLabel : '', r.fw ? `firmware ${r.fw.version}` : '',
       o.heard_unix_ms ? `answered ${new Date(o.heard_unix_ms).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}` : '']
       .filter(Boolean).join(' · ');
     const verdict = dlg.querySelector('.smart-verdict');
     const nDiff = Object.keys(mine).filter(k => most[k] !== undefined && most[k] !== mine[k]).length;
-    verdict.className = 'smart-verdict' + (r.differs || !o.stored ? ' warn' : '');
+    verdict.className = 'smart-verdict' + (!zeros && (r.differs || !o.stored) ? ' warn' : '');
     verdict.textContent = zeros
-      ? (o.stored ? 'Settings stored: its store-done flag reads S.' : 'Settings not stored yet: its store-done flag reads N. A CCA would send them again.')
+      ? 'Nothing here can be checked: its firmware answers the same whatever it holds.'
       : r.differs ? `Differs from ${peers.usual} of the ${peers.answered} ${fam}s in ${nDiff === 1 ? 'one setting' : nDiff + ' settings'}.`
       : `The same as ${peers.usual} of the ${peers.answered} ${fam}s that answered.` + (o.stored ? '' : ' Not stored yet: its store-done flag reads N.');
     const body = dlg.querySelector('.smart-body');
     if (zeros) {
-      body.innerHTML = `<div class="smart-verdict">${topoEscape(fam)} firmware doesn't report its settings: it answers zeros in every field, by design. Only the stored flag means anything here.</div>`;
+      body.innerHTML = `<div class="smart-verdict">${topoEscape(fam)} firmware doesn't report its settings. It answers with zeros in every field, and its stored flag reads N on every read and S only in its reply to a write, so a CCA rewrites it all day and can never confirm it took.</div>`;
     } else {
       const groups = SMRT_GROUPS.map(([title, items]) => {
         const shown = items.filter(([code]) => mine[code] !== undefined);
@@ -3637,6 +3651,10 @@
   });
 
   function smartTitle(o, differs, peers) {
+    if (peers.placeholder)
+      return `Settings not reported: ${peers.family || 'this'} firmware answers fixed zeros, and its stored flag reads N on every read ` +
+        `(S only in its reply to a write), so neither says what it holds\n${o.settings}` +
+        (o.heard_unix_ms ? `\nHeard ${new Date(o.heard_unix_ms).toLocaleString()}` : '');
     const of = `${peers.usual} of the ${peers.answered}${peers.family ? ` on ${peers.family} firmware` : ''} that answered`;
     const t = o.settings.split(' '), fields = smartFields(o.settings);
     const zeros = SMRT_WHOLE.every(i => i === 10 || /^0+$/.test(t[i] || ''));
