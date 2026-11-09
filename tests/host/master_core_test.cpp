@@ -727,6 +727,8 @@ static void test_a_replace_lists_the_new_one_and_waits() {
   core.set_table_writes(true);
   core.set_window_wanted(false);
   core.set_table_saved([](const mp::Bytes &, const std::vector<mp::TableRecord> *) { return true; });
+  std::vector<std::string> replaced;
+  core.set_on_replaced([&](const std::string &o, const std::string &n) { replaced.push_back(o + ">" + n); });
   CHECK(core.open());
   mp::Bytes old(tap.records[1].begin(), tap.records[1].begin() + 8);  // at 0003
   std::string why;
@@ -741,6 +743,10 @@ static void test_a_replace_lists_the_new_one_and_waits() {
   int renewals = tap.renewals;
   for (; t < 40000; t += 50) core.tick(t);
   CHECK(tap.renewals > renewals);
+  CHECK(replaced.empty());  // not until it joins
+  tap.records[1][8] &= 0x7F;
+  for (; t < 130000; t += 50) core.tick(t);
+  CHECK(replaced.size() == 1 && replaced[0] == "04C05B0000000102>04C05B0000001234");
   core.close();
 }
 

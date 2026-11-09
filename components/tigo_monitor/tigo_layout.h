@@ -76,6 +76,23 @@ constexpr size_t kMaxSkeleton = 2048;
 
 inline const std::string &mppt_name(const MpptSpec &m) { return m.display_label.empty() ? m.label : m.display_label; }
 
+// A replaced optimizer: new_bc takes old_bc's place in its string, so the
+// panel keeps its position and so its name. False, changing nothing, if
+// old_bc isn't in the layout or new_bc already is.
+inline bool replace_panel(Layout &l, const std::string &old_bc, const std::string &new_bc) {
+  std::string *slot = nullptr;
+  for (auto &inv : l.inverters)
+    for (auto &m : inv.mppts)
+      for (auto &st : m.strings)
+        for (auto &p : st.panels) {
+          if (p == new_bc) return false;
+          if (p == old_bc) slot = &p;
+        }
+  if (!slot) return false;
+  *slot = new_bc;
+  return true;
+}
+
 inline std::string panel_name(const StringSpec &s, size_t index) {
   return (s.display_label.empty() ? s.label : s.display_label) + std::to_string(index + 1);
 }

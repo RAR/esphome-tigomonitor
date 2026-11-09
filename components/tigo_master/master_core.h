@@ -264,6 +264,10 @@ class MasterCore {
   // Starts replacing one: the table erased and written back without it,
   // with the new one listed (not joined) at its address, then waited for
   // like an add. The removal's refusals, and a new MAC that isn't 8 bytes.
+  // Told, from the bus thread, when a replace's new optimizer has joined:
+  // the old MAC and the new, in hex, for the layout to follow. Call before open().
+  using TableReplaced = std::function<void(const std::string &old_mac, const std::string &new_mac)>;
+  void set_on_replaced(TableReplaced cb) { on_replaced_ = std::move(cb); }
   bool request_table_replace(const esphome::tigo_monitor::master::Bytes &old_mac,
                              const esphome::tigo_monitor::master::Bytes &new_mac, bool dry_run, std::string &why);
   // Stops waiting for an added optimizer to join (it stays listed, and
@@ -352,6 +356,8 @@ class MasterCore {
   esphome::tigo_monitor::master::JoinWatch join_watch_;
   std::vector<esphome::tigo_monitor::master::Bytes> stop_waiting_;
   std::map<std::string, int64_t> waiting_since_;  // by MAC hex
+  std::map<std::string, std::string> replaced_from_;  // a replace's new MAC → the old, both hex, until it joins
+  TableReplaced on_replaced_;
   void sync_join_status_();
   std::unique_ptr<esphome::tigo_monitor::master::Queries> queries_;
   // queries_'s answers, kept across a restart of queries_ (a takeover, a TAP

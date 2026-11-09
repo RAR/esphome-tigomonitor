@@ -325,7 +325,22 @@ static void test_mppt_display_names() {
         out.inverters[0].mppts[0].strings.size() == 1);
 }
 
+// A replaced optimizer: the new barcode takes the old one's place, so the
+// panel keeps its string, position and so its name; a barcode not in the
+// layout, or a new one already in it, changes nothing.
+static void test_replace_panel() {
+  Layout l;
+  l.inverters.push_back({"Inverter 1", "", {{"MPPT 1", "", {{"A", "", 0, {"04C05B0000000001", "04C05B0000000002", "04C05B0000000003"}}}}}});
+  CHECK(replace_panel(l, "04C05B0000000002", "04C05B0000102E66"));
+  const auto &panels = l.inverters[0].mppts[0].strings[0].panels;
+  CHECK(panels.size() == 3 && panels[1] == "04C05B0000102E66" && panels[0] == "04C05B0000000001");
+  CHECK(!replace_panel(l, "04C05B0000009999", "04C05B0000102E67"));
+  CHECK(!replace_panel(l, "04C05B0000000001", "04C05B0000000003"));
+  CHECK(panels[0] == "04C05B0000000001" && panels[2] == "04C05B0000000003");
+}
+
 int main() {
+  test_replace_panel();
   test_panel_names_follow_position();
   test_validate_accepts_a_good_layout();
   test_validate_rejects();

@@ -254,7 +254,12 @@ void MasterCore::sync_join_status_() {
   auto outcomes = join_watch_.take_outcomes();
   for (const auto &o : outcomes) {
     LOGI("bus master: table: %04X %s", o.id, o.text.c_str());
-    waiting_since_.erase(master::mac_hex(o.mac));
+    std::string mac = master::mac_hex(o.mac);
+    waiting_since_.erase(mac);
+    auto from = replaced_from_.find(mac);
+    if (from == replaced_from_.end()) continue;
+    if (o.joined && on_replaced_) on_replaced_(from->second, mac);
+    replaced_from_.erase(from);
   }
   std::lock_guard<std::mutex> lock(mu_);
   for (const auto &o : outcomes) {
@@ -295,6 +300,7 @@ void MasterCore::settle_table_job_(uint32_t now_ms) {
     if (r->awaiting_join()) {
       join_watch_.add(r->added_mac(), r->id(), now_ms);
       waiting_since_[master::mac_hex(r->added_mac())] = unix_now();
+      replaced_from_[master::mac_hex(r->added_mac())] = master::mac_hex(r->mac());
     }
   }
   sync_join_status_();
