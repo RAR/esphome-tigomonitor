@@ -7,7 +7,8 @@
 --slots gives each report a real slot counter (one 400-tick bin a round)
 instead of a random one; --drop leaves one panel's report out of one round;
 --netdiag adds a NetDiag join from that panel before the first round,
-through PARENT (default 0001, the TAP). Power
+through the node whose NWID is PARENT (default 0001, the TAP); each panel's
+NWID is its address plus 0x40, so the two never coincide. Power
 frames come from TAP 1201 (address 9201).
 
 The stream is what a listener on the bus would see: a Frame 27 node table,
@@ -88,9 +89,9 @@ def main() -> None:
     for barcode, addr in panels:
         joins = {x.split(":")[0].upper().zfill(4): (x.split(":") + ["0001"])[1].upper().zfill(4) for x in a.netdiag}
         if f"{addr:04X}" in joins:
-            # 23 data bytes: an unknown word, the node's own NWID, its
-            # parent's, another unknown word, the node's MAC, 7 more.
-            data = "0000" + f"{addr:04X}" + joins[f"{addr:04X}"] + "0000" + barcode + "C7012C1E001728"
+            # 23 data bytes: the node's NWID, its address, its parent's
+            # NWID, a status word, the node's MAC, 7 more.
+            data = f"{addr + 0x40:04X}" + f"{addr:04X}" + joins[f"{addr:04X}"] + "0000" + barcode + "C7012C1E001728"
             out += wire("9201" "0149" "FFFF" "000000" + f"09{addr:04X}{addr:04X}0017" + data)
     for rnd in range(a.rounds):
         sun = 0.5 + 0.4 * (rnd / max(1, a.rounds - 1))

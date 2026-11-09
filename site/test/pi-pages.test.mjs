@@ -386,8 +386,9 @@ test('mesh: an optimizer joined through another is drawn from it', async () => {
 });
 
 test('mesh: an optimizer through a relay sits just beyond it, away from the TAP', async () => {
+  // As the daemon sends it: the parent's NWID, and the optimizer holding it.
   const node = (addr, parent, rssi = 150) => ({ addr, label: 'N' + addr, string: '', tap: '1201', parent, rssi,
-    rssi_24h: Array(288).fill(null), reports_today: 100, lost_today: 0, last_heard_s: 2, last_join_unix: 1 });
+    relay: parent === '0001' ? null : parent, rssi_24h: Array(288).fill(null), reports_today: 100, lost_today: 0, last_heard_s: 2, last_join_unix: 1 });
   const nodes = [];
   for (let i = 2; i < 14; i++) nodes.push(node(i.toString(16).toUpperCase().padStart(4, '0'), '0001'));
   // Two through 0005, one through one of those, and a pair naming each other.
@@ -409,6 +410,22 @@ test('mesh: an optimizer through a relay sits just beyond it, away from the TAP'
   assert.ok(Math.hypot(a[0] - b[0], a[1] - b[1]) > 18, 'siblings fanned apart');
   assert.equal(await meshNode(page, 'N0013').count(), 1);
   assert.equal(await meshNode(page, 'N0014').count(), 1);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+// A parent is a NWID, a different number from an address: one that happens
+// to equal some optimizer's address is not that optimizer unless the daemon
+// says so.
+test('mesh: a parent NWID equal to an address is no relay without the daemon naming one', async () => {
+  const node = (addr, parent, relay) => ({ addr, label: 'N' + addr, string: '', tap: '1201', parent, relay, rssi: 150,
+    rssi_24h: Array(288).fill(null), reports_today: 100, lost_today: 0, last_heard_s: 2, last_join_unix: 1 });
+  const nodes = [node('0002', '0002', null), node('0003', '0002', null), node('0004', '0045', '0003'), node('0005', '0001', null)];
+  const { page, ctx, errors } = await openMesh({ mesh: { loss_method: 'slot', parent_confirmed: true, taps: [{ id: '1201' }], nodes } });
+  const via = async (addr) => { await meshNode(page, 'N' + addr).hover(); return page.textContent('#mesh-side .mesh-via'); };
+  assert.match(await via('0002'), /^A relay not identified yet \(network ID 0002\)/);
+  assert.match(await via('0003'), /^A relay not identified yet \(network ID 0002\)/);
+  assert.match(await via('0004'), /^N0003, another optimizer/);
   assert.deepEqual(errors, []);
   await ctx.close();
 });

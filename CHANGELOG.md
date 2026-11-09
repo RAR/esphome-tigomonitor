@@ -34,6 +34,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   give. It comes from the answers to the optimizer queries the CCA asks,
   ours or a CCA's; the raw answer is in the tooltip.
 
+### Fixed
+
+- **The Mesh map names most relays now (Raspberry Pi).** An optimizer's
+  join names its parent by mesh ID, a different number from the
+  optimizer's address. The Pi read the wrong field as the mesh ID and
+  matched parents against addresses, so on the roof 17 of 28 joins showed
+  "a relay not identified yet". Two others matched an address by
+  coincidence: one showed itself as its own relay, one a relay it wasn't
+  using. The Pi now reads each optimizer's mesh ID from its join and names
+  the optimizer that holds the parent's. It also accepts the shorter and
+  longer join forms it used to drop. Joins come mostly at sunrise, so the
+  map fills in as optimizers rejoin.
+
 ## [2.1.0] - 2026-11-07
 
 ### Added

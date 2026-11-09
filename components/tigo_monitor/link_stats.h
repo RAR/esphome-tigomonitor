@@ -44,6 +44,7 @@ struct Link {
   int64_t last_heard_s = 0;
   int64_t last_join_s = 0;  // 0 until a NetDiag join is heard
   std::string parent;       // its parent's NWID from that join, hex; 0001 is the TAP
+  std::string nwid;         // its own NWID from that join: what children name
   uint32_t reports_today = 0;
   uint32_t lost_today = 0;
 
@@ -126,10 +127,29 @@ class LinkStats {
     for (auto &e : links_) roll_(e.second, day);
   }
 
-  void on_join(const std::string &addr, int64_t unix_s, const std::string &parent) {
+  void on_join(const std::string &addr, int64_t unix_s, const std::string &parent, const std::string &nwid) {
     Link &l = links_[addr];
     l.last_join_s = unix_s;
     l.parent = parent;
+    l.nwid = nwid;
+  }
+
+  // The node its parent is: the one that last joined with the parent's NWID,
+  // looked up now rather than at the join, so a parent heard later still
+  // resolves. Empty for the TAP, a NWID no node holds, or its own.
+  std::string relay_of(const std::string &addr) const {
+    auto it = links_.find(addr);
+    if (it == links_.end()) return "";
+    const Link &l = it->second;
+    if (l.parent.empty() || l.parent == "0001" || l.parent == l.nwid) return "";
+    std::string best;
+    int64_t when = 0;
+    for (const auto &e : links_)
+      if (e.first != addr && e.second.nwid == l.parent && e.second.last_join_s >= when) {
+        best = e.first;
+        when = e.second.last_join_s;
+      }
+    return best;
   }
 
   // An optimizer deleted from the node table is forgotten here too.

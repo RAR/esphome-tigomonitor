@@ -317,32 +317,43 @@ static void test_against_reference() {
 }
 
 // A NetDiag join, built from fake values: type 09, the node's address, 3
-// header bytes (the first two repeat the address), length 23, then 23 data
-// bytes: an unknown word, the node's own NWID, its parent's NWID (0001, the
-// TAP), another unknown word, the node's MAC, 7 more.
-static std::string netdiag(const char *own, const char *parent) {
-  return std::string("09" "0012" "001200" "17") + "AAAA" + own + parent + "AAAA" + "04C05B0000000012" "C7012C1E001728";
+// header bytes (the first two repeat the address), the data length, then the
+// data: the node's NWID (the mesh's id for it), its address, its parent's
+// NWID (0001, the TAP), a status word, the node's MAC, then signal,
+// alignment and hyper-slot, and in the longer forms the versions.
+static std::string netdiag(const char *nwid, const char *addr, const char *parent, int len = 23) {
+  std::string tail = len == 20 ? "C7012C1E" : len == 24 ? "C7012C1E00172800" : "C7012C1E001728";
+  char n[3];
+  std::snprintf(n, sizeof(n), "%02X", len);
+  return std::string("09" "0012" "001200") + n + nwid + addr + parent + "AAAA" + "04C05B0000000012" + tail;
 }
-static const std::string NETDIAG_PACKET = netdiag("0012", "0001");
+static const std::string NETDIAG_PACKET = netdiag("0058", "0012", "0001");
 
 static void test_netdiag() {
   NetDiagJoin j;
   CHECK(decode_netdiag_packet(NETDIAG_PACKET, j));
   CHECK(std::string(j.addr) == "0012");
+  CHECK(std::string(j.nwid) == "0058");
   CHECK(std::string(j.node_mac) == "04C05B0000000012");
   CHECK(std::string(j.parent) == "0001");
-  // Through a relay, optimizer 0018.
-  CHECK(decode_netdiag_packet(netdiag("0012", "0018"), j));
-  CHECK(std::string(j.parent) == "0018");
+  // Through a relay: the parent is that relay's NWID, not its address.
+  CHECK(decode_netdiag_packet(netdiag("0058", "0012", "0019"), j));
+  CHECK(std::string(j.parent) == "0019");
   // A report naming some other node as itself is dropped, as the CCA does.
-  CHECK(!decode_netdiag_packet(netdiag("0013", "0001"), j));
-  // The two unknown words aren't kept anywhere.
+  CHECK(!decode_netdiag_packet(netdiag("0058", "0013", "0001"), j));
+  // The status word isn't kept anywhere.
   CHECK(std::string(j.addr).find("AAAA") == std::string::npos);
   CHECK(std::string(j.node_mac).find("AAAA") == std::string::npos);
-
-  std::string wrong_length = NETDIAG_PACKET;
-  wrong_length.replace(12, 2, "10");
-  CHECK(!decode_netdiag_packet(wrong_length.substr(0, 14 + 32), j));
+  // The short form, without the versions, and the 24-byte one: the parent
+  // is in the same place in all three.
+  CHECK(decode_netdiag_packet(netdiag("0058", "0012", "0019", 20), j));
+  CHECK(std::string(j.parent) == "0019" && std::string(j.nwid) == "0058");
+  CHECK(decode_netdiag_packet(netdiag("0058", "0012", "0019", 24), j));
+  CHECK(std::string(j.parent) == "0019");
+  // Too short to hold the MAC, or a length the packet doesn't carry.
+  CHECK(!decode_netdiag_packet(netdiag("0058", "0012", "0001", 16).substr(0, 14 + 32), j));
+  std::string cut = NETDIAG_PACKET.substr(0, NETDIAG_PACKET.size() - 2);
+  CHECK(!decode_netdiag_packet(cut, j));
   std::string wrong_type = NETDIAG_PACKET;
   wrong_type.replace(0, 2, "31");
   CHECK(!decode_netdiag_packet(wrong_type, j));

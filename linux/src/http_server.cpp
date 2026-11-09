@@ -474,7 +474,8 @@ void HttpServer::routes_() {
 
   // The mesh map: each optimizer's TAP, reports lost today and a day of RSSI
   // (the raw byte, not dBm). Short addresses and labels only, never a MAC.
-  // The parent field of a NetDiag join isn't decoded yet, so parent is null.
+  // parent is the NWID its last join named; relay, the optimizer holding that
+  // NWID now, if one does.
   svr.Get("/api/mesh", [&mon](const httplib::Request &, httplib::Response &res) {
     auto stats = mon.links();
     auto panels = mon.panels();
@@ -500,6 +501,7 @@ void HttpServer::routes_() {
                        {"string", p ? string_of(mon, *p) : ""},
                        {"tap", l.tap ? json(tap) : json(nullptr)},
                        {"parent", l.parent.empty() ? json(nullptr) : json(l.parent)},
+                       {"relay", stats.relay_of(e.first).empty() ? json(nullptr) : json(stats.relay_of(e.first))},
                        {"rssi", heard ? json(l.rssi) : json(nullptr)},
                        {"rssi_24h", rssi_24h},
                        {"reports_today", l.reports_today},

@@ -370,7 +370,7 @@ const meshRssi = (base, i) => Array.from({ length: 288 }, (_, k) => {
 const meshNodes = devices.map((d, i) => {
   const rssi = Math.round(92 + wob(i + 410) * 110);
   const node = {
-    addr: d.addr, label: d.name, string: d.string_label, tap: '1201', parent: '0001',
+    addr: d.addr, label: d.name, string: d.string_label, tap: '1201', parent: '0001', relay: null,
     rssi, rssi_24h: meshRssi(rssi, i), reports_today: 10800 - Math.round(wob(i + 450) * 60),
     lost_today: Math.round(wob(i + 470) * 40), last_heard_s: 1 + Math.round(wob(i + 490) * 3),
     last_join_unix: PI_T / 1000 - 5 * 3600 - i * 37,
@@ -380,7 +380,7 @@ const meshNodes = devices.map((d, i) => {
   if (i === 15) Object.assign(node, { last_heard_s: 900 });                 // silent
   if (i === 20) Object.assign(node, { reports_today: 0, lost_today: 0, rssi_24h: Array(288).fill(null), last_heard_s: 64000,
                                       parent: null, last_join_unix: null });
-  if (i === 7) node.parent = devices[2].addr;                                // through a relay, optimizer 2
+  if (i === 7) Object.assign(node, { parent: '0046', relay: devices[2].addr }); // through optimizer 2, by its NWID
   if (i === 11) node.parent = '0091';                                        // through a relay not yet identified
   return node;
 });

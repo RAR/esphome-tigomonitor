@@ -185,7 +185,7 @@ void Monitor::on_netdiag_(const std::string &packet) {
   std::string addr = j.addr;
   for (const auto &n : nodes_)
     if (n.long_address == j.node_mac) addr = n.addr;
-  links_.on_join(addr, unix_ms() / 1000, j.parent);
+  links_.on_join(addr, unix_ms() / 1000, j.parent, j.nwid);
   dirty_ = true;  // kept in state.json: the next join may be tomorrow's sunrise
   LOGI("%s joined (NetDiag)", addr.c_str());
 }
@@ -737,7 +737,7 @@ bool Monitor::save_locked_() {
   json joins = json::array();
   for (const auto &kv : links_.links())
     if (kv.second.last_join_s)
-      joins.push_back({{"addr", kv.first}, {"parent", kv.second.parent}, {"unix", kv.second.last_join_s}});
+      joins.push_back({{"addr", kv.first}, {"parent", kv.second.parent}, {"nwid", kv.second.nwid}, {"unix", kv.second.last_join_s}});
   // And a day of each one's signal, which the mesh map draws.
   json rssi = json::array();
   const int64_t now_s = unix_ms() / 1000;
@@ -783,7 +783,7 @@ bool Monitor::load() {
   }
   for (const auto &e : j.value("joins", json::array()))
     if (e.is_object() && !e.value("addr", "").empty())
-      links_.on_join(e.value("addr", ""), e.value("unix", static_cast<int64_t>(0)), e.value("parent", ""));
+      links_.on_join(e.value("addr", ""), e.value("unix", static_cast<int64_t>(0)), e.value("parent", ""), e.value("nwid", ""));
   for (const auto &e : j.value("rssi_24h", json::array()))
     if (e.is_object() && !e.value("addr", "").empty() && e.value("to", 0) > 0)
       links_.rssi_restore(e.value("addr", ""), e.value("to", 0), e.value("b", ""));
