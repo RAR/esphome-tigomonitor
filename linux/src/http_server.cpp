@@ -1605,6 +1605,39 @@ void HttpServer::routes_() {
     else send_json(res, {{"error", why.empty() ? "not running the bus" : why}}, code);
   });
 
+  // Pi-only: replace an optimizer (System setup): {"old_mac": "04C05B...",
+  // "label": the new one's (or "mac"), "dry_run"}. The table erased and
+  // written back without the old one, the new one listed at its address;
+  // once it joins, it takes the old one's place in the layout. Behind the
+  // web password.
+  svr.Post("/api/master/table/replace", [this](const httplib::Request &req, httplib::Response &res) {
+    if (ctx_.current_settings().web_password.empty()) {
+      send_json(res, {{"error", "set a web password first"}}, 403);
+      return;
+    }
+    json j = json::parse(req.body, nullptr, false);
+    namespace mp = esphome::tigo_monitor::master;
+    mp::Bytes old_mac, new_mac;
+    std::string bad;
+    if (j.is_discarded() || !j.is_object() || !j.contains("old_mac") || !j["old_mac"].is_string() ||
+        !optimizer_of(json{{"mac", j["old_mac"]}}, old_mac, bad)) {
+      send_json(res, {{"error", bad.empty() ? "give the old optimizer's 16-digit MAC as old_mac" : "old_mac: " + bad}}, 400);
+      return;
+    }
+    if (!optimizer_of(j, new_mac, bad)) {
+      send_json(res, {{"error", bad}}, 400);
+      return;
+    }
+    bool dry = j.contains("dry_run") && j["dry_run"].is_boolean() && j["dry_run"].get<bool>();
+    std::string why;
+    int code = ctx_.request_table_replace ? ctx_.request_table_replace(old_mac, new_mac, dry, why) : 409;
+    if (code == 200)
+      send_json(res, {{"started", true}, {"dry_run", dry}, {"old_mac", mp::mac_hex(old_mac)}, {"mac", mp::mac_hex(new_mac)},
+                      {"label", mp::label_of(new_mac)}});
+    else
+      send_json(res, {{"error", why.empty() ? "not running the bus" : why}}, code);
+  });
+
   // Pi-only: stop waiting for an added optimizer to join ({"label"} or
   // {"mac"}); it stays listed. Behind the web password.
   svr.Post("/api/master/table/stop", [this](const httplib::Request &req, httplib::Response &res) {
