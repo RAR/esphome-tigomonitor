@@ -3547,6 +3547,9 @@
     ['OvMinPwm', 1, 0, ''], ['BaseOverride', null, 0, ''],
   ];
   const SMRT_WHOLE = [0, 1, 2, 3, 4, 5, 6, 7, 8, 10];  // in every answer, whole
+  // 0FFF is the most an output voltage field holds, about 205 V, far beyond
+  // what one panel's optimizer can put out: no limit set, not a real one.
+  const SMRT_NO_LIMIT = ['SwVout', 'HwVout'];
   function smartKey(settings) {
     const t = settings.split(' ');
     return SMRT_WHOLE.map(i => t[i] || '').join(' ');
@@ -3559,7 +3562,8 @@
       const f = SMRT_FIELDS[i];
       if (!f || (!full && !SMRT_WHOLE.includes(i))) return;
       const n = parseInt(v, 16);
-      out.push([f[0], f[1] === null || isNaN(n) ? v : (n * f[1]).toFixed(f[2]) + f[3]]);
+      out.push([f[0], f[1] === null || isNaN(n) ? v
+        : n === 0xFFF && SMRT_NO_LIMIT.includes(f[0]) ? 'No limit (max)' : (n * f[1]).toFixed(f[2]) + f[3]]);
     });
     return out;
   }
