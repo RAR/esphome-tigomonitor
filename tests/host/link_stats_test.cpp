@@ -273,6 +273,26 @@ static void test_a_stale_or_broken_dump_restores_nothing() {
   CHECK(broken.links().empty());
 }
 
+// After a silence of 2.5 minutes the counter has moved more than half its
+// wrap, so the next report looks "behind". It is the newest, and the ones
+// after it count from it. (A report really 60-200 s late would be measured
+// wrongly instead; the counter can't tell the two apart, and on the roof
+// late reports are at most 15 s behind.)
+static void test_after_a_silence_the_next_report_is_the_newest() {
+  LinkStats s;
+  int64_t t = T0;
+  uint32_t k = 0;
+  for (int i = 0; i < 5; i++, k += 600, t += 3) s.on_report("0001", 0x1201, 120, slot_of(k % WRAP_TICKS), t, DAY);
+  k += 30000 - 600;  // 150 s of silence
+  t += 150 - 3;
+  for (int i = 0; i < 5; i++, k += 600, t += 3) s.on_report("0001", 0x1201, 120, slot_of(k % WRAP_TICKS), t, DAY);
+  k += 600;  // one report missed after it: still counted
+  t += 3;
+  for (int i = 0; i < 3; i++, k += 600, t += 3) s.on_report("0001", 0x1201, 120, slot_of(k % WRAP_TICKS), t, DAY);
+  CHECK(s.links().at("0001").lost_today == 1);
+  CHECK(s.links().at("0001").reports_today == 13);
+}
+
 int main() {
   test_slot_ticks();
   test_steady_reports_lose_nothing();
@@ -300,6 +320,7 @@ int main() {
   test_rssi_survives_a_restart();
   test_nothing_heard_today_dumps_nothing();
   test_a_stale_or_broken_dump_restores_nothing();
+  test_after_a_silence_the_next_report_is_the_newest();
   if (failures) {
     std::printf("%d failed\n", failures);
     return 1;
