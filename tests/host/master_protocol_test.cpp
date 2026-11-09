@@ -275,11 +275,14 @@ static void test_more_allow() {
   CHECK(classify_request(CMD_TUNNEL, tunnel_request(0x22, 1, {0x00, 0x05})) == Allow::bench_only);
   CHECK(classify_request(CMD_TUNNEL, tunnel_request(0x22, 1, {0x00, 0x01, 0x01})) == Allow::never);
   CHECK(classify_request(CMD_TUNNEL, tunnel_request(0x22, 1, {0x00, 0x00, 0x00})) == Allow::never);
-  // Sub 0x2B is the gateway firmware's Stop Discovery (2D starts it, 2E reads
-  // it). Never, bench or not, with or without the renewal's BA BE.
-  for (const Bytes &args : {Bytes{}, Bytes{0xBA, 0xBE}, hex("babe02038400300100")})
+  // Sub 0x2B is EraseFlash, the whole optimizer table. Never, bench or not,
+  // but BA BE exactly as the CCA sends it, and that only as a table write
+  // (an owner's removal, table_edit_test.cpp).
+  for (const Bytes &args : {Bytes{}, hex("babe02038400300100")})
     CHECK(classify_request(CMD_TUNNEL, tunnel_request(0x2B, 1, args)) == Allow::never &&
           !may_send(CMD_TUNNEL, tunnel_request(0x2B, 1, args), true, true, true));
+  CHECK(classify_request(CMD_TUNNEL, tunnel_request(0x2B, 1, {0xBA, 0xBE})) == Allow::table_write &&
+        !may_send(CMD_TUNNEL, tunnel_request(0x2B, 1, {0xBA, 0xBE}), true, true, true, true));
   for (const char *q : {"^00Tests\r", "^00Mppt\r", "^00Info\r"}) {
     Bytes a = {0x00, 0x14};
     a.insert(a.end(), q, q + strlen(q));

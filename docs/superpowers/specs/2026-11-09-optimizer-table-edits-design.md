@@ -33,6 +33,19 @@ What it settles:
 - **The new optimizer goes into every TAP's table,** and joins one of them.
 - The window's last byte was `01` here, against `00` on the roof and on 11-06.
 
+**The delete, 19:24 (the owner removed the optimizer at `0003` in Tigo EI):**
+
+| Time (EST) | TAP | The CCA sent |
+|---|---|---|
+| 19:24:51 | both | GatewayCfg reads; the empty 0x22 pair |
+| 19:24:53 | both | a table read: 1201 held `0002` and `0003`, both joined; 1202 held `8003` |
+| 19:24:54 | 1201 | **EraseFlash**, then 0x29 with **one record: `0002`, bit 15 clear**, then a read back |
+| 19:24:54 | 1202 | **EraseFlash**, and nothing written back |
+| 19:24:56 | 1201 | the reads to `0002`, a PeriodicCfg write, the `Smrt_` write; **no window** |
+
+- **A delete is an erase of every TAP that lists the optimizer, then a write of what stays, as it was.** Nothing has to rejoin, and no window is opened.
+- `0002` reported from 19:24:57, three seconds after the rewrite. It had been silent since 19:15:58, and `0003` reported only from 19:18:22 to 19:23:42, because the bench has one supply, moved from one optimizer to the other (owner, 2026-11-09). So neither erase dropped a powered, joined optimizer: in the add, `0002` was powered and reported six seconds after the rewrite.
+
 **Our add appends instead** (one record, no erase), as the owner's analysis says a 0x29 does. That keeps the erase off the roof for an add, but no capture shows an append to a table that already holds records. The first bench run checks it, on 1201 with its two records.
 
 ## What we build
@@ -49,7 +62,7 @@ What it settles:
 **Remove (MAC):**
 1. Walk the whole table; the MAC must be listed. The survivors are every other record, with their TUIDs.
 2. **Save the survivors to the state dir before anything is sent.** If the daemon stops between the erase and the last write, the job resumes from that file at the next start. It's deleted only after a good read back.
-3. Send `0x2B BA BE`; ack `00`. Walk: the table must read empty.
+3. Send `0x2B BA BE`; ack `00` (the TAP erases, then acks: 16–48 ms on the bench). Walk: the table must read empty. Then wait 0.5 s, the CCA's holdoff (0.7–2.3 s seen from erase to rewrite). Every optimizer on the TAP is unjoined from the erase to the write back (the owner's analysis, `table-erase-rewrite.md`), so that is the whole gap.
 4. Write the survivors back, 10 per 0x29, each with its TUID as read (bit 15 clear for a joined one, as the CCA wrote them), in id order. Any ack but `00` stops the job and leaves the file, so a retry resumes.
 5. Walk: the table must equal the survivors. Then watch that every survivor that was reporting still reports; one that doesn't within a few minutes gets the window.
 

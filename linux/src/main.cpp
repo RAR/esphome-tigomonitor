@@ -8,6 +8,7 @@
 #include "discovery_policy.h"
 #include "pv_store.h"
 #include "discovery_store.h"
+#include "table_store.h"
 #include "monitor.h"
 #include "cca_ble.h"
 #include "cca_http.h"
@@ -180,6 +181,7 @@ int main(int argc, char **argv) {
   // And the discovery switch, for the same reason.
   DiscoveryStore discovery(state_dir + "/discovery.json");
   discovery.load();
+  TableStore table_store(state_dir + "/table-remove.json");
   // Every frame, named, and an alarm for one that reconfigures the TAP.
   BusLog bus_log(state_dir + "/bus-alarm.json", state_dir + "/versions.json");
   bus_log.load();
@@ -236,6 +238,17 @@ int main(int argc, char **argv) {
       m->set_discovery(discovery.renew(), [&discovery](bool renew) { discovery.save(renew); });
       m->set_read_tap_config(settings.master_read_tap_config);
       m->set_table_writes(settings.master_table_writes);
+      {
+        // A removal that stopped between its erase and its write back is
+        // finished by this master, from the list saved before the erase.
+        esphome::tigo_monitor::master::Bytes resume_mac;
+        std::vector<esphome::tigo_monitor::master::TableRecord> resume;
+        bool unfinished = table_store.load(resume_mac, resume);
+        m->set_table_saved([&table_store](const esphome::tigo_monitor::master::Bytes &mac,
+                                          const std::vector<esphome::tigo_monitor::master::TableRecord> *stay) {
+          return table_store.save(mac, stay);
+        }, resume_mac, unfinished ? &resume : nullptr);
+      }
       // Standing by, it listens as the listen role does, learning the 0x41s
       // another master sends, and takes the latest of them when it takes over.
       if (settings.bus_role == "standby")
@@ -363,6 +376,14 @@ int main(int argc, char **argv) {
           return 409;
         }
         return bus_master->request_table_add(mac, id, dry_run, why) ? 200 : 409;
+      },
+      [&](const esphome::tigo_monitor::master::Bytes &mac, bool dry_run, std::string &why) {
+        std::lock_guard<std::mutex> lock(master_mu);
+        if (!bus_master) {
+          why = "this monitor isn't running the bus";
+          return 409;
+        }
+        return bus_master->request_table_remove(mac, dry_run, why) ? 200 : 409;
       }});
   if (port < 0 && settings.web_port > 0) port = settings.web_port;
   // Only the default steps aside for another web server; a port someone

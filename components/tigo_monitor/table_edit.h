@@ -1,13 +1,17 @@
 #pragma once
 
-// Adding an optimizer to the TAP's table, as the CCA did on the bench
-// (2026-11-06, docs/superpowers/specs/2026-11-05-optimizer-commissioning-design.md):
-// read the table (sub 0x26), write one record (sub 0x29) with bit 15 set,
-// read it back, then hold the discovery window open until the TAP clears the
-// bit, which it does when the optimizer joins. Unlike the CCA it doesn't
-// erase the table first (the CCA's was empty; ours holds every optimizer on
-// the roof), and sends none of the CCA's 0x22s with data or its writes after
-// the join. See docs/superpowers/specs/2026-11-09-optimizer-table-edits-design.md.
+// Adding an optimizer to the TAP's table and removing one, from the bench
+// captures of a CCA doing both (2026-11-06 and 2026-11-09; see
+// docs/superpowers/specs/2026-11-09-optimizer-table-edits-design.md).
+//   - Add: read the table (sub 0x26), write one record (sub 0x29) with bit
+//     15 set, read it back, then hold the discovery window open until the
+//     TAP clears the bit, which it does when the optimizer joins. The CCA
+//     erases the table and rewrites it with the new record; this appends,
+//     as the owner's analysis says a 0x29 does, so an add never erases.
+//   - Remove: there is no single-record delete. Read the table, erase it
+//     (sub 0x2B BA BE), and write back what stays exactly as read, as the
+//     CCA did. Nothing rejoins.
+// Neither sends the CCA's 0x22s with data or its writes to optimizers.
 //
 // And an optimizer's printed label read as its MAC, from taptap's
 // docs/protocol.md ("Barcodes"): "4-9A57A2L" is 04C05B 4 0 00 9A 57 A2. The
@@ -20,6 +24,7 @@
 
 #include "tigo_master.h"
 
+#include <algorithm>
 #include <cstdio>
 #include <string>
 #include <vector>
@@ -130,31 +135,183 @@ inline const char *set_table_ack_text(int ack) {
   }
 }
 
-// One add, start to finish: due() for the next request, on_reply() with what
-// came back. It sends one request at a time, each marked table_edit, and
-// sends the write at most once: a write with no ack is never repeated, and
-// the read back decides whether it took.
-class TableAdd : public RequestSource {
+// Reads the whole table, a page at a time: each page asked from one past
+// the last id the one before held (the CCA's own next index, first + count,
+// on a table with no gaps, and right on one with). A page with no reply is
+// asked once more.
+class TableWalk {
+ public:
+  enum Result { more, done, failed };
+  static const uint32_t PAGE_WAIT_MS = 500;  // as Housekeeping's walks
+  static const int MAX_PAGES = 110;          // 1024 slots at about 12 a page
+
+  void start() {
+    active_ = true;
+    index_ = 0;
+    pages_ = 0;
+    retried_ = false;
+    records_.clear();
+  }
+  bool active() const { return active_; }
+  Request request(uint8_t &seq) {
+    seq = next_seq(seq);
+    pages_++;
+    Request r{CMD_TUNNEL, tunnel_request(0x26, seq, {static_cast<uint8_t>(index_ >> 8), static_cast<uint8_t>(index_)}),
+              PAGE_WAIT_MS};
+    r.table_edit = true;
+    return r;
+  }
+  Result on_reply(bool ok, const Frame &reply) {
+    TunnelReply t;
+    uint16_t start = 0;
+    std::vector<TableRecord> page;
+    if (!ok || reply.cmd != CMD_TUNNEL_REPLY || !parse_tunnel_reply(reply.payload, t) || !parse_table_page(t, start, page)) {
+      if (!retried_) {
+        retried_ = true;
+        pages_--;
+        return more;
+      }
+      active_ = false;
+      return failed;
+    }
+    retried_ = false;
+    if (page.empty()) {
+      active_ = false;
+      return done;
+    }
+    uint32_t next = static_cast<uint32_t>(page.back().id()) + 1;
+    if (start < index_ || next <= index_ || pages_ >= MAX_PAGES) {
+      active_ = false;
+      return failed;
+    }
+    for (const auto &r : page)
+      if (!find(records_, r.mac)) records_.push_back(r);
+    index_ = static_cast<uint16_t>(next);
+    return more;
+  }
+  const std::vector<TableRecord> &records() const { return records_; }
+
+  static const TableRecord *find(const std::vector<TableRecord> &t, const Bytes &mac) {
+    for (const auto &r : t)
+      if (r.mac == mac) return &r;
+    return nullptr;
+  }
+
+ private:
+  bool active_ = false;
+  bool retried_ = false;
+  uint16_t index_ = 0;
+  int pages_ = 0;
+  std::vector<TableRecord> records_;
+};
+
+// Whether two tables list the same optimizers at the same ids, whatever
+// their 0x8000 bits (one may have joined in between).
+inline bool same_table(const std::vector<TableRecord> &a, const std::vector<TableRecord> &b) {
+  if (a.size() != b.size()) return false;
+  for (const auto &r : a) {
+    const TableRecord *o = TableWalk::find(b, r.mac);
+    if (!o || o->id() != r.id()) return false;
+  }
+  return true;
+}
+
+// An owner's change to the TAP's table, start to finish: due() for the next
+// request, on_reply() with what came back. One request at a time, each
+// marked table_edit. A write or erase with no ack is never repeated: the
+// read after it decides whether it took.
+class TableJob : public RequestSource {
+ public:
+  virtual void on_reply(const Request &req, bool ok, const Frame &reply, uint32_t now_ms) = 0;
+  virtual const char *kind() const = 0;       // "add", "remove"
+  virtual const char *step_text() const = 0;  // for the Devices page
+  virtual bool finished() const = 0;
+  virtual bool ok() const = 0;
+  // True while the job wants the discovery window open.
+  virtual bool wants_window() const { return false; }
+  // A removal's records to write back, before its erase: the caller saves
+  // them (resume after a stop), then calls saved().
+  virtual bool wants_save() const { return false; }
+  virtual void saved(bool) {}
+  // Whether a saved list must stay: a removal stopped after its erase.
+  virtual bool keep_saved() const { return false; }
+  virtual const std::vector<TableRecord> &survivors() const { return none_; }
+
+  bool dry_run() const { return dry_run_; }
+  const Bytes &mac() const { return mac_; }
+  uint16_t id() const { return id_; }  // 0 until known
+  int ack() const { return ack_; }     // the last write's or erase's; -1: none heard
+  const std::string &message() const { return message_; }
+  // A dry run's frames, as the sub then the args after the seq.
+  const std::vector<Bytes> &dry_frames() const { return dry_frames_; }
+  const std::vector<TableRecord> &table() const { return before_; }  // as read first
+
+ protected:
+  TableJob(const Bytes &mac, bool dry_run) : mac_(mac), dry_run_(dry_run) {}
+  static std::string hex4_(uint16_t v) {
+    char b[5];
+    std::snprintf(b, sizeof(b), "%04X", v);
+    return b;
+  }
+  Request send_(uint8_t sub, const Bytes &args, uint32_t wait_ms, uint8_t &seq) {
+    seq = next_seq(seq);
+    waiting_ = true;
+    Request r{CMD_TUNNEL, tunnel_request(sub, seq, args), wait_ms};
+    r.table_edit = true;
+    return r;
+  }
+  // The reply to the job's own request: false if it isn't one.
+  bool take_(const Request &req) {
+    if (!req.table_edit || !waiting_ || req.payload.size() < 5) return false;
+    waiting_ = false;
+    return true;
+  }
+  // The ack byte of a write (0x2A) or erase (0x2C) reply, or -1.
+  static int ack_of_(bool ok, const Frame &reply, uint8_t sub) {
+    TunnelReply t;
+    if (ok && reply.cmd == CMD_TUNNEL_REPLY && parse_tunnel_reply(reply.payload, t) && t.sub == sub && !t.data.empty())
+      return t.data[0];
+    return -1;
+  }
+
+  Bytes mac_;
+  bool dry_run_;
+  uint16_t id_ = 0;
+  int ack_ = -1;
+  std::string message_;
+  bool waiting_ = false;
+  TableWalk walk_;
+  std::vector<TableRecord> before_;
+  std::vector<Bytes> dry_frames_;
+
+ private:
+  std::vector<TableRecord> none_;
+};
+
+// Adding one optimizer: read the table, write one record with bit 15 set at
+// the lowest free id from 2 (or the one asked for), read it back, and want
+// the window open until the TAP clears the bit, which it does when the
+// optimizer joins.
+class TableAdd : public TableJob {
  public:
   enum class Step { read_before, write, read_after, joining, done, failed };
-  static const uint32_t PAGE_WAIT_MS = 500;   // as Housekeeping's walks
+  static const uint32_t PAGE_WAIT_MS = TableWalk::PAGE_WAIT_MS;
   static const uint32_t WRITE_WAIT_MS = 2000;  // the TAP acks once the record is in flash
-  static const int MAX_PAGES = 110;            // 1024 slots at about 12 a page
   static const uint32_t JOIN_CHECK_MS = 60000;
-  static const uint32_t JOIN_TIMEOUT_MS = 30 * 60000;  // the bench's first join took 10 min
+  static const uint32_t JOIN_TIMEOUT_MS = 30 * 60000;  // the bench's joins took 3.5 and 10 min
 
   // want_id 0: the lowest free id from 2, as the CCA chose on the bench.
-  TableAdd(const Bytes &mac, uint16_t want_id, bool dry_run) : mac_(mac), want_id_(want_id), dry_run_(dry_run) {}
+  TableAdd(const Bytes &mac, uint16_t want_id, bool dry_run) : TableJob(mac, dry_run), want_id_(want_id) {}
 
   Request due(uint32_t now_ms, uint8_t &seq) override {
     if (finished() || waiting_) return {};
-    if (step_ == Step::joining) {
+    if (step_ == Step::joining && !walk_.active()) {
       if (static_cast<int32_t>(now_ms - joining_since_ms_) >= static_cast<int32_t>(JOIN_TIMEOUT_MS)) {
         fail_("not joined after " + std::to_string(JOIN_TIMEOUT_MS / 60000) +
               " min: it stays listed, not joined, and joins whenever the window is next open");
         return {};
       }
-      if (!walking_ && static_cast<int32_t>(now_ms - next_check_ms_) < 0) return {};
+      if (static_cast<int32_t>(now_ms - next_check_ms_) < 0) return {};
     }
     if (step_ == Step::write) {
       Bytes args = {1};
@@ -162,82 +319,45 @@ class TableAdd : public RequestSource {
       args.push_back(static_cast<uint8_t>(0x80 | id_ >> 8));
       args.push_back(static_cast<uint8_t>(id_));
       if (dry_run_) {
-        dry_frames_.push_back(args);
+        Bytes f = {0x29};
+        f.insert(f.end(), args.begin(), args.end());
+        dry_frames_.push_back(f);
         finish_("dry run: would list " + mac_hex(mac_) + " at " + hex4_(id_) + " (not joined)");
         return {};
       }
-      seq = next_seq(seq);
-      waiting_ = true;
-      return tag_({CMD_TUNNEL, tunnel_request(0x29, seq, args), WRITE_WAIT_MS});
+      return send_(0x29, args, WRITE_WAIT_MS, seq);
     }
-    if (!walking_) {
-      walking_ = true;
-      page_index_ = 0;
-      pages_ = 0;
-      retried_ = false;
-      walk_.clear();
-    }
-    seq = next_seq(seq);
+    if (!walk_.active()) walk_.start();
     waiting_ = true;
-    pages_++;
-    return tag_({CMD_TUNNEL,
-                 tunnel_request(0x26, seq, {static_cast<uint8_t>(page_index_ >> 8), static_cast<uint8_t>(page_index_)}),
-                 PAGE_WAIT_MS});
+    return walk_.request(seq);
   }
 
-  void on_reply(const Request &req, bool ok, const Frame &reply, uint32_t now_ms) {
-    if (!req.table_edit || !waiting_ || req.payload.size() < 5) return;
-    waiting_ = false;
-    TunnelReply t;
-    bool parsed = ok && reply.cmd == CMD_TUNNEL_REPLY && parse_tunnel_reply(reply.payload, t);
+  void on_reply(const Request &req, bool ok, const Frame &reply, uint32_t now_ms) override {
+    if (!take_(req)) return;
     if (req.payload[3] == 0x29) {
-      if (parsed && t.sub == 0x2A && !t.data.empty()) {
-        ack_ = t.data[0];
-        if (ack_ != 0) return fail_(std::string("the TAP refused the write: ") + set_table_ack_text(ack_));
-      }
+      ack_ = ack_of_(ok, reply, 0x2A);
+      if (ack_ > 0) return fail_(std::string("the TAP refused the write: ") + set_table_ack_text(ack_));
       step_ = Step::read_after;  // no ack: the read back says whether it took
       return;
     }
-    uint16_t start = 0;
-    std::vector<TableRecord> page;
-    if (!parsed || !parse_table_page(t, start, page)) {
-      if (!retried_) {  // the same page once more
-        retried_ = true;
-        pages_--;
-        return;
-      }
-      if (step_ == Step::joining) {  // try again at the next check
-        walking_ = false;
-        next_check_ms_ = now_ms + JOIN_CHECK_MS;
-        return;
-      }
-      return fail_("the TAP didn't answer a read of its table");
+    switch (walk_.on_reply(ok, reply)) {
+      case TableWalk::more: return;
+      case TableWalk::failed:
+        if (step_ == Step::joining) {  // try again at the next check
+          next_check_ms_ = now_ms + JOIN_CHECK_MS;
+          return;
+        }
+        return fail_("the TAP didn't answer a read of its table");
+      case TableWalk::done: return walked_(now_ms);
     }
-    retried_ = false;
-    if (page.empty()) return walked_(now_ms);
-    // The next page from one past this page's last id: the CCA's own next
-    // index (first + count) on a table with no gaps, and right on one with.
-    uint32_t next = static_cast<uint32_t>(page.back().id()) + 1;
-    if (start < page_index_ || next <= page_index_ || pages_ >= MAX_PAGES)
-      return fail_("the TAP's table read didn't add up");
-    for (const auto &r : page)
-      if (!find_(walk_, r.mac)) walk_.push_back(r);
-    page_index_ = static_cast<uint16_t>(next);
   }
 
+  const char *kind() const override { return "add"; }
   Step step() const { return step_; }
-  bool finished() const { return step_ == Step::done || step_ == Step::failed; }
-  bool ok() const { return step_ == Step::done; }
-  bool dry_run() const { return dry_run_; }
-  const Bytes &mac() const { return mac_; }
-  uint16_t id() const { return id_; }  // 0 until chosen
-  int ack() const { return ack_; }     // -1: none heard
-  const std::string &message() const { return message_; }
-  // True while the optimizer is listed and the job waits for it to join.
-  bool wants_window() const { return step_ == Step::joining; }
-  // A dry run's write, as the args after the seq.
-  const std::vector<Bytes> &dry_frames() const { return dry_frames_; }
-  const std::vector<TableRecord> &table() const { return before_; }
+  bool finished() const override { return step_ == Step::done || step_ == Step::failed; }
+  bool ok() const override { return step_ == Step::done; }
+  bool wants_window() const override { return step_ == Step::joining; }
+  const char *step_text() const override { return step_name(step_); }
   static const char *step_name(Step s) {
     switch (s) {
       case Step::read_before: return "reading the table";
@@ -251,35 +371,21 @@ class TableAdd : public RequestSource {
   }
 
  private:
-  static std::string hex4_(uint16_t v) {
-    char b[5];
-    std::snprintf(b, sizeof(b), "%04X", v);
-    return b;
-  }
-  Request tag_(Request r) {
-    r.table_edit = true;
-    return r;
-  }
   void fail_(const std::string &why) {
     step_ = Step::failed;
     message_ = why;
-    walking_ = waiting_ = false;
+    waiting_ = false;
   }
   void finish_(const std::string &what) {
     step_ = Step::done;
     message_ = what;
-    walking_ = waiting_ = false;
-  }
-  const TableRecord *find_(const std::vector<TableRecord> &t, const Bytes &mac) const {
-    for (const auto &r : t)
-      if (r.mac == mac) return &r;
-    return nullptr;
+    waiting_ = false;
   }
   void walked_(uint32_t now_ms) {
-    walking_ = false;
+    const std::vector<TableRecord> &walk = walk_.records();
     if (step_ == Step::read_before) {
-      before_ = walk_;
-      if (const TableRecord *r = find_(before_, mac_)) {
+      before_ = walk;
+      if (const TableRecord *r = TableWalk::find(before_, mac_)) {
         id_ = r->id();
         return finish_("already in the table at " + hex4_(id_) + (r->joined() ? ", joined" : ", not joined yet") +
                        ": nothing to write; it joins while the window is open");
@@ -300,15 +406,11 @@ class TableAdd : public RequestSource {
       return;
     }
     if (step_ == Step::read_after) {
-      // As before, plus the one record. Others may have joined meanwhile, so
-      // records compare by MAC and id, not the 0x8000 bit.
-      const TableRecord *added = find_(walk_, mac_);
-      bool same = added && added->id() == id_ && walk_.size() == before_.size() + 1;
-      for (const auto &r : before_) {
-        const TableRecord *now = same ? find_(walk_, r.mac) : nullptr;
-        if (!now || now->id() != r.id()) same = false;
-      }
-      if (!same)
+      // As before, plus the one record.
+      const TableRecord *added = TableWalk::find(walk, mac_);
+      std::vector<TableRecord> expected = before_;
+      if (added) expected.push_back({mac_, id_});
+      if (!added || !same_table(walk, expected))
         return fail_(added        ? "the read back doesn't match the table before the write"
                      : ack_ == -1 ? "no answer to the write, and the read back doesn't list it"
                                   : "the read back doesn't list it");
@@ -320,27 +422,210 @@ class TableAdd : public RequestSource {
       return;
     }
     // Joining: has the TAP cleared the bit?
-    const TableRecord *r = find_(walk_, mac_);
+    const TableRecord *r = TableWalk::find(walk, mac_);
     if (!r) return fail_("it's gone from the table");
     if (r->joined()) return finish_("joined at " + hex4_(r->id()));
     next_check_ms_ = now_ms + JOIN_CHECK_MS;
   }
 
-  Bytes mac_;
   uint16_t want_id_;
-  bool dry_run_;
   Step step_ = Step::read_before;
-  uint16_t id_ = 0;
-  int ack_ = -1;
-  std::string message_;
-  bool waiting_ = false;
-  bool walking_ = false;
-  bool retried_ = false;
-  uint16_t page_index_ = 0;
-  int pages_ = 0;
-  std::vector<TableRecord> walk_, before_;
   uint32_t joining_since_ms_ = 0, next_check_ms_ = 0;
-  std::vector<Bytes> dry_frames_;
+};
+
+// Removing one optimizer, as the CCA did on the bench (2026-11-09): there is
+// no single-record delete, so read the table, have the records that stay
+// saved (the caller's job: wants_save, saved), erase the table (sub 0x2B
+// BA BE), check it reads empty, write the records that stay back exactly as
+// read (bit 15 and all, up to 10 a write), and read back. Nothing has to
+// rejoin, and no window is opened: the CCA opened none.
+//
+// resume: the records a removal stopped before writing back (saved), for
+// the next start to finish: read, and unless the table already holds just
+// those, erase and write them.
+class TableRemove : public TableJob {
+ public:
+  enum class Step { read_before, save, erase, read_empty, write, read_after, done, failed };
+  static const uint32_t ERASE_WAIT_MS = 3000;  // the TAP erases, then acks: 16-48 ms on the bench
+  // From the empty read to the first write back, as the CCA's holdoff (0.5 s,
+  // and 0.7 to 2.3 s seen, 2026-11-06/09). Every optimizer is unjoined until
+  // the write back, so this is the whole of the gap.
+  static const uint32_t REWRITE_HOLDOFF_MS = 500;
+  static const uint32_t WRITE_WAIT_MS = TableAdd::WRITE_WAIT_MS;
+  static constexpr size_t PER_WRITE = 10;
+
+  TableRemove(const Bytes &mac, bool dry_run, const std::vector<TableRecord> *resume = nullptr)
+      : TableJob(mac, dry_run), resuming_(resume != nullptr) {
+    if (resume) survivors_ = *resume;
+  }
+
+  Request due(uint32_t now_ms, uint8_t &seq) override {
+    if (finished() || waiting_ || step_ == Step::save) return {};
+    if (step_ == Step::write && written_ == 0 && static_cast<int32_t>(now_ms - empty_at_ms_) < static_cast<int32_t>(REWRITE_HOLDOFF_MS))
+      return {};
+    if (step_ == Step::erase) {
+      if (dry_run_) {
+        dry_frames_.push_back({SUB_ERASE_FLASH, 0xBA, 0xBE});
+        for (size_t i = 0; i < survivors_.size(); i += PER_WRITE) {
+          Bytes f = {0x29};
+          Bytes a = batch_(i);
+          f.insert(f.end(), a.begin(), a.end());
+          dry_frames_.push_back(f);
+        }
+        finish_("dry run: would erase the table and write back the other " + std::to_string(survivors_.size()));
+        return {};
+      }
+      erase_sent_ = true;
+      return send_(SUB_ERASE_FLASH, {0xBA, 0xBE}, ERASE_WAIT_MS, seq);
+    }
+    if (step_ == Step::write) return send_(0x29, batch_(written_), WRITE_WAIT_MS, seq);
+    if (!walk_.active()) walk_.start();
+    waiting_ = true;
+    return walk_.request(seq);
+  }
+
+  void on_reply(const Request &req, bool ok, const Frame &reply, uint32_t now_ms) override {
+    if (!take_(req)) return;
+    uint8_t sub = req.payload[3];
+    empty_at_ms_ = now_ms;  // the read that finds it empty is the last reply before the holdoff
+    if (sub == SUB_ERASE_FLASH) {
+      ack_ = ack_of_(ok, reply, 0x2C);
+      if (ack_ > 0) return fail_("the TAP refused the erase (" + std::to_string(ack_) + "); its table is as it was", false);
+      step_ = Step::read_empty;  // no ack: the read says whether it took
+      return;
+    }
+    if (sub == 0x29) {
+      ack_ = ack_of_(ok, reply, 0x2A);
+      if (ack_ > 0)
+        return fail_(std::string("the TAP refused a write back: ") + set_table_ack_text(ack_) +
+                         "; the rest is saved and is written at the next start",
+                     true);
+      if (ack_ < 0) {  // never sent again; read what the TAP holds
+        step_ = Step::read_after;
+        return;
+      }
+      written_ += std::min(PER_WRITE, survivors_.size() - written_);
+      if (written_ >= survivors_.size()) step_ = Step::read_after;
+      return;
+    }
+    switch (walk_.on_reply(ok, reply)) {
+      case TableWalk::more: return;
+      case TableWalk::failed:
+        return fail_("the TAP didn't answer a read of its table", step_ != Step::read_before);
+      case TableWalk::done: return walked_();
+    }
+  }
+
+  bool wants_save() const override { return step_ == Step::save; }
+  void saved(bool ok) override {
+    if (step_ != Step::save) return;
+    if (!ok) return fail_("couldn't save the records to write back; nothing was erased", false);
+    step_ = Step::erase;
+  }
+  bool keep_saved() const override { return keep_saved_; }
+  const std::vector<TableRecord> &survivors() const override { return survivors_; }
+
+  const char *kind() const override { return "remove"; }
+  Step step() const { return step_; }
+  bool finished() const override { return step_ == Step::done || step_ == Step::failed; }
+  bool ok() const override { return step_ == Step::done; }
+  bool resuming() const { return resuming_; }
+  bool erase_sent() const { return erase_sent_; }
+  const char *step_text() const override { return step_name(step_); }
+  static const char *step_name(Step s) {
+    switch (s) {
+      case Step::read_before: return "reading the table";
+      case Step::save: return "saving what stays";
+      case Step::erase: return "erasing the table";
+      case Step::read_empty: return "checking it's empty";
+      case Step::write: return "writing back what stays";
+      case Step::read_after: return "reading it back";
+      case Step::done: return "done";
+      case Step::failed: return "stopped";
+    }
+    return "";
+  }
+
+ private:
+  Bytes batch_(size_t from) const {
+    size_t n = std::min(PER_WRITE, survivors_.size() - from);
+    Bytes a = {static_cast<uint8_t>(n)};
+    for (size_t i = from; i < from + n; i++) {
+      a.insert(a.end(), survivors_[i].mac.begin(), survivors_[i].mac.end());
+      a.push_back(static_cast<uint8_t>(survivors_[i].tuid >> 8));
+      a.push_back(static_cast<uint8_t>(survivors_[i].tuid));
+    }
+    return a;
+  }
+  // keep: the saved records must stay for a resume (the table may be short of them).
+  void fail_(const std::string &why, bool keep) {
+    step_ = Step::failed;
+    message_ = why;
+    waiting_ = false;
+    keep_saved_ = keep;
+  }
+  void finish_(const std::string &what) {
+    step_ = Step::done;
+    message_ = what;
+    waiting_ = false;
+    keep_saved_ = false;
+  }
+  void walked_() {
+    const std::vector<TableRecord> &walk = walk_.records();
+    if (step_ == Step::read_before) {
+      before_ = walk;
+      if (resuming_) {
+        if (same_table(walk, survivors_)) return finish_("the interrupted removal had finished: nothing to do");
+        step_ = Step::erase;  // the saved list is already on disk
+        keep_saved_ = true;
+        return;
+      }
+      const TableRecord *r = TableWalk::find(before_, mac_);
+      if (!r) return finish_("not in the table: nothing to remove");
+      id_ = r->id();
+      for (const auto &rec : before_)
+        if (rec.mac != mac_) survivors_.push_back(rec);
+      // In id order, as the CCA wrote them back.
+      std::sort(survivors_.begin(), survivors_.end(),
+                [](const TableRecord &a, const TableRecord &b) { return a.id() < b.id(); });
+      if (dry_run_) {
+        step_ = Step::erase;
+        return;
+      }
+      step_ = Step::save;
+      return;
+    }
+    if (step_ == Step::read_empty) {
+      if (walk.empty()) {
+        keep_saved_ = true;
+        written_ = 0;
+        step_ = survivors_.empty() ? Step::read_after : Step::write;
+        if (survivors_.empty()) return finish_(done_text_());
+        return;
+      }
+      if (same_table(walk, before_) && !resuming_)
+        return fail_("the erase didn't take (no answer, and the table is as it was): nothing changed", false);
+      return fail_("the table didn't read empty after the erase; the records to write back are saved", true);
+    }
+    // After the writes: just the records that stay.
+    if (!same_table(walk, survivors_))
+      return fail_("the read back doesn't match the records that stay; they are saved and are written at the next start",
+                   true);
+    finish_(done_text_());
+  }
+  std::string done_text_() const {
+    std::string n = std::to_string(survivors_.size());
+    return resuming_ ? "finished the interrupted removal: " + n + " written back"
+                     : "removed " + hex4_(id_) + "; the other " + n + " written back as they were";
+  }
+
+  bool resuming_;
+  Step step_ = Step::read_before;
+  std::vector<TableRecord> survivors_;
+  size_t written_ = 0;
+  uint32_t empty_at_ms_ = 0;
+  bool erase_sent_ = false;
+  bool keep_saved_ = false;
 };
 
 }  // namespace master

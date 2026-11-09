@@ -60,9 +60,10 @@ struct PvState {
   int64_t since_unix = 0;
 };
 
-// The last table add the owner started (table_edit.h's TableAdd), for the
-// Devices page: still running (active) or how it ended.
+// The last change to the TAP's table the owner started (table_edit.h), for
+// the Devices page: still running (active) or how it ended.
 struct TableEditStatus {
+  std::string kind;  // "add", "remove"
   bool active = false;
   bool finished = false;
   bool ok = false;
@@ -72,7 +73,10 @@ struct TableEditStatus {
   int ack = -1;
   std::string step, message;
   int64_t started_unix = 0, finished_unix = 0;
-  std::vector<std::string> dry_frames;  // the write it would send, as the hex args after the seq
+  std::vector<std::string> dry_frames;  // what it would send: the sub, then the args after the seq, in hex
+  // A removal stopped between its erase and its last write back, saved for
+  // the next start, which needs master_table_writes on to finish it.
+  bool interrupted = false;
 };
 
 struct MasterStatus {
@@ -217,14 +221,27 @@ class MasterCore {
   // (request_discovery) still wins: renewed only when both want it.
   // missing: how many expected optimizers haven't reported today, for the UI.
   void set_window_wanted(bool wanted, int missing = 0);
-  // master_table_writes: lets an add the owner starts (request_table_add)
-  // send its table write. Off, only a dry run can be started. Call before open().
+  // master_table_writes: lets an add or removal the owner starts send its
+  // table writes and erase. Off, only a dry run can be started. Call before open().
   void set_table_writes(bool on) { table_writes_on_ = on; }
+  // Where a removal saves the records it will write back, before its erase,
+  // and clears them once they are back (survivors null). False: not saved,
+  // so nothing is erased. resume: a list saved by a removal that stopped
+  // after its erase, finished at the start (with master_table_writes on).
+  // Call before open(); without it no removal can run.
+  using TableSaved = std::function<bool(const esphome::tigo_monitor::master::Bytes &mac,
+                                        const std::vector<esphome::tigo_monitor::master::TableRecord> *survivors)>;
+  void set_table_saved(TableSaved saved, const esphome::tigo_monitor::master::Bytes &resume_mac = {},
+                       const std::vector<esphome::tigo_monitor::master::TableRecord> *resume = nullptr);
   // Starts adding an optimizer to the TAP's table, at id (0: the lowest
-  // free), in the next tick. false, with why, while one is running, while
-  // standing by, with PV held off or the window held closed by the owner,
-  // or without master_table_writes (a dry run needs none of those but the first two).
+  // free), in the next tick. false, with why, while a change is running,
+  // while standing by, with PV held off or the window held closed by the
+  // owner, or without master_table_writes (a dry run needs none of those
+  // but the first two).
   bool request_table_add(const esphome::tigo_monitor::master::Bytes &mac, uint16_t id, bool dry_run, std::string &why);
+  // Starts removing one: the table erased and what stays written back. The
+  // same refusals, but for the window, and nowhere to save what stays.
+  bool request_table_remove(const esphome::tigo_monitor::master::Bytes &mac, bool dry_run, std::string &why);
 
   bool open();
   // Sends at most one request and reads its reply, up to REPLY_TIMEOUT_MS.
@@ -287,11 +304,14 @@ class MasterCore {
   Targets targets_;
   bool queries_on_, writes_on_;
   bool table_writes_on_ = false;
-  std::unique_ptr<esphome::tigo_monitor::master::TableAdd> table_add_;
-  std::unique_ptr<esphome::tigo_monitor::master::TableAdd> table_add_pending_;  // under mu_
-  bool table_add_running_ = false;  // under mu_: pending or table_add_
+  std::unique_ptr<esphome::tigo_monitor::master::TableJob> table_job_;
+  std::unique_ptr<esphome::tigo_monitor::master::TableJob> table_job_pending_;  // under mu_
+  bool table_job_running_ = false;  // under mu_: pending or table_job_
+  TableSaved table_saved_;
+  bool table_refusal_(bool dry_run, std::string &why) const;  // under mu_
+  void start_table_job_(std::unique_ptr<esphome::tigo_monitor::master::TableJob> job);  // under mu_
   void sync_table_status_(bool finished_now);
-  void settle_table_add_();
+  void settle_table_job_();
   std::unique_ptr<esphome::tigo_monitor::master::Queries> queries_;
   // queries_'s answers, kept across a restart of queries_ (a takeover, a TAP
   // power cut); under mu_.

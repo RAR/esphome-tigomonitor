@@ -69,6 +69,8 @@ struct HttpContext {
   // lowest free, dry run): 200, or 409 with why, as request_pv.
   std::function<int(const esphome::tigo_monitor::master::Bytes &mac, uint16_t id, bool dry_run, std::string &why)>
       request_table_add;
+  // The owner's removal of one: 200, or 409 with why.
+  std::function<int(const esphome::tigo_monitor::master::Bytes &mac, bool dry_run, std::string &why)> request_table_remove;
 };
 
 // tigomonitord --health-check PORT, the container's HEALTHCHECK: GETs

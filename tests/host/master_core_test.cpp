@@ -452,6 +452,7 @@ struct TableTap {
       {0x04, 0xC0, 0x5B, 0x00, 0x00, 0x00, 0x01, 0x02, 0x00, 0x03}};
   std::vector<mp::Bytes> writes;
   int renewals = 0;
+  int erases = 0;
   TableTap() {
     port.answer = [this](const mp::Frame &f, mp::Frame &r) {
       if (f.cmd != 0x0B0F || f.payload.size() < 5) return false;
@@ -480,9 +481,15 @@ struct TableTap {
         r.payload.insert(r.payload.end(), d.begin(), d.end());
         return true;
       }
+      if (sub == 0x2B) {
+        erases++;
+        records.clear();
+        r.payload.push_back(0x00);
+        return true;
+      }
       if (sub == 0x29) {
         writes.push_back(args);
-        records.push_back(mp::Bytes(args.begin() + 1, args.end()));
+        for (size_t i = 0; i < args[0]; i++) records.push_back(mp::Bytes(args.begin() + 1 + 10 * i, args.begin() + 11 + 10 * i));
         r.payload.push_back(0x00);
         return true;
       }
@@ -515,7 +522,8 @@ static void test_a_dry_run_sends_no_write() {
   MasterStatus s = core.status();
   CHECK(s.table_edit.finished && s.table_edit.ok && s.table_edit.dry_run);
   CHECK(s.table_edit.dry_frames.size() == 1);
-  CHECK(s.table_edit.dry_frames[0] == "01" "04C05B0000001234" "8004");
+  CHECK(s.table_edit.dry_frames[0] == "29" "01" "04C05B0000001234" "8004");
+  CHECK(s.table_edit.kind == "add");
   core.close();
 }
 
@@ -550,7 +558,81 @@ static void test_a_table_add_writes_once_and_holds_the_window() {
   core.close();
 }
 
+// A removal through the core: what stays is saved before the erase and
+// cleared once it is written back; without a place to save it, refused.
+static void test_a_removal_saves_then_erases() {
+  TableTap tap;
+  MasterCore core(&tap.port, [](int, const std::string &) {}, nullptr, nullptr, GW, false, false);
+  core.set_table_writes(true);
+  std::vector<std::string> events;
+  std::string why;
+  CHECK(!core.request_table_remove(tap.records[0], false, why));  // nowhere to save yet
+  mp::Bytes first(tap.records[0].begin(), tap.records[0].begin() + 8);
+  core.set_table_saved([&](const mp::Bytes &mac, const std::vector<mp::TableRecord> *stay) {
+    CHECK(mac == first);
+    events.push_back(stay ? "saved " + std::to_string(stay->size()) + " at erase " + std::to_string(tap.erases) : "cleared");
+    return true;
+  });
+  CHECK(core.open());
+  CHECK(core.request_table_remove(first, false, why));
+  for (uint32_t t = 0; t < 20000; t += 50) core.tick(t);
+  CHECK(tap.erases == 1);
+  CHECK(tap.records.size() == 1 && tap.records[0][7] == 0x02);
+  CHECK(events.size() == 2 && events[0] == "saved 1 at erase 0" && events[1] == "cleared");
+  MasterStatus s = core.status();
+  CHECK(s.table_edit.kind == "remove" && s.table_edit.finished && s.table_edit.ok && !s.table_edit.interrupted);
+  core.close();
+}
+
+// A saved list from a removal that stopped: finished at the start with the
+// setting on; with it off, nothing is sent and every change is refused.
+static void test_an_interrupted_removal_is_finished() {
+  std::vector<mp::TableRecord> stay = {{{0x04, 0xC0, 0x5B, 0x00, 0x00, 0x00, 0x01, 0x02}, 0x0003}};
+  mp::Bytes gone = {0x04, 0xC0, 0x5B, 0x00, 0x00, 0x00, 0x01, 0x01};
+  {
+    TableTap tap;
+    tap.records.clear();  // stopped after the erase
+    MasterCore core(&tap.port, [](int, const std::string &) {}, nullptr, nullptr, GW, false, false);
+    bool cleared = false;
+    core.set_table_saved([&](const mp::Bytes &, const std::vector<mp::TableRecord> *s) {
+      if (!s) cleared = true;
+      return true;
+    }, gone, &stay);
+    CHECK(core.open());
+    for (uint32_t t = 0; t < 20000; t += 50) core.tick(t);
+    CHECK(tap.erases == 0);
+    CHECK(tap.writes.empty());
+    MasterStatus s = core.status();
+    CHECK(s.table_edit.interrupted && !s.table_edit.finished);
+    std::string why;
+    CHECK(!core.request_table_add(NEW_MAC, 0, true, why));
+    CHECK(!cleared);
+    core.close();
+  }
+  {
+    TableTap tap;
+    tap.records.clear();
+    MasterCore core(&tap.port, [](int, const std::string &) {}, nullptr, nullptr, GW, false, false);
+    core.set_table_writes(true);
+    bool cleared = false;
+    core.set_table_saved([&](const mp::Bytes &, const std::vector<mp::TableRecord> *s) {
+      if (!s) cleared = true;
+      return true;
+    }, gone, &stay);
+    CHECK(core.open());
+    for (uint32_t t = 0; t < 20000; t += 50) core.tick(t);
+    CHECK(tap.writes.size() == 1);
+    CHECK(tap.records.size() == 1 && tap.records[0][7] == 0x02 && tap.records[0][9] == 0x03);
+    CHECK(cleared);
+    MasterStatus s = core.status();
+    CHECK(s.table_edit.finished && s.table_edit.ok && !s.table_edit.interrupted);
+    core.close();
+  }
+}
+
 int main() {
+  test_a_removal_saves_then_erases();
+  test_an_interrupted_removal_is_finished();
   test_a_table_add_needs_the_setting();
   test_a_dry_run_sends_no_write();
   test_a_table_add_writes_once_and_holds_the_window();

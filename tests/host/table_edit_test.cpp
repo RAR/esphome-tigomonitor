@@ -1,6 +1,7 @@
 // Host test for table_edit.h: an optimizer's label read as its MAC, the
-// send gate's one shape of table write, and adding one optimizer to the
-// TAP's table as the CCA did on the bench (2026-11-06), against a fake TAP.
+// send gate's shapes of table write and erase, and adding and removing an
+// optimizer in the TAP's table as the CCA did on the bench (2026-11-06,
+// 2026-11-09), against a fake TAP.
 //
 // MACs are made up, with the 04C05B0000 prefix, but for taptap's published
 // example (docs/protocol.md, "Barcodes").
@@ -71,10 +72,15 @@ static void test_the_gate() {
   CHECK(classify_request(CMD_TUNNEL, tunnel_request(0x29, 1, one)) == Allow::table_write);
   CHECK(!may_send(CMD_TUNNEL, tunnel_request(0x29, 1, one), true, true, true, true));
   CHECK(may_send(CMD_TUNNEL, tunnel_request(0x29, 1, one), false, false, false, false, true));
-  // One record a write, as the CCA's add: two are refused until a removal needs them.
-  CHECK(!is_set_table_args(set_table({record("04C05B0000001234", 0x8002), record("04C05B0000001235", 0x8003)})));
+  // Up to ten a write, joined ones (bit 15 clear) among them, as the CCA
+  // wrote a table back.
+  std::vector<Bytes> ten;
+  for (int i = 0; i < 10; i++) ten.push_back(record("04C05B0000001234", static_cast<uint16_t>((i % 2 ? 0x8002 : 0x0002) + i)));
+  CHECK(is_set_table_args(set_table(ten)));
+  ten.push_back(record("04C05B0000001235", 0x000C));
+  CHECK(!is_set_table_args(set_table(ten)));
   CHECK(!is_set_table_args(set_table({})));
-  CHECK(!is_set_table_args(set_table({record("04C05B0000001234", 0x0002)})));  // bit 15 clear: joined at once
+  CHECK(is_set_table_args(set_table({record("04C05B0000001234", 0x0002)})));
   CHECK(!is_set_table_args(set_table({record("04C05B0000001234", 0x8001)})));  // the TAP's own id
   CHECK(!is_set_table_args(set_table({record("04C05B0000001234", 0x8400)})));  // 1024
   CHECK(!is_set_table_args(set_table({record("04C05B0000001234", 0xC002)})));
@@ -87,8 +93,12 @@ static void test_the_gate() {
   // Any other 0x29 is never sent, whatever the settings.
   CHECK(classify_request(CMD_TUNNEL, tunnel_request(0x29, 1, short_one)) == Allow::never);
   CHECK(!may_send(CMD_TUNNEL, tunnel_request(0x29, 1, short_one), true, true, true, true, true));
-  // The erase stays never.
-  CHECK(!may_send(CMD_TUNNEL, tunnel_request(SUB_ERASE_FLASH, 1, {0xBA, 0xBE}), true, true, true, true, true));
+  // The erase: BA BE only, and only as a table write.
+  CHECK(classify_request(CMD_TUNNEL, tunnel_request(SUB_ERASE_FLASH, 1, {0xBA, 0xBE})) == Allow::table_write);
+  CHECK(!may_send(CMD_TUNNEL, tunnel_request(SUB_ERASE_FLASH, 1, {0xBA, 0xBE}), true, true, true, true, false));
+  CHECK(may_send(CMD_TUNNEL, tunnel_request(SUB_ERASE_FLASH, 1, {0xBA, 0xBE}), false, false, false, false, true));
+  for (Bytes other : {Bytes{}, Bytes{0xBA}, Bytes{0xBA, 0xBF}, Bytes{0xBA, 0xBE, 0x00}})
+    CHECK(classify_request(CMD_TUNNEL, tunnel_request(SUB_ERASE_FLASH, 1, other)) == Allow::never);
 }
 
 // A TAP with a table, answering pages of up to 12 from the id asked for, as
@@ -96,6 +106,12 @@ static void test_the_gate() {
 struct FakeTap {
   std::vector<std::pair<Bytes, uint16_t>> slots;  // MAC, TUID as read (0x8000: not joined)
   int ack = 0;
+  int ack_on_write = 1;  // the write that gets ack (1: every one)
+  int erase_ack = 0;
+  bool erase_takes = true;
+  bool answer_erase = true;
+  int erases = 0;
+  std::vector<Bytes> all_writes;
   bool answer_write = true;
   bool answer_pages = true;
   int writes = 0;
@@ -132,15 +148,24 @@ struct FakeTap {
       }
       return true;
     }
+    if (sub == SUB_ERASE_FLASH) {
+      erases++;
+      if (erase_ack == 0 && erase_takes) slots.clear();
+      out.payload.push_back(static_cast<uint8_t>(erase_ack));
+      return answer_erase;
+    }
     if (sub == 0x29) {
       writes++;
       last_write = args;
-      if (ack == 0)
+      all_writes.push_back(args);
+      int this_ack = writes >= ack_on_write ? ack : 0;
+      out.payload.push_back(static_cast<uint8_t>(this_ack));
+      if (this_ack) return answer_write;
+      if (true)
         for (size_t i = 0; i < args[0]; i++) {
           Bytes mac(args.begin() + 1 + 10 * i, args.begin() + 9 + 10 * i);
           slots.push_back({mac, static_cast<uint16_t>(args[9 + 10 * i] << 8 | args[10 + 10 * i])});
         }
-      out.payload.push_back(static_cast<uint8_t>(ack));
       return answer_write;  // false: taken, but the reply lost
     }
     return false;
@@ -153,10 +178,11 @@ struct FakeTap {
 
 // Runs the job against the TAP until it has nothing to send, advancing the
 // clock a second a request. Returns how many requests went out.
-static int run(TableAdd &job, FakeTap &tap, uint32_t &now, int limit = 400) {
+static int run(TableJob &job, FakeTap &tap, uint32_t &now, int limit = 400, bool save_ok = true) {
   uint8_t seq = 0;
   int sent = 0;
   for (int i = 0; i < limit && !job.finished(); i++) {
+    if (job.wants_save()) job.saved(save_ok);
     Request r = job.due(now, seq);
     if (!r.cmd) {
       now += 1000;
@@ -343,7 +369,10 @@ static void test_dry_run() {
   CHECK(job.finished() && job.ok());
   CHECK(tap.writes == 0);
   CHECK(job.dry_frames().size() == 1);
-  CHECK(job.dry_frames()[0] == set_table({record("04C05B0000001234", 0x8005)}));
+  Bytes frame = {0x29};
+  Bytes args = set_table({record("04C05B0000001234", 0x8005)});
+  frame.insert(frame.end(), args.begin(), args.end());
+  CHECK(job.dry_frames()[0] == frame);
   CHECK(job.message().find("dry run") != std::string::npos);
 }
 
@@ -369,7 +398,218 @@ static void test_join_timeout() {
   CHECK(job.message().find("not joined") != std::string::npos);
 }
 
+// ---- removal ----
+
+static std::vector<TableRecord> records_of(const FakeTap &tap) {
+  std::vector<TableRecord> out;
+  for (const auto &s : tap.slots) out.push_back({s.first, s.second});
+  std::sort(out.begin(), out.end(), [](const TableRecord &a, const TableRecord &b) { return a.id() < b.id(); });
+  return out;
+}
+
+// The bench removal: erase, then the others back exactly as read, joined
+// ones with bit 15 clear, in id order; nothing rejoins.
+static void test_remove_erases_and_writes_back_the_rest() {
+  FakeTap tap = table_of(5);
+  tap.slots[3].second |= 0x8000;  // one not joined yet keeps its bit
+  std::swap(tap.slots[0], tap.slots[4]);  // slots out of id order
+  std::vector<TableRecord> want = records_of(tap);
+  Bytes gone = want[2].mac;
+  want.erase(want.begin() + 2);
+  uint32_t now = 0;
+  TableRemove job(gone, false);
+  CHECK(!job.wants_window());
+  run(job, tap, now);
+  CHECK(job.finished() && job.ok());
+  CHECK(!job.keep_saved());
+  CHECK(job.id() == 4);
+  CHECK(tap.erases == 1);
+  CHECK(tap.writes == 1);
+  Bytes expect = {4};
+  for (const auto &r : want) {
+    expect.insert(expect.end(), r.mac.begin(), r.mac.end());
+    expect.push_back(static_cast<uint8_t>(r.tuid >> 8));
+    expect.push_back(static_cast<uint8_t>(r.tuid));
+  }
+  CHECK(tap.last_write == expect);
+  std::vector<TableRecord> now_held = records_of(tap);
+  CHECK(now_held.size() == 4);
+  for (size_t i = 0; i < want.size() && i < now_held.size(); i++) CHECK(now_held[i].tuid == want[i].tuid);
+  CHECK(job.message() == "removed 0004; the other 4 written back as they were");
+}
+
+// The write back waits the CCA's holdoff after the empty read, and no longer.
+static void test_remove_waits_the_holdoff() {
+  FakeTap tap = table_of(3);
+  uint32_t now = 0;
+  TableRemove job(tap.slots[0].first, false);
+  uint8_t seq = 0;
+  uint32_t empty_at = 0, written_at = 0;
+  for (int i = 0; i < 400 && !job.finished(); i++, now += 50) {
+    if (job.wants_save()) job.saved(true);
+    Request r = job.due(now, seq);
+    if (!r.cmd) continue;
+    Frame reply;
+    bool ok = tap.reply(r, reply);
+    if (r.payload[3] == 0x29 && !written_at) written_at = now;
+    job.on_reply(r, ok, reply, now);
+    if (job.step() == TableRemove::Step::write && !empty_at) empty_at = now;
+  }
+  CHECK(job.ok());
+  CHECK(written_at - empty_at >= TableRemove::REWRITE_HOLDOFF_MS);
+  CHECK(written_at - empty_at <= TableRemove::REWRITE_HOLDOFF_MS + 50);
+}
+
+// More than ten stay: written ten at a time.
+static void test_remove_writes_ten_at_a_time() {
+  FakeTap tap = table_of(25);
+  Bytes gone = tap.slots[0].first;
+  uint32_t now = 0;
+  TableRemove job(gone, false);
+  run(job, tap, now);
+  CHECK(job.ok());
+  CHECK(tap.writes == 3);
+  CHECK(tap.all_writes.size() == 3 && tap.all_writes[0][0] == 10 && tap.all_writes[1][0] == 10 && tap.all_writes[2][0] == 4);
+  CHECK(tap.slots.size() == 24);
+}
+
+// Not listed: nothing erased. The only one: erased, nothing written.
+static void test_remove_not_listed_or_the_only_one() {
+  FakeTap tap = table_of(3);
+  uint32_t now = 0;
+  TableRemove absent(hex("04C05B0000001234"), false);
+  run(absent, tap, now);
+  CHECK(absent.ok() && tap.erases == 0 && tap.writes == 0);
+  CHECK(absent.message() == "not in the table: nothing to remove");
+  FakeTap one = table_of(1);
+  TableRemove only(one.slots[0].first, false);
+  run(only, one, now);
+  CHECK(only.ok() && one.erases == 1 && one.writes == 0 && one.slots.empty());
+}
+
+// The list must be saved before the erase; if it can't be, nothing is erased.
+static void test_remove_saves_before_erasing() {
+  FakeTap tap = table_of(3);
+  uint32_t now = 0;
+  TableRemove job(tap.slots[1].first, false);
+  uint8_t seq = 0;
+  bool asked = false;
+  for (int i = 0; i < 20 && !job.finished(); i++) {
+    if (job.wants_save()) {
+      asked = true;
+      CHECK(tap.erases == 0);
+      CHECK(job.survivors().size() == 2);
+      job.saved(false);
+    }
+    Request r = job.due(now, seq);
+    if (r.cmd) {
+      Frame reply;
+      bool ok = tap.reply(r, reply);
+      job.on_reply(r, ok, reply, now);
+    }
+    now += 1000;
+  }
+  CHECK(asked);
+  CHECK(job.finished() && !job.ok() && !job.keep_saved());
+  CHECK(tap.erases == 0 && tap.slots.size() == 3);
+}
+
+// The TAP refuses the erase, or doesn't answer and it didn't take: stopped,
+// the table as it was, nothing to resume. No answer but it took: carries on.
+static void test_remove_erase_outcomes() {
+  {
+    FakeTap tap = table_of(3);
+    tap.erase_ack = 1;
+    uint32_t now = 0;
+    TableRemove job(tap.slots[1].first, false);
+    run(job, tap, now);
+    CHECK(job.finished() && !job.ok() && !job.keep_saved() && job.ack() == 1);
+    CHECK(tap.writes == 0 && tap.slots.size() == 3);
+  }
+  {
+    FakeTap tap = table_of(3);
+    tap.answer_erase = false;
+    tap.erase_takes = false;
+    uint32_t now = 0;
+    TableRemove job(tap.slots[1].first, false);
+    run(job, tap, now);
+    CHECK(job.finished() && !job.ok() && !job.keep_saved());
+    CHECK(job.message().find("didn't take") != std::string::npos);
+    CHECK(tap.erases == 1 && tap.writes == 0);
+  }
+  {
+    FakeTap tap = table_of(3);
+    tap.answer_erase = false;
+    uint32_t now = 0;
+    TableRemove job(tap.slots[1].first, false);
+    run(job, tap, now);
+    CHECK(job.ok() && tap.erases == 1 && tap.slots.size() == 2);
+  }
+}
+
+// A refused write back stops the job with the list kept for a resume; the
+// resume, given that list, erases and writes it all.
+static void test_remove_resumes_after_a_stop() {
+  FakeTap tap = table_of(25);
+  tap.ack = 3;
+  tap.ack_on_write = 2;  // the second batch fails to commit
+  Bytes gone = tap.slots[0].first;
+  uint32_t now = 0;
+  TableRemove job(gone, false);
+  run(job, tap, now);
+  CHECK(job.finished() && !job.ok() && job.keep_saved());
+  CHECK(tap.slots.size() == 10);
+  std::vector<TableRecord> saved = job.survivors();
+  CHECK(saved.size() == 24);
+  tap.ack = 0;
+  TableRemove resume(gone, false, &saved);
+  CHECK(resume.resuming());
+  run(resume, tap, now);
+  CHECK(resume.ok() && !resume.keep_saved());
+  CHECK(tap.erases == 2);
+  CHECK(same_table(records_of(tap), saved));
+  // A resume that finds the table already right sends nothing.
+  int erases = tap.erases, writes = tap.writes;
+  TableRemove again(gone, false, &saved);
+  run(again, tap, now);
+  CHECK(again.ok() && tap.erases == erases && tap.writes == writes);
+}
+
+// A read back short of what stays: stopped, the list kept.
+static void test_remove_bad_read_back() {
+  FakeTap tap = table_of(4);
+  tap.answer_write = false;
+  tap.ack = 3;  // not taken, and the reply lost: the read back decides
+  uint32_t now = 0;
+  TableRemove job(tap.slots[0].first, false);
+  run(job, tap, now);
+  CHECK(job.finished() && !job.ok() && job.keep_saved());
+  CHECK(tap.writes == 1);
+}
+
+// A dry run reads, then lists the erase and the write backs, sending neither.
+static void test_remove_dry_run() {
+  FakeTap tap = table_of(12);
+  uint32_t now = 0;
+  TableRemove job(tap.slots[0].first, true);
+  run(job, tap, now);
+  CHECK(job.ok() && tap.erases == 0 && tap.writes == 0);
+  CHECK(job.dry_frames().size() == 3);
+  CHECK(job.dry_frames()[0] == (Bytes{0x2B, 0xBA, 0xBE}));
+  CHECK(job.dry_frames()[1][0] == 0x29 && job.dry_frames()[1][1] == 10);
+  CHECK(job.dry_frames()[2][0] == 0x29 && job.dry_frames()[2][1] == 1);
+}
+
 int main() {
+  test_remove_erases_and_writes_back_the_rest();
+  test_remove_writes_ten_at_a_time();
+  test_remove_waits_the_holdoff();
+  test_remove_not_listed_or_the_only_one();
+  test_remove_saves_before_erasing();
+  test_remove_erase_outcomes();
+  test_remove_resumes_after_a_stop();
+  test_remove_bad_read_back();
+  test_remove_dry_run();
   test_labels();
   test_the_gate();
   test_add_writes_one_record_and_waits_for_the_join();

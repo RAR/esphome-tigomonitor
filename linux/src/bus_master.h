@@ -77,6 +77,13 @@ class BusMaster {
   }
   void set_read_tap_config(bool on) { core_.set_read_tap_config(on); }
   void set_table_writes(bool on) { core_.set_table_writes(on); }
+  void set_table_saved(esphome::tigo_master::MasterCore::TableSaved saved, const esphome::tigo_monitor::master::Bytes &mac,
+                       const std::vector<esphome::tigo_monitor::master::TableRecord> *resume) {
+    core_.set_table_saved(std::move(saved), mac, resume);
+  }
+  bool request_table_remove(const esphome::tigo_monitor::master::Bytes &mac, bool dry_run, std::string &why) {
+    return core_.request_table_remove(mac, dry_run, why);
+  }
   bool request_table_add(const esphome::tigo_monitor::master::Bytes &mac, uint16_t id, bool dry_run, std::string &why) {
     return core_.request_table_add(mac, id, dry_run, why);
   }

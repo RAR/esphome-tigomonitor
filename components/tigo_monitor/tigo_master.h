@@ -99,7 +99,8 @@ static const uint16_t CMD_TUNNEL_REPLY = 0x0B10;
 static const uint16_t CMD_NOT_TAKEN = 0x0146;
 static const uint8_t SUB_DISCOVERY_START = 0x2D;
 static const uint8_t SUB_DISCOVERY_STATUS = 0x2E;
-// EraseFlash: wipes the TAP's optimizer table. Never sent. The CCA's own UI
+// EraseFlash: wipes the TAP's optimizer table. Sent only by a removal the
+// owner started (table_edit.h), BA BE, as the CCA sends it. The CCA's own UI
 // names it (Mesh History, 2026-11-06); we first read it as "Stop Discovery",
 // and before that 2D and 2B as a "run lease" that kept the optimizers
 // producing, which the roof showed it doesn't.
@@ -1327,24 +1328,22 @@ class Discovery {
 // replies ask for it (Queries), sent only with that setting on.
 // pv_off: the PV switch's 00, sent only while the owner holds PV off (or
 // in a bring-up, as the CCA's after its reboot).
-// table_write: the CCA's table write (sub 0x29) in the one shape it sent,
-// sent only by an add the owner started, with master_table_writes on.
+// table_write: the CCA's table write (sub 0x29) and erase (sub 0x2B) in the
+// shapes it sent, sent only by an add or removal the owner started
+// (table_edit.h), with master_table_writes on.
 enum class Allow { yes, bench_only, startup_only, optimizer_write, pv_off, table_write, never };
 
-// Sub 0x29's args as the CCA sent them adding an optimizer on the bench
-// (2026-11-06): a count of 1, the MAC, the TUID. The TAP takes up to 10
-// records a write, but only a removal's rewrite needs more than one, and
-// that isn't built. The TUID has bit 15 set, which lists the optimizer
-// without marking it joined (the TAP clears the bit when it joins), and is
-// a real id, 2..1023. A record with bit 15 clear would be marked joined at
-// once, which the CCA never does.
-static const uint8_t SET_TABLE_MAX_RECORDS = 1;
+// Sub 0x29's args as the CCA sent them on the bench (2026-11-06, 11-09): a
+// count, then count x (MAC, TUID), 1 to 10 (the TAP's limit). Each TUID is a
+// real id, 2..1023, with bit 15 set for a new record (listed, not joined;
+// the TAP clears it when the optimizer joins) or clear for one written back
+// as it was, joined, as the CCA rewrites a table.
+static const uint8_t SET_TABLE_MAX_RECORDS = 10;
 inline bool is_set_table_args(const Bytes &args) {
   if (args.empty() || args[0] < 1 || args[0] > SET_TABLE_MAX_RECORDS || args.size() != 1 + 10u * args[0]) return false;
   for (size_t i = 0; i < args[0]; i++) {
-    uint16_t tuid = static_cast<uint16_t>(args[9 + 10 * i] << 8 | args[10 + 10 * i]);
-    uint16_t id = tuid & 0x7FFF;
-    if (!(tuid & 0x8000) || id < 2 || id > 1023) return false;
+    uint16_t id = static_cast<uint16_t>(args[9 + 10 * i] << 8 | args[10 + 10 * i]) & 0x7FFF;
+    if (id < 2 || id > 1023) return false;
   }
   return true;
 }
@@ -1391,7 +1390,8 @@ inline Allow classify_request(uint16_t cmd, const Bytes &payload) {
   switch (payload[3]) {
     case 0x29:  // SetTable, the optimizer table write
       return is_set_table_args(args) ? Allow::table_write : Allow::never;
-    case SUB_ERASE_FLASH:
+    case SUB_ERASE_FLASH:  // the whole table, exactly as the CCA sent it
+      return args == Bytes{0xBA, 0xBE} ? Allow::table_write : Allow::never;
     case 0x1D:  // ResetNode
     case 0x13:  // PeriodicCfg Write
     case 0xE1:  // SetKnownNetworks
