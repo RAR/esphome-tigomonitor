@@ -1,8 +1,9 @@
 # .github/workflows/pi.yml
 # The Raspberry Pi build (linux/). Every change runs the host tests and the
 # end-to-end replay; a manual run or a version tag also builds the .deb and
-# the container image for arm64 (Pi) and amd64 (x86), each on a native runner,
-# no QEMU. A tag pushes the image to ghcr.io/rar/tigomonitord.
+# the container image, each on a native runner, no QEMU: a tag for arm64 (Pi)
+# and amd64 (x86), a manual run for arm64 unless asked for both. A tag pushes
+# the image to ghcr.io/rar/tigomonitord.
 # (linux/image/build-image.sh can turn the .deb into an SD card image, but we
 # only ship the .deb for now.)
 name: Pi build
@@ -32,6 +33,18 @@ on:
       - 'tests/host/**'
       - '.github/workflows/pi.yml'
   workflow_dispatch:
+    inputs:
+      arch:
+        description: Architectures to build the .deb and image for
+        type: choice
+        options: [arm64, both]
+        default: arm64
+# A newer run of the same kind on the same branch cancels the older one: its
+# result no longer matters. Manual builds have their own group, so a merge's
+# test run can't cancel a build waiting to be installed. Tags never cancel.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'workflow_dispatch' && 'build' || 'test' }}-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
 permissions:
   contents: read
 jobs:
@@ -78,11 +91,8 @@ jobs:
     needs: test
     strategy:
       matrix:
-        include:
-          - arch: arm64
-            runner: ubuntu-24.04-arm
-          - arch: amd64
-            runner: ubuntu-latest
+        # Both for a tag, or a manual run that asks; else arm64 alone.
+        include: ${{ fromJSON(github.event_name == 'workflow_dispatch' && inputs.arch != 'both' && '[{"arch":"arm64","runner":"ubuntu-24.04-arm"}]' || '[{"arch":"arm64","runner":"ubuntu-24.04-arm"},{"arch":"amd64","runner":"ubuntu-latest"}]') }}
     runs-on: ${{ matrix.runner }}
     permissions:
       contents: write  # attaching the .deb to a tag's release
@@ -125,11 +135,8 @@ jobs:
     needs: test
     strategy:
       matrix:
-        include:
-          - arch: arm64
-            runner: ubuntu-24.04-arm
-          - arch: amd64
-            runner: ubuntu-latest
+        # Both for a tag, or a manual run that asks; else arm64 alone.
+        include: ${{ fromJSON(github.event_name == 'workflow_dispatch' && inputs.arch != 'both' && '[{"arch":"arm64","runner":"ubuntu-24.04-arm"}]' || '[{"arch":"arm64","runner":"ubuntu-24.04-arm"},{"arch":"amd64","runner":"ubuntu-latest"}]') }}
     runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
