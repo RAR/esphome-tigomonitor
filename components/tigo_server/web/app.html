@@ -6500,6 +6500,7 @@
     const order = { poor: 0, silent: 1, fair: 2, good: 3 };
     const keep = meshSelected && nodes.find(n => n.addr === meshSelected);
     meshSide(keep || [...nodes].sort((a, b) => order[meshTier(a)] - order[meshTier(b)])[0]);
+    meshFit();
   }
 
   // Each string on a row, its panels in label order; the row's median loss
@@ -6555,7 +6556,6 @@
     const order = { poor: 0, silent: 1, fair: 2, good: 3 };
     const keep = meshSelected && nodes.find(n => n.addr === meshSelected);
     meshSide(keep || [...nodes].sort((a, b) => order[meshTier(a)] - order[meshTier(b)])[0]);
-    meshFit();
   }
 
   // On a wide screen the map's box runs down to the window's foot, leaving
@@ -6574,6 +6574,16 @@
     stage.style.height = Math.max(380, window.innerHeight - top - below - 12) + 'px';
   }
   window.addEventListener('resize', () => { if (meshData) meshFit(); });
+  // And when the tab itself changes size: drawn while the page was still
+  // hidden, it has no size to fit until it's shown, and a window resize may
+  // never come.
+  if (window.ResizeObserver) {
+    let lastWidth = 0;
+    new ResizeObserver(entries => {
+      const w = Math.round(entries[0].contentRect.width);
+      if (w !== lastWidth) { lastWidth = w; if (meshData) meshFit(); }
+    }).observe(document.getElementById('topology-mesh'));
+  }
 
   // Each string's share of reports lost, a column a day: how it fares over
   // weeks, where the map's figures start again each midnight.

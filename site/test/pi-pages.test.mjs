@@ -615,6 +615,20 @@ test('mesh: relays build outward without lines crossing or running through a dot
   await ctx.close();
 });
 
+// Fitted as it first opens, not only once the window is resized: from the
+// menu, and from a link straight to Topology.
+test('mesh: the radio map is fitted to the window as it opens', async () => {
+  for (const hash of ['', '#topology']) {
+    const { page, ctx, errors } = hash ? await open({ hash }) : await openMesh();
+    await page.waitForSelector('#mesh-svg .mesh-node');
+    await page.waitForTimeout(300);
+    const legend = await page.$eval('#mesh-legend', (e) => e.getBoundingClientRect().bottom);
+    assert.ok(legend <= 900 && legend >= 860, `legend ends at ${legend} in a 900 px window, opened ${hash || 'from the menu'}`);
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+});
+
 // The map fills the window: its box runs down to leave the legend just in
 // view, on a short window and a tall one.
 test('mesh: the radio map fills the height of the window, legend in view', async () => {
