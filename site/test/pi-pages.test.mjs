@@ -335,7 +335,9 @@ test('mesh: the Pi opens Topology on Mesh, first of the tabs, until Layout is pi
 test('mesh: one node per optimizer around its TAP', async () => {
   const { page, ctx, errors } = await openMesh();
   assert.equal(await page.locator('#mesh-svg .mesh-node').count(), fixtureNodes.length);
-  assert.deepEqual(await page.locator('#mesh-svg .mesh-tap').allTextContents(), ['TAP 1201']);
+  // The TAP by the name it was given on the Devices page, its address beneath.
+  assert.deepEqual(await page.locator('#mesh-svg .mesh-tap text.mesh-tap-name').allTextContents(), ['Garage']);
+  assert.deepEqual(await page.locator('#mesh-svg .mesh-tap text.mesh-tap-addr').allTextContents(), ['TAP 1201']);
   assert.deepEqual(errors, []);
   await ctx.close();
 });
@@ -397,7 +399,7 @@ test('mesh: an optimizer through a relay sits just beyond it, away from the TAP'
   const at = async (addr) => { const d = meshNode(page, 'N' + addr).locator('.mesh-dot');
     return [+await d.getAttribute('cx'), +await d.getAttribute('cy')]; };
   const r = await page.locator('#mesh-svg .mesh-tap rect').first();
-  const hub = [+await r.getAttribute('x') + 38, +await r.getAttribute('y') + 16];
+  const hub = [+await r.getAttribute('x') + +await r.getAttribute('width') / 2, +await r.getAttribute('y') + +await r.getAttribute('height') / 2];
   const polar = ([x, y]) => [Math.hypot(x - hub[0], y - hub[1]), Math.atan2(y - hub[1], x - hub[0])];
   for (const [child, parent] of [['0010', '0005'], ['0011', '0005'], ['0012', '0010']]) {
     const c = await at(child), p = await at(parent), [rc, ac] = polar(c), [rp, ap] = polar(p);
@@ -549,6 +551,63 @@ test('mesh: remembered as the last tab, it is not fetched until Topology opens',
   await page.click('#nav button[data-view="topology"]');
   await page.waitForSelector('#topology-mesh .mesh-node', { state: 'attached' });
   assert.ok(api.meshReads >= 1);
+  await ctx.close();
+});
+
+test('mesh: a TAP with no name is shown by its address, and named in the side panel', async () => {
+  const { page, ctx, errors } = await openMesh({ mesh: { ...piRoutes['/api/mesh'], taps: [{ id: '1201' }] } });
+  assert.deepEqual(await page.locator('#mesh-svg .mesh-tap text').allTextContents(), ['TAP 1201']);
+  await ctx.close();
+  const named = await openMesh();
+  await meshNode(named.page, fixtureNodes[0].label).hover();
+  assert.match(await named.page.textContent('#mesh-side'), /Reports through\s*Garage \(TAP 1201\)/);
+  assert.deepEqual([...errors, ...named.errors], []);
+  await named.ctx.close();
+});
+
+// The roof's mesh after a TAP restart, 2026-11-09: 17 relays, some in chains
+// of three, the rest straight to the TAP or through one not named yet. Each
+// relay's optimizers fan out in its own slice of the circle, so no two lines
+// cross and none runs through another optimizer.
+test('mesh: relays build outward without lines crossing or running through a dot', async () => {
+  const relays = { A1: 'A10', A2: 'A9', A7: 'A2', A8: 'C3', B1: 'C8', B2: 'B8', B5: 'A10', B6: 'B8', B7: 'B1', B9: 'B8',
+                   C10: 'C5', C4: 'D6', C7: 'C9', C8: 'C6', D6: 'D9', D7: 'D2', D8: 'D2' };
+  const unknown = { B10: '000E', B4: '0039', C2: '002F', D3: '0098' };
+  const labels = [], addr = {};
+  'ABCD'.split('').forEach((s, k) => { for (let i = 1; i <= 10; i++) { const l = s + i; labels.push(l); addr[l] = (k * 10 + i + 1).toString(16).toUpperCase().padStart(4, '0'); } });
+  const nodes = labels.map((l, i) => ({ addr: addr[l], label: l, string: 'String ' + l[0], tap: '1201',
+    parent: relays[l] ? '00' + (0x40 + i).toString(16).toUpperCase() : unknown[l] || '0001', relay: relays[l] ? addr[relays[l]] : null,
+    rssi: 80 + (i * 37) % 130, rssi_24h: Array(288).fill(null), reports_today: 100, lost_today: 0, last_heard_s: 2, last_join_unix: 1 }));
+  const { page, ctx, errors } = await openMesh({ mesh: { loss_method: 'slot', parent_confirmed: true, taps: [{ id: '1201' }], nodes } });
+  const segs = await page.$$eval('#mesh-svg .mesh-link', (ls) => ls.map((l) => [l.dataset.addr,
+    l.x1.baseVal.value, l.y1.baseVal.value, l.x2.baseVal.value, l.y2.baseVal.value]));
+  const dots = await page.$$eval('#mesh-svg .mesh-node', (gs) => gs.map((g) => { const c = g.querySelector('.mesh-dot');
+    return [g.dataset.addr, c.cx.baseVal.value, c.cy.baseVal.value]; }));
+  assert.equal(segs.length, 40);
+  const cross = (a, b) => {
+    const o = (p, q, r) => Math.sign((q[0] - p[0]) * (r[1] - p[1]) - (q[1] - p[1]) * (r[0] - p[0]));
+    const [p1, p2, p3, p4] = [[a[1], a[2]], [a[3], a[4]], [b[1], b[2]], [b[3], b[4]]];
+    const same = (p, q) => Math.hypot(p[0] - q[0], p[1] - q[1]) < 0.5;
+    if ([p3, p4].some((p) => same(p, p1) || same(p, p2))) return false;  // they meet at a dot
+    return o(p1, p2, p3) * o(p1, p2, p4) < 0 && o(p3, p4, p1) * o(p3, p4, p2) < 0;
+  };
+  const crossings = [];
+  for (let i = 0; i < segs.length; i++) for (let j = i + 1; j < segs.length; j++) if (cross(segs[i], segs[j])) crossings.push(segs[i][0] + '×' + segs[j][0]);
+  assert.deepEqual(crossings, []);
+  // A line comes no nearer than 9 px to a dot it doesn't end at.
+  const near = [];
+  for (const s of segs) for (const [a, x, y] of dots) {
+    const [, x1, y1, x2, y2] = s, dx = x2 - x1, dy = y2 - y1;
+    if (Math.hypot(x - x1, y - y1) < 0.5 || Math.hypot(x - x2, y - y2) < 0.5) continue;
+    const t = Math.max(0, Math.min(1, ((x - x1) * dx + (y - y1) * dy) / (dx * dx + dy * dy)));
+    if (Math.hypot(x - x1 - t * dx, y - y1 - t * dy) < 9) near.push(s[0] + '→' + a);
+  }
+  assert.deepEqual(near, []);
+  let closest = Infinity;
+  for (let i = 0; i < dots.length; i++) for (let j = i + 1; j < dots.length; j++)
+    closest = Math.min(closest, Math.hypot(dots[i][1] - dots[j][1], dots[i][2] - dots[j][2]));
+  assert.ok(closest >= 16, `two dots ${closest.toFixed(1)} px apart`);
+  assert.deepEqual(errors, []);
   await ctx.close();
 });
 

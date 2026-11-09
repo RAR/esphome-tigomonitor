@@ -263,6 +263,13 @@ struct TapRadio {
   int channel = 0, slt = 0, slm = 0;
 };
 
+// A TAP's ID: the MAC it gives in answer to "where are you" (GET_MAC), as
+// 16 hex characters, the same form as an optimizer's barcode here.
+struct TapId {
+  uint16_t tap = 0;
+  std::string mac;
+};
+
 // req and rep: a tunnel request and the reply paired with it. Only a read
 // (args 00 00 or 00 01) counts: a write (01 00 + the block) is echoed back
 // with the same block, and isn't the TAP's own setting until it's read.
@@ -510,6 +517,11 @@ class BusWatch {
   }
   uint64_t polls() const { return polls_; }
   // The TAP radio settings read since the last call.
+  std::vector<TapId> take_tap_ids() {
+    std::vector<TapId> out;
+    out.swap(tap_ids_);
+    return out;
+  }
   std::vector<TapRadio> take_radios() {
     std::vector<TapRadio> out;
     out.swap(radios_);
@@ -621,6 +633,14 @@ class BusWatch {
       radios_.push_back(radio);
       if (radios_.size() > 16) radios_.erase(radios_.begin());  // nobody taking them
     }
+    // Only a TAP answering at its own address: one at the factory address
+    // is about to be moved, and isn't any TAP's yet.
+    uint16_t from = rep.dest & 0x7FFF;
+    if ((rep.cmd == 0x0039 || rep.cmd == 0x003B) && rep.payload.size() >= 10 &&
+        (rep.payload[8] << 8 | rep.payload[9]) == from && from != FACTORY_ID_) {
+      tap_ids_.push_back({from, hex16(rep.payload.data(), 8)});
+      if (tap_ids_.size() > 16) tap_ids_.erase(tap_ids_.begin());
+    }
     e.rt_ms = static_cast<int>(now - e.unix_ms);
     e.reply_hex = bus_hex(rep);
     std::string asked = e.reconfig.empty() ? request_summary(req) : e.reconfig;
@@ -726,6 +746,8 @@ class BusWatch {
   std::string discovery_;
   std::vector<VersionSeen> versions_;
   std::vector<TapRadio> radios_;
+  std::vector<TapId> tap_ids_;
+  static const uint16_t FACTORY_ID_ = 0x1235;  // where a TAP answers before it's addressed
   std::vector<SmartSeen> smarts_;
 };
 

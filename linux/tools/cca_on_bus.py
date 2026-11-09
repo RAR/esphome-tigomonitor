@@ -8,8 +8,9 @@ read, a text query with its ack, and VERSION with its reply. With
 --reconfigure-after, S seconds in it also sends what the CCA's local UI sends
 to reconfigure a TAP: a GatewayCfg write (01 00 and a 36-byte block, all
 made-up zeros here) and SET_CHANNEL 20 00. With --config-read it starts with
-the bring-up's GatewayCfg read: channel 18, SLT 90, SLm 60, and a made-up PAN
-(12 34) and key (EE x 16). Then steady state again, until killed. Nothing
+the bring-up's "where are you" (GET_MAC, a made-up MAC 04C05B0000001234) and
+its GatewayCfg read: channel 18, SLT 90, SLm 60, and a made-up PAN (12 34)
+and key (EE x 16). Then steady state again, until killed. Nothing
 here is a real network's config.
 """
 import argparse
@@ -48,6 +49,8 @@ def main():
         time.sleep(1)  # let the monitor open the port
         block = (bytes([0x00, 0x12, 0x12, 0x34, 0x0C, 0x02, 0x02, 0x01, 0x00, 0xAA, 0xBB, 0xCC, 0x1C, 0x03, 0x5A])
                  + bytes([0xEE] * 16) + bytes([0x00, 0x00, 0x02, 0x00, 0x3C, 0x00]))
+        say([encode(TAP, 0x003A, b''),
+             encode(TAP | 0x8000, 0x003B, bytes.fromhex('04C05B0000001234') + bytes([TAP >> 8, TAP & 0xFF]))])
         say([encode(TAP, 0x0B0F, bytes([0, 0, 0, 0x0D, 0xF0, 0x00, 0x00])),
              encode(TAP | 0x8000, 0x0B10, bytes([0x00, 0x2A, 0x00, 0x0E, 0xF0]) + block)])
 

@@ -662,6 +662,14 @@
   .mesh-node.selected text { fill: var(--text); font-weight: 600; }
   .mesh-tap rect { fill: var(--bg-4); stroke: var(--accent-2); stroke-width: 1.5; }
   .mesh-tap text { fill: var(--text); font-size: 12px; font-weight: 600; }
+  .mesh-tap text.mesh-tap-addr { fill: var(--text-dim); font-size: 10px; font-weight: 500; }
+  td.tap-name { white-space: nowrap; }
+  td.tap-name .input { width: 12em; }
+  button.tap-rename { font: inherit; color: var(--text-dim); background: none; border: 1px solid transparent; border-radius: 6px;
+                      padding: 2px 6px; margin-left: 4px; cursor: pointer; }
+  button.tap-rename:hover, button.tap-rename:focus-visible { border-color: var(--border); color: var(--text); }
+  button.tap-rename:not(.add)::before { content: '✎'; }
+  button.tap-rename.add { margin-left: -6px; font-style: italic; }
   .mesh-bus { stroke: var(--accent-2); stroke-width: 2; stroke-dasharray: 1 5; stroke-linecap: round; }
   .mesh-legend { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: 10px; color: var(--text-dim); font-size: 12px; }
   .mesh-sw { display: inline-block; width: 18px; height: 3px; border-radius: 2px; vertical-align: middle; margin-right: 6px; }
@@ -1330,7 +1338,7 @@
         <div class="section-title devices-head">TAPs</div>
         <div class="table-wrap">
           <table class="nodes">
-            <thead><tr><th>Addr</th><th>Model</th><th>Firmware</th><th>Radio</th><th>Since</th><th>Last read</th></tr></thead>
+            <thead><tr><th>Name</th><th>Addr</th><th>ID</th><th>Model</th><th>Firmware</th><th>Radio</th><th>Since</th><th>Last read</th></tr></thead>
             <tbody></tbody>
           </table>
         </div>
@@ -3651,6 +3659,7 @@
   }
   function renderTaps() {
     const box = document.getElementById('devices-taps');
+    if (box.querySelector('td.tap-name input')) return;  // not while a name is being typed
     const v = nodesData.versions;
     box.style.display = v ? '' : 'none';
     if (!v) return;
@@ -3662,11 +3671,21 @@
       return r ? `<td title="SLm ${r.slm}, read ${when(r.heard_unix_ms)}">Channel ${r.channel} · admits above ${r.slt}</td>`
                : '<td title="Read from the TAP when a bus master brings it up">—</td>';
     };
+    // Its ID: the MAC it gave when a master asked where it was.
+    const id = addr => {
+      const m = (v.ids || []).find(x => x.tap === addr);
+      return m ? `<td class="mono tap-id" title="Its MAC, as it answered GET_MAC ${when(m.heard_unix_ms)}">${topoEscape(m.mac)}</td>`
+               : '<td class="tap-id" title="Read when a bus master brings the TAP up">—</td>';
+    };
+    // A name, kept on the Pi and shown on the mesh map too.
+    const name = t => `<td class="tap-name" data-tap="${topoEscape(t.addr)}">${t.name
+      ? `<span>${topoEscape(t.name)}</span><button type="button" class="tap-rename" aria-label="Rename TAP ${topoEscape(t.addr)}" title="Rename"></button>`
+      : `<button type="button" class="tap-rename add">Add a name</button>`}</td>`;
     box.querySelector('tbody').innerHTML = (v.taps || []).length ? v.taps.map(t => `<tr>
-        <td class="mono">${topoEscape(t.addr)}</td><td>${topoEscape(t.model)}</td>
+        ${name(t)}<td class="mono">${topoEscape(t.addr)}</td>${id(t.addr)}<td>${topoEscape(t.model)}</td>
         <td class="mono"${t.previous ? ` title="was ${topoEscape(t.previous)}"` : ''}><strong>${topoEscape(t.version)}</strong></td>
         ${radio(t.addr)}<td>${when(t.since_unix_ms)}</td><td>${when(t.last_unix_ms)}</td></tr>`).join('')
-      : `<tr><td colspan="6" style="color:var(--text-faint)">Not heard yet. The bus master asks the TAP once each time it starts, and the optimizers as it first hears each one.</td></tr>`;
+      : `<tr><td colspan="8" style="color:var(--text-faint)">Not heard yet. The bus master asks the TAP once each time it starts, and the optimizers as it first hears each one.</td></tr>`;
   }
 
   async function refreshNodes() {
@@ -3704,6 +3723,38 @@
       showToast('Not saved: ' + err.message, 'err');
     }
     await refreshNodes();
+  });
+
+  // Naming a TAP: the cell becomes a box; Enter saves (empty clears it),
+  // Escape or leaving it puts it back as it was.
+  document.getElementById('devices-taps').addEventListener('click', e => {
+    const b = e.target.closest('button.tap-rename');
+    if (!b) return;
+    const td = b.closest('td.tap-name'), tap = td.dataset.tap;
+    const t = ((nodesData.versions || {}).taps || []).find(x => x.addr === tap) || {};
+    td.innerHTML = `<input class="input compact" maxlength="32" aria-label="Name for TAP ${topoEscape(tap)}" placeholder="e.g. Garage">`;
+    const input = td.querySelector('input');
+    input.value = t.name || '';
+    input.focus();
+    let done = false;
+    const close = () => { if (done) return; done = true; td.innerHTML = ''; renderTaps(); };
+    input.addEventListener('blur', close);
+    input.addEventListener('keydown', async ev => {
+      if (ev.key === 'Escape') { ev.preventDefault(); close(); return; }
+      if (ev.key !== 'Enter') return;
+      ev.preventDefault();
+      done = true;
+      input.disabled = true;
+      try {
+        const r = await apiFetch('/api/taps/name', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ tap, name: input.value.trim() }) });
+        if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `refused (${r.status})`);
+      } catch (err) {
+        showToast('Not saved: ' + err.message, 'err');
+      }
+      td.innerHTML = '';
+      await refreshNodes();
+    });
   });
 
   document.getElementById('nodes-search').addEventListener('input', e => {
@@ -6215,6 +6266,11 @@
   // Where an optimizer joined the mesh, from its last NetDiag join: the TAP
   // (NWID 0001), another optimizer (the daemon matches the parent's NWID to
   // whoever holds it), or a relay we can't name yet.
+  // A TAP's name, if it was given one on the Devices page.
+  function meshTapName(id) {
+    const t = (meshData.taps || []).find(t => t.id === id);
+    return t && t.name ? t.name : '';
+  }
   function meshVia(n) {
     if (!n.parent) return { kind: 'none' };
     if (n.parent === '0001') return { kind: 'tap' };
@@ -6247,74 +6303,65 @@
     const tapIds = (meshData.taps || []).map(t => t.id);
     for (const n of nodes) if (n.tap && !tapIds.includes(n.tap)) tapIds.push(n.tap);
     if (!tapIds.length) tapIds.push('?');
-    // Each TAP gets room for a full ring; the viewBox fits whatever is drawn,
-    // so more TAPs widen the picture rather than shrinking the rings.
-    const rMin = 54, rMax = H / 2 - 34, spacing = 2 * rMax + 60;
+    // A tree per TAP, drawn outward: the optimizers straight on the TAP (or
+    // through a relay not named yet) around it, nearer as the signal is
+    // stronger, and each relay's optimizers fanned out beyond it. Every one
+    // gets a slice of the circle as wide as the optimizers behind it, and its
+    // own fan stays inside that slice, so no two lines cross and none runs
+    // through another dot. Address order, so the same data draws the same
+    // picture. A pair naming each other as relay goes on the TAP.
+    const pos = new Map(), polar = new Map();
+    const relayOf = n => { const v = meshVia(n); return v.kind === 'node' ? v.relay : null; };
+    const byAddr = (a, b) => a.addr.localeCompare(b.addr);
+    const kids = new Map(nodes.map(n => [n, []]));
+    const roots = [], seen = new Set();
+    const adopt = n => {
+      seen.add(n);
+      for (const k of nodes.filter(m => relayOf(m) === n && !seen.has(m)).sort(byAddr)) { kids.get(n).push(k); adopt(k); }
+    };
+    for (const n of [...nodes].sort(byAddr)) if (!relayOf(n)) { roots.push(n); adopt(n); }
+    for (const n of [...nodes].sort(byAddr)) if (!seen.has(n)) { roots.push(n); adopt(n); }
+    const size = n => 1 + kids.get(n).reduce((t, k) => t + size(k), 0);
+    const hubOf = n => n.tap && tapIds.includes(n.tap) ? n.tap : tapIds[0];
+    const rRoot = 84, rSpan = 96, rStep = 48;
+    const lay = (n, id, r, a0, a1) => {
+      const a = (a0 + a1) / 2;
+      polar.set(n, [r, a, id]);
+      const ks = kids.get(n);
+      if (!ks.length) return;
+      // The fan: the slice, or less, about 30 px a dot at its radius.
+      const rk = r + rStep, total = ks.reduce((t, k) => t + size(k), 0);
+      const width = Math.min(a1 - a0, total * 30 / rk);
+      let at = a - width / 2;
+      for (const k of ks) { const w = width * size(k) / total; lay(k, id, rk, at, at + w); at += w; }
+    };
+    for (const id of tapIds) {
+      const mine = roots.filter(n => hubOf(n) === id), all = mine.reduce((t, n) => t + size(n), 0);
+      let at = -Math.PI / 2;
+      mine.forEach((n, i) => {
+        const w = 2 * Math.PI * size(n) / all;
+        const weak = n.rssi == null ? 1 : 1 - Math.min(1, Math.max(0, (n.rssi - 60) / 170));
+        // Neighbours alternate in and out, so two thin slices side by side
+        // don't put their dots and labels together.
+        lay(n, id, meshTier(n) === 'silent' ? rRoot + rSpan + 24 : rRoot + weak * (rSpan - 30) + (i % 2) * 30, at, at + w);
+        at += w;
+      });
+    }
+    // Each TAP gets room for its whole tree; the viewBox fits whatever is
+    // drawn, so more TAPs widen the picture rather than shrinking the trees.
+    const reach = Math.max(rRoot + rSpan + 24, ...[...polar.values()].map(([r]) => r));
+    const spacing = 2 * reach + 60;
     const hub = {};
     tapIds.forEach((id, k) => { hub[id] = [spacing * (k + 0.5), H / 2]; });
-    // Each TAP's optimizers by golden angle, in address order so the same
-    // data draws the same picture; further out as the signal falls. One that
-    // joined through another optimizer is placed after, off its relay.
-    const pos = new Map(), polar = new Map(), golden = 137.508 * Math.PI / 180;
-    const hubOf = n => n.tap && hub[n.tap] ? n.tap : tapIds[0];
-    const relayOf = n => { const v = meshVia(n); return v.kind === 'node' ? v.relay : null; };
-    const place = (n, id, r, a) => {
-      polar.set(n, [r, a, id]);
-      pos.set(n, [hub[id][0] + r * Math.cos(a), hub[id][1] + r * Math.sin(a) * 0.92]);
-    };
-    const ringCount = {};
-    for (const id of tapIds) {
-      // Slots come from every optimizer on this TAP, so one moving off to its
-      // relay leaves the rest where they were.
-      const group = nodes.filter(n => hubOf(n) === id).sort((a, b) => a.addr.localeCompare(b.addr));
-      group.forEach((n, i) => {
-        if (relayOf(n)) return;
-        const weak = n.rssi == null ? 1 : 1 - Math.min(1, Math.max(0, (n.rssi - 60) / 170));
-        place(n, id, meshTier(n) === 'silent' ? rMax : rMin + weak * (rMax - rMin - 14) + (i % 3) * 7, i * golden);
-      });
-      ringCount[id] = group.length;
-    }
-    // Then each one through a relay: just beyond it, on the side away from
-    // the TAP, fanned out when a relay carries several, so its line is a short
-    // spoke rather than one crossing the map. Relays of relays follow in turn;
-    // ones whose relay is never placed (two naming each other) go on the ring.
-    let left = nodes.filter(relayOf).sort((a, b) => a.addr.localeCompare(b.addr));
-    while (left.length) {
-      const ready = left.filter(n => polar.has(relayOf(n)));
-      if (!ready.length) {
-        const n = left.shift(), id = hubOf(n);
-        place(n, id, rMax, ringCount[id]++ * golden);
-        continue;
-      }
-      for (const relay of new Set(ready.map(relayOf))) {
-        const kids = ready.filter(n => relayOf(n) === relay), [rr, ar, id] = polar.get(relay);
-        kids.forEach((n, k) => {
-          // The first spot clear of every dot placed so far, nearest first:
-          // fanned beside the relay, then a step further out. A dot with its
-          // label wants about 34 px; none clear, the nearest.
-          const step = Math.min(0.35, 28 / (rr + 40)), base = ar + (k - (kids.length - 1) / 2) * step;
-          let best = null;
-          for (const r of [rr + 40, rr + 62, rr + 84]) {
-            for (const j of [0, 1, -1, 2, -2]) {
-              const a = base + j * step * 0.8, x = hub[id][0] + r * Math.cos(a), y = hub[id][1] + r * Math.sin(a) * 0.92;
-              const gap = Math.min(...[...pos.values()].map(([px, py]) => Math.hypot(x - px, (y - py) * 2.2)));
-              if (!best || gap > best.gap) best = { r, a, gap };
-              if (gap >= 34) break;
-            }
-            if (best.gap >= 34) break;
-          }
-          place(n, id, best.r, best.a);
-        });
-      }
-      left = left.filter(n => !ready.includes(n));
-    }
+    for (const [n, [r, a, id]] of polar) pos.set(n, [hub[id][0] + r * Math.cos(a), hub[id][1] + r * Math.sin(a)]);
     if (tapIds.length > 1)
       el('line', { class: 'mesh-bus', x1: hub[tapIds[0]][0], y1: H / 2, x2: hub[tapIds.at(-1)][0], y2: H / 2 }, svg);
     // Each line runs from where the optimizer joined: its relay if we know
     // it, else its TAP.
     for (const n of nodes) {
       const via = meshVia(n);
-      const [x, y] = pos.get(n), [hx, hy] = via.kind === 'node' ? pos.get(via.relay) : hub[n.tap && hub[n.tap] ? n.tap : tapIds[0]];
+      const [x, y] = pos.get(n), [hx, hy] = via.kind === 'node' && polar.get(via.relay)[2] === polar.get(n)[2] && kids.get(via.relay).includes(n)
+        ? pos.get(via.relay) : hub[polar.get(n)[2]];
       el('line', { class: `mesh-link tier-${meshTier(n)}${via.kind === 'unknown' ? ' via-unknown' : ''}`,
                    'data-addr': n.addr, 'data-via': via.kind, x1: hx, y1: hy, x2: x, y2: y }, svg);
     }
@@ -6325,8 +6372,14 @@
       // A bigger, invisible target than the dot, reaching the label.
       el('circle', { class: 'mesh-hit', cx: x, cy: y, r: 12 }, g);
       el('circle', { class: 'mesh-dot', cx: x, cy: y, r: 7 }, g);
-      const right = x >= hub[polar.get(n)[2]][0];
-      el('text', { x: right ? x + 10 : x - 10, y: y + 3.5, 'text-anchor': right ? 'start' : 'end' }, g).textContent = n.label;
+      // The label outward, along its line: beside the dot on the sides,
+      // above or below it at the top and bottom. A relay's own fan runs on
+      // outward, so its label goes across the line instead.
+      const c = Math.cos(polar.get(n)[1]), up = Math.sin(polar.get(n)[1]) < 0 || kids.get(n).length > 0;
+      const side = kids.get(n).length ? (Math.abs(c) > 0.35 ? 'middle' : c >= 0 ? 'start' : 'end')
+        : c > 0.35 ? 'start' : c < -0.35 ? 'end' : 'middle';
+      el('text', { x: side === 'start' ? x + 10 : side === 'end' ? x - 10 : x,
+                   y: side !== 'middle' ? y + 3.5 : up ? y - 11 : y + 18, 'text-anchor': side }, g).textContent = n.label;
       const pick = () => meshSide(n);
       g.addEventListener('mouseenter', pick);
       g.addEventListener('focus', pick);
@@ -6339,10 +6392,17 @@
       x0 = Math.min(x0, x - 48); x1 = Math.max(x1, x + 48); y0 = Math.min(y0, y - 22); y1 = Math.max(y1, y + 22);
     }
     svg.setAttribute('viewBox', `${x0.toFixed(0)} ${y0.toFixed(0)} ${(x1 - x0).toFixed(0)} ${(y1 - y0).toFixed(0)}`);
+    // A TAP by the name given it on the Devices page, its address beneath.
     for (const id of tapIds) {
-      const [x, y] = hub[id], g = el('g', { class: 'mesh-tap' }, svg);
-      el('rect', { x: x - 38, y: y - 16, width: 76, height: 32, rx: 7 }, g);
-      el('text', { x, y: y + 4.5, 'text-anchor': 'middle' }, g).textContent = `TAP ${id}`;
+      const [x, y] = hub[id], g = el('g', { class: 'mesh-tap' }, svg), name = meshTapName(id);
+      const w = Math.max(76, Math.min(180, 16 + 7.4 * (name || '').length)), h = name ? 40 : 32;
+      el('rect', { x: x - w / 2, y: y - h / 2, width: w, height: h, rx: 7 }, g);
+      if (name) {
+        el('text', { class: 'mesh-tap-name', x, y: y - 1, 'text-anchor': 'middle' }, g).textContent = name;
+        el('text', { class: 'mesh-tap-addr', x, y: y + 12, 'text-anchor': 'middle' }, g).textContent = `TAP ${id}`;
+      } else {
+        el('text', { x, y: y + 4.5, 'text-anchor': 'middle' }, g).textContent = `TAP ${id}`;
+      }
     }
     // Keep the one being looked at; else open on the worst.
     const order = { poor: 0, silent: 1, fair: 2, good: 3 };
@@ -6445,7 +6505,7 @@
       <div class="mesh-v">${n.rssi == null ? '—' : n.rssi} <span class="mesh-faint">Tigo's raw number, higher is better</span></div>
       ${spark}
       <div class="mesh-k">Reports lost today</div><div class="mesh-v mesh-loss">${lossText}</div>
-      <div class="mesh-k">Reports through</div><div class="mesh-v">${n.tap ? 'TAP ' + meshEsc(n.tap) : '—'}</div>
+      <div class="mesh-k">Reports through</div><div class="mesh-v">${n.tap ? (meshTapName(n.tap) ? `${meshEsc(meshTapName(n.tap))} (TAP ${meshEsc(n.tap)})` : 'TAP ' + meshEsc(n.tap)) : '—'}</div>
       <div class="mesh-k">Joined through</div><div class="mesh-v mesh-via">${viaText}</div>
       ${relays.length ? `<div class="mesh-k">Relays for</div><div class="mesh-v">${relays.join(', ')}</div>` : ''}
       <div class="mesh-k">Last heard</div><div class="mesh-v">${ago(n.last_heard_s)}</div>

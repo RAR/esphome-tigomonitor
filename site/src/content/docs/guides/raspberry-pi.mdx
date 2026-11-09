@@ -181,8 +181,10 @@ counting as missing, and leaves the panel totals.
 
 **Topology › Mesh**, the tab Topology opens on (the panel layout is the
 Layout tab beside it), draws each TAP with its optimizers around it, one line
-per optimizer to the TAP its reports come through. The colour of the line
-says how well that optimizer is getting through:
+per optimizer to the TAP its reports come through. A TAP shows by the name you
+give it on the **Devices** page (press **Add a name** in its row), with its
+address beneath. The colour of the line says how well that optimizer is
+getting through:
 
 - **Reports lost today.** Each report carries Tigo's slot counter, which
   places it in a time slot: every 3 seconds on one roof, every 2 on a bench
@@ -205,11 +207,18 @@ network.
 An optimizer that can't hear the TAP well joins through another one, which
 relays for it. Each optimizer says where it joined when it joins, so the line
 runs from that relay, and the side panel names it ("Joined through") and
-lists the ones a relay carries ("Relays for"). A relay whose network ID
-matches no optimizer the TAP lists is drawn as a dashed line to the TAP:
+lists the ones a relay carries ("Relays for"). A relay's optimizers fan out
+beyond it, each in its own slice of the circle, so chains of relays build
+outward without their lines crossing.
+
+A join names its relay by the relay's network ID, which the mesh hands out
+and can change each time an optimizer rejoins; it isn't the address the
+Devices page shows. The Pi matches it to whichever optimizer last joined
+under that ID. Until that optimizer rejoins, the line is dashed to the TAP:
 "a relay not identified yet". Joins come at sunrise and when an optimizer
-rejoins; the Pi keeps the last one across restarts, so only a new install
-says "Not known" until the next sunrise.
+rejoins; the Pi keeps the last one across restarts. The mesh reforms each
+time, so a relay line shows where an optimizer joined last, not a fixed
+route.
 
 **By string**, above the map, lays the same optimizers out a row per string,
 its panels in order, with each one's share of reports lost and its signal. A

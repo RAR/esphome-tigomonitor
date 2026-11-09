@@ -346,6 +346,27 @@ static void test_tap_radio_from_a_read() {
   CHECK(w.take_radios().empty());
 }
 
+// A TAP answering "where are you" gives its MAC and address: its ID, shown
+// with it on the Devices page. One at another address (the factory one,
+// before it's moved) isn't that TAP's.
+static void test_tap_id_from_its_mac_reply() {
+  BusWatch w;
+  w.on_frame(request(0x003A, {}), true, 1000);
+  w.on_frame(reply(0x003B, hex("04C05B0000001234" "1201")), false, 1010);
+  auto ids = w.take_tap_ids();
+  CHECK(ids.size() == 1);
+  if (ids.size() == 1) {
+    CHECK(ids[0].tap == 0x1201);
+    CHECK(ids[0].mac == "04C05B0000001234");
+  }
+  CHECK(w.take_tap_ids().empty());
+  w.on_frame(request(0x0038, {}, 0x1235), true, 2000);
+  w.on_frame(reply(0x0039, hex("04C05B0000005678" "1235"), 0x1235), false, 2010);
+  w.on_frame(request(0x003A, {}), true, 3000);
+  w.on_frame(reply(0x003B, hex("04C05B0000009999" "1202")), false, 3010);
+  CHECK(w.take_tap_ids().empty());
+}
+
 static void test_tap_radio_not_from_a_write() {
   BusWatch w;
   // 01 00 + 36 bytes writes the block; its echo looks like a read's reply.
@@ -409,6 +430,7 @@ int main() {
   test_stats_cover_five_minutes();
   test_log_is_bounded();
   test_tap_radio_from_a_read();
+  test_tap_id_from_its_mac_reply();
   test_tap_radio_not_from_a_write();
   test_tap_radio_needs_the_whole_block();
   test_smart_settings_are_picked_out();

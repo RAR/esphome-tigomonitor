@@ -24,11 +24,17 @@ before(async () => {
 });
 after(async () => { await browser.close(); server.close(); });
 
-async function open(linux, versions = routes['/api/versions']) {
+async function open(linux, versions = routes['/api/versions'], posts = []) {
   const ctx = await browser.newContext({ viewport: { width: 1400, height: 1200 } });
   await ctx.route('**/api/**', async (route) => {
     const path = new URL(route.request().url()).pathname.replace(/^.*(\/api\/)/, '$1');
     const json = (status, body) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
+    if (path === '/api/taps/name' && route.request().method() === 'POST') {
+      const b = JSON.parse(route.request().postData());
+      posts.push(b);
+      versions = { ...versions, taps: versions.taps.map((t) => t.addr === b.tap ? { ...t, name: b.name } : t) };
+      return json(200, b);
+    }
     if (path === '/api/status') return json(200, linux ? { ...routes['/api/status'], platform: 'linux' } : routes['/api/status']);
     if (path === '/api/versions') return linux ? json(200, versions) : route.fulfill({ status: 404, body: 'no' });
     if (path === '/api/master') return json(200, { role: 'listen', active: false });
@@ -150,6 +156,44 @@ test('Devices, on the ESP32: no TAP list and no firmware column', async () => {
   assert.equal(await page.isVisible('#devices-taps'), false);
   assert.equal(await page.isVisible('table.nodes thead th.fw'), false);
   assert.equal(await page.isVisible('table.nodes thead th.smart'), false);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test("Devices, on the Pi: the TAP's ID, from its MAC, and the name it was given", async () => {
+  const { page, ctx, errors } = await open(true);
+  await page.waitForSelector('#devices-taps', { state: 'visible' });
+  const row = page.locator('#devices-taps tbody tr').first();
+  assert.equal((await row.locator('td.tap-name').textContent()).trim(), 'Garage');
+  assert.equal((await row.locator('td.tap-id').textContent()).trim(), '04C05B0000001234');
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test('Devices, on the Pi: a TAP is named in place, and an empty name clears it', async () => {
+  const posts = [];
+  const unnamed = { ...routes['/api/versions'], taps: routes['/api/versions'].taps.map(({ name, ...t }) => t) };
+  const { page, ctx, errors } = await open(true, unnamed, posts);
+  await page.waitForSelector('#devices-taps', { state: 'visible' });
+  const cell = page.locator('#devices-taps tbody tr td.tap-name');
+  assert.match(await cell.textContent(), /Add a name/);
+  await cell.locator('button').click();
+  const input = cell.locator('input');
+  await input.fill('Shed');
+  await input.press('Enter');
+  await page.waitForFunction(() => document.querySelector('#devices-taps td.tap-name').textContent.trim() === 'Shed');
+  assert.deepEqual(posts, [{ tap: '1201', name: 'Shed' }]);
+  // Escape leaves it as it was.
+  await cell.locator('button').click();
+  await cell.locator('input').fill('Barn');
+  await cell.locator('input').press('Escape');
+  assert.equal((await cell.textContent()).trim(), 'Shed');
+  assert.equal(posts.length, 1);
+  await cell.locator('button').click();
+  await cell.locator('input').fill('');
+  await cell.locator('input').press('Enter');
+  await page.waitForFunction(() => /Add a name/.test(document.querySelector('#devices-taps td.tap-name').textContent));
+  assert.deepEqual(posts.at(-1), { tap: '1201', name: '' });
   assert.deepEqual(errors, []);
   await ctx.close();
 });

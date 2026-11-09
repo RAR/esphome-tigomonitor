@@ -69,6 +69,22 @@ expect "labels present" "$(q "all('label' in x and 'string' in x for x in d['nod
 expect "no MACs in the answer" "$(grep -c 04C05B "$out/mesh.json" || true)" 0
 get 18092 /api/mesh > "$out/quiet.json"
 expect "a quiet bus" "$(python3 -c "import json; d = json.load(open('$out/quiet.json')); print(d['nodes'], d['taps'])")" "[] []"
+# A TAP's name, set on the Devices page, comes with it on the map.
+post() {  # post PORT PATH JSON: the HTTP status
+  python3 - "$@" <<'PY'
+import sys, urllib.error, urllib.request as u
+r = u.Request(f'http://127.0.0.1:{sys.argv[1]}{sys.argv[2]}', data=sys.argv[3].encode(), headers={'Content-Type': 'application/json'})
+try:
+    print(u.urlopen(r, timeout=5).status)
+except urllib.error.HTTPError as e:
+    print(e.code)
+PY
+}
+expect "name a TAP" "$(post 18091 /api/taps/name '{"tap": "1201", "name": "  Garage  "}')" 200
+expect "not a TAP address" "$(post 18091 /api/taps/name '{"tap": "12", "name": "x"}')" 400
+expect "a name too long" "$(post 18091 /api/taps/name '{"tap": "1201", "name": "'"$(printf 'x%.0s' $(seq 33))"'"}')" 400
+get 18091 /api/mesh > "$out/mesh.json"
+expect "the map has its name" "$(q "d['taps']")" "[{'id': '1201', 'name': 'Garage'}]"
 # A restart keeps where each optimizer joined: joins come only at sunrise.
 # And the day of signal history, which would otherwise start empty.
 rssi_before="$(q "{a: n[a]['rssi_24h'][-1] for a in sorted(n)}")"
@@ -85,6 +101,11 @@ get 18093 /api/mesh > "$out/mesh.json"
 expect "parents kept after a restart" "$(q "{a: n[a]['parent'] for a in sorted(n) if n[a]['parent']}")" "{'0002': '0001', '0004': '0042', '0005': '0002'}"
 expect "relays kept after a restart" "$(q "{a: n[a]['relay'] for a in sorted(n) if n[a]['relay']}")" "{'0004': '0002'}"
 expect "join times kept" "$(q "sorted(a for a in n if isinstance(n[a]['last_join_unix'], int))")" "['0002', '0004', '0005']"
+tap_names() { python3 -c "import json; print(json.load(open('$out/state/state.json')).get('tap_names'))"; }
+expect "TAP name saved" "$(tap_names)" "{'1201': 'Garage'}"
+expect "an empty name forgets it" "$(post 18093 /api/taps/name '{"tap": "1201", "name": ""}')" 200
+sleep 0.5
+expect "no name now" "$(tap_names)" "{}"
 expect "signal history kept" "$(q "{a: n[a]['rssi_24h'][-1] for a in sorted(n)}")" "$rssi_before"
 expect "signal history not empty" "$(q "all(x['rssi_24h'][-1] is not None for x in d['nodes'])")" True
 # Restarted at night, before any report: each optimizer it has heard still

@@ -478,6 +478,7 @@ void HttpServer::routes_() {
   // NWID now, if one does.
   svr.Get("/api/mesh", [&mon](const httplib::Request &, httplib::Response &res) {
     auto stats = mon.links();
+    auto names = mon.tap_names();
     auto panels = mon.panels();
     int64_t now_s = std::chrono::duration_cast<std::chrono::seconds>(
                         std::chrono::system_clock::now().time_since_epoch()).count();
@@ -513,7 +514,8 @@ void HttpServer::routes_() {
     for (uint16_t t : tap_ids) {
       char id[8];
       snprintf(id, sizeof(id), "%04X", t);
-      taps.push_back({{"id", id}});
+      auto it = names.find(id);
+      taps.push_back(it != names.end() ? json{{"id", id}, {"name", it->second}} : json{{"id", id}});
     }
     send_json(res, {{"loss_method", "slot"}, {"parent_confirmed", true}, {"taps", taps}, {"nodes", nodes}});
   });
@@ -1003,6 +1005,21 @@ void HttpServer::routes_() {
     send_json(res, {{"known", known}});
   });
 
+  // A TAP's name, by its address; an empty name forgets it.
+  svr.Post("/api/taps/name", [this](const httplib::Request &req, httplib::Response &res) {
+    json j = json::parse(req.body, nullptr, false);
+    if (j.is_discarded() || !j.is_object() || !j.contains("tap") || !j["tap"].is_string() || !j.contains("name") ||
+        !j["name"].is_string()) {
+      send_json(res, {{"error", "expected {\"tap\": \"1201\", \"name\": \"...\"}"}}, 400);
+      return;
+    }
+    if (!ctx_.mutable_monitor.set_tap_name(j["tap"].get<std::string>(), j["name"].get<std::string>())) {
+      send_json(res, {{"error", "a TAP is 4 hex digits, and a name at most 32 characters"}}, 400);
+      return;
+    }
+    send_json(res, {{"tap", j["tap"]}, {"name", j["name"]}});
+  });
+
   svr.Post("/api/layout", [this, &mon, body_of](const httplib::Request &req, httplib::Response &res) {
     json j;
     if (!body_of(req, res, j)) return;
@@ -1460,7 +1477,13 @@ void HttpServer::routes_() {
       send_json(res, {{"error", "no bus log"}}, 404);
       return;
     }
-    send_json(res, ctx_.bus_log->versions_json());
+    json v = ctx_.bus_log->versions_json();
+    auto names = ctx_.monitor.tap_names();
+    for (auto &t : v["taps"]) {
+      auto it = names.find(t.value("addr", std::string()));
+      if (it != names.end()) t["name"] = it->second;
+    }
+    send_json(res, v);
   });
   // Clearing only forgets the alarm; it sends nothing on the bus.
   svr.Post("/api/bus/alarm/clear", [this](const httplib::Request &, httplib::Response &res) {

@@ -186,8 +186,10 @@ export const routes = {
   // Pi build only: firmware heard on the bus. One optimizer was updated.
   '/api/versions': {
     taps: [{ addr: '1201', model: 'Mgate', version: 'G8.59 Jan  1 2026', previous: '',
-             since_unix_ms: 1767225600000, last_unix_ms: 1767225600000 }],
+             since_unix_ms: 1767225600000, last_unix_ms: 1767225600000, name: 'Garage' }],
     radios: [{ tap: '1201', channel: 18, slt: 90, slm: 60, heard_unix_ms: 1767225600000 }],
+    // Each TAP's MAC, from its answer to GET_MAC; made up.
+    ids: [{ tap: '1201', mac: '04C05B0000001234', heard_unix_ms: 1767225600000 }],
     // Two on the H9 firmware, as D6-D10 are on the roof.
     optimizers: devices.map((d, i) => ({ addr: d.addr, model: 'Mnode', version: i === 4 ? 'K8.0130 (2D)' : i === 5 || i === 6 ? 'H9.0018 (40)' : 'K8.0120 (2D)',
       previous: i === 4 ? 'K8.0120 (2D)' : '', since_unix_ms: 1767225600000 + i * 60000, last_unix_ms: 1767225600000 + i * 60000 })),
@@ -415,5 +417,5 @@ export const piRoutes = {
       discovery: 'Open, 552 s left · 24 of the 24 in the table have joined' },
     exchanges: piExchanges,
   },
-  '/api/mesh': { loss_method: 'slot', parent_confirmed: true, taps: [{ id: '1201' }], nodes: meshNodes },
+  '/api/mesh': { loss_method: 'slot', parent_confirmed: true, taps: [{ id: '1201', name: 'Garage' }], nodes: meshNodes },
 };

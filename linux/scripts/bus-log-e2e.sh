@@ -80,6 +80,8 @@ expect "the write's block isn't shown" "$(bus 18140 "[(e['request_hex'][:12], e[
 expect "health names it" "$(api 18140 /api/health | python3 -c "import json,sys; d=json.load(sys.stdin); print(d['status'], any('another device reconfigured the TAP (SET_CHANNEL, 2 frames' in p for p in d['problems']))")" "problem True"
 radios() { api "$1" /api/versions | python3 -c "import json,sys; d=json.load(sys.stdin); print([(r['tap'], r['channel'], r['slt'], r['slm'], r['heard_unix_ms'] > 0) for r in d['radios']])"; }
 expect "the TAP's radio, from its read" "$(radios 18140)" "[('1201', 18, 90, 60, True)]"
+ids() { api "$1" /api/versions | python3 -c "import json,sys; d=json.load(sys.stdin); print([(i['tap'], i['mac'], i['heard_unix_ms'] > 0) for i in d['ids']])"; }
+expect "the TAP's ID, from its answer to GET_MAC" "$(ids 18140)" "[('1201', '04C05B0000001234', True)]"
 expect "the read's block isn't shown" "$(bus 18140 "any('EE EE' in (e['reply_hex'] or '') for e in d['exchanges'])")" False
 expect "logged as an error" "$(grep -c 'another device sent the TAP a reconfiguration: GatewayCfg write' "$out/daemon2.log" || true)" 1
 expect "MQTT: alarm on" "$(mosquitto_sub -p 18834 -C 1 -W 10 -t tigomonitor/test/system/state 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin)["tap_reconfigured"])')" True
@@ -96,6 +98,7 @@ daemon=$!
 sleep 3
 expect "still on after a restart" "$(bus 18140 "(d['alarm']['active'], d['alarm']['count'])")" "(True, 2)"
 expect "radio back after a restart" "$(radios 18140)" "[('1201', 18, 90, 60, True)]"
+expect "the TAP's ID back after a restart" "$(ids 18140)" "[('1201', '04C05B0000001234', True)]"
 expect "settings back after a restart" "$(smarts 18140)" "[('0003', '0FFF 0000 0FFF 0008 00C8 00C8 000A 0154 0154 S 00 01', True, True)]"
 expect "said at startup" "$(grep -c 'alarm is still on from before the restart' "$out/daemon3.log" || true)" 1
 expect "cleared" "$(api 18140 /api/bus/alarm/clear post)" '{"cleared":true}'
