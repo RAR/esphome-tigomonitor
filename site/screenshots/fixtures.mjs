@@ -188,6 +188,8 @@ export const routes = {
     taps: [{ addr: '1201', model: 'Mgate', version: 'G8.59 Jan  1 2026', previous: '',
              since_unix_ms: 1767225600000, last_unix_ms: 1767225600000, name: 'Garage' }],
     radios: [{ tap: '1201', channel: 18, slt: 90, slm: 60, heard_unix_ms: 1767225600000 }],
+    // An optimizer whose PIV current changed, newest first.
+    changes: [{ unix_ms: 1767225600000 + 3 * 60000, addr: devices[3].addr, what: 'MPPT', before: '12 40 08 12', after: '12 40 0A 12' }],
     // Each TAP's MAC, from its answer to GET_MAC; made up.
     ids: [{ tap: '1201', mac: '04C05B0000001234', heard_unix_ms: 1767225600000 }],
     // Two on the H9 firmware, as D6-D10 are on the roof.
@@ -421,5 +423,17 @@ export const piRoutes = {
       discovery: 'Open, 552 s left · 24 of the 24 in the table have joined' },
     exchanges: piExchanges,
   },
-  '/api/mesh': { loss_method: 'slot', parent_confirmed: true, taps: [{ id: '1201', name: 'Garage' }], nodes: meshNodes },
+  '/api/mesh': { loss_method: 'slot', parent_confirmed: true, taps: [{ id: '1201', name: 'Garage' }], nodes: meshNodes,
+    // Reports and losses by day, summed by string: one string worse than
+    // the rest, and getting better on the last day.
+    loss_days: [4, 3, 2, 1, 0].map((back) => ({
+      date: new Date(PI_T - back * 86400000).toISOString().slice(0, 10),
+      strings: Object.fromEntries([...new Set(devices.map((d) => d.string_label))].map((s, k) =>
+        [s, [12000, k === 1 ? (back ? 960 : 300) : 40 + k * 20 + back * 5]])) })) },
+  // One optimizer's joins, newest first: through a relay, the TAP, and a
+  // relay not identified.
+  '/api/mesh/joins': { joins: [
+    { unix: PI_T / 1000 - 5 * 3600, parent: '0046', relay: devices[2].addr },
+    { unix: PI_T / 1000 - 29 * 3600, parent: '0001', relay: null },
+    { unix: PI_T / 1000 - 53 * 3600, parent: '0091', relay: null }] },
 };

@@ -68,6 +68,10 @@ async function open(opts = {}) {
       return json(200, api.settings);
     }
     if (path === '/api/master' && linux && opts.master) return json(200, piRoutes['/api/master']);
+    if (path === '/api/mesh/joins' && linux) {
+      api.joinReads = [...(api.joinReads || []), new URL(req.url()).searchParams.get('addr')];
+      return json(200, { addr: new URL(req.url()).searchParams.get('addr'), ...(opts.joins ?? piRoutes['/api/mesh/joins']) });
+    }
     if (path === '/api/mesh' && linux) { api.meshReads = (api.meshReads || 0) + 1; return json(200, opts.mesh ?? piRoutes['/api/mesh']); }
     if (path === '/api/logs') { api.logReads = (api.logReads || 0) + 1; return json(200, { lines: [], next: 0 }); }
     if (path === '/api/cloud/status') return json(200, { configured: true });
@@ -607,6 +611,55 @@ test('mesh: relays build outward without lines crossing or running through a dot
   for (let i = 0; i < dots.length; i++) for (let j = i + 1; j < dots.length; j++)
     closest = Math.min(closest, Math.hypot(dots[i][1] - dots[j][1], dots[i][2] - dots[j][2]));
   assert.ok(closest >= 16, `two dots ${closest.toFixed(1)} px apart`);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+// The map fills the window: its box runs down to leave the legend just in
+// view, on a short window and a tall one.
+test('mesh: the radio map fills the height of the window, legend in view', async () => {
+  for (const h of [800, 1300]) {
+    const { page, ctx, errors } = await openMesh();
+    await page.setViewportSize({ width: 1400, height: h });
+    await page.waitForTimeout(200);
+    const legend = await page.$eval('#mesh-legend', (e) => e.getBoundingClientRect().bottom);
+    assert.ok(legend <= h && legend >= h - 40, `legend ends at ${legend} in a ${h} px window`);
+    const svg = await page.$eval('#mesh-svg', (s) => s.getBoundingClientRect().height);
+    assert.ok(svg >= h - 420, `map ${svg} px tall in a ${h} px window`);
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+});
+
+// Each string's share of reports lost, by day: a row per string, a day per
+// column, coloured as the map is.
+test('mesh: reports lost by day, a row per string', async () => {
+  const { page, ctx, errors } = await openMesh();
+  const days = piRoutes['/api/mesh'].loss_days;
+  const strings = Object.keys(days[0].strings);
+  assert.equal(await page.locator('#mesh-days .mesh-day-row').count(), strings.length);
+  const row = page.locator('#mesh-days .mesh-day-row').nth(1);
+  assert.equal((await row.locator('.mesh-day-name').textContent()).trim(), strings[1]);
+  const cells = await row.locator('.mesh-day-cell').allTextContents();
+  assert.deepEqual(cells.map((c) => c.trim()), ['7.4%', '7.4%', '7.4%', '7.4%', '2.4%']);
+  assert.deepEqual(await row.locator('.mesh-day-cell').evaluateAll((cs) => cs.map((c) => c.className.replace('mesh-day-cell ', ''))),
+    ['tier-poor', 'tier-poor', 'tier-poor', 'tier-poor', 'tier-fair']);
+  assert.equal(await page.locator('#mesh-days .mesh-day-head span').count(), days.length + 1);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+// An optimizer's joins over the last month, in its side panel.
+test('mesh: the side panel lists the joins it made, and through whom', async () => {
+  const { page, ctx, errors, api } = await openMesh();
+  await meshNode(page, fixtureNodes[7].label).click();
+  await page.waitForFunction(() => document.querySelectorAll('#mesh-side .mesh-joins li').length === 3);
+  const items = await page.locator('#mesh-side .mesh-joins li').allTextContents();
+  assert.equal(items.length, 3);
+  assert.match(items[0], new RegExp(`via ${fixtureNodes[2].label}`));
+  assert.match(items[1], /the TAP/);
+  assert.match(items[2], /a relay not identified yet/);
+  assert.ok(api.joinReads.includes(fixtureNodes[7].addr));
   assert.deepEqual(errors, []);
   await ctx.close();
 });

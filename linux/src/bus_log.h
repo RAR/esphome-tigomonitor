@@ -50,6 +50,8 @@ class BusLog {
   // SLm as last read, ids each TAP's MAC, settings each optimizer's answer to
   // ^00Smrt, mppt its four MPPT parameters from its answer to ^00Mppt.
   nlohmann::json versions_json() const;
+  // How many optimizer settings, MPPT or firmware changes were heard since.
+  int changes_since(int64_t since_ms) const;
 
  private:
   struct Alarm {
@@ -58,6 +60,14 @@ class BusLog {
   };
   void on_frame_(const esphome::tigo_monitor::master::Frame &f, bool ours, int64_t now);
   void load_versions_();
+  void change_(int64_t now, uint16_t addr, const char *what, const std::string &before, const std::string &after);
+  struct Change {
+    int64_t unix_ms;
+    uint16_t addr;
+    std::string what, before, after;
+  };
+  std::deque<Change> changes_;  // newest last
+  static const size_t KEEP_CHANGES = 50;
 
   std::string path_, versions_path_;
   esphome::tigo_monitor::master::VersionBook versions_;

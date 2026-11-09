@@ -67,7 +67,7 @@ kill $daemon; wait $daemon 2>/dev/null || true
 kill $cca; wait $cca 2>/dev/null || true
 
 # --- run 2: the CCA's UI reconfigures the TAP ---
-python3 linux/tools/cca_on_bus.py "$out/bus" --reconfigure-after 2 --config-read &
+python3 linux/tools/cca_on_bus.py "$out/bus" --reconfigure-after 2 --config-read --change-after 2.5 &
 cca=$!
 sleep 0.5
 build/linux/tigomonitord --state-dir "$out/state" --web-dir components/tigo_server/web 2> "$out/daemon2.log" &
@@ -83,6 +83,10 @@ expect "health names it" "$(api 18140 /api/health | python3 -c "import json,sys;
 radios() { api "$1" /api/versions | python3 -c "import json,sys; d=json.load(sys.stdin); print([(r['tap'], r['channel'], r['slt'], r['slm'], r['heard_unix_ms'] > 0) for r in d['radios']])"; }
 expect "the TAP's radio, from its read" "$(radios 18140)" "[('1201', 18, 90, 60, True)]"
 ids() { api "$1" /api/versions | python3 -c "import json,sys; d=json.load(sys.stdin); print([(i['tap'], i['mac'], i['heard_unix_ms'] > 0) for i in d['ids']])"; }
+changes() { api "$1" /api/versions | python3 -c "import json,sys; d=json.load(sys.stdin); print([(c['addr'], c['what'], c['before'], c['after']) for c in d['changes']])"; }
+for _ in $(seq 40); do [ "$(changes 18140)" != "[]" ] && break; sleep 0.25; done
+expect "an MPPT change, heard" "$(changes 18140)" "[('0003', 'MPPT', '12 40 08 12', '12 40 0A 12')]"
+expect "and logged" "$(grep -c "optimizer 0003's MPPT changed" "$out/daemon2.log" || true)" 1
 expect "the TAP's ID, from its answer to GET_MAC" "$(ids 18140)" "[('1201', '04C05B0000001234', True)]"
 expect "the read's block isn't shown" "$(bus 18140 "any('EE EE' in (e['reply_hex'] or '') for e in d['exchanges'])")" False
 expect "logged as an error" "$(grep -c 'another device sent the TAP a reconfiguration: GatewayCfg write' "$out/daemon2.log" || true)" 1
@@ -101,7 +105,8 @@ sleep 3
 expect "still on after a restart" "$(bus 18140 "(d['alarm']['active'], d['alarm']['count'])")" "(True, 2)"
 expect "radio back after a restart" "$(radios 18140)" "[('1201', 18, 90, 60, True)]"
 expect "the TAP's ID back after a restart" "$(ids 18140)" "[('1201', '04C05B0000001234', True)]"
-expect "MPPT parameters back after a restart" "$(mppt 18140)" "[('0003', '12 40 08 12', True)]"
+expect "the change kept after a restart" "$(changes 18140)" "[('0003', 'MPPT', '12 40 08 12', '12 40 0A 12')]"
+expect "MPPT parameters back after a restart" "$(mppt 18140)" "[('0003', '12 40 0A 12', True)]"
 expect "settings back after a restart" "$(smarts 18140)" "[('0003', '0FFF 0000 0FFF 0008 00C8 00C8 000A 0154 0154 S 00 01', True, True)]"
 expect "said at startup" "$(grep -c 'alarm is still on from before the restart' "$out/daemon3.log" || true)" 1
 expect "cleared" "$(api 18140 /api/bus/alarm/clear post)" '{"cleared":true}'
