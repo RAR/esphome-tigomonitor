@@ -386,6 +386,31 @@ static void test_the_tap_config_is_read_without_housekeeping() {
   for (auto &p : tunnels) CHECK(p.size() >= 4 && (p[3] == 0x0D || p[3] == 0x2E));
 }
 
+// Dropped before it went out (the port reopened, as when the TAP is lost),
+// the read isn't lost: the next opening sends it, still only once.
+static void test_the_tap_config_read_survives_a_drop_before_it_is_sent() {
+  std::vector<std::vector<uint8_t>> tunnels;
+  TapPort port;
+  port.answer = [&](const mp::Frame &f, mp::Frame &r) {
+    if (f.cmd == 0x0B0F) tunnels.push_back(f.payload);
+    if (f.cmd != 0x003A || f.dest != GW) return false;
+    r = mac_reply(GW, 1);
+    return true;
+  };
+  MasterCore core(&port, [](int, const std::string &) {}, nullptr, nullptr, GW, false, true, false);
+  core.set_read_tap_config(true);
+  CHECK(core.open());
+  uint32_t t = 0;
+  while (t < 20000 && tunnels.empty()) core.tick(t += 50);  // the opening has begun
+  CHECK(!tunnels.empty());
+  CHECK(config_reads(tunnels) == 0);
+  core.close();
+  CHECK(core.open());
+  for (uint32_t end = t + 20000; t < end; t += 50) core.tick(t);
+  core.close();
+  CHECK(config_reads(tunnels) == 1);
+}
+
 // Automatic discovery: the window is renewed only while wanted, and the
 // owner's "let it close" still wins. The TAP here says its window has run
 // out (0 s left), which is when a renewal goes.
@@ -424,6 +449,7 @@ int main() {
   test_the_tap_config_is_not_read_unless_asked();
   test_the_tap_config_is_read_once_when_asked();
   test_the_tap_config_is_read_without_housekeeping();
+  test_the_tap_config_read_survives_a_drop_before_it_is_sent();
   test_a_late_drain_is_reported();
   test_a_prompt_drain_is_not_late();
   test_the_tap_version_is_asked_once_at_start();
