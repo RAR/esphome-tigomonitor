@@ -263,82 +263,25 @@ test('Devices, on the Pi: a TAP whose radio was never read says so', async () =>
   await ctx.close();
 });
 
-// Running the bus, the Devices page adds and removes optimizers in the TAP's
-// table. The label is checked as it is typed; a dry run shows what it would send.
-test('Devices, on the Pi running the bus: add an optimizer by its label', async () => {
-  const posts = [];
-  const master = { ...piRoutes['/api/master'], role: 'master', active: true };
-  const { page, ctx, errors } = await open(true, routes['/api/versions'], posts, master);
-  await page.waitForSelector('#table-edit', { state: 'visible' });
-  assert.match(await page.textContent('#table-edit-note'), /Table writes are off/);
-  assert.equal(await page.isDisabled('#table-add-go'), true);
-  assert.equal(await page.isDisabled('#table-add-dry'), false);
-  await page.fill('#table-add-label', '0-1234S');
-  assert.match(await page.textContent('#table-add-hint'), /doesn't check out/);
-  await page.fill('#table-add-label', '0-1234r');
-  assert.equal(await page.textContent('#table-add-hint'), 'MAC 04C05B0000001234');
-  await page.click('#table-add-dry');
-  await page.waitForFunction(() => /Would send/.test(document.getElementById('table-edit-status').textContent));
-  assert.deepEqual(posts, [{ path: '/api/master/table/add', dry_run: true, label: '0-1234r' }]);
-  assert.match(await page.textContent('#table-edit-status'), /Dry run: adding 0-1234R.*290104C05B00000012348008/s);
-  // The TAP's optimizers, by address, name and label, to remove one.
-  const options = await page.$$eval('#table-remove-pick option', os => os.map(o => o.textContent));
-  assert.ok(options.length > 2);
-  assert.ok(options.slice(1).every(o => /^[0-9A-F]{4} · .*\d-[0-9A-F]*[G-Z]$/.test(o)), options.join('|'));
-  assert.deepEqual(errors, []);
-  await ctx.close();
-});
-
-// A standby that has taken the bus runs it like a master: the panel shows.
-// One standing by doesn't.
-test('Devices, on a standby: the panel only while it runs the bus', async () => {
-  for (const [state, shown] of [['active', true], ['standing_by', false]]) {
-    const master = { ...piRoutes['/api/master'], role: 'standby', active: true,
-      standby: { ...piRoutes['/api/master'].standby, state } };
+// Running the bus (as master, or a standby that has taken it), the Devices
+// page says what the TAP holds and points to System setup; listening, or a
+// standby standing by, it doesn't.
+test('Devices, on the Pi: what the TAP holds, and where to change it', async () => {
+  const base = { ...piRoutes['/api/master'], active: true, discovery_read: true,
+                 discovery: { running: false, remaining_s: 0, node_count: 24, joined: 23, in_table: 24 } };
+  for (const [master, shown] of [[{ ...base, role: 'master' }, true],
+                                 [{ ...base, role: 'standby', standby: { ...base.standby, state: 'active' } }, true],
+                                 [{ ...base, role: 'standby', standby: { ...base.standby, state: 'standing_by' } }, false],
+                                 [{ role: 'listen', active: false }, false]]) {
     const { page, ctx, errors } = await open(true, routes['/api/versions'], [], master);
     await page.waitForSelector('#devices-taps', { state: 'visible' });
     await page.waitForTimeout(300);
-    assert.equal(await page.isVisible('#table-edit'), shown, state);
+    assert.equal(await page.isVisible('#devices-setup-link'), shown, JSON.stringify(master.role));
+    if (shown) {
+      assert.equal(await page.textContent('#devices-setup-link'), 'The TAP lists 24 optimizers, 23 joined. To replace, add or retire one, open System setup.');
+      assert.equal(await page.getAttribute('#devices-setup-link a', 'href'), '#setup');
+    }
     assert.deepEqual(errors, []);
     await ctx.close();
   }
-});
-
-test('Devices, on the Pi listening: no table changes', async () => {
-  const { page, ctx, errors } = await open(true);
-  await page.waitForSelector('#devices-taps', { state: 'visible' });
-  assert.equal(await page.isVisible('#table-edit'), false);
-  assert.deepEqual(errors, []);
-  await ctx.close();
-});
-
-// Added optimizers not joined yet are listed under the panel, each with a
-// way to stop waiting, then the last that joined; the panel sits below the
-// optimizers table.
-test('Devices, on the Pi running the bus: the optimizers waiting to join', async () => {
-  const posts = [];
-  const now = Math.round(Date.now() / 1000);
-  const master = { ...piRoutes['/api/master'], role: 'master', active: true,
-    table: { ...piRoutes['/api/master'].table, writes: true,
-      waiting: [{ mac: '04C05B0000001234', label: '0-1234R', id: '0008', since_unix: now - 200 },
-                { mac: '04C05B0000001235', label: '0-1235V', id: '0009', since_unix: now - 30 }],
-      joins: [{ mac: '04C05B0000000012', label: '0-12P', id: '0007', joined: true, text: 'joined at 0007', unix: now - 600 }] } };
-  const { page, ctx, errors } = await open(true, routes['/api/versions'], posts, master);
-  await page.waitForSelector('#table-edit', { state: 'visible' });
-  const order = await page.evaluate(() => {
-    const a = document.getElementById('nodes-tbody'), b = document.getElementById('table-edit');
-    return !!(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
-  });
-  assert.equal(order, true, 'the panel is below the optimizers');
-  const text = await page.textContent('#table-edit-waiting');
-  assert.match(text, /Waiting to join/);
-  assert.match(text, /0008 · .*0-1234R · 3 min/s);
-  assert.match(text, /0009 · .*0-1235V · just now/s);
-  assert.match(text, /0007 .*joined at 0007/s);
-  assert.equal(await page.isDisabled('#table-add-go'), false);  // waiting doesn't block a change
-  await page.click('#table-edit-waiting button[data-stop="04C05B0000001234"]');
-  await page.waitForFunction(() => !/0-1234R/.test(document.getElementById('table-edit-waiting').textContent));
-  assert.deepEqual(posts, [{ path: '/api/master/table/stop', mac: '04C05B0000001234' }]);
-  assert.deepEqual(errors, []);
-  await ctx.close();
 });

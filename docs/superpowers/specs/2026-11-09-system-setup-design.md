@@ -1,6 +1,6 @@
 # System setup: replacing, adding and retiring optimizers — design
 
-2026-11-09 · branch `feature/system-setup` (on `feature/optimizer-table`, PR #110) · **status: agreed with the owner from the mockups; not built.** Mockups: the "System setup" boards of the canvas published from this session (private to the owner).
+2026-11-09 · branch `feature/system-setup` (on `feature/optimizer-table`, PR #110) · **status: built (this branch); the replace not yet tried on hardware.** Mockups: the "System setup" boards of the canvas published from this session (private to the owner).
 
 ## Why
 

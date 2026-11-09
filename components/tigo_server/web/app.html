@@ -657,26 +657,70 @@
   .devices-changes strong { color: var(--warn); }
   .devices-changes ul { margin: 6px 0 0; padding-left: 18px; }
   .devices-changes li { margin: 2px 0; }
-  .table-edit { margin: 0 0 22px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 10px; font-size: 13px; }
-  #table-edit-wrap { margin-top: 22px; }
-  .table-edit-waiting:empty { display: none; }
-  .table-edit-waiting { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); }
-  .table-edit-waiting ul { margin: 4px 0 0; padding-left: 18px; }
-  .table-edit-waiting li { margin: 3px 0; }
-  .table-edit-waiting .btn { padding: 2px 10px; margin-left: 8px; }
-  .table-edit-waiting .past { color: var(--text-dim); }
-  .table-edit-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 4px 0; }
-  .table-edit-row > label { flex: 0 0 13em; font-weight: 600; white-space: nowrap; }
-  .table-edit-row .input { width: 15em; min-width: 0; }
-  .table-edit-row #table-add-id { width: 12em; }
-  .table-edit .btn:disabled { opacity: .4; filter: saturate(.15); cursor: default; }
-  .table-edit-hint { color: var(--text-dim); }
-  .table-edit-hint.bad { color: var(--bad); }
-  .table-edit-note { margin: 0 0 6px; color: var(--text-dim); }
-  .table-edit-status { margin-top: 8px; }
-  .table-edit-status:empty { display: none; }
-  .table-edit-status.bad { color: var(--bad); }
-  .table-edit-status .mono { word-break: break-all; }
+  .devices-setup-link { margin: 18px 0 0; font-size: 13px; color: var(--text-dim); }
+  .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+  /* ===== System setup ===== */
+  .setup-lede { margin: -6px 0 18px; font-size: 13px; color: var(--text-dim); max-width: 70ch; }
+  .setup-note { margin: 0 0 18px; padding: 12px 16px; border-radius: 10px; font-size: 13px; display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px;
+                border: 1px solid color-mix(in srgb, var(--warn) 40%, transparent); background: color-mix(in srgb, var(--warn) 7%, var(--bg)); }
+  .setup-note strong { color: var(--warn); }
+  body.light-mode .setup-note strong { color: color-mix(in srgb, var(--warn) 55%, #000); }
+  .setup-note.info { border-color: var(--border); background: var(--bg-2); }
+  .setup-tasks { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; margin-bottom: 22px; }
+  .setup-task { display: flex; flex-direction: column; gap: 6px; text-align: left; padding: 18px; border-radius: 10px; cursor: pointer;
+                background: var(--bg-2); border: 1px solid var(--border); color: var(--text); font: inherit; }
+  .setup-task:hover, .setup-task:focus-visible { border-color: var(--accent); outline: none; }
+  .setup-task strong { font-size: 15px; }
+  .setup-task span { font-size: 12px; color: var(--text-dim); line-height: 1.5; }
+  .setup-holds { display: flex; flex-wrap: wrap; gap: 8px 28px; align-items: baseline; padding: 14px 18px; border-radius: 10px;
+                 background: var(--bg-2); border: 1px solid var(--border); font-size: 13px; color: var(--text-dim); }
+  .setup-holds b { font-size: 18px; color: var(--text); margin-right: 4px; }
+  .setup-last { margin-top: 10px; font-size: 12px; color: var(--text-faint); }
+  .setup-flow { display: flex; flex-wrap: wrap; border: 1px solid var(--border); border-radius: 12px; background: var(--bg-2); min-height: 420px; }
+  .setup-rail { flex: 0 0 220px; box-sizing: border-box; padding: 24px 20px; border-right: 1px solid var(--border); }
+  .setup-rail h2 { margin: 0 0 12px; font-size: 11px; font-weight: 600; letter-spacing: .6px; text-transform: uppercase; color: var(--text-dim); }
+  .setup-rail ol { list-style: none; margin: 0; padding: 0; }
+  .setup-rail li { display: flex; gap: 10px; align-items: center; padding: 7px 0; font-size: 13px; color: var(--text-faint); }
+  .setup-rail li .n { width: 22px; height: 22px; flex-shrink: 0; border-radius: 50%; border: 1px solid var(--border); display: flex; align-items: center; justify-content: center; font-size: 11px; }
+  .setup-rail li.done { color: var(--text-dim); }
+  .setup-rail li.done .n { border-color: var(--accent); color: var(--accent); }
+  .setup-rail li.on { color: var(--text); font-weight: 600; }
+  .setup-rail li.on .n { background: var(--accent); border-color: var(--accent); color: #061018; }
+  .setup-body { flex: 999 1 420px; min-width: 0; box-sizing: border-box; padding: 24px 28px; display: flex; flex-direction: column; gap: 14px; }
+  .setup-body h3 { margin: 0; font-size: 20px; font-weight: 600; }
+  .setup-body .sub { font-size: 13px; color: var(--text-dim); line-height: 1.5; max-width: 66ch; }
+  .setup-pick { display: flex; flex-direction: column; gap: 8px; max-height: 340px; overflow-y: auto; }
+  .setup-pick label { display: grid; grid-template-columns: 20px 64px minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 11px 14px;
+                      border: 1px solid var(--border); border-radius: 8px; font-size: 13px; cursor: pointer; }
+  .setup-pick label:has(input:checked) { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 6%, transparent); }
+  .setup-pick .quiet { color: var(--warn); }
+  .setup-pick .dim { color: var(--text-dim); }
+  .setup-field { display: flex; flex-direction: column; gap: 6px; max-width: 420px; }
+  .setup-field label { font-size: 12px; color: var(--text-dim); }
+  .setup-field input { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 16px; padding: 10px 14px; min-width: 0; }
+  .setup-check { font-size: 13px; }
+  .setup-check.good { color: var(--good); }
+  .setup-check.bad { color: var(--bad); }
+  .setup-plan { margin: 0; padding: 16px 18px 16px 38px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg); font-size: 14px; line-height: 1.55; }
+  .setup-plan li { margin: 4px 0; }
+  .setup-frames { font-size: 12px; color: var(--text-dim); }
+  .setup-frames .mono { display: block; margin-top: 6px; word-break: break-all; line-height: 1.6; }
+  .setup-progress { list-style: none; margin: 0; padding: 0; }
+  .setup-progress li { display: grid; grid-template-columns: 22px 1fr; gap: 10px; padding: 9px 0; border-bottom: 1px solid var(--border); font-size: 14px; color: var(--text-faint); }
+  .setup-progress li.done { color: var(--text); }
+  .setup-progress li.done::before { content: "✓"; color: var(--good); }
+  .setup-progress li.now { color: var(--text); }
+  .setup-progress li.now::before { content: "◐"; color: var(--warn); }
+  .setup-progress li:not(.done):not(.now)::before { content: "○"; }
+  .setup-wait { display: flex; align-items: center; gap: 18px; padding: 18px 20px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg); }
+  .setup-wait strong { font-size: 16px; }
+  .setup-done dl { display: grid; grid-template-columns: 130px minmax(0, 1fr); gap: 8px 16px; margin: 0; padding: 18px 20px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg); font-size: 14px; }
+  .setup-done dt { color: var(--text-dim); }
+  .setup-done dd { margin: 0; }
+  .setup-error { color: var(--bad); font-size: 13px; }
+  .setup-actions { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 10px; margin-top: auto; padding-top: 8px; }
+  .setup-actions .why { flex-basis: 100%; text-align: right; font-size: 12px; color: var(--text-dim); }
+  @media (max-width: 760px) { .setup-rail { flex-basis: 100%; border-right: 0; border-bottom: 1px solid var(--border); } }
   .mesh-empty { padding: 80px 24px; text-align: center; color: var(--text-dim); font-size: 13px; }
   .mesh-side { border-left: 1px solid var(--border); padding: 16px; font-size: 13px; background: var(--bg); }
   .mesh-side h3 { margin: 0 0 2px; font-size: 15px; display: flex; gap: 8px; align-items: center; }
@@ -1123,6 +1167,7 @@
       <button data-view="history"><span class="icon">↗</span> History</button>
       <button data-view="topology"><span class="icon">⌘</span> Topology</button>
       <button data-view="nodes"><span class="icon">≡</span> Devices</button>
+      <button data-view="setup" id="nav-setup" data-linux-only style="display:none"><span class="icon">✚</span> System setup</button>
       <button data-view="settings"><span class="icon">⚙</span> Settings</button>
       <button data-view="diagnostics"><span class="icon">◈</span> Diagnostics</button>
       <button data-view="bus" id="nav-bus" data-linux-only style="display:none"><span class="icon">⇄</span> Bus</button>
@@ -1435,29 +1480,8 @@
           </tbody>
         </table>
       </div>
-      <!-- Pi build, running the bus: an optimizer added to or removed from the TAP's table. -->
-      <div id="table-edit-wrap" style="display:none">
-      <div class="section-title devices-head">The TAP's table</div>
-      <div id="table-edit" class="table-edit">
-        <p class="table-edit-note" id="table-edit-note"></p>
-        <div class="table-edit-row">
-          <label for="table-add-label">Add an optimizer</label>
-          <input class="input" id="table-add-label" placeholder="Its label, e.g. 4-9A57A2L" autocomplete="off" spellcheck="false">
-          <input class="input compact" id="table-add-id" placeholder="Address (optional)" maxlength="4" autocomplete="off" spellcheck="false">
-          <button class="btn" type="button" id="table-add-dry">Dry run</button>
-          <button class="btn primary" type="button" id="table-add-go">Add</button>
-          <span class="table-edit-hint" id="table-add-hint"></span>
-        </div>
-        <div class="table-edit-row">
-          <label for="table-remove-pick">Remove an optimizer</label>
-          <select class="input" id="table-remove-pick"></select>
-          <button class="btn" type="button" id="table-remove-dry">Dry run</button>
-          <button class="btn danger" type="button" id="table-remove-go">Remove</button>
-        </div>
-        <div class="table-edit-status" id="table-edit-status" role="status"></div>
-        <div class="table-edit-waiting" id="table-edit-waiting"></div>
-      </div>
-      </div>
+      <!-- Pi build, running the bus: what the TAP holds; changes are in System setup. -->
+      <p class="devices-setup-link" id="devices-setup-link" style="display:none"></p>
       <dialog id="smart-panel" class="smart-panel" aria-labelledby="smart-panel-title">
         <div class="smart-head">
           <div><h3 id="smart-panel-title"></h3><div class="smart-sub"></div></div>
@@ -1468,6 +1492,15 @@
         <div class="smart-k">As heard</div>
         <code class="smart-raw"></code>
       </dialog>
+    </section>
+
+    <!-- Pi build: changes to the hardware, as guided steps (System setup). -->
+    <section class="view" id="view-setup">
+      <div class="topbar">
+        <h1>System setup</h1>
+        <div class="topbar-meta" id="setup-meta">—</div>
+      </div>
+      <div id="setup-root" aria-live="polite"></div>
     </section>
 
     <!-- SETTINGS -->
@@ -2803,6 +2836,8 @@
     apiFetch('/api/settings').then(r => r.ok ? r.json() : null).then(st => { if (st) piApplyPages(st); }).catch(() => {});
     document.querySelectorAll('[data-esp-only]').forEach(el => { el.style.display = 'none'; });
     document.querySelectorAll('[data-linux-only]').forEach(el => { el.style.display = ''; });
+    // Opened at #setup: it couldn't load before the platform was known.
+    if (document.getElementById('view-setup').classList.contains('active')) refreshSetup();
     document.getElementById('hist-backing').textContent = 'Stored on the SD card · persists across reboots';
     document.getElementById('cca-ble-hint').innerHTML = 'Scan for your Tigo CCA over Bluetooth (matched by its <code>04:C0:5B</code> address prefix). With none saved, the Pi uses the nearest one; save a MAC to pin it.';
     document.getElementById('cca-ble-revert-btn').textContent = 'Use nearest';
@@ -3851,110 +3886,301 @@
     return h[6] + '-' + h.slice(7).replace(/^0+/, '') + labelCheck(h);
   }
 
-  // The add and removal panel: shown while this Pi runs the bus, as the
-  // master or as a standby that has taken it over.
-  let tableMaster = null;
-  function renderTableEdit() {
-    const box = document.getElementById('table-edit-wrap');
-    const m = tableMaster;
-    const running = m && m.active && m.table &&
-      (m.role === 'master' || (m.role === 'standby' && m.standby && m.standby.state === 'active'));
-    box.style.display = running ? '' : 'none';
-    if (!running) return;
-    const t = m.table, e = t.edit || {};
-    document.getElementById('table-edit-note').textContent = t.writes
-      ? 'Changes the TAP\'s list of optimizers, as the CCA does. Try a dry run first: it reads the table and shows what would be sent.'
-      : 'Table writes are off (Settings → Bus), so only a dry run works: it reads the table and shows what would be sent.';
-    const busy = !!e.active || !!e.interrupted;
-    for (const id of ['table-add-dry', 'table-remove-dry']) document.getElementById(id).disabled = busy;
-    for (const id of ['table-add-go', 'table-remove-go']) document.getElementById(id).disabled = busy || !t.writes;
-    // The optimizers the TAP lists, by name and label.
-    const pick = document.getElementById('table-remove-pick');
-    const was = pick.value;
-    const nodes = (nodesData.nodes || []).filter(n => /^04C05B/i.test(n.long_address || ''))
-      .sort((a, b) => String(a.addr).localeCompare(String(b.addr)));
-    const name = n => { const d = (nodesData.devices || []).find(x => x.addr === n.addr); return d && d.name ? d.name : n.cca_label || ''; };
-    pick.innerHTML = '<option value="">Choose one…</option>' + nodes.map(n =>
-      `<option value="${topoEscape(n.long_address)}">${topoEscape(n.addr)}${name(n) ? ' · ' + topoEscape(name(n)) : ''} · ${topoEscape(labelOfMac(n.long_address))}</option>`).join('');
-    pick.value = was;
-    // Added and not joined yet, each with a way to stop waiting; then the
-    // last few that joined or were given up on.
-    const ago = u => { const m = Math.max(0, Math.floor((Date.now() / 1000 - u) / 60)); return m < 1 ? 'just now' : `${m} min`; };
-    const who = x => { const n = nodes.find(n => String(n.long_address).toUpperCase() === x.mac); return `${topoEscape(x.id)}${n && name(n) ? ' · ' + topoEscape(name(n)) : ''} · ${topoEscape(x.label)}`; };
-    const waiting = t.waiting || [], joins = (t.joins || []).slice(-3).reverse();
-    document.getElementById('table-edit-waiting').innerHTML =
-      (waiting.length ? '<strong>Waiting to join</strong> (the window stays open meanwhile, up to 30 min each)<ul>' +
-        waiting.map(w => `<li>${who(w)} · ${ago(w.since_unix)}<button class="btn" type="button" data-stop="${topoEscape(w.mac)}">Stop waiting</button></li>`).join('') + '</ul>' : '') +
-      (joins.length ? `<ul class="past">` + joins.map(o => `<li>${who(o)}: ${topoEscape(o.text)}</li>`).join('') + '</ul>' : '');
-    const st = document.getElementById('table-edit-status');
-    st.classList.toggle('bad', !!e.finished && !e.ok || !!e.interrupted);
-    if (!e.kind) { st.textContent = ''; return; }
-    const what = (e.dry_run ? 'Dry run: ' : '') + (e.kind === 'add' ? 'adding ' : 'removing ') + (e.label || e.mac);
-    let html = `<strong>${topoEscape(what)}</strong> · ${topoEscape(e.active ? e.step + '…' : e.message || e.step)}`;
-    if ((e.dry_frames || []).length)
-      html += '<br>Would send: ' + e.dry_frames.map(f => `<span class="mono">${topoEscape(f)}</span>`).join(', ');
-    st.innerHTML = html;
+  // Running the bus, the Devices page says what the TAP holds and where to
+  // change it (System setup).
+  async function refreshSetupLink() {
+    const el = document.getElementById('devices-setup-link');
+    const m = PLATFORM === 'linux' ? await apiFetch('/api/master').then(r => r.ok ? r.json() : null).catch(() => null) : null;
+    const w = m && m.discovery;
+    if (!setupRunning(m) || !w || !m.discovery_read) { el.style.display = 'none'; return; }
+    el.style.display = '';
+    el.innerHTML = `The TAP lists ${w.in_table} optimizers, ${w.joined} joined. To replace, add or retire one, open <a href="#setup">System setup</a>.`;
   }
-  // Polled every 2 s while a change runs.
-  let tableEditTimer = 0;
-  async function refreshTableEdit() {
-    clearTimeout(tableEditTimer);
-    if (PLATFORM !== 'linux') return;
-    tableMaster = await apiFetch('/api/master').then(r => r.ok ? r.json() : null).catch(() => null);
-    renderTableEdit();
-    const e = tableMaster && tableMaster.table && tableMaster.table.edit || {};
-    const waits = tableMaster && tableMaster.table && (tableMaster.table.waiting || []).length;
-    if ((e.active || waits) && document.getElementById('view-nodes').classList.contains('active'))
-      tableEditTimer = setTimeout(async () => { await refreshTableEdit(); if (!(tableMaster && tableMaster.table.edit.active)) refreshNodes(); }, 2000);
+
+  // ===== System setup =====
+  // Replacing, adding and retiring an optimizer as guided steps
+  // (docs/superpowers/specs/2026-11-09-system-setup-design.md). The bus work
+  // is the master's table jobs (/api/master/table/*); this page asks for
+  // them, a check (dry run) first, and follows them through /api/master.
+  const SETUP_STEPS = {
+    replace: ['pick', 'label', 'check', 'do', 'wait', 'done'],
+    add: ['label', 'check', 'do', 'wait', 'done'],
+    retire: ['pick', 'check', 'do', 'done'],
+  };
+  const SETUP_STEP_NAMES = { pick: 'Which one', label: "What's going in", check: 'Check', do: 'Do it',
+                             wait: 'Wait for it to join', done: 'Done' };
+  const SETUP_TITLES = { replace: 'Replace an optimizer', add: 'Add an optimizer', retire: 'Retire an optimizer' };
+  // The master's steps, in order, for the progress list.
+  const SETUP_JOB_STEPS = {
+    add: [['reading the table', 'Read the TAP\'s list'], ['writing', 'Write the new one'], ['reading it back', 'Read it back']],
+    remove: [['reading the table', 'Read the TAP\'s list'], ['saving what stays', 'Save it, so a cut-off can be finished'],
+             ['erasing the table', 'Erase the TAP\'s list'], ['checking it\'s empty', 'Check it\'s empty'],
+             ['writing back what stays', 'Write the list back'], ['reading it back', 'Read it back']],
+  };
+  let setup = { flow: null, data: null, timer: 0 };
+
+  async function setupLoad() {
+    const get = u => apiFetch(u).then(r => r.ok ? r.json() : null).catch(() => null);
+    const [m, d, n] = await Promise.all([get('/api/master'), get('/api/devices'), get('/api/nodes')]);
+    const devices = (d && d.devices) || [];
+    const opts = ((n && n.nodes) || []).filter(x => /^04C05B/i.test(x.long_address || '')).map(x => {
+      const dev = devices.find(v => String(v.addr).toUpperCase() === String(x.addr).toUpperCase()) || {};
+      return { addr: String(x.addr).toUpperCase(), mac: String(x.long_address).toUpperCase(), name: dev.name || x.cca_label || x.addr,
+               string: x.cca_string || '', placed: !!x.cca_string, ageMs: dev.data_age_ms, stale: !!dev.stale, power: dev.power,
+               vin: dev.voltage_in, current: dev.current, label: labelOfMac(x.long_address) };
+    });
+    // Gone quiet: placed, and silent for 15 min while most others report.
+    const reporting = opts.filter(o => o.ageMs !== undefined && o.ageMs < 60000).length;
+    for (const o of opts) o.quiet = o.placed && reporting > opts.length / 2 && (o.stale || !(o.ageMs < 15 * 60000));
+    setup.data = { master: m, opts };
   }
-  document.getElementById('table-add-label').addEventListener('input', e => {
-    const hint = document.getElementById('table-add-hint');
-    const v = e.target.value.trim();
-    const mac = macOfLabel(v);
-    hint.classList.toggle('bad', !!v && !mac);
-    hint.textContent = !v ? '' : mac ? `MAC ${mac}` : 'That label doesn\'t check out: look for a misread character';
-  });
-  async function startTableEdit(kind, dry) {
-    const body = { dry_run: dry };
-    if (kind === 'add') {
-      const label = document.getElementById('table-add-label').value.trim();
-      if (!macOfLabel(label)) { showToast('Type the optimizer\'s label first', 'err'); return; }
-      body.label = label;
-      const id = document.getElementById('table-add-id').value.trim();
-      if (id) body.id = id;
+  function setupRunning(m) {
+    return !!(m && m.active && m.table && (m.role === 'master' || (m.role === 'standby' && m.standby && m.standby.state === 'active')));
+  }
+  function setupAgo(ms) {
+    if (ms === undefined || ms === null) return 'not heard';
+    const min = Math.floor(ms / 60000);
+    return min < 1 ? 'just now' : min < 60 ? `${min} min ago` : `${Math.floor(min / 60)} h ago`;
+  }
+
+  function renderSetup() {
+    const root = document.getElementById('setup-root');
+    const d = setup.data;
+    if (!d) { root.innerHTML = '<p class="setup-lede">Loading…</p>'; return; }
+    const m = d.master, t = m && m.table, w = m && m.discovery;
+    document.getElementById('setup-meta').textContent = w && m.discovery_read
+      ? `${w.in_table} listed with the TAP · ${w.joined} joined` : '—';
+    if (setup.flow) return renderSetupFlow(root);
+    let html = '<p class="setup-lede">Changes to the hardware, done the way a CCA does them. Each one checks first and tells you what it will do before anything is sent.</p>';
+    if (!setupRunning(m))
+      html += '<div class="setup-note info">This Pi isn\'t running the bus, so it can\'t change the TAP\'s list. Set it to run the bus in Settings → Bus.</div>';
+    else if (!t.writes)
+      html += '<div class="setup-note info">Changes are off: turn on <strong>Let me change the TAP\'s table</strong> in Settings → Bus. You can still go through each task and see what it would do.</div>';
+    const quiet = d.opts.filter(o => o.quiet).sort((a, b) => (b.ageMs || 0) - (a.ageMs || 0))[0];
+    if (quiet)
+      html += `<div class="setup-note"><span><strong>${topoEscape(quiet.name)} hasn't reported for ${topoEscape(setupAgo(quiet.ageMs).replace(' ago', ''))}.</strong> If it's been swapped, replace it here.</span>
+        <span style="flex-grow:1"></span><button type="button" class="btn primary" data-setup-start="replace" data-setup-old="${topoEscape(quiet.mac)}">Replace ${topoEscape(quiet.name)}</button></div>`;
+    html += `<div class="setup-tasks">
+      <button type="button" class="setup-task" data-setup-start="replace"><strong>Replace an optimizer</strong><span>Take a dead one out of the TAP's list, put its replacement in, and keep its place in your layout.</span></button>
+      <button type="button" class="setup-task" data-setup-start="add"><strong>Add an optimizer</strong><span>A new panel: list it with the TAP and wait for it to join, then place it in Topology.</span></button>
+      <button type="button" class="setup-task" data-setup-start="retire"><strong>Retire an optimizer</strong><span>Gone for good: take it off the TAP's list.</span></button>
+    </div>`;
+    if (w && m.discovery_read) {
+      const never = Math.max(0, w.in_table - w.joined);
+      html += `<div class="section-title devices-head">What the TAP holds</div><div class="setup-holds">
+        <span><b>${w.in_table}</b>listed</span><span><b style="color:var(--good)">${w.joined}</b>joined</span>
+        <span><b>${never}</b>listed, not joined</span>${(t.waiting || []).length ? `<span><b style="color:var(--warn)">${t.waiting.length}</b>waiting to join</span>` : ''}</div>`;
+    }
+    if (t && t.edit && t.edit.kind && t.edit.finished && !t.edit.dry_run)
+      html += `<div class="setup-last">Last change: ${topoEscape(t.edit.message)}</div>`;
+    root.innerHTML = html;
+  }
+
+  function setupRail(f) {
+    const steps = SETUP_STEPS[f.task], i = steps.indexOf(f.step);
+    const name = s => {
+      if (s === 'pick' && f.old && steps.indexOf(s) < i) return `${f.old.name} ${f.task === 'retire' ? 'going' : 'coming out'}`;
+      if (s === 'label' && f.label && steps.indexOf(s) < i) return `${macOfLabel(f.label) ? labelOfMac(macOfLabel(f.label)) : f.label} going in`;
+      return s === 'pick' && f.task === 'retire' ? 'Which one is going' : s === 'pick' ? 'Which one is coming out' : SETUP_STEP_NAMES[s];
+    };
+    return `<nav class="setup-rail" aria-label="Steps"><h2>${SETUP_TITLES[f.task]}</h2><ol>${steps.map((s, k) =>
+      `<li class="${k < i ? 'done' : k === i ? 'on' : ''}"${k === i ? ' aria-current="step"' : ''}><span class="n">${k < i ? '✓' : k + 1}</span>${topoEscape(name(s))}</li>`).join('')}</ol></nav>`;
+  }
+
+  function setupJob() {
+    const m = setup.data.master;
+    return (m && m.table && m.table.edit) || {};
+  }
+  // The plan a check returned, in plain words.
+  function setupPlan(f, e) {
+    const records = (e.dry_frames || []).filter(x => x.startsWith('29')).reduce((n, x) => n + parseInt(x.slice(2, 4), 16), 0);
+    if (f.task === 'add') {
+      if (/^already in the table/.test(e.message)) return { lines: [`It's on the TAP's list already (${e.message.replace(/^already in the table at /, 'at ')}). Nothing needs writing; it joins while the window is open.`], nothing: true };
+      return { lines: [`Write one record for it at ${e.id}, listed and not joined yet. Nothing is erased.`,
+                       'Keep the join window open until it joins, up to 30 minutes.',
+                       'It starts unassigned: place it in Topology once it reports.'] };
+    }
+    const others = f.task === 'replace' ? records - 1 : records;
+    const lines = ['Save the TAP\'s list first, so a cut-off can be finished later.',
+      f.task === 'replace'
+        ? `Erase the TAP's list and write it back without ${f.old.name}'s optimizer, with the new one at ${e.id}, ${f.old.name}'s address. The other ${others} go back as they were; the joined ones stay joined.`
+        : `Erase the TAP's list and write the other ${others} back as they were; the joined ones stay joined.`];
+    if (f.task === 'replace') {
+      lines.push('Keep the join window open until the new one joins, up to 30 minutes.');
+      lines.push(`Then put it in ${f.old.name}'s place${f.old.string ? `: ${f.old.string}` : ''}.`);
     } else {
-      const mac = document.getElementById('table-remove-pick').value;
-      if (!mac) { showToast('Choose the optimizer to remove', 'err'); return; }
-      body.mac = mac;
-      if (!dry && !confirm(`Remove ${labelOfMac(mac)} from the TAP's table?\n\nAs the CCA does, this erases the whole table and writes every other optimizer back as it was. They are unjoined for under a second while that happens.`))
-        return;
+      lines.push(`${f.old.name} keeps its place in your layout until you change it in Topology.`);
     }
-    try {
-      const r = await apiFetch(`/api/master/table/${kind}`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body) });
-      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `refused (${r.status})`);
-    } catch (err) {
-      showToast('Not started: ' + err.message, 'err');
-    }
-    await refreshTableEdit();
+    return { lines, gap: true };
   }
-  document.getElementById('table-edit-waiting').addEventListener('click', async ev => {
-    const b = ev.target.closest('button[data-stop]');
-    if (!b) return;
-    b.disabled = true;
-    try {
-      const r = await apiFetch('/api/master/table/stop', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mac: b.dataset.stop }) });
-      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `refused (${r.status})`);
-    } catch (err) {
-      showToast('Not stopped: ' + err.message, 'err');
+
+  function renderSetupFlow(root) {
+    const f = setup.flow, d = setup.data, m = d.master, t = m && m.table, e = setupJob();
+    const running = setupRunning(m);
+    let body = '';
+    const back = (label = 'Back') => `<button type="button" class="btn" data-setup-back>${label}</button>`;
+    if (f.step === 'pick') {
+      const opts = d.opts.slice().sort((a, b) => (b.quiet - a.quiet) || (b.placed - a.placed) || a.name.localeCompare(b.name, undefined, { numeric: true }));
+      body = `<h3>${f.task === 'retire' ? 'Which optimizer is going?' : 'Which optimizer is coming out?'}</h3>
+        <div class="sub">${f.task === 'retire' ? 'It comes off the TAP\'s list.' : 'Quiet ones first. Its place in the layout carries over to the new one.'}</div>
+        <fieldset class="setup-pick" style="border:0;margin:0;padding:0"><legend class="sr-only">Optimizer</legend>${opts.map(o => `
+          <label><input type="radio" name="setup-old" value="${topoEscape(o.mac)}"${f.old && f.old.mac === o.mac ? ' checked' : ''}>
+            <strong>${topoEscape(o.name)}</strong><span class="dim">${o.string ? topoEscape(o.string) : 'Not placed'} · <span class="mono">${topoEscape(o.label)}</span></span>
+            <span class="${o.quiet ? 'quiet' : 'dim'}">${o.quiet ? 'Silent since ' + topoEscape(setupAgo(o.ageMs)) : 'Reporting'}</span></label>`).join('')}</fieldset>
+        <div class="setup-actions">${back('Cancel')}<button type="button" class="btn primary" data-setup-next${f.old ? '' : ' disabled'}>Next</button></div>`;
+    } else if (f.step === 'label') {
+      const mac = macOfLabel(f.label || '');
+      const listed = mac && d.opts.find(o => o.mac === mac);
+      const check = !f.label ? '' : !mac
+        ? '<div class="setup-check bad">✕ That doesn\'t check out: look for a misread character (0 and D, 8 and B, 2 and Z, 5 and S).</div>'
+        : listed ? `<div class="setup-check bad">✕ That one is already on the TAP's list, as ${topoEscape(listed.name)}.</div>`
+        : `<div class="setup-check good">✓ Checks out · radio address <span class="mono">${mac}</span></div>`;
+      body = `<h3>What's going in?</h3>
+        <div class="sub">Type the label on the new optimizer, the short code like <span class="mono">4-9A57A2L</span>. It holds the whole radio address, and its last letter is a check, so a misread character is caught here.</div>
+        <div class="setup-field"><label for="setup-label">Label</label>
+          <input class="input" id="setup-label" autocomplete="off" spellcheck="false" value="${topoEscape(f.label || '')}" placeholder="4-9A57A2L">
+          <div id="setup-label-check">${check}</div></div>
+        <div class="setup-actions">${f.task === 'add' ? back('Cancel') : back()}<button type="button" class="btn primary" data-setup-next${mac && !listed ? '' : ' disabled'}>Check</button></div>`;
+    } else if (f.step === 'check') {
+      const mine = e.kind && e.started_unix >= f.checkedAt && e.dry_run;
+      if (!mine || !e.finished) {
+        body = '<h3>Checking…</h3><div class="sub">Reading the TAP\'s list. Nothing is sent but the read.</div>';
+      } else if (!e.ok) {
+        body = `<h3>That can't be done</h3><div class="setup-error">${topoEscape(e.message)}</div><div class="setup-actions">${back()}</div>`;
+      } else {
+        const plan = setupPlan(f, e);
+        const go = f.task === 'replace' ? `Replace ${f.old.name}` : f.task === 'add' ? 'Add it' : `Retire ${f.old.name}`;
+        const why = !running ? 'This Pi isn\'t running the bus.' : !t.writes ? 'Changes are off: turn on Let me change the TAP\'s table in Settings → Bus.' : '';
+        body = `<h3>Here's what will happen</h3>
+          <div class="sub">Read just now from the TAP. Nothing has been sent yet.</div>
+          <ol class="setup-plan">${plan.lines.map(l => `<li>${topoEscape(l)}</li>`).join('')}</ol>
+          ${plan.gap ? '<div class="sub">Every optimizer is unjoined for under a second while the list is rewritten; on the roof that took 0.78 s, and nothing had to rejoin.</div>' : ''}
+          ${(e.dry_frames || []).length ? `<details class="setup-frames"><summary>What goes on the bus (${e.dry_frames.length} frame${e.dry_frames.length === 1 ? '' : 's'})</summary><span class="mono">${e.dry_frames.map(topoEscape).join('<br>')}</span></details>` : ''}
+          <div class="setup-actions">${back()}${plan.nothing ? '' : `<button type="button" class="btn primary" data-setup-go${why ? ' disabled' : ''}>${topoEscape(go)}</button>`}
+            ${why ? `<span class="why">${topoEscape(why)}</span>` : ''}</div>`;
+      }
+    } else if (f.step === 'do') {
+      const mine = e.kind && e.started_unix >= f.startedAt && !e.dry_run;
+      const list = SETUP_JOB_STEPS[f.task === 'add' ? 'add' : 'remove'];
+      const at = mine ? (e.finished && e.ok ? list.length : list.findIndex(([k]) => k === e.step)) : 0;
+      body = `<h3>${f.task === 'replace' ? `Replacing ${topoEscape(f.old.name)}…` : f.task === 'add' ? 'Adding it…' : `Retiring ${topoEscape(f.old.name)}…`}</h3>
+        <ul class="setup-progress">${list.map(([, text], k) => `<li class="${k < at ? 'done' : k === at ? 'now' : ''}">${text}</li>`).join('')}</ul>
+        ${mine && e.finished && !e.ok ? `<div class="setup-error">${topoEscape(e.message)}${e.interrupted ? ' It will be finished from the saved list once the TAP answers again.' : ''}</div><div class="setup-actions">${back('Close')}</div>`
+          : '<div class="sub">A second or two. If it\'s cut off, by a TAP restart or this Pi, it finishes from the saved list once the TAP answers again. Leaving this page doesn\'t stop it.</div>'}`;
+    } else if (f.step === 'wait') {
+      const wt = (t.waiting || []).find(x => x.mac === f.mac);
+      const out = (t.joins || []).slice().reverse().find(x => x.mac === f.mac && x.unix >= f.startedAt);
+      const min = wt ? Math.max(0, Math.floor((Date.now() / 1000 - wt.since_unix) / 60)) : 0;
+      body = out && !out.joined
+        ? `<h3>It hasn't joined</h3><div class="sub">${topoEscape(out.text)}.</div><div class="setup-actions">${back('Close')}</div>`
+        : `<h3>Listening for the new optimizer</h3>
+          <div class="setup-wait"><svg width="44" height="44" viewBox="0 0 44 44" aria-hidden="true"><circle cx="22" cy="22" r="18" fill="none" stroke="var(--border)" stroke-width="4"></circle><path d="M22 4 A18 18 0 0 1 39 16" fill="none" stroke="var(--warn)" stroke-width="4" stroke-linecap="round"></path></svg>
+            <div><strong>${min < 1 ? 'Just started' : `${min} min`} · the join window is open</strong>
+            <div class="sub">The TAP is ready for <span class="mono">${topoEscape(labelOfMac(f.mac))}</span>. Joins took 3½ to 10 minutes on the bench, and 8 on the roof.</div></div></div>
+          <div class="sub"><strong>Meanwhile:</strong> wire it in and give it sun; an optimizer with no PV voltage can't join. You can leave this page; it keeps waiting.</div>
+          <div class="setup-actions"><button type="button" class="btn" data-setup-stop>Stop waiting</button><span class="why">Gives up at 30 min; it stays listed and joins whenever the window is next open.</span></div>`;
+    } else if (f.step === 'done') {
+      const now = f.mac && d.opts.find(o => o.mac === f.mac);
+      if (f.task === 'retire') {
+        body = `<div class="setup-done"><h3>${topoEscape(f.old.name)} is off the TAP's list</h3></div>
+          <div class="sub">${topoEscape(setupJob().message || '')}. Its place in your layout stays until you change it in Topology.</div>
+          <div class="setup-actions"><a class="btn" href="#topology">Open Topology</a><button type="button" class="btn primary" data-setup-back>Done</button></div>`;
+      } else {
+        const place = now && now.string ? `${now.string}, named ${now.name}` : f.task === 'add' ? 'Not placed yet' : 'Moving over…';
+        body = `<div class="setup-done"><h3>${f.task === 'replace' ? `${topoEscape(f.old.name)} is back` : 'It\'s in'}</h3>
+          <dl><dt>Place</dt><dd>${topoEscape(place)}</dd>
+            <dt>Optimizer</dt><dd><span class="mono">${topoEscape(labelOfMac(f.mac))}</span>${now ? ` at <span class="mono">${now.addr}</span>` : ''}</dd>
+            <dt>Reading</dt><dd>${now && now.power !== undefined ? `${(+now.vin || 0).toFixed(1)} V in · <strong>${Math.round(now.power)} W</strong>` : 'Not yet'}</dd></dl></div>
+          <div class="setup-actions">${f.task === 'add' ? '<a class="btn" href="#topology">Place it in Topology</a>' : `<button type="button" class="btn" data-setup-start="replace">Replace another</button>`}<button type="button" class="btn primary" data-setup-back>Done</button></div>`;
+      }
     }
-    await refreshTableEdit();
+    root.innerHTML = `<div class="setup-flow">${setupRail(f)}<div class="setup-body">${body}</div></div>`;
+    if (f.step === 'label') {
+      const input = document.getElementById('setup-label');
+      input.focus();
+      input.setSelectionRange(input.value.length, input.value.length);
+    }
+  }
+
+  // Follows the change while one is being checked, done or waited for.
+  async function refreshSetup() {
+    clearTimeout(setup.timer);
+    if (PLATFORM !== 'linux') return;
+    await setupLoad();
+    const f = setup.flow;
+    if (f) {
+      const e = setupJob(), t = setup.data.master && setup.data.master.table;
+      if (f.step === 'do' && e.kind && e.started_unix >= f.startedAt && !e.dry_run && e.finished && e.ok)
+        f.step = f.task === 'retire' ? 'done' : (t.waiting || []).some(x => x.mac === f.mac) ? 'wait' : 'done';
+      if (f.step === 'wait' && (t.joins || []).some(x => x.mac === f.mac && x.joined && x.unix >= f.startedAt)) f.step = 'done';
+    }
+    renderSetup();
+    const busy = f && (f.step === 'check' || f.step === 'do' || f.step === 'wait' || f.step === 'done');
+    if (document.getElementById('view-setup').classList.contains('active'))
+      setup.timer = setTimeout(refreshSetup, busy ? 1500 : 10000);
+  }
+  async function setupPost(path, body) {
+    const r = await apiFetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `refused (${r.status})`);
+  }
+  // The check, or the real thing: the same request, dry_run on or off.
+  function setupRequest(f, dry) {
+    if (f.task === 'replace') return setupPost('/api/master/table/replace', { old_mac: f.old.mac, label: f.label, dry_run: dry });
+    if (f.task === 'add') return setupPost('/api/master/table/add', { label: f.label, dry_run: dry });
+    return setupPost('/api/master/table/remove', { mac: f.old.mac, dry_run: dry });
+  }
+  document.getElementById('setup-root').addEventListener('click', async ev => {
+    const b = ev.target.closest('button');
+    if (!b || b.disabled) return;
+    const f = setup.flow;
+    if (b.dataset.setupStart) {
+      const old = b.dataset.setupOld && setup.data.opts.find(o => o.mac === b.dataset.setupOld);
+      setup.flow = { task: b.dataset.setupStart, step: old ? 'label' : SETUP_STEPS[b.dataset.setupStart][0], old: old || null, label: '' };
+      return renderSetup();
+    }
+    if (b.hasAttribute('data-setup-back')) {
+      const steps = SETUP_STEPS[f.task], i = steps.indexOf(f.step);
+      // From a finished or failed change, back is home; from a check, the step before it.
+      if (f.step === 'pick' || f.step === 'done' || f.step === 'do' || f.step === 'wait' || (f.step === 'label' && f.task === 'add')) setup.flow = null;
+      else f.step = steps[i - 1];
+      return refreshSetup();
+    }
+    if (b.hasAttribute('data-setup-next')) {
+      const steps = SETUP_STEPS[f.task];
+      f.step = steps[steps.indexOf(f.step) + 1];
+      if (f.step === 'check') {
+        f.mac = f.label ? macOfLabel(f.label) : null;
+        f.checkedAt = Math.floor(Date.now() / 1000) - 1;
+        try { await setupRequest(f, true); } catch (err) { showToast('Not checked: ' + err.message, 'err'); f.step = steps[steps.indexOf('check') - 1]; }
+      }
+      return refreshSetup();
+    }
+    if (b.hasAttribute('data-setup-go')) {
+      b.disabled = true;
+      f.startedAt = Math.floor(Date.now() / 1000) - 1;
+      try { await setupRequest(f, false); f.step = 'do'; } catch (err) { showToast('Not started: ' + err.message, 'err'); }
+      return refreshSetup();
+    }
+    if (b.hasAttribute('data-setup-stop')) {
+      try { await setupPost('/api/master/table/stop', { mac: f.mac }); } catch (err) { showToast('Not stopped: ' + err.message, 'err'); }
+      setup.flow = null;
+      return refreshSetup();
+    }
   });
-  document.getElementById('table-add-dry').addEventListener('click', () => startTableEdit('add', true));
-  document.getElementById('table-add-go').addEventListener('click', () => startTableEdit('add', false));
-  document.getElementById('table-remove-dry').addEventListener('click', () => startTableEdit('remove', true));
-  document.getElementById('table-remove-go').addEventListener('click', () => startTableEdit('remove', false));
+  document.getElementById('setup-root').addEventListener('change', ev => {
+    if (ev.target.name !== 'setup-old') return;
+    setup.flow.old = setup.data.opts.find(o => o.mac === ev.target.value) || null;
+    renderSetup();
+  });
+  document.getElementById('setup-root').addEventListener('input', ev => {
+    if (ev.target.id !== 'setup-label') return;
+    setup.flow.label = ev.target.value.trim();
+    const pos = ev.target.selectionStart;
+    renderSetup();
+    const input = document.getElementById('setup-label');
+    input.setSelectionRange(pos, pos);
+  });
+  document.addEventListener('viewshown', ev => { if (ev.detail === 'setup') refreshSetup(); });
 
   async function refreshNodes() {
     if (!document.getElementById('view-nodes').classList.contains('active')) return;
@@ -3972,7 +4198,7 @@
       };
       renderTaps();
       renderChanges();
-      refreshTableEdit();
+      refreshSetupLink();
       rebuildNodesStringFilter();
       renderNodesTable();
     } catch (e) {
