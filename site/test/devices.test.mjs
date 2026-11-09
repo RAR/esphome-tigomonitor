@@ -95,6 +95,45 @@ test("Devices, on the Pi: each optimizer's settings, stored or not, and the odd 
   await ctx.close();
 });
 
+test("Devices, on the Pi: a Settings cell opens that optimizer's settings, named, beside what its family has", async () => {
+  const { page, ctx, errors } = await open(true);
+  await page.waitForFunction(() => /Not stored/.test(document.getElementById('nodes-tbody').textContent));
+  const dev = routes['/api/devices'].devices;
+  const openFor = async (i) => {
+    await page.click(`#nodes-tbody tr[data-addr="${dev[i].addr}"] td.smart button`);
+    await page.waitForSelector('#smart-panel[open]');
+  };
+  const rows = () => page.$$eval('#smart-panel .smart-row', (rs) => rs.map((r) => [
+    r.querySelector('.smart-code').textContent, r.querySelector('.smart-val').textContent,
+    r.querySelector('.smart-most').textContent, r.classList.contains('differs')]));
+  // The odd one out: its row marked, beside what most K8s have.
+  await openFor(7);
+  assert.match(await page.textContent('#smart-panel h3'), new RegExp(`^${dev[7].name}`));
+  assert.match(await page.textContent('#smart-panel .smart-verdict'), /Differs from 5 of the 6 K8s in one setting/);
+  const r7 = await rows();
+  assert.equal(r7.length, 10);
+  assert.deepEqual(r7.find((r) => r[0] === 'HwVout'), ['HwVout', '179.20 V', '204.75 V', true]);
+  assert.equal(r7.filter((r) => r[3]).length, 1);
+  assert.match(await page.textContent('#smart-panel'), /never arrive/);
+  assert.match(await page.textContent('#smart-panel .smart-raw'), /0E00 .* S 00 …$/);
+  await page.keyboard.press('Escape');
+  await page.waitForSelector('#smart-panel:not([open])', { state: 'attached' });
+  // An H9: no table, it says the firmware answers zeros.
+  await openFor(5);
+  assert.equal((await rows()).length, 0);
+  assert.match(await page.textContent('#smart-panel'), /H9 firmware doesn't report its settings/);
+  assert.match(await page.textContent('#smart-panel .smart-verdict'), /not stored yet/i);
+  await page.click('#smart-panel .smart-close');
+  await page.waitForSelector('#smart-panel:not([open])', { state: 'attached' });
+  // A phone: the same panel, as a sheet along the bottom.
+  await page.setViewportSize({ width: 390, height: 844 });
+  await openFor(0);
+  const box = await page.$eval('#smart-panel', (d) => { const r = d.getBoundingClientRect(); return [r.left, r.bottom, r.width]; });
+  assert.ok(box[0] <= 1 && Math.abs(box[1] - 844) <= 1 && box[2] >= 388, `sheet at ${box}`);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
 test('Devices, on the Pi with no TAP version heard yet, says where it comes from', async () => {
   const { page, ctx, errors } = await open(true, { taps: [], optimizers: [] });
   await page.waitForSelector('#devices-taps', { state: 'visible' });
