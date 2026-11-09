@@ -27,10 +27,13 @@
 #include <nlohmann/json.hpp>
 
 #include <atomic>
+#include <condition_variable>
 #include <functional>
 #include <mutex>
+#include <optional>
 #include <set>
 #include <string>
+#include <thread>
 
 struct mosquitto;
 
@@ -41,10 +44,12 @@ class MqttPublisher {
   MqttPublisher(const Monitor &monitor, std::string version);
   ~MqttPublisher();
 
-  // (Re)connects with new settings; an empty host turns MQTT off.
+  // (Re)connects with new settings; an empty host turns MQTT off. Returns at
+  // once: the reconnect, and its lookup of the broker's name, happen on a
+  // thread of their own, so a slow or unknown name can't hold up the caller.
   void configure(const Settings &settings);
   // Publishes discovery for new panels and the current state. Call every
-  // publish_interval_s.
+  // publish_interval_s. Skipped while a reconfigure is under way.
   void publish();
 
   // Where publish() reads the bus master's status, in the master role.
@@ -59,6 +64,8 @@ class MqttPublisher {
 
  private:
   void stop_();
+  void apply_(const Settings &settings);  // configure's work, on worker_
+  void work_();
   void publish_discovery_(const Panel &p);
   void publish_system_discovery_();
   void publish_string_discovery_(const std::string &label);
@@ -85,6 +92,15 @@ class MqttPublisher {
   void on_pv_command_(const std::string &payload);
   mutable std::mutex err_mu_;
   std::string last_error_;
+  // The client and settings_: held by apply_ while it reconfigures, and
+  // tried by publish().
+  std::mutex client_mu_;
+  // Settings waiting for the worker; the newest wins.
+  std::mutex cfg_mu_;
+  std::condition_variable cfg_cv_;
+  std::optional<Settings> pending_;
+  bool quit_ = false;
+  std::thread worker_;
 
   friend struct MqttCallbacks;
 };
