@@ -139,7 +139,29 @@ Data collection from every TAP stops for the whole scan, about 5½ min. The acti
 - **The field after `S`** is AcLoss, the rapid-shutdown-on-AC-loss setting: `0000` in the 4.0.7 and night forms, `.` in the morning form.
 - **Our allowlisted `^00Smrt_........S0000...0000` is the CCA's Default.**
 
-The read-back `!Smrt …` has 16 tokens on the bench: token 3 HwVout, 10 the store-done flag (`S`), 11 AcLoss, 15 BaseOverride. The CCA compares them with what it wants and re-sends on a mismatch. The roof answers two ways, and the form follows the firmware (all 40, 2026-11-08): the 35 on K8 (K8.0120 and K8.0114) give 13 tokens, all identical, `0FFF 0000 0FFF 0008 00C8 00C8 000A 0154 0154 S 00 01`; the 5 on H9.0018 (D6–D10, the same five that keep producing through a mesh PV off) give 16 tokens of zeros around the flag. The K8 answer matches the K6 layout in the analysis side's `MESH_BEACONS.md` (read from the CCA's `lmudcd.smrt` headers) token for token through the flag and AcLoss: SwVout, OutResist, HwVout, DnPwmTime, UpPwmTime, PwmThresh, OvRecover, UvinLo, UvinHi (volts ×0.05, times ×0.001 s). Its last token, the K6 fields it lacks, and what the H9's zeros mean are open (handed to the analysis side 2026-11-09). So the Pi names only the flag, and compares an optimizer's answer only with others of its firmware family. Two of the H9s went `N` → `S` after the Zero's allowlisted `Smrt_`.
+The read-back `!Smrt …` has **one layout for every firmware** (the analysis side, 2026-11-08: the same format string in the K6, K8.0120, K8.0131 and H9.0022 node images, and the field table the CCA's `lmudcd` builds): nine words, the flag, a byte, three words, a byte. Counting `!Smrt` as token 0:
+
+| token | field | unit, raw → real |
+|---|---|---|
+| 1 | SwVout, the software output-voltage setpoint | V, ×0.05 |
+| 2 | OutResis, output resistance | Ω, ×0.01953125 |
+| 3 | HwVout, the hardware output-voltage limit | V, ×0.05 |
+| 4, 5 | DnPwmTim, UpPwmTim, PWM ramp times | s, ×0.001 |
+| 6 | PwmThrsh | raw |
+| 7 | OvRecTim, over-voltage recovery | s, ×0.001 |
+| 8, 9 | UvinLvLo, UvinLvHi, input under-voltage levels | V, ×0.05 |
+| 10 | the flag: `S` stored, `N` not | literal |
+| 11 | AcLoss (PwmAcLos), rapid shutdown on AC loss | raw |
+| 12 | UclLimit, the upper current limit | A, ×0.0025 |
+| 13 | UclThrsh | V, ×0.05 |
+| 14 | OvMinPwm | raw |
+| 15 | BaseOverride, the CCA UI's "Discharge Enabled" | a choice |
+
+- **A K8's answer is cut at 58 characters** (every one in the roof captures: no `\r`, the CRC straight after), two digits into UclLimit. So the roof's `… S 00 01` ends in a fragment of `0190`, not a setting; UclLimit, UclThrsh, OvMinPwm and BaseOverride never arrive from a K8. Its `!Info` is cut the same way. The CCA expects it: meshdcd logs "Reply from %s is truncated, but still useful" and retries, then gives up on, BaseOverride.
+- **An H9's answer is whole and all zeros by design:** its builder passes 0 for every setpoint. Zeros there mean "not reported", not "unset".
+- **The CCA compares four fields** and re-sends `Smrt_` on a mismatch: HwVout, the flag (anything but `S`), AcLoss and BaseOverride.
+- The Devices page names tokens 1–9 and 11, shows 10 as Stored/Not stored, and compares an optimizer's whole fields only with others of its firmware family. On the roof, the 35 K8s (K8.0120, K8.0114) all agree; the 5 H9.0018s (D6–D10, the same five that keep producing through a mesh PV off) answer zeros. Two of the H9s went `N` → `S` after the Zero's allowlisted `Smrt_`.
+- Open: which character of the `^00Smrt_` write maps to which field.
 
 ## What the Pi must never send
 
@@ -153,6 +175,6 @@ The send gate lists these as never (some are still being moved there; see plan T
 
 - What `SET_CHANNEL 20 00` means.
 - The status byte's bit order.
-- The `Smrt_` fields the parser never reads: the K8 answer's last token, and the H9 form.
+- Which character of the `^00Smrt_` write maps to which field.
 - Whether to turn NetDiag on with PeriodicCfg Write so the mesh map refreshes, and at what rate; left until the Pi takes on more writes.
 - Whether a TAP takes a node that isn't in its table (plan session B3). This decides whether we ever need SetTable.
