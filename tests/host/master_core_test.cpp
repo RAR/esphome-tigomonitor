@@ -550,24 +550,67 @@ static void test_a_table_add_writes_once_and_holds_the_window() {
   CHECK(core.open());
   std::string why;
   CHECK(core.request_table_add(NEW_MAC, 0, false, why));
-  CHECK(!core.request_table_add(NEW_MAC, 0, false, why));  // one at a time
+  CHECK(!core.request_table_add(NEW_MAC, 0, false, why));  // one change at a time
   for (uint32_t t = 0; t < 30000; t += 50) core.tick(t);
   CHECK(tap.writes.size() == 1);
   CHECK(tap.writes.size() == 1 && tap.writes[0] == (mp::Bytes{0x01, 0x04, 0xC0, 0x5B, 0x00, 0x00, 0x00, 0x12, 0x34, 0x80, 0x04}));
   MasterStatus s = core.status();
-  CHECK(s.table_edit.active && !s.table_edit.finished);
-  CHECK(s.table_edit.id == 4);
-  CHECK(s.table_edit.step == "waiting for it to join");
+  // The add is done once listed; the join is waited for apart from it.
+  CHECK(s.table_edit.finished && s.table_edit.ok && s.table_edit.id == 4);
+  CHECK(s.table_edit.message == "listed at 0004; waiting for it to join");
+  CHECK(s.table_waiting.size() == 1 && s.table_waiting[0].id == 4 && s.table_waiting[0].mac == "04C05B0000001234");
   CHECK(tap.renewals > 0);
   // It joins: the TAP clears the bit; the next read finds it, and the
   // window goes back to what discovery wants.
   tap.records.back()[8] &= 0x7F;
   for (uint32_t t = 30000; t < 120000; t += 50) core.tick(t);
   s = core.status();
-  CHECK(s.table_edit.finished && s.table_edit.ok && !s.table_edit.active);
+  CHECK(s.table_waiting.empty());
+  CHECK(s.table_joins.size() == 1 && s.table_joins[0].joined && s.table_joins[0].text == "joined at 0004");
   int renewals = tap.renewals;
   for (uint32_t t = 120000; t < 160000; t += 50) core.tick(t);
   CHECK(tap.renewals == renewals);
+  core.close();
+}
+
+// Several added back to back, waited for together; one given up on by the
+// owner, one removed: the window is held until none is left.
+static void test_several_adds_are_waited_for_together() {
+  TableTap tap;
+  int saves = 0;
+  MasterCore core(&tap.port, [](int, const std::string &) {}, nullptr, nullptr, GW, false, false);
+  core.set_table_writes(true);
+  core.set_window_wanted(false);
+  core.set_table_saved([&](const mp::Bytes &, const std::vector<mp::TableRecord> *) { saves++; return true; });
+  CHECK(core.open());
+  std::string why;
+  mp::Bytes a = NEW_MAC, b = NEW_MAC, c = NEW_MAC;
+  b[7] = 0x35;
+  c[7] = 0x36;
+  uint32_t t = 0;
+  for (const mp::Bytes &m : {a, b, c}) {
+    CHECK(core.request_table_add(m, 0, false, why));
+    for (uint32_t end = t + 3000; t < end; t += 50) core.tick(t);
+  }
+  CHECK(tap.writes.size() == 3);
+  MasterStatus s = core.status();
+  CHECK(s.table_waiting.size() == 3);
+  CHECK(!core.request_table_stop_waiting({0x04, 0xC0, 0x5B, 0x00, 0x00, 0x00, 0x99, 0x99}));
+  CHECK(core.request_table_stop_waiting(b));
+  CHECK(core.request_table_remove(c, false, why));
+  for (uint32_t end = t + 5000; t < end; t += 50) core.tick(t);
+  s = core.status();
+  CHECK(s.table_waiting.size() == 1 && s.table_waiting[0].mac == "04C05B0000001234");
+  CHECK(tap.erases == 1);
+  int renewals = tap.renewals;
+  for (uint32_t end = t + 20000; t < end; t += 50) core.tick(t);
+  CHECK(tap.renewals > renewals);  // still held for a
+  CHECK(core.request_table_stop_waiting(a));
+  for (uint32_t end = t + 3000; t < end; t += 50) core.tick(t);
+  renewals = tap.renewals;
+  for (uint32_t end = t + 40000; t < end; t += 50) core.tick(t);
+  CHECK(tap.renewals == renewals);
+  CHECK(core.status().table_waiting.empty());
   core.close();
 }
 
@@ -683,6 +726,7 @@ int main() {
   test_a_table_add_needs_the_setting();
   test_a_dry_run_sends_no_write();
   test_a_table_add_writes_once_and_holds_the_window();
+  test_several_adds_are_waited_for_together();
   test_discovery_renews_only_while_wanted();
   test_the_owner_switch_beats_wanted();
   test_the_tap_config_is_not_read_unless_asked();

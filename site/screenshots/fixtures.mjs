@@ -413,7 +413,7 @@ export const piRoutes = {
     discovery_read: true, discovery: { running: true, remaining_s: 552, node_count: 24 }, renewals: 41, discovery_renewing: true, discovery_auto: false, window_wanted: true, missing_expected: 0,
     polls: 712400, timeouts: 3, resyncs: 0, gap_ms: { max: 39, max_at_unix: 1767225600, recent: 12 }, last_reply_unix: PI_T / 1000,
     pv: { on: true, source: 'setting', since: 0, confirmed: true, unconfirmed: false, last_sent: '01', last_reply: '01' },
-    table: { writes: false, edit: { kind: '', active: false, interrupted: false, finished: false, ok: false, dry_run: false, mac: '', label: '', id: '', ack: -1, step: '', message: '', started_unix: 0, finished_unix: 0, dry_frames: [] } },
+    table: { writes: false, edit: { kind: '', active: false, interrupted: false, finished: false, ok: false, dry_run: false, mac: '', label: '', id: '', ack: -1, step: '', message: '', started_unix: 0, finished_unix: 0, dry_frames: [] }, waiting: [], joins: [] },
     standby: { state: 'off', takeover_s: 3, master_heard_ms_ago: -1, takeovers: 0, last_takeover_unix: 0, yields: 0 },
   },
   '/api/bus': {

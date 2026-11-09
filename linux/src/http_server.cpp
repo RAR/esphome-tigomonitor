@@ -1499,7 +1499,20 @@ void HttpServer::routes_() {
                         {"message", m.table_edit.message},
                         {"started_unix", m.table_edit.started_unix},
                         {"finished_unix", m.table_edit.finished_unix},
-                        {"dry_frames", m.table_edit.dry_frames}}}}},
+                        {"dry_frames", m.table_edit.dry_frames}}},
+                      {"waiting", [&m] {
+                         json a = json::array();
+                         for (const auto &w : m.table_waiting)
+                           a.push_back({{"mac", w.mac}, {"label", label_of_hex(w.mac)}, {"id", hex4(w.id)}, {"since_unix", w.since_unix}});
+                         return a;
+                       }()},
+                      {"joins", [&m] {
+                         json a = json::array();
+                         for (const auto &o : m.table_joins)
+                           a.push_back({{"mac", o.mac}, {"label", label_of_hex(o.mac)}, {"id", hex4(o.id)}, {"joined", o.joined},
+                                        {"text", o.text}, {"unix", o.at_unix}});
+                         return a;
+                       }()}}},
                     {"standby",
                      {{"state", standby_name(m.standby)},
                       {"takeover_s", m.takeover_s},
@@ -1589,6 +1602,26 @@ void HttpServer::routes_() {
     std::string why;
     int code = ctx_.request_table_remove ? ctx_.request_table_remove(mac, dry, why) : 409;
     if (code == 200) send_json(res, {{"started", true}, {"dry_run", dry}, {"mac", mp::mac_hex(mac)}, {"label", mp::label_of(mac)}});
+    else send_json(res, {{"error", why.empty() ? "not running the bus" : why}}, code);
+  });
+
+  // Pi-only: stop waiting for an added optimizer to join ({"label"} or
+  // {"mac"}); it stays listed. Behind the web password.
+  svr.Post("/api/master/table/stop", [this](const httplib::Request &req, httplib::Response &res) {
+    if (ctx_.current_settings().web_password.empty()) {
+      send_json(res, {{"error", "set a web password first"}}, 403);
+      return;
+    }
+    json j = json::parse(req.body, nullptr, false);
+    esphome::tigo_monitor::master::Bytes mac;
+    std::string bad;
+    if (j.is_discarded() || !j.is_object() || !optimizer_of(j, mac, bad)) {
+      send_json(res, {{"error", bad.empty() ? "expected {\"label\": ...} or {\"mac\": ...}" : bad}}, 400);
+      return;
+    }
+    std::string why;
+    int code = ctx_.request_table_stop_waiting ? ctx_.request_table_stop_waiting(mac, why) : 409;
+    if (code == 200) send_json(res, {{"stopped", true}});
     else send_json(res, {{"error", why.empty() ? "not running the bus" : why}}, code);
   });
 

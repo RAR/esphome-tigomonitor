@@ -32,6 +32,7 @@
 #include <atomic>
 #include <cstdint>
 #include <functional>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <set>
@@ -77,6 +78,21 @@ struct TableEditStatus {
   // A removal stopped between its erase and its last write back, saved for
   // the next start, which needs master_table_writes on to finish it.
   bool interrupted = false;
+};
+
+// An optimizer added and not joined yet (table_edit.h's JoinWatch), and
+// what became of one: joined, gone from the table, or given up on.
+struct TableWaiting {
+  std::string mac;  // hex
+  uint16_t id = 0;
+  int64_t since_unix = 0;
+};
+struct TableJoinOutcome {
+  std::string mac;
+  uint16_t id = 0;
+  bool joined = false;
+  std::string text;
+  int64_t at_unix = 0;
 };
 
 struct MasterStatus {
@@ -138,6 +154,9 @@ struct MasterStatus {
   int pv_last_sent = -1, pv_last_reply = -1;
   bool table_writes = false;  // the setting
   TableEditStatus table_edit;
+  std::vector<TableWaiting> table_waiting;
+  std::vector<TableJoinOutcome> table_joins;  // newest last, at most TABLE_JOINS_KEPT
+  static const size_t TABLE_JOINS_KEPT = 10;
 };
 
 // The serial port on the bus. The core calls it only from tick().
@@ -242,6 +261,9 @@ class MasterCore {
   // Starts removing one: the table erased and what stays written back. The
   // same refusals, but for the window, and nowhere to save what stays.
   bool request_table_remove(const esphome::tigo_monitor::master::Bytes &mac, bool dry_run, std::string &why);
+  // Stops waiting for an added optimizer to join (it stays listed, and
+  // joins whenever the window is next open). False if it isn't waited for.
+  bool request_table_stop_waiting(const esphome::tigo_monitor::master::Bytes &mac);
 
   bool open();
   // Sends at most one request and reads its reply, up to REPLY_TIMEOUT_MS.
@@ -320,6 +342,12 @@ class MasterCore {
   void start_table_job_(std::unique_ptr<esphome::tigo_monitor::master::TableJob> job);  // under mu_
   void sync_table_status_(bool finished_now);
   void settle_table_job_(uint32_t now_ms);
+  // The added optimizers waited for (tick thread), and the owner's "stop
+  // waiting"s for the next tick (under mu_).
+  esphome::tigo_monitor::master::JoinWatch join_watch_;
+  std::vector<esphome::tigo_monitor::master::Bytes> stop_waiting_;
+  std::map<std::string, int64_t> waiting_since_;  // by MAC hex
+  void sync_join_status_();
   std::unique_ptr<esphome::tigo_monitor::master::Queries> queries_;
   // queries_'s answers, kept across a restart of queries_ (a takeover, a TAP
   // power cut); under mu_.

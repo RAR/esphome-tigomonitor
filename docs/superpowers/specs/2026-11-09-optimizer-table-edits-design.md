@@ -108,6 +108,12 @@ The owner removed one of the replacement spares listed in the roof TAP's table b
 - Afterwards the TAP's window read showed 43 in the table, 41 joined: the 40 working optimizers and `002D`, which the table already listed as joined.
 - All 40 optimizers reported within 30 s; no rejoins (no NetDiag), no TAP silence. The saved list was cleared.
 
+**The add, 16:18 EST:** the owner added the same spare back from the Devices page. A dry run first, then one write (`29 01 … 802C`, ack `00`) with no erase; the read back showed the 43 as before plus `802C`, not joined. The TAP counted 44 in the table, 41 joined, and the window opened for the join (the Bus page's discovery switch had to be set back to renewing first: an add refuses to start while it's held closed). **At 16:26:13 the spare joined, eight minutes on,** from the bench: the bench TAPs were being power-cut by the unplugged CCA, so it had no steady parent there and found the roof's TAP. Afterwards the roof read 41 of 41 optimizers reporting.
+
+## Waiting for joins apart from the change
+
+An add first held the one-change-at-a-time lock until its optimizer joined or 30 minutes passed, so a second add had to wait. Now the add ends once its record is listed and read back (about a second), and a separate list (`JoinWatch`) holds the window open while any added optimizer hasn't joined, reading the table once a minute. Each is given up on after its own 30 minutes, or when the owner presses **Stop waiting**, and is dropped when a removal takes it out of the table. A change starting abandons a half-done read of the list, so no read straddles an erase. Adding several replacements is now a few seconds apart, then one wait, as the CCA writes them together and opens one window.
+
 ## Bench first
 
 Each step on the bench TAP before the roof, with `--capture` on:

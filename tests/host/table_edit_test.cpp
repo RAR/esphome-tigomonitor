@@ -210,33 +210,117 @@ static FakeTap table_of(int n) {
 }
 
 // The bench add: read the table, write one provisional record at the lowest
-// free id, read back, then wait for the join with the window held open.
-static void test_add_writes_one_record_and_waits_for_the_join() {
+// free id, read back. Done once it is listed; the wait for the join is
+// JoinWatch's.
+static void test_add_writes_one_record() {
   FakeTap tap = table_of(25);  // three pages
   tap.slots[3].second |= 0x8000;  // one listed and not joined yet
   uint32_t now = 1000;
   TableAdd job(hex("04C05B0000001234"), 0, false);
   CHECK(job.step() == TableAdd::Step::read_before);
-  CHECK(!job.wants_window());
-  for (int i = 0; i < 60 && job.step() != TableAdd::Step::joining && !job.finished(); i++) run(job, tap, now, 1);
-  CHECK(job.step() == TableAdd::Step::joining);
+  run(job, tap, now);
+  CHECK(job.finished() && job.ok());
   CHECK(tap.writes == 1);
   CHECK(tap.last_write == set_table({record("04C05B0000001234", 0x8000 | 27)}));
   CHECK(job.id() == 27);
-  CHECK(job.wants_window());
   CHECK(job.ack() == 0);
-  // Not joined: the job reads the table again a minute on, and keeps waiting.
+  CHECK(job.awaiting_join());
+  CHECK(job.message() == "listed at 001B; waiting for it to join");
+}
+
+// ---- JoinWatch ----
+
+// Reads the table a minute apart while any added optimizer hasn't joined;
+// each that has, or is gone, is an outcome; the window is wanted meanwhile.
+static int watch_run(JoinWatch &w, FakeTap &tap, uint32_t &now, uint32_t until) {
+  uint8_t seq = 0;
+  int sent = 0;
+  for (; now < until; now += 1000) {
+    Request r = w.due(now, seq);
+    if (!r.cmd) continue;
+    CHECK(r.table_edit);
+    CHECK(classify_request(r.cmd, r.payload) == Allow::yes);  // reads only
+    sent++;
+    Frame reply;
+    bool ok = tap.reply(r, reply);
+    w.on_reply(ok, reply, now);
+  }
+  return sent;
+}
+
+static void test_join_watch() {
+  FakeTap tap = table_of(3);
+  Bytes a = hex("04C05B0000001234"), b = hex("04C05B0000001235"), c = hex("04C05B0000001236");
+  tap.slots.push_back({a, 0x8005});
+  tap.slots.push_back({b, 0x8006});
+  tap.slots.push_back({c, 0x8007});
+  JoinWatch w;
+  uint32_t now = 0;
+  CHECK(!w.wants_window());
+  w.add(a, 5, now);
+  w.add(b, 6, now);
+  w.add(c, 7, now);
+  CHECK(w.wants_window() && w.waiting().size() == 3);
+  CHECK(watch_run(w, tap, now, 30000) == 0);  // the first read a minute on
+  CHECK(watch_run(w, tap, now, 70000) > 0);
+  CHECK(w.waiting().size() == 3 && w.take_outcomes().empty());
+  tap.join(a);
+  tap.slots.erase(tap.slots.begin() + 5);  // c gone from the table
+  watch_run(w, tap, now, 140000);
+  auto out = w.take_outcomes();
+  CHECK(out.size() == 2);
+  CHECK(out.size() == 2 && out[0].mac == a && out[0].joined && out[0].text == "joined at 0005");
+  CHECK(out.size() == 2 && out[1].mac == c && !out[1].joined && out[1].text == "gone from the table");
+  CHECK(w.waiting().size() == 1 && w.waiting()[0].mac == b);
+  // Given up on by the owner: nothing waited for, nothing read.
+  CHECK(w.drop(b) && !w.drop(b));
+  CHECK(!w.wants_window());
   int pages = tap.pages;
-  for (int i = 0; i < 70; i++) run(job, tap, now, 1);
-  CHECK(tap.pages > pages);
-  CHECK(job.step() == TableAdd::Step::joining);
-  // Joined: done at the next read.
-  tap.join(hex("04C05B0000001234"));
-  for (int i = 0; i < 70 && !job.finished(); i++) run(job, tap, now, 1);
-  CHECK(job.finished() && job.ok());
-  CHECK(job.step() == TableAdd::Step::done);
-  CHECK(!job.wants_window());
-  CHECK(tap.writes == 1);
+  watch_run(w, tap, now, 400000);
+  CHECK(tap.pages == pages);
+}
+
+// Each is given up after its own 30 min, left listed.
+static void test_join_watch_timeout() {
+  FakeTap tap = table_of(2);
+  Bytes a = hex("04C05B0000001234"), b = hex("04C05B0000001235");
+  tap.slots.push_back({a, 0x8004});
+  tap.slots.push_back({b, 0x8005});
+  JoinWatch w;
+  uint32_t now = 0;
+  w.add(a, 4, now);
+  watch_run(w, tap, now, 10 * 60000);
+  w.add(b, 5, now);
+  watch_run(w, tap, now, JoinWatch::JOIN_TIMEOUT_MS + 1000);
+  auto out = w.take_outcomes();
+  CHECK(out.size() == 1 && out[0].mac == a && !out[0].joined);
+  CHECK(out.size() == 1 && out[0].text.find("not joined after 30 min") == 0);
+  CHECK(w.waiting().size() == 1);
+  watch_run(w, tap, now, 10 * 60000 + JoinWatch::JOIN_TIMEOUT_MS + 1000);
+  CHECK(w.take_outcomes().size() == 1 && !w.wants_window());
+  CHECK(tap.slots.size() == 4);  // nothing written or removed
+}
+
+// A change starting mid-read: the read is dropped and begun again later.
+static void test_join_watch_pause() {
+  FakeTap tap = table_of(30);
+  Bytes a = hex("04C05B0000001234");
+  tap.slots.push_back({a, 0x8040});
+  JoinWatch w;
+  uint32_t now = 0;
+  uint8_t seq = 0;
+  w.add(a, 0x40, now);
+  now = JoinWatch::JOIN_CHECK_MS;
+  Request r = w.due(now, seq);
+  Frame reply;
+  CHECK(r.cmd && tap.reply(r, reply));
+  w.on_reply(true, reply, now);  // one page of three
+  w.pause();
+  CHECK(!w.asked());
+  tap.join(a);
+  watch_run(w, tap, now, now + 5000);
+  auto out = w.take_outcomes();
+  CHECK(out.size() == 1 && out[0].joined);
 }
 
 // A table with gaps is read whole, each page from one past the last id.
@@ -331,8 +415,8 @@ static void test_a_bad_read_back() {
   TableAdd job2(hex("04C05B0000001234"), 0, false);
   for (int i = 0; i < 20 && tap2.writes == 0; i++) run(job2, tap2, now, 1);
   tap2.join(tap2.slots[1].first);
-  for (int i = 0; i < 20 && job2.step() != TableAdd::Step::joining && !job2.finished(); i++) run(job2, tap2, now, 1);
-  CHECK(job2.step() == TableAdd::Step::joining);
+  run(job2, tap2, now);
+  CHECK(job2.ok() && job2.awaiting_join());
 }
 
 // No ack: never sent again; the read back decides.
@@ -342,9 +426,9 @@ static void test_no_ack() {
   uint32_t now = 0;
   TableAdd job(hex("04C05B0000001234"), 0, false);
   // Its write still lands: answer_write only drops the reply.
-  for (int i = 0; i < 20 && job.step() != TableAdd::Step::joining && !job.finished(); i++) run(job, tap, now, 1);
+  run(job, tap, now);
   CHECK(tap.writes == 1);
-  CHECK(job.step() == TableAdd::Step::joining);
+  CHECK(job.ok() && job.awaiting_join());
   CHECK(job.ack() == -1);
 }
 
@@ -376,27 +460,6 @@ static void test_dry_run() {
   CHECK(job.message().find("dry run") != std::string::npos);
 }
 
-// Not joined within the time: stopped, the record left provisional.
-static void test_join_timeout() {
-  FakeTap tap = table_of(2);
-  uint32_t now = 0;
-  TableAdd job(hex("04C05B0000001234"), 0, false);
-  uint8_t seq = 0;
-  for (int i = 0; i < 20000 && !job.finished(); i++) {
-    Request r = job.due(now, seq);
-    if (r.cmd) {
-      Frame reply;
-      bool ok = tap.reply(r, reply);
-      job.on_reply(r, ok, reply, now);
-    }
-    now += 1000;
-  }
-  CHECK(job.finished() && !job.ok());
-  CHECK(now >= TableAdd::JOIN_TIMEOUT_MS);
-  CHECK(now < TableAdd::JOIN_TIMEOUT_MS + 5 * 60000);
-  CHECK(!job.wants_window());
-  CHECK(job.message().find("not joined") != std::string::npos);
-}
 
 // ---- removal ----
 
@@ -418,7 +481,6 @@ static void test_remove_erases_and_writes_back_the_rest() {
   want.erase(want.begin() + 2);
   uint32_t now = 0;
   TableRemove job(gone, false);
-  CHECK(!job.wants_window());
   run(job, tap, now);
   CHECK(job.finished() && job.ok());
   CHECK(!job.keep_saved());
@@ -612,7 +674,10 @@ int main() {
   test_remove_dry_run();
   test_labels();
   test_the_gate();
-  test_add_writes_one_record_and_waits_for_the_join();
+  test_add_writes_one_record();
+  test_join_watch();
+  test_join_watch_timeout();
+  test_join_watch_pause();
   test_the_id();
   test_a_table_with_gaps();
   test_already_listed();
@@ -621,7 +686,6 @@ int main() {
   test_no_ack();
   test_no_table();
   test_dry_run();
-  test_join_timeout();
   if (failures) {
     std::printf("%d failure(s)\n", failures);
     return 1;

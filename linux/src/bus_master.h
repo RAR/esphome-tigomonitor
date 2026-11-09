@@ -84,6 +84,9 @@ class BusMaster {
   bool request_table_remove(const esphome::tigo_monitor::master::Bytes &mac, bool dry_run, std::string &why) {
     return core_.request_table_remove(mac, dry_run, why);
   }
+  bool request_table_stop_waiting(const esphome::tigo_monitor::master::Bytes &mac) {
+    return core_.request_table_stop_waiting(mac);
+  }
   bool request_table_add(const esphome::tigo_monitor::master::Bytes &mac, uint16_t id, bool dry_run, std::string &why) {
     return core_.request_table_add(mac, id, dry_run, why);
   }

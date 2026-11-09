@@ -37,6 +37,12 @@ async function open(linux, versions = routes['/api/versions'], posts = [], maste
     }
     if (path === '/api/status') return json(200, linux ? { ...routes['/api/status'], platform: 'linux' } : routes['/api/status']);
     if (path === '/api/versions') return linux ? json(200, versions) : route.fulfill({ status: 404, body: 'no' });
+    if (path === '/api/master/table/stop' && route.request().method() === 'POST') {
+      const b = JSON.parse(route.request().postData());
+      posts.push({ path, ...b });
+      master = { ...master, table: { ...master.table, waiting: master.table.waiting.filter((w) => w.mac !== b.mac) } };
+      return json(200, { stopped: true });
+    }
     if (path.startsWith('/api/master/table/') && route.request().method() === 'POST') {
       const b = JSON.parse(route.request().postData());
       posts.push({ path, ...b });
@@ -302,6 +308,37 @@ test('Devices, on the Pi listening: no table changes', async () => {
   const { page, ctx, errors } = await open(true);
   await page.waitForSelector('#devices-taps', { state: 'visible' });
   assert.equal(await page.isVisible('#table-edit'), false);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+// Added optimizers not joined yet are listed under the panel, each with a
+// way to stop waiting, then the last that joined; the panel sits below the
+// optimizers table.
+test('Devices, on the Pi running the bus: the optimizers waiting to join', async () => {
+  const posts = [];
+  const now = Math.round(Date.now() / 1000);
+  const master = { ...piRoutes['/api/master'], role: 'master', active: true,
+    table: { ...piRoutes['/api/master'].table, writes: true,
+      waiting: [{ mac: '04C05B0000001234', label: '0-1234R', id: '0008', since_unix: now - 200 },
+                { mac: '04C05B0000001235', label: '0-1235V', id: '0009', since_unix: now - 30 }],
+      joins: [{ mac: '04C05B0000000012', label: '0-12P', id: '0007', joined: true, text: 'joined at 0007', unix: now - 600 }] } };
+  const { page, ctx, errors } = await open(true, routes['/api/versions'], posts, master);
+  await page.waitForSelector('#table-edit', { state: 'visible' });
+  const order = await page.evaluate(() => {
+    const a = document.getElementById('nodes-tbody'), b = document.getElementById('table-edit');
+    return !!(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+  });
+  assert.equal(order, true, 'the panel is below the optimizers');
+  const text = await page.textContent('#table-edit-waiting');
+  assert.match(text, /Waiting to join/);
+  assert.match(text, /0008 · .*0-1234R · 3 min/s);
+  assert.match(text, /0009 · .*0-1235V · just now/s);
+  assert.match(text, /0007 .*joined at 0007/s);
+  assert.equal(await page.isDisabled('#table-add-go'), false);  // waiting doesn't block a change
+  await page.click('#table-edit-waiting button[data-stop="04C05B0000001234"]');
+  await page.waitForFunction(() => !/0-1234R/.test(document.getElementById('table-edit-waiting').textContent));
+  assert.deepEqual(posts, [{ path: '/api/master/table/stop', mac: '04C05B0000001234' }]);
   assert.deepEqual(errors, []);
   await ctx.close();
 });

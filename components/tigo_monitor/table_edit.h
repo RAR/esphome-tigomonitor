@@ -4,8 +4,9 @@
 // captures of a CCA doing both (2026-11-06 and 2026-11-09; see
 // docs/superpowers/specs/2026-11-09-optimizer-table-edits-design.md).
 //   - Add: read the table (sub 0x26), write one record (sub 0x29) with bit
-//     15 set, read it back, then hold the discovery window open until the
-//     TAP clears the bit, which it does when the optimizer joins. The CCA
+//     15 set, and read it back. JoinWatch then holds the discovery window
+//     open until the TAP clears the bit, which it does when the optimizer
+//     joins, for any number of added optimizers at once. The CCA
 //     erases the table and rewrites it with the new record; this appends,
 //     as the owner's analysis says a 0x29 does, so an add never erases.
 //   - Remove: there is no single-record delete. Read the table, erase it
@@ -227,8 +228,6 @@ class TableJob : public RequestSource {
   virtual const char *step_text() const = 0;  // for the Devices page
   virtual bool finished() const = 0;
   virtual bool ok() const = 0;
-  // True while the job wants the discovery window open.
-  virtual bool wants_window() const { return false; }
   // A removal's records to write back, before its erase: the caller saves
   // them (resume after a stop), then calls saved().
   virtual bool wants_save() const { return false; }
@@ -289,30 +288,20 @@ class TableJob : public RequestSource {
 };
 
 // Adding one optimizer: read the table, write one record with bit 15 set at
-// the lowest free id from 2 (or the one asked for), read it back, and want
-// the window open until the TAP clears the bit, which it does when the
-// optimizer joins.
+// the lowest free id from 2 (or the one asked for), and read it back. Then
+// it's done: waiting for the optimizer to join is JoinWatch's, so the next
+// change can start at once.
 class TableAdd : public TableJob {
  public:
-  enum class Step { read_before, write, read_after, joining, done, failed };
+  enum class Step { read_before, write, read_after, done, failed };
   static const uint32_t PAGE_WAIT_MS = TableWalk::PAGE_WAIT_MS;
   static const uint32_t WRITE_WAIT_MS = 2000;  // the TAP acks once the record is in flash
-  static const uint32_t JOIN_CHECK_MS = 60000;
-  static const uint32_t JOIN_TIMEOUT_MS = 30 * 60000;  // the bench's joins took 3.5 and 10 min
 
   // want_id 0: the lowest free id from 2, as the CCA chose on the bench.
   TableAdd(const Bytes &mac, uint16_t want_id, bool dry_run) : TableJob(mac, dry_run), want_id_(want_id) {}
 
-  Request due(uint32_t now_ms, uint8_t &seq) override {
+  Request due(uint32_t, uint8_t &seq) override {
     if (finished() || waiting_) return {};
-    if (step_ == Step::joining && !walk_.active()) {
-      if (static_cast<int32_t>(now_ms - joining_since_ms_) >= static_cast<int32_t>(JOIN_TIMEOUT_MS)) {
-        fail_("not joined after " + std::to_string(JOIN_TIMEOUT_MS / 60000) +
-              " min: it stays listed, not joined, and joins whenever the window is next open");
-        return {};
-      }
-      if (static_cast<int32_t>(now_ms - next_check_ms_) < 0) return {};
-    }
     if (step_ == Step::write) {
       Bytes args = {1};
       args.insert(args.end(), mac_.begin(), mac_.end());
@@ -332,7 +321,7 @@ class TableAdd : public TableJob {
     return walk_.request(seq);
   }
 
-  void on_reply(const Request &req, bool ok, const Frame &reply, uint32_t now_ms) override {
+  void on_reply(const Request &req, bool ok, const Frame &reply, uint32_t) override {
     if (!take_(req)) return;
     if (req.payload[3] == 0x29) {
       ack_ = ack_of_(ok, reply, 0x2A);
@@ -342,13 +331,8 @@ class TableAdd : public TableJob {
     }
     switch (walk_.on_reply(ok, reply)) {
       case TableWalk::more: return;
-      case TableWalk::failed:
-        if (step_ == Step::joining) {  // try again at the next check
-          next_check_ms_ = now_ms + JOIN_CHECK_MS;
-          return;
-        }
-        return fail_("the TAP didn't answer a read of its table");
-      case TableWalk::done: return walked_(now_ms);
+      case TableWalk::failed: return fail_("the TAP didn't answer a read of its table");
+      case TableWalk::done: return walked_();
     }
   }
 
@@ -356,14 +340,14 @@ class TableAdd : public TableJob {
   Step step() const { return step_; }
   bool finished() const override { return step_ == Step::done || step_ == Step::failed; }
   bool ok() const override { return step_ == Step::done; }
-  bool wants_window() const override { return step_ == Step::joining; }
+  // Listed and not joined yet: for JoinWatch.
+  bool awaiting_join() const { return awaiting_; }
   const char *step_text() const override { return step_name(step_); }
   static const char *step_name(Step s) {
     switch (s) {
       case Step::read_before: return "reading the table";
       case Step::write: return "writing";
       case Step::read_after: return "reading it back";
-      case Step::joining: return "waiting for it to join";
       case Step::done: return "done";
       case Step::failed: return "stopped";
     }
@@ -381,14 +365,15 @@ class TableAdd : public TableJob {
     message_ = what;
     waiting_ = false;
   }
-  void walked_(uint32_t now_ms) {
+  void walked_() {
     const std::vector<TableRecord> &walk = walk_.records();
     if (step_ == Step::read_before) {
       before_ = walk;
       if (const TableRecord *r = TableWalk::find(before_, mac_)) {
         id_ = r->id();
+        awaiting_ = !r->joined() && !dry_run_;
         return finish_("already in the table at " + hex4_(id_) + (r->joined() ? ", joined" : ", not joined yet") +
-                       ": nothing to write; it joins while the window is open");
+                       ": nothing to write" + (r->joined() ? "" : "; waiting for it to join"));
       }
       std::vector<bool> used(1024, false);
       for (const auto &r : before_)
@@ -405,32 +390,135 @@ class TableAdd : public TableJob {
       step_ = Step::write;
       return;
     }
-    if (step_ == Step::read_after) {
-      // As before, plus the one record.
-      const TableRecord *added = TableWalk::find(walk, mac_);
-      std::vector<TableRecord> expected = before_;
-      if (added) expected.push_back({mac_, id_});
-      if (!added || !same_table(walk, expected))
-        return fail_(added        ? "the read back doesn't match the table before the write"
-                     : ack_ == -1 ? "no answer to the write, and the read back doesn't list it"
-                                  : "the read back doesn't list it");
-      if (added->joined()) return finish_("listed at " + hex4_(id_) + " and joined");
-      step_ = Step::joining;
-      joining_since_ms_ = now_ms;
-      next_check_ms_ = now_ms + JOIN_CHECK_MS;
-      message_ = "listed at " + hex4_(id_) + "; waiting for it to join";
-      return;
-    }
-    // Joining: has the TAP cleared the bit?
-    const TableRecord *r = TableWalk::find(walk, mac_);
-    if (!r) return fail_("it's gone from the table");
-    if (r->joined()) return finish_("joined at " + hex4_(r->id()));
-    next_check_ms_ = now_ms + JOIN_CHECK_MS;
+    // The read back: as before, plus the one record.
+    const TableRecord *added = TableWalk::find(walk, mac_);
+    std::vector<TableRecord> expected = before_;
+    if (added) expected.push_back({mac_, id_});
+    if (!added || !same_table(walk, expected))
+      return fail_(added        ? "the read back doesn't match the table before the write"
+                   : ack_ == -1 ? "no answer to the write, and the read back doesn't list it"
+                                : "the read back doesn't list it");
+    if (added->joined()) return finish_("listed at " + hex4_(id_) + " and joined");
+    awaiting_ = true;
+    finish_("listed at " + hex4_(id_) + "; waiting for it to join");
   }
 
   uint16_t want_id_;
   Step step_ = Step::read_before;
-  uint32_t joining_since_ms_ = 0, next_check_ms_ = 0;
+  bool awaiting_ = false;
+};
+
+// The optimizers listed and not joined yet, after their adds: the window
+// is wanted open while any are, and the table is read every JOIN_CHECK_MS
+// to see which have joined (the TAP clears their 0x8000 bit). Each is given
+// up after JOIN_TIMEOUT_MS, left listed: it joins whenever the window is
+// next open. A table change running pauses the reads (pause()).
+class JoinWatch : public RequestSource {
+ public:
+  static const uint32_t JOIN_CHECK_MS = 60000;
+  static const uint32_t JOIN_TIMEOUT_MS = 30 * 60000;  // the bench's joins took 3.5 and 10 min
+  static const size_t RECENT = 10;
+  struct Waiting {
+    Bytes mac;
+    uint16_t id = 0;
+    uint32_t since_ms = 0;
+  };
+  struct Outcome {
+    Bytes mac;
+    uint16_t id = 0;
+    bool joined = false;
+    std::string text;
+  };
+
+  void add(const Bytes &mac, uint16_t id, uint32_t now_ms) {
+    drop(mac);
+    waiting_.push_back({mac, id, now_ms});
+    if (waiting_.size() == 1) next_check_ms_ = now_ms + JOIN_CHECK_MS;
+  }
+  // No longer waited for (removed from the table, or the owner gave up). True if it was.
+  bool drop(const Bytes &mac) {
+    for (size_t i = 0; i < waiting_.size(); i++)
+      if (waiting_[i].mac == mac) {
+        waiting_.erase(waiting_.begin() + static_cast<long>(i));
+        return true;
+      }
+    return false;
+  }
+  // A table change is about to run: abandon a read half done.
+  void pause() {
+    walk_ = TableWalk();
+    asked_ = false;
+  }
+  bool wants_window() const { return !waiting_.empty(); }
+  const std::vector<Waiting> &waiting() const { return waiting_; }
+  // Newest last; take_outcomes() hands over the ones not yet seen.
+  std::vector<Outcome> take_outcomes() {
+    std::vector<Outcome> out;
+    out.swap(new_outcomes_);
+    return out;
+  }
+
+  Request due(uint32_t now_ms, uint8_t &seq) override {
+    if (asked_) return {};
+    // Time limits, checked whether or not a read is due.
+    for (size_t i = 0; i < waiting_.size();) {
+      if (static_cast<int32_t>(now_ms - waiting_[i].since_ms) >= static_cast<int32_t>(JOIN_TIMEOUT_MS)) {
+        outcome_(waiting_[i], false,
+                 "not joined after " + std::to_string(JOIN_TIMEOUT_MS / 60000) +
+                     " min: it stays listed, and joins whenever the window is next open");
+        waiting_.erase(waiting_.begin() + static_cast<long>(i));
+      } else {
+        i++;
+      }
+    }
+    if (waiting_.empty()) {
+      walk_ = TableWalk();
+      return {};
+    }
+    if (!walk_.active()) {
+      if (static_cast<int32_t>(now_ms - next_check_ms_) < 0) return {};
+      walk_.start();
+    }
+    asked_ = true;
+    return walk_.request(seq);
+  }
+
+  // A reply to one of its own reads (Request::table_edit, from due()).
+  void on_reply(bool ok, const Frame &reply, uint32_t now_ms) {
+    if (!asked_) return;
+    asked_ = false;
+    switch (walk_.on_reply(ok, reply)) {
+      case TableWalk::more: return;
+      case TableWalk::failed:
+        next_check_ms_ = now_ms + JOIN_CHECK_MS;
+        return;
+      case TableWalk::done: break;
+    }
+    next_check_ms_ = now_ms + JOIN_CHECK_MS;
+    const std::vector<TableRecord> &table = walk_.records();
+    for (size_t i = 0; i < waiting_.size();) {
+      const TableRecord *r = TableWalk::find(table, waiting_[i].mac);
+      if (r && !r->joined()) {
+        i++;
+        continue;
+      }
+      char b[5];
+      std::snprintf(b, sizeof(b), "%04X", r ? r->id() : waiting_[i].id);
+      outcome_(waiting_[i], r != nullptr, r ? std::string("joined at ") + b : std::string("gone from the table"));
+      waiting_.erase(waiting_.begin() + static_cast<long>(i));
+    }
+  }
+  bool asked() const { return asked_; }
+
+ private:
+  void outcome_(const Waiting &w, bool joined, const std::string &text) {
+    new_outcomes_.push_back({w.mac, w.id, joined, text});
+  }
+  std::vector<Waiting> waiting_;
+  std::vector<Outcome> new_outcomes_;
+  TableWalk walk_;
+  bool asked_ = false;
+  uint32_t next_check_ms_ = 0;
 };
 
 // Removing one optimizer, as the CCA did on the bench (2026-11-09): there is

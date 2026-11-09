@@ -71,6 +71,8 @@ struct HttpContext {
       request_table_add;
   // The owner's removal of one: 200, or 409 with why.
   std::function<int(const esphome::tigo_monitor::master::Bytes &mac, bool dry_run, std::string &why)> request_table_remove;
+  // Stop waiting for an added optimizer to join: 200, or 409 with why.
+  std::function<int(const esphome::tigo_monitor::master::Bytes &mac, std::string &why)> request_table_stop_waiting;
 };
 
 // tigomonitord --health-check PORT, the container's HEALTHCHECK: GETs

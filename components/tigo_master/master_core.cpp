@@ -221,6 +221,34 @@ void MasterCore::set_table_saved(TableSaved saved, const master::Bytes &resume_m
   start_table_job_(std::make_unique<master::TableRemove>(resume_mac, false, resume));
 }
 
+bool MasterCore::request_table_stop_waiting(const master::Bytes &mac) {
+  std::lock_guard<std::mutex> lock(mu_);
+  bool waited = false;
+  for (const auto &w : status_.table_waiting) waited = waited || w.mac == master::mac_hex(mac);
+  if (waited) stop_waiting_.push_back(mac);
+  return waited;
+}
+
+// Tick thread; takes mu_.
+void MasterCore::sync_join_status_() {
+  auto outcomes = join_watch_.take_outcomes();
+  for (const auto &o : outcomes) {
+    LOGI("bus master: table: %04X %s", o.id, o.text.c_str());
+    waiting_since_.erase(master::mac_hex(o.mac));
+  }
+  std::lock_guard<std::mutex> lock(mu_);
+  for (const auto &o : outcomes) {
+    auto &j = status_.table_joins;
+    if (j.size() == MasterStatus::TABLE_JOINS_KEPT) j.erase(j.begin());
+    j.push_back({master::mac_hex(o.mac), o.id, o.joined, o.text, unix_now()});
+  }
+  status_.table_waiting.clear();
+  for (const auto &w : join_watch_.waiting()) {
+    std::string mac = master::mac_hex(w.mac);
+    status_.table_waiting.push_back({mac, w.id, waiting_since_.count(mac) ? waiting_since_[mac] : 0});
+  }
+}
+
 void MasterCore::settle_table_job_(uint32_t now_ms) {
   if (!table_job_) return;
   // A removal's list of what stays, saved before its erase.
@@ -234,6 +262,16 @@ void MasterCore::settle_table_job_(uint32_t now_ms) {
   if (!done) return;
   bool add = std::string(table_job_->kind()) == "add";
   if (!add && !table_job_->dry_run() && !table_job_->keep_saved() && table_saved_) table_saved_(table_job_->mac(), nullptr);
+  // An add listed and not joined goes on the watch; a removal takes it off.
+  if (add && table_job_->ok() && static_cast<master::TableAdd *>(table_job_.get())->awaiting_join()) {
+    join_watch_.add(table_job_->mac(), table_job_->id(), now_ms);
+    waiting_since_[master::mac_hex(table_job_->mac())] = unix_now();
+  }
+  if (!add && table_job_->ok() && !table_job_->dry_run()) {
+    join_watch_.drop(table_job_->mac());
+    waiting_since_.erase(master::mac_hex(table_job_->mac()));
+  }
+  sync_join_status_();
   if (!add && table_job_->keep_saved()) {
     // Held until it is finished: no other change in between.
     resume_mac_ = table_job_->mac();
@@ -326,9 +364,14 @@ bool MasterCore::open() {
   if (startup_) phase_ = Phase::probing;
   LOGI("bus master on %s for gateway %04X%s", port_->name().c_str(), gateway_, bench_ ? " (bench mode)" : "");
   std::lock_guard<std::mutex> lock(mu_);
-  TableEditStatus table_edit = status_.table_edit;  // a change to the table goes on across a reopen
+  // A change to the table, and the joins waited for, go on across a reopen.
+  TableEditStatus table_edit = status_.table_edit;
+  auto waiting = status_.table_waiting;
+  auto joins = status_.table_joins;
   status_ = MasterStatus{};
   status_.table_edit = table_edit;
+  status_.table_waiting = waiting;
+  status_.table_joins = joins;
   status_.active = true;
   status_.pv = pv_state_;
   status_.discovery_renewing = discovery_renewing_;
@@ -613,6 +656,7 @@ void MasterCore::tick_(uint32_t now_ms) {
     housekeeping_->set_targets(t);
     targets_at_ms_ = now_ms;
   }
+  std::vector<master::Bytes> stops;  // the owner's "stop waiting"s, taken under mu_
   {
     std::lock_guard<std::mutex> lock(mu_);
     // A removal cut off by a TAP restart, once the TAP has answered steadily.
@@ -625,18 +669,44 @@ void MasterCore::tick_(uint32_t now_ms) {
         start_table_job_(std::make_unique<master::TableRemove>(resume_mac_, false, &resume_stay_));
       }
     }
+    stops.swap(stop_waiting_);
     if (table_job_pending_ && !table_job_) {
       table_job_ = std::move(table_job_pending_);
+      join_watch_.pause();  // its read would straddle the change
       bool add = std::string(table_job_->kind()) == "add";
       LOGI("bus master: table: %s%s an optimizer", table_job_->dry_run() ? "a dry run of " : "", add ? "adding" : "removing");
     }
     // An add waiting for its optimizer to join holds the window open, as
     // the CCA opened it after its write; the owner's switch still wins.
-    window_.set_renewing(discovery_renewing_ && (window_wanted_ || (table_job_ && table_job_->wants_window())));
+    window_.set_renewing(discovery_renewing_ && (window_wanted_ || join_watch_.wants_window()));
   }
   if (refusals_in_a_row_ >= NO_REPLY_FAULT_AFTER && now_ms - refused_at_ms_ < REFUSED_RETRY_MS) return;
+  if (!stops.empty()) {
+    for (const auto &mac : stops)
+      if (join_watch_.drop(mac)) {
+        waiting_since_.erase(master::mac_hex(mac));
+        LOGI("bus master: table: no longer waiting for an optimizer to join; it stays listed");
+      }
+    sync_join_status_();
+  }
+  // A change to the table first, else the join watch's reads.
+  struct TableSources : master::RequestSource {
+    master::TableJob *job;
+    master::JoinWatch *watch;
+    bool from_watch = false;
+    master::Request due(uint32_t now, uint8_t &seq) override {
+      if (job) return job->due(now, seq);
+      master::Request r = watch->due(now, seq);
+      from_watch = r.cmd != 0;
+      return r;
+    }
+  } table_sources;
+  table_sources.job = table_job_.get();
+  table_sources.watch = &join_watch_;
+  size_t waiting_before = join_watch_.waiting().size();
   master::Request req = master::next_request(window_, cursor_, seq_, now_ms, housekeeping_.get(), queries_.get(),
-                                             pv_.get(), table_job_.get());
+                                             pv_.get(), &table_sources);
+  if (join_watch_.waiting().size() != waiting_before) sync_join_status_();  // given up on in due()
   settle_table_job_(now_ms);  // a dry run ends in due(), and a removal saves there
   // Bring-up frames are allowed only straight after a re-address, but for
   // the one GatewayCfg read the owner asked for (set_read_tap_config).
@@ -665,7 +735,10 @@ void MasterCore::tick_(uint32_t now_ms) {
   if (master::is_config_read(req.cmd, req.payload)) config_read_sent_ = true;
   if (status().fault == Fault::second_master || standing_by_()) return;
   if (housekeeping_ && !req.table_edit) housekeeping_->on_reply(req, ok, reply);
-  if (table_job_ && req.table_edit) {
+  if (req.table_edit && table_sources.from_watch) {
+    join_watch_.on_reply(ok, reply, now_ms);
+    sync_join_status_();
+  } else if (table_job_ && req.table_edit) {
     table_job_->on_reply(req, ok, reply, now_ms);
     uint8_t sub = req.payload.size() > 3 ? req.payload[3] : 0;
     int ack = table_job_->ack();

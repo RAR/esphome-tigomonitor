@@ -140,4 +140,22 @@ expect "erased and wrote back the saved two" "$(stat "$out/four.json" "(d['erase
 expect "the saved list is gone" "$([ -e "$out/four/table-remove.json" ] && echo kept || echo gone)" gone
 stop_all
 
+# --- run 5: two added back to back, waited for together; one given up on ---
+start five 18305 ', "master_table_writes": true' --join-after 20
+waits() { body GET 18305 /api/master '' admin:pw | python3 -c "import json,sys; t=json.load(sys.stdin)['table']; print(eval(sys.argv[1]))" "$1"; }
+expect "the first add starts" "$(code POST 18305 /api/master/table/add "{$LABEL}" admin:pw)" 200
+finished 18305
+expect "it's listed and waited for" "$(waits "[(w['id'], w['label']) for w in t['waiting']]")" "[('0008', '0-1234R')]"
+expect "the second starts at once" "$(code POST 18305 /api/master/table/add '{"label": "0-1235V"}' admin:pw)" 200
+finished 18305
+expect "both waited for" "$(waits "[w['id'] for w in t['waiting']]")" "['0008', '0009']"
+expect "stop waiting for the second" "$(code POST 18305 /api/master/table/stop '{"label": "0-1235V"}' admin:pw)" 200
+sleep 1
+expect "one left" "$(waits "[w['id'] for w in t['waiting']]")" "['0008']"
+expect "stopping one not waited for is refused" "$(code POST 18305 /api/master/table/stop '{"label": "0-1235V"}' admin:pw)" 409
+for _ in $(seq 100); do [ "$(waits "len(t['waiting'])")" = 0 ] && break; sleep 1; done
+expect "the first joined" "$(waits "[(o['id'], o['joined'], o['text']) for o in t['joins']]")" "[('0008', True, 'joined at 0008')]"
+expect "two writes, no erase" "$(stat "$out/five.json" "(len(d['table_writes']), d['erases'])")" "(2, 0)"
+stop_all
+
 [ $fail = 0 ] && echo "table e2e passed" || { echo "table e2e FAILED"; exit 1; }

@@ -18,7 +18,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   it was, so nothing has to rejoin; they are unjoined for under a second.
   Both copy frames captured from a CCA on the bench, sit behind the new
   **Let me change the TAP's table** switch (Settings → Bus, off by default),
-  and have a dry run that shows what would be sent. Not yet tried on a roof.
+  and have a dry run that shows what would be sent. Several can be added one
+  after another; the page lists those waiting to join, each with **Stop
+  waiting**. Tried on the reference roof: one spare removed and added back.
 
 - **See which optimizers have a weak link (Raspberry Pi).** Topology opens
   on a new Mesh tab, Layout beside it: each TAP with its optimizers around it, every line coloured
