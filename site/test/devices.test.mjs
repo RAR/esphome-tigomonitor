@@ -79,6 +79,16 @@ test("Devices, on the Pi: each optimizer's settings, stored or not, and the odd 
   const [n7, t7] = await cell(dev[7].addr);
   assert.equal(n7, 'Stored · differs');
   assert.match(t7, /Differs from 5 of the 6 on K8 firmware that answered/);
+  // Each setting by the CCA's name and unit; the one that differs, against
+  // what most report. The K8's answer is cut short: its last "01" is the
+  // start of UclLimit, so it's neither named nor shown.
+  assert.match(t7, /HwVout 179\.20 V, where most have 204\.75 V/);
+  const [, t0] = await cell(dev[0].addr);
+  assert.match(t0, /SwVout 204\.75 V/);
+  assert.match(t0, /UvinLvHi 17\.00 V/);
+  assert.match(t0, /AcLoss 0/);
+  assert.doesNotMatch(t0, /UclLimit|BaseOverride|\b01\b/);
+  assert.match(t5, /Settings not reported by H9 firmware/);
   assert.equal((await cell(dev[9].addr))[0], '—');
   assert.equal(await page.isVisible('table.nodes thead th.smart'), true);
   assert.deepEqual(errors, []);

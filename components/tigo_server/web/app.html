@@ -1398,7 +1398,7 @@
           <div class="cfg-ctrl"><label class="cfg-switch"><input type="checkbox" id="pi-writes"> <span>Off</span></label></div>
         </div>
         <div class="cfg-row" id="pi-discauto-row" style="display:none">
-          <div class="cfg-text"><strong>Open discovery only when needed</strong><span>As the CCA does: keep the TAP's join window open only while an optimizer placed in your layout hasn't reported today, in daylight. With none placed, it stays open as now. The Bus page's Disable still wins (experimental)</span></div>
+          <div class="cfg-text"><strong>Open discovery only when needed</strong><span>As the CCA does: keep the TAP's join window open only while an optimizer in a string hasn't reported today, in daylight. With none in a string, it stays open as now. The Bus page's Disable still wins (experimental)</span></div>
           <div class="cfg-ctrl"><label class="cfg-switch"><input type="checkbox" id="pi-discauto"> <span>Off</span></label></div>
         </div>
         <div class="cfg-row" id="pi-tapcfg-row" style="display:none">
@@ -3329,7 +3329,9 @@
       const v = fwByAddr[addr] && fwByAddr[addr].version;
       return v ? v.split('.')[0] : '';
     };
-    const smartValues = o => o.settings.split(' ').filter((t, i) => i !== 9).join(' ');
+    // Only fields every answer carries whole: the K8's is cut at 58 characters,
+    // inside UclLimit (see SMRT_FIELDS).
+    const smartValues = o => smartKey(o.settings);
     const smartByAddr = {}, smartCount = {};
     for (const o of (nodesData.versions && nodesData.versions.settings) || []) {
       const addr = o.addr.toUpperCase(), fam = smartFamily(addr);
@@ -3338,9 +3340,13 @@
       c.n++;
       c.by[smartValues(o)] = (c.by[smartValues(o)] || 0) + 1;
     }
-    const smartUsual = {};
+    const smartUsual = {}, smartUsualSettings = {};
     for (const [fam, c] of Object.entries(smartCount))
       smartUsual[fam] = Object.keys(c.by).sort((a, b) => c.by[b] - c.by[a])[0];
+    for (const o of (nodesData.versions && nodesData.versions.settings) || []) {
+      const fam = smartFamily(o.addr.toUpperCase());
+      if (!smartUsualSettings[fam] && smartValues(o) === smartUsual[fam]) smartUsualSettings[fam] = o.settings;
+    }
 
     const search = nodesFilters.search.toLowerCase();
     const filterString = nodesFilters.stringLabel;
@@ -3378,7 +3384,7 @@
       const fam = smart ? smartFamily(String(n.addr).toUpperCase()) : '';
       const c = smart && smartCount[fam], usual = smart && smartUsual[fam];
       const differs = !!smart && smartValues(smart) !== usual && c.by[usual] > c.by[smartValues(smart)];
-      const smartPeers = smart ? { family: fam, usual: c.by[usual], answered: c.n } : null;
+      const smartPeers = smart ? { family: fam, usual: c.by[usual], answered: c.n, usualSettings: smartUsualSettings[fam] } : null;
       rows.push({ n, name, addr: n.addr, barcodeKey, barcodeShort,
                   stringLabel, mpptLabel, v, a, w, t, age, state, fw, smart, differs, smartPeers });
     }
@@ -3480,11 +3486,49 @@
   }
 
   // A settings answer's tooltip: stored or not, how it compares, the tokens.
+  // The !Smrt answer's fields after "!Smrt", by the CCA's own names, scales
+  // and units (lmudcd's field table; the analysis side, 2026-11-08): one
+  // layout for every firmware. Index 9 is the stored flag. A K8's answer is
+  // cut at 58 characters, two digits into UclLimit, so it carries 0-10 whole
+  // and a fragment; an H9's is whole but its firmware reports zeros.
+  const SMRT_FIELDS = [
+    ['SwVout', 0.05, 2, ' V'], ['OutResis', 0.01953125, 3, ' Ω'], ['HwVout', 0.05, 2, ' V'],
+    ['DnPwmTim', 0.001, 3, ' s'], ['UpPwmTim', 0.001, 3, ' s'], ['PwmThrsh', 1, 0, ''],
+    ['OvRecTim', 0.001, 3, ' s'], ['UvinLvLo', 0.05, 2, ' V'], ['UvinLvHi', 0.05, 2, ' V'],
+    null, ['AcLoss', 1, 0, ''], ['UclLimit', 0.0025, 4, ' A'], ['UclThrsh', 0.05, 2, ' V'],
+    ['OvMinPwm', 1, 0, ''], ['BaseOverride', null, 0, ''],
+  ];
+  const SMRT_WHOLE = [0, 1, 2, 3, 4, 5, 6, 7, 8, 10];  // in every answer, whole
+  function smartKey(settings) {
+    const t = settings.split(' ');
+    return SMRT_WHOLE.map(i => t[i] || '').join(' ');
+  }
+  // [name, text] for each field the answer carries whole.
+  function smartFields(settings) {
+    const t = settings.split(' '), full = t.length >= SMRT_FIELDS.length;
+    const out = [];
+    t.forEach((v, i) => {
+      const f = SMRT_FIELDS[i];
+      if (!f || (!full && !SMRT_WHOLE.includes(i))) return;
+      const n = parseInt(v, 16);
+      out.push([f[0], f[1] === null || isNaN(n) ? v : (n * f[1]).toFixed(f[2]) + f[3]]);
+    });
+    return out;
+  }
   function smartTitle(o, differs, peers) {
     const of = `${peers.usual} of the ${peers.answered}${peers.family ? ` on ${peers.family} firmware` : ''} that answered`;
+    const t = o.settings.split(' '), fields = smartFields(o.settings);
+    const zeros = SMRT_WHOLE.every(i => i === 10 || /^0+$/.test(t[i] || ''));
+    const usual = peers.usualSettings ? Object.fromEntries(smartFields(peers.usualSettings)) : {};
+    const lines = zeros
+      ? [`Settings not reported by ${peers.family || 'this'} firmware (it answers zeros)`]
+      : fields.map(([name, text]) => differs && usual[name] !== undefined && usual[name] !== text
+          ? `${name} ${text}, where most have ${usual[name]}` : `${name} ${text}`);
+    // As heard, a cut-off tail shown as "…".
+    const heard = t.length < SMRT_FIELDS.length ? t.slice(0, 11).join(' ') + ' …' : o.settings;
     return (o.stored ? 'Settings stored' : "Settings not stored: its store-done flag reads N") +
       (differs ? ` · Differs from ${of}` : ` · The same as ${of}`) +
-      `\n${o.settings}` + (o.heard_unix_ms ? `\nHeard ${new Date(o.heard_unix_ms).toLocaleString()}` : '');
+      `\n${lines.join('\n')}\n${heard}` + (o.heard_unix_ms ? `\nHeard ${new Date(o.heard_unix_ms).toLocaleString()}` : '');
   }
 
   // "Mnode since Jan 1, 12:00, was K8.0120 (2D)": a version's tooltip.
@@ -4004,7 +4048,7 @@
     const autoText = !auto ? ''
       : m.window_wanted === false ? 'Automatic: every optimizer in your layout has reported today, so the window is left to close · '
       : m.missing_expected > 0 ? `Automatic: kept open while ${m.missing_expected} optimizer${m.missing_expected === 1 ? '' : 's'} in your layout haven't reported today · `
-      : 'Automatic: kept open (nothing placed in the layout to judge by) · ';
+      : 'Automatic: kept open (no optimizer in a string to judge by) · ';
     document.getElementById('disc-state').textContent = auto ? 'Automatic' : renewing ? 'Enabled' : 'Disabled';
     document.getElementById('disc-detail').textContent = autoText + (renewing ? `Now ${left}` : `Now ${left} · kept through a restart`) + joined;
     const disc = document.getElementById('disc-toggle');
