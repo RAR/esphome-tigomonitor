@@ -81,6 +81,18 @@ Everything else stays `never`: CLEAR_ADT, SET_LIST_ENTRIES, a 0x29 with bit 15 c
 
 **UI (Devices page, TAP section):** the table as the walks read it (address, MAC, joined or provisional, its panel if placed), **Remove** on each row with a confirm that says every optimizer will rejoin, **Add optimizer** (MAC, optional address), and the running job's step and result. API: `GET /api/table`, `POST /api/table/add`, `POST /api/table/remove`, each with `dry_run`.
 
+## Bench run, 2026-11-09 evening: our master, the CCA off the bus
+
+Our master on this PC through the FTDI adapter, bring-up off (no address broadcast), driving TAP 1201 (H1.0006) with the bench optimizer joined at `0002`; TAP 1202 on the bus and left alone. Captures `cca-off-table-20261109-2013.bin` and `cca-off-table-del-20261109-2014.bin` (raw bytes, no timestamps; git-excluded).
+
+- **Dry runs:** an add of a made-up optimizer (`0-1234R`) would write `29 01 04C05B0000001234 8003`; a removal of `0002`, the only record, would send `2B BABE` alone. Both read the table and sent nothing else.
+- **Add, appended to a table that already held a joined record:** the TAP acked `00`, and the read back listed `0002` (joined) and `8003`. `0002` lost none of 547 reports. So an add needs no erase on this TAP.
+- **Removal of the made-up one:** read (`0002`, `8003`), erase (ack `00`), read (empty), `29 01 <0002's MAC> 0002`, read back (`0002`): the CCA's sequence, frame for frame. The saved list was written before the erase and cleared after. `0002` lost none of 24 reports in the 20 s after.
+- **TAP power cycle afterwards:** the first window read after the restart showed 1 in the table, 1 joined; `0002` sent its NetDiag about a second later and reported again, with the window closed and not renewed.
+- **TAP 1201 restarted about every 65 s throughout.** The bench TAPs take their power from the backup CCA's port, and with its data line unplugged that CCA cut their power repeatedly, as a CCA does to TAPs it can't hear (owner, 2026-11-09). The 11-06 note blaming "the CCA powering its port" was right. It wasn't our master: it started before our first write, and housekeeping on or off made no difference. It did show the add and removal surviving repeated TAP power cuts.
+
+Follow-up from it: a removal cut off by a TAP restart between its erase and its write back keeps its saved list, but resumes only at the next daemon start. It should resume as soon as the TAP answers again.
+
 ## Bench first
 
 Each step on the bench TAP before the roof, with `--capture` on:

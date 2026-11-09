@@ -308,10 +308,18 @@ class MasterCore {
   std::unique_ptr<esphome::tigo_monitor::master::TableJob> table_job_pending_;  // under mu_
   bool table_job_running_ = false;  // under mu_: pending or table_job_
   TableSaved table_saved_;
+  // A removal cut off between its erase and its write back (the TAP
+  // restarted): what stays, tried again once the TAP has answered for
+  // RESUME_AFTER_MS, and every RESUME_AFTER_MS after a try that fails.
+  esphome::tigo_monitor::master::Bytes resume_mac_;
+  std::vector<esphome::tigo_monitor::master::TableRecord> resume_stay_;
+  bool resume_waiting_ = false;
+  uint32_t resume_at_ms_ = 0;
+  static const uint32_t RESUME_AFTER_MS = 60000;
   bool table_refusal_(bool dry_run, std::string &why) const;  // under mu_
   void start_table_job_(std::unique_ptr<esphome::tigo_monitor::master::TableJob> job);  // under mu_
   void sync_table_status_(bool finished_now);
-  void settle_table_job_();
+  void settle_table_job_(uint32_t now_ms);
   std::unique_ptr<esphome::tigo_monitor::master::Queries> queries_;
   // queries_'s answers, kept across a restart of queries_ (a takeover, a TAP
   // power cut); under mu_.

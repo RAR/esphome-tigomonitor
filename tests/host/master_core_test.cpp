@@ -453,8 +453,20 @@ struct TableTap {
   std::vector<mp::Bytes> writes;
   int renewals = 0;
   int erases = 0;
+  int silent_after_erase = 0;  // requests unanswered after an erase: the TAP restarting
+  int silent_left = 0;
   TableTap() {
     port.answer = [this](const mp::Frame &f, mp::Frame &r) {
+      if (silent_left > 0) {
+        silent_left--;
+        return false;
+      }
+      if (f.cmd == 0x0148 && f.payload.size() == 5) {  // empty, as the bench TAP's: 00 1F, the cursor, a byte
+        r.dest = GW | 0x8000;
+        r.cmd = 0x0149;
+        r.payload = {0x00, 0x1F, f.payload[2], f.payload[3], 0x00};
+        return true;
+      }
       if (f.cmd != 0x0B0F || f.payload.size() < 5) return false;
       uint8_t sub = f.payload[3], seq = f.payload[4];
       mp::Bytes args(f.payload.begin() + 5, f.payload.end());
@@ -483,6 +495,7 @@ struct TableTap {
       }
       if (sub == 0x2B) {
         erases++;
+        if (erases == 1) silent_left = silent_after_erase;
         records.clear();
         r.payload.push_back(0x00);
         return true;
@@ -630,7 +643,41 @@ static void test_an_interrupted_removal_is_finished() {
   }
 }
 
+// A TAP that restarts between the erase and the write back: the removal
+// stops with what stays saved, and is finished once the TAP answers again,
+// without waiting for a restart of the master.
+static void test_a_removal_cut_off_by_a_tap_restart_is_finished() {
+  TableTap tap;
+  tap.silent_after_erase = 40;
+  MasterCore core(&tap.port, [](int, const std::string &) {}, nullptr, nullptr, GW, false, false);
+  core.set_table_writes(true);
+  int clears = 0;
+  core.set_table_saved([&](const mp::Bytes &, const std::vector<mp::TableRecord> *stay) {
+    if (!stay) clears++;
+    return true;
+  });
+  CHECK(core.open());
+  mp::Bytes first(tap.records[0].begin(), tap.records[0].begin() + 8);
+  std::string why;
+  CHECK(core.request_table_remove(first, false, why));
+  uint32_t t = 0;
+  for (; t < 30000; t += 50) core.tick(t);
+  MasterStatus s = core.status();
+  CHECK(tap.erases == 1 && tap.writes.empty());
+  CHECK(s.table_edit.interrupted);
+  CHECK(!core.request_table_add(NEW_MAC, 0, true, why));  // nothing else meanwhile
+  CHECK(clears == 0);
+  for (; t < 200000; t += 50) core.tick(t);
+  s = core.status();
+  CHECK(s.table_edit.finished && s.table_edit.ok && !s.table_edit.interrupted);
+  CHECK(tap.writes.size() == 1);
+  CHECK(tap.records.size() == 1 && tap.records[0][7] == 0x02);
+  CHECK(clears == 1);
+  core.close();
+}
+
 int main() {
+  test_a_removal_cut_off_by_a_tap_restart_is_finished();
   test_a_removal_saves_then_erases();
   test_an_interrupted_removal_is_finished();
   test_a_table_add_needs_the_setting();

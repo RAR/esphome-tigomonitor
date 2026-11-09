@@ -221,7 +221,7 @@ void MasterCore::set_table_saved(TableSaved saved, const master::Bytes &resume_m
   start_table_job_(std::make_unique<master::TableRemove>(resume_mac, false, resume));
 }
 
-void MasterCore::settle_table_job_() {
+void MasterCore::settle_table_job_(uint32_t now_ms) {
   if (!table_job_) return;
   // A removal's list of what stays, saved before its erase.
   if (table_job_->wants_save()) {
@@ -234,6 +234,17 @@ void MasterCore::settle_table_job_() {
   if (!done) return;
   bool add = std::string(table_job_->kind()) == "add";
   if (!add && !table_job_->dry_run() && !table_job_->keep_saved() && table_saved_) table_saved_(table_job_->mac(), nullptr);
+  if (!add && table_job_->keep_saved()) {
+    // Held until it is finished: no other change in between.
+    resume_mac_ = table_job_->mac();
+    resume_stay_ = table_job_->survivors();
+    resume_waiting_ = true;
+    resume_at_ms_ = now_ms + RESUME_AFTER_MS;
+    std::lock_guard<std::mutex> lock(mu_);
+    table_job_running_ = true;
+    LOGW("bus master: table: will finish the removal once the TAP has answered for %u s",
+         static_cast<unsigned>(RESUME_AFTER_MS / 1000));
+  }
   if (table_job_->ok())
     LOGI("bus master: table: %s", table_job_->message().c_str());
   else
@@ -604,6 +615,16 @@ void MasterCore::tick_(uint32_t now_ms) {
   }
   {
     std::lock_guard<std::mutex> lock(mu_);
+    // A removal cut off by a TAP restart, once the TAP has answered steadily.
+    if (resume_waiting_ && !table_job_ && !table_job_pending_) {
+      if (timeouts_in_a_row_ || refusals_in_a_row_) resume_at_ms_ = now_ms + RESUME_AFTER_MS;
+      if (table_writes_on_ && static_cast<int32_t>(now_ms - resume_at_ms_) >= 0) {
+        resume_waiting_ = false;
+        LOGW("bus master: table: finishing the removal that was cut off, writing back the %zu optimizers that stay",
+             resume_stay_.size());
+        start_table_job_(std::make_unique<master::TableRemove>(resume_mac_, false, &resume_stay_));
+      }
+    }
     if (table_job_pending_ && !table_job_) {
       table_job_ = std::move(table_job_pending_);
       bool add = std::string(table_job_->kind()) == "add";
@@ -616,7 +637,7 @@ void MasterCore::tick_(uint32_t now_ms) {
   if (refusals_in_a_row_ >= NO_REPLY_FAULT_AFTER && now_ms - refused_at_ms_ < REFUSED_RETRY_MS) return;
   master::Request req = master::next_request(window_, cursor_, seq_, now_ms, housekeeping_.get(), queries_.get(),
                                              pv_.get(), table_job_.get());
-  settle_table_job_();  // a dry run ends in due(), and a removal saves there
+  settle_table_job_(now_ms);  // a dry run ends in due(), and a removal saves there
   // Bring-up frames are allowed only straight after a re-address, but for
   // the one GatewayCfg read the owner asked for (set_read_tap_config).
   bool bring_up = req.bring_up && (readdressed_ || (read_tap_config_ && master::is_config_read(req.cmd, req.payload)));
@@ -653,7 +674,7 @@ void MasterCore::tick_(uint32_t now_ms) {
            req.payload[5] == 1 ? "" : "s", ack < 0 ? "no ack; reading it back" : master::set_table_ack_text(ack));
     if (sub == master::SUB_ERASE_FLASH)
       LOGW("bus master: table: erased the TAP's table (%s)", ack < 0 ? "no ack; reading it back" : ack == 0 ? "done" : "refused");
-    settle_table_job_();
+    settle_table_job_(now_ms);
   }
   if (req.cmd == master::CMD_SESSION) {
     pv_->on_reply(req, ok, reply, now_ms);
