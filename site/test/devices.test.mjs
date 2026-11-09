@@ -69,11 +69,16 @@ test("Devices, on the Pi: each optimizer's settings, stored or not, and the odd 
   const dev = routes['/api/devices'].devices;
   const cell = (addr) => page.$eval(`#nodes-tbody tr[data-addr="${addr}"] td.smart`, (td) => [td.textContent.trim(), td.title]);
   assert.deepEqual((await cell(dev[0].addr))[0], 'Stored');
+  // Compared only with the same firmware family, and not on the stored flag,
+  // which the cell already shows: the two H9s agree with each other.
   const [n5, t5] = await cell(dev[5].addr);
-  assert.equal(n5, 'Not stored · differs');
-  assert.match(t5, /Differs from 6 of the 8 that answered/);
+  assert.equal(n5, 'Not stored');
+  assert.match(t5, /The same as 2 of the 2 on H9 firmware that answered/);
   assert.match(t5, /0000 0000 0000 0000 0000 0000 0000 0000 0000 N 00 0000 0000 0000 00/);
-  assert.equal((await cell(dev[6].addr))[0], 'Stored · differs');
+  assert.equal((await cell(dev[6].addr))[0], 'Stored');
+  const [n7, t7] = await cell(dev[7].addr);
+  assert.equal(n7, 'Stored · differs');
+  assert.match(t7, /Differs from 5 of the 6 on K8 firmware that answered/);
   assert.equal((await cell(dev[9].addr))[0], '—');
   assert.equal(await page.isVisible('table.nodes thead th.smart'), true);
   assert.deepEqual(errors, []);
