@@ -6213,11 +6213,12 @@
   }, 10000);
 
   // Where an optimizer joined the mesh, from its last NetDiag join: the TAP
-  // (NWID 0001), another optimizer we know, or a relay we can't name yet.
+  // (NWID 0001), another optimizer (the daemon matches the parent's NWID to
+  // whoever holds it), or a relay we can't name yet.
   function meshVia(n) {
     if (!n.parent) return { kind: 'none' };
     if (n.parent === '0001') return { kind: 'tap' };
-    const relay = (meshData.nodes || []).find(m => m.addr === n.parent && m !== n);
+    const relay = n.relay ? (meshData.nodes || []).find(m => m.addr === n.relay && m !== n) : null;
     return relay ? { kind: 'node', relay } : { kind: 'unknown', id: n.parent };
   }
 
@@ -6436,7 +6437,7 @@
       : via.kind === 'node' ? `${meshEsc(via.relay.label)}, another optimizer, which relays it to the TAP`
       : via.kind === 'unknown' ? `A relay not identified yet (network ID ${meshEsc(via.id)})`
       : 'Not known: no join heard yet';
-    const relays = (meshData.nodes || []).filter(m => m !== n && m.parent === n.addr).map(m => meshEsc(m.label));
+    const relays = (meshData.nodes || []).filter(m => m !== n && m.relay === n.addr).map(m => meshEsc(m.label));
     document.getElementById('mesh-side').innerHTML = `
       <h3>${meshEsc(n.label)} <span class="mesh-pill tier-${tier}">${MESH_NAMES[tier]}</span></h3>
       <div class="mesh-sub">${n.string ? meshEsc(n.string) + ' · ' : ''}address ${meshEsc(n.addr)}</div>

@@ -132,7 +132,7 @@ static void test_ring_forgets_after_a_day() {
 
 static void test_join_is_recorded() {
   LinkStats s;
-  s.on_join("0012", 1794049920, "0001");
+  s.on_join("0012", 1794049920, "0001", "0052");
   CHECK(s.links().at("0012").last_join_s == 1794049920);
   CHECK(s.links().at("0012").reports_today == 0);
   CHECK(s.links().at("0012").parent == "0001");
@@ -144,11 +144,51 @@ static void test_a_rejoin_moves_the_parent() {
   LinkStats s;
   reports(s, "0012", {0, 400});
   CHECK(s.links().at("0012").parent.empty());
-  s.on_join("0012", T0 + 10, "0018");
-  s.on_join("0012", T0 + 20, "0091");
+  s.on_join("0012", T0 + 10, "0018", "0052");
+  s.on_join("0012", T0 + 20, "0091", "0053");
   CHECK(s.links().at("0012").parent == "0091");
   s.on_report("0012", 0x1201, 120, slot_of(800), T0 + 30, DAY + 1);
   CHECK(s.links().at("0012").parent == "0091");
+}
+
+// A parent is a NWID, the mesh's own id for a node, not its address: it
+// resolves to whichever node last joined with that NWID.
+static void test_a_parent_resolves_by_nwid_not_address() {
+  LinkStats s;
+  s.on_join("0006", T0, "0001", "0018");
+  s.on_join("0018", T0 + 5, "0001", "0040");  // the address 0018, another node
+  s.on_join("0003", T0 + 10, "0018", "0019");
+  CHECK(s.relay_of("0003") == "0006");
+  CHECK(s.relay_of("0006").empty());  // the TAP is no relay
+}
+
+// The parent may join after its child, as at sunrise; it resolves then.
+static void test_a_parent_heard_later_resolves_then() {
+  LinkStats s;
+  s.on_join("0026", T0, "005A", "005B");
+  CHECK(s.relay_of("0026").empty());
+  s.on_join("0017", T0 + 30, "0001", "005A");
+  CHECK(s.relay_of("0026") == "0017");
+}
+
+// NWIDs change on a rejoin: a parent that came back under a new one leaves
+// its child unresolved, and a NWID taken up by another node goes to it.
+static void test_a_rejoined_parent_leaves_its_child_unresolved() {
+  LinkStats s;
+  s.on_join("0017", T0, "0001", "005A");
+  s.on_join("0026", T0 + 10, "005A", "005B");
+  s.on_join("0017", T0 + 20, "0001", "0061");
+  CHECK(s.relay_of("0026").empty());
+  s.on_join("0030", T0 + 30, "0001", "005A");
+  CHECK(s.relay_of("0026") == "0030");
+}
+
+// A node naming its own NWID as parent is no relationship (the CCA drops it).
+static void test_its_own_nwid_is_no_relay() {
+  LinkStats s;
+  s.on_join("0002", T0, "0044", "0044");
+  CHECK(s.relay_of("0002").empty());
+  CHECK(s.relay_of("0099").empty());  // and nothing known, nothing
 }
 
 static void test_tap_and_last_heard() {
@@ -308,6 +348,10 @@ int main() {
   test_ring_forgets_after_a_day();
   test_join_is_recorded();
   test_a_rejoin_moves_the_parent();
+  test_a_parent_resolves_by_nwid_not_address();
+  test_a_parent_heard_later_resolves_then();
+  test_a_rejoined_parent_leaves_its_child_unresolved();
+  test_its_own_nwid_is_no_relay();
   test_tap_and_last_heard();
   test_a_late_report_fills_its_hole();
   test_a_short_silence_keeps_counting();
