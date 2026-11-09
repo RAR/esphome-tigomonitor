@@ -57,6 +57,8 @@ expect "versions heard" "$(versions 18140)" \
   "[('taps', '1201', 'Mgate', 'G8.59 Jan  1 2026', True), ('optimizers', '0003', 'Mnode', 'K8.0120 (2D)', True)]"
 smarts() { api "$1" /api/versions | python3 -c "import json,sys; d=json.load(sys.stdin); print([(o['addr'], o['settings'], o['stored'], o['heard_unix_ms'] > 0) for o in d['settings']])"; }
 expect "an optimizer's settings, from its answer" "$(smarts 18140)" "[('0003', '0FFF 0000 0FFF 0008 00C8 00C8 000A 0154 0154 S 00 01', True, True)]"
+mppt() { api "$1" /api/versions | python3 -c "import json,sys; d=json.load(sys.stdin); print([(o['addr'], o['params'], o['heard_unix_ms'] > 0) for o in d['mppt']])"; }
+expect "its MPPT parameters, from its answer" "$(mppt 18140)" "[('0003', '12 40 08 12', True)]"
 expect "listening: nothing ours, no other master" "$(bus 18140 "any(e['ours'] or e['other_master'] for e in d['exchanges'])")" False
 expect "steady state: no alarm" "$(bus 18140 "d['alarm']")" "{'active': False, 'count': 0, 'first_unix_ms': 0, 'recent': []}"
 expect "steady state: healthy" "$(health 18140)" "ok []"
@@ -99,6 +101,7 @@ sleep 3
 expect "still on after a restart" "$(bus 18140 "(d['alarm']['active'], d['alarm']['count'])")" "(True, 2)"
 expect "radio back after a restart" "$(radios 18140)" "[('1201', 18, 90, 60, True)]"
 expect "the TAP's ID back after a restart" "$(ids 18140)" "[('1201', '04C05B0000001234', True)]"
+expect "MPPT parameters back after a restart" "$(mppt 18140)" "[('0003', '12 40 08 12', True)]"
 expect "settings back after a restart" "$(smarts 18140)" "[('0003', '0FFF 0000 0FFF 0008 00C8 00C8 000A 0154 0154 S 00 01', True, True)]"
 expect "said at startup" "$(grep -c 'alarm is still on from before the restart' "$out/daemon3.log" || true)" 1
 expect "cleared" "$(api 18140 /api/bus/alarm/clear post)" '{"cleared":true}'

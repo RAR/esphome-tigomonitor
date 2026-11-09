@@ -3400,6 +3400,13 @@
     const smartUsual = {}, smartUsualSettings = {};
     for (const [fam, c] of Object.entries(smartCount))
       smartUsual[fam] = Object.keys(c.by).sort((a, b) => c.by[b] - c.by[a])[0];
+    // MPPT parameters, compared across every optimizer: all firmware give them.
+    const mpptByAddr = {}, mpptBy = {};
+    for (const o of (nodesData.versions && nodesData.versions.mppt) || []) {
+      mpptByAddr[o.addr.toUpperCase()] = o;
+      mpptBy[o.params] = (mpptBy[o.params] || 0) + 1;
+    }
+    const mpptUsual = Object.keys(mpptBy).sort((a, b) => mpptBy[b] - mpptBy[a])[0];
     for (const o of (nodesData.versions && nodesData.versions.settings) || []) {
       const fam = smartFamily(o.addr.toUpperCase());
       if (!smartUsualSettings[fam] && smartValues(o) === smartUsual[fam]) smartUsualSettings[fam] = o.settings;
@@ -3444,6 +3451,8 @@
       const differs = !!smart && !placeholder && smartValues(smart) !== usual && c.by[usual] > c.by[smartValues(smart)];
       const smartPeers = smart ? (placeholder ? { family: fam, placeholder: true }
         : { family: fam, usual: c.by[usual], answered: c.n, usualSettings: smartUsualSettings[fam] }) : null;
+      const mppt = mpptByAddr[String(n.addr).toUpperCase()] || null;
+      if (smartPeers) Object.assign(smartPeers, { mppt, mpptUsual });
       rows.push({ n, name, addr: n.addr, barcodeKey, barcodeShort,
                   stringLabel, mpptLabel, v, a, w, t, age, state, fw, smart, differs, smartPeers });
     }
@@ -3588,6 +3597,20 @@
     });
     return out;
   }
+  // The four MPPT parameters, the last four bytes of an answer to ^00Mppt, as
+  // the CCA's settings page names them (its "Additional MPPT command
+  // settings", 5-8) and scales them (the owner's analysis, 2026-11-09). Every
+  // firmware reports them, the H9 too. No scale is known for 7, so it's raw.
+  const MPPT_FIELDS = [
+    ['MPPT 5', 'Points for a valid PV curve', v => String(v)],
+    ['MPPT 6', 'Volt difference for the PV slope', v => (v / 640).toFixed(3) + ' V'],
+    ['MPPT 7', 'PIV activation current', v => String(v)],
+    ['MPPT 8', 'Under-voltage below VMP', v => (v * 0.5).toFixed(1) + ' V'],
+  ];
+  function mpptFields(params) {
+    const b = (params || '').split(' ').map(x => parseInt(x, 16));
+    return b.length === 4 && b.every(v => !isNaN(v)) ? MPPT_FIELDS.map(([code, , f], i) => [code, f(b[i])]) : [];
+  }
   // Plain names for the panel, by section; the CCA's name goes beneath.
   const SMRT_GROUPS = [
     ['Output', [['SwVout', 'Output voltage setpoint'], ['HwVout', 'Output voltage limit'], ['OutResis', 'Output resistance']]],
@@ -3613,12 +3636,21 @@
     const nDiff = Object.keys(mine).filter(k => most[k] !== undefined && most[k] !== mine[k]).length;
     verdict.className = 'smart-verdict' + (!zeros && (r.differs || !o.stored) ? ' warn' : '');
     verdict.textContent = zeros
-      ? 'Nothing here can be checked: its firmware answers the same whatever it holds.'
+      ? (peers.mppt ? 'Only its MPPT parameters are reported.' : 'Nothing here can be checked: its firmware answers the same whatever it holds.')
       : r.differs ? `Differs from ${peers.usual} of the ${peers.answered} ${fam}s in ${nDiff === 1 ? 'one setting' : nDiff + ' settings'}.`
       : `The same as ${peers.usual} of the ${peers.answered} ${fam}s that answered.` + (o.stored ? '' : ' Not stored yet: its store-done flag reads N.');
     const body = dlg.querySelector('.smart-body');
+    // Its MPPT parameters, beside what most optimizers report.
+    const mpptMine = Object.fromEntries(mpptFields(peers.mppt && peers.mppt.params));
+    const mpptMost = Object.fromEntries(mpptFields(peers.mpptUsual));
+    const mpptRows = Object.keys(mpptMine).length ? MPPT_FIELDS.map(([code, label]) => {
+      const diff = mpptMost[code] !== undefined && mpptMost[code] !== mpptMine[code];
+      return `<div class="smart-row mppt-row${diff ? ' differs' : ''}"><span class="smart-name"><span>${label}</span><span class="smart-code">${code}</span></span>` +
+        `<span class="smart-val">${topoEscape(mpptMine[code])}</span><span class="smart-most">${topoEscape(mpptMost[code] ?? '—')}</span></div>`;
+    }).join('') : '';
+    const mpptTable = mpptRows ? `<div class="smart-table"><div class="smart-cols"><span>MPPT</span><span>This one</span><span>Most optimizers</span></div>${mpptRows}</div>` : '';
     if (zeros) {
-      body.innerHTML = `<div class="smart-verdict">${topoEscape(fam)} firmware doesn't report its settings. It answers with zeros in every field, and its stored flag reads N on every read and S only in its reply to a write, so a CCA rewrites it all day and can never confirm it took.</div>`;
+      body.innerHTML = `<div class="smart-verdict">${topoEscape(fam)} firmware doesn't report its settings. It answers with zeros in every field, and its stored flag reads N on every read and S only in its reply to a write, so a CCA rewrites it all day and can never confirm it took.</div>` + mpptTable;
     } else {
       const groups = SMRT_GROUPS.map(([title, items]) => {
         const shown = items.filter(([code]) => mine[code] !== undefined);
@@ -3631,7 +3663,7 @@
       }).join('');
       const cut = t.length < SMRT_FIELDS.length
         ? `<div class="smart-note">Not in a ${topoEscape(fam)}'s answer: the current limit, its threshold, minimum PWM and Discharge enabled. Its reply is cut short, so these never arrive.</div>` : '';
-      body.innerHTML = `<div class="smart-table"><div class="smart-cols"><span>Setting</span><span>This one</span><span>Most ${topoEscape(fam)}s</span></div>${groups}${cut}</div>`;
+      body.innerHTML = `<div class="smart-table"><div class="smart-cols"><span>Setting</span><span>This one</span><span>Most ${topoEscape(fam)}s</span></div>${groups}${cut}</div>` + mpptTable;
     }
     dlg.querySelector('.smart-raw').textContent = t.length < SMRT_FIELDS.length ? t.slice(0, 11).join(' ') + ' …' : o.settings;
     if (!dlg.open) dlg.showModal();

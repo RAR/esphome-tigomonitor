@@ -23,6 +23,7 @@ static int64_t unix_ms_now() {
 
 using esphome::tigo_monitor::master::TapRadio;
 using esphome::tigo_monitor::master::SmartSeen;
+using esphome::tigo_monitor::master::MpptSeen;
 
 static std::string hex4(unsigned v) {
   char b[8];
@@ -81,6 +82,14 @@ void BusLog::load_versions_() {
     m.stored = o.value("stored", false);
     if (!m.settings.empty()) smarts_[m.addr] = {m, o.value("heard_unix_ms", int64_t{0})};
   }
+  for (const auto &o : j.value("mppt", json::array())) {
+    if (!o.is_object()) continue;
+    MpptSeen m;
+    m.addr = static_cast<uint16_t>(std::strtoul(o.value("addr", std::string("0")).c_str(), nullptr, 16));
+    m.params = o.value("params", std::string());
+    m.answer = o.value("answer", std::string());
+    if (!m.params.empty()) mppts_[m.addr] = {m, o.value("heard_unix_ms", int64_t{0})};
+  }
 }
 
 void BusLog::load() {
@@ -118,6 +127,13 @@ void BusLog::on_frame_(const Frame &f, bool ours, int64_t now) {
     auto it = tap_ids_.find(t.tap);
     if (it == tap_ids_.end() || it->second.first != t.mac) LOGI("bus: TAP %s is %s", hex4(t.tap).c_str(), t.mac.c_str());
     tap_ids_[t.tap] = {t.mac, now};
+    versions_dirty_ = true;
+  }
+  for (const auto &m : watch_.take_mppts()) {
+    auto it = mppts_.find(m.addr);
+    if (it == mppts_.end() || it->second.first.params != m.params)
+      LOGI("bus: optimizer %s MPPT parameters: %s", hex4(m.addr).c_str(), m.params.c_str());
+    mppts_[m.addr] = {m, now};
     versions_dirty_ = true;
   }
   for (const auto &m : watch_.take_smarts()) {
@@ -212,7 +228,13 @@ json BusLog::versions_json() const {
                         {"settings", kv.second.first.settings},
                         {"stored", kv.second.first.stored},
                         {"heard_unix_ms", kv.second.second}});
-  return {{"taps", taps}, {"optimizers", optimizers}, {"radios", radios}, {"ids", ids}, {"settings", settings}};
+  json mppt = json::array();
+  for (const auto &kv : mppts_)
+    mppt.push_back({{"addr", hex4(kv.first)},
+                    {"params", kv.second.first.params},
+                    {"answer", kv.second.first.answer},
+                    {"heard_unix_ms", kv.second.second}});
+  return {{"taps", taps}, {"optimizers", optimizers}, {"radios", radios}, {"ids", ids}, {"settings", settings}, {"mppt", mppt}};
 }
 
 void BusLog::save_if_changed() {

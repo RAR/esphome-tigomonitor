@@ -48,7 +48,7 @@ class BusLog {
   // /api/versions: {taps: [...], optimizers: [...], radios: [...], ids: [...],
   // settings: [...]}, each by address; radios are the TAPs' channel, SLT and
   // SLm as last read, ids each TAP's MAC, settings each optimizer's answer to
-  // ^00Smrt.
+  // ^00Smrt, mppt its four MPPT parameters from its answer to ^00Mppt.
   nlohmann::json versions_json() const;
 
  private:
@@ -65,6 +65,8 @@ class BusLog {
   std::map<uint16_t, std::pair<esphome::tigo_monitor::master::TapRadio, int64_t>> radios_;
   // Each TAP's MAC, its ID, from its last answer to GET_MAC, and when.
   std::map<uint16_t, std::pair<std::string, int64_t>> tap_ids_;
+  // Each optimizer's MPPT parameters, from its answer to ^00Mppt, and when.
+  std::map<uint16_t, std::pair<esphome::tigo_monitor::master::MpptSeen, int64_t>> mppts_;
   // Each optimizer's answer to ^00Smrt, as last heard, and when.
   std::map<uint16_t, std::pair<esphome::tigo_monitor::master::SmartSeen, int64_t>> smarts_;
   bool versions_dirty_ = false;

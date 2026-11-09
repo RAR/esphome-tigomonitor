@@ -67,6 +67,10 @@ def main():
         if seq % 40 == 3:
             text = b'!Smrt 0FFF 0000 0FFF 0008 00C8 00C8 000A 0154 0154 S 00 01\r'
             answer = bytes([0x07, 0x00, 0x03, 0x00, 0x00, 0x00, len(text)]) + text
+        # And its MPPT parameters, as the roof answers ^00Mppt.
+        if seq % 40 == 4:
+            text = b'!Mppt 1 0 S M[100 0003 - 3/3] 0 12 40 08 12\r'
+            answer = bytes([0x07, 0x00, 0x03, 0x00, 0x00, 0x00, len(text)]) + text
         say([encode(TAP, 0x0148, bytes([0x00, 0x01, cursor >> 8, cursor & 0xFF, 0x04])),
              encode(TAP | 0x8000, 0x0149, bytes([0x00, 0x1F, 0x00, 0x00, 0x00]) + answer)])
         cursor += 1

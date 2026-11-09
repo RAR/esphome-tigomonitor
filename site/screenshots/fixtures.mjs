@@ -202,6 +202,10 @@ export const routes = {
               : i === 7 ? '0FFF 0000 0E00 0008 00C8 00C8 000A 0154 0154 S 00 01'
               : '0FFF 0000 0FFF 0008 00C8 00C8 000A 0154 0154 S 00 01',
       stored: i !== 5, heard_unix_ms: 1767225600000 + i * 60000 })),
+    // The four MPPT parameters from each answer to ^00Mppt: the roof's
+    // 12 40 08 12 from every firmware, one with a different PIV current.
+    mppt: devices.slice(0, 8).map((d, i) => ({ addr: d.addr, params: i === 3 ? '12 40 0A 12' : '12 40 08 12',
+      answer: `1 0 S M[100 ${d.addr} - 3/3] 0 ${i === 3 ? '12 40 0A 12' : '12 40 08 12'}`, heard_unix_ms: 1767225600000 + i * 60000 })),
   },
   '/api/status': {
     free_heap: 98740, total_heap: 310652,

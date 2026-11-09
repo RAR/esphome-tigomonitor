@@ -414,6 +414,30 @@ static void test_smart_needs_the_flag() {
   CHECK(!parse_smart("!Smrt 0FFF 0000 0FFF 0008 00C8 00C8 000A 0154 0154 X 00 01", v));
 }
 
+// An optimizer's four MPPT parameters, the last four bytes of its answer to
+// ^00Mppt, as the roof gives them (2026-11-09); the bracket is live state.
+static void test_mppt_parameters_are_picked_out() {
+  BusWatch w;
+  w.on_frame(request(0x0148, hex("00016fc404")), true, 1000);
+  w.on_frame(reply(0x0149, poll_reply_with_answer(0x10, "!Mppt 1 0 S M[100 0018 - 3/3] 0 12 40 08 12\r")), false, 1010);
+  w.on_frame(request(0x0148, hex("00016fc504")), true, 1100);
+  w.on_frame(reply(0x0149, poll_reply_with_answer(0x11, "!Smrt 0FFF 0000 0FFF 0008 00C8 00C8 000A 0154 0154 S 00 01\r")),
+             false, 1110);
+  auto m = w.take_mppts();
+  CHECK(m.size() == 1);
+  if (m.size() == 1) {
+    CHECK(m[0].addr == 0x10);
+    CHECK(m[0].params == "12 40 08 12");
+    CHECK(m[0].answer == "1 0 S M[100 0018 - 3/3] 0 12 40 08 12");
+  }
+  CHECK(w.take_mppts().empty());
+  MpptSeen v;
+  CHECK(!parse_mppt("!Mppt 1 0 S M[100 0018 - 3/3] 0 12 40 08", v));  // one short
+  CHECK(!parse_mppt("!Mppt 1 0 S 0 12 40 08 12", v));                  // no bracket
+  CHECK(!parse_mppt("!Mppt 1 0 S M[100 0018 - 3/3] 0 12 4G 08 12", v)); // not hex
+  CHECK(!parse_mppt("!Mpptx 1 0 S M[100 0018 - 3/3] 0 12 40 08 12", v));
+}
+
 int main() {
   test_names();
   test_no_alarm_for_what_a_master_here_sends();
@@ -435,6 +459,7 @@ int main() {
   test_tap_radio_needs_the_whole_block();
   test_smart_settings_are_picked_out();
   test_smart_needs_the_flag();
+  test_mppt_parameters_are_picked_out();
   if (failures) {
     std::printf("%d failed\n", failures);
     return 1;

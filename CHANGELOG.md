@@ -34,7 +34,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   give. It comes from the answers to the optimizer queries the CCA asks,
   ours or a CCA's; the raw answer is in the tooltip. Optimizers on H9
   firmware show "Not reported": they answer with fixed zeros and a stored
-  flag that never changes on a read, so there's nothing to check.
+  flag that never changes on a read, so there's nothing to check. The
+  panel also shows each optimizer's four MPPT parameters, from its answer to
+  the MPPT query, which every firmware reports, H9 included.
 - **Name your TAPs (Raspberry Pi).** The TAPs on the Devices page show each
   TAP's ID, the MAC it gives when a bus master brings it up, and take a name
   you type in place. The mesh map then labels the TAP by that name.

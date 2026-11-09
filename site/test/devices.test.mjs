@@ -114,7 +114,7 @@ test("Devices, on the Pi: a Settings cell opens that optimizer's settings, named
     await page.click(`#nodes-tbody tr[data-addr="${dev[i].addr}"] td.smart button`);
     await page.waitForSelector('#smart-panel[open]');
   };
-  const rows = () => page.$$eval('#smart-panel .smart-row', (rs) => rs.map((r) => [
+  const rows = (sel = '.smart-row:not(.mppt-row)') => page.$$eval(`#smart-panel ${sel}`, (rs) => rs.map((r) => [
     r.querySelector('.smart-code').textContent, r.querySelector('.smart-val').textContent,
     r.querySelector('.smart-most').textContent, r.classList.contains('differs')]));
   // The odd one out: its row marked, beside what most K8s have.
@@ -128,6 +128,16 @@ test("Devices, on the Pi: a Settings cell opens that optimizer's settings, named
   assert.equal(r7.filter((r) => r[3]).length, 1);
   assert.match(await page.textContent('#smart-panel'), /never arrive/);
   assert.match(await page.textContent('#smart-panel .smart-raw'), /0E00 .* S 00 …$/);
+  // Its four MPPT parameters, from its answer to ^00Mppt, beside what most
+  // optimizers report; the same as most here.
+  assert.deepEqual(await rows('.mppt-row'), [
+    ['MPPT 5', '18', '18', false], ['MPPT 6', '0.100 V', '0.100 V', false],
+    ['MPPT 7', '8', '8', false], ['MPPT 8', '9.0 V', '9.0 V', false]]);
+  await page.keyboard.press('Escape');
+  await page.waitForSelector('#smart-panel:not([open])', { state: 'attached' });
+  // One whose PIV activation current differs: marked, whatever its ^00Smrt.
+  await openFor(3);
+  assert.deepEqual((await rows('.mppt-row')).filter((r) => r[3]), [['MPPT 7', '10', '8', true]]);
   await page.keyboard.press('Escape');
   await page.waitForSelector('#smart-panel:not([open])', { state: 'attached' });
   // An H9: no table, no stored or not; it says the firmware answers fixed
@@ -138,6 +148,8 @@ test("Devices, on the Pi: a Settings cell opens that optimizer's settings, named
   assert.equal(await page.$eval('#smart-panel h3 .smart-pill', (p) => p.classList.contains('warn')), false);
   assert.match(await page.textContent('#smart-panel'), /H9 firmware doesn't report its settings/);
   assert.doesNotMatch(await page.textContent('#smart-panel'), /not stored/i);
+  // But its MPPT parameters it does report, as every firmware does.
+  assert.equal((await rows('.mppt-row')).length, 4);
   await page.click('#smart-panel .smart-close');
   await page.waitForSelector('#smart-panel:not([open])', { state: 'attached' });
   // A phone: the same panel, as a sheet along the bottom.
