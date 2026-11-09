@@ -93,8 +93,8 @@ don't control. The goal is a replacement on hardware and software we own.
 
 ### The keep-alive, from the CCA's binaries
 
-From `~/tigo-protocol-analysis/docs/KEEPALIVE_NETRUN.md` (lmudcd strings and
-counters; nothing was put on a bus):
+From `~/tigo-protocol-analysis/docs/KEEPALIVE_NETRUN.md` (the CCA's own
+strings and counters; nothing was put on a bus):
 
 - **Both layers take part.** Once the TAP is in Running mode with netrun
   started, it sends the mesh timing beacon on its own clock. The master
@@ -104,7 +104,7 @@ counters; nothing was put on a bus):
   - it runs an AdvSync about every 12 minutes: Netrun Stop, set TXID,
     Netrun Start, then a check of GET_GATEWAY_STAT's running flag;
   - it stops queueing beacons in PV-safe mode.
-- **No optimizer keep-alive timeout exists in lmudcd or meshdcd.** How long an
+- **No optimizer keep-alive timeout exists in the CCA's firmware.** How long an
   optimizer runs without an enabling beacon lives in the TS4 firmware. Whether
   the TAP stops beaconing when the master goes quiet lives in the TAP
   firmware. Measure both; don't assume "set netrun once and walk away".
@@ -131,7 +131,7 @@ counters; nothing was put on a bus):
   start/stop argument bytes were never captured. Do not hardcode them. The
   real CCA does Netrun Stop/Start on every AdvSync, so a passive roof
   capture of 15 minutes or more contains the exact bytes.
-- GET_GATEWAY_STAT (0x0300, read-only) shows whether netrun took, as lmudcd
+- GET_GATEWAY_STAT (0x0300, read-only) shows whether netrun took, as the CCA
   itself checks.
 
 ### What the roof CCA actually sends (passive capture, 2026-10-26)
@@ -224,7 +224,7 @@ optimizers:
   RS485 id; see above.)
 - **Configured is not beaconing on newer gateways.** The G5.26 beacons as soon
   as it's in running mode; the newer H1.0006 (GW-H158, the roof's model line)
-  shows no beacon from the mode alone. And lmudcd's netrun start is timed to
+  shows no beacon from the mode alone. And the CCA's netrun start is timed to
   the beacon clock, not a replayable argument. So after a rapid-shutdown power
   cut, the roof TAP may need a start the master doesn't send. The CCA
   cold-start capture (plan Task 10) decides this before any takeover.

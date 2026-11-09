@@ -238,7 +238,7 @@ static void test_allow_list() {
 
   // The writes never sent, in steady state or bench: store, clear-roster,
   // whitelist, netrun, and the gateway mode (SET_GATEWAY_MODE 0x0054, its
-  // response 0x0055: lmudcd's opcode switch). (The re-addressing writes
+  // response 0x0055: the CCA's opcode table). (The re-addressing writes
   // 0x0010/0x0014/0x003C are startup_only; see test_startup_allow.)
   for (uint16_t cmd : {0x0012, 0x011E, 0x0182, 0x0058, 0x0054, 0x0055})
     CHECK(classify_request(cmd, {}) == Allow::never && !may_send(cmd, {}, true, true, true, true));
@@ -1242,7 +1242,7 @@ static void test_next_request_housekeeping() {
   CHECK(next_request(window, cursor, seq, 7000).cmd == CMD_POLL);
 }
 
-// The PV switch: 0x0B00 00 off, 01 on (the CCA's CUpdaterPvOff; the roof's
+// The PV switch: 0x0B00 00 off, 01 on (the CCA's PV-off updater; the roof's
 // 0x0B00 [01] -> 0x0B01 [01]). Off goes out at once, is retried until the
 // TAP's reply carries it, and no 01 goes out while it is held.
 static Frame session_reply(uint8_t v) {

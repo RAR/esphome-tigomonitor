@@ -21,7 +21,7 @@ What we want:
 | 4. Join | The optimizer joins the TAP, but only while the discovery window is open (measured 2026-11-05 and 2026-11-06, below). The TAP then clears the entry's 0x8000 bit | We already see joins (new-optimizer handling) |
 | 5. Configure | The updaters read `Version`, `Info`, `Mppt`, `Smrt`, `Tests`. The Info updater also corrects settings (`Mppt_..1.…`, `Mppt_%X.1`, `Discharge_%02X`) | We send the reads; none of the corrective writes |
 
-Sources: the owner's RE write-ups of CCA 4.0.3-nd (`meshdcd`, `lmudcd`), summarised in memory under *cca-enrollment-static-findings*. Treat the table rewrite and the ID choice as firmware-confirmed. The write-ups' "joins aren't gated, only the discover bit is" came from log strings; the roof measurement below contradicts it for a registered node that has never joined.
+Sources: the owner's RE write-ups of CCA 4.0.3-nd, summarised in memory under *cca-enrollment-static-findings*. Treat the table rewrite and the ID choice as firmware-confirmed. The write-ups' "joins aren't gated, only the discover bit is" came from log strings; the roof measurement below contradicts it for a registered node that has never joined.
 
 Rejecting unknown optimizers ("not in SysConfig and Discovery not Promiscuous") is a CCA setting, not a TAP rule. The Pi has no such filter.
 
