@@ -14,8 +14,8 @@ bring it back from the same page.
 
 ## The frame (what we know)
 
-From the 4.0.3 CCA's `meshdcd`, class `CUpdaterPvOff`, read statically
-(the analysis note "CUpdaterPvOff — frame layout and value meanings",
+From the 4.0.3 CCA's firmware, its PV-off updater, read statically
+(the analysis note on the PV-off frame layout and value meanings,
 2026-11-03; nothing was sent on a bus):
 
 - The PV switch is **command 0x0B00 with one payload byte: `00` = off,

@@ -70,6 +70,11 @@ expect "a quiet bus" "$(python3 -c "import json; d = json.load(open('$out/quiet.
 # And the day of signal history, which would otherwise start empty.
 rssi_before="$(q "{a: n[a]['rssi_24h'][-1] for a in sorted(n)}")"
 kill $daemon; wait $daemon 2>/dev/null || true
+# 0005 marked as a known spare, as the Devices page's Mark known does.
+python3 -c "import json; p = '$out/state/state.json'; d = json.load(open(p))
+for n in d['nodes']:
+    n['known'] = n['addr'] == '0005'
+json.dump(d, open(p, 'w'))"
 build/linux/tigomonitord --state-dir "$out/state" --port 18093 --serial /dev/nonexistent 2> "$out/restart.log" &
 daemon=$!
 sleep 1
@@ -78,4 +83,13 @@ expect "parents kept after a restart" "$(q "{a: n[a]['parent'] for a in sorted(n
 expect "join times kept" "$(q "sorted(a for a in n if isinstance(n[a]['last_join_unix'], int))")" "['0002', '0004']"
 expect "signal history kept" "$(q "{a: n[a]['rssi_24h'][-1] for a in sorted(n)}")" "$rssi_before"
 expect "signal history not empty" "$(q "all(x['rssi_24h'][-1] is not None for x in d['nodes'])")" True
+# Restarted at night, before any report: each optimizer it has heard still
+# has its place, stale and reading nothing, as on the ESP32; a known spare
+# doesn't.
+get 18093 /api/devices > "$out/devices.json"
+dev() { python3 -c "import json; d = json.load(open('$out/devices.json'))['devices']; print($1)"; }
+expect "devices kept after a restart" "$(dev "sorted(x['addr'] for x in d)")" "['0002', '0003', '0004']"
+expect "each stale, reading nothing" "$(dev "all(x['stale'] and x['power'] == 0 for x in d)")" True
+expect "with its barcode" "$(dev "all(len(x['barcode']) == 16 for x in d)")" True
+expect "aged from when it was last heard" "$(dev "all(0 <= x['data_age_ms'] < 600000 for x in d)")" True
 [ $fail = 0 ] && echo "mesh e2e passed" || { echo "mesh e2e FAILED; see $out/"; exit 1; }

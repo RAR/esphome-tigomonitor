@@ -668,6 +668,12 @@
   .mesh-sw.tier-good { background: var(--good); } .mesh-sw.tier-fair { background: var(--warn); }
   .mesh-sw.tier-poor { background: var(--bad); } .mesh-sw.tier-silent { border-top: 2px dashed var(--text-faint); height: 0; }
   .mesh-sw.via-unknown { background: repeating-linear-gradient(90deg, var(--text-dim) 0 8px, transparent 8px 12px); }
+  /* By string, the legend speaks the cards' language: dots and tags. */
+  .mesh-legend .mesh-strings-only, .mesh-legend.strings .mesh-map-only { display: none; }
+  .mesh-legend.strings .mesh-strings-only { display: inline; }
+  .mesh-legend.strings .mesh-sw { width: 8px; height: 8px; border-radius: 50%; }
+  .mesh-legend.strings .mesh-sw.tier-silent { border: 1.5px dashed var(--text-faint); box-sizing: border-box; }
+  .mesh-legend .mesh-card-via { font-style: normal; display: inline-block; margin-right: 6px; }
   .mesh-view { margin: 0 0 12px; }
   /* By string: a row per string, a card per optimizer in panel order. */
   .mesh-strings { padding: 14px; display: flex; flex-direction: column; gap: 12px; }
@@ -698,7 +704,44 @@
   .mesh-card-via { align-self: flex-start; font-size: 10px; padding: 0 6px; border-radius: 4px; color: var(--accent-3);
                    background: color-mix(in srgb, var(--accent-3) 16%, transparent); }
   .mesh-card-via.unknown { color: var(--text-dim); background: none; border: 1px dashed var(--text-dim); }
+  /* An optimizer's settings (Devices › Settings): a drawer, a sheet on a phone. */
+  td.smart button { font: inherit; color: inherit; background: none; border: 1px solid transparent; border-radius: 6px;
+                    padding: 4px 8px; margin: -4px -8px; cursor: pointer; text-align: left; min-height: 32px; }
+  td.smart button:hover, td.smart button:focus-visible { border-color: var(--border); background: var(--bg-3); outline: none; }
+  td.smart button::after { content: '›'; color: var(--text-faint); margin-left: 6px; }
+  .smart-panel { position: fixed; inset: 0 0 0 auto; margin: 0; width: min(440px, 100vw); max-width: 100vw; height: 100%; max-height: 100%;
+                 box-sizing: border-box; padding: 22px 22px 18px; border: 0; border-left: 1px solid var(--border);
+                 background: var(--bg); color: var(--text); overflow-y: auto; }
+  .smart-panel[open] { display: flex; flex-direction: column; gap: 12px; }
+  .smart-panel::backdrop { background: rgb(0 0 0 / .35); }
+  .smart-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+  .smart-head h3 { margin: 0; font-size: 19px; display: flex; gap: 10px; align-items: center; }
+  .smart-sub { color: var(--text-dim); font-size: 12px; margin-top: 3px; }
+  .smart-close { width: 40px; height: 40px; flex: none; border-radius: 8px; border: 1px solid var(--border); background: none;
+                 color: var(--text-dim); font-size: 20px; cursor: pointer; }
+  .smart-pill { font-size: 11.5px; font-weight: 600; padding: 2px 9px; border-radius: 99px; color: var(--good);
+                background: color-mix(in srgb, var(--good) 14%, transparent); }
+  .smart-pill.warn { color: var(--warn); background: color-mix(in srgb, var(--warn) 14%, transparent); }
+  .smart-verdict { font-size: 13px; line-height: 1.45; padding: 10px 12px; border-radius: 8px; background: var(--bg-2); border: 1px solid var(--border); }
+  .smart-verdict.warn { color: var(--warn); background: color-mix(in srgb, var(--warn) 8%, var(--bg)); border-color: color-mix(in srgb, var(--warn) 35%, transparent); }
+  .smart-table { display: flex; flex-direction: column; }
+  .smart-cols, .smart-row { display: grid; grid-template-columns: minmax(0, 1fr) 92px 92px; gap: 8px; align-items: center; }
+  .smart-cols { font-size: 11px; color: var(--text-faint); text-transform: uppercase; letter-spacing: .05em; padding-bottom: 6px; border-bottom: 1px solid var(--border); }
+  .smart-cols span + span, .smart-val, .smart-most { text-align: right; font-variant-numeric: tabular-nums; }
+  .smart-group { font-size: 11px; color: var(--text-dim); font-weight: 600; padding: 10px 0 2px; }
+  .smart-row { padding: 5px 8px; margin: 0 -8px; border-radius: 6px; font-size: 13px; }
+  .smart-row.differs { background: color-mix(in srgb, var(--warn) 10%, transparent); }
+  .smart-row.differs .smart-val { color: var(--warn); font-weight: 700; }
+  .smart-name { display: flex; flex-direction: column; min-width: 0; }
+  .smart-code { font-size: 10.5px; color: var(--text-faint); font-family: ui-monospace, Menlo, monospace; }
+  .smart-most { color: var(--text-dim); }
+  .smart-note { font-size: 11.5px; color: var(--text-faint); line-height: 1.5; padding-top: 6px; }
+  .smart-k { margin-top: auto; font-size: 11px; color: var(--text-faint); }
+  .smart-raw { font-size: 11px; color: var(--text-dim); background: var(--bg-2); border-radius: 6px; padding: 8px 10px; white-space: pre-wrap; word-break: break-all; }
   @media (max-width: 760px) {
+    .smart-panel { inset: auto 0 0 0; width: 100vw; height: auto; max-height: 82vh; border-left: 0;
+                   border-top: 1px solid var(--border); border-radius: 16px 16px 0 0; }
+    .smart-k { margin-top: 4px; }
     .mesh-row { flex-direction: column; gap: 10px; }
     .mesh-row-head { width: auto; flex-direction: row; align-items: baseline; flex-wrap: wrap; gap: 4px 10px; }
     .mesh-stage { grid-template-columns: minmax(0, 1fr); }
@@ -1263,12 +1306,14 @@
           <div class="mesh-graph"><svg id="mesh-svg" viewBox="0 0 760 460" role="group" aria-label="Optimizers around the TAP each reports through"></svg></div>
           <div class="mesh-side" id="mesh-side" aria-live="polite"></div>
         </div>
-        <div class="mesh-legend" aria-hidden="true">
+        <div class="mesh-legend" id="mesh-legend" aria-hidden="true">
           <span><i class="mesh-sw tier-good"></i>Good</span>
           <span><i class="mesh-sw tier-fair"></i>Fair: 1–5% lost, or signal under 110</span>
           <span><i class="mesh-sw tier-poor"></i>Poor: over 5% lost, or signal under 80</span>
           <span><i class="mesh-sw tier-silent"></i>Silent: not heard for 10 minutes</span>
-          <span><i class="mesh-sw via-unknown"></i>Through a relay not identified yet</span>
+          <span class="mesh-map-only"><i class="mesh-sw via-unknown"></i>Through a relay not identified yet</span>
+          <span class="mesh-strings-only"><i class="mesh-card-via">via D9</i>Joined through another optimizer</span>
+          <span class="mesh-strings-only"><i class="mesh-card-via unknown">via ?</i>Through a relay not identified yet</span>
         </div>
       </div>
     </section>
@@ -1334,6 +1379,16 @@
           </tbody>
         </table>
       </div>
+      <dialog id="smart-panel" class="smart-panel" aria-labelledby="smart-panel-title">
+        <div class="smart-head">
+          <div><h3 id="smart-panel-title"></h3><div class="smart-sub"></div></div>
+          <button type="button" class="smart-close" aria-label="Close">&times;</button>
+        </div>
+        <div class="smart-verdict"></div>
+        <div class="smart-body"></div>
+        <div class="smart-k">As heard</div>
+        <code class="smart-raw"></code>
+      </dialog>
     </section>
 
     <!-- SETTINGS -->
@@ -1390,7 +1445,7 @@
           <div class="cfg-ctrl"><label class="cfg-switch"><input type="checkbox" id="pi-writes"> <span>Off</span></label></div>
         </div>
         <div class="cfg-row" id="pi-discauto-row" style="display:none">
-          <div class="cfg-text"><strong>Open discovery only when needed</strong><span>As the CCA does: keep the TAP's join window open only while an optimizer placed in your layout hasn't reported today, in daylight. With none placed, it stays open as now. The Bus page's Disable still wins (experimental)</span></div>
+          <div class="cfg-text"><strong>Open discovery only when needed</strong><span>As the CCA does: keep the TAP's join window open only while an optimizer in a string hasn't reported today, in daylight. With none in a string, it stays open as now. The Bus page's Disable still wins (experimental)</span></div>
           <div class="cfg-ctrl"><label class="cfg-switch"><input type="checkbox" id="pi-discauto"> <span>Off</span></label></div>
         </div>
         <div class="cfg-row" id="pi-tapcfg-row" style="display:none">
@@ -3314,14 +3369,31 @@
     for (const o of (nodesData.versions && nodesData.versions.optimizers) || []) fwByAddr[o.addr.toUpperCase()] = o;
     document.querySelector('#view-nodes table.nodes:not(#devices-taps table)').classList.toggle('with-fw', !!nodesData.versions);
     // Settings as each optimizer last answered them, and the answer most of
-    // them give: one that differs is worth a look.
+    // its firmware family give: one that differs is worth a look. Families
+    // answer in different forms (the roof's H9s in zeros), so a K8 is only
+    // compared with K8s; and not on the stored flag, which the cell shows.
+    const smartFamily = addr => {
+      const v = fwByAddr[addr] && fwByAddr[addr].version;
+      return v ? v.split('.')[0] : '';
+    };
+    // Only fields every answer carries whole: the K8's is cut at 58 characters,
+    // inside UclLimit (see SMRT_FIELDS).
+    const smartValues = o => smartKey(o.settings);
     const smartByAddr = {}, smartCount = {};
     for (const o of (nodesData.versions && nodesData.versions.settings) || []) {
-      smartByAddr[o.addr.toUpperCase()] = o;
-      smartCount[o.settings] = (smartCount[o.settings] || 0) + 1;
+      const addr = o.addr.toUpperCase(), fam = smartFamily(addr);
+      smartByAddr[addr] = o;
+      const c = smartCount[fam] = smartCount[fam] || { n: 0, by: {} };
+      c.n++;
+      c.by[smartValues(o)] = (c.by[smartValues(o)] || 0) + 1;
     }
-    const smartAnswered = Object.values(smartCount).reduce((a, b) => a + b, 0);
-    const smartUsual = Object.keys(smartCount).sort((a, b) => smartCount[b] - smartCount[a])[0];
+    const smartUsual = {}, smartUsualSettings = {};
+    for (const [fam, c] of Object.entries(smartCount))
+      smartUsual[fam] = Object.keys(c.by).sort((a, b) => c.by[b] - c.by[a])[0];
+    for (const o of (nodesData.versions && nodesData.versions.settings) || []) {
+      const fam = smartFamily(o.addr.toUpperCase());
+      if (!smartUsualSettings[fam] && smartValues(o) === smartUsual[fam]) smartUsualSettings[fam] = o.settings;
+    }
 
     const search = nodesFilters.search.toLowerCase();
     const filterString = nodesFilters.stringLabel;
@@ -3356,9 +3428,12 @@
 
       const fw = fwByAddr[String(n.addr).toUpperCase()] || null;
       const smart = smartByAddr[String(n.addr).toUpperCase()] || null;
-      const differs = !!smart && smart.settings !== smartUsual && smartCount[smartUsual] > smartCount[smart.settings];
+      const fam = smart ? smartFamily(String(n.addr).toUpperCase()) : '';
+      const c = smart && smartCount[fam], usual = smart && smartUsual[fam];
+      const differs = !!smart && smartValues(smart) !== usual && c.by[usual] > c.by[smartValues(smart)];
+      const smartPeers = smart ? { family: fam, usual: c.by[usual], answered: c.n, usualSettings: smartUsualSettings[fam] } : null;
       rows.push({ n, name, addr: n.addr, barcodeKey, barcodeShort,
-                  stringLabel, mpptLabel, v, a, w, t, age, state, fw, smart, differs });
+                  stringLabel, mpptLabel, v, a, w, t, age, state, fw, smart, differs, smartPeers });
     }
 
     // Sort by current column. Numeric columns sort numerically; string
@@ -3418,8 +3493,8 @@
           <td class="num">${fmtAge(r.age)}</td>
           <td><span class="badge ${r.n.known ? 'stale' : r.state}"${r.n.known ? ' title="Marked known: not reporting, not counted, not flagged as missing"' : ''}>${stateLabel}</span></td>
           <td class="mono fw"${r.fw ? ` title="${topoEscape(fwTitle(r.fw))}"` : ''}>${r.fw ? topoEscape(r.fw.version) : '—'}</td>
-          <td class="fw smart"${r.smart ? ` title="${topoEscape(smartTitle(r.smart, r.differs, smartCount[smartUsual], smartAnswered))}"` : ''}>${r.smart
-            ? `<span${r.smart.stored && !r.differs ? '' : ' style="color:var(--warn)"'}>${r.smart.stored ? 'Stored' : 'Not stored'}${r.differs ? ' · differs' : ''}</span>` : '—'}</td>
+          <td class="fw smart"${r.smart ? ` title="${topoEscape(smartTitle(r.smart, r.differs, r.smartPeers))}"` : ''}>${r.smart
+            ? `<button type="button" aria-haspopup="dialog"${r.smart.stored && !r.differs ? '' : ' style="color:var(--warn)"'}>${r.smart.stored ? 'Stored' : 'Not stored'}${r.differs ? ' · differs' : ''}</button>` : '—'}</td>
         </tr>
       `;
     }
@@ -3428,6 +3503,7 @@
       html = '<tr><td colspan="11" style="text-align:center;color:var(--text-faint);padding:40px 0">No nodes match the current filters.</td></tr>';
     }
     tbody.innerHTML = html;
+    smartRows = Object.fromEntries(rows.filter(r => r.smart).map(r => [String(r.addr).toUpperCase(), r]));
     countEl.textContent = `${rows.length} of ${nodes.length} shown`;
     const knownCount = nodes.filter(n => n.known).length;
     metaEl.textContent = `${nodes.length - knownCount} discovered · ${devices.filter(d => (d.data_age_ms ?? 999999) < 60000).length} reporting` +
@@ -3458,10 +3534,114 @@
   }
 
   // A settings answer's tooltip: stored or not, how it compares, the tokens.
-  function smartTitle(o, differs, usual, answered) {
+  // The !Smrt answer's fields after "!Smrt", by the CCA's own names, scales
+  // and units (the CCA's field table; the analysis side, 2026-11-08): one
+  // layout for every firmware. Index 9 is the stored flag. A K8's answer is
+  // cut at 58 characters, two digits into UclLimit, so it carries 0-10 whole
+  // and a fragment; an H9's is whole but its firmware reports zeros.
+  const SMRT_FIELDS = [
+    ['SwVout', 0.05, 2, ' V'], ['OutResis', 0.01953125, 3, ' Ω'], ['HwVout', 0.05, 2, ' V'],
+    ['DnPwmTim', 0.001, 3, ' s'], ['UpPwmTim', 0.001, 3, ' s'], ['PwmThrsh', 1, 0, ''],
+    ['OvRecTim', 0.001, 3, ' s'], ['UvinLvLo', 0.05, 2, ' V'], ['UvinLvHi', 0.05, 2, ' V'],
+    null, ['AcLoss', 1, 0, ''], ['UclLimit', 0.0025, 4, ' A'], ['UclThrsh', 0.05, 2, ' V'],
+    ['OvMinPwm', 1, 0, ''], ['BaseOverride', null, 0, ''],
+  ];
+  const SMRT_WHOLE = [0, 1, 2, 3, 4, 5, 6, 7, 8, 10];  // in every answer, whole
+  // 0FFF is the most an output voltage field holds, about 205 V, far beyond
+  // what one panel's optimizer can put out: no limit set, not a real one.
+  const SMRT_NO_LIMIT = ['SwVout', 'HwVout'];
+  function smartKey(settings) {
+    const t = settings.split(' ');
+    return SMRT_WHOLE.map(i => t[i] || '').join(' ');
+  }
+  // [name, text] for each field the answer carries whole.
+  function smartFields(settings) {
+    const t = settings.split(' '), full = t.length >= SMRT_FIELDS.length;
+    const out = [];
+    t.forEach((v, i) => {
+      const f = SMRT_FIELDS[i];
+      if (!f || (!full && !SMRT_WHOLE.includes(i))) return;
+      const n = parseInt(v, 16);
+      out.push([f[0], f[1] === null || isNaN(n) ? v
+        : n === 0xFFF && SMRT_NO_LIMIT.includes(f[0]) ? 'No limit (max)' : (n * f[1]).toFixed(f[2]) + f[3]]);
+    });
+    return out;
+  }
+  // Plain names for the panel, by section; the CCA's name goes beneath.
+  const SMRT_GROUPS = [
+    ['Output', [['SwVout', 'Output voltage setpoint'], ['HwVout', 'Output voltage limit'], ['OutResis', 'Output resistance']]],
+    ['Switching', [['DnPwmTim', 'PWM ramp down'], ['UpPwmTim', 'PWM ramp up'], ['PwmThrsh', 'PWM threshold'], ['OvRecTim', 'Over-voltage recovery']]],
+    ['Input', [['UvinLvLo', 'Under-voltage, low'], ['UvinLvHi', 'Under-voltage, high']]],
+    ['Rapid shutdown', [['AcLoss', 'Shut down on AC loss']]],
+    ['Limits', [['UclLimit', 'Current limit'], ['UclThrsh', 'Current limit threshold'], ['OvMinPwm', 'Over-voltage minimum PWM'], ['BaseOverride', 'Discharge enabled']]],
+  ];
+  let smartRows = {};
+  function openSmartPanel(r) {
+    const dlg = document.getElementById('smart-panel');
+    const o = r.smart, peers = r.smartPeers, fam = peers.family || 'this';
+    const t = o.settings.split(' ');
+    const zeros = SMRT_WHOLE.every(i => i === 10 || /^0+$/.test(t[i] || ''));
+    const mine = Object.fromEntries(smartFields(o.settings));
+    const most = peers.usualSettings ? Object.fromEntries(smartFields(peers.usualSettings)) : {};
+    dlg.querySelector('h3').innerHTML = `${topoEscape(r.name)} <span class="smart-pill${o.stored ? '' : ' warn'}">${o.stored ? 'Stored' : 'Not stored'}</span>`;
+    dlg.querySelector('.smart-sub').textContent = [r.stringLabel !== '—' ? r.stringLabel : '', r.fw ? `firmware ${r.fw.version}` : '',
+      o.heard_unix_ms ? `answered ${new Date(o.heard_unix_ms).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}` : '']
+      .filter(Boolean).join(' · ');
+    const verdict = dlg.querySelector('.smart-verdict');
+    const nDiff = Object.keys(mine).filter(k => most[k] !== undefined && most[k] !== mine[k]).length;
+    verdict.className = 'smart-verdict' + (r.differs || !o.stored ? ' warn' : '');
+    verdict.textContent = zeros
+      ? (o.stored ? 'Settings stored: its store-done flag reads S.' : 'Settings not stored yet: its store-done flag reads N. A CCA would send them again.')
+      : r.differs ? `Differs from ${peers.usual} of the ${peers.answered} ${fam}s in ${nDiff === 1 ? 'one setting' : nDiff + ' settings'}.`
+      : `The same as ${peers.usual} of the ${peers.answered} ${fam}s that answered.` + (o.stored ? '' : ' Not stored yet: its store-done flag reads N.');
+    const body = dlg.querySelector('.smart-body');
+    if (zeros) {
+      body.innerHTML = `<div class="smart-verdict">${topoEscape(fam)} firmware doesn't report its settings: it answers zeros in every field, by design. Only the stored flag means anything here.</div>`;
+    } else {
+      const groups = SMRT_GROUPS.map(([title, items]) => {
+        const shown = items.filter(([code]) => mine[code] !== undefined);
+        if (!shown.length) return '';
+        return `<div class="smart-group">${title}</div>` + shown.map(([code, label]) => {
+          const diff = most[code] !== undefined && most[code] !== mine[code];
+          return `<div class="smart-row${r.differs && diff ? ' differs' : ''}"><span class="smart-name"><span>${label}</span><span class="smart-code">${code}</span></span>` +
+            `<span class="smart-val">${topoEscape(mine[code])}</span><span class="smart-most">${topoEscape(most[code] ?? '—')}</span></div>`;
+        }).join('');
+      }).join('');
+      const cut = t.length < SMRT_FIELDS.length
+        ? `<div class="smart-note">Not in a ${topoEscape(fam)}'s answer: the current limit, its threshold, minimum PWM and Discharge enabled. Its reply is cut short, so these never arrive.</div>` : '';
+      body.innerHTML = `<div class="smart-table"><div class="smart-cols"><span>Setting</span><span>This one</span><span>Most ${topoEscape(fam)}s</span></div>${groups}${cut}</div>`;
+    }
+    dlg.querySelector('.smart-raw').textContent = t.length < SMRT_FIELDS.length ? t.slice(0, 11).join(' ') + ' …' : o.settings;
+    if (!dlg.open) dlg.showModal();
+  }
+  document.getElementById('nodes-tbody').addEventListener('click', e => {
+    const b = e.target.closest('td.smart button');
+    const r = b && smartRows[String(b.closest('tr').dataset.addr).toUpperCase()];
+    if (r) openSmartPanel(r);
+  });
+  document.querySelector('#smart-panel .smart-close').addEventListener('click', () => document.getElementById('smart-panel').close());
+  // A click on the backdrop (outside the panel) closes it too.
+  document.getElementById('smart-panel').addEventListener('click', e => {
+    if (e.target === e.currentTarget) {
+      const b = e.currentTarget.getBoundingClientRect();
+      if (e.clientX < b.left || e.clientX > b.right || e.clientY < b.top || e.clientY > b.bottom) e.currentTarget.close();
+    }
+  });
+
+  function smartTitle(o, differs, peers) {
+    const of = `${peers.usual} of the ${peers.answered}${peers.family ? ` on ${peers.family} firmware` : ''} that answered`;
+    const t = o.settings.split(' '), fields = smartFields(o.settings);
+    const zeros = SMRT_WHOLE.every(i => i === 10 || /^0+$/.test(t[i] || ''));
+    const usual = peers.usualSettings ? Object.fromEntries(smartFields(peers.usualSettings)) : {};
+    const lines = zeros
+      ? [`Settings not reported by ${peers.family || 'this'} firmware (it answers zeros)`]
+      : fields.map(([name, text]) => differs && usual[name] !== undefined && usual[name] !== text
+          ? `${name} ${text}, where most have ${usual[name]}` : `${name} ${text}`);
+    // As heard, a cut-off tail shown as "…".
+    const heard = t.length < SMRT_FIELDS.length ? t.slice(0, 11).join(' ') + ' …' : o.settings;
     return (o.stored ? 'Settings stored' : "Settings not stored: its store-done flag reads N") +
-      (differs ? ` · Differs from ${usual} of the ${answered} that answered` : ` · The same as ${usual} of the ${answered} that answered`) +
-      `\n${o.settings}` + (o.heard_unix_ms ? `\nHeard ${new Date(o.heard_unix_ms).toLocaleString()}` : '');
+      (differs ? ` · Differs from ${of}` : ` · The same as ${of}`) +
+      `\n${lines.join('\n')}\n${heard}` + (o.heard_unix_ms ? `\nHeard ${new Date(o.heard_unix_ms).toLocaleString()}` : '');
   }
 
   // "Mnode since Jan 1, 12:00, was K8.0120 (2D)": a version's tooltip.
@@ -3807,7 +3987,7 @@
     verEl.textContent = ver ? ver[2] : m.tap_version || '—';
     verEl.title = m.tap_version || '';
     document.getElementById('diag-tap-version-sub').textContent = !m.tap_version ? 'asked once each time the bus master starts'
-      : ver ? [ver[1], ver[3].replace(/\s+/g, ' ')].filter(Boolean).join(' · ') : 'read in the bring-up';
+      : ver ? [ver[1], ver[3].replace(/\s+/g, ' ').replace(/-/g, '\u2011')].filter(Boolean).join(' · ') : 'read in the bring-up';
   }
 
   async function refreshDiagnostics(force) {
@@ -3981,7 +4161,7 @@
     const autoText = !auto ? ''
       : m.window_wanted === false ? 'Automatic: every optimizer in your layout has reported today, so the window is left to close · '
       : m.missing_expected > 0 ? `Automatic: kept open while ${m.missing_expected} optimizer${m.missing_expected === 1 ? '' : 's'} in your layout haven't reported today · `
-      : 'Automatic: kept open (nothing placed in the layout to judge by) · ';
+      : 'Automatic: kept open (no optimizer in a string to judge by) · ';
     document.getElementById('disc-state').textContent = auto ? 'Automatic' : renewing ? 'Enabled' : 'Disabled';
     document.getElementById('disc-detail').textContent = autoText + (renewing ? `Now ${left}` : `Now ${left} · kept through a restart`) + joined;
     const disc = document.getElementById('disc-toggle');
@@ -5999,6 +6179,7 @@
       b.setAttribute('aria-pressed', String(b.dataset.mode === meshMode));
     });
     document.getElementById('mesh-note').textContent = MESH_NOTES[meshMode];
+    document.getElementById('mesh-legend').classList.toggle('strings', meshMode === 'strings');
   }
   document.querySelectorAll('#mesh-view button').forEach(b => b.addEventListener('click', () => setMeshMode(b.dataset.mode)));
 

@@ -185,8 +185,10 @@ per optimizer to the TAP its reports come through. The colour of the line
 says how well that optimizer is getting through:
 
 - **Reports lost today.** Each report carries Tigo's slot counter, which
-  places it in a 2-second slot, so a skipped slot is a report that never
-  arrived. Only gaps while it is reporting count: the night, or a
+  places it in a time slot: every 3 seconds on one roof, every 2 on a bench
+  setup. The Pi learns each optimizer's spacing, so a skipped slot is a
+  report that never arrived; one that turns up late, up to a minute behind,
+  fills its gap. Only gaps while it is reporting count: the night, or a
   restart of the Pi, isn't loss.
 - **Signal.** The number each report carries, from 0 to 255, higher is
   better. It is Tigo's own scale, not dBm, so the Pi shows it as it is. On
@@ -360,10 +362,11 @@ it. It needs the web UI password too.
 
 To do what that CCA did, turn on **Open discovery only when needed** under
 Settings → Bus. The Pi then checks once a minute: in daylight, while any
-optimizer you've placed in a string in the layout hasn't reported since
-midnight, it renews the window; once all have, it lets the window close. At
+optimizer in a string hasn't reported since midnight, it renews the window;
+once all have, it lets the window close. A string counts whether you set it
+up in **Edit layout** or it came from the CCA or a Tigo cloud import. At
 night nothing is held open, since the optimizers rejoin by themselves at
-sunrise. With nothing placed in the layout it renews as before, and a spare
+sunrise. With no optimizer in a string it renews as before, and a spare
 you've marked known doesn't count. The Bus page says which it's doing and
 how many it's waiting for. **Disable** still wins over it.
 

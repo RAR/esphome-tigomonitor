@@ -5,7 +5,7 @@ Engineering notes on how a Tigo CCA manages its TAPs (gateways) over RS485, from
 **Sources:**
 - Listen-only bench recordings of a backup CCA (firmware 3.6.0-ct) on 2026-11-06, driving an H1.0006 TAP, a G5.26 TAP (reflashed to G8.59 during the session) and one TS4 optimizer (Mnode H9.0022).
 - That CCA's local web UI. Its diagnostic pages name every opcode and decode the frames.
-- The owner's static analysis of CCA 4.0.3 (`meshdcd`, `lmudcd`) and of the Mgate H1.0007 image.
+- The owner's static analysis of CCA 4.0.3 and of a TAP's firmware (H1.0007).
 - The roof's 24-hour capture under the 4.0.7 CCA, and the Zero's CCA-era cold-start capture.
 
 The recordings and UI pastes hold MACs, PANs and network keys. They live in `~/tigo-protocol-analysis/captures/`, outside any git tree, and nothing here quotes them. The planning record is `docs/superpowers/specs/2026-11-05-optimizer-commissioning-design.md` and `docs/superpowers/plans/2026-11-06-bench-learnings.md`.
@@ -111,8 +111,8 @@ Our master does steps 1–6 for one TAP. Its STORE runs only on that drop-back p
 
 - **Power reports carry a slot counter:** top 2 bits = Hslot 0–3, low 14 bits = 5 ms ticks. One report per 2 s bin (400 ticks) on the bench, per 3 s (600 ticks) on the roof; an Hslot is 60 s; the counter wraps every 4 min. `tigo_protocol.h` keeps it as text (`slot_counter`).
 - **Reports carry no sequence number.** No byte steps by one from report to report in the bench captures; the CCA UI's "serial" column is the CCA's own count. Loss shows in the slot counter instead: a gap of twice the cadence means one report missed, and 0 a duplicate. `link_stats.h` counts it per optimizer, taking the smallest gap of the day as the cadence. On the bench that was 400 ticks (2 s); on the roof at sunrise, 2026-11-08, it was 600 ticks (3 s) on a 200-tick grid, and about one report in six reached the bus behind a newer one: 600, 1,800 or 3,000 ticks behind. Counting only up to 1,600 ticks behind as late read 20% loss (median of 40) where the slots seen showed 0.9%; anything behind by under half the wrap and heard within 60 s now counts as late, which reads 1.1%.
-- **NetDiag (type 09), once per join, 20, 23 or 24 data bytes** (the owner's analysis of the CCA's meshdcd, 2026-11-08): words at 0 and 6 unknown, 2 the node's own NWID (meshdcd drops the report if it isn't the expected node), **4 the parent's NWID**, 8–15 the node's MAC; 20–21 and 22 only in the longer forms. `0001` is the gateway: the bench CCA's mesh tree drew its one optimizer on the TAP, and that optimizer's joins all name `0001`. The CCA's own tree (`netrouting.*.csv`) is this parent per node, with the gateway written as `@<its MAC>`.
-  - Roof, 21 joins at sunrise 2026-11-08: own NWID = the bus address every time; 11 name `0001`, 1 names optimizer `0018`, and 9 name NWIDs `0039`–`0091`, which aren't in the TAP's 44-entry table (highest `002D`). One optimizer joined twice through two of those. How meshdcd maps such an NWID to a node (its Traceroute resolves "parent NWID … which is node …") is open; the Mesh tab draws them as a relay not identified yet.
+- **NetDiag (type 09), once per join, 20, 23 or 24 data bytes** (the owner's analysis of the CCA's firmware, 2026-11-08): words at 0 and 6 unknown, 2 the node's own NWID (the CCA drops the report if it isn't the expected node), **4 the parent's NWID**, 8–15 the node's MAC; 20–21 and 22 only in the longer forms. `0001` is the gateway: the bench CCA's mesh tree drew its one optimizer on the TAP, and that optimizer's joins all name `0001`. The CCA's own tree (`netrouting.*.csv`) is this parent per node, with the gateway written as `@<its MAC>`.
+  - Roof, 21 joins at sunrise 2026-11-08: own NWID = the bus address every time; 11 name `0001`, 1 names optimizer `0018`, and 9 name NWIDs `0039`–`0091`, which aren't in the TAP's 44-entry table (highest `002D`). One optimizer joined twice through two of those. How the CCA maps such an NWID to a node (its route tracing resolves a parent NWID to a node) is open; the Mesh tab draws them as a relay not identified yet.
   - Byte 16 is the node's signal at the join: it tracked the RSSI of its next power reports (correlation 0.93, within 4.9 on average). Bytes 20–22 are not the parent, as first guessed here.
   - **Nothing asks for a NetDiag** (owner's analysis, 2026-11-08). Like Power (31) and NetDebug (30), type 09 is an unsolicited report with no request opcode paired with it; it reaches the bus inside the TAP's input queue (0x0149), as Power does. How often a node sends one is set per node by PeriodicCfg Write (13), which carries a period and rate for Power, NetDiag and NetDebug, in that order; a zero slot turns that report off. The CCA leaves NetDiag and NetDebug at zero, so a node sends one NetDiag when it joins and no more: 1 NetDiag to 256 power reports in a CCA dump. Joins still happen in daylight: on the roof at 12:26 and 12:40, 2026-11-08, two optimizers rejoined, one (B5, losing 18.9% of its reports) through optimizer D9 and one through an unidentified NWID. PeriodicCfg Req (17, payload `0F`) reads the table back in 18.
   - So a map that refreshes on demand needs a write: either PeriodicCfg Write with a nonzero NetDiag slot, which changes what every node sends, or a way not yet known. The Pi never sends PeriodicCfg Write (below), so for now it keeps each optimizer's last join across restarts and waits for the next. Reading the table with 17 would show the roof's actual rates; our master has never sent it, so it gets a bench capture first. NetDebug (30) also carries the parent's RSSI, at offset 0x30.
@@ -139,7 +139,29 @@ Data collection from every TAP stops for the whole scan, about 5½ min. The acti
 - **The field after `S`** is AcLoss, the rapid-shutdown-on-AC-loss setting: `0000` in the 4.0.7 and night forms, `.` in the morning form.
 - **Our allowlisted `^00Smrt_........S0000...0000` is the CCA's Default.**
 
-The read-back `!Smrt …` has 16 tokens on the bench: token 3 HwVout, 10 the store-done flag (`S`), 11 AcLoss, 15 BaseOverride. The CCA compares them with what it wants and re-sends on a mismatch. The roof answers two ways (sunrise, 2026-11-08, 22 optimizers): 13 tokens with values (17, all identical: `0FFF 0000 0FFF 0008 00C8 00C8 000A 0154 0154 S 00 01`), or 16 tokens of zeros (5). Token 10 is `S` or `N` in both; the other positions don't line up, so the Pi names only the flag and shows the rest as heard. Two of the zero-form five went `N` → `S` after the Zero's allowlisted `Smrt_`.
+The read-back `!Smrt …` has **one layout for every firmware** (the analysis side, 2026-11-08: the same answer format in the K6, K8 and H9 optimizer firmware, and the CCA's own field table): nine words, the flag, a byte, three words, a byte. Counting `!Smrt` as token 0:
+
+| token | field | unit, raw → real |
+|---|---|---|
+| 1 | SwVout, the software output-voltage setpoint | V, ×0.05 |
+| 2 | OutResis, output resistance | Ω, ×0.01953125 |
+| 3 | HwVout, the hardware output-voltage limit | V, ×0.05 |
+| 4, 5 | DnPwmTim, UpPwmTim, PWM ramp times | s, ×0.001 |
+| 6 | PwmThrsh | raw |
+| 7 | OvRecTim, over-voltage recovery | s, ×0.001 |
+| 8, 9 | UvinLvLo, UvinLvHi, input under-voltage levels | V, ×0.05 |
+| 10 | the flag: `S` stored, `N` not | literal |
+| 11 | AcLoss (PwmAcLos), rapid shutdown on AC loss | raw |
+| 12 | UclLimit, the upper current limit | A, ×0.0025 |
+| 13 | UclThrsh | V, ×0.05 |
+| 14 | OvMinPwm | raw |
+| 15 | BaseOverride, the CCA UI's "Discharge Enabled" | a choice |
+
+- **A K8's answer is cut at 58 characters** (every one in the roof captures: no `\r`, the CRC straight after), two digits into UclLimit. So the roof's `… S 00 01` ends in a fragment of `0190`, not a setting; UclLimit, UclThrsh, OvMinPwm and BaseOverride never arrive from a K8. Its `!Info` is cut the same way. The CCA expects it: it logs the reply as truncated but still useful, and retries BaseOverride, then gives up on it.
+- **An H9's answer is whole and all zeros by design:** its builder passes 0 for every setpoint. Zeros there mean "not reported", not "unset".
+- **The CCA compares four fields** and re-sends `Smrt_` on a mismatch: HwVout, the flag (anything but `S`), AcLoss and BaseOverride.
+- The Devices page names tokens 1–9 and 11, shows 10 as Stored/Not stored, and compares an optimizer's whole fields only with others of its firmware family. On the roof, the 35 K8s (K8.0120, K8.0114) all agree; the 5 H9.0018s (D6–D10, the same five that keep producing through a mesh PV off) answer zeros. Two of the H9s went `N` → `S` after the Zero's allowlisted `Smrt_`.
+- Open: which character of the `^00Smrt_` write maps to which field.
 
 ## What the Pi must never send
 
@@ -153,6 +175,6 @@ The send gate lists these as never (some are still being moved there; see plan T
 
 - What `SET_CHANNEL 20 00` means.
 - The status byte's bit order.
-- The `Smrt_` fields the parser never reads.
+- Which character of the `^00Smrt_` write maps to which field.
 - Whether to turn NetDiag on with PeriodicCfg Write so the mesh map refreshes, and at what rate; left until the Pi takes on more writes.
 - Whether a TAP takes a node that isn't in its table (plan session B3). This decides whether we ever need SetTable.

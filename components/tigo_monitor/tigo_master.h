@@ -109,8 +109,7 @@ static const uint8_t SUB_DISCOVERY_STATUS_REPLY = 0x2F;
 static const uint8_t SUB_HOUSEKEEPING = 0x41;
 // The PV switch, though we first copied it as a "session" frame: one byte,
 // 00 off, anything else on (the CCA sends 01). From the 4.0.3 CCA's
-// CUpdaterPvOff (FillPvOffCommand: command 0x0B00, one payload byte; "OFF"
-// when it is 0). The roof CCA sent 01 every hour and 00 then 01 after each
+// PV-off updater (command 0x0B00, one payload byte; "OFF" when it is 0). The roof CCA sent 01 every hour and 00 then 01 after each
 // of its reboots; the TAP answers 0x0B01 with the same byte (the roof
 // capture: 0x0B00 [01] -> 0x0B01 [01]). Zero is off: never write a bare byte.
 static const uint16_t CMD_SESSION = 0x0B00;
@@ -1328,7 +1327,7 @@ inline Allow classify_request(uint16_t cmd, const Bytes &payload) {
     return Allow::startup_only;
   // The writes nothing here ever sends: store, clear-roster, whitelist, the
   // rapid-shutdown netrun lever, and the gateway's mode (SET_GATEWAY_MODE,
-  // 0x0054, and its response number 0x0055, from lmudcd's opcode switch).
+  // 0x0054, and its response number 0x0055, from the CCA's opcode table).
   static const uint16_t NEVER[] = {0x0012, 0x011E, 0x0182, 0x0058, 0x0054, 0x0055};
   for (uint16_t w : NEVER)
     if (cmd == w) return Allow::never;

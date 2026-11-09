@@ -447,6 +447,28 @@ void HttpServer::routes_() {
                          {"data_age_ms", age},
                          {"stale", now - p.updated >= mon.online_window()}});
     }
+    // An optimizer heard before but not since this start, such as after a
+    // restart at night, keeps its place reading nothing, as on the ESP32. A
+    // known spare doesn't.
+    int64_t now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                         std::chrono::system_clock::now().time_since_epoch()).count();
+    auto heard = mon.panels();
+    for (const auto &n : mon.nodes()) {
+      if (n.known || !n.last_heard_unix) continue;
+      bool listed = false;
+      for (const auto &p : heard) listed = listed || p.addr == n.addr;
+      if (listed) continue;
+      Panel p;
+      p.addr = n.addr;
+      p.barcode = n.long_address;
+      p.label = n.cca_label;
+      devices.push_back({{"addr", p.addr}, {"barcode", p.barcode}, {"name", panel_name(p)},
+                         {"string_label", string_of(mon, p)}, {"voltage_in", 0}, {"voltage_out", 0},
+                         {"current", 0}, {"current_out", 0}, {"power_in", 0}, {"power", 0}, {"power_out", 0},
+                         {"peak_power", 0}, {"temperature", 0}, {"rssi", 0}, {"duty_cycle", 0}, {"efficiency", 0},
+                         {"data_age_ms", std::max<int64_t>(0, now_ms - n.last_heard_unix * 1000)},
+                         {"stale", true}});
+    }
     send_json(res, {{"devices", devices}, {"count", devices.size()}});
   });
 

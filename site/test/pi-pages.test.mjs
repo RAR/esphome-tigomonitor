@@ -291,7 +291,8 @@ test('bus: the gateway version is the figure, its build details beneath', async 
   await page.click('#nav button[data-view="bus"]');
   await page.waitForFunction(() => document.getElementById('diag-tap-version').textContent !== '—');
   assert.equal(await page.textContent('#diag-tap-version'), 'G8.59');
-  assert.equal(await page.textContent('#diag-tap-version-sub'), 'Mgate · Jan 1 2026 10:00:00 GW-H1');
+  // A non-breaking hyphen, so the model doesn't wrap as GW- / H1.
+  assert.equal(await page.textContent('#diag-tap-version-sub'), 'Mgate · Jan 1 2026 10:00:00 GW\u2011H1');
   assert.equal(await page.getAttribute('#diag-tap-version', 'title'), 'Mgate Version G8.59 Jan  1 2026 10:00:00 GW-H1');
   assert.deepEqual(errors, []);
   await ctx.close();
@@ -463,6 +464,20 @@ test('mesh: by string puts each string on a row, panels in order', async () => {
   await page.waitForSelector('#mesh-strings .mesh-row');
   await page.click('#mesh-view button[data-mode="map"]');
   await page.waitForSelector('#mesh-svg .mesh-node');
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test('mesh: the legend matches the view, lines for the map and dots and tags by string', async () => {
+  const { page, ctx, errors } = await openMesh();
+  const shown = (sel) => page.locator(`#mesh-legend ${sel}`).first().isVisible();
+  assert.equal(await shown('.mesh-sw.via-unknown'), true);
+  assert.equal(await shown('.mesh-card-via'), false);
+  await page.click('#mesh-view button[data-mode="strings"]');
+  await page.waitForSelector('#mesh-strings .mesh-row');
+  assert.equal(await shown('.mesh-sw.via-unknown'), false);
+  assert.deepEqual(await page.locator('#mesh-legend .mesh-card-via').evaluateAll((es) => es.filter((e) => e.offsetParent).map((e) => e.textContent)), ['via D9', 'via ?']);
+  assert.equal(await page.$eval('#mesh-legend .mesh-sw.tier-good', (e) => getComputedStyle(e).borderRadius), '50%');
   assert.deepEqual(errors, []);
   await ctx.close();
 });

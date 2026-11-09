@@ -452,8 +452,9 @@ void MasterCore::tick_(uint32_t now_ms) {
     master::HousekeepingPlan plan;
     plan.send_41 = plan.session = plan.broadcast = plan.walks = housekeeping_on_;
     plan.bring_up_reads = readdressed_;
+    // Marked sent when it goes out, below: an opening dropped before it got
+    // there (the TAP lost) plans it again.
     plan.config_read = read_tap_config_ && !config_read_sent_;
-    config_read_sent_ = config_read_sent_ || plan.config_read || plan.bring_up_reads;
     plan.session_reset = housekeeping_on_ && readdressed_ && !session_reset_sent_;
     session_reset_sent_ = session_reset_sent_ || plan.session_reset;
     housekeeping_ = std::make_unique<master::Housekeeping>(learned_, now_ms, plan, now_ms ^ unix_now());
@@ -505,6 +506,7 @@ void MasterCore::tick_(uint32_t now_ms) {
   }
   Frame reply;
   bool ok = transact(gateway_, req.cmd, req.payload, reply, req.wait_ms ? req.wait_ms : REPLY_TIMEOUT_MS);
+  if (master::is_config_read(req.cmd, req.payload)) config_read_sent_ = true;
   if (status().fault == Fault::second_master || standing_by_()) return;
   if (housekeeping_) housekeeping_->on_reply(req, ok, reply);
   if (req.cmd == master::CMD_SESSION) {

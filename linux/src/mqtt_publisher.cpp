@@ -55,6 +55,12 @@ MqttPublisher::MqttPublisher(const Monitor &monitor, std::string version)
 }
 
 MqttPublisher::~MqttPublisher() {
+  {
+    std::lock_guard<std::mutex> lock(cfg_mu_);
+    quit_ = true;
+  }
+  cfg_cv_.notify_all();
+  if (worker_.joinable()) worker_.join();
   stop_();
   mosquitto_lib_cleanup();
 }
@@ -83,6 +89,32 @@ void MqttPublisher::stop_() {
 }
 
 void MqttPublisher::configure(const Settings &settings) {
+  {
+    std::lock_guard<std::mutex> lock(cfg_mu_);
+    pending_ = settings;
+  }
+  cfg_cv_.notify_all();
+  if (!worker_.joinable()) worker_ = std::thread([this] { work_(); });
+}
+
+void MqttPublisher::work_() {
+  for (;;) {
+    Settings s;
+    {
+      std::unique_lock<std::mutex> lock(cfg_mu_);
+      cfg_cv_.wait(lock, [this] { return quit_ || pending_.has_value(); });
+      if (quit_) return;
+      s = std::move(*pending_);
+      pending_.reset();
+    }
+    apply_(s);
+  }
+}
+
+// Can wait on a DNS lookup (mosquitto_connect_async resolves the name
+// before it returns), so only ever on worker_.
+void MqttPublisher::apply_(const Settings &settings) {
+  std::lock_guard<std::mutex> client(client_mu_);
   stop_();
   settings_ = settings;
   announced_.clear();
@@ -407,6 +439,9 @@ static double round_to(double v, int digits) {
 
 void MqttPublisher::publish() {
   if (!connected_) return;
+  // A reconfigure on the worker holds the client: skip this round, not wait.
+  std::unique_lock<std::mutex> client(client_mu_, std::try_to_lock);
+  if (!client.owns_lock()) return;
   if (need_discovery_.exchange(false)) {
     announced_.clear();
     announced_strings_.clear();
