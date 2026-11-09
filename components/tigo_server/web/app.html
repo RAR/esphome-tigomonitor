@@ -657,6 +657,19 @@
   .devices-changes strong { color: var(--warn); }
   .devices-changes ul { margin: 6px 0 0; padding-left: 18px; }
   .devices-changes li { margin: 2px 0; }
+  .table-edit { margin: -8px 0 22px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 10px; font-size: 13px; }
+  .table-edit-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 4px 0; }
+  .table-edit-row > label { flex: 0 0 13em; font-weight: 600; white-space: nowrap; }
+  .table-edit-row .input { width: 15em; min-width: 0; }
+  .table-edit-row #table-add-id { width: 12em; }
+  .table-edit .btn:disabled { opacity: .4; filter: saturate(.15); cursor: default; }
+  .table-edit-hint { color: var(--text-dim); }
+  .table-edit-hint.bad { color: var(--bad); }
+  .table-edit-note { margin: 0 0 6px; color: var(--text-dim); }
+  .table-edit-status { margin-top: 8px; }
+  .table-edit-status:empty { display: none; }
+  .table-edit-status.bad { color: var(--bad); }
+  .table-edit-status .mono { word-break: break-all; }
   .mesh-empty { padding: 80px 24px; text-align: center; color: var(--text-dim); font-size: 13px; }
   .mesh-side { border-left: 1px solid var(--border); padding: 16px; font-size: 13px; background: var(--bg); }
   .mesh-side h3 { margin: 0 0 2px; font-size: 15px; display: flex; gap: 8px; align-items: center; }
@@ -1370,6 +1383,25 @@
             <tbody></tbody>
           </table>
         </div>
+        <!-- Pi build, running the bus: an optimizer added to or removed from the TAP's table. -->
+        <div id="table-edit" class="table-edit" style="display:none">
+          <p class="table-edit-note" id="table-edit-note"></p>
+          <div class="table-edit-row">
+            <label for="table-add-label">Add an optimizer</label>
+            <input class="input" id="table-add-label" placeholder="Its label, e.g. 4-9A57A2L" autocomplete="off" spellcheck="false">
+            <input class="input compact" id="table-add-id" placeholder="Address (optional)" maxlength="4" autocomplete="off" spellcheck="false">
+            <button class="btn" type="button" id="table-add-dry">Dry run</button>
+            <button class="btn primary" type="button" id="table-add-go">Add</button>
+            <span class="table-edit-hint" id="table-add-hint"></span>
+          </div>
+          <div class="table-edit-row">
+            <label for="table-remove-pick">Remove an optimizer</label>
+            <select class="input" id="table-remove-pick"></select>
+            <button class="btn" type="button" id="table-remove-dry">Dry run</button>
+            <button class="btn danger" type="button" id="table-remove-go">Remove</button>
+          </div>
+          <div class="table-edit-status" id="table-edit-status" role="status"></div>
+        </div>
         <div class="section-title devices-head">Optimizers</div>
       </div>
 
@@ -1483,6 +1515,10 @@
         <div class="cfg-row" id="pi-discauto-row" style="display:none">
           <div class="cfg-text"><strong>Open discovery only when needed</strong><span>As the CCA does: keep the TAP's join window open only while an optimizer in a string hasn't reported today, in daylight. With none in a string, it stays open as now. The Bus page's Disable still wins (experimental)</span></div>
           <div class="cfg-ctrl"><label class="cfg-switch"><input type="checkbox" id="pi-discauto"> <span>Off</span></label></div>
+        </div>
+        <div class="cfg-row" id="pi-tablewrites-row" style="display:none">
+          <div class="cfg-text"><strong>Let me change the TAP's table</strong><span>Allow the Devices page to add an optimizer to the TAP's list, or remove one, as the CCA does. Removing erases the whole table and writes the rest back. Dry runs work with this off (experimental)</span></div>
+          <div class="cfg-ctrl"><label class="cfg-switch"><input type="checkbox" id="pi-tablewrites"> <span>Off</span></label></div>
         </div>
         <div class="cfg-row" id="pi-tapcfg-row" style="display:none">
           <div class="cfg-text"><strong>Read the TAP's radio settings</strong><span>Once each time the master starts, read the TAP's channel and the signal level it admits optimizers at, as the CCA does when it brings a TAP up. Shown on the Devices page. Reads only (experimental)</span></div>
@@ -3778,6 +3814,112 @@
       : `<tr><td colspan="8" style="color:var(--text-faint)">Not heard yet. The bus master asks the TAP once each time it starts, and the optimizers as it first hears each one.</td></tr>`;
   }
 
+  // An optimizer's label is its whole MAC: 04C05B left out, the character
+  // before the dash the next hex digit, the dash standing for zeroes, then
+  // the rest and a CRC-4 check letter (taptap's protocol notes, "Barcodes").
+  // The daemon checks it again (table_edit.h); this is for the preview.
+  function labelCheck(hex) {
+    let crc = 0x2;
+    for (let i = 0; i < 16; i += 2) {
+      let r = (parseInt(hex.substr(i, 2), 16) ^ (crc << 4)) & 0xFF;
+      for (let k = 0; k < 8; k++) r = r & 0x80 ? ((r << 1) ^ 0x30) & 0xFF : (r << 1) & 0xFF;
+      crc = r >> 4;
+    }
+    return 'GHJKLMNPRSTVWXYZ'[crc];
+  }
+  function macOfLabel(typed) {
+    const s = String(typed).replace(/\s+/g, '').toUpperCase();
+    const m = /^([0-9A-F])-([0-9A-F]{0,9})([G-Z])$/.exec(s);
+    if (!m) return null;
+    const mac = '04C05B' + m[1] + m[2].padStart(9, '0');
+    return labelCheck(mac) === m[3] ? mac : null;
+  }
+  function labelOfMac(mac) {
+    const h = String(mac).toUpperCase();
+    if (!/^04C05B[0-9A-F]{10}$/.test(h)) return '';
+    return h[6] + '-' + h.slice(7).replace(/^0+/, '') + labelCheck(h);
+  }
+
+  // The add and removal panel: shown while this Pi runs the bus.
+  let tableMaster = null;
+  function renderTableEdit() {
+    const box = document.getElementById('table-edit');
+    const m = tableMaster;
+    const running = m && m.active && m.role === 'master' && m.table;
+    box.style.display = running ? '' : 'none';
+    if (!running) return;
+    const t = m.table, e = t.edit || {};
+    document.getElementById('table-edit-note').textContent = t.writes
+      ? 'Changes the TAP\'s list of optimizers, as the CCA does. Try a dry run first: it reads the table and shows what would be sent.'
+      : 'Table writes are off (Settings → Bus), so only a dry run works: it reads the table and shows what would be sent.';
+    const busy = !!e.active || !!e.interrupted;
+    for (const id of ['table-add-dry', 'table-remove-dry']) document.getElementById(id).disabled = busy;
+    for (const id of ['table-add-go', 'table-remove-go']) document.getElementById(id).disabled = busy || !t.writes;
+    // The optimizers the TAP lists, by name and label.
+    const pick = document.getElementById('table-remove-pick');
+    const was = pick.value;
+    const nodes = (nodesData.nodes || []).filter(n => /^04C05B/i.test(n.long_address || ''))
+      .sort((a, b) => String(a.addr).localeCompare(String(b.addr)));
+    const name = n => { const d = (nodesData.devices || []).find(x => x.addr === n.addr); return d && d.name ? d.name : n.cca_label || ''; };
+    pick.innerHTML = '<option value="">Choose one…</option>' + nodes.map(n =>
+      `<option value="${topoEscape(n.long_address)}">${topoEscape(n.addr)}${name(n) ? ' · ' + topoEscape(name(n)) : ''} · ${topoEscape(labelOfMac(n.long_address))}</option>`).join('');
+    pick.value = was;
+    const st = document.getElementById('table-edit-status');
+    st.classList.toggle('bad', !!e.finished && !e.ok || !!e.interrupted);
+    if (!e.kind) { st.textContent = ''; return; }
+    const what = (e.dry_run ? 'Dry run: ' : '') + (e.kind === 'add' ? 'adding ' : 'removing ') + (e.label || e.mac);
+    let html = `<strong>${topoEscape(what)}</strong> · ${topoEscape(e.active ? e.step + '…' : e.message || e.step)}`;
+    if ((e.dry_frames || []).length)
+      html += '<br>Would send: ' + e.dry_frames.map(f => `<span class="mono">${topoEscape(f)}</span>`).join(', ');
+    st.innerHTML = html;
+  }
+  // Polled every 2 s while a change runs.
+  let tableEditTimer = 0;
+  async function refreshTableEdit() {
+    clearTimeout(tableEditTimer);
+    if (PLATFORM !== 'linux') return;
+    tableMaster = await apiFetch('/api/master').then(r => r.ok ? r.json() : null).catch(() => null);
+    renderTableEdit();
+    const e = tableMaster && tableMaster.table && tableMaster.table.edit || {};
+    if (e.active && document.getElementById('view-nodes').classList.contains('active'))
+      tableEditTimer = setTimeout(async () => { await refreshTableEdit(); if (!(tableMaster && tableMaster.table.edit.active)) refreshNodes(); }, 2000);
+  }
+  document.getElementById('table-add-label').addEventListener('input', e => {
+    const hint = document.getElementById('table-add-hint');
+    const v = e.target.value.trim();
+    const mac = macOfLabel(v);
+    hint.classList.toggle('bad', !!v && !mac);
+    hint.textContent = !v ? '' : mac ? `MAC ${mac}` : 'That label doesn\'t check out: look for a misread character';
+  });
+  async function startTableEdit(kind, dry) {
+    const body = { dry_run: dry };
+    if (kind === 'add') {
+      const label = document.getElementById('table-add-label').value.trim();
+      if (!macOfLabel(label)) { showToast('Type the optimizer\'s label first', 'err'); return; }
+      body.label = label;
+      const id = document.getElementById('table-add-id').value.trim();
+      if (id) body.id = id;
+    } else {
+      const mac = document.getElementById('table-remove-pick').value;
+      if (!mac) { showToast('Choose the optimizer to remove', 'err'); return; }
+      body.mac = mac;
+      if (!dry && !confirm(`Remove ${labelOfMac(mac)} from the TAP's table?\n\nAs the CCA does, this erases the whole table and writes every other optimizer back as it was. They are unjoined for under a second while that happens.`))
+        return;
+    }
+    try {
+      const r = await apiFetch(`/api/master/table/${kind}`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body) });
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `refused (${r.status})`);
+    } catch (err) {
+      showToast('Not started: ' + err.message, 'err');
+    }
+    await refreshTableEdit();
+  }
+  document.getElementById('table-add-dry').addEventListener('click', () => startTableEdit('add', true));
+  document.getElementById('table-add-go').addEventListener('click', () => startTableEdit('add', false));
+  document.getElementById('table-remove-dry').addEventListener('click', () => startTableEdit('remove', true));
+  document.getElementById('table-remove-go').addEventListener('click', () => startTableEdit('remove', false));
+
   async function refreshNodes() {
     if (!document.getElementById('view-nodes').classList.contains('active')) return;
     try {
@@ -3794,6 +3936,7 @@
       };
       renderTaps();
       renderChanges();
+      refreshTableEdit();
       rebuildNodesStringFilter();
       renderNodesTable();
     } catch (e) {
@@ -4888,6 +5031,8 @@
       document.getElementById('pi-housekeeping').nextElementSibling.textContent = s.master_housekeeping ? 'On' : 'Off';
       document.getElementById('pi-queries').checked = !!s.master_queries;
       document.getElementById('pi-tapcfg').checked = !!s.master_read_tap_config;
+      document.getElementById('pi-tablewrites').checked = !!s.master_table_writes;
+      document.getElementById('pi-tablewrites').nextElementSibling.textContent = s.master_table_writes ? 'On' : 'Off';
       document.getElementById('pi-discauto').checked = !!s.discovery_auto;
       document.getElementById('pi-discauto').nextElementSibling.textContent = s.discovery_auto ? 'On' : 'Off';
       document.getElementById('pi-tapcfg').nextElementSibling.textContent = s.master_read_tap_config ? 'On' : 'Off';
@@ -4928,7 +5073,7 @@
   let piWebPortActive = 0;
   let piWebLogin = { user: 'admin', set: false };
   let piBusRole = 'listen';
-  const PI_MASTER_ROWS = ['pi-startup-row', 'pi-housekeeping-row', 'pi-queries-row', 'pi-writes-row', 'pi-tapcfg-row', 'pi-discauto-row'];
+  const PI_MASTER_ROWS = ['pi-startup-row', 'pi-housekeeping-row', 'pi-queries-row', 'pi-writes-row', 'pi-tapcfg-row', 'pi-discauto-row', 'pi-tablewrites-row'];
   // Two masters on one bus collide, and the master's requests reach the
   // optimizers, so becoming the master is a deliberate step.
   document.getElementById('pi-bus-role').addEventListener('change', (e) => {
@@ -5000,7 +5145,7 @@
       }
     });
   }
-  for (const id of ['pi-startup', 'pi-housekeeping', 'pi-queries', 'pi-writes', 'pi-tapcfg', 'pi-discauto', 'pi-mqtt-disc-on', 'pi-mqtt-standby-panels']) {
+  for (const id of ['pi-startup', 'pi-housekeeping', 'pi-queries', 'pi-writes', 'pi-tapcfg', 'pi-discauto', 'pi-tablewrites', 'pi-mqtt-disc-on', 'pi-mqtt-standby-panels']) {
     document.getElementById(id).addEventListener('change', (e) => {
       e.target.nextElementSibling.textContent = e.target.checked ? 'On' : 'Off';
     });
@@ -5095,6 +5240,7 @@
                    master_optimizer_writes: document.getElementById('pi-writes').checked,
                    master_read_tap_config: document.getElementById('pi-tapcfg').checked,
                    discovery_auto: document.getElementById('pi-discauto').checked,
+                   master_table_writes: document.getElementById('pi-tablewrites').checked,
                    web_username: document.getElementById('pi-web-user').value.trim() || 'admin' };
     if (!piTls.fixed) Object.assign(body, { tls_cert: tlsCert, tls_key: tlsKey });
     const webPass = document.getElementById('pi-web-pass').value;

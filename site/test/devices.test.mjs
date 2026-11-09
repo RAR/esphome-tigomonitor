@@ -8,7 +8,7 @@ import { createServer } from 'node:http';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
-import { routes } from '../screenshots/fixtures.mjs';
+import { routes, piRoutes } from '../screenshots/fixtures.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const html = readFileSync(resolve(HERE, '../../components/tigo_server/web/app.html'), 'utf8')
@@ -24,7 +24,7 @@ before(async () => {
 });
 after(async () => { await browser.close(); server.close(); });
 
-async function open(linux, versions = routes['/api/versions'], posts = []) {
+async function open(linux, versions = routes['/api/versions'], posts = [], master = { role: 'listen', active: false }) {
   const ctx = await browser.newContext({ viewport: { width: 1400, height: 1200 } });
   await ctx.route('**/api/**', async (route) => {
     const path = new URL(route.request().url()).pathname.replace(/^.*(\/api\/)/, '$1');
@@ -37,7 +37,15 @@ async function open(linux, versions = routes['/api/versions'], posts = []) {
     }
     if (path === '/api/status') return json(200, linux ? { ...routes['/api/status'], platform: 'linux' } : routes['/api/status']);
     if (path === '/api/versions') return linux ? json(200, versions) : route.fulfill({ status: 404, body: 'no' });
-    if (path === '/api/master') return json(200, { role: 'listen', active: false });
+    if (path.startsWith('/api/master/table/') && route.request().method() === 'POST') {
+      const b = JSON.parse(route.request().postData());
+      posts.push({ path, ...b });
+      master = { ...master, table: { ...master.table, edit: { kind: path.endsWith('add') ? 'add' : 'remove', active: false, finished: true,
+        ok: true, dry_run: b.dry_run, mac: '04C05B0000001234', label: '0-1234R', id: '0008', ack: -1, step: 'done',
+        message: 'dry run: would list 04C05B0000001234 at 0008 (not joined)', dry_frames: ['290104C05B00000012348008'], interrupted: false } } };
+      return json(200, { started: true, dry_run: b.dry_run });
+    }
+    if (path === '/api/master') return json(200, master);
     if (path === '/api/bus') return json(200, { alarm: { active: false }, stats: {}, exchanges: [] });
     if (routes[path] !== undefined) return json(200, routes[path]);
     return route.fulfill({ status: 404, body: 'no fixture' });
@@ -246,5 +254,39 @@ test('Devices, on the Pi: a TAP whose radio was never read says so', async () =>
   const cells = await page.$$eval('#devices-taps tbody tr td', tds => tds.map(td => td.textContent.trim()));
   assert.ok(cells.includes('—'));
   assert.doesNotMatch(cells.join(' '), /Channel/);
+  await ctx.close();
+});
+
+// Running the bus, the Devices page adds and removes optimizers in the TAP's
+// table. The label is checked as it is typed; a dry run shows what it would send.
+test('Devices, on the Pi running the bus: add an optimizer by its label', async () => {
+  const posts = [];
+  const master = { ...piRoutes['/api/master'], role: 'master', active: true };
+  const { page, ctx, errors } = await open(true, routes['/api/versions'], posts, master);
+  await page.waitForSelector('#table-edit', { state: 'visible' });
+  assert.match(await page.textContent('#table-edit-note'), /Table writes are off/);
+  assert.equal(await page.isDisabled('#table-add-go'), true);
+  assert.equal(await page.isDisabled('#table-add-dry'), false);
+  await page.fill('#table-add-label', '0-1234S');
+  assert.match(await page.textContent('#table-add-hint'), /doesn't check out/);
+  await page.fill('#table-add-label', '0-1234r');
+  assert.equal(await page.textContent('#table-add-hint'), 'MAC 04C05B0000001234');
+  await page.click('#table-add-dry');
+  await page.waitForFunction(() => /Would send/.test(document.getElementById('table-edit-status').textContent));
+  assert.deepEqual(posts, [{ path: '/api/master/table/add', dry_run: true, label: '0-1234r' }]);
+  assert.match(await page.textContent('#table-edit-status'), /Dry run: adding 0-1234R.*290104C05B00000012348008/s);
+  // The TAP's optimizers, by address, name and label, to remove one.
+  const options = await page.$$eval('#table-remove-pick option', os => os.map(o => o.textContent));
+  assert.ok(options.length > 2);
+  assert.ok(options.slice(1).every(o => /^[0-9A-F]{4} · .*\d-[0-9A-F]*[G-Z]$/.test(o)), options.join('|'));
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test('Devices, on the Pi listening: no table changes', async () => {
+  const { page, ctx, errors } = await open(true);
+  await page.waitForSelector('#devices-taps', { state: 'visible' });
+  assert.equal(await page.isVisible('#table-edit'), false);
+  assert.deepEqual(errors, []);
   await ctx.close();
 });
