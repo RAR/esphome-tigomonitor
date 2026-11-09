@@ -24,11 +24,17 @@ before(async () => {
 });
 after(async () => { await browser.close(); server.close(); });
 
-async function open(linux, versions = routes['/api/versions']) {
+async function open(linux, versions = routes['/api/versions'], posts = []) {
   const ctx = await browser.newContext({ viewport: { width: 1400, height: 1200 } });
   await ctx.route('**/api/**', async (route) => {
     const path = new URL(route.request().url()).pathname.replace(/^.*(\/api\/)/, '$1');
     const json = (status, body) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
+    if (path === '/api/taps/name' && route.request().method() === 'POST') {
+      const b = JSON.parse(route.request().postData());
+      posts.push(b);
+      versions = { ...versions, taps: versions.taps.map((t) => t.addr === b.tap ? { ...t, name: b.name } : t) };
+      return json(200, b);
+    }
     if (path === '/api/status') return json(200, linux ? { ...routes['/api/status'], platform: 'linux' } : routes['/api/status']);
     if (path === '/api/versions') return linux ? json(200, versions) : route.fulfill({ status: 404, body: 'no' });
     if (path === '/api/master') return json(200, { role: 'listen', active: false });
@@ -65,17 +71,22 @@ test('Devices, on the Pi: the TAP, and each optimizer with its firmware', async 
 
 test("Devices, on the Pi: each optimizer's settings, stored or not, and the odd ones out", async () => {
   const { page, ctx, errors } = await open(true);
-  await page.waitForFunction(() => /Not stored/.test(document.getElementById('nodes-tbody').textContent));
+  await page.waitForFunction(() => /Not reported/.test(document.getElementById('nodes-tbody').textContent));
   const dev = routes['/api/devices'].devices;
-  const cell = (addr) => page.$eval(`#nodes-tbody tr[data-addr="${addr}"] td.smart`, (td) => [td.textContent.trim(), td.title]);
+  const cell = (addr) => page.$eval(`#nodes-tbody tr[data-addr="${addr}"] td.smart`, (td) => [td.textContent.trim(), td.title,
+    !!(td.querySelector('button') && td.querySelector('button').style.color)]);
   assert.deepEqual((await cell(dev[0].addr))[0], 'Stored');
-  // Compared only with the same firmware family, and not on the stored flag,
-  // which the cell already shows: the two H9s agree with each other.
-  const [n5, t5] = await cell(dev[5].addr);
-  assert.equal(n5, 'Not stored');
-  assert.match(t5, /The same as 2 of the 2 on H9 firmware that answered/);
+  // An H9 answers with fixed zeros and a flag that reads N on every read (S
+  // only in the reply to a write), so neither says what it holds: "Not
+  // reported", in no warning colour, whichever flag it last gave, and never
+  // compared.
+  const [n5, t5, warn5] = await cell(dev[5].addr);
+  assert.equal(n5, 'Not reported');
+  assert.equal(warn5, false);
+  assert.doesNotMatch(t5, /The same as|Differs|not stored/i);
+  assert.match(t5, /H9 firmware answers fixed zeros/);
   assert.match(t5, /0000 0000 0000 0000 0000 0000 0000 0000 0000 N 00 0000 0000 0000 00/);
-  assert.equal((await cell(dev[6].addr))[0], 'Stored');
+  assert.equal((await cell(dev[6].addr))[0], 'Not reported');
   const [n7, t7] = await cell(dev[7].addr);
   assert.equal(n7, 'Stored · differs');
   assert.match(t7, /Differs from 5 of the 6 on K8 firmware that answered/);
@@ -89,7 +100,6 @@ test("Devices, on the Pi: each optimizer's settings, stored or not, and the odd 
   assert.match(t0, /UvinLvHi 17\.00 V/);
   assert.match(t0, /AcLoss 0/);
   assert.doesNotMatch(t0, /UclLimit|BaseOverride|\b01\b/);
-  assert.match(t5, /Settings not reported by H9 firmware/);
   assert.equal((await cell(dev[9].addr))[0], '—');
   assert.equal(await page.isVisible('table.nodes thead th.smart'), true);
   assert.deepEqual(errors, []);
@@ -98,13 +108,13 @@ test("Devices, on the Pi: each optimizer's settings, stored or not, and the odd 
 
 test("Devices, on the Pi: a Settings cell opens that optimizer's settings, named, beside what its family has", async () => {
   const { page, ctx, errors } = await open(true);
-  await page.waitForFunction(() => /Not stored/.test(document.getElementById('nodes-tbody').textContent));
+  await page.waitForFunction(() => /Not reported/.test(document.getElementById('nodes-tbody').textContent));
   const dev = routes['/api/devices'].devices;
   const openFor = async (i) => {
     await page.click(`#nodes-tbody tr[data-addr="${dev[i].addr}"] td.smart button`);
     await page.waitForSelector('#smart-panel[open]');
   };
-  const rows = () => page.$$eval('#smart-panel .smart-row', (rs) => rs.map((r) => [
+  const rows = (sel = '.smart-row:not(.mppt-row)') => page.$$eval(`#smart-panel ${sel}`, (rs) => rs.map((r) => [
     r.querySelector('.smart-code').textContent, r.querySelector('.smart-val').textContent,
     r.querySelector('.smart-most').textContent, r.classList.contains('differs')]));
   // The odd one out: its row marked, beside what most K8s have.
@@ -118,13 +128,28 @@ test("Devices, on the Pi: a Settings cell opens that optimizer's settings, named
   assert.equal(r7.filter((r) => r[3]).length, 1);
   assert.match(await page.textContent('#smart-panel'), /never arrive/);
   assert.match(await page.textContent('#smart-panel .smart-raw'), /0E00 .* S 00 …$/);
+  // Its four MPPT parameters, from its answer to ^00Mppt, beside what most
+  // optimizers report; the same as most here.
+  assert.deepEqual(await rows('.mppt-row'), [
+    ['MPPT 5', '18', '18', false], ['MPPT 6', '0.100 V', '0.100 V', false],
+    ['MPPT 7', '8', '8', false], ['MPPT 8', '9.0 V', '9.0 V', false]]);
   await page.keyboard.press('Escape');
   await page.waitForSelector('#smart-panel:not([open])', { state: 'attached' });
-  // An H9: no table, it says the firmware answers zeros.
+  // One whose PIV activation current differs: marked, whatever its ^00Smrt.
+  await openFor(3);
+  assert.deepEqual((await rows('.mppt-row')).filter((r) => r[3]), [['MPPT 7', '10', '8', true]]);
+  await page.keyboard.press('Escape');
+  await page.waitForSelector('#smart-panel:not([open])', { state: 'attached' });
+  // An H9: no table, no stored or not; it says the firmware answers fixed
+  // zeros and a flag that can't be checked.
   await openFor(5);
   assert.equal((await rows()).length, 0);
+  assert.equal((await page.textContent('#smart-panel h3 .smart-pill')).trim(), 'Not reported');
+  assert.equal(await page.$eval('#smart-panel h3 .smart-pill', (p) => p.classList.contains('warn')), false);
   assert.match(await page.textContent('#smart-panel'), /H9 firmware doesn't report its settings/);
-  assert.match(await page.textContent('#smart-panel .smart-verdict'), /not stored yet/i);
+  assert.doesNotMatch(await page.textContent('#smart-panel'), /not stored/i);
+  // But its MPPT parameters it does report, as every firmware does.
+  assert.equal((await rows('.mppt-row')).length, 4);
   await page.click('#smart-panel .smart-close');
   await page.waitForSelector('#smart-panel:not([open])', { state: 'attached' });
   // A phone: the same panel, as a sheet along the bottom.
@@ -150,6 +175,44 @@ test('Devices, on the ESP32: no TAP list and no firmware column', async () => {
   assert.equal(await page.isVisible('#devices-taps'), false);
   assert.equal(await page.isVisible('table.nodes thead th.fw'), false);
   assert.equal(await page.isVisible('table.nodes thead th.smart'), false);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test("Devices, on the Pi: the TAP's ID, from its MAC, and the name it was given", async () => {
+  const { page, ctx, errors } = await open(true);
+  await page.waitForSelector('#devices-taps', { state: 'visible' });
+  const row = page.locator('#devices-taps tbody tr').first();
+  assert.equal((await row.locator('td.tap-name').textContent()).trim(), 'Garage');
+  assert.equal((await row.locator('td.tap-id').textContent()).trim(), '04C05B0000001234');
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test('Devices, on the Pi: a TAP is named in place, and an empty name clears it', async () => {
+  const posts = [];
+  const unnamed = { ...routes['/api/versions'], taps: routes['/api/versions'].taps.map(({ name, ...t }) => t) };
+  const { page, ctx, errors } = await open(true, unnamed, posts);
+  await page.waitForSelector('#devices-taps', { state: 'visible' });
+  const cell = page.locator('#devices-taps tbody tr td.tap-name');
+  assert.match(await cell.textContent(), /Add a name/);
+  await cell.locator('button').click();
+  const input = cell.locator('input');
+  await input.fill('Shed');
+  await input.press('Enter');
+  await page.waitForFunction(() => document.querySelector('#devices-taps td.tap-name').textContent.trim() === 'Shed');
+  assert.deepEqual(posts, [{ tap: '1201', name: 'Shed' }]);
+  // Escape leaves it as it was.
+  await cell.locator('button').click();
+  await cell.locator('input').fill('Barn');
+  await cell.locator('input').press('Escape');
+  assert.equal((await cell.textContent()).trim(), 'Shed');
+  assert.equal(posts.length, 1);
+  await cell.locator('button').click();
+  await cell.locator('input').fill('');
+  await cell.locator('input').press('Enter');
+  await page.waitForFunction(() => /Add a name/.test(document.querySelector('#devices-taps td.tap-name').textContent));
+  assert.deepEqual(posts.at(-1), { tap: '1201', name: '' });
   assert.deepEqual(errors, []);
   await ctx.close();
 });

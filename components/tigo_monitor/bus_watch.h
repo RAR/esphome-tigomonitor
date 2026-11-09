@@ -252,6 +252,46 @@ inline bool parse_smart(const std::string &text, SmartSeen &s) {
   return true;
 }
 
+// An optimizer's four MPPT parameters, from its answer to ^00Mppt:
+// "!Mppt 1 0 S M[100 0018 - 3/3] 0 12 40 08 12" on the roof (2026-11-09).
+// The bracket is live operating state; the byte after it is status, and the
+// last four are the parameters a CCA sets and checks (the owner's analysis:
+// minimum points for a valid PV curve, minimum volt difference for the PV
+// slope, minimum PIV activation current, and the hardware under-Vin margin
+// below VMP). Unlike an H9's ^00Smrt, every firmware reports them.
+struct MpptSeen {
+  uint16_t addr = 0;
+  std::string params;  // the four parameter bytes, hex, one space apart
+  std::string answer;  // the tokens after "!Mppt", as heard
+};
+
+inline bool parse_mppt(const std::string &text, MpptSeen &m) {
+  std::vector<std::string> tok;
+  std::string cur;
+  for (char c : text) {
+    if (c == ' ' || c == '\r' || c == '\n') {
+      if (!cur.empty()) tok.push_back(cur);
+      cur.clear();
+    } else {
+      cur += c;
+    }
+  }
+  if (!cur.empty()) tok.push_back(cur);
+  if (tok.size() < 7 || tok[0] != "!Mppt") return false;
+  size_t close = tok.size();
+  for (size_t i = 1; i < tok.size(); i++)
+    if (!tok[i].empty() && tok[i].back() == ']') close = i;
+  if (close == tok.size() || tok.size() - close != 6) return false;  // status, then four
+  m.params.clear();
+  for (size_t i = tok.size() - 4; i < tok.size(); i++) {
+    if (tok[i].size() != 2 || tok[i].find_first_not_of("0123456789ABCDEFabcdef") != std::string::npos) return false;
+    m.params += (m.params.empty() ? "" : " ") + tok[i];
+  }
+  m.answer.clear();
+  for (size_t i = 1; i < tok.size(); i++) m.answer += (i > 1 ? " " : "") + tok[i];
+  return true;
+}
+
 // Each device's version, from when it was first seen, and the one it
 // replaced: kept by the caller across restarts (the Pi's versions.json).
 // The TAP's radio settings, from the 37-byte GatewayCfg block a read returns
@@ -261,6 +301,13 @@ inline bool parse_smart(const std::string &text, SmartSeen &s) {
 struct TapRadio {
   uint16_t tap = 0;
   int channel = 0, slt = 0, slm = 0;
+};
+
+// A TAP's ID: the MAC it gives in answer to "where are you" (GET_MAC), as
+// 16 hex characters, the same form as an optimizer's barcode here.
+struct TapId {
+  uint16_t tap = 0;
+  std::string mac;
 };
 
 // req and rep: a tunnel request and the reply paired with it. Only a read
@@ -510,9 +557,20 @@ class BusWatch {
   }
   uint64_t polls() const { return polls_; }
   // The TAP radio settings read since the last call.
+  std::vector<TapId> take_tap_ids() {
+    std::vector<TapId> out;
+    out.swap(tap_ids_);
+    return out;
+  }
   std::vector<TapRadio> take_radios() {
     std::vector<TapRadio> out;
     out.swap(radios_);
+    return out;
+  }
+  // The optimizer MPPT parameters heard since the last call.
+  std::vector<MpptSeen> take_mppts() {
+    std::vector<MpptSeen> out;
+    out.swap(mppts_);
     return out;
   }
   // The optimizer settings heard since the last call.
@@ -621,6 +679,14 @@ class BusWatch {
       radios_.push_back(radio);
       if (radios_.size() > 16) radios_.erase(radios_.begin());  // nobody taking them
     }
+    // Only a TAP answering at its own address: one at the factory address
+    // is about to be moved, and isn't any TAP's yet.
+    uint16_t from = rep.dest & 0x7FFF;
+    if ((rep.cmd == 0x0039 || rep.cmd == 0x003B) && rep.payload.size() >= 10 &&
+        (rep.payload[8] << 8 | rep.payload[9]) == from && from != FACTORY_ID_) {
+      tap_ids_.push_back({from, hex16(rep.payload.data(), 8)});
+      if (tap_ids_.size() > 16) tap_ids_.erase(tap_ids_.begin());
+    }
     e.rt_ms = static_cast<int>(now - e.unix_ms);
     e.reply_hex = bus_hex(rep);
     std::string asked = e.reconfig.empty() ? request_summary(req) : e.reconfig;
@@ -649,6 +715,7 @@ class BusWatch {
           std::string text = bus_text(data, n);
           version_(false, tuid, text);
           smart_(tuid, text);
+          mppt_(tuid, text);
           answer_(tuid, text, now);
         }
       });
@@ -698,6 +765,13 @@ class BusWatch {
     versions_.push_back(v);
     if (versions_.size() > 64) versions_.erase(versions_.begin());  // nobody taking them
   }
+  void mppt_(uint16_t addr, const std::string &text) {
+    MpptSeen m;
+    if (!parse_mppt(text, m)) return;
+    m.addr = addr;
+    mppts_.push_back(m);
+    if (mppts_.size() > 64) mppts_.erase(mppts_.begin());  // nobody taking them
+  }
   void smart_(uint16_t addr, const std::string &text) {
     SmartSeen s;
     if (!parse_smart(text, s)) return;
@@ -726,7 +800,10 @@ class BusWatch {
   std::string discovery_;
   std::vector<VersionSeen> versions_;
   std::vector<TapRadio> radios_;
+  std::vector<TapId> tap_ids_;
+  static const uint16_t FACTORY_ID_ = 0x1235;  // where a TAP answers before it's addressed
   std::vector<SmartSeen> smarts_;
+  std::vector<MpptSeen> mppts_;
 };
 
 }  // namespace master

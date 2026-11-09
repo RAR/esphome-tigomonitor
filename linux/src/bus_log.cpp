@@ -23,6 +23,7 @@ static int64_t unix_ms_now() {
 
 using esphome::tigo_monitor::master::TapRadio;
 using esphome::tigo_monitor::master::SmartSeen;
+using esphome::tigo_monitor::master::MpptSeen;
 
 static std::string hex4(unsigned v) {
   char b[8];
@@ -67,6 +68,12 @@ void BusLog::load_versions_() {
     r.slm = o.value("slm", 0);
     if (r.tap) radios_[r.tap] = {r, o.value("heard_unix_ms", int64_t{0})};
   }
+  for (const auto &o : j.value("ids", json::array())) {
+    if (!o.is_object()) continue;
+    auto tap = static_cast<uint16_t>(std::strtoul(o.value("tap", std::string("0")).c_str(), nullptr, 16));
+    std::string mac = o.value("mac", std::string());
+    if (tap && mac.size() == 16) tap_ids_[tap] = {mac, o.value("heard_unix_ms", int64_t{0})};
+  }
   for (const auto &o : j.value("settings", json::array())) {
     if (!o.is_object()) continue;
     SmartSeen m;
@@ -74,6 +81,14 @@ void BusLog::load_versions_() {
     m.settings = o.value("settings", std::string());
     m.stored = o.value("stored", false);
     if (!m.settings.empty()) smarts_[m.addr] = {m, o.value("heard_unix_ms", int64_t{0})};
+  }
+  for (const auto &o : j.value("mppt", json::array())) {
+    if (!o.is_object()) continue;
+    MpptSeen m;
+    m.addr = static_cast<uint16_t>(std::strtoul(o.value("addr", std::string("0")).c_str(), nullptr, 16));
+    m.params = o.value("params", std::string());
+    m.answer = o.value("answer", std::string());
+    if (!m.params.empty()) mppts_[m.addr] = {m, o.value("heard_unix_ms", int64_t{0})};
   }
 }
 
@@ -106,6 +121,19 @@ void BusLog::on_frame_(const Frame &f, bool ours, int64_t now) {
     if (changed)
       LOGI("bus: TAP %s radio: channel %d, SLT %d, SLm %d", hex4(r.tap).c_str(), r.channel, r.slt, r.slm);
     radios_[r.tap] = {r, now};
+    versions_dirty_ = true;
+  }
+  for (const auto &t : watch_.take_tap_ids()) {
+    auto it = tap_ids_.find(t.tap);
+    if (it == tap_ids_.end() || it->second.first != t.mac) LOGI("bus: TAP %s is %s", hex4(t.tap).c_str(), t.mac.c_str());
+    tap_ids_[t.tap] = {t.mac, now};
+    versions_dirty_ = true;
+  }
+  for (const auto &m : watch_.take_mppts()) {
+    auto it = mppts_.find(m.addr);
+    if (it == mppts_.end() || it->second.first.params != m.params)
+      LOGI("bus: optimizer %s MPPT parameters: %s", hex4(m.addr).c_str(), m.params.c_str());
+    mppts_[m.addr] = {m, now};
     versions_dirty_ = true;
   }
   for (const auto &m : watch_.take_smarts()) {
@@ -191,13 +219,22 @@ json BusLog::versions_json() const {
                       {"slt", kv.second.first.slt},
                       {"slm", kv.second.first.slm},
                       {"heard_unix_ms", kv.second.second}});
+  json ids = json::array();
+  for (const auto &kv : tap_ids_)
+    ids.push_back({{"tap", hex4(kv.first)}, {"mac", kv.second.first}, {"heard_unix_ms", kv.second.second}});
   json settings = json::array();
   for (const auto &kv : smarts_)
     settings.push_back({{"addr", hex4(kv.first)},
                         {"settings", kv.second.first.settings},
                         {"stored", kv.second.first.stored},
                         {"heard_unix_ms", kv.second.second}});
-  return {{"taps", taps}, {"optimizers", optimizers}, {"radios", radios}, {"settings", settings}};
+  json mppt = json::array();
+  for (const auto &kv : mppts_)
+    mppt.push_back({{"addr", hex4(kv.first)},
+                    {"params", kv.second.first.params},
+                    {"answer", kv.second.first.answer},
+                    {"heard_unix_ms", kv.second.second}});
+  return {{"taps", taps}, {"optimizers", optimizers}, {"radios", radios}, {"ids", ids}, {"settings", settings}, {"mppt", mppt}};
 }
 
 void BusLog::save_if_changed() {

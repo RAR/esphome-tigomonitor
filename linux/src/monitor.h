@@ -129,6 +129,11 @@ class Monitor {
   int64_t last_report_unix() const;
   // Marks the node with this barcode known (or not). False: no such node.
   bool set_known(const std::string &barcode, bool known);
+  // A name for a TAP, by its address ("1201"), shown wherever the TAP is;
+  // an empty name forgets it. False for an address that isn't 4 hex digits
+  // or a name over 32 characters.
+  bool set_tap_name(const std::string &tap, const std::string &name);
+  std::map<std::string, std::string> tap_names() const;
   static const int64_t MISSING_AFTER_S = 3 * 86400;
   static const int64_t OFF_ROSTER_AFTER_S = 86400;
   static const int64_t SEEN_SAVE_EVERY_S = 3600;  // how stale a saved last_heard/last_roster may be
@@ -230,6 +235,7 @@ class Monitor {
   // one heard after the first day was first heard.
   std::set<std::string> seen_barcodes_;
   int64_t seen_since_ = 0;
+  std::map<std::string, std::string> tap_names_;  // by address, upper-case hex
   std::map<std::string, int64_t> first_heard_;
   std::string new_note_;
   void note_barcode_(const std::string &barcode, const std::string &addr);

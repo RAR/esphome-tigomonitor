@@ -293,6 +293,27 @@ bool Monitor::set_known(const std::string &barcode, bool known) {
   return false;
 }
 
+bool Monitor::set_tap_name(const std::string &tap, const std::string &name) {
+  if (tap.size() != 4 || tap.find_first_not_of("0123456789abcdefABCDEF") != std::string::npos) return false;
+  size_t a = name.find_first_not_of(" \t"), b = name.find_last_not_of(" \t");
+  std::string trimmed = a == std::string::npos ? "" : name.substr(a, b - a + 1);
+  if (trimmed.size() > 32) return false;
+  std::string key = tap;
+  for (char &c : key) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+  std::lock_guard<std::mutex> lock(mu_);
+  if (trimmed.empty()) tap_names_.erase(key);
+  else tap_names_[key] = trimmed;
+  dirty_ = true;
+  save_locked_();
+  LOGI("TAP %s %s", key.c_str(), trimmed.empty() ? "has no name now" : ("is named " + trimmed).c_str());
+  return true;
+}
+
+std::map<std::string, std::string> Monitor::tap_names() const {
+  std::lock_guard<std::mutex> lock(mu_);
+  return tap_names_;
+}
+
 int Monitor::new_optimizers(int64_t now_unix) const {
   std::lock_guard<std::mutex> lock(mu_);
   int n = 0;
@@ -747,7 +768,8 @@ bool Monitor::save_locked_() {
   }
   json j = {{"version", 1},     {"nodes", nodes},           {"energy_kwh", energy_kwh_}, {"energy_in_kwh", energy_in_kwh_}, {"today_in_kwh", today_in_kwh_}, {"peaks", peaks},
             {"today", today_},  {"today_kwh", today_kwh_}, {"daily_kwh", history},
-            {"seen_barcodes", seen_barcodes_}, {"seen_since", seen_since_}, {"first_heard", first}, {"joins", joins}, {"rssi_24h", rssi}};
+            {"seen_barcodes", seen_barcodes_}, {"seen_since", seen_since_}, {"first_heard", first}, {"joins", joins}, {"rssi_24h", rssi},
+            {"tap_names", tap_names_}};
   {
     std::lock_guard<std::mutex> lock(write_mu_);
     pending_ = j.dump(1) + "\n";
@@ -787,6 +809,10 @@ bool Monitor::load() {
   for (const auto &e : j.value("rssi_24h", json::array()))
     if (e.is_object() && !e.value("addr", "").empty() && e.value("to", 0) > 0)
       links_.rssi_restore(e.value("addr", ""), e.value("to", 0), e.value("b", ""));
+  tap_names_.clear();
+  const json names = j.value("tap_names", json::object());
+  for (const auto &kv : names.items())
+    if (kv.value().is_string() && kv.key().size() == 4) tap_names_[kv.key()] = kv.value().get<std::string>();
   nodes_.clear();
   for (const auto &e : j.value("nodes", json::array())) {
     if (!e.is_object()) continue;

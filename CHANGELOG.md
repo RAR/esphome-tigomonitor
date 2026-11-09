@@ -32,7 +32,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   page has a Settings column: whether each optimizer has its settings
   stored, and "differs" for one whose answer isn't the one most of them
   give. It comes from the answers to the optimizer queries the CCA asks,
-  ours or a CCA's; the raw answer is in the tooltip.
+  ours or a CCA's; the raw answer is in the tooltip. Optimizers on H9
+  firmware show "Not reported": they answer with fixed zeros and a stored
+  flag that never changes on a read, so there's nothing to check. The
+  panel also shows each optimizer's four MPPT parameters, from its answer to
+  the MPPT query, which every firmware reports, H9 included.
+- **Name your TAPs (Raspberry Pi).** The TAPs on the Devices page show each
+  TAP's ID, the MAC it gives when a bus master brings it up, and take a name
+  you type in place. The mesh map then labels the TAP by that name.
+
+### Changed
+
+- **The mesh map lays relays out as a tree (Raspberry Pi).** Each
+  optimizer gets a slice of the circle as wide as the optimizers relaying
+  through it, and a relay's optimizers fan out beyond it inside that slice.
+  Chains of relays build outward, and no two lines cross. Before, a relayed
+  optimizer was placed in the first clear spot near its relay, and lines
+  could run across each other.
 
 ### Fixed
 
