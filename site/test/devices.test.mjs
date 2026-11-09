@@ -283,6 +283,21 @@ test('Devices, on the Pi running the bus: add an optimizer by its label', async 
   await ctx.close();
 });
 
+// A standby that has taken the bus runs it like a master: the panel shows.
+// One standing by doesn't.
+test('Devices, on a standby: the panel only while it runs the bus', async () => {
+  for (const [state, shown] of [['active', true], ['standing_by', false]]) {
+    const master = { ...piRoutes['/api/master'], role: 'standby', active: true,
+      standby: { ...piRoutes['/api/master'].standby, state } };
+    const { page, ctx, errors } = await open(true, routes['/api/versions'], [], master);
+    await page.waitForSelector('#devices-taps', { state: 'visible' });
+    await page.waitForTimeout(300);
+    assert.equal(await page.isVisible('#table-edit'), shown, state);
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+});
+
 test('Devices, on the Pi listening: no table changes', async () => {
   const { page, ctx, errors } = await open(true);
   await page.waitForSelector('#devices-taps', { state: 'visible' });

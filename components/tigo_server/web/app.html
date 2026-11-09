@@ -3840,12 +3840,14 @@
     return h[6] + '-' + h.slice(7).replace(/^0+/, '') + labelCheck(h);
   }
 
-  // The add and removal panel: shown while this Pi runs the bus.
+  // The add and removal panel: shown while this Pi runs the bus, as the
+  // master or as a standby that has taken it over.
   let tableMaster = null;
   function renderTableEdit() {
     const box = document.getElementById('table-edit');
     const m = tableMaster;
-    const running = m && m.active && m.role === 'master' && m.table;
+    const running = m && m.active && m.table &&
+      (m.role === 'master' || (m.role === 'standby' && m.standby && m.standby.state === 'active'));
     box.style.display = running ? '' : 'none';
     if (!running) return;
     const t = m.table, e = t.edit || {};
