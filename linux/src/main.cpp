@@ -497,12 +497,15 @@ int main(int argc, char **argv) {
           input_stop = true;
           if (input.joinable()) input.join();
           input = start_input();
+          // A new master starts wanting the window: check now, not up to a
+          // minute later, so it doesn't renew one auto would let close.
+          last_discovery_check = std::chrono::steady_clock::now() - std::chrono::seconds(60);
         }
       }
     }
     monitor.tick();
     // Automatic discovery, once a minute: renew the TAP's join window only
-    // while an optimizer placed in the layout hasn't reported today, in
+    // while an optimizer in a string hasn't reported today, in
     // daylight (discovery_policy.h). Off, the window is renewed as always.
     if (std::chrono::steady_clock::now() - last_discovery_check >= std::chrono::seconds(60)) {
       last_discovery_check = std::chrono::steady_clock::now();
@@ -518,6 +521,8 @@ int main(int argc, char **argv) {
         for (int64_t h : expected) missing += h < midnight;
         wanted = esphome::tigo_monitor::discovery::window_wanted(
             expected, midnight, esphome::tigo_monitor::discovery::daylight(monitor.last_report_unix(), t));
+        // What the window is held open for: at night, nothing.
+        if (!wanted) missing = 0;
       }
       std::shared_ptr<BusMaster> m;
       {

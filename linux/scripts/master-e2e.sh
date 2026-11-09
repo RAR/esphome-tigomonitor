@@ -598,4 +598,31 @@ expect "and the pages were awaited meanwhile" "$(stat "$out/tap22.json" "len(d['
 kill $daemon; wait $daemon 2>/dev/null || true
 kill $tap; wait $tap 2>/dev/null || true
 
+# Automatic discovery when a new master starts (a settings change here): the
+# first check runs at once, not up to a minute later, so a fresh master
+# doesn't renew a window auto would close. One optimizer in a string, last
+# heard yesterday; no reports, so it's night: not wanted, and nothing is
+# counted as missing, since nothing is being waited for.
+mkdir -p "$out/state23"
+python3 linux/tools/mock_tap.py "$out/tap23a" --window 600 --nodes 44 --panels 0 --stats "$out/tap23a.json" &
+tap=$!
+python3 linux/tools/mock_tap.py "$out/tap23b" --window 600 --nodes 44 --panels 0 --stats "$out/tap23b.json" &
+tap23b=$!
+sleep 0.5
+python3 -c "import json, time; json.dump({'version': 1, 'nodes': [{'addr': '0002', 'long_address': '04C05B0000000002',
+  'cca_label': 'A1', 'cca_string_label': 'String A', 'last_heard_unix': int(time.time()) - 86400 - 3600}]},
+  open('$out/state23/state.json', 'w'))"
+printf '{"bus_role": "master", "discovery_auto": true, "serial_port": "%s", "gateway_id": 4609, "web_port": 18115}\n' \
+  "$PWD/$out/tap23a" > "$out/state23/settings.json"
+build/linux/tigomonitord --state-dir "$out/state23" 2> "$out/daemon23.log" &
+daemon=$!
+for _ in $(seq 40); do api 18115 /api/master 2>/dev/null | grep -q '"window_wanted"' && break; sleep 0.25; done
+sleep 1
+expect "auto at start: not wanted at night" "$(api 18115 /api/master | field "(d['window_wanted'], d['missing_expected'])")" "(False, 0)"
+expect "new port saved" "$(api 18115 /api/settings "{\"serial_port\": \"$PWD/$out/tap23b\"}")" 200
+for _ in $(seq 40); do [ -f "$out/tap23b.json" ] && [ "$(stat "$out/tap23b.json" "d['polls']")" -ge 5 ] && break; sleep 0.25; done
+expect "a new master, checked at once: still not wanted" "$(api 18115 /api/master | field "(d['window_wanted'], d['missing_expected'])")" "(False, 0)"
+kill $daemon; wait $daemon 2>/dev/null || true
+kill $tap $tap23b 2>/dev/null || true; wait $tap $tap23b 2>/dev/null || true
+
 [ $fail = 0 ] && echo "master e2e passed" || { echo "master e2e FAILED; see $out/"; exit 1; }
