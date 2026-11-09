@@ -235,6 +235,7 @@ int main(int argc, char **argv) {
       m->set_pv(pv.state(), [&pv](const PvState &s) { pv.save(s); }, pv.unreadable());
       m->set_discovery(discovery.renew(), [&discovery](bool renew) { discovery.save(renew); });
       m->set_read_tap_config(settings.master_read_tap_config);
+      m->set_table_writes(settings.master_table_writes);
       // Standing by, it listens as the listen role does, learning the 0x41s
       // another master sends, and takes the latest of them when it takes over.
       if (settings.bus_role == "standby")
@@ -354,7 +355,15 @@ int main(int argc, char **argv) {
         }
         return 200;
       },
-      &bus_log});
+      &bus_log,
+      [&](const esphome::tigo_monitor::master::Bytes &mac, uint16_t id, bool dry_run, std::string &why) {
+        std::lock_guard<std::mutex> lock(master_mu);
+        if (!bus_master) {
+          why = "this monitor isn't running the bus";
+          return 409;
+        }
+        return bus_master->request_table_add(mac, id, dry_run, why) ? 200 : 409;
+      }});
   if (port < 0 && settings.web_port > 0) port = settings.web_port;
   // Only the default steps aside for another web server; a port someone
   // chose fails loudly instead, and systemd keeps retrying it.
@@ -483,7 +492,8 @@ int main(int argc, char **argv) {
                         fresh.master_housekeeping != settings.master_housekeeping ||
                         fresh.master_queries != settings.master_queries ||
                         fresh.master_optimizer_writes != settings.master_optimizer_writes ||
-                        fresh.master_read_tap_config != settings.master_read_tap_config;
+                        fresh.master_read_tap_config != settings.master_read_tap_config ||
+                        fresh.master_table_writes != settings.master_table_writes;
         if (fresh.web_port != settings.web_port) LOGI("web: the new port takes effect when the service restarts");
         if (fresh.tls_cert != settings.tls_cert || fresh.tls_key != settings.tls_key)
           LOGI("web: the HTTPS change takes effect when the service restarts");

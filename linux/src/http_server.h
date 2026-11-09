@@ -65,6 +65,10 @@ struct HttpContext {
   std::function<int(bool renew, std::string &why)> request_discovery;
   // The decoded bus log and the TAP-reconfiguration alarm.
   BusLog *bus_log = nullptr;
+  // The owner's add of an optimizer to the TAP's table (MAC, id 0 for the
+  // lowest free, dry run): 200, or 409 with why, as request_pv.
+  std::function<int(const esphome::tigo_monitor::master::Bytes &mac, uint16_t id, bool dry_run, std::string &why)>
+      request_table_add;
 };
 
 // tigomonitord --health-check PORT, the container's HEALTHCHECK: GETs

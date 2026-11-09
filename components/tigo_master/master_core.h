@@ -24,6 +24,7 @@
 // the bus, ours or a CCA, and takes the bus over once no master has been
 // heard for takeover_s. Any master it hears, it yields to: a CCA can't.
 
+#include "../tigo_monitor/table_edit.h"
 #include "../tigo_monitor/tigo_master.h"
 #include "../tigo_monitor/tigo_protocol.h"
 
@@ -57,6 +58,21 @@ struct PvState {
   bool off = false;
   bool heard = false;
   int64_t since_unix = 0;
+};
+
+// The last table add the owner started (table_edit.h's TableAdd), for the
+// Devices page: still running (active) or how it ended.
+struct TableEditStatus {
+  bool active = false;
+  bool finished = false;
+  bool ok = false;
+  bool dry_run = false;
+  std::string mac;  // hex
+  uint16_t id = 0;  // 0 until chosen
+  int ack = -1;
+  std::string step, message;
+  int64_t started_unix = 0, finished_unix = 0;
+  std::vector<std::string> dry_frames;  // the write it would send, as the hex args after the seq
 };
 
 struct MasterStatus {
@@ -116,6 +132,8 @@ struct MasterStatus {
   bool pv_confirmed = false;    // the TAP's last reply carried the byte
   bool pv_unconfirmed = false;  // it didn't, after PvSwitch::RETRIES
   int pv_last_sent = -1, pv_last_reply = -1;
+  bool table_writes = false;  // the setting
+  TableEditStatus table_edit;
 };
 
 // The serial port on the bus. The core calls it only from tick().
@@ -199,6 +217,14 @@ class MasterCore {
   // (request_discovery) still wins: renewed only when both want it.
   // missing: how many expected optimizers haven't reported today, for the UI.
   void set_window_wanted(bool wanted, int missing = 0);
+  // master_table_writes: lets an add the owner starts (request_table_add)
+  // send its table write. Off, only a dry run can be started. Call before open().
+  void set_table_writes(bool on) { table_writes_on_ = on; }
+  // Starts adding an optimizer to the TAP's table, at id (0: the lowest
+  // free), in the next tick. false, with why, while one is running, while
+  // standing by, with PV held off or the window held closed by the owner,
+  // or without master_table_writes (a dry run needs none of those but the first two).
+  bool request_table_add(const esphome::tigo_monitor::master::Bytes &mac, uint16_t id, bool dry_run, std::string &why);
 
   bool open();
   // Sends at most one request and reads its reply, up to REPLY_TIMEOUT_MS.
@@ -260,6 +286,12 @@ class MasterCore {
   std::unique_ptr<esphome::tigo_monitor::master::Housekeeping> housekeeping_;
   Targets targets_;
   bool queries_on_, writes_on_;
+  bool table_writes_on_ = false;
+  std::unique_ptr<esphome::tigo_monitor::master::TableAdd> table_add_;
+  std::unique_ptr<esphome::tigo_monitor::master::TableAdd> table_add_pending_;  // under mu_
+  bool table_add_running_ = false;  // under mu_: pending or table_add_
+  void sync_table_status_(bool finished_now);
+  void settle_table_add_();
   std::unique_ptr<esphome::tigo_monitor::master::Queries> queries_;
   // queries_'s answers, kept across a restart of queries_ (a takeover, a TAP
   // power cut); under mu_.

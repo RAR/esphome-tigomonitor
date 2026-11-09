@@ -256,7 +256,7 @@ Still open:
 3. ~~How the ID reaches the optimizer~~ **Answered:** through the table record; the optimizer takes it when it joins.
 4. ~~Whether entries survive a TAP restart~~ **Answered:** the table and the joined flags are in flash and survive. STORE is about the RS485 address, not the table.
 5. Which corrective writes a factory-fresh optimizer needs, if any. **So far none:** 002D reported accurately without any, and the roof's 40 have run for weeks without 0x13 or 0x17. The roof swap's Info/Mppt comparison is the last check.
-6. How the printed short code (`N-XXXXXC`) maps to the long address.
+6. ~~How the printed short code maps to the long address~~ **Answered 2026-11-09** by taptap's protocol notes ("Barcodes"): it is the whole MAC with `04C05B` implied, the dash standing for zeroes and a CRC-4 check letter; it round-trips on all 44 roof MACs. See `2026-11-09-optimizer-table-edits-design.md`.
    - Partly answered on the bench H1.0006 TAP (2026-11-05): its five hex digits are the last five hex digits of the MAC, and the MAC starts `04C05B`.
    - Still unknown: the leading digit, which is not simply the MAC nibble before those five, and how the trailing letter is computed. Matching on the five hex digits is enough to find a device.
 

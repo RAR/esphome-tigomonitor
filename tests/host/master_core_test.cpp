@@ -443,7 +443,117 @@ static void test_the_owner_switch_beats_wanted() {
   CHECK(renewals_sent(false, true) == 0);
 }
 
+// The table add (table_edit.h) through the core: a TAP with two optimizers
+// listed, that takes one record and says its window has run out.
+struct TableTap {
+  TapPort port;
+  std::vector<mp::Bytes> records = {
+      {0x04, 0xC0, 0x5B, 0x00, 0x00, 0x00, 0x01, 0x01, 0x00, 0x02},
+      {0x04, 0xC0, 0x5B, 0x00, 0x00, 0x00, 0x01, 0x02, 0x00, 0x03}};
+  std::vector<mp::Bytes> writes;
+  int renewals = 0;
+  TableTap() {
+    port.answer = [this](const mp::Frame &f, mp::Frame &r) {
+      if (f.cmd != 0x0B0F || f.payload.size() < 5) return false;
+      uint8_t sub = f.payload[3], seq = f.payload[4];
+      mp::Bytes args(f.payload.begin() + 5, f.payload.end());
+      r.dest = GW | 0x8000;
+      r.cmd = 0x0B10;
+      r.payload = {0x00, 0x0E, 0x00, static_cast<uint8_t>(sub + 1), seq};
+      if (sub == 0x2E || sub == 0x2D) {
+        renewals += sub == 0x2D;
+        r.payload[3] = 0x2F;
+        mp::Bytes w = {0x00, 0x00, 0x00, 0x00, 0x02, 0x00, 0x02, 0x00, static_cast<uint8_t>(records.size())};
+        r.payload.insert(r.payload.end(), w.begin(), w.end());
+        return true;
+      }
+      if (sub == 0x26) {
+        // From the id asked for, as the roof's TAP pages (ids here ascend).
+        uint16_t asked = static_cast<uint16_t>(args[0] << 8 | args[1]);
+        std::vector<mp::Bytes> page;
+        for (const auto &rec : records)
+          if (((rec[8] & 0x7F) << 8 | rec[9]) >= asked) page.push_back(rec);
+        uint16_t first = page.empty() ? asked : static_cast<uint16_t>((page[0][8] & 0x7F) << 8 | page[0][9]);
+        mp::Bytes d = {static_cast<uint8_t>(first >> 8), static_cast<uint8_t>(first), 0x00,
+                       static_cast<uint8_t>(page.size())};
+        for (const auto &rec : page) d.insert(d.end(), rec.begin(), rec.end());
+        r.payload.insert(r.payload.end(), d.begin(), d.end());
+        return true;
+      }
+      if (sub == 0x29) {
+        writes.push_back(args);
+        records.push_back(mp::Bytes(args.begin() + 1, args.end()));
+        r.payload.push_back(0x00);
+        return true;
+      }
+      return false;
+    };
+  }
+};
+static const mp::Bytes NEW_MAC = {0x04, 0xC0, 0x5B, 0x00, 0x00, 0x00, 0x12, 0x34};
+
+static void test_a_table_add_needs_the_setting() {
+  TableTap tap;
+  MasterCore core(&tap.port, [](int, const std::string &) {}, nullptr, nullptr, GW, false, false);
+  CHECK(core.open());
+  std::string why;
+  CHECK(!core.request_table_add(NEW_MAC, 0, false, why));
+  CHECK(why.find("master_table_writes") != std::string::npos);
+  for (uint32_t t = 0; t < 5000; t += 50) core.tick(t);
+  CHECK(tap.writes.empty());
+  core.close();
+}
+
+static void test_a_dry_run_sends_no_write() {
+  TableTap tap;
+  MasterCore core(&tap.port, [](int, const std::string &) {}, nullptr, nullptr, GW, false, false);
+  CHECK(core.open());
+  std::string why;
+  CHECK(core.request_table_add(NEW_MAC, 0, true, why));
+  for (uint32_t t = 0; t < 5000; t += 50) core.tick(t);
+  CHECK(tap.writes.empty());
+  MasterStatus s = core.status();
+  CHECK(s.table_edit.finished && s.table_edit.ok && s.table_edit.dry_run);
+  CHECK(s.table_edit.dry_frames.size() == 1);
+  CHECK(s.table_edit.dry_frames[0] == "01" "04C05B0000001234" "8004");
+  core.close();
+}
+
+// With the setting on: one write, and the window held open for the join
+// even though automatic discovery wants it closed.
+static void test_a_table_add_writes_once_and_holds_the_window() {
+  TableTap tap;
+  MasterCore core(&tap.port, [](int, const std::string &) {}, nullptr, nullptr, GW, false, false);
+  core.set_table_writes(true);
+  core.set_window_wanted(false);
+  CHECK(core.open());
+  std::string why;
+  CHECK(core.request_table_add(NEW_MAC, 0, false, why));
+  CHECK(!core.request_table_add(NEW_MAC, 0, false, why));  // one at a time
+  for (uint32_t t = 0; t < 30000; t += 50) core.tick(t);
+  CHECK(tap.writes.size() == 1);
+  CHECK(tap.writes.size() == 1 && tap.writes[0] == (mp::Bytes{0x01, 0x04, 0xC0, 0x5B, 0x00, 0x00, 0x00, 0x12, 0x34, 0x80, 0x04}));
+  MasterStatus s = core.status();
+  CHECK(s.table_edit.active && !s.table_edit.finished);
+  CHECK(s.table_edit.id == 4);
+  CHECK(s.table_edit.step == "waiting for it to join");
+  CHECK(tap.renewals > 0);
+  // It joins: the TAP clears the bit; the next read finds it, and the
+  // window goes back to what discovery wants.
+  tap.records.back()[8] &= 0x7F;
+  for (uint32_t t = 30000; t < 120000; t += 50) core.tick(t);
+  s = core.status();
+  CHECK(s.table_edit.finished && s.table_edit.ok && !s.table_edit.active);
+  int renewals = tap.renewals;
+  for (uint32_t t = 120000; t < 160000; t += 50) core.tick(t);
+  CHECK(tap.renewals == renewals);
+  core.close();
+}
+
 int main() {
+  test_a_table_add_needs_the_setting();
+  test_a_dry_run_sends_no_write();
+  test_a_table_add_writes_once_and_holds_the_window();
   test_discovery_renews_only_while_wanted();
   test_the_owner_switch_beats_wanted();
   test_the_tap_config_is_not_read_unless_asked();

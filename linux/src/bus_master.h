@@ -76,6 +76,10 @@ class BusMaster {
     core_.set_discovery(renew, std::move(saved));
   }
   void set_read_tap_config(bool on) { core_.set_read_tap_config(on); }
+  void set_table_writes(bool on) { core_.set_table_writes(on); }
+  bool request_table_add(const esphome::tigo_monitor::master::Bytes &mac, uint16_t id, bool dry_run, std::string &why) {
+    return core_.request_table_add(mac, id, dry_run, why);
+  }
   void set_window_wanted(bool wanted, int missing) { core_.set_window_wanted(wanted, missing); }
   std::map<uint16_t, esphome::tigo_monitor::master::Queries::Setup> setups() const { return core_.setups(); }
   void tick(uint32_t now_ms) { core_.tick(now_ms); }

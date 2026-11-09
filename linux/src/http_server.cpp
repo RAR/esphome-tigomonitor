@@ -46,6 +46,20 @@ static json pv_byte(int b) {
   return h;
 }
 
+static std::string hex4(uint16_t v) {
+  char b[5];
+  std::snprintf(b, sizeof(b), "%04X", v);
+  return b;
+}
+
+// An optimizer's printed label from its MAC in hex; "" if it isn't one.
+static std::string label_of_hex(const std::string &mac) {
+  if (mac.size() != 16) return "";
+  esphome::tigo_monitor::master::Bytes b;
+  for (size_t i = 0; i < 16; i += 2) b.push_back(static_cast<uint8_t>(std::stoi(mac.substr(i, 2), nullptr, 16)));
+  return esphome::tigo_monitor::master::label_of(b);
+}
+
 static void send_json(httplib::Response &res, const json &j, int status = 200) {
   res.status = status;
   res.set_header("Cache-Control", "no-store");
@@ -1445,6 +1459,22 @@ void HttpServer::routes_() {
                       {"unconfirmed", m.pv_unconfirmed},
                       {"last_sent", pv_byte(m.pv_last_sent)},
                       {"last_reply", pv_byte(m.pv_last_reply)}}},
+                    {"table",
+                     {{"writes", m.table_writes},
+                      {"edit",
+                       {{"active", m.table_edit.active},
+                        {"finished", m.table_edit.finished},
+                        {"ok", m.table_edit.ok},
+                        {"dry_run", m.table_edit.dry_run},
+                        {"mac", m.table_edit.mac},
+                        {"label", label_of_hex(m.table_edit.mac)},
+                        {"id", m.table_edit.id ? hex4(m.table_edit.id) : ""},
+                        {"ack", m.table_edit.ack},
+                        {"step", m.table_edit.step},
+                        {"message", m.table_edit.message},
+                        {"started_unix", m.table_edit.started_unix},
+                        {"finished_unix", m.table_edit.finished_unix},
+                        {"dry_frames", m.table_edit.dry_frames}}}}},
                     {"standby",
                      {{"state", standby_name(m.standby)},
                       {"takeover_s", m.takeover_s},
@@ -1470,6 +1500,59 @@ void HttpServer::routes_() {
     std::string why;
     int code = ctx_.request_pv ? ctx_.request_pv(!on, why) : 409;
     if (code == 200) send_json(res, {{"on", on}});
+    else send_json(res, {{"error", why.empty() ? "not running the bus" : why}}, code);
+  });
+
+  // Pi-only: add an optimizer to the TAP's table, by its printed label (or
+  // MAC), as the CCA does (table_edit.h). Behind the web password, as PV
+  // output is: {"label": "4-9A57A2L"} or {"mac": "04C05B..."}, optional
+  // "id" (hex, 0002..03FF) and "dry_run".
+  svr.Post("/api/master/table/add", [this](const httplib::Request &req, httplib::Response &res) {
+    if (ctx_.current_settings().web_password.empty()) {
+      send_json(res, {{"error", "set a web password first"}}, 403);
+      return;
+    }
+    json j = json::parse(req.body, nullptr, false);
+    if (j.is_discarded() || !j.is_object()) {
+      send_json(res, {{"error", "expected {\"label\": \"4-9A57A2L\"} or {\"mac\": \"...\"}"}}, 400);
+      return;
+    }
+    namespace mp = esphome::tigo_monitor::master;
+    mp::Bytes mac;
+    std::string label = j.contains("label") && j["label"].is_string() ? j["label"].get<std::string>() : "";
+    std::string mac_hex = j.contains("mac") && j["mac"].is_string() ? j["mac"].get<std::string>() : "";
+    if (!label.empty()) {
+      if (!mp::mac_of_label(label, mac)) {
+        send_json(res, {{"error", "that label doesn't check out: look for a misread character"}}, 400);
+        return;
+      }
+    } else if (mac_hex.size() == 16 && mac_hex.find_first_not_of("0123456789abcdefABCDEF") == std::string::npos) {
+      for (size_t i = 0; i < 16; i += 2) mac.push_back(static_cast<uint8_t>(std::stoi(mac_hex.substr(i, 2), nullptr, 16)));
+      if (mp::label_of(mac).empty()) {
+        send_json(res, {{"error", "not a Tigo optimizer's MAC (04C05B...)"}}, 400);
+        return;
+      }
+    } else {
+      send_json(res, {{"error", "give the optimizer's label, or its 16-digit MAC"}}, 400);
+      return;
+    }
+    uint16_t id = 0;
+    if (j.contains("id") && j["id"].is_string() && !j["id"].get<std::string>().empty()) {
+      std::string h = j["id"].get<std::string>();
+      if (h.size() > 4 || h.find_first_not_of("0123456789abcdefABCDEF") != std::string::npos) {
+        send_json(res, {{"error", "an address is up to 4 hex digits, 0002..03FF"}}, 400);
+        return;
+      }
+      id = static_cast<uint16_t>(std::stoul(h, nullptr, 16));
+      if (id < 2 || id > 0x3FF) {
+        send_json(res, {{"error", "an address must be 0002..03FF"}}, 400);
+        return;
+      }
+    }
+    bool dry = j.contains("dry_run") && j["dry_run"].is_boolean() && j["dry_run"].get<bool>();
+    std::string why;
+    int code = ctx_.request_table_add ? ctx_.request_table_add(mac, id, dry, why) : 409;
+    if (code == 200) send_json(res, {{"started", true}, {"dry_run", dry}, {"mac", mp::mac_hex(mac)}, {"label", mp::label_of(mac)}});
     else send_json(res, {{"error", why.empty() ? "not running the bus" : why}}, code);
   });
 
@@ -1548,6 +1631,7 @@ void HttpServer::routes_() {
                     {"master_housekeeping", s.master_housekeeping},
                     {"master_queries", s.master_queries},
                     {"master_read_tap_config", s.master_read_tap_config},
+                    {"master_table_writes", s.master_table_writes},
                     {"discovery_auto", s.discovery_auto},
                     {"master_optimizer_writes", s.master_optimizer_writes},
                     {"gateway_id", s.gateway_id},
@@ -1599,6 +1683,7 @@ void HttpServer::routes_() {
       if (j.contains("master_housekeeping")) s.master_housekeeping = j["master_housekeeping"].get<bool>();
       if (j.contains("master_queries")) s.master_queries = j["master_queries"].get<bool>();
       if (j.contains("master_read_tap_config")) s.master_read_tap_config = j["master_read_tap_config"].get<bool>();
+      if (j.contains("master_table_writes")) s.master_table_writes = j["master_table_writes"].get<bool>();
       if (j.contains("discovery_auto")) s.discovery_auto = j["discovery_auto"].get<bool>();
       if (j.contains("master_optimizer_writes")) s.master_optimizer_writes = j["master_optimizer_writes"].get<bool>();
       if (j.contains("gateway_id")) s.gateway_id = j["gateway_id"].get<int>();
