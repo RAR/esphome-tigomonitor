@@ -261,6 +261,11 @@ class MasterCore {
   // Starts removing one: the table erased and what stays written back. The
   // same refusals, but for the window, and nowhere to save what stays.
   bool request_table_remove(const esphome::tigo_monitor::master::Bytes &mac, bool dry_run, std::string &why);
+  // Starts replacing one: the table erased and written back without it,
+  // with the new one listed (not joined) at its address, then waited for
+  // like an add. The removal's refusals, and a new MAC that isn't 8 bytes.
+  bool request_table_replace(const esphome::tigo_monitor::master::Bytes &old_mac,
+                             const esphome::tigo_monitor::master::Bytes &new_mac, bool dry_run, std::string &why);
   // Stops waiting for an added optimizer to join (it stays listed, and
   // joins whenever the window is next open). False if it isn't waited for.
   bool request_table_stop_waiting(const esphome::tigo_monitor::master::Bytes &mac);

@@ -560,7 +560,10 @@ class TableRemove : public TableJob {
           f.insert(f.end(), a.begin(), a.end());
           dry_frames_.push_back(f);
         }
-        finish_("dry run: would erase the table and write back the other " + std::to_string(survivors_.size()));
+        finish_(add_mac_.empty()
+                    ? "dry run: would erase the table and write back the other " + std::to_string(survivors_.size())
+                    : "dry run: would erase the table, write back the other " + std::to_string(survivors_.size() - 1) +
+                          " and the new one at " + hex4_(id_) + " (not joined)");
         return {};
       }
       erase_sent_ = true;
@@ -613,12 +616,15 @@ class TableRemove : public TableJob {
   bool keep_saved() const override { return keep_saved_; }
   const std::vector<TableRecord> &survivors() const override { return survivors_; }
 
-  const char *kind() const override { return "remove"; }
+  const char *kind() const override { return add_mac_.empty() ? "remove" : "replace"; }
   Step step() const { return step_; }
   bool finished() const override { return step_ == Step::done || step_ == Step::failed; }
   bool ok() const override { return step_ == Step::done; }
   bool resuming() const { return resuming_; }
   bool erase_sent() const { return erase_sent_; }
+  // A replace's new optimizer, listed and not joined yet: for JoinWatch.
+  bool awaiting_join() const { return ok() && !add_mac_.empty() && !dry_run_; }
+  const Bytes &added_mac() const { return add_mac_; }
   const char *step_text() const override { return step_name(step_); }
   static const char *step_name(Step s) {
     switch (s) {
@@ -633,6 +639,10 @@ class TableRemove : public TableJob {
     }
     return "";
   }
+
+ protected:
+  // A replace: the new optimizer, written provisional at the removed one's id.
+  Bytes add_mac_;
 
  private:
   Bytes batch_(size_t from) const {
@@ -669,10 +679,19 @@ class TableRemove : public TableJob {
         return;
       }
       const TableRecord *r = TableWalk::find(before_, mac_);
-      if (!r) return finish_("not in the table: nothing to remove");
+      if (!r) {
+        if (!add_mac_.empty()) return fail_("the optimizer coming out is not in the table", false);
+        return finish_("not in the table: nothing to remove");
+      }
       id_ = r->id();
       for (const auto &rec : before_)
         if (rec.mac != mac_) survivors_.push_back(rec);
+      if (!add_mac_.empty()) {
+        if (add_mac_ == mac_) return fail_("the new optimizer is the one coming out", false);
+        if (const TableRecord *dup = TableWalk::find(before_, add_mac_))
+          return fail_("the new optimizer is already in the table at " + hex4_(dup->id()), false);
+        survivors_.push_back({add_mac_, static_cast<uint16_t>(0x8000 | id_)});
+      }
       // In id order, as the CCA wrote them back.
       std::sort(survivors_.begin(), survivors_.end(),
                 [](const TableRecord &a, const TableRecord &b) { return a.id() < b.id(); });
@@ -703,8 +722,11 @@ class TableRemove : public TableJob {
   }
   std::string done_text_() const {
     std::string n = std::to_string(survivors_.size());
-    return resuming_ ? "finished the interrupted removal: " + n + " written back"
-                     : "removed " + hex4_(id_) + "; the other " + n + " written back as they were";
+    if (resuming_) return "finished the interrupted removal: " + n + " written back";
+    if (!add_mac_.empty())
+      return "replaced " + hex4_(id_) + "; the other " + std::to_string(survivors_.size() - 1) +
+             " written back as they were, the new one waiting to join";
+    return "removed " + hex4_(id_) + "; the other " + n + " written back as they were";
   }
 
   bool resuming_;
@@ -714,6 +736,18 @@ class TableRemove : public TableJob {
   uint32_t empty_at_ms_ = 0;
   bool erase_sent_ = false;
   bool keep_saved_ = false;
+};
+
+// Replacing one: a removal whose rewrite also lists the new optimizer,
+// provisional (bit 15 set) at the removed one's id, as the CCA writes an
+// add into a whole-table rewrite (2026-11-09). One gap of under a second
+// instead of a removal and then an add, and the new optimizer reports under
+// the address the history already uses. The new MAC must not be listed.
+class TableReplace : public TableRemove {
+ public:
+  TableReplace(const Bytes &old_mac, const Bytes &new_mac, bool dry_run) : TableRemove(old_mac, dry_run) {
+    add_mac_ = new_mac;
+  }
 };
 
 }  // namespace master

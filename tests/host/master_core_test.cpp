@@ -719,7 +719,33 @@ static void test_a_removal_cut_off_by_a_tap_restart_is_finished() {
   core.close();
 }
 
+// A replace through the core: one erase, the new optimizer listed at the
+// old one's id, then waited for like an add.
+static void test_a_replace_lists_the_new_one_and_waits() {
+  TableTap tap;
+  MasterCore core(&tap.port, [](int, const std::string &) {}, nullptr, nullptr, GW, false, false);
+  core.set_table_writes(true);
+  core.set_window_wanted(false);
+  core.set_table_saved([](const mp::Bytes &, const std::vector<mp::TableRecord> *) { return true; });
+  CHECK(core.open());
+  mp::Bytes old(tap.records[1].begin(), tap.records[1].begin() + 8);  // at 0003
+  std::string why;
+  CHECK(core.request_table_replace(old, NEW_MAC, false, why));
+  uint32_t t = 0;
+  for (; t < 10000; t += 50) core.tick(t);
+  MasterStatus s = core.status();
+  CHECK(s.table_edit.kind == "replace" && s.table_edit.ok && s.table_edit.id == 3);
+  CHECK(tap.erases == 1);
+  CHECK(tap.records.size() == 2 && tap.records[1][7] == 0x34 && tap.records[1][8] == 0x80 && tap.records[1][9] == 0x03);
+  CHECK(s.table_waiting.size() == 1 && s.table_waiting[0].mac == "04C05B0000001234" && s.table_waiting[0].id == 3);
+  int renewals = tap.renewals;
+  for (; t < 40000; t += 50) core.tick(t);
+  CHECK(tap.renewals > renewals);
+  core.close();
+}
+
 int main() {
+  test_a_replace_lists_the_new_one_and_waits();
   test_a_removal_cut_off_by_a_tap_restart_is_finished();
   test_a_removal_saves_then_erases();
   test_an_interrupted_removal_is_finished();
