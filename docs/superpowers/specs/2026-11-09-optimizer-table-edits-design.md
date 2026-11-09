@@ -93,6 +93,21 @@ Our master on this PC through the FTDI adapter, bring-up off (no address broadca
 
 Follow-up from it: a removal cut off by a TAP restart between its erase and its write back keeps its saved list, but resumes only at the next daemon start. It should resume as soon as the TAP answers again.
 
+## First roof run, 2026-11-09 (16:14 EST)
+
+The owner removed one of the replacement spares listed in the roof TAP's table but not installed (`802C`), from the Devices page on the Zero (an active standby running the bus). A dry run first showed one erase and 43 records back in five writes (10, 10, 10, 10, 3) in id order: the joined ones with bit 15 clear, `802A` and `802B` still with it set, `802C` left out.
+
+| Time (EST) | Step |
+|---|---|
+| 16:14:00.690 | the 43 saved; erasing |
+| 16:14:00.710 | erase acked `00` |
+| 16:14:01.274–.492 | five writes, each acked `00` (the first 0.56 s after the erase) |
+| 16:14:01.723 | read back: the 43, as before |
+
+- **The gap from erase to the last write back was 0.78 s.**
+- Afterwards the TAP's window read showed 43 in the table, 41 joined: the 40 working optimizers and `002D`, which the table already listed as joined.
+- All 40 optimizers reported within 30 s; no rejoins (no NetDiag), no TAP silence. The saved list was cleared.
+
 ## Bench first
 
 Each step on the bench TAP before the roof, with `--capture` on:
