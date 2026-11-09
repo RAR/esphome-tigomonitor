@@ -185,8 +185,10 @@ per optimizer to the TAP its reports come through. The colour of the line
 says how well that optimizer is getting through:
 
 - **Reports lost today.** Each report carries Tigo's slot counter, which
-  places it in a 2-second slot, so a skipped slot is a report that never
-  arrived. Only gaps while it is reporting count: the night, or a
+  places it in a time slot: every 3 seconds on one roof, every 2 on a bench
+  setup. The Pi learns each optimizer's spacing, so a skipped slot is a
+  report that never arrived; one that turns up late, up to a minute behind,
+  fills its gap. Only gaps while it is reporting count: the night, or a
   restart of the Pi, isn't loss.
 - **Signal.** The number each report carries, from 0 to 255, higher is
   better. It is Tigo's own scale, not dBm, so the Pi shows it as it is. On

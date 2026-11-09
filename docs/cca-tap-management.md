@@ -139,7 +139,7 @@ Data collection from every TAP stops for the whole scan, about 5½ min. The acti
 - **The field after `S`** is AcLoss, the rapid-shutdown-on-AC-loss setting: `0000` in the 4.0.7 and night forms, `.` in the morning form.
 - **Our allowlisted `^00Smrt_........S0000...0000` is the CCA's Default.**
 
-The read-back `!Smrt …` has 16 tokens on the bench: token 3 HwVout, 10 the store-done flag (`S`), 11 AcLoss, 15 BaseOverride. The CCA compares them with what it wants and re-sends on a mismatch. The roof answers two ways (sunrise, 2026-11-08, 22 optimizers): 13 tokens with values (17, all identical: `0FFF 0000 0FFF 0008 00C8 00C8 000A 0154 0154 S 00 01`), or 16 tokens of zeros (5). Token 10 is `S` or `N` in both; the other positions don't line up, so the Pi names only the flag and shows the rest as heard. Two of the zero-form five went `N` → `S` after the Zero's allowlisted `Smrt_`.
+The read-back `!Smrt …` has 16 tokens on the bench: token 3 HwVout, 10 the store-done flag (`S`), 11 AcLoss, 15 BaseOverride. The CCA compares them with what it wants and re-sends on a mismatch. The roof answers two ways, and the form follows the firmware (all 40, 2026-11-08): the 35 on K8 (K8.0120 and K8.0114) give 13 tokens, all identical, `0FFF 0000 0FFF 0008 00C8 00C8 000A 0154 0154 S 00 01`; the 5 on H9.0018 (D6–D10, the same five that keep producing through a mesh PV off) give 16 tokens of zeros around the flag. The K8 answer matches the K6 layout in the analysis side's `MESH_BEACONS.md` (read from the CCA's `lmudcd.smrt` headers) token for token through the flag and AcLoss: SwVout, OutResist, HwVout, DnPwmTime, UpPwmTime, PwmThresh, OvRecover, UvinLo, UvinHi (volts ×0.05, times ×0.001 s). Its last token, the K6 fields it lacks, and what the H9's zeros mean are open (handed to the analysis side 2026-11-09). So the Pi names only the flag, and compares an optimizer's answer only with others of its firmware family. Two of the H9s went `N` → `S` after the Zero's allowlisted `Smrt_`.
 
 ## What the Pi must never send
 
@@ -153,6 +153,6 @@ The send gate lists these as never (some are still being moved there; see plan T
 
 - What `SET_CHANNEL 20 00` means.
 - The status byte's bit order.
-- The `Smrt_` fields the parser never reads.
+- The `Smrt_` fields the parser never reads: the K8 answer's last token, and the H9 form.
 - Whether to turn NetDiag on with PeriodicCfg Write so the mesh map refreshes, and at what rate; left until the Pi takes on more writes.
 - Whether a TAP takes a node that isn't in its table (plan session B3). This decides whether we ever need SetTable.
