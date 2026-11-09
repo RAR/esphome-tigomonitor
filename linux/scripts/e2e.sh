@@ -28,9 +28,12 @@ summary="$(grep 'stopping:' "$out/daemon.log")"
 expect "readings" "$(echo "$summary" | sed -E 's/.* ([0-9]+) readings.*/\1/')" $((panels * rounds))
 expect "bad checksums" "$(echo "$summary" | sed -E 's/.* ([0-9]+) bad checksums.*/\1/')" 1
 expect "panels" "$(echo "$summary" | sed -E 's/.* ([0-9]+) panels.*/\1/')" $panels
-# 12 metrics and the barcode per panel; 9 system sensors and night mode.
-expect "panel discovery configs" "$(grep -c '^homeassistant/sensor/tigo_04C05B' "$out/mqtt.txt")" $((panels * 13))
-expect "system discovery configs" "$(grep '^homeassistant/sensor/tigomonitor_test_' "$out/mqtt.txt" | grep -vc _bus_master)" 9
+# 13 metrics and the barcode per panel; 10 system sensors and night mode.
+expect "panel discovery configs" "$(grep -c '^homeassistant/sensor/tigo_04C05B' "$out/mqtt.txt")" $((panels * 14))
+expect "system discovery configs" "$(grep '^homeassistant/sensor/tigomonitor_test_' "$out/mqtt.txt" | grep -vc _bus_master)" 10
+# Each panel's share of today's reports lost, and the setting changes heard.
+expect "panel state has its loss" "$(grep -m1 '^tigomonitor/test/panel/' "$out/mqtt.txt" | sed 's/^[^ ]* //' | python3 -c 'import json,sys; print(type(json.load(sys.stdin)["link_loss"]).__name__)')" float
+expect "no setting changes" "$(grep '^tigomonitor/test/system/state' "$out/mqtt.txt" | tail -1 | sed 's/^[^ ]* //' | python3 -c 'import json,sys; print(json.load(sys.stdin)["setting_changes"])')" 0
 # Listening, the bus master's 8 entities are cleared, in case it ran the bus before,
 # and the 2 retired lease_* sensors.
 expect "bus master configs cleared" "$(grep -c '^homeassistant/[a-z_]*/tigomonitor_test_bus_master_[a-z_]*/config (null)$' "$out/mqtt.txt")" 10
@@ -39,9 +42,9 @@ expect "PV switch config cleared" "$(grep -c '^homeassistant/switch/tigomonitor_
 expect "no bus master state" "$(grep -c '^tigomonitor/test/master/' "$out/mqtt.txt" || true)" 0
 expect "night mode sensor" "$(grep -c '^homeassistant/binary_sensor/tigomonitor_test_night_mode' "$out/mqtt.txt")" 1
 # A standby publishes no system state while it stands by: its entities must
-# go unavailable rather than freeze on their last values. (9 sensors, night
+# go unavailable rather than freeze on their last values. (10 sensors, night
 # mode, and the TAP-reconfiguration alarm.)
-expect "system entities expire" "$(grep -E '^homeassistant/(sensor|binary_sensor)/tigomonitor_test_' "$out/mqtt.txt" | grep -v _bus_master | grep -c '"expire_after":300')" 11
+expect "system entities expire" "$(grep -E '^homeassistant/(sensor|binary_sensor)/tigomonitor_test_' "$out/mqtt.txt" | grep -v _bus_master | grep -c '"expire_after":300')" 12
 # One publish per interval plus a final one at the end of the replay, so at
 # least one message per panel; how many depends on timing.
 states="$(grep -c '^tigomonitor/test/panel/' "$out/mqtt.txt")"
@@ -67,7 +70,7 @@ kill $sub
 mosquitto_sub -p 18830 -v --retained-only -W 1 -t 'homeassistant/#' > "$out/retained-off.txt" 2>/dev/null || true
 pkill mosquitto || true
 cleared="$(grep -c '^homeassistant/[a-z_]*/tigo[a-zA-Z0-9_]*/config (null)$' "$out/mqtt-off.txt" || true)"
-expect "discovery off: configs cleared" "$cleared" $((panels * 13 + 9 + 1 + 10 + 1 + 1))
+expect "discovery off: configs cleared" "$cleared" $((panels * 14 + 10 + 1 + 10 + 1 + 1))
 expect "discovery off: nothing left retained" "$(grep -c . "$out/retained-off.txt" || true)" 0
 expect "discovery off: no configs sent" "$(grep -c '^homeassistant/.*{' "$out/mqtt-off.txt" || true)" 0
 states="$(grep -c '^tigomonitor/test/panel/' "$out/mqtt-off.txt")"

@@ -41,8 +41,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   TAP's ID, the MAC it gives when a bus master brings it up, and take a name
   you type in place. The mesh map then labels the TAP by that name.
 
+- **See each string's link over weeks (Raspberry Pi).** Under the mesh map,
+  a grid of each string's share of reports lost, a day per column, kept for
+  30 days. Today's figures start again at midnight; this shows whether a
+  weak string is steady, getting worse, or fixed.
+- **Each optimizer's past joins (Raspberry Pi).** The mesh map's side panel
+  lists the joins an optimizer made over the last 30 days and which
+  optimizer each went through.
+- **Link loss and setting changes in Home Assistant (Raspberry Pi).** Each
+  panel gets a "Reports lost today" sensor, and each string one too. An
+  "Optimizer setting changes (24 h)" sensor counts optimizers whose
+  settings, MPPT parameters or firmware changed. A CCA never drifts them,
+  so the Devices page lists each change too.
+
 ### Changed
 
+- **The mesh map fills the window (Raspberry Pi).** On a wide screen the
+  radio map's box runs down to the foot of the window, with the legend
+  still in view, and the side panel scrolls within it.
 - **The mesh map lays relays out as a tree (Raspberry Pi).** Each
   optimizer gets a slice of the circle as wide as the optimizers relaying
   through it, and a relay's optimizers fan out beyond it inside that slice.

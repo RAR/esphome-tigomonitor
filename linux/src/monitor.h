@@ -7,6 +7,7 @@
 // web server read snapshots.
 
 #include "link_stats.h"
+#include "mesh_history.h"
 #include "tigo_layout.h"
 #include "tigo_protocol.h"
 
@@ -16,6 +17,7 @@
 #include <cstdint>
 #include <map>
 #include <mutex>
+#include <nlohmann/json.hpp>
 #include <string>
 #include <thread>
 #include <set>
@@ -134,6 +136,12 @@ class Monitor {
   // or a name over 32 characters.
   bool set_tap_name(const std::string &tap, const std::string &name);
   std::map<std::string, std::string> tap_names() const;
+  // Reports and losses by day and optimizer, the last LOSS_DAYS days.
+  std::map<std::string, std::map<std::string, std::pair<uint32_t, uint32_t>>> loss_days() const;
+  // The joins of the last JOIN_DAYS days, oldest first.
+  std::vector<esphome::tigo_monitor::mesh_history::JoinEntry> join_log() const;
+  static const size_t LOSS_DAYS = 30;
+  static const int64_t JOIN_DAYS = 30;
   static const int64_t MISSING_AFTER_S = 3 * 86400;
   static const int64_t OFF_ROSTER_AFTER_S = 86400;
   static const int64_t SEEN_SAVE_EVERY_S = 3600;  // how stale a saved last_heard/last_roster may be
@@ -204,6 +212,8 @@ class Monitor {
   std::vector<StringTotals> strings_locked_() const;
   bool night_locked_() const;
   bool save_locked_();
+  nlohmann::json loss_days_json_locked_() const;
+  nlohmann::json join_log_json_locked_() const;
   void writer_loop_();
 
   std::string state_path_;
@@ -216,6 +226,10 @@ class Monitor {
   std::vector<Node> nodes_;
   std::vector<Node> parked_cca_;
   esphome::tigo_monitor::link::LinkStats links_;
+  // Each optimizer's reports and losses by day, and the joins of the last
+  // JOIN_DAYS days, oldest first: the mesh over time.
+  esphome::tigo_monitor::mesh_history::LossBook loss_book_;
+  std::vector<esphome::tigo_monitor::mesh_history::JoinEntry> join_log_;
   BusStats stats_;
   double energy_kwh_ = 0;
   double energy_in_kwh_ = 0, today_in_kwh_ = 0;

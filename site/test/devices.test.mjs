@@ -217,6 +217,20 @@ test('Devices, on the Pi: a TAP is named in place, and an empty name clears it',
   await ctx.close();
 });
 
+test('Devices, on the Pi: a change to an optimizer\'s settings is listed, newest first', async () => {
+  const { page, ctx, errors } = await open(true);
+  await page.waitForSelector('#devices-changes', { state: 'visible' });
+  const dev = routes['/api/devices'].devices;
+  const text = await page.textContent('#devices-changes');
+  assert.match(text, new RegExp(`${dev[3].name}.*MPPT.*12 40 08 12.*12 40 0A 12`, 's'));
+  await ctx.close();
+  const none = await open(true, { ...routes['/api/versions'], changes: [] });
+  await none.page.waitForSelector('#devices-taps', { state: 'visible' });
+  assert.equal(await none.page.isVisible('#devices-changes'), false);
+  assert.deepEqual([...errors, ...none.errors], []);
+  await none.ctx.close();
+});
+
 test("Devices, on the Pi: the TAP's radio channel and admission level, once read", async () => {
   const { page, ctx } = await open(true);
   await page.waitForSelector('#devices-taps', { state: 'visible' });

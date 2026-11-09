@@ -2,6 +2,7 @@
 
 #include "fsutil.h"
 #include "log.h"
+#include "mesh_history.h"
 
 #include <chrono>
 #include <cstdlib>
@@ -82,6 +83,13 @@ void BusLog::load_versions_() {
     m.stored = o.value("stored", false);
     if (!m.settings.empty()) smarts_[m.addr] = {m, o.value("heard_unix_ms", int64_t{0})};
   }
+  for (const auto &o : j.value("changes", json::array())) {  // newest first
+    if (!o.is_object()) continue;
+    changes_.push_front({o.value("unix_ms", int64_t{0}),
+                         static_cast<uint16_t>(std::strtoul(o.value("addr", std::string("0")).c_str(), nullptr, 16)),
+                         o.value("what", std::string()), o.value("before", std::string()), o.value("after", std::string())});
+  }
+  while (changes_.size() > KEEP_CHANGES) changes_.pop_front();
   for (const auto &o : j.value("mppt", json::array())) {
     if (!o.is_object()) continue;
     MpptSeen m;
@@ -112,6 +120,22 @@ void BusLog::load() {
          static_cast<unsigned long long>(alarm_count_));
 }
 
+// An optimizer whose settings, MPPT parameters or firmware changed: a CCA
+// never drifts them, so each is news. The last KEEP_CHANGES are kept.
+void BusLog::change_(int64_t now, uint16_t addr, const char *what, const std::string &before, const std::string &after) {
+  LOGW("bus: optimizer %s's %s changed: %s, was %s", hex4(addr).c_str(), what, after.c_str(), before.c_str());
+  changes_.push_back({now, addr, what, before, after});
+  while (changes_.size() > KEEP_CHANGES) changes_.pop_front();
+  versions_dirty_ = true;
+}
+
+int BusLog::changes_since(int64_t since_ms) const {
+  std::lock_guard<std::mutex> lock(mu_);
+  int n = 0;
+  for (const auto &c : changes_) n += c.unix_ms >= since_ms;
+  return n;
+}
+
 void BusLog::on_frame_(const Frame &f, bool ours, int64_t now) {
   std::string what = watch_.on_frame(f, ours, now);
   for (const auto &r : watch_.take_radios()) {
@@ -133,6 +157,7 @@ void BusLog::on_frame_(const Frame &f, bool ours, int64_t now) {
     auto it = mppts_.find(m.addr);
     if (it == mppts_.end() || it->second.first.params != m.params)
       LOGI("bus: optimizer %s MPPT parameters: %s", hex4(m.addr).c_str(), m.params.c_str());
+    if (it != mppts_.end() && it->second.first.params != m.params) change_(now, m.addr, "MPPT", it->second.first.params, m.params);
     mppts_[m.addr] = {m, now};
     versions_dirty_ = true;
   }
@@ -141,15 +166,19 @@ void BusLog::on_frame_(const Frame &f, bool ours, int64_t now) {
     if (it == smarts_.end() || it->second.first.settings != m.settings)
       LOGI("bus: optimizer %s settings: %s (%s)", hex4(m.addr).c_str(), m.settings.c_str(),
            m.stored ? "stored" : "not stored");
+    if (it != smarts_.end() && esphome::tigo_monitor::mesh_history::settings_changed(it->second.first.settings, m.settings))
+      change_(now, m.addr, "settings", it->second.first.settings, m.settings);
     smarts_[m.addr] = {m, now};
     versions_dirty_ = true;
   }
   for (const auto &v : watch_.take_versions()) {
     VersionBook::Result r = versions_.record(v, now);
     versions_dirty_ = true;
-    if (r == VersionBook::changed)
+    if (r == VersionBook::changed) {
       LOGW("bus: %s %s's firmware changed: %s, was %s", v.tap ? "TAP" : "optimizer", hex4(v.addr).c_str(),
            v.version.c_str(), versions_.find(v.tap, v.addr)->previous.c_str());
+      if (!v.tap) change_(now, v.addr, "firmware", versions_.find(v.tap, v.addr)->previous, v.version);
+    }
     else if (r == VersionBook::first)
       LOGI("bus: %s %s runs %s %s", v.tap ? "TAP" : "optimizer", hex4(v.addr).c_str(), v.model.c_str(),
            v.version.c_str());
@@ -234,7 +263,12 @@ json BusLog::versions_json() const {
                     {"params", kv.second.first.params},
                     {"answer", kv.second.first.answer},
                     {"heard_unix_ms", kv.second.second}});
-  return {{"taps", taps}, {"optimizers", optimizers}, {"radios", radios}, {"ids", ids}, {"settings", settings}, {"mppt", mppt}};
+  json changes = json::array();
+  for (auto it = changes_.rbegin(); it != changes_.rend(); ++it)
+    changes.push_back({{"unix_ms", it->unix_ms}, {"addr", hex4(it->addr)}, {"what", it->what},
+                       {"before", it->before}, {"after", it->after}});
+  return {{"taps", taps}, {"optimizers", optimizers}, {"radios", radios}, {"ids", ids}, {"settings", settings}, {"mppt", mppt},
+          {"changes", changes}};
 }
 
 void BusLog::save_if_changed() {

@@ -196,6 +196,8 @@ static const Metric PANEL_METRICS[] = {
     {"efficiency", "Efficiency", "%", nullptr, "measurement", 1},
     {"load_factor", "Load factor", "%", nullptr, "measurement", 1},
     {"rssi", "RSSI", "dBm", "signal_strength", "measurement", 0},
+    // Its share of today's reports that never arrived, as the mesh map counts.
+    {"link_loss", "Reports lost today", "%", nullptr, "measurement", 1},
 };
 
 void MqttPublisher::publish_discovery_(const Panel &p) {
@@ -223,7 +225,7 @@ void MqttPublisher::publish_discovery_(const Panel &p) {
     if (m.device_class) c["device_class"] = m.device_class;
     if (m.state_class) c["state_class"] = m.state_class;
     std::string key = m.key;
-    if (key == "rssi" || key == "duty_cycle" || key == "load_factor") c["entity_category"] = "diagnostic";
+    if (key == "rssi" || key == "duty_cycle" || key == "load_factor" || key == "link_loss") c["entity_category"] = "diagnostic";
     announce_("sensor", uid, c);
   }
   // The barcode as its own entity too, as the firmware's barcode text sensor.
@@ -261,6 +263,9 @@ void MqttPublisher::publish_system_discovery_() {
       {"new_optimizers", "New optimizers", nullptr, nullptr, "measurement"},
       // No reading for 3 days, or dropped from the TAP's roster: a dead one.
       {"missing_optimizers", "Missing optimizers", nullptr, nullptr, "measurement"},
+      // An optimizer's settings, MPPT parameters or firmware changed: a CCA
+      // never drifts them, so any is news.
+      {"setting_changes", "Optimizer setting changes (24 h)", nullptr, nullptr, "measurement"},
   };
   for (const auto &m : SYS) {
     std::string uid = "tigomonitor_" + settings_.device_id + "_" + m.key;
@@ -318,6 +323,18 @@ void MqttPublisher::publish_string_discovery_(const std::string &label) {
             {"state_class", "measurement"},
             {"device", monitor_device(settings_, version_)}};
   announce_("sensor", uid, c);
+  // And its share of today's reports lost, summed over its optimizers.
+  std::string loss = uid + "_loss";
+  announce_("sensor", loss,
+            {{"name", label + " reports lost today"},
+             {"unique_id", loss},
+             {"state_topic", base_() + "/system/state"},
+             {"value_template", "{{ value_json.string_loss[" + json(label).dump() + "] | default(0) }}"},
+             {"availability_topic", base_() + "/status"},
+             {"unit_of_measurement", "%"},
+             {"state_class", "measurement"},
+             {"suggested_display_precision", 1},
+             {"device", monitor_device(settings_, version_)}});
 }
 
 // The bus master, on the monitor device. remove: the listen role, where a
@@ -466,6 +483,14 @@ void MqttPublisher::publish() {
   auto window = monitor_.online_window();
   bool night = monitor_.night_mode();
   int online = 0;
+  // Today's reports and losses, as the mesh map counts them, and each
+  // optimizer's string, for the loss sensors.
+  auto links = monitor_.links();
+  std::map<std::string, std::string> string_by_addr;
+  for (const auto &n : monitor_.nodes())
+    string_by_addr[n.addr] = n.cca_string_label.empty() ? Monitor::ALL_PANELS : n.cca_string_label;
+  std::map<std::string, std::pair<uint64_t, uint64_t>> string_counts;
+  auto loss_pct = [](uint64_t reports, uint64_t lost) { return reports + lost ? 100.0 * lost / (reports + lost) : 0.0; };
   for (const auto &p : monitor_.panels()) {
     bool live = !night && now - p.updated < window;
     if (live) online++;
@@ -491,14 +516,24 @@ void MqttPublisher::publish() {
               {"efficiency", round_to(prod(r.efficiency), 1)},
               {"load_factor", round_to(prod(r.load_factor * 100.0), 1)},
               {"rssi", live ? r.rssi : 0},
+              {"link_loss", 0.0},
               {"barcode", p.barcode}};
+    auto l = links.links().find(p.addr);
+    if (l != links.links().end()) {
+      s["link_loss"] = round_to(loss_pct(l->second.reports_today, l->second.lost_today), 1);
+      auto &c = string_counts[string_by_addr.count(p.addr) ? string_by_addr[p.addr] : Monitor::ALL_PANELS];
+      c.first += l->second.reports_today;
+      c.second += l->second.lost_today;
+    }
     pub_(base_() + "/panel/" + p.barcode + "/state", s.dump(), false);
   }
-  json strings = json::object();
+  json strings = json::object(), string_loss = json::object();
   for (const auto &st : monitor_.strings()) {
     if (st.label == Monitor::ALL_PANELS) continue;  // not a string the site has
     if (announced_strings_.insert(st.label).second) publish_string_discovery_(st.label);
     strings[st.label] = round_to(st.total_power, 1);
+    auto c = string_counts[st.label];
+    string_loss[st.label] = round_to(loss_pct(c.first, c.second), 1);
   }
   BusStats bus = monitor_.stats();
   // reset_at_midnight: the energy sensors count today, as the firmware's
@@ -515,7 +550,9 @@ void MqttPublisher::publish() {
               {"tap_reconfigured", tap_reconfigured_ && tap_reconfigured_()},
               {"new_optimizers", monitor_.new_optimizers(static_cast<int64_t>(time(nullptr)))},
               {"missing_optimizers", monitor_.missing_optimizers(static_cast<int64_t>(time(nullptr)))},
-              {"strings", strings}};
+              {"setting_changes", setting_changes_ ? setting_changes_() : 0},
+              {"strings", strings},
+              {"string_loss", string_loss}};
   pub_(base_() + "/system/state", sys.dump(), false);
 }
 

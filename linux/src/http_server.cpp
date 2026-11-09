@@ -517,7 +517,41 @@ void HttpServer::routes_() {
       auto it = names.find(id);
       taps.push_back(it != names.end() ? json{{"id", id}, {"name", it->second}} : json{{"id", id}});
     }
-    send_json(res, {{"loss_method", "slot"}, {"parent_confirmed", true}, {"taps", taps}, {"nodes", nodes}});
+    // Reports and losses by day, summed by string: how each string fares
+    // over weeks, where reports_today resets at midnight.
+    std::map<std::string, std::string> string_by_addr;
+    for (const auto &n : mon.nodes())
+      string_by_addr[n.addr] = n.cca_string_label.empty() ? Monitor::ALL_PANELS : n.cca_string_label;
+    json days = json::array();
+    for (const auto &day : mon.loss_days()) {
+      std::map<std::string, std::pair<uint64_t, uint64_t>> by;
+      for (const auto &kv : day.second) {
+        auto it = string_by_addr.find(kv.first);
+        auto &c = by[it != string_by_addr.end() ? it->second : Monitor::ALL_PANELS];
+        c.first += kv.second.first;
+        c.second += kv.second.second;
+      }
+      json strings = json::object();
+      for (const auto &kv : by) strings[kv.first] = {kv.second.first, kv.second.second};
+      days.push_back({{"date", day.first}, {"strings", strings}});
+    }
+    send_json(res, {{"loss_method", "slot"}, {"parent_confirmed", true}, {"taps", taps}, {"nodes", nodes}, {"loss_days", days}});
+  });
+
+  // One optimizer's joins of the last 30 days, newest first, each with the
+  // relay it went through, as best the join log can tell.
+  svr.Get("/api/mesh/joins", [&mon](const httplib::Request &req, httplib::Response &res) {
+    std::string addr = req.get_param_value("addr");
+    for (char &c : addr) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+    auto log = mon.join_log();
+    auto relays = esphome::tigo_monitor::mesh_history::resolve_relays(log);
+    json joins = json::array();
+    for (size_t i = log.size(); i-- > 0;)
+      if (log[i].addr == addr)
+        joins.push_back({{"unix", log[i].unix_s},
+                         {"parent", log[i].parent},
+                         {"relay", relays[i].empty() ? json(nullptr) : json(relays[i])}});
+    send_json(res, {{"addr", addr}, {"joins", joins}});
   });
 
   svr.Get("/api/overview", [&mon](const httplib::Request &, httplib::Response &res) {

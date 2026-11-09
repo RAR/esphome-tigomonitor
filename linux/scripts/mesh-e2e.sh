@@ -69,6 +69,15 @@ expect "labels present" "$(q "all('label' in x and 'string' in x for x in d['nod
 expect "no MACs in the answer" "$(grep -c 04C05B "$out/mesh.json" || true)" 0
 get 18092 /api/mesh > "$out/quiet.json"
 expect "a quiet bus" "$(python3 -c "import json; d = json.load(open('$out/quiet.json')); print(d['nodes'], d['taps'])")" "[] []"
+# Today's reports and losses by string, as the map's grid shows them: the
+# same counts the nodes carry, summed.
+expect "loss by day: today, by string" "$(q "[(x['date'] == __import__('time').strftime('%Y-%m-%d'), sorted(x['strings'])) for x in d['loss_days']]")" "[(True, ['All panels'])]"
+expect "loss by day: today's sums" "$(q "d['loss_days'][-1]['strings']['All panels'] == [sum(x['reports_today'] for x in d['nodes']), sum(x['lost_today'] for x in d['nodes'])]")" True
+# Each optimizer's joins, with the relay the log says it went through.
+joins() { get "$1" "/api/mesh/joins?addr=$2" | python3 -c "import json,sys; print([(j['parent'], j['relay']) for j in json.load(sys.stdin)['joins']])"; }
+expect "0004's joins" "$(joins 18091 0004)" "[('0042', '0002')]"
+expect "0005's joins: a NWID nobody holds" "$(joins 18091 0005)" "[('0002', None)]"
+expect "0003 never joined" "$(joins 18091 0003)" "[]"
 # A TAP's name, set on the Devices page, comes with it on the map.
 post() {  # post PORT PATH JSON: the HTTP status
   python3 - "$@" <<'PY'
@@ -101,6 +110,8 @@ get 18093 /api/mesh > "$out/mesh.json"
 expect "parents kept after a restart" "$(q "{a: n[a]['parent'] for a in sorted(n) if n[a]['parent']}")" "{'0002': '0001', '0004': '0042', '0005': '0002'}"
 expect "relays kept after a restart" "$(q "{a: n[a]['relay'] for a in sorted(n) if n[a]['relay']}")" "{'0004': '0002'}"
 expect "join times kept" "$(q "sorted(a for a in n if isinstance(n[a]['last_join_unix'], int))")" "['0002', '0004', '0005']"
+expect "joins kept after a restart" "$(joins 18093 0004)" "[('0042', '0002')]"
+expect "loss by day kept after a restart" "$(q "[sorted(x['strings']) for x in d['loss_days']]")" "[['All panels']]"
 tap_names() { python3 -c "import json; print(json.load(open('$out/state/state.json')).get('tap_names'))"; }
 expect "TAP name saved" "$(tap_names)" "{'1201': 'Garage'}"
 expect "an empty name forgets it" "$(post 18093 /api/taps/name '{"tap": "1201", "name": ""}')" 200

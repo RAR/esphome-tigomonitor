@@ -284,6 +284,11 @@ int main(int argc, char **argv) {
   };
   mqtt.set_master_status(master_status);
   mqtt.set_tap_reconfigured([&bus_log] { return bus_log.alarm_active(); });
+  mqtt.set_setting_changes([&bus_log] {
+    int64_t now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                         std::chrono::system_clock::now().time_since_epoch()).count();
+    return bus_log.changes_since(now_ms - 24 * 3600 * 1000LL);
+  });
   // Under master_mu, so it can't fall between start_input's read of the
   // state and its swap. request_pv never waits on the bus.
   mqtt.set_pv_command([&](bool off) {

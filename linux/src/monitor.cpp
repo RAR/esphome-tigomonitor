@@ -185,7 +185,10 @@ void Monitor::on_netdiag_(const std::string &packet) {
   std::string addr = j.addr;
   for (const auto &n : nodes_)
     if (n.long_address == j.node_mac) addr = n.addr;
-  links_.on_join(addr, unix_ms() / 1000, j.parent, j.nwid);
+  int64_t now_s = unix_ms() / 1000;
+  links_.on_join(addr, now_s, j.parent, j.nwid);
+  join_log_.push_back({addr, now_s, j.parent, j.nwid});
+  while (!join_log_.empty() && join_log_.front().unix_s < now_s - JOIN_DAYS * 86400) join_log_.erase(join_log_.begin());
   dirty_ = true;  // kept in state.json: the next join may be tomorrow's sunrise
   LOGI("%s joined (NetDiag)", addr.c_str());
 }
@@ -307,6 +310,22 @@ bool Monitor::set_tap_name(const std::string &tap, const std::string &name) {
   save_locked_();
   LOGI("TAP %s %s", key.c_str(), trimmed.empty() ? "has no name now" : ("is named " + trimmed).c_str());
   return true;
+}
+
+std::map<std::string, std::map<std::string, std::pair<uint32_t, uint32_t>>> Monitor::loss_days() const {
+  std::lock_guard<std::mutex> lock(mu_);
+  auto days = loss_book_.days();
+  // Today's as they stand now, not as last saved.
+  if (!today_.empty())
+    for (const auto &kv : links_.links())
+      if (kv.second.day == local_day() && kv.second.reports_today)
+        days[today_][kv.first] = {kv.second.reports_today, kv.second.lost_today};
+  return days;
+}
+
+std::vector<esphome::tigo_monitor::mesh_history::JoinEntry> Monitor::join_log() const {
+  std::lock_guard<std::mutex> lock(mu_);
+  return join_log_;
 }
 
 std::map<std::string, std::string> Monitor::tap_names() const {
@@ -726,10 +745,34 @@ bool Monitor::save() {
   return !write_failed_;
 }
 
+json Monitor::loss_days_json_locked_() const {
+  json out = json::object();
+  for (const auto &day : loss_book_.days()) {
+    json d = json::object();
+    for (const auto &kv : day.second) d[kv.first] = {kv.second.first, kv.second.second};
+    out[day.first] = d;
+  }
+  return out;
+}
+
+json Monitor::join_log_json_locked_() const {
+  json out = json::array();
+  for (const auto &e : join_log_) out.push_back({e.addr, e.unix_s, e.parent, e.nwid});
+  return out;
+}
+
 bool Monitor::save_locked_() {
   last_save_ = Clock::now();
   if (write_failed_.exchange(false)) dirty_ = true;
   if (!dirty_) return true;
+  // Today's reports and losses so far: the last noted before midnight stand
+  // as the day's.
+  if (!today_.empty()) {
+    for (const auto &kv : links_.links())
+      if (kv.second.day == local_day() && kv.second.reports_today)
+        loss_book_.note(today_, kv.first, kv.second.reports_today, kv.second.lost_today);
+    loss_book_.prune(LOSS_DAYS);
+  }
   json nodes = json::array();
   for (const auto &n : nodes_) {
     nodes.push_back({{"addr", n.addr},
@@ -769,7 +812,7 @@ bool Monitor::save_locked_() {
   json j = {{"version", 1},     {"nodes", nodes},           {"energy_kwh", energy_kwh_}, {"energy_in_kwh", energy_in_kwh_}, {"today_in_kwh", today_in_kwh_}, {"peaks", peaks},
             {"today", today_},  {"today_kwh", today_kwh_}, {"daily_kwh", history},
             {"seen_barcodes", seen_barcodes_}, {"seen_since", seen_since_}, {"first_heard", first}, {"joins", joins}, {"rssi_24h", rssi},
-            {"tap_names", tap_names_}};
+            {"tap_names", tap_names_}, {"loss_days", loss_days_json_locked_()}, {"join_log", join_log_json_locked_()}};
   {
     std::lock_guard<std::mutex> lock(write_mu_);
     pending_ = j.dump(1) + "\n";
@@ -809,6 +852,17 @@ bool Monitor::load() {
   for (const auto &e : j.value("rssi_24h", json::array()))
     if (e.is_object() && !e.value("addr", "").empty() && e.value("to", 0) > 0)
       links_.rssi_restore(e.value("addr", ""), e.value("to", 0), e.value("b", ""));
+  loss_book_ = {};
+  const json losses = j.value("loss_days", json::object());
+  for (const auto &day : losses.items())
+    if (day.value().is_object())
+      for (const auto &kv : day.value().items())
+        if (kv.value().is_array() && kv.value().size() == 2 && kv.value()[0].is_number_unsigned() && kv.value()[1].is_number_unsigned())
+          loss_book_.restore(day.key(), kv.key(), kv.value()[0].get<uint32_t>(), kv.value()[1].get<uint32_t>());
+  join_log_.clear();
+  for (const auto &e : j.value("join_log", json::array()))
+    if (e.is_array() && e.size() == 4 && e[0].is_string() && e[1].is_number_integer() && e[2].is_string() && e[3].is_string())
+      join_log_.push_back({e[0].get<std::string>(), e[1].get<int64_t>(), e[2].get<std::string>(), e[3].get<std::string>()});
   tap_names_.clear();
   const json names = j.value("tap_names", json::object());
   for (const auto &kv : names.items())

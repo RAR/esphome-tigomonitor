@@ -634,6 +634,29 @@
                 border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
   .mesh-graph { min-width: 0; }
   #mesh-svg { display: block; width: 100%; height: auto; max-height: 560px; margin: 0 auto; }
+  /* Fitted to the window (meshFit): the map fills the box. */
+  .mesh-graph.fitted #mesh-svg { height: 100%; max-height: none; }
+  .mesh-stage.fitted .mesh-side { overflow-y: auto; }
+  .mesh-stage.fitted { grid-template-rows: minmax(0, 1fr); }
+  .mesh-days { margin-top: 18px; background: var(--bg-2); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; overflow-x: auto; }
+  .mesh-days h3 { margin: 0 0 10px; font-size: 13px; color: var(--text-dim); font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
+  .mesh-day-head, .mesh-day-row { display: grid; grid-template-columns: 9em repeat(var(--days), minmax(3.6em, 1fr)); gap: 4px; align-items: center; }
+  .mesh-day-head span { font-size: 11px; color: var(--text-dim); text-align: center; }
+  .mesh-day-head span:first-child, .mesh-day-name { text-align: left; }
+  .mesh-day-row { margin-top: 4px; font-size: 12.5px; }
+  .mesh-day-cell { text-align: center; padding: 5px 0; border-radius: 6px; font-variant-numeric: tabular-nums; }
+  .mesh-day-cell.tier-good { background: color-mix(in srgb, var(--good) 14%, transparent); }
+  .mesh-day-cell.tier-fair { background: color-mix(in srgb, var(--warn) 18%, transparent); }
+  .mesh-day-cell.tier-poor { background: color-mix(in srgb, var(--bad) 22%, transparent); }
+  .mesh-day-cell.none { color: var(--text-faint); }
+  .mesh-joins { list-style: none; margin: 2px 0 0; padding: 0; font-size: 12.5px; }
+  .mesh-joins li { padding: 2px 0; color: var(--text); }
+  .mesh-joins li span { color: var(--text-dim); }
+  .devices-changes { margin: 0 0 18px; padding: 12px 14px; border-radius: 10px; font-size: 13px;
+                     border: 1px solid color-mix(in srgb, var(--warn) 40%, transparent); background: color-mix(in srgb, var(--warn) 7%, var(--bg)); }
+  .devices-changes strong { color: var(--warn); }
+  .devices-changes ul { margin: 6px 0 0; padding-left: 18px; }
+  .devices-changes li { margin: 2px 0; }
   .mesh-empty { padding: 80px 24px; text-align: center; color: var(--text-dim); font-size: 13px; }
   .mesh-side { border-left: 1px solid var(--border); padding: 16px; font-size: 13px; background: var(--bg); }
   .mesh-side h3 { margin: 0 0 2px; font-size: 15px; display: flex; gap: 8px; align-items: center; }
@@ -1324,6 +1347,7 @@
           <span class="mesh-strings-only"><i class="mesh-card-via">via D9</i>Joined through another optimizer</span>
           <span class="mesh-strings-only"><i class="mesh-card-via unknown">via ?</i>Through a relay not identified yet</span>
         </div>
+        <div class="mesh-days" id="mesh-days" hidden></div>
       </div>
     </section>
 
@@ -1333,6 +1357,9 @@
         <h1>Devices</h1>
         <div class="topbar-meta" id="nodes-meta">—</div>
       </div>
+
+      <!-- Pi build: optimizers whose settings, MPPT or firmware changed. -->
+      <div id="devices-changes" class="devices-changes" style="display:none"></div>
 
       <!-- Pi build: the TAPs, from /api/versions. -->
       <div id="devices-taps" style="display:none">
@@ -3707,6 +3734,19 @@
     const when = ms => new Date(ms).toLocaleString([], { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
     return `${v.model} since ${when(v.since_unix_ms)}` + (v.previous ? `, was ${v.previous}` : '');
   }
+  // Optimizers whose settings, MPPT parameters or firmware changed: a CCA
+  // never drifts them, so each is worth a look. The newest five.
+  function renderChanges() {
+    const box = document.getElementById('devices-changes');
+    const changes = ((nodesData.versions || {}).changes || []).slice(0, 5);
+    box.style.display = changes.length ? '' : 'none';
+    if (!changes.length) return;
+    const name = a => { const d = (nodesData.devices || []).find(x => String(x.addr).toUpperCase() === a); return d ? d.name : a; };
+    const when = ms => new Date(ms).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+    box.innerHTML = `<strong>Settings changed</strong>: an optimizer's settings normally never change, so these are worth a look.<ul>` +
+      changes.map(c => `<li>${topoEscape(name(c.addr))} · ${topoEscape(c.what)}: <span class="mono">${topoEscape(c.before)}</span> → ` +
+        `<span class="mono">${topoEscape(c.after)}</span> <span style="color:var(--text-dim)">(${when(c.unix_ms)})</span></li>`).join('') + '</ul>';
+  }
   function renderTaps() {
     const box = document.getElementById('devices-taps');
     if (box.querySelector('td.tap-name input')) return;  // not while a name is being typed
@@ -3753,6 +3793,7 @@
           ? await apiFetch('/api/versions').then(r => r.ok ? r.json() : null).catch(() => null) : null,
       };
       renderTaps();
+      renderChanges();
       rebuildNodesStringFilter();
       renderNodesTable();
     } catch (e) {
@@ -6337,7 +6378,8 @@
       return;
     }
     meshModeButtons();
-    if (meshMode === 'strings') return renderMeshStrings(graph, nodes);
+    renderMeshDays();
+    if (meshMode === 'strings') { meshFit(); return renderMeshStrings(graph, nodes); }
     if (!document.getElementById('mesh-svg'))
       graph.innerHTML = '<svg id="mesh-svg" viewBox="0 0 760 460" role="group" aria-label="Optimizers around the TAP each reports through"></svg>';
     const svg = document.getElementById('mesh-svg');
@@ -6458,6 +6500,7 @@
     const order = { poor: 0, silent: 1, fair: 2, good: 3 };
     const keep = meshSelected && nodes.find(n => n.addr === meshSelected);
     meshSide(keep || [...nodes].sort((a, b) => order[meshTier(a)] - order[meshTier(b)])[0]);
+    meshFit();
   }
 
   // Each string on a row, its panels in label order; the row's median loss
@@ -6515,6 +6558,79 @@
     meshSide(keep || [...nodes].sort((a, b) => order[meshTier(a)] - order[meshTier(b)])[0]);
   }
 
+  // On a wide screen the map's box runs down to the window's foot, leaving
+  // the legend in view; on a phone, or by string, it takes its own height.
+  function meshFit() {
+    const graph = document.querySelector('#topology-mesh .mesh-graph');
+    const fit = meshMode !== 'strings' && window.innerWidth > 760 && !!document.getElementById('mesh-svg');
+    const stage = graph.parentElement;
+    graph.classList.toggle('fitted', fit);
+    stage.classList.toggle('fitted', fit);
+    stage.style.height = '';
+    if (!fit || document.getElementById('topology-mesh').hidden) return;
+    const legend = document.getElementById('mesh-legend');
+    const below = legend.getBoundingClientRect().bottom - stage.getBoundingClientRect().bottom;
+    const top = stage.getBoundingClientRect().top + window.scrollY;
+    stage.style.height = Math.max(380, window.innerHeight - top - below - 12) + 'px';
+  }
+  window.addEventListener('resize', () => { if (meshData) meshFit(); });
+  // And when the tab itself changes size: drawn while the page was still
+  // hidden, it has no size to fit until it's shown, and a window resize may
+  // never come.
+  if (window.ResizeObserver) {
+    let lastWidth = 0;
+    new ResizeObserver(entries => {
+      const w = Math.round(entries[0].contentRect.width);
+      if (w !== lastWidth) { lastWidth = w; if (meshData) meshFit(); }
+    }).observe(document.getElementById('topology-mesh'));
+  }
+
+  // Each string's share of reports lost, a column a day: how it fares over
+  // weeks, where the map's figures start again each midnight.
+  function renderMeshDays() {
+    const box = document.getElementById('mesh-days');
+    const days = (meshData.loss_days || []).slice(-14);
+    const names = [...new Set(days.flatMap(d => Object.keys(d.strings || {})))].sort();
+    box.hidden = !days.length || !names.length;
+    if (box.hidden) return;
+    const label = d => new Date(d + 'T12:00:00').toLocaleDateString([], { month: 'short', day: 'numeric' });
+    const cell = (c) => {
+      if (!c || !(c[0] + c[1])) return '<span class="mesh-day-cell none">—</span>';
+      const pct = 100 * c[1] / (c[0] + c[1]);
+      const tier = pct > 5 ? 'poor' : pct >= 1 ? 'fair' : 'good';
+      return `<span class="mesh-day-cell tier-${tier}" title="${c[1].toLocaleString()} of ${(c[0] + c[1]).toLocaleString()} reports lost">${pct.toFixed(1)}%</span>`;
+    };
+    box.style.setProperty('--days', days.length);
+    box.innerHTML = '<h3>Reports lost by day</h3>' +
+      `<div class="mesh-day-head"><span>String</span>${days.map(d => `<span>${label(d.date)}</span>`).join('')}</div>` +
+      names.map(name => `<div class="mesh-day-row"><span class="mesh-day-name">${meshEsc(name || 'No string')}</span>` +
+        days.map(d => cell((d.strings || {})[name])).join('') + '</div>').join('');
+  }
+
+  // An optimizer's joins of the last month, fetched when it's picked; kept a
+  // minute, as hovering picks it again and again.
+  const meshJoinCache = {};
+  async function meshJoins(n) {
+    const hit = meshJoinCache[n.addr];
+    if (hit && Date.now() - hit.at < 60000) return hit.joins;
+    const r = await apiFetch('/api/mesh/joins?addr=' + encodeURIComponent(n.addr));
+    const joins = r.ok ? (await r.json()).joins || [] : [];
+    meshJoinCache[n.addr] = { at: Date.now(), joins };
+    return joins;
+  }
+  async function meshSideJoins(n) {
+    const list = document.querySelector('#mesh-side .mesh-joins');
+    if (!list) return;
+    let joins;
+    try { joins = await meshJoins(n); } catch { return; }
+    if (meshSelected !== n.addr) return;
+    const name = a => { const m = (meshData.nodes || []).find(x => x.addr === a); return m ? m.label : a; };
+    const when = s => new Date(s * 1000).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+    list.innerHTML = joins.length ? joins.slice(0, 8).map(j => `<li><span>${when(j.unix)}</span> · ${
+      j.parent === '0001' ? 'the TAP' : j.relay ? 'via ' + meshEsc(name(j.relay)) : 'a relay not identified yet'}</li>`).join('')
+      : '<li><span>None in the last 30 days</span></li>';
+  }
+
   function meshSide(n) {
     meshSelected = n.addr;
     document.querySelectorAll('#mesh-svg .mesh-node').forEach(g => g.classList.toggle('selected', g.dataset.addr === n.addr));
@@ -6559,7 +6675,9 @@
       <div class="mesh-k">Joined through</div><div class="mesh-v mesh-via">${viaText}</div>
       ${relays.length ? `<div class="mesh-k">Relays for</div><div class="mesh-v">${relays.join(', ')}</div>` : ''}
       <div class="mesh-k">Last heard</div><div class="mesh-v">${ago(n.last_heard_s)}</div>
-      <div class="mesh-k">Last joined</div><div class="mesh-v mesh-joined">${joined}</div>`;
+      <div class="mesh-k">Last joined</div><div class="mesh-v mesh-joined">${joined}</div>
+      <div class="mesh-k">Past joins</div><ul class="mesh-joins"><li><span>…</span></li></ul>`;
+    meshSideJoins(n);
   }
 
   async function refreshTopology() {

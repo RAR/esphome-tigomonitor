@@ -117,6 +117,13 @@ UART** (`/dev/serial0`).
 For the Energy dashboard, add the **Tigo Monitor Energy** sensor under
 **Settings → Dashboards → Energy → Solar production**.
 
+Each panel also has a **Reports lost today** sensor, and each string a
+**reports lost today** sensor on the Tigo Monitor device, the same figures
+the mesh map shows, for graphs and alerts in Home Assistant.
+**Optimizer setting changes (24 h)** counts the optimizers whose settings,
+MPPT parameters or firmware changed in the last day. A CCA never drifts
+them, so any change is worth a look; the Devices page lists them.
+
 To keep the readings on MQTT without Home Assistant adding them as devices,
 for example while an ESP32 on the same bus already provides them, turn
 **Home Assistant discovery** off. Home Assistant then removes the devices the
@@ -218,7 +225,9 @@ under that ID. Until that optimizer rejoins, the line is dashed to the TAP:
 "a relay not identified yet". Joins come at sunrise and when an optimizer
 rejoins; the Pi keeps the last one across restarts. The mesh reforms each
 time, so a relay line shows where an optimizer joined last, not a fixed
-route.
+route. The side panel's **Past joins** lists the joins it made over the last
+30 days and whom each went through, so you can see which optimizers it
+leans on.
 
 **By string**, above the map, lays the same optimizers out a row per string,
 its panels in order, with each one's share of reports lost and its signal. A
@@ -228,6 +237,12 @@ joined through, or "via ?" for a relay not identified yet. The Pi remembers
 which of the two you last looked at, in this browser.
 
 <ThemedShot name="pi-mesh-strings" alt="Topology › Mesh › By string — a row per string with its median loss, and a card per optimizer with its loss, signal and the optimizer it joined through." />
+
+**Reports lost by day**, under the map, keeps each string's share of reports
+lost for every day of the last 30 (the newest 14 shown), coloured as the map
+is. The map's figures start again each midnight; this grid shows whether a
+weak string is steady, getting worse, or fixed after a change, such as
+adding a second TAP.
 
 ## Set a password
 
