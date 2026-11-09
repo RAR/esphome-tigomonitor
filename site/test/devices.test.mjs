@@ -278,7 +278,7 @@ test('Devices, on the Pi: what the TAP holds, and where to change it', async () 
     await page.waitForTimeout(300);
     assert.equal(await page.isVisible('#devices-setup-link'), shown, JSON.stringify(master.role));
     if (shown) {
-      assert.equal(await page.textContent('#devices-setup-link'), 'The TAP lists 24 optimizers, 23 joined. To replace, add or retire one, open System setup.');
+      assert.equal(await page.textContent('#devices-setup-link'), 'The TAP lists 24 optimizers, 23 joined. To replace, add, or retire an optimizer, open System setup.');
       assert.equal(await page.getAttribute('#devices-setup-link a', 'href'), '#setup');
     }
     assert.deepEqual(errors, []);

@@ -83,38 +83,38 @@ test('System setup: replace a quiet optimizer, step by step', async () => {
   const w = world();
   const { page, ctx, errors } = await open(w);
   // The quiet one is offered, and its place is what carries over.
-  assert.match(await page.textContent('.setup-note'), /A2 hasn't reported for 3 h\./);
+  assert.match(await page.textContent('.setup-note'), /A2 has not reported for 3 h\./);
   assert.match(await page.textContent('.setup-holds'), /24\s*listed/);
   await page.click('.setup-note button[data-setup-start="replace"]');
   // Step 2: the label is checked as it's typed.
   await page.waitForSelector('#setup-label');
-  assert.match(await page.textContent('.setup-rail'), /A2 coming out/);
+  assert.match(await page.textContent('.setup-rail'), /Removing A2/);
   await page.fill('#setup-label', '0-1234S');
-  assert.match(await page.textContent('#setup-label-check'), /doesn't check out/);
+  assert.match(await page.textContent('#setup-label-check'), /This label is not valid/);
   assert.equal(await page.isDisabled('button[data-setup-next]'), true);
   await page.fill('#setup-label', w.nodes[5].long_address.replace(/^04C05B(.)0*(.*)$/, '$1-$2') + 'X');
   await page.fill('#setup-label', '0-1234r');
-  assert.match(await page.textContent('#setup-label-check'), /Checks out · radio address 04C05B0000001234/);
+  assert.match(await page.textContent('#setup-label-check'), /Valid label · radio address 04C05B0000001234/);
   // Step 3: the check is a dry run, and the plan is in words.
   await page.click('button[data-setup-next]');
   await page.waitForSelector('.setup-plan');
   const plan = await page.textContent('.setup-plan');
-  assert.match(plan, /without A2's optimizer, with the new one at 0005, A2's address\. The other 23 go back as they were/);
-  assert.match(plan, /put it in A2's place: String A\./);
+  assert.match(plan, /without A2's optimizer, adding the new optimizer at 0005 \(A2's address\)\. The other 23 optimizers are written back unchanged/);
+  assert.match(plan, /Assign the new optimizer to A2's position: String A\./);
   assert.deepEqual(w.posts, [{ path: '/api/master/table/replace', old_mac: w.old.long_address, label: '0-1234r', dry_run: true }]);
   // Step 4 then 5: the real thing, then the wait.
   await page.click('button[data-setup-go]');
   await page.waitForSelector('.setup-wait');
   assert.equal(w.posts.length, 2);
   assert.equal(w.posts[1].dry_run, false);
-  assert.match(await page.textContent('.setup-wait'), /the join window is open/);
+  assert.match(await page.textContent('.setup-wait'), /join window open/);
   // It joins and takes A2's place: step 6.
   w.master.table.waiting = [];
   w.master.table.joins = [{ mac: NEW_MAC, label: '0-1234R', id: '0005', joined: true, text: 'joined at 0005', unix: now() }];
   w.nodes = w.nodes.map((n) => n.addr === '0005' ? { ...n, long_address: NEW_MAC } : n);
   w.devices = w.devices.map((d) => d.addr === '0005' ? { ...d, barcode: NEW_MAC, data_age_ms: 2000, stale: false } : d);
   await page.waitForSelector('.setup-done', { timeout: 10000 });
-  assert.match(await page.textContent('.setup-done'), /A2 is back.*Place\s*String A, named A2.*0-1234R at 0005/s);
+  assert.match(await page.textContent('.setup-done'), /A2 has been replaced.*Position\s*String A, named A2.*0-1234R at 0005/s);
   assert.deepEqual(errors, []);
   await ctx.close();
 });
@@ -122,7 +122,7 @@ test('System setup: replace a quiet optimizer, step by step', async () => {
 test('System setup: with changes off, a check still works and the button says why', async () => {
   const w = world(false);
   const { page, ctx, errors } = await open(w);
-  assert.match(await page.textContent('#setup-root'), /Changes are off/);
+  assert.match(await page.textContent('#setup-root'), /Changes are disabled/);
   await page.click('.setup-task[data-setup-start="retire"]');
   await page.click('.setup-pick input[value="' + w.old.long_address + '"]');
   w.master.table.edit = { ...w.master.table.edit };
@@ -135,9 +135,9 @@ test('System setup: with changes off, a check still works and the button says wh
   });
   await page.click('button[data-setup-next]');
   await page.waitForSelector('.setup-plan');
-  assert.match(await page.textContent('.setup-plan'), /write the other 23 back as they were/);
+  assert.match(await page.textContent('.setup-plan'), /rewrite the other 23 optimizers unchanged/);
   assert.equal(await page.isDisabled('button[data-setup-go]'), true);
-  assert.match(await page.textContent('.setup-actions .why'), /Changes are off/);
+  assert.match(await page.textContent('.setup-actions .why'), /Changes are disabled/);
   assert.deepEqual(w.posts, [{ mac: w.old.long_address, dry_run: true }]);
   assert.deepEqual(errors, []);
   await ctx.close();

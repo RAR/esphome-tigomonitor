@@ -3894,7 +3894,7 @@
     const w = m && m.discovery;
     if (!setupRunning(m) || !w || !m.discovery_read) { el.style.display = 'none'; return; }
     el.style.display = '';
-    el.innerHTML = `The TAP lists ${w.in_table} optimizers, ${w.joined} joined. To replace, add or retire one, open <a href="#setup">System setup</a>.`;
+    el.innerHTML = `The TAP lists ${w.in_table} optimizers, ${w.joined} joined. To replace, add, or retire an optimizer, open <a href="#setup">System setup</a>.`;
   }
 
   // ===== System setup =====
@@ -3907,15 +3907,15 @@
     add: ['label', 'check', 'do', 'wait', 'done'],
     retire: ['pick', 'check', 'do', 'done'],
   };
-  const SETUP_STEP_NAMES = { pick: 'Which one', label: "What's going in", check: 'Check', do: 'Do it',
-                             wait: 'Wait for it to join', done: 'Done' };
+  const SETUP_STEP_NAMES = { pick: 'Optimizer to remove', label: 'New optimizer', check: 'Review', do: 'Apply',
+                             wait: 'Wait for join', done: 'Complete' };
   const SETUP_TITLES = { replace: 'Replace an optimizer', add: 'Add an optimizer', retire: 'Retire an optimizer' };
   // The master's steps, in order, for the progress list.
   const SETUP_JOB_STEPS = {
-    add: [['reading the table', 'Read the TAP\'s list'], ['writing', 'Write the new one'], ['reading it back', 'Read it back']],
-    remove: [['reading the table', 'Read the TAP\'s list'], ['saving what stays', 'Save it, so a cut-off can be finished'],
-             ['erasing the table', 'Erase the TAP\'s list'], ['checking it\'s empty', 'Check it\'s empty'],
-             ['writing back what stays', 'Write the list back'], ['reading it back', 'Read it back']],
+    add: [['reading the table', 'Read the TAP\'s list'], ['writing', 'Write the new record'], ['reading it back', 'Verify the result']],
+    remove: [['reading the table', 'Read the TAP\'s list'], ['saving what stays', 'Save the list'],
+             ['erasing the table', 'Erase the TAP\'s list'], ['checking it\'s empty', 'Confirm it is empty'],
+             ['writing back what stays', 'Rewrite the list'], ['reading it back', 'Verify the result']],
   };
   let setup = { flow: null, data: null, timer: 0 };
 
@@ -3938,7 +3938,7 @@
     return !!(m && m.active && m.table && (m.role === 'master' || (m.role === 'standby' && m.standby && m.standby.state === 'active')));
   }
   function setupAgo(ms) {
-    if (ms === undefined || ms === null) return 'not heard';
+    if (ms === undefined || ms === null) return 'never';
     const min = Math.floor(ms / 60000);
     return min < 1 ? 'just now' : min < 60 ? `${min} min ago` : `${Math.floor(min / 60)} h ago`;
   }
@@ -3951,19 +3951,19 @@
     document.getElementById('setup-meta').textContent = w && m.discovery_read
       ? `${w.in_table} listed with the TAP · ${w.joined} joined` : '—';
     if (setup.flow) return renderSetupFlow(root);
-    let html = '<p class="setup-lede">Changes to the hardware, done the way a CCA does them. Each one checks first and tells you what it will do before anything is sent.</p>';
+    let html = '<p class="setup-lede">Make changes to the system\'s hardware the way a CCA does. Each change is checked first, and you will see exactly what it will do before anything is sent.</p>';
     if (!setupRunning(m))
-      html += '<div class="setup-note info">This Pi isn\'t running the bus, so it can\'t change the TAP\'s list. Set it to run the bus in Settings → Bus.</div>';
+      html += '<div class="setup-note info">This Pi is not running the bus, so it cannot change the TAP\'s optimizer list. To make changes, set its bus role in Settings → Bus.</div>';
     else if (!t.writes)
-      html += '<div class="setup-note info">Changes are off: turn on <strong>Let me change the TAP\'s table</strong> in Settings → Bus. You can still go through each task and see what it would do.</div>';
+      html += '<div class="setup-note info">Changes are disabled. To enable them, turn on <strong>Let me change the TAP\'s table</strong> in Settings → Bus. You can still review each task and its planned changes.</div>';
     const quiet = d.opts.filter(o => o.quiet).sort((a, b) => (b.ageMs || 0) - (a.ageMs || 0))[0];
     if (quiet)
-      html += `<div class="setup-note"><span><strong>${topoEscape(quiet.name)} hasn't reported for ${topoEscape(setupAgo(quiet.ageMs).replace(' ago', ''))}.</strong> If it's been swapped, replace it here.</span>
+      html += `<div class="setup-note"><span><strong>${topoEscape(quiet.name)} has not reported for ${topoEscape(setupAgo(quiet.ageMs).replace(' ago', ''))}.</strong> If it has been physically replaced, update the system here.</span>
         <span style="flex-grow:1"></span><button type="button" class="btn primary" data-setup-start="replace" data-setup-old="${topoEscape(quiet.mac)}">Replace ${topoEscape(quiet.name)}</button></div>`;
     html += `<div class="setup-tasks">
-      <button type="button" class="setup-task" data-setup-start="replace"><strong>Replace an optimizer</strong><span>Take a dead one out of the TAP's list, put its replacement in, and keep its place in your layout.</span></button>
-      <button type="button" class="setup-task" data-setup-start="add"><strong>Add an optimizer</strong><span>A new panel: list it with the TAP and wait for it to join, then place it in Topology.</span></button>
-      <button type="button" class="setup-task" data-setup-start="retire"><strong>Retire an optimizer</strong><span>Gone for good: take it off the TAP's list.</span></button>
+      <button type="button" class="setup-task" data-setup-start="replace"><strong>Replace an optimizer</strong><span>Remove a failed optimizer from the TAP's list, add its replacement, and keep its position in your layout.</span></button>
+      <button type="button" class="setup-task" data-setup-start="add"><strong>Add an optimizer</strong><span>Register a new optimizer with the TAP, wait for it to join, then assign it in Topology.</span></button>
+      <button type="button" class="setup-task" data-setup-start="retire"><strong>Retire an optimizer</strong><span>Permanently remove an optimizer from the TAP's list.</span></button>
     </div>`;
     if (w && m.discovery_read) {
       const never = Math.max(0, w.in_table - w.joined);
@@ -3979,9 +3979,9 @@
   function setupRail(f) {
     const steps = SETUP_STEPS[f.task], i = steps.indexOf(f.step);
     const name = s => {
-      if (s === 'pick' && f.old && steps.indexOf(s) < i) return `${f.old.name} ${f.task === 'retire' ? 'going' : 'coming out'}`;
-      if (s === 'label' && f.label && steps.indexOf(s) < i) return `${macOfLabel(f.label) ? labelOfMac(macOfLabel(f.label)) : f.label} going in`;
-      return s === 'pick' && f.task === 'retire' ? 'Which one is going' : s === 'pick' ? 'Which one is coming out' : SETUP_STEP_NAMES[s];
+      if (s === 'pick' && f.old && steps.indexOf(s) < i) return `Removing ${f.old.name}`;
+      if (s === 'label' && f.label && steps.indexOf(s) < i) return `Adding ${macOfLabel(f.label) ? labelOfMac(macOfLabel(f.label)) : f.label}`;
+      return SETUP_STEP_NAMES[s];
     };
     return `<nav class="setup-rail" aria-label="Steps"><h2>${SETUP_TITLES[f.task]}</h2><ol>${steps.map((s, k) =>
       `<li class="${k < i ? 'done' : k === i ? 'on' : ''}"${k === i ? ' aria-current="step"' : ''}><span class="n">${k < i ? '✓' : k + 1}</span>${topoEscape(name(s))}</li>`).join('')}</ol></nav>`;
@@ -3995,21 +3995,21 @@
   function setupPlan(f, e) {
     const records = (e.dry_frames || []).filter(x => x.startsWith('29')).reduce((n, x) => n + parseInt(x.slice(2, 4), 16), 0);
     if (f.task === 'add') {
-      if (/^already in the table/.test(e.message)) return { lines: [`It's on the TAP's list already (${e.message.replace(/^already in the table at /, 'at ')}). Nothing needs writing; it joins while the window is open.`], nothing: true };
-      return { lines: [`Write one record for it at ${e.id}, listed and not joined yet. Nothing is erased.`,
-                       'Keep the join window open until it joins, up to 30 minutes.',
-                       'It starts unassigned: place it in Topology once it reports.'] };
+      if (/^already in the table/.test(e.message)) return { lines: [`This optimizer is already on the TAP's list (${e.message.replace(/^already in the table at /, 'at ')}). No change is needed; it will join while the window is open.`], nothing: true };
+      return { lines: [`Add one record for the new optimizer at ${e.id}, listed but not yet joined. Nothing is erased.`,
+                       'Keep the join window open until it joins, for up to 30 minutes.',
+                       'The new optimizer starts unassigned; assign it in Topology once it reports.'] };
     }
     const others = f.task === 'replace' ? records - 1 : records;
-    const lines = ['Save the TAP\'s list first, so a cut-off can be finished later.',
+    const lines = ['Save the TAP\'s list, so the change can be completed if it is interrupted.',
       f.task === 'replace'
-        ? `Erase the TAP's list and write it back without ${f.old.name}'s optimizer, with the new one at ${e.id}, ${f.old.name}'s address. The other ${others} go back as they were; the joined ones stay joined.`
-        : `Erase the TAP's list and write the other ${others} back as they were; the joined ones stay joined.`];
+        ? `Erase the TAP's list and rewrite it without ${f.old.name}'s optimizer, adding the new optimizer at ${e.id} (${f.old.name}'s address). The other ${others} optimizers are written back unchanged; joined optimizers remain joined.`
+        : `Erase the TAP's list and rewrite the other ${others} optimizers unchanged; joined optimizers remain joined.`];
     if (f.task === 'replace') {
-      lines.push('Keep the join window open until the new one joins, up to 30 minutes.');
-      lines.push(`Then put it in ${f.old.name}'s place${f.old.string ? `: ${f.old.string}` : ''}.`);
+      lines.push('Keep the join window open until the new optimizer joins, for up to 30 minutes.');
+      lines.push(`Assign the new optimizer to ${f.old.name}'s position${f.old.string ? `: ${f.old.string}` : ''}.`);
     } else {
-      lines.push(`${f.old.name} keeps its place in your layout until you change it in Topology.`);
+      lines.push(`${f.old.name} keeps its position in your layout until you change it in Topology.`);
     }
     return { lines, gap: true };
   }
@@ -4021,41 +4021,41 @@
     const back = (label = 'Back') => `<button type="button" class="btn" data-setup-back>${label}</button>`;
     if (f.step === 'pick') {
       const opts = d.opts.slice().sort((a, b) => (b.quiet - a.quiet) || (b.placed - a.placed) || a.name.localeCompare(b.name, undefined, { numeric: true }));
-      body = `<h3>${f.task === 'retire' ? 'Which optimizer is going?' : 'Which optimizer is coming out?'}</h3>
-        <div class="sub">${f.task === 'retire' ? 'It comes off the TAP\'s list.' : 'Quiet ones first. Its place in the layout carries over to the new one.'}</div>
+      body = `<h3>Which optimizer should be removed?</h3>
+        <div class="sub">${f.task === 'retire' ? 'It will be removed from the TAP\'s optimizer list.' : 'Optimizers that have stopped reporting are listed first. The replacement takes over this optimizer\'s position in the layout.'}</div>
         <fieldset class="setup-pick" style="border:0;margin:0;padding:0"><legend class="sr-only">Optimizer</legend>${opts.map(o => `
           <label><input type="radio" name="setup-old" value="${topoEscape(o.mac)}"${f.old && f.old.mac === o.mac ? ' checked' : ''}>
             <strong>${topoEscape(o.name)}</strong><span class="dim">${o.string ? topoEscape(o.string) : 'Not placed'} · <span class="mono">${topoEscape(o.label)}</span></span>
-            <span class="${o.quiet ? 'quiet' : 'dim'}">${o.quiet ? 'Silent since ' + topoEscape(setupAgo(o.ageMs)) : 'Reporting'}</span></label>`).join('')}</fieldset>
+            <span class="${o.quiet ? 'quiet' : 'dim'}">${o.quiet ? 'Last reported ' + topoEscape(setupAgo(o.ageMs)) : 'Reporting'}</span></label>`).join('')}</fieldset>
         <div class="setup-actions">${back('Cancel')}<button type="button" class="btn primary" data-setup-next${f.old ? '' : ' disabled'}>Next</button></div>`;
     } else if (f.step === 'label') {
       const mac = macOfLabel(f.label || '');
       const listed = mac && d.opts.find(o => o.mac === mac);
       const check = !f.label ? '' : !mac
-        ? '<div class="setup-check bad">✕ That doesn\'t check out: look for a misread character (0 and D, 8 and B, 2 and Z, 5 and S).</div>'
-        : listed ? `<div class="setup-check bad">✕ That one is already on the TAP's list, as ${topoEscape(listed.name)}.</div>`
-        : `<div class="setup-check good">✓ Checks out · radio address <span class="mono">${mac}</span></div>`;
-      body = `<h3>What's going in?</h3>
-        <div class="sub">Type the label on the new optimizer, the short code like <span class="mono">4-9A57A2L</span>. It holds the whole radio address, and its last letter is a check, so a misread character is caught here.</div>
-        <div class="setup-field"><label for="setup-label">Label</label>
+        ? '<div class="setup-check bad">✕ This label is not valid. Check for misread characters (0 and D, 8 and B, 2 and Z, 5 and S).</div>'
+        : listed ? `<div class="setup-check bad">✕ This optimizer is already on the TAP's list, as ${topoEscape(listed.name)}.</div>`
+        : `<div class="setup-check good">✓ Valid label · radio address <span class="mono">${mac}</span></div>`;
+      body = `<h3>Enter the new optimizer's label</h3>
+        <div class="sub">Enter the label printed on the optimizer, for example <span class="mono">4-9A57A2L</span>. The label encodes the full radio address, and its final letter is a check character that detects misread characters.</div>
+        <div class="setup-field"><label for="setup-label">Optimizer label</label>
           <input class="input" id="setup-label" autocomplete="off" spellcheck="false" value="${topoEscape(f.label || '')}" placeholder="4-9A57A2L">
           <div id="setup-label-check">${check}</div></div>
-        <div class="setup-actions">${f.task === 'add' ? back('Cancel') : back()}<button type="button" class="btn primary" data-setup-next${mac && !listed ? '' : ' disabled'}>Check</button></div>`;
+        <div class="setup-actions">${f.task === 'add' ? back('Cancel') : back()}<button type="button" class="btn primary" data-setup-next${mac && !listed ? '' : ' disabled'}>Review</button></div>`;
     } else if (f.step === 'check') {
       const mine = e.kind && e.started_unix >= f.checkedAt && e.dry_run;
       if (!mine || !e.finished) {
-        body = '<h3>Checking…</h3><div class="sub">Reading the TAP\'s list. Nothing is sent but the read.</div>';
+        body = '<h3>Reading the TAP\'s list…</h3><div class="sub">Only a read is sent.</div>';
       } else if (!e.ok) {
-        body = `<h3>That can't be done</h3><div class="setup-error">${topoEscape(e.message)}</div><div class="setup-actions">${back()}</div>`;
+        body = `<h3>This change cannot be made</h3><div class="setup-error">${topoEscape(e.message)}</div><div class="setup-actions">${back()}</div>`;
       } else {
         const plan = setupPlan(f, e);
-        const go = f.task === 'replace' ? `Replace ${f.old.name}` : f.task === 'add' ? 'Add it' : `Retire ${f.old.name}`;
-        const why = !running ? 'This Pi isn\'t running the bus.' : !t.writes ? 'Changes are off: turn on Let me change the TAP\'s table in Settings → Bus.' : '';
-        body = `<h3>Here's what will happen</h3>
-          <div class="sub">Read just now from the TAP. Nothing has been sent yet.</div>
+        const go = f.task === 'replace' ? `Replace ${f.old.name}` : f.task === 'add' ? 'Add optimizer' : `Retire ${f.old.name}`;
+        const why = !running ? 'This Pi is not running the bus.' : !t.writes ? 'Changes are disabled. Turn on Let me change the TAP\'s table in Settings → Bus.' : '';
+        body = `<h3>Review the planned changes</h3>
+          <div class="sub">Read from the TAP just now. Nothing has been sent yet.</div>
           <ol class="setup-plan">${plan.lines.map(l => `<li>${topoEscape(l)}</li>`).join('')}</ol>
-          ${plan.gap ? '<div class="sub">Every optimizer is unjoined for under a second while the list is rewritten; on the roof that took 0.78 s, and nothing had to rejoin.</div>' : ''}
-          ${(e.dry_frames || []).length ? `<details class="setup-frames"><summary>What goes on the bus (${e.dry_frames.length} frame${e.dry_frames.length === 1 ? '' : 's'})</summary><span class="mono">${e.dry_frames.map(topoEscape).join('<br>')}</span></details>` : ''}
+          ${plan.gap ? '<div class="sub">All optimizers are briefly unjoined (under one second) while the list is rewritten. On the reference system this took 0.78 s, and no optimizer had to rejoin.</div>' : ''}
+          ${(e.dry_frames || []).length ? `<details class="setup-frames"><summary>Bus frames (${e.dry_frames.length})</summary><span class="mono">${e.dry_frames.map(topoEscape).join('<br>')}</span></details>` : ''}
           <div class="setup-actions">${back()}${plan.nothing ? '' : `<button type="button" class="btn primary" data-setup-go${why ? ' disabled' : ''}>${topoEscape(go)}</button>`}
             ${why ? `<span class="why">${topoEscape(why)}</span>` : ''}</div>`;
       }
@@ -4063,35 +4063,35 @@
       const mine = e.kind && e.started_unix >= f.startedAt && !e.dry_run;
       const list = SETUP_JOB_STEPS[f.task === 'add' ? 'add' : 'remove'];
       const at = mine ? (e.finished && e.ok ? list.length : list.findIndex(([k]) => k === e.step)) : 0;
-      body = `<h3>${f.task === 'replace' ? `Replacing ${topoEscape(f.old.name)}…` : f.task === 'add' ? 'Adding it…' : `Retiring ${topoEscape(f.old.name)}…`}</h3>
+      body = `<h3>${f.task === 'replace' ? `Replacing ${topoEscape(f.old.name)}…` : f.task === 'add' ? 'Adding the optimizer…' : `Retiring ${topoEscape(f.old.name)}…`}</h3>
         <ul class="setup-progress">${list.map(([, text], k) => `<li class="${k < at ? 'done' : k === at ? 'now' : ''}">${text}</li>`).join('')}</ul>
-        ${mine && e.finished && !e.ok ? `<div class="setup-error">${topoEscape(e.message)}${e.interrupted ? ' It will be finished from the saved list once the TAP answers again.' : ''}</div><div class="setup-actions">${back('Close')}</div>`
-          : '<div class="sub">A second or two. If it\'s cut off, by a TAP restart or this Pi, it finishes from the saved list once the TAP answers again. Leaving this page doesn\'t stop it.</div>'}`;
+        ${mine && e.finished && !e.ok ? `<div class="setup-error">${topoEscape(e.message)}${e.interrupted ? ' It will be completed from the saved list once the TAP responds.' : ''}</div><div class="setup-actions">${back('Close')}</div>`
+          : '<div class="sub">This takes a few seconds. If it is interrupted by a TAP restart or by this Pi, it will be completed from the saved list once the TAP responds. You can leave this page.</div>'}`;
     } else if (f.step === 'wait') {
       const wt = (t.waiting || []).find(x => x.mac === f.mac);
       const out = (t.joins || []).slice().reverse().find(x => x.mac === f.mac && x.unix >= f.startedAt);
       const min = wt ? Math.max(0, Math.floor((Date.now() / 1000 - wt.since_unix) / 60)) : 0;
       body = out && !out.joined
-        ? `<h3>It hasn't joined</h3><div class="sub">${topoEscape(out.text)}.</div><div class="setup-actions">${back('Close')}</div>`
-        : `<h3>Listening for the new optimizer</h3>
+        ? `<h3>The optimizer did not join</h3><div class="sub">${topoEscape(out.text)}.</div><div class="setup-actions">${back('Close')}</div>`
+        : `<h3>Waiting for the new optimizer to join</h3>
           <div class="setup-wait"><svg width="44" height="44" viewBox="0 0 44 44" aria-hidden="true"><circle cx="22" cy="22" r="18" fill="none" stroke="var(--border)" stroke-width="4"></circle><path d="M22 4 A18 18 0 0 1 39 16" fill="none" stroke="var(--warn)" stroke-width="4" stroke-linecap="round"></path></svg>
-            <div><strong>${min < 1 ? 'Just started' : `${min} min`} · the join window is open</strong>
-            <div class="sub">The TAP is ready for <span class="mono">${topoEscape(labelOfMac(f.mac))}</span>. Joins took 3½ to 10 minutes on the bench, and 8 on the roof.</div></div></div>
-          <div class="sub"><strong>Meanwhile:</strong> wire it in and give it sun; an optimizer with no PV voltage can't join. You can leave this page; it keeps waiting.</div>
-          <div class="setup-actions"><button type="button" class="btn" data-setup-stop>Stop waiting</button><span class="why">Gives up at 30 min; it stays listed and joins whenever the window is next open.</span></div>`;
+            <div><strong>${min < 1 ? 'Just started' : `${min} min`} · join window open</strong>
+            <div class="sub">The TAP is ready for <span class="mono">${topoEscape(labelOfMac(f.mac))}</span>. On the bench, joins took between 3.5 and 10 minutes; on the roof, 8 minutes.</div></div></div>
+          <div class="sub"><strong>In the meantime:</strong> connect the optimizer and make sure its panel is in sunlight; an optimizer without PV voltage cannot join. You can leave this page; the system will keep waiting.</div>
+          <div class="setup-actions"><button type="button" class="btn" data-setup-stop>Stop waiting</button><span class="why">After 30 minutes the system stops waiting. The optimizer remains listed and will join the next time the window is open.</span></div>`;
     } else if (f.step === 'done') {
       const now = f.mac && d.opts.find(o => o.mac === f.mac);
       if (f.task === 'retire') {
-        body = `<div class="setup-done"><h3>${topoEscape(f.old.name)} is off the TAP's list</h3></div>
-          <div class="sub">${topoEscape(setupJob().message || '')}. Its place in your layout stays until you change it in Topology.</div>
-          <div class="setup-actions"><a class="btn" href="#topology">Open Topology</a><button type="button" class="btn primary" data-setup-back>Done</button></div>`;
+        body = `<div class="setup-done"><h3>${topoEscape(f.old.name)} has been retired</h3></div>
+          <div class="sub">It has been removed from the TAP's list. Its position in your layout remains until you change it in Topology.</div>
+          <div class="setup-actions"><a class="btn" href="#topology">Open Topology</a><button type="button" class="btn primary" data-setup-back>Finish</button></div>`;
       } else {
-        const place = now && now.string ? `${now.string}, named ${now.name}` : f.task === 'add' ? 'Not placed yet' : 'Moving over…';
-        body = `<div class="setup-done"><h3>${f.task === 'replace' ? `${topoEscape(f.old.name)} is back` : 'It\'s in'}</h3>
-          <dl><dt>Place</dt><dd>${topoEscape(place)}</dd>
+        const place = now && now.string ? `${now.string}, named ${now.name}` : f.task === 'add' ? 'Not yet assigned' : 'Updating…';
+        body = `<div class="setup-done"><h3>${f.task === 'replace' ? `${topoEscape(f.old.name)} has been replaced` : 'Optimizer added'}</h3>
+          <dl><dt>Position</dt><dd>${topoEscape(place)}</dd>
             <dt>Optimizer</dt><dd><span class="mono">${topoEscape(labelOfMac(f.mac))}</span>${now ? ` at <span class="mono">${now.addr}</span>` : ''}</dd>
-            <dt>Reading</dt><dd>${now && now.power !== undefined ? `${(+now.vin || 0).toFixed(1)} V in · <strong>${Math.round(now.power)} W</strong>` : 'Not yet'}</dd></dl></div>
-          <div class="setup-actions">${f.task === 'add' ? '<a class="btn" href="#topology">Place it in Topology</a>' : `<button type="button" class="btn" data-setup-start="replace">Replace another</button>`}<button type="button" class="btn primary" data-setup-back>Done</button></div>`;
+            <dt>Latest reading</dt><dd>${now && now.power !== undefined ? `${(+now.vin || 0).toFixed(1)} V in · <strong>${Math.round(now.power)} W</strong>` : 'No reading yet'}</dd></dl></div>
+          <div class="setup-actions">${f.task === 'add' ? '<a class="btn" href="#topology">Assign in Topology</a>' : `<button type="button" class="btn" data-setup-start="replace">Replace another</button>`}<button type="button" class="btn primary" data-setup-back>Finish</button></div>`;
       }
     }
     root.innerHTML = `<div class="setup-flow">${setupRail(f)}<div class="setup-body">${body}</div></div>`;
