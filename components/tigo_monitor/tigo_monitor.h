@@ -23,6 +23,7 @@
 #include <new>
 #include <optional>
 
+#include "barcode_bindings.h"
 #include "tigo_history.h"
 #include "tigo_layout.h"
 #include "tigo_protocol.h"
@@ -422,10 +423,69 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
     this->power_factor_sensors_[address] = sensor; 
     ESP_LOGCONFIG("tigo_monitor", "Registered power_factor sensor for address: %s", address);
   }
-  void add_load_factor_sensor(const char *address, sensor::Sensor *sensor) { 
-    this->load_factor_sensors_[address] = sensor; 
+  void add_load_factor_sensor(const char *address, sensor::Sensor *sensor) {
+    this->load_factor_sensors_[address] = sensor;
     ESP_LOGCONFIG("tigo_monitor", "Registered load_factor sensor for address: %s", address);
   }
+
+  // Barcode-keyed registration (YAML `long_address:` instead of `address:`).
+  // A panel's short address is reassigned by the gateway at commissioning and
+  // can change wholesale on any re-commissioning, but its barcode (Frame 27's
+  // 16-char long address) never does — see tigo_node_identity.h, which already
+  // keeps CCA labels glued to the barcode for the same reason (#74). These
+  // sensors are not placed in the normal *_sensors_ maps immediately: the
+  // barcode's current address isn't known until a Frame 27 confirms it, which
+  // place_barcode_sensors_() does, moving the pointer if a later Frame 27
+  // shows the barcode at a new address.
+  void add_voltage_in_sensor_by_barcode(const char *barcode, sensor::Sensor *sensor) {
+    this->register_numeric_sensor_by_barcode_(barcode, &this->voltage_in_sensors_, sensor, "voltage_in");
+  }
+  void add_voltage_out_sensor_by_barcode(const char *barcode, sensor::Sensor *sensor) {
+    this->register_numeric_sensor_by_barcode_(barcode, &this->voltage_out_sensors_, sensor, "voltage_out");
+  }
+  void add_current_in_sensor_by_barcode(const char *barcode, sensor::Sensor *sensor) {
+    this->register_numeric_sensor_by_barcode_(barcode, &this->current_in_sensors_, sensor, "current_in");
+  }
+  void add_current_out_sensor_by_barcode(const char *barcode, sensor::Sensor *sensor) {
+    this->register_numeric_sensor_by_barcode_(barcode, &this->current_out_sensors_, sensor, "current_out");
+  }
+  void add_temperature_sensor_by_barcode(const char *barcode, sensor::Sensor *sensor) {
+    this->register_numeric_sensor_by_barcode_(barcode, &this->temperature_sensors_, sensor, "temperature");
+  }
+  void add_power_in_sensor_by_barcode(const char *barcode, sensor::Sensor *sensor) {
+    this->register_numeric_sensor_by_barcode_(barcode, &this->power_in_sensors_, sensor, "power_in");
+  }
+  void add_power_sensor_by_barcode(const char *barcode, sensor::Sensor *sensor) {
+    this->add_power_in_sensor_by_barcode(barcode, sensor);
+  }
+  void add_power_out_sensor_by_barcode(const char *barcode, sensor::Sensor *sensor) {
+    this->register_numeric_sensor_by_barcode_(barcode, &this->power_out_sensors_, sensor, "power_out");
+  }
+  void add_peak_power_sensor_by_barcode(const char *barcode, sensor::Sensor *sensor) {
+    this->register_numeric_sensor_by_barcode_(barcode, &this->peak_power_sensors_, sensor, "peak_power");
+  }
+  void add_rssi_sensor_by_barcode(const char *barcode, sensor::Sensor *sensor) {
+    this->register_numeric_sensor_by_barcode_(barcode, &this->rssi_sensors_, sensor, "rssi");
+  }
+  void add_duty_cycle_sensor_by_barcode(const char *barcode, sensor::Sensor *sensor) {
+    this->register_numeric_sensor_by_barcode_(barcode, &this->duty_cycle_sensors_, sensor, "duty_cycle");
+  }
+  void add_efficiency_sensor_by_barcode(const char *barcode, sensor::Sensor *sensor) {
+    this->register_numeric_sensor_by_barcode_(barcode, &this->efficiency_sensors_, sensor, "efficiency");
+  }
+  void add_power_factor_sensor_by_barcode(const char *barcode, sensor::Sensor *sensor) {
+    this->register_numeric_sensor_by_barcode_(barcode, &this->power_factor_sensors_, sensor, "power_factor");
+  }
+  void add_load_factor_sensor_by_barcode(const char *barcode, sensor::Sensor *sensor) {
+    this->register_numeric_sensor_by_barcode_(barcode, &this->load_factor_sensors_, sensor, "load_factor");
+  }
+  void add_barcode_sensor_by_barcode(const char *barcode, text_sensor::TextSensor *sensor) {
+    this->register_text_sensor_by_barcode_(barcode, &this->barcode_sensors_, sensor, "barcode");
+  }
+  void add_firmware_version_sensor_by_barcode(const char *barcode, text_sensor::TextSensor *sensor) {
+    this->register_text_sensor_by_barcode_(barcode, &this->firmware_version_sensors_, sensor, "firmware_version");
+  }
+
   void add_tigo_sensor(const char *address, sensor::Sensor *sensor) {
     this->power_in_sensors_[address] = sensor;
   }
@@ -665,7 +725,12 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   void process_power_frame(const frame_string &frame);
   void process_09_frame(const frame_string &frame);
   void process_27_frame(const frame_string &hex_frame, size_t offset);
-  
+
+  // Places (or moves) any barcode-registered YAML sensors onto `addr`, the
+  // short address a Frame 27 has just confirmed for `barcode`. A no-op if
+  // nothing is registered for this barcode, or it is already placed there.
+  void place_barcode_sensors_(const node_string &barcode, const node_string &addr);
+
   // Device management
   void update_device_data(const DeviceData &data);
   void publish_sensor_data();
@@ -845,6 +910,41 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   std::map<node_string, sensor::Sensor*> load_factor_sensors_;
   std::map<node_string, sensor::Sensor*> string_power_sensors_;  // key = canonical string label
 #endif
+
+  // Barcode-keyed (YAML `long_address:`) sensor registrations, placed into the
+  // maps above once a Frame 27 confirms the barcode's current short address,
+  // and moved if a later Frame 27 shows the same barcode at a new address.
+  // See add_*_sensor_by_barcode() and place_barcode_sensors_().
+  struct BarcodeNumericSensorBinding {
+    psram_map<node_string, sensor::Sensor*> *target;
+    sensor::Sensor *sensor;
+  };
+  struct BarcodeTextSensorBinding {
+    psram_map<node_string, text_sensor::TextSensor*> *target;
+    text_sensor::TextSensor *sensor;
+  };
+  psram_map<node_string, psram_vector<BarcodeNumericSensorBinding>> barcode_numeric_bindings_;
+  psram_map<node_string, psram_vector<BarcodeTextSensorBinding>> barcode_text_bindings_;
+  psram_map<node_string, node_string> barcode_sensor_addr_;  // barcode -> address currently holding its sensors
+
+  void register_numeric_sensor_by_barcode_(const node_string &barcode,
+                                            psram_map<node_string, sensor::Sensor*> *target,
+                                            sensor::Sensor *sensor, const char *kind) {
+    this->barcode_numeric_bindings_[barcode].push_back({target, sensor});
+    ESP_LOGCONFIG("tigo_monitor", "Registered %s sensor for barcode: %s (address not yet known)",
+                  kind, barcode.c_str());
+    auto addr_it = this->barcode_sensor_addr_.find(barcode);
+    if (addr_it != this->barcode_sensor_addr_.end()) (*target)[addr_it->second] = sensor;
+  }
+  void register_text_sensor_by_barcode_(const node_string &barcode,
+                                         psram_map<node_string, text_sensor::TextSensor*> *target,
+                                         text_sensor::TextSensor *sensor, const char *kind) {
+    this->barcode_text_bindings_[barcode].push_back({target, sensor});
+    ESP_LOGCONFIG("tigo_monitor", "Registered %s text sensor for barcode: %s (address not yet known)",
+                  kind, barcode.c_str());
+    auto addr_it = this->barcode_sensor_addr_.find(barcode);
+    if (addr_it != this->barcode_sensor_addr_.end()) (*target)[addr_it->second] = sensor;
+  }
   // The Topology editor's layout (tigo_layout_store.cpp). skeleton_ holds the
   // inverters, and the MPPTs and strings no node carries; layout_manual_ that
   // the user saved it, so later layouts wait for them.

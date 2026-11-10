@@ -4,7 +4,7 @@
 set -eu
 cmake -S linux -B build/linux -DCMAKE_BUILD_TYPE=RelWithDebInfo -DTIGOD_VERSION="${TIGOD_VERSION:-dev}"
 cmake --build build/linux -j"$(nproc)"
-for t in protocol_test node_identity_test cca_ble_protocol_test master_protocol_test layout_test bus_watch_test link_stats_test discovery_policy_test mesh_history_test table_edit_test; do
+for t in barcode_bindings_test protocol_test node_identity_test cca_ble_protocol_test master_protocol_test layout_test bus_watch_test link_stats_test discovery_policy_test mesh_history_test table_edit_test; do
   g++ -std=c++17 -Wall -Wextra -I components/tigo_monitor "tests/host/$t.cpp" -o "build/linux/$t"
   # To a log, not piped through tail: a pipeline's status is tail's, so a
   # failing test would leave this script, and CI, green.

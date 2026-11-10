@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Per-panel sensors can now be keyed by `long_address:` (the panel's barcode) instead of `address:`.** A panel's short address is reassigned by the gateway at commissioning and can change wholesale on any re-commissioning — the same instability that #74 fixed for CCA labels, but YAML-declared sensors still pinned themselves to `address:` and had no way to follow a renumbering. `long_address:` is mutually exclusive with `address:` on a device sensor entry; its sensors are placed once a Frame 27 confirms the barcode's current address, and re-pointed automatically if the gateway reassigns it later. Existing `address:`-based configs are unaffected.
 - **Forget a stray optimizer (Raspberry Pi).** An optimizer that once
   joined your system keeps its network key and goes on reporting through
   the TAP even after it's taken off the TAP's table, so it showed up as

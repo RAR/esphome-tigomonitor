@@ -49,6 +49,11 @@ CONF_DUTY_CYCLE = "duty_cycle"
 CONF_TEMPERATURE = "temperature"
 CONF_RSSI = "rssi"
 CONF_BARCODE = "barcode"
+# Identity key alternative to `address:`. Named after the field the firmware
+# already calls it internally (NodeTableData.long_address / Frame 27's 16-char
+# long address) rather than reusing "barcode", which is already the per-device
+# sub-sensor key above that exposes it as a text sensor.
+CONF_LONG_ADDRESS = "long_address"
 CONF_FIRMWARE_VERSION = "firmware_version"
 CONF_DEVICE_INFO = "device_info"
 CONF_EFFICIENCY = "efficiency"
@@ -169,10 +174,12 @@ def _require_device_sub_sensor(config):
     showed up in Home Assistant" (issue #48).
     """
     if not any(key in config for key in _DEVICE_SUB_SENSOR_KEYS):
+        identity = (f"address '{config[CONF_ADDRESS]}'" if CONF_ADDRESS in config
+                    else f"long_address '{config[CONF_LONG_ADDRESS]}'")
         raise cv.Invalid(
-            f"Device sensor '{config[CONF_NAME]}' (address "
-            f"'{config[CONF_ADDRESS]}') selects no measurements, so it would "
-            "create no entities. Add at least one sub-key, e.g.:\n"
+            f"Device sensor '{config[CONF_NAME]}' ({identity}) selects no "
+            "measurements, so it would create no entities. Add at least one "
+            "sub-key, e.g.:\n"
             "    power: {}\n"
             "    voltage_in: {}\n"
             "    current_in: {}\n"
@@ -182,11 +189,41 @@ def _require_device_sub_sensor(config):
     return config
 
 
+def _validate_long_address(value):
+    value = cv.string_strict(value).strip().upper()
+    if len(value) != 16 or any(c not in "0123456789ABCDEF" for c in value):
+        raise cv.Invalid(
+            f"long_address must be the panel's 16-character barcode (Frame 27's "
+            f"long address), e.g. 'AABBCCDD00112233' - got '{value}'"
+        )
+    return value
+
+
+def _require_one_identity_key(config):
+    """`address` and `long_address` are the two ways to identify a panel.
+
+    `address` is the gateway-assigned short address (4 hex chars) - it is
+    reassigned at commissioning and can change wholesale on any
+    re-commissioning. `long_address` is the panel's barcode (16 hex chars,
+    Frame 27's long address) - it never changes. Exactly one must be given;
+    see tigo_node_identity.h for why the firmware treats barcode as the
+    stable identity and address as ephemeral.
+    """
+    if (CONF_ADDRESS in config) == (CONF_LONG_ADDRESS in config):
+        raise cv.Invalid(
+            "Specify exactly one of 'address' (short, gateway-assigned, can "
+            "change on re-commissioning) or 'long_address' (the panel's "
+            "16-character barcode, stable) to identify this panel."
+        )
+    return config
+
+
 # Schema for individual device sensors
 DEVICE_CONFIG_SCHEMA = cv.All(
     cv.Schema({
         cv.GenerateID(CONF_TIGO_MONITOR_ID): cv.use_id(TigoMonitorComponent),
-        cv.Required(CONF_ADDRESS): cv.string,
+        cv.Optional(CONF_ADDRESS): cv.string,
+        cv.Optional(CONF_LONG_ADDRESS): _validate_long_address,
         cv.Required(CONF_NAME): cv.string,
         # Optional sub-device assignment. Set once here and it propagates to
         # every selected sub-sensor below (power_in, peak_power, ...). The
@@ -275,6 +312,7 @@ DEVICE_CONFIG_SCHEMA = cv.All(
             state_class=STATE_CLASS_MEASUREMENT,
         ),
     }).extend(cv.COMPONENT_SCHEMA),
+    _require_one_identity_key,
     _require_device_sub_sensor,
     _auto_template_sensor_config,
 )
@@ -489,16 +527,16 @@ def _validate_config(config):
     """Validate configuration and determine sensor type."""
     if CONF_STRING_LABEL in config:
         # Per-string aggregate sensor — keyed by CCA string label.
-        if CONF_ADDRESS in config:
+        if CONF_ADDRESS in config or CONF_LONG_ADDRESS in config:
             raise cv.Invalid(
-                "'string_label' and 'address' are mutually exclusive: use "
-                "'address' for a per-panel sensor or 'string_label' for a "
-                "per-string aggregate."
+                "'string_label' and 'address'/'long_address' are mutually "
+                "exclusive: use one of the latter two for a per-panel sensor, "
+                "or 'string_label' for a per-string aggregate."
             )
         return STRING_POWER_CONFIG_SCHEMA(config)
 
-    if CONF_ADDRESS in config:
-        # Device sensor — keyed by address.
+    if CONF_ADDRESS in config or CONF_LONG_ADDRESS in config:
+        # Device sensor — keyed by address or long_address (barcode).
         return DEVICE_CONFIG_SCHEMA(config)
 
     # Aggregate sensor — type is inferred from name keywords.
@@ -529,8 +567,9 @@ async def to_code(config):
         cg.add(hub.add_string_power_sensor(config[CONF_STRING_LABEL], sens))
         return
 
-    # Check if this is an aggregate sensor (no address) or device sensor (has address)
-    if CONF_ADDRESS not in config:
+    # Check if this is an aggregate sensor (no address/long_address) or a
+    # device sensor (has one of them)
+    if CONF_ADDRESS not in config and CONF_LONG_ADDRESS not in config:
         # Aggregate sensor — route by the same name-keyword classifier used in
         # validation, so the registered hub method always matches the schema.
         category = _classify_aggregate_sensor(config.get(CONF_NAME, ""))
@@ -553,35 +592,38 @@ async def to_code(config):
         cg.add(register(sens))
         return
     
-    # This is a device sensor configuration
-    address = config[CONF_ADDRESS]
-    
-    # Define sensor configurations with their methods
+    # This is a device sensor configuration, identified by address (ephemeral,
+    # gateway-assigned) or long_address (the panel's stable barcode).
+    by_barcode = CONF_LONG_ADDRESS in config
+    identity = config[CONF_LONG_ADDRESS] if by_barcode else config[CONF_ADDRESS]
+
+    # Define sensor configurations with their by-address and by-barcode methods
     sensor_configs = [
-        (CONF_POWER_IN, hub.add_power_in_sensor, sensor.new_sensor),
-        (CONF_POWER, hub.add_power_in_sensor, sensor.new_sensor),
-        (CONF_PEAK_POWER, hub.add_peak_power_sensor, sensor.new_sensor),
-        (CONF_POWER_OUT, hub.add_power_out_sensor, sensor.new_sensor),
-        (CONF_VOLTAGE_IN, hub.add_voltage_in_sensor, sensor.new_sensor),
-        (CONF_VOLTAGE_OUT, hub.add_voltage_out_sensor, sensor.new_sensor),
-        (CONF_CURRENT_OUT, hub.add_current_out_sensor, sensor.new_sensor),
-        (CONF_CURRENT_IN, hub.add_current_in_sensor, sensor.new_sensor),
-        (CONF_DUTY_CYCLE, hub.add_duty_cycle_sensor, sensor.new_sensor),
-        (CONF_TEMPERATURE, hub.add_temperature_sensor, sensor.new_sensor),
-        (CONF_RSSI, hub.add_rssi_sensor, sensor.new_sensor),
-        (CONF_BARCODE, hub.add_barcode_sensor, text_sensor.new_text_sensor),
-        (CONF_FIRMWARE_VERSION, hub.add_firmware_version_sensor, text_sensor.new_text_sensor),
-        (CONF_DEVICE_INFO, hub.add_device_info_sensor, text_sensor.new_text_sensor),
-        (CONF_EFFICIENCY, hub.add_efficiency_sensor, sensor.new_sensor),
-        (CONF_POWER_FACTOR, hub.add_power_factor_sensor, sensor.new_sensor),
-        (CONF_LOAD_FACTOR, hub.add_load_factor_sensor, sensor.new_sensor),
+        (CONF_POWER_IN, hub.add_power_in_sensor, hub.add_power_in_sensor_by_barcode, sensor.new_sensor),
+        (CONF_POWER, hub.add_power_in_sensor, hub.add_power_in_sensor_by_barcode, sensor.new_sensor),
+        (CONF_PEAK_POWER, hub.add_peak_power_sensor, hub.add_peak_power_sensor_by_barcode, sensor.new_sensor),
+        (CONF_POWER_OUT, hub.add_power_out_sensor, hub.add_power_out_sensor_by_barcode, sensor.new_sensor),
+        (CONF_VOLTAGE_IN, hub.add_voltage_in_sensor, hub.add_voltage_in_sensor_by_barcode, sensor.new_sensor),
+        (CONF_VOLTAGE_OUT, hub.add_voltage_out_sensor, hub.add_voltage_out_sensor_by_barcode, sensor.new_sensor),
+        (CONF_CURRENT_OUT, hub.add_current_out_sensor, hub.add_current_out_sensor_by_barcode, sensor.new_sensor),
+        (CONF_CURRENT_IN, hub.add_current_in_sensor, hub.add_current_in_sensor_by_barcode, sensor.new_sensor),
+        (CONF_DUTY_CYCLE, hub.add_duty_cycle_sensor, hub.add_duty_cycle_sensor_by_barcode, sensor.new_sensor),
+        (CONF_TEMPERATURE, hub.add_temperature_sensor, hub.add_temperature_sensor_by_barcode, sensor.new_sensor),
+        (CONF_RSSI, hub.add_rssi_sensor, hub.add_rssi_sensor_by_barcode, sensor.new_sensor),
+        (CONF_BARCODE, hub.add_barcode_sensor, hub.add_barcode_sensor_by_barcode, text_sensor.new_text_sensor),
+        (CONF_FIRMWARE_VERSION, hub.add_firmware_version_sensor, hub.add_firmware_version_sensor_by_barcode,
+         text_sensor.new_text_sensor),
+        (CONF_DEVICE_INFO, hub.add_device_info_sensor, hub.add_device_info_sensor, text_sensor.new_text_sensor),
+        (CONF_EFFICIENCY, hub.add_efficiency_sensor, hub.add_efficiency_sensor_by_barcode, sensor.new_sensor),
+        (CONF_POWER_FACTOR, hub.add_power_factor_sensor, hub.add_power_factor_sensor_by_barcode, sensor.new_sensor),
+        (CONF_LOAD_FACTOR, hub.add_load_factor_sensor, hub.add_load_factor_sensor_by_barcode, sensor.new_sensor),
     ]
-    
+
     # Process each configured sensor type (auto-templating already done in validation)
-    for conf_key, add_method, new_sensor_method in sensor_configs:
+    for conf_key, add_method, add_method_by_barcode, new_sensor_method in sensor_configs:
         if conf_key in config:
             sensor_config = config[conf_key]
             # Create the sensor object from the config
             sens = await new_sensor_method(sensor_config)
             # Register sensor with the hub using cg.add() to generate C++ code
-            cg.add(add_method(address, sens))
+            cg.add((add_method_by_barcode if by_barcode else add_method)(identity, sens))
