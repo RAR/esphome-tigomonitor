@@ -67,6 +67,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The sidebar is grouped: Monitor, Inspect and Control.** The pages that
+  change something (Settings, and on the Pi System setup and Bus control)
+  now sit together at the bottom, apart from the ones you only read. The Bus
+  page's two tabs are now two sidebar items: **Bus traffic** under Inspect,
+  **Bus control** under Control.
 - **The mesh map fills the window (Raspberry Pi).** On a wide screen the
   radio map's box runs down to the foot of the window, with the legend
   still in view, and the side panel scrolls within it.
