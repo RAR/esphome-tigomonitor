@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Forget a stray optimizer (Raspberry Pi).** An optimizer that once
+  joined your system keeps its network key and goes on reporting through
+  the TAP even after it's taken off the TAP's table, so it showed up as
+  an unassigned panel on the Dashboard and the mesh map but nowhere on
+  Devices. Devices now lists such optimizers under **Heard, not in the
+  node list**, with **Forget** to drop one; it comes back only if it
+  reports again. Unplugging it, or moving it out of range, is what stops
+  it reporting.
 - **Replace, add or retire an optimizer without a CCA (Raspberry Pi,
   opt-in).** A new **System setup** page walks you through it: pick the one
   coming out (quiet ones first), type the new one's printed label (its check

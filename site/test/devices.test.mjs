@@ -24,7 +24,7 @@ before(async () => {
 });
 after(async () => { await browser.close(); server.close(); });
 
-async function open(linux, versions = routes['/api/versions'], posts = [], master = { role: 'listen', active: false }) {
+async function open(linux, versions = routes['/api/versions'], posts = [], master = { role: 'listen', active: false }, devices = null) {
   const ctx = await browser.newContext({ viewport: { width: 1400, height: 1200 } });
   await ctx.route('**/api/**', async (route) => {
     const path = new URL(route.request().url()).pathname.replace(/^.*(\/api\/)/, '$1');
@@ -52,6 +52,13 @@ async function open(linux, versions = routes['/api/versions'], posts = [], maste
       return json(200, { started: true, dry_run: b.dry_run });
     }
     if (path === '/api/master') return json(200, master);
+    if (path === '/api/devices' && devices) return json(200, { devices, count: devices.length });
+    if (path === '/api/nodes/delete' && route.request().method() === 'POST') {
+      const addr = new URL(route.request().url()).searchParams.get('addr');
+      posts.push({ path, addr });
+      if (devices) devices = devices.filter((d) => d.addr !== addr);
+      return json(200, { status: 'ok' });
+    }
     if (path === '/api/bus') return json(200, { alarm: { active: false }, stats: {}, exchanges: [] });
     if (routes[path] !== undefined) return json(200, routes[path]);
     return route.fulfill({ status: 404, body: 'no fixture' });
@@ -174,6 +181,40 @@ test("Devices, on the Pi: a Settings cell opens that optimizer's settings, named
   assert.deepEqual(errors, []);
   await ctx.close();
 });
+
+// An optimizer the Pi hears (or heard) that isn't in its node list: a spare
+// that still has the network's key reports through the TAP whatever the
+// TAP's table says (owner's analysis, 2026-11-10). It is listed apart, and
+// Forget drops it from the Dashboard and the mesh map.
+const stray = { addr: '0080', barcode: '04C05B0000200001', name: '', string_label: '', power: 0, power_in: 0,
+  voltage_in: 0, data_age_ms: 3 * 3600 * 1000, stale: true };
+test('Devices, on the Pi: an optimizer heard but not in the node list, and Forget', async () => {
+  const posts = [];
+  const { page, ctx, errors } = await open(true, routes['/api/versions'], posts, undefined, [...routes['/api/devices'].devices, stray]);
+  page.on('dialog', (d) => d.accept());
+  await page.waitForSelector('#devices-strays', { state: 'visible' });
+  const row = await page.textContent('#devices-strays tbody');
+  assert.match(row, /0080/);
+  assert.match(row, /no data for 3h/);
+  assert.equal(await page.locator('#nodes-tbody tr[data-addr="0080"]').count(), 0);
+  await page.click('#devices-strays button.stray-forget');
+  await page.waitForSelector('#devices-strays', { state: 'hidden' });
+  assert.deepEqual(posts.filter((p) => p.path === '/api/nodes/delete'), [{ path: '/api/nodes/delete', addr: '0080' }]);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test('Devices: no stray list when every optimizer is in the node list, or on the ESP32', async () => {
+  const pi = await open(true);
+  await page_settled(pi.page);
+  assert.equal(await pi.page.isVisible('#devices-strays'), false);
+  await pi.ctx.close();
+  const esp = await open(false, undefined, [], undefined, [...routes['/api/devices'].devices, stray]);
+  await page_settled(esp.page);
+  assert.equal(await esp.page.isVisible('#devices-strays'), false);
+  await esp.ctx.close();
+});
+async function page_settled(page) { await page.waitForTimeout(500); }
 
 test('Devices, on the Pi with no TAP version heard yet, says where it comes from', async () => {
   const { page, ctx, errors } = await open(true, { taps: [], optimizers: [] });
