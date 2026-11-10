@@ -354,12 +354,19 @@ static void test_tap_reconfiguring_frames_are_never_sent() {
   CHECK(SUB_ERASE_FLASH == 0x2B);
   // The CCA's other messages to an optimizer besides SetPgw (0x41): Own star,
   // Ignore star, Kick (evicts a node its TAP doesn't list), firmware request
-  // and delivery, and Blacklist (makes a node forget a network for good). In
-  // none of our captures (owner's analysis, 2026-11-10).
+  // (0x45) and firmware delivery (0x46), and 0x47 beside them. In none of our
+  // captures (owner's analysis, 2026-11-10).
   for (uint8_t sub = 0x42; sub <= 0x47; sub++)
     for (const Bytes &args : {Bytes{}, Bytes{0x00, 0x02}, Bytes{0x00, 0x02, 0x80, 0x00}})
       CHECK(never_anywhere(CMD_TUNNEL, tunnel_request(sub, 1, args)));
   CHECK(classify_request(CMD_TUNNEL, tunnel_request(0x40, 1, {})) == Allow::bench_only);
+  // An optimizer's own Leave command makes it leave its network (owner's
+  // analysis, 2026-11-10): never, in any of the text forms the CCA uses.
+  for (const char *t : {"Leave", "Leave\r", "!Leave", "^00Leave", "^00Leave\r", "#Leave"}) {
+    Bytes a = {0x00, 0x1c};
+    a.insert(a.end(), t, t + strlen(t));
+    CHECK(never_anywhere(CMD_TUNNEL, tunnel_request(0x06, 1, a)));
+  }
   CHECK(classify_request(CMD_TUNNEL, tunnel_request(0x48, 1, {})) == Allow::bench_only);
   // Neighbours stay as they were: the reads around them are bench-only.
   CHECK(classify_request(0x000B, {}) == Allow::bench_only);

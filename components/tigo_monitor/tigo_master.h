@@ -1750,8 +1750,8 @@ inline Allow classify_request(uint16_t cmd, const Bytes &payload) {
     case 0x1B:  // unnamed in the CCA's UI; its neighbours are all writes
     // The CCA's other messages to an optimizer besides SetPgw (0x41): Own star,
     // Ignore star, Kick (evicts a node its TAP doesn't list), firmware request
-    // and delivery, and Blacklist (makes a node forget a network for good). In
-    // none of our captures (owner's analysis, 2026-11-10).
+    // (0x45) and firmware delivery (0x46), and 0x47 beside them. In none of our
+    // captures (owner's analysis, 2026-11-10).
     case 0x42:
     case 0x43:
     case 0x44:
@@ -1783,6 +1783,9 @@ inline Allow classify_request(uint16_t cmd, const Bytes &payload) {
       // proves nothing for these.
       if (text.rfind("#", 0) == 0 || (text.rfind("^", 0) == 0 && text.find('_') != std::string::npos))
         return Allow::never;
+      // The optimizer's own Leave command: it leaves its network (owner's
+      // analysis, 2026-11-10). No CCA flow sends it.
+      if (text.find("Leave") != std::string::npos) return Allow::never;
       return Allow::bench_only;
     }
     case 0x0D:  // GatewayCfg. The bring-up's pair of reads, 00 00 then 00 01.
