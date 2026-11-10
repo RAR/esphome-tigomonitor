@@ -1493,6 +1493,18 @@
             <tbody></tbody>
           </table>
         </div>
+        <!-- Heard, but not in the node list: a spare that still has the
+             network's key reports through the TAP whatever its table says. -->
+        <div id="devices-strays" style="display:none">
+          <div class="section-title devices-head">Heard, not in the node list</div>
+          <p class="hint">These optimizers report through the TAP but aren't in the node list: a spare that was on this system before, or one from a neighbour's. Taking one off the TAP's table doesn't stop it; only unplugging it, or moving it out of range, does. Forget takes it off the Dashboard and the mesh map, until it next reports.</p>
+          <div class="table-wrap">
+            <table class="nodes">
+              <thead><tr><th>Label</th><th>Addr</th><th>Last heard</th><th></th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
         <div class="section-title devices-head">Optimizers</div>
       </div>
 
@@ -3962,6 +3974,38 @@
     return h[6] + '-' + h.slice(7).replace(/^0+/, '') + labelCheck(h);
   }
 
+  // Pi build: optimizers heard (/api/devices) that the node list doesn't
+  // have, matched as the table matches them, by MAC then address. Only the
+  // Pi's delete drops a panel that isn't in the node list.
+  function renderStrays() {
+    const box = document.getElementById('devices-strays');
+    const nodes = nodesData.nodes || [];
+    const known = new Set(nodes.flatMap(n => [n.addr, n.long_address].filter(Boolean)));
+    const strays = PLATFORM === 'linux'
+      ? (nodesData.devices || []).filter(d => !known.has(d.addr) && !(d.barcode && known.has(d.barcode))) : [];
+    box.style.display = strays.length ? '' : 'none';
+    box.querySelector('tbody').innerHTML = strays.map(d => {
+      const label = d.barcode ? labelOfMac(d.barcode) || d.barcode : '—';
+      const heard = d.stale ? `no data for ${fmtAge(d.data_age_ms)}` : 'reporting now';
+      return `<tr><td class="mono" title="${topoEscape(d.barcode || '')}">${topoEscape(label)}</td><td class="mono">${topoEscape(d.addr)}</td>
+        <td>${heard}</td><td><button type="button" class="btn stray-forget" data-addr="${topoEscape(d.addr)}">Forget</button></td></tr>`;
+    }).join('');
+  }
+  document.getElementById('devices-strays').addEventListener('click', async e => {
+    const b = e.target.closest('button.stray-forget');
+    if (!b) return;
+    const addr = b.dataset.addr;
+    if (!confirm(`Forget optimizer ${addr}? It leaves the Dashboard and the mesh map. If it reports again, it comes back.`)) return;
+    b.disabled = true;
+    try {
+      const r = await apiFetch(`/api/nodes/delete?addr=${encodeURIComponent(addr)}`, { method: 'POST' });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      await refreshNodes();
+    } catch (err) {
+      b.disabled = false;
+      b.textContent = 'Forget failed: ' + err.message;
+    }
+  });
   // What the TAPs hold: one TAP's window, or with several, theirs summed
   // (those read so far). null until one is read.
   function setupCounts(m) {
@@ -4408,6 +4452,7 @@
           ? await apiFetch('/api/versions').then(r => r.ok ? r.json() : null).catch(() => null) : null,
       };
       renderTaps();
+      renderStrays();
       renderChanges();
       refreshSetupLink();
       rebuildNodesStringFilter();

@@ -23,7 +23,7 @@ setup and Bus control).
 | **Dashboard** | The main view. A coloured tile per panel, grouped by string, so an underperforming panel stands out at a glance. Click any tile for that panel's detail and history. |
 | **History** | Charts of power and energy over the day, week, month or year. Only present if you enabled [history storage](/esphome-tigomonitor/guides/tsdb-integration/). |
 | **Topology** | Your array laid out as inverter → string → panel, with live readings. This is where you rename things, enter panel ratings, and lay the array out by hand. |
-| **Devices** | The raw list of every panel the device has ever seen. You can export it to a file as a backup. On the Raspberry Pi build it also lists the TAP, and each optimizer's and the TAP's firmware as heard on the bus. |
+| **Devices** | The raw list of every panel the device has ever seen. You can export it to a file as a backup. On the Raspberry Pi build it also lists the TAP, each optimizer's and the TAP's firmware as heard on the bus, and any optimizer heard that isn't in the node list, such as a spare that still has your network's key, with **Forget** to take it off the Dashboard. |
 | **Settings** | Change settings, generate config, reset counters, restart the device. One tab per area; on the Raspberry Pi build, Bus, MQTT, Inverters and Web UI too. |
 | **Diagnostics** | Is it healthy? Memory, WiFi signal, how many messages it's missing. On the Raspberry Pi build, its Logs tab shows the service's log. |
 | **Bus traffic** | Raspberry Pi build only. Each request on the bus with its reply, how long the reply took and what it means, under a strip of the last 5 minutes, filtered by kind. A banner says if another device reconfigures the TAP. |

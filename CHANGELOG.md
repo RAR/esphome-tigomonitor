@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Forget a stray optimizer (Raspberry Pi).** An optimizer that once
+  joined your system keeps its network key and goes on reporting through
+  the TAP even after it's taken off the TAP's table, so it showed up as
+  an unassigned panel on the Dashboard and the mesh map but nowhere on
+  Devices. Devices now lists such optimizers under **Heard, not in the
+  node list**, with **Forget** to drop one; it comes back only if it
+  reports again. Unplugging it, or moving it out of range, is what stops
+  it reporting.
 - **More than one TAP on one Pi (Raspberry Pi, experimental).** Running the
   bus, the Pi now polls every TAP it knows in turn, as the CCA does, each
   with its own join window, housekeeping and optimizer table. One TAP that
