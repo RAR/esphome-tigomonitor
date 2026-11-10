@@ -13,8 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   joined your system keeps its network key and goes on reporting through
   the TAP even after it's taken off the TAP's table, so it showed up as
   an unassigned panel on the Dashboard and the mesh map but nowhere on
-  Devices. Devices now lists such optimizers under **Heard, not in the
-  node list**, with **Forget** to drop one; it comes back only if it
+  Devices. Devices now lists such optimizers under **Heard, not on the
+  TAP's list**, with **Forget** to clear one; it comes back only if it
   reports again. Unplugging it, or moving it out of range, is what stops
   it reporting.
 - **More than one TAP on one Pi (Raspberry Pi, experimental).** Running the
@@ -89,6 +89,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Optimizers the TAP doesn't list stay off the Dashboard and the mesh map
+  (Raspberry Pi).** A spare that once joined keeps the network's key and
+  goes on reporting, so it turned up as a panel, and its silence as an
+  alert. Like the CCA's aliens, an optimizer with no node row, or whose
+  row the TAP's table walks haven't listed for a day, is now listed only on
+  Devices, under **Heard, not on the TAP's list**. An unassigned optimizer
+  the TAP does list, such as one just added, still shows.
 - **Devices names each TAP's series, and flags a star-only one (Raspberry
   Pi).** The TAP list's Model column said "Mgate" for every TAP; it now says
   "H series · mesh" or "G series · mesh", read from the TAP's version as the
@@ -117,6 +124,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A stray optimizer no longer reads as a string down (Raspberry Pi).**
+  A spare that once joined the system and was then switched off sat alone
+  in the "All panels" group, the panels no string claims, and the
+  Dashboard reported "All panels () — no production while the rest of the
+  system is producing", as if a whole string had tripped. That group isn't
+  a string, so it no longer raises that alert; its panels still show as
+  stale.
 - **The Mesh map names most relays now (Raspberry Pi).** An optimizer's
   join names its parent by mesh ID, a different number from the
   optimizer's address. The Pi read the wrong field as the mesh ID and
