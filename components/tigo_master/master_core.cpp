@@ -139,6 +139,178 @@ void MasterCore::set_window_wanted(bool wanted, int missing) {
                                                        : "every optimizer reported today, letting the window close");
 }
 
+// Under mu_: why a change to the table can't start now, or "".
+bool MasterCore::table_refusal_(bool dry_run, std::string &why) const {
+  if (status_.standby == Standby::standing_by || status_.standby == Standby::taking_over)
+    why = "this monitor is standing by; only the master running the bus can change the TAP's table";
+  else if (table_job_running_)
+    why = status_.table_edit.interrupted ? "an interrupted removal is waiting to be finished"
+                                         : "a change to the table is already running";
+  else if (!dry_run && !table_writes_on_)
+    why = "table writes are off (master_table_writes); a dry run still works";
+  else if (!dry_run && pv_state_.off)
+    why = "PV output is held off; turn it back on first";
+  else
+    why.clear();
+  return !why.empty();
+}
+
+// Under mu_.
+void MasterCore::start_table_job_(std::unique_ptr<master::TableJob> job) {
+  status_.table_edit = TableEditStatus();
+  status_.table_edit.kind = job->kind();
+  status_.table_edit.active = true;
+  status_.table_edit.dry_run = job->dry_run();
+  status_.table_edit.mac = master::mac_hex(job->mac());
+  status_.table_edit.step = job->step_text();
+  status_.table_edit.started_unix = unix_now();
+  table_job_pending_ = std::move(job);
+  table_job_running_ = true;
+}
+
+bool MasterCore::request_table_add(const master::Bytes &mac, uint16_t id, bool dry_run, std::string &why) {
+  std::lock_guard<std::mutex> lock(mu_);
+  if (table_refusal_(dry_run, why)) return false;
+  if (mac.size() != 8) {
+    why = "a MAC is 8 bytes";
+    return false;
+  }
+  if (!dry_run && !discovery_renewing_) {
+    why = "the discovery window is held closed; the optimizer could never join";
+    return false;
+  }
+  start_table_job_(std::make_unique<master::TableAdd>(mac, id, dry_run));
+  return true;
+}
+
+bool MasterCore::request_table_remove(const master::Bytes &mac, bool dry_run, std::string &why) {
+  std::lock_guard<std::mutex> lock(mu_);
+  if (table_refusal_(dry_run, why)) return false;
+  if (mac.size() != 8) {
+    why = "a MAC is 8 bytes";
+    return false;
+  }
+  if (!dry_run && !table_saved_) {
+    why = "nowhere to save the optimizers that stay, so nothing is erased";
+    return false;
+  }
+  start_table_job_(std::make_unique<master::TableRemove>(mac, dry_run));
+  return true;
+}
+
+void MasterCore::set_table_saved(TableSaved saved, const master::Bytes &resume_mac,
+                                 const std::vector<master::TableRecord> *resume) {
+  std::lock_guard<std::mutex> lock(mu_);
+  table_saved_ = std::move(saved);
+  if (!resume) return;
+  if (!table_writes_on_) {
+    // Nothing is sent; the Devices page says so, and a new change is refused.
+    status_.table_edit = TableEditStatus();
+    status_.table_edit.kind = "remove";
+    status_.table_edit.mac = master::mac_hex(resume_mac);
+    status_.table_edit.interrupted = true;
+    status_.table_edit.step = "interrupted";
+    status_.table_edit.message =
+        "a removal stopped before writing back the optimizers that stay; turn table writes on to finish it";
+    table_job_running_ = true;
+    LOGE("bus master: table: %s", status_.table_edit.message.c_str());
+    return;
+  }
+  LOGW("bus master: table: finishing a removal that stopped before writing back the %zu optimizers that stay",
+       resume->size());
+  start_table_job_(std::make_unique<master::TableRemove>(resume_mac, false, resume));
+}
+
+bool MasterCore::request_table_stop_waiting(const master::Bytes &mac) {
+  std::lock_guard<std::mutex> lock(mu_);
+  bool waited = false;
+  for (const auto &w : status_.table_waiting) waited = waited || w.mac == master::mac_hex(mac);
+  if (waited) stop_waiting_.push_back(mac);
+  return waited;
+}
+
+// Tick thread; takes mu_.
+void MasterCore::sync_join_status_() {
+  auto outcomes = join_watch_.take_outcomes();
+  for (const auto &o : outcomes) {
+    LOGI("bus master: table: %04X %s", o.id, o.text.c_str());
+    waiting_since_.erase(master::mac_hex(o.mac));
+  }
+  std::lock_guard<std::mutex> lock(mu_);
+  for (const auto &o : outcomes) {
+    auto &j = status_.table_joins;
+    if (j.size() == MasterStatus::TABLE_JOINS_KEPT) j.erase(j.begin());
+    j.push_back({master::mac_hex(o.mac), o.id, o.joined, o.text, unix_now()});
+  }
+  status_.table_waiting.clear();
+  for (const auto &w : join_watch_.waiting()) {
+    std::string mac = master::mac_hex(w.mac);
+    status_.table_waiting.push_back({mac, w.id, waiting_since_.count(mac) ? waiting_since_[mac] : 0});
+  }
+}
+
+void MasterCore::settle_table_job_(uint32_t now_ms) {
+  if (!table_job_) return;
+  // A removal's list of what stays, saved before its erase.
+  if (table_job_->wants_save()) {
+    bool ok = table_saved_ && table_saved_(table_job_->mac(), &table_job_->survivors());
+    if (ok) LOGI("bus master: table: saved the %zu optimizers that stay; erasing", table_job_->survivors().size());
+    table_job_->saved(ok);
+  }
+  bool done = table_job_->finished();
+  sync_table_status_(done);
+  if (!done) return;
+  bool add = std::string(table_job_->kind()) == "add";
+  if (!add && !table_job_->dry_run() && !table_job_->keep_saved() && table_saved_) table_saved_(table_job_->mac(), nullptr);
+  // An add listed and not joined goes on the watch; a removal takes it off.
+  if (add && table_job_->ok() && static_cast<master::TableAdd *>(table_job_.get())->awaiting_join()) {
+    join_watch_.add(table_job_->mac(), table_job_->id(), now_ms);
+    waiting_since_[master::mac_hex(table_job_->mac())] = unix_now();
+  }
+  if (!add && table_job_->ok() && !table_job_->dry_run()) {
+    join_watch_.drop(table_job_->mac());
+    waiting_since_.erase(master::mac_hex(table_job_->mac()));
+  }
+  sync_join_status_();
+  if (!add && table_job_->keep_saved()) {
+    // Held until it is finished: no other change in between.
+    resume_mac_ = table_job_->mac();
+    resume_stay_ = table_job_->survivors();
+    resume_waiting_ = true;
+    resume_at_ms_ = now_ms + RESUME_AFTER_MS;
+    std::lock_guard<std::mutex> lock(mu_);
+    table_job_running_ = true;
+    LOGW("bus master: table: will finish the removal once the TAP has answered for %u s",
+         static_cast<unsigned>(RESUME_AFTER_MS / 1000));
+  }
+  if (table_job_->ok())
+    LOGI("bus master: table: %s", table_job_->message().c_str());
+  else
+    LOGW("bus master: table: the %s stopped: %s", add ? "add" : "removal", table_job_->message().c_str());
+  table_job_.reset();
+}
+
+// Under no lock; takes mu_.
+void MasterCore::sync_table_status_(bool finished_now) {
+  if (!table_job_) return;
+  std::lock_guard<std::mutex> lock(mu_);
+  TableEditStatus &t = status_.table_edit;
+  t.id = table_job_->id();
+  t.ack = table_job_->ack();
+  t.step = table_job_->step_text();
+  t.message = table_job_->message();
+  t.dry_frames.clear();
+  for (const auto &f : table_job_->dry_frames()) t.dry_frames.push_back(master::mac_hex(f));
+  if (finished_now) {
+    t.active = false;
+    t.finished = true;
+    t.ok = table_job_->ok();
+    t.interrupted = !t.ok && table_job_->keep_saved();
+    t.finished_unix = unix_now();
+    table_job_running_ = false;
+  }
+}
+
 void MasterCore::set_discovery(bool renew, DiscoverySaved saved) {
   {
     std::lock_guard<std::mutex> lock(mu_);
@@ -192,7 +364,14 @@ bool MasterCore::open() {
   if (startup_) phase_ = Phase::probing;
   LOGI("bus master on %s for gateway %04X%s", port_->name().c_str(), gateway_, bench_ ? " (bench mode)" : "");
   std::lock_guard<std::mutex> lock(mu_);
+  // A change to the table, and the joins waited for, go on across a reopen.
+  TableEditStatus table_edit = status_.table_edit;
+  auto waiting = status_.table_waiting;
+  auto joins = status_.table_joins;
   status_ = MasterStatus{};
+  status_.table_edit = table_edit;
+  status_.table_waiting = waiting;
+  status_.table_joins = joins;
   status_.active = true;
   status_.pv = pv_state_;
   status_.discovery_renewing = discovery_renewing_;
@@ -225,6 +404,7 @@ std::map<uint16_t, master::Queries::Setup> MasterCore::setups() const {
 MasterStatus MasterCore::status() const {
   std::lock_guard<std::mutex> lock(mu_);
   MasterStatus m = status_;
+  m.table_writes = table_writes_on_;
   int64_t heard = heard_at_ms_;
   if (m.standby == Standby::standing_by || m.standby == Standby::taking_over)
     m.master_heard_ms_ago = heard >= 0 ? steady_ms() - heard : -1;
@@ -476,13 +656,58 @@ void MasterCore::tick_(uint32_t now_ms) {
     housekeeping_->set_targets(t);
     targets_at_ms_ = now_ms;
   }
+  std::vector<master::Bytes> stops;  // the owner's "stop waiting"s, taken under mu_
   {
     std::lock_guard<std::mutex> lock(mu_);
-    window_.set_renewing(discovery_renewing_ && window_wanted_);
+    // A removal cut off by a TAP restart, once the TAP has answered steadily.
+    if (resume_waiting_ && !table_job_ && !table_job_pending_) {
+      if (timeouts_in_a_row_ || refusals_in_a_row_) resume_at_ms_ = now_ms + RESUME_AFTER_MS;
+      if (table_writes_on_ && static_cast<int32_t>(now_ms - resume_at_ms_) >= 0) {
+        resume_waiting_ = false;
+        LOGW("bus master: table: finishing the removal that was cut off, writing back the %zu optimizers that stay",
+             resume_stay_.size());
+        start_table_job_(std::make_unique<master::TableRemove>(resume_mac_, false, &resume_stay_));
+      }
+    }
+    stops.swap(stop_waiting_);
+    if (table_job_pending_ && !table_job_) {
+      table_job_ = std::move(table_job_pending_);
+      join_watch_.pause();  // its read would straddle the change
+      bool add = std::string(table_job_->kind()) == "add";
+      LOGI("bus master: table: %s%s an optimizer", table_job_->dry_run() ? "a dry run of " : "", add ? "adding" : "removing");
+    }
+    // An add waiting for its optimizer to join holds the window open, as
+    // the CCA opened it after its write; the owner's switch still wins.
+    window_.set_renewing(discovery_renewing_ && (window_wanted_ || join_watch_.wants_window()));
   }
   if (refusals_in_a_row_ >= NO_REPLY_FAULT_AFTER && now_ms - refused_at_ms_ < REFUSED_RETRY_MS) return;
-  master::Request req =
-      master::next_request(window_, cursor_, seq_, now_ms, housekeeping_.get(), queries_.get(), pv_.get());
+  if (!stops.empty()) {
+    for (const auto &mac : stops)
+      if (join_watch_.drop(mac)) {
+        waiting_since_.erase(master::mac_hex(mac));
+        LOGI("bus master: table: no longer waiting for an optimizer to join; it stays listed");
+      }
+    sync_join_status_();
+  }
+  // A change to the table first, else the join watch's reads.
+  struct TableSources : master::RequestSource {
+    master::TableJob *job;
+    master::JoinWatch *watch;
+    bool from_watch = false;
+    master::Request due(uint32_t now, uint8_t &seq) override {
+      if (job) return job->due(now, seq);
+      master::Request r = watch->due(now, seq);
+      from_watch = r.cmd != 0;
+      return r;
+    }
+  } table_sources;
+  table_sources.job = table_job_.get();
+  table_sources.watch = &join_watch_;
+  size_t waiting_before = join_watch_.waiting().size();
+  master::Request req = master::next_request(window_, cursor_, seq_, now_ms, housekeeping_.get(), queries_.get(),
+                                             pv_.get(), &table_sources);
+  if (join_watch_.waiting().size() != waiting_before) sync_join_status_();  // given up on in due()
+  settle_table_job_(now_ms);  // a dry run ends in due(), and a removal saves there
   // Bring-up frames are allowed only straight after a re-address, but for
   // the one GatewayCfg read the owner asked for (set_read_tap_config).
   bool bring_up = req.bring_up && (readdressed_ || (read_tap_config_ && master::is_config_read(req.cmd, req.payload)));
@@ -500,7 +725,8 @@ void MasterCore::tick_(uint32_t now_ms) {
     status_.sent_writes = queries_->sent_writes();
     status_.answers = queries_->answers();
   }
-  if (!master::may_send(req.cmd, req.payload, bench_, bring_up, writes_on_, pv_->off())) {
+  if (!master::may_send(req.cmd, req.payload, bench_, bring_up, writes_on_, pv_->off(),
+                        req.table_edit && table_writes_on_)) {
     set_fault(Fault::refused, "refused to send command " + std::to_string(req.cmd));
     return;
   }
@@ -508,7 +734,21 @@ void MasterCore::tick_(uint32_t now_ms) {
   bool ok = transact(gateway_, req.cmd, req.payload, reply, req.wait_ms ? req.wait_ms : REPLY_TIMEOUT_MS);
   if (master::is_config_read(req.cmd, req.payload)) config_read_sent_ = true;
   if (status().fault == Fault::second_master || standing_by_()) return;
-  if (housekeeping_) housekeeping_->on_reply(req, ok, reply);
+  if (housekeeping_ && !req.table_edit) housekeeping_->on_reply(req, ok, reply);
+  if (req.table_edit && table_sources.from_watch) {
+    join_watch_.on_reply(ok, reply, now_ms);
+    sync_join_status_();
+  } else if (table_job_ && req.table_edit) {
+    table_job_->on_reply(req, ok, reply, now_ms);
+    uint8_t sub = req.payload.size() > 3 ? req.payload[3] : 0;
+    int ack = table_job_->ack();
+    if (sub == 0x29 && req.payload.size() > 5)
+      LOGW("bus master: table: wrote %u record%s to the TAP's table (%s)", static_cast<unsigned>(req.payload[5]),
+           req.payload[5] == 1 ? "" : "s", ack < 0 ? "no ack; reading it back" : master::set_table_ack_text(ack));
+    if (sub == master::SUB_ERASE_FLASH)
+      LOGW("bus master: table: erased the TAP's table (%s)", ack < 0 ? "no ack; reading it back" : ack == 0 ? "done" : "refused");
+    settle_table_job_(now_ms);
+  }
   if (req.cmd == master::CMD_SESSION) {
     pv_->on_reply(req, ok, reply, now_ms);
     sync_pv_status_();

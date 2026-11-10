@@ -34,7 +34,9 @@ It also plays the rest of the CCA's dialogue, as the roof TAP answered it:
 a SET_ID_BY_MAC away from the id the TAP was first given, then a RESET
 broadcast, brings it back at that first id after ~5 s of silence; VERSION,
 0x0E02 and tunnel 0x0D get fixed (invented) replies; tunnel 0x22 is acked;
-tunnel 0x26 pages the node table from the index asked; and tunnel 0x06
+tunnel 0x26 pages the node table from the id asked; tunnel 0x29 takes 1-10
+records (acked --table-ack), a new one (bit 15) listed not joined until
+--join-after s; tunnel 0x2B BA BE erases the table; and tunnel 0x06
 queries are forwarded (status 0d) with the optimizer's answer in a later
 poll reply, as a type 0x07 packet. The first panel answers Info with 00 in
 its ninth word until it gets #00w255; the second answers Smrt in mode N
@@ -109,6 +111,8 @@ def main():
     ap.add_argument('--extra-link', action='append', default=[])
     ap.add_argument('--not-taken', type=lambda v: int(v, 16), action='append', default=[])  # node ids whose queries get 0x0146 00 02
     ap.add_argument('--pv-wrong-reply', action='store_true')  # answer 0x0B00 with the other byte
+    ap.add_argument('--join-after', type=float, default=5)  # a record the master wrote joins this long after
+    ap.add_argument('--table-ack', type=int, default=0)  # the 0x29 ack byte
     a = ap.parse_args()
 
     # One pty per master on the bus. The slave ends stay open here, so a
@@ -155,6 +159,10 @@ def main():
     home = None  # the id the TAP was first given, which a RESET returns it to
     quiet_until = 0.0
     answers = []  # optimizers' answers, waiting for a poll reply to carry them
+    written = []  # records a 0x29 added: [mac hex, id, joins at]
+    erased = False  # after a 0x2B the table is what was written since, and no longer the panels
+    stats['table_writes'] = []
+    stats['erases'] = 0
     needs_w255 = {panels[0][1]} if panels else set()
     smart_n = {panels[1][1]} if len(panels) > 1 else set()
     buf = bytearray()
@@ -322,14 +330,29 @@ def main():
             elif cmd == 0x0B0F and len(p) == 7 and p[3] == 0x26:  # a page of the node table, 12 at most
                 idx = p[5] << 8 | p[6]
                 stats['walk'].append(f'{idx:04X}')
-                page = [(b, n) for b, n in panels if n >= idx][:12]
-                first = page[0][1] if page else idx
+                rows = ([] if erased else list(panels)) + [(m, n | (0 if t >= at else 0x8000)) for m, n, at in written]
+                page = sorted([(b, n) for b, n in rows if (n & 0x7FFF) >= idx], key=lambda r: r[1] & 0x7FFF)[:12]
+                first = page[0][1] & 0x7FFF if page else idx
                 body = bytes([0x00, 0x0E, 0x00, 0x27, p[4], first >> 8, first & 0xFF, 0x00, len(page)])
                 for barcode, paddr in page:
                     body += bytes.fromhex(barcode) + bytes([paddr >> 8, paddr & 0xFF])
                 if a.page_delay:
                     time.sleep(a.page_delay)
                 send(encode(addr | 0x8000, 0x0B10, body))
+            elif cmd == 0x0B0F and len(p) >= 16 and p[3] == 0x29 and len(p) == 6 + 10 * p[5]:  # 1-10 records
+                stats['table_writes'].append(p[5:].hex())
+                if a.table_ack == 0:
+                    for k in range(p[5]):
+                        rec = p[6 + 10 * k:16 + 10 * k]
+                        tuid = rec[8] << 8 | rec[9]
+                        # Bit 15 clear: listed joined at once, as the CCA writes a table back.
+                        written.append((rec[:8].hex(), tuid & 0x7FFF, t + a.join_after if tuid & 0x8000 else t))
+                send(encode(addr | 0x8000, 0x0B10, bytes([0x00, 0x0E, 0x00, 0x2A, p[4], a.table_ack])))
+            elif cmd == 0x0B0F and len(p) == 7 and p[3] == 0x2B and p[5:7] == b'\xba\xbe':  # the table erase
+                stats['erases'] += 1
+                erased = True
+                written.clear()
+                send(encode(addr | 0x8000, 0x0B10, bytes([0x00, 0x0E, 0x00, 0x2C, p[4], 0x00])))
             elif cmd == 0x0B0F and len(p) > 7 and p[3] == 0x06:  # a query, forwarded; the answer comes later
                 tuid, text = p[5] << 8 | p[6], p[7:].decode(errors='replace')
                 stats['queries'].append({'t': round(t, 2), 'node': f'{tuid:04X}', 'text': text.strip()})

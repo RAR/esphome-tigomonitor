@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Add an optimizer to the TAP, or remove one, without a CCA (Raspberry
+  Pi, opt-in).** Running the bus, the Devices page takes a new optimizer's
+  printed label (the label is its whole radio address, with a check letter
+  that catches a misread character) and lists it in the TAP's table, then
+  keeps the join window open until it joins. Removing one does what the CCA
+  does: the TAP's table is erased and every other optimizer written back as
+  it was, so nothing has to rejoin; they are unjoined for under a second.
+  Both copy frames captured from a CCA on the bench, sit behind the new
+  **Let me change the TAP's table** switch (Settings → Bus, off by default),
+  and have a dry run that shows what would be sent. Several can be added one
+  after another; the page lists those waiting to join, each with **Stop
+  waiting**. Tried on the reference roof: one spare removed and added back.
+
 - **See which optimizers have a weak link (Raspberry Pi).** Topology opens
   on a new Mesh tab, Layout beside it: each TAP with its optimizers around it, every line coloured
   by how many of that optimizer's reports went missing today and by Tigo's

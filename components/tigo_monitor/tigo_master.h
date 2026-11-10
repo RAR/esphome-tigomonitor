@@ -99,7 +99,8 @@ static const uint16_t CMD_TUNNEL_REPLY = 0x0B10;
 static const uint16_t CMD_NOT_TAKEN = 0x0146;
 static const uint8_t SUB_DISCOVERY_START = 0x2D;
 static const uint8_t SUB_DISCOVERY_STATUS = 0x2E;
-// EraseFlash: wipes the TAP's optimizer table. Never sent. The CCA's own UI
+// EraseFlash: wipes the TAP's optimizer table. Sent only by a removal the
+// owner started (table_edit.h), BA BE, as the CCA sends it. The CCA's own UI
 // names it (Mesh History, 2026-11-06); we first read it as "Stop Discovery",
 // and before that 2D and 2B as a "run lease" that kept the optimizers
 // producing, which the roof showed it doesn't.
@@ -368,6 +369,7 @@ struct Request {
   Bytes payload;
   uint32_t wait_ms = 0;   // how long to wait for the reply; 0 = the usual
   bool bring_up = false;  // a frame the CCA sends only straight after re-addressing a TAP
+  bool table_edit = false;  // from a TableAdd (table_edit.h), the only source of a table write
 };
 
 // ---- housekeeping ----------------------------------------------------------
@@ -1004,8 +1006,17 @@ class Queries {
 // What a master sends next: discovery work when it's due, then housekeeping (if
 // there is any), then queries (if there are any), a poll otherwise. seq is
 // the last tunnel sequence number used, advanced when one is.
+// A job the owner started (table_edit.h's TableAdd): asked after the
+// window and before housekeeping, so it finishes in seconds, not minutes.
+class RequestSource {
+ public:
+  virtual ~RequestSource() = default;
+  virtual Request due(uint32_t now_ms, uint8_t &seq) = 0;
+};
+
 inline Request next_request(WindowKeeper &window, const PollCursor &cursor, uint8_t &seq, uint32_t now_ms,
-                            Housekeeping *housekeeping = nullptr, Queries *queries = nullptr, PvSwitch *pv = nullptr) {
+                            Housekeeping *housekeeping = nullptr, Queries *queries = nullptr, PvSwitch *pv = nullptr,
+                            RequestSource *job = nullptr) {
   // A PV switch goes in the next slot, ahead even of the discovery window: one
   // request's delay is nothing to a 900 s window.
   if (pv) {
@@ -1014,6 +1025,10 @@ inline Request next_request(WindowKeeper &window, const PollCursor &cursor, uint
   }
   WindowAction a = window.due(now_ms);
   if (a.kind == WindowAction::none) {
+    if (job) {
+      Request r = job->due(now_ms, seq);
+      if (r.cmd) return r;
+    }
     if (housekeeping) {
       Request r = housekeeping->due(now_ms, seq);
       if (r.cmd) return r;
@@ -1305,7 +1320,7 @@ class Discovery {
 // bench_only: reads and anything else, for a TAP on the bench.
 // never: writes. The commands that change what a TAP stores or does (reset,
 // store, ids, roster, whitelist, netrun, its channel, network config and
-// firmware, the table write and erase) and anything carrying the setup key
+// firmware, the table erase, any other table write) and anything carrying the setup key
 // 37 24 92 66. Nothing in this code sends them, whatever the settings,
 // except the bring-up's own: RESET, SET_485_ID, SET_ID_BY_MAC and the
 // key-only STORE (startup_only).
@@ -1313,7 +1328,25 @@ class Discovery {
 // replies ask for it (Queries), sent only with that setting on.
 // pv_off: the PV switch's 00, sent only while the owner holds PV off (or
 // in a bring-up, as the CCA's after its reboot).
-enum class Allow { yes, bench_only, startup_only, optimizer_write, pv_off, never };
+// table_write: the CCA's table write (sub 0x29) and erase (sub 0x2B) in the
+// shapes it sent, sent only by an add or removal the owner started
+// (table_edit.h), with master_table_writes on.
+enum class Allow { yes, bench_only, startup_only, optimizer_write, pv_off, table_write, never };
+
+// Sub 0x29's args as the CCA sent them on the bench (2026-11-06, 11-09): a
+// count, then count x (MAC, TUID), 1 to 10 (the TAP's limit). Each TUID is a
+// real id, 2..1023, with bit 15 set for a new record (listed, not joined;
+// the TAP clears it when the optimizer joins) or clear for one written back
+// as it was, joined, as the CCA rewrites a table.
+static const uint8_t SET_TABLE_MAX_RECORDS = 10;
+inline bool is_set_table_args(const Bytes &args) {
+  if (args.empty() || args[0] < 1 || args[0] > SET_TABLE_MAX_RECORDS || args.size() != 1 + 10u * args[0]) return false;
+  for (size_t i = 0; i < args[0]; i++) {
+    uint16_t id = static_cast<uint16_t>(args[9 + 10 * i] << 8 | args[10 + 10 * i]) & 0x7FFF;
+    if (id < 2 || id > 1023) return false;
+  }
+  return true;
+}
 
 
 inline Allow classify_request(uint16_t cmd, const Bytes &payload) {
@@ -1355,8 +1388,10 @@ inline Allow classify_request(uint16_t cmd, const Bytes &payload) {
   if (cmd != CMD_TUNNEL || payload.size() < 5 || payload[0] || payload[1] || payload[2]) return Allow::bench_only;
   Bytes args(payload.begin() + 5, payload.end());
   switch (payload[3]) {
-    case SUB_ERASE_FLASH:
-    case 0x29:  // SetTable, the optimizer table write (Phase 2, not approved)
+    case 0x29:  // SetTable, the optimizer table write
+      return is_set_table_args(args) ? Allow::table_write : Allow::never;
+    case SUB_ERASE_FLASH:  // the whole table, exactly as the CCA sent it
+      return args == Bytes{0xBA, 0xBE} ? Allow::table_write : Allow::never;
     case 0x1D:  // ResetNode
     case 0x13:  // PeriodicCfg Write
     case 0xE1:  // SetKnownNetworks
@@ -1413,13 +1448,14 @@ inline bool is_config_read(uint16_t cmd, const Bytes &payload) {
 }
 
 inline bool may_send(uint16_t cmd, const Bytes &payload, bool bench, bool startup = false, bool writes = false,
-                     bool pv_off = false) {
+                     bool pv_off = false, bool table_writes = false) {
   switch (classify_request(cmd, payload)) {
     case Allow::yes: return true;
     case Allow::bench_only: return bench;  // startup is not bench: a bring-up sends only its own
     case Allow::startup_only: return startup;
     case Allow::optimizer_write: return writes;
     case Allow::pv_off: return pv_off || startup;
+    case Allow::table_write: return table_writes;  // never bench or startup alone
     case Allow::never: return false;
   }
   return false;

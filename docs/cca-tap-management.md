@@ -89,6 +89,18 @@ Our master does steps 1–6 for one TAP. Its STORE runs only on that drop-back p
 
 **A CCA reflashes TAPs.** The 3.6 CCA updated the never-used G5.26 to G8.59 on its first bring-up, with its own updates blocked: 292 × 0x0522 blocks, about 20 s. Its UI can also install a chosen image or erase one, and erasing them all bricks the TAP.
 
+**How the CCA finds and numbers TAPs** (the owner's analysis of the 4.0.3 CCA's firmware, 2026-11-09, checked against the 11-06 bring-up capture):
+- **It never looks for a TAP at its old address or scans a range.** The SET_485_ID broadcast pulls every TAP on the bus to 1235, whatever address it had, duplicates included, and GET_MAC then separates them by MAC. A used TAP from another system is found the same way as a new one.
+- **The herd runs five passes.** A TAP already moved is pulled back to 1235 and moved again, and the CCA logs it as a successful retry. Our bring-up runs one pass.
+- **Addresses go up from 1201, skipping 1234 and 1235,** which a TAP treats as broadcast and management addresses. The CCA keeps a saved MAC → address map, so a TAP it has seen before gets its old address back, and a new MAC gets the next free one. That matches the 11-06 bench, where the known TAP kept 1201 and the new one got 1202.
+- **A TAP takes 0000, 1234, 4321 and FFFF as broadcast addresses** (the owner's analysis of an H1.0007 TAP's firmware).
+- **A used TAP brings its gateway, not its optimizers.** Once the CCA writes the system's channel, PAN and key to it (the GatewayCfg write), the optimizers it served are on a foreign network until each is added again.
+- **Baud rate:** detection sets the CCA's port to 38400 without telling the TAPs. A TAP left at 115200 by another system won't hear the herd. We've only ever seen TAPs at 38400.
+- **Herding is bus-wide:** every TAP, including working ones, is pulled to 1235 and reassigned, and data collection stops meanwhile.
+- **Firmware:** the 4.0.3 analysis found the version read and stored, with no gateway firmware update in the bus daemon it covered. The 3.6 CCA on the 11-06 bench did reflash a TAP (above), so either 4.0.3 dropped it or it lives elsewhere. Treat any CCA as able to reflash a TAP.
+
+For our master this changes nothing yet: it drives one TAP and herds only when that TAP turns up at 1235. A used TAP left at some other address sits there unseen until a herd. Adopting a second TAP would need the five-pass herd and the address rules above, and still the GatewayCfg write, which stays on the never-send list.
+
 ## Node tables, joining, moving and removing
 
 - **Each TAP's table** is up to 1024 slots of MAC + TUID, in flash.
