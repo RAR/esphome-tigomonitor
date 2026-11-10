@@ -50,6 +50,7 @@ struct Settings {
   bool master_optimizer_writes = false;  // and the two writes its answers call for
   bool master_read_tap_config = false;   // the bring-up's GatewayCfg read, once at start
   bool master_table_writes = false;      // let the owner's add write a record to the TAP's table
+  bool master_adopt_taps = false;        // a new TAP at the factory address starts the CCA's herd (needs startup)
   bool discovery_auto = false;           // renew the join window only while a layout optimizer is missing
   int gateway_id = 0x1201;    // the TAP's RS485 id, as the CCA addresses it (gateway_id_ok)
   float power_calibration = 1.0f;
