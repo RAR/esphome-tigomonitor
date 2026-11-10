@@ -1,6 +1,7 @@
 #include "master_core.h"
 
 #include <algorithm>
+#include <cctype>
 
 #include <chrono>
 #include <cstdarg>
@@ -173,8 +174,12 @@ void MasterCore::set_window_wanted(bool wanted, int missing) {
 
 // Under mu_: why a change to the table can't start now, or "".
 bool MasterCore::table_refusal_(bool dry_run, uint16_t tap, std::string &why) const {
-  bool known = !tap;
-  for (const auto &t : taps_) known = known || t->id == tap;
+  bool known = !tap, answering = true;
+  for (const auto &t : taps_)
+    if (t->id == tap || (!tap && t == taps_.front())) {
+      known = true;
+      answering = t->st.state == "running";  // st is under mu_, as here
+    }
   if (status_.standby == Standby::standing_by || status_.standby == Standby::taking_over)
     why = "this monitor is standing by; only the master running the bus can change the TAP's table";
   else if (table_job_running_)
@@ -182,6 +187,8 @@ bool MasterCore::table_refusal_(bool dry_run, uint16_t tap, std::string &why) co
                                          : "a change to the table is already running";
   else if (!known)
     why = "no such TAP on this bus";
+  else if (!answering)
+    why = "that TAP isn't answering; it can't be changed until it is";
   else if (!dry_run && !table_writes_on_)
     why = "table writes are off (master_table_writes); a dry run still works";
   else if (!dry_run && pv_state_.off)
@@ -283,7 +290,11 @@ void MasterCore::start_herd_(const char *why) {
   std::vector<master::Herd::Known> known;
   for (const auto &t : taps_)
     if (!t->mac.empty()) known.push_back({t->mac, t->id});
-  herd_ = std::make_unique<master::Herd>(FACTORY_ID, gateway_, known);
+  // Not adopting, a herd still moves our own TAPs (with more than one, the
+  // way to re-address one: Discovery's SET_485_ID moves them all, and its
+  // GET_MAC, hearing them all, could give one the other's id), but leaves
+  // a stranger where it is.
+  herd_ = std::make_unique<master::Herd>(FACTORY_ID, gateway_, known, adopt_taps_);
   discovery_.reset();
   restart_taps_();
   phase_ = Phase::discovering;
@@ -343,12 +354,14 @@ void MasterCore::herd_done_() {
     status_.extra_taps.clear();
   }
   for (const auto &l : lines) log_(l.find("wasn't heard") != std::string::npos ? 4 : 6, "%s", l.c_str());
-  herd_.reset();
   phase_ = Phase::running;
   probe_index_ = 0;
+  std::vector<Bytes> extras = herd_->extras();
+  herd_.reset();
   if (status().fault == Fault::discovery_failed || status().fault == Fault::extra_tap) set_fault(Fault::none, "");
   LOGI("bus master: %zu TAP%s; polling", saved.size(), saved.size() == 1 ? "" : "s");
   if (taps_saved_) taps_saved_(saved);
+  report_extra_taps_(extras);
 }
 
 void MasterCore::set_table_saved(TableSaved saved, const master::Bytes &resume_mac,
@@ -953,7 +966,7 @@ void MasterCore::tick_(uint32_t now_ms) {
       plan.config_read = read_tap_config_ && !t.config_read_sent;
       plan.session_reset = housekeeping_on_ && t.readdressed && !t.session_reset_sent;
       t.session_reset_sent = t.session_reset_sent || plan.session_reset;
-      t.housekeeping = std::make_unique<master::Housekeeping>(learned_, now_ms, plan, now_ms ^ unix_now() ^ t.id);
+      t.housekeeping = std::make_unique<master::Housekeeping>(learned_, now_ms, plan, now_ms ^ unix_now());
       t.housekeeping->set_pv(t.pv.get());
       t.targets_at_ms = now_ms - TARGETS_EVERY_MS;
       if (housekeeping_on_)
@@ -965,9 +978,10 @@ void MasterCore::tick_(uint32_t now_ms) {
       LOGI("bus master: queries to optimizers on%s", writes_on_ ? ", with the CCA's two writes" : "");
     }
     // Asked each minute, or each second while none have been heard yet.
-    if (t.housekeeping && (tap_targets_ || targets_) &&
-        now_ms - t.targets_at_ms >= (t.targets_empty ? 1000 : TARGETS_EVERY_MS)) {
-      std::vector<uint16_t> list = tap_targets_ ? tap_targets_(t.id) : targets_();
+    // With more than one TAP, each TAP's own (tap_targets_); with one, all.
+    bool own = tap_targets_ && several_();
+    if (t.housekeeping && (own || targets_) && now_ms - t.targets_at_ms >= (t.targets_empty ? 1000 : TARGETS_EVERY_MS)) {
+      std::vector<uint16_t> list = own ? tap_targets_(t.id) : targets_();
       t.targets_empty = list.empty();
       t.housekeeping->set_targets(list);
       t.targets_at_ms = now_ms;
@@ -1211,6 +1225,20 @@ void MasterCore::tick_(uint32_t now_ms) {
   if (several_()) {
     bool was_lost = t.lost;
     tap_unanswered_(t, now_ms);
+    // A lost TAP may be back at the factory address (a power cut, and no
+    // stored id): in startup mode, its try asks there too, once. One there
+    // means a herd, the way to re-address one of several (above).
+    Frame f;
+    if (startup_ && was_lost && phase_ == Phase::running && !table_job_ &&
+        transact(FACTORY_ID, master::CMD_GET_MAC_NOW, {}, f) && f.payload.size() >= 8) {
+      Bytes mac(f.payload.begin(), f.payload.begin() + 8);
+      // This one, or adopting: a herd. A stranger, not adopting: said once.
+      if (adopt_taps_ || (!t.mac.empty() && mac == t.mac)) {
+        start_herd_("a TAP is at the factory address");
+        return;
+      }
+      note_stranger_(mac);
+    }
     bool all_lost = true;
     for (const auto &x : taps_) all_lost = all_lost && x->lost;
     if (all_lost && !was_lost) {
@@ -1280,14 +1308,37 @@ void MasterCore::run_startup(uint32_t now_ms) {
     } else if (++probe_misses_ < PROBE_MISSES_BEFORE_FACTORY) {
       return;  // ask at its own address again before looking anywhere else
     } else if (transact(FACTORY_ID, master::CMD_GET_MAC_NOW, {}, r)) {  // at the factory address
-      if (adopt_taps_) {
+      // Only the TAP this monitor was polling is ever given its id: another
+      // one there (a second TAP on the bus) is not, unless adopting. With
+      // one TAP, one of no known MAC is taken as it, as before.
+      bool same = r.payload.size() >= 8 && !t.mac.empty() && std::equal(t.mac.begin(), t.mac.end(), r.payload.begin());
+      bool ours = same || (t.mac.empty() && !several_());
+      // With more than one TAP, re-addressing one is a herd: Discovery's
+      // SET_485_ID moves them all to the factory address, where its GET_MAC
+      // hears them all and could give the first to answer this one's id, and
+      // one with no stored id would stay there after its RESET.
+      if (adopt_taps_ || (several_() && ours)) {
         probe_misses_ = 0;
         start_herd_("a TAP is at the factory address");
         return;
       }
-      // Only the TAP this monitor was polling: another one there (a second
-      // TAP on the bus) is never given this one's id.
-      if (!t.mac.empty() && (r.payload.size() < 8 || !std::equal(t.mac.begin(), t.mac.end(), r.payload.begin()))) {
+      if (!ours && several_()) {
+        // A stranger, not adopting: said, and this TAP looked for no more
+        // here; the others are brought up, and it is asked as a TAP lost.
+        if (r.payload.size() >= 8) note_stranger_(Bytes(r.payload.begin(), r.payload.begin() + 8));
+        probe_misses_ = 0;
+        t.timeouts_in_a_row = NO_REPLY_FAULT_AFTER;
+        if (!t.lost) tap_unanswered_(t, now_ms);
+        if (!last) {
+          probe_index_++;
+          return;
+        }
+        discovery_ = std::make_unique<master::Discovery>(FACTORY_ID, first_().id, /*scan_only=*/true);
+        discovery_tap_ = first_().id;
+        phase_ = Phase::discovering;
+        return;
+      }
+      if (!ours) {
         set_fault(Fault::extra_tap, "a different TAP answers at the factory address; not re-addressing it");
         return;
       }
@@ -1517,6 +1568,23 @@ void MasterCore::drop_housekeeping_(Tap &t) {
   t.sent_walk_pages_before += t.housekeeping->sent_walk_pages();
   t.walks_done_before += t.housekeeping->walks_done();
   t.housekeeping.reset();
+}
+
+// A TAP heard at the factory address that isn't one of ours, not adopting:
+// reported as the scan's are, but only the first time.
+void MasterCore::note_stranger_(const Bytes &mac) {
+  std::string h = master::mac_hex(mac);
+  for (auto &c : h) c = static_cast<char>(tolower(static_cast<unsigned char>(c)));
+  for (const auto &e : status().extra_taps)
+    if (e == h) return;
+  std::vector<Bytes> all;
+  for (const auto &e : status().extra_taps) {
+    Bytes b;
+    for (size_t i = 0; i + 1 < e.size(); i += 2) b.push_back(static_cast<uint8_t>(std::stoi(e.substr(i, 2), nullptr, 16)));
+    all.push_back(b);
+  }
+  all.push_back(mac);
+  report_extra_taps_(all);
 }
 
 // A TAP the scan heard at the factory address that isn't one of ours was

@@ -134,7 +134,7 @@ struct MasterStatus {
   // running down to 0 between renewals is normal and not counted.
   uint32_t tap_lost = 0;
   std::vector<int64_t> recent_lost_unix;  // oldest first, at most RECENT_LOST
-  static const size_t RECENT_LOST = 10;
+  static constexpr size_t RECENT_LOST = 10;
   uint32_t back_without_discovery = 0;
   // The longest the bus waited on the daemon rather than the TAP: from the
   // end of one tick to the start of the next, or inside on_rx (decoding).
@@ -178,7 +178,7 @@ struct MasterStatus {
   TableEditStatus table_edit;
   std::vector<TableWaiting> table_waiting;
   std::vector<TableJoinOutcome> table_joins;  // newest last, at most TABLE_JOINS_KEPT
-  static const size_t TABLE_JOINS_KEPT = 10;
+  static constexpr size_t TABLE_JOINS_KEPT = 10;
   uint16_t table_tap = 0;      // the TAP the last change ran on
   std::vector<TapStatus> taps;  // in the order they are polled
 };
@@ -228,7 +228,7 @@ class MasterCore {
   MasterCore(Transport *port, Log log, Sink on_rx, SentSink on_tx, uint16_t gateway_id, bool bench, bool startup,
              bool housekeeping = false, std::vector<esphome::tigo_monitor::master::Learned41::Entry> learned = {},
              Targets targets = nullptr, bool queries = false, bool writes = false);
-  static const uint32_t TARGETS_EVERY_MS = 60000;
+  static constexpr uint32_t TARGETS_EVERY_MS = 60000;
   ~MasterCore();
 
   // The TAPs to run, in polling order (the saved map); call before open().
@@ -239,8 +239,9 @@ class MasterCore {
   };
   void set_taps(const std::vector<TapEntry> &taps);
   std::vector<TapEntry> taps() const;  // as now known, MACs included
-  // The optimizers to send 0x41s to through one TAP, asked each minute. With
-  // it, each TAP gets its own; without, every TAP gets targets'.
+  // The optimizers to send 0x41s to through one TAP, asked each minute.
+  // While more than one TAP is run, each gets its own from it; with one TAP,
+  // or without it, targets' (all of them).
   using TapTargets = std::function<std::vector<uint16_t>(uint16_t tap)>;
   void set_tap_targets(TapTargets t) { tap_targets_ = std::move(t); }
   // master_adopt_taps: a TAP heard at the factory address that isn't one of
@@ -260,16 +261,16 @@ class MasterCore {
   // With more than one TAP, one that stopped answering is asked once every
   // LOST_PROBE_MS while the others are polled, and after LOST_MISSES
   // unanswered, once every REMOVED_PROBE_MS.
-  static const uint32_t LOST_PROBE_MS = 30000;
-  static const uint32_t LOST_MISSES = 10;
-  static const uint32_t REMOVED_PROBE_MS = 300000;
+  static constexpr uint32_t LOST_PROBE_MS = 30000;
+  static constexpr uint32_t LOST_MISSES = 10;
+  static constexpr uint32_t REMOVED_PROBE_MS = 300000;
 
   // Stand by rather than run the bus (bus_role standby); call before open().
   // on_listen gets the bytes read while standing by (the Monitor, and the
   // 0x41 learning); learned is asked for the 0x41s at each takeover.
   using Learned = std::function<std::vector<esphome::tigo_monitor::master::Learned41::Entry>()>;
   void set_standby(uint32_t takeover_s, Sink on_listen, Learned learned);
-  static const uint32_t TAKEOVER_JITTER_MS = 500;  // at most, so two standbys starting together don't tie
+  static constexpr uint32_t TAKEOVER_JITTER_MS = 500;  // at most, so two standbys starting together don't tie
 
   // The PV state to start from (the one saved), and where to save a change;
   // call before open().
@@ -348,18 +349,18 @@ class MasterCore {
   // The optimizers' last !Info and !Mppt answers, by short id (queries on).
   std::map<uint16_t, esphome::tigo_monitor::master::Queries::Setup> setups() const;
 
-  static const int REPLY_TIMEOUT_MS = 50;
-  static const uint32_t REOPEN_EVERY_MS = 5000;
-  static const uint32_t LOG_FIRST_REPLIES = 20;  // poll reply headers logged at INFO, for the bench
-  static const uint16_t FACTORY_ID = 0x1235;     // the universal factory RS485 address
-  static const uint32_t NO_REPLY_FAULT_AFTER = 10;
+  static constexpr int REPLY_TIMEOUT_MS = 50;
+  static constexpr uint32_t REOPEN_EVERY_MS = 5000;
+  static constexpr uint32_t LOG_FIRST_REPLIES = 20;  // poll reply headers logged at INFO, for the bench
+  static constexpr uint16_t FACTORY_ID = 0x1235;     // the universal factory RS485 address
+  static constexpr uint32_t NO_REPLY_FAULT_AFTER = 10;
   // Missed answers in a row at the TAP's own address before the factory
   // address is tried: one lost reply is not a TAP that forgot its id.
-  static const uint32_t PROBE_MISSES_BEFORE_FACTORY = 3;
+  static constexpr uint32_t PROBE_MISSES_BEFORE_FACTORY = 3;
   // A TAP that refuses every request (0x0006) is asked once a second, not
   // forty times: it is answering, so this isn't a TAP lost.
-  static const uint32_t REFUSED_RETRY_MS = 1000;
-  static const uint32_t RETRY_AFTER_FAIL_MS = 30000;  // a failed bring-up looks again after this
+  static constexpr uint32_t REFUSED_RETRY_MS = 1000;
+  static constexpr uint32_t RETRY_AFTER_FAIL_MS = 30000;  // a failed bring-up looks again after this
 
  private:
   // One TAP on the bus and everything kept for it: what with one TAP was the
@@ -427,6 +428,7 @@ class MasterCore {
   void drop_housekeeping_(Tap &t);
   void restart_taps_();  // window, housekeeping, queries and counts back to a start, for every TAP
   void report_extra_taps_(const std::vector<esphome::tigo_monitor::master::Bytes> &macs);
+  void note_stranger_(const esphome::tigo_monitor::master::Bytes &mac);
   // The TAP to serve this tick (round robin over those due), or null.
   Tap *next_tap_(uint32_t now_ms);
   Tap *tap_by_id_(uint16_t id);  // 0: the first
@@ -463,7 +465,7 @@ class MasterCore {
   uint16_t resume_tap_ = 0;
   bool resume_waiting_ = false;
   uint32_t resume_at_ms_ = 0;
-  static const uint32_t RESUME_AFTER_MS = 60000;
+  static constexpr uint32_t RESUME_AFTER_MS = 60000;
   bool table_refusal_(bool dry_run, uint16_t tap, std::string &why) const;  // under mu_
   void start_table_job_(std::unique_ptr<esphome::tigo_monitor::master::TableJob> job, uint16_t tap);  // under mu_
   void sync_table_status_(bool finished_now);
@@ -494,10 +496,10 @@ class MasterCore {
   bool holding_ = false;
   void tick_(uint32_t now_ms);
   void note_pause_(uint32_t ms, int64_t now_steady_ms);
-  static const int64_t GAP_WINDOW_MS = 5 * 60000;
+  static constexpr int64_t GAP_WINDOW_MS = 5 * 60000;
   // How far past its due a wait inside a request may run before the excess
   // counts as a pause: the process was not running (stopped, or starved).
-  static const int64_t OVERRUN_SLACK_MS = 20;
+  static constexpr int64_t OVERRUN_SLACK_MS = 20;
   int64_t last_tick_end_ms_ = -1;  // steady clock
   int64_t gap_window_start_ms_ = 0;
   uint32_t gap_window_max_ms_ = 0, gap_prev_window_max_ms_ = 0;

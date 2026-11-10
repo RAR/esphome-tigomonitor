@@ -1335,18 +1335,18 @@ class Discovery {
 // the working ones too, so data collection stops for the herd's ~30 s.
 class Herd {
  public:
-  static const int CLAIMS = 5;
-  static const uint32_t CLAIM_EVERY_MS = 750;
-  static const int MAC_TRIES = 5;  // GET_MACs before giving up on hearing any TAP
-  static const int SCAN_TRIES = 5;
-  static const uint32_t BACKOFF_WAIT_MS = 800;
-  static const uint32_t RESET_QUIET_MS = 5000;
-  static const uint32_t BACK_WAIT_MS = 1000;
-  static const int BACK_TRIES = 2;  // the CCA read each once; one more for a slow TAP
-  static const int STEP_TRIES = 5;
-  static const int ROUNDS = 2;
-  static const uint16_t BROADCAST_A = 0x1234;  // a TAP takes both as its own; never an id
-  static const uint16_t BROADCAST_B = 0x1235;
+  static constexpr int CLAIMS = 5;
+  static constexpr uint32_t CLAIM_EVERY_MS = 750;
+  static constexpr int MAC_TRIES = 5;  // GET_MACs before giving up on hearing any TAP
+  static constexpr int SCAN_TRIES = 5;
+  static constexpr uint32_t BACKOFF_WAIT_MS = 800;
+  static constexpr uint32_t RESET_QUIET_MS = 5000;
+  static constexpr uint32_t BACK_WAIT_MS = 1000;
+  static constexpr int BACK_TRIES = 2;  // the CCA read each once; one more for a slow TAP
+  static constexpr int STEP_TRIES = 5;
+  static constexpr int ROUNDS = 2;
+  static constexpr uint16_t BROADCAST_A = 0x1234;  // a TAP takes both as its own; never an id
+  static constexpr uint16_t BROADCAST_B = 0x1235;
 
   struct Known {
     Bytes mac;
@@ -1361,8 +1361,10 @@ class Herd {
     bool needs_store = false;
   };
 
-  Herd(uint16_t factory_id, uint16_t first_id, std::vector<Known> known)
-      : factory_(factory_id), first_(first_id), known_(std::move(known)) {}
+  // adopt_new false: a MAC not in known is heard and left where it is, at
+  // the factory address, unplaced (extras()); only known TAPs are moved on.
+  Herd(uint16_t factory_id, uint16_t first_id, std::vector<Known> known, bool adopt_new = true)
+      : factory_(factory_id), first_(first_id), known_(std::move(known)), adopt_new_(adopt_new) {}
 
   DiscoveryRequest next() {
     DiscoveryRequest r;
@@ -1543,6 +1545,8 @@ class Herd {
   const char *unanswered() const { return unanswered_; }
   // Every TAP heard, its id, and whether it was back there at the end.
   const std::vector<Placed> &placed() const { return placed_; }
+  // MACs heard that aren't known, left at the factory address (adopt_new false).
+  const std::vector<Bytes> &extras() const { return extras_; }
 
  private:
   enum State { claim, get_mac, assign, scan, verify, store, hop, hop_verify, reset, quiet, back, st_done, st_failed };
@@ -1570,6 +1574,10 @@ class Herd {
     p.mac = mac;
     for (const auto &k : known_)
       if (k.mac == mac) p.id = k.id;
+    if (!p.id && !adopt_new_) {
+      if (std::find(extras_.begin(), extras_.end(), mac) == extras_.end()) extras_.push_back(mac);
+      return;
+    }
     for (const auto &b : fresh_before_)
       if (b.mac == mac && b.fresh) p.fresh = true;
     if (!p.id) {
@@ -1643,6 +1651,8 @@ class Herd {
 
   uint16_t factory_, first_;
   std::vector<Known> known_;
+  bool adopt_new_;
+  std::vector<Bytes> extras_;
   std::vector<Bytes> stores_;
   std::vector<Placed> placed_;
   std::vector<Placed> fresh_before_;

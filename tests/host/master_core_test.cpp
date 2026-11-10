@@ -1153,7 +1153,107 @@ static void test_a_herd_keeps_a_missing_tap() {
   core.close();
 }
 
+// A lost TAP back at the factory address (a power cut, and it keeps no id):
+// in startup mode its tries also ask there, and finding it, the master
+// herds, as it re-addresses one of several TAPs (see the next test). Both
+// end at their ids.
+static void test_a_lost_tap_at_the_factory_address_is_brought_back() {
+  MultiTap bus;
+  bus.taps = {{0x1201, 1}, {0x1202, 2}};
+  MasterCore core(&bus.port, [](int, const std::string &) {}, nullptr, nullptr, 0x1201, false, /*startup=*/true);
+  core.set_taps({{0x1201, multi_mac(1)}, {0x1202, multi_mac(2)}});
+  CHECK(core.open());
+  run_for(core, 0, 8000, 50);
+  CHECK(core.status().taps.size() == 2 && core.status().taps[1].state == "running");
+  bus.at(0x1202)->id = 0x1235;  // back from a power cut at the factory address
+  uint32_t t = 8000;
+  for (uint32_t end = t + 3 * MasterCore::LOST_PROBE_MS; t < end; t += 50) core.tick(t);
+  CHECK(bus.taps[1].id == 0x1202);
+  CHECK(core.status().taps[1].state == "running");
+  CHECK(bus.sent_to(0x0000, 0x0014) == 5 && bus.taps[0].id == 0x1201);  // one round of the herd
+  int before = bus.sent_to(0x1202, 0x0148);
+  for (uint32_t end = t + 2000; t < end; t += 50) core.tick(t);
+  CHECK(bus.sent_to(0x1202, 0x0148) - before > 10);
+  core.close();
+}
+
+// Startup, two known TAPs, one at the factory address: a herd, not the
+// one-TAP bring-up, whose SET_485_ID moves both there and whose GET_MAC,
+// hearing both, could give the first to answer the other's id.
+static void test_startup_with_one_of_two_at_the_factory_address_herds() {
+  MultiTap bus;
+  bus.taps = {{0x1201, 1}, {0x1235, 2}};
+  bus.at(0x1235)->stored = 0x1202;
+  MasterCore core(&bus.port, [](int, const std::string &) {}, nullptr, nullptr, 0x1201, false, /*startup=*/true);
+  core.set_taps({{0x1201, multi_mac(1)}, {0x1202, multi_mac(2)}});
+  CHECK(core.open());
+  run_for(core, 0, 40000, 50);
+  CHECK(bus.sent_to(0x0000, 0x0014) == 5);
+  CHECK(bus.taps[0].id == 0x1201 && bus.taps[1].id == 0x1202);
+  MasterStatus m = core.status();
+  CHECK(m.taps.size() == 2 && m.taps[0].state == "running" && m.taps[1].state == "running");
+  CHECK(bus.sent_to(0x1201, 0x0148) > 20 && bus.sent_to(0x1202, 0x0148) > 20);
+  core.close();
+}
+
+// Not adopting, a stranger at the factory address is no reason to herd:
+// a lost TAP's tries see it there, and leave it; the other TAP is polled
+// throughout, and the stranger is reported.
+static void test_a_stranger_at_the_factory_address_starts_no_herd() {
+  MultiTap bus;
+  bus.taps = {{0x1201, 1}, {0x1202, 2}, {0x1235, 9}};
+  MasterCore core(&bus.port, [](int, const std::string &) {}, nullptr, nullptr, 0x1201, false, /*startup=*/true);
+  core.set_taps({{0x1201, multi_mac(1)}, {0x1202, multi_mac(2)}});
+  CHECK(core.open());
+  run_for(core, 0, 10000, 50);
+  bus.at(0x1202)->up = false;  // lost; the stranger stays at the factory address
+  uint32_t t = 10000;
+  for (uint32_t end = t + 4 * MasterCore::LOST_PROBE_MS; t < end; t += 50) core.tick(t);
+  CHECK(bus.sent_to(0x0000, 0x0014) == 0);
+  CHECK(core.status().taps[1].state == "lost" && core.status().fault == Fault::extra_tap);
+  int before = bus.sent_to(0x1201, 0x0148);
+  for (uint32_t end = t + 2000; t < end; t += 50) core.tick(t);
+  CHECK(bus.sent_to(0x1201, 0x0148) - before > 10);
+  core.close();
+}
+
+// Startup, two known TAPs, the second missing and a stranger at the factory
+// address, not adopting: the stranger is reported, the first is polled.
+static void test_startup_with_a_stranger_polls_ours() {
+  MultiTap bus;
+  bus.taps = {{0x1201, 1}, {0x1202, 2, false}, {0x1235, 9}};
+  MasterCore core(&bus.port, [](int, const std::string &) {}, nullptr, nullptr, 0x1201, false, /*startup=*/true);
+  core.set_taps({{0x1201, multi_mac(1)}, {0x1202, multi_mac(2)}});
+  CHECK(core.open());
+  run_for(core, 0, 20000, 50);
+  CHECK(bus.sent_to(0x0000, 0x0014) == 0);
+  CHECK(core.status().phase == Phase::running && core.status().taps[1].state == "lost");
+  CHECK(bus.sent_to(0x1201, 0x0148) > 20);
+  core.close();
+}
+
+// A change aimed at a TAP that isn't answering is refused, not left waiting.
+static void test_a_table_change_on_a_lost_tap_is_refused() {
+  MultiTap bus;
+  bus.taps = {{0x1201, 1}, {0x1202, 2, false}};
+  MasterCore core(&bus.port, [](int, const std::string &) {}, nullptr, nullptr, 0x1201, false, false);
+  core.set_taps({{0x1201, {}}, {0x1202, {}}});
+  CHECK(core.open());
+  run_for(core, 0, 3000);
+  CHECK(core.status().taps[1].state == "lost");
+  std::string why;
+  CHECK(!core.request_table_add(NEW_MAC, 0, true, why, 0x1202));
+  CHECK(why.find("isn't answering") != std::string::npos);
+  CHECK(core.request_table_add(NEW_MAC, 0, true, why, 0x1201));
+  core.close();
+}
+
 int main() {
+  test_a_lost_tap_at_the_factory_address_is_brought_back();
+  test_a_table_change_on_a_lost_tap_is_refused();
+  test_startup_with_one_of_two_at_the_factory_address_herds();
+  test_a_stranger_at_the_factory_address_starts_no_herd();
+  test_startup_with_a_stranger_polls_ours();
   test_adopting_herds_a_new_tap();
   test_not_adopting_leaves_a_new_tap_alone();
   test_the_owners_herd_keeps_known_ids();

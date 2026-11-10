@@ -1419,7 +1419,7 @@ struct SimBus {
     return n;
   }
 };
-static Bytes tap_mac(uint8_t last) { return {0x04, 0xC0, 0x5B, 0x30, 0x00, 0x00, 0x00, last}; }
+static Bytes tap_mac(uint8_t last) { return {0x04, 0xC0, 0x5B, 0x00, 0x00, 0x00, 0x00, last}; }
 
 // Runs a herd to its end against the bus; every request's frames checked
 // against what the send gate allows a bring-up.
@@ -1497,6 +1497,20 @@ static void test_herd_skips_the_broadcast_ids() {
   for (auto &s : bus.sent) CHECK(!(s.second == CMD_GET_MAC_NOW && s.first == 0x1234));
 }
 
+// Not adopting: a TAP the map doesn't know is heard, left at the factory
+// address and reported; the known one is moved on as before.
+static void test_herd_not_adopting_leaves_a_new_tap() {
+  SimBus bus;
+  bus.taps = {{tap_mac(2), 0x0000, 0}, {tap_mac(1), 0x1201, 0x1201}};
+  Herd h(0x1235, 0x1201, {{tap_mac(1), 0x1201}}, /*adopt_new=*/false);
+  run_herd(h, bus);
+  CHECK(h.done() && h.round() == 1);
+  CHECK(h.placed().size() == 1 && h.placed()[0].mac == tap_mac(1) && h.placed()[0].answered);
+  CHECK(h.extras().size() == 1 && h.extras()[0] == tap_mac(2));
+  CHECK(bus.taps[0].id == 0x1235 && bus.taps[1].id == 0x1201);
+  CHECK(bus.count(CMD_STORE) == 0);
+}
+
 // No TAP on the bus: failed, after MAC_TRIES GET_MACs.
 static void test_herd_with_no_tap_fails() {
   SimBus bus;
@@ -1511,6 +1525,7 @@ int main() {
   test_herd_skips_a_missing_taps_id();
   test_herd_skips_the_broadcast_ids();
   test_herd_with_no_tap_fails();
+  test_herd_not_adopting_leaves_a_new_tap();
   test_discovery();
   test_discovery_scan();
   test_discovery_hop();
