@@ -29,7 +29,7 @@ The recordings and UI pastes hold MACs, PANs and network keys. They live in `~/t
 | 0x0146 | the TAP's answer to a text query it couldn't deliver (`00 02`); seen from an H1.0006 when the node was off or reconnecting |
 | 0x0148 / 0x0149 | the poll, carrying the queue cursor; the reply holds queued node messages |
 | 0x0520 / 0x0522 / 0x0526 | TAP firmware: start, 136-byte data block, list partitions |
-| 0x0B00 | a one-byte housekeeping write |
+| 0x0B00 | PV off or on: one byte, `00` off, `01` on; the reply, 0x0B01, echoes it |
 | 0x0B0F / 0x0B10 | the tunnel: `00 00 00 <sub> <seq> <args>` |
 
 **Tunnel subs and queue entries share one numbering.** That's the firmware's own naming table (44 names): the same type byte names a tunnel sub sent to the TAP and an entry queued in a poll reply.
@@ -50,29 +50,39 @@ The recordings and UI pastes hold MACs, PANs and network keys. They live in `~/t
 | 2E / 2F | DiscState | read: flag, seconds left, count echo, joined, in table |
 | 30 | Report NetDebug | off by default |
 | 31 | Report Power | every 2 s, delivered two at a time |
-| 40–47 | StarDisc Found / **SetPgw** / Own / Ignore / Kick / Status, Firmware Request / Delivery | **0x41 SetPgw is the per-minute "housekeeping" frame**: sets a node's preferred gateway |
+| 40–47 | StarDisc Found / **SetPgw** / Own / Ignore / Kick / Status, Firmware Request / Delivery | **0x41 SetPgw is the per-minute "housekeeping" frame**: sets a node's preferred gateway. With several TAPs the CCA picks it from the TAPs that have heard the node, by round-robin and a neighbour count. A node that gets none keeps its last; the CCA times one out after 3 minutes at least (owner's analysis) |
 | E1–E6 | SetKnownNetworks, Get / EraseStackTrace | |
 
 ## The gateway config block
 
-The 37-byte GatewayCfg reply: the 36-byte block the CCA writes, then a 00. Laid out per the CCA UI's own decode and the owner's analysis of the CCA's firmware (2026-11-09); a controlled channel change (23 → 20) moved byte 1 and the map's bytes 9–11.
+The 37-byte GatewayCfg reply: the 36-byte block the CCA writes, then a status byte. It was `00` in 66 of 71 reads of each copy in the 11-06 captures and `01` in the other 5, the same five on both copies, all during config changes; the CCA checks the reply's length but never reads that byte, so it is don't-care. Laid out per the CCA UI's own decode and the owner's analysis of the CCA's firmware (2026-11-09); a controlled channel change (23 → 20) moved byte 1 and the map's bytes 9–11.
 
 | Byte | Field |
 |---|---|
 | 0–1 | channel (802.15.4, 11–26), big-endian; byte 0 is always 00 |
 | 2–3 | PAN |
-| 4–13 | the map: shown as `12-2-2-1/28/3`, its bytes 5–7 (block 9–11) a hidden value not in that text |
+| 4–13 | the map: shown as `12-2-2-1/28/1`. Its bytes 5–7 (block 9–11) are never set by the CCA, so they carry whatever was in memory; they mean nothing, and zero is correct |
 | 14 | SLT (90): the signal level a node must beat to be admitted |
 | 15–30 | **the 16-byte network key** |
 | 31–34 | Optimizn (00000200) |
 | 35 | SLm (60) |
-| 36 | 00 |
+| 36 | status byte (reply only) |
 
 - **A factory TAP** has PAN 0x1234 and channel 0x14.
 - **The roof TAP is on channel 18.**
 - **Channel, PAN and key are per TAP**, and each TAP is its own network. Two bench TAPs under one CCA sat on channels 15 and 23 (later 20), with different PANs and keys. The PAN comes from a search for a free one, seeded by the TAP's MAC and the CCA's serial; the key is 16 random bytes (owner's analysis). The bench CCA wrote a new PAN and key on every placement, rediscover and delete. Read them from the TAP; never compute them.
-- **The map is sized per TAP from the number of optimizers it carries** (owner's analysis). The roof TAP with 40 reads `14-2-2-1/28/1`; the bench TAPs with one read `12-2-2-1/28/1` (2026-11-09) and `12-2-2-1/28/3` with bytes 9–11 nonzero (2026-11-06). Two TAPs written in one operation can share bytes 9–11 when their maps match.
-- **The write** is `0B0F` sub `0D`, args `01 00` + the 36-byte block; the reads are `00 00` and `00 01`, both sent to each TAP. Every write in the 11-06 captures (six) came right after a herd and RESET, between `0B00 00` and `0B00 01` sent to every TAP, and only to the TAPs being configured: adopting a new TAP left the other's block untouched.
+- **The map is a sizing profile, not a count of optimizers** (owner's analysis, 2026-11-10). The CCA has four, each with a capacity and a data-collection interval:
+
+  | Map | Holds | Interval |
+  |---|---|---|
+  | `12-2-2-1/28/1` | 40 optimizers | 2 s |
+  | `14-2-2-1/28/1` | 75 | 3 s |
+  | `20-2-2-1/28/1` | 120 | 4 s |
+  | `24-4-2-1/28/1` | 300 | 20 s |
+
+  The CCA picks one per TAP from the largest number of optimizers on any TAP plus headroom (optimizers expected but not seen, and ones with no TAP), so the roof's 40 plus headroom got `14-`, and a bench TAP with one got `12-`, which still holds 40. A full 40 on a `12-` TAP is at the edge: the CCA would have moved to `14-` at 41. The interval is how often the system as a whole collects from that many optimizers, not each optimizer's own report period, so it doesn't change how often a panel reports. It re-picks only at the end of a detection/reset, not as optimizers join, unless the TAP's behavior setting turns automatic sizing off. A TAP carrying more than its map holds can't give every optimizer a slot, so some are polled rarely or refused one. Our master never writes the map, so **a TAP the Pi carries keeps the map a CCA last gave it: keep a `12-` TAP below 40 optimizers, with room to spare.** Automatic sizing only ever writes the `/1` form; the `/3` the bench TAP read on 11-06 came from a map set by hand in the CCA's config, which is written to a TAP as is. The bench TAPs read `12-2-2-1/28/1` (2026-11-09) and `12-2-2-1/28/3` (2026-11-06); bytes 9–11 were nonzero on 11-06 and zero since, which is the leftover memory above, not a setting.
+- **The reads:** `00 00` returns the config in use, `00 01` the one staged to apply. **The write** is `0B0F` sub `0D`, args `01 00` + the 36-byte block, and sets the staged copy; the TAP applies it on its next reset, and until then the two reads differ (one capture shows the old channel and PAN in the first and the new ones in the second). The CCA reads both after every write to check it (owner's analysis, matching the 11-06 captures).
+- **Every write in the 11-06 captures (six) came right after a herd and RESET, between PV off (`0B00 00`) and PV on (`0B00 01`) sent to every TAP**, and only to the TAPs being configured: adopting a new TAP left the other's block untouched. The PV off is the CCA's safety step around a config change, not part of the write.
 - **Never log or commit this block:** it carries the key.
 
 ## Bring-up
@@ -86,7 +96,11 @@ The 37-byte GatewayCfg reply: the 36-byte block the CCA writes, then a 00. Laid 
 
 Our master does steps 1–6 for one TAP. Its STORE runs only on that drop-back path, and it worked on hardware twice with a never-used G5.26 (2720da4). A stored id can be stored again: SET_ID_BY_MAC to 1235 plus a key-only STORE returns a TAP to "factory" for its RS485 id.
 
+With more than one TAP, the CCA herds them all at once, and our master's `Herd` (`tigo_master.h`) copies it frame for frame, used only with `master_adopt_taps` on. The 11-06 recording of the bench CCA adopting a second TAP (`cca-two-taps-20261106-2035.bin`) shows: five SET_485_ID broadcasts ~0.75 s apart; one GET_MAC at 1235 that both TAPs answer, 70 ms apart; SET_ID_BY_MAC for each at 1235, the known TAP to its old id and the new one to the next free; the five-GET_MAC scan; GET_MAC_NOW at each new id; the hop, each TAP to the next id past every placed one (1202 → 1203, 1201 → 1204); RESET, ~5 s of quiet, GET_MAC_NOW at each home id. The new TAP had no stored id and wasn't back, so the CCA ran the whole herd again and sent that TAP a key-only STORE straight after its read. Then polling alternated strictly between the two, each getting its own window reads, `0B00`, `22`, walks and `0x41`s. Our master does all of that but the `0x41`s: with more than one TAP it sends none, since a copied one names the TAP a CCA chose and could steer an optimizer onto the wrong TAP; one that gets none keeps its TAP (owner's analysis, 2026-11-10). The design is `docs/superpowers/specs/2026-11-10-multi-tap-design.md`.
+
 **A CCA reflashes TAPs.** The 3.6 CCA updated the never-used G5.26 to G8.59 on its first bring-up, with its own updates blocked: 292 × 0x0522 blocks, about 20 s. Its UI can also install a chosen image or erase one, and erasing them all bricks the TAP.
+
+**H and G TAPs** (owner's analysis, 2026-11-10). Both run the same mesh-gateway firmware family and speak the same protocol to the CCA: herd, ids, tables, GatewayCfg, discovery, PV off and the 0x41 messages. On the 2026-11-10 bench an H1.0006 and a G8.65 behaved identically under our master, and findings from the H1.0007 image hold for the G8. They are different chips, though (Silicon Labs EFR32MG21 and NXP JN5148), each with its own bootloader and image format, so an H image can't go on a G TAP or the other way round; the CCA picks the image from the TAP's version string. The CCA runs mixed H and G TAPs as one mesh system, but **a TAP still on star-only firmware (a G5.x) forces the whole system back to the old star stack**, so never put one on a mesh system; the CCA moved the bench's G5.26 to G8.59 on first bring-up for that reason. TAPs of very different build ages may differ in timing (the CCA counts those on a 4-minute slot clock), not in protocol.
 
 **How the CCA finds and numbers TAPs** (the owner's analysis of the 4.0.3 CCA's firmware, 2026-11-09, checked against the 11-06 bring-up capture):
 - **It never looks for a TAP at its old address or scans a range.** The SET_485_ID broadcast pulls every TAP on the bus to 1235, whatever address it had, duplicates included, and GET_MAC then separates them by MAC. A used TAP from another system is found the same way as a new one.
@@ -96,15 +110,19 @@ Our master does steps 1–6 for one TAP. Its STORE runs only on that drop-back p
 - **A used TAP brings its gateway, not its optimizers.** Once the CCA writes the system's channel, PAN and key to it (the GatewayCfg write), the optimizers it served are on a foreign network until each is added again.
 - **Baud rate:** detection sets the CCA's port to 38400 without telling the TAPs. A TAP left at 115200 by another system won't hear the herd. We've only ever seen TAPs at 38400.
 - **Herding is bus-wide:** every TAP, including working ones, is pulled to 1235 and reassigned, and data collection stops meanwhile.
+- **A herd and its RESET touch only the TAP's RS485 side** (owner's analysis, 2026-11-10). Channel, PAN, key and the node table are in flash and survive, so joined optimizers don't rejoin; they reach the TAP again once it's back, which is why the panels kept reporting through every 11-06 herd. What the reset loses is the TAP's memory: an open discovery window, and joins and polls in progress. The table and each entry's joined flag are in flash and come back at boot (below). So a herd in the middle of an add closes the window. Our master reads each TAP's window at least every 20 s and renews one it finds closed with nodes still to join, so it reopens within about 20 s; this hasn't been watched on hardware.
 - **Firmware:** the 4.0.3 analysis found the version read and stored, with no gateway firmware update in the bus daemon it covered. The 3.6 CCA on the 11-06 bench did reflash a TAP (above), so either 4.0.3 dropped it or it lives elsewhere. Treat any CCA as able to reflash a TAP.
 
-For our master this changes nothing yet: it drives one TAP and herds only when that TAP turns up at 1235. A used TAP left at some other address sits there unseen until a herd. Adopting a second TAP would need the five-pass herd and the address rules above, and still the GatewayCfg write, which stays on the never-send list.
+Our master now drives every TAP in its saved list (`taps.json`), and with `master_adopt_taps` on, a TAP at 1235 that isn't one of them starts the five-pass herd with the address rules above; the owner can start one too, to find a TAP left at some other address. A TAP it adopts must already be configured by a CCA: the GatewayCfg write stays on the never-send list, so the Pi never gives a TAP its channel, PAN or key.
 
 ## Node tables, joining, moving and removing
 
 - **Each TAP's table** is up to 1024 slots of MAC + TUID, in flash.
   - Bit 15 of the TUID means provisional: in the table, not yet joined.
-  - Joins persist through TAP power loss. The open window doesn't.
+  - Joins persist through TAP power loss. The open window doesn't. The joined flag is a bit in each slot's spare byte (a new entry is written not joined; joining clears the bit, no erase needed), reloaded into memory at boot. A table read (0x26) sets bit 15 from that, so it shows the joined state as it stands (owner's analysis, 2026-11-10).
+- **The table doesn't decide whose reports get through** (owner's analysis, 2026-11-10, and the roof). A node with the TAP's network key reports through it whether or not the table lists it: a join marks the entry joined if there is one, and the reports are built from the radio side, not from the table. A spare retired from the roof TAP's table on 2026-11-10 went on reporting there, shown as unassigned. What the table governs is the roster: which nodes the CCA counts, their joined flags, and the window's counts. It can't work any other way: a new node reports before the CCA writes its record.
+- **A node remembers several networks,** a table of them, and can roam among them; so a spare that was once on the roof goes back whenever it hears the roof TAP, even with another TAP's window open for it (the 2026-11-10 bench). It leaves a network only by a blacklist command for that network, its own `Leave` text command, a leave from its parent, its keep-alive running out when the parent stops listing it as a child, or the network itself changing (a new PAN or channel). It forgets every network only when the TAP's beacon carries a clear command; which CCA action sets that is unknown. No normal CCA flow sends `Leave` or a blacklist; the only way in is the CCA's command-line page. There is no factory reset in its command set (owner's analysis, 2026-11-10). **A table rewrite (0x2B/0x29) sends nothing to the node,** so it neither strands a node nor evicts one.
+- **Kick (0x44)** is the CCA's message to evict a node a TAP hears but doesn't list, sent only during star discovery. 0x45 and 0x46 are firmware request and delivery, the CCA's over-the-air update for optimizers. None appears in any capture; all are never-send (below), as is the optimizer's `Leave` text.
 - **A known node rejoins on its own,** with the window closed:
   - about 40 s after a TAP RESET;
   - about 2 min after the optimizer itself was powered off for hours.
@@ -193,7 +211,7 @@ The read-back `!Smrt …` has **one layout for every firmware** (the analysis si
 ## What the Pi must never send
 
 The send gate lists these as never (some are still being moved there; see plan Task 8):
-- **Tunnel subs:** EraseFlash, SetTable (until Phase 2 is approved), the GatewayCfg write, ResetNode, PeriodicCfg Write, SetKnownNetworks, EraseStackTrace, 0x12, 0x1B.
+- **Tunnel subs:** EraseFlash, SetTable (until Phase 2 is approved), the GatewayCfg write, ResetNode, PeriodicCfg Write, SetKnownNetworks, EraseStackTrace, 0x12, 0x1B, and the star messages 0x42–0x47 (Own, Ignore, Kick, firmware request and delivery, 0x47). A text command containing `Leave` to an optimizer.
 - **Top-level commands:** SET_CHANNEL, the channel scan (0x0070/0x0072), every TAP firmware command (0x0520–0x0527), CLEAR_ADT, SET_LIST_ENTRIES, and STORE in any form but the key-only bring-up one.
 
 **Any one of these, on the roof, can silence every optimizer, re-key the network, or brick the TAP.**
@@ -201,7 +219,9 @@ The send gate lists these as never (some are still being moved there; see plan T
 ## Still open
 
 - What `SET_CHANNEL 20 00` means.
-- The status byte's bit order.
+- The status byte's bit order, and what the status byte after a GatewayCfg read means (the CCA ignores it).
+- The layout of the 16 bytes in a 0x41 that list the TAPs that can hear an optimizer.
 - Which character of the `^00Smrt_` write maps to which field.
 - Whether to turn NetDiag on with PeriodicCfg Write so the mesh map refreshes, and at what rate; left until the Pi takes on more writes.
-- Whether a TAP takes a node that isn't in its table (plan session B3). This decides whether we ever need SetTable.
+- Whether a factory-new node, with no key yet, can join a TAP that doesn't list it. A keyed one reports regardless (above); the analysis implies a new one joins first and is listed after, which would mean an add needs the open window more than the table write. Not yet seen on the bench.
+- How many networks a node remembers.

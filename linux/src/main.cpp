@@ -9,6 +9,7 @@
 #include "pv_store.h"
 #include "discovery_store.h"
 #include "table_store.h"
+#include "tap_store.h"
 #include "monitor.h"
 #include "cca_ble.h"
 #include "cca_http.h"
@@ -33,7 +34,9 @@
 #include <fstream>
 #include <memory>
 #include <mutex>
+#include <set>
 #include <string>
+#include <strings.h>
 #include <sys/stat.h>
 #include <systemd/sd-daemon.h>
 #include <thread>
@@ -182,6 +185,25 @@ int main(int argc, char **argv) {
   DiscoveryStore discovery(state_dir + "/discovery.json");
   discovery.load();
   TableStore table_store(state_dir + "/table-remove.json");
+  TapStore tap_store(state_dir + "/taps.json");
+  // The TAP an optimizer (MAC, hex) last reported through, from the Monitor's
+  // link stats: 0 if it never has, which a table change takes as the first.
+  auto tap_of_mac = [&monitor](const std::string &mac) -> uint16_t {
+    std::string addr;
+    for (const Node &n : monitor.nodes())
+      if (strcasecmp(n.long_address.c_str(), mac.c_str()) == 0) addr = n.addr;
+    if (addr.empty()) return 0;
+    auto links = monitor.links();
+    auto it = links.links().find(addr);
+    return it == links.links().end() ? 0 : it->second.tap;
+  };
+  // tap if the master runs it, else 0 (the first): a link heard before
+  // gateway_id changed names a TAP that isn't polled.
+  auto known_tap = [](const BusMaster &m, uint16_t tap) -> uint16_t {
+    for (const auto &t : m.taps())
+      if (t.id == tap) return tap;
+    return 0;
+  };
   // Every frame, named, and an alarm for one that reconfigures the TAP.
   BusLog bus_log(state_dir + "/bus-alarm.json", state_dir + "/versions.json");
   bus_log.load();
@@ -234,10 +256,28 @@ int main(int argc, char **argv) {
       // may land: one taken by the old master would be lost, and the new one
       // would start from the state before it. The requests take this too.
       std::unique_lock<std::mutex> swap(master_mu);
+      // The TAPs saved by a herd; none, the one at gateway_id. With more
+      // than one (saved, or after a herd), each TAP's 0x41s go to the
+      // optimizers heard through it.
+      auto saved_taps = tap_store.load();
+      if (!saved_taps.empty()) m->set_taps(saved_taps);
+      m->set_tap_targets([&monitor](uint16_t tap) {
+        std::vector<uint16_t> tuids;
+        int64_t since = static_cast<int64_t>(time(nullptr)) - 86400;
+        auto links = monitor.links();
+        for (const auto &kv : links.links())
+          if (kv.second.tap == tap && kv.second.last_heard_s >= since)
+            tuids.push_back(static_cast<uint16_t>(strtoul(kv.first.c_str(), nullptr, 16)));
+        return tuids;
+      });
       m->set_pv(pv.state(), [&pv](const PvState &s) { pv.save(s); }, pv.unreadable());
       m->set_discovery(discovery.renew(), [&discovery](bool renew) { discovery.save(renew); });
       m->set_read_tap_config(settings.master_read_tap_config);
       m->set_table_writes(settings.master_table_writes);
+      // A herd's TAPs, saved so each gets its id back next time.
+      m->set_adopt_taps(settings.master_adopt_taps, [&tap_store](const std::vector<BusMaster::TapEntry> &taps) {
+        if (tap_store.save(taps)) LOGI("bus master: saved %zu TAP%s", taps.size(), taps.size() == 1 ? "" : "s");
+      });
       // A replace's new optimizer, once it has joined, takes the old one's
       // place in the layout, as a CCA's cloud does.
       m->set_on_replaced([&monitor](const std::string &old_mac, const std::string &new_mac) {
@@ -385,30 +425,37 @@ int main(int argc, char **argv) {
         return 200;
       },
       &bus_log,
-      [&](const esphome::tigo_monitor::master::Bytes &mac, uint16_t id, bool dry_run, std::string &why) {
+      [&](const esphome::tigo_monitor::master::Bytes &mac, uint16_t id, bool dry_run, std::string &why, uint16_t tap) {
         std::lock_guard<std::mutex> lock(master_mu);
         if (!bus_master) {
           why = "this monitor isn't running the bus";
           return 409;
         }
-        return bus_master->request_table_add(mac, id, dry_run, why) ? 200 : 409;
+        // With more than one TAP, an id is free only if no TAP lists it.
+        std::set<uint16_t> avoid;
+        if (bus_master->taps().size() > 1)
+          for (const Node &n : monitor.nodes())
+            avoid.insert(static_cast<uint16_t>(strtoul(n.addr.c_str(), nullptr, 16) & 0x7FFF));
+        return bus_master->request_table_add(mac, id, dry_run, why, tap, avoid) ? 200 : 409;
       },
-      [&](const esphome::tigo_monitor::master::Bytes &mac, bool dry_run, std::string &why) {
+      [&](const esphome::tigo_monitor::master::Bytes &mac, bool dry_run, std::string &why, uint16_t tap) {
         std::lock_guard<std::mutex> lock(master_mu);
         if (!bus_master) {
           why = "this monitor isn't running the bus";
           return 409;
         }
-        return bus_master->request_table_remove(mac, dry_run, why) ? 200 : 409;
+        if (!tap) tap = known_tap(*bus_master, tap_of_mac(esphome::tigo_monitor::master::mac_hex(mac)));
+        return bus_master->request_table_remove(mac, dry_run, why, tap) ? 200 : 409;
       },
       [&](const esphome::tigo_monitor::master::Bytes &old_mac, const esphome::tigo_monitor::master::Bytes &new_mac,
-          bool dry_run, std::string &why) {
+          bool dry_run, std::string &why, uint16_t tap) {
         std::lock_guard<std::mutex> lock(master_mu);
         if (!bus_master) {
           why = "this monitor isn't running the bus";
           return 409;
         }
-        return bus_master->request_table_replace(old_mac, new_mac, dry_run, why) ? 200 : 409;
+        if (!tap) tap = known_tap(*bus_master, tap_of_mac(esphome::tigo_monitor::master::mac_hex(old_mac)));
+        return bus_master->request_table_replace(old_mac, new_mac, dry_run, why, tap) ? 200 : 409;
       },
       [&](const esphome::tigo_monitor::master::Bytes &mac, std::string &why) {
         std::lock_guard<std::mutex> lock(master_mu);
@@ -419,6 +466,14 @@ int main(int argc, char **argv) {
         if (bus_master->request_table_stop_waiting(mac)) return 200;
         why = "not waiting for that optimizer to join";
         return 409;
+      },
+      [&](std::string &why) {
+        std::lock_guard<std::mutex> lock(master_mu);
+        if (!bus_master) {
+          why = "this monitor isn't running the bus";
+          return 409;
+        }
+        return bus_master->request_herd(why) ? 200 : 409;
       }});
   if (port < 0 && settings.web_port > 0) port = settings.web_port;
   // Only the default steps aside for another web server; a port someone
@@ -549,7 +604,8 @@ int main(int argc, char **argv) {
                         fresh.master_queries != settings.master_queries ||
                         fresh.master_optimizer_writes != settings.master_optimizer_writes ||
                         fresh.master_read_tap_config != settings.master_read_tap_config ||
-                        fresh.master_table_writes != settings.master_table_writes;
+                        fresh.master_table_writes != settings.master_table_writes ||
+                        fresh.master_adopt_taps != settings.master_adopt_taps;
         if (fresh.web_port != settings.web_port) LOGI("web: the new port takes effect when the service restarts");
         if (fresh.tls_cert != settings.tls_cert || fresh.tls_key != settings.tls_key)
           LOGI("web: the HTTPS change takes effect when the service restarts");

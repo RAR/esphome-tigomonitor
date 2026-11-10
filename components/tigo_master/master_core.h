@@ -95,6 +95,28 @@ struct TableJoinOutcome {
   int64_t at_unix = 0;
 };
 
+// One TAP the master runs (docs/superpowers/specs/2026-11-10-multi-tap-design.md):
+// its counts and state. MasterStatus's own fields sum the counts over every
+// TAP and give the first TAP's state, so with one TAP they read as before.
+struct TapStatus {
+  uint16_t id = 0;
+  std::string mac;      // hex, once it has answered a GET_MAC
+  std::string version;  // VERSION's reply
+  // running: polled. lost: stopped answering, asked again now and then.
+  // removed: unanswered LOST_MISSES times, asked rarely (it keeps its id).
+  std::string state = "running";
+  esphome::tigo_monitor::master::DiscoveryWindow discovery;
+  bool discovery_read = false;
+  uint32_t renewals = 0, polls = 0, timeouts = 0, resyncs = 0;
+  uint32_t tap_lost = 0, back_without_discovery = 0;
+  std::vector<int64_t> recent_lost_unix;  // oldest first, at most MasterStatus::RECENT_LOST
+  int64_t last_reply_unix = 0;
+  uint32_t sent_41 = 0, sent_session = 0, sent_broadcast = 0, sent_walk_pages = 0, walks_done = 0;
+  uint32_t sent_reads = 0, not_taken = 0, sent_writes = 0, answers = 0;
+  bool pv_confirmed = false, pv_unconfirmed = false;
+  int pv_last_sent = -1, pv_last_reply = -1;
+};
+
 struct MasterStatus {
   bool active = false;  // the port is open and nothing has stopped it
   Fault fault = Fault::none;
@@ -112,7 +134,7 @@ struct MasterStatus {
   // running down to 0 between renewals is normal and not counted.
   uint32_t tap_lost = 0;
   std::vector<int64_t> recent_lost_unix;  // oldest first, at most RECENT_LOST
-  static const size_t RECENT_LOST = 10;
+  static constexpr size_t RECENT_LOST = 10;
   uint32_t back_without_discovery = 0;
   // The longest the bus waited on the daemon rather than the TAP: from the
   // end of one tick to the start of the next, or inside on_rx (decoding).
@@ -156,7 +178,9 @@ struct MasterStatus {
   TableEditStatus table_edit;
   std::vector<TableWaiting> table_waiting;
   std::vector<TableJoinOutcome> table_joins;  // newest last, at most TABLE_JOINS_KEPT
-  static const size_t TABLE_JOINS_KEPT = 10;
+  static constexpr size_t TABLE_JOINS_KEPT = 10;
+  uint16_t table_tap = 0;      // the TAP the last change ran on
+  std::vector<TapStatus> taps;  // in the order they are polled
 };
 
 // The serial port on the bus. The core calls it only from tick().
@@ -204,15 +228,49 @@ class MasterCore {
   MasterCore(Transport *port, Log log, Sink on_rx, SentSink on_tx, uint16_t gateway_id, bool bench, bool startup,
              bool housekeeping = false, std::vector<esphome::tigo_monitor::master::Learned41::Entry> learned = {},
              Targets targets = nullptr, bool queries = false, bool writes = false);
-  static const uint32_t TARGETS_EVERY_MS = 60000;
+  static constexpr uint32_t TARGETS_EVERY_MS = 60000;
   ~MasterCore();
+
+  // The TAPs to run, in polling order (the saved map); call before open().
+  // Without it, the one at gateway_id. An empty MAC is one not heard yet.
+  struct TapEntry {
+    uint16_t id = 0;
+    esphome::tigo_monitor::master::Bytes mac;
+  };
+  void set_taps(const std::vector<TapEntry> &taps);
+  std::vector<TapEntry> taps() const;  // as now known, MACs included
+  // The optimizers to send 0x41s to through one TAP, asked each minute.
+  // While more than one TAP is run, each gets its own from it; with one TAP,
+  // or without it, targets' (all of them).
+  using TapTargets = std::function<std::vector<uint16_t>(uint16_t tap)>;
+  void set_tap_targets(TapTargets t) { tap_targets_ = std::move(t); }
+  // master_adopt_taps: a TAP heard at the factory address that isn't one of
+  // these starts the CCA's herd (tigo_master.h's Herd), which moves every
+  // TAP on the bus, gives each its saved id or a new one, and saves the list
+  // (saved). Off, it is reported and left alone, as with one TAP. Needs
+  // startup on; call before open().
+  using TapsSaved = std::function<void(const std::vector<TapEntry> &taps)>;
+  void set_adopt_taps(bool on, TapsSaved saved) {
+    adopt_taps_ = on;
+    taps_saved_ = std::move(saved);
+  }
+  // The owner's herd, to find a TAP left at some other address: at the next
+  // tick. False, with why, unless adopting is on and this monitor runs the
+  // bus with no change to a table running.
+  bool request_herd(std::string &why);
+  // With more than one TAP, one that stopped answering is asked once every
+  // LOST_PROBE_MS while the others are polled, and after LOST_MISSES
+  // unanswered, once every REMOVED_PROBE_MS.
+  static constexpr uint32_t LOST_PROBE_MS = 30000;
+  static constexpr uint32_t LOST_MISSES = 10;
+  static constexpr uint32_t REMOVED_PROBE_MS = 300000;
 
   // Stand by rather than run the bus (bus_role standby); call before open().
   // on_listen gets the bytes read while standing by (the Monitor, and the
   // 0x41 learning); learned is asked for the 0x41s at each takeover.
   using Learned = std::function<std::vector<esphome::tigo_monitor::master::Learned41::Entry>()>;
   void set_standby(uint32_t takeover_s, Sink on_listen, Learned learned);
-  static const uint32_t TAKEOVER_JITTER_MS = 500;  // at most, so two standbys starting together don't tie
+  static constexpr uint32_t TAKEOVER_JITTER_MS = 500;  // at most, so two standbys starting together don't tie
 
   // The PV state to start from (the one saved), and where to save a change;
   // call before open().
@@ -257,10 +315,14 @@ class MasterCore {
   // while standing by, with PV held off or the window held closed by the
   // owner, or without master_table_writes (a dry run needs none of those
   // but the first two).
-  bool request_table_add(const esphome::tigo_monitor::master::Bytes &mac, uint16_t id, bool dry_run, std::string &why);
+  // tap: the TAP's id (0: the first). avoid: ids listed on other TAPs, which
+  // an add choosing the lowest free one skips (optimizer ids are system-wide).
+  bool request_table_add(const esphome::tigo_monitor::master::Bytes &mac, uint16_t id, bool dry_run, std::string &why,
+                         uint16_t tap = 0, const std::set<uint16_t> &avoid = {});
   // Starts removing one: the table erased and what stays written back. The
   // same refusals, but for the window, and nowhere to save what stays.
-  bool request_table_remove(const esphome::tigo_monitor::master::Bytes &mac, bool dry_run, std::string &why);
+  bool request_table_remove(const esphome::tigo_monitor::master::Bytes &mac, bool dry_run, std::string &why,
+                            uint16_t tap = 0);
   // Starts replacing one: the table erased and written back without it,
   // with the new one listed (not joined) at its address, then waited for
   // like an add. The removal's refusals, and a new MAC that isn't 8 bytes.
@@ -273,7 +335,8 @@ class MasterCore {
   using TableRemoved = std::function<void(const std::string &mac)>;
   void set_on_removed(TableRemoved cb) { on_removed_ = std::move(cb); }
   bool request_table_replace(const esphome::tigo_monitor::master::Bytes &old_mac,
-                             const esphome::tigo_monitor::master::Bytes &new_mac, bool dry_run, std::string &why);
+                             const esphome::tigo_monitor::master::Bytes &new_mac, bool dry_run, std::string &why,
+                             uint16_t tap = 0);
   // Stops waiting for an added optimizer to join (it stays listed, and
   // joins whenever the window is next open). False if it isn't waited for.
   bool request_table_stop_waiting(const esphome::tigo_monitor::master::Bytes &mac);
@@ -286,29 +349,69 @@ class MasterCore {
   // The optimizers' last !Info and !Mppt answers, by short id (queries on).
   std::map<uint16_t, esphome::tigo_monitor::master::Queries::Setup> setups() const;
 
-  static const int REPLY_TIMEOUT_MS = 50;
-  static const uint32_t REOPEN_EVERY_MS = 5000;
-  static const uint32_t LOG_FIRST_REPLIES = 20;  // poll reply headers logged at INFO, for the bench
-  static const uint16_t FACTORY_ID = 0x1235;     // the universal factory RS485 address
-  static const uint32_t NO_REPLY_FAULT_AFTER = 10;
+  static constexpr int REPLY_TIMEOUT_MS = 50;
+  static constexpr uint32_t REOPEN_EVERY_MS = 5000;
+  static constexpr uint32_t LOG_FIRST_REPLIES = 20;  // poll reply headers logged at INFO, for the bench
+  static constexpr uint16_t FACTORY_ID = 0x1235;     // the universal factory RS485 address
+  static constexpr uint32_t NO_REPLY_FAULT_AFTER = 10;
   // Missed answers in a row at the TAP's own address before the factory
   // address is tried: one lost reply is not a TAP that forgot its id.
-  static const uint32_t PROBE_MISSES_BEFORE_FACTORY = 3;
+  static constexpr uint32_t PROBE_MISSES_BEFORE_FACTORY = 3;
   // A TAP that refuses every request (0x0006) is asked once a second, not
   // forty times: it is answering, so this isn't a TAP lost.
-  static const uint32_t REFUSED_RETRY_MS = 1000;
-  static const uint32_t RETRY_AFTER_FAIL_MS = 30000;  // a failed bring-up looks again after this
+  static constexpr uint32_t REFUSED_RETRY_MS = 1000;
+  static constexpr uint32_t RETRY_AFTER_FAIL_MS = 30000;  // a failed bring-up looks again after this
 
  private:
+  // One TAP on the bus and everything kept for it: what with one TAP was the
+  // master's own. st is under mu_; the rest is the tick thread's.
+  struct Tap {
+    uint16_t id = 0;
+    esphome::tigo_monitor::master::Bytes mac;  // the TAP that answered at id, once one has
+    TapStatus st;
+    esphome::tigo_monitor::master::WindowKeeper window;
+    esphome::tigo_monitor::master::PollCursor cursor{0};
+    // Made each time polling starts, so a TAP brought up again gets the
+    // 0x0B00 straight away, as the CCA's bring-up sends it.
+    std::unique_ptr<esphome::tigo_monitor::master::Housekeeping> housekeeping;
+    std::unique_ptr<esphome::tigo_monitor::master::Queries> queries;
+    // Made each time polling starts, from pv_state_, so a TAP brought up
+    // again hears the held state first.
+    std::unique_ptr<esphome::tigo_monitor::master::PvSwitch> pv;
+    // The added optimizers waited for on this TAP.
+    esphome::tigo_monitor::master::JoinWatch join_watch;
+    uint32_t sent_41_before = 0, sent_session_before = 0;  // from earlier Housekeepings
+    uint32_t sent_broadcast_before = 0, sent_walk_pages_before = 0, walks_done_before = 0;
+    uint32_t targets_at_ms = 0;
+    bool targets_empty = true;
+    uint32_t timeouts_in_a_row = 0;
+    uint32_t refusals_in_a_row = 0;
+    uint32_t refused_at_ms = 0;
+    uint32_t replies_logged = 0;
+    bool version_asked = false;  // the TAP's version, asked once per start
+    bool lost_since_window_read = false;  // the next discovery read says whether it came back without one
+    bool readdressed = false;         // the last bring-up moved it off the factory address
+    bool session_reset_sent = false;  // the 0x0B00 00, sent once per start, as after a CCA reboot
+    bool config_read_sent = false;    // once a master lifetime, not at each takeover
+    // More than one TAP: lost (stopped answering), it is asked at most once
+    // every LOST_PROBE_MS; removed after LOST_MISSES of those.
+    bool lost = false;
+    uint32_t lost_misses = 0;
+    uint32_t next_try_ms = 0;
+    uint32_t pv_gen = 0;  // the request_pv its switch has been told
+  };
+
   // Sends one frame and reads until the gateway's reply ends or the timeout.
   // false on a timeout, a write error or a second master.
+  // all: every reply heard until the timeout goes there, not just the first.
   bool transact(uint16_t dest, uint16_t cmd, const esphome::tigo_monitor::master::Bytes &payload,
-                esphome::tigo_monitor::master::Frame &reply, uint32_t timeout_ms = REPLY_TIMEOUT_MS);
+                esphome::tigo_monitor::master::Frame &reply, uint32_t timeout_ms = REPLY_TIMEOUT_MS,
+                std::vector<esphome::tigo_monitor::master::Frame> *all = nullptr);
   bool is_reply(uint16_t cmd, const esphome::tigo_monitor::master::Bytes &request,
                 const esphome::tigo_monitor::master::Frame &f) const;
   void run_startup(uint32_t now_ms);  // probe + discovery, before steady state
-  void ask_version_();               // VERSION (0x000A), into status().tap_version
-  void stand_by_(uint32_t now_ms);   // listen for another master; take over when there is none
+  void ask_version_(Tap &t);          // VERSION (0x000A), into its status
+  void stand_by_(uint32_t now_ms);    // listen for another master; take over when there is none
   void take_over_(int64_t quiet_ms);
   void yield_();
   void listen_stopped_();
@@ -322,8 +425,17 @@ class MasterCore {
   void set_fault(Fault f, const std::string &detail);
   void log_(int prio, const char *fmt, ...) __attribute__((format(printf, 3, 4)));
   void update_discovery_fault_();
-  void drop_housekeeping_();
+  void drop_housekeeping_(Tap &t);
+  void restart_taps_();  // window, housekeeping, queries and counts back to a start, for every TAP
   void report_extra_taps_(const std::vector<esphome::tigo_monitor::master::Bytes> &macs);
+  void note_stranger_(const esphome::tigo_monitor::master::Bytes &mac);
+  // The TAP to serve this tick (round robin over those due), or null.
+  Tap *next_tap_(uint32_t now_ms);
+  Tap *tap_by_id_(uint16_t id);  // 0: the first
+  Tap &first_() { return *taps_.front(); }
+  bool several_() const { return taps_.size() > 1; }
+  void tap_answered_(Tap &t);
+  void tap_unanswered_(Tap &t, uint32_t now_ms);
 
   Sink on_rx_;
   SentSink on_tx_;
@@ -331,16 +443,18 @@ class MasterCore {
   bool bench_, startup_;
   bool housekeeping_on_;
   bool read_tap_config_ = false;
-  bool config_read_sent_ = false;  // once a master lifetime, not at each takeover
   std::vector<esphome::tigo_monitor::master::Learned41::Entry> learned_;
-  // Made each time polling starts, so a TAP brought up again gets the
-  // 0x0B00 straight away, as the CCA's bring-up sends it.
-  std::unique_ptr<esphome::tigo_monitor::master::Housekeeping> housekeeping_;
   Targets targets_;
+  TapTargets tap_targets_;
   bool queries_on_, writes_on_;
+  // The TAPs, in polling order; the vector itself changes only under mu_.
+  std::vector<std::unique_ptr<Tap>> taps_;
+  size_t turn_ = 0;  // the next TAP's turn
   bool table_writes_on_ = false;
   std::unique_ptr<esphome::tigo_monitor::master::TableJob> table_job_;
   std::unique_ptr<esphome::tigo_monitor::master::TableJob> table_job_pending_;  // under mu_
+  uint16_t table_tap_ = 0;          // the TAP table_job_ runs on
+  uint16_t table_tap_pending_ = 0;  // under mu_: and table_job_pending_'s
   bool table_job_running_ = false;  // under mu_: pending or table_job_
   TableSaved table_saved_;
   // A removal cut off between its erase and its write back (the TAP
@@ -348,79 +462,68 @@ class MasterCore {
   // RESUME_AFTER_MS, and every RESUME_AFTER_MS after a try that fails.
   esphome::tigo_monitor::master::Bytes resume_mac_;
   std::vector<esphome::tigo_monitor::master::TableRecord> resume_stay_;
+  uint16_t resume_tap_ = 0;
   bool resume_waiting_ = false;
   uint32_t resume_at_ms_ = 0;
-  static const uint32_t RESUME_AFTER_MS = 60000;
-  bool table_refusal_(bool dry_run, std::string &why) const;  // under mu_
-  void start_table_job_(std::unique_ptr<esphome::tigo_monitor::master::TableJob> job);  // under mu_
+  static constexpr uint32_t RESUME_AFTER_MS = 60000;
+  bool table_refusal_(bool dry_run, uint16_t tap, std::string &why) const;  // under mu_
+  void start_table_job_(std::unique_ptr<esphome::tigo_monitor::master::TableJob> job, uint16_t tap);  // under mu_
   void sync_table_status_(bool finished_now);
   void settle_table_job_(uint32_t now_ms);
-  // The added optimizers waited for (tick thread), and the owner's "stop
-  // waiting"s for the next tick (under mu_).
-  esphome::tigo_monitor::master::JoinWatch join_watch_;
+  // The owner's "stop waiting"s for the next tick (under mu_).
   std::vector<esphome::tigo_monitor::master::Bytes> stop_waiting_;
   std::map<std::string, int64_t> waiting_since_;  // by MAC hex
   std::map<std::string, std::string> replaced_from_;  // a replace's new MAC → the old, both hex, until it joins
   TableReplaced on_replaced_;
   TableRemoved on_removed_;
-  void sync_join_status_();
-  std::unique_ptr<esphome::tigo_monitor::master::Queries> queries_;
-  // queries_'s answers, kept across a restart of queries_ (a takeover, a TAP
-  // power cut); under mu_.
+  void sync_join_status_(Tap &t);
+  // Every TAP's queries' answers, kept across a restart of them (a
+  // takeover, a TAP power cut); under mu_.
   std::map<uint16_t, esphome::tigo_monitor::master::Queries::Setup> setups_;
-  uint32_t setups_at_answers_ = 0;
-  // Made each time polling starts, from pv_state_, so a TAP brought up again
-  // hears the held state first.
-  std::unique_ptr<esphome::tigo_monitor::master::PvSwitch> pv_;
   PvState pv_state_;       // under mu_
   bool discovery_renewing_ = true;  // under mu_
   bool window_wanted_ = true;       // under mu_
-  bool pv_changed_ = false;  // under mu_: request_pv's, for the next tick
+  uint32_t pv_gen_ = 0;  // under mu_: bumped by request_pv; each TAP's switch follows it
   // Standing by: whether a 0x0B00 has been heard since it began. A takeover
   // without one leaves the switch silent (tigo_master.h's PvSwitch).
   bool pv_heard_since_standby_ = false;  // under mu_
   bool pv_silent_ = false;               // under mu_
   PvSaved pv_saved_;
   DiscoverySaved discovery_saved_;
-  void sync_pv_status_();
+  void sync_pv_status_(Tap &t);
   void hear_pv_(bool off);
   uint32_t hold_until_ms_ = 0;  // discovery's quiet after a RESET
   bool holding_ = false;
-  uint32_t targets_at_ms_ = 0;
-  bool targets_empty_ = true;
   void tick_(uint32_t now_ms);
   void note_pause_(uint32_t ms, int64_t now_steady_ms);
-  static const int64_t GAP_WINDOW_MS = 5 * 60000;
+  static constexpr int64_t GAP_WINDOW_MS = 5 * 60000;
   // How far past its due a wait inside a request may run before the excess
   // counts as a pause: the process was not running (stopped, or starved).
-  static const int64_t OVERRUN_SLACK_MS = 20;
+  static constexpr int64_t OVERRUN_SLACK_MS = 20;
   int64_t last_tick_end_ms_ = -1;  // steady clock
   int64_t gap_window_start_ms_ = 0;
   uint32_t gap_window_max_ms_ = 0, gap_prev_window_max_ms_ = 0;
-  bool lost_since_window_read_ = false;  // the next discovery read says whether it came back without one
-  bool readdressed_ = false;     // the last bring-up moved the TAP off the factory address
-  bool session_reset_sent_ = false;  // the 0x0B00 00, sent once per start, as after a CCA reboot
-  uint32_t sent_41_before_ = 0, sent_session_before_ = 0;  // from earlier Housekeepings
-  uint32_t sent_broadcast_before_ = 0, sent_walk_pages_before_ = 0, walks_done_before_ = 0;
   Phase phase_;
   std::unique_ptr<esphome::tigo_monitor::master::Discovery> discovery_;
+  std::unique_ptr<esphome::tigo_monitor::master::Herd> herd_;  // instead of discovery_, adopting
+  bool adopt_taps_ = false;
+  TapsSaved taps_saved_;
+  bool herd_wanted_ = false;  // under mu_: request_herd's, for the next tick
+  void start_herd_(const char *why);
+  void herd_done_();
+  uint16_t discovery_tap_ = 0;  // the TAP discovery_ brings up
+  size_t probe_index_ = 0;      // probing: the TAP being looked for
+  uint32_t probe_misses_ = 0;   // GET_MAC_NOWs in a row unanswered at its id
   Transport *port_;  // reopened every REOPEN_EVERY_MS while closed, as listening does
   Log log_sink_;
   bool tried_open_ = false;
   uint32_t last_open_try_ms_ = 0;
-  esphome::tigo_monitor::master::WindowKeeper window_;
-  esphome::tigo_monitor::master::PollCursor cursor_{0};
+  // The TAP the request in flight went to: transact's poll cursor match.
+  const Tap *in_flight_ = nullptr;
   uint8_t seq_ = 0;
-  uint32_t timeouts_in_a_row_ = 0;
-  uint32_t probe_misses_ = 0;          // GET_MAC_NOWs in a row unanswered at gateway_
-  esphome::tigo_monitor::master::Bytes tap_mac_;  // the TAP that answered at gateway_, once one has
-  uint32_t refusals_in_a_row_ = 0;
-  uint32_t refused_at_ms_ = 0;
   bool refused_ = false;  // the last transact() got the TAP's 0x0006
   bool not_taken_ = false;  // the last transact(), a text query, got the TAP's 0x0146
   std::set<uint16_t> not_taken_logged_;  // nodes whose queries the TAP couldn't deliver, logged once each
-  uint32_t replies_logged_ = 0;
-  bool version_asked_ = false;          // the TAP's version, asked once per start
   std::set<uint16_t> refusals_logged_;  // commands the TAP NAKed (0x0006), logged once each
   esphome::tigo_monitor::protocol::FrameSplitter<std::string> splitter_;
   Standby standby_ = Standby::off;

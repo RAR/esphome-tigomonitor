@@ -17,6 +17,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   node list**, with **Forget** to drop one; it comes back only if it
   reports again. Unplugging it, or moving it out of range, is what stops
   it reporting.
+- **More than one TAP on one Pi (Raspberry Pi, experimental).** Running the
+  bus, the Pi now polls every TAP it knows in turn, as the CCA does, each
+  with its own join window, housekeeping and optimizer table. One TAP that
+  stops answering no longer stops the others. The Devices page shows the
+  TAP each optimizer reports through, and System setup counts and lists
+  each TAP and asks which one an add is for. A new **Take on a new TAP**
+  switch (Settings → Bus, off by default) brings every TAP up again the
+  CCA's way when a new one appears: each known TAP keeps its address, a
+  new one gets the next free and has it stored, and polling stops for
+  about 30 seconds. The new TAP must already have its radio settings from a
+  CCA; the Pi never writes them. With more than one TAP the Pi sends no
+  0x41, the CCA's message telling an optimizer which TAP to use, so it
+  never steers one onto the wrong TAP. Tested against simulated TAPs only,
+  not yet on hardware. With one TAP nothing changes.
 - **Replace, add or retire an optimizer without a CCA (Raspberry Pi,
   opt-in).** A new **System setup** page walks you through it: pick the one
   coming out (quiet ones first), type the new one's printed label (its check
@@ -75,6 +89,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Devices names each TAP's series, and flags a star-only one (Raspberry
+  Pi).** The TAP list's Model column said "Mgate" for every TAP; it now says
+  "H series · mesh" or "G series · mesh", read from the TAP's version as the
+  CCA classifies it, with the TAP's board ID (the version's `GW-…` suffix)
+  beneath. A TAP on star-only firmware (Gway, or a G5.x) shows **Star only**
+  in the warning colour: on a system with mesh TAPs it forces the whole
+  system back to the old star stack. The Firmware column shows the version
+  and date, with the build time in its tooltip, and the Radio column's
+  "admits above 90" is now "join threshold 90" under the channel, with a
+  tooltip saying what it is: the signal a new optimizer must be heard above
+  to join, on the radio's own scale.
 - **The sidebar is grouped: Monitor, Inspect and Control.** The pages that
   change something (Settings, and on the Pi System setup and Bus control)
   now sit together at the bottom, apart from the ones you only read. The Bus

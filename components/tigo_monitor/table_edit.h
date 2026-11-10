@@ -27,6 +27,7 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -299,6 +300,9 @@ class TableAdd : public TableJob {
 
   // want_id 0: the lowest free id from 2, as the CCA chose on the bench.
   TableAdd(const Bytes &mac, uint16_t want_id, bool dry_run) : TableJob(mac, dry_run), want_id_(want_id) {}
+  // Ids listed on the system's other TAPs: never chosen, and refused if
+  // asked for. Optimizer ids are unique across a system, not per TAP.
+  void set_avoid(const std::set<uint16_t> &ids) { avoid_ = ids; }
 
   Request due(uint32_t, uint8_t &seq) override {
     if (finished() || waiting_) return {};
@@ -381,10 +385,11 @@ class TableAdd : public TableJob {
       if (want_id_) {
         if (want_id_ < 2 || want_id_ > 1023) return fail_("an address must be 0002..03FF");
         if (used[want_id_]) return fail_(hex4_(want_id_) + " is already in the table");
+        if (avoid_.count(want_id_)) return fail_(hex4_(want_id_) + " is listed on another TAP");
         id_ = want_id_;
       } else {
         for (uint16_t i = 2; i < 1024 && !id_; i++)
-          if (!used[i]) id_ = i;
+          if (!used[i] && !avoid_.count(i)) id_ = i;
         if (!id_) return fail_("the table has no free address");
       }
       step_ = Step::write;
@@ -404,6 +409,7 @@ class TableAdd : public TableJob {
   }
 
   uint16_t want_id_;
+  std::set<uint16_t> avoid_;
   Step step_ = Step::read_before;
   bool awaiting_ = false;
 };

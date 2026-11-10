@@ -286,14 +286,16 @@ Under **Settings → Bus**, set **Bus role**:
 
 Running the bus, the Pi polls the TAP and renews its
 [discovery window](#disable-the-discovery-window). The rest of what the CCA
-did is behind six switches on the same tab, all off until you turn them on:
+did is behind eight switches on the same tab, all off until you turn them on:
 
 - **Bring up the TAP.** After a power cut a TAP can come back at its
   factory address, where nothing polls it. This re-addresses it and starts
   it again. It only re-addresses the TAP it was polling, never a second one
   on the bus, and a TAP stranded some other way may still need the real CCA.
 - **Send the CCA's housekeeping:** its regular 0x41 to each optimizer, its
-  hourly 0x0B00 and 0x22, and its reads of the TAP's node table.
+  hourly 0x0B00 and 0x22, and its reads of the TAP's node table. With more
+  than one TAP the 0x41 is left out: it tells an optimizer which TAP to use,
+  and the Pi's copy of it can name the wrong one.
 - **Query the optimizers:** the CCA's five questions to each one. The
   firmware and the Settings column on the Devices page come from the
   answers: whether each optimizer has its settings stored, and "differs"
@@ -309,6 +311,15 @@ did is behind six switches on the same tab, all off until you turn them on:
   listening Pi shows them too whenever it hears any master make that read.
 - **Open discovery only when needed:** see
   [below](#disable-the-discovery-window).
+- **Let me change the TAP's table:** lets **System setup** replace, add or
+  retire an optimizer, as the CCA does. Its checks (dry runs) work with
+  this off.
+- **Take on a new TAP** (experimental): with more than one TAP, when one
+  turns up at the factory address the Pi brings every TAP up again the
+  CCA's way. Each known TAP keeps its address, a new one gets the next
+  free and has it stored, and polling stops for about 30 seconds. Needs
+  **Bring up the TAP**. The new TAP must already have its radio settings
+  from a CCA: the Pi never writes them. Tested against simulated TAPs only.
 
 **A dead master is not a fail-safe.** On the roof we measured, with no
 master at all, the array kept producing for the 8 to 10 minutes we watched

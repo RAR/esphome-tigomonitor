@@ -692,6 +692,14 @@
   .setup-health .head { display: flex; align-items: baseline; gap: 10px; }
   .setup-health .head strong { font-size: 14px; }
   .setup-health .head span { font-size: 12px; color: var(--text-dim); }
+  /* More than one TAP: each one's count, under the bar. */
+  .setup-taps { list-style: none; margin: 0; padding: 10px 0 0; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 6px; font-size: 12px; }
+  .setup-taps li { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; }
+  .setup-taps strong { font-size: 13px; }
+  .setup-taps span { color: var(--text-dim); }
+  .setup-taps .lost { color: var(--warn); font-weight: 600; }
+  .setup-herd { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding-top: 10px; border-top: 1px solid var(--border); }
+  .setup-herd span { font-size: 12px; color: var(--text-dim); flex: 1 1 260px; }
   .setup-health .head a { margin-left: auto; font-size: 12px; color: var(--accent-2); }
   .setup-bar { display: flex; gap: 2px; height: 12px; border-radius: 6px; overflow: hidden; background: var(--bg-3); }
   .setup-bar span { min-width: 6px; }
@@ -782,6 +790,12 @@
   .mesh-tap text { fill: var(--text); font-size: 12px; font-weight: 600; }
   .mesh-tap text.mesh-tap-addr { fill: var(--text-dim); font-size: 10px; font-weight: 500; }
   td.tap-name { white-space: nowrap; }
+  td.tap-model { white-space: nowrap; }
+  td.tap-model.star-only { color: var(--warn); font-weight: 600; }
+  td.tap-radio .tap-sub { font-size: 11px; color: var(--text-dim); }
+  td.tap-model .tap-board { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 11px; color: var(--text-dim); font-weight: 400; }
+  table.nodes .node-tap { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; font-size: 11px;
+                         color: var(--text-faint); white-space: nowrap; }
   td.tap-name .input { width: 12em; }
   button.tap-rename { font: inherit; color: var(--text-dim); background: none; border: 1px solid transparent; border-radius: 6px;
                       padding: 2px 6px; margin-left: 4px; cursor: pointer; }
@@ -1619,6 +1633,10 @@
         <div class="cfg-row" id="pi-tablewrites-row" style="display:none">
           <div class="cfg-text"><strong>Let me change the TAP's table</strong><span>Allow the Devices page to add an optimizer to the TAP's list, or remove one, as the CCA does. Removing erases the whole table and writes the rest back. Dry runs work with this off (experimental)</span></div>
           <div class="cfg-ctrl"><label class="cfg-switch"><input type="checkbox" id="pi-tablewrites"> <span>Off</span></label></div>
+        </div>
+        <div class="cfg-row" id="pi-adopttaps-row" style="display:none">
+          <div class="cfg-text"><strong>Take on a new TAP</strong><span>When a TAP turns up at the factory address, bring every TAP on the bus up again, as the CCA does: each known one keeps its address and a new one gets the next free. Polling stops for about 30 seconds. Needs bring-up on. The new TAP must already have its radio settings from a CCA (experimental)</span></div>
+          <div class="cfg-ctrl"><label class="cfg-switch"><input type="checkbox" id="pi-adopttaps"> <span>Off</span></label></div>
         </div>
         <div class="cfg-row" id="pi-tapcfg-row" style="display:none">
           <div class="cfg-text"><strong>Read the TAP's radio settings</strong><span>Once each time the master starts, read the TAP's channel and the signal level it admits optimizers at, as the CCA does when it brings a TAP up. Shown on the Devices page. Reads only (experimental)</span></div>
@@ -3505,6 +3523,12 @@
     const nodes = nodesData.nodes || [];
     const devices = nodesData.devices || [];
     const newestRoster = Math.max(0, ...nodes.map(n => n.last_roster_unix || 0));
+    // More than one TAP: each optimizer's, under its address, by the TAP's name.
+    const multiTap = new Set(devices.map(d => d.tap).filter(Boolean)).size > 1;
+    const tapLabel = id => {
+      const t = ((nodesData.versions || {}).taps || []).find(x => x.addr === id);
+      return t && t.name ? t.name : 'TAP ' + id;
+    };
 
     // Index devices by long_address (the persistent key) and by addr.
     const byLong = {};
@@ -3607,7 +3631,7 @@
         : { family: fam, usual: c.by[usual], answered: c.n, usualSettings: smartUsualSettings[fam] }) : null;
       const mppt = mpptByAddr[String(n.addr).toUpperCase()] || null;
       if (smartPeers) Object.assign(smartPeers, { mppt, mpptUsual });
-      rows.push({ n, name, addr: n.addr, barcodeKey, barcodeShort,
+      rows.push({ n, name, addr: n.addr, barcodeKey, barcodeShort, tap: dev?.tap || null,
                   stringLabel, mpptLabel, v, a, w, t, age, state, fw, smart, differs, smartPeers });
     }
 
@@ -3658,7 +3682,7 @@
         <tr data-addr="${topoEscape(String(r.addr))}">
           <td><strong${r.n.setup ? ` title="${topoEscape([r.n.setup.mppt, r.n.setup.info].filter(Boolean).join('\n'))}"` : ''}>${r.name}</strong>${isNewOptimizer(r.n.first_heard_unix, !!r.n.cca_string)
             ? ` <span class="node-new" title="First heard ${new Date(r.n.first_heard_unix * 1000).toLocaleString()}">New</span>` : ''}${nodeTags(r.n, newestRoster)}${knownBtn}</td>
-          <td class="mono">${r.addr}</td>
+          <td class="mono">${r.addr}${multiTap && r.tap ? `<div class="node-tap">${topoEscape(tapLabel(r.tap))}</div>` : ''}</td>
           <td class="mono">…${r.barcodeShort}</td>
           <td>${r.stringLabel} <span style="color:var(--text-faint)">·</span> ${r.mpptLabel}</td>
           <td class="num">${r.v.toFixed(1)}</td>
@@ -3885,7 +3909,7 @@
     // channel, and SLT, the signal level an optimizer must beat to be let in.
     const radio = addr => {
       const r = (v.radios || []).find(x => x.tap === addr);
-      return r ? `<td title="SLm ${r.slm}, read ${when(r.heard_unix_ms)}">Channel ${r.channel} · admits above ${r.slt}</td>`
+      return r ? `<td class="tap-radio" title="Radio channel ${r.channel} (802.15.4). Join threshold ${r.slt} (SLT): a new optimizer must be heard above ${r.slt} to join this TAP, on the radio's own signal scale, not dBm; 90 is the CCA's usual value. SLm ${r.slm}, meaning unknown. Read ${when(r.heard_unix_ms)}.">Channel ${r.channel}<div class="tap-sub">join threshold ${r.slt}</div></td>`
                : '<td title="Read from the TAP when a bus master brings it up">—</td>';
     };
     // Its ID: the MAC it gave when a master asked where it was.
@@ -3894,13 +3918,32 @@
       return m ? `<td class="mono tap-id" title="Its MAC, as it answered GET_MAC ${when(m.heard_unix_ms)}">${topoEscape(m.mac)}</td>`
                : '<td class="tap-id" title="Read when a bus master brings the TAP up">—</td>';
     };
+    // Its series and firmware kind, from its version string, as the CCA
+    // classifies a TAP (owner's analysis, 2026-11-10): Mgate is the mesh
+    // gateway firmware, H and G the two TAP lines, which share its protocol.
+    // A star-only TAP (Gway, or a G5.x like the bench's before the CCA updated
+    // it) forces a whole mesh system back to the old star stack.
+    // The version string's GW- suffix is the TAP's board (hardware) ID,
+    // shown here under the series rather than at the end of its firmware.
+    const boardRe = /\s*\bGW-\S+\s*$/;
+    const board = t => { const b = /\bGW-\S+\s*$/.exec(t.version || ''); return b ? b[0].trim() : ''; };
+    const model = t => {
+      const v = /^([A-Z])(\d+)\./.exec(t.version || '');
+      const full = `${t.model} firmware ${t.version}`;
+      const b = board(t) ? `<div class="tap-board">${topoEscape(board(t))}</div>` : '';
+      if (t.model === 'Gway' || (v && v[1] === 'G' && Number(v[2]) <= 5))
+        return `<td class="tap-model star-only" title="${topoEscape(full)}: star-only firmware. A star-only TAP forces a mesh system back to the old star stack; keep it off a system with mesh TAPs.">Star only${b}</td>`;
+      if (t.model === 'Mgate' && v)
+        return `<td class="tap-model" title="${topoEscape(full)}">${v[1]} series · mesh${b}</td>`;
+      return `<td class="tap-model" title="${topoEscape(full)}">${topoEscape(t.model)}${b}</td>`;
+    };
     // A name, kept on the Pi and shown on the mesh map too.
     const name = t => `<td class="tap-name" data-tap="${topoEscape(t.addr)}">${t.name
       ? `<span>${topoEscape(t.name)}</span><button type="button" class="tap-rename" aria-label="Rename TAP ${topoEscape(t.addr)}" title="Rename"></button>`
       : `<button type="button" class="tap-rename add">Add a name</button>`}</td>`;
     box.querySelector('tbody').innerHTML = (v.taps || []).length ? v.taps.map(t => `<tr>
-        ${name(t)}<td class="mono">${topoEscape(t.addr)}</td>${id(t.addr)}<td>${topoEscape(t.model)}</td>
-        <td class="mono"${t.previous ? ` title="was ${topoEscape(t.previous)}"` : ''}><strong>${topoEscape(t.version)}</strong></td>
+        ${name(t)}<td class="mono">${topoEscape(t.addr)}</td>${id(t.addr)}${model(t)}
+        <td class="mono tap-fw" title="${topoEscape(t.version || '')}${t.previous ? ` · was ${topoEscape(t.previous)}` : ''}"><strong>${topoEscape((t.version || '').replace(boardRe, '').replace(/\s+\d{1,2}:\d{2}:\d{2}$/, ''))}</strong></td>
         ${radio(t.addr)}<td>${when(t.since_unix_ms)}</td><td>${when(t.last_unix_ms)}</td></tr>`).join('')
       : `<tr><td colspan="8" style="color:var(--text-faint)">Not heard yet. The bus master asks the TAP once each time it starts, and the optimizers as it first hears each one.</td></tr>`;
   }
@@ -3963,14 +4006,25 @@
       b.textContent = 'Forget failed: ' + err.message;
     }
   });
+  // What the TAPs hold: one TAP's window, or with several, theirs summed
+  // (those read so far). null until one is read.
+  function setupCounts(m) {
+    const taps = (m && m.taps) || [];
+    if (taps.length > 1) {
+      const read = taps.filter(t => t.discovery && t.discovery.read);
+      return read.length ? { in_table: read.reduce((n, t) => n + t.discovery.node_count, 0),
+                             joined: read.reduce((n, t) => n + t.discovery.joined, 0) } : null;
+    }
+    return m && m.discovery_read && m.discovery ? { in_table: m.discovery.in_table, joined: m.discovery.joined } : null;
+  }
 
   // Running the bus, the Devices page says what the TAP holds and where to
   // change it (System setup).
   async function refreshSetupLink() {
     const el = document.getElementById('devices-setup-link');
     const m = PLATFORM === 'linux' ? await apiFetch('/api/master').then(r => r.ok ? r.json() : null).catch(() => null) : null;
-    const w = m && m.discovery;
-    if (!setupRunning(m) || !w || !m.discovery_read) { el.style.display = 'none'; return; }
+    const w = setupCounts(m);
+    if (!setupRunning(m) || !w) { el.style.display = 'none'; return; }
     el.style.display = '';
     el.innerHTML = `Your system has ${w.in_table} optimizers, ${w.joined} joined. To replace, add, or retire an optimizer, open <a href="#setup">System setup</a>.`;
   }
@@ -4028,7 +4082,8 @@
 
   async function setupLoad() {
     const get = u => apiFetch(u).then(r => r.ok ? r.json() : null).catch(() => null);
-    const [m, d, n] = await Promise.all([get('/api/master'), get('/api/devices'), get('/api/nodes')]);
+    const [m, d, n, v] = await Promise.all([get('/api/master'), get('/api/devices'), get('/api/nodes'),
+                                            get('/api/versions')]);
     const devices = (d && d.devices) || [];
     const opts = ((n && n.nodes) || []).filter(x => /^04C05B/i.test(x.long_address || '')).map(x => {
       const dev = devices.find(v => String(v.addr).toUpperCase() === String(x.addr).toUpperCase()) || {};
@@ -4039,7 +4094,18 @@
     // Gone quiet: placed, and silent for 15 min while most others report.
     const reporting = opts.filter(o => o.ageMs !== undefined && o.ageMs < 60000).length;
     for (const o of opts) o.quiet = o.placed && reporting > opts.length / 2 && (o.stale || !(o.ageMs < 15 * 60000));
-    setup.data = { master: m, opts };
+    // Each TAP's name, by its id, as on the Devices page.
+    const tapNames = Object.fromEntries(((v && v.taps) || []).filter(t => t.name).map(t => [t.addr, t.name]));
+    setup.data = { master: m, opts, tapNames };
+  }
+  // More than one TAP: the ones run, and each by name.
+  function setupTaps() {
+    const m = setup.data && setup.data.master;
+    return (m && m.taps) || [];
+  }
+  function setupTapName(id) {
+    const n = setup.data && setup.data.tapNames[id];
+    return n ? `${n} (TAP ${id})` : `TAP ${id}`;
   }
   function setupRunning(m) {
     return !!(m && m.active && m.table && (m.role === 'master' || (m.role === 'standby' && m.standby && m.standby.state === 'active')));
@@ -4054,9 +4120,10 @@
     const root = document.getElementById('setup-root');
     const d = setup.data;
     if (!d) { root.innerHTML = '<p class="setup-lede">Loading…</p>'; return; }
-    const m = d.master, t = m && m.table, w = m && m.discovery;
-    document.getElementById('setup-meta').textContent = w && m.discovery_read
-      ? `${w.in_table} optimizer${w.in_table === 1 ? '' : 's'} · ${w.joined} joined` : '—';
+    const m = d.master, t = m && m.table, w = setupCounts(m);
+    const taps = setupTaps();
+    document.getElementById('setup-meta').textContent = w
+      ? `${w.in_table} optimizer${w.in_table === 1 ? '' : 's'} · ${w.joined} joined${taps.length > 1 ? ` · ${taps.length} TAPs` : ''}` : '—';
     if (setup.flow) return renderSetupFlow(root);
     setup.drawn = '';
     let html = '<p class="setup-lede">Make changes to the system\'s hardware the way a CCA does. Each change is checked first, and you will see exactly what it will do before anything is sent.</p>';
@@ -4076,7 +4143,7 @@
       ${task('add', 'Add an optimizer', 'Register a new optimizer, wait for it to join, then assign it in Topology.')}
       ${task('retire', 'Retire an optimizer', 'Permanently remove an optimizer from your system.')}
     </div>`;
-    if (w && m.discovery_read) {
+    if (w) {
       // Your system: joined and reporting, joined but silent, listed and never joined.
       const silent = d.opts.filter(o => o.quiet);
       const never = d.opts.filter(o => /^8/.test(o.addr));
@@ -4090,7 +4157,13 @@
         <div class="setup-key"><span><b style="color:var(--good)">${nOk}</b>joined, reporting</span>
           <span><b style="color:var(--warn)">${nSilent}</b>joined, silent${names(silent)}</span>
           <span><b style="color:var(--accent-3)">${nNever}</b>listed, never joined${names(never)}</span>
-          ${(t.waiting || []).length ? `<span><b style="color:var(--accent-2)">${t.waiting.length}</b>waiting to join</span>` : ''}</div></div>`;
+          ${(t.waiting || []).length ? `<span><b style="color:var(--accent-2)">${t.waiting.length}</b>waiting to join</span>` : ''}</div>
+        ${taps.length > 1 ? `<ul class="setup-taps">${taps.map(x => {
+          const dx = x.discovery || {};
+          const state = x.state === 'running' ? '' : ` <span class="lost">${x.state === 'lost' ? 'not answering' : 'not answering; asked every 5 min'}</span>`;
+          return `<li><strong>${topoEscape(setupTapName(x.id))}</strong><span>${dx.read ? `${dx.node_count} optimizer${dx.node_count === 1 ? '' : 's'}, ${dx.joined} joined` : 'not read yet'}</span>${state}</li>`;
+        }).join('')}</ul>` : ''}
+        ${m.adopt_taps && setupRunning(m) ? `<div class="setup-herd"><button type="button" class="btn" data-setup-herd>Look for TAPs</button><span>Brings every TAP on the bus up again, as the CCA does: each known one keeps its address and a new one gets the next free. Polling stops for about 30 seconds.</span></div>` : ''}</div>`;
     }
     if (t && t.edit && t.edit.kind && t.edit.finished && !t.edit.dry_run)
       html += `<div class="setup-last">Last change: ${topoEscape(t.edit.message)}</div>`;
@@ -4127,12 +4200,14 @@
     const label = f.mac ? labelOfMac(f.mac) : '';
     if (f.task === 'add') {
       if (/^already in the table/.test(e.message)) return { lines: [['keep', `This optimizer is already on the TAP's list (${e.message.replace(/^already in the table at /, 'at ')}). No change is needed; it will join while the window is open.`]], nothing: true };
-      return { lines: [['in', `Add ${label} at ${e.id}, listed but not yet joined. Nothing is erased.`],
+      const on = setupTaps().length > 1 ? ` on ${setupTapName(setup.data.master.table.tap)}` : '';
+      return { lines: [['in', `Add ${label} at ${e.id}${on}, listed but not yet joined. Nothing is erased.`],
                        ['wait', 'Keep the join window open until it joins, for up to 30 minutes.'],
                        ['place', 'It starts unassigned; assign it in Topology once it reports.']] };
     }
     const others = f.task === 'replace' ? records - 1 : records;
-    const lines = [['save', 'Save the TAP\'s list, so the change can be completed if it is interrupted.'],
+    const whose = setupTaps().length > 1 ? `${setupTapName(setup.data.master.table.tap)}'s` : 'the TAP\'s';
+    const lines = [['save', `Save ${whose} list, so the change can be completed if it is interrupted.`],
                    ['out', `Erase the list and rewrite it without ${f.old.name}'s optimizer.`]];
     if (f.task === 'replace') lines.push(['in', `Add ${label} at ${e.id} (${f.old.name}'s address).`]);
     lines.push(['keep', `The other ${others} optimizers are written back unchanged; joined optimizers remain joined.`]);
@@ -4173,6 +4248,9 @@
         <div class="setup-field"><label for="setup-label">Optimizer label</label>
           <input class="input" id="setup-label" autocomplete="off" spellcheck="false" value="${topoEscape(f.label || '')}" placeholder="4-9A57A2L">
           <div id="setup-label-check">${check}</div></div>
+        ${f.task === 'add' && setupTaps().length > 1 ? `<div class="setup-field"><label for="setup-tap">TAP</label>
+          <select class="input" id="setup-tap">${setupTaps().map(x => `<option value="${topoEscape(x.id)}"${x.id === (f.tap || setupTaps()[0].id) ? ' selected' : ''}>${topoEscape(setupTapName(x.id))}</option>`).join('')}</select>
+          <div class="sub">The TAP nearest the optimizer. It joins through this one.</div></div>` : ''}
         <div class="setup-actions">${f.task === 'add' ? back('Cancel') : back()}<button type="button" class="btn task-go" data-setup-next${mac && !listed ? '' : ' disabled'}>Review</button></div>`;
     } else if (f.step === 'check') {
       const mine = e.kind && e.started_unix >= f.checkedAt && e.dry_run;
@@ -4274,13 +4352,28 @@
   // The check, or the real thing: the same request, dry_run on or off.
   function setupRequest(f, dry) {
     if (f.task === 'replace') return setupPost('/api/master/table/replace', { old_mac: f.old.mac, label: f.label, dry_run: dry });
-    if (f.task === 'add') return setupPost('/api/master/table/add', { label: f.label, dry_run: dry });
+    if (f.task === 'add') return setupPost('/api/master/table/add', Object.assign({ label: f.label, dry_run: dry },
+                                                                             setupTaps().length > 1 ? { tap: f.tap || setupTaps()[0].id } : {}));
     return setupPost('/api/master/table/remove', { mac: f.old.mac, dry_run: dry });
   }
+  document.getElementById('setup-root').addEventListener('change', ev => {
+    if (ev.target.id === 'setup-tap' && setup.flow) setup.flow.tap = ev.target.value;
+  });
   document.getElementById('setup-root').addEventListener('click', async ev => {
     const b = ev.target.closest('button');
     if (!b || b.disabled) return;
     const f = setup.flow;
+    if (b.hasAttribute('data-setup-herd')) {
+      if (!confirm('Look for TAPs? Every TAP on the bus is brought up again, and polling stops for about 30 seconds.')) return;
+      b.disabled = true;
+      try {
+        await setupPost('/api/master/taps/herd', {});
+        showToast('Looking for TAPs…');
+      } catch (err) {
+        showToast('Not started: ' + err.message, 'err');
+      }
+      return refreshSetup(true);
+    }
     if (b.dataset.setupStart) {
       const old = b.dataset.setupOld && setup.data.opts.find(o => o.mac === b.dataset.setupOld);
       setup.flow = { task: b.dataset.setupStart, step: old ? 'label' : SETUP_STEPS[b.dataset.setupStart][0], old: old || null, label: '' };
@@ -4858,9 +4951,17 @@
     meta.className = 'badge ' + (m.fault && m.fault !== 'none' ? 'bad' : standingBy || !m.active ? 'stale' : 'ok');
     const renewing = m.discovery_renewing !== false;
     const w = m.discovery || {};
-    const left = m.discovery_read ? (w.running && w.remaining_s > 0 ? `open, ${w.remaining_s} s left` : 'closed') : 'not read yet';
+    const leftOf = (read, x) => read ? (x.running && x.remaining_s > 0 ? `open, ${x.remaining_s} s left` : 'closed') : 'not read yet';
+    // More than one TAP: each one's window, by id.
+    const several = (m.taps || []).length > 1;
+    const left = several
+      ? m.taps.map(t => `TAP ${t.id} ${t.state === 'running' ? leftOf(t.discovery.read, t.discovery) : 'not answering'}`).join(', ')
+      : leftOf(m.discovery_read, w);
     // Joined is the TAP's flag, kept for good: a dead optimizer still counts.
-    const joined = !m.discovery_read || w.joined == null || w.in_table == null ? ''
+    const read = several ? m.taps.filter(t => t.discovery.read) : [];
+    const joined = several
+      ? (read.length ? ` · ${read.reduce((n, t) => n + t.discovery.joined, 0)} of the ${read.reduce((n, t) => n + t.discovery.node_count, 0)} in the TAPs' tables have joined` : '')
+      : !m.discovery_read || w.joined == null || w.in_table == null ? ''
       : w.in_table === 0 ? " · the TAP's table is empty"
       : ` · ${w.joined} of the ${w.in_table} in the TAP's table have joined`;
     // Automatic (Settings › Bus): renewed only while an optimizer in the
@@ -5456,6 +5557,8 @@
       document.getElementById('pi-tapcfg').checked = !!s.master_read_tap_config;
       document.getElementById('pi-tablewrites').checked = !!s.master_table_writes;
       document.getElementById('pi-tablewrites').nextElementSibling.textContent = s.master_table_writes ? 'On' : 'Off';
+      document.getElementById('pi-adopttaps').checked = !!s.master_adopt_taps;
+      document.getElementById('pi-adopttaps').nextElementSibling.textContent = s.master_adopt_taps ? 'On' : 'Off';
       document.getElementById('pi-discauto').checked = !!s.discovery_auto;
       document.getElementById('pi-discauto').nextElementSibling.textContent = s.discovery_auto ? 'On' : 'Off';
       document.getElementById('pi-tapcfg').nextElementSibling.textContent = s.master_read_tap_config ? 'On' : 'Off';
@@ -5496,7 +5599,7 @@
   let piWebPortActive = 0;
   let piWebLogin = { user: 'admin', set: false };
   let piBusRole = 'listen';
-  const PI_MASTER_ROWS = ['pi-startup-row', 'pi-housekeeping-row', 'pi-queries-row', 'pi-writes-row', 'pi-tapcfg-row', 'pi-discauto-row', 'pi-tablewrites-row'];
+  const PI_MASTER_ROWS = ['pi-startup-row', 'pi-housekeeping-row', 'pi-queries-row', 'pi-writes-row', 'pi-tapcfg-row', 'pi-discauto-row', 'pi-tablewrites-row', 'pi-adopttaps-row'];
   // Two masters on one bus collide, and the master's requests reach the
   // optimizers, so becoming the master is a deliberate step.
   document.getElementById('pi-bus-role').addEventListener('change', (e) => {
@@ -5568,7 +5671,7 @@
       }
     });
   }
-  for (const id of ['pi-startup', 'pi-housekeeping', 'pi-queries', 'pi-writes', 'pi-tapcfg', 'pi-discauto', 'pi-tablewrites', 'pi-mqtt-disc-on', 'pi-mqtt-standby-panels']) {
+  for (const id of ['pi-startup', 'pi-housekeeping', 'pi-queries', 'pi-writes', 'pi-tapcfg', 'pi-discauto', 'pi-tablewrites', 'pi-adopttaps', 'pi-mqtt-disc-on', 'pi-mqtt-standby-panels']) {
     document.getElementById(id).addEventListener('change', (e) => {
       e.target.nextElementSibling.textContent = e.target.checked ? 'On' : 'Off';
     });
@@ -5664,6 +5767,7 @@
                    master_read_tap_config: document.getElementById('pi-tapcfg').checked,
                    discovery_auto: document.getElementById('pi-discauto').checked,
                    master_table_writes: document.getElementById('pi-tablewrites').checked,
+                   master_adopt_taps: document.getElementById('pi-adopttaps').checked,
                    web_username: document.getElementById('pi-web-user').value.trim() || 'admin' };
     if (!piTls.fixed) Object.assign(body, { tls_cert: tlsCert, tls_key: tlsKey });
     const webPass = document.getElementById('pi-web-pass').value;

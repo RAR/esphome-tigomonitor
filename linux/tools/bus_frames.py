@@ -1,10 +1,17 @@
 #!/usr/bin/env python3
-"""Lists the frames in a raw bus capture (the bytes tigomonitord --capture or
-`cat /dev/serial0` writes): one line per frame with a good CRC.
+"""Lists the frames in a bus capture: one line per frame with a good CRC.
+
+Two kinds of file: the raw bytes tigomonitord --capture or `cat
+/dev/serial0` writes, and the 2026-11-06 bench recorder's, where each read
+is a record behind a 10-byte header (ms since the epoch as a u16 low part
+and a u32 high part, a u16, and a u16 length, all little-endian). Read raw,
+a frame that straddles two records fails its CRC. The reading that gives
+fewer bad frames is used, and a recorded file's times come from its
+headers.
 
 usage: bus_frames.py CAPTURE [--seconds S] [--requests] [--sub HEX] [--pairs]
 
-  --seconds S   how long the capture ran (default 1200), to turn offsets into time
+  --seconds S   how long a raw capture ran (default 1200), to turn offsets into time
   --requests    only the master's requests (DEST without the 0x8000 bit)
   --sub HEX     only tunnel requests with this sub, and replies with sub + 1
   --pairs       each request followed by the next reply whose CMD is CMD+1
@@ -58,17 +65,48 @@ def frames(data):
     return good, bad
 
 
+def records(raw):
+    """A recorded capture's bytes with the headers stripped, and (offset, unix s)
+    for each record; None if raw doesn't parse as records end to end."""
+    out, marks, i = bytearray(), [], 0
+    while i + 10 <= len(raw):
+        lo, hi, n = int.from_bytes(raw[i:i + 2], 'little'), int.from_bytes(raw[i + 2:i + 6], 'little'), \
+            int.from_bytes(raw[i + 8:i + 10], 'little')
+        if i + 10 + n > len(raw):
+            return None
+        marks.append((len(out), (hi << 16 | lo) / 1000.0))
+        out += raw[i + 10:i + 10 + n]
+        i += 10 + n
+    return (bytes(out), marks) if i == len(raw) and marks else None
+
+
+def load(raw):
+    """(bytes, good frames, bad count, time of an offset): raw or recorded, whichever reads better."""
+    good, bad = frames(raw)
+    rec = records(raw)
+    if rec:
+        data, marks = rec
+        g2, b2 = frames(data)
+        if b2 < bad:
+            offs = [m[0] for m in marks]
+
+            def at(off):
+                import bisect
+                return marks[max(0, bisect.bisect_right(offs, off) - 1)][1] - marks[0][1]
+            return data, g2, b2, at
+    return raw, good, bad, None
+
+
 def main(argv):
     args = argv[1:]
     if not args or args[0].startswith('-'):
         print(__doc__)
         return 2
-    data = open(args[0], 'rb').read()
+    data, good, bad, at = load(open(args[0], 'rb').read())
     seconds = float(args[args.index('--seconds') + 1]) if '--seconds' in args else 1200.0
     sub = int(args[args.index('--sub') + 1], 16) if '--sub' in args else None
     rate = len(data) / seconds
-    good, bad = frames(data)
-    print(f'{len(data)} bytes, {len(good)} good frames, {bad} bad')
+    print(f'{len(data)} bytes, {len(good)} good frames, {bad} bad' + (' (recorded: headers stripped)' if at else ''))
 
     def wanted(f):
         _, dest, cmd, p = f
@@ -82,7 +120,8 @@ def main(argv):
 
     def line(f, tag=''):
         s, dest, cmd, p = f
-        return f'{tag}@{s:>9} {s / rate:8.1f}s {dest:04X} {cmd:04X} [{len(p)}] {p.hex(" ")}'
+        t = at(s) if at else s / rate
+        return f'{tag}@{s:>9} {t:8.1f}s {dest:04X} {cmd:04X} [{len(p)}] {p.hex(" ")}'
 
     for i, f in enumerate(good):
         if not wanted(f) or (('--pairs' in args) and f[1] & 0x8000):
