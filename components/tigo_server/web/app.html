@@ -784,6 +784,7 @@
   td.tap-name { white-space: nowrap; }
   td.tap-model { white-space: nowrap; }
   td.tap-model.star-only { color: var(--warn); font-weight: 600; }
+  td.tap-radio .tap-sub { font-size: 11px; color: var(--text-dim); }
   td.tap-model .tap-board { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 11px; color: var(--text-dim); font-weight: 400; }
   td.tap-name .input { width: 12em; }
   button.tap-rename { font: inherit; color: var(--text-dim); background: none; border: 1px solid transparent; border-radius: 6px;
@@ -3876,7 +3877,7 @@
     // channel, and SLT, the signal level an optimizer must beat to be let in.
     const radio = addr => {
       const r = (v.radios || []).find(x => x.tap === addr);
-      return r ? `<td title="SLm ${r.slm}, read ${when(r.heard_unix_ms)}">Channel ${r.channel} · admits above ${r.slt}</td>`
+      return r ? `<td class="tap-radio" title="Radio channel ${r.channel} (802.15.4). Join threshold ${r.slt} (SLT): a new optimizer must be heard above ${r.slt} to join this TAP, on the radio's own signal scale, not dBm; 90 is the CCA's usual value. SLm ${r.slm}, meaning unknown. Read ${when(r.heard_unix_ms)}.">Channel ${r.channel}<div class="tap-sub">join threshold ${r.slt}</div></td>`
                : '<td title="Read from the TAP when a bus master brings it up">—</td>';
     };
     // Its ID: the MAC it gave when a master asked where it was.

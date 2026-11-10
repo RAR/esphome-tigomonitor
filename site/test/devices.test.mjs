@@ -276,9 +276,13 @@ test('Devices, on the Pi: a change to an optimizer\'s settings is listed, newest
 test("Devices, on the Pi: the TAP's radio channel and admission level, once read", async () => {
   const { page, ctx } = await open(true);
   await page.waitForSelector('#devices-taps', { state: 'visible' });
-  const row = await page.textContent('#devices-taps tbody tr');
-  assert.match(row, /Channel 18/);
-  assert.match(row, /admits above 90/);
+  // The channel first; the threshold beneath, named for what it does, and
+  // explained in the tooltip, since its scale has no units anyone knows.
+  const cell = page.locator('#devices-taps tbody tr td.tap-radio').first();
+  assert.equal((await cell.innerText()).replace(/\s+/g, ' ').trim(), 'Channel 18 join threshold 90');
+  const title = await cell.getAttribute('title');
+  assert.match(title, /must be heard above 90 to join/);
+  assert.match(title, /SLm 60/);
   await ctx.close();
 });
 

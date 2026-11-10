@@ -74,7 +74,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   beneath. A TAP on star-only firmware (Gway, or a G5.x) shows **Star only**
   in the warning colour: on a system with mesh TAPs it forces the whole
   system back to the old star stack. The Firmware column shows the version
-  and date, with the build time in its tooltip.
+  and date, with the build time in its tooltip, and the Radio column's
+  "admits above 90" is now "join threshold 90" under the channel, with a
+  tooltip saying what it is: the signal a new optimizer must be heard above
+  to join, on the radio's own scale.
 - **The sidebar is grouped: Monitor, Inspect and Control.** The pages that
   change something (Settings, and on the Pi System setup and Bus control)
   now sit together at the bottom, apart from the ones you only read. The Bus
