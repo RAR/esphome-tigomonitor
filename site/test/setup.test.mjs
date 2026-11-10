@@ -196,3 +196,20 @@ test('System setup: search the list, and Back returns to it', async () => {
   assert.deepEqual(errors, []);
   await ctx.close();
 });
+
+// The review's bus frames, once opened, stay open through the page's own
+// refresh (every 1.5 s while it follows the bus), which used to close them.
+test('System setup: the bus frames stay open', async () => {
+  const w = world();
+  const { page, ctx, errors } = await open(w);
+  await page.click('.setup-note button[data-setup-start="replace"]');
+  await page.fill('#setup-label', '0-1234R');
+  await page.click('button[data-setup-next]');
+  await page.waitForSelector('.setup-frames');
+  await page.click('.setup-frames summary');
+  assert.equal(await page.$eval('.setup-frames', (d) => d.open), true);
+  await page.waitForTimeout(4000);  // a few of the page's refreshes
+  assert.equal(await page.$eval('.setup-frames', (d) => d.open), true);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});

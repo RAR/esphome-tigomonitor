@@ -3954,6 +3954,7 @@
     document.getElementById('setup-meta').textContent = w && m.discovery_read
       ? `${w.in_table} listed with the TAP · ${w.joined} joined` : '—';
     if (setup.flow) return renderSetupFlow(root);
+    setup.drawn = '';
     let html = '<p class="setup-lede">Make changes to the system\'s hardware the way a CCA does. Each change is checked first, and you will see exactly what it will do before anything is sent.</p>';
     if (!setupRunning(m))
       html += '<div class="setup-note info">This Pi is not running the bus, so it cannot change the TAP\'s optimizer list. To make changes, set its bus role in Settings → Bus.</div>';
@@ -4106,11 +4107,20 @@
           <div class="setup-actions">${f.task === 'add' ? '<a class="btn" href="#topology">Assign in Topology</a>' : `<button type="button" class="btn" data-setup-start="replace">Replace another</button>`}<button type="button" class="btn primary" data-setup-back>Finish</button></div>`;
       }
     }
+    // Redrawn only when what it shows has changed: the page refreshes every
+    // 1.5 s while it follows the bus, and a redraw would close the bus frames
+    // and lose the list's scroll. One that does happen keeps both.
+    const html = `<div class="setup-flow">${setupRail(f)}<div class="setup-body">${body}</div></div>`;
+    if (html === setup.drawn && root.querySelector('.setup-flow')) return;
+    setup.drawn = html;
     const scrolled = root.querySelector('.setup-pick');
     const top = scrolled ? scrolled.scrollTop : 0;
-    root.innerHTML = `<div class="setup-flow">${setupRail(f)}<div class="setup-body">${body}</div></div>`;
+    const framesOpen = !!root.querySelector('.setup-frames[open]');
+    root.innerHTML = html;
     const pick = root.querySelector('.setup-pick');
     if (pick) pick.scrollTop = top;
+    const frames = root.querySelector('.setup-frames');
+    if (frames && framesOpen) frames.open = true;
     if (f.step === 'label') {
       const input = document.getElementById('setup-label');
       input.focus();
