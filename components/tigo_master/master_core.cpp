@@ -284,6 +284,45 @@ bool MasterCore::request_herd(std::string &why) {
   return true;
 }
 
+bool MasterCore::request_forget_tap(uint16_t id, std::string &why) {
+  std::lock_guard<std::mutex> lock(mu_);
+  const Tap *t = nullptr;
+  for (const auto &x : taps_)
+    if (x && x->id == id) t = x.get();
+  char b[96];
+  if (!t) {
+    snprintf(b, sizeof(b), "no TAP %04X on this monitor's list", id);
+    why = b;
+  } else if (taps_.size() <= 1) {
+    why = "it is the only TAP";
+  } else if (t->st.state == "running") {  // st is under mu_, as status() reads it
+    snprintf(b, sizeof(b), "TAP %04X is answering; unplug it before retiring it", id);
+    why = b;
+  } else if (table_job_running_ && status_.table_tap == id) {
+    why = "a change to its table is running";
+  } else {
+    why.clear();
+  }
+  if (!why.empty()) return false;
+  forget_wanted_ = id;
+  return true;
+}
+
+// Done in the tick: taps_ is walked there without the lock.
+void MasterCore::forget_tap_(uint16_t id) {
+  std::vector<TapEntry> saved;
+  {
+    std::lock_guard<std::mutex> lock(mu_);
+    auto it = std::find_if(taps_.begin(), taps_.end(), [id](const std::unique_ptr<Tap> &t) { return t && t->id == id; });
+    if (it == taps_.end() || taps_.size() <= 1 || (*it)->st.state == "running") return;
+    taps_.erase(it);
+    turn_ = 0;
+    for (const auto &t : taps_) saved.push_back({t->id, t->mac});
+  }
+  LOGI("bus master: TAP %04X retired: no longer polled, and left off the saved list", id);
+  if (taps_saved_) taps_saved_(saved);
+}
+
 // Every TAP on the bus moved at once, as the CCA brings up a system: the
 // known ones to their saved ids, a new one to the next free.
 void MasterCore::start_herd_(const char *why) {
@@ -914,6 +953,15 @@ void MasterCore::tick_(uint32_t now_ms) {
       herd_wanted_ = false;
     }
     if (herd && !herd_ && !table_job_) start_herd_("looking for TAPs, asked from this monitor");
+  }
+  {
+    uint16_t forget;
+    {
+      std::lock_guard<std::mutex> lock(mu_);
+      forget = forget_wanted_;
+      forget_wanted_ = 0;
+    }
+    if (forget && !herd_) forget_tap_(forget);
   }
   if (startup_ && phase_ != Phase::running) {
     run_startup(now_ms);

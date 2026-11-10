@@ -83,6 +83,8 @@ struct HttpContext {
   std::function<int(const esphome::tigo_monitor::master::Bytes &mac, std::string &why)> request_table_stop_waiting;
   // The owner's herd (look for TAPs): 200, or 409 with why.
   std::function<int(std::string &why)> request_herd;
+  // Retire a TAP that has gone for good (POST /api/master/taps/forget); 200, or 409 with why.
+  std::function<int(uint16_t id, std::string &why)> forget_tap;
 };
 
 // tigomonitord --health-check PORT, the container's HEALTHCHECK: GETs

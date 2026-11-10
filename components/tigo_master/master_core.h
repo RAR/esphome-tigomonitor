@@ -258,6 +258,10 @@ class MasterCore {
   // tick. False, with why, unless adopting is on and this monitor runs the
   // bus with no change to a table running.
   bool request_herd(std::string &why);
+  // Retire a TAP that has gone for good: dropped at the next tick, no longer
+  // polled, and the list saved without it. Refused for a TAP still
+  // answering, the only TAP, or one a table change is running on; why says so.
+  bool request_forget_tap(uint16_t id, std::string &why);
   // With more than one TAP, one that stopped answering is asked once every
   // LOST_PROBE_MS while the others are polled, and after LOST_MISSES
   // unanswered, once every REMOVED_PROBE_MS.
@@ -509,6 +513,8 @@ class MasterCore {
   bool adopt_taps_ = false;
   TapsSaved taps_saved_;
   bool herd_wanted_ = false;  // under mu_: request_herd's, for the next tick
+  uint16_t forget_wanted_ = 0;  // under mu_: request_forget_tap's, for the next tick
+  void forget_tap_(uint16_t id);
   void start_herd_(const char *why);
   void herd_done_();
   uint16_t discovery_tap_ = 0;  // the TAP discovery_ brings up

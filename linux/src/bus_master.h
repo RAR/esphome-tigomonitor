@@ -107,6 +107,7 @@ class BusMaster {
     core_.set_adopt_taps(on, std::move(saved));
   }
   bool request_herd(std::string &why) { return core_.request_herd(why); }
+  bool request_forget_tap(uint16_t id, std::string &why) { return core_.request_forget_tap(id, why); }
   void set_window_wanted(bool wanted, int missing) { core_.set_window_wanted(wanted, missing); }
   std::map<uint16_t, esphome::tigo_monitor::master::Queries::Setup> setups() const { return core_.setups(); }
   void tick(uint32_t now_ms) { core_.tick(now_ms); }

@@ -8,7 +8,7 @@
 # quiet doesn't stop the other; that with adopting on, a new TAP at the
 # factory address starts the CCA's herd, which stores its new id and saves
 # the list, and with it off, the TAP is only reported; and that the owner's
-# herd keeps the known ids.
+# herd keeps the known ids; and that a TAP gone for good can be retired.
 # Run from the repo root inside the dev container, after build.sh.
 set -eu
 out=build/multitap-e2e
@@ -102,6 +102,14 @@ expect "1202 lost" "$(master 18401 "d['taps'][1]['state']")" lost
 expect "1201 still polled" "$(master 18401 "d['taps'][0]['polls'] - $before > 50")" True
 expect "no fault with one TAP answering" "$(master 18401 "d['fault']")" none
 expect "the loss logged" "$(grep -c 'TAP 1202 stopped answering' "$out/one.log")" 1
+# Retired: refused for the TAP still answering, then 1202 is dropped and the
+# saved list keeps 1201 alone. (That it is no longer asked is the host test's:
+# the mock doesn't count frames to a TAP that is down.)
+expect "retiring 1201, answering, refused" "$(code POST 18401 /api/master/taps/forget '{"tap": "1201"}')" 409
+expect "retiring 1202 accepted" "$(code POST 18401 /api/master/taps/forget '{"tap": "1202"}')" 200
+wait_for 10 18401 "len(d['taps']) == 1"
+expect "1202 retired" "$(master 18401 "[t['id'] for t in d['taps']]")" "['1201']"
+expect "the saved list without it" "$(saved_taps "$out/one/taps.json")" "[('1201', 'a1')]"
 stop_all
 
 # --- run 2: adopting on, a new TAP at the factory address: the herd ---
