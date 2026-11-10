@@ -84,7 +84,11 @@ test('System setup: replace a quiet optimizer, step by step', async () => {
   const { page, ctx, errors } = await open(w);
   // The quiet one is offered, and its place is what carries over.
   assert.match(await page.textContent('.setup-note'), /A2 has not reported for 3 h\./);
-  assert.match(await page.textContent('.setup-holds'), /24\s*listed/);
+  const health = await page.textContent('.setup-health');
+  assert.match(health, /Your system\s*24 optimizers/);
+  assert.match(health, /23\s*joined, reporting/);
+  assert.match(health, /1\s*joined, silent \(A2\)/);
+  assert.match(health, /0\s*listed, never joined/);
   await page.click('.setup-note button[data-setup-start="replace"]');
   // Step 2: the label is checked as it's typed.
   await page.waitForSelector('#setup-label');
@@ -99,8 +103,8 @@ test('System setup: replace a quiet optimizer, step by step', async () => {
   await page.click('button[data-setup-next]');
   await page.waitForSelector('.setup-plan');
   const plan = await page.textContent('.setup-plan');
-  assert.match(plan, /without A2's optimizer, adding the new optimizer at 0005 \(A2's address\)\. The other 23 optimizers are written back unchanged/);
-  assert.match(plan, /Assign the new optimizer to A2's position: String A\./);
+  assert.match(plan, /rewrite it without A2's optimizer\.Add 0-1234R at 0005 \(A2's address\)\.The other 23 optimizers are written back unchanged/);
+  assert.match(plan, /Assign it to A2's position: String A\./);
   assert.deepEqual(w.posts, [{ path: '/api/master/table/replace', old_mac: w.old.long_address, label: '0-1234r', dry_run: true }]);
   // Step 4 then 5: the real thing, then the wait.
   await page.click('button[data-setup-go]');
@@ -135,7 +139,7 @@ test('System setup: with changes off, a check still works and the button says wh
   });
   await page.click('button[data-setup-next]');
   await page.waitForSelector('.setup-plan');
-  assert.match(await page.textContent('.setup-plan'), /rewrite the other 23 optimizers unchanged/);
+  assert.match(await page.textContent('.setup-plan'), /The other 23 optimizers are written back unchanged/);
   assert.equal(await page.isDisabled('button[data-setup-go]'), true);
   assert.match(await page.textContent('.setup-actions .why'), /Changes are disabled/);
   assert.deepEqual(w.posts, [{ mac: w.old.long_address, dry_run: true }]);

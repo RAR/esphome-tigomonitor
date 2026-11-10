@@ -661,20 +661,42 @@
   .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
   /* ===== System setup ===== */
   .setup-lede { margin: -6px 0 18px; font-size: 13px; color: var(--text-dim); max-width: 70ch; }
-  .setup-note { margin: 0 0 18px; padding: 12px 16px; border-radius: 10px; font-size: 13px; display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px;
+  .setup-note { margin: 0 0 18px; padding: 12px 16px; border-radius: 12px; font-size: 13px; display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px;
                 border: 1px solid color-mix(in srgb, var(--warn) 40%, transparent); background: color-mix(in srgb, var(--warn) 7%, var(--bg)); }
+  .setup-note .ico { width: 36px; height: 36px; flex-shrink: 0; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+                     background: color-mix(in srgb, var(--warn) 16%, transparent); }
+  .setup-note .what { display: flex; flex-direction: column; gap: 2px; }
+  .setup-note .what strong { font-size: 14px; }
+  .setup-note .what span { color: var(--text-dim); }
   .setup-note strong { color: var(--warn); }
   body.light-mode .setup-note strong { color: color-mix(in srgb, var(--warn) 55%, #000); }
   .setup-note.info { border-color: var(--border); background: var(--bg-2); }
-  .setup-tasks { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; margin-bottom: 22px; }
-  .setup-task { display: flex; flex-direction: column; gap: 6px; text-align: left; padding: 18px; border-radius: 10px; cursor: pointer;
+  /* Each task has its hue, carried into its flow: replace sky, add green, retire violet. */
+  [data-task="replace"] { --task: var(--accent-2); }
+  [data-task="add"] { --task: var(--accent); }
+  [data-task="retire"] { --task: var(--accent-3); }
+  .btn.task-go { background: var(--task); border-color: var(--task); color: #04121c; font-weight: 600; }
+  .btn.task-go:hover:not(:disabled) { background: color-mix(in srgb, var(--task) 85%, #fff); }
+  .setup-tasks { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 14px; margin-bottom: 22px; }
+  .setup-task { display: flex; flex-direction: column; text-align: left; padding: 0; border-radius: 12px; cursor: pointer; overflow: hidden;
                 background: var(--bg-2); border: 1px solid var(--border); color: var(--text); font: inherit; }
-  .setup-task:hover, .setup-task:focus-visible { border-color: var(--accent); outline: none; }
+  .setup-task::before { content: ""; height: 4px; background: var(--task); }
+  .setup-task:hover, .setup-task:focus-visible { border-color: var(--task); outline: none; }
+  .setup-task .art { height: 92px; margin: 14px 14px 0; border-radius: 10px; display: flex; align-items: center; justify-content: center;
+                     background: color-mix(in srgb, var(--task) 10%, transparent); }
+  .setup-task .in { display: flex; flex-direction: column; gap: 8px; padding: 14px 18px 18px; }
   .setup-task strong { font-size: 15px; }
-  .setup-task span { font-size: 12px; color: var(--text-dim); line-height: 1.5; }
-  .setup-holds { display: flex; flex-wrap: wrap; gap: 8px 28px; align-items: baseline; padding: 14px 18px; border-radius: 10px;
-                 background: var(--bg-2); border: 1px solid var(--border); font-size: 13px; color: var(--text-dim); }
-  .setup-holds b { font-size: 18px; color: var(--text); margin-right: 4px; }
+  .setup-task .in > span { font-size: 12px; color: var(--text-dim); line-height: 1.5; }
+  .setup-task .in > .go { color: var(--task); font-weight: 600; font-size: 12px; margin-top: 2px; }
+  .setup-health { padding: 16px 18px; border-radius: 12px; background: var(--bg-2); border: 1px solid var(--border); display: flex; flex-direction: column; gap: 10px; }
+  .setup-health .head { display: flex; align-items: baseline; gap: 10px; }
+  .setup-health .head strong { font-size: 14px; }
+  .setup-health .head span { font-size: 12px; color: var(--text-dim); }
+  .setup-health .head a { margin-left: auto; font-size: 12px; color: var(--accent-2); }
+  .setup-bar { display: flex; gap: 2px; height: 12px; border-radius: 6px; overflow: hidden; background: var(--bg-3); }
+  .setup-bar span { min-width: 6px; }
+  .setup-key { display: flex; flex-wrap: wrap; gap: 6px 22px; font-size: 12px; color: var(--text-dim); }
+  .setup-key b { font-size: 13px; margin-right: 3px; }
   .setup-last { margin-top: 10px; font-size: 12px; color: var(--text-faint); }
   .setup-flow { display: flex; flex-wrap: wrap; border: 1px solid var(--border); border-radius: 12px; background: var(--bg-2); min-height: 420px; }
   .setup-rail { flex: 0 0 220px; box-sizing: border-box; padding: 24px 20px; border-right: 1px solid var(--border); }
@@ -683,9 +705,16 @@
   .setup-rail li { display: flex; gap: 10px; align-items: center; padding: 7px 0; font-size: 13px; color: var(--text-faint); }
   .setup-rail li .n { width: 22px; height: 22px; flex-shrink: 0; border-radius: 50%; border: 1px solid var(--border); display: flex; align-items: center; justify-content: center; font-size: 11px; }
   .setup-rail li.done { color: var(--text-dim); }
-  .setup-rail li.done .n { border-color: var(--accent); color: var(--accent); }
+  .setup-rail li.done .n { border-color: var(--task); color: var(--task); background: color-mix(in srgb, var(--task) 10%, transparent); }
   .setup-rail li.on { color: var(--text); font-weight: 600; }
-  .setup-rail li.on .n { background: var(--accent); border-color: var(--accent); color: #061018; }
+  .setup-rail li.on .n { background: var(--task); border-color: var(--task); color: #04121c; }
+  .setup-flow { border-top: 4px solid var(--task); }
+  .setup-rail h2 { display: flex; align-items: center; gap: 10px; color: var(--task); }
+  .setup-rail h2 .ico { width: 30px; height: 30px; border-radius: 8px; display: flex; align-items: center; justify-content: center;
+                        background: color-mix(in srgb, var(--task) 14%, transparent); }
+  .setup-plan { list-style: none; padding: 16px 18px; display: flex; flex-direction: column; gap: 10px; }
+  .setup-plan li { display: grid; grid-template-columns: 26px minmax(0, 1fr); gap: 10px; align-items: start; margin: 0; }
+  .setup-plan .mk { width: 24px; height: 24px; border-radius: 7px; display: flex; align-items: center; justify-content: center; }
   .setup-body { flex: 999 1 420px; min-width: 0; box-sizing: border-box; padding: 24px 28px; display: flex; flex-direction: column; gap: 14px; }
   .setup-body h3 { margin: 0; font-size: 20px; font-weight: 600; }
   .setup-body .sub { font-size: 13px; color: var(--text-dim); line-height: 1.5; max-width: 66ch; }
@@ -704,8 +733,7 @@
   .setup-check { font-size: 13px; }
   .setup-check.good { color: var(--good); }
   .setup-check.bad { color: var(--bad); }
-  .setup-plan { margin: 0; padding: 16px 18px 16px 38px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg); font-size: 14px; line-height: 1.55; }
-  .setup-plan li { margin: 4px 0; }
+  .setup-plan { margin: 0; border: 1px solid var(--border); border-radius: 10px; background: var(--bg); font-size: 14px; line-height: 1.55; }
   .setup-frames { font-size: 12px; color: var(--text-dim); }
   .setup-frames .mono { display: block; margin-top: 6px; word-break: break-all; line-height: 1.6; }
   .setup-progress { list-style: none; margin: 0; padding: 0; }
@@ -3897,7 +3925,7 @@
     const w = m && m.discovery;
     if (!setupRunning(m) || !w || !m.discovery_read) { el.style.display = 'none'; return; }
     el.style.display = '';
-    el.innerHTML = `The TAP lists ${w.in_table} optimizers, ${w.joined} joined. To replace, add, or retire an optimizer, open <a href="#setup">System setup</a>.`;
+    el.innerHTML = `Your system has ${w.in_table} optimizers, ${w.joined} joined. To replace, add, or retire an optimizer, open <a href="#setup">System setup</a>.`;
   }
 
   // ===== System setup =====
@@ -3921,6 +3949,35 @@
              ['writing back what stays', 'Rewrite the list'], ['reading it back', 'Verify the result']],
   };
   let setup = { flow: null, data: null, timer: 0 };
+  // The tasks' drawings and marks, in each task's hue (currentColor).
+  const SETUP_ART = {
+    replace: `<svg width="140" height="56" viewBox="0 0 140 56" fill="none" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <rect x="6" y="12" width="38" height="32" rx="6" stroke="var(--text-faint)" stroke-width="2" stroke-dasharray="4 4"/><path d="M18 24l14 8M32 24l-14 8" stroke="var(--bad)" stroke-width="2"/>
+      <path d="M54 22h26l-6-6M80 34H54l6 6" stroke="var(--task)" stroke-width="2.5"/><rect x="96" y="12" width="38" height="32" rx="6" stroke="var(--task)" stroke-width="2"/>
+      <path d="M106 28l6 6 12-12" stroke="var(--good)" stroke-width="2.5"/></svg>`,
+    add: `<svg width="140" height="56" viewBox="0 0 140 56" fill="none" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <rect x="22" y="12" width="38" height="32" rx="6" stroke="var(--text-faint)" stroke-width="2"/><rect x="80" y="12" width="38" height="32" rx="6" stroke="var(--task)" stroke-width="2"/>
+      <path d="M99 21v14M92 28h14" stroke="var(--task)" stroke-width="2.5"/></svg>`,
+    retire: `<svg width="140" height="56" viewBox="0 0 140 56" fill="none" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <rect x="51" y="8" width="38" height="32" rx="6" stroke="var(--text-faint)" stroke-width="2" stroke-dasharray="4 4"/><path d="M44 44h52" stroke="var(--task)" stroke-width="2.5"/>
+      <path d="M70 22v12l-5-5M70 34l5-5" stroke="var(--task)" stroke-width="2.5"/></svg>`,
+  };
+  const SETUP_ICON = {
+    replace: '<path d="M4 8h13l-3-3"/><path d="M20 16H7l3 3"/>',
+    add: '<path d="M12 5v14M5 12h14"/>',
+    retire: '<path d="M3 7h18v3H3z"/><path d="M5 10v9h14v-9"/><path d="M10 14h4"/>',
+  };
+  // The review plan's marks: each line says what kind of step it is.
+  const SETUP_MARK = {
+    save: ['var(--text-dim)', '<path d="M5 4h11l3 3v13H5z"/><path d="M8 4v5h7V4"/>'],
+    out: ['var(--bad)', '<path d="M5 12h14"/>'],
+    in: ['var(--good)', '<path d="M12 5v14M5 12h14"/>'],
+    keep: ['var(--text-dim)', '<path d="M5 12l4 4 10-10"/>'],
+    wait: ['var(--warn)', '<circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/>'],
+    place: ['var(--accent-2)', '<path d="M4 8h13l-3-3"/><path d="M20 16H7l3 3"/>'],
+  };
+  const setupSvg = (body, color, size = 14) =>
+    `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="${color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${body}</svg>`;
 
   async function setupLoad() {
     const get = u => apiFetch(u).then(r => r.ok ? r.json() : null).catch(() => null);
@@ -3952,7 +4009,7 @@
     if (!d) { root.innerHTML = '<p class="setup-lede">Loading…</p>'; return; }
     const m = d.master, t = m && m.table, w = m && m.discovery;
     document.getElementById('setup-meta').textContent = w && m.discovery_read
-      ? `${w.in_table} listed with the TAP · ${w.joined} joined` : '—';
+      ? `${w.in_table} optimizer${w.in_table === 1 ? '' : 's'} · ${w.joined} joined` : '—';
     if (setup.flow) return renderSetupFlow(root);
     setup.drawn = '';
     let html = '<p class="setup-lede">Make changes to the system\'s hardware the way a CCA does. Each change is checked first, and you will see exactly what it will do before anything is sent.</p>';
@@ -3962,18 +4019,31 @@
       html += '<div class="setup-note info">Changes are disabled. To enable them, turn on <strong>Let me change the TAP\'s table</strong> in Settings → Bus. You can still review each task and its planned changes.</div>';
     const quiet = d.opts.filter(o => o.quiet).sort((a, b) => (b.ageMs || 0) - (a.ageMs || 0))[0];
     if (quiet)
-      html += `<div class="setup-note"><span><strong>${topoEscape(quiet.name)} has not reported for ${topoEscape(setupAgo(quiet.ageMs).replace(' ago', ''))}.</strong> If it has been physically replaced, update the system here.</span>
-        <span style="flex-grow:1"></span><button type="button" class="btn primary" data-setup-start="replace" data-setup-old="${topoEscape(quiet.mac)}">Replace ${topoEscape(quiet.name)}</button></div>`;
+      html += `<div class="setup-note"><span class="ico">${setupSvg('<path d="M12 8v5"/><path d="M12 16.5h.01"/><path d="M10.3 3.9 2.6 17.5A2 2 0 0 0 4.3 20.5h15.4a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/>', 'var(--warn)', 18)}</span>
+        <span class="what"><strong>${topoEscape(quiet.name)} has not reported for ${topoEscape(setupAgo(quiet.ageMs).replace(' ago', ''))}.</strong><span>If it has been physically replaced, update the system here.</span></span>
+        <span style="flex-grow:1"></span><button type="button" class="btn task-go" data-task="replace" data-setup-start="replace" data-setup-old="${topoEscape(quiet.mac)}">Replace ${topoEscape(quiet.name)}</button></div>`;
+    const task = (k, title, text) => `<button type="button" class="setup-task" data-task="${k}" data-setup-start="${k}"><span class="art">${SETUP_ART[k]}</span>
+      <span class="in"><strong>${title}</strong><span>${text}</span><span class="go">Start →</span></span></button>`;
     html += `<div class="setup-tasks">
-      <button type="button" class="setup-task" data-setup-start="replace"><strong>Replace an optimizer</strong><span>Remove a failed optimizer from the TAP's list, add its replacement, and keep its position in your layout.</span></button>
-      <button type="button" class="setup-task" data-setup-start="add"><strong>Add an optimizer</strong><span>Register a new optimizer with the TAP, wait for it to join, then assign it in Topology.</span></button>
-      <button type="button" class="setup-task" data-setup-start="retire"><strong>Retire an optimizer</strong><span>Permanently remove an optimizer from the TAP's list.</span></button>
+      ${task('replace', 'Replace an optimizer', 'Remove a failed optimizer, add its replacement, and keep its position in your layout.')}
+      ${task('add', 'Add an optimizer', 'Register a new optimizer, wait for it to join, then assign it in Topology.')}
+      ${task('retire', 'Retire an optimizer', 'Permanently remove an optimizer from your system.')}
     </div>`;
     if (w && m.discovery_read) {
-      const never = Math.max(0, w.in_table - w.joined);
-      html += `<div class="section-title devices-head">What the TAP holds</div><div class="setup-holds">
-        <span><b>${w.in_table}</b>listed</span><span><b style="color:var(--good)">${w.joined}</b>joined</span>
-        <span><b>${never}</b>listed, not joined</span>${(t.waiting || []).length ? `<span><b style="color:var(--warn)">${t.waiting.length}</b>waiting to join</span>` : ''}</div>`;
+      // Your system: joined and reporting, joined but silent, listed and never joined.
+      const silent = d.opts.filter(o => o.quiet);
+      const never = d.opts.filter(o => /^8/.test(o.addr));
+      const nNever = Math.max(never.length, w.in_table - w.joined);
+      const nSilent = Math.min(silent.length, w.joined);
+      const nOk = Math.max(0, w.joined - nSilent);
+      const names = list => list.length && list.length <= 3 ? ` (${list.map(o => topoEscape(o.placed ? o.name : o.addr)).join(', ')})` : '';
+      const seg = (n, color) => n ? `<span style="flex:${n} 1 0;background:${color}"></span>` : '';
+      html += `<div class="setup-health"><div class="head"><strong>Your system</strong><span>${w.in_table} optimizer${w.in_table === 1 ? '' : 's'}</span><a href="#nodes">See the list</a></div>
+        <div class="setup-bar" role="img" aria-label="${nOk} joined and reporting, ${nSilent} joined but silent, ${nNever} listed but never joined">${seg(nOk, 'var(--good)')}${seg(nSilent, 'var(--warn)')}${seg(nNever, 'var(--accent-3)')}</div>
+        <div class="setup-key"><span><b style="color:var(--good)">${nOk}</b>joined, reporting</span>
+          <span><b style="color:var(--warn)">${nSilent}</b>joined, silent${names(silent)}</span>
+          <span><b style="color:var(--accent-3)">${nNever}</b>listed, never joined${names(never)}</span>
+          ${(t.waiting || []).length ? `<span><b style="color:var(--accent-2)">${t.waiting.length}</b>waiting to join</span>` : ''}</div></div>`;
     }
     if (t && t.edit && t.edit.kind && t.edit.finished && !t.edit.dry_run)
       html += `<div class="setup-last">Last change: ${topoEscape(t.edit.message)}</div>`;
@@ -3987,7 +4057,7 @@
       if (s === 'label' && f.label && steps.indexOf(s) < i) return `Adding ${macOfLabel(f.label) ? labelOfMac(macOfLabel(f.label)) : f.label}`;
       return SETUP_STEP_NAMES[s];
     };
-    return `<nav class="setup-rail" aria-label="Steps"><h2>${SETUP_TITLES[f.task]}</h2><ol>${steps.map((s, k) =>
+    return `<nav class="setup-rail" aria-label="Steps"><h2><span class="ico">${setupSvg(SETUP_ICON[f.task], 'var(--task)', 16)}</span>${SETUP_TITLES[f.task]}</h2><ol>${steps.map((s, k) =>
       `<li class="${k < i ? 'done' : k === i ? 'on' : ''}"${k === i ? ' aria-current="step"' : ''}><span class="n">${k < i ? '✓' : k + 1}</span>${topoEscape(name(s))}</li>`).join('')}</ol></nav>`;
   }
 
@@ -4002,25 +4072,28 @@
     const m = setup.data.master;
     return (m && m.table && m.table.edit) || {};
   }
-  // The plan a check returned, in plain words.
+  // The plan a check returned, in plain words: each line marked by kind
+  // (out: the one coming out, in: the one going in), so what changes is
+  // hard to misread.
   function setupPlan(f, e) {
     const records = (e.dry_frames || []).filter(x => x.startsWith('29')).reduce((n, x) => n + parseInt(x.slice(2, 4), 16), 0);
+    const label = f.mac ? labelOfMac(f.mac) : '';
     if (f.task === 'add') {
-      if (/^already in the table/.test(e.message)) return { lines: [`This optimizer is already on the TAP's list (${e.message.replace(/^already in the table at /, 'at ')}). No change is needed; it will join while the window is open.`], nothing: true };
-      return { lines: [`Add one record for the new optimizer at ${e.id}, listed but not yet joined. Nothing is erased.`,
-                       'Keep the join window open until it joins, for up to 30 minutes.',
-                       'The new optimizer starts unassigned; assign it in Topology once it reports.'] };
+      if (/^already in the table/.test(e.message)) return { lines: [['keep', `This optimizer is already on the TAP's list (${e.message.replace(/^already in the table at /, 'at ')}). No change is needed; it will join while the window is open.`]], nothing: true };
+      return { lines: [['in', `Add ${label} at ${e.id}, listed but not yet joined. Nothing is erased.`],
+                       ['wait', 'Keep the join window open until it joins, for up to 30 minutes.'],
+                       ['place', 'It starts unassigned; assign it in Topology once it reports.']] };
     }
     const others = f.task === 'replace' ? records - 1 : records;
-    const lines = ['Save the TAP\'s list, so the change can be completed if it is interrupted.',
-      f.task === 'replace'
-        ? `Erase the TAP's list and rewrite it without ${f.old.name}'s optimizer, adding the new optimizer at ${e.id} (${f.old.name}'s address). The other ${others} optimizers are written back unchanged; joined optimizers remain joined.`
-        : `Erase the TAP's list and rewrite the other ${others} optimizers unchanged; joined optimizers remain joined.`];
+    const lines = [['save', 'Save the TAP\'s list, so the change can be completed if it is interrupted.'],
+                   ['out', `Erase the list and rewrite it without ${f.old.name}'s optimizer.`]];
+    if (f.task === 'replace') lines.push(['in', `Add ${label} at ${e.id} (${f.old.name}'s address).`]);
+    lines.push(['keep', `The other ${others} optimizers are written back unchanged; joined optimizers remain joined.`]);
     if (f.task === 'replace') {
-      lines.push('Keep the join window open until the new optimizer joins, for up to 30 minutes.');
-      lines.push(`Assign the new optimizer to ${f.old.name}'s position${f.old.string ? `: ${f.old.string}` : ''}.`);
+      lines.push(['wait', 'Keep the join window open until the new optimizer joins, for up to 30 minutes.']);
+      lines.push(['place', `Assign it to ${f.old.name}'s position${f.old.string ? `: ${f.old.string}` : ''}.`]);
     } else {
-      lines.push(`${f.old.name} keeps its position in your layout until you change it in Topology.`);
+      lines.push(['place', `${f.old.name} leaves the Devices list; its history is kept.`]);
     }
     return { lines, gap: true };
   }
@@ -4040,7 +4113,7 @@
             <strong>${topoEscape(o.name)}</strong><span class="dim">${o.string ? topoEscape(o.string) : 'Not placed'} · <span class="mono">${topoEscape(o.label)}</span></span>
             <span class="${o.quiet ? 'quiet' : 'dim'}">${o.quiet ? 'Last reported ' + topoEscape(setupAgo(o.ageMs)) : 'Reporting'}</span></label>`).join('')}</fieldset>
         <div class="setup-none" id="setup-none"${opts.some(o => !setupHidden(f, o)) ? ' hidden' : ''}>No optimizer matches that.</div>
-        <div class="setup-actions">${back('Cancel')}<button type="button" class="btn primary" data-setup-next${f.old ? '' : ' disabled'}>Next</button></div>`;
+        <div class="setup-actions">${back('Cancel')}<button type="button" class="btn task-go" data-setup-next${f.old ? '' : ' disabled'}>Next</button></div>`;
     } else if (f.step === 'label') {
       const mac = macOfLabel(f.label || '');
       const listed = mac && d.opts.find(o => o.mac === mac);
@@ -4053,7 +4126,7 @@
         <div class="setup-field"><label for="setup-label">Optimizer label</label>
           <input class="input" id="setup-label" autocomplete="off" spellcheck="false" value="${topoEscape(f.label || '')}" placeholder="4-9A57A2L">
           <div id="setup-label-check">${check}</div></div>
-        <div class="setup-actions">${f.task === 'add' ? back('Cancel') : back()}<button type="button" class="btn primary" data-setup-next${mac && !listed ? '' : ' disabled'}>Review</button></div>`;
+        <div class="setup-actions">${f.task === 'add' ? back('Cancel') : back()}<button type="button" class="btn task-go" data-setup-next${mac && !listed ? '' : ' disabled'}>Review</button></div>`;
     } else if (f.step === 'check') {
       const mine = e.kind && e.started_unix >= f.checkedAt && e.dry_run;
       if (!mine || !e.finished) {
@@ -4066,10 +4139,10 @@
         const why = !running ? 'This Pi is not running the bus.' : !t.writes ? 'Changes are disabled. Turn on Let me change the TAP\'s table in Settings → Bus.' : '';
         body = `<h3>Review the planned changes</h3>
           <div class="sub">Read from the TAP just now. Nothing has been sent yet.</div>
-          <ol class="setup-plan">${plan.lines.map(l => `<li>${topoEscape(l)}</li>`).join('')}</ol>
+          <ol class="setup-plan">${plan.lines.map(([k, text]) => `<li class="${k}"><span class="mk" style="background:color-mix(in srgb, ${SETUP_MARK[k][0]} 14%, transparent)">${setupSvg(SETUP_MARK[k][1], SETUP_MARK[k][0])}</span><span>${topoEscape(text)}</span></li>`).join('')}</ol>
           ${plan.gap ? '<div class="sub">All optimizers are briefly unjoined (under one second) while the list is rewritten. On the reference system this took 0.78 s, and no optimizer had to rejoin.</div>' : ''}
           ${(e.dry_frames || []).length ? `<details class="setup-frames"><summary>Bus frames (${e.dry_frames.length})</summary><span class="mono">${e.dry_frames.map(topoEscape).join('<br>')}</span></details>` : ''}
-          <div class="setup-actions">${back()}${plan.nothing ? '' : `<button type="button" class="btn primary" data-setup-go${why ? ' disabled' : ''}>${topoEscape(go)}</button>`}
+          <div class="setup-actions">${back()}${plan.nothing ? '' : `<button type="button" class="btn task-go" data-setup-go${why ? ' disabled' : ''}>${topoEscape(go)}</button>`}
             ${why ? `<span class="why">${topoEscape(why)}</span>` : ''}</div>`;
       }
     } else if (f.step === 'do') {
@@ -4110,7 +4183,7 @@
     // Redrawn only when what it shows has changed: the page refreshes every
     // 1.5 s while it follows the bus, and a redraw would close the bus frames
     // and lose the list's scroll. One that does happen keeps both.
-    const html = `<div class="setup-flow">${setupRail(f)}<div class="setup-body">${body}</div></div>`;
+    const html = `<div class="setup-flow" data-task="${f.task}">${setupRail(f)}<div class="setup-body">${body}</div></div>`;
     if (html === setup.drawn && root.querySelector('.setup-flow')) return;
     setup.drawn = html;
     const scrolled = root.querySelector('.setup-pick');
