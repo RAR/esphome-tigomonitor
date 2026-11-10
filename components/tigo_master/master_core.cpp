@@ -292,6 +292,10 @@ void MasterCore::settle_table_job_(uint32_t now_ms) {
     join_watch_.add(table_job_->mac(), table_job_->id(), now_ms);
     waiting_since_[master::mac_hex(table_job_->mac())] = unix_now();
   }
+  // A removal that took it off (not one that found it absent; a resumed one did).
+  if (std::string(table_job_->kind()) == "remove" && table_job_->ok() && !table_job_->dry_run() && on_removed_ &&
+      (table_job_->id() || static_cast<master::TableRemove *>(table_job_.get())->resuming()))
+    on_removed_(master::mac_hex(table_job_->mac()));
   if (!add && table_job_->ok() && !table_job_->dry_run()) {
     join_watch_.drop(table_job_->mac());
     waiting_since_.erase(master::mac_hex(table_job_->mac()));

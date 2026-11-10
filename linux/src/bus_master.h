@@ -89,6 +89,7 @@ class BusMaster {
     return core_.request_table_replace(old_mac, new_mac, dry_run, why);
   }
   void set_on_replaced(esphome::tigo_master::MasterCore::TableReplaced cb) { core_.set_on_replaced(std::move(cb)); }
+  void set_on_removed(esphome::tigo_master::MasterCore::TableRemoved cb) { core_.set_on_removed(std::move(cb)); }
   bool request_table_stop_waiting(const esphome::tigo_monitor::master::Bytes &mac) {
     return core_.request_table_stop_waiting(mac);
   }

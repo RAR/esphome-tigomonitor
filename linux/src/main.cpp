@@ -246,6 +246,13 @@ int main(int argc, char **argv) {
           LOGI("layout: the replacement took its place");
         else
           LOGW("layout: the replacement joined, but its place wasn't moved: %s", why.c_str());
+        // The old one, its place handed on, leaves the Devices list.
+        monitor.forget_optimizer(old_mac);
+      });
+      // A retired optimizer leaves the Devices list at once; one that drops
+      // off the TAP any other way stays, tagged, so a failure shows.
+      m->set_on_removed([&monitor](const std::string &mac) {
+        if (monitor.forget_optimizer(mac)) LOGI("devices: forgot the retired optimizer");
       });
       {
         // A removal that stopped between its erase and its write back is

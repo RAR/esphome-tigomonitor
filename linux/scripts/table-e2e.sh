@@ -120,6 +120,7 @@ expect "one erase, one write of five, joined" "$(stat "$out/three.json" "(d['era
   "(1, 1, '05', ['0002', '0004', '0005', '0006', '0007'])"
 expect "the saved list is gone" "$([ -e "$out/three/table-remove.json" ] && echo kept || echo gone)" gone
 expect "logged the erase" "$(grep -c 'erased the TAP.s table (done)' "$out/three.log")" 1
+expect "and it left the Devices list" "$(body GET 18303 /api/nodes '' admin:pw | python3 -c "import json,sys; print(any(n['long_address'] == sys.argv[1] for n in json.load(sys.stdin)['nodes']))" "$mac3")" False
 stop_all
 
 # --- run 4: a removal that stopped after its erase, found at the start ---
@@ -186,6 +187,7 @@ for _ in $(seq 100); do [ "$(waits6 "len(t['waiting'])")" = 0 ] && break; sleep 
 sleep 1
 expect "it joined" "$(waits6 "[(o['id'], o['joined']) for o in t['joins']]")" "[('0003', True)]"
 expect "and took the old one's place" "$(place 04C05B0000001234)" True
+expect "the old one left the Devices list" "$(body GET 18306 /api/nodes '' admin:pw | python3 -c "import json,sys; print(any(n['long_address'] == sys.argv[1] for n in json.load(sys.stdin)['nodes']))" "$old")" False
 expect "logged" "$(grep -c 'the replacement took its place' "$out/six.log")" 1
 stop_all
 

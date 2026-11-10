@@ -31,6 +31,7 @@ The add/remove panel at the bottom of the Devices page goes; the Devices page ke
 
 - **A replace is one erase-and-rewrite, as the CCA writes a table:** the old record left out, the new one written provisional **at the old one's address**, every other record written back as read. One gap of under a second (0.78 s for 43 on the roof) rather than a removal and then an add. The new optimizer reports under the address the history, mesh map and loss counts already use. **Bench first:** reusing an address in the same rewrite that drops its old record hasn't been seen on hardware.
 - **The layout follows the replace on the Pi, as the CCA's cloud does:** the old label's slot, name and string go to the new label; the old label is kept in the log. Same semantics as the Topology editor's existing **Replace…**, done on the server.
+- **An optimizer the owner removed leaves the Devices list** (owner, 2026-11-10): a retired one as soon as the removal succeeds, the old one of a replace once the new one has its place; its history stays. One that drops off the TAP any other way (a dead unit, a CCA) stays, tagged "Not on the TAP" and then "Missing", so a failure isn't hidden.
 - **Every change checks first and asks** (the plan in plain words, then one button); no separate dry-run buttons.
 - **One change on the bus at a time; joins waited for together** (PR #110's JoinWatch).
 - **All of it stays behind `master_table_writes`.** With it off, the page shows what each task would do but its buttons say why they can't run.

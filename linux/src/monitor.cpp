@@ -581,6 +581,30 @@ bool Monitor::delete_node(const std::string &addr) {
   return found;
 }
 
+bool Monitor::forget_optimizer(const std::string &barcode) {
+  std::lock_guard<std::mutex> lock(mu_);
+  bool found = false;
+  auto node = std::find_if(nodes_.begin(), nodes_.end(), [&](const Node &n) { return n.long_address == barcode; });
+  if (node != nodes_.end()) {
+    std::string addr = node->addr;
+    nodes_.erase(node);
+    auto panel = std::find_if(panels_.begin(), panels_.end(), [&](const Panel &p) { return p.addr == addr; });
+    if (panel != panels_.end()) panels_.erase(panel);
+    links_.erase(addr);
+    found = true;
+  }
+  auto parked = std::remove_if(parked_cca_.begin(), parked_cca_.end(), [&](const Node &n) { return n.long_address == barcode; });
+  if (parked != parked_cca_.end()) {
+    parked_cca_.erase(parked, parked_cca_.end());
+    found = true;
+  }
+  if (found) {
+    dirty_ = true;
+    save_locked_();
+  }
+  return found;
+}
+
 std::vector<esphome::tigo_monitor::layout::Assignment> Monitor::resolve_layout(
     const std::vector<LayoutPanel> &panels) const {
   std::lock_guard<std::mutex> lock(mu_);

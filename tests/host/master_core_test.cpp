@@ -629,9 +629,15 @@ static void test_a_removal_saves_then_erases() {
     events.push_back(stay ? "saved " + std::to_string(stay->size()) + " at erase " + std::to_string(tap.erases) : "cleared");
     return true;
   });
+  std::vector<std::string> removed;
+  core.set_on_removed([&](const std::string &mac) { removed.push_back(mac); });
   CHECK(core.open());
+  CHECK(core.request_table_remove(first, true, why));  // a dry run removes nothing
+  for (uint32_t t = 0; t < 5000; t += 50) core.tick(t);
+  CHECK(removed.empty());
   CHECK(core.request_table_remove(first, false, why));
-  for (uint32_t t = 0; t < 20000; t += 50) core.tick(t);
+  for (uint32_t t = 5000; t < 25000; t += 50) core.tick(t);
+  CHECK(removed.size() == 1 && removed[0] == "04C05B0000000101");
   CHECK(tap.erases == 1);
   CHECK(tap.records.size() == 1 && tap.records[0][7] == 0x02);
   CHECK(events.size() == 2 && events[0] == "saved 1 at erase 0" && events[1] == "cleared");

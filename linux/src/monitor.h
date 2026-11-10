@@ -207,6 +207,11 @@ class Monitor {
   std::vector<esphome::tigo_monitor::layout::Assignment> current_assignments() const;
   // Drops one node (and its panel), as the Nodes page's delete does.
   bool delete_node(const std::string &addr);
+  // An optimizer the owner took off the TAP's list (System setup's retire,
+  // or the old one of a replace once the new one has its place): its node
+  // and panel, by barcode, and any labels parked for it. History keeps it.
+  // An address that has passed to another optimizer isn't touched.
+  bool forget_optimizer(const std::string &barcode);
 
  private:
   void on_frame_(const std::string &raw);
