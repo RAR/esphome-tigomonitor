@@ -267,29 +267,52 @@ test('the Web UI card saves the web settings with the bus ones', async () => {
   await ctx.close();
 });
 
-test('the bus master can be asked to read the TAP\'s radio settings, off unless turned on', async () => {
-  const { page, ctx, api } = await open({ hash: '#settings', pages: { bus_role: 'master', master_read_tap_config: false } });
+// Running the bus, Settings → Bus has two switches' worth: the CCA's way of
+// running it, all of a piece, and Allow changes to the TAPs. The CCA's
+// parts are no longer switches each; one an older settings file turned off
+// is named, with a way to turn them all on.
+const CCA_PARTS = { master_startup: true, master_housekeeping: true, master_queries: true, master_optimizer_writes: true,
+  master_read_tap_config: true, discovery_auto: true };
+
+test('running the bus, Settings → Bus has one switch: Allow changes to the TAPs', async () => {
+  const { page, ctx, api } = await open({ hash: '#settings', pages: { bus_role: 'master', ...CCA_PARTS, master_table_writes: false } });
   await page.click('#settings-tab-bus');
-  await page.waitForSelector('#pi-tapcfg-row', { state: 'visible' });
-  assert.equal(await page.isChecked('#pi-tapcfg'), false);
-  await page.check('#pi-tapcfg');
+  await page.waitForSelector('#pi-cca-row', { state: 'visible' });
+  const switches = await page.$$eval('#settings-bus .cfg-switch input', (is) => is.filter((i) => i.offsetParent).map((i) => i.id));
+  assert.deepEqual(switches, ['pi-tablewrites']);
+  assert.match(await page.textContent('#pi-tablewrites-row'), /Allow changes to the TAPs/);
+  assert.match(await page.textContent('#pi-cca-row'), /Runs the whole bus/);
+  assert.equal(await page.isVisible('#pi-cca-all'), false);
+  await page.check('#pi-tablewrites');
   page.on('dialog', (d) => d.dismiss());
   await page.click('#pi-port-save');
   await page.waitForTimeout(300);
-  assert.equal(api.posts.at(-1).master_read_tap_config, true);
+  const body = api.posts.at(-1);
+  assert.equal(body.master_table_writes, true);
+  // Saving the card leaves the CCA's parts, and Take on a new TAP, as they are.
+  for (const k of [...Object.keys(CCA_PARTS), 'master_adopt_taps']) assert.equal(k in body, false, k);
   await ctx.close();
 });
 
-test('automatic discovery is a switch on the Bus card, off unless turned on', async () => {
-  const { page, ctx, api } = await open({ hash: '#settings', pages: { bus_role: 'master', discovery_auto: false } });
+test('a part of the CCA\'s running turned off in the settings file is named, and Turn them all on sends them', async () => {
+  const { page, ctx, api } = await open({ hash: '#settings',
+    pages: { bus_role: 'master', ...CCA_PARTS, master_queries: false, master_optimizer_writes: false } });
   await page.click('#settings-tab-bus');
-  await page.waitForSelector('#pi-discauto-row', { state: 'visible' });
-  assert.equal(await page.isChecked('#pi-discauto'), false);
-  await page.check('#pi-discauto');
-  page.on('dialog', (d) => d.dismiss());
-  await page.click('#pi-port-save');
+  await page.waitForSelector('#pi-cca-row', { state: 'visible' });
+  assert.match(await page.textContent('#pi-cca-row'), /Off in the settings file: querying the optimizers, the writes their answers call for/);
+  page.on('dialog', (d) => d.accept());
+  await page.click('#pi-cca-all');
   await page.waitForTimeout(300);
-  assert.equal(api.posts.at(-1).discovery_auto, true);
+  assert.deepEqual(api.posts.at(-1), CCA_PARTS);
+  await ctx.close();
+});
+
+test('listening, neither shows', async () => {
+  const { page, ctx } = await open({ hash: '#settings', pages: { bus_role: 'listen' } });
+  await page.click('#settings-tab-bus');
+  await page.waitForSelector('#pi-bus-role');
+  assert.equal(await page.isVisible('#pi-cca-row'), false);
+  assert.equal(await page.isVisible('#pi-tablewrites-row'), false);
   await ctx.close();
 });
 
