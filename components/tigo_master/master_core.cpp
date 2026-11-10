@@ -198,6 +198,26 @@ bool MasterCore::request_table_remove(const master::Bytes &mac, bool dry_run, st
   return true;
 }
 
+bool MasterCore::request_table_replace(const master::Bytes &old_mac, const master::Bytes &new_mac, bool dry_run,
+                                       std::string &why) {
+  std::lock_guard<std::mutex> lock(mu_);
+  if (table_refusal_(dry_run, why)) return false;
+  if (old_mac.size() != 8 || new_mac.size() != 8) {
+    why = "a MAC is 8 bytes";
+    return false;
+  }
+  if (!dry_run && !table_saved_) {
+    why = "nowhere to save the optimizers that stay, so nothing is erased";
+    return false;
+  }
+  if (!dry_run && !discovery_renewing_) {
+    why = "the discovery window is held closed; the new optimizer could never join";
+    return false;
+  }
+  start_table_job_(std::make_unique<master::TableReplace>(old_mac, new_mac, dry_run));
+  return true;
+}
+
 void MasterCore::set_table_saved(TableSaved saved, const master::Bytes &resume_mac,
                                  const std::vector<master::TableRecord> *resume) {
   std::lock_guard<std::mutex> lock(mu_);
@@ -234,7 +254,12 @@ void MasterCore::sync_join_status_() {
   auto outcomes = join_watch_.take_outcomes();
   for (const auto &o : outcomes) {
     LOGI("bus master: table: %04X %s", o.id, o.text.c_str());
-    waiting_since_.erase(master::mac_hex(o.mac));
+    std::string mac = master::mac_hex(o.mac);
+    waiting_since_.erase(mac);
+    auto from = replaced_from_.find(mac);
+    if (from == replaced_from_.end()) continue;
+    if (o.joined && on_replaced_) on_replaced_(from->second, mac);
+    replaced_from_.erase(from);
   }
   std::lock_guard<std::mutex> lock(mu_);
   for (const auto &o : outcomes) {
@@ -267,9 +292,20 @@ void MasterCore::settle_table_job_(uint32_t now_ms) {
     join_watch_.add(table_job_->mac(), table_job_->id(), now_ms);
     waiting_since_[master::mac_hex(table_job_->mac())] = unix_now();
   }
+  // A removal that took it off (not one that found it absent; a resumed one did).
+  if (std::string(table_job_->kind()) == "remove" && table_job_->ok() && !table_job_->dry_run() && on_removed_ &&
+      (table_job_->id() || static_cast<master::TableRemove *>(table_job_.get())->resuming()))
+    on_removed_(master::mac_hex(table_job_->mac()));
   if (!add && table_job_->ok() && !table_job_->dry_run()) {
     join_watch_.drop(table_job_->mac());
     waiting_since_.erase(master::mac_hex(table_job_->mac()));
+    // A replace's new optimizer is waited for like an add's.
+    auto *r = static_cast<master::TableRemove *>(table_job_.get());
+    if (r->awaiting_join()) {
+      join_watch_.add(r->added_mac(), r->id(), now_ms);
+      waiting_since_[master::mac_hex(r->added_mac())] = unix_now();
+      replaced_from_[master::mac_hex(r->added_mac())] = master::mac_hex(r->mac());
+    }
   }
   sync_join_status_();
   if (!add && table_job_->keep_saved()) {
@@ -286,7 +322,8 @@ void MasterCore::settle_table_job_(uint32_t now_ms) {
   if (table_job_->ok())
     LOGI("bus master: table: %s", table_job_->message().c_str());
   else
-    LOGW("bus master: table: the %s stopped: %s", add ? "add" : "removal", table_job_->message().c_str());
+    LOGW("bus master: table: the %s stopped: %s", add ? "add" : std::string(table_job_->kind()) == "replace" ? "replace" : "removal",
+         table_job_->message().c_str());
   table_job_.reset();
 }
 
@@ -674,7 +711,9 @@ void MasterCore::tick_(uint32_t now_ms) {
       table_job_ = std::move(table_job_pending_);
       join_watch_.pause();  // its read would straddle the change
       bool add = std::string(table_job_->kind()) == "add";
-      LOGI("bus master: table: %s%s an optimizer", table_job_->dry_run() ? "a dry run of " : "", add ? "adding" : "removing");
+      std::string kind = table_job_->kind();
+      LOGI("bus master: table: %s%s an optimizer", table_job_->dry_run() ? "a dry run of " : "",
+           add ? "adding" : kind == "replace" ? "replacing" : "removing");
     }
     // An add waiting for its optimizer to join holds the window open, as
     // the CCA opened it after its write; the owner's switch still wins.

@@ -629,9 +629,15 @@ static void test_a_removal_saves_then_erases() {
     events.push_back(stay ? "saved " + std::to_string(stay->size()) + " at erase " + std::to_string(tap.erases) : "cleared");
     return true;
   });
+  std::vector<std::string> removed;
+  core.set_on_removed([&](const std::string &mac) { removed.push_back(mac); });
   CHECK(core.open());
+  CHECK(core.request_table_remove(first, true, why));  // a dry run removes nothing
+  for (uint32_t t = 0; t < 5000; t += 50) core.tick(t);
+  CHECK(removed.empty());
   CHECK(core.request_table_remove(first, false, why));
-  for (uint32_t t = 0; t < 20000; t += 50) core.tick(t);
+  for (uint32_t t = 5000; t < 25000; t += 50) core.tick(t);
+  CHECK(removed.size() == 1 && removed[0] == "04C05B0000000101");
   CHECK(tap.erases == 1);
   CHECK(tap.records.size() == 1 && tap.records[0][7] == 0x02);
   CHECK(events.size() == 2 && events[0] == "saved 1 at erase 0" && events[1] == "cleared");
@@ -719,7 +725,39 @@ static void test_a_removal_cut_off_by_a_tap_restart_is_finished() {
   core.close();
 }
 
+// A replace through the core: one erase, the new optimizer listed at the
+// old one's id, then waited for like an add.
+static void test_a_replace_lists_the_new_one_and_waits() {
+  TableTap tap;
+  MasterCore core(&tap.port, [](int, const std::string &) {}, nullptr, nullptr, GW, false, false);
+  core.set_table_writes(true);
+  core.set_window_wanted(false);
+  core.set_table_saved([](const mp::Bytes &, const std::vector<mp::TableRecord> *) { return true; });
+  std::vector<std::string> replaced;
+  core.set_on_replaced([&](const std::string &o, const std::string &n) { replaced.push_back(o + ">" + n); });
+  CHECK(core.open());
+  mp::Bytes old(tap.records[1].begin(), tap.records[1].begin() + 8);  // at 0003
+  std::string why;
+  CHECK(core.request_table_replace(old, NEW_MAC, false, why));
+  uint32_t t = 0;
+  for (; t < 10000; t += 50) core.tick(t);
+  MasterStatus s = core.status();
+  CHECK(s.table_edit.kind == "replace" && s.table_edit.ok && s.table_edit.id == 3);
+  CHECK(tap.erases == 1);
+  CHECK(tap.records.size() == 2 && tap.records[1][7] == 0x34 && tap.records[1][8] == 0x80 && tap.records[1][9] == 0x03);
+  CHECK(s.table_waiting.size() == 1 && s.table_waiting[0].mac == "04C05B0000001234" && s.table_waiting[0].id == 3);
+  int renewals = tap.renewals;
+  for (; t < 40000; t += 50) core.tick(t);
+  CHECK(tap.renewals > renewals);
+  CHECK(replaced.empty());  // not until it joins
+  tap.records[1][8] &= 0x7F;
+  for (; t < 130000; t += 50) core.tick(t);
+  CHECK(replaced.size() == 1 && replaced[0] == "04C05B0000000102>04C05B0000001234");
+  core.close();
+}
+
 int main() {
+  test_a_replace_lists_the_new_one_and_waits();
   test_a_removal_cut_off_by_a_tap_restart_is_finished();
   test_a_removal_saves_then_erases();
   test_an_interrupted_removal_is_finished();

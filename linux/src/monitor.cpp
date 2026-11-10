@@ -581,6 +581,30 @@ bool Monitor::delete_node(const std::string &addr) {
   return found;
 }
 
+bool Monitor::forget_optimizer(const std::string &barcode) {
+  std::lock_guard<std::mutex> lock(mu_);
+  bool found = false;
+  auto node = std::find_if(nodes_.begin(), nodes_.end(), [&](const Node &n) { return n.long_address == barcode; });
+  if (node != nodes_.end()) {
+    std::string addr = node->addr;
+    nodes_.erase(node);
+    auto panel = std::find_if(panels_.begin(), panels_.end(), [&](const Panel &p) { return p.addr == addr; });
+    if (panel != panels_.end()) panels_.erase(panel);
+    links_.erase(addr);
+    found = true;
+  }
+  auto parked = std::remove_if(parked_cca_.begin(), parked_cca_.end(), [&](const Node &n) { return n.long_address == barcode; });
+  if (parked != parked_cca_.end()) {
+    parked_cca_.erase(parked, parked_cca_.end());
+    found = true;
+  }
+  if (found) {
+    dirty_ = true;
+    save_locked_();
+  }
+  return found;
+}
+
 std::vector<esphome::tigo_monitor::layout::Assignment> Monitor::resolve_layout(
     const std::vector<LayoutPanel> &panels) const {
   std::lock_guard<std::mutex> lock(mu_);
@@ -629,6 +653,45 @@ int Monitor::set_assignments(const std::vector<esphome::tigo_monitor::layout::As
   dirty_ = true;
   save_locked_();
   return matched;
+}
+
+bool Monitor::take_place(const std::string &old_bc, const std::string &new_bc, std::string &why) {
+  std::lock_guard<std::mutex> lock(mu_);
+  Node *to = nullptr, *from = nullptr;
+  for (auto &n : nodes_) {
+    if (n.long_address == new_bc) to = &n;
+    if (n.long_address == old_bc) from = &n;
+  }
+  auto parked = std::find_if(parked_cca_.begin(), parked_cca_.end(),
+                             [&](const Node &p) { return p.long_address == old_bc; });
+  if (!to) {
+    why = "the new optimizer isn't in the node table yet";
+    return false;
+  }
+  if (!to->cca_string_label.empty() || !to->cca_label.empty()) {
+    why = "the new optimizer has a place already";
+    return false;
+  }
+  const Node *src = from && !from->cca_string_label.empty() ? from : parked != parked_cca_.end() ? &*parked : nullptr;
+  if (!src || src->cca_string_label.empty()) {
+    why = "the old optimizer had no place";
+    return false;
+  }
+  to->cca_label = src->cca_label;
+  to->cca_string_label = src->cca_string_label;
+  to->cca_mppt_label = src->cca_mppt_label;
+  if (from) {
+    from->cca_label.clear();
+    from->cca_string_label.clear();
+    from->cca_mppt_label.clear();
+  }
+  if (parked != parked_cca_.end()) parked_cca_.erase(parked);
+  for (auto &p : panels_)
+    if (p.addr == to->addr) p.label = to->cca_label;
+  string_peaks_.clear();
+  dirty_ = true;
+  save_locked_();
+  return true;
 }
 
 std::vector<esphome::tigo_monitor::layout::Assignment> Monitor::current_assignments() const {

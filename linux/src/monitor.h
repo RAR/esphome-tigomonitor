@@ -197,10 +197,21 @@ class Monitor {
   // a node the list leaves out loses its panel name, string and MPPT.
   // Returns how many nodes matched.
   int set_assignments(const std::vector<esphome::tigo_monitor::layout::Assignment> &as, bool clear_unlisted);
+  // A replaced optimizer (System setup): the new barcode's node takes the old
+  // one's place (name, string, MPPT), from the old node or, once its address
+  // has passed to the new one, from its parked labels. False, changing
+  // nothing, with why: the new one isn't in the node table yet, has a place
+  // already, or the old one had none.
+  bool take_place(const std::string &old_bc, const std::string &new_bc, std::string &why);
   // Every node that has a barcode, as the labels it carries now.
   std::vector<esphome::tigo_monitor::layout::Assignment> current_assignments() const;
   // Drops one node (and its panel), as the Nodes page's delete does.
   bool delete_node(const std::string &addr);
+  // An optimizer the owner took off the TAP's list (System setup's retire,
+  // or the old one of a replace once the new one has its place): its node
+  // and panel, by barcode, and any labels parked for it. History keeps it.
+  // An address that has passed to another optimizer isn't touched.
+  bool forget_optimizer(const std::string &barcode);
 
  private:
   void on_frame_(const std::string &raw);

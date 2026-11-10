@@ -55,16 +55,13 @@ The recordings and UI pastes hold MACs, PANs and network keys. They live in `~/t
 
 ## The gateway config block
 
-The 37-byte GatewayCfg reply, laid out per the CCA UI's own decode. It was confirmed by a controlled channel change (23 → 20 moved byte 1 alone, plus the per-write bytes 9–11).
+The 37-byte GatewayCfg reply: the 36-byte block the CCA writes, then a 00. Laid out per the CCA UI's own decode and the owner's analysis of the CCA's firmware (2026-11-09); a controlled channel change (23 → 20) moved byte 1 and the map's bytes 9–11.
 
 | Byte | Field |
 |---|---|
-| 0 | status |
-| 1 | channel (802.15.4, 11–26) |
+| 0–1 | channel (802.15.4, 11–26), big-endian; byte 0 is always 00 |
 | 2–3 | PAN |
-| 4–7, 12–13 | slot map (12-2-2-1/28/3 on the bench) |
-| 8 | 00 |
-| 9–11 | a per-operation value: new on every write, and shared by every TAP one operation writes |
+| 4–13 | the map: shown as `12-2-2-1/28/3`, its bytes 5–7 (block 9–11) a hidden value not in that text |
 | 14 | SLT (90): the signal level a node must beat to be admitted |
 | 15–30 | **the 16-byte network key** |
 | 31–34 | Optimizn (00000200) |
@@ -73,7 +70,9 @@ The 37-byte GatewayCfg reply, laid out per the CCA UI's own decode. It was confi
 
 - **A factory TAP** has PAN 0x1234 and channel 0x14.
 - **The roof TAP is on channel 18.**
-- **The PAN is chosen by the CCA, not derived from its serial.** The bench CCA wrote a new PAN and a new key on every placement, rediscover and delete. Read it from the TAP; never compute it.
+- **Channel, PAN and key are per TAP**, and each TAP is its own network. Two bench TAPs under one CCA sat on channels 15 and 23 (later 20), with different PANs and keys. The PAN comes from a search for a free one, seeded by the TAP's MAC and the CCA's serial; the key is 16 random bytes (owner's analysis). The bench CCA wrote a new PAN and key on every placement, rediscover and delete. Read them from the TAP; never compute them.
+- **The map is sized per TAP from the number of optimizers it carries** (owner's analysis). The roof TAP with 40 reads `14-2-2-1/28/1`; the bench TAPs with one read `12-2-2-1/28/1` (2026-11-09) and `12-2-2-1/28/3` with bytes 9–11 nonzero (2026-11-06). Two TAPs written in one operation can share bytes 9–11 when their maps match.
+- **The write** is `0B0F` sub `0D`, args `01 00` + the 36-byte block; the reads are `00 00` and `00 01`, both sent to each TAP. Every write in the 11-06 captures (six) came right after a herd and RESET, between `0B00 00` and `0B00 01` sent to every TAP, and only to the TAPs being configured: adopting a new TAP left the other's block untouched.
 - **Never log or commit this block:** it carries the key.
 
 ## Bring-up

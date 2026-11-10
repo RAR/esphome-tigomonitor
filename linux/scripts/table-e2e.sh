@@ -120,6 +120,7 @@ expect "one erase, one write of five, joined" "$(stat "$out/three.json" "(d['era
   "(1, 1, '05', ['0002', '0004', '0005', '0006', '0007'])"
 expect "the saved list is gone" "$([ -e "$out/three/table-remove.json" ] && echo kept || echo gone)" gone
 expect "logged the erase" "$(grep -c 'erased the TAP.s table (done)' "$out/three.log")" 1
+expect "and it left the Devices list" "$(body GET 18303 /api/nodes '' admin:pw | python3 -c "import json,sys; print(any(n['long_address'] == sys.argv[1] for n in json.load(sys.stdin)['nodes']))" "$mac3")" False
 stop_all
 
 # --- run 4: a removal that stopped after its erase, found at the start ---
@@ -156,6 +157,38 @@ expect "stopping one not waited for is refused" "$(code POST 18305 /api/master/t
 for _ in $(seq 100); do [ "$(waits "len(t['waiting'])")" = 0 ] && break; sleep 1; done
 expect "the first joined" "$(waits "[(o['id'], o['joined'], o['text']) for o in t['joins']]")" "[('0008', True, 'joined at 0008')]"
 expect "two writes, no erase" "$(stat "$out/five.json" "(len(d['table_writes']), d['erases'])")" "(2, 0)"
+stop_all
+
+# --- run 6: replace one: one rewrite, the new one at the old address, then its place ---
+start six 18306 ', "master_table_writes": true' --join-after 20
+macs=''
+for _ in $(seq 40); do  # the six panels, in address order, once the table has been read
+  macs="$(body GET 18306 /api/nodes '' admin:pw | python3 -c "import json,sys; n=sorted((x for x in json.load(sys.stdin)['nodes'] if x['long_address']), key=lambda x: x['addr']); print(','.join(x['long_address'] for x in n) if len(n) == 6 else '')")"
+  [ -n "$macs" ] && break
+  sleep 0.25
+done
+old="$(echo "$macs" | cut -d, -f2)"
+layout="$(python3 -c "import json,sys; print(json.dumps({'inverters': [{'name': 'Inverter 1', 'mppts': [{'label': 'MPPT 1', 'strings': [{'label': 'A', 'panels': sys.argv[1].split(',')}]}]}]}))" "$macs")"
+expect "a layout of the six" "$(code POST 18306 /api/layout "$layout" admin:pw)" 200
+place() { body GET 18306 /api/layout '' admin:pw | python3 -c "import json,sys; s=json.load(sys.stdin)['inverters'][0]['mppts'][0]['strings'][0]; print(s['panels'][1]['barcode'] == sys.argv[1])" "$1"; }
+expect "the old one in A's second place" "$(place "$old")" True
+expect "a dry run of the replace" "$(code POST 18306 /api/master/table/replace "{\"old_mac\": \"$old\", $LABEL, \"dry_run\": true}" admin:pw)" 200
+finished 18306
+expect "it would write the new one at 0003" "$(edit 18306 "(e['kind'], e['ok'], e['id'], e['dry_frames'][0], e['dry_frames'][1][2:4])")" "('replace', True, '0003', '2BBABE', '06')"
+expect "and sent nothing" "$(stat "$out/six.json" "(d['erases'], d['table_writes'])")" "(0, [])"
+expect "the replace starts" "$(code POST 18306 /api/master/table/replace "{\"old_mac\": \"$old\", $LABEL}" admin:pw)" 200
+finished 18306
+expect "replaced" "$(edit 18306 "(e['kind'], e['ok'], e['message'])")" \
+  "('replace', True, 'replaced 0003; the other 5 written back as they were, the new one waiting to join')"
+expect "one erase, the new one at 8003 among six" "$(stat "$out/six.json" "(d['erases'], len(d['table_writes']), d['table_writes'][0][:2], '04c05b00000012348003' in d['table_writes'][0])")" "(1, 1, '06', True)"
+waits6() { body GET 18306 /api/master '' admin:pw | python3 -c "import json,sys; t=json.load(sys.stdin)['table']; print(eval(sys.argv[1]))" "$1"; }
+expect "waiting for the new one" "$(waits6 "[(w['id'], w['label']) for w in t['waiting']]")" "[('0003', '0-1234R')]"
+for _ in $(seq 100); do [ "$(waits6 "len(t['waiting'])")" = 0 ] && break; sleep 1; done
+sleep 1
+expect "it joined" "$(waits6 "[(o['id'], o['joined']) for o in t['joins']]")" "[('0003', True)]"
+expect "and took the old one's place" "$(place 04C05B0000001234)" True
+expect "the old one left the Devices list" "$(body GET 18306 /api/nodes '' admin:pw | python3 -c "import json,sys; print(any(n['long_address'] == sys.argv[1] for n in json.load(sys.stdin)['nodes']))" "$old")" False
+expect "logged" "$(grep -c 'the replacement took its place' "$out/six.log")" 1
 stop_all
 
 [ $fail = 0 ] && echo "table e2e passed" || { echo "table e2e FAILED"; exit 1; }

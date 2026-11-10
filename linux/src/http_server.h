@@ -71,6 +71,10 @@ struct HttpContext {
       request_table_add;
   // The owner's removal of one: 200, or 409 with why.
   std::function<int(const esphome::tigo_monitor::master::Bytes &mac, bool dry_run, std::string &why)> request_table_remove;
+  // The owner's replace of one (old MAC, new MAC, dry run): 200, or 409 with why.
+  std::function<int(const esphome::tigo_monitor::master::Bytes &old_mac, const esphome::tigo_monitor::master::Bytes &new_mac,
+                    bool dry_run, std::string &why)>
+      request_table_replace;
   // Stop waiting for an added optimizer to join: 200, or 409 with why.
   std::function<int(const esphome::tigo_monitor::master::Bytes &mac, std::string &why)> request_table_stop_waiting;
 };

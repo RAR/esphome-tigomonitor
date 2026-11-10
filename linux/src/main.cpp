@@ -238,6 +238,22 @@ int main(int argc, char **argv) {
       m->set_discovery(discovery.renew(), [&discovery](bool renew) { discovery.save(renew); });
       m->set_read_tap_config(settings.master_read_tap_config);
       m->set_table_writes(settings.master_table_writes);
+      // A replace's new optimizer, once it has joined, takes the old one's
+      // place in the layout, as a CCA's cloud does.
+      m->set_on_replaced([&monitor](const std::string &old_mac, const std::string &new_mac) {
+        std::string why;
+        if (monitor.take_place(old_mac, new_mac, why))
+          LOGI("layout: the replacement took its place");
+        else
+          LOGW("layout: the replacement joined, but its place wasn't moved: %s", why.c_str());
+        // The old one, its place handed on, leaves the Devices list.
+        monitor.forget_optimizer(old_mac);
+      });
+      // A retired optimizer leaves the Devices list at once; one that drops
+      // off the TAP any other way stays, tagged, so a failure shows.
+      m->set_on_removed([&monitor](const std::string &mac) {
+        if (monitor.forget_optimizer(mac)) LOGI("devices: forgot the retired optimizer");
+      });
       {
         // A removal that stopped between its erase and its write back is
         // finished by this master, from the list saved before the erase.
@@ -384,6 +400,15 @@ int main(int argc, char **argv) {
           return 409;
         }
         return bus_master->request_table_remove(mac, dry_run, why) ? 200 : 409;
+      },
+      [&](const esphome::tigo_monitor::master::Bytes &old_mac, const esphome::tigo_monitor::master::Bytes &new_mac,
+          bool dry_run, std::string &why) {
+        std::lock_guard<std::mutex> lock(master_mu);
+        if (!bus_master) {
+          why = "this monitor isn't running the bus";
+          return 409;
+        }
+        return bus_master->request_table_replace(old_mac, new_mac, dry_run, why) ? 200 : 409;
       },
       [&](const esphome::tigo_monitor::master::Bytes &mac, std::string &why) {
         std::lock_guard<std::mutex> lock(master_mu);

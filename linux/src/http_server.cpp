@@ -517,6 +517,7 @@ void HttpServer::routes_() {
     auto stats = mon.links();
     auto names = mon.tap_names();
     auto panels = mon.panels();
+    auto node_list = mon.nodes();
     int64_t now_s = std::chrono::duration_cast<std::chrono::seconds>(
                         std::chrono::system_clock::now().time_since_epoch()).count();
     std::set<uint16_t> tap_ids;
@@ -534,9 +535,22 @@ void HttpServer::routes_() {
       json rssi_24h = json::array();
       for (int v : stats.rssi_24h(e.first, now_s)) rssi_24h.push_back(v < 0 ? json(nullptr) : json(v));
       bool heard = l.last_heard_s > 0;
+      // One not heard since this start (a restart at night) keeps the name
+      // and string the node table has for it, as /api/devices does.
+      std::string label = e.first, string;
+      if (p) {
+        label = panel_name(*p);
+        string = string_of(mon, *p);
+      } else {
+        for (const auto &n : node_list) {
+          if (n.addr != e.first) continue;
+          label = !n.cca_label.empty() ? n.cca_label : n.long_address.size() >= 6 ? n.long_address.substr(n.long_address.size() - 6) : e.first;
+          string = n.cca_string_label.empty() ? Monitor::ALL_PANELS : n.cca_string_label;
+        }
+      }
       nodes.push_back({{"addr", e.first},
-                       {"label", p ? panel_name(*p) : e.first},
-                       {"string", p ? string_of(mon, *p) : ""},
+                       {"label", label},
+                       {"string", string},
                        {"tap", l.tap ? json(tap) : json(nullptr)},
                        {"parent", l.parent.empty() ? json(nullptr) : json(l.parent)},
                        {"relay", stats.relay_of(e.first).empty() ? json(nullptr) : json(stats.relay_of(e.first))},
@@ -1603,6 +1617,39 @@ void HttpServer::routes_() {
     int code = ctx_.request_table_remove ? ctx_.request_table_remove(mac, dry, why) : 409;
     if (code == 200) send_json(res, {{"started", true}, {"dry_run", dry}, {"mac", mp::mac_hex(mac)}, {"label", mp::label_of(mac)}});
     else send_json(res, {{"error", why.empty() ? "not running the bus" : why}}, code);
+  });
+
+  // Pi-only: replace an optimizer (System setup): {"old_mac": "04C05B...",
+  // "label": the new one's (or "mac"), "dry_run"}. The table erased and
+  // written back without the old one, the new one listed at its address;
+  // once it joins, it takes the old one's place in the layout. Behind the
+  // web password.
+  svr.Post("/api/master/table/replace", [this](const httplib::Request &req, httplib::Response &res) {
+    if (ctx_.current_settings().web_password.empty()) {
+      send_json(res, {{"error", "set a web password first"}}, 403);
+      return;
+    }
+    json j = json::parse(req.body, nullptr, false);
+    namespace mp = esphome::tigo_monitor::master;
+    mp::Bytes old_mac, new_mac;
+    std::string bad;
+    if (j.is_discarded() || !j.is_object() || !j.contains("old_mac") || !j["old_mac"].is_string() ||
+        !optimizer_of(json{{"mac", j["old_mac"]}}, old_mac, bad)) {
+      send_json(res, {{"error", bad.empty() ? "give the old optimizer's 16-digit MAC as old_mac" : "old_mac: " + bad}}, 400);
+      return;
+    }
+    if (!optimizer_of(j, new_mac, bad)) {
+      send_json(res, {{"error", bad}}, 400);
+      return;
+    }
+    bool dry = j.contains("dry_run") && j["dry_run"].is_boolean() && j["dry_run"].get<bool>();
+    std::string why;
+    int code = ctx_.request_table_replace ? ctx_.request_table_replace(old_mac, new_mac, dry, why) : 409;
+    if (code == 200)
+      send_json(res, {{"started", true}, {"dry_run", dry}, {"old_mac", mp::mac_hex(old_mac)}, {"mac", mp::mac_hex(new_mac)},
+                      {"label", mp::label_of(new_mac)}});
+    else
+      send_json(res, {{"error", why.empty() ? "not running the bus" : why}}, code);
   });
 
   // Pi-only: stop waiting for an added optimizer to join ({"label"} or

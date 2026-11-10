@@ -662,7 +662,71 @@ static void test_remove_dry_run() {
   CHECK(job.dry_frames()[2][0] == 0x29 && job.dry_frames()[2][1] == 1);
 }
 
+// ---- replace ----
+
+// The old record left out, the new one written provisional at its id, in
+// the same rewrite; every other record back as read.
+static void test_replace_writes_the_new_one_at_the_old_id() {
+  FakeTap tap = table_of(12);
+  Bytes old = tap.slots[5].first;  // id 7
+  Bytes fresh = hex("04C05B0000102E66");
+  uint32_t now = 0;
+  TableReplace job(old, fresh, false);
+  CHECK(std::string(job.kind()) == "replace");
+  run(job, tap, now);
+  CHECK(job.finished() && job.ok());
+  CHECK(job.id() == 7);
+  CHECK(tap.erases == 1 && tap.writes == 2);
+  std::vector<TableRecord> held = records_of(tap);
+  CHECK(held.size() == 12);
+  bool old_gone = true, fresh_at_7 = false;
+  for (const auto &r : held) {
+    if (r.mac == old) old_gone = false;
+    if (r.mac == fresh) fresh_at_7 = r.tuid == 0x8007;
+  }
+  CHECK(old_gone && fresh_at_7);
+  CHECK(job.awaiting_join());
+  CHECK(job.message() == "replaced 0007; the other 11 written back as they were, the new one waiting to join");
+}
+
+// The new one already listed, the old one not: stopped before anything is sent.
+static void test_replace_refusals() {
+  FakeTap tap = table_of(4);
+  uint32_t now = 0;
+  TableReplace listed(tap.slots[0].first, tap.slots[1].first, false);
+  run(listed, tap, now);
+  CHECK(listed.finished() && !listed.ok() && tap.erases == 0);
+  CHECK(listed.message().find("already in the table") != std::string::npos);
+  TableReplace absent(hex("04C05B0000009999"), hex("04C05B0000102E66"), false);
+  run(absent, tap, now);
+  CHECK(absent.finished() && !absent.ok() && tap.erases == 0);
+  CHECK(absent.message().find("not in the table") != std::string::npos);
+  TableReplace same(tap.slots[0].first, tap.slots[0].first, false);
+  run(same, tap, now);
+  CHECK(!same.ok() && tap.erases == 0);
+}
+
+// A dry run lists the erase and the writes, the new record among them.
+static void test_replace_dry_run() {
+  FakeTap tap = table_of(3);
+  uint32_t now = 0;
+  TableReplace job(tap.slots[1].first, hex("04C05B0000102E66"), true);
+  run(job, tap, now);
+  CHECK(job.ok() && tap.erases == 0 && tap.writes == 0);
+  CHECK(job.dry_frames().size() == 2);
+  Bytes expect = {0x29, 3};
+  for (const auto &r : std::vector<std::pair<Bytes, uint16_t>>{{tap.slots[0].first, 2}, {hex("04C05B0000102E66"), 0x8003}, {tap.slots[2].first, 4}}) {
+    expect.insert(expect.end(), r.first.begin(), r.first.end());
+    expect.push_back(static_cast<uint8_t>(r.second >> 8));
+    expect.push_back(static_cast<uint8_t>(r.second));
+  }
+  CHECK(job.dry_frames().size() == 2 && job.dry_frames()[1] == expect);
+}
+
 int main() {
+  test_replace_writes_the_new_one_at_the_old_id();
+  test_replace_refusals();
+  test_replace_dry_run();
   test_remove_erases_and_writes_back_the_rest();
   test_remove_writes_ten_at_a_time();
   test_remove_waits_the_holdoff();
