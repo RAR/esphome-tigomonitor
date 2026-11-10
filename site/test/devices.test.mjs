@@ -70,7 +70,7 @@ test('Devices, on the Pi: the TAP, and each optimizer with its firmware', async 
   assert.equal(await page.textContent('#view-nodes h1'), 'Devices');
   await page.waitForSelector('#devices-taps', { state: 'visible' });
   const tap = await page.textContent('#devices-taps tbody');
-  assert.match(tap, /1201.*Mgate.*G8\.59 Jan {2}1 2026/s);
+  assert.match(tap, /1201.*G series · mesh.*G8\.59 Jan {2}1 2026/s);
   await page.waitForFunction(() => /K8\.0120/.test(document.getElementById('nodes-tbody').textContent));
   const dev = routes['/api/devices'].devices;
   const row = (addr) => page.$eval(`#nodes-tbody tr[data-addr="${addr}"]`, (tr) => tr.textContent);
@@ -171,6 +171,27 @@ test("Devices, on the Pi: a Settings cell opens that optimizer's settings, named
   await openFor(0);
   const box = await page.$eval('#smart-panel', (d) => { const r = d.getBoundingClientRect(); return [r.left, r.bottom, r.width]; });
   assert.ok(box[0] <= 1 && Math.abs(box[1] - 844) <= 1 && box[2] >= 388, `sheet at ${box}`);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+// The Model column names the TAP's series and whether it runs the mesh
+// firmware, from its version string, as the CCA classifies it. A star-only
+// TAP is flagged: on a mesh system it forces the old star stack.
+test("Devices, on the Pi: each TAP's series, mesh or star only, from its version", async () => {
+  const tap = (addr, model, version) => ({ addr, model, version, previous: '', since_unix_ms: 1767225600000,
+    last_unix_ms: 1767225600000, name: '' });
+  const versions = { ...routes['/api/versions'], radios: [], ids: [], taps: [
+    tap('1201', 'Mgate', 'H1.0006 Aug 25 2023'), tap('1202', 'Mgate', 'G8.65 May  9 2025'),
+    tap('1203', 'Gway', 'G5.26 Jan  1 2020'), tap('1204', 'Mgate', 'G5.26 Jan  1 2020'), tap('1205', 'Xgate', 'Z9.01')] };
+  const { page, ctx, errors } = await open(true, versions);
+  await page.waitForSelector('#devices-taps tbody tr:nth-child(5)');
+  const cells = await page.$$eval('#devices-taps tbody tr td.tap-model', (tds) => tds.map((td) =>
+    [td.textContent.trim(), td.classList.contains('star-only'), td.title]));
+  assert.deepEqual(cells.map(([t, star]) => [t, star]), [
+    ['H series · mesh', false], ['G series · mesh', false], ['Star only', true], ['Star only', true], ['Xgate', false]]);
+  assert.match(cells[0][2], /Mgate firmware H1\.0006/);
+  assert.match(cells[2][2], /forces a mesh system back to the old star stack/);
   assert.deepEqual(errors, []);
   await ctx.close();
 });
