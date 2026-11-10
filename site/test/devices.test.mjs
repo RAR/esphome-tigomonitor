@@ -70,7 +70,7 @@ test('Devices, on the Pi: the TAP, and each optimizer with its firmware', async 
   assert.equal(await page.textContent('#view-nodes h1'), 'Devices');
   await page.waitForSelector('#devices-taps', { state: 'visible' });
   const tap = await page.textContent('#devices-taps tbody');
-  assert.match(tap, /1201.*Mgate.*G8\.59 Jan {2}1 2026/s);
+  assert.match(tap, /1201.*G series · mesh.*G8\.59 Jan {2}1 2026/s);
   await page.waitForFunction(() => /K8\.0120/.test(document.getElementById('nodes-tbody').textContent));
   const dev = routes['/api/devices'].devices;
   const row = (addr) => page.$eval(`#nodes-tbody tr[data-addr="${addr}"]`, (tr) => tr.textContent);
@@ -175,6 +175,34 @@ test("Devices, on the Pi: a Settings cell opens that optimizer's settings, named
   await ctx.close();
 });
 
+// The Model column names the TAP's series and whether it runs the mesh
+// firmware, from its version string, as the CCA classifies it. A star-only
+// TAP is flagged: on a mesh system it forces the old star stack.
+test("Devices, on the Pi: each TAP's series, mesh or star only, from its version", async () => {
+  const tap = (addr, model, version) => ({ addr, model, version, previous: '', since_unix_ms: 1767225600000,
+    last_unix_ms: 1767225600000, name: '' });
+  const versions = { ...routes['/api/versions'], radios: [], ids: [], taps: [
+    tap('1201', 'Mgate', 'H1.0007 Apr 22 2025 15:28:25 GW-H158.7.00'), tap('1202', 'Mgate', 'G8.65 May  9 2025 13:52:34 GW-H150.6.0S0.12'),
+    tap('1203', 'Gway', 'G5.26 Jan  1 2020'), tap('1204', 'Mgate', 'G5.26 Jan  1 2020'), tap('1205', 'Xgate', 'Z9.01')] };
+  const { page, ctx, errors } = await open(true, versions);
+  await page.waitForSelector('#devices-taps tbody tr:nth-child(5)');
+  const cells = await page.$$eval('#devices-taps tbody tr td.tap-model', (tds) => tds.map((td) =>
+    [td.innerText.replace(/\s+/g, ' ').trim(), td.classList.contains('star-only'), td.title]));
+  assert.deepEqual(cells.map(([t, star]) => [t, star]), [
+    ['H series · mesh GW-H158.7.00', false], ['G series · mesh GW-H150.6.0S0.12', false], ['Star only', true], ['Star only', true], ['Xgate', false]]);
+  assert.match(cells[0][2], /Mgate firmware H1\.0007/);
+  // The board ID is the version string's GW- suffix (owner's analysis): shown
+  // under the series, and not repeated in the Firmware column.
+  assert.equal(await page.textContent('#devices-taps tbody tr:nth-child(1) td.tap-model .tap-board'), 'GW-H158.7.00');
+  const fw = await page.$$eval('#devices-taps tbody tr td.tap-fw', (tds) => tds.map((td) => td.textContent.trim()));
+  // The build time goes to the tooltip with the rest, so the cell stays on one line.
+  assert.deepEqual(fw.slice(0, 2), ['H1.0007 Apr 22 2025', 'G8.65 May  9 2025']);
+  assert.match(await page.getAttribute('#devices-taps tbody tr:nth-child(1) td.tap-fw', 'title'), /15:28:25 GW-H158\.7\.00/);
+  assert.match(cells[2][2], /forces a mesh system back to the old star stack/);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
 test('Devices, on the Pi with no TAP version heard yet, says where it comes from', async () => {
   const { page, ctx, errors } = await open(true, { taps: [], optimizers: [] });
   await page.waitForSelector('#devices-taps', { state: 'visible' });
@@ -248,9 +276,13 @@ test('Devices, on the Pi: a change to an optimizer\'s settings is listed, newest
 test("Devices, on the Pi: the TAP's radio channel and admission level, once read", async () => {
   const { page, ctx } = await open(true);
   await page.waitForSelector('#devices-taps', { state: 'visible' });
-  const row = await page.textContent('#devices-taps tbody tr');
-  assert.match(row, /Channel 18/);
-  assert.match(row, /admits above 90/);
+  // The channel first; the threshold beneath, named for what it does, and
+  // explained in the tooltip, since its scale has no units anyone knows.
+  const cell = page.locator('#devices-taps tbody tr td.tap-radio').first();
+  assert.equal((await cell.innerText()).replace(/\s+/g, ' ').trim(), 'Channel 18 join threshold 90');
+  const title = await cell.getAttribute('title');
+  assert.match(title, /must be heard above 90 to join/);
+  assert.match(title, /SLm 60/);
   await ctx.close();
 });
 

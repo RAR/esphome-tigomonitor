@@ -790,6 +790,10 @@
   .mesh-tap text { fill: var(--text); font-size: 12px; font-weight: 600; }
   .mesh-tap text.mesh-tap-addr { fill: var(--text-dim); font-size: 10px; font-weight: 500; }
   td.tap-name { white-space: nowrap; }
+  td.tap-model { white-space: nowrap; }
+  td.tap-model.star-only { color: var(--warn); font-weight: 600; }
+  td.tap-radio .tap-sub { font-size: 11px; color: var(--text-dim); }
+  td.tap-model .tap-board { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 11px; color: var(--text-dim); font-weight: 400; }
   table.nodes .node-tap { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; font-size: 11px;
                          color: var(--text-faint); white-space: nowrap; }
   td.tap-name .input { width: 12em; }
@@ -3893,7 +3897,7 @@
     // channel, and SLT, the signal level an optimizer must beat to be let in.
     const radio = addr => {
       const r = (v.radios || []).find(x => x.tap === addr);
-      return r ? `<td title="SLm ${r.slm}, read ${when(r.heard_unix_ms)}">Channel ${r.channel} · admits above ${r.slt}</td>`
+      return r ? `<td class="tap-radio" title="Radio channel ${r.channel} (802.15.4). Join threshold ${r.slt} (SLT): a new optimizer must be heard above ${r.slt} to join this TAP, on the radio's own signal scale, not dBm; 90 is the CCA's usual value. SLm ${r.slm}, meaning unknown. Read ${when(r.heard_unix_ms)}.">Channel ${r.channel}<div class="tap-sub">join threshold ${r.slt}</div></td>`
                : '<td title="Read from the TAP when a bus master brings it up">—</td>';
     };
     // Its ID: the MAC it gave when a master asked where it was.
@@ -3902,13 +3906,32 @@
       return m ? `<td class="mono tap-id" title="Its MAC, as it answered GET_MAC ${when(m.heard_unix_ms)}">${topoEscape(m.mac)}</td>`
                : '<td class="tap-id" title="Read when a bus master brings the TAP up">—</td>';
     };
+    // Its series and firmware kind, from its version string, as the CCA
+    // classifies a TAP (owner's analysis, 2026-11-10): Mgate is the mesh
+    // gateway firmware, H and G the two TAP lines, which share its protocol.
+    // A star-only TAP (Gway, or a G5.x like the bench's before the CCA updated
+    // it) forces a whole mesh system back to the old star stack.
+    // The version string's GW- suffix is the TAP's board (hardware) ID,
+    // shown here under the series rather than at the end of its firmware.
+    const boardRe = /\s*\bGW-\S+\s*$/;
+    const board = t => { const b = /\bGW-\S+\s*$/.exec(t.version || ''); return b ? b[0].trim() : ''; };
+    const model = t => {
+      const v = /^([A-Z])(\d+)\./.exec(t.version || '');
+      const full = `${t.model} firmware ${t.version}`;
+      const b = board(t) ? `<div class="tap-board">${topoEscape(board(t))}</div>` : '';
+      if (t.model === 'Gway' || (v && v[1] === 'G' && Number(v[2]) <= 5))
+        return `<td class="tap-model star-only" title="${topoEscape(full)}: star-only firmware. A star-only TAP forces a mesh system back to the old star stack; keep it off a system with mesh TAPs.">Star only${b}</td>`;
+      if (t.model === 'Mgate' && v)
+        return `<td class="tap-model" title="${topoEscape(full)}">${v[1]} series · mesh${b}</td>`;
+      return `<td class="tap-model" title="${topoEscape(full)}">${topoEscape(t.model)}${b}</td>`;
+    };
     // A name, kept on the Pi and shown on the mesh map too.
     const name = t => `<td class="tap-name" data-tap="${topoEscape(t.addr)}">${t.name
       ? `<span>${topoEscape(t.name)}</span><button type="button" class="tap-rename" aria-label="Rename TAP ${topoEscape(t.addr)}" title="Rename"></button>`
       : `<button type="button" class="tap-rename add">Add a name</button>`}</td>`;
     box.querySelector('tbody').innerHTML = (v.taps || []).length ? v.taps.map(t => `<tr>
-        ${name(t)}<td class="mono">${topoEscape(t.addr)}</td>${id(t.addr)}<td>${topoEscape(t.model)}</td>
-        <td class="mono"${t.previous ? ` title="was ${topoEscape(t.previous)}"` : ''}><strong>${topoEscape(t.version)}</strong></td>
+        ${name(t)}<td class="mono">${topoEscape(t.addr)}</td>${id(t.addr)}${model(t)}
+        <td class="mono tap-fw" title="${topoEscape(t.version || '')}${t.previous ? ` · was ${topoEscape(t.previous)}` : ''}"><strong>${topoEscape((t.version || '').replace(boardRe, '').replace(/\s+\d{1,2}:\d{2}:\d{2}$/, ''))}</strong></td>
         ${radio(t.addr)}<td>${when(t.since_unix_ms)}</td><td>${when(t.last_unix_ms)}</td></tr>`).join('')
       : `<tr><td colspan="8" style="color:var(--text-faint)">Not heard yet. The bus master asks the TAP once each time it starts, and the optimizers as it first hears each one.</td></tr>`;
   }
