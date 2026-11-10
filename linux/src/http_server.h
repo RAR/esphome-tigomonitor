@@ -65,18 +65,24 @@ struct HttpContext {
   std::function<int(bool renew, std::string &why)> request_discovery;
   // The decoded bus log and the TAP-reconfiguration alarm.
   BusLog *bus_log = nullptr;
-  // The owner's add of an optimizer to the TAP's table (MAC, id 0 for the
-  // lowest free, dry run): 200, or 409 with why, as request_pv.
-  std::function<int(const esphome::tigo_monitor::master::Bytes &mac, uint16_t id, bool dry_run, std::string &why)>
+  // The owner's add of an optimizer to a TAP's table (MAC, id 0 for the
+  // lowest free, dry run, the TAP's id or 0 for the first): 200, or 409
+  // with why, as request_pv.
+  std::function<int(const esphome::tigo_monitor::master::Bytes &mac, uint16_t id, bool dry_run, std::string &why,
+                    uint16_t tap)>
       request_table_add;
-  // The owner's removal of one: 200, or 409 with why.
-  std::function<int(const esphome::tigo_monitor::master::Bytes &mac, bool dry_run, std::string &why)> request_table_remove;
-  // The owner's replace of one (old MAC, new MAC, dry run): 200, or 409 with why.
+  // The owner's removal of one (tap 0: the one it reports through): 200, or 409 with why.
+  std::function<int(const esphome::tigo_monitor::master::Bytes &mac, bool dry_run, std::string &why, uint16_t tap)>
+      request_table_remove;
+  // The owner's replace of one (old MAC, new MAC, dry run, tap 0: the old
+  // one's): 200, or 409 with why.
   std::function<int(const esphome::tigo_monitor::master::Bytes &old_mac, const esphome::tigo_monitor::master::Bytes &new_mac,
-                    bool dry_run, std::string &why)>
+                    bool dry_run, std::string &why, uint16_t tap)>
       request_table_replace;
   // Stop waiting for an added optimizer to join: 200, or 409 with why.
   std::function<int(const esphome::tigo_monitor::master::Bytes &mac, std::string &why)> request_table_stop_waiting;
+  // The owner's herd (look for TAPs): 200, or 409 with why.
+  std::function<int(std::string &why)> request_herd;
 };
 
 // tigomonitord --health-check PORT, the container's HEALTHCHECK: GETs

@@ -352,6 +352,22 @@ static void test_tap_reconfiguring_frames_are_never_sent() {
     for (const Bytes &args : {Bytes{}, Bytes{0x00, 0x02}, Bytes{0x00, 0x02, 0x80, 0x00}})
       CHECK(never_anywhere(CMD_TUNNEL, tunnel_request(sub, 1, args)));
   CHECK(SUB_ERASE_FLASH == 0x2B);
+  // The CCA's other messages to an optimizer besides SetPgw (0x41): Own star,
+  // Ignore star, Kick (evicts a node its TAP doesn't list), firmware request
+  // (0x45) and firmware delivery (0x46), and 0x47 beside them. In none of our
+  // captures (owner's analysis, 2026-11-10).
+  for (uint8_t sub = 0x42; sub <= 0x47; sub++)
+    for (const Bytes &args : {Bytes{}, Bytes{0x00, 0x02}, Bytes{0x00, 0x02, 0x80, 0x00}})
+      CHECK(never_anywhere(CMD_TUNNEL, tunnel_request(sub, 1, args)));
+  CHECK(classify_request(CMD_TUNNEL, tunnel_request(0x40, 1, {})) == Allow::bench_only);
+  // An optimizer's own Leave command makes it leave its network (owner's
+  // analysis, 2026-11-10): never, in any of the text forms the CCA uses.
+  for (const char *t : {"Leave", "Leave\r", "!Leave", "^00Leave", "^00Leave\r", "#Leave"}) {
+    Bytes a = {0x00, 0x1c};
+    a.insert(a.end(), t, t + strlen(t));
+    CHECK(never_anywhere(CMD_TUNNEL, tunnel_request(0x06, 1, a)));
+  }
+  CHECK(classify_request(CMD_TUNNEL, tunnel_request(0x48, 1, {})) == Allow::bench_only);
   // Neighbours stay as they were: the reads around them are bench-only.
   CHECK(classify_request(0x000B, {}) == Allow::bench_only);
   CHECK(classify_request(0x0071, {}) == Allow::bench_only);
@@ -1360,7 +1376,172 @@ static void test_pv_switch() {
   CHECK(r.payload == tunnel_request(SUB_DISCOVERY_STATUS, seq, {}));
 }
 
+// ---- the herd (Herd): every TAP on the bus at once
+
+// TAPs on a simulated bus, as the 11-06 bench's answered the CCA: a
+// SET_485_ID broadcast moves every one to the factory id, GET_MAC there is
+// answered by each, SET_ID_BY_MAC moves the one with that MAC, STORE keeps
+// its id, and a RESET puts each back at its stored id, or at the factory id
+// if it has none (a new TAP).
+struct SimTap {
+  Bytes mac;
+  uint16_t id;
+  uint16_t stored;  // 0: none
+};
+struct SimBus {
+  std::vector<SimTap> taps;
+  std::vector<std::pair<uint16_t, uint16_t>> sent;  // dest, cmd
+  std::vector<Frame> handle(const DiscoveryRequest &r) {
+    sent.push_back({r.dest, r.cmd});
+    std::vector<Frame> out;
+    auto reply = [&](uint16_t at, uint16_t cmd, Bytes p) {
+      Frame f;
+      f.dest = at | 0x8000;
+      f.cmd = cmd;
+      f.payload = std::move(p);
+      out.push_back(f);
+    };
+    auto mac_id = [](const SimTap &t) {
+      Bytes p = t.mac;
+      p.push_back(static_cast<uint8_t>(t.id >> 8));
+      p.push_back(static_cast<uint8_t>(t.id));
+      return p;
+    };
+    if (r.cmd == CMD_SET_485_ID) {
+      for (auto &t : taps) t.id = 0x1235;
+      reply(0x0000, 0x0015, {});
+    } else if (r.cmd == CMD_RESET) {
+      for (auto &t : taps) t.id = t.stored ? t.stored : 0x1235;
+    } else {
+      for (auto &t : taps) {
+        if (t.id != r.dest) continue;
+        if (r.cmd == CMD_GET_MAC || r.cmd == CMD_GET_MAC_NOW) reply(t.id, r.cmd + 1, mac_id(t));
+        if (r.cmd == CMD_STORE) {
+          t.stored = t.id;
+          reply(t.id, CMD_STORE + 1, {});
+        }
+        if (r.cmd == CMD_SET_ID_BY_MAC && Bytes(r.payload.begin() + 4, r.payload.begin() + 12) == t.mac) {
+          reply(t.id, CMD_SET_ID_BY_MAC + 1, {});
+          t.id = static_cast<uint16_t>(r.payload[12] << 8 | r.payload[13]);
+          break;
+        }
+      }
+    }
+    return out;
+  }
+  int count(uint16_t cmd) const {
+    int n = 0;
+    for (auto &s : sent) n += s.second == cmd;
+    return n;
+  }
+};
+static Bytes tap_mac(uint8_t last) { return {0x04, 0xC0, 0x5B, 0x00, 0x00, 0x00, 0x00, last}; }
+
+// Runs a herd to its end against the bus; every request's frames checked
+// against what the send gate allows a bring-up.
+static void run_herd(Herd &h, SimBus &bus) {
+  for (int i = 0; i < 2000; i++) {
+    DiscoveryRequest r = h.next();
+    if (r.done || r.failed) return;
+    if (!r.send) continue;
+    CHECK(may_send(r.cmd, r.payload, false, /*startup=*/true));
+    std::vector<Frame> replies = bus.handle(r);
+    for (size_t k = 0; k < replies.size() && (r.collect || k == 0); k++) h.on_reply(replies[k]);
+  }
+  CHECK(false);  // never ended
+}
+
+// One TAP the map knows, at its stored id: one round, five broadcasts, its
+// old id back, the scan, the read, the hop one up, the RESET, and home.
+static void test_herd_one_known_tap() {
+  SimBus bus;
+  bus.taps = {{tap_mac(1), 0x1201, 0x1201}};
+  Herd h(0x1235, 0x1201, {{tap_mac(1), 0x1201}});
+  run_herd(h, bus);
+  CHECK(h.done() && h.round() == 1);
+  CHECK(h.placed().size() == 1 && h.placed()[0].id == 0x1201 && !h.placed()[0].fresh && h.placed()[0].answered);
+  CHECK(bus.count(CMD_SET_485_ID) == 5 && bus.count(CMD_RESET) == 1 && bus.count(CMD_STORE) == 0);
+  CHECK(bus.count(CMD_GET_MAC) == 1 + Herd::SCAN_TRIES);
+  // The hop went to 1202, one past the only placed id.
+  bool hopped = false;
+  for (auto &s : bus.sent) hopped = hopped || (s.first == 0x1202 && s.second == CMD_GET_MAC_NOW);
+  CHECK(hopped);
+  CHECK(bus.taps[0].id == 0x1201);
+}
+
+// The 11-06 bench: one TAP known at 1201, one new. The new one gets 1202,
+// isn't back there after the RESET (it keeps no id), and the herd runs
+// again with a STORE for it, after which both are home.
+static void test_herd_a_new_tap_is_stored_in_a_second_round() {
+  SimBus bus;
+  bus.taps = {{tap_mac(2), 0x0000, 0}, {tap_mac(1), 0x1201, 0x1201}};
+  Herd h(0x1235, 0x1201, {{tap_mac(1), 0x1201}});
+  run_herd(h, bus);
+  CHECK(h.done() && h.round() == 2);
+  CHECK(bus.count(CMD_SET_485_ID) == 10 && bus.count(CMD_RESET) == 2 && bus.count(CMD_STORE) == 1);
+  const Herd::Placed *n = nullptr, *k = nullptr;
+  for (const auto &p : h.placed()) (p.mac == tap_mac(2) ? n : k) = &p;
+  CHECK(n && k && n->id == 0x1202 && n->fresh && n->stored && n->answered);
+  CHECK(k->id == 0x1201 && !k->fresh && !k->stored && k->answered);
+  CHECK(bus.taps[0].id == 0x1202 && bus.taps[0].stored == 0x1202 && bus.taps[1].id == 0x1201);
+  // The hops went past both placed ids: 1203 and 1204.
+  int hops = 0;
+  for (auto &s : bus.sent) hops += (s.first == 0x1203 || s.first == 0x1204) && s.second == CMD_GET_MAC_NOW;
+  CHECK(hops >= 2);
+}
+
+// A known TAP missing from the bus keeps its id: a new one skips it.
+static void test_herd_skips_a_missing_taps_id() {
+  SimBus bus;
+  bus.taps = {{tap_mac(1), 0x1201, 0x1201}, {tap_mac(3), 0x0000, 0x0000}};
+  Herd h(0x1235, 0x1201, {{tap_mac(1), 0x1201}, {tap_mac(2), 0x1202}});
+  run_herd(h, bus);
+  CHECK(h.done());
+  for (const auto &p : h.placed())
+    if (p.mac == tap_mac(3)) CHECK(p.id == 0x1203);
+}
+
+// The ids skip 1234 and 1235, which a TAP takes as broadcast addresses.
+static void test_herd_skips_the_broadcast_ids() {
+  SimBus bus;
+  bus.taps = {{tap_mac(1), 0x1233, 0x1233}, {tap_mac(2), 0x0000, 0x0000}};
+  Herd h(0x1235, 0x1233, {{tap_mac(1), 0x1233}});
+  run_herd(h, bus);
+  CHECK(h.done());
+  for (const auto &p : h.placed())
+    if (p.mac == tap_mac(2)) CHECK(p.id == 0x1236);
+  for (auto &s : bus.sent) CHECK(!(s.second == CMD_GET_MAC_NOW && s.first == 0x1234));
+}
+
+// Not adopting: a TAP the map doesn't know is heard, left at the factory
+// address and reported; the known one is moved on as before.
+static void test_herd_not_adopting_leaves_a_new_tap() {
+  SimBus bus;
+  bus.taps = {{tap_mac(2), 0x0000, 0}, {tap_mac(1), 0x1201, 0x1201}};
+  Herd h(0x1235, 0x1201, {{tap_mac(1), 0x1201}}, /*adopt_new=*/false);
+  run_herd(h, bus);
+  CHECK(h.done() && h.round() == 1);
+  CHECK(h.placed().size() == 1 && h.placed()[0].mac == tap_mac(1) && h.placed()[0].answered);
+  CHECK(h.extras().size() == 1 && h.extras()[0] == tap_mac(2));
+  CHECK(bus.taps[0].id == 0x1235 && bus.taps[1].id == 0x1201);
+  CHECK(bus.count(CMD_STORE) == 0);
+}
+
+// No TAP on the bus: failed, after MAC_TRIES GET_MACs.
+static void test_herd_with_no_tap_fails() {
+  SimBus bus;
+  Herd h(0x1235, 0x1201, {});
+  run_herd(h, bus);
+  CHECK(h.failed() && bus.count(CMD_GET_MAC) == Herd::MAC_TRIES);
+}
+
 int main() {
+  test_herd_one_known_tap();
+  test_herd_a_new_tap_is_stored_in_a_second_round();
+  test_herd_skips_a_missing_taps_id();
+  test_herd_skips_the_broadcast_ids();
+  test_herd_with_no_tap_fails();
+  test_herd_not_adopting_leaves_a_new_tap();
   test_discovery();
   test_discovery_scan();
   test_discovery_hop();
