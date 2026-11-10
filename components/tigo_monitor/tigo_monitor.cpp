@@ -923,24 +923,32 @@ void TigoMonitorComponent::place_barcode_sensors_(const node_string &barcode, co
   if (prev_it != this->barcode_sensor_addr_.end() && old_addr == addr) return;  // already placed here
   this->barcode_sensor_addr_[barcode] = addr;
 
+  // move_barcode_sensor() frees old_addr only if it still holds this
+  // sensor: in a swap the other panel may already have moved there.
+  bool displaced = false;
   auto num_it = this->barcode_numeric_bindings_.find(barcode);
   if (num_it != this->barcode_numeric_bindings_.end()) {
-    for (auto &binding : num_it->second) {
-      if (!old_addr.empty()) binding.target->erase(old_addr);
-      (*binding.target)[addr] = binding.sensor;
-    }
+    for (auto &binding : num_it->second)
+      displaced |= move_barcode_sensor(*binding.target, binding.sensor, old_addr, addr) != nullptr;
   }
   auto txt_it = this->barcode_text_bindings_.find(barcode);
   if (txt_it != this->barcode_text_bindings_.end()) {
-    for (auto &binding : txt_it->second) {
-      if (!old_addr.empty()) binding.target->erase(old_addr);
-      (*binding.target)[addr] = binding.sensor;
-    }
+    for (auto &binding : txt_it->second)
+      displaced |= move_barcode_sensor(*binding.target, binding.sensor, old_addr, addr) != nullptr;
   }
+  bool has_bindings = num_it != this->barcode_numeric_bindings_.end() || txt_it != this->barcode_text_bindings_.end();
+  if (displaced) {
+    // Only when the same address is configured both ways, a config mistake.
+    ESP_LOGW(TAG, "Barcode %s at address %s replaced another sensor configured for that address", barcode.c_str(),
+             addr.c_str());
+  }
+  // Every barcode in every Frame 27 comes here; only long_address: panels
+  // have sensors to move, so only they are logged.
+  if (!has_bindings) return;
   if (!old_addr.empty()) {
     ESP_LOGW(TAG, "Barcode %s moved from address %s to %s - re-pointing its YAML-configured sensors",
              barcode.c_str(), old_addr.c_str(), addr.c_str());
-  } else if (num_it != this->barcode_numeric_bindings_.end() || txt_it != this->barcode_text_bindings_.end()) {
+  } else {
     ESP_LOGI(TAG, "Barcode %s confirmed at address %s - placing its YAML-configured sensors",
              barcode.c_str(), addr.c_str());
   }

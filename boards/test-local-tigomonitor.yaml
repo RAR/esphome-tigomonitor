@@ -58,6 +58,14 @@ sensor:
     tigo_monitor_id: tigo_hub
     string_label: "A"
     name: "String A Power"
+  # Exercises the barcode-keyed (long_address:) codegen path: its sensors are
+  # placed by place_barcode_sensors_() once a Frame 27 shows the barcode.
+  - platform: tigo_monitor
+    tigo_monitor_id: tigo_hub
+    long_address: "04C05B0000000001"
+    name: "Panel by barcode"
+    power: {}
+    barcode: {}
   # Exercises the alert-count codegen paths
   - platform: tigo_monitor
     tigo_monitor_id: tigo_hub

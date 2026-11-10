@@ -23,6 +23,7 @@
 #include <new>
 #include <optional>
 
+#include "barcode_bindings.h"
 #include "tigo_history.h"
 #include "tigo_layout.h"
 #include "tigo_protocol.h"
