@@ -106,7 +106,12 @@ interface it already uses.
 ## Not in this change
 
 - The GatewayCfg write (never-send).
-- SetPgw steering between TAPs: each TAP's 0x41s go to the optimizers heard
-  through it, as with one TAP.
+- SetPgw steering between TAPs. **With more than one TAP no 0x41 is sent
+  at all.** Our 0x41 content is copied from a CCA (learned, or built in) and
+  names the TAP that CCA chose; the owner's analysis (2026-11-10) found it is
+  the CCA's steering message, and the CCA tells each TAP the others' network
+  settings, so through another TAP a copied one could move an optimizer onto
+  the wrong TAP. A node that gets none keeps its TAP. With one TAP the 0x41s
+  go out as before.
 - Moving an optimizer between TAPs in System setup.
 - The five-pass herd on the roof before a bench capture.

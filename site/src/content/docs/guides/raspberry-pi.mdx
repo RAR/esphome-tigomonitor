@@ -293,7 +293,9 @@ did is behind eight switches on the same tab, all off until you turn them on:
   it again. It only re-addresses the TAP it was polling, never a second one
   on the bus, and a TAP stranded some other way may still need the real CCA.
 - **Send the CCA's housekeeping:** its regular 0x41 to each optimizer, its
-  hourly 0x0B00 and 0x22, and its reads of the TAP's node table.
+  hourly 0x0B00 and 0x22, and its reads of the TAP's node table. With more
+  than one TAP the 0x41 is left out: it tells an optimizer which TAP to use,
+  and the Pi's copy of it can name the wrong one.
 - **Query the optimizers:** the CCA's five questions to each one. The
   firmware and the Settings column on the Devices page come from the
   answers: whether each optimizer has its settings stored, and "differs"

@@ -940,6 +940,32 @@ static void test_two_taps_are_polled_in_turn() {
   core.close();
 }
 
+// With more than one TAP, no 0x41: its content is copied from a CCA (or
+// built in) and names the TAP the CCA chose, so through another TAP it could
+// steer an optimizer onto the wrong one (owner's analysis, 2026-11-10). A node
+// that gets none keeps its TAP. The rest of housekeeping goes on; one TAP
+// still gets its 0x41s.
+static void test_no_0x41_with_more_than_one_tap() {
+  MultiTap bus;
+  bus.taps = {{0x1201, 1}, {0x1202, 2}};
+  MasterCore core(&bus.port, [](int, const std::string &) {}, nullptr, nullptr, 0x1201, false, false, true);
+  core.set_taps({{0x1201, {}}, {0x1202, {}}});
+  CHECK(core.open());
+  run_for(core, 0, 20000);
+  MasterStatus m = core.status();
+  CHECK(m.taps.size() == 2 && m.taps[0].sent_41 == 0 && m.taps[1].sent_41 == 0 && m.sent_41 == 0);
+  CHECK(m.taps[0].sent_session > 0 && m.taps[1].sent_session > 0);
+  core.close();
+
+  MultiTap one;
+  one.taps = {{0x1201, 1}};
+  MasterCore single(&one.port, [](int, const std::string &) {}, nullptr, nullptr, 0x1201, false, false, true);
+  CHECK(single.open());
+  run_for(single, 0, 20000);
+  CHECK(single.status().sent_41 > 0);
+  single.close();
+}
+
 // One of two TAPs goes quiet: the other goes on being polled at full rate,
 // and the quiet one is asked once every LOST_PROBE_MS, then, after
 // LOST_MISSES of those, once every REMOVED_PROBE_MS. Back, it is polled again.
@@ -1259,6 +1285,7 @@ int main() {
   test_the_owners_herd_keeps_known_ids();
   test_a_herd_keeps_a_missing_tap();
   test_two_taps_are_polled_in_turn();
+  test_no_0x41_with_more_than_one_tap();
   test_a_quiet_tap_does_not_stop_the_other();
   test_no_tap_answering_is_a_fault();
   test_a_table_add_runs_on_its_tap();

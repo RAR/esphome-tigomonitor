@@ -959,7 +959,13 @@ void MasterCore::tick_(uint32_t now_ms) {
     // the rest of housekeeping.
     if ((housekeeping_on_ || t.readdressed || (read_tap_config_ && !t.config_read_sent)) && !t.housekeeping) {
       master::HousekeepingPlan plan;
-      plan.send_41 = plan.session = plan.broadcast = plan.walks = housekeeping_on_;
+      plan.session = plan.broadcast = plan.walks = housekeeping_on_;
+      // No 0x41 with more than one TAP: its content is a CCA's, copied, and
+      // names the TAP that CCA chose, so through another TAP it could steer
+      // an optimizer onto the wrong one. A node that gets none keeps its TAP
+      // (owner's analysis, 2026-11-10). Rebuilt after every herd, so a TAP
+      // taken on later turns them off on the first too.
+      plan.send_41 = housekeeping_on_ && !several_();
       plan.bring_up_reads = t.readdressed;
       // Marked sent when it goes out, below: an opening dropped before it got
       // there (the TAP lost) plans it again.
@@ -969,7 +975,9 @@ void MasterCore::tick_(uint32_t now_ms) {
       t.housekeeping = std::make_unique<master::Housekeeping>(learned_, now_ms, plan, now_ms ^ unix_now());
       t.housekeeping->set_pv(t.pv.get());
       t.targets_at_ms = now_ms - TARGETS_EVERY_MS;
-      if (housekeeping_on_)
+      if (housekeeping_on_ && several_())
+        LOGI("bus master: TAP %04X housekeeping on, without 0x41s: more than one TAP", t.id);
+      else if (housekeeping_on_)
         LOGI("bus master: housekeeping on: %zu learned 0x41s%s", learned_.size(),
              learned_.empty() ? " (none heard: using the built-in content)" : "");
     }

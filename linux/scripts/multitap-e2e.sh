@@ -1,7 +1,8 @@
 #!/bin/sh
 # More than one TAP (docs/superpowers/specs/2026-11-10-multi-tap-design.md):
 # the bus master against linux/tools/mock_taps.py's several TAPs on one bus.
-# Checks that two saved TAPs are both polled, each with its own 0x41s; that a
+# Checks that two saved TAPs are both polled, with housekeeping but no 0x41s
+# (a CCA's copied 0x41 could steer an optimizer to the wrong TAP); that a
 # table add runs on the TAP it names and skips ids the other lists, and a
 # removal goes to the TAP its optimizer reports through; that one TAP going
 # quiet doesn't stop the other; that with adopting on, a new TAP at the
@@ -72,11 +73,12 @@ expect "no fault" "$(master 18401 "d['fault']")" none
 expect "panels from both TAPs" "$(body GET 18401 /api/devices | python3 -c 'import json,sys; print(len(json.load(sys.stdin)["devices"]))')" 6
 expect "polls alternate at the mock" "$(stat "$out/one.json" "abs(d['taps'][0]['polls'] - d['taps'][1]['polls']) <= 3")" True
 expect "nothing unknown sent" "$(stat "$out/one.json" "d['other']")" "[]"
-# Each TAP's 0x41s: its own optimizers (and the TAP's own 0001), never the other's.
-for _ in $(seq 60); do [ "$(stat "$out/one.json" "all(t['housekeeping'] for t in d['taps'])")" = True ] && break; sleep 1; done
-expect "0x41s only for each TAP's own" "$(stat "$out/one.json" \
-  "(set(d['taps'][0]['housekeeping']) <= {'0001','0002','0003','0004'}, set(d['taps'][1]['housekeeping']) <= {'0001','0005','0006','0007'}, bool(d['taps'][0]['housekeeping']), bool(d['taps'][1]['housekeeping']))")" \
-  "(True, True, True, True)"
+# Housekeeping runs on each TAP, but with two TAPs no 0x41 goes to either:
+# the first would be due within 11 s of housekeeping starting.
+for _ in $(seq 60); do [ "$(stat "$out/one.json" "all(t['sessions'] for t in d['taps'])")" = True ] && break; sleep 1; done
+sleep 15
+expect "housekeeping on both, no 0x41s" "$(stat "$out/one.json" \
+  "[(bool(t['sessions']), t['housekeeping']) for t in d['taps']]")" "[(True, []), (True, [])]"
 # A table add on TAP 1202: ids 0002-0007 are listed across the two, so 0008.
 expect "an add on 1202 starts" "$(code POST 18401 /api/master/table/add '{"label": "0-1234R", "tap": "1202"}')" 200
 wait_for 30 18401 "d['table']['edit']['finished']"
@@ -113,11 +115,12 @@ expect "both polled" "$(master 18402 "[(t['id'], t['state']) for t in d['taps']]
 expect "the list saved" "$(saved_taps "$out/two/taps.json")" "[('1201', 'a1'), ('1202', 'b2')]"
 expect "no fault" "$(master 18402 "d['fault']")" none
 expect "nothing unknown sent" "$(stat "$out/two.json" "d['other']")" "[]"
-# Adopted by the herd, not saved at the start: each TAP's 0x41s still only its own.
-for _ in $(seq 90); do [ "$(stat "$out/two.json" "all(set(t['housekeeping']) - {'0001'} for t in d['taps'])")" = True ] && break; sleep 1; done
-expect "after the herd, 0x41s only for each TAP's own" "$(stat "$out/two.json" \
-  "(set(d['taps'][0]['housekeeping']) - {'0001'} <= {'0002','0003','0004'}, set(d['taps'][1]['housekeeping']) - {'0001'} <= {'0005','0006','0007'}, bool(set(d['taps'][1]['housekeeping']) - {'0001'}))")" \
-  "(True, True, True)"
+# Adopted by the herd, not saved at the start: now two TAPs, so no 0x41s on
+# either, the first TAP included, though it had one TAP's housekeeping before.
+for _ in $(seq 90); do [ "$(stat "$out/two.json" "all(t['sessions'] for t in d['taps'])")" = True ] && break; sleep 1; done
+sleep 15
+expect "after the herd, no 0x41s on either TAP" "$(stat "$out/two.json" \
+  "[t['housekeeping'] for t in d['taps']]")" "[[], []]"
 stop_all
 
 # --- run 3: adopting off: the new TAP is only reported ---
