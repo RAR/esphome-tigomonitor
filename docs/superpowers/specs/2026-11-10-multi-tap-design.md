@@ -69,10 +69,19 @@ the one at `gateway_id`. A TAP found answering at its id is polled.
   other address.
 
 The herd changes the bring-up for one TAP too (five broadcasts, the scan
-before the read, a drop-back reruns the herd with a STORE), so the herd is
-used only once adopting is on. Off, the single-TAP bring-up stays the one
-tested on hardware (2720da4). **The herd gets a bench capture before it
-goes near the roof.**
+before the read, a drop-back reruns the herd with a STORE), so with one TAP
+it is used only once adopting is on. Off, the single-TAP bring-up stays the
+one tested on hardware (2720da4).
+
+**With more than one TAP, re-addressing any of them is a herd**, adopting
+or not. The one-TAP bring-up starts with a SET_485_ID broadcast, which
+moves every TAP to the factory address; its GET_MAC there then hears them
+all and could give the first to answer this TAP's id, and a TAP with no
+stored id would stay at the factory address after its RESET. Not adopting,
+the herd moves only known TAPs and leaves a MAC it doesn't know at the
+factory address, reported as now (`extra_tap`).
+
+**The herd gets a bench capture before it goes near the roof.**
 
 **A TAP that stops answering** (10 requests in a row, as now): with one TAP,
 as now (startup mode looks for it again, at its id then the factory
@@ -81,6 +90,10 @@ at its id once every `LOST_PROBE_MS` (30 s), and after `LOST_MISSES` (10)
 unanswered it is dropped from the polled set (state `removed`) and asked
 every 5 min. Its map entry stays, so it gets its id back if it returns.
 The CCA removes the entry; keeping it is the one deliberate difference.
+In startup mode each of its tries also asks at the factory address once
+(GET_MAC_NOW, a bring-up read): a TAP there, after a power cut that lost
+its id, starts a herd. A table change aimed at a TAP that isn't answering
+is refused rather than left waiting.
 
 **Table changes name a TAP.** An add, removal or replace runs on one TAP:
 the one the optimizer reports through, or the owner's choice for an add.

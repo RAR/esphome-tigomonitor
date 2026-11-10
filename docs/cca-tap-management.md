@@ -86,6 +86,8 @@ The 37-byte GatewayCfg reply: the 36-byte block the CCA writes, then a 00. Laid 
 
 Our master does steps 1–6 for one TAP. Its STORE runs only on that drop-back path, and it worked on hardware twice with a never-used G5.26 (2720da4). A stored id can be stored again: SET_ID_BY_MAC to 1235 plus a key-only STORE returns a TAP to "factory" for its RS485 id.
 
+With more than one TAP, the CCA herds them all at once, and our master's `Herd` (`tigo_master.h`) copies it frame for frame, used only with `master_adopt_taps` on. The 11-06 recording of the bench CCA adopting a second TAP (`cca-two-taps-20261106-2035.bin`) shows: five SET_485_ID broadcasts ~0.75 s apart; one GET_MAC at 1235 that both TAPs answer, 70 ms apart; SET_ID_BY_MAC for each at 1235, the known TAP to its old id and the new one to the next free; the five-GET_MAC scan; GET_MAC_NOW at each new id; the hop, each TAP to the next id past every placed one (1202 → 1203, 1201 → 1204); RESET, ~5 s of quiet, GET_MAC_NOW at each home id. The new TAP had no stored id and wasn't back, so the CCA ran the whole herd again and sent that TAP a key-only STORE straight after its read. Then polling alternated strictly between the two, each getting its own window reads, `0B00`, `22`, walks and `0x41`s. The design is `docs/superpowers/specs/2026-11-10-multi-tap-design.md`.
+
 **A CCA reflashes TAPs.** The 3.6 CCA updated the never-used G5.26 to G8.59 on its first bring-up, with its own updates blocked: 292 × 0x0522 blocks, about 20 s. Its UI can also install a chosen image or erase one, and erasing them all bricks the TAP.
 
 **How the CCA finds and numbers TAPs** (the owner's analysis of the 4.0.3 CCA's firmware, 2026-11-09, checked against the 11-06 bring-up capture):
@@ -98,7 +100,7 @@ Our master does steps 1–6 for one TAP. Its STORE runs only on that drop-back p
 - **Herding is bus-wide:** every TAP, including working ones, is pulled to 1235 and reassigned, and data collection stops meanwhile.
 - **Firmware:** the 4.0.3 analysis found the version read and stored, with no gateway firmware update in the bus daemon it covered. The 3.6 CCA on the 11-06 bench did reflash a TAP (above), so either 4.0.3 dropped it or it lives elsewhere. Treat any CCA as able to reflash a TAP.
 
-For our master this changes nothing yet: it drives one TAP and herds only when that TAP turns up at 1235. A used TAP left at some other address sits there unseen until a herd. Adopting a second TAP would need the five-pass herd and the address rules above, and still the GatewayCfg write, which stays on the never-send list.
+Our master now drives every TAP in its saved list (`taps.json`), and with `master_adopt_taps` on, a TAP at 1235 that isn't one of them starts the five-pass herd with the address rules above; the owner can start one too, to find a TAP left at some other address. A TAP it adopts must already be configured by a CCA: the GatewayCfg write stays on the never-send list, so the Pi never gives a TAP its channel, PAN or key.
 
 ## Node tables, joining, moving and removing
 
