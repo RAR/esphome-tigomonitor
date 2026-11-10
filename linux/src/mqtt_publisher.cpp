@@ -488,7 +488,7 @@ void MqttPublisher::publish() {
   auto links = monitor_.links();
   std::map<std::string, std::string> string_by_addr;
   for (const auto &n : monitor_.nodes())
-    string_by_addr[n.addr] = n.cca_string_label.empty() ? Monitor::ALL_PANELS : n.cca_string_label;
+    string_by_addr[n.addr] = n.cca_string_label.empty() ? Monitor::NO_STRING : n.cca_string_label;
   std::map<std::string, std::pair<uint64_t, uint64_t>> string_counts;
   auto loss_pct = [](uint64_t reports, uint64_t lost) { return reports + lost ? 100.0 * lost / (reports + lost) : 0.0; };
   for (const auto &p : monitor_.panels()) {
@@ -521,7 +521,7 @@ void MqttPublisher::publish() {
     auto l = links.links().find(p.addr);
     if (l != links.links().end()) {
       s["link_loss"] = round_to(loss_pct(l->second.reports_today, l->second.lost_today), 1);
-      auto &c = string_counts[string_by_addr.count(p.addr) ? string_by_addr[p.addr] : Monitor::ALL_PANELS];
+      auto &c = string_counts[string_by_addr.count(p.addr) ? string_by_addr[p.addr] : Monitor::NO_STRING];
       c.first += l->second.reports_today;
       c.second += l->second.lost_today;
     }
@@ -529,7 +529,7 @@ void MqttPublisher::publish() {
   }
   json strings = json::object(), string_loss = json::object();
   for (const auto &st : monitor_.strings()) {
-    if (st.label == Monitor::ALL_PANELS) continue;  // not a string the site has
+    if (st.label == Monitor::NO_STRING) continue;  // not a string the site has
     if (announced_strings_.insert(st.label).second) publish_string_discovery_(st.label);
     strings[st.label] = round_to(st.total_power, 1);
     auto c = string_counts[st.label];

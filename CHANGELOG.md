@@ -125,6 +125,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The mesh map's "Reports lost by day" could show a total higher than
+  any string (Raspberry Pi).** Its "All panels" row was really the
+  optimizers on no string, plus any deleted from Devices, whose counts
+  stayed in the daily figures: a deleted spare showed as 12% lost while
+  the 40 panels lost 2.3%. Deleted optimizers now drop out of it, the
+  group is called **No string** everywhere, and a **Whole array** row
+  sums every string. A panel rating set on "All panels" carries over.
 - **A stray optimizer no longer reads as a string down (Raspberry Pi).**
   A spare that once joined the system and was then switched off sat alone
   in the "All panels" group, the panels no string claims, and the

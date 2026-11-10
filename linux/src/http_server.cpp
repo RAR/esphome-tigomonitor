@@ -116,7 +116,7 @@ static bool same_secret(const std::string &a, const std::string &b) {
 static std::string string_of(const Monitor &mon, const Panel &p) {
   for (const auto &n : mon.nodes())
     if (n.addr == p.addr && !n.cca_string_label.empty()) return n.cca_string_label;
-  return Monitor::ALL_PANELS;
+  return Monitor::NO_STRING;
 }
 
 // /api/strings carries the MPPT label as "inverter" (the CCA's word for it);
@@ -553,7 +553,7 @@ void HttpServer::routes_() {
         for (const auto &n : node_list) {
           if (n.addr != e.first) continue;
           label = !n.cca_label.empty() ? n.cca_label : n.long_address.size() >= 6 ? n.long_address.substr(n.long_address.size() - 6) : e.first;
-          string = n.cca_string_label.empty() ? Monitor::ALL_PANELS : n.cca_string_label;
+          string = n.cca_string_label.empty() ? Monitor::NO_STRING : n.cca_string_label;
         }
       }
       nodes.push_back({{"addr", e.first},
@@ -577,16 +577,18 @@ void HttpServer::routes_() {
       taps.push_back(it != names.end() ? json{{"id", id}, {"name", it->second}} : json{{"id", id}});
     }
     // Reports and losses by day, summed by string: how each string fares
-    // over weeks, where reports_today resets at midnight.
+    // over weeks, where reports_today resets at midnight. Only the nodes it
+    // has: a deleted one's counts stay in the book but belong to no string.
     std::map<std::string, std::string> string_by_addr;
     for (const auto &n : mon.nodes())
-      string_by_addr[n.addr] = n.cca_string_label.empty() ? Monitor::ALL_PANELS : n.cca_string_label;
+      string_by_addr[n.addr] = n.cca_string_label.empty() ? Monitor::NO_STRING : n.cca_string_label;
     json days = json::array();
     for (const auto &day : mon.loss_days()) {
       std::map<std::string, std::pair<uint64_t, uint64_t>> by;
       for (const auto &kv : day.second) {
         auto it = string_by_addr.find(kv.first);
-        auto &c = by[it != string_by_addr.end() ? it->second : Monitor::ALL_PANELS];
+        if (it == string_by_addr.end()) continue;
+        auto &c = by[it->second];
         c.first += kv.second.first;
         c.second += kv.second.second;
       }

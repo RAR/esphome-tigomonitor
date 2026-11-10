@@ -1,6 +1,6 @@
 // site/test/dashboard-alerts.test.mjs
 // The Dashboard's alerts: a whole string at 0 W while the rest produce is
-// "down", but the Pi's "All panels" group, the panels no string claims, is
+// "down", but the Pi's "No string" group, the panels no string claims, is
 // not a string, and a lone stray there (a spare that once joined and is now
 // off) must not read as one down (2026-11-10, on the roof).
 import { test, before, after } from 'node:test';
@@ -53,15 +53,15 @@ async function alerts(devices, inverters, nodes = routes['/api/nodes'].nodes) {
 const base = routes['/api/devices'].devices;
 const invs = routes['/api/inverters'].inverters;
 // As the Pi's /api/inverters gives it: the strings no inverter claims, here
-// only "All panels", under a synthetic Unassigned inverter.
+// only "No string", under a synthetic Unassigned inverter.
 const unassigned = { name: 'Unassigned', display_name: '', unassigned: true, mppts: [], total_power: 0, peak_power: 0,
   active_devices: 0, total_devices: 1,
-  strings: [{ label: 'All panels', display_label: '', mppt: '', panel_rating_w: 0, total_power: 0, peak_power: 0,
+  strings: [{ label: 'No string', display_label: '', mppt: '', panel_rating_w: 0, total_power: 0, peak_power: 0,
     active_devices: 0, total_devices: 1 }] };
-const stray = { addr: '002C', barcode: '', name: '002C', string_label: 'All panels', power: 0, power_in: 0,
+const stray = { addr: '002C', barcode: '', name: '002C', string_label: 'No string', power: 0, power_in: 0,
   voltage_in: 0, data_age_ms: 3 * 3600 * 1000, stale: true };
 
-test('a stray in "All panels" at 0 W is not a string down', async () => {
+test('a stray in "No string" at 0 W is not a string down', async () => {
   // In the node list and no table walk heard, so not an alien: still shown.
   const nodes = [...routes['/api/nodes'].nodes, { ...routes['/api/nodes'].nodes[0], addr: '002C', long_address: '',
     cca_label: '', cca_string: '' }];
@@ -86,12 +86,12 @@ test('a real string at 0 W while the rest produce is still down', async () => {
 const T = 1767225600;
 const onRoster = routes['/api/nodes'].nodes.map((n) => ({ ...n, last_roster_unix: T }));
 
-test('an alien is not on the Dashboard: no tile, no alert, no "All panels" string', async () => {
+test('an alien is not on the Dashboard: no tile, no alert, no "No string" string', async () => {
   const { text, tiles, grid, errors } = await alerts([...base, stray], [...invs, unassigned], onRoster);
   assert.equal(tiles.includes('002C'), false);
   assert.equal(tiles.length, base.length);
   assert.doesNotMatch(text, /002C/);
-  assert.doesNotMatch(grid, /All panels|Unassigned/);
+  assert.doesNotMatch(grid, /No string|Unassigned/);
   assert.deepEqual(errors, []);
 });
 
@@ -105,7 +105,7 @@ test('an optimizer the TAP stopped listing a day ago is an alien too', async () 
 });
 
 test('an unassigned optimizer the TAP lists is still a panel on the Dashboard', async () => {
-  const fresh = { ...base[0], addr: '0080', name: '0080', barcode: '04C05B0000200001', string_label: 'All panels' };
+  const fresh = { ...base[0], addr: '0080', name: '0080', barcode: '04C05B0000200001', string_label: 'No string' };
   const nodes = [...onRoster, { ...onRoster[0], addr: '0080', long_address: '04C05B0000200001', cca_label: '',
     cca_string: '', last_roster_unix: T }];
   const { tiles, errors } = await alerts([...base, fresh], [...invs, unassigned], nodes);
@@ -116,7 +116,7 @@ test('an unassigned optimizer the TAP lists is still a panel on the Dashboard', 
 test('an alien is not on the mesh map', async () => {
   const ctx = await browser.newContext({ viewport: { width: 1400, height: 1200 } });
   const mesh = piRoutes['/api/mesh'];
-  const meshNodes = [...mesh.nodes, { ...mesh.nodes[0], addr: '002C', label: '002C', string: 'All panels' }];
+  const meshNodes = [...mesh.nodes, { ...mesh.nodes[0], addr: '002C', label: '002C', string: 'No string' }];
   await ctx.route('**/api/**', async (route) => {
     const path = new URL(route.request().url()).pathname.replace(/^.*(\/api\/)/, '$1');
     const json = (body) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
