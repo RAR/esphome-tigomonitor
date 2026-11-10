@@ -517,6 +517,7 @@ void HttpServer::routes_() {
     auto stats = mon.links();
     auto names = mon.tap_names();
     auto panels = mon.panels();
+    auto node_list = mon.nodes();
     int64_t now_s = std::chrono::duration_cast<std::chrono::seconds>(
                         std::chrono::system_clock::now().time_since_epoch()).count();
     std::set<uint16_t> tap_ids;
@@ -534,9 +535,22 @@ void HttpServer::routes_() {
       json rssi_24h = json::array();
       for (int v : stats.rssi_24h(e.first, now_s)) rssi_24h.push_back(v < 0 ? json(nullptr) : json(v));
       bool heard = l.last_heard_s > 0;
+      // One not heard since this start (a restart at night) keeps the name
+      // and string the node table has for it, as /api/devices does.
+      std::string label = e.first, string;
+      if (p) {
+        label = panel_name(*p);
+        string = string_of(mon, *p);
+      } else {
+        for (const auto &n : node_list) {
+          if (n.addr != e.first) continue;
+          label = !n.cca_label.empty() ? n.cca_label : n.long_address.size() >= 6 ? n.long_address.substr(n.long_address.size() - 6) : e.first;
+          string = n.cca_string_label.empty() ? Monitor::ALL_PANELS : n.cca_string_label;
+        }
+      }
       nodes.push_back({{"addr", e.first},
-                       {"label", p ? panel_name(*p) : e.first},
-                       {"string", p ? string_of(mon, *p) : ""},
+                       {"label", label},
+                       {"string", string},
                        {"tap", l.tap ? json(tap) : json(nullptr)},
                        {"parent", l.parent.empty() ? json(nullptr) : json(l.parent)},
                        {"relay", stats.relay_of(e.first).empty() ? json(nullptr) : json(stats.relay_of(e.first))},

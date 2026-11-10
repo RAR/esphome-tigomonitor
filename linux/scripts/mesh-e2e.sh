@@ -98,10 +98,12 @@ expect "the map has its name" "$(q "d['taps']")" "[{'id': '1201', 'name': 'Garag
 # And the day of signal history, which would otherwise start empty.
 rssi_before="$(q "{a: n[a]['rssi_24h'][-1] for a in sorted(n)}")"
 kill $daemon; wait $daemon 2>/dev/null || true
-# 0005 marked as a known spare, as the Devices page's Mark known does.
+# 0005 marked as a known spare, as the Devices page's Mark known does; 0002
+# placed in a string, named A1, as a layout does.
 python3 -c "import json; p = '$out/state/state.json'; d = json.load(open(p))
 for n in d['nodes']:
     n['known'] = n['addr'] == '0005'
+    if n['addr'] == '0002': n['cca_label'], n['cca_string_label'] = 'A1', 'String A'
 json.dump(d, open(p, 'w'))"
 build/linux/tigomonitord --state-dir "$out/state" --port 18093 --serial /dev/nonexistent 2> "$out/restart.log" &
 daemon=$!
@@ -109,9 +111,14 @@ sleep 1
 get 18093 /api/mesh > "$out/mesh.json"
 expect "parents kept after a restart" "$(q "{a: n[a]['parent'] for a in sorted(n) if n[a]['parent']}")" "{'0002': '0001', '0004': '0042', '0005': '0002'}"
 expect "relays kept after a restart" "$(q "{a: n[a]['relay'] for a in sorted(n) if n[a]['relay']}")" "{'0004': '0002'}"
+# Restarted at night, before any report: each keeps its name and string, so
+# By string doesn't drop them all into no string.
+expect "strings kept after a restart" "$(q "{a: n[a]['string'] for a in sorted(n)}")" \
+  "{'0002': 'String A', '0003': 'All panels', '0004': 'All panels', '0005': 'All panels'}"
+expect "names kept after a restart" "$(q "n['0002']['label']")" A1
 expect "join times kept" "$(q "sorted(a for a in n if isinstance(n[a]['last_join_unix'], int))")" "['0002', '0004', '0005']"
 expect "joins kept after a restart" "$(joins 18093 0004)" "[('0042', '0002')]"
-expect "loss by day kept after a restart" "$(q "[sorted(x['strings']) for x in d['loss_days']]")" "[['All panels']]"
+expect "loss by day kept after a restart" "$(q "[sorted(x['strings']) for x in d['loss_days']]")" "[['All panels', 'String A']]"
 tap_names() { python3 -c "import json; print(json.load(open('$out/state/state.json')).get('tap_names'))"; }
 expect "TAP name saved" "$(tap_names)" "{'1201': 'Garage'}"
 expect "an empty name forgets it" "$(post 18093 /api/taps/name '{"tap": "1201", "name": ""}')" 200
