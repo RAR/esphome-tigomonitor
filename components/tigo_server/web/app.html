@@ -105,7 +105,9 @@
   .overview-label { color: var(--text-dim); }
   .overview-val { font-variant-numeric: tabular-nums; font-weight: 500; }
 
-  nav { padding: 12px 8px; flex: 1; }
+  nav { padding: 12px 8px; flex: 1; display: flex; flex-direction: column; gap: 14px; }
+  .nav-head { padding: 0 12px 4px; font-size: 10px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-dim); }
+  .nav-control { padding-top: 12px; border-top: 1px solid var(--border); }
   nav button {
     display: flex; align-items: center; gap: 10px; width: 100%;
     padding: 9px 12px; margin: 2px 0;
@@ -158,19 +160,17 @@
   .topbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; }
   h1 { font-size: 20px; font-weight: 600; }
   .topbar-meta { font-size: 12px; color: var(--text-dim); }
-  /* The Bus page's two halves: shown only when there are both. */
-  .bus-tabs, .page-tabs { display: none; gap: 4px; margin: -12px 0 20px; border-bottom: 1px solid var(--border); }
-  body.bus-both .bus-tabs { display: flex; }
+  .page-tabs { gap: 4px; margin: -12px 0 20px; border-bottom: 1px solid var(--border); }
   /* A page's own tabs (Settings): scroll sideways on a phone rather than wrap. */
   .page-tabs { display: flex; overflow-x: auto; scrollbar-width: none; }
   .page-tabs::-webkit-scrollbar { display: none; }
-  .bus-tabs a, .page-tabs a, .page-tabs button { padding: 8px 14px; margin-bottom: -1px; text-decoration: none; color: var(--text-dim); font-weight: 600;
+  .page-tabs a, .page-tabs button { padding: 8px 14px; margin-bottom: -1px; text-decoration: none; color: var(--text-dim); font-weight: 600;
                 border-bottom: 2px solid transparent; }
   .page-tabs button { background: none; border-top: 0; border-left: 0; border-right: 0; font: inherit; font-weight: 600;
                       white-space: nowrap; cursor: pointer; }
   .page-tabs a { white-space: nowrap; }
-  .bus-tabs a:hover, .page-tabs a:hover, .page-tabs button:hover { color: var(--text); }
-  .bus-tabs a[aria-selected="true"], .page-tabs a[aria-selected="true"], .page-tabs button[aria-selected="true"] { color: var(--text); border-bottom-color: var(--accent-2); }
+  .page-tabs a:hover, .page-tabs button:hover { color: var(--text); }
+  .page-tabs a[aria-selected="true"], .page-tabs button[aria-selected="true"] { color: var(--text); border-bottom-color: var(--accent-2); }
   .page-tabs button:focus-visible { outline: 2px solid var(--accent-2); outline-offset: -2px; border-radius: 4px 4px 0 0; }
   .btn {
     display: inline-flex; align-items: center; gap: 6px;
@@ -1193,17 +1193,30 @@
       <div class="overview-row"><span class="overview-label">Today</span><span class="overview-val" id="ov-today">— kWh</span></div>
     </div>
 
+    <!-- Grouped by what you open it for: watching the array, looking into
+         a problem, or changing something (every page here can send a frame
+         or save a setting). -->
     <nav id="nav">
-      <button data-view="dashboard" class="active"><span class="icon">▣</span> Dashboard</button>
-      <button data-view="history"><span class="icon">↗</span> History</button>
-      <button data-view="topology"><span class="icon">⌘</span> Topology</button>
-      <button data-view="nodes"><span class="icon">≡</span> Devices</button>
-      <button data-view="setup" id="nav-setup" data-linux-only style="display:none"><span class="icon">✚</span> System setup</button>
-      <button data-view="settings"><span class="icon">⚙</span> Settings</button>
-      <button data-view="diagnostics"><span class="icon">◈</span> Diagnostics</button>
-      <button data-view="bus" id="nav-bus" data-linux-only style="display:none"><span class="icon">⇄</span> Bus</button>
-      <button data-view="cca"><span class="icon">◉</span> CCA Info</button>
-      <button data-view="cloudstatus" id="nav-cloudstatus" style="display:none"><span class="icon">☁</span> Tigo Cloud</button>
+      <div class="nav-group" role="group" aria-labelledby="nav-h-monitor">
+        <div class="nav-head" id="nav-h-monitor">Monitor</div>
+        <button data-view="dashboard" class="active"><span class="icon">▣</span> Dashboard</button>
+        <button data-view="history"><span class="icon">↗</span> History</button>
+        <button data-view="topology"><span class="icon">⌘</span> Topology</button>
+        <button data-view="nodes"><span class="icon">≡</span> Devices</button>
+      </div>
+      <div class="nav-group" role="group" aria-labelledby="nav-h-inspect">
+        <div class="nav-head" id="nav-h-inspect">Inspect</div>
+        <button data-view="diagnostics"><span class="icon">◈</span> Diagnostics</button>
+        <button data-view="buslog" id="nav-buslog" data-linux-only style="display:none"><span class="icon">⇄</span> Bus traffic</button>
+        <button data-view="cca"><span class="icon">◉</span> CCA Info</button>
+        <button data-view="cloudstatus" id="nav-cloudstatus" style="display:none"><span class="icon">☁</span> Tigo Cloud</button>
+      </div>
+      <div class="nav-group nav-control" role="group" aria-labelledby="nav-h-control">
+        <div class="nav-head" id="nav-h-control">Control</div>
+        <button data-view="setup" id="nav-setup" data-linux-only style="display:none"><span class="icon">✚</span> System setup</button>
+        <button data-view="busmaster" id="nav-busmaster" style="display:none"><span class="icon">◐</span> Bus control</button>
+        <button data-view="settings"><span class="icon">⚙</span> Settings</button>
+      </div>
     </nav>
 
     <!-- The PV output state, on the Pi running (or standing by for) the bus.
@@ -1806,12 +1819,8 @@
     <!-- BUS MASTER (the Pi, running or standing by for the bus) -->
     <section class="view" id="view-busmaster">
       <div class="topbar">
-        <h1>Bus</h1>
+        <h1>Bus control</h1>
         <div class="topbar-meta"><span class="badge stale" id="bm-meta">—</span></div>
-      </div>
-      <div class="bus-tabs" role="tablist">
-        <a href="#busmaster" role="tab" aria-selected="true">Control</a>
-        <a href="#buslog" role="tab" aria-selected="false">Traffic</a>
       </div>
 
       <div class="section-head">
@@ -2036,12 +2045,8 @@
     <!-- BUS LOG (the Pi): each request with what came back; polls counted -->
     <section class="view" id="view-buslog">
       <div class="topbar">
-        <h1>Bus</h1>
+        <h1>Bus traffic</h1>
         <div class="topbar-meta" id="buslog-meta">—</div>
-      </div>
-      <div class="bus-tabs" role="tablist">
-        <a href="#busmaster" role="tab" aria-selected="false">Control</a>
-        <a href="#buslog" role="tab" aria-selected="true">Traffic</a>
       </div>
       <div class="tools-card" id="bus-alarm-card" style="display:none">
         <div class="pv-row">
@@ -2364,13 +2369,10 @@
   // Pages the Pi's settings leave out of the sidebar (show_cca_page,
   // show_cloud_page). A link to one opens the Dashboard instead.
   const hiddenPages = new Set();
-  // The Bus item: Control while this monitor runs the bus, else Traffic.
-  let busControl = false;
   // Old names of pages, so links and bookmarks to them still work.
   const viewAliases = { tools: 'settings' };
   function showView(id) {
     id = viewAliases[id] || id;
-    if (id === 'bus') id = busControl ? 'busmaster' : 'buslog';
     if (hiddenPages.has(id)) id = 'dashboard';
     // Leaving the Topology editor with changes not saved asks first.
     if (id !== 'topology' && typeof topoEditor !== 'undefined' && topoEditor.active) {
@@ -2382,7 +2384,7 @@
       topoEditor.dirty = false;
       topoEdToolbar(false);
     }
-    const navId = id === 'busmaster' || id === 'buslog' ? 'bus' : id === 'logs' ? 'diagnostics' : id;
+    const navId = id === 'logs' ? 'diagnostics' : id;
     document.querySelectorAll('#nav button').forEach(b => b.classList.toggle('active', b.dataset.view === navId));
     document.querySelectorAll('.view').forEach(v => v.classList.toggle('active', v.id === 'view-' + id));
     if (window.location.hash !== '#' + id) {
@@ -4779,9 +4781,7 @@
   }
   function pvApply(m) {
     const show = !!m && (m.role === 'master' || m.role === 'standby');
-    busControl = show;
-    document.getElementById('nav-bus').style.display = show || PLATFORM === 'linux' ? '' : 'none';
-    document.body.classList.toggle('bus-both', show && PLATFORM === 'linux');
+    document.getElementById('nav-busmaster').style.display = show ? '' : 'none';
     document.getElementById('pv-pill').style.display = show ? '' : 'none';
     const pv = show && m.pv ? m.pv : { on: true };
     const banner = document.getElementById('pv-banner');

@@ -102,20 +102,24 @@ async function open(opts = {}) {
   return { page, ctx, api, errors };
 }
 
-// The Bus page's Control tab: there only while this monitor runs the bus.
-const nav = (page) => page.$eval('#view-busmaster .bus-tabs', (e) => getComputedStyle(e).display !== 'none');
+// The sidebar's Bus control item: there only while this monitor runs the bus.
+const nav = (page) => page.isVisible('#nav button[data-view="busmaster"]');
 
-test('the Bus nav item opens Control, and the tabs switch to Traffic and back', async () => {
+test('Bus control and Bus traffic are separate sidebar items, under Control and Inspect', async () => {
   const { page, ctx, errors } = await open();
   await page.waitForSelector('#pv-pill', { state: 'visible' });
-  await page.click('#nav button[data-view="bus"]');
+  const group = (v) => page.$eval(`#nav button[data-view="${v}"]`, (b) => b.closest('.nav-group').querySelector('.nav-head').textContent.trim());
+  assert.equal(await group('busmaster'), 'Control');
+  assert.equal(await group('buslog'), 'Inspect');
+  await page.click('#nav button[data-view="busmaster"]');
   await page.waitForSelector('#view-busmaster.active');
-  assert.equal(await page.getAttribute('#nav button[data-view="bus"]', 'class'), 'active');
-  await page.click('#view-busmaster .bus-tabs a[href="#buslog"]');
+  assert.equal(await page.getAttribute('#nav button[data-view="busmaster"]', 'class'), 'active');
+  assert.equal(await page.isVisible('#view-busmaster .bus-tabs'), false);
+  await page.click('#nav button[data-view="buslog"]');
   await page.waitForSelector('#view-buslog.active');
-  assert.equal(await page.getAttribute('#nav button[data-view="bus"]', 'class'), 'active');
-  assert.equal(await page.getAttribute('#view-buslog .bus-tabs a[href="#buslog"]', 'aria-selected'), 'true');
-  await page.click('#view-buslog .bus-tabs a[href="#busmaster"]');
+  assert.equal(await page.getAttribute('#nav button[data-view="buslog"]', 'class'), 'active');
+  assert.equal(await page.getAttribute('#nav button[data-view="busmaster"]', 'class'), '');
+  await page.click('#pv-pill');
   await page.waitForSelector('#view-busmaster.active');
   assert.deepEqual(errors, []);
   await ctx.close();

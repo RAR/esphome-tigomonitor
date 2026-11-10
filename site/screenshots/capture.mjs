@@ -56,8 +56,8 @@ const VIEWS = [
 // to click, or a list clicked in turn]. Docs only; the README keeps the
 // ESP32's views.
 const PI_VIEWS = [
-  ['pi-bus-control', 'Bus Control', 'button[data-view="bus"]'],
-  ['pi-bus-traffic', 'Bus Traffic', '#view-busmaster .bus-tabs a[href="#buslog"]'],
+  ['pi-bus-control', 'Bus Control', 'button[data-view="busmaster"]'],
+  ['pi-bus-traffic', 'Bus Traffic', 'button[data-view="buslog"]'],
   ['pi-devices',     'Pi Devices',  'button[data-view="nodes"]'],
   ['pi-mesh',        'Mesh',        ['button[data-view="topology"]', '#topology-tabs [data-tab="mesh"]']],
   ['pi-mesh-strings', 'Mesh by string', ['button[data-view="topology"]', '#topology-tabs [data-tab="mesh"]', '#mesh-view button[data-mode="strings"]']],
