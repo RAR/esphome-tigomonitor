@@ -90,6 +90,37 @@ async function open(opts = {}) {
 const navShown = (page, view) => page.isVisible(`#nav button[data-view="${view}"]`);
 const activeView = (page) => page.$eval('.view.active', (v) => v.id);
 
+// The sidebar's groups, each with the items it shows, in order.
+const navGroups = (page) => page.$$eval('#nav .nav-group', (gs) => gs.map((g) => [
+  g.querySelector('.nav-head').textContent.trim(),
+  [...g.querySelectorAll('button')].filter((b) => b.offsetParent !== null)
+    .map((b) => b.textContent.trim().replace(/^\S+\s*/, '')),
+]));
+
+test('the Pi\'s sidebar is grouped: Monitor, Inspect, then Control', async () => {
+  const { page, ctx, errors } = await open();
+  await page.waitForSelector('#nav button[data-view="buslog"]', { state: 'visible' });
+  assert.deepEqual(await navGroups(page), [
+    ['Monitor', ['Dashboard', 'History', 'Topology', 'Devices']],
+    ['Inspect', ['Diagnostics', 'Bus traffic', 'CCA Info', 'Tigo Cloud']],
+    ['Control', ['System setup', 'Settings']],
+  ]);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test('the ESP32\'s sidebar keeps the groups without the Pi\'s pages', async () => {
+  const { page, ctx, errors } = await open({ linux: false });
+  await page.waitForTimeout(600);
+  assert.deepEqual(await navGroups(page), [
+    ['Monitor', ['Dashboard', 'History', 'Topology', 'Devices']],
+    ['Inspect', ['Diagnostics', 'CCA Info', 'Tigo Cloud']],
+    ['Control', ['Settings']],
+  ]);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
 test('on the Pi both pages are in the sidebar until turned off', async () => {
   const { page, ctx, errors } = await open();
   await page.waitForSelector('#nav-cloudstatus', { state: 'visible' });
@@ -292,7 +323,7 @@ test('the ESP32 has no Logs, so Diagnostics has no tabs', async () => {
 
 test('bus: the gateway version is the figure, its build details beneath', async () => {
   const { page, ctx, errors } = await open({ master: true });
-  await page.click('#nav button[data-view="bus"]');
+  await page.click('#nav button[data-view="busmaster"]');
   await page.waitForFunction(() => document.getElementById('diag-tap-version').textContent !== '—');
   assert.equal(await page.textContent('#diag-tap-version'), 'G8.59');
   // A non-breaking hyphen, so the model doesn't wrap as GW- / H1.
