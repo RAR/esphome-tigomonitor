@@ -70,9 +70,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Devices names each TAP's series, and flags a star-only one (Raspberry
   Pi).** The TAP list's Model column said "Mgate" for every TAP; it now says
   "H series · mesh" or "G series · mesh", read from the TAP's version as the
-  CCA classifies it. A TAP on star-only firmware (Gway, or a G5.x) shows
-  **Star only** in the warning colour: on a system with mesh TAPs it forces
-  the whole system back to the old star stack.
+  CCA classifies it, with the TAP's board ID (the version's `GW-…` suffix)
+  beneath. A TAP on star-only firmware (Gway, or a G5.x) shows **Star only**
+  in the warning colour: on a system with mesh TAPs it forces the whole
+  system back to the old star stack. The Firmware column shows the version
+  and date, with the build time in its tooltip.
 - **The sidebar is grouped: Monitor, Inspect and Control.** The pages that
   change something (Settings, and on the Pi System setup and Bus control)
   now sit together at the bottom, apart from the ones you only read. The Bus

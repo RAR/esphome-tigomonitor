@@ -185,7 +185,7 @@ export const routes = {
   },
   // Pi build only: firmware heard on the bus. One optimizer was updated.
   '/api/versions': {
-    taps: [{ addr: '1201', model: 'Mgate', version: 'G8.59 Jan  1 2026', previous: '',
+    taps: [{ addr: '1201', model: 'Mgate', version: 'G8.59 Jan  1 2026 10:00:00 GW-H150.6.0S0.12', previous: '',
              since_unix_ms: 1767225600000, last_unix_ms: 1767225600000, name: 'Garage' }],
     radios: [{ tap: '1201', channel: 18, slt: 90, slm: 60, heard_unix_ms: 1767225600000 }],
     // An optimizer whose PIV current changed, newest first.

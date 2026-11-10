@@ -784,6 +784,7 @@
   td.tap-name { white-space: nowrap; }
   td.tap-model { white-space: nowrap; }
   td.tap-model.star-only { color: var(--warn); font-weight: 600; }
+  td.tap-model .tap-board { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 11px; color: var(--text-dim); font-weight: 400; }
   td.tap-name .input { width: 12em; }
   button.tap-rename { font: inherit; color: var(--text-dim); background: none; border: 1px solid transparent; border-radius: 6px;
                       padding: 2px 6px; margin-left: 4px; cursor: pointer; }
@@ -3889,14 +3890,19 @@
     // gateway firmware, H and G the two TAP lines, which share its protocol.
     // A star-only TAP (Gway, or a G5.x like the bench's before the CCA updated
     // it) forces a whole mesh system back to the old star stack.
+    // The version string's GW- suffix is the TAP's board (hardware) ID,
+    // shown here under the series rather than at the end of its firmware.
+    const boardRe = /\s*\bGW-\S+\s*$/;
+    const board = t => { const b = /\bGW-\S+\s*$/.exec(t.version || ''); return b ? b[0].trim() : ''; };
     const model = t => {
       const v = /^([A-Z])(\d+)\./.exec(t.version || '');
       const full = `${t.model} firmware ${t.version}`;
+      const b = board(t) ? `<div class="tap-board">${topoEscape(board(t))}</div>` : '';
       if (t.model === 'Gway' || (v && v[1] === 'G' && Number(v[2]) <= 5))
-        return `<td class="tap-model star-only" title="${topoEscape(full)}: star-only firmware. A star-only TAP forces a mesh system back to the old star stack; keep it off a system with mesh TAPs.">Star only</td>`;
+        return `<td class="tap-model star-only" title="${topoEscape(full)}: star-only firmware. A star-only TAP forces a mesh system back to the old star stack; keep it off a system with mesh TAPs.">Star only${b}</td>`;
       if (t.model === 'Mgate' && v)
-        return `<td class="tap-model" title="${topoEscape(full)}">${v[1]} series · mesh</td>`;
-      return `<td class="tap-model" title="${topoEscape(full)}">${topoEscape(t.model)}</td>`;
+        return `<td class="tap-model" title="${topoEscape(full)}">${v[1]} series · mesh${b}</td>`;
+      return `<td class="tap-model" title="${topoEscape(full)}">${topoEscape(t.model)}${b}</td>`;
     };
     // A name, kept on the Pi and shown on the mesh map too.
     const name = t => `<td class="tap-name" data-tap="${topoEscape(t.addr)}">${t.name
@@ -3904,7 +3910,7 @@
       : `<button type="button" class="tap-rename add">Add a name</button>`}</td>`;
     box.querySelector('tbody').innerHTML = (v.taps || []).length ? v.taps.map(t => `<tr>
         ${name(t)}<td class="mono">${topoEscape(t.addr)}</td>${id(t.addr)}${model(t)}
-        <td class="mono"${t.previous ? ` title="was ${topoEscape(t.previous)}"` : ''}><strong>${topoEscape(t.version)}</strong></td>
+        <td class="mono tap-fw" title="${topoEscape(t.version || '')}${t.previous ? ` · was ${topoEscape(t.previous)}` : ''}"><strong>${topoEscape((t.version || '').replace(boardRe, '').replace(/\s+\d{1,2}:\d{2}:\d{2}$/, ''))}</strong></td>
         ${radio(t.addr)}<td>${when(t.since_unix_ms)}</td><td>${when(t.last_unix_ms)}</td></tr>`).join('')
       : `<tr><td colspan="8" style="color:var(--text-faint)">Not heard yet. The bus master asks the TAP once each time it starts, and the optimizers as it first hears each one.</td></tr>`;
   }

@@ -182,15 +182,22 @@ test("Devices, on the Pi: each TAP's series, mesh or star only, from its version
   const tap = (addr, model, version) => ({ addr, model, version, previous: '', since_unix_ms: 1767225600000,
     last_unix_ms: 1767225600000, name: '' });
   const versions = { ...routes['/api/versions'], radios: [], ids: [], taps: [
-    tap('1201', 'Mgate', 'H1.0006 Aug 25 2023'), tap('1202', 'Mgate', 'G8.65 May  9 2025'),
+    tap('1201', 'Mgate', 'H1.0007 Apr 22 2025 15:28:25 GW-H158.7.00'), tap('1202', 'Mgate', 'G8.65 May  9 2025 13:52:34 GW-H150.6.0S0.12'),
     tap('1203', 'Gway', 'G5.26 Jan  1 2020'), tap('1204', 'Mgate', 'G5.26 Jan  1 2020'), tap('1205', 'Xgate', 'Z9.01')] };
   const { page, ctx, errors } = await open(true, versions);
   await page.waitForSelector('#devices-taps tbody tr:nth-child(5)');
   const cells = await page.$$eval('#devices-taps tbody tr td.tap-model', (tds) => tds.map((td) =>
-    [td.textContent.trim(), td.classList.contains('star-only'), td.title]));
+    [td.innerText.replace(/\s+/g, ' ').trim(), td.classList.contains('star-only'), td.title]));
   assert.deepEqual(cells.map(([t, star]) => [t, star]), [
-    ['H series · mesh', false], ['G series · mesh', false], ['Star only', true], ['Star only', true], ['Xgate', false]]);
-  assert.match(cells[0][2], /Mgate firmware H1\.0006/);
+    ['H series · mesh GW-H158.7.00', false], ['G series · mesh GW-H150.6.0S0.12', false], ['Star only', true], ['Star only', true], ['Xgate', false]]);
+  assert.match(cells[0][2], /Mgate firmware H1\.0007/);
+  // The board ID is the version string's GW- suffix (owner's analysis): shown
+  // under the series, and not repeated in the Firmware column.
+  assert.equal(await page.textContent('#devices-taps tbody tr:nth-child(1) td.tap-model .tap-board'), 'GW-H158.7.00');
+  const fw = await page.$$eval('#devices-taps tbody tr td.tap-fw', (tds) => tds.map((td) => td.textContent.trim()));
+  // The build time goes to the tooltip with the rest, so the cell stays on one line.
+  assert.deepEqual(fw.slice(0, 2), ['H1.0007 Apr 22 2025', 'G8.65 May  9 2025']);
+  assert.match(await page.getAttribute('#devices-taps tbody tr:nth-child(1) td.tap-fw', 'title'), /15:28:25 GW-H158\.7\.00/);
   assert.match(cells[2][2], /forces a mesh system back to the old star stack/);
   assert.deepEqual(errors, []);
   await ctx.close();
