@@ -299,6 +299,7 @@ void TigoMonitorComponent::setup() {
   for (const auto &entry : node_table_) {
     if (!entry.long_address.empty()) place_barcode_sensors_(entry.long_address, entry.addr);
   }
+  load_layout_();
   load_energy_data();
   load_daily_energy_history();
 
@@ -1346,6 +1347,13 @@ bool TigoMonitorComponent::set_inverter_display_name(const std::string &canonica
     pref.save(&dn_buf);
     ESP_LOGI(TAG, "Renamed inverter '%s' -> '%s' (saved to NVS)",
              canonical.c_str(), display_name.c_str());
+    // A saved Topology layout stands in for the YAML at boot, so it carries the name too.
+    if (layout_manual_) {
+      StateLock lock(state_mutex_);
+      for (auto &s : skeleton_.inverters)
+        if (s.name == canonical) s.display_name = display_name;
+      save_skeleton_();
+    }
     return true;
   }
   ESP_LOGW(TAG, "set_inverter_display_name: no inverter matches '%s'", canonical.c_str());
@@ -1368,6 +1376,14 @@ bool TigoMonitorComponent::set_string_panel_rating(const std::string &canonical,
   pref.save(&rating_w);
   ESP_LOGI(TAG, "Set panel rating for string '%s' = %u W (saved to NVS)",
            canonical.c_str(), (unsigned) rating_w);
+  if (layout_manual_) {
+    StateLock lock(state_mutex_);
+    for (auto &inv : skeleton_.inverters)
+      for (auto &m : inv.mppts)
+        for (auto &st : m.strings)
+          if (st.label == canonical) st.rating_w = rating_w;
+    save_skeleton_();
+  }
   return true;
 }
 
@@ -1389,6 +1405,14 @@ bool TigoMonitorComponent::set_string_display_label(const std::string &canonical
   pref.save(&dn_buf);
   ESP_LOGI(TAG, "Renamed string '%s' -> '%s' (saved to NVS)",
            canonical.c_str(), display_label.c_str());
+  if (layout_manual_) {
+    StateLock lock(state_mutex_);
+    for (auto &inv : skeleton_.inverters)
+      for (auto &m : inv.mppts)
+        for (auto &st : m.strings)
+          if (st.label == canonical) st.display_label = display_label;
+    save_skeleton_();
+  }
   return true;
 }
 
@@ -3137,6 +3161,13 @@ void TigoMonitorComponent::match_cca_to_uart(const char *json_response) {
   
   int matched_count = 0;
   int cca_panel_count = 0;
+  // Collected first and applied after, so a layout the user saved by hand
+  // can hold it for them instead (tigo_layout_store.cpp).
+  struct CcaMatch {
+    NodeTableData *node;
+    std::string label, string_label, mppt_label, channel, object_id;
+  };
+  std::vector<CcaMatch> matches;
   
   // CCA returns array of objects with hierarchical structure
   // type: 2 = Panel, 3 = String, 4 = Inverter
@@ -3225,12 +3256,7 @@ void TigoMonitorComponent::match_cca_to_uart(const char *json_response) {
             inverter_label.replace(0, 9, "MPPT ");
           }
           
-          node.cca_label = cca_label_str;
-          node.cca_string_label = string_label;
-          node.cca_mppt_label = inverter_label;
-          node.cca_channel = cca_channel_str;
-          node.cca_object_id = cca_obj_id;
-          node.cca_validated = true;
+          matches.push_back({&node, cca_label_str, string_label, inverter_label, cca_channel_str, cca_obj_id});
           
           ESP_LOGI(TAG, "Matched UART device %s (%s) with CCA panel '%s' (String: %s, MPPT: %s)",
                    node.addr.c_str(), uart_barcode.c_str(), cca_label_str.c_str(),
@@ -3251,6 +3277,24 @@ void TigoMonitorComponent::match_cca_to_uart(const char *json_response) {
   
   ESP_LOGI(TAG, "CCA Sync complete: %d CCA panels found, %d matched with UART devices",
            cca_panel_count, matched_count);
+
+  if (layout_manual_) {
+    std::vector<layout::Assignment> incoming;
+    for (const auto &m : matches)
+      incoming.push_back({to_std_string(m.node->long_address), m.label, m.string_label, m.mppt_label});
+    offer_layout("cca", std::move(incoming), {});
+    last_cca_sync_time_ = millis();
+    cJSON_Delete(root);
+    return;
+  }
+  for (const auto &m : matches) {
+    m.node->cca_label = to_node_string(m.label);
+    m.node->cca_string_label = to_node_string(m.string_label);
+    m.node->cca_mppt_label = to_node_string(m.mppt_label);
+    m.node->cca_channel = to_node_string(m.channel);
+    m.node->cca_object_id = to_node_string(m.object_id);
+    m.node->cca_validated = true;
+  }
   
   // Save updated node table with CCA metadata
   if (matched_count > 0) {

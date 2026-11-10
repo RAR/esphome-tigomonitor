@@ -1,8 +1,9 @@
 # .github/workflows/pi.yml
 # The Raspberry Pi build (linux/). Every change runs the host tests and the
 # end-to-end replay; a manual run or a version tag also builds the .deb and
-# the container image for arm64 (Pi) and amd64 (x86), each on a native runner,
-# no QEMU. A tag pushes the image to ghcr.io/rar/tigomonitord.
+# the container image, each on a native runner, no QEMU: a tag for arm64 (Pi)
+# and amd64 (x86), a manual run for arm64 unless asked for both. A tag pushes
+# the image to ghcr.io/rar/tigomonitord.
 # (linux/image/build-image.sh can turn the .deb into an SD card image, but we
 # only ship the .deb for now.)
 name: Pi build
@@ -12,22 +13,38 @@ on:
     tags: ['v*']
     paths:
       - 'linux/**'
-      - 'components/tigo_monitor/tigo_protocol.h'
-      - 'components/tigo_monitor/tigo_node_identity.h'
-      - 'components/tigo_monitor/tigo_cca_ble_protocol.h'
+      # Everything the daemon compiles: any header on its include path, and
+      # the bus-master core (linux/CMakeLists.txt). Listing headers one by one
+      # missed master_core.cpp, so a change to it ran no tests at all.
+      - 'components/tigo_monitor/*.h'
+      - 'components/tigo_master/**'
       - 'components/tigo_server/web/app.html'
       - 'tests/host/**'
       - '.github/workflows/pi.yml'
   pull_request:
     paths:
       - 'linux/**'
-      - 'components/tigo_monitor/tigo_protocol.h'
-      - 'components/tigo_monitor/tigo_node_identity.h'
-      - 'components/tigo_monitor/tigo_cca_ble_protocol.h'
+      # Everything the daemon compiles: any header on its include path, and
+      # the bus-master core (linux/CMakeLists.txt). Listing headers one by one
+      # missed master_core.cpp, so a change to it ran no tests at all.
+      - 'components/tigo_monitor/*.h'
+      - 'components/tigo_master/**'
       - 'components/tigo_server/web/app.html'
       - 'tests/host/**'
       - '.github/workflows/pi.yml'
   workflow_dispatch:
+    inputs:
+      arch:
+        description: Architectures to build the .deb and image for
+        type: choice
+        options: [arm64, both]
+        default: arm64
+# A newer run of the same kind on the same branch cancels the older one: its
+# result no longer matters. Manual builds have their own group, so a merge's
+# test run can't cancel a build waiting to be installed. Tags never cancel.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'workflow_dispatch' && 'build' || 'test' }}-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
 permissions:
   contents: read
 jobs:
@@ -42,19 +59,42 @@ jobs:
         run: docker run --rm -v "$PWD":/src -w /src tigod-dev linux/scripts/e2e.sh
       - name: CCA over Bluetooth and HTTP, against mocks
         run: docker run --rm -v "$PWD":/src -w /src tigod-dev linux/scripts/cca-e2e.sh
+      - name: The Topology editor's layout
+        run: docker run --rm -v "$PWD":/src -w /src tigod-dev linux/scripts/layout-e2e.sh
       - name: The bus over a network bridge, against a mock
         run: docker run --rm -v "$PWD":/src -w /src tigod-dev linux/scripts/bridge-e2e.sh
+      - name: The bus master, against a mock TAP
+        run: docker run --rm -v "$PWD":/src -w /src tigod-dev linux/scripts/master-e2e.sh
+      - name: Two masters on one bus, a standby taking over
+        run: docker run --rm -v "$PWD":/src -w /src tigod-dev linux/scripts/standby-e2e.sh
+      - name: The bus master with more than one TAP, against mock TAPs
+        run: docker run --rm -v "$PWD":/src -w /src tigod-dev linux/scripts/multitap-e2e.sh
+      - name: The bus log, and a CCA reconfiguring the TAP
+        run: docker run --rm -v "$PWD":/src -w /src tigod-dev linux/scripts/bus-log-e2e.sh
+      - name: PV output off and on, against a mock TAP
+        run: docker run --rm -v "$PWD":/src -w /src tigod-dev linux/scripts/pv-e2e.sh
+      - name: A new optimizer heard, against a synthetic bus
+        run: docker run --rm -v "$PWD":/src -w /src tigod-dev linux/scripts/new-optimizer-e2e.sh
+      - name: The mesh map's link counts, against a synthetic bus
+        run: docker run --rm -v "$PWD":/src -w /src tigod-dev linux/scripts/mesh-e2e.sh
+      - name: A slow broker name, looked up off the main loop
+        run: docker run --rm -v "$PWD":/src -w /src tigod-dev linux/scripts/mqtt-lookup-e2e.sh
+      - name: HTTPS, with test certificates
+        run: docker run --rm -v "$PWD":/src -w /src tigod-dev linux/scripts/https-e2e.sh
+      - name: HTTPS in Docker Compose, with a stand-in for certbot
+        run: |
+          docker build -t tigomonitord:https-test -f linux/Dockerfile .
+          linux/scripts/https-compose-test.sh
+      - name: The systemd watchdog, against a stand-in notify socket
+        run: docker run --rm -v "$PWD":/src -w /src tigod-dev linux/scripts/watchdog-e2e.sh
 
   deb:
     if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
     needs: test
     strategy:
       matrix:
-        include:
-          - arch: arm64
-            runner: ubuntu-24.04-arm
-          - arch: amd64
-            runner: ubuntu-latest
+        # Both for a tag, or a manual run that asks; else arm64 alone.
+        include: ${{ fromJSON(github.event_name == 'workflow_dispatch' && inputs.arch != 'both' && '[{"arch":"arm64","runner":"ubuntu-24.04-arm"}]' || '[{"arch":"arm64","runner":"ubuntu-24.04-arm"},{"arch":"amd64","runner":"ubuntu-latest"}]') }}
     runs-on: ${{ matrix.runner }}
     permissions:
       contents: write  # attaching the .deb to a tag's release
@@ -69,11 +109,16 @@ jobs:
       - run: docker build -t tigod-dev -f linux/Dockerfile.dev linux
       - name: Build the ${{ matrix.arch }} .deb
         run: docker run --rm -v "$PWD":/src -w /src tigod-dev linux/packaging/build-deb.sh "${{ steps.version.outputs.version }}"
+      - name: The certbot hook it ships, in a clean install
+        run: linux/scripts/cert-hook-test.sh build/deb/*.deb
       - uses: actions/upload-artifact@v4
         with:
           name: tigomonitord-${{ steps.version.outputs.version }}-${{ matrix.arch }}
           path: build/deb/*.deb
           compression-level: 0  # already compressed
+          # Actions storage is 2 GB: a release's 90 days, main's 7, any
+          # other branch's a day (each is downloaded within minutes).
+          retention-days: ${{ startsWith(github.ref, 'refs/tags/v') && 90 || github.ref == 'refs/heads/main' && 7 || 1 }}
       - name: Attach to the release
         if: startsWith(github.ref, 'refs/tags/v')
         env:
@@ -95,11 +140,8 @@ jobs:
     needs: test
     strategy:
       matrix:
-        include:
-          - arch: arm64
-            runner: ubuntu-24.04-arm
-          - arch: amd64
-            runner: ubuntu-latest
+        # Both for a tag, or a manual run that asks; else arm64 alone.
+        include: ${{ fromJSON(github.event_name == 'workflow_dispatch' && inputs.arch != 'both' && '[{"arch":"arm64","runner":"ubuntu-24.04-arm"}]' || '[{"arch":"arm64","runner":"ubuntu-24.04-arm"},{"arch":"amd64","runner":"ubuntu-latest"}]') }}
     runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
@@ -125,6 +167,9 @@ jobs:
           name: tigomonitord-image-${{ steps.version.outputs.version }}-${{ matrix.arch }}
           path: tigomonitord-image-${{ matrix.arch }}.tar.gz
           compression-level: 0
+          # ~30 MB each, most of the storage: main's kept 7 days, any other
+          # branch's a day. A release's goes to GHCR instead.
+          retention-days: ${{ github.ref == 'refs/heads/main' && 7 || 1 }}
       - name: Push to GHCR
         if: startsWith(github.ref, 'refs/tags/v')
         run: |

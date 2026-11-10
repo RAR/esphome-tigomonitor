@@ -14,7 +14,10 @@
 #include "cloud.h"
 #include "history.h"
 #include "monitor.h"
+#include "bus_master.h"
 #include "settings.h"
+#include "tls.h"
+#include "bus_log.h"
 #include "topology.h"
 
 #include <atomic>
@@ -46,6 +49,59 @@ struct HttpContext {
   Cloud &cloud;
   CcaBle &cca;
   CcaHttp &cca_http;
+  std::function<MasterStatus()> master_status;  // inactive when listening
+  TlsCerts *tls = nullptr;  // HTTPS with these; null: plain HTTP
+  bool tls_from_args = false;  // set by --tls-cert/--tls-key, not the web UI
+  std::function<int64_t()> main_loop_late_ms;  // since the main loop's last pass
+  // The owner's PV off or on: 200, or 409 with why (no bus master running,
+  // or it is standing by).
+  std::function<int(bool off, std::string &why)> request_pv;
+  std::function<bool()> pv_unreadable;  // pv.json couldn't be read: nothing said about PV
+  // The optimizers' last !Info/!Mppt answers by short id, while this monitor
+  // runs the bus with queries on.
+  std::function<std::map<uint16_t, esphome::tigo_monitor::master::Queries::Setup>()> setups;
+  // The owner's discovery switch (renew or let it close): 200, or 409 with
+  // why, as request_pv.
+  std::function<int(bool renew, std::string &why)> request_discovery;
+  // The decoded bus log and the TAP-reconfiguration alarm.
+  BusLog *bus_log = nullptr;
+  // The owner's add of an optimizer to a TAP's table (MAC, id 0 for the
+  // lowest free, dry run, the TAP's id or 0 for the first): 200, or 409
+  // with why, as request_pv.
+  std::function<int(const esphome::tigo_monitor::master::Bytes &mac, uint16_t id, bool dry_run, std::string &why,
+                    uint16_t tap)>
+      request_table_add;
+  // The owner's removal of one (tap 0: the one it reports through): 200, or 409 with why.
+  std::function<int(const esphome::tigo_monitor::master::Bytes &mac, bool dry_run, std::string &why, uint16_t tap)>
+      request_table_remove;
+  // The owner's replace of one (old MAC, new MAC, dry run, tap 0: the old
+  // one's): 200, or 409 with why.
+  std::function<int(const esphome::tigo_monitor::master::Bytes &old_mac, const esphome::tigo_monitor::master::Bytes &new_mac,
+                    bool dry_run, std::string &why, uint16_t tap)>
+      request_table_replace;
+  // Stop waiting for an added optimizer to join: 200, or 409 with why.
+  std::function<int(const esphome::tigo_monitor::master::Bytes &mac, std::string &why)> request_table_stop_waiting;
+  // The owner's herd (look for TAPs): 200, or 409 with why.
+  std::function<int(std::string &why)> request_herd;
+};
+
+// tigomonitord --health-check PORT, the container's HEALTHCHECK: GETs
+// /api/health from the daemon on this machine and returns 0 for a 200.
+int health_check(int port);
+
+// With HTTPS on the default ports, port 80 answers every request with a
+// redirect to the same path over HTTPS, so http:// bookmarks and the mDNS
+// advert (which names port 80) still lead to the web UI.
+class HttpsRedirect {
+ public:
+  HttpsRedirect();
+  ~HttpsRedirect();
+  bool start(int port, int https_port);
+  void stop();
+
+ private:
+  std::unique_ptr<httplib::Server> svr_;
+  std::unique_ptr<std::thread> thread_;
 };
 
 class HttpServer {
@@ -53,13 +109,17 @@ class HttpServer {
   explicit HttpServer(HttpContext ctx);
   ~HttpServer();
   // Listens on port in a background thread, or on fallback (when nonzero)
-  // if port is taken. Returns the port it got, or 0 if it got neither.
+  // if port is taken. Returns the port it got, or -1 if it got neither
+  // (port 0, any free port, returns 0).
   int start(int port, int fallback = 0);
   void stop();
 
  private:
   void routes_();
+  std::vector<std::string> health_problems_() const;
+  void new_server_();
   HttpContext ctx_;
+  int64_t started_unix_ms_;
   std::unique_ptr<httplib::Server> svr_;
   std::unique_ptr<std::thread> thread_;
   int port_ = 0;

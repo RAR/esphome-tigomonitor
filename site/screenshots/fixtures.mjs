@@ -75,6 +75,7 @@ for (const [si, s] of STRINGS.entries()) {
       efficiency: eff,
       data_age_ms: Math.round(1800 + wob(i + 320) * 7000),
       stale: false,
+      tap: '1201',
     });
   }
 }
@@ -129,6 +130,32 @@ function series(hours, peak) {
   return out;
 }
 
+// The Topology editor's tree (/api/layout): the same site as /api/inverters,
+// CCA-derived (not yet saved by hand), plus one panel the bus has found that
+// no string holds yet. That panel is not in /api/devices: it hasn't reported.
+// The second inverter numbers its own MPPTs: labels stay unique across the
+// site (panels carry them), names need only be unique in their inverter.
+const MPPT_NAMES = { 'MPPT 3': 'MPPT 1', 'MPPT 4': 'MPPT 2' };
+
+const layout = {
+  manual: false,
+  inverters: INVERTERS.map((inv, ii) => ({
+    name: inv.name,
+    display_name: inv.display_name,
+    mppts: STRINGS.filter((s) => s.inv === ii).map((s) => ({
+      label: s.mppt,
+      display_label: MPPT_NAMES[s.mppt] || '',
+      strings: [{
+        label: s.label, display_label: '', rating_w: RATING,
+        panels: of(s.label).map((d) => ({ barcode: d.barcode, addr: d.addr, name: d.name, first_heard_unix: 0, known: false })),
+      }],
+    })),
+  })),
+  unplaced_mppts: [],
+  unassigned: [{ barcode: '04C05B0000200001', addr: '0080', name: '', first_heard_unix: 0, known: false }],
+  pending: null,
+};
+
 export const routes = {
   '/api/overview': {
     total_power: sum(devices, 'power_in'),
@@ -143,16 +170,45 @@ export const routes = {
   },
   '/api/devices': { devices, count: devices.length },
   '/api/strings': { strings },
-  '/api/inverters': { inverters },
+  '/api/inverters': { inverters, mppt_names: MPPT_NAMES },
+  '/api/layout': layout,
+  '/api/layout/pending': { pending: null },
   '/api/nodes': {
     nodes: devices.map((d, i) => ({
-      addr: d.addr, long_address: d.barcode, sensor_index: i, checksum: '',
+      addr: d.addr, first_heard_unix: 0, long_address: d.barcode, sensor_index: i, checksum: '',
       cca_validated: true, cca_label: d.name, cca_string: d.string_label,
       cca_mppt: mpptOf(d.string_label),
       cca_channel: `04C05B000000.${10 + i}`,
+      last_heard_unix: 0, last_roster_unix: 0, known: false, setup: null,
     })),
     inverters: [],
     strings: strings.map((s) => ({ label: s.label, panel_rating_w: RATING })),
+  },
+  // Pi build only: firmware heard on the bus. One optimizer was updated.
+  '/api/versions': {
+    taps: [{ addr: '1201', model: 'Mgate', version: 'G8.59 Jan  1 2026 10:00:00 GW-H150.6.0S0.12', previous: '',
+             since_unix_ms: 1767225600000, last_unix_ms: 1767225600000, name: 'Garage' }],
+    radios: [{ tap: '1201', channel: 18, slt: 90, slm: 60, heard_unix_ms: 1767225600000 }],
+    // An optimizer whose PIV current changed, newest first.
+    changes: [{ unix_ms: 1767225600000 + 3 * 60000, addr: devices[3].addr, what: 'MPPT', before: '12 40 08 12', after: '12 40 0A 12' }],
+    // Each TAP's MAC, from its answer to GET_MAC; made up.
+    ids: [{ tap: '1201', mac: '04C05B0000001234', heard_unix_ms: 1767225600000 }],
+    // Two on the H9 firmware, as D6-D10 are on the roof.
+    optimizers: devices.map((d, i) => ({ addr: d.addr, model: 'Mnode', version: i === 4 ? 'K8.0130 (2D)' : i === 5 || i === 6 ? 'H9.0018 (40)' : 'K8.0120 (2D)',
+      previous: i === 4 ? 'K8.0120 (2D)' : '', since_unix_ms: 1767225600000 + i * 60000, last_unix_ms: 1767225600000 + i * 60000 })),
+    // Answers to ^00Smrt: the roof's usual 13 tokens from the K8s, one of
+    // them with a different HwVout; the two H9s in their all-zero form, one
+    // not yet stored; the rest not answered yet.
+    settings: devices.slice(0, 8).map((d, i) => ({ addr: d.addr,
+      settings: i === 5 ? '0000 0000 0000 0000 0000 0000 0000 0000 0000 N 00 0000 0000 0000 00'
+              : i === 6 ? '0000 0000 0000 0000 0000 0000 0000 0000 0000 S 00 0000 0000 0000 00'
+              : i === 7 ? '0FFF 0000 0E00 0008 00C8 00C8 000A 0154 0154 S 00 01'
+              : '0FFF 0000 0FFF 0008 00C8 00C8 000A 0154 0154 S 00 01',
+      stored: i !== 5, heard_unix_ms: 1767225600000 + i * 60000 })),
+    // The four MPPT parameters from each answer to ^00Mppt: the roof's
+    // 12 40 08 12 from every firmware, one with a different PIV current.
+    mppt: devices.slice(0, 8).map((d, i) => ({ addr: d.addr, params: i === 3 ? '12 40 0A 12' : '12 40 08 12',
+      answer: `1 0 S M[100 ${d.addr} - 3/3] 0 ${i === 3 ? '12 40 0A 12' : '12 40 08 12'}`, heard_unix_ms: 1767225600000 + i * 60000 })),
   },
   '/api/status': {
     free_heap: 98740, total_heap: 310652,
@@ -258,3 +314,131 @@ export const patterns = [
   }],
   [/\/api\/history\/panel/, () => ({ slot: 0, range: 'day', interval_min: 60, records: series(24, 392), count: 48, query_ms: 31 })],
 ];
+
+// ---------------------------------------------------------------------------
+// The Raspberry Pi build's pages (Bus › Control, Bus › Traffic, Devices with
+// the TAP), served on top of `routes` when capture.mjs runs in Pi mode.
+// Invented, like everything here: gateway 1201, the panels' own node numbers.
+// Fixed times, so the pixels are the same on every run.
+const PI_T = 1767268800000;  // 2026-01-01 12:00 UTC
+const node = (i) => devices[i].addr;
+let exId = 1;
+const exch = (dt_ms, o) => ({
+  id: exId++, unix_ms: PI_T + dt_ms, ours: true, other_master: false, addr: '1201', cmd: '0B0F', name: 'Tunnel',
+  sub_name: '', node: null, category: 'other', result: 'answered', late: false, rt_ms: 4,
+  summary: '', answer: '', answer_after_ms: null, request_hex: '', reply_hex: '', reconfig: '', ...o,
+});
+const disc = (dt) => exch(dt, {
+  sub_name: 'DiscState', category: 'discovery', rt_ms: 5,
+  summary: `Open, ${612 - Math.round(dt / 1000)} s left · 24 of the 24 in the table have joined`,
+  request_hex: '00 00 00 2E 05', reply_hex: '00 0E 00 2F 05 01 01 9C 00 18 00 18 00 18 00',
+});
+const pgw = (dt, i) => exch(dt, {
+  sub_name: 'SetPgw', category: 'housekeeping', node: node(i), rt_ms: 4,
+  summary: `Preferred gateway for node ${node(i)} · stream 01`,
+  request_hex: `00 00 00 41 0A 00 ${node(i).slice(0, 2)} ${node(i).slice(2)} 00 00 00 01 00`, reply_hex: '00 0E 00 42 0A',
+});
+const query = (dt, i, q, answer) => exch(dt, {
+  sub_name: 'EncapString', category: 'queries', node: node(i), result: 'delivered', rt_ms: 6,
+  summary: q, answer, answer_after_ms: answer ? 1840 : null,
+  request_hex: `00 00 00 06 0B 00 ${node(i).slice(2)} 5E 30 30`, reply_hex: '00 0D 00 07 0B',
+});
+const page = (dt, from, n) => exch(dt, {
+  sub_name: 'GetTable', category: 'housekeeping', rt_ms: n ? 31 : 8,
+  summary: n ? `${n} entries from index ${from}` : `The end of the table, from index ${from}`,
+  request_hex: `00 00 00 26 0C 00 ${from.slice(2)}`, reply_hex: '00 0E 00 27 0C',
+});
+const piExchanges = [
+  disc(0),
+  pgw(2100, 3),
+  query(4300, 5, '^00Version', 'Mnode Version K8.0130 (2D)'),
+  pgw(19600, 9),
+  disc(20000),
+  query(22400, 11, '^00Info', '!Info 0027 12 0000'),
+  page(30000, '0002', 12),
+  page(30400, '000E', 12),
+  page(30800, '001A', 0),
+  pgw(37100, 14),
+  disc(40000),
+  query(41900, 17, '^00Mppt', ''),
+  exch(43500, { sub_name: 'EncapString', category: 'queries', node: node(20), result: 'not_delivered', rt_ms: 5,
+    summary: "^00Version · the TAP couldn't deliver it (0x0146): the optimizer may be off or rejoining",
+    request_hex: `00 00 00 06 0E 00 ${node(20).slice(2)} 5E 30 30`, reply_hex: '00 02' }),
+  pgw(54600, 21),
+  disc(60000),
+];
+
+// The mesh map: every fixture panel behind one TAP, with a few problems
+// planted so the colours mean something. RSSI is Tigo's raw byte (higher is
+// better), spread like the roof's 66-222. A day of 5-minute averages, empty
+// overnight. Addresses and labels only; the API never carries a MAC.
+const meshRssi = (base, i) => Array.from({ length: 288 }, (_, k) => {
+  const hour = new Date(PI_T - (287 - k) * 300000).getUTCHours();
+  return hour >= 7 && hour < 18 ? Math.round(base + Math.sin(k / 9 + i) * 4 + (wob(i * 31 + k) - 0.5) * 3) : null;
+});
+const meshNodes = devices.map((d, i) => {
+  const rssi = Math.round(92 + wob(i + 410) * 110);
+  const node = {
+    addr: d.addr, label: d.name, string: d.string_label, tap: '1201', parent: '0001', relay: null,
+    rssi, rssi_24h: meshRssi(rssi, i), reports_today: 10800 - Math.round(wob(i + 450) * 60),
+    lost_today: Math.round(wob(i + 470) * 40), last_heard_s: 1 + Math.round(wob(i + 490) * 3),
+    last_join_unix: PI_T / 1000 - 5 * 3600 - i * 37,
+  };
+  if (i === 4) Object.assign(node, { lost_today: 680 });                     // poor: 6 % lost
+  if (i === 9) Object.assign(node, { rssi: 72, rssi_24h: meshRssi(72, i) }); // poor: weak signal
+  if (i === 15) Object.assign(node, { last_heard_s: 900 });                 // silent
+  if (i === 20) Object.assign(node, { reports_today: 0, lost_today: 0, rssi_24h: Array(288).fill(null), last_heard_s: 64000,
+                                      parent: null, last_join_unix: null });
+  if (i === 7) Object.assign(node, { parent: '0046', relay: devices[2].addr }); // through optimizer 2, by its NWID
+  if (i === 11) node.parent = '0091';                                        // through a relay not yet identified
+  return node;
+});
+
+export const piRoutes = {
+  '/api/status': { ...routes['/api/status'], platform: 'linux' },
+  '/api/settings': {
+    serial_port: '/dev/serial/by-id/usb-FTDI_USB_RS485-if00-port0', bus_role: 'master', standby_takeover_s: 3,
+    master_startup: true, master_housekeeping: true, master_queries: true, master_optimizer_writes: false,
+    master_read_tap_config: false, master_table_writes: false, master_adopt_taps: false, discovery_auto: false, gateway_id: 0x1201, web_port: 0, web_port_active: 80, web_username: 'admin', web_password_set: true,
+    tls_cert: '', tls_key: '', tls_active: false, tls_from_args: false, power_calibration: 1, publish_interval_s: 30,
+    device_id: 'tigomonitor', show_cca_page: true, show_cloud_page: true,
+    mqtt: { host: '192.0.2.10', port: 1883, username: 'tigomonitor', password_set: true, discovery: true,
+      discovery_prefix: 'homeassistant', base_topic: 'tigomonitor', standby_panels: false, pv_switch: true },
+    mqtt_connected: true, mqtt_error: '',
+  },
+  '/api/master': {
+    role: 'master', active: true, fault: 'none', phase: 'running', detail: '', extra_taps: [],
+    housekeeping: { on: true, learned_41: 24, sent_41: 1412, sent_session: 3, sent_broadcast: 6, sent_walk_pages: 96, walks_done: 32 },
+    queries: { on: true, writes: false, sent_reads: 640, sent_writes: 0, answers: 598 },
+    tap_version: 'Mgate Version G8.59 Jan  1 2026 10:00:00 GW-H1', tap: { lost: 0, last_lost_unix: 0, recent_lost_unix: [], back_without_discovery: 0 },
+    discovery_read: true, discovery: { running: true, remaining_s: 552, node_count: 24 }, renewals: 41, discovery_renewing: true, discovery_auto: false, adopt_taps: false, window_wanted: true, missing_expected: 0,
+    polls: 712400, timeouts: 3, resyncs: 0, gap_ms: { max: 39, max_at_unix: 1767225600, recent: 12 }, last_reply_unix: PI_T / 1000,
+    pv: { on: true, source: 'setting', since: 0, confirmed: true, unconfirmed: false, last_sent: '01', last_reply: '01' },
+    taps: [{ id: '1201', mac: '04C05B0000000001', version: 'Mgate Version G8.59 Jan  1 2026 10:00:00 GW-H1', state: 'running',
+      polls: 712400, timeouts: 3, renewals: 41, lost: 0, last_reply_unix: PI_T / 1000,
+      discovery: { read: true, running: true, remaining_s: 552, node_count: 24, joined: 24 } }],
+    table: { writes: false, tap: '', edit: { kind: '', active: false, interrupted: false, finished: false, ok: false, dry_run: false, mac: '', label: '', id: '', ack: -1, step: '', message: '', started_unix: 0, finished_unix: 0, dry_frames: [] }, waiting: [], joins: [] },
+    standby: { state: 'off', takeover_s: 3, master_heard_ms_ago: -1, takeovers: 0, last_takeover_unix: 0, yields: 0 },
+  },
+  '/api/bus': {
+    alarm: { active: false, count: 0, first_unix_ms: 0, recent: [] },
+    stats: { window_s: 300, polls: 13180, polls_lost: 0, polls_empty: 12950, polls_refused: 0,
+      count: { discovery: 4, queries: 4, housekeeping: 7, bringup: 0, reconfig: 0, other: 0 }, delivered: 3, not_delivered: 1,
+      other_master: 0, reconfig: 0, rt_median_ms: 4, rt_max_ms: 31,
+      discovery: 'Open, 552 s left · 24 of the 24 in the table have joined' },
+    exchanges: piExchanges,
+  },
+  '/api/mesh': { loss_method: 'slot', parent_confirmed: true, taps: [{ id: '1201', name: 'Garage' }], nodes: meshNodes,
+    // Reports and losses by day, summed by string: one string worse than
+    // the rest, and getting better on the last day.
+    loss_days: [4, 3, 2, 1, 0].map((back) => ({
+      date: new Date(PI_T - back * 86400000).toISOString().slice(0, 10),
+      strings: Object.fromEntries([...new Set(devices.map((d) => d.string_label))].map((s, k) =>
+        [s, [12000, k === 1 ? (back ? 960 : 300) : 40 + k * 20 + back * 5]])) })) },
+  // One optimizer's joins, newest first: through a relay, the TAP, and a
+  // relay not identified.
+  '/api/mesh/joins': { joins: [
+    { unix: PI_T / 1000 - 5 * 3600, parent: '0046', relay: devices[2].addr },
+    { unix: PI_T / 1000 - 29 * 3600, parent: '0001', relay: null },
+    { unix: PI_T / 1000 - 53 * 3600, parent: '0091', relay: null }] },
+};

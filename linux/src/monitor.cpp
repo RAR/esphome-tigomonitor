@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdlib>
 #include <ctime>
 #include <fstream>
 #include <map>
@@ -27,13 +28,54 @@ static std::string local_date() {
   return buf;
 }
 
+// Today as YYYYMMDD in local time, for counters that restart at midnight.
+// Asked for each power report (20-40 a second), so worked out once a second.
+static int local_day() {
+  static thread_local time_t last = 0;
+  static thread_local int day = 0;
+  time_t t = time(nullptr);
+  if (t != last) {
+    last = t;
+    tm lt{};
+    localtime_r(&t, &lt);
+    day = (lt.tm_year + 1900) * 10000 + (lt.tm_mon + 1) * 100 + lt.tm_mday;
+  }
+  return day;
+}
+
 static int64_t unix_ms() {
   using namespace std::chrono;
   return duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
 }
 
 Monitor::Monitor(std::string state_path, float power_calibration, size_t max_nodes)
-    : state_path_(std::move(state_path)), power_calibration_(power_calibration), max_nodes_(max_nodes) {}
+    : state_path_(std::move(state_path)), power_calibration_(power_calibration), max_nodes_(max_nodes),
+      writer_([this] { writer_loop_(); }) {}
+
+Monitor::~Monitor() {
+  {
+    std::lock_guard<std::mutex> lock(write_mu_);
+    stop_writer_ = true;
+  }
+  write_cv_.notify_all();
+  writer_.join();
+}
+
+void Monitor::writer_loop_() {
+  std::unique_lock<std::mutex> lock(write_mu_);
+  for (;;) {
+    write_cv_.wait(lock, [this] { return has_pending_ || stop_writer_; });
+    if (!has_pending_) return;  // stopping, and nothing left to write
+    std::string text = std::move(pending_);
+    has_pending_ = false;
+    writing_ = true;
+    lock.unlock();
+    if (!write_file_atomic(state_path_, text)) write_failed_ = true;  // the next save marks it dirty again
+    lock.lock();
+    writing_ = false;
+    write_cv_.notify_all();
+  }
+}
 
 void Monitor::feed(const char *data, size_t len) {
   std::lock_guard<std::mutex> lock(mu_);
@@ -61,8 +103,13 @@ void Monitor::on_frame_(const std::string &raw) {
 
   switch (proto::frame_type(hex)) {
     case proto::FrameType::power:
-      if (!proto::walk_power_packets(hex, [this](const std::string &type, const std::string &packet) {
-            if (type == "31") on_power_packet_(packet);
+      // The TAP it came through: a reply's address is the TAP's RS485 id
+      // with 0x8000 set.
+      if (!proto::walk_power_packets(hex, [this, tap = static_cast<uint16_t>(
+                                                     std::strtoul(hex.substr(0, 4).c_str(), nullptr, 16) & 0x7FFF)](
+                                                const std::string &type, const std::string &packet) {
+            if (type == "31") on_power_packet_(packet, tap);
+            else if (type == "09") on_netdiag_(packet);
           }))
         LOGD("power frame ended in a truncated packet");
       break;
@@ -80,7 +127,7 @@ Panel *Monitor::find_panel_(const std::string &addr) {
   return nullptr;
 }
 
-void Monitor::on_power_packet_(const std::string &packet) {
+void Monitor::on_power_packet_(const std::string &packet, uint16_t tap) {
   proto::PowerReading r;
   auto result = proto::decode_power_packet(packet, power_calibration_, r);
   if (result != proto::PowerDecode::ok) {
@@ -99,8 +146,19 @@ void Monitor::on_power_packet_(const std::string &packet) {
   p->updated = Clock::now();
   p->updated_unix_ms = unix_ms();
   p->readings++;
-  for (const auto &n : nodes_) {
+  int64_t now_s = p->updated_unix_ms / 1000;
+  links_.on_report(r.addr, tap, r.rssi, static_cast<uint16_t>(std::strtoul(r.slot_counter, nullptr, 16)), now_s,
+                   local_day());
+  for (auto &n : nodes_) {
     if (n.addr == p->addr) {
+      if (now_s - n.last_heard_unix >= SEEN_SAVE_EVERY_S) dirty_ = true;
+      n.last_heard_unix = now_s;
+      if (n.known) {
+        n.known = false;
+        dirty_ = true;
+        LOGI("%s (%s) is reporting: no longer marked known", n.cca_label.empty() ? n.addr.c_str() : n.cca_label.c_str(),
+             n.addr.c_str());
+      }
       p->barcode = n.long_address;
       p->label = n.cca_label;
       break;
@@ -117,6 +175,22 @@ void Monitor::on_power_packet_(const std::string &packet) {
   }
   if (r.power_out > p->peak_power) p->peak_power = r.power_out;
   LOGD("%s: %.1f W out, %.2f V in, %.1f C", r.addr, r.power_out, r.voltage_in, r.temperature);
+}
+
+// A NetDiag join: the optimizer named by its MAC, else by the packet's
+// address, and the parent it joined through; see decode_netdiag_packet.
+void Monitor::on_netdiag_(const std::string &packet) {
+  proto::NetDiagJoin j;
+  if (!proto::decode_netdiag_packet(packet, j)) return;
+  std::string addr = j.addr;
+  for (const auto &n : nodes_)
+    if (n.long_address == j.node_mac) addr = n.addr;
+  int64_t now_s = unix_ms() / 1000;
+  links_.on_join(addr, now_s, j.parent, j.nwid);
+  join_log_.push_back({addr, now_s, j.parent, j.nwid});
+  while (!join_log_.empty() && join_log_.front().unix_s < now_s - JOIN_DAYS * 86400) join_log_.erase(join_log_.begin());
+  dirty_ = true;  // kept in state.json: the next join may be tomorrow's sunrise
+  LOGI("%s joined (NetDiag)", addr.c_str());
 }
 
 void Monitor::on_frame27_(const std::string &hex) {
@@ -149,6 +223,13 @@ void Monitor::on_frame27_(const std::string &hex) {
     if (res.renumbered) LOGW("address %s now belongs to barcode %s (gateway renumbered)", a.c_str(), l.c_str());
     if (res.table_changed) changed = true;
     if (Panel *p = find_panel_(a)) p->barcode = l;
+    note_barcode_(l, a);
+    int64_t now_s = static_cast<int64_t>(time(nullptr));
+    for (auto &n : nodes_)
+      if (n.addr == a) {
+        if (now_s - n.last_roster_unix >= SEEN_SAVE_EVERY_S) dirty_ = true;
+        n.last_roster_unix = now_s;
+      }
   });
   if (!ok) {
     LOGW("Frame 27 too short for its header");
@@ -167,9 +248,131 @@ std::vector<Panel> Monitor::panels() const {
   return panels_;
 }
 
+void Monitor::note_barcode_(const std::string &barcode, const std::string &addr) {
+  if (barcode.empty() || !seen_barcodes_.insert(barcode).second) return;
+  dirty_ = true;
+  int64_t now = static_cast<int64_t>(time(nullptr));
+  if (seen_since_ == 0) {
+    seen_since_ = now;
+    return;
+  }
+  if (now - seen_since_ < NEW_AFTER_S) return;
+  first_heard_[barcode] = now;
+  LOGW("new optimizer heard: %s at node %s; place it in the layout (Topology, Edit layout)%s", barcode.c_str(), addr.c_str(),
+       new_note_.c_str());
+}
+
+std::map<std::string, int64_t> Monitor::first_heard() const {
+  std::lock_guard<std::mutex> lock(mu_);
+  return first_heard_;
+}
+
+int Monitor::missing_optimizers(int64_t now_unix) const {
+  std::lock_guard<std::mutex> lock(mu_);
+  int64_t newest_roster = 0;
+  for (const auto &n : nodes_) newest_roster = std::max(newest_roster, n.last_roster_unix);
+  int count = 0;
+  for (const auto &n : nodes_) {
+    if (n.long_address.empty() || n.known) continue;
+    bool silent = n.last_heard_unix > 0 && now_unix - n.last_heard_unix >= MISSING_AFTER_S;
+    bool off_roster = n.last_roster_unix > 0 && newest_roster - n.last_roster_unix >= OFF_ROSTER_AFTER_S;
+    if (silent || off_roster) count++;
+  }
+  return count;
+}
+
+bool Monitor::set_known(const std::string &barcode, bool known) {
+  std::lock_guard<std::mutex> lock(mu_);
+  for (auto &n : nodes_) {
+    if (n.long_address != barcode) continue;
+    if (n.known != known) {
+      n.known = known;
+      dirty_ = true;
+      LOGI("%s (%s) %s", n.cca_label.empty() ? n.addr.c_str() : n.cca_label.c_str(), n.addr.c_str(),
+           known ? "marked known: not reporting, and not counted as missing" : "no longer marked known");
+    }
+    return true;
+  }
+  return false;
+}
+
+bool Monitor::set_tap_name(const std::string &tap, const std::string &name) {
+  if (tap.size() != 4 || tap.find_first_not_of("0123456789abcdefABCDEF") != std::string::npos) return false;
+  size_t a = name.find_first_not_of(" \t"), b = name.find_last_not_of(" \t");
+  std::string trimmed = a == std::string::npos ? "" : name.substr(a, b - a + 1);
+  if (trimmed.size() > 32) return false;
+  std::string key = tap;
+  for (char &c : key) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+  std::lock_guard<std::mutex> lock(mu_);
+  if (trimmed.empty()) tap_names_.erase(key);
+  else tap_names_[key] = trimmed;
+  dirty_ = true;
+  save_locked_();
+  LOGI("TAP %s %s", key.c_str(), trimmed.empty() ? "has no name now" : ("is named " + trimmed).c_str());
+  return true;
+}
+
+std::map<std::string, std::map<std::string, std::pair<uint32_t, uint32_t>>> Monitor::loss_days() const {
+  std::lock_guard<std::mutex> lock(mu_);
+  auto days = loss_book_.days();
+  // Today's as they stand now, not as last saved.
+  if (!today_.empty())
+    for (const auto &kv : links_.links())
+      if (kv.second.day == local_day() && kv.second.reports_today)
+        days[today_][kv.first] = {kv.second.reports_today, kv.second.lost_today};
+  return days;
+}
+
+std::vector<esphome::tigo_monitor::mesh_history::JoinEntry> Monitor::join_log() const {
+  std::lock_guard<std::mutex> lock(mu_);
+  return join_log_;
+}
+
+std::map<std::string, std::string> Monitor::tap_names() const {
+  std::lock_guard<std::mutex> lock(mu_);
+  return tap_names_;
+}
+
+int Monitor::new_optimizers(int64_t now_unix) const {
+  std::lock_guard<std::mutex> lock(mu_);
+  int n = 0;
+  for (const auto &node : nodes_) {
+    auto it = first_heard_.find(node.long_address);
+    if (it != first_heard_.end() && now_unix - it->second < NEW_FOR_S && node.cca_string_label.empty()) n++;
+  }
+  return n;
+}
+
+std::vector<int64_t> Monitor::expected_last_heard() const {
+  std::lock_guard<std::mutex> lock(mu_);
+  std::vector<int64_t> out;
+  for (const auto &n : nodes_)
+    if (!n.cca_string_label.empty() && !n.known) out.push_back(n.last_heard_unix);
+  return out;
+}
+
+int64_t Monitor::last_report_unix() const {
+  std::lock_guard<std::mutex> lock(mu_);
+  int64_t newest = 0;
+  for (const auto &p : panels_) newest = std::max(newest, p.updated_unix_ms / 1000);
+  return newest;
+}
+
 std::vector<Node> Monitor::nodes() const {
   std::lock_guard<std::mutex> lock(mu_);
   return nodes_;
+}
+
+esphome::tigo_monitor::link::LinkStats Monitor::links() const {
+  esphome::tigo_monitor::link::LinkStats copy;
+  {
+    std::lock_guard<std::mutex> lock(mu_);
+    copy = links_;
+  }
+  // An optimizer not heard since midnight reads today's zeros, not
+  // yesterday's counts.
+  copy.roll(local_day());
+  return copy;
 }
 
 BusStats Monitor::stats() const {
@@ -370,11 +573,134 @@ bool Monitor::delete_node(const std::string &addr) {
     found = true;
     break;
   }
+  links_.erase(addr);
   if (found) {
     dirty_ = true;
     save_locked_();
   }
   return found;
+}
+
+bool Monitor::forget_optimizer(const std::string &barcode) {
+  std::lock_guard<std::mutex> lock(mu_);
+  bool found = false;
+  auto node = std::find_if(nodes_.begin(), nodes_.end(), [&](const Node &n) { return n.long_address == barcode; });
+  if (node != nodes_.end()) {
+    std::string addr = node->addr;
+    nodes_.erase(node);
+    auto panel = std::find_if(panels_.begin(), panels_.end(), [&](const Panel &p) { return p.addr == addr; });
+    if (panel != panels_.end()) panels_.erase(panel);
+    links_.erase(addr);
+    found = true;
+  }
+  auto parked = std::remove_if(parked_cca_.begin(), parked_cca_.end(), [&](const Node &n) { return n.long_address == barcode; });
+  if (parked != parked_cca_.end()) {
+    parked_cca_.erase(parked, parked_cca_.end());
+    found = true;
+  }
+  if (found) {
+    dirty_ = true;
+    save_locked_();
+  }
+  return found;
+}
+
+std::vector<esphome::tigo_monitor::layout::Assignment> Monitor::resolve_layout(
+    const std::vector<LayoutPanel> &panels) const {
+  std::lock_guard<std::mutex> lock(mu_);
+  auto upper = [](std::string s) {
+    for (char &c : s) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+    return s;
+  };
+  std::vector<esphome::tigo_monitor::layout::Assignment> out;
+  for (const auto &lp : panels) {
+    std::string serial = upper(lp.serial);
+    for (const auto &n : nodes_) {
+      if (n.long_address.size() < 6) continue;
+      if (serial.find(upper(n.long_address.substr(n.long_address.size() - 6))) == std::string::npos) continue;
+      out.push_back({n.long_address, lp.label, lp.string_label, lp.mppt});
+      break;
+    }
+  }
+  return out;
+}
+
+int Monitor::set_assignments(const std::vector<esphome::tigo_monitor::layout::Assignment> &as,
+                             bool clear_unlisted) {
+  std::lock_guard<std::mutex> lock(mu_);
+  std::map<std::string, const esphome::tigo_monitor::layout::Assignment *> by_bc;
+  for (const auto &a : as) by_bc[a.barcode] = &a;
+  int matched = 0;
+  for (auto &n : nodes_) {
+    if (n.long_address.empty()) continue;
+    auto it = by_bc.find(n.long_address);
+    if (it != by_bc.end()) {
+      n.cca_label = it->second->label;
+      n.cca_string_label = it->second->string_label;
+      n.cca_mppt_label = it->second->mppt_label;
+      matched++;
+    } else if (clear_unlisted) {
+      n.cca_label.clear();
+      n.cca_string_label.clear();
+      n.cca_mppt_label.clear();
+    } else {
+      continue;
+    }
+    for (auto &p : panels_)
+      if (p.addr == n.addr) p.label = n.cca_label;
+  }
+  string_peaks_.clear();
+  dirty_ = true;
+  save_locked_();
+  return matched;
+}
+
+bool Monitor::take_place(const std::string &old_bc, const std::string &new_bc, std::string &why) {
+  std::lock_guard<std::mutex> lock(mu_);
+  Node *to = nullptr, *from = nullptr;
+  for (auto &n : nodes_) {
+    if (n.long_address == new_bc) to = &n;
+    if (n.long_address == old_bc) from = &n;
+  }
+  auto parked = std::find_if(parked_cca_.begin(), parked_cca_.end(),
+                             [&](const Node &p) { return p.long_address == old_bc; });
+  if (!to) {
+    why = "the new optimizer isn't in the node table yet";
+    return false;
+  }
+  if (!to->cca_string_label.empty() || !to->cca_label.empty()) {
+    why = "the new optimizer has a place already";
+    return false;
+  }
+  const Node *src = from && !from->cca_string_label.empty() ? from : parked != parked_cca_.end() ? &*parked : nullptr;
+  if (!src || src->cca_string_label.empty()) {
+    why = "the old optimizer had no place";
+    return false;
+  }
+  to->cca_label = src->cca_label;
+  to->cca_string_label = src->cca_string_label;
+  to->cca_mppt_label = src->cca_mppt_label;
+  if (from) {
+    from->cca_label.clear();
+    from->cca_string_label.clear();
+    from->cca_mppt_label.clear();
+  }
+  if (parked != parked_cca_.end()) parked_cca_.erase(parked);
+  for (auto &p : panels_)
+    if (p.addr == to->addr) p.label = to->cca_label;
+  string_peaks_.clear();
+  dirty_ = true;
+  save_locked_();
+  return true;
+}
+
+std::vector<esphome::tigo_monitor::layout::Assignment> Monitor::current_assignments() const {
+  std::lock_guard<std::mutex> lock(mu_);
+  std::vector<esphome::tigo_monitor::layout::Assignment> out;
+  for (const auto &n : nodes_)
+    if (!n.long_address.empty())
+      out.push_back({n.long_address, n.cca_label, n.cca_string_label, n.cca_mppt_label});
+  return out;
 }
 
 Monitor::ImportResult Monitor::import_nodes(const std::vector<Node> &in) {
@@ -470,15 +796,46 @@ void Monitor::tick() {
   }
 }
 
+// Waits for the write, for the save at shutdown.
 bool Monitor::save() {
-  std::lock_guard<std::mutex> lock(mu_);
-  dirty_ = true;
-  return save_locked_();
+  {
+    std::lock_guard<std::mutex> lock(mu_);
+    dirty_ = true;
+    save_locked_();
+  }
+  std::unique_lock<std::mutex> lock(write_mu_);
+  write_cv_.wait(lock, [this] { return !has_pending_ && !writing_; });
+  return !write_failed_;
+}
+
+json Monitor::loss_days_json_locked_() const {
+  json out = json::object();
+  for (const auto &day : loss_book_.days()) {
+    json d = json::object();
+    for (const auto &kv : day.second) d[kv.first] = {kv.second.first, kv.second.second};
+    out[day.first] = d;
+  }
+  return out;
+}
+
+json Monitor::join_log_json_locked_() const {
+  json out = json::array();
+  for (const auto &e : join_log_) out.push_back({e.addr, e.unix_s, e.parent, e.nwid});
+  return out;
 }
 
 bool Monitor::save_locked_() {
   last_save_ = Clock::now();
+  if (write_failed_.exchange(false)) dirty_ = true;
   if (!dirty_) return true;
+  // Today's reports and losses so far: the last noted before midnight stand
+  // as the day's.
+  if (!today_.empty()) {
+    for (const auto &kv : links_.links())
+      if (kv.second.day == local_day() && kv.second.reports_today)
+        loss_book_.note(today_, kv.first, kv.second.reports_today, kv.second.lost_today);
+    loss_book_.prune(LOSS_DAYS);
+  }
   json nodes = json::array();
   for (const auto &n : nodes_) {
     nodes.push_back({{"addr", n.addr},
@@ -490,7 +847,10 @@ bool Monitor::save_locked_() {
                      {"cca_mppt_label", n.cca_mppt_label},
                      {"cca_channel", n.cca_channel},
                      {"cca_object_id", n.cca_object_id},
-                     {"cca_validated", n.cca_validated}});
+                     {"cca_validated", n.cca_validated},
+                     {"last_heard_unix", n.last_heard_unix},
+                     {"last_roster_unix", n.last_roster_unix},
+                     {"known", n.known}});
   }
   json history = json::array();
   for (const auto &d : history_) history.push_back({d.first, d.second});
@@ -498,9 +858,30 @@ bool Monitor::save_locked_() {
   for (const auto &kv : saved_peaks_) peaks[kv.first] = kv.second;  // not seen since start
   for (const auto &p : panels_)
     if (!p.barcode.empty()) peaks[p.barcode] = p.peak_power;
+  json first = json::object();
+  for (const auto &kv : first_heard_) first[kv.first] = kv.second;
+  // Where each optimizer last joined the mesh, and when.
+  json joins = json::array();
+  for (const auto &kv : links_.links())
+    if (kv.second.last_join_s)
+      joins.push_back({{"addr", kv.first}, {"parent", kv.second.parent}, {"nwid", kv.second.nwid}, {"unix", kv.second.last_join_s}});
+  // And a day of each one's signal, which the mesh map draws.
+  json rssi = json::array();
+  const int64_t now_s = unix_ms() / 1000;
+  for (const auto &kv : links_.links()) {
+    std::string b = links_.rssi_dump(kv.first, now_s);
+    if (!b.empty()) rssi.push_back({{"addr", kv.first}, {"to", now_s / esphome::tigo_monitor::link::BUCKET_S}, {"b", b}});
+  }
   json j = {{"version", 1},     {"nodes", nodes},           {"energy_kwh", energy_kwh_}, {"energy_in_kwh", energy_in_kwh_}, {"today_in_kwh", today_in_kwh_}, {"peaks", peaks},
-            {"today", today_},  {"today_kwh", today_kwh_}, {"daily_kwh", history}};
-  if (!write_file_atomic(state_path_, j.dump(1) + "\n")) return false;
+            {"today", today_},  {"today_kwh", today_kwh_}, {"daily_kwh", history},
+            {"seen_barcodes", seen_barcodes_}, {"seen_since", seen_since_}, {"first_heard", first}, {"joins", joins}, {"rssi_24h", rssi},
+            {"tap_names", tap_names_}, {"loss_days", loss_days_json_locked_()}, {"join_log", join_log_json_locked_()}};
+  {
+    std::lock_guard<std::mutex> lock(write_mu_);
+    pending_ = j.dump(1) + "\n";
+    has_pending_ = true;
+  }
+  write_cv_.notify_all();
   dirty_ = false;
   return true;
 }
@@ -528,6 +909,27 @@ bool Monitor::load() {
     if (d.is_array() && d.size() == 2 && d[0].is_string() && d[1].is_number())
       history_.emplace_back(d[0].get<std::string>(), d[1].get<double>());
   }
+  for (const auto &e : j.value("joins", json::array()))
+    if (e.is_object() && !e.value("addr", "").empty())
+      links_.on_join(e.value("addr", ""), e.value("unix", static_cast<int64_t>(0)), e.value("parent", ""), e.value("nwid", ""));
+  for (const auto &e : j.value("rssi_24h", json::array()))
+    if (e.is_object() && !e.value("addr", "").empty() && e.value("to", 0) > 0)
+      links_.rssi_restore(e.value("addr", ""), e.value("to", 0), e.value("b", ""));
+  loss_book_ = {};
+  const json losses = j.value("loss_days", json::object());
+  for (const auto &day : losses.items())
+    if (day.value().is_object())
+      for (const auto &kv : day.value().items())
+        if (kv.value().is_array() && kv.value().size() == 2 && kv.value()[0].is_number_unsigned() && kv.value()[1].is_number_unsigned())
+          loss_book_.restore(day.key(), kv.key(), kv.value()[0].get<uint32_t>(), kv.value()[1].get<uint32_t>());
+  join_log_.clear();
+  for (const auto &e : j.value("join_log", json::array()))
+    if (e.is_array() && e.size() == 4 && e[0].is_string() && e[1].is_number_integer() && e[2].is_string() && e[3].is_string())
+      join_log_.push_back({e[0].get<std::string>(), e[1].get<int64_t>(), e[2].get<std::string>(), e[3].get<std::string>()});
+  tap_names_.clear();
+  const json names = j.value("tap_names", json::object());
+  for (const auto &kv : names.items())
+    if (kv.value().is_string() && kv.key().size() == 4) tap_names_[kv.key()] = kv.value().get<std::string>();
   nodes_.clear();
   for (const auto &e : j.value("nodes", json::array())) {
     if (!e.is_object()) continue;
@@ -543,7 +945,26 @@ bool Monitor::load() {
     n.cca_channel = e.value("cca_channel", "");
     n.cca_object_id = e.value("cca_object_id", "");
     n.cca_validated = e.value("cca_validated", false);
+    n.last_heard_unix = e.value("last_heard_unix", static_cast<int64_t>(0));
+    n.last_roster_unix = e.value("last_roster_unix", static_cast<int64_t>(0));
+    n.known = e.value("known", false);
     nodes_.push_back(std::move(n));
+  }
+  // Before seen_barcodes was kept, the node table was all it had heard, and
+  // long enough ago that a barcode heard now is news.
+  seen_barcodes_.clear();
+  first_heard_.clear();
+  if (j.contains("seen_barcodes") && j["seen_barcodes"].is_array()) {
+    for (const auto &b : j["seen_barcodes"])
+      if (b.is_string()) seen_barcodes_.insert(b.get<std::string>());
+    seen_since_ = j.value("seen_since", static_cast<int64_t>(0));
+    const json first = j.value("first_heard", json::object());  // items() of a temporary would dangle
+    for (const auto &kv : first.items())
+      if (kv.value().is_number_integer()) first_heard_[kv.key()] = kv.value().get<int64_t>();
+  } else {
+    for (const auto &n : nodes_)
+      if (!n.long_address.empty()) seen_barcodes_.insert(n.long_address);
+    seen_since_ = seen_barcodes_.empty() ? 0 : 1;
   }
   LOGI("state: %zu nodes, %.3f kWh", nodes_.size(), energy_kwh_);
   return true;

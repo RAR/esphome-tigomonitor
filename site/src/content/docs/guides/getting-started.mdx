@@ -114,10 +114,10 @@ without a cable.
 
 **Already running an older version?** Two things to know.
 
-**Export your node table first** — web UI → Nodes → Export. Changing the flash
+**Export your node table first** — web UI → Devices → Export. Changing the flash
 layout moves the region holding everything you've set on the device, and the
 old contents don't move with it: panel names, inverter and string renames,
-per-string ratings, the settings under Tools, and a saved CCA address. Nodes →
+per-string ratings, the settings under Settings, and a saved CCA address. Devices →
 Import restores the lot afterwards, topology overrides included. Anything set
 in YAML comes back on its own.
 
@@ -167,7 +167,7 @@ Out of the box the device knows there *is* a panel, but not that it's "South Roo
    `cloud_import: true` in your config.
 2. **Read it from the CCA.** If your CCA is on older firmware (before 4.0.4), the
    device can ask it directly over your network.
-3. **Type them in.** The Tools page lets you name everything by hand. Tedious
+3. **Type them in.** The Topology page lets you name everything by hand. Tedious
    with 30 panels, but it always works.
 
 Details for all three: [Configuration guide](/esphome-tigomonitor/guides/configuration/).

@@ -12,8 +12,18 @@ struct MqttSettings {
   int port = 1883;
   std::string username;
   std::string password;
+  // Off: the readings still go out on the state topics, but Home Assistant
+  // is not told about them, and the configs sent before are cleared.
+  bool discovery = true;
   std::string discovery_prefix = "homeassistant";
   std::string base_topic = "tigomonitor";
+  // A standby that's standing by publishes only its own status unless this
+  // is on; then its readings too, though Home Assistant isn't told of its
+  // panels until it takes the bus over.
+  bool standby_panels = false;
+  // A PV output switch in Home Assistant (<base>/pv/set). Off by default:
+  // anyone who can publish to the broker could turn the array off with it.
+  bool pv_switch = false;
 };
 
 struct Settings {
@@ -22,17 +32,43 @@ struct Settings {
   // USB serial adapter, then the Pi's own UART; the SD card image starts there.
   std::string serial_port;
   int baud_rate = 38400;
+  // "listen" (the default): only read the bus, beside a CCA. "master": run
+  // the bus in the CCA's place, with the CCA unplugged (bus_master.h).
+  // "standby": listen while another master runs the bus, and take it over
+  // once none has been heard for standby_takeover_s.
+  std::string bus_role = "listen";
+  // 2-60; the preferred of two standbys has the shorter time. 3 s is for
+  // monitors standing by for each other. Beside a working CCA it wants 30 s
+  // or more: a rebooting CCA is quiet for longer than 3 s, and a CCA never
+  // yields, so the two would talk over each other until the standby hears it.
+  int standby_takeover_s = 3;
+  bool master_bench = false;    // also send the reads a bench TAP answers
+  bool master_startup = false;  // re-address and bring up a TAP found at the factory address
+  // Also send the CCA's 0x41s, its hourly 0x0B00 and 0x22s, and its 0x26 walks.
+  bool master_housekeeping = false;
+  bool master_queries = false;           // the CCA's 0x06 reads to optimizers
+  bool master_optimizer_writes = false;  // and the two writes its answers call for
+  bool master_read_tap_config = false;   // the bring-up's GatewayCfg read, once at start
+  bool master_table_writes = false;      // let the owner's add write a record to the TAP's table
+  bool master_adopt_taps = false;        // a new TAP at the factory address starts the CCA's herd (needs startup)
+  bool discovery_auto = false;           // renew the join window only while a layout optimizer is missing
+  int gateway_id = 0x1201;    // the TAP's RS485 id, as the CCA addresses it (gateway_id_ok)
   float power_calibration = 1.0f;
   // Plenty of RAM here, so the node table is sized for any real site rather
   // than to the panel count, as number_of_devices has to be on the ESP32.
   int max_nodes = 512;
   int publish_interval_s = 30;
-  // 0: port 80, or 8080 when something else already has 80.
+  // 0: port 80, or 8080 when something else already has 80; with HTTPS,
+  // 443 or 8443.
   int web_port = 0;
   // A login for the web UI and API, as web_username/web_password on the
   // ESP32. An empty password leaves it open to the LAN, the default there too.
   std::string web_username = "admin";
   std::string web_password;
+  // HTTPS: a PEM certificate (with its chain, as fullchain.pem) and its
+  // key. Both empty: plain HTTP.
+  std::string tls_cert;
+  std::string tls_key;
   // History snapshots. The ESP32 takes one every 30 minutes to spare its
   // flash; an SD card can take one a minute and keep two years of them.
   int history_interval_min = 1;
@@ -45,10 +81,25 @@ struct Settings {
   bool sync_cca_on_startup = true;
   std::string cca_ip;  // CCA firmware before 4.0.4 only
   std::string device_id;  // empty: the hostname
+  // The CCA Info and Tigo Cloud pages in the web UI's sidebar, for a site
+  // without a CCA or a Tigo account. Hiding one stops nothing behind it.
+  bool show_cca_page = true;
+  bool show_cloud_page = true;
   MqttSettings mqtt;
 };
 
+// 1-7FFE, and not 1234 or 1235: the bring-up's hop moves the TAP to the id
+// one up, which must be neither the factory address nor past the top.
+// The roles that transmit, and so run a BusMaster.
+inline bool runs_bus(const Settings &s) { return s.bus_role == "master" || s.bus_role == "standby"; }
+inline bool standby_takeover_ok(int s) { return s >= 2 && s <= 60; }
+
+inline bool gateway_id_ok(int id) { return id >= 1 && id <= 0x7FFE && id != 0x1234 && id != 0x1235; }
+
 Settings load_settings(const std::string &path);
+// a and b differ in nothing but the page switches above, which only the web
+// UI reads: applying them needs nothing restarted or reconnected.
+bool differ_only_in_pages(const Settings &a, const Settings &b);
 bool save_settings(const std::string &path, const Settings &s);
 
 }  // namespace tigod

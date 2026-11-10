@@ -1,0 +1,56 @@
+---
+title: ESP32 or Raspberry Pi?
+description: What each build of Tigo Monitor can do — the ESP32 firmware and the Raspberry Pi and Linux package side by side, from setup and Home Assistant to history, the mesh map and running the bus in the CCA's place.
+---
+
+Tigo Monitor comes in two builds that decode the same bus the same way. The
+**ESP32** build is ESPHome firmware for a small board at the Tigo cabinet,
+and the main way to run it. The **Raspberry Pi** build is a Linux package
+for a Pi, another Debian or Ubuntu machine, or Docker. It is newer, has run
+on one installation so far, and is where the newer features land first.
+
+Pick the ESP32 if you already use ESPHome, want the cheapest box, or want
+the setup the most people run. Pick the Pi if you'd rather not compile
+anything, want to replace a failed CCA, or want the mesh map and bus tools
+below.
+
+## Setting it up
+
+|  | ESP32 | Raspberry Pi and Linux |
+|---|---|---|
+| Hardware | An ESP32 with PSRAM and an RS485 transceiver, about $30 ([Start Here](/esphome-tigomonitor/guides/getting-started/)). Boards without PSRAM run sensors only, without the web UI. | A Pi with a USB RS485 adapter or an RS485 HAT, or any Linux machine reading the bus from an [ESP32 bridge](/esphome-tigomonitor/guides/raspberry-pi/#read-the-bus-over-the-network) over Wi-Fi. |
+| Install | Write a YAML config ([Config Builder](/esphome-tigomonitor/config-builder/)), compile and flash with ESPHome. | Install one package, or [run it in Docker](/esphome-tigomonitor/guides/raspberry-pi/#run-it-in-docker). Nothing to compile. |
+| Settings | In YAML, and some under Settings → General. | All in the browser, under Settings. |
+| Home Assistant | The ESPHome integration, with the sensors you list in YAML. | MQTT discovery: each panel its own device, as soon as the gateway announces it. |
+| Status | The main build. | [Experimental](/esphome-tigomonitor/guides/raspberry-pi/): one 40-panel installation so far. |
+
+## What you see
+
+|  | ESP32 | Raspberry Pi and Linux |
+|---|---|---|
+| Dashboard, Topology, Devices, CCA Info, Tigo Cloud | Yes | Yes |
+| [Laying out the array by hand](/esphome-tigomonitor/guides/web-server/#laying-out-the-array-by-hand) | Yes, or inverters in YAML | Yes |
+| History | On the board's flash: a reading every 30 minutes by default, about two years ([Saving History to Flash](/esphome-tigomonitor/guides/tsdb-integration/)). | On the SD card: a reading every minute, for two years. |
+| CCA Info from the CCA | Over Bluetooth with `cca_source: ble`, or HTTP for CCA firmware before 4.0.4. | Over the Pi's Bluetooth, finding the nearest CCA by itself; HTTP for firmware before 4.0.4. |
+| A display on the board | Optional, on an AtomS3R. | No |
+| [New and missing optimizers](/esphome-tigomonitor/guides/raspberry-pi/#new-and-missing-optimizers) | No | A notice for a new one, tags for missing ones, and both counts in Home Assistant. |
+| Optimizer and TAP firmware, optimizer settings | No | On the Devices page, from what the bus carries. |
+| [Mesh map](/esphome-tigomonitor/guides/raspberry-pi/#see-which-optimizers-have-a-weak-link) | No | Each optimizer's link: reports lost today, signal over a day, and which optimizer it joined through. |
+| Bus traffic | No | Bus → Traffic: each request on the bus with its reply and what it means. |
+| The service's log | Through ESPHome's logs. | Diagnostics → Logs, in the web UI. |
+| [HTTPS](/esphome-tigomonitor/guides/raspberry-pi/#use-https) | No | Yes, with your certificate. |
+| Web UI password | Yes | Yes |
+| `/api/health` for an uptime monitor | Up or not, with uptime and memory. | [Also what's wrong](/esphome-tigomonitor/guides/raspberry-pi/#watch-it-from-a-monitor): no bus, no master, MQTT down. |
+
+## Running the bus in the CCA's place
+
+Both builds can poll the TAP themselves, so the CCA can come off the bus.
+Only the Pi has done it on a roof.
+
+|  | ESP32 | Raspberry Pi and Linux |
+|---|---|---|
+| [Master or standby](/esphome-tigomonitor/guides/raspberry-pi/#run-the-bus-in-the-ccas-place) | `tigo_master:` in YAML, not yet run on hardware. | Settings → Bus. The only master on one 40-panel roof since 2026-10-29. |
+| Bring up the TAP, housekeeping, query the optimizers, let queries change settings | Yes, in YAML | Yes, switches on Settings → Bus |
+| Read the TAP's radio settings, open discovery only when needed | No | Yes |
+| [Turn the array's output off](/esphome-tigomonitor/guides/raspberry-pi/#turn-the-arrays-output-off) | `pv_output:`, then a switch on the Bus control page | A switch on Bus control |
+| More than one TAP | No: a second TAP on the bus is reported and left alone. | No, the same. |

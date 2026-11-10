@@ -6,13 +6,21 @@
 // the ESP32 (#74). Thread-safe: the serial thread feeds it, the publisher and
 // web server read snapshots.
 
+#include "link_stats.h"
+#include "mesh_history.h"
+#include "tigo_layout.h"
 #include "tigo_protocol.h"
 
+#include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <cstdint>
 #include <map>
 #include <mutex>
+#include <nlohmann/json.hpp>
 #include <string>
+#include <thread>
+#include <set>
 #include <utility>
 #include <vector>
 
@@ -30,6 +38,14 @@ struct Node {
   std::string cca_label, cca_string_label, cca_mppt_label, cca_channel, cca_object_id;
   bool cca_validated = false;
   bool seen_in_frame27 = false;  // runtime only
+  // When it last reported a reading, and when the TAP's roster (a Frame 27)
+  // last listed it: unix s, saved to the hour. 0: not yet.
+  int64_t last_heard_unix = 0;
+  int64_t last_roster_unix = 0;
+  // The owner marked it known: listed by the TAP but not reporting, and
+  // expected not to (one that never joined, say). Not missing, not counted.
+  // Cleared by its first reading.
+  bool known = false;
 };
 
 struct Panel {
@@ -75,6 +91,7 @@ struct BusStats {
 class Monitor {
  public:
   Monitor(std::string state_path, float power_calibration, size_t max_nodes);
+  ~Monitor();  // writes any state still waiting
 
   void feed(const char *data, size_t len);
 
@@ -92,6 +109,47 @@ class Monitor {
 
   std::vector<Panel> panels() const;
   std::vector<Node> nodes() const;
+  // Each optimizer's link: its TAP, reports lost today, RSSI over a day.
+  esphome::tigo_monitor::link::LinkStats links() const;
+  // A new optimizer: a barcode first heard (in a Frame 27) more than a day
+  // after this monitor first heard any, so a fresh install's own panels
+  // aren't news. When each was first heard, by barcode (unix s).
+  std::map<std::string, int64_t> first_heard() const;
+  // Those heard in the last NEW_FOR_S that no string holds yet: the ones to
+  // place in the layout. A replacement shows up here.
+  int new_optimizers(int64_t now_unix) const;
+  static const int64_t NEW_AFTER_S = 86400;
+  static const int64_t NEW_FOR_S = 7 * 86400;
+  // Missing: a node with a barcode that hasn't reported for MISSING_AFTER_S,
+  // or that the roster stopped listing OFF_ROSTER_AFTER_S before its newest
+  // entry. A dead or removed optimizer shows up here.
+  int missing_optimizers(int64_t now_unix) const;
+  // For automatic discovery (discovery_policy.h): when each optimizer placed
+  // in the layout (a string label, not marked known) last reported, and the
+  // newest report from any panel (unix s, 0 = none).
+  std::vector<int64_t> expected_last_heard() const;
+  int64_t last_report_unix() const;
+  // Marks the node with this barcode known (or not). False: no such node.
+  bool set_known(const std::string &barcode, bool known);
+  // A name for a TAP, by its address ("1201"), shown wherever the TAP is;
+  // an empty name forgets it. False for an address that isn't 4 hex digits
+  // or a name over 32 characters.
+  bool set_tap_name(const std::string &tap, const std::string &name);
+  std::map<std::string, std::string> tap_names() const;
+  // Reports and losses by day and optimizer, the last LOSS_DAYS days.
+  std::map<std::string, std::map<std::string, std::pair<uint32_t, uint32_t>>> loss_days() const;
+  // The joins of the last JOIN_DAYS days, oldest first.
+  std::vector<esphome::tigo_monitor::mesh_history::JoinEntry> join_log() const;
+  static const size_t LOSS_DAYS = 30;
+  static const int64_t JOIN_DAYS = 30;
+  static const int64_t MISSING_AFTER_S = 3 * 86400;
+  static const int64_t OFF_ROSTER_AFTER_S = 86400;
+  static const int64_t SEEN_SAVE_EVERY_S = 3600;  // how stale a saved last_heard/last_roster may be
+  // Added to the new optimizer log line (main.cpp's new_optimizer_note).
+  void set_new_optimizer_note(std::string note) {
+    std::lock_guard<std::mutex> lock(mu_);
+    new_note_ = std::move(note);
+  }
   BusStats stats() const;
   double energy_kwh() const;    // lifetime, panel output
   double energy_in_kwh() const;  // lifetime, panel input
@@ -133,18 +191,41 @@ class Monitor {
   // 04C05B4000BBCC02 -> serial "4-BBCC02K"), which is the only link between
   // the two, so that is the match — as in the firmware.
   int apply_layout(const std::vector<LayoutPanel> &panels);
+  // Where apply_layout would put each panel it matches, without writing.
+  std::vector<esphome::tigo_monitor::layout::Assignment> resolve_layout(const std::vector<LayoutPanel> &panels) const;
+  // The Topology editor's: places nodes by exact barcode. With clear_unlisted,
+  // a node the list leaves out loses its panel name, string and MPPT.
+  // Returns how many nodes matched.
+  int set_assignments(const std::vector<esphome::tigo_monitor::layout::Assignment> &as, bool clear_unlisted);
+  // A replaced optimizer (System setup): the new barcode's node takes the old
+  // one's place (name, string, MPPT), from the old node or, once its address
+  // has passed to the new one, from its parked labels. False, changing
+  // nothing, with why: the new one isn't in the node table yet, has a place
+  // already, or the old one had none.
+  bool take_place(const std::string &old_bc, const std::string &new_bc, std::string &why);
+  // Every node that has a barcode, as the labels it carries now.
+  std::vector<esphome::tigo_monitor::layout::Assignment> current_assignments() const;
   // Drops one node (and its panel), as the Nodes page's delete does.
   bool delete_node(const std::string &addr);
+  // An optimizer the owner took off the TAP's list (System setup's retire,
+  // or the old one of a replace once the new one has its place): its node
+  // and panel, by barcode, and any labels parked for it. History keeps it.
+  // An address that has passed to another optimizer isn't touched.
+  bool forget_optimizer(const std::string &barcode);
 
  private:
   void on_frame_(const std::string &raw);
-  void on_power_packet_(const std::string &packet);
+  void on_power_packet_(const std::string &packet, uint16_t tap);
+  void on_netdiag_(const std::string &packet);
   void on_frame27_(const std::string &hex);
   Panel *find_panel_(const std::string &addr);
   float total_power_locked_(bool input = false) const;
   std::vector<StringTotals> strings_locked_() const;
   bool night_locked_() const;
   bool save_locked_();
+  nlohmann::json loss_days_json_locked_() const;
+  nlohmann::json join_log_json_locked_() const;
+  void writer_loop_();
 
   std::string state_path_;
   float power_calibration_;
@@ -155,6 +236,11 @@ class Monitor {
   std::vector<Panel> panels_;
   std::vector<Node> nodes_;
   std::vector<Node> parked_cca_;
+  esphome::tigo_monitor::link::LinkStats links_;
+  // Each optimizer's reports and losses by day, and the joins of the last
+  // JOIN_DAYS days, oldest first: the mesh over time.
+  esphome::tigo_monitor::mesh_history::LossBook loss_book_;
+  std::vector<esphome::tigo_monitor::mesh_history::JoinEntry> join_log_;
   BusStats stats_;
   double energy_kwh_ = 0;
   double energy_in_kwh_ = 0, today_in_kwh_ = 0;
@@ -170,6 +256,25 @@ class Monitor {
   Clock::time_point last_tick_{};
   Clock::time_point last_save_{};
   bool dirty_ = false;
+  // Every barcode this monitor has heard, since seen_since_; and when each
+  // one heard after the first day was first heard.
+  std::set<std::string> seen_barcodes_;
+  int64_t seen_since_ = 0;
+  std::map<std::string, std::string> tap_names_;  // by address, upper-case hex
+  std::map<std::string, int64_t> first_heard_;
+  std::string new_note_;
+  void note_barcode_(const std::string &barcode, const std::string &addr);
+
+  // state.json is written on its own thread, outside mu_: an fsync on a slow
+  // SD card took 0.9 s, and in the master role feed() and tick() run on the
+  // loop that drives the bus. save_locked_() hands over the text; the newest
+  // waiting copy wins.
+  std::mutex write_mu_;
+  std::condition_variable write_cv_;
+  std::string pending_;
+  bool has_pending_ = false, writing_ = false, stop_writer_ = false;
+  std::atomic<bool> write_failed_{false};
+  std::thread writer_;
 };
 
 }  // namespace tigod

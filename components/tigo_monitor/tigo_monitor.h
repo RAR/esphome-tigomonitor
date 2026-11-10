@@ -21,8 +21,10 @@
 #include <string>
 #include <limits>
 #include <new>
+#include <optional>
 
 #include "tigo_history.h"
+#include "tigo_layout.h"
 #include "tigo_protocol.h"
 
 #ifdef USE_ESP_IDF
@@ -535,6 +537,31 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   // % of rated for individual panels and total nameplate roll-ups for
   // the string. Pass 0 to clear the override.
   bool set_string_panel_rating(const std::string &canonical, uint16_t rating_w);
+
+  // ---- The Topology editor (tigo_layout_store.cpp). Rules in tigo_layout.h,
+  // shared with the Raspberry Pi build. All of these take the state lock.
+  // The tree GET /api/layout serves, whether the layout is the user's own,
+  // and what (if anything) waits for them.
+  layout::Tree layout_tree(bool &manual, std::string &pending_source, size_t &pending_changes);
+  // Saves a layout from the editor; "" or what is wrong with it.
+  std::string set_layout(const layout::Layout &l);
+  bool layout_manual() const;
+  // MPPT label -> its name from the Topology editor, for the MPPTs of the
+  // inverters in use that it renamed.
+  std::map<std::string, std::string> layout_mppt_names() const;
+  // Every node with a barcode, as the labels it carries now.
+  std::vector<layout::Assignment> current_assignments() const;
+  // An incoming layout: decides with layout::decide() and holds it if the
+  // user should choose. Applying is the caller's, as each source applies
+  // differently.
+  layout::Offer offer_layout(const char *source, std::vector<layout::Assignment> incoming,
+                             layout::InverterMppts inverters);
+  // GET /api/layout/pending. False when nothing waits.
+  bool layout_pending(std::string &source, std::vector<layout::Change> &changes, layout::InverterMppts &now,
+                      layout::InverterMppts &then);
+  // The user's answer: keep theirs, or use the incoming one. False when
+  // nothing waits.
+  bool resolve_layout_pending(bool use);
   
   // Public getters for web server access
   // NOTE: get_X() return references and are only safe from the main task (the
@@ -917,6 +944,27 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
     auto addr_it = this->barcode_sensor_addr_.find(barcode);
     if (addr_it != this->barcode_sensor_addr_.end()) (*target)[addr_it->second] = sensor;
   }
+  // The Topology editor's layout (tigo_layout_store.cpp). skeleton_ holds the
+  // inverters, and the MPPTs and strings no node carries; layout_manual_ that
+  // the user saved it, so later layouts wait for them.
+  struct HeldLayout {
+    std::string source;
+    std::vector<layout::Assignment> assignments;
+    layout::InverterMppts inverters;
+    uint32_t fp = 0;
+  };
+  layout::Layout skeleton_;
+  bool layout_manual_ = false;
+  layout::Declined layout_declined_;  // per source
+  std::optional<HeldLayout> held_layout_;
+  decltype(inverters_) yaml_inverters_;  // the YAML's, while a saved layout stands in for them
+  void load_layout_();
+  bool save_skeleton_();
+  layout::Layout current_skeleton_() const;
+  layout::InverterMppts inverter_mppts_() const;
+  void write_assignments_(const std::vector<layout::Assignment> &as, bool clear_unlisted);
+  void inverters_from_skeleton_();
+  void save_string_prefs_(const std::string &label, const std::string &display, uint16_t rating_w);
 
   sensor::Sensor* power_in_sum_sensor_ = nullptr;
   sensor::Sensor* power_out_sum_sensor_ = nullptr;

@@ -13,14 +13,21 @@ anyone who wants to pull the numbers into their own scripts.
 
 ## The pages you get
 
+The sidebar groups them by what you open them for: **Monitor** for watching
+the array, **Inspect** for looking into a problem, and **Control** for the
+pages that change something (Settings, and on the Raspberry Pi build System
+setup and Bus control).
+
 | Page | What it's for |
 |------|---------------|
 | **Dashboard** | The main view. A coloured tile per panel, grouped by string, so an underperforming panel stands out at a glance. Click any tile for that panel's detail and history. |
 | **History** | Charts of power and energy over the day, week, month or year. Only present if you enabled [history storage](/esphome-tigomonitor/guides/tsdb-integration/). |
-| **Topology** | Your array laid out as inverter → string → panel, with live readings. This is where you rename things and enter panel ratings. |
-| **Node Table** | The raw list of every panel the device has ever seen. You can export it to a file as a backup. |
-| **Tools** | Change settings, generate config, reset counters, restart the device. |
-| **Diagnostics** | Is it healthy? Memory, WiFi signal, how many messages it's missing. |
+| **Topology** | Your array laid out as inverter → string → panel, with live readings. This is where you rename things, enter panel ratings, and lay the array out by hand. |
+| **Devices** | The raw list of every panel the device has ever seen. You can export it to a file as a backup. On the Raspberry Pi build it also lists the TAP, each optimizer's and the TAP's firmware as heard on the bus, and any optimizer heard that the TAP doesn't list, such as a spare that still has your network's key: kept off the Dashboard and the mesh map as the CCA keeps its aliens, with **Forget** to clear it. |
+| **Settings** | Change settings, generate config, reset counters, restart the device. One tab per area; on the Raspberry Pi build, Bus, MQTT, Inverters and Web UI too. |
+| **Diagnostics** | Is it healthy? Memory, WiFi signal, how many messages it's missing. On the Raspberry Pi build, its Logs tab shows the service's log. |
+| **Bus traffic** | Raspberry Pi build only. Each request on the bus with its reply, how long the reply took and what it means, under a strip of the last 5 minutes, filtered by kind. A banner says if another device reconfigures the TAP. |
+| **Bus control** | While this monitor runs or stands by for the bus: the PV output and discovery window switches, and the bus master's health. |
 | **CCA Info** | What your Tigo box reports about itself. |
 | **Tigo Cloud** | Tigo's own view of your system, if you've connected your account. |
 
@@ -32,9 +39,11 @@ anyone who wants to pull the numbers into their own scripts.
 
 <ThemedShot name="topology" alt="Topology — your array as inverter, string and panel, with live readings." />
 
-<ThemedShot name="nodes" alt="Node Table — every panel the device has seen, sortable and filterable." />
+<ThemedShot name="nodes" alt="Devices — every panel the device has seen, sortable and filterable." />
 
 <ThemedShot name="diagnostics" alt="Diagnostics — memory, network, UART counters and time-series database stats." />
+
+<ThemedShot name="pi-devices" alt="Devices on the Raspberry Pi build — the TAP and its firmware above the optimizers, each with the firmware it reported on the bus." />
 
 These are generated from the current UI against synthetic data — no real
 install's serials, addresses or account details appear in them. They follow
@@ -62,9 +71,12 @@ it. You don't need any of it to use the dashboard.
 | Dashboard | `/app#dashboard` |
 | History | `/app#history` |
 | Topology | `/app#topology` |
-| Node Table | `/app#nodes` |
-| Tools | `/app#tools` |
+| Devices | `/app#nodes` |
+| Settings | `/app#settings` (the old `/app#tools` still works) |
 | Diagnostics | `/app#diagnostics` |
+| Diagnostics › Logs (Raspberry Pi) | `/app#logs` |
+| Bus (Raspberry Pi) | `/app#bus`: Control while the Pi runs the bus, else Traffic |
+| Bus › Control, › Traffic | `/app#busmaster`, `/app#buslog` |
 | CCA Info | `/app#cca` |
 | Tigo Cloud | `/app#cloudstatus` (only when `cloud_import` is set) |
 
@@ -85,6 +97,35 @@ When `cloud_import` is set and a Tigo cloud token is connected, a **cloud status
 Inverters and strings can be renamed live from the Topology view (✎ next to each label). The override is stored in NVS via ESPHome's `global_preferences` API and is keyed by canonical name (the YAML inverter name or CCA string label). YAML stays the source of truth for identity — overrides are purely display labels and are used wherever those names appear: Topology, Dashboard inverter cards, Dashboard alert text, embedded strings inside `/api/inverters`.
 
 Empty override = falls back to canonical.
+
+### Laying out the array by hand
+
+You don't need a CCA or a Tigo account to tell the monitor which panel is where. On the Topology page, **Edit layout** opens the layout for editing:
+
+- **Unassigned** at the top holds every panel the bus has reported that is in no string yet. A panel shows up there once the gateway has announced its barcode.
+- Drag panels into a string, between strings, within a string to reorder them, or back to Unassigned. On a phone or tablet, press and hold a panel for a moment to pick it up; a quick swipe still scrolls.
+- Move a whole string, panels and all, by the ⠿ handle beside its name: drop it on any MPPT, in this inverter or another. An MPPT moves the same way, with its strings, onto another inverter. Dropped on a string or MPPT, it goes in front of that one; dropped anywhere else in the block, it goes last. Inverters reorder by the same handle: drop one on another to put it in front, or on **+ Inverter** to put it last. The Dashboard and Topology list them in the order you save. A moved string keeps its name, so its panels keep theirs.
+- Hold a drag near the top or bottom of the window and the page scrolls, so a target further down the page is in reach on a phone.
+- **+ Inverter**, **+ MPPT** and **+ String** add the next free name (Inverter 2, string C). MPPTs are numbered within their inverter, so a second inverter starts again at MPPT 1. Inverter, MPPT and string names are edited in place, and an empty one can be deleted.
+- Panels are named after their string and position: the third panel in string A is **A3**. Rename the string to "East" and its panels become East1, East2, and so on. Panel names aren't edited one by one.
+- **Replace…** on an unassigned panel swaps it in for a placed one: it takes that panel's place in its string, and so its name, and the panel it replaced goes to Unassigned. The list puts the panels with no reading first, since the dead one is usually among them. Each panel's history stays with its own barcode, so the old optimizer's record isn't credited to the new one.
+- Live watts keep updating while you edit. Nothing is stored until **Save layout**, which sends the whole layout at once. **Cancel** throws your changes away, and leaving the page asks first if there are any.
+
+**A new optimizer** (a replacement, or one added) joins the gateway's network on its own and appears in Unassigned once the gateway announces its barcode. On the Raspberry Pi build, one first heard after the monitor's own first day is marked **New** for a week, on the Devices page and in the editor, until it's placed in a string. The Topology page says so too, and the log names it. In Home Assistant, the **New optimizers** sensor counts them, for an automation to tell you.
+
+The Raspberry Pi build also marks the other end. An optimizer with no reading for three days is tagged **Missing** on the Devices page, and one the TAP's roster has stopped listing is tagged **Not on the TAP**. Either usually means it died or was removed. The **Missing optimizers** sensor in Home Assistant counts both. Removing a dead one from the TAP's own list isn't done: the only commands for it can wipe the whole list, and a stale entry costs nothing but a little radio time. If you already know one isn't reporting, such as one that never joined, choose **Mark known** on its row: it shows as **known**, isn't flagged or counted as missing, and is left out of the panel counts here and on Topology. Its first reading clears the mark, and **Unmark** does it by hand. While the Pi runs the bus with queries on, it keeps each optimizer's last answers about its setup. Hover a name on the Devices page to see them. One whose configuration was never completed, as the CCA would on enrolling it, is tagged **Not set up**. A replacement put in since the CCA has gone may show it.
+
+A string keeps the label it was created with; renaming it changes only the name shown. MPPTs work the same way: each keeps a label no other MPPT has, which a node-table export shows, while the name you give it only has to be unique within its inverter. An MPPT dragged into an inverter that already has one by its name takes the next free number there. Per-string history and peaks follow that label, so a rename never loses them. Home Assistant entities are keyed on the panel's barcode, so moving or renaming a panel doesn't break them either.
+
+Names are limited to 32 characters, without `|`. On the ESP32 the inverters, MPPTs and strings are stored in 2 KB of flash; a save that doesn't fit is refused with a message saying so.
+
+**Once you save a layout, it's yours.** A CCA sync, a Tigo cloud import or a node-table import that would change it doesn't overwrite it. On the ESP32, neither does a YAML `inverters:` block that differs. The Topology page instead says where the other layout came from and how many panels it would move:
+
+- **Review** lists each panel's move.
+- **Keep mine** turns that layout down. The same layout won't ask again, so a daily CCA sync that never changes stays quiet. A different one will ask.
+- **Use theirs** takes it and hands the layout back to that source, as before you edited it.
+
+Until you save a layout by hand, every sync and import works exactly as it always has.
 
 ### Per-string panel nameplate
 
@@ -109,9 +150,9 @@ Click any heat tile on a desktop viewport (>768 px) to open a modal showing:
 
 Slot lookup uses `/api/panels` (barcode last-6 → tsdb slot) and is cached on first fetch. The modal is hidden via `@media (max-width: 768px)` on phones — it would be too cramped — so the heat tile cursor reverts to default on those viewports.
 
-### Sortable Node Table
+### Sortable device table
 
-Every column header on the Nodes view is clickable. Click cycles ascending / descending, with an arrow indicator (`↑` / `↓`) on the active column. Defaults:
+Every column header on the Devices page is clickable. Click cycles ascending / descending, with an arrow indicator (`↑` / `↓`) on the active column. Defaults:
 
 - Numeric columns (V, A, Power, Temp) sort **descending** on first click — "biggest first" is usually what you want.
 - Text columns and Age sort **ascending**.
@@ -119,7 +160,7 @@ Every column header on the Nodes view is clickable. Click cycles ascending / des
 
 Filters (search, string, state) are applied first; sort sees the filtered set.
 
-### Device Configuration (Tools view)
+### Device configuration (Settings › General)
 
 A handful of runtime knobs can be edited in the UI and persisted to the ESP32 (NVS) without reflashing: `power_calibration` (applied immediately — every power calc reads it live), `night_mode_timeout`, `reset_at_midnight`, `sync_cca_on_startup`, and `cca_ip`. The YAML values remain the **defaults**: at boot the codegen setters populate the members, then any stored overrides are overlaid on top. A field shows a **Revert** button (enabled only when the live value differs from the default) that clears the override and restores the YAML default — after which editing the YAML applies again. Backed by `GET`/`POST /api/config`. Structural settings (inverter layout, device count, ports, IDs) and auth (`api_token`/`web_*`) stay in YAML — the latter because NVS is plaintext-at-rest.
 
@@ -157,8 +198,10 @@ Conventions for the tables below:
 | `/api/strings` | Flat per-string aggregates incl. `display_label`, `panel_rating_w` |
 | `/api/inverters` | Hierarchical inverter rollups with embedded strings (each carries `display_label`, `panel_rating_w`) and inverter `display_name` |
 | `/api/nodes` | Node table with CCA metadata |
+| `/api/layout` | The Topology editor's tree: `inverters → mppts → strings → panels` (`barcode`, `addr`, `name`), plus `unplaced_mppts`, `unassigned`, `manual` (the layout is the user's) and `pending` (`null`, or `{source, changes}`) |
+| `/api/layout/pending` | A layout that arrived after the user's own: `{source, changes:[{barcode, now, then}], inverters_now, inverters_then}`, or `{pending: null}` |
 | `/api/cca` | CCA connection state + `device_info` (encoded JSON string from CCA) |
-| `/api/yaml?sensors=…&hub_sensors=…&grouping=panel\|mppt\|inverter\|none` | Generated YAML config (Tools view). `grouping` (default `none`) emits an `esphome.devices:` block and propagates `device_id:` to each child sensor at the chosen granularity |
+| `/api/yaml?sensors=…&hub_sensors=…&grouping=panel\|mppt\|inverter\|none` | Generated YAML config (Settings › YAML). `grouping` (default `none`) emits an `esphome.devices:` block and propagates `device_id:` to each child sensor at the chosen granularity |
 | `/api/tsdb/stats` | LittleFS partition + per-DB record counts (only when esp_tsdb is compiled in) |
 | `/api/history/power?range=day\|week\|month\|year` | System power/energy time series |
 | `/api/history/panel?slot=N&range=…` | Single-panel power time series |
@@ -183,6 +226,8 @@ Conventions for the tables below:
 | `POST /api/inverters/rename` | `{name, display_name}` | Set inverter display name. Empty `display_name` clears the override |
 | `POST /api/strings/rename` | `{label, display_label}` | Set string display name. Empty clears the override |
 | `POST /api/strings/rating` | `{label, rating_w}` | Set per-panel nameplate watts. `rating_w=0` clears |
+| `POST /api/layout` | `{inverters:[{name, display_name, mppts:[{label, strings:[{label, display_label, rating_w, panels:[barcode…]}]}]}]}` | Replaces the whole layout and marks it the user's. Panels by barcode, in order. `400 {error}` and nothing written if it isn't valid |
+| `POST /api/layout/pending` | `{action: "keep"\|"use"}` | Answers a waiting layout. `409` when nothing waits |
 | `POST /api/cca/refresh` | none | Triggers a fresh CCA query |
 | `POST /api/backlight` | `state=on\|off\|toggle` | Backlight control (units with backlight wired) |
 | `POST /api/config` | `{key,value}` or `{reset:key}` | Set + persist a runtime knob, or revert it to the YAML default |

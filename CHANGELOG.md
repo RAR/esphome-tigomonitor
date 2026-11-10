@@ -8,13 +8,167 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- **A Raspberry Pi build, as a package for Raspberry Pi OS (experimental).** A Pi Zero 2 W with an RS485 adapter or HAT runs the same panel decoding and the same web dashboard as the ESP32, with no ESPHome or YAML: install the `.deb` on 64-bit Raspberry Pi OS (trixie), Debian 13 or Ubuntu 24.04 and later, choose the adapter and set your MQTT broker in the web UI, and panels appear in Home Assistant through MQTT discovery. Its web UI can be given a password under Tools. History, Topology, Tigo cloud import, the CCA Info page (over the Pi's Bluetooth) and the ESP32's Home Assistant sensors work as on the ESP32. It has run on one 40-panel bus so far, where its readings matched the ESP32's — see [Raspberry Pi](https://rar.github.io/esphome-tigomonitor/guides/raspberry-pi/). ESP32 users have nothing to do.
-- **The Pi build can read the bus from an ESP32 at the cabinet, over Wi-Fi (experimental).** Choose **Network bridge (TCP)** under Tools and enter the bridge's address. `boards/example-t-can485-bridge.yaml` turns a LilyGO T-CAN485 into that bridge with [stream_server](https://github.com/oxan/esphome-stream-server). The bridge is wired so it cannot send anything onto the bus, and the monitor reconnects by itself when the bridge drops. Tested against a simulated bridge so far, not yet on a real bus — see [Raspberry Pi](https://rar.github.io/esphome-tigomonitor/guides/raspberry-pi/#read-the-bus-over-the-network).
-- **The Pi build as a Docker image (experimental).** `ghcr.io/rar/tigomonitord`, for arm64 and amd64, runs the same monitor in a container, set up from its web UI. It reads the bus from a network bridge or a USB adapter passed in with `--device`. Tested in Docker against a simulated bridge; the Bluetooth CCA page in a container hasn't been tried — see [Run it in Docker](https://rar.github.io/esphome-tigomonitor/guides/raspberry-pi/#run-it-in-docker).
+
 - **Per-panel sensors can now be keyed by `long_address:` (the panel's barcode) instead of `address:`.** A panel's short address is reassigned by the gateway at commissioning and can change wholesale on any re-commissioning — the same instability that #74 fixed for CCA labels, but YAML-declared sensors still pinned themselves to `address:` and had no way to follow a renumbering. `long_address:` is mutually exclusive with `address:` on a device sensor entry; its sensors are placed once a Frame 27 confirms the barcode's current address, and re-pointed automatically if the gateway reassigns it later. Existing `address:`-based configs are unaffected.
-- **A second AtomS3R display package, `boards/atoms3r-display-st7735.yaml`, for units with an ST7735 panel instead of ST7789V.** Some AtomS3R units stayed dark even with the GPIO45/0 I2C fix below: the backlight (a separate chip on a separate bus) was lighting correctly the whole time, but the display itself never came out of its power-on sleep state. `atoms3r-display.yaml` configures `platform: st7789v`; these units' own label reads "ST7735 0.85" LCD", and M5GFX's own panel-ID probe for this exact board picks an ST7735S/GC9107 driver, never ST7789 - it doesn't understand ST7789V's init sequence. Check your unit's label before choosing a package; use the new file if it says ST7735 ([#93](https://github.com/RAR/esphome-tigomonitor/pull/93)).
+- **Forget a stray optimizer (Raspberry Pi).** An optimizer that once
+  joined your system keeps its network key and goes on reporting through
+  the TAP even after it's taken off the TAP's table, so it showed up as
+  an unassigned panel on the Dashboard and the mesh map but nowhere on
+  Devices. Devices now lists such optimizers under **Heard, not on the
+  TAP's list**, with **Forget** to clear one; it comes back only if it
+  reports again. Unplugging it, or moving it out of range, is what stops
+  it reporting.
+- **More than one TAP on one Pi (Raspberry Pi, experimental).** Running the
+  bus, the Pi now polls every TAP it knows in turn, as the CCA does, each
+  with its own join window, housekeeping and optimizer table. One TAP that
+  stops answering no longer stops the others. The Devices page shows the
+  TAP each optimizer reports through, and System setup counts and lists
+  each TAP and asks which one an add is for. A new **Take on a new TAP**
+  switch (Settings → Bus, off by default) brings every TAP up again the
+  CCA's way when a new one appears: each known TAP keeps its address, a
+  new one gets the next free and has it stored, and polling stops for
+  about 30 seconds. The new TAP must already have its radio settings from a
+  CCA; the Pi never writes them. With more than one TAP the Pi sends no
+  0x41, the CCA's message telling an optimizer which TAP to use, so it
+  never steers one onto the wrong TAP. Tested against simulated TAPs only,
+  not yet on hardware. With one TAP nothing changes.
+- **Replace, add or retire an optimizer without a CCA (Raspberry Pi,
+  opt-in).** A new **System setup** page walks you through it: pick the one
+  coming out (quiet ones first), type the new one's printed label (its check
+  letter catches a misread character), see what will happen in plain words,
+  then one button. A replace rewrites the TAP's list in one go with the new
+  optimizer at the old one's address, keeps the join window open until it
+  joins, and then gives it the old one's name and place in your layout; the
+  others are unjoined for under a second. Every change copies frames
+  captured from a CCA on the bench and sits behind the new **Let me change
+  the TAP's table** switch (Settings → Bus, off by default). Tried on the
+  reference roof: one spare removed and added back.
+- **See which optimizers have a weak link (Raspberry Pi).** Topology opens
+  on a new Mesh tab, Layout beside it: each TAP with its optimizers around it, every line coloured
+  by how many of that optimizer's reports went missing today and by Tigo's
+  raw signal number. An optimizer that joined through another is drawn from
+  that relay, as each says when it joins. Hover or tap one for a day of its
+  signal (kept across a restart), when it last joined, and through what. **By string** lays them out a row
+  per string in panel order instead, so a string with a weak link stands out. Lost reports are counted from gaps in each report's slot
+  counter, and the night doesn't count. Read-only: it adds nothing to the
+  bus. See [Running on a Raspberry Pi](https://rar.github.io/esphome-tigomonitor/guides/raspberry-pi/#see-which-optimizers-have-a-weak-link).
+- **The TAP's radio channel and admission level on the Devices page
+  (Raspberry Pi).** Read from the TAP's own config block whenever a master
+  reads it: ours with the new, opt-in **Read the TAP's radio settings**
+  (Settings → Bus), or a CCA's. Only the channel and the two signal levels
+  are kept; the block's network ID and key never leave the decoder.
+- **Discovery like the CCA's (Raspberry Pi, opt-in).** **Open discovery
+  only when needed** renews the TAP's join window only while an optimizer
+  in your layout hasn't reported today, in daylight, as the CCA we watched
+  on the bench did, instead of all day. Off by default; see
+  [Disable the discovery window](https://rar.github.io/esphome-tigomonitor/guides/raspberry-pi/#disable-the-discovery-window).
+- **Spot an optimizer whose settings differ (Raspberry Pi).** The Devices
+  page has a Settings column: whether each optimizer has its settings
+  stored, and "differs" for one whose answer isn't the one most of them
+  give. It comes from the answers to the optimizer queries the CCA asks,
+  ours or a CCA's; the raw answer is in the tooltip. Optimizers on H9
+  firmware show "Not reported": they answer with fixed zeros and a stored
+  flag that never changes on a read, so there's nothing to check. The
+  panel also shows each optimizer's four MPPT parameters, from its answer to
+  the MPPT query, which every firmware reports, H9 included.
+- **Name your TAPs (Raspberry Pi).** The TAPs on the Devices page show each
+  TAP's ID, the MAC it gives when a bus master brings it up, and take a name
+  you type in place. The mesh map then labels the TAP by that name.
+
+- **See each string's link over weeks (Raspberry Pi).** Under the mesh map,
+  a grid of each string's share of reports lost, a day per column, kept for
+  30 days. Today's figures start again at midnight; this shows whether a
+  weak string is steady, getting worse, or fixed.
+- **Each optimizer's past joins (Raspberry Pi).** The mesh map's side panel
+  lists the joins an optimizer made over the last 30 days and which
+  optimizer each went through.
+- **Link loss and setting changes in Home Assistant (Raspberry Pi).** Each
+  panel gets a "Reports lost today" sensor, and each string one too. An
+  "Optimizer setting changes (24 h)" sensor counts optimizers whose
+  settings, MPPT parameters or firmware changed. A CCA never drifts them,
+  so the Devices page lists each change too.
+
+### Changed
+
+- **Optimizers the TAP doesn't list stay off the Dashboard and the mesh map
+  (Raspberry Pi).** A spare that once joined keeps the network's key and
+  goes on reporting, so it turned up as a panel, and its silence as an
+  alert. Like the CCA's aliens, an optimizer with no node row, or whose
+  row the TAP's table walks haven't listed for a day, is now listed only on
+  Devices, under **Heard, not on the TAP's list**. An unassigned optimizer
+  the TAP does list, such as one just added, still shows.
+- **Devices names each TAP's series, and flags a star-only one (Raspberry
+  Pi).** The TAP list's Model column said "Mgate" for every TAP; it now says
+  "H series · mesh" or "G series · mesh", read from the TAP's version as the
+  CCA classifies it, with the TAP's board ID (the version's `GW-…` suffix)
+  beneath. A TAP on star-only firmware (Gway, or a G5.x) shows **Star only**
+  in the warning colour: on a system with mesh TAPs it forces the whole
+  system back to the old star stack. The Firmware column shows the version
+  and date, with the build time in its tooltip, and the Radio column's
+  "admits above 90" is now "join threshold 90" under the channel, with a
+  tooltip saying what it is: the signal a new optimizer must be heard above
+  to join, on the radio's own scale.
+- **The sidebar is grouped: Monitor, Inspect and Control.** The pages that
+  change something (Settings, and on the Pi System setup and Bus control)
+  now sit together at the bottom, apart from the ones you only read. The Bus
+  page's two tabs are now two sidebar items: **Bus traffic** under Inspect,
+  **Bus control** under Control.
+- **The mesh map fills the window (Raspberry Pi).** On a wide screen the
+  radio map's box runs down to the foot of the window, with the legend
+  still in view, and the side panel scrolls within it.
+- **The mesh map lays relays out as a tree (Raspberry Pi).** Each
+  optimizer gets a slice of the circle as wide as the optimizers relaying
+  through it, and a relay's optimizers fan out beyond it inside that slice.
+  Chains of relays build outward, and no two lines cross. Before, a relayed
+  optimizer was placed in the first clear spot near its relay, and lines
+  could run across each other.
 
 ### Fixed
+
+- **A stray optimizer no longer reads as a string down (Raspberry Pi).**
+  A spare that once joined the system and was then switched off sat alone
+  in the "All panels" group, the panels no string claims, and the
+  Dashboard reported "All panels () — no production while the rest of the
+  system is producing", as if a whole string had tripped. That group isn't
+  a string, so it no longer raises that alert; its panels still show as
+  stale.
+- **The Mesh map names most relays now (Raspberry Pi).** An optimizer's
+  join names its parent by mesh ID, a different number from the
+  optimizer's address. The Pi read the wrong field as the mesh ID and
+  matched parents against addresses, so on the roof 17 of 28 joins showed
+  "a relay not identified yet". Two others matched an address by
+  coincidence: one showed itself as its own relay, one a relay it wasn't
+  using. The Pi now reads each optimizer's mesh ID from its join and names
+  the optimizer that holds the parent's. It also accepts the shorter and
+  longer join forms it used to drop. Joins come mostly at sunrise, so the
+  map fills in as optimizers rejoin.
+
+## [2.1.0] - 2026-11-07
+
+### Added
+- **A Raspberry Pi build, as a package for Raspberry Pi OS (experimental).** A Pi Zero 2 W with an RS485 adapter or HAT runs the same panel decoding and the same web dashboard as the ESP32, with no ESPHome or YAML: install the `.deb` on 64-bit Raspberry Pi OS (trixie), Debian 13 or Ubuntu 24.04 and later, choose the adapter and set your MQTT broker in the web UI, and panels appear in Home Assistant through MQTT discovery. Its web UI can be given a password under Settings. History, Topology, Tigo cloud import, the CCA Info page (over the Pi's Bluetooth) and the ESP32's Home Assistant sensors work as on the ESP32. It has run on one 40-panel bus so far, where its readings matched the ESP32's — see [Raspberry Pi](https://rar.github.io/esphome-tigomonitor/guides/raspberry-pi/). ESP32 users have nothing to do.
+- **The Pi build can read the bus from an ESP32 at the cabinet, over Wi-Fi (experimental).** Choose **Network bridge (TCP)** under Settings → Bus and enter the bridge's address. `boards/example-t-can485-bridge.yaml` turns a LilyGO T-CAN485 into that bridge with [stream_server](https://github.com/oxan/esphome-stream-server). The bridge is wired so it cannot send anything onto the bus, and the monitor reconnects by itself when the bridge drops. Tested against a simulated bridge so far, not yet on a real bus — see [Raspberry Pi](https://rar.github.io/esphome-tigomonitor/guides/raspberry-pi/#read-the-bus-over-the-network).
+- **The Pi build as a Docker image (experimental).** `ghcr.io/rar/tigomonitord`, for arm64 and amd64, runs the same monitor in a container, set up from its web UI. It reads the bus from a network bridge or a USB adapter passed in with `--device`. Tested in Docker against a simulated bridge; the Bluetooth CCA page in a container hasn't been tried — see [Run it in Docker](https://rar.github.io/esphome-tigomonitor/guides/raspberry-pi/#run-it-in-docker).
+- **The Pi build's web UI can serve HTTPS (experimental).** Over plain HTTP its password crosses the network readable. Set a certificate and key under Settings → Web UI (from Let's Encrypt, say, whose DNS challenge works for a Pi that isn't reachable from the internet) and it serves HTTPS on port 443, with port 80 redirecting to it. A renewed certificate is picked up within 10 seconds, with no restart. A pair that won't load at startup leaves the web UI on plain HTTP, so you can still reach it to fix the paths. On a Pi, the package ships the deploy hook certbot needs, so certbot and its DNS plugin are all you install. In Docker, `linux/docker-compose.https.yml` adds a certbot container that gets and renews the certificate through Route 53 or Cloudflare, with nothing to install on the host. Tested with a real Let's Encrypt certificate in Docker, and the compose file against a stand-in for certbot — see [Use HTTPS](https://rar.github.io/esphome-tigomonitor/guides/raspberry-pi/#use-https).
+- **The Pi build restarts itself if it hangs.** The package's service now uses systemd's watchdog: the monitor checks in every second, and if it stops for a minute systemd restarts it, instead of leaving it running with nothing updating. Nothing to do; it comes with the package. In Docker, where there's no systemd, the monitor watches itself the same way and exits after a minute stuck, so `restart: unless-stopped` brings it back. The image also has a healthcheck, so Portainer and `docker ps` show it unhealthy as soon as the problem starts, along with anything else `/api/health` reports.
+- **The Pi build can run the bus in the CCA's place (experimental).** Set **Bus role** to **Master** under Settings → Bus and unplug the CCA, and the Pi polls the TAP and renews its discovery window as the CCA did. Behind their own switches it also sends the CCA's housekeeping, asks each optimizer the CCA's questions, and brings up a TAP that a power cut left at its factory address. It sends only the requests the CCA sends, in the CCA's shapes, and refuses anything that would change the TAP's network settings. If it hears another master, it stops sending and goes on reading. It has been the only master on one 40-panel roof since 2026-10-29, when that site's CCA failed. A dead master is not a fail-safe: there, with no master at all, the array kept producing, so rapid shutdown stays the RSD's job — see [Run the bus in the CCA's place](https://rar.github.io/esphome-tigomonitor/guides/raspberry-pi/#run-the-bus-in-the-ccas-place).
+- **A standby that takes the bus over when the master goes quiet (experimental).** **Bus role: Standby** listens beside a CCA or another monitor, and runs the bus itself after a set number of seconds of silence: 3 by default, 30 or more beside a CCA, whose reboots are quieter for longer. A standby sends only its own status over MQTT until it takes the bus, so with two standbys Home Assistant follows whichever one runs it. An ESP32 can be a master or standby too, with `tigo_master:` ([example](https://github.com/RAR/esphome-tigomonitor/blob/main/boards/example-waveshare-relay-1ch-standby.yaml)); that has not been run on hardware yet.
+- **Turn the array's output off and on, as the CCA's PV-safe button did (experimental).** The Bus page sends it through the TAP, which confirms each one, and it stays off across restarts, updates and a standby taking over, until someone turns it on. Turn on **PV output switch** under Settings → MQTT for the same switch in Home Assistant; on an ESP32 master it is `pv_output:` under `tigo_master:`. The web switch needs a web UI password; the Home Assistant one is open to anyone who can publish to your broker, so give the monitor its own broker login. A `pv.json` that can't be read says nothing to the TAP about PV, and `/api/health` reports it. It is not rapid shutdown, and it misses optimizers that also follow an inverter's RSS signal: on the test roof, 5 of 40 kept producing until the RSS transmitters were unplugged. A minute after an off, the page lists the panels still producing — see [Turn the array's output off](https://rar.github.io/esphome-tigomonitor/guides/raspberry-pi/#turn-the-arrays-output-off).
+- **A switch to let the TAP's discovery window close.** Running the bus, the Pi renews the TAP's window for new optimizers to join, as the CCA did; **Disable** on the Bus page stops renewing it. The panels keep reporting: on the test roof, with the window closed, all 40 kept producing, came back at sunrise, and came back after a TAP power cycle. Enable it again before adding an optimizer. The choice survives restarts.
+- **New, missing and unplaced optimizers are pointed out.** When the Pi hears an optimizer it doesn't know, it logs it, counts it for Home Assistant, and marks it until you place it; in the layout editor you can put it in a dead panel's place. The Devices page tags optimizers that are missing, that the TAP has dropped, or that aren't set up as the rest are. One that never joined can be marked as known, and then stops counting as missing.
+- **Lay out the Topology by hand, without a CCA or a Tigo account.** Drag panels into strings, move strings and MPPTs between inverters, and reorder inverters, on the Pi and the ESP32. A later CCA or cloud sync asks before it replaces a layout you made — see [Laying out the array by hand](https://rar.github.io/esphome-tigomonitor/guides/web-server/#laying-out-the-array-by-hand).
+- **A Bus page on the Pi shows what is said on the bus.** Its **Traffic** tab lists each request with its reply, how long the reply took, and what it means, such as "8 entries from index 0026" or a panel's name for a node number, under a 5-minute strip of the traffic. If another device reconfigures the TAP, a banner says so. The TAP's network key is never shown.
+- **The Devices page lists the TAP's and each optimizer's firmware.** The Pi asks the TAP once each time it starts, and reads each optimizer's version from its answer to the CCA's version question. A version that changes is logged.
+- **Smaller additions to the Pi build.** A Logs tab under Diagnostics; a switch for Home Assistant discovery; the bus master's state as Home Assistant entities; `/api/health` naming what is wrong; and switches to leave the CCA Info and Tigo Cloud pages out of the sidebar.
+- **A second AtomS3R display package, `boards/atoms3r-display-st7735.yaml`, for units with an ST7735 panel instead of ST7789V.** Some AtomS3R units stayed dark even with the GPIO45/0 I2C fix below: the backlight (a separate chip on a separate bus) was lighting correctly the whole time, but the display itself never came out of its power-on sleep state. `atoms3r-display.yaml` configures `platform: st7789v`; these units' own label reads "ST7735 0.85" LCD", and M5GFX's own panel-ID probe for this exact board picks an ST7735S/GC9107 driver, never ST7789 - it doesn't understand ST7789V's init sequence. Check your unit's label before choosing a package; use the new file if it says ST7735 ([#93](https://github.com/RAR/esphome-tigomonitor/pull/93)).
+
+### Changed
+
+- **Tools is now Settings, with a tab per area, and the Node Table is now Devices.** On the Pi the tabs are Bus, MQTT, Inverters, Web UI, General and Maintenance; on the ESP32, General, YAML and Maintenance. Old links and bookmarks still open them.
+
+### Fixed
+
+- **A web UI save no longer drops the Pi build's `--serial` option.** Saving any setting reloaded `settings.json` and switched to the port it names, usually none, so a monitor started with `--serial` stopped reading the bus until restarted. A port chosen under Settings wasn't affected.
 - **Panel labels ended up on the wrong panels after the gateway renumbered them.** The node table keyed a panel's CCA labels (name, string, MPPT) to its short bus address. The gateway assigns those at commissioning and can reassign all of them at once — a rediscovery is enough — so after a renumbering every label stayed on its old address and landed on whichever panel inherited it. In [#74](https://github.com/RAR/esphome-tigomonitor/issues/74), 21 of 30 panels were mislabelled or unlabelled. Labels now follow the panel's barcode: when the gateway announces a panel at a new address, its labels move with it. Nothing to do on upgrade; a table that is already scrambled needs one **Cloud Import** (or a CCA sync) to put the labels back.
   - Restoring a backup had the same flaw: it put each entry back at the short address recorded in the file, so a backup taken before a renumbering scrambled the labels again every time it was imported. Import now places each entry by barcode wherever the gateway has confirmed that barcode's current address, which is normally within a couple of minutes of boot.
   - An import with more panels than `number_of_devices` is now refused with a message saying what to set. It used to be accepted and then truncated when saved, so the extra panels lost their labels at the next reboot, and the full table then refused to re-add them.
@@ -779,7 +933,8 @@ None - All changes are backward compatible. Web authentication and API tokens ar
 ## Initial Development
 Previous commits were part of the initial development phase. This is the first official release with comprehensive feature set and documentation.
 
-[Unreleased]: https://github.com/RAR/esphome-tigomonitor/compare/v2.0.1...HEAD
+[Unreleased]: https://github.com/RAR/esphome-tigomonitor/compare/v2.1.0...HEAD
+[2.1.0]: https://github.com/RAR/esphome-tigomonitor/releases/tag/v2.1.0
 [2.0.1]: https://github.com/RAR/esphome-tigomonitor/releases/tag/v2.0.1
 [2.0.0]: https://github.com/RAR/esphome-tigomonitor/releases/tag/v2.0.0
 [2.0.0-rc.2]: https://github.com/RAR/esphome-tigomonitor/releases/tag/v2.0.0-rc.2

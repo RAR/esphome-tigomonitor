@@ -1,0 +1,617 @@
+---
+title: Raspberry Pi and Linux
+description: Run Tigo Monitor on a Raspberry Pi, another Linux machine or in Docker instead of an ESP32 — install one package, connect an RS485 adapter or a network bridge, and point it at Home Assistant's MQTT broker.
+---
+
+import ThemedShot from '../../../components/ThemedShot.astro';
+
+
+The ESP32 is the main way to run Tigo Monitor. If you would rather use a
+Raspberry Pi, there is a Pi build: the same dashboard and the same panel
+decoding, packaged for Raspberry Pi OS, with no ESPHome and no YAML. The same
+build runs on other Debian and Ubuntu machines and in Docker, and can read the
+bus from a small ESP32 bridge at the Tigo cabinet; see
+[Other ways to run it](#other-ways-to-run-it).
+
+:::caution[Experimental]
+The Pi build is new and has run on one installation so far: a Pi Zero 2 W
+with a Waveshare RS485 CAN HAT, on a 40-panel bus, where its readings
+matched the ESP32's on the same bus panel for panel. If you try it, please
+[open an issue](https://github.com/RAR/esphome-tigomonitor/issues) with what
+you saw, working or not.
+:::
+
+## How it differs from the ESP32 build
+
+For everything side by side, see [ESP32 or Raspberry Pi?](/esphome-tigomonitor/guides/esp32-or-pi/).
+
+- **Setup happens in the browser.** You set the MQTT broker and choose the
+  serial port on the Settings page, and what the ESP32 takes from YAML (power
+  calibration, night-mode timeout, reset at midnight, a CCA IP) under
+  **Settings → General**. There is nothing to compile.
+- **Home Assistant connects over MQTT**, not the ESPHome integration. Each
+  panel appears as its own device, named by its barcode, as soon as the
+  gateway announces it. The gateway announces its panels every 15 minutes or
+  so, which is the longest you wait on a fresh install.
+- **Inverters are set on the Topology page**, not in YAML: **Edit layout**
+  adds inverters, MPPTs and strings and drags panels into them. A Tigo cloud
+  import fills them in for you when none are set.
+- **History is kept on the SD card**, with a snapshot every minute
+  rather than the ESP32's 30, for two years. Panels are not recorded at
+  night, once the bus has been silent for the night-mode timeout, which
+  roughly halves what the card stores.
+- **The CCA Info page talks to the CCA over the Pi's Bluetooth**, as the
+  ESP32 does with `cca_source: ble`. The Pi finds the nearest CCA by itself;
+  there is no MAC to enter. For a CCA on firmware older than 4.0.4, set its
+  IP under Settings → General to use its local HTTP API instead.
+
+## What you need
+
+- A **Raspberry Pi Zero 2 W** (any 64-bit Pi works) and a microSD card,
+  running **Raspberry Pi OS (64-bit)**, the current release, based on Debian
+  13 (trixie). The Lite version is enough. The package does not install on
+  the older bookworm release, which Imager lists under Legacy.
+- A **USB RS485 adapter**, wired to the TAP the same way as the ESP32 build —
+  A, B and ground; see [Wiring](/esphome-tigomonitor/guides/wiring/). An RS485
+  HAT on the Pi's own serial pins works too; see
+  [Using an RS485 HAT](#using-an-rs485-hat). So does an ESP32 bridge at the
+  cabinet; see [Read the bus over the network](#read-the-bus-over-the-network).
+- An **MQTT broker** that Home Assistant uses. If you don't have one, install
+  the Mosquitto broker add-on in Home Assistant.
+
+## Install it
+
+1. In [Raspberry Pi Imager](https://www.raspberrypi.com/software/), choose
+   **Raspberry Pi Zero 2 W**, then **Raspberry Pi OS Lite (64-bit)**.
+2. When Imager offers to apply OS customisation, choose **Edit settings** and
+   fill in:
+   - your **Wi-Fi** name and password — the Zero 2 W has no Ethernet port, so
+     without this it cannot reach your network;
+   - a **username and password**, and turn on **SSH** under Services;
+   - a hostname such as `tigomonitor`.
+3. Write the card, put it in the Pi, connect the RS485 adapter, and power it
+   on. Once it has joined your Wi-Fi, log in over SSH.
+4. Download `tigomonitord_VERSION_arm64.deb` from the
+   [releases page](https://github.com/RAR/esphome-tigomonitor/releases) and
+   install it:
+
+   ```sh
+   sudo apt install ./tigomonitord_VERSION_arm64.deb
+   ```
+
+   The service starts straight away and on every boot after.
+5. Open `http://tigomonitor.local` (your hostname, then `.local`). Under
+   **Settings → Bus**, choose your adapter. USB adapters
+   are listed by make and model. It opens the adapter as soon as you save,
+   and the dashboard fills in as panels report.
+
+## Using an RS485 HAT
+
+A HAT such as Waveshare's
+[RS485 CAN HAT](https://www.waveshare.com/wiki/RS485_CAN_HAT) reads the bus on
+the Pi's own serial port. The monitor only listens, so a HAT that switches
+direction by itself, as that one does by default, needs no extra setup.
+
+Raspberry Pi OS leaves that serial port off. Turn it on, without a login
+console on it, and reboot:
+
+```sh
+sudo raspi-config nonint do_serial_cons 1
+sudo raspi-config nonint do_serial_hw 0
+sudo reboot
+```
+
+Then, under **Settings → Bus**, choose **Raspberry Pi
+UART** (`/dev/serial0`).
+
+## Connect it to Home Assistant
+
+1. Open `http://tigomonitor.local` (or your hostname).
+2. Go to **Settings → MQTT** and enter the broker's address, port, and
+   a username and password the broker accepts. With the Mosquitto add-on that
+   is your Home Assistant's address, port 1883, and any Home Assistant user.
+3. Save. The section header changes to *connected* within a few seconds, and
+   panels appear in Home Assistant under **Settings → Devices & services →
+   MQTT**.
+
+For the Energy dashboard, add the **Tigo Monitor Energy** sensor under
+**Settings → Dashboards → Energy → Solar production**.
+
+Each panel also has a **Reports lost today** sensor, and each string a
+**reports lost today** sensor on the Tigo Monitor device, the same figures
+the mesh map shows, for graphs and alerts in Home Assistant.
+**Optimizer setting changes (24 h)** counts the optimizers whose settings,
+MPPT parameters or firmware changed in the last day. A CCA never drifts
+them, so any change is worth a look; the Devices page lists them.
+
+To keep the readings on MQTT without Home Assistant adding them as devices,
+for example while an ESP32 on the same bus already provides them, turn
+**Home Assistant discovery** off. Home Assistant then removes the devices the
+Pi added. The readings keep going to `tigomonitor/<device id>/…` for MQTT
+sensors you define yourself.
+
+## Name your panels and strings
+
+Out of the box every panel is named by its barcode and sits in one group
+called "All panels". There are four ways to get your real layout:
+
+- **By hand:** on the Topology page choose **Edit layout**, add your
+  inverters, MPPTs and strings, and drag each panel into its string. Panels
+  are named after their string and position (A1, A2, …). See
+  [Laying out the array by hand](/esphome-tigomonitor/guides/web-server/#laying-out-the-array-by-hand).
+
+- **From Tigo's cloud:** open **Tigo Cloud**, choose **Configure**, and log
+  in with the account you use in the Tigo app. Then press **Import from Tigo
+  cloud** on the Topology page. Panel names, strings, MPPTs and inverters
+  all come across. The Pi keeps only the login token, not your password.
+- **From an ESP32:** on the ESP32's **Devices** page (**Node Table** in older versions) choose **Export**,
+  then **Import** the file on the Pi's. Names, strings, and your Topology
+  renames and panel ratings come across. If you haven't set up inverters on
+  the Pi yet, the backup's inverter names wait and apply once you do.
+
+- **From the CCA, on firmware older than 4.0.4:** set the CCA's IP under
+  **Settings → General**, then press **Refresh from CCA** on the
+  CCA Info page.
+
+If the strings land under **Unassigned**, open **Edit layout** on the
+Topology page: strings whose MPPT no inverter lists arrive there in an
+inverter of their own, ready to rename or move.
+
+No CCA, or no Tigo account? Under **Settings → Web UI**, switch off the
+**CCA Info** or **Tigo Cloud** page and it leaves the sidebar; a link to it
+opens the Dashboard instead. Hiding a page stops nothing behind it, such as
+a CCA sync at startup.
+
+## New and missing optimizers
+
+The Pi keeps track of when it first and last heard each optimizer, so it
+can point out the ones that need you:
+
+- **A new optimizer**, first heard in the last week and in no string yet,
+  gets a notice on the Topology page, and a line in the log. A replacement
+  shows up as one. In **Edit layout**, drag it into its string, or use
+  **Replace…** on its tile to give it the place, name and string of the
+  panel it replaced.
+- The **Devices** page tags an optimizer **Missing** after 3 days with no
+  reading, and **Not on the TAP** once the TAP's node table has stopped
+  listing it for a day. **Not set up** means its answers say the settings a
+  CCA writes when it enrolls an optimizer aren't all written; it needs
+  **Query the optimizers** on.
+- Home Assistant gets both counts, as *New optimizers* and *Missing
+  optimizers*.
+
+For one you know isn't reporting, such as a spare the TAP knows but that
+isn't on the roof, press **Mark known** on the Devices page. It stops
+counting as missing, and leaves the panel totals.
+
+## See which optimizers have a weak link
+
+**Topology › Mesh**, the tab Topology opens on (the panel layout is the
+Layout tab beside it), draws each TAP with its optimizers around it, one line
+per optimizer to the TAP its reports come through. A TAP shows by the name you
+give it on the **Devices** page (press **Add a name** in its row), with its
+address beneath. The colour of the line says how well that optimizer is
+getting through:
+
+- **Reports lost today.** Each report carries Tigo's slot counter, which
+  places it in a time slot: every 3 seconds on one roof, every 2 on a bench
+  setup. The Pi learns each optimizer's spacing, so a skipped slot is a
+  report that never arrived; one that turns up late, up to a minute behind,
+  fills its gap. Only gaps while it is reporting count: the night, or a
+  restart of the Pi, isn't loss.
+- **Signal.** The number each report carries, from 0 to 255, higher is
+  better. It is Tigo's own scale, not dBm, so the Pi shows it as it is. On
+  one 40-optimizer roof it runs from 66 to 222.
+
+**Poor** is more than 5% of today's reports lost or a signal under 80;
+**fair** is 1–5% lost or a signal under 110; **silent** is nothing heard
+for 10 minutes. Hover over or tap an optimizer for its numbers, a day of
+its signal (kept across a restart of the Pi), and when it last joined the
+network.
+
+<ThemedShot name="pi-mesh" alt="Topology › Mesh — the optimizers around their TAP, each line coloured by link quality, with one optimizer's signal over a day, reports lost today and when it last joined." />
+
+An optimizer that can't hear the TAP well joins through another one, which
+relays for it. Each optimizer says where it joined when it joins, so the line
+runs from that relay, and the side panel names it ("Joined through") and
+lists the ones a relay carries ("Relays for"). A relay's optimizers fan out
+beyond it, each in its own slice of the circle, so chains of relays build
+outward without their lines crossing.
+
+A join names its relay by the relay's network ID, which the mesh hands out
+and can change each time an optimizer rejoins; it isn't the address the
+Devices page shows. The Pi matches it to whichever optimizer last joined
+under that ID. Until that optimizer rejoins, the line is dashed to the TAP:
+"a relay not identified yet". Joins come at sunrise and when an optimizer
+rejoins; the Pi keeps the last one across restarts. The mesh reforms each
+time, so a relay line shows where an optimizer joined last, not a fixed
+route. The side panel's **Past joins** lists the joins it made over the last
+30 days and whom each went through, so you can see which optimizers it
+leans on.
+
+**By string**, above the map, lays the same optimizers out a row per string,
+its panels in order, with each one's share of reports lost and its signal. A
+row is tinted when its median loss is over 5%, so a whole string with a weak
+link stands out from one bad panel. A tag on a card names the optimizer it
+joined through, or "via ?" for a relay not identified yet. The Pi remembers
+which of the two you last looked at, in this browser.
+
+<ThemedShot name="pi-mesh-strings" alt="Topology › Mesh › By string — a row per string with its median loss, and a card per optimizer with its loss, signal and the optimizer it joined through." />
+
+**Reports lost by day**, under the map, keeps each string's share of reports
+lost for every day of the last 30 (the newest 14 shown), coloured as the map
+is. The map's figures start again each midnight; this grid shows whether a
+weak string is steady, getting worse, or fixed after a change, such as
+adding a second TAP.
+
+## Set a password
+
+Out of the box, as on the ESP32, the web UI has no login: anyone on your
+network can open it and change its settings, including the CCA's Wi-Fi and
+the MQTT broker. To require one, set **Web UI password** under **Settings →
+Web UI**. The browser then asks for the username (`admin`
+unless you change it) and password. Pages on other websites can't use the
+monitor's settings either way, even with the login saved in your browser.
+Over plain HTTP the password crosses your network readable by anything on
+it; [HTTPS](#use-https) closes that.
+
+The MQTT password stays on the Pi: the web UI never shows it, and changing
+the broker's address or username clears it, so it has to be entered again.
+
+## Run the bus in the CCA's place
+
+*Experimental.* The Pi can do the CCA's job on the bus: poll the TAP for
+the panels' readings and keep the TAP running, so the CCA can come off the
+bus. It sends only the requests the CCA sends, in the CCA's shapes, and
+refuses anything that would change the TAP's network settings. It has been
+the only master on one 40-panel roof since 2026-10-29, when that site's CCA
+failed.
+
+Under **Settings → Bus**, set **Bus role**:
+
+- **Listen, beside the CCA**, the default. The Pi only reads.
+- **Master, in place of the CCA.** Unplug the CCA first: two masters on one
+  bus talk over each other. If the Pi hears another master anyway, it stops
+  sending and goes on reading, so its readings stay real, and says so on
+  `/api/health`. Restarting it, or saving a setting, starts it sending
+  again.
+- **Standby, takes over if the master stops.** It listens beside a CCA or
+  another monitor, and runs the bus itself once it has heard no master for
+  **Take over after** seconds. The default 3 s suits two monitors. Beside a
+  CCA use 30 s or more: a CCA that reboots is quiet for longer than that,
+  and never gets the bus back. Of two standbys, give the one you prefer the
+  shorter time. A standby sends only its own status over MQTT until it
+  takes over, unless **Panel readings while standing by** is on under
+  Settings → MQTT, so Home Assistant follows whichever one runs the bus.
+
+Running the bus, the Pi polls the TAP and renews its
+[discovery window](#disable-the-discovery-window). The rest of what the CCA
+did is behind eight switches on the same tab, all off until you turn them on:
+
+- **Bring up the TAP.** After a power cut a TAP can come back at its
+  factory address, where nothing polls it. This re-addresses it and starts
+  it again. It only re-addresses the TAP it was polling, never a second one
+  on the bus, and a TAP stranded some other way may still need the real CCA.
+- **Send the CCA's housekeeping:** its regular 0x41 to each optimizer, its
+  hourly 0x0B00 and 0x22, and its reads of the TAP's node table. With more
+  than one TAP the 0x41 is left out: it tells an optimizer which TAP to use,
+  and the Pi's copy of it can name the wrong one.
+- **Query the optimizers:** the CCA's five questions to each one. The
+  firmware and the Settings column on the Devices page come from the
+  answers: whether each optimizer has its settings stored, and "differs"
+  for one whose settings aren't what most of the others report. Press a
+  Settings cell for the settings by name, and the four MPPT parameters
+  every optimizer reports. H9 firmware answers the settings query with fixed
+  zeros, so those show "Not reported".
+- **Let queries change optimizer settings:** the two writes the CCA sends
+  when an answer calls for them. Needs **Query the optimizers**.
+- **Read the TAP's radio settings:** once each time the master starts, the
+  read the CCA makes when it brings a TAP up. The Devices page then shows
+  the TAP's channel and the signal level it admits optimizers at. A
+  listening Pi shows them too whenever it hears any master make that read.
+- **Open discovery only when needed:** see
+  [below](#disable-the-discovery-window).
+- **Let me change the TAP's table:** lets **System setup** replace, add or
+  retire an optimizer, as the CCA does. Its checks (dry runs) work with
+  this off.
+- **Take on a new TAP** (experimental): with more than one TAP, when one
+  turns up at the factory address the Pi brings every TAP up again the
+  CCA's way. Each known TAP keeps its address, a new one gets the next
+  free and has it stored, and polling stops for about 30 seconds. Needs
+  **Bring up the TAP**. The new TAP must already have its radio settings
+  from a CCA: the Pi never writes them. Tested against simulated TAPs only.
+
+**A dead master is not a fail-safe.** On the roof we measured, with no
+master at all, the array kept producing for the 8 to 10 minutes we watched
+after the TAP's window ran out, with the inverters' RSS transmitters on and
+with them unplugged. Rapid shutdown is the RSD's job: it cuts the TAP's
+power, whatever the Pi is doing.
+
+The sidebar's **Bus control** page has the switches and the master's
+health, and **Bus traffic** shows what is said on the bus; see
+[the web UI's pages](/esphome-tigomonitor/guides/web-server/#the-pages-you-get).
+
+<ThemedShot name="pi-bus-control" alt="Bus › Control — the PV output and discovery window switches, and the bus master's health: polls, the longest pause, gateway dropouts, housekeeping, optimizer queries and the TAP's firmware." />
+
+<ThemedShot name="pi-bus-traffic" alt="Bus › Traffic — a strip of the last 5 minutes, then each request on the bus with its reply, round trip and what it means: discovery window reads, node table pages, preferred gateways and optimizer queries." />
+ An ESP32 can run
+the bus too, with `tigo_master:`
+([example](https://github.com/RAR/esphome-tigomonitor/blob/main/boards/example-waveshare-relay-1ch-standby.yaml)),
+but that hasn't been run on hardware yet.
+
+## Turn the array's output off
+
+When the Pi runs the bus in the CCA's place (bus role *master* or
+*standby* under **Settings → Bus**), it can do what the CCA's PV-safe button did:
+tell the TAP to turn the optimizers' output off, and on again later. It is
+the same command the CCA sends, and the TAP answers each one, so the Pi
+knows it arrived.
+
+This is not rapid shutdown. The RSD cuts the TAP's power, which stops the
+array whatever the Pi is doing, and nothing here can stand in its way. A
+crashed Pi or a TAP that forgets could bring production back, so don't work
+on the array relying on it.
+
+It reaches only the optimizers that take their keep-alive from the TAP's
+mesh. Newer ones can also follow the RSS signal that an inverter's
+transmitter sends on the DC wiring, and those keep producing while the
+transmitter runs. A minute after you turn output off, the page lists any
+panels still producing, so you can see which ones on your site those are.
+
+The switch is on the **Bus control** page, which appears while the Pi runs
+or stands by for the bus. It needs a
+[web UI password](#set-a-password): without one anyone on your network
+could turn the array off, so the Pi refuses. Turning output off asks first.
+While it's off:
+
+- the sidebar's **PV off** pill turns red, and every page says when and
+  from where it was turned off;
+- it stays off across a restart, an update, a TAP that loses power and
+  comes back (an RSD release included) and a standby taking over, until
+  someone turns it on. A standby learns it from the master it hears, and
+  can't change it while it stands by. One that takes over before it has
+  heard anything (the running master repeats the state only hourly, so a
+  standby started minutes earlier may not have) says nothing to the TAP
+  about PV until you switch it, so the array stays as it was. So does a
+  Pi whose `pv.json` can't be read, and `/api/health` reports it.
+
+To control it from Home Assistant, turn on **PV output switch** under
+**Settings → MQTT**. A *PV output* switch then appears with the
+monitor's other entities. Anyone who can publish to your broker can use
+it, so give the Pi its own broker login.
+
+On an ESP32 running the bus, `pv_output:` under `tigo_master:` adds the
+same switch; see the
+[Relay-1CH standby example](https://github.com/RAR/esphome-tigomonitor/blob/main/boards/example-waveshare-relay-1ch-standby.yaml).
+
+### Disable the discovery window
+
+The TAP's *discovery window* is its window for new optimizers to join. The
+Pi renews it every time it runs out, by default. The CCA we watched on the
+bench renewed it only while an optimizer it expected was missing, and kept
+it closed once all were found. The
+**Bus control** page can stop renewing it: **Disable**. The Pi keeps
+polling, so every panel still reports, and nothing new goes to the TAP; it
+just stops sending the renewal. On the roof we measured, a closed window
+didn't stop production, and every optimizer came back at sunrise and after
+a TAP power cycle. **Enable** it again before adding an optimizer. The choice is saved in
+`discovery.json` beside `settings.json`, so a restart or an update keeps
+it. It needs the web UI password too.
+
+To do what that CCA did, turn on **Open discovery only when needed** under
+Settings → Bus. The Pi then checks once a minute: in daylight, while any
+optimizer in a string hasn't reported since midnight, it renews the window;
+once all have, it lets the window close. A string counts whether you set it
+up in **Edit layout** or it came from the CCA or a Tigo cloud import. At
+night nothing is held open, since the optimizers rejoin by themselves at
+sunrise. With no optimizer in a string it renews as before, and a spare
+you've marked known doesn't count. The Bus control page says which it's doing and
+how many it's waiting for. **Disable** still wins over it.
+
+## Watch it from a monitor
+
+`http://tigomonitor.local/api/health` answers HTTP 200 with
+`"status": "ok"` while everything works, and HTTP 503 with
+`"status": "problem"` and a `problems` list when something doesn't:
+
+- No serial port chosen.
+- No frames from the bus for 5 minutes, unless night mode explains the
+  quiet. Running the bus in the CCA's place, the TAP answers all night, so
+  the limit there is 1 minute.
+- In the CCA's place, the bus master stopped or reports a fault, such as
+  `no_reply` or `second_master`. A standby listening while another master
+  runs the bus is healthy. One that has taken the bus over is judged as a
+  master.
+- An MQTT broker set but not connected.
+- The main loop, which polls the bus and saves history, stuck for over 10
+  seconds while the web UI still answers.
+
+Point Uptime Kuma, or anything that checks a URL, at it. It needs no login
+even with a web UI password set, and tells only whether all is well and
+what isn't.
+
+## Use HTTPS
+
+The web UI serves HTTPS once you give it a certificate and its key. Browsers
+trust a certificate only for a name, not an IP address, so you need a domain
+name pointing at the Pi, `tigo.example.com` say. Let's Encrypt issues
+certificates for free and can do it without the Pi being reachable from the
+internet: its DNS challenge proves you own the domain through a TXT record,
+which certbot writes through your DNS provider's API.
+
+1. Point the name at the Pi's address on your network, with an A record at
+   your DNS provider or an override in your router's DNS.
+2. Install certbot and the plugin for your DNS provider, and give the
+   plugin credentials that can edit your domain's records. On Raspberry Pi
+   OS, for example:
+   - **Cloudflare:** `sudo apt install certbot python3-certbot-dns-cloudflare`,
+     then put an API token in `/root/cloudflare.ini` as the plugin's
+     instructions say.
+   - **Amazon Route 53:** `sudo apt install certbot python3-certbot-dns-route53`.
+     Create an IAM user for it alone, with a policy that allows
+     `route53:ListHostedZones` and `route53:GetChange` on `*`, and
+     `route53:ChangeResourceRecordSets` only on
+     `arn:aws:route53:::hostedzone/YOUR_ZONE_ID`. Put its access key in
+     `/root/.aws/credentials`, readable by root only, under `[default]`.
+3. Get the certificate, with the deploy hook the package installs. The hook
+   copies the certificate where the monitor can read it, since
+   `/etc/letsencrypt` is root's alone, and certbot runs it again after each
+   renewal. For Cloudflare:
+
+   ```sh
+   sudo certbot certonly --dns-cloudflare --dns-cloudflare-credentials /root/cloudflare.ini \
+     -d tigo.example.com --deploy-hook /usr/libexec/tigomonitor/cert-hook
+   ```
+
+   For Route 53, which finds the key in `/root/.aws/credentials` by itself:
+
+   ```sh
+   sudo certbot certonly --dns-route53 \
+     -d tigo.example.com --deploy-hook /usr/libexec/tigomonitor/cert-hook
+   ```
+
+4. Under **Settings → Web UI**, set **HTTPS certificate** to
+   `/var/lib/tigomonitor/fullchain.pem` and **HTTPS key** to
+   `/var/lib/tigomonitor/privkey.pem`, save, and let it restart. The page
+   reopens at `https://` on port 443, or 8443 if something else has 443.
+   Port 80 then redirects to it, so `http://` bookmarks and the
+   `tigomonitor.local` network-browser entry still work.
+
+certbot renews the certificate on its own and runs the hook each time. The
+monitor checks the two files every 10 seconds and uses a renewed pair for new
+connections, with no restart. A pair that doesn't load (a key that isn't the
+certificate's, say) is logged under Diagnostics → Logs and the previous one kept. If
+the pair won't load when the service starts, the web UI comes up on plain
+HTTP instead and the log says why, so you can still reach it to fix the
+paths. It keeps trying the pair every 10 seconds, and restarts on HTTPS once
+it loads.
+
+## Other ways to run it
+
+None of these are needed for a Pi at the Tigo cabinet.
+
+### Read the bus over the network
+
+The machine running the monitor doesn't have to be at the Tigo cabinet. A
+small ESP32 there can pass the bus along over Wi-Fi instead, and the monitor
+reads it from the network. The bridge only forwards bytes; the decoding, the
+dashboard and the history all stay on the machine running the monitor.
+
+1. Flash
+   [`boards/example-t-can485-bridge.yaml`](https://github.com/RAR/esphome-tigomonitor/blob/main/boards/example-t-can485-bridge.yaml)
+   to a LilyGO T-CAN485, with your Wi-Fi filled in, and wire its RS485
+   terminals to the TAP as in [Wiring](/esphome-tigomonitor/guides/wiring/).
+   It runs [stream_server](https://github.com/oxan/esphome-stream-server),
+   which sends every byte from the bus to whoever connects on port 6638.
+2. Under **Settings → Bus**, choose **Network bridge (TCP)**
+   and enter the bridge's address, `tigo-bridge.local:6638` or its IP and
+   port, then save.
+
+The bridge can't send anything onto the bus: its UART has no transmit pin,
+and the transceiver's driver is held off. If the bridge loses power or Wi-Fi,
+the monitor notices within about a minute and reconnects when it's back.
+
+An RS485-to-Ethernet converter set to TCP server mode, passing bytes through
+unchanged, takes the bridge's place the same way. So far only the T-CAN485
+config has been built, and the monitor's side tested against a simulated
+bridge.
+
+### On a machine that does other things
+
+The same package installs on 64-bit Raspberry Pi OS, Debian 13 (trixie), or
+Ubuntu 24.04 or 26.04, on a machine that already runs other services. For an x86 machine, take the
+`amd64` package instead of the `arm64` one. It stays out of their way until
+you set it up:
+
+- **It opens no serial port until you choose one.** A Zigbee or Z-Wave stick
+  on the same machine is never touched, and listing the ports does not open
+  them.
+- **Its web UI moves to port 8080 if port 80 is taken**, and the log says so.
+  Set another port in the same card; it takes effect when the service
+  restarts, and the page offers to restart and follow it there. The
+  `tigomonitor.local` network-browser entry still says port 80: edit
+  `/etc/avahi/services/tigomonitor-http.service` to match.
+
+Installing the package starts the service straight away. To keep it off a
+port another service may want, such as 8080, set the port before you
+install. The monitor reads `settings.json` when it first starts, and
+installing never overwrites it:
+
+```sh
+sudo mkdir -p /var/lib/tigomonitor
+echo '{"web_port": 8099}' | sudo tee /var/lib/tigomonitor/settings.json
+sudo apt install ./tigomonitord_VERSION_arm64.deb
+```
+
+The same file takes `"serial_port"` too. Anything left out keeps its
+default, and the web UI edits the file from then on.
+
+### Run it in Docker
+
+On a machine that already runs containers, use the image instead of the
+package. It's built for arm64 and amd64:
+
+```sh
+docker run -d --name tigomonitord --hostname tigomonitor --restart unless-stopped \
+  -p 8080:8080 -v tigomonitor:/var/lib/tigomonitor \
+  ghcr.io/rar/tigomonitord:latest
+```
+
+Then open `http://HOST:8080` and set it up under Settings, as with the package.
+[`linux/docker-compose.yml`](https://github.com/RAR/esphome-tigomonitor/blob/main/linux/docker-compose.yml)
+does the same with Compose.
+
+- **The bus:** a [network bridge](#read-the-bus-over-the-network) needs
+  nothing extra. For a USB adapter, mount the host's `/dev` and allow USB
+  serial devices: `-v /dev:/dev --device-cgroup-rule 'c 188:* rw'
+  --device-cgroup-rule 'c 166:* rw'`. Then choose the adapter's
+  `/dev/serial/by-id/` name under Settings → Bus. That name stays the same across
+  reboots, where `/dev/ttyUSB0` may change, and the container sees the
+  adapter again after you unplug it, which `--device` doesn't.
+- **The hostname:** give the container a fixed one, such as
+  `--hostname tigomonitor`. Home Assistant's device ID comes from it, and
+  Docker's default, the container ID, changes each time the container is
+  recreated, which would add the panels to Home Assistant again under a new
+  device.
+- **Restarts:** use `--restart unless-stopped`, not `on-failure`. The web UI's
+  **Restart service** exits cleanly and relies on Docker starting it again,
+  as does the monitor's own watchdog: with no systemd to restart it, it exits
+  if its main loop has been stuck for a minute. The image's healthcheck shows
+  the container unhealthy whenever [`/api/health`](#watch-it-from-a-monitor)
+  reports a problem, a stuck loop included. Docker only reports that; the
+  watchdog is what restarts it.
+- **The web port** is 8080 inside the container; publish it as any port you
+  like. The web UI's port setting does nothing here.
+- **HTTPS:** use
+  [`linux/docker-compose.https.yml`](https://github.com/RAR/esphome-tigomonitor/blob/main/linux/docker-compose.https.yml)
+  instead. It adds a certbot container that gets a Let's Encrypt certificate
+  through Route 53 or Cloudflare and renews it, with nothing installed on the
+  host. Set `DOMAIN`, `DNS_PROVIDER` and the provider's keys as the file's
+  header says, in a `.env` file or as Portainer's stack environment
+  variables, and point the domain at the host. The web UI serves plain HTTP
+  for the minute or two the first certificate takes, then restarts on HTTPS
+  at `https://DOMAIN:8443`. The certificate's paths are set by the compose
+  file, so the fields under Settings → Web UI are locked. If it stays on HTTP,
+  `docker compose logs certbot` says why.
+- **The CCA page over Bluetooth** needs the host's BlueZ. Mount
+  `/run/dbus/system_bus_socket` into the container, and run it as an account
+  the host knows that is in its `bluetooth` group: `--user UID:GID`, plus
+  `--group-add` with the host's bluetooth group ID. D-Bus drops connections
+  from user IDs the host can't look up, and the image's own account is one of
+  those. That account then also needs to own the state directory, so use a
+  directory it owns in place of the named volume. This hasn't been tried
+  against a CCA yet. The CCA's HTTP API, for firmware older than 4.0.4, needs
+  nothing extra.
+
+## If nothing shows up
+
+- **No panels on the dashboard:** check **Diagnostics → Frames processed**.
+  If it stays at 0, the Pi is not receiving the bus: check the wiring, and
+  that **Settings → Bus** names your adapter.
+- **Panels on the dashboard but not in Home Assistant:** the MQTT tab of
+  Settings shows the broker's error, such as a refused password. Also
+  allow up to 15 minutes on a fresh install for the gateway's next
+  announcement.
+- **Lots of bad checksums:** A and B are probably swapped.
+- **Logs:** log in over SSH and run `journalctl -u tigomonitord -f`, or
+  `docker logs -f tigomonitord` for the container.

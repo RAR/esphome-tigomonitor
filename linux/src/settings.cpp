@@ -33,9 +33,23 @@ Settings load_settings(const std::string &path) {
   }
   get(j, "serial_port", s.serial_port);
   get(j, "baud_rate", s.baud_rate);
+  get(j, "bus_role", s.bus_role);
+  get(j, "standby_takeover_s", s.standby_takeover_s);
+  get(j, "master_bench", s.master_bench);
+  get(j, "master_startup", s.master_startup);
+  get(j, "master_housekeeping", s.master_housekeeping);
+  get(j, "master_queries", s.master_queries);
+  get(j, "master_read_tap_config", s.master_read_tap_config);
+  get(j, "master_table_writes", s.master_table_writes);
+  get(j, "master_adopt_taps", s.master_adopt_taps);
+  get(j, "discovery_auto", s.discovery_auto);
+  get(j, "master_optimizer_writes", s.master_optimizer_writes);
+  get(j, "gateway_id", s.gateway_id);
   get(j, "web_port", s.web_port);
   get(j, "web_username", s.web_username);
   get(j, "web_password", s.web_password);
+  get(j, "tls_cert", s.tls_cert);
+  get(j, "tls_key", s.tls_key);
   get(j, "power_calibration", s.power_calibration);
   get(j, "max_nodes", s.max_nodes);
   get(j, "publish_interval_s", s.publish_interval_s);
@@ -47,17 +61,26 @@ Settings load_settings(const std::string &path) {
   get(j, "sync_cca_on_startup", s.sync_cca_on_startup);
   get(j, "cca_ip", s.cca_ip);
   get(j, "device_id", s.device_id);
+  get(j, "show_cca_page", s.show_cca_page);
+  get(j, "show_cloud_page", s.show_cloud_page);
   if (auto m = j.find("mqtt"); m != j.end() && m->is_object()) {
     get(*m, "host", s.mqtt.host);
     get(*m, "port", s.mqtt.port);
     get(*m, "username", s.mqtt.username);
     get(*m, "password", s.mqtt.password);
+    get(*m, "discovery", s.mqtt.discovery);
     get(*m, "discovery_prefix", s.mqtt.discovery_prefix);
     get(*m, "base_topic", s.mqtt.base_topic);
+    get(*m, "standby_panels", s.mqtt.standby_panels);
+    get(*m, "pv_switch", s.mqtt.pv_switch);
   }
   if (s.publish_interval_s < 5) s.publish_interval_s = 5;
   if (s.web_port < 0 || s.web_port > 65535) s.web_port = 0;
   if (s.web_username.empty()) s.web_username = "admin";
+  if (s.bus_role != "master" && s.bus_role != "standby") s.bus_role = "listen";
+  if (!standby_takeover_ok(s.standby_takeover_s)) s.standby_takeover_s = 3;
+  if (!gateway_id_ok(s.gateway_id)) s.gateway_id = 0x1201;
+  s.master_optimizer_writes = s.master_optimizer_writes && s.master_queries;
   if (s.history_interval_min < 1 || s.history_interval_min > 60) s.history_interval_min = 1;
   if (s.history_days < 1) s.history_days = 730;
   if (s.night_mode_timeout_min < 1 || s.night_mode_timeout_min > 1440) s.night_mode_timeout_min = 60;
@@ -65,13 +88,27 @@ Settings load_settings(const std::string &path) {
   return s;
 }
 
-bool save_settings(const std::string &path, const Settings &s) {
-  json j = {
+static json to_json(const Settings &s) {
+  return {
       {"serial_port", s.serial_port},
       {"baud_rate", s.baud_rate},
+      {"bus_role", s.bus_role},
+      {"standby_takeover_s", s.standby_takeover_s},
+      {"master_bench", s.master_bench},
+      {"master_startup", s.master_startup},
+      {"master_housekeeping", s.master_housekeeping},
+      {"master_queries", s.master_queries},
+      {"master_read_tap_config", s.master_read_tap_config},
+      {"master_table_writes", s.master_table_writes},
+      {"master_adopt_taps", s.master_adopt_taps},
+      {"discovery_auto", s.discovery_auto},
+      {"master_optimizer_writes", s.master_optimizer_writes},
+      {"gateway_id", s.gateway_id},
       {"web_port", s.web_port},
       {"web_username", s.web_username},
       {"web_password", s.web_password},
+      {"tls_cert", s.tls_cert},
+      {"tls_key", s.tls_key},
       {"power_calibration", s.power_calibration},
       {"max_nodes", s.max_nodes},
       {"publish_interval_s", s.publish_interval_s},
@@ -83,16 +120,31 @@ bool save_settings(const std::string &path, const Settings &s) {
       {"sync_cca_on_startup", s.sync_cca_on_startup},
       {"cca_ip", s.cca_ip},
       {"device_id", s.device_id},
+      {"show_cca_page", s.show_cca_page},
+      {"show_cloud_page", s.show_cloud_page},
       {"mqtt",
        {{"host", s.mqtt.host},
         {"port", s.mqtt.port},
         {"username", s.mqtt.username},
         {"password", s.mqtt.password},
+        {"discovery", s.mqtt.discovery},
         {"discovery_prefix", s.mqtt.discovery_prefix},
-        {"base_topic", s.mqtt.base_topic}}},
+        {"base_topic", s.mqtt.base_topic},
+        {"standby_panels", s.mqtt.standby_panels},
+        {"pv_switch", s.mqtt.pv_switch}}},
   };
+}
+
+bool save_settings(const std::string &path, const Settings &s) {
   // The MQTT and web passwords are in here: owner-only.
-  return write_file_atomic(path, j.dump(2) + "\n", 0600);
+  return write_file_atomic(path, to_json(s).dump(2) + "\n", 0600);
+}
+
+bool differ_only_in_pages(const Settings &a, const Settings &b) {
+  Settings same = b;
+  same.show_cca_page = a.show_cca_page;
+  same.show_cloud_page = a.show_cloud_page;
+  return to_json(a) == to_json(same);
 }
 
 }  // namespace tigod

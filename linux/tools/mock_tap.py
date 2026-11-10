@@ -1,0 +1,386 @@
+#!/usr/bin/env python3
+"""A TAP for testing the bus master, on a pseudo-terminal.
+
+    mock_tap.py PTY_LINK [--window S] [--renew-to S] [--nodes N] [--panels N]
+                         [--foreign-after S] [--echo] [--drop-every N]
+                         [--start-cursor HEX] [--bare] [--factory]
+                         [--second-tap] [--power-cut-every S] [--stats FILE]
+                         [--extra-link PTY_LINK ...]
+
+Answers requests to gateway 0x1201 the way the rig's TAP did in the capture:
+  - 0x0148 polls with 0x0149 power frames: up to two synthetic readings per
+    reply, and it checks the poll's cursor against how many it has handed out;
+  - tunnel 0x2E with the discovery window (a countdown from --window seconds; state
+    and the first count drop to 0 when it runs out);
+  - tunnel 0x2D, the renewal, by resetting the discovery window to --renew-to seconds.
+A Frame 27 node table goes out after the first poll, so panels get barcodes.
+--foreign-after puts a request of its own on the bus after S seconds, as a
+second master would; with --foreign-every, one every S seconds from then on,
+as a CCA plugged in beside it, until --foreign-until (seconds from start). --echo sends every byte the master writes straight back,
+as an adapter that hears itself does. --drop-every N leaves every Nth poll
+unanswered. --start-cursor gives the TAP a cursor of its own: a poll with any
+other cursor gets no data and a reply whose long header states the TAP's
+cursor (a guess at what a real TAP does; the capture never shows it).
+--reset-quiet S is how long a RESET leaves it deaf (4.5 s; the roof's was ~5).
+--power-cut-every S cuts its power every S seconds, as the CCA did on the
+roof once it could no longer hear the TAP: deaf for --power-off seconds
+(8), then back at the same id with its discovery window out.
+--second-tap puts another TAP behind the same port, left at the factory
+address: it answers GET_MAC there and nothing else.
+--extra-link adds another port on the same bus, for a second master: every
+byte one master writes reaches the others, and every reply reaches all of
+them, as on RS485. The stats count the frames that came in on each link.
+It also plays the rest of the CCA's dialogue, as the roof TAP answered it:
+a SET_ID_BY_MAC away from the id the TAP was first given, then a RESET
+broadcast, brings it back at that first id after ~5 s of silence; VERSION,
+0x0E02 and tunnel 0x0D get fixed (invented) replies; tunnel 0x22 is acked;
+tunnel 0x26 pages the node table from the id asked; tunnel 0x29 takes 1-10
+records (acked --table-ack), a new one (bit 15) listed not joined until
+--join-after s; tunnel 0x2B BA BE erases the table; and tunnel 0x06
+queries are forwarded (status 0d) with the optimizer's answer in a later
+poll reply, as a type 0x07 packet. The first panel answers Info with 00 in
+its ninth word until it gets #00w255; the second answers Smrt in mode N
+always, as an H9 does (it reports S only in its reply to the write).
+--bare is a gateway with no mesh behind it, like a spare TAP on the bench: it
+answers VERSION and refuses polls and the tunnel with 0x0006, as the analysis
+repo's standalone gateways did. Writes what it saw to --stats as JSON every second.
+Barcodes are made up.
+"""
+import argparse
+import json
+import os
+import pty
+import random
+import select
+import sys
+import time
+
+sys.path.insert(0, os.path.dirname(__file__))
+from synth_bus import crc16, power_packet  # noqa: E402
+
+GATEWAY = 0x1201
+ESCAPED = [0x7E, 0x24, 0x23, 0x25, 0xA4, 0xA3, 0xA5]
+
+
+def encode(dest, cmd, payload):
+    body = bytes([dest >> 8, dest & 0xFF, cmd >> 8, cmd & 0xFF]) + payload
+    crc = crc16(body)
+    body += bytes([crc >> 8, crc & 0xFF])
+    out = bytearray(b'\x00\xff\xff\x7e\x07')
+    for b in body:
+        out += bytes([0x7E, ESCAPED.index(b)]) if b in ESCAPED else bytes([b])
+    return bytes(out + b'\x7e\x08')
+
+
+def unescape(b):
+    out, i = bytearray(), 0
+    while i < len(b):
+        if b[i] == 0x7E and i + 1 < len(b) and b[i + 1] < 7:
+            out.append(ESCAPED[b[i + 1]])
+            i += 2
+        else:
+            out.append(b[i])
+            i += 1
+    return bytes(out)
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument('link')
+    ap.add_argument('--window', type=float, default=900)
+    ap.add_argument('--renew-to', type=float, default=900)
+    ap.add_argument('--nodes', type=int, default=44)
+    ap.add_argument('--panels', type=int, default=6)
+    ap.add_argument('--foreign-after', type=float, default=None)
+    ap.add_argument('--foreign-every', type=float, default=0)
+    ap.add_argument('--foreign-until', type=float, default=None)
+    ap.add_argument('--echo', action='store_true')
+    ap.add_argument('--drop-every', type=int, default=0)
+    ap.add_argument('--start-cursor', type=lambda v: int(v, 16), default=0)
+    ap.add_argument('--bare', action='store_true')
+    ap.add_argument('--factory', action='store_true')  # boot at the factory address 0x1235
+    ap.add_argument('--second-tap', action='store_true')
+    ap.add_argument('--reset-quiet', type=float, default=4.5)  # seconds deaf after a RESET
+    ap.add_argument('--power-cut-every', type=float, default=0)
+    ap.add_argument('--power-off', type=float, default=8)
+    ap.add_argument('--page-delay', type=float, default=0)  # seconds before answering a 0x26 page
+    ap.add_argument('--refuse-renewals', type=int, default=0)  # ack this many renewals, window left closed
+    ap.add_argument('--mute-claims', type=int, default=0)  # ignore this many SET_485_ID broadcasts
+    ap.add_argument('--deaf-hop', action='store_true')  # moved one id up by the hop, answers nothing there
+    ap.add_argument('--stats', default=None)
+    ap.add_argument('--extra-link', action='append', default=[])
+    ap.add_argument('--not-taken', type=lambda v: int(v, 16), action='append', default=[])  # node ids whose queries get 0x0146 00 02
+    ap.add_argument('--pv-wrong-reply', action='store_true')  # answer 0x0B00 with the other byte
+    ap.add_argument('--join-after', type=float, default=5)  # a record the master wrote joins this long after
+    ap.add_argument('--table-ack', type=int, default=0)  # the 0x29 ack byte
+    a = ap.parse_args()
+
+    # One pty per master on the bus. The slave ends stay open here, so a
+    # master that exits doesn't end the bus; writes to its full buffer are
+    # dropped rather than blocking the TAP.
+    links = []
+    for link in [a.link] + a.extra_link:
+        m_fd, s_fd = pty.openpty()
+        os.system(f'stty -F {os.ttyname(s_fd)} raw -echo')
+        os.set_blocking(m_fd, False)
+        if os.path.lexists(link):
+            os.unlink(link)
+        os.symlink(os.ttyname(s_fd), link)
+        links.append((m_fd, s_fd))
+    fds = [m for m, _ in links]
+
+    def send(data, skip=None):
+        for fd in fds:
+            if fd == skip:
+                continue
+            try:
+                os.write(fd, data)
+            except OSError:
+                pass
+
+    rng = random.Random(1)
+    panels = [(f"04C05B40{0x0B0000 + i * 7:06X}{rng.randint(0, 255):02X}", 0x0002 + i) for i in range(a.panels)]  # (barcode, node id)
+    start = time.monotonic()
+    window_end = start + a.window
+    handed_out = a.start_cursor
+    sent_table = False
+    foreign_sent = False
+    next_foreign = 0.0
+    MAC = bytes.fromhex('04c05b3000a1b2c3')
+    SECOND_MAC = bytes.fromhex('04c05b3000d4e5f6')
+    FACTORY = 0x1235
+    addr = FACTORY if a.factory else GATEWAY  # the id the TAP currently answers at
+    stats = {'refused': 0, 'probes': 0, 'not_taken': 0, 'polls': 0, 'retries': 0, 'cursor_mismatches': 0, 'checks': 0, 'renewals': [], 'other': [],
+             'first_discovery_frame': None, 'first_frame': None, 'addressed_to': None, 'frames_after_foreign': 0, 'foreign_at': None,
+             'second_asked': 0, 'second_written': 0, 'session': [], 'cut_marks': [], 'pv': 'on', 'housekeeping': [],
+             'log': [], 'claims': 0, 'deaf': 0, 'resets': 0, 'quiet_broken': 0, 'broadcast': [], 'walk': [], 'queries': [],
+             'answered': 0, 'power_cuts': 0, 'frames_by_link': [0] * len(fds),
+             'last_frame_t_by_link': [None] * len(fds)}
+    home = None  # the id the TAP was first given, which a RESET returns it to
+    quiet_until = 0.0
+    answers = []  # optimizers' answers, waiting for a poll reply to carry them
+    written = []  # records a 0x29 added: [mac hex, id, joins at]
+    erased = False  # after a 0x2B the table is what was written since, and no longer the panels
+    stats['table_writes'] = []
+    stats['erases'] = 0
+    needs_w255 = {panels[0][1]} if panels else set()
+    smart_n = {panels[1][1]} if len(panels) > 1 else set()
+    buf = bytearray()
+    last_stats = 0.0
+    next_cut = start + a.power_cut_every if a.power_cut_every else None
+
+    def window_payload(seq):
+        left = max(0, int(window_end - time.monotonic()))
+        state, count_a = (1, a.nodes) if left > 0 else (0, 0)
+        return bytes([0x00, 0x0E, 0x00, 0x2F, seq, state, left >> 8, left & 0xFF, count_a >> 8, count_a & 0xFF,
+                      0x00, 0x28, a.nodes >> 8, a.nodes & 0xFF, 0x00])
+
+    while True:
+        now = time.monotonic()
+        if next_cut is not None and now >= next_cut:  # off and back on: the id stays, the discovery window doesn't
+            stats['power_cuts'] += 1
+            stats['cut_marks'].append(len(stats['session']))  # where each cut fell in the session list
+            quiet_until = now + a.power_off
+            window_end = now
+            next_cut = now + a.power_cut_every
+        if a.foreign_after is not None and not foreign_sent and now - start >= a.foreign_after:
+            send(encode(GATEWAY, 0x0148, bytes.fromhex('0001000004')))
+            foreign_sent = True
+            stats['foreign_at'] = now - start
+            next_foreign = now + a.foreign_every
+        elif (foreign_sent and a.foreign_every and now >= next_foreign and
+              (a.foreign_until is None or now - start < a.foreign_until)):
+            send(encode(GATEWAY, 0x0148, bytes.fromhex('0001000004')))
+            next_foreign = now + a.foreign_every
+        if a.stats and now - last_stats >= 1.0:
+            with open(a.stats + '.tmp', 'w') as f:
+                json.dump(stats, f)
+            os.replace(a.stats + '.tmp', a.stats)
+            last_stats = now
+        r, _, _ = select.select(fds, [], [], 0.05)
+        if not r:
+            continue
+        src = r[0]
+        try:
+            chunk = os.read(src, 4096)
+        except OSError:
+            continue
+        # The other masters hear it on the wire; the sender too, with --echo.
+        send(chunk, skip=None if a.echo else src)
+        n_frames = chunk.count(b'\x7e\x07')
+        if n_frames:
+            li = fds.index(src)
+            stats['frames_by_link'][li] += n_frames
+            stats['last_frame_t_by_link'][li] = round(time.monotonic() - start, 2)
+        buf += chunk
+        while True:
+            s = buf.find(b'\x7e\x07')
+            e = buf.find(b'\x7e\x08', s + 2) if s >= 0 else -1
+            if s < 0 or e < 0:
+                break
+            body = unescape(bytes(buf[s + 2:e]))
+            del buf[:e + 2]
+            if len(body) < 6 or crc16(body[:-2]) != (body[-2] << 8 | body[-1]):
+                continue
+            dest, cmd, p = body[0] << 8 | body[1], body[2] << 8 | body[3], body[4:-2]
+            t = time.monotonic() - start
+            if not (cmd == 0x0148 or (cmd == 0x0B0F and len(p) > 3 and p[3] in (0x2E, 0x41))) and len(stats['log']) < 600:
+                sub = f' {p[3]:02x} {p[5:7].hex()}' if cmd == 0x0B0F and len(p) > 3 else (f' {p.hex()}' if cmd in (0x0B00, 0x003C) else '')
+                stats['log'].append({'t': round(t, 2), 'f': f'{dest:04X}/{cmd:04X}{sub}'})
+            if time.monotonic() < quiet_until:  # resetting: deaf and mute
+                stats['quiet_broken'] += 1
+                continue
+            # Gateway addressing: answers at its current address, or at the
+            # broadcast address for the universal set-id and reset.
+            if cmd == 0x0014 and dest == 0x0000:  # SET_485_ID broadcast
+                stats['claims'] += 1
+                if stats['claims'] > a.mute_claims:
+                    send(encode(0x8000, 0x0015, b''))
+                continue
+            if cmd == 0x0010 and dest == 0x0000:  # RESET broadcast
+                send(encode(0x8000, 0x0011, b''))
+                stats['resets'] += 1
+                quiet_until = time.monotonic() + a.reset_quiet
+                addr = home if home is not None else FACTORY
+                stats['addressed_to'] = f'{addr:04X}'
+                continue
+            if a.second_tap and cmd == 0x003C and p[4:12] == SECOND_MAC:
+                stats['second_written'] += 1
+            if a.deaf_hop and home is not None and addr == home + 1 and dest == addr:
+                stats['deaf'] += 1
+                continue
+            if cmd in (0x0038, 0x003A) and (dest == addr or (a.second_tap and dest == FACTORY)):  # GET_MAC
+                if dest == addr:
+                    stats['probes'] += 1
+                    send(encode(addr | 0x8000, cmd + 1, MAC + bytes([addr >> 8, addr & 0xFF])))
+                if a.second_tap and dest == FACTORY:  # the second TAP answers after the first
+                    stats['second_asked'] += 1
+                    send(encode(FACTORY | 0x8000, cmd + 1, SECOND_MAC + bytes([FACTORY >> 8, FACTORY & 0xFF])))
+                continue
+            if cmd == 0x003C and dest == addr and len(p) == 14 and p[4:12] == MAC:  # SET_ID_BY_MAC
+                if addr == FACTORY:
+                    home = p[12] << 8 | p[13]
+                addr = p[12] << 8 | p[13]
+                stats['addressed_to'] = f'{addr:04X}'
+                send(encode(dest | 0x8000, 0x003D, b''))
+                continue
+            if dest != addr:
+                continue
+            stats['first_frame'] = stats['first_frame'] or f'{cmd:04X}'
+            if cmd == 0x000A:
+                send(encode(addr | 0x8000, 0x000B, b'Mgate Version G1.00\rJan  1 2026\r'))
+                continue
+            if cmd == 0x0E02 and not p:
+                send(encode(addr | 0x8000, 0x0E03, bytes(11) + b'\x01\x03'))
+                continue
+            if a.bare and cmd in (0x0B0F, 0x0148):
+                stats['refused'] += 1
+                send(encode(addr | 0x8000, 0x0006, b''))
+                continue
+            if foreign_sent:
+                stats['frames_after_foreign'] += 1
+            if cmd == 0x0148 and len(p) == 5:
+                stats['polls'] += 1
+                if p[1] == 0:
+                    stats['retries'] += 1
+                cursor = p[2] << 8 | p[3]
+                if a.drop_every and stats['polls'] % a.drop_every == 0:
+                    stats['dropped'] = stats.get('dropped', 0) + 1
+                    continue
+                if cursor != handed_out & 0xFFFF:
+                    stats['cursor_mismatches'] += 1
+                    # 0x41E0: bits 0-4 clear, so the header carries the TAP's whole cursor.
+                    reply = bytes.fromhex(f'41E0000E00010200{handed_out & 0xFFFF:04X}4C00')
+                    send(encode(addr | 0x8000, 0x0149, reply))
+                    continue
+                n = rng.choice([0, 0, 0, 1, 2])
+                packets = ''.join(power_packet(panels[(handed_out + i) % len(panels)][1], rng, 0.8) for i in range(n))
+                handed_out += n
+                for tuid, text in answers:  # optimizers' answers ride along, as type 0x07 packets
+                    packets += bytes([0x07, tuid >> 8, tuid & 0xFF, 0x00, 0x02, 0xDB, len(text)]).hex() + text.hex()
+                    stats['answered'] += 1
+                handed_out += len(answers)  # counted in the cursor too, as in the rig capture (7 of 7)
+                answers.clear()
+                reply = bytes.fromhex(f'41FF{cursor & 0xFF:02X}4B9A' + packets)
+                send(encode(addr | 0x8000, 0x0149, reply))
+                if not sent_table:  # the node table, as a reply from the gateway
+                    table = '0000002701' + f'{2:04X}{len(panels):04X}' + ''.join(
+                        barcode + f'{paddr:04X}' for barcode, paddr in panels)
+                    send(encode(addr | 0x8000, 0x0B10, bytes.fromhex(table)))
+                    sent_table = True
+            elif cmd == 0x0B0F and len(p) >= 5 and p[3] == 0x2E:
+                stats['checks'] += 1
+                stats['first_discovery_frame'] = stats['first_discovery_frame'] or 'check'
+                send(encode(addr | 0x8000, 0x0B10, window_payload(p[4])))
+            elif cmd == 0x0B0F and len(p) == 14 and p[3] == 0x2D:
+                stats['first_discovery_frame'] = stats['first_discovery_frame'] or 'renew'
+                stats['renewals'].append({'t': round(t, 2), 'nodes': p[10] << 8 | p[11]})
+                if len(stats['renewals']) > a.refuse_renewals:
+                    window_end = time.monotonic() + a.renew_to
+                send(encode(addr | 0x8000, 0x0B10, window_payload(p[4])))
+            elif cmd == 0x0B00 and len(p) == 1:  # the PV switch, 00 off; the TAP echoes it
+                stats['session'].append(f'{p[0]:02x}')
+                stats['pv'] = 'off' if p[0] == 0 else 'on'
+                send(encode(addr | 0x8000, 0x0B01, bytes([p[0] ^ 1]) if a.pv_wrong_reply else p))
+            elif cmd == 0x0B0F and len(p) == 7 and p[3] == 0x0D:  # bring-up; the real reply's block is the site's
+                send(encode(addr | 0x8000, 0x0B10, bytes([0x00, 0x0E, 0x00, 0x0E, p[4]]) + bytes(range(37))))
+            elif cmd == 0x0B0F and len(p) == 7 and p[3] == 0x22:  # empty broadcast, acked
+                stats['broadcast'].append(p[5:].hex())
+                send(encode(addr | 0x8000, 0x0B10, bytes([0x00, 0x0E, 0x00, 0x23, p[4], 0x03])))
+            elif cmd == 0x0B0F and len(p) == 7 and p[3] == 0x26:  # a page of the node table, 12 at most
+                idx = p[5] << 8 | p[6]
+                stats['walk'].append(f'{idx:04X}')
+                rows = ([] if erased else list(panels)) + [(m, n | (0 if t >= at else 0x8000)) for m, n, at in written]
+                page = sorted([(b, n) for b, n in rows if (n & 0x7FFF) >= idx], key=lambda r: r[1] & 0x7FFF)[:12]
+                first = page[0][1] & 0x7FFF if page else idx
+                body = bytes([0x00, 0x0E, 0x00, 0x27, p[4], first >> 8, first & 0xFF, 0x00, len(page)])
+                for barcode, paddr in page:
+                    body += bytes.fromhex(barcode) + bytes([paddr >> 8, paddr & 0xFF])
+                if a.page_delay:
+                    time.sleep(a.page_delay)
+                send(encode(addr | 0x8000, 0x0B10, body))
+            elif cmd == 0x0B0F and len(p) >= 16 and p[3] == 0x29 and len(p) == 6 + 10 * p[5]:  # 1-10 records
+                stats['table_writes'].append(p[5:].hex())
+                if a.table_ack == 0:
+                    for k in range(p[5]):
+                        rec = p[6 + 10 * k:16 + 10 * k]
+                        tuid = rec[8] << 8 | rec[9]
+                        # Bit 15 clear: listed joined at once, as the CCA writes a table back.
+                        written.append((rec[:8].hex(), tuid & 0x7FFF, t + a.join_after if tuid & 0x8000 else t))
+                send(encode(addr | 0x8000, 0x0B10, bytes([0x00, 0x0E, 0x00, 0x2A, p[4], a.table_ack])))
+            elif cmd == 0x0B0F and len(p) == 7 and p[3] == 0x2B and p[5:7] == b'\xba\xbe':  # the table erase
+                stats['erases'] += 1
+                erased = True
+                written.clear()
+                send(encode(addr | 0x8000, 0x0B10, bytes([0x00, 0x0E, 0x00, 0x2C, p[4], 0x00])))
+            elif cmd == 0x0B0F and len(p) > 7 and p[3] == 0x06:  # a query, forwarded; the answer comes later
+                tuid, text = p[5] << 8 | p[6], p[7:].decode(errors='replace')
+                stats['queries'].append({'t': round(t, 2), 'node': f'{tuid:04X}', 'text': text.strip()})
+                if tuid in a.not_taken:  # the H1.0006's answer for a node it can't reach (bench, 2026-11-06)
+                    stats['not_taken'] += 1
+                    send(encode(addr | 0x8000, 0x0146, b'\x00\x02'))
+                    continue
+                send(encode(addr | 0x8000, 0x0B10, bytes([0x00, 0x0D, 0x00, 0x07, p[4]])))
+                if text == '#00w255\r':
+                    needs_w255.discard(tuid)
+                elif text == '^00Version\r':
+                    answers.append((tuid, b'Mnode Version K8.0120 (2D)\r'))
+                elif text == '^00Tests\r':
+                    answers.append((tuid, b'!Tests 1 3 2 0 00 0000 00\r'))
+                elif text == '^00Info\r':
+                    w = '00' if tuid in needs_w255 else 'FF'
+                    answers.append((tuid, f'!Info 0027 12 0000 0DC1 00 0000 0000 {w} 00 0000 0FFF 1F9 B'.encode()))
+                elif text == '^00Smrt\r':
+                    mode = 'N' if tuid in smart_n else 'S'
+                    answers.append((tuid, f'!Smrt 0FFF 0000 0FFF 0008 00C8 00C8 000A 0154 0154 {mode} 00 01'.encode()))
+                elif text == '^00Mppt\r':
+                    answers.append((tuid, b'!Mppt 1 0 S M[100 0000 - 3/3] 0 12 40 08 12\r'))
+            elif cmd == 0x0B0F and len(p) >= 5 and p[3] == 0x41:  # housekeeping, forwarded to the mesh
+                stats['housekeeping'].append({'t': round(t, 2), 'args': p[5:].hex()})
+                send(encode(addr | 0x8000, 0x0B10, bytes([0x00, 0x0D, 0x00, 0x41, p[4]])))
+            else:
+                stats['other'].append(f'{cmd:04X} {p.hex()}')
+
+
+if __name__ == '__main__':
+    main()

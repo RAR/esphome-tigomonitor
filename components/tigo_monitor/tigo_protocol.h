@@ -312,6 +312,41 @@ template<class S> PowerDecode decode_power_packet(const S &packet, float calibra
   return PowerDecode::ok;
 }
 
+// ---- NetDiag joins ---------------------------------------------------------
+
+// An optimizer sends one type-09 NetDiag packet each time it (re)joins: on a
+// roof, mostly once a sunrise. The data comes in three lengths, 20, 23 or 24
+// bytes, laid out as the CCA's firmware reads it: the node's NWID (0-1, the
+// mesh's own id for it, which can change on a rejoin), its address (2-3, as
+// in the header and the TAP's table), its parent's NWID (4-5; 0001 is the
+// TAP), a status word (6-7), its MAC (8-15), the parent's signal (16),
+// alignment (17) and hyper-slot (18-19); the longer two add the firmware and
+// application versions. A parent is named by NWID, never by address.
+struct NetDiagJoin {
+  char addr[5] = {0};       // short address, hex
+  char nwid[5] = {0};       // the node's NWID, hex
+  char node_mac[17] = {0};  // 16 hex chars
+  char parent[5] = {0};     // the parent's NWID, hex: 0001 is the TAP
+};
+
+// packet: the whole type-09 packet as hex, as walk_power_packets hands it.
+// A report whose address isn't the node's is dropped, as the CCA does.
+template<class S> bool decode_netdiag_packet(const S &packet, NetDiagJoin &j) {
+  if (packet.length() < 14 || packet.compare(0, 2, "09") != 0) return false;
+  unsigned len = parse_hex_field(packet, 12, 2);
+  if (len < 20 || len > 24 || packet.length() < 14 + 2 * len) return false;
+  if (packet.compare(14 + 4, 4, packet, 2, 4) != 0) return false;
+  memcpy(j.nwid, packet.c_str() + 14, 4);
+  j.nwid[4] = '\0';
+  memcpy(j.parent, packet.c_str() + 14 + 8, 4);
+  j.parent[4] = '\0';
+  memcpy(j.addr, packet.c_str() + 2, 4);
+  j.addr[4] = '\0';
+  memcpy(j.node_mac, packet.c_str() + 14 + 16, 16);
+  j.node_mac[16] = '\0';
+  return true;
+}
+
 // ---- addresses -------------------------------------------------------------
 
 // The check character Tigo appends to a short address (e.g. "1234" → "1234K").

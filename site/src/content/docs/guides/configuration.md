@@ -28,8 +28,7 @@ worth knowing about:
 | `inverters:` | Groups your strings under inverter names so the dashboard mirrors your real layout. |
 | `api_token` / `web_password` | Passwords for the dashboard and API. Worth setting. |
 
-The first three can be changed **live in the web dashboard** (Tools → Device
-Configuration) without rebuilding or reflashing anything — handy for tuning
+The first three can be changed **live in the web dashboard** (Settings → General) without rebuilding or reflashing anything — handy for tuning
 `power_calibration` against your inverter's own display.
 
 ## Contents
@@ -147,7 +146,7 @@ tigo_monitor:
 
 Applied to: individual device power, string aggregates, total system power, energy calculations.
 
-> **Tip:** `power_calibration` (and `night_mode_timeout`, `reset_at_midnight`, `sync_cca_on_startup`, `cca_ip`) can also be edited live in the web UI under **Tools → Device Configuration** and stored on-device, so you can tune them without reflashing. See [On-device configuration](#on-device-configuration-tools--device-configuration).
+> **Tip:** `power_calibration` (and `night_mode_timeout`, `reset_at_midnight`, `sync_cca_on_startup`, `cca_ip`) can also be edited live in the web UI under **Settings → General** and stored on-device, so you can tune them without reflashing. See [On-device configuration](#on-device-configuration-settings--general).
 
 ---
 
@@ -208,7 +207,7 @@ esp32_ble_tracker:
 
 You don't have to know the MAC up front: the CCA Info page's **CCA Connection** card scans for the CCA by its Tigo `04:C0:5B` address prefix and lets you pick it. The choice is saved on-device (NVS) and overrides the YAML MAC across reboots; **Revert** restores the YAML value. The `ble_client:` block (with *some* MAC) is still required — `mac_address` is a required field, so leave your real MAC there as the default.
 
-### On-device configuration (Tools → Device Configuration)
+### On-device configuration (Settings → General)
 
 These runtime knobs can be set in the web UI and persisted to the ESP32 (NVS) without reflashing — handy for tuning `power_calibration` against a reference meter, or changing behavior on a deployed unit:
 
@@ -342,7 +341,7 @@ entities, and is rejected at validation time rather than silently skipped.
 
 ESPHome's [sub-devices feature](https://esphome.io/components/esphome/#esphome-devices)
 lets one ESPHome node expose multiple logical "devices" to Home Assistant. The
-generator in the Tools view emits this for you — pick **Per MPPT**, **Per inverter**,
+generator under Settings → YAML emits this for you — pick **Per MPPT**, **Per inverter**,
 or **Per panel** in the grouping selector and the YAML it produces will include
 an `esphome.devices:` block plus a `device_id:` on each child sensor.
 

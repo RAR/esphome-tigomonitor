@@ -1,5 +1,6 @@
 #include "http_server.h"
 
+#include "layout_api.h"
 #include "log.h"
 #include "serial_port.h"
 
@@ -8,7 +9,9 @@
 
 #include <algorithm>
 #include <cerrno>
+#include <chrono>
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 #include <ctime>
 #include <fstream>
@@ -29,6 +32,56 @@ using nlohmann::json;
 static double r1(double v) { return std::round(v * 10) / 10; }
 static double r2(double v) { return std::round(v * 100) / 100; }
 static double r3(double v) { return std::round(v * 1000) / 1000; }
+
+static int64_t unix_ms() {
+  return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch())
+      .count();
+}
+
+// A PV switch byte as /api/master shows it: "00" (off), "01" (on), or null.
+static json pv_byte(int b) {
+  if (b < 0) return nullptr;
+  char h[3];
+  snprintf(h, sizeof(h), "%02X", b);
+  return h;
+}
+
+static std::string hex4(uint16_t v) {
+  char b[5];
+  std::snprintf(b, sizeof(b), "%04X", v);
+  return b;
+}
+
+// An optimizer's printed label from its MAC in hex; "" if it isn't one.
+static std::string label_of_hex(const std::string &mac) {
+  if (mac.size() != 16) return "";
+  esphome::tigo_monitor::master::Bytes b;
+  for (size_t i = 0; i < 16; i += 2) b.push_back(static_cast<uint8_t>(std::stoi(mac.substr(i, 2), nullptr, 16)));
+  return esphome::tigo_monitor::master::label_of(b);
+}
+
+// The optimizer a table change names: {"label": "4-9A57A2L"} or {"mac":
+// "04C05B..."}. False with why for a label whose check letter doesn't match
+// or a MAC that isn't Tigo's.
+static bool optimizer_of(const json &j, esphome::tigo_monitor::master::Bytes &mac, std::string &why) {
+  namespace mp = esphome::tigo_monitor::master;
+  std::string label = j.contains("label") && j["label"].is_string() ? j["label"].get<std::string>() : "";
+  std::string hex = j.contains("mac") && j["mac"].is_string() ? j["mac"].get<std::string>() : "";
+  if (!label.empty()) {
+    if (mp::mac_of_label(label, mac)) return true;
+    why = "that label doesn't check out: look for a misread character";
+    return false;
+  }
+  if (hex.size() == 16 && hex.find_first_not_of("0123456789abcdefABCDEF") == std::string::npos) {
+    mac.clear();
+    for (size_t i = 0; i < 16; i += 2) mac.push_back(static_cast<uint8_t>(std::stoi(hex.substr(i, 2), nullptr, 16)));
+    if (!mp::label_of(mac).empty()) return true;
+    why = "not a Tigo optimizer's MAC (04C05B...)";
+    return false;
+  }
+  why = "give the optimizer's label, or its 16-digit MAC";
+  return false;
+}
 
 static void send_json(httplib::Response &res, const json &j, int status = 200) {
   res.status = status;
@@ -212,7 +265,14 @@ static long system_uptime_s() {
   return sysinfo(&si) == 0 ? si.uptime : 0;
 }
 
-HttpServer::HttpServer(HttpContext ctx) : ctx_(std::move(ctx)), svr_(std::make_unique<httplib::Server>()) {}
+HttpServer::HttpServer(HttpContext ctx) : ctx_(std::move(ctx)), started_unix_ms_(unix_ms()) { new_server_(); }
+
+void HttpServer::new_server_() {
+  if (ctx_.tls)
+    svr_ = std::make_unique<httplib::SSLServer>([this](SSL_CTX &c) { return ctx_.tls->install(c); });
+  else
+    svr_ = std::make_unique<httplib::Server>();
+}
 
 HttpServer::~HttpServer() { stop(); }
 
@@ -222,21 +282,56 @@ int HttpServer::start(int port, int fallback) {
     int bind_errno = errno;
     // A failed bind retires an httplib::Server for good; try on a new one.
     if (fallback != 0) {
-      svr_ = std::make_unique<httplib::Server>();
+      new_server_();
       routes_();
     }
     if (fallback == 0 || !svr_->bind_to_port("0.0.0.0", fallback)) {
       LOGE("web: cannot listen on port %d (%s)", port, strerror(bind_errno));
-      return 0;
+      return -1;
     }
     LOGW("web: port %d is taken, so the web UI is on port %d; choose another under Tools", port, fallback);
     port = fallback;
   } else {
-    LOGI("web: listening on port %d", port);
+    LOGI("web: listening on port %d%s", port, ctx_.tls ? " (HTTPS)" : "");
   }
   port_ = port;
   thread_ = std::make_unique<std::thread>([this] { svr_->listen_after_bind(); });
   return port;
+}
+
+HttpsRedirect::HttpsRedirect() = default;
+HttpsRedirect::~HttpsRedirect() { stop(); }
+
+bool HttpsRedirect::start(int port, int https_port) {
+  svr_ = std::make_unique<httplib::Server>();
+  svr_->set_keep_alive_max_count(1);
+  auto to_https = [https_port](const httplib::Request &req, httplib::Response &res) {
+    // The name the browser used, without its port; an IPv6 literal keeps its brackets.
+    std::string host = req.get_header_value("Host");
+    size_t colon = host.rfind(':');
+    if (colon != std::string::npos && host.find(']', colon) == std::string::npos) host.erase(colon);
+    if (host.empty()) host = "localhost";
+    std::string url = "https://" + host + (https_port == 443 ? "" : ":" + std::to_string(https_port)) +
+                      (req.target.empty() ? "/" : req.target);
+    res.set_redirect(url, 301);
+  };
+  for (auto m : {&httplib::Server::Get, &httplib::Server::Post, &httplib::Server::Put, &httplib::Server::Delete})
+    (svr_.get()->*m)(".*", to_https);
+  if (!svr_->bind_to_port("0.0.0.0", port)) {
+    LOGW("web: port %d is taken, so it can't send people to HTTPS (%s)", port, strerror(errno));
+    svr_.reset();
+    return false;
+  }
+  LOGI("web: port %d redirects to HTTPS on %d", port, https_port);
+  thread_ = std::make_unique<std::thread>([this] { svr_->listen_after_bind(); });
+  return true;
+}
+
+void HttpsRedirect::stop() {
+  if (!thread_) return;
+  svr_->stop();
+  thread_->join();
+  thread_.reset();
 }
 
 void HttpServer::stop() {
@@ -244,6 +339,48 @@ void HttpServer::stop() {
   svr_->stop();
   thread_->join();
   thread_.reset();
+}
+
+// What a monitor polling /api/health is told is wrong, in words; empty when
+// all is well. Bus traffic is judged by role: as master the daemon polls the
+// TAP all night and the TAP always answers, so a minute's silence is a
+// fault; listening, a quiet bus is normal once night mode says so.
+std::vector<std::string> HttpServer::health_problems_() const {
+  std::vector<std::string> problems;
+  Settings s = ctx_.current_settings();
+  bool master = runs_bus(s);  // a standby is judged as a master: either it or another runs the bus
+  if (s.serial_port.empty()) problems.push_back("no serial port chosen");
+  if (master) {
+    MasterStatus m = ctx_.master_status ? ctx_.master_status() : MasterStatus{};
+    if (m.fault != Fault::none) {
+      problems.push_back(std::string("bus master: ") + fault_name(m.fault) + (m.detail.empty() ? "" : " (" + m.detail + ")"));
+    } else if (!m.active) {
+      problems.push_back("bus master: stopped");
+    }
+  }
+  int64_t now = unix_ms();
+  int64_t last = ctx_.monitor.stats().last_frame_unix_ms;
+  int64_t quiet_s = (now - (last > 0 ? last : started_unix_ms_)) / 1000;
+  if (master) {
+    MasterStatus m = ctx_.master_status ? ctx_.master_status() : MasterStatus{};
+    if (m.pv_unconfirmed) problems.push_back("PV output: the TAP didn't confirm it is " + std::string(m.pv.off ? "off" : "on"));
+  }
+  if (ctx_.pv_unreadable && ctx_.pv_unreadable()) problems.push_back("PV output: pv.json is unreadable; saying nothing to the TAP about PV until it is switched");
+  // Latched until the owner clears it: a CCA on the bus may have re-PANned
+  // the TAP, which every optimizer then drops off.
+  if (ctx_.bus_log && ctx_.bus_log->alarm_active())
+    problems.push_back("bus: another device reconfigured the TAP (" + ctx_.bus_log->alarm_summary() + ")");
+  int64_t limit_s = master ? 60 : 300;
+  if (!s.serial_port.empty() && quiet_s > limit_s && (master || !ctx_.monitor.night_mode()))
+    problems.push_back(last > 0 ? "no frames from the bus for " + std::to_string(quiet_s) + " s"
+                                : "no frames from the bus since it started");
+  // The web threads answer even when the loop that polls the bus and writes
+  // history has stuck; a pass takes about a second.
+  int64_t late_ms = ctx_.main_loop_late_ms ? ctx_.main_loop_late_ms() : 0;
+  if (late_ms > 10000) problems.push_back("main loop: no pass for " + std::to_string(late_ms / 1000) + " s");
+  if (!s.mqtt.host.empty() && !ctx_.mqtt_connected())
+    problems.push_back("MQTT: not connected to " + s.mqtt.host + (ctx_.mqtt_error().empty() ? "" : " (" + ctx_.mqtt_error() + ")"));
+  return problems;
 }
 
 void HttpServer::routes_() {
@@ -259,7 +396,9 @@ void HttpServer::routes_() {
       return httplib::Server::HandlerResponse::Handled;
     }
     Settings s = ctx_.current_settings();
-    if (!s.web_password.empty() &&
+    // Health is for a monitor to poll, so it needs no login; it tells only
+    // whether all is well, and what is not.
+    if (!s.web_password.empty() && !(req.method == "GET" && req.path == "/api/health") &&
         !same_secret(req.get_header_value("Authorization"),
                      "Basic " + httplib::detail::base64_encode(s.web_username + ":" + s.web_password))) {
       res.status = 401;
@@ -305,7 +444,7 @@ void HttpServer::routes_() {
   // The firmware's old page addresses, sent to the matching view. Relative,
   // as the firmware's are, so a reverse proxy's path prefix survives.
   for (const auto &page : std::vector<std::pair<const char *, const char *>>{
-           {"/nodes", "nodes"}, {"/status", "diagnostics"}, {"/history", "history"}, {"/cca", "cca"}, {"/yaml", "tools"}}) {
+           {"/nodes", "nodes"}, {"/status", "diagnostics"}, {"/history", "history"}, {"/cca", "cca"}, {"/yaml", "settings"}}) {
     std::string loc = std::string("app#") + page.second;
     svr.Get(page.first, [loc](const httplib::Request &, httplib::Response &res) {
       res.status = 302;
@@ -323,6 +462,12 @@ void HttpServer::routes_() {
   svr.Get("/api/devices", [&mon](const httplib::Request &, httplib::Response &res) {
     auto now = Clock::now();
     json devices = json::array();
+    // The TAP each reports through (its RS485 id), or null until it has.
+    auto links = mon.links();
+    auto tap_of = [&links](const std::string &addr) -> json {
+      auto it = links.links().find(addr);
+      return it == links.links().end() || !it->second.tap ? json(nullptr) : json(hex4(it->second.tap));
+    };
     for (const auto &p : mon.panels()) {
       const auto &r = p.reading;
       auto age = std::chrono::duration_cast<std::chrono::milliseconds>(now - p.updated).count();
@@ -343,9 +488,129 @@ void HttpServer::routes_() {
                          {"duty_cycle", r1(r.duty_cycle * 100.0 / 255.0)},
                          {"efficiency", r2(r.efficiency)},
                          {"data_age_ms", age},
-                         {"stale", now - p.updated >= mon.online_window()}});
+                         {"stale", now - p.updated >= mon.online_window()},
+                         {"tap", tap_of(p.addr)}});
+    }
+    // An optimizer heard before but not since this start, such as after a
+    // restart at night, keeps its place reading nothing, as on the ESP32. A
+    // known spare doesn't.
+    int64_t now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                         std::chrono::system_clock::now().time_since_epoch()).count();
+    auto heard = mon.panels();
+    for (const auto &n : mon.nodes()) {
+      if (n.known || !n.last_heard_unix) continue;
+      bool listed = false;
+      for (const auto &p : heard) listed = listed || p.addr == n.addr;
+      if (listed) continue;
+      Panel p;
+      p.addr = n.addr;
+      p.barcode = n.long_address;
+      p.label = n.cca_label;
+      devices.push_back({{"addr", p.addr}, {"barcode", p.barcode}, {"name", panel_name(p)},
+                         {"string_label", string_of(mon, p)}, {"voltage_in", 0}, {"voltage_out", 0},
+                         {"current", 0}, {"current_out", 0}, {"power_in", 0}, {"power", 0}, {"power_out", 0},
+                         {"peak_power", 0}, {"temperature", 0}, {"rssi", 0}, {"duty_cycle", 0}, {"efficiency", 0},
+                         {"data_age_ms", std::max<int64_t>(0, now_ms - n.last_heard_unix * 1000)},
+                         {"stale", true},
+                         {"tap", tap_of(n.addr)}});
     }
     send_json(res, {{"devices", devices}, {"count", devices.size()}});
+  });
+
+  // The mesh map: each optimizer's TAP, reports lost today and a day of RSSI
+  // (the raw byte, not dBm). Short addresses and labels only, never a MAC.
+  // parent is the NWID its last join named; relay, the optimizer holding that
+  // NWID now, if one does.
+  svr.Get("/api/mesh", [&mon](const httplib::Request &, httplib::Response &res) {
+    auto stats = mon.links();
+    auto names = mon.tap_names();
+    auto panels = mon.panels();
+    auto node_list = mon.nodes();
+    int64_t now_s = std::chrono::duration_cast<std::chrono::seconds>(
+                        std::chrono::system_clock::now().time_since_epoch()).count();
+    std::set<uint16_t> tap_ids;
+    json nodes = json::array();
+    for (const auto &e : stats.links()) {
+      const auto &l = e.second;
+      const Panel *p = nullptr;
+      for (const auto &q : panels)
+        if (q.addr == e.first) p = &q;
+      char tap[8] = "";
+      if (l.tap) {
+        snprintf(tap, sizeof(tap), "%04X", l.tap);
+        tap_ids.insert(l.tap);
+      }
+      json rssi_24h = json::array();
+      for (int v : stats.rssi_24h(e.first, now_s)) rssi_24h.push_back(v < 0 ? json(nullptr) : json(v));
+      bool heard = l.last_heard_s > 0;
+      // One not heard since this start (a restart at night) keeps the name
+      // and string the node table has for it, as /api/devices does.
+      std::string label = e.first, string;
+      if (p) {
+        label = panel_name(*p);
+        string = string_of(mon, *p);
+      } else {
+        for (const auto &n : node_list) {
+          if (n.addr != e.first) continue;
+          label = !n.cca_label.empty() ? n.cca_label : n.long_address.size() >= 6 ? n.long_address.substr(n.long_address.size() - 6) : e.first;
+          string = n.cca_string_label.empty() ? Monitor::ALL_PANELS : n.cca_string_label;
+        }
+      }
+      nodes.push_back({{"addr", e.first},
+                       {"label", label},
+                       {"string", string},
+                       {"tap", l.tap ? json(tap) : json(nullptr)},
+                       {"parent", l.parent.empty() ? json(nullptr) : json(l.parent)},
+                       {"relay", stats.relay_of(e.first).empty() ? json(nullptr) : json(stats.relay_of(e.first))},
+                       {"rssi", heard ? json(l.rssi) : json(nullptr)},
+                       {"rssi_24h", rssi_24h},
+                       {"reports_today", l.reports_today},
+                       {"lost_today", l.lost_today},
+                       {"last_heard_s", heard ? json(now_s - l.last_heard_s) : json(nullptr)},
+                       {"last_join_unix", l.last_join_s ? json(l.last_join_s) : json(nullptr)}});
+    }
+    json taps = json::array();
+    for (uint16_t t : tap_ids) {
+      char id[8];
+      snprintf(id, sizeof(id), "%04X", t);
+      auto it = names.find(id);
+      taps.push_back(it != names.end() ? json{{"id", id}, {"name", it->second}} : json{{"id", id}});
+    }
+    // Reports and losses by day, summed by string: how each string fares
+    // over weeks, where reports_today resets at midnight.
+    std::map<std::string, std::string> string_by_addr;
+    for (const auto &n : mon.nodes())
+      string_by_addr[n.addr] = n.cca_string_label.empty() ? Monitor::ALL_PANELS : n.cca_string_label;
+    json days = json::array();
+    for (const auto &day : mon.loss_days()) {
+      std::map<std::string, std::pair<uint64_t, uint64_t>> by;
+      for (const auto &kv : day.second) {
+        auto it = string_by_addr.find(kv.first);
+        auto &c = by[it != string_by_addr.end() ? it->second : Monitor::ALL_PANELS];
+        c.first += kv.second.first;
+        c.second += kv.second.second;
+      }
+      json strings = json::object();
+      for (const auto &kv : by) strings[kv.first] = {kv.second.first, kv.second.second};
+      days.push_back({{"date", day.first}, {"strings", strings}});
+    }
+    send_json(res, {{"loss_method", "slot"}, {"parent_confirmed", true}, {"taps", taps}, {"nodes", nodes}, {"loss_days", days}});
+  });
+
+  // One optimizer's joins of the last 30 days, newest first, each with the
+  // relay it went through, as best the join log can tell.
+  svr.Get("/api/mesh/joins", [&mon](const httplib::Request &req, httplib::Response &res) {
+    std::string addr = req.get_param_value("addr");
+    for (char &c : addr) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+    auto log = mon.join_log();
+    auto relays = esphome::tigo_monitor::mesh_history::resolve_relays(log);
+    json joins = json::array();
+    for (size_t i = log.size(); i-- > 0;)
+      if (log[i].addr == addr)
+        joins.push_back({{"unix", log[i].unix_s},
+                         {"parent", log[i].parent},
+                         {"relay", relays[i].empty() ? json(nullptr) : json(relays[i])}});
+    send_json(res, {{"addr", addr}, {"joins", joins}});
   });
 
   svr.Get("/api/overview", [&mon](const httplib::Request &, httplib::Response &res) {
@@ -370,7 +635,17 @@ void HttpServer::routes_() {
     strftime(ym, sizeof(ym), "%Y-%m", &lt);
     for (const auto &d : mon.daily_history())
       if (d.first.compare(0, 7, ym) == 0) month += d.second;
-    size_t known = std::max(panels.size(), mon.nodes().size());
+    // Every optimizer the TAP lists, less the ones marked known (not
+    // reporting, and expected not to): the sidebar's and dashboard's "of N".
+    size_t listed = 0, heard = 0;
+    std::set<std::string> marked;
+    for (const auto &n : mon.nodes()) {
+      if (!n.known) listed++;
+      else marked.insert(n.long_address);
+    }
+    for (const auto &p : panels)
+      if (!marked.count(p.barcode)) heard++;
+    size_t known = std::max(heard, listed);
     send_json(res, {{"total_power", r1(power_out)},
                     {"total_current", r2(current)},
                     {"avg_efficiency", active ? r2(eff / active) : 0.0},
@@ -391,7 +666,7 @@ void HttpServer::routes_() {
     send_json(res, {{"strings", arr}});
   });
   svr.Get("/api/inverters", [this, &mon](const httplib::Request &, httplib::Response &res) {
-    send_json(res, {{"inverters", inverters_json(mon, ctx_.topology)}});
+    send_json(res, {{"inverters", inverters_json(mon, ctx_.topology)}, {"mppt_names", ctx_.topology.mppt_names()}});
   });
 
   svr.Post("/api/nodes/delete", [this](const httplib::Request &req, httplib::Response &res) {
@@ -488,6 +763,12 @@ void HttpServer::routes_() {
                     {"status", status.is_discarded() ? json(v.discovery) : status}});
   });
   svr.Post("/api/cca/discovery/start", [this, cca_unavailable](const httplib::Request &, httplib::Response &res) {
+    // The CCA is off the bus while the Pi runs it, so its scan can't reach
+    // anything; plugged back in, it would be a second master.
+    if (ctx_.current_settings().bus_role == "master") {
+      send_json(res, {{"status", "error"}, {"message", "The Pi is running the bus; CCA discovery is off while it does"}}, 409);
+      return;
+    }
     if (cca_unavailable(res)) return;
     ctx_.cca.request_command("START_DISCOVERY");
     send_json(res, {{"status", "ok"}, {"message", "Discovery start requested"}});
@@ -577,26 +858,29 @@ void HttpServer::routes_() {
     std::string err;
     if (!ctx_.cloud.layout(layout, err))
       return send_json(res, {{"status", "error"}, {"message", "Import failed: " + err}}, 502);
-    int matched = ctx_.mutable_monitor.apply_layout(layout.panels);
     // The ESP32 takes its inverters from YAML. Here the layout can supply
     // them, but only on a Pi with none set up, so it never undoes an edit.
-    bool added_inverters = false;
-    if (matched > 0 && ctx_.topology.inverters().empty()) {
-      std::vector<InverterConfig> invs;
-      int n = 0;
-      for (const auto &ci : layout.inverters) {
-        n++;
-        if (ci.mppts.empty()) continue;
-        invs.push_back({ci.label.empty() ? "Inverter " + std::to_string(n) : ci.label, "", ci.mppts});
-      }
-      added_inverters = !invs.empty() && ctx_.topology.set_inverters(invs);
+    PendingLayout in;
+    in.source = "cloud";
+    in.panels = layout.panels;
+    in.assignments = ctx_.mutable_monitor.resolve_layout(layout.panels);
+    int matched = static_cast<int>(in.assignments.size());
+    int n = 0;
+    for (const auto &ci : layout.inverters) {
+      n++;
+      if (ci.mppts.empty()) continue;
+      in.inverters.push_back({ci.label.empty() ? "Inverter " + std::to_string(n) : ci.label, "", ci.mppts});
     }
+    bool added_inverters = false;
+    bool held = offer_layout(ctx_.mutable_monitor, ctx_.topology, std::move(in), &added_inverters) ==
+                esphome::tigo_monitor::layout::Offer::hold;
     send_json(res, {{"status", "ok"},
                     {"message", "Layout imported from Tigo cloud: " + std::to_string(matched) + " of " +
                                     std::to_string(layout.panels.size()) + " panels matched"},
                     {"panels", layout.panels.size()},
                     {"matched", matched},
-                    {"inverters_added", added_inverters}});
+                    {"inverters_added", added_inverters},
+                    {"held", held}});
   });
   svr.Get("/api/cloud/health", [this](const httplib::Request &, httplib::Response &res) {
     std::string body, err;
@@ -793,10 +1077,84 @@ void HttpServer::routes_() {
     send_json(res, {{"success", true}});
   });
 
+  // The Topology editor: the whole tree, and saving one. A save replaces the
+  // layout in one go and marks it the user's own (tigo_layout.h).
+  svr.Get("/api/layout", [this, &mon](const httplib::Request &, httplib::Response &res) {
+    send_json(res, layout_json(mon, ctx_.topology));
+  });
+  // The Node Table's "Mark as known": {"barcode": "...", "known": true|false}.
+  svr.Post("/api/nodes/known", [this](const httplib::Request &req, httplib::Response &res) {
+    json j = json::parse(req.body, nullptr, false);
+    if (j.is_discarded() || !j.is_object() || !j.contains("barcode") || !j["barcode"].is_string() ||
+        !j.contains("known") || !j["known"].is_boolean()) {
+      send_json(res, {{"error", "expected {\"barcode\": \"...\", \"known\": true|false}"}}, 400);
+      return;
+    }
+    bool known = j["known"].get<bool>();
+    if (!ctx_.mutable_monitor.set_known(j["barcode"].get<std::string>(), known)) {
+      send_json(res, {{"error", "no optimizer with that barcode"}}, 404);
+      return;
+    }
+    send_json(res, {{"known", known}});
+  });
+
+  // A TAP's name, by its address; an empty name forgets it.
+  svr.Post("/api/taps/name", [this](const httplib::Request &req, httplib::Response &res) {
+    json j = json::parse(req.body, nullptr, false);
+    if (j.is_discarded() || !j.is_object() || !j.contains("tap") || !j["tap"].is_string() || !j.contains("name") ||
+        !j["name"].is_string()) {
+      send_json(res, {{"error", "expected {\"tap\": \"1201\", \"name\": \"...\"}"}}, 400);
+      return;
+    }
+    if (!ctx_.mutable_monitor.set_tap_name(j["tap"].get<std::string>(), j["name"].get<std::string>())) {
+      send_json(res, {{"error", "a TAP is 4 hex digits, and a name at most 32 characters"}}, 400);
+      return;
+    }
+    send_json(res, {{"tap", j["tap"]}, {"name", j["name"]}});
+  });
+
+  svr.Post("/api/layout", [this, &mon, body_of](const httplib::Request &req, httplib::Response &res) {
+    json j;
+    if (!body_of(req, res, j)) return;
+    namespace layout = esphome::tigo_monitor::layout;
+    layout::Layout l;
+    std::string err = parse_layout(j, l);
+    if (err.empty()) {
+      std::set<std::string> known;
+      for (const auto &n : mon.nodes())
+        if (!n.long_address.empty()) known.insert(n.long_address);
+      err = layout::validate(l, [&known](const std::string &bc) { return known.count(bc) > 0; });
+    }
+    if (!err.empty()) return send_json(res, {{"success", false}, {"error", err}}, 400);
+    if (!ctx_.topology.set_skeleton(l) || !ctx_.topology.set_manual(true))
+      return send_json(res, {{"success", false}, {"error", "Could not save to disk."}}, 500);
+    ctx_.mutable_monitor.set_assignments(layout::assignments(l), true);
+    ctx_.topology.clear_pending();
+    send_json(res, {{"success", true}});
+  });
+
+  svr.Get("/api/layout/pending", [this, &mon](const httplib::Request &, httplib::Response &res) {
+    send_json(res, pending_json(mon, ctx_.topology));
+  });
+  svr.Post("/api/layout/pending", [this, body_of](const httplib::Request &req, httplib::Response &res) {
+    json j;
+    if (!body_of(req, res, j)) return;
+    std::string action = j.contains("action") && j["action"].is_string() ? j["action"].get<std::string>() : "";
+    if (action != "keep" && action != "use")
+      return send_json(res, {{"success", false}, {"error", "action must be \"keep\" or \"use\""}}, 400);
+    if (!resolve_pending(ctx_.mutable_monitor, ctx_.topology, action == "use"))
+      return send_json(res, {{"success", false}, {"error", "nothing is waiting"}}, 409);
+    send_json(res, {{"success", true}});
+  });
+
   svr.Get("/api/nodes", [this, &mon](const httplib::Request &, httplib::Response &res) {
     json nodes = json::array();
+    auto heard = mon.first_heard();
+    auto setups = ctx_.setups ? ctx_.setups() : std::map<uint16_t, esphome::tigo_monitor::master::Queries::Setup>{};
     for (const auto &n : mon.nodes()) {
+      auto fh = heard.find(n.long_address);
       nodes.push_back({{"addr", n.addr},
+                       {"first_heard_unix", fh == heard.end() ? 0 : fh->second},
                        {"long_address", n.long_address},
                        {"sensor_index", n.sensor_index},
                        {"checksum", n.checksum},
@@ -805,7 +1163,14 @@ void HttpServer::routes_() {
                        {"cca_string", n.cca_string_label},
                        {"cca_mppt", n.cca_mppt_label},
                        {"cca_inverter", n.cca_mppt_label},  // the field's name before #60; older imports read it
-                       {"cca_channel", n.cca_channel}});
+                       {"cca_channel", n.cca_channel},
+                       {"last_heard_unix", n.last_heard_unix},
+                       {"last_roster_unix", n.last_roster_unix},
+                       {"known", n.known}});
+      // How it is set up, from its last answers to the master's reads.
+      auto st = setups.find(static_cast<uint16_t>(strtoul(n.addr.c_str(), nullptr, 16)));
+      nodes.back()["setup"] = st == setups.end() ? json(nullptr)
+                                                 : json{{"info", st->second.info}, {"mppt", st->second.mppt}};
     }
     // Topology names and ratings ride along, so an export restores them too.
     json inverters = json::array(), strings = json::array();
@@ -843,7 +1208,14 @@ void HttpServer::routes_() {
     uint64_t min_avail = std::min(prev, avail);
     long up = system_uptime_s();
     if (req.path == "/api/health") {
-      send_json(res, {{"status", "ok"}, {"uptime", up}, {"heap_free", avail}, {"heap_min_free", min_avail}});
+      std::vector<std::string> problems = health_problems_();
+      send_json(res,
+                {{"status", problems.empty() ? "ok" : "problem"},
+                 {"problems", problems},
+                 {"uptime", up},
+                 {"heap_free", avail},
+                 {"heap_min_free", min_avail}},
+                problems.empty() ? 200 : 503);
       return;
     }
     BusStats s = mon.stats();
@@ -1004,11 +1376,33 @@ void HttpServer::routes_() {
     if (barcodes.size() > cap)
       return fail("This file has " + std::to_string(barcodes.size()) + " panels but the node table holds " +
                   std::to_string(cap) + ".");
+    // Once the user has laid the site out by hand, a file's labels wait
+    // for them like a sync's; its addresses still restore at once, carrying
+    // the labels each panel has now.
+    PendingLayout in;
+    in.source = "import";
+    const bool manual = ctx_.topology.manual();
+    if (manual) {
+      std::map<std::string, esphome::tigo_monitor::layout::Assignment> now;
+      for (const auto &a : ctx_.mutable_monitor.current_assignments()) now[a.barcode] = a;
+      for (auto &n : nodes) {
+        if (!n.cca_string_label.empty())
+          in.assignments.push_back({n.long_address, n.cca_label, n.cca_string_label, n.cca_mppt_label});
+        auto it = now.find(n.long_address);
+        n.cca_label = it == now.end() ? "" : it->second.label;
+        n.cca_string_label = it == now.end() ? "" : it->second.string_label;
+        n.cca_mppt_label = it == now.end() ? "" : it->second.mppt_label;
+      }
+    }
     auto r = ctx_.mutable_monitor.import_nodes(nodes);
-    // The file's Topology names and ratings, as the firmware applies them.
+    bool held = !in.assignments.empty() &&
+                offer_layout(ctx_.mutable_monitor, ctx_.topology, std::move(in)) ==
+                    esphome::tigo_monitor::layout::Offer::hold;
+    // The file's Topology names and ratings, as the firmware applies them;
+    // not over a layout the user made, whose string names name its panels.
     int overrides = 0;
-    const json file_inverters = body.value("inverters", json::array());
-    const json file_strings = body.value("strings", json::array());
+    const json file_inverters = manual ? json::array() : body.value("inverters", json::array());
+    const json file_strings = manual ? json::array() : body.value("strings", json::array());
     for (const auto &o : file_inverters) {
       if (!o.is_object() || o.value("name", "") == "" || !o.contains("display_name") || !o["display_name"].is_string())
         continue;
@@ -1032,12 +1426,382 @@ void HttpServer::routes_() {
                     {"imported", r.imported},
                     {"remapped", r.remapped},
                     {"held", r.parked},
+                    {"layout_held", held},
                     {"overrides", overrides}});
   });
   // systemd restarts the service (Restart=always in the unit).
   svr.Post("/api/restart", [this](const httplib::Request &, httplib::Response &res) {
     ctx_.restart_requested = true;
     send_json(res, {{"ok", true}});
+  });
+
+  // Pi-only: the daemon's last log lines, for the Logs page. ?after=N skips
+  // what the page already has; "next" is the N to ask with next time.
+  svr.Get("/api/logs", [](const httplib::Request &req, httplib::Response &res) {
+    uint64_t after = 0;
+    if (req.has_param("after")) after = std::strtoull(req.get_param_value("after").c_str(), nullptr, 10);
+    uint64_t next = 0;
+    json lines = json::array();
+    for (const LogLine &l : log_since(after, &next)) {
+      const char *level = l.prio <= 3 ? "error" : l.prio == 4 ? "warning" : l.prio == 7 ? "debug" : "info";
+      lines.push_back({{"seq", l.seq}, {"t", l.unix_ms}, {"level", level}, {"msg", l.msg}});
+    }
+    send_json(res, {{"lines", lines}, {"next", next}});
+  });
+
+  // Pi-only: the bus master, when the daemon runs the bus in the CCA's place.
+  svr.Get("/api/master", [this](const httplib::Request &, httplib::Response &res) {
+    MasterStatus m = ctx_.master_status ? ctx_.master_status() : MasterStatus{};
+    send_json(res, {{"role", ctx_.current_settings().bus_role},
+                    {"active", m.active},
+                    {"fault", fault_name(m.fault)},
+                    {"phase", phase_name(m.phase)},
+                    {"detail", m.detail},
+                    {"extra_taps", m.extra_taps},
+                    {"housekeeping",
+                     {{"on", m.housekeeping},
+                      {"learned_41", m.learned_41},
+                      {"sent_41", m.sent_41},
+                      {"sent_session", m.sent_session},
+                      {"sent_broadcast", m.sent_broadcast},
+                      {"sent_walk_pages", m.sent_walk_pages},
+                      {"walks_done", m.walks_done}}},
+                    {"queries",
+                     {{"on", m.queries},
+                      {"writes", m.writes},
+                      {"sent_reads", m.sent_reads},
+                      {"not_taken", m.not_taken},
+                      {"sent_writes", m.sent_writes},
+                      {"answers", m.answers}}},
+                    {"tap_version", m.tap_version},
+                    {"tap",
+                     {{"lost", m.tap_lost},
+                      {"last_lost_unix", m.recent_lost_unix.empty() ? 0 : m.recent_lost_unix.back()},
+                      {"recent_lost_unix", m.recent_lost_unix},
+                      {"back_without_discovery", m.back_without_discovery}}},
+                    {"discovery_read", m.discovery_read},
+                    {"discovery_renewing", m.discovery_renewing},
+                    {"window_wanted", m.window_wanted},
+                    {"discovery_auto", ctx_.current_settings().discovery_auto},
+                    {"adopt_taps", ctx_.current_settings().master_adopt_taps && ctx_.current_settings().master_startup},
+                    {"missing_expected", m.missing_expected},
+                    {"discovery",
+                     {{"running", m.discovery.running},
+                      {"remaining_s", m.discovery.remaining_s},
+                      {"node_count", m.discovery.node_count},
+                      {"joined", m.discovery.joined},
+                      {"in_table", m.discovery.node_count}}},
+                    {"renewals", m.renewals},
+                    {"polls", m.polls},
+                    {"timeouts", m.timeouts},
+                    {"resyncs", m.resyncs},
+                    {"gap_ms", {{"max", m.gap_max_ms}, {"max_at_unix", m.gap_max_at_unix}, {"recent", m.gap_recent_ms}}},
+                    {"last_reply_unix", m.last_reply_unix},
+                    {"pv",
+                     {{"on", !m.pv.off},
+                      {"source", m.pv.heard ? "heard" : "setting"},
+                      {"since", m.pv.since_unix},
+                      {"confirmed", m.pv_confirmed},
+                      {"unconfirmed", m.pv_unconfirmed},
+                      {"last_sent", pv_byte(m.pv_last_sent)},
+                      {"last_reply", pv_byte(m.pv_last_reply)}}},
+                    {"taps", [&m] {
+                       json a = json::array();
+                       for (const auto &t : m.taps)
+                         a.push_back({{"id", hex4(t.id)},
+                                      {"mac", t.mac},
+                                      {"version", t.version},
+                                      {"state", t.state},
+                                      {"polls", t.polls},
+                                      {"timeouts", t.timeouts},
+                                      {"renewals", t.renewals},
+                                      {"lost", t.tap_lost},
+                                      {"last_reply_unix", t.last_reply_unix},
+                                      {"discovery",
+                                       {{"read", t.discovery_read},
+                                        {"running", t.discovery.running},
+                                        {"remaining_s", t.discovery.remaining_s},
+                                        {"node_count", t.discovery.node_count},
+                                        {"joined", t.discovery.joined}}}});
+                       return a;
+                     }()},
+                    {"table",
+                     {{"writes", m.table_writes},
+                      {"tap", m.table_tap ? hex4(m.table_tap) : ""},
+                      {"edit",
+                       {{"kind", m.table_edit.kind},
+                        {"active", m.table_edit.active},
+                        {"interrupted", m.table_edit.interrupted},
+                        {"finished", m.table_edit.finished},
+                        {"ok", m.table_edit.ok},
+                        {"dry_run", m.table_edit.dry_run},
+                        {"mac", m.table_edit.mac},
+                        {"label", label_of_hex(m.table_edit.mac)},
+                        {"id", m.table_edit.id ? hex4(m.table_edit.id) : ""},
+                        {"ack", m.table_edit.ack},
+                        {"step", m.table_edit.step},
+                        {"message", m.table_edit.message},
+                        {"started_unix", m.table_edit.started_unix},
+                        {"finished_unix", m.table_edit.finished_unix},
+                        {"dry_frames", m.table_edit.dry_frames}}},
+                      {"waiting", [&m] {
+                         json a = json::array();
+                         for (const auto &w : m.table_waiting)
+                           a.push_back({{"mac", w.mac}, {"label", label_of_hex(w.mac)}, {"id", hex4(w.id)}, {"since_unix", w.since_unix}});
+                         return a;
+                       }()},
+                      {"joins", [&m] {
+                         json a = json::array();
+                         for (const auto &o : m.table_joins)
+                           a.push_back({{"mac", o.mac}, {"label", label_of_hex(o.mac)}, {"id", hex4(o.id)}, {"joined", o.joined},
+                                        {"text", o.text}, {"unix", o.at_unix}});
+                         return a;
+                       }()}}},
+                    {"standby",
+                     {{"state", standby_name(m.standby)},
+                      {"takeover_s", m.takeover_s},
+                      {"master_heard_ms_ago", m.master_heard_ms_ago},
+                      {"takeovers", m.takeovers},
+                      {"last_takeover_unix", m.last_takeover_unix},
+                      {"yields", m.yields}}}});
+  });
+
+  // Pi-only: PV output off or on, through the bus master. Turning an array
+  // off is not for anyone on the LAN: refused until a web password is set.
+  svr.Post("/api/master/pv", [this](const httplib::Request &req, httplib::Response &res) {
+    if (ctx_.current_settings().web_password.empty()) {
+      send_json(res, {{"error", "set a web password first"}}, 403);
+      return;
+    }
+    json j = json::parse(req.body, nullptr, false);
+    if (j.is_discarded() || !j.is_object() || !j.contains("on") || !j["on"].is_boolean()) {
+      send_json(res, {{"error", "expected {\"on\": true|false}"}}, 400);
+      return;
+    }
+    bool on = j["on"].get<bool>();
+    std::string why;
+    int code = ctx_.request_pv ? ctx_.request_pv(!on, why) : 409;
+    if (code == 200) send_json(res, {{"on", on}});
+    else send_json(res, {{"error", why.empty() ? "not running the bus" : why}}, code);
+  });
+
+  // Pi-only: add an optimizer to the TAP's table, by its printed label (or
+  // MAC), as the CCA does (table_edit.h). Behind the web password, as PV
+  // output is: {"label": "4-9A57A2L"} or {"mac": "04C05B..."}, optional
+  // "id" (hex, 0002..03FF) and "dry_run".
+  // A table change's optional "tap": the TAP's RS485 id in hex. 0 when
+  // absent: the TAP the optimizer reports through, or the first.
+  auto tap_of = [](const json &j, uint16_t &tap, std::string &bad) {
+    tap = 0;
+    if (!j.contains("tap") || j["tap"].is_null()) return true;
+    std::string h = j["tap"].is_string() ? j["tap"].get<std::string>() : "";
+    if (h.empty() || h.size() > 4 || h.find_first_not_of("0123456789abcdefABCDEF") != std::string::npos) {
+      bad = "a TAP is its RS485 id, up to 4 hex digits";
+      return false;
+    }
+    tap = static_cast<uint16_t>(std::stoul(h, nullptr, 16));
+    return true;
+  };
+  svr.Post("/api/master/table/add", [this, tap_of](const httplib::Request &req, httplib::Response &res) {
+    if (ctx_.current_settings().web_password.empty()) {
+      send_json(res, {{"error", "set a web password first"}}, 403);
+      return;
+    }
+    json j = json::parse(req.body, nullptr, false);
+    if (j.is_discarded() || !j.is_object()) {
+      send_json(res, {{"error", "expected {\"label\": \"4-9A57A2L\"} or {\"mac\": \"...\"}"}}, 400);
+      return;
+    }
+    namespace mp = esphome::tigo_monitor::master;
+    mp::Bytes mac;
+    std::string bad;
+    if (!optimizer_of(j, mac, bad)) {
+      send_json(res, {{"error", bad}}, 400);
+      return;
+    }
+    uint16_t id = 0;
+    if (j.contains("id") && j["id"].is_string() && !j["id"].get<std::string>().empty()) {
+      std::string h = j["id"].get<std::string>();
+      if (h.size() > 4 || h.find_first_not_of("0123456789abcdefABCDEF") != std::string::npos) {
+        send_json(res, {{"error", "an address is up to 4 hex digits, 0002..03FF"}}, 400);
+        return;
+      }
+      id = static_cast<uint16_t>(std::stoul(h, nullptr, 16));
+      if (id < 2 || id > 0x3FF) {
+        send_json(res, {{"error", "an address must be 0002..03FF"}}, 400);
+        return;
+      }
+    }
+    bool dry = j.contains("dry_run") && j["dry_run"].is_boolean() && j["dry_run"].get<bool>();
+    uint16_t tap = 0;
+    std::string bad_tap;
+    if (!tap_of(j, tap, bad_tap)) {
+      send_json(res, {{"error", bad_tap}}, 400);
+      return;
+    }
+    std::string why;
+    int code = ctx_.request_table_add ? ctx_.request_table_add(mac, id, dry, why, tap) : 409;
+    if (code == 200) send_json(res, {{"started", true}, {"dry_run", dry}, {"mac", mp::mac_hex(mac)}, {"label", mp::label_of(mac)}});
+    else send_json(res, {{"error", why.empty() ? "not running the bus" : why}}, code);
+  });
+
+  // Pi-only: remove an optimizer from the TAP's table, as the CCA does: the
+  // table erased and the rest written back as they were (table_edit.h).
+  // {"label": ...} or {"mac": ...}, and "dry_run"; behind the web password.
+  svr.Post("/api/master/table/remove", [this, tap_of](const httplib::Request &req, httplib::Response &res) {
+    if (ctx_.current_settings().web_password.empty()) {
+      send_json(res, {{"error", "set a web password first"}}, 403);
+      return;
+    }
+    json j = json::parse(req.body, nullptr, false);
+    namespace mp = esphome::tigo_monitor::master;
+    mp::Bytes mac;
+    std::string bad;
+    if (j.is_discarded() || !j.is_object() || !optimizer_of(j, mac, bad)) {
+      send_json(res, {{"error", bad.empty() ? "expected {\"label\": \"4-9A57A2L\"} or {\"mac\": \"...\"}" : bad}}, 400);
+      return;
+    }
+    bool dry = j.contains("dry_run") && j["dry_run"].is_boolean() && j["dry_run"].get<bool>();
+    uint16_t tap = 0;
+    std::string bad_tap;
+    if (!tap_of(j, tap, bad_tap)) {
+      send_json(res, {{"error", bad_tap}}, 400);
+      return;
+    }
+    std::string why;
+    int code = ctx_.request_table_remove ? ctx_.request_table_remove(mac, dry, why, tap) : 409;
+    if (code == 200) send_json(res, {{"started", true}, {"dry_run", dry}, {"mac", mp::mac_hex(mac)}, {"label", mp::label_of(mac)}});
+    else send_json(res, {{"error", why.empty() ? "not running the bus" : why}}, code);
+  });
+
+  // Pi-only: replace an optimizer (System setup): {"old_mac": "04C05B...",
+  // "label": the new one's (or "mac"), "dry_run"}. The table erased and
+  // written back without the old one, the new one listed at its address;
+  // once it joins, it takes the old one's place in the layout. Behind the
+  // web password.
+  svr.Post("/api/master/table/replace", [this, tap_of](const httplib::Request &req, httplib::Response &res) {
+    if (ctx_.current_settings().web_password.empty()) {
+      send_json(res, {{"error", "set a web password first"}}, 403);
+      return;
+    }
+    json j = json::parse(req.body, nullptr, false);
+    namespace mp = esphome::tigo_monitor::master;
+    mp::Bytes old_mac, new_mac;
+    std::string bad;
+    if (j.is_discarded() || !j.is_object() || !j.contains("old_mac") || !j["old_mac"].is_string() ||
+        !optimizer_of(json{{"mac", j["old_mac"]}}, old_mac, bad)) {
+      send_json(res, {{"error", bad.empty() ? "give the old optimizer's 16-digit MAC as old_mac" : "old_mac: " + bad}}, 400);
+      return;
+    }
+    if (!optimizer_of(j, new_mac, bad)) {
+      send_json(res, {{"error", bad}}, 400);
+      return;
+    }
+    bool dry = j.contains("dry_run") && j["dry_run"].is_boolean() && j["dry_run"].get<bool>();
+    uint16_t tap = 0;
+    std::string bad_tap;
+    if (!tap_of(j, tap, bad_tap)) {
+      send_json(res, {{"error", bad_tap}}, 400);
+      return;
+    }
+    std::string why;
+    int code = ctx_.request_table_replace ? ctx_.request_table_replace(old_mac, new_mac, dry, why, tap) : 409;
+    if (code == 200)
+      send_json(res, {{"started", true}, {"dry_run", dry}, {"old_mac", mp::mac_hex(old_mac)}, {"mac", mp::mac_hex(new_mac)},
+                      {"label", mp::label_of(new_mac)}});
+    else
+      send_json(res, {{"error", why.empty() ? "not running the bus" : why}}, code);
+  });
+
+  // Pi-only: stop waiting for an added optimizer to join ({"label"} or
+  // {"mac"}); it stays listed. Behind the web password.
+  // Pi-only: look for TAPs, as the CCA's detection does: every TAP on the
+  // bus moved to the factory address and given its saved id, or the next
+  // free one (tigo_master.h's Herd). Polling stops for ~30 s. Needs
+  // master_adopt_taps and master_startup; behind the web password.
+  svr.Post("/api/master/taps/herd", [this](const httplib::Request &, httplib::Response &res) {
+    if (ctx_.current_settings().web_password.empty()) {
+      send_json(res, {{"error", "set a web password first"}}, 403);
+      return;
+    }
+    std::string why;
+    int code = ctx_.request_herd ? ctx_.request_herd(why) : 409;
+    if (code == 200) send_json(res, {{"started", true}});
+    else send_json(res, {{"error", why.empty() ? "not running the bus" : why}}, code);
+  });
+
+  svr.Post("/api/master/table/stop", [this](const httplib::Request &req, httplib::Response &res) {
+    if (ctx_.current_settings().web_password.empty()) {
+      send_json(res, {{"error", "set a web password first"}}, 403);
+      return;
+    }
+    json j = json::parse(req.body, nullptr, false);
+    esphome::tigo_monitor::master::Bytes mac;
+    std::string bad;
+    if (j.is_discarded() || !j.is_object() || !optimizer_of(j, mac, bad)) {
+      send_json(res, {{"error", bad.empty() ? "expected {\"label\": ...} or {\"mac\": ...}" : bad}}, 400);
+      return;
+    }
+    std::string why;
+    int code = ctx_.request_table_stop_waiting ? ctx_.request_table_stop_waiting(mac, why) : 409;
+    if (code == 200) send_json(res, {{"stopped", true}});
+    else send_json(res, {{"error", why.empty() ? "not running the bus" : why}}, code);
+  });
+
+  // Pi-only: keep renewing the TAP's discovery window, or let it close (for
+  // testing; saved in discovery.json). Behind the web password, as PV output is.
+  svr.Post("/api/master/discovery", [this](const httplib::Request &req, httplib::Response &res) {
+    if (ctx_.current_settings().web_password.empty()) {
+      send_json(res, {{"error", "set a web password first"}}, 403);
+      return;
+    }
+    json j = json::parse(req.body, nullptr, false);
+    if (j.is_discarded() || !j.is_object() || !j.contains("renew") || !j["renew"].is_boolean()) {
+      send_json(res, {{"error", "expected {\"renew\": true|false}"}}, 400);
+      return;
+    }
+    bool renew = j["renew"].get<bool>();
+    std::string why;
+    int code = ctx_.request_discovery ? ctx_.request_discovery(renew, why) : 409;
+    if (code == 200) send_json(res, {{"renew", renew}});
+    else send_json(res, {{"error", why.empty() ? "not running the bus" : why}}, code);
+  });
+
+  // The decoded bus log, newest last, and the TAP-reconfiguration alarm.
+  svr.Get("/api/bus", [this](const httplib::Request &req, httplib::Response &res) {
+    if (!ctx_.bus_log) {
+      send_json(res, {{"error", "no bus log"}}, 404);
+      return;
+    }
+    size_t limit = esphome::tigo_monitor::master::BusWatch::KEEP;
+    if (req.has_param("limit")) {
+      long v = std::strtol(req.get_param_value("limit").c_str(), nullptr, 10);
+      if (v > 0 && static_cast<size_t>(v) < limit) limit = static_cast<size_t>(v);
+    }
+    send_json(res, ctx_.bus_log->to_json(limit));
+  });
+  // The TAPs' and optimizers' firmware, as heard on the bus.
+  svr.Get("/api/versions", [this](const httplib::Request &, httplib::Response &res) {
+    if (!ctx_.bus_log) {
+      send_json(res, {{"error", "no bus log"}}, 404);
+      return;
+    }
+    json v = ctx_.bus_log->versions_json();
+    auto names = ctx_.monitor.tap_names();
+    for (auto &t : v["taps"]) {
+      auto it = names.find(t.value("addr", std::string()));
+      if (it != names.end()) t["name"] = it->second;
+    }
+    send_json(res, v);
+  });
+  // Clearing only forgets the alarm; it sends nothing on the bus.
+  svr.Post("/api/bus/alarm/clear", [this](const httplib::Request &, httplib::Response &res) {
+    if (!ctx_.bus_log) {
+      send_json(res, {{"error", "no bus log"}}, 404);
+      return;
+    }
+    ctx_.bus_log->clear_alarm();
+    send_json(res, {{"cleared", true}});
   });
 
   // Pi-only: the serial ports to choose the RS485 adapter from.
@@ -1052,20 +1816,42 @@ void HttpServer::routes_() {
   svr.Get("/api/settings", [this](const httplib::Request &, httplib::Response &res) {
     Settings s = ctx_.current_settings();
     send_json(res, {{"serial_port", s.serial_port},
+                    {"bus_role", s.bus_role},
+                    {"standby_takeover_s", s.standby_takeover_s},
+                    {"master_bench", s.master_bench},
+                    {"master_startup", s.master_startup},
+                    {"master_housekeeping", s.master_housekeeping},
+                    {"master_queries", s.master_queries},
+                    {"master_read_tap_config", s.master_read_tap_config},
+                    {"master_table_writes", s.master_table_writes},
+                    {"master_adopt_taps", s.master_adopt_taps},
+                    {"discovery_auto", s.discovery_auto},
+                    {"master_optimizer_writes", s.master_optimizer_writes},
+                    {"gateway_id", s.gateway_id},
                     {"web_port", s.web_port},
                     {"web_port_active", port_},
                     {"web_username", s.web_username},
                     {"web_password_set", !s.web_password.empty()},
+                    {"tls_cert", s.tls_cert},
+                    {"tls_key", s.tls_key},
+                    {"tls_active", ctx_.tls != nullptr},
+                    {"tls_from_args", ctx_.tls_from_args},
+                    {"tls_expires", ctx_.tls ? ctx_.tls->not_after() : 0},
                     {"power_calibration", s.power_calibration},
                     {"publish_interval_s", s.publish_interval_s},
+                    {"show_cca_page", s.show_cca_page},
+                    {"show_cloud_page", s.show_cloud_page},
                     {"device_id", s.device_id},
                     {"mqtt",
                      {{"host", s.mqtt.host},
                       {"port", s.mqtt.port},
                       {"username", s.mqtt.username},
                       {"password_set", !s.mqtt.password.empty()},
+                      {"discovery", s.mqtt.discovery},
                       {"discovery_prefix", s.mqtt.discovery_prefix},
-                      {"base_topic", s.mqtt.base_topic}}},
+                      {"base_topic", s.mqtt.base_topic},
+                      {"standby_panels", s.mqtt.standby_panels},
+                      {"pv_switch", s.mqtt.pv_switch}}},
                     {"mqtt_connected", ctx_.mqtt_connected()},
                     {"mqtt_error", ctx_.mqtt_error()}});
   });
@@ -1083,12 +1869,29 @@ void HttpServer::routes_() {
     std::string err;
     try {
       if (j.contains("serial_port")) s.serial_port = j["serial_port"].get<std::string>();
+      if (j.contains("bus_role")) s.bus_role = j["bus_role"].get<std::string>();
+      if (j.contains("standby_takeover_s")) s.standby_takeover_s = j["standby_takeover_s"].get<int>();
+      if (j.contains("master_bench")) s.master_bench = j["master_bench"].get<bool>();
+      if (j.contains("master_startup")) s.master_startup = j["master_startup"].get<bool>();
+      if (j.contains("master_housekeeping")) s.master_housekeeping = j["master_housekeeping"].get<bool>();
+      if (j.contains("master_queries")) s.master_queries = j["master_queries"].get<bool>();
+      if (j.contains("master_read_tap_config")) s.master_read_tap_config = j["master_read_tap_config"].get<bool>();
+      if (j.contains("master_table_writes")) s.master_table_writes = j["master_table_writes"].get<bool>();
+      if (j.contains("master_adopt_taps")) s.master_adopt_taps = j["master_adopt_taps"].get<bool>();
+      if (j.contains("discovery_auto")) s.discovery_auto = j["discovery_auto"].get<bool>();
+      if (j.contains("master_optimizer_writes")) s.master_optimizer_writes = j["master_optimizer_writes"].get<bool>();
+      if (j.contains("gateway_id")) s.gateway_id = j["gateway_id"].get<int>();
       if (j.contains("web_port")) s.web_port = j["web_port"].get<int>();
       if (j.contains("web_username")) s.web_username = j["web_username"].get<std::string>();
       // Absent keeps it, and "" turns the login off.
       if (j.contains("web_password")) s.web_password = j["web_password"].get<std::string>();
+      // Set on the command line, they are not the web UI's to change.
+      if (j.contains("tls_cert") && !ctx_.tls_from_args) s.tls_cert = j["tls_cert"].get<std::string>();
+      if (j.contains("tls_key") && !ctx_.tls_from_args) s.tls_key = j["tls_key"].get<std::string>();
       if (j.contains("power_calibration")) s.power_calibration = j["power_calibration"].get<float>();
       if (j.contains("publish_interval_s")) s.publish_interval_s = j["publish_interval_s"].get<int>();
+      if (j.contains("show_cca_page")) s.show_cca_page = j["show_cca_page"].get<bool>();
+      if (j.contains("show_cloud_page")) s.show_cloud_page = j["show_cloud_page"].get<bool>();
       if (j.contains("mqtt") && j["mqtt"].is_object()) {
         const json &m = j["mqtt"];
         const MqttSettings before = s.mqtt;
@@ -1101,8 +1904,11 @@ void HttpServer::routes_() {
         if (m.contains("password")) s.mqtt.password = m["password"].get<std::string>();
         else if (s.mqtt.host != before.host || s.mqtt.port != before.port || s.mqtt.username != before.username)
           s.mqtt.password.clear();
+        if (m.contains("discovery")) s.mqtt.discovery = m["discovery"].get<bool>();
         if (m.contains("discovery_prefix")) s.mqtt.discovery_prefix = m["discovery_prefix"].get<std::string>();
         if (m.contains("base_topic")) s.mqtt.base_topic = m["base_topic"].get<std::string>();
+        if (m.contains("standby_panels")) s.mqtt.standby_panels = m["standby_panels"].get<bool>();
+        if (m.contains("pv_switch")) s.mqtt.pv_switch = m["pv_switch"].get<bool>();
       }
     } catch (const json::exception &) {
       err = "A setting has the wrong type.";
@@ -1111,8 +1917,24 @@ void HttpServer::routes_() {
     if (err.empty() && s.serial_port.rfind(TCP_PREFIX, 0) == 0 &&
         !parse_tcp_source(s.serial_port, bridge_host, bridge_port))
       err = "A network bridge is host:port, with a port of 1-65535.";
+    if (err.empty() && s.bus_role != "listen" && s.bus_role != "master" && s.bus_role != "standby")
+      err = "Bus role is listen, master or standby.";
+    if (err.empty() && !standby_takeover_ok(s.standby_takeover_s)) err = "The standby's takeover time is 2-60 s.";
+    if (err.empty() && runs_bus(s) && s.serial_port.rfind(TCP_PREFIX, 0) == 0)
+      err = "The bus master needs a serial port on the bus, not a network bridge.";
+    if (err.empty() && !gateway_id_ok(s.gateway_id))
+      err = "Gateway id must be 1-7FFE, and not 1234 or 1235 (the bring-up moves the TAP to the id one up; 1235 is the factory address).";
+    s.master_optimizer_writes = s.master_optimizer_writes && s.master_queries;
     if (err.empty() && (s.mqtt.port < 1 || s.mqtt.port > 65535)) err = "MQTT port must be 1-65535.";
     if (err.empty() && (s.web_port < 0 || s.web_port > 65535)) err = "Web port must be 1-65535, or empty for the default.";
+    if (err.empty() && s.tls_cert.empty() != s.tls_key.empty())
+      err = "HTTPS needs both a certificate and a key, or neither for plain HTTP.";
+    // Checked now, while the person who typed the paths is looking: a pair
+    // that fails at the next start leaves the web UI on plain HTTP.
+    if (err.empty() && !s.tls_cert.empty()) {
+      std::string tls_err = TlsCerts::check(s.tls_cert, s.tls_key);
+      if (!tls_err.empty()) err = "The certificate did not load: " + tls_err + ".";
+    }
     if (err.empty() && (s.web_username.empty() || s.web_username.find(':') != std::string::npos))
       err = "The web UI username cannot be empty or contain a colon.";
     // Wildcards would make every publish fail, and an empty or slash-edged
@@ -1135,6 +1957,28 @@ void HttpServer::routes_() {
     ctx_.settings_changed = true;
     send_json(res, {{"saved", true}});
   });
+}
+
+int health_check(int port) {
+  // It can't tell whether HTTPS is on, so it tries HTTPS, then plain HTTP.
+  // The certificate goes unchecked: it names the web UI, not 127.0.0.1.
+  auto report = [](const httplib::Result &r) {
+    std::printf("%s\n", r->body.c_str());
+    return r->status == 200 ? 0 : 1;
+  };
+  {
+    httplib::SSLClient tls("127.0.0.1", port);
+    tls.enable_server_certificate_verification(false);
+    tls.set_connection_timeout(3);
+    tls.set_read_timeout(5);
+    if (auto r = tls.Get("/api/health")) return report(r);
+  }
+  httplib::Client plain("127.0.0.1", port);
+  plain.set_connection_timeout(3);
+  plain.set_read_timeout(5);
+  if (auto r = plain.Get("/api/health")) return report(r);
+  std::fprintf(stderr, "nothing answered on port %d\n", port);
+  return 1;
 }
 
 }  // namespace tigod
