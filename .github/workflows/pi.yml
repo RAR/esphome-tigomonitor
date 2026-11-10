@@ -114,6 +114,9 @@ jobs:
           name: tigomonitord-${{ steps.version.outputs.version }}-${{ matrix.arch }}
           path: build/deb/*.deb
           compression-level: 0  # already compressed
+          # Actions storage is 2 GB: a release's 90 days, main's 7, any
+          # other branch's a day (each is downloaded within minutes).
+          retention-days: ${{ startsWith(github.ref, 'refs/tags/v') && 90 || github.ref == 'refs/heads/main' && 7 || 1 }}
       - name: Attach to the release
         if: startsWith(github.ref, 'refs/tags/v')
         env:
@@ -162,6 +165,9 @@ jobs:
           name: tigomonitord-image-${{ steps.version.outputs.version }}-${{ matrix.arch }}
           path: tigomonitord-image-${{ matrix.arch }}.tar.gz
           compression-level: 0
+          # ~30 MB each, most of the storage: main's kept 7 days, any other
+          # branch's a day. A release's goes to GHCR instead.
+          retention-days: ${{ github.ref == 'refs/heads/main' && 7 || 1 }}
       - name: Push to GHCR
         if: startsWith(github.ref, 'refs/tags/v')
         run: |
