@@ -737,8 +737,6 @@
   .setup-taps strong { font-size: 13px; }
   .setup-taps span { color: var(--text-dim); }
   .setup-taps .lost { color: var(--warn); font-weight: 600; }
-  .setup-herd { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding-top: 10px; border-top: 1px solid var(--border); }
-  .setup-herd span { font-size: 12px; color: var(--text-dim); flex: 1 1 260px; }
   .setup-health .head a { margin-left: auto; font-size: 12px; color: var(--accent-2); }
   .setup-bar { display: flex; gap: 2px; height: 12px; border-radius: 6px; overflow: hidden; background: var(--bg-3); }
   .setup-bar span { min-width: 6px; }
@@ -4330,8 +4328,7 @@
           const dx = x.discovery || {};
           const state = x.state === 'running' ? '' : ` <span class="lost">${x.state === 'lost' ? 'not answering' : 'not answering; asked every 5 min'}</span>`;
           return `<li><strong>${topoEscape(setupTapName(x.id))}</strong><span>${dx.read ? `${dx.node_count} optimizer${dx.node_count === 1 ? '' : 's'}, ${dx.joined} joined` : 'not read yet'}</span>${state}</li>`;
-        }).join('')}</ul>` : ''}
-        ${m.adopt_taps && setupRunning(m) ? `<div class="setup-herd"><button type="button" class="btn" data-setup-herd>Look for TAPs</button><span>Brings every TAP on the bus up again, as the CCA does: each known one keeps its address and a new one gets the next free. Polling stops for about 30 seconds.</span></div>` : ''}</div>`;
+        }).join('')}</ul>` : ''}</div>`;
     }
     if (t && t.edit && t.edit.kind && t.edit.finished && !t.edit.dry_run)
       html += `<div class="setup-last">Last change: ${topoEscape(t.edit.message)}</div>`;
@@ -4685,17 +4682,6 @@
       try {
         await setupPost('/api/master/taps/herd', {});
         f.looking = true;
-      } catch (err) {
-        showToast('Not started: ' + err.message, 'err');
-      }
-      return refreshSetup(true);
-    }
-    if (b.hasAttribute('data-setup-herd')) {
-      if (!confirm('Look for TAPs? Every TAP on the bus is brought up again, and polling stops for about 30 seconds.')) return;
-      b.disabled = true;
-      try {
-        await setupPost('/api/master/taps/herd', {});
-        showToast('Looking for TAPs…');
       } catch (err) {
         showToast('Not started: ' + err.message, 'err');
       }

@@ -2,7 +2,7 @@
 // System setup (Raspberry Pi): replacing an optimizer step by step against a
 // mocked bus master, which answers the check (a dry run), the replace, the
 // wait and the join the way /api/master reports them.
-import { test, before, after } from 'node:test';
+import { test, before, after, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { createServer } from 'node:http';
@@ -24,6 +24,11 @@ before(async () => {
   browser = await chromium.launch({ args: ['--no-sandbox'] });
 });
 after(async () => { await browser.close(); server.close(); });
+// A test that fails before its own ctx.close() leaves the page polling the
+// mock; close whatever is still open. (Assert on counts, never on an element
+// handle: a failing assert.equal(handle, null) diffs Playwright's object graph
+// and runs out of memory.)
+afterEach(async () => { await Promise.all(browser.contexts().map((c) => c.close())); });
 
 const NEW_MAC = '04C05B0000001234';  // printed 0-1234R
 const now = () => Math.floor(Date.now() / 1000);
@@ -220,8 +225,9 @@ test('System setup: the bus frames stay open', async () => {
 
 // Two TAPs (docs/superpowers/specs/2026-11-10-multi-tap-design.md): the
 // counts are both TAPs' summed, each TAP is listed by name with its own,
-// one not answering says so, adopting on offers the owner's herd, and an
-// add asks which TAP and sends it.
+// one not answering says so, and an add asks which TAP and sends it.
+// Looking for TAPs is the Add a TAP guide's step, not a button on the card,
+// even with adopting on.
 test('System setup: with two TAPs, each is listed and an add names its TAP', async () => {
   const w = world();
   const tap = (id, state, count, joined) => ({ id, mac: '', version: '', state, polls: 10, timeouts: 0, renewals: 1, lost: 0,
@@ -235,7 +241,7 @@ test('System setup: with two TAPs, each is listed and an add names its TAP', asy
   assert.equal(items.length, 2);
   assert.match(items[0], /^Garage \(TAP 1201\)24 optimizers, 24 joined$/);
   assert.match(items[1], /^TAP 12023 optimizers, 2 joined not answering$/);
-  assert.ok(await page.$('button[data-setup-herd]'));
+  assert.equal(await page.locator('button[data-setup-herd]').count(), 0);
   await page.click('button[data-setup-start="add"]');
   await page.fill('#setup-label', '0-1234R');
   assert.deepEqual(await page.$$eval('#setup-tap option', (os) => os.map((o) => o.value)), ['1201', '1202']);
@@ -254,8 +260,8 @@ test('System setup: with two TAPs, each is listed and an add names its TAP', asy
 test('System setup: with one TAP, no TAP is asked for', async () => {
   const w = world();
   const { page, ctx, errors } = await open(w);
-  assert.equal(await page.$('.setup-taps'), null);
-  assert.equal(await page.$('button[data-setup-herd]'), null);
+  assert.equal(await page.locator('.setup-taps').count(), 0);
+  assert.equal(await page.locator('button[data-setup-herd]').count(), 0);
   await page.click('button[data-setup-start="add"]');
   await page.fill('#setup-label', '0-1234R');
   assert.equal(await page.$('#setup-tap'), null);
