@@ -684,10 +684,10 @@
   .setup-task:hover, .setup-task:focus-visible { border-color: var(--task); outline: none; }
   .setup-task .art { height: 92px; margin: 14px 14px 0; border-radius: 10px; display: flex; align-items: center; justify-content: center;
                      background: color-mix(in srgb, var(--task) 10%, transparent); }
-  .setup-task .in { display: flex; flex-direction: column; gap: 8px; padding: 14px 18px 18px; }
+  .setup-task .in { flex: 1; display: flex; flex-direction: column; gap: 8px; padding: 14px 18px 18px; }
   .setup-task strong { font-size: 15px; }
   .setup-task .in > span { font-size: 12px; color: var(--text-dim); line-height: 1.5; }
-  .setup-task .in > .go { color: var(--task); font-weight: 600; font-size: 12px; margin-top: 2px; }
+  .setup-task .in > .go { color: var(--task); font-weight: 600; font-size: 12px; margin-top: auto; padding-top: 4px; }  /* level across the cards */
   .setup-health { padding: 16px 18px; border-radius: 12px; background: var(--bg-2); border: 1px solid var(--border); display: flex; flex-direction: column; gap: 10px; }
   .setup-health .head { display: flex; align-items: baseline; gap: 10px; }
   .setup-health .head strong { font-size: 14px; }
