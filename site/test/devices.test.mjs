@@ -285,3 +285,29 @@ test('Devices, on the Pi: what the TAP holds, and where to change it', async () 
     await ctx.close();
   }
 });
+
+// More than one TAP: each optimizer's, by the TAP's name, under its
+// address. With one, nothing is added.
+test('Devices, on the Pi: with two TAPs, each optimizer shows the one it reports through', async () => {
+  const saved = routes['/api/devices'];
+  const devices = saved.devices.map((d, i) => ({ ...d, tap: i < 6 ? '1201' : '1202' }));
+  routes['/api/devices'] = { ...saved, devices };
+  const versions = { ...routes['/api/versions'], taps: [...routes['/api/versions'].taps,
+    { addr: '1202', model: 'Mgate', version: 'G8.60 Jan  1 2026', previous: '', since_unix_ms: 1767225600000, last_unix_ms: 1767225600000 }] };
+  try {
+    const { page, ctx, errors } = await open(true, versions);
+    await page.waitForSelector('#nodes-tbody .node-tap');
+    const tapOf = (addr) => page.$eval(`#nodes-tbody tr[data-addr="${addr}"] .node-tap`, (e) => e.textContent);
+    assert.equal(await tapOf(devices[0].addr), 'Garage');
+    assert.equal(await tapOf(devices[7].addr), 'TAP 1202');
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  } finally {
+    routes['/api/devices'] = saved;
+  }
+  const { page, ctx, errors } = await open(true);
+  await page.waitForTimeout(300);
+  assert.equal(await page.$('#nodes-tbody .node-tap'), null);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});

@@ -290,6 +290,20 @@ test('an empty table is said as such, and a reply without the counts shows none'
   await ctx.close();
 });
 
+// More than one TAP: each TAP's window, and the joined counts summed.
+test('with two TAPs, the discovery window card gives each TAP\'s window', async () => {
+  const tap = (id, state, d) => ({ id, mac: '', version: '', state, polls: 1, timeouts: 0, renewals: 0, lost: 0, last_reply_unix: 0,
+                                   discovery: { read: true, running: true, ...d } });
+  const { page, ctx, errors } = await open({ hash: '#busmaster', master: { taps: [
+    tap('1201', 'running', { remaining_s: 400, node_count: 40, joined: 38 }),
+    tap('1202', 'lost', { remaining_s: 0, node_count: 4, joined: 2 })] } });
+  await page.waitForFunction(() => /TAP 1202/.test(document.getElementById('disc-detail').textContent));
+  assert.equal(await page.textContent('#disc-detail'),
+    "Now TAP 1201 open, 400 s left, TAP 1202 not answering · 40 of the 44 in the TAPs' tables have joined");
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
 test('standing by, the discovery switch is disabled', async () => {
   const { page, ctx } = await open({ role: 'standby', standby: 'standing_by', hash: '#busmaster' });
   await page.waitForSelector('#disc-card', { state: 'visible' });
