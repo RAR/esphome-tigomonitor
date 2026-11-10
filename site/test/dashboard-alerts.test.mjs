@@ -10,7 +10,7 @@ import { createServer } from 'node:http';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
-import { routes } from '../screenshots/fixtures.mjs';
+import { routes, piRoutes } from '../screenshots/fixtures.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const html = readFileSync(resolve(HERE, '../../components/tigo_server/web/app.html'), 'utf8')
@@ -26,7 +26,7 @@ before(async () => {
 });
 after(async () => { await browser.close(); server.close(); });
 
-async function alerts(devices, inverters) {
+async function alerts(devices, inverters, nodes = routes['/api/nodes'].nodes) {
   const ctx = await browser.newContext({ viewport: { width: 1400, height: 1200 } });
   await ctx.route('**/api/**', async (route) => {
     const path = new URL(route.request().url()).pathname.replace(/^.*(\/api\/)/, '$1');
@@ -34,6 +34,7 @@ async function alerts(devices, inverters) {
     if (path === '/api/status') return json({ ...routes['/api/status'], platform: 'linux' });
     if (path === '/api/devices') return json({ devices, count: devices.length });
     if (path === '/api/inverters') return json({ ...routes['/api/inverters'], inverters });
+    if (path === '/api/nodes') return json({ ...routes['/api/nodes'], nodes });
     if (routes[path] !== undefined) return json(routes[path]);
     return route.fulfill({ status: 404, body: 'no fixture' });
   });
@@ -43,8 +44,10 @@ async function alerts(devices, inverters) {
   await page.goto(`http://127.0.0.1:${port}/#dashboard`, { waitUntil: 'networkidle' });
   await page.waitForFunction(() => document.getElementById('alerts').textContent.trim() !== '');
   const text = await page.textContent('#alerts');
+  const tiles = await page.$$eval('#inv-grid .panel-heat-tile', (ts) => ts.map((t) => t.dataset.addr));
+  const grid = await page.textContent('#inv-grid');
   await ctx.close();
-  return { text, errors };
+  return { text, tiles, grid, errors };
 }
 
 const base = routes['/api/devices'].devices;
@@ -59,7 +62,10 @@ const stray = { addr: '002C', barcode: '', name: '002C', string_label: 'All pane
   voltage_in: 0, data_age_ms: 3 * 3600 * 1000, stale: true };
 
 test('a stray in "All panels" at 0 W is not a string down', async () => {
-  const { text, errors } = await alerts([...base, stray], [...invs, unassigned]);
+  // In the node list and no table walk heard, so not an alien: still shown.
+  const nodes = [...routes['/api/nodes'].nodes, { ...routes['/api/nodes'].nodes[0], addr: '002C', long_address: '',
+    cca_label: '', cca_string: '' }];
+  const { text, errors } = await alerts([...base, stray], [...invs, unassigned], nodes);
   assert.doesNotMatch(text, /no production while the rest of the system is producing/);
   assert.match(text, /002C.*no data for 3h/);
   assert.deepEqual(errors, []);
@@ -71,4 +77,65 @@ test('a real string at 0 W while the rest produce is still down', async () => {
   const { text, errors } = await alerts(devices, invs);
   assert.match(text, /no production while the rest of the system is producing/);
   assert.deepEqual(errors, []);
+});
+
+// An alien, as the CCA calls one: an optimizer that reports but the TAP's
+// table doesn't list. The CCA keeps it off its panels; so does the Pi, once
+// it has heard a table walk: on the Dashboard and the mesh map it isn't a
+// panel, and Devices lists it under "Heard, not in the node list".
+const T = 1767225600;
+const onRoster = routes['/api/nodes'].nodes.map((n) => ({ ...n, last_roster_unix: T }));
+
+test('an alien is not on the Dashboard: no tile, no alert, no "All panels" string', async () => {
+  const { text, tiles, grid, errors } = await alerts([...base, stray], [...invs, unassigned], onRoster);
+  assert.equal(tiles.includes('002C'), false);
+  assert.equal(tiles.length, base.length);
+  assert.doesNotMatch(text, /002C/);
+  assert.doesNotMatch(grid, /All panels|Unassigned/);
+  assert.deepEqual(errors, []);
+});
+
+test('an optimizer the TAP stopped listing a day ago is an alien too', async () => {
+  const gone = { ...stray, addr: '002D', name: '002D', barcode: '04C05B0000200002' };
+  const nodes = [...onRoster, { ...onRoster[0], addr: '002D', long_address: '04C05B0000200002', cca_label: '',
+    cca_string: '', last_roster_unix: T - 2 * 86400 }];
+  const { tiles, errors } = await alerts([...base, gone], [...invs, unassigned], nodes);
+  assert.equal(tiles.includes('002D'), false);
+  assert.deepEqual(errors, []);
+});
+
+test('an unassigned optimizer the TAP lists is still a panel on the Dashboard', async () => {
+  const fresh = { ...base[0], addr: '0080', name: '0080', barcode: '04C05B0000200001', string_label: 'All panels' };
+  const nodes = [...onRoster, { ...onRoster[0], addr: '0080', long_address: '04C05B0000200001', cca_label: '',
+    cca_string: '', last_roster_unix: T }];
+  const { tiles, errors } = await alerts([...base, fresh], [...invs, unassigned], nodes);
+  assert.equal(tiles.includes('0080'), true);
+  assert.deepEqual(errors, []);
+});
+
+test('an alien is not on the mesh map', async () => {
+  const ctx = await browser.newContext({ viewport: { width: 1400, height: 1200 } });
+  const mesh = piRoutes['/api/mesh'];
+  const meshNodes = [...mesh.nodes, { ...mesh.nodes[0], addr: '002C', label: '002C', string: 'All panels' }];
+  await ctx.route('**/api/**', async (route) => {
+    const path = new URL(route.request().url()).pathname.replace(/^.*(\/api\/)/, '$1');
+    const json = (body) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
+    if (path === '/api/status') return json({ ...routes['/api/status'], platform: 'linux' });
+    if (path === '/api/mesh') return json({ ...mesh, nodes: meshNodes });
+    if (path === '/api/devices') return json({ devices: [...base, stray], count: base.length + 1 });
+    if (path === '/api/nodes') return json({ ...routes['/api/nodes'], nodes: onRoster });
+    if (piRoutes[path] !== undefined) return json(piRoutes[path]);
+    if (routes[path] !== undefined) return json(routes[path]);
+    return route.fulfill({ status: 404, body: 'no fixture' });
+  });
+  const page = await ctx.newPage();
+  const errors = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+  await page.goto(`http://127.0.0.1:${port}/#topology`, { waitUntil: 'networkidle' });
+  await page.waitForSelector('#topology-mesh .mesh-node');
+  const addrs = await page.$$eval('#topology-mesh .mesh-node', (gs) => gs.map((g) => g.dataset.addr));
+  assert.equal(addrs.includes('002C'), false);
+  assert.equal(addrs.length, mesh.nodes.length);
+  assert.deepEqual(errors, []);
+  await ctx.close();
 });

@@ -24,7 +24,7 @@ before(async () => {
 });
 after(async () => { await browser.close(); server.close(); });
 
-async function open(linux, versions = routes['/api/versions'], posts = [], master = { role: 'listen', active: false }, devices = null) {
+async function open(linux, versions = routes['/api/versions'], posts = [], master = { role: 'listen', active: false }, devices = null, nodes = null) {
   const ctx = await browser.newContext({ viewport: { width: 1400, height: 1200 } });
   await ctx.route('**/api/**', async (route) => {
     const path = new URL(route.request().url()).pathname.replace(/^.*(\/api\/)/, '$1');
@@ -53,6 +53,7 @@ async function open(linux, versions = routes['/api/versions'], posts = [], maste
     }
     if (path === '/api/master') return json(200, master);
     if (path === '/api/devices' && devices) return json(200, { devices, count: devices.length });
+    if (path === '/api/nodes' && nodes) return json(200, { ...routes['/api/nodes'], nodes });
     if (path === '/api/nodes/delete' && route.request().method() === 'POST') {
       const addr = new URL(route.request().url()).searchParams.get('addr');
       posts.push({ path, addr });
@@ -228,6 +229,19 @@ test("Devices, on the Pi: each TAP's series, mesh or star only, from its version
   assert.deepEqual(fw.slice(0, 2), ['H1.0007 Apr 22 2025', 'G8.65 May  9 2025']);
   assert.match(await page.getAttribute('#devices-taps tbody tr:nth-child(1) td.tap-fw', 'title'), /15:28:25 GW-H158\.7\.00/);
   assert.match(cells[2][2], /forces a mesh system back to the old star stack/);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test('Devices, on the Pi: a node the TAP stopped listing a day ago is listed as heard, not in the table', async () => {
+  const T = 1767225600;
+  const nodes = routes['/api/nodes'].nodes.map((m) => ({ ...m, last_roster_unix: T }));
+  const gone = { ...stray, addr: '002D', barcode: '04C05B0000200002' };
+  nodes.push({ ...nodes[0], addr: '002D', long_address: '04C05B0000200002', cca_label: '', cca_string: '', last_roster_unix: T - 2 * 86400 });
+  const { page, ctx, errors } = await open(true, routes['/api/versions'], [], undefined, [...routes['/api/devices'].devices, gone], nodes);
+  await page.waitForSelector('#devices-strays', { state: 'visible' });
+  assert.match(await page.textContent('#devices-strays tbody'), /002D/);
+  assert.equal(await page.locator('#devices-strays tbody tr').count(), 1);
   assert.deepEqual(errors, []);
   await ctx.close();
 });
