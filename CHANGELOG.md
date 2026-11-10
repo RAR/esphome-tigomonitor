@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Set up a whole system from one page (Raspberry Pi).** System setup
+  gains **Set up a new system**, a checklist from the bus to the layout:
+  the bus, the TAP, the optimizers, the layout, string ratings, and a
+  password and Home Assistant. Each step ticks itself off from what the Pi
+  already sees and links to where you do the rest. Beside the optimizer
+  tasks are two for TAPs (experimental): **Add a TAP**, which brings a TAP
+  a CCA has set up onto the bus and names it, and **Retire a TAP**, which
+  drops one that has gone for good. The task cards have new pictures, the
+  optimizer from the logo and a TAP of its own.
 - **Forget a stray optimizer (Raspberry Pi).** An optimizer that once
   joined your system keeps its network key and goes on reporting through
   the TAP even after it's taken off the TAP's table, so it showed up as

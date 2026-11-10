@@ -675,6 +675,45 @@
   [data-task="replace"] { --task: var(--accent-2); }
   [data-task="add"] { --task: var(--accent); }
   [data-task="retire"] { --task: var(--accent-3); }
+  [data-task="system"] { --task: var(--warn); }
+  [data-task="addtap"] { --task: var(--accent); }
+  [data-task="retiretap"] { --task: var(--accent-3); }
+  .setup-group { font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--text-dim); margin: 0 0 10px; }
+  .setup-task .art { gap: 12px; }
+  .setup-task .art .mark { position: relative; display: flex; }
+  .setup-task .art .mark-badge { position: absolute; }
+  .setup-task.later { cursor: default; border-style: dashed; }
+  .setup-task.later::before { display: none; }
+  .setup-task.later .art { opacity: .5; background: var(--bg-3); }
+  .setup-task.later:hover { border-color: var(--border); }
+  /* "Set up a new system": a card across the top, its steps as a bar. */
+  .setup-start { display: flex; flex-wrap: wrap; align-items: center; gap: 14px 22px; width: 100%; padding: 18px 22px; margin-bottom: 22px; text-align: left;
+                 border-radius: 12px; border: 1px solid var(--border); border-top: 4px solid var(--task); background: var(--bg-2); color: var(--text); font: inherit; cursor: pointer; }
+  .setup-start:hover, .setup-start:focus-visible { border-color: var(--task); outline: none; }
+  .setup-start .in { flex: 1 1 320px; display: flex; flex-direction: column; gap: 6px; }
+  .setup-start strong { font-size: 17px; }
+  .setup-start .in > span { font-size: 13px; color: var(--text-dim); }
+  .setup-start .steps { display: flex; gap: 6px; margin-top: 4px; }
+  .setup-start .steps span { flex: 1; height: 6px; border-radius: 3px; background: var(--warn); }
+  .setup-start .steps span.ok { background: var(--good); }
+  .setup-start .go { padding: 10px 16px; border-radius: 8px; background: var(--task); color: #1c1300; font-weight: 600; font-size: 13px; }
+  .setup-state { display: inline-block; padding: 3px 9px; border-radius: 999px; font-size: 11px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; vertical-align: middle; margin-left: 10px; }
+  .setup-state.ok { color: var(--good); background: color-mix(in srgb, var(--good) 15%, transparent); }
+  .setup-state.todo { color: var(--warn); background: color-mix(in srgb, var(--warn) 15%, transparent); }
+  .setup-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin: 14px 0; }
+  .setup-stats div { padding: 12px 14px; border-radius: 10px; background: var(--bg-3); display: flex; flex-direction: column; gap: 2px; }
+  .setup-stats b { font-size: 22px; }
+  .setup-stats span { font-size: 12px; color: var(--text-dim); }
+  .setup-stats .todo { box-shadow: inset 0 0 0 1px var(--warn); }
+  .setup-stats .todo b { color: var(--warn); }
+  .setup-found { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border-radius: 10px; background: var(--bg-3); margin: 14px 0; font-size: 13px; }
+  .setup-found .new { color: var(--good); }
+  .setup-tap-pick label { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; cursor: pointer; }
+  .setup-tap-pick label.off { cursor: default; opacity: .6; }
+  .setup-tap-pick span { color: var(--text-dim); font-size: 12px; }
+  .setup-actions a.btn { text-decoration: none; }
+  /* The checklist ticks a step done from what the Pi sees, in green: amber is its to do. */
+  [data-task="system"] .setup-rail li.done .n { border-color: var(--good); color: var(--good); background: color-mix(in srgb, var(--good) 10%, transparent); }
   .btn.task-go { background: var(--task); border-color: var(--task); color: #04121c; font-weight: 600; }
   .btn.task-go:hover:not(:disabled) { background: color-mix(in srgb, var(--task) 85%, #fff); }
   .setup-tasks { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 14px; margin-bottom: 22px; }
@@ -1570,6 +1609,38 @@
         <h1>System setup</h1>
         <div class="topbar-meta" id="setup-meta">—</div>
       </div>
+      <!-- The marks on the task cards: the optimizer from the Tigo Monitor
+           logo, and the TAP, a gateway with one live light. -->
+      <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+        <defs>
+          <symbol id="setup-mark-opt" viewBox="4 10 56 48">
+            <rect x="9" y="17" width="34" height="28" rx="5" fill="#1D2A63" stroke="#C6D0E2" stroke-width="3.5"/>
+            <g fill="#C6D0E2" fill-opacity="0.65"><rect x="23" y="23" width="6" height="6"/><rect x="31" y="23" width="6" height="6"/>
+              <rect x="15" y="33" width="6" height="6"/><rect x="23" y="33" width="6" height="6"/><rect x="31" y="33" width="6" height="6"/></g>
+            <rect x="15" y="23" width="6" height="6" fill="#F4B23C"/>
+            <g fill="none" stroke="#F4B23C" stroke-width="4" stroke-linecap="round"><path d="M48 25 a11 11 0 0 1 0 14"/><path d="M53 19 a19 19 0 0 1 0 26"/></g>
+            <g fill="none" stroke="#C6D0E2" stroke-width="4.5" stroke-linecap="round"><path d="M17 45 v5 a4 4 0 0 1 -4 4 h-4"/><path d="M35 45 v5 a4 4 0 0 0 4 4 h4"/></g>
+          </symbol>
+          <symbol id="setup-mark-optghost" viewBox="0 10 52 48">
+            <rect x="9" y="17" width="34" height="28" rx="5" fill="none" style="stroke:var(--text-faint)" stroke-width="3" stroke-dasharray="5 4"/>
+            <g fill="none" style="stroke:var(--text-faint)" stroke-width="4" stroke-linecap="round"><path d="M17 45 v5 a4 4 0 0 1 -4 4 h-4"/><path d="M35 45 v5 a4 4 0 0 0 4 4 h4"/></g>
+          </symbol>
+          <symbol id="setup-mark-tap" viewBox="0 0 64 64">
+            <path d="M44 22 V9" stroke="#C6D0E2" stroke-width="3.5" stroke-linecap="round"/><circle cx="44" cy="8" r="3" fill="#C6D0E2"/>
+            <g fill="none" stroke="#F4B23C" stroke-width="3.5" stroke-linecap="round"><path d="M51 3 a9 9 0 0 1 0 10"/><path d="M37 3 a9 9 0 0 0 0 10"/></g>
+            <rect x="8" y="22" width="48" height="26" rx="5" fill="#1D2A63" stroke="#C6D0E2" stroke-width="3.5"/>
+            <circle cx="32" cy="35" r="4" fill="#F4B23C"/>
+            <g stroke="#C6D0E2" stroke-width="3.5" stroke-linecap="round"><path d="M22 48 v8"/><path d="M42 48 v8"/></g>
+            <path d="M4 58 H60" stroke="#C6D0E2" stroke-opacity="0.55" stroke-width="3" stroke-linecap="round"/>
+          </symbol>
+          <symbol id="setup-mark-tapghost" viewBox="0 0 64 64">
+            <path d="M44 22 V9" style="stroke:var(--text-faint)" stroke-width="3" stroke-linecap="round"/>
+            <rect x="8" y="22" width="48" height="26" rx="5" fill="none" style="stroke:var(--text-faint)" stroke-width="3" stroke-dasharray="5 4"/>
+            <g style="stroke:var(--text-faint)" stroke-width="3" stroke-linecap="round"><path d="M22 48 v8"/><path d="M42 48 v8"/></g>
+            <path d="M4 58 H60" style="stroke:var(--text-faint)" stroke-width="3" stroke-linecap="round"/>
+          </symbol>
+        </defs>
+      </svg>
       <div id="setup-root" aria-live="polite"></div>
     </section>
 
@@ -4080,10 +4151,19 @@
     replace: ['pick', 'label', 'check', 'do', 'wait', 'done'],
     add: ['label', 'check', 'do', 'wait', 'done'],
     retire: ['pick', 'check', 'do', 'done'],
+    // Guides: no check or job of their own; each step says what it found.
+    system: ['bus', 'tap', 'optimizers', 'layout', 'names', 'access', 'done'],
+    addtap: ['prepare', 'connect', 'allow', 'find', 'name', 'done'],
+    retiretap: ['pick', 'done'],
   };
   const SETUP_STEP_NAMES = { pick: 'Optimizer to remove', label: 'New optimizer', check: 'Review', do: 'Apply',
-                             wait: 'Wait for join', done: 'Complete' };
-  const SETUP_TITLES = { replace: 'Replace an optimizer', add: 'Add an optimizer', retire: 'Retire an optimizer' };
+                             wait: 'Wait for join', done: 'Complete',
+                             bus: 'Connect the bus', tap: 'Find the TAP', optimizers: 'Optimizers', layout: 'Lay out the array',
+                             names: 'Names and ratings', access: 'Password and Home Assistant',
+                             prepare: 'Set it up with a CCA', connect: 'Wire it in', allow: 'Allow a new TAP', find: 'Look for TAPs',
+                             name: 'Name it' };
+  const SETUP_TITLES = { replace: 'Replace an optimizer', add: 'Add an optimizer', retire: 'Retire an optimizer',
+                         system: 'Set up a new system', addtap: 'Add a TAP', retiretap: 'Retire a TAP' };
   // The master's steps, in order, for the progress list.
   const SETUP_JOB_STEPS = {
     add: [['reading the table', 'Read the TAP\'s list'], ['writing', 'Write the new record'], ['reading it back', 'Verify the result']],
@@ -4093,22 +4173,28 @@
   };
   let setup = { flow: null, data: null, timer: 0 };
   // The tasks' drawings and marks, in each task's hue (currentColor).
+  const setupMark = (id, w, h, style = '') => `<svg width="${w}" height="${h}"${style ? ` style="${style}"` : ''}><use href="#setup-mark-${id}"/></svg>`;
+  const setupBadge = (body, color, pos) => `<svg class="mark-badge" width="20" height="20" viewBox="0 0 24 24" style="${pos}" fill="var(--bg)" stroke="${color}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/>${body}</svg>`;
+  const SETUP_SWAP = color => `<svg width="30" height="24" viewBox="0 0 30 24" fill="none" stroke="${color}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8h22l-5-5M27 16H5l5 5"/></svg>`;
+  const SETUP_SHELF = '<svg width="80" height="14" viewBox="0 0 80 14" fill="none" stroke="var(--task)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M40 1v8l-4-4M40 9l4-4"/><path d="M6 12h68"/></svg>';
+  const SETUP_PLUS = '<path d="M12 7v10M7 12h10"/>';
+  // The tasks' pictures: the optimizer and TAP marks, in each task's hue.
   const SETUP_ART = {
-    replace: `<svg width="140" height="56" viewBox="0 0 140 56" fill="none" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-      <rect x="6" y="12" width="38" height="32" rx="6" stroke="var(--text-faint)" stroke-width="2" stroke-dasharray="4 4"/><path d="M18 24l14 8M32 24l-14 8" stroke="var(--bad)" stroke-width="2"/>
-      <path d="M54 22h26l-6-6M80 34H54l6 6" stroke="var(--task)" stroke-width="2.5"/><rect x="96" y="12" width="38" height="32" rx="6" stroke="var(--task)" stroke-width="2"/>
-      <path d="M106 28l6 6 12-12" stroke="var(--good)" stroke-width="2.5"/></svg>`,
-    add: `<svg width="140" height="56" viewBox="0 0 140 56" fill="none" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-      <rect x="22" y="12" width="38" height="32" rx="6" stroke="var(--text-faint)" stroke-width="2"/><rect x="80" y="12" width="38" height="32" rx="6" stroke="var(--task)" stroke-width="2"/>
-      <path d="M99 21v14M92 28h14" stroke="var(--task)" stroke-width="2.5"/></svg>`,
-    retire: `<svg width="140" height="56" viewBox="0 0 140 56" fill="none" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-      <rect x="51" y="8" width="38" height="32" rx="6" stroke="var(--text-faint)" stroke-width="2" stroke-dasharray="4 4"/><path d="M44 44h52" stroke="var(--task)" stroke-width="2.5"/>
-      <path d="M70 22v12l-5-5M70 34l5-5" stroke="var(--task)" stroke-width="2.5"/></svg>`,
+    replace: `<span class="mark">${setupMark('optghost', 54, 46)}<svg class="mark-badge" width="22" height="22" viewBox="0 0 24 24" style="left:16px;top:9px" fill="none" stroke="var(--bad)" stroke-width="3" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></span>
+      ${SETUP_SWAP('var(--task)')}<span class="mark">${setupMark('opt', 54, 46)}${setupBadge('<path d="M7 12l4 4 6-7"/>', 'var(--good)', 'right:-4px;top:-4px')}</span>`,
+    add: `${setupMark('opt', 46, 40, 'opacity:.45')}<span class="mark">${setupMark('opt', 54, 46)}${setupBadge(SETUP_PLUS, 'var(--good)', 'right:-6px;top:-6px')}</span>`,
+    retire: `<span style="display:flex;flex-direction:column;align-items:center;gap:4px">${setupMark('optghost', 54, 46)}${SETUP_SHELF}</span>`,
+    addtap: `${setupMark('tap', 46, 46, 'opacity:.45')}<span class="mark">${setupMark('tap', 56, 56)}${setupBadge(SETUP_PLUS, 'var(--good)', 'right:-6px;top:10px')}</span>`,
+    retiretap: `<span style="display:flex;flex-direction:column;align-items:center;gap:2px">${setupMark('tapghost', 52, 52)}${SETUP_SHELF}</span>`,
+    replacetap: `${setupMark('tapghost', 46, 46)}${SETUP_SWAP('var(--text-faint)')}${setupMark('tap', 46, 46)}`,
   };
   const SETUP_ICON = {
     replace: '<path d="M4 8h13l-3-3"/><path d="M20 16H7l3 3"/>',
     add: '<path d="M12 5v14M5 12h14"/>',
     retire: '<path d="M3 7h18v3H3z"/><path d="M5 10v9h14v-9"/><path d="M10 14h4"/>',
+    system: '<path d="M9 6h11M9 12h11M9 18h11"/><path d="M4 6l1 1 2-2M4 12l1 1 2-2"/><path d="M4.5 18h.01"/>',
+    addtap: '<path d="M12 5v14M5 12h14"/>',
+    retiretap: '<path d="M3 7h18v3H3z"/><path d="M5 10v9h14v-9"/><path d="M10 14h4"/>',
   };
   // The review plan's marks: each line says what kind of step it is.
   const SETUP_MARK = {
@@ -4124,8 +4210,8 @@
 
   async function setupLoad() {
     const get = u => apiFetch(u).then(r => r.ok ? r.json() : null).catch(() => null);
-    const [m, d, n, v] = await Promise.all([get('/api/master'), get('/api/devices'), get('/api/nodes'),
-                                            get('/api/versions')]);
+    const [m, d, n, v, st, cfg, lay] = await Promise.all([get('/api/master'), get('/api/devices'), get('/api/nodes'),
+                                            get('/api/versions'), get('/api/status'), get('/api/settings'), get('/api/layout')]);
     const devices = (d && d.devices) || [];
     const opts = ((n && n.nodes) || []).filter(x => /^04C05B/i.test(x.long_address || '')).map(x => {
       const dev = devices.find(v => String(v.addr).toUpperCase() === String(x.addr).toUpperCase()) || {};
@@ -4138,7 +4224,33 @@
     for (const o of opts) o.quiet = o.placed && reporting > opts.length / 2 && (o.stale || !(o.ageMs < 15 * 60000));
     // Each TAP's name, by its id, as on the Devices page.
     const tapNames = Object.fromEntries(((v && v.taps) || []).filter(t => t.name).map(t => [t.addr, t.name]));
-    setup.data = { master: m, opts, tapNames };
+    setup.data = { master: m, opts, tapNames, devices, nodes: n, versions: v, status: st, settings: cfg, layout: lay };
+  }
+
+  // "Set up a new system": each step's state, from what the Pi already
+  // knows, so a step done elsewhere ticks itself off. ok: done; line: what
+  // was found, said in one sentence.
+  function setupChecks(d) {
+    const st = d.status || {}, cfg = d.settings || {}, lay = d.layout || {}, v = d.versions || {};
+    const frames = st.total_frames || 0;
+    const tapsHeard = (v.taps || []).length;
+    const reporting = (d.devices || []).filter(x => !x.stale).length;
+    const w = setupCounts(d.master);
+    const invs = lay.inverters || [];
+    const rated = invs.flatMap(i => (i.mppts || []).flatMap(m => m.strings || []));
+    const strings = rated.length;
+    const loose = (lay.unassigned || []).length;
+    const unrated = rated.filter(x => !(x.rating_w > 0)).length;
+    const fmt = x => Number(x).toLocaleString('en-US');
+    return {
+      bus: { ok: frames > 0, line: frames ? `${fmt(frames)} messages heard on the bus${st.invalid_checksum ? `, ${fmt(st.invalid_checksum)} with a bad checksum` : ''}.` : 'Nothing heard on the bus yet.' },
+      tap: { ok: tapsHeard > 0, line: tapsHeard ? `${tapsHeard === 1 ? 'The TAP' : `${tapsHeard} TAPs`} answered: ${(v.taps || []).map(t => `${t.name || 'TAP ' + t.addr} (${t.version.split(' ')[0]})`).join(', ')}.` : 'No TAP has answered yet.' },
+      optimizers: { ok: reporting > 0, line: reporting ? `${reporting} optimizer${reporting === 1 ? '' : 's'} reporting${w ? `, ${w.in_table} in the TAP's table` : ''}.` : 'No optimizer is reporting yet.' },
+      layout: { ok: invs.length > 0 && loose === 0, invs: invs.length, strings, loose,
+                line: !invs.length ? 'No inverters laid out yet.' : loose ? `${loose} optimizer${loose === 1 ? " isn't" : "s aren't"} placed yet.` : 'Every optimizer is placed.' },
+      names: { ok: rated.length > 0 && unrated === 0, line: !rated.length ? 'No strings to rate yet.' : unrated ? `${unrated} string${unrated === 1 ? ' has' : 's have'} no panel rating.` : 'Every string has a panel rating.' },
+      access: { ok: !!cfg.web_password_set, line: cfg.web_password_set ? `A web password is set${cfg.mqtt && cfg.mqtt.host ? ', and Home Assistant is connected over MQTT' : ''}.` : 'No web password: anyone on your network can change settings.' },
+    };
   }
   // More than one TAP: the ones run, and each by name.
   function setupTaps() {
@@ -4169,6 +4281,14 @@
     if (setup.flow) return renderSetupFlow(root);
     setup.drawn = '';
     let html = '<p class="setup-lede">Make changes to the system\'s hardware the way a CCA does. Each change is checked first, and you will see exactly what it will do before anything is sent.</p>';
+    // "Set up a new system": its steps as a bar, done or not, and the next to do.
+    const checks = setupChecks(d), keys = SETUP_STEPS.system.filter(k => k !== 'done');
+    const left = keys.filter(k => !checks[k].ok);
+    html += `<button type="button" class="setup-start" data-task="system" data-setup-start="system"><span class="in"><strong>Set up a new system</strong>
+      <span>Everything from the bus to the layout, in one place. Steps that are already done tick themselves off.</span>
+      <span class="steps" aria-hidden="true">${keys.map(k => `<span class="${checks[k].ok ? 'ok' : ''}"></span>`).join('')}</span>
+      <span>${keys.length - left.length} of ${keys.length} done${left.length ? ` · next: ${SETUP_STEP_NAMES[left[0]]}` : ''}</span></span>
+      <span class="go">${left.length === keys.length ? 'Start' : left.length ? 'Continue' : 'Review'} →</span></button>`;
     if (!setupRunning(m))
       html += '<div class="setup-note info">This Pi is not running the bus, so it cannot change the TAP\'s optimizer list. To make changes, set its bus role in Settings → Bus.</div>';
     else if (!t.writes)
@@ -4180,10 +4300,16 @@
         <span style="flex-grow:1"></span><button type="button" class="btn task-go" data-task="replace" data-setup-start="replace" data-setup-old="${topoEscape(quiet.mac)}">Replace ${topoEscape(quiet.name)}</button></div>`;
     const task = (k, title, text) => `<button type="button" class="setup-task" data-task="${k}" data-setup-start="${k}"><span class="art">${SETUP_ART[k]}</span>
       <span class="in"><strong>${title}</strong><span>${text}</span><span class="go">Start →</span></span></button>`;
-    html += `<div class="setup-tasks">
+    html += `<h3 class="setup-group">Optimizers</h3><div class="setup-tasks">
       ${task('replace', 'Replace an optimizer', 'Remove a failed optimizer, add its replacement, and keep its position in your layout.')}
       ${task('add', 'Add an optimizer', 'Register a new optimizer, wait for it to join, then assign it in Topology.')}
       ${task('retire', 'Retire an optimizer', 'Permanently remove an optimizer from your system.')}
+    </div>
+    <h3 class="setup-group">TAPs</h3><div class="setup-tasks">
+      ${task('addtap', 'Add a TAP', 'Bring a TAP a CCA has set up onto the bus, and give it an address and a name.')}
+      ${task('retiretap', 'Retire a TAP', 'Forget a TAP that has gone for good, so it stops showing as not answering.')}
+      <div class="setup-task later"><span class="art">${SETUP_ART.replacetap}</span><span class="in"><strong>Replace a TAP</strong>
+        <span>Comes after a bench rehearsal: the old TAP's optimizers have to move to the new one.</span></span></div>
     </div>`;
     if (w) {
       // Your system: joined and reporting, joined but silent, listed and never joined.
@@ -4215,12 +4341,15 @@
   function setupRail(f) {
     const steps = SETUP_STEPS[f.task], i = steps.indexOf(f.step);
     const name = s => {
+      if (s === 'pick' && f.task === 'retiretap') return f.tapPick && steps.indexOf(s) < i ? `Retiring TAP ${f.tapPick}` : 'TAP to retire';
       if (s === 'pick' && f.old && steps.indexOf(s) < i) return `Removing ${f.old.name}`;
       if (s === 'label' && f.label && steps.indexOf(s) < i) return `Adding ${macOfLabel(f.label) ? labelOfMac(macOfLabel(f.label)) : f.label}`;
       return SETUP_STEP_NAMES[s];
     };
+    const checks = f.task === 'system' ? setupChecks(setup.data) : null;
+    const done = (s, k) => checks ? !!(checks[s] && checks[s].ok) && k !== i : k < i;
     return `<nav class="setup-rail" aria-label="Steps"><h2><span class="ico">${setupSvg(SETUP_ICON[f.task], 'var(--task)', 16)}</span>${SETUP_TITLES[f.task]}</h2><ol>${steps.map((s, k) =>
-      `<li class="${k < i ? 'done' : k === i ? 'on' : ''}"${k === i ? ' aria-current="step"' : ''}><span class="n">${k < i ? '✓' : k + 1}</span>${topoEscape(name(s))}</li>`).join('')}</ol></nav>`;
+      `<li class="${done(s, k) ? 'done' : k === i ? 'on' : ''}"${k === i ? ' aria-current="step"' : ''}><span class="n">${done(s, k) ? '✓' : k + 1}</span>${topoEscape(name(s))}</li>`).join('')}</ol></nav>`;
   }
 
   // The pick list's search: every word typed must appear in the row.
@@ -4262,12 +4391,117 @@
     return { lines, gap: true };
   }
 
+  // The guides' steps (SETUP_STEPS.system and .addtap): no check or job;
+  // each says what it found and where to do the rest.
+  const setupNext = (f, ok = true) => {
+    const steps = SETUP_STEPS[f.task], next = steps[steps.indexOf(f.step) + 1];
+    return `<button type="button" class="btn${ok ? ' task-go' : ''}" data-setup-next${ok ? '' : ' disabled'}>${next === 'done' ? 'Finish' : `Next: ${SETUP_STEP_NAMES[next]}`}</button>`;
+  };
+  const setupLink = (href, label, primary, tab) =>
+    `<a class="btn${primary ? ' task-go' : ''}" href="${href}"${tab ? ` data-settings-tab="${tab}"` : ''}>${label}</a>`;
+  const SETUP_SYSTEM = {
+    bus: ['The Pi listens to the RS485 bus between the TAP and its CCA, or runs the bus itself in the CCA\'s place. Choose the serial port, or a network bridge, and the Pi\'s role on the bus.',
+          [['#settings', 'Open Settings → Bus', 'bus']]],
+    tap: ['Running the bus, the Pi brings the TAP up and asks its version; listening, it hears the CCA ask. If no TAP answers, check its power and the A and B wires.',
+          [['#settings', 'Open Settings → Bus', 'bus'], ['#buslog', 'See the bus traffic']]],
+    optimizers: ['An optimizer reports once it has joined the TAP, which lists the optimizers it takes. One the TAP doesn\'t list won\'t join; add it with Add an optimizer.',
+                 [['#nodes', 'See the list']]],
+    layout: ['Tell the monitor which inverter, MPPT and string each optimizer feeds, so the Dashboard can group them and spot a panel lagging its neighbours. In Topology, add your inverters and strings, then drag each panel onto its string.',
+             [['#topology', 'Open Topology →']]],
+    names: ['Give each string its panel rating, so the Dashboard can compare each panel with what it should make, and name panels the way you know them.',
+            [['#topology', 'Open Topology →']]],
+    access: ['Set a web password, so only you can change settings, and connect Home Assistant over MQTT if you use it.',
+             [['#settings', 'Set a password', 'web'], ['#settings', 'Connect Home Assistant', 'ha']]],
+  };
+  const SETUP_GUIDES = {
+    retiretap(f, back) {
+      if (f.step === 'done')
+        return `<div class="setup-done"><h3>TAP ${topoEscape(f.tapPick)} is retired</h3>
+          <div class="sub">The Pi no longer polls it or keeps it on its list. If it comes back, bring it in again with Add a TAP.</div>
+          <div class="setup-actions"><button type="button" class="btn primary" data-setup-home>Finish</button></div></div>`;
+      const taps = setupTaps();
+      const rows = taps.map(t => {
+        const answering = t.state === 'running';
+        return `<label class="${answering ? 'off' : ''}"><input type="radio" name="setup-tap-retire" value="${topoEscape(t.id)}"${answering ? ' disabled' : ''}${f.tapPick === t.id ? ' checked' : ''}>
+          <strong>${topoEscape(setupTapName(t.id))}</strong><span>${answering ? 'answering: unplug it first' : t.state === 'lost' ? 'not answering' : 'not answering; asked every 5 min'}</span></label>`;
+      }).join('');
+      return `<h3>Which TAP has gone for good?</h3>
+        <div class="sub">The Pi stops polling it and leaves it off its list. A TAP still answering can't be retired: unplug it first. Its optimizers' history stays.</div>
+        ${setupRunning(setup.data.master) ? (taps.length > 1 ? `<div class="setup-found setup-tap-pick">${rows}</div>` : '<div class="setup-note info">There is only one TAP: nothing to retire.</div>')
+          : '<div class="setup-note info">This Pi is not running the bus, so it cannot change its list of TAPs.</div>'}
+        <div class="setup-actions">${back('Cancel')}<button type="button" class="btn task-go" data-setup-retire${f.tapPick ? '' : ' disabled'}>${f.tapPick ? `Retire TAP ${topoEscape(f.tapPick)}` : 'Retire'}</button></div>`;
+    },
+    system(f, back) {
+      const c = setupChecks(setup.data), keys = SETUP_STEPS.system.filter(k => k !== 'done');
+      if (f.step === 'done') {
+        const left = keys.filter(k => !c[k].ok);
+        return `<h3>${left.length ? `${keys.length - left.length} of ${keys.length} done` : 'Your system is set up'}</h3>
+          <div class="sub">${left.length ? 'What is left, and where to do it, is on each step. This list stays here: come back any time.' : 'Every step is done. Come back any time: the list ticks itself off from what the Pi sees.'}</div>
+          <ul class="setup-sumlist">${keys.map(k => `<li><span class="setup-state ${c[k].ok ? 'ok' : 'todo'}">${c[k].ok ? 'Done' : 'To do'}</span> <strong>${SETUP_STEP_NAMES[k]}</strong> ${topoEscape(c[k].line)}</li>`).join('')}</ul>
+          <div class="setup-actions">${back()}<button type="button" class="btn primary" data-setup-home>Finish</button></div>`;
+      }
+      const k = f.step, [text, links] = SETUP_SYSTEM[k], ok = c[k].ok;
+      const stats = k === 'layout' ? `<div class="setup-stats"><div><b>${c.layout.invs}</b><span>inverter${c.layout.invs === 1 ? '' : 's'}</span></div>
+          <div><b>${c.layout.strings}</b><span>string${c.layout.strings === 1 ? '' : 's'}</span></div>
+          <div class="${c.layout.loose ? 'todo' : ''}"><b>${c.layout.loose}</b><span>${c.layout.loose === 1 ? "optimizer isn't placed yet" : 'not placed yet'}</span></div></div>` : '';
+      const extra = k === 'optimizers' ? '<button type="button" class="btn" data-setup-start="add">Add an optimizer</button>' : '';
+      return `<h3>${SETUP_STEP_NAMES[k]}<span class="setup-state ${ok ? 'ok' : 'todo'}">${ok ? 'Done' : 'To do'}</span></h3>
+        <div class="sub">${text}</div>
+        <p class="setup-line">${topoEscape(c[k].line)}</p>${stats}
+        <div class="setup-actions">${links.map(([h, l, tab], i) => setupLink(h, l, i === 0 && !ok, tab)).join('')}${extra}</div>
+        <div class="setup-actions">${back()}${setupNext(f)}</div>`;
+    },
+    addtap(f, back) {
+      const m = setup.data.master, running = setupRunning(m);
+      const offBus = '<div class="setup-note info">This Pi is not running the bus, so it cannot take on a TAP. To do this, set its bus role in Settings → Bus.</div>';
+      if (f.step === 'prepare')
+        return `<h3>Set it up with a CCA</h3>
+          <div class="sub">A new TAP has to be set up by a CCA first: the Pi can't give a TAP its radio settings. Connect the new TAP to a CCA on its own, not on this bus, let the CCA set it up, then unplug the CCA.</div>
+          <div class="setup-actions">${back('Cancel')}${setupNext(f)}</div>`;
+      if (f.step === 'connect')
+        return `<h3>Wire it in</h3>
+          <div class="sub">Wire it onto this bus beside the TAP you have: A to A, B to B and a shared ground, then power it. Until you look for TAPs, polling may stumble if it answers at another TAP's address.</div>
+          <div class="setup-actions">${back()}${setupNext(f)}</div>`;
+      if (f.step === 'allow') {
+        const on = !!(m && m.adopt_taps);
+        return `<h3>Allow a new TAP<span class="setup-state ${on ? 'ok' : 'todo'}">${on ? 'On' : 'Off'}</span></h3>
+          <div class="sub"><strong>Take on a new TAP</strong> lets the Pi bring a new TAP up and give it an address. Turning it on or off restarts the bus master: a few seconds without polling. You can turn it off again at the end.</div>
+          ${running ? (on ? '' : '<div class="setup-actions"><button type="button" class="btn task-go" data-setup-adopt="on">Turn it on</button></div>') : offBus}
+          <div class="setup-actions">${back()}${setupNext(f, running && on)}</div>`;
+      }
+      if (f.step === 'find') {
+        const taps = setupTaps(), before = f.before || [];
+        const list = taps.map(t => `<div><strong class="${f.before && !before.includes(t.id) ? 'new' : ''}">${f.before && !before.includes(t.id) ? `Found TAP ${t.id}` : topoEscape(setupTapName(t.id))}</strong>
+          <span>${f.before && !before.includes(t.id) ? 'new, its address stored' : t.state === 'running' ? 'answering' : 'not answering'}</span></div>`).join('');
+        const looking = f.looking && !f.found;
+        return `<h3>Look for TAPs</h3>
+          <div class="sub">The Pi brings every TAP on the bus up again, the way the CCA does: each known TAP keeps its address, and the new one gets the next free address, stored on it. Polling stops for about 30 seconds.</div>
+          ${running ? `<div class="setup-found">${list || '<span>No TAP answering yet.</span>'}</div>
+          <div class="setup-actions"><button type="button" class="btn${f.found ? '' : ' task-go'}" data-setup-look${looking ? ' disabled' : ''}>${looking ? 'Looking…' : f.looking ? 'Look again' : 'Look for TAPs'}</button>
+          ${f.lookedAt && !f.found && !looking ? '<span class="setup-line">No new TAP found. Check its wiring and power, then look again.</span>' : ''}</div>` : offBus}
+          <div class="setup-actions">${back()}${setupNext(f, !!f.found)}</div>`;
+      }
+      if (f.step === 'name')
+        return `<h3>Name it</h3>
+          <div class="sub">A name you'll recognise, such as where it is mounted. It shows on Devices, the mesh map and when adding an optimizer.</div>
+          <div class="setup-field"><label for="setup-tap-name">Name for TAP ${topoEscape(f.found)}</label>
+          <input class="input" id="setup-tap-name" maxlength="40" value="${topoEscape(f.tapName || '')}" placeholder="Garage"></div>
+          <div class="setup-actions">${back()}${setupNext(f)}</div>`;
+      const on = !!(m && m.adopt_taps);
+      return `<div class="setup-done"><h3>TAP ${topoEscape(f.found)} is on the bus</h3>
+        <div class="sub">The Pi polls it with the others. To put optimizers on it, add them with Add an optimizer and choose this TAP.</div>
+        ${on ? `<div class="setup-note info"><strong>Take on a new TAP</strong> is still on. Turn it off unless you are adding another, so the Pi only brings TAPs up when you ask. <button type="button" class="btn" data-setup-adopt="off">Turn it off</button></div>` : ''}
+        <div class="setup-actions"><button type="button" class="btn" data-setup-start="add">Add an optimizer</button><button type="button" class="btn primary" data-setup-home>Finish</button></div></div>`;
+    },
+  };
+
   function renderSetupFlow(root) {
     const f = setup.flow, d = setup.data, m = d.master, t = m && m.table, e = setupJob();
     const running = setupRunning(m);
     let body = '';
     const back = (label = 'Back') => `<button type="button" class="btn" data-setup-back>${label}</button>`;
-    if (f.step === 'pick') {
+    if (SETUP_GUIDES[f.task]) body = SETUP_GUIDES[f.task](f, back);
+    else if (f.step === 'pick') {
       const opts = d.opts.slice().sort((a, b) => (b.quiet - a.quiet) || (b.placed - a.placed) || a.name.localeCompare(b.name, undefined, { numeric: true }));
       body = `<h3>Which optimizer should be removed?</h3>
         <div class="sub">${f.task === 'retire' ? 'It will be removed from the TAP\'s optimizer list.' : 'Optimizers that have stopped reporting are listed first. The replacement takes over this optimizer\'s position in the layout.'}</div>
@@ -4380,10 +4614,15 @@
       if (f.step === 'do' && e.kind && e.started_unix >= f.startedAt && !e.dry_run && e.finished && e.ok)
         f.step = f.task === 'retire' ? 'done' : (t.waiting || []).some(x => x.mac === f.mac) ? 'wait' : 'done';
       if (f.step === 'wait' && (t.joins || []).some(x => x.mac === f.mac && x.joined && x.unix >= f.startedAt)) f.step = 'done';
+      if (f.task === 'addtap' && f.looking && !f.found) {
+        const m = setup.data.master, fresh = setupTaps().find(x => !(f.before || []).includes(x.id) && x.state === 'running');
+        if (m && m.phase === 'running' && fresh) f.found = fresh.id;
+        else if (Date.now() - f.lookedAt > 120000) f.looking = false;  // gave up: say so, offer to look again
+      }
     }
     // While choosing or typing, nothing on screen depends on the bus: leave it be.
     if (force || !(f && (f.step === 'pick' || f.step === 'label') && document.getElementById('setup-root').childElementCount)) renderSetup();
-    const busy = f && (f.step === 'check' || f.step === 'do' || f.step === 'wait' || f.step === 'done');
+    const busy = f && (f.step === 'check' || f.step === 'do' || f.step === 'wait' || f.step === 'done' || (f.looking && !f.found));
     if (document.getElementById('view-setup').classList.contains('active'))
       setup.timer = setTimeout(refreshSetup, busy ? 1500 : 10000);
   }
@@ -4400,11 +4639,57 @@
   }
   document.getElementById('setup-root').addEventListener('change', ev => {
     if (ev.target.id === 'setup-tap' && setup.flow) setup.flow.tap = ev.target.value;
+    // Picking a TAP to retire only enables its button: no re-render.
+    if (ev.target.name === 'setup-tap-retire' && setup.flow) {
+      setup.flow.tapPick = ev.target.value;
+      const go = document.querySelector('#setup-root button[data-setup-retire]');
+      if (go) { go.disabled = false; go.textContent = `Retire TAP ${ev.target.value}`; }
+    }
   });
   document.getElementById('setup-root').addEventListener('click', async ev => {
     const b = ev.target.closest('button');
     if (!b || b.disabled) return;
     const f = setup.flow;
+    if (b.hasAttribute('data-setup-home')) {
+      setup.flow = null;
+      return refreshSetup(true);
+    }
+    // The guides' own buttons: Take on a new TAP, on or off; Look for TAPs.
+    if (b.dataset.setupAdopt) {
+      b.disabled = true;
+      try {
+        await setupPost('/api/settings', { master_adopt_taps: b.dataset.setupAdopt === 'on' });
+        showToast(`Take on a new TAP is ${b.dataset.setupAdopt}`, 'ok');
+      } catch (err) {
+        showToast('Not saved: ' + err.message, 'err');
+      }
+      return refreshSetup(true);
+    }
+    if (b.hasAttribute('data-setup-retire')) {
+      if (!confirm(`Retire TAP ${f.tapPick}? The Pi stops polling it and leaves it off its list.`)) return;
+      b.disabled = true;
+      try {
+        await setupPost('/api/master/taps/forget', { tap: f.tapPick });
+        f.step = 'done';
+      } catch (err) {
+        showToast('Not retired: ' + err.message, 'err');
+      }
+      return refreshSetup(true);
+    }
+    if (b.hasAttribute('data-setup-look')) {
+      if (!confirm('Look for TAPs? Every TAP on the bus is brought up again, and polling stops for about 30 seconds.')) return;
+      b.disabled = true;
+      f.before = setupTaps().map(t => t.id);
+      f.found = '';
+      f.lookedAt = Date.now();
+      try {
+        await setupPost('/api/master/taps/herd', {});
+        f.looking = true;
+      } catch (err) {
+        showToast('Not started: ' + err.message, 'err');
+      }
+      return refreshSetup(true);
+    }
     if (b.hasAttribute('data-setup-herd')) {
       if (!confirm('Look for TAPs? Every TAP on the bus is brought up again, and polling stops for about 30 seconds.')) return;
       b.disabled = true;
@@ -4424,12 +4709,19 @@
     if (b.hasAttribute('data-setup-back')) {
       const steps = SETUP_STEPS[f.task], i = steps.indexOf(f.step);
       // From a finished or failed change, back is home; from a check, the step before it.
-      if (f.step === 'pick' || f.step === 'done' || f.step === 'do' || f.step === 'wait' || (f.step === 'label' && f.task === 'add')) setup.flow = null;
+      if (i === 0 || f.step === 'pick' || f.step === 'done' || f.step === 'do' || f.step === 'wait' || (f.step === 'label' && f.task === 'add')) setup.flow = null;
       else f.step = steps[i - 1];
       return refreshSetup(true);
     }
     if (b.hasAttribute('data-setup-next')) {
       const steps = SETUP_STEPS[f.task];
+      if (f.task === 'addtap' && f.step === 'name') {
+        const name = (document.getElementById('setup-tap-name').value || '').trim();
+        f.tapName = name;
+        if (name) {
+          try { await setupPost('/api/taps/name', { tap: f.found, name }); } catch (err) { return showToast('Name not saved: ' + err.message, 'err'); }
+        }
+      }
       f.step = steps[steps.indexOf(f.step) + 1];
       if (f.step === 'check') {
         f.mac = f.label ? macOfLabel(f.label) : null;
@@ -4449,6 +4741,12 @@
       setup.flow = null;
       return refreshSetup(true);
     }
+  });
+  document.getElementById('setup-root').addEventListener('click', ev => {
+    const a = ev.target.closest('a[data-settings-tab]');
+    if (!a) return;
+    try { localStorage.setItem('settings-tab', a.dataset.settingsTab); } catch (e) {}
+    settingsTab(a.dataset.settingsTab);
   });
   // Picking one only enables Next: a re-render would send the list back to the top.
   document.getElementById('setup-root').addEventListener('change', ev => {
