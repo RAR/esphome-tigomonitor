@@ -352,6 +352,15 @@ static void test_tap_reconfiguring_frames_are_never_sent() {
     for (const Bytes &args : {Bytes{}, Bytes{0x00, 0x02}, Bytes{0x00, 0x02, 0x80, 0x00}})
       CHECK(never_anywhere(CMD_TUNNEL, tunnel_request(sub, 1, args)));
   CHECK(SUB_ERASE_FLASH == 0x2B);
+  // The CCA's other messages to an optimizer besides SetPgw (0x41): Own star,
+  // Ignore star, Kick (evicts a node its TAP doesn't list), firmware request
+  // and delivery, and Blacklist (makes a node forget a network for good). In
+  // none of our captures (owner's analysis, 2026-11-10).
+  for (uint8_t sub = 0x42; sub <= 0x47; sub++)
+    for (const Bytes &args : {Bytes{}, Bytes{0x00, 0x02}, Bytes{0x00, 0x02, 0x80, 0x00}})
+      CHECK(never_anywhere(CMD_TUNNEL, tunnel_request(sub, 1, args)));
+  CHECK(classify_request(CMD_TUNNEL, tunnel_request(0x40, 1, {})) == Allow::bench_only);
+  CHECK(classify_request(CMD_TUNNEL, tunnel_request(0x48, 1, {})) == Allow::bench_only);
   // Neighbours stay as they were: the reads around them are bench-only.
   CHECK(classify_request(0x000B, {}) == Allow::bench_only);
   CHECK(classify_request(0x0071, {}) == Allow::bench_only);

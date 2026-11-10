@@ -1748,6 +1748,16 @@ inline Allow classify_request(uint16_t cmd, const Bytes &payload) {
     case 0xE1:  // SetKnownNetworks
     case 0xE5:  // EraseStackTrace
     case 0x1B:  // unnamed in the CCA's UI; its neighbours are all writes
+    // The CCA's other messages to an optimizer besides SetPgw (0x41): Own star,
+    // Ignore star, Kick (evicts a node its TAP doesn't list), firmware request
+    // and delivery, and Blacklist (makes a node forget a network for good). In
+    // none of our captures (owner's analysis, 2026-11-10).
+    case 0x42:
+    case 0x43:
+    case 0x44:
+    case 0x45:
+    case 0x46:
+    case 0x47:
       return Allow::never;
     case SUB_DISCOVERY_STATUS:
       return args.empty() ? Allow::yes : Allow::bench_only;

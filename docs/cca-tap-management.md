@@ -108,7 +108,7 @@ With more than one TAP, the CCA herds them all at once, and our master's `Herd` 
 - **A used TAP brings its gateway, not its optimizers.** Once the CCA writes the system's channel, PAN and key to it (the GatewayCfg write), the optimizers it served are on a foreign network until each is added again.
 - **Baud rate:** detection sets the CCA's port to 38400 without telling the TAPs. A TAP left at 115200 by another system won't hear the herd. We've only ever seen TAPs at 38400.
 - **Herding is bus-wide:** every TAP, including working ones, is pulled to 1235 and reassigned, and data collection stops meanwhile.
-- **A herd and its RESET touch only the TAP's RS485 side** (owner's analysis, 2026-11-10). Channel, PAN, key and the node table are in flash and survive, so joined optimizers don't rejoin; they reach the TAP again once it's back, which is why the panels kept reporting through every 11-06 herd. What the reset loses is the TAP's memory: an open discovery window, and joins and polls in progress. Which nodes have joined is kept only in memory too, so after a reset the table's records read back as not joined (`80xx`) until each node answers again; it's a status flag, not a gate, and the TAP keeps passing their reports, since the table itself is reloaded from flash. So a herd in the middle of an add closes the window. Our master reads each TAP's window at least every 20 s and renews one it finds closed with nodes still to join, so it reopens within about 20 s; this hasn't been watched on hardware.
+- **A herd and its RESET touch only the TAP's RS485 side** (owner's analysis, 2026-11-10). Channel, PAN, key and the node table are in flash and survive, so joined optimizers don't rejoin; they reach the TAP again once it's back, which is why the panels kept reporting through every 11-06 herd. What the reset loses is the TAP's memory: an open discovery window, and joins and polls in progress. The table and each entry's joined flag are in flash and come back at boot (below). So a herd in the middle of an add closes the window. Our master reads each TAP's window at least every 20 s and renews one it finds closed with nodes still to join, so it reopens within about 20 s; this hasn't been watched on hardware.
 - **Firmware:** the 4.0.3 analysis found the version read and stored, with no gateway firmware update in the bus daemon it covered. The 3.6 CCA on the 11-06 bench did reflash a TAP (above), so either 4.0.3 dropped it or it lives elsewhere. Treat any CCA as able to reflash a TAP.
 
 Our master now drives every TAP in its saved list (`taps.json`), and with `master_adopt_taps` on, a TAP at 1235 that isn't one of them starts the five-pass herd with the address rules above; the owner can start one too, to find a TAP left at some other address. A TAP it adopts must already be configured by a CCA: the GatewayCfg write stays on the never-send list, so the Pi never gives a TAP its channel, PAN or key.
@@ -117,7 +117,10 @@ Our master now drives every TAP in its saved list (`taps.json`), and with `maste
 
 - **Each TAP's table** is up to 1024 slots of MAC + TUID, in flash.
   - Bit 15 of the TUID means provisional: in the table, not yet joined.
-  - Joins persist through TAP power loss. The open window doesn't.
+  - Joins persist through TAP power loss. The open window doesn't. The joined flag is a bit in each slot's spare byte (a new entry is written not joined; joining clears the bit, no erase needed), reloaded into memory at boot. A table read (0x26) sets bit 15 from that, so it shows the joined state as it stands (owner's analysis, 2026-11-10).
+- **The table doesn't decide whose reports get through** (owner's analysis, 2026-11-10, and the roof). A node with the TAP's network key reports through it whether or not the table lists it: a join marks the entry joined if there is one, and the reports are built from the radio side, not from the table. A spare retired from the roof TAP's table on 2026-11-10 went on reporting there, shown as unassigned. What the table governs is the roster: which nodes the CCA counts, their joined flags, and the window's counts. It can't work any other way: a new node reports before the CCA writes its record.
+- **A node remembers several networks,** a table of them, and can roam among them; so a spare that was once on the roof goes back whenever it hears the roof TAP, even with another TAP's window open for it (the 2026-11-10 bench). It leaves a network only by a Blacklist message for that network, a leave from its parent, its keep-alive running out when the parent stops listing it as a child, or the network itself changing (a new PAN or channel). **A table rewrite (0x2B/0x29) sends nothing to the node,** so it neither strands a node nor evicts one.
+- **Kick (0x44)** is the CCA's message to evict a node a TAP hears but doesn't list, sent only during star discovery; **Blacklist (0x46)** makes a node forget a network. Neither appears in any capture; both are never-send (below).
 - **A known node rejoins on its own,** with the window closed:
   - about 40 s after a TAP RESET;
   - about 2 min after the optimizer itself was powered off for hours.
@@ -206,7 +209,7 @@ The read-back `!Smrt …` has **one layout for every firmware** (the analysis si
 ## What the Pi must never send
 
 The send gate lists these as never (some are still being moved there; see plan Task 8):
-- **Tunnel subs:** EraseFlash, SetTable (until Phase 2 is approved), the GatewayCfg write, ResetNode, PeriodicCfg Write, SetKnownNetworks, EraseStackTrace, 0x12, 0x1B.
+- **Tunnel subs:** EraseFlash, SetTable (until Phase 2 is approved), the GatewayCfg write, ResetNode, PeriodicCfg Write, SetKnownNetworks, EraseStackTrace, 0x12, 0x1B, and the star messages 0x42–0x47 (Own, Ignore, Kick, firmware request and delivery, Blacklist).
 - **Top-level commands:** SET_CHANNEL, the channel scan (0x0070/0x0072), every TAP firmware command (0x0520–0x0527), CLEAR_ADT, SET_LIST_ENTRIES, and STORE in any form but the key-only bring-up one.
 
 **Any one of these, on the roof, can silence every optimizer, re-key the network, or brick the TAP.**
@@ -218,4 +221,5 @@ The send gate lists these as never (some are still being moved there; see plan T
 - The layout of the 16 bytes in a 0x41 that list the TAPs that can hear an optimizer.
 - Which character of the `^00Smrt_` write maps to which field.
 - Whether to turn NetDiag on with PeriodicCfg Write so the mesh map refreshes, and at what rate; left until the Pi takes on more writes.
-- Whether a TAP takes a node that isn't in its table (plan session B3). This decides whether we ever need SetTable.
+- Whether a factory-new node, with no key yet, can join a TAP that doesn't list it. A keyed one reports regardless (above); the analysis implies a new one joins first and is listed after, which would mean an add needs the open window more than the table write. Not yet seen on the bench.
+- How many networks a node remembers.
