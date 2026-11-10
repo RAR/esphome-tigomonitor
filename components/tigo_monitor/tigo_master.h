@@ -1084,6 +1084,9 @@ struct DiscoveryRequest {
   Bytes payload;
   uint32_t wait_ms = 0;  // how long to wait for the reply; 0 = the usual
   uint32_t idle_ms = 0;  // send nothing at all for this long, then ask again
+  // Every answer heard within wait_ms, not just the first: a GET_MAC at the
+  // factory address that more than one TAP answers, each after its backoff.
+  bool collect = false;
 };
 
 class Discovery {
@@ -1312,6 +1315,344 @@ class Discovery {
   bool dropped_back_ = false;
   bool stored_ = false;
   std::vector<Bytes> extra_;
+};
+
+// ---- the herd: every TAP on the bus at once ---------------------------------
+
+// The CCA's bring-up with more than one TAP (bench capture 2026-11-06,
+// cca-two-taps-20261106-2035, and docs/superpowers/specs/2026-11-10-multi-tap-design.md):
+//   1. five SET_485_ID broadcasts, ~0.75 s apart: every TAP to the factory id;
+//   2. GET_MAC there, every answer heard (each TAP after its own backoff);
+//   3. SET_ID_BY_MAC for each, there: a known MAC its saved id, a new one the
+//      next free id from the first, skipping 1234 and 1235;
+//   4. five more GET_MACs there (the scan); one that answers is placed too;
+//   5. GET_MAC_NOW at each new id, in the order placed, and for a TAP that
+//      dropped back in an earlier round, a key-only STORE straight after;
+//   6. the hop: each TAP to the next id past every placed one, read there;
+//   7. a RESET broadcast, ~5 s of quiet, and a read at each home id.
+// A TAP not back at its id after the RESET has no stored id: the whole herd
+// runs again (ROUNDS), with the STORE for it. Every TAP on the bus is moved,
+// the working ones too, so data collection stops for the herd's ~30 s.
+class Herd {
+ public:
+  static const int CLAIMS = 5;
+  static const uint32_t CLAIM_EVERY_MS = 750;
+  static const int MAC_TRIES = 5;  // GET_MACs before giving up on hearing any TAP
+  static const int SCAN_TRIES = 5;
+  static const uint32_t BACKOFF_WAIT_MS = 800;
+  static const uint32_t RESET_QUIET_MS = 5000;
+  static const uint32_t BACK_WAIT_MS = 1000;
+  static const int BACK_TRIES = 2;  // the CCA read each once; one more for a slow TAP
+  static const int STEP_TRIES = 5;
+  static const int ROUNDS = 2;
+  static const uint16_t BROADCAST_A = 0x1234;  // a TAP takes both as its own; never an id
+  static const uint16_t BROADCAST_B = 0x1235;
+
+  struct Known {
+    Bytes mac;
+    uint16_t id = 0;
+  };
+  struct Placed {
+    Bytes mac;
+    uint16_t id = 0;
+    bool fresh = false;     // not in the saved map: given the next free id
+    bool answered = false;  // back at its id after the last round's RESET
+    bool stored = false;    // acked a STORE
+    bool needs_store = false;
+  };
+
+  Herd(uint16_t factory_id, uint16_t first_id, std::vector<Known> known)
+      : factory_(factory_id), first_(first_id), known_(std::move(known)) {}
+
+  DiscoveryRequest next() {
+    DiscoveryRequest r;
+    if (state_ == st_failed) { r.failed = true; return r; }
+    if (state_ == st_done) { r.done = true; return r; }
+    switch (state_) {
+      case claim:
+        if (pause_) {
+          pause_ = false;
+          r.idle_ms = CLAIM_EVERY_MS;
+          if (claims_ == CLAIMS) state_ = get_mac;
+          return r;
+        }
+        claims_++;
+        pause_ = true;
+        r.send = true;
+        r.dest = 0x0000; r.cmd = CMD_SET_485_ID;
+        r.payload = {0x37, 0x24, 0x92, 0x66, static_cast<uint8_t>(factory_ >> 8), static_cast<uint8_t>(factory_)};
+        return r;
+      case get_mac:
+        if (!placed_.empty()) {
+          state_ = assign;
+          return next();
+        }
+        if (mac_tries_ == MAC_TRIES) {
+          unanswered_ = "GET_MAC at the factory address";
+          state_ = st_failed;
+          return next();
+        }
+        mac_tries_++;
+        r.send = true; r.collect = true;
+        r.dest = factory_; r.cmd = CMD_GET_MAC; r.wait_ms = BACKOFF_WAIT_MS;
+        return r;
+      case assign:
+      case scan:
+        // Each placed TAP not yet given its id, in the order heard.
+        for (size_t i = 0; i < placed_.size(); i++)
+          if (!given_[i]) {
+            if (!try_(i)) {
+              given_[i] = true;  // never acked: its verify will say
+              return next();
+            }
+            current_ = i;
+            r.send = true;
+            r.dest = factory_; r.cmd = CMD_SET_ID_BY_MAC;
+            r.payload = id_payload_(placed_[i].mac, placed_[i].id);
+            return r;
+          }
+        if (state_ == assign) state_ = scan;
+        if (scans_ == SCAN_TRIES) {
+          state_ = verify;
+          current_ = 0;
+          return next();
+        }
+        scans_++;
+        r.send = true; r.collect = true;
+        r.dest = factory_; r.cmd = CMD_GET_MAC; r.wait_ms = BACKOFF_WAIT_MS;
+        return r;
+      case verify:
+        if (current_ == placed_.size()) {
+          state_ = hop;
+          current_ = 0;
+          return next();
+        }
+        if (!try_(current_)) {
+          current_++;
+          return next();
+        }
+        r.send = true;
+        r.dest = placed_[current_].id; r.cmd = CMD_GET_MAC_NOW;
+        return r;
+      case store:
+        if (!try_(current_)) {
+          state_ = verify;
+          current_++;
+          return next();
+        }
+        r.send = true;
+        r.dest = placed_[current_].id; r.cmd = CMD_STORE;
+        r.payload = {0x37, 0x24, 0x92, 0x66};
+        return r;
+      case hop:
+        if (current_ == placed_.size()) {
+          state_ = reset;
+          return next();
+        }
+        if (!try_(current_)) {  // the RESET puts it back wherever it is
+          current_++;
+          return next();
+        }
+        r.send = true;
+        r.dest = placed_[current_].id; r.cmd = CMD_SET_ID_BY_MAC;
+        r.payload = id_payload_(placed_[current_].mac, hop_id_(current_));
+        return r;
+      case hop_verify:
+        if (!try_(current_)) {
+          state_ = hop;
+          current_++;
+          return next();
+        }
+        r.send = true;
+        r.dest = hop_id_(current_); r.cmd = CMD_GET_MAC_NOW;
+        return r;
+      case reset:  // once, ack or not: the TAPs may reset before they answer
+        state_ = quiet;
+        r.send = true;
+        r.dest = 0x0000; r.cmd = CMD_RESET;
+        r.payload = {0x37, 0x24, 0x92, 0x66};
+        return r;
+      case quiet:
+        state_ = back;
+        current_ = 0;
+        r.idle_ms = RESET_QUIET_MS;
+        return r;
+      case back:
+        while (current_ < placed_.size() && (placed_[current_].answered || back_tries_ == BACK_TRIES)) {
+          current_++;
+          back_tries_ = 0;
+        }
+        if (current_ == placed_.size()) return round_over_();
+        back_tries_++;
+        r.send = true;
+        r.dest = placed_[current_].id; r.cmd = CMD_GET_MAC_NOW; r.wait_ms = BACK_WAIT_MS;
+        return r;
+      default:
+        return r;
+    }
+  }
+
+  void on_reply(const Frame &f) {
+    switch (state_) {
+      case get_mac:
+      case scan:
+        if (f.cmd == CMD_GET_MAC + 1 && f.payload.size() >= 10) place_(Bytes(f.payload.begin(), f.payload.begin() + 8));
+        break;
+      case assign:
+        if (f.cmd == CMD_SET_ID_BY_MAC + 1 && current_ < given_.size()) given_[current_] = true;
+        break;
+      case verify:
+        if (f.cmd == CMD_GET_MAC_NOW + 1 && f.payload.size() >= 10 &&
+            (f.payload[8] << 8 | f.payload[9]) == placed_[current_].id) {
+          if (placed_[current_].needs_store) {
+            state_ = store;
+          } else {
+            current_++;
+          }
+        }
+        break;
+      case store:
+        if (f.cmd == CMD_STORE + 1) {
+          placed_[current_].stored = true;
+          state_ = verify;
+          current_++;
+        }
+        break;
+      case hop:
+        if (f.cmd == CMD_SET_ID_BY_MAC + 1) state_ = hop_verify;
+        break;
+      case hop_verify:
+        if (f.cmd == CMD_GET_MAC_NOW + 1 && f.payload.size() >= 10) {
+          state_ = hop;
+          current_++;
+        }
+        break;
+      case back:
+        if (f.cmd == CMD_GET_MAC_NOW + 1 && f.payload.size() >= 10 && current_ < placed_.size() &&
+            (f.payload[8] << 8 | f.payload[9]) == placed_[current_].id &&
+            Bytes(f.payload.begin(), f.payload.begin() + 8) == placed_[current_].mac)
+          placed_[current_].answered = true;
+        break;
+      default: break;
+    }
+  }
+
+  bool done() const { return state_ == st_done; }
+  bool failed() const { return state_ == st_failed; }
+  int round() const { return round_; }
+  const char *unanswered() const { return unanswered_; }
+  // Every TAP heard, its id, and whether it was back there at the end.
+  const std::vector<Placed> &placed() const { return placed_; }
+
+ private:
+  enum State { claim, get_mac, assign, scan, verify, store, hop, hop_verify, reset, quiet, back, st_done, st_failed };
+
+  static Bytes id_payload_(const Bytes &mac, uint16_t id) {
+    Bytes p = {0x37, 0x24, 0x92, 0x66};
+    p.insert(p.end(), mac.begin(), mac.end());
+    p.push_back(static_cast<uint8_t>(id >> 8));
+    p.push_back(static_cast<uint8_t>(id));
+    return p;
+  }
+  static bool reserved_(uint16_t id) { return id == BROADCAST_A || id == BROADCAST_B || id == 0 || id == 0xFFFF; }
+  bool taken_(uint16_t id) const {
+    for (const auto &k : known_)
+      if (k.id == id) return true;
+    for (const auto &p : placed_)
+      if (p.id == id) return true;
+    return false;
+  }
+  // A MAC heard at the factory address: its saved id, or the next free one.
+  void place_(const Bytes &mac) {
+    for (const auto &p : placed_)
+      if (p.mac == mac) return;
+    Placed p;
+    p.mac = mac;
+    for (const auto &k : known_)
+      if (k.mac == mac) p.id = k.id;
+    for (const auto &b : fresh_before_)
+      if (b.mac == mac && b.fresh) p.fresh = true;
+    if (!p.id) {
+      p.fresh = true;
+      uint16_t id = first_;
+      while (reserved_(id) || taken_(id)) id++;
+      p.id = id;
+    }
+    for (const auto &s : stores_)
+      if (s == mac) p.needs_store = true;
+    placed_.push_back(p);
+    given_.push_back(false);
+  }
+  // The hop's id for placed i: the next past every placed id, one each, in order.
+  uint16_t hop_id_(size_t i) const {
+    uint16_t top = 0;
+    for (const auto &p : placed_) top = std::max(top, p.id);
+    uint16_t id = top;
+    for (size_t k = 0; k <= i; k++) {
+      id++;
+      while (reserved_(id) || taken_(id)) id++;
+    }
+    return id;
+  }
+  // Counts a try at this step for placed i; false once it has had STEP_TRIES.
+  bool try_(size_t i) {
+    size_t key = static_cast<size_t>(state_) * 4096 + i;
+    if (key != tries_key_) {
+      tries_key_ = key;
+      tries_ = 0;
+    }
+    if (tries_ == STEP_TRIES) return false;
+    tries_++;
+    return true;
+  }
+  DiscoveryRequest round_over_() {
+    bool any = false, all = true;
+    for (const auto &p : placed_) {
+      any = any || p.answered;
+      all = all && p.answered;
+    }
+    if (all || round_ == ROUNDS) {
+      if (!any) unanswered_ = "the reads at the TAPs' ids after the RESET";
+      state_ = any ? st_done : st_failed;
+      return next();
+    }
+    // Another round, as the CCA's, with a STORE for each that dropped back.
+    // The ids stay: this round's become the saved ones.
+    for (const auto &p : placed_) {
+      bool have = false;
+      for (auto &k : known_)
+        if (k.mac == p.mac) {
+          k.id = p.id;
+          have = true;
+        }
+      if (!have) known_.push_back({p.mac, p.id});
+      if (!p.answered) stores_.push_back(p.mac);
+    }
+    fresh_before_ = placed_;  // new to the saved map in round 1 stays new
+    round_++;
+    placed_.clear();
+    given_.clear();
+    claims_ = mac_tries_ = scans_ = 0;
+    back_tries_ = 0;
+    tries_key_ = static_cast<size_t>(-1);
+    current_ = 0;
+    pause_ = false;
+    state_ = claim;
+    return next();
+  }
+
+  uint16_t factory_, first_;
+  std::vector<Known> known_;
+  std::vector<Bytes> stores_;
+  std::vector<Placed> placed_;
+  std::vector<Placed> fresh_before_;
+  std::vector<bool> given_;
+  State state_ = claim;
+  bool pause_ = false;
+  int claims_ = 0, mac_tries_ = 0, scans_ = 0, round_ = 1;
+  int tries_ = 0, back_tries_ = 0;
+  size_t current_ = 0, tries_key_ = static_cast<size_t>(-1);
+  const char *unanswered_ = "";
 };
 
 // ---- what a master may send ------------------------------------------------
