@@ -2772,6 +2772,12 @@
     for (const [label, panels] of Object.entries(byString)) {
       const meta = stringMap[label];
       if (!meta) continue;
+      // The Pi's "All panels" is the panels no string claims (Monitor::
+      // ALL_PANELS), not a string the site has: the MQTT strings skip it too.
+      // A lone stray there, a spare that once joined and is now off, would
+      // otherwise read as a whole string down. Its stale panels are listed
+      // above.
+      if (label === 'All panels') continue;
       const powers = panels.map(p => p.power_in || 0);
       const med = median(powers.filter(p => p > 5));
       if (med < 5) {

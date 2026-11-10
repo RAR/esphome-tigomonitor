@@ -117,6 +117,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A stray optimizer no longer reads as a string down (Raspberry Pi).**
+  A spare that once joined the system and was then switched off sat alone
+  in the "All panels" group, the panels no string claims, and the
+  Dashboard reported "All panels () — no production while the rest of the
+  system is producing", as if a whole string had tripped. That group isn't
+  a string, so it no longer raises that alert; its panels still show as
+  stale.
 - **The Mesh map names most relays now (Raspberry Pi).** An optimizer's
   join names its parent by mesh ID, a different number from the
   optimizer's address. The Pi read the wrong field as the mesh ID and
