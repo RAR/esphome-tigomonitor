@@ -43,15 +43,21 @@ struct Settings {
   // yields, so the two would talk over each other until the standby hears it.
   int standby_takeover_s = 3;
   bool master_bench = false;    // also send the reads a bench TAP answers
-  bool master_startup = false;  // re-address and bring up a TAP found at the factory address
+  // Running the bus whole: each of these was a switch of its own while it
+  // was new, and they're one now, on by default. The settings page no longer
+  // offers them one by one; a settings file can still turn one off, and the
+  // page then names it.
+  bool master_startup = true;  // re-address and bring up a TAP found at the factory address
   // Also send the CCA's 0x41s, its hourly 0x0B00 and 0x22s, and its 0x26 walks.
-  bool master_housekeeping = false;
-  bool master_queries = false;           // the CCA's 0x06 reads to optimizers
-  bool master_optimizer_writes = false;  // and the two writes its answers call for
-  bool master_read_tap_config = false;   // the bring-up's GatewayCfg read, once at start
+  bool master_housekeeping = true;
+  bool master_queries = true;            // the CCA's 0x06 reads to optimizers
+  bool master_optimizer_writes = true;   // and the two writes its answers call for
+  bool master_read_tap_config = true;    // the bring-up's GatewayCfg read, once at start
+  // The second switch, Allow changes to the TAPs: off by default.
   bool master_table_writes = false;      // let the owner's add write a record to the TAP's table
+  // Set and cleared by the Add a TAP guide, not a setting of its own.
   bool master_adopt_taps = false;        // a new TAP at the factory address starts the CCA's herd (needs startup)
-  bool discovery_auto = false;           // renew the join window only while a layout optimizer is missing
+  bool discovery_auto = true;            // renew the join window only while a layout optimizer is missing
   int gateway_id = 0x1201;    // the TAP's RS485 id, as the CCA addresses it (gateway_id_ok)
   float power_calibration = 1.0f;
   // Plenty of RAM here, so the node table is sized for any real site rather

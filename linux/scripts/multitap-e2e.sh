@@ -50,7 +50,7 @@ start() {  # start NAME PORT EXTRA-SETTINGS [MOCK FLAGS...]
   python3 linux/tools/mock_taps.py "$out/$name.tty" --stats "$out/$name.json" "$@" &
   tap=$!
   sleep 0.5
-  printf '{"bus_role": "master", "master_startup": true, "serial_port": "%s", "gateway_id": 4609, "web_port": %s, "web_password": "pw"%s}\n' \
+  printf '{"bus_role": "master", "master_startup": false, "master_housekeeping": false, "master_queries": false, "master_optimizer_writes": false, "master_read_tap_config": false, "discovery_auto": false, "master_startup": true, "serial_port": "%s", "gateway_id": 4609, "web_port": %s, "web_password": "pw"%s}\n' \
     "$PWD/$out/$name.tty" "$port" "$extra" > "$out/$name/settings.json"
   build/linux/tigomonitord --state-dir "$out/$name" --web-dir components/tigo_server/web 2>> "$out/$name.log" &
   daemon=$!

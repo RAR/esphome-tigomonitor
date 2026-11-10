@@ -51,7 +51,7 @@ wait_owner() {  # wait_owner DEVICE SECONDS
   return 0
 }
 settings() {  # settings DIR LINK WEB_PORT TAKEOVER_S
-  printf '{"bus_role": "standby", "standby_takeover_s": %s, "serial_port": "%s", "gateway_id": 4609, "web_port": %s, "device_id": "%s", "publish_interval_s": 5, "mqtt": {"host": "127.0.0.1", "port": 18832}}\n' \
+  printf '{"bus_role": "standby", "master_startup": false, "master_housekeeping": false, "master_queries": false, "master_optimizer_writes": false, "master_read_tap_config": false, "discovery_auto": false, "standby_takeover_s": %s, "serial_port": "%s", "gateway_id": 4609, "web_port": %s, "device_id": "%s", "publish_interval_s": 5, "mqtt": {"host": "127.0.0.1", "port": 18832}}\n' \
     "$4" "$PWD/$out/$2" "$3" "$(basename "$1")" > "$1/settings.json"
 }
 start() {  # start DIR: the daemon's pid in $pid
@@ -186,7 +186,7 @@ tap=$!
 sleep 0.5
 for d in pa:2:18113 pb:6:18114; do
   n=${d%%:*} rest=${d#*:}
-  printf '{"bus_role": "standby", "standby_takeover_s": %s, "master_housekeeping": true, "serial_port": "%s", "gateway_id": 4609, "web_port": %s, "web_password": "pw"}\n' \
+  printf '{"bus_role": "standby", "master_startup": false, "master_housekeeping": false, "master_queries": false, "master_optimizer_writes": false, "master_read_tap_config": false, "discovery_auto": false, "standby_takeover_s": %s, "master_housekeeping": true, "serial_port": "%s", "gateway_id": 4609, "web_port": %s, "web_password": "pw"}\n' \
     "${rest%%:*}" "$PWD/$out/link-$n" "${rest#*:}" > "$out/$n/settings.json"
 done
 start "$out/pa"; a=$pid
@@ -235,7 +235,7 @@ python3 linux/tools/mock_tap.py "$out/link-qa" --extra-link "$out/link-qb" --win
 tap=$!
 sleep 0.5
 qsettings() {  # qsettings NAME TAKEOVER PORT PV_SWITCH
-  printf '{"bus_role": "standby", "standby_takeover_s": %s, "serial_port": "%s", "gateway_id": 4609, "web_port": %s, "web_password": "pw", "device_id": "%s", "publish_interval_s": 2, "mqtt": {"host": "127.0.0.1", "port": 18832, "pv_switch": %s}}\n' \
+  printf '{"bus_role": "standby", "master_startup": false, "master_housekeeping": false, "master_queries": false, "master_optimizer_writes": false, "master_read_tap_config": false, "discovery_auto": false, "standby_takeover_s": %s, "serial_port": "%s", "gateway_id": 4609, "web_port": %s, "web_password": "pw", "device_id": "%s", "publish_interval_s": 2, "mqtt": {"host": "127.0.0.1", "port": 18832, "pv_switch": %s}}\n' \
     "$2" "$PWD/$out/link-$1" "$3" "$1" "$4" > "$out/$1/settings.json"
 }
 pvconfig() { mosquitto_sub -p 18832 -v --retained-only -W 2 -t "homeassistant/switch/tigomonitor_$1_pv_output/config" 2>/dev/null | wc -l; }
@@ -279,7 +279,7 @@ tap=$!
 sleep 0.5
 for d in ra:2:18117 rb:6:18118; do
   n=${d%%:*} rest=${d#*:}
-  printf '{"bus_role": "standby", "standby_takeover_s": %s, "master_housekeeping": true, "serial_port": "%s", "gateway_id": 4609, "web_port": %s, "web_password": "pw"}\n' \
+  printf '{"bus_role": "standby", "master_startup": false, "master_housekeeping": false, "master_queries": false, "master_optimizer_writes": false, "master_read_tap_config": false, "discovery_auto": false, "standby_takeover_s": %s, "master_housekeeping": true, "serial_port": "%s", "gateway_id": 4609, "web_port": %s, "web_password": "pw"}\n' \
     "${rest%%:*}" "$PWD/$out/link-$n" "${rest#*:}" > "$out/$n/settings.json"
 done
 start "$out/ra"; a=$pid

@@ -59,6 +59,9 @@ LABEL='"label": "0-1234R"'
 
 # --- run 1: the guards, a dry run, then the add ---
 start one 18301 '' --join-after 0
+# Running the bus whole is the default; changes to the TAPs are not.
+expect "the six parts on by default, changes off" "$(body GET 18301 /api/settings '' admin:pw | python3 -c "import json,sys; s=json.load(sys.stdin); print([s[k] for k in ('master_startup','master_housekeeping','master_queries','master_optimizer_writes','master_read_tap_config','discovery_auto','master_table_writes','master_adopt_taps')])")" \
+  "[True, True, True, True, True, True, False, False]"
 expect "no password, no add" "$(code POST 18301 /api/master/table/add "{$LABEL}")" 401
 expect "a misread label is refused" "$(req POST 18301 /api/master/table/add '{"label": "0-1234S"}' admin:pw)" \
   "400 {\"error\":\"that label doesn't check out: look for a misread character\"}"
