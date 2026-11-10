@@ -13,6 +13,9 @@ python3 linux/tools/synth_bus.py "$out/bus.bin" --panels 4 --rounds 20 --slots \
 python3 linux/tools/mock_bridge.py "$out/bus.bin" 16639 1 "$out/bridge.json" &
 bridge=$!
 sleep 0.3
+# A rating set on the no-string group under its old name, "All panels",
+# as a system with no layout had it.
+printf '%s' '{"inverters": [], "strings": {"All panels": {"display_label": "", "panel_rating_w": 400}}}' > "$out/state/topology.json"
 build/linux/tigomonitord --state-dir "$out/state" --port 18091 --serial tcp://127.0.0.1:16639 \
   2> "$out/daemon.log" &
 daemon=$!
@@ -71,8 +74,10 @@ get 18092 /api/mesh > "$out/quiet.json"
 expect "a quiet bus" "$(python3 -c "import json; d = json.load(open('$out/quiet.json')); print(d['nodes'], d['taps'])")" "[] []"
 # Today's reports and losses by string, as the map's grid shows them: the
 # same counts the nodes carry, summed.
-expect "loss by day: today, by string" "$(q "[(x['date'] == __import__('time').strftime('%Y-%m-%d'), sorted(x['strings'])) for x in d['loss_days']]")" "[(True, ['All panels'])]"
-expect "loss by day: today's sums" "$(q "d['loss_days'][-1]['strings']['All panels'] == [sum(x['reports_today'] for x in d['nodes']), sum(x['lost_today'] for x in d['nodes'])]")" True
+expect "loss by day: today, by string" "$(q "[(x['date'] == __import__('time').strftime('%Y-%m-%d'), sorted(x['strings'])) for x in d['loss_days']]")" "[(True, ['No string'])]"
+expect "loss by day: today's sums" "$(q "d['loss_days'][-1]['strings']['No string'] == [sum(x['reports_today'] for x in d['nodes']), sum(x['lost_today'] for x in d['nodes'])]")" True
+strings() { get 18091 /api/strings | python3 -c "import json,sys; print({s['label']: s['panel_rating_w'] for s in json.load(sys.stdin)['strings']})"; }
+expect "the old name's rating kept" "$(strings)" "{'No string': 400}"
 # Each optimizer's joins, with the relay the log says it went through.
 joins() { get "$1" "/api/mesh/joins?addr=$2" | python3 -c "import json,sys; print([(j['parent'], j['relay']) for j in json.load(sys.stdin)['joins']])"; }
 expect "0004's joins" "$(joins 18091 0004)" "[('0042', '0002')]"
@@ -114,11 +119,11 @@ expect "relays kept after a restart" "$(q "{a: n[a]['relay'] for a in sorted(n) 
 # Restarted at night, before any report: each keeps its name and string, so
 # By string doesn't drop them all into no string.
 expect "strings kept after a restart" "$(q "{a: n[a]['string'] for a in sorted(n)}")" \
-  "{'0002': 'String A', '0003': 'All panels', '0004': 'All panels', '0005': 'All panels'}"
+  "{'0002': 'String A', '0003': 'No string', '0004': 'No string', '0005': 'No string'}"
 expect "names kept after a restart" "$(q "n['0002']['label']")" A1
 expect "join times kept" "$(q "sorted(a for a in n if isinstance(n[a]['last_join_unix'], int))")" "['0002', '0004', '0005']"
 expect "joins kept after a restart" "$(joins 18093 0004)" "[('0042', '0002')]"
-expect "loss by day kept after a restart" "$(q "[sorted(x['strings']) for x in d['loss_days']]")" "[['All panels', 'String A']]"
+expect "loss by day kept after a restart" "$(q "[sorted(x['strings']) for x in d['loss_days']]")" "[['No string', 'String A']]"
 tap_names() { python3 -c "import json; print(json.load(open('$out/state/state.json')).get('tap_names'))"; }
 expect "TAP name saved" "$(tap_names)" "{'1201': 'Garage'}"
 expect "an empty name forgets it" "$(post 18093 /api/taps/name '{"tap": "1201", "name": ""}')" 200
@@ -135,4 +140,11 @@ expect "devices kept after a restart" "$(dev "sorted(x['addr'] for x in d)")" "[
 expect "each stale, reading nothing" "$(dev "all(x['stale'] and x['power'] == 0 for x in d)")" True
 expect "with its barcode" "$(dev "all(len(x['barcode']) == 16 for x in d)")" True
 expect "aged from when it was last heard" "$(dev "all(0 <= x['data_age_ms'] < 600000 for x in d)")" True
+# A node deleted from Devices leaves the loss by day too: its reports were
+# counted under no string, a group it is no longer in. 0003 lost both
+# reports dropped.
+lost_today() { get 18093 /api/mesh | python3 -c "import json,sys; d = json.load(sys.stdin)['loss_days'][-1]['strings']; print(sum(v[1] for v in d.values()))"; }
+expect "0003's losses counted today" "$(lost_today)" 2
+expect "delete 0003" "$(post 18093 '/api/nodes/delete?addr=0003' '{}')" 200
+expect "and not counted once deleted" "$(lost_today)" 0
 [ $fail = 0 ] && echo "mesh e2e passed" || { echo "mesh e2e FAILED; see $out/"; exit 1; }

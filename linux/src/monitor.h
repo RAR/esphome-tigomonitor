@@ -62,7 +62,7 @@ struct Panel {
 // One string's live totals, grouped by the nodes' cca_string label — the
 // firmware's StringData, aggregated the same way (output power, online panels).
 struct StringTotals {
-  std::string label;  // "All panels" for panels no string label claims
+  std::string label;  // NO_STRING for panels no string label claims
   std::string mppt;   // the nodes' cca_mppt label, if any
   double total_power = 0, total_current = 0;
   double avg_voltage_in = 0, avg_voltage_out = 0, avg_temperature = 0;
@@ -162,7 +162,10 @@ class Monitor {
   float total_power_in() const;  // input power of online panels, W
   std::vector<StringTotals> strings() const;
   // Panels with no string label are grouped under this one.
-  static constexpr const char *ALL_PANELS = "All panels";
+  // The group for panels no string label claims. Until 2.1 it was "All
+  // panels", which read as a total once some panels had strings.
+  static constexpr const char *NO_STRING = "No string";
+  static constexpr const char *OLD_NO_STRING = "All panels";
 
   // Integrates total_power into energy_kwh; call periodically.
   void tick();

@@ -682,7 +682,7 @@ test('mesh: reports lost by day, a row per string', async () => {
   const { page, ctx, errors } = await openMesh();
   const days = piRoutes['/api/mesh'].loss_days;
   const strings = Object.keys(days[0].strings);
-  assert.equal(await page.locator('#mesh-days .mesh-day-row').count(), strings.length);
+  assert.equal(await page.locator('#mesh-days .mesh-day-row:not(.total)').count(), strings.length);
   const row = page.locator('#mesh-days .mesh-day-row').nth(1);
   assert.equal((await row.locator('.mesh-day-name').textContent()).trim(), strings[1]);
   const cells = await row.locator('.mesh-day-cell').allTextContents();
@@ -690,6 +690,25 @@ test('mesh: reports lost by day, a row per string', async () => {
   assert.deepEqual(await row.locator('.mesh-day-cell').evaluateAll((cs) => cs.map((c) => c.className.replace('mesh-day-cell ', ''))),
     ['tier-poor', 'tier-poor', 'tier-poor', 'tier-poor', 'tier-fair']);
   assert.equal(await page.locator('#mesh-days .mesh-day-head span').count(), days.length + 1);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+// And the whole array under the strings: every string's reports summed, so
+// no row reads as a total that isn't one.
+test('mesh: reports lost by day, with the whole array summed under the strings', async () => {
+  const { page, ctx, errors } = await openMesh();
+  const days = piRoutes['/api/mesh'].loss_days;
+  const rows = page.locator('#mesh-days .mesh-day-row');
+  assert.equal(await rows.count(), Object.keys(days[0].strings).length + 1);
+  const total = rows.last();
+  assert.equal(await total.getAttribute('class'), 'mesh-day-row total');
+  assert.equal((await total.locator('.mesh-day-name').textContent()).trim(), 'Whole array');
+  const want = days.map((d) => {
+    const [ok, lost] = Object.values(d.strings).reduce((a, c) => [a[0] + c[0], a[1] + c[1]], [0, 0]);
+    return (100 * lost / (ok + lost)).toFixed(1) + '%';
+  });
+  assert.deepEqual((await total.locator('.mesh-day-cell').allTextContents()).map((c) => c.trim()), want);
   assert.deepEqual(errors, []);
   await ctx.close();
 });

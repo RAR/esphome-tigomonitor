@@ -644,6 +644,7 @@
   .mesh-day-head span { font-size: 11px; color: var(--text-dim); text-align: center; }
   .mesh-day-head span:first-child, .mesh-day-name { text-align: left; }
   .mesh-day-row { margin-top: 4px; font-size: 12.5px; }
+  .mesh-day-row.total { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); font-weight: 600; }
   .mesh-day-cell { text-align: center; padding: 5px 0; border-radius: 6px; font-variant-numeric: tabular-nums; }
   .mesh-day-cell.tier-good { background: color-mix(in srgb, var(--good) 14%, transparent); }
   .mesh-day-cell.tier-fair { background: color-mix(in srgb, var(--warn) 18%, transparent); }
@@ -2772,12 +2773,12 @@
     for (const [label, panels] of Object.entries(byString)) {
       const meta = stringMap[label];
       if (!meta) continue;
-      // The Pi's "All panels" is the panels no string claims (Monitor::
-      // ALL_PANELS), not a string the site has: the MQTT strings skip it too.
+      // The Pi's "No string" is the panels no string claims (Monitor::
+      // NO_STRING), not a string the site has: the MQTT strings skip it too.
       // A lone stray there, a spare that once joined and is now off, would
       // otherwise read as a whole string down. Its stale panels are listed
       // above.
-      if (label === 'All panels') continue;
+      if (label === 'No string') continue;
       const powers = panels.map(p => p.power_in || 0);
       const med = median(powers.filter(p => p > 5));
       if (med < 5) {
@@ -4015,7 +4016,7 @@
     if (!aliens.size) return inverters;
     const left = new Set(devices.filter(d => !aliens.has(d.addr)).map(d => d.string_label));
     return inverters
-      .map(inv => ({ ...inv, strings: (inv.strings || []).filter(st => st.label !== 'All panels' || left.has(st.label)) }))
+      .map(inv => ({ ...inv, strings: (inv.strings || []).filter(st => st.label !== 'No string' || left.has(st.label)) }))
       .filter(inv => !inv.unassigned || inv.strings.length);
   }
 
@@ -7307,7 +7308,8 @@
   }
 
   // Each string's share of reports lost, a column a day: how it fares over
-  // weeks, where the map's figures start again each midnight.
+  // weeks, where the map's figures start again each midnight. Under them,
+  // the whole array: every string's reports summed.
   function renderMeshDays() {
     const box = document.getElementById('mesh-days');
     const days = (meshData.loss_days || []).slice(-14);
@@ -7322,10 +7324,13 @@
       return `<span class="mesh-day-cell tier-${tier}" title="${c[1].toLocaleString()} of ${(c[0] + c[1]).toLocaleString()} reports lost">${pct.toFixed(1)}%</span>`;
     };
     box.style.setProperty('--days', days.length);
+    const whole = d => Object.values(d.strings || {}).reduce((a, c) => [a[0] + c[0], a[1] + c[1]], [0, 0]);
     box.innerHTML = '<h3>Reports lost by day</h3>' +
       `<div class="mesh-day-head"><span>String</span>${days.map(d => `<span>${label(d.date)}</span>`).join('')}</div>` +
       names.map(name => `<div class="mesh-day-row"><span class="mesh-day-name">${meshEsc(name || 'No string')}</span>` +
-        days.map(d => cell((d.strings || {})[name])).join('') + '</div>').join('');
+        days.map(d => cell((d.strings || {})[name])).join('') + '</div>').join('') +
+      (names.length > 1 ? '<div class="mesh-day-row total"><span class="mesh-day-name">Whole array</span>' +
+        days.map(d => cell(whole(d))).join('') + '</div>' : '');
   }
 
   // An optimizer's joins of the last month, fetched when it's picked; kept a

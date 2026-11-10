@@ -48,7 +48,8 @@ void Topology::load() {
       StringOverride so;
       so.display_label = kv.value().value("display_label", "");
       so.panel_rating_w = kv.value().value("panel_rating_w", 0);
-      strings_[kv.key()] = so;
+      // The no-string group's old name: its rating carries over.
+      strings_[kv.key() == Monitor::OLD_NO_STRING ? Monitor::NO_STRING : kv.key()] = so;
     }
   } catch (const json::exception &) {
     LOGW("topology: %s has a field of the wrong type; using what was read", path_.c_str());

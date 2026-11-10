@@ -466,7 +466,7 @@ std::vector<StringTotals> Monitor::strings_locked_() const {
   for (const auto &p : panels_) {
     auto it = node_by_addr.find(p.addr);
     const Node *n = it == node_by_addr.end() ? nullptr : it->second;
-    std::string label = n && !n->cca_string_label.empty() ? n->cca_string_label : ALL_PANELS;
+    std::string label = n && !n->cca_string_label.empty() ? n->cca_string_label : NO_STRING;
     StringTotals &s = by_label[label];
     s.label = label;
     if (s.mppt.empty() && n) s.mppt = n->cca_mppt_label;
