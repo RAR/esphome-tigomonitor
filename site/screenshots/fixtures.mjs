@@ -75,6 +75,7 @@ for (const [si, s] of STRINGS.entries()) {
       efficiency: eff,
       data_age_ms: Math.round(1800 + wob(i + 320) * 7000),
       stale: false,
+      tap: '1201',
     });
   }
 }
@@ -398,7 +399,7 @@ export const piRoutes = {
   '/api/settings': {
     serial_port: '/dev/serial/by-id/usb-FTDI_USB_RS485-if00-port0', bus_role: 'master', standby_takeover_s: 3,
     master_startup: true, master_housekeeping: true, master_queries: true, master_optimizer_writes: false,
-    master_read_tap_config: false, master_table_writes: false, discovery_auto: false, gateway_id: 0x1201, web_port: 0, web_port_active: 80, web_username: 'admin', web_password_set: true,
+    master_read_tap_config: false, master_table_writes: false, master_adopt_taps: false, discovery_auto: false, gateway_id: 0x1201, web_port: 0, web_port_active: 80, web_username: 'admin', web_password_set: true,
     tls_cert: '', tls_key: '', tls_active: false, tls_from_args: false, power_calibration: 1, publish_interval_s: 30,
     device_id: 'tigomonitor', show_cca_page: true, show_cloud_page: true,
     mqtt: { host: '192.0.2.10', port: 1883, username: 'tigomonitor', password_set: true, discovery: true,
@@ -410,10 +411,13 @@ export const piRoutes = {
     housekeeping: { on: true, learned_41: 24, sent_41: 1412, sent_session: 3, sent_broadcast: 6, sent_walk_pages: 96, walks_done: 32 },
     queries: { on: true, writes: false, sent_reads: 640, sent_writes: 0, answers: 598 },
     tap_version: 'Mgate Version G8.59 Jan  1 2026 10:00:00 GW-H1', tap: { lost: 0, last_lost_unix: 0, recent_lost_unix: [], back_without_discovery: 0 },
-    discovery_read: true, discovery: { running: true, remaining_s: 552, node_count: 24 }, renewals: 41, discovery_renewing: true, discovery_auto: false, window_wanted: true, missing_expected: 0,
+    discovery_read: true, discovery: { running: true, remaining_s: 552, node_count: 24 }, renewals: 41, discovery_renewing: true, discovery_auto: false, adopt_taps: false, window_wanted: true, missing_expected: 0,
     polls: 712400, timeouts: 3, resyncs: 0, gap_ms: { max: 39, max_at_unix: 1767225600, recent: 12 }, last_reply_unix: PI_T / 1000,
     pv: { on: true, source: 'setting', since: 0, confirmed: true, unconfirmed: false, last_sent: '01', last_reply: '01' },
-    table: { writes: false, edit: { kind: '', active: false, interrupted: false, finished: false, ok: false, dry_run: false, mac: '', label: '', id: '', ack: -1, step: '', message: '', started_unix: 0, finished_unix: 0, dry_frames: [] }, waiting: [], joins: [] },
+    taps: [{ id: '1201', mac: '04C05B0000000001', version: 'Mgate Version G8.59 Jan  1 2026 10:00:00 GW-H1', state: 'running',
+      polls: 712400, timeouts: 3, renewals: 41, lost: 0, last_reply_unix: PI_T / 1000,
+      discovery: { read: true, running: true, remaining_s: 552, node_count: 24, joined: 24 } }],
+    table: { writes: false, tap: '', edit: { kind: '', active: false, interrupted: false, finished: false, ok: false, dry_run: false, mac: '', label: '', id: '', ack: -1, step: '', message: '', started_unix: 0, finished_unix: 0, dry_frames: [] }, waiting: [], joins: [] },
     standby: { state: 'off', takeover_s: 3, master_heard_ms_ago: -1, takeovers: 0, last_takeover_unix: 0, yields: 0 },
   },
   '/api/bus': {

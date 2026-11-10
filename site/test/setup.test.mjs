@@ -217,3 +217,52 @@ test('System setup: the bus frames stay open', async () => {
   assert.deepEqual(errors, []);
   await ctx.close();
 });
+
+// Two TAPs (docs/superpowers/specs/2026-11-10-multi-tap-design.md): the
+// counts are both TAPs' summed, each TAP is listed by name with its own,
+// one not answering says so, adopting on offers the owner's herd, and an
+// add asks which TAP and sends it.
+test('System setup: with two TAPs, each is listed and an add names its TAP', async () => {
+  const w = world();
+  const tap = (id, state, count, joined) => ({ id, mac: '', version: '', state, polls: 10, timeouts: 0, renewals: 1, lost: 0,
+    last_reply_unix: now(), discovery: { read: true, running: true, remaining_s: 500, node_count: count, joined } });
+  w.master.taps = [tap('1201', 'running', 24, 24), tap('1202', 'lost', 3, 2)];
+  w.master.adopt_taps = true;
+  const { page, ctx, errors } = await open(w);
+  await page.waitForSelector('.setup-taps li');
+  assert.match(await page.textContent('#setup-meta'), /27 optimizers · 26 joined · 2 TAPs/);
+  const items = await page.$$eval('.setup-taps li', (ls) => ls.map((l) => l.textContent.replace(/\s+/g, ' ').trim()));
+  assert.equal(items.length, 2);
+  assert.match(items[0], /^Garage \(TAP 1201\)24 optimizers, 24 joined$/);
+  assert.match(items[1], /^TAP 12023 optimizers, 2 joined not answering$/);
+  assert.ok(await page.$('button[data-setup-herd]'));
+  await page.click('button[data-setup-start="add"]');
+  await page.fill('#setup-label', '0-1234R');
+  assert.deepEqual(await page.$$eval('#setup-tap option', (os) => os.map((o) => o.value)), ['1201', '1202']);
+  await page.selectOption('#setup-tap', '1202');
+  await page.click('button[data-setup-next]');
+  for (let i = 0; i < 40 && !w.posts.length; i++) await page.waitForTimeout(100);
+  assert.equal(w.posts.length, 1);
+  assert.equal(w.posts[0].path, '/api/master/table/add');
+  assert.equal(w.posts[0].tap, '1202');
+  assert.equal(w.posts[0].dry_run, true);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+// One TAP, as before: no list, no TAP choice, nothing extra sent.
+test('System setup: with one TAP, no TAP is asked for', async () => {
+  const w = world();
+  const { page, ctx, errors } = await open(w);
+  assert.equal(await page.$('.setup-taps'), null);
+  assert.equal(await page.$('button[data-setup-herd]'), null);
+  await page.click('button[data-setup-start="add"]');
+  await page.fill('#setup-label', '0-1234R');
+  assert.equal(await page.$('#setup-tap'), null);
+  await page.click('button[data-setup-next]');
+  for (let i = 0; i < 40 && !w.posts.length; i++) await page.waitForTimeout(100);
+  assert.equal(w.posts.length, 1);
+  assert.equal('tap' in w.posts[0], false);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});

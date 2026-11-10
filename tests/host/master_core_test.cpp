@@ -198,6 +198,8 @@ namespace mp = esphome::tigo_monitor::master;
 class TapPort : public Transport {
  public:
   std::function<bool(const mp::Frame &, mp::Frame &)> answer;
+  // Instead of answer: any number of replies (two TAPs answering one GET_MAC).
+  std::function<std::vector<mp::Frame>(const mp::Frame &)> answer_all;
   std::vector<std::pair<uint16_t, uint16_t>> sent;
   bool configured() const override { return true; }
   bool open(std::string &) override { return open_ = true; }
@@ -209,7 +211,12 @@ class TapPort : public Transport {
         mp::Frame f, r;
         if (!mp::decode_frame(body, f)) return;
         sent.push_back({f.dest, f.cmd});
-        if (answer && answer(f, r)) {
+        if (answer_all) {
+          for (const auto &a : answer_all(f)) {
+            auto w = mp::encode_frame(a.dest, a.cmd, a.payload);
+            pending_.insert(pending_.end(), w.begin(), w.end());
+          }
+        } else if (answer && answer(f, r)) {
           auto w = mp::encode_frame(r.dest, r.cmd, r.payload);
           pending_.insert(pending_.end(), w.begin(), w.end());
         }
@@ -756,7 +763,535 @@ static void test_a_replace_lists_the_new_one_and_waits() {
   core.close();
 }
 
+// ---- more than one TAP (docs/superpowers/specs/2026-11-10-multi-tap-design.md)
+
+// A bus with several TAPs, each answering at its own id with its own table:
+// polls (empty), discovery reads and renewals, VERSION, GET_MAC_NOW, table
+// pages, writes and erases. A TAP with up false answers nothing.
+struct MultiTap {
+  struct One {
+    One(uint16_t i, uint8_t m, bool u = true) : id(i), mac_last(m), up(u), stored(i) {}
+    uint16_t id;
+    uint8_t mac_last;
+    bool up;
+    uint16_t stored;  // where a RESET puts it; 0: the factory address (a new TAP)
+    std::vector<mp::Bytes> records;
+    std::vector<mp::Bytes> writes;
+  };
+  TapPort port;
+  std::vector<One> taps;
+  std::vector<uint16_t> dests;  // each request's dest, in order
+  One *at(uint16_t id) {
+    for (auto &t : taps)
+      if (t.id == id) return &t;
+    return nullptr;
+  }
+  MultiTap() {
+    port.answer_all = [this](const mp::Frame &f) {
+      std::vector<mp::Frame> out;
+      // The bring-up's, to every TAP: as SimBus in master_protocol_test.
+      if (f.cmd == 0x0014 && f.dest == 0) {
+        for (auto &t : taps)
+          if (t.up) t.id = 0x1235;
+        mp::Frame a;
+        a.dest = 0x8000;
+        a.cmd = 0x0015;
+        out.push_back(a);
+        return out;
+      }
+      if (f.cmd == 0x0010 && f.dest == 0) {
+        for (auto &t : taps) t.id = t.stored ? t.stored : 0x1235;
+        return out;
+      }
+      if (f.cmd == 0x0038) {
+        for (auto &t : taps)
+          if (t.up && t.id == f.dest) {
+            mp::Frame a = mac_reply(t.id, t.mac_last);
+            a.cmd = 0x0039;
+            out.push_back(a);
+          }
+        return out;
+      }
+      if (f.cmd == 0x003C && f.payload.size() == 14) {
+        for (auto &t : taps)
+          if (t.up && t.id == f.dest && f.payload[11] == t.mac_last) {
+            mp::Frame a;
+            a.dest = t.id | 0x8000;
+            a.cmd = 0x003D;
+            out.push_back(a);
+            t.id = static_cast<uint16_t>(f.payload[12] << 8 | f.payload[13]);
+            break;
+          }
+        return out;
+      }
+      if (f.cmd == 0x0012) {
+        for (auto &t : taps)
+          if (t.up && t.id == f.dest) {
+            t.stored = t.id;
+            mp::Frame a;
+            a.dest = t.id | 0x8000;
+            a.cmd = 0x0013;
+            out.push_back(a);
+          }
+        return out;
+      }
+      mp::Frame r;
+      if (one(f, r)) out.push_back(r);
+      return out;
+    };
+  }
+  bool one(const mp::Frame &f, mp::Frame &r) {
+    {
+      dests.push_back(f.dest);
+      One *t = at(f.dest);
+      if (!t || !t->up) return false;
+      r.dest = f.dest | 0x8000;
+      if (f.cmd == 0x003A) {
+        r = mac_reply(f.dest, t->mac_last);
+        return true;
+      }
+      if (f.cmd == 0x000A) {
+        r.cmd = 0x000B;
+        std::string v = "Mgate Version G8.59";
+        r.payload.assign(v.begin(), v.end());
+        return true;
+      }
+      if (f.cmd == 0x0148 && f.payload.size() == 5) {
+        r.cmd = 0x0149;
+        r.payload = {0x00, 0x1F, f.payload[2], f.payload[3], 0x00};
+        return true;
+      }
+      if (f.cmd != 0x0B0F || f.payload.size() < 5) return false;
+      uint8_t sub = f.payload[3], seq = f.payload[4];
+      mp::Bytes args(f.payload.begin() + 5, f.payload.end());
+      r.cmd = 0x0B10;
+      r.payload = {0x00, 0x0E, 0x00, static_cast<uint8_t>(sub + 1), seq};
+      if (sub == 0x2E || sub == 0x2D) {
+        r.payload[3] = 0x2F;
+        mp::Bytes w = {0x01, 0x03, 0x84, 0x00, 0x02, 0x00, 0x02, 0x00, static_cast<uint8_t>(t->records.size())};
+        r.payload.insert(r.payload.end(), w.begin(), w.end());
+        return true;
+      }
+      if (sub == 0x26) {
+        uint16_t asked = static_cast<uint16_t>(args[0] << 8 | args[1]);
+        std::vector<mp::Bytes> page;
+        for (const auto &rec : t->records)
+          if (((rec[8] & 0x7F) << 8 | rec[9]) >= asked) page.push_back(rec);
+        uint16_t first = page.empty() ? asked : static_cast<uint16_t>((page[0][8] & 0x7F) << 8 | page[0][9]);
+        mp::Bytes d = {static_cast<uint8_t>(first >> 8), static_cast<uint8_t>(first), 0x00,
+                       static_cast<uint8_t>(page.size())};
+        for (const auto &rec : page) d.insert(d.end(), rec.begin(), rec.end());
+        r.payload.insert(r.payload.end(), d.begin(), d.end());
+        return true;
+      }
+      if (sub == 0x29) {
+        t->writes.push_back(args);
+        for (size_t i = 0; i < args[0]; i++)
+          t->records.push_back(mp::Bytes(args.begin() + 1 + 10 * i, args.begin() + 11 + 10 * i));
+        r.payload.push_back(0x00);
+        return true;
+      }
+      return false;
+    }
+  }
+  int sent_to(uint16_t id, uint16_t cmd) const {
+    int n = 0;
+    for (auto &s : port.sent) n += s.first == id && s.second == cmd;
+    return n;
+  }
+};
+
+static mp::Bytes rec(uint8_t last, uint16_t id) {
+  return {0x04, 0xC0, 0x5B, 0x00, 0x00, 0x00, 0x02, last, static_cast<uint8_t>(id >> 8), static_cast<uint8_t>(id)};
+}
+
+static void run_for(MasterCore &core, uint32_t from, uint32_t to, uint32_t step = 20) {
+  for (uint32_t t = from; t < to; t += step) core.tick(t);
+}
+
+// Two TAPs: polled one each in turn, as the CCA alternates them, and each
+// gets its own discovery reads.
+static void test_two_taps_are_polled_in_turn() {
+  MultiTap bus;
+  bus.taps = {{0x1201, 1}, {0x1202, 2}};
+  MasterCore core(&bus.port, [](int, const std::string &) {}, nullptr, nullptr, 0x1201, false, false);
+  core.set_taps({{0x1201, {}}, {0x1202, {}}});
+  CHECK(core.open());
+  run_for(core, 0, 4000);
+  int a = bus.sent_to(0x1201, 0x0148), b = bus.sent_to(0x1202, 0x0148);
+  CHECK(a > 20 && b > 20 && (a > b ? a - b : b - a) <= 2);
+  // No run of three polls to one TAP.
+  int run = 0, longest = 0;
+  uint16_t prev = 0;
+  for (auto &s : bus.port.sent) {
+    if (s.second != 0x0148) continue;
+    run = s.first == prev ? run + 1 : 1;
+    prev = s.first;
+    longest = std::max(longest, run);
+  }
+  CHECK(longest <= 2);
+  CHECK(bus.sent_to(0x1201, 0x0B0F) > 0 && bus.sent_to(0x1202, 0x0B0F) > 0);
+  CHECK(bus.sent_to(0x1201, 0x000A) == 1 && bus.sent_to(0x1202, 0x000A) == 1);
+  MasterStatus m = core.status();
+  CHECK(m.taps.size() == 2 && m.taps[0].id == 0x1201 && m.taps[1].id == 0x1202);
+  CHECK(m.polls == m.taps[0].polls + m.taps[1].polls);
+  CHECK(m.taps[1].version == "Mgate Version G8.59" && m.tap_version == m.taps[0].version);
+  CHECK(m.taps[0].state == "running" && m.taps[1].state == "running");
+  core.close();
+}
+
+// With more than one TAP, no 0x41: its content is copied from a CCA (or
+// built in) and names the TAP the CCA chose, so through another TAP it could
+// steer an optimizer onto the wrong one (owner's analysis, 2026-11-10). A node
+// that gets none keeps its TAP. The rest of housekeeping goes on; one TAP
+// still gets its 0x41s.
+static void test_no_0x41_with_more_than_one_tap() {
+  MultiTap bus;
+  bus.taps = {{0x1201, 1}, {0x1202, 2}};
+  MasterCore core(&bus.port, [](int, const std::string &) {}, nullptr, nullptr, 0x1201, false, false, true);
+  core.set_taps({{0x1201, {}}, {0x1202, {}}});
+  CHECK(core.open());
+  run_for(core, 0, 20000);
+  MasterStatus m = core.status();
+  CHECK(m.taps.size() == 2 && m.taps[0].sent_41 == 0 && m.taps[1].sent_41 == 0 && m.sent_41 == 0);
+  CHECK(m.taps[0].sent_session > 0 && m.taps[1].sent_session > 0);
+  core.close();
+
+  MultiTap one;
+  one.taps = {{0x1201, 1}};
+  MasterCore single(&one.port, [](int, const std::string &) {}, nullptr, nullptr, 0x1201, false, false, true);
+  CHECK(single.open());
+  run_for(single, 0, 20000);
+  CHECK(single.status().sent_41 > 0);
+  single.close();
+}
+
+// One of two TAPs goes quiet: the other goes on being polled at full rate,
+// and the quiet one is asked once every LOST_PROBE_MS, then, after
+// LOST_MISSES of those, once every REMOVED_PROBE_MS. Back, it is polled again.
+static void test_a_quiet_tap_does_not_stop_the_other() {
+  MultiTap bus;
+  bus.taps = {{0x1201, 1}, {0x1202, 2}};
+  MasterCore core(&bus.port, [](int, const std::string &) {}, nullptr, nullptr, 0x1201, false, false);
+  core.set_taps({{0x1201, {}}, {0x1202, {}}});
+  CHECK(core.open());
+  run_for(core, 0, 2000);
+  bus.at(0x1202)->up = false;
+  run_for(core, 2000, 4000);
+  MasterStatus m = core.status();
+  CHECK(m.taps[1].state == "lost" && m.taps[0].state == "running");
+  CHECK(m.fault == Fault::none);
+  int before = bus.sent_to(0x1202, 0x0148) + bus.sent_to(0x1202, 0x0B0F);
+  int first_before = bus.sent_to(0x1201, 0x0148);
+  // One try every LOST_PROBE_MS: in 3 of them, 3 tries (a step of 50 ms here).
+  run_for(core, 4000, 4000 + 3 * MasterCore::LOST_PROBE_MS, 50);
+  int tries = bus.sent_to(0x1202, 0x0148) + bus.sent_to(0x1202, 0x0B0F) - before;
+  CHECK(tries >= 2 && tries <= 4);
+  CHECK(bus.sent_to(0x1201, 0x0148) - first_before > 1000);
+  // Unanswered LOST_MISSES times: removed, asked every REMOVED_PROBE_MS.
+  uint32_t t = 4000 + 3 * MasterCore::LOST_PROBE_MS;
+  uint32_t until = t + (MasterCore::LOST_MISSES + 1) * MasterCore::LOST_PROBE_MS;
+  for (; t < until; t += 1000) core.tick(t);
+  CHECK(core.status().taps[1].state == "removed");
+  before = bus.sent_to(0x1202, 0x0148) + bus.sent_to(0x1202, 0x0B0F);
+  for (uint32_t end = t + MasterCore::REMOVED_PROBE_MS; t < end; t += 1000) core.tick(t);
+  tries = bus.sent_to(0x1202, 0x0148) + bus.sent_to(0x1202, 0x0B0F) - before;
+  CHECK(tries >= 1 && tries <= 2);
+  // Back.
+  bus.at(0x1202)->up = true;
+  for (uint32_t end = t + MasterCore::REMOVED_PROBE_MS + 2000; t < end; t += 1000) core.tick(t);
+  CHECK(core.status().taps[1].state == "running");
+  before = bus.sent_to(0x1202, 0x0148);
+  run_for(core, t, t + 1000);
+  CHECK(bus.sent_to(0x1202, 0x0148) - before > 10);
+  core.close();
+}
+
+// Both quiet: the master's fault says no TAP answers, as with one.
+static void test_no_tap_answering_is_a_fault() {
+  MultiTap bus;
+  bus.taps = {{0x1201, 1, false}, {0x1202, 2, false}};
+  MasterCore core(&bus.port, [](int, const std::string &) {}, nullptr, nullptr, 0x1201, false, false);
+  core.set_taps({{0x1201, {}}, {0x1202, {}}});
+  CHECK(core.open());
+  run_for(core, 0, 3000);
+  CHECK(core.status().fault == Fault::no_reply);
+  core.close();
+}
+
+// A table add runs on the TAP it names, and the id it picks skips those
+// listed on the other TAP: optimizer ids are system-wide.
+static void test_a_table_add_runs_on_its_tap() {
+  MultiTap bus;
+  bus.taps = {{0x1201, 1}, {0x1202, 2}};
+  bus.at(0x1201)->records = {rec(1, 0x0002), rec(2, 0x0003)};
+  bus.at(0x1202)->records = {rec(3, 0x0004)};
+  MasterCore core(&bus.port, [](int, const std::string &) {}, nullptr, nullptr, 0x1201, false, false);
+  core.set_taps({{0x1201, {}}, {0x1202, {}}});
+  core.set_table_writes(true);
+  CHECK(core.open());
+  run_for(core, 0, 1000);
+  std::string why;
+  CHECK(core.request_table_add(NEW_MAC, 0, false, why, 0x1202, {0x0002, 0x0003}));
+  run_for(core, 1000, 8000);
+  CHECK(bus.at(0x1201)->writes.empty());
+  CHECK(bus.at(0x1202)->writes.size() == 1);
+  // 0002 and 0003 are on 1201, 0004 on 1202: the lowest free is 0005.
+  CHECK(core.status().table_edit.ok && core.status().table_edit.id == 0x0005);
+  CHECK(core.status().table_tap == 0x1202);
+  CHECK(core.status().table_waiting.size() == 1);
+  // An id listed on the other TAP is refused if asked for.
+  CHECK(core.request_table_add({0x04, 0xC0, 0x5B, 0, 0, 0, 0x12, 0x35}, 0x0003, false, why, 0x1202, {0x0002, 0x0003}));
+  run_for(core, 8000, 14000);
+  CHECK(!core.status().table_edit.ok && core.status().table_edit.message.find("another TAP") != std::string::npos);
+  // A TAP that isn't on the bus is refused.
+  CHECK(!core.request_table_add(NEW_MAC, 0, true, why, 0x1209));
+  core.close();
+}
+
+// Startup with two TAPs, both at their ids: each is read there, then the
+// scan at the factory address, then both are polled. Nothing is re-addressed.
+static void test_startup_finds_two_taps_at_their_ids() {
+  MultiTap bus;
+  bus.taps = {{0x1201, 1}, {0x1202, 2}};
+  MasterCore core(&bus.port, [](int, const std::string &) {}, nullptr, nullptr, 0x1201, false, /*startup=*/true);
+  core.set_taps({{0x1201, {}}, {0x1202, {}}});
+  CHECK(core.open());
+  run_for(core, 0, 10000);
+  CHECK(bus.sent_to(0x1201, 0x003A) == 1 && bus.sent_to(0x1202, 0x003A) == 1);
+  CHECK(bus.sent_to(0x1235, 0x0038) == 5);
+  CHECK(!readdressed(bus.port));
+  CHECK(bus.sent_to(0x1201, 0x0148) > 20 && bus.sent_to(0x1202, 0x0148) > 20);
+  auto taps = core.taps();
+  CHECK(taps.size() == 2 && taps[1].mac.size() == 8 && taps[1].mac[7] == 2);
+  core.close();
+}
+
+// Startup with one of two TAPs missing: the other is polled, the missing
+// one is lost, asked again now and then.
+static void test_startup_without_one_tap_polls_the_other() {
+  MultiTap bus;
+  bus.taps = {{0x1201, 1}, {0x1202, 2, false}};
+  MasterCore core(&bus.port, [](int, const std::string &) {}, nullptr, nullptr, 0x1201, false, /*startup=*/true);
+  core.set_taps({{0x1201, {}}, {0x1202, {}}});
+  CHECK(core.open());
+  run_for(core, 0, 10000);
+  CHECK(bus.sent_to(0x1201, 0x0148) > 20);
+  CHECK(core.status().taps[1].state == "lost" && core.status().phase == Phase::running);
+  CHECK(!readdressed(bus.port));
+  core.close();
+}
+
+// PV off reaches every TAP's switch, and is confirmed only once each answered.
+static void test_pv_off_goes_to_every_tap() {
+  MultiTap bus;
+  bus.taps = {{0x1201, 1}, {0x1202, 2}};
+  MasterCore core(&bus.port, [](int, const std::string &) {}, nullptr, nullptr, 0x1201, false, false);
+  core.set_taps({{0x1201, {}}, {0x1202, {}}});
+  CHECK(core.open());
+  run_for(core, 0, 1000);
+  CHECK(core.request_pv(true));
+  run_for(core, 1000, 3000);
+  CHECK(bus.sent_to(0x1201, 0x0B00) >= 1 && bus.sent_to(0x1202, 0x0B00) >= 1);
+  core.close();
+}
+
+static mp::Bytes multi_mac(uint8_t last) { return {0x04, 0xC0, 0x5B, 0x00, 0x00, 0x00, 0x00, last}; }
+
+// Adopting on: a new TAP at the factory address starts the herd. The known
+// TAP keeps 1201, the new one gets 1202 and, keeping no id through the
+// RESET, a STORE in the second round; both are saved and polled.
+static void test_adopting_herds_a_new_tap() {
+  MultiTap bus;
+  bus.taps = {{0x1201, 1}, {0x1235, 2}};
+  bus.at(0x1235)->stored = 0;
+  MasterCore core(&bus.port, [](int, const std::string &) {}, nullptr, nullptr, 0x1201, false, /*startup=*/true);
+  core.set_taps({{0x1201, multi_mac(1)}});
+  std::vector<MasterCore::TapEntry> saved;
+  core.set_adopt_taps(true, [&](const std::vector<MasterCore::TapEntry> &t) { saved = t; });
+  CHECK(core.open());
+  run_for(core, 0, 60000, 50);
+  CHECK(bus.sent_to(0x0000, 0x0014) == 10);  // two rounds of five
+  CHECK(bus.sent_to(0x1202, 0x0012) == 1);   // the STORE, to the new one only
+  CHECK(bus.sent_to(0x1201, 0x0012) == 0);
+  CHECK(saved.size() == 2 && saved[0].id == 0x1201 && saved[1].id == 0x1202 && saved[1].mac == multi_mac(2));
+  CHECK(bus.taps[0].id == 0x1201 && bus.taps[1].id == 0x1202 && bus.taps[1].stored == 0x1202);
+  int a = bus.sent_to(0x1201, 0x0148), b = bus.sent_to(0x1202, 0x0148);
+  CHECK(a > 20 && b > 20);
+  MasterStatus m = core.status();
+  CHECK(m.taps.size() == 2 && m.fault == Fault::none && m.phase == Phase::running);
+  core.close();
+}
+
+// Adopting off, as before: the new TAP is reported and nothing is herded.
+static void test_not_adopting_leaves_a_new_tap_alone() {
+  MultiTap bus;
+  bus.taps = {{0x1201, 1}, {0x1235, 2}};
+  bus.at(0x1235)->stored = 0;
+  MasterCore core(&bus.port, [](int, const std::string &) {}, nullptr, nullptr, 0x1201, false, /*startup=*/true);
+  CHECK(core.open());
+  run_for(core, 0, 20000, 50);
+  CHECK(bus.sent_to(0x0000, 0x0014) == 0);
+  CHECK(core.status().fault == Fault::extra_tap && core.status().extra_taps.size() == 1);
+  CHECK(bus.sent_to(0x1201, 0x0148) > 20);
+  std::string why;
+  CHECK(!core.request_herd(why) && why.find("master_adopt_taps") != std::string::npos);
+  core.close();
+}
+
+// The owner's herd, two TAPs already known: both keep their ids, one round.
+static void test_the_owners_herd_keeps_known_ids() {
+  MultiTap bus;
+  bus.taps = {{0x1201, 1}, {0x1202, 2}};
+  MasterCore core(&bus.port, [](int, const std::string &) {}, nullptr, nullptr, 0x1201, false, /*startup=*/true);
+  core.set_taps({{0x1201, multi_mac(1)}, {0x1202, multi_mac(2)}});
+  std::vector<MasterCore::TapEntry> saved;
+  core.set_adopt_taps(true, [&](const std::vector<MasterCore::TapEntry> &t) { saved = t; });
+  CHECK(core.open());
+  run_for(core, 0, 10000, 50);
+  CHECK(bus.sent_to(0x0000, 0x0014) == 0);  // both found at their ids: no herd
+  std::string why;
+  CHECK(core.request_herd(why));
+  run_for(core, 10000, 40000, 50);
+  CHECK(bus.sent_to(0x0000, 0x0014) == 5 && bus.sent_to(0x0000, 0x0010) == 1);
+  CHECK(saved.size() == 2 && saved[0].id == 0x1201 && saved[1].id == 0x1202);
+  CHECK(bus.taps[0].id == 0x1201 && bus.taps[1].id == 0x1202);
+  CHECK(core.status().phase == Phase::running);
+  core.close();
+}
+
+// A herd that hears a saved TAP missing keeps it, lost, at its id.
+static void test_a_herd_keeps_a_missing_tap() {
+  MultiTap bus;
+  bus.taps = {{0x1201, 1}, {0x1202, 2, false}};
+  MasterCore core(&bus.port, [](int, const std::string &) {}, nullptr, nullptr, 0x1201, false, /*startup=*/true);
+  core.set_taps({{0x1201, multi_mac(1)}, {0x1202, multi_mac(2)}});
+  std::vector<MasterCore::TapEntry> saved;
+  core.set_adopt_taps(true, [&](const std::vector<MasterCore::TapEntry> &t) { saved = t; });
+  CHECK(core.open());
+  run_for(core, 0, 10000, 50);
+  std::string why;
+  CHECK(core.request_herd(why));
+  run_for(core, 10000, 40000, 50);
+  CHECK(saved.size() == 2 && saved[1].id == 0x1202 && saved[1].mac == multi_mac(2));
+  MasterStatus m = core.status();
+  CHECK(m.taps.size() == 2 && m.taps[0].state == "running" && m.taps[1].state == "lost");
+  core.close();
+}
+
+// A lost TAP back at the factory address (a power cut, and it keeps no id):
+// in startup mode its tries also ask there, and finding it, the master
+// herds, as it re-addresses one of several TAPs (see the next test). Both
+// end at their ids.
+static void test_a_lost_tap_at_the_factory_address_is_brought_back() {
+  MultiTap bus;
+  bus.taps = {{0x1201, 1}, {0x1202, 2}};
+  MasterCore core(&bus.port, [](int, const std::string &) {}, nullptr, nullptr, 0x1201, false, /*startup=*/true);
+  core.set_taps({{0x1201, multi_mac(1)}, {0x1202, multi_mac(2)}});
+  CHECK(core.open());
+  run_for(core, 0, 8000, 50);
+  CHECK(core.status().taps.size() == 2 && core.status().taps[1].state == "running");
+  bus.at(0x1202)->id = 0x1235;  // back from a power cut at the factory address
+  uint32_t t = 8000;
+  for (uint32_t end = t + 3 * MasterCore::LOST_PROBE_MS; t < end; t += 50) core.tick(t);
+  CHECK(bus.taps[1].id == 0x1202);
+  CHECK(core.status().taps[1].state == "running");
+  CHECK(bus.sent_to(0x0000, 0x0014) == 5 && bus.taps[0].id == 0x1201);  // one round of the herd
+  int before = bus.sent_to(0x1202, 0x0148);
+  for (uint32_t end = t + 2000; t < end; t += 50) core.tick(t);
+  CHECK(bus.sent_to(0x1202, 0x0148) - before > 10);
+  core.close();
+}
+
+// Startup, two known TAPs, one at the factory address: a herd, not the
+// one-TAP bring-up, whose SET_485_ID moves both there and whose GET_MAC,
+// hearing both, could give the first to answer the other's id.
+static void test_startup_with_one_of_two_at_the_factory_address_herds() {
+  MultiTap bus;
+  bus.taps = {{0x1201, 1}, {0x1235, 2}};
+  bus.at(0x1235)->stored = 0x1202;
+  MasterCore core(&bus.port, [](int, const std::string &) {}, nullptr, nullptr, 0x1201, false, /*startup=*/true);
+  core.set_taps({{0x1201, multi_mac(1)}, {0x1202, multi_mac(2)}});
+  CHECK(core.open());
+  run_for(core, 0, 40000, 50);
+  CHECK(bus.sent_to(0x0000, 0x0014) == 5);
+  CHECK(bus.taps[0].id == 0x1201 && bus.taps[1].id == 0x1202);
+  MasterStatus m = core.status();
+  CHECK(m.taps.size() == 2 && m.taps[0].state == "running" && m.taps[1].state == "running");
+  CHECK(bus.sent_to(0x1201, 0x0148) > 20 && bus.sent_to(0x1202, 0x0148) > 20);
+  core.close();
+}
+
+// Not adopting, a stranger at the factory address is no reason to herd:
+// a lost TAP's tries see it there, and leave it; the other TAP is polled
+// throughout, and the stranger is reported.
+static void test_a_stranger_at_the_factory_address_starts_no_herd() {
+  MultiTap bus;
+  bus.taps = {{0x1201, 1}, {0x1202, 2}, {0x1235, 9}};
+  MasterCore core(&bus.port, [](int, const std::string &) {}, nullptr, nullptr, 0x1201, false, /*startup=*/true);
+  core.set_taps({{0x1201, multi_mac(1)}, {0x1202, multi_mac(2)}});
+  CHECK(core.open());
+  run_for(core, 0, 10000, 50);
+  bus.at(0x1202)->up = false;  // lost; the stranger stays at the factory address
+  uint32_t t = 10000;
+  for (uint32_t end = t + 4 * MasterCore::LOST_PROBE_MS; t < end; t += 50) core.tick(t);
+  CHECK(bus.sent_to(0x0000, 0x0014) == 0);
+  CHECK(core.status().taps[1].state == "lost" && core.status().fault == Fault::extra_tap);
+  int before = bus.sent_to(0x1201, 0x0148);
+  for (uint32_t end = t + 2000; t < end; t += 50) core.tick(t);
+  CHECK(bus.sent_to(0x1201, 0x0148) - before > 10);
+  core.close();
+}
+
+// Startup, two known TAPs, the second missing and a stranger at the factory
+// address, not adopting: the stranger is reported, the first is polled.
+static void test_startup_with_a_stranger_polls_ours() {
+  MultiTap bus;
+  bus.taps = {{0x1201, 1}, {0x1202, 2, false}, {0x1235, 9}};
+  MasterCore core(&bus.port, [](int, const std::string &) {}, nullptr, nullptr, 0x1201, false, /*startup=*/true);
+  core.set_taps({{0x1201, multi_mac(1)}, {0x1202, multi_mac(2)}});
+  CHECK(core.open());
+  run_for(core, 0, 20000, 50);
+  CHECK(bus.sent_to(0x0000, 0x0014) == 0);
+  CHECK(core.status().phase == Phase::running && core.status().taps[1].state == "lost");
+  CHECK(bus.sent_to(0x1201, 0x0148) > 20);
+  core.close();
+}
+
+// A change aimed at a TAP that isn't answering is refused, not left waiting.
+static void test_a_table_change_on_a_lost_tap_is_refused() {
+  MultiTap bus;
+  bus.taps = {{0x1201, 1}, {0x1202, 2, false}};
+  MasterCore core(&bus.port, [](int, const std::string &) {}, nullptr, nullptr, 0x1201, false, false);
+  core.set_taps({{0x1201, {}}, {0x1202, {}}});
+  CHECK(core.open());
+  run_for(core, 0, 3000);
+  CHECK(core.status().taps[1].state == "lost");
+  std::string why;
+  CHECK(!core.request_table_add(NEW_MAC, 0, true, why, 0x1202));
+  CHECK(why.find("isn't answering") != std::string::npos);
+  CHECK(core.request_table_add(NEW_MAC, 0, true, why, 0x1201));
+  core.close();
+}
+
 int main() {
+  test_a_lost_tap_at_the_factory_address_is_brought_back();
+  test_a_table_change_on_a_lost_tap_is_refused();
+  test_startup_with_one_of_two_at_the_factory_address_herds();
+  test_a_stranger_at_the_factory_address_starts_no_herd();
+  test_startup_with_a_stranger_polls_ours();
+  test_adopting_herds_a_new_tap();
+  test_not_adopting_leaves_a_new_tap_alone();
+  test_the_owners_herd_keeps_known_ids();
+  test_a_herd_keeps_a_missing_tap();
+  test_two_taps_are_polled_in_turn();
+  test_no_0x41_with_more_than_one_tap();
+  test_a_quiet_tap_does_not_stop_the_other();
+  test_no_tap_answering_is_a_fault();
+  test_a_table_add_runs_on_its_tap();
+  test_startup_finds_two_taps_at_their_ids();
+  test_startup_without_one_tap_polls_the_other();
+  test_pv_off_goes_to_every_tap();
   test_a_replace_lists_the_new_one_and_waits();
   test_a_removal_cut_off_by_a_tap_restart_is_finished();
   test_a_removal_saves_then_erases();

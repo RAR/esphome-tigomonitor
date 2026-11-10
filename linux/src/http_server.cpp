@@ -462,6 +462,12 @@ void HttpServer::routes_() {
   svr.Get("/api/devices", [&mon](const httplib::Request &, httplib::Response &res) {
     auto now = Clock::now();
     json devices = json::array();
+    // The TAP each reports through (its RS485 id), or null until it has.
+    auto links = mon.links();
+    auto tap_of = [&links](const std::string &addr) -> json {
+      auto it = links.links().find(addr);
+      return it == links.links().end() || !it->second.tap ? json(nullptr) : json(hex4(it->second.tap));
+    };
     for (const auto &p : mon.panels()) {
       const auto &r = p.reading;
       auto age = std::chrono::duration_cast<std::chrono::milliseconds>(now - p.updated).count();
@@ -482,7 +488,8 @@ void HttpServer::routes_() {
                          {"duty_cycle", r1(r.duty_cycle * 100.0 / 255.0)},
                          {"efficiency", r2(r.efficiency)},
                          {"data_age_ms", age},
-                         {"stale", now - p.updated >= mon.online_window()}});
+                         {"stale", now - p.updated >= mon.online_window()},
+                         {"tap", tap_of(p.addr)}});
     }
     // An optimizer heard before but not since this start, such as after a
     // restart at night, keeps its place reading nothing, as on the ESP32. A
@@ -504,7 +511,8 @@ void HttpServer::routes_() {
                          {"current", 0}, {"current_out", 0}, {"power_in", 0}, {"power", 0}, {"power_out", 0},
                          {"peak_power", 0}, {"temperature", 0}, {"rssi", 0}, {"duty_cycle", 0}, {"efficiency", 0},
                          {"data_age_ms", std::max<int64_t>(0, now_ms - n.last_heard_unix * 1000)},
-                         {"stale", true}});
+                         {"stale", true},
+                         {"tap", tap_of(n.addr)}});
     }
     send_json(res, {{"devices", devices}, {"count", devices.size()}});
   });
@@ -1475,6 +1483,7 @@ void HttpServer::routes_() {
                     {"discovery_renewing", m.discovery_renewing},
                     {"window_wanted", m.window_wanted},
                     {"discovery_auto", ctx_.current_settings().discovery_auto},
+                    {"adopt_taps", ctx_.current_settings().master_adopt_taps && ctx_.current_settings().master_startup},
                     {"missing_expected", m.missing_expected},
                     {"discovery",
                      {{"running", m.discovery.running},
@@ -1496,8 +1505,29 @@ void HttpServer::routes_() {
                       {"unconfirmed", m.pv_unconfirmed},
                       {"last_sent", pv_byte(m.pv_last_sent)},
                       {"last_reply", pv_byte(m.pv_last_reply)}}},
+                    {"taps", [&m] {
+                       json a = json::array();
+                       for (const auto &t : m.taps)
+                         a.push_back({{"id", hex4(t.id)},
+                                      {"mac", t.mac},
+                                      {"version", t.version},
+                                      {"state", t.state},
+                                      {"polls", t.polls},
+                                      {"timeouts", t.timeouts},
+                                      {"renewals", t.renewals},
+                                      {"lost", t.tap_lost},
+                                      {"last_reply_unix", t.last_reply_unix},
+                                      {"discovery",
+                                       {{"read", t.discovery_read},
+                                        {"running", t.discovery.running},
+                                        {"remaining_s", t.discovery.remaining_s},
+                                        {"node_count", t.discovery.node_count},
+                                        {"joined", t.discovery.joined}}}});
+                       return a;
+                     }()},
                     {"table",
                      {{"writes", m.table_writes},
+                      {"tap", m.table_tap ? hex4(m.table_tap) : ""},
                       {"edit",
                        {{"kind", m.table_edit.kind},
                         {"active", m.table_edit.active},
@@ -1559,7 +1589,20 @@ void HttpServer::routes_() {
   // MAC), as the CCA does (table_edit.h). Behind the web password, as PV
   // output is: {"label": "4-9A57A2L"} or {"mac": "04C05B..."}, optional
   // "id" (hex, 0002..03FF) and "dry_run".
-  svr.Post("/api/master/table/add", [this](const httplib::Request &req, httplib::Response &res) {
+  // A table change's optional "tap": the TAP's RS485 id in hex. 0 when
+  // absent: the TAP the optimizer reports through, or the first.
+  auto tap_of = [](const json &j, uint16_t &tap, std::string &bad) {
+    tap = 0;
+    if (!j.contains("tap") || j["tap"].is_null()) return true;
+    std::string h = j["tap"].is_string() ? j["tap"].get<std::string>() : "";
+    if (h.empty() || h.size() > 4 || h.find_first_not_of("0123456789abcdefABCDEF") != std::string::npos) {
+      bad = "a TAP is its RS485 id, up to 4 hex digits";
+      return false;
+    }
+    tap = static_cast<uint16_t>(std::stoul(h, nullptr, 16));
+    return true;
+  };
+  svr.Post("/api/master/table/add", [this, tap_of](const httplib::Request &req, httplib::Response &res) {
     if (ctx_.current_settings().web_password.empty()) {
       send_json(res, {{"error", "set a web password first"}}, 403);
       return;
@@ -1590,8 +1633,14 @@ void HttpServer::routes_() {
       }
     }
     bool dry = j.contains("dry_run") && j["dry_run"].is_boolean() && j["dry_run"].get<bool>();
+    uint16_t tap = 0;
+    std::string bad_tap;
+    if (!tap_of(j, tap, bad_tap)) {
+      send_json(res, {{"error", bad_tap}}, 400);
+      return;
+    }
     std::string why;
-    int code = ctx_.request_table_add ? ctx_.request_table_add(mac, id, dry, why) : 409;
+    int code = ctx_.request_table_add ? ctx_.request_table_add(mac, id, dry, why, tap) : 409;
     if (code == 200) send_json(res, {{"started", true}, {"dry_run", dry}, {"mac", mp::mac_hex(mac)}, {"label", mp::label_of(mac)}});
     else send_json(res, {{"error", why.empty() ? "not running the bus" : why}}, code);
   });
@@ -1599,7 +1648,7 @@ void HttpServer::routes_() {
   // Pi-only: remove an optimizer from the TAP's table, as the CCA does: the
   // table erased and the rest written back as they were (table_edit.h).
   // {"label": ...} or {"mac": ...}, and "dry_run"; behind the web password.
-  svr.Post("/api/master/table/remove", [this](const httplib::Request &req, httplib::Response &res) {
+  svr.Post("/api/master/table/remove", [this, tap_of](const httplib::Request &req, httplib::Response &res) {
     if (ctx_.current_settings().web_password.empty()) {
       send_json(res, {{"error", "set a web password first"}}, 403);
       return;
@@ -1613,8 +1662,14 @@ void HttpServer::routes_() {
       return;
     }
     bool dry = j.contains("dry_run") && j["dry_run"].is_boolean() && j["dry_run"].get<bool>();
+    uint16_t tap = 0;
+    std::string bad_tap;
+    if (!tap_of(j, tap, bad_tap)) {
+      send_json(res, {{"error", bad_tap}}, 400);
+      return;
+    }
     std::string why;
-    int code = ctx_.request_table_remove ? ctx_.request_table_remove(mac, dry, why) : 409;
+    int code = ctx_.request_table_remove ? ctx_.request_table_remove(mac, dry, why, tap) : 409;
     if (code == 200) send_json(res, {{"started", true}, {"dry_run", dry}, {"mac", mp::mac_hex(mac)}, {"label", mp::label_of(mac)}});
     else send_json(res, {{"error", why.empty() ? "not running the bus" : why}}, code);
   });
@@ -1624,7 +1679,7 @@ void HttpServer::routes_() {
   // written back without the old one, the new one listed at its address;
   // once it joins, it takes the old one's place in the layout. Behind the
   // web password.
-  svr.Post("/api/master/table/replace", [this](const httplib::Request &req, httplib::Response &res) {
+  svr.Post("/api/master/table/replace", [this, tap_of](const httplib::Request &req, httplib::Response &res) {
     if (ctx_.current_settings().web_password.empty()) {
       send_json(res, {{"error", "set a web password first"}}, 403);
       return;
@@ -1643,8 +1698,14 @@ void HttpServer::routes_() {
       return;
     }
     bool dry = j.contains("dry_run") && j["dry_run"].is_boolean() && j["dry_run"].get<bool>();
+    uint16_t tap = 0;
+    std::string bad_tap;
+    if (!tap_of(j, tap, bad_tap)) {
+      send_json(res, {{"error", bad_tap}}, 400);
+      return;
+    }
     std::string why;
-    int code = ctx_.request_table_replace ? ctx_.request_table_replace(old_mac, new_mac, dry, why) : 409;
+    int code = ctx_.request_table_replace ? ctx_.request_table_replace(old_mac, new_mac, dry, why, tap) : 409;
     if (code == 200)
       send_json(res, {{"started", true}, {"dry_run", dry}, {"old_mac", mp::mac_hex(old_mac)}, {"mac", mp::mac_hex(new_mac)},
                       {"label", mp::label_of(new_mac)}});
@@ -1654,6 +1715,21 @@ void HttpServer::routes_() {
 
   // Pi-only: stop waiting for an added optimizer to join ({"label"} or
   // {"mac"}); it stays listed. Behind the web password.
+  // Pi-only: look for TAPs, as the CCA's detection does: every TAP on the
+  // bus moved to the factory address and given its saved id, or the next
+  // free one (tigo_master.h's Herd). Polling stops for ~30 s. Needs
+  // master_adopt_taps and master_startup; behind the web password.
+  svr.Post("/api/master/taps/herd", [this](const httplib::Request &, httplib::Response &res) {
+    if (ctx_.current_settings().web_password.empty()) {
+      send_json(res, {{"error", "set a web password first"}}, 403);
+      return;
+    }
+    std::string why;
+    int code = ctx_.request_herd ? ctx_.request_herd(why) : 409;
+    if (code == 200) send_json(res, {{"started", true}});
+    else send_json(res, {{"error", why.empty() ? "not running the bus" : why}}, code);
+  });
+
   svr.Post("/api/master/table/stop", [this](const httplib::Request &req, httplib::Response &res) {
     if (ctx_.current_settings().web_password.empty()) {
       send_json(res, {{"error", "set a web password first"}}, 403);
@@ -1748,6 +1824,7 @@ void HttpServer::routes_() {
                     {"master_queries", s.master_queries},
                     {"master_read_tap_config", s.master_read_tap_config},
                     {"master_table_writes", s.master_table_writes},
+                    {"master_adopt_taps", s.master_adopt_taps},
                     {"discovery_auto", s.discovery_auto},
                     {"master_optimizer_writes", s.master_optimizer_writes},
                     {"gateway_id", s.gateway_id},
@@ -1800,6 +1877,7 @@ void HttpServer::routes_() {
       if (j.contains("master_queries")) s.master_queries = j["master_queries"].get<bool>();
       if (j.contains("master_read_tap_config")) s.master_read_tap_config = j["master_read_tap_config"].get<bool>();
       if (j.contains("master_table_writes")) s.master_table_writes = j["master_table_writes"].get<bool>();
+      if (j.contains("master_adopt_taps")) s.master_adopt_taps = j["master_adopt_taps"].get<bool>();
       if (j.contains("discovery_auto")) s.discovery_auto = j["discovery_auto"].get<bool>();
       if (j.contains("master_optimizer_writes")) s.master_optimizer_writes = j["master_optimizer_writes"].get<bool>();
       if (j.contains("gateway_id")) s.gateway_id = j["gateway_id"].get<int>();

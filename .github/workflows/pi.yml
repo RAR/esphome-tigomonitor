@@ -67,6 +67,8 @@ jobs:
         run: docker run --rm -v "$PWD":/src -w /src tigod-dev linux/scripts/master-e2e.sh
       - name: Two masters on one bus, a standby taking over
         run: docker run --rm -v "$PWD":/src -w /src tigod-dev linux/scripts/standby-e2e.sh
+      - name: The bus master with more than one TAP, against mock TAPs
+        run: docker run --rm -v "$PWD":/src -w /src tigod-dev linux/scripts/multitap-e2e.sh
       - name: The bus log, and a CCA reconfiguring the TAP
         run: docker run --rm -v "$PWD":/src -w /src tigod-dev linux/scripts/bus-log-e2e.sh
       - name: PV output off and on, against a mock TAP

@@ -81,21 +81,32 @@ class BusMaster {
                        const std::vector<esphome::tigo_monitor::master::TableRecord> *resume) {
     core_.set_table_saved(std::move(saved), mac, resume);
   }
-  bool request_table_remove(const esphome::tigo_monitor::master::Bytes &mac, bool dry_run, std::string &why) {
-    return core_.request_table_remove(mac, dry_run, why);
+  bool request_table_remove(const esphome::tigo_monitor::master::Bytes &mac, bool dry_run, std::string &why,
+                            uint16_t tap = 0) {
+    return core_.request_table_remove(mac, dry_run, why, tap);
   }
   bool request_table_replace(const esphome::tigo_monitor::master::Bytes &old_mac,
-                             const esphome::tigo_monitor::master::Bytes &new_mac, bool dry_run, std::string &why) {
-    return core_.request_table_replace(old_mac, new_mac, dry_run, why);
+                             const esphome::tigo_monitor::master::Bytes &new_mac, bool dry_run, std::string &why,
+                             uint16_t tap = 0) {
+    return core_.request_table_replace(old_mac, new_mac, dry_run, why, tap);
   }
   void set_on_replaced(esphome::tigo_master::MasterCore::TableReplaced cb) { core_.set_on_replaced(std::move(cb)); }
   void set_on_removed(esphome::tigo_master::MasterCore::TableRemoved cb) { core_.set_on_removed(std::move(cb)); }
   bool request_table_stop_waiting(const esphome::tigo_monitor::master::Bytes &mac) {
     return core_.request_table_stop_waiting(mac);
   }
-  bool request_table_add(const esphome::tigo_monitor::master::Bytes &mac, uint16_t id, bool dry_run, std::string &why) {
-    return core_.request_table_add(mac, id, dry_run, why);
+  bool request_table_add(const esphome::tigo_monitor::master::Bytes &mac, uint16_t id, bool dry_run, std::string &why,
+                         uint16_t tap = 0, const std::set<uint16_t> &avoid = {}) {
+    return core_.request_table_add(mac, id, dry_run, why, tap, avoid);
   }
+  using TapEntry = esphome::tigo_master::MasterCore::TapEntry;
+  void set_taps(const std::vector<TapEntry> &taps) { core_.set_taps(taps); }
+  std::vector<TapEntry> taps() const { return core_.taps(); }
+  void set_tap_targets(esphome::tigo_master::MasterCore::TapTargets t) { core_.set_tap_targets(std::move(t)); }
+  void set_adopt_taps(bool on, esphome::tigo_master::MasterCore::TapsSaved saved) {
+    core_.set_adopt_taps(on, std::move(saved));
+  }
+  bool request_herd(std::string &why) { return core_.request_herd(why); }
   void set_window_wanted(bool wanted, int missing) { core_.set_window_wanted(wanted, missing); }
   std::map<uint16_t, esphome::tigo_monitor::master::Queries::Setup> setups() const { return core_.setups(); }
   void tick(uint32_t now_ms) { core_.tick(now_ms); }
