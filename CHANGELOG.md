@@ -108,6 +108,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Running the bus is one choice now, with one switch (Raspberry Pi).**
+  Bringing a TAP up, the housekeeping, the optimizer queries and the two
+  writes they call for, the TAP's radio read and opening the join window only
+  when needed were eight switches on Settings → Bus, all off by default. They
+  are on now whenever the Pi runs the bus. The one switch left is **Allow
+  changes to the TAPs**, still off by default. A settings file from before
+  keeps any part it turned off, and the Bus card names it with **Turn them all
+  on**. Take on a new TAP is no longer a setting: the Add a TAP guide allows it
+  while you add one. The page also no longer explains itself by comparison
+  with a CCA.
 - **Optimizers the TAP doesn't list stay off the Dashboard and the mesh map
   (Raspberry Pi).** A spare that once joined keeps the network's key and
   goes on reporting, so it turned up as a panel, and its silence as an

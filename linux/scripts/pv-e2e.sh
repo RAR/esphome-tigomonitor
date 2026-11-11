@@ -45,7 +45,7 @@ start() {  # start NAME PORT EXTRA-SETTINGS [MOCK FLAGS...]
   python3 linux/tools/mock_tap.py "$out/$name.tty" --window 600 --nodes 44 --stats "$out/$name.json" "$@" &
   tap=$!
   sleep 0.5
-  printf '{"bus_role": "master", "master_startup": true, "serial_port": "%s", "gateway_id": 4609, "web_port": %s, "web_password": "pw"%s}\n' \
+  printf '{"bus_role": "master", "master_startup": false, "master_housekeeping": false, "master_queries": false, "master_optimizer_writes": false, "master_read_tap_config": false, "discovery_auto": false, "master_startup": true, "serial_port": "%s", "gateway_id": 4609, "web_port": %s, "web_password": "pw"%s}\n' \
     "$PWD/$out/$name.tty" "$port" "$extra" > "$out/$name/settings.json"
   restart "$name"
 }
@@ -135,7 +135,7 @@ stop_all
 
 # --- run 6: no web password, and the listen role ---
 start six 18206 ''
-printf '{"bus_role": "master", "serial_port": "%s", "gateway_id": 4609, "web_port": 18206}\n' "$PWD/$out/six.tty" > "$out/six/settings.json"
+printf '{"bus_role": "master", "master_startup": false, "master_housekeeping": false, "master_queries": false, "master_optimizer_writes": false, "master_read_tap_config": false, "discovery_auto": false, "serial_port": "%s", "gateway_id": 4609, "web_port": 18206}\n' "$PWD/$out/six.tty" > "$out/six/settings.json"
 stop
 restart six
 expect "no web password: 403" "$(req POST 18206 /api/master/pv '{"on": false}')" '403 {"error":"set a web password first"}'
@@ -155,7 +155,7 @@ python3 linux/tools/mock_tap.py "$out/seven.tty" --window 600 --nodes 44 --stats
 tap=$!
 sleep 0.5
 chmod 666 "$(readlink -f "$out/seven.tty")"
-printf '{"bus_role": "master", "master_startup": true, "master_housekeeping": true, "serial_port": "%s", "gateway_id": 4609, "web_port": 18207, "web_password": "pw"}\n' \
+printf '{"bus_role": "master", "master_startup": false, "master_housekeeping": false, "master_queries": false, "master_optimizer_writes": false, "master_read_tap_config": false, "discovery_auto": false, "master_startup": true, "master_housekeeping": true, "serial_port": "%s", "gateway_id": 4609, "web_port": 18207, "web_password": "pw"}\n' \
   "$PWD/$out/seven.tty" > "$out/seven/settings.json"
 chown 65534:65534 "$out/seven" "$out/seven/settings.json"
 setpriv --reuid=65534 --regid=65534 --clear-groups build/linux/tigomonitord --state-dir "$out/seven" \
