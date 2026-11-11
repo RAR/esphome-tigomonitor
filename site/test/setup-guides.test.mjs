@@ -308,3 +308,46 @@ test('System setup: "Retire a TAP" drops one that has gone for good, never one s
   assert.deepEqual(errors, []);
   await ctx.close();
 });
+
+test('System setup: the browser\'s Back and Forward step through a task, then back to the list', async () => {
+  const w = world();
+  const { page, ctx, errors } = await open(w);
+  await page.click('.setup-start[data-task="system"]');
+  await page.waitForSelector('.setup-flow[data-task="system"]');
+  await next(page, 'Find the TAP');
+  await next(page, 'Optimizers');
+  const at = () => page.evaluate(() => (document.querySelector('.setup-rail li[aria-current="step"]') || {}).textContent || 'list');
+  await page.goBack();
+  await page.waitForFunction(() => /Find the TAP$/.test((document.querySelector('.setup-rail li[aria-current="step"]') || {}).textContent || ''));
+  assert.match(await at(), /Find the TAP$/);
+  await page.goBack();
+  await page.waitForFunction(() => /Connect the bus$/.test((document.querySelector('.setup-rail li[aria-current="step"]') || {}).textContent || ''));
+  await page.goBack();
+  await page.waitForFunction(() => !document.querySelector('.setup-flow') && document.querySelector('.setup-tasks'));
+  assert.equal(new URL(page.url()).hash, '#setup');
+  await page.goForward();
+  await page.waitForFunction(() => /Connect the bus$/.test((document.querySelector('.setup-rail li[aria-current="step"]') || {}).textContent || ''));
+  // The page's own Back is the same step back, so the browser's Forward still works after it.
+  await page.click('button[data-setup-next]');
+  await page.waitForFunction(() => /Find the TAP$/.test((document.querySelector('.setup-rail li[aria-current="step"]') || {}).textContent || ''));
+  await page.click('button[data-setup-back]');
+  await page.waitForFunction(() => /Connect the bus$/.test((document.querySelector('.setup-rail li[aria-current="step"]') || {}).textContent || ''));
+  await page.goForward();
+  await page.waitForFunction(() => /Find the TAP$/.test((document.querySelector('.setup-rail li[aria-current="step"]') || {}).textContent || ''));
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test('System setup: once every step is done, "Set up a new system" rolls up and says so', async () => {
+  const w = world();
+  w.layout.unassigned = [];
+  const { page, ctx, errors } = await open(w);
+  const card = page.locator('.setup-start[data-task="system"]');
+  assert.match(await card.getAttribute('class'), /\bdone\b/);
+  assert.match(await card.textContent(), /system is set up/i);
+  assert.equal(await page.locator('.setup-start[data-task="system"] .steps').count(), 0);
+  await card.click();
+  await page.waitForSelector('.setup-flow[data-task="system"]');
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
