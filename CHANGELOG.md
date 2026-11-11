@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Set up a whole system from one page (Raspberry Pi).** System setup
+  gains **Set up a new system**, a checklist from the bus to the layout:
+  the bus, the TAP, the optimizers, the layout, string ratings, and a
+  password and Home Assistant. Each step ticks itself off from what the Pi
+  already sees and links to where you do the rest. Beside the optimizer
+  tasks are two for TAPs (experimental): **Add a TAP**, which brings a TAP
+  a CCA has set up onto the bus and names it, and **Retire a TAP**, which
+  drops one that has gone for good. The task cards have new pictures, the
+  optimizer from the logo and a TAP of its own.
 - **Per-panel sensors can now be keyed by `long_address:` (the panel's barcode) instead of `address:`.** A panel's short address is reassigned by the gateway at commissioning and can change wholesale on any re-commissioning — the same instability that #74 fixed for CCA labels, but YAML-declared sensors still pinned themselves to `address:` and had no way to follow a renumbering. `long_address:` is mutually exclusive with `address:` on a device sensor entry; its sensors are placed once a Frame 27 confirms the barcode's current address, and re-pointed automatically if the gateway reassigns it later. Existing `address:`-based configs are unaffected.
 - **Forget a stray optimizer (Raspberry Pi).** An optimizer that once
   joined your system keeps its network key and goes on reporting through

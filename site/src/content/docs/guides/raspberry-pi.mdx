@@ -104,6 +104,30 @@ sudo reboot
 Then, under **Settings → Bus**, choose **Raspberry Pi
 UART** (`/dev/serial0`).
 
+## Set it up in one place
+
+**System setup** gathers every setup job in one page.
+
+- **Set up a new system** is a checklist from the bus to the layout:
+  connect the bus, find the TAP, check the optimizers are reporting, lay out
+  the array in Topology, rate the strings, and set a password and Home
+  Assistant. Each step ticks itself off from what the Pi already sees and
+  links to where you do the rest, so it also answers "what's left?" on a
+  running system.
+- **Optimizers:** replace, add or retire one, step by step, each change
+  checked before anything is sent. These need the Pi running the bus and
+  **Let me change the TAP's table** on (Settings → Bus).
+- **TAPs** (experimental):
+  - **Add a TAP** walks through bringing a second TAP onto the bus. The TAP
+    must be set up by a CCA first: the Pi can't give a TAP its radio
+    settings. It turns on **Take on a new TAP** for you, looks for TAPs, and
+    names the new one. Turning that switch on or off restarts the bus master,
+    a few seconds without polling, and looking for TAPs stops polling for
+    about 30 seconds.
+  - **Retire a TAP** drops a TAP that has gone for good, so it stops showing
+    as not answering. One still answering can't be retired.
+  - Replacing a TAP isn't offered yet.
+
 ## Connect it to Home Assistant
 
 1. Open `http://tigomonitor.local` (or your hostname).

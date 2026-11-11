@@ -474,6 +474,14 @@ int main(int argc, char **argv) {
           return 409;
         }
         return bus_master->request_herd(why) ? 200 : 409;
+      },
+      [&](uint16_t id, std::string &why) {
+        std::lock_guard<std::mutex> lock(master_mu);
+        if (!bus_master) {
+          why = "this monitor isn't running the bus";
+          return 409;
+        }
+        return bus_master->request_forget_tap(id, why) ? 200 : 409;
       }});
   if (port < 0 && settings.web_port > 0) port = settings.web_port;
   // Only the default steps aside for another web server; a port someone

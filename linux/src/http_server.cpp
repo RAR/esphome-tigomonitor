@@ -1732,6 +1732,27 @@ void HttpServer::routes_() {
     else send_json(res, {{"error", why.empty() ? "not running the bus" : why}}, code);
   });
 
+  // Pi-only: retire a TAP that has gone for good ({"tap": "1202"}): no
+  // longer polled, and left off the saved list (taps.json). Refused for a
+  // TAP still answering, or the only one. Behind the web password.
+  svr.Post("/api/master/taps/forget", [this](const httplib::Request &req, httplib::Response &res) {
+    if (ctx_.current_settings().web_password.empty()) {
+      send_json(res, {{"error", "set a web password first"}}, 403);
+      return;
+    }
+    json j = json::parse(req.body, nullptr, false);
+    unsigned id = 0;
+    if (j.is_discarded() || !j.is_object() || !j.contains("tap") || !j["tap"].is_string() ||
+        sscanf(j["tap"].get<std::string>().c_str(), "%x", &id) != 1 || !id || id > 0xFFFF) {
+      send_json(res, {{"error", "expected {\"tap\": \"1202\"}"}}, 400);
+      return;
+    }
+    std::string why;
+    int code = ctx_.forget_tap ? ctx_.forget_tap(static_cast<uint16_t>(id), why) : 409;
+    if (code == 200) send_json(res, {{"retired", true}});
+    else send_json(res, {{"error", why.empty() ? "not running the bus" : why}}, code);
+  });
+
   svr.Post("/api/master/table/stop", [this](const httplib::Request &req, httplib::Response &res) {
     if (ctx_.current_settings().web_password.empty()) {
       send_json(res, {{"error", "set a web password first"}}, 403);

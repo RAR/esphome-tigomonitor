@@ -1007,6 +1007,38 @@ static void test_a_quiet_tap_does_not_stop_the_other() {
   core.close();
 }
 
+// Retiring a TAP that has gone for good: refused while it answers, for the
+// only TAP, and for one the master doesn't have; a lost one is dropped at the
+// next tick, no longer polled, and the shorter list is saved.
+static void test_a_lost_tap_can_be_retired() {
+  MultiTap bus;
+  bus.taps = {{0x1201, 1}, {0x1202, 2}};
+  MasterCore core(&bus.port, [](int, const std::string &) {}, nullptr, nullptr, 0x1201, false, false);
+  std::vector<std::vector<MasterCore::TapEntry>> saves;
+  core.set_adopt_taps(false, [&](const std::vector<MasterCore::TapEntry> &t) { saves.push_back(t); });
+  core.set_taps({{0x1201, {}}, {0x1202, {}}});
+  CHECK(core.open());
+  run_for(core, 0, 2000);
+  std::string why;
+  CHECK(!core.request_forget_tap(0x1202, why) && why.find("answering") != std::string::npos);
+  CHECK(!core.request_forget_tap(0x1209, why) && why.find("no TAP") != std::string::npos);
+  bus.at(0x1202)->up = false;
+  run_for(core, 2000, 4000);
+  CHECK(core.status().taps[1].state == "lost");
+  CHECK(core.request_forget_tap(0x1202, why));
+  core.tick(4001);
+  MasterStatus m = core.status();
+  CHECK(m.taps.size() == 1 && m.taps[0].id == 0x1201);
+  CHECK(saves.size() == 1 && saves[0].size() == 1 && saves[0][0].id == 0x1201);
+  int before = bus.sent_to(0x1202, 0x0148) + bus.sent_to(0x1202, 0x0B0F);
+  run_for(core, 4001, 4001 + 2 * MasterCore::LOST_PROBE_MS, 50);
+  CHECK(bus.sent_to(0x1202, 0x0148) + bus.sent_to(0x1202, 0x0B0F) == before);
+  CHECK(m.fault == Fault::none);
+  // Now the only TAP: refused.
+  CHECK(!core.request_forget_tap(0x1201, why) && why.find("only TAP") != std::string::npos);
+  core.close();
+}
+
 // Both quiet: the master's fault says no TAP answers, as with one.
 static void test_no_tap_answering_is_a_fault() {
   MultiTap bus;
@@ -1287,6 +1319,7 @@ int main() {
   test_two_taps_are_polled_in_turn();
   test_no_0x41_with_more_than_one_tap();
   test_a_quiet_tap_does_not_stop_the_other();
+  test_a_lost_tap_can_be_retired();
   test_no_tap_answering_is_a_fault();
   test_a_table_add_runs_on_its_tap();
   test_startup_finds_two_taps_at_their_ids();
