@@ -72,7 +72,8 @@ static void usage() {
                "  --health-check P  check the daemon on port P, as Docker's HEALTHCHECK does\n"
                "  --replay FILE     read bus bytes from a capture instead of a port\n"
                "  --speed X         replay speed (1 = bus speed, 0 = as fast as possible)\n"
-               "  --capture FILE    also append every byte read to FILE\n"
+               "  --capture FILE    also append every byte read to FILE (raw, so it holds\n"
+               "                    a TAP's network key if one is read or written)\n"
                "  --verbose         debug logging\n"
                "  --version\n");
 }
@@ -95,6 +96,27 @@ static std::string new_optimizer_note(const Settings &s) {
   if (!runs_bus(s) || s.master_optimizer_writes) return "";
   return "; master_optimizer_writes is off, so it gets no w255 and may produce nothing until it's on";
 }
+
+// Running in a container: its MAC is the container's (from its bridge
+// address, or new each start), not this machine's.
+static bool in_container() {
+  if (access("/.dockerenv", F_OK) == 0 || access("/run/.containerenv", F_OK) == 0) return true;
+  if (FILE *f = fopen("/proc/1/cgroup", "r")) {
+    char line[512];
+    bool found = false;
+    while (!found && fgets(line, sizeof(line), f))
+      found = strstr(line, "docker") || strstr(line, "containerd") || strstr(line, "kubepods") || strstr(line, "libpod");
+    fclose(f);
+    if (found) return true;
+  }
+  return false;
+}
+
+// What a new TAP's PAN is made from (pan_for takes its last two bytes): this
+// machine's MAC on bare metal, as a CCA takes its serial; in a container, a
+// random seed made once and kept in the state directory, so each install's
+// differs and stays the same across restarts.
+static esphome::tigo_monitor::master::Bytes pan_seed(const std::string &state_dir);
 
 // This machine's MAC, from the interface the default route uses: what a new
 // TAP's PAN is made from (a CCA uses its own serial). Empty if none is found.
@@ -121,6 +143,30 @@ static esphome::tigo_monitor::master::Bytes system_mac() {
     fclose(a);
   }
   return out;
+}
+
+static esphome::tigo_monitor::master::Bytes pan_seed(const std::string &state_dir) {
+  if (!in_container()) {
+    auto mac = system_mac();
+    if (mac.size() >= 2) return mac;
+  }
+  const std::string path = state_dir + "/pan-seed";
+  unsigned v = 0;
+  if (FILE *f = fopen(path.c_str(), "r")) {
+    if (fscanf(f, "%x", &v) != 1) v = 0;
+    fclose(f);
+  }
+  if (!v || v >= 0xFFFF) {
+    std::random_device rd;
+    do v = rd() & 0xFFFF; while (!v || v == 0xFFFF);
+    std::string tmp = path + ".tmp";
+    if (FILE *f = fopen(tmp.c_str(), "w")) {
+      fprintf(f, "%04X\n", v);
+      fclose(f);
+      rename(tmp.c_str(), path.c_str());
+    }
+  }
+  return {static_cast<uint8_t>(v >> 8), static_cast<uint8_t>(v)};
 }
 
 int main(int argc, char **argv) {
@@ -220,8 +266,8 @@ int main(int argc, char **argv) {
   // And the discovery switch, for the same reason.
   DiscoveryStore discovery(state_dir + "/discovery.json");
   // The tunnel sequence, carried from one master to the next and across
-  // restarts: the TAP answers its config reads with status 1 once our count
-  // has broken (bench, 2026-11-11), as the CCA's never does.
+  // restarts, as the CCA's runs on unbroken. The TAP only echoes it (bench
+  // and analysis, 2026-11-11); this just keeps us counting the CCA's way.
   const std::string seq_path = state_dir + "/tunnel-seq";
   uint8_t carried_seq = 0;
   if (FILE *f = fopen(seq_path.c_str(), "r")) {
@@ -550,8 +596,8 @@ int main(int argc, char **argv) {
         }
         mp::RadioBlock block;
         // Not given: a channel at least two from every TAP heard on this bus,
-        // and a PAN from this monitor's own MAC (as a CCA takes one from its
-        // serial), stepped past any in use.
+        // and a PAN from this machine (pan_seed: its MAC on bare metal, a kept
+        // random seed in a container), stepped past any in use.
         // The TAP's own aren't another's: the step again on it keeps them.
         std::set<uint16_t> channels, pans;
         uint16_t self = bus_log.tap_of_mac(mp::mac_hex(tap_mac));
@@ -561,7 +607,7 @@ int main(int argc, char **argv) {
           if (r.pan) pans.insert(r.pan);
         }
         block.channel = channel ? channel : mp::channel_for(channels);
-        mp::Bytes own = system_mac();
+        mp::Bytes own = pan_seed(state_dir);
         block.pan = pan ? pan : mp::pan_for(own.size() >= 2 ? own : tap_mac, pans);
         if (!block.channel || !block.pan) {
           why = "no free channel or PAN left";
@@ -572,6 +618,7 @@ int main(int argc, char **argv) {
         mp::map_for_profile(12, block.map, generation <= 0xFFFFFF ? generation : 0);
         block.next_generation = generation > 0xFFFFFF;
         block.skip_identify = !identify;
+        block.keep_tap_profile = true;  // a TAP with a profile keeps it; one without gets 40's
         std::random_device rd;
         block.key = mp::key_from([&rd]() { return static_cast<uint8_t>(rd()); });
         given = block.describe();

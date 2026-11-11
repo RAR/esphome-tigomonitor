@@ -130,10 +130,13 @@ UART** (`/dev/serial0`).
   checked before anything is sent. These need the Pi running the bus and
   **Allow changes to the TAPs** on (Settings → Bus).
 - **TAPs** (experimental):
-  - **Add a TAP** walks through bringing a second TAP onto the bus. The TAP
-    must be set up by a CCA first: the Pi can't give a TAP its radio
-    settings. It lets the Pi take on a new TAP while you add it, looks for
-    TAPs, and names the new one. Allowing it, and stopping again, restarts the bus master,
+  - **Add a TAP** walks through bringing a new TAP onto the bus, no CCA
+    needed. It lets the Pi take on a new TAP while you add it, looks for
+    TAPs, gives the new one its radio settings (a channel at least two from
+    your other TAPs', a network ID made from the Pi's own and a new key,
+    which the TAP saves), and names it. A check shows the channel and
+    network ID first; giving them needs **Allow changes to the TAPs**. The
+    radio settings were tested on a bench TAP, not yet on a roof. Allowing it, and stopping again, restarts the bus master,
     a few seconds without polling, and looking for TAPs stops polling for
     about 30 seconds.
   - **Retire a TAP** drops a TAP that has gone for good, so it stops showing

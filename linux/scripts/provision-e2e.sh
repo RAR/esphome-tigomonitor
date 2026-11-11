@@ -1,8 +1,9 @@
 #!/bin/sh
-# Giving a spare TAP its radio settings (tap_config.h), against the mock
-# TAP: refused without master_bench and for a MAC that isn't the TAP's; a
-# dry run reads the TAP and writes nothing; the real one writes, saves with
-# the stored read and checks; a reset to that TAP alone only when asked.
+# Giving a TAP its radio settings (tap_config.h), against the mock TAP: a
+# write refused without master_bench or Allow changes to the TAPs, and for a
+# MAC that isn't the TAP's; a dry run reads the TAP and writes nothing; the
+# real one writes, saves with the stored read and checks; a reset to that TAP
+# alone only on the bench; Add a TAP's live case, the channel and PAN chosen.
 # The key never appears in the API's answers or the log.
 # Run from the repo root inside the dev container, after build.sh.
 set -eu
@@ -92,6 +93,7 @@ expect "still polled after the reset" "$(body GET 18402 /api/master | python3 -c
 # No key anywhere a person sees: the API's answer and the log show it hidden,
 # and the write's 32-hex-digit key never appears.
 expect "the log says key hidden" "$(grep -c 'key hidden' "$out/on.log" | tr -d ' ' | sed 's/^[1-9][0-9]*$/yes/')" yes
+expect "and no 32-hex-digit key is in it" "$(grep -cE '[0-9A-Fa-f]{32}' "$out/on.log" || true)" 0
 # Our own write is in the bus log, but it isn't another device's: no alarm.
 expect "no reconfiguration alarm from our own write" "$(grep -c 'another device sent the TAP' "$out/on.log" || true)" 0
 stop_all
@@ -115,6 +117,9 @@ finished 18404
 expect "it finished" "$(edit 18404 "(e['ok'], e['step'])")" "(True, 'done')"
 expect "on a channel two from the one heard" "$(stat "$out/live.json" "[w['channel'] for w in d['cfg_writes']]")" "[11]"
 expect "with a PAN" "$(stat "$out/live.json" "d['cfg_writes'][0]['pan'] not in ('0000', 'FFFF')")" True
+# In a container (this test runs in one), the PAN comes from a random seed
+# kept in the state directory, not the container's MAC.
+expect "from a seed kept in the state directory" "$(python3 -c "import json; s=open('$out/live/pan-seed').read().strip(); print(len(s) == 4)")" True
 # The step again on the same TAP: its own channel and PAN aren't "in use"
 # by another, so it keeps them rather than hopping.
 expect "the step again starts" "$(code POST 18404 /api/master/taps/provision "{\"mac\": \"$MAC\", \"dry_run\": false}")" 200

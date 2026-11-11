@@ -371,7 +371,7 @@ struct Request {
   uint32_t wait_ms = 0;   // how long to wait for the reply; 0 = the usual
   bool bring_up = false;  // a frame the CCA sends only straight after re-addressing a TAP
   bool table_edit = false;  // from a TableAdd (table_edit.h), the only source of a table write
-  bool provision = false;   // from a ProvisionJob (tap_config.h): bench only
+  bool provision = false;   // from a ProvisionJob (tap_config.h): Add a TAP's radio step
 };
 
 // ---- housekeeping ----------------------------------------------------------
@@ -877,7 +877,7 @@ class Queries {
   // A read-shaped text: ^00 and a name, nothing else (no '_', no '#', not
   // Leave). What the owner may ask one node for on the bench.
   static bool is_read_text(const std::string &text) {
-    if (text.size() < 5 || text.compare(0, 3, "^00") != 0 || text.back() != '\r') return false;
+    if (text.size() < 5 || text.size() > 28 || text.compare(0, 3, "^00") != 0 || text.back() != '\r') return false;
     for (size_t i = 3; i + 1 < text.size(); i++)
       if (!std::isalpha(static_cast<unsigned char>(text[i]))) return false;
     return text.find("Leave") == std::string::npos;
@@ -1746,8 +1746,9 @@ class Herd {
 // (table_edit.h), with master_table_writes on.
 // provision: the write of a TAP's radio settings (sub 0x0D, 01 00 and a
 // whole block on a channel the TAP takes), sent only by a ProvisionJob
-// (tap_config.h) on the bench. A provisioning request may also send the 0x0D
-// reads and the reset, to its own TAP alone.
+// (tap_config.h), with Allow changes to the TAPs or master_bench on (the
+// caller's provision flag). A provisioning request may also send the 0x0D
+// reads, GET_MAC_NOW and (bench only) the reset, to its own TAP alone.
 enum class Allow { yes, bench_only, startup_only, optimizer_write, pv_off, table_write, provision, never };
 
 // Sub 0x29's args as the CCA sent them on the bench (2026-11-06, 11-09): a

@@ -235,6 +235,40 @@ static void test_provision_generation() {
   }
 }
 
+// A TAP that already has a profile (a CCA's, say, for 120 optimizers) keeps
+// it; one without gets the 40-optimizer default. The result says which.
+static void test_provision_keeps_the_taps_profile() {
+  {
+    FakeTap tap;
+    tap.ram = made_up();
+    tap.ram.map = {20, 2, 2, 1, 0, 0x10, 0x20, 0x30, 28, 1};
+    RadioBlock want = made_up();
+    std::array<uint8_t, 10> m{};
+    map_for_profile(12, m);
+    want.map = m;
+    want.keep_tap_profile = true;
+    ProvisionJob job(TAP_MAC, want, false, false);
+    run(job, tap);
+    CHECK(job.ok() && tap.ram.map[0] == 20 && tap.ram.map[8] == 28 && tap.ram.map[9] == 1);
+    CHECK(job.message().find("up to 120 optimizers") != std::string::npos);
+  }
+  {  // blank: the default
+    FakeTap tap;
+    tap.ram = made_up();
+    tap.ram.map = {};
+    RadioBlock want = made_up();
+    std::array<uint8_t, 10> m{};
+    map_for_profile(12, m);
+    want.map = m;
+    want.keep_tap_profile = true;
+    ProvisionJob job(TAP_MAC, want, false, false);
+    run(job, tap);
+    CHECK(job.ok() && tap.ram.map[0] == 12 && job.message().find("up to 40 optimizers") != std::string::npos);
+  }
+  CHECK(profile_capacity(12) == 40 && profile_capacity(14) == 75 && profile_capacity(20) == 120 &&
+        profile_capacity(24) == 300 && profile_capacity(7) == 0);
+}
+
 // After its read, the job gives the master one turn (its poll, as the CCA
 // sent between its read and its write) before writing.
 static void test_provision_gives_a_turn_before_writing() {
@@ -389,6 +423,7 @@ int main() {
   test_provision_with_reset();
   test_provision_generation();
   test_provision_gives_a_turn_before_writing();
+  test_provision_keeps_the_taps_profile();
   test_provision_stops();
   test_dry_run();
   if (failures) {

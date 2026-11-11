@@ -71,9 +71,13 @@ async function open(w) {
         return json(200, { started: true });
       }
       if (path === '/api/taps/name') { w.names[b.tap] = b.name; return json(200, b); }
+      if (path === '/api/master/taps/provision' && w.provisionHangs) {
+        w.master.table.edit = { ...w.master.table.edit, kind: 'provision', active: true, finished: false, started_unix: Math.floor(Date.now() / 1000) };
+        return json(200, { started: true });
+      }
       if (path === '/api/master/taps/provision') {
         // Channel and PAN chosen by the daemon when not given; the key never shown.
-        const given = 'channel 11, PAN 1A2B, map 0c020201000000011c01, SLT 5A, key hidden, optimization 00000200, SLm 3C';
+        const given = 'channel 11, PAN 1A2B, map 0c020201000000011c01, SLT 5A, key hidden, optimization 00000200, SLm 3C, for up to 40 optimizers';
         const dry = b.dry_run !== false;
         w.master.table.edit = { ...w.master.table.edit, kind: 'provision', active: false, finished: true, ok: true, dry_run: dry,
           step: 'done', mac: b.mac, started_unix: Math.floor(Date.now() / 1000),
@@ -283,10 +287,13 @@ test('System setup: "Add a TAP" from wiring it in to its name, giving it its rad
   const plan = await page.textContent('.setup-body');
   assert.match(plan, /Channel 11/);
   assert.match(plan, /Network ID 1A2B/);
+  assert.match(plan, /up to 40 optimizers/);
   assert.match(plan, /never shown/);
   assert.doesNotMatch(plan, /key hidden/);
   await page.click('button[data-setup-radio-go]');
-  await page.waitForFunction(() => /Saved/.test(document.querySelector('.setup-body').textContent));
+  await page.waitForFunction(() => /Given and saved/.test(document.querySelector('.setup-body').textContent));
+  // Only what the job checked: no claim about a power cut it didn't see.
+  assert.doesNotMatch(await page.textContent('.setup-body'), /power cut/);
   // The check first, then the real one, to the TAP found, and no channel or PAN chosen here.
   assert.deepEqual(w.posts.filter((p) => p.path === '/api/master/taps/provision').map((p) => [p.mac, p.dry_run, 'channel' in p, 'pan' in p]),
     [['04C05B3000000202', true, false, false], ['04C05B3000000202', false, false, false]]);
@@ -372,6 +379,27 @@ test('System setup: once every step is done, "Set up a new system" rolls up and 
   assert.equal(await page.locator('.setup-start[data-task="system"] .steps').count(), 0);
   await card.click();
   await page.waitForSelector('.setup-flow[data-task="system"]');
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+// The Radio step: a job that never finishes turns into a failure to retry
+// after 90 s, rather than spinning for ever.
+test('System setup: "Add a TAP"\'s radio check that never finishes can be tried again', async () => {
+  const w = world();
+  w.provisionHangs = true;
+  const { page, ctx, errors } = await open(w);
+  await page.clock.install();
+  await page.click('.setup-task[data-task="addtap"]');
+  await page.waitForSelector('.setup-flow[data-task="addtap"]');
+  await page.evaluate(() => { setup.flow.step = 'radio'; setup.flow.found = '1201'; });
+  w.master.taps = [{ ...w.master.taps[0], mac: '04C05B3000000201' }];
+  await page.evaluate(() => refreshSetup(true));
+  await page.click('button[data-setup-radio-check]');
+  await page.waitForFunction(() => /Reading its radio settings/.test(document.querySelector('.setup-body').textContent));
+  await page.clock.fastForward(95000);
+  await page.waitForFunction(() => document.querySelector('button[data-setup-radio-check]'), null, { timeout: 10000 });
+  assert.match(await page.textContent('.setup-body'), /no result/i);
   assert.deepEqual(errors, []);
   await ctx.close();
 });

@@ -83,6 +83,9 @@ struct RadioBlock {
   // Not sent: ProvisionJob sets map bytes 5-7 to the TAP's own generation
   // plus one (wrapping to 1, never 0), read just before it writes.
   bool next_generation = false;
+  // Not sent: keep the profile (map bytes 0-4 and 8-9) the TAP already has,
+  // if it's a known one, instead of this block's.
+  bool keep_tap_profile = false;
   // Not sent: start at the read, without asking the TAP for its MAC first
   // (bench: does a lone 003A to a running TAP set the 0x0E status to 1?).
   bool skip_identify = false;
@@ -147,6 +150,11 @@ struct RadioBlock {
     return s;
   }
 };
+
+// How many optimizers a profile is for, by its first count; 0 unknown.
+inline int profile_capacity(uint8_t first) {
+  return first == 12 ? 40 : first == 14 ? 75 : first == 20 ? 120 : first == 24 ? 300 : 0;
+}
 
 // The map for a profile by its first count (12, 14, 20 or 24: 40, 75, 120
 // and 300 optimizers). Bytes 5-7 are a map generation the TAP doesn't check
@@ -249,7 +257,7 @@ class ProvisionJob : public TableJob {
           dry_text_.push_back("0D 00 01 (the save)");
           dry_text_.push_back("0D 00 00 (the check)");
           if (reset_) dry_text_.push_back("0010 37 24 92 66 to this TAP alone");
-          finish_("dry run: would give the TAP " + block_.describe());
+          finish_("dry run: would give the TAP " + block_.describe() + capacity_note_());
           return {};
         }
         return provision_(send_(SUB_GATEWAY_CFG, radio_write_args(block_), WRITE_WAIT_MS, seq));
@@ -301,6 +309,10 @@ class ProvisionJob : public TableJob {
         block_.wide = now.wide;
         block_.extra = now.extra;
         turn_ = true;
+        // A TAP that has a known profile, with its parameters, keeps it.
+        if (block_.keep_tap_profile && profile_capacity(now.map[0]) && now.map[8]) {
+          for (int i : {0, 1, 2, 3, 4, 8, 9}) block_.map[i] = now.map[i];
+        }
         if (block_.next_generation) {
           uint32_t g = (static_cast<uint32_t>(now.map[5]) << 16 | now.map[6] << 8 | now.map[7]) + 1;
           if (g > 0xFFFFFF) g = 1;
@@ -334,13 +346,14 @@ class ProvisionJob : public TableJob {
           step_ = Step::reset;
           return;
         }
-        return finish_("given " + block_.describe() + status_note_() +
+        return finish_("given " + block_.describe() + capacity_note_() + status_note_() +
                        "; saved. Power-cycle the TAP and read it to see it kept");
       default: return;
     }
   }
 
   const char *kind() const override { return "provision"; }
+  void abort(const std::string &why) override { fail_(why); }
   Step step() const { return step_; }
   bool finished() const override { return step_ == Step::done || step_ == Step::failed; }
   bool ok() const override { return step_ == Step::done; }
@@ -381,6 +394,10 @@ class ProvisionJob : public TableJob {
     waiting_ = false;
   }
 
+  std::string capacity_note_() const {
+    int n = profile_capacity(block_.map[0]);
+    return n ? ", for up to " + std::to_string(n) + " optimizers" : "";
+  }
   std::string status_note_() const {
     return write_status_ ? " (the write answered status " + std::to_string(write_status_) + ", its echo exact)" : "";
   }

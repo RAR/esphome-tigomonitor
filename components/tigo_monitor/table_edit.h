@@ -232,6 +232,8 @@ class TableJob : public RequestSource {
   // A removal's records to write back, before its erase: the caller saves
   // them (resume after a stop), then calls saved().
   virtual bool wants_save() const { return false; }
+  // The send gate refused one of its frames: stop, saying why.
+  virtual void abort(const std::string &why) { (void)why; }
   virtual void saved(bool) {}
   // Whether a saved list must stay: a removal stopped after its erase.
   virtual bool keep_saved() const { return false; }

@@ -303,7 +303,8 @@ inline bool parse_mppt(const std::string &text, MpptSeen &m) {
 // (docs/cca-tap-management.md): byte 1 the 802.15.4 channel, 14 SLT (the
 // signal a node must beat to be admitted), SLm last. The same block holds the
 // PAN and the 16-byte network key. The key is never copied out; the PAN is
-// kept so a new TAP isn't given one already in use, and is never shown.
+// kept so a new TAP isn't given one already in use: in versions.json, never
+// in /api/versions.
 struct TapRadio {
   uint16_t tap = 0;
   int channel = 0, slt = 0, slm = 0;

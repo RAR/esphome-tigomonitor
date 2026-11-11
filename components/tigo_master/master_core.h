@@ -350,10 +350,12 @@ class MasterCore {
   bool request_table_replace(const esphome::tigo_monitor::master::Bytes &old_mac,
                              const esphome::tigo_monitor::master::Bytes &new_mac, bool dry_run, std::string &why,
                              uint16_t tap = 0);
-  // Gives one TAP its radio settings (tap_config.h), on the bench only:
-  // master_bench on, the TAP named by the MAC it answered GET_MAC with, no
-  // other change running. reset: then reset that TAP alone. A dry run reads
-  // the TAP's settings and lists what it would send.
+  // Gives one TAP its radio settings (tap_config.h), Add a TAP's step: with
+  // Allow changes to the TAPs (master_table_writes) or master_bench on, the
+  // TAP named by the MAC it answered GET_MAC with, no other change running.
+  // A dry run (a check) needs neither switch: it reads the TAP's settings
+  // and lists what it would send. reset, and skipping the MAC check, only
+  // with master_bench.
   bool request_provision(const esphome::tigo_monitor::master::Bytes &tap_mac,
                          const esphome::tigo_monitor::master::RadioBlock &block, bool reset, bool dry_run,
                          std::string &why);

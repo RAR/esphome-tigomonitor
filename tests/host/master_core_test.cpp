@@ -1195,8 +1195,8 @@ static void test_the_owners_herd_keeps_known_ids() {
 }
 
 // After the herd's reset broadcast the tunnel sequence starts again at 01,
-// as the CCA's does: the bench H1 answers every 0x0D with status 1 once its
-// count has broken, until a reset followed by 01 (2026-11-11).
+// as the CCA's does. (The TAP only echoes it: 0x0E's status byte turned out
+// to be the join window's state, bench 2026-11-11.)
 static void test_the_tunnel_seq_starts_at_01_after_a_reset() {
   MultiTap bus;
   bus.taps = {{0x1201, 1}};
@@ -1237,12 +1237,24 @@ static void test_radio_settings_need_the_bench_or_table_writes() {
     CHECK(core.open());
     run_for(core, 0, 20000, 50);
     std::string why;
-    // A check (a dry run) only reads: allowed either way, as other checks are.
+    // A check (a dry run) only reads: allowed either way, as other checks are,
+    // and it finishes; it doesn't hang refused, blocking every table change.
     CHECK(core.request_provision(mac, b, false, true, why));
     run_for(core, 20000, 30000, 50);
+    CHECK(core.status().table_edit.finished && !core.status().table_edit.active);
+    CHECK(core.status().fault != Fault::refused);
     bool ok = core.request_provision(mac, b, false, false, why);
     if (mode == 0) CHECK(!ok && why.find("Allow changes to the TAPs") != std::string::npos);
     else CHECK(ok);
+    // Skipping the MAC check, or a reset, only on the bench: on a live
+    // system a wrong MAC could otherwise re-network the TAP in service.
+    run_for(core, 30000, 40000, 50);
+    mp::RadioBlock skip = b;
+    skip.skip_identify = true;
+    CHECK(core.request_provision(mac, skip, false, false, why) == (mode == 1));
+    run_for(core, 40000, 50000, 50);
+    CHECK(core.request_provision(mac, b, /*reset=*/true, false, why) == (mode == 1));
+    run_for(core, 50000, 60000, 50);
     core.close();
   }
 }

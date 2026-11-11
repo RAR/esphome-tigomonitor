@@ -4627,16 +4627,18 @@
         // chosen by the daemon and saved on the TAP (tap_config.h).
         const r = f.radio || {}, writes = !!(m && m.table && m.table.writes);
         const ch = (r.given || '').match(/channel (\d+)/), pan = (r.given || '').match(/PAN ([0-9A-F]{4})/);
+        const cap = (r.given || '').match(/for up to (\d+) optimizers/);
         let state;
         if (r.phase === 'checking') state = '<div class="setup-line">Reading its radio settings…</div>';
         else if (r.phase === 'writing') state = '<div class="setup-line">Giving it its settings…</div>';
-        else if (r.phase === 'done') state = `<div class="setup-check good">✓ Saved: TAP ${topoEscape(f.found)} keeps these through a power cut. Its optimizers join this network once they are on its list.</div>`;
+        else if (r.phase === 'done') state = `<div class="setup-check good">✓ Given and saved: TAP ${topoEscape(f.found)} now runs channel ${ch ? ch[1] : '?'}, and has saved its settings. Its optimizers join this network once they are on its list.</div>`;
         else if (r.phase === 'failed') state = `<div class="setup-error">${topoEscape(r.message || 'Not given.')}</div>`;
         else state = '';
         const plan = r.phase === 'checked' || r.phase === 'writing' || r.phase === 'done'
           ? `<div class="setup-found"><div><strong>Channel ${ch ? ch[1] : '?'}</strong><span>at least two from your other TAPs'</span></div>
              <div><strong>Network ID ${pan ? pan[1] : '?'}</strong><span>made from this TigoMonitor's own</span></div>
-             <div><strong>A new network key</strong><span>made here, never shown</span></div></div>` : '';
+             <div><strong>A new network key</strong><span>made here, never shown</span></div>
+             ${cap ? `<div><strong>For up to ${cap[1]} optimizers</strong><span>its own profile if it had one; running this step again changes nothing else</span></div>` : ''}</div>` : '';
         const act = !running ? offBus
           : r.phase === 'checked' ? (writes ? `<div class="setup-actions"><button type="button" class="btn task-go" data-setup-radio-go>Give it these settings</button></div>`
             : '<div class="setup-note info">To give it these settings, turn on <strong>Allow changes to the TAPs</strong> in Settings → Bus.</div>')
@@ -4802,7 +4804,10 @@
       // The radio step's job: the check gives the plan, the real one the result.
       if (f.task === 'addtap' && f.radio && (f.radio.phase === 'checking' || f.radio.phase === 'writing')) {
         const e = setupJob();
-        if (e.kind === 'provision' && e.finished && e.started_unix >= f.radio.at) {
+        if (Date.now() / 1000 - f.radio.at > 90 && !(e.kind === 'provision' && e.finished && e.started_unix >= f.radio.at)) {
+          f.radio.phase = 'failed';
+          f.radio.message = 'No result after 90 seconds. Check that the TAP is answering, then try again.';
+        } else if (e.kind === 'provision' && e.finished && e.started_unix >= f.radio.at) {
           if (!e.ok) { f.radio.phase = 'failed'; f.radio.message = e.message; }
           else if (f.radio.phase === 'checking') {
             f.radio.phase = 'checked';
@@ -4918,6 +4923,7 @@
       b.disabled = true;
       f.before = setupTaps().map(t => t.id);
       f.found = '';
+      f.radio = null;  // a result belongs to the TAP it was for
       f.lookedAt = Date.now();
       try {
         await setupPost('/api/master/taps/herd', {});

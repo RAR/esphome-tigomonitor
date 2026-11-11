@@ -240,12 +240,17 @@ bool MasterCore::request_provision(const master::Bytes &tap_mac, const master::R
   for (const auto &t : taps_)
     if (!t->st.mac.empty() && t->st.mac == want) tap = t->id;
   // A TAP polled since start may never have said its MAC; with one TAP, the
-  // job asks it first and stops unless it's this one.
-  if (!tap && taps_.size() == 1) tap = taps_.front()->id;
+  // job asks it first and stops unless it's this one. Not when that check
+  // is skipped: then the MAC must be one it has said.
+  if (!tap && taps_.size() == 1 && !block.skip_identify) tap = taps_.front()->id;
   // A live system needs "Allow changes to the TAPs", as Add a TAP's step;
   // the bench needs nothing more.
   if (!bench_ && !table_writes_on_ && !dry_run)  // a check only reads
     why = "giving a TAP its radio settings needs Allow changes to the TAPs (Settings > Bus)";
+  // Skipping the MAC check, or a reset, are bench tools: on a live system a
+  // wrong MAC could re-network the TAP in service, and a reset restarts it.
+  else if (!bench_ && (block.skip_identify || reset))
+    why = "skipping the MAC check, or a reset, is for the bench only (master_bench)";
   else if (tap_mac.size() != 8 || !tap)
     why = "no TAP on this bus answered with that MAC";  // with several, it must have said its MAC already
   else if (!master::is_radio_block_ok(block.encode()))
@@ -1194,9 +1199,15 @@ void MasterCore::tick_(uint32_t now_ms) {
     t.st.answers = t.queries->answers();
   }
   if (!req.cmd) return;  // nothing due: a lost TAP's window keeper waiting out a backoff
+  // A provisioning check (dry run) only reads, and never builds the write:
+  // its reads go with neither switch on, as other checks do.
+  bool provision_ok = req.provision && (bench_ || table_writes_on_ || (job_here && table_job_ && table_job_->dry_run()));
   if (!master::may_send(req.cmd, req.payload, bench_, bring_up, writes_on_, t.pv && t.pv->off(),
-                        req.table_edit && table_writes_on_, req.provision && (bench_ || table_writes_on_))) {
+                        req.table_edit && table_writes_on_, provision_ok)) {
     set_fault(Fault::refused, "refused to send command " + std::to_string(req.cmd));
+    // A job whose frame the gate refused stops, saying so, rather than
+    // waiting for a reply that will never come and blocking every change.
+    if (job_here && table_job_ && req.table_edit) table_job_->abort("refused to send command " + std::to_string(req.cmd));
     return;
   }
   Frame reply;
@@ -1519,7 +1530,7 @@ void MasterCore::run_startup(uint32_t now_ms) {
       return;
     }
     // After a reset the CCA numbers its tunnel requests from 01 again; the
-    // bench H1 answers every 0x0D with status 1 once that count has broken.
+    // TAP only echoes it (bench, 2026-11-11): this follows the CCA's way.
     if (h.cmd == master::CMD_RESET) seq_ = 0;
     std::vector<Frame> all;
     if (h.collect) {

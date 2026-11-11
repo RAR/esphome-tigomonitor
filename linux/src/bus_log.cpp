@@ -250,9 +250,16 @@ std::vector<esphome::tigo_monitor::master::TapRadio> BusLog::radios() const {
 
 uint16_t BusLog::tap_of_mac(const std::string &mac) const {
   std::lock_guard<std::mutex> lock(mu_);
+  // The address it gave this MAC from most recently: a TAP re-addressed by a
+  // herd leaves its old one behind in tap_ids_.
+  uint16_t best = 0;
+  int64_t when = -1;
   for (const auto &kv : tap_ids_)
-    if (kv.second.first == mac) return kv.first;
-  return 0;
+    if (kv.second.first == mac && kv.second.second > when) {
+      best = kv.first;
+      when = kv.second.second;
+    }
+  return best;
 }
 
 json BusLog::versions_json_(bool with_pans) const {
