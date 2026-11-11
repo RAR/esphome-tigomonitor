@@ -61,8 +61,11 @@ static void test_block_layout() {
 
 static void test_values() {
   std::array<uint8_t, 10> m{};
-  CHECK(map_for_profile(12, m) && m == (std::array<uint8_t, 10>{12, 2, 2, 1, 0, 0, 0, 0, 28, 3}));
+  CHECK(map_for_profile(12, m) && m == (std::array<uint8_t, 10>{12, 2, 2, 1, 0, 0, 0, 0, 28, 1}));
   CHECK(!map_for_profile(24, m));  // its parameters aren't known
+  // A map generation in bytes 5-7, big-endian, as the CCA's creep upward.
+  CHECK(map_for_profile(12, m, 0x000001) && m == (std::array<uint8_t, 10>{12, 2, 2, 1, 0, 0, 0, 1, 28, 1}));
+  CHECK(map_for_profile(12, m, 0x76C107) && m[5] == 0x76 && m[6] == 0xC1 && m[7] == 0x07);
   // Channels: two clear of each in use, so 20 rules out 19-21.
   CHECK(channel_for({}) == 11);
   CHECK(channel_for({11}) == 13);
@@ -200,6 +203,38 @@ static void test_provision() {
   CHECK(job.message().find("112233") == std::string::npos);
 }
 
+// With no generation asked for, the job writes the TAP's own map generation
+// (bytes 5-7) plus one, as the CCA's creep upward; one asked for is kept.
+static void test_provision_generation() {
+  {
+    FakeTap tap;
+    tap.ram = made_up();
+    tap.ram.map[5] = 0x76; tap.ram.map[6] = 0xC1; tap.ram.map[7] = 0xFF;
+    RadioBlock want = made_up();
+    want.next_generation = true;
+    ProvisionJob job(TAP_MAC, want, false, false);
+    run(job, tap);
+    CHECK(job.ok() && tap.ram.map[5] == 0x76 && tap.ram.map[6] == 0xC2 && tap.ram.map[7] == 0x00);
+  }
+  {  // at the top, it wraps to 1, never 0
+    FakeTap tap;
+    tap.ram = made_up();
+    tap.ram.map[5] = tap.ram.map[6] = tap.ram.map[7] = 0xFF;
+    RadioBlock want = made_up();
+    want.next_generation = true;
+    ProvisionJob job(TAP_MAC, want, false, false);
+    run(job, tap);
+    CHECK(job.ok() && tap.ram.map[5] == 0 && tap.ram.map[6] == 0 && tap.ram.map[7] == 1);
+  }
+  {  // asked for: kept as given
+    FakeTap tap;
+    tap.ram = made_up();
+    ProvisionJob job(TAP_MAC, made_up(), false, false);
+    run(job, tap);
+    CHECK(job.ok() && tap.ram.map[5] == 0xFF && tap.ram.map[6] == 0x84 && tap.ram.map[7] == 0x01);
+  }
+}
+
 static void test_provision_with_reset() {
   FakeTap tap;
   ProvisionJob job(TAP_MAC, made_up(), true, false);
@@ -332,6 +367,7 @@ int main() {
   test_gate();
   test_provision();
   test_provision_with_reset();
+  test_provision_generation();
   test_provision_stops();
   test_dry_run();
   if (failures) {

@@ -74,6 +74,9 @@ struct RadioBlock {
   // The 46-byte form, and its 10 unexplained bytes (31-40).
   bool wide = false;
   std::array<uint8_t, 10> extra{};
+  // Not sent: ProvisionJob sets map bytes 5-7 to the TAP's own generation
+  // plus one (wrapping to 1, never 0), read just before it writes.
+  bool next_generation = false;
 
   Bytes encode() const {
     Bytes b;
@@ -137,11 +140,15 @@ struct RadioBlock {
 };
 
 // The map for a profile by its first count (12, 14, 20 or 24: 40, 75, 120
-// and 300 optimizers), bytes 5-7 zero. Only 12, 14 and 20 have known
-// parameters (28, 3); false for the rest.
-inline bool map_for_profile(uint8_t first, std::array<uint8_t, 10> &out) {
+// and 300 optimizers). Bytes 5-7 are a map generation the TAP doesn't check
+// (the CCA's creep upward; zero is accepted). The last byte is the TAP's
+// join-window dwell term: 01 as the CCA wrote it on 2026-11-11 (status 0);
+// 03, from an older capture, is applied but answered with status 1. Only 12,
+// 14 and 20 have known parameters; false for the rest.
+inline bool map_for_profile(uint8_t first, std::array<uint8_t, 10> &out, uint32_t generation = 0) {
   if (first != 12 && first != 14 && first != 20) return false;
-  out = {first, 2, 2, 1, 0, 0, 0, 0, 28, 3};
+  out = {first, 2, 2, 1, 0, static_cast<uint8_t>(generation >> 16), static_cast<uint8_t>(generation >> 8),
+         static_cast<uint8_t>(generation), 28, 1};
   return true;
 }
 
@@ -276,6 +283,13 @@ class ProvisionJob : public TableJob {
         // of the 46-byte form stay what the TAP has.
         block_.wide = now.wide;
         block_.extra = now.extra;
+        if (block_.next_generation) {
+          uint32_t g = (static_cast<uint32_t>(now.map[5]) << 16 | now.map[6] << 8 | now.map[7]) + 1;
+          if (g > 0xFFFFFF) g = 1;
+          block_.map[5] = static_cast<uint8_t>(g >> 16);
+          block_.map[6] = static_cast<uint8_t>(g >> 8);
+          block_.map[7] = static_cast<uint8_t>(g);
+        }
         step_ = Step::write;
         return;
       case Step::write:

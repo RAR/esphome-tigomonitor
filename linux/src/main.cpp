@@ -492,8 +492,8 @@ int main(int argc, char **argv) {
         }
         return bus_master->request_forget_tap(id, why) ? 200 : 409;
       },
-      [&](const esphome::tigo_monitor::master::Bytes &tap_mac, uint16_t channel, uint16_t pan, bool reset, bool dry_run,
-          std::string &why, std::string &given) {
+      [&](const esphome::tigo_monitor::master::Bytes &tap_mac, uint16_t channel, uint16_t pan, uint32_t generation,
+          bool reset, bool dry_run, std::string &why, std::string &given) {
         namespace mp = esphome::tigo_monitor::master;
         std::lock_guard<std::mutex> lock(master_mu);
         if (!bus_master) {
@@ -503,7 +503,10 @@ int main(int argc, char **argv) {
         mp::RadioBlock block;
         block.channel = channel;
         block.pan = pan ? pan : mp::pan_for(tap_mac, {});
-        mp::map_for_profile(12, block.map);  // 40 optimizers: a bench TAP
+        // 40 optimizers: a bench TAP. A generation not asked for is the TAP's
+        // own plus one, read by the job just before it writes.
+        mp::map_for_profile(12, block.map, generation <= 0xFFFFFF ? generation : 0);
+        block.next_generation = generation > 0xFFFFFF;
         std::random_device rd;
         block.key = mp::key_from([&rd]() { return static_cast<uint8_t>(rd()); });
         given = block.describe();

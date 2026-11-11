@@ -88,8 +88,8 @@ struct HttpContext {
   // Give a bench TAP its radio settings (POST /api/master/taps/provision,
   // tap_config.h): its MAC, the channel, the PAN (0: from its MAC), reset
   // after, dry run. 200 with what it will give in given (no key), or 409 with why.
-  std::function<int(const esphome::tigo_monitor::master::Bytes &tap_mac, uint16_t channel, uint16_t pan, bool reset,
-                    bool dry_run, std::string &why, std::string &given)>
+  std::function<int(const esphome::tigo_monitor::master::Bytes &tap_mac, uint16_t channel, uint16_t pan,
+                    uint32_t generation, bool reset, bool dry_run, std::string &why, std::string &given)>
       request_provision;
   // Bench only: ask one optimizer a read-shaped text (POST /api/master/query);
   // 200, or 409 with why.

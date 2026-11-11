@@ -1780,17 +1780,21 @@ void HttpServer::routes_() {
       mac.push_back(static_cast<uint8_t>(std::stoul(h.substr(i, 2), nullptr, 16)));
     }
     int channel = j["channel"].get<int>();
-    unsigned pan = 0;
+    unsigned pan = 0, generation = 0x1000000;  // not given: the TAP's own plus one
     if (mac.size() != 8 || channel < 11 || channel > 26 ||
         (j.contains("pan") && (!j["pan"].is_string() || sscanf(j["pan"].get<std::string>().c_str(), "%x", &pan) != 1 ||
-                               !pan || pan >= 0xFFFF))) {
+                               !pan || pan >= 0xFFFF)) ||
+        (j.contains("generation") &&
+         (!j["generation"].is_string() || sscanf(j["generation"].get<std::string>().c_str(), "%x", &generation) != 1 ||
+          generation > 0xFFFFFF))) {
       send_json(res, {{"error", shape}}, 400);
       return;
     }
     bool reset = j.value("reset", false), dry = j.value("dry_run", true);
     std::string why, given;
     int code = ctx_.request_provision
-                   ? ctx_.request_provision(mac, static_cast<uint16_t>(channel), static_cast<uint16_t>(pan), reset, dry, why, given)
+                   ? ctx_.request_provision(mac, static_cast<uint16_t>(channel), static_cast<uint16_t>(pan), generation,
+                                            reset, dry, why, given)
                    : 409;
     if (code == 200) send_json(res, {{"started", true}, {"dry_run", dry}, {"reset", reset}, {"given", given}});
     else send_json(res, {{"error", why.empty() ? "not running the bus" : why}}, code);
