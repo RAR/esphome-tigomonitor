@@ -2905,6 +2905,10 @@
   let mpptNames = {};
   const mpptName = label => (label && mpptNames[label]) || label;
 
+  // The Raspberry Pi build answers /api/status with platform: 'linux'; the
+  // ESP32 omits it. Declared before the Dashboard, whose refresh reads it.
+  let PLATFORM = 'esp32';
+
   async function refreshDashboard() {
     if (!document.getElementById('view-dashboard').classList.contains('active')) {
       // Page hidden — don't pay for the fetches.
@@ -2974,12 +2978,10 @@
       document.getElementById('dash-meta').textContent = `refresh error: ${e.message}`;
     }
   }
-  refreshDashboard();
   setInterval(refreshDashboard, 5000);
 
-  // The Raspberry Pi build answers /api/status with platform: 'linux'; the
-  // ESP32 omits it. Swap the ESP32-only Settings tabs for the Pi's.
-  let PLATFORM = 'esp32';
+  // Once the platform is known (below), the Pi's and the ESP32's pages
+  // differ: swap the ESP32-only Settings tabs for the Pi's.
   const platformReady = apiFetch('/api/status').then(r => r.ok ? r.json() : {}).then(s => {
     if (s.platform !== 'linux') return;
     PLATFORM = 'linux';
@@ -2999,6 +3001,9 @@
     restart.textContent = 'Restart service';
     refreshSettings();
   }).catch(() => {});
+  // The first refresh, as soon as the platform is known: on the Pi it leaves
+  // out the optimizers the TAP doesn't list, which need /api/nodes.
+  platformReady.finally(refreshDashboard);
 
   // ===== Panel detail modal =====
   // Click a heat tile → modal with live readings + per-panel power history,
