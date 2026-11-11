@@ -2153,7 +2153,7 @@
       </div>
 
       <div class="tools-card" id="cca-master-banner" style="display:none;border-color:var(--accent)">
-        <div style="font-weight:600;margin-bottom:4px">The Pi is running the bus</div>
+        <div style="font-weight:600;margin-bottom:4px">TigoMonitor is running the bus</div>
         <div style="color:var(--text-dim);font-size:13px">The CCA is off the bus. Panel names, strings and
           layout below are from its last sync, and keep working without it.</div>
       </div>
@@ -2960,10 +2960,10 @@
     // Opened at #setup: it couldn't load before the platform was known.
     if (document.getElementById('view-setup').classList.contains('active')) refreshSetup();
     document.getElementById('hist-backing').textContent = 'Stored on the SD card · persists across reboots';
-    document.getElementById('cca-ble-hint').innerHTML = 'Scan for your Tigo CCA over Bluetooth (matched by its <code>04:C0:5B</code> address prefix). With none saved, the Pi uses the nearest one; save a MAC to pin it.';
+    document.getElementById('cca-ble-hint').innerHTML = 'Scan for your Tigo CCA over Bluetooth (matched by its <code>04:C0:5B</code> address prefix). With none saved, TigoMonitor uses the nearest one; save a MAC to pin it.';
     document.getElementById('cca-ble-revert-btn').textContent = 'Use nearest';
-    document.getElementById('cfg-sub').textContent = 'Saved on the Pi';
-    document.getElementById('cfg-hint').innerHTML = 'Saved on the Pi and applied within a second. Revert returns a setting to its default. <span id="cfg-status" style="color:var(--text-dim)"></span>';
+    document.getElementById('cfg-sub').textContent = 'Saved by TigoMonitor';
+    document.getElementById('cfg-hint').innerHTML = 'Saved by TigoMonitor and applied within a second. Revert returns a setting to its default. <span id="cfg-status" style="color:var(--text-dim)"></span>';
     const restart = document.getElementById('tools-restart');
     restart.previousElementSibling.innerHTML =
       '<strong>Restart service</strong><span>Restarts the monitor service. Readings pause for a few seconds.</span>';
@@ -4265,9 +4265,9 @@
       <span>${keys.length - left.length} of ${keys.length} done${left.length ? ` · next: ${SETUP_STEP_NAMES[left[0]]}` : ''}</span></span>
       <span class="go">${left.length === keys.length ? 'Start' : left.length ? 'Continue' : 'Review'} →</span></button>`;
     if (!setupRunning(m))
-      html += '<div class="setup-note info">This Pi is not running the bus, so it cannot change the TAP\'s optimizer list. To make changes, set its bus role in Settings → Bus.</div>';
+      html += '<div class="setup-note info">This TigoMonitor is not running the bus, so it cannot change the TAP\'s optimizer list. To make changes, set its bus role in Settings → Bus.</div>';
     else if (!t.writes)
-      html += '<div class="setup-note info">Changes are disabled. To enable them, turn on <strong>Let me change the TAP\'s table</strong> in Settings → Bus. You can still review each task and its planned changes.</div>';
+      html += '<div class="setup-note info">Changes are disabled. To enable them, turn on <strong>Allow changes to the TAPs</strong> in Settings → Bus. You can still review each task and its planned changes.</div>';
     const quiet = d.opts.filter(o => o.quiet).sort((a, b) => (b.ageMs || 0) - (a.ageMs || 0))[0];
     if (quiet)
       html += `<div class="setup-note"><span class="ico">${setupSvg('<path d="M12 8v5"/><path d="M12 16.5h.01"/><path d="M10.3 3.9 2.6 17.5A2 2 0 0 0 4.3 20.5h15.4a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/>', 'var(--warn)', 18)}</span>
@@ -4374,9 +4374,9 @@
   const setupLink = (href, label, primary, tab) =>
     `<a class="btn${primary ? ' task-go' : ''}" href="${href}"${tab ? ` data-settings-tab="${tab}"` : ''}>${label}</a>`;
   const SETUP_SYSTEM = {
-    bus: ['The Pi listens to the RS485 bus between the TAP and its CCA, or runs the bus itself in the CCA\'s place. Choose the serial port, or a network bridge, and the Pi\'s role on the bus.',
+    bus: ['TigoMonitor listens to the RS485 bus between the TAP and its CCA, or runs the bus itself in the CCA\'s place. Choose the serial port, or a network bridge, and its role on the bus.',
           [['#settings', 'Open Settings → Bus', 'bus']]],
-    tap: ['Running the bus, the Pi brings the TAP up and asks its version; listening, it hears the CCA ask. If no TAP answers, check its power and the A and B wires.',
+    tap: ['Running the bus, TigoMonitor brings the TAP up and asks its version; listening, it hears the CCA ask. If no TAP answers, check its power and the A and B wires.',
           [['#settings', 'Open Settings → Bus', 'bus'], ['#buslog', 'See the bus traffic']]],
     optimizers: ['An optimizer reports once it has joined the TAP, which lists the optimizers it takes. One the TAP doesn\'t list won\'t join; add it with Add an optimizer.',
                  [['#nodes', 'See the list']]],
@@ -4391,7 +4391,7 @@
     retiretap(f, back) {
       if (f.step === 'done')
         return `<div class="setup-done"><h3>TAP ${topoEscape(f.tapPick)} is retired</h3>
-          <div class="sub">The Pi no longer polls it or keeps it on its list. If it comes back, bring it in again with Add a TAP.</div>
+          <div class="sub">TigoMonitor no longer polls it or keeps it on its list. If it comes back, bring it in again with Add a TAP.</div>
           <div class="setup-actions"><button type="button" class="btn primary" data-setup-home>Finish</button></div></div>`;
       const taps = setupTaps();
       const rows = taps.map(t => {
@@ -4400,9 +4400,9 @@
           <strong>${topoEscape(setupTapName(t.id))}</strong><span>${answering ? 'answering: unplug it first' : t.state === 'lost' ? 'not answering' : 'not answering; asked every 5 min'}</span></label>`;
       }).join('');
       return `<h3>Which TAP has gone for good?</h3>
-        <div class="sub">The Pi stops polling it and leaves it off its list. A TAP still answering can't be retired: unplug it first. Its optimizers' history stays.</div>
+        <div class="sub">TigoMonitor stops polling it and leaves it off its list. A TAP still answering can't be retired: unplug it first. Its optimizers' history stays.</div>
         ${setupRunning(setup.data.master) ? (taps.length > 1 ? `<div class="setup-found setup-tap-pick">${rows}</div>` : '<div class="setup-note info">There is only one TAP: nothing to retire.</div>')
-          : '<div class="setup-note info">This Pi is not running the bus, so it cannot change its list of TAPs.</div>'}
+          : '<div class="setup-note info">This TigoMonitor is not running the bus, so it cannot change its list of TAPs.</div>'}
         <div class="setup-actions">${back('Cancel')}<button type="button" class="btn task-go" data-setup-retire${f.tapPick ? '' : ' disabled'}>${f.tapPick ? `Retire TAP ${topoEscape(f.tapPick)}` : 'Retire'}</button></div>`;
     },
     system(f, back) {
@@ -4410,7 +4410,7 @@
       if (f.step === 'done') {
         const left = keys.filter(k => !c[k].ok);
         return `<h3>${left.length ? `${keys.length - left.length} of ${keys.length} done` : 'Your system is set up'}</h3>
-          <div class="sub">${left.length ? 'What is left, and where to do it, is on each step. This list stays here: come back any time.' : 'Every step is done. Come back any time: the list ticks itself off from what the Pi sees.'}</div>
+          <div class="sub">${left.length ? 'What is left, and where to do it, is on each step. This list stays here: come back any time.' : 'Every step is done. Come back any time: the list ticks itself off from what TigoMonitor sees.'}</div>
           <ul class="setup-sumlist">${keys.map(k => `<li><span class="setup-state ${c[k].ok ? 'ok' : 'todo'}">${c[k].ok ? 'Done' : 'To do'}</span> <strong>${SETUP_STEP_NAMES[k]}</strong> ${topoEscape(c[k].line)}</li>`).join('')}</ul>
           <div class="setup-actions">${back()}<button type="button" class="btn primary" data-setup-home>Finish</button></div>`;
       }
@@ -4427,10 +4427,10 @@
     },
     addtap(f, back) {
       const m = setup.data.master, running = setupRunning(m);
-      const offBus = '<div class="setup-note info">This Pi is not running the bus, so it cannot take on a TAP. To do this, set its bus role in Settings → Bus.</div>';
+      const offBus = '<div class="setup-note info">This TigoMonitor is not running the bus, so it cannot take on a TAP. To do this, set its bus role in Settings → Bus.</div>';
       if (f.step === 'prepare')
         return `<h3>Set it up with a CCA</h3>
-          <div class="sub">A new TAP has to be set up by a CCA first: the Pi can't give a TAP its radio settings. Connect the new TAP to a CCA on its own, not on this bus, let the CCA set it up, then unplug the CCA.</div>
+          <div class="sub">A new TAP has to be set up by a CCA first: TigoMonitor can't give a TAP its radio settings. Connect the new TAP to a CCA on its own, not on this bus, let the CCA set it up, then unplug the CCA.</div>
           <div class="setup-actions">${back('Cancel')}${setupNext(f)}</div>`;
       if (f.step === 'connect')
         return `<h3>Wire it in</h3>
@@ -4439,7 +4439,7 @@
       if (f.step === 'allow') {
         const on = !!(m && m.adopt_taps);
         return `<h3>Allow a new TAP<span class="setup-state ${on ? 'ok' : 'todo'}">${on ? 'On' : 'Off'}</span></h3>
-          <div class="sub"><strong>Take on a new TAP</strong> lets the Pi bring a new TAP up and give it an address. Turning it on or off restarts the bus master: a few seconds without polling. You can turn it off again at the end.</div>
+          <div class="sub"><strong>Take on a new TAP</strong> lets TigoMonitor bring a new TAP up and give it an address. Turning it on or off restarts the bus master: a few seconds without polling. You can turn it off again at the end.</div>
           ${running ? (on ? '' : '<div class="setup-actions"><button type="button" class="btn task-go" data-setup-adopt="on">Turn it on</button></div>') : offBus}
           <div class="setup-actions">${back()}${setupNext(f, running && on)}</div>`;
       }
@@ -4449,7 +4449,7 @@
           <span>${f.before && !before.includes(t.id) ? 'new, its address stored' : t.state === 'running' ? 'answering' : 'not answering'}</span></div>`).join('');
         const looking = f.looking && !f.found;
         return `<h3>Look for TAPs</h3>
-          <div class="sub">The Pi brings every TAP on the bus up again: each known TAP keeps its address, and the new one gets the next free address, stored on it. Polling stops for about 30 seconds.</div>
+          <div class="sub">TigoMonitor brings every TAP on the bus up again: each known TAP keeps its address, and the new one gets the next free address, stored on it. Polling stops for about 30 seconds.</div>
           ${running ? `<div class="setup-found">${list || '<span>No TAP answering yet.</span>'}</div>
           <div class="setup-actions"><button type="button" class="btn${f.found ? '' : ' task-go'}" data-setup-look${looking ? ' disabled' : ''}>${looking ? 'Looking…' : f.looking ? 'Look again' : 'Look for TAPs'}</button>
           ${f.lookedAt && !f.found && !looking ? '<span class="setup-line">No new TAP found. Check its wiring and power, then look again.</span>' : ''}</div>` : offBus}
@@ -4463,8 +4463,8 @@
           <div class="setup-actions">${back()}${setupNext(f)}</div>`;
       const on = !!(m && m.adopt_taps);
       return `<div class="setup-done"><h3>TAP ${topoEscape(f.found)} is on the bus</h3>
-        <div class="sub">The Pi polls it with the others. To put optimizers on it, add them with Add an optimizer and choose this TAP.</div>
-        ${on ? `<div class="setup-note info"><strong>Take on a new TAP</strong> is still on. Turn it off unless you are adding another, so the Pi only brings TAPs up when you ask. <button type="button" class="btn" data-setup-adopt="off">Turn it off</button></div>` : ''}
+        <div class="sub">TigoMonitor polls it with the others. To put optimizers on it, add them with Add an optimizer and choose this TAP.</div>
+        ${on ? `<div class="setup-note info"><strong>Take on a new TAP</strong> is still on. Turn it off unless you are adding another, so TigoMonitor only brings TAPs up when you ask. <button type="button" class="btn" data-setup-adopt="off">Turn it off</button></div>` : ''}
         <div class="setup-actions"><button type="button" class="btn" data-setup-start="add">Add an optimizer</button><button type="button" class="btn primary" data-setup-home>Finish</button></div></div>`;
     },
   };
@@ -4511,7 +4511,7 @@
       } else {
         const plan = setupPlan(f, e);
         const go = f.task === 'replace' ? `Replace ${f.old.name}` : f.task === 'add' ? 'Add optimizer' : `Retire ${f.old.name}`;
-        const why = !running ? 'This Pi is not running the bus.' : !t.writes ? 'Changes are disabled. Turn on Let me change the TAP\'s table in Settings → Bus.' : '';
+        const why = !running ? 'This TigoMonitor is not running the bus.' : !t.writes ? 'Changes are disabled. Turn on Allow changes to the TAPs in Settings → Bus.' : '';
         body = `<h3>Review the planned changes</h3>
           <div class="sub">Read from the TAP just now. Nothing has been sent yet.</div>
           <ol class="setup-plan">${plan.lines.map(([k, text]) => `<li class="${k}"><span class="mk" style="background:color-mix(in srgb, ${SETUP_MARK[k][0]} 14%, transparent)">${setupSvg(SETUP_MARK[k][1], SETUP_MARK[k][0])}</span><span>${topoEscape(text)}</span></li>`).join('')}</ol>
@@ -4527,7 +4527,7 @@
       body = `<h3>${f.task === 'replace' ? `Replacing ${topoEscape(f.old.name)}…` : f.task === 'add' ? 'Adding the optimizer…' : `Retiring ${topoEscape(f.old.name)}…`}</h3>
         <ul class="setup-progress">${list.map(([, text], k) => `<li class="${k < at ? 'done' : k === at ? 'now' : ''}">${text}</li>`).join('')}</ul>
         ${mine && e.finished && !e.ok ? `<div class="setup-error">${topoEscape(e.message)}${e.interrupted ? ' It will be completed from the saved list once the TAP responds.' : ''}</div><div class="setup-actions">${back('Close')}</div>`
-          : '<div class="sub">This takes a few seconds. If it is interrupted by a TAP restart or by this Pi, it will be completed from the saved list once the TAP responds. You can leave this page.</div>'}`;
+          : '<div class="sub">This takes a few seconds. If it is interrupted by a TAP restart or by this TigoMonitor, it will be completed from the saved list once the TAP responds. You can leave this page.</div>'}`;
     } else if (f.step === 'wait') {
       const wt = (t.waiting || []).find(x => x.mac === f.mac);
       const out = (t.joins || []).slice().reverse().find(x => x.mac === f.mac && x.unix >= f.startedAt);
@@ -4640,7 +4640,7 @@
       return refreshSetup(true);
     }
     if (b.hasAttribute('data-setup-retire')) {
-      if (!confirm(`Retire TAP ${f.tapPick}? The Pi stops polling it and leaves it off its list.`)) return;
+      if (!confirm(`Retire TAP ${f.tapPick}? TigoMonitor stops polling it and leaves it off its list.`)) return;
       b.disabled = true;
       try {
         await setupPost('/api/master/taps/forget', { tap: f.tapPick });
@@ -5924,7 +5924,7 @@
   });
   // Turning discovery off removes the entities Home Assistant already has.
   document.getElementById('pi-mqtt-disc-on').addEventListener('change', (e) => {
-    if (!e.target.checked && !confirm('Home Assistant will remove the Tigo devices and entities this Pi added, once you save. Readings keep going to the MQTT topic.\n\nContinue?'))
+    if (!e.target.checked && !confirm('Home Assistant will remove the Tigo devices and entities this TigoMonitor added, once you save. Readings keep going to the MQTT topic.\n\nContinue?'))
       e.target.checked = true;
   });
   // The sidebar's page switches save on their own, at once.
@@ -5985,7 +5985,7 @@
     } catch (e) { /* the saved choice still shows */ }
     const bridge = current.startsWith('tcp://');
     const opts = [['', 'Not chosen: nothing is opened'],
-                  ['auto', 'Automatic: first USB adapter, else the Pi UART'],
+                  ['auto', 'Automatic: first USB adapter, else the Raspberry Pi UART'],
                   ['tcp', 'Network bridge (TCP)']];
     if (bridge) {
       document.getElementById('pi-bridge').value = current.slice('tcp://'.length);
@@ -6439,10 +6439,10 @@
     const btn = document.getElementById('cca-discovery-btn');
     if (master) {
       btn.disabled = true;
-      btn.title = 'Off while the Pi runs the bus';
+      btn.title = 'Off while TigoMonitor runs the bus';
       ccaDiscoveryLocked = true;
       document.getElementById('cca-discovery-status').textContent =
-        'Off while the Pi runs the bus: the CCA is not on it, so its scan has nothing to reach.';
+        'Off while TigoMonitor runs the bus: the CCA is not on it, so its scan has nothing to reach.';
     } else if (ccaDiscoveryLocked) {
       ccaDiscoveryLocked = false;
       btn.disabled = false;

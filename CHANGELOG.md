@@ -99,6 +99,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The web pages say TigoMonitor, not "the Pi" (Raspberry Pi and other
+  Linux).** It runs on any Linux machine, so messages such as "This Pi is not
+  running the bus" now read "This TigoMonitor is not running the bus". The
+  serial port choice still says "Raspberry Pi UART", since that's the
+  hardware. Two notes in System setup also used the old name of the switch
+  now called **Allow changes to the TAPs**.
 - **Running the bus is one choice now, with one switch (Raspberry Pi).**
   Bringing a TAP up, the housekeeping, the optimizer queries and the two
   writes they call for, the TAP's radio read and opening the join window only
