@@ -22,6 +22,10 @@ template<class T> static void get(const json &j, const char *key, T &out) {
   }
 }
 
+bool setup_open(const Settings &s, int64_t now_unix) {
+  return s.web_password.empty() && now_unix < s.setup_open_until;
+}
+
 Settings load_settings(const std::string &path) {
   Settings s;
   std::ifstream in(path);
@@ -48,6 +52,7 @@ Settings load_settings(const std::string &path) {
   get(j, "web_port", s.web_port);
   get(j, "web_username", s.web_username);
   get(j, "web_password", s.web_password);
+  get(j, "setup_open_until", s.setup_open_until);
   get(j, "tls_cert", s.tls_cert);
   get(j, "tls_key", s.tls_key);
   get(j, "power_calibration", s.power_calibration);
@@ -107,6 +112,7 @@ static json to_json(const Settings &s) {
       {"web_port", s.web_port},
       {"web_username", s.web_username},
       {"web_password", s.web_password},
+      {"setup_open_until", s.setup_open_until},
       {"tls_cert", s.tls_cert},
       {"tls_key", s.tls_key},
       {"power_calibration", s.power_calibration},

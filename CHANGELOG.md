@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Set up a new system on one page (Raspberry Pi and other Linux).**
+  System setup's checklist now does the work in place:
+  - choosing the serial port and bus role;
+  - letting optimizers join again;
+  - starting the layout from how many inverters, MPPTs and strings you have;
+  - typing each string's panel rating;
+  - setting the password.
+
+  Its links to other pages are larger cards. A new install has a day of
+  setup mode, in which System setup's changes to the bus need no password,
+  with a banner on every page until one is set. PV off always needs the
+  password, and an install that already had a settings file isn't affected.
 - **Set up a whole system from one page (Raspberry Pi).** System setup
   gains **Set up a new system**, a checklist from the bus to the layout:
   the bus, the TAP, the optimizers, the layout, string ratings, and a
