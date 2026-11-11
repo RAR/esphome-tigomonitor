@@ -47,7 +47,7 @@ stat() { python3 -c "import json,sys; d=json.load(open('$1')); print(eval(sys.ar
 python3 linux/tools/mock_tap.py "$out/tap" --window 3 --renew-to 3 --nodes 45 --stats "$out/tap.json" &
 tap=$!
 sleep 0.5
-printf '{"bus_role": "master", "serial_port": "%s", "gateway_id": 4609, "web_port": 18092, "device_id": "test", "publish_interval_s": 5, "mqtt": {"host": "127.0.0.1", "port": 18831}}\n' "$PWD/$out/tap" \
+printf '{"bus_role": "master", "master_startup": false, "master_housekeeping": false, "master_queries": false, "master_optimizer_writes": false, "master_read_tap_config": false, "discovery_auto": false, "serial_port": "%s", "gateway_id": 4609, "web_port": 18092, "device_id": "test", "publish_interval_s": 5, "mqtt": {"host": "127.0.0.1", "port": 18831}}\n' "$PWD/$out/tap" \
   > "$out/state/settings.json"
 build/linux/tigomonitord --state-dir "$out/state" --web-dir components/tigo_server/web 2> "$out/daemon.log" &
 daemon=$!
@@ -84,7 +84,7 @@ kill $tap; wait $tap 2>/dev/null || true
 python3 linux/tools/mock_tap.py "$out/tap2" --foreign-after 3 --stats "$out/tap2.json" &
 tap=$!
 sleep 0.5
-printf '{"bus_role": "master", "serial_port": "%s", "gateway_id": 4609, "web_port": 18093, "device_id": "test", "publish_interval_s": 5, "mqtt": {"host": "127.0.0.1", "port": 18831}}\n' "$PWD/$out/tap2" \
+printf '{"bus_role": "master", "master_startup": false, "master_housekeeping": false, "master_queries": false, "master_optimizer_writes": false, "master_read_tap_config": false, "discovery_auto": false, "serial_port": "%s", "gateway_id": 4609, "web_port": 18093, "device_id": "test", "publish_interval_s": 5, "mqtt": {"host": "127.0.0.1", "port": 18831}}\n' "$PWD/$out/tap2" \
   > "$out/state2/settings.json"
 build/linux/tigomonitord --state-dir "$out/state2" --web-dir components/tigo_server/web 2> "$out/daemon2.log" &
 daemon=$!
@@ -98,7 +98,7 @@ kill $tap; wait $tap 2>/dev/null || true
 
 # --- run 3: the port appears after the master starts (a late USB adapter) ---
 mkdir -p "$out/state3"
-printf '{"bus_role": "master", "serial_port": "%s", "gateway_id": 4609, "web_port": 18094}\n' "$PWD/$out/tap3" \
+printf '{"bus_role": "master", "master_startup": false, "master_housekeeping": false, "master_queries": false, "master_optimizer_writes": false, "master_read_tap_config": false, "discovery_auto": false, "serial_port": "%s", "gateway_id": 4609, "web_port": 18094}\n' "$PWD/$out/tap3" \
   > "$out/state3/settings.json"
 build/linux/tigomonitord --state-dir "$out/state3" --web-dir components/tigo_server/web 2> "$out/daemon3.log" &
 daemon=$!
@@ -126,7 +126,7 @@ mkdir -p "$out/state4"
 python3 linux/tools/mock_tap.py "$out/tap4" --echo --drop-every 7 --start-cursor 6FC4 --stats "$out/tap4.json" &
 tap=$!
 sleep 0.5
-printf '{"bus_role": "master", "serial_port": "%s", "gateway_id": 4609, "web_port": 18095}\n' "$PWD/$out/tap4" \
+printf '{"bus_role": "master", "master_startup": false, "master_housekeeping": false, "master_queries": false, "master_optimizer_writes": false, "master_read_tap_config": false, "discovery_auto": false, "serial_port": "%s", "gateway_id": 4609, "web_port": 18095}\n' "$PWD/$out/tap4" \
   > "$out/state4/settings.json"
 build/linux/tigomonitord --state-dir "$out/state4" --web-dir components/tigo_server/web \
   --capture "$out/bus4.bin" 2> "$out/daemon4.log" &
@@ -144,7 +144,7 @@ kill $tap; wait $tap 2>/dev/null || true
 
 # --- run 5: "auto" is resolved as listening does, not opened as a file ---
 mkdir -p "$out/state5"
-printf '{"bus_role": "master", "serial_port": "auto", "gateway_id": 4609, "web_port": 18096}\n' > "$out/state5/settings.json"
+printf '{"bus_role": "master", "master_startup": false, "master_housekeeping": false, "master_queries": false, "master_optimizer_writes": false, "master_read_tap_config": false, "discovery_auto": false, "serial_port": "auto", "gateway_id": 4609, "web_port": 18096}\n' > "$out/state5/settings.json"
 build/linux/tigomonitord --state-dir "$out/state5" --web-dir components/tigo_server/web 2> "$out/daemon5.log" &
 daemon=$!
 sleep 2
@@ -156,7 +156,7 @@ mkdir -p "$out/state6"
 python3 linux/tools/mock_tap.py "$out/tap6" --bare --stats "$out/tap6.json" &
 tap=$!
 sleep 0.5
-printf '{"bus_role": "master", "master_bench": true, "serial_port": "%s", "gateway_id": 4609, "web_port": 18097}\n' \
+printf '{"bus_role": "master", "master_startup": false, "master_housekeeping": false, "master_queries": false, "master_optimizer_writes": false, "master_read_tap_config": false, "discovery_auto": false, "master_bench": true, "serial_port": "%s", "gateway_id": 4609, "web_port": 18097}\n' \
   "$PWD/$out/tap6" > "$out/state6/settings.json"
 build/linux/tigomonitord --state-dir "$out/state6" --web-dir components/tigo_server/web 2> "$out/daemon6.log" &
 daemon=$!
@@ -175,7 +175,7 @@ mkdir -p "$out/state6b"
 python3 linux/tools/mock_tap.py "$out/tap6b" --bare --stats "$out/tap6b.json" &
 tap=$!
 sleep 0.5
-printf '{"bus_role": "master", "master_startup": true, "serial_port": "%s", "gateway_id": 4609, "web_port": 18125}\n' \
+printf '{"bus_role": "master", "master_startup": false, "master_housekeeping": false, "master_queries": false, "master_optimizer_writes": false, "master_read_tap_config": false, "discovery_auto": false, "master_startup": true, "serial_port": "%s", "gateway_id": 4609, "web_port": 18125}\n' \
   "$PWD/$out/tap6b" > "$out/state6b/settings.json"
 build/linux/tigomonitord --state-dir "$out/state6b" --web-dir components/tigo_server/web 2> "$out/daemon6b.log" &
 daemon=$!
@@ -196,7 +196,7 @@ mkdir -p "$out/state7"
 python3 linux/tools/mock_tap.py "$out/tap7" --factory --window 600 --nodes 44 --stats "$out/tap7.json" &
 tap=$!
 sleep 0.5
-printf '{"bus_role": "master", "master_startup": true, "serial_port": "%s", "gateway_id": 4609, "web_port": 18098}\n' \
+printf '{"bus_role": "master", "master_startup": false, "master_housekeeping": false, "master_queries": false, "master_optimizer_writes": false, "master_read_tap_config": false, "discovery_auto": false, "master_startup": true, "serial_port": "%s", "gateway_id": 4609, "web_port": 18098}\n' \
   "$PWD/$out/tap7" > "$out/state7/settings.json"
 build/linux/tigomonitord --state-dir "$out/state7" --web-dir components/tigo_server/web 2> "$out/daemon7.log" &
 daemon=$!
@@ -214,7 +214,7 @@ mkdir -p "$out/state8"
 python3 linux/tools/mock_tap.py "$out/tap8" --window 600 --nodes 44 --stats "$out/tap8.json" &
 tap=$!
 sleep 0.5
-printf '{"bus_role": "master", "master_startup": true, "serial_port": "%s", "gateway_id": 4609, "web_port": 18099}\n' \
+printf '{"bus_role": "master", "master_startup": false, "master_housekeeping": false, "master_queries": false, "master_optimizer_writes": false, "master_read_tap_config": false, "discovery_auto": false, "master_startup": true, "serial_port": "%s", "gateway_id": 4609, "web_port": 18099}\n' \
   "$PWD/$out/tap8" > "$out/state8/settings.json"
 build/linux/tigomonitord --state-dir "$out/state8" --web-dir components/tigo_server/web 2> "$out/daemon8.log" &
 daemon=$!
@@ -232,7 +232,7 @@ mkdir -p "$out/state9"
 python3 linux/tools/mock_tap.py "$out/tap9" --window 600 --nodes 44 --stats "$out/tap9.json" &
 tap=$!
 sleep 0.5
-printf '{"bus_role": "master", "serial_port": "%s", "gateway_id": 4609, "web_port": 18100}\n' \
+printf '{"bus_role": "master", "master_startup": false, "master_housekeeping": false, "master_queries": false, "master_optimizer_writes": false, "master_read_tap_config": false, "discovery_auto": false, "serial_port": "%s", "gateway_id": 4609, "web_port": 18100}\n' \
   "$PWD/$out/tap9" > "$out/state9/settings.json"
 build/linux/tigomonitord --state-dir "$out/state9" --web-dir components/tigo_server/web 2> "$out/daemon9.log" &
 daemon=$!
@@ -260,7 +260,7 @@ for mode in warm cold; do
   python3 linux/tools/mock_tap.py "$out/tap10$mode" $flag --second-tap --window 600 --nodes 44 --stats "$out/tap10$mode.json" &
   tap=$!
   sleep 0.5
-  printf '{"bus_role": "master", "master_startup": true, "serial_port": "%s", "gateway_id": 4609, "web_port": 18101}\n' \
+  printf '{"bus_role": "master", "master_startup": false, "master_housekeeping": false, "master_queries": false, "master_optimizer_writes": false, "master_read_tap_config": false, "discovery_auto": false, "master_startup": true, "serial_port": "%s", "gateway_id": 4609, "web_port": 18101}\n' \
     "$PWD/$out/tap10$mode" > "$out/state10$mode/settings.json"
   build/linux/tigomonitord --state-dir "$out/state10$mode" --web-dir components/tigo_server/web 2> "$out/daemon10$mode.log" &
   daemon=$!
@@ -309,7 +309,7 @@ for mode in warm cold; do
   python3 linux/tools/mock_tap.py "$out/tap12$mode" $flag --window 600 --nodes 44 --stats "$out/tap12$mode.json" &
   tap=$!
   sleep 0.5
-  printf '{"bus_role": "master", "master_startup": true, "master_housekeeping": true, "serial_port": "%s", "gateway_id": 4609, "web_port": 18102}\n' \
+  printf '{"bus_role": "master", "master_startup": false, "master_housekeeping": false, "master_queries": false, "master_optimizer_writes": false, "master_read_tap_config": false, "discovery_auto": false, "master_startup": true, "master_housekeeping": true, "serial_port": "%s", "gateway_id": 4609, "web_port": 18102}\n' \
     "$PWD/$out/tap12$mode" > "$out/state12$mode/settings.json"
   build/linux/tigomonitord --state-dir "$out/state12$mode" --web-dir components/tigo_server/web 2> "$out/daemon12$mode.log" &
   daemon=$!
@@ -336,7 +336,7 @@ mkdir -p "$out/state13"
 python3 linux/tools/mock_tap.py "$out/tap13" --window 600 --nodes 44 --stats "$out/tap13.json" &
 tap=$!
 sleep 0.5
-printf '{"bus_role": "master", "master_housekeeping": true, "serial_port": "%s", "gateway_id": 4609, "web_port": 18103}\n' \
+printf '{"bus_role": "master", "master_startup": false, "master_housekeeping": false, "master_queries": false, "master_optimizer_writes": false, "master_read_tap_config": false, "discovery_auto": false, "master_housekeeping": true, "serial_port": "%s", "gateway_id": 4609, "web_port": 18103}\n' \
   "$PWD/$out/tap13" > "$out/state13/settings.json"
 build/linux/tigomonitord --state-dir "$out/state13" --web-dir components/tigo_server/web 2> "$out/daemon13.log" &
 daemon=$!
@@ -356,7 +356,7 @@ mkdir -p "$out/state14"
 python3 linux/tools/mock_tap.py "$out/tap14" --factory --window 600 --nodes 44 --stats "$out/tap14.json" &
 tap=$!
 sleep 0.5
-printf '{"bus_role": "master", "master_startup": true, "master_housekeeping": true, "master_queries": true, "master_optimizer_writes": true, "serial_port": "%s", "gateway_id": 4609, "web_port": 18104}\n' \
+printf '{"bus_role": "master", "master_startup": false, "master_housekeeping": false, "master_queries": false, "master_optimizer_writes": false, "master_read_tap_config": false, "discovery_auto": false, "master_startup": true, "master_housekeeping": true, "master_queries": true, "master_optimizer_writes": true, "serial_port": "%s", "gateway_id": 4609, "web_port": 18104}\n' \
   "$PWD/$out/tap14" > "$out/state14/settings.json"
 build/linux/tigomonitord --state-dir "$out/state14" --web-dir components/tigo_server/web 2> "$out/daemon14.log" &
 daemon=$!
@@ -388,7 +388,7 @@ mkdir -p "$out/state15"
 python3 linux/tools/mock_tap.py "$out/tap15" --window 600 --nodes 44 --stats "$out/tap15.json" &
 tap=$!
 sleep 0.5
-printf '{"bus_role": "master", "master_startup": true, "master_queries": true, "serial_port": "%s", "gateway_id": 4609, "web_port": 18105}\n' \
+printf '{"bus_role": "master", "master_startup": false, "master_housekeeping": false, "master_queries": false, "master_optimizer_writes": false, "master_read_tap_config": false, "discovery_auto": false, "master_startup": true, "master_queries": true, "serial_port": "%s", "gateway_id": 4609, "web_port": 18105}\n' \
   "$PWD/$out/tap15" > "$out/state15/settings.json"
 build/linux/tigomonitord --state-dir "$out/state15" --web-dir components/tigo_server/web 2> "$out/daemon15.log" &
 daemon=$!
@@ -411,7 +411,7 @@ mkdir -p "$out/state15b"
 python3 linux/tools/mock_tap.py "$out/tap15b" --window 600 --nodes 44 --not-taken 0003 --stats "$out/tap15b.json" &
 tap=$!
 sleep 0.5
-printf '{"bus_role": "master", "master_queries": true, "serial_port": "%s", "gateway_id": 4609, "web_port": 18126}\n' \
+printf '{"bus_role": "master", "master_startup": false, "master_housekeeping": false, "master_queries": false, "master_optimizer_writes": false, "master_read_tap_config": false, "discovery_auto": false, "master_queries": true, "serial_port": "%s", "gateway_id": 4609, "web_port": 18126}\n' \
   "$PWD/$out/tap15b" > "$out/state15b/settings.json"
 build/linux/tigomonitord --state-dir "$out/state15b" --web-dir components/tigo_server/web 2> "$out/daemon15b.log" &
 daemon=$!
@@ -434,7 +434,7 @@ mkdir -p "$out/state16"
 python3 linux/tools/mock_tap.py "$out/tap16" --factory --reset-quiet 12 --window 600 --nodes 44 --stats "$out/tap16.json" &
 tap=$!
 sleep 0.5
-printf '{"bus_role": "master", "master_startup": true, "serial_port": "%s", "gateway_id": 4609, "web_port": 18106}\n' \
+printf '{"bus_role": "master", "master_startup": false, "master_housekeeping": false, "master_queries": false, "master_optimizer_writes": false, "master_read_tap_config": false, "discovery_auto": false, "master_startup": true, "serial_port": "%s", "gateway_id": 4609, "web_port": 18106}\n' \
   "$PWD/$out/tap16" > "$out/state16/settings.json"
 build/linux/tigomonitord --state-dir "$out/state16" --web-dir components/tigo_server/web 2> "$out/daemon16.log" &
 daemon=$!
@@ -454,7 +454,7 @@ mkdir -p "$out/state17"
 python3 linux/tools/mock_tap.py "$out/tap17" --power-cut-every 15 --window 600 --nodes 44 --stats "$out/tap17.json" &
 tap=$!
 sleep 0.5
-printf '{"bus_role": "master", "master_startup": true, "serial_port": "%s", "gateway_id": 4609, "web_port": 18107}\n' \
+printf '{"bus_role": "master", "master_startup": false, "master_housekeeping": false, "master_queries": false, "master_optimizer_writes": false, "master_read_tap_config": false, "discovery_auto": false, "master_startup": true, "serial_port": "%s", "gateway_id": 4609, "web_port": 18107}\n' \
   "$PWD/$out/tap17" > "$out/state17/settings.json"
 build/linux/tigomonitord --state-dir "$out/state17" --web-dir components/tigo_server/web 2> "$out/daemon17.log" &
 daemon=$!
@@ -476,7 +476,7 @@ cc -shared -fPIC -o "$out/slow_fsync.so" linux/tools/slow_fsync.c -ldl
 python3 linux/tools/mock_tap.py "$out/tap18" --window 600 --nodes 44 --stats "$out/tap18.json" &
 tap=$!
 sleep 0.5
-printf '{"bus_role": "master", "serial_port": "%s", "gateway_id": 4609, "web_port": 18108}\n' \
+printf '{"bus_role": "master", "master_startup": false, "master_housekeeping": false, "master_queries": false, "master_optimizer_writes": false, "master_read_tap_config": false, "discovery_auto": false, "serial_port": "%s", "gateway_id": 4609, "web_port": 18108}\n' \
   "$PWD/$out/tap18" > "$out/state18/settings.json"
 LD_PRELOAD="$PWD/$out/slow_fsync.so" build/linux/tigomonitord --state-dir "$out/state18" --web-dir components/tigo_server/web 2> "$out/daemon18.log" &
 daemon=$!
@@ -498,7 +498,7 @@ mkdir -p "$out/state19"
 python3 linux/tools/mock_tap.py "$out/tap19" --factory --mute-claims 1000 --window 600 --nodes 44 --stats "$out/tap19.json" &
 tap=$!
 sleep 0.5
-printf '{"bus_role": "master", "master_startup": true, "serial_port": "%s", "gateway_id": 4609, "web_port": 18109}\n' \
+printf '{"bus_role": "master", "master_startup": false, "master_housekeeping": false, "master_queries": false, "master_optimizer_writes": false, "master_read_tap_config": false, "discovery_auto": false, "master_startup": true, "serial_port": "%s", "gateway_id": 4609, "web_port": 18109}\n' \
   "$PWD/$out/tap19" > "$out/state19/settings.json"
 build/linux/tigomonitord --state-dir "$out/state19" --web-dir components/tigo_server/web 2> "$out/daemon19.log" &
 daemon=$!
@@ -517,7 +517,7 @@ mkdir -p "$out/state19b"
 python3 linux/tools/mock_tap.py "$out/tap19b" --factory --deaf-hop --window 600 --nodes 44 --stats "$out/tap19b.json" &
 tap=$!
 sleep 0.5
-printf '{"bus_role": "master", "master_startup": true, "serial_port": "%s", "gateway_id": 4609, "web_port": 18110}\n' \
+printf '{"bus_role": "master", "master_startup": false, "master_housekeeping": false, "master_queries": false, "master_optimizer_writes": false, "master_read_tap_config": false, "discovery_auto": false, "master_startup": true, "serial_port": "%s", "gateway_id": 4609, "web_port": 18110}\n' \
   "$PWD/$out/tap19b" > "$out/state19b/settings.json"
 build/linux/tigomonitord --state-dir "$out/state19b" --web-dir components/tigo_server/web 2> "$out/daemon19b.log" &
 daemon=$!
@@ -534,7 +534,7 @@ mkdir -p "$out/state20"
 python3 linux/tools/mock_tap.py "$out/tap20" --window 2 --refuse-renewals 3 --nodes 44 --stats "$out/tap20.json" &
 tap=$!
 sleep 0.5
-printf '{"bus_role": "master", "serial_port": "%s", "gateway_id": 4609, "web_port": 18111}\n' \
+printf '{"bus_role": "master", "master_startup": false, "master_housekeeping": false, "master_queries": false, "master_optimizer_writes": false, "master_read_tap_config": false, "discovery_auto": false, "serial_port": "%s", "gateway_id": 4609, "web_port": 18111}\n' \
   "$PWD/$out/tap20" > "$out/state20/settings.json"
 build/linux/tigomonitord --state-dir "$out/state20" --web-dir components/tigo_server/web 2> "$out/daemon20.log" &
 daemon=$!
@@ -556,7 +556,7 @@ mkdir -p "$out/state21"
 python3 linux/tools/mock_tap.py "$out/tap21" --page-delay 0.12 --panels 30 --window 600 --nodes 44 --stats "$out/tap21.json" &
 tap=$!
 sleep 0.5
-printf '{"bus_role": "master", "master_housekeeping": true, "serial_port": "%s", "gateway_id": 4609, "web_port": 18112}\n' \
+printf '{"bus_role": "master", "master_startup": false, "master_housekeeping": false, "master_queries": false, "master_optimizer_writes": false, "master_read_tap_config": false, "discovery_auto": false, "master_housekeeping": true, "serial_port": "%s", "gateway_id": 4609, "web_port": 18112}\n' \
   "$PWD/$out/tap21" > "$out/state21/settings.json"
 build/linux/tigomonitord --state-dir "$out/state21" --web-dir components/tigo_server/web 2> "$out/daemon21.log" &
 daemon=$!
@@ -574,7 +574,7 @@ mkdir -p "$out/state22"
 python3 linux/tools/mock_tap.py "$out/tap22" --page-delay 0.4 --panels 30 --window 600 --nodes 44 --stats "$out/tap22.json" &
 tap=$!
 sleep 0.5
-printf '{"bus_role": "master", "master_housekeeping": true, "serial_port": "%s", "gateway_id": 4609, "web_port": 18113}\n' \
+printf '{"bus_role": "master", "master_startup": false, "master_housekeeping": false, "master_queries": false, "master_optimizer_writes": false, "master_read_tap_config": false, "discovery_auto": false, "master_housekeeping": true, "serial_port": "%s", "gateway_id": 4609, "web_port": 18113}\n' \
   "$PWD/$out/tap22" > "$out/state22/settings.json"
 build/linux/tigomonitord --state-dir "$out/state22" --web-dir components/tigo_server/web 2> "$out/daemon22.log" &
 daemon=$!
@@ -612,7 +612,7 @@ sleep 0.5
 python3 -c "import json, time; json.dump({'version': 1, 'nodes': [{'addr': '0002', 'long_address': '04C05B0000000002',
   'cca_label': 'A1', 'cca_string_label': 'String A', 'last_heard_unix': int(time.time()) - 86400 - 3600}]},
   open('$out/state23/state.json', 'w'))"
-printf '{"bus_role": "master", "discovery_auto": true, "serial_port": "%s", "gateway_id": 4609, "web_port": 18115}\n' \
+printf '{"bus_role": "master", "master_startup": false, "master_housekeeping": false, "master_queries": false, "master_optimizer_writes": false, "master_read_tap_config": false, "discovery_auto": false, "discovery_auto": true, "serial_port": "%s", "gateway_id": 4609, "web_port": 18115}\n' \
   "$PWD/$out/tap23a" > "$out/state23/settings.json"
 build/linux/tigomonitord --state-dir "$out/state23" 2> "$out/daemon23.log" &
 daemon=$!

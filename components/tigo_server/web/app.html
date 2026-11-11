@@ -1535,7 +1535,7 @@
              network's key reports through the TAP whatever its table says. -->
         <div id="devices-strays" style="display:none">
           <div class="section-title devices-head">Heard, not on the TAP's list</div>
-          <p class="hint">These optimizers report through the TAP, but the TAP's table doesn't list them, or hasn't for a day: a spare that was on this system before, or one from a neighbour's. Like the CCA's aliens, they're kept off the Dashboard and the mesh map. Taking one off the TAP's table doesn't stop it reporting; only unplugging it, or moving it out of range, does. Forget clears it from this list until it next reports.</p>
+          <p class="hint">These optimizers report through the TAP, but the TAP's table doesn't list them, or hasn't for a day: a spare that was on this system before, or one from a neighbour's. They're kept off the Dashboard and the mesh map. Taking one off the TAP's table doesn't stop it reporting; only unplugging it, or moving it out of range, does. Forget clears it from this list until it next reports.</p>
           <div class="table-wrap">
             <table class="nodes">
               <thead><tr><th>Label</th><th>Addr</th><th>Last heard</th><th></th></tr></thead>
@@ -1680,37 +1680,13 @@
           <div class="cfg-text"><strong>Take over after</strong><span>Seconds with no master heard before this one runs the bus. Of two standbys, give the one you prefer the shorter time. The default 3 s suits two monitors; beside a working CCA use 30 s or more, since a CCA that reboots is quiet for longer than that and never gives the bus back. Losing power on one master no longer stops the array: the other takes over, so rapid shutdown must cut the TAP's own power</span></div>
           <div class="cfg-ctrl"><input class="cfg-input" id="pi-takeover" type="number" min="2" max="60" placeholder="3"></div>
         </div>
-        <div class="cfg-row" id="pi-startup-row" style="display:none">
-          <div class="cfg-text"><strong>Bring up the TAP</strong><span>If the gateway is found at its factory address (after a power cut), re-address it and start it. Needs the real CCA on hand to recover a stranded gateway (experimental)</span></div>
-          <div class="cfg-ctrl"><label class="cfg-switch"><input type="checkbox" id="pi-startup"> <span>Off</span></label></div>
-        </div>
-        <div class="cfg-row" id="pi-housekeeping-row" style="display:none">
-          <div class="cfg-text"><strong>Send the CCA's housekeeping</strong><span id="pi-housekeeping-hint">Send the CCA's 0x41 to each optimizer in turn, its hourly 0x0B00 and 0x22, and its reads of the TAP's node table (experimental)</span></div>
-          <div class="cfg-ctrl"><label class="cfg-switch"><input type="checkbox" id="pi-housekeeping"> <span>Off</span></label></div>
-        </div>
-        <div class="cfg-row" id="pi-queries-row" style="display:none">
-          <div class="cfg-text"><strong>Query the optimizers</strong><span>Ask each optimizer the CCA's five questions (version, tests, info, smart, MPPT), again until it answers (experimental)</span></div>
-          <div class="cfg-ctrl"><label class="cfg-switch"><input type="checkbox" id="pi-queries"> <span>Off</span></label></div>
-        </div>
-        <div class="cfg-row" id="pi-writes-row" style="display:none">
-          <div class="cfg-text"><strong>Let queries change optimizer settings</strong><span>Send the CCA's two writes when an optimizer's answer calls for them: #00w255 after an Info reading 00, and Smrt mode S after one in mode N. Needs Query the optimizers (experimental)</span></div>
-          <div class="cfg-ctrl"><label class="cfg-switch"><input type="checkbox" id="pi-writes"> <span>Off</span></label></div>
-        </div>
-        <div class="cfg-row" id="pi-discauto-row" style="display:none">
-          <div class="cfg-text"><strong>Open discovery only when needed</strong><span>As the CCA does: keep the TAP's join window open only while an optimizer in a string hasn't reported today, in daylight. With none in a string, it stays open as now. The Bus page's Disable still wins (experimental)</span></div>
-          <div class="cfg-ctrl"><label class="cfg-switch"><input type="checkbox" id="pi-discauto"> <span>Off</span></label></div>
+        <div class="cfg-row" id="pi-cca-row" style="display:none">
+          <div class="cfg-text"><strong>Runs the whole bus</strong><span>Brings a TAP up from its factory address, sends the housekeeping, asks the optimizers their status questions and makes the two writes their answers call for, reads the TAP's radio settings at start, and opens the join window only while a panel is missing</span><span id="pi-cca-state" style="color:var(--warn)"></span></div>
+          <div class="cfg-ctrl"><button class="btn" id="pi-cca-all" type="button" style="display:none">Turn them all on</button></div>
         </div>
         <div class="cfg-row" id="pi-tablewrites-row" style="display:none">
-          <div class="cfg-text"><strong>Let me change the TAP's table</strong><span>Allow the Devices page to add an optimizer to the TAP's list, or remove one, as the CCA does. Removing erases the whole table and writes the rest back. Dry runs work with this off (experimental)</span></div>
+          <div class="cfg-text"><strong>Allow changes to the TAPs</strong><span>Lets System setup add, remove and replace optimizers on a TAP's list, take on a new TAP and retire one. Removing erases the TAP's table and writes the rest back. Checks (dry runs) work with this off</span></div>
           <div class="cfg-ctrl"><label class="cfg-switch"><input type="checkbox" id="pi-tablewrites"> <span>Off</span></label></div>
-        </div>
-        <div class="cfg-row" id="pi-adopttaps-row" style="display:none">
-          <div class="cfg-text"><strong>Take on a new TAP</strong><span>When a TAP turns up at the factory address, bring every TAP on the bus up again, as the CCA does: each known one keeps its address and a new one gets the next free. Polling stops for about 30 seconds. Needs bring-up on. The new TAP must already have its radio settings from a CCA (experimental)</span></div>
-          <div class="cfg-ctrl"><label class="cfg-switch"><input type="checkbox" id="pi-adopttaps"> <span>Off</span></label></div>
-        </div>
-        <div class="cfg-row" id="pi-tapcfg-row" style="display:none">
-          <div class="cfg-text"><strong>Read the TAP's radio settings</strong><span>Once each time the master starts, read the TAP's channel and the signal level it admits optimizers at, as the CCA does when it brings a TAP up. Shown on the Devices page. Reads only (experimental)</span></div>
-          <div class="cfg-ctrl"><label class="cfg-switch"><input type="checkbox" id="pi-tapcfg"> <span>Off</span></label></div>
         </div>
         <div class="cfg-row" id="pi-bridge-row" style="display:none">
           <div class="cfg-text"><strong>Bridge address</strong><span>host:port of an ESP32 running stream_server, or an RS485-to-Ethernet converter in TCP server mode</span></div>
@@ -1933,7 +1909,7 @@
         </div>
         <div class="pv-msg" id="pv-status"></div>
         <div class="pv-msg" id="pv-still"></div>
-        <p class="pv-note">The CCA's PV-safe button, sent through the TAP. This should not be used as rapid shutdown. Optimizers that also follow the RSS signal keep producing while the inverter's transmitter runs.</p>
+        <p class="pv-note">Turns every optimizer's output off or on, through the TAP. This should not be used as rapid shutdown. Optimizers that also follow the RSS signal keep producing while the inverter's transmitter runs.</p>
       </div>
 
       <div class="section-head">
@@ -3991,7 +3967,7 @@
     // channel, and SLT, the signal level an optimizer must beat to be let in.
     const radio = addr => {
       const r = (v.radios || []).find(x => x.tap === addr);
-      return r ? `<td class="tap-radio" title="Radio channel ${r.channel} (802.15.4). Join threshold ${r.slt} (SLT): a new optimizer must be heard above ${r.slt} to join this TAP, on the radio's own signal scale, not dBm; 90 is the CCA's usual value. SLm ${r.slm}, meaning unknown. Read ${when(r.heard_unix_ms)}.">Channel ${r.channel}<div class="tap-sub">join threshold ${r.slt}</div></td>`
+      return r ? `<td class="tap-radio" title="Radio channel ${r.channel} (802.15.4). Join threshold ${r.slt} (SLT): a new optimizer must be heard above ${r.slt} to join this TAP, on the radio's own signal scale, not dBm; 90 is the usual value. SLm ${r.slm}, meaning unknown. Read ${when(r.heard_unix_ms)}.">Channel ${r.channel}<div class="tap-sub">join threshold ${r.slt}</div></td>`
                : '<td title="Read from the TAP when a bus master brings it up">—</td>';
     };
     // Its ID: the MAC it gave when a master asked where it was.
@@ -4279,7 +4255,7 @@
       ? `${w.in_table} optimizer${w.in_table === 1 ? '' : 's'} · ${w.joined} joined${taps.length > 1 ? ` · ${taps.length} TAPs` : ''}` : '—';
     if (setup.flow) return renderSetupFlow(root);
     setup.drawn = '';
-    let html = '<p class="setup-lede">Make changes to the system\'s hardware the way a CCA does. Each change is checked first, and you will see exactly what it will do before anything is sent.</p>';
+    let html = '<p class="setup-lede">Make changes to the system\'s hardware. Each change is checked first, and you will see exactly what it will do before anything is sent.</p>';
     // "Set up a new system": its steps as a bar, done or not, and the next to do.
     const checks = setupChecks(d), keys = SETUP_STEPS.system.filter(k => k !== 'done');
     const left = keys.filter(k => !checks[k].ok);
@@ -4473,7 +4449,7 @@
           <span>${f.before && !before.includes(t.id) ? 'new, its address stored' : t.state === 'running' ? 'answering' : 'not answering'}</span></div>`).join('');
         const looking = f.looking && !f.found;
         return `<h3>Look for TAPs</h3>
-          <div class="sub">The Pi brings every TAP on the bus up again, the way the CCA does: each known TAP keeps its address, and the new one gets the next free address, stored on it. Polling stops for about 30 seconds.</div>
+          <div class="sub">The Pi brings every TAP on the bus up again: each known TAP keeps its address, and the new one gets the next free address, stored on it. Polling stops for about 30 seconds.</div>
           ${running ? `<div class="setup-found">${list || '<span>No TAP answering yet.</span>'}</div>
           <div class="setup-actions"><button type="button" class="btn${f.found ? '' : ' task-go'}" data-setup-look${looking ? ' disabled' : ''}>${looking ? 'Looking…' : f.looking ? 'Look again' : 'Look for TAPs'}</button>
           ${f.lookedAt && !f.found && !looking ? '<span class="setup-line">No new TAP found. Check its wiring and power, then look again.</span>' : ''}</div>` : offBus}
@@ -5873,28 +5849,12 @@
       document.getElementById('pi-web-port').value = s.web_port || '';
       piBusRole = s.bus_role || 'listen';
       document.getElementById('pi-bus-role').value = piBusRole;
-      document.getElementById('pi-startup').checked = !!s.master_startup;
-      document.getElementById('pi-startup').nextElementSibling.textContent = s.master_startup ? 'On' : 'Off';
-      document.getElementById('pi-startup-row').style.display = piBusRole !== 'listen' ? '' : 'none';
       document.getElementById('pi-takeover').value = s.standby_takeover_s || 3;
       document.getElementById('pi-takeover-row').style.display = piBusRole === 'standby' ? '' : 'none';
-      document.getElementById('pi-housekeeping').checked = !!s.master_housekeeping;
-      document.getElementById('pi-housekeeping').nextElementSibling.textContent = s.master_housekeeping ? 'On' : 'Off';
-      document.getElementById('pi-queries').checked = !!s.master_queries;
-      document.getElementById('pi-tapcfg').checked = !!s.master_read_tap_config;
       document.getElementById('pi-tablewrites').checked = !!s.master_table_writes;
       document.getElementById('pi-tablewrites').nextElementSibling.textContent = s.master_table_writes ? 'On' : 'Off';
-      document.getElementById('pi-adopttaps').checked = !!s.master_adopt_taps;
-      document.getElementById('pi-adopttaps').nextElementSibling.textContent = s.master_adopt_taps ? 'On' : 'Off';
-      document.getElementById('pi-discauto').checked = !!s.discovery_auto;
-      document.getElementById('pi-discauto').nextElementSibling.textContent = s.discovery_auto ? 'On' : 'Off';
-      document.getElementById('pi-tapcfg').nextElementSibling.textContent = s.master_read_tap_config ? 'On' : 'Off';
-      document.getElementById('pi-queries').nextElementSibling.textContent = s.master_queries ? 'On' : 'Off';
-      document.getElementById('pi-writes').checked = !!s.master_optimizer_writes;
-      document.getElementById('pi-writes').nextElementSibling.textContent = s.master_optimizer_writes ? 'On' : 'Off';
-      document.getElementById('pi-writes').disabled = !s.master_queries;
+      piFillCca(s);
       for (const row of PI_MASTER_ROWS) document.getElementById(row).style.display = piBusRole !== 'listen' ? '' : 'none';
-      piFillHousekeepingHint();
       piTls = { cert: s.tls_cert || '', key: s.tls_key || '', active: !!s.tls_active, fixed: !!s.tls_from_args };
       document.getElementById('pi-tls-cert').value = piTls.cert;
       document.getElementById('pi-tls-key').value = piTls.key;
@@ -5926,7 +5886,30 @@
   let piWebPortActive = 0;
   let piWebLogin = { user: 'admin', set: false };
   let piBusRole = 'listen';
-  const PI_MASTER_ROWS = ['pi-startup-row', 'pi-housekeeping-row', 'pi-queries-row', 'pi-writes-row', 'pi-tapcfg-row', 'pi-discauto-row', 'pi-tablewrites-row', 'pi-adopttaps-row'];
+  const PI_MASTER_ROWS = ['pi-cca-row', 'pi-tablewrites-row'];
+  // The parts of running the bus as a CCA does. Each was a switch while it
+  // was new; they're one now, on unless a settings file turned one off.
+  const PI_CCA_PARTS = [['master_startup', 'bringing a TAP up'], ['master_housekeeping', 'the housekeeping'],
+    ['master_queries', 'querying the optimizers'], ['master_optimizer_writes', 'the writes their answers call for'],
+    ['master_read_tap_config', "reading the TAP's radio settings"], ['discovery_auto', 'opening the join window only when needed']];
+  function piFillCca(s) {
+    const off = PI_CCA_PARTS.filter(([k]) => s[k] === false).map(([, name]) => name);
+    document.getElementById('pi-cca-state').textContent = off.length ? `Off in the settings file: ${off.join(', ')}` : '';
+    document.getElementById('pi-cca-all').style.display = off.length ? '' : 'none';
+  }
+  document.getElementById('pi-cca-all').addEventListener('click', async (e) => {
+    if (!confirm('Turn on every part of running the bus? This includes the two writes to optimizers that their answers call for. The bus master restarts: a few seconds without polling.')) return;
+    e.target.disabled = true;
+    try {
+      const r = await apiFetch('/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(Object.fromEntries(PI_CCA_PARTS.map(([k]) => [k, true]))) });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      showToast('All on: the bus master restarts');
+      refreshPiSettings();
+    } catch (err) {
+      showToast('Not saved: ' + err.message, 'err');
+    } finally { e.target.disabled = false; }
+  });
   // Two masters on one bus collide, and the master's requests reach the
   // optimizers, so becoming the master is a deliberate step.
   document.getElementById('pi-bus-role').addEventListener('change', (e) => {
@@ -5938,17 +5921,6 @@
       e.target.value = piBusRole;
     for (const row of PI_MASTER_ROWS) document.getElementById(row).style.display = e.target.value !== 'listen' ? '' : 'none';
     document.getElementById('pi-takeover-row').style.display = e.target.value === 'standby' ? '' : 'none';
-  });
-  // The writes only follow the queries' answers.
-  document.getElementById('pi-queries').addEventListener('change', (e) => {
-    const w = document.getElementById('pi-writes');
-    w.disabled = !e.target.checked;
-    if (!e.target.checked) { w.checked = false; w.nextElementSibling.textContent = 'off'; }
-  });
-  // Changing what optimizers store is a step further than reading them.
-  document.getElementById('pi-writes').addEventListener('change', (e) => {
-    if (e.target.checked && !confirm('This lets the master change two settings on optimizers, as the CCA does when their answers call for it. What the settings do is not known.\n\nContinue?'))
-      e.target.checked = false;
   });
   // Turning discovery off removes the entities Home Assistant already has.
   document.getElementById('pi-mqtt-disc-on').addEventListener('change', (e) => {
@@ -5998,23 +5970,10 @@
       }
     });
   }
-  for (const id of ['pi-startup', 'pi-housekeeping', 'pi-queries', 'pi-writes', 'pi-tapcfg', 'pi-discauto', 'pi-tablewrites', 'pi-adopttaps', 'pi-mqtt-disc-on', 'pi-mqtt-standby-panels']) {
+  for (const id of ['pi-tablewrites', 'pi-mqtt-disc-on', 'pi-mqtt-standby-panels']) {
     document.getElementById(id).addEventListener('change', (e) => {
       e.target.nextElementSibling.textContent = e.target.checked ? 'On' : 'Off';
     });
-  }
-  // How many 0x41 targets were learned, so it's plain whether turning
-  // housekeeping on would send any.
-  async function piFillHousekeepingHint() {
-    try {
-      const r = await apiFetch('/api/master');
-      if (!r.ok) return;
-      const h = (await r.json()).housekeeping || {};
-      const n = h.learned_41 || 0;
-      document.getElementById('pi-housekeeping-hint').textContent =
-        "Send the CCA's 0x41 to each optimizer in turn, its hourly 0x0B00 and 0x22, and its reads of the TAP's node table (experimental). " +
-        (n ? `Content learned from the CCA (${n} heard).` : 'Built-in content: none heard from a CCA yet.');
-    } catch (e) { /* the default text stays */ }
   }
   let piTls = { cert: '', key: '', active: false, fixed: false };
   async function piFillSerial(current) {
@@ -6087,14 +6046,7 @@
     const body = { serial_port: source, web_port: webPort,
                    bus_role: document.getElementById('pi-bus-role').value,
                    standby_takeover_s: Number(document.getElementById('pi-takeover').value) || 3,
-                   master_startup: document.getElementById('pi-startup').checked,
-                   master_housekeeping: document.getElementById('pi-housekeeping').checked,
-                   master_queries: document.getElementById('pi-queries').checked,
-                   master_optimizer_writes: document.getElementById('pi-writes').checked,
-                   master_read_tap_config: document.getElementById('pi-tapcfg').checked,
-                   discovery_auto: document.getElementById('pi-discauto').checked,
                    master_table_writes: document.getElementById('pi-tablewrites').checked,
-                   master_adopt_taps: document.getElementById('pi-adopttaps').checked,
                    web_username: document.getElementById('pi-web-user').value.trim() || 'admin' };
     if (!piTls.fixed) Object.assign(body, { tls_cert: tlsCert, tls_key: tlsKey });
     const webPass = document.getElementById('pi-web-pass').value;

@@ -116,12 +116,12 @@ UART** (`/dev/serial0`).
   running system.
 - **Optimizers:** replace, add or retire one, step by step, each change
   checked before anything is sent. These need the Pi running the bus and
-  **Let me change the TAP's table** on (Settings → Bus).
+  **Allow changes to the TAPs** on (Settings → Bus).
 - **TAPs** (experimental):
   - **Add a TAP** walks through bringing a second TAP onto the bus. The TAP
     must be set up by a CCA first: the Pi can't give a TAP its radio
-    settings. It turns on **Take on a new TAP** for you, looks for TAPs, and
-    names the new one. Turning that switch on or off restarts the bus master,
+    settings. It lets the Pi take on a new TAP while you add it, looks for
+    TAPs, and names the new one. Allowing it, and stopping again, restarts the bus master,
     a few seconds without polling, and looking for TAPs stops polling for
     about 30 seconds.
   - **Retire a TAP** drops a TAP that has gone for good, so it stops showing
@@ -199,8 +199,8 @@ can point out the ones that need you:
 - The **Devices** page tags an optimizer **Missing** after 3 days with no
   reading, and **Not on the TAP** once the TAP's node table has stopped
   listing it for a day. **Not set up** means its answers say the settings a
-  CCA writes when it enrolls an optimizer aren't all written; it needs
-  **Query the optimizers** on.
+  CCA writes when it enrolls an optimizer aren't all written; it comes from
+  the optimizers' answers to the Pi's queries.
 - Home Assistant gets both counts, as *New optimizers* and *Missing
   optimizers*.
 
@@ -308,42 +308,45 @@ Under **Settings → Bus**, set **Bus role**:
   takes over, unless **Panel readings while standing by** is on under
   Settings → MQTT, so Home Assistant follows whichever one runs the bus.
 
-Running the bus, the Pi polls the TAP and renews its
-[discovery window](#disable-the-discovery-window). The rest of what the CCA
-did is behind eight switches on the same tab, all off until you turn them on:
+Running the bus, the Pi does all of it, and Settings → Bus says so under
+**Runs the whole bus**:
 
-- **Bring up the TAP.** After a power cut a TAP can come back at its
-  factory address, where nothing polls it. This re-addresses it and starts
-  it again. It only re-addresses the TAP it was polling, never a second one
-  on the bus, and a TAP stranded some other way may still need the real CCA.
-- **Send the CCA's housekeeping:** its regular 0x41 to each optimizer, its
-  hourly 0x0B00 and 0x22, and its reads of the TAP's node table. With more
-  than one TAP the 0x41 is left out: it tells an optimizer which TAP to use,
-  and the Pi's copy of it can name the wrong one.
-- **Query the optimizers:** the CCA's five questions to each one. The
-  firmware and the Settings column on the Devices page come from the
-  answers: whether each optimizer has its settings stored, and "differs"
-  for one whose settings aren't what most of the others report. Press a
-  Settings cell for the settings by name, and the four MPPT parameters
-  every optimizer reports. H9 firmware answers the settings query with fixed
-  zeros, so those show "Not reported".
-- **Let queries change optimizer settings:** the two writes the CCA sends
-  when an answer calls for them. Needs **Query the optimizers**.
-- **Read the TAP's radio settings:** once each time the master starts, the
-  read the CCA makes when it brings a TAP up. The Devices page then shows
-  the TAP's channel and the signal level it admits optimizers at. A
-  listening Pi shows them too whenever it hears any master make that read.
-- **Open discovery only when needed:** see
+- **It brings the TAP up.** After a power cut a TAP can come back at its
+  factory address, where nothing polls it. The Pi re-addresses it and starts
+  it again. It only re-addresses a TAP it knows, and a TAP stranded some
+  other way may still need the real CCA.
+- **It sends the housekeeping:** a regular 0x41 to each optimizer, an hourly
+  0x0B00 and 0x22, and reads of the TAP's node table. With more than one TAP
+  the 0x41 is left out: it tells an optimizer which TAP to use, and the Pi's
+  copy of it can name the wrong one.
+- **It queries the optimizers:** five questions to each one. The firmware
+  and the Settings column on the Devices page come from the answers: whether
+  each optimizer has its settings stored, and "differs" for one whose
+  settings aren't what most of the others report. Press a Settings cell for
+  the settings by name, and the four MPPT parameters every optimizer
+  reports. H9 firmware answers the settings query with fixed zeros, so those
+  show "Not reported". When an answer calls for one of the two writes a
+  CCA makes, `#00w255` after an Info reading 00 or Smrt mode S after one in
+  mode N, the Pi makes it.
+- **It reads the TAP's radio settings** once each time it starts. The
+  Devices page then shows the TAP's channel and the signal level it admits
+  optimizers at. A listening Pi shows them too whenever it hears any master
+  make that read.
+- **It opens the join window only when needed:** see
   [below](#disable-the-discovery-window).
-- **Let me change the TAP's table:** lets **System setup** replace, add or
-  retire an optimizer, as the CCA does. Its checks (dry runs) work with
-  this off.
-- **Take on a new TAP** (experimental): with more than one TAP, when one
-  turns up at the factory address the Pi brings every TAP up again the
-  CCA's way. Each known TAP keeps its address, a new one gets the next
-  free and has it stored, and polling stops for about 30 seconds. Needs
-  **Bring up the TAP**. The new TAP must already have its radio settings
-  from a CCA: the Pi never writes them. Tested against simulated TAPs only.
+
+These used to be switches of their own, one by one, all off. Now they're
+all on. A `settings.json` from before that turned one off keeps it off, and
+Settings → Bus names it, with **Turn them all on**.
+
+One switch stays: **Allow changes to the TAPs**, off until you turn it on.
+It lets **System setup** add, remove and replace optimizers on a TAP's list,
+and take on or retire a TAP. Its checks (dry runs) work with it off. Taking
+on a new TAP (experimental, tested against simulated TAPs only) brings every
+TAP on the bus up again: each known TAP keeps its address, a new one gets
+the next free and has it stored, and polling stops for about 30 seconds. The
+new TAP must already have its radio settings from a CCA: the Pi never writes
+them.
 
 **A dead master is not a fail-safe.** On the roof we measured, with no
 master at all, the array kept producing for the 8 to 10 minutes we watched
@@ -410,10 +413,10 @@ same switch; see the
 
 ### Disable the discovery window
 
-The TAP's *discovery window* is its window for new optimizers to join. The
-Pi renews it every time it runs out, by default. The CCA we watched on the
-bench renewed it only while an optimizer it expected was missing, and kept
-it closed once all were found. The
+The TAP's *discovery window* is its window for new optimizers to join.
+Running the bus, the Pi renews it only while an optimizer it expects is
+missing, and lets it close once all are found, as the CCA we watched on the
+bench did. The
 **Bus control** page can stop renewing it: **Disable**. The Pi keeps
 polling, so every panel still reports, and nothing new goes to the TAP; it
 just stops sending the renewal. On the roof we measured, a closed window
@@ -422,8 +425,7 @@ a TAP power cycle. **Enable** it again before adding an optimizer. The choice is
 `discovery.json` beside `settings.json`, so a restart or an update keeps
 it. It needs the web UI password too.
 
-To do what that CCA did, turn on **Open discovery only when needed** under
-Settings → Bus. The Pi then checks once a minute: in daylight, while any
+How it decides: it checks once a minute: in daylight, while any
 optimizer in a string hasn't reported since midnight, it renews the window;
 once all have, it lets the window close. A string counts whether you set it
 up in **Edit layout** or it came from the CCA or a Tigo cloud import. At
