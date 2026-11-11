@@ -107,6 +107,8 @@ static bool from_another_site(const httplib::Request &req) {
   return p == std::string::npos || origin.substr(p + 3) != req.get_header_value("Host");
 }
 
+static int64_t unix_now_s() { return static_cast<int64_t>(::time(nullptr)); }
+
 static bool same_secret(const std::string &a, const std::string &b) {
   unsigned char diff = a.size() != b.size();
   for (size_t i = 0; i < a.size() && i < b.size(); i++) diff |= a[i] ^ b[i];
@@ -1605,7 +1607,7 @@ void HttpServer::routes_() {
     return true;
   };
   svr.Post("/api/master/table/add", [this, tap_of](const httplib::Request &req, httplib::Response &res) {
-    if (ctx_.current_settings().web_password.empty()) {
+    if (ctx_.current_settings().web_password.empty() && !setup_open(ctx_.current_settings(), unix_now_s())) {
       send_json(res, {{"error", "set a web password first"}}, 403);
       return;
     }
@@ -1651,7 +1653,7 @@ void HttpServer::routes_() {
   // table erased and the rest written back as they were (table_edit.h).
   // {"label": ...} or {"mac": ...}, and "dry_run"; behind the web password.
   svr.Post("/api/master/table/remove", [this, tap_of](const httplib::Request &req, httplib::Response &res) {
-    if (ctx_.current_settings().web_password.empty()) {
+    if (ctx_.current_settings().web_password.empty() && !setup_open(ctx_.current_settings(), unix_now_s())) {
       send_json(res, {{"error", "set a web password first"}}, 403);
       return;
     }
@@ -1682,7 +1684,7 @@ void HttpServer::routes_() {
   // once it joins, it takes the old one's place in the layout. Behind the
   // web password.
   svr.Post("/api/master/table/replace", [this, tap_of](const httplib::Request &req, httplib::Response &res) {
-    if (ctx_.current_settings().web_password.empty()) {
+    if (ctx_.current_settings().web_password.empty() && !setup_open(ctx_.current_settings(), unix_now_s())) {
       send_json(res, {{"error", "set a web password first"}}, 403);
       return;
     }
@@ -1722,7 +1724,7 @@ void HttpServer::routes_() {
   // free one (tigo_master.h's Herd). Polling stops for ~30 s. Needs
   // master_adopt_taps and master_startup; behind the web password.
   svr.Post("/api/master/taps/herd", [this](const httplib::Request &, httplib::Response &res) {
-    if (ctx_.current_settings().web_password.empty()) {
+    if (ctx_.current_settings().web_password.empty() && !setup_open(ctx_.current_settings(), unix_now_s())) {
       send_json(res, {{"error", "set a web password first"}}, 403);
       return;
     }
@@ -1736,7 +1738,7 @@ void HttpServer::routes_() {
   // longer polled, and left off the saved list (taps.json). Refused for a
   // TAP still answering, or the only one. Behind the web password.
   svr.Post("/api/master/taps/forget", [this](const httplib::Request &req, httplib::Response &res) {
-    if (ctx_.current_settings().web_password.empty()) {
+    if (ctx_.current_settings().web_password.empty() && !setup_open(ctx_.current_settings(), unix_now_s())) {
       send_json(res, {{"error", "set a web password first"}}, 403);
       return;
     }
@@ -1754,7 +1756,7 @@ void HttpServer::routes_() {
   });
 
   svr.Post("/api/master/table/stop", [this](const httplib::Request &req, httplib::Response &res) {
-    if (ctx_.current_settings().web_password.empty()) {
+    if (ctx_.current_settings().web_password.empty() && !setup_open(ctx_.current_settings(), unix_now_s())) {
       send_json(res, {{"error", "set a web password first"}}, 403);
       return;
     }
@@ -1774,7 +1776,7 @@ void HttpServer::routes_() {
   // Pi-only: keep renewing the TAP's discovery window, or let it close (for
   // testing; saved in discovery.json). Behind the web password, as PV output is.
   svr.Post("/api/master/discovery", [this](const httplib::Request &req, httplib::Response &res) {
-    if (ctx_.current_settings().web_password.empty()) {
+    if (ctx_.current_settings().web_password.empty() && !setup_open(ctx_.current_settings(), unix_now_s())) {
       send_json(res, {{"error", "set a web password first"}}, 403);
       return;
     }
@@ -1855,6 +1857,8 @@ void HttpServer::routes_() {
                     {"web_port_active", port_},
                     {"web_username", s.web_username},
                     {"web_password_set", !s.web_password.empty()},
+                    {"setup_open", setup_open(s, unix_now_s())},
+                    {"setup_open_until", s.setup_open_until},
                     {"tls_cert", s.tls_cert},
                     {"tls_key", s.tls_key},
                     {"tls_active", ctx_.tls != nullptr},

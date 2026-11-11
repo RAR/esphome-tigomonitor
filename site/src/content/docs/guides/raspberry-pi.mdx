@@ -108,12 +108,24 @@ UART** (`/dev/serial0`).
 
 **System setup** gathers every setup job in one page.
 
-- **Set up a new system** is a checklist from the bus to the layout:
-  connect the bus, find the TAP, check the optimizers are reporting, lay out
-  the array in Topology, rate the strings, and set a password and Home
-  Assistant. Each step ticks itself off from what the Pi already sees and
-  links to where you do the rest, so it also answers "what's left?" on a
-  running system.
+- **Set up a new system** is a checklist from the bus to the layout, done
+  on the page itself:
+  - choose the serial port and the bus role;
+  - see the TAP answer, its firmware and its join window, and let optimizers
+    join again if renewal was turned off;
+  - check the optimizers are reporting;
+  - start the layout from how many inverters, MPPTs and strings you have,
+    then place the panels in Topology;
+  - type each string's panel rating;
+  - set a password to finish.
+
+  Each step ticks itself off from what the Pi already sees, so the list also
+  answers "what's left?" on a running system.
+- **Setup mode.** On a new install, the first day needs no password for
+  System setup's changes, so you can set the system up first and lock it
+  last. Every page says so in a banner until you set one. Turning the
+  array's output off always needs the password. An install that already
+  had a settings file never gets setup mode.
 - **Optimizers:** replace, add or retire one, step by step, each change
   checked before anything is sent. These need the Pi running the bus and
   **Allow changes to the TAPs** on (Settings → Bus).
