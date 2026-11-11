@@ -37,6 +37,22 @@ inline bool window_wanted(const std::vector<int64_t> &expected_last_heard, int64
   return false;
 }
 
+// The owner's morning rule (2026-11-11): optimizers wake one by one at
+// sunrise and take whatever parent they hear first; better ones aren't up
+// yet. With the window held open for a while after the day's first report,
+// a relayed one can move to a better parent. first_report_unix: today's
+// first report (one before midnight is yesterday's: none yet today).
+// morning_s 0 turns it off. Returns when it stops, or 0.
+inline int64_t morning_until(int64_t first_report_unix, int64_t midnight_unix, int64_t morning_s) {
+  if (morning_s <= 0 || first_report_unix < midnight_unix || first_report_unix <= 0) return 0;
+  return first_report_unix + morning_s;
+}
+inline bool morning_wanted(int64_t first_report_unix, int64_t midnight_unix, int64_t now_unix, bool is_daylight,
+                           int64_t morning_s) {
+  int64_t until = morning_until(first_report_unix, midnight_unix, morning_s);
+  return is_daylight && until && now_unix < until;
+}
+
 }  // namespace discovery
 }  // namespace tigo_monitor
 }  // namespace esphome

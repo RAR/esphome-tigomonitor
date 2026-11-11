@@ -48,7 +48,7 @@ function master(role, pv = {}, standby = 'off') {
 
 function settings() {
   return {
-    serial_port: 'auto', bus_role: 'master', standby_takeover_s: 3, master_startup: true, master_bench: false,
+    serial_port: 'auto', bus_role: 'master', standby_takeover_s: 3, master_startup: true, master_bench: false, discovery_morning_min: 120,
     master_housekeeping: true, master_queries: false, master_optimizer_writes: false, gateway_id: 0x1201,
     web_port: 0, web_port_active: 80, web_username: 'admin', web_password_set: true,
     tls_cert: '', tls_key: '', tls_active: false, tls_from_args: false, power_calibration: 1, publish_interval_s: 30,
@@ -345,5 +345,29 @@ test('automatic discovery off: the card is as before', async () => {
   await page.waitForFunction(() => /Now/.test(document.getElementById('disc-detail').textContent));
   assert.doesNotMatch(await page.textContent('#disc-detail'), /Automatic/);
   assert.equal(await page.textContent('#disc-state'), 'Enabled');
+  await ctx.close();
+});
+
+// The owner's morning rule (2026-11-11): the window stays open for a while
+// after sunrise, so optimizers that woke onto a poor relay can move.
+test('automatic discovery, after sunrise: the card says it is kept open until when', async () => {
+  const until = Math.floor(Date.now() / 1000) + 3600;
+  const { page, ctx } = await open({ master: { discovery_auto: true, window_wanted: true, missing_expected: 0, morning_until_unix: until } });
+  await page.waitForFunction(() => /Automatic/.test(document.getElementById('disc-detail').textContent));
+  const hhmm = new Date(until * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  assert.match(await page.textContent('#disc-detail'), new RegExp(`Automatic: kept open after sunrise, until ${hhmm}`));
+  await ctx.close();
+});
+
+test('the time the window stays open after sunrise is a Bus setting, saved in minutes', async () => {
+  const { page, ctx, api } = await open({ hash: '#settings' });
+  await page.click('#settings-tab-bus');
+  await page.waitForSelector('#pi-morning', { state: 'visible' });
+  assert.equal(await page.inputValue('#pi-morning'), '120');  // the default, as the daemon gives it
+  await page.fill('#pi-morning', '90');
+  await page.click('#pi-port-save');
+  await page.waitForFunction(() => true);
+  await page.waitForTimeout(500);
+  assert.equal(api.settingsPosts.at(-1).discovery_morning_min, 90);
   await ctx.close();
 });

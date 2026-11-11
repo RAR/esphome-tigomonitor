@@ -158,7 +158,7 @@ bool MasterCore::request_discovery(bool renew) {
   return true;
 }
 
-void MasterCore::set_window_wanted(bool wanted, int missing) {
+void MasterCore::set_window_wanted(bool wanted, int missing, int64_t morning_until_unix) {
   bool changed;
   {
     std::lock_guard<std::mutex> lock(mu_);
@@ -166,6 +166,7 @@ void MasterCore::set_window_wanted(bool wanted, int missing) {
     window_wanted_ = wanted;
     status_.window_wanted = wanted;
     status_.missing_expected = missing;
+    status_.morning_until_unix = morning_until_unix;
   }
   if (changed)
     LOGI("bus master: automatic discovery: %s", wanted ? "an optimizer is missing, renewing the window"

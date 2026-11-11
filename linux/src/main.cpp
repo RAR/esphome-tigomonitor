@@ -534,6 +534,7 @@ int main(int argc, char **argv) {
 
   std::atomic<bool> bus_log_saving{false}, housekeeping_saving{false};
   auto last_discovery_check = std::chrono::steady_clock::now() - std::chrono::seconds(60);
+  int64_t first_report_today = 0;  // the morning rule's sunrise (discovery_policy.h)
 
   auto last_publish = std::chrono::steady_clock::now() - std::chrono::hours(1);
   // Snapshots land on wall-clock multiples of the interval (:00, :05, ...),
@@ -654,6 +655,7 @@ int main(int argc, char **argv) {
       last_discovery_check = std::chrono::steady_clock::now();
       bool wanted = true;
       int missing = 0;
+      int64_t morning_until = 0;
       if (settings.discovery_auto) {
         int64_t t = static_cast<int64_t>(time(nullptr));
         tm lt{};
@@ -662,17 +664,27 @@ int main(int argc, char **argv) {
         int64_t midnight = t - (lt.tm_hour * 3600 + lt.tm_min * 60 + lt.tm_sec);
         auto expected = monitor.expected_last_heard();
         for (int64_t h : expected) missing += h < midnight;
-        wanted = esphome::tigo_monitor::discovery::window_wanted(
-            expected, midnight, esphome::tigo_monitor::discovery::daylight(monitor.last_report_unix(), t));
+        bool day = esphome::tigo_monitor::discovery::daylight(monitor.last_report_unix(), t);
+        wanted = esphome::tigo_monitor::discovery::window_wanted(expected, midnight, day);
         // What the window is held open for: at night, nothing.
         if (!wanted) missing = 0;
+        // The day's first report, as this loop first sees one after midnight
+        // (a restart mid-morning starts the count again; it only holds the
+        // window open longer).
+        int64_t last = monitor.last_report_unix();
+        if (last >= midnight && first_report_today < midnight) first_report_today = last;
+        int64_t morning_s = static_cast<int64_t>(settings.discovery_morning_min) * 60;
+        if (esphome::tigo_monitor::discovery::morning_wanted(first_report_today, midnight, t, day, morning_s)) {
+          wanted = true;
+          morning_until = esphome::tigo_monitor::discovery::morning_until(first_report_today, midnight, morning_s);
+        }
       }
       std::shared_ptr<BusMaster> m;
       {
         std::lock_guard<std::mutex> lock(master_mu);
         m = bus_master;
       }
-      if (m) m->set_window_wanted(wanted, missing);
+      if (m) m->set_window_wanted(wanted, missing, morning_until);
     }
     // On the history worker: an fsync can take a second on a slow SD card.
     if (housekeeping.needs_save() && !housekeeping_saving.exchange(true))

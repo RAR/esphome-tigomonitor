@@ -1718,8 +1718,12 @@
           <div class="cfg-ctrl"><input class="cfg-input" id="pi-takeover" type="number" min="2" max="60" placeholder="3"></div>
         </div>
         <div class="cfg-row" id="pi-cca-row" style="display:none">
-          <div class="cfg-text"><strong>Runs the whole bus</strong><span>Brings a TAP up from its factory address, sends the housekeeping, asks the optimizers their status questions and makes the two writes their answers call for, reads the TAP's radio settings at start, and opens the join window only while a panel is missing</span><span id="pi-cca-state" style="color:var(--warn)"></span></div>
+          <div class="cfg-text"><strong>Runs the whole bus</strong><span>Brings a TAP up from its factory address, sends the housekeeping, asks the optimizers their status questions and makes the two writes their answers call for, reads the TAP's radio settings at start, and opens the join window only while a panel is missing and for a while after sunrise</span><span id="pi-cca-state" style="color:var(--warn)"></span></div>
           <div class="cfg-ctrl"><button class="btn" id="pi-cca-all" type="button" style="display:none">Turn them all on</button></div>
+        </div>
+        <div class="cfg-row" id="pi-morning-row" style="display:none">
+          <div class="cfg-text"><strong>Keep the join window open after sunrise</strong><span>Minutes from the day's first report. Optimizers wake one by one and take the first relay they hear; with the window open a while, they can move to a better one. 0 turns it off</span></div>
+          <div class="cfg-ctrl"><input class="cfg-input" id="pi-morning" type="number" min="0" max="720" step="15" placeholder="120"></div>
         </div>
         <div class="cfg-row" id="pi-tablewrites-row" style="display:none">
           <div class="cfg-text"><strong>Allow changes to the TAPs</strong><span>Lets System setup add, remove and replace optimizers on a TAP's list, take on a new TAP and retire one. Removing erases the TAP's table and writes the rest back. Checks (dry runs) work with this off</span></div>
@@ -5523,8 +5527,11 @@
     // Automatic (Settings › Bus): renewed only while an optimizer in the
     // layout hasn't reported today. The Disable switch still wins.
     const auto = renewing && m.discovery_auto;
+    const morningUntil = m.morning_until_unix && m.morning_until_unix * 1000 > Date.now()
+      ? new Date(m.morning_until_unix * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
     const autoText = !auto ? ''
       : m.window_wanted === false ? 'Automatic: every optimizer in your layout has reported today, so the window is left to close · '
+      : morningUntil && !(m.missing_expected > 0) ? `Automatic: kept open after sunrise, until ${morningUntil} · `
       : m.missing_expected > 0 ? `Automatic: kept open while ${m.missing_expected} optimizer${m.missing_expected === 1 ? '' : 's'} in your layout haven't reported today · `
       : 'Automatic: kept open (no optimizer in a string to judge by) · ';
     document.getElementById('disc-state').textContent = auto ? 'Automatic' : renewing ? 'Enabled' : 'Disabled';
@@ -6103,6 +6110,7 @@
       piBusRole = s.bus_role || 'listen';
       document.getElementById('pi-bus-role').value = piBusRole;
       document.getElementById('pi-takeover').value = s.standby_takeover_s || 3;
+      document.getElementById('pi-morning').value = s.discovery_morning_min ?? 120;
       document.getElementById('pi-takeover-row').style.display = piBusRole === 'standby' ? '' : 'none';
       document.getElementById('pi-tablewrites').checked = !!s.master_table_writes;
       document.getElementById('pi-tablewrites').nextElementSibling.textContent = s.master_table_writes ? 'On' : 'Off';
@@ -6139,7 +6147,7 @@
   let piWebPortActive = 0;
   let piWebLogin = { user: 'admin', set: false };
   let piBusRole = 'listen';
-  const PI_MASTER_ROWS = ['pi-cca-row', 'pi-tablewrites-row'];
+  const PI_MASTER_ROWS = ['pi-cca-row', 'pi-morning-row', 'pi-tablewrites-row'];
   // The parts of running the bus as a CCA does. Each was a switch while it
   // was new; they're one now, on unless a settings file turned one off.
   const PI_CCA_PARTS = [['master_startup', 'bringing a TAP up'], ['master_housekeeping', 'the housekeeping'],
@@ -6304,6 +6312,7 @@
     const body = { serial_port: source, web_port: webPort,
                    bus_role: document.getElementById('pi-bus-role').value,
                    standby_takeover_s: Number(document.getElementById('pi-takeover').value) || 3,
+                   discovery_morning_min: Math.max(0, Math.min(720, Math.round(Number(document.getElementById('pi-morning').value)))) || 0,
                    master_table_writes: document.getElementById('pi-tablewrites').checked,
                    web_username: document.getElementById('pi-web-user').value.trim() || 'admin' };
     if (!piTls.fixed) Object.assign(body, { tls_cert: tlsCert, tls_key: tlsKey });
