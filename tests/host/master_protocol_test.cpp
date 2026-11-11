@@ -1151,6 +1151,49 @@ static void test_queries() {
         Queries::retry_after_ms(100) == 30 * 60000);
 }
 
+// A one-off read the owner asks for on the bench (^00GetOsState): a read's
+// shape, so bench-only at the gate; sent until the node answers, the answer
+// kept for the log; never on the roof.
+static void test_queries_ask() {
+  uint8_t seq = 0;
+  Queries q(0, false);
+  q.on_poll_reply(poll_reply_with({power_from(0x03)}), 0);
+  ask(q, 0, 10000, seq);  // its five reads
+  CHECK(!q.ask(0x03, "^00Get_State\r", 20000));  // a write's shape: refused
+  CHECK(!q.ask(0x03, "#00x\r", 20000));
+  CHECK(!q.ask(0x03, "^00Leave\r", 20000));
+  CHECK(q.ask(0x03, "^00GetOsState\r", 20000));
+  std::vector<Request> r = ask(q, 20000, 30000, seq, 0x03);
+  CHECK(r.size() == 1 && query_text(r[0]) == "^00GetOsState\r");
+  CHECK(classify_request(r[0].cmd, r[0].payload) == Allow::bench_only);
+  CHECK(!may_send(r[0].cmd, r[0].payload, false));
+  // Unanswered: asked again on the reads' schedule.
+  r = ask(q, 20000 + 3 * 60000, 20000 + 3 * 60000 + 15000, seq, 0x03);  // after the five reads due then
+  bool again = false;
+  for (const Request &x : r) again = again || query_text(x) == "^00GetOsState\r";
+  CHECK(again);
+  // Answered: kept, and not asked again.
+  q.on_poll_reply(poll_reply_with({string_packet(0x03, "!GetOsState State=OS_Run1, Tuid=3, Freq=15, Pan=0x1234, D=1\r")}), 300000);
+  std::vector<std::pair<uint16_t, std::string>> got = q.take_asked();
+  CHECK(got.size() == 1 && got[0].first == 0x03 && got[0].second.rfind("!GetOsState State=OS_Run1", 0) == 0);
+  CHECK(q.take_asked().empty());
+  for (const Request &x : ask(q, 300000, 300000 + 40 * 60000, seq, 0x03)) CHECK(query_text(x) != "^00GetOsState\r");
+  // Never answered (a text this firmware doesn't know): given up after
+  // Queries::ASK_TRIES, and said so.
+  Queries n(0, false);
+  n.on_poll_reply(poll_reply_with({power_from(0x04)}), 0);
+  ask(n, 0, 10000, seq);
+  CHECK(n.ask(0x04, "^00GetPAN\r", 20000));
+  int sent = 0;
+  for (uint32_t t = 20000; t < 20000 + 3 * 3600000u; t += 60000) {
+    n.on_poll_reply(poll_reply_with({power_from(0x04)}), t);  // awake throughout
+    for (const Request &x : ask(n, t, t + 59000, seq, 0x04)) sent += query_text(x) == "^00GetPAN\r";
+  }
+  CHECK(sent == static_cast<int>(Queries::ASK_TRIES));
+  std::vector<std::pair<uint16_t, std::string>> gave = n.take_asked();
+  CHECK(gave.size() == 1 && gave[0].second == "no answer to ^00GetPAN after 3 tries");
+}
+
 static void test_housekeeping() {
   Learned41 l;
   l.on_frame(cca41(1, 0x0027, 0x01, 0x21));
@@ -1566,6 +1609,7 @@ int main() {
   test_bring_up_plan();
   test_walks();
   test_queries();
+  test_queries_ask();
   test_pv_switch();
   if (failures) {
     std::printf("%d failed\n", failures);

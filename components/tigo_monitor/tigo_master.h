@@ -22,6 +22,7 @@
 #include "tigo_protocol.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cstdint>
 #include <map>
 #include <set>
@@ -866,7 +867,33 @@ class Queries {
   static const uint32_t INFO_AGAIN_MS = 40 * 60000;
   static const uint32_t CHECK_AFTER_MS = 3 * 60000;  // a read after a write
   static const uint32_t ASLEEP_MS = 30 * 60000;
-  enum Kind { version, tests, info, smrt, mppt, w255, smart_s };
+  static const uint32_t ASK_TRIES = 3;  // an asked text unanswered this often: given up
+  enum Kind { version, tests, info, smrt, mppt, w255, smart_s, asked };
+
+  // A read-shaped text: ^00 and a name, nothing else (no '_', no '#', not
+  // Leave). What the owner may ask one node for on the bench.
+  static bool is_read_text(const std::string &text) {
+    if (text.size() < 5 || text.compare(0, 3, "^00") != 0 || text.back() != '\r') return false;
+    for (size_t i = 3; i + 1 < text.size(); i++)
+      if (!std::isalpha(static_cast<unsigned char>(text[i]))) return false;
+    return text.find("Leave") == std::string::npos;
+  }
+
+  // The owner's one-off read for one node (bench only: the gate's
+  // bench_only, as it isn't one of the five). Sent on the reads' schedule
+  // until the node answers with !<name>; the answer goes to take_asked().
+  bool ask(uint16_t tuid, const std::string &text, uint32_t now_ms) {
+    if (!is_read_text(text)) return false;
+    for (Item &it : pending_)
+      if (it.tuid == tuid && it.kind == asked) return false;  // one at a time
+    pending_.push_back({tuid, asked, now_ms, 0, text});
+    return true;
+  }
+  std::vector<std::pair<uint16_t, std::string>> take_asked() {
+    std::vector<std::pair<uint16_t, std::string>> out;
+    out.swap(asked_answers_);
+    return out;
+  }
 
   Queries(uint32_t now_ms, bool writes) : writes_(writes), last_sent_ms_(now_ms - GAP_MS) {}
 
@@ -902,8 +929,18 @@ class Queries {
     if (best == pending_.size()) return {};
     Item &it = pending_[best];
     Bytes args = {static_cast<uint8_t>(it.tuid >> 8), static_cast<uint8_t>(it.tuid)};
-    const char *text = it.kind == w255 ? QUERY_W255 : it.kind == smart_s ? QUERY_SMART_S : QUERY_READS[it.kind];
+    const char *text = it.kind == w255      ? QUERY_W255
+                       : it.kind == smart_s ? QUERY_SMART_S
+                       : it.kind == asked   ? it.text.c_str()
+                                            : QUERY_READS[it.kind];
     args.insert(args.end(), text, text + std::char_traits<char>::length(text));
+    if (it.kind == asked && it.tries >= ASK_TRIES) {
+      // Given up: likely a text this firmware doesn't know.
+      asked_answers_.push_back({it.tuid, "no answer to " + it.text.substr(0, it.text.size() - 1) + " after " +
+                                             std::to_string(ASK_TRIES) + " tries"});
+      pending_.erase(pending_.begin() + static_cast<long>(best));
+      return {};
+    }
     if (it.kind == w255 || it.kind == smart_s) {
       sent_writes_++;
       pending_.erase(pending_.begin() + static_cast<long>(best));  // once, as the CCA's
@@ -933,6 +970,7 @@ class Queries {
     Kind kind;
     uint32_t next_ms;
     uint32_t tries;
+    std::string text = {};  // an asked one's text
   };
 
   void heard_(uint16_t tuid, uint32_t now_ms) {
@@ -956,6 +994,19 @@ class Queries {
       a = b + 1;
     }
     if (f.empty()) return;
+    // The owner's one-off read: its answer is !<name>.
+    for (size_t k = 0; k < pending_.size(); k++) {
+      Item &it = pending_[k];
+      if (it.tuid != tuid || it.kind != asked) continue;
+      std::string name = "!" + it.text.substr(3, it.text.size() - 4);
+      if (f[0] != name) continue;
+      std::string t = text;
+      while (!t.empty() && (t.back() == '\r' || t.back() == '\n' || t.back() == ' ')) t.pop_back();
+      asked_answers_.push_back({tuid, t});
+      pending_.erase(pending_.begin() + static_cast<long>(k));
+      answers_++;
+      return;
+    }
     Kind k;
     if (f[0] == "Mnode") k = version;
     else if (f[0] == "!Tests") k = tests;
@@ -999,6 +1050,7 @@ class Queries {
   uint32_t last_sent_ms_;
   std::vector<Item> pending_;
   std::map<uint16_t, Setup> setups_;
+  std::vector<std::pair<uint16_t, std::string>> asked_answers_;
   std::map<uint16_t, uint32_t> heard_ms_;
   std::set<uint16_t> smart_written_;  // nodes sent the Smrt write this session
   uint32_t sent_reads_ = 0, sent_writes_ = 0, answers_ = 0;

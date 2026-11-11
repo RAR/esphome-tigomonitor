@@ -307,6 +307,21 @@ bool MasterCore::request_herd(std::string &why) {
   return true;
 }
 
+bool MasterCore::request_ask(uint16_t node, const std::string &text, std::string &why) {
+  std::lock_guard<std::mutex> lock(mu_);
+  if (!bench_)
+    why = "asking an optimizer a one-off question is for the bench only (master_bench)";
+  else if (!queries_on_)
+    why = "queries to optimizers are off";
+  else if (!master::Queries::is_read_text(text))
+    why = "only a read: ^00 and a name";
+  else
+    why.clear();
+  if (!why.empty()) return false;
+  ask_wanted_.push_back({node, text});
+  return true;
+}
+
 bool MasterCore::request_forget_tap(uint16_t id, std::string &why) {
   std::lock_guard<std::mutex> lock(mu_);
   const Tap *t = nullptr;
@@ -998,6 +1013,18 @@ void MasterCore::tick_(uint32_t now_ms) {
     }
     if (forget && !herd_) forget_tap_(forget);
   }
+  {
+    std::vector<std::pair<uint16_t, std::string>> asks;
+    {
+      std::lock_guard<std::mutex> lock(mu_);
+      asks.swap(ask_wanted_);
+    }
+    for (const auto &a : asks)
+      for (auto &t : taps_)
+        if (t->queries && t->queries->ask(a.first, a.second, now_ms))
+          LOGI("bus master: asking optimizer %04X (TAP %04X) %s", a.first, t->id,
+               a.second.substr(0, a.second.size() - 1).c_str());
+  }
   if (startup_ && phase_ != Phase::running) {
     run_startup(now_ms);
     return;
@@ -1198,6 +1225,9 @@ void MasterCore::tick_(uint32_t now_ms) {
   if (ok && t.queries && req.cmd == master::CMD_POLL) {
     uint32_t before = t.queries->answers();
     t.queries->on_poll_reply(reply.payload, now_ms);
+    for (const auto &a : t.queries->take_asked())
+      LOGI(a.second.rfind("no answer", 0) == 0 ? "bus master: optimizer %04X: %s" : "bus master: optimizer %04X answered: %s",
+           a.first, a.second.c_str());
     if (t.queries->answers() != before) {
       std::lock_guard<std::mutex> lock(mu_);
       for (const auto &kv : t.queries->setups()) {

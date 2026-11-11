@@ -508,6 +508,14 @@ int main(int argc, char **argv) {
         block.key = mp::key_from([&rd]() { return static_cast<uint8_t>(rd()); });
         given = block.describe();
         return bus_master->request_provision(tap_mac, block, reset, dry_run, why) ? 200 : 409;
+      },
+      [&](uint16_t node, const std::string &text, std::string &why) {
+        std::lock_guard<std::mutex> lock(master_mu);
+        if (!bus_master) {
+          why = "this monitor isn't running the bus";
+          return 409;
+        }
+        return bus_master->request_ask(node, text, why) ? 200 : 409;
       }});
   if (port < 0 && settings.web_port > 0) port = settings.web_port;
   // Only the default steps aside for another web server; a port someone

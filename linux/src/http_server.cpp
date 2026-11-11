@@ -1796,6 +1796,30 @@ void HttpServer::routes_() {
     else send_json(res, {{"error", why.empty() ? "not running the bus" : why}}, code);
   });
 
+  // Pi-only, bench only: ask one optimizer a read-shaped question, such as
+  // ^00GetOsState, that isn't one of the five the CCA sends. {"addr": "0003",
+  // "text": "GetOsState"}; the answer goes to the log. Behind the web
+  // password; refused unless master_bench is on.
+  svr.Post("/api/master/query", [this](const httplib::Request &req, httplib::Response &res) {
+    if (ctx_.current_settings().web_password.empty()) {
+      send_json(res, {{"error", "set a web password first"}}, 403);
+      return;
+    }
+    json j = json::parse(req.body, nullptr, false);
+    unsigned addr = 0;
+    if (j.is_discarded() || !j.is_object() || !j.contains("addr") || !j["addr"].is_string() || !j.contains("text") ||
+        !j["text"].is_string() || sscanf(j["addr"].get<std::string>().c_str(), "%x", &addr) != 1 || addr < 2 ||
+        addr > 0x7FFF) {
+      send_json(res, {{"error", "expected {\"addr\": \"0003\", \"text\": \"GetOsState\"}"}}, 400);
+      return;
+    }
+    std::string text = "^00" + j["text"].get<std::string>() + "\r";
+    std::string why;
+    int code = ctx_.request_ask ? ctx_.request_ask(static_cast<uint16_t>(addr), text, why) : 409;
+    if (code == 200) send_json(res, {{"asked", true}});
+    else send_json(res, {{"error", why.empty() ? "not running the bus" : why}}, code);
+  });
+
   svr.Post("/api/master/table/stop", [this](const httplib::Request &req, httplib::Response &res) {
     if (ctx_.current_settings().web_password.empty() && !setup_open(ctx_.current_settings(), unix_now_s())) {
       send_json(res, {{"error", "set a web password first"}}, 403);

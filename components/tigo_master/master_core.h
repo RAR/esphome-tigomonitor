@@ -263,6 +263,10 @@ class MasterCore {
   // polled, and the list saved without it. Refused for a TAP still
   // answering, the only TAP, or one a table change is running on; why says so.
   bool request_forget_tap(uint16_t id, std::string &why);
+  // Bench only (master_bench): ask one optimizer a read-shaped text
+  // (^00Name, master::Queries::is_read_text) at the next tick; the answer is
+  // logged. Refused off the bench, without queries, or for any other text.
+  bool request_ask(uint16_t node, const std::string &text, std::string &why);
   // With more than one TAP, one that stopped answering is asked once every
   // LOST_PROBE_MS while the others are polled, and after LOST_MISSES
   // unanswered, once every REMOVED_PROBE_MS.
@@ -522,6 +526,7 @@ class MasterCore {
   TapsSaved taps_saved_;
   bool herd_wanted_ = false;  // under mu_: request_herd's, for the next tick
   uint16_t forget_wanted_ = 0;  // under mu_: request_forget_tap's, for the next tick
+  std::vector<std::pair<uint16_t, std::string>> ask_wanted_;  // under mu_: request_ask's
   void forget_tap_(uint16_t id);
   void start_herd_(const char *why);
   void herd_done_();

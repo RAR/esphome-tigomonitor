@@ -108,6 +108,9 @@ class BusMaster {
   }
   bool request_herd(std::string &why) { return core_.request_herd(why); }
   bool request_forget_tap(uint16_t id, std::string &why) { return core_.request_forget_tap(id, why); }
+  bool request_ask(uint16_t node, const std::string &text, std::string &why) {
+    return core_.request_ask(node, text, why);
+  }
   bool request_provision(const esphome::tigo_monitor::master::Bytes &tap_mac,
                          const esphome::tigo_monitor::master::RadioBlock &block, bool reset, bool dry_run,
                          std::string &why) {

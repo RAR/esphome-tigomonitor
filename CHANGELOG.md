@@ -31,8 +31,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   for a bench rehearsal before a CCA-less Add a TAP. On a bench H1.0007 TAP
   (2026-11-11) the settings it wrote survived a power cycle, and a write
   without the stored read didn't. It writes the 36- or 46-byte form the TAP
-  reads back in, keeping a 46-byte TAP's own extra 10 bytes. An optimizer
-  joining the network it sets up hasn't been seen yet.
+  reads back in, keeping a 46-byte TAP's own extra 10 bytes. A fresh
+  optimizer joined the network it set up, and followed the TAP when it was
+  given a new one. `POST /api/master/query` asks one optimizer a read-only
+  question the CCA never sends, such as `GetPAN`, also on the bench only.
 - **Set up a whole system from one page (Raspberry Pi).** System setup
   gains **Set up a new system**, a checklist from the bus to the layout:
   the bus, the TAP, the optimizers, the layout, string ratings, and a

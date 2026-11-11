@@ -91,6 +91,9 @@ struct HttpContext {
   std::function<int(const esphome::tigo_monitor::master::Bytes &tap_mac, uint16_t channel, uint16_t pan, bool reset,
                     bool dry_run, std::string &why, std::string &given)>
       request_provision;
+  // Bench only: ask one optimizer a read-shaped text (POST /api/master/query);
+  // 200, or 409 with why.
+  std::function<int(uint16_t node, const std::string &text, std::string &why)> request_ask;
 };
 
 // tigomonitord --health-check PORT, the container's HEALTHCHECK: GETs
