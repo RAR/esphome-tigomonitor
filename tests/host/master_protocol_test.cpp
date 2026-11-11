@@ -1304,6 +1304,35 @@ static void test_next_request_housekeeping() {
   CHECK(next_request(window, cursor, seq, 7000).cmd == CMD_POLL);
 }
 
+// After a re-address, the CCA's bring-up reads go before the join window, so
+// its 0D 00 00 is the first tunnel request after the reset (seq 01), as the
+// CCA's is; the window's status and renewal follow.
+static void test_next_request_bring_up_before_the_window() {
+  HousekeepingPlan plan;
+  plan.bring_up_reads = true;
+  plan.session = plan.broadcast = true;
+  plan.session_reset = true;  // PV off around the read, as the roof's housekeeping does
+  Housekeeping hk({}, 0, plan, 1);
+  WindowKeeper window;
+  PollCursor cursor(0);
+  uint8_t seq = 0;
+  std::vector<std::string> got;
+  for (int i = 0; i < 9; i++) {
+    Request r = next_request(window, cursor, seq, 0, &hk);
+    char b[24];
+    if (r.cmd == CMD_TUNNEL) snprintf(b, sizeof(b), "T%02X/%02X", r.payload[3], r.payload[4]);
+    else snprintf(b, sizeof(b), "%04X", r.cmd);
+    got.push_back(b);
+  }
+  // VERSION, 0E02, PV, the 0D read at seq 01, PV, the stored read at 02, the
+  // 0x22; then the window's status.
+  CHECK(got[0] == "000A" && got[1] == "0E02" && got[3] == "T0D/01" && got[5] == "T0D/02");
+  bool window_after = false;
+  for (size_t i = 6; i < got.size(); i++) window_after = window_after || got[i].rfind("T2E/", 0) == 0;
+  CHECK(window_after);
+  CHECK(std::find(got.begin(), got.begin() + 5, std::string("T2E/01")) == got.begin() + 5);
+}
+
 // The PV switch: 0x0B00 00 off, 01 on (the CCA's PV-off updater; the roof's
 // 0x0B00 [01] -> 0x0B01 [01]). Off goes out at once, is retried until the
 // TAP's reply carries it, and no 01 goes out while it is held.
@@ -1606,6 +1635,7 @@ int main() {
   test_discovery_window_counts();
   test_no_renewal_for_an_empty_table();
   test_next_request_housekeeping();
+  test_next_request_bring_up_before_the_window();
   test_bring_up_plan();
   test_walks();
   test_queries();

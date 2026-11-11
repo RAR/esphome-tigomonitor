@@ -107,6 +107,8 @@ class BusMaster {
     core_.set_adopt_taps(on, std::move(saved));
   }
   bool request_herd(std::string &why) { return core_.request_herd(why); }
+  uint8_t seq() const { return core_.seq(); }
+  void set_seq(uint8_t s) { core_.set_seq(s); }
   bool request_forget_tap(uint16_t id, std::string &why) { return core_.request_forget_tap(id, why); }
   bool request_ask(uint16_t node, const std::string &text, std::string &why) {
     return core_.request_ask(node, text, why);

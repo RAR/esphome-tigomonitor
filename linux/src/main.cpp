@@ -192,6 +192,24 @@ int main(int argc, char **argv) {
   pv.load();
   // And the discovery switch, for the same reason.
   DiscoveryStore discovery(state_dir + "/discovery.json");
+  // The tunnel sequence, carried from one master to the next and across
+  // restarts: the TAP answers its config reads with status 1 once our count
+  // has broken (bench, 2026-11-11), as the CCA's never does.
+  const std::string seq_path = state_dir + "/tunnel-seq";
+  uint8_t carried_seq = 0;
+  if (FILE *f = fopen(seq_path.c_str(), "r")) {
+    unsigned v = 0;
+    if (fscanf(f, "%u", &v) == 1 && v < 0xFF) carried_seq = static_cast<uint8_t>(v);
+    fclose(f);
+  }
+  auto save_seq = [&](uint8_t s) {
+    std::string tmp = seq_path + ".tmp";
+    if (FILE *f = fopen(tmp.c_str(), "w")) {
+      fprintf(f, "%u\n", static_cast<unsigned>(s));
+      fclose(f);
+      rename(tmp.c_str(), seq_path.c_str());
+    }
+  };
   discovery.load();
   TableStore table_store(state_dir + "/table-remove.json");
   TapStore tap_store(state_dir + "/taps.json");
@@ -265,6 +283,8 @@ int main(int argc, char **argv) {
       // may land: one taken by the old master would be lost, and the new one
       // would start from the state before it. The requests take this too.
       std::unique_lock<std::mutex> swap(master_mu);
+      if (bus_master) carried_seq = bus_master->seq();  // the master this one replaces
+      m->set_seq(carried_seq);
       // The TAPs saved by a herd; none, the one at gateway_id. With more
       // than one (saved, or after a herd), each TAP's 0x41s go to the
       // optimizers heard through it.
@@ -326,6 +346,7 @@ int main(int argc, char **argv) {
     }
     {
       std::lock_guard<std::mutex> lock(master_mu);
+      if (bus_master) carried_seq = bus_master->seq();
       bus_master.reset();
     }
     return std::thread([&, dev, baud] {
@@ -493,7 +514,7 @@ int main(int argc, char **argv) {
         return bus_master->request_forget_tap(id, why) ? 200 : 409;
       },
       [&](const esphome::tigo_monitor::master::Bytes &tap_mac, uint16_t channel, uint16_t pan, uint32_t generation,
-          bool reset, bool dry_run, std::string &why, std::string &given) {
+          bool identify, bool reset, bool dry_run, std::string &why, std::string &given) {
         namespace mp = esphome::tigo_monitor::master;
         std::lock_guard<std::mutex> lock(master_mu);
         if (!bus_master) {
@@ -507,6 +528,7 @@ int main(int argc, char **argv) {
         // own plus one, read by the job just before it writes.
         mp::map_for_profile(12, block.map, generation <= 0xFFFFFF ? generation : 0);
         block.next_generation = generation > 0xFFFFFF;
+        block.skip_identify = !identify;
         std::random_device rd;
         block.key = mp::key_from([&rd]() { return static_cast<uint8_t>(rd()); });
         given = block.describe();
@@ -786,8 +808,10 @@ int main(int argc, char **argv) {
   history_worker.join();
   {
     std::lock_guard<std::mutex> lock(master_mu);
+    if (bus_master) carried_seq = bus_master->seq();
     bus_master.reset();
   }
+  save_seq(carried_seq);
   redirect.stop();
   web.stop();
   cca.stop();

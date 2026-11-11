@@ -175,7 +175,7 @@ static void run(ProvisionJob &job, FakeTap &tap) {
   uint8_t seq = 0;
   for (int i = 0; i < 20 && !job.finished(); i++) {
     Request r = job.due(0, seq);
-    if (!r.cmd) break;
+    if (!r.cmd) continue;  // a turn left to the master
     CHECK(r.provision && r.table_edit);
     Frame reply;
     bool ok = tap.answer(r, reply);
@@ -233,6 +233,26 @@ static void test_provision_generation() {
     run(job, tap);
     CHECK(job.ok() && tap.ram.map[5] == 0xFF && tap.ram.map[6] == 0x84 && tap.ram.map[7] == 0x01);
   }
+}
+
+// After its read, the job gives the master one turn (its poll, as the CCA
+// sent between its read and its write) before writing.
+static void test_provision_gives_a_turn_before_writing() {
+  FakeTap tap;
+  ProvisionJob job(TAP_MAC, made_up(), false, false);
+  uint8_t seq = 0;
+  std::vector<int> due_cmds;  // 0: a turn left to the master
+  for (int i = 0; i < 20 && !job.finished(); i++) {
+    Request r = job.due(0, seq);
+    due_cmds.push_back(r.cmd ? (r.cmd == CMD_TUNNEL ? r.payload[5] : 0x100) : 0);
+    if (!r.cmd) continue;
+    Frame reply;
+    bool ok = tap.answer(r, reply);
+    job.on_reply(r, ok, reply, 0);
+  }
+  CHECK(job.ok());
+  // GET_MAC, the read (00), a turn left (0), the write (01), the save, the check.
+  CHECK(due_cmds.size() >= 4 && due_cmds[0] == 0x100 && due_cmds[1] == 0x00 && due_cmds[2] == 0 && due_cmds[3] == 0x01);
 }
 
 static void test_provision_with_reset() {
@@ -368,6 +388,7 @@ int main() {
   test_provision();
   test_provision_with_reset();
   test_provision_generation();
+  test_provision_gives_a_turn_before_writing();
   test_provision_stops();
   test_dry_run();
   if (failures) {

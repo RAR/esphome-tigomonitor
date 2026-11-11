@@ -263,6 +263,10 @@ class MasterCore {
   // polled, and the list saved without it. Refused for a TAP still
   // answering, the only TAP, or one a table change is running on; why says so.
   bool request_forget_tap(uint16_t id, std::string &why);
+  // The tunnel sequence: a master replacing another (a settings save, a
+  // daemon restart) carries it on, so the TAP sees no break in its count.
+  uint8_t seq() const { return seq_; }
+  void set_seq(uint8_t s) { seq_ = s; }
   // Bench only (master_bench): ask one optimizer a read-shaped text
   // (^00Name, master::Queries::is_read_text) at the next tick; the answer is
   // logged. Refused off the bench, without queries, or for any other text.

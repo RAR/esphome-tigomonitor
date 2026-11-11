@@ -1516,6 +1516,9 @@ void MasterCore::run_startup(uint32_t now_ms) {
       set_fault(Fault::refused, "refused a herd command " + std::to_string(h.cmd));
       return;
     }
+    // After a reset the CCA numbers its tunnel requests from 01 again; the
+    // bench H1 answers every 0x0D with status 1 once that count has broken.
+    if (h.cmd == master::CMD_RESET) seq_ = 0;
     std::vector<Frame> all;
     if (h.collect) {
       transact(h.dest, h.cmd, h.payload, r, h.wait_ms ? h.wait_ms : REPLY_TIMEOUT_MS, &all);
@@ -1581,6 +1584,7 @@ void MasterCore::run_startup(uint32_t now_ms) {
     set_fault(Fault::refused, "refused a discovery command " + std::to_string(d.cmd));
     return;
   }
+  if (d.cmd == master::CMD_RESET) seq_ = 0;  // the tunnel count starts at 01 again, as the CCA's
   if (transact(d.dest, d.cmd, d.payload, r, d.wait_ms ? d.wait_ms : REPLY_TIMEOUT_MS)) discovery_->on_reply(r);
 }
 

@@ -77,6 +77,9 @@ struct RadioBlock {
   // Not sent: ProvisionJob sets map bytes 5-7 to the TAP's own generation
   // plus one (wrapping to 1, never 0), read just before it writes.
   bool next_generation = false;
+  // Not sent: start at the read, without asking the TAP for its MAC first
+  // (bench: does a lone 003A to a running TAP set the 0x0E status to 1?).
+  bool skip_identify = false;
 
   Bytes encode() const {
     Bytes b;
@@ -213,10 +216,18 @@ class ProvisionJob : public TableJob {
   static const uint32_t RESET_WAIT_MS = 2000;
 
   ProvisionJob(const Bytes &tap_mac, const RadioBlock &block, bool reset, bool dry_run)
-      : TableJob(tap_mac, dry_run), block_(block), reset_(reset) {}
+      : TableJob(tap_mac, dry_run), block_(block), reset_(reset) {
+    if (block.skip_identify) step_ = Step::read_before;
+  }
 
   Request due(uint32_t, uint8_t &seq) override {
     if (finished() || waiting_) return {};
+    // One turn to the master between the read and the write: its poll, as
+    // the CCA sent (bench, 2026-11-11: does the write's status follow it?).
+    if (turn_) {
+      turn_ = false;
+      return {};
+    }
     switch (step_) {
       case Step::identify: {
         waiting_ = true;
@@ -283,6 +294,7 @@ class ProvisionJob : public TableJob {
         // of the 46-byte form stay what the TAP has.
         block_.wide = now.wide;
         block_.extra = now.extra;
+        turn_ = true;
         if (block_.next_generation) {
           uint32_t g = (static_cast<uint32_t>(now.map[5]) << 16 | now.map[6] << 8 | now.map[7]) + 1;
           if (g > 0xFFFFFF) g = 1;
@@ -370,6 +382,7 @@ class ProvisionJob : public TableJob {
   RadioBlock block_;
   bool reset_;
   int write_status_ = 0;
+  bool turn_ = false;  // a turn left to the master before the write
   Step step_ = Step::identify;
   RadioBlock before_block_;
   bool had_before_ = false;

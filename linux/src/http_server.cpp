@@ -1790,11 +1790,11 @@ void HttpServer::routes_() {
       send_json(res, {{"error", shape}}, 400);
       return;
     }
-    bool reset = j.value("reset", false), dry = j.value("dry_run", true);
+    bool reset = j.value("reset", false), dry = j.value("dry_run", true), identify = j.value("identify", true);
     std::string why, given;
     int code = ctx_.request_provision
                    ? ctx_.request_provision(mac, static_cast<uint16_t>(channel), static_cast<uint16_t>(pan), generation,
-                                            reset, dry, why, given)
+                                            identify, reset, dry, why, given)
                    : 409;
     if (code == 200) send_json(res, {{"started", true}, {"dry_run", dry}, {"reset", reset}, {"given", given}});
     else send_json(res, {{"error", why.empty() ? "not running the bus" : why}}, code);

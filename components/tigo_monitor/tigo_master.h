@@ -639,6 +639,10 @@ class Housekeeping {
   // the opening's 01 become 00, and after a bring-up's 00 the 01 is dropped.
   void set_pv(const PvSwitch *pv) { pv_ = pv; }
 
+  // A bring-up's opening still to go: the CCA sends it before anything about
+  // the join window, so its 0D read is the first tunnel after the reset.
+  bool bring_up_pending() const { return plan_.bring_up_reads && opening_next_ < opening_.size(); }
+
   Request due(uint32_t now_ms, uint8_t &seq) {
     while (opening_next_ < opening_.size()) {
       Item it = opening_[opening_next_++];
@@ -1074,6 +1078,11 @@ inline Request next_request(WindowKeeper &window, const PollCursor &cursor, uint
   // request's delay is nothing to a 900 s window.
   if (pv) {
     Request r = pv->due(now_ms);
+    if (r.cmd) return r;
+  }
+  // After a re-address, the CCA's bring-up reads come before the window.
+  if (housekeeping && housekeeping->bring_up_pending()) {
+    Request r = housekeeping->due(now_ms, seq);
     if (r.cmd) return r;
   }
   WindowAction a = window.due(now_ms);
