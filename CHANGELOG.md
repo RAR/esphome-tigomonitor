@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Set up a new system on one page (Raspberry Pi and other Linux).**
+  System setup's checklist now does the work in place:
+  - choosing the serial port and bus role;
+  - letting optimizers join again;
+  - starting the layout from how many inverters, MPPTs and strings you have;
+  - typing each string's panel rating;
+  - setting the password.
+
+  Its links to other pages are larger cards. A new install has a day of
+  setup mode, in which System setup's changes to the bus need no password,
+  with a banner on every page until one is set. PV off always needs the
+  password, and an install that already had a settings file isn't affected.
 - **Give a spare TAP its radio settings, on the bench (Raspberry Pi,
   experimental).** `POST /api/master/taps/provision` writes a TAP's channel,
   network ID and key the way a CCA sets up a new TAP, then reads its stored
@@ -108,6 +120,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The web pages say TigoMonitor, not "the Pi" (Raspberry Pi and other
+  Linux).** It runs on any Linux machine, so messages such as "This Pi is not
+  running the bus" now read "This TigoMonitor is not running the bus". The
+  serial port choice still says "Raspberry Pi UART", since that's the
+  hardware. Two notes in System setup also used the old name of the switch
+  now called **Allow changes to the TAPs**.
 - **Running the bus is one choice now, with one switch (Raspberry Pi).**
   Bringing a TAP up, the housekeeping, the optimizer queries and the two
   writes they call for, the TAP's radio read and opening the join window only

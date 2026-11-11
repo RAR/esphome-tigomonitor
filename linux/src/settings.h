@@ -71,6 +71,11 @@ struct Settings {
   // ESP32. An empty password leaves it open to the LAN, the default there too.
   std::string web_username = "admin";
   std::string web_password;
+  // Setup mode: until this time (unix seconds), with no web password, System
+  // setup's changes to the bus need none, so a new system is set up first
+  // and locked last. Set once, a day ahead, when the daemon first starts
+  // with no settings.json; 0 on an install that had one.
+  int64_t setup_open_until = 0;
   // HTTPS: a PEM certificate (with its chain, as fullchain.pem) and its
   // key. Both empty: plain HTTP.
   std::string tls_cert;
@@ -103,6 +108,8 @@ inline bool standby_takeover_ok(int s) { return s >= 2 && s <= 60; }
 inline bool gateway_id_ok(int id) { return id >= 1 && id <= 0x7FFE && id != 0x1234 && id != 0x1235; }
 
 Settings load_settings(const std::string &path);
+// Whether setup mode is open now: no password, and before its deadline.
+bool setup_open(const Settings &s, int64_t now_unix);
 // a and b differ in nothing but the page switches above, which only the web
 // UI reads: applying them needs nothing restarted or reconnected.
 bool differ_only_in_pages(const Settings &a, const Settings &b);

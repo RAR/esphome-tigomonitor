@@ -137,7 +137,15 @@ int main(int argc, char **argv) {
 
   ::mkdir(state_dir.c_str(), 0755);
   const std::string settings_path = state_dir + "/settings.json";
+  struct stat settings_stat;
+  const bool first_start = ::stat(settings_path.c_str(), &settings_stat) != 0;
   Settings settings = load_settings(settings_path);
+  // A new install: a day of setup mode (settings.h), saved at once so a
+  // restart doesn't start the day again.
+  if (first_start) {
+    settings.setup_open_until = static_cast<int64_t>(::time(nullptr)) + 24 * 3600;
+    if (save_settings(settings_path, settings)) LOGI("settings: a new install; System setup needs no password for a day");
+  }
   if (settings.device_id.empty()) settings.device_id = hostname();
   if (!serial_override.empty()) settings.serial_port = serial_override;
   // As the Docker compose file with certbot sets them: the certificate
