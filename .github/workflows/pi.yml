@@ -75,6 +75,8 @@ jobs:
         run: docker run --rm -v "$PWD":/src -w /src tigod-dev linux/scripts/pv-e2e.sh
       - name: Setup mode, a new install's first day without a password
         run: docker run --rm -v "$PWD":/src -w /src tigod-dev linux/scripts/setup-e2e.sh
+      - name: Adding and removing optimizers in the TAP's table, against a mock TAP
+        run: docker run --rm -v "$PWD":/src -w /src tigod-dev linux/scripts/table-e2e.sh
       - name: A new optimizer heard, against a synthetic bus
         run: docker run --rm -v "$PWD":/src -w /src tigod-dev linux/scripts/new-optimizer-e2e.sh
       - name: The mesh map's link counts, against a synthetic bus
