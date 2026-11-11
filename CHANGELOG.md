@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **System setup works with the browser's Back button (Raspberry Pi and
+  other Linux).** Each step of a task is its own page in the browser's
+  history, so Back goes to the step before and then to the list of tasks,
+  and Forward returns. Back doesn't step into a change that's being sent;
+  it returns to the list, as the page's own Back does. Once every step of
+  Set up a new system is done, its card rolls up to one line that says the
+  system is set up, with Review to open it again.
 - **Set up a new system on one page (Raspberry Pi and other Linux).**
   System setup's checklist now does the work in place:
   - choosing the serial port and bus role;

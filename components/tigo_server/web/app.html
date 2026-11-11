@@ -549,6 +549,7 @@
   table.nodes .num { text-align: right; }
   table.nodes:not(.with-fw) .fw { display: none; }
   .devices-head { margin: 4px 0 10px; color: var(--text-dim); }
+  .devices-note { font-size: 13px; line-height: 1.5; color: var(--text-dim); max-width: 75ch; margin: -2px 0 12px; }
   #devices-taps .table-wrap { margin-bottom: 22px; }
   table.nodes td strong { color: var(--text); }
 
@@ -698,6 +699,13 @@
   .setup-start .steps span { flex: 1; height: 6px; border-radius: 3px; background: var(--warn); }
   .setup-start .steps span.ok { background: var(--good); }
   .setup-start .go { padding: 10px 16px; border-radius: 8px; background: var(--task); color: #1c1300; font-weight: 600; font-size: 13px; }
+  /* Every step done: rolled up to one line that says so. */
+  .setup-start.done { flex-wrap: nowrap; gap: 14px; padding: 12px 16px; margin-bottom: 18px; border-top: 1px solid var(--border); }
+  .setup-start.done:hover, .setup-start.done:focus-visible { border-color: var(--good); }
+  .setup-start.done .ico { width: 32px; height: 32px; flex: none; border-radius: 50%; display: grid; place-items: center; background: color-mix(in srgb, var(--good) 15%, transparent); }
+  .setup-start.done .in { flex: 1 1 auto; gap: 2px; min-width: 0; }
+  .setup-start.done strong { font-size: 14px; }
+  .setup-start.done .go { flex: none; white-space: nowrap; padding: 6px 12px; background: transparent; color: var(--text-dim); border: 1px solid var(--border); font-weight: 500; }
   .setup-state { display: inline-block; padding: 3px 9px; border-radius: 999px; font-size: 11px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; vertical-align: middle; margin-left: 10px; }
   .setup-state.ok { color: var(--good); background: color-mix(in srgb, var(--good) 15%, transparent); }
   .setup-state.todo { color: var(--warn); background: color-mix(in srgb, var(--warn) 15%, transparent); }
@@ -1564,7 +1572,7 @@
              network's key reports through the TAP whatever its table says. -->
         <div id="devices-strays" style="display:none">
           <div class="section-title devices-head">Heard, not on the TAP's list</div>
-          <p class="hint">These optimizers report through the TAP, but the TAP's table doesn't list them, or hasn't for a day: a spare that was on this system before, or one from a neighbour's. They're kept off the Dashboard and the mesh map. Taking one off the TAP's table doesn't stop it reporting; only unplugging it, or moving it out of range, does. Forget clears it from this list until it next reports.</p>
+          <p class="devices-note">These report through the TAP, but its table doesn't list them (or hasn't for a day): usually a spare that was once on this system, or a neighbour's. They're kept off the Dashboard and the mesh map. Removing one from the TAP's table doesn't stop it reporting; unplug it or move it out of range. Forget hides it until it next reports.</p>
           <div class="table-wrap">
             <table class="nodes">
               <thead><tr><th>Label</th><th>Addr</th><th>Last heard</th><th></th></tr></thead>
@@ -2905,6 +2913,10 @@
   let mpptNames = {};
   const mpptName = label => (label && mpptNames[label]) || label;
 
+  // The Raspberry Pi build answers /api/status with platform: 'linux'; the
+  // ESP32 omits it. Declared before the Dashboard, whose refresh reads it.
+  let PLATFORM = 'esp32';
+
   async function refreshDashboard() {
     if (!document.getElementById('view-dashboard').classList.contains('active')) {
       // Page hidden — don't pay for the fetches.
@@ -2974,12 +2986,10 @@
       document.getElementById('dash-meta').textContent = `refresh error: ${e.message}`;
     }
   }
-  refreshDashboard();
   setInterval(refreshDashboard, 5000);
 
-  // The Raspberry Pi build answers /api/status with platform: 'linux'; the
-  // ESP32 omits it. Swap the ESP32-only Settings tabs for the Pi's.
-  let PLATFORM = 'esp32';
+  // Once the platform is known (below), the Pi's and the ESP32's pages
+  // differ: swap the ESP32-only Settings tabs for the Pi's.
   const platformReady = apiFetch('/api/status').then(r => r.ok ? r.json() : {}).then(s => {
     if (s.platform !== 'linux') return;
     PLATFORM = 'linux';
@@ -2999,6 +3009,9 @@
     restart.textContent = 'Restart service';
     refreshSettings();
   }).catch(() => {});
+  // The first refresh, as soon as the platform is known: on the Pi it leaves
+  // out the optimizers the TAP doesn't list, which need /api/nodes.
+  platformReady.finally(refreshDashboard);
 
   // ===== Panel detail modal =====
   // Click a heat tile → modal with live readings + per-panel power history,
@@ -4273,7 +4286,44 @@
     return min < 1 ? 'just now' : min < 60 ? `${min} min ago` : `${Math.floor(min / 60)} h ago`;
   }
 
+  // The browser's Back and Forward step through a task: each step it moves
+  // to is a history entry of its own, all under #setup. setupHist holds each
+  // entry's task and step; entry 0 is the list of tasks.
+  const setupHist = [null];
+  let setupNavUser = false;
+  const setupKey = f => f ? `${f.task}:${f.step}` : 'home';
+  const setupSnap = f => f ? JSON.parse(JSON.stringify(f)) : null;
+  function setupSync() {
+    if (window.location.hash !== '#setup') return;
+    const st = history.state || {}, i = Number.isInteger(st.setupIdx) ? st.setupIdx : 0, key = setupKey(setup.flow);
+    const user = setupNavUser;
+    setupNavUser = false;
+    if (key === (st.setupKey || 'home')) { setupHist[i] = setupSnap(setup.flow); return; }
+    // Back to a step behind this one (the page's own Back, Finish): go back
+    // to that entry, so the browser's Forward still works after it.
+    for (let j = Math.min(i, setupHist.length) - 1; j >= 0; j--)
+      if (setupKey(setupHist[j]) === key) { setupHist[j] = setupSnap(setup.flow); history.go(j - i); return; }
+    // A step the page moved to by itself (a change finished): this entry.
+    if (!user) { setupHist[i] = setupSnap(setup.flow); history.replaceState({ setupIdx: i, setupKey: key }, '', '#setup'); return; }
+    setupHist.length = i + 1;
+    setupHist.push(setupSnap(setup.flow));
+    history.pushState({ setupIdx: i + 1, setupKey: key }, '', '#setup');
+  }
+  window.addEventListener('popstate', ev => {
+    if (window.location.hash !== '#setup') return;
+    const st = ev.state || {}, i = Number.isInteger(st.setupIdx) ? st.setupIdx : 0, cur = setup.flow;
+    let f = i < setupHist.length ? setupSnap(setupHist[i]) : null;
+    if (setupKey(f) === setupKey(cur)) return;
+    // A change being sent or waited on isn't stepped back into or replayed:
+    // the list of tasks, as the page's own Back does.
+    if (f && (f.step === 'do' || f.step === 'wait')) f = null;
+    if (cur && (cur.step === 'do' || cur.step === 'wait') && f && f.task === cur.task) f = null;
+    setup.flow = f;
+    refreshSetup(true);
+  });
+
   function renderSetup() {
+    setupSync();
     const root = document.getElementById('setup-root');
     const d = setup.data;
     if (!d) { root.innerHTML = '<p class="setup-lede">Loading…</p>'; return; }
@@ -4287,11 +4337,15 @@
     // "Set up a new system": its steps as a bar, done or not, and the next to do.
     const checks = setupChecks(d), keys = SETUP_STEPS.system.filter(k => k !== 'done');
     const left = keys.filter(k => !checks[k].ok);
-    html += `<button type="button" class="setup-start" data-task="system" data-setup-start="system"><span class="in"><strong>Set up a new system</strong>
+    if (!left.length) html += `<button type="button" class="setup-start done" data-task="system" data-setup-start="system">
+      <span class="ico">${setupSvg('<path d="M5 12l4 4 10-10"/>', 'var(--good)', 18)}</span>
+      <span class="in"><strong>Your system is set up</strong><span>All ${keys.length} steps of Set up a new system are done.</span></span>
+      <span class="go">Review →</span></button>`;
+    else html += `<button type="button" class="setup-start" data-task="system" data-setup-start="system"><span class="in"><strong>Set up a new system</strong>
       <span>Everything from the bus to the layout, in one place. Steps that are already done tick themselves off.</span>
       <span class="steps" aria-hidden="true">${keys.map(k => `<span class="${checks[k].ok ? 'ok' : ''}"></span>`).join('')}</span>
       <span>${keys.length - left.length} of ${keys.length} done${left.length ? ` · next: ${SETUP_STEP_NAMES[left[0]]}` : ''}</span></span>
-      <span class="go">${left.length === keys.length ? 'Start' : left.length ? 'Continue' : 'Review'} →</span></button>`;
+      <span class="go">${left.length === keys.length ? 'Start' : 'Continue'} →</span></button>`;
     if (!setupRunning(m))
       html += '<div class="setup-note info">This TigoMonitor is not running the bus, so it cannot change the TAP\'s optimizer list. To make changes, set its bus role in Settings → Bus.</div>';
     else if (!t.writes)
@@ -4783,6 +4837,7 @@
     const b = ev.target.closest('button');
     if (!b || b.disabled) return;
     const f = setup.flow;
+    setupNavUser = true;
     if (b.hasAttribute('data-setup-home')) {
       setup.flow = null;
       return refreshSetup(true);
