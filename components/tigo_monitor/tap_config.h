@@ -1,6 +1,6 @@
 #pragma once
 
-// A TAP's radio settings, and giving a spare TAP its own on the bench.
+// A TAP's radio settings, and giving a new TAP its own (Add a TAP's step).
 //
 // The block is what a CCA writes when it sets up a TAP (the 2026-11-06
 // two-TAP capture, and the owner's analysis of the CCA's and the TAP's
@@ -31,12 +31,18 @@
 // always followed by that read. Its reply comes from RAM, so only a power
 // cycle shows what was saved.
 //
-// ProvisionJob does that to one TAP, named by its MAC, and only on the
-// bench: classify_request() puts the write in Allow::provision, which
-// may_send() allows only for a provisioning request with master_bench on.
-// No PV bracket, no 0x000E / 0x0E02, no table erase: the analysis found the
-// TAP needs none of them, and the bench TAP is alone on its bus. A reset
-// addressed to that TAP alone is sent only when asked for.
+// ProvisionJob does that to one TAP, named by its MAC (it asks the TAP at
+// that address for its MAC first and stops unless it matches):
+// classify_request() puts the write in Allow::provision, which may_send()
+// allows only for a provisioning request, with "Allow changes to the TAPs"
+// (master_table_writes) or master_bench on. No PV bracket, no 0x000E /
+// 0x0E02, no table erase: the analysis found the TAP needs none of them, and
+// the bench showed it. A reset addressed to that TAP alone is sent only when
+// asked for; Add a TAP's step never asks.
+//
+// The 0x0E reply's status byte is the TAP's join-window state (1 while a
+// window is open; bench, 2026-11-11), not a verdict on the write: the job
+// takes 0, or 1 with an echo of exactly what was sent.
 //
 // The key never leaves this file in the clear: dry runs, messages and logs
 // show it as hidden.
@@ -307,9 +313,9 @@ class ProvisionJob : public TableJob {
       case Step::write:
         ack_ = status;
         if (!got) return fail_("no echo of the write; read the TAP before trying again");
-        // 0, or 1 with an echo of exactly what was sent: the bench H1.0007
-        // answers a whole 36-byte write with 1 and applies it (2026-11-11);
-        // what 1 means isn't known yet. Anything else stops here.
+        // 0, or 1 with an echo of exactly what was sent: 1 is the TAP's join
+        // window being open (bench, 2026-11-11), and the write still applies.
+        // Anything else stops here.
         if (status != 0 && status != 1)
           return fail_("the TAP answered the write with status " + std::to_string(status));
         if (now != block_) return fail_("the write's echo differs from what was sent");

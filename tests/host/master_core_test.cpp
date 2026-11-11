@@ -1219,6 +1219,34 @@ static void test_the_tunnel_seq_starts_at_01_after_a_reset() {
   core.close();
 }
 
+// Giving a TAP its radio settings: on the bench, or on a live system with
+// "Allow changes to the TAPs" (master_table_writes) on, as Add a TAP's step
+// does; refused with neither.
+static void test_radio_settings_need_the_bench_or_table_writes() {
+  mp::RadioBlock b;
+  b.channel = 21;
+  b.pan = 0x4C3D;
+  mp::map_for_profile(12, b.map);
+  const mp::Bytes mac = multi_mac(1);
+  for (int mode = 0; mode < 3; mode++) {
+    MultiTap bus;
+    bus.taps = {{0x1201, 1}};
+    MasterCore core(&bus.port, [](int, const std::string &) {}, nullptr, nullptr, 0x1201, /*bench=*/mode == 1, true);
+    core.set_taps({{0x1201, mac}});
+    if (mode == 2) core.set_table_writes(true);
+    CHECK(core.open());
+    run_for(core, 0, 20000, 50);
+    std::string why;
+    // A check (a dry run) only reads: allowed either way, as other checks are.
+    CHECK(core.request_provision(mac, b, false, true, why));
+    run_for(core, 20000, 30000, 50);
+    bool ok = core.request_provision(mac, b, false, false, why);
+    if (mode == 0) CHECK(!ok && why.find("Allow changes to the TAPs") != std::string::npos);
+    else CHECK(ok);
+    core.close();
+  }
+}
+
 // A master replacing another (a settings save) carries on its tunnel count,
 // so the TAP sees no break.
 static void test_the_tunnel_seq_carries_over() {
@@ -1362,6 +1390,7 @@ int main() {
   test_the_owners_herd_keeps_known_ids();
   test_the_tunnel_seq_starts_at_01_after_a_reset();
   test_the_tunnel_seq_carries_over();
+  test_radio_settings_need_the_bench_or_table_writes();
   test_a_herd_keeps_a_missing_tap();
   test_two_taps_are_polled_in_turn();
   test_no_0x41_with_more_than_one_tap();

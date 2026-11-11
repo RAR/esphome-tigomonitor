@@ -35,15 +35,15 @@ finished() {
 }
 tap=0 daemon=0
 trap 'kill $daemon $tap 2>/dev/null || true' EXIT
-start() {  # start NAME PORT BENCH
+start() {  # start NAME PORT BENCH [MOCK_ARGS] [MORE_SETTINGS]
   name=$1 port=$2 bench=$3
   mkdir -p "$out/$name"
   # shellcheck disable=SC2086
   python3 linux/tools/mock_tap.py "$out/$name.tty" --window 600 --nodes 2 --panels 2 --stats "$out/$name.json" ${4:-} &
   tap=$!
   sleep 0.5
-  printf '{"bus_role": "master", "master_bench": %s, "serial_port": "%s", "gateway_id": 4609, "web_port": %s, "web_password": "pw"}\n' \
-    "$bench" "$PWD/$out/$name.tty" "$port" > "$out/$name/settings.json"
+  printf '{"bus_role": "master", "master_bench": %s, "serial_port": "%s", "gateway_id": 4609, "web_port": %s, "web_password": "pw"%s}\n' \
+    "$bench" "$PWD/$out/$name.tty" "$port" "${5:-}" > "$out/$name/settings.json"
   build/linux/tigomonitord --state-dir "$out/$name" --web-dir components/tigo_server/web 2>> "$out/$name.log" &
   daemon=$!
   for _ in $(seq 40); do [ "$(code GET "$port" /api/health)" != 000 ] 2>/dev/null && break; sleep 0.25; done
@@ -54,7 +54,8 @@ MAC=04C05B3000A1B2C3
 
 # --- bench off: refused, nothing sent ---
 start off 18401 false
-expect "refused without master_bench" "$(body POST 18401 /api/master/taps/provision "{\"mac\": \"$MAC\", \"channel\": 20}" | python3 -c "import json,sys; print('bench' in json.load(sys.stdin)['error'])")" True
+expect "a write refused without the bench or Allow changes to the TAPs" "$(body POST 18401 /api/master/taps/provision "{\"mac\": \"$MAC\", \"channel\": 20, \"dry_run\": false}" | python3 -c "import json,sys; print('Allow changes to the TAPs' in json.load(sys.stdin)['error'])")" True
+expect "but a check (it only reads) starts" "$(code POST 18401 /api/master/taps/provision "{\"mac\": \"$MAC\", \"channel\": 20}")" 200
 stop_all
 expect "and wrote nothing" "$(stat "$out/off.json" "len(d['cfg_writes'])")" 0
 
@@ -86,7 +87,7 @@ expect "again, with a reset" "$(code POST 18402 /api/master/taps/provision "{\"m
 finished 18402
 sleep 3
 expect "reset to it alone, no broadcast" "$(stat "$out/on.json" "(d['unicast_resets'], d['resets'])")" "(1, 0)"
-expect "the PAN from its MAC" "$(stat "$out/on.json" "d['cfg_writes'][-1]")" "{'channel': 22, 'pan': 'B2C3'}"
+expect "on channel 22, the PAN from this machine's MAC, not the TAP's" "$(stat "$out/on.json" "(d['cfg_writes'][-1]['channel'], d['cfg_writes'][-1]['pan'] != 'B2C3')")" "(22, True)"
 expect "still polled after the reset" "$(body GET 18402 /api/master | python3 -c "import json,sys; print(json.load(sys.stdin)['taps'][0]['state'])")" running
 # No key anywhere a person sees: the API's answer and the log show it hidden,
 # and the write's 32-hex-digit key never appears.
@@ -103,6 +104,23 @@ finished 18403
 expect "it finished" "$(edit 18403 "(e['ok'], e['step'])")" "(True, 'done')"
 expect "one write, on channel 20, PAN 5A5A" "$(stat "$out/wide.json" "d['cfg_writes']")" "[{'channel': 20, 'pan': '5A5A'}]"
 expect "the TAP's 10 bytes as they were" "$(stat "$out/wide.json" "d['cfg_extra'] == bytes(range(31, 41)).hex()")" True
+stop_all
+
+# --- a live system, as Add a TAP's step: no bench, Allow changes to the TAPs
+# on, and neither channel nor PAN given: chosen two from the TAP's own (1),
+# the PAN from this machine's MAC ---
+start live 18404 false "" ', "master_table_writes": true'
+expect "the step's write starts" "$(code POST 18404 /api/master/taps/provision "{\"mac\": \"$MAC\", \"dry_run\": false}")" 200
+finished 18404
+expect "it finished" "$(edit 18404 "(e['ok'], e['step'])")" "(True, 'done')"
+expect "on a channel two from the one heard" "$(stat "$out/live.json" "[w['channel'] for w in d['cfg_writes']]")" "[11]"
+expect "with a PAN" "$(stat "$out/live.json" "d['cfg_writes'][0]['pan'] not in ('0000', 'FFFF')")" True
+# The step again on the same TAP: its own channel and PAN aren't "in use"
+# by another, so it keeps them rather than hopping.
+expect "the step again starts" "$(code POST 18404 /api/master/taps/provision "{\"mac\": \"$MAC\", \"dry_run\": false}")" 200
+finished 18404
+expect "and keeps the same channel and PAN" "$(stat "$out/live.json" "len(d['cfg_writes']) == 2 and d['cfg_writes'][0] == d['cfg_writes'][1]")" True
+expect "and the PAN stays out of /api/versions" "$(body GET 18404 /api/versions | python3 -c "import json,sys; print(any('pan' in r for r in json.load(sys.stdin).get('radios', [])))")" False
 stop_all
 
 [ $fail = 0 ] && echo "provision e2e passed" || { echo "provision e2e FAILED; see $out/"; exit 1; }

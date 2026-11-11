@@ -302,10 +302,12 @@ inline bool parse_mppt(const std::string &text, MpptSeen &m) {
 // bytes and a status, or 46 and a status on a G8.59)
 // (docs/cca-tap-management.md): byte 1 the 802.15.4 channel, 14 SLT (the
 // signal a node must beat to be admitted), SLm last. The same block holds the
-// PAN and the 16-byte network key; those are never copied out.
+// PAN and the 16-byte network key. The key is never copied out; the PAN is
+// kept so a new TAP isn't given one already in use, and is never shown.
 struct TapRadio {
   uint16_t tap = 0;
   int channel = 0, slt = 0, slm = 0;
+  uint16_t pan = 0;
 };
 
 // A TAP's ID: the MAC it gives in answer to "where are you" (GET_MAC), as
@@ -326,6 +328,7 @@ inline bool parse_gateway_cfg(const Frame &req, const Frame &rep, TapRadio &r) {
   if ((t.data.size() != 37 && t.data.size() != 47) || t.data[0] != 0x00) return false;
   r.tap = rep.dest & 0x7FFF;
   r.channel = t.data[1];
+  r.pan = static_cast<uint16_t>(t.data[2] << 8 | t.data[3]);
   r.slt = t.data[14];
   r.slm = t.data[t.data.size() - 2];
   return true;

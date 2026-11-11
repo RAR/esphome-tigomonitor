@@ -96,6 +96,33 @@ static std::string new_optimizer_note(const Settings &s) {
   return "; master_optimizer_writes is off, so it gets no w255 and may produce nothing until it's on";
 }
 
+// This machine's MAC, from the interface the default route uses: what a new
+// TAP's PAN is made from (a CCA uses its own serial). Empty if none is found.
+static esphome::tigo_monitor::master::Bytes system_mac() {
+  esphome::tigo_monitor::master::Bytes out;
+  FILE *f = fopen("/proc/net/route", "r");
+  if (!f) return out;
+  char line[256], iface[64] = "";
+  while (fgets(line, sizeof(line), f)) {
+    char name[64];
+    unsigned long dest = 1;
+    if (sscanf(line, "%63s %lx", name, &dest) == 2 && dest == 0) {
+      snprintf(iface, sizeof(iface), "%s", name);
+      break;
+    }
+  }
+  fclose(f);
+  if (!iface[0]) return out;
+  std::string path = std::string("/sys/class/net/") + iface + "/address";
+  if (FILE *a = fopen(path.c_str(), "r")) {
+    unsigned b[6];
+    if (fscanf(a, "%x:%x:%x:%x:%x:%x", &b[0], &b[1], &b[2], &b[3], &b[4], &b[5]) == 6)
+      for (unsigned v : b) out.push_back(static_cast<uint8_t>(v));
+    fclose(a);
+  }
+  return out;
+}
+
 int main(int argc, char **argv) {
   std::string state_dir = "/var/lib/tigomonitor";
   std::string web_dir = "/usr/share/tigomonitor/web";
@@ -522,8 +549,24 @@ int main(int argc, char **argv) {
           return 409;
         }
         mp::RadioBlock block;
-        block.channel = channel;
-        block.pan = pan ? pan : mp::pan_for(tap_mac, {});
+        // Not given: a channel at least two from every TAP heard on this bus,
+        // and a PAN from this monitor's own MAC (as a CCA takes one from its
+        // serial), stepped past any in use.
+        // The TAP's own aren't another's: the step again on it keeps them.
+        std::set<uint16_t> channels, pans;
+        uint16_t self = bus_log.tap_of_mac(mp::mac_hex(tap_mac));
+        for (const auto &r : bus_log.radios()) {
+          if (self && r.tap == self) continue;
+          if (r.channel) channels.insert(static_cast<uint16_t>(r.channel));
+          if (r.pan) pans.insert(r.pan);
+        }
+        block.channel = channel ? channel : mp::channel_for(channels);
+        mp::Bytes own = system_mac();
+        block.pan = pan ? pan : mp::pan_for(own.size() >= 2 ? own : tap_mac, pans);
+        if (!block.channel || !block.pan) {
+          why = "no free channel or PAN left";
+          return 409;
+        }
         // 40 optimizers: a bench TAP. A generation not asked for is the TAP's
         // own plus one, read by the job just before it writes.
         mp::map_for_profile(12, block.map, generation <= 0xFFFFFF ? generation : 0);

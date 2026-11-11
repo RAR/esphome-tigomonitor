@@ -67,6 +67,7 @@ void BusLog::load_versions_() {
     r.channel = o.value("channel", 0);
     r.slt = o.value("slt", 0);
     r.slm = o.value("slm", 0);
+    r.pan = static_cast<uint16_t>(std::strtoul(o.value("pan", std::string("0")).c_str(), nullptr, 16));
     if (r.tap) radios_[r.tap] = {r, o.value("heard_unix_ms", int64_t{0})};
   }
   for (const auto &o : j.value("ids", json::array())) {
@@ -237,17 +238,37 @@ bool BusLog::needs_save() const {
   return dirty_ || versions_dirty_;
 }
 
-json BusLog::versions_json() const {
+// The API's: no PAN. The saved file's keeps it (versions_json_(true)).
+json BusLog::versions_json() const { return versions_json_(false); }
+
+std::vector<esphome::tigo_monitor::master::TapRadio> BusLog::radios() const {
+  std::lock_guard<std::mutex> lock(mu_);
+  std::vector<esphome::tigo_monitor::master::TapRadio> out;
+  for (const auto &kv : radios_) out.push_back(kv.second.first);
+  return out;
+}
+
+uint16_t BusLog::tap_of_mac(const std::string &mac) const {
+  std::lock_guard<std::mutex> lock(mu_);
+  for (const auto &kv : tap_ids_)
+    if (kv.second.first == mac) return kv.first;
+  return 0;
+}
+
+json BusLog::versions_json_(bool with_pans) const {
   std::lock_guard<std::mutex> lock(mu_);
   json taps = json::array(), optimizers = json::array();
   for (const auto &kv : versions_.entries()) (kv.second.tap ? taps : optimizers).push_back(entry_json(kv.second));
   json radios = json::array();
-  for (const auto &kv : radios_)
-    radios.push_back({{"tap", hex4(kv.first)},
-                      {"channel", kv.second.first.channel},
-                      {"slt", kv.second.first.slt},
-                      {"slm", kv.second.first.slm},
-                      {"heard_unix_ms", kv.second.second}});
+  for (const auto &kv : radios_) {
+    json r = {{"tap", hex4(kv.first)},
+              {"channel", kv.second.first.channel},
+              {"slt", kv.second.first.slt},
+              {"slm", kv.second.first.slm},
+              {"heard_unix_ms", kv.second.second}};
+    if (with_pans && kv.second.first.pan) r["pan"] = hex4(kv.second.first.pan);
+    radios.push_back(r);
+  }
   json ids = json::array();
   for (const auto &kv : tap_ids_)
     ids.push_back({{"tap", hex4(kv.first)}, {"mac", kv.second.first}, {"heard_unix_ms", kv.second.second}});
@@ -279,7 +300,7 @@ void BusLog::save_if_changed() {
       write = versions_dirty_;
       versions_dirty_ = false;
     }
-    if (write && !write_file_atomic(versions_path_, versions_json().dump(1) + "\n", 0644))
+    if (write && !write_file_atomic(versions_path_, versions_json_(true).dump(1) + "\n", 0644))
       LOGW("bus log: cannot write %s", versions_path_.c_str());
   }
   json j;

@@ -242,8 +242,10 @@ bool MasterCore::request_provision(const master::Bytes &tap_mac, const master::R
   // A TAP polled since start may never have said its MAC; with one TAP, the
   // job asks it first and stops unless it's this one.
   if (!tap && taps_.size() == 1) tap = taps_.front()->id;
-  if (!bench_)
-    why = "giving a TAP its radio settings is for the bench only (master_bench)";
+  // A live system needs "Allow changes to the TAPs", as Add a TAP's step;
+  // the bench needs nothing more.
+  if (!bench_ && !table_writes_on_ && !dry_run)  // a check only reads
+    why = "giving a TAP its radio settings needs Allow changes to the TAPs (Settings > Bus)";
   else if (tap_mac.size() != 8 || !tap)
     why = "no TAP on this bus answered with that MAC";  // with several, it must have said its MAC already
   else if (!master::is_radio_block_ok(block.encode()))
@@ -1193,7 +1195,7 @@ void MasterCore::tick_(uint32_t now_ms) {
   }
   if (!req.cmd) return;  // nothing due: a lost TAP's window keeper waiting out a backoff
   if (!master::may_send(req.cmd, req.payload, bench_, bring_up, writes_on_, t.pv && t.pv->off(),
-                        req.table_edit && table_writes_on_, req.provision && bench_)) {
+                        req.table_edit && table_writes_on_, req.provision && (bench_ || table_writes_on_))) {
     set_fault(Fault::refused, "refused to send command " + std::to_string(req.cmd));
     return;
   }

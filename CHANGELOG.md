@@ -28,20 +28,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   setup mode, in which System setup's changes to the bus need no password,
   with a banner on every page until one is set. PV off always needs the
   password, and an install that already had a settings file isn't affected.
-- **Give a spare TAP its radio settings, on the bench (Raspberry Pi,
-  experimental).** `POST /api/master/taps/provision` writes a TAP's channel,
-  network ID and key the way a CCA sets up a new TAP, then reads its stored
-  copy, which is what makes the TAP save it. It does nothing unless
-  `master_bench` is on. It first asks the TAP for its MAC and stops unless
-  that's the one named, and it does a dry run unless told otherwise. The key
-  never appears in its answers or the log. There's no page for it yet: it's
-  for a bench rehearsal before a CCA-less Add a TAP. On a bench H1.0007 TAP
-  (2026-11-11) the settings it wrote survived a power cycle, and a write
-  without the stored read didn't. It writes the 36- or 46-byte form the TAP
-  reads back in, keeping a 46-byte TAP's own extra 10 bytes. A fresh
-  optimizer joined the network it set up, and followed the TAP when it was
-  given a new one. `POST /api/master/query` asks one optimizer a read-only
-  question the CCA never sends, such as `GetPAN`, also on the bench only.
+- **Add a TAP without a CCA (Raspberry Pi and other Linux).** System
+  setup's Add a TAP gives the new TAP its radio settings itself, in a new
+  step after Look for TAPs: a channel at least two from the other TAPs on
+  the bus, a network ID made from this TigoMonitor's own, and a new key,
+  which the TAP then saves. A check (it only reads) shows the channel and
+  network ID first; the key is never shown. Giving the settings needs
+  **Allow changes to the TAPs**. The CCA step is gone. On a bench TAP
+  (H1.0007, 2026-11-11) the settings survived a power cycle, and a fresh
+  optimizer joined the network and followed the TAP to a new one. Behind
+  it is `POST /api/master/taps/provision`, which asks the TAP for its MAC
+  first and writes the block size the TAP reads back in.
+- **Ask one optimizer a read-only question, on the bench.**
+  `POST /api/master/query` sends a question the CCA never sends, such as
+  `GetPAN`, with `master_bench` on only.
 - **Set up a whole system from one page (Raspberry Pi).** System setup
   gains **Set up a new system**, a checklist from the bus to the layout:
   the bus, the TAP, the optimizers, the layout, string ratings, and a

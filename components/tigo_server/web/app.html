@@ -4170,14 +4170,14 @@
     retire: ['pick', 'check', 'do', 'done'],
     // Guides: no check or job of their own; each step says what it found.
     system: ['bus', 'tap', 'optimizers', 'layout', 'names', 'done'],
-    addtap: ['prepare', 'connect', 'allow', 'find', 'name', 'done'],
+    addtap: ['connect', 'allow', 'find', 'radio', 'name', 'done'],
     retiretap: ['pick', 'done'],
   };
   const SETUP_STEP_NAMES = { pick: 'Optimizer to remove', label: 'New optimizer', check: 'Review', do: 'Apply',
                              wait: 'Wait for join', done: 'Complete',
                              bus: 'Connect the bus', tap: 'Find the TAP', optimizers: 'Optimizers', layout: 'Lay out the array',
                              names: 'Names and ratings',
-                             prepare: 'Set it up with a CCA', connect: 'Wire it in', allow: 'Allow a new TAP', find: 'Look for TAPs',
+                             radio: 'Radio settings', connect: 'Wire it in', allow: 'Allow a new TAP', find: 'Look for TAPs',
                              name: 'Name it' };
   const SETUP_TITLES = { replace: 'Replace an optimizer', add: 'Add an optimizer', retire: 'Retire an optimizer',
                          system: 'Set up a new system', addtap: 'Add a TAP', retiretap: 'Retire a TAP' };
@@ -4363,7 +4363,7 @@
       ${task('retire', 'Retire an optimizer', 'Permanently remove an optimizer from your system.')}
     </div>
     <h3 class="setup-group">TAPs</h3><div class="setup-tasks">
-      ${task('addtap', 'Add a TAP', 'Bring a TAP a CCA has set up onto the bus, and give it an address and a name.')}
+      ${task('addtap', 'Add a TAP', 'Wire in a new TAP, give it an address and its radio settings, and name it.')}
       ${task('retiretap', 'Retire a TAP', 'Forget a TAP that has gone for good, so it stops showing as not answering.')}
       <div class="setup-task later"><span class="art">${SETUP_ART.replacetap}</span><span class="in"><strong>Replace a TAP</strong>
         <span>Comes after a bench rehearsal: the old TAP's optimizers have to move to the new one.</span></span></div>
@@ -4618,14 +4618,35 @@
     addtap(f, back) {
       const m = setup.data.master, running = setupRunning(m);
       const offBus = '<div class="setup-note info">This TigoMonitor is not running the bus, so it cannot take on a TAP. To do this, set its bus role in Settings → Bus.</div>';
-      if (f.step === 'prepare')
-        return `<h3>Set it up with a CCA</h3>
-          <div class="sub">A new TAP has to be set up by a CCA first: TigoMonitor can't give a TAP its radio settings. Connect the new TAP to a CCA on its own, not on this bus, let the CCA set it up, then unplug the CCA.</div>
-          <div class="setup-actions">${back('Cancel')}${setupNext(f)}</div>`;
       if (f.step === 'connect')
         return `<h3>Wire it in</h3>
           <div class="sub">Wire it onto this bus beside the TAP you have: A to A, B to B and a shared ground, then power it. Until you look for TAPs, polling may stumble if it answers at another TAP's address.</div>
-          <div class="setup-actions">${back()}${setupNext(f)}</div>`;
+          <div class="setup-actions">${back('Cancel')}${setupNext(f)}</div>`;
+      if (f.step === 'radio') {
+        // The TAP's own network: a channel, a network ID (PAN) and a key,
+        // chosen by the daemon and saved on the TAP (tap_config.h).
+        const r = f.radio || {}, writes = !!(m && m.table && m.table.writes);
+        const ch = (r.given || '').match(/channel (\d+)/), pan = (r.given || '').match(/PAN ([0-9A-F]{4})/);
+        let state;
+        if (r.phase === 'checking') state = '<div class="setup-line">Reading its radio settings…</div>';
+        else if (r.phase === 'writing') state = '<div class="setup-line">Giving it its settings…</div>';
+        else if (r.phase === 'done') state = `<div class="setup-check good">✓ Saved: TAP ${topoEscape(f.found)} keeps these through a power cut. Its optimizers join this network once they are on its list.</div>`;
+        else if (r.phase === 'failed') state = `<div class="setup-error">${topoEscape(r.message || 'Not given.')}</div>`;
+        else state = '';
+        const plan = r.phase === 'checked' || r.phase === 'writing' || r.phase === 'done'
+          ? `<div class="setup-found"><div><strong>Channel ${ch ? ch[1] : '?'}</strong><span>at least two from your other TAPs'</span></div>
+             <div><strong>Network ID ${pan ? pan[1] : '?'}</strong><span>made from this TigoMonitor's own</span></div>
+             <div><strong>A new network key</strong><span>made here, never shown</span></div></div>` : '';
+        const act = !running ? offBus
+          : r.phase === 'checked' ? (writes ? `<div class="setup-actions"><button type="button" class="btn task-go" data-setup-radio-go>Give it these settings</button></div>`
+            : '<div class="setup-note info">To give it these settings, turn on <strong>Allow changes to the TAPs</strong> in Settings → Bus.</div>')
+          : r.phase === 'checking' || r.phase === 'writing' || r.phase === 'done' ? ''
+          : `<div class="setup-actions"><button type="button" class="btn task-go" data-setup-radio-check>${r.phase === 'failed' ? 'Check again' : 'Check'}</button></div>`;
+        return `<h3>Give it its radio settings</h3>
+          <div class="sub">A new TAP needs its own radio network for its optimizers to join: a channel, a network ID and a key. TigoMonitor chooses them and the TAP saves them. The check only reads.</div>
+          ${plan}${state}${act}
+          <div class="setup-actions">${back()}${setupNext(f, r.phase === 'done')}</div>`;
+      }
       if (f.step === 'allow') {
         const on = !!(m && m.adopt_taps);
         return `<h3>Allow a new TAP<span class="setup-state ${on ? 'ok' : 'todo'}">${on ? 'On' : 'Off'}</span></h3>
@@ -4778,6 +4799,17 @@
       if (f.step === 'do' && e.kind && e.started_unix >= f.startedAt && !e.dry_run && e.finished && e.ok)
         f.step = f.task === 'retire' ? 'done' : (t.waiting || []).some(x => x.mac === f.mac) ? 'wait' : 'done';
       if (f.step === 'wait' && (t.joins || []).some(x => x.mac === f.mac && x.joined && x.unix >= f.startedAt)) f.step = 'done';
+      // The radio step's job: the check gives the plan, the real one the result.
+      if (f.task === 'addtap' && f.radio && (f.radio.phase === 'checking' || f.radio.phase === 'writing')) {
+        const e = setupJob();
+        if (e.kind === 'provision' && e.finished && e.started_unix >= f.radio.at) {
+          if (!e.ok) { f.radio.phase = 'failed'; f.radio.message = e.message; }
+          else if (f.radio.phase === 'checking') {
+            f.radio.phase = 'checked';
+            f.radio.given = String(e.message || '').replace(/^dry run: would give the TAP /, '');
+          } else f.radio.phase = 'done';
+        }
+      }
       if (f.task === 'addtap' && f.looking && !f.found) {
         const m = setup.data.master, fresh = setupTaps().find(x => !(f.before || []).includes(x.id) && x.state === 'running');
         if (m && m.phase === 'running' && fresh) f.found = fresh.id;
@@ -4790,7 +4822,8 @@
       renderSetup();
       if (f && f.task === 'system' && f.step === 'bus') setupFillSerial();
     }
-    const busy = f && (f.step === 'check' || f.step === 'do' || f.step === 'wait' || f.step === 'done' || (f.looking && !f.found));
+    const busy = f && (f.step === 'check' || f.step === 'do' || f.step === 'wait' || f.step === 'done' || (f.looking && !f.found) ||
+                       (f.radio && (f.radio.phase === 'checking' || f.radio.phase === 'writing')));
     if (document.getElementById('view-setup').classList.contains('active'))
       setup.timer = setTimeout(refreshSetup, busy ? 1500 : 10000);
   }
@@ -4861,6 +4894,22 @@
         f.step = 'done';
       } catch (err) {
         showToast('Not retired: ' + err.message, 'err');
+      }
+      return refreshSetup(true);
+    }
+    // Add a TAP's radio step: the check (a dry run), then the real one, to
+    // the TAP the guide found. The daemon chooses the channel and PAN.
+    if (b.hasAttribute('data-setup-radio-check') || b.hasAttribute('data-setup-radio-go')) {
+      const go = b.hasAttribute('data-setup-radio-go');
+      const tap = setupTaps().find(x => x.id === f.found);
+      if (!tap || !tap.mac) return showToast('TAP ' + f.found + ' has not said its MAC yet; look for TAPs again', 'err');
+      b.disabled = true;
+      f.radio = { ...(f.radio || {}), phase: go ? 'writing' : 'checking', at: Math.floor(Date.now() / 1000) - 1 };
+      try {
+        await setupPost('/api/master/taps/provision', { mac: tap.mac, dry_run: !go });
+      } catch (err) {
+        f.radio.phase = 'failed';
+        f.radio.message = err.message;
       }
       return refreshSetup(true);
     }

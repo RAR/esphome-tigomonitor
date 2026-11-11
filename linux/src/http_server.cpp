@@ -1756,10 +1756,11 @@ void HttpServer::routes_() {
     else send_json(res, {{"error", why.empty() ? "not running the bus" : why}}, code);
   });
 
-  // Pi-only, bench only: give a spare TAP its radio settings (tap_config.h).
-  // {"mac": "<the TAP's 16 hex digits>", "channel": 11..26, "pan": "1A2B"
-  // (optional; from its MAC otherwise), "reset": false, "dry_run": true};
-  // behind the web password, and refused unless master_bench is on.
+  // Pi-only: give a new TAP its radio settings (tap_config.h), Add a TAP's
+  // step. {"mac": "<the TAP's 16 hex digits>", "channel": 11..26 (optional:
+  // two from every TAP heard), "pan": "1A2B" (optional: from this machine's
+  // MAC, past any in use), "reset": false, "dry_run": true}; behind the web
+  // password. A real one needs Allow changes to the TAPs, or master_bench.
   svr.Post("/api/master/taps/provision", [this](const httplib::Request &req, httplib::Response &res) {
     if (ctx_.current_settings().web_password.empty()) {
       send_json(res, {{"error", "set a web password first"}}, 403);
@@ -1768,8 +1769,8 @@ void HttpServer::routes_() {
     namespace mp = esphome::tigo_monitor::master;
     json j = json::parse(req.body, nullptr, false);
     const char *shape = "expected {\"mac\": \"04C05B...\", \"channel\": 11..26, \"pan\": \"1A2B\", \"dry_run\": true}";
-    if (j.is_discarded() || !j.is_object() || !j.contains("mac") || !j["mac"].is_string() || !j.contains("channel") ||
-        !j["channel"].is_number_integer()) {
+    if (j.is_discarded() || !j.is_object() || !j.contains("mac") || !j["mac"].is_string() ||
+        (j.contains("channel") && !j["channel"].is_number_integer())) {
       send_json(res, {{"error", shape}}, 400);
       return;
     }
@@ -1779,9 +1780,9 @@ void HttpServer::routes_() {
       if (!isxdigit(static_cast<unsigned char>(h[i])) || !isxdigit(static_cast<unsigned char>(h[i + 1]))) break;
       mac.push_back(static_cast<uint8_t>(std::stoul(h.substr(i, 2), nullptr, 16)));
     }
-    int channel = j["channel"].get<int>();
+    int channel = j.value("channel", 0);  // 0: chosen, two from every TAP heard
     unsigned pan = 0, generation = 0x1000000;  // not given: the TAP's own plus one
-    if (mac.size() != 8 || channel < 11 || channel > 26 ||
+    if (mac.size() != 8 || (channel && (channel < 11 || channel > 26)) ||
         (j.contains("pan") && (!j["pan"].is_string() || sscanf(j["pan"].get<std::string>().c_str(), "%x", &pan) != 1 ||
                                !pan || pan >= 0xFFFF)) ||
         (j.contains("generation") &&
