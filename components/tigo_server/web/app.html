@@ -549,6 +549,7 @@
   table.nodes .num { text-align: right; }
   table.nodes:not(.with-fw) .fw { display: none; }
   .devices-head { margin: 4px 0 10px; color: var(--text-dim); }
+  .devices-note { font-size: 13px; line-height: 1.5; color: var(--text-dim); max-width: 75ch; margin: -2px 0 12px; }
   #devices-taps .table-wrap { margin-bottom: 22px; }
   table.nodes td strong { color: var(--text); }
 
@@ -1564,7 +1565,7 @@
              network's key reports through the TAP whatever its table says. -->
         <div id="devices-strays" style="display:none">
           <div class="section-title devices-head">Heard, not on the TAP's list</div>
-          <p class="hint">These optimizers report through the TAP, but the TAP's table doesn't list them, or hasn't for a day: a spare that was on this system before, or one from a neighbour's. They're kept off the Dashboard and the mesh map. Taking one off the TAP's table doesn't stop it reporting; only unplugging it, or moving it out of range, does. Forget clears it from this list until it next reports.</p>
+          <p class="devices-note">These report through the TAP, but its table doesn't list them (or hasn't for a day): usually a spare that was once on this system, or a neighbour's. They're kept off the Dashboard and the mesh map. Removing one from the TAP's table doesn't stop it reporting; unplug it or move it out of range. Forget hides it until it next reports.</p>
           <div class="table-wrap">
             <table class="nodes">
               <thead><tr><th>Label</th><th>Addr</th><th>Last heard</th><th></th></tr></thead>
