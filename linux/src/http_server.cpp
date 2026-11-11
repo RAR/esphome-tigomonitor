@@ -11,6 +11,7 @@
 #include <cerrno>
 #include <chrono>
 #include <cmath>
+#include <cctype>
 #include <cstdio>
 #include <cstring>
 #include <ctime>
@@ -1750,6 +1751,46 @@ void HttpServer::routes_() {
     std::string why;
     int code = ctx_.forget_tap ? ctx_.forget_tap(static_cast<uint16_t>(id), why) : 409;
     if (code == 200) send_json(res, {{"retired", true}});
+    else send_json(res, {{"error", why.empty() ? "not running the bus" : why}}, code);
+  });
+
+  // Pi-only, bench only: give a spare TAP its radio settings (tap_config.h).
+  // {"mac": "<the TAP's 16 hex digits>", "channel": 11..26, "pan": "1A2B"
+  // (optional; from its MAC otherwise), "reset": false, "dry_run": true};
+  // behind the web password, and refused unless master_bench is on.
+  svr.Post("/api/master/taps/provision", [this](const httplib::Request &req, httplib::Response &res) {
+    if (ctx_.current_settings().web_password.empty()) {
+      send_json(res, {{"error", "set a web password first"}}, 403);
+      return;
+    }
+    namespace mp = esphome::tigo_monitor::master;
+    json j = json::parse(req.body, nullptr, false);
+    const char *shape = "expected {\"mac\": \"04C05B...\", \"channel\": 11..26, \"pan\": \"1A2B\", \"dry_run\": true}";
+    if (j.is_discarded() || !j.is_object() || !j.contains("mac") || !j["mac"].is_string() || !j.contains("channel") ||
+        !j["channel"].is_number_integer()) {
+      send_json(res, {{"error", shape}}, 400);
+      return;
+    }
+    std::string h = j["mac"].get<std::string>();
+    mp::Bytes mac;
+    for (size_t i = 0; i + 1 < h.size() && h.size() == 16; i += 2) {
+      if (!isxdigit(static_cast<unsigned char>(h[i])) || !isxdigit(static_cast<unsigned char>(h[i + 1]))) break;
+      mac.push_back(static_cast<uint8_t>(std::stoul(h.substr(i, 2), nullptr, 16)));
+    }
+    int channel = j["channel"].get<int>();
+    unsigned pan = 0;
+    if (mac.size() != 8 || channel < 11 || channel > 26 ||
+        (j.contains("pan") && (!j["pan"].is_string() || sscanf(j["pan"].get<std::string>().c_str(), "%x", &pan) != 1 ||
+                               !pan || pan >= 0xFFFF))) {
+      send_json(res, {{"error", shape}}, 400);
+      return;
+    }
+    bool reset = j.value("reset", false), dry = j.value("dry_run", true);
+    std::string why, given;
+    int code = ctx_.request_provision
+                   ? ctx_.request_provision(mac, static_cast<uint16_t>(channel), static_cast<uint16_t>(pan), reset, dry, why, given)
+                   : 409;
+    if (code == 200) send_json(res, {{"started", true}, {"dry_run", dry}, {"reset", reset}, {"given", given}});
     else send_json(res, {{"error", why.empty() ? "not running the bus" : why}}, code);
   });
 

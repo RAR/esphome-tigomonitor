@@ -232,6 +232,29 @@ bool MasterCore::request_table_add(const master::Bytes &mac, uint16_t id, bool d
   return true;
 }
 
+bool MasterCore::request_provision(const master::Bytes &tap_mac, const master::RadioBlock &block, bool reset,
+                                   bool dry_run, std::string &why) {
+  std::lock_guard<std::mutex> lock(mu_);
+  uint16_t tap = 0;
+  std::string want = master::mac_hex(tap_mac);
+  for (const auto &t : taps_)
+    if (!t->st.mac.empty() && t->st.mac == want) tap = t->id;
+  // A TAP polled since start may never have said its MAC; with one TAP, the
+  // job asks it first and stops unless it's this one.
+  if (!tap && taps_.size() == 1) tap = taps_.front()->id;
+  if (!bench_)
+    why = "giving a TAP its radio settings is for the bench only (master_bench)";
+  else if (tap_mac.size() != 8 || !tap)
+    why = "no TAP on this bus answered with that MAC";  // with several, it must have said its MAC already
+  else if (!master::is_radio_block_ok(block.encode()))
+    why = "the channel must be 11 to 26";
+  else if (table_refusal_(true, tap, why))
+    return false;
+  if (!why.empty()) return false;
+  start_table_job_(std::make_unique<master::ProvisionJob>(tap_mac, block, reset, dry_run), tap);
+  return true;
+}
+
 bool MasterCore::request_table_remove(const master::Bytes &mac, bool dry_run, std::string &why, uint16_t tap) {
   std::lock_guard<std::mutex> lock(mu_);
   if (table_refusal_(dry_run, tap, why)) return false;
@@ -474,6 +497,16 @@ void MasterCore::settle_table_job_(uint32_t now_ms) {
   bool done = table_job_->finished();
   sync_table_status_(done);
   if (!done) return;
+  // Giving a TAP its radio settings touches no table: nothing to save,
+  // watch or follow.
+  if (std::string(table_job_->kind()) == "provision") {
+    if (table_job_->ok())
+      LOGI("bus master: radio settings: %s", table_job_->message().c_str());
+    else
+      LOGW("bus master: radio settings: stopped: %s", table_job_->message().c_str());
+    table_job_.reset();
+    return;
+  }
   bool add = std::string(table_job_->kind()) == "add";
   if (!add && !table_job_->dry_run() && !table_job_->keep_saved() && table_saved_) table_saved_(table_job_->mac(), nullptr);
   // An add listed and not joined goes on the watch; a removal takes it off.
@@ -528,6 +561,8 @@ void MasterCore::sync_table_status_(bool finished_now) {
   t.message = table_job_->message();
   t.dry_frames.clear();
   for (const auto &f : table_job_->dry_frames()) t.dry_frames.push_back(master::mac_hex(f));
+  if (std::string(table_job_->kind()) == "provision")
+    for (const auto &f : static_cast<master::ProvisionJob *>(table_job_.get())->dry_text()) t.dry_frames.push_back(f);
   if (finished_now) {
     t.active = false;
     t.finished = true;
@@ -1064,7 +1099,10 @@ void MasterCore::tick_(uint32_t now_ms) {
       for (auto &x : taps_) x->join_watch.pause();  // their reads would straddle the change
       bool add = std::string(table_job_->kind()) == "add";
       std::string kind = table_job_->kind();
-      if (several_())
+      if (kind == "provision")
+        LOGW("bus master: radio settings: %sgiving TAP %04X %s", table_job_->dry_run() ? "a dry run of " : "",
+             table_tap_, static_cast<master::ProvisionJob *>(table_job_.get())->block().describe().c_str());
+      else if (several_())
         LOGI("bus master: table: %s%s an optimizer on TAP %04X", table_job_->dry_run() ? "a dry run of " : "",
              add ? "adding" : kind == "replace" ? "replacing" : "removing", table_tap_);
       else
@@ -1128,7 +1166,7 @@ void MasterCore::tick_(uint32_t now_ms) {
   }
   if (!req.cmd) return;  // nothing due: a lost TAP's window keeper waiting out a backoff
   if (!master::may_send(req.cmd, req.payload, bench_, bring_up, writes_on_, t.pv && t.pv->off(),
-                        req.table_edit && table_writes_on_)) {
+                        req.table_edit && table_writes_on_, req.provision && bench_)) {
     set_fault(Fault::refused, "refused to send command " + std::to_string(req.cmd));
     return;
   }

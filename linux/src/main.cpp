@@ -22,6 +22,7 @@
 #include "settings.h"
 
 #include <atomic>
+#include <random>
 #include <chrono>
 #include <condition_variable>
 #include <deque>
@@ -482,6 +483,23 @@ int main(int argc, char **argv) {
           return 409;
         }
         return bus_master->request_forget_tap(id, why) ? 200 : 409;
+      },
+      [&](const esphome::tigo_monitor::master::Bytes &tap_mac, uint16_t channel, uint16_t pan, bool reset, bool dry_run,
+          std::string &why, std::string &given) {
+        namespace mp = esphome::tigo_monitor::master;
+        std::lock_guard<std::mutex> lock(master_mu);
+        if (!bus_master) {
+          why = "this monitor isn't running the bus";
+          return 409;
+        }
+        mp::RadioBlock block;
+        block.channel = channel;
+        block.pan = pan ? pan : mp::pan_for(tap_mac, {});
+        mp::map_for_profile(12, block.map);  // 40 optimizers: a bench TAP
+        std::random_device rd;
+        block.key = mp::key_from([&rd]() { return static_cast<uint8_t>(rd()); });
+        given = block.describe();
+        return bus_master->request_provision(tap_mac, block, reset, dry_run, why) ? 200 : 409;
       }});
   if (port < 0 && settings.web_port > 0) port = settings.web_port;
   // Only the default steps aside for another web server; a port someone

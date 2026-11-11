@@ -25,6 +25,7 @@
 // heard for takeover_s. Any master it hears, it yields to: a CCA can't.
 
 #include "../tigo_monitor/table_edit.h"
+#include "../tigo_monitor/tap_config.h"
 #include "../tigo_monitor/tigo_master.h"
 #include "../tigo_monitor/tigo_protocol.h"
 
@@ -341,6 +342,13 @@ class MasterCore {
   bool request_table_replace(const esphome::tigo_monitor::master::Bytes &old_mac,
                              const esphome::tigo_monitor::master::Bytes &new_mac, bool dry_run, std::string &why,
                              uint16_t tap = 0);
+  // Gives one TAP its radio settings (tap_config.h), on the bench only:
+  // master_bench on, the TAP named by the MAC it answered GET_MAC with, no
+  // other change running. reset: then reset that TAP alone. A dry run reads
+  // the TAP's settings and lists what it would send.
+  bool request_provision(const esphome::tigo_monitor::master::Bytes &tap_mac,
+                         const esphome::tigo_monitor::master::RadioBlock &block, bool reset, bool dry_run,
+                         std::string &why);
   // Stops waiting for an added optimizer to join (it stays listed, and
   // joins whenever the window is next open). False if it isn't waited for.
   bool request_table_stop_waiting(const esphome::tigo_monitor::master::Bytes &mac);

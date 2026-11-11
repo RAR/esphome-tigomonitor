@@ -108,6 +108,11 @@ class BusMaster {
   }
   bool request_herd(std::string &why) { return core_.request_herd(why); }
   bool request_forget_tap(uint16_t id, std::string &why) { return core_.request_forget_tap(id, why); }
+  bool request_provision(const esphome::tigo_monitor::master::Bytes &tap_mac,
+                         const esphome::tigo_monitor::master::RadioBlock &block, bool reset, bool dry_run,
+                         std::string &why) {
+    return core_.request_provision(tap_mac, block, reset, dry_run, why);
+  }
   void set_window_wanted(bool wanted, int missing) { core_.set_window_wanted(wanted, missing); }
   std::map<uint16_t, esphome::tigo_monitor::master::Queries::Setup> setups() const { return core_.setups(); }
   void tick(uint32_t now_ms) { core_.tick(now_ms); }

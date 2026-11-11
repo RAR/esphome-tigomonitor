@@ -73,6 +73,8 @@ jobs:
         run: docker run --rm -v "$PWD":/src -w /src tigod-dev linux/scripts/bus-log-e2e.sh
       - name: PV output off and on, against a mock TAP
         run: docker run --rm -v "$PWD":/src -w /src tigod-dev linux/scripts/pv-e2e.sh
+      - name: Giving a bench TAP its radio settings, against a mock TAP
+        run: docker run --rm -v "$PWD":/src -w /src tigod-dev linux/scripts/provision-e2e.sh
       - name: A new optimizer heard, against a synthetic bus
         run: docker run --rm -v "$PWD":/src -w /src tigod-dev linux/scripts/new-optimizer-e2e.sh
       - name: The mesh map's link counts, against a synthetic bus

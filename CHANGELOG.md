@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Give a spare TAP its radio settings, on the bench (Raspberry Pi,
+  experimental).** `POST /api/master/taps/provision` writes a TAP's channel,
+  network ID and key the way a CCA sets up a new TAP, then reads its stored
+  copy, which is what makes the TAP save it. It does nothing unless
+  `master_bench` is on. It first asks the TAP for its MAC and stops unless
+  that's the one named, and it does a dry run unless told otherwise. The key
+  never appears in its answers or the log. There's no page for it yet: it's
+  for a bench rehearsal before a CCA-less Add a TAP. Not yet run on a real
+  TAP.
 - **Set up a whole system from one page (Raspberry Pi).** System setup
   gains **Set up a new system**, a checklist from the bus to the layout:
   the bus, the TAP, the optimizers, the layout, string ratings, and a

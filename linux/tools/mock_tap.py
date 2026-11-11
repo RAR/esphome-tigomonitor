@@ -163,6 +163,13 @@ def main():
     erased = False  # after a 0x2B the table is what was written since, and no longer the panels
     stats['table_writes'] = []
     stats['erases'] = 0
+    # The radio settings block (tap_config.h): the write sets RAM, the
+    # stored read (00 01) saves it, a reset brings back what was saved.
+    cfg_ram = bytes(range(36))
+    cfg_saved = cfg_ram
+    stats['cfg_writes'] = []  # channel and PAN of each write, never the key
+    stats['cfg_saves'] = 0
+    stats['unicast_resets'] = 0
     needs_w255 = {panels[0][1]} if panels else set()
     smart_n = {panels[1][1]} if len(panels) > 1 else set()
     buf = bytearray()
@@ -236,6 +243,12 @@ def main():
                 stats['claims'] += 1
                 if stats['claims'] > a.mute_claims:
                     send(encode(0x8000, 0x0015, b''))
+                continue
+            if cmd == 0x0010 and dest == addr and dest != 0x0000:  # RESET to this TAP alone
+                send(encode(addr | 0x8000, 0x0011, b''))
+                stats['unicast_resets'] += 1
+                cfg_ram = cfg_saved
+                quiet_until = time.monotonic() + a.reset_quiet
                 continue
             if cmd == 0x0010 and dest == 0x0000:  # RESET broadcast
                 send(encode(0x8000, 0x0011, b''))
@@ -322,8 +335,15 @@ def main():
                 stats['session'].append(f'{p[0]:02x}')
                 stats['pv'] = 'off' if p[0] == 0 else 'on'
                 send(encode(addr | 0x8000, 0x0B01, bytes([p[0] ^ 1]) if a.pv_wrong_reply else p))
-            elif cmd == 0x0B0F and len(p) == 7 and p[3] == 0x0D:  # bring-up; the real reply's block is the site's
-                send(encode(addr | 0x8000, 0x0B10, bytes([0x00, 0x0E, 0x00, 0x0E, p[4]]) + bytes(range(37))))
+            elif cmd == 0x0B0F and len(p) == 7 and p[3] == 0x0D:  # the reads; 00 01 also saves
+                if p[5:7] == b'\x00\x01':
+                    cfg_saved = cfg_ram
+                    stats['cfg_saves'] += 1
+                send(encode(addr | 0x8000, 0x0B10, bytes([0x00, 0x0E, 0x00, 0x0E, p[4]]) + cfg_ram + b'\x00'))
+            elif cmd == 0x0B0F and len(p) == 43 and p[3] == 0x0D and p[5:7] == b'\x01\x00':  # the write: RAM only
+                cfg_ram = bytes(p[7:43])
+                stats['cfg_writes'].append({'channel': cfg_ram[1], 'pan': f'{cfg_ram[2]:02X}{cfg_ram[3]:02X}'})
+                send(encode(addr | 0x8000, 0x0B10, bytes([0x00, 0x0E, 0x00, 0x0E, p[4]]) + cfg_ram + b'\x00'))
             elif cmd == 0x0B0F and len(p) == 7 and p[3] == 0x22:  # empty broadcast, acked
                 stats['broadcast'].append(p[5:].hex())
                 send(encode(addr | 0x8000, 0x0B10, bytes([0x00, 0x0E, 0x00, 0x23, p[4], 0x03])))

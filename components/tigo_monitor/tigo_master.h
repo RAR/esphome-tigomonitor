@@ -370,6 +370,7 @@ struct Request {
   uint32_t wait_ms = 0;   // how long to wait for the reply; 0 = the usual
   bool bring_up = false;  // a frame the CCA sends only straight after re-addressing a TAP
   bool table_edit = false;  // from a TableAdd (table_edit.h), the only source of a table write
+  bool provision = false;   // from a ProvisionJob (tap_config.h): bench only
 };
 
 // ---- housekeeping ----------------------------------------------------------
@@ -1682,7 +1683,11 @@ class Herd {
 // table_write: the CCA's table write (sub 0x29) and erase (sub 0x2B) in the
 // shapes it sent, sent only by an add or removal the owner started
 // (table_edit.h), with master_table_writes on.
-enum class Allow { yes, bench_only, startup_only, optimizer_write, pv_off, table_write, never };
+// provision: the write of a TAP's radio settings (sub 0x0D, 01 00 and a
+// whole block on a channel the TAP takes), sent only by a ProvisionJob
+// (tap_config.h) on the bench. A provisioning request may also send the 0x0D
+// reads and the reset, to its own TAP alone.
+enum class Allow { yes, bench_only, startup_only, optimizer_write, pv_off, table_write, provision, never };
 
 // Sub 0x29's args as the CCA sent them on the bench (2026-11-06, 11-09): a
 // count, then count x (MAC, TUID), 1 to 10 (the TAP's limit). Each TUID is a
@@ -1790,7 +1795,12 @@ inline Allow classify_request(uint16_t cmd, const Bytes &payload) {
     }
     case 0x0D:  // GatewayCfg. The bring-up's pair of reads, 00 00 then 00 01.
       // A first byte of 01 is the write of the TAP's whole network config
-      // (channel, PAN, key): how a CCA re-PANs a TAP.
+      // (channel, PAN, key): how a CCA re-PANs a TAP. Only 01 00 (active)
+      // with a whole block on channel 11-26 is ever sent, and only on the
+      // bench; 01 01 (the stored copy) never.
+      if (args.size() == 38 && args[0] == 0x01 && args[1] == 0x00 && args[2] == 0x00 && args[3] >= 11 &&
+          args[3] <= 26)
+        return Allow::provision;
       if (!args.empty() && args[0] != 0x00) return Allow::never;
       return args == Bytes{0x00, 0x00} || args == Bytes{0x00, 0x01} ? Allow::startup_only : Allow::bench_only;
     case 0x22:
@@ -1812,14 +1822,20 @@ inline bool is_config_read(uint16_t cmd, const Bytes &payload) {
 }
 
 inline bool may_send(uint16_t cmd, const Bytes &payload, bool bench, bool startup = false, bool writes = false,
-                     bool pv_off = false, bool table_writes = false) {
+                     bool pv_off = false, bool table_writes = false, bool provision = false) {
   switch (classify_request(cmd, payload)) {
     case Allow::yes: return true;
     case Allow::bench_only: return bench;  // startup is not bench: a bring-up sends only its own
-    case Allow::startup_only: return startup;
+    case Allow::startup_only:
+      // A provisioning request's reads of the radio settings and its reset.
+      if (provision && (cmd == CMD_RESET || (cmd == CMD_GET_MAC_NOW && payload.empty()) ||
+                        (cmd == CMD_TUNNEL && payload.size() == 7 && payload[3] == 0x0D)))
+        return true;
+      return startup;
     case Allow::optimizer_write: return writes;
     case Allow::pv_off: return pv_off || startup;
     case Allow::table_write: return table_writes;  // never bench or startup alone
+    case Allow::provision: return provision;  // never bench or startup alone
     case Allow::never: return false;
   }
   return false;
