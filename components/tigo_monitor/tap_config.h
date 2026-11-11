@@ -16,6 +16,15 @@
 //   31-34 optimization, big-endian (0x00000200)
 //   35    SLm (0x3C)
 //
+// That's the 36-byte form, an H1.0007 TAP's on the bench (2026-11-11): its
+// read, its write and the write's echo. The G8.59 in the 11-06 capture used
+// a 46-byte form for its read (00 00), the CCA's write and the echo: 10 more
+// bytes at 31-40, between the key and optimization (which then sits at 41,
+// SLm at 45). Nobody has said yet what those 10 are. Its stored read (00 01)
+// still answered with 36. So the job writes the form the TAP's own read
+// came back in, and in the 46-byte form keeps the TAP's 10 bytes as they
+// are rather than making them up.
+//
 // The write changes the TAP's RAM and retunes its radio at once; it saves
 // nothing. The read of the stored copy (01 selector, 0D 00 01) is what marks
 // every field to be saved, field by field, in the background. So a write is
@@ -51,6 +60,7 @@ namespace master {
 static const uint8_t SUB_GATEWAY_CFG = 0x0D;
 static const uint8_t SUB_GATEWAY_CFG_REPLY = 0x0E;
 static const size_t RADIO_BLOCK_SIZE = 36;
+static const size_t RADIO_BLOCK_WIDE = 46;
 static const uint8_t CHANNEL_MIN = 11, CHANNEL_MAX = 26;
 
 struct RadioBlock {
@@ -61,6 +71,9 @@ struct RadioBlock {
   std::array<uint8_t, 16> key{};
   uint32_t optimization = 0x00000200;
   uint8_t slm = 0x3C;
+  // The 46-byte form, and its 10 unexplained bytes (31-40).
+  bool wide = false;
+  std::array<uint8_t, 10> extra{};
 
   Bytes encode() const {
     Bytes b;
@@ -71,23 +84,36 @@ struct RadioBlock {
     b.insert(b.end(), map.begin(), map.end());
     b.push_back(slt);
     b.insert(b.end(), key.begin(), key.end());
+    if (wide) b.insert(b.end(), extra.begin(), extra.end());
     for (int s = 24; s >= 0; s -= 8) b.push_back(static_cast<uint8_t>(optimization >> s));
     b.push_back(slm);
     return b;
   }
+  // Either form, by its length; nothing else.
   static bool decode(const Bytes &b, RadioBlock &out) {
-    if (b.size() < RADIO_BLOCK_SIZE) return false;
+    if (b.size() != RADIO_BLOCK_SIZE && b.size() != RADIO_BLOCK_WIDE) return false;
+    out.wide = b.size() == RADIO_BLOCK_WIDE;
+    size_t o = out.wide ? 10 : 0;
     out.channel = static_cast<uint16_t>(b[0] << 8 | b[1]);
     out.pan = static_cast<uint16_t>(b[2] << 8 | b[3]);
     std::copy(b.begin() + 4, b.begin() + 14, out.map.begin());
     out.slt = b[14];
     std::copy(b.begin() + 15, b.begin() + 31, out.key.begin());
-    out.optimization = static_cast<uint32_t>(b[31]) << 24 | b[32] << 16 | b[33] << 8 | b[34];
-    out.slm = b[35];
+    out.extra = {};
+    if (out.wide) std::copy(b.begin() + 31, b.begin() + 41, out.extra.begin());
+    out.optimization = static_cast<uint32_t>(b[31 + o]) << 24 | b[32 + o] << 16 | b[33 + o] << 8 | b[34 + o];
+    out.slm = b[35 + o];
     return true;
   }
   bool operator==(const RadioBlock &o) const { return encode() == o.encode(); }
   bool operator!=(const RadioBlock &o) const { return !(*this == o); }
+  // The same channel, PAN, map, thresholds, key and optimization, whichever
+  // form either is in: a 46-byte TAP's stored read answers with 36.
+  bool same_settings(const RadioBlock &o) const {
+    RadioBlock a = *this, b = o;
+    a.wide = b.wide = false;
+    return a == b;
+  }
 
   // For a person: everything but the key.
   std::string describe() const {
@@ -121,7 +147,7 @@ inline bool map_for_profile(uint8_t first, std::array<uint8_t, 10> &out) {
 
 // The shape the gate allows: a whole block on a channel the TAP takes.
 inline bool is_radio_block_ok(const Bytes &block) {
-  if (block.size() != RADIO_BLOCK_SIZE || block[0] != 0) return false;
+  if ((block.size() != RADIO_BLOCK_SIZE && block.size() != RADIO_BLOCK_WIDE) || block[0] != 0) return false;
   return block[1] >= CHANNEL_MIN && block[1] <= CHANNEL_MAX;
 }
 
@@ -231,32 +257,42 @@ class ProvisionJob : public TableJob {
       if (!req.table_edit || !waiting_) return;
       waiting_ = false;
       // A TAP restarting may not answer: the next poll shows it back.
-      return finish_("given " + block_.describe() + "; saved and reset");
+      return finish_("given " + block_.describe() + status_note_() + "; saved and reset");
     }
     if (!take_(req)) return;
     TunnelReply t;
-    bool got = ok && reply.cmd == CMD_TUNNEL_REPLY && parse_tunnel_reply(reply.payload, t) &&
-               t.sub == SUB_GATEWAY_CFG_REPLY && t.data.size() >= RADIO_BLOCK_SIZE + 1;
+    // The block in either form, then a status byte.
     RadioBlock now;
-    if (got) RadioBlock::decode(Bytes(t.data.begin(), t.data.begin() + RADIO_BLOCK_SIZE), now);
-    int status = got ? t.data[RADIO_BLOCK_SIZE] : -1;
+    bool got = ok && reply.cmd == CMD_TUNNEL_REPLY && parse_tunnel_reply(reply.payload, t) &&
+               t.sub == SUB_GATEWAY_CFG_REPLY && !t.data.empty() &&
+               RadioBlock::decode(Bytes(t.data.begin(), t.data.end() - 1), now);
+    int status = got ? t.data.back() : -1;
     switch (step_) {
       case Step::read_before:
         if (!got) return fail_("the TAP didn't answer a read of its radio settings");
         before_block_ = now;
         had_before_ = true;
+        // Write the form this TAP reads back in; the 10 unexplained bytes
+        // of the 46-byte form stay what the TAP has.
+        block_.wide = now.wide;
+        block_.extra = now.extra;
         step_ = Step::write;
         return;
       case Step::write:
         ack_ = status;
         if (!got) return fail_("no echo of the write; read the TAP before trying again");
-        if (status != 0) return fail_("the TAP answered the write with status " + std::to_string(status));
+        // 0, or 1 with an echo of exactly what was sent: the bench H1.0007
+        // answers a whole 36-byte write with 1 and applies it (2026-11-11);
+        // what 1 means isn't known yet. Anything else stops here.
+        if (status != 0 && status != 1)
+          return fail_("the TAP answered the write with status " + std::to_string(status));
         if (now != block_) return fail_("the write's echo differs from what was sent");
+        write_status_ = status;
         step_ = Step::save;
         return;
       case Step::save:
         if (!got) return fail_("the TAP didn't answer the save (0D 00 01); the write is in RAM only");
-        if (now != block_) return fail_("after the save the TAP runs something else");
+        if (!now.same_settings(block_)) return fail_("after the save the TAP runs something else");
         step_ = Step::check;
         return;
       case Step::check:
@@ -266,7 +302,8 @@ class ProvisionJob : public TableJob {
           step_ = Step::reset;
           return;
         }
-        return finish_("given " + block_.describe() + "; saved. Power-cycle the TAP and read it to see it kept");
+        return finish_("given " + block_.describe() + status_note_() +
+                       "; saved. Power-cycle the TAP and read it to see it kept");
       default: return;
     }
   }
@@ -312,8 +349,13 @@ class ProvisionJob : public TableJob {
     waiting_ = false;
   }
 
+  std::string status_note_() const {
+    return write_status_ ? " (the write answered status " + std::to_string(write_status_) + ", its echo exact)" : "";
+  }
+
   RadioBlock block_;
   bool reset_;
+  int write_status_ = 0;
   Step step_ = Step::identify;
   RadioBlock before_block_;
   bool had_before_ = false;

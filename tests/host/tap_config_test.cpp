@@ -132,6 +132,9 @@ struct FakeTap {
   bool silent = false;
   std::vector<Bytes> got;
   int resets = 0;
+  // The G8.59's form: the active block (read 00 00, the write and its echo)
+  // is 46 bytes; the stored read (00 01) answers with 36.
+  bool wide = false;
   bool answer(const Request &req, Frame &reply) {
     if (req.cmd == CMD_RESET) {
       resets++;
@@ -151,9 +154,11 @@ struct FakeTap {
     got.push_back(req.payload);
     if (silent) return false;
     Bytes args(req.payload.begin() + 5, req.payload.end());
-    if (args.size() == 38 && args[0] == 0x01) RadioBlock::decode(Bytes(args.begin() + 2, args.end()), ram);
+    if (args.size() == (wide ? 48u : 38u) && args[0] == 0x01) RadioBlock::decode(Bytes(args.begin() + 2, args.end()), ram);
     if (args == Bytes{0x00, 0x01}) save_armed = true;
-    Bytes data = ram.encode();
+    RadioBlock shown = ram;
+    if (args == Bytes{0x00, 0x01}) shown.wide = false;
+    Bytes data = shown.encode();
     if (echo_wrong) data[0] ^= 1;
     data.push_back(static_cast<uint8_t>(status));
     reply.cmd = CMD_TUNNEL_REPLY;
@@ -212,6 +217,23 @@ static void test_provision_stops() {
     CHECK(!job.ok() && job.message().find("status 6") != std::string::npos);
     CHECK(tap.got.size() == 2);  // no save after a refused write
   }
+  {  // status 1 with an echo of exactly what was sent: carried on, and said
+    // (the bench H1.0007 answers a whole 36-byte write so; 2026-11-11)
+    FakeTap tap;
+    tap.status = 1;
+    ProvisionJob job(TAP_MAC, made_up(), false, false);
+    run(job, tap);
+    CHECK(job.ok() && tap.got.size() == 4 && tap.save_armed);
+    CHECK(job.message().find("status 1") != std::string::npos);
+  }
+  {  // status 1 and an echo that differs: stopped before the save
+    FakeTap tap;
+    tap.status = 1;
+    tap.echo_wrong = true;
+    ProvisionJob job(TAP_MAC, made_up(), false, false);
+    run(job, tap);
+    CHECK(!job.ok() && tap.got.size() == 2);
+  }
   {  // an echo that differs
     FakeTap tap;
     tap.echo_wrong = true;
@@ -246,8 +268,66 @@ static void test_dry_run() {
   for (const auto &t : job.dry_text()) CHECK(t.find("112233") == std::string::npos);
 }
 
+// The G8.59's 46-byte block: 10 bytes nobody has explained yet sit between
+// the key and optimization. Made-up values.
+static RadioBlock made_up_wide() {
+  RadioBlock b = made_up();
+  b.wide = true;
+  b.extra = {0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0xA6, 0xA7, 0xA8, 0xA9, 0xAA};
+  return b;
+}
+
+static void test_wide_layout() {
+  Bytes want = hex("0017" "4C3D" "0C020201" "00FF8401" "1C03" "5A"
+                   "112233445566778899AABBCCDDEEFF11" "A1A2A3A4A5A6A7A8A9AA" "00000200" "3C");
+  CHECK(made_up_wide().encode() == want);
+  CHECK(want.size() == RADIO_BLOCK_WIDE);
+  RadioBlock back;
+  CHECK(RadioBlock::decode(want, back) && back.wide && back == made_up_wide());
+  CHECK(back.optimization == 0x200 && back.slm == 0x3C);
+  // The settings are the same as the 36-byte form's; only the form differs.
+  CHECK(back.same_settings(made_up()) && back != made_up());
+  CHECK(radio_write_args(made_up_wide()).size() == 48);
+  // The gate takes either form, and nothing in between.
+  CHECK(classify_request(CMD_TUNNEL, tunnel_request(0x0D, 1, radio_write_args(made_up_wide()))) == Allow::provision);
+  Bytes odd = radio_write_args(made_up_wide());
+  odd.pop_back();
+  CHECK(classify_request(CMD_TUNNEL, tunnel_request(0x0D, 1, odd)) == Allow::never);
+  // No key, and none of the unexplained bytes, in what a person sees.
+  std::string seen = radio_write_text(made_up_wide());
+  CHECK(seen.find("112233") == std::string::npos && seen.find("A1A2") == std::string::npos);
+  // The bus watch reads the TAP's channel and SLm from either form.
+  Frame req{0x1201, CMD_TUNNEL, tunnel_request(0x0D, 1, {0x00, 0x00})};
+  Frame rep{0x9201, CMD_TUNNEL_REPLY, {0x00, 0x0E, 0x00, 0x0E, 0x01}};
+  Bytes data = want;
+  data.push_back(0x00);
+  rep.payload.insert(rep.payload.end(), data.begin(), data.end());
+  TapRadio r;
+  CHECK(parse_gateway_cfg(req, rep, r) && r.channel == 23 && r.slt == 0x5A && r.slm == 0x3C);
+}
+
+// On a TAP with the 46-byte form, the job writes that form, keeping the
+// TAP's own 10 unexplained bytes as they are rather than making them up.
+static void test_provision_wide() {
+  FakeTap tap;
+  tap.wide = true;
+  tap.ram = made_up_wide();
+  tap.ram.channel = 15;
+  tap.ram.extra = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
+  ProvisionJob job(TAP_MAC, made_up(), false, false);
+  run(job, tap);
+  CHECK(job.ok());
+  CHECK(tap.got.size() == 4);
+  if (tap.got.size() == 4) CHECK(tap.got[1].size() == 5 + 48);
+  CHECK(tap.ram.wide && tap.ram.channel == 23);
+  CHECK(tap.ram.extra == (std::array<uint8_t, 10>{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}));
+  CHECK(tap.ram.same_settings(made_up()));
+}
+
 int main() {
   test_block_layout();
+  test_wide_layout();
+  test_provision_wide();
   test_values();
   test_gate();
   test_provision();

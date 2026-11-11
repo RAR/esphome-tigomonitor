@@ -38,7 +38,8 @@ trap 'kill $daemon $tap 2>/dev/null || true' EXIT
 start() {  # start NAME PORT BENCH
   name=$1 port=$2 bench=$3
   mkdir -p "$out/$name"
-  python3 linux/tools/mock_tap.py "$out/$name.tty" --window 600 --nodes 2 --panels 2 --stats "$out/$name.json" &
+  # shellcheck disable=SC2086
+  python3 linux/tools/mock_tap.py "$out/$name.tty" --window 600 --nodes 2 --panels 2 --stats "$out/$name.json" ${4:-} &
   tap=$!
   sleep 0.5
   printf '{"bus_role": "master", "master_bench": %s, "serial_port": "%s", "gateway_id": 4609, "web_port": %s, "web_password": "pw"}\n' \
@@ -92,6 +93,16 @@ expect "still polled after the reset" "$(body GET 18402 /api/master | python3 -c
 expect "the log says key hidden" "$(grep -c 'key hidden' "$out/on.log" | tr -d ' ' | sed 's/^[1-9][0-9]*$/yes/')" yes
 # Our own write is in the bus log, but it isn't another device's: no alarm.
 expect "no reconfiguration alarm from our own write" "$(grep -c 'another device sent the TAP' "$out/on.log" || true)" 0
+stop_all
+
+# --- a TAP with the G8.59's 46-byte block: written in that form, its 10
+# unexplained bytes left as the TAP had them ---
+start wide 18403 true --cfg-size=46
+expect "the write starts" "$(code POST 18403 /api/master/taps/provision "{\"mac\": \"$MAC\", \"channel\": 20, \"pan\": \"5A5A\", \"dry_run\": false}")" 200
+finished 18403
+expect "it finished" "$(edit 18403 "(e['ok'], e['step'])")" "(True, 'done')"
+expect "one write, on channel 20, PAN 5A5A" "$(stat "$out/wide.json" "d['cfg_writes']")" "[{'channel': 20, 'pan': '5A5A'}]"
+expect "the TAP's 10 bytes as they were" "$(stat "$out/wide.json" "d['cfg_extra'] == bytes(range(31, 41)).hex()")" True
 stop_all
 
 [ $fail = 0 ] && echo "provision e2e passed" || { echo "provision e2e FAILED; see $out/"; exit 1; }

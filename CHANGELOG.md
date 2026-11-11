@@ -28,8 +28,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `master_bench` is on. It first asks the TAP for its MAC and stops unless
   that's the one named, and it does a dry run unless told otherwise. The key
   never appears in its answers or the log. There's no page for it yet: it's
-  for a bench rehearsal before a CCA-less Add a TAP. Not yet run on a real
-  TAP.
+  for a bench rehearsal before a CCA-less Add a TAP. On a bench H1.0007 TAP
+  (2026-11-11) the settings it wrote survived a power cycle, and a write
+  without the stored read didn't. It writes the 36- or 46-byte form the TAP
+  reads back in, keeping a 46-byte TAP's own extra 10 bytes. An optimizer
+  joining the network it sets up hasn't been seen yet.
 - **Set up a whole system from one page (Raspberry Pi).** System setup
   gains **Set up a new system**, a checklist from the bus to the layout:
   the bus, the TAP, the optimizers, the layout, string ratings, and a

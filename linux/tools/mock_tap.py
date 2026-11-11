@@ -113,6 +113,7 @@ def main():
     ap.add_argument('--pv-wrong-reply', action='store_true')  # answer 0x0B00 with the other byte
     ap.add_argument('--join-after', type=float, default=5)  # a record the master wrote joins this long after
     ap.add_argument('--table-ack', type=int, default=0)  # the 0x29 ack byte
+    ap.add_argument('--cfg-size', type=int, default=36, choices=[36, 46])  # the radio block's form: 46 as the G8.59's
     a = ap.parse_args()
 
     # One pty per master on the bus. The slave ends stay open here, so a
@@ -165,8 +166,9 @@ def main():
     stats['erases'] = 0
     # The radio settings block (tap_config.h): the write sets RAM, the
     # stored read (00 01) saves it, a reset brings back what was saved.
-    cfg_ram = bytes(range(36))
+    cfg_ram = bytes(range(a.cfg_size))
     cfg_saved = cfg_ram
+    stats['cfg_extra'] = cfg_ram[31:41].hex() if a.cfg_size == 46 else ''  # the 46-byte form's 10 unexplained bytes
     stats['cfg_writes'] = []  # channel and PAN of each write, never the key
     stats['cfg_saves'] = 0
     stats['unicast_resets'] = 0
@@ -339,9 +341,13 @@ def main():
                 if p[5:7] == b'\x00\x01':
                     cfg_saved = cfg_ram
                     stats['cfg_saves'] += 1
-                send(encode(addr | 0x8000, 0x0B10, bytes([0x00, 0x0E, 0x00, 0x0E, p[4]]) + cfg_ram + b'\x00'))
-            elif cmd == 0x0B0F and len(p) == 43 and p[3] == 0x0D and p[5:7] == b'\x01\x00':  # the write: RAM only
-                cfg_ram = bytes(p[7:43])
+                # A 46-byte TAP's stored read answers in the 36-byte form.
+                shown = cfg_ram[:31] + cfg_ram[41:] if p[5:7] == b'\x00\x01' and len(cfg_ram) == 46 else cfg_ram
+                send(encode(addr | 0x8000, 0x0B10, bytes([0x00, 0x0E, 0x00, 0x0E, p[4]]) + shown + b'\x00'))
+            elif cmd == 0x0B0F and len(p) == 7 + a.cfg_size and p[3] == 0x0D and p[5:7] == b'\x01\x00':  # the write: RAM only
+                cfg_ram = bytes(p[7:])
+                if a.cfg_size == 46:
+                    stats['cfg_extra'] = cfg_ram[31:41].hex()
                 stats['cfg_writes'].append({'channel': cfg_ram[1], 'pan': f'{cfg_ram[2]:02X}{cfg_ram[3]:02X}'})
                 send(encode(addr | 0x8000, 0x0B10, bytes([0x00, 0x0E, 0x00, 0x0E, p[4]]) + cfg_ram + b'\x00'))
             elif cmd == 0x0B0F and len(p) == 7 and p[3] == 0x22:  # empty broadcast, acked

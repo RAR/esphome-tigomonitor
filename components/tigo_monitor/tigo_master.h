@@ -1797,8 +1797,9 @@ inline Allow classify_request(uint16_t cmd, const Bytes &payload) {
       // A first byte of 01 is the write of the TAP's whole network config
       // (channel, PAN, key): how a CCA re-PANs a TAP. Only 01 00 (active)
       // with a whole block on channel 11-26 is ever sent, and only on the
-      // bench; 01 01 (the stored copy) never.
-      if (args.size() == 38 && args[0] == 0x01 && args[1] == 0x00 && args[2] == 0x00 && args[3] >= 11 &&
+      // bench; 01 01 (the stored copy) never. The block is 36 bytes, or 46
+      // on a TAP that reads back in that form (tap_config.h).
+      if ((args.size() == 38 || args.size() == 48) && args[0] == 0x01 && args[1] == 0x00 && args[2] == 0x00 && args[3] >= 11 &&
           args[3] <= 26)
         return Allow::provision;
       if (!args.empty() && args[0] != 0x00) return Allow::never;
