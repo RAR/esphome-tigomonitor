@@ -108,7 +108,9 @@ class BusMaster {
   }
   bool request_herd(std::string &why) { return core_.request_herd(why); }
   bool request_forget_tap(uint16_t id, std::string &why) { return core_.request_forget_tap(id, why); }
-  void set_window_wanted(bool wanted, int missing) { core_.set_window_wanted(wanted, missing); }
+  void set_window_wanted(bool wanted, int missing, int64_t morning_until_unix = 0) {
+    core_.set_window_wanted(wanted, missing, morning_until_unix);
+  }
   std::map<uint16_t, esphome::tigo_monitor::master::Queries::Setup> setups() const { return core_.setups(); }
   void tick(uint32_t now_ms) { core_.tick(now_ms); }
   void close() { core_.close(); }

@@ -170,6 +170,7 @@ struct MasterStatus {
   bool discovery_renewing = true;
   bool window_wanted = true;  // what automatic discovery wants (true when it's off)
   int missing_expected = 0;   // and how many in the layout it is waiting for
+  int64_t morning_until_unix = 0;  // kept open after sunrise until then (0: not)
   PvState pv;
   bool pv_confirmed = false;    // the TAP's last reply carried the byte
   bool pv_unconfirmed = false;  // it didn't, after PvSwitch::RETRIES
@@ -301,7 +302,7 @@ class MasterCore {
   // as the CCA does with every expected optimizer found. The owner's switch
   // (request_discovery) still wins: renewed only when both want it.
   // missing: how many expected optimizers haven't reported today, for the UI.
-  void set_window_wanted(bool wanted, int missing = 0);
+  void set_window_wanted(bool wanted, int missing = 0, int64_t morning_until_unix = 0);
   // master_table_writes: lets an add or removal the owner starts send its
   // table writes and erase. Off, only a dry run can be started. Call before open().
   void set_table_writes(bool on) { table_writes_on_ = on; }

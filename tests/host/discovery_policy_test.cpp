@@ -51,7 +51,25 @@ static void test_daylight_from_recent_reports() {
   CHECK(!daylight(0, NOON));
 }
 
+// The owner's morning rule (2026-11-11): keep the window open for a while
+// after the day's first report, so optimizers that woke onto a poor relay
+// can move. Until first + morning; never at night; 0 turns it off.
+static void test_morning_keeps_it_open_after_sunrise() {
+  const int64_t sunrise = MIDNIGHT + 7 * 3600;
+  CHECK(morning_until(sunrise, MIDNIGHT, 120 * 60) == sunrise + 120 * 60);
+  CHECK(morning_wanted(sunrise, MIDNIGHT, sunrise + 60, true, 120 * 60));
+  CHECK(morning_wanted(sunrise, MIDNIGHT, sunrise + 119 * 60, true, 120 * 60));
+  CHECK(!morning_wanted(sunrise, MIDNIGHT, sunrise + 120 * 60, true, 120 * 60));  // over
+  CHECK(!morning_wanted(sunrise, MIDNIGHT, sunrise + 60, false, 120 * 60));       // not daylight
+  CHECK(!morning_wanted(sunrise, MIDNIGHT, sunrise + 60, true, 0));                // off
+  // Yesterday's first report isn't today's sunrise.
+  CHECK(!morning_wanted(MIDNIGHT - 3600, MIDNIGHT, MIDNIGHT + 60, true, 120 * 60));
+  CHECK(morning_until(MIDNIGHT - 3600, MIDNIGHT, 120 * 60) == 0);
+  CHECK(!morning_wanted(0, MIDNIGHT, MIDNIGHT + 60, true, 120 * 60));  // none yet
+}
+
 int main() {
+  test_morning_keeps_it_open_after_sunrise();
   test_no_layout_keeps_renewing();
   test_all_heard_today_closes_it();
   test_one_unheard_today_opens_it();

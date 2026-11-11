@@ -47,6 +47,7 @@ Settings load_settings(const std::string &path) {
   get(j, "master_table_writes", s.master_table_writes);
   get(j, "master_adopt_taps", s.master_adopt_taps);
   get(j, "discovery_auto", s.discovery_auto);
+  get(j, "discovery_morning_min", s.discovery_morning_min);
   get(j, "master_optimizer_writes", s.master_optimizer_writes);
   get(j, "gateway_id", s.gateway_id);
   get(j, "web_port", s.web_port);
@@ -84,6 +85,7 @@ Settings load_settings(const std::string &path) {
   if (s.web_username.empty()) s.web_username = "admin";
   if (s.bus_role != "master" && s.bus_role != "standby") s.bus_role = "listen";
   if (!standby_takeover_ok(s.standby_takeover_s)) s.standby_takeover_s = 3;
+  if (s.discovery_morning_min < 0 || s.discovery_morning_min > 720) s.discovery_morning_min = 120;
   if (!gateway_id_ok(s.gateway_id)) s.gateway_id = 0x1201;
   s.master_optimizer_writes = s.master_optimizer_writes && s.master_queries;
   if (s.history_interval_min < 1 || s.history_interval_min > 60) s.history_interval_min = 1;
@@ -107,6 +109,7 @@ static json to_json(const Settings &s) {
       {"master_table_writes", s.master_table_writes},
       {"master_adopt_taps", s.master_adopt_taps},
       {"discovery_auto", s.discovery_auto},
+      {"discovery_morning_min", s.discovery_morning_min},
       {"master_optimizer_writes", s.master_optimizer_writes},
       {"gateway_id", s.gateway_id},
       {"web_port", s.web_port},
