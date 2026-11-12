@@ -71,8 +71,10 @@ struct HttpContext {
   std::function<int(const esphome::tigo_monitor::master::Bytes &mac, uint16_t id, bool dry_run, std::string &why,
                     uint16_t tap)>
       request_table_add;
-  // The owner's removal of one (tap 0: the one it reports through): 200, or 409 with why.
-  std::function<int(const esphome::tigo_monitor::master::Bytes &mac, bool dry_run, std::string &why, uint16_t tap)>
+  // The owner's removal of one, or several in one pass (tap 0: the one the
+  // first reports through): 200, or 409 with why.
+  std::function<int(const std::vector<esphome::tigo_monitor::master::Bytes> &macs, bool dry_run, std::string &why,
+                    uint16_t tap)>
       request_table_remove;
   // The owner's replace of one (old MAC, new MAC, dry run, tap 0: the old
   // one's): 200, or 409 with why.

@@ -336,6 +336,9 @@ class MasterCore {
   // same refusals, but for the window, and nowhere to save what stays.
   bool request_table_remove(const esphome::tigo_monitor::master::Bytes &mac, bool dry_run, std::string &why,
                             uint16_t tap = 0);
+  // Several in one pass: one erase, only those that stay written back.
+  bool request_table_remove(const std::vector<esphome::tigo_monitor::master::Bytes> &macs, bool dry_run,
+                            std::string &why, uint16_t tap = 0);
   // Starts replacing one: the table erased and written back without it,
   // with the new one listed (not joined) at its address, then waited for
   // like an add. The removal's refusals, and a new MAC that isn't 8 bytes.

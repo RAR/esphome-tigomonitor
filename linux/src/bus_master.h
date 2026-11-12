@@ -85,6 +85,10 @@ class BusMaster {
                             uint16_t tap = 0) {
     return core_.request_table_remove(mac, dry_run, why, tap);
   }
+  bool request_table_remove(const std::vector<esphome::tigo_monitor::master::Bytes> &macs, bool dry_run,
+                            std::string &why, uint16_t tap = 0) {
+    return core_.request_table_remove(macs, dry_run, why, tap);
+  }
   bool request_table_replace(const esphome::tigo_monitor::master::Bytes &old_mac,
                              const esphome::tigo_monitor::master::Bytes &new_mac, bool dry_run, std::string &why,
                              uint16_t tap = 0) {

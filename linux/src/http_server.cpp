@@ -1652,7 +1652,8 @@ void HttpServer::routes_() {
 
   // Pi-only: remove an optimizer from the TAP's table, as the CCA does: the
   // table erased and the rest written back as they were (table_edit.h).
-  // {"label": ...} or {"mac": ...}, and "dry_run"; behind the web password.
+  // {"label": ...} or {"mac": ...}, or several in one pass as {"macs": [...]}
+  // (up to 100; ones not listed are skipped), and "dry_run"; behind the web password.
   svr.Post("/api/master/table/remove", [this, tap_of](const httplib::Request &req, httplib::Response &res) {
     if (ctx_.current_settings().web_password.empty() && !setup_open(ctx_.current_settings(), unix_now_s())) {
       send_json(res, {{"error", "set a web password first"}}, 403);
@@ -1661,10 +1662,25 @@ void HttpServer::routes_() {
     json j = json::parse(req.body, nullptr, false);
     namespace mp = esphome::tigo_monitor::master;
     mp::Bytes mac;
+    std::vector<mp::Bytes> macs;
     std::string bad;
-    if (j.is_discarded() || !j.is_object() || !optimizer_of(j, mac, bad)) {
+    if (!j.is_discarded() && j.is_object() && j.contains("macs")) {
+      if (!j["macs"].is_array() || j["macs"].empty() || j["macs"].size() > 100) {
+        send_json(res, {{"error", "macs is a list of 1 to 100 16-digit MACs"}}, 400);
+        return;
+      }
+      for (const auto &m : j["macs"]) {
+        if (!m.is_string() || !optimizer_of(json{{"mac", m}}, mac, bad)) {
+          send_json(res, {{"error", "macs: " + (bad.empty() ? std::string("give 16-digit MACs") : bad)}}, 400);
+          return;
+        }
+        macs.push_back(mac);
+      }
+    } else if (j.is_discarded() || !j.is_object() || !optimizer_of(j, mac, bad)) {
       send_json(res, {{"error", bad.empty() ? "expected {\"label\": \"4-9A57A2L\"} or {\"mac\": \"...\"}" : bad}}, 400);
       return;
+    } else {
+      macs.push_back(mac);
     }
     bool dry = j.contains("dry_run") && j["dry_run"].is_boolean() && j["dry_run"].get<bool>();
     uint16_t tap = 0;
@@ -1674,8 +1690,10 @@ void HttpServer::routes_() {
       return;
     }
     std::string why;
-    int code = ctx_.request_table_remove ? ctx_.request_table_remove(mac, dry, why, tap) : 409;
-    if (code == 200) send_json(res, {{"started", true}, {"dry_run", dry}, {"mac", mp::mac_hex(mac)}, {"label", mp::label_of(mac)}});
+    int code = ctx_.request_table_remove ? ctx_.request_table_remove(macs, dry, why, tap) : 409;
+    if (code == 200 && j.contains("macs")) send_json(res, {{"started", true}, {"dry_run", dry}, {"count", macs.size()}});
+    else if (code == 200)
+      send_json(res, {{"started", true}, {"dry_run", dry}, {"mac", mp::mac_hex(mac)}, {"label", mp::label_of(mac)}});
     else send_json(res, {{"error", why.empty() ? "not running the bus" : why}}, code);
   });
 

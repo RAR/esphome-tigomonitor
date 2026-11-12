@@ -541,14 +541,16 @@ int main(int argc, char **argv) {
             avoid.insert(static_cast<uint16_t>(strtoul(n.addr.c_str(), nullptr, 16) & 0x7FFF));
         return bus_master->request_table_add(mac, id, dry_run, why, tap, avoid) ? 200 : 409;
       },
-      [&](const esphome::tigo_monitor::master::Bytes &mac, bool dry_run, std::string &why, uint16_t tap) {
+      [&](const std::vector<esphome::tigo_monitor::master::Bytes> &macs, bool dry_run, std::string &why,
+          uint16_t tap) {
         std::lock_guard<std::mutex> lock(master_mu);
         if (!bus_master) {
           why = "this monitor isn't running the bus";
           return 409;
         }
-        if (!tap) tap = known_tap(*bus_master, tap_of_mac(esphome::tigo_monitor::master::mac_hex(mac)));
-        return bus_master->request_table_remove(mac, dry_run, why, tap) ? 200 : 409;
+        if (!tap && !macs.empty())
+          tap = known_tap(*bus_master, tap_of_mac(esphome::tigo_monitor::master::mac_hex(macs.front())));
+        return bus_master->request_table_remove(macs, dry_run, why, tap) ? 200 : 409;
       },
       [&](const esphome::tigo_monitor::master::Bytes &old_mac, const esphome::tigo_monitor::master::Bytes &new_mac,
           bool dry_run, std::string &why, uint16_t tap) {

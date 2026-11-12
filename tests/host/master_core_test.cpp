@@ -655,6 +655,26 @@ static void test_a_removal_saves_then_erases() {
   core.close();
 }
 
+// Several in one removal: each one taken off is told, once.
+static void test_a_removal_of_several() {
+  TableTap tap;
+  MasterCore core(&tap.port, [](int, const std::string &) {}, nullptr, nullptr, GW, false, false);
+  core.set_table_writes(true);
+  core.set_table_saved([](const mp::Bytes &, const std::vector<mp::TableRecord> *) { return true; });
+  std::vector<std::string> removed;
+  core.set_on_removed([&](const std::string &mac) { removed.push_back(mac); });
+  CHECK(core.open());
+  std::vector<mp::Bytes> both;
+  for (const auto &r : tap.records) both.emplace_back(r.begin(), r.begin() + 8);
+  std::string why;
+  CHECK(core.request_table_remove(both, false, why));
+  for (uint32_t t = 0; t < 20000; t += 50) core.tick(t);
+  CHECK(tap.erases == 1 && tap.records.empty());
+  CHECK(removed.size() == 2);
+  CHECK(core.status().table_edit.ok);
+  core.close();
+}
+
 // A saved list from a removal that stopped: finished at the start with the
 // setting on; with it off, nothing is sent and every change is refused.
 static void test_an_interrupted_removal_is_finished() {
@@ -1416,6 +1436,7 @@ int main() {
   test_a_replace_lists_the_new_one_and_waits();
   test_a_removal_cut_off_by_a_tap_restart_is_finished();
   test_a_removal_saves_then_erases();
+  test_a_removal_of_several();
   test_an_interrupted_removal_is_finished();
   test_a_table_add_needs_the_setting();
   test_a_dry_run_sends_no_write();

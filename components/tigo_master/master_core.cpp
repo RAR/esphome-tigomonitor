@@ -263,9 +263,14 @@ bool MasterCore::request_provision(const master::Bytes &tap_mac, const master::R
 }
 
 bool MasterCore::request_table_remove(const master::Bytes &mac, bool dry_run, std::string &why, uint16_t tap) {
+  return request_table_remove(std::vector<master::Bytes>{mac}, dry_run, why, tap);
+}
+
+bool MasterCore::request_table_remove(const std::vector<master::Bytes> &macs, bool dry_run, std::string &why,
+                                      uint16_t tap) {
   std::lock_guard<std::mutex> lock(mu_);
   if (table_refusal_(dry_run, tap, why)) return false;
-  if (mac.size() != 8) {
+  if (macs.empty() || std::any_of(macs.begin(), macs.end(), [](const master::Bytes &m) { return m.size() != 8; })) {
     why = "a MAC is 8 bytes";
     return false;
   }
@@ -273,7 +278,8 @@ bool MasterCore::request_table_remove(const master::Bytes &mac, bool dry_run, st
     why = "nowhere to save the optimizers that stay, so nothing is erased";
     return false;
   }
-  start_table_job_(std::make_unique<master::TableRemove>(mac, dry_run), tap);
+  if (macs.size() == 1) start_table_job_(std::make_unique<master::TableRemove>(macs[0], dry_run), tap);
+  else start_table_job_(std::make_unique<master::TableRemove>(macs, dry_run), tap);
   return true;
 }
 
@@ -537,12 +543,20 @@ void MasterCore::settle_table_job_(uint32_t now_ms) {
     waiting_since_[master::mac_hex(table_job_->mac())] = unix_now();
   }
   // A removal that took it off (not one that found it absent; a resumed one did).
-  if (std::string(table_job_->kind()) == "remove" && table_job_->ok() && !table_job_->dry_run() && on_removed_ &&
-      (table_job_->id() || static_cast<master::TableRemove *>(table_job_.get())->resuming()))
-    on_removed_(master::mac_hex(table_job_->mac()));
+  // Every one it took off: one, or several in one pass; a resumed one, its own.
+  std::vector<master::Bytes> gone;
+  if (!add) {
+    auto *r = static_cast<master::TableRemove *>(table_job_.get());
+    gone = r->removed();
+    if (gone.empty() && r->resuming()) gone.push_back(table_job_->mac());
+  }
+  if (std::string(table_job_->kind()) == "remove" && table_job_->ok() && !table_job_->dry_run() && on_removed_)
+    for (const auto &m : gone) on_removed_(master::mac_hex(m));
   if (!add && table_job_->ok() && !table_job_->dry_run()) {
-    for (auto &t : taps_) t->join_watch.drop(table_job_->mac());
-    waiting_since_.erase(master::mac_hex(table_job_->mac()));
+    for (const auto &m : gone) {
+      for (auto &t : taps_) t->join_watch.drop(m);
+      waiting_since_.erase(master::mac_hex(m));
+    }
     // A replace's new optimizer is waited for like an add's.
     auto *r = static_cast<master::TableRemove *>(table_job_.get());
     if (r->awaiting_join()) {
