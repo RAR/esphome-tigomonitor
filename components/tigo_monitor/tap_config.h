@@ -311,7 +311,7 @@ class ProvisionJob : public TableJob {
           dry_text_.push_back("0D 00 01 (the save)");
           dry_text_.push_back("0D 00 00 (the check)");
           if (reset_) dry_text_.push_back("0010 37 24 92 66 to this TAP alone");
-          finish_("dry run: would give the TAP " + block_.describe() + capacity_note_());
+          finish_("dry run: would give the TAP " + block_.describe() + capacity_note_() + now_note_());
           return {};
         }
         return provision_(send_(SUB_GATEWAY_CFG, radio_write_args(block_), WRITE_WAIT_MS, seq));
@@ -434,6 +434,18 @@ class ProvisionJob : public TableJob {
   // What the TAP ran before, for the log: never shown with its key.
   bool had_before() const { return had_before_; }
   const RadioBlock &before() const { return before_block_; }
+  // What the TAP has now, for a dry run: its map, and the profile it's for.
+  std::string now_note_() const {
+    if (!had_before_) return "";
+    std::string m;
+    char x[3];
+    for (uint8_t v : before_block_.map) {
+      std::snprintf(x, sizeof(x), "%02x", v);
+      m += x;
+    }
+    int n = before_block_.map[8] ? profile_capacity(before_block_.map[0]) : 0;
+    return " (now map " + m + (n ? ", for up to " + std::to_string(n) : std::string()) + ")";
+  }
   // A dry run's frames as text, the key hidden.
   const std::vector<std::string> &dry_text() const { return dry_text_; }
 

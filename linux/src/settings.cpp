@@ -45,6 +45,7 @@ Settings load_settings(const std::string &path) {
   get(j, "master_queries", s.master_queries);
   get(j, "master_read_tap_config", s.master_read_tap_config);
   get(j, "master_send_41", s.master_send_41);
+  get(j, "dangerous_options", s.dangerous_options);
   get(j, "master_table_writes", s.master_table_writes);
   get(j, "master_adopt_taps", s.master_adopt_taps);
   get(j, "discovery_auto", s.discovery_auto);
@@ -108,6 +109,7 @@ static json to_json(const Settings &s) {
       {"master_queries", s.master_queries},
       {"master_read_tap_config", s.master_read_tap_config},
       {"master_send_41", s.master_send_41},
+      {"dangerous_options", s.dangerous_options},
       {"master_table_writes", s.master_table_writes},
       {"master_adopt_taps", s.master_adopt_taps},
       {"discovery_auto", s.discovery_auto},

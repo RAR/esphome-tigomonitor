@@ -150,4 +150,23 @@ expect "already set" "$(edit 18405 "e['message']")" "the report period is alread
 expect "still two writes" "$(stat "$out/period.json" "len(d['period_writes'])")" 2
 stop_all
 
+# --- dangerous_options: set in settings.json only, never through the API ---
+start danger 18406 false
+expect "off unless the file says so" "$(body GET 18406 /api/settings | python3 -c "import json,sys; print(json.load(sys.stdin)['dangerous_options'])")" False
+expect "the API takes the save" "$(code POST 18406 /api/settings '{"dangerous_options": true}')" 200
+sleep 2
+expect "but doesn't turn it on" "$(body GET 18406 /api/settings | python3 -c "import json,sys; print(json.load(sys.stdin)['dangerous_options'])")" False
+expect "nor writes it to the file" "$(stat "$out/danger/settings.json" "d.get('dangerous_options')")" False
+# A profile's dry run says what the TAP has now.
+expect "a profile dry run starts" "$(code POST 18406 /api/master/taps/provision "{\"mac\": \"$MAC\", \"keep_network\": true, \"profile\": 120}")" 200
+finished 18406
+expect "and names the TAP's map now" "$(edit 18406 "('for up to 120' in e['message'], '(now map ' in e['message'])")" "(True, True)"
+stop_all
+start dangeron 18407 false "" ', "dangerous_options": true'
+expect "on when the file says so" "$(body GET 18407 /api/settings | python3 -c "import json,sys; print(json.load(sys.stdin)['dangerous_options'])")" True
+expect "and the API can't turn it off" "$(code POST 18407 /api/settings '{"dangerous_options": false}')" 200
+sleep 2
+expect "still on" "$(body GET 18407 /api/settings | python3 -c "import json,sys; print(json.load(sys.stdin)['dangerous_options'])")" True
+stop_all
+
 [ $fail = 0 ] && echo "provision e2e passed" || { echo "provision e2e FAILED; see $out/"; exit 1; }

@@ -1974,6 +1974,7 @@ void HttpServer::routes_() {
                     {"master_queries", s.master_queries},
                     {"master_read_tap_config", s.master_read_tap_config},
                     {"master_send_41", s.master_send_41},
+                    {"dangerous_options", s.dangerous_options},  // settings.json only: a POST never changes it
                     {"master_table_writes", s.master_table_writes},
                     {"master_adopt_taps", s.master_adopt_taps},
                     {"discovery_auto", s.discovery_auto},
