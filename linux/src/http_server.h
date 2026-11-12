@@ -19,6 +19,7 @@
 #include "tls.h"
 #include "bus_log.h"
 #include "topology.h"
+#include "web_session.h"
 
 #include <atomic>
 #include <functional>
@@ -29,6 +30,7 @@
 
 namespace httplib {
 class Server;
+struct Request;
 }
 
 namespace tigod {
@@ -126,6 +128,13 @@ class HttpServer {
   std::unique_ptr<std::thread> thread_;
   int port_ = 0;
   std::mutex settings_mu_;  // serialises settings.json writes
+  WebSessions sessions_;    // the web UI's sign-ins (web_session.h)
+  // Signed in: a session cookie, or the username and password as HTTP Basic
+  // (scripts, and browsers that still send what their popup was given).
+  bool signed_in_(const httplib::Request &req, const Settings &s);
+  // The Set-Cookie for a session, or with "" one that ends it.
+  std::string session_cookie_(const std::string &token, const httplib::Request &req, const Settings &s) const;
+  std::string client_(const httplib::Request &req, const Settings &s) const;  // who wrong passwords count against
 };
 
 }  // namespace tigod

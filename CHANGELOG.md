@@ -125,6 +125,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Signing in is a page, not the browser's popup (Raspberry Pi and other
+  Linux).** With a web UI password set, the page now asks for the username
+  and password itself, so a password manager can fill them, a wrong one
+  says so, and **Sign out** (Settings → Web UI) ends the session. You stay
+  signed in for 30 days, until the password changes or the service
+  restarts. Five wrong passwords in 15 minutes lock that address out for
+  a quarter of an hour. Behind a reverse proxy, add its address under
+  **Trusted proxies** (Settings → Web UI) so the lockout reaches only the
+  visitor who guessed, not everyone the proxy serves. Scripts that send
+  the login as HTTP Basic keep working; nothing to do. The ESP32 still
+  uses the browser's login.
+- **Questions before a change open in the web UI, not the browser.** Every
+  "are you sure?" (retiring a TAP, turning the array's output off,
+  removing the password, and the rest) is now the app's own dialog: the
+  question as its title and a button that names the action. One that can't
+  be taken back is red, with the focus on Cancel, and on a phone it rises
+  from the bottom of the screen. Primary buttons such as Save no longer
+  turn grey under the pointer.
 - **The web pages say TigoMonitor, not "the Pi" (Raspberry Pi and other
   Linux).** It runs on any Linux machine, so messages such as "This Pi is not
   running the bus" now read "This TigoMonitor is not running the bus". The

@@ -11,6 +11,7 @@ import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
 import { routes, piRoutes } from '../screenshots/fixtures.mjs';
+import { answer, answerAll } from './ui-dialog.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const html = readFileSync(resolve(HERE, '../../components/tigo_server/web/app.html'), 'utf8')
@@ -256,7 +257,7 @@ test('the arrow keys move along the tabs', async () => {
 test('the Web UI card saves the web settings with the bus ones', async () => {
   const { page, ctx, api } = await open({ hash: '#settings' });
   await page.click('#settings-tab-web');
-  page.on('dialog', (d) => d.dismiss());
+  await answerAll(page, false);
   await page.fill('#pi-web-port', '8080');
   await page.click('#pi-web-save');
   await page.waitForFunction(() => true);
@@ -264,6 +265,38 @@ test('the Web UI card saves the web settings with the bus ones', async () => {
   const body = api.posts.at(-1);
   assert.equal(body.web_port, 8080);
   assert.equal(body.bus_role, 'listen');
+  await ctx.close();
+});
+
+test('a primary button keeps its colour under the pointer', async () => {
+  const { page, ctx } = await open({ hash: '#settings' });
+  await page.click('#settings-tab-web');
+  const bg = () => page.$eval('#pi-web-save', (b) => getComputedStyle(b).backgroundColor);
+  const grey = await page.$eval('#pi-web-signout', (b) => getComputedStyle(b).backgroundColor);
+  const before = await bg();
+  await page.hover('#pi-web-save');
+  await page.waitForTimeout(250);
+  const after = await bg();
+  assert.notEqual(after, grey, 'not the plain buttons\' grey');
+  // rgb(0-255) or, from color-mix, color(srgb 0-1).
+  const sum = (c) => c.match(/[\d.]+/g).slice(0, 3).map(Number).reduce((a, b) => a + b, 0) * (c.startsWith('color(') ? 255 : 1);
+  assert.ok(sum(after) >= sum(before), `lighter or the same, not darker: ${before} -> ${after}`);
+  await ctx.close();
+});
+
+test('the Web UI card shows and saves the trusted proxies', async () => {
+  const { page, ctx, api } = await open({ hash: '#settings', pages: { trusted_proxies: ['172.16.0.0/12'] } });
+  await page.click('#settings-tab-web');
+  await answerAll(page, false);
+  assert.equal(await page.inputValue('#pi-web-proxies'), '172.16.0.0/12');
+  await page.fill('#pi-web-proxies', ' 10.0.0.1,  fd00::/8 192.168.1.2 ');
+  await page.click('#pi-web-save');
+  await page.waitForTimeout(300);
+  assert.deepEqual(api.posts.at(-1).trusted_proxies, ['10.0.0.1', 'fd00::/8', '192.168.1.2']);
+  await page.fill('#pi-web-proxies', '');
+  await page.click('#pi-web-save');
+  await page.waitForTimeout(300);
+  assert.deepEqual(api.posts.at(-1).trusted_proxies, []);
   await ctx.close();
 });
 
@@ -284,7 +317,7 @@ test('running the bus, Settings → Bus has one switch: Allow changes to the TAP
   assert.match(await page.textContent('#pi-cca-row'), /Runs the whole bus/);
   assert.equal(await page.isVisible('#pi-cca-all'), false);
   await page.check('#pi-tablewrites');
-  page.on('dialog', (d) => d.dismiss());
+  await answerAll(page, false);
   await page.click('#pi-port-save');
   await page.waitForTimeout(300);
   const body = api.posts.at(-1);
@@ -300,7 +333,7 @@ test('a part of the CCA\'s running turned off in the settings file is named, and
   await page.click('#settings-tab-bus');
   await page.waitForSelector('#pi-cca-row', { state: 'visible' });
   assert.match(await page.textContent('#pi-cca-row'), /Off in the settings file: querying the optimizers, the writes their answers call for/);
-  page.on('dialog', (d) => d.accept());
+  await answerAll(page, true);
   await page.click('#pi-cca-all');
   await page.waitForTimeout(300);
   assert.deepEqual(api.posts.at(-1), CCA_PARTS);
