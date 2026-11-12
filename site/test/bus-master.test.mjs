@@ -11,6 +11,7 @@ import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
 import { routes } from '../screenshots/fixtures.mjs';
+import { answer, answerAll } from './ui-dialog.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const html = readFileSync(resolve(HERE, '../../components/tigo_server/web/app.html'), 'utf8')
@@ -147,14 +148,12 @@ test('running the bus with PV on: the page, the pill says PV on, no banner', asy
 test('turning PV off asks first; dismissed it sends nothing, accepted it sends off', async () => {
   const { page, ctx, api } = await open({ hash: '#busmaster' });
   await page.waitForSelector('#pv-toggle', { state: 'visible' });
-  const seen = [];
-  page.once('dialog', (d) => { seen.push(d.message()); d.dismiss(); });
   await page.click('#pv-toggle');
+  assert.equal(await answer(page, false), "Turn the array's output off?");
   await page.waitForTimeout(300);
-  assert.deepEqual(seen, ["Turn the array's output off? This is not rapid shutdown."]);
   assert.deepEqual(api.posts, []);
-  page.once('dialog', (d) => d.accept());
   await page.click('#pv-toggle');
+  await answer(page, true);
   await page.waitForFunction(() => document.getElementById('pv-pill').textContent.trim() === 'PV off');
   assert.deepEqual(api.posts, [{ on: false }]);
   assert.equal(await page.isVisible('#pv-banner'), true);
@@ -188,8 +187,8 @@ test('a refused switch says why and changes nothing', async () => {
   const { page, ctx, api } = await open({ hash: '#busmaster' });
   await page.waitForSelector('#pv-toggle', { state: 'visible' });
   api.pvStatus = 403;
-  page.once('dialog', (d) => d.accept());
   await page.click('#pv-toggle');
+  await answer(page, true);
   await page.waitForFunction(() => /web password/.test(document.getElementById('pv-status').textContent));
   assert.equal((await page.textContent('#pv-pill')).trim(), 'PV on');
   await ctx.close();

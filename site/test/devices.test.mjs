@@ -9,6 +9,7 @@ import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
 import { routes, piRoutes } from '../screenshots/fixtures.mjs';
+import { answer, answerAll } from './ui-dialog.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const html = readFileSync(resolve(HERE, '../../components/tigo_server/web/app.html'), 'utf8')
@@ -192,7 +193,7 @@ const stray = { addr: '0080', barcode: '04C05B0000200001', name: '', string_labe
 test('Devices, on the Pi: an optimizer heard but not in the node list, and Forget', async () => {
   const posts = [];
   const { page, ctx, errors } = await open(true, routes['/api/versions'], posts, undefined, [...routes['/api/devices'].devices, stray]);
-  page.on('dialog', (d) => d.accept());
+  await answerAll(page, true);
   await page.waitForSelector('#devices-strays', { state: 'visible' });
   const row = await page.textContent('#devices-strays tbody');
   assert.match(row, /0080/);

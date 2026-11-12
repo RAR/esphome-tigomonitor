@@ -11,6 +11,7 @@ import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
 import { routes, piRoutes } from '../screenshots/fixtures.mjs';
+import { answer, answerAll } from './ui-dialog.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const html = readFileSync(resolve(HERE, '../../components/tigo_server/web/app.html'), 'utf8')
@@ -256,7 +257,7 @@ test('the arrow keys move along the tabs', async () => {
 test('the Web UI card saves the web settings with the bus ones', async () => {
   const { page, ctx, api } = await open({ hash: '#settings' });
   await page.click('#settings-tab-web');
-  page.on('dialog', (d) => d.dismiss());
+  await answerAll(page, false);
   await page.fill('#pi-web-port', '8080');
   await page.click('#pi-web-save');
   await page.waitForFunction(() => true);
@@ -284,7 +285,7 @@ test('running the bus, Settings → Bus has one switch: Allow changes to the TAP
   assert.match(await page.textContent('#pi-cca-row'), /Runs the whole bus/);
   assert.equal(await page.isVisible('#pi-cca-all'), false);
   await page.check('#pi-tablewrites');
-  page.on('dialog', (d) => d.dismiss());
+  await answerAll(page, false);
   await page.click('#pi-port-save');
   await page.waitForTimeout(300);
   const body = api.posts.at(-1);
@@ -300,7 +301,7 @@ test('a part of the CCA\'s running turned off in the settings file is named, and
   await page.click('#settings-tab-bus');
   await page.waitForSelector('#pi-cca-row', { state: 'visible' });
   assert.match(await page.textContent('#pi-cca-row'), /Off in the settings file: querying the optimizers, the writes their answers call for/);
-  page.on('dialog', (d) => d.accept());
+  await answerAll(page, true);
   await page.click('#pi-cca-all');
   await page.waitForTimeout(300);
   assert.deepEqual(api.posts.at(-1), CCA_PARTS);
