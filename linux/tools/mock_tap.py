@@ -357,7 +357,7 @@ def main():
                 send(encode(addr | 0x8000, 0x0B10, bytes([0x00, 0x0E, 0x00, 0x23, p[4], period[p[6] & 1]])))
             elif cmd == 0x0B0F and len(p) == 8 and p[3] == 0x22 and p[5] == 0x01 and p[6] <= 1:  # its write
                 was = period[p[6]]
-                period[0] = period[1] = p[7]  # one write moves both, as the bench's H1
+                period[p[6]] = p[7]
                 stats['period_writes'].append(p[5:].hex())
                 send(encode(addr | 0x8000, 0x0B10, bytes([0x00, 0x0E, 0x00, 0x23, p[4], was])))  # the code before
             elif cmd == 0x0B0F and len(p) == 7 and p[3] == 0x26:  # a page of the node table, 12 at most

@@ -142,12 +142,12 @@ sleep 3  # the settings apply on the bus thread
 expect "the write starts" "$(code POST 18405 /api/master/taps/period "{\"mac\": \"$MAC\", \"code\": 4, \"dry_run\": false}")" 200
 finished 18405
 expect "both written and read back" "$(edit 18405 "(e['ok'], e['message'])")" "(True, 'report period 4 s on both (was 3 s and 3 s)')"
-expect "one write moved both, as on the bench" "$(stat "$out/period.json" "d['period_writes']")" "['010004']"
+expect "each setting written once" "$(stat "$out/period.json" "d['period_writes']")" "['010004', '010104']"
 expect "logged" "$(grep -c 'report period: report period 4 s on both' "$out/period.log")" 1
 expect "the same again writes nothing" "$(code POST 18405 /api/master/taps/period "{\"mac\": \"$MAC\", \"code\": 4, \"dry_run\": false}")" 200
 finished 18405
 expect "already set" "$(edit 18405 "e['message']")" "the report period is already 4 s on both: nothing written"
-expect "still one write" "$(stat "$out/period.json" "len(d['period_writes'])")" 1
+expect "still two writes" "$(stat "$out/period.json" "len(d['period_writes'])")" 2
 stop_all
 
 [ $fail = 0 ] && echo "provision e2e passed" || { echo "provision e2e FAILED; see $out/"; exit 1; }

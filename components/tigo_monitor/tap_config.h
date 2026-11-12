@@ -482,9 +482,12 @@ class ProvisionJob : public TableJob {
 // answered 0x23 <code>. There are two settings, 00 and 01; the CCA writes
 // both the same, and only where the TAP's code differs from the period its
 // map works out to. The code stands for a cycle in hyperslots (200 a
-// second): 1 to 11 below. On the bench's H1 (2026-11-12) one write to
-// setting 00 moved both readings, its reply held the code from before, and
-// the optimizer's reports moved from 400 to 600 ticks apart. Our housekeeping has always sent both reads, as
+// second): 1 to 11 below. On the bench's H1 (2026-11-12) a write to 00
+// moved the optimizer's reports from 400 to 600 ticks apart and back, and
+// the TAP kept the code through a power cycle. Its replies aren't a
+// read-back: a write's reply held the code from before it as often as the
+// new one. Once 01 had followed 00 by the time it was read; twice it still
+// read the old code and took its own write. Our housekeeping has always sent both reads, as
 // the CCA does; the roof TAP answers 3 on both, under the CCA (2026-10-27)
 // and under us, and the bench's H1 answers 2. The CCA's channel scan sends
 // the write form with code 12, which isn't a period and is never sent here.
@@ -561,8 +564,8 @@ class PeriodJob : public TableJob {
           sel_ = 1;
           return;
         }
-        // One write moved both on the bench's H1; the other is written only
-        // if it still differs.
+        // A setting that still differs gets its own write (01 has followed
+        // 00 on the bench, but not every time).
         for (uint8_t s : {0, 1}) {
           if (now_[s] == code_) continue;
           if (written_[s])

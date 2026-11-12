@@ -475,8 +475,8 @@ static void test_period_gate() {
   CHECK(period_code_text(3) == "3 s" && period_code_text(7) == "10 s");
 }
 
-// As the bench's H1 answered (2026-11-12): a write's reply holds the code
-// from before it, and one write moves both readings (linked).
+// A write's reply holds the code from before it, as the bench's H1's
+// first did (2026-11-12); linked: one write moves both, as 01 once followed 00.
 struct PeriodTap {
   uint8_t code[2] = {2, 2};
   bool linked = true;
