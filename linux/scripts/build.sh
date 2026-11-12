@@ -15,6 +15,14 @@ for t in barcode_bindings_test protocol_test node_identity_test cca_ble_protocol
   fi
   tail -1 "build/linux/$t.log"
 done
+# The web UI's sign-in sessions.
+g++ -std=c++17 -Wall -Wextra -I linux/src tests/host/web_session_test.cpp -o build/linux/web_session_test
+if ! build/linux/web_session_test >build/linux/web_session_test.log 2>&1; then
+  cat build/linux/web_session_test.log
+  echo "web_session_test failed" >&2
+  exit 1
+fi
+tail -1 build/linux/web_session_test.log
 # The bus master's core, against a fake port.
 g++ -std=c++17 -O2 -Wall -Wextra -I components/tigo_monitor tests/host/master_core_test.cpp \
   components/tigo_master/master_core.cpp -lpthread -o build/linux/master_core_test

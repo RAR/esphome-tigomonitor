@@ -88,6 +88,10 @@ struct Settings {
   // ESP32. An empty password leaves it open to the LAN, the default there too.
   std::string web_username = "admin";
   std::string web_password;
+  // A reverse proxy in front of the web UI: addresses or networks
+  // (address/bits) whose X-Forwarded-For is believed, so wrong passwords
+  // count against each visitor rather than the proxy (web_session.h).
+  std::vector<std::string> trusted_proxies;
   // Setup mode: until this time (unix seconds), with no web password, System
   // setup's changes to the bus need none, so a new system is set up first
   // and locked last. Set once, a day ahead, when the daemon first starts

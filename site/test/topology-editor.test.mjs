@@ -11,6 +11,7 @@ import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
 import { routes } from '../screenshots/fixtures.mjs';
+import { answer, answerAll } from './ui-dialog.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const html = readFileSync(resolve(HERE, '../../components/tigo_server/web/app.html'), 'utf8')
@@ -273,10 +274,8 @@ test('leaving the view with unsaved edits asks first', async () => {
   const { page, ctx } = await open();
   await edit(page);
   await page.locator(`[data-barcode="${P[0]}"]`).dragTo(page.locator('[data-string-label="B"] .panel-grid'));
-  let asked = 0;
-  page.once('dialog', (d) => { asked++; d.dismiss(); });
   await page.click('button[data-view="dashboard"]');
-  assert.equal(asked, 1);
+  assert.equal(await answer(page, false), 'Leave the Topology editor?');
   assert.ok(await page.isVisible('#view-topology'));
   assert.ok(await page.$('#topo-unassigned'));
   await ctx.close();

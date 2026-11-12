@@ -180,6 +180,8 @@
   .btn:hover:not(:disabled) { background: var(--bg-4); }
   .btn:disabled { opacity: 0.45; cursor: not-allowed; }
   .btn.primary { background: var(--accent); color: #061018; border-color: var(--accent); font-weight: 600; }
+  /* After .btn:hover, which would otherwise grey the action under the pointer. */
+  .btn.primary:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 86%, #fff); }
 
   /* ===== View switching ===== */
   .view { display: none; }
@@ -1010,6 +1012,56 @@
     .mesh-stage { grid-template-columns: minmax(0, 1fr); }
     .mesh-side { border-left: 0; border-top: 1px solid var(--border); }
   }
+
+  /* A question before a change that can't be taken back, or a result that
+     has to be read: in place of the browser's own confirm() and alert(). */
+  .ui-dialog { margin: auto; width: min(460px, calc(100vw - 32px)); max-height: calc(100vh - 48px); box-sizing: border-box;
+               padding: 22px 22px 18px; border: 1px solid var(--border); border-radius: 12px; overflow-y: auto;
+               background: var(--bg); color: var(--text); box-shadow: 0 24px 60px -12px rgb(0 0 0 / .5), 0 2px 8px rgb(0 0 0 / .2); }
+  .ui-dialog[open] { display: flex; flex-direction: column; gap: 10px; animation: ui-dialog-in .18s cubic-bezier(.16, 1, .3, 1); }
+  .ui-dialog::backdrop { background: rgb(6 10 18 / .55); animation: ui-backdrop-in .18s ease-out; }
+  @keyframes ui-dialog-in { from { opacity: 0; transform: translateY(8px) scale(.985); } }
+  @keyframes ui-backdrop-in { from { opacity: 0; } }
+  .ui-dialog h3 { margin: 0; font-size: 18px; line-height: 1.3; text-wrap: balance; }
+  .ui-dialog .ui-body { margin: 0; font-size: 13.5px; line-height: 1.55; color: var(--text-dim); white-space: pre-line; max-width: 62ch; }
+  .ui-dialog .ui-body:empty { display: none; }
+  .ui-dialog .ui-facts { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px 14px; margin: 2px 0 0;
+                         padding: 10px 12px; border-radius: 8px; background: var(--bg-2); border: 1px solid var(--border); font-size: 13px; }
+  .ui-dialog .ui-facts:empty { display: none; }
+  .ui-dialog .ui-facts dt { color: var(--text-faint); }
+  .ui-dialog .ui-facts dd { margin: 0; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+  .ui-dialog .ui-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
+  .ui-dialog .ui-actions .btn { min-width: 92px; justify-content: center; text-align: center; }
+  .ui-dialog .btn:focus-visible { outline: 2px solid var(--accent-2); outline-offset: 2px; }
+  @media (max-width: 760px) {
+    .ui-dialog { margin: auto 0 0; width: 100vw; max-width: 100vw; max-height: 86vh; border-radius: 16px 16px 0 0; border-width: 1px 0 0;
+                 padding-bottom: max(18px, env(safe-area-inset-bottom)); }
+    .ui-dialog .ui-actions { flex-direction: column-reverse; }
+    .ui-dialog .ui-actions .btn { width: 100%; }
+  }
+  @media (prefers-reduced-motion: reduce) { .ui-dialog[open], .ui-dialog::backdrop { animation: none; } }
+
+  /* Signing in (Raspberry Pi build, with a password set): the page asks,
+     in place of the browser's own login popup. */
+  body.signing-in .app { display: none; }
+  .signin { position: fixed; inset: 0; display: grid; place-items: center; padding: 24px 16px; overflow-y: auto;
+            background: radial-gradient(1100px 520px at 50% -12%, color-mix(in srgb, var(--accent-2) 9%, transparent), transparent 70%), var(--bg); }
+  .signin[hidden] { display: none; }
+  .signin-form { width: min(340px, 100%); display: flex; flex-direction: column; gap: 14px; animation: ui-dialog-in .24s cubic-bezier(.16, 1, .3, 1); }
+  .signin-brand { display: flex; align-items: center; gap: 10px; color: var(--text-dim); font-size: 13px; font-weight: 600; margin-bottom: 18px; }
+  .signin-mark { width: 36px; height: 36px; flex: none; }
+  .signin-mark svg { width: 100%; height: 100%; display: block; }
+  .signin h1 { margin: 0 0 4px; font-size: 24px; line-height: 1.2; letter-spacing: -.01em; }
+  .signin label { display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--text-dim); font-weight: 600; }
+  .signin .input { min-width: 0; width: 100%; box-sizing: border-box; padding: 10px 12px; font-size: 14px; }
+  .signin .input:focus-visible { border-color: var(--accent-2); outline: 2px solid color-mix(in srgb, var(--accent-2) 35%, transparent); outline-offset: 1px; }
+  .signin-error { margin: 0; font-size: 13px; color: var(--bad); }
+  .signin-error:empty { display: none; }
+  .signin .btn.primary { justify-content: center; padding: 11px 14px; font-size: 14px; }
+  .signin .btn.primary:focus-visible { outline: 2px solid var(--accent-2); outline-offset: 2px; }
+  .signin-note { margin: 18px 0 0; font-size: 12px; line-height: 1.5; color: var(--text-faint); }
+  .signin-note code { font-size: 11.5px; color: var(--text-dim); }
+  @media (prefers-reduced-motion: reduce) { .signin-form { animation: none; } }
 
   /* A layout that arrived after the user's own, waiting for them */
   .topo-pending {
@@ -1907,9 +1959,14 @@
           <div class="cfg-text"><strong>Web UI password</strong><span id="pi-web-pass-hint">Empty: anyone on your network can open this page and change settings</span></div>
           <div class="cfg-ctrl"><input class="cfg-input" id="pi-web-pass" type="password" autocomplete="new-password"></div>
         </div>
+        <div class="cfg-row">
+          <div class="cfg-text"><strong>Trusted proxies</strong><span>A reverse proxy in front of the web UI: its address, or a network as address/bits. Wrong passwords then lock out only the visitor who typed them, not everyone using the proxy. Empty: none</span></div>
+          <div class="cfg-ctrl"><input class="cfg-input" id="pi-web-proxies" autocomplete="off" spellcheck="false" placeholder="172.16.0.0/12"></div>
+        </div>
         <div class="tools-actions" style="margin-top:12px">
           <button class="btn primary" id="pi-web-save">Save</button>
           <button class="btn" id="pi-web-pass-remove" style="display:none">Remove password</button>
+          <button class="btn" id="pi-web-signout" style="display:none">Sign out</button>
         </div>
       </div>
 
@@ -2488,6 +2545,30 @@
   </div>
 </div>
 
+<!-- Signing in (Raspberry Pi build): shown when the API answers 401
+     {"sign_in": true}; the browser's password manager fills it. -->
+<div class="signin" id="signin" hidden>
+  <form class="signin-form" id="signin-form">
+    <div class="signin-brand"><span class="signin-mark" id="signin-mark"></span>Tigo Monitor</div>
+    <h1>Sign in</h1>
+    <label>Username <input class="input" id="signin-user" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" required></label>
+    <label>Password <input class="input" id="signin-pass" name="password" type="password" autocomplete="current-password" required></label>
+    <p class="signin-error" id="signin-error" role="alert"></p>
+    <button class="btn primary" type="submit" id="signin-go">Sign in</button>
+    <p class="signin-note">Forgot it? Take <code>web_password</code> out of TigoMonitor's <code>settings.json</code>, then restart the service.</p>
+  </form>
+</div>
+<!-- The app's questions and results (uiAsk): outside every view, so it
+     shows whichever page is open. -->
+<dialog id="ui-dialog" class="ui-dialog" aria-labelledby="ui-dialog-title" aria-describedby="ui-dialog-body">
+  <h3 id="ui-dialog-title"></h3>
+  <p class="ui-body" id="ui-dialog-body"></p>
+  <dl class="ui-facts" id="ui-dialog-facts"></dl>
+  <div class="ui-actions">
+    <button type="button" class="btn" data-answer="cancel">Cancel</button>
+    <button type="button" class="btn primary" data-answer="ok">OK</button>
+  </div>
+</dialog>
 <script>
   const API_TOKEN = "__TIGO_API_TOKEN__";
 
@@ -2507,8 +2588,46 @@
       options.headers = options.headers || {};
       options.headers['Authorization'] = 'Bearer ' + API_TOKEN;
     }
-    return fetch(BASE_PATH + url.replace(/^\//, ''), options);
+    const r = await fetch(BASE_PATH + url.replace(/^\//, ''), options);
+    // The Pi with a password set and no sign-in yet: the page asks.
+    if (r.status === 401 && !signingIn) {
+      const j = await r.clone().json().catch(() => null);
+      if (j && j.sign_in) showSignIn();
+    }
+    return r;
   }
+  let signingIn = false;
+  function showSignIn() {
+    signingIn = true;
+    try { if (uiAnswer) uiAnswer(false); } catch (_) { /* declared further down; nothing open yet */ }
+    document.body.classList.add('signing-in');
+    // The sidebar's mark, drawn for this size (the favicon is drawn for 16 px).
+    const mark = document.getElementById('signin-mark'), logo = document.querySelector('.brand-logo svg');
+    if (logo && !mark.firstChild) mark.innerHTML = logo.outerHTML.replaceAll('brand-tile', 'signin-tile').replace(/aria-label="[^"]*"/, 'aria-hidden="true"');
+    document.getElementById('signin').hidden = false;
+    const user = document.getElementById('signin-user');
+    (user.value ? document.getElementById('signin-pass') : user).focus();
+  }
+  document.getElementById('signin-form').addEventListener('submit', async e => {
+    e.preventDefault();
+    const go = document.getElementById('signin-go'), err = document.getElementById('signin-error');
+    const pass = document.getElementById('signin-pass');
+    go.disabled = true;
+    err.textContent = '';
+    try {
+      const r = await fetch(BASE_PATH + 'api/login', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: document.getElementById('signin-user').value, password: pass.value }),
+      });
+      if (r.ok) { window.location.reload(); return; }
+      const j = await r.json().catch(() => ({}));
+      err.textContent = j.error || `Couldn't sign in (${r.status}).`;
+      pass.value = '';
+      pass.focus();
+    } catch (x) {
+      err.textContent = "Couldn't reach TigoMonitor. Check the connection and try again.";
+    } finally { go.disabled = false; }
+  });
 
   // Adjust placeholder "use today's page" links so they point at sibling URLs
   // under the same base (works for HA Ingress / nested deployments).
@@ -2572,8 +2691,11 @@
     if (hiddenPages.has(id)) id = 'dashboard';
     // Leaving the Topology editor with changes not saved asks first.
     if (id !== 'topology' && typeof topoEditor !== 'undefined' && topoEditor.active) {
-      if (topoEditor.dirty && !confirm('Leave the Topology editor? Your layout changes are not saved.')) {
+      if (topoEditor.dirty) {
         if (window.location.hash !== '#topology') history.replaceState(null, '', '#topology');
+        uiAsk({ title: 'Leave the Topology editor?', body: 'Your layout changes are not saved.', ok: 'Leave without saving',
+                cancel: 'Keep editing', tone: 'danger' })
+          .then(leave => { if (leave) { topoEditor.dirty = false; showView(id); } });
         return;
       }
       topoEditor.active = false;
@@ -4208,7 +4330,8 @@
     const b = e.target.closest('button.stray-forget');
     if (!b) return;
     const addr = b.dataset.addr;
-    if (!confirm(`Forget optimizer ${addr}? It leaves the Dashboard and the mesh map. If it reports again, it comes back.`)) return;
+    if (!(await uiAsk({ title: `Forget optimizer ${addr}?`, body: 'It leaves the Dashboard and the mesh map. If it reports again, it comes back.',
+                        ok: 'Forget', tone: 'danger' }))) return;
     b.disabled = true;
     try {
       const r = await apiFetch(`/api/nodes/delete?addr=${encodeURIComponent(addr)}`, { method: 'POST' });
@@ -4975,7 +5098,8 @@
       return refreshSetup(true);
     }
     if (b.hasAttribute('data-setup-retire')) {
-      if (!confirm(`Retire TAP ${f.tapPick}? TigoMonitor stops polling it and leaves it off its list.`)) return;
+      if (!(await uiAsk({ title: `Retire TAP ${f.tapPick}?`, body: 'TigoMonitor stops polling it and leaves it off its list.',
+                          ok: 'Retire', tone: 'danger' }))) return;
       b.disabled = true;
       try {
         await setupPost('/api/master/taps/forget', { tap: f.tapPick });
@@ -5002,7 +5126,8 @@
       return refreshSetup(true);
     }
     if (b.hasAttribute('data-setup-look')) {
-      if (!confirm('Look for TAPs? Every TAP on the bus is brought up again, and polling stops for about 30 seconds.')) return;
+      if (!(await uiAsk({ title: 'Look for TAPs?', body: 'Every TAP on the bus is brought up again, and polling stops for about 30 seconds.',
+                          ok: 'Look for TAPs' }))) return;
       b.disabled = true;
       f.before = setupTaps().map(t => t.id);
       f.found = '';
@@ -5030,10 +5155,8 @@
         port = 'tcp://' + addr;
       }
       const role = (document.querySelector('#setup-root input[name="setup-role"]:checked') || {}).value || 'listen';
-      if (role === 'master' && cfg.bus_role !== 'master' &&
-          !confirm('Running the bus transmits on it. Unplug the CCA first: two masters on one bus collide.\n\nContinue?')) return;
-      if (role === 'standby' && cfg.bus_role !== 'standby' &&
-          !confirm('A standby takes the bus over whenever it hears no master, and transmits then. With one, cutting power to a master no longer stops the array: rapid shutdown must cut the TAP\'s own power.\n\nContinue?')) return;
+      if (role === 'master' && cfg.bus_role !== 'master' && !(await askMasterRole())) return;
+      if (role === 'standby' && cfg.bus_role !== 'standby' && !(await askStandbyRole())) return;
       b.disabled = true;
       try { await setupPost('/api/settings', { serial_port: port, bus_role: role }); showToast('Saved: the bus master restarts'); f.edited = null; }
       catch (err) { showToast('Not saved: ' + err.message, 'err'); }
@@ -5056,7 +5179,7 @@
       const pass = document.getElementById('setup-pass').value;
       if (!pass || pass !== document.getElementById('setup-pass2').value) return;
       b.disabled = true;
-      try { await setupPost('/api/settings', { web_password: pass }); showToast('Password set: your browser will ask you to log in'); f.edited = null; }
+      try { await setupPost('/api/settings', { web_password: pass }); showToast('Password set. This browser is signed in'); f.edited = null; }
       catch (err) { showToast('Not set: ' + err.message, 'err'); }
       return refreshSetup(true);
     }
@@ -5265,7 +5388,8 @@
       if (!data.nodes || !Array.isArray(data.nodes)) {
         throw new Error('missing "nodes" array');
       }
-      if (!confirm(`Import ${data.nodes.length} node(s)? This replaces the current node table.`)) return;
+      if (!(await uiAsk({ title: `Import ${data.nodes.length} node(s)?`, body: 'This replaces the current node table.',
+                          ok: 'Import and replace', tone: 'danger' }))) return;
       const r = await apiFetch('/api/nodes/import', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -5286,17 +5410,13 @@
       // than a toast — the toast is gone in 2.4 s and this has to be read.
       const um = result.warnings && result.warnings.unmatched_mppts;
       if (um && um.length) {
-        const lines = um.map(u => `  • "${u.label}" — ${u.nodes} node(s)`).join('\n');
         const expected = (result.warnings.expected_mppts || []).join(', ');
-        alert(
-          'Imported, but the topology will not render.\n\n' +
-          'These MPPT labels match no configured inverter:\n' + lines + '\n\n' +
-          (expected ? 'Configured MPPTs: ' + expected + '\n\n' : '') +
-          'In the node JSON, cca_mppt holds the MPPT label — not the inverter ' +
-          'name. The inverter itself comes from the inverters: block in your YAML.\n\n' +
-          'Their strings exist (see /api/strings) but do not appear on the ' +
-          'Dashboard or Topology.'
-        );
+        const facts = um.map(u => [`"${u.label}"`, `${u.nodes} node(s), no matching inverter`]);
+        if (expected) facts.push(['Configured MPPTs', expected]);
+        await uiTell('Imported, but the topology will not render',
+          'These MPPT labels match no configured inverter. In the node JSON, cca_mppt holds the MPPT label, not the ' +
+          'inverter name; the inverter itself comes from the inverters: block in your YAML.\n\n' +
+          'Their strings exist (see /api/strings) but do not appear on the Dashboard or Topology.', facts);
       }
     } catch (e) {
       showToast(`Import failed: ${e.message}`, 'err');
@@ -5713,7 +5833,7 @@
   }
   document.getElementById('pv-toggle').addEventListener('click', async () => {
     const on = !(pvLast && pvLast.pv && pvLast.pv.on === false);  // as it is now
-    if (on && !confirm("Turn the array's output off? This is not rapid shutdown.")) return;
+    if (on && !(await uiAsk({ title: "Turn the array's output off?", body: 'This is not rapid shutdown.', ok: 'Turn output off', tone: 'danger' }))) return;
     const status = document.getElementById('pv-status');
     try {
       const r = await apiFetch('/api/master/pv', { method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -5928,8 +6048,56 @@
     t._timer = setTimeout(() => { t.className = 'toast'; }, 2400);
   }
 
-  async function toolsAction(path, label, confirmMsg) {
-    if (confirmMsg && !window.confirm(confirmMsg)) return;
+  // Asks before a change, in place of confirm(): resolves true for the
+  // action, false for Cancel, Escape or a click outside. tone 'danger' paints
+  // the action red and puts the focus on Cancel. facts: [label, value] rows.
+  // One question at a time: a new one answers the one open as Cancel.
+  let uiAnswer = null;
+  function uiAsk({ title, body = '', facts = null, ok = 'OK', cancel = 'Cancel', tone = '', tell = false }) {
+    const dlg = document.getElementById('ui-dialog');
+    if (uiAnswer) uiAnswer(false);
+    dlg.querySelector('h3').textContent = title;
+    dlg.querySelector('.ui-body').textContent = body;
+    const dl = dlg.querySelector('.ui-facts');
+    dl.replaceChildren();
+    for (const [k, v] of facts || []) {
+      const dt = document.createElement('dt'); dt.textContent = k;
+      const dd = document.createElement('dd'); dd.textContent = v;
+      dl.append(dt, dd);
+    }
+    const okBtn = dlg.querySelector('[data-answer="ok"]'), cancelBtn = dlg.querySelector('[data-answer="cancel"]');
+    okBtn.textContent = ok;
+    okBtn.className = 'btn ' + (tone === 'danger' ? 'danger' : 'primary');
+    cancelBtn.textContent = cancel;
+    cancelBtn.hidden = tell;
+    dlg.setAttribute('role', tell ? 'dialog' : 'alertdialog');
+    return new Promise(resolve => {
+      uiAnswer = (yes) => {
+        uiAnswer = null;
+        if (dlg.open) dlg.close();
+        resolve(yes);
+      };
+      if (!dlg.open) dlg.showModal();
+      (tone === 'danger' && !tell ? cancelBtn : okBtn).focus();
+    });
+  }
+  // A result that has to be read, in place of alert().
+  function uiTell(title, body = '', facts = null) { return uiAsk({ title, body, facts, ok: 'OK', tell: true }); }
+  {
+    const dlg = document.getElementById('ui-dialog');
+    dlg.addEventListener('click', e => {
+      const b = e.target.closest('[data-answer]');
+      if (b) return uiAnswer && uiAnswer(b.dataset.answer === 'ok');
+      // The backdrop: a click on the dialog element outside its box.
+      const r = dlg.getBoundingClientRect();
+      const outside = e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom;
+      if (e.target === dlg && outside && uiAnswer) uiAnswer(dlg.querySelector('[data-answer="cancel"]').hidden);  // as Cancel
+    });
+    dlg.addEventListener('cancel', e => { e.preventDefault(); if (uiAnswer) uiAnswer(false); });  // Escape
+  }
+
+  async function toolsAction(path, label, ask) {
+    if (ask && !(await uiAsk({ tone: 'danger', ...ask }))) return;
     try {
       const r = await apiFetch(path, { method: 'POST' });
       if (!r.ok) throw new Error(`${path} ${r.status}`);
@@ -5962,13 +6130,13 @@
   });
   document.getElementById('tools-reset-peak').addEventListener('click', () =>
     toolsAction('/api/reset_peak_power', 'Peak power reset',
-      'Reset all per-device peak-power values?'));
+      { title: 'Reset every peak-power value?', body: 'Each device starts its peak again from its next reading.', ok: 'Reset peaks' }));
   document.getElementById('tools-reset-nodes').addEventListener('click', () =>
     toolsAction('/api/reset_node_table', 'Node table cleared',
-      'Clear the persisted node table? Devices will repopulate as telemetry arrives.'));
+      { title: 'Clear the saved node table?', body: 'Devices will repopulate as telemetry arrives.', ok: 'Clear nodes' }));
   document.getElementById('tools-restart').addEventListener('click', () =>
     toolsAction('/api/restart', 'Restart issued',
-      PLATFORM === 'linux' ? 'Restart the monitor service now?' : 'Reboot the ESP32 now?'));
+      PLATFORM === 'linux' ? { title: 'Restart the monitor service now?', ok: 'Restart' } : { title: 'Reboot the ESP32 now?', ok: 'Reboot' }));
 
   // ===== Logs (linux/ build) =====
   // Polls /api/logs every 2 s while the view is open, asking only for lines
@@ -6183,7 +6351,8 @@
     }
   }
   document.getElementById('bus-alarm-clear').addEventListener('click', async () => {
-    if (!confirm('Clear the alarm? Do it once the other device is off the bus and every panel is reporting.')) return;
+    if (!(await uiAsk({ title: 'Clear the alarm?', body: 'Do it once the other device is off the bus and every panel is reporting.',
+                        ok: 'Clear the alarm' }))) return;
     await apiFetch('/api/bus/alarm/clear', { method: 'POST' }).catch(() => null);
     await refreshBus(true);
   });
@@ -6262,9 +6431,11 @@
     const profile = Number(row.querySelector('[data-danger-profile]').value);
     const code = Number(row.querySelector('[data-danger-period]').value);
     const label = what === 'profile' ? DANGER_PROFILES.find(p => p[0] === profile)[1] : DANGER_PERIODS.find(p => p[0] === code)[1];
-    if (!dry && !confirm(what === 'profile'
-          ? `Write the radio profile for ${label} to this TAP? Its optimizers are re-slotted; a wrong profile can cost reports until it's set back.`
-          : `Set this TAP's report period to ${label}? Every optimizer on it reports at the new rate.`)) return;
+    if (!dry && !(await uiAsk(what === 'profile'
+          ? { title: `Write the radio profile for ${label}?`, tone: 'danger', ok: 'Write profile',
+              body: 'The TAP keeps its channel, PAN and key, and re-slots its optimizers. A wrong profile can cost reports until it\'s set back.' }
+          : { title: `Set the report period to ${label}?`, tone: 'danger', ok: 'Set period',
+              body: 'Every optimizer on this TAP reports at the new rate.' }))) return;
     const path = what === 'profile' ? '/api/master/taps/provision' : '/api/master/taps/period';
     const body = what === 'profile' ? { mac, keep_network: true, profile, dry_run: dry } : { mac, code, dry_run: dry };
     row.querySelectorAll('button').forEach(x => { x.disabled = true; });
@@ -6338,11 +6509,13 @@
       piWebLogin = { user: s.web_username || 'admin', set: !!s.web_password_set };
       document.getElementById('pi-web-user').value = piWebLogin.user;
       document.getElementById('pi-web-pass').value = '';
+      document.getElementById('pi-web-proxies').value = (s.trusted_proxies || []).join(', ');
       document.getElementById('pi-web-pass').placeholder = s.web_password_set ? 'unchanged' : '';
       document.getElementById('pi-web-pass-hint').textContent = s.web_password_set
-        ? `Set: log in as "${piWebLogin.user}". Leave empty to keep it.`
+        ? `Set: sign in as "${piWebLogin.user}". Leave empty to keep it.`
         : 'Empty: anyone on your network can open this page and change settings';
       document.getElementById('pi-web-pass-remove').style.display = s.web_password_set ? '' : 'none';
+      document.getElementById('pi-web-signout').style.display = s.web_password_set ? '' : 'none';
       await piFillSerial(s.serial_port || '');
       document.getElementById('pi-mqtt-state').textContent = !s.mqtt.host ? 'MQTT off'
         : s.mqtt_connected ? `connected to ${s.mqtt.host}` : `not connected${s.mqtt_error ? ': ' + s.mqtt_error : ''}`;
@@ -6366,7 +6539,9 @@
     document.getElementById('pi-cca-all').style.display = off.length ? '' : 'none';
   }
   document.getElementById('pi-cca-all').addEventListener('click', async (e) => {
-    if (!confirm('Turn on every part of running the bus? This includes the two writes to optimizers that their answers call for. The bus master restarts: a few seconds without polling.')) return;
+    if (!(await uiAsk({ title: 'Turn on every part of running the bus?',
+                        body: 'This includes the two writes to optimizers that their answers call for. The bus master restarts: a few seconds without polling.',
+                        ok: 'Turn it all on' }))) return;
     e.target.disabled = true;
     try {
       const r = await apiFetch('/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -6380,20 +6555,32 @@
   });
   // Two masters on one bus collide, and the master's requests reach the
   // optimizers, so becoming the master is a deliberate step.
-  document.getElementById('pi-bus-role').addEventListener('change', (e) => {
-    if (e.target.value === 'master' && piBusRole !== 'master' &&
-        !confirm('Master mode transmits on the bus. Unplug the CCA first: two masters on one bus collide.\n\nContinue?'))
-      e.target.value = piBusRole;
-    else if (e.target.value === 'standby' && piBusRole !== 'standby' &&
-        !confirm('A standby takes the bus over whenever it hears no master, and transmits then. With one, cutting power to a master no longer stops the array: rapid shutdown must cut the TAP\'s own power.\n\nContinue?'))
-      e.target.value = piBusRole;
+  function askMasterRole() {
+    return uiAsk({ title: 'Run the bus?', body: 'Running the bus transmits on it. Unplug the CCA first: two masters on one bus collide.',
+                   ok: 'Run the bus', tone: 'danger' });
+  }
+  function askStandbyRole() {
+    return uiAsk({ title: 'Stand by to run the bus?',
+                   body: 'A standby takes the bus over whenever it hears no master, and transmits then. With one, cutting power ' +
+                         'to a master no longer stops the array: rapid shutdown must cut the TAP\'s own power.',
+                   ok: 'Stand by', tone: 'danger' });
+  }
+  document.getElementById('pi-bus-role').addEventListener('change', async (e) => {
+    const want = e.target.value;
+    if ((want === 'master' && piBusRole !== 'master') || (want === 'standby' && piBusRole !== 'standby')) {
+      e.target.value = piBusRole;  // until it's answered
+      if (await (want === 'master' ? askMasterRole() : askStandbyRole())) e.target.value = want;
+    }
     for (const row of PI_MASTER_ROWS) document.getElementById(row).style.display = e.target.value !== 'listen' ? '' : 'none';
     document.getElementById('pi-takeover-row').style.display = e.target.value === 'standby' ? '' : 'none';
   });
   // Turning discovery off removes the entities Home Assistant already has.
-  document.getElementById('pi-mqtt-disc-on').addEventListener('change', (e) => {
-    if (!e.target.checked && !confirm('Home Assistant will remove the Tigo devices and entities this TigoMonitor added, once you save. Readings keep going to the MQTT topic.\n\nContinue?'))
-      e.target.checked = true;
+  document.getElementById('pi-mqtt-disc-on').addEventListener('change', async (e) => {
+    if (e.target.checked) return;
+    e.target.checked = true;  // until it's answered
+    e.target.checked = !(await uiAsk({ title: 'Turn Home Assistant discovery off?',
+      body: 'Home Assistant will remove the Tigo devices and entities this TigoMonitor added, once you save. Readings keep going to the MQTT topic.',
+      ok: 'Turn discovery off', tone: 'danger' }));
   });
   // The sidebar's page switches save on their own, at once.
   const piPages = { show_cca_page: true, show_cloud_page: true };
@@ -6487,8 +6674,14 @@
       document.getElementById('pi-serial').value === 'tcp' ? '' : 'none';
   }
   document.getElementById('pi-serial').addEventListener('change', piShowBridge);
+  // Signing out ends this browser's session; the page then asks again.
+  document.getElementById('pi-web-signout').addEventListener('click', async () => {
+    await apiFetch('/api/logout', { method: 'POST' }).catch(() => null);
+    window.location.reload();
+  });
   document.getElementById('pi-web-pass-remove').addEventListener('click', async () => {
-    if (!confirm('Remove the web UI password? Anyone on your network will be able to open this page and change settings.')) return;
+    if (!(await uiAsk({ title: 'Remove the web UI password?', body: 'Anyone on your network will be able to open this page and change settings.',
+                        ok: 'Remove password', tone: 'danger' }))) return;
     try {
       const r = await apiFetch('/api/settings', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ web_password: '' }),
@@ -6521,7 +6714,8 @@
                    standby_takeover_s: Number(document.getElementById('pi-takeover').value) || 3,
                    discovery_morning_min: Math.max(0, Math.min(720, Math.round(Number(document.getElementById('pi-morning').value)))) || 0,
                    master_table_writes: document.getElementById('pi-tablewrites').checked,
-                   web_username: document.getElementById('pi-web-user').value.trim() || 'admin' };
+                   web_username: document.getElementById('pi-web-user').value.trim() || 'admin',
+                   trusted_proxies: document.getElementById('pi-web-proxies').value.split(/[\s,]+/).filter(Boolean) };
     if (!piTls.fixed) Object.assign(body, { tls_cert: tlsCert, tls_key: tlsKey });
     const webPass = document.getElementById('pi-web-pass').value;
     if (webPass !== '') body.web_password = webPass;
@@ -6530,10 +6724,11 @@
     // silently becomes the login. So say what the login will be before
     // turning it on or changing it.
     if ((webPass !== '' || piWebLogin.set) && (webPass !== '' || body.web_username !== piWebLogin.user) &&
-        !confirm(`Your browser will ask for this login from now on:\n\n` +
-                 `Username: ${body.web_username}\n` +
-                 `Password: ${webPass !== '' ? `the one you typed (${webPass.length} characters)` : 'unchanged'}\n\n` +
-                 `If your browser filled either in for you, cancel and correct them.`)) return;
+        !(await uiAsk({ title: 'Use this login from now on?',
+                        body: 'If your browser filled either in for you, cancel and correct them.',
+                        facts: [['Username', body.web_username],
+                                ['Password', webPass !== '' ? `the one you typed (${webPass.length} characters)` : 'unchanged']],
+                        ok: 'Save login' }))) return;
     try {
       const r = await apiFetch('/api/settings', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
@@ -6546,7 +6741,8 @@
       const tlsChanged = tlsCert !== piTls.cert || tlsKey !== piTls.key;
       const where = `${https ? 'https' : 'http'} on port ${next}`;
       if ((next !== piWebPortActive || tlsChanged) &&
-          confirm(`Restart the service to serve the web UI over ${where}?\n\nWithout a restart it stays as it is.`)) {
+          await uiAsk({ title: `Restart to serve the web UI over ${where}?`, body: 'Without a restart it stays as it is.',
+                        ok: 'Restart now', cancel: 'Later' })) {
         await apiFetch('/api/restart', { method: 'POST' }).catch(() => {});
         const url = new URL(window.location.href);
         url.protocol = https ? 'https:' : 'http:';
@@ -7048,9 +7244,9 @@
     if (!mac) { showToast('Enter a MAC first', 'bad'); return; }
     ccaBlePost({ mac });
   });
-  document.getElementById('cca-ble-revert-btn').addEventListener('click', () => {
+  document.getElementById('cca-ble-revert-btn').addEventListener('click', async () => {
     const revertTo = PLATFORM === 'linux' ? 'the nearest CCA' : 'the one from YAML';
-    if (confirm(`Forget the saved CCA MAC and use ${revertTo}?`)) ccaBlePost({ reset: true });
+    if (await uiAsk({ title: `Forget the saved CCA MAC and use ${revertTo}?`, ok: 'Forget the MAC' })) ccaBlePost({ reset: true });
   });
 
   document.getElementById('cca-refresh-btn').addEventListener('click', async () => {
@@ -7172,7 +7368,9 @@
   let ccaDiscovering = false;
   document.getElementById('cca-discovery-btn').addEventListener('click', async () => {
     if (ccaDiscovering || ccaMasterMode) return;
-    if (!confirm('Start a CCA topology discovery scan?\n\nThe CCA will briefly interrupt normal optimizer operation while it re-discovers modules. This is recoverable but can take a few minutes.')) return;
+    if (!(await uiAsk({ title: 'Start a CCA topology discovery scan?',
+                        body: 'The CCA will briefly interrupt normal optimizer operation while it re-discovers modules. This is recoverable but can take a few minutes.',
+                        ok: 'Start the scan', tone: 'danger' }))) return;
     ccaDiscovering = true;
     ccaBusy = true;  // pause the device-info auto-refresh so we don't fight over the BLE link
     const el = document.getElementById('cca-discovery-status');
@@ -7284,7 +7482,9 @@
     const pwd = document.getElementById('cca-wifi-pwd').value;
     const res = document.getElementById('cca-wifi-result');
     if (!ssid) { res.innerHTML = '<span style="color:var(--bad)">Enter an SSID first.</span>'; return; }
-    if (!confirm(`Join the CCA to WiFi "${ssid}"?\n\nIf the network or password is wrong the CCA can lose its uplink — recoverable from the Tigo app.`)) return;
+    if (!(await uiAsk({ title: `Join the CCA to WiFi "${ssid}"?`,
+                        body: 'If the network or password is wrong the CCA can lose its uplink. That is recoverable from the Tigo app.',
+                        ok: 'Join' }))) return;
     ccaBusy = true;
     res.innerHTML = '<span style="color:var(--text-dim)"><span class="spinner" style="width:13px;height:13px;vertical-align:-2px;margin-right:6px"></span>Sending WiFi credentials over BLE… (~10 s)</span>';
     try {
@@ -7302,7 +7502,9 @@
 
   document.getElementById('cca-wifi-clear-btn').addEventListener('click', async () => {
     if (ccaBusy) return;
-    if (!confirm('Clear the CCA\'s saved WiFi settings?\n\nThis wipes its WiFi config. If the CCA relies on WiFi for its uplink it will go offline until reconfigured.')) return;
+    if (!(await uiAsk({ title: 'Clear the CCA\'s saved WiFi settings?',
+                        body: 'This wipes its WiFi config. If the CCA relies on WiFi for its uplink it will go offline until reconfigured.',
+                        ok: 'Clear WiFi', tone: 'danger' }))) return;
     ccaBusy = true;
     const res = document.getElementById('cca-wifi-result');
     res.innerHTML = '<span style="color:var(--text-dim)"><span class="spinner" style="width:13px;height:13px;vertical-align:-2px;margin-right:6px"></span>Clearing WiFi over BLE… (~10 s)</span>';
