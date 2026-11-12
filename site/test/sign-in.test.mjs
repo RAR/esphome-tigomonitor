@@ -91,6 +91,9 @@ test('Sign out, in Settings, ends the session and the page asks again', async ()
   await page.fill('#signin-user', 'admin');
   await page.fill('#signin-pass', 'right');
   await Promise.all([page.waitForNavigation(), page.click('#signin-go')]);
+  // A fresh load at #settings, as the Pi pages' tests open it: a hash change
+  // on the loaded page can run before the page knows it's on a Pi.
+  await page.goto('about:blank');
   await page.goto(`http://127.0.0.1:${port}/#settings`, { waitUntil: 'networkidle' });
   await page.click('#settings-tab-web');
   await page.waitForSelector('#pi-web-signout', { state: 'visible' });
