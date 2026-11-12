@@ -8,9 +8,11 @@
 // all day. Here that is the rule itself:
 //   1. named: pgw_panels from the settings, by panel name or address;
 //   2. roof: of the optimizers reporting through this TAP and placed on
-//      the roof (roof.h), the farthest quarter from this TAP's marker,
-//      then those with the most neighbours (all eight directions), then
-//      the farthest;
+//      the roof (roof.h), the farthest from this TAP's marker; panels
+//      around one (all eight directions) only break an exact tie. Not
+//      neighbours first: on an A-frame roof the two faces are drawn with a
+//      gap for the ridge, and a dense block's corner would beat the far
+//      face (the owner's roof, 2026-11-12);
 //   3. loss: no roof to go by, the worst loss so far today.
 #pragma once
 
@@ -96,13 +98,8 @@ inline std::vector<uint16_t> pgw_pool(const Roof &roof, const std::string &tap_i
     }
     if (placed.size() >= PGW_POOL) {
       std::sort(placed.begin(), placed.end(), [](const Ranked &a, const Ranked &b) {
-        return a.dist != b.dist ? a.dist > b.dist : a.tuid < b.tuid;
-      });
-      size_t far = std::max(PGW_POOL, (placed.size() + 3) / 4);
-      placed.resize(std::min(far, placed.size()));
-      std::sort(placed.begin(), placed.end(), [](const Ranked &a, const Ranked &b) {
-        if (a.around != b.around) return a.around > b.around;
         if (a.dist != b.dist) return a.dist > b.dist;
+        if (a.around != b.around) return a.around > b.around;
         return a.tuid < b.tuid;
       });
       for (size_t i = 0; i < PGW_POOL; i++) out.push_back(placed[i].tuid);

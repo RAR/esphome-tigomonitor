@@ -1,7 +1,7 @@
 // Host test for linux/src/pgw.h: which optimizers a TAP leans on for the
 // far part of the array (the 0x41 PGW streams 01 and 02), by our own rule:
-// the farthest quarter from that TAP on the roof, the best-surrounded of
-// those first; with no roof, the worst loss; a named list overrides both.
+// the farthest from that TAP on the roof (neighbours only break ties); with
+// no roof, the worst loss; a named list overrides both.
 #include "pgw.h"
 
 #include <cstdio>
@@ -55,13 +55,31 @@ static void test_the_roof_picks_the_far_face() {
   auto pool = pgw_pool(r, "1201", m, {}, why);
   CHECK(why == "roof");
   CHECK(pool.size() == PGW_POOL);
-  // All from B, the face farthest from the TAP; the four with five
-  // neighbours (B4, B5, B8, B9) ahead of the edge ones.
-  auto n = names(pool, m);
-  for (const auto &s : n) CHECK(s[0] == 'B');
-  std::vector<std::string> want = {"B4", "B5", "B8", "B9"};
-  std::sort(n.begin(), n.end());
-  CHECK(n == want);
+  // The four farthest, all of B: B1-B4, farthest first.
+  CHECK((names(pool, m) == std::vector<std::string>{"B1", "B2", "B3", "B4"}));
+}
+
+// An A-frame: B's two columns on opposite faces, drawn with an empty column
+// for the ridge. A dense block's corner (A1, A6) has more neighbours than
+// any of B, but B is farther, and wins.
+static void test_a_ridge_gap_doesnt_hand_it_to_a_dense_corner() {
+  std::vector<PgwMember> m;
+  Roof r;
+  uint16_t t = 2;
+  auto put = [&](const std::string &name, int x, int y) {
+    char a[5];
+    std::snprintf(a, sizeof(a), "%04X", t);
+    r.panels.push_back({a, x, y, true});
+    m.push_back({t++, name, 0.02});
+  };
+  for (int i = 0; i < 6; i++) put("B" + std::to_string(i + 1), 1, i);
+  for (int i = 0; i < 4; i++) put("B" + std::to_string(i + 7), 3, i + 2);
+  for (int i = 0; i < 5; i++) put("A" + std::to_string(i + 1), i, 8);
+  for (int i = 0; i < 5; i++) put("A" + std::to_string(i + 6), i, 9);
+  r.taps.push_back({"1201", 14, 11});
+  std::string why;
+  auto pool = pgw_pool(r, "1201", m, {}, why);
+  CHECK((names(pool, m) == std::vector<std::string>{"B1", "B2", "B3", "B4"}));
 }
 
 static void test_only_this_taps_optimizers() {
@@ -75,7 +93,7 @@ static void test_only_this_taps_optimizers() {
   std::string why;
   auto pool = pgw_pool(r, "1201", through_1201, {}, why);
   CHECK(why == "roof");
-  for (const auto &s : names(pool, m)) CHECK(s[0] == 'A');  // A is now the far end for 1201
+  CHECK((names(pool, m) == std::vector<std::string>{"A1", "A6", "A2", "A7"}));  // A is now the far end for 1201
 }
 
 static void test_no_roof_falls_back_to_loss() {
@@ -117,6 +135,7 @@ static void test_nothing_to_pick() {
 
 int main() {
   test_the_roof_picks_the_far_face();
+  test_a_ridge_gap_doesnt_hand_it_to_a_dense_corner();
   test_only_this_taps_optimizers();
   test_no_roof_falls_back_to_loss();
   test_named_overrides();
