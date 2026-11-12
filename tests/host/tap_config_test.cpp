@@ -475,8 +475,11 @@ static void test_period_gate() {
   CHECK(period_code_text(3) == "3 s" && period_code_text(7) == "10 s");
 }
 
+// As the bench's H1 answered (2026-11-12): a write's reply holds the code
+// from before it, and one write moves both readings (linked).
 struct PeriodTap {
   uint8_t code[2] = {2, 2};
+  bool linked = true;
   bool deaf_to_writes = false;  // answers, but keeps its code
   bool silent = false;
   std::vector<Bytes> got;
@@ -484,9 +487,13 @@ struct PeriodTap {
     Bytes args(req.payload.begin() + 5, req.payload.end());
     got.push_back(args);
     if (silent || args.size() < 2 || args[1] > 1) return false;
-    if (args[0] == 0x01 && args.size() == 3 && !deaf_to_writes) code[args[1]] = args[2];
+    uint8_t shown = code[args[1]];
+    if (args[0] == 0x01 && args.size() == 3 && !deaf_to_writes) {
+      if (linked) code[0] = code[1] = args[2];
+      else code[args[1]] = args[2];
+    }
     reply.cmd = CMD_TUNNEL_REPLY;
-    reply.payload = {0x00, 0x0E, 0x00, 0x23, req.payload[4], code[args[1]]};
+    reply.payload = {0x00, 0x0E, 0x00, 0x23, req.payload[4], shown};
     return true;
   }
 };
@@ -504,19 +511,35 @@ static void run(PeriodJob &job, PeriodTap &tap) {
   }
 }
 
-static void test_period_writes_both_then_reads_back() {
+// The bench's H1: one write, and both read back changed.
+static void test_period_one_write_moves_both() {
   PeriodTap tap;
   PeriodJob job(TAP_MAC, 3, false);
   run(job, tap);
   CHECK(job.ok());
-  std::vector<Bytes> want = {{0x00, 0x00}, {0x00, 0x01}, {0x01, 0x00, 0x03}, {0x01, 0x01, 0x03}, {0x00, 0x00}, {0x00, 0x01}};
+  std::vector<Bytes> want = {{0x00, 0x00}, {0x00, 0x01}, {0x01, 0x00, 0x03}, {0x00, 0x00}, {0x00, 0x01}};
   CHECK(tap.got == want);
   CHECK(job.before(0) == 2 && job.before(1) == 2);
   CHECK(job.message() == "report period 3 s on both (was 2 s and 2 s)");
 }
 
+// Two settings of their own: the second is written once the first's
+// read-back shows it still differs.
+static void test_period_writes_both_then_reads_back() {
+  PeriodTap tap;
+  tap.linked = false;
+  PeriodJob job(TAP_MAC, 3, false);
+  run(job, tap);
+  CHECK(job.ok());
+  std::vector<Bytes> want = {{0x00, 0x00}, {0x00, 0x01}, {0x01, 0x00, 0x03}, {0x00, 0x00},
+                             {0x00, 0x01}, {0x01, 0x01, 0x03}, {0x00, 0x00}, {0x00, 0x01}};
+  CHECK(tap.got == want);
+  CHECK(job.message() == "report period 3 s on both (was 2 s and 2 s)");
+}
+
 static void test_period_writes_only_what_differs() {
   PeriodTap tap;
+  tap.linked = false;
   tap.code[0] = 3;
   PeriodJob job(TAP_MAC, 3, false);
   run(job, tap);
@@ -537,7 +560,8 @@ static void test_period_stops() {
   PeriodJob job(TAP_MAC, 3, false);
   run(job, deaf);
   CHECK(!job.ok() && job.finished());
-  CHECK(job.message() == "the TAP answered the write with 2 s, not 3 s");
+  CHECK(job.message() == "after the write the TAP still reads 2 s, not 3 s");
+  CHECK(deaf.got.size() == 5);  // tried once: read, read, write, read, read
   PeriodTap silent;
   silent.silent = true;
   PeriodJob mute(TAP_MAC, 3, false);
@@ -552,6 +576,7 @@ static void test_period_dry_run() {
   run(job, tap);
   CHECK(job.ok());
   CHECK(tap.got.size() == 2);  // the reads only
+  CHECK(tap.code[0] == 2 && tap.code[1] == 2);
   CHECK(job.dry_frames().size() == 2);
   if (job.dry_frames().size() == 2) {
     CHECK(job.dry_frames()[0] == (Bytes{0x22, 0x01, 0x00, 0x04}));
@@ -576,6 +601,7 @@ int main() {
   test_provision_stops();
   test_dry_run();
   test_period_gate();
+  test_period_one_write_moves_both();
   test_period_writes_both_then_reads_back();
   test_period_writes_only_what_differs();
   test_period_stops();

@@ -482,7 +482,9 @@ class ProvisionJob : public TableJob {
 // answered 0x23 <code>. There are two settings, 00 and 01; the CCA writes
 // both the same, and only where the TAP's code differs from the period its
 // map works out to. The code stands for a cycle in hyperslots (200 a
-// second): 1 to 11 below. Our housekeeping has always sent both reads, as
+// second): 1 to 11 below. On the bench's H1 (2026-11-12) one write to
+// setting 00 moved both readings, its reply held the code from before, and
+// the optimizer's reports moved from 400 to 600 ticks apart. Our housekeeping has always sent both reads, as
 // the CCA does; the roof TAP answers 3 on both, under the CCA (2026-10-27)
 // and under us, and the bench's H1 answers 2. The CCA's channel scan sends
 // the write form with code 12, which isn't a period and is never sent here.
@@ -545,22 +547,29 @@ class PeriodJob : public TableJob {
         step_ = Step::write;
         return;
       case Step::write:
+        // The reply holds the code from before the write (bench, 2026-11-12):
+        // it says the write arrived, and the reads after it say what took.
         if (got < 0) return fail_("no answer to the write; read the TAP before trying again");
-        if (got != code_)
-          return fail_("the TAP answered the write with " + period_code_text(got) + ", not " + period_code_text(code_));
-        if (sel_ == 0 && before_[1] != code_) {
-          sel_ = 1;
-          return;
-        }
+        written_[sel_] = true;
         sel_ = 0;
         step_ = Step::check;
         return;
       case Step::check:
         if (got < 0) return fail_("the TAP didn't answer the check read");
-        if (got != code_)
-          return fail_("after the write the TAP reads " + period_code_text(got) + ", not " + period_code_text(code_));
+        now_[sel_] = got;
         if (sel_ == 0) {
           sel_ = 1;
+          return;
+        }
+        // One write moved both on the bench's H1; the other is written only
+        // if it still differs.
+        for (uint8_t s : {0, 1}) {
+          if (now_[s] == code_) continue;
+          if (written_[s])
+            return fail_("after the write the TAP still reads " + period_code_text(now_[s]) + ", not " +
+                         period_code_text(code_));
+          sel_ = s;
+          step_ = Step::write;
           return;
         }
         return finish_("report period " + period_code_text(code_) + " on both (was " + was_() + ")");
@@ -605,6 +614,8 @@ class PeriodJob : public TableJob {
   uint8_t code_;
   uint8_t sel_ = 0;
   int before_[2] = {-1, -1};
+  int now_[2] = {-1, -1};
+  bool written_[2] = {false, false};
   Step step_ = Step::read;
 };
 
