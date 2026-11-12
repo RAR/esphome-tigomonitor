@@ -126,7 +126,9 @@ class BusMaster {
                          std::string &why) {
     return core_.request_provision(tap_mac, block, reset, dry_run, why);
   }
-  void set_window_wanted(bool wanted, int missing) { core_.set_window_wanted(wanted, missing); }
+  void set_window_wanted(bool wanted, int missing, int64_t morning_until_unix = 0) {
+    core_.set_window_wanted(wanted, missing, morning_until_unix);
+  }
   std::map<uint16_t, esphome::tigo_monitor::master::Queries::Setup> setups() const { return core_.setups(); }
   void tick(uint32_t now_ms) { core_.tick(now_ms); }
   void close() { core_.close(); }

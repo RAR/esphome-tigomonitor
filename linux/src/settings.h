@@ -58,6 +58,7 @@ struct Settings {
   // Set and cleared by the Add a TAP guide, not a setting of its own.
   bool master_adopt_taps = false;        // a new TAP at the factory address starts the CCA's herd (needs startup)
   bool discovery_auto = true;            // renew the join window only while a layout optimizer is missing
+  int discovery_morning_min = 120;       // and, with it, for this long after the day's first report (0: off)
   int gateway_id = 0x1201;    // the TAP's RS485 id, as the CCA addresses it (gateway_id_ok)
   float power_calibration = 1.0f;
   // Plenty of RAM here, so the node table is sized for any real site rather

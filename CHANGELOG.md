@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The join window stays open for a while after sunrise (Raspberry Pi
+  and other Linux).** With automatic discovery on, the TAP's join window is
+  now also kept open for 2 hours after the day's first report, so
+  optimizers that woke onto a poor relay can move to a better one. It's
+  adjustable under Settings → Bus ("Keep the join window open after
+  sunrise", 0–720 minutes; 0 turns it off), and the Bus page says until
+  when it's held open.
 - **System setup works with the browser's Back button (Raspberry Pi and
   other Linux).** Each step of a task is its own page in the browser's
   history, so Back goes to the step before and then to the list of tasks,

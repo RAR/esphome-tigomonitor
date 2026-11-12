@@ -1490,6 +1490,7 @@ void HttpServer::routes_() {
                     {"discovery_auto", ctx_.current_settings().discovery_auto},
                     {"adopt_taps", ctx_.current_settings().master_adopt_taps && ctx_.current_settings().master_startup},
                     {"missing_expected", m.missing_expected},
+                    {"morning_until_unix", m.morning_until_unix},
                     {"discovery",
                      {{"running", m.discovery.running},
                       {"remaining_s", m.discovery.remaining_s},
@@ -1975,6 +1976,7 @@ void HttpServer::routes_() {
                     {"master_table_writes", s.master_table_writes},
                     {"master_adopt_taps", s.master_adopt_taps},
                     {"discovery_auto", s.discovery_auto},
+                    {"discovery_morning_min", s.discovery_morning_min},
                     {"master_optimizer_writes", s.master_optimizer_writes},
                     {"gateway_id", s.gateway_id},
                     {"web_port", s.web_port},
@@ -2030,6 +2032,7 @@ void HttpServer::routes_() {
       if (j.contains("master_table_writes")) s.master_table_writes = j["master_table_writes"].get<bool>();
       if (j.contains("master_adopt_taps")) s.master_adopt_taps = j["master_adopt_taps"].get<bool>();
       if (j.contains("discovery_auto")) s.discovery_auto = j["discovery_auto"].get<bool>();
+      if (j.contains("discovery_morning_min")) s.discovery_morning_min = j["discovery_morning_min"].get<int>();
       if (j.contains("master_optimizer_writes")) s.master_optimizer_writes = j["master_optimizer_writes"].get<bool>();
       if (j.contains("gateway_id")) s.gateway_id = j["gateway_id"].get<int>();
       if (j.contains("web_port")) s.web_port = j["web_port"].get<int>();
@@ -2071,6 +2074,8 @@ void HttpServer::routes_() {
     if (err.empty() && s.bus_role != "listen" && s.bus_role != "master" && s.bus_role != "standby")
       err = "Bus role is listen, master or standby.";
     if (err.empty() && !standby_takeover_ok(s.standby_takeover_s)) err = "The standby's takeover time is 2-60 s.";
+    if (err.empty() && (s.discovery_morning_min < 0 || s.discovery_morning_min > 720))
+      err = "The time after sunrise is 0-720 minutes.";
     if (err.empty() && runs_bus(s) && s.serial_port.rfind(TCP_PREFIX, 0) == 0)
       err = "The bus master needs a serial port on the bus, not a network bridge.";
     if (err.empty() && !gateway_id_ok(s.gateway_id))
