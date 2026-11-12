@@ -1,7 +1,9 @@
 #include "http_server.h"
 
+#include "fsutil.h"
 #include "layout_api.h"
 #include "log.h"
+#include "roof.h"
 #include "serial_port.h"
 
 #include <httplib.h>
@@ -1084,6 +1086,42 @@ void HttpServer::routes_() {
 
   // The Topology editor: the whole tree, and saving one. A save replaces the
   // layout in one go and marks it the user's own (tigo_layout.h).
+  // Topology > Roof: where each panel and TAP physically sits (roof.h), in
+  // roof.json beside settings.json. Empty until the first save.
+  auto roof_path = [this] {
+    const std::string &s = ctx_.settings_path;
+    size_t slash = s.find_last_of('/');
+    return (slash == std::string::npos ? std::string(".") : s.substr(0, slash)) + "/roof.json";
+  };
+  svr.Get("/api/roof", [roof_path](const httplib::Request &, httplib::Response &res) {
+    Roof r;
+    std::ifstream in(roof_path());
+    if (in) {
+      json j = json::parse(in, nullptr, false);
+      if (j.is_discarded() || !roof_from_json(j, r).empty()) {
+        LOGW("roof: %s isn't a roof layout; showing none", roof_path().c_str());
+        r = Roof();
+      }
+    }
+    send_json(res, roof_to_json(r));
+  });
+  svr.Post("/api/roof", [this, roof_path](const httplib::Request &req, httplib::Response &res) {
+    json j = json::parse(req.body, nullptr, false);
+    Roof r;
+    std::string err = j.is_discarded() ? "Expected a JSON object." : roof_from_json(j, r);
+    if (!err.empty()) {
+      send_json(res, {{"error", err}}, 400);
+      return;
+    }
+    std::lock_guard<std::mutex> lock(settings_mu_);
+    if (!write_file_atomic(roof_path(), roof_to_json(r).dump(2) + "\n")) {
+      send_json(res, {{"error", "Could not save the roof layout to disk."}}, 500);
+      return;
+    }
+    LOGI("roof: saved, %zu panels and %zu TAPs placed", r.panels.size(), r.taps.size());
+    send_json(res, {{"saved", true}});
+  });
+
   svr.Get("/api/layout", [this, &mon](const httplib::Request &, httplib::Response &res) {
     send_json(res, layout_json(mon, ctx_.topology));
   });
