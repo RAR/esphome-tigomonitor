@@ -268,6 +268,38 @@ test('the Web UI card saves the web settings with the bus ones', async () => {
   await ctx.close();
 });
 
+test('a primary button keeps its colour under the pointer', async () => {
+  const { page, ctx } = await open({ hash: '#settings' });
+  await page.click('#settings-tab-web');
+  const bg = () => page.$eval('#pi-web-save', (b) => getComputedStyle(b).backgroundColor);
+  const grey = await page.$eval('#pi-web-signout', (b) => getComputedStyle(b).backgroundColor);
+  const before = await bg();
+  await page.hover('#pi-web-save');
+  await page.waitForTimeout(250);
+  const after = await bg();
+  assert.notEqual(after, grey, 'not the plain buttons\' grey');
+  // rgb(0-255) or, from color-mix, color(srgb 0-1).
+  const sum = (c) => c.match(/[\d.]+/g).slice(0, 3).map(Number).reduce((a, b) => a + b, 0) * (c.startsWith('color(') ? 255 : 1);
+  assert.ok(sum(after) >= sum(before), `lighter or the same, not darker: ${before} -> ${after}`);
+  await ctx.close();
+});
+
+test('the Web UI card shows and saves the trusted proxies', async () => {
+  const { page, ctx, api } = await open({ hash: '#settings', pages: { trusted_proxies: ['172.16.0.0/12'] } });
+  await page.click('#settings-tab-web');
+  await answerAll(page, false);
+  assert.equal(await page.inputValue('#pi-web-proxies'), '172.16.0.0/12');
+  await page.fill('#pi-web-proxies', ' 10.0.0.1,  fd00::/8 192.168.1.2 ');
+  await page.click('#pi-web-save');
+  await page.waitForTimeout(300);
+  assert.deepEqual(api.posts.at(-1).trusted_proxies, ['10.0.0.1', 'fd00::/8', '192.168.1.2']);
+  await page.fill('#pi-web-proxies', '');
+  await page.click('#pi-web-save');
+  await page.waitForTimeout(300);
+  assert.deepEqual(api.posts.at(-1).trusted_proxies, []);
+  await ctx.close();
+});
+
 // Running the bus, Settings → Bus has two switches' worth: the CCA's way of
 // running it, all of a piece, and Allow changes to the TAPs. The CCA's
 // parts are no longer switches each; one an older settings file turned off

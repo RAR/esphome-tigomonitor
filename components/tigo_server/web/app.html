@@ -180,6 +180,8 @@
   .btn:hover:not(:disabled) { background: var(--bg-4); }
   .btn:disabled { opacity: 0.45; cursor: not-allowed; }
   .btn.primary { background: var(--accent); color: #061018; border-color: var(--accent); font-weight: 600; }
+  /* After .btn:hover, which would otherwise grey the action under the pointer. */
+  .btn.primary:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 86%, #fff); }
 
   /* ===== View switching ===== */
   .view { display: none; }
@@ -980,9 +982,6 @@
   .ui-dialog .ui-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
   .ui-dialog .ui-actions .btn { min-width: 92px; justify-content: center; text-align: center; }
   .ui-dialog .btn:focus-visible { outline: 2px solid var(--accent-2); outline-offset: 2px; }
-  /* .btn:hover outranks .btn.primary, which greyed the action under the pointer. */
-  .ui-dialog .btn.primary:hover:not(:disabled), .signin .btn.primary:hover:not(:disabled) {
-    background: color-mix(in srgb, var(--accent) 86%, #fff); }
   @media (max-width: 760px) {
     .ui-dialog { margin: auto 0 0; width: 100vw; max-width: 100vw; max-height: 86vh; border-radius: 16px 16px 0 0; border-width: 1px 0 0;
                  padding-bottom: max(18px, env(safe-area-inset-bottom)); }
@@ -1880,6 +1879,10 @@
         <div class="cfg-row">
           <div class="cfg-text"><strong>Web UI password</strong><span id="pi-web-pass-hint">Empty: anyone on your network can open this page and change settings</span></div>
           <div class="cfg-ctrl"><input class="cfg-input" id="pi-web-pass" type="password" autocomplete="new-password"></div>
+        </div>
+        <div class="cfg-row">
+          <div class="cfg-text"><strong>Trusted proxies</strong><span>A reverse proxy in front of the web UI: its address, or a network as address/bits. Wrong passwords then lock out only the visitor who typed them, not everyone using the proxy. Empty: none</span></div>
+          <div class="cfg-ctrl"><input class="cfg-input" id="pi-web-proxies" autocomplete="off" spellcheck="false" placeholder="172.16.0.0/12"></div>
         </div>
         <div class="tools-actions" style="margin-top:12px">
           <button class="btn primary" id="pi-web-save">Save</button>
@@ -6297,6 +6300,7 @@
       piWebLogin = { user: s.web_username || 'admin', set: !!s.web_password_set };
       document.getElementById('pi-web-user').value = piWebLogin.user;
       document.getElementById('pi-web-pass').value = '';
+      document.getElementById('pi-web-proxies').value = (s.trusted_proxies || []).join(', ');
       document.getElementById('pi-web-pass').placeholder = s.web_password_set ? 'unchanged' : '';
       document.getElementById('pi-web-pass-hint').textContent = s.web_password_set
         ? `Set: sign in as "${piWebLogin.user}". Leave empty to keep it.`
@@ -6501,7 +6505,8 @@
                    standby_takeover_s: Number(document.getElementById('pi-takeover').value) || 3,
                    discovery_morning_min: Math.max(0, Math.min(720, Math.round(Number(document.getElementById('pi-morning').value)))) || 0,
                    master_table_writes: document.getElementById('pi-tablewrites').checked,
-                   web_username: document.getElementById('pi-web-user').value.trim() || 'admin' };
+                   web_username: document.getElementById('pi-web-user').value.trim() || 'admin',
+                   trusted_proxies: document.getElementById('pi-web-proxies').value.split(/[\s,]+/).filter(Boolean) };
     if (!piTls.fixed) Object.assign(body, { tls_cert: tlsCert, tls_key: tlsKey });
     const webPass = document.getElementById('pi-web-pass').value;
     if (webPass !== '') body.web_password = webPass;
