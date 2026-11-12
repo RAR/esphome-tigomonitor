@@ -631,6 +631,57 @@
   .topo-empty { padding: 60px 24px; text-align: center; color: var(--text-dim); font-size: 13px; }
   /* The mesh map (Pi): optimizers around the TAP each reports through. */
   .mesh-note { margin: 0 0 14px; color: var(--text-dim); font-size: 13px; max-width: 760px; }
+  /* ===== Topology > Roof: panels where they sit ===== */
+  .roof-wrap { display: flex; gap: 14px; align-items: flex-start; }
+  .roof-scroll { flex: 1; min-width: 0; overflow: auto; border: 1px solid var(--border); border-radius: 10px;
+    background: var(--bg-2); max-height: 72vh; }
+  .roof-canvas { position: relative; margin: 12px; touch-action: none; }
+  .roof-canvas.editing { background-image:
+      linear-gradient(to right, color-mix(in srgb, var(--border) 70%, transparent) 1px, transparent 1px),
+      linear-gradient(to bottom, color-mix(in srgb, var(--border) 70%, transparent) 1px, transparent 1px);
+    background-size: var(--roof-cell) var(--roof-cell); outline: 1px solid var(--border); }
+  .roof-tile { position: absolute; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    border-radius: 3px; border: 1px solid rgba(255,255,255,0.18); color: #e8eef8; font-size: 11px; line-height: 1.15;
+    font-variant-numeric: tabular-nums; user-select: none; box-sizing: border-box;
+    background-image: linear-gradient(to right, rgba(255,255,255,0.07) 1px, transparent 1px),
+                      linear-gradient(to bottom, rgba(255,255,255,0.07) 1px, transparent 1px);
+    background-size: 33.4% 25%; box-shadow: 0 1px 2px rgba(0,0,0,0.35); }
+  .roof-tile.lit { color: #061018; border-color: rgba(6,16,24,0.25); }
+  .roof-tile.stale { opacity: 0.55; }
+  .roof-tile .rn { font-weight: 600; }
+  .roof-tile .rw { font-size: 9.5px; opacity: 0.9; white-space: nowrap; letter-spacing: -0.02em; }
+  .roof-tile .rn { white-space: nowrap; }
+  .roof-canvas.editing .roof-tile, .roof-canvas.editing .roof-tap { cursor: grab; }
+  .roof-tile:focus-visible, .roof-tap:focus-visible, .roof-chip:focus-visible { outline: 2px solid var(--accent-2); outline-offset: 2px; }
+  .roof-tile.sel, .roof-tap.sel { outline: 2px solid var(--accent-2); outline-offset: 2px; }
+  .roof-tap { position: absolute; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px;
+    border-radius: 50%; background: var(--bg-3); border: 2px solid var(--accent-2); color: var(--text);
+    font-size: 10px; font-weight: 600; box-sizing: border-box; user-select: none; box-shadow: 0 1px 3px rgba(0,0,0,0.3); }
+  .roof-tap svg { width: 14px; height: 14px; color: var(--accent-2); }
+  .roof-drop { position: absolute; border: 2px dashed var(--accent-2); border-radius: 4px; pointer-events: none; box-sizing: border-box; }
+  .roof-drop.taken { border-color: var(--warn); }
+  .roof-ghost { position: fixed; pointer-events: none; z-index: 50; opacity: 0.85; }
+  .roof-tray { width: 210px; flex: none; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-2);
+    padding: 10px; max-height: 72vh; overflow: auto; }
+  .roof-tray h3 { margin: 0 0 6px; font-size: 12px; font-weight: 600; color: var(--text-dim); }
+  .roof-tray .roof-group { margin-bottom: 10px; }
+  .roof-tray .roof-group-name { font-size: 11px; color: var(--text-dim); margin: 6px 0 4px; }
+  .roof-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+  .roof-chip { font: inherit; font-size: 11px; padding: 3px 7px; border-radius: 4px; border: 1px solid var(--border);
+    background: #16233d; color: #e8eef8; cursor: grab; touch-action: none; }
+  .roof-chip.tap { background: var(--bg-3); color: var(--text); border-color: var(--accent-2); }
+  .roof-tray .roof-done { font-size: 12px; color: var(--text-dim); }
+  .roof-empty { padding: 36px 20px; text-align: center; color: var(--text-dim); font-size: 13px; }
+  .roof-empty strong { display: block; color: var(--text); font-size: 15px; margin-bottom: 6px; }
+  .roof-scale { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-dim); }
+  .roof-scale i { display: inline-block; width: 64px; height: 8px; border-radius: 4px;
+    background: linear-gradient(to right, #16233d, var(--accent)); border: 1px solid var(--border); }
+  .roof-help { font-size: 12px; color: var(--text-dim); margin: 10px 0 0; max-width: 760px; }
+  .roof-help kbd { font: inherit; font-size: 11px; border: 1px solid var(--border); border-radius: 3px; padding: 0 4px; background: var(--bg-3); }
+  @media (max-width: 760px) {
+    .roof-wrap { flex-direction: column; }
+    .roof-tray { width: auto; align-self: stretch; max-height: 30vh; }
+  }
   .mesh-stage { display: grid; grid-template-columns: minmax(0, 1fr) 260px; background: var(--bg-2);
                 border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
   .mesh-graph { min-width: 0; }
@@ -1496,6 +1547,7 @@
       <div class="page-tabs" role="tablist" aria-label="Topology" id="topology-tabs" data-linux-only style="display:none">
         <button role="tab" id="topology-tab-mesh" aria-controls="topology-mesh" aria-selected="false" data-tab="mesh" tabindex="-1">Mesh</button>
         <button role="tab" id="topology-tab-layout" aria-controls="topology-layout" aria-selected="true" data-tab="layout">Layout</button>
+        <button role="tab" id="topology-tab-roof" aria-controls="topology-roof" aria-selected="false" data-tab="roof" tabindex="-1">Roof</button>
       </div>
 
       <div id="topology-layout" role="tabpanel" aria-labelledby="topology-tab-layout">
@@ -1524,6 +1576,22 @@
       <div id="topo-tree" class="topo-tree">
         <div class="topo-empty">Loading topology…</div>
       </div>
+      </div>
+
+      <div id="topology-roof" role="tabpanel" aria-labelledby="topology-tab-roof" hidden>
+        <div class="topo-toolbar">
+          <span class="roof-scale" id="roof-scale"><span>0 W</span><i></i><span id="roof-scale-max">peak</span></span>
+          <span class="topo-summary" id="roof-summary">—</span>
+          <button class="btn" id="roof-edit-btn">Edit roof</button>
+          <button class="btn" id="roof-cancel-btn" style="display:none">Cancel</button>
+          <button class="btn primary" id="roof-save-btn" style="display:none">Save roof</button>
+        </div>
+        <div id="roof-error" class="topo-ed-error" role="alert"></div>
+        <div class="roof-wrap">
+          <div class="roof-tray" id="roof-tray" role="region" aria-label="Not placed yet" style="display:none"></div>
+          <div class="roof-scroll" id="roof-scroll"><div class="roof-canvas" id="roof-canvas"></div></div>
+        </div>
+        <p class="roof-help" id="roof-help" style="display:none">Drag each panel from the list onto the grid where it sits on the roof, and each TAP where it's mounted. Leave empty squares for gaps between roof faces. Select a placed panel to move it with the arrow keys, turn it with <kbd>R</kbd>, or send it back to the list with <kbd>Delete</kbd>. Dropping on another panel swaps the two.</p>
       </div>
 
       <div id="topology-mesh" role="tabpanel" aria-labelledby="topology-tab-mesh" hidden>
@@ -7486,7 +7554,7 @@
     if (!name) { try { name = localStorage.getItem('topology-tab'); } catch (e) {} }
     // The Pi opens on Mesh unless Layout was picked; the ESP32 has only Layout.
     if (PLATFORM !== 'linux') name = 'layout';
-    else if (name !== 'layout') name = 'mesh';
+    else if (name !== 'layout' && name !== 'roof') name = 'mesh';
     document.querySelectorAll('#topology-tabs [role="tab"]').forEach(t => {
       const on = t.dataset.tab === name;
       t.setAttribute('aria-selected', String(on));
@@ -7495,6 +7563,7 @@
     });
     // Fetched only when it's on screen, not for a tab remembered from before.
     if (name === 'mesh' && document.getElementById('view-topology').classList.contains('active')) refreshMesh();
+    if (name === 'roof' && document.getElementById('view-topology').classList.contains('active')) refreshRoof();
   }
   document.querySelectorAll('#topology-tabs [role="tab"]').forEach(t => t.addEventListener('click', () => {
     topologyTab(t.dataset.tab);
@@ -7513,7 +7582,281 @@
   platformReady.then(() => topologyTab());
   document.querySelector('#nav button[data-view="topology"]').addEventListener('click', () => {
     if (!document.getElementById('topology-mesh').hidden) refreshMesh();
+    if (!document.getElementById('topology-roof').hidden) refreshRoof();
   });
+
+  // ---- the roof: each panel where it sits, coloured by its power ----
+  // Topology > Roof (Pi). /api/roof holds the positions (one grid cell per
+  // panel; touching cells are neighbours on the roof), /api/devices the
+  // live power. Edit roof opens a tray of what isn't placed yet.
+  const roof = { saved: { panels: [], taps: [] }, draft: null, devices: [], tapNames: {}, sel: null, loaded: false };
+  const ROOF_PANEL_BASE = '#16233d';
+  const roofEsc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const roofCell = () => (window.innerWidth < 760 ? 40 : 48);
+  const ROOF_TAP_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">' +
+    '<path d="M12 13v8"/><circle cx="12" cy="11" r="2"/><path d="M8.5 7.5a5 5 0 0 0 0 7"/><path d="M15.5 7.5a5 5 0 0 1 0 7"/>' +
+    '<path d="M5.6 4.6a9 9 0 0 0 0 12.8"/><path d="M18.4 4.6a9 9 0 0 1 0 12.8"/></svg>';
+
+  async function refreshRoof(devicesOnly) {
+    try {
+      const jobs = [apiFetch('/api/devices').then(r => r.ok ? r.json() : { devices: [] })];
+      if (!devicesOnly) {
+        jobs.push(apiFetch('/api/roof').then(r => { if (!r.ok) throw new Error(`/api/roof ${r.status}`); return r.json(); }));
+        jobs.push(apiFetch('/api/mesh').then(r => r.ok ? r.json() : {}).catch(() => ({})));
+      }
+      const [dev, saved, mesh] = await Promise.all(jobs);
+      roof.devices = (dev && dev.devices) || [];
+      if (saved) { roof.saved = { panels: saved.panels || [], taps: saved.taps || [] }; roof.loaded = true; }
+      if (mesh && mesh.taps) mesh.taps.forEach(t => { roof.tapNames[t.id] = t.name || ''; });
+      document.getElementById('roof-error').textContent = '';
+    } catch (e) {
+      document.getElementById('roof-error').textContent = `Couldn't load the roof: ${e.message}`;
+    }
+    roofRender();
+  }
+  // Every TAP a panel reports through, plus any placed or named.
+  function roofTapIds() {
+    const ids = new Set(Object.keys(roof.tapNames));
+    roof.devices.forEach(d => { if (d.tap) ids.add(d.tap); });
+    (roof.draft || roof.saved).taps.forEach(t => ids.add(t.id));
+    return [...ids].sort();
+  }
+  const roofTapLabel = id => roof.tapNames[id] ? `${roof.tapNames[id]}` : `TAP ${id}`;
+  function roofAt(l, x, y) {
+    return l.panels.find(p => p.x === x && p.y === y) || l.taps.find(t => t.x === x && t.y === y) || null;
+  }
+  function roofFree(l) {
+    for (let y = 0; y < 200; y++) for (let x = 0; x < 16; x++) if (!roofAt(l, x, y)) return { x, y };
+    return { x: 0, y: 0 };
+  }
+
+  function roofRender() {
+    const editing = !!roof.draft;
+    const l = editing ? roof.draft : roof.saved;
+    const canvas = document.getElementById('roof-canvas');
+    const C = roofCell();
+    canvas.style.setProperty('--roof-cell', `${C}px`);
+    canvas.classList.toggle('editing', editing);
+    const byAddr = Object.fromEntries(roof.devices.map(d => [String(d.addr).toUpperCase(), d]));
+    const peak = Math.max(1, ...roof.devices.map(d => d.peak_power || d.power || 0));
+    document.getElementById('roof-scale-max').textContent = `${Math.round(peak)} W`;
+    document.getElementById('roof-scale').style.display = editing ? 'none' : '';
+    document.getElementById('roof-tray').style.display = editing ? '' : 'none';
+    document.getElementById('roof-help').style.display = editing ? '' : 'none';
+    document.getElementById('roof-edit-btn').style.display = editing ? 'none' : '';
+    document.getElementById('roof-cancel-btn').style.display = editing ? '' : 'none';
+    document.getElementById('roof-save-btn').style.display = editing ? '' : 'none';
+    const placed = new Set(l.panels.map(p => p.addr));
+    const known = roof.devices.length;
+    document.getElementById('roof-summary').textContent = known || l.panels.length
+      ? `${l.panels.filter(p => byAddr[p.addr]).length} of ${known} panels placed${l.taps.length ? ` · ${l.taps.length} TAP${l.taps.length > 1 ? 's' : ''}` : ''}`
+      : '—';
+    const all = [...l.panels, ...l.taps];
+    if (!editing && !all.length) {
+      canvas.style.width = canvas.style.height = '';
+      canvas.innerHTML = '<div class="roof-empty"><strong>No roof drawn yet</strong>Choose Edit roof and place each panel where it sits, and each TAP where it\'s mounted. ' +
+        'Then this shows every panel\'s power in place, so a shaded corner or one dropping out stands out.</div>';
+      roofRenderTray(byAddr, placed);
+      return;
+    }
+    const xs = all.map(i => i.x), ys = all.map(i => i.y);
+    const ox = editing ? 0 : Math.min(...xs), oy = editing ? 0 : Math.min(...ys);
+    const cols = editing ? Math.max(16, (xs.length ? Math.max(...xs) : 0) + 4) : Math.max(...xs) - ox + 1;
+    const rows = editing ? Math.max(10, (ys.length ? Math.max(...ys) : 0) + 4) : Math.max(...ys) - oy + 1;
+    canvas.style.width = `${cols * C}px`;
+    canvas.style.height = `${rows * C}px`;
+    const tab = editing ? ' tabindex="0"' : '';
+    let html = '';
+    for (const p of l.panels) {
+      const d = byAddr[p.addr];
+      const name = d ? (d.name || p.addr) : p.addr;
+      const w = d && !d.stale ? Math.round(d.power || 0) : null;
+      const frac = w == null ? 0 : Math.max(0, Math.min(1, w / peak));
+      const tw = Math.round(C * (p.portrait ? 0.7 : 0.92)), th = Math.round(C * (p.portrait ? 0.92 : 0.64));
+      const left = (p.x - ox) * C + (C - tw) / 2, top = (p.y - oy) * C + (C - th) / 2;
+      const tip = `${name}${d && d.string_label ? ` · ${d.string_label}` : ''}${w == null ? (d ? ' · no recent report' : ' · not heard') : ` · ${w} W`}`;
+      html += `<div class="roof-tile${frac > 0.55 ? ' lit' : ''}${w == null ? ' stale' : ''}${roof.sel === 'p' + p.addr ? ' sel' : ''}" data-kind="panel" data-id="${roofEsc(p.addr)}"${tab}
+        role="${editing ? 'button' : 'img'}" aria-label="${roofEsc(tip)}" title="${roofEsc(tip)}"
+        style="left:${left}px;top:${top}px;width:${tw}px;height:${th}px;background-color:color-mix(in srgb, var(--accent) ${Math.round(frac * 100)}%, ${ROOF_PANEL_BASE})">
+        <span class="rn">${roofEsc(name)}</span>${w == null || C < 44 ? '' : `<span class="rw">${w} W</span>`}</div>`;
+    }
+    for (const t of l.taps) {
+      const s = Math.round(C * 0.8), left = (t.x - ox) * C + (C - s) / 2, top = (t.y - oy) * C + (C - s) / 2;
+      html += `<div class="roof-tap${roof.sel === 't' + t.id ? ' sel' : ''}" data-kind="tap" data-id="${roofEsc(t.id)}"${tab}
+        role="${editing ? 'button' : 'img'}" aria-label="${roofEsc(roofTapLabel(t.id))}" title="${roofEsc(roofTapLabel(t.id))}"
+        style="left:${left}px;top:${top}px;width:${s}px;height:${s}px">${ROOF_TAP_ICON}<span>${roofEsc(t.id)}</span></div>`;
+    }
+    canvas.innerHTML = html;
+    roofRenderTray(byAddr, placed);
+  }
+
+  function roofRenderTray(byAddr, placed) {
+    const tray = document.getElementById('roof-tray');
+    if (!roof.draft) { tray.innerHTML = ''; return; }
+    const groups = {};
+    roof.devices.filter(d => !placed.has(String(d.addr).toUpperCase())).forEach(d => {
+      const g = d.string_label || 'No string';
+      (groups[g] = groups[g] || []).push(d);
+    });
+    const taps = roofTapIds().filter(id => !roof.draft.taps.some(t => t.id === id));
+    const nat = (a, b) => String(a.name || a.addr).localeCompare(String(b.name || b.addr), undefined, { numeric: true });
+    let html = '<h3>Not placed yet</h3>';
+    if (taps.length) html += `<div class="roof-group"><div class="roof-group-name">TAPs</div><div class="roof-chips">${
+      taps.map(id => `<button type="button" class="roof-chip tap" data-kind="tap" data-id="${roofEsc(id)}" title="${roofEsc(roofTapLabel(id))}">${roofEsc(roofTapLabel(id))}</button>`).join('')}</div></div>`;
+    Object.keys(groups).sort((a, b) => a.localeCompare(b, undefined, { numeric: true })).forEach(g => {
+      html += `<div class="roof-group"><div class="roof-group-name">${roofEsc(g)}</div><div class="roof-chips">${
+        groups[g].sort(nat).map(d => `<button type="button" class="roof-chip" data-kind="panel" data-id="${roofEsc(String(d.addr).toUpperCase())}">${roofEsc(d.name || d.addr)}</button>`).join('')}</div></div>`;
+    });
+    if (!taps.length && !Object.keys(groups).length) html += '<p class="roof-done">Everything is placed. Drag a panel here to take it off the roof.</p>';
+    tray.innerHTML = html;
+  }
+
+  // Put kind/id at x,y in the draft: a panel dropped on a panel swaps with it;
+  // nothing lands on a TAP, nor a TAP on anything. Returns whether it moved.
+  function roofPlace(kind, id, x, y) {
+    const l = roof.draft;
+    if (x < 0 || y < 0 || x > 199 || y > 199) return false;
+    const list = kind === 'panel' ? l.panels : l.taps;
+    const key = kind === 'panel' ? 'addr' : 'id';
+    const me = list.find(i => i[key] === id);
+    const there = roofAt(l, x, y);
+    if (there === me && me) return false;
+    if (there) {
+      if (kind !== 'panel' || !there.addr) return false;
+      if (me) { there.x = me.x; there.y = me.y; } else l.panels = l.panels.filter(p => p !== there);
+    }
+    if (me) { me.x = x; me.y = y; } else list.push(kind === 'panel' ? { addr: id, x, y, portrait: true } : { id, x, y });
+    return true;
+  }
+  function roofUnplace(kind, id) {
+    const l = roof.draft;
+    if (kind === 'panel') l.panels = l.panels.filter(p => p.addr !== id); else l.taps = l.taps.filter(t => t.id !== id);
+    roof.sel = null;
+  }
+
+  document.getElementById('roof-edit-btn').addEventListener('click', async () => {
+    if (!roof.loaded) await refreshRoof();
+    roof.draft = JSON.parse(JSON.stringify(roof.saved));
+    roof.sel = null;
+    roofRender();
+  });
+  document.getElementById('roof-cancel-btn').addEventListener('click', () => {
+    roof.draft = null; roof.sel = null;
+    document.getElementById('roof-error').textContent = '';
+    roofRender();
+  });
+  document.getElementById('roof-save-btn').addEventListener('click', async () => {
+    const btn = document.getElementById('roof-save-btn');
+    btn.disabled = true;
+    try {
+      const r = await apiFetch('/api/roof', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(roof.draft) });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || `refused (${r.status})`);
+      roof.saved = roof.draft; roof.draft = null; roof.sel = null;
+      document.getElementById('roof-error').textContent = '';
+      showToast('Roof saved ✓', 'ok');
+      roofRender();
+    } catch (e) {
+      document.getElementById('roof-error').textContent = `Not saved: ${e.message}`;
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  // Dragging, by pointer (mouse, pen or touch): from the tray or the grid,
+  // onto a cell or back onto the tray. A press without a drag selects.
+  let roofDrag = null;
+  function roofCellAt(ev) {
+    const r = document.getElementById('roof-canvas').getBoundingClientRect(), C = roofCell();
+    if (ev.clientX < r.left || ev.clientY < r.top || ev.clientX >= r.right || ev.clientY >= r.bottom) return null;
+    return { x: Math.floor((ev.clientX - r.left) / C), y: Math.floor((ev.clientY - r.top) / C) };
+  }
+  function roofOverTray(ev) {
+    const r = document.getElementById('roof-tray').getBoundingClientRect();
+    return ev.clientX >= r.left && ev.clientX < r.right && ev.clientY >= r.top && ev.clientY < r.bottom;
+  }
+  function roofDropMark(cell, ok) {
+    const canvas = document.getElementById('roof-canvas');
+    let m = canvas.querySelector('.roof-drop');
+    if (!cell) { if (m) m.remove(); return; }
+    if (!m) { m = document.createElement('div'); m.className = 'roof-drop'; canvas.appendChild(m); }
+    const C = roofCell();
+    Object.assign(m.style, { left: `${cell.x * C}px`, top: `${cell.y * C}px`, width: `${C}px`, height: `${C}px` });
+    m.classList.toggle('taken', !ok);
+  }
+  function roofDropOk(cell) {
+    if (!cell || !roofDrag) return false;
+    const there = roofAt(roof.draft, cell.x, cell.y);
+    if (!there) return true;
+    const mine = roofDrag.kind === 'panel' ? there.addr === roofDrag.id : there.id === roofDrag.id;
+    return mine || (roofDrag.kind === 'panel' && !!there.addr);
+  }
+  ['roof-canvas', 'roof-tray'].forEach(where => document.getElementById(where).addEventListener('pointerdown', ev => {
+    if (!roof.draft || ev.button > 0) return;
+    const el = ev.target.closest('[data-kind]');
+    if (!el) { if (roof.sel) { roof.sel = null; roofRender(); } return; }
+    ev.preventDefault();
+    roofDrag = { kind: el.dataset.kind, id: el.dataset.id, x0: ev.clientX, y0: ev.clientY, el, ghost: null, fromTray: where === 'roof-tray' };
+  }));
+  document.addEventListener('pointermove', ev => {
+    if (!roofDrag) return;
+    if (!roofDrag.ghost) {
+      if (Math.hypot(ev.clientX - roofDrag.x0, ev.clientY - roofDrag.y0) < 5) return;
+      const g = roofDrag.el.cloneNode(true);
+      g.classList.add('roof-ghost'); g.classList.remove('sel');
+      const r = roofDrag.el.getBoundingClientRect();
+      Object.assign(g.style, { width: `${r.width}px`, height: `${r.height}px`, left: '0', top: '0' });
+      document.body.appendChild(g);
+      roofDrag.ghost = g; roofDrag.w = r.width; roofDrag.h = r.height;
+    }
+    roofDrag.ghost.style.transform = `translate(${ev.clientX - roofDrag.w / 2}px, ${ev.clientY - roofDrag.h / 2}px)`;
+    const cell = roofCellAt(ev);
+    roofDropMark(cell, roofDropOk(cell));
+  });
+  document.addEventListener('pointerup', ev => {
+    if (!roofDrag) return;
+    const d = roofDrag;
+    roofDrag = null;
+    roofDropMark(null);
+    if (!d.ghost) {  // a press: select what's on the grid; place what's in the tray
+      if (d.fromTray) { const f = roofFree(roof.draft); roofPlace(d.kind, d.id, f.x, f.y); }
+      roof.sel = (d.kind === 'panel' ? 'p' : 't') + d.id;
+      roofRender();
+      const back = document.querySelector(`#roof-canvas [data-kind="${d.kind}"][data-id="${d.id}"]`);
+      if (back) back.focus();
+      return;
+    }
+    d.ghost.remove();
+    const cell = roofCellAt(ev);
+    if (roofOverTray(ev) && !d.fromTray) roofUnplace(d.kind, d.id);
+    else if (cell) roofPlace(d.kind, d.id, cell.x, cell.y);
+    roofRender();
+  });
+  document.getElementById('roof-canvas').addEventListener('keydown', ev => {
+    if (!roof.draft) return;
+    const el = ev.target.closest('[data-kind]');
+    if (!el) return;
+    const kind = el.dataset.kind, id = el.dataset.id;
+    const item = kind === 'panel' ? roof.draft.panels.find(p => p.addr === id) : roof.draft.taps.find(t => t.id === id);
+    if (!item) return;
+    const step = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[ev.key];
+    if (step) roofPlace(kind, id, item.x + step[0], item.y + step[1]);
+    else if ((ev.key === 'r' || ev.key === 'R') && kind === 'panel') item.portrait = !item.portrait;
+    else if (ev.key === 'Delete' || ev.key === 'Backspace') roofUnplace(kind, id);
+    else if (ev.key === 'Escape') roof.sel = null;
+    else return;
+    ev.preventDefault();
+    if (ev.key !== 'Delete' && ev.key !== 'Backspace' && ev.key !== 'Escape') roof.sel = (kind === 'panel' ? 'p' : 't') + id;
+    roofRender();
+    const back = document.querySelector(`#roof-canvas [data-kind="${kind}"][data-id="${id}"]`);
+    if (back) back.focus();
+  });
+  // Live power while the roof is on screen and not being edited.
+  setInterval(() => {
+    if (roof.draft || document.getElementById('topology-roof').hidden ||
+        !document.getElementById('view-topology').classList.contains('active') || document.hidden) return;
+    refreshRoof(true);
+  }, 10000);
 
   // ---- the mesh map ----
   // Tiers from reports lost today (measured) and the raw RSSI byte, which
