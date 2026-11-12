@@ -33,7 +33,7 @@ them, as on RS485. The stats count the frames that came in on each link.
 It also plays the rest of the CCA's dialogue, as the roof TAP answered it:
 a SET_ID_BY_MAC away from the id the TAP was first given, then a RESET
 broadcast, brings it back at that first id after ~5 s of silence; VERSION,
-0x0E02 and tunnel 0x0D get fixed (invented) replies; tunnel 0x22 is acked;
+0x0E02 and tunnel 0x0D get fixed (invented) replies; tunnel 0x22 reads and writes a report period (3, as the roof's);
 tunnel 0x26 pages the node table from the id asked; tunnel 0x29 takes 1-10
 records (acked --table-ack), a new one (bit 15) listed not joined until
 --join-after s; tunnel 0x2B BA BE erases the table; and tunnel 0x06
@@ -113,6 +113,7 @@ def main():
     ap.add_argument('--pv-wrong-reply', action='store_true')  # answer 0x0B00 with the other byte
     ap.add_argument('--join-after', type=float, default=5)  # a record the master wrote joins this long after
     ap.add_argument('--table-ack', type=int, default=0)  # the 0x29 ack byte
+    ap.add_argument('--cfg-size', type=int, default=36, choices=[36, 46])  # the radio block's form: 46 as the G8.59's
     a = ap.parse_args()
 
     # One pty per master on the bus. The slave ends stay open here, so a
@@ -163,6 +164,16 @@ def main():
     erased = False  # after a 0x2B the table is what was written since, and no longer the panels
     stats['table_writes'] = []
     stats['erases'] = 0
+    # The radio settings block (tap_config.h): the write sets RAM, the
+    # stored read (00 01) saves it, a reset brings back what was saved.
+    cfg_ram = bytes(range(a.cfg_size))
+    cfg_saved = cfg_ram
+    stats['cfg_extra'] = cfg_ram[31:41].hex() if a.cfg_size == 46 else ''  # the 46-byte form's 10 unexplained bytes
+    stats['cfg_writes'] = []  # channel and PAN of each write, never the key
+    stats['period_writes'] = []  # tunnel 0x22 writes, 01 <setting> <code>
+    period = [3, 3]  # the report period codes, as the roof TAP answers
+    stats['cfg_saves'] = 0
+    stats['unicast_resets'] = 0
     needs_w255 = {panels[0][1]} if panels else set()
     smart_n = {panels[1][1]} if len(panels) > 1 else set()
     buf = bytearray()
@@ -236,6 +247,12 @@ def main():
                 stats['claims'] += 1
                 if stats['claims'] > a.mute_claims:
                     send(encode(0x8000, 0x0015, b''))
+                continue
+            if cmd == 0x0010 and dest == addr and dest != 0x0000:  # RESET to this TAP alone
+                send(encode(addr | 0x8000, 0x0011, b''))
+                stats['unicast_resets'] += 1
+                cfg_ram = cfg_saved
+                quiet_until = time.monotonic() + a.reset_quiet
                 continue
             if cmd == 0x0010 and dest == 0x0000:  # RESET broadcast
                 send(encode(0x8000, 0x0011, b''))
@@ -322,11 +339,27 @@ def main():
                 stats['session'].append(f'{p[0]:02x}')
                 stats['pv'] = 'off' if p[0] == 0 else 'on'
                 send(encode(addr | 0x8000, 0x0B01, bytes([p[0] ^ 1]) if a.pv_wrong_reply else p))
-            elif cmd == 0x0B0F and len(p) == 7 and p[3] == 0x0D:  # bring-up; the real reply's block is the site's
-                send(encode(addr | 0x8000, 0x0B10, bytes([0x00, 0x0E, 0x00, 0x0E, p[4]]) + bytes(range(37))))
-            elif cmd == 0x0B0F and len(p) == 7 and p[3] == 0x22:  # empty broadcast, acked
+            elif cmd == 0x0B0F and len(p) == 7 and p[3] == 0x0D:  # the reads; 00 01 also saves
+                if p[5:7] == b'\x00\x01':
+                    cfg_saved = cfg_ram
+                    stats['cfg_saves'] += 1
+                # A 46-byte TAP's stored read answers in the 36-byte form.
+                shown = cfg_ram[:31] + cfg_ram[41:] if p[5:7] == b'\x00\x01' and len(cfg_ram) == 46 else cfg_ram
+                send(encode(addr | 0x8000, 0x0B10, bytes([0x00, 0x0E, 0x00, 0x0E, p[4]]) + shown + b'\x00'))
+            elif cmd == 0x0B0F and len(p) == 7 + a.cfg_size and p[3] == 0x0D and p[5:7] == b'\x01\x00':  # the write: RAM only
+                cfg_ram = bytes(p[7:])
+                if a.cfg_size == 46:
+                    stats['cfg_extra'] = cfg_ram[31:41].hex()
+                stats['cfg_writes'].append({'channel': cfg_ram[1], 'pan': f'{cfg_ram[2]:02X}{cfg_ram[3]:02X}'})
+                send(encode(addr | 0x8000, 0x0B10, bytes([0x00, 0x0E, 0x00, 0x0E, p[4]]) + cfg_ram + b'\x00'))
+            elif cmd == 0x0B0F and len(p) == 7 and p[3] == 0x22:  # a read of a report period setting
                 stats['broadcast'].append(p[5:].hex())
-                send(encode(addr | 0x8000, 0x0B10, bytes([0x00, 0x0E, 0x00, 0x23, p[4], 0x03])))
+                send(encode(addr | 0x8000, 0x0B10, bytes([0x00, 0x0E, 0x00, 0x23, p[4], period[p[6] & 1]])))
+            elif cmd == 0x0B0F and len(p) == 8 and p[3] == 0x22 and p[5] == 0x01 and p[6] <= 1:  # its write
+                was = period[p[6]]
+                period[p[6]] = p[7]
+                stats['period_writes'].append(p[5:].hex())
+                send(encode(addr | 0x8000, 0x0B10, bytes([0x00, 0x0E, 0x00, 0x23, p[4], was])))  # the code before
             elif cmd == 0x0B0F and len(p) == 7 and p[3] == 0x26:  # a page of the node table, 12 at most
                 idx = p[5] << 8 | p[6]
                 stats['walk'].append(f'{idx:04X}')

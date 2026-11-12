@@ -233,10 +233,64 @@ bool MasterCore::request_table_add(const master::Bytes &mac, uint16_t id, bool d
   return true;
 }
 
+bool MasterCore::request_provision(const master::Bytes &tap_mac, const master::RadioBlock &block, bool reset,
+                                   bool dry_run, std::string &why) {
+  std::lock_guard<std::mutex> lock(mu_);
+  uint16_t tap = 0;
+  std::string want = master::mac_hex(tap_mac);
+  for (const auto &t : taps_)
+    if (!t->st.mac.empty() && t->st.mac == want) tap = t->id;
+  // A TAP polled since start may never have said its MAC; with one TAP, the
+  // job asks it first and stops unless it's this one. Not when that check
+  // is skipped: then the MAC must be one it has said.
+  if (!tap && taps_.size() == 1 && !block.skip_identify) tap = taps_.front()->id;
+  // A live system needs "Allow changes to the TAPs", as Add a TAP's step;
+  // the bench needs nothing more.
+  if (!bench_ && !table_writes_on_ && !dry_run)  // a check only reads
+    why = "giving a TAP its radio settings needs Allow changes to the TAPs (Settings > Bus)";
+  // Skipping the MAC check, or a reset, are bench tools: on a live system a
+  // wrong MAC could re-network the TAP in service, and a reset restarts it.
+  else if (!bench_ && (block.skip_identify || reset))
+    why = "skipping the MAC check, or a reset, is for the bench only (master_bench)";
+  else if (tap_mac.size() != 8 || !tap)
+    why = "no TAP on this bus answered with that MAC";  // with several, it must have said its MAC already
+  else if (!master::is_radio_block_ok(block.encode()))
+    why = "the channel must be 11 to 26";
+  else if (table_refusal_(true, tap, why))
+    return false;
+  if (!why.empty()) return false;
+  start_table_job_(std::make_unique<master::ProvisionJob>(tap_mac, block, reset, dry_run), tap);
+  return true;
+}
+
+bool MasterCore::request_period(const master::Bytes &tap_mac, uint8_t code, bool dry_run, std::string &why) {
+  std::lock_guard<std::mutex> lock(mu_);
+  uint16_t tap = 0;
+  std::string want = master::mac_hex(tap_mac);
+  for (const auto &t : taps_)
+    if (!t->st.mac.empty() && t->st.mac == want) tap = t->id;
+  if (!bench_ && !table_writes_on_ && !dry_run)
+    why = "setting a TAP's report period needs Allow changes to the TAPs (Settings > Bus)";
+  else if (!master::period_code_hyperslots(code))
+    why = "the period code is 1 to 11 (1 s to 30 s)";
+  else if (tap_mac.size() != 8 || !tap)
+    why = "no TAP on this bus has said that MAC";
+  else if (table_refusal_(true, tap, why))
+    return false;
+  if (!why.empty()) return false;
+  start_table_job_(std::make_unique<master::PeriodJob>(tap_mac, code, dry_run), tap);
+  return true;
+}
+
 bool MasterCore::request_table_remove(const master::Bytes &mac, bool dry_run, std::string &why, uint16_t tap) {
+  return request_table_remove(std::vector<master::Bytes>{mac}, dry_run, why, tap);
+}
+
+bool MasterCore::request_table_remove(const std::vector<master::Bytes> &macs, bool dry_run, std::string &why,
+                                      uint16_t tap) {
   std::lock_guard<std::mutex> lock(mu_);
   if (table_refusal_(dry_run, tap, why)) return false;
-  if (mac.size() != 8) {
+  if (macs.empty() || std::any_of(macs.begin(), macs.end(), [](const master::Bytes &m) { return m.size() != 8; })) {
     why = "a MAC is 8 bytes";
     return false;
   }
@@ -244,7 +298,8 @@ bool MasterCore::request_table_remove(const master::Bytes &mac, bool dry_run, st
     why = "nowhere to save the optimizers that stay, so nothing is erased";
     return false;
   }
-  start_table_job_(std::make_unique<master::TableRemove>(mac, dry_run), tap);
+  if (macs.size() == 1) start_table_job_(std::make_unique<master::TableRemove>(macs[0], dry_run), tap);
+  else start_table_job_(std::make_unique<master::TableRemove>(macs, dry_run), tap);
   return true;
 }
 
@@ -282,6 +337,21 @@ bool MasterCore::request_herd(std::string &why) {
     why.clear();
   if (!why.empty()) return false;
   herd_wanted_ = true;
+  return true;
+}
+
+bool MasterCore::request_ask(uint16_t node, const std::string &text, std::string &why) {
+  std::lock_guard<std::mutex> lock(mu_);
+  if (!bench_)
+    why = "asking an optimizer a one-off question is for the bench only (master_bench)";
+  else if (!queries_on_)
+    why = "queries to optimizers are off";
+  else if (!master::Queries::is_read_text(text))
+    why = "only a read: ^00 and a name";
+  else
+    why.clear();
+  if (!why.empty()) return false;
+  ask_wanted_.push_back({node, text});
   return true;
 }
 
@@ -475,6 +545,17 @@ void MasterCore::settle_table_job_(uint32_t now_ms) {
   bool done = table_job_->finished();
   sync_table_status_(done);
   if (!done) return;
+  // Giving a TAP its radio settings touches no table: nothing to save,
+  // watch or follow.
+  if (std::string(table_job_->kind()) == "provision" || std::string(table_job_->kind()) == "period") {
+    const char *what = std::string(table_job_->kind()) == "period" ? "report period" : "radio settings";
+    if (table_job_->ok())
+      LOGI("bus master: %s: %s", what, table_job_->message().c_str());
+    else
+      LOGW("bus master: %s: stopped: %s", what, table_job_->message().c_str());
+    table_job_.reset();
+    return;
+  }
   bool add = std::string(table_job_->kind()) == "add";
   if (!add && !table_job_->dry_run() && !table_job_->keep_saved() && table_saved_) table_saved_(table_job_->mac(), nullptr);
   // An add listed and not joined goes on the watch; a removal takes it off.
@@ -483,12 +564,20 @@ void MasterCore::settle_table_job_(uint32_t now_ms) {
     waiting_since_[master::mac_hex(table_job_->mac())] = unix_now();
   }
   // A removal that took it off (not one that found it absent; a resumed one did).
-  if (std::string(table_job_->kind()) == "remove" && table_job_->ok() && !table_job_->dry_run() && on_removed_ &&
-      (table_job_->id() || static_cast<master::TableRemove *>(table_job_.get())->resuming()))
-    on_removed_(master::mac_hex(table_job_->mac()));
+  // Every one it took off: one, or several in one pass; a resumed one, its own.
+  std::vector<master::Bytes> gone;
+  if (!add) {
+    auto *r = static_cast<master::TableRemove *>(table_job_.get());
+    gone = r->removed();
+    if (gone.empty() && r->resuming()) gone.push_back(table_job_->mac());
+  }
+  if (std::string(table_job_->kind()) == "remove" && table_job_->ok() && !table_job_->dry_run() && on_removed_)
+    for (const auto &m : gone) on_removed_(master::mac_hex(m));
   if (!add && table_job_->ok() && !table_job_->dry_run()) {
-    for (auto &t : taps_) t->join_watch.drop(table_job_->mac());
-    waiting_since_.erase(master::mac_hex(table_job_->mac()));
+    for (const auto &m : gone) {
+      for (auto &t : taps_) t->join_watch.drop(m);
+      waiting_since_.erase(master::mac_hex(m));
+    }
     // A replace's new optimizer is waited for like an add's.
     auto *r = static_cast<master::TableRemove *>(table_job_.get());
     if (r->awaiting_join()) {
@@ -529,6 +618,8 @@ void MasterCore::sync_table_status_(bool finished_now) {
   t.message = table_job_->message();
   t.dry_frames.clear();
   for (const auto &f : table_job_->dry_frames()) t.dry_frames.push_back(master::mac_hex(f));
+  if (std::string(table_job_->kind()) == "provision")
+    for (const auto &f : static_cast<master::ProvisionJob *>(table_job_.get())->dry_text()) t.dry_frames.push_back(f);
   if (finished_now) {
     t.active = false;
     t.finished = true;
@@ -964,6 +1055,18 @@ void MasterCore::tick_(uint32_t now_ms) {
     }
     if (forget && !herd_) forget_tap_(forget);
   }
+  {
+    std::vector<std::pair<uint16_t, std::string>> asks;
+    {
+      std::lock_guard<std::mutex> lock(mu_);
+      asks.swap(ask_wanted_);
+    }
+    for (const auto &a : asks)
+      for (auto &t : taps_)
+        if (t->queries && t->queries->ask(a.first, a.second, now_ms))
+          LOGI("bus master: asking optimizer %04X (TAP %04X) %s", a.first, t->id,
+               a.second.substr(0, a.second.size() - 1).c_str());
+  }
   if (startup_ && phase_ != Phase::running) {
     run_startup(now_ms);
     return;
@@ -1014,7 +1117,7 @@ void MasterCore::tick_(uint32_t now_ms) {
       // an optimizer onto the wrong one. A node that gets none keeps its TAP
       // (owner's analysis, 2026-11-10). Rebuilt after every herd, so a TAP
       // taken on later turns them off on the first too.
-      plan.send_41 = housekeeping_on_ && !several_();
+      plan.send_41 = housekeeping_on_ && send_41_ && !several_();
       plan.bring_up_reads = t.readdressed;
       // Marked sent when it goes out, below: an opening dropped before it got
       // there (the TAP lost) plans it again.
@@ -1026,6 +1129,8 @@ void MasterCore::tick_(uint32_t now_ms) {
       t.targets_at_ms = now_ms - TARGETS_EVERY_MS;
       if (housekeeping_on_ && several_())
         LOGI("bus master: TAP %04X housekeeping on, without 0x41s: more than one TAP", t.id);
+      else if (housekeeping_on_ && !send_41_)
+        LOGI("bus master: housekeeping on, without 0x41s: turned off in the settings");
       else if (housekeeping_on_)
         LOGI("bus master: housekeeping on: %zu learned 0x41s%s", learned_.size(),
              learned_.empty() ? " (none heard: using the built-in content)" : "");
@@ -1065,7 +1170,14 @@ void MasterCore::tick_(uint32_t now_ms) {
       for (auto &x : taps_) x->join_watch.pause();  // their reads would straddle the change
       bool add = std::string(table_job_->kind()) == "add";
       std::string kind = table_job_->kind();
-      if (several_())
+      if (kind == "period")
+        LOGW("bus master: report period: %ssetting TAP %04X to %s on both", table_job_->dry_run() ? "a dry run of " : "",
+             table_tap_,
+             master::period_code_text(static_cast<master::PeriodJob *>(table_job_.get())->code()).c_str());
+      else if (kind == "provision")
+        LOGW("bus master: radio settings: %sgiving TAP %04X %s", table_job_->dry_run() ? "a dry run of " : "",
+             table_tap_, static_cast<master::ProvisionJob *>(table_job_.get())->block().describe().c_str());
+      else if (several_())
         LOGI("bus master: table: %s%s an optimizer on TAP %04X", table_job_->dry_run() ? "a dry run of " : "",
              add ? "adding" : kind == "replace" ? "replacing" : "removing", table_tap_);
       else
@@ -1128,9 +1240,15 @@ void MasterCore::tick_(uint32_t now_ms) {
     t.st.answers = t.queries->answers();
   }
   if (!req.cmd) return;  // nothing due: a lost TAP's window keeper waiting out a backoff
+  // A provisioning check (dry run) only reads, and never builds the write:
+  // its reads go with neither switch on, as other checks do.
+  bool provision_ok = req.provision && (bench_ || table_writes_on_ || (job_here && table_job_ && table_job_->dry_run()));
   if (!master::may_send(req.cmd, req.payload, bench_, bring_up, writes_on_, t.pv && t.pv->off(),
-                        req.table_edit && table_writes_on_)) {
+                        req.table_edit && table_writes_on_, provision_ok)) {
     set_fault(Fault::refused, "refused to send command " + std::to_string(req.cmd));
+    // A job whose frame the gate refused stops, saying so, rather than
+    // waiting for a reply that will never come and blocking every change.
+    if (job_here && table_job_ && req.table_edit) table_job_->abort("refused to send command " + std::to_string(req.cmd));
     return;
   }
   Frame reply;
@@ -1161,6 +1279,9 @@ void MasterCore::tick_(uint32_t now_ms) {
   if (ok && t.queries && req.cmd == master::CMD_POLL) {
     uint32_t before = t.queries->answers();
     t.queries->on_poll_reply(reply.payload, now_ms);
+    for (const auto &a : t.queries->take_asked())
+      LOGI(a.second.rfind("no answer", 0) == 0 ? "bus master: optimizer %04X: %s" : "bus master: optimizer %04X answered: %s",
+           a.first, a.second.c_str());
     if (t.queries->answers() != before) {
       std::lock_guard<std::mutex> lock(mu_);
       for (const auto &kv : t.queries->setups()) {
@@ -1449,6 +1570,9 @@ void MasterCore::run_startup(uint32_t now_ms) {
       set_fault(Fault::refused, "refused a herd command " + std::to_string(h.cmd));
       return;
     }
+    // After a reset the CCA numbers its tunnel requests from 01 again; the
+    // TAP only echoes it (bench, 2026-11-11): this follows the CCA's way.
+    if (h.cmd == master::CMD_RESET) seq_ = 0;
     std::vector<Frame> all;
     if (h.collect) {
       transact(h.dest, h.cmd, h.payload, r, h.wait_ms ? h.wait_ms : REPLY_TIMEOUT_MS, &all);
@@ -1514,6 +1638,7 @@ void MasterCore::run_startup(uint32_t now_ms) {
     set_fault(Fault::refused, "refused a discovery command " + std::to_string(d.cmd));
     return;
   }
+  if (d.cmd == master::CMD_RESET) seq_ = 0;  // the tunnel count starts at 01 again, as the CCA's
   if (transact(d.dest, d.cmd, d.payload, r, d.wait_ms ? d.wait_ms : REPLY_TIMEOUT_MS)) discovery_->on_reply(r);
 }
 

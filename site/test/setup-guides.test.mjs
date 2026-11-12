@@ -67,10 +67,23 @@ async function open(w) {
       if (path === '/api/master/taps/herd') {
         // The herd runs, then the new TAP is at the next free id.
         w.master.phase = 'discovering';
-        setTimeout(() => { w.master.phase = 'running'; w.master.taps = [tap('1201'), tap('1202')]; }, 300);
+        setTimeout(() => { w.master.phase = 'running'; w.master.taps = [tap('1201'), { ...tap('1202'), mac: '04C05B3000000202' }]; }, 300);
         return json(200, { started: true });
       }
       if (path === '/api/taps/name') { w.names[b.tap] = b.name; return json(200, b); }
+      if (path === '/api/master/taps/provision' && w.provisionHangs) {
+        w.master.table.edit = { ...w.master.table.edit, kind: 'provision', active: true, finished: false, started_unix: Math.floor(Date.now() / 1000) };
+        return json(200, { started: true });
+      }
+      if (path === '/api/master/taps/provision') {
+        // Channel and PAN chosen by the daemon when not given; the key never shown.
+        const given = 'channel 11, PAN 1A2B, map 0c020201000000011c01, SLT 5A, key hidden, optimization 00000200, SLm 3C, for up to 40 optimizers';
+        const dry = b.dry_run !== false;
+        w.master.table.edit = { ...w.master.table.edit, kind: 'provision', active: false, finished: true, ok: true, dry_run: dry,
+          step: 'done', mac: b.mac, started_unix: Math.floor(Date.now() / 1000),
+          message: dry ? `dry run: would give the TAP ${given}` : `given ${given} (the write answered status 1, its echo exact); saved. Power-cycle the TAP and read it to see it kept` };
+        return json(200, { started: true, dry_run: dry, given, reset: false });
+      }
       if (path === '/api/master/discovery') { w.master.discovery_renewing = b.renew; return json(200, b); }
       if (path === '/api/layout') { w.layout = { manual: true, unassigned: w.layout.unassigned, inverters: b.inverters }; return json(200, { success: true }); }
       if (path === '/api/strings/rating') return json(200, { success: true });
@@ -248,13 +261,13 @@ test('with setup closed, no banner', async () => {
   await ctx.close();
 });
 
-test('System setup: "Add a TAP" from the CCA to its name, the switch on for it and off after', async () => {
+test('System setup: "Add a TAP" from wiring it in to its name, giving it its radio settings itself', async () => {
   const w = world();
   const { page, ctx, errors } = await open(w);
   await page.click('.setup-task[data-task="addtap"]');
   await page.waitForSelector('.setup-flow[data-task="addtap"]');
-  assert.match(await page.textContent('.setup-body'), /set up by a CCA first/);
-  await next(page, 'Wire it in');
+  // No CCA step any more: TigoMonitor gives the TAP its radio settings.
+  assert.doesNotMatch(await page.textContent('.setup-body'), /CCA/);
   assert.match(await page.textContent('.setup-body'), /Wire it onto this bus/);
   await next(page, 'Allow a new TAP');
   // The switch is off: Next waits for it.
@@ -266,6 +279,24 @@ test('System setup: "Add a TAP" from the CCA to its name, the switch on for it a
   await page.click('button[data-setup-look]');
   await page.waitForFunction(() => /Found TAP 1202/.test(document.querySelector('.setup-body').textContent), null, { timeout: 15000 });
   assert.equal(w.posts.filter((p) => p.path === '/api/master/taps/herd').length, 1);
+  await next(page, 'Radio settings');
+  // Not given until checked and given: Next waits.
+  assert.equal(await page.isDisabled('button[data-setup-next]'), true);
+  await page.click('button[data-setup-radio-check]');
+  await page.waitForFunction(() => /Channel 11/.test(document.querySelector('.setup-body').textContent));
+  const plan = await page.textContent('.setup-body');
+  assert.match(plan, /Channel 11/);
+  assert.match(plan, /Network ID 1A2B/);
+  assert.match(plan, /up to 40 optimizers/);
+  assert.match(plan, /never shown/);
+  assert.doesNotMatch(plan, /key hidden/);
+  await page.click('button[data-setup-radio-go]');
+  await page.waitForFunction(() => /Given and saved/.test(document.querySelector('.setup-body').textContent));
+  // Only what the job checked: no claim about a power cut it didn't see.
+  assert.doesNotMatch(await page.textContent('.setup-body'), /power cut/);
+  // The check first, then the real one, to the TAP found, and no channel or PAN chosen here.
+  assert.deepEqual(w.posts.filter((p) => p.path === '/api/master/taps/provision').map((p) => [p.mac, p.dry_run, 'channel' in p, 'pan' in p]),
+    [['04C05B3000000202', true, false, false], ['04C05B3000000202', false, false, false]]);
   await next(page, 'Name it');
   await page.fill('#setup-tap-name', 'Shed');
   await next(page, 'Complete');
@@ -284,7 +315,7 @@ test('System setup: "Add a TAP" says so when this Pi is not running the bus', as
   w.master = { ...w.master, role: 'listen', active: false };
   const { page, ctx, errors } = await open(w);
   await page.click('.setup-task[data-task="addtap"]');
-  await next(page, 'Wire it in');
+  await page.waitForSelector('.setup-flow[data-task="addtap"]');
   await next(page, 'Allow a new TAP');
   assert.match(await page.textContent('.setup-body'), /not running the bus/);
   assert.equal(await page.isDisabled('button[data-setup-next]'), true);
@@ -348,6 +379,27 @@ test('System setup: once every step is done, "Set up a new system" rolls up and 
   assert.equal(await page.locator('.setup-start[data-task="system"] .steps').count(), 0);
   await card.click();
   await page.waitForSelector('.setup-flow[data-task="system"]');
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+// The Radio step: a job that never finishes turns into a failure to retry
+// after 90 s, rather than spinning for ever.
+test('System setup: "Add a TAP"\'s radio check that never finishes can be tried again', async () => {
+  const w = world();
+  w.provisionHangs = true;
+  const { page, ctx, errors } = await open(w);
+  await page.clock.install();
+  await page.click('.setup-task[data-task="addtap"]');
+  await page.waitForSelector('.setup-flow[data-task="addtap"]');
+  await page.evaluate(() => { setup.flow.step = 'radio'; setup.flow.found = '1201'; });
+  w.master.taps = [{ ...w.master.taps[0], mac: '04C05B3000000201' }];
+  await page.evaluate(() => refreshSetup(true));
+  await page.click('button[data-setup-radio-check]');
+  await page.waitForFunction(() => /Reading its radio settings/.test(document.querySelector('.setup-body').textContent));
+  await page.clock.fastForward(95000);
+  await page.waitForFunction(() => document.querySelector('button[data-setup-radio-check]'), null, { timeout: 10000 });
+  assert.match(await page.textContent('.setup-body'), /no result/i);
   assert.deepEqual(errors, []);
   await ctx.close();
 });

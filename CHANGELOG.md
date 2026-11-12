@@ -35,6 +35,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   setup mode, in which System setup's changes to the bus need no password,
   with a banner on every page until one is set. PV off always needs the
   password, and an install that already had a settings file isn't affected.
+- **Add a TAP without a CCA (Raspberry Pi and other Linux).** System
+  setup's Add a TAP gives the new TAP its radio settings itself, in a new
+  step after Look for TAPs: a channel at least two from the other TAPs on
+  the bus, a network ID made from this TigoMonitor's own, and a new key,
+  which the TAP then saves. A check (it only reads) shows the channel and
+  network ID first; the key is never shown. Giving the settings needs
+  **Allow changes to the TAPs**. The CCA step is gone. On a bench TAP
+  (H1.0007, 2026-11-11) the settings survived a power cycle, and a fresh
+  optimizer joined the network and followed the TAP to a new one. Behind
+  it is `POST /api/master/taps/provision`, which asks the TAP for its MAC
+  first and writes the block size the TAP reads back in. The mesh map is
+  sized as a CCA sizes it: a TAP keeps its own while that covers the
+  optimizers on its list, otherwise it gets the smallest that does (for 40,
+  75, 120 or 300 optimizers), or the one asked for (`"profile"`). With
+  `"keep_network": true` only the map changes; on a bench TAP its joined
+  optimizer kept reporting through a 40-to-75 change.
+- **Ask one optimizer a read-only question, on the bench.**
+  `POST /api/master/query` sends a question the CCA never sends, such as
+  `GetPAN`, with `master_bench` on only.
 - **Set up a whole system from one page (Raspberry Pi).** System setup
   gains **Set up a new system**, a checklist from the bus to the layout:
   the bus, the TAP, the optimizers, the layout, string ratings, and a

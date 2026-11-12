@@ -22,6 +22,7 @@
 #include "settings.h"
 
 #include <atomic>
+#include <random>
 #include <chrono>
 #include <condition_variable>
 #include <deque>
@@ -71,7 +72,8 @@ static void usage() {
                "  --health-check P  check the daemon on port P, as Docker's HEALTHCHECK does\n"
                "  --replay FILE     read bus bytes from a capture instead of a port\n"
                "  --speed X         replay speed (1 = bus speed, 0 = as fast as possible)\n"
-               "  --capture FILE    also append every byte read to FILE\n"
+               "  --capture FILE    also append every byte read to FILE (raw, so it holds\n"
+               "                    a TAP's network key if one is read or written)\n"
                "  --verbose         debug logging\n"
                "  --version\n");
 }
@@ -93,6 +95,78 @@ static std::string hostname() {
 static std::string new_optimizer_note(const Settings &s) {
   if (!runs_bus(s) || s.master_optimizer_writes) return "";
   return "; master_optimizer_writes is off, so it gets no w255 and may produce nothing until it's on";
+}
+
+// Running in a container: its MAC is the container's (from its bridge
+// address, or new each start), not this machine's.
+static bool in_container() {
+  if (access("/.dockerenv", F_OK) == 0 || access("/run/.containerenv", F_OK) == 0) return true;
+  if (FILE *f = fopen("/proc/1/cgroup", "r")) {
+    char line[512];
+    bool found = false;
+    while (!found && fgets(line, sizeof(line), f))
+      found = strstr(line, "docker") || strstr(line, "containerd") || strstr(line, "kubepods") || strstr(line, "libpod");
+    fclose(f);
+    if (found) return true;
+  }
+  return false;
+}
+
+// What a new TAP's PAN is made from (pan_for takes its last two bytes): this
+// machine's MAC on bare metal, as a CCA takes its serial; in a container, a
+// random seed made once and kept in the state directory, so each install's
+// differs and stays the same across restarts.
+static esphome::tigo_monitor::master::Bytes pan_seed(const std::string &state_dir);
+
+// This machine's MAC, from the interface the default route uses: what a new
+// TAP's PAN is made from (a CCA uses its own serial). Empty if none is found.
+static esphome::tigo_monitor::master::Bytes system_mac() {
+  esphome::tigo_monitor::master::Bytes out;
+  FILE *f = fopen("/proc/net/route", "r");
+  if (!f) return out;
+  char line[256], iface[64] = "";
+  while (fgets(line, sizeof(line), f)) {
+    char name[64];
+    unsigned long dest = 1;
+    if (sscanf(line, "%63s %lx", name, &dest) == 2 && dest == 0) {
+      snprintf(iface, sizeof(iface), "%s", name);
+      break;
+    }
+  }
+  fclose(f);
+  if (!iface[0]) return out;
+  std::string path = std::string("/sys/class/net/") + iface + "/address";
+  if (FILE *a = fopen(path.c_str(), "r")) {
+    unsigned b[6];
+    if (fscanf(a, "%x:%x:%x:%x:%x:%x", &b[0], &b[1], &b[2], &b[3], &b[4], &b[5]) == 6)
+      for (unsigned v : b) out.push_back(static_cast<uint8_t>(v));
+    fclose(a);
+  }
+  return out;
+}
+
+static esphome::tigo_monitor::master::Bytes pan_seed(const std::string &state_dir) {
+  if (!in_container()) {
+    auto mac = system_mac();
+    if (mac.size() >= 2) return mac;
+  }
+  const std::string path = state_dir + "/pan-seed";
+  unsigned v = 0;
+  if (FILE *f = fopen(path.c_str(), "r")) {
+    if (fscanf(f, "%x", &v) != 1) v = 0;
+    fclose(f);
+  }
+  if (!v || v >= 0xFFFF) {
+    std::random_device rd;
+    do v = rd() & 0xFFFF; while (!v || v == 0xFFFF);
+    std::string tmp = path + ".tmp";
+    if (FILE *f = fopen(tmp.c_str(), "w")) {
+      fprintf(f, "%04X\n", v);
+      fclose(f);
+      rename(tmp.c_str(), path.c_str());
+    }
+  }
+  return {static_cast<uint8_t>(v >> 8), static_cast<uint8_t>(v)};
 }
 
 int main(int argc, char **argv) {
@@ -191,6 +265,24 @@ int main(int argc, char **argv) {
   pv.load();
   // And the discovery switch, for the same reason.
   DiscoveryStore discovery(state_dir + "/discovery.json");
+  // The tunnel sequence, carried from one master to the next and across
+  // restarts, as the CCA's runs on unbroken. The TAP only echoes it (bench
+  // and analysis, 2026-11-11); this just keeps us counting the CCA's way.
+  const std::string seq_path = state_dir + "/tunnel-seq";
+  uint8_t carried_seq = 0;
+  if (FILE *f = fopen(seq_path.c_str(), "r")) {
+    unsigned v = 0;
+    if (fscanf(f, "%u", &v) == 1 && v < 0xFF) carried_seq = static_cast<uint8_t>(v);
+    fclose(f);
+  }
+  auto save_seq = [&](uint8_t s) {
+    std::string tmp = seq_path + ".tmp";
+    if (FILE *f = fopen(tmp.c_str(), "w")) {
+      fprintf(f, "%u\n", static_cast<unsigned>(s));
+      fclose(f);
+      rename(tmp.c_str(), seq_path.c_str());
+    }
+  };
   discovery.load();
   TableStore table_store(state_dir + "/table-remove.json");
   TapStore tap_store(state_dir + "/taps.json");
@@ -264,6 +356,8 @@ int main(int argc, char **argv) {
       // may land: one taken by the old master would be lost, and the new one
       // would start from the state before it. The requests take this too.
       std::unique_lock<std::mutex> swap(master_mu);
+      if (bus_master) carried_seq = bus_master->seq();  // the master this one replaces
+      m->set_seq(carried_seq);
       // The TAPs saved by a herd; none, the one at gateway_id. With more
       // than one (saved, or after a herd), each TAP's 0x41s go to the
       // optimizers heard through it.
@@ -281,6 +375,7 @@ int main(int argc, char **argv) {
       m->set_pv(pv.state(), [&pv](const PvState &s) { pv.save(s); }, pv.unreadable());
       m->set_discovery(discovery.renew(), [&discovery](bool renew) { discovery.save(renew); });
       m->set_read_tap_config(settings.master_read_tap_config);
+      m->set_send_41(settings.master_send_41);
       m->set_table_writes(settings.master_table_writes);
       // A herd's TAPs, saved so each gets its id back next time.
       m->set_adopt_taps(settings.master_adopt_taps, [&tap_store](const std::vector<BusMaster::TapEntry> &taps) {
@@ -325,6 +420,7 @@ int main(int argc, char **argv) {
     }
     {
       std::lock_guard<std::mutex> lock(master_mu);
+      if (bus_master) carried_seq = bus_master->seq();
       bus_master.reset();
     }
     return std::thread([&, dev, baud] {
@@ -446,14 +542,16 @@ int main(int argc, char **argv) {
             avoid.insert(static_cast<uint16_t>(strtoul(n.addr.c_str(), nullptr, 16) & 0x7FFF));
         return bus_master->request_table_add(mac, id, dry_run, why, tap, avoid) ? 200 : 409;
       },
-      [&](const esphome::tigo_monitor::master::Bytes &mac, bool dry_run, std::string &why, uint16_t tap) {
+      [&](const std::vector<esphome::tigo_monitor::master::Bytes> &macs, bool dry_run, std::string &why,
+          uint16_t tap) {
         std::lock_guard<std::mutex> lock(master_mu);
         if (!bus_master) {
           why = "this monitor isn't running the bus";
           return 409;
         }
-        if (!tap) tap = known_tap(*bus_master, tap_of_mac(esphome::tigo_monitor::master::mac_hex(mac)));
-        return bus_master->request_table_remove(mac, dry_run, why, tap) ? 200 : 409;
+        if (!tap && !macs.empty())
+          tap = known_tap(*bus_master, tap_of_mac(esphome::tigo_monitor::master::mac_hex(macs.front())));
+        return bus_master->request_table_remove(macs, dry_run, why, tap) ? 200 : 409;
       },
       [&](const esphome::tigo_monitor::master::Bytes &old_mac, const esphome::tigo_monitor::master::Bytes &new_mac,
           bool dry_run, std::string &why, uint16_t tap) {
@@ -490,6 +588,66 @@ int main(int argc, char **argv) {
           return 409;
         }
         return bus_master->request_forget_tap(id, why) ? 200 : 409;
+      },
+      [&](const esphome::tigo_monitor::master::Bytes &tap_mac, uint16_t channel, uint16_t pan,
+          bool identify, bool reset, bool dry_run, int profile, bool keep_network, std::string &why,
+          std::string &given) {
+        namespace mp = esphome::tigo_monitor::master;
+        std::lock_guard<std::mutex> lock(master_mu);
+        if (!bus_master) {
+          why = "this monitor isn't running the bus";
+          return 409;
+        }
+        mp::RadioBlock block;
+        // Not given: a channel at least two from every TAP heard on this bus,
+        // and a PAN from this machine (pan_seed: its MAC on bare metal, a kept
+        // random seed in a container), stepped past any in use.
+        // The TAP's own aren't another's: the step again on it keeps them.
+        std::set<uint16_t> channels, pans;
+        uint16_t self = bus_log.tap_of_mac(mp::mac_hex(tap_mac));
+        for (const auto &r : bus_log.radios()) {
+          if (self && r.tap == self) continue;
+          if (r.channel) channels.insert(static_cast<uint16_t>(r.channel));
+          if (r.pan) pans.insert(r.pan);
+        }
+        // Keeping the TAP's network: the job copies its channel, PAN and key
+        // from its read; these only pass the shape check until then.
+        block.keep_network = keep_network;
+        block.channel = keep_network ? 11 : channel ? channel : mp::channel_for(channels);
+        mp::Bytes own = pan_seed(state_dir);
+        block.pan = keep_network ? 1 : pan ? pan : mp::pan_for(own.size() >= 2 ? own : tap_mac, pans);
+        if (!block.channel || !block.pan) {
+          why = "no free channel or PAN left";
+          return 409;
+        }
+        // The map asked for (40, 75, 120, 300 optimizers: first count 12,
+        // 14, 20, 24); not asked for, sized the CCA's way at the TAP's read:
+        // its own while that covers its table, else the smallest that does.
+        mp::map_for_profile(profile == 300 ? 24 : profile == 120 ? 20 : profile == 75 ? 14 : 12, block.map);
+        block.keep_tap_profile = !profile;
+        for (const auto &t : bus_master->status().taps)
+          if (t.mac == mp::mac_hex(tap_mac)) block.burden = t.discovery.node_count;
+        block.skip_identify = !identify;
+        std::random_device rd;
+        block.key = mp::key_from([&rd]() { return static_cast<uint8_t>(rd()); });
+        given = block.describe();
+        return bus_master->request_provision(tap_mac, block, reset, dry_run, why) ? 200 : 409;
+      },
+      [&](uint16_t node, const std::string &text, std::string &why) {
+        std::lock_guard<std::mutex> lock(master_mu);
+        if (!bus_master) {
+          why = "this monitor isn't running the bus";
+          return 409;
+        }
+        return bus_master->request_ask(node, text, why) ? 200 : 409;
+      },
+      [&](const esphome::tigo_monitor::master::Bytes &tap_mac, uint8_t code, bool dry_run, std::string &why) {
+        std::lock_guard<std::mutex> lock(master_mu);
+        if (!bus_master) {
+          why = "this monitor isn't running the bus";
+          return 409;
+        }
+        return bus_master->request_period(tap_mac, code, dry_run, why) ? 200 : 409;
       }});
   if (port < 0 && settings.web_port > 0) port = settings.web_port;
   // Only the default steps aside for another web server; a port someone
@@ -621,6 +779,7 @@ int main(int argc, char **argv) {
                         fresh.master_queries != settings.master_queries ||
                         fresh.master_optimizer_writes != settings.master_optimizer_writes ||
                         fresh.master_read_tap_config != settings.master_read_tap_config ||
+                        fresh.master_send_41 != settings.master_send_41 ||
                         fresh.master_table_writes != settings.master_table_writes ||
                         fresh.master_adopt_taps != settings.master_adopt_taps;
         if (fresh.web_port != settings.web_port) LOGI("web: the new port takes effect when the service restarts");
@@ -769,8 +928,10 @@ int main(int argc, char **argv) {
   history_worker.join();
   {
     std::lock_guard<std::mutex> lock(master_mu);
+    if (bus_master) carried_seq = bus_master->seq();
     bus_master.reset();
   }
+  save_seq(carried_seq);
   redirect.stop();
   web.stop();
   cca.stop();

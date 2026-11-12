@@ -331,6 +331,23 @@ print(len(panels) > 0, all(h['args'][4:] == content[int(h['args'][10:12], 16)] a
   kill $tap; wait $tap 2>/dev/null || true
 done
 
+# --- run 12n: housekeeping on, master_send_41 off: the rest, and no 0x41 ---
+mkdir -p "$out/state12n"
+cp "$out/state11/cca-0x41.json" "$out/state12n/"
+python3 linux/tools/mock_tap.py "$out/tap12n" --window 600 --nodes 44 --stats "$out/tap12n.json" &
+tap=$!
+sleep 0.5
+printf '{"bus_role": "master", "master_startup": false, "master_housekeeping": true, "master_queries": false, "master_optimizer_writes": false, "master_read_tap_config": false, "discovery_auto": false, "master_send_41": false, "serial_port": "%s", "gateway_id": 4609, "web_port": 18104}\n' \
+  "$PWD/$out/tap12n" > "$out/state12n/settings.json"
+build/linux/tigomonitord --state-dir "$out/state12n" --web-dir components/tigo_server/web 2> "$out/daemon12n.log" &
+daemon=$!
+sleep 12  # past when run 12 had all three streams' 0x41s out
+expect "no 0x41s: 0x0B00 still sent, polling" "$(stat "$out/tap12n.json" "(d['session'], len(d['housekeeping']), d['polls'] > 0)")" "(['01'], 0, True)"
+expect "says why" "$(grep -c 'without 0x41s: turned off in the settings' "$out/daemon12n.log")" 1
+expect "shown in the settings" "$(api 18104 /api/settings | python3 -c 'import json,sys; print(json.load(sys.stdin)["master_send_41"])')" False
+kill $daemon; wait $daemon 2>/dev/null || true
+kill $tap; wait $tap 2>/dev/null || true
+
 # --- run 13: housekeeping on with nothing learned sends the built-in 0x41 content ---
 mkdir -p "$out/state13"
 python3 linux/tools/mock_tap.py "$out/tap13" --window 600 --nodes 44 --stats "$out/tap13.json" &

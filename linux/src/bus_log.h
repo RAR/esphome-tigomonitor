@@ -50,6 +50,10 @@ class BusLog {
   // SLm as last read, ids each TAP's MAC, settings each optimizer's answer to
   // ^00Smrt, mppt its four MPPT parameters from its answer to ^00Mppt.
   nlohmann::json versions_json() const;
+  // Each TAP's radio settings heard, PAN included (for choosing a new TAP's).
+  std::vector<esphome::tigo_monitor::master::TapRadio> radios() const;
+  // The address of the TAP that gave this MAC (16 hex digits), or 0.
+  uint16_t tap_of_mac(const std::string &mac) const;
   // How many optimizer settings, MPPT or firmware changes were heard since.
   int changes_since(int64_t since_ms) const;
 
@@ -73,6 +77,7 @@ class BusLog {
   esphome::tigo_monitor::master::VersionBook versions_;
   // Each TAP's radio settings, as last read (by anyone), and when.
   std::map<uint16_t, std::pair<esphome::tigo_monitor::master::TapRadio, int64_t>> radios_;
+  nlohmann::json versions_json_(bool with_pans) const;
   // Each TAP's MAC, its ID, from its last answer to GET_MAC, and when.
   std::map<uint16_t, std::pair<std::string, int64_t>> tap_ids_;
   // Each optimizer's MPPT parameters, from its answer to ^00Mppt, and when.

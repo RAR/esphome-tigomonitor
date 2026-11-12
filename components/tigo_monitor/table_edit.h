@@ -232,6 +232,8 @@ class TableJob : public RequestSource {
   // A removal's records to write back, before its erase: the caller saves
   // them (resume after a stop), then calls saved().
   virtual bool wants_save() const { return false; }
+  // The send gate refused one of its frames: stop, saying why.
+  virtual void abort(const std::string &why) { (void)why; }
   virtual void saved(bool) {}
   // Whether a saved list must stay: a removal stopped after its erase.
   virtual bool keep_saved() const { return false; }
@@ -552,6 +554,10 @@ class TableRemove : public TableJob {
       : TableJob(mac, dry_run), resuming_(resume != nullptr) {
     if (resume) survivors_ = *resume;
   }
+  // Several at once (a bench's made-up entries, say): one read, one erase,
+  // and only those that stay written back. Ones not listed are skipped.
+  TableRemove(const std::vector<Bytes> &macs, bool dry_run)
+      : TableJob(macs.empty() ? Bytes{} : macs.front(), dry_run), resuming_(false), several_(macs) {}
 
   Request due(uint32_t now_ms, uint8_t &seq) override {
     if (finished() || waiting_ || step_ == Step::save) return {};
@@ -623,6 +629,8 @@ class TableRemove : public TableJob {
   const std::vector<TableRecord> &survivors() const override { return survivors_; }
 
   const char *kind() const override { return add_mac_.empty() ? "remove" : "replace"; }
+  // The MACs this job took off (or, dry, would): found in the table.
+  const std::vector<Bytes> &removed() const { return removed_; }
   Step step() const { return step_; }
   bool finished() const override { return step_ == Step::done || step_ == Step::failed; }
   bool ok() const override { return step_ == Step::done; }
@@ -684,14 +692,21 @@ class TableRemove : public TableJob {
         keep_saved_ = true;
         return;
       }
-      const TableRecord *r = TableWalk::find(before_, mac_);
-      if (!r) {
+      auto going = [this](const Bytes &m) {
+        return several_.empty() ? m == mac_ : std::find(several_.begin(), several_.end(), m) != several_.end();
+      };
+      for (const auto &rec : before_) {
+        if (!going(rec.mac)) {
+          survivors_.push_back(rec);
+          continue;
+        }
+        if (removed_.empty()) id_ = rec.id();
+        removed_.push_back(rec.mac);
+      }
+      if (removed_.empty()) {
         if (!add_mac_.empty()) return fail_("the optimizer coming out is not in the table", false);
         return finish_("not in the table: nothing to remove");
       }
-      id_ = r->id();
-      for (const auto &rec : before_)
-        if (rec.mac != mac_) survivors_.push_back(rec);
       if (!add_mac_.empty()) {
         if (add_mac_ == mac_) return fail_("the new optimizer is the one coming out", false);
         if (const TableRecord *dup = TableWalk::find(before_, add_mac_))
@@ -729,6 +744,8 @@ class TableRemove : public TableJob {
   std::string done_text_() const {
     std::string n = std::to_string(survivors_.size());
     if (resuming_) return "finished the interrupted removal: " + n + " written back";
+    if (!several_.empty())
+      return "removed " + std::to_string(removed_.size()) + "; the other " + n + " written back as they were";
     if (!add_mac_.empty())
       return "replaced " + hex4_(id_) + "; the other " + std::to_string(survivors_.size() - 1) +
              " written back as they were, the new one waiting to join";
@@ -736,6 +753,8 @@ class TableRemove : public TableJob {
   }
 
   bool resuming_;
+  std::vector<Bytes> several_;  // empty: just mac_
+  std::vector<Bytes> removed_;
   Step step_ = Step::read_before;
   std::vector<TableRecord> survivors_;
   size_t written_ = 0;

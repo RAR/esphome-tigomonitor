@@ -1737,6 +1737,17 @@
           <button class="btn primary" id="pi-port-save">Save</button>
         </div>
       </div>
+      <div id="pi-danger" style="display:none">
+        <div class="section-head">
+          <div class="section-title">Dangerous options</div>
+          <div class="section-sub">Turned on in settings.json; this page can't turn them on or off</div>
+        </div>
+        <div class="tools-card">
+          <p class="hint">These change how a TAP schedules its optimizers. The channel, PAN and key stay as they are, but a wrong choice can cost reports until it's set back. Preview first: it reads the TAP and says what would be sent, without sending it. Writing needs Allow changes to the TAPs.</p>
+          <div id="pi-danger-taps"></div>
+          <div class="hint" data-danger-out style="margin-top:10px;white-space:pre-wrap"></div>
+        </div>
+      </div>
       </div>
 
       <div class="settings-panel" id="settings-ha" role="tabpanel" aria-labelledby="settings-tab-ha" hidden>
@@ -4174,14 +4185,14 @@
     retire: ['pick', 'check', 'do', 'done'],
     // Guides: no check or job of their own; each step says what it found.
     system: ['bus', 'tap', 'optimizers', 'layout', 'names', 'done'],
-    addtap: ['prepare', 'connect', 'allow', 'find', 'name', 'done'],
+    addtap: ['connect', 'allow', 'find', 'radio', 'name', 'done'],
     retiretap: ['pick', 'done'],
   };
   const SETUP_STEP_NAMES = { pick: 'Optimizer to remove', label: 'New optimizer', check: 'Review', do: 'Apply',
                              wait: 'Wait for join', done: 'Complete',
                              bus: 'Connect the bus', tap: 'Find the TAP', optimizers: 'Optimizers', layout: 'Lay out the array',
                              names: 'Names and ratings',
-                             prepare: 'Set it up with a CCA', connect: 'Wire it in', allow: 'Allow a new TAP', find: 'Look for TAPs',
+                             radio: 'Radio settings', connect: 'Wire it in', allow: 'Allow a new TAP', find: 'Look for TAPs',
                              name: 'Name it' };
   const SETUP_TITLES = { replace: 'Replace an optimizer', add: 'Add an optimizer', retire: 'Retire an optimizer',
                          system: 'Set up a new system', addtap: 'Add a TAP', retiretap: 'Retire a TAP' };
@@ -4367,7 +4378,7 @@
       ${task('retire', 'Retire an optimizer', 'Permanently remove an optimizer from your system.')}
     </div>
     <h3 class="setup-group">TAPs</h3><div class="setup-tasks">
-      ${task('addtap', 'Add a TAP', 'Bring a TAP a CCA has set up onto the bus, and give it an address and a name.')}
+      ${task('addtap', 'Add a TAP', 'Wire in a new TAP, give it an address and its radio settings, and name it.')}
       ${task('retiretap', 'Retire a TAP', 'Forget a TAP that has gone for good, so it stops showing as not answering.')}
       <div class="setup-task later"><span class="art">${SETUP_ART.replacetap}</span><span class="in"><strong>Replace a TAP</strong>
         <span>Comes after a bench rehearsal: the old TAP's optimizers have to move to the new one.</span></span></div>
@@ -4622,14 +4633,37 @@
     addtap(f, back) {
       const m = setup.data.master, running = setupRunning(m);
       const offBus = '<div class="setup-note info">This TigoMonitor is not running the bus, so it cannot take on a TAP. To do this, set its bus role in Settings → Bus.</div>';
-      if (f.step === 'prepare')
-        return `<h3>Set it up with a CCA</h3>
-          <div class="sub">A new TAP has to be set up by a CCA first: TigoMonitor can't give a TAP its radio settings. Connect the new TAP to a CCA on its own, not on this bus, let the CCA set it up, then unplug the CCA.</div>
-          <div class="setup-actions">${back('Cancel')}${setupNext(f)}</div>`;
       if (f.step === 'connect')
         return `<h3>Wire it in</h3>
           <div class="sub">Wire it onto this bus beside the TAP you have: A to A, B to B and a shared ground, then power it. Until you look for TAPs, polling may stumble if it answers at another TAP's address.</div>
-          <div class="setup-actions">${back()}${setupNext(f)}</div>`;
+          <div class="setup-actions">${back('Cancel')}${setupNext(f)}</div>`;
+      if (f.step === 'radio') {
+        // The TAP's own network: a channel, a network ID (PAN) and a key,
+        // chosen by the daemon and saved on the TAP (tap_config.h).
+        const r = f.radio || {}, writes = !!(m && m.table && m.table.writes);
+        const ch = (r.given || '').match(/channel (\d+)/), pan = (r.given || '').match(/PAN ([0-9A-F]{4})/);
+        const cap = (r.given || '').match(/for up to (\d+) optimizers/);
+        let state;
+        if (r.phase === 'checking') state = '<div class="setup-line">Reading its radio settings…</div>';
+        else if (r.phase === 'writing') state = '<div class="setup-line">Giving it its settings…</div>';
+        else if (r.phase === 'done') state = `<div class="setup-check good">✓ Given and saved: TAP ${topoEscape(f.found)} now runs channel ${ch ? ch[1] : '?'}, and has saved its settings. Its optimizers join this network once they are on its list.</div>`;
+        else if (r.phase === 'failed') state = `<div class="setup-error">${topoEscape(r.message || 'Not given.')}</div>`;
+        else state = '';
+        const plan = r.phase === 'checked' || r.phase === 'writing' || r.phase === 'done'
+          ? `<div class="setup-found"><div><strong>Channel ${ch ? ch[1] : '?'}</strong><span>at least two from your other TAPs'</span></div>
+             <div><strong>Network ID ${pan ? pan[1] : '?'}</strong><span>made from this TigoMonitor's own</span></div>
+             <div><strong>A new network key</strong><span>made here, never shown</span></div>
+             ${cap ? `<div><strong>For up to ${cap[1]} optimizers</strong><span>its own profile if it had one; running this step again changes nothing else</span></div>` : ''}</div>` : '';
+        const act = !running ? offBus
+          : r.phase === 'checked' ? (writes ? `<div class="setup-actions"><button type="button" class="btn task-go" data-setup-radio-go>Give it these settings</button></div>`
+            : '<div class="setup-note info">To give it these settings, turn on <strong>Allow changes to the TAPs</strong> in Settings → Bus.</div>')
+          : r.phase === 'checking' || r.phase === 'writing' || r.phase === 'done' ? ''
+          : `<div class="setup-actions"><button type="button" class="btn task-go" data-setup-radio-check>${r.phase === 'failed' ? 'Check again' : 'Check'}</button></div>`;
+        return `<h3>Give it its radio settings</h3>
+          <div class="sub">A new TAP needs its own radio network for its optimizers to join: a channel, a network ID and a key. TigoMonitor chooses them and the TAP saves them. The check only reads.</div>
+          ${plan}${state}${act}
+          <div class="setup-actions">${back()}${setupNext(f, r.phase === 'done')}</div>`;
+      }
       if (f.step === 'allow') {
         const on = !!(m && m.adopt_taps);
         return `<h3>Allow a new TAP<span class="setup-state ${on ? 'ok' : 'todo'}">${on ? 'On' : 'Off'}</span></h3>
@@ -4782,6 +4816,20 @@
       if (f.step === 'do' && e.kind && e.started_unix >= f.startedAt && !e.dry_run && e.finished && e.ok)
         f.step = f.task === 'retire' ? 'done' : (t.waiting || []).some(x => x.mac === f.mac) ? 'wait' : 'done';
       if (f.step === 'wait' && (t.joins || []).some(x => x.mac === f.mac && x.joined && x.unix >= f.startedAt)) f.step = 'done';
+      // The radio step's job: the check gives the plan, the real one the result.
+      if (f.task === 'addtap' && f.radio && (f.radio.phase === 'checking' || f.radio.phase === 'writing')) {
+        const e = setupJob();
+        if (Date.now() / 1000 - f.radio.at > 90 && !(e.kind === 'provision' && e.finished && e.started_unix >= f.radio.at)) {
+          f.radio.phase = 'failed';
+          f.radio.message = 'No result after 90 seconds. Check that the TAP is answering, then try again.';
+        } else if (e.kind === 'provision' && e.finished && e.started_unix >= f.radio.at) {
+          if (!e.ok) { f.radio.phase = 'failed'; f.radio.message = e.message; }
+          else if (f.radio.phase === 'checking') {
+            f.radio.phase = 'checked';
+            f.radio.given = String(e.message || '').replace(/^dry run: would give the TAP /, '');
+          } else f.radio.phase = 'done';
+        }
+      }
       if (f.task === 'addtap' && f.looking && !f.found) {
         const m = setup.data.master, fresh = setupTaps().find(x => !(f.before || []).includes(x.id) && x.state === 'running');
         if (m && m.phase === 'running' && fresh) f.found = fresh.id;
@@ -4794,7 +4842,8 @@
       renderSetup();
       if (f && f.task === 'system' && f.step === 'bus') setupFillSerial();
     }
-    const busy = f && (f.step === 'check' || f.step === 'do' || f.step === 'wait' || f.step === 'done' || (f.looking && !f.found));
+    const busy = f && (f.step === 'check' || f.step === 'do' || f.step === 'wait' || f.step === 'done' || (f.looking && !f.found) ||
+                       (f.radio && (f.radio.phase === 'checking' || f.radio.phase === 'writing')));
     if (document.getElementById('view-setup').classList.contains('active'))
       setup.timer = setTimeout(refreshSetup, busy ? 1500 : 10000);
   }
@@ -4868,11 +4917,28 @@
       }
       return refreshSetup(true);
     }
+    // Add a TAP's radio step: the check (a dry run), then the real one, to
+    // the TAP the guide found. The daemon chooses the channel and PAN.
+    if (b.hasAttribute('data-setup-radio-check') || b.hasAttribute('data-setup-radio-go')) {
+      const go = b.hasAttribute('data-setup-radio-go');
+      const tap = setupTaps().find(x => x.id === f.found);
+      if (!tap || !tap.mac) return showToast('TAP ' + f.found + ' has not said its MAC yet; look for TAPs again', 'err');
+      b.disabled = true;
+      f.radio = { ...(f.radio || {}), phase: go ? 'writing' : 'checking', at: Math.floor(Date.now() / 1000) - 1 };
+      try {
+        await setupPost('/api/master/taps/provision', { mac: tap.mac, dry_run: !go });
+      } catch (err) {
+        f.radio.phase = 'failed';
+        f.radio.message = err.message;
+      }
+      return refreshSetup(true);
+    }
     if (b.hasAttribute('data-setup-look')) {
       if (!confirm('Look for TAPs? Every TAP on the bus is brought up again, and polling stops for about 30 seconds.')) return;
       b.disabled = true;
       f.before = setupTaps().map(t => t.id);
       f.found = '';
+      f.radio = null;  // a result belongs to the TAP it was for
       f.lookedAt = Date.now();
       try {
         await setupPost('/api/master/taps/herd', {});
@@ -6082,6 +6148,78 @@
   });
 
   // ===== Raspberry Pi settings (linux/ build) =====
+  // Dangerous options: a TAP's radio profile and report period, shown only
+  // with "dangerous_options": true in settings.json, on a TigoMonitor that
+  // runs the bus.
+  const DANGER_PERIODS = [[1, '1 s'], [2, '2 s'], [3, '3 s'], [4, '4 s'], [5, '5 s'], [6, '6 s'], [7, '10 s'],
+                          [8, '12 s'], [9, '15 s'], [10, '20 s'], [11, '30 s']];
+  const DANGER_PROFILES = [[40, '40 optimizers (12-2-2-1)'], [75, '75 optimizers (14-2-2-1)'],
+                           [120, '120 optimizers (20-2-2-1)'], [300, '300 optimizers (24-4-2-1)']];
+  let dangerOn = false;
+  const dangerEsc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  async function piDangerRefresh(s) {
+    dangerOn = !!(s && s.dangerous_options && s.bus_role && s.bus_role !== 'listen');
+    const card = document.getElementById('pi-danger');
+    card.style.display = dangerOn ? '' : 'none';
+    if (!dangerOn) return;
+    let taps = [];
+    try {
+      const r = await apiFetch('/api/master');
+      if (r.ok) taps = ((await r.json()).taps || []).filter(t => t.mac);
+    } catch (e) { /* drawn empty below */ }
+    const opts = (list, pick) => list.map(([v, t]) => `<option value="${v}"${v === pick ? ' selected' : ''}>${dangerEsc(t)}</option>`).join('');
+    document.getElementById('pi-danger-taps').innerHTML = taps.length ? taps.map(t => `
+      <div data-danger-tap="${dangerEsc(t.mac)}" style="border-top:1px solid var(--border);padding-top:10px;margin-top:10px">
+        <strong>TAP ${dangerEsc(t.id)}</strong>
+        <div class="cfg-row">
+          <div class="cfg-text"><strong>Radio profile</strong><span>How many optimizers its schedule is planned for. Preview shows what it has now</span></div>
+          <div class="cfg-ctrl"><select class="cfg-input" data-danger-profile>${opts(DANGER_PROFILES, 75)}</select>
+            <button class="btn" data-danger="profile-preview">Preview</button> <button class="btn danger" data-danger="profile-write">Write</button></div>
+        </div>
+        <div class="cfg-row">
+          <div class="cfg-text"><strong>Report period</strong><span>How often each optimizer reports. Preview shows what it has now</span></div>
+          <div class="cfg-ctrl"><select class="cfg-input" data-danger-period>${opts(DANGER_PERIODS, 3)}</select>
+            <button class="btn" data-danger="period-preview">Preview</button> <button class="btn danger" data-danger="period-write">Write</button></div>
+        </div>
+      </div>`).join('') : '<p class="hint">No TAP is running on the bus yet.</p>';
+  }
+  document.getElementById('pi-danger').addEventListener('click', async ev => {
+    const b = ev.target.closest('button[data-danger]');
+    if (!b) return;
+    const row = b.closest('[data-danger-tap]');
+    const out = document.querySelector('#pi-danger [data-danger-out]');
+    const [what, mode] = b.dataset.danger.split('-');
+    const dry = mode === 'preview';
+    const mac = row.dataset.dangerTap;
+    const profile = Number(row.querySelector('[data-danger-profile]').value);
+    const code = Number(row.querySelector('[data-danger-period]').value);
+    const label = what === 'profile' ? DANGER_PROFILES.find(p => p[0] === profile)[1] : DANGER_PERIODS.find(p => p[0] === code)[1];
+    if (!dry && !confirm(what === 'profile'
+          ? `Write the radio profile for ${label} to this TAP? Its optimizers are re-slotted; a wrong profile can cost reports until it's set back.`
+          : `Set this TAP's report period to ${label}? Every optimizer on it reports at the new rate.`)) return;
+    const path = what === 'profile' ? '/api/master/taps/provision' : '/api/master/taps/period';
+    const body = what === 'profile' ? { mac, keep_network: true, profile, dry_run: dry } : { mac, code, dry_run: dry };
+    row.querySelectorAll('button').forEach(x => { x.disabled = true; });
+    out.textContent = dry ? 'Reading the TAP…' : 'Writing…';
+    try {
+      const r = await apiFetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || `refused (${r.status})`);
+      let e = {};
+      for (let i = 0; i < 120; i++) {
+        const m = await (await apiFetch('/api/master')).json();
+        e = (m.table && m.table.edit) || {};
+        if (e.finished && e.kind === (what === 'profile' ? 'provision' : 'period')) break;
+        await new Promise(res => setTimeout(res, 500));
+      }
+      out.textContent = e.finished ? `${e.ok ? '' : 'Failed: '}${e.message}` : 'No answer yet; check the Bus log.';
+    } catch (err) {
+      out.textContent = `Refused: ${err.message}`;
+    } finally {
+      row.querySelectorAll('button').forEach(x => { x.disabled = false; });
+    }
+  });
+
   async function refreshPiSettings() {
     try {
       const r = await apiFetch('/api/settings');
@@ -6113,6 +6251,7 @@
       document.getElementById('pi-morning').value = s.discovery_morning_min ?? 120;
       document.getElementById('pi-takeover-row').style.display = piBusRole === 'standby' ? '' : 'none';
       document.getElementById('pi-tablewrites').checked = !!s.master_table_writes;
+      piDangerRefresh(s);
       document.getElementById('pi-tablewrites').nextElementSibling.textContent = s.master_table_writes ? 'On' : 'Off';
       piFillCca(s);
       for (const row of PI_MASTER_ROWS) document.getElementById(row).style.display = piBusRole !== 'listen' ? '' : 'none';

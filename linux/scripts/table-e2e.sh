@@ -124,6 +124,15 @@ expect "one erase, one write of five, joined" "$(stat "$out/three.json" "(d['era
 expect "the saved list is gone" "$([ -e "$out/three/table-remove.json" ] && echo kept || echo gone)" gone
 expect "logged the erase" "$(grep -c 'erased the TAP.s table (done)' "$out/three.log")" 1
 expect "and it left the Devices list" "$(body GET 18303 /api/nodes '' admin:pw | python3 -c "import json,sys; print(any(n['long_address'] == sys.argv[1] for n in json.load(sys.stdin)['nodes']))" "$mac3")" False
+# Several in one pass: one more erase, the three that stay in one write.
+two="$(body GET 18303 /api/nodes '' admin:pw | python3 -c "import json,sys; print(json.dumps([n['long_address'] for n in json.load(sys.stdin)['nodes'] if n['addr'] in ('0004', '0005')]))")"
+expect "two to remove" "$(echo "$two" | python3 -c "import json,sys; print(len(json.load(sys.stdin)))")" 2
+expect "a list that isn't one is refused" "$(code POST 18303 /api/master/table/remove '{"macs": "nope"}' admin:pw)" 400
+expect "the removal of two starts" "$(code POST 18303 /api/master/table/remove "{\"macs\": $two}" admin:pw)" 200
+finished 18303
+expect "both removed in one pass" "$(edit 18303 "(e['ok'], e['message'])")" "(True, 'removed 2; the other 3 written back as they were')"
+expect "one more erase, one write of three" "$(stat "$out/three.json" "(d['erases'], len(d['table_writes']), d['table_writes'][1][:2])")" "(2, 2, '03')"
+expect "and both left the Devices list" "$(body GET 18303 /api/nodes '' admin:pw | python3 -c "import json,sys; print(sorted(n['addr'] for n in json.load(sys.stdin)['nodes']))")" "['0002', '0006', '0007']"
 stop_all
 
 # --- run 4: a removal that stopped after its erase, found at the start ---

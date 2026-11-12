@@ -11,6 +11,7 @@
 #include <cerrno>
 #include <chrono>
 #include <cmath>
+#include <cctype>
 #include <cstdio>
 #include <cstring>
 #include <ctime>
@@ -1652,7 +1653,8 @@ void HttpServer::routes_() {
 
   // Pi-only: remove an optimizer from the TAP's table, as the CCA does: the
   // table erased and the rest written back as they were (table_edit.h).
-  // {"label": ...} or {"mac": ...}, and "dry_run"; behind the web password.
+  // {"label": ...} or {"mac": ...}, or several in one pass as {"macs": [...]}
+  // (up to 100; ones not listed are skipped), and "dry_run"; behind the web password.
   svr.Post("/api/master/table/remove", [this, tap_of](const httplib::Request &req, httplib::Response &res) {
     if (ctx_.current_settings().web_password.empty() && !setup_open(ctx_.current_settings(), unix_now_s())) {
       send_json(res, {{"error", "set a web password first"}}, 403);
@@ -1661,10 +1663,25 @@ void HttpServer::routes_() {
     json j = json::parse(req.body, nullptr, false);
     namespace mp = esphome::tigo_monitor::master;
     mp::Bytes mac;
+    std::vector<mp::Bytes> macs;
     std::string bad;
-    if (j.is_discarded() || !j.is_object() || !optimizer_of(j, mac, bad)) {
+    if (!j.is_discarded() && j.is_object() && j.contains("macs")) {
+      if (!j["macs"].is_array() || j["macs"].empty() || j["macs"].size() > 100) {
+        send_json(res, {{"error", "macs is a list of 1 to 100 16-digit MACs"}}, 400);
+        return;
+      }
+      for (const auto &m : j["macs"]) {
+        if (!m.is_string() || !optimizer_of(json{{"mac", m}}, mac, bad)) {
+          send_json(res, {{"error", "macs: " + (bad.empty() ? std::string("give 16-digit MACs") : bad)}}, 400);
+          return;
+        }
+        macs.push_back(mac);
+      }
+    } else if (j.is_discarded() || !j.is_object() || !optimizer_of(j, mac, bad)) {
       send_json(res, {{"error", bad.empty() ? "expected {\"label\": \"4-9A57A2L\"} or {\"mac\": \"...\"}" : bad}}, 400);
       return;
+    } else {
+      macs.push_back(mac);
     }
     bool dry = j.contains("dry_run") && j["dry_run"].is_boolean() && j["dry_run"].get<bool>();
     uint16_t tap = 0;
@@ -1674,8 +1691,10 @@ void HttpServer::routes_() {
       return;
     }
     std::string why;
-    int code = ctx_.request_table_remove ? ctx_.request_table_remove(mac, dry, why, tap) : 409;
-    if (code == 200) send_json(res, {{"started", true}, {"dry_run", dry}, {"mac", mp::mac_hex(mac)}, {"label", mp::label_of(mac)}});
+    int code = ctx_.request_table_remove ? ctx_.request_table_remove(macs, dry, why, tap) : 409;
+    if (code == 200 && j.contains("macs")) send_json(res, {{"started", true}, {"dry_run", dry}, {"count", macs.size()}});
+    else if (code == 200)
+      send_json(res, {{"started", true}, {"dry_run", dry}, {"mac", mp::mac_hex(mac)}, {"label", mp::label_of(mac)}});
     else send_json(res, {{"error", why.empty() ? "not running the bus" : why}}, code);
   });
 
@@ -1753,6 +1772,111 @@ void HttpServer::routes_() {
     std::string why;
     int code = ctx_.forget_tap ? ctx_.forget_tap(static_cast<uint16_t>(id), why) : 409;
     if (code == 200) send_json(res, {{"retired", true}});
+    else send_json(res, {{"error", why.empty() ? "not running the bus" : why}}, code);
+  });
+
+  // Pi-only: give a new TAP its radio settings (tap_config.h), Add a TAP's
+  // step. {"mac": "<the TAP's 16 hex digits>", "channel": 11..26 (optional:
+  // two from every TAP heard), "pan": "1A2B" (optional: from this machine's
+  // MAC, past any in use), "reset": false, "dry_run": true}; behind the web
+  // password. A real one needs Allow changes to the TAPs, or master_bench.
+  // Pi-only: set one TAP's report period, tunnel 0x22 (tap_config.h):
+  // {"mac": the TAP's, "code": 1..11 (1 s..30 s), "dry_run": true by default}.
+  // Both settings are written where they differ, then read back. Behind the
+  // web password and, but for a dry run, Allow changes to the TAPs.
+  svr.Post("/api/master/taps/period", [this](const httplib::Request &req, httplib::Response &res) {
+    if (ctx_.current_settings().web_password.empty()) {
+      send_json(res, {{"error", "set a web password first"}}, 403);
+      return;
+    }
+    namespace mp = esphome::tigo_monitor::master;
+    json j = json::parse(req.body, nullptr, false);
+    mp::Bytes mac;
+    std::string h = !j.is_discarded() && j.is_object() && j.contains("mac") && j["mac"].is_string() ? j["mac"].get<std::string>() : "";
+    for (size_t i = 0; i + 1 < h.size() && h.size() == 16; i += 2) {
+      if (!isxdigit(static_cast<unsigned char>(h[i])) || !isxdigit(static_cast<unsigned char>(h[i + 1]))) break;
+      mac.push_back(static_cast<uint8_t>(std::stoul(h.substr(i, 2), nullptr, 16)));
+    }
+    int code = !j.is_discarded() && j.is_object() && j.contains("code") && j["code"].is_number_integer() ? j["code"].get<int>() : 0;
+    if (mac.size() != 8 || code < 1 || code > 11) {
+      send_json(res, {{"error", "expected {\"mac\": \"04C05B...\", \"code\": 1..11, \"dry_run\": true}"}}, 400);
+      return;
+    }
+    bool dry = j.value("dry_run", true);
+    std::string why;
+    int status = ctx_.request_period ? ctx_.request_period(mac, static_cast<uint8_t>(code), dry, why) : 409;
+    if (status == 200)
+      send_json(res, {{"started", true}, {"dry_run", dry}, {"code", code}, {"period", mp::period_code_text(code)}});
+    else send_json(res, {{"error", why.empty() ? "not running the bus" : why}}, status);
+  });
+
+  svr.Post("/api/master/taps/provision", [this](const httplib::Request &req, httplib::Response &res) {
+    if (ctx_.current_settings().web_password.empty()) {
+      send_json(res, {{"error", "set a web password first"}}, 403);
+      return;
+    }
+    namespace mp = esphome::tigo_monitor::master;
+    json j = json::parse(req.body, nullptr, false);
+    const char *shape = "expected {\"mac\": \"04C05B...\", \"channel\": 11..26, \"pan\": \"1A2B\", \"dry_run\": true}";
+    if (j.is_discarded() || !j.is_object() || !j.contains("mac") || !j["mac"].is_string() ||
+        (j.contains("channel") && !j["channel"].is_number_integer())) {
+      send_json(res, {{"error", shape}}, 400);
+      return;
+    }
+    std::string h = j["mac"].get<std::string>();
+    mp::Bytes mac;
+    for (size_t i = 0; i + 1 < h.size() && h.size() == 16; i += 2) {
+      if (!isxdigit(static_cast<unsigned char>(h[i])) || !isxdigit(static_cast<unsigned char>(h[i + 1]))) break;
+      mac.push_back(static_cast<uint8_t>(std::stoul(h.substr(i, 2), nullptr, 16)));
+    }
+    int channel = j.value("channel", 0);  // 0: chosen, two from every TAP heard
+    unsigned pan = 0;
+    if (mac.size() != 8 || (channel && (channel < 11 || channel > 26)) ||
+        (j.contains("pan") && (!j["pan"].is_string() || sscanf(j["pan"].get<std::string>().c_str(), "%x", &pan) != 1 ||
+                               !pan || pan >= 0xFFFF))) {
+      send_json(res, {{"error", shape}}, 400);
+      return;
+    }
+    bool reset = j.value("reset", false), dry = j.value("dry_run", true), identify = j.value("identify", true);
+    // "profile": how many optimizers the TAP is for (40, 75, 120 or 300);
+    // absent, sized the CCA's way from its table (tap_config.h). "keep_network": keep its channel, PAN and key, so
+    // only the profile changes.
+    int profile = j.contains("profile") && j["profile"].is_number_integer() ? j["profile"].get<int>() : 0;
+    bool keep_network = j.value("keep_network", false);
+    if (profile && profile != 40 && profile != 75 && profile != 120 && profile != 300) {
+      send_json(res, {{"error", "profile is 40, 75, 120 or 300 optimizers"}}, 400);
+      return;
+    }
+    std::string why, given;
+    int code = ctx_.request_provision
+                   ? ctx_.request_provision(mac, static_cast<uint16_t>(channel), static_cast<uint16_t>(pan),
+                                            identify, reset, dry, profile, keep_network, why, given)
+                   : 409;
+    if (code == 200) send_json(res, {{"started", true}, {"dry_run", dry}, {"reset", reset}, {"given", given}});
+    else send_json(res, {{"error", why.empty() ? "not running the bus" : why}}, code);
+  });
+
+  // Pi-only, bench only: ask one optimizer a read-shaped question, such as
+  // ^00GetOsState, that isn't one of the five the CCA sends. {"addr": "0003",
+  // "text": "GetOsState"}; the answer goes to the log. Behind the web
+  // password; refused unless master_bench is on.
+  svr.Post("/api/master/query", [this](const httplib::Request &req, httplib::Response &res) {
+    if (ctx_.current_settings().web_password.empty()) {
+      send_json(res, {{"error", "set a web password first"}}, 403);
+      return;
+    }
+    json j = json::parse(req.body, nullptr, false);
+    unsigned addr = 0;
+    if (j.is_discarded() || !j.is_object() || !j.contains("addr") || !j["addr"].is_string() || !j.contains("text") ||
+        !j["text"].is_string() || sscanf(j["addr"].get<std::string>().c_str(), "%x", &addr) != 1 || addr < 2 ||
+        addr > 0x7FFF) {
+      send_json(res, {{"error", "expected {\"addr\": \"0003\", \"text\": \"GetOsState\"}"}}, 400);
+      return;
+    }
+    std::string text = "^00" + j["text"].get<std::string>() + "\r";
+    std::string why;
+    int code = ctx_.request_ask ? ctx_.request_ask(static_cast<uint16_t>(addr), text, why) : 409;
+    if (code == 200) send_json(res, {{"asked", true}});
     else send_json(res, {{"error", why.empty() ? "not running the bus" : why}}, code);
   });
 
@@ -1849,6 +1973,8 @@ void HttpServer::routes_() {
                     {"master_housekeeping", s.master_housekeeping},
                     {"master_queries", s.master_queries},
                     {"master_read_tap_config", s.master_read_tap_config},
+                    {"master_send_41", s.master_send_41},
+                    {"dangerous_options", s.dangerous_options},  // settings.json only: a POST never changes it
                     {"master_table_writes", s.master_table_writes},
                     {"master_adopt_taps", s.master_adopt_taps},
                     {"discovery_auto", s.discovery_auto},
@@ -1905,6 +2031,7 @@ void HttpServer::routes_() {
       if (j.contains("master_housekeeping")) s.master_housekeeping = j["master_housekeeping"].get<bool>();
       if (j.contains("master_queries")) s.master_queries = j["master_queries"].get<bool>();
       if (j.contains("master_read_tap_config")) s.master_read_tap_config = j["master_read_tap_config"].get<bool>();
+      if (j.contains("master_send_41")) s.master_send_41 = j["master_send_41"].get<bool>();
       if (j.contains("master_table_writes")) s.master_table_writes = j["master_table_writes"].get<bool>();
       if (j.contains("master_adopt_taps")) s.master_adopt_taps = j["master_adopt_taps"].get<bool>();
       if (j.contains("discovery_auto")) s.discovery_auto = j["discovery_auto"].get<bool>();

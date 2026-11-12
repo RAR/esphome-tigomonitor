@@ -46,7 +46,7 @@ function master(role, pv = {}, standby = 'off') {
   };
 }
 
-function settings() {
+function settings(more = {}) {
   return {
     serial_port: 'auto', bus_role: 'master', standby_takeover_s: 3, master_startup: true, master_bench: false, discovery_morning_min: 120,
     master_housekeeping: true, master_queries: false, master_optimizer_writes: false, gateway_id: 0x1201,
@@ -55,7 +55,7 @@ function settings() {
     device_id: 'tigomonitor', show_cca_page: true, show_cloud_page: true,
     mqtt: { host: 'broker', port: 1883, username: '', password_set: false, discovery: true,
       discovery_prefix: 'homeassistant', base_topic: 'tigomonitor', standby_panels: false, pv_switch: false },
-    mqtt_connected: true, mqtt_error: '',
+    mqtt_connected: true, mqtt_error: '', ...more,
   };
 }
 
@@ -87,7 +87,15 @@ async function open(opts = {}) {
     }
     if (path === '/api/settings') {
       if (req.method() === 'POST') { api.settingsPosts.push(JSON.parse(req.postData())); return json(200, { saved: true }); }
-      return json(200, settings());
+      return json(200, settings(opts.settings));
+    }
+    if ((path === '/api/master/taps/provision' || path === '/api/master/taps/period') && req.method() === 'POST') {
+      const body = JSON.parse(req.postData());
+      api.posts.push({ path, body });
+      const kind = path.endsWith('period') ? 'period' : 'provision';
+      api.master.table = { edit: { kind, finished: true, ok: true, dry_run: body.dry_run !== false,
+        message: body.dry_run !== false ? `dry run: would do it (${kind})` : `done (${kind})` } };
+      return json(200, { started: true });
     }
     if (path === '/api/serial-ports') return json(200, { ports: [] });
     if (path === '/api/devices' && opts.devices) return json(200, { devices: opts.devices, count: opts.devices.length });
@@ -369,5 +377,56 @@ test('the time the window stays open after sunrise is a Bus setting, saved in mi
   await page.waitForFunction(() => true);
   await page.waitForTimeout(500);
   assert.equal(api.settingsPosts.at(-1).discovery_morning_min, 90);
+  await ctx.close();
+});
+
+// Dangerous options: only with "dangerous_options": true in settings.json,
+// which the page can show but never set.
+const TAPS = { taps: [{ id: '1201', mac: '04C05B0000A1B2C3', state: 'running' }] };
+
+test('without dangerous_options there is no Dangerous options card', async () => {
+  const { page, ctx, errors } = await open({ hash: '#settings', master: TAPS });
+  await page.waitForSelector('#pi-port-save', { state: 'visible' });
+  await page.waitForTimeout(500);
+  assert.equal(await page.isVisible('#pi-danger'), false);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test('listening, the card stays hidden even with the flag', async () => {
+  const { page, ctx } = await open({ hash: '#settings', role: 'listen', master: TAPS, settings: { dangerous_options: true, bus_role: 'listen' } });
+  await page.waitForSelector('#pi-port-save', { state: 'visible' });
+  await page.waitForTimeout(500);
+  assert.equal(await page.isVisible('#pi-danger'), false);
+  await ctx.close();
+});
+
+test('with the flag: preview a profile and a period, then write one after a warning', async () => {
+  const { page, ctx, api, errors } = await open({ hash: '#settings', master: TAPS, settings: { dangerous_options: true } });
+  await page.waitForSelector('#pi-danger', { state: 'visible' });
+  assert.equal(await page.locator('#pi-danger [data-danger-tap]').count(), 1);
+  await page.selectOption('#pi-danger select[data-danger-profile]', '120');
+  await page.click('#pi-danger button[data-danger="profile-preview"]');
+  await page.waitForFunction(() => /would do it \(provision\)/.test(document.querySelector('#pi-danger [data-danger-out]').textContent));
+  assert.deepEqual(api.posts.at(-1), { path: '/api/master/taps/provision',
+    body: { mac: '04C05B0000A1B2C3', keep_network: true, profile: 120, dry_run: true } });
+  await page.selectOption('#pi-danger select[data-danger-period]', '4');
+  await page.click('#pi-danger button[data-danger="period-preview"]');
+  await page.waitForFunction(() => /\(period\)/.test(document.querySelector('#pi-danger [data-danger-out]').textContent));
+  assert.deepEqual(api.posts.at(-1).body, { mac: '04C05B0000A1B2C3', code: 4, dry_run: true });
+  // Cancelled: nothing sent.
+  const n = api.posts.length;
+  page.once('dialog', (d) => d.dismiss());
+  await page.click('#pi-danger button[data-danger="profile-write"]');
+  await page.waitForTimeout(300);
+  assert.equal(api.posts.length, n);
+  // Confirmed: the real write.
+  let asked = '';
+  page.once('dialog', (d) => { asked = d.message(); d.accept(); });
+  await page.click('#pi-danger button[data-danger="profile-write"]');
+  await page.waitForFunction(() => /done \(provision\)/.test(document.querySelector('#pi-danger [data-danger-out]').textContent));
+  assert.match(asked, /120/);
+  assert.deepEqual(api.posts.at(-1).body, { mac: '04C05B0000A1B2C3', keep_network: true, profile: 120, dry_run: false });
+  assert.deepEqual(errors, []);
   await ctx.close();
 });

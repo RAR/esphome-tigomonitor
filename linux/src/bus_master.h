@@ -76,6 +76,7 @@ class BusMaster {
     core_.set_discovery(renew, std::move(saved));
   }
   void set_read_tap_config(bool on) { core_.set_read_tap_config(on); }
+  void set_send_41(bool on) { core_.set_send_41(on); }
   void set_table_writes(bool on) { core_.set_table_writes(on); }
   void set_table_saved(esphome::tigo_master::MasterCore::TableSaved saved, const esphome::tigo_monitor::master::Bytes &mac,
                        const std::vector<esphome::tigo_monitor::master::TableRecord> *resume) {
@@ -84,6 +85,10 @@ class BusMaster {
   bool request_table_remove(const esphome::tigo_monitor::master::Bytes &mac, bool dry_run, std::string &why,
                             uint16_t tap = 0) {
     return core_.request_table_remove(mac, dry_run, why, tap);
+  }
+  bool request_table_remove(const std::vector<esphome::tigo_monitor::master::Bytes> &macs, bool dry_run,
+                            std::string &why, uint16_t tap = 0) {
+    return core_.request_table_remove(macs, dry_run, why, tap);
   }
   bool request_table_replace(const esphome::tigo_monitor::master::Bytes &old_mac,
                              const esphome::tigo_monitor::master::Bytes &new_mac, bool dry_run, std::string &why,
@@ -107,7 +112,21 @@ class BusMaster {
     core_.set_adopt_taps(on, std::move(saved));
   }
   bool request_herd(std::string &why) { return core_.request_herd(why); }
+  uint8_t seq() const { return core_.seq(); }
+  void set_seq(uint8_t s) { core_.set_seq(s); }
   bool request_forget_tap(uint16_t id, std::string &why) { return core_.request_forget_tap(id, why); }
+  bool request_ask(uint16_t node, const std::string &text, std::string &why) {
+    return core_.request_ask(node, text, why);
+  }
+  bool request_period(const esphome::tigo_monitor::master::Bytes &tap_mac, uint8_t code, bool dry_run,
+                      std::string &why) {
+    return core_.request_period(tap_mac, code, dry_run, why);
+  }
+  bool request_provision(const esphome::tigo_monitor::master::Bytes &tap_mac,
+                         const esphome::tigo_monitor::master::RadioBlock &block, bool reset, bool dry_run,
+                         std::string &why) {
+    return core_.request_provision(tap_mac, block, reset, dry_run, why);
+  }
   void set_window_wanted(bool wanted, int missing, int64_t morning_until_unix = 0) {
     core_.set_window_wanted(wanted, missing, morning_until_unix);
   }

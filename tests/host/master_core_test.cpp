@@ -201,6 +201,7 @@ class TapPort : public Transport {
   // Instead of answer: any number of replies (two TAPs answering one GET_MAC).
   std::function<std::vector<mp::Frame>(const mp::Frame &)> answer_all;
   std::vector<std::pair<uint16_t, uint16_t>> sent;
+  std::vector<mp::Frame> frames;  // every request, whole
   bool configured() const override { return true; }
   bool open(std::string &) override { return open_ = true; }
   void close() override { open_ = false; }
@@ -211,6 +212,7 @@ class TapPort : public Transport {
         mp::Frame f, r;
         if (!mp::decode_frame(body, f)) return;
         sent.push_back({f.dest, f.cmd});
+        frames.push_back(f);
         if (answer_all) {
           for (const auto &a : answer_all(f)) {
             auto w = mp::encode_frame(a.dest, a.cmd, a.payload);
@@ -650,6 +652,26 @@ static void test_a_removal_saves_then_erases() {
   CHECK(events.size() == 2 && events[0] == "saved 1 at erase 0" && events[1] == "cleared");
   MasterStatus s = core.status();
   CHECK(s.table_edit.kind == "remove" && s.table_edit.finished && s.table_edit.ok && !s.table_edit.interrupted);
+  core.close();
+}
+
+// Several in one removal: each one taken off is told, once.
+static void test_a_removal_of_several() {
+  TableTap tap;
+  MasterCore core(&tap.port, [](int, const std::string &) {}, nullptr, nullptr, GW, false, false);
+  core.set_table_writes(true);
+  core.set_table_saved([](const mp::Bytes &, const std::vector<mp::TableRecord> *) { return true; });
+  std::vector<std::string> removed;
+  core.set_on_removed([&](const std::string &mac) { removed.push_back(mac); });
+  CHECK(core.open());
+  std::vector<mp::Bytes> both;
+  for (const auto &r : tap.records) both.emplace_back(r.begin(), r.begin() + 8);
+  std::string why;
+  CHECK(core.request_table_remove(both, false, why));
+  for (uint32_t t = 0; t < 20000; t += 50) core.tick(t);
+  CHECK(tap.erases == 1 && tap.records.empty());
+  CHECK(removed.size() == 2);
+  CHECK(core.status().table_edit.ok);
   core.close();
 }
 
@@ -1192,6 +1214,89 @@ static void test_the_owners_herd_keeps_known_ids() {
   core.close();
 }
 
+// After the herd's reset broadcast the tunnel sequence starts again at 01,
+// as the CCA's does. (The TAP only echoes it: 0x0E's status byte turned out
+// to be the join window's state, bench 2026-11-11.)
+static void test_the_tunnel_seq_starts_at_01_after_a_reset() {
+  MultiTap bus;
+  bus.taps = {{0x1201, 1}};
+  MasterCore core(&bus.port, [](int, const std::string &) {}, nullptr, nullptr, 0x1201, false, /*startup=*/true);
+  core.set_taps({{0x1201, multi_mac(1)}});
+  core.set_adopt_taps(true, [](const std::vector<MasterCore::TapEntry> &) {});
+  CHECK(core.open());
+  run_for(core, 0, 60000, 50);  // running, its seq well past 01
+  std::string why;
+  CHECK(core.request_herd(why));
+  run_for(core, 60000, 100000, 50);
+  size_t reset = 0;
+  for (size_t i = 0; i < bus.port.frames.size(); i++)
+    if (bus.port.frames[i].dest == 0x0000 && bus.port.frames[i].cmd == 0x0010) reset = i;
+  CHECK(reset > 0);
+  int first = -1;
+  for (size_t i = reset + 1; i < bus.port.frames.size() && first < 0; i++)
+    if (bus.port.frames[i].cmd == mp::CMD_TUNNEL && bus.port.frames[i].payload.size() > 4) first = bus.port.frames[i].payload[4];
+  CHECK(first == 0x01);
+  core.close();
+}
+
+// Giving a TAP its radio settings: on the bench, or on a live system with
+// "Allow changes to the TAPs" (master_table_writes) on, as Add a TAP's step
+// does; refused with neither.
+static void test_radio_settings_need_the_bench_or_table_writes() {
+  mp::RadioBlock b;
+  b.channel = 21;
+  b.pan = 0x4C3D;
+  mp::map_for_profile(12, b.map);
+  const mp::Bytes mac = multi_mac(1);
+  for (int mode = 0; mode < 3; mode++) {
+    MultiTap bus;
+    bus.taps = {{0x1201, 1}};
+    MasterCore core(&bus.port, [](int, const std::string &) {}, nullptr, nullptr, 0x1201, /*bench=*/mode == 1, true);
+    core.set_taps({{0x1201, mac}});
+    if (mode == 2) core.set_table_writes(true);
+    CHECK(core.open());
+    run_for(core, 0, 20000, 50);
+    std::string why;
+    // A check (a dry run) only reads: allowed either way, as other checks are,
+    // and it finishes; it doesn't hang refused, blocking every table change.
+    CHECK(core.request_provision(mac, b, false, true, why));
+    run_for(core, 20000, 30000, 50);
+    CHECK(core.status().table_edit.finished && !core.status().table_edit.active);
+    CHECK(core.status().fault != Fault::refused);
+    bool ok = core.request_provision(mac, b, false, false, why);
+    if (mode == 0) CHECK(!ok && why.find("Allow changes to the TAPs") != std::string::npos);
+    else CHECK(ok);
+    // Skipping the MAC check, or a reset, only on the bench: on a live
+    // system a wrong MAC could otherwise re-network the TAP in service.
+    run_for(core, 30000, 40000, 50);
+    mp::RadioBlock skip = b;
+    skip.skip_identify = true;
+    CHECK(core.request_provision(mac, skip, false, false, why) == (mode == 1));
+    run_for(core, 40000, 50000, 50);
+    CHECK(core.request_provision(mac, b, /*reset=*/true, false, why) == (mode == 1));
+    run_for(core, 50000, 60000, 50);
+    core.close();
+  }
+}
+
+// A master replacing another (a settings save) carries on its tunnel count,
+// so the TAP sees no break.
+static void test_the_tunnel_seq_carries_over() {
+  MultiTap bus;
+  bus.taps = {{0x1201, 1}};
+  MasterCore core(&bus.port, [](int, const std::string &) {}, nullptr, nullptr, 0x1201, false, /*startup=*/true);
+  core.set_taps({{0x1201, multi_mac(1)}});
+  core.set_seq(0x40);
+  CHECK(core.open());
+  run_for(core, 0, 60000, 50);
+  int first = -1;
+  for (const auto &f : bus.port.frames)
+    if (f.cmd == mp::CMD_TUNNEL && f.payload.size() > 4) { first = f.payload[4]; break; }
+  CHECK(first == 0x41);
+  CHECK(core.seq() > 0x41);
+  core.close();
+}
+
 // A herd that hears a saved TAP missing keeps it, lost, at its id.
 static void test_a_herd_keeps_a_missing_tap() {
   MultiTap bus;
@@ -1315,6 +1420,9 @@ int main() {
   test_adopting_herds_a_new_tap();
   test_not_adopting_leaves_a_new_tap_alone();
   test_the_owners_herd_keeps_known_ids();
+  test_the_tunnel_seq_starts_at_01_after_a_reset();
+  test_the_tunnel_seq_carries_over();
+  test_radio_settings_need_the_bench_or_table_writes();
   test_a_herd_keeps_a_missing_tap();
   test_two_taps_are_polled_in_turn();
   test_no_0x41_with_more_than_one_tap();
@@ -1328,6 +1436,7 @@ int main() {
   test_a_replace_lists_the_new_one_and_waits();
   test_a_removal_cut_off_by_a_tap_restart_is_finished();
   test_a_removal_saves_then_erases();
+  test_a_removal_of_several();
   test_an_interrupted_removal_is_finished();
   test_a_table_add_needs_the_setting();
   test_a_dry_run_sends_no_write();

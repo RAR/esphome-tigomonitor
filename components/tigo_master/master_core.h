@@ -25,6 +25,7 @@
 // heard for takeover_s. Any master it hears, it yields to: a CCA can't.
 
 #include "../tigo_monitor/table_edit.h"
+#include "../tigo_monitor/tap_config.h"
 #include "../tigo_monitor/tigo_master.h"
 #include "../tigo_monitor/tigo_protocol.h"
 
@@ -263,6 +264,14 @@ class MasterCore {
   // polled, and the list saved without it. Refused for a TAP still
   // answering, the only TAP, or one a table change is running on; why says so.
   bool request_forget_tap(uint16_t id, std::string &why);
+  // The tunnel sequence: a master replacing another (a settings save, a
+  // daemon restart) carries it on, so the TAP sees no break in its count.
+  uint8_t seq() const { return seq_; }
+  void set_seq(uint8_t s) { seq_ = s; }
+  // Bench only (master_bench): ask one optimizer a read-shaped text
+  // (^00Name, master::Queries::is_read_text) at the next tick; the answer is
+  // logged. Refused off the bench, without queries, or for any other text.
+  bool request_ask(uint16_t node, const std::string &text, std::string &why);
   // With more than one TAP, one that stopped answering is asked once every
   // LOST_PROBE_MS while the others are polled, and after LOST_MISSES
   // unanswered, once every REMOVED_PROBE_MS.
@@ -298,6 +307,8 @@ class MasterCore {
   // read, 0x0D 00 00), for its channel and SLT. Off unless the owner asks;
   // call before open().
   void set_read_tap_config(bool on) { read_tap_config_ = on; }
+  // Housekeeping without its 0x41s (the rest unchanged).
+  void set_send_41(bool on) { send_41_ = on; }
   // Automatic discovery (discovery_policy.h): false lets the window close,
   // as the CCA does with every expected optimizer found. The owner's switch
   // (request_discovery) still wins: renewed only when both want it.
@@ -328,6 +339,9 @@ class MasterCore {
   // same refusals, but for the window, and nowhere to save what stays.
   bool request_table_remove(const esphome::tigo_monitor::master::Bytes &mac, bool dry_run, std::string &why,
                             uint16_t tap = 0);
+  // Several in one pass: one erase, only those that stay written back.
+  bool request_table_remove(const std::vector<esphome::tigo_monitor::master::Bytes> &macs, bool dry_run,
+                            std::string &why, uint16_t tap = 0);
   // Starts replacing one: the table erased and written back without it,
   // with the new one listed (not joined) at its address, then waited for
   // like an add. The removal's refusals, and a new MAC that isn't 8 bytes.
@@ -342,6 +356,19 @@ class MasterCore {
   bool request_table_replace(const esphome::tigo_monitor::master::Bytes &old_mac,
                              const esphome::tigo_monitor::master::Bytes &new_mac, bool dry_run, std::string &why,
                              uint16_t tap = 0);
+  // Gives one TAP its radio settings (tap_config.h), Add a TAP's step: with
+  // Allow changes to the TAPs (master_table_writes) or master_bench on, the
+  // TAP named by the MAC it answered GET_MAC with, no other change running.
+  // A dry run (a check) needs neither switch: it reads the TAP's settings
+  // and lists what it would send. reset, and skipping the MAC check, only
+  // with master_bench.
+  bool request_provision(const esphome::tigo_monitor::master::Bytes &tap_mac,
+                         const esphome::tigo_monitor::master::RadioBlock &block, bool reset, bool dry_run,
+                         std::string &why);
+  // Sets one TAP's report period (tap_config.h, PeriodJob): code 1-11, both
+  // settings, then read back. The radio settings' refusals.
+  bool request_period(const esphome::tigo_monitor::master::Bytes &tap_mac, uint8_t code, bool dry_run,
+                      std::string &why);
   // Stops waiting for an added optimizer to join (it stays listed, and
   // joins whenever the window is next open). False if it isn't waited for.
   bool request_table_stop_waiting(const esphome::tigo_monitor::master::Bytes &mac);
@@ -448,6 +475,7 @@ class MasterCore {
   bool bench_, startup_;
   bool housekeeping_on_;
   bool read_tap_config_ = false;
+  bool send_41_ = true;
   std::vector<esphome::tigo_monitor::master::Learned41::Entry> learned_;
   Targets targets_;
   TapTargets tap_targets_;
@@ -515,6 +543,7 @@ class MasterCore {
   TapsSaved taps_saved_;
   bool herd_wanted_ = false;  // under mu_: request_herd's, for the next tick
   uint16_t forget_wanted_ = 0;  // under mu_: request_forget_tap's, for the next tick
+  std::vector<std::pair<uint16_t, std::string>> ask_wanted_;  // under mu_: request_ask's
   void forget_tap_(uint16_t id);
   void start_herd_(const char *why);
   void herd_done_();

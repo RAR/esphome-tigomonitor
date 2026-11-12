@@ -6,8 +6,9 @@
 // 2026-11-06); the rest are the protocol's. A reconfiguration is a request
 // classify_request() says no master here ever sends: a GatewayCfg write,
 // SET_CHANNEL, the scan, TAP firmware, EraseFlash, SetTable and the rest. Our
-// own master can't send one, so hearing one means another device (a CCA,
-// most likely) is on the bus and changing the TAP.
+// own master sends none of them on a running system (only the GatewayCfg
+// write, on the bench, and that one isn't raised), so hearing one means
+// another device (a CCA, most likely) is on the bus and changing the TAP.
 //
 // An event keeps the frame's payload in hex, as the rest of the device's UI
 // shows addresses and barcodes, but for one thing: the GatewayCfg block (the
@@ -149,7 +150,10 @@ inline bool is_reply(const Frame &f) { return (f.dest & 0x8000) && f.dest != 0xF
 
 inline std::string reconfiguration(const Frame &f) {
   if (is_reply(f)) return "";
-  if (classify_request(f.cmd, f.payload) != Allow::never) return "";
+  // A radio settings write is one even though the bench may send it: heard
+  // here, it's another device's.
+  Allow a = classify_request(f.cmd, f.payload);
+  if (a != Allow::never && a != Allow::provision) return "";
   char buf[64];
   if (f.cmd == CMD_TUNNEL && f.payload.size() >= 5) {
     uint8_t sub = f.payload[3];
@@ -294,13 +298,17 @@ inline bool parse_mppt(const std::string &text, MpptSeen &m) {
 
 // Each device's version, from when it was first seen, and the one it
 // replaced: kept by the caller across restarts (the Pi's versions.json).
-// The TAP's radio settings, from the 37-byte GatewayCfg block a read returns
+// The TAP's radio settings, from the GatewayCfg block a read returns (36
+// bytes and a status, or 46 and a status on a G8.59)
 // (docs/cca-tap-management.md): byte 1 the 802.15.4 channel, 14 SLT (the
-// signal a node must beat to be admitted), 35 SLm. The same block holds the
-// PAN and the 16-byte network key; those are never copied out.
+// signal a node must beat to be admitted), SLm last. The same block holds the
+// PAN and the 16-byte network key. The key is never copied out; the PAN is
+// kept so a new TAP isn't given one already in use: in versions.json, never
+// in /api/versions.
 struct TapRadio {
   uint16_t tap = 0;
   int channel = 0, slt = 0, slm = 0;
+  uint16_t pan = 0;
 };
 
 // A TAP's ID: the MAC it gives in answer to "where are you" (GET_MAC), as
@@ -317,11 +325,13 @@ inline bool parse_gateway_cfg(const Frame &req, const Frame &rep, TapRadio &r) {
   TunnelReply t;
   if (req.cmd != CMD_TUNNEL || req.payload.size() < 7 || req.payload[3] != 0x0D || req.payload[5] != 0x00) return false;
   if (rep.cmd != CMD_TUNNEL_REPLY || !parse_tunnel_reply(rep.payload, t) || t.sub != 0x0E) return false;
-  if (t.data.size() != 37 || t.data[0] != 0x00) return false;
+  // 36 bytes and a status, or the G8.59's 46 (tap_config.h): SLm is last.
+  if ((t.data.size() != 37 && t.data.size() != 47) || t.data[0] != 0x00) return false;
   r.tap = rep.dest & 0x7FFF;
   r.channel = t.data[1];
+  r.pan = static_cast<uint16_t>(t.data[2] << 8 | t.data[3]);
   r.slt = t.data[14];
-  r.slm = t.data[35];
+  r.slm = t.data[t.data.size() - 2];
   return true;
 }
 
@@ -544,7 +554,9 @@ class BusWatch {
       open_req_ = f;
     }
     push_(e);
-    return e.reconfig;
+    // Our own bench provisioning (tap_config.h) is named in the log like
+    // anyone's, but only another device's reconfiguration is an alarm.
+    return ours ? "" : e.reconfig;
   }
 
   const std::deque<Exchange> &exchanges() const { return exchanges_; }
