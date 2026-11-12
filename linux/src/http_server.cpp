@@ -1781,21 +1781,27 @@ void HttpServer::routes_() {
       mac.push_back(static_cast<uint8_t>(std::stoul(h.substr(i, 2), nullptr, 16)));
     }
     int channel = j.value("channel", 0);  // 0: chosen, two from every TAP heard
-    unsigned pan = 0, generation = 0x1000000;  // not given: the TAP's own plus one
+    unsigned pan = 0;
     if (mac.size() != 8 || (channel && (channel < 11 || channel > 26)) ||
         (j.contains("pan") && (!j["pan"].is_string() || sscanf(j["pan"].get<std::string>().c_str(), "%x", &pan) != 1 ||
-                               !pan || pan >= 0xFFFF)) ||
-        (j.contains("generation") &&
-         (!j["generation"].is_string() || sscanf(j["generation"].get<std::string>().c_str(), "%x", &generation) != 1 ||
-          generation > 0xFFFFFF))) {
+                               !pan || pan >= 0xFFFF))) {
       send_json(res, {{"error", shape}}, 400);
       return;
     }
     bool reset = j.value("reset", false), dry = j.value("dry_run", true), identify = j.value("identify", true);
+    // "profile": how many optimizers the TAP is for (40, 75, 120 or 300);
+    // absent, sized the CCA's way from its table (tap_config.h). "keep_network": keep its channel, PAN and key, so
+    // only the profile changes.
+    int profile = j.contains("profile") && j["profile"].is_number_integer() ? j["profile"].get<int>() : 0;
+    bool keep_network = j.value("keep_network", false);
+    if (profile && profile != 40 && profile != 75 && profile != 120 && profile != 300) {
+      send_json(res, {{"error", "profile is 40, 75, 120 or 300 optimizers"}}, 400);
+      return;
+    }
     std::string why, given;
     int code = ctx_.request_provision
-                   ? ctx_.request_provision(mac, static_cast<uint16_t>(channel), static_cast<uint16_t>(pan), generation,
-                                            identify, reset, dry, why, given)
+                   ? ctx_.request_provision(mac, static_cast<uint16_t>(channel), static_cast<uint16_t>(pan),
+                                            identify, reset, dry, profile, keep_network, why, given)
                    : 409;
     if (code == 200) send_json(res, {{"started", true}, {"dry_run", dry}, {"reset", reset}, {"given", given}});
     else send_json(res, {{"error", why.empty() ? "not running the bus" : why}}, code);

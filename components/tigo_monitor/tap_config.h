@@ -80,12 +80,15 @@ struct RadioBlock {
   // The 46-byte form, and its 10 unexplained bytes (31-40).
   bool wide = false;
   std::array<uint8_t, 10> extra{};
-  // Not sent: ProvisionJob sets map bytes 5-7 to the TAP's own generation
-  // plus one (wrapping to 1, never 0), read just before it writes.
-  bool next_generation = false;
+  // Not sent: how many optimizers the TAP's table holds, for sizing its map
+  // (the CCA's burden).
+  uint16_t burden = 0;
   // Not sent: keep the profile (map bytes 0-4 and 8-9) the TAP already has,
   // if it's a known one, instead of this block's.
   bool keep_tap_profile = false;
+  // Not sent: keep the TAP's channel, PAN and key from its own read, so only
+  // the map changes (changing a TAP's profile under its joined optimizers).
+  bool keep_network = false;
   // Not sent: start at the read, without asking the TAP for its MAC first
   // (bench: does a lone 003A to a running TAP set the 0x0E status to 1?).
   bool skip_identify = false;
@@ -156,16 +159,67 @@ inline int profile_capacity(uint8_t first) {
   return first == 12 ? 40 : first == 14 ? 75 : first == 20 ? 120 : first == 24 ? 300 : 0;
 }
 
+// The smallest map whose capacity covers burden optimizers, by its first
+// count: the CCA's auto-size rule (re-chosen at each reset there).
+inline uint8_t profile_for(int burden) {
+  return burden <= 40 ? 12 : burden <= 75 ? 14 : burden <= 120 ? 20 : 24;
+}
+
+// The CCA's period for a map, in slots: what its Change Mesh Map page's
+// "Calculate period speed" shows (owner's analysis of the CCA's firmware,
+// 2026-11-11; it matched all eleven values read off a CCA). The levels are
+// fan-outs, so P[i] is the positions at depth i; W counts each report and
+// its relays; 28 and the star hunks (52 each) come out of a 792 budget.
+// 0xFFFF when the CCA would call it invalid.
+inline int map_period_slots(const std::array<uint8_t, 10> &m) {
+  long p = 1, s = 0, w = 0, last = 0;
+  int depth = 0;
+  for (int i = 0; i < 8 && m[i]; i++) {
+    p *= m[i];
+    if (p > 0xFFFF) return 0xFFFF;
+    s += p;
+    w += (i + 1) * p;
+    last = p;
+    depth++;
+  }
+  if (!depth || s > 0xFFFF || w > 0xFFFF) return 0xFFFF;
+  long d = 792L - m[8] - 52L * m[9] + last - s;
+  if (d <= 0) return 0xFFFF;
+  long raw = (static_cast<long>(w + 31) * 800 + d - 1) / d;  // ceil
+  return static_cast<int>((raw * 65 + 99) / 100);            // ceil(raw * 0.65)
+}
+
+// The cycle the CCA rounds a period up to, in hyperslots (200 a second): the
+// first step above it; 0 past the last.
+inline int period_hyperslots(int slots) {
+  for (int step : {200, 400, 600, 800, 1000, 1200, 2000, 2400, 3000, 4000, 6000})
+    if (step > slots) return step;
+  return 0;
+}
+
+// For a person: how often each optimizer would report on this map, as the
+// CCA plans it. Not shown yet: writing the map alone didn't change a bench
+// TAP's 2 s cycle (2026-11-12), so the period reaches it some other way.
+inline std::string map_cycle_text(const std::array<uint8_t, 10> &m) {
+  int hs = period_hyperslots(map_period_slots(m));
+  if (!hs) return "";
+  char b[32];
+  if (hs % 200 == 0) std::snprintf(b, sizeof(b), "every %d s", hs / 200);
+  else std::snprintf(b, sizeof(b), "every %.1f s", hs / 200.0);
+  return b;
+}
+
 // The map for a profile by its first count (12, 14, 20 or 24: 40, 75, 120
-// and 300 optimizers). Bytes 5-7 are a map generation the TAP doesn't check
-// (the CCA's creep upward; zero is accepted). The last byte is the TAP's
-// join-window dwell term: 01 as the CCA wrote it on 2026-11-11 (status 0);
-// 03, from an older capture, is applied but answered with status 1. Only 12,
-// 14 and 20 have known parameters; false for the rest.
-inline bool map_for_profile(uint8_t first, std::array<uint8_t, 10> &out, uint32_t generation = 0) {
-  if (first != 12 && first != 14 && first != 20) return false;
-  out = {first, 2, 2, 1, 0, static_cast<uint8_t>(generation >> 16), static_cast<uint8_t>(generation >> 8),
-         static_cast<uint8_t>(generation), 28, 1};
+// and 300 optimizers): the CCA's Change Mesh Map "12-2-2-1/28/1". Bytes 0-4
+// are the counts and the 0 that ends them; 5-7 are left zero (the CCA's map
+// parser never writes them; older CCA builds left stack bytes there, the
+// "creeping" values in its writes); 8-9 are 28 and 1 for every size (the
+// CCA's editor doesn't let you change them). From the owner's analysis of
+// the CCA's firmware, 2026-11-11. False for an unknown first count.
+inline bool map_for_profile(uint8_t first, std::array<uint8_t, 10> &out) {
+  if (first != 12 && first != 14 && first != 20 && first != 24) return false;
+  // 12, 14, 20: N-2-2-1; 24: 24-4-2-1. All /28/1.
+  out = {first, static_cast<uint8_t>(first == 24 ? 4 : 2), 2, 1, 0, 0, 0, 0, 28, 1};
   return true;
 }
 
@@ -309,17 +363,22 @@ class ProvisionJob : public TableJob {
         block_.wide = now.wide;
         block_.extra = now.extra;
         turn_ = true;
-        // A TAP that has a known profile, with its parameters, keeps it.
-        if (block_.keep_tap_profile && profile_capacity(now.map[0]) && now.map[8]) {
-          for (int i : {0, 1, 2, 3, 4, 8, 9}) block_.map[i] = now.map[i];
+        if (block_.keep_network) {
+          block_.channel = now.channel;
+          block_.pan = now.pan;
+          block_.key = now.key;
         }
-        if (block_.next_generation) {
-          uint32_t g = (static_cast<uint32_t>(now.map[5]) << 16 | now.map[6] << 8 | now.map[7]) + 1;
-          if (g > 0xFFFFFF) g = 1;
-          block_.map[5] = static_cast<uint8_t>(g >> 16);
-          block_.map[6] = static_cast<uint8_t>(g >> 8);
-          block_.map[7] = static_cast<uint8_t>(g);
+        // Sized the CCA's way: a TAP keeps its own known map while that still
+        // covers its table; otherwise the smallest that does.
+        if (block_.keep_tap_profile) {
+          int own = now.map[8] ? profile_capacity(now.map[0]) : 0;
+          if (own && own >= block_.burden) {
+            for (int i : {0, 1, 2, 3, 4, 8, 9}) block_.map[i] = now.map[i];
+          } else {
+            map_for_profile(profile_for(block_.burden), block_.map);
+          }
         }
+        block_.map[5] = block_.map[6] = block_.map[7] = 0;  // never written by the CCA
         step_ = Step::write;
         return;
       case Step::write:
@@ -395,6 +454,8 @@ class ProvisionJob : public TableJob {
   }
 
   std::string capacity_note_() const {
+    // Not the cycle (map_cycle_text): on the bench a TAP moved to 14-2-2-1
+    // still reported every 2 s, so the period reaches it some other way.
     int n = profile_capacity(block_.map[0]);
     return n ? ", for up to " + std::to_string(n) + " optimizers" : "";
   }

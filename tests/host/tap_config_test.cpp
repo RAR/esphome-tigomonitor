@@ -4,7 +4,7 @@
 // analysis describes (the write changes RAM, the stored read saves it).
 //
 // Every PAN, key and MAC here is made up. The map is the one the CCA wrote
-// on the bench on 2026-11-06, bytes 5-7 included as it sent them.
+// on the bench, with bytes 5-7 zero as the current CCA writes them.
 
 #include "tap_config.h"
 #include "bus_watch.h"
@@ -36,7 +36,7 @@ static RadioBlock made_up() {
   RadioBlock b;
   b.channel = 23;
   b.pan = 0x4C3D;
-  b.map = {0x0C, 0x02, 0x02, 0x01, 0x00, 0xFF, 0x84, 0x01, 0x1C, 0x03};
+  b.map = {0x0C, 0x02, 0x02, 0x01, 0x00, 0x00, 0x00, 0x00, 0x1C, 0x01};
   for (int i = 0; i < 16; i++) b.key[i] = static_cast<uint8_t>(0x11 * (i % 15 + 1));
   return b;
 }
@@ -45,7 +45,7 @@ static RadioBlock made_up() {
 // 01 00, then channel, PAN, map, SLT, key, optimization, SLm. The PAN and key
 // here are made up; the capture's own stay out of the repo.
 static void test_block_layout() {
-  Bytes want = hex("0017" "4C3D" "0C020201" "00FF8401" "1C03" "5A"
+  Bytes want = hex("0017" "4C3D" "0C020201" "00000000" "1C01" "5A"
                    "112233445566778899AABBCCDDEEFF11" "00000200" "3C");
   CHECK(made_up().encode() == want);
   CHECK(want.size() == RADIO_BLOCK_SIZE);
@@ -62,10 +62,8 @@ static void test_block_layout() {
 static void test_values() {
   std::array<uint8_t, 10> m{};
   CHECK(map_for_profile(12, m) && m == (std::array<uint8_t, 10>{12, 2, 2, 1, 0, 0, 0, 0, 28, 1}));
-  CHECK(!map_for_profile(24, m));  // its parameters aren't known
-  // A map generation in bytes 5-7, big-endian, as the CCA's creep upward.
-  CHECK(map_for_profile(12, m, 0x000001) && m == (std::array<uint8_t, 10>{12, 2, 2, 1, 0, 0, 0, 1, 28, 1}));
-  CHECK(map_for_profile(12, m, 0x76C107) && m[5] == 0x76 && m[6] == 0xC1 && m[7] == 0x07);
+  // The 300 map: 24-4-2-1, the same 28/1 (owner's analysis, 2026-11-11).
+  CHECK(map_for_profile(24, m) && m == (std::array<uint8_t, 10>{24, 4, 2, 1, 0, 0, 0, 0, 28, 1}));
   // Channels: two clear of each in use, so 20 rules out 19-21.
   CHECK(channel_for({}) == 11);
   CHECK(channel_for({11}) == 13);
@@ -203,38 +201,6 @@ static void test_provision() {
   CHECK(job.message().find("112233") == std::string::npos);
 }
 
-// With no generation asked for, the job writes the TAP's own map generation
-// (bytes 5-7) plus one, as the CCA's creep upward; one asked for is kept.
-static void test_provision_generation() {
-  {
-    FakeTap tap;
-    tap.ram = made_up();
-    tap.ram.map[5] = 0x76; tap.ram.map[6] = 0xC1; tap.ram.map[7] = 0xFF;
-    RadioBlock want = made_up();
-    want.next_generation = true;
-    ProvisionJob job(TAP_MAC, want, false, false);
-    run(job, tap);
-    CHECK(job.ok() && tap.ram.map[5] == 0x76 && tap.ram.map[6] == 0xC2 && tap.ram.map[7] == 0x00);
-  }
-  {  // at the top, it wraps to 1, never 0
-    FakeTap tap;
-    tap.ram = made_up();
-    tap.ram.map[5] = tap.ram.map[6] = tap.ram.map[7] = 0xFF;
-    RadioBlock want = made_up();
-    want.next_generation = true;
-    ProvisionJob job(TAP_MAC, want, false, false);
-    run(job, tap);
-    CHECK(job.ok() && tap.ram.map[5] == 0 && tap.ram.map[6] == 0 && tap.ram.map[7] == 1);
-  }
-  {  // asked for: kept as given
-    FakeTap tap;
-    tap.ram = made_up();
-    ProvisionJob job(TAP_MAC, made_up(), false, false);
-    run(job, tap);
-    CHECK(job.ok() && tap.ram.map[5] == 0xFF && tap.ram.map[6] == 0x84 && tap.ram.map[7] == 0x01);
-  }
-}
-
 // A TAP that already has a profile (a CCA's, say, for 120 optimizers) keeps
 // it; one without gets the 40-optimizer default. The result says which.
 static void test_provision_keeps_the_taps_profile() {
@@ -267,6 +233,85 @@ static void test_provision_keeps_the_taps_profile() {
   }
   CHECK(profile_capacity(12) == 40 && profile_capacity(14) == 75 && profile_capacity(20) == 120 &&
         profile_capacity(24) == 300 && profile_capacity(7) == 0);
+}
+
+// Changing only the profile: the TAP's channel, PAN and key are kept from
+// its own read, so its joined optimizers see the same network.
+static void test_provision_keeps_the_network_changes_the_profile() {
+  FakeTap tap;
+  tap.ram = made_up();
+  tap.ram.channel = 13;
+  tap.ram.pan = 0x7E21;
+  for (int i = 0; i < 16; i++) tap.ram.key[i] = static_cast<uint8_t>(0x30 + i);
+  RadioBlock want;  // what the request carries: placeholders and the new profile
+  want.channel = 11;
+  want.pan = 1;
+  map_for_profile(14, want.map);
+  want.keep_network = true;
+  ProvisionJob job(TAP_MAC, want, false, false);
+  run(job, tap);
+  CHECK(job.ok());
+  CHECK(tap.ram.channel == 13 && tap.ram.pan == 0x7E21 && tap.ram.key[0] == 0x30 && tap.ram.key[15] == 0x3F);
+  CHECK(tap.ram.map[0] == 14 && job.message().find("up to 75 optimizers") != std::string::npos);
+  CHECK(job.message().find("3031") == std::string::npos);  // the key still hidden
+}
+
+// Sizing, the CCA's rule: the smallest map whose capacity covers the TAP's
+// table (burden). A TAP keeps its own map only while that still covers it.
+// Bytes 5-7 are always zero: the CCA's map parser never writes them.
+static RadioBlock sized(uint16_t burden) {
+  RadioBlock b = made_up();
+  map_for_profile(12, b.map);
+  b.keep_tap_profile = true;
+  b.burden = burden;
+  return b;
+}
+static std::array<uint8_t, 10> after(const std::array<uint8_t, 10> &tap_map, uint16_t burden) {
+  FakeTap tap;
+  tap.ram = made_up();
+  tap.ram.map = tap_map;
+  ProvisionJob job(TAP_MAC, sized(burden), false, false);
+  run(job, tap);
+  CHECK(job.ok());
+  return tap.ram.map;
+}
+static void test_provision_sizes_the_map() {
+  const std::array<uint8_t, 10> m40 = {12, 2, 2, 1, 0, 0xE7, 0xB4, 0x76, 28, 1};  // the CCA's, junk in 5-7
+  const std::array<uint8_t, 10> m120 = {20, 2, 2, 1, 0, 0, 0, 0, 28, 1};
+  const std::array<uint8_t, 10> blank = {};
+  CHECK(after(m40, 40) == (std::array<uint8_t, 10>{12, 2, 2, 1, 0, 0, 0, 0, 28, 1}));  // fits: kept, 5-7 zeroed
+  CHECK(after(m40, 41)[0] == 14);    // outgrown: the next size
+  CHECK(after(m120, 30)[0] == 20);   // bigger than needed: kept, never shrunk under it
+  CHECK(after(blank, 0)[0] == 12);   // none: the smallest
+  CHECK(after(blank, 130) == (std::array<uint8_t, 10>{24, 4, 2, 1, 0, 0, 0, 0, 28, 1}));
+  CHECK(profile_for(0) == 12 && profile_for(40) == 12 && profile_for(41) == 14 && profile_for(75) == 14 &&
+        profile_for(76) == 20 && profile_for(121) == 24 && profile_for(300) == 24);
+}
+
+// The CCA's period for a map (its Calculate button; the owner's analysis of
+// its firmware), and the cycle it rounds to: every value the owner read off
+// the CCA on 2026-11-11.
+static void test_map_period() {
+  auto mp = [](std::initializer_list<int> levels, int star) {
+    std::array<uint8_t, 10> m{};
+    int i = 0;
+    for (int v : levels) m[i++] = static_cast<uint8_t>(v);
+    m[8] = 28;
+    m[9] = static_cast<uint8_t>(star);
+    return map_period_slots(m);
+  };
+  CHECK(mp({12}, 1) == 32 && mp({13}, 1) == 33 && mp({12, 2}, 1) == 68);
+  CHECK(mp({12, 2, 2, 1}, 1) == 354 && mp({13, 2, 2, 1}, 1) == 386);
+  CHECK(mp({12, 2, 2, 2}, 1) == 513 && mp({12, 2, 3, 1}, 1) == 513 && mp({12, 2, 2, 1, 1}, 1) == 598);
+  CHECK(mp({12, 2, 2, 1}, 2) == 387 && mp({12, 2, 2, 1}, 3) == 424 && mp({12, 2, 2, 1}, 4) == 471);
+  // The cycle, in hyperslots (200 a second): the next step up.
+  CHECK(period_hyperslots(354) == 400 && period_hyperslots(418) == 600 && period_hyperslots(629) == 800);
+  CHECK(period_hyperslots(5000) == 6000 && period_hyperslots(7000) == 0);
+  std::array<uint8_t, 10> m{};
+  map_for_profile(14, m);
+  CHECK(map_cycle_text(m) == "every 3 s");
+  map_for_profile(12, m);
+  CHECK(map_cycle_text(m) == "every 2 s");
 }
 
 // After its read, the job gives the master one turn (its poll, as the CCA
@@ -367,7 +412,7 @@ static RadioBlock made_up_wide() {
 }
 
 static void test_wide_layout() {
-  Bytes want = hex("0017" "4C3D" "0C020201" "00FF8401" "1C03" "5A"
+  Bytes want = hex("0017" "4C3D" "0C020201" "00000000" "1C01" "5A"
                    "112233445566778899AABBCCDDEEFF11" "A1A2A3A4A5A6A7A8A9AA" "00000200" "3C");
   CHECK(made_up_wide().encode() == want);
   CHECK(want.size() == RADIO_BLOCK_WIDE);
@@ -421,9 +466,11 @@ int main() {
   test_gate();
   test_provision();
   test_provision_with_reset();
-  test_provision_generation();
   test_provision_gives_a_turn_before_writing();
   test_provision_keeps_the_taps_profile();
+  test_provision_keeps_the_network_changes_the_profile();
+  test_provision_sizes_the_map();
+  test_map_period();
   test_provision_stops();
   test_dry_run();
   if (failures) {

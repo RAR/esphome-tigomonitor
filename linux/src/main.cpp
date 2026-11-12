@@ -586,8 +586,9 @@ int main(int argc, char **argv) {
         }
         return bus_master->request_forget_tap(id, why) ? 200 : 409;
       },
-      [&](const esphome::tigo_monitor::master::Bytes &tap_mac, uint16_t channel, uint16_t pan, uint32_t generation,
-          bool identify, bool reset, bool dry_run, std::string &why, std::string &given) {
+      [&](const esphome::tigo_monitor::master::Bytes &tap_mac, uint16_t channel, uint16_t pan,
+          bool identify, bool reset, bool dry_run, int profile, bool keep_network, std::string &why,
+          std::string &given) {
         namespace mp = esphome::tigo_monitor::master;
         std::lock_guard<std::mutex> lock(master_mu);
         if (!bus_master) {
@@ -606,19 +607,24 @@ int main(int argc, char **argv) {
           if (r.channel) channels.insert(static_cast<uint16_t>(r.channel));
           if (r.pan) pans.insert(r.pan);
         }
-        block.channel = channel ? channel : mp::channel_for(channels);
+        // Keeping the TAP's network: the job copies its channel, PAN and key
+        // from its read; these only pass the shape check until then.
+        block.keep_network = keep_network;
+        block.channel = keep_network ? 11 : channel ? channel : mp::channel_for(channels);
         mp::Bytes own = pan_seed(state_dir);
-        block.pan = pan ? pan : mp::pan_for(own.size() >= 2 ? own : tap_mac, pans);
+        block.pan = keep_network ? 1 : pan ? pan : mp::pan_for(own.size() >= 2 ? own : tap_mac, pans);
         if (!block.channel || !block.pan) {
           why = "no free channel or PAN left";
           return 409;
         }
-        // 40 optimizers: a bench TAP. A generation not asked for is the TAP's
-        // own plus one, read by the job just before it writes.
-        mp::map_for_profile(12, block.map, generation <= 0xFFFFFF ? generation : 0);
-        block.next_generation = generation > 0xFFFFFF;
+        // The map asked for (40, 75, 120, 300 optimizers: first count 12,
+        // 14, 20, 24); not asked for, sized the CCA's way at the TAP's read:
+        // its own while that covers its table, else the smallest that does.
+        mp::map_for_profile(profile == 300 ? 24 : profile == 120 ? 20 : profile == 75 ? 14 : 12, block.map);
+        block.keep_tap_profile = !profile;
+        for (const auto &t : bus_master->status().taps)
+          if (t.mac == mp::mac_hex(tap_mac)) block.burden = t.discovery.node_count;
         block.skip_identify = !identify;
-        block.keep_tap_profile = true;  // a TAP with a profile keeps it; one without gets 40's
         std::random_device rd;
         block.key = mp::key_from([&rd]() { return static_cast<uint8_t>(rd()); });
         given = block.describe();

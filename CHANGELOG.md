@@ -38,7 +38,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (H1.0007, 2026-11-11) the settings survived a power cycle, and a fresh
   optimizer joined the network and followed the TAP to a new one. Behind
   it is `POST /api/master/taps/provision`, which asks the TAP for its MAC
-  first and writes the block size the TAP reads back in.
+  first and writes the block size the TAP reads back in. The mesh map is
+  sized as a CCA sizes it: a TAP keeps its own while that covers the
+  optimizers on its list, otherwise it gets the smallest that does (for 40,
+  75, 120 or 300 optimizers), or the one asked for (`"profile"`). With
+  `"keep_network": true` only the map changes; on a bench TAP its joined
+  optimizer kept reporting through a 40-to-75 change.
 - **Ask one optimizer a read-only question, on the bench.**
   `POST /api/master/query` sends a question the CCA never sends, such as
   `GetPAN`, with `master_bench` on only.
