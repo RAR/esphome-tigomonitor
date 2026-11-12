@@ -53,6 +53,7 @@ Settings load_settings(const std::string &path) {
   get(j, "web_port", s.web_port);
   get(j, "web_username", s.web_username);
   get(j, "web_password", s.web_password);
+  get(j, "trusted_proxies", s.trusted_proxies);
   get(j, "setup_open_until", s.setup_open_until);
   get(j, "tls_cert", s.tls_cert);
   get(j, "tls_key", s.tls_key);
@@ -115,6 +116,7 @@ static json to_json(const Settings &s) {
       {"web_port", s.web_port},
       {"web_username", s.web_username},
       {"web_password", s.web_password},
+      {"trusted_proxies", s.trusted_proxies},
       {"setup_open_until", s.setup_open_until},
       {"tls_cert", s.tls_cert},
       {"tls_key", s.tls_key},

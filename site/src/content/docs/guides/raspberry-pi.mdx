@@ -290,9 +290,14 @@ unless you change it) and password, and your browser's password manager can
 fill them in. You stay signed in on that browser for 30 days, until you
 choose **Sign out** in the same card, or until the password changes or the
 service restarts. Five wrong passwords within 15 minutes lock that address
-out for 15 minutes; behind a reverse proxy every visitor shares the proxy's
-address, so the lockout reaches them all. Scripts can still send the login
-as HTTP Basic. Pages on other websites can't use the monitor's settings
+out for 15 minutes. Behind a reverse proxy every visitor arrives from the
+proxy's address, so put that address (or its network, as `172.16.0.0/12`
+for Docker's) under **Trusted proxies** in the same card: the lockout then
+counts each visitor by the address the proxy passes on in
+`X-Forwarded-For`, and the session cookie is marked Secure when the proxy
+says it took HTTPS (`X-Forwarded-Proto`). The header is believed only from
+those addresses, since anyone else could write it. Scripts can still send
+the login as HTTP Basic. Pages on other websites can't use the monitor's settings
 either way, even when you're signed in. Over plain HTTP the password crosses
 your network readable by anything on it; [HTTPS](#use-https) closes that.
 

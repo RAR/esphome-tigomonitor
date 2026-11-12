@@ -424,7 +424,8 @@ void HttpServer::routes_() {
       return;
     }
     int64_t now = unix_now_s();
-    if (sessions_.locked(req.remote_addr, now)) {
+    const std::string client = client_(req, s);
+    if (sessions_.locked(client, now)) {
       send_json(res, {{"error", "Too many wrong passwords. Wait 15 minutes, then try again."}}, 429);
       return;
     }
@@ -432,19 +433,19 @@ void HttpServer::routes_() {
     std::string user = !j.is_discarded() && j.is_object() && j.value("username", json()).is_string() ? j["username"].get<std::string>() : "";
     std::string pass = !j.is_discarded() && j.is_object() && j.value("password", json()).is_string() ? j["password"].get<std::string>() : "";
     if (!same_secret(user + ":" + pass, s.web_username + ":" + s.web_password)) {
-      sessions_.failed(req.remote_addr, now, user + ":" + pass);
+      sessions_.failed(client, now, user + ":" + pass);
       send_json(res, {{"error", "That username and password don't match."}}, 401);
       return;
     }
-    sessions_.succeeded(req.remote_addr);
+    sessions_.succeeded(client);
     std::random_device rd;
     std::string token = sessions_.create(now, [&rd]() { return static_cast<uint8_t>(rd()); });
-    res.set_header("Set-Cookie", session_cookie_(token));
+    res.set_header("Set-Cookie", session_cookie_(token, req, s));
     send_json(res, {{"signed_in", true}});
   });
   svr.Post("/api/logout", [this](const httplib::Request &req, httplib::Response &res) {
     sessions_.drop(cookie_value(req.get_header_value("Cookie"), "tm_session"));
-    res.set_header("Set-Cookie", session_cookie_(""));
+    res.set_header("Set-Cookie", session_cookie_("", req, ctx_.current_settings()));
     send_json(res, {{"signed_in", false}});
   });
 
@@ -1896,6 +1897,7 @@ void HttpServer::routes_() {
                     {"web_port_active", port_},
                     {"web_username", s.web_username},
                     {"web_password_set", !s.web_password.empty()},
+                    {"trusted_proxies", s.trusted_proxies},
                     {"setup_open", setup_open(s, unix_now_s())},
                     {"setup_open_until", s.setup_open_until},
                     {"tls_cert", s.tls_cert},
@@ -1954,6 +1956,7 @@ void HttpServer::routes_() {
       if (j.contains("web_username")) s.web_username = j["web_username"].get<std::string>();
       // Absent keeps it, and "" turns the login off.
       if (j.contains("web_password")) s.web_password = j["web_password"].get<std::string>();
+      if (j.contains("trusted_proxies")) s.trusted_proxies = j["trusted_proxies"].get<std::vector<std::string>>();
       // Set on the command line, they are not the web UI's to change.
       if (j.contains("tls_cert") && !ctx_.tls_from_args) s.tls_cert = j["tls_cert"].get<std::string>();
       if (j.contains("tls_key") && !ctx_.tls_from_args) s.tls_key = j["tls_key"].get<std::string>();
@@ -2008,6 +2011,9 @@ void HttpServer::routes_() {
     }
     if (err.empty() && (s.web_username.empty() || s.web_username.find(':') != std::string::npos))
       err = "The web UI username cannot be empty or contain a colon.";
+    for (const std::string &e : s.trusted_proxies)
+      if (err.empty() && !proxy_entry_ok(e))
+        err = "\"" + e + "\" is not an address, or a network as address/bits, for a trusted proxy.";
     // Wildcards would make every publish fail, and an empty or slash-edged
     // level gives topics nothing in Home Assistant subscribes to.
     for (const std::string *t : {&s.mqtt.base_topic, &s.mqtt.discovery_prefix}) {
@@ -2033,7 +2039,7 @@ void HttpServer::routes_() {
       sessions_.clear();
       if (had && !s.web_password.empty()) {
         std::random_device rd;
-        res.set_header("Set-Cookie", session_cookie_(sessions_.create(unix_now_s(), [&rd]() { return static_cast<uint8_t>(rd()); })));
+        res.set_header("Set-Cookie", session_cookie_(sessions_.create(unix_now_s(), [&rd]() { return static_cast<uint8_t>(rd()); }), req, s));
       }
     }
     send_json(res, {{"saved", true}});
@@ -2046,16 +2052,24 @@ bool HttpServer::signed_in_(const httplib::Request &req, const Settings &s) {
   std::string given = req.get_header_value("Authorization");
   if (given.rfind("Basic ", 0) != 0) return false;
   // Counted with the sign-in form's: otherwise it would be the way round the lockout.
-  if (sessions_.locked(req.remote_addr, now)) return false;
+  const std::string client = client_(req, s);
+  if (sessions_.locked(client, now)) return false;
   if (same_secret(given, "Basic " + httplib::detail::base64_encode(s.web_username + ":" + s.web_password))) return true;
-  sessions_.failed(req.remote_addr, now, given);
+  sessions_.failed(client, now, given);
   return false;
 }
 
-std::string HttpServer::session_cookie_(const std::string &token) const {
+std::string HttpServer::client_(const httplib::Request &req, const Settings &s) const {
+  return client_address(req.remote_addr, req.get_header_value("X-Forwarded-For"), s.trusted_proxies);
+}
+
+std::string HttpServer::session_cookie_(const std::string &token, const httplib::Request &req, const Settings &s) const {
   std::string c = "tm_session=" + token + "; Path=/; HttpOnly; SameSite=Strict; Max-Age=" +
                   (token.empty() ? std::string("0") : std::to_string(WebSessions::LIFETIME_S));
-  if (ctx_.tls) c += "; Secure";
+  // A proxy that takes HTTPS and passes plain HTTP on says so.
+  if (ctx_.tls || (from_trusted_proxy(req.remote_addr, s.trusted_proxies) &&
+                   req.get_header_value("X-Forwarded-Proto") == "https"))
+    c += "; Secure";
   return c;
 }
 

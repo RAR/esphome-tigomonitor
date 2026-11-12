@@ -133,7 +133,8 @@ class HttpServer {
   // (scripts, and browsers that still send what their popup was given).
   bool signed_in_(const httplib::Request &req, const Settings &s);
   // The Set-Cookie for a session, or with "" one that ends it.
-  std::string session_cookie_(const std::string &token) const;
+  std::string session_cookie_(const std::string &token, const httplib::Request &req, const Settings &s) const;
+  std::string client_(const httplib::Request &req, const Settings &s) const;  // who wrong passwords count against
 };
 
 }  // namespace tigod

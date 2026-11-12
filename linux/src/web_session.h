@@ -11,12 +11,16 @@
 // it with every request, doesn't lock its owner out by itself.
 #pragma once
 
+#include <arpa/inet.h>
+
 #include <cstdint>
+#include <cstring>
 #include <cstdio>
 #include <functional>
 #include <map>
 #include <mutex>
 #include <string>
+#include <vector>
 
 class WebSessions {
  public:
@@ -116,4 +120,92 @@ inline std::string cookie_value(const std::string &header, const std::string &na
     i = end + 1;
   }
   return "";
+}
+
+// Behind a reverse proxy, every visitor arrives from the proxy's address, so
+// one person's wrong guesses would lock everyone out. The proxy says who it
+// is passing along in X-Forwarded-For; that is believed only from an address
+// in trusted_proxies (each an address, or a network as address/bits), since
+// anyone else can write the header. The proxy appends the address it saw,
+// so the list is read from the end, past any further trusted proxies; what
+// comes before that is the visitor's own to write, and isn't used.
+namespace web_proxy_detail {
+struct Net {
+  int family = 0;  // AF_INET or AF_INET6
+  unsigned char bytes[16] = {};
+  int bits = 0;
+};
+// An address, written IPv4-as-IPv6 (::ffff:a.b.c.d) or not, as IPv4 or IPv6.
+inline bool parse_address(const std::string &text, Net &out) {
+  std::string t = text;
+  if (t.rfind("::ffff:", 0) == 0 && t.find('.') != std::string::npos) t = t.substr(7);
+  if (inet_pton(AF_INET, t.c_str(), out.bytes) == 1) {
+    out.family = AF_INET;
+    out.bits = 32;
+    return true;
+  }
+  if (inet_pton(AF_INET6, t.c_str(), out.bytes) == 1) {
+    out.family = AF_INET6;
+    out.bits = 128;
+    return true;
+  }
+  return false;
+}
+inline bool parse_entry(const std::string &entry, Net &out) {
+  size_t slash = entry.find('/');
+  if (!parse_address(entry.substr(0, slash), out)) return false;
+  if (slash == std::string::npos) return true;
+  std::string b = entry.substr(slash + 1);
+  if (b.empty() || b.size() > 3 || b.find_first_not_of("0123456789") != std::string::npos) return false;
+  int bits = std::stoi(b);
+  if (bits > out.bits) return false;
+  out.bits = bits;
+  return true;
+}
+inline bool in(const Net &addr, const Net &net) {
+  if (addr.family != net.family) return false;
+  int full = net.bits / 8, rest = net.bits % 8;
+  if (std::memcmp(addr.bytes, net.bytes, full) != 0) return false;
+  if (!rest) return true;
+  unsigned char mask = static_cast<unsigned char>(0xff << (8 - rest));
+  return (addr.bytes[full] & mask) == (net.bytes[full] & mask);
+}
+inline std::string trim(const std::string &s) {
+  size_t a = s.find_first_not_of(" \t"), b = s.find_last_not_of(" \t");
+  return a == std::string::npos ? "" : s.substr(a, b - a + 1);
+}
+}  // namespace web_proxy_detail
+
+inline bool proxy_entry_ok(const std::string &entry) {
+  web_proxy_detail::Net n;
+  return web_proxy_detail::parse_entry(entry, n);
+}
+
+inline bool from_trusted_proxy(const std::string &address, const std::vector<std::string> &trusted) {
+  web_proxy_detail::Net a, n;
+  if (!web_proxy_detail::parse_address(address, a)) return false;
+  for (const std::string &e : trusted)
+    if (web_proxy_detail::parse_entry(e, n) && web_proxy_detail::in(a, n)) return true;
+  return false;
+}
+
+// Who to count wrong passwords against: the connection's address, or, from
+// a trusted proxy, the address it forwarded for.
+inline std::string client_address(const std::string &remote, const std::string &forwarded_for,
+                                  const std::vector<std::string> &trusted) {
+  std::string who = remote;
+  if (!from_trusted_proxy(who, trusted)) return who;
+  size_t end = forwarded_for.size();
+  while (end > 0) {
+    size_t comma = forwarded_for.rfind(',', end - 1);
+    size_t start = comma == std::string::npos ? 0 : comma + 1;
+    std::string hop = web_proxy_detail::trim(forwarded_for.substr(start, end - start));
+    web_proxy_detail::Net a;
+    if (!web_proxy_detail::parse_address(hop, a)) return who;  // garbled: stop at the last one we trust
+    who = hop;
+    if (!from_trusted_proxy(hop, trusted)) return who;
+    if (comma == std::string::npos) break;
+    end = comma;
+  }
+  return remote;  // every hop is a trusted proxy: count against the connection
 }
