@@ -91,4 +91,33 @@ expect('locked out after five wrong', (s, json.loads(b)['error']), (429, 'Too ma
 expect('HTTP Basic is locked out too', req('/api/settings', headers=basic('admin', 'pw2'))[0], 401)
 sys.exit(fail)
 PY
+# The first password: the browser that sets it is signed in at once, so the
+# page doesn't ask straight after.
+kill $daemon; wait $daemon 2>/dev/null || true
+rm -rf "$out/first" && mkdir -p "$out/first"
+printf '{"web_username": "admin"}\n' > "$out/first/settings.json"
+build/linux/tigomonitord --state-dir "$out/first" --port $port --serial /dev/nonexistent \
+  --web-dir components/tigo_server/web 2>> "$out/first.log" &
+daemon=$!
+for _ in $(seq 50); do grep -q "web: listening on port $port" "$out/first.log" 2>/dev/null && break; sleep 0.1; done
+python3 - $port <<'PY'
+import json, sys, time, urllib.error, urllib.request as u
+port = int(sys.argv[1])
+def req(path, body=None, headers=None):
+    r = u.Request(f'http://127.0.0.1:{port}{path}', data=None if body is None else json.dumps(body).encode(),
+                  headers={'Content-Type': 'application/json', **(headers or {})})
+    try:
+        with u.urlopen(r, timeout=5) as resp: return resp.status, dict(resp.headers)
+    except urllib.error.HTTPError as e: return e.code, dict(e.headers)
+s, h = req('/api/settings', {'web_password': 'pw'})
+c = h.get('Set-Cookie', '')
+ok = s == 200 and c.startswith('tm_session=') and 'Max-Age=2592000' in c
+time.sleep(2)
+tok = c.split(';')[0].split('=', 1)[1] if ok else ''
+after = req('/api/settings', headers={'Cookie': f'tm_session={tok}'})[0]
+without = req('/api/settings')[0]
+good = ok and after == 200 and without == 401
+print(f"  {'ok  ' if good else 'FAIL'} the first password signs its browser in: {s}, cookie {bool(c)}, then {after} with it and {without} without")
+sys.exit(0 if good else 1)
+PY
 echo "login e2e passed"

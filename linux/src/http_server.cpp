@@ -1933,6 +1933,7 @@ void HttpServer::routes_() {
     // yet would otherwise be overwritten.
     Settings s = load_settings(ctx_.settings_path);
     const std::string login_before = s.web_username + ":" + s.web_password;
+    const bool had_no_password = s.web_password.empty();
     std::string err;
     try {
       if (j.contains("serial_port")) s.serial_port = j["serial_port"].get<std::string>();
@@ -2025,9 +2026,10 @@ void HttpServer::routes_() {
       return;
     }
     ctx_.settings_changed = true;
-    // A new login ends every session; the browser that set it gets a new one.
+    // A new login ends every session; the browser that set it gets a new
+    // one, and so does the one that set the first password (it had none).
     if (s.web_username + ":" + s.web_password != login_before) {
-      bool had = sessions_.valid(cookie_value(req.get_header_value("Cookie"), "tm_session"), unix_now_s());
+      bool had = had_no_password || sessions_.valid(cookie_value(req.get_header_value("Cookie"), "tm_session"), unix_now_s());
       sessions_.clear();
       if (had && !s.web_password.empty()) {
         std::random_device rd;
