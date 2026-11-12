@@ -53,6 +53,10 @@ struct Settings {
   bool master_queries = true;            // the CCA's 0x06 reads to optimizers
   bool master_optimizer_writes = true;   // and the two writes its answers call for
   bool master_read_tap_config = true;    // the bring-up's GatewayCfg read, once at start
+  // Within housekeeping, the 0x41s (the CCA's StarDisc SetPgw, replayed from
+  // what was learned). Off sends none, the rest of housekeeping as before: a
+  // roof test, 2026-11-12, of whether a stale replay costs reports.
+  bool master_send_41 = true;
   // The second switch, Allow changes to the TAPs: off by default.
   bool master_table_writes = false;      // let the owner's add write a record to the TAP's table
   // Set and cleared by the Add a TAP guide, not a setting of its own.

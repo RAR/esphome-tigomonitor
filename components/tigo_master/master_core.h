@@ -307,6 +307,8 @@ class MasterCore {
   // read, 0x0D 00 00), for its channel and SLT. Off unless the owner asks;
   // call before open().
   void set_read_tap_config(bool on) { read_tap_config_ = on; }
+  // Housekeeping without its 0x41s (the rest unchanged).
+  void set_send_41(bool on) { send_41_ = on; }
   // Automatic discovery (discovery_policy.h): false lets the window close,
   // as the CCA does with every expected optimizer found. The owner's switch
   // (request_discovery) still wins: renewed only when both want it.
@@ -473,6 +475,7 @@ class MasterCore {
   bool bench_, startup_;
   bool housekeeping_on_;
   bool read_tap_config_ = false;
+  bool send_41_ = true;
   std::vector<esphome::tigo_monitor::master::Learned41::Entry> learned_;
   Targets targets_;
   TapTargets tap_targets_;

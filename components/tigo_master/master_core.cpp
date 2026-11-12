@@ -1117,7 +1117,7 @@ void MasterCore::tick_(uint32_t now_ms) {
       // an optimizer onto the wrong one. A node that gets none keeps its TAP
       // (owner's analysis, 2026-11-10). Rebuilt after every herd, so a TAP
       // taken on later turns them off on the first too.
-      plan.send_41 = housekeeping_on_ && !several_();
+      plan.send_41 = housekeeping_on_ && send_41_ && !several_();
       plan.bring_up_reads = t.readdressed;
       // Marked sent when it goes out, below: an opening dropped before it got
       // there (the TAP lost) plans it again.
@@ -1129,6 +1129,8 @@ void MasterCore::tick_(uint32_t now_ms) {
       t.targets_at_ms = now_ms - TARGETS_EVERY_MS;
       if (housekeeping_on_ && several_())
         LOGI("bus master: TAP %04X housekeeping on, without 0x41s: more than one TAP", t.id);
+      else if (housekeeping_on_ && !send_41_)
+        LOGI("bus master: housekeeping on, without 0x41s: turned off in the settings");
       else if (housekeeping_on_)
         LOGI("bus master: housekeeping on: %zu learned 0x41s%s", learned_.size(),
              learned_.empty() ? " (none heard: using the built-in content)" : "");

@@ -76,6 +76,7 @@ class BusMaster {
     core_.set_discovery(renew, std::move(saved));
   }
   void set_read_tap_config(bool on) { core_.set_read_tap_config(on); }
+  void set_send_41(bool on) { core_.set_send_41(on); }
   void set_table_writes(bool on) { core_.set_table_writes(on); }
   void set_table_saved(esphome::tigo_master::MasterCore::TableSaved saved, const esphome::tigo_monitor::master::Bytes &mac,
                        const std::vector<esphome::tigo_monitor::master::TableRecord> *resume) {

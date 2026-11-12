@@ -375,6 +375,7 @@ int main(int argc, char **argv) {
       m->set_pv(pv.state(), [&pv](const PvState &s) { pv.save(s); }, pv.unreadable());
       m->set_discovery(discovery.renew(), [&discovery](bool renew) { discovery.save(renew); });
       m->set_read_tap_config(settings.master_read_tap_config);
+      m->set_send_41(settings.master_send_41);
       m->set_table_writes(settings.master_table_writes);
       // A herd's TAPs, saved so each gets its id back next time.
       m->set_adopt_taps(settings.master_adopt_taps, [&tap_store](const std::vector<BusMaster::TapEntry> &taps) {
@@ -778,6 +779,7 @@ int main(int argc, char **argv) {
                         fresh.master_queries != settings.master_queries ||
                         fresh.master_optimizer_writes != settings.master_optimizer_writes ||
                         fresh.master_read_tap_config != settings.master_read_tap_config ||
+                        fresh.master_send_41 != settings.master_send_41 ||
                         fresh.master_table_writes != settings.master_table_writes ||
                         fresh.master_adopt_taps != settings.master_adopt_taps;
         if (fresh.web_port != settings.web_port) LOGI("web: the new port takes effect when the service restarts");

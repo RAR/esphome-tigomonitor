@@ -1973,6 +1973,7 @@ void HttpServer::routes_() {
                     {"master_housekeeping", s.master_housekeeping},
                     {"master_queries", s.master_queries},
                     {"master_read_tap_config", s.master_read_tap_config},
+                    {"master_send_41", s.master_send_41},
                     {"master_table_writes", s.master_table_writes},
                     {"master_adopt_taps", s.master_adopt_taps},
                     {"discovery_auto", s.discovery_auto},
@@ -2029,6 +2030,7 @@ void HttpServer::routes_() {
       if (j.contains("master_housekeeping")) s.master_housekeeping = j["master_housekeeping"].get<bool>();
       if (j.contains("master_queries")) s.master_queries = j["master_queries"].get<bool>();
       if (j.contains("master_read_tap_config")) s.master_read_tap_config = j["master_read_tap_config"].get<bool>();
+      if (j.contains("master_send_41")) s.master_send_41 = j["master_send_41"].get<bool>();
       if (j.contains("master_table_writes")) s.master_table_writes = j["master_table_writes"].get<bool>();
       if (j.contains("master_adopt_taps")) s.master_adopt_taps = j["master_adopt_taps"].get<bool>();
       if (j.contains("discovery_auto")) s.discovery_auto = j["discovery_auto"].get<bool>();
