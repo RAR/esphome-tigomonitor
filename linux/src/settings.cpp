@@ -46,6 +46,8 @@ Settings load_settings(const std::string &path) {
   get(j, "master_read_tap_config", s.master_read_tap_config);
   get(j, "master_send_41", s.master_send_41);
   get(j, "dangerous_options", s.dangerous_options);
+  get(j, "pgw_rule", s.pgw_rule);
+  get(j, "pgw_panels", s.pgw_panels);
   get(j, "master_table_writes", s.master_table_writes);
   get(j, "master_adopt_taps", s.master_adopt_taps);
   get(j, "discovery_auto", s.discovery_auto);
@@ -86,6 +88,7 @@ Settings load_settings(const std::string &path) {
   if (s.web_port < 0 || s.web_port > 65535) s.web_port = 0;
   if (s.web_username.empty()) s.web_username = "admin";
   if (s.bus_role != "master" && s.bus_role != "standby") s.bus_role = "listen";
+  if (s.pgw_rule != "roof") s.pgw_rule = "random";
   if (!standby_takeover_ok(s.standby_takeover_s)) s.standby_takeover_s = 3;
   if (s.discovery_morning_min < 0 || s.discovery_morning_min > 720) s.discovery_morning_min = 120;
   if (!gateway_id_ok(s.gateway_id)) s.gateway_id = 0x1201;
@@ -110,6 +113,8 @@ static json to_json(const Settings &s) {
       {"master_read_tap_config", s.master_read_tap_config},
       {"master_send_41", s.master_send_41},
       {"dangerous_options", s.dangerous_options},
+      {"pgw_rule", s.pgw_rule},
+      {"pgw_panels", s.pgw_panels},
       {"master_table_writes", s.master_table_writes},
       {"master_adopt_taps", s.master_adopt_taps},
       {"discovery_auto", s.discovery_auto},

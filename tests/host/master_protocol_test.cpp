@@ -1287,6 +1287,67 @@ static void test_housekeeping() {
   CHECK(r.size() == 1 && r[0].payload == Bytes{0x01});
 }
 
+// With a PGW pool (pgw.h): streams 01 and 02 take turns through the TAP and
+// the pool, a step apart, and stream 04 through everyone else in order, each
+// holder for 480 s and kept alive every minute, as the CCA's are.
+static void test_housekeeping_pool() {
+  Learned41 l;
+  l.on_frame(cca41(1, 0x0027, 0x01, 0x21));
+  l.on_frame(cca41(1, 0x0006, 0x02, 0x22));
+  l.on_frame(cca41(1, 0x0009, 0x04, 0x24));
+  std::vector<uint16_t> roster;
+  for (uint16_t n = 0x02; n <= 0x29; n++) roster.push_back(n);
+  const std::vector<uint16_t> pool = {0x26, 0x27, 0x28, 0x29};
+  const std::vector<uint16_t> turn = {0x0001, 0x26, 0x27, 0x28, 0x29};
+  uint8_t seq = 0;
+  Housekeeping hk(l.entries(), 1000, false, 7);
+  hk.set_targets(roster);
+  hk.set_pool(pool);
+  auto tunnels = [&](uint32_t at) {
+    std::vector<Request> t;
+    for (const Request &q : drain(hk, at, seq))
+      if (q.cmd == CMD_TUNNEL) t.push_back(q);
+    return t;
+  };
+  // Slot 0: 02 to the first of the pool, 01 to the TAP, 04 to the first of the rest.
+  std::vector<Request> r = tunnels(1000 + 15000);
+  CHECK(r.size() == 3);
+  if (r.size() == 3) {
+    CHECK(stream_of(r[0]) == 0x02 && tuid_of(r[0]) == 0x26);
+    CHECK(stream_of(r[1]) == 0x01 && tuid_of(r[1]) == 0x0001);
+    CHECK(stream_of(r[2]) == 0x04 && tuid_of(r[2]) == 0x02);
+    CHECK(r[0].payload == tunnel_request(SUB_HOUSEKEEPING, r[0].payload[4], args41(0x26, 0x02, 0x22)));
+  }
+  // Kept alive: the same three a minute later, and still at 7 minutes.
+  for (uint32_t at : {1000u + 75000u, 1000u + 7 * 60000u + 15000u}) {
+    r = tunnels(at);
+    CHECK(r.size() == 3 && tuid_of(r[0]) == 0x26 && tuid_of(r[1]) == 0x0001 && tuid_of(r[2]) == 0x02);
+  }
+  // Each 480 s, the next: 01 and 02 never on the same node, both in the
+  // turn; 04 visits all 36 others once in 36 slots, never one of the pool.
+  std::vector<uint16_t> seen04 = {0x02};  // slot 0, seen above
+  for (uint32_t slot = 1; slot < 36; slot++) {
+    r = tunnels(1000 + slot * Housekeeping::POOL_SLOT_MS + 15000);
+    CHECK(r.size() == 3);
+    if (r.size() != 3) break;
+    CHECK(tuid_of(r[1]) == turn[slot % 5] && tuid_of(r[0]) == turn[(slot + 1) % 5]);
+    CHECK(tuid_of(r[0]) != tuid_of(r[1]));
+    CHECK(std::find(pool.begin(), pool.end(), tuid_of(r[2])) == pool.end());
+    seen04.push_back(tuid_of(r[2]));
+    for (const Request &q : r) CHECK(classify_request(q.cmd, q.payload) == Allow::yes);
+  }
+  std::sort(seen04.begin(), seen04.end());
+  std::vector<uint16_t> others;
+  for (uint16_t n : roster)
+    if (std::find(pool.begin(), pool.end(), n) == pool.end()) others.push_back(n);
+  CHECK(seen04 == others);
+  // No pool any more: back to the random draw over the whole roster.
+  hk.set_pool({});
+  r = tunnels(1000 + 40 * Housekeeping::POOL_SLOT_MS + 15000);
+  CHECK(r.size() == 3);
+  for (const Request &q : r) CHECK(tuid_of(q) == 0x0001 || (tuid_of(q) >= 0x02 && tuid_of(q) <= 0x29));
+}
+
 static void test_next_request_housekeeping() {
   Learned41 l;
   l.on_frame(cca41(1, 0x0001, 0x01));
@@ -1631,6 +1692,7 @@ int main() {
   test_housekeeping_allow();
   test_learner();
   test_housekeeping();
+  test_housekeeping_pool();
   test_tap_reconfiguring_frames_are_never_sent();
   test_discovery_window_counts();
   test_no_renewal_for_an_empty_table();

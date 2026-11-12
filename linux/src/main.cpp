@@ -20,7 +20,9 @@
 #include "mqtt_publisher.h"
 #include "serial_port.h"
 #include "settings.h"
+#include "pgw.h"
 
+#include <map>
 #include <atomic>
 #include <random>
 #include <chrono>
@@ -372,6 +374,48 @@ int main(int argc, char **argv) {
             tuids.push_back(static_cast<uint16_t>(strtoul(kv.first.c_str(), nullptr, 16)));
         return tuids;
       });
+      if (settings.pgw_rule == "roof") {
+        // The PGW pool per TAP (pgw.h): from the roof drawn under Topology >
+        // Roof, else today's worst loss; pgw_panels overrides. Logged when it
+        // changes.
+        auto last_pool = std::make_shared<std::map<uint16_t, std::string>>();
+        m->set_tap_pool([&monitor, state_dir, named = settings.pgw_panels, last_pool](uint16_t tap) {
+          Roof roof;
+          std::ifstream in(state_dir + "/roof.json");
+          if (in) {
+            nlohmann::json j = nlohmann::json::parse(in, nullptr, false);
+            if (j.is_discarded() || !roof_from_json(j, roof).empty()) roof = Roof();
+          }
+          std::map<std::string, std::string> names;
+          for (const Panel &p : monitor.panels())
+            names[p.addr] = !p.label.empty() ? p.label : p.addr;
+          std::vector<PgwMember> members;
+          int64_t since = static_cast<int64_t>(time(nullptr)) - 86400;
+          auto links = monitor.links();
+          for (const auto &kv : links.links()) {
+            if (kv.second.tap != tap || kv.second.last_heard_s < since) continue;
+            uint32_t all = kv.second.reports_today + kv.second.lost_today;
+            members.push_back({static_cast<uint16_t>(strtoul(kv.first.c_str(), nullptr, 16)),
+                               names.count(kv.first) ? names[kv.first] : kv.first,
+                               all >= 100 ? static_cast<double>(kv.second.lost_today) / all : -1.0});
+          }
+          char id[5];
+          snprintf(id, sizeof(id), "%04X", tap);
+          std::string why;
+          std::vector<uint16_t> pool = pgw_pool(roof, id, members, named, why);
+          std::string text = why + ":";
+          for (uint16_t t : pool) {
+            char a[5];
+            snprintf(a, sizeof(a), "%04X", t);
+            text += " " + (names.count(a) ? names[a] : std::string(a));
+          }
+          if ((*last_pool)[tap] != text) {
+            (*last_pool)[tap] = text;
+            LOGI("bus master: TAP %04X PGW pool (%s)", tap, text.c_str());
+          }
+          return pool;
+        });
+      }
       m->set_pv(pv.state(), [&pv](const PvState &s) { pv.save(s); }, pv.unreadable());
       m->set_discovery(discovery.renew(), [&discovery](bool renew) { discovery.save(renew); });
       m->set_read_tap_config(settings.master_read_tap_config);
@@ -780,6 +824,7 @@ int main(int argc, char **argv) {
                         fresh.master_optimizer_writes != settings.master_optimizer_writes ||
                         fresh.master_read_tap_config != settings.master_read_tap_config ||
                         fresh.master_send_41 != settings.master_send_41 ||
+                        fresh.pgw_rule != settings.pgw_rule || fresh.pgw_panels != settings.pgw_panels ||
                         fresh.master_table_writes != settings.master_table_writes ||
                         fresh.master_adopt_taps != settings.master_adopt_taps;
         if (fresh.web_port != settings.web_port) LOGI("web: the new port takes effect when the service restarts");

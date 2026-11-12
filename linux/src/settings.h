@@ -4,6 +4,7 @@
 // them; anything missing from the file takes the default below.
 
 #include <string>
+#include <vector>
 
 namespace tigod {
 
@@ -61,6 +62,13 @@ struct Settings {
   // report period). Set by editing settings.json only: the settings API
   // reports it and never changes it, so the web UI can't turn it on.
   bool dangerous_options = false;
+  // Which optimizers the 0x41 PGW streams 01 and 02 go to (pgw.h):
+  // "random", any heard optimizer in turn, as before; "roof", the far end
+  // of the roof from each TAP (or the worst loss, with no roof drawn).
+  // pgw_panels names them outright, by panel name or address. Only with
+  // master_send_41 on.
+  std::string pgw_rule = "random";
+  std::vector<std::string> pgw_panels;
   // The second switch, Allow changes to the TAPs: off by default.
   bool master_table_writes = false;      // let the owner's add write a record to the TAP's table
   // Set and cleared by the Add a TAP guide, not a setting of its own.

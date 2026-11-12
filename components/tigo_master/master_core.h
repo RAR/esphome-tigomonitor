@@ -246,6 +246,9 @@ class MasterCore {
   // or without it, targets' (all of them).
   using TapTargets = std::function<std::vector<uint16_t>(uint16_t tap)>;
   void set_tap_targets(TapTargets t) { tap_targets_ = std::move(t); }
+  // The PGW pool for one TAP (pgw.h), asked with its targets each minute;
+  // unset or empty, the 0x41 streams draw at random as before.
+  void set_tap_pool(TapTargets p) { tap_pool_ = std::move(p); }
   // master_adopt_taps: a TAP heard at the factory address that isn't one of
   // these starts the CCA's herd (tigo_master.h's Herd), which moves every
   // TAP on the bus, gives each its saved id or a new one, and saves the list
@@ -479,6 +482,7 @@ class MasterCore {
   std::vector<esphome::tigo_monitor::master::Learned41::Entry> learned_;
   Targets targets_;
   TapTargets tap_targets_;
+  TapTargets tap_pool_;
   bool queries_on_, writes_on_;
   // The TAPs, in polling order; the vector itself changes only under mu_.
   std::vector<std::unique_ptr<Tap>> taps_;

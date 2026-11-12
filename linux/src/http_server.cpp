@@ -2013,6 +2013,8 @@ void HttpServer::routes_() {
                     {"master_read_tap_config", s.master_read_tap_config},
                     {"master_send_41", s.master_send_41},
                     {"dangerous_options", s.dangerous_options},  // settings.json only: a POST never changes it
+                    {"pgw_rule", s.pgw_rule},
+                    {"pgw_panels", s.pgw_panels},
                     {"master_table_writes", s.master_table_writes},
                     {"master_adopt_taps", s.master_adopt_taps},
                     {"discovery_auto", s.discovery_auto},
@@ -2070,6 +2072,8 @@ void HttpServer::routes_() {
       if (j.contains("master_queries")) s.master_queries = j["master_queries"].get<bool>();
       if (j.contains("master_read_tap_config")) s.master_read_tap_config = j["master_read_tap_config"].get<bool>();
       if (j.contains("master_send_41")) s.master_send_41 = j["master_send_41"].get<bool>();
+      if (j.contains("pgw_rule")) s.pgw_rule = j["pgw_rule"].get<std::string>();
+      if (j.contains("pgw_panels")) s.pgw_panels = j["pgw_panels"].get<std::vector<std::string>>();
       if (j.contains("master_table_writes")) s.master_table_writes = j["master_table_writes"].get<bool>();
       if (j.contains("master_adopt_taps")) s.master_adopt_taps = j["master_adopt_taps"].get<bool>();
       if (j.contains("discovery_auto")) s.discovery_auto = j["discovery_auto"].get<bool>();
@@ -2132,6 +2136,8 @@ void HttpServer::routes_() {
       std::string tls_err = TlsCerts::check(s.tls_cert, s.tls_key);
       if (!tls_err.empty()) err = "The certificate did not load: " + tls_err + ".";
     }
+    if (err.empty() && s.pgw_rule != "random" && s.pgw_rule != "roof") err = "pgw_rule is \"random\" or \"roof\".";
+    if (err.empty() && s.pgw_panels.size() > 8) err = "pgw_panels names at most 8 panels.";
     if (err.empty() && (s.web_username.empty() || s.web_username.find(':') != std::string::npos))
       err = "The web UI username cannot be empty or contain a colon.";
     // Wildcards would make every publish fail, and an empty or slash-edged

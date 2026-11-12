@@ -32,3 +32,11 @@ if ! build/linux/roof_test >build/linux/roof_test.log 2>&1; then
   exit 1
 fi
 tail -1 build/linux/roof_test.log
+# The PGW pool rule (pgw.h), on top of the roof.
+g++ -std=c++17 -Wall -Wextra -I linux/src tests/host/pgw_test.cpp -o build/linux/pgw_test
+if ! build/linux/pgw_test >build/linux/pgw_test.log 2>&1; then
+  cat build/linux/pgw_test.log
+  echo "pgw_test failed" >&2
+  exit 1
+fi
+tail -1 build/linux/pgw_test.log

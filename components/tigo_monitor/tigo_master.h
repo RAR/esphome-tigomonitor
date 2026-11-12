@@ -569,6 +569,9 @@ class Housekeeping {
  public:
   static const uint32_t STREAM_EVERY_MS = 60000;
   static const uint32_t SLOT_MS = 600000;
+  // With a pool (set_pool), a holder keeps its stream this long, as the
+  // CCA's do (its PGW re-pick, 480 s; owner's analysis of its firmware).
+  static const uint32_t POOL_SLOT_MS = 480000;
   static const uint32_t SESSION_EVERY_MS = 3600000;
   // Streams 02, 01, 04 go out in that order, a few seconds apart, as the CCA's do.
   static constexpr uint8_t STREAMS[3] = {0x02, 0x01, 0x04};
@@ -627,6 +630,11 @@ class Housekeeping {
 
   // The optimizers to choose from: their Tuids. 0, 0x0001 and anything with
   // the high bit (a roster entry not yet joined) are left out.
+  // The PGW pool (pgw.h): streams 01 and 02 then take turns through the TAP
+  // and these, a step apart, and stream 04 through the other targets in
+  // order. Empty: each stream draws at random from all targets.
+  void set_pool(const std::vector<uint16_t> &tuids) { pool_ = tuids; }
+  const std::vector<uint16_t> &pool() const { return pool_; }
   void set_targets(const std::vector<uint16_t> &tuids) {
     targets_.clear();
     for (uint16_t t : tuids)
@@ -688,6 +696,15 @@ class Housekeeping {
     for (int i = 0; i < 3 && plan_.send_41; i++) {
       if (content_[i].empty() || static_cast<int32_t>(now_ms - next_ms_[i]) < 0) continue;
       next_ms_[i] = now_ms + STREAM_EVERY_MS;
+      if (!pool_.empty()) {
+        target_[i] = pool_target_(STREAMS[i], (now_ms - start_ms_) / POOL_SLOT_MS);
+        if (!target_[i]) continue;
+        Bytes args = {static_cast<uint8_t>(target_[i] >> 8), static_cast<uint8_t>(target_[i])};
+        args.insert(args.end(), content_[i].begin(), content_[i].end());
+        seq = next_seq(seq);
+        sent_41_++;
+        return {CMD_TUNNEL, tunnel_request(SUB_HOUSEKEEPING, seq, args)};
+      }
       uint32_t slot = (now_ms - start_ms_) / SLOT_MS;
       if (!picked_[i] || slot != slot_[i] || !target_[i]) {
         slot_[i] = slot;
@@ -777,6 +794,18 @@ class Housekeeping {
   }
 
   // The next target from this stream's shuffled pass, 0 if there are none.
+  uint16_t pool_target_(uint8_t stream, uint32_t slot) const {
+    if (stream != 0x04) {
+      std::vector<uint16_t> turn = {TAP_TUID};
+      turn.insert(turn.end(), pool_.begin(), pool_.end());
+      return turn[(slot + (stream == 0x02 ? 1 : 0)) % turn.size()];
+    }
+    std::vector<uint16_t> rest;
+    for (uint16_t t : targets_)
+      if (std::find(pool_.begin(), pool_.end(), t) == pool_.end()) rest.push_back(t);
+    std::sort(rest.begin(), rest.end());
+    return rest.empty() ? 0 : rest[slot % rest.size()];
+  }
   uint16_t draw_(int i) {
     for (int tries = 0; tries < 2; tries++) {
       while (!bag_[i].empty()) {
@@ -817,6 +846,7 @@ class Housekeeping {
   std::string version_;
   uint32_t rng_;
   std::vector<uint16_t> targets_;
+  std::vector<uint16_t> pool_;
   Bytes content_[3];
   std::vector<uint16_t> bag_[3];
   uint16_t target_[3] = {0, 0, 0};

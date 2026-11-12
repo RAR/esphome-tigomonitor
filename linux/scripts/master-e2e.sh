@@ -348,6 +348,22 @@ expect "shown in the settings" "$(api 18104 /api/settings | python3 -c 'import j
 kill $daemon; wait $daemon 2>/dev/null || true
 kill $tap; wait $tap 2>/dev/null || true
 
+# --- run 12p: the PGW pool, named: streams 01 and 02 only to the TAP and those ---
+mkdir -p "$out/state12p"
+cp "$out/state11/cca-0x41.json" "$out/state12p/"
+python3 linux/tools/mock_tap.py "$out/tap12p" --window 600 --nodes 44 --stats "$out/tap12p.json" &
+tap=$!
+sleep 0.5
+printf '{"bus_role": "master", "master_startup": false, "master_housekeeping": true, "master_queries": false, "master_optimizer_writes": false, "master_read_tap_config": false, "discovery_auto": false, "pgw_rule": "roof", "pgw_panels": ["0003", "0004"], "serial_port": "%s", "gateway_id": 4609, "web_port": 18105}\n' \
+  "$PWD/$out/tap12p" > "$out/state12p/settings.json"
+build/linux/tigomonitord --state-dir "$out/state12p" --web-dir components/tigo_server/web 2> "$out/daemon12p.log" &
+daemon=$!
+for _ in $(seq 60); do [ -f "$out/tap12p.json" ] && [ "$(stat "$out/tap12p.json" "len(d['housekeeping'])")" -ge 3 ] && break; sleep 0.5; done
+expect "pool: 01 and 02 to the TAP or the named, 04 elsewhere" "$(stat "$out/tap12p.json" "sorted({(h['args'][10:12], h['args'][:4] in ('0001','0003','0004')) for h in d['housekeeping']})")" "[('01', True), ('02', True), ('04', False)]"
+expect "logged as named" "$(grep -c 'PGW pool (named: 0003 0004)' "$out/daemon12p.log")" 1
+kill $daemon; wait $daemon 2>/dev/null || true
+kill $tap; wait $tap 2>/dev/null || true
+
 # --- run 13: housekeeping on with nothing learned sends the built-in 0x41 content ---
 mkdir -p "$out/state13"
 python3 linux/tools/mock_tap.py "$out/tap13" --window 600 --nodes 44 --stats "$out/tap13.json" &

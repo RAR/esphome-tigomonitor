@@ -1146,6 +1146,7 @@ void MasterCore::tick_(uint32_t now_ms) {
       std::vector<uint16_t> list = own ? tap_targets_(t.id) : targets_();
       t.targets_empty = list.empty();
       t.housekeeping->set_targets(list);
+      if (tap_pool_) t.housekeeping->set_pool(tap_pool_(t.id));
       t.targets_at_ms = now_ms;
     }
   }
