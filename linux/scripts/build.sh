@@ -24,3 +24,11 @@ if ! build/linux/master_core_test >build/linux/master_core_test.log 2>&1; then
   exit 1
 fi
 tail -1 build/linux/master_core_test.log
+# The roof layout (Topology > Roof).
+g++ -std=c++17 -Wall -Wextra -I linux/src tests/host/roof_test.cpp -o build/linux/roof_test
+if ! build/linux/roof_test >build/linux/roof_test.log 2>&1; then
+  cat build/linux/roof_test.log
+  echo "roof_test failed" >&2
+  exit 1
+fi
+tail -1 build/linux/roof_test.log
