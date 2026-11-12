@@ -83,6 +83,8 @@ jobs:
         run: docker run --rm -v "$PWD":/src -w /src tigod-dev linux/scripts/mesh-e2e.sh
       - name: A slow broker name, looked up off the main loop
         run: docker run --rm -v "$PWD":/src -w /src tigod-dev linux/scripts/mqtt-lookup-e2e.sh
+      - name: The web UI's sign-in, sessions and lockout
+        run: docker run --rm -v "$PWD":/src -w /src tigod-dev linux/scripts/login-e2e.sh
       - name: HTTPS, with test certificates
         run: docker run --rm -v "$PWD":/src -w /src tigod-dev linux/scripts/https-e2e.sh
       - name: HTTPS in Docker Compose, with a stand-in for certbot

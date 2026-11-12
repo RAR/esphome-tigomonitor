@@ -20,6 +20,7 @@
 #include <set>
 #include <arpa/inet.h>
 #include <net/if.h>
+#include <random>
 #include <sstream>
 #include <sys/statvfs.h>
 #include <sys/sysinfo.h>
@@ -398,17 +399,53 @@ void HttpServer::routes_() {
       return httplib::Server::HandlerResponse::Handled;
     }
     Settings s = ctx_.current_settings();
-    // Health is for a monitor to poll, so it needs no login; it tells only
-    // whether all is well, and what is not.
-    if (!s.web_password.empty() && !(req.method == "GET" && req.path == "/api/health") &&
-        !same_secret(req.get_header_value("Authorization"),
-                     "Basic " + httplib::detail::base64_encode(s.web_username + ":" + s.web_password))) {
-      res.status = 401;
-      res.set_header("WWW-Authenticate", "Basic realm=\"Tigo Monitor\", charset=\"UTF-8\"");
-      res.set_content("Log in with the web UI username and password set under Tools.", "text/plain");
+    // Open without signing in: health, for a monitor to poll (it tells only
+    // whether all is well, and what is not); the page itself, which holds
+    // nothing of the system's and shows the sign-in when the API answers 401;
+    // and signing in and out.
+    bool open = (req.method == "GET" && (req.path == "/api/health" || req.path == "/" || req.path == "/app" ||
+                                         req.path == "/favicon.ico")) ||
+                (req.method == "POST" && (req.path == "/api/login" || req.path == "/api/logout"));
+    if (!s.web_password.empty() && !open && !signed_in_(req, s)) {
+      // No WWW-Authenticate: that is what opened the browser's own login
+      // popup. The page asks instead.
+      send_json(res, {{"error", "Sign in first."}, {"sign_in", true}}, 401);
       return httplib::Server::HandlerResponse::Handled;
     }
     return httplib::Server::HandlerResponse::Unhandled;
+  });
+
+  // Signing in: {"username", "password"} -> a session cookie. Five wrong in
+  // 15 minutes from one address lock it out for 15 (web_session.h).
+  svr.Post("/api/login", [this](const httplib::Request &req, httplib::Response &res) {
+    Settings s = ctx_.current_settings();
+    if (s.web_password.empty()) {
+      send_json(res, {{"signed_in", true}, {"error", "No password is set: nothing to sign in to."}}, 400);
+      return;
+    }
+    int64_t now = unix_now_s();
+    if (sessions_.locked(req.remote_addr, now)) {
+      send_json(res, {{"error", "Too many wrong passwords. Wait 15 minutes, then try again."}}, 429);
+      return;
+    }
+    json j = json::parse(req.body, nullptr, false);
+    std::string user = !j.is_discarded() && j.is_object() && j.value("username", json()).is_string() ? j["username"].get<std::string>() : "";
+    std::string pass = !j.is_discarded() && j.is_object() && j.value("password", json()).is_string() ? j["password"].get<std::string>() : "";
+    if (!same_secret(user + ":" + pass, s.web_username + ":" + s.web_password)) {
+      sessions_.failed(req.remote_addr, now, user + ":" + pass);
+      send_json(res, {{"error", "That username and password don't match."}}, 401);
+      return;
+    }
+    sessions_.succeeded(req.remote_addr);
+    std::random_device rd;
+    std::string token = sessions_.create(now, [&rd]() { return static_cast<uint8_t>(rd()); });
+    res.set_header("Set-Cookie", session_cookie_(token));
+    send_json(res, {{"signed_in", true}});
+  });
+  svr.Post("/api/logout", [this](const httplib::Request &req, httplib::Response &res) {
+    sessions_.drop(cookie_value(req.get_header_value("Cookie"), "tm_session"));
+    res.set_header("Set-Cookie", session_cookie_(""));
+    send_json(res, {{"signed_in", false}});
   });
 
   auto app = [this](const httplib::Request &, httplib::Response &res) {
@@ -1895,6 +1932,7 @@ void HttpServer::routes_() {
     // The file, not the running copy: a save the main loop has not applied
     // yet would otherwise be overwritten.
     Settings s = load_settings(ctx_.settings_path);
+    const std::string login_before = s.web_username + ":" + s.web_password;
     std::string err;
     try {
       if (j.contains("serial_port")) s.serial_port = j["serial_port"].get<std::string>();
@@ -1987,8 +2025,36 @@ void HttpServer::routes_() {
       return;
     }
     ctx_.settings_changed = true;
+    // A new login ends every session; the browser that set it gets a new one.
+    if (s.web_username + ":" + s.web_password != login_before) {
+      bool had = sessions_.valid(cookie_value(req.get_header_value("Cookie"), "tm_session"), unix_now_s());
+      sessions_.clear();
+      if (had && !s.web_password.empty()) {
+        std::random_device rd;
+        res.set_header("Set-Cookie", session_cookie_(sessions_.create(unix_now_s(), [&rd]() { return static_cast<uint8_t>(rd()); })));
+      }
+    }
     send_json(res, {{"saved", true}});
   });
+}
+
+bool HttpServer::signed_in_(const httplib::Request &req, const Settings &s) {
+  int64_t now = unix_now_s();
+  if (sessions_.valid(cookie_value(req.get_header_value("Cookie"), "tm_session"), now)) return true;
+  std::string given = req.get_header_value("Authorization");
+  if (given.rfind("Basic ", 0) != 0) return false;
+  // Counted with the sign-in form's: otherwise it would be the way round the lockout.
+  if (sessions_.locked(req.remote_addr, now)) return false;
+  if (same_secret(given, "Basic " + httplib::detail::base64_encode(s.web_username + ":" + s.web_password))) return true;
+  sessions_.failed(req.remote_addr, now, given);
+  return false;
+}
+
+std::string HttpServer::session_cookie_(const std::string &token) const {
+  std::string c = "tm_session=" + token + "; Path=/; HttpOnly; SameSite=Strict; Max-Age=" +
+                  (token.empty() ? std::string("0") : std::to_string(WebSessions::LIFETIME_S));
+  if (ctx_.tls) c += "; Secure";
+  return c;
 }
 
 int health_check(int port) {
