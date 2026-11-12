@@ -262,6 +262,25 @@ bool MasterCore::request_provision(const master::Bytes &tap_mac, const master::R
   return true;
 }
 
+bool MasterCore::request_period(const master::Bytes &tap_mac, uint8_t code, bool dry_run, std::string &why) {
+  std::lock_guard<std::mutex> lock(mu_);
+  uint16_t tap = 0;
+  std::string want = master::mac_hex(tap_mac);
+  for (const auto &t : taps_)
+    if (!t->st.mac.empty() && t->st.mac == want) tap = t->id;
+  if (!bench_ && !table_writes_on_ && !dry_run)
+    why = "setting a TAP's report period needs Allow changes to the TAPs (Settings > Bus)";
+  else if (!master::period_code_hyperslots(code))
+    why = "the period code is 1 to 11 (1 s to 30 s)";
+  else if (tap_mac.size() != 8 || !tap)
+    why = "no TAP on this bus has said that MAC";
+  else if (table_refusal_(true, tap, why))
+    return false;
+  if (!why.empty()) return false;
+  start_table_job_(std::make_unique<master::PeriodJob>(tap_mac, code, dry_run), tap);
+  return true;
+}
+
 bool MasterCore::request_table_remove(const master::Bytes &mac, bool dry_run, std::string &why, uint16_t tap) {
   return request_table_remove(std::vector<master::Bytes>{mac}, dry_run, why, tap);
 }
@@ -527,11 +546,12 @@ void MasterCore::settle_table_job_(uint32_t now_ms) {
   if (!done) return;
   // Giving a TAP its radio settings touches no table: nothing to save,
   // watch or follow.
-  if (std::string(table_job_->kind()) == "provision") {
+  if (std::string(table_job_->kind()) == "provision" || std::string(table_job_->kind()) == "period") {
+    const char *what = std::string(table_job_->kind()) == "period" ? "report period" : "radio settings";
     if (table_job_->ok())
-      LOGI("bus master: radio settings: %s", table_job_->message().c_str());
+      LOGI("bus master: %s: %s", what, table_job_->message().c_str());
     else
-      LOGW("bus master: radio settings: stopped: %s", table_job_->message().c_str());
+      LOGW("bus master: %s: stopped: %s", what, table_job_->message().c_str());
     table_job_.reset();
     return;
   }
@@ -1147,7 +1167,11 @@ void MasterCore::tick_(uint32_t now_ms) {
       for (auto &x : taps_) x->join_watch.pause();  // their reads would straddle the change
       bool add = std::string(table_job_->kind()) == "add";
       std::string kind = table_job_->kind();
-      if (kind == "provision")
+      if (kind == "period")
+        LOGW("bus master: report period: %ssetting TAP %04X to %s on both", table_job_->dry_run() ? "a dry run of " : "",
+             table_tap_,
+             master::period_code_text(static_cast<master::PeriodJob *>(table_job_.get())->code()).c_str());
+      else if (kind == "provision")
         LOGW("bus master: radio settings: %sgiving TAP %04X %s", table_job_->dry_run() ? "a dry run of " : "",
              table_tap_, static_cast<master::ProvisionJob *>(table_job_.get())->block().describe().c_str());
       else if (several_())

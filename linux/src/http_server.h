@@ -97,6 +97,10 @@ struct HttpContext {
   // Bench only: ask one optimizer a read-shaped text (POST /api/master/query);
   // 200, or 409 with why.
   std::function<int(uint16_t node, const std::string &text, std::string &why)> request_ask;
+  // Sets one TAP's report period (tap_config.h): its MAC, the code (1-11),
+  // dry run. 200, or 409 with why.
+  std::function<int(const esphome::tigo_monitor::master::Bytes &tap_mac, uint8_t code, bool dry_run, std::string &why)>
+      request_period;
 };
 
 // tigomonitord --health-check PORT, the container's HEALTHCHECK: GETs

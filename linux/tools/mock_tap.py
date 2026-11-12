@@ -33,7 +33,7 @@ them, as on RS485. The stats count the frames that came in on each link.
 It also plays the rest of the CCA's dialogue, as the roof TAP answered it:
 a SET_ID_BY_MAC away from the id the TAP was first given, then a RESET
 broadcast, brings it back at that first id after ~5 s of silence; VERSION,
-0x0E02 and tunnel 0x0D get fixed (invented) replies; tunnel 0x22 is acked;
+0x0E02 and tunnel 0x0D get fixed (invented) replies; tunnel 0x22 reads and writes a report period (3, as the roof's);
 tunnel 0x26 pages the node table from the id asked; tunnel 0x29 takes 1-10
 records (acked --table-ack), a new one (bit 15) listed not joined until
 --join-after s; tunnel 0x2B BA BE erases the table; and tunnel 0x06
@@ -170,6 +170,8 @@ def main():
     cfg_saved = cfg_ram
     stats['cfg_extra'] = cfg_ram[31:41].hex() if a.cfg_size == 46 else ''  # the 46-byte form's 10 unexplained bytes
     stats['cfg_writes'] = []  # channel and PAN of each write, never the key
+    stats['period_writes'] = []  # tunnel 0x22 writes, 01 <setting> <code>
+    period = [3, 3]  # the report period codes, as the roof TAP answers
     stats['cfg_saves'] = 0
     stats['unicast_resets'] = 0
     needs_w255 = {panels[0][1]} if panels else set()
@@ -350,9 +352,13 @@ def main():
                     stats['cfg_extra'] = cfg_ram[31:41].hex()
                 stats['cfg_writes'].append({'channel': cfg_ram[1], 'pan': f'{cfg_ram[2]:02X}{cfg_ram[3]:02X}'})
                 send(encode(addr | 0x8000, 0x0B10, bytes([0x00, 0x0E, 0x00, 0x0E, p[4]]) + cfg_ram + b'\x00'))
-            elif cmd == 0x0B0F and len(p) == 7 and p[3] == 0x22:  # empty broadcast, acked
+            elif cmd == 0x0B0F and len(p) == 7 and p[3] == 0x22:  # a read of a report period setting
                 stats['broadcast'].append(p[5:].hex())
-                send(encode(addr | 0x8000, 0x0B10, bytes([0x00, 0x0E, 0x00, 0x23, p[4], 0x03])))
+                send(encode(addr | 0x8000, 0x0B10, bytes([0x00, 0x0E, 0x00, 0x23, p[4], period[p[6] & 1]])))
+            elif cmd == 0x0B0F and len(p) == 8 and p[3] == 0x22 and p[5] == 0x01 and p[6] <= 1:  # its write
+                period[p[6]] = p[7]
+                stats['period_writes'].append(p[5:].hex())
+                send(encode(addr | 0x8000, 0x0B10, bytes([0x00, 0x0E, 0x00, 0x23, p[4], p[7]])))
             elif cmd == 0x0B0F and len(p) == 7 and p[3] == 0x26:  # a page of the node table, 12 at most
                 idx = p[5] << 8 | p[6]
                 stats['walk'].append(f'{idx:04X}')

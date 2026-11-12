@@ -362,6 +362,10 @@ class MasterCore {
   bool request_provision(const esphome::tigo_monitor::master::Bytes &tap_mac,
                          const esphome::tigo_monitor::master::RadioBlock &block, bool reset, bool dry_run,
                          std::string &why);
+  // Sets one TAP's report period (tap_config.h, PeriodJob): code 1-11, both
+  // settings, then read back. The radio settings' refusals.
+  bool request_period(const esphome::tigo_monitor::master::Bytes &tap_mac, uint8_t code, bool dry_run,
+                      std::string &why);
   // Stops waiting for an added optimizer to join (it stays listed, and
   // joins whenever the window is next open). False if it isn't waited for.
   bool request_table_stop_waiting(const esphome::tigo_monitor::master::Bytes &mac);

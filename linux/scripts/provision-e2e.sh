@@ -128,4 +128,26 @@ expect "and keeps the same channel and PAN" "$(stat "$out/live.json" "len(d['cfg
 expect "and the PAN stays out of /api/versions" "$(body GET 18404 /api/versions | python3 -c "import json,sys; print(any('pan' in r for r in json.load(sys.stdin).get('radios', [])))")" False
 stop_all
 
+# --- the report period (tunnel 0x22): the mock TAP starts at code 3, as the roof's ---
+start period 18405 false
+expect "a write refused without Allow changes to the TAPs" "$(body POST 18405 /api/master/taps/period "{\"mac\": \"$MAC\", \"code\": 4, \"dry_run\": false}" | python3 -c "import json,sys; print('Allow changes to the TAPs' in json.load(sys.stdin)['error'])")" True
+expect "a code out of range" "$(code POST 18405 /api/master/taps/period "{\"mac\": \"$MAC\", \"code\": 12}")" 400
+expect "a dry run starts" "$(code POST 18405 /api/master/taps/period "{\"mac\": \"$MAC\", \"code\": 4}")" 200
+finished 18405
+expect "and lists both writes" "$(edit 18405 "(e['kind'], e['ok'], e['dry_frames'], e['message'])")" \
+  "('period', True, ['22010004', '22010104'], 'dry run: would set the report period to 4 s on both (now 3 s and 3 s)')"
+expect "having written nothing" "$(stat "$out/period.json" "d['period_writes']")" "[]"
+expect "table writes on" "$(code POST 18405 /api/settings '{"master_table_writes": true}')" 200
+sleep 3  # the settings apply on the bus thread
+expect "the write starts" "$(code POST 18405 /api/master/taps/period "{\"mac\": \"$MAC\", \"code\": 4, \"dry_run\": false}")" 200
+finished 18405
+expect "both written and read back" "$(edit 18405 "(e['ok'], e['message'])")" "(True, 'report period 4 s on both (was 3 s and 3 s)')"
+expect "the two writes, nothing else" "$(stat "$out/period.json" "d['period_writes']")" "['010004', '010104']"
+expect "logged" "$(grep -c 'report period: report period 4 s on both' "$out/period.log")" 1
+expect "the same again writes nothing" "$(code POST 18405 /api/master/taps/period "{\"mac\": \"$MAC\", \"code\": 4, \"dry_run\": false}")" 200
+finished 18405
+expect "already set" "$(edit 18405 "e['message']")" "the report period is already 4 s on both: nothing written"
+expect "still two writes" "$(stat "$out/period.json" "len(d['period_writes'])")" 2
+stop_all
+
 [ $fail = 0 ] && echo "provision e2e passed" || { echo "provision e2e FAILED; see $out/"; exit 1; }

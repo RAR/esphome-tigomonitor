@@ -1867,8 +1867,12 @@ inline Allow classify_request(uint16_t cmd, const Bytes &payload) {
       if (!args.empty() && args[0] != 0x00) return Allow::never;
       return args == Bytes{0x00, 0x00} || args == Bytes{0x00, 0x01} ? Allow::startup_only : Allow::bench_only;
     case 0x22:
-      // Empty, to the broadcast address or the TAP. With data after the node
-      // id it is what taptap saw an older CCA use for "PV off": never.
+      // The TAP's report period (tap_config.h): the reads, 00 00 and 00 01,
+      // as the CCA sends them. The write, 01 <setting 0 or 1> <code 1-11>,
+      // only as the owner's change (PeriodJob). Any other shape with data,
+      // the channel scan's code 12 among them, never.
+      if (args.size() == 3 && args[0] == 0x01 && args[1] <= 0x01 && args[2] >= 1 && args[2] <= 11)
+        return Allow::provision;
       if (args.size() > 2) return Allow::never;
       return args == Bytes{0x00, 0x00} || args == Bytes{0x00, 0x01} ? Allow::yes : Allow::bench_only;
     default:

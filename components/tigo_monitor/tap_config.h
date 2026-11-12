@@ -473,6 +473,141 @@ class ProvisionJob : public TableJob {
   std::vector<std::string> dry_text_;
 };
 
+// ---- the report period: tunnel 0x22 -------------------------------------
+//
+// How often the TAP's optimizers report is not set by the map: on the
+// bench, a TAP moved to 14-2-2-1 still reported every 2 s. It is a setting
+// of its own (owner's analysis of the CCA's firmware, 2026-11-12), read
+// with 0x22 00 <setting> and written with 0x22 01 <setting> <code>, each
+// answered 0x23 <code>. There are two settings, 00 and 01; the CCA writes
+// both the same, and only where the TAP's code differs from the period its
+// map works out to. The code stands for a cycle in hyperslots (200 a
+// second): 1 to 11 below. Our housekeeping has always sent both reads, as
+// the CCA does; the roof TAP answers 3 on both, under the CCA (2026-10-27)
+// and under us, and the bench's H1 answers 2. The CCA's channel scan sends
+// the write form with code 12, which isn't a period and is never sent here.
+static const uint8_t SUB_PERIOD = 0x22;
+static const uint8_t SUB_PERIOD_REPLY = 0x23;
+
+inline int period_code_hyperslots(int code) {
+  static const int HS[] = {200, 400, 600, 800, 1000, 1200, 2000, 2400, 3000, 4000, 6000};
+  return code >= 1 && code <= 11 ? HS[code - 1] : 0;
+}
+inline std::string period_code_text(int code) {
+  int hs = period_code_hyperslots(code);
+  return hs ? std::to_string(hs / 200) + " s" : "code " + std::to_string(code);
+}
+
+// Setting one TAP's report period: read both settings, write each that
+// differs from the code asked for, and read both back. Marked provision,
+// so it goes out under the same switch as the radio settings.
+class PeriodJob : public TableJob {
+ public:
+  enum class Step { read, write, check, done, failed };
+  static const uint32_t WAIT_MS = 2000;
+
+  PeriodJob(const Bytes &tap_mac, uint8_t code, bool dry_run) : TableJob(tap_mac, dry_run), code_(code) {}
+
+  Request due(uint32_t, uint8_t &seq) override {
+    if (finished() || waiting_) return {};
+    switch (step_) {
+      case Step::read:
+      case Step::check: return provision_(send_(SUB_PERIOD, {0x00, sel_}, WAIT_MS, seq));
+      case Step::write: return provision_(send_(SUB_PERIOD, {0x01, sel_, code_}, WAIT_MS, seq));
+      default: return {};
+    }
+  }
+
+  void on_reply(const Request &req, bool ok, const Frame &reply, uint32_t) override {
+    if (!take_(req)) return;
+    TunnelReply t;
+    int got = ok && reply.cmd == CMD_TUNNEL_REPLY && parse_tunnel_reply(reply.payload, t) && t.sub == SUB_PERIOD_REPLY &&
+                      !t.data.empty()
+                  ? t.data[0]
+                  : -1;
+    switch (step_) {
+      case Step::read:
+        if (got < 0) return fail_("the TAP didn't answer a read of its report period");
+        before_[sel_] = got;
+        if (sel_ == 0) {
+          sel_ = 1;
+          return;
+        }
+        if (before_[0] == code_ && before_[1] == code_)
+          return finish_("the report period is already " + period_code_text(code_) + " on both: nothing written");
+        if (dry_run_) {
+          for (uint8_t s : {0, 1})
+            if (before_[s] != code_) dry_frames_.push_back({SUB_PERIOD, 0x01, s, code_});
+          return finish_("dry run: would set the report period to " + period_code_text(code_) + " on both (now " +
+                         was_() + ")");
+        }
+        sel_ = before_[0] != code_ ? 0 : 1;
+        step_ = Step::write;
+        return;
+      case Step::write:
+        if (got < 0) return fail_("no answer to the write; read the TAP before trying again");
+        if (got != code_)
+          return fail_("the TAP answered the write with " + period_code_text(got) + ", not " + period_code_text(code_));
+        if (sel_ == 0 && before_[1] != code_) {
+          sel_ = 1;
+          return;
+        }
+        sel_ = 0;
+        step_ = Step::check;
+        return;
+      case Step::check:
+        if (got < 0) return fail_("the TAP didn't answer the check read");
+        if (got != code_)
+          return fail_("after the write the TAP reads " + period_code_text(got) + ", not " + period_code_text(code_));
+        if (sel_ == 0) {
+          sel_ = 1;
+          return;
+        }
+        return finish_("report period " + period_code_text(code_) + " on both (was " + was_() + ")");
+      default: return;
+    }
+  }
+
+  const char *kind() const override { return "period"; }
+  void abort(const std::string &why) override { fail_(why); }
+  bool finished() const override { return step_ == Step::done || step_ == Step::failed; }
+  bool ok() const override { return step_ == Step::done; }
+  const char *step_text() const override {
+    switch (step_) {
+      case Step::read: return "reading its report period";
+      case Step::write: return "writing";
+      case Step::check: return "checking";
+      case Step::done: return "done";
+      case Step::failed: return "stopped";
+    }
+    return "";
+  }
+  uint8_t code() const { return code_; }
+  int before(int sel) const { return sel == 0 || sel == 1 ? before_[sel] : -1; }
+
+ private:
+  static Request provision_(Request r) {
+    r.provision = true;
+    return r;
+  }
+  std::string was_() const { return period_code_text(before_[0]) + " and " + period_code_text(before_[1]); }
+  void fail_(const std::string &why) {
+    step_ = Step::failed;
+    message_ = why;
+    waiting_ = false;
+  }
+  void finish_(const std::string &what) {
+    step_ = Step::done;
+    message_ = what;
+    waiting_ = false;
+  }
+
+  uint8_t code_;
+  uint8_t sel_ = 0;
+  int before_[2] = {-1, -1};
+  Step step_ = Step::read;
+};
+
 }  // namespace master
 }  // namespace tigo_monitor
 }  // namespace esphome

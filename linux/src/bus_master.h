@@ -117,6 +117,10 @@ class BusMaster {
   bool request_ask(uint16_t node, const std::string &text, std::string &why) {
     return core_.request_ask(node, text, why);
   }
+  bool request_period(const esphome::tigo_monitor::master::Bytes &tap_mac, uint8_t code, bool dry_run,
+                      std::string &why) {
+    return core_.request_period(tap_mac, code, dry_run, why);
+  }
   bool request_provision(const esphome::tigo_monitor::master::Bytes &tap_mac,
                          const esphome::tigo_monitor::master::RadioBlock &block, bool reset, bool dry_run,
                          std::string &why) {

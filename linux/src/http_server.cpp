@@ -1779,6 +1779,36 @@ void HttpServer::routes_() {
   // two from every TAP heard), "pan": "1A2B" (optional: from this machine's
   // MAC, past any in use), "reset": false, "dry_run": true}; behind the web
   // password. A real one needs Allow changes to the TAPs, or master_bench.
+  // Pi-only: set one TAP's report period, tunnel 0x22 (tap_config.h):
+  // {"mac": the TAP's, "code": 1..11 (1 s..30 s), "dry_run": true by default}.
+  // Both settings are written where they differ, then read back. Behind the
+  // web password and, but for a dry run, Allow changes to the TAPs.
+  svr.Post("/api/master/taps/period", [this](const httplib::Request &req, httplib::Response &res) {
+    if (ctx_.current_settings().web_password.empty()) {
+      send_json(res, {{"error", "set a web password first"}}, 403);
+      return;
+    }
+    namespace mp = esphome::tigo_monitor::master;
+    json j = json::parse(req.body, nullptr, false);
+    mp::Bytes mac;
+    std::string h = !j.is_discarded() && j.is_object() && j.contains("mac") && j["mac"].is_string() ? j["mac"].get<std::string>() : "";
+    for (size_t i = 0; i + 1 < h.size() && h.size() == 16; i += 2) {
+      if (!isxdigit(static_cast<unsigned char>(h[i])) || !isxdigit(static_cast<unsigned char>(h[i + 1]))) break;
+      mac.push_back(static_cast<uint8_t>(std::stoul(h.substr(i, 2), nullptr, 16)));
+    }
+    int code = !j.is_discarded() && j.is_object() && j.contains("code") && j["code"].is_number_integer() ? j["code"].get<int>() : 0;
+    if (mac.size() != 8 || code < 1 || code > 11) {
+      send_json(res, {{"error", "expected {\"mac\": \"04C05B...\", \"code\": 1..11, \"dry_run\": true}"}}, 400);
+      return;
+    }
+    bool dry = j.value("dry_run", true);
+    std::string why;
+    int status = ctx_.request_period ? ctx_.request_period(mac, static_cast<uint8_t>(code), dry, why) : 409;
+    if (status == 200)
+      send_json(res, {{"started", true}, {"dry_run", dry}, {"code", code}, {"period", mp::period_code_text(code)}});
+    else send_json(res, {{"error", why.empty() ? "not running the bus" : why}}, status);
+  });
+
   svr.Post("/api/master/taps/provision", [this](const httplib::Request &req, httplib::Response &res) {
     if (ctx_.current_settings().web_password.empty()) {
       send_json(res, {{"error", "set a web password first"}}, 403);

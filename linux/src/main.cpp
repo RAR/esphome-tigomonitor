@@ -639,6 +639,14 @@ int main(int argc, char **argv) {
           return 409;
         }
         return bus_master->request_ask(node, text, why) ? 200 : 409;
+      },
+      [&](const esphome::tigo_monitor::master::Bytes &tap_mac, uint8_t code, bool dry_run, std::string &why) {
+        std::lock_guard<std::mutex> lock(master_mu);
+        if (!bus_master) {
+          why = "this monitor isn't running the bus";
+          return 409;
+        }
+        return bus_master->request_period(tap_mac, code, dry_run, why) ? 200 : 409;
       }});
   if (port < 0 && settings.web_port > 0) port = settings.web_port;
   // Only the default steps aside for another web server; a port someone

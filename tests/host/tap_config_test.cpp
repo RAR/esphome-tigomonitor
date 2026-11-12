@@ -458,6 +458,108 @@ static void test_provision_wide() {
   CHECK(tap.ram.same_settings(made_up()));
 }
 
+// The report period, tunnel 0x22 (owner's analysis, 2026-11-12): read
+// 00 <sel>, write 01 <sel> <code>, the reply 0x23 <code>; codes 1-11.
+static void test_period_gate() {
+  CHECK(classify_request(CMD_TUNNEL, tunnel_request(0x22, 1, {0x01, 0x00, 0x03})) == Allow::provision);
+  CHECK(classify_request(CMD_TUNNEL, tunnel_request(0x22, 1, {0x01, 0x01, 0x0B})) == Allow::provision);
+  CHECK(classify_request(CMD_TUNNEL, tunnel_request(0x22, 1, {0x01, 0x02, 0x03})) == Allow::never);  // no third setting
+  CHECK(classify_request(CMD_TUNNEL, tunnel_request(0x22, 1, {0x01, 0x00, 0x00})) == Allow::never);
+  CHECK(classify_request(CMD_TUNNEL, tunnel_request(0x22, 1, {0x01, 0x00, 0x0C})) == Allow::never);  // the scan's 12
+  CHECK(classify_request(CMD_TUNNEL, tunnel_request(0x22, 1, {0x01, 0x00, 0x03, 0x00})) == Allow::never);
+  Bytes w = tunnel_request(0x22, 1, {0x01, 0x00, 0x03});
+  CHECK(!may_send(CMD_TUNNEL, w, true, true, true, true, true));  // only as a provisioning request
+  CHECK(may_send(CMD_TUNNEL, w, false, false, false, false, false, true));
+  CHECK(period_code_hyperslots(1) == 200 && period_code_hyperslots(3) == 600 && period_code_hyperslots(11) == 6000);
+  CHECK(period_code_hyperslots(0) == 0 && period_code_hyperslots(12) == 0);
+  CHECK(period_code_text(3) == "3 s" && period_code_text(7) == "10 s");
+}
+
+struct PeriodTap {
+  uint8_t code[2] = {2, 2};
+  bool deaf_to_writes = false;  // answers, but keeps its code
+  bool silent = false;
+  std::vector<Bytes> got;
+  bool answer(const Request &req, Frame &reply) {
+    Bytes args(req.payload.begin() + 5, req.payload.end());
+    got.push_back(args);
+    if (silent || args.size() < 2 || args[1] > 1) return false;
+    if (args[0] == 0x01 && args.size() == 3 && !deaf_to_writes) code[args[1]] = args[2];
+    reply.cmd = CMD_TUNNEL_REPLY;
+    reply.payload = {0x00, 0x0E, 0x00, 0x23, req.payload[4], code[args[1]]};
+    return true;
+  }
+};
+
+static void run(PeriodJob &job, PeriodTap &tap) {
+  uint8_t seq = 0;
+  for (int i = 0; i < 20 && !job.finished(); i++) {
+    Request r = job.due(0, seq);
+    if (!r.cmd) continue;
+    CHECK(r.provision && r.table_edit);
+    CHECK(r.payload[3] == 0x22);
+    Frame reply;
+    bool ok = tap.answer(r, reply);
+    job.on_reply(r, ok, reply, 0);
+  }
+}
+
+static void test_period_writes_both_then_reads_back() {
+  PeriodTap tap;
+  PeriodJob job(TAP_MAC, 3, false);
+  run(job, tap);
+  CHECK(job.ok());
+  std::vector<Bytes> want = {{0x00, 0x00}, {0x00, 0x01}, {0x01, 0x00, 0x03}, {0x01, 0x01, 0x03}, {0x00, 0x00}, {0x00, 0x01}};
+  CHECK(tap.got == want);
+  CHECK(job.before(0) == 2 && job.before(1) == 2);
+  CHECK(job.message() == "report period 3 s on both (was 2 s and 2 s)");
+}
+
+static void test_period_writes_only_what_differs() {
+  PeriodTap tap;
+  tap.code[0] = 3;
+  PeriodJob job(TAP_MAC, 3, false);
+  run(job, tap);
+  CHECK(job.ok());
+  std::vector<Bytes> want = {{0x00, 0x00}, {0x00, 0x01}, {0x01, 0x01, 0x03}, {0x00, 0x00}, {0x00, 0x01}};
+  CHECK(tap.got == want);
+  PeriodTap set;
+  set.code[0] = set.code[1] = 3;
+  PeriodJob already(TAP_MAC, 3, false);
+  run(already, set);
+  CHECK(already.ok() && set.got.size() == 2);
+  CHECK(already.message() == "the report period is already 3 s on both: nothing written");
+}
+
+static void test_period_stops() {
+  PeriodTap deaf;
+  deaf.deaf_to_writes = true;
+  PeriodJob job(TAP_MAC, 3, false);
+  run(job, deaf);
+  CHECK(!job.ok() && job.finished());
+  CHECK(job.message() == "the TAP answered the write with 2 s, not 3 s");
+  PeriodTap silent;
+  silent.silent = true;
+  PeriodJob mute(TAP_MAC, 3, false);
+  run(mute, silent);
+  CHECK(!mute.ok() && mute.message() == "the TAP didn't answer a read of its report period");
+  CHECK(silent.got.size() == 1);
+}
+
+static void test_period_dry_run() {
+  PeriodTap tap;
+  PeriodJob job(TAP_MAC, 4, true);
+  run(job, tap);
+  CHECK(job.ok());
+  CHECK(tap.got.size() == 2);  // the reads only
+  CHECK(job.dry_frames().size() == 2);
+  if (job.dry_frames().size() == 2) {
+    CHECK(job.dry_frames()[0] == (Bytes{0x22, 0x01, 0x00, 0x04}));
+    CHECK(job.dry_frames()[1] == (Bytes{0x22, 0x01, 0x01, 0x04}));
+  }
+  CHECK(job.message() == "dry run: would set the report period to 4 s on both (now 2 s and 2 s)");
+}
+
 int main() {
   test_block_layout();
   test_wide_layout();
@@ -473,6 +575,11 @@ int main() {
   test_map_period();
   test_provision_stops();
   test_dry_run();
+  test_period_gate();
+  test_period_writes_both_then_reads_back();
+  test_period_writes_only_what_differs();
+  test_period_stops();
+  test_period_dry_run();
   if (failures) {
     std::printf("%d failed\n", failures);
     return 1;
