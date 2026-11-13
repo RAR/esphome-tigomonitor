@@ -641,8 +641,8 @@ int main(int argc, char **argv) {
         return bus_master->request_forget_tap(id, why) ? 200 : 409;
       },
       [&](const esphome::tigo_monitor::master::Bytes &tap_mac, uint16_t channel, uint16_t pan,
-          bool identify, bool reset, bool dry_run, int profile, bool keep_network, std::string &why,
-          std::string &given) {
+          bool identify, bool reset, bool dry_run, int profile, bool keep_network, bool store,
+          std::string &why, std::string &given) {
         namespace mp = esphome::tigo_monitor::master;
         std::lock_guard<std::mutex> lock(master_mu);
         if (!bus_master) {
@@ -679,6 +679,7 @@ int main(int argc, char **argv) {
         for (const auto &t : bus_master->status().taps)
           if (t.mac == mp::mac_hex(tap_mac)) block.burden = t.discovery.node_count;
         block.skip_identify = !identify;
+        block.store = store;
         std::random_device rd;
         block.key = mp::key_from([&rd]() { return static_cast<uint8_t>(rd()); });
         given = block.describe();

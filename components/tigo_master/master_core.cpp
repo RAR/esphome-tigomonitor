@@ -250,8 +250,8 @@ bool MasterCore::request_provision(const master::Bytes &tap_mac, const master::R
     why = "giving a TAP its radio settings needs Allow changes to the TAPs (Settings > Bus)";
   // Skipping the MAC check, or a reset, are bench tools: on a live system a
   // wrong MAC could re-network the TAP in service, and a reset restarts it.
-  else if (!bench_ && (block.skip_identify || reset))
-    why = "skipping the MAC check, or a reset, is for the bench only (master_bench)";
+  else if (!bench_ && (block.skip_identify || reset || block.store))
+    why = "skipping the MAC check, a reset or a Store is for the bench only (master_bench)";
   else if (tap_mac.size() != 8 || !tap)
     why = "no TAP on this bus answered with that MAC";  // with several, it must have said its MAC already
   else if (!master::is_radio_block_ok(block.encode()))

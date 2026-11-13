@@ -1929,6 +1929,8 @@ void HttpServer::routes_() {
     // only the profile changes.
     int profile = j.contains("profile") && j["profile"].is_number_integer() ? j["profile"].get<int>() : 0;
     bool keep_network = j.value("keep_network", false);
+    // "store": the bench only; the gateway Store after the check (tap_config.h).
+    bool store = j.value("store", false);
     if (profile && profile != 40 && profile != 75 && profile != 120 && profile != 300) {
       send_json(res, {{"error", "profile is 40, 75, 120 or 300 optimizers"}}, 400);
       return;
@@ -1936,7 +1938,7 @@ void HttpServer::routes_() {
     std::string why, given;
     int code = ctx_.request_provision
                    ? ctx_.request_provision(mac, static_cast<uint16_t>(channel), static_cast<uint16_t>(pan),
-                                            identify, reset, dry, profile, keep_network, why, given)
+                                            identify, reset, dry, profile, keep_network, store, why, given)
                    : 409;
     if (code == 200) send_json(res, {{"started", true}, {"dry_run", dry}, {"reset", reset}, {"given", given}});
     else send_json(res, {{"error", why.empty() ? "not running the bus" : why}}, code);

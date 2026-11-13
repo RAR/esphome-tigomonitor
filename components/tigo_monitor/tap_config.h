@@ -26,10 +26,13 @@
 // are rather than making them up.
 //
 // The write changes the TAP's RAM and retunes its radio at once; it saves
-// nothing. The read of the stored copy (01 selector, 0D 00 01) is what marks
-// every field to be saved, field by field, in the background. So a write is
-// always followed by that read. Its reply comes from RAM, so only a power
-// cycle shows what was saved.
+// nothing. On an H1 (the bench's H1.0007) the read of the stored copy (01
+// selector, 0D 00 01) is what marks every field to be saved, field by field,
+// in the background, and its reply comes from RAM. On a G8 (the roof's
+// G8.65, 2026-11-13) that read answers with the stored copy and saves
+// nothing: the CCA saves with the gateway Store (0x0012 + the key), which
+// this job sends only on the bench, when asked. So a write is always
+// followed by that read, and only a power cycle shows what was saved.
 //
 // ProvisionJob does that to one TAP, named by its MAC (it asks the TAP at
 // that address for its MAC first and stops unless it matches):
@@ -92,6 +95,12 @@ struct RadioBlock {
   // Not sent: start at the read, without asking the TAP for its MAC first
   // (bench: does a lone 003A to a running TAP set the 0x0E status to 1?).
   bool skip_identify = false;
+  // Not sent: bench only (master_bench). After the check, send the gateway
+  // Store (0x0012 + the key, as the CCA does to a G8) and read the stored
+  // copy again. On a G8 the write is RAM only and the Store is what saves it
+  // (owner's analysis of the CCA's firmware, 2026-11-13); what else the Store
+  // saves isn't known, hence the bench.
+  bool store = false;
 
   Bytes encode() const {
     Bytes b;
@@ -308,7 +317,7 @@ inline std::string radio_write_text(const RadioBlock &b) {
 // cycle and a read to show.
 class ProvisionJob : public TableJob {
  public:
-  enum class Step { identify, read_before, write, save, check, reset, done, failed };
+  enum class Step { identify, read_before, write, save, check, store, store_read, reset, done, failed };
   static const uint32_t READ_WAIT_MS = 2000;
   static const uint32_t WRITE_WAIT_MS = 3000;
   static const uint32_t RESET_WAIT_MS = 2000;
@@ -340,6 +349,10 @@ class ProvisionJob : public TableJob {
           dry_text_.push_back(radio_write_text(block_));
           dry_text_.push_back("0D 00 01 (the save)");
           dry_text_.push_back("0D 00 00 (the check)");
+          if (block_.store) {
+            dry_text_.push_back("0012 37 24 92 66 (the Store) to this TAP alone");
+            dry_text_.push_back("0D 00 01 (the stored copy again)");
+          }
           if (reset_) dry_text_.push_back("0010 37 24 92 66 to this TAP alone");
           finish_("dry run: would give the TAP " + block_.describe() + capacity_note_() + now_note_());
           return {};
@@ -347,6 +360,14 @@ class ProvisionJob : public TableJob {
         return provision_(send_(SUB_GATEWAY_CFG, radio_write_args(block_), WRITE_WAIT_MS, seq));
       case Step::save: return provision_(send_(SUB_GATEWAY_CFG, {0x00, 0x01}, READ_WAIT_MS, seq));
       case Step::check: return provision_(send_(SUB_GATEWAY_CFG, {0x00, 0x00}, READ_WAIT_MS, seq));
+      case Step::store: {
+        waiting_ = true;
+        Request r{CMD_STORE, {0x37, 0x24, 0x92, 0x66}, WRITE_WAIT_MS};
+        r.table_edit = true;
+        r.provision = true;
+        return r;
+      }
+      case Step::store_read: return provision_(send_(SUB_GATEWAY_CFG, {0x00, 0x01}, READ_WAIT_MS, seq));
       case Step::reset: {
         waiting_ = true;
         Request r{CMD_RESET, {0x37, 0x24, 0x92, 0x66}, RESET_WAIT_MS};
@@ -369,11 +390,24 @@ class ProvisionJob : public TableJob {
       step_ = Step::read_before;
       return;
     }
+    if (req.cmd == CMD_STORE) {
+      if (!req.table_edit || !waiting_ || step_ != Step::store) return;
+      waiting_ = false;
+      // The CCA takes any 0x13 of 19 bytes from this TAP as done, without
+      // reading it; we say what came back and read the stored copy again.
+      if (!ok || reply.cmd != CMD_STORE + 1)
+        return fail_("the TAP didn't answer the Store; read it and power-cycle it to see what it kept");
+      store_note_ = "the Store answered 0x13 with " + std::to_string(reply.payload.size()) + " bytes (" +
+                    hex_bytes_(reply.payload) + ")";
+      step_ = Step::store_read;
+      return;
+    }
     if (req.cmd == CMD_RESET) {
       if (!req.table_edit || !waiting_) return;
       waiting_ = false;
       // A TAP restarting may not answer: the next poll shows it back.
-      return finish_("given " + block_.describe() + status_note_() + "; saved and reset");
+      return finish_("given " + block_.describe() + status_note_() +
+                     (store_done_.empty() ? "; saved and reset" : "; " + store_done_ + "; reset"));
     }
     if (!take_(req)) return;
     TunnelReply t;
@@ -447,6 +481,10 @@ class ProvisionJob : public TableJob {
       case Step::check:
         if (!got) return fail_("the TAP didn't answer the check read");
         if (now != block_) return fail_("the check read differs from what was written");
+        if (block_.store) {
+          step_ = Step::store;
+          return;
+        }
         if (unsaved_) {
           int was = profile_capacity(stored_map_[0]);
           return finish_("the TAP runs map " + hex_of_(block_.map) + capacity_note_() + " now, but didn't save it: " +
@@ -460,6 +498,20 @@ class ProvisionJob : public TableJob {
         }
         return finish_("given " + block_.describe() + capacity_note_() + status_note_() +
                        "; saved. Power-cycle the TAP and read it to see it kept");
+      case Step::store_read: {
+        if (!got) return fail_(store_note_ + ", but didn't answer the stored read after it");
+        bool kept = now.same_settings(block_);
+        std::string what = store_note_ + "; its stored copy now has map " + hex_of_(now.map) +
+                           (kept ? ", the same settings as written"
+                                 : ", and differs from what was written in " + block_.differences(now));
+        if (reset_) {
+          store_done_ = what;
+          step_ = Step::reset;
+          return;
+        }
+        return finish_("given " + block_.describe() + capacity_note_() + status_note_() + "; " + what +
+                       ". Power-cycle the TAP and read it to see it kept");
+      }
       default: return;
     }
   }
@@ -477,6 +529,8 @@ class ProvisionJob : public TableJob {
       case Step::write: return "writing";
       case Step::save: return "saving";
       case Step::check: return "checking";
+      case Step::store: return "storing";
+      case Step::store_read: return "reading the stored copy";
       case Step::reset: return "resetting it";
       case Step::done: return "done";
       case Step::failed: return "stopped";
@@ -528,6 +582,15 @@ class ProvisionJob : public TableJob {
     return write_status_ ? " (the write answered status " + std::to_string(write_status_) + ", its echo exact)" : "";
   }
 
+  static std::string hex_bytes_(const Bytes &b) {
+    static const char *d = "0123456789abcdef";
+    std::string out;
+    for (uint8_t v : b) {
+      out += d[v >> 4];
+      out += d[v & 0xF];
+    }
+    return out;
+  }
   static std::string hex_of_(const std::array<uint8_t, 10> &m) {
     static const char *d = "0123456789abcdef";
     std::string out;
@@ -541,6 +604,7 @@ class ProvisionJob : public TableJob {
   RadioBlock block_;
   bool reset_;
   bool unsaved_ = false;  // the TAP runs the new profile but stored the old
+  std::string store_note_, store_done_;
   std::array<uint8_t, 10> stored_map_{};
   int write_status_ = 0;
   bool turn_ = false;  // a turn left to the master before the write

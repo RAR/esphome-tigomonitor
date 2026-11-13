@@ -94,7 +94,7 @@ struct HttpContext {
   // after, dry run. 200 with what it will give in given (no key), or 409 with why.
   std::function<int(const esphome::tigo_monitor::master::Bytes &tap_mac, uint16_t channel, uint16_t pan,
                     bool identify, bool reset, bool dry_run, int profile, bool keep_network,
-                    std::string &why, std::string &given)>
+                    bool store, std::string &why, std::string &given)>
       request_provision;
   // Bench only: ask one optimizer a read-shaped text (POST /api/master/query);
   // 200, or 409 with why.

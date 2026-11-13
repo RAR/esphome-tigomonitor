@@ -107,6 +107,10 @@ static void test_gate() {
   Bytes key = {0x37, 0x24, 0x92, 0x66};
   CHECK(may_send(CMD_RESET, key, false, false, false, false, false, true));
   CHECK(!may_send(CMD_RESET, key, true));
+  // The gateway Store: a provisioning request on the bench only.
+  CHECK(may_send(CMD_STORE, key, true, false, false, false, false, true));
+  CHECK(!may_send(CMD_STORE, key, false, false, false, false, false, true));
+  CHECK(!may_send(CMD_STORE, key, true));
   // Provisioning doesn't open anything else: a table erase, SetKnownNetworks.
   CHECK(!may_send(CMD_TUNNEL, tunnel_request(SUB_ERASE_FLASH, 1, {0xBA, 0xBE}), false, false, false, false, false, true));
   CHECK(!may_send(CMD_TUNNEL, tunnel_request(0xE1, 1, {0x01}), false, false, false, false, false, true));
@@ -140,7 +144,22 @@ struct FakeTap {
   // The G8.59's form: the active block (read 00 00, the write and its echo)
   // is 46 bytes; the stored read (00 01) answers with 36.
   bool wide = false;
+  // A G8 (the analyst's trace, 2026-11-13): the stored read answers with
+  // the stored copy, and only the gateway Store (0x0012 + the key) saves
+  // RAM to it, answering 0x13 with 19 bytes.
+  bool g8 = false;
+  bool store_silent = false;
+  RadioBlock stored_copy;
+  int stores = 0;
   bool answer(const Request &req, Frame &reply) {
+    if (req.cmd == CMD_STORE) {
+      stores++;
+      if (store_silent) return false;
+      stored_copy = ram;
+      reply.cmd = CMD_STORE + 1;
+      reply.payload = Bytes(19, 0xA5);
+      return true;
+    }
     if (req.cmd == CMD_RESET) {
       resets++;
       if (save_armed) saved = ram;
@@ -163,6 +182,7 @@ struct FakeTap {
     if (args == Bytes{0x00, 0x01}) save_armed = true;
     RadioBlock shown = ram;
     if (args == Bytes{0x00, 0x01}) {
+      if (g8) shown = stored_copy;
       shown.wide = false;
       if (stored_shows) stored_shows(shown);
     }
@@ -297,6 +317,61 @@ static void test_provision_profile_not_stored() {
     ProvisionJob job(TAP_MAC, made_up(), false, false);
     run(job, tap);
     CHECK(!job.ok() && job.message().find("after the save the TAP runs something else") != std::string::npos);
+  }
+}
+
+// The bench's Store test (owner, 2026-11-13): asked to, on a TAP that kept
+// the old profile, the job sends the gateway Store and reads the stored copy
+// again, saying what it now holds.
+static void test_provision_store() {
+  RadioBlock want;
+  want.channel = 11;
+  want.pan = 1;
+  map_for_profile(20, want.map);
+  want.keep_network = true;
+  want.store = true;
+  {
+    FakeTap tap;
+    tap.g8 = true;
+    tap.ram = made_up();
+    map_for_profile(14, tap.ram.map);
+    tap.stored_copy = tap.ram;
+    ProvisionJob job(TAP_MAC, want, false, false);
+    run(job, tap);
+    std::string m = job.message();
+    CHECK(job.ok());
+    CHECK(tap.stores == 1);
+    CHECK(tap.stored_copy.map[0] == 20);
+    // read, write, stored read, check, then the stored read again after the Store
+    CHECK(tap.got.size() == 5);
+    if (tap.got.size() == 5) CHECK(Bytes(tap.got[4].begin() + 5, tap.got[4].end()) == (Bytes{0x00, 0x01}));
+    CHECK(m.find("Store answered 0x13") != std::string::npos);
+    CHECK(m.find("19 bytes") != std::string::npos);
+    CHECK(m.find("stored copy now has map 14020201000000001c01") != std::string::npos);
+    CHECK(m.find("112233") == std::string::npos);
+  }
+  {  // no answer to the Store
+    FakeTap tap;
+    tap.g8 = true;
+    tap.store_silent = true;
+    tap.ram = made_up();
+    map_for_profile(14, tap.ram.map);
+    tap.stored_copy = tap.ram;
+    ProvisionJob job(TAP_MAC, want, false, false);
+    run(job, tap);
+    CHECK(!job.ok() && job.message().find("didn't answer the Store") != std::string::npos);
+  }
+  {  // not asked: no Store
+    FakeTap tap;
+    tap.g8 = true;
+    tap.ram = made_up();
+    map_for_profile(14, tap.ram.map);
+    tap.stored_copy = tap.ram;
+    RadioBlock plain = want;
+    plain.store = false;
+    ProvisionJob job(TAP_MAC, plain, false, false);
+    run(job, tap);
+    CHECK(job.ok() && tap.stores == 0);
   }
 }
 
@@ -674,6 +749,7 @@ int main() {
   test_provision_keeps_the_taps_profile();
   test_provision_keeps_the_network_changes_the_profile();
   test_provision_profile_not_stored();
+  test_provision_store();
   test_provision_sizes_the_map();
   test_map_period();
   test_provision_stops();

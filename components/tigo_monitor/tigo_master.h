@@ -1175,9 +1175,11 @@ static const uint16_t CMD_GET_MAC = 0x0038;        // with backoff
 static const uint16_t CMD_GET_MAC_NOW = 0x003A;    // no backoff; also the "where are you" read
 static const uint16_t CMD_SET_ID_BY_MAC = 0x003C;
 static const uint16_t CMD_RESET = 0x0010;
-// The gateway's store, in the one form a bring-up sends: the key and nothing
-// else, to the TAP at its new id. It commits the id, so the next RESET or
-// power cycle brings the TAP back there (the 3.6 CCA, bench capture 2026-11-06).
+// The gateway's Store, the key and nothing else: the CCA's own, byte for byte.
+// It saves the TAP's whole gateway configuration, not just the id (owner's
+// analysis of the CCA's firmware, 2026-11-13); our bring-up sends it to a TAP
+// at its new id, so the next RESET or power cycle brings it back there (the
+// 3.6 CCA, bench capture 2026-11-06), and the bench's radio test after a write.
 static const uint16_t CMD_STORE = 0x0012;
 
 struct DiscoveryRequest {
@@ -1941,6 +1943,8 @@ inline bool may_send(uint16_t cmd, const Bytes &payload, bool bench, bool startu
       if (provision && (cmd == CMD_RESET || (cmd == CMD_GET_MAC_NOW && payload.empty()) ||
                         (cmd == CMD_TUNNEL && payload.size() == 7 && payload[3] == 0x0D)))
         return true;
+      // The gateway Store after a radio write: the bench only (tap_config.h).
+      if (provision && bench && cmd == CMD_STORE) return true;
       return startup;
     case Allow::optimizer_write: return writes;
     case Allow::pv_off: return pv_off || startup;

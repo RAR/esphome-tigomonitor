@@ -1275,6 +1275,11 @@ static void test_radio_settings_need_the_bench_or_table_writes() {
     run_for(core, 40000, 50000, 50);
     CHECK(core.request_provision(mac, b, /*reset=*/true, false, why) == (mode == 1));
     run_for(core, 50000, 60000, 50);
+    // The gateway Store, too: the bench only.
+    mp::RadioBlock store = b;
+    store.store = true;
+    CHECK(core.request_provision(mac, store, false, false, why) == (mode == 1));
+    run_for(core, 60000, 70000, 50);
     core.close();
   }
 }
