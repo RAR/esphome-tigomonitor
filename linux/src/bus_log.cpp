@@ -67,6 +67,7 @@ void BusLog::load_versions_() {
     r.channel = o.value("channel", 0);
     r.slt = o.value("slt", 0);
     r.slm = o.value("slm", 0);
+    r.profile = o.value("profile", 0);
     r.pan = static_cast<uint16_t>(std::strtoul(o.value("pan", std::string("0")).c_str(), nullptr, 16));
     if (r.tap) radios_[r.tap] = {r, o.value("heard_unix_ms", int64_t{0})};
   }
@@ -139,8 +140,9 @@ int BusLog::changes_since(int64_t since_ms) const {
 
 void BusLog::on_frame_(const Frame &f, bool ours, int64_t now) {
   std::string what = watch_.on_frame(f, ours, now);
-  for (const auto &r : watch_.take_radios()) {
+  for (auto r : watch_.take_radios()) {
     auto it = radios_.find(r.tap);
+    if (!r.profile && it != radios_.end()) r.profile = it->second.first.profile;  // a stored read: keep the live one
     bool changed = it == radios_.end() || it->second.first.channel != r.channel || it->second.first.slt != r.slt ||
                    it->second.first.slm != r.slm;
     if (changed)
@@ -273,6 +275,7 @@ json BusLog::versions_json_(bool with_pans) const {
               {"slt", kv.second.first.slt},
               {"slm", kv.second.first.slm},
               {"heard_unix_ms", kv.second.second}};
+    if (kv.second.first.profile) r["profile"] = kv.second.first.profile;
     if (with_pans && kv.second.first.pan) r["pan"] = hex4(kv.second.first.pan);
     radios.push_back(r);
   }

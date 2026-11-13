@@ -188,7 +188,7 @@ export const routes = {
   '/api/versions': {
     taps: [{ addr: '1201', model: 'Mgate', version: 'G8.59 Jan  1 2026 10:00:00 GW-H150.6.0S0.12', previous: '',
              since_unix_ms: 1767225600000, last_unix_ms: 1767225600000, name: 'Garage' }],
-    radios: [{ tap: '1201', channel: 18, slt: 90, slm: 60, heard_unix_ms: 1767225600000 }],
+    radios: [{ tap: '1201', channel: 18, slt: 90, slm: 60, profile: 75, heard_unix_ms: 1767225600000 }],
     // An optimizer whose PIV current changed, newest first.
     changes: [{ unix_ms: 1767225600000 + 3 * 60000, addr: devices[3].addr, what: 'MPPT', before: '12 40 08 12', after: '12 40 0A 12' }],
     // Each TAP's MAC, from its answer to GET_MAC; made up.

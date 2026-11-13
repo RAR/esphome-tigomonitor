@@ -6415,17 +6415,20 @@
     card.style.display = dangerOn ? '' : 'none';
     if (!dangerOn) return;
     let taps = [];
+    const live = {};  // the profile each TAP runs, from its last live read
     try {
       const r = await apiFetch('/api/master');
       if (r.ok) taps = ((await r.json()).taps || []).filter(t => t.mac);
-    } catch (e) { /* drawn empty below */ }
+      const v = await apiFetch('/api/versions');
+      if (v.ok) for (const x of ((await v.json()).radios || [])) if (x.profile) live[x.tap] = x.profile;
+    } catch (e) { /* drawn empty, or with the usual default, below */ }
     const opts = (list, pick) => list.map(([v, t]) => `<option value="${v}"${v === pick ? ' selected' : ''}>${dangerEsc(t)}</option>`).join('');
     document.getElementById('pi-danger-taps').innerHTML = taps.length ? taps.map(t => `
       <div data-danger-tap="${dangerEsc(t.mac)}" style="border-top:1px solid var(--border);padding-top:10px;margin-top:10px">
-        <strong>TAP ${dangerEsc(t.id)}</strong>
+        <div style="font-weight:600;margin:0 0 10px">TAP ${dangerEsc(t.id)}</div>
         <div class="cfg-row">
-          <div class="cfg-text"><strong>Radio profile</strong><span>How many optimizers its schedule is planned for. Preview shows what it has now</span></div>
-          <div class="cfg-ctrl"><select class="cfg-input" data-danger-profile>${opts(DANGER_PROFILES, 75)}</select>
+          <div class="cfg-text"><strong>Radio profile</strong><span>How many optimizers its schedule is planned for. ${live[t.id] ? `It runs ${live[t.id]} now` : 'Preview shows what it has now'}</span></div>
+          <div class="cfg-ctrl"><select class="cfg-input" data-danger-profile>${opts(DANGER_PROFILES, live[t.id] || 75)}</select>
             <button class="btn" data-danger="profile-preview">Preview</button> <button class="btn danger" data-danger="profile-write">Write</button></div>
         </div>
         <div class="cfg-row">

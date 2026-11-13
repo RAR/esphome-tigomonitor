@@ -309,6 +309,10 @@ struct TapRadio {
   uint16_t tap = 0;
   int channel = 0, slt = 0, slm = 0;
   uint16_t pan = 0;
+  // How many optimizers its map is planned for (40, 75, 120, 300), from a
+  // read of the live block (00 00); 0 from the stored read (00 01), which
+  // can hold another (the roof's G8.65, 2026-11-13), or a map not known.
+  int profile = 0;
 };
 
 // A TAP's ID: the MAC it gives in answer to "where are you" (GET_MAC), as
@@ -332,6 +336,10 @@ inline bool parse_gateway_cfg(const Frame &req, const Frame &rep, TapRadio &r) {
   r.pan = static_cast<uint16_t>(t.data[2] << 8 | t.data[3]);
   r.slt = t.data[14];
   r.slm = t.data[t.data.size() - 2];
+  if (req.payload[6] == 0x00) {
+    uint8_t first = t.data[4];
+    r.profile = first == 12 ? 40 : first == 14 ? 75 : first == 20 ? 120 : first == 24 ? 300 : 0;
+  }
   return true;
 }
 

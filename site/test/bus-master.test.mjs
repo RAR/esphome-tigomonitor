@@ -98,6 +98,7 @@ async function open(opts = {}) {
         message: body.dry_run !== false ? `dry run: would do it (${kind})` : `done (${kind})` } };
       return json(200, { started: true });
     }
+    if (path === '/api/versions' && opts.versions) return json(200, opts.versions);
     if (path === '/api/serial-ports') return json(200, { ports: [] });
     if (path === '/api/devices' && opts.devices) return json(200, { devices: opts.devices, count: opts.devices.length });
     if (path === '/api/cloud/status') return json(200, { configured: false });
@@ -397,6 +398,25 @@ test('listening, the card stays hidden even with the flag', async () => {
   await page.waitForSelector('#pi-port-save', { state: 'visible' });
   await page.waitForTimeout(500);
   assert.equal(await page.isVisible('#pi-danger'), false);
+  await ctx.close();
+});
+
+test('the profile list opens on the profile the TAP runs, from its last live read', async () => {
+  const versions = { taps: [], optimizers: [], radios: [{ tap: '1201', channel: 18, slt: 90, slm: 60, profile: 120, heard_unix_ms: 1 }] };
+  const { page, ctx, errors } = await open({ hash: '#settings', master: TAPS, settings: { dangerous_options: true }, versions });
+  await page.waitForSelector('#pi-danger [data-danger-tap]', { state: 'visible' });
+  assert.equal(await page.inputValue('#pi-danger select[data-danger-profile]'), '120');
+  assert.match(await page.textContent('#pi-danger [data-danger-tap]'), /It runs 120 now/);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test('with no live read the profile list opens on 75', async () => {
+  const versions = { taps: [], optimizers: [], radios: [] };
+  const { page, ctx } = await open({ hash: '#settings', master: TAPS, settings: { dangerous_options: true }, versions });
+  await page.waitForSelector('#pi-danger [data-danger-tap]', { state: 'visible' });
+  assert.equal(await page.inputValue('#pi-danger select[data-danger-profile]'), '75');
+  assert.match(await page.textContent('#pi-danger [data-danger-tap]'), /Preview shows what it has now/);
   await ctx.close();
 });
 

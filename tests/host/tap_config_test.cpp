@@ -263,6 +263,43 @@ static void test_provision_keeps_the_network_changes_the_profile() {
   CHECK(job.message().find("3031") == std::string::npos);  // the key still hidden
 }
 
+// A profile change the TAP runs but doesn't store (the roof's G8.65,
+// 2026-11-13: the live read showed the new map, the stored read the old).
+// Not a failure: it says the TAP runs the new profile now and goes back to
+// the stored one when it restarts, and skips any reset, which would undo it.
+// A change of the network itself that isn't stored still fails.
+static void test_provision_profile_not_stored() {
+  RadioBlock want;
+  want.channel = 11;
+  want.pan = 1;
+  map_for_profile(20, want.map);
+  want.keep_network = true;
+  {
+    FakeTap tap;
+    tap.ram = made_up();
+    map_for_profile(14, tap.ram.map);
+    std::array<uint8_t, 10> old = tap.ram.map;
+    tap.stored_shows = [old](RadioBlock &b) { b.map = old; };
+    ProvisionJob job(TAP_MAC, want, /*reset=*/true, false);
+    run(job, tap);
+    std::string m = job.message();
+    CHECK(job.ok());
+    CHECK(tap.resets == 0);
+    CHECK(tap.ram.map[0] == 20);
+    CHECK(m.find("up to 120 optimizers") != std::string::npos);
+    CHECK(m.find("didn't save it") != std::string::npos);
+    CHECK(m.find("up to 75") != std::string::npos);  // what it goes back to
+    CHECK(m.find("restarts") != std::string::npos);
+  }
+  {
+    FakeTap tap;
+    tap.stored_shows = [](RadioBlock &b) { b.channel = 15; };
+    ProvisionJob job(TAP_MAC, made_up(), false, false);
+    run(job, tap);
+    CHECK(!job.ok() && job.message().find("after the save the TAP runs something else") != std::string::npos);
+  }
+}
+
 // Sizing, the CCA's rule: the smallest map whose capacity covers the TAP's
 // table (burden). A TAP keeps its own map only while that still covers it.
 // Bytes 5-7 are always zero: the CCA's map parser never writes them.
@@ -465,6 +502,19 @@ static void test_wide_layout() {
   rep.payload.insert(rep.payload.end(), data.begin(), data.end());
   TapRadio r;
   CHECK(parse_gateway_cfg(req, rep, r) && r.channel == 23 && r.slt == 0x5A && r.slm == 0x3C);
+  // And the profile it runs, from the live read (00 00) only: the stored
+  // read (00 01) can hold another (the roof's G8.65, 2026-11-13).
+  RadioBlock b20 = made_up_wide();
+  map_for_profile(20, b20.map);
+  Bytes d20 = b20.encode();
+  d20.push_back(0x00);
+  Frame rep20{0x9201, CMD_TUNNEL_REPLY, {0x00, 0x0E, 0x00, 0x0E, 0x01}};
+  rep20.payload.insert(rep20.payload.end(), d20.begin(), d20.end());
+  TapRadio live;
+  CHECK(parse_gateway_cfg(req, rep20, live) && live.profile == 120);
+  Frame stored_req{0x1201, CMD_TUNNEL, tunnel_request(0x0D, 2, {0x00, 0x01})};
+  TapRadio stored;
+  CHECK(parse_gateway_cfg(stored_req, rep20, stored) && stored.profile == 0);
 }
 
 // On a TAP with the 46-byte form, the job writes that form, keeping the
@@ -623,6 +673,7 @@ int main() {
   test_provision_gives_a_turn_before_writing();
   test_provision_keeps_the_taps_profile();
   test_provision_keeps_the_network_changes_the_profile();
+  test_provision_profile_not_stored();
   test_provision_sizes_the_map();
   test_map_period();
   test_provision_stops();

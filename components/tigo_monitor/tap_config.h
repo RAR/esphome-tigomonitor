@@ -425,15 +425,35 @@ class ProvisionJob : public TableJob {
         return;
       case Step::save:
         if (!got) return fail_("the TAP didn't answer the save (0D 00 01); the write is in RAM only");
-        if (!now.same_settings(block_))
+        if (!now.same_settings(block_)) {
+          // Only the profile, the network kept: the TAP runs the new map but
+          // stored the old (the roof's G8.65, 2026-11-13). Said, not failed;
+          // and no reset, which would put the stored one back.
+          RadioBlock same_map = now;
+          same_map.map = block_.map;
+          if (block_.keep_network && same_map.same_settings(block_)) {
+            stored_map_ = now.map;
+            unsaved_ = true;
+            reset_ = false;
+            step_ = Step::check;
+            return;
+          }
           return fail_("after the save the TAP runs something else: its stored read (" +
                        std::to_string(now.wide ? RADIO_BLOCK_WIDE : RADIO_BLOCK_SIZE) + " bytes) has " +
                        block_.differences(now));
+        }
         step_ = Step::check;
         return;
       case Step::check:
         if (!got) return fail_("the TAP didn't answer the check read");
         if (now != block_) return fail_("the check read differs from what was written");
+        if (unsaved_) {
+          int was = profile_capacity(stored_map_[0]);
+          return finish_("the TAP runs map " + hex_of_(block_.map) + capacity_note_() + " now, but didn't save it: " +
+                         "its stored copy still has map " + hex_of_(stored_map_) +
+                         (was ? ", for up to " + std::to_string(was) : std::string()) +
+                         ", and it goes back to that when it restarts" + status_note_());
+        }
         if (reset_) {
           step_ = Step::reset;
           return;
@@ -508,8 +528,20 @@ class ProvisionJob : public TableJob {
     return write_status_ ? " (the write answered status " + std::to_string(write_status_) + ", its echo exact)" : "";
   }
 
+  static std::string hex_of_(const std::array<uint8_t, 10> &m) {
+    static const char *d = "0123456789abcdef";
+    std::string out;
+    for (uint8_t v : m) {
+      out += d[v >> 4];
+      out += d[v & 0xF];
+    }
+    return out;
+  }
+
   RadioBlock block_;
   bool reset_;
+  bool unsaved_ = false;  // the TAP runs the new profile but stored the old
+  std::array<uint8_t, 10> stored_map_{};
   int write_status_ = 0;
   bool turn_ = false;  // a turn left to the master before the write
   Step step_ = Step::identify;
