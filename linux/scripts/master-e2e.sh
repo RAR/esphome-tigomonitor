@@ -360,7 +360,7 @@ build/linux/tigomonitord --state-dir "$out/state12p" --web-dir components/tigo_s
 daemon=$!
 for _ in $(seq 60); do [ -f "$out/tap12p.json" ] && [ "$(stat "$out/tap12p.json" "len(d['housekeeping'])")" -ge 3 ] && break; sleep 0.5; done
 expect "pool: 01 and 02 to the TAP or the named, 04 elsewhere" "$(stat "$out/tap12p.json" "sorted({(h['args'][10:12], h['args'][:4] in ('0001','0003','0004')) for h in d['housekeeping']})")" "[('01', True), ('02', True), ('04', False)]"
-expect "logged as named" "$(grep -c 'PGW pool (named: 0003 0004)' "$out/daemon12p.log")" 1
+expect "logged as named" "$(grep -c 'PGW pool (named, [0-9]* through it: 0003 0004)' "$out/daemon12p.log")" 1
 kill $daemon; wait $daemon 2>/dev/null || true
 kill $tap; wait $tap 2>/dev/null || true
 

@@ -407,7 +407,7 @@ int main(int argc, char **argv) {
           snprintf(id, sizeof(id), "%04X", tap);
           std::string why;
           std::vector<uint16_t> pool = pgw_pool(roof, id, members, named, why);
-          std::string text = why + ":";
+          std::string text = why + ", " + std::to_string(members.size()) + " through it:";
           for (uint16_t t : pool) {
             char a[5];
             snprintf(a, sizeof(a), "%04X", t);

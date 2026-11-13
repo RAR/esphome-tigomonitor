@@ -53,18 +53,19 @@ struct PgwSeen {
 };
 
 // The optimizers reporting through tap. With no other TAP heard lately,
-// every panel last heard through it or not since a restart (tap 0),
-// however long ago: at night nothing reports, and a restart keeps a
-// panel's TAP but not when it was heard, so going by "lately" there would
-// choose the pool from the few heard since, and it would wander until
-// sunrise. With several TAPs, only those heard through this one lately.
+// every panel, whatever TAP was last recorded for it and however long
+// ago: at night nothing reports, and what a restart keeps of a panel's
+// TAP can't be trusted (on the roof, 2026-11-12, B1-B6 weren't counted),
+// so anything narrower chose the pool from the few heard since and it
+// wandered until sunrise. With several TAPs, only those heard through
+// this one lately.
 inline std::vector<PgwMember> pgw_members(const std::vector<PgwSeen> &seen, uint16_t tap) {
   bool others = false;
   for (const auto &s : seen)
     if (s.tap && s.tap != tap && s.lately) others = true;
   std::vector<PgwMember> out;
   for (const auto &s : seen) {
-    bool mine = others ? (s.tap == tap && s.lately) : (s.tap == tap || !s.tap);
+    bool mine = others ? (s.tap == tap && s.lately) : true;
     if (!mine) continue;
     uint32_t all = s.reports + s.lost;
     out.push_back({s.tuid, s.name, all >= 100 ? static_cast<double>(s.lost) / all : -1.0});
