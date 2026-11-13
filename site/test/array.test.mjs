@@ -1,7 +1,7 @@
-// site/test/roof.test.mjs
-// Topology > Roof on the Raspberry Pi build, in the real app.html, in
-// Chromium, against a mock API: an empty roof says what to do, a saved one
-// draws each panel in place by its power and each TAP, and Edit roof places
+// site/test/array.test.mjs
+// Topology > Array on the Raspberry Pi build, in the real app.html, in
+// Chromium, against a mock API: an empty array says what to do, a saved one
+// draws each panel in place by its power and each TAP, and Edit array places
 // panels from a tray by dragging (mouse) or pressing, moves, turns and
 // returns them with the keyboard, swaps two panels on a drop, and saves.
 import { test, before, after } from 'node:test';
@@ -40,7 +40,7 @@ const DEVICES = [
 ];
 
 async function open(saved = { panels: [], taps: [] }, platform = 'linux') {
-  const api = { roof: JSON.parse(JSON.stringify(saved)), posts: [] };
+  const api = { layout: JSON.parse(JSON.stringify(saved)), posts: [] };
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
   await ctx.route('**/api/**', async (route) => {
     const req = route.request();
@@ -48,9 +48,9 @@ async function open(saved = { panels: [], taps: [] }, platform = 'linux') {
     const json = (status, body) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
     if (path === '/api/status') return json(200, { ...routes['/api/status'], ...(platform === 'linux' ? { platform: 'linux' } : {}) });
     if (path === '/api/devices') return json(200, { devices: DEVICES, count: DEVICES.length });
-    if (path === '/api/roof') {
-      if (req.method() === 'POST') { const b = JSON.parse(req.postData()); api.posts.push(b); api.roof = b; return json(200, { saved: true }); }
-      return json(200, api.roof);
+    if (path === '/api/array') {
+      if (req.method() === 'POST') { const b = JSON.parse(req.postData()); api.posts.push(b); api.layout = b; return json(200, { saved: true }); }
+      return json(200, api.layout);
     }
     if (path === '/api/mesh') return json(200, { taps: [{ id: '1201', name: 'Garage' }], nodes: [], loss_days: [] });
     if (routes[path] !== undefined) return json(200, routes[path]);
@@ -61,36 +61,36 @@ async function open(saved = { panels: [], taps: [] }, platform = 'linux') {
   page.on('pageerror', (e) => errors.push(e.message));
   await page.goto(`http://127.0.0.1:${port}/#topology`, { waitUntil: 'networkidle' });
   if (platform === 'linux') {
-    await page.click('#topology-tab-roof');
-    await page.waitForSelector('#topology-roof:not([hidden])');
+    await page.click('#topology-tab-array');
+    await page.waitForSelector('#topology-array:not([hidden])');
   }
   return { page, ctx, api, errors };
 }
-const tile = (page, addr) => page.locator(`#roof-canvas [data-kind="panel"][data-id="${addr}"]`);
-const chip = (page, addr) => page.locator(`#roof-tray [data-kind="panel"][data-id="${addr}"]`);
+const tile = (page, addr) => page.locator(`#array-canvas [data-kind="panel"][data-id="${addr}"]`);
+const chip = (page, addr) => page.locator(`#array-tray [data-kind="panel"][data-id="${addr}"]`);
 
-test('the ESP32 has no Roof tab', async () => {
+test('the ESP32 has no Array tab', async () => {
   const { page, ctx } = await open(undefined, 'esp32');
   await page.waitForTimeout(400);
-  assert.equal(await page.isVisible('#topology-tab-roof'), false);
+  assert.equal(await page.isVisible('#topology-tab-array'), false);
   await ctx.close();
 });
 
-test('no roof yet: it says how to start', async () => {
+test('no array yet: it says how to start', async () => {
   const { page, ctx, errors } = await open();
-  await page.waitForSelector('#roof-canvas .roof-empty');
-  assert.match(await page.textContent('#roof-canvas'), /No roof drawn yet/);
-  assert.equal(await page.isVisible('#roof-tray'), false);
+  await page.waitForSelector('#array-canvas .array-empty');
+  assert.match(await page.textContent('#array-canvas'), /No array drawn yet/);
+  assert.equal(await page.isVisible('#array-tray'), false);
   assert.deepEqual(errors, []);
   await ctx.close();
 });
 
-test('a saved roof: each panel in place, lit by its power, and the TAP', async () => {
+test('a saved array: each panel in place, lit by its power, and the TAP', async () => {
   const { page, ctx, errors } = await open({
     panels: [{ addr: '0002', x: 5, y: 3, portrait: true }, { addr: '0003', x: 6, y: 3, portrait: false }, { addr: '0004', x: 5, y: 4, portrait: true }],
     taps: [{ id: '1201', x: 8, y: 4 }],
   });
-  await page.waitForSelector('#roof-canvas .roof-tile');
+  await page.waitForSelector('#array-canvas .array-tile');
   const box = async (addr) => (await tile(page, addr).boundingBox());
   const a1 = await box('0002'), a2 = await box('0003'), b1 = await box('0004');
   assert.ok(a2.x > a1.x && Math.abs(a2.y + a2.height / 2 - (a1.y + a1.height / 2)) < 2, 'A2 to the right of A1, same row');
@@ -100,19 +100,19 @@ test('a saved roof: each panel in place, lit by its power, and the TAP', async (
   assert.doesNotMatch(await tile(page, '0003').getAttribute('class'), /\blit\b/);
   assert.match(await tile(page, '0004').getAttribute('class'), /\bstale\b/);
   assert.match(await tile(page, '0002').textContent(), /400 W/);
-  assert.match(await page.getAttribute('#roof-canvas .roof-tap', 'aria-label'), /Garage/);
-  assert.match(await page.textContent('#roof-summary'), /3 of 3 panels placed · 1 TAP/);
+  assert.match(await page.getAttribute('#array-canvas .array-tap', 'aria-label'), /Garage/);
+  assert.match(await page.textContent('#array-summary'), /3 of 3 panels placed · 1 TAP/);
   assert.deepEqual(errors, []);
   await ctx.close();
 });
 
 test('editing: drag from the tray, press to place, keys to move, turn and return, swap on a drop, save', async () => {
   const { page, ctx, api, errors } = await open();
-  await page.click('#roof-edit-btn');
-  await page.waitForSelector('#roof-tray .roof-chip');
-  assert.equal(await page.locator('#roof-tray [data-kind="tap"]').count(), 1);
+  await page.click('#array-edit-btn');
+  await page.waitForSelector('#array-tray .array-chip');
+  assert.equal(await page.locator('#array-tray [data-kind="tap"]').count(), 1);
   // Drag A1 to the cell at column 4, row 2.
-  const c = await page.locator('#roof-canvas').boundingBox();
+  const c = await page.locator('#array-canvas').boundingBox();
   const cell = c.width / 16;
   const from = await chip(page, '0002').boundingBox();
   await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
@@ -138,15 +138,64 @@ test('editing: drag from the tray, press to place, keys to move, turn and return
   await page.mouse.down();
   await page.mouse.move(a2.x + a2.width / 2, a2.y + a2.height / 2, { steps: 8 });
   await page.mouse.up();
-  await page.click('#roof-save-btn');
-  await page.waitForFunction(() => document.getElementById('roof-edit-btn').style.display !== 'none');
+  await page.click('#array-save-btn');
+  await page.waitForFunction(() => document.getElementById('array-edit-btn').style.display !== 'none');
   const saved = api.posts.at(-1);
   const at = Object.fromEntries(saved.panels.map(p => [p.addr, [p.x, p.y, p.portrait]]));
-  assert.deepEqual(at, { '0003': [0, 0, false], '0004': [1, 0, true] }, 'A2 and B1 swapped; A1 back off the roof');
+  // The drawing is kept anchored at its top left: A1 dropped alone sat at
+  // 0,0; with A1 gone, A2 shifted back to 0,0; B1 came in at 1,0 and swapped.
+  assert.deepEqual(at, { '0003': [1, 0, false], '0004': [0, 0, true] }, 'A2 and B1 swapped; A1 back off the array');
   assert.deepEqual(saved.taps, []);
-  // Saved: the roof is drawn, the tray gone.
-  assert.equal(await page.isVisible('#roof-tray'), false);
-  assert.equal(await page.locator('#roof-canvas .roof-tile').count(), 2);
+  // Saved: the array is drawn, the tray gone.
+  assert.equal(await page.isVisible('#array-tray'), false);
+  assert.equal(await page.locator('#array-canvas .array-tile').count(), 2);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test('a TAP can share a panel\'s square, drawn small in its corner', async () => {
+  const { page, ctx, api, errors } = await open();
+  await page.click('#array-edit-btn');
+  await page.waitForSelector('#array-tray .array-chip');
+  // A1 pressed in lands at 0,0; the TAP pressed in lands at the first square
+  // without a TAP: the same one, under A1.
+  await page.locator('#array-tray [data-kind="panel"][data-id="0002"]').click();
+  await page.locator('#array-tray [data-kind="tap"]').click();
+  const tap = page.locator('#array-canvas [data-kind="tap"]');
+  await tap.waitFor();
+  assert.match(await tap.getAttribute('class'), /\bunder\b/);
+  const t = await tap.boundingBox(), p = await page.locator('#array-canvas [data-kind="panel"][data-id="0002"]').boundingBox();
+  assert.ok(t.width < p.width && t.height < p.height, 'smaller than the panel');
+  await page.click('#array-save-btn');
+  await page.waitForFunction(() => document.getElementById('array-edit-btn').style.display !== 'none');
+  assert.deepEqual(api.posts.at(-1).taps, [{ id: '1201', x: 0, y: 0 }]);
+  assert.deepEqual(api.posts.at(-1).panels, [{ addr: '0002', x: 0, y: 0, portrait: true }]);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test('the grid grows in every direction: a drop above or left of everything shifts the drawing', async () => {
+  const { page, ctx, api, errors } = await open({ panels: [{ addr: '0002', x: 0, y: 0, portrait: true }], taps: [] });
+  await page.click('#array-edit-btn');
+  await page.waitForSelector('#array-tray .array-chip');
+  // Three empty squares above and to the left of A1 while editing.
+  const a1 = await page.locator('#array-canvas [data-kind="panel"][data-id="0002"]').boundingBox();
+  const c = await page.locator('#array-canvas').boundingBox();
+  const cell = (a1.x + a1.width / 2 - c.x) / 3.5;
+  assert.ok(Math.abs((a1.y + a1.height / 2 - c.y) / cell - 3.5) < 0.2, 'three squares above it');
+  // Drop A2 two squares left of A1 and one above.
+  const from = await page.locator('#array-tray [data-kind="panel"][data-id="0003"]').boundingBox();
+  await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(a1.x + a1.width / 2 - 2 * cell, a1.y + a1.height / 2 - cell, { steps: 8 });
+  await page.mouse.up();
+  // Keys reach past the edge too: A1 one square further down.
+  await page.locator('#array-canvas [data-kind="panel"][data-id="0002"]').focus();
+  await page.keyboard.press('ArrowDown');
+  await page.click('#array-save-btn');
+  await page.waitForFunction(() => document.getElementById('array-edit-btn').style.display !== 'none');
+  const at = Object.fromEntries(api.posts.at(-1).panels.map(p => [p.addr, [p.x, p.y]]));
+  assert.deepEqual(at, { '0002': [2, 2], '0003': [0, 0] });
   assert.deepEqual(errors, []);
   await ctx.close();
 });

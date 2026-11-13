@@ -9,12 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Draw your roof and see each panel's power where it sits (Raspberry Pi
-  and other Linux).** Topology › Roof places every panel and TAP on a grid
-  as they are on the roof, by dragging (mouse or touch) or from the
-  keyboard, and then shades each panel by its power as it updates. It's
-  kept apart from the string layout, and saved in `roof.json` beside the
-  settings.
+- **Draw your array and see each panel's power where it sits (Raspberry
+  Pi and other Linux).** Topology › Array places every panel and TAP on a
+  grid as they really are (a TAP can share the square of the panel it's
+  under), by dragging (mouse or touch) or from the keyboard, and then
+  shades each panel by its power as it updates. The grid grows in any
+  direction while editing. It's kept apart from the string layout, and
+  saved in `array.json` beside the settings.
 - **The join window stays open for a while after sunrise (Raspberry Pi
   and other Linux).** With automatic discovery on, the TAP's join window is
   now also kept open for 2 hours after the day's first report, so

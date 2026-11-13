@@ -81,8 +81,8 @@ jobs:
         run: docker run --rm -v "$PWD":/src -w /src tigod-dev linux/scripts/new-optimizer-e2e.sh
       - name: The mesh map's link counts, against a synthetic bus
         run: docker run --rm -v "$PWD":/src -w /src tigod-dev linux/scripts/mesh-e2e.sh
-      - name: Roof layout end-to-end
-        run: docker run --rm -v "$PWD":/src -w /src tigod-dev linux/scripts/roof-e2e.sh
+      - name: ArrayLayout layout end-to-end
+        run: docker run --rm -v "$PWD":/src -w /src tigod-dev linux/scripts/array-e2e.sh
       - name: A slow broker name, looked up off the main loop
         run: docker run --rm -v "$PWD":/src -w /src tigod-dev linux/scripts/mqtt-lookup-e2e.sh
       - name: HTTPS, with test certificates
