@@ -133,6 +133,36 @@ struct RadioBlock {
     return a == b;
   }
 
+  // For a person: which settings differ from o, with this block's value
+  // then o's; the PAN and the key only as differing, never their values.
+  std::string differences(const RadioBlock &o) const {
+    std::string out;
+    auto add = [&out](const std::string &s) { out += (out.empty() ? "" : ", ") + s; };
+    char buf[96];
+    if (channel != o.channel) {
+      std::snprintf(buf, sizeof(buf), "channel %u, not %u", o.channel, channel);
+      add(buf);
+    }
+    if (pan != o.pan) add("the PAN");
+    if (map != o.map)
+      add("map " + hex_(Bytes(o.map.begin(), o.map.end())) + ", not " + hex_(Bytes(map.begin(), map.end())));
+    if (slt != o.slt) {
+      std::snprintf(buf, sizeof(buf), "SLT %02X, not %02X", o.slt, slt);
+      add(buf);
+    }
+    if (key != o.key) add("the key");
+    if (optimization != o.optimization) {
+      std::snprintf(buf, sizeof(buf), "optimization %08X, not %08X", static_cast<unsigned>(o.optimization),
+                    static_cast<unsigned>(optimization));
+      add(buf);
+    }
+    if (slm != o.slm) {
+      std::snprintf(buf, sizeof(buf), "SLm %02X, not %02X", o.slm, slm);
+      add(buf);
+    }
+    return out;
+  }
+
   // For a person: everything but the key.
   std::string describe() const {
     char buf[160];
@@ -395,7 +425,10 @@ class ProvisionJob : public TableJob {
         return;
       case Step::save:
         if (!got) return fail_("the TAP didn't answer the save (0D 00 01); the write is in RAM only");
-        if (!now.same_settings(block_)) return fail_("after the save the TAP runs something else");
+        if (!now.same_settings(block_))
+          return fail_("after the save the TAP runs something else: its stored read (" +
+                       std::to_string(now.wide ? RADIO_BLOCK_WIDE : RADIO_BLOCK_SIZE) + " bytes) has " +
+                       block_.differences(now));
         step_ = Step::check;
         return;
       case Step::check:

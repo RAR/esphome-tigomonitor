@@ -10,6 +10,7 @@
 #include "bus_watch.h"
 
 #include <cstdio>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -131,6 +132,9 @@ struct FakeTap {
   int status = 0;
   bool echo_wrong = false;
   bool silent = false;
+  // The stored read answers with something other than RAM (the roof's G8.65
+  // on 2026-11-13: "after the save the TAP runs something else").
+  std::function<void(RadioBlock &)> stored_shows;
   std::vector<Bytes> got;
   int resets = 0;
   // The G8.59's form: the active block (read 00 00, the write and its echo)
@@ -158,7 +162,10 @@ struct FakeTap {
     if (args.size() == (wide ? 48u : 38u) && args[0] == 0x01) RadioBlock::decode(Bytes(args.begin() + 2, args.end()), ram);
     if (args == Bytes{0x00, 0x01}) save_armed = true;
     RadioBlock shown = ram;
-    if (args == Bytes{0x00, 0x01}) shown.wide = false;
+    if (args == Bytes{0x00, 0x01}) {
+      shown.wide = false;
+      if (stored_shows) stored_shows(shown);
+    }
     Bytes data = shown.encode();
     if (echo_wrong) data[0] ^= 1;
     data.push_back(static_cast<uint8_t>(status));
@@ -374,6 +381,26 @@ static void test_provision_stops() {
     ProvisionJob job(TAP_MAC, made_up(), false, false);
     run(job, tap);
     CHECK(!job.ok() && job.message().find("echo differs") != std::string::npos);
+  }
+  {  // a stored read that differs: says which fields, never the key or PAN
+    FakeTap tap;
+    tap.stored_shows = [](RadioBlock &b) {
+      b.map[0] = 0x0E;
+      b.map[6] = 0x84;
+      b.pan ^= 1;
+      b.key[0] ^= 1;
+    };
+    ProvisionJob job(TAP_MAC, made_up(), false, false);
+    run(job, tap);
+    std::string m = job.message();
+    CHECK(!job.ok() && m.find("after the save the TAP runs something else") != std::string::npos);
+    CHECK(m.find("map") != std::string::npos && m.find("0e") != std::string::npos);
+    CHECK(m.find("the PAN") != std::string::npos && m.find("the key") != std::string::npos);
+    CHECK(m.find("36 bytes") != std::string::npos);
+    char pan[8];
+    std::snprintf(pan, sizeof(pan), "%04X", made_up().pan);
+    CHECK(m.find(pan) == std::string::npos);  // the PAN itself never shown
+    CHECK(m.find("channel") == std::string::npos);  // what agrees isn't listed
   }
   {  // no answer at all: not even to which TAP it is
     FakeTap tap;
