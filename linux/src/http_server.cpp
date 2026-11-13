@@ -3,7 +3,7 @@
 #include "fsutil.h"
 #include "layout_api.h"
 #include "log.h"
-#include "roof.h"
+#include "array_layout.h"
 #include "serial_port.h"
 
 #include <httplib.h>
@@ -1124,39 +1124,39 @@ void HttpServer::routes_() {
 
   // The Topology editor: the whole tree, and saving one. A save replaces the
   // layout in one go and marks it the user's own (tigo_layout.h).
-  // Topology > Roof: where each panel and TAP physically sits (roof.h), in
-  // roof.json beside settings.json. Empty until the first save.
-  auto roof_path = [this] {
+  // Topology > Array: where each panel and TAP physically sits (array.h), in
+  // array.json beside settings.json. Empty until the first save.
+  auto array_path = [this] {
     const std::string &s = ctx_.settings_path;
     size_t slash = s.find_last_of('/');
-    return (slash == std::string::npos ? std::string(".") : s.substr(0, slash)) + "/roof.json";
+    return (slash == std::string::npos ? std::string(".") : s.substr(0, slash)) + "/array.json";
   };
-  svr.Get("/api/roof", [roof_path](const httplib::Request &, httplib::Response &res) {
-    Roof r;
-    std::ifstream in(roof_path());
+  svr.Get("/api/array", [array_path](const httplib::Request &, httplib::Response &res) {
+    ArrayLayout r;
+    std::ifstream in(array_path());
     if (in) {
       json j = json::parse(in, nullptr, false);
-      if (j.is_discarded() || !roof_from_json(j, r).empty()) {
-        LOGW("roof: %s isn't a roof layout; showing none", roof_path().c_str());
-        r = Roof();
+      if (j.is_discarded() || !array_from_json(j, r).empty()) {
+        LOGW("array: %s isn't a array layout; showing none", array_path().c_str());
+        r = ArrayLayout();
       }
     }
-    send_json(res, roof_to_json(r));
+    send_json(res, array_to_json(r));
   });
-  svr.Post("/api/roof", [this, roof_path](const httplib::Request &req, httplib::Response &res) {
+  svr.Post("/api/array", [this, array_path](const httplib::Request &req, httplib::Response &res) {
     json j = json::parse(req.body, nullptr, false);
-    Roof r;
-    std::string err = j.is_discarded() ? "Expected a JSON object." : roof_from_json(j, r);
+    ArrayLayout r;
+    std::string err = j.is_discarded() ? "Expected a JSON object." : array_from_json(j, r);
     if (!err.empty()) {
       send_json(res, {{"error", err}}, 400);
       return;
     }
     std::lock_guard<std::mutex> lock(settings_mu_);
-    if (!write_file_atomic(roof_path(), roof_to_json(r).dump(2) + "\n")) {
-      send_json(res, {{"error", "Could not save the roof layout to disk."}}, 500);
+    if (!write_file_atomic(array_path(), array_to_json(r).dump(2) + "\n")) {
+      send_json(res, {{"error", "Could not save the array layout to disk."}}, 500);
       return;
     }
-    LOGI("roof: saved, %zu panels and %zu TAPs placed", r.panels.size(), r.taps.size());
+    LOGI("array: saved, %zu panels and %zu TAPs placed", r.panels.size(), r.taps.size());
     send_json(res, {{"saved", true}});
   });
 
@@ -2178,7 +2178,8 @@ void HttpServer::routes_() {
       std::string tls_err = TlsCerts::check(s.tls_cert, s.tls_key);
       if (!tls_err.empty()) err = "The certificate did not load: " + tls_err + ".";
     }
-    if (err.empty() && s.pgw_rule != "random" && s.pgw_rule != "roof") err = "pgw_rule is \"random\" or \"roof\".";
+    if (err.empty() && s.pgw_rule == "roof") s.pgw_rule = "array";
+    if (err.empty() && s.pgw_rule != "random" && s.pgw_rule != "array") err = "pgw_rule is \"random\" or \"array\".";
     if (err.empty() && s.pgw_panels.size() > 8) err = "pgw_panels names at most 8 panels.";
     if (err.empty() && (s.web_username.empty() || s.web_username.find(':') != std::string::npos))
       err = "The web UI username cannot be empty or contain a colon.";

@@ -63,8 +63,9 @@ struct Settings {
   // reports it and never changes it, so the web UI can't turn it on.
   bool dangerous_options = false;
   // Which optimizers the 0x41 PGW streams 01 and 02 go to (pgw.h):
-  // "random", any heard optimizer in turn, as before; "roof", the far end
-  // of the roof from each TAP (or the worst loss, with no roof drawn).
+  // "random", any heard optimizer in turn, as before; "array", the far end
+  // of the array from each TAP (or the worst loss, with no layout drawn).
+  // "roof", its first name, is read as "array".
   // pgw_panels names them outright, by panel name or address. Only with
   // master_send_41 on.
   std::string pgw_rule = "random";

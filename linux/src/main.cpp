@@ -374,17 +374,17 @@ int main(int argc, char **argv) {
             tuids.push_back(static_cast<uint16_t>(strtoul(kv.first.c_str(), nullptr, 16)));
         return tuids;
       });
-      if (settings.pgw_rule == "roof") {
-        // The PGW pool per TAP (pgw.h): from the roof drawn under Topology >
-        // Roof, else today's worst loss; pgw_panels overrides. Logged when it
+      if (settings.pgw_rule == "array") {
+        // The PGW pool per TAP (pgw.h): from the layout drawn under Topology >
+        // Array, else today's worst loss; pgw_panels overrides. Logged when it
         // changes.
         auto last_pool = std::make_shared<std::map<uint16_t, std::string>>();
         m->set_tap_pool([&monitor, state_dir, named = settings.pgw_panels, last_pool](uint16_t tap) {
-          Roof roof;
-          std::ifstream in(state_dir + "/roof.json");
+          ArrayLayout layout;
+          std::ifstream in(state_dir + "/array.json");
           if (in) {
             nlohmann::json j = nlohmann::json::parse(in, nullptr, false);
-            if (j.is_discarded() || !roof_from_json(j, roof).empty()) roof = Roof();
+            if (j.is_discarded() || !array_from_json(j, layout).empty()) layout = ArrayLayout();
           }
           std::map<std::string, std::string> names;
           std::vector<PgwSeen> seen;
@@ -409,7 +409,7 @@ int main(int argc, char **argv) {
           char id[5];
           snprintf(id, sizeof(id), "%04X", tap);
           std::string why;
-          std::vector<uint16_t> pool = pgw_pool(roof, id, members, named, why);
+          std::vector<uint16_t> pool = pgw_pool(layout, id, members, named, why);
           std::string text = why + ", " + std::to_string(members.size()) + " through it:";
           for (uint16_t t : pool) {
             char a[5];

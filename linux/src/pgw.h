@@ -7,16 +7,16 @@
 // the owner's roof that picked String B, the face farthest from the TAP,
 // all day. Here that is the rule itself:
 //   1. named: pgw_panels from the settings, by panel name or address;
-//   2. roof: of the optimizers reporting through this TAP and placed on
-//      the roof (roof.h), the farthest from this TAP's marker; panels
+//   2. array: of the optimizers reporting through this TAP and placed on
+//      the array layout (array_layout.h), the farthest from this TAP's marker; panels
 //      around one (all eight directions) only break an exact tie. Not
 //      neighbours first: on an A-frame roof the two faces are drawn with a
 //      gap for the ridge, and a dense block's corner would beat the far
 //      face (the owner's roof, 2026-11-12);
-//   3. loss: no roof to go by, the worst loss so far today.
+//   3. loss: no layout to go by, the worst loss so far today.
 #pragma once
 
-#include "roof.h"
+#include "array_layout.h"
 
 #include <algorithm>
 #include <cctype>
@@ -74,9 +74,9 @@ inline std::vector<PgwMember> pgw_members(const std::vector<PgwSeen> &seen, uint
 }
 
 // The pool for TAP tap_id (4 hex digits) from members, the optimizers
-// reporting through it; why says which rule chose it: "named", "roof",
+// reporting through it; why says which rule chose it: "named", "array",
 // "loss" or "none".
-inline std::vector<uint16_t> pgw_pool(const Roof &roof, const std::string &tap_id, const std::vector<PgwMember> &members,
+inline std::vector<uint16_t> pgw_pool(const ArrayLayout &layout, const std::string &tap_id, const std::vector<PgwMember> &members,
                                       const std::vector<std::string> &named, std::string &why) {
   std::vector<uint16_t> out;
   // 1. Named, in the order given.
@@ -98,14 +98,14 @@ inline std::vector<uint16_t> pgw_pool(const Roof &roof, const std::string &tap_i
       return out;
     }
   }
-  // 2. The roof.
-  const RoofTap *tap = nullptr;
-  for (const auto &t : roof.taps)
+  // 2. The array layout.
+  const ArrayTap *tap = nullptr;
+  for (const auto &t : layout.taps)
     if (pgw_upper(t.id) == pgw_upper(tap_id)) tap = &t;
   if (tap) {
-    std::map<std::string, const RoofPanel *> at;
+    std::map<std::string, const ArrayPanel *> at;
     std::set<std::pair<int, int>> cells;
-    for (const auto &p : roof.panels) {
+    for (const auto &p : layout.panels) {
       at[pgw_upper(p.addr)] = &p;
       cells.insert({p.x, p.y});
     }
@@ -120,7 +120,7 @@ inline std::vector<uint16_t> pgw_pool(const Roof &roof, const std::string &tap_i
       std::snprintf(addr, sizeof(addr), "%04X", m.tuid);
       auto it = at.find(addr);
       if (it == at.end()) continue;
-      const RoofPanel &p = *it->second;
+      const ArrayPanel &p = *it->second;
       int around = 0;
       for (int dx = -1; dx <= 1; dx++)
         for (int dy = -1; dy <= 1; dy++)
@@ -134,7 +134,7 @@ inline std::vector<uint16_t> pgw_pool(const Roof &roof, const std::string &tap_i
         return a.tuid < b.tuid;
       });
       for (size_t i = 0; i < PGW_POOL; i++) out.push_back(placed[i].tuid);
-      why = "roof";
+      why = "array";
       return out;
     }
   }

@@ -89,7 +89,8 @@ Settings load_settings(const std::string &path) {
   if (s.web_port < 0 || s.web_port > 65535) s.web_port = 0;
   if (s.web_username.empty()) s.web_username = "admin";
   if (s.bus_role != "master" && s.bus_role != "standby") s.bus_role = "listen";
-  if (s.pgw_rule != "roof") s.pgw_rule = "random";
+  if (s.pgw_rule == "roof") s.pgw_rule = "array";  // its first name, before Roof became Array
+  if (s.pgw_rule != "array") s.pgw_rule = "random";
   if (!standby_takeover_ok(s.standby_takeover_s)) s.standby_takeover_s = 3;
   if (s.discovery_morning_min < 0 || s.discovery_morning_min > 720) s.discovery_morning_min = 120;
   if (!gateway_id_ok(s.gateway_id)) s.gateway_id = 0x1201;
