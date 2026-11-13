@@ -633,6 +633,60 @@
   .topo-empty { padding: 60px 24px; text-align: center; color: var(--text-dim); font-size: 13px; }
   /* The mesh map (Pi): optimizers around the TAP each reports through. */
   .mesh-note { margin: 0 0 14px; color: var(--text-dim); font-size: 13px; max-width: 760px; }
+  /* ===== Topology > Array: panels where they sit ===== */
+  .array-wrap { display: flex; gap: 14px; align-items: flex-start; }
+  .array-scroll { flex: 1; min-width: 0; overflow: auto; border: 1px solid var(--border); border-radius: 10px;
+    background: var(--bg-2); max-height: 72vh; }
+  .array-canvas { position: relative; margin: 12px; touch-action: none; }
+  .array-canvas.editing { background-image:
+      linear-gradient(to right, color-mix(in srgb, var(--border) 70%, transparent) 1px, transparent 1px),
+      linear-gradient(to bottom, color-mix(in srgb, var(--border) 70%, transparent) 1px, transparent 1px);
+    background-size: var(--array-cell) var(--array-cell); outline: 1px solid var(--border); }
+  .array-tile { position: absolute; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    border-radius: 3px; border: 1px solid rgba(255,255,255,0.18); color: #e8eef8; font-size: 11px; line-height: 1.15;
+    font-variant-numeric: tabular-nums; user-select: none; box-sizing: border-box;
+    background-image: linear-gradient(to right, rgba(255,255,255,0.07) 1px, transparent 1px),
+                      linear-gradient(to bottom, rgba(255,255,255,0.07) 1px, transparent 1px);
+    background-size: 33.4% 25%; box-shadow: 0 1px 2px rgba(0,0,0,0.35); }
+  .array-tile.lit { color: #061018; border-color: rgba(6,16,24,0.25); }
+  .array-tile.stale { opacity: 0.55; }
+  .array-tile .rn { font-weight: 600; }
+  .array-tile .rw { font-size: 9.5px; opacity: 0.9; white-space: nowrap; letter-spacing: -0.02em; }
+  .array-tile .rn { white-space: nowrap; }
+  .array-canvas.editing .array-tile, .array-canvas.editing .array-tap { cursor: grab; }
+  .array-tile:focus-visible, .array-tap:focus-visible, .array-chip:focus-visible { outline: 2px solid var(--accent-2); outline-offset: 2px; }
+  .array-tile.sel, .array-tap.sel { outline: 2px solid var(--accent-2); outline-offset: 2px; }
+  .array-tap { position: absolute; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px;
+    border-radius: 50%; background: var(--bg-3); border: 2px solid var(--accent-2); color: var(--text);
+    font-size: 10px; font-weight: 600; box-sizing: border-box; user-select: none; box-shadow: 0 1px 3px rgba(0,0,0,0.3); }
+  .array-tap svg { width: 14px; height: 14px; color: var(--accent-2); }
+  .array-tap.under { z-index: 1; gap: 0; }
+  .array-tap.under span { display: none; }
+  .array-tap.under svg { width: 12px; height: 12px; }
+  .array-drop { position: absolute; border: 2px dashed var(--accent-2); border-radius: 4px; pointer-events: none; box-sizing: border-box; }
+  .array-drop.taken { border-color: var(--warn); }
+  .array-ghost { position: fixed; pointer-events: none; z-index: 50; opacity: 0.85; }
+  .array-tray { width: 210px; flex: none; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-2);
+    padding: 10px; max-height: 72vh; overflow: auto; }
+  .array-tray h3 { margin: 0 0 6px; font-size: 12px; font-weight: 600; color: var(--text-dim); }
+  .array-tray .array-group { margin-bottom: 10px; }
+  .array-tray .array-group-name { font-size: 11px; color: var(--text-dim); margin: 6px 0 4px; }
+  .array-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+  .array-chip { font: inherit; font-size: 11px; padding: 3px 7px; border-radius: 4px; border: 1px solid var(--border);
+    background: #16233d; color: #e8eef8; cursor: grab; touch-action: none; }
+  .array-chip.tap { background: var(--bg-3); color: var(--text); border-color: var(--accent-2); }
+  .array-tray .array-done { font-size: 12px; color: var(--text-dim); }
+  .array-empty { padding: 36px 20px; text-align: center; color: var(--text-dim); font-size: 13px; }
+  .array-empty strong { display: block; color: var(--text); font-size: 15px; margin-bottom: 6px; }
+  .array-scale { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-dim); }
+  .array-scale i { display: inline-block; width: 64px; height: 8px; border-radius: 4px;
+    background: linear-gradient(to right, #16233d, var(--accent)); border: 1px solid var(--border); }
+  .array-help { font-size: 12px; color: var(--text-dim); margin: 10px 0 0; max-width: 760px; }
+  .array-help kbd { font: inherit; font-size: 11px; border: 1px solid var(--border); border-radius: 3px; padding: 0 4px; background: var(--bg-3); }
+  @media (max-width: 760px) {
+    .array-wrap { flex-direction: column; }
+    .array-tray { width: auto; align-self: stretch; max-height: 30vh; }
+  }
   .mesh-stage { display: grid; grid-template-columns: minmax(0, 1fr) 260px; background: var(--bg-2);
                 border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
   .mesh-graph { min-width: 0; }
@@ -1548,6 +1602,7 @@
       <div class="page-tabs" role="tablist" aria-label="Topology" id="topology-tabs" data-linux-only style="display:none">
         <button role="tab" id="topology-tab-mesh" aria-controls="topology-mesh" aria-selected="false" data-tab="mesh" tabindex="-1">Mesh</button>
         <button role="tab" id="topology-tab-layout" aria-controls="topology-layout" aria-selected="true" data-tab="layout">Layout</button>
+        <button role="tab" id="topology-tab-array" aria-controls="topology-array" aria-selected="false" data-tab="array" tabindex="-1">Array</button>
       </div>
 
       <div id="topology-layout" role="tabpanel" aria-labelledby="topology-tab-layout">
@@ -1576,6 +1631,22 @@
       <div id="topo-tree" class="topo-tree">
         <div class="topo-empty">Loading topology…</div>
       </div>
+      </div>
+
+      <div id="topology-array" role="tabpanel" aria-labelledby="topology-tab-array" hidden>
+        <div class="topo-toolbar">
+          <span class="array-scale" id="array-scale"><span>0 W</span><i></i><span id="array-scale-max">peak</span></span>
+          <span class="topo-summary" id="array-summary">—</span>
+          <button class="btn" id="array-edit-btn">Edit array</button>
+          <button class="btn" id="array-cancel-btn" style="display:none">Cancel</button>
+          <button class="btn primary" id="array-save-btn" style="display:none">Save array</button>
+        </div>
+        <div id="array-error" class="topo-ed-error" role="alert"></div>
+        <div class="array-wrap">
+          <div class="array-tray" id="array-tray" role="region" aria-label="Not placed yet" style="display:none"></div>
+          <div class="array-scroll" id="array-scroll"><div class="array-canvas" id="array-canvas"></div></div>
+        </div>
+        <p class="array-help" id="array-help" style="display:none">Drag each panel from the list onto the grid where it really sits, and each TAP where it's mounted. Leave empty squares for gaps, such as between arr faces or rows. Select a placed panel to move it with the arrow keys, turn it with <kbd>R</kbd>, or send it back to the list with <kbd>Delete</kbd>. Dropping on another panel swaps the two.</p>
       </div>
 
       <div id="topology-mesh" role="tabpanel" aria-labelledby="topology-tab-mesh" hidden>
@@ -7686,7 +7757,7 @@
     if (!name) { try { name = localStorage.getItem('topology-tab'); } catch (e) {} }
     // The Pi opens on Mesh unless Layout was picked; the ESP32 has only Layout.
     if (PLATFORM !== 'linux') name = 'layout';
-    else if (name !== 'layout') name = 'mesh';
+    else if (name !== 'layout' && name !== 'array') name = 'mesh';
     document.querySelectorAll('#topology-tabs [role="tab"]').forEach(t => {
       const on = t.dataset.tab === name;
       t.setAttribute('aria-selected', String(on));
@@ -7695,6 +7766,7 @@
     });
     // Fetched only when it's on screen, not for a tab remembered from before.
     if (name === 'mesh' && document.getElementById('view-topology').classList.contains('active')) refreshMesh();
+    if (name === 'array' && document.getElementById('view-topology').classList.contains('active')) refreshArray();
   }
   document.querySelectorAll('#topology-tabs [role="tab"]').forEach(t => t.addEventListener('click', () => {
     topologyTab(t.dataset.tab);
@@ -7713,7 +7785,301 @@
   platformReady.then(() => topologyTab());
   document.querySelector('#nav button[data-view="topology"]').addEventListener('click', () => {
     if (!document.getElementById('topology-mesh').hidden) refreshMesh();
+    if (!document.getElementById('topology-array').hidden) refreshArray();
   });
+
+  // ---- the array: each panel where it sits, coloured by its power ----
+  // Topology > Array (Pi). /api/array holds the positions (one grid cell per
+  // panel; touching cells are neighbours on the arr), /api/devices the
+  // live power. Edit array opens a tray of what isn't placed yet.
+  const arr = { saved: { panels: [], taps: [] }, draft: null, devices: [], tapNames: {}, sel: null, loaded: false };
+  const ARRAY_PANEL_BASE = '#16233d';
+  const ARRAY_MARGIN = 3;  // empty squares round the drawing while editing
+  const arrayEsc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const arrayCell = () => (window.innerWidth < 760 ? 40 : 48);
+  const ARRAY_TAP_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">' +
+    '<path d="M12 13v8"/><circle cx="12" cy="11" r="2"/><path d="M8.5 7.5a5 5 0 0 0 0 7"/><path d="M15.5 7.5a5 5 0 0 1 0 7"/>' +
+    '<path d="M5.6 4.6a9 9 0 0 0 0 12.8"/><path d="M18.4 4.6a9 9 0 0 1 0 12.8"/></svg>';
+
+  async function refreshArray(devicesOnly) {
+    try {
+      const jobs = [apiFetch('/api/devices').then(r => r.ok ? r.json() : { devices: [] })];
+      if (!devicesOnly) {
+        jobs.push(apiFetch('/api/array').then(r => { if (!r.ok) throw new Error(`/api/array ${r.status}`); return r.json(); }));
+        jobs.push(apiFetch('/api/mesh').then(r => r.ok ? r.json() : {}).catch(() => ({})));
+      }
+      const [dev, saved, mesh] = await Promise.all(jobs);
+      arr.devices = (dev && dev.devices) || [];
+      if (saved) { arr.saved = { panels: saved.panels || [], taps: saved.taps || [] }; arr.loaded = true; }
+      if (mesh && mesh.taps) mesh.taps.forEach(t => { arr.tapNames[t.id] = t.name || ''; });
+      document.getElementById('array-error').textContent = '';
+    } catch (e) {
+      document.getElementById('array-error').textContent = `Couldn't load the array: ${e.message}`;
+    }
+    arrayRender();
+  }
+  // Every TAP a panel reports through, plus any placed or named.
+  function arrayTapIds() {
+    const ids = new Set(Object.keys(arr.tapNames));
+    arr.devices.forEach(d => { if (d.tap) ids.add(d.tap); });
+    (arr.draft || arr.saved).taps.forEach(t => ids.add(t.id));
+    return [...ids].sort();
+  }
+  const arrayTapLabel = id => arr.tapNames[id] ? `${arr.tapNames[id]}` : `TAP ${id}`;
+  // What of one kind is in a square. A TAP can share a square with a panel
+  // (it's often mounted under one); two panels or two TAPs can't.
+  function arrayAt(l, kind, x, y) {
+    return (kind === 'panel' ? l.panels : l.taps).find(i => i.x === x && i.y === y) || null;
+  }
+  function arrayFree(l, kind) {
+    for (let y = 0; y < 200; y++) for (let x = 0; x < 16; x++) if (!arrayAt(l, kind, x, y)) return { x, y };
+    return { x: 0, y: 0 };
+  }
+
+  function arrayRender() {
+    const editing = !!arr.draft;
+    const l = editing ? arr.draft : arr.saved;
+    const canvas = document.getElementById('array-canvas');
+    const C = arrayCell();
+    canvas.style.setProperty('--array-cell', `${C}px`);
+    canvas.classList.toggle('editing', editing);
+    const byAddr = Object.fromEntries(arr.devices.map(d => [String(d.addr).toUpperCase(), d]));
+    const peak = Math.max(1, ...arr.devices.map(d => d.peak_power || d.power || 0));
+    document.getElementById('array-scale-max').textContent = `${Math.round(peak)} W`;
+    document.getElementById('array-scale').style.display = editing ? 'none' : '';
+    document.getElementById('array-tray').style.display = editing ? '' : 'none';
+    document.getElementById('array-help').style.display = editing ? '' : 'none';
+    document.getElementById('array-edit-btn').style.display = editing ? 'none' : '';
+    document.getElementById('array-cancel-btn').style.display = editing ? '' : 'none';
+    document.getElementById('array-save-btn').style.display = editing ? '' : 'none';
+    const placed = new Set(l.panels.map(p => p.addr));
+    const known = arr.devices.length;
+    document.getElementById('array-summary').textContent = known || l.panels.length
+      ? `${l.panels.filter(p => byAddr[p.addr]).length} of ${known} panels placed${l.taps.length ? ` · ${l.taps.length} TAP${l.taps.length > 1 ? 's' : ''}` : ''}`
+      : '—';
+    const all = [...l.panels, ...l.taps];
+    if (!editing && !all.length) {
+      canvas.style.width = canvas.style.height = '';
+      canvas.innerHTML = '<div class="array-empty"><strong>No array drawn yet</strong>Choose Edit array and place each panel where it really sits, and each TAP where it\'s mounted. ' +
+        'Then this shows every panel\'s power in place, so a shaded corner or one dropping out stands out.</div>';
+      arrayRenderTray(byAddr, placed);
+      return;
+    }
+    const xs = all.map(i => i.x), ys = all.map(i => i.y);
+    // Editing, ARRAY_MARGIN empty squares on every side, so the drawing can
+    // grow in any direction (arrayNormalize shifts it back to 0,0).
+    const pad = editing && xs.length ? ARRAY_MARGIN : 0;
+    const ox = (xs.length ? Math.min(...xs) : 0) - pad, oy = (ys.length ? Math.min(...ys) : 0) - pad;
+    const cols = editing ? Math.max(16, (xs.length ? Math.max(...xs) : 0) - ox + 1 + ARRAY_MARGIN) : Math.max(...xs) - ox + 1;
+    const rows = editing ? Math.max(10, (ys.length ? Math.max(...ys) : 0) - oy + 1 + ARRAY_MARGIN) : Math.max(...ys) - oy + 1;
+    arr.ox = ox; arr.oy = oy;
+    canvas.style.width = `${cols * C}px`;
+    canvas.style.height = `${rows * C}px`;
+    const tab = editing ? ' tabindex="0"' : '';
+    let html = '';
+    for (const p of l.panels) {
+      const d = byAddr[p.addr];
+      const name = d ? (d.name || p.addr) : p.addr;
+      const w = d && !d.stale ? Math.round(d.power || 0) : null;
+      const frac = w == null ? 0 : Math.max(0, Math.min(1, w / peak));
+      const tw = Math.round(C * (p.portrait ? 0.7 : 0.92)), th = Math.round(C * (p.portrait ? 0.92 : 0.64));
+      const left = (p.x - ox) * C + (C - tw) / 2, top = (p.y - oy) * C + (C - th) / 2;
+      const tip = `${name}${d && d.string_label ? ` · ${d.string_label}` : ''}${w == null ? (d ? ' · no recent report' : ' · not heard') : ` · ${w} W`}`;
+      html += `<div class="array-tile${frac > 0.55 ? ' lit' : ''}${w == null ? ' stale' : ''}${arr.sel === 'p' + p.addr ? ' sel' : ''}" data-kind="panel" data-id="${arrayEsc(p.addr)}"${tab}
+        role="${editing ? 'button' : 'img'}" aria-label="${arrayEsc(tip)}" title="${arrayEsc(tip)}"
+        style="left:${left}px;top:${top}px;width:${tw}px;height:${th}px;background-color:color-mix(in srgb, var(--accent) ${Math.round(frac * 100)}%, ${ARRAY_PANEL_BASE})">
+        <span class="rn">${arrayEsc(name)}</span>${w == null || C < 44 ? '' : `<span class="rw">${w} W</span>`}</div>`;
+    }
+    for (const t of l.taps) {
+      // Under a panel: small, in the corner of the panel's square.
+      const under = l.panels.some(p => p.x === t.x && p.y === t.y);
+      const s = Math.round(C * (under ? 0.46 : 0.8));
+      const left = (t.x - ox) * C + (under ? C - s - 1 : (C - s) / 2), top = (t.y - oy) * C + (under ? C - s - 1 : (C - s) / 2);
+      html += `<div class="array-tap${under ? ' under' : ''}${arr.sel === 't' + t.id ? ' sel' : ''}" data-kind="tap" data-id="${arrayEsc(t.id)}"${tab}
+        role="${editing ? 'button' : 'img'}" aria-label="${arrayEsc(arrayTapLabel(t.id))}" title="${arrayEsc(arrayTapLabel(t.id))}"
+        style="left:${left}px;top:${top}px;width:${s}px;height:${s}px">${ARRAY_TAP_ICON}<span>${arrayEsc(t.id)}</span></div>`;
+    }
+    canvas.innerHTML = html;
+    arrayRenderTray(byAddr, placed);
+  }
+
+  function arrayRenderTray(byAddr, placed) {
+    const tray = document.getElementById('array-tray');
+    if (!arr.draft) { tray.innerHTML = ''; return; }
+    const groups = {};
+    arr.devices.filter(d => !placed.has(String(d.addr).toUpperCase())).forEach(d => {
+      const g = d.string_label || 'No string';
+      (groups[g] = groups[g] || []).push(d);
+    });
+    const taps = arrayTapIds().filter(id => !arr.draft.taps.some(t => t.id === id));
+    const nat = (a, b) => String(a.name || a.addr).localeCompare(String(b.name || b.addr), undefined, { numeric: true });
+    let html = '<h3>Not placed yet</h3>';
+    if (taps.length) html += `<div class="array-group"><div class="array-group-name">TAPs</div><div class="array-chips">${
+      taps.map(id => `<button type="button" class="array-chip tap" data-kind="tap" data-id="${arrayEsc(id)}" title="${arrayEsc(arrayTapLabel(id))}">${arrayEsc(arrayTapLabel(id))}</button>`).join('')}</div></div>`;
+    Object.keys(groups).sort((a, b) => a.localeCompare(b, undefined, { numeric: true })).forEach(g => {
+      html += `<div class="array-group"><div class="array-group-name">${arrayEsc(g)}</div><div class="array-chips">${
+        groups[g].sort(nat).map(d => `<button type="button" class="array-chip" data-kind="panel" data-id="${arrayEsc(String(d.addr).toUpperCase())}">${arrayEsc(d.name || d.addr)}</button>`).join('')}</div></div>`;
+    });
+    if (!taps.length && !Object.keys(groups).length) html += '<p class="array-done">Everything is placed. Drag a panel here to take it off the array.</p>';
+    tray.innerHTML = html;
+  }
+
+  // Put kind/id at x,y in the draft: a panel dropped on a panel swaps with it;
+  // nothing lands on a TAP, nor a TAP on anything. Returns whether it moved.
+  function arrayPlace(kind, id, x, y) {
+    const l = arr.draft;
+    if (x < -ARRAY_MARGIN || y < -ARRAY_MARGIN || x > 199 || y > 199) return false;
+    const list = kind === 'panel' ? l.panels : l.taps;
+    const key = kind === 'panel' ? 'addr' : 'id';
+    const me = list.find(i => i[key] === id);
+    const there = arrayAt(l, kind, x, y);
+    if (there === me && me) return false;
+    if (there) {
+      if (kind !== 'panel') return false;
+      if (me) { there.x = me.x; there.y = me.y; } else l.panels = l.panels.filter(p => p !== there);
+    }
+    if (me) { me.x = x; me.y = y; } else list.push(kind === 'panel' ? { addr: id, x, y, portrait: true } : { id, x, y });
+    arrayNormalize(l);
+    return true;
+  }
+  // Placed above or left of everything: shift the whole drawing so its top
+  // left is 0,0 again (the saved squares are 0-199).
+  function arrayNormalize(l) {
+    const all = [...l.panels, ...l.taps];
+    if (!all.length) return;
+    const dx = Math.min(...all.map(i => i.x)), dy = Math.min(...all.map(i => i.y));
+    if (dx || dy) all.forEach(i => { i.x -= dx; i.y -= dy; });
+  }
+  function arrayUnplace(kind, id) {
+    const l = arr.draft;
+    if (kind === 'panel') l.panels = l.panels.filter(p => p.addr !== id); else l.taps = l.taps.filter(t => t.id !== id);
+    arr.sel = null;
+    arrayNormalize(l);
+  }
+
+  document.getElementById('array-edit-btn').addEventListener('click', async () => {
+    if (!arr.loaded) await refreshArray();
+    arr.draft = JSON.parse(JSON.stringify(arr.saved));
+    arr.sel = null;
+    arrayRender();
+  });
+  document.getElementById('array-cancel-btn').addEventListener('click', () => {
+    arr.draft = null; arr.sel = null;
+    document.getElementById('array-error').textContent = '';
+    arrayRender();
+  });
+  document.getElementById('array-save-btn').addEventListener('click', async () => {
+    const btn = document.getElementById('array-save-btn');
+    btn.disabled = true;
+    try {
+      const r = await apiFetch('/api/array', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(arr.draft) });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || `refused (${r.status})`);
+      arr.saved = arr.draft; arr.draft = null; arr.sel = null;
+      document.getElementById('array-error').textContent = '';
+      showToast('Array saved ✓', 'ok');
+      arrayRender();
+    } catch (e) {
+      document.getElementById('array-error').textContent = `Not saved: ${e.message}`;
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  // Dragging, by pointer (mouse, pen or touch): from the tray or the grid,
+  // onto a cell or back onto the tray. A press without a drag selects.
+  let arrayDrag = null;
+  function arrayCellAt(ev) {
+    const r = document.getElementById('array-canvas').getBoundingClientRect(), C = arrayCell();
+    if (ev.clientX < r.left || ev.clientY < r.top || ev.clientX >= r.right || ev.clientY >= r.bottom) return null;
+    return { x: Math.floor((ev.clientX - r.left) / C) + arr.ox, y: Math.floor((ev.clientY - r.top) / C) + arr.oy };
+  }
+  function arrayOverTray(ev) {
+    const r = document.getElementById('array-tray').getBoundingClientRect();
+    return ev.clientX >= r.left && ev.clientX < r.right && ev.clientY >= r.top && ev.clientY < r.bottom;
+  }
+  function arrayDropMark(cell, ok) {
+    const canvas = document.getElementById('array-canvas');
+    let m = canvas.querySelector('.array-drop');
+    if (!cell) { if (m) m.remove(); return; }
+    if (!m) { m = document.createElement('div'); m.className = 'array-drop'; canvas.appendChild(m); }
+    const C = arrayCell();
+    Object.assign(m.style, { left: `${(cell.x - arr.ox) * C}px`, top: `${(cell.y - arr.oy) * C}px`, width: `${C}px`, height: `${C}px` });
+    m.classList.toggle('taken', !ok);
+  }
+  function arrayDropOk(cell) {
+    if (!cell || !arrayDrag) return false;
+    const there = arrayAt(arr.draft, arrayDrag.kind, cell.x, cell.y);
+    if (!there) return true;
+    const mine = arrayDrag.kind === 'panel' ? there.addr === arrayDrag.id : there.id === arrayDrag.id;
+    return mine || arrayDrag.kind === 'panel';
+  }
+  ['array-canvas', 'array-tray'].forEach(where => document.getElementById(where).addEventListener('pointerdown', ev => {
+    if (!arr.draft || ev.button > 0) return;
+    const el = ev.target.closest('[data-kind]');
+    if (!el) { if (arr.sel) { arr.sel = null; arrayRender(); } return; }
+    ev.preventDefault();
+    arrayDrag = { kind: el.dataset.kind, id: el.dataset.id, x0: ev.clientX, y0: ev.clientY, el, ghost: null, fromTray: where === 'array-tray' };
+  }));
+  document.addEventListener('pointermove', ev => {
+    if (!arrayDrag) return;
+    if (!arrayDrag.ghost) {
+      if (Math.hypot(ev.clientX - arrayDrag.x0, ev.clientY - arrayDrag.y0) < 5) return;
+      const g = arrayDrag.el.cloneNode(true);
+      g.classList.add('array-ghost'); g.classList.remove('sel');
+      const r = arrayDrag.el.getBoundingClientRect();
+      Object.assign(g.style, { width: `${r.width}px`, height: `${r.height}px`, left: '0', top: '0' });
+      document.body.appendChild(g);
+      arrayDrag.ghost = g; arrayDrag.w = r.width; arrayDrag.h = r.height;
+    }
+    arrayDrag.ghost.style.transform = `translate(${ev.clientX - arrayDrag.w / 2}px, ${ev.clientY - arrayDrag.h / 2}px)`;
+    const cell = arrayCellAt(ev);
+    arrayDropMark(cell, arrayDropOk(cell));
+  });
+  document.addEventListener('pointerup', ev => {
+    if (!arrayDrag) return;
+    const d = arrayDrag;
+    arrayDrag = null;
+    arrayDropMark(null);
+    if (!d.ghost) {  // a press: select what's on the grid; place what's in the tray
+      if (d.fromTray) { const f = arrayFree(arr.draft, d.kind); arrayPlace(d.kind, d.id, f.x, f.y); }
+      arr.sel = (d.kind === 'panel' ? 'p' : 't') + d.id;
+      arrayRender();
+      const back = document.querySelector(`#array-canvas [data-kind="${d.kind}"][data-id="${d.id}"]`);
+      if (back) back.focus();
+      return;
+    }
+    d.ghost.remove();
+    const cell = arrayCellAt(ev);
+    if (arrayOverTray(ev) && !d.fromTray) arrayUnplace(d.kind, d.id);
+    else if (cell) arrayPlace(d.kind, d.id, cell.x, cell.y);
+    arrayRender();
+  });
+  document.getElementById('array-canvas').addEventListener('keydown', ev => {
+    if (!arr.draft) return;
+    const el = ev.target.closest('[data-kind]');
+    if (!el) return;
+    const kind = el.dataset.kind, id = el.dataset.id;
+    const item = kind === 'panel' ? arr.draft.panels.find(p => p.addr === id) : arr.draft.taps.find(t => t.id === id);
+    if (!item) return;
+    const step = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[ev.key];
+    if (step) arrayPlace(kind, id, item.x + step[0], item.y + step[1]);
+    else if ((ev.key === 'r' || ev.key === 'R') && kind === 'panel') item.portrait = !item.portrait;
+    else if (ev.key === 'Delete' || ev.key === 'Backspace') arrayUnplace(kind, id);
+    else if (ev.key === 'Escape') arr.sel = null;
+    else return;
+    ev.preventDefault();
+    if (ev.key !== 'Delete' && ev.key !== 'Backspace' && ev.key !== 'Escape') arr.sel = (kind === 'panel' ? 'p' : 't') + id;
+    arrayRender();
+    const back = document.querySelector(`#array-canvas [data-kind="${kind}"][data-id="${id}"]`);
+    if (back) back.focus();
+  });
+  // Live power while the array is on screen and not being edited.
+  setInterval(() => {
+    if (arr.draft || document.getElementById('topology-array').hidden ||
+        !document.getElementById('view-topology').classList.contains('active') || document.hidden) return;
+    refreshArray(true);
+  }, 10000);
 
   // ---- the mesh map ----
   // Tiers from reports lost today (measured) and the raw RSSI byte, which

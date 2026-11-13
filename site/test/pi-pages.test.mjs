@@ -411,7 +411,7 @@ test('mesh: the Pi opens Topology on Mesh, first of the tabs, until Layout is pi
   const { page, ctx, errors } = await open();
   await page.click('#nav button[data-view="topology"]');
   await page.waitForSelector('#topology-mesh .mesh-node', { state: 'attached' });
-  assert.deepEqual(await page.locator('#topology-tabs [role="tab"]').evaluateAll((ts) => ts.map((t) => t.dataset.tab)), ['mesh', 'layout']);
+  assert.deepEqual(await page.locator('#topology-tabs [role="tab"]').evaluateAll((ts) => ts.map((t) => t.dataset.tab)), ['mesh', 'layout', 'array']);
   assert.equal(await page.getAttribute('#topology-tab-mesh', 'aria-selected'), 'true');
   assert.equal(await page.isVisible('#topology-layout'), false);
   await page.click('#topology-tabs [data-tab="layout"]');
@@ -419,6 +419,12 @@ test('mesh: the Pi opens Topology on Mesh, first of the tabs, until Layout is pi
   await page.click('#nav button[data-view="topology"]');
   assert.equal(await page.getAttribute('#topology-tab-layout', 'aria-selected'), 'true');
   assert.equal(await page.isVisible('#topology-mesh'), false);
+  // Array is remembered the same way.
+  await page.click('#topology-tabs [data-tab="array"]');
+  await page.reload();
+  await page.click('#nav button[data-view="topology"]');
+  assert.equal(await page.getAttribute('#topology-tab-array', 'aria-selected'), 'true');
+  assert.equal(await page.isVisible('#topology-layout'), false);
   assert.deepEqual(errors, []);
   await ctx.close();
 });

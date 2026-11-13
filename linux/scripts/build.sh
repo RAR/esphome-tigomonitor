@@ -32,3 +32,11 @@ if ! build/linux/master_core_test >build/linux/master_core_test.log 2>&1; then
   exit 1
 fi
 tail -1 build/linux/master_core_test.log
+# The array layout (Topology > Array).
+g++ -std=c++17 -Wall -Wextra -I linux/src tests/host/array_layout_test.cpp -o build/linux/array_layout_test
+if ! build/linux/array_layout_test >build/linux/array_layout_test.log 2>&1; then
+  cat build/linux/array_layout_test.log
+  echo "array_layout_test failed" >&2
+  exit 1
+fi
+tail -1 build/linux/array_layout_test.log
