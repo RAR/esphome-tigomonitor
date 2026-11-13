@@ -146,11 +146,11 @@ static void test_members() {
   // Two TAPs in use: only the one heard through 1201 lately.
   auto m = pgw_members(seen, 0x1201);
   CHECK(m.size() == 1 && m[0].tuid == 0x02 && m[0].loss > 0.099 && m[0].loss < 0.101);
-  // One TAP in use: the unheard panel counts too, its loss unknown; one
-  // heard through another TAP never does.
+  // One TAP in use: the one not heard lately and the unheard one count too
+  // (the latter's loss unknown).
   seen.pop_back();
   m = pgw_members(seen, 0x1201);
-  CHECK(m.size() == 2 && m[1].tuid == 0x04 && m[1].loss < 0);
+  CHECK(m.size() == 3 && m[1].tuid == 0x03 && m[2].tuid == 0x04 && m[2].loss < 0);
   // Under 100 reports: loss unknown.
   seen[0].reports = 50;
   seen[0].lost = 10;
