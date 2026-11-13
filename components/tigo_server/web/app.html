@@ -661,6 +661,16 @@
     font-size: 10px; font-weight: 600; box-sizing: border-box; user-select: none; box-shadow: 0 1px 3px rgba(0,0,0,0.3); }
   .array-tap svg { width: 14px; height: 14px; color: var(--accent-2); }
   .array-tap.under { z-index: 1; gap: 0; }
+  .array-tile.pool { outline: 2px dashed var(--accent-2); outline-offset: 2px; }
+  .array-badge { position: absolute; top: -8px; right: -8px; min-width: 18px; height: 18px; padding: 0 4px; border-radius: 9px;
+    background: var(--accent-2); color: #061018; font-size: 10px; font-weight: 700; line-height: 18px; text-align: center;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.35); z-index: 2; box-sizing: border-box; }
+  .array-badge.s04 { background: var(--warn); }
+  .array-helpers { font-size: 13px; color: var(--text-dim); margin: -6px 0 12px; max-width: 900px; line-height: 1.5; }
+  .array-helpers strong { color: var(--text); font-weight: 600; }
+  .array-helpers .k { display: inline-block; min-width: 18px; padding: 0 4px; border-radius: 9px; background: var(--accent-2); color: #061018;
+    font-size: 10px; font-weight: 700; text-align: center; line-height: 16px; margin-right: 3px; }
+  .array-helpers .k.s04 { background: var(--warn); }
   .array-tap.under span { display: none; }
   .array-tap.under svg { width: 12px; height: 12px; }
   .array-drop { position: absolute; border: 2px dashed var(--accent-2); border-radius: 4px; pointer-events: none; box-sizing: border-box; }
@@ -1637,11 +1647,13 @@
         <div class="topo-toolbar">
           <span class="array-scale" id="array-scale"><span>0 W</span><i></i><span id="array-scale-max">peak</span></span>
           <span class="topo-summary" id="array-summary">—</span>
+          <button class="btn" id="array-helpers-btn" aria-pressed="false" style="display:none" title="Which optimizers the TAP leans on, and who holds each of its three schedule streams now">Helpers</button>
           <button class="btn" id="array-edit-btn">Edit array</button>
           <button class="btn" id="array-cancel-btn" style="display:none">Cancel</button>
           <button class="btn primary" id="array-save-btn" style="display:none">Save array</button>
         </div>
         <div id="array-error" class="topo-ed-error" role="alert"></div>
+        <div id="array-helpers" class="array-helpers" role="status" style="display:none"></div>
         <div class="array-wrap">
           <div class="array-tray" id="array-tray" role="region" aria-label="Not placed yet" style="display:none"></div>
           <div class="array-scroll" id="array-scroll"><div class="array-canvas" id="array-canvas"></div></div>
@@ -7933,7 +7945,7 @@
   // Topology > Array (Pi). /api/array holds the positions (one grid cell per
   // panel; touching cells are neighbours on the arr), /api/devices the
   // live power. Edit array opens a tray of what isn't placed yet.
-  const arr = { saved: { panels: [], taps: [] }, draft: null, devices: [], tapNames: {}, sel: null, loaded: false };
+  const arr = { saved: { panels: [], taps: [] }, draft: null, devices: [], tapNames: {}, sel: null, loaded: false, helpers: false, pgw: {}, pgwAt: 0 };
   const ARRAY_PANEL_BASE = '#16233d';
   const ARRAY_MARGIN = 3;  // empty squares round the drawing while editing
   const arrayEsc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -7944,13 +7956,18 @@
 
   async function refreshArray(devicesOnly) {
     try {
-      const jobs = [apiFetch('/api/devices').then(r => r.ok ? r.json() : { devices: [] })];
+      const jobs = [apiFetch('/api/devices').then(r => r.ok ? r.json() : { devices: [] }),
+                    apiFetch('/api/master').then(r => r.ok ? r.json() : {}).catch(() => ({}))];
       if (!devicesOnly) {
         jobs.push(apiFetch('/api/array').then(r => { if (!r.ok) throw new Error(`/api/array ${r.status}`); return r.json(); }));
         jobs.push(apiFetch('/api/mesh').then(r => r.ok ? r.json() : {}).catch(() => ({})));
       }
-      const [dev, saved, mesh] = await Promise.all(jobs);
+      const [dev, master, saved, mesh] = await Promise.all(jobs);
       arr.devices = (dev && dev.devices) || [];
+      // The TAP's helpers (the 0x41 PGW streams), from a TigoMonitor running the bus.
+      arr.pgw = {};
+      ((master && master.active !== false && master.taps) || []).forEach(t => { if (t.pgw) arr.pgw[t.id] = t.pgw; });
+      arr.pgwAt = Date.now();
       if (saved) { arr.saved = { panels: saved.panels || [], taps: saved.taps || [] }; arr.loaded = true; }
       if (mesh && mesh.taps) mesh.taps.forEach(t => { arr.tapNames[t.id] = t.name || ''; });
       document.getElementById('array-error').textContent = '';
@@ -8026,10 +8043,11 @@
       const tw = Math.round(C * (p.portrait ? 0.7 : 0.92)), th = Math.round(C * (p.portrait ? 0.92 : 0.64));
       const left = (p.x - ox) * C + (C - tw) / 2, top = (p.y - oy) * C + (C - th) / 2;
       const tip = `${name}${d && d.string_label ? ` · ${d.string_label}` : ''}${w == null ? (d ? ' · no recent report' : ' · not heard') : ` · ${w} W`}`;
-      html += `<div class="array-tile${frac > 0.55 ? ' lit' : ''}${w == null ? ' stale' : ''}${arr.sel === 'p' + p.addr ? ' sel' : ''}" data-kind="panel" data-id="${arrayEsc(p.addr)}"${tab}
+      const helps = !editing && arr.helpers ? arrayHelps(p.addr) : null;
+      html += `<div class="array-tile${frac > 0.55 ? ' lit' : ''}${w == null ? ' stale' : ''}${helps && helps.pool ? ' pool' : ''}${arr.sel === 'p' + p.addr ? ' sel' : ''}" data-kind="panel" data-id="${arrayEsc(p.addr)}"${tab}
         role="${editing ? 'button' : 'img'}" aria-label="${arrayEsc(tip)}" title="${arrayEsc(tip)}"
         style="left:${left}px;top:${top}px;width:${tw}px;height:${th}px;background-color:color-mix(in srgb, var(--accent) ${Math.round(frac * 100)}%, ${ARRAY_PANEL_BASE})">
-        <span class="rn">${arrayEsc(name)}</span>${w == null || C < 44 ? '' : `<span class="rw">${w} W</span>`}</div>`;
+        <span class="rn">${arrayEsc(name)}</span>${w == null || C < 44 ? '' : `<span class="rw">${w} W</span>`}${helps ? arrayBadges(helps.holds) : ''}</div>`;
     }
     for (const t of l.taps) {
       // Under a panel: small, in the corner of the panel's square.
@@ -8038,11 +8056,72 @@
       const left = (t.x - ox) * C + (under ? C - s - 1 : (C - s) / 2), top = (t.y - oy) * C + (under ? C - s - 1 : (C - s) / 2);
       html += `<div class="array-tap${under ? ' under' : ''}${arr.sel === 't' + t.id ? ' sel' : ''}" data-kind="tap" data-id="${arrayEsc(t.id)}"${tab}
         role="${editing ? 'button' : 'img'}" aria-label="${arrayEsc(arrayTapLabel(t.id))}" title="${arrayEsc(arrayTapLabel(t.id))}"
-        style="left:${left}px;top:${top}px;width:${s}px;height:${s}px">${ARRAY_TAP_ICON}<span>${arrayEsc(t.id)}</span></div>`;
+        style="left:${left}px;top:${top}px;width:${s}px;height:${s}px">${ARRAY_TAP_ICON}<span>${arrayEsc(t.id)}</span>${!editing && arr.helpers ? arrayBadges(arrayHelps('0001', t.id).holds) : ''}</div>`;
     }
     canvas.innerHTML = html;
     arrayRenderTray(byAddr, placed);
+    arrayRenderHelpers(byAddr);
   }
+
+  // The helpers overlay. Each TAP gives three schedule streams to
+  // optimizers in turn (the 0x41s): 01 and 02 to the TAP itself and a pool
+  // of four, 04 to everyone else. A panel's pool and streams, for the TAP it
+  // reports through; addr 0001 is the TAP itself (tapId says which).
+  function arrayHelps(addr, tapId) {
+    const out = { pool: false, holds: [] };
+    for (const [id, g] of Object.entries(arr.pgw)) {
+      if (addr === '0001' && id !== tapId) continue;
+      if ((g.pool || []).includes(addr)) out.pool = true;
+      for (const s of ['01', '02', '04']) if (g.holders && g.holders[s] === addr) out.holds.push(s);
+    }
+    return out;
+  }
+  function arrayBadges(holds) {
+    return holds.map((s, i) => `<span class="array-badge s${s}" style="right:${-8 + i * 20}px">${s}</span>`).join('');
+  }
+  function arrayRenderHelpers(byAddr) {
+    const btn = document.getElementById('array-helpers-btn'), box = document.getElementById('array-helpers');
+    const any = Object.keys(arr.pgw).length > 0;
+    btn.style.display = any && !arr.draft ? '' : 'none';
+    btn.setAttribute('aria-pressed', String(arr.helpers));
+    btn.classList.toggle('primary', arr.helpers);
+    box.style.display = any && arr.helpers && !arr.draft ? '' : 'none';
+    if (!any || !arr.helpers) return;
+    const nameOf = a => a === '0001' ? 'the TAP' : (byAddr[a] && byAddr[a].name) || a;
+    const RULE = {
+      array: n => `the ${n} placed farthest from the TAP on this drawing`,
+      named: n => `the ${n} named in the settings (pgw_panels)`,
+      loss: n => `the ${n} losing the most reports today, as no layout places this TAP`,
+      none: () => 'nobody yet: no optimizers reported through it',
+      random: () => 'any optimizer, drawn in turn',
+    };
+    const left = s => { const t = Math.max(0, s - Math.round((Date.now() - arr.pgwAt) / 1000)); return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`; };
+    box.innerHTML = Object.entries(arr.pgw).map(([id, g]) => {
+      const pool = (g.pool || []).map(nameOf).join(', ');
+      const why = (RULE[g.rule] || RULE.random)(`${(g.pool || []).length || 'four'}`);
+      const now = ['01', '02', '04'].map(s => `<span class="k s${s}">${s}</span>${arrayEsc(g.holders && g.holders[s] ? nameOf(g.holders[s]) : '—')}`).join(' &nbsp; ');
+      return `<div><strong>${arrayEsc(arrayTapLabel(id))}</strong>: ${g.sending ? '' : '<strong>not sending</strong> (master_send_41 is off); '}` +
+        `streams 01 and 02 take turns through the TAP and ${arrayEsc(why)}${pool ? ` (${arrayEsc(pool)}, outlined)` : ''}; 04 goes through everyone else in order.` +
+        (g.sending ? `<br>Now: ${now} &nbsp;·&nbsp; next turn in <span data-turn="${g.turn_left_s}">${left(g.turn_left_s)}</span>` : '') + '</div>';
+    }).join('');
+  }
+  document.getElementById('array-helpers-btn').addEventListener('click', () => {
+    arr.helpers = !arr.helpers;
+    try { localStorage.setItem('array-helpers', arr.helpers ? '1' : ''); } catch (e) {}
+    arrayRender();
+  });
+  try { arr.helpers = localStorage.getItem('array-helpers') === '1'; } catch (e) {}
+  // The countdown, between fetches; a turn ending fetches the new holders.
+  setInterval(() => {
+    const spans = document.querySelectorAll('#array-helpers [data-turn]');
+    let due = false;
+    spans.forEach(sp => {
+      const t = Math.max(0, Number(sp.dataset.turn) - Math.round((Date.now() - arr.pgwAt) / 1000));
+      sp.textContent = `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`;
+      if (t === 0) due = true;
+    });
+    if (due && !arr.draft && !document.getElementById('topology-array').hidden) refreshArray(true);
+  }, 1000);
 
   function arrayRenderTray(byAddr, placed) {
     const tray = document.getElementById('array-tray');

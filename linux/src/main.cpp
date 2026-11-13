@@ -420,7 +420,7 @@ int main(int argc, char **argv) {
             (*last_pool)[tap] = text;
             LOGI("bus master: TAP %04X PGW pool (%s)", tap, text.c_str());
           }
-          return pool;
+          return esphome::tigo_master::MasterCore::PgwPick{pool, why};
         });
       }
       m->set_pv(pv.state(), [&pv](const PvState &s) { pv.save(s); }, pv.unreadable());

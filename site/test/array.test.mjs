@@ -39,7 +39,7 @@ const DEVICES = [
   { addr: '0004', name: 'B1', string_label: 'String B', power: 0, peak_power: 300, stale: true, tap: '1201' },
 ];
 
-async function open(saved = { panels: [], taps: [] }, platform = 'linux') {
+async function open(saved = { panels: [], taps: [] }, platform = 'linux', master = null) {
   const api = { layout: JSON.parse(JSON.stringify(saved)), posts: [] };
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
   await ctx.route('**/api/**', async (route) => {
@@ -52,6 +52,7 @@ async function open(saved = { panels: [], taps: [] }, platform = 'linux') {
       if (req.method() === 'POST') { const b = JSON.parse(req.postData()); api.posts.push(b); api.layout = b; return json(200, { saved: true }); }
       return json(200, api.layout);
     }
+    if (path === '/api/master' && master) return json(200, master);
     if (path === '/api/mesh') return json(200, { taps: [{ id: '1201', name: 'Garage' }], nodes: [], loss_days: [] });
     if (routes[path] !== undefined) return json(200, routes[path]);
     return route.fulfill({ status: 404, body: 'no fixture' });
@@ -198,4 +199,48 @@ test('the grid grows in every direction: a drop above or left of everything shif
   assert.deepEqual(at, { '0002': [2, 2], '0003': [0, 0] });
   assert.deepEqual(errors, []);
   await ctx.close();
+});
+
+test('helpers: the pool outlined, who holds each stream badged, and why, with the turn counting down', async () => {
+  const master = { active: true, taps: [{ id: '1201', pgw: { sending: true, rule: 'array', pool: ['0002', '0003'],
+    holders: { '01': '0001', '02': '0002', '04': '0004' }, turn_left_s: 300 } }] };
+  const { page, ctx, errors } = await open({
+    panels: [{ addr: '0002', x: 0, y: 0 }, { addr: '0003', x: 1, y: 0 }, { addr: '0004', x: 3, y: 2 }],
+    taps: [{ id: '1201', x: 3, y: 3 }],
+  }, 'linux', master);
+  await page.waitForSelector('#array-helpers-btn', { state: 'visible' });
+  assert.equal(await page.locator('#array-canvas .array-badge').count(), 0, 'off until asked');
+  await page.click('#array-helpers-btn');
+  await page.waitForSelector('#array-helpers', { state: 'visible' });
+  assert.equal(await page.getAttribute('#array-helpers-btn', 'aria-pressed'), 'true');
+  assert.equal(await page.locator('#array-canvas .array-tile.pool').count(), 2);
+  const badge = (sel) => page.locator(`${sel} .array-badge`).allTextContents();
+  assert.deepEqual(await badge('#array-canvas [data-kind="panel"][data-id="0002"]'), ['02']);
+  assert.deepEqual(await badge('#array-canvas [data-kind="panel"][data-id="0004"]'), ['04']);
+  assert.deepEqual(await badge('#array-canvas [data-kind="tap"]'), ['01']);
+  const text = await page.textContent('#array-helpers');
+  assert.match(text, /Garage/);
+  assert.match(text, /farthest from the TAP/);
+  assert.match(text, /A1, A2, outlined/);
+  assert.match(text, /next turn in [45]:[0-9]{2}/);
+  // Remembered, and gone while editing.
+  await page.click('#array-edit-btn');
+  assert.equal(await page.isVisible('#array-helpers'), false);
+  assert.equal(await page.locator('#array-canvas .array-badge').count(), 0);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test('helpers: not sending says so; listening, there is no Helpers button', async () => {
+  const master = { active: true, taps: [{ id: '1201', pgw: { sending: false, rule: 'random', pool: [], holders: { '01': null, '02': null, '04': null }, turn_left_s: 0 } }] };
+  const { page, ctx } = await open({ panels: [{ addr: '0002', x: 0, y: 0 }], taps: [] }, 'linux', master);
+  await page.waitForSelector('#array-helpers-btn', { state: 'visible' });
+  await page.click('#array-helpers-btn');
+  assert.match(await page.textContent('#array-helpers'), /not sending/);
+  await ctx.close();
+  const quiet = await open({ panels: [{ addr: '0002', x: 0, y: 0 }], taps: [] });
+  await quiet.page.waitForSelector('#array-canvas .array-tile');
+  await quiet.page.waitForTimeout(300);
+  assert.equal(await quiet.page.isVisible('#array-helpers-btn'), false);
+  await quiet.ctx.close();
 });

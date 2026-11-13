@@ -1318,6 +1318,11 @@ static void test_housekeeping_pool() {
     CHECK(stream_of(r[2]) == 0x04 && tuid_of(r[2]) == 0x02);
     CHECK(r[0].payload == tunnel_request(SUB_HOUSEKEEPING, r[0].payload[4], args41(0x26, 0x02, 0x22)));
   }
+  // What /api/master shows: the holders now, and the turn's time left.
+  CHECK(hk.sends_41() && hk.holder(0x01, 1000 + 15000) == 0x0001 && hk.holder(0x02, 1000 + 15000) == 0x26 &&
+        hk.holder(0x04, 1000 + 15000) == 0x02);
+  CHECK(hk.turn_left_ms(1000 + 15000) == Housekeeping::POOL_SLOT_MS - 15000);
+  CHECK(hk.holder(0x01, 1000 + Housekeeping::POOL_SLOT_MS) == 0x26);  // the next turn
   // Kept alive: the same three a minute later, and still at 7 minutes.
   for (uint32_t at : {1000u + 75000u, 1000u + 7 * 60000u + 15000u}) {
     r = tunnels(at);
@@ -1341,6 +1346,14 @@ static void test_housekeeping_pool() {
   for (uint16_t n : roster)
     if (std::find(pool.begin(), pool.end(), n) == pool.end()) others.push_back(n);
   CHECK(seen04 == others);
+  // Without 0x41s, nobody holds a stream.
+  HousekeepingPlan quiet;
+  quiet.session = true;
+  quiet.send_41 = false;
+  Housekeeping none(l.entries(), 0, quiet, 1);
+  none.set_targets(roster);
+  none.set_pool(pool);
+  CHECK(!none.sends_41() && none.holder(0x01, 15000) == 0 && none.holder(0x04, 15000) == 0);
   // No pool any more: back to the random draw over the whole roster.
   hk.set_pool({});
   r = tunnels(1000 + 40 * Housekeeping::POOL_SLOT_MS + 15000);

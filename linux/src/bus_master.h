@@ -108,7 +108,7 @@ class BusMaster {
   void set_taps(const std::vector<TapEntry> &taps) { core_.set_taps(taps); }
   std::vector<TapEntry> taps() const { return core_.taps(); }
   void set_tap_targets(esphome::tigo_master::MasterCore::TapTargets t) { core_.set_tap_targets(std::move(t)); }
-  void set_tap_pool(esphome::tigo_master::MasterCore::TapTargets p) { core_.set_tap_pool(std::move(p)); }
+  void set_tap_pool(esphome::tigo_master::MasterCore::TapPool p) { core_.set_tap_pool(std::move(p)); }
   void set_adopt_taps(bool on, esphome::tigo_master::MasterCore::TapsSaved saved) {
     core_.set_adopt_taps(on, std::move(saved));
   }

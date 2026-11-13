@@ -746,6 +746,19 @@ class Housekeeping {
   }
 
   uint32_t sent_41() const { return sent_41_; }
+  bool sends_41() const { return plan_.send_41; }
+  // Who holds stream (0x01, 0x02 or 0x04) now: with a pool, by the turn;
+  // drawing at random, the last one sent to. 0 none (yet).
+  uint16_t holder(uint8_t stream, uint32_t now_ms) const {
+    if (!plan_.send_41) return 0;
+    if (!pool_.empty()) return pool_target_(stream, (now_ms - start_ms_) / POOL_SLOT_MS);
+    return target_[stream == 0x02 ? 0 : stream == 0x01 ? 1 : 2];
+  }
+  // Until the holders change, in ms.
+  uint32_t turn_left_ms(uint32_t now_ms) const {
+    uint32_t slot = pool_.empty() ? SLOT_MS : POOL_SLOT_MS;
+    return slot - (now_ms - start_ms_) % slot;
+  }
   uint32_t sent_session() const { return sent_session_; }
   uint32_t sent_broadcast() const { return sent_broadcast_; }
   uint32_t sent_walk_pages() const { return sent_walk_pages_; }

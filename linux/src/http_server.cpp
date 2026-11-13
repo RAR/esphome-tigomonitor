@@ -1599,6 +1599,16 @@ void HttpServer::routes_() {
                                       {"renewals", t.renewals},
                                       {"lost", t.tap_lost},
                                       {"last_reply_unix", t.last_reply_unix},
+                                      {"pgw", [&t] {
+                                         json pool = json::array();
+                                         for (uint16_t p : t.pgw_pool) pool.push_back(hex4(p));
+                                         auto who = [](uint16_t h) { return h ? json(hex4(h)) : json(nullptr); };
+                                         return json{{"sending", t.sends_41},
+                                                     {"rule", t.pgw_why.empty() ? "random" : t.pgw_why},
+                                                     {"pool", pool},
+                                                     {"holders", {{"01", who(t.holder_01)}, {"02", who(t.holder_02)}, {"04", who(t.holder_04)}}},
+                                                     {"turn_left_s", t.turn_left_s}};
+                                       }()},
                                       {"discovery",
                                        {{"read", t.discovery_read},
                                         {"running", t.discovery.running},

@@ -1146,7 +1146,13 @@ void MasterCore::tick_(uint32_t now_ms) {
       std::vector<uint16_t> list = own ? tap_targets_(t.id) : targets_();
       t.targets_empty = list.empty();
       t.housekeeping->set_targets(list);
-      if (tap_pool_) t.housekeeping->set_pool(tap_pool_(t.id));
+      if (tap_pool_) {
+        PgwPick pick = tap_pool_(t.id);
+        t.housekeeping->set_pool(pick.pool);
+        std::lock_guard<std::mutex> lock(mu_);
+        t.st.pgw_why = pick.why;
+        t.st.pgw_pool = pick.pool;
+      }
       t.targets_at_ms = now_ms;
     }
   }
@@ -1233,6 +1239,11 @@ void MasterCore::tick_(uint32_t now_ms) {
     t.st.sent_broadcast = t.sent_broadcast_before + t.housekeeping->sent_broadcast();
     t.st.sent_walk_pages = t.sent_walk_pages_before + t.housekeeping->sent_walk_pages();
     t.st.walks_done = t.walks_done_before + t.housekeeping->walks_done();
+    t.st.sends_41 = t.housekeeping->sends_41();
+    t.st.holder_01 = t.housekeeping->holder(0x01, now_ms);
+    t.st.holder_02 = t.housekeeping->holder(0x02, now_ms);
+    t.st.holder_04 = t.housekeeping->holder(0x04, now_ms);
+    t.st.turn_left_s = (t.housekeeping->turn_left_ms(now_ms) + 999) / 1000;
   }
   if (t.queries) {
     std::lock_guard<std::mutex> lock(mu_);
