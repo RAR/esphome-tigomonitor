@@ -707,7 +707,22 @@ int main(int argc, char **argv) {
           why = "this monitor isn't running the bus";
           return 409;
         }
-        return bus_master->request_leave(node, why) ? 200 : 409;
+        // The node's MAC from the TAP's roster, as the TAP's own Leave carries it.
+        esphome::tigo_monitor::master::Bytes mac;
+        char a[5];
+        std::snprintf(a, sizeof(a), "%04X", node);
+        for (const Node &n : monitor.nodes())
+          if (strcasecmp(n.addr.c_str(), a) == 0 && n.long_address.size() == 16 &&
+              n.long_address.find_first_not_of("0123456789abcdefABCDEF") == std::string::npos) {
+            for (size_t i = 0; i < 16; i += 2)
+              mac.push_back(static_cast<uint8_t>(std::stoi(n.long_address.substr(i, 2), nullptr, 16)));
+            break;
+          }
+        if (mac.empty()) {
+          why = "no MAC known for that optimizer";
+          return 409;
+        }
+        return bus_master->request_leave(node, mac, why) ? 200 : 409;
       }});
   if (port < 0 && settings.web_port > 0) port = settings.web_port;
   // Only the default steps aside for another web server; a port someone

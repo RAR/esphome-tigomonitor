@@ -970,7 +970,7 @@ static int leaves_sent(const TapPort &port) {
   for (const mp::Frame &f : port.frames) {
     if (f.cmd != 0x0B0F || f.payload.size() < 7 || f.payload[3] != 0x06) continue;
     std::string text(f.payload.begin() + 7, f.payload.end());
-    n += text == "^00Leave\r";
+    n += text == "}04C05B0000000ABCLeave\r";
   }
   return n;
 }
@@ -990,17 +990,19 @@ static void test_one_shot_leave() {
   };
   MasterCore off(&port, [](int, const std::string &) {}, nullptr, nullptr, GW, false, false, false, {}, {}, true);
   std::string why;
-  CHECK(!off.request_leave(0x0003, why) && why.find("dangerous_options") != std::string::npos);
+  const mp::Bytes mac = {0x04, 0xC0, 0x5B, 0x00, 0x00, 0x00, 0x0A, 0xBC};
+  CHECK(!off.request_leave(0x0003, mac, why) && why.find("dangerous_options") != std::string::npos);
   MasterCore noq(&port, [](int, const std::string &) {}, nullptr, nullptr, GW, false, false, false, {}, {}, false);
   noq.set_leave_allowed(true);
-  CHECK(!noq.request_leave(0x0003, why) && !why.empty());
+  CHECK(!noq.request_leave(0x0003, mac, why) && !why.empty());
 
   MasterCore core(&port, [](int, const std::string &) {}, nullptr, nullptr, GW, false, false, false, {}, {}, true);
   core.set_leave_allowed(true);
   CHECK(core.open());
   run_for(core, 0, 20000, 50);  // heard, its reads out
   CHECK(leaves_sent(port) == 0);
-  CHECK(core.request_leave(0x0003, why));
+  CHECK(!core.request_leave(0x0003, mp::Bytes{0x04}, why));  // not a MAC
+  CHECK(core.request_leave(0x0003, mac, why));
   run_for(core, 20000, 20000 + 3 * 3600000u, 1000);
   CHECK(leaves_sent(port) == 1);
   core.close();

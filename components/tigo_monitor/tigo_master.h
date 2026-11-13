@@ -875,10 +875,27 @@ class Housekeeping {
 static const char *const QUERY_READS[] = {"^00Version\r", "^00Tests\r", "^00Info\r", "^00Smrt\r", "^00Mppt\r"};
 static const char *const QUERY_W255 = "#00w255\r";
 static const char *const QUERY_SMART_S = "^00Smrt_........S0000...0000\r";
-// The optimizer's own Leave: it drops its parent and scans again, keeping its
-// known networks and keys, so it rejoins the same TAP unaided (owner's
-// analysis, 2026-11-13). No CCA flow sends it; only the owner's one-shot.
-static const char *const QUERY_LEAVE = "^00Leave\r";
+// An optimizer's Leave: it drops its parent and scans again, keeping its
+// known networks and keys, so it rejoins the same TAP unaided. The only form
+// in the firmware is the TAP's own per-node command, } + the node's MAC as 16
+// upper-case hex + Leave + CR; there is no ^00Leave (owner's analysis,
+// 2026-11-13, after ^00Leave\r reached an H9 and did nothing). No CCA flow
+// sends it; only the owner's one-shot.
+inline std::string leave_text(const Bytes &mac) {
+  static const char *hexd = "0123456789ABCDEF";
+  std::string s = "}";
+  for (uint8_t v : mac) {
+    s += hexd[v >> 4];
+    s += hexd[v & 0xF];
+  }
+  return s + "Leave\r";
+}
+inline bool is_leave_text(const std::string &t) {
+  if (t.size() != 1 + 16 + 6 || t[0] != '}' || t.compare(17, 6, "Leave\r") != 0) return false;
+  for (size_t i = 1; i < 17; i++)
+    if (!std::isdigit(static_cast<unsigned char>(t[i])) && !(t[i] >= 'A' && t[i] <= 'F')) return false;
+  return true;
+}
 
 // The CCA's text dialogue with optimizers, tunnel sub 0x06, from the 24 h
 // capture. A query is the node's Tuid and an ASCII line; the TAP only
@@ -944,11 +961,11 @@ class Queries {
   // The owner's one-shot Leave to one node this TAP has heard: queued, sent
   // once at the next gap, never retried (a second could kick it again as it
   // rejoins). False for a node not heard, or one with a Leave still queued.
-  bool leave(uint16_t tuid, uint32_t now_ms) {
-    if (!heard_ms_.count(tuid)) return false;
+  bool leave(uint16_t tuid, const Bytes &mac, uint32_t now_ms) {
+    if (mac.size() != 8 || !heard_ms_.count(tuid)) return false;
     for (Item &it : pending_)
       if (it.tuid == tuid && it.kind == leave_once) return false;
-    pending_.push_back({tuid, leave_once, now_ms, 0});
+    pending_.push_back({tuid, leave_once, now_ms, 0, leave_text(mac)});
     return true;
   }
   uint32_t sent_leaves() const { return sent_leaves_; }
@@ -994,8 +1011,7 @@ class Queries {
     Bytes args = {static_cast<uint8_t>(it.tuid >> 8), static_cast<uint8_t>(it.tuid)};
     const char *text = it.kind == w255      ? QUERY_W255
                        : it.kind == smart_s ? QUERY_SMART_S
-                       : it.kind == asked   ? it.text.c_str()
-                       : it.kind == leave_once ? QUERY_LEAVE
+                       : it.kind == asked || it.kind == leave_once ? it.text.c_str()
                                             : QUERY_READS[it.kind];
     args.insert(args.end(), text, text + std::char_traits<char>::length(text));
     if (it.kind == asked && it.tries >= ASK_TRIES) {
@@ -1920,7 +1936,7 @@ inline Allow classify_request(uint16_t cmd, const Bytes &payload) {
       // The optimizer's own Leave command: it drops its parent and rejoins
       // (owner's analysis, 2026-11-10/13). No CCA flow sends it. Only the
       // owner's one-shot, in exactly this form; any other shape never.
-      if (text == QUERY_LEAVE) return Allow::node_leave;
+      if (is_leave_text(text)) return Allow::node_leave;
       if (text.find("Leave") != std::string::npos) return Allow::never;
       return Allow::bench_only;
     }

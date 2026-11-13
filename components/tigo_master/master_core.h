@@ -289,11 +289,12 @@ class MasterCore {
   // (^00Name, master::Queries::is_read_text) at the next tick; the answer is
   // logged. Refused off the bench, without queries, or for any other text.
   bool request_ask(uint16_t node, const std::string &text, std::string &why);
-  // The owner's one-shot Leave (^00Leave\r) to one optimizer: it drops its
-  // parent and rejoins, picking a parent again. Sent once at the next tick by
-  // the TAP that has heard it, never retried. Refused unless the leave switch
-  // (settings' dangerous_options) is on and queries run.
-  bool request_leave(uint16_t node, std::string &why);
+  // The owner's one-shot Leave to one optimizer, in the TAP's per-node form
+  // (master::leave_text, its 8-byte MAC): it drops its parent and rejoins,
+  // picking a parent again. Sent once at the next tick by the TAP that has
+  // heard it, never retried. Refused unless the leave switch (settings'
+  // dangerous_options) is on and queries run.
+  bool request_leave(uint16_t node, const esphome::tigo_monitor::master::Bytes &mac, std::string &why);
   void set_leave_allowed(bool on) {
     std::lock_guard<std::mutex> lock(mu_);
     leave_on_ = on;
@@ -570,7 +571,7 @@ class MasterCore {
   TapsSaved taps_saved_;
   bool herd_wanted_ = false;  // under mu_: request_herd's, for the next tick
   uint16_t forget_wanted_ = 0;  // under mu_: request_forget_tap's, for the next tick
-  std::vector<uint16_t> leave_wanted_;  // under mu_: request_leave's
+  std::vector<std::pair<uint16_t, esphome::tigo_monitor::master::Bytes>> leave_wanted_;  // under mu_
   bool leave_on_ = false;               // under mu_
   bool leave_allowed_() {
     std::lock_guard<std::mutex> lock(mu_);
