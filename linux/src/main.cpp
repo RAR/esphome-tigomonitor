@@ -427,7 +427,6 @@ int main(int argc, char **argv) {
       m->set_discovery(discovery.renew(), [&discovery](bool renew) { discovery.save(renew); });
       m->set_read_tap_config(settings.master_read_tap_config);
       m->set_send_41(settings.master_send_41);
-      m->set_leave_allowed(settings.dangerous_options);
       m->set_table_writes(settings.master_table_writes);
       // A herd's TAPs, saved so each gets its id back next time.
       m->set_adopt_taps(settings.master_adopt_taps, [&tap_store](const std::vector<BusMaster::TapEntry> &taps) {
@@ -700,29 +699,6 @@ int main(int argc, char **argv) {
           return 409;
         }
         return bus_master->request_period(tap_mac, code, dry_run, why) ? 200 : 409;
-      },
-      [&](uint16_t node, std::string &why) {
-        std::lock_guard<std::mutex> lock(master_mu);
-        if (!bus_master) {
-          why = "this monitor isn't running the bus";
-          return 409;
-        }
-        // The node's MAC from the TAP's roster, as the TAP's own Leave carries it.
-        esphome::tigo_monitor::master::Bytes mac;
-        char a[5];
-        std::snprintf(a, sizeof(a), "%04X", node);
-        for (const Node &n : monitor.nodes())
-          if (strcasecmp(n.addr.c_str(), a) == 0 && n.long_address.size() == 16 &&
-              n.long_address.find_first_not_of("0123456789abcdefABCDEF") == std::string::npos) {
-            for (size_t i = 0; i < 16; i += 2)
-              mac.push_back(static_cast<uint8_t>(std::stoi(n.long_address.substr(i, 2), nullptr, 16)));
-            break;
-          }
-        if (mac.empty()) {
-          why = "no MAC known for that optimizer";
-          return 409;
-        }
-        return bus_master->request_leave(node, mac, why) ? 200 : 409;
       }});
   if (port < 0 && settings.web_port > 0) port = settings.web_port;
   // Only the default steps aside for another web server; a port someone

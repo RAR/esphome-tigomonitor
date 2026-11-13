@@ -355,23 +355,6 @@ bool MasterCore::request_ask(uint16_t node, const std::string &text, std::string
   return true;
 }
 
-bool MasterCore::request_leave(uint16_t node, const master::Bytes &mac, std::string &why) {
-  std::lock_guard<std::mutex> lock(mu_);
-  if (!leave_on_)
-    why = "telling an optimizer to leave needs dangerous_options in settings.json";
-  else if (!queries_on_)
-    why = "queries to optimizers are off";
-  else if (node < 2 || node > 0x7FFF)
-    why = "not an optimizer's address";
-  else if (mac.size() != 8)
-    why = "no MAC for that optimizer";
-  else
-    why.clear();
-  if (!why.empty()) return false;
-  leave_wanted_.push_back({node, mac});
-  return true;
-}
-
 bool MasterCore::request_forget_tap(uint16_t id, std::string &why) {
   std::lock_guard<std::mutex> lock(mu_);
   const Tap *t = nullptr;
@@ -1083,21 +1066,6 @@ void MasterCore::tick_(uint32_t now_ms) {
         if (t->queries && t->queries->ask(a.first, a.second, now_ms))
           LOGI("bus master: asking optimizer %04X (TAP %04X) %s", a.first, t->id,
                a.second.substr(0, a.second.size() - 1).c_str());
-    std::vector<std::pair<uint16_t, master::Bytes>> leaves;
-    {
-      std::lock_guard<std::mutex> lock(mu_);
-      leaves.swap(leave_wanted_);
-    }
-    for (const auto &lv : leaves) {
-      uint16_t n = lv.first;
-      bool queued = false;
-      for (auto &t : taps_)
-        if (!queued && t->queries && t->queries->leave(n, lv.second, now_ms)) {
-          queued = true;
-          LOGI("bus master: telling optimizer %04X (TAP %04X) to leave, once", n, t->id);
-        }
-      if (!queued) LOGW("bus master: no Leave for optimizer %04X: no TAP has heard it, or one is queued", n);
-    }
   }
   if (startup_ && phase_ != Phase::running) {
     run_startup(now_ms);
@@ -1288,7 +1256,7 @@ void MasterCore::tick_(uint32_t now_ms) {
   // its reads go with neither switch on, as other checks do.
   bool provision_ok = req.provision && (bench_ || table_writes_on_ || (job_here && table_job_ && table_job_->dry_run()));
   if (!master::may_send(req.cmd, req.payload, bench_, bring_up, writes_on_, t.pv && t.pv->off(),
-                        req.table_edit && table_writes_on_, provision_ok, req.leave && leave_allowed_())) {
+                        req.table_edit && table_writes_on_, provision_ok)) {
     set_fault(Fault::refused, "refused to send command " + std::to_string(req.cmd));
     // A job whose frame the gate refused stops, saying so, rather than
     // waiting for a reply that will never come and blocking every change.
