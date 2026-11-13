@@ -387,18 +387,22 @@ int main(int argc, char **argv) {
             if (j.is_discarded() || !roof_from_json(j, roof).empty()) roof = Roof();
           }
           std::map<std::string, std::string> names;
-          for (const Panel &p : monitor.panels())
-            names[p.addr] = !p.label.empty() ? p.label : p.addr;
-          std::vector<PgwMember> members;
+          std::vector<PgwSeen> seen;
           int64_t since = static_cast<int64_t>(time(nullptr)) - 86400;
           auto links = monitor.links();
-          for (const auto &kv : links.links()) {
-            if (kv.second.tap != tap || kv.second.last_heard_s < since) continue;
-            uint32_t all = kv.second.reports_today + kv.second.lost_today;
-            members.push_back({static_cast<uint16_t>(strtoul(kv.first.c_str(), nullptr, 16)),
-                               names.count(kv.first) ? names[kv.first] : kv.first,
-                               all >= 100 ? static_cast<double>(kv.second.lost_today) / all : -1.0});
+          for (const Panel &p : monitor.panels()) {
+            names[p.addr] = !p.label.empty() ? p.label : p.addr;
+            PgwSeen s{static_cast<uint16_t>(strtoul(p.addr.c_str(), nullptr, 16)), names[p.addr], 0, false, 0, 0};
+            auto it = links.links().find(p.addr);
+            if (it != links.links().end()) {
+              s.tap = it->second.tap;
+              s.lately = it->second.last_heard_s >= since;
+              s.reports = it->second.reports_today;
+              s.lost = it->second.lost_today;
+            }
+            seen.push_back(s);
           }
+          std::vector<PgwMember> members = pgw_members(seen, tap);
           char id[5];
           snprintf(id, sizeof(id), "%04X", tap);
           std::string why;

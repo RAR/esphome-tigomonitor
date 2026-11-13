@@ -133,7 +133,32 @@ static void test_nothing_to_pick() {
   CHECK(pgw_pool(Roof(), "1201", unknown, {}, why).empty());
 }
 
+// Who reports through a TAP: those heard through it lately; with one TAP in
+// use, also every panel not heard since a restart, so the pool is right at
+// night and at sunrise, not only once all have reported.
+static void test_members() {
+  std::vector<PgwSeen> seen = {
+      {0x02, "A1", 0x1201, true, 900, 100},  // heard through it: loss 0.1
+      {0x03, "A2", 0x1201, false, 900, 100}, // through it, but not lately
+      {0x04, "B1", 0, false, 0, 0},          // not heard since the restart
+      {0x05, "B2", 0x1202, true, 50, 0},     // through another TAP
+  };
+  // Two TAPs in use: only the one heard through 1201 lately.
+  auto m = pgw_members(seen, 0x1201);
+  CHECK(m.size() == 1 && m[0].tuid == 0x02 && m[0].loss > 0.099 && m[0].loss < 0.101);
+  // One TAP in use: the unheard panel counts too, its loss unknown; one
+  // heard through another TAP never does.
+  seen.pop_back();
+  m = pgw_members(seen, 0x1201);
+  CHECK(m.size() == 2 && m[1].tuid == 0x04 && m[1].loss < 0);
+  // Under 100 reports: loss unknown.
+  seen[0].reports = 50;
+  seen[0].lost = 10;
+  CHECK(pgw_members(seen, 0x1201)[0].loss < 0);
+}
+
 int main() {
+  test_members();
   test_the_roof_picks_the_far_face();
   test_a_ridge_gap_doesnt_hand_it_to_a_dense_corner();
   test_only_this_taps_optimizers();

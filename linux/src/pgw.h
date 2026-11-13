@@ -42,6 +42,35 @@ inline std::string pgw_upper(std::string s) {
   return s;
 }
 
+// What the monitor knows of one panel, for pgw_members.
+struct PgwSeen {
+  uint16_t tuid;
+  std::string name;
+  uint16_t tap;     // the TAP it was last heard through; 0 not since the restart
+  bool lately;      // heard in the last day
+  uint32_t reports;  // today
+  uint32_t lost;     // today
+};
+
+// The optimizers reporting through tap: those heard through it lately.
+// With no other TAP heard lately, also every panel not heard since a
+// restart (tap 0): a restart forgets who was heard through what, and at
+// night nothing reports, so without them the pool would be chosen from the
+// few heard since and wander until sunrise.
+inline std::vector<PgwMember> pgw_members(const std::vector<PgwSeen> &seen, uint16_t tap) {
+  bool others = false;
+  for (const auto &s : seen)
+    if (s.tap && s.tap != tap && s.lately) others = true;
+  std::vector<PgwMember> out;
+  for (const auto &s : seen) {
+    bool mine = s.tap == tap ? s.lately : (!s.tap && !others);
+    if (!mine) continue;
+    uint32_t all = s.reports + s.lost;
+    out.push_back({s.tuid, s.name, all >= 100 ? static_cast<double>(s.lost) / all : -1.0});
+  }
+  return out;
+}
+
 // The pool for TAP tap_id (4 hex digits) from members, the optimizers
 // reporting through it; why says which rule chose it: "named", "roof",
 // "loss" or "none".
