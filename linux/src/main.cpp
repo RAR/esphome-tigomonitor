@@ -390,8 +390,11 @@ int main(int argc, char **argv) {
           std::vector<PgwSeen> seen;
           int64_t since = static_cast<int64_t>(time(nullptr)) - 86400;
           auto links = monitor.links();
-          for (const Panel &p : monitor.panels()) {
-            names[p.addr] = !p.label.empty() ? p.label : p.addr;
+          // The node table, kept across restarts, not the panels: those
+          // fill only as each reports, so after a restart at night the pool
+          // was chosen from the few heard since (roof, 2026-11-12).
+          for (const Node &p : monitor.nodes()) {
+            names[p.addr] = !p.cca_label.empty() ? p.cca_label : p.addr;
             PgwSeen s{static_cast<uint16_t>(strtoul(p.addr.c_str(), nullptr, 16)), names[p.addr], 0, false, 0, 0};
             auto it = links.links().find(p.addr);
             if (it != links.links().end()) {
