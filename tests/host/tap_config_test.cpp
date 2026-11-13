@@ -107,9 +107,9 @@ static void test_gate() {
   Bytes key = {0x37, 0x24, 0x92, 0x66};
   CHECK(may_send(CMD_RESET, key, false, false, false, false, false, true));
   CHECK(!may_send(CMD_RESET, key, true));
-  // The gateway Store: a provisioning request on the bench only.
+  // The gateway Store: a provisioning request's (a G8 saves only with it).
   CHECK(may_send(CMD_STORE, key, true, false, false, false, false, true));
-  CHECK(!may_send(CMD_STORE, key, false, false, false, false, false, true));
+  CHECK(may_send(CMD_STORE, key, false, false, false, false, false, true));
   CHECK(!may_send(CMD_STORE, key, true));
   // Provisioning doesn't open anything else: a table erase, SetKnownNetworks.
   CHECK(!may_send(CMD_TUNNEL, tunnel_request(SUB_ERASE_FLASH, 1, {0xBA, 0xBE}), false, false, false, false, false, true));
@@ -323,6 +323,15 @@ static void test_provision_profile_not_stored() {
 // The bench's Store test (owner, 2026-11-13): asked to, on a TAP that kept
 // the old profile, the job sends the gateway Store and reads the stored copy
 // again, saying what it now holds.
+static void test_saves_with_store() {
+  CHECK(saves_with_store("Mgate Version G8.65 May  9 2025 13:52:34 GW-H150.6.0S0.12"));
+  CHECK(saves_with_store("Mgate Version G8.59 Jan  1 2024"));
+  CHECK(!saves_with_store("Mgate Version H1.0007 Apr 22 2025 15:28:25 GW-H158.7.00"));
+  CHECK(saves_with_store("G8.65 May  9 2025"));
+  CHECK(!saves_with_store("Mgate Version XG8.1"));
+  CHECK(!saves_with_store(""));
+}
+
 static void test_provision_store() {
   RadioBlock want;
   want.channel = 11;
@@ -347,7 +356,7 @@ static void test_provision_store() {
     if (tap.got.size() == 5) CHECK(Bytes(tap.got[4].begin() + 5, tap.got[4].end()) == (Bytes{0x00, 0x01}));
     CHECK(m.find("Store answered 0x13") != std::string::npos);
     CHECK(m.find("19 bytes") != std::string::npos);
-    CHECK(m.find("stored copy now has map 14020201000000001c01") != std::string::npos);
+    CHECK(m.find("saved with the Store") != std::string::npos);
     CHECK(m.find("112233") == std::string::npos);
   }
   {  // no answer to the Store
@@ -360,6 +369,34 @@ static void test_provision_store() {
     ProvisionJob job(TAP_MAC, want, false, false);
     run(job, tap);
     CHECK(!job.ok() && job.message().find("didn't answer the Store") != std::string::npos);
+  }
+  {  // a G8, not asked: it saves only with the Store, so the job sends it
+    FakeTap tap;
+    tap.g8 = true;
+    tap.ram = made_up();
+    tap.stored_copy = tap.ram;
+    RadioBlock g8 = made_up();
+    g8.channel = 15;  // a whole new network: the stored copy differs until the Store
+    g8.saved_by_store = true;
+    ProvisionJob job(TAP_MAC, g8, false, false);
+    run(job, tap);
+    CHECK(job.ok());
+    CHECK(tap.stores == 1 && tap.stored_copy.channel == 15);
+    CHECK(job.message().find("saved with the Store") != std::string::npos);
+  }
+  {  // a G8 whose Store saves nothing: stopped, said
+    FakeTap tap;
+    tap.g8 = true;
+    tap.ram = made_up();
+    tap.stored_copy = tap.ram;
+    RadioBlock g8 = made_up();
+    g8.channel = 15;
+    g8.saved_by_store = true;
+    std::function<void(RadioBlock &)> old = [](RadioBlock &b) { b.channel = 11; };
+    tap.stored_shows = old;
+    ProvisionJob job(TAP_MAC, g8, false, false);
+    run(job, tap);
+    CHECK(!job.ok() && job.message().find("after the Store") != std::string::npos);
   }
   {  // not asked: no Store
     FakeTap tap;
@@ -750,6 +787,7 @@ int main() {
   test_provision_keeps_the_network_changes_the_profile();
   test_provision_profile_not_stored();
   test_provision_store();
+  test_saves_with_store();
   test_provision_sizes_the_map();
   test_map_period();
   test_provision_stops();

@@ -259,7 +259,10 @@ bool MasterCore::request_provision(const master::Bytes &tap_mac, const master::R
   else if (table_refusal_(true, tap, why))
     return false;
   if (!why.empty()) return false;
-  start_table_job_(std::make_unique<master::ProvisionJob>(tap_mac, block, reset, dry_run), tap);
+  master::RadioBlock b = block;
+  for (const auto &t : taps_)
+    if (t->id == tap) b.saved_by_store = master::saves_with_store(t->st.version);
+  start_table_job_(std::make_unique<master::ProvisionJob>(tap_mac, b, reset, dry_run), tap);
   return true;
 }
 

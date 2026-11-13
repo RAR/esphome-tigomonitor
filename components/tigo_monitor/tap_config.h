@@ -95,11 +95,11 @@ struct RadioBlock {
   // Not sent: start at the read, without asking the TAP for its MAC first
   // (bench: does a lone 003A to a running TAP set the 0x0E status to 1?).
   bool skip_identify = false;
-  // Not sent: bench only (master_bench). After the check, send the gateway
-  // Store (0x0012 + the key, as the CCA does to a G8) and read the stored
-  // copy again. On a G8 the write is RAM only and the Store is what saves it
-  // (owner's analysis of the CCA's firmware, 2026-11-13); what else the Store
-  // saves isn't known, hence the bench.
+  // Not sent: the TAP saves only with the gateway Store (0x0012 + the key),
+  // a G8 (saves_with_store). After the check the job sends it and reads the
+  // stored copy again, which must then match.
+  bool saved_by_store = false;
+  // Not sent: bench only (master_bench). The Store to any TAP, asked for.
   bool store = false;
 
   Bytes encode() const {
@@ -306,6 +306,14 @@ inline Bytes radio_write_args(const RadioBlock &b) {
 }
 
 // A frame as a dry run shows it, the key replaced.
+// A G8 saves its radio settings only with the gateway Store: its stored read
+// answers with the stored copy and saves nothing (the roof's G8.65 and the
+// bench's, 2026-11-13; the bench's kept a Store-saved map through a power
+// cycle). An H1 saves on the stored read, and its 0x0012 is another command.
+inline bool saves_with_store(const std::string &version) {
+  return version.rfind("G8.", 0) == 0 || version.find(" G8.") != std::string::npos;
+}
+
 inline std::string radio_write_text(const RadioBlock &b) {
   return "0D 01 00 + block (" + b.describe() + ")";
 }
@@ -323,7 +331,7 @@ class ProvisionJob : public TableJob {
   static const uint32_t RESET_WAIT_MS = 2000;
 
   ProvisionJob(const Bytes &tap_mac, const RadioBlock &block, bool reset, bool dry_run)
-      : TableJob(tap_mac, dry_run), block_(block), reset_(reset) {
+      : TableJob(tap_mac, dry_run), block_(block), reset_(reset), store_(block.store || block.saved_by_store) {
     if (block.skip_identify) step_ = Step::read_before;
   }
 
@@ -349,7 +357,7 @@ class ProvisionJob : public TableJob {
           dry_text_.push_back(radio_write_text(block_));
           dry_text_.push_back("0D 00 01 (the save)");
           dry_text_.push_back("0D 00 00 (the check)");
-          if (block_.store) {
+          if (store_) {
             dry_text_.push_back("0012 37 24 92 66 (the Store) to this TAP alone");
             dry_text_.push_back("0D 00 01 (the stored copy again)");
           }
@@ -397,8 +405,10 @@ class ProvisionJob : public TableJob {
       // reading it; we say what came back and read the stored copy again.
       if (!ok || reply.cmd != CMD_STORE + 1)
         return fail_("the TAP didn't answer the Store; read it and power-cycle it to see what it kept");
-      store_note_ = "the Store answered 0x13 with " + std::to_string(reply.payload.size()) + " bytes (" +
-                    hex_bytes_(reply.payload) + ")";
+      store_note_ = "the Store answered 0x13" +
+                    (reply.payload.empty() ? std::string()
+                                           : " with " + std::to_string(reply.payload.size()) + " bytes (" +
+                                                 hex_bytes_(reply.payload) + ")");
       step_ = Step::store_read;
       return;
     }
@@ -459,6 +469,11 @@ class ProvisionJob : public TableJob {
         return;
       case Step::save:
         if (!got) return fail_("the TAP didn't answer the save (0D 00 01); the write is in RAM only");
+        // Saved by the Store: until then the stored copy is the old one.
+        if (store_) {
+          step_ = Step::check;
+          return;
+        }
         if (!now.same_settings(block_)) {
           // Only the profile, the network kept: the TAP runs the new map but
           // stored the old (the roof's G8.65, 2026-11-13). Said, not failed;
@@ -481,7 +496,7 @@ class ProvisionJob : public TableJob {
       case Step::check:
         if (!got) return fail_("the TAP didn't answer the check read");
         if (now != block_) return fail_("the check read differs from what was written");
-        if (block_.store) {
+        if (store_) {
           step_ = Step::store;
           return;
         }
@@ -500,10 +515,10 @@ class ProvisionJob : public TableJob {
                        "; saved. Power-cycle the TAP and read it to see it kept");
       case Step::store_read: {
         if (!got) return fail_(store_note_ + ", but didn't answer the stored read after it");
-        bool kept = now.same_settings(block_);
-        std::string what = store_note_ + "; its stored copy now has map " + hex_of_(now.map) +
-                           (kept ? ", the same settings as written"
-                                 : ", and differs from what was written in " + block_.differences(now));
+        if (!now.same_settings(block_))
+          return fail_(store_note_ + ", but after the Store its stored copy still differs from what was written: " +
+                       block_.differences(now) + "; it goes back to that when it restarts");
+        std::string what = "saved with the Store (" + store_note_.substr(4) + ")";
         if (reset_) {
           store_done_ = what;
           step_ = Step::reset;
@@ -603,6 +618,7 @@ class ProvisionJob : public TableJob {
 
   RadioBlock block_;
   bool reset_;
+  bool store_;            // save with the gateway Store (a G8, or asked on the bench)
   bool unsaved_ = false;  // the TAP runs the new profile but stored the old
   std::string store_note_, store_done_;
   std::array<uint8_t, 10> stored_map_{};

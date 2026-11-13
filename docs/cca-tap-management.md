@@ -20,7 +20,7 @@ The recordings and UI pastes hold MACs, PANs and network keys. They live in `~/t
 | 0x000C | SET_CHANNEL, 2 bytes. Seen as `00 00` (disable, or start of a channel scan) and `20 00` (unknown). Acked with 0x000D |
 | 0x000E / 0x0E02 | the bring-up read; H-series TAPs take 0x000E and refuse 0x0E02 |
 | 0x0010 | RESET, key only (broadcast) |
-| 0x0012 | STORE, key only: commits the TAP's current settings (RS485 id, channel) |
+| 0x0012 | STORE, key only: saves the TAP's whole gateway configuration (RS485 id, radio block) |
 | 0x0014 | SET_485_ID broadcast: key + factory id. Moves **every** TAP to 1235 |
 | 0x0038 / 0x003A | GET_MAC with / without reply backoff |
 | 0x003C | SET_ID_BY_MAC: key + MAC + new id |
@@ -81,7 +81,7 @@ The 37-byte GatewayCfg reply: the 36-byte block the CCA writes, then a status by
   | `24-4-2-1/28/1` | 300 | 20 s |
 
   The CCA picks one per TAP from the largest number of optimizers on any TAP plus headroom (optimizers expected but not seen, and ones with no TAP), so the roof's 40 plus headroom got `14-`, and a bench TAP with one got `12-`, which still holds 40. A full 40 on a `12-` TAP is at the edge: the CCA would have moved to `14-` at 41. The interval is how often the system as a whole collects from that many optimizers, not each optimizer's own report period, so it doesn't change how often a panel reports. It re-picks only at the end of a detection/reset, not as optimizers join, unless the TAP's behavior setting turns automatic sizing off. A TAP carrying more than its map holds can't give every optimizer a slot, so some are polled rarely or refused one. Our master never writes the map, so **a TAP the Pi carries keeps the map a CCA last gave it: keep a `12-` TAP below 40 optimizers, with room to spare.** Automatic sizing only ever writes the `/1` form; the `/3` the bench TAP read on 11-06 came from a map set by hand in the CCA's config, which is written to a TAP as is. The bench TAPs read `12-2-2-1/28/1` (2026-11-09) and `12-2-2-1/28/3` (2026-11-06); bytes 9–11 were nonzero on 11-06 and zero since, which is the leftover memory above, not a setting.
-- **The reads:** `00 00` returns the config in use, `00 01` the one staged to apply. **The write** is `0B0F` sub `0D`, args `01 00` + the 36-byte block, and sets the staged copy; the TAP applies it on its next reset, and until then the two reads differ (one capture shows the old channel and PAN in the first and the new ones in the second). The CCA reads both after every write to check it (owner's analysis, matching the 11-06 captures).
+- **The reads:** `00 00` returns the config in use, `00 01` the one staged to apply. **The write** is `0B0F` sub `0D`, args `01 00` + the 36-byte block, and sets the staged copy; and the TAP retunes at once. How it is saved depends on the firmware. An H1 (the bench's H1.0007) saves it when the `00 01` read comes in. A G8 doesn't: its `00 01` answers with the stored copy, which keeps the old block until a key-only STORE (`0x0012` + `37 24 92 66`, answered `0x13` with no payload), the CCA's own save, as the owner's analysis of its firmware shows. Observed on the roof's G8.65 and the bench's (2026-11-13): a write alone left the stored copy on the old map; with the STORE it read the new one, and the bench TAP ran it after a power cycle. Our radio job sends the STORE to a TAP whose VERSION says G8, after its check read, and reads the stored copy again.
 - **Every write in the 11-06 captures (six) came right after a herd and RESET, between PV off (`0B00 00`) and PV on (`0B00 01`) sent to every TAP**, and only to the TAPs being configured: adopting a new TAP left the other's block untouched. The PV off is the CCA's safety step around a config change, not part of the write.
 - **Never log or commit this block:** it carries the key.
 
@@ -213,7 +213,7 @@ The read-back `!Smrt …` has **one layout for every firmware** (the analysis si
 
 The send gate lists these as never (some are still being moved there; see plan Task 8):
 - **Tunnel subs:** EraseFlash, SetTable (until Phase 2 is approved), the GatewayCfg write, ResetNode, PeriodicCfg Write, SetKnownNetworks, EraseStackTrace, 0x12, 0x1B, and the star messages 0x42–0x47 (Own, Ignore, Kick, firmware request and delivery, 0x47). A text command containing `Leave` to an optimizer.
-- **Top-level commands:** SET_CHANNEL, the channel scan (0x0070/0x0072), every TAP firmware command (0x0520–0x0527), CLEAR_ADT, SET_LIST_ENTRIES, and STORE in any form but the key-only bring-up one.
+- **Top-level commands:** SET_CHANNEL, the channel scan (0x0070/0x0072), every TAP firmware command (0x0520–0x0527), CLEAR_ADT, SET_LIST_ENTRIES, and STORE in any form but the key-only one (the bring-up's, and a G8's save after a radio write).
 
 **Any one of these, on the roof, can silence every optimizer, re-key the network, or brick the TAP.**
 

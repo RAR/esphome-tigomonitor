@@ -1179,7 +1179,7 @@ static const uint16_t CMD_RESET = 0x0010;
 // It saves the TAP's whole gateway configuration, not just the id (owner's
 // analysis of the CCA's firmware, 2026-11-13); our bring-up sends it to a TAP
 // at its new id, so the next RESET or power cycle brings it back there (the
-// 3.6 CCA, bench capture 2026-11-06), and the bench's radio test after a write.
+// 3.6 CCA, bench capture 2026-11-06), and a G8 after a radio write, as the CCA does.
 static const uint16_t CMD_STORE = 0x0012;
 
 struct DiscoveryRequest {
@@ -1943,8 +1943,8 @@ inline bool may_send(uint16_t cmd, const Bytes &payload, bool bench, bool startu
       if (provision && (cmd == CMD_RESET || (cmd == CMD_GET_MAC_NOW && payload.empty()) ||
                         (cmd == CMD_TUNNEL && payload.size() == 7 && payload[3] == 0x0D)))
         return true;
-      // The gateway Store after a radio write: the bench only (tap_config.h).
-      if (provision && bench && cmd == CMD_STORE) return true;
+      // The gateway Store after a radio write: how a G8 saves it (tap_config.h).
+      if (provision && cmd == CMD_STORE) return true;
       return startup;
     case Allow::optimizer_write: return writes;
     case Allow::pv_off: return pv_off || startup;
