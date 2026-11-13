@@ -116,6 +116,8 @@ class BusMaster {
   uint8_t seq() const { return core_.seq(); }
   void set_seq(uint8_t s) { core_.set_seq(s); }
   bool request_forget_tap(uint16_t id, std::string &why) { return core_.request_forget_tap(id, why); }
+  bool request_leave(uint16_t node, std::string &why) { return core_.request_leave(node, why); }
+  void set_leave_allowed(bool on) { core_.set_leave_allowed(on); }
   bool request_ask(uint16_t node, const std::string &text, std::string &why) {
     return core_.request_ask(node, text, why);
   }

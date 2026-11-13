@@ -360,12 +360,20 @@ static void test_tap_reconfiguring_frames_are_never_sent() {
     for (const Bytes &args : {Bytes{}, Bytes{0x00, 0x02}, Bytes{0x00, 0x02, 0x80, 0x00}})
       CHECK(never_anywhere(CMD_TUNNEL, tunnel_request(sub, 1, args)));
   CHECK(classify_request(CMD_TUNNEL, tunnel_request(0x40, 1, {})) == Allow::bench_only);
-  // An optimizer's own Leave command makes it leave its network (owner's
-  // analysis, 2026-11-10): never, in any of the text forms the CCA uses.
-  for (const char *t : {"Leave", "Leave\r", "!Leave", "^00Leave", "^00Leave\r", "#Leave"}) {
+  // An optimizer's own Leave command makes it drop its parent (owner's
+  // analysis, 2026-11-10/13): never, in any text form but ^00Leave\r, which
+  // only the owner's one-shot sends (test_queries_leave).
+  for (const char *t : {"Leave", "Leave\r", "!Leave", "^00Leave", "#Leave"}) {
     Bytes a = {0x00, 0x1c};
     a.insert(a.end(), t, t + strlen(t));
     CHECK(never_anywhere(CMD_TUNNEL, tunnel_request(0x06, 1, a)));
+  }
+  {
+    Bytes a = {0x00, 0x1c};
+    a.insert(a.end(), QUERY_LEAVE, QUERY_LEAVE + strlen(QUERY_LEAVE));
+    Bytes p = tunnel_request(0x06, 1, a);
+    CHECK(classify_request(CMD_TUNNEL, p) == Allow::node_leave);
+    CHECK(!may_send(CMD_TUNNEL, p, true, true, true, true, true, true));
   }
   CHECK(classify_request(CMD_TUNNEL, tunnel_request(0x48, 1, {})) == Allow::bench_only);
   // Neighbours stay as they were: the reads around them are bench-only.
@@ -1194,6 +1202,43 @@ static void test_queries_ask() {
   CHECK(gave.size() == 1 && gave[0].second == "no answer to ^00GetPAN after 3 tries");
 }
 
+// The owner's one-shot Leave to one node (2026-11-13): sent exactly once,
+// never retried, never by ask(); at the gate only with the leave switch,
+// never on the bench alone. Any other text with Leave in it stays never.
+static void test_queries_leave() {
+  uint8_t seq = 0;
+  Queries q(0, false);
+  q.on_poll_reply(poll_reply_with({power_from(0x03)}), 0);
+  ask(q, 0, 10000, seq);  // its five reads
+  CHECK(q.leave(0x03, 20000));
+  CHECK(!q.leave(0x03, 20000));  // one at a time
+  std::vector<Request> r = ask(q, 20000, 30000, seq, 0x03);
+  CHECK(r.size() == 1 && query_text(r[0]) == "^00Leave\r" && r[0].leave);
+  CHECK(q.sent_leaves() == 1);
+  CHECK(classify_request(r[0].cmd, r[0].payload) == Allow::node_leave);
+  CHECK(!may_send(r[0].cmd, r[0].payload, false));
+  CHECK(!may_send(r[0].cmd, r[0].payload, true));  // the bench alone isn't enough
+  CHECK(!may_send(r[0].cmd, r[0].payload, true, true, true, true, true, true));
+  CHECK(may_send(r[0].cmd, r[0].payload, false, false, false, false, false, false, true));
+  // Never again, however long it stays quiet.
+  for (uint32_t t = 30000; t < 30000 + 3 * 3600000u; t += 60000) {
+    q.on_poll_reply(poll_reply_with({power_from(0x03)}), t);
+    for (const Request &x : ask(q, t, t + 59000, seq, 0x03)) CHECK(query_text(x) != "^00Leave\r");
+  }
+  CHECK(q.sent_leaves() == 1);
+  // A Leave of any other shape: never, whatever is on.
+  for (const char *t : {"^00Leave_1\r", "^00LeaveNow\r", "!Leave\r", "^01Leave\r"}) {
+    std::string text(t);
+    Bytes args = {0x00, 0x03};
+    args.insert(args.end(), text.begin(), text.end());
+    Bytes p = tunnel_request(0x06, 1, args);
+    CHECK(classify_request(CMD_TUNNEL, p) == Allow::never);
+    CHECK(!may_send(CMD_TUNNEL, p, true, true, true, true, true, true, true));
+  }
+  // An unknown node: refused.
+  CHECK(!q.leave(0x44, 20000));
+}
+
 static void test_housekeeping() {
   Learned41 l;
   l.on_frame(cca41(1, 0x0027, 0x01, 0x21));
@@ -1715,6 +1760,7 @@ int main() {
   test_walks();
   test_queries();
   test_queries_ask();
+  test_queries_leave();
   test_pv_switch();
   if (failures) {
     std::printf("%d failed\n", failures);

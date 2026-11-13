@@ -1966,6 +1966,31 @@ void HttpServer::routes_() {
     else send_json(res, {{"error", why.empty() ? "not running the bus" : why}}, code);
   });
 
+  // The owner's one-shot Leave: {"addr": "0003"}. The optimizer drops its
+  // parent and rejoins, choosing a parent again. Sent once, never retried;
+  // only with dangerous_options in settings.json and a web password set.
+  svr.Post("/api/master/leave", [this](const httplib::Request &req, httplib::Response &res) {
+    if (ctx_.current_settings().web_password.empty()) {
+      send_json(res, {{"error", "set a web password first"}}, 403);
+      return;
+    }
+    if (!ctx_.current_settings().dangerous_options) {
+      send_json(res, {{"error", "telling an optimizer to leave needs dangerous_options in settings.json"}}, 403);
+      return;
+    }
+    json j = json::parse(req.body, nullptr, false);
+    unsigned addr = 0;
+    if (j.is_discarded() || !j.is_object() || !j.contains("addr") || !j["addr"].is_string() ||
+        sscanf(j["addr"].get<std::string>().c_str(), "%x", &addr) != 1 || addr < 2 || addr > 0x7FFF) {
+      send_json(res, {{"error", "expected {\"addr\": \"0003\"}"}}, 400);
+      return;
+    }
+    std::string why;
+    int code = ctx_.request_leave ? ctx_.request_leave(static_cast<uint16_t>(addr), why) : 409;
+    if (code == 200) send_json(res, {{"queued", true}});
+    else send_json(res, {{"error", why.empty() ? "not running the bus" : why}}, code);
+  });
+
   svr.Post("/api/master/table/stop", [this](const httplib::Request &req, httplib::Response &res) {
     if (ctx_.current_settings().web_password.empty() && !setup_open(ctx_.current_settings(), unix_now_s())) {
       send_json(res, {{"error", "set a web password first"}}, 403);

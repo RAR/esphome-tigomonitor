@@ -372,6 +372,7 @@ struct Request {
   bool bring_up = false;  // a frame the CCA sends only straight after re-addressing a TAP
   bool table_edit = false;  // from a TableAdd (table_edit.h), the only source of a table write
   bool provision = false;   // from a ProvisionJob (tap_config.h): Add a TAP's radio step
+  bool leave = false;       // the owner's one-shot Leave to one node (Queries::leave)
 };
 
 // ---- housekeeping ----------------------------------------------------------
@@ -874,6 +875,10 @@ class Housekeeping {
 static const char *const QUERY_READS[] = {"^00Version\r", "^00Tests\r", "^00Info\r", "^00Smrt\r", "^00Mppt\r"};
 static const char *const QUERY_W255 = "#00w255\r";
 static const char *const QUERY_SMART_S = "^00Smrt_........S0000...0000\r";
+// The optimizer's own Leave: it drops its parent and scans again, keeping its
+// known networks and keys, so it rejoins the same TAP unaided (owner's
+// analysis, 2026-11-13). No CCA flow sends it; only the owner's one-shot.
+static const char *const QUERY_LEAVE = "^00Leave\r";
 
 // The CCA's text dialogue with optimizers, tunnel sub 0x06, from the 24 h
 // capture. A query is the node's Tuid and an ASCII line; the TAP only
@@ -915,7 +920,7 @@ class Queries {
   static const uint32_t CHECK_AFTER_MS = 3 * 60000;  // a read after a write
   static const uint32_t ASLEEP_MS = 30 * 60000;
   static const uint32_t ASK_TRIES = 3;  // an asked text unanswered this often: given up
-  enum Kind { version, tests, info, smrt, mppt, w255, smart_s, asked };
+  enum Kind { version, tests, info, smrt, mppt, w255, smart_s, asked, leave_once };
 
   // A read-shaped text: ^00 and a name, nothing else (no '_', no '#', not
   // Leave). What the owner may ask one node for on the bench.
@@ -936,6 +941,17 @@ class Queries {
     pending_.push_back({tuid, asked, now_ms, 0, text});
     return true;
   }
+  // The owner's one-shot Leave to one node this TAP has heard: queued, sent
+  // once at the next gap, never retried (a second could kick it again as it
+  // rejoins). False for a node not heard, or one with a Leave still queued.
+  bool leave(uint16_t tuid, uint32_t now_ms) {
+    if (!heard_ms_.count(tuid)) return false;
+    for (Item &it : pending_)
+      if (it.tuid == tuid && it.kind == leave_once) return false;
+    pending_.push_back({tuid, leave_once, now_ms, 0});
+    return true;
+  }
+  uint32_t sent_leaves() const { return sent_leaves_; }
   std::vector<std::pair<uint16_t, std::string>> take_asked() {
     std::vector<std::pair<uint16_t, std::string>> out;
     out.swap(asked_answers_);
@@ -979,6 +995,7 @@ class Queries {
     const char *text = it.kind == w255      ? QUERY_W255
                        : it.kind == smart_s ? QUERY_SMART_S
                        : it.kind == asked   ? it.text.c_str()
+                       : it.kind == leave_once ? QUERY_LEAVE
                                             : QUERY_READS[it.kind];
     args.insert(args.end(), text, text + std::char_traits<char>::length(text));
     if (it.kind == asked && it.tries >= ASK_TRIES) {
@@ -988,7 +1005,11 @@ class Queries {
       pending_.erase(pending_.begin() + static_cast<long>(best));
       return {};
     }
-    if (it.kind == w255 || it.kind == smart_s) {
+    bool leave = it.kind == leave_once;
+    if (leave) {
+      sent_leaves_++;
+      pending_.erase(pending_.begin() + static_cast<long>(best));  // once, never retried
+    } else if (it.kind == w255 || it.kind == smart_s) {
       sent_writes_++;
       pending_.erase(pending_.begin() + static_cast<long>(best));  // once, as the CCA's
     } else {
@@ -998,7 +1019,9 @@ class Queries {
     }
     last_sent_ms_ = now_ms;
     seq = next_seq(seq);
-    return {CMD_TUNNEL, tunnel_request(0x06, seq, args)};
+    Request r{CMD_TUNNEL, tunnel_request(0x06, seq, args)};
+    r.leave = leave;
+    return r;
   }
 
   uint32_t sent_reads() const { return sent_reads_; }
@@ -1094,6 +1117,7 @@ class Queries {
   }
 
   bool writes_;
+  uint32_t sent_leaves_ = 0;
   uint32_t last_sent_ms_;
   std::vector<Item> pending_;
   std::map<uint16_t, Setup> setups_;
@@ -1792,7 +1816,7 @@ class Herd {
 // (tap_config.h), with Allow changes to the TAPs or master_bench on (the
 // caller's provision flag). A provisioning request may also send the 0x0D
 // reads, GET_MAC_NOW and (bench only) the reset, to its own TAP alone.
-enum class Allow { yes, bench_only, startup_only, optimizer_write, pv_off, table_write, provision, never };
+enum class Allow { yes, bench_only, startup_only, optimizer_write, pv_off, table_write, provision, node_leave, never };
 
 // Sub 0x29's args as the CCA sent them on the bench (2026-11-06, 11-09): a
 // count, then count x (MAC, TUID), 1 to 10 (the TAP's limit). Each TUID is a
@@ -1893,8 +1917,10 @@ inline Allow classify_request(uint16_t cmd, const Bytes &payload) {
       // proves nothing for these.
       if (text.rfind("#", 0) == 0 || (text.rfind("^", 0) == 0 && text.find('_') != std::string::npos))
         return Allow::never;
-      // The optimizer's own Leave command: it leaves its network (owner's
-      // analysis, 2026-11-10). No CCA flow sends it.
+      // The optimizer's own Leave command: it drops its parent and rejoins
+      // (owner's analysis, 2026-11-10/13). No CCA flow sends it. Only the
+      // owner's one-shot, in exactly this form; any other shape never.
+      if (text == QUERY_LEAVE) return Allow::node_leave;
       if (text.find("Leave") != std::string::npos) return Allow::never;
       return Allow::bench_only;
     }
@@ -1932,7 +1958,7 @@ inline bool is_config_read(uint16_t cmd, const Bytes &payload) {
 }
 
 inline bool may_send(uint16_t cmd, const Bytes &payload, bool bench, bool startup = false, bool writes = false,
-                     bool pv_off = false, bool table_writes = false, bool provision = false) {
+                     bool pv_off = false, bool table_writes = false, bool provision = false, bool leave = false) {
   switch (classify_request(cmd, payload)) {
     case Allow::yes: return true;
     case Allow::bench_only: return bench;  // startup is not bench: a bring-up sends only its own
@@ -1946,6 +1972,7 @@ inline bool may_send(uint16_t cmd, const Bytes &payload, bool bench, bool startu
     case Allow::pv_off: return pv_off || startup;
     case Allow::table_write: return table_writes;  // never bench or startup alone
     case Allow::provision: return provision;  // never bench or startup alone
+    case Allow::node_leave: return leave;     // never bench or startup alone
     case Allow::never: return false;
   }
   return false;

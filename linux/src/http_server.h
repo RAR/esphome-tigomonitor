@@ -103,6 +103,9 @@ struct HttpContext {
   // dry run. 200, or 409 with why.
   std::function<int(const esphome::tigo_monitor::master::Bytes &tap_mac, uint8_t code, bool dry_run, std::string &why)>
       request_period;
+  // The owner's one-shot Leave to one optimizer (POST /api/master/leave),
+  // only with dangerous_options in settings.json; 200, or 409 with why.
+  std::function<int(uint16_t node, std::string &why)> request_leave;
 };
 
 // tigomonitord --health-check PORT, the container's HEALTHCHECK: GETs
