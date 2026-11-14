@@ -14,6 +14,7 @@
 // 400-tick (2 s) bins: on the bench a gap of 400 was the norm, 800/1200/1600
 // meant 1/2/3 bins missed, and 0 a duplicate.
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <map>
@@ -35,6 +36,9 @@ static const int64_t LONG_GAP_S = 200;
 // last one, is a late one: a silence that long would take 2 minutes. On the
 // roof they arrive up to 3,000 ticks (15 s) behind.
 static const int64_t LATE_WITHIN_S = 60;
+// A parent heard no later than this before its child joined through it
+// counts as present then: it reports every few seconds while producing.
+static const int64_t RELAY_STALE_S = 600;
 
 inline uint32_t slot_ticks(uint16_t slot) { return (slot >> 14) * 12000u + (slot & 0x3FFF); }
 
@@ -136,7 +140,10 @@ class LinkStats {
 
   // The node its parent is: the one that last joined with the parent's NWID,
   // looked up now rather than at the join, so a parent heard later still
-  // resolves. Empty for the TAP, a NWID no node holds, or its own.
+  // resolves. Empty for the TAP, a NWID no node holds, or its own. One not
+  // heard or joined since shortly before the child's join is gone (a spare
+  // switched off days ago keeps its last NWID on record, and the TAP hands
+  // NWIDs out again), so it is no relay.
   std::string relay_of(const std::string &addr) const {
     auto it = links_.find(addr);
     if (it == links_.end()) return "";
@@ -145,7 +152,8 @@ class LinkStats {
     std::string best;
     int64_t when = 0;
     for (const auto &e : links_)
-      if (e.first != addr && e.second.nwid == l.parent && e.second.last_join_s >= when) {
+      if (e.first != addr && e.second.nwid == l.parent && e.second.last_join_s >= when &&
+          std::max(e.second.last_heard_s, e.second.last_join_s) >= l.last_join_s - RELAY_STALE_S) {
         best = e.first;
         when = e.second.last_join_s;
       }

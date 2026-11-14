@@ -183,6 +183,28 @@ static void test_a_rejoined_parent_leaves_its_child_unresolved() {
   CHECK(s.relay_of("0026") == "0030");
 }
 
+// A node gone for days keeps its last NWID on record, and the TAP hands
+// NWIDs out again: a child that joins under that NWID now isn't relaying
+// through it. Only a node heard since about the child's join counts.
+static void test_a_node_not_heard_since_the_join_is_no_relay() {
+  LinkStats s;
+  s.on_join("002C", T0, "0001", "000D");  // a spare, then switched off
+  s.on_join("000C", T0 + 3 * 86400, "000D", "0010");
+  CHECK(s.relay_of("000C").empty());
+  // One that joined under it a little before and has reported since is.
+  s.on_join("0017", T0 + 3 * 86400 - 300, "0001", "000D");
+  CHECK(s.relay_of("000C") == "0017");
+}
+
+// Heard reporting, not just joined, also keeps a parent current.
+static void test_a_parent_heard_reporting_since_the_join_resolves() {
+  LinkStats s;
+  s.on_join("0017", T0, "0001", "005A");
+  s.on_report("0017", 0x1201, 120, slot_of(100), T0 + 86400, DAY + 1);
+  s.on_join("0026", T0 + 86400 + 60, "005A", "005B");
+  CHECK(s.relay_of("0026") == "0017");
+}
+
 // A node naming its own NWID as parent is no relationship (the CCA drops it).
 static void test_its_own_nwid_is_no_relay() {
   LinkStats s;
@@ -351,6 +373,8 @@ int main() {
   test_a_parent_resolves_by_nwid_not_address();
   test_a_parent_heard_later_resolves_then();
   test_a_rejoined_parent_leaves_its_child_unresolved();
+  test_a_node_not_heard_since_the_join_is_no_relay();
+  test_a_parent_heard_reporting_since_the_join_resolves();
   test_its_own_nwid_is_no_relay();
   test_tap_and_last_heard();
   test_a_late_report_fills_its_hole();
