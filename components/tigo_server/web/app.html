@@ -4217,15 +4217,17 @@
     return `${v.model} since ${when(v.since_unix_ms)}` + (v.previous ? `, was ${v.previous}` : '');
   }
   // Optimizers whose settings, MPPT parameters or firmware changed: a CCA
-  // never drifts them, so each is worth a look. The newest five.
+  // never drifts them, so each is worth a look. The newest five of the last
+  // day, as the Home Assistant count: older ones stay in /api/versions.
   function renderChanges() {
     const box = document.getElementById('devices-changes');
-    const changes = ((nodesData.versions || {}).changes || []).slice(0, 5);
+    const since = Date.now() - 24 * 3600 * 1000;
+    const changes = ((nodesData.versions || {}).changes || []).filter(c => c.unix_ms >= since).slice(0, 5);
     box.style.display = changes.length ? '' : 'none';
     if (!changes.length) return;
     const name = a => { const d = (nodesData.devices || []).find(x => String(x.addr).toUpperCase() === a); return d ? d.name : a; };
     const when = ms => new Date(ms).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-    box.innerHTML = `<strong>Settings changed</strong>: an optimizer's settings normally never change, so these are worth a look.<ul>` +
+    box.innerHTML = `<strong>Settings changed</strong> in the last day: an optimizer's settings normally never change, so these are worth a look.<ul>` +
       changes.map(c => `<li>${topoEscape(name(c.addr))} · ${topoEscape(c.what)}: <span class="mono">${topoEscape(c.before)}</span> → ` +
         `<span class="mono">${topoEscape(c.after)}</span> <span style="color:var(--text-dim)">(${when(c.unix_ms)})</span></li>`).join('') + '</ul>';
   }

@@ -139,8 +139,14 @@ void BusLog::load() {
 }
 
 // An optimizer whose settings, MPPT parameters or firmware changed: a CCA
-// never drifts them, so each is news. The last KEEP_CHANGES are kept.
+// never drifts them, so each is news. The last KEEP_CHANGES are kept. Only
+// while this monitor runs the bus: under another master, the change is its.
 void BusLog::change_(int64_t now, uint16_t addr, const char *what, const std::string &before, const std::string &after) {
+  if (!runs_bus_) {
+    LOGI("bus: optimizer %s's %s is now %s, was %s (another master runs the bus)", hex4(addr).c_str(), what,
+         after.c_str(), before.c_str());
+    return;
+  }
   LOGW("bus: optimizer %s's %s changed: %s, was %s", hex4(addr).c_str(), what, after.c_str(), before.c_str());
   changes_.push_back({now, addr, what, before, after});
   while (changes_.size() > KEEP_CHANGES) changes_.pop_front();
@@ -225,8 +231,9 @@ void BusLog::on_frame_(const Frame &f, bool ours, int64_t now) {
     VersionBook::Result r = versions_.record(v, now);
     versions_dirty_ = true;
     if (r == VersionBook::changed) {
-      LOGW("bus: %s %s's firmware changed: %s, was %s", v.tap ? "TAP" : "optimizer", hex4(v.addr).c_str(),
-           v.version.c_str(), versions_.find(v.tap, v.addr)->previous.c_str());
+      if (v.tap || runs_bus_)
+        LOGW("bus: %s %s's firmware changed: %s, was %s", v.tap ? "TAP" : "optimizer", hex4(v.addr).c_str(),
+             v.version.c_str(), versions_.find(v.tap, v.addr)->previous.c_str());
       if (!v.tap) change_(now, v.addr, "firmware", versions_.find(v.tap, v.addr)->previous, v.version);
     }
     else if (r == VersionBook::first)

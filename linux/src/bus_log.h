@@ -15,6 +15,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <atomic>
 #include <cstdint>
 #include <deque>
 #include <functional>
@@ -63,6 +64,10 @@ class BusLog {
   // starts that address's record afresh instead of logging a change. Called
   // with this log's lock held, so it must not call back in.
   void set_barcode_of(std::function<std::string(uint16_t)> barcode_of) { barcode_of_ = std::move(barcode_of); }
+  // Whether this monitor runs the bus now. While another master runs it,
+  // what an optimizer reports changed is that master's doing: the new value
+  // is kept, but not listed as a change or warned of.
+  void set_runs_bus(bool on) { runs_bus_ = on; }
 
  private:
   struct Alarm {
@@ -98,6 +103,7 @@ class BusLog {
   esphome::tigo_monitor::master::AddressOwners owners_;
   std::function<std::string(uint16_t)> barcode_of_;
   bool versions_dirty_ = false;
+  std::atomic<bool> runs_bus_{false};
   mutable std::mutex mu_;
   esphome::tigo_monitor::master::BusWatch watch_;
   esphome::tigo_monitor::protocol::FrameSplitter<std::string> rx_, tx_;

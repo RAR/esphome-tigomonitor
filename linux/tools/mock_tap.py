@@ -41,6 +41,7 @@ queries are forwarded (status 0d) with the optimizer's answer in a later
 poll reply, as a type 0x07 packet. The first panel answers Info with 00 in
 its ninth word until it gets #00w255; the second answers Smrt in mode N
 always, as an H9 does (it reports S only in its reply to the write).
+--node-version sets the firmware every panel reports, for an update between runs.
 --bare is a gateway with no mesh behind it, like a spare TAP on the bench: it
 answers VERSION and refuses polls and the tunnel with 0x0006, as the analysis
 repo's standalone gateways did. Writes what it saw to --stats as JSON every second.
@@ -113,6 +114,7 @@ def main():
     ap.add_argument('--pv-wrong-reply', action='store_true')  # answer 0x0B00 with the other byte
     ap.add_argument('--join-after', type=float, default=5)  # a record the master wrote joins this long after
     ap.add_argument('--table-ack', type=int, default=0)  # the 0x29 ack byte
+    ap.add_argument('--node-version', default='K8.0120 (2D)')  # what every panel answers ^00Version with
     ap.add_argument('--cfg-size', type=int, default=36, choices=[36, 46])  # the radio block's form: 46 as the G8.59's
     a = ap.parse_args()
 
@@ -397,7 +399,7 @@ def main():
                 if text == '#00w255\r':
                     needs_w255.discard(tuid)
                 elif text == '^00Version\r':
-                    answers.append((tuid, b'Mnode Version K8.0120 (2D)\r'))
+                    answers.append((tuid, f'Mnode Version {a.node_version}\r'.encode()))
                 elif text == '^00Tests\r':
                     answers.append((tuid, b'!Tests 1 3 2 0 00 0000 00\r'))
                 elif text == '^00Info\r':

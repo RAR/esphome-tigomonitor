@@ -309,6 +309,7 @@ int main(int argc, char **argv) {
   // Every frame, named, and an alarm for one that reconfigures the TAP.
   BusLog bus_log(state_dir + "/bus-alarm.json", state_dir + "/versions.json");
   bus_log.load();
+  bus_log.set_runs_bus(settings.bus_role == "master");  // kept current by the main loop
   // An address another optimizer holds now (a gateway renumbering) starts
   // its record afresh, not as a change: the node table knows who is where.
   bus_log.set_barcode_of([&monitor](uint16_t addr) {
@@ -517,6 +518,13 @@ int main(int argc, char **argv) {
     return m;
   };
   mqtt.set_master_status(master_status);
+  // Changes an optimizer reports are listed only while we run the bus: as
+  // master, or as a standby that has taken over.
+  auto runs_bus_now = [&] {
+    if (settings.bus_role == "master") return true;
+    return settings.bus_role == "standby" && master_status().standby == Standby::active;
+  };
+  bus_log.set_runs_bus(runs_bus_now());
   mqtt.set_tap_reconfigured([&bus_log] { return bus_log.alarm_active(); });
   mqtt.set_setting_changes([&bus_log] {
     int64_t now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -913,6 +921,7 @@ int main(int argc, char **argv) {
         housekeeping.save_if_changed();
         housekeeping_saving = false;
       });
+    bus_log.set_runs_bus(runs_bus_now());
     if (bus_log.needs_save() && !bus_log_saving.exchange(true))
       post_history([&] {
         bus_log.save_if_changed();

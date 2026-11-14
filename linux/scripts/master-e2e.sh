@@ -418,6 +418,22 @@ expect "logs the TAP's version" "$(grep -c 'TAP version: Mgate Version G1.00' "$
 kill $daemon; wait $daemon 2>/dev/null || true
 kill $tap; wait $tap 2>/dev/null || true
 
+# --- run 14b: the same panels, updated while we were off, and we run the bus ---
+# What changes while this monitor runs the bus is listed (a listener's isn't:
+# bus-log-e2e). The panels now answer ^00Version with new firmware.
+python3 linux/tools/mock_tap.py "$out/tap14b" --window 600 --nodes 44 --node-version 'K8.0131 (2E)' --stats "$out/tap14b.json" &
+tap=$!
+sleep 0.5
+sed "s#$out/tap14#$out/tap14b#" "$out/state14/settings.json" > "$out/state14/s.json" && mv "$out/state14/s.json" "$out/state14/settings.json"
+build/linux/tigomonitord --state-dir "$out/state14" --web-dir components/tigo_server/web 2> "$out/daemon14b.log" &
+daemon=$!
+fw_changes() { api 18104 /api/versions | python3 -c 'import json,sys; print(sorted({(c["addr"], c["what"], c["after"]) for c in json.load(sys.stdin)["changes"] if c["what"] == "firmware"}))'; }
+for _ in $(seq 240); do [ "$(fw_changes)" != "[]" ] && [ "$(fw_changes | grep -o 0131 | wc -l)" -ge 6 ] && break; sleep 0.5; done
+expect "running the bus, a firmware change is listed" "$(fw_changes)" \
+  "[('0002', 'firmware', 'K8.0131 (2E)'), ('0003', 'firmware', 'K8.0131 (2E)'), ('0004', 'firmware', 'K8.0131 (2E)'), ('0005', 'firmware', 'K8.0131 (2E)'), ('0006', 'firmware', 'K8.0131 (2E)'), ('0007', 'firmware', 'K8.0131 (2E)')]"
+kill $daemon; wait $daemon 2>/dev/null || true
+kill $tap; wait $tap 2>/dev/null || true
+
 # --- run 15: queries without writes, housekeeping off, TAP already at its id ---
 mkdir -p "$out/state15"
 python3 linux/tools/mock_tap.py "$out/tap15" --window 600 --nodes 44 --stats "$out/tap15.json" &
