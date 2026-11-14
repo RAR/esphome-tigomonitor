@@ -8,6 +8,7 @@
 // bus with its CCA running (gateway 0x1201). Only polls and discovery frames are
 // used: they carry no serials, barcodes or MACs.
 
+#include <map>
 #include "tigo_master.h"
 
 #include <algorithm>
@@ -1224,11 +1225,11 @@ static void test_housekeeping() {
   // A minute on, the same targets again.
   r = drain(hk, 1000 + 75000, seq);
   CHECK(r.size() == 3 && tuid_of(r[0]) == first02 && tuid_of(r[1]) == 0x0001 && tuid_of(r[2]) == first04);
-  // Each 10-minute slot, a new target per stream; stream 01 is back at
+  // Each turn, a new target per stream; stream 01 is back at
   // 0x0001 every other slot. Over 40 slots stream 04 visits all 40, once each.
   std::vector<uint16_t> seen04 = {first04};
   for (uint32_t slot = 1; slot < 40; slot++) {
-    r = drain(hk, 1000 + slot * Housekeeping::SLOT_MS + 15000, seq);
+    r = drain(hk, 1000 + slot * Housekeeping::TURN_MS + 15000, seq);
     std::vector<Request> tunnels;
     for (const Request &q : r)
       if (q.cmd == CMD_TUNNEL) tunnels.push_back(q);
@@ -1248,7 +1249,7 @@ static void test_housekeeping() {
   drain(shrink, 15000, seq);
   shrink.set_targets({0x05});
   for (uint32_t slot = 1; slot < 8; slot++)
-    for (const Request &q : drain(shrink, slot * Housekeeping::SLOT_MS + 15000, seq))
+    for (const Request &q : drain(shrink, slot * Housekeeping::TURN_MS + 15000, seq))
       if (q.cmd == CMD_TUNNEL) CHECK(tuid_of(q) == 0x0001 || tuid_of(q) == 0x05);
 
   // No optimizers heard yet: only stream 01's 0x0001.
@@ -1260,7 +1261,7 @@ static void test_housekeeping() {
   // A stream with nothing learned sends the built-in content; a learned one
   // sends what was learned.
   empty.set_targets(roster);
-  r = drain(empty, Housekeeping::SLOT_MS + 15000, seq);
+  r = drain(empty, Housekeeping::TURN_MS + 15000, seq);
   CHECK(r.size() == 3);
   const Bytes learned01 = args41(0, 0x01);
   for (const Request &q : r) {
@@ -1291,7 +1292,7 @@ static void test_housekeeping() {
 
 // With a PGW pool (pgw.h): streams 01 and 02 take turns through the TAP and
 // the pool, a step apart, and stream 04 through everyone else in order, each
-// holder for 480 s and kept alive every minute, as the CCA's are.
+// holder for 480 s and kept alive every minute, then 180 s quiet, as the CCA's are.
 static void test_housekeeping_pool() {
   Learned41 l;
   l.on_frame(cca41(1, 0x0027, 0x01, 0x21));
@@ -1323,18 +1324,18 @@ static void test_housekeeping_pool() {
   // What /api/master shows: the holders now, and the turn's time left.
   CHECK(hk.sends_41() && hk.holder(0x01, 1000 + 15000) == 0x0001 && hk.holder(0x02, 1000 + 15000) == 0x26 &&
         hk.holder(0x04, 1000 + 15000) == 0x02);
-  CHECK(hk.turn_left_ms(1000 + 15000) == Housekeeping::POOL_SLOT_MS - 15000);
-  CHECK(hk.holder(0x01, 1000 + Housekeeping::POOL_SLOT_MS) == 0x26);  // the next turn
+  CHECK(hk.turn_left_ms(1000 + 15000) == Housekeeping::HOLD_MS - 15000);
+  CHECK(hk.holder(0x01, 1000 + Housekeeping::TURN_MS) == 0x26);  // the next turn
   // Kept alive: the same three a minute later, and still at 7 minutes.
   for (uint32_t at : {1000u + 75000u, 1000u + 7 * 60000u + 15000u}) {
     r = tunnels(at);
     CHECK(r.size() == 3 && tuid_of(r[0]) == 0x26 && tuid_of(r[1]) == 0x0001 && tuid_of(r[2]) == 0x02);
   }
-  // Each 480 s, the next: 01 and 02 never on the same node, both in the
+  // Each turn, the next: 01 and 02 never on the same node, both in the
   // turn; 04 visits all 36 others once in 36 slots, never one of the pool.
   std::vector<uint16_t> seen04 = {0x02};  // slot 0, seen above
   for (uint32_t slot = 1; slot < 36; slot++) {
-    r = tunnels(1000 + slot * Housekeeping::POOL_SLOT_MS + 15000);
+    r = tunnels(1000 + slot * Housekeeping::TURN_MS + 15000);
     CHECK(r.size() == 3);
     if (r.size() != 3) break;
     CHECK(tuid_of(r[1]) == turn[slot % 5] && tuid_of(r[0]) == turn[(slot + 1) % 5]);
@@ -1358,9 +1359,57 @@ static void test_housekeeping_pool() {
   CHECK(!none.sends_41() && none.holder(0x01, 15000) == 0 && none.holder(0x04, 15000) == 0);
   // No pool any more: back to the random draw over the whole roster.
   hk.set_pool({});
-  r = tunnels(1000 + 40 * Housekeeping::POOL_SLOT_MS + 15000);
+  r = tunnels(1000 + 40 * Housekeeping::TURN_MS + 15000);
   CHECK(r.size() == 3);
   for (const Request &q : r) CHECK(tuid_of(q) == 0x0001 || (tuid_of(q) >= 0x02 && tuid_of(q) <= 0x29));
+}
+
+// The CCA's timing (roof capture, 2026-11-14): each stream keeps one target
+// for 8 sends a minute apart, then sends nothing for 180 s, as the old
+// holder's lease runs out, before the next target. With and without a pool.
+static void test_housekeeping_cca_timing() {
+  Learned41 l;
+  l.on_frame(cca41(1, 0x0027, 0x01, 0x21));
+  l.on_frame(cca41(1, 0x0006, 0x02, 0x22));
+  l.on_frame(cca41(1, 0x0009, 0x04, 0x24));
+  std::vector<uint16_t> roster;
+  for (uint16_t n = 0x02; n <= 0x29; n++) roster.push_back(n);
+  for (bool pooled : {false, true}) {
+    uint8_t seq = 0;
+    const uint32_t t0 = 1000;
+    Housekeeping hk(l.entries(), t0, false, 7);
+    hk.set_targets(roster);
+    if (pooled) hk.set_pool({0x26, 0x27, 0x28, 0x29});
+    // stream -> (time, tuid) of every 0x41, a second at a time for 4 turns.
+    std::map<uint8_t, std::vector<std::pair<uint32_t, uint16_t>>> sent;
+    const uint32_t turn = Housekeeping::HOLD_MS + Housekeeping::QUIET_MS;
+    CHECK(Housekeeping::HOLD_MS == 480000 && Housekeeping::QUIET_MS == 180000);
+    for (uint32_t at = t0; at < t0 + 4 * turn; at += 1000) {
+      for (const Request &q : drain(hk, at, seq))
+        if (q.cmd == CMD_TUNNEL && q.payload[3] == SUB_HOUSEKEEPING) sent[stream_of(q)].push_back({at - t0, tuid_of(q)});
+      // Quiet: nobody holds a stream, and the countdown runs to the next turn.
+      uint32_t phase = (at - t0) % turn;
+      if (phase >= Housekeeping::HOLD_MS) {
+        CHECK(hk.holder(0x01, at) == 0 && hk.holder(0x02, at) == 0 && hk.holder(0x04, at) == 0);
+        CHECK(hk.turn_left_ms(at) == turn - phase);
+      } else {
+        CHECK(hk.turn_left_ms(at) == Housekeeping::HOLD_MS - phase);
+      }
+    }
+    for (int i = 0; i < 3; i++) {
+      const auto &s = sent[Housekeeping::STREAMS[i]];
+      CHECK(s.size() == 4 * 8);
+      if (s.size() != 4 * 8) continue;
+      for (size_t k = 0; k < s.size(); k++) {
+        uint32_t want = (k / 8) * turn + Housekeeping::OFFSET_MS[i] + (k % 8) * Housekeeping::STREAM_EVERY_MS;
+        CHECK(s[k].first == want);
+        if (k % 8) CHECK(s[k].second == s[k - 1].second);  // one target through a turn
+      }
+      // The next target, not the last one again (stream 01 without a pool
+      // alternates with the TAP; the others draw a new one).
+      for (size_t k = 8; k < s.size(); k += 8) CHECK(s[k].second != s[k - 1].second);
+    }
+  }
 }
 
 static void test_next_request_housekeeping() {
@@ -1708,6 +1757,7 @@ int main() {
   test_learner();
   test_housekeeping();
   test_housekeeping_pool();
+  test_housekeeping_cca_timing();
   test_tap_reconfiguring_frames_are_never_sent();
   test_discovery_window_counts();
   test_no_renewal_for_an_empty_table();

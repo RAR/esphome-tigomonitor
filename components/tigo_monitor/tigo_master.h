@@ -381,7 +381,8 @@ struct Request {
 //   - tunnel sub 0x41, the args a target Tuid then 00 00 00 <stream> 00 and 17
 //     more bytes. Three streams (01, 02, 04), each sent once a minute, each
 //     moving to its next target every 10 minutes; between them they reached
-//     every optimizer. The 17 bytes never changed in 24 h, across CCA
+//     every optimizer. (A 2026-11-14 roof capture: 8 sends to one target,
+//     then about 3 minutes with none on that stream, then the next.) The 17 bytes never changed in 24 h, across CCA
 //     reboots. What they mean isn't known, so they are copied, not composed.
 //   - 0x0B00 with 01, every hour; after the CCA reboots, 00 then 01 once.
 //   - tunnel sub 0x22, empty, to the broadcast address then the TAP, a second
@@ -563,15 +564,19 @@ struct HousekeepingPlan {
 // copied: the CCA's own order favours some optimizers for reasons unknown,
 // so each stream instead walks
 // the optimizers heard lately (set_targets) in a random order, a new one
-// every 10 minutes, each visited once a pass. Stream 01 goes to 0x0001 every
-// other slot, starting with the first, as the CCA's does after every reboot.
+// each turn (TURN_MS), each visited once a pass. Stream 01 goes to 0x0001 every
+// other turn, starting with the first, as the CCA's does after every reboot.
 class Housekeeping {
  public:
   static const uint32_t STREAM_EVERY_MS = 60000;
-  static const uint32_t SLOT_MS = 600000;
-  // With a pool (set_pool), a holder keeps its stream this long, as the
-  // CCA's do (its PGW re-pick, 480 s; owner's analysis of its firmware).
-  static const uint32_t POOL_SLOT_MS = 480000;
+  // A turn, as the CCA's: a holder kept alive every minute for HOLD_MS (8
+  // sends), then QUIET_MS with no 0x41 on any stream before the next. Its
+  // firmware re-picks a holder after 480 s and times one out after 180 s
+  // (owner's analysis), so the quiet is the old holder's lease running out:
+  // a new one sooner could leave two nodes holding the same stream.
+  static const uint32_t HOLD_MS = 480000;
+  static const uint32_t QUIET_MS = 180000;
+  static const uint32_t TURN_MS = HOLD_MS + QUIET_MS;
   static const uint32_t SESSION_EVERY_MS = 3600000;
   // Streams 02, 01, 04 go out in that order, a few seconds apart, as the CCA's do.
   static constexpr uint8_t STREAMS[3] = {0x02, 0x01, 0x04};
@@ -695,9 +700,13 @@ class Housekeeping {
     }
     for (int i = 0; i < 3 && plan_.send_41; i++) {
       if (content_[i].empty() || static_cast<int32_t>(now_ms - next_ms_[i]) < 0) continue;
-      next_ms_[i] = now_ms + STREAM_EVERY_MS;
+      // On a fixed minute grid from the start, so the 8 sends stay inside
+      // the hold however late due() is called; a long stall skips, not bursts.
+      while (static_cast<int32_t>(now_ms - next_ms_[i]) >= 0) next_ms_[i] += STREAM_EVERY_MS;
+      if (quiet_(now_ms)) continue;
+      uint32_t slot = (now_ms - start_ms_) / TURN_MS;
       if (!pool_.empty()) {
-        target_[i] = pool_target_(STREAMS[i], (now_ms - start_ms_) / POOL_SLOT_MS);
+        target_[i] = pool_target_(STREAMS[i], slot);
         if (!target_[i]) continue;
         Bytes args = {static_cast<uint8_t>(target_[i] >> 8), static_cast<uint8_t>(target_[i])};
         args.insert(args.end(), content_[i].begin(), content_[i].end());
@@ -705,7 +714,6 @@ class Housekeeping {
         sent_41_++;
         return {CMD_TUNNEL, tunnel_request(SUB_HOUSEKEEPING, seq, args)};
       }
-      uint32_t slot = (now_ms - start_ms_) / SLOT_MS;
       if (!picked_[i] || slot != slot_[i] || !target_[i]) {
         slot_[i] = slot;
         picked_[i] = true;
@@ -750,14 +758,15 @@ class Housekeeping {
   // Who holds stream (0x01, 0x02 or 0x04) now: with a pool, by the turn;
   // drawing at random, the last one sent to. 0 none (yet).
   uint16_t holder(uint8_t stream, uint32_t now_ms) const {
-    if (!plan_.send_41) return 0;
-    if (!pool_.empty()) return pool_target_(stream, (now_ms - start_ms_) / POOL_SLOT_MS);
+    if (!plan_.send_41 || quiet_(now_ms)) return 0;
+    if (!pool_.empty()) return pool_target_(stream, (now_ms - start_ms_) / TURN_MS);
     return target_[stream == 0x02 ? 0 : stream == 0x01 ? 1 : 2];
   }
-  // Until the holders change, in ms.
+  // Until the holders change, in ms: to the end of the hold, or in the
+  // quiet, to the next turn's holders.
   uint32_t turn_left_ms(uint32_t now_ms) const {
-    uint32_t slot = pool_.empty() ? SLOT_MS : POOL_SLOT_MS;
-    return slot - (now_ms - start_ms_) % slot;
+    uint32_t phase = (now_ms - start_ms_) % TURN_MS;
+    return phase < HOLD_MS ? HOLD_MS - phase : TURN_MS - phase;
   }
   uint32_t sent_session() const { return sent_session_; }
   uint32_t sent_broadcast() const { return sent_broadcast_; }
@@ -798,6 +807,7 @@ class Housekeeping {
     }
     return r;
   }
+  bool quiet_(uint32_t now_ms) const { return (now_ms - start_ms_) % TURN_MS >= HOLD_MS; }
   void end_walk_() {
     walk_waiting_ = false;
     walk_retried_ = false;
