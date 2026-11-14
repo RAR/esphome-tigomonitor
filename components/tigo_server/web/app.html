@@ -931,6 +931,8 @@
   td.tap-model.star-only { color: var(--warn); font-weight: 600; }
   td.tap-radio .tap-sub { font-size: 11px; color: var(--text-dim); }
   td.tap-model .tap-board { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 11px; color: var(--text-dim); font-weight: 400; }
+  table.nodes .node-rating { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; font-size: 11px;
+    color: var(--text-faint); }
   table.nodes .node-tap { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; font-size: 11px;
                          color: var(--text-faint); white-space: nowrap; }
   td.tap-name .input { width: 12em; }
@@ -3874,6 +3876,9 @@
 
     const fwByAddr = {};
     for (const o of (nodesData.versions && nodesData.versions.optimizers) || []) fwByAddr[o.addr.toUpperCase()] = o;
+    // Each optimizer's rating, from its own answer to a calibration read.
+    const ratingByAddr = {};
+    for (const o of (nodesData.versions && nodesData.versions.ratings) || []) ratingByAddr[o.addr.toUpperCase()] = o;
     document.querySelector('#view-nodes table.nodes:not(#devices-taps table)').classList.toggle('with-fw', !!nodesData.versions);
     // Settings as each optimizer last answered them, and the answer most of
     // its firmware family give: one that differs is worth a look. Families
@@ -3942,6 +3947,7 @@
       if (filterState && state !== filterState) continue;
 
       const fw = fwByAddr[String(n.addr).toUpperCase()] || null;
+      const rating = ratingByAddr[String(n.addr).toUpperCase()] || null;
       const smart = smartByAddr[String(n.addr).toUpperCase()] || null;
       const fam = smart ? smartFamily(String(n.addr).toUpperCase()) : '';
       const c = smart && smartCount[fam], usual = smart && smartUsual[fam];
@@ -3952,7 +3958,7 @@
       const mppt = mpptByAddr[String(n.addr).toUpperCase()] || null;
       if (smartPeers) Object.assign(smartPeers, { mppt, mpptUsual });
       rows.push({ n, name, addr: n.addr, barcodeKey, barcodeShort, tap: dev?.tap || null,
-                  stringLabel, mpptLabel, v, a, w, t, age, state, fw, smart, differs, smartPeers });
+                  stringLabel, mpptLabel, v, a, w, t, age, state, fw, rating, smart, differs, smartPeers });
     }
 
     // Sort by current column. Numeric columns sort numerically; string
@@ -4011,7 +4017,7 @@
           <td class="num">${fmtTemp(r.t, 0)} ${tempUnit()}</td>
           <td class="num">${fmtAge(r.age)}</td>
           <td><span class="badge ${r.n.known ? 'stale' : r.state}"${r.n.known ? ' title="Marked known: not reporting, not counted, not flagged as missing"' : ''}>${stateLabel}</span></td>
-          <td class="mono fw"${r.fw ? ` title="${topoEscape(fwTitle(r.fw))}"` : ''}>${r.fw ? topoEscape(r.fw.version) : '—'}</td>
+          <td class="mono fw"${r.fw || r.rating ? ` title="${topoEscape([r.fw ? fwTitle(r.fw) : '', r.rating ? ratingTitle(r.rating) : ''].filter(Boolean).join('. '))}"` : ''}>${r.fw ? topoEscape(r.fw.version) : '—'}${r.rating ? `<div class="node-rating">${r.rating.watts} W</div>` : ''}</td>
           <td class="fw smart"${r.smart ? ` title="${topoEscape(smartTitle(r.smart, r.differs, r.smartPeers))}"` : ''}>${r.smart
             ? (r.smartPeers.placeholder ? '<button type="button" aria-haspopup="dialog">Not reported</button>'
               : `<button type="button" aria-haspopup="dialog"${r.smart.stored && !r.differs ? '' : ' style="color:var(--warn)"'}>${r.smart.stored ? 'Stored' : 'Not stored'}${r.differs ? ' · differs' : ''}</button>`) : '—'}</td>
@@ -4201,6 +4207,11 @@
   }
 
   // "Mnode since Jan 1, 12:00, was K8.0120 (2D)": a version's tooltip.
+  // "Rated 75 V, 700 W (ESO075V700W-H461.11.70S0.12)": what the optimizer
+  // says it is, in its answer to a calibration read.
+  function ratingTitle(r) {
+    return `Rated ${r.volts} V, ${r.watts} W (${r.cal})`;
+  }
   function fwTitle(v) {
     const when = ms => new Date(ms).toLocaleString([], { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
     return `${v.model} since ${when(v.since_unix_ms)}` + (v.previous ? `, was ${v.previous}` : '');

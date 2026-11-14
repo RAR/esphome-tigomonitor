@@ -19,6 +19,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdlib>
 #include <cstdio>
 #include <deque>
 #include <iterator>
@@ -296,6 +297,54 @@ inline bool parse_mppt(const std::string &text, MpptSeen &m) {
   return true;
 }
 
+// An optimizer's rating, from its answer to ^00Cal: "!ESO075V700W-H461.11.70S0.12"
+// or "!ESO080V725W-H511.22.00" on the roof (2026-11-14, a CCA asking): its
+// rated volts and watts, then its calibration. The serial doesn't hold the
+// rating; this answer is where a CCA gets it.
+struct CalSeen {
+  uint16_t addr = 0;
+  int volts = 0, watts = 0;
+  std::string cal;  // the answer after "!", as heard
+};
+
+inline bool parse_cal(const std::string &text, CalSeen &c) {
+  if (text.compare(0, 4, "!ESO") != 0) return false;
+  size_t i = 4, v0 = i;
+  while (i < text.size() && isdigit(static_cast<unsigned char>(text[i]))) i++;
+  if (i == v0 || i >= text.size() || text[i] != 'V') return false;
+  int volts = std::atoi(text.substr(v0, i - v0).c_str());
+  size_t w0 = ++i;
+  while (i < text.size() && isdigit(static_cast<unsigned char>(text[i]))) i++;
+  if (i == w0 || i >= text.size() || text[i] != 'W') return false;
+  c.volts = volts;
+  c.watts = std::atoi(text.substr(w0, i - w0).c_str());
+  c.cal = text.substr(1);
+  while (!c.cal.empty() && (c.cal.back() == ' ' || c.cal.back() == '\r' || c.cal.back() == '\n')) c.cal.pop_back();
+  return true;
+}
+
+// Which optimizer (barcode) each address was last answering for. A gateway
+// renumbering (a CCA bringing a roof up, 2026-11-14) hands an address to
+// another optimizer, whose answers must not be read as the old one's
+// changing: H9 firmware "becoming" K8.
+class AddressOwners {
+ public:
+  // Whether addr now belongs to another barcode than before. An empty
+  // barcode (not known yet) says nothing and changes nothing.
+  bool moved(uint16_t addr, const std::string &barcode) {
+    if (barcode.empty()) return false;
+    std::string &o = owners_[addr];
+    bool m = !o.empty() && o != barcode;
+    o = barcode;
+    return m;
+  }
+  void restore(uint16_t addr, const std::string &barcode) { owners_[addr] = barcode; }
+  const std::map<uint16_t, std::string> &owners() const { return owners_; }
+
+ private:
+  std::map<uint16_t, std::string> owners_;
+};
+
 // Each device's version, from when it was first seen, and the one it
 // replaced: kept by the caller across restarts (the Pi's versions.json).
 // The TAP's radio settings, from the GatewayCfg block a read returns (36
@@ -366,6 +415,7 @@ class VersionBook {
     return r;
   }
   void restore(const Entry &e) { entries_[{e.tap, e.addr}] = e; }
+  void forget(bool tap, uint16_t addr) { entries_.erase({tap, addr}); }
   const Entry *find(bool tap, uint16_t addr) const {
     auto it = entries_.find({tap, addr});
     return it == entries_.end() ? nullptr : &it->second;
@@ -599,6 +649,12 @@ class BusWatch {
     out.swap(smarts_);
     return out;
   }
+  // The optimizer ratings heard since the last call.
+  std::vector<CalSeen> take_cals() {
+    std::vector<CalSeen> out;
+    out.swap(cals_);
+    return out;
+  }
   // The versions heard since the last call.
   std::vector<VersionSeen> take_versions() {
     std::vector<VersionSeen> out;
@@ -736,6 +792,7 @@ class BusWatch {
           version_(false, tuid, text);
           smart_(tuid, text);
           mppt_(tuid, text);
+          cal_(tuid, text);
           answer_(tuid, text, now);
         }
       });
@@ -792,6 +849,13 @@ class BusWatch {
     mppts_.push_back(m);
     if (mppts_.size() > 64) mppts_.erase(mppts_.begin());  // nobody taking them
   }
+  void cal_(uint16_t addr, const std::string &text) {
+    CalSeen c;
+    if (!parse_cal(text, c)) return;
+    c.addr = addr;
+    cals_.push_back(c);
+    if (cals_.size() > 64) cals_.erase(cals_.begin());  // nobody taking them
+  }
   void smart_(uint16_t addr, const std::string &text) {
     SmartSeen s;
     if (!parse_smart(text, s)) return;
@@ -824,6 +888,7 @@ class BusWatch {
   static const uint16_t FACTORY_ID_ = 0x1235;  // where a TAP answers before it's addressed
   std::vector<SmartSeen> smarts_;
   std::vector<MpptSeen> mppts_;
+  std::vector<CalSeen> cals_;
 };
 
 }  // namespace master

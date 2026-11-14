@@ -25,6 +25,7 @@ static int64_t unix_ms_now() {
 using esphome::tigo_monitor::master::TapRadio;
 using esphome::tigo_monitor::master::SmartSeen;
 using esphome::tigo_monitor::master::MpptSeen;
+using esphome::tigo_monitor::master::CalSeen;
 
 static std::string hex4(unsigned v) {
   char b[8];
@@ -85,6 +86,21 @@ void BusLog::load_versions_() {
     m.stored = o.value("stored", false);
     if (!m.settings.empty()) smarts_[m.addr] = {m, o.value("heard_unix_ms", int64_t{0})};
   }
+  for (const auto &o : j.value("ratings", json::array())) {
+    if (!o.is_object()) continue;
+    CalSeen c;
+    c.addr = static_cast<uint16_t>(std::strtoul(o.value("addr", std::string("0")).c_str(), nullptr, 16));
+    c.volts = o.value("volts", 0);
+    c.watts = o.value("watts", 0);
+    c.cal = o.value("cal", std::string());
+    if (!c.cal.empty()) cals_[c.addr] = {c, o.value("heard_unix_ms", int64_t{0})};
+  }
+  for (const auto &o : j.value("owners", json::array())) {
+    if (!o.is_object()) continue;
+    std::string b = o.value("barcode", std::string());
+    if (!b.empty())
+      owners_.restore(static_cast<uint16_t>(std::strtoul(o.value("addr", std::string("0")).c_str(), nullptr, 16)), b);
+  }
   for (const auto &o : j.value("changes", json::array())) {  // newest first
     if (!o.is_object()) continue;
     changes_.push_front({o.value("unix_ms", int64_t{0}),
@@ -131,6 +147,26 @@ void BusLog::change_(int64_t now, uint16_t addr, const char *what, const std::st
   versions_dirty_ = true;
 }
 
+// Before an optimizer's answer is compared with what its address said
+// before: if another optimizer holds that address now, forget the old one's.
+void BusLog::check_owner_(uint16_t addr) {
+  if (!barcode_of_) return;
+  std::string now = barcode_of_(addr);
+  auto was = owners_.owners().find(addr);
+  std::string before = was == owners_.owners().end() ? "" : was->second;
+  if (!owners_.moved(addr, now)) {
+    if (before.empty() && !now.empty()) versions_dirty_ = true;  // first owner, kept
+    return;
+  }
+  LOGI("bus: address %s is barcode %s now, was %s; its answers start afresh", hex4(addr).c_str(), now.c_str(),
+       before.c_str());
+  smarts_.erase(addr);
+  mppts_.erase(addr);
+  cals_.erase(addr);
+  versions_.forget(false, addr);
+  versions_dirty_ = true;
+}
+
 int BusLog::changes_since(int64_t since_ms) const {
   std::lock_guard<std::mutex> lock(mu_);
   int n = 0;
@@ -157,6 +193,7 @@ void BusLog::on_frame_(const Frame &f, bool ours, int64_t now) {
     versions_dirty_ = true;
   }
   for (const auto &m : watch_.take_mppts()) {
+    check_owner_(m.addr);
     auto it = mppts_.find(m.addr);
     if (it == mppts_.end() || it->second.first.params != m.params)
       LOGI("bus: optimizer %s MPPT parameters: %s", hex4(m.addr).c_str(), m.params.c_str());
@@ -165,6 +202,7 @@ void BusLog::on_frame_(const Frame &f, bool ours, int64_t now) {
     versions_dirty_ = true;
   }
   for (const auto &m : watch_.take_smarts()) {
+    check_owner_(m.addr);
     auto it = smarts_.find(m.addr);
     if (it == smarts_.end() || it->second.first.settings != m.settings)
       LOGI("bus: optimizer %s settings: %s (%s)", hex4(m.addr).c_str(), m.settings.c_str(),
@@ -174,7 +212,16 @@ void BusLog::on_frame_(const Frame &f, bool ours, int64_t now) {
     smarts_[m.addr] = {m, now};
     versions_dirty_ = true;
   }
+  for (const auto &c : watch_.take_cals()) {
+    check_owner_(c.addr);
+    auto it = cals_.find(c.addr);
+    if (it == cals_.end() || it->second.first.cal != c.cal)
+      LOGI("bus: optimizer %s is rated %d V, %d W (%s)", hex4(c.addr).c_str(), c.volts, c.watts, c.cal.c_str());
+    cals_[c.addr] = {c, now};
+    versions_dirty_ = true;
+  }
   for (const auto &v : watch_.take_versions()) {
+    if (!v.tap) check_owner_(v.addr);
     VersionBook::Result r = versions_.record(v, now);
     versions_dirty_ = true;
     if (r == VersionBook::changed) {
@@ -294,12 +341,25 @@ json BusLog::versions_json_(bool with_pans) const {
                     {"params", kv.second.first.params},
                     {"answer", kv.second.first.answer},
                     {"heard_unix_ms", kv.second.second}});
+  json ratings = json::array();
+  for (const auto &kv : cals_)
+    ratings.push_back({{"addr", hex4(kv.first)},
+                       {"volts", kv.second.first.volts},
+                       {"watts", kv.second.first.watts},
+                       {"cal", kv.second.first.cal},
+                       {"heard_unix_ms", kv.second.second}});
   json changes = json::array();
   for (auto it = changes_.rbegin(); it != changes_.rend(); ++it)
     changes.push_back({{"unix_ms", it->unix_ms}, {"addr", hex4(it->addr)}, {"what", it->what},
                        {"before", it->before}, {"after", it->after}});
-  return {{"taps", taps}, {"optimizers", optimizers}, {"radios", radios}, {"ids", ids}, {"settings", settings}, {"mppt", mppt},
-          {"changes", changes}};
+  json out = {{"taps", taps},         {"optimizers", optimizers}, {"radios", radios}, {"ids", ids},
+              {"settings", settings}, {"mppt", mppt},             {"ratings", ratings}, {"changes", changes}};
+  if (with_pans) {  // the saved file's: which barcode each address answered for
+    json owners = json::array();
+    for (const auto &kv : owners_.owners()) owners.push_back({{"addr", hex4(kv.first)}, {"barcode", kv.second}});
+    out["owners"] = owners;
+  }
+  return out;
 }
 
 void BusLog::save_if_changed() {

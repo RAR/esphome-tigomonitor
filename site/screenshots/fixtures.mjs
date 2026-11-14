@@ -209,6 +209,11 @@ export const routes = {
     // 12 40 08 12 from every firmware, one with a different PIV current.
     mppt: devices.slice(0, 8).map((d, i) => ({ addr: d.addr, params: i === 3 ? '12 40 0A 12' : '12 40 08 12',
       answer: `1 0 S M[100 ${d.addr} - 3/3] 0 ${i === 3 ? '12 40 0A 12' : '12 40 08 12'}`, heard_unix_ms: 1767225600000 + i * 60000 })),
+    // Ratings from each answer to ^00Cal: the K8s' 700 W, the two H9s' 725 W,
+    // in the roof's forms; the rest not answered yet.
+    ratings: devices.slice(0, 8).map((d, i) => (i === 5 || i === 6
+      ? { addr: d.addr, volts: 80, watts: 725, cal: 'ESO080V725W-H511.22.00', heard_unix_ms: 1767225600000 + i * 60000 }
+      : { addr: d.addr, volts: 75, watts: 700, cal: 'ESO075V700W-H461.11.70S0.12', heard_unix_ms: 1767225600000 + i * 60000 })),
   },
   '/api/status': {
     free_heap: 98740, total_heap: 310652,

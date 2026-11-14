@@ -17,6 +17,7 @@
 
 #include <cstdint>
 #include <deque>
+#include <functional>
 #include <mutex>
 #include <map>
 #include <string>
@@ -48,7 +49,8 @@ class BusLog {
   // /api/versions: {taps: [...], optimizers: [...], radios: [...], ids: [...],
   // settings: [...]}, each by address; radios are the TAPs' channel, SLT and
   // SLm as last read, ids each TAP's MAC, settings each optimizer's answer to
-  // ^00Smrt, mppt its four MPPT parameters from its answer to ^00Mppt.
+  // ^00Smrt, mppt its four MPPT parameters from its answer to ^00Mppt,
+  // ratings its rated volts and watts from its answer to ^00Cal.
   nlohmann::json versions_json() const;
   // Each TAP's radio settings heard, PAN included (for choosing a new TAP's).
   std::vector<esphome::tigo_monitor::master::TapRadio> radios() const;
@@ -56,6 +58,11 @@ class BusLog {
   uint16_t tap_of_mac(const std::string &mac) const;
   // How many optimizer settings, MPPT or firmware changes were heard since.
   int changes_since(int64_t since_ms) const;
+  // The barcode at an address in the node table, or "": an answer from an
+  // address another optimizer has taken since (a gateway renumbering) then
+  // starts that address's record afresh instead of logging a change. Called
+  // with this log's lock held, so it must not call back in.
+  void set_barcode_of(std::function<std::string(uint16_t)> barcode_of) { barcode_of_ = std::move(barcode_of); }
 
  private:
   struct Alarm {
@@ -65,6 +72,7 @@ class BusLog {
   void on_frame_(const esphome::tigo_monitor::master::Frame &f, bool ours, int64_t now);
   void load_versions_();
   void change_(int64_t now, uint16_t addr, const char *what, const std::string &before, const std::string &after);
+  void check_owner_(uint16_t addr);
   struct Change {
     int64_t unix_ms;
     uint16_t addr;
@@ -84,6 +92,11 @@ class BusLog {
   std::map<uint16_t, std::pair<esphome::tigo_monitor::master::MpptSeen, int64_t>> mppts_;
   // Each optimizer's answer to ^00Smrt, as last heard, and when.
   std::map<uint16_t, std::pair<esphome::tigo_monitor::master::SmartSeen, int64_t>> smarts_;
+  // Each optimizer's rating, from its answer to ^00Cal, and when.
+  std::map<uint16_t, std::pair<esphome::tigo_monitor::master::CalSeen, int64_t>> cals_;
+  // Which barcode each address last answered for (versions.json, not the API).
+  esphome::tigo_monitor::master::AddressOwners owners_;
+  std::function<std::string(uint16_t)> barcode_of_;
   bool versions_dirty_ = false;
   mutable std::mutex mu_;
   esphome::tigo_monitor::master::BusWatch watch_;

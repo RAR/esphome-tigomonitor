@@ -309,6 +309,15 @@ int main(int argc, char **argv) {
   // Every frame, named, and an alarm for one that reconfigures the TAP.
   BusLog bus_log(state_dir + "/bus-alarm.json", state_dir + "/versions.json");
   bus_log.load();
+  // An address another optimizer holds now (a gateway renumbering) starts
+  // its record afresh, not as a change: the node table knows who is where.
+  bus_log.set_barcode_of([&monitor](uint16_t addr) {
+    char a[8];
+    std::snprintf(a, sizeof(a), "%04X", addr);
+    for (const auto &n : monitor.nodes())
+      if (n.addr == a) return n.long_address;
+    return std::string();
+  });
   auto on_data = [&](const char *data, size_t n) {
     if (capture_out) capture_out->write(data, static_cast<std::streamsize>(n)).flush();
     monitor.feed(data, n);
