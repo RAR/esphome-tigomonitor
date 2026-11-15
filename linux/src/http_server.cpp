@@ -1131,7 +1131,9 @@ void HttpServer::routes_() {
     size_t slash = s.find_last_of('/');
     return (slash == std::string::npos ? std::string(".") : s.substr(0, slash)) + "/array.json";
   };
-  svr.Get("/api/array", [array_path](const httplib::Request &, httplib::Response &res) {
+  // Panels are saved with their barcodes and shown at the address each
+  // barcode has now, so a renumbering doesn't move them around (2026-11-14).
+  svr.Get("/api/array", [array_path, &mon](const httplib::Request &, httplib::Response &res) {
     ArrayLayout r;
     std::ifstream in(array_path());
     if (in) {
@@ -1141,9 +1143,12 @@ void HttpServer::routes_() {
         r = ArrayLayout();
       }
     }
+    std::map<std::string, std::string> addr_of, barcode_of;
+    array_node_maps(mon.nodes(), addr_of, barcode_of);
+    array_follow_barcodes(r, addr_of);
     send_json(res, array_to_json(r));
   });
-  svr.Post("/api/array", [this, array_path](const httplib::Request &req, httplib::Response &res) {
+  svr.Post("/api/array", [this, array_path, &mon](const httplib::Request &req, httplib::Response &res) {
     json j = json::parse(req.body, nullptr, false);
     ArrayLayout r;
     std::string err = j.is_discarded() ? "Expected a JSON object." : array_from_json(j, r);
@@ -1151,6 +1156,9 @@ void HttpServer::routes_() {
       send_json(res, {{"error", err}}, 400);
       return;
     }
+    std::map<std::string, std::string> addr_of, barcode_of;
+    array_node_maps(mon.nodes(), addr_of, barcode_of);
+    array_fill_barcodes(r, barcode_of);
     std::lock_guard<std::mutex> lock(settings_mu_);
     if (!write_file_atomic(array_path(), array_to_json(r).dump(2) + "\n")) {
       send_json(res, {{"error", "Could not save the array layout to disk."}}, 500);

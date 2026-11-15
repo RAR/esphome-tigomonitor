@@ -52,4 +52,41 @@ ok = [p['addr'] for p in got['panels']] == ['0026', '000A'] and got['taps'][0]['
 print(f"  {'ok  ' if ok else 'FAIL'} kept across a restart: {got}")
 sys.exit(0 if ok else 1)
 PY
+# A renumbering moves a panel's address, not where it sits: a save keeps
+# each panel's barcode, and the layout follows it (roof, 2026-11-14).
+stop
+nodes() {  # addr of barcode ...01, then of ...02
+  python3 - "$out/state.json" "$1" "$2" <<'PY'
+import json, sys
+n = lambda a, b, l: {'addr': a, 'long_address': b, 'cca_label': l, 'checksum': 'X', 'sensor_index': -1}
+json.dump({'version': 1, 'nodes': [n(sys.argv[2], '04C05B0000000001', 'A1'), n(sys.argv[3], '04C05B0000000002', 'A2')]},
+          open(sys.argv[1], 'w'))
+PY
+}
+nodes 0026 000A
+start
+python3 - $port <<'PY'
+import json, sys, urllib.request as u
+port = int(sys.argv[1])
+def req(path, body=None):
+    r = u.Request(f'http://127.0.0.1:{port}{path}', data=None if body is None else json.dumps(body).encode(),
+                  headers={'Content-Type': 'application/json'})
+    with u.urlopen(r, timeout=5) as resp: return json.load(resp)
+req('/api/array', {'panels': [{'addr': '0026', 'x': 3, 'y': 2}, {'addr': '000A', 'x': 4, 'y': 2}], 'taps': []})
+got = [(p['addr'], p.get('barcode')) for p in req('/api/array')['panels']]
+ok = got == [('0026', '04C05B0000000001'), ('000A', '04C05B0000000002')]
+print(f"  {'ok  ' if ok else 'FAIL'} a save keeps each panel's barcode: {got}")
+sys.exit(0 if ok else 1)
+PY
+stop
+nodes 0031 0026
+start
+python3 - $port <<'PY'
+import json, sys, urllib.request as u
+got = json.load(u.urlopen(f'http://127.0.0.1:{sys.argv[1]}/api/array', timeout=5))
+got = [(p['addr'], p['x']) for p in got['panels']]
+ok = got == [('0031', 3), ('0026', 4)]
+print(f"  {'ok  ' if ok else 'FAIL'} renumbered, each panel stays where it sits: {got}")
+sys.exit(0 if ok else 1)
+PY
 echo "array e2e passed"

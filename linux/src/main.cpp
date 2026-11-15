@@ -396,6 +396,11 @@ int main(int argc, char **argv) {
             nlohmann::json j = nlohmann::json::parse(in, nullptr, false);
             if (j.is_discarded() || !array_from_json(j, layout).empty()) layout = ArrayLayout();
           }
+          {
+            std::map<std::string, std::string> addr_of, barcode_of;
+            array_node_maps(monitor.nodes(), addr_of, barcode_of);
+            array_follow_barcodes(layout, addr_of);
+          }
           std::map<std::string, std::string> names;
           std::vector<PgwSeen> seen;
           int64_t since = static_cast<int64_t>(time(nullptr)) - 86400;
