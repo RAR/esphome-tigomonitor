@@ -5,7 +5,7 @@
 // Waits for the question, answers it, and returns its title.
 export async function answer(page, yes) {
   await page.waitForSelector('#ui-dialog[open]');
-  const title = await page.textContent('#ui-dialog h3');
+  const title = await page.textContent('#ui-dialog h2');
   await page.click(`#ui-dialog [data-answer="${yes ? 'ok' : 'cancel'}"]`);
   await page.waitForSelector('#ui-dialog:not([open])', { state: 'attached' });
   return title;
