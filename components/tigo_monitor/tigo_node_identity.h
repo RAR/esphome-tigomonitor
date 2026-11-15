@@ -109,6 +109,38 @@ template<class Str> Str without_provisional_bit(const Str &addr) {
   return a;
 }
 
+// Fold provisional entries saved before the Frame 27 fix into the address
+// their reports come from, when the node table loads. Until a TAP lists the
+// optimizer again, nothing else would move the labels off the 80xx entry.
+// An entry is folded when its real address is free, has no barcode, or has
+// the same barcode; one whose real address holds another panel is left as is.
+// Returns how many were folded.
+template<class Table> int fold_provisional_entries(Table &table) {
+  int folded = 0;
+  for (size_t i = 0; i < table.size(); ++i) {
+    auto real = without_provisional_bit(table[i].addr);
+    if (real == table[i].addr) continue;
+    size_t j = 0;
+    while (j < table.size() && table[j].addr != real) ++j;
+    if (j == table.size()) {
+      table[i].addr = real;
+      ++folded;
+      continue;
+    }
+    auto &keep = table[j];
+    auto &dup = table[i];
+    if (!keep.long_address.empty() && keep.long_address != dup.long_address) continue;
+    if (keep.long_address.empty()) keep.long_address = dup.long_address;
+    if (keep.sensor_index < 0 && dup.sensor_index >= 0) keep.sensor_index = dup.sensor_index;
+    fill_cca_metadata(keep, dup);
+    keep.is_persistent = keep.is_persistent || dup.is_persistent;
+    table.erase(table.begin() + i);
+    --i;
+    ++folded;
+  }
+  return folded;
+}
+
 template<class Table, class Pool, class Str, class MakeNode, class OnRemoved>
 Result apply_frame27_entry(Table &table, Pool &pool, const Str &listed_addr, const Str &long_addr,
                            size_t max_nodes, MakeNode make_node, OnRemoved on_alias_removed) {

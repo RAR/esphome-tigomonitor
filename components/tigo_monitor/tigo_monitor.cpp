@@ -2320,6 +2320,14 @@ void TigoMonitorComponent::load_node_table() {
   }
   
   ESP_LOGI(TAG, "Loaded %d persistent node table entries (capacity: %d devices)", loaded_count, number_of_devices_);
+
+  // Provisional (80xx) entries saved before Frame 27 stripped the bit hold
+  // labels their optimizers' reports never reach.
+  int folded = node_identity::fold_provisional_entries(node_table_);
+  if (folded > 0) {
+    ESP_LOGI(TAG, "Folded %d provisional node table entries into their real addresses", folded);
+    save_node_table();
+  }
 }
 
 void TigoMonitorComponent::save_node_table() {
