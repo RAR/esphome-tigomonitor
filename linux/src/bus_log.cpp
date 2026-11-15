@@ -25,6 +25,7 @@ static int64_t unix_ms_now() {
 using esphome::tigo_monitor::master::TapRadio;
 using esphome::tigo_monitor::master::SmartSeen;
 using esphome::tigo_monitor::master::MpptSeen;
+using esphome::tigo_monitor::master::CalSeen;
 
 static std::string hex4(unsigned v) {
   char b[8];
@@ -67,6 +68,8 @@ void BusLog::load_versions_() {
     r.channel = o.value("channel", 0);
     r.slt = o.value("slt", 0);
     r.slm = o.value("slm", 0);
+    r.profile = o.value("profile", 0);
+    r.pan = static_cast<uint16_t>(std::strtoul(o.value("pan", std::string("0")).c_str(), nullptr, 16));
     if (r.tap) radios_[r.tap] = {r, o.value("heard_unix_ms", int64_t{0})};
   }
   for (const auto &o : j.value("ids", json::array())) {
@@ -82,6 +85,21 @@ void BusLog::load_versions_() {
     m.settings = o.value("settings", std::string());
     m.stored = o.value("stored", false);
     if (!m.settings.empty()) smarts_[m.addr] = {m, o.value("heard_unix_ms", int64_t{0})};
+  }
+  for (const auto &o : j.value("ratings", json::array())) {
+    if (!o.is_object()) continue;
+    CalSeen c;
+    c.addr = static_cast<uint16_t>(std::strtoul(o.value("addr", std::string("0")).c_str(), nullptr, 16));
+    c.volts = o.value("volts", 0);
+    c.watts = o.value("watts", 0);
+    c.cal = o.value("cal", std::string());
+    if (!c.cal.empty()) cals_[c.addr] = {c, o.value("heard_unix_ms", int64_t{0})};
+  }
+  for (const auto &o : j.value("owners", json::array())) {
+    if (!o.is_object()) continue;
+    std::string b = o.value("barcode", std::string());
+    if (!b.empty())
+      owners_.restore(static_cast<uint16_t>(std::strtoul(o.value("addr", std::string("0")).c_str(), nullptr, 16)), b);
   }
   for (const auto &o : j.value("changes", json::array())) {  // newest first
     if (!o.is_object()) continue;
@@ -121,11 +139,37 @@ void BusLog::load() {
 }
 
 // An optimizer whose settings, MPPT parameters or firmware changed: a CCA
-// never drifts them, so each is news. The last KEEP_CHANGES are kept.
+// never drifts them, so each is news. The last KEEP_CHANGES are kept. Only
+// while this monitor runs the bus: under another master, the change is its.
 void BusLog::change_(int64_t now, uint16_t addr, const char *what, const std::string &before, const std::string &after) {
+  if (!runs_bus_) {
+    LOGI("bus: optimizer %s's %s is now %s, was %s (another master runs the bus)", hex4(addr).c_str(), what,
+         after.c_str(), before.c_str());
+    return;
+  }
   LOGW("bus: optimizer %s's %s changed: %s, was %s", hex4(addr).c_str(), what, after.c_str(), before.c_str());
   changes_.push_back({now, addr, what, before, after});
   while (changes_.size() > KEEP_CHANGES) changes_.pop_front();
+  versions_dirty_ = true;
+}
+
+// Before an optimizer's answer is compared with what its address said
+// before: if another optimizer holds that address now, forget the old one's.
+void BusLog::check_owner_(uint16_t addr) {
+  if (!barcode_of_) return;
+  std::string now = barcode_of_(addr);
+  auto was = owners_.owners().find(addr);
+  std::string before = was == owners_.owners().end() ? "" : was->second;
+  if (!owners_.moved(addr, now)) {
+    if (before.empty() && !now.empty()) versions_dirty_ = true;  // first owner, kept
+    return;
+  }
+  LOGI("bus: address %s is barcode %s now, was %s; its answers start afresh", hex4(addr).c_str(), now.c_str(),
+       before.c_str());
+  smarts_.erase(addr);
+  mppts_.erase(addr);
+  cals_.erase(addr);
+  versions_.forget(false, addr);
   versions_dirty_ = true;
 }
 
@@ -138,8 +182,9 @@ int BusLog::changes_since(int64_t since_ms) const {
 
 void BusLog::on_frame_(const Frame &f, bool ours, int64_t now) {
   std::string what = watch_.on_frame(f, ours, now);
-  for (const auto &r : watch_.take_radios()) {
+  for (auto r : watch_.take_radios()) {
     auto it = radios_.find(r.tap);
+    if (!r.profile && it != radios_.end()) r.profile = it->second.first.profile;  // a stored read: keep the live one
     bool changed = it == radios_.end() || it->second.first.channel != r.channel || it->second.first.slt != r.slt ||
                    it->second.first.slm != r.slm;
     if (changed)
@@ -154,6 +199,7 @@ void BusLog::on_frame_(const Frame &f, bool ours, int64_t now) {
     versions_dirty_ = true;
   }
   for (const auto &m : watch_.take_mppts()) {
+    check_owner_(m.addr);
     auto it = mppts_.find(m.addr);
     if (it == mppts_.end() || it->second.first.params != m.params)
       LOGI("bus: optimizer %s MPPT parameters: %s", hex4(m.addr).c_str(), m.params.c_str());
@@ -162,6 +208,7 @@ void BusLog::on_frame_(const Frame &f, bool ours, int64_t now) {
     versions_dirty_ = true;
   }
   for (const auto &m : watch_.take_smarts()) {
+    check_owner_(m.addr);
     auto it = smarts_.find(m.addr);
     if (it == smarts_.end() || it->second.first.settings != m.settings)
       LOGI("bus: optimizer %s settings: %s (%s)", hex4(m.addr).c_str(), m.settings.c_str(),
@@ -171,12 +218,22 @@ void BusLog::on_frame_(const Frame &f, bool ours, int64_t now) {
     smarts_[m.addr] = {m, now};
     versions_dirty_ = true;
   }
+  for (const auto &c : watch_.take_cals()) {
+    check_owner_(c.addr);
+    auto it = cals_.find(c.addr);
+    if (it == cals_.end() || it->second.first.cal != c.cal)
+      LOGI("bus: optimizer %s is rated %d V, %d W (%s)", hex4(c.addr).c_str(), c.volts, c.watts, c.cal.c_str());
+    cals_[c.addr] = {c, now};
+    versions_dirty_ = true;
+  }
   for (const auto &v : watch_.take_versions()) {
+    if (!v.tap) check_owner_(v.addr);
     VersionBook::Result r = versions_.record(v, now);
     versions_dirty_ = true;
     if (r == VersionBook::changed) {
-      LOGW("bus: %s %s's firmware changed: %s, was %s", v.tap ? "TAP" : "optimizer", hex4(v.addr).c_str(),
-           v.version.c_str(), versions_.find(v.tap, v.addr)->previous.c_str());
+      if (v.tap || runs_bus_)
+        LOGW("bus: %s %s's firmware changed: %s, was %s", v.tap ? "TAP" : "optimizer", hex4(v.addr).c_str(),
+             v.version.c_str(), versions_.find(v.tap, v.addr)->previous.c_str());
       if (!v.tap) change_(now, v.addr, "firmware", versions_.find(v.tap, v.addr)->previous, v.version);
     }
     else if (r == VersionBook::first)
@@ -184,6 +241,9 @@ void BusLog::on_frame_(const Frame &f, bool ours, int64_t now) {
            v.version.c_str());
   }
   if (what.empty()) return;
+  // Listening (or standing by), another master runs the bus, and what it
+  // sends the TAP is its own business: marked in the log, not raised.
+  if (!runs_bus_) return;
   if (!alarm_count_) first_alarm_ms_ = now;
   alarm_count_++;
   alarms_.push_back({now, what});
@@ -237,17 +297,45 @@ bool BusLog::needs_save() const {
   return dirty_ || versions_dirty_;
 }
 
-json BusLog::versions_json() const {
+// The API's: no PAN. The saved file's keeps it (versions_json_(true)).
+json BusLog::versions_json() const { return versions_json_(false); }
+
+std::vector<esphome::tigo_monitor::master::TapRadio> BusLog::radios() const {
+  std::lock_guard<std::mutex> lock(mu_);
+  std::vector<esphome::tigo_monitor::master::TapRadio> out;
+  for (const auto &kv : radios_) out.push_back(kv.second.first);
+  return out;
+}
+
+uint16_t BusLog::tap_of_mac(const std::string &mac) const {
+  std::lock_guard<std::mutex> lock(mu_);
+  // The address it gave this MAC from most recently: a TAP re-addressed by a
+  // herd leaves its old one behind in tap_ids_.
+  uint16_t best = 0;
+  int64_t when = -1;
+  for (const auto &kv : tap_ids_)
+    if (kv.second.first == mac && kv.second.second > when) {
+      best = kv.first;
+      when = kv.second.second;
+    }
+  return best;
+}
+
+json BusLog::versions_json_(bool with_pans) const {
   std::lock_guard<std::mutex> lock(mu_);
   json taps = json::array(), optimizers = json::array();
   for (const auto &kv : versions_.entries()) (kv.second.tap ? taps : optimizers).push_back(entry_json(kv.second));
   json radios = json::array();
-  for (const auto &kv : radios_)
-    radios.push_back({{"tap", hex4(kv.first)},
-                      {"channel", kv.second.first.channel},
-                      {"slt", kv.second.first.slt},
-                      {"slm", kv.second.first.slm},
-                      {"heard_unix_ms", kv.second.second}});
+  for (const auto &kv : radios_) {
+    json r = {{"tap", hex4(kv.first)},
+              {"channel", kv.second.first.channel},
+              {"slt", kv.second.first.slt},
+              {"slm", kv.second.first.slm},
+              {"heard_unix_ms", kv.second.second}};
+    if (kv.second.first.profile) r["profile"] = kv.second.first.profile;
+    if (with_pans && kv.second.first.pan) r["pan"] = hex4(kv.second.first.pan);
+    radios.push_back(r);
+  }
   json ids = json::array();
   for (const auto &kv : tap_ids_)
     ids.push_back({{"tap", hex4(kv.first)}, {"mac", kv.second.first}, {"heard_unix_ms", kv.second.second}});
@@ -263,12 +351,25 @@ json BusLog::versions_json() const {
                     {"params", kv.second.first.params},
                     {"answer", kv.second.first.answer},
                     {"heard_unix_ms", kv.second.second}});
+  json ratings = json::array();
+  for (const auto &kv : cals_)
+    ratings.push_back({{"addr", hex4(kv.first)},
+                       {"volts", kv.second.first.volts},
+                       {"watts", kv.second.first.watts},
+                       {"cal", kv.second.first.cal},
+                       {"heard_unix_ms", kv.second.second}});
   json changes = json::array();
   for (auto it = changes_.rbegin(); it != changes_.rend(); ++it)
     changes.push_back({{"unix_ms", it->unix_ms}, {"addr", hex4(it->addr)}, {"what", it->what},
                        {"before", it->before}, {"after", it->after}});
-  return {{"taps", taps}, {"optimizers", optimizers}, {"radios", radios}, {"ids", ids}, {"settings", settings}, {"mppt", mppt},
-          {"changes", changes}};
+  json out = {{"taps", taps},         {"optimizers", optimizers}, {"radios", radios}, {"ids", ids},
+              {"settings", settings}, {"mppt", mppt},             {"ratings", ratings}, {"changes", changes}};
+  if (with_pans) {  // the saved file's: which barcode each address answered for
+    json owners = json::array();
+    for (const auto &kv : owners_.owners()) owners.push_back({{"addr", hex4(kv.first)}, {"barcode", kv.second}});
+    out["owners"] = owners;
+  }
+  return out;
 }
 
 void BusLog::save_if_changed() {
@@ -279,7 +380,7 @@ void BusLog::save_if_changed() {
       write = versions_dirty_;
       versions_dirty_ = false;
     }
-    if (write && !write_file_atomic(versions_path_, versions_json().dump(1) + "\n", 0644))
+    if (write && !write_file_atomic(versions_path_, versions_json_(true).dump(1) + "\n", 0644))
       LOGW("bus log: cannot write %s", versions_path_.c_str());
   }
   json j;

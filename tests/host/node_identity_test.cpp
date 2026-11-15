@@ -161,6 +161,54 @@ static void test_commissioning_alias_is_merged() {
   CHECK(h.removed.size() == 1 && h.removed[0] == "8002");
 }
 
+static void test_provisional_entry_lands_at_its_real_address() {
+  std::puts("a provisional entry (0x8000 set, listed but not yet confirmed) is the same node as its address");
+  Harness h;
+  h.table = {labelled("8017", "", "")};  // a leftover alias from before
+  h.table[0].long_address = "BC000000000000B1";
+  auto r = h.feed("8017", "BC000000000000B1");
+  CHECK(h.at("0017") != nullptr);
+  CHECK(h.at("8017") == nullptr);
+  CHECK(h.table.size() == 1);
+  r = h.feed("0017", "BC000000000000B1");
+  CHECK(!r.table_changed);
+  Harness fresh;
+  fresh.feed("80A3", "BC000000000000B2");
+  CHECK(fresh.at("00A3") != nullptr && fresh.table.size() == 1);
+}
+
+static void test_stored_provisional_entries_fold_at_load() {
+  std::puts("a saved provisional entry (80xx) folds into its real address when the table loads");
+  std::vector<Node> t;
+  t.push_back(labelled("8003", "BC00000000000A03", "A3"));
+  t[0].sensor_index = 4;
+  Node bare;  // the reports' own entry, no barcode yet
+  bare.addr = "0003";
+  t.push_back(bare);
+  t.push_back(labelled("8004", "BC00000000000A04", "A4"));  // nothing at 0004
+  t.push_back(labelled("8005", "BC00000000000A05", "A5"));
+  t.push_back(labelled("0005", "BC00000000000C01", "C1"));  // another panel: leave both
+  Node same = labelled("8006", "BC00000000000A06", "");
+  t.push_back(same);
+  t.push_back(labelled("0006", "BC00000000000A06", "A6"));
+  int folded = fold_provisional_entries(t);
+  CHECK(folded == 3);
+  auto at = [&](const std::string &a) -> const Node * {
+    for (auto &n : t)
+      if (n.addr == a) return &n;
+    return nullptr;
+  };
+  CHECK(at("8003") == nullptr);
+  CHECK(at("0003") && at("0003")->long_address == "BC00000000000A03" && at("0003")->cca_label == "A3");
+  CHECK(at("0003") && at("0003")->sensor_index == 4);
+  CHECK(at("8004") == nullptr && at("0004") && at("0004")->cca_label == "A4");
+  CHECK(at("8005") && at("8005")->cca_label == "A5");
+  CHECK(at("0005") && at("0005")->cca_label == "C1");
+  CHECK(at("8006") == nullptr && at("0006") && at("0006")->cca_label == "A6");
+  CHECK(t.size() == 5);
+  CHECK(fold_provisional_entries(t) == 0);
+}
+
 static void test_first_barcode_keeps_imported_labels() {
   std::puts("an entry learning its barcode for the first time keeps its labels");
   Harness h;
@@ -283,6 +331,8 @@ int main() {
   test_rotation_split_across_frames();
   test_full_shuffle_of_thirty_panels();
   test_commissioning_alias_is_merged();
+  test_provisional_entry_lands_at_its_real_address();
+  test_stored_provisional_entries_fold_at_load();
   test_first_barcode_keeps_imported_labels();
   test_table_full();
   test_import_restores_a_backup();

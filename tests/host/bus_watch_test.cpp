@@ -438,6 +438,63 @@ static void test_mppt_parameters_are_picked_out() {
   CHECK(!parse_mppt("!Mpptx 1 0 S M[100 0018 - 3/3] 0 12 40 08 12", v));
 }
 
+// An optimizer's rating, from its answer to ^00Cal, as the roof's give it
+// (2026-11-14, a CCA asking): rated volts and watts, then the calibration.
+static void test_ratings_are_picked_out() {
+  BusWatch w;
+  CHECK(w.take_cals().empty());
+  w.on_frame(request(0x0148, hex("00016fc404")), true, 1000);
+  w.on_frame(reply(0x0149, poll_reply_with_answer(0x21, "!ESO075V700W-H461.11.70S0.12\r")), false, 1010);
+  w.on_frame(request(0x0148, hex("00016fc504")), true, 1100);
+  w.on_frame(reply(0x0149, poll_reply_with_answer(0x26, "!ESO080V725W-H511.22.00\r")), false, 1110);
+  w.on_frame(request(0x0148, hex("00016fc604")), true, 1200);
+  w.on_frame(reply(0x0149, poll_reply_with_answer(0x12, "!Info 0027 12 FF\r")), false, 1210);
+  auto c = w.take_cals();
+  CHECK(c.size() == 2);
+  if (c.size() == 2) {
+    CHECK(c[0].addr == 0x21 && c[0].volts == 75 && c[0].watts == 700 && c[0].cal == "ESO075V700W-H461.11.70S0.12");
+    CHECK(c[1].addr == 0x26 && c[1].volts == 80 && c[1].watts == 725 && c[1].cal == "ESO080V725W-H511.22.00");
+  }
+  CHECK(w.take_cals().empty());
+  CalSeen v;
+  CHECK(!parse_cal("!Info 0027 12 FF", v));
+  CHECK(!parse_cal("!ESOV700W-H461", v));      // no volts
+  CHECK(!parse_cal("!ESO075V-H461", v));       // no watts
+  CHECK(!parse_cal("!ESO075X700W-H461", v));
+  CHECK(!parse_cal("ESO075V700W-H461", v));    // not an answer
+}
+
+// A gateway renumbering hands an address to another optimizer: its old
+// answers are someone else's, not a change. Unknown barcodes say nothing.
+static void test_an_address_taken_by_another_optimizer() {
+  AddressOwners o;
+  CHECK(!o.moved(0x26, ""));                  // nothing known yet
+  CHECK(!o.moved(0x26, "04C05B0000000001"));  // the first owner
+  CHECK(!o.moved(0x26, "04C05B0000000001"));  // the same one
+  CHECK(!o.moved(0x26, ""));                  // a lookup that came back empty keeps it
+  CHECK(o.moved(0x26, "04C05B0000000002"));   // another one now
+  CHECK(!o.moved(0x26, "04C05B0000000002"));
+  CHECK(!o.moved(0x27, "04C05B0000000001"));  // the first, at its new address
+  CHECK(o.owners().at(0x26) == "04C05B0000000002");
+  AddressOwners back;
+  back.restore(0x26, "04C05B0000000002");
+  CHECK(!back.moved(0x26, "04C05B0000000002"));
+  CHECK(back.moved(0x26, "04C05B0000000003"));
+}
+
+static void test_version_book_forgets_an_address() {
+  VersionBook b;
+  VersionSeen v;
+  v.addr = 0x26;
+  v.model = "Mnode";
+  v.version = "K8.0114 (24)";
+  b.record(v, 1000);
+  b.forget(false, 0x26);
+  CHECK(!b.find(false, 0x26));
+  v.version = "H9.0018 (40)";
+  CHECK(b.record(v, 2000) == VersionBook::first);  // a new optimizer there, not a change
+}
+
 int main() {
   test_names();
   test_no_alarm_for_what_a_master_here_sends();
@@ -460,6 +517,9 @@ int main() {
   test_smart_settings_are_picked_out();
   test_smart_needs_the_flag();
   test_mppt_parameters_are_picked_out();
+  test_ratings_are_picked_out();
+  test_an_address_taken_by_another_optimizer();
+  test_version_book_forgets_an_address();
   if (failures) {
     std::printf("%d failed\n", failures);
     return 1;

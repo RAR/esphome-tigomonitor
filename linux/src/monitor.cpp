@@ -149,6 +149,7 @@ void Monitor::on_power_packet_(const std::string &packet, uint16_t tap) {
   int64_t now_s = p->updated_unix_ms / 1000;
   links_.on_report(r.addr, tap, r.rssi, static_cast<uint16_t>(std::strtoul(r.slot_counter, nullptr, 16)), now_s,
                    local_day());
+  prune_links_locked_(now_s);
   for (auto &n : nodes_) {
     if (n.addr == p->addr) {
       if (now_s - n.last_heard_unix >= SEEN_SAVE_EVERY_S) dirty_ = true;
@@ -199,7 +200,8 @@ void Monitor::on_frame27_(const std::string &hex) {
   bool changed = false;
   bool ok = proto::walk_frame27(hex, proto::COMMAND_PAYLOAD_OFFSET, header,
                                 [&](const char *long_addr, const char *addr) {
-    std::string a(addr), l(long_addr);
+    // A provisional entry (0x8000 set) is filed at the address its reports come from.
+    std::string a = identity::without_provisional_bit(std::string(addr)), l(long_addr);
     auto res = identity::apply_frame27_entry(
         nodes_, parked_cca_, a, l, max_nodes_,
         [](const std::string &na, const std::string &nl) {
@@ -967,7 +969,22 @@ bool Monitor::load() {
     seen_since_ = seen_barcodes_.empty() ? 0 : 1;
   }
   LOGI("state: %zu nodes, %.3f kWh", nodes_.size(), energy_kwh_);
+  prune_links_locked_(unix_ms() / 1000);
   return true;
+}
+
+void Monitor::prune_links_locked_(int64_t now_s) {
+  // No node table yet (a new install, or a listener that hasn't heard one):
+  // nothing to tell a leftover from an optimizer by.
+  if (nodes_.empty() || now_s - last_prune_s_ < 60) return;
+  last_prune_s_ = now_s;
+  size_t n = links_.prune([this](const std::string &addr) {
+    return std::any_of(nodes_.begin(), nodes_.end(), [&](const Node &x) { return x.addr == addr; });
+  }, now_s, LINK_QUIET_S);
+  if (n) {
+    LOGI("mesh: dropped %zu address%s no optimizer holds now, quiet for an hour", n, n == 1 ? "" : "es");
+    dirty_ = true;
+  }
 }
 
 }  // namespace tigod

@@ -549,6 +549,37 @@ static void test_remove_not_listed_or_the_only_one() {
   CHECK(only.ok() && one.erases == 1 && one.writes == 0 && one.slots.empty());
 }
 
+// Several at once: one read, one erase, and only those that stay written
+// back, in id order. Ones not listed are skipped, not refused.
+static void test_remove_several_in_one_pass() {
+  FakeTap tap = table_of(41);
+  std::vector<TableRecord> all = records_of(tap);
+  std::vector<Bytes> gone;
+  for (size_t i = 0; i < all.size(); i++)
+    if (i != 0 && i != 2) gone.push_back(all[i].mac);
+  gone.push_back(hex("04C05B0000001234"));  // not listed
+  uint32_t now = 0;
+  TableRemove job(gone, false);
+  run(job, tap, now);
+  CHECK(job.ok());
+  CHECK(tap.erases == 1);
+  CHECK(tap.writes == 1);
+  std::vector<TableRecord> held = records_of(tap);
+  CHECK(held.size() == 2);
+  if (held.size() == 2) {
+    CHECK(held[0].mac == all[0].mac && held[0].tuid == all[0].tuid);
+    CHECK(held[1].mac == all[2].mac && held[1].tuid == all[2].tuid);
+  }
+  CHECK(job.removed().size() == 39);
+  CHECK(job.message() == "removed 39; the other 2 written back as they were");
+  // None of them listed: nothing erased.
+  FakeTap small = table_of(3);
+  TableRemove none(std::vector<Bytes>{hex("04C05B0000001234"), hex("04C05B0000001235")}, false);
+  run(none, small, now);
+  CHECK(none.ok() && small.erases == 0 && none.removed().empty());
+  CHECK(none.message() == "not in the table: nothing to remove");
+}
+
 // The list must be saved before the erase; if it can't be, nothing is erased.
 static void test_remove_saves_before_erasing() {
   FakeTap tap = table_of(3);
@@ -736,6 +767,7 @@ int main() {
   test_remove_resumes_after_a_stop();
   test_remove_bad_read_back();
   test_remove_dry_run();
+  test_remove_several_in_one_pass();
   test_labels();
   test_the_gate();
   test_add_writes_one_record();

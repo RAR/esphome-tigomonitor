@@ -8,6 +8,7 @@
 // bus with its CCA running (gateway 0x1201). Only polls and discovery frames are
 // used: they carry no serials, barcodes or MACs.
 
+#include <map>
 #include "tigo_master.h"
 
 #include <algorithm>
@@ -362,7 +363,9 @@ static void test_tap_reconfiguring_frames_are_never_sent() {
   CHECK(classify_request(CMD_TUNNEL, tunnel_request(0x40, 1, {})) == Allow::bench_only);
   // An optimizer's own Leave command makes it leave its network (owner's
   // analysis, 2026-11-10): never, in any of the text forms the CCA uses.
-  for (const char *t : {"Leave", "Leave\r", "!Leave", "^00Leave", "^00Leave\r", "#Leave"}) {
+  // The TAP's own per-node form (} + the node's MAC + Leave) too: tried on
+  // the roof 2026-11-13 with ^00Leave\r, neither made a node leave.
+  for (const char *t : {"Leave", "Leave\r", "!Leave", "^00Leave", "^00Leave\r", "#Leave", "}04C05B0000000ABCLeave\r"}) {
     Bytes a = {0x00, 0x1c};
     a.insert(a.end(), t, t + strlen(t));
     CHECK(never_anywhere(CMD_TUNNEL, tunnel_request(0x06, 1, a)));
@@ -1151,6 +1154,49 @@ static void test_queries() {
         Queries::retry_after_ms(100) == 30 * 60000);
 }
 
+// A one-off read the owner asks for on the bench (^00GetOsState): a read's
+// shape, so bench-only at the gate; sent until the node answers, the answer
+// kept for the log; never on the roof.
+static void test_queries_ask() {
+  uint8_t seq = 0;
+  Queries q(0, false);
+  q.on_poll_reply(poll_reply_with({power_from(0x03)}), 0);
+  ask(q, 0, 10000, seq);  // its five reads
+  CHECK(!q.ask(0x03, "^00Get_State\r", 20000));  // a write's shape: refused
+  CHECK(!q.ask(0x03, "#00x\r", 20000));
+  CHECK(!q.ask(0x03, "^00Leave\r", 20000));
+  CHECK(q.ask(0x03, "^00GetOsState\r", 20000));
+  std::vector<Request> r = ask(q, 20000, 30000, seq, 0x03);
+  CHECK(r.size() == 1 && query_text(r[0]) == "^00GetOsState\r");
+  CHECK(classify_request(r[0].cmd, r[0].payload) == Allow::bench_only);
+  CHECK(!may_send(r[0].cmd, r[0].payload, false));
+  // Unanswered: asked again on the reads' schedule.
+  r = ask(q, 20000 + 3 * 60000, 20000 + 3 * 60000 + 15000, seq, 0x03);  // after the five reads due then
+  bool again = false;
+  for (const Request &x : r) again = again || query_text(x) == "^00GetOsState\r";
+  CHECK(again);
+  // Answered: kept, and not asked again.
+  q.on_poll_reply(poll_reply_with({string_packet(0x03, "!GetOsState State=OS_Run1, Tuid=3, Freq=15, Pan=0x1234, D=1\r")}), 300000);
+  std::vector<std::pair<uint16_t, std::string>> got = q.take_asked();
+  CHECK(got.size() == 1 && got[0].first == 0x03 && got[0].second.rfind("!GetOsState State=OS_Run1", 0) == 0);
+  CHECK(q.take_asked().empty());
+  for (const Request &x : ask(q, 300000, 300000 + 40 * 60000, seq, 0x03)) CHECK(query_text(x) != "^00GetOsState\r");
+  // Never answered (a text this firmware doesn't know): given up after
+  // Queries::ASK_TRIES, and said so.
+  Queries n(0, false);
+  n.on_poll_reply(poll_reply_with({power_from(0x04)}), 0);
+  ask(n, 0, 10000, seq);
+  CHECK(n.ask(0x04, "^00GetPAN\r", 20000));
+  int sent = 0;
+  for (uint32_t t = 20000; t < 20000 + 3 * 3600000u; t += 60000) {
+    n.on_poll_reply(poll_reply_with({power_from(0x04)}), t);  // awake throughout
+    for (const Request &x : ask(n, t, t + 59000, seq, 0x04)) sent += query_text(x) == "^00GetPAN\r";
+  }
+  CHECK(sent == static_cast<int>(Queries::ASK_TRIES));
+  std::vector<std::pair<uint16_t, std::string>> gave = n.take_asked();
+  CHECK(gave.size() == 1 && gave[0].second == "no answer to ^00GetPAN after 3 tries");
+}
+
 static void test_housekeeping() {
   Learned41 l;
   l.on_frame(cca41(1, 0x0027, 0x01, 0x21));
@@ -1179,11 +1225,11 @@ static void test_housekeeping() {
   // A minute on, the same targets again.
   r = drain(hk, 1000 + 75000, seq);
   CHECK(r.size() == 3 && tuid_of(r[0]) == first02 && tuid_of(r[1]) == 0x0001 && tuid_of(r[2]) == first04);
-  // Each 10-minute slot, a new target per stream; stream 01 is back at
+  // Each turn, a new target per stream; stream 01 is back at
   // 0x0001 every other slot. Over 40 slots stream 04 visits all 40, once each.
   std::vector<uint16_t> seen04 = {first04};
   for (uint32_t slot = 1; slot < 40; slot++) {
-    r = drain(hk, 1000 + slot * Housekeeping::SLOT_MS + 15000, seq);
+    r = drain(hk, 1000 + slot * Housekeeping::TURN_MS + 15000, seq);
     std::vector<Request> tunnels;
     for (const Request &q : r)
       if (q.cmd == CMD_TUNNEL) tunnels.push_back(q);
@@ -1203,7 +1249,7 @@ static void test_housekeeping() {
   drain(shrink, 15000, seq);
   shrink.set_targets({0x05});
   for (uint32_t slot = 1; slot < 8; slot++)
-    for (const Request &q : drain(shrink, slot * Housekeeping::SLOT_MS + 15000, seq))
+    for (const Request &q : drain(shrink, slot * Housekeeping::TURN_MS + 15000, seq))
       if (q.cmd == CMD_TUNNEL) CHECK(tuid_of(q) == 0x0001 || tuid_of(q) == 0x05);
 
   // No optimizers heard yet: only stream 01's 0x0001.
@@ -1215,7 +1261,7 @@ static void test_housekeeping() {
   // A stream with nothing learned sends the built-in content; a learned one
   // sends what was learned.
   empty.set_targets(roster);
-  r = drain(empty, Housekeeping::SLOT_MS + 15000, seq);
+  r = drain(empty, Housekeeping::TURN_MS + 15000, seq);
   CHECK(r.size() == 3);
   const Bytes learned01 = args41(0, 0x01);
   for (const Request &q : r) {
@@ -1244,6 +1290,128 @@ static void test_housekeeping() {
   CHECK(r.size() == 1 && r[0].payload == Bytes{0x01});
 }
 
+// With a PGW pool (pgw.h): streams 01 and 02 take turns through the TAP and
+// the pool, a step apart, and stream 04 through everyone else in order, each
+// holder for 480 s and kept alive every minute, then 180 s quiet, as the CCA's are.
+static void test_housekeeping_pool() {
+  Learned41 l;
+  l.on_frame(cca41(1, 0x0027, 0x01, 0x21));
+  l.on_frame(cca41(1, 0x0006, 0x02, 0x22));
+  l.on_frame(cca41(1, 0x0009, 0x04, 0x24));
+  std::vector<uint16_t> roster;
+  for (uint16_t n = 0x02; n <= 0x29; n++) roster.push_back(n);
+  const std::vector<uint16_t> pool = {0x26, 0x27, 0x28, 0x29};
+  const std::vector<uint16_t> turn = {0x0001, 0x26, 0x27, 0x28, 0x29};
+  uint8_t seq = 0;
+  Housekeeping hk(l.entries(), 1000, false, 7);
+  hk.set_targets(roster);
+  hk.set_pool(pool);
+  auto tunnels = [&](uint32_t at) {
+    std::vector<Request> t;
+    for (const Request &q : drain(hk, at, seq))
+      if (q.cmd == CMD_TUNNEL) t.push_back(q);
+    return t;
+  };
+  // Slot 0: 02 to the first of the pool, 01 to the TAP, 04 to the first of the rest.
+  std::vector<Request> r = tunnels(1000 + 15000);
+  CHECK(r.size() == 3);
+  if (r.size() == 3) {
+    CHECK(stream_of(r[0]) == 0x02 && tuid_of(r[0]) == 0x26);
+    CHECK(stream_of(r[1]) == 0x01 && tuid_of(r[1]) == 0x0001);
+    CHECK(stream_of(r[2]) == 0x04 && tuid_of(r[2]) == 0x02);
+    CHECK(r[0].payload == tunnel_request(SUB_HOUSEKEEPING, r[0].payload[4], args41(0x26, 0x02, 0x22)));
+  }
+  // What /api/master shows: the holders now, and the turn's time left.
+  CHECK(hk.sends_41() && hk.holder(0x01, 1000 + 15000) == 0x0001 && hk.holder(0x02, 1000 + 15000) == 0x26 &&
+        hk.holder(0x04, 1000 + 15000) == 0x02);
+  CHECK(hk.turn_left_ms(1000 + 15000) == Housekeeping::HOLD_MS - 15000);
+  CHECK(hk.holder(0x01, 1000 + Housekeeping::TURN_MS) == 0x26);  // the next turn
+  // Kept alive: the same three a minute later, and still at 7 minutes.
+  for (uint32_t at : {1000u + 75000u, 1000u + 7 * 60000u + 15000u}) {
+    r = tunnels(at);
+    CHECK(r.size() == 3 && tuid_of(r[0]) == 0x26 && tuid_of(r[1]) == 0x0001 && tuid_of(r[2]) == 0x02);
+  }
+  // Each turn, the next: 01 and 02 never on the same node, both in the
+  // turn; 04 visits all 36 others once in 36 slots, never one of the pool.
+  std::vector<uint16_t> seen04 = {0x02};  // slot 0, seen above
+  for (uint32_t slot = 1; slot < 36; slot++) {
+    r = tunnels(1000 + slot * Housekeeping::TURN_MS + 15000);
+    CHECK(r.size() == 3);
+    if (r.size() != 3) break;
+    CHECK(tuid_of(r[1]) == turn[slot % 5] && tuid_of(r[0]) == turn[(slot + 1) % 5]);
+    CHECK(tuid_of(r[0]) != tuid_of(r[1]));
+    CHECK(std::find(pool.begin(), pool.end(), tuid_of(r[2])) == pool.end());
+    seen04.push_back(tuid_of(r[2]));
+    for (const Request &q : r) CHECK(classify_request(q.cmd, q.payload) == Allow::yes);
+  }
+  std::sort(seen04.begin(), seen04.end());
+  std::vector<uint16_t> others;
+  for (uint16_t n : roster)
+    if (std::find(pool.begin(), pool.end(), n) == pool.end()) others.push_back(n);
+  CHECK(seen04 == others);
+  // Without 0x41s, nobody holds a stream.
+  HousekeepingPlan quiet;
+  quiet.session = true;
+  quiet.send_41 = false;
+  Housekeeping none(l.entries(), 0, quiet, 1);
+  none.set_targets(roster);
+  none.set_pool(pool);
+  CHECK(!none.sends_41() && none.holder(0x01, 15000) == 0 && none.holder(0x04, 15000) == 0);
+  // No pool any more: back to the random draw over the whole roster.
+  hk.set_pool({});
+  r = tunnels(1000 + 40 * Housekeeping::TURN_MS + 15000);
+  CHECK(r.size() == 3);
+  for (const Request &q : r) CHECK(tuid_of(q) == 0x0001 || (tuid_of(q) >= 0x02 && tuid_of(q) <= 0x29));
+}
+
+// The CCA's timing (roof capture, 2026-11-14): each stream keeps one target
+// for 8 sends a minute apart, then sends nothing for 180 s, as the old
+// holder's lease runs out, before the next target. With and without a pool.
+static void test_housekeeping_cca_timing() {
+  Learned41 l;
+  l.on_frame(cca41(1, 0x0027, 0x01, 0x21));
+  l.on_frame(cca41(1, 0x0006, 0x02, 0x22));
+  l.on_frame(cca41(1, 0x0009, 0x04, 0x24));
+  std::vector<uint16_t> roster;
+  for (uint16_t n = 0x02; n <= 0x29; n++) roster.push_back(n);
+  for (bool pooled : {false, true}) {
+    uint8_t seq = 0;
+    const uint32_t t0 = 1000;
+    Housekeeping hk(l.entries(), t0, false, 7);
+    hk.set_targets(roster);
+    if (pooled) hk.set_pool({0x26, 0x27, 0x28, 0x29});
+    // stream -> (time, tuid) of every 0x41, a second at a time for 4 turns.
+    std::map<uint8_t, std::vector<std::pair<uint32_t, uint16_t>>> sent;
+    const uint32_t turn = Housekeeping::HOLD_MS + Housekeeping::QUIET_MS;
+    CHECK(Housekeeping::HOLD_MS == 480000 && Housekeeping::QUIET_MS == 180000);
+    for (uint32_t at = t0; at < t0 + 4 * turn; at += 1000) {
+      for (const Request &q : drain(hk, at, seq))
+        if (q.cmd == CMD_TUNNEL && q.payload[3] == SUB_HOUSEKEEPING) sent[stream_of(q)].push_back({at - t0, tuid_of(q)});
+      // Quiet: nobody holds a stream, and the countdown runs to the next turn.
+      uint32_t phase = (at - t0) % turn;
+      if (phase >= Housekeeping::HOLD_MS) {
+        CHECK(hk.holder(0x01, at) == 0 && hk.holder(0x02, at) == 0 && hk.holder(0x04, at) == 0);
+        CHECK(hk.turn_left_ms(at) == turn - phase);
+      } else {
+        CHECK(hk.turn_left_ms(at) == Housekeeping::HOLD_MS - phase);
+      }
+    }
+    for (int i = 0; i < 3; i++) {
+      const auto &s = sent[Housekeeping::STREAMS[i]];
+      CHECK(s.size() == 4 * 8);
+      if (s.size() != 4 * 8) continue;
+      for (size_t k = 0; k < s.size(); k++) {
+        uint32_t want = (k / 8) * turn + Housekeeping::OFFSET_MS[i] + (k % 8) * Housekeeping::STREAM_EVERY_MS;
+        CHECK(s[k].first == want);
+        if (k % 8) CHECK(s[k].second == s[k - 1].second);  // one target through a turn
+      }
+      // The next target, not the last one again (stream 01 without a pool
+      // alternates with the TAP; the others draw a new one).
+      for (size_t k = 8; k < s.size(); k += 8) CHECK(s[k].second != s[k - 1].second);
+    }
+  }
+}
+
 static void test_next_request_housekeeping() {
   Learned41 l;
   l.on_frame(cca41(1, 0x0001, 0x01));
@@ -1259,6 +1427,35 @@ static void test_next_request_housekeeping() {
   CHECK(r.cmd == CMD_TUNNEL && r.payload == tunnel_request(SUB_HOUSEKEEPING, 2, args41(0x0001, 0x01)));
   // Without it, as before.
   CHECK(next_request(window, cursor, seq, 7000).cmd == CMD_POLL);
+}
+
+// After a re-address, the CCA's bring-up reads go before the join window, so
+// its 0D 00 00 is the first tunnel request after the reset (seq 01), as the
+// CCA's is; the window's status and renewal follow.
+static void test_next_request_bring_up_before_the_window() {
+  HousekeepingPlan plan;
+  plan.bring_up_reads = true;
+  plan.session = plan.broadcast = true;
+  plan.session_reset = true;  // PV off around the read, as the roof's housekeeping does
+  Housekeeping hk({}, 0, plan, 1);
+  WindowKeeper window;
+  PollCursor cursor(0);
+  uint8_t seq = 0;
+  std::vector<std::string> got;
+  for (int i = 0; i < 9; i++) {
+    Request r = next_request(window, cursor, seq, 0, &hk);
+    char b[24];
+    if (r.cmd == CMD_TUNNEL) snprintf(b, sizeof(b), "T%02X/%02X", r.payload[3], r.payload[4]);
+    else snprintf(b, sizeof(b), "%04X", r.cmd);
+    got.push_back(b);
+  }
+  // VERSION, 0E02, PV, the 0D read at seq 01, PV, the stored read at 02, the
+  // 0x22; then the window's status.
+  CHECK(got[0] == "000A" && got[1] == "0E02" && got[3] == "T0D/01" && got[5] == "T0D/02");
+  bool window_after = false;
+  for (size_t i = 6; i < got.size(); i++) window_after = window_after || got[i].rfind("T2E/", 0) == 0;
+  CHECK(window_after);
+  CHECK(std::find(got.begin(), got.begin() + 5, std::string("T2E/01")) == got.begin() + 5);
 }
 
 // The PV switch: 0x0B00 00 off, 01 on (the CCA's PV-off updater; the roof's
@@ -1559,13 +1756,17 @@ int main() {
   test_housekeeping_allow();
   test_learner();
   test_housekeeping();
+  test_housekeeping_pool();
+  test_housekeeping_cca_timing();
   test_tap_reconfiguring_frames_are_never_sent();
   test_discovery_window_counts();
   test_no_renewal_for_an_empty_table();
   test_next_request_housekeeping();
+  test_next_request_bring_up_before_the_window();
   test_bring_up_plan();
   test_walks();
   test_queries();
+  test_queries_ask();
   test_pv_switch();
   if (failures) {
     std::printf("%d failed\n", failures);

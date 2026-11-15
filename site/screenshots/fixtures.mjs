@@ -188,9 +188,9 @@ export const routes = {
   '/api/versions': {
     taps: [{ addr: '1201', model: 'Mgate', version: 'G8.59 Jan  1 2026 10:00:00 GW-H150.6.0S0.12', previous: '',
              since_unix_ms: 1767225600000, last_unix_ms: 1767225600000, name: 'Garage' }],
-    radios: [{ tap: '1201', channel: 18, slt: 90, slm: 60, heard_unix_ms: 1767225600000 }],
+    radios: [{ tap: '1201', channel: 18, slt: 90, slm: 60, profile: 75, heard_unix_ms: 1767225600000 }],
     // An optimizer whose PIV current changed, newest first.
-    changes: [{ unix_ms: 1767225600000 + 3 * 60000, addr: devices[3].addr, what: 'MPPT', before: '12 40 08 12', after: '12 40 0A 12' }],
+    changes: [{ unix_ms: now * 1000 - 3 * 60000, addr: devices[3].addr, what: 'MPPT', before: '12 40 08 12', after: '12 40 0A 12' }],
     // Each TAP's MAC, from its answer to GET_MAC; made up.
     ids: [{ tap: '1201', mac: '04C05B0000001234', heard_unix_ms: 1767225600000 }],
     // Two on the H9 firmware, as D6-D10 are on the roof.
@@ -209,6 +209,11 @@ export const routes = {
     // 12 40 08 12 from every firmware, one with a different PIV current.
     mppt: devices.slice(0, 8).map((d, i) => ({ addr: d.addr, params: i === 3 ? '12 40 0A 12' : '12 40 08 12',
       answer: `1 0 S M[100 ${d.addr} - 3/3] 0 ${i === 3 ? '12 40 0A 12' : '12 40 08 12'}`, heard_unix_ms: 1767225600000 + i * 60000 })),
+    // Ratings from each answer to ^00Cal: the K8s' 700 W, the two H9s' 725 W,
+    // in the roof's forms; the rest not answered yet.
+    ratings: devices.slice(0, 8).map((d, i) => (i === 5 || i === 6
+      ? { addr: d.addr, volts: 80, watts: 725, cal: 'ESO080V725W-H511.22.00', heard_unix_ms: 1767225600000 + i * 60000 }
+      : { addr: d.addr, volts: 75, watts: 700, cal: 'ESO075V700W-H461.11.70S0.12', heard_unix_ms: 1767225600000 + i * 60000 })),
   },
   '/api/status': {
     free_heap: 98740, total_heap: 310652,
@@ -399,7 +404,7 @@ export const piRoutes = {
   '/api/settings': {
     serial_port: '/dev/serial/by-id/usb-FTDI_USB_RS485-if00-port0', bus_role: 'master', standby_takeover_s: 3,
     master_startup: true, master_housekeeping: true, master_queries: true, master_optimizer_writes: false,
-    master_read_tap_config: false, master_table_writes: false, master_adopt_taps: false, discovery_auto: false, discovery_morning_min: 120, gateway_id: 0x1201, web_port: 0, web_port_active: 80, web_username: 'admin', web_password_set: true, trusted_proxies: [],
+    master_read_tap_config: false, master_send_41: true, dangerous_options: false, pgw_rule: 'random', pgw_panels: [], master_table_writes: false, master_adopt_taps: false, discovery_auto: false, discovery_morning_min: 120, gateway_id: 0x1201, web_port: 0, web_port_active: 80, web_username: 'admin', web_password_set: true, trusted_proxies: [],
     tls_cert: '', tls_key: '', tls_active: false, tls_from_args: false, power_calibration: 1, publish_interval_s: 30,
     device_id: 'tigomonitor', show_cca_page: true, show_cloud_page: true, setup_open: false, setup_open_until: 0,
     mqtt: { host: '192.0.2.10', port: 1883, username: 'tigomonitor', password_set: true, discovery: true,

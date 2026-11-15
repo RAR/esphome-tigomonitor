@@ -22,6 +22,7 @@
 #include "tigo_protocol.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cstdint>
 #include <map>
 #include <set>
@@ -370,6 +371,7 @@ struct Request {
   uint32_t wait_ms = 0;   // how long to wait for the reply; 0 = the usual
   bool bring_up = false;  // a frame the CCA sends only straight after re-addressing a TAP
   bool table_edit = false;  // from a TableAdd (table_edit.h), the only source of a table write
+  bool provision = false;   // from a ProvisionJob (tap_config.h): Add a TAP's radio step
 };
 
 // ---- housekeeping ----------------------------------------------------------
@@ -379,7 +381,8 @@ struct Request {
 //   - tunnel sub 0x41, the args a target Tuid then 00 00 00 <stream> 00 and 17
 //     more bytes. Three streams (01, 02, 04), each sent once a minute, each
 //     moving to its next target every 10 minutes; between them they reached
-//     every optimizer. The 17 bytes never changed in 24 h, across CCA
+//     every optimizer. (A 2026-11-14 roof capture: 8 sends to one target,
+//     then about 3 minutes with none on that stream, then the next.) The 17 bytes never changed in 24 h, across CCA
 //     reboots. What they mean isn't known, so they are copied, not composed.
 //   - 0x0B00 with 01, every hour; after the CCA reboots, 00 then 01 once.
 //   - tunnel sub 0x22, empty, to the broadcast address then the TAP, a second
@@ -561,12 +564,19 @@ struct HousekeepingPlan {
 // copied: the CCA's own order favours some optimizers for reasons unknown,
 // so each stream instead walks
 // the optimizers heard lately (set_targets) in a random order, a new one
-// every 10 minutes, each visited once a pass. Stream 01 goes to 0x0001 every
-// other slot, starting with the first, as the CCA's does after every reboot.
+// each turn (TURN_MS), each visited once a pass. Stream 01 goes to 0x0001 every
+// other turn, starting with the first, as the CCA's does after every reboot.
 class Housekeeping {
  public:
   static const uint32_t STREAM_EVERY_MS = 60000;
-  static const uint32_t SLOT_MS = 600000;
+  // A turn, as the CCA's: a holder kept alive every minute for HOLD_MS (8
+  // sends), then QUIET_MS with no 0x41 on any stream before the next. Its
+  // firmware re-picks a holder after 480 s and times one out after 180 s
+  // (owner's analysis), so the quiet is the old holder's lease running out:
+  // a new one sooner could leave two nodes holding the same stream.
+  static const uint32_t HOLD_MS = 480000;
+  static const uint32_t QUIET_MS = 180000;
+  static const uint32_t TURN_MS = HOLD_MS + QUIET_MS;
   static const uint32_t SESSION_EVERY_MS = 3600000;
   // Streams 02, 01, 04 go out in that order, a few seconds apart, as the CCA's do.
   static constexpr uint8_t STREAMS[3] = {0x02, 0x01, 0x04};
@@ -625,6 +635,11 @@ class Housekeeping {
 
   // The optimizers to choose from: their Tuids. 0, 0x0001 and anything with
   // the high bit (a roster entry not yet joined) are left out.
+  // The PGW pool (pgw.h): streams 01 and 02 then take turns through the TAP
+  // and these, a step apart, and stream 04 through the other targets in
+  // order. Empty: each stream draws at random from all targets.
+  void set_pool(const std::vector<uint16_t> &tuids) { pool_ = tuids; }
+  const std::vector<uint16_t> &pool() const { return pool_; }
   void set_targets(const std::vector<uint16_t> &tuids) {
     targets_.clear();
     for (uint16_t t : tuids)
@@ -636,6 +651,10 @@ class Housekeeping {
   // Where the 0x0B00s take their byte: with PV off held, the hourly and
   // the opening's 01 become 00, and after a bring-up's 00 the 01 is dropped.
   void set_pv(const PvSwitch *pv) { pv_ = pv; }
+
+  // A bring-up's opening still to go: the CCA sends it before anything about
+  // the join window, so its 0D read is the first tunnel after the reset.
+  bool bring_up_pending() const { return plan_.bring_up_reads && opening_next_ < opening_.size(); }
 
   Request due(uint32_t now_ms, uint8_t &seq) {
     while (opening_next_ < opening_.size()) {
@@ -681,8 +700,20 @@ class Housekeeping {
     }
     for (int i = 0; i < 3 && plan_.send_41; i++) {
       if (content_[i].empty() || static_cast<int32_t>(now_ms - next_ms_[i]) < 0) continue;
-      next_ms_[i] = now_ms + STREAM_EVERY_MS;
-      uint32_t slot = (now_ms - start_ms_) / SLOT_MS;
+      // On a fixed minute grid from the start, so the 8 sends stay inside
+      // the hold however late due() is called; a long stall skips, not bursts.
+      while (static_cast<int32_t>(now_ms - next_ms_[i]) >= 0) next_ms_[i] += STREAM_EVERY_MS;
+      if (quiet_(now_ms)) continue;
+      uint32_t slot = (now_ms - start_ms_) / TURN_MS;
+      if (!pool_.empty()) {
+        target_[i] = pool_target_(STREAMS[i], slot);
+        if (!target_[i]) continue;
+        Bytes args = {static_cast<uint8_t>(target_[i] >> 8), static_cast<uint8_t>(target_[i])};
+        args.insert(args.end(), content_[i].begin(), content_[i].end());
+        seq = next_seq(seq);
+        sent_41_++;
+        return {CMD_TUNNEL, tunnel_request(SUB_HOUSEKEEPING, seq, args)};
+      }
       if (!picked_[i] || slot != slot_[i] || !target_[i]) {
         slot_[i] = slot;
         picked_[i] = true;
@@ -723,6 +754,20 @@ class Housekeeping {
   }
 
   uint32_t sent_41() const { return sent_41_; }
+  bool sends_41() const { return plan_.send_41; }
+  // Who holds stream (0x01, 0x02 or 0x04) now: with a pool, by the turn;
+  // drawing at random, the last one sent to. 0 none (yet).
+  uint16_t holder(uint8_t stream, uint32_t now_ms) const {
+    if (!plan_.send_41 || quiet_(now_ms)) return 0;
+    if (!pool_.empty()) return pool_target_(stream, (now_ms - start_ms_) / TURN_MS);
+    return target_[stream == 0x02 ? 0 : stream == 0x01 ? 1 : 2];
+  }
+  // Until the holders change, in ms: to the end of the hold, or in the
+  // quiet, to the next turn's holders.
+  uint32_t turn_left_ms(uint32_t now_ms) const {
+    uint32_t phase = (now_ms - start_ms_) % TURN_MS;
+    return phase < HOLD_MS ? HOLD_MS - phase : TURN_MS - phase;
+  }
   uint32_t sent_session() const { return sent_session_; }
   uint32_t sent_broadcast() const { return sent_broadcast_; }
   uint32_t sent_walk_pages() const { return sent_walk_pages_; }
@@ -762,6 +807,7 @@ class Housekeeping {
     }
     return r;
   }
+  bool quiet_(uint32_t now_ms) const { return (now_ms - start_ms_) % TURN_MS >= HOLD_MS; }
   void end_walk_() {
     walk_waiting_ = false;
     walk_retried_ = false;
@@ -771,6 +817,18 @@ class Housekeeping {
   }
 
   // The next target from this stream's shuffled pass, 0 if there are none.
+  uint16_t pool_target_(uint8_t stream, uint32_t slot) const {
+    if (stream != 0x04) {
+      std::vector<uint16_t> turn = {TAP_TUID};
+      turn.insert(turn.end(), pool_.begin(), pool_.end());
+      return turn[(slot + (stream == 0x02 ? 1 : 0)) % turn.size()];
+    }
+    std::vector<uint16_t> rest;
+    for (uint16_t t : targets_)
+      if (std::find(pool_.begin(), pool_.end(), t) == pool_.end()) rest.push_back(t);
+    std::sort(rest.begin(), rest.end());
+    return rest.empty() ? 0 : rest[slot % rest.size()];
+  }
   uint16_t draw_(int i) {
     for (int tries = 0; tries < 2; tries++) {
       while (!bag_[i].empty()) {
@@ -811,6 +869,7 @@ class Housekeeping {
   std::string version_;
   uint32_t rng_;
   std::vector<uint16_t> targets_;
+  std::vector<uint16_t> pool_;
   Bytes content_[3];
   std::vector<uint16_t> bag_[3];
   uint16_t target_[3] = {0, 0, 0};
@@ -865,7 +924,33 @@ class Queries {
   static const uint32_t INFO_AGAIN_MS = 40 * 60000;
   static const uint32_t CHECK_AFTER_MS = 3 * 60000;  // a read after a write
   static const uint32_t ASLEEP_MS = 30 * 60000;
-  enum Kind { version, tests, info, smrt, mppt, w255, smart_s };
+  static const uint32_t ASK_TRIES = 3;  // an asked text unanswered this often: given up
+  enum Kind { version, tests, info, smrt, mppt, w255, smart_s, asked };
+
+  // A read-shaped text: ^00 and a name, nothing else (no '_', no '#', not
+  // Leave). What the owner may ask one node for on the bench.
+  static bool is_read_text(const std::string &text) {
+    if (text.size() < 5 || text.size() > 28 || text.compare(0, 3, "^00") != 0 || text.back() != '\r') return false;
+    for (size_t i = 3; i + 1 < text.size(); i++)
+      if (!std::isalpha(static_cast<unsigned char>(text[i]))) return false;
+    return text.find("Leave") == std::string::npos;
+  }
+
+  // The owner's one-off read for one node (bench only: the gate's
+  // bench_only, as it isn't one of the five). Sent on the reads' schedule
+  // until the node answers with !<name>; the answer goes to take_asked().
+  bool ask(uint16_t tuid, const std::string &text, uint32_t now_ms) {
+    if (!is_read_text(text)) return false;
+    for (Item &it : pending_)
+      if (it.tuid == tuid && it.kind == asked) return false;  // one at a time
+    pending_.push_back({tuid, asked, now_ms, 0, text});
+    return true;
+  }
+  std::vector<std::pair<uint16_t, std::string>> take_asked() {
+    std::vector<std::pair<uint16_t, std::string>> out;
+    out.swap(asked_answers_);
+    return out;
+  }
 
   Queries(uint32_t now_ms, bool writes) : writes_(writes), last_sent_ms_(now_ms - GAP_MS) {}
 
@@ -901,8 +986,18 @@ class Queries {
     if (best == pending_.size()) return {};
     Item &it = pending_[best];
     Bytes args = {static_cast<uint8_t>(it.tuid >> 8), static_cast<uint8_t>(it.tuid)};
-    const char *text = it.kind == w255 ? QUERY_W255 : it.kind == smart_s ? QUERY_SMART_S : QUERY_READS[it.kind];
+    const char *text = it.kind == w255      ? QUERY_W255
+                       : it.kind == smart_s ? QUERY_SMART_S
+                       : it.kind == asked   ? it.text.c_str()
+                                            : QUERY_READS[it.kind];
     args.insert(args.end(), text, text + std::char_traits<char>::length(text));
+    if (it.kind == asked && it.tries >= ASK_TRIES) {
+      // Given up: likely a text this firmware doesn't know.
+      asked_answers_.push_back({it.tuid, "no answer to " + it.text.substr(0, it.text.size() - 1) + " after " +
+                                             std::to_string(ASK_TRIES) + " tries"});
+      pending_.erase(pending_.begin() + static_cast<long>(best));
+      return {};
+    }
     if (it.kind == w255 || it.kind == smart_s) {
       sent_writes_++;
       pending_.erase(pending_.begin() + static_cast<long>(best));  // once, as the CCA's
@@ -932,6 +1027,7 @@ class Queries {
     Kind kind;
     uint32_t next_ms;
     uint32_t tries;
+    std::string text = {};  // an asked one's text
   };
 
   void heard_(uint16_t tuid, uint32_t now_ms) {
@@ -955,6 +1051,19 @@ class Queries {
       a = b + 1;
     }
     if (f.empty()) return;
+    // The owner's one-off read: its answer is !<name>.
+    for (size_t k = 0; k < pending_.size(); k++) {
+      Item &it = pending_[k];
+      if (it.tuid != tuid || it.kind != asked) continue;
+      std::string name = "!" + it.text.substr(3, it.text.size() - 4);
+      if (f[0] != name) continue;
+      std::string t = text;
+      while (!t.empty() && (t.back() == '\r' || t.back() == '\n' || t.back() == ' ')) t.pop_back();
+      asked_answers_.push_back({tuid, t});
+      pending_.erase(pending_.begin() + static_cast<long>(k));
+      answers_++;
+      return;
+    }
     Kind k;
     if (f[0] == "Mnode") k = version;
     else if (f[0] == "!Tests") k = tests;
@@ -998,6 +1107,7 @@ class Queries {
   uint32_t last_sent_ms_;
   std::vector<Item> pending_;
   std::map<uint16_t, Setup> setups_;
+  std::vector<std::pair<uint16_t, std::string>> asked_answers_;
   std::map<uint16_t, uint32_t> heard_ms_;
   std::set<uint16_t> smart_written_;  // nodes sent the Smrt write this session
   uint32_t sent_reads_ = 0, sent_writes_ = 0, answers_ = 0;
@@ -1021,6 +1131,11 @@ inline Request next_request(WindowKeeper &window, const PollCursor &cursor, uint
   // request's delay is nothing to a 900 s window.
   if (pv) {
     Request r = pv->due(now_ms);
+    if (r.cmd) return r;
+  }
+  // After a re-address, the CCA's bring-up reads come before the window.
+  if (housekeeping && housekeeping->bring_up_pending()) {
+    Request r = housekeeping->due(now_ms, seq);
     if (r.cmd) return r;
   }
   WindowAction a = window.due(now_ms);
@@ -1070,9 +1185,11 @@ static const uint16_t CMD_GET_MAC = 0x0038;        // with backoff
 static const uint16_t CMD_GET_MAC_NOW = 0x003A;    // no backoff; also the "where are you" read
 static const uint16_t CMD_SET_ID_BY_MAC = 0x003C;
 static const uint16_t CMD_RESET = 0x0010;
-// The gateway's store, in the one form a bring-up sends: the key and nothing
-// else, to the TAP at its new id. It commits the id, so the next RESET or
-// power cycle brings the TAP back there (the 3.6 CCA, bench capture 2026-11-06).
+// The gateway's Store, the key and nothing else: the CCA's own, byte for byte.
+// It saves the TAP's whole gateway configuration, not just the id (owner's
+// analysis of the CCA's firmware, 2026-11-13); our bring-up sends it to a TAP
+// at its new id, so the next RESET or power cycle brings it back there (the
+// 3.6 CCA, bench capture 2026-11-06), and a G8 after a radio write, as the CCA does.
 static const uint16_t CMD_STORE = 0x0012;
 
 struct DiscoveryRequest {
@@ -1682,7 +1799,12 @@ class Herd {
 // table_write: the CCA's table write (sub 0x29) and erase (sub 0x2B) in the
 // shapes it sent, sent only by an add or removal the owner started
 // (table_edit.h), with master_table_writes on.
-enum class Allow { yes, bench_only, startup_only, optimizer_write, pv_off, table_write, never };
+// provision: the write of a TAP's radio settings (sub 0x0D, 01 00 and a
+// whole block on a channel the TAP takes), sent only by a ProvisionJob
+// (tap_config.h), with Allow changes to the TAPs or master_bench on (the
+// caller's provision flag). A provisioning request may also send the 0x0D
+// reads, GET_MAC_NOW and (bench only) the reset, to its own TAP alone.
+enum class Allow { yes, bench_only, startup_only, optimizer_write, pv_off, table_write, provision, never };
 
 // Sub 0x29's args as the CCA sent them on the bench (2026-11-06, 11-09): a
 // count, then count x (MAC, TUID), 1 to 10 (the TAP's limit). Each TUID is a
@@ -1790,12 +1912,22 @@ inline Allow classify_request(uint16_t cmd, const Bytes &payload) {
     }
     case 0x0D:  // GatewayCfg. The bring-up's pair of reads, 00 00 then 00 01.
       // A first byte of 01 is the write of the TAP's whole network config
-      // (channel, PAN, key): how a CCA re-PANs a TAP.
+      // (channel, PAN, key): how a CCA re-PANs a TAP. Only 01 00 (active)
+      // with a whole block on channel 11-26 is ever sent, and only on the
+      // bench; 01 01 (the stored copy) never. The block is 36 bytes, or 46
+      // on a TAP that reads back in that form (tap_config.h).
+      if ((args.size() == 38 || args.size() == 48) && args[0] == 0x01 && args[1] == 0x00 && args[2] == 0x00 && args[3] >= 11 &&
+          args[3] <= 26)
+        return Allow::provision;
       if (!args.empty() && args[0] != 0x00) return Allow::never;
       return args == Bytes{0x00, 0x00} || args == Bytes{0x00, 0x01} ? Allow::startup_only : Allow::bench_only;
     case 0x22:
-      // Empty, to the broadcast address or the TAP. With data after the node
-      // id it is what taptap saw an older CCA use for "PV off": never.
+      // The TAP's report period (tap_config.h): the reads, 00 00 and 00 01,
+      // as the CCA sends them. The write, 01 <setting 0 or 1> <code 1-11>,
+      // only as the owner's change (PeriodJob). Any other shape with data,
+      // the channel scan's code 12 among them, never.
+      if (args.size() == 3 && args[0] == 0x01 && args[1] <= 0x01 && args[2] >= 1 && args[2] <= 11)
+        return Allow::provision;
       if (args.size() > 2) return Allow::never;
       return args == Bytes{0x00, 0x00} || args == Bytes{0x00, 0x01} ? Allow::yes : Allow::bench_only;
     default:
@@ -1812,14 +1944,22 @@ inline bool is_config_read(uint16_t cmd, const Bytes &payload) {
 }
 
 inline bool may_send(uint16_t cmd, const Bytes &payload, bool bench, bool startup = false, bool writes = false,
-                     bool pv_off = false, bool table_writes = false) {
+                     bool pv_off = false, bool table_writes = false, bool provision = false) {
   switch (classify_request(cmd, payload)) {
     case Allow::yes: return true;
     case Allow::bench_only: return bench;  // startup is not bench: a bring-up sends only its own
-    case Allow::startup_only: return startup;
+    case Allow::startup_only:
+      // A provisioning request's reads of the radio settings and its reset.
+      if (provision && (cmd == CMD_RESET || (cmd == CMD_GET_MAC_NOW && payload.empty()) ||
+                        (cmd == CMD_TUNNEL && payload.size() == 7 && payload[3] == 0x0D)))
+        return true;
+      // The gateway Store after a radio write: how a G8 saves it (tap_config.h).
+      if (provision && cmd == CMD_STORE) return true;
+      return startup;
     case Allow::optimizer_write: return writes;
     case Allow::pv_off: return pv_off || startup;
     case Allow::table_write: return table_writes;  // never bench or startup alone
+    case Allow::provision: return provision;  // never bench or startup alone
     case Allow::never: return false;
   }
   return false;

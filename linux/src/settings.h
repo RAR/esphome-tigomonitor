@@ -54,6 +54,22 @@ struct Settings {
   bool master_queries = true;            // the CCA's 0x06 reads to optimizers
   bool master_optimizer_writes = true;   // and the two writes its answers call for
   bool master_read_tap_config = true;    // the bring-up's GatewayCfg read, once at start
+  // Within housekeeping, the 0x41s (the CCA's StarDisc SetPgw, replayed from
+  // what was learned). Off sends none, the rest of housekeeping as before: a
+  // roof test, 2026-11-12, of whether a stale replay costs reports.
+  bool master_send_41 = true;
+  // Shows Settings > Bus's Dangerous options (a TAP's radio profile and
+  // report period). Set by editing settings.json only: the settings API
+  // reports it and never changes it, so the web UI can't turn it on.
+  bool dangerous_options = false;
+  // Which optimizers the 0x41 PGW streams 01 and 02 go to (pgw.h):
+  // "random", any heard optimizer in turn, as before; "array", the far end
+  // of the array from each TAP (or the worst loss, with no layout drawn).
+  // "roof", its first name, is read as "array".
+  // pgw_panels names them outright, by panel name or address. Only with
+  // master_send_41 on.
+  std::string pgw_rule = "random";
+  std::vector<std::string> pgw_panels;
   // The second switch, Allow changes to the TAPs: off by default.
   bool master_table_writes = false;      // let the owner's add write a record to the TAP's table
   // Set and cleared by the Add a TAP guide, not a setting of its own.

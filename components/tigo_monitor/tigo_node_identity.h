@@ -96,9 +96,55 @@ struct Result {
 // checksum). on_alias_removed(node) is called just before an entry is erased
 // as a stale alias of the same barcode, so the caller can drop its runtime
 // device row.
+//
+// An address with 0x8000 set is a provisional entry: listed on the TAP but
+// not yet confirmed. It is the same optimizer as the address without the bit,
+// which is the one its reports come from, so it is filed there.
+template<class Str> Str without_provisional_bit(const Str &addr) {
+  Str a = addr;
+  if (a.empty()) return a;
+  char c = a[0];
+  int v = c >= '0' && c <= '9' ? c - '0' : c >= 'A' && c <= 'F' ? c - 'A' + 10 : c >= 'a' && c <= 'f' ? c - 'a' + 10 : -1;
+  if (v >= 8) a[0] = "01234567"[v - 8];
+  return a;
+}
+
+// Fold provisional entries saved before the Frame 27 fix into the address
+// their reports come from, when the node table loads. Until a TAP lists the
+// optimizer again, nothing else would move the labels off the 80xx entry.
+// An entry is folded when its real address is free, has no barcode, or has
+// the same barcode; one whose real address holds another panel is left as is.
+// Returns how many were folded.
+template<class Table> int fold_provisional_entries(Table &table) {
+  int folded = 0;
+  for (size_t i = 0; i < table.size(); ++i) {
+    auto real = without_provisional_bit(table[i].addr);
+    if (real == table[i].addr) continue;
+    size_t j = 0;
+    while (j < table.size() && table[j].addr != real) ++j;
+    if (j == table.size()) {
+      table[i].addr = real;
+      ++folded;
+      continue;
+    }
+    auto &keep = table[j];
+    auto &dup = table[i];
+    if (!keep.long_address.empty() && keep.long_address != dup.long_address) continue;
+    if (keep.long_address.empty()) keep.long_address = dup.long_address;
+    if (keep.sensor_index < 0 && dup.sensor_index >= 0) keep.sensor_index = dup.sensor_index;
+    fill_cca_metadata(keep, dup);
+    keep.is_persistent = keep.is_persistent || dup.is_persistent;
+    table.erase(table.begin() + i);
+    --i;
+    ++folded;
+  }
+  return folded;
+}
+
 template<class Table, class Pool, class Str, class MakeNode, class OnRemoved>
-Result apply_frame27_entry(Table &table, Pool &pool, const Str &addr, const Str &long_addr,
+Result apply_frame27_entry(Table &table, Pool &pool, const Str &listed_addr, const Str &long_addr,
                            size_t max_nodes, MakeNode make_node, OnRemoved on_alias_removed) {
+  const Str addr = without_provisional_bit(listed_addr);
   Result r;
   auto find = [&](const Str &a) -> decltype(&table[0]) {
     for (auto &n : table)

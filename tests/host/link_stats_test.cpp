@@ -183,6 +183,28 @@ static void test_a_rejoined_parent_leaves_its_child_unresolved() {
   CHECK(s.relay_of("0026") == "0030");
 }
 
+// A node gone for days keeps its last NWID on record, and the TAP hands
+// NWIDs out again: a child that joins under that NWID now isn't relaying
+// through it. Only a node heard since about the child's join counts.
+static void test_a_node_not_heard_since_the_join_is_no_relay() {
+  LinkStats s;
+  s.on_join("002C", T0, "0001", "000D");  // a spare, then switched off
+  s.on_join("000C", T0 + 3 * 86400, "000D", "0010");
+  CHECK(s.relay_of("000C").empty());
+  // One that joined under it a little before and has reported since is.
+  s.on_join("0017", T0 + 3 * 86400 - 300, "0001", "000D");
+  CHECK(s.relay_of("000C") == "0017");
+}
+
+// Heard reporting, not just joined, also keeps a parent current.
+static void test_a_parent_heard_reporting_since_the_join_resolves() {
+  LinkStats s;
+  s.on_join("0017", T0, "0001", "005A");
+  s.on_report("0017", 0x1201, 120, slot_of(100), T0 + 86400, DAY + 1);
+  s.on_join("0026", T0 + 86400 + 60, "005A", "005B");
+  CHECK(s.relay_of("0026") == "0017");
+}
+
 // A node naming its own NWID as parent is no relationship (the CCA drops it).
 static void test_its_own_nwid_is_no_relay() {
   LinkStats s;
@@ -247,6 +269,25 @@ static void test_a_deleted_optimizer_is_forgotten() {
   CHECK(s.links().count("0002") == 1);
   s.erase("0009");  // unknown: nothing happens
   CHECK(s.links().size() == 1);
+}
+
+// A gateway renumbering (the CCA, 2026-11-14) leaves the old addresses
+// behind: no optimizer answers there now. One not in the node table and
+// not heard or joined for an hour goes; one in the table stays however
+// quiet, and a new one stays while it's recent, before it's in the table.
+static void test_an_old_address_nobody_holds_is_dropped() {
+  LinkStats s;
+  reports(s, "0004", {0, 400});            // in the table, quiet since T0
+  reports(s, "8004", {0, 400});            // the old address, quiet since T0
+  s.on_join("000E", T0 - 86400, "", "");   // an old join, restored at start
+  s.on_join("8005", T0 + 3500, "", "");    // a new joiner, not in the table yet
+  auto in_table = [](const std::string &a) { return a == "0004"; };
+  CHECK(s.prune(in_table, T0 + 3700, 3600) == 2);
+  CHECK(s.links().count("0004") == 1);
+  CHECK(s.links().count("8004") == 0);
+  CHECK(s.links().count("000E") == 0);
+  CHECK(s.links().count("8005") == 1);
+  CHECK(s.prune(in_table, T0 + 3700, 3600) == 0);
 }
 
 // The roof at sunrise, 2026-11-08: a 600-tick cadence, and reports that
@@ -351,6 +392,8 @@ int main() {
   test_a_parent_resolves_by_nwid_not_address();
   test_a_parent_heard_later_resolves_then();
   test_a_rejoined_parent_leaves_its_child_unresolved();
+  test_a_node_not_heard_since_the_join_is_no_relay();
+  test_a_parent_heard_reporting_since_the_join_resolves();
   test_its_own_nwid_is_no_relay();
   test_tap_and_last_heard();
   test_a_late_report_fills_its_hole();
@@ -358,6 +401,7 @@ int main() {
   test_a_duplicate_is_still_heard();
   test_a_silent_optimizer_reads_zero_after_midnight();
   test_a_deleted_optimizer_is_forgotten();
+  test_an_old_address_nobody_holds_is_dropped();
   test_a_report_far_behind_fills_its_hole();
   test_a_late_report_keeps_the_newest();
   test_a_late_report_heard_twice_counts_once();

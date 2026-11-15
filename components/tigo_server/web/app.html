@@ -633,6 +633,70 @@
   .topo-empty { padding: 60px 24px; text-align: center; color: var(--text-dim); font-size: 13px; }
   /* The mesh map (Pi): optimizers around the TAP each reports through. */
   .mesh-note { margin: 0 0 14px; color: var(--text-dim); font-size: 13px; max-width: 760px; }
+  /* ===== Topology > Array: panels where they sit ===== */
+  .array-wrap { display: flex; gap: 14px; align-items: flex-start; }
+  .array-scroll { flex: 1; min-width: 0; overflow: auto; border: 1px solid var(--border); border-radius: 10px;
+    background: var(--bg-2); max-height: 72vh; }
+  .array-canvas { position: relative; margin: 12px; touch-action: none; }
+  .array-canvas.editing { background-image:
+      linear-gradient(to right, color-mix(in srgb, var(--border) 70%, transparent) 1px, transparent 1px),
+      linear-gradient(to bottom, color-mix(in srgb, var(--border) 70%, transparent) 1px, transparent 1px);
+    background-size: var(--array-cell) var(--array-cell); outline: 1px solid var(--border); }
+  .array-tile { position: absolute; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    border-radius: 3px; border: 1px solid rgba(255,255,255,0.18); color: #e8eef8; font-size: 11px; line-height: 1.15;
+    font-variant-numeric: tabular-nums; user-select: none; box-sizing: border-box;
+    background-image: linear-gradient(to right, rgba(255,255,255,0.07) 1px, transparent 1px),
+                      linear-gradient(to bottom, rgba(255,255,255,0.07) 1px, transparent 1px);
+    background-size: 33.4% 25%; box-shadow: 0 1px 2px rgba(0,0,0,0.35); }
+  .array-tile.lit { color: #061018; border-color: rgba(6,16,24,0.25); }
+  .array-tile.stale { opacity: 0.55; }
+  .array-tile .rn { font-weight: 600; }
+  .array-tile .rw { font-size: 9.5px; opacity: 0.9; white-space: nowrap; letter-spacing: -0.02em; }
+  .array-tile .rn { white-space: nowrap; }
+  .array-canvas.editing .array-tile, .array-canvas.editing .array-tap { cursor: grab; }
+  .array-tile:focus-visible, .array-tap:focus-visible, .array-chip:focus-visible { outline: 2px solid var(--accent-2); outline-offset: 2px; }
+  .array-tile.sel, .array-tap.sel { outline: 2px solid var(--accent-2); outline-offset: 2px; }
+  .array-tap { position: absolute; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px;
+    border-radius: 50%; background: var(--bg-3); border: 2px solid var(--accent-2); color: var(--text);
+    font-size: 10px; font-weight: 600; box-sizing: border-box; user-select: none; box-shadow: 0 1px 3px rgba(0,0,0,0.3); }
+  .array-tap svg { width: 14px; height: 14px; color: var(--accent-2); }
+  .array-tap.under { z-index: 1; gap: 0; }
+  .array-tile.pool { outline: 2px dashed var(--accent-2); outline-offset: 2px; }
+  .array-badge { position: absolute; top: -8px; right: -8px; min-width: 18px; height: 18px; padding: 0 4px; border-radius: 9px;
+    background: var(--accent-2); color: #061018; font-size: 10px; font-weight: 700; line-height: 18px; text-align: center;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.35); z-index: 2; box-sizing: border-box; }
+  .array-badge.s04 { background: var(--warn); }
+  .array-helpers { font-size: 13px; color: var(--text-dim); margin: -6px 0 12px; max-width: 900px; line-height: 1.5; }
+  .array-helpers strong { color: var(--text); font-weight: 600; }
+  .array-helpers .k { display: inline-block; min-width: 18px; padding: 0 4px; border-radius: 9px; background: var(--accent-2); color: #061018;
+    font-size: 10px; font-weight: 700; text-align: center; line-height: 16px; margin-right: 3px; }
+  .array-helpers .k.s04 { background: var(--warn); }
+  .array-tap.under span { display: none; }
+  .array-tap.under svg { width: 12px; height: 12px; }
+  .array-drop { position: absolute; border: 2px dashed var(--accent-2); border-radius: 4px; pointer-events: none; box-sizing: border-box; }
+  .array-drop.taken { border-color: var(--warn); }
+  .array-ghost { position: fixed; pointer-events: none; z-index: 50; opacity: 0.85; }
+  .array-tray { width: 210px; flex: none; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-2);
+    padding: 10px; max-height: 72vh; overflow: auto; }
+  .array-tray h3 { margin: 0 0 6px; font-size: 12px; font-weight: 600; color: var(--text-dim); }
+  .array-tray .array-group { margin-bottom: 10px; }
+  .array-tray .array-group-name { font-size: 11px; color: var(--text-dim); margin: 6px 0 4px; }
+  .array-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+  .array-chip { font: inherit; font-size: 11px; padding: 3px 7px; border-radius: 4px; border: 1px solid var(--border);
+    background: #16233d; color: #e8eef8; cursor: grab; touch-action: none; }
+  .array-chip.tap { background: var(--bg-3); color: var(--text); border-color: var(--accent-2); }
+  .array-tray .array-done { font-size: 12px; color: var(--text-dim); }
+  .array-empty { padding: 36px 20px; text-align: center; color: var(--text-dim); font-size: 13px; }
+  .array-empty strong { display: block; color: var(--text); font-size: 15px; margin-bottom: 6px; }
+  .array-scale { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-dim); }
+  .array-scale i { display: inline-block; width: 64px; height: 8px; border-radius: 4px;
+    background: linear-gradient(to right, #16233d, var(--accent)); border: 1px solid var(--border); }
+  .array-help { font-size: 12px; color: var(--text-dim); margin: 10px 0 0; max-width: 760px; }
+  .array-help kbd { font: inherit; font-size: 11px; border: 1px solid var(--border); border-radius: 3px; padding: 0 4px; background: var(--bg-3); }
+  @media (max-width: 760px) {
+    .array-wrap { flex-direction: column; }
+    .array-tray { width: auto; align-self: stretch; max-height: 30vh; }
+  }
   .mesh-stage { display: grid; grid-template-columns: minmax(0, 1fr) 260px; background: var(--bg-2);
                 border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
   .mesh-graph { min-width: 0; }
@@ -867,6 +931,8 @@
   td.tap-model.star-only { color: var(--warn); font-weight: 600; }
   td.tap-radio .tap-sub { font-size: 11px; color: var(--text-dim); }
   td.tap-model .tap-board { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 11px; color: var(--text-dim); font-weight: 400; }
+  table.nodes .node-rating { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; font-size: 11px;
+    color: var(--text-faint); }
   table.nodes .node-tap { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; font-size: 11px;
                          color: var(--text-faint); white-space: nowrap; }
   td.tap-name .input { width: 12em; }
@@ -1548,6 +1614,7 @@
       <div class="page-tabs" role="tablist" aria-label="Topology" id="topology-tabs" data-linux-only style="display:none">
         <button role="tab" id="topology-tab-mesh" aria-controls="topology-mesh" aria-selected="false" data-tab="mesh" tabindex="-1">Mesh</button>
         <button role="tab" id="topology-tab-layout" aria-controls="topology-layout" aria-selected="true" data-tab="layout">Layout</button>
+        <button role="tab" id="topology-tab-array" aria-controls="topology-array" aria-selected="false" data-tab="array" tabindex="-1">Array</button>
       </div>
 
       <div id="topology-layout" role="tabpanel" aria-labelledby="topology-tab-layout">
@@ -1576,6 +1643,24 @@
       <div id="topo-tree" class="topo-tree">
         <div class="topo-empty">Loading topology…</div>
       </div>
+      </div>
+
+      <div id="topology-array" role="tabpanel" aria-labelledby="topology-tab-array" hidden>
+        <div class="topo-toolbar">
+          <span class="array-scale" id="array-scale"><span>0 W</span><i></i><span id="array-scale-max">peak</span></span>
+          <span class="topo-summary" id="array-summary">—</span>
+          <button class="btn" id="array-helpers-btn" aria-pressed="false" style="display:none" title="Which optimizers the TAP leans on, and who holds each of its three schedule streams now">Helpers</button>
+          <button class="btn" id="array-edit-btn">Edit array</button>
+          <button class="btn" id="array-cancel-btn" style="display:none">Cancel</button>
+          <button class="btn primary" id="array-save-btn" style="display:none">Save array</button>
+        </div>
+        <div id="array-error" class="topo-ed-error" role="alert"></div>
+        <div id="array-helpers" class="array-helpers" role="status" style="display:none"></div>
+        <div class="array-wrap">
+          <div class="array-tray" id="array-tray" role="region" aria-label="Not placed yet" style="display:none"></div>
+          <div class="array-scroll" id="array-scroll"><div class="array-canvas" id="array-canvas"></div></div>
+        </div>
+        <p class="array-help" id="array-help" style="display:none">Drag each panel from the list onto the grid where it really sits, and each TAP where it's mounted. Leave empty squares for gaps, such as between arr faces or rows. Select a placed panel to move it with the arrow keys, turn it with <kbd>R</kbd>, or send it back to the list with <kbd>Delete</kbd>. Dropping on another panel swaps the two.</p>
       </div>
 
       <div id="topology-mesh" role="tabpanel" aria-labelledby="topology-tab-mesh" hidden>
@@ -1787,6 +1872,17 @@
         </div>
         <div class="tools-actions" style="margin-top:12px">
           <button class="btn primary" id="pi-port-save">Save</button>
+        </div>
+      </div>
+      <div id="pi-danger" style="display:none">
+        <div class="section-head">
+          <div class="section-title">Dangerous options</div>
+          <div class="section-sub">Turned on in settings.json; this page can't turn them on or off</div>
+        </div>
+        <div class="tools-card">
+          <p class="hint">These change how a TAP schedules its optimizers. The channel, PAN and key stay as they are, but a wrong choice can cost reports until it's set back. Preview first: it reads the TAP and says what would be sent, without sending it. Writing needs Allow changes to the TAPs.</p>
+          <div id="pi-danger-taps"></div>
+          <div class="hint" data-danger-out style="margin-top:10px;white-space:pre-wrap"></div>
         </div>
       </div>
       </div>
@@ -3780,6 +3876,9 @@
 
     const fwByAddr = {};
     for (const o of (nodesData.versions && nodesData.versions.optimizers) || []) fwByAddr[o.addr.toUpperCase()] = o;
+    // Each optimizer's rating, from its own answer to a calibration read.
+    const ratingByAddr = {};
+    for (const o of (nodesData.versions && nodesData.versions.ratings) || []) ratingByAddr[o.addr.toUpperCase()] = o;
     document.querySelector('#view-nodes table.nodes:not(#devices-taps table)').classList.toggle('with-fw', !!nodesData.versions);
     // Settings as each optimizer last answered them, and the answer most of
     // its firmware family give: one that differs is worth a look. Families
@@ -3848,6 +3947,7 @@
       if (filterState && state !== filterState) continue;
 
       const fw = fwByAddr[String(n.addr).toUpperCase()] || null;
+      const rating = ratingByAddr[String(n.addr).toUpperCase()] || null;
       const smart = smartByAddr[String(n.addr).toUpperCase()] || null;
       const fam = smart ? smartFamily(String(n.addr).toUpperCase()) : '';
       const c = smart && smartCount[fam], usual = smart && smartUsual[fam];
@@ -3858,7 +3958,7 @@
       const mppt = mpptByAddr[String(n.addr).toUpperCase()] || null;
       if (smartPeers) Object.assign(smartPeers, { mppt, mpptUsual });
       rows.push({ n, name, addr: n.addr, barcodeKey, barcodeShort, tap: dev?.tap || null,
-                  stringLabel, mpptLabel, v, a, w, t, age, state, fw, smart, differs, smartPeers });
+                  stringLabel, mpptLabel, v, a, w, t, age, state, fw, rating, smart, differs, smartPeers });
     }
 
     // Sort by current column. Numeric columns sort numerically; string
@@ -3917,7 +4017,7 @@
           <td class="num">${fmtTemp(r.t, 0)} ${tempUnit()}</td>
           <td class="num">${fmtAge(r.age)}</td>
           <td><span class="badge ${r.n.known ? 'stale' : r.state}"${r.n.known ? ' title="Marked known: not reporting, not counted, not flagged as missing"' : ''}>${stateLabel}</span></td>
-          <td class="mono fw"${r.fw ? ` title="${topoEscape(fwTitle(r.fw))}"` : ''}>${r.fw ? topoEscape(r.fw.version) : '—'}</td>
+          <td class="mono fw"${r.fw || r.rating ? ` title="${topoEscape([r.fw ? fwTitle(r.fw) : '', r.rating ? ratingTitle(r.rating) : ''].filter(Boolean).join('. '))}"` : ''}>${r.fw ? topoEscape(r.fw.version) : '—'}${r.rating ? `<div class="node-rating">${r.rating.watts} W</div>` : ''}</td>
           <td class="fw smart"${r.smart ? ` title="${topoEscape(smartTitle(r.smart, r.differs, r.smartPeers))}"` : ''}>${r.smart
             ? (r.smartPeers.placeholder ? '<button type="button" aria-haspopup="dialog">Not reported</button>'
               : `<button type="button" aria-haspopup="dialog"${r.smart.stored && !r.differs ? '' : ' style="color:var(--warn)"'}>${r.smart.stored ? 'Stored' : 'Not stored'}${r.differs ? ' · differs' : ''}</button>`) : '—'}</td>
@@ -4107,20 +4207,27 @@
   }
 
   // "Mnode since Jan 1, 12:00, was K8.0120 (2D)": a version's tooltip.
+  // "Rated 75 V, 700 W (ESO075V700W-H461.11.70S0.12)": what the optimizer
+  // says it is, in its answer to a calibration read.
+  function ratingTitle(r) {
+    return `Rated ${r.volts} V, ${r.watts} W (${r.cal})`;
+  }
   function fwTitle(v) {
     const when = ms => new Date(ms).toLocaleString([], { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
     return `${v.model} since ${when(v.since_unix_ms)}` + (v.previous ? `, was ${v.previous}` : '');
   }
   // Optimizers whose settings, MPPT parameters or firmware changed: a CCA
-  // never drifts them, so each is worth a look. The newest five.
+  // never drifts them, so each is worth a look. The newest five of the last
+  // day, as the Home Assistant count: older ones stay in /api/versions.
   function renderChanges() {
     const box = document.getElementById('devices-changes');
-    const changes = ((nodesData.versions || {}).changes || []).slice(0, 5);
+    const since = Date.now() - 24 * 3600 * 1000;
+    const changes = ((nodesData.versions || {}).changes || []).filter(c => c.unix_ms >= since).slice(0, 5);
     box.style.display = changes.length ? '' : 'none';
     if (!changes.length) return;
     const name = a => { const d = (nodesData.devices || []).find(x => String(x.addr).toUpperCase() === a); return d ? d.name : a; };
     const when = ms => new Date(ms).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-    box.innerHTML = `<strong>Settings changed</strong>: an optimizer's settings normally never change, so these are worth a look.<ul>` +
+    box.innerHTML = `<strong>Settings changed</strong> in the last day: an optimizer's settings normally never change, so these are worth a look.<ul>` +
       changes.map(c => `<li>${topoEscape(name(c.addr))} · ${topoEscape(c.what)}: <span class="mono">${topoEscape(c.before)}</span> → ` +
         `<span class="mono">${topoEscape(c.after)}</span> <span style="color:var(--text-dim)">(${when(c.unix_ms)})</span></li>`).join('') + '</ul>';
   }
@@ -4297,14 +4404,14 @@
     retire: ['pick', 'check', 'do', 'done'],
     // Guides: no check or job of their own; each step says what it found.
     system: ['bus', 'tap', 'optimizers', 'layout', 'names', 'done'],
-    addtap: ['prepare', 'connect', 'allow', 'find', 'name', 'done'],
+    addtap: ['connect', 'allow', 'find', 'radio', 'name', 'done'],
     retiretap: ['pick', 'done'],
   };
   const SETUP_STEP_NAMES = { pick: 'Optimizer to remove', label: 'New optimizer', check: 'Review', do: 'Apply',
                              wait: 'Wait for join', done: 'Complete',
                              bus: 'Connect the bus', tap: 'Find the TAP', optimizers: 'Optimizers', layout: 'Lay out the array',
                              names: 'Names and ratings',
-                             prepare: 'Set it up with a CCA', connect: 'Wire it in', allow: 'Allow a new TAP', find: 'Look for TAPs',
+                             radio: 'Radio settings', connect: 'Wire it in', allow: 'Allow a new TAP', find: 'Look for TAPs',
                              name: 'Name it' };
   const SETUP_TITLES = { replace: 'Replace an optimizer', add: 'Add an optimizer', retire: 'Retire an optimizer',
                          system: 'Set up a new system', addtap: 'Add a TAP', retiretap: 'Retire a TAP' };
@@ -4490,7 +4597,7 @@
       ${task('retire', 'Retire an optimizer', 'Permanently remove an optimizer from your system.')}
     </div>
     <h3 class="setup-group">TAPs</h3><div class="setup-tasks">
-      ${task('addtap', 'Add a TAP', 'Bring a TAP a CCA has set up onto the bus, and give it an address and a name.')}
+      ${task('addtap', 'Add a TAP', 'Wire in a new TAP, give it an address and its radio settings, and name it.')}
       ${task('retiretap', 'Retire a TAP', 'Forget a TAP that has gone for good, so it stops showing as not answering.')}
       <div class="setup-task later"><span class="art">${SETUP_ART.replacetap}</span><span class="in"><strong>Replace a TAP</strong>
         <span>Comes after a bench rehearsal: the old TAP's optimizers have to move to the new one.</span></span></div>
@@ -4745,14 +4852,37 @@
     addtap(f, back) {
       const m = setup.data.master, running = setupRunning(m);
       const offBus = '<div class="setup-note info">This TigoMonitor is not running the bus, so it cannot take on a TAP. To do this, set its bus role in Settings → Bus.</div>';
-      if (f.step === 'prepare')
-        return `<h3>Set it up with a CCA</h3>
-          <div class="sub">A new TAP has to be set up by a CCA first: TigoMonitor can't give a TAP its radio settings. Connect the new TAP to a CCA on its own, not on this bus, let the CCA set it up, then unplug the CCA.</div>
-          <div class="setup-actions">${back('Cancel')}${setupNext(f)}</div>`;
       if (f.step === 'connect')
         return `<h3>Wire it in</h3>
           <div class="sub">Wire it onto this bus beside the TAP you have: A to A, B to B and a shared ground, then power it. Until you look for TAPs, polling may stumble if it answers at another TAP's address.</div>
-          <div class="setup-actions">${back()}${setupNext(f)}</div>`;
+          <div class="setup-actions">${back('Cancel')}${setupNext(f)}</div>`;
+      if (f.step === 'radio') {
+        // The TAP's own network: a channel, a network ID (PAN) and a key,
+        // chosen by the daemon and saved on the TAP (tap_config.h).
+        const r = f.radio || {}, writes = !!(m && m.table && m.table.writes);
+        const ch = (r.given || '').match(/channel (\d+)/), pan = (r.given || '').match(/PAN ([0-9A-F]{4})/);
+        const cap = (r.given || '').match(/for up to (\d+) optimizers/);
+        let state;
+        if (r.phase === 'checking') state = '<div class="setup-line">Reading its radio settings…</div>';
+        else if (r.phase === 'writing') state = '<div class="setup-line">Giving it its settings…</div>';
+        else if (r.phase === 'done') state = `<div class="setup-check good">✓ Given and saved: TAP ${topoEscape(f.found)} now runs channel ${ch ? ch[1] : '?'}, and has saved its settings. Its optimizers join this network once they are on its list.</div>`;
+        else if (r.phase === 'failed') state = `<div class="setup-error">${topoEscape(r.message || 'Not given.')}</div>`;
+        else state = '';
+        const plan = r.phase === 'checked' || r.phase === 'writing' || r.phase === 'done'
+          ? `<div class="setup-found"><div><strong>Channel ${ch ? ch[1] : '?'}</strong><span>at least two from your other TAPs'</span></div>
+             <div><strong>Network ID ${pan ? pan[1] : '?'}</strong><span>made from this TigoMonitor's own</span></div>
+             <div><strong>A new network key</strong><span>made here, never shown</span></div>
+             ${cap ? `<div><strong>For up to ${cap[1]} optimizers</strong><span>its own profile if it had one; running this step again changes nothing else</span></div>` : ''}</div>` : '';
+        const act = !running ? offBus
+          : r.phase === 'checked' ? (writes ? `<div class="setup-actions"><button type="button" class="btn task-go" data-setup-radio-go>Give it these settings</button></div>`
+            : '<div class="setup-note info">To give it these settings, turn on <strong>Allow changes to the TAPs</strong> in Settings → Bus.</div>')
+          : r.phase === 'checking' || r.phase === 'writing' || r.phase === 'done' ? ''
+          : `<div class="setup-actions"><button type="button" class="btn task-go" data-setup-radio-check>${r.phase === 'failed' ? 'Check again' : 'Check'}</button></div>`;
+        return `<h3>Give it its radio settings</h3>
+          <div class="sub">A new TAP needs its own radio network for its optimizers to join: a channel, a network ID and a key. TigoMonitor chooses them and the TAP saves them. The check only reads.</div>
+          ${plan}${state}${act}
+          <div class="setup-actions">${back()}${setupNext(f, r.phase === 'done')}</div>`;
+      }
       if (f.step === 'allow') {
         const on = !!(m && m.adopt_taps);
         return `<h3>Allow a new TAP<span class="setup-state ${on ? 'ok' : 'todo'}">${on ? 'On' : 'Off'}</span></h3>
@@ -4905,6 +5035,20 @@
       if (f.step === 'do' && e.kind && e.started_unix >= f.startedAt && !e.dry_run && e.finished && e.ok)
         f.step = f.task === 'retire' ? 'done' : (t.waiting || []).some(x => x.mac === f.mac) ? 'wait' : 'done';
       if (f.step === 'wait' && (t.joins || []).some(x => x.mac === f.mac && x.joined && x.unix >= f.startedAt)) f.step = 'done';
+      // The radio step's job: the check gives the plan, the real one the result.
+      if (f.task === 'addtap' && f.radio && (f.radio.phase === 'checking' || f.radio.phase === 'writing')) {
+        const e = setupJob();
+        if (Date.now() / 1000 - f.radio.at > 90 && !(e.kind === 'provision' && e.finished && e.started_unix >= f.radio.at)) {
+          f.radio.phase = 'failed';
+          f.radio.message = 'No result after 90 seconds. Check that the TAP is answering, then try again.';
+        } else if (e.kind === 'provision' && e.finished && e.started_unix >= f.radio.at) {
+          if (!e.ok) { f.radio.phase = 'failed'; f.radio.message = e.message; }
+          else if (f.radio.phase === 'checking') {
+            f.radio.phase = 'checked';
+            f.radio.given = String(e.message || '').replace(/^dry run: would give the TAP /, '');
+          } else f.radio.phase = 'done';
+        }
+      }
       if (f.task === 'addtap' && f.looking && !f.found) {
         const m = setup.data.master, fresh = setupTaps().find(x => !(f.before || []).includes(x.id) && x.state === 'running');
         if (m && m.phase === 'running' && fresh) f.found = fresh.id;
@@ -4917,7 +5061,8 @@
       renderSetup();
       if (f && f.task === 'system' && f.step === 'bus') setupFillSerial();
     }
-    const busy = f && (f.step === 'check' || f.step === 'do' || f.step === 'wait' || f.step === 'done' || (f.looking && !f.found));
+    const busy = f && (f.step === 'check' || f.step === 'do' || f.step === 'wait' || f.step === 'done' || (f.looking && !f.found) ||
+                       (f.radio && (f.radio.phase === 'checking' || f.radio.phase === 'writing')));
     if (document.getElementById('view-setup').classList.contains('active'))
       setup.timer = setTimeout(refreshSetup, busy ? 1500 : 10000);
   }
@@ -4992,12 +5137,29 @@
       }
       return refreshSetup(true);
     }
+    // Add a TAP's radio step: the check (a dry run), then the real one, to
+    // the TAP the guide found. The daemon chooses the channel and PAN.
+    if (b.hasAttribute('data-setup-radio-check') || b.hasAttribute('data-setup-radio-go')) {
+      const go = b.hasAttribute('data-setup-radio-go');
+      const tap = setupTaps().find(x => x.id === f.found);
+      if (!tap || !tap.mac) return showToast('TAP ' + f.found + ' has not said its MAC yet; look for TAPs again', 'err');
+      b.disabled = true;
+      f.radio = { ...(f.radio || {}), phase: go ? 'writing' : 'checking', at: Math.floor(Date.now() / 1000) - 1 };
+      try {
+        await setupPost('/api/master/taps/provision', { mac: tap.mac, dry_run: !go });
+      } catch (err) {
+        f.radio.phase = 'failed';
+        f.radio.message = err.message;
+      }
+      return refreshSetup(true);
+    }
     if (b.hasAttribute('data-setup-look')) {
       if (!(await uiAsk({ title: 'Look for TAPs?', body: 'Every TAP on the bus is brought up again, and polling stops for about 30 seconds.',
                           ok: 'Look for TAPs' }))) return;
       b.disabled = true;
       f.before = setupTaps().map(t => t.id);
       f.found = '';
+      f.radio = null;  // a result belongs to the TAP it was for
       f.lookedAt = Date.now();
       try {
         await setupPost('/api/master/taps/herd', {});
@@ -6251,6 +6413,83 @@
   });
 
   // ===== Raspberry Pi settings (linux/ build) =====
+  // Dangerous options: a TAP's radio profile and report period, shown only
+  // with "dangerous_options": true in settings.json, on a TigoMonitor that
+  // runs the bus.
+  const DANGER_PERIODS = [[1, '1 s'], [2, '2 s'], [3, '3 s'], [4, '4 s'], [5, '5 s'], [6, '6 s'], [7, '10 s'],
+                          [8, '12 s'], [9, '15 s'], [10, '20 s'], [11, '30 s']];
+  const DANGER_PROFILES = [[40, '40 optimizers (12-2-2-1)'], [75, '75 optimizers (14-2-2-1)'],
+                           [120, '120 optimizers (20-2-2-1)'], [300, '300 optimizers (24-4-2-1)']];
+  let dangerOn = false;
+  const dangerEsc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  async function piDangerRefresh(s) {
+    dangerOn = !!(s && s.dangerous_options && s.bus_role && s.bus_role !== 'listen');
+    const card = document.getElementById('pi-danger');
+    card.style.display = dangerOn ? '' : 'none';
+    if (!dangerOn) return;
+    let taps = [];
+    const live = {};  // the profile each TAP runs, from its last live read
+    try {
+      const r = await apiFetch('/api/master');
+      if (r.ok) taps = ((await r.json()).taps || []).filter(t => t.mac);
+      const v = await apiFetch('/api/versions');
+      if (v.ok) for (const x of ((await v.json()).radios || [])) if (x.profile) live[x.tap] = x.profile;
+    } catch (e) { /* drawn empty, or with the usual default, below */ }
+    const opts = (list, pick) => list.map(([v, t]) => `<option value="${v}"${v === pick ? ' selected' : ''}>${dangerEsc(t)}</option>`).join('');
+    document.getElementById('pi-danger-taps').innerHTML = taps.length ? taps.map(t => `
+      <div data-danger-tap="${dangerEsc(t.mac)}" style="border-top:1px solid var(--border);padding-top:10px;margin-top:10px">
+        <div style="font-weight:600;margin:0 0 10px">TAP ${dangerEsc(t.id)}</div>
+        <div class="cfg-row">
+          <div class="cfg-text"><strong>Radio profile</strong><span>How many optimizers its schedule is planned for. ${live[t.id] ? `It runs ${live[t.id]} now` : 'Preview shows what it has now'}</span></div>
+          <div class="cfg-ctrl"><select class="cfg-input" data-danger-profile>${opts(DANGER_PROFILES, live[t.id] || 75)}</select>
+            <button class="btn" data-danger="profile-preview">Preview</button> <button class="btn danger" data-danger="profile-write">Write</button></div>
+        </div>
+        <div class="cfg-row">
+          <div class="cfg-text"><strong>Report period</strong><span>How often each optimizer reports. Preview shows what it has now</span></div>
+          <div class="cfg-ctrl"><select class="cfg-input" data-danger-period>${opts(DANGER_PERIODS, 3)}</select>
+            <button class="btn" data-danger="period-preview">Preview</button> <button class="btn danger" data-danger="period-write">Write</button></div>
+        </div>
+      </div>`).join('') : '<p class="hint">No TAP is running on the bus yet.</p>';
+  }
+  document.getElementById('pi-danger').addEventListener('click', async ev => {
+    const b = ev.target.closest('button[data-danger]');
+    if (!b) return;
+    const row = b.closest('[data-danger-tap]');
+    const out = document.querySelector('#pi-danger [data-danger-out]');
+    const [what, mode] = b.dataset.danger.split('-');
+    const dry = mode === 'preview';
+    const mac = row.dataset.dangerTap;
+    const profile = Number(row.querySelector('[data-danger-profile]').value);
+    const code = Number(row.querySelector('[data-danger-period]').value);
+    const label = what === 'profile' ? DANGER_PROFILES.find(p => p[0] === profile)[1] : DANGER_PERIODS.find(p => p[0] === code)[1];
+    if (!dry && !(await uiAsk(what === 'profile'
+          ? { title: `Write the radio profile for ${label}?`, tone: 'danger', ok: 'Write profile',
+              body: 'The TAP keeps its channel, PAN and key, and re-slots its optimizers. A wrong profile can cost reports until it\'s set back.' }
+          : { title: `Set the report period to ${label}?`, tone: 'danger', ok: 'Set period',
+              body: 'Every optimizer on this TAP reports at the new rate.' }))) return;
+    const path = what === 'profile' ? '/api/master/taps/provision' : '/api/master/taps/period';
+    const body = what === 'profile' ? { mac, keep_network: true, profile, dry_run: dry } : { mac, code, dry_run: dry };
+    row.querySelectorAll('button').forEach(x => { x.disabled = true; });
+    out.textContent = dry ? 'Reading the TAP…' : 'Writing…';
+    try {
+      const r = await apiFetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || `refused (${r.status})`);
+      let e = {};
+      for (let i = 0; i < 120; i++) {
+        const m = await (await apiFetch('/api/master')).json();
+        e = (m.table && m.table.edit) || {};
+        if (e.finished && e.kind === (what === 'profile' ? 'provision' : 'period')) break;
+        await new Promise(res => setTimeout(res, 500));
+      }
+      out.textContent = e.finished ? `${e.ok ? '' : 'Failed: '}${e.message}` : 'No answer yet; check the Bus log.';
+    } catch (err) {
+      out.textContent = `Refused: ${err.message}`;
+    } finally {
+      row.querySelectorAll('button').forEach(x => { x.disabled = false; });
+    }
+  });
+
   async function refreshPiSettings() {
     try {
       const r = await apiFetch('/api/settings');
@@ -6282,6 +6521,7 @@
       document.getElementById('pi-morning').value = s.discovery_morning_min ?? 120;
       document.getElementById('pi-takeover-row').style.display = piBusRole === 'standby' ? '' : 'none';
       document.getElementById('pi-tablewrites').checked = !!s.master_table_writes;
+      piDangerRefresh(s);
       document.getElementById('pi-tablewrites').nextElementSibling.textContent = s.master_table_writes ? 'On' : 'Off';
       piFillCca(s);
       for (const row of PI_MASTER_ROWS) document.getElementById(row).style.display = piBusRole !== 'listen' ? '' : 'none';
@@ -7686,7 +7926,7 @@
     if (!name) { try { name = localStorage.getItem('topology-tab'); } catch (e) {} }
     // The Pi opens on Mesh unless Layout was picked; the ESP32 has only Layout.
     if (PLATFORM !== 'linux') name = 'layout';
-    else if (name !== 'layout') name = 'mesh';
+    else if (name !== 'layout' && name !== 'array') name = 'mesh';
     document.querySelectorAll('#topology-tabs [role="tab"]').forEach(t => {
       const on = t.dataset.tab === name;
       t.setAttribute('aria-selected', String(on));
@@ -7695,6 +7935,7 @@
     });
     // Fetched only when it's on screen, not for a tab remembered from before.
     if (name === 'mesh' && document.getElementById('view-topology').classList.contains('active')) refreshMesh();
+    if (name === 'array' && document.getElementById('view-topology').classList.contains('active')) refreshArray();
   }
   document.querySelectorAll('#topology-tabs [role="tab"]').forEach(t => t.addEventListener('click', () => {
     topologyTab(t.dataset.tab);
@@ -7713,7 +7954,368 @@
   platformReady.then(() => topologyTab());
   document.querySelector('#nav button[data-view="topology"]').addEventListener('click', () => {
     if (!document.getElementById('topology-mesh').hidden) refreshMesh();
+    if (!document.getElementById('topology-array').hidden) refreshArray();
   });
+
+  // ---- the array: each panel where it sits, coloured by its power ----
+  // Topology > Array (Pi). /api/array holds the positions (one grid cell per
+  // panel; touching cells are neighbours on the arr), /api/devices the
+  // live power. Edit array opens a tray of what isn't placed yet.
+  const arr = { saved: { panels: [], taps: [] }, draft: null, devices: [], tapNames: {}, sel: null, loaded: false, helpers: false, pgw: {}, pgwAt: 0 };
+  const ARRAY_PANEL_BASE = '#16233d';
+  const ARRAY_MARGIN = 3;  // empty squares round the drawing while editing
+  const arrayEsc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const arrayCell = () => (window.innerWidth < 760 ? 40 : 48);
+  const ARRAY_TAP_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">' +
+    '<path d="M12 13v8"/><circle cx="12" cy="11" r="2"/><path d="M8.5 7.5a5 5 0 0 0 0 7"/><path d="M15.5 7.5a5 5 0 0 1 0 7"/>' +
+    '<path d="M5.6 4.6a9 9 0 0 0 0 12.8"/><path d="M18.4 4.6a9 9 0 0 1 0 12.8"/></svg>';
+
+  async function refreshArray(devicesOnly) {
+    try {
+      const jobs = [apiFetch('/api/devices').then(r => r.ok ? r.json() : { devices: [] }),
+                    apiFetch('/api/master').then(r => r.ok ? r.json() : {}).catch(() => ({}))];
+      if (!devicesOnly) {
+        jobs.push(apiFetch('/api/array').then(r => { if (!r.ok) throw new Error(`/api/array ${r.status}`); return r.json(); }));
+        jobs.push(apiFetch('/api/mesh').then(r => r.ok ? r.json() : {}).catch(() => ({})));
+      }
+      const [dev, master, saved, mesh] = await Promise.all(jobs);
+      arr.devices = (dev && dev.devices) || [];
+      // The TAP's helpers (the 0x41 PGW streams), from a TigoMonitor running the bus.
+      arr.pgw = {};
+      ((master && master.active !== false && master.taps) || []).forEach(t => { if (t.pgw) arr.pgw[t.id] = t.pgw; });
+      arr.pgwAt = Date.now();
+      if (saved) { arr.saved = { panels: saved.panels || [], taps: saved.taps || [] }; arr.loaded = true; }
+      if (mesh && mesh.taps) mesh.taps.forEach(t => { arr.tapNames[t.id] = t.name || ''; });
+      document.getElementById('array-error').textContent = '';
+    } catch (e) {
+      document.getElementById('array-error').textContent = `Couldn't load the array: ${e.message}`;
+    }
+    arrayRender();
+  }
+  // Every TAP a panel reports through, plus any placed or named.
+  function arrayTapIds() {
+    const ids = new Set(Object.keys(arr.tapNames));
+    arr.devices.forEach(d => { if (d.tap) ids.add(d.tap); });
+    (arr.draft || arr.saved).taps.forEach(t => ids.add(t.id));
+    return [...ids].sort();
+  }
+  const arrayTapLabel = id => arr.tapNames[id] ? `${arr.tapNames[id]}` : `TAP ${id}`;
+  // What of one kind is in a square. A TAP can share a square with a panel
+  // (it's often mounted under one); two panels or two TAPs can't.
+  function arrayAt(l, kind, x, y) {
+    return (kind === 'panel' ? l.panels : l.taps).find(i => i.x === x && i.y === y) || null;
+  }
+  function arrayFree(l, kind) {
+    for (let y = 0; y < 200; y++) for (let x = 0; x < 16; x++) if (!arrayAt(l, kind, x, y)) return { x, y };
+    return { x: 0, y: 0 };
+  }
+
+  function arrayRender() {
+    const editing = !!arr.draft;
+    const l = editing ? arr.draft : arr.saved;
+    const canvas = document.getElementById('array-canvas');
+    const C = arrayCell();
+    canvas.style.setProperty('--array-cell', `${C}px`);
+    canvas.classList.toggle('editing', editing);
+    const byAddr = Object.fromEntries(arr.devices.map(d => [String(d.addr).toUpperCase(), d]));
+    const peak = Math.max(1, ...arr.devices.map(d => d.peak_power || d.power || 0));
+    document.getElementById('array-scale-max').textContent = `${Math.round(peak)} W`;
+    document.getElementById('array-scale').style.display = editing ? 'none' : '';
+    document.getElementById('array-tray').style.display = editing ? '' : 'none';
+    document.getElementById('array-help').style.display = editing ? '' : 'none';
+    document.getElementById('array-edit-btn').style.display = editing ? 'none' : '';
+    document.getElementById('array-cancel-btn').style.display = editing ? '' : 'none';
+    document.getElementById('array-save-btn').style.display = editing ? '' : 'none';
+    const placed = new Set(l.panels.map(p => p.addr));
+    const known = arr.devices.length;
+    document.getElementById('array-summary').textContent = known || l.panels.length
+      ? `${l.panels.filter(p => byAddr[p.addr]).length} of ${known} panels placed${l.taps.length ? ` · ${l.taps.length} TAP${l.taps.length > 1 ? 's' : ''}` : ''}`
+      : '—';
+    const all = [...l.panels, ...l.taps];
+    if (!editing && !all.length) {
+      canvas.style.width = canvas.style.height = '';
+      canvas.innerHTML = '<div class="array-empty"><strong>No array drawn yet</strong>Choose Edit array and place each panel where it really sits, and each TAP where it\'s mounted. ' +
+        'Then this shows every panel\'s power in place, so a shaded corner or one dropping out stands out.</div>';
+      arrayRenderTray(byAddr, placed);
+      return;
+    }
+    const xs = all.map(i => i.x), ys = all.map(i => i.y);
+    // Editing, ARRAY_MARGIN empty squares on every side, so the drawing can
+    // grow in any direction (arrayNormalize shifts it back to 0,0).
+    const pad = editing && xs.length ? ARRAY_MARGIN : 0;
+    const ox = (xs.length ? Math.min(...xs) : 0) - pad, oy = (ys.length ? Math.min(...ys) : 0) - pad;
+    const cols = editing ? Math.max(16, (xs.length ? Math.max(...xs) : 0) - ox + 1 + ARRAY_MARGIN) : Math.max(...xs) - ox + 1;
+    const rows = editing ? Math.max(10, (ys.length ? Math.max(...ys) : 0) - oy + 1 + ARRAY_MARGIN) : Math.max(...ys) - oy + 1;
+    arr.ox = ox; arr.oy = oy;
+    canvas.style.width = `${cols * C}px`;
+    canvas.style.height = `${rows * C}px`;
+    const tab = editing ? ' tabindex="0"' : '';
+    let html = '';
+    for (const p of l.panels) {
+      const d = byAddr[p.addr];
+      const name = d ? (d.name || p.addr) : p.addr;
+      const w = d && !d.stale ? Math.round(d.power || 0) : null;
+      const frac = w == null ? 0 : Math.max(0, Math.min(1, w / peak));
+      const tw = Math.round(C * (p.portrait ? 0.7 : 0.92)), th = Math.round(C * (p.portrait ? 0.92 : 0.64));
+      const left = (p.x - ox) * C + (C - tw) / 2, top = (p.y - oy) * C + (C - th) / 2;
+      const tip = `${name}${d && d.string_label ? ` · ${d.string_label}` : ''}${w == null ? (d ? ' · no recent report' : ' · not heard') : ` · ${w} W`}`;
+      const helps = !editing && arr.helpers ? arrayHelps(p.addr) : null;
+      html += `<div class="array-tile${frac > 0.55 ? ' lit' : ''}${w == null ? ' stale' : ''}${helps && helps.pool ? ' pool' : ''}${arr.sel === 'p' + p.addr ? ' sel' : ''}" data-kind="panel" data-id="${arrayEsc(p.addr)}"${tab}
+        role="${editing ? 'button' : 'img'}" aria-label="${arrayEsc(tip)}" title="${arrayEsc(tip)}"
+        style="left:${left}px;top:${top}px;width:${tw}px;height:${th}px;background-color:color-mix(in srgb, var(--accent) ${Math.round(frac * 100)}%, ${ARRAY_PANEL_BASE})">
+        <span class="rn">${arrayEsc(name)}</span>${w == null || C < 44 ? '' : `<span class="rw">${w} W</span>`}${helps ? arrayBadges(helps.holds) : ''}</div>`;
+    }
+    for (const t of l.taps) {
+      // Under a panel: small, in the corner of the panel's square.
+      const under = l.panels.some(p => p.x === t.x && p.y === t.y);
+      const s = Math.round(C * (under ? 0.46 : 0.8));
+      const left = (t.x - ox) * C + (under ? C - s - 1 : (C - s) / 2), top = (t.y - oy) * C + (under ? C - s - 1 : (C - s) / 2);
+      html += `<div class="array-tap${under ? ' under' : ''}${arr.sel === 't' + t.id ? ' sel' : ''}" data-kind="tap" data-id="${arrayEsc(t.id)}"${tab}
+        role="${editing ? 'button' : 'img'}" aria-label="${arrayEsc(arrayTapLabel(t.id))}" title="${arrayEsc(arrayTapLabel(t.id))}"
+        style="left:${left}px;top:${top}px;width:${s}px;height:${s}px">${ARRAY_TAP_ICON}<span>${arrayEsc(t.id)}</span>${!editing && arr.helpers ? arrayBadges(arrayHelps('0001', t.id).holds) : ''}</div>`;
+    }
+    canvas.innerHTML = html;
+    arrayRenderTray(byAddr, placed);
+    arrayRenderHelpers(byAddr);
+  }
+
+  // The helpers overlay. Each TAP gives three schedule streams to
+  // optimizers in turn (the 0x41s): 01 and 02 to the TAP itself and a pool
+  // of four, 04 to everyone else. A panel's pool and streams, for the TAP it
+  // reports through; addr 0001 is the TAP itself (tapId says which).
+  function arrayHelps(addr, tapId) {
+    const out = { pool: false, holds: [] };
+    for (const [id, g] of Object.entries(arr.pgw)) {
+      if (addr === '0001' && id !== tapId) continue;
+      if ((g.pool || []).includes(addr)) out.pool = true;
+      for (const s of ['01', '02', '04']) if (g.holders && g.holders[s] === addr) out.holds.push(s);
+    }
+    return out;
+  }
+  function arrayBadges(holds) {
+    return holds.map((s, i) => `<span class="array-badge s${s}" style="right:${-8 + i * 20}px">${s}</span>`).join('');
+  }
+  function arrayRenderHelpers(byAddr) {
+    const btn = document.getElementById('array-helpers-btn'), box = document.getElementById('array-helpers');
+    const any = Object.keys(arr.pgw).length > 0;
+    btn.style.display = any && !arr.draft ? '' : 'none';
+    btn.setAttribute('aria-pressed', String(arr.helpers));
+    btn.classList.toggle('primary', arr.helpers);
+    box.style.display = any && arr.helpers && !arr.draft ? '' : 'none';
+    if (!any || !arr.helpers) return;
+    const nameOf = a => a === '0001' ? 'the TAP' : (byAddr[a] && byAddr[a].name) || a;
+    const RULE = {
+      array: n => `the ${n} placed farthest from the TAP on this drawing`,
+      named: n => `the ${n} named in the settings (pgw_panels)`,
+      loss: n => `the ${n} losing the most reports today, as no layout places this TAP`,
+      none: () => 'nobody yet: no optimizers reported through it',
+      random: () => 'any optimizer, drawn in turn',
+    };
+    const left = s => { const t = Math.max(0, s - Math.round((Date.now() - arr.pgwAt) / 1000)); return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`; };
+    box.innerHTML = Object.entries(arr.pgw).map(([id, g]) => {
+      const pool = (g.pool || []).map(nameOf).join(', ');
+      const why = (RULE[g.rule] || RULE.random)(`${(g.pool || []).length || 'four'}`);
+      const now = ['01', '02', '04'].map(s => `<span class="k s${s}">${s}</span>${arrayEsc(g.holders && g.holders[s] ? nameOf(g.holders[s]) : '—')}`).join(' &nbsp; ');
+      return `<div><strong>${arrayEsc(arrayTapLabel(id))}</strong>: ${g.sending ? '' : '<strong>not sending</strong> (master_send_41 is off); '}` +
+        `streams 01 and 02 take turns through the TAP and ${arrayEsc(why)}${pool ? ` (${arrayEsc(pool)}, outlined)` : ''}; 04 goes through everyone else in order.` +
+        (g.sending ? `<br>Now: ${now} &nbsp;·&nbsp; next turn in <span data-turn="${g.turn_left_s}">${left(g.turn_left_s)}</span>` : '') + '</div>';
+    }).join('');
+  }
+  document.getElementById('array-helpers-btn').addEventListener('click', () => {
+    arr.helpers = !arr.helpers;
+    try { localStorage.setItem('array-helpers', arr.helpers ? '1' : ''); } catch (e) {}
+    arrayRender();
+  });
+  try { arr.helpers = localStorage.getItem('array-helpers') === '1'; } catch (e) {}
+  // The countdown, between fetches; a turn ending fetches the new holders.
+  setInterval(() => {
+    const spans = document.querySelectorAll('#array-helpers [data-turn]');
+    let due = false;
+    spans.forEach(sp => {
+      const t = Math.max(0, Number(sp.dataset.turn) - Math.round((Date.now() - arr.pgwAt) / 1000));
+      sp.textContent = `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`;
+      if (t === 0) due = true;
+    });
+    if (due && !arr.draft && !document.getElementById('topology-array').hidden) refreshArray(true);
+  }, 1000);
+
+  function arrayRenderTray(byAddr, placed) {
+    const tray = document.getElementById('array-tray');
+    if (!arr.draft) { tray.innerHTML = ''; return; }
+    const groups = {};
+    arr.devices.filter(d => !placed.has(String(d.addr).toUpperCase())).forEach(d => {
+      const g = d.string_label || 'No string';
+      (groups[g] = groups[g] || []).push(d);
+    });
+    const taps = arrayTapIds().filter(id => !arr.draft.taps.some(t => t.id === id));
+    const nat = (a, b) => String(a.name || a.addr).localeCompare(String(b.name || b.addr), undefined, { numeric: true });
+    let html = '<h3>Not placed yet</h3>';
+    if (taps.length) html += `<div class="array-group"><div class="array-group-name">TAPs</div><div class="array-chips">${
+      taps.map(id => `<button type="button" class="array-chip tap" data-kind="tap" data-id="${arrayEsc(id)}" title="${arrayEsc(arrayTapLabel(id))}">${arrayEsc(arrayTapLabel(id))}</button>`).join('')}</div></div>`;
+    Object.keys(groups).sort((a, b) => a.localeCompare(b, undefined, { numeric: true })).forEach(g => {
+      html += `<div class="array-group"><div class="array-group-name">${arrayEsc(g)}</div><div class="array-chips">${
+        groups[g].sort(nat).map(d => `<button type="button" class="array-chip" data-kind="panel" data-id="${arrayEsc(String(d.addr).toUpperCase())}">${arrayEsc(d.name || d.addr)}</button>`).join('')}</div></div>`;
+    });
+    if (!taps.length && !Object.keys(groups).length) html += '<p class="array-done">Everything is placed. Drag a panel here to take it off the array.</p>';
+    tray.innerHTML = html;
+  }
+
+  // Put kind/id at x,y in the draft: a panel dropped on a panel swaps with it;
+  // nothing lands on a TAP, nor a TAP on anything. Returns whether it moved.
+  function arrayPlace(kind, id, x, y) {
+    const l = arr.draft;
+    if (x < -ARRAY_MARGIN || y < -ARRAY_MARGIN || x > 199 || y > 199) return false;
+    const list = kind === 'panel' ? l.panels : l.taps;
+    const key = kind === 'panel' ? 'addr' : 'id';
+    const me = list.find(i => i[key] === id);
+    const there = arrayAt(l, kind, x, y);
+    if (there === me && me) return false;
+    if (there) {
+      if (kind !== 'panel') return false;
+      if (me) { there.x = me.x; there.y = me.y; } else l.panels = l.panels.filter(p => p !== there);
+    }
+    if (me) { me.x = x; me.y = y; } else list.push(kind === 'panel' ? { addr: id, x, y, portrait: true } : { id, x, y });
+    arrayNormalize(l);
+    return true;
+  }
+  // Placed above or left of everything: shift the whole drawing so its top
+  // left is 0,0 again (the saved squares are 0-199).
+  function arrayNormalize(l) {
+    const all = [...l.panels, ...l.taps];
+    if (!all.length) return;
+    const dx = Math.min(...all.map(i => i.x)), dy = Math.min(...all.map(i => i.y));
+    if (dx || dy) all.forEach(i => { i.x -= dx; i.y -= dy; });
+  }
+  function arrayUnplace(kind, id) {
+    const l = arr.draft;
+    if (kind === 'panel') l.panels = l.panels.filter(p => p.addr !== id); else l.taps = l.taps.filter(t => t.id !== id);
+    arr.sel = null;
+    arrayNormalize(l);
+  }
+
+  document.getElementById('array-edit-btn').addEventListener('click', async () => {
+    if (!arr.loaded) await refreshArray();
+    arr.draft = JSON.parse(JSON.stringify(arr.saved));
+    arr.sel = null;
+    arrayRender();
+  });
+  document.getElementById('array-cancel-btn').addEventListener('click', () => {
+    arr.draft = null; arr.sel = null;
+    document.getElementById('array-error').textContent = '';
+    arrayRender();
+  });
+  document.getElementById('array-save-btn').addEventListener('click', async () => {
+    const btn = document.getElementById('array-save-btn');
+    btn.disabled = true;
+    try {
+      const r = await apiFetch('/api/array', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(arr.draft) });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || `refused (${r.status})`);
+      arr.saved = arr.draft; arr.draft = null; arr.sel = null;
+      document.getElementById('array-error').textContent = '';
+      showToast('Array saved ✓', 'ok');
+      arrayRender();
+    } catch (e) {
+      document.getElementById('array-error').textContent = `Not saved: ${e.message}`;
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  // Dragging, by pointer (mouse, pen or touch): from the tray or the grid,
+  // onto a cell or back onto the tray. A press without a drag selects.
+  let arrayDrag = null;
+  function arrayCellAt(ev) {
+    const r = document.getElementById('array-canvas').getBoundingClientRect(), C = arrayCell();
+    if (ev.clientX < r.left || ev.clientY < r.top || ev.clientX >= r.right || ev.clientY >= r.bottom) return null;
+    return { x: Math.floor((ev.clientX - r.left) / C) + arr.ox, y: Math.floor((ev.clientY - r.top) / C) + arr.oy };
+  }
+  function arrayOverTray(ev) {
+    const r = document.getElementById('array-tray').getBoundingClientRect();
+    return ev.clientX >= r.left && ev.clientX < r.right && ev.clientY >= r.top && ev.clientY < r.bottom;
+  }
+  function arrayDropMark(cell, ok) {
+    const canvas = document.getElementById('array-canvas');
+    let m = canvas.querySelector('.array-drop');
+    if (!cell) { if (m) m.remove(); return; }
+    if (!m) { m = document.createElement('div'); m.className = 'array-drop'; canvas.appendChild(m); }
+    const C = arrayCell();
+    Object.assign(m.style, { left: `${(cell.x - arr.ox) * C}px`, top: `${(cell.y - arr.oy) * C}px`, width: `${C}px`, height: `${C}px` });
+    m.classList.toggle('taken', !ok);
+  }
+  function arrayDropOk(cell) {
+    if (!cell || !arrayDrag) return false;
+    const there = arrayAt(arr.draft, arrayDrag.kind, cell.x, cell.y);
+    if (!there) return true;
+    const mine = arrayDrag.kind === 'panel' ? there.addr === arrayDrag.id : there.id === arrayDrag.id;
+    return mine || arrayDrag.kind === 'panel';
+  }
+  ['array-canvas', 'array-tray'].forEach(where => document.getElementById(where).addEventListener('pointerdown', ev => {
+    if (!arr.draft || ev.button > 0) return;
+    const el = ev.target.closest('[data-kind]');
+    if (!el) { if (arr.sel) { arr.sel = null; arrayRender(); } return; }
+    ev.preventDefault();
+    arrayDrag = { kind: el.dataset.kind, id: el.dataset.id, x0: ev.clientX, y0: ev.clientY, el, ghost: null, fromTray: where === 'array-tray' };
+  }));
+  document.addEventListener('pointermove', ev => {
+    if (!arrayDrag) return;
+    if (!arrayDrag.ghost) {
+      if (Math.hypot(ev.clientX - arrayDrag.x0, ev.clientY - arrayDrag.y0) < 5) return;
+      const g = arrayDrag.el.cloneNode(true);
+      g.classList.add('array-ghost'); g.classList.remove('sel');
+      const r = arrayDrag.el.getBoundingClientRect();
+      Object.assign(g.style, { width: `${r.width}px`, height: `${r.height}px`, left: '0', top: '0' });
+      document.body.appendChild(g);
+      arrayDrag.ghost = g; arrayDrag.w = r.width; arrayDrag.h = r.height;
+    }
+    arrayDrag.ghost.style.transform = `translate(${ev.clientX - arrayDrag.w / 2}px, ${ev.clientY - arrayDrag.h / 2}px)`;
+    const cell = arrayCellAt(ev);
+    arrayDropMark(cell, arrayDropOk(cell));
+  });
+  document.addEventListener('pointerup', ev => {
+    if (!arrayDrag) return;
+    const d = arrayDrag;
+    arrayDrag = null;
+    arrayDropMark(null);
+    if (!d.ghost) {  // a press: select what's on the grid; place what's in the tray
+      if (d.fromTray) { const f = arrayFree(arr.draft, d.kind); arrayPlace(d.kind, d.id, f.x, f.y); }
+      arr.sel = (d.kind === 'panel' ? 'p' : 't') + d.id;
+      arrayRender();
+      const back = document.querySelector(`#array-canvas [data-kind="${d.kind}"][data-id="${d.id}"]`);
+      if (back) back.focus();
+      return;
+    }
+    d.ghost.remove();
+    const cell = arrayCellAt(ev);
+    if (arrayOverTray(ev) && !d.fromTray) arrayUnplace(d.kind, d.id);
+    else if (cell) arrayPlace(d.kind, d.id, cell.x, cell.y);
+    arrayRender();
+  });
+  document.getElementById('array-canvas').addEventListener('keydown', ev => {
+    if (!arr.draft) return;
+    const el = ev.target.closest('[data-kind]');
+    if (!el) return;
+    const kind = el.dataset.kind, id = el.dataset.id;
+    const item = kind === 'panel' ? arr.draft.panels.find(p => p.addr === id) : arr.draft.taps.find(t => t.id === id);
+    if (!item) return;
+    const step = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[ev.key];
+    if (step) arrayPlace(kind, id, item.x + step[0], item.y + step[1]);
+    else if ((ev.key === 'r' || ev.key === 'R') && kind === 'panel') item.portrait = !item.portrait;
+    else if (ev.key === 'Delete' || ev.key === 'Backspace') arrayUnplace(kind, id);
+    else if (ev.key === 'Escape') arr.sel = null;
+    else return;
+    ev.preventDefault();
+    if (ev.key !== 'Delete' && ev.key !== 'Backspace' && ev.key !== 'Escape') arr.sel = (kind === 'panel' ? 'p' : 't') + id;
+    arrayRender();
+    const back = document.querySelector(`#array-canvas [data-kind="${kind}"][data-id="${id}"]`);
+    if (back) back.focus();
+  });
+  // Live power while the array is on screen and not being edited.
+  setInterval(() => {
+    if (arr.draft || document.getElementById('topology-array').hidden ||
+        !document.getElementById('view-topology').classList.contains('active') || document.hidden) return;
+    refreshArray(true);
+  }, 10000);
 
   // ---- the mesh map ----
   // Tiers from reports lost today (measured) and the raw RSSI byte, which
