@@ -61,6 +61,8 @@ const PI_VIEWS = [
   ['pi-devices',     'Pi Devices',  'button[data-view="nodes"]'],
   ['pi-mesh',        'Mesh',        ['button[data-view="topology"]', '#topology-tabs [data-tab="mesh"]']],
   ['pi-mesh-strings', 'Mesh by string', ['button[data-view="topology"]', '#topology-tabs [data-tab="mesh"]', '#mesh-view button[data-mode="strings"]']],
+  ['pi-array',       'Array',       ['button[data-view="topology"]', '#topology-tabs [data-tab="array"]']],
+  ['pi-setup',       'System setup', 'button[data-view="setup"]'],
 ];
 
 const THEMES = ['dark', 'light'];

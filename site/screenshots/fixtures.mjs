@@ -399,7 +399,18 @@ const meshNodes = devices.map((d, i) => {
   return node;
 });
 
+// Topology › Array: two roof faces, South (strings A, B) above North (C, D)
+// with an empty row for the ridge between them, and the TAP under B3.
+const arrayFixture = {
+  panels: devices.map((d, i) => {
+    const row = Math.floor(i / 6), col = i % 6;
+    return { addr: d.addr, barcode: d.barcode, x: col + 1, y: row < 2 ? row + 1 : row + 2, portrait: true };
+  }),
+  taps: [{ id: '1201', x: 3, y: 2 }],
+};
+
 export const piRoutes = {
+  '/api/array': arrayFixture,
   '/api/status': { ...routes['/api/status'], platform: 'linux' },
   '/api/settings': {
     serial_port: '/dev/serial/by-id/usb-FTDI_USB_RS485-if00-port0', bus_role: 'master', standby_takeover_s: 3,

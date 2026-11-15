@@ -52,7 +52,8 @@ this page's theme, so what you see is what the device will look like for you.
 ### Two things worth knowing
 
 - **Temperature units and light/dark theme** are toggles at the bottom of the
-  sidebar. Both remember your choice.
+  sidebar. Both remember your choice. Until you pick a theme, the pages
+  follow your device's light or dark setting.
 - **Old bookmarks still work.** Everything now lives under `/app`, but the older
   addresses (`/nodes`, `/status`, `/yaml`, `/cca`, `/history`) redirect to the
   right place automatically — including through Home Assistant's Ingress.
@@ -88,7 +89,7 @@ The sidebar's footer carries:
 
 - **GitHub link** → opens `github.com/RAR/esphome-tigomonitor` in a new tab.
 - **°C / °F toggle** — persists via `localStorage['tempUnit']` (same key the legacy page used). The button shows the unit you'll *get* if you click. Active view re-renders immediately.
-- **Theme toggle** — light/dark, persists via `localStorage['tigoTheme']`.
+- **Theme toggle** — light/dark, persists via `localStorage['tigoTheme']`. With nothing saved, the page follows `prefers-color-scheme`.
 
 When `cloud_import` is set and a Tigo cloud token is connected, a **cloud status box** also appears in the sidebar with at-a-glance severity dots for the CCA and panels (refreshed ~10 min while the UI is open); clicking it opens the Tigo Cloud view.
 
