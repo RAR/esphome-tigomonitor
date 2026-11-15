@@ -741,6 +741,16 @@
   /* A network name in the scan list that fills in the SSID: text, not a box. */
   .cca-ssid-pick { padding: 0; border: 0; background: none; color: var(--accent-text); text-decoration: underline;
                    text-underline-offset: 2px; cursor: pointer; }
+  /* One piece of equipment in the Tigo Cloud status list. Its state shows
+     in the badge; a warning or error also colours the whole border. */
+  .cloud-eq { border: 1px solid var(--border); border-radius: 7px; padding: 8px 11px; margin-bottom: 7px; }
+  .cloud-eq.warn { border-color: var(--warn); }
+  .cloud-eq.bad { border-color: var(--bad); }
+  .cloud-eq-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+  .cloud-eq-name { font-size: 13.5px; }
+  .cloud-eq-meta { color: var(--text-dim); font-size: 11.5px; margin: 1px 0 4px; }
+  .cloud-eq-meta:empty { margin: 0 0 4px; }
+  .cloud-eq-none { color: var(--text-faint); font-size: 12px; }
   .devices-changes ul { margin: 6px 0 0; padding-left: 18px; }
   .devices-changes li { margin: 2px 0; }
   .devices-setup-link { margin: 18px 0 0; font-size: 13px; color: var(--text-dim); }
@@ -7631,7 +7641,7 @@
       .sort((a, b) => (order[a.equipmentType] ?? 9) - (order[b.equipmentType] ?? 9))
       .map(s => {
         const e = s.error || 0, w = s.warning || 0;
-        const col = e ? 'var(--bad)' : w ? '#e6a700' : 'var(--good)';
+        const col = e ? 'var(--bad)' : w ? 'var(--warn)' : 'var(--good)';
         const name = s.equipmentType === 'unit' ? 'CCA' : s.equipmentType === 'panel' ? 'Panels' : s.equipmentType;
         const detail = e ? `${e} error${e > 1 ? 's' : ''}` : w ? `${w} warning${w > 1 ? 's' : ''}` : 'OK';
         return `<div style="display:flex;align-items:center;gap:7px;padding:1px 0;color:var(--text)" title="${name}: ${detail}"><span style="width:9px;height:9px;border-radius:50%;background:${col};flex:none"></span>${name}</div>`;
@@ -7663,7 +7673,7 @@
     disconnection: 'Connection', battery_fault: 'Battery', production: 'Production',
     pv_off: 'PV On', high_voltage: 'Voltage Compliance', wifi_signal_v2: 'WiFi Signal',
   };
-  const CLOUD_SEV = { 0: ['OK', 'var(--good)'], 1: ['Warning', '#e6a700'], 2: ['Error', 'var(--bad)'] };
+  const CLOUD_SEV = { 0: ['OK', 'var(--good)'], 1: ['Warning', 'var(--warn)'], 2: ['Error', 'var(--bad)'] };
   const cloudSev = c => CLOUD_SEV[c] || ['?', 'var(--text-dim)'];
   const cloudCheckTitle = t => CLOUD_CHECK_TITLES[t] || t;
   const cloudEsc = s => String(s).replace(/[&<>"']/g, c => ({
@@ -7729,7 +7739,7 @@
 
     // --- issues ---
     const flagged = list.filter(eq => cloudWorstCode(eq) > 0);
-    document.getElementById('cloudstatus-issues-card').style.borderLeft = flagged.length ? `3px solid ${worst === 2 ? 'var(--bad)' : '#e6a700'}` : '';
+    document.getElementById('cloudstatus-issues-card').style.borderColor = flagged.length ? (worst === 2 ? 'var(--bad)' : 'var(--warn)') : '';
     issEl.innerHTML = !flagged.length
       ? '<span style="color:var(--good-text)">No issues — all equipment OK.</span>'
       : flagged.map(eq => {
@@ -7758,18 +7768,17 @@
     };
     const row = eq => {
       const c = cloudWorstCode(eq);
-      const border = c === 2 ? 'var(--bad)' : c === 1 ? '#e6a700' : 'var(--good)';
       const checks = (eq.equipmentStatusesLatest || []).slice()
         .sort((a, b) => (b.statusCode || 0) - (a.statusCode || 0));
       const meta = [eq.equipmentModel, eq.equipmentSerial && `SN ${eq.equipmentSerial}`]
         .filter(Boolean).map(cloudEsc).join(' · ');
-      return `<div style="border:1px solid var(--border);border-left:3px solid ${border};border-radius:7px;padding:8px 11px;margin-bottom:7px">`
-        + `<div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px">`
-        +   `<b style="font-size:13.5px">${cloudEsc(cloudEqName(eq))}</b>`
+      return `<div class="cloud-eq ${c === 2 ? 'bad' : c === 1 ? 'warn' : 'ok'}">`
+        + `<div class="cloud-eq-head">`
+        +   `<b class="cloud-eq-name">${cloudEsc(cloudEqName(eq))}</b>`
         +   cloudBadge(c, cloudSev(c)[0])
         + `</div>`
-        + (meta ? `<div style="color:var(--text-dim);font-size:11.5px;margin:1px 0 4px">${meta}</div>` : '<div style="margin-bottom:4px"></div>')
-        + (checks.length ? checks.map(checkRow).join('') : '<div style="color:var(--text-faint);font-size:12px">No status reported</div>')
+        + (meta ? `<div class="cloud-eq-meta">${meta}</div>` : '<div class="cloud-eq-meta"></div>')
+        + (checks.length ? checks.map(checkRow).join('') : '<div class="cloud-eq-none">No status reported</div>')
         + `</div>`;
     };
     eqEl.innerHTML = Object.keys(byGroup).sort((a, b) => a === 'CCA' ? -1 : b === 'CCA' ? 1 : a.localeCompare(b)).map(g => {
