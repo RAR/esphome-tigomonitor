@@ -220,6 +220,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Light mode is readable, and the web UI follows your device's theme.**
+  Green, amber, red and blue text kept the bright shades made for the dark
+  background, so in light mode the Dashboard's current power read at
+  1.7:1 on white; every text colour now reaches 4.5:1 in both themes
+  (measured on all eight main pages at phone and desktop width). With no
+  theme chosen yet, the page opens light or dark to match the device.
+- **Dragging on Topology › Array no longer leaves a panel stuck to the
+  screen.** A drag the browser cancels (a scroll, a second finger) now
+  ends with nothing moved, and the panel tray scrolls under a finger.
+
 - **Panel names no longer go missing after a rediscovery.** While a CCA
   rediscovers, the TAP lists each optimizer with a "not yet confirmed"
   flag on its address (8017 for 0017). Both builds filed the name under
