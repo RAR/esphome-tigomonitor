@@ -17,6 +17,7 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <string>
 #include <vector>
@@ -162,6 +163,22 @@ class LinkStats {
 
   // An optimizer deleted from the node table is forgotten here too.
   void erase(const std::string &addr) { links_.erase(addr); }
+  // Drops each address the node table doesn't hold (in_table false) that
+  // hasn't been heard or joined for quiet_s: what a gateway renumbering
+  // leaves behind. A new optimizer stays while it's recent. How many went.
+  size_t prune(const std::function<bool(const std::string &)> &in_table, int64_t unix_s, int64_t quiet_s) {
+    size_t n = 0;
+    for (auto it = links_.begin(); it != links_.end();) {
+      const Link &l = it->second;
+      if (!in_table(it->first) && unix_s - std::max(l.last_heard_s, l.last_join_s) >= quiet_s) {
+        it = links_.erase(it);
+        n++;
+      } else {
+        ++it;
+      }
+    }
+    return n;
+  }
 
   // The last day of 5-minute RSSI averages, oldest first; -1 where nothing
   // was heard.

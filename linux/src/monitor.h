@@ -226,6 +226,11 @@ class Monitor {
   std::vector<StringTotals> strings_locked_() const;
   bool night_locked_() const;
   bool save_locked_();
+  // Drops the mesh's addresses no optimizer in the node table holds, once
+  // quiet for LINK_QUIET_S (a renumbering's leftovers); at most once a minute.
+  void prune_links_locked_(int64_t now_s);
+  int64_t last_prune_s_ = 0;
+  static const int64_t LINK_QUIET_S = 3600;
   nlohmann::json loss_days_json_locked_() const;
   nlohmann::json join_log_json_locked_() const;
   void writer_loop_();

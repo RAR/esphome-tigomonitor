@@ -271,6 +271,25 @@ static void test_a_deleted_optimizer_is_forgotten() {
   CHECK(s.links().size() == 1);
 }
 
+// A gateway renumbering (the CCA, 2026-11-14) leaves the old addresses
+// behind: no optimizer answers there now. One not in the node table and
+// not heard or joined for an hour goes; one in the table stays however
+// quiet, and a new one stays while it's recent, before it's in the table.
+static void test_an_old_address_nobody_holds_is_dropped() {
+  LinkStats s;
+  reports(s, "0004", {0, 400});            // in the table, quiet since T0
+  reports(s, "8004", {0, 400});            // the old address, quiet since T0
+  s.on_join("000E", T0 - 86400, "", "");   // an old join, restored at start
+  s.on_join("8005", T0 + 3500, "", "");    // a new joiner, not in the table yet
+  auto in_table = [](const std::string &a) { return a == "0004"; };
+  CHECK(s.prune(in_table, T0 + 3700, 3600) == 2);
+  CHECK(s.links().count("0004") == 1);
+  CHECK(s.links().count("8004") == 0);
+  CHECK(s.links().count("000E") == 0);
+  CHECK(s.links().count("8005") == 1);
+  CHECK(s.prune(in_table, T0 + 3700, 3600) == 0);
+}
+
 // The roof at sunrise, 2026-11-08: a 600-tick cadence, and reports that
 // arrive up to 3,000 ticks behind the newest. Each late one fills a hole the
 // jump over it counted, and the next report is measured from the newest.
@@ -382,6 +401,7 @@ int main() {
   test_a_duplicate_is_still_heard();
   test_a_silent_optimizer_reads_zero_after_midnight();
   test_a_deleted_optimizer_is_forgotten();
+  test_an_old_address_nobody_holds_is_dropped();
   test_a_report_far_behind_fills_its_hole();
   test_a_late_report_keeps_the_newest();
   test_a_late_report_heard_twice_counts_once();
