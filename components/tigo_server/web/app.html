@@ -955,7 +955,8 @@
                          color: var(--text-faint); white-space: nowrap; }
   td.tap-name .input { width: 12em; }
   button.tap-rename { font: inherit; color: var(--text-dim); background: none; border: 1px solid transparent; border-radius: 6px;
-                      padding: 2px 6px; margin-left: 4px; cursor: pointer; }
+                      padding: 2px 6px; margin-left: 4px; cursor: pointer;
+                      min-width: 24px; min-height: 24px; display: inline-flex; align-items: center; justify-content: center; }
   button.tap-rename:hover, button.tap-rename:focus-visible { border-color: var(--border); color: var(--text); }
   button.tap-rename:not(.add)::before { content: '✎'; }
   button.tap-rename.add { margin-left: -6px; font-style: italic; }
@@ -1220,7 +1221,13 @@
   .cfg-row:has(> .cfg-text) .cfg-switch { min-width: 120px; }  /* Save lines up with the number rows' */
   .cfg-input { width: 110px; padding: 7px 9px; background: var(--bg-2); border: 1px solid var(--border); border-radius: 5px; color: var(--text); font-size: 13px; }
   .cfg-unit { color: var(--text-dim); font-size: 12px; margin-right: 2px; }
-  .cfg-switch { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text); cursor: pointer; min-width: 64px; }
+  .cfg-switch { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text); cursor: pointer; min-width: 64px; min-height: 24px; }
+  /* A finger needs more than a mouse: the pencil and the On/Off switches
+     grow to 44 px where the pointer is coarse. */
+  @media (pointer: coarse) {
+    button.tap-rename { min-width: 44px; min-height: 44px; }
+    .cfg-switch { min-height: 44px; }
+  }
   .btn.cfg-revert:disabled { opacity: .4; cursor: default; }
   .toast {
     position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(100px);
