@@ -6,15 +6,21 @@
 #   linux/packaging/build-deb.sh VERSION      e.g. 2.1.0 or 2.1.0~dev1
 #
 # Output: build/deb/tigomonitord_VERSION_ARCH.deb
+#
+# TIGOD_BUILD_DIR names a build directory to keep and build into
+# incrementally (linux/scripts/local-deb.sh); unset, build/linux is
+# rebuilt from scratch, as CI does.
 set -eu
 version="${1:?usage: build-deb.sh VERSION}"
 arch="$(dpkg --print-architecture)"
 root="build/deb/root"
+bdir="${TIGOD_BUILD_DIR:-build/linux}"
 
-rm -rf build/linux build/deb
-cmake -S linux -B build/linux -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr -DTIGOD_VERSION="$version"
-cmake --build build/linux -j"$(nproc)"
-DESTDIR="$PWD/$root" cmake --install build/linux --strip
+rm -rf build/deb
+[ -n "${TIGOD_BUILD_DIR:-}" ] || rm -rf "$bdir"
+cmake -S linux -B "$bdir" -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr -DTIGOD_VERSION="$version"
+cmake --build "$bdir" -j"$(nproc)"
+DESTDIR="$PWD/$root" cmake --install "$bdir" --strip
 
 install -Dm644 linux/packaging/tigomonitord.service "$root/usr/lib/systemd/system/tigomonitord.service"
 install -Dm755 linux/packaging/cert-hook "$root/usr/libexec/tigomonitor/cert-hook"
