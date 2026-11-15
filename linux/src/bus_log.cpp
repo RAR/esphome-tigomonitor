@@ -241,6 +241,9 @@ void BusLog::on_frame_(const Frame &f, bool ours, int64_t now) {
            v.version.c_str());
   }
   if (what.empty()) return;
+  // Listening (or standing by), another master runs the bus, and what it
+  // sends the TAP is its own business: marked in the log, not raised.
+  if (!runs_bus_) return;
   if (!alarm_count_) first_alarm_ms_ = now;
   alarm_count_++;
   alarms_.push_back({now, what});

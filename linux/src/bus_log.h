@@ -66,7 +66,8 @@ class BusLog {
   void set_barcode_of(std::function<std::string(uint16_t)> barcode_of) { barcode_of_ = std::move(barcode_of); }
   // Whether this monitor runs the bus now. While another master runs it,
   // what an optimizer reports changed is that master's doing: the new value
-  // is kept, but not listed as a change or warned of.
+  // is kept, but not listed as a change or warned of; and a reconfiguration
+  // it sends the TAP is marked in the log but raises no alarm.
   void set_runs_bus(bool on) { runs_bus_ = on; }
 
  private:

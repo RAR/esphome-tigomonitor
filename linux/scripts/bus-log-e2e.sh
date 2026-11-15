@@ -73,13 +73,14 @@ sleep 0.5
 build/linux/tigomonitord --state-dir "$out/state" --web-dir components/tigo_server/web 2> "$out/daemon2.log" &
 daemon=$!
 sleep 6
-expect "alarm on, both named" "$(bus 18140 "(d['alarm']['active'], d['alarm']['count'], [a['what'] for a in d['alarm']['recent']])")" \
-  "(True, 2, [\"GatewayCfg write (the TAP's channel, network ID and key)\", 'SET_CHANNEL'])"
+# Listening, the CCA is the master: what it sends the TAP is its business.
+# The log still marks the frames, but nothing is raised.
+expect "listening: no alarm" "$(bus 18140 "(d['alarm']['active'], d['alarm']['count'])")" "(False, 0)"
 expect "the log marks them" "$(bus 18140 "[e['reconfig'] for e in d['exchanges'] if e['reconfig']]")" \
   "[\"GatewayCfg write (the TAP's channel, network ID and key)\", 'SET_CHANNEL']"
 expect "the write's block isn't shown" "$(bus 18140 "[(e['request_hex'][:12], e['request_hex'][14:], e['result']) for e in d['exchanges'] if e['sub_name'] == 'GatewayCfg write']")" \
   "[('00 00 00 0D ', \" 01 00 + 36 bytes hidden (the TAP's network config and key)\", 'answered')]"
-expect "health names it" "$(api 18140 /api/health | python3 -c "import json,sys; d=json.load(sys.stdin); print(d['status'], any('another device reconfigured the TAP (SET_CHANNEL, 2 frames' in p for p in d['problems']))")" "problem True"
+expect "listening: healthy" "$(health 18140)" "ok []"
 radios() { api "$1" /api/versions | python3 -c "import json,sys; d=json.load(sys.stdin); print([(r['tap'], r['channel'], r['slt'], r['slm'], r['heard_unix_ms'] > 0) for r in d['radios']])"; }
 expect "the TAP's radio, from its read" "$(radios 18140)" "[('1201', 18, 90, 60, True)]"
 ids() { api "$1" /api/versions | python3 -c "import json,sys; d=json.load(sys.stdin); print([(i['tap'], i['mac'], i['heard_unix_ms'] > 0) for i in d['ids']])"; }
@@ -92,24 +93,48 @@ expect "but not listed as a change" "$(changes 18140)" "[]"
 expect "nor warned of" "$(grep -c "optimizer 0003's MPPT changed" "$out/daemon2.log" || true)" 0
 expect "the TAP's ID, from its answer to GET_MAC" "$(ids 18140)" "[('1201', '04C05B0000001234', True)]"
 expect "the read's block isn't shown" "$(bus 18140 "any('EE EE' in (e['reply_hex'] or '') for e in d['exchanges'])")" False
-expect "logged as an error" "$(grep -c 'another device sent the TAP a reconfiguration: GatewayCfg write' "$out/daemon2.log" || true)" 1
-expect "MQTT: alarm on" "$(mosquitto_sub -p 18834 -C 1 -W 10 -t tigomonitor/test/system/state 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin)["tap_reconfigured"])')" True
+expect "listening: not logged as an error" "$(grep -c 'another device sent the TAP a reconfiguration' "$out/daemon2.log" || true)" 0
+expect "MQTT: alarm off" "$(mosquitto_sub -p 18834 -C 1 -W 10 -t tigomonitor/test/system/state 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin)["tap_reconfigured"])')" False
 kill $daemon; wait $daemon 2>/dev/null || true
 expect "versions kept" "$(python3 -c "import json; d=json.load(open('$out/state/versions.json')); print(len(d['taps']), len(d['optimizers']))")" "1 1"
 expect "radio kept" "$(python3 -c "import json; d=json.load(open('$out/state/versions.json')); print([(r['tap'], r['channel']) for r in d['radios']])")" "[('1201', 18)]"
 expect "settings kept" "$(python3 -c "import json; d=json.load(open('$out/state/versions.json')); print([(o['addr'], o['stored']) for o in d['settings']])")" "[('0003', True)]"
 expect "no key on disk" "$(grep -ci 'eeee\|238, 238' "$out/state/versions.json" || true)" 0
+kill $cca; wait $cca 2>/dev/null || true
+
+# --- run 2b: we run the bus, and another device reconfigures the TAP ---
+python3 linux/tools/cca_on_bus.py "$out/bus" --reconfigure-after 2 &
+cca=$!
+sleep 0.5
+printf '{"bus_role": "master", "master_startup": false, "master_housekeeping": false, "master_queries": false, "master_optimizer_writes": false, "master_read_tap_config": false, "discovery_auto": false, "serial_port": "%s", "gateway_id": 4609, "web_port": 18140, "device_id": "test", "publish_interval_s": 2, "mqtt": {"host": "127.0.0.1", "port": 18834}}\n' \
+  "$PWD/$out/bus" > "$out/state/settings.json"
+build/linux/tigomonitord --state-dir "$out/state" --web-dir components/tigo_server/web 2> "$out/daemon2b.log" &
+daemon=$!
+for _ in $(seq 40); do [ "$(bus 18140 "d['alarm']['count']")" = 2 ] && break; sleep 0.25; done
+expect "running the bus: alarm on, both named" "$(bus 18140 "(d['alarm']['active'], d['alarm']['count'], [a['what'] for a in d['alarm']['recent']])")" \
+  "(True, 2, [\"GatewayCfg write (the TAP's channel, network ID and key)\", 'SET_CHANNEL'])"
+expect "health names it" "$(api 18140 /api/health | python3 -c "import json,sys; d=json.load(sys.stdin); print(d['status'], any('another device reconfigured the TAP (SET_CHANNEL, 2 frames' in p for p in d['problems']))")" "problem True"
+expect "logged as an error" "$(grep -c 'another device sent the TAP a reconfiguration: GatewayCfg write' "$out/daemon2b.log" || true)" 1
+expect "MQTT: alarm on" "$(mosquitto_sub -p 18834 -C 1 -W 10 -t tigomonitor/test/system/state 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin)["tap_reconfigured"])')" True
+kill $daemon; wait $daemon 2>/dev/null || true
+kill $cca; wait $cca 2>/dev/null || true
 expect "kept by name only" "$(python3 -c "import json; d=json.load(open('$out/state/bus-alarm.json')); print(d['count'], sorted(d['recent'][0]))")" "2 ['unix_ms', 'what']"
 
 # --- run 3: a restart keeps it; clearing ends it ---
+# Back to listening, with no bus: an alarm raised while we ran the bus stays
+# until cleared.
+printf '{"bus_role": "listen", "serial_port": "%s", "web_port": 18140, "device_id": "test", "publish_interval_s": 2, "mqtt": {"host": "127.0.0.1", "port": 18834}}\n' \
+  "$PWD/$out/bus" > "$out/state/settings.json"
 build/linux/tigomonitord --state-dir "$out/state" --web-dir components/tigo_server/web 2> "$out/daemon3.log" &
 daemon=$!
 sleep 3
 expect "still on after a restart" "$(bus 18140 "(d['alarm']['active'], d['alarm']['count'])")" "(True, 2)"
 expect "radio back after a restart" "$(radios 18140)" "[('1201', 18, 90, 60, True)]"
 expect "the TAP's ID back after a restart" "$(ids 18140)" "[('1201', '04C05B0000001234', True)]"
-expect "no change after a restart either" "$(changes 18140)" "[]"
-expect "MPPT parameters back after a restart" "$(mppt 18140)" "[('0003', '12 40 0A 12', True)]"
+# Run 2b's mock started from the old parameters: heard while we ran the bus,
+# that one is a change, and listed.
+expect "the change heard while running the bus, kept after a restart" "$(changes 18140)" "[('0003', 'MPPT', '12 40 0A 12', '12 40 08 12')]"
+expect "MPPT parameters back after a restart" "$(mppt 18140)" "[('0003', '12 40 08 12', True)]"
 expect "settings back after a restart" "$(smarts 18140)" "[('0003', '0FFF 0000 0FFF 0008 00C8 00C8 000A 0154 0154 S 00 01', True, True)]"
 expect "said at startup" "$(grep -c 'alarm is still on from before the restart' "$out/daemon3.log" || true)" 1
 expect "cleared" "$(api 18140 /api/bus/alarm/clear post)" '{"cleared":true}'
@@ -117,6 +142,5 @@ expect "off after clearing" "$(bus 18140 "d['alarm']['active']")" False
 expect "healthy again" "$(health 18140)" "ok []"
 kill $daemon; wait $daemon 2>/dev/null || true
 expect "cleared on disk" "$(python3 -c "import json; print(json.load(open('$out/state/bus-alarm.json'))['count'])")" 0
-kill $cca; wait $cca 2>/dev/null || true
 
 [ $fail -eq 0 ] && echo "bus log e2e passed" || { echo "bus log e2e FAILED"; exit 1; }
