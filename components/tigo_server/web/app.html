@@ -768,12 +768,12 @@
   body.light-mode .setup-note strong { color: color-mix(in srgb, var(--warn) 55%, #000); }
   .setup-note.info { border-color: var(--border); background: var(--bg-2); display: block; }
   /* Each task has its hue, carried into its flow: replace sky, add green, retire violet. */
-  [data-task="replace"] { --task: var(--accent-2); }
-  [data-task="add"] { --task: var(--accent); }
-  [data-task="retire"] { --task: var(--accent-3); }
-  [data-task="system"] { --task: var(--warn); }
-  [data-task="addtap"] { --task: var(--accent); }
-  [data-task="retiretap"] { --task: var(--accent-3); }
+  [data-task="replace"] { --task: var(--accent-2); --task-text: var(--accent-2-text); }
+  [data-task="add"] { --task: var(--accent); --task-text: var(--accent-text); }
+  [data-task="retire"] { --task: var(--accent-3); --task-text: var(--accent-3-text); }
+  [data-task="system"] { --task: var(--warn); --task-text: var(--warn-text); }
+  [data-task="addtap"] { --task: var(--accent); --task-text: var(--accent-text); }
+  [data-task="retiretap"] { --task: var(--accent-3); --task-text: var(--accent-3-text); }
   .setup-group { font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--text-dim); margin: 0 0 10px; }
   .setup-task .art { gap: 12px; }
   .setup-task .art .mark { position: relative; display: flex; }
@@ -854,7 +854,7 @@
   .setup-task .in { flex: 1; display: flex; flex-direction: column; gap: 8px; padding: 14px 18px 18px; }
   .setup-task strong { font-size: 15px; }
   .setup-task .in > span { font-size: 12px; color: var(--text-dim); line-height: 1.5; }
-  .setup-task .in > .go { color: var(--task); font-weight: 600; font-size: 12px; margin-top: auto; padding-top: 4px; }  /* level across the cards */
+  .setup-task .in > .go { color: var(--task-text); font-weight: 600; font-size: 12px; margin-top: auto; padding-top: 4px; }  /* level across the cards */
   .setup-health { padding: 16px 18px; border-radius: 10px; background: var(--bg-2); border: 1px solid var(--border); display: flex; flex-direction: column; gap: 10px; }
   .setup-health .head { display: flex; align-items: baseline; gap: 10px; }
   .setup-health .head strong { font-size: 14px; }
@@ -878,11 +878,11 @@
   .setup-rail li { display: flex; gap: 10px; align-items: center; padding: 7px 0; font-size: 13px; color: var(--text-faint); }
   .setup-rail li .n { width: 22px; height: 22px; flex-shrink: 0; border-radius: 50%; border: 1px solid var(--border); display: flex; align-items: center; justify-content: center; font-size: 11px; }
   .setup-rail li.done { color: var(--text-dim); }
-  .setup-rail li.done .n { border-color: var(--task); color: var(--task); background: color-mix(in srgb, var(--task) 10%, transparent); }
+  .setup-rail li.done .n { border-color: var(--task); color: var(--task-text); background: color-mix(in srgb, var(--task) 10%, transparent); }
   .setup-rail li.on { color: var(--text); font-weight: 600; }
   .setup-rail li.on .n { background: var(--task); border-color: var(--task); color: #04121c; }
   .setup-flow { border-top: 4px solid var(--task); }
-  .setup-rail h2 { display: flex; align-items: center; gap: 10px; color: var(--task); }
+  .setup-rail h2 { display: flex; align-items: center; gap: 10px; color: var(--task-text); }
   .setup-rail h2 .ico { width: 30px; height: 30px; border-radius: 8px; display: flex; align-items: center; justify-content: center;
                         background: color-mix(in srgb, var(--task) 14%, transparent); }
   .setup-plan { list-style: none; padding: 16px 18px; display: flex; flex-direction: column; gap: 10px; }
