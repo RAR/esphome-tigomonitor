@@ -96,9 +96,23 @@ struct Result {
 // checksum). on_alias_removed(node) is called just before an entry is erased
 // as a stale alias of the same barcode, so the caller can drop its runtime
 // device row.
+//
+// An address with 0x8000 set is a provisional entry: listed on the TAP but
+// not yet confirmed. It is the same optimizer as the address without the bit,
+// which is the one its reports come from, so it is filed there.
+template<class Str> Str without_provisional_bit(const Str &addr) {
+  Str a = addr;
+  if (a.empty()) return a;
+  char c = a[0];
+  int v = c >= '0' && c <= '9' ? c - '0' : c >= 'A' && c <= 'F' ? c - 'A' + 10 : c >= 'a' && c <= 'f' ? c - 'a' + 10 : -1;
+  if (v >= 8) a[0] = "01234567"[v - 8];
+  return a;
+}
+
 template<class Table, class Pool, class Str, class MakeNode, class OnRemoved>
-Result apply_frame27_entry(Table &table, Pool &pool, const Str &addr, const Str &long_addr,
+Result apply_frame27_entry(Table &table, Pool &pool, const Str &listed_addr, const Str &long_addr,
                            size_t max_nodes, MakeNode make_node, OnRemoved on_alias_removed) {
+  const Str addr = without_provisional_bit(listed_addr);
   Result r;
   auto find = [&](const Str &a) -> decltype(&table[0]) {
     for (auto &n : table)

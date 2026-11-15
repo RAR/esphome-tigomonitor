@@ -966,7 +966,8 @@ void TigoMonitorComponent::process_27_frame(const frame_string &hex_frame, size_
   bool have_header = protocol::walk_frame27(hex_frame, offset, header,
                                             [&](const char *long_addr_buf, const char *addr_buf) {
     node_string long_addr(long_addr_buf);
-    node_string addr(addr_buf);
+    // A provisional entry (0x8000 set) is filed at the address its reports come from.
+    node_string addr = node_identity::without_provisional_bit(node_string(addr_buf));
     
     ESP_LOGD(TAG, "Frame 27 - Device Identity: addr=%s, long_addr=%s", 
              addr.c_str(), long_addr.c_str());

@@ -161,6 +161,22 @@ static void test_commissioning_alias_is_merged() {
   CHECK(h.removed.size() == 1 && h.removed[0] == "8002");
 }
 
+static void test_provisional_entry_lands_at_its_real_address() {
+  std::puts("a provisional entry (0x8000 set, listed but not yet confirmed) is the same node as its address");
+  Harness h;
+  h.table = {labelled("8017", "", "")};  // a leftover alias from before
+  h.table[0].long_address = "BC000000000000B1";
+  auto r = h.feed("8017", "BC000000000000B1");
+  CHECK(h.at("0017") != nullptr);
+  CHECK(h.at("8017") == nullptr);
+  CHECK(h.table.size() == 1);
+  r = h.feed("0017", "BC000000000000B1");
+  CHECK(!r.table_changed);
+  Harness fresh;
+  fresh.feed("80A3", "BC000000000000B2");
+  CHECK(fresh.at("00A3") != nullptr && fresh.table.size() == 1);
+}
+
 static void test_first_barcode_keeps_imported_labels() {
   std::puts("an entry learning its barcode for the first time keeps its labels");
   Harness h;
@@ -283,6 +299,7 @@ int main() {
   test_rotation_split_across_frames();
   test_full_shuffle_of_thirty_panels();
   test_commissioning_alias_is_merged();
+  test_provisional_entry_lands_at_its_real_address();
   test_first_barcode_keeps_imported_labels();
   test_table_full();
   test_import_restores_a_backup();

@@ -200,7 +200,8 @@ void Monitor::on_frame27_(const std::string &hex) {
   bool changed = false;
   bool ok = proto::walk_frame27(hex, proto::COMMAND_PAYLOAD_OFFSET, header,
                                 [&](const char *long_addr, const char *addr) {
-    std::string a(addr), l(long_addr);
+    // A provisional entry (0x8000 set) is filed at the address its reports come from.
+    std::string a = identity::without_provisional_bit(std::string(addr)), l(long_addr);
     auto res = identity::apply_frame27_entry(
         nodes_, parked_cca_, a, l, max_nodes_,
         [](const std::string &na, const std::string &nl) {
