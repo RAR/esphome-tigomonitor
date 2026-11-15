@@ -220,6 +220,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Panel names no longer go missing after a rediscovery.** While a CCA
+  rediscovers, the TAP lists each optimizer with a "not yet confirmed"
+  flag on its address (8017 for 0017). Both builds filed the name under
+  the flagged address, so the panel reported nameless, and on the ESP32
+  its Home Assistant sensor read 0 W, until the TAP listed it again. The
+  name now lands on the real address. An ESP32 that saved such entries
+  moves them across the next time it starts: on the roof rig, after the
+  2026-11-15 rediscovery, 16 stuck names came back on the first boot.
+  Reflash the ESP32 to take this.
+- **The array keeps each panel in its square after a renumbering
+  (Raspberry Pi and other Linux).** The array was saved by short address,
+  which a CCA can reassign; when one did, panels swapped squares. It is
+  saved by barcode now, and an array saved before is given barcodes the
+  next time it is saved.
+- **No "another device reconfigured the TAP" alarm while a CCA runs the
+  bus (Raspberry Pi).** A TigoMonitor listening beside a CCA raised it
+  when the CCA brought up a second TAP; the alarm is now raised only while
+  TigoMonitor itself runs the bus. The bus log still marks the frames.
+- **The mesh map drops addresses a renumbering left behind (Raspberry
+  Pi).** After a CCA re-addressed the roof, 21 old addresses stayed on the
+  map as "Silent" for good. An address the TAP no longer lists, not heard
+  for an hour, is now dropped.
+
 - **The mesh map's "Reports lost by day" could show a total higher than
   any string (Raspberry Pi).** Its "All panels" row was really the
   optimizers on no string, plus any deleted from Devices, whose counts
