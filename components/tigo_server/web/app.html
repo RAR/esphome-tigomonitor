@@ -14,13 +14,22 @@
     --border: #2f3a51;
     --text: #e6ecf5;
     --text-dim: #94a0b6;
-    --text-faint: #6b768b;
+    --text-faint: #8b96ab;  /* 4.5:1 on --bg-3 */
     --accent: #4ade80;
     --accent-2: #38bdf8;
     --accent-3: #a78bfa;
     --warn: #fbbf24;
     --bad: #f87171;
     --good: #4ade80;
+    /* Text in an accent colour. The same as the fill on dark; light mode
+       darkens these so words keep 4.5:1, while fills stay bright for the
+       dark text drawn on them. */
+    --accent-text: var(--accent);
+    --accent-2-text: var(--accent-2);
+    --accent-3-text: var(--accent-3);
+    --warn-text: var(--warn);
+    --bad-text: var(--bad);
+    --good-text: var(--good);
   }
   /* On html too: the page's own scrollbar takes its colours from there. */
   body.light-mode, html:has(> body.light-mode) {
@@ -31,7 +40,13 @@
     --border: #e2e8f0;
     --text: #0f172a;
     --text-dim: #475569;
-    --text-faint: #94a3b8;
+    --text-faint: #5b6779;  /* 4.6:1 on --bg-4 */
+    --accent-text: #166534;
+    --accent-2-text: #0369a1;
+    --accent-3-text: #6d28d9;
+    --warn-text: #a14a08;
+    --bad-text: #b91c1c;
+    --good-text: #166534;
   }
 
   * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -132,12 +147,12 @@
   .pv-pill:focus-visible { outline: 2px solid var(--good); outline-offset: 2px; }
   .pv-pill-label { flex: 1; }
   .pv-pill-state { padding: 2px 7px; border-radius: 4px; font-size: 10.5px; letter-spacing: .06em; text-transform: uppercase;
-                   color: var(--good); background: rgba(74,222,128,0.15); }
+                   color: var(--good-text); background: rgba(74,222,128,0.15); }
   .pv-pill.off { border-color: rgba(248,113,113,0.5); background: rgba(248,113,113,0.1); }
   .pv-pill.off:hover { background: rgba(248,113,113,0.16); border-color: rgba(248,113,113,0.7); }
   .pv-pill.off:focus-visible { outline-color: var(--bad); }
   .pv-pill.off::before { background: var(--bad); animation: pv-pulse 2s ease-out infinite; }
-  .pv-pill.off .pv-pill-state { color: var(--bad); background: rgba(248,113,113,0.18); }
+  .pv-pill.off .pv-pill-state { color: var(--bad-text); background: rgba(248,113,113,0.18); }
   body.light-mode .pv-pill-state { color: #15803d; }
   body.light-mode .pv-pill.off .pv-pill-state { color: #b91c1c; }
   @keyframes pv-pulse {
@@ -146,7 +161,7 @@
   }
   @media (prefers-reduced-motion: reduce) { .pv-pill.off::before { animation: none; box-shadow: 0 0 0 3px rgba(248,113,113,0.25); } }
   .pv-banner { display: flex; gap: 12px; align-items: center; margin: 0 0 16px; padding: 10px 14px; border-radius: 8px;
-               border: 1px solid var(--bad); color: var(--bad); font-weight: 600; font-size: 14px; }
+               border: 1px solid var(--bad); color: var(--bad-text); font-weight: 600; font-size: 14px; }
   .pv-banner a { color: inherit; white-space: nowrap; }
   .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--good); box-shadow: 0 0 8px var(--good); }
   .theme-toggle {
@@ -192,7 +207,7 @@
     padding: 60px 24px; text-align: center; color: var(--text-dim);
   }
   .placeholder-title { font-size: 16px; color: var(--text); margin-bottom: 8px; }
-  .placeholder-link { color: var(--accent-2); text-decoration: none; }
+  .placeholder-link { color: var(--accent-2-text); text-decoration: none; }
   .placeholder-link:hover { text-decoration: underline; }
 
   /* ===== Dashboard hero strip ===== */
@@ -205,7 +220,7 @@
   .hero-label { font-size: 11px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px; }
   .hero-val { font-size: 28px; font-weight: 700; margin-top: 6px; font-variant-numeric: tabular-nums; }
   .hero-val .unit { font-size: 14px; color: var(--text-dim); font-weight: 500; margin-left: 4px; }
-  .hero-card.primary .hero-val { font-size: 36px; color: var(--accent); }
+  .hero-card.primary .hero-val { font-size: 36px; color: var(--accent-text); }
   .hero-trend { font-size: 11px; color: var(--text-dim); margin-top: 4px; }
 
   .section-head { display: flex; justify-content: space-between; align-items: baseline; margin: 8px 0 12px; }
@@ -234,7 +249,7 @@
   .inv-name { font-weight: 600; font-size: 15px; }
   .inv-meta { display: flex; gap: 18px; font-size: 12px; color: var(--text-dim); margin-top: 4px; }
   .inv-meta strong { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
-  .inv-stat { font-size: 18px; font-weight: 700; color: var(--accent); font-variant-numeric: tabular-nums; }
+  .inv-stat { font-size: 18px; font-weight: 700; color: var(--accent-text); font-variant-numeric: tabular-nums; }
   .inv-stat .unit { font-size: 12px; color: var(--text-dim); font-weight: 500; margin-left: 3px; }
 
   .panel-bar-row { display: flex; gap: 4px; align-items: flex-end; height: 80px; }
@@ -467,8 +482,8 @@
   .log-time { color: var(--text-faint); font-variant-numeric: tabular-nums; }
   .log-lvl { text-transform: uppercase; font-size: 10.5px; letter-spacing: .04em; padding-top: 1px; color: var(--text-dim); }
   .log-msg { white-space: pre-wrap; word-break: break-word; color: var(--text); }
-  .log-line.warning .log-lvl, .log-line.warning .log-msg { color: var(--warn); }
-  .log-line.error .log-lvl, .log-line.error .log-msg { color: var(--bad); }
+  .log-line.warning .log-lvl, .log-line.warning .log-msg { color: var(--warn-text); }
+  .log-line.error .log-lvl, .log-line.error .log-msg { color: var(--bad-text); }
   .log-line.debug .log-lvl, .log-line.debug .log-msg { color: var(--text-faint); }
   .logs-empty { padding: 24px 14px; color: var(--text-faint); font-family: inherit; }
   /* The Bus log: the last 5 minutes in a strip, then one row per exchange. */
@@ -479,12 +494,12 @@
   .bx-tile .v { font-size: 20px; font-weight: 650; font-variant-numeric: tabular-nums; }
   .bx-tile .s { font-size: 12px; color: var(--text-dim); overflow-wrap: anywhere; }
   .bx-tile.bad { background: rgba(248,113,113,0.10); }
-  .bx-tile.bad .k, .bx-tile.bad .v { color: var(--bad); }
+  .bx-tile.bad .k, .bx-tile.bad .v { color: var(--bad-text); }
   .bx-chip { font-family: inherit; font-size: 12.5px; font-weight: 500; border: 1px solid var(--border); background: var(--bg-2); color: var(--text-dim);
              border-radius: 999px; padding: 5px 11px; cursor: pointer; display: inline-flex; gap: 6px; align-items: center; }
   .bx-chip .n { font-variant-numeric: tabular-nums; color: var(--text-faint); }
   .bx-chip[aria-pressed="true"] { background: var(--bg-3); color: var(--text); border-color: var(--text-faint); }
-  .bx-chip.bad[aria-pressed="true"] { border-color: var(--bad); color: var(--bad); }
+  .bx-chip.bad[aria-pressed="true"] { border-color: var(--bad); color: var(--bad-text); }
   .bx-table { border: 1px solid var(--border); border-radius: 10px; background: var(--bg-2); overflow: auto;
               max-height: calc(100vh - 380px); min-height: 280px; }
   /* px, not ch: the header's smaller font would make its ch columns narrower than the rows'. */
@@ -498,19 +513,19 @@
   .bx-row.reconfig { background: rgba(248,113,113,0.10); }
   .bx-row.reconfig::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 3px; background: var(--bad); }
   .bx-mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px; font-variant-numeric: tabular-nums; color: var(--text-dim); }
-  .bx-mono.slow { color: var(--warn); }
+  .bx-mono.slow { color: var(--warn-text); }
   .bx-src { font-size: 12.5px; color: var(--text-dim); }
-  .bx-src.other { color: var(--bad); font-weight: 600; }
+  .bx-src.other { color: var(--bad-text); font-weight: 600; }
   .bx-ex { font-weight: 600; min-width: 0; }
   .bx-ex small, .bx-mono.node small { display: block; font-weight: 400; color: var(--text-faint); font-size: 11.5px; }
   .bx-mono.node small { font-family: inherit; }
   .bx-res { font-size: 12px; font-weight: 600; border-radius: 6px; padding: 1px 7px; justify-self: start; white-space: nowrap; }
-  .bx-res.ok { background: rgba(74,222,128,0.15); color: var(--good); }
-  .bx-res.warn { background: rgba(251,191,36,0.15); color: var(--warn); }
-  .bx-res.bad { background: rgba(248,113,113,0.15); color: var(--bad); }
+  .bx-res.ok { background: rgba(74,222,128,0.15); color: var(--good-text); }
+  .bx-res.warn { background: rgba(251,191,36,0.15); color: var(--warn-text); }
+  .bx-res.bad { background: rgba(248,113,113,0.15); color: var(--bad-text); }
   .bx-res.none { background: var(--bg-3); color: var(--text-dim); }
   .bx-sum { min-width: 0; overflow-wrap: anywhere; }
-  .bx-sum .q { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px; color: var(--accent-2); }
+  .bx-sum .q { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px; color: var(--accent-2-text); }
   .bx-detail { display: grid; gap: 4px; border-bottom: 1px solid var(--border); background: var(--bg); padding: 10px 14px 12px 122px;
                font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px; color: var(--text-dim); overflow-wrap: anywhere; }
   .bx-detail .lbl { color: var(--text-faint); display: inline-block; min-width: 9ch; }
@@ -524,7 +539,7 @@
     .bx-detail { padding-left: 14px; }
   }
   #bus-alarm-card { border-color: var(--bad); }
-  #bus-alarm-card .pv-title { color: var(--bad); }
+  #bus-alarm-card .pv-title { color: var(--bad-text); }
   .bus-alarm-list { margin: 10px 0 0; padding: 0; list-style: none; font-size: 13px; line-height: 1.6; }
   .bus-alarm-list time { color: var(--text-dim); font-variant-numeric: tabular-nums; margin-right: 8px; }
   @media (max-width: 768px) {
@@ -536,8 +551,8 @@
   table.nodes { width: 100%; border-collapse: collapse; font-size: 14px; }
   table.nodes th[data-sort] { cursor: pointer; user-select: none; }
   table.nodes th[data-sort]:hover { color: var(--text); }
-  table.nodes th.sort-asc::after { content: ' ↑'; color: var(--accent); }
-  table.nodes th.sort-desc::after { content: ' ↓'; color: var(--accent); }
+  table.nodes th.sort-asc::after { content: ' ↑'; color: var(--accent-text); }
+  table.nodes th.sort-desc::after { content: ' ↓'; color: var(--accent-text); }
   table.nodes th {
     text-align: left; padding: 12px 14px; font-weight: 600;
     color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.4px;
@@ -559,9 +574,9 @@
     display: inline-block; padding: 3px 9px; border-radius: 4px;
     font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.4px;
   }
-  .badge.ok    { background: rgba(74,222,128,0.15); color: var(--good); }
-  .badge.warn  { background: rgba(251,191,36,0.15); color: var(--warn); }
-  .badge.bad   { background: rgba(248,113,113,0.15); color: var(--bad); }
+  .badge.ok    { background: rgba(74,222,128,0.15); color: var(--good-text); }
+  .badge.warn  { background: rgba(251,191,36,0.15); color: var(--warn-text); }
+  .badge.bad   { background: rgba(248,113,113,0.15); color: var(--bad-text); }
   .badge.stale { background: rgba(138,150,173,0.15); color: var(--text-dim); }
 
   /* ===== Topology view ===== */
@@ -585,7 +600,7 @@
     pointer-events: none;
   }
   .topo-inv-head { display: flex; align-items: center; gap: 12px; cursor: pointer; user-select: none; }
-  .topo-inv-toggle { font-size: 16px; color: var(--accent); width: 18px; text-align: center; transition: transform 0.15s; }
+  .topo-inv-toggle { font-size: 16px; color: var(--accent-text); width: 18px; text-align: center; transition: transform 0.15s; }
   .topo-inv.collapsed .topo-inv-toggle { transform: rotate(-90deg); }
   .topo-inv-name { font-weight: 600; font-size: 14px; flex-shrink: 0; }
   .topo-inv-name-edit-btn {
@@ -659,7 +674,7 @@
   .array-tap { position: absolute; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px;
     border-radius: 50%; background: var(--bg-3); border: 2px solid var(--accent-2); color: var(--text);
     font-size: 10px; font-weight: 600; box-sizing: border-box; user-select: none; box-shadow: 0 1px 3px rgba(0,0,0,0.3); }
-  .array-tap svg { width: 14px; height: 14px; color: var(--accent-2); }
+  .array-tap svg { width: 14px; height: 14px; color: var(--accent-2-text); }
   .array-tap.under { z-index: 1; gap: 0; }
   .array-tile.pool { outline: 2px dashed var(--accent-2); outline-offset: 2px; }
   .array-badge { position: absolute; top: -8px; right: -8px; min-width: 18px; height: 18px; padding: 0 4px; border-radius: 9px;
@@ -722,7 +737,7 @@
   .mesh-joins li span { color: var(--text-dim); }
   .devices-changes { margin: 0 0 18px; padding: 12px 14px; border-radius: 10px; font-size: 13px;
                      border: 1px solid color-mix(in srgb, var(--warn) 40%, transparent); background: color-mix(in srgb, var(--warn) 7%, var(--bg)); }
-  .devices-changes strong { color: var(--warn); }
+  .devices-changes strong { color: var(--warn-text); }
   .devices-changes ul { margin: 6px 0 0; padding-left: 18px; }
   .devices-changes li { margin: 2px 0; }
   .devices-setup-link { margin: 18px 0 0; font-size: 13px; color: var(--text-dim); }
@@ -736,7 +751,7 @@
   .setup-note .what { display: flex; flex-direction: column; gap: 2px; }
   .setup-note .what strong { font-size: 14px; }
   .setup-note .what span { color: var(--text-dim); }
-  .setup-note strong { color: var(--warn); }
+  .setup-note strong { color: var(--warn-text); }
   body.light-mode .setup-note strong { color: color-mix(in srgb, var(--warn) 55%, #000); }
   .setup-note.info { border-color: var(--border); background: var(--bg-2); }
   /* Each task has its hue, carried into its flow: replace sky, add green, retire violet. */
@@ -773,16 +788,16 @@
   .setup-start.done strong { font-size: 14px; }
   .setup-start.done .go { flex: none; white-space: nowrap; padding: 6px 12px; background: transparent; color: var(--text-dim); border: 1px solid var(--border); font-weight: 500; }
   .setup-state { display: inline-block; padding: 3px 9px; border-radius: 999px; font-size: 11px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; vertical-align: middle; margin-left: 10px; }
-  .setup-state.ok { color: var(--good); background: color-mix(in srgb, var(--good) 15%, transparent); }
-  .setup-state.todo { color: var(--warn); background: color-mix(in srgb, var(--warn) 15%, transparent); }
+  .setup-state.ok { color: var(--good-text); background: color-mix(in srgb, var(--good) 15%, transparent); }
+  .setup-state.todo { color: var(--warn-text); background: color-mix(in srgb, var(--warn) 15%, transparent); }
   .setup-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin: 14px 0; }
   .setup-stats div { padding: 12px 14px; border-radius: 10px; background: var(--bg-3); display: flex; flex-direction: column; gap: 2px; }
   .setup-stats b { font-size: 22px; }
   .setup-stats span { font-size: 12px; color: var(--text-dim); }
   .setup-stats .todo { box-shadow: inset 0 0 0 1px var(--warn); }
-  .setup-stats .todo b { color: var(--warn); }
+  .setup-stats .todo b { color: var(--warn-text); }
   .setup-found { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border-radius: 10px; background: var(--bg-3); margin: 14px 0; font-size: 13px; }
-  .setup-found .new { color: var(--good); }
+  .setup-found .new { color: var(--good-text); }
   .setup-tap-pick label { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; cursor: pointer; }
   .setup-tap-pick label.off { cursor: default; opacity: .6; }
   .setup-tap-pick span { color: var(--text-dim); font-size: 12px; }
@@ -795,7 +810,7 @@
   .setup-card .txt { flex: 1; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
   .setup-card strong { font-size: 14px; }
   .setup-card .txt span { font-size: 12px; color: var(--text-dim); }
-  .setup-card .go { color: var(--accent); font-size: 18px; }
+  .setup-card .go { color: var(--accent-text); font-size: 18px; }
   .setup-form { display: flex; flex-direction: column; gap: 12px; margin: 14px 0; max-width: 640px; }
   .setup-form .row { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
   .setup-form label { display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--text-dim); }
@@ -813,7 +828,7 @@
   .setup-banner a { font-weight: 600; }
   .setup-banner[hidden] { display: none; }
   /* The checklist ticks a step done from what the Pi sees, in green: amber is its to do. */
-  [data-task="system"] .setup-rail li.done .n { border-color: var(--good); color: var(--good); background: color-mix(in srgb, var(--good) 10%, transparent); }
+  [data-task="system"] .setup-rail li.done .n { border-color: var(--good); color: var(--good-text); background: color-mix(in srgb, var(--good) 10%, transparent); }
   .btn.task-go { background: var(--task); border-color: var(--task); color: #04121c; font-weight: 600; }
   .btn.task-go:hover:not(:disabled) { background: color-mix(in srgb, var(--task) 85%, #fff); }
   .setup-tasks { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 14px; margin-bottom: 22px; }
@@ -836,8 +851,8 @@
   .setup-taps li { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; }
   .setup-taps strong { font-size: 13px; }
   .setup-taps span { color: var(--text-dim); }
-  .setup-taps .lost { color: var(--warn); font-weight: 600; }
-  .setup-health .head a { margin-left: auto; font-size: 12px; color: var(--accent-2); }
+  .setup-taps .lost { color: var(--warn-text); font-weight: 600; }
+  .setup-health .head a { margin-left: auto; font-size: 12px; color: var(--accent-2-text); }
   .setup-bar { display: flex; gap: 2px; height: 12px; border-radius: 6px; overflow: hidden; background: var(--bg-3); }
   .setup-bar span { min-width: 6px; }
   .setup-key { display: flex; flex-wrap: wrap; gap: 6px 22px; font-size: 12px; color: var(--text-dim); }
@@ -870,30 +885,30 @@
   .setup-pick label { display: grid; grid-template-columns: 20px 64px minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 11px 14px;
                       border: 1px solid var(--border); border-radius: 8px; font-size: 13px; cursor: pointer; }
   .setup-pick label:has(input:checked) { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 6%, transparent); }
-  .setup-pick .quiet { color: var(--warn); }
+  .setup-pick .quiet { color: var(--warn-text); }
   .setup-pick .dim { color: var(--text-dim); }
   .setup-field { display: flex; flex-direction: column; gap: 6px; max-width: 420px; }
   .setup-field label { font-size: 12px; color: var(--text-dim); }
   .setup-field input { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 16px; padding: 10px 14px; min-width: 0; }
   .setup-check { font-size: 13px; }
-  .setup-check.good { color: var(--good); }
-  .setup-check.bad { color: var(--bad); }
+  .setup-check.good { color: var(--good-text); }
+  .setup-check.bad { color: var(--bad-text); }
   .setup-plan { margin: 0; border: 1px solid var(--border); border-radius: 10px; background: var(--bg); font-size: 14px; line-height: 1.55; }
   .setup-frames { font-size: 12px; color: var(--text-dim); }
   .setup-frames .mono { display: block; margin-top: 6px; word-break: break-all; line-height: 1.6; }
   .setup-progress { list-style: none; margin: 0; padding: 0; }
   .setup-progress li { display: grid; grid-template-columns: 22px 1fr; gap: 10px; padding: 9px 0; border-bottom: 1px solid var(--border); font-size: 14px; color: var(--text-faint); }
   .setup-progress li.done { color: var(--text); }
-  .setup-progress li.done::before { content: "✓"; color: var(--good); }
+  .setup-progress li.done::before { content: "✓"; color: var(--good-text); }
   .setup-progress li.now { color: var(--text); }
-  .setup-progress li.now::before { content: "◐"; color: var(--warn); }
+  .setup-progress li.now::before { content: "◐"; color: var(--warn-text); }
   .setup-progress li:not(.done):not(.now)::before { content: "○"; }
   .setup-wait { display: flex; align-items: center; gap: 18px; padding: 18px 20px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg); }
   .setup-wait strong { font-size: 16px; }
   .setup-done dl { display: grid; grid-template-columns: 130px minmax(0, 1fr); gap: 8px 16px; margin: 0; padding: 18px 20px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg); font-size: 14px; }
   .setup-done dt { color: var(--text-dim); }
   .setup-done dd { margin: 0; }
-  .setup-error { color: var(--bad); font-size: 13px; }
+  .setup-error { color: var(--bad-text); font-size: 13px; }
   .setup-actions { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 10px; margin-top: auto; padding-top: 8px; }
   .setup-actions .why { flex-basis: 100%; text-align: right; font-size: 12px; color: var(--text-dim); }
   @media (max-width: 760px) { .setup-rail { flex-basis: 100%; border-right: 0; border-bottom: 1px solid var(--border); } }
@@ -907,9 +922,9 @@
   .mesh-spark { display: block; width: 100%; height: 42px; margin-top: 4px; }
   .mesh-spark polyline { fill: none; stroke: var(--accent-2); stroke-width: 1.5; vector-effect: non-scaling-stroke; }
   .mesh-pill { padding: 1px 8px; border-radius: 99px; font-size: 11.5px; font-weight: 600; }
-  .mesh-pill.tier-good { color: var(--good); background: color-mix(in srgb, var(--good) 16%, transparent); }
-  .mesh-pill.tier-fair { color: var(--warn); background: color-mix(in srgb, var(--warn) 16%, transparent); }
-  .mesh-pill.tier-poor { color: var(--bad); background: color-mix(in srgb, var(--bad) 16%, transparent); }
+  .mesh-pill.tier-good { color: var(--good-text); background: color-mix(in srgb, var(--good) 16%, transparent); }
+  .mesh-pill.tier-fair { color: var(--warn-text); background: color-mix(in srgb, var(--warn) 16%, transparent); }
+  .mesh-pill.tier-poor { color: var(--bad-text); background: color-mix(in srgb, var(--bad) 16%, transparent); }
   .mesh-pill.tier-silent { color: var(--text-dim); background: var(--bg-3); }
   .mesh-link { stroke-width: 1.3; opacity: .7; }
   .mesh-link.tier-good { stroke: var(--good); } .mesh-link.tier-fair { stroke: var(--warn); }
@@ -928,7 +943,7 @@
   .mesh-tap text.mesh-tap-addr { fill: var(--text-dim); font-size: 10px; font-weight: 500; }
   td.tap-name { white-space: nowrap; }
   td.tap-model { white-space: nowrap; }
-  td.tap-model.star-only { color: var(--warn); font-weight: 600; }
+  td.tap-model.star-only { color: var(--warn-text); font-weight: 600; }
   td.tap-radio .tap-sub { font-size: 11px; color: var(--text-dim); }
   td.tap-model .tap-board { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 11px; color: var(--text-dim); font-weight: 400; }
   table.nodes .node-rating { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; font-size: 11px;
@@ -961,9 +976,9 @@
   .mesh-row-head { width: 120px; flex: none; display: flex; flex-direction: column; gap: 3px; }
   .mesh-row-name { font-size: 14px; font-weight: 600; }
   .mesh-row-med { font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums; }
-  .mesh-row.fair .mesh-row-med { color: var(--warn); } .mesh-row.poor .mesh-row-med { color: var(--bad); }
+  .mesh-row.fair .mesh-row-med { color: var(--warn-text); } .mesh-row.poor .mesh-row-med { color: var(--bad-text); }
   .mesh-row-k { font-size: 11px; color: var(--text-dim); }
-  .mesh-row.poor .mesh-row-poor { color: var(--bad); }
+  .mesh-row.poor .mesh-row-poor { color: var(--bad-text); }
   .mesh-cards { flex: 1; min-width: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); gap: 8px; }
   .mesh-card { font: inherit; text-align: left; color: inherit; cursor: pointer; display: flex; flex-direction: column; gap: 5px;
                padding: 8px 9px; border-radius: 8px; background: var(--bg-3); border: 1px solid var(--border); min-height: 96px; }
@@ -975,12 +990,12 @@
   .mesh-card.tier-good .mesh-card-dot { background: var(--good); } .mesh-card.tier-fair .mesh-card-dot { background: var(--warn); }
   .mesh-card.tier-poor .mesh-card-dot { background: var(--bad); } .mesh-card.tier-silent .mesh-card-dot { border: 1.5px dashed var(--text-faint); }
   .mesh-card-loss { font-size: 16px; font-weight: 600; font-variant-numeric: tabular-nums; }
-  .mesh-card-loss.fair { color: var(--warn); } .mesh-card-loss.poor { color: var(--bad); }
+  .mesh-card-loss.fair { color: var(--warn-text); } .mesh-card-loss.poor { color: var(--bad-text); }
   .mesh-card-bar { display: block; height: 4px; border-radius: 2px; background: var(--bg-4); overflow: hidden; }
   .mesh-card-bar i { display: block; height: 100%; background: var(--text-dim); }
   .mesh-card-bar i.fair { background: var(--warn); } .mesh-card-bar i.poor { background: var(--bad); }
   .mesh-card-sig { font-size: 10px; color: var(--text-faint); }
-  .mesh-card-via { align-self: flex-start; font-size: 10px; padding: 0 6px; border-radius: 4px; color: var(--accent-3);
+  .mesh-card-via { align-self: flex-start; font-size: 10px; padding: 0 6px; border-radius: 4px; color: var(--accent-3-text);
                    background: color-mix(in srgb, var(--accent-3) 16%, transparent); }
   .mesh-card-via.unknown { color: var(--text-dim); background: none; border: 1px dashed var(--text-dim); }
   /* An optimizer's settings (Devices › Settings): a drawer, a sheet on a phone. */
@@ -998,12 +1013,12 @@
   .smart-sub { color: var(--text-dim); font-size: 12px; margin-top: 3px; }
   .smart-close { width: 40px; height: 40px; flex: none; border-radius: 8px; border: 1px solid var(--border); background: none;
                  color: var(--text-dim); font-size: 20px; cursor: pointer; }
-  .smart-pill { font-size: 11.5px; font-weight: 600; padding: 2px 9px; border-radius: 99px; color: var(--good);
+  .smart-pill { font-size: 11.5px; font-weight: 600; padding: 2px 9px; border-radius: 99px; color: var(--good-text);
                 background: color-mix(in srgb, var(--good) 14%, transparent); }
-  .smart-pill.warn { color: var(--warn); background: color-mix(in srgb, var(--warn) 14%, transparent); }
+  .smart-pill.warn { color: var(--warn-text); background: color-mix(in srgb, var(--warn) 14%, transparent); }
   .smart-pill.quiet { color: var(--text-dim); background: var(--bg-4); }
   .smart-verdict { font-size: 13px; line-height: 1.45; padding: 10px 12px; border-radius: 8px; background: var(--bg-2); border: 1px solid var(--border); }
-  .smart-verdict.warn { color: var(--warn); background: color-mix(in srgb, var(--warn) 8%, var(--bg)); border-color: color-mix(in srgb, var(--warn) 35%, transparent); }
+  .smart-verdict.warn { color: var(--warn-text); background: color-mix(in srgb, var(--warn) 8%, var(--bg)); border-color: color-mix(in srgb, var(--warn) 35%, transparent); }
   .smart-table { display: flex; flex-direction: column; }
   .smart-cols, .smart-row { display: grid; grid-template-columns: minmax(0, 1fr) 92px 92px; gap: 8px; align-items: center; }
   .smart-cols { font-size: 11px; color: var(--text-faint); text-transform: uppercase; letter-spacing: .05em; padding-bottom: 6px; border-bottom: 1px solid var(--border); }
@@ -1011,7 +1026,7 @@
   .smart-group { font-size: 11px; color: var(--text-dim); font-weight: 600; padding: 10px 0 2px; }
   .smart-row { padding: 5px 8px; margin: 0 -8px; border-radius: 6px; font-size: 13px; }
   .smart-row.differs { background: color-mix(in srgb, var(--warn) 10%, transparent); }
-  .smart-row.differs .smart-val { color: var(--warn); font-weight: 700; }
+  .smart-row.differs .smart-val { color: var(--warn-text); font-weight: 700; }
   .smart-name { display: flex; flex-direction: column; min-width: 0; }
   .smart-code { font-size: 10.5px; color: var(--text-faint); font-family: ui-monospace, Menlo, monospace; }
   .smart-most { color: var(--text-dim); }
@@ -1070,7 +1085,7 @@
   .signin label { display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--text-dim); font-weight: 600; }
   .signin .input { min-width: 0; width: 100%; box-sizing: border-box; padding: 10px 12px; font-size: 14px; }
   .signin .input:focus-visible { border-color: var(--accent-2); outline: 2px solid color-mix(in srgb, var(--accent-2) 35%, transparent); outline-offset: 1px; }
-  .signin-error { margin: 0; font-size: 13px; color: var(--bad); }
+  .signin-error { margin: 0; font-size: 13px; color: var(--bad-text); }
   .signin-error:empty { display: none; }
   .signin .btn.primary { justify-content: center; padding: 11px 14px; font-size: 14px; }
   .signin .btn.primary:focus-visible { outline: 2px solid var(--accent-2); outline-offset: 2px; }
@@ -1092,19 +1107,19 @@
     display: inline-block; margin-left: 6px; padding: 2px 7px; border-radius: 4px; font-size: 10.5px;
     font-weight: 600; text-transform: uppercase; letter-spacing: .04em; white-space: nowrap; vertical-align: 1px;
   }
-  .node-new { background: rgba(74,222,128,0.15); color: var(--accent); }
-  .node-missing { background: rgba(248,113,113,0.15); color: var(--bad); }
-  .node-unset { background: rgba(251,191,36,0.15); color: var(--warn); }
+  .node-new { background: rgba(74,222,128,0.15); color: var(--accent-text); }
+  .node-missing { background: rgba(248,113,113,0.15); color: var(--bad-text); }
+  .node-unset { background: rgba(251,191,36,0.15); color: var(--warn-text); }
   .node-known-btn { margin-left: 8px; padding: 1px 8px; font-size: 11.5px; white-space: nowrap; vertical-align: 1px; }
   .panel-tile.known { opacity: .55; }
-  .topo-new strong { color: var(--accent); }
+  .topo-new strong { color: var(--accent-text); }
   .topo-ed-replace, .topo-ed-replace-pick { margin-top: 4px; font-size: 11.5px; max-width: 100%; }
   .topo-pending-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
   .topo-pending-row span { margin-right: auto; }
   .topo-pending-list { margin: 10px 0 0 18px; color: var(--text-dim); font-size: 12px; line-height: 1.6; }
 
   /* Topology editor (Edit layout) */
-  .topo-ed-error { color: var(--bad); font-size: 13px; margin: -8px 0 12px; }
+  .topo-ed-error { color: var(--bad-text); font-size: 13px; margin: -8px 0 12px; }
   .topo-ed-error:empty { display: none; }
   .topo-tray {
     background: var(--bg-2); border: 1px dashed var(--warn); border-radius: 10px; padding: 12px 14px;
@@ -1147,7 +1162,7 @@
     background: none; border: 1px solid var(--border); color: var(--text-dim);
     border-radius: 4px; padding: 2px 8px; font-size: 11px; cursor: pointer; margin-left: auto;
   }
-  .topo-del:hover { color: var(--bad); border-color: var(--bad); }
+  .topo-del:hover { color: var(--bad-text); border-color: var(--bad); }
 
   /* ===== Settings view ===== */
   .tools-card { background: var(--bg-2); border: 1px solid var(--border); border-radius: 10px; padding: 18px 20px; margin-bottom: 16px; }
@@ -1170,7 +1185,7 @@
   .danger-text { flex: 1; font-size: 13px; line-height: 1.45; }
   .danger-text strong { display: block; color: var(--text); font-size: 14px; margin-bottom: 3px; }
   .danger-text span { color: var(--text-dim); }
-  .btn.danger { background: rgba(248,113,113,0.15); border-color: rgba(248,113,113,0.4); color: var(--bad); }
+  .btn.danger { background: rgba(248,113,113,0.15); border-color: rgba(248,113,113,0.4); color: var(--bad-text); }
   .btn.danger:hover { background: rgba(248,113,113,0.25); }
   /* Device Configuration rows */
   .cfg-row { display: flex; gap: 14px; align-items: center; padding: 12px; background: var(--bg-3); border-radius: 6px; margin-bottom: 8px; flex-wrap: wrap; }
@@ -1234,8 +1249,8 @@
     padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: 600;
     text-transform: uppercase; letter-spacing: 0.4px;
   }
-  .alert-badge.warn { background: rgba(251,191,36,0.15); color: var(--warn); }
-  .alert-badge.bad  { background: rgba(248,113,113,0.15); color: var(--bad); }
+  .alert-badge.warn { background: rgba(251,191,36,0.15); color: var(--warn-text); }
+  .alert-badge.bad  { background: rgba(248,113,113,0.15); color: var(--bad-text); }
   .alert-badge.stale { background: rgba(138,150,173,0.15); color: var(--text-dim); }
   /* MPPT grouping inside an inverter card (shown when >1 string shares an MPPT) */
   .topo-mppt { border-left: 2px solid var(--bg-4); margin: 10px 0 10px 4px; padding-left: 12px; }
@@ -1855,7 +1870,7 @@
           <div class="cfg-ctrl"><input class="cfg-input" id="pi-takeover" type="number" min="2" max="60" placeholder="3"></div>
         </div>
         <div class="cfg-row" id="pi-cca-row" style="display:none">
-          <div class="cfg-text"><strong>Runs the whole bus</strong><span>Brings a TAP up from its factory address, sends the housekeeping, asks the optimizers their status questions and makes the two writes their answers call for, reads the TAP's radio settings at start, and opens the join window only while a panel is missing and for a while after sunrise</span><span id="pi-cca-state" style="color:var(--warn)"></span></div>
+          <div class="cfg-text"><strong>Runs the whole bus</strong><span>Brings a TAP up from its factory address, sends the housekeeping, asks the optimizers their status questions and makes the two writes their answers call for, reads the TAP's radio settings at start, and opens the join window only while a panel is missing and for a while after sunrise</span><span id="pi-cca-state" style="color:var(--warn-text)"></span></div>
           <div class="cfg-ctrl"><button class="btn" id="pi-cca-all" type="button" style="display:none">Turn them all on</button></div>
         </div>
         <div class="cfg-row" id="pi-morning-row" style="display:none">
@@ -2402,7 +2417,7 @@
           <input id="cca-ble-mac" type="text" placeholder="AA:BB:CC:DD:EE:FF" autocomplete="off" spellcheck="false"
                  style="flex:1;min-width:170px;padding:6px 8px;background:var(--bg-2);border:1px solid var(--border);border-radius:5px;color:var(--text);font-family:ui-monospace,Menlo,monospace;font-size:13px">
           <button class="btn" id="cca-ble-scan-btn">Scan</button>
-          <button class="btn" id="cca-ble-save-btn" style="border-color:var(--accent);color:var(--accent)">Save MAC</button>
+          <button class="btn" id="cca-ble-save-btn" style="border-color:var(--accent);color:var(--accent-text)">Save MAC</button>
           <button class="btn" id="cca-ble-revert-btn">Revert to YAML</button>
         </div>
         <div id="cca-ble-list" style="margin-top:10px"></div>
@@ -2419,8 +2434,8 @@
           <input id="cca-wifi-pwd" type="password" placeholder="Password (blank = open)" autocomplete="off"
             style="flex:1;min-width:140px;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text)">
           <button class="btn" id="cca-wifi-scan-btn">Scan</button>
-          <button class="btn" id="cca-wifi-join-btn" style="border-color:var(--accent);color:var(--accent)">Join WiFi</button>
-          <button class="btn" id="cca-wifi-clear-btn" style="border-color:var(--bad);color:var(--bad)">Clear WiFi</button>
+          <button class="btn" id="cca-wifi-join-btn" style="border-color:var(--accent);color:var(--accent-text)">Join WiFi</button>
+          <button class="btn" id="cca-wifi-clear-btn" style="border-color:var(--bad);color:var(--bad-text)">Clear WiFi</button>
         </div>
         <div style="color:var(--text-dim);font-size:12px;margin-top:8px">
           Scan to list nearby networks (click one to fill the SSID). Changing WiFi can drop the CCA's uplink.
@@ -2660,7 +2675,8 @@
     document.body.classList.toggle('light-mode', theme === 'light');
     document.getElementById('theme-toggle').textContent = theme === 'light' ? '☾' : '☀';
   }
-  const initialTheme = localStorage.getItem('tigoTheme') || 'dark';
+  // No choice saved yet: follow the device's own light or dark setting.
+  const initialTheme = localStorage.getItem('tigoTheme') || (matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
   applyTheme(initialTheme);
   document.getElementById('theme-toggle').addEventListener('click', () => {
     const next = document.body.classList.contains('light-mode') ? 'dark' : 'light';
@@ -4020,7 +4036,7 @@
           <td class="mono fw"${r.fw || r.rating ? ` title="${topoEscape([r.fw ? fwTitle(r.fw) : '', r.rating ? ratingTitle(r.rating) : ''].filter(Boolean).join('. '))}"` : ''}>${r.fw ? topoEscape(r.fw.version) : '—'}${r.rating ? `<div class="node-rating">${r.rating.watts} W</div>` : ''}</td>
           <td class="fw smart"${r.smart ? ` title="${topoEscape(smartTitle(r.smart, r.differs, r.smartPeers))}"` : ''}>${r.smart
             ? (r.smartPeers.placeholder ? '<button type="button" aria-haspopup="dialog">Not reported</button>'
-              : `<button type="button" aria-haspopup="dialog"${r.smart.stored && !r.differs ? '' : ' style="color:var(--warn)"'}>${r.smart.stored ? 'Stored' : 'Not stored'}${r.differs ? ' · differs' : ''}</button>`) : '—'}</td>
+              : `<button type="button" aria-haspopup="dialog"${r.smart.stored && !r.differs ? '' : ' style="color:var(--warn-text)"'}>${r.smart.stored ? 'Stored' : 'Not stored'}${r.differs ? ' · differs' : ''}</button>`) : '—'}</td>
         </tr>
       `;
     }
@@ -4432,10 +4448,10 @@
   // The tasks' pictures: the optimizer and TAP marks, in each task's hue.
   const SETUP_ART = {
     replace: `<span class="mark">${setupMark('optghost', 54, 46)}<svg class="mark-badge" width="22" height="22" viewBox="0 0 24 24" style="left:16px;top:9px" fill="none" stroke="var(--bad)" stroke-width="3" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></span>
-      ${SETUP_SWAP('var(--task)')}<span class="mark">${setupMark('opt', 54, 46)}${setupBadge('<path d="M7 12l4 4 6-7"/>', 'var(--good)', 'right:-4px;top:-4px')}</span>`,
-    add: `${setupMark('opt', 46, 40, 'opacity:.45')}<span class="mark">${setupMark('opt', 54, 46)}${setupBadge(SETUP_PLUS, 'var(--good)', 'right:-6px;top:-6px')}</span>`,
+      ${SETUP_SWAP('var(--task)')}<span class="mark">${setupMark('opt', 54, 46)}${setupBadge('<path d="M7 12l4 4 6-7"/>', 'var(--good-text)', 'right:-4px;top:-4px')}</span>`,
+    add: `${setupMark('opt', 46, 40, 'opacity:.45')}<span class="mark">${setupMark('opt', 54, 46)}${setupBadge(SETUP_PLUS, 'var(--good-text)', 'right:-6px;top:-6px')}</span>`,
     retire: `<span style="display:flex;flex-direction:column;align-items:center;gap:4px">${setupMark('optghost', 54, 46)}${SETUP_SHELF}</span>`,
-    addtap: `${setupMark('tap', 46, 46, 'opacity:.45')}<span class="mark">${setupMark('tap', 56, 56)}${setupBadge(SETUP_PLUS, 'var(--good)', 'right:-6px;top:10px')}</span>`,
+    addtap: `${setupMark('tap', 46, 46, 'opacity:.45')}<span class="mark">${setupMark('tap', 56, 56)}${setupBadge(SETUP_PLUS, 'var(--good-text)', 'right:-6px;top:10px')}</span>`,
     retiretap: `<span style="display:flex;flex-direction:column;align-items:center;gap:2px">${setupMark('tapghost', 52, 52)}${SETUP_SHELF}</span>`,
     replacetap: `${setupMark('tapghost', 46, 46)}${SETUP_SWAP('var(--text-faint)')}${setupMark('tap', 46, 46)}`,
   };
@@ -4450,11 +4466,11 @@
   // The review plan's marks: each line says what kind of step it is.
   const SETUP_MARK = {
     save: ['var(--text-dim)', '<path d="M5 4h11l3 3v13H5z"/><path d="M8 4v5h7V4"/>'],
-    out: ['var(--bad)', '<path d="M5 12h14"/>'],
-    in: ['var(--good)', '<path d="M12 5v14M5 12h14"/>'],
+    out: ['var(--bad-text)', '<path d="M5 12h14"/>'],
+    in: ['var(--good-text)', '<path d="M12 5v14M5 12h14"/>'],
     keep: ['var(--text-dim)', '<path d="M5 12l4 4 10-10"/>'],
-    wait: ['var(--warn)', '<circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/>'],
-    place: ['var(--accent-2)', '<path d="M4 8h13l-3-3"/><path d="M20 16H7l3 3"/>'],
+    wait: ['var(--warn-text)', '<circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/>'],
+    place: ['var(--accent-2-text)', '<path d="M4 8h13l-3-3"/><path d="M20 16H7l3 3"/>'],
   };
   const setupSvg = (body, color, size = 14) =>
     `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="${color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${body}</svg>`;
@@ -4572,7 +4588,7 @@
     const checks = setupChecks(d), keys = SETUP_STEPS.system.filter(k => k !== 'done');
     const left = keys.filter(k => !checks[k].ok);
     if (!left.length) html += `<button type="button" class="setup-start done" data-task="system" data-setup-start="system">
-      <span class="ico">${setupSvg('<path d="M5 12l4 4 10-10"/>', 'var(--good)', 18)}</span>
+      <span class="ico">${setupSvg('<path d="M5 12l4 4 10-10"/>', 'var(--good-text)', 18)}</span>
       <span class="in"><strong>Your system is set up</strong><span>All ${keys.length} steps of Set up a new system are done.</span></span>
       <span class="go">Review →</span></button>`;
     else html += `<button type="button" class="setup-start" data-task="system" data-setup-start="system"><span class="in"><strong>Set up a new system</strong>
@@ -4586,7 +4602,7 @@
       html += '<div class="setup-note info">Changes are disabled. To enable them, turn on <strong>Allow changes to the TAPs</strong> in Settings → Bus. You can still review each task and its planned changes.</div>';
     const quiet = d.opts.filter(o => o.quiet).sort((a, b) => (b.ageMs || 0) - (a.ageMs || 0))[0];
     if (quiet)
-      html += `<div class="setup-note"><span class="ico">${setupSvg('<path d="M12 8v5"/><path d="M12 16.5h.01"/><path d="M10.3 3.9 2.6 17.5A2 2 0 0 0 4.3 20.5h15.4a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/>', 'var(--warn)', 18)}</span>
+      html += `<div class="setup-note"><span class="ico">${setupSvg('<path d="M12 8v5"/><path d="M12 16.5h.01"/><path d="M10.3 3.9 2.6 17.5A2 2 0 0 0 4.3 20.5h15.4a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/>', 'var(--warn-text)', 18)}</span>
         <span class="what"><strong>${topoEscape(quiet.name)} has not reported for ${topoEscape(setupAgo(quiet.ageMs).replace(' ago', ''))}.</strong><span>If it has been physically replaced, update the system here.</span></span>
         <span style="flex-grow:1"></span><button type="button" class="btn task-go" data-task="replace" data-setup-start="replace" data-setup-old="${topoEscape(quiet.mac)}">Replace ${topoEscape(quiet.name)}</button></div>`;
     const task = (k, title, text) => `<button type="button" class="setup-task" data-task="${k}" data-setup-start="${k}"><span class="art">${SETUP_ART[k]}</span>
@@ -4613,10 +4629,10 @@
       const seg = (n, color) => n ? `<span style="flex:${n} 1 0;background:${color}"></span>` : '';
       html += `<div class="setup-health"><div class="head"><strong>Your system</strong><span>${w.in_table} optimizer${w.in_table === 1 ? '' : 's'}</span><a href="#nodes">See the list</a></div>
         <div class="setup-bar" role="img" aria-label="${nOk} joined and reporting, ${nSilent} joined but silent, ${nNever} listed but never joined">${seg(nOk, 'var(--good)')}${seg(nSilent, 'var(--warn)')}${seg(nNever, 'var(--accent-3)')}</div>
-        <div class="setup-key"><span><b style="color:var(--good)">${nOk}</b>joined, reporting</span>
-          <span><b style="color:var(--warn)">${nSilent}</b>joined, silent${names(silent)}</span>
-          <span><b style="color:var(--accent-3)">${nNever}</b>listed, never joined${names(never)}</span>
-          ${(t.waiting || []).length ? `<span><b style="color:var(--accent-2)">${t.waiting.length}</b>waiting to join</span>` : ''}</div>
+        <div class="setup-key"><span><b style="color:var(--good-text)">${nOk}</b>joined, reporting</span>
+          <span><b style="color:var(--warn-text)">${nSilent}</b>joined, silent${names(silent)}</span>
+          <span><b style="color:var(--accent-3-text)">${nNever}</b>listed, never joined${names(never)}</span>
+          ${(t.waiting || []).length ? `<span><b style="color:var(--accent-2-text)">${t.waiting.length}</b>waiting to join</span>` : ''}</div>
         ${taps.length > 1 ? `<ul class="setup-taps">${taps.map(x => {
           const dx = x.discovery || {};
           const state = x.state === 'running' ? '' : ` <span class="lost">${x.state === 'lost' ? 'not answering' : 'not answering; asked every 5 min'}</span>`;
@@ -4700,7 +4716,7 @@
     home: '<path d="M4 11l8-7 8 7"/><path d="M6 10v10h12V10"/>',
   };
   const setupCardBody = (icon, title, line) =>
-    `<span class="ico">${setupSvg(SETUP_CARD_ICON[icon], 'var(--accent)', 20)}</span><span class="txt"><strong>${title}</strong><span>${line}</span></span><span class="go" aria-hidden="true">→</span>`;
+    `<span class="ico">${setupSvg(SETUP_CARD_ICON[icon], 'var(--accent-text)', 20)}</span><span class="txt"><strong>${title}</strong><span>${line}</span></span><span class="go" aria-hidden="true">→</span>`;
   const setupCard = (href, icon, title, line, tab) =>
     `<a class="setup-card" href="${href}"${tab ? ` data-settings-tab="${tab}"` : ''}>${setupCardBody(icon, title, line)}</a>`;
   const SETUP_SYSTEM = {
@@ -5304,7 +5320,7 @@
       renderNodesTable();
     } catch (e) {
       document.getElementById('nodes-tbody').innerHTML =
-        `<tr><td colspan="10" style="text-align:center;color:var(--bad);padding:40px 0">refresh error: ${e.message}</td></tr>`;
+        `<tr><td colspan="10" style="text-align:center;color:var(--bad-text);padding:40px 0">refresh error: ${e.message}</td></tr>`;
     }
   }
 
@@ -5484,13 +5500,13 @@
       software:  ['since restart',         '',           'Deliberate reboot — an OTA update or a requested restart'],
       external:  ['since external reset',  '',           'The reset pin was asserted'],
       deepsleep: ['since deep sleep',      '',           'Woke from deep sleep'],
-      brownout:  ['after brownout',        'var(--warn)','Supply voltage sagged below the brownout threshold'],
-      unknown:   ['cause not recorded',    'var(--warn)','RTC memory lost the reset cause — typical of a hard power interruption'],
-      sdio:      ['after SDIO reset',      'var(--warn)','Reset over the SDIO interface'],
-      panic:     ['after a crash',         'var(--bad)', 'Firmware exception or abort — this is a bug, not the environment'],
-      task_wdt:  ['after task watchdog',   'var(--bad)', 'A task stopped feeding the watchdog — something stalled'],
-      int_wdt:   ['after interrupt watchdog','var(--bad)','Interrupts were blocked too long'],
-      other_wdt: ['after watchdog reset',  'var(--bad)', 'A watchdog fired'],
+      brownout:  ['after brownout',        'var(--warn-text)','Supply voltage sagged below the brownout threshold'],
+      unknown:   ['cause not recorded',    'var(--warn-text)','RTC memory lost the reset cause — typical of a hard power interruption'],
+      sdio:      ['after SDIO reset',      'var(--warn-text)','Reset over the SDIO interface'],
+      panic:     ['after a crash',         'var(--bad-text)', 'Firmware exception or abort — this is a bug, not the environment'],
+      task_wdt:  ['after task watchdog',   'var(--bad-text)', 'A task stopped feeding the watchdog — something stalled'],
+      int_wdt:   ['after interrupt watchdog','var(--bad-text)','Interrupts were blocked too long'],
+      other_wdt: ['after watchdog reset',  'var(--bad-text)', 'A watchdog fired'],
     };
     // Older firmware has no reset_reason field; say nothing rather than guess.
     const e = map[token];
@@ -6043,7 +6059,7 @@
       cfgRenderRows(await r.json());
       document.getElementById('cfg-status').textContent = '';
     } catch (e) {
-      document.getElementById('cfg-rows').innerHTML = `<span style="color:var(--bad)">Config unavailable: ${cloudEsc(e.message)}</span>`;
+      document.getElementById('cfg-rows').innerHTML = `<span style="color:var(--bad-text)">Config unavailable: ${cloudEsc(e.message)}</span>`;
     }
   }
 
@@ -6946,7 +6962,7 @@
     if (!/HTTP\s*(401|403)/.test(m)) return null;
     const code = m.match(/HTTP\s*(\d+)/)?.[1] || '401';
     return `<div style="border:1px solid var(--border);background:var(--bg-2);border-radius:10px;padding:16px 18px;line-height:1.55">
-      <div style="font-weight:600;color:var(--warn);margin-bottom:8px">CCA local HTTP access is disabled (HTTP ${code})</div>
+      <div style="font-weight:600;color:var(--warn-text);margin-bottom:8px">CCA local HTTP access is disabled (HTTP ${code})</div>
       <div style="color:var(--text-dim)">
         Your CCA answered the request with <strong>${code} Unauthorized</strong>. Tigo firmware
         <strong>4.0.4 and later</strong> (including <strong>4.0.5-ct</strong>) closes the local HTTP API
@@ -6973,7 +6989,7 @@
         target.innerHTML = lockdown;
         return 'blocked';
       }
-      target.innerHTML = `<div style="color:var(--bad)">Failed to retrieve CCA information: ${msg}</div>`;
+      target.innerHTML = `<div style="color:var(--bad-text)">Failed to retrieve CCA information: ${msg}</div>`;
       return 'error';
     }
 
@@ -7023,8 +7039,8 @@
       const border = i < rows.length - 1 ? 'border-bottom:1px solid var(--border)' : '';
       // The CCA flags some info rows (e.g. "Last Data Sync") stale via status>0 — amber the value.
       const flagged = st > 0;
-      const vstyle = flagged ? 'color:var(--warn)' : '';
-      const warn = flagged ? ' <span title="Flagged by the CCA" style="color:var(--warn)">⚠</span>' : '';
+      const vstyle = flagged ? 'color:var(--warn-text)' : '';
+      const warn = flagged ? ' <span title="Flagged by the CCA" style="color:var(--warn-text)">⚠</span>' : '';
       detail += `<div style="display:flex;justify-content:space-between;gap:12px;padding:4px 0;${border}"><span style="color:var(--text-dim)">${esc(k)}</span><span style="font-family:ui-monospace,Menlo,monospace;text-align:right;word-break:break-word;${vstyle}">${esc(v)}${warn}</span></div>`;
     });
 
@@ -7183,7 +7199,7 @@
     } catch (e) {
       ccaSetStatusBadge('failed');
       document.getElementById('cca-device-info').innerHTML =
-        `<div style="color:var(--bad)">Error loading CCA information: ${e.message}</div>`;
+        `<div style="color:var(--bad-text)">Error loading CCA information: ${e.message}</div>`;
       document.getElementById('cca-meta').textContent = `error: ${e.message}`;
     }
   }
@@ -7260,10 +7276,10 @@
       const data = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(data.message || ('HTTP ' + r.status));
       ccaBleRender(data);
-      res.innerHTML = `<span style="color:var(--good)">Targeting ${cloudEsc(data.active_mac)} — use Refresh from CCA to connect.</span>`;
+      res.innerHTML = `<span style="color:var(--good-text)">Targeting ${cloudEsc(data.active_mac)} — use Refresh from CCA to connect.</span>`;
       showToast('CCA MAC updated', 'ok');
     } catch (e) {
-      res.innerHTML = `<span style="color:var(--bad)">${cloudEsc(e.message)}</span>`;
+      res.innerHTML = `<span style="color:var(--bad-text)">${cloudEsc(e.message)}</span>`;
       showToast('MAC error: ' + e.message, 'bad');
     }
   }
@@ -7320,12 +7336,12 @@
       if (ccaShowUnreachable('CCA not reachable · showing last sync')) return;
       ccaSetStatusBadge('failed');
       info.innerHTML =
-        '<div style="color:var(--bad)">BLE refresh timed out — the CCA may be out of range or busy (it allows one BLE client at a time). Try again.</div>';
+        '<div style="color:var(--bad-text)">BLE refresh timed out — the CCA may be out of range or busy (it allows one BLE client at a time). Try again.</div>';
       document.getElementById('cca-meta').textContent = 'BLE refresh timed out';
     } catch (e) {
       if (ccaShowUnreachable('CCA not reachable · showing last sync')) return;
       ccaSetStatusBadge('failed');
-      info.innerHTML = `<div style="color:var(--bad)">Failed to refresh: ${e.message}</div>`;
+      info.innerHTML = `<div style="color:var(--bad-text)">Failed to refresh: ${e.message}</div>`;
     } finally {
       ccaBusy = false;
     }
@@ -7391,7 +7407,7 @@
     if (status.found_gateways != null) parts.push(`gateways: ${status.found_gateways}`);
     if (status.phase) parts.push(`phase: ${status.phase}`);
     const age = ageS != null ? ` <span style="color:var(--text-dim)">(${ageS}s ago)</span>` : '';
-    const color = running ? 'var(--text)' : 'var(--good)';
+    const color = running ? 'var(--text)' : 'var(--good-text)';
     el.innerHTML = `<span style="color:${color}">${parts.join(' · ')}</span>${age}`;
     return running;
   }
@@ -7430,7 +7446,7 @@
         if (data.status && !running) { break; }  // CCA reports complete
       }
     } catch (e) {
-      el.innerHTML = `<span style="color:var(--bad)">Discovery failed: ${e.message}</span>`;
+      el.innerHTML = `<span style="color:var(--bad-text)">Discovery failed: ${e.message}</span>`;
     } finally {
       ccaDiscovering = false;
       ccaBusy = false;
@@ -7452,7 +7468,7 @@
         result.networks.forEach((n, i) => {
           const sig = esc(`${n.signal ?? ''}${n.protected ? ' 🔒' : ''}${n.connected ? ' ✓' : ''}`);
           const name = n.ssid
-            ? `<span class="cca-ssid-pick" data-i="${i}" title="Click to use this SSID" style="cursor:pointer;color:var(--accent);text-decoration:underline">${esc(n.ssid)}</span>`
+            ? `<span class="cca-ssid-pick" data-i="${i}" title="Click to use this SSID" style="cursor:pointer;color:var(--accent-text);text-decoration:underline">${esc(n.ssid)}</span>`
             : `<span style="color:var(--text-dim)">(hidden)</span>`;
           rows += `<div style="display:flex;justify-content:space-between;gap:12px;padding:2px 0">${name}<span style="font-family:ui-monospace,Menlo,monospace">${sig}</span></div>`;
         });
@@ -7497,9 +7513,9 @@
         if (data.result && data.age_s != null && data.age_s <= elapsed + 3) { ccaNetRender(label, data.result, data.age_s); return; }
         el.innerHTML = `<span style="color:var(--text-dim)"><span class="spinner" style="width:13px;height:13px;vertical-align:-2px;margin-right:6px"></span>Querying ${label} over BLE… (${Math.round(elapsed)} s)</span>`;
       }
-      el.innerHTML = `<span style="color:var(--bad)">${label} timed out — the CCA may be out of range or busy (one BLE client at a time).</span>`;
+      el.innerHTML = `<span style="color:var(--bad-text)">${label} timed out — the CCA may be out of range or busy (one BLE client at a time).</span>`;
     } catch (e) {
-      el.innerHTML = `<span style="color:var(--bad)">${label} failed: ${e.message}</span>`;
+      el.innerHTML = `<span style="color:var(--bad-text)">${label} failed: ${e.message}</span>`;
     } finally {
       ccaBusy = false;
     }
@@ -7512,7 +7528,7 @@
     const ssid = document.getElementById('cca-wifi-ssid').value.trim();
     const pwd = document.getElementById('cca-wifi-pwd').value;
     const res = document.getElementById('cca-wifi-result');
-    if (!ssid) { res.innerHTML = '<span style="color:var(--bad)">Enter an SSID first.</span>'; return; }
+    if (!ssid) { res.innerHTML = '<span style="color:var(--bad-text)">Enter an SSID first.</span>'; return; }
     if (!(await uiAsk({ title: `Join the CCA to WiFi "${ssid}"?`,
                         body: 'If the network or password is wrong the CCA can lose its uplink. That is recoverable from the Tigo app.',
                         ok: 'Join' }))) return;
@@ -7525,7 +7541,7 @@
       res.innerHTML = 'Requested — give it ~15 s, then <b>Refresh from CCA</b> to confirm in Network status.';
       document.getElementById('cca-wifi-pwd').value = '';
     } catch (e) {
-      res.innerHTML = `<span style="color:var(--bad)">Join failed: ${e.message}</span>`;
+      res.innerHTML = `<span style="color:var(--bad-text)">Join failed: ${e.message}</span>`;
     } finally {
       ccaBusy = false;
     }
@@ -7543,9 +7559,9 @@
       const r = await apiFetch('/api/cca/network/wifi-clear', { method: 'POST' });
       const j = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(j.message || `failed (${r.status})`);
-      res.innerHTML = '<span style="color:var(--good)">WiFi clear requested.</span>';
+      res.innerHTML = '<span style="color:var(--good-text)">WiFi clear requested.</span>';
     } catch (e) {
-      res.innerHTML = `<span style="color:var(--bad)">Clear failed: ${e.message}</span>`;
+      res.innerHTML = `<span style="color:var(--bad-text)">Clear failed: ${e.message}</span>`;
     } finally {
       ccaBusy = false;
     }
@@ -7575,7 +7591,7 @@
     const email = document.getElementById('cloud-cfg-email').value.trim();
     const pwd = document.getElementById('cloud-cfg-pwd').value;
     const res = document.getElementById('cloud-cfg-result');
-    if (!email || !pwd) { res.innerHTML = '<span style="color:var(--bad)">Enter email and password.</span>'; return; }
+    if (!email || !pwd) { res.innerHTML = '<span style="color:var(--bad-text)">Enter email and password.</span>'; return; }
     const btn = document.getElementById('cloud-cfg-connect');
     const orig = btn.textContent; btn.disabled = true; btn.textContent = 'Connecting…';
     res.innerHTML = '<span style="color:var(--text-dim)">Logging into Tigo cloud… (~10 s)</span>';
@@ -7584,13 +7600,13 @@
       const j = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(j.message || `failed (${r.status})`);
       document.getElementById('cloud-cfg-pwd').value = '';
-      res.innerHTML = '<span style="color:var(--good)">Connected ✓</span>';
+      res.innerHTML = '<span style="color:var(--good-text)">Connected ✓</span>';
       showToast('Connected to Tigo cloud ✓', 'ok');
       cloudUiSync();
       refreshCloudStatus();
       setTimeout(cloudConfigClose, 700);
     } catch (e) {
-      res.innerHTML = `<span style="color:var(--bad)">${e.message}</span>`;
+      res.innerHTML = `<span style="color:var(--bad-text)">${e.message}</span>`;
     } finally {
       btn.disabled = false; btn.textContent = orig;
     }
@@ -7705,7 +7721,7 @@
     const flagged = list.filter(eq => cloudWorstCode(eq) > 0);
     document.getElementById('cloudstatus-issues-card').style.borderLeft = flagged.length ? `3px solid ${worst === 2 ? 'var(--bad)' : '#e6a700'}` : '';
     issEl.innerHTML = !flagged.length
-      ? '<span style="color:var(--good)">No issues — all equipment OK.</span>'
+      ? '<span style="color:var(--good-text)">No issues — all equipment OK.</span>'
       : flagged.map(eq => {
         const checks = (eq.equipmentStatusesLatest || []).filter(s => (s.statusCode || 0) > 0).map(s => {
           const data = cloudFmtData(s.data, s.statusType);
@@ -7812,7 +7828,7 @@
       const lr = await apiFetch('/api/cloud/equipment?view=latest');
       if (lr.ok) cloudRenderLatest((await lr.json()).data);
       else {
-        document.getElementById('cloudstatus-overall').innerHTML = '<span style="color:var(--bad)">Failed</span>';
+        document.getElementById('cloudstatus-overall').innerHTML = '<span style="color:var(--bad-text)">Failed</span>';
         ['cloudstatus-cca', 'cloudstatus-panels', 'cloudstatus-issues', 'cloudstatus-equipment']
           .forEach(id => { document.getElementById(id).textContent = '—'; });
       }
@@ -9081,7 +9097,7 @@
         `last update ${new Date().toLocaleTimeString()}`;
     } catch (e) {
       document.getElementById('topo-tree').innerHTML =
-        `<div class="topo-empty" style="color:var(--bad)">Error loading topology: ${topoEscape(e.message)}</div>`;
+        `<div class="topo-empty" style="color:var(--bad-text)">Error loading topology: ${topoEscape(e.message)}</div>`;
       document.getElementById('topo-meta').textContent = `error: ${e.message}`;
     }
   }
