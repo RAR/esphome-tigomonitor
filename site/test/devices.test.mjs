@@ -142,7 +142,7 @@ test("Devices, on the Pi: a Settings cell opens that optimizer's settings, named
     r.querySelector('.smart-most').textContent, r.classList.contains('differs')]));
   // The odd one out: its row marked, beside what most K8s have.
   await openFor(7);
-  assert.match(await page.textContent('#smart-panel h3'), new RegExp(`^${dev[7].name}`));
+  assert.match(await page.textContent('#smart-panel h2'), new RegExp(`^${dev[7].name}`));
   assert.match(await page.textContent('#smart-panel .smart-verdict'), /Differs from 5 of the 6 K8s in one setting/);
   const r7 = await rows();
   assert.equal(r7.length, 10);
@@ -167,8 +167,8 @@ test("Devices, on the Pi: a Settings cell opens that optimizer's settings, named
   // zeros and a flag that can't be checked.
   await openFor(5);
   assert.equal((await rows()).length, 0);
-  assert.equal((await page.textContent('#smart-panel h3 .smart-pill')).trim(), 'Not reported');
-  assert.equal(await page.$eval('#smart-panel h3 .smart-pill', (p) => p.classList.contains('warn')), false);
+  assert.equal((await page.textContent('#smart-panel h2 .smart-pill')).trim(), 'Not reported');
+  assert.equal(await page.$eval('#smart-panel h2 .smart-pill', (p) => p.classList.contains('warn')), false);
   assert.match(await page.textContent('#smart-panel'), /H9 firmware doesn't report its settings/);
   assert.doesNotMatch(await page.textContent('#smart-panel'), /not stored/i);
   // But its MPPT parameters it does report, as every firmware does.

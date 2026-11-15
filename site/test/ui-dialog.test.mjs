@@ -57,7 +57,7 @@ test('asking first: Cancel, Escape and a click outside send nothing; the action 
   await page.click('#tools-reset-peak');
   await page.waitForSelector('#ui-dialog[open]');
   assert.equal(await page.getAttribute('#ui-dialog', 'role'), 'alertdialog');
-  assert.equal(await page.textContent('#ui-dialog h3'), 'Reset every peak-power value?');
+  assert.equal(await page.textContent('#ui-dialog h2'), 'Reset every peak-power value?');
   assert.equal(await page.textContent('#ui-dialog [data-answer="ok"]'), 'Reset peaks');
   assert.match(await page.getAttribute('#ui-dialog [data-answer="ok"]', 'class'), /\bdanger\b/);
   // A red action starts on Cancel, so Enter doesn't take it.
