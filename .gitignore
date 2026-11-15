@@ -10,7 +10,7 @@
 components/tigo_server/web_assets.h
 
 # Astro docs site
-site/node_modules/
+site/node_modules
 site/dist/
 site/.astro/
 # Docs screenshots are regenerated from components/tigo_server/web/app.html

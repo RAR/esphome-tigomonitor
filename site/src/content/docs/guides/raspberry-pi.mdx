@@ -126,6 +126,8 @@ UART** (`/dev/serial0`).
   last. Every page says so in a banner until you set one. Turning the
   array's output off always needs the password. An install that already
   had a settings file never gets setup mode.
+
+<ThemedShot name="pi-setup" alt="System setup — the Set up a new system checklist, then a card for each optimizer and TAP task." />
 - **Optimizers:** replace, add or retire one, step by step, each change
   checked before anything is sent. These need the Pi running the bus and
   **Allow changes to the TAPs** on (Settings → Bus).
@@ -135,10 +137,12 @@ UART** (`/dev/serial0`).
     TAPs, gives the new one its radio settings (a channel at least two from
     your other TAPs', a network ID made from the Pi's own and a new key,
     which the TAP saves), and names it. A check shows the channel and
-    network ID first; giving them needs **Allow changes to the TAPs**. The
-    radio settings were tested on a bench TAP, not yet on a roof. Allowing it, and stopping again, restarts the bus master,
-    a few seconds without polling, and looking for TAPs stops polling for
-    about 30 seconds.
+    network ID first; giving them needs **Allow changes to the TAPs**. We
+    tested the radio settings on two bench TAPs, an H1 and a G8, and both
+    kept them through a power cycle; on a roof, so far only a TAP's mesh
+    size has been changed this way. Allowing it, and stopping again,
+    restarts the bus master, a few seconds without polling, and looking for
+    TAPs stops polling for about 30 seconds.
   - **Retire a TAP** drops a TAP that has gone for good, so it stops showing
     as not answering. One still answering can't be retired.
   - Replacing a TAP isn't offered yet.
@@ -214,7 +218,10 @@ the grid keeps empty squares on every side, so you can add to the drawing
 in any direction. On a keyboard, select a placed panel and move it with the
 arrow keys, turn it between portrait and landscape with **R**, or send it
 back to the list with **Delete**. Dropping one panel on another swaps them.
-Choose **Save array** when it matches.
+Choose **Save array** when it matches. The drawing is saved by each panel's
+barcode, so it stays right when the TAP gives the optimizers new addresses.
+
+<ThemedShot name="pi-array" alt="Topology › Array — two roof faces drawn panel by panel, each shaded by its power, with the TAP marked on the panel it sits under." />
 
 The drawing is kept apart from the string layout: that says how the
 panels are wired, this says where they are.
@@ -388,11 +395,11 @@ Settings → Bus names it, with **Turn them all on**.
 One switch stays: **Allow changes to the TAPs**, off until you turn it on.
 It lets **System setup** add, remove and replace optimizers on a TAP's list,
 and take on or retire a TAP. Its checks (dry runs) work with it off. Taking
-on a new TAP (experimental, tested against simulated TAPs only) brings every
-TAP on the bus up again: each known TAP keeps its address, a new one gets
-the next free and has it stored, and polling stops for about 30 seconds. The
-new TAP must already have its radio settings from a CCA: the Pi never writes
-them.
+on a new TAP (experimental) brings every TAP on the bus up again: each known
+TAP keeps its address, a new one gets the next free and has it stored, and
+polling stops for about 30 seconds. On a bench with two TAPs this matched a
+CCA's bring-up frame for frame. **Add a TAP** then gives the new TAP its
+radio settings; a TAP a CCA has already set up keeps its own.
 
 **A dead master is not a fail-safe.** On the roof we measured, with no
 master at all, the array kept producing for the 8 to 10 minutes we watched
