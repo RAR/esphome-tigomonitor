@@ -86,7 +86,9 @@ test('Devices, on the Pi: the TAP, and each optimizer with its firmware', async 
   assert.match(await row(dev[0].addr), /K8\.0120 \(2D\)/);
   // An update shows what it replaced.
   assert.match(await row(dev[4].addr), /K8\.0130 \(2D\)/);
-  assert.match(await page.$eval(`#nodes-tbody tr[data-addr="${dev[4].addr}"] .fw`, (td) => td.title), /was K8\.0120 \(2D\)/);
+  // Its row opens to say what it replaced, and when.
+  await page.click(`#nodes-tbody tr[data-addr="${dev[4].addr}"] .node-toggle`);
+  assert.match(await page.textContent(`#nd-${dev[4].addr.toUpperCase()}`), /Was\s*K8\.0120 \(2D\)/);
   assert.equal(await page.isVisible('table.nodes thead th.fw'), true);
   assert.deepEqual(errors, []);
   await ctx.close();
@@ -96,90 +98,94 @@ test("Devices, on the Pi: each optimizer's settings, stored or not, and the odd 
   const { page, ctx, errors } = await open(true);
   await page.waitForFunction(() => /Not reported/.test(document.getElementById('nodes-tbody').textContent));
   const dev = routes['/api/devices'].devices;
-  const cell = (addr) => page.$eval(`#nodes-tbody tr[data-addr="${addr}"] td.smart`, (td) => [td.textContent.trim(), td.title,
-    !!(td.querySelector('button') && td.querySelector('button').style.color)]);
+  const cell = (addr) => page.$eval(`#nodes-tbody tr[data-addr="${addr}"] td.smart`, (td) => [td.textContent.trim(), !!td.querySelector('.warn')]);
+  const detail = async (addr) => {
+    await page.click(`#nodes-tbody tr[data-addr="${addr}"] .node-toggle`);
+    return page.textContent(`#nd-${addr.toUpperCase()}`);
+  };
   assert.deepEqual((await cell(dev[0].addr))[0], 'Stored');
   // An H9 answers with fixed zeros and a flag that reads N on every read (S
   // only in the reply to a write), so neither says what it holds: "Not
   // reported", in no warning colour, whichever flag it last gave, and never
   // compared.
-  const [n5, t5, warn5] = await cell(dev[5].addr);
+  const [n5, warn5] = await cell(dev[5].addr);
   assert.equal(n5, 'Not reported');
   assert.equal(warn5, false);
-  assert.doesNotMatch(t5, /The same as|Differs|not stored/i);
-  assert.match(t5, /H9 firmware answers fixed zeros/);
-  assert.match(t5, /0000 0000 0000 0000 0000 0000 0000 0000 0000 N 00 0000 0000 0000 00/);
+  const d5 = await detail(dev[5].addr);
+  assert.doesNotMatch(d5, /The same as|Differs|not stored/i);
+  assert.match(d5, /H9 firmware doesn't report its settings/);
+  assert.match(d5, /0000 0000 0000 0000 0000 0000 0000 0000 0000 N 00 0000 0000 0000 00/);
   assert.equal((await cell(dev[6].addr))[0], 'Not reported');
-  const [n7, t7] = await cell(dev[7].addr);
+  const [n7, warn7] = await cell(dev[7].addr);
   assert.equal(n7, 'Stored · differs');
-  assert.match(t7, /Differs from 5 of the 6 on K8 firmware that answered/);
-  // Each setting by the CCA's name and unit; the one that differs, against
-  // what most report. The K8's answer is cut short: its last "01" is the
-  // start of UclLimit, so it's neither named nor shown.
-  // 0FFF is the most a voltage field holds: no limit, not 204.75 V.
-  assert.match(t7, /HwVout 179\.20 V, where most have no limit \(max\)/i);
-  const [, t0] = await cell(dev[0].addr);
-  assert.match(t0, /SwVout no limit \(max\)/i);
-  assert.match(t0, /UvinLvHi 17\.00 V/);
-  assert.match(t0, /AcLoss 0/);
-  assert.doesNotMatch(t0, /UclLimit|BaseOverride|\b01\b/);
+  assert.equal(warn7, true);
+  assert.match(await detail(dev[7].addr), /Differs from 5 of the 6 K8s in one setting/);
   assert.equal((await cell(dev[9].addr))[0], '—');
   assert.equal(await page.isVisible('table.nodes thead th.smart'), true);
   assert.deepEqual(errors, []);
   await ctx.close();
 });
 
-test("Devices, on the Pi: a Settings cell opens that optimizer's settings, named, beside what its family has", async () => {
+test("Devices, on the Pi: a row opens in place to show that optimizer, its settings beside what its family has", async () => {
   const { page, ctx, errors } = await open(true);
   await page.waitForFunction(() => /Not reported/.test(document.getElementById('nodes-tbody').textContent));
   const dev = routes['/api/devices'].devices;
-  const openFor = async (i) => {
-    await page.click(`#nodes-tbody tr[data-addr="${dev[i].addr}"] td.smart button`);
-    await page.waitForSelector('#smart-panel[open]');
-  };
-  const rows = (sel = '.smart-row:not(.mppt-row)') => page.$$eval(`#smart-panel ${sel}`, (rs) => rs.map((r) => [
+  const id = (i) => `#nd-${dev[i].addr.toUpperCase()}`;
+  const toggle = (i) => `#nodes-tbody tr[data-addr="${dev[i].addr}"] .node-toggle`;
+  const rows = (i, sel = '.smart-row:not(.mppt-row)') => page.$$eval(`${id(i)} ${sel}`, (rs) => rs.map((r) => [
     r.querySelector('.smart-code').textContent, r.querySelector('.smart-val').textContent,
     r.querySelector('.smart-most').textContent, r.classList.contains('differs')]));
+  // Closed to start; a click anywhere on the row opens it, under the row.
+  assert.equal(await page.$(id(7)), null);
+  assert.equal(await page.getAttribute(toggle(7), 'aria-expanded'), 'false');
+  await page.click(`#nodes-tbody tr[data-addr="${dev[7].addr}"] td.num >> nth=0`);
+  await page.waitForSelector(id(7));
+  assert.equal(await page.getAttribute(toggle(7), 'aria-expanded'), 'true');
+  assert.equal(await page.$eval(id(7), (tr) => tr.previousElementSibling.dataset.addr), dev[7].addr);
+  // What it is, its firmware and its rating.
+  const text = await page.textContent(id(7));
+  assert.match(text, new RegExp(dev[7].barcode));
+  assert.match(text, /Rated\s*75 V, 700 W/);
+  assert.match(text, /ESO075V700W/);
   // The odd one out: its row marked, beside what most K8s have.
-  await openFor(7);
-  assert.match(await page.textContent('#smart-panel h2'), new RegExp(`^${dev[7].name}`));
-  assert.match(await page.textContent('#smart-panel .smart-verdict'), /Differs from 5 of the 6 K8s in one setting/);
-  const r7 = await rows();
+  assert.match(text, /Differs from 5 of the 6 K8s in one setting/);
+  const r7 = await rows(7);
   assert.equal(r7.length, 10);
   assert.deepEqual(r7.find((r) => r[0] === 'HwVout'), ['HwVout', '179.20 V', 'No limit (max)', true]);
   assert.deepEqual(r7.find((r) => r[0] === 'SwVout'), ['SwVout', 'No limit (max)', 'No limit (max)', false]);
   assert.equal(r7.filter((r) => r[3]).length, 1);
-  assert.match(await page.textContent('#smart-panel'), /never arrive/);
-  assert.match(await page.textContent('#smart-panel .smart-raw'), /0E00 .* S 00 …$/);
+  assert.match(text, /never arrive/);
+  assert.match(text, /0E00 .* S 00 …/);
   // Its four MPPT parameters, from its answer to ^00Mppt, beside what most
   // optimizers report; the same as most here.
-  assert.deepEqual(await rows('.mppt-row'), [
+  assert.deepEqual(await rows(7, '.mppt-row'), [
     ['MPPT 5', '18', '18', false], ['MPPT 6', '0.100 V', '0.100 V', false],
     ['MPPT 7', '8', '8', false], ['MPPT 8', '9.0 V', '9.0 V', false]]);
-  await page.keyboard.press('Escape');
-  await page.waitForSelector('#smart-panel:not([open])', { state: 'attached' });
+  // It stays open through the next poll, and another can open beside it.
+  await page.evaluate(() => renderNodesTable());
+  assert.ok(await page.$(id(7)));
   // One whose PIV activation current differs: marked, whatever its ^00Smrt.
-  await openFor(3);
-  assert.deepEqual((await rows('.mppt-row')).filter((r) => r[3]), [['MPPT 7', '10', '8', true]]);
-  await page.keyboard.press('Escape');
-  await page.waitForSelector('#smart-panel:not([open])', { state: 'attached' });
-  // An H9: no table, no stored or not; it says the firmware answers fixed
-  // zeros and a flag that can't be checked.
-  await openFor(5);
-  assert.equal((await rows()).length, 0);
-  assert.equal((await page.textContent('#smart-panel h2 .smart-pill')).trim(), 'Not reported');
-  assert.equal(await page.$eval('#smart-panel h2 .smart-pill', (p) => p.classList.contains('warn')), false);
-  assert.match(await page.textContent('#smart-panel'), /H9 firmware doesn't report its settings/);
-  assert.doesNotMatch(await page.textContent('#smart-panel'), /not stored/i);
-  // But its MPPT parameters it does report, as every firmware does.
-  assert.equal((await rows('.mppt-row')).length, 4);
-  await page.click('#smart-panel .smart-close');
-  await page.waitForSelector('#smart-panel:not([open])', { state: 'attached' });
-  // A phone: the same panel, as a sheet along the bottom.
+  await page.click(toggle(3));
+  await page.waitForSelector(id(3));
+  assert.deepEqual((await rows(3, '.mppt-row')).filter((r) => r[3]), [['MPPT 7', '10', '8', true]]);
+  // The toggle closes it again, and keeps the keyboard where it was.
+  await page.focus(toggle(3));
+  await page.keyboard.press('Enter');
+  await page.waitForSelector(id(3), { state: 'detached' });
+  assert.equal(await page.evaluate(() => document.activeElement.classList.contains('node-toggle')), true);
+  // An H9: no settings table, no stored or not; it says the firmware answers
+  // fixed zeros. But its MPPT parameters it does report, as every firmware does.
+  await page.click(toggle(5));
+  await page.waitForSelector(id(5));
+  assert.equal((await rows(5)).length, 0);
+  assert.equal((await page.textContent(`${id(5)} .smart-pill`)).trim(), 'Not reported');
+  assert.match(await page.textContent(id(5)), /H9 firmware doesn't report its settings/);
+  assert.doesNotMatch(await page.textContent(id(5)), /not stored/i);
+  assert.equal((await rows(5, '.mppt-row')).length, 4);
+  // A phone: the details fit the screen, though the table scrolls sideways.
   await page.setViewportSize({ width: 390, height: 844 });
-  await openFor(0);
-  const box = await page.$eval('#smart-panel', (d) => { const r = d.getBoundingClientRect(); return [r.left, r.bottom, r.width]; });
-  assert.ok(box[0] <= 1 && Math.abs(box[1] - 844) <= 1 && box[2] >= 388, `sheet at ${box}`);
+  const w = await page.$eval(`${id(7)} .nd`, (d) => d.getBoundingClientRect().width);
+  assert.ok(w <= 390, `details ${w} px wide`);
   assert.deepEqual(errors, []);
   await ctx.close();
 });

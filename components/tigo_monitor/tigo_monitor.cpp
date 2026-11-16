@@ -3296,7 +3296,7 @@ void TigoMonitorComponent::match_cca_to_uart(const char *json_response) {
            cca_panel_count, matched_count);
 
   if (layout_manual_) {
-    std::vector<layout::Assignment> incoming;
+    layout::Assignments incoming;
     for (const auto &m : matches)
       incoming.push_back({to_std_string(m.node->long_address), m.label, m.string_label, m.mppt_label});
     offer_layout("cca", std::move(incoming), {});

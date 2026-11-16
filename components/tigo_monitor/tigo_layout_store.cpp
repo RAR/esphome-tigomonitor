@@ -127,7 +127,7 @@ void TigoMonitorComponent::save_string_prefs_(const std::string &label, const st
   this->cached_pref_<uint16_t>(fnv1_hash(key)).save(&rating_w);
 }
 
-void TigoMonitorComponent::write_assignments_(const std::vector<layout::Assignment> &as, bool clear_unlisted) {
+void TigoMonitorComponent::write_assignments_(const layout::Assignments &as, bool clear_unlisted) {
   std::map<std::string, const layout::Assignment *> by_bc;
   for (const auto &a : as) by_bc[a.barcode] = &a;
   for (auto &n : node_table_) {
@@ -165,9 +165,9 @@ std::map<std::string, std::string> TigoMonitorComponent::layout_mppt_names() con
   return out;
 }
 
-std::vector<layout::Assignment> TigoMonitorComponent::current_assignments() const {
+layout::Assignments TigoMonitorComponent::current_assignments() const {
   StateLock lock(state_mutex_);
-  std::vector<layout::Assignment> out;
+  layout::Assignments out;
   for (const auto &n : node_table_)
     if (!n.long_address.empty())
       out.push_back({to_std_string(n.long_address), to_std_string(n.cca_label), to_std_string(n.cca_string_label),
@@ -177,7 +177,7 @@ std::vector<layout::Assignment> TigoMonitorComponent::current_assignments() cons
 
 layout::Tree TigoMonitorComponent::layout_tree(bool &manual, std::string &pending_source, size_t &pending_changes) {
   StateLock lock(state_mutex_);
-  std::vector<layout::NodeView> nodes;
+  layout::NodeViews nodes;
   for (const auto &n : node_table_)
     nodes.push_back({to_std_string(n.long_address), to_std_string(n.addr), to_std_string(n.cca_label),
                      to_std_string(n.cca_string_label), to_std_string(n.cca_mppt_label)});
@@ -227,10 +227,10 @@ std::string TigoMonitorComponent::set_layout(const layout::Layout &l) {
   return "";
 }
 
-layout::Offer TigoMonitorComponent::offer_layout(const char *source, std::vector<layout::Assignment> incoming,
+layout::Offer TigoMonitorComponent::offer_layout(const char *source, layout::Assignments incoming,
                                                  layout::InverterMppts inverters) {
   StateLock lock(state_mutex_);
-  bool changes = !layout::diff(current_assignments(), incoming).empty() ||
+  bool changes = layout::differs(current_assignments(), incoming) ||
                  (!inverters.empty() && inverters != inverter_mppts_());
   uint32_t fp = layout::fingerprint(incoming, inverters);
   layout::Offer o = layout::decide(layout_manual_, changes, fp, layout_declined_[source]);
@@ -244,7 +244,7 @@ layout::Offer TigoMonitorComponent::offer_layout(const char *source, std::vector
   return o;
 }
 
-bool TigoMonitorComponent::layout_pending(std::string &source, std::vector<layout::Change> &changes,
+bool TigoMonitorComponent::layout_pending(std::string &source, layout::Changes &changes,
                                           layout::InverterMppts &now, layout::InverterMppts &then) {
   StateLock lock(state_mutex_);
   if (!held_layout_) return false;

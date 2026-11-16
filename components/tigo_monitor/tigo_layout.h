@@ -13,8 +13,15 @@
 // have no panels yet.
 //
 // Header-only and free of ESPHome dependencies, so the rules are exercised on
-// the host (tests/host/layout_test.cpp). Plain std types: a layout is a few
-// KB at most.
+// the host (tests/host/layout_test.cpp, layout_alloc_test.cpp).
+//
+// The lists a layout builds (assignments, changes, the tree's nodes) take
+// their memory from TIGO_LAYOUT_ALLOCATOR when it is defined. The ESP32 sets
+// it to its PSRAM allocator: a plain std::vector there comes from the ~64 KB
+// internal heap, and growing diff()'s list of changes for 40 panels needs a
+// ~14 KB block that a fragmented internal heap may not have (a Cloud import
+// against a user-made layout aborted there). The Pi and the host tests leave
+// it unset, so the lists are std::vector and std::map there.
 
 #include <algorithm>
 #include <climits>
@@ -31,6 +38,14 @@
 namespace esphome {
 namespace tigo_monitor {
 namespace layout {
+
+#ifdef TIGO_LAYOUT_ALLOCATOR
+template <class T> using Allocator = TIGO_LAYOUT_ALLOCATOR<T>;
+#else
+template <class T> using Allocator = std::allocator<T>;
+#endif
+template <class T> using Vec = std::vector<T, Allocator<T>>;
+template <class K, class V> using Map = std::map<K, V, std::less<K>, Allocator<std::pair<const K, V>>>;
 
 struct StringSpec {
   std::string label;          // identity: what nodes carry as cca_string_label; never changes
@@ -59,6 +74,7 @@ struct Layout {
 struct Assignment {
   std::string barcode, label, string_label, mppt_label;
 };
+using Assignments = Vec<Assignment>;
 
 // (inverter name, its MPPT labels): an incoming inverter list on both builds.
 using InverterMppts = std::vector<std::pair<std::string, std::vector<std::string>>>;
@@ -136,8 +152,8 @@ inline std::string validate(const Layout &l, const std::function<bool(const std:
   return "";
 }
 
-inline std::vector<Assignment> assignments(const Layout &l) {
-  std::vector<Assignment> out;
+inline Assignments assignments(const Layout &l) {
+  Assignments out;
   for (const auto &inv : l.inverters)
     for (const auto &m : inv.mppts)
       for (const auto &s : m.strings)
@@ -149,6 +165,7 @@ inline std::vector<Assignment> assignments(const Layout &l) {
 struct NodeView {
   std::string barcode, addr, label, string_label, mppt_label;
 };
+using NodeViews = Vec<NodeView>;
 
 // GET /api/layout's tree: the skeleton, then whatever the nodes say that it
 // doesn't. A string the skeleton lacks goes under its nodes' MPPT; an MPPT
@@ -157,11 +174,11 @@ struct NodeView {
 struct Tree {
   Layout layout;
   std::vector<MpptSpec> unplaced;
-  std::vector<NodeView> unassigned;
-  std::map<std::string, std::vector<NodeView>> panels;  // string label -> panels, in order
+  NodeViews unassigned;
+  Map<std::string, NodeViews> panels;  // string label -> panels, in order
 };
 
-inline Tree build_tree(Layout skeleton, const std::vector<NodeView> &nodes,
+inline Tree build_tree(Layout skeleton, const NodeViews &nodes,
                        const std::function<void(StringSpec &)> &fill_string) {
   Tree t;
   t.layout = std::move(skeleton);
@@ -210,25 +227,51 @@ struct Change {
   std::string barcode;
   Assignment now, then;  // now: as it stands; then: as the incoming layout has it
 };
+using Changes = Vec<Change>;
+
+namespace detail {
+inline Map<std::string, const Assignment *> by_barcode(const Assignments &as) {
+  Map<std::string, const Assignment *> out;
+  for (const auto &a : as) out[a.barcode] = &a;
+  return out;
+}
+// The panel's place as it stands, or null when the current layout lacks it.
+inline const Assignment *placed(const Map<std::string, const Assignment *> &by_bc, const std::string &barcode) {
+  auto it = by_bc.find(barcode);
+  return it == by_bc.end() ? nullptr : it->second;
+}
+// A panel the current layout lacks is unnamed and unplaced.
+inline bool same_place(const Assignment *now, const Assignment &in) {
+  if (!now) return in.label.empty() && in.string_label.empty() && in.mppt_label.empty();
+  return now->label == in.label && now->string_label == in.string_label && now->mppt_label == in.mppt_label;
+}
+}  // namespace detail
 
 // One Change per incoming panel whose place or name differs. A panel the
 // incoming layout doesn't mention is left alone, as a sync leaves it.
-inline std::vector<Change> diff(const std::vector<Assignment> &current, const std::vector<Assignment> &incoming) {
-  std::map<std::string, const Assignment *> by_bc;
-  for (const auto &a : current) by_bc[a.barcode] = &a;
-  std::vector<Change> out;
+inline Changes diff(const Assignments &current, const Assignments &incoming) {
+  auto by_bc = detail::by_barcode(current);
+  Changes out;
   for (const auto &in : incoming) {
-    auto it = by_bc.find(in.barcode);
-    Assignment now;
-    now.barcode = in.barcode;
-    if (it != by_bc.end()) now = *it->second;
-    if (now.label == in.label && now.string_label == in.string_label && now.mppt_label == in.mppt_label) continue;
-    out.push_back({in.barcode, now, in});
+    const Assignment *now = detail::placed(by_bc, in.barcode);
+    if (detail::same_place(now, in)) continue;
+    Assignment was;
+    was.barcode = in.barcode;
+    if (now) was = *now;
+    out.push_back({in.barcode, was, in});
   }
   return out;
 }
 
-inline uint32_t fingerprint(const std::vector<Assignment> &as, const InverterMppts &inverters) {
+// Whether diff() would report anything, without building its list.
+inline bool differs(const Assignments &current, const Assignments &incoming) {
+  auto by_bc = detail::by_barcode(current);
+  for (const auto &in : incoming)
+    if (!detail::same_place(detail::placed(by_bc, in.barcode), in)) return true;
+  return false;
+}
+
+inline uint32_t fingerprint(const Assignments &as, const InverterMppts &inverters) {
   std::vector<std::string> lines;
   for (const auto &a : as) lines.push_back("P|" + a.barcode + "|" + a.label + "|" + a.string_label + "|" + a.mppt_label);
   for (const auto &inv : inverters) {

@@ -881,7 +881,9 @@ class Housekeeping {
 };
 
 // The CCA's text queries to optimizers (tunnel sub 0x06), and its two writes.
-static const char *const QUERY_READS[] = {"^00Version\r", "^00Tests\r", "^00Info\r", "^00Smrt\r", "^00Mppt\r"};
+// ^00Cal is the rating read (answer "!ESO075V700W-..."): the CCA sent it 146
+// times on 11-14, byte for byte this text (owner OK to send it, 2026-11-16).
+static const char *const QUERY_READS[] = {"^00Version\r", "^00Tests\r", "^00Info\r", "^00Smrt\r", "^00Mppt\r", "^00Cal\r"};
 static const char *const QUERY_W255 = "#00w255\r";
 static const char *const QUERY_SMART_S = "^00Smrt_........S0000...0000\r";
 
@@ -890,7 +892,7 @@ static const char *const QUERY_SMART_S = "^00Smrt_........S0000...0000\r";
 // forwards it (status 0d), and the optimizer's answer comes back later as a
 // type 0x07 packet in a 0x0149 poll reply. Many are lost, so the CCA asks
 // again, 3 minutes on, then 2 minutes later each time (up to 30), until
-// one comes. A node first heard gets all five reads (as every node did after
+// one comes. A node first heard gets all six reads (as every node did after
 // a CCA reboot); one heard again after half an hour asleep gets ^00Tests (as
 // each did at sunrise). Two answers bring a write, with writes on: an Info
 // whose ninth word is 00 brings #00w255 (50 of 50 in the capture; its
@@ -925,7 +927,7 @@ class Queries {
   static const uint32_t CHECK_AFTER_MS = 3 * 60000;  // a read after a write
   static const uint32_t ASLEEP_MS = 30 * 60000;
   static const uint32_t ASK_TRIES = 3;  // an asked text unanswered this often: given up
-  enum Kind { version, tests, info, smrt, mppt, w255, smart_s, asked };
+  enum Kind { version, tests, info, smrt, mppt, cal, w255, smart_s, asked };  // the reads index QUERY_READS
 
   // A read-shaped text: ^00 and a name, nothing else (no '_', no '#', not
   // Leave). What the owner may ask one node for on the bench.
@@ -1033,7 +1035,7 @@ class Queries {
   void heard_(uint16_t tuid, uint32_t now_ms) {
     auto h = heard_ms_.find(tuid);
     if (h == heard_ms_.end()) {
-      for (Kind k : {version, tests, info, smrt, mppt}) add_(tuid, k, now_ms);
+      for (Kind k : {version, tests, info, smrt, mppt, cal}) add_(tuid, k, now_ms);
     } else if (now_ms - h->second >= ASLEEP_MS) {
       drop_(tuid);
       add_(tuid, tests, now_ms);
@@ -1070,6 +1072,7 @@ class Queries {
     else if (f[0] == "!Info") k = info;
     else if (f[0] == "!Smrt") k = smrt;
     else if (f[0] == "!Mppt") k = mppt;
+    else if (f[0].compare(0, 4, "!ESO") == 0) k = cal;
     else return;
     answers_++;
     remove_(tuid, k);
@@ -1893,7 +1896,7 @@ inline Allow classify_request(uint16_t cmd, const Bytes &payload) {
       return is_housekeeping_args(args) ? Allow::yes : Allow::bench_only;
     case 0x26:  // a page of the roster, by index
       return args.size() == 2 ? Allow::yes : Allow::bench_only;
-    case 0x06: {  // a text query to one node: the five the CCA sends, and its two writes
+    case 0x06: {  // a text query to one node: the six reads the CCA sends, and its two writes
       if (args.size() < 2) return Allow::bench_only;
       std::string text(args.begin() + 2, args.end());
       for (const char *q : QUERY_READS)

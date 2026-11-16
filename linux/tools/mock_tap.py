@@ -410,6 +410,8 @@ def main():
                     answers.append((tuid, f'!Smrt 0FFF 0000 0FFF 0008 00C8 00C8 000A 0154 0154 {mode} 00 01'.encode()))
                 elif text == '^00Mppt\r':
                     answers.append((tuid, b'!Mppt 1 0 S M[100 0000 - 3/3] 0 12 40 08 12\r'))
+                elif text == '^00Cal\r':  # the rating, as a roof K8 gives it
+                    answers.append((tuid, b'!ESO075V700W-H461.11.70S0.12\r'))
             elif cmd == 0x0B0F and len(p) >= 5 and p[3] == 0x41:  # housekeeping, forwarded to the mesh
                 stats['housekeeping'].append({'t': round(t, 2), 'args': p[5:].hex()})
                 send(encode(addr | 0x8000, 0x0B10, bytes([0x00, 0x0D, 0x00, 0x41, p[4]])))

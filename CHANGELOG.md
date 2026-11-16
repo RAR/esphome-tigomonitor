@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Each optimizer's rating shows on Devices without a CCA (Raspberry Pi
+  and other Linux).** Running the bus, the Pi now asks each newly heard
+  optimizer `^00Cal`, the CCA's rating read, and Devices shows its answer
+  ("Rated 75 V, 700 W"). Before, a rating appeared only if a CCA on the
+  bus happened to ask. It's one more read in the first-heard set, the
+  text exactly as the CCA sent it.
+
 - **Hand a TAP's optimizers to another (Raspberry Pi, experimental, API
   only).** `POST /api/master/taps/handover` with `{"from": "1202", "to":
   "1201"}` lists every optimizer last heard through the first TAP on the
@@ -163,6 +170,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Devices: click an optimizer to see everything about it, under its
+  row.** The row opens in place to show its barcode, address, TAP and
+  string; its firmware (since when, and what it replaced) and rating; on
+  the Pi, its settings and MPPT parameters beside what most of its family
+  report, any recent changes, and its last answers as heard. This
+  replaces the Settings side panel and the tooltips on the Name, Firmware
+  and Settings cells. Rows stay open as the table updates, and the toggle
+  works from the keyboard.
+
 - **The ESP32 keeps its web page compressed, freeing about 420 KB of
   flash.** The page was stored as plain text (571 KB); it's now stored
   gzipped (145 KB) and sent that way, with the API token added as it goes
@@ -237,6 +253,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   could run across each other.
 
 ### Fixed
+
+- **Cloud import no longer reboots the ESP32 once you've saved a layout.**
+  With a layout of your own, an import is compared with it so you can choose
+  which to keep. That comparison used the ESP32's ~64 KB internal heap, and
+  growing its list of changes for 40 panels aborted when no large enough
+  block was free. The Topology editor's lists now live in PSRAM, and the
+  check for whether anything changed no longer builds the list at all.
+  Reflash the ESP32 to pick it up; the Raspberry Pi build was not affected.
 
 - **Keyboard focus and hover survive the page's refreshes.** The mesh map
   put focus back on the optimizer you were on after its 10-second redraw,

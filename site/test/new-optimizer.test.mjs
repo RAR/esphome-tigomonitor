@@ -151,7 +151,9 @@ test('the Node Table tags a missing optimizer, one off the TAP\'s roster, and on
   assert.match(await row('C5').locator('.node-unset').getAttribute('title'), /!Mppt 1 0 N/);
   assert.match(await row('C5').locator('.node-unset').getAttribute('title'), /^Its settings aren't all written: its !Mppt answer's flag is N\. /);
   assert.equal(await row('C6').locator('.node-unset').count(), 0);
-  assert.match(await row('C6').locator('strong').first().getAttribute('title'), /!Mppt 1 0 S/);
+  // Its last answers, as heard, are in its row's details.
+  await row('C6').locator('.node-toggle').click();
+  assert.match(await page.locator('#nodes-tbody tr.node-detail').textContent(), /Mppt\s*!Mppt 1 0 S/);
   assert.deepEqual(errors, []);
   await ctx.close();
 });

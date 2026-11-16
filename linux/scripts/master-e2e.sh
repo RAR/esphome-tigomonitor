@@ -408,13 +408,15 @@ expect "back at 1201, then the CCA's bring-up order" "$(log "(lambda i: [x['f'] 
   "['1201/003A', '1201/000A', '1201/0E02', '1201/0B00 00', '1201/0B0F 0d 0000', '1201/0B00 01', '1201/0B0F 0d 0001', '1201/0B0F 22 0000', '1201/0B0F 26 0000', '1201/0B0F 26 0008']"
 expect "the second 0x22 a second after the first" "$(log "(lambda b: (b[1] - b[0] >= 0.9))([x['t'] for x in d['log'] if x['f'].startswith('1201/0B0F 22')][:2])")" True
 expect "two walks, each page from the last reply's end" "$(log "d['walk'][:4]")" "['0000', '0008', '0000', '0008']"
-expect "all five reads to every panel" "$(log "sorted({(q['node'], q['text']) for q in d['queries'] if q['text'].startswith('^00') and '_' not in q['text']}) == sorted((f'{n:04X}', t) for n in range(2, 8) for t in ('^00Version', '^00Tests', '^00Info', '^00Smrt', '^00Mppt'))")" True
+expect "all six reads to every panel" "$(log "sorted({(q['node'], q['text']) for q in d['queries'] if q['text'].startswith('^00') and '_' not in q['text']}) == sorted((f'{n:04X}', t) for n in range(2, 8) for t in ('^00Version', '^00Tests', '^00Info', '^00Smrt', '^00Mppt', '^00Cal'))")" True
 expect "the writes: w255 to the panel whose Info asked, Smrt_ S to the one in mode N" "$(log "sorted((q['node'], q['text']) for q in d['queries'] if q['text'].startswith(('#', '^00Smrt_')))")" \
   "[('0002', '#00w255'), ('0003', '^00Smrt_........S0000...0000')]"
 expect "nothing unrecognised sent" "$(log "d['other']")" "[]"
 expect "/api/master" "$(api 18104 /api/master | python3 -c 'import json,sys; m=json.load(sys.stdin); h=m["housekeeping"]; q=m["queries"]; print(m["tap_version"], h["sent_broadcast"] >= 2, h["sent_walk_pages"] >= 4, q["on"], q["writes"], q["sent_writes"], q["answers"] > 0)')" \
   "Mgate Version G1.00 Jan  1 2026 True True True True 2 True"
 expect "logs the TAP's version" "$(grep -c 'TAP version: Mgate Version G1.00' "$out/daemon14.log")" 1
+expect "each panel's rating, from its answer to our own ^00Cal" "$(api 18104 /api/versions | python3 -c 'import json,sys; r=json.load(sys.stdin)["ratings"]; print(sorted({(x["volts"], x["watts"], x["cal"]) for x in r}), len(r) >= 6)')" \
+  "[(75, 700, 'ESO075V700W-H461.11.70S0.12')] True"
 kill $daemon; wait $daemon 2>/dev/null || true
 kill $tap; wait $tap 2>/dev/null || true
 
@@ -468,11 +470,11 @@ build/linux/tigomonitord --state-dir "$out/state15b" --web-dir components/tigo_s
 daemon=$!
 for _ in $(seq 160); do [ -f "$out/tap15b.json" ] && [ "$(stat "$out/tap15b.json" "len(d['queries'])")" -ge 30 ] && break; sleep 0.5; done
 sleep 3
-expect "node 0003 was asked its five reads, once each" "$(stat "$out/tap15b.json" "(d['not_taken'], sorted(q['text'] for q in d['queries'] if q['node'] == '0003'))")" \
-  "(5, ['^00Info', '^00Mppt', '^00Smrt', '^00Tests', '^00Version'])"
-# Not as timeouts: if they were, there'd be at least 5. A busy CI runner can
+expect "node 0003 was asked its six reads, once each" "$(stat "$out/tap15b.json" "(d['not_taken'], sorted(q['text'] for q in d['queries'] if q['node'] == '0003'))")" \
+  "(6, ['^00Cal', '^00Info', '^00Mppt', '^00Smrt', '^00Tests', '^00Version'])"
+# Not as timeouts: if they were, there'd be at least 6. A busy CI runner can
 # still time out the odd poll (once in the v2.1.0 tag build), so not 0.
-expect "counted as not taken, not as timeouts" "$(api 18126 /api/master | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["queries"]["not_taken"], d["timeouts"] < 5, d["tap"]["lost"], d["fault"])')" "5 True 0 none"
+expect "counted as not taken, not as timeouts" "$(api 18126 /api/master | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["queries"]["not_taken"], d["timeouts"] < 6, d["tap"]["lost"], d["fault"])')" "6 True 0 none"
 expect "said once, naming the node" "$(grep -c "optimizer 0003: the TAP couldn't deliver a query" "$out/daemon15b.log" || true)" 1
 expect "the other nodes still answered" "$(stat "$out/tap15b.json" "d['answered'] >= 20")" True
 kill $daemon; wait $daemon 2>/dev/null || true

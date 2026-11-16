@@ -25,7 +25,6 @@
 
 #include "barcode_bindings.h"
 #include "tigo_history.h"
-#include "tigo_layout.h"
 #include "tigo_protocol.h"
 
 #ifdef USE_ESP_IDF
@@ -119,6 +118,14 @@ inline bool operator==(const std::string &a, const psram_string &b) { return b =
 inline bool operator!=(const psram_string &a, const std::string &b) { return !(a == b); }
 inline bool operator!=(const std::string &a, const psram_string &b) { return !(b == a); }
 #endif
+
+// The Topology editor's lists (tigo_layout.h) live in PSRAM: the plain heap
+// here is the ~64 KB internal one, and a Cloud import against a user-made
+// layout aborted growing its list of changes there.
+#ifdef USE_ESP_IDF
+#define TIGO_LAYOUT_ALLOCATOR ::PSRAMAllocator
+#endif
+#include "tigo_layout.h"
 
 namespace esphome {
 namespace tigo_monitor {
@@ -551,14 +558,14 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   // inverters in use that it renamed.
   std::map<std::string, std::string> layout_mppt_names() const;
   // Every node with a barcode, as the labels it carries now.
-  std::vector<layout::Assignment> current_assignments() const;
+  layout::Assignments current_assignments() const;
   // An incoming layout: decides with layout::decide() and holds it if the
   // user should choose. Applying is the caller's, as each source applies
   // differently.
-  layout::Offer offer_layout(const char *source, std::vector<layout::Assignment> incoming,
+  layout::Offer offer_layout(const char *source, layout::Assignments incoming,
                              layout::InverterMppts inverters);
   // GET /api/layout/pending. False when nothing waits.
-  bool layout_pending(std::string &source, std::vector<layout::Change> &changes, layout::InverterMppts &now,
+  bool layout_pending(std::string &source, layout::Changes &changes, layout::InverterMppts &now,
                       layout::InverterMppts &then);
   // The user's answer: keep theirs, or use the incoming one. False when
   // nothing waits.
@@ -950,7 +957,7 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   // the user saved it, so later layouts wait for them.
   struct HeldLayout {
     std::string source;
-    std::vector<layout::Assignment> assignments;
+    layout::Assignments assignments;
     layout::InverterMppts inverters;
     uint32_t fp = 0;
   };
@@ -963,7 +970,7 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   bool save_skeleton_();
   layout::Layout current_skeleton_() const;
   layout::InverterMppts inverter_mppts_() const;
-  void write_assignments_(const std::vector<layout::Assignment> &as, bool clear_unlisted);
+  void write_assignments_(const layout::Assignments &as, bool clear_unlisted);
   void inverters_from_skeleton_();
   void save_string_prefs_(const std::string &label, const std::string &display, uint16_t rating_w);
 
