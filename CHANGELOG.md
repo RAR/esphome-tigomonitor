@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Each optimizer's rating shows on Devices without a CCA (Raspberry Pi
+  and other Linux).** Running the bus, the Pi now asks each newly heard
+  optimizer `^00Cal`, the CCA's rating read, and Devices shows its answer
+  ("Rated 75 V, 700 W"). Before, a rating appeared only if a CCA on the
+  bus happened to ask. It's one more read in the first-heard set, the
+  text exactly as the CCA sent it.
+
 - **Draw your array and see each panel's power where it sits (Raspberry
   Pi and other Linux).** Topology › Array places every panel and TAP on a
   grid as they really are (a TAP can share the square of the panel it's
