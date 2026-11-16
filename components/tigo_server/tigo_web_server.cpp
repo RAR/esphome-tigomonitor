@@ -2317,10 +2317,10 @@ esp_err_t TigoWebServer::api_node_import_handler(httpd_req_t *req) {
   // Once the user has laid the site out by hand, a file's labels wait for
   // them like a sync's; its addresses still restore at once, carrying the
   // labels each panel has now (as the Raspberry Pi build does).
-  std::vector<tigo_monitor::layout::Assignment> held_labels;
+  tigo_monitor::layout::Assignments held_labels;
   const bool layout_manual = server->parent_->layout_manual();
   if (layout_manual) {
-    std::map<std::string, tigo_monitor::layout::Assignment> now;
+    tigo_monitor::layout::Map<std::string, tigo_monitor::layout::Assignment> now;
     for (const auto &a : server->parent_->current_assignments()) now[a.barcode] = a;
     for (auto &node : nodes) {
       std::string bc(node.long_address.data(), node.long_address.size());
@@ -4362,7 +4362,7 @@ esp_err_t TigoWebServer::api_layout_pending_get_handler(httpd_req_t *req) {
     return ESP_OK;
   }
   std::string source;
-  std::vector<layout::Change> changes;
+  layout::Changes changes;
   layout::InverterMppts now, then;
   httpd_resp_set_type(req, "application/json");
   if (!server->parent_->layout_pending(source, changes, now, then)) {

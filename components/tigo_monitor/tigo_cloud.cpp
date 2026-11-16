@@ -375,7 +375,7 @@ void TigoMonitorComponent::match_cloud_layout_to_uart_(const char *layout_json) 
   // A layout the user saved by hand holds this one for them instead
   // (tigo_layout_store.cpp), so collect rather than write.
   bool hold = layout_manual();
-  std::vector<layout::Assignment> incoming;
+  layout::Assignments incoming;
   cJSON *inv;
   cJSON_ArrayForEach(inv, inverters) {
     cJSON *mppts = cJSON_GetObjectItem(inv, "mppts");
