@@ -284,7 +284,7 @@ static void test_more_allow() {
           !may_send(CMD_TUNNEL, tunnel_request(0x2B, 1, args), true, true, true));
   CHECK(classify_request(CMD_TUNNEL, tunnel_request(0x2B, 1, {0xBA, 0xBE})) == Allow::table_write &&
         !may_send(CMD_TUNNEL, tunnel_request(0x2B, 1, {0xBA, 0xBE}), true, true, true, true));
-  for (const char *q : {"^00Tests\r", "^00Mppt\r", "^00Info\r"}) {
+  for (const char *q : {"^00Tests\r", "^00Mppt\r", "^00Info\r", "^00Cal\r"}) {
     Bytes a = {0x00, 0x14};
     a.insert(a.end(), q, q + strlen(q));
     CHECK(classify_request(CMD_TUNNEL, tunnel_request(0x06, 1, a)) == Allow::yes);
@@ -1066,10 +1066,10 @@ static std::vector<Request> ask(Queries &q, uint32_t from_ms, uint32_t to_ms, ui
 static void test_queries() {
   uint8_t seq = 0;
   Queries q(0, /*writes=*/false);
-  // A node first heard gets all five reads, as after a CCA reboot, a gap apart.
+  // A node first heard gets all six reads, as after a CCA reboot, a gap apart.
   q.on_poll_reply(poll_reply_with({power_from(0x14)}), 0);
   std::vector<Request> r = ask(q, 0, 10000, seq);
-  CHECK(r.size() == 5);
+  CHECK(r.size() == 6);
   std::vector<std::string> texts;
   for (const Request &x : r) {
     CHECK(sub_of(x) == 0x06 && x.payload[5] == 0x00 && x.payload[6] == 0x14);
@@ -1077,18 +1077,21 @@ static void test_queries() {
     texts.push_back(query_text(x));
   }
   std::sort(texts.begin(), texts.end());
-  CHECK((texts == std::vector<std::string>{"^00Info\r", "^00Mppt\r", "^00Smrt\r", "^00Tests\r", "^00Version\r"}));
+  CHECK((texts == std::vector<std::string>{"^00Cal\r", "^00Info\r", "^00Mppt\r", "^00Smrt\r", "^00Tests\r", "^00Version\r"}));
   CHECK(ask(q, 10100, 3 * 60000 - 100, seq).empty());  // nothing more until the first retry
 
   // Unanswered: again after 3 min, then 5 more, then 7 more.
-  CHECK(ask(q, 3 * 60000, 3 * 60000 + 10000, seq).size() == 5);
-  // Version and Tests answer; the other three keep going.
+  CHECK(ask(q, 3 * 60000, 3 * 60000 + 10000, seq).size() == 6);
+  // Version, Tests and Cal answer (Cal's answer is the rating itself,
+  // "!ESO..."); the other three keep going.
   q.on_poll_reply(poll_reply_with({string_packet(0x14, "Mnode Version K8.0120 (2D)\r"),
-                                   string_packet(0x14, "!Tests 1 3 2 0 00 0000 00\r")}),
+                                   string_packet(0x14, "!Tests 1 3 2 0 00 0000 00\r"),
+                                   string_packet(0x14, "!ESO075V700W-H461.11.70S0.12\r")}),
                   3 * 60000 + 20000);
   r = ask(q, 8 * 60000, 8 * 60000 + 10000, seq);
   CHECK(r.size() == 3);
-  for (const Request &x : r) CHECK(query_text(x) != "^00Version\r" && query_text(x) != "^00Tests\r");
+  for (const Request &x : r)
+    CHECK(query_text(x) != "^00Version\r" && query_text(x) != "^00Tests\r" && query_text(x) != "^00Cal\r");
 
   // An Info that asks for the w255: without writes, no write, but Info is
   // read again 40 minutes on, as the CCA does.
