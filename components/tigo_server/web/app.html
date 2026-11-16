@@ -15,6 +15,10 @@
     --text: #e6ecf5;
     --text-dim: #94a0b6;
     --text-faint: #8b96ab;  /* 4.5:1 on --bg-3 */
+    /* An unlit panel on Topology > Array, the same in both themes: it is
+       drawn as the dark glass, not as page chrome. */
+    --panel-glass: #16233d;
+    --panel-glass-text: #e8eef8;
     --accent: #4ade80;
     --accent-2: #38bdf8;
     --accent-3: #a78bfa;
@@ -121,7 +125,7 @@
   .overview-val { font-variant-numeric: tabular-nums; font-weight: 500; }
 
   nav { padding: 12px 8px; flex: 1; display: flex; flex-direction: column; gap: 14px; }
-  .nav-head { padding: 0 12px 4px; font-size: 10px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-dim); }
+  .nav-head { padding: 0 12px 4px; font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-dim); }
   .nav-control { padding-top: 12px; border-top: 1px solid var(--border); }
   nav button {
     display: flex; align-items: center; gap: 10px; width: 100%;
@@ -146,7 +150,7 @@
   .pv-pill:hover { background: rgba(74,222,128,0.13); border-color: rgba(74,222,128,0.45); }
   .pv-pill:focus-visible { outline: 2px solid var(--good); outline-offset: 2px; }
   .pv-pill-label { flex: 1; }
-  .pv-pill-state { padding: 2px 7px; border-radius: 4px; font-size: 10.5px; letter-spacing: .06em; text-transform: uppercase;
+  .pv-pill-state { padding: 2px 7px; border-radius: 4px; font-size: 11px; letter-spacing: .06em; text-transform: uppercase;
                    color: var(--good-text); background: rgba(74,222,128,0.15); }
   .pv-pill.off { border-color: rgba(248,113,113,0.5); background: rgba(248,113,113,0.1); }
   .pv-pill.off:hover { background: rgba(248,113,113,0.16); border-color: rgba(248,113,113,0.7); }
@@ -296,7 +300,7 @@
   .panel-heat-tile .pht-id { font-size: 13px; line-height: 1; }
   .panel-heat-tile .pht-w  { font-size: 12px; line-height: 1; opacity: 0.85; margin-top: 6px; font-variant-numeric: tabular-nums; text-align: center; }
   .panel-heat-tile .pht-rated {
-    display: block; font-size: 10px; opacity: 0.7; margin-top: 2px;
+    display: block; font-size: 11px; margin-top: 2px;
     font-weight: 500;
   }
   .panel-heat-tile.good { background: var(--good); color: #061018; }
@@ -384,7 +388,7 @@
   .btn .spinner { width: 13px; height: 13px; vertical-align: -2px; margin-right: 6px; }
 
   .panel-modal-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 18px; }
-  .panel-modal-eyebrow { font-size: 10px; color: var(--text-faint); text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 4px; }
+  .panel-modal-eyebrow { font-size: 11px; color: var(--text-faint); text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 4px; }
   .panel-modal-title { font-size: 22px; font-weight: 600; line-height: 1.2; }
   .panel-modal-sub { font-size: 12px; color: var(--text-dim); margin-top: 4px; }
   .panel-modal-close {
@@ -404,7 +408,7 @@
     border: 1px solid var(--border);
     border-radius: 8px; padding: 10px 12px;
   }
-  .panel-modal-stat-lbl { font-size: 10px; color: var(--text-faint); text-transform: uppercase; letter-spacing: 0.06em; }
+  .panel-modal-stat-lbl { font-size: 11px; color: var(--text-faint); text-transform: uppercase; letter-spacing: 0.06em; }
   .panel-modal-stat-val { font-size: 18px; font-weight: 600; font-variant-numeric: tabular-nums; margin-top: 2px; }
   .legend-chip { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-dim); }
   .legend-swatch { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
@@ -480,7 +484,7 @@
   .log-line { display: grid; grid-template-columns: 9.5ch 7ch minmax(0, 1fr); gap: 10px; padding: 0 14px; }
   .log-line:hover { background: var(--bg-2); }
   .log-time { color: var(--text-faint); font-variant-numeric: tabular-nums; }
-  .log-lvl { text-transform: uppercase; font-size: 10.5px; letter-spacing: .04em; padding-top: 1px; color: var(--text-dim); }
+  .log-lvl { text-transform: uppercase; font-size: 11px; letter-spacing: .04em; padding-top: 1px; color: var(--text-dim); }
   .log-msg { white-space: pre-wrap; word-break: break-word; color: var(--text); }
   .log-line.warning .log-lvl, .log-line.warning .log-msg { color: var(--warn-text); }
   .log-line.error .log-lvl, .log-line.error .log-msg { color: var(--bad-text); }
@@ -605,7 +609,7 @@
   .topo-inv-name { font-weight: 600; font-size: 14px; flex-shrink: 0; }
   .topo-inv-name-edit-btn {
     background: none; border: 1px solid var(--border); color: var(--text-dim);
-    border-radius: 4px; padding: 2px 6px; font-size: 10px; cursor: pointer;
+    border-radius: 4px; padding: 2px 6px; font-size: 11px; cursor: pointer;
     margin-left: 4px;
   }
   .topo-inv-name-edit-btn:hover { color: var(--text); border-color: var(--accent-2); }
@@ -640,10 +644,10 @@
   .panel-tile.stale { opacity: 0.55; border-style: dashed; border-left: 3px solid var(--text-faint); }
   .panel-tile-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 6px; }
   .panel-tile-id { font-weight: 600; font-size: 12px; }
-  .panel-tile-bc { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 10px; color: var(--text-faint); }
+  .panel-tile-bc { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 11px; color: var(--text-faint); }
   .panel-tile-power { font-size: 16px; font-weight: 700; font-variant-numeric: tabular-nums; }
   .panel-tile-power .unit { font-size: 11px; color: var(--text-dim); font-weight: 500; margin-left: 2px; }
-  .panel-tile-detail { display: flex; justify-content: space-between; gap: 4px; font-size: 10px; color: var(--text-dim); margin-top: 4px; font-variant-numeric: tabular-nums; }
+  .panel-tile-detail { display: flex; justify-content: space-between; gap: 4px; font-size: 11px; color: var(--text-dim); margin-top: 4px; font-variant-numeric: tabular-nums; }
 
   .topo-empty { padding: 60px 24px; text-align: center; color: var(--text-dim); font-size: 13px; }
   /* The mesh map (Pi): optimizers around the TAP each reports through. */
@@ -658,7 +662,7 @@
       linear-gradient(to bottom, color-mix(in srgb, var(--border) 70%, transparent) 1px, transparent 1px);
     background-size: var(--array-cell) var(--array-cell); outline: 1px solid var(--border); }
   .array-tile { position: absolute; display: flex; flex-direction: column; align-items: center; justify-content: center;
-    border-radius: 3px; border: 1px solid rgba(255,255,255,0.18); color: #e8eef8; font-size: 11px; line-height: 1.15;
+    border-radius: 3px; border: 1px solid rgba(255,255,255,0.18); color: var(--panel-glass-text); font-size: 11px; line-height: 1.15;
     font-variant-numeric: tabular-nums; user-select: none; box-sizing: border-box;
     background-image: linear-gradient(to right, rgba(255,255,255,0.07) 1px, transparent 1px),
                       linear-gradient(to bottom, rgba(255,255,255,0.07) 1px, transparent 1px);
@@ -666,6 +670,9 @@
   .array-tile.lit { color: #061018; border-color: rgba(6,16,24,0.25); }
   .array-tile.stale { opacity: 0.55; }
   .array-tile .rn { font-weight: 600; }
+  /* Below the 11px floor on purpose: a label inside a drawn panel square
+     (40-48 px), where "350 W" must fit. The Nodes page has the same value
+     at full size. */
   .array-tile .rw { font-size: 9.5px; opacity: 0.9; white-space: nowrap; letter-spacing: -0.02em; }
   .array-tile .rn { white-space: nowrap; }
   .array-canvas.editing .array-tile, .array-canvas.editing .array-tap { cursor: grab; }
@@ -673,18 +680,18 @@
   .array-tile.sel, .array-tap.sel { outline: 2px solid var(--accent-2); outline-offset: 2px; }
   .array-tap { position: absolute; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px;
     border-radius: 50%; background: var(--bg-3); border: 2px solid var(--accent-2); color: var(--text);
-    font-size: 10px; font-weight: 600; box-sizing: border-box; user-select: none; box-shadow: 0 1px 3px rgba(0,0,0,0.3); }
+    font-size: 11px; font-weight: 600; box-sizing: border-box; user-select: none; box-shadow: 0 1px 3px rgba(0,0,0,0.3); }
   .array-tap svg { width: 14px; height: 14px; color: var(--accent-2-text); }
   .array-tap.under { z-index: 1; gap: 0; }
   .array-tile.pool { outline: 2px dashed var(--accent-2); outline-offset: 2px; }
   .array-badge { position: absolute; top: -8px; right: -8px; min-width: 18px; height: 18px; padding: 0 4px; border-radius: 9px;
-    background: var(--accent-2); color: #061018; font-size: 10px; font-weight: 700; line-height: 18px; text-align: center;
+    background: var(--accent-2); color: #061018; font-size: 11px; font-weight: 700; line-height: 18px; text-align: center;
     box-shadow: 0 1px 3px rgba(0,0,0,0.35); z-index: 2; box-sizing: border-box; }
   .array-badge.s04 { background: var(--warn); }
   .array-helpers { font-size: 13px; color: var(--text-dim); margin: -6px 0 12px; max-width: 900px; line-height: 1.5; }
   .array-helpers strong { color: var(--text); font-weight: 600; }
   .array-helpers .k { display: inline-block; min-width: 18px; padding: 0 4px; border-radius: 9px; background: var(--accent-2); color: #061018;
-    font-size: 10px; font-weight: 700; text-align: center; line-height: 16px; margin-right: 3px; }
+    font-size: 11px; font-weight: 700; text-align: center; line-height: 16px; margin-right: 3px; }
   .array-helpers .k.s04 { background: var(--warn); }
   .array-tap.under span { display: none; }
   .array-tap.under svg { width: 12px; height: 12px; }
@@ -693,19 +700,19 @@
   .array-ghost { position: fixed; pointer-events: none; z-index: 50; opacity: 0.85; }
   .array-tray { width: 210px; flex: none; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-2);
     padding: 10px; max-height: 72vh; overflow: auto; }
-  .array-tray h3 { margin: 0 0 6px; font-size: 12px; font-weight: 600; color: var(--text-dim); }
+  .array-tray h2 { margin: 0 0 6px; font-size: 12px; font-weight: 600; color: var(--text-dim); }
   .array-tray .array-group { margin-bottom: 10px; }
   .array-tray .array-group-name { font-size: 11px; color: var(--text-dim); margin: 6px 0 4px; }
   .array-chips { display: flex; flex-wrap: wrap; gap: 4px; }
   .array-chip { font: inherit; font-size: 11px; padding: 3px 7px; border-radius: 4px; border: 1px solid var(--border);
-    background: #16233d; color: #e8eef8; cursor: grab; touch-action: pan-y; }
+    background: var(--panel-glass); color: var(--panel-glass-text); cursor: grab; touch-action: pan-y; }
   .array-chip.tap { background: var(--bg-3); color: var(--text); border-color: var(--accent-2); }
   .array-tray .array-done { font-size: 12px; color: var(--text-dim); }
   .array-empty { padding: 36px 20px; text-align: center; color: var(--text-dim); font-size: 13px; }
   .array-empty strong { display: block; color: var(--text); font-size: 15px; margin-bottom: 6px; }
   .array-scale { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-dim); }
   .array-scale i { display: inline-block; width: 64px; height: 8px; border-radius: 4px;
-    background: linear-gradient(to right, #16233d, var(--accent)); border: 1px solid var(--border); }
+    background: linear-gradient(to right, var(--panel-glass), var(--accent)); border: 1px solid var(--border); }
   .array-help { font-size: 12px; color: var(--text-dim); margin: 10px 0 0; max-width: 760px; }
   .array-help kbd { font: inherit; font-size: 11px; border: 1px solid var(--border); border-radius: 3px; padding: 0 4px; background: var(--bg-3); }
   @media (max-width: 760px) {
@@ -721,7 +728,7 @@
   .mesh-stage.fitted .mesh-side { overflow-y: auto; }
   .mesh-stage.fitted { grid-template-rows: minmax(0, 1fr); }
   .mesh-days { margin-top: 18px; background: var(--bg-2); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; overflow-x: auto; }
-  .mesh-days h3 { margin: 0 0 10px; font-size: 13px; color: var(--text-dim); font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
+  .mesh-days h2 { margin: 0 0 10px; font-size: 13px; color: var(--text-dim); font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
   .mesh-day-head, .mesh-day-row { display: grid; grid-template-columns: 9em repeat(var(--days), minmax(3.6em, 1fr)); gap: 4px; align-items: center; }
   .mesh-day-head span { font-size: 11px; color: var(--text-dim); text-align: center; }
   .mesh-day-head span:first-child, .mesh-day-name { text-align: left; }
@@ -889,7 +896,7 @@
   .setup-plan li { display: grid; grid-template-columns: 26px minmax(0, 1fr); gap: 10px; align-items: start; margin: 0; }
   .setup-plan .mk { width: 24px; height: 24px; border-radius: 7px; display: flex; align-items: center; justify-content: center; }
   .setup-body { flex: 999 1 420px; min-width: 0; box-sizing: border-box; padding: 24px 28px; display: flex; flex-direction: column; gap: 14px; }
-  .setup-body h3 { margin: 0; font-size: 20px; font-weight: 600; }
+  .setup-body h2 { margin: 0; font-size: 20px; font-weight: 600; }
   .setup-body .sub { font-size: 13px; color: var(--text-dim); line-height: 1.5; max-width: 66ch; }
   .setup-pick { display: flex; flex-direction: column; gap: 8px; max-height: 340px; overflow-y: auto; }
   .setup-pick label[hidden] { display: none; }
@@ -927,7 +934,7 @@
   @media (max-width: 760px) { .setup-rail { flex-basis: 100%; border-right: 0; border-bottom: 1px solid var(--border); } }
   .mesh-empty { padding: 80px 24px; text-align: center; color: var(--text-dim); font-size: 13px; }
   .mesh-side { border-left: 1px solid var(--border); padding: 16px; font-size: 13px; background: var(--bg); }
-  .mesh-side h3 { margin: 0 0 2px; font-size: 15px; display: flex; gap: 8px; align-items: center; }
+  .mesh-side h2 { margin: 0 0 2px; font-size: 15px; display: flex; gap: 8px; align-items: center; }
   .mesh-side .mesh-sub { color: var(--text-dim); }
   .mesh-side .mesh-k { color: var(--text-faint); font-size: 11px; text-transform: uppercase; letter-spacing: .05em; margin-top: 12px; }
   .mesh-side .mesh-v { font-variant-numeric: tabular-nums; }
@@ -948,12 +955,12 @@
   .mesh-node .mesh-dot { fill: var(--bg-3); stroke-width: 1.5; }
   .mesh-node.tier-good .mesh-dot { stroke: var(--good); } .mesh-node.tier-fair .mesh-dot { stroke: var(--warn); }
   .mesh-node.tier-poor .mesh-dot { stroke: var(--bad); } .mesh-node.tier-silent .mesh-dot { stroke: var(--text-faint); }
-  .mesh-node text { font-size: 10px; fill: var(--text-dim); }
+  .mesh-node text { font-size: 11px; fill: var(--text-dim); }
   .mesh-node:hover .mesh-dot, .mesh-node:focus-visible .mesh-dot, .mesh-node.selected .mesh-dot { stroke: var(--text); stroke-width: 2.5; }
   .mesh-node.selected text { fill: var(--text); font-weight: 600; }
   .mesh-tap rect { fill: var(--bg-4); stroke: var(--accent-2); stroke-width: 1.5; }
   .mesh-tap text { fill: var(--text); font-size: 12px; font-weight: 600; }
-  .mesh-tap text.mesh-tap-addr { fill: var(--text-dim); font-size: 10px; font-weight: 500; }
+  .mesh-tap text.mesh-tap-addr { fill: var(--text-dim); font-size: 11px; font-weight: 500; }
   td.tap-name { white-space: nowrap; }
   td.tap-model { white-space: nowrap; }
   td.tap-model.star-only { color: var(--warn-text); font-weight: 600; }
@@ -1008,8 +1015,8 @@
   .mesh-card-bar { display: block; height: 4px; border-radius: 2px; background: var(--bg-4); overflow: hidden; }
   .mesh-card-bar i { display: block; height: 100%; background: var(--text-dim); }
   .mesh-card-bar i.fair { background: var(--warn); } .mesh-card-bar i.poor { background: var(--bad); }
-  .mesh-card-sig { font-size: 10px; color: var(--text-faint); }
-  .mesh-card-via { align-self: flex-start; font-size: 10px; padding: 0 6px; border-radius: 4px; color: var(--accent-3-text);
+  .mesh-card-sig { font-size: 11px; color: var(--text-faint); }
+  .mesh-card-via { align-self: flex-start; font-size: 11px; padding: 0 6px; border-radius: 4px; color: var(--accent-3-text);
                    background: color-mix(in srgb, var(--accent-3) 16%, transparent); }
   .mesh-card-via.unknown { color: var(--text-dim); background: none; border: 1px dashed var(--text-dim); }
   /* An optimizer's settings (Devices › Settings): a drawer, a sheet on a phone. */
@@ -1042,7 +1049,7 @@
   .smart-row.differs { background: color-mix(in srgb, var(--warn) 10%, transparent); }
   .smart-row.differs .smart-val { color: var(--warn-text); font-weight: 700; }
   .smart-name { display: flex; flex-direction: column; min-width: 0; }
-  .smart-code { font-size: 10.5px; color: var(--text-faint); font-family: ui-monospace, Menlo, monospace; }
+  .smart-code { font-size: 11px; color: var(--text-faint); font-family: ui-monospace, Menlo, monospace; }
   .smart-most { color: var(--text-dim); }
   .smart-note { font-size: 11.5px; color: var(--text-faint); line-height: 1.5; padding-top: 6px; }
   .smart-k { margin-top: auto; font-size: 11px; color: var(--text-faint); }
@@ -1118,7 +1125,7 @@
   }
   /* Node Table tags: the same tinted chip as the State column's badges */
   .node-new, .node-missing, .node-unset {
-    display: inline-block; margin-left: 6px; padding: 2px 7px; border-radius: 4px; font-size: 10.5px;
+    display: inline-block; margin-left: 6px; padding: 2px 7px; border-radius: 4px; font-size: 11px;
     font-weight: 600; text-transform: uppercase; letter-spacing: .04em; white-space: nowrap; vertical-align: 1px;
   }
   .node-new { background: rgba(74,222,128,0.15); color: var(--accent-text); }
@@ -1465,7 +1472,7 @@
 
     <!-- Tigo cloud status box — shown only when a cloud connection is configured. -->
     <div id="cloud-box" style="display:none;margin:8px 12px;padding:9px 11px;border:1px solid var(--border);border-radius:8px;cursor:pointer" title="Open Cloud Status">
-      <div style="font-size:10px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.05em;margin-bottom:5px">☁ Tigo Cloud</div>
+      <div style="font-size:11px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.05em;margin-bottom:5px">☁ Tigo Cloud</div>
       <div id="cloud-box-body" style="font-size:12.5px;line-height:1.5;color:var(--text-dim)">checking…</div>
     </div>
 
@@ -2624,6 +2631,26 @@
 <script>
   const API_TOKEN = "__TIGO_API_TOKEN__";
 
+  // Write markup only when it changed. The polls re-render every few
+  // seconds; leaving unchanged markup alone keeps hover, focus, text
+  // selection and scroll, and skips the layout. Any other change to the
+  // element's DOM (a class toggled, a row edited in place) drops the record,
+  // so the next write always goes through. Returns true if it wrote.
+  const htmlWritten = new WeakMap();
+  const htmlWatch = new MutationObserver(recs => {
+    for (const r of recs) for (let n = r.target; n; n = n.parentNode) htmlWritten.delete(n);
+  });
+  function setHTML(el, html) {
+    if (!el) return false;
+    for (const r of htmlWatch.takeRecords()) for (let n = r.target; n; n = n.parentNode) htmlWritten.delete(n);
+    if (htmlWritten.get(el) === html) return false;
+    el.innerHTML = html;
+    htmlWatch.takeRecords();  // our own write
+    htmlWritten.set(el, html);
+    htmlWatch.observe(el, { childList: true, subtree: true, attributes: true, characterData: true });
+    return true;
+  }
+
   // HA Ingress base-path detection.
   function getBasePath() {
     const path = window.location.pathname;
@@ -3043,11 +3070,11 @@
         // Optional string-level nameplate roll-up: total / (n × rating).
         const nameplate = rating > 0 ? rating * panels.length : 0;
         const stringRatedPct = nameplate > 0
-          ? ` <span style="color:var(--text-faint);font-size:10px">${Math.round((s.total_power || 0) / nameplate * 100)}% of ${(nameplate / 1000).toFixed(2)}kW</span>`
+          ? ` <span style="color:var(--text-faint);font-size:11px">${Math.round((s.total_power || 0) / nameplate * 100)}% of ${(nameplate / 1000).toFixed(2)}kW</span>`
           : '';
         html += `
           <div class="panel-string-row">
-            <div class="panel-string-label">${stringLabel}<br><span style="color:var(--text-faint);font-size:10px">${mpptName(s.mppt)}</span>${stringRatedPct}</div>
+            <div class="panel-string-label">${stringLabel}<br><span style="color:var(--text-faint);font-size:11px">${mpptName(s.mppt)}</span>${stringRatedPct}</div>
             <div class="panel-string-bars">${tiles}</div>
           </div>
         `;
@@ -4064,7 +4091,7 @@
     if (rows.length === 0) {
       html = '<tr><td colspan="11" style="text-align:center;color:var(--text-faint);padding:40px 0">No nodes match the current filters.</td></tr>';
     }
-    tbody.innerHTML = html;
+    setHTML(tbody, html);
     smartRows = Object.fromEntries(rows.filter(r => r.smart).map(r => [String(r.addr).toUpperCase(), r]));
     countEl.textContent = `${rows.length} of ${nodes.length} shown`;
     const knownCount = nodes.filter(n => n.known).length;
@@ -4310,11 +4337,11 @@
     const name = t => `<td class="tap-name" data-tap="${topoEscape(t.addr)}">${t.name
       ? `<span>${topoEscape(t.name)}</span><button type="button" class="tap-rename" aria-label="Rename TAP ${topoEscape(t.addr)}" title="Rename"></button>`
       : `<button type="button" class="tap-rename add">Add a name</button>`}</td>`;
-    box.querySelector('tbody').innerHTML = (v.taps || []).length ? v.taps.map(t => `<tr>
+    setHTML(box.querySelector('tbody'), (v.taps || []).length ? v.taps.map(t => `<tr>
         ${name(t)}<td class="mono">${topoEscape(t.addr)}</td>${id(t.addr)}${model(t)}
         <td class="mono tap-fw" title="${topoEscape(t.version || '')}${t.previous ? ` · was ${topoEscape(t.previous)}` : ''}"><strong>${topoEscape((t.version || '').replace(boardRe, '').replace(/\s+\d{1,2}:\d{2}:\d{2}$/, ''))}</strong></td>
         ${radio(t.addr)}<td>${when(t.since_unix_ms)}</td><td>${when(t.last_unix_ms)}</td></tr>`).join('')
-      : `<tr><td colspan="8" style="color:var(--text-faint)">Not heard yet. The bus master asks the TAP once each time it starts, and the optimizers as it first hears each one.</td></tr>`;
+      : `<tr><td colspan="8" style="color:var(--text-faint)">Not heard yet. The bus master asks the TAP once each time it starts, and the optimizers as it first hears each one.</td></tr>`);
   }
 
   // An optimizer's label is its whole MAC: 04C05B left out, the character
@@ -4383,12 +4410,12 @@
     const aliens = alienAddrs(nodesData.nodes || [], nodesData.devices || []);
     const strays = (nodesData.devices || []).filter(d => aliens.has(d.addr));
     box.style.display = strays.length ? '' : 'none';
-    box.querySelector('tbody').innerHTML = strays.map(d => {
+    setHTML(box.querySelector('tbody'), strays.map(d => {
       const label = d.barcode ? labelOfMac(d.barcode) || d.barcode : '—';
       const heard = d.stale ? `no data for ${fmtAge(d.data_age_ms)}` : 'reporting now';
       return `<tr><td class="mono" title="${topoEscape(d.barcode || '')}">${topoEscape(label)}</td><td class="mono">${topoEscape(d.addr)}</td>
         <td>${heard}</td><td><button type="button" class="btn stray-forget" data-addr="${topoEscape(d.addr)}">Forget</button></td></tr>`;
-    }).join('');
+    }).join(''));
   }
   document.getElementById('devices-strays').addEventListener('click', async e => {
     const b = e.target.closest('button.stray-forget');
@@ -4627,12 +4654,12 @@
         <span style="flex-grow:1"></span><button type="button" class="btn task-go" data-task="replace" data-setup-start="replace" data-setup-old="${topoEscape(quiet.mac)}">Replace ${topoEscape(quiet.name)}</button></div>`;
     const task = (k, title, text) => `<button type="button" class="setup-task" data-task="${k}" data-setup-start="${k}"><span class="art">${SETUP_ART[k]}</span>
       <span class="in"><strong>${title}</strong><span>${text}</span><span class="go">Start →</span></span></button>`;
-    html += `<h3 class="setup-group">Optimizers</h3><div class="setup-tasks">
+    html += `<h2 class="setup-group">Optimizers</h2><div class="setup-tasks">
       ${task('replace', 'Replace an optimizer', 'Remove a failed optimizer, add its replacement, and keep its position in your layout.')}
       ${task('add', 'Add an optimizer', 'Register a new optimizer, wait for it to join, then assign it in Topology.')}
       ${task('retire', 'Retire an optimizer', 'Permanently remove an optimizer from your system.')}
     </div>
-    <h3 class="setup-group">TAPs</h3><div class="setup-tasks">
+    <h2 class="setup-group">TAPs</h2><div class="setup-tasks">
       ${task('addtap', 'Add a TAP', 'Wire in a new TAP, give it an address and its radio settings, and name it.')}
       ${task('retiretap', 'Retire a TAP', 'Forget a TAP that has gone for good, so it stops showing as not answering.')}
       <div class="setup-task later"><span class="art">${SETUP_ART.replacetap}</span><span class="in"><strong>Replace a TAP</strong>
@@ -4661,7 +4688,7 @@
     }
     if (t && t.edit && t.edit.kind && t.edit.finished && !t.edit.dry_run)
       html += `<div class="setup-last">Last change: ${topoEscape(t.edit.message)}</div>`;
-    root.innerHTML = html;
+    setHTML(root, html);
   }
 
   function setupRail(f) {
@@ -4844,7 +4871,7 @@
   const SETUP_GUIDES = {
     retiretap(f, back) {
       if (f.step === 'done')
-        return `<div class="setup-done"><h3>TAP ${topoEscape(f.tapPick)} is retired</h3>
+        return `<div class="setup-done"><h2>TAP ${topoEscape(f.tapPick)} is retired</h2>
           <div class="sub">TigoMonitor no longer polls it or keeps it on its list. If it comes back, bring it in again with Add a TAP.</div>
           <div class="setup-actions"><button type="button" class="btn primary" data-setup-home>Finish</button></div></div>`;
       const taps = setupTaps();
@@ -4853,7 +4880,7 @@
         return `<label class="${answering ? 'off' : ''}"><input type="radio" name="setup-tap-retire" value="${topoEscape(t.id)}"${answering ? ' disabled' : ''}${f.tapPick === t.id ? ' checked' : ''}>
           <strong>${topoEscape(setupTapName(t.id))}</strong><span>${answering ? 'answering: unplug it first' : t.state === 'lost' ? 'not answering' : 'not answering; asked every 5 min'}</span></label>`;
       }).join('');
-      return `<h3>Which TAP has gone for good?</h3>
+      return `<h2>Which TAP has gone for good?</h2>
         <div class="sub">TigoMonitor stops polling it and leaves it off its list. A TAP still answering can't be retired: unplug it first. Its optimizers' history stays.</div>
         ${setupRunning(setup.data.master) ? (taps.length > 1 ? `<div class="setup-found setup-tap-pick">${rows}</div>` : '<div class="setup-note info">There is only one TAP: nothing to retire.</div>')
           : '<div class="setup-note info">This TigoMonitor is not running the bus, so it cannot change its list of TAPs.</div>'}
@@ -4870,7 +4897,7 @@
             <div class="row"><label>Password<input class="cfg-input" id="setup-pass" type="password" autocomplete="new-password"></label>
               <label>Again<input class="cfg-input" id="setup-pass2" type="password" autocomplete="new-password"></label></div>
             <div><button type="button" class="btn task-go" data-setup-finish disabled>Set the password and finish</button></div></div>`;
-        return `<h3>${left.length ? `${keys.length - left.length} of ${keys.length} done` : 'Your system is set up'}</h3>
+        return `<h2>${left.length ? `${keys.length - left.length} of ${keys.length} done` : 'Your system is set up'}</h2>
           <div class="sub">${left.length ? 'What is left, and where to do it, is on each step. This list stays here: come back any time.' : 'Every step is done. Come back any time: the list ticks itself off from what TigoMonitor sees.'}</div>
           <ul class="setup-sumlist">${keys.map(k => `<li><span class="setup-state ${c[k].ok ? 'ok' : 'todo'}">${c[k].ok ? 'Done' : 'To do'}</span> <strong>${SETUP_STEP_NAMES[k]}</strong> ${topoEscape(c[k].line)}</li>`).join('')}</ul>
           ${lock}
@@ -4879,7 +4906,7 @@
       }
       const k = f.step, [text, cards] = SETUP_SYSTEM[k], ok = c[k].ok;
       const add = k === 'optimizers' ? `<button type="button" class="setup-card" data-setup-start="add">${setupCardBody('add', 'Add an optimizer', 'Put one on the TAP\'s list, checked first')}</button>` : '';
-      return `<h3>${SETUP_STEP_NAMES[k]}<span class="setup-state ${ok ? 'ok' : 'todo'}">${ok ? 'Done' : 'To do'}</span></h3>
+      return `<h2>${SETUP_STEP_NAMES[k]}<span class="setup-state ${ok ? 'ok' : 'todo'}">${ok ? 'Done' : 'To do'}</span></h2>
         <div class="sub">${text}</div>
         <p class="setup-line">${topoEscape(c[k].line)}</p>${setupSystemPart(k, c)}
         <div class="setup-cards">${cards.map(([h, icon, t, line, tab]) => setupCard(h, icon, t, line, tab)).join('')}${add}</div>
@@ -4889,7 +4916,7 @@
       const m = setup.data.master, running = setupRunning(m);
       const offBus = '<div class="setup-note info">This TigoMonitor is not running the bus, so it cannot take on a TAP. To do this, set its bus role in Settings → Bus.</div>';
       if (f.step === 'connect')
-        return `<h3>Wire it in</h3>
+        return `<h2>Wire it in</h2>
           <div class="sub">Wire it onto this bus beside the TAP you have: A to A, B to B and a shared ground, then power it. Until you look for TAPs, polling may stumble if it answers at another TAP's address.</div>
           <div class="setup-actions">${back('Cancel')}${setupNext(f)}</div>`;
       if (f.step === 'radio') {
@@ -4914,14 +4941,14 @@
             : '<div class="setup-note info">To give it these settings, turn on <strong>Allow changes to the TAPs</strong> in Settings → Bus.</div>')
           : r.phase === 'checking' || r.phase === 'writing' || r.phase === 'done' ? ''
           : `<div class="setup-actions"><button type="button" class="btn task-go" data-setup-radio-check>${r.phase === 'failed' ? 'Check again' : 'Check'}</button></div>`;
-        return `<h3>Give it its radio settings</h3>
+        return `<h2>Give it its radio settings</h2>
           <div class="sub">A new TAP needs its own radio network for its optimizers to join: a channel, a network ID and a key. TigoMonitor chooses them and the TAP saves them. The check only reads.</div>
           ${plan}${state}${act}
           <div class="setup-actions">${back()}${setupNext(f, r.phase === 'done')}</div>`;
       }
       if (f.step === 'allow') {
         const on = !!(m && m.adopt_taps);
-        return `<h3>Allow a new TAP<span class="setup-state ${on ? 'ok' : 'todo'}">${on ? 'On' : 'Off'}</span></h3>
+        return `<h2>Allow a new TAP<span class="setup-state ${on ? 'ok' : 'todo'}">${on ? 'On' : 'Off'}</span></h2>
           <div class="sub"><strong>Take on a new TAP</strong> lets TigoMonitor bring a new TAP up and give it an address. Turning it on or off restarts the bus master: a few seconds without polling. You can turn it off again at the end.</div>
           ${running ? (on ? '' : '<div class="setup-actions"><button type="button" class="btn task-go" data-setup-adopt="on">Turn it on</button></div>') : offBus}
           <div class="setup-actions">${back()}${setupNext(f, running && on)}</div>`;
@@ -4931,7 +4958,7 @@
         const list = taps.map(t => `<div><strong class="${f.before && !before.includes(t.id) ? 'new' : ''}">${f.before && !before.includes(t.id) ? `Found TAP ${t.id}` : topoEscape(setupTapName(t.id))}</strong>
           <span>${f.before && !before.includes(t.id) ? 'new, its address stored' : t.state === 'running' ? 'answering' : 'not answering'}</span></div>`).join('');
         const looking = f.looking && !f.found;
-        return `<h3>Look for TAPs</h3>
+        return `<h2>Look for TAPs</h2>
           <div class="sub">TigoMonitor brings every TAP on the bus up again: each known TAP keeps its address, and the new one gets the next free address, stored on it. Polling stops for about 30 seconds.</div>
           ${running ? `<div class="setup-found">${list || '<span>No TAP answering yet.</span>'}</div>
           <div class="setup-actions"><button type="button" class="btn${f.found ? '' : ' task-go'}" data-setup-look${looking ? ' disabled' : ''}>${looking ? 'Looking…' : f.looking ? 'Look again' : 'Look for TAPs'}</button>
@@ -4939,13 +4966,13 @@
           <div class="setup-actions">${back()}${setupNext(f, !!f.found)}</div>`;
       }
       if (f.step === 'name')
-        return `<h3>Name it</h3>
+        return `<h2>Name it</h2>
           <div class="sub">A name you'll recognise, such as where it is mounted. It shows on Devices, the mesh map and when adding an optimizer.</div>
           <div class="setup-field"><label for="setup-tap-name">Name for TAP ${topoEscape(f.found)}</label>
           <input class="input" id="setup-tap-name" maxlength="40" value="${topoEscape(f.tapName || '')}" placeholder="Garage"></div>
           <div class="setup-actions">${back()}${setupNext(f)}</div>`;
       const on = !!(m && m.adopt_taps);
-      return `<div class="setup-done"><h3>TAP ${topoEscape(f.found)} is on the bus</h3>
+      return `<div class="setup-done"><h2>TAP ${topoEscape(f.found)} is on the bus</h2>
         <div class="sub">TigoMonitor polls it with the others. To put optimizers on it, add them with Add an optimizer and choose this TAP.</div>
         ${on ? `<div class="setup-note info"><strong>Take on a new TAP</strong> is still on. Turn it off unless you are adding another, so TigoMonitor only brings TAPs up when you ask. <button type="button" class="btn" data-setup-adopt="off">Turn it off</button></div>` : ''}
         <div class="setup-actions"><button type="button" class="btn" data-setup-start="add">Add an optimizer</button><button type="button" class="btn primary" data-setup-home>Finish</button></div></div>`;
@@ -4960,7 +4987,7 @@
     if (SETUP_GUIDES[f.task]) body = SETUP_GUIDES[f.task](f, back);
     else if (f.step === 'pick') {
       const opts = d.opts.slice().sort((a, b) => (b.quiet - a.quiet) || (b.placed - a.placed) || a.name.localeCompare(b.name, undefined, { numeric: true }));
-      body = `<h3>Which optimizer should be removed?</h3>
+      body = `<h2>Which optimizer should be removed?</h2>
         <div class="sub">${f.task === 'retire' ? 'It will be removed from the TAP\'s optimizer list.' : 'Optimizers that have stopped reporting are listed first. The replacement takes over this optimizer\'s position in the layout.'}</div>
         <input class="input setup-search" id="setup-search" type="search" placeholder="Search by name, string, label or address" aria-label="Search optimizers" autocomplete="off" value="${topoEscape(f.search || '')}">
         <fieldset class="setup-pick" style="border:0;margin:0;padding:0"><legend class="sr-only">Optimizer</legend>${opts.map(o => `
@@ -4976,7 +5003,7 @@
         ? '<div class="setup-check bad">✕ This label is not valid. Check for misread characters (0 and D, 8 and B, 2 and Z, 5 and S).</div>'
         : listed ? `<div class="setup-check bad">✕ This optimizer is already on the TAP's list, as ${topoEscape(listed.name)}.</div>`
         : `<div class="setup-check good">✓ Valid label · radio address <span class="mono">${mac}</span></div>`;
-      body = `<h3>Enter the new optimizer's label</h3>
+      body = `<h2>Enter the new optimizer's label</h2>
         <div class="sub">Enter the label printed on the optimizer, for example <span class="mono">4-9A57A2L</span>. The label encodes the full radio address, and its final letter is a check character that detects misread characters.</div>
         <div class="setup-field"><label for="setup-label">Optimizer label</label>
           <input class="input" id="setup-label" autocomplete="off" spellcheck="false" value="${topoEscape(f.label || '')}" placeholder="4-9A57A2L">
@@ -4988,14 +5015,14 @@
     } else if (f.step === 'check') {
       const mine = e.kind && e.started_unix >= f.checkedAt && e.dry_run;
       if (!mine || !e.finished) {
-        body = '<h3>Reading the TAP\'s list…</h3><div class="sub">Only a read is sent.</div>';
+        body = '<h2>Reading the TAP\'s list…</h2><div class="sub">Only a read is sent.</div>';
       } else if (!e.ok) {
-        body = `<h3>This change cannot be made</h3><div class="setup-error">${topoEscape(e.message)}</div><div class="setup-actions">${back()}</div>`;
+        body = `<h2>This change cannot be made</h2><div class="setup-error">${topoEscape(e.message)}</div><div class="setup-actions">${back()}</div>`;
       } else {
         const plan = setupPlan(f, e);
         const go = f.task === 'replace' ? `Replace ${f.old.name}` : f.task === 'add' ? 'Add optimizer' : `Retire ${f.old.name}`;
         const why = !running ? 'This TigoMonitor is not running the bus.' : !t.writes ? 'Changes are disabled. Turn on Allow changes to the TAPs in Settings → Bus.' : '';
-        body = `<h3>Review the planned changes</h3>
+        body = `<h2>Review the planned changes</h2>
           <div class="sub">Read from the TAP just now. Nothing has been sent yet.</div>
           <ol class="setup-plan">${plan.lines.map(([k, text]) => `<li class="${k}"><span class="mk" style="background:color-mix(in srgb, ${SETUP_MARK[k][0]} 14%, transparent)">${setupSvg(SETUP_MARK[k][1], SETUP_MARK[k][0])}</span><span>${topoEscape(text)}</span></li>`).join('')}</ol>
           ${plan.gap ? '<div class="sub">All optimizers are briefly unjoined (under one second) while the list is rewritten. On the reference system this took 0.78 s, and no optimizer had to rejoin.</div>' : ''}
@@ -5007,7 +5034,7 @@
       const mine = e.kind && e.started_unix >= f.startedAt && !e.dry_run;
       const list = SETUP_JOB_STEPS[f.task === 'add' ? 'add' : 'remove'];
       const at = mine ? (e.finished && e.ok ? list.length : list.findIndex(([k]) => k === e.step)) : 0;
-      body = `<h3>${f.task === 'replace' ? `Replacing ${topoEscape(f.old.name)}…` : f.task === 'add' ? 'Adding the optimizer…' : `Retiring ${topoEscape(f.old.name)}…`}</h3>
+      body = `<h2>${f.task === 'replace' ? `Replacing ${topoEscape(f.old.name)}…` : f.task === 'add' ? 'Adding the optimizer…' : `Retiring ${topoEscape(f.old.name)}…`}</h2>
         <ul class="setup-progress">${list.map(([, text], k) => `<li class="${k < at ? 'done' : k === at ? 'now' : ''}">${text}</li>`).join('')}</ul>
         ${mine && e.finished && !e.ok ? `<div class="setup-error">${topoEscape(e.message)}${e.interrupted ? ' It will be completed from the saved list once the TAP responds.' : ''}</div><div class="setup-actions">${back('Close')}</div>`
           : '<div class="sub">This takes a few seconds. If it is interrupted by a TAP restart or by this TigoMonitor, it will be completed from the saved list once the TAP responds. You can leave this page.</div>'}`;
@@ -5016,8 +5043,8 @@
       const out = (t.joins || []).slice().reverse().find(x => x.mac === f.mac && x.unix >= f.startedAt);
       const min = wt ? Math.max(0, Math.floor((Date.now() / 1000 - wt.since_unix) / 60)) : 0;
       body = out && !out.joined
-        ? `<h3>The optimizer did not join</h3><div class="sub">${topoEscape(out.text)}.</div><div class="setup-actions">${back('Close')}</div>`
-        : `<h3>Waiting for the new optimizer to join</h3>
+        ? `<h2>The optimizer did not join</h2><div class="sub">${topoEscape(out.text)}.</div><div class="setup-actions">${back('Close')}</div>`
+        : `<h2>Waiting for the new optimizer to join</h2>
           <div class="setup-wait"><svg width="44" height="44" viewBox="0 0 44 44" aria-hidden="true"><circle cx="22" cy="22" r="18" fill="none" stroke="var(--border)" stroke-width="4"></circle><path d="M22 4 A18 18 0 0 1 39 16" fill="none" stroke="var(--warn)" stroke-width="4" stroke-linecap="round"></path></svg>
             <div><strong>${min < 1 ? 'Just started' : `${min} min`} · join window open</strong>
             <div class="sub">The TAP is ready for <span class="mono">${topoEscape(labelOfMac(f.mac))}</span>. On the bench, joins took between 3.5 and 10 minutes; on the roof, 8 minutes.</div></div></div>
@@ -5026,12 +5053,12 @@
     } else if (f.step === 'done') {
       const now = f.mac && d.opts.find(o => o.mac === f.mac);
       if (f.task === 'retire') {
-        body = `<div class="setup-done"><h3>${topoEscape(f.old.name)} has been retired</h3></div>
+        body = `<div class="setup-done"><h2>${topoEscape(f.old.name)} has been retired</h2></div>
           <div class="sub">It has been removed from the TAP's list. Its position in your layout remains until you change it in Topology.</div>
           <div class="setup-actions"><a class="btn" href="#topology">Open Topology</a><button type="button" class="btn primary" data-setup-back>Finish</button></div>`;
       } else {
         const place = now && now.string ? `${now.string}, named ${now.name}` : f.task === 'add' ? 'Not yet assigned' : 'Updating…';
-        body = `<div class="setup-done"><h3>${f.task === 'replace' ? `${topoEscape(f.old.name)} has been replaced` : 'Optimizer added'}</h3>
+        body = `<div class="setup-done"><h2>${f.task === 'replace' ? `${topoEscape(f.old.name)} has been replaced` : 'Optimizer added'}</h2>
           <dl><dt>Position</dt><dd>${topoEscape(place)}</dd>
             <dt>Optimizer</dt><dd><span class="mono">${topoEscape(labelOfMac(f.mac))}</span>${now ? ` at <span class="mono">${now.addr}</span>` : ''}</dd>
             <dt>Latest reading</dt><dd>${now && now.power !== undefined ? `${(+now.vin || 0).toFixed(1)} V in · <strong>${Math.round(now.power)} W</strong>` : 'No reading yet'}</dd></dl></div>
@@ -5773,8 +5800,8 @@
             <td class="mono" style="color:var(--text-dim)">${range}</td>
           </tr>`;
         }
-        tbody.innerHTML = html ||
-          '<tr><td colspan="7" style="text-align:center;color:var(--text-faint);padding:32px 0">No databases open</td></tr>';
+        setHTML(tbody, html ||
+          '<tr><td colspan="7" style="text-align:center;color:var(--text-faint);padding:32px 0">No databases open</td></tr>');
       } else {
         sub.textContent = 'TSDB stats unavailable';
         tbody.innerHTML =
@@ -7997,7 +8024,7 @@
   // panel; touching cells are neighbours on the arr), /api/devices the
   // live power. Edit array opens a tray of what isn't placed yet.
   const arr = { saved: { panels: [], taps: [] }, draft: null, devices: [], tapNames: {}, sel: null, loaded: false, helpers: false, pgw: {}, pgwAt: 0 };
-  const ARRAY_PANEL_BASE = '#16233d';
+  const ARRAY_PANEL_BASE = 'var(--panel-glass)';
   const ARRAY_MARGIN = 3;  // empty squares round the drawing while editing
   const arrayEsc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const arrayCell = () => (window.innerWidth < 760 ? 40 : 48);
@@ -8184,7 +8211,7 @@
     });
     const taps = arrayTapIds().filter(id => !arr.draft.taps.some(t => t.id === id));
     const nat = (a, b) => String(a.name || a.addr).localeCompare(String(b.name || b.addr), undefined, { numeric: true });
-    let html = '<h3>Not placed yet</h3>';
+    let html = '<h2>Not placed yet</h2>';
     if (taps.length) html += `<div class="array-group"><div class="array-group-name">TAPs</div><div class="array-chips">${
       taps.map(id => `<button type="button" class="array-chip tap" data-kind="tap" data-id="${arrayEsc(id)}" title="${arrayEsc(arrayTapLabel(id))}">${arrayEsc(arrayTapLabel(id))}</button>`).join('')}</div></div>`;
     Object.keys(groups).sort((a, b) => a.localeCompare(b, undefined, { numeric: true })).forEach(g => {
@@ -8455,6 +8482,8 @@
     if (!document.getElementById('mesh-svg'))
       graph.innerHTML = '<svg id="mesh-svg" viewBox="0 0 760 460" role="group" aria-label="Optimizers around the TAP each reports through"></svg>';
     const svg = document.getElementById('mesh-svg');
+    // The redraw replaces every node; give keyboard focus back afterwards.
+    const focusAddr = svg.contains(document.activeElement) ? document.activeElement.dataset?.addr : null;
     svg.replaceChildren();
     const H = 460, NS = 'http://www.w3.org/2000/svg';
     const el = (tag, attrs, parent) => {
@@ -8573,6 +8602,7 @@
     const keep = meshSelected && nodes.find(n => n.addr === meshSelected);
     meshSide(keep || [...nodes].sort((a, b) => order[meshTier(a)] - order[meshTier(b)])[0]);
     meshFit();
+    if (focusAddr) svg.querySelector(`.mesh-node[data-addr="${CSS.escape(focusAddr)}"]`)?.focus({ preventScroll: true });
   }
 
   // Each string on a row, its panels in label order; the row's median loss
@@ -8618,9 +8648,9 @@
         <div class="mesh-cards">${cards}</div>
       </div>`;
     }).join('');
-    graph.innerHTML = `<div class="mesh-strings" id="mesh-strings">${rows}</div>`;
-    graph.querySelectorAll('.mesh-card').forEach(c => {
-      const n = nodes.find(m => m.addr === c.dataset.addr), pick = () => meshSide(n);
+    if (setHTML(graph, `<div class="mesh-strings" id="mesh-strings">${rows}</div>`)) graph.querySelectorAll('.mesh-card').forEach(c => {
+      // Looked up when used: a card can outlive the poll that drew it.
+      const pick = () => meshSide((meshData.nodes || []).find(m => m.addr === c.dataset.addr));
       c.addEventListener('mouseenter', pick);
       c.addEventListener('focus', pick);
       c.addEventListener('click', pick);
@@ -8675,7 +8705,7 @@
     };
     box.style.setProperty('--days', days.length);
     const whole = d => Object.values(d.strings || {}).reduce((a, c) => [a[0] + c[0], a[1] + c[1]], [0, 0]);
-    box.innerHTML = '<h3>Reports lost by day</h3>' +
+    box.innerHTML = '<h2>Reports lost by day</h2>' +
       `<div class="mesh-day-head"><span>String</span>${days.map(d => `<span>${label(d.date)}</span>`).join('')}</div>` +
       names.map(name => `<div class="mesh-day-row"><span class="mesh-day-name">${meshEsc(name || 'No string')}</span>` +
         days.map(d => cell((d.strings || {})[name])).join('') + '</div>').join('') +
@@ -8741,7 +8771,7 @@
       : 'Not known: no join heard yet';
     const relays = (meshData.nodes || []).filter(m => m !== n && m.relay === n.addr).map(m => meshEsc(m.label));
     document.getElementById('mesh-side').innerHTML = `
-      <h3>${meshEsc(n.label)} <span class="mesh-pill tier-${tier}">${MESH_NAMES[tier]}</span></h3>
+      <h2>${meshEsc(n.label)} <span class="mesh-pill tier-${tier}">${MESH_NAMES[tier]}</span></h2>
       <div class="mesh-sub">${n.string ? meshEsc(n.string) + ' · ' : ''}address ${meshEsc(n.addr)}</div>
       <div class="mesh-k">Signal</div>
       <div class="mesh-v">${n.rssi == null ? '—' : n.rssi} <span class="mesh-faint">Tigo's raw number, higher is better</span></div>
@@ -8968,9 +8998,12 @@
         totalActive += inv.active_devices || 0;
       }
 
-      tree.innerHTML = html ||
-        '<div class="topo-empty">No topology data — CCA mappings may not be loaded yet.</div>';
+      const wrote = setHTML(tree, html ||
+        '<div class="topo-empty">No topology data — CCA mappings may not be loaded yet.</div>');
 
+      // The handlers below go on fresh nodes only; unchanged markup kept
+      // its nodes and their handlers.
+      if (wrote) {
       // Wire collapse toggles on the freshly-rendered headers. The edit
       // button stops propagation so opening rename doesn't toggle collapse.
       tree.querySelectorAll('.topo-inv-head').forEach(head => {
@@ -9117,6 +9150,7 @@
           input.select();
         });
       });
+      }
 
       document.getElementById('topo-summary').textContent =
         `${inverters.length} inverter${inverters.length === 1 ? '' : 's'} · ` +

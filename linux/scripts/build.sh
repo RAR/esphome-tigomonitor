@@ -15,6 +15,17 @@ for t in barcode_bindings_test protocol_test node_identity_test cca_ble_protocol
   fi
   tail -1 "build/linux/$t.log"
 done
+# The ESP32's gzipped web page, token spliced in (components/tigo_server).
+python3 components/tigo_server/web_assets_gen.py --out build/linux/web_assets.h
+g++ -std=c++17 -Wall -Wextra -I build/linux -I components/tigo_server \
+  -DAPP_HTML_PATH='"components/tigo_server/web/app.html"' tests/host/gzip_splice_test.cpp -lz \
+  -o build/linux/gzip_splice_test
+if ! build/linux/gzip_splice_test >build/linux/gzip_splice_test.log 2>&1; then
+  cat build/linux/gzip_splice_test.log
+  echo "gzip_splice_test failed" >&2
+  exit 1
+fi
+tail -1 build/linux/gzip_splice_test.log
 # The web UI's sign-in sessions.
 g++ -std=c++17 -Wall -Wextra -I linux/src tests/host/web_session_test.cpp -o build/linux/web_session_test
 if ! build/linux/web_session_test >build/linux/web_session_test.log 2>&1; then
