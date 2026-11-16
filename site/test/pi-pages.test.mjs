@@ -572,7 +572,7 @@ test('mesh: by string puts each string on a row, panels in order', async () => {
   assert.equal(await card(11).locator('.mesh-card-via').textContent(), 'via ?');
   assert.equal(await card(0).locator('.mesh-card-via').count(), 0);
   await card(4).click();
-  assert.match(await page.textContent('#mesh-side h3'), new RegExp(`^${fixtureNodes[4].label}`));
+  assert.match(await page.textContent('#mesh-side h2'), new RegExp(`^${fixtureNodes[4].label}`));
   assert.equal(await card(4).getAttribute('aria-pressed'), 'true');
   await page.reload();
   await page.click('#nav button[data-view="topology"]');
@@ -815,5 +815,31 @@ test('on the Pi a #logs link still polls the log', async () => {
   const { page, ctx, api } = await open({ hash: '#logs' });
   await page.waitForTimeout(2500);
   assert.ok((api.logReads || 0) >= 1);
+  await ctx.close();
+});
+
+test('mesh: the 10 s redraw leaves keyboard focus on the optimizer it was on', async () => {
+  const { page, ctx, errors } = await openMesh();
+  await page.waitForSelector('#mesh-svg .mesh-node');
+  const label = fixtureNodes[3].label;
+  await meshNode(page, label).focus();
+  await page.evaluate(() => refreshMesh());
+  assert.equal(await page.evaluate(() => document.activeElement?.dataset?.label), label);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test('topology: a poll with nothing new keeps the tree, and a header still toggles once', async () => {
+  const { page, ctx, errors } = await open({ linux: false });
+  await page.click('#nav button[data-view="topology"]');
+  await page.waitForSelector('#topo-tree .topo-inv-head');
+  // An expando property is not a DOM change: a poll that redraws drops it.
+  await page.evaluate(() => { document.querySelector('#topo-tree .topo-inv').__kept = true; });
+  await page.evaluate(() => refreshTopology());
+  assert.equal(await page.evaluate(() => document.querySelector('#topo-tree .topo-inv').__kept), true);
+  // One handler per header: a second one would toggle it straight back.
+  await page.click('#topo-tree .topo-inv-head');
+  assert.equal(await page.evaluate(() => document.querySelector('#topo-tree .topo-inv').classList.contains('collapsed')), true);
+  assert.deepEqual(errors, []);
   await ctx.close();
 });

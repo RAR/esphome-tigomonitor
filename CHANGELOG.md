@@ -151,6 +151,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The ESP32 keeps its web page compressed, freeing about 420 KB of
+  flash.** The page was stored as plain text (571 KB); it's now stored
+  gzipped (145 KB) and sent that way, with the API token added as it goes
+  out, so the device never unpacks it. On the reference build flash use
+  went from 99.5% to 81.6%. Browsers load the page as before; nothing to
+  change in your YAML.
 - **Signing in is a page, not the browser's popup (Raspberry Pi and other
   Linux).** With a web UI password set, the page now asks for the username
   and password itself, so a password manager can fill them, a wrong one
@@ -220,6 +226,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Keyboard focus and hover survive the page's refreshes.** The mesh map
+  put focus back on the optimizer you were on after its 10-second redraw,
+  and the Devices, Topology, Diagnostics and System setup tables now
+  leave their rows alone when a poll brings nothing new, so hover, focus,
+  text selection and an open row stay put.
+- **Small text is easier to read.** Labels that were 10 px (the sidebar
+  group names, the PV pill, panel-detail labels, the "% rated" line on the
+  Dashboard's panel tiles) are now 11 px, and "% rated" is no longer
+  faded below 4.5:1 contrast. The wattage inside the Array's panel squares
+  stays small so it fits.
 - **Light mode is readable, and the web UI follows your device's theme.**
   Green, amber, red and blue text kept the bright shades made for the dark
   background, so in light mode the Dashboard's current power read at
