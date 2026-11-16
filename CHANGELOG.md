@@ -226,6 +226,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Cloud import no longer reboots the ESP32 once you've saved a layout.**
+  With a layout of your own, an import is compared with it so you can choose
+  which to keep. That comparison used the ESP32's ~64 KB internal heap, and
+  growing its list of changes for 40 panels aborted when no large enough
+  block was free. The Topology editor's lists now live in PSRAM, and the
+  check for whether anything changed no longer builds the list at all.
+  Reflash the ESP32 to pick it up; the Raspberry Pi build was not affected.
+
 - **Keyboard focus and hover survive the page's refreshes.** The mesh map
   put focus back on the optimizer you were on after its 10-second redraw,
   and the Devices, Topology, Diagnostics and System setup tables now
