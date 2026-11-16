@@ -158,6 +158,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Devices: click an optimizer to see everything about it, under its
+  row.** The row opens in place to show its barcode, address, TAP and
+  string; its firmware (since when, and what it replaced) and rating; on
+  the Pi, its settings and MPPT parameters beside what most of its family
+  report, any recent changes, and its last answers as heard. This
+  replaces the Settings side panel and the tooltips on the Name, Firmware
+  and Settings cells. Rows stay open as the table updates, and the toggle
+  works from the keyboard.
+
 - **The ESP32 keeps its web page compressed, freeing about 420 KB of
   flash.** The page was stored as plain text (571 KB); it's now stored
   gzipped (145 KB) and sent that way, with the API token added as it goes
