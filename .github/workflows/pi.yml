@@ -19,6 +19,8 @@ on:
       - 'components/tigo_monitor/*.h'
       - 'components/tigo_master/**'
       - 'components/tigo_server/web/app.html'
+      - 'components/tigo_server/gzip_splice.h'
+      - 'components/tigo_server/web_assets_gen.py'
       - 'tests/host/**'
       - '.github/workflows/pi.yml'
   pull_request:
@@ -30,6 +32,8 @@ on:
       - 'components/tigo_monitor/*.h'
       - 'components/tigo_master/**'
       - 'components/tigo_server/web/app.html'
+      - 'components/tigo_server/gzip_splice.h'
+      - 'components/tigo_server/web_assets_gen.py'
       - 'tests/host/**'
       - '.github/workflows/pi.yml'
   workflow_dispatch:

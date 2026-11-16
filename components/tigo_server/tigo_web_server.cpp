@@ -904,12 +904,18 @@ esp_err_t TigoWebServer::app_handler(httpd_req_t *req) {
     return ESP_OK;
   }
 
-  PSRAMString html;
-  server->get_app_html(html);
-
+  // Gzipped in flash, sent straight from there with the token spliced in
+  // (gzip_splice.h): about 145 KB on the wire and in flash instead of 571 KB,
+  // and no PSRAM copy of the page per request.
   httpd_resp_set_type(req, "text/html");
+  httpd_resp_set_hdr(req, "Content-Encoding", "gzip");
   httpd_resp_set_hdr(req, "Connection", "close");
-  return httpd_resp_send(req, html.c_str(), html.length());
+  const std::string &token = server->get_api_token();
+  bool ok = tigo_gzip::send_spliced(APP_HTML_GZ, token.data(), token.size(), [req](const void *p, size_t n) {
+    return httpd_resp_send_chunk(req, static_cast<const char *>(p), n) == ESP_OK;
+  });
+  if (!ok) return ESP_FAIL;
+  return httpd_resp_send_chunk(req, nullptr, 0);
 }
 
 esp_err_t TigoWebServer::yaml_config_handler(httpd_req_t *req) {
@@ -3450,12 +3456,6 @@ void TigoWebServer::build_yaml_json(PSRAMString& json, const std::set<std::strin
 }
 
 // ===== HTML Page Generators =====
-
-void TigoWebServer::get_app_html(PSRAMString& html) {
-  html.append(APP_HTML_PRE);
-  html.append(api_token_);
-  html.append(APP_HTML_POST);
-}
 
 void TigoWebServer::build_cca_info_json(PSRAMString& json) {
   // Source of the device-info payload + freshness, per cca_source_:
