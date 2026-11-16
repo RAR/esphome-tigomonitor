@@ -95,6 +95,10 @@ class BusMaster {
                              uint16_t tap = 0) {
     return core_.request_table_replace(old_mac, new_mac, dry_run, why, tap);
   }
+  bool request_table_handover(const std::vector<esphome::tigo_monitor::master::TableRecord> &from_old_tap, bool dry_run,
+                              std::string &why, uint16_t tap) {
+    return core_.request_table_handover(from_old_tap, dry_run, why, tap);
+  }
   void set_on_replaced(esphome::tigo_master::MasterCore::TableReplaced cb) { core_.set_on_replaced(std::move(cb)); }
   void set_on_removed(esphome::tigo_master::MasterCore::TableRemoved cb) { core_.set_on_removed(std::move(cb)); }
   bool request_table_stop_waiting(const esphome::tigo_monitor::master::Bytes &mac) {

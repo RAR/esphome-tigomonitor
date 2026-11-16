@@ -754,10 +754,95 @@ static void test_replace_dry_run() {
   CHECK(job.dry_frames().size() == 2 && job.dry_frames()[1] == expect);
 }
 
+// A TAP handing over: the new TAP keeps what it lists, and the old TAP's
+// optimizers are added at their own ids with bit 15 set (listed, not
+// joined), as a CCA's rediscovery wrote them to a second TAP (2026-11-15).
+static std::vector<TableRecord> old_tap_records(int n, int first_id) {
+  std::vector<TableRecord> out;
+  for (int i = 0; i < n; i++) {
+    char m[17];
+    std::snprintf(m, sizeof(m), "04C05B00000020%02X", static_cast<unsigned>(i & 0xFF));
+    out.push_back({hex(m), static_cast<uint16_t>(first_id + i)});
+  }
+  return out;
+}
+
+static void test_handover_lists_the_old_taps_optimizers_not_joined() {
+  FakeTap tap = table_of(3);  // ids 2..4, joined
+  std::vector<TableRecord> old = old_tap_records(12, 0x20);
+  uint32_t now = 0;
+  TableHandover job(old, false);
+  CHECK(std::string(job.kind()) == "handover");
+  run(job, tap, now);
+  CHECK(job.finished() && job.ok());
+  CHECK(tap.erases == 1 && tap.writes == 2);  // 15 records, ten a write
+  std::vector<TableRecord> held = records_of(tap);
+  CHECK(held.size() == 15);
+  int joined = 0, listed = 0;
+  for (const auto &r : held) {
+    if (r.joined()) joined++;
+    else listed++;
+  }
+  CHECK(joined == 3 && listed == 12);
+  for (const auto &o : old) {
+    const TableRecord *r = TableWalk::find(held, o.mac);
+    CHECK(r && r->tuid == (0x8000 | o.id()));
+  }
+  CHECK(job.joining().size() == 12);
+  CHECK(job.message() == "listed 12 from the other TAP, not joined yet; the other 3 written back as they were");
+}
+
+// One already listed here (it joined this TAP before) is left as it is; all
+// already listed: nothing to do, nothing sent but the read.
+static void test_handover_skips_ones_already_listed() {
+  FakeTap tap = table_of(2);
+  std::vector<TableRecord> old = old_tap_records(3, 0x20);
+  tap.slots.push_back({old[0].mac, old[0].id()});  // joined here already
+  uint32_t now = 0;
+  TableHandover job(old, false);
+  run(job, tap, now);
+  CHECK(job.ok() && job.joining().size() == 2);
+  FakeTap all = table_of(0);
+  for (const auto &o : old) all.slots.push_back({o.mac, o.id()});
+  TableHandover none(old, false);
+  run(none, all, now);
+  CHECK(none.ok() && all.erases == 0 && all.writes == 0);
+  CHECK(none.message() == "all 3 are already listed on this TAP: nothing to do");
+}
+
+// An id the new TAP already gives another optimizer: stopped before the
+// erase, saying which.
+static void test_handover_stops_on_an_id_in_use() {
+  FakeTap tap = table_of(3);  // ids 2..4
+  std::vector<TableRecord> old = old_tap_records(2, 3);  // 3 clashes
+  uint32_t now = 0;
+  TableHandover job(old, false);
+  run(job, tap, now);
+  CHECK(job.finished() && !job.ok() && tap.erases == 0 && tap.writes == 0);
+  CHECK(job.message().find("0003") != std::string::npos);
+}
+
+// A dry run: the erase, then the writes, nothing sent.
+static void test_handover_dry_run() {
+  FakeTap tap = table_of(1);
+  std::vector<TableRecord> old = old_tap_records(2, 0x20);
+  uint32_t now = 0;
+  TableHandover job(old, true);
+  run(job, tap, now);
+  CHECK(job.ok() && tap.erases == 0 && tap.writes == 0);
+  CHECK(job.dry_frames().size() == 2);
+  CHECK(job.dry_frames()[1].size() == 2 + 3 * 10 && job.dry_frames()[1][1] == 3);
+  CHECK(job.message() == "dry run: would erase the table, write back the other 1 and list 2 from the other TAP, not joined");
+}
+
 int main() {
   test_replace_writes_the_new_one_at_the_old_id();
   test_replace_refusals();
   test_replace_dry_run();
+  test_handover_lists_the_old_taps_optimizers_not_joined();
+  test_handover_skips_ones_already_listed();
+  test_handover_stops_on_an_id_in_use();
+  test_handover_dry_run();
   test_remove_erases_and_writes_back_the_rest();
   test_remove_writes_ten_at_a_time();
   test_remove_waits_the_holdoff();

@@ -326,6 +326,37 @@ bool MasterCore::request_table_replace(const master::Bytes &old_mac, const maste
   return true;
 }
 
+bool MasterCore::request_table_handover(const std::vector<master::TableRecord> &from_old_tap, bool dry_run,
+                                        std::string &why, uint16_t tap) {
+  std::lock_guard<std::mutex> lock(mu_);
+  if (!tap || !tap_by_id_(tap)) {
+    char b[64];
+    snprintf(b, sizeof(b), "no TAP %04X on this monitor's list", tap);
+    why = b;
+    return false;
+  }
+  if (table_refusal_(dry_run, tap, why)) return false;
+  if (from_old_tap.empty()) {
+    why = "no optimizers to hand over";
+    return false;
+  }
+  for (const auto &r : from_old_tap)
+    if (r.mac.size() != 8 || r.id() < 2 || r.id() > 1023) {
+      why = "each optimizer needs its 8-byte MAC and an address from 0002 to 03FF";
+      return false;
+    }
+  if (!dry_run && !table_saved_) {
+    why = "nowhere to save the table before its erase, so nothing is erased";
+    return false;
+  }
+  if (!dry_run && !discovery_renewing_) {
+    why = "the discovery window is held closed; the optimizers could never join";
+    return false;
+  }
+  start_table_job_(std::make_unique<master::TableHandover>(from_old_tap, dry_run), tap);
+  return true;
+}
+
 bool MasterCore::request_herd(std::string &why) {
   std::lock_guard<std::mutex> lock(mu_);
   if (status_.standby == Standby::standing_by || status_.standby == Standby::taking_over)
@@ -587,6 +618,11 @@ void MasterCore::settle_table_job_(uint32_t now_ms) {
       tap->join_watch.add(r->added_mac(), r->id(), now_ms);
       waiting_since_[master::mac_hex(r->added_mac())] = unix_now();
       replaced_from_[master::mac_hex(r->added_mac())] = master::mac_hex(r->mac());
+    }
+    // A handover's optimizers, each waited for until it joins this TAP.
+    for (const auto &j : r->joining()) {
+      tap->join_watch.add(j.mac, j.id(), now_ms);
+      waiting_since_[master::mac_hex(j.mac)] = unix_now();
     }
   }
   sync_join_status_(*tap);
@@ -1189,7 +1225,7 @@ void MasterCore::tick_(uint32_t now_ms) {
              table_tap_, static_cast<master::ProvisionJob *>(table_job_.get())->block().describe().c_str());
       else if (several_())
         LOGI("bus master: table: %s%s an optimizer on TAP %04X", table_job_->dry_run() ? "a dry run of " : "",
-             add ? "adding" : kind == "replace" ? "replacing" : "removing", table_tap_);
+             add ? "adding" : kind == "replace" ? "replacing" : kind == "handover" ? "handing over to" : "removing", table_tap_);
       else
         LOGI("bus master: table: %s%s an optimizer", table_job_->dry_run() ? "a dry run of " : "",
              add ? "adding" : kind == "replace" ? "replacing" : "removing");
