@@ -10,6 +10,7 @@
 #include "discovery_store.h"
 #include "table_store.h"
 #include "tap_store.h"
+#include "heard_taps.h"
 #include "monitor.h"
 #include "cca_ble.h"
 #include "cca_http.h"
@@ -370,10 +371,33 @@ int main(int argc, char **argv) {
       std::unique_lock<std::mutex> swap(master_mu);
       if (bus_master) carried_seq = bus_master->seq();  // the master this one replaces
       m->set_seq(carried_seq);
-      // The TAPs saved by a herd; none, the one at gateway_id. With more
-      // than one (saved, or after a herd), each TAP's 0x41s go to the
+      // The TAPs saved by a herd; none, the ones heard run by another master
+      // (a CCA) in the last day, saved; none of those, the one at
+      // gateway_id. With more than one, each TAP's 0x41s go to the
       // optimizers heard through it.
       auto saved_taps = tap_store.load();
+      if (saved_taps.empty()) {
+        std::vector<std::pair<uint16_t, int64_t>> heard;
+        auto links = monitor.links();
+        for (const auto &kv : links.links()) heard.push_back({kv.second.tap, kv.second.last_heard_s});
+        std::string list;
+        for (const HeardTap &t : heard_taps(heard, bus_log.tap_macs(), static_cast<int64_t>(time(nullptr)))) {
+          BusMaster::TapEntry e;
+          e.id = t.id;
+          for (size_t i = 0; i + 1 < t.mac.size(); i += 2)
+            e.mac.push_back(static_cast<uint8_t>(strtoul(t.mac.substr(i, 2).c_str(), nullptr, 16)));
+          saved_taps.push_back(e);
+          char id[6];
+          snprintf(id, sizeof(id), " %04X", t.id);
+          list += id;
+        }
+        // Just the one at gateway_id: nothing to change or keep.
+        if (saved_taps.size() == 1 && saved_taps[0].id == settings.gateway_id) saved_taps.clear();
+        if (!saved_taps.empty()) {
+          LOGI("bus master: no saved TAPs; running the %zu heard in the last day:%s", saved_taps.size(), list.c_str());
+          if (tap_store.save(saved_taps)) LOGI("bus master: saved %zu TAP%s", saved_taps.size(), saved_taps.size() == 1 ? "" : "s");
+        }
+      }
       if (!saved_taps.empty()) m->set_taps(saved_taps);
       m->set_tap_targets([&monitor](uint16_t tap) {
         std::vector<uint16_t> tuids;

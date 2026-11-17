@@ -59,3 +59,12 @@ if ! build/linux/pgw_test >build/linux/pgw_test.log 2>&1; then
   exit 1
 fi
 tail -1 build/linux/pgw_test.log
+# The TAPs heard run by another master (heard_taps.h), for a takeover
+# with no saved TAP list.
+g++ -std=c++17 -Wall -Wextra -I linux/src tests/host/heard_taps_test.cpp -o build/linux/heard_taps_test
+if ! build/linux/heard_taps_test >build/linux/heard_taps_test.log 2>&1; then
+  cat build/linux/heard_taps_test.log
+  echo "heard_taps_test failed" >&2
+  exit 1
+fi
+tail -1 build/linux/heard_taps_test.log

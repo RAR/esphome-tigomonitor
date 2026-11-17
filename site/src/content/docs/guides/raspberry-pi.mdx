@@ -407,11 +407,11 @@ after the TAP's window ran out, with the inverters' RSS transmitters on and
 with them unplugged. Rapid shutdown is the RSD's job: it cuts the TAP's
 power, whatever the Pi is doing.
 
-The sidebar's **Bus control** page has the switches and the master's
-health, and **Bus traffic** shows what is said on the bus; see
+While the Pi runs the bus, **System setup** has the PV output and
+discovery window switches, **Diagnostics** the bus master's figures, and
+**Devices** each TAP's polls and dropouts. **Bus traffic** shows what is
+said on the bus; see
 [the web UI's pages](/esphome-tigomonitor/guides/web-server/#the-pages-you-get).
-
-<ThemedShot name="pi-bus-control" alt="Bus › Control — the PV output and discovery window switches, and the bus master's health: polls, the longest pause, gateway dropouts, housekeeping, optimizer queries and the TAP's firmware." />
 
 <ThemedShot name="pi-bus-traffic" alt="Bus › Traffic — a strip of the last 5 minutes, then each request on the bus with its reply, round trip and what it means: discovery window reads, node table pages, preferred gateways and optimizer queries." />
  An ESP32 can run
@@ -438,7 +438,7 @@ transmitter sends on the DC wiring, and those keep producing while the
 transmitter runs. A minute after you turn output off, the page lists any
 panels still producing, so you can see which ones on your site those are.
 
-The switch is on the **Bus control** page, which appears while the Pi runs
+The switch is on **System setup**, under the tasks, while the Pi runs
 or stands by for the bus. It needs a
 [web UI password](#set-a-password): without one anyone on your network
 could turn the array off, so the Pi refuses. Turning output off asks first.
@@ -470,7 +470,7 @@ The TAP's *discovery window* is its window for new optimizers to join.
 Running the bus, the Pi renews it only while an optimizer it expects is
 missing, and lets it close once all are found, as the CCA we watched on the
 bench did. The
-**Bus control** page can stop renewing it: **Disable**. The Pi keeps
+**Discovery window** switch on System setup can stop renewing it: **Disable**. The Pi keeps
 polling, so every panel still reports, and nothing new goes to the TAP; it
 just stops sending the renewal. On the roof we measured, a closed window
 didn't stop production, and every optimizer came back at sunrise and after
@@ -484,7 +484,7 @@ once all have, it lets the window close. A string counts whether you set it
 up in **Edit layout** or it came from the CCA or a Tigo cloud import. At
 night nothing is held open, since the optimizers rejoin by themselves at
 sunrise. With no optimizer in a string it renews as before, and a spare
-you've marked known doesn't count. The Bus control page says which it's doing and
+you've marked known doesn't count. The switch says which it's doing and
 how many it's waiting for. **Disable** still wins over it.
 
 ## Watch it from a monitor
