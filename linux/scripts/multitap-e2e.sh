@@ -8,7 +8,8 @@
 # quiet doesn't stop the other; that with adopting on, a new TAP at the
 # factory address starts the CCA's herd, which stores its new id and saves
 # the list, and with it off, the TAP is only reported; and that the owner's
-# herd keeps the known ids; and that a TAP gone for good can be retired.
+# herd keeps the known ids; that a TAP gone for good can be retired; and that
+# with no saved list (another master ran the bus) the TAPs heard are run.
 # Run from the repo root inside the dev container, after build.sh.
 set -eu
 out=build/multitap-e2e
@@ -156,6 +157,26 @@ expect "ids kept" "$(stat "$out/four.json" "[t['id'] for t in d['taps']]")" "['1
 expect "no STORE for TAPs that keep their ids" "$(stat "$out/four.json" "[t['stores'] for t in d['taps']]")" "[0, 0]"
 expect "the list saved" "$(saved_taps "$out/four/taps.json")" "[('1201', 'a1'), ('1202', 'a2')]"
 expect "polled again" "$(master 18404 "all(t['polls'] > 20 for t in d['taps'])")" True
+stop_all
+
+# --- run 5: no saved list, after another master ran two TAPs (a CCA): the TAPs heard ---
+# Both TAPs' optimizers heard, then the list gone and the role flipped to
+# listening and back, in the running daemon, as the owner does from Settings.
+mkdir -p "$out/five"
+echo '{"taps": [{"id": "1201", "mac": "04c05b0000a1b2a1"}, {"id": "1202", "mac": "04c05b0000a1b2a2"}]}' > "$out/five/taps.json"
+start five 18405 '' --tap 1201,a1,3 --tap 1202,a2,3
+wait_for 20 18405 "len(d['taps']) == 2 and all(t['polls'] > 20 for t in d['taps'])"
+for _ in $(seq 40); do [ "$(body GET 18405 /api/devices | python3 -c 'import json,sys; print(len(json.load(sys.stdin)["devices"]))')" = 6 ] && break; sleep 0.25; done
+rm "$out/five/taps.json"
+expect "to listening" "$(code POST 18405 /api/settings '{"bus_role": "listen"}')" 200
+sleep 2
+expect "and back to running the bus" "$(code POST 18405 /api/settings '{"bus_role": "master"}')" 200
+sleep 2
+wait_for 20 18405 "len(d['taps']) == 2 and all(t['polls'] > 5 for t in d['taps'])"
+expect "with no saved list, both TAPs heard are polled" "$(master 18405 "[(t['id'], t['state'], t['polls'] > 5) for t in d['taps']]")" \
+  "[('1201', 'running', True), ('1202', 'running', True)]"
+expect "and the list is saved, MACs and all" "$(saved_taps "$out/five/taps.json")" "[('1201', 'a1'), ('1202', 'a2')]"
+expect "said so" "$(grep -c 'no saved TAPs; running the 2 heard in the last day: 1201 1202' "$out/five.log")" 1
 stop_all
 
 if [ $fail -ne 0 ]; then

@@ -242,6 +242,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Taking the bus over from a CCA ran only one of its TAPs (Raspberry
+  Pi and other Linux).** The Pi keeps the TAPs it runs in `taps.json`, but
+  only its own bring-up wrote that list, so after a CCA had run two TAPs
+  the Pi ran just the one at its gateway ID. With no saved list it now runs
+  every TAP an optimizer reported through in the last day, with the MAC
+  each gave, and saves the list. Nothing to do if you already have one.
+
 - **Cloud import no longer reboots the ESP32 once you've saved a layout.**
   With a layout of your own, an import is compared with it so you can choose
   which to keep. That comparison used the ESP32's ~64 KB internal heap, and

@@ -307,6 +307,13 @@ std::vector<esphome::tigo_monitor::master::TapRadio> BusLog::radios() const {
   return out;
 }
 
+std::map<uint16_t, std::string> BusLog::tap_macs() const {
+  std::lock_guard<std::mutex> lock(mu_);
+  std::map<uint16_t, std::string> out;
+  for (const auto &kv : tap_ids_) out[kv.first] = kv.second.first;
+  return out;
+}
+
 uint16_t BusLog::tap_of_mac(const std::string &mac) const {
   std::lock_guard<std::mutex> lock(mu_);
   // The address it gave this MAC from most recently: a TAP re-addressed by a
