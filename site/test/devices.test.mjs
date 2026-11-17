@@ -203,10 +203,10 @@ test("Devices, on the Pi: an optimizer over its rating, and one whose panel is r
   await page.waitForFunction(() => /Over rating/.test(document.getElementById('nodes-tbody').textContent));
   const row = (i) => page.textContent(`#nodes-tbody tr[data-addr="${dev[i].addr}"] td:first-child`);
   assert.match(await row(0), /Over rating/);
-  assert.doesNotMatch(await row(0), /Clips/);  // over says it; its 400 W panel's note is in its details
-  assert.match(await row(7), /Clips at 375 W/);
+  assert.doesNotMatch(await row(0), /Panel above/);  // over says it; its 400 W panel's note is in its details
+  assert.match(await row(7), /Panel above 375 W/);
   assert.doesNotMatch(await row(7), /Over rating/);
-  assert.doesNotMatch(await row(1), /Over rating|Clips/);
+  assert.doesNotMatch(await row(1), /Over rating|Panel above/);
   await page.click(`#nodes-tbody tr[data-addr="${dev[0].addr}"] .node-toggle`);
   const d0 = await page.textContent(`#nd-${dev[0].addr.toUpperCase()}`);
   assert.match(d0, /Over its rating now: 350 W in, rated 300 W/);
@@ -214,7 +214,8 @@ test("Devices, on the Pi: an optimizer over its rating, and one whose panel is r
   const d7 = await page.textContent(`#nd-${dev[7].addr.toUpperCase()}`);
   assert.match(d7, /Peak\s*396 W, 106% of 375 W/);
   assert.match(d7, /Input now\s*39\.2 V of 75 V/);
-  assert.match(d7, /panel is rated 400 W, more than this optimizer's 375 W/);
+  assert.match(d7, /panel is rated 400 W, above this optimizer's 375 W rating: in strong sun it can run over its rating/);
+  assert.doesNotMatch(d7, /clip|limits/i);
   // The Dashboard rings the tile that's over, and says so under its watts.
   await page.click('#nav button[data-view="dashboard"]');
   await page.waitForSelector(`.panel-heat-tile.over[data-addr="${dev[0].addr}"]`);
