@@ -1325,6 +1325,39 @@ static void test_a_herd_keeps_a_missing_tap() {
 // in startup mode its tries also ask there, and finding it, the master
 // herds, as it re-addresses one of several TAPs (see the next test). Both
 // end at their ids.
+// Both TAPs miss together (the bus for a second, on the roof 2026-11-17):
+// the master looks for them again, finds one at its id and the other later.
+// Each shows as running again; before, the one found at its id was left
+// "lost" while it was polled.
+static void test_both_quiet_at_once_then_back_each_shows_running() {
+  MultiTap bus;
+  bus.taps = {{0x1201, 1}, {0x1202, 2}};
+  MasterCore core(&bus.port, [](int, const std::string &) {}, nullptr, nullptr, 0x1201, false, /*startup=*/true);
+  core.set_taps({{0x1201, multi_mac(1)}, {0x1202, multi_mac(2)}});
+  CHECK(core.open());
+  run_for(core, 0, 8000, 50);
+  CHECK(core.status().taps[0].state == "running" && core.status().taps[1].state == "running");
+  bus.at(0x1201)->up = false;
+  bus.at(0x1202)->up = false;
+  // As on the roof: 1202 is back by the time the master looks again, 1201
+  // a little later, so the look finds 1202 at its id and 1201 lost again.
+  uint32_t t = 8000;
+  for (; t < 12000 && core.status().fault != Fault::no_reply; t += 50) core.tick(t);
+  CHECK(core.status().fault == Fault::no_reply);
+  bus.at(0x1202)->up = true;
+  run_for(core, t, t + MasterCore::LOST_PROBE_MS / 2, 50);
+  bus.at(0x1201)->up = true;
+  run_for(core, t + MasterCore::LOST_PROBE_MS / 2, t + 2 * MasterCore::LOST_PROBE_MS, 50);
+  t += 2 * MasterCore::LOST_PROBE_MS;
+  MasterStatus m = core.status();
+  CHECK(m.taps.size() == 2 && m.taps[0].state == "running" && m.taps[1].state == "running");
+  CHECK(m.fault == Fault::none);
+  int a = bus.sent_to(0x1201, 0x0148), b = bus.sent_to(0x1202, 0x0148);
+  run_for(core, t, t + 2000, 50);
+  CHECK(bus.sent_to(0x1201, 0x0148) - a > 10 && bus.sent_to(0x1202, 0x0148) - b > 10);
+  core.close();
+}
+
 static void test_a_lost_tap_at_the_factory_address_is_brought_back() {
   MultiTap bus;
   bus.taps = {{0x1201, 1}, {0x1202, 2}};
@@ -1418,6 +1451,7 @@ static void test_a_table_change_on_a_lost_tap_is_refused() {
 
 int main() {
   test_a_lost_tap_at_the_factory_address_is_brought_back();
+  test_both_quiet_at_once_then_back_each_shows_running();
   test_a_table_change_on_a_lost_tap_is_refused();
   test_startup_with_one_of_two_at_the_factory_address_herds();
   test_a_stranger_at_the_factory_address_starts_no_herd();

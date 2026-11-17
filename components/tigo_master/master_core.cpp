@@ -1483,10 +1483,16 @@ void MasterCore::run_startup(uint32_t now_ms) {
     t.readdressed = false;
     if (transact(t.id, master::CMD_GET_MAC_NOW, {}, r)) {  // already addressed
       probe_misses_ = 0;
-      if (r.payload.size() >= 8) {
+      {
         std::lock_guard<std::mutex> lock(mu_);  // taps() reads the MAC
-        t.mac.assign(r.payload.begin(), r.payload.begin() + 8);
-        t.st.mac = master::mac_hex(t.mac);
+        if (r.payload.size() >= 8) {
+          t.mac.assign(r.payload.begin(), r.payload.begin() + 8);
+          t.st.mac = master::mac_hex(t.mac);
+        }
+        // Found where it should be: running, whatever it was before the
+        // look (after every TAP went quiet, one found here was left "lost").
+        t.lost = false;
+        t.st.state = "running";
       }
       if (several_()) LOGI("bus master: TAP %04X is already there; polling", t.id);
       else LOGI("bus master: the TAP is already at %04X; polling", t.id);
