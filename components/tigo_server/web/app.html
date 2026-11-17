@@ -964,7 +964,8 @@
   td.tap-name { white-space: nowrap; }
   td.tap-model { white-space: nowrap; }
   td.tap-model.star-only { color: var(--warn-text); font-weight: 600; }
-  td.tap-radio .tap-sub { font-size: 11px; color: var(--text-dim); }
+  td.tap-radio .tap-sub, #devices-taps td.num .tap-sub { font-size: 11px; color: var(--text-dim); white-space: nowrap; }
+  #setup-bus { margin-top: 28px; }
   td.tap-model .tap-board { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 11px; color: var(--text-dim); font-weight: 400; }
   table.nodes .node-rating { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; font-size: 11px;
     color: var(--text-faint); }
@@ -1482,14 +1483,13 @@
       <div class="nav-group nav-control" role="group" aria-labelledby="nav-h-control">
         <div class="nav-head" id="nav-h-control">Control</div>
         <button data-view="setup" id="nav-setup" data-linux-only style="display:none"><span class="icon">✚</span> System setup</button>
-        <button data-view="busmaster" id="nav-busmaster" style="display:none"><span class="icon">◐</span> Bus control</button>
         <button data-view="settings"><span class="icon">⚙</span> Settings</button>
       </div>
     </nav>
 
     <!-- The PV output state, on the Pi running (or standing by for) the bus.
          It shows the state and links to the switch; it never switches it. -->
-    <a id="pv-pill" class="pv-pill" href="#busmaster" style="display:none" title="PV output: open Bus master"><span class="pv-pill-label">PV</span> <span class="pv-pill-state">on</span></a>
+    <a id="pv-pill" class="pv-pill" href="#setup" style="display:none" title="PV output: open System setup"><span class="pv-pill-label">PV</span> <span class="pv-pill-state">on</span></a>
 
     <!-- Tigo cloud status box — shown only when a cloud connection is configured. -->
     <div id="cloud-box" style="display:none;margin:8px 12px;padding:9px 11px;border:1px solid var(--border);border-radius:8px;cursor:pointer" title="Open Cloud Status">
@@ -1520,7 +1520,7 @@
     </div>
     <div id="pv-banner" class="pv-banner" style="display:none">
       <span id="pv-banner-text">PV output is off</span>
-      <a href="#busmaster">Bus master</a>
+      <a href="#setup">System setup</a>
     </div>
     <!-- Latched until cleared on the Bus log page: a CCA on the bus may have
          re-PANned the TAP, and then every optimizer drops off. -->
@@ -1766,7 +1766,7 @@
         <div class="section-title devices-head">TAPs</div>
         <div class="table-wrap">
           <table class="nodes">
-            <thead><tr><th>Name</th><th>Addr</th><th>ID</th><th>Model</th><th>Firmware</th><th>Radio</th><th>Since</th><th>Last read</th></tr></thead>
+            <thead><tr><th>Name</th><th>Addr</th><th>ID</th><th>Model</th><th>Firmware</th><th>Radio</th><th>Since</th><th>Last read</th><th class="num">Polls</th><th class="num">Dropouts</th></tr></thead>
             <tbody></tbody>
           </table>
         </div>
@@ -1870,6 +1870,35 @@
         </defs>
       </svg>
       <div id="setup-root" aria-live="polite"></div>
+      <!-- Running (or standing by for) the bus: the PV output and discovery
+           window switches. -->
+      <div id="setup-bus" hidden>
+      <div class="section-head">
+        <div class="section-title">PV output</div>
+      </div>
+      <div class="tools-card" id="pv-card">
+        <div class="pv-row">
+          <div class="cfg-text"><strong class="pv-title"><span class="dot dim" id="pv-dot"></span><span id="pv-state">PV output is on</span></strong><span id="pv-detail">—</span></div>
+          <button class="btn" id="pv-toggle">Turn off</button>
+        </div>
+        <div class="pv-msg" id="pv-status"></div>
+        <div class="pv-msg" id="pv-still"></div>
+        <p class="pv-note">Turns every optimizer's output off or on, through the TAP. This should not be used as rapid shutdown. Optimizers that also follow the RSS signal keep producing while the inverter's transmitter runs.</p>
+      </div>
+
+      <div class="section-head">
+        <div class="section-title">Discovery window</div>
+      </div>
+      <div class="tools-card" id="disc-card">
+        <div class="pv-row">
+          <div class="cfg-text"><strong class="pv-title"><span class="dot dim" id="disc-dot"></span><span id="disc-state">Enabled</span></strong><span id="disc-detail">—</span></div>
+          <button class="btn" id="disc-toggle">Disable</button>
+        </div>
+        <div class="pv-msg" id="disc-status"></div>
+        <p class="pv-note">The TAP's window for new optimizers to join. Disabled, the panels keep reporting and producing; enable it before adding an optimizer.</p>
+      </div>
+
+      </div>
     </section>
 
     <!-- SETTINGS -->
@@ -2142,85 +2171,6 @@
 
     <!-- DIAGNOSTICS -->
     <!-- BUS MASTER (the Pi, running or standing by for the bus) -->
-    <section class="view" id="view-busmaster">
-      <div class="topbar">
-        <h1>Bus control</h1>
-        <div class="topbar-meta"><span class="badge stale" id="bm-meta">—</span></div>
-      </div>
-
-      <div class="section-head">
-        <div class="section-title">PV output</div>
-      </div>
-      <div class="tools-card" id="pv-card">
-        <div class="pv-row">
-          <div class="cfg-text"><strong class="pv-title"><span class="dot dim" id="pv-dot"></span><span id="pv-state">PV output is on</span></strong><span id="pv-detail">—</span></div>
-          <button class="btn" id="pv-toggle">Turn off</button>
-        </div>
-        <div class="pv-msg" id="pv-status"></div>
-        <div class="pv-msg" id="pv-still"></div>
-        <p class="pv-note">Turns every optimizer's output off or on, through the TAP. This should not be used as rapid shutdown. Optimizers that also follow the RSS signal keep producing while the inverter's transmitter runs.</p>
-      </div>
-
-      <div class="section-head">
-        <div class="section-title">Discovery window</div>
-      </div>
-      <div class="tools-card" id="disc-card">
-        <div class="pv-row">
-          <div class="cfg-text"><strong class="pv-title"><span class="dot dim" id="disc-dot"></span><span id="disc-state">Enabled</span></strong><span id="disc-detail">—</span></div>
-          <button class="btn" id="disc-toggle">Disable</button>
-        </div>
-        <div class="pv-msg" id="disc-status"></div>
-        <p class="pv-note">The TAP's window for new optimizers to join. Disabled, the panels keep reporting and producing; enable it before adding an optimizer.</p>
-      </div>
-
-      <div class="section-head" id="diag-master-head">
-        <div class="section-title">Health</div>
-        <div class="section-sub" id="diag-master-sub"></div>
-      </div>
-      <div class="hist-stat-grid" id="diag-master">
-        <div class="hist-stat-card">
-          <div class="hist-stat-label">Discovery window</div>
-          <div class="hist-stat-val" id="diag-discovery">—<span class="hist-stat-unit">s</span></div>
-          <div class="hist-stat-sub" id="diag-discovery-sub">—</div>
-        </div>
-        <div class="hist-stat-card">
-          <div class="hist-stat-label">Renewals</div>
-          <div class="hist-stat-val" id="diag-renewals">—</div>
-          <div class="hist-stat-sub">since the service started</div>
-        </div>
-        <div class="hist-stat-card">
-          <div class="hist-stat-label">Polls</div>
-          <div class="hist-stat-val" id="diag-polls">—</div>
-          <div class="hist-stat-sub" id="diag-timeouts">— unanswered</div>
-        </div>
-        <div class="hist-stat-card">
-          <div class="hist-stat-label">Longest pause</div>
-          <div class="hist-stat-val" id="diag-gap">—<span class="hist-stat-unit">ms</span></div>
-          <div class="hist-stat-sub" id="diag-gap-sub">—</div>
-        </div>
-        <div class="hist-stat-card">
-          <div class="hist-stat-label">Gateway dropouts</div>
-          <div class="hist-stat-val" id="diag-tap-lost">—</div>
-          <div class="hist-stat-sub" id="diag-tap-lost-sub">—</div>
-        </div>
-        <div class="hist-stat-card">
-          <div class="hist-stat-label">Housekeeping</div>
-          <div class="hist-stat-val" id="diag-housekeeping">—</div>
-          <div class="hist-stat-sub" id="diag-housekeeping-sub">—</div>
-        </div>
-        <div class="hist-stat-card">
-          <div class="hist-stat-label">Optimizer queries</div>
-          <div class="hist-stat-val" id="diag-queries">—</div>
-          <div class="hist-stat-sub" id="diag-queries-sub">—</div>
-        </div>
-        <div class="hist-stat-card">
-          <div class="hist-stat-label">Gateway version</div>
-          <div class="hist-stat-val" id="diag-tap-version">—</div>
-          <div class="hist-stat-sub" id="diag-tap-version-sub">—</div>
-        </div>
-      </div>
-
-    </section>
 
     <section class="view" id="view-diagnostics">
       <div class="topbar">
@@ -2287,6 +2237,43 @@
           <div class="hist-stat-label">Active sockets</div>
           <div class="hist-stat-val" id="diag-sockets">—<span class="hist-stat-unit" id="diag-sockets-of">/ —</span></div>
           <div class="hist-stat-sub" id="diag-tasks">— FreeRTOS tasks</div>
+        </div>
+      </div>
+
+      <div class="section-head" id="diag-master-head" style="display:none">
+        <div class="section-title">Bus</div>
+        <div class="section-sub" id="diag-master-sub"></div>
+      </div>
+      <div class="hist-stat-grid" id="diag-master" style="display:none">
+        <div class="hist-stat-card">
+          <div class="hist-stat-label">Discovery window</div>
+          <div class="hist-stat-val" id="diag-discovery">—<span class="hist-stat-unit">s</span></div>
+          <div class="hist-stat-sub" id="diag-discovery-sub">—</div>
+        </div>
+        <div class="hist-stat-card">
+          <div class="hist-stat-label">Renewals</div>
+          <div class="hist-stat-val" id="diag-renewals">—</div>
+          <div class="hist-stat-sub">since the service started</div>
+        </div>
+        <div class="hist-stat-card">
+          <div class="hist-stat-label">Polls</div>
+          <div class="hist-stat-val" id="diag-polls">—</div>
+          <div class="hist-stat-sub" id="diag-timeouts">— unanswered</div>
+        </div>
+        <div class="hist-stat-card">
+          <div class="hist-stat-label">Longest pause</div>
+          <div class="hist-stat-val" id="diag-gap">—<span class="hist-stat-unit">ms</span></div>
+          <div class="hist-stat-sub" id="diag-gap-sub">—</div>
+        </div>
+        <div class="hist-stat-card">
+          <div class="hist-stat-label">Housekeeping</div>
+          <div class="hist-stat-val" id="diag-housekeeping">—</div>
+          <div class="hist-stat-sub" id="diag-housekeeping-sub">—</div>
+        </div>
+        <div class="hist-stat-card">
+          <div class="hist-stat-label">Optimizer queries</div>
+          <div class="hist-stat-val" id="diag-queries">—</div>
+          <div class="hist-stat-sub" id="diag-queries-sub">—</div>
         </div>
       </div>
 
@@ -2776,7 +2763,8 @@
   // show_cloud_page). A link to one opens the Dashboard instead.
   const hiddenPages = new Set();
   // Old names of pages, so links and bookmarks to them still work.
-  const viewAliases = { tools: 'settings' };
+  // Old links: Bus control's switches are on System setup now (its figures on Diagnostics).
+  const viewAliases = { tools: 'settings', busmaster: 'setup' };
   function showView(id) {
     id = viewAliases[id] || id;
     if (hiddenPages.has(id)) id = 'dashboard';
@@ -4355,6 +4343,18 @@
         return `<td class="tap-model" title="${topoEscape(full)}">${v[1]} series · mesh${b}</td>`;
       return `<td class="tap-model" title="${topoEscape(full)}">${topoEscape(t.model)}${b}</td>`;
     };
+    // Running the bus: how each TAP answers, from /api/master. A TAP that
+    // keeps dropping out at a steady interval is having its power cut: the
+    // CCA does that to one it can no longer hear.
+    const busOf = addr => {
+      const m = pvLast && (pvLast.role === 'master' || pvLast.role === 'standby') ? pvLast : null;
+      const t = m && (m.taps || []).find(x => x.id === addr);
+      if (!t) return '<td class="num" style="color:var(--text-faint)">—</td><td class="num" style="color:var(--text-faint)">—</td>';
+      const unanswered = t.timeouts ? `<div class="tap-sub">${t.timeouts.toLocaleString()} unanswered</div>` : '';
+      const last = t.lost && m.tap && m.tap.last_lost_unix && m.taps.length === 1
+        ? `<div class="tap-sub">last ${new Date(m.tap.last_lost_unix * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>` : '';
+      return `<td class="num">${t.polls.toLocaleString()}${unanswered}</td><td class="num">${t.lost.toLocaleString()}${last}</td>`;
+    };
     // A name, kept on the Pi and shown on the mesh map too.
     const name = t => `<td class="tap-name" data-tap="${topoEscape(t.addr)}">${t.name
       ? `<span>${topoEscape(t.name)}</span><button type="button" class="tap-rename" aria-label="Rename TAP ${topoEscape(t.addr)}" title="Rename"></button>`
@@ -4362,8 +4362,8 @@
     setHTML(box.querySelector('tbody'), (v.taps || []).length ? v.taps.map(t => `<tr>
         ${name(t)}<td class="mono">${topoEscape(t.addr)}</td>${id(t.addr)}${model(t)}
         <td class="mono tap-fw" title="${topoEscape(t.version || '')}${t.previous ? ` · was ${topoEscape(t.previous)}` : ''}"><strong>${topoEscape((t.version || '').replace(boardRe, '').replace(/\s+\d{1,2}:\d{2}:\d{2}$/, ''))}</strong></td>
-        ${radio(t.addr)}<td>${when(t.since_unix_ms)}</td><td>${when(t.last_unix_ms)}</td></tr>`).join('')
-      : `<tr><td colspan="8" style="color:var(--text-faint)">Not heard yet. The bus master asks the TAP once each time it starts, and the optimizers as it first hears each one.</td></tr>`);
+        ${radio(t.addr)}<td>${when(t.since_unix_ms)}</td><td>${when(t.last_unix_ms)}</td>${busOf(t.addr)}</tr>`).join('')
+      : `<tr><td colspan="10" style="color:var(--text-faint)">Not heard yet. The bus master asks the TAP once each time it starts, and the optimizers as it first hears each one.</td></tr>`);
   }
 
   // An optimizer's label is its whole MAC: 04C05B left out, the character
@@ -4865,7 +4865,7 @@
         <div><b>${dx.node_count !== undefined ? `${dx.joined ?? 0} of ${dx.node_count}` : '—'}</b><span>listed optimizers joined</span></div>
         <div class="${dx.running ? '' : 'todo'}"><b>${win}</b><span>join window</span></div></div>`;
       const renew = m.discovery_renewing === false
-        ? `<div class="setup-actions"><button type="button" class="btn task-go" data-setup-window>Let optimizers join again</button><span class="sub">Renewal is turned off (Bus control). Optimizers the TAP lists can't join until it's back on.</span></div>`
+        ? `<div class="setup-actions"><button type="button" class="btn task-go" data-setup-window>Let optimizers join again</button><span class="sub">Renewal is turned off (Discovery window, below). Optimizers the TAP lists can't join until it's back on.</span></div>`
         : !dx.running && m.role ? '<p class="sub">Closed by itself: every optimizer in a string has reported today. It opens again when one goes missing.</p>' : '';
       return tiles + renew;
     }
@@ -5636,7 +5636,7 @@
   }
 
   let masterPolls = 0, masterPollsAt = 0;
-  // The Bus master page's figures, from an /api/master answer.
+  // The bus figures on Diagnostics, from an /api/master answer.
   function refreshMasterDiagnostics(m) {
     if (!m || (m.role !== 'master' && m.role !== 'standby')) return;
     const faults = { none: '', no_port: 'cannot open the port', no_reply: 'the TAP is not answering',
@@ -5683,21 +5683,6 @@
       ? `last 5–10 min · longest ${g.max.toLocaleString()} ms, ${new Date(g.max_at_unix * 1000).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}`
       : 'last 5–10 min, between requests to the gateway';
 
-    // A gateway that keeps dropping out at a steady interval is having its
-    // power cut: the CCA does that to one it can no longer hear.
-    const t = m.tap;
-    document.getElementById('diag-tap-lost').textContent = t.lost.toLocaleString();
-    let lostSub = 'none since the service started';
-    if (t.lost) {
-      const at = new Date(t.last_lost_unix * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-      const r = t.recent_lost_unix;
-      const every = r.length >= 3 ? Math.round((r[r.length - 1] - r[0]) / (r.length - 1)) : null;
-      lostSub = `last ${at}` + (t.back_without_discovery ? ` · came back with discovery closed ${t.back_without_discovery}×` : '') +
-                (every !== null && every < 600 && Date.now() / 1000 - t.last_lost_unix < 2 * every
-                 ? ` · every ~${every} s: is its power being cut?` : '');
-    }
-    document.getElementById('diag-tap-lost-sub').textContent = lostSub;
-
     const h = m.housekeeping;
     document.getElementById('diag-housekeeping').innerHTML = h.on
       ? `${h.sent_41.toLocaleString()}<span class="hist-stat-unit">0x41s</span>` : 'off';
@@ -5710,14 +5695,6 @@
     document.getElementById('diag-queries-sub').textContent = !q.on ? 'turn on under Settings › Bus'
       : q.writes ? `${q.sent_writes} writes sent` : 'writes off';
 
-    // "Mgate Version G8.65 May  9 2025 13:52:34 GW-H1": the version is the
-    // figure; the family and the build's date and model go beneath it.
-    const ver = (m.tap_version || '').match(/^(\S+) Version (\S+)\s*(.*)$/);
-    const verEl = document.getElementById('diag-tap-version');
-    verEl.textContent = ver ? ver[2] : m.tap_version || '—';
-    verEl.title = m.tap_version || '';
-    document.getElementById('diag-tap-version-sub').textContent = !m.tap_version ? 'asked once each time the bus master starts'
-      : ver ? [ver[1], ver[3].replace(/\s+/g, ' ').replace(/-/g, '\u2011')].filter(Boolean).join(' · ') : 'read in the bring-up';
   }
 
   async function refreshDiagnostics(force) {
@@ -5841,13 +5818,16 @@
   // ---- Bus master: PV output, the sidebar pill and the banner (Pi) ----
   // Every 5 s on the Pi, whatever page is open: the pill and the banner
   // must say PV is off wherever you are.
-  let pvLast = null;
+  var pvLast = null;  // var: Devices' TAP table reads it too, possibly first
   function pvWhen(unix) {
     return unix ? new Date(unix * 1000).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'an unknown time';
   }
   function pvApply(m) {
     const show = !!m && (m.role === 'master' || m.role === 'standby');
-    document.getElementById('nav-busmaster').style.display = show ? '' : 'none';
+    document.getElementById('setup-bus').hidden = !show;
+    // Section heads and grids set their own display, so not [hidden].
+    document.getElementById('diag-master-head').style.display = show ? '' : 'none';
+    document.getElementById('diag-master').style.display = show ? '' : 'none';
     document.getElementById('pv-pill').style.display = show ? '' : 'none';
     const pv = show && m.pv ? m.pv : { on: true };
     const banner = document.getElementById('pv-banner');
@@ -5873,9 +5853,6 @@
     if (standingBy) status.textContent = 'Standing by: change it on the device running the bus.';
     else if (status.dataset.standby) status.textContent = '';
     status.dataset.standby = standingBy ? '1' : '';
-    const meta = document.getElementById('bm-meta');
-    meta.textContent = m.fault && m.fault !== 'none' ? 'fault' : standingBy ? 'standing by' : m.active ? 'running the bus' : 'not running';
-    meta.className = 'badge ' + (m.fault && m.fault !== 'none' ? 'bad' : standingBy || !m.active ? 'stale' : 'ok');
     const renewing = m.discovery_renewing !== false;
     const w = m.discovery || {};
     const leftOf = (read, x) => read ? (x.running && x.remaining_s > 0 ? `open, ${x.remaining_s} s left` : 'closed') : 'not read yet';
@@ -5942,7 +5919,8 @@
     pvApply(m);
     const still = await pvStillProducing(m && (m.role === 'master' || m.role === 'standby') ? m : null);
     if (still) document.getElementById('pv-banner-text').textContent += ` · ${still} panel${still === 1 ? '' : 's'} still producing`;
-    if (document.getElementById('view-busmaster').classList.contains('active')) refreshMasterDiagnostics(m);
+    if (document.getElementById('view-diagnostics').classList.contains('active')) refreshMasterDiagnostics(m);
+    if (document.getElementById('view-nodes').classList.contains('active')) renderTaps();
   }
   document.getElementById('pv-toggle').addEventListener('click', async () => {
     const on = !(pvLast && pvLast.pv && pvLast.pv.on === false);  // as it is now
@@ -5973,7 +5951,7 @@
   });
   platformReady.then(refreshPv);
   setInterval(refreshPv, 5000);
-  document.addEventListener('viewshown', e => { if (e.detail === 'busmaster') refreshPv(); });
+  document.addEventListener('viewshown', e => { if (e.detail === 'setup' || e.detail === 'diagnostics') refreshPv(); });
 
   // Opening the view forces a fetch; the periodic tick does not.
   document.addEventListener('viewshown', e => { if (e.detail === 'diagnostics') refreshDiagnostics(true); });

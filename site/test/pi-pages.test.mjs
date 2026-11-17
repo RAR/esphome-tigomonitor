@@ -377,14 +377,14 @@ test('the ESP32 has no Logs, so Diagnostics has no tabs', async () => {
 
 // ---- the mesh map --------------------------------------------------------
 
-test('bus: the gateway version is the figure, its build details beneath', async () => {
-  const { page, ctx, errors } = await open({ master: true });
-  await page.click('#nav button[data-view="busmaster"]');
-  await page.waitForFunction(() => document.getElementById('diag-tap-version').textContent !== '—');
-  assert.equal(await page.textContent('#diag-tap-version'), 'G8.59');
-  // A non-breaking hyphen, so the model doesn't wrap as GW- / H1.
-  assert.equal(await page.textContent('#diag-tap-version-sub'), 'Mgate · Jan 1 2026 10:00:00 GW\u2011H1');
-  assert.equal(await page.getAttribute('#diag-tap-version', 'title'), 'Mgate Version G8.59 Jan  1 2026 10:00:00 GW-H1');
+test("Devices: each TAP's polls and dropouts, while this monitor runs the bus", async () => {
+  const { page, ctx, errors } = await open({ master: true, hash: '#nodes' });
+  await page.waitForSelector('#devices-taps', { state: 'visible' });
+  const head = await page.$$eval('#devices-taps table', (ts) => [...ts[0].querySelectorAll('thead th')].map((t) => t.textContent));
+  assert.deepEqual(head.slice(-2), ['Polls', 'Dropouts']);
+  await page.waitForFunction(() => /712,400/.test(document.querySelector('#devices-taps tbody').textContent));
+  const cells = await page.$$eval('#devices-taps table', (ts) => [...ts[0].querySelectorAll('tbody tr:first-child td')].slice(-2).map((t) => t.textContent.trim()));
+  assert.deepEqual(cells, ['712,4003 unanswered', '0']);
   assert.deepEqual(errors, []);
   await ctx.close();
 });

@@ -1,5 +1,5 @@
 // site/test/bus-master.test.mjs
-// The Raspberry Pi build's Bus master page: the PV output switch, the
+// The Raspberry Pi build's bus switches (on System setup): the PV output switch, the
 // sidebar's PV pill and the banner, in the real app.html, in Chromium,
 // against a mock API (/api/master and its POST in memory; the rest from the
 // screenshot fixtures).
@@ -44,6 +44,8 @@ function master(role, pv = {}, standby = 'off') {
     polls: 1000, timeouts: 0, resyncs: 0, gap_ms: { max: 10, max_at_unix: 0, recent: 9 }, last_reply_unix: 0,
     pv: { on: true, source: 'setting', since: 0, confirmed: true, unconfirmed: false, last_sent: '01', last_reply: '01', ...pv },
     standby: { state: standby, takeover_s: 3, master_heard_ms_ago: standby === 'standing_by' ? 200 : -1, takeovers: 0, last_takeover_unix: 0, yields: 0 },
+    // As /api/master always has it: System setup, where the switches are, reads it.
+    table: { writes: false, tap: '', edit: { kind: '', active: false, finished: false }, waiting: [], joins: [] },
   };
 }
 
@@ -112,30 +114,27 @@ async function open(opts = {}) {
   return { page, ctx, api, errors };
 }
 
-// The sidebar's Bus control item: there only while this monitor runs the bus.
-const nav = (page) => page.isVisible('#nav button[data-view="busmaster"]');
+// The PV and discovery switches, on System setup: there only while this
+// monitor runs (or stands by for) the bus.
+const nav = (page) => page.$eval('#setup-bus', (e) => !e.hidden);
 
-test('Bus control and Bus traffic are separate sidebar items, under Control and Inspect', async () => {
+test('no Bus control page: the switches are on System setup, the PV pill and old links go there', async () => {
   const { page, ctx, errors } = await open();
   await page.waitForSelector('#pv-pill', { state: 'visible' });
-  const group = (v) => page.$eval(`#nav button[data-view="${v}"]`, (b) => b.closest('.nav-group').querySelector('.nav-head').textContent.trim());
-  assert.equal(await group('busmaster'), 'Control');
-  assert.equal(await group('buslog'), 'Inspect');
-  await page.click('#nav button[data-view="busmaster"]');
-  await page.waitForSelector('#view-busmaster.active');
-  assert.equal(await page.getAttribute('#nav button[data-view="busmaster"]', 'class'), 'active');
-  assert.equal(await page.isVisible('#view-busmaster .bus-tabs'), false);
-  await page.click('#nav button[data-view="buslog"]');
-  await page.waitForSelector('#view-buslog.active');
-  assert.equal(await page.getAttribute('#nav button[data-view="buslog"]', 'class'), 'active');
-  assert.equal(await page.getAttribute('#nav button[data-view="busmaster"]', 'class'), '');
+  assert.equal(await page.$('#nav button[data-view="busmaster"]'), null);
+  assert.equal(await page.$('#view-busmaster'), null);
   await page.click('#pv-pill');
-  await page.waitForSelector('#view-busmaster.active');
+  await page.waitForSelector('#view-setup.active');
+  assert.equal(await page.isVisible('#pv-toggle'), true);
+  assert.equal(await page.isVisible('#disc-toggle'), true);
+  // A bookmark to the old page opens System setup.
+  await page.evaluate(() => { location.hash = '#busmaster'; });
+  await page.waitForFunction(() => location.hash === '#setup' && document.getElementById('view-setup').classList.contains('active'));
   assert.deepEqual(errors, []);
   await ctx.close();
 });
 
-test('listening, there is no Bus master page and no PV pill', async () => {
+test('listening, there are no bus switches and no PV pill', async () => {
   const { page, ctx, errors } = await open({ role: 'listen' });
   await page.waitForTimeout(600);
   assert.equal(await nav(page), false);
@@ -144,7 +143,7 @@ test('listening, there is no Bus master page and no PV pill', async () => {
   await ctx.close();
 });
 
-test('running the bus with PV on: the page, the pill says PV on, no banner', async () => {
+test('running the bus with PV on: the switches, the pill says PV on, no banner', async () => {
   const { page, ctx, errors } = await open();
   await page.waitForSelector('#pv-pill', { state: 'visible' });
   assert.equal(await nav(page), true);
@@ -155,7 +154,7 @@ test('running the bus with PV on: the page, the pill says PV on, no banner', asy
 });
 
 test('turning PV off asks first; dismissed it sends nothing, accepted it sends off', async () => {
-  const { page, ctx, api } = await open({ hash: '#busmaster' });
+  const { page, ctx, api } = await open({ hash: '#setup' });
   await page.waitForSelector('#pv-toggle', { state: 'visible' });
   await page.click('#pv-toggle');
   assert.equal(await answer(page, false), "Turn the array's output off?");
@@ -184,7 +183,7 @@ test('heard off from the master running the bus: the banner says so', async () =
 });
 
 test('standing by, the switch is read-only and says where to change it', async () => {
-  const { page, ctx, api } = await open({ role: 'standby', standby: 'standing_by', hash: '#busmaster' });
+  const { page, ctx, api } = await open({ role: 'standby', standby: 'standing_by', hash: '#setup' });
   await page.waitForSelector('#pv-toggle', { state: 'visible' });
   await page.waitForFunction(() => document.getElementById('pv-toggle').disabled);
   assert.match(await page.textContent('#pv-status'), /change it on the device running the bus/);
@@ -193,7 +192,7 @@ test('standing by, the switch is read-only and says where to change it', async (
 });
 
 test('a refused switch says why and changes nothing', async () => {
-  const { page, ctx, api } = await open({ hash: '#busmaster' });
+  const { page, ctx, api } = await open({ hash: '#setup' });
   await page.waitForSelector('#pv-toggle', { state: 'visible' });
   api.pvStatus = 403;
   await page.click('#pv-toggle');
@@ -203,11 +202,17 @@ test('a refused switch says why and changes nothing', async () => {
   await ctx.close();
 });
 
-test('the bus master figures moved from Diagnostics to Bus master', async () => {
-  const { page, ctx } = await open({ hash: '#busmaster' });
+test('the bus figures are on Diagnostics, while this monitor runs the bus', async () => {
+  const { page, ctx } = await open({ hash: '#diagnostics' });
   await page.waitForSelector('#diag-master', { state: 'visible' });
-  assert.equal(await page.$eval('#diag-master', (e) => e.closest('.view').id), 'view-busmaster');
+  assert.equal(await page.$eval('#diag-master', (e) => e.closest('.view').id), 'view-diagnostics');
+  assert.equal((await page.textContent('#diag-master-head .section-title')).trim(), 'Bus');
+  await page.waitForFunction(() => document.getElementById('diag-renewals').textContent !== '—');
   await ctx.close();
+  const l = await open({ role: 'listen', hash: '#diagnostics' });
+  await l.page.waitForTimeout(600);
+  assert.equal(await l.page.isVisible('#diag-master'), false);
+  await l.ctx.close();
 });
 
 test('the Home Assistant PV switch setting is on the Settings MQTT card', async () => {
@@ -223,9 +228,9 @@ test('the Home Assistant PV switch setting is on the Settings MQTT card', async 
 });
 
 test('the page says optimizers that also follow the RSS signal keep producing', async () => {
-  const { page, ctx } = await open({ hash: '#busmaster' });
+  const { page, ctx } = await open({ hash: '#setup' });
   await page.waitForSelector('#pv-card', { state: 'visible' });
-  assert.match(await page.textContent('#view-busmaster'), /also follow the RSS signal.*keep producing/s);
+  assert.match(await page.textContent('#setup-bus'), /also follow the RSS signal.*keep producing/s);
   await ctx.close();
 });
 
@@ -237,7 +242,7 @@ function devicesProducing(names) {
 
 test('a minute after off, it lists the panels still producing', async () => {
   const since = Math.floor(Date.now() / 1000) - 120;
-  const { page, ctx } = await open({ hash: '#busmaster', pv: { on: false, since }, devices: devicesProducing(['D5', 'D6']) });
+  const { page, ctx } = await open({ hash: '#setup', pv: { on: false, since }, devices: devicesProducing(['D5', 'D6']) });
   await page.waitForFunction(() => /still producing/.test(document.getElementById('pv-still').textContent));
   assert.match(await page.textContent('#pv-still'), /^2 panels are still producing: D5, D6\./);
   assert.match(await page.textContent('#pv-banner'), /2 panels still producing/);
@@ -246,7 +251,7 @@ test('a minute after off, it lists the panels still producing', async () => {
 
 test('all stopped: it says so', async () => {
   const since = Math.floor(Date.now() / 1000) - 120;
-  const { page, ctx } = await open({ hash: '#busmaster', pv: { on: false, since }, devices: devicesProducing([]) });
+  const { page, ctx } = await open({ hash: '#setup', pv: { on: false, since }, devices: devicesProducing([]) });
   await page.waitForFunction(() => /stopped/.test(document.getElementById('pv-still').textContent));
   assert.match(await page.textContent('#pv-still'), /^Every panel has stopped producing\./);
   await ctx.close();
@@ -254,10 +259,10 @@ test('all stopped: it says so', async () => {
 
 test('in the first minute it is still checking, and with PV on it says nothing', async () => {
   const since = Math.floor(Date.now() / 1000) - 10;
-  const { page, ctx } = await open({ hash: '#busmaster', pv: { on: false, since }, devices: devicesProducing(['D6']) });
+  const { page, ctx } = await open({ hash: '#setup', pv: { on: false, since }, devices: devicesProducing(['D6']) });
   await page.waitForFunction(() => /checking/i.test(document.getElementById('pv-still').textContent));
   await ctx.close();
-  const on = await open({ hash: '#busmaster', devices: devicesProducing(['D6']) });
+  const on = await open({ hash: '#setup', devices: devicesProducing(['D6']) });
   await on.page.waitForSelector('#pv-card', { state: 'visible' });
   await on.page.waitForTimeout(600);
   assert.equal((await on.page.textContent('#pv-still')).trim(), '');
@@ -265,7 +270,7 @@ test('in the first minute it is still checking, and with PV on it says nothing',
 });
 
 test('the discovery window can be left to close, and renewed again', async () => {
-  const { page, ctx, api, errors } = await open({ hash: '#busmaster' });
+  const { page, ctx, api, errors } = await open({ hash: '#setup' });
   await page.waitForSelector('#disc-card', { state: 'visible' });
   assert.equal(await page.textContent('#disc-state'), 'Enabled');
   assert.equal(await page.textContent('#disc-toggle'), 'Disable');
@@ -273,7 +278,7 @@ test('the discovery window can be left to close, and renewed again', async () =>
   await page.waitForFunction(() => document.getElementById('disc-toggle').textContent === 'Enable');
   assert.deepEqual(api.discoveryPosts, [{ renew: false }]);
   assert.match(await page.textContent('#disc-state'), /^Disabled$/);
-  assert.match(await page.textContent('#diag-discovery-sub'), /disabled/);
+  assert.match(await page.textContent('#disc-detail'), /kept through a restart/);
   await page.click('#disc-toggle');
   await page.waitForFunction(() => document.getElementById('disc-toggle').textContent === 'Disable');
   assert.deepEqual(api.discoveryPosts, [{ renew: false }, { renew: true }]);
@@ -282,7 +287,7 @@ test('the discovery window can be left to close, and renewed again', async () =>
 });
 
 test('the discovery window card says how many of the TAP\'s table have joined', async () => {
-  const { page, ctx, errors } = await open({ hash: '#busmaster', discovery: { joined: 40, in_table: 44 } });
+  const { page, ctx, errors } = await open({ hash: '#setup', discovery: { joined: 40, in_table: 44 } });
   await page.waitForFunction(() => /left/.test(document.getElementById('disc-detail').textContent));
   assert.equal(await page.textContent('#disc-detail'), 'Now open, 400 s left · 40 of the 44 in the TAP\'s table have joined');
   assert.deepEqual(errors, []);
@@ -290,12 +295,12 @@ test('the discovery window card says how many of the TAP\'s table have joined', 
 });
 
 test('an empty table is said as such, and a reply without the counts shows none', async () => {
-  const empty = await open({ hash: '#busmaster', discovery: { joined: 0, in_table: 0 } });
+  const empty = await open({ hash: '#setup', discovery: { joined: 0, in_table: 0 } });
   await empty.page.waitForFunction(() => /left/.test(document.getElementById('disc-detail').textContent));
   assert.equal(await empty.page.textContent('#disc-detail'), 'Now open, 400 s left · the TAP\'s table is empty');
   await empty.ctx.close();
   // An older daemon: no joined or in_table.
-  const { page, ctx, errors } = await open({ hash: '#busmaster' });
+  const { page, ctx, errors } = await open({ hash: '#setup' });
   await page.waitForFunction(() => /left/.test(document.getElementById('disc-detail').textContent));
   assert.equal(await page.textContent('#disc-detail'), 'Now open, 400 s left');
   assert.deepEqual(errors, []);
@@ -306,7 +311,7 @@ test('an empty table is said as such, and a reply without the counts shows none'
 test('with two TAPs, the discovery window card gives each TAP\'s window', async () => {
   const tap = (id, state, d) => ({ id, mac: '', version: '', state, polls: 1, timeouts: 0, renewals: 0, lost: 0, last_reply_unix: 0,
                                    discovery: { read: true, running: true, ...d } });
-  const { page, ctx, errors } = await open({ hash: '#busmaster', master: { taps: [
+  const { page, ctx, errors } = await open({ hash: '#setup', master: { taps: [
     tap('1201', 'running', { remaining_s: 400, node_count: 40, joined: 38 }),
     tap('1202', 'lost', { remaining_s: 0, node_count: 4, joined: 2 })] } });
   await page.waitForFunction(() => /TAP 1202/.test(document.getElementById('disc-detail').textContent));
@@ -317,7 +322,7 @@ test('with two TAPs, the discovery window card gives each TAP\'s window', async 
 });
 
 test('standing by, the discovery switch is disabled', async () => {
-  const { page, ctx } = await open({ role: 'standby', standby: 'standing_by', hash: '#busmaster' });
+  const { page, ctx } = await open({ role: 'standby', standby: 'standing_by', hash: '#setup' });
   await page.waitForSelector('#disc-card', { state: 'visible' });
   await page.waitForFunction(() => document.getElementById('disc-toggle').disabled);
   await ctx.close();
