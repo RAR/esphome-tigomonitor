@@ -158,6 +158,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **No Bus control page any more (Raspberry Pi and other Linux).** Its
+  PV output and discovery window switches are on System setup, under the
+  tasks, while the Pi runs or stands by for the bus; its figures are a Bus
+  section on Diagnostics; and each TAP's polls and dropouts are in the TAP
+  table on Devices, so a second TAP's show too (the page showed only the
+  first). The PV pill and banner, and old `#busmaster` links, open System
+  setup.
+
 - **Devices: click an optimizer to see everything about it, under its
   row.** The row opens in place to show its barcode, address, TAP and
   string; its firmware (since when, and what it replaced) and rating; on
@@ -241,6 +249,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   could run across each other.
 
 ### Fixed
+
+- **Taking the bus over from a CCA ran only one of its TAPs (Raspberry
+  Pi and other Linux).** The Pi keeps the TAPs it runs in `taps.json`, but
+  only its own bring-up wrote that list, so after a CCA had run two TAPs
+  the Pi ran just the one at its gateway ID. With no saved list it now runs
+  every TAP an optimizer reported through in the last day, with the MAC
+  each gave, and saves the list. Nothing to do if you already have one.
 
 - **"Your system is set up" went back to "Set up a new system" every
   night (Raspberry Pi and other Linux).** Its Optimizers step counted only
