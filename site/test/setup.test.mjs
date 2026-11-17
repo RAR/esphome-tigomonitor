@@ -128,6 +128,35 @@ test('System setup: replace a quiet optimizer, step by step', async () => {
   await ctx.close();
 });
 
+// One the TAP doesn't list (a CCA listed it, the owner removed it in EI,
+// 2026-11-17): the check finds nothing to remove there, so it says so and
+// offers to forget it from Devices, not a plan to apply.
+test("System setup: retiring one the TAP doesn't list offers to forget it", async () => {
+  const w = world();
+  const { page, ctx, errors } = await open(w);
+  await page.click('.setup-task[data-setup-start="retire"]');
+  await page.click('.setup-pick input[value="' + w.old.long_address + '"]');
+  await page.route('**/api/master/table/remove', (route) => {
+    w.master.table.edit = { ...w.master.table.edit, kind: 'remove', finished: true, ok: true, dry_run: true, id: '', started_unix: now(),
+      message: 'not in the table: nothing to remove', dry_frames: [] };
+    return route.fulfill({ status: 200, contentType: 'application/json', body: '{"started":true}' });
+  });
+  const deletes = [];
+  await page.route('**/api/nodes/delete**', (route) => {
+    deletes.push(new URL(route.request().url()).searchParams.get('addr'));
+    return route.fulfill({ status: 200, contentType: 'application/json', body: '{"status":"ok"}' });
+  });
+  await page.click('button[data-setup-next]');
+  await page.waitForSelector('button[data-setup-forget]');
+  assert.match(await page.textContent('#setup-root'), /isn't in the TAP's list/);
+  assert.equal(await page.locator('button[data-setup-go]').count(), 0);
+  await page.click('button[data-setup-forget]');
+  await page.waitForFunction(() => /forgotten/i.test(document.getElementById('setup-root').textContent));
+  assert.deepEqual(deletes, ['0005']);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
 test('System setup: with changes off, a check still works and the button says why', async () => {
   const w = world(false);
   const { page, ctx, errors } = await open(w);
