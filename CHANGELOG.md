@@ -14,8 +14,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (its answer to the Pi's calibration read): one taking more watts or volts
   in than it's rated for is tagged **Over rating** on Devices and ringed on
   the Dashboard; one whose string's panel nameplate (Topology) is above its
-  rating is tagged **Clips at 475 W**, say, since it limits that panel to
-  its own rating in strong sun. Its details under the row show its peak
+  rating is tagged **Panel above 475 W**, say, since in strong sun it can
+  run over its rating. Its details under the row show its peak
   and input voltage against its rating.
 
 - **Each optimizer's rating shows on Devices without a CCA (Raspberry Pi
