@@ -4571,6 +4571,8 @@
     const frames = st.total_frames || 0;
     const tapsHeard = (v.taps || []).length;
     const reporting = (d.devices || []).filter(x => !x.stale).length;
+    // Heard at all: after dark none report, and the step stays done.
+    const heard = (d.devices || []).length;
     const w = setupCounts(d.master);
     const invs = lay.inverters || [];
     const rated = invs.flatMap(i => (i.mppts || []).flatMap(m => m.strings || []));
@@ -4581,7 +4583,8 @@
     return {
       bus: { ok: frames > 0, line: frames ? `${fmt(frames)} messages heard on the bus${st.invalid_checksum ? `, ${fmt(st.invalid_checksum)} with a bad checksum` : ''}.` : 'Nothing heard on the bus yet.' },
       tap: { ok: tapsHeard > 0, line: tapsHeard ? `${tapsHeard === 1 ? 'The TAP' : `${tapsHeard} TAPs`} answered: ${(v.taps || []).map(t => `${t.name || 'TAP ' + t.addr} (${t.version.split(' ')[0]})`).join(', ')}.` : 'No TAP has answered yet.' },
-      optimizers: { ok: reporting > 0, line: reporting ? `${reporting} optimizer${reporting === 1 ? '' : 's'} reporting${w ? `, ${w.in_table} in the TAP's table` : ''}.` : 'No optimizer is reporting yet.' },
+      optimizers: { ok: heard > 0, line: reporting ? `${reporting} optimizer${reporting === 1 ? '' : 's'} reporting${w ? `, ${w.in_table} in the TAP's table` : ''}.`
+        : heard ? `${heard} optimizer${heard === 1 ? '' : 's'} heard, none reporting right now: they stop at night.` : 'No optimizer is reporting yet.' },
       layout: { ok: invs.length > 0 && loose === 0, invs: invs.length, strings, loose,
                 line: !invs.length ? 'No inverters laid out yet.' : loose ? `${loose} optimizer${loose === 1 ? " isn't" : "s aren't"} placed yet.` : 'Every optimizer is placed.' },
       names: { ok: rated.length > 0 && unrated === 0, line: !rated.length ? 'No strings to rate yet.' : unrated ? `${unrated} string${unrated === 1 ? ' has' : 's have'} no panel rating.` : 'Every string has a panel rating.' },
