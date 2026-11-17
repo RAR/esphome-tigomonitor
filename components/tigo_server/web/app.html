@@ -318,6 +318,11 @@
     border: 1px dashed var(--text-faint);
   }
   .panel-heat-tile.stale .panel-heat-rating { display: none; }
+  /* Over its optimizer's rating (Pi): a ring in the fault colour, whatever
+     the tile's own health colour, and a word under its watts. */
+  .panel-heat-tile.over { box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--bad); }
+  .panel-heat-tile .pht-over { display: block; font-size: 10px; font-weight: 700; margin-top: 2px; text-transform: uppercase; letter-spacing: .06em; }
+  .legend-item[hidden] { display: none; }
   /* Bottom stripe — rating-vs-nameplate signal, independent of peer color.
      Uses the same good/warn/bad palette so the loud cases (e.g. green tile +
      red stripe = keeping up with shaded neighbors, but everyone is well
@@ -1037,6 +1042,9 @@
   @keyframes nd-in { from { opacity: 0; transform: translateY(-4px); } }
   @media (prefers-reduced-motion: reduce) { .nd.enter { animation: none; } .node-toggle svg { transition: none; } }
   .nd-sec { min-width: 0; }
+  .nd-note { margin: 10px 0 0; font-size: 13px; line-height: 1.45; max-width: 46ch; }
+  .nd-note.warn { color: var(--warn-text); }
+  .nd-note.bad { color: var(--bad-text); }
   .nd-sec.wide { grid-column: 1 / -1; }
   .nd-sec h3 { margin: 0 0 8px; font-size: 12px; font-weight: 600; color: var(--text-dim); }
   .nd dl { margin: 0; display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 5px 14px; font-size: 13px; }
@@ -1574,6 +1582,7 @@
         <div class="legend-item"><div class="legend-swatch" style="background:var(--warn)"></div> Lagging (30–70%)</div>
         <div class="legend-item"><div class="legend-swatch" style="background:var(--bad)"></div> Far below peers (&lt;30%)</div>
         <div class="legend-item"><div class="legend-swatch" style="background:var(--bg-3);border:1px dashed var(--text-faint)"></div> Sleeping / no data</div>
+        <div class="legend-item" id="legend-over" hidden><div class="legend-swatch" style="background:var(--bg-3);box-shadow:0 0 0 2px var(--bad)"></div> Over its optimizer's rating</div>
       </div>
       <div style="font-size:11px;color:var(--text-faint);margin-top:6px">
         Tile color compares each panel to its string median — answers "is this panel keeping up with neighbors right now?". Low output at dawn, dusk, or under cloud cover is expected and shifts the median, not the color. The small stripe at the bottom of a tile compares to the per-panel nameplate rating (when set) using the same green/yellow/red bands — useful for spotting cases where the whole string is below rating but individual panels still look "on par" with each other.
@@ -3047,9 +3056,11 @@
             if (cls === 'stale') tipParts.push(`stale — no data for ${fmtAge(p.data_age_ms)}`);
             if (med > 0 && cls !== 'stale') tipParts.push(`${Math.round((w / med) * 100)}% of string median (${Math.round(med)}W)`);
             if (ratedPct != null) tipParts.push(`${ratedPct}% of nameplate (${rating}W)`);
+            const over = overRating(p, optRatings[String(p.addr || '').toUpperCase()]);
+            if (over) tipParts.push(`over its optimizer's rating: ${over}`);
             const stripe = rCls ? `<div class="panel-heat-rating ${rCls}"></div>` : '';
             const bc6 = (p.barcode || '').slice(-6);
-            tiles += `<div class="panel-heat-tile ${cls}"
+            tiles += `<div class="panel-heat-tile ${cls}${over ? ' over' : ''}"
               data-addr="${p.addr || ''}"
               data-barcode6="${bc6}"
               data-name="${id}"
@@ -3057,7 +3068,7 @@
               data-mppt="${mpptName(s.mppt) || ''}"
               data-power="${w.toFixed(1)}">
               <span class="pht-id">${id}</span>
-              <span class="pht-w">${wText}${pctText}</span>
+              <span class="pht-w">${wText}${pctText}${over ? '<span class="pht-over">Over</span>' : ''}</span>
               ${stripe}
               <div class="panel-bar-tip">${tipParts.join(' · ')}</div>
             </div>`;
@@ -3256,7 +3267,9 @@
       const aliens = alienAddrs(nodesList, dev.devices || []);
       const panels = (dev.devices || []).filter(d => !aliens.has(d.addr));
       const invs = withoutAliens(inv.inverters || [], dev.devices || [], aliens);
+      await loadOptRatings();
       renderInverters(invs, panels);
+      document.getElementById('legend-over').hidden = !document.querySelector('.panel-heat-tile.over');
       renderAlerts(invs, panels);
       if (typeof refreshPanelModalIfOpen === 'function') refreshPanelModalIfOpen();
       document.getElementById('dash-meta').textContent =
@@ -3885,6 +3898,30 @@
   // its !Mppt answer's flag is N, its config items not all set (the CCA's
   // enrollment writes them). The Pi reports all three; the ESP32 none.
   const NODE_MISSING_S = 3 * 86400, NODE_OFF_ROSTER_S = 86400;
+  // Each optimizer's rating (Pi), from its answer to a calibration read: by
+  // address, from /api/versions, fetched at most every 5 minutes for the
+  // Dashboard (Devices reads the same answer on its own).
+  var optRatings = {}, optRatingsAt = 0;
+  async function loadOptRatings() {
+    if (PLATFORM !== 'linux' || Date.now() - optRatingsAt < 300000) return optRatings;
+    optRatingsAt = Date.now();
+    const v = await apiFetch('/api/versions').then(r => r.ok ? r.json() : null).catch(() => null);
+    if (v) optRatings = Object.fromEntries((v.ratings || []).map(o => [String(o.addr).toUpperCase(), o]));
+    return optRatings;
+  }
+  // Over its optimizer's rating right now, in watts or volts in: what, or ''.
+  function overRating(dev, r) {
+    if (!r || !dev || dev.stale) return '';
+    const w = dev.power_in || 0, v = dev.voltage_in || 0;
+    if (r.watts > 0 && w > r.watts) return `${Math.round(w)} W in, rated ${r.watts} W`;
+    if (r.volts > 0 && v > r.volts) return `${v.toFixed(1)} V in, rated ${r.volts} V`;
+    return '';
+  }
+  // A panel rated above its optimizer: the optimizer limits it to its own rating.
+  function clipsAt(panelW, r) {
+    return r && r.watts > 0 && panelW > r.watts ? r.watts : 0;
+  }
+
   function nodeTags(n, newestRoster) {
     let html = '';
     const now = Date.now() / 1000;
@@ -3941,6 +3978,10 @@
     // Each optimizer's rating, from its own answer to a calibration read.
     const ratingByAddr = {};
     for (const o of (nodesData.versions && nodesData.versions.ratings) || []) ratingByAddr[o.addr.toUpperCase()] = o;
+    // Each string's panel nameplate (Topology), by its label as the rows have it.
+    const panelRatingOf = {};
+    for (const st of (nodesData.strings && nodesData.strings.strings) || [])
+      if (st.panel_rating_w > 0) for (const k of [st.label, st.display_label]) if (k) panelRatingOf[k] = st.panel_rating_w;
     document.querySelector('#view-nodes table.nodes:not(#devices-taps table)').classList.toggle('with-fw', !!nodesData.versions);
     // Settings as each optimizer last answered them, and the answer most of
     // its firmware family give: one that differs is worth a look. Families
@@ -4010,6 +4051,8 @@
 
       const fw = fwByAddr[String(n.addr).toUpperCase()] || null;
       const rating = ratingByAddr[String(n.addr).toUpperCase()] || null;
+      const panelW = panelRatingOf[stringLabel] || 0;
+      const over = overRating(dev, rating), clip = clipsAt(panelW, rating);
       const smart = smartByAddr[String(n.addr).toUpperCase()] || null;
       const fam = smart ? smartFamily(String(n.addr).toUpperCase()) : '';
       const c = smart && smartCount[fam], usual = smart && smartUsual[fam];
@@ -4020,7 +4063,8 @@
       const mppt = mpptByAddr[String(n.addr).toUpperCase()] || null;
       if (smartPeers) Object.assign(smartPeers, { mppt, mpptUsual });
       rows.push({ n, name, addr: n.addr, barcodeKey, barcodeShort, tap: dev?.tap || null,
-                  stringLabel, mpptLabel, v, a, w, t, age, state, fw, rating, smart, differs, smartPeers });
+                  stringLabel, mpptLabel, v, a, w, t, age, state, fw, rating, smart, differs, smartPeers,
+                  over, clip, panelW, peak: dev?.peak_power || 0 });
     }
 
     // Sort by current column. Numeric columns sort numerically; string
@@ -4070,7 +4114,8 @@
       html += `
         <tr class="node-row${open ? ' open' : ''}" data-addr="${topoEscape(String(r.addr))}">
           <td><button type="button" class="node-toggle" aria-expanded="${open}" aria-controls="${did}" aria-label="Details for ${topoEscape(r.name)}">${CHEVRON}</button><strong>${r.name}</strong>${isNewOptimizer(r.n.first_heard_unix, !!r.n.cca_string)
-            ? ` <span class="node-new" title="First heard ${new Date(r.n.first_heard_unix * 1000).toLocaleString()}">New</span>` : ''}${nodeTags(r.n, newestRoster)}${knownBtn}</td>
+            ? ` <span class="node-new" title="First heard ${new Date(r.n.first_heard_unix * 1000).toLocaleString()}">New</span>` : ''}${nodeTags(r.n, newestRoster)}${r.over ? ' <span class="node-missing">Over rating</span>'
+            : r.clip ? ` <span class="node-unset">Clips at ${r.clip} W</span>` : ''}${knownBtn}</td>
           <td class="mono">${r.addr}${multiTap && r.tap ? `<div class="node-tap">${topoEscape(tapLabel(r.tap))}</div>` : ''}</td>
           <td class="mono">…${r.barcodeShort}</td>
           <td>${r.stringLabel} <span style="color:var(--text-faint)">·</span> ${r.mpptLabel}</td>
@@ -4211,8 +4256,14 @@
       secs.push(`<div class="nd-sec"><h3>Firmware and rating</h3><dl>` +
         (r.fw ? ndPair('Firmware', `${topoEscape(r.fw.version)} <span class="mono">${topoEscape(r.fw.model || '')}</span>`) +
           ndPair('Since', r.fw.since_unix_ms ? ndWhen(r.fw.since_unix_ms) : '') + ndPair('Was', r.fw.previous ? topoEscape(r.fw.previous) : '') : '') +
-        (r.rating ? ndPair('Rated', `${r.rating.volts} V, ${r.rating.watts} W`) + ndPair('Calibration', `<span class="mono">${topoEscape(r.rating.cal)}</span>`)
-          : ndPair('Rated', '<span style="color:var(--text-faint)">Not read yet</span>')) + `</dl></div>`);
+        (r.rating ? ndPair('Rated', `${r.rating.volts} V, ${r.rating.watts} W`) +
+          ndPair('Peak', r.peak > 0 ? `${Math.round(r.peak)} W, ${Math.round(100 * r.peak / r.rating.watts)}% of ${r.rating.watts} W` : '') +
+          ndPair('Input now', r.v > 0 ? `${r.v.toFixed(1)} V of ${r.rating.volts} V` : '') +
+          ndPair('Calibration', `<span class="mono">${topoEscape(r.rating.cal)}</span>`)
+          : ndPair('Rated', '<span style="color:var(--text-faint)">Not read yet</span>')) + `</dl>` +
+        (r.over ? `<p class="nd-note bad">Over its rating now: ${topoEscape(r.over)}.</p>` : '') +
+        (r.clip ? `<p class="nd-note warn">Its panel is rated ${r.panelW} W, more than this optimizer's ${r.clip} W: in strong sun it limits the panel to ${r.clip} W.</p>` : '') +
+        `</div>`);
     const changes = ((nodesData.versions || {}).changes || []).filter(c => String(c.addr).toUpperCase() === String(r.addr).toUpperCase());
     if (changes.length)
       secs.push(`<div class="nd-sec"><h3>Changes</h3><ul class="nd-hist">` + changes.slice(0, 6).map(c =>
@@ -5383,6 +5434,9 @@
         // Pi build: each device's firmware, as heard on the bus.
         versions: PLATFORM === 'linux'
           ? await apiFetch('/api/versions').then(r => r.ok ? r.json() : null).catch(() => null) : null,
+        // Pi build: each string's panel nameplate, against its optimizers' ratings.
+        strings: PLATFORM === 'linux'
+          ? await apiFetch('/api/strings').then(r => r.ok ? r.json() : null).catch(() => null) : null,
       };
       renderTaps();
       renderStrays();
