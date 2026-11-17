@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Optimizers over their rating, or with a panel rated above them, are
+  marked (Raspberry Pi and other Linux).** From each optimizer's own rating
+  (its answer to the Pi's calibration read): one taking more watts or volts
+  in than it's rated for is tagged **Over rating** on Devices and ringed on
+  the Dashboard; one whose string's panel nameplate (Topology) is above its
+  rating is tagged **Clips at 475 W**, say, since it limits that panel to
+  its own rating in strong sun. Its details under the row show its peak
+  and input voltage against its rating.
+
 - **Each optimizer's rating shows on Devices without a CCA (Raspberry Pi
   and other Linux).** Running the bus, the Pi now asks each newly heard
   optimizer `^00Cal`, the CCA's rating read, and Devices shows its answer
@@ -261,6 +270,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   could run across each other.
 
 ### Fixed
+
+- **A TAP could show as "not answering" while it was polled (Raspberry Pi
+  and other Linux, more than one TAP).** If every TAP missed a few polls at
+  once (on the roof, for about a second while an ESP32 on the same bus rebooted), the Pi looked for
+  them again, and one found straight away at its address kept the "lost"
+  state System setup and `/api/master` report, though it answered every
+  poll after. It's shown as running as soon as it's found. A restart
+  clears it on a version without this fix.
 
 - **Taking the bus over from a CCA ran only one of its TAPs (Raspberry
   Pi and other Linux).** The Pi keeps the TAPs it runs in `taps.json`, but
