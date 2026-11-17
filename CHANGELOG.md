@@ -259,6 +259,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A TAP could show as "not answering" while it was polled (Raspberry Pi
+  and other Linux, more than one TAP).** If every TAP missed a few polls at
+  once (on the roof, for about a second while an ESP32 on the same bus rebooted), the Pi looked for
+  them again, and one found straight away at its address kept the "lost"
+  state System setup and `/api/master` report, though it answered every
+  poll after. It's shown as running as soon as it's found. A restart
+  clears it on a version without this fix.
+
 - **Taking the bus over from a CCA ran only one of its TAPs (Raspberry
   Pi and other Linux).** The Pi keeps the TAPs it runs in `taps.json`, but
   only its own bring-up wrote that list, so after a CCA had run two TAPs
