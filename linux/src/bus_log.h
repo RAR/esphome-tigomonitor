@@ -57,6 +57,8 @@ class BusLog {
   std::vector<esphome::tigo_monitor::master::TapRadio> radios() const;
   // The address of the TAP that gave this MAC (16 hex digits), or 0.
   uint16_t tap_of_mac(const std::string &mac) const;
+  // Each TAP address's MAC (16 hex digits), as last heard there.
+  std::map<uint16_t, std::string> tap_macs() const;
   // How many optimizer settings, MPPT or firmware changes were heard since.
   int changes_since(int64_t since_ms) const;
   // The barcode at an address in the node table, or "": an answer from an
