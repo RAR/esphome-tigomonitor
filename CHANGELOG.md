@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Optimizers over their rating, or with a panel rated above them, are
+  marked (Raspberry Pi and other Linux).** From each optimizer's own rating
+  (its answer to the Pi's calibration read): one taking more watts or volts
+  in than it's rated for is tagged **Over rating** on Devices and ringed on
+  the Dashboard; one whose string's panel nameplate (Topology) is above its
+  rating is tagged **Clips at 475 W**, say, since it limits that panel to
+  its own rating in strong sun. Its details under the row show its peak
+  and input voltage against its rating.
+
 - **Each optimizer's rating shows on Devices without a CCA (Raspberry Pi
   and other Linux).** Running the bus, the Pi now asks each newly heard
   optimizer `^00Cal`, the CCA's rating read, and Devices shows its answer

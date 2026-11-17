@@ -190,6 +190,41 @@ test("Devices, on the Pi: a row opens in place to show that optimizer, its setti
   await ctx.close();
 });
 
+// Each optimizer's own rating, from its answer to a calibration read,
+// against what it carries: over it now (watts or volts in), or a panel rated
+// above it (Topology's nameplate), which it limits to its own rating.
+test("Devices, on the Pi: an optimizer over its rating, and one whose panel is rated above it", async () => {
+  const dev = routes['/api/devices'].devices;
+  const v = routes['/api/versions'];
+  // A1 makes 350 W on a 300 W optimizer; B2's 400 W panel is on a 375 W one.
+  const ratings = v.ratings.map((r) => r.addr === dev[0].addr ? { ...r, watts: 300 }
+    : r.addr === dev[7].addr ? { ...r, watts: 375, cal: 'ESO075V375W-TEST' } : r);
+  const { page, ctx, errors } = await open(true, { ...v, ratings });
+  await page.waitForFunction(() => /Over rating/.test(document.getElementById('nodes-tbody').textContent));
+  const row = (i) => page.textContent(`#nodes-tbody tr[data-addr="${dev[i].addr}"] td:first-child`);
+  assert.match(await row(0), /Over rating/);
+  assert.doesNotMatch(await row(0), /Clips/);  // over says it; its 400 W panel's note is in its details
+  assert.match(await row(7), /Clips at 375 W/);
+  assert.doesNotMatch(await row(7), /Over rating/);
+  assert.doesNotMatch(await row(1), /Over rating|Clips/);
+  await page.click(`#nodes-tbody tr[data-addr="${dev[0].addr}"] .node-toggle`);
+  const d0 = await page.textContent(`#nd-${dev[0].addr.toUpperCase()}`);
+  assert.match(d0, /Over its rating now: 350 W in, rated 300 W/);
+  await page.click(`#nodes-tbody tr[data-addr="${dev[7].addr}"] .node-toggle`);
+  const d7 = await page.textContent(`#nd-${dev[7].addr.toUpperCase()}`);
+  assert.match(d7, /Peak\s*396 W, 106% of 375 W/);
+  assert.match(d7, /Input now\s*39\.2 V of 75 V/);
+  assert.match(d7, /panel is rated 400 W, more than this optimizer's 375 W/);
+  // The Dashboard rings the tile that's over, and says so under its watts.
+  await page.click('#nav button[data-view="dashboard"]');
+  await page.waitForSelector(`.panel-heat-tile.over[data-addr="${dev[0].addr}"]`);
+  assert.equal(await page.locator('.panel-heat-tile.over').count(), 1);
+  assert.equal(await page.textContent(`.panel-heat-tile[data-addr="${dev[0].addr}"] .pht-over`), 'Over');
+  assert.equal(await page.isVisible('#legend-over'), true);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
 // An optimizer the Pi hears (or heard) that isn't in its node list: a spare
 // that still has the network's key reports through the TAP whatever the
 // TAP's table says (owner's analysis, 2026-11-10). It is listed apart, and
