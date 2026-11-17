@@ -259,6 +259,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **An optimizer no TAP lists can be forgotten (Raspberry Pi and other
+  Linux).** One a CCA listed and was later removed (in EI, say) stayed in
+  Devices, and Retire said only "not in the table: nothing to remove".
+  Retire now says it isn't in the TAP's list and offers **Forget**, and on
+  Devices a row tagged "Not on the TAP" has a **Forget** button.
+
 - **A TAP could show as "not answering" while it was polled (Raspberry Pi
   and other Linux, more than one TAP).** If every TAP missed a few polls at
   once (on the roof, for about a second while an ESP32 on the same bus rebooted), the Pi looked for
