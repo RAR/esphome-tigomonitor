@@ -103,6 +103,7 @@ async function open(w) {
       const v = piRoutes['/api/versions'] ?? routes['/api/versions'];
       return json(200, { ...v, taps: (v.taps || []).map((t) => ({ ...t, name: w.names[t.addr] ?? t.name })) });
     }
+    if (path === '/api/devices' && w.devices) return json(200, { devices: w.devices, count: w.devices.length });
     const body = piRoutes[path] ?? routes[path];
     return body === undefined ? route.fulfill({ status: 404, body: 'no' }) : json(200, body);
   });
@@ -138,6 +139,23 @@ test('System setup: "Set up a new system" ticks off what is done and points at w
   const done = await page.textContent('.setup-body');
   assert.match(done, /4 of 5 done/);
   assert.match(done, /Lay out the array/);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+// After dark no optimizer reports; the system was set up all the same, and
+// the card shouldn't go back to "Set up a new system" every night.
+test('System setup: a set-up system stays set up at night, when no optimizer is reporting', async () => {
+  const w = world();
+  w.layout.unassigned = [];
+  const dev = (piRoutes['/api/devices'] ?? routes['/api/devices']).devices;
+  w.devices = dev.map((d) => ({ ...d, stale: true, data_age_ms: 6 * 3600 * 1000, power: 0, power_in: 0 }));
+  const { page, ctx, errors } = await open(w);
+  await page.waitForFunction(() => /Your system is set up/.test(document.querySelector('.setup-start[data-task="system"]').textContent));
+  await page.click('.setup-start[data-task="system"]');
+  await page.waitForSelector('.setup-flow[data-task="system"]');
+  for (const n of ['Find the TAP', 'Optimizers']) await next(page, n);
+  assert.match(await page.textContent('.setup-body'), new RegExp(`Done.*${dev.length} optimizers heard, none reporting right now`, 's'));
   assert.deepEqual(errors, []);
   await ctx.close();
 });

@@ -242,6 +242,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **"Your system is set up" went back to "Set up a new system" every
+  night (Raspberry Pi and other Linux).** Its Optimizers step counted only
+  optimizers reporting right now, and after dark none do. It now counts
+  every optimizer heard, and says when none is reporting at the moment.
+
 - **Cloud import no longer reboots the ESP32 once you've saved a layout.**
   With a layout of your own, an import is compared with it so you can choose
   which to keep. That comparison used the ESP32's ~64 KB internal heap, and
