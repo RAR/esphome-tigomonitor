@@ -558,6 +558,7 @@
 
   .table-wrap { background: var(--bg-2); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
   table.nodes { width: 100%; border-collapse: collapse; font-size: 14px; }
+  .nodes-empty { text-align: center; color: var(--text-faint); padding: 40px 0; }
   table.nodes th[data-sort] { cursor: pointer; user-select: none; }
   table.nodes th[data-sort]:hover { color: var(--text); }
   table.nodes th.sort-asc::after { content: ' ↑'; color: var(--accent-text); }
@@ -615,7 +616,7 @@
   .topo-inv-name-edit-btn {
     background: none; border: 1px solid var(--border); color: var(--text-dim);
     border-radius: 4px; padding: 2px 6px; font-size: 11px; cursor: pointer;
-    margin-left: 4px;
+    margin-left: 4px; min-width: 24px; min-height: 24px;
   }
   .topo-inv-name-edit-btn:hover { color: var(--text); border-color: var(--accent-2); }
   .topo-inv-name-input {
@@ -877,7 +878,7 @@
   .setup-taps strong { font-size: 13px; }
   .setup-taps span { color: var(--text-dim); }
   .setup-taps .lost { color: var(--warn-text); font-weight: 600; }
-  .setup-health .head a { margin-left: auto; font-size: 12px; color: var(--accent-2-text); }
+  .setup-health .head a { margin-left: auto; padding-block: 4px; font-size: 12px; color: var(--accent-2-text); }
   .setup-bar { display: flex; gap: 2px; height: 12px; border-radius: 6px; overflow: hidden; background: var(--bg-3); }
   .setup-bar span { min-width: 6px; }
   .setup-key { display: flex; flex-wrap: wrap; gap: 6px 22px; font-size: 12px; color: var(--text-dim); }
@@ -1394,6 +1395,15 @@
        than reflowing into card-list form (which loses at-a-glance compare). */
     .table-wrap { overflow-x: auto; }
     table.nodes { min-width: 720px; }
+    /* Devices: at 720 px its cells wrapped into three-line rows with Power
+       and State off the right edge. Address, barcode and amps are in each
+       row's details, so drop them, keep each cell on one line, and let the
+       table take its own width. */
+    table.nodes.devices { min-width: 0; }
+    /* Centred across a table wider than the phone, it was cut off. */
+    .nodes-empty { text-align: left; padding: 32px 16px; }
+    table.nodes.devices tr:not(.node-detail) > :is(th, td):not([colspan]) { white-space: nowrap; }
+    table.nodes.devices tr:not(.node-detail) > :is(:nth-child(2), :nth-child(3), :nth-child(6)):not([colspan]) { display: none; }
 
     /* History segmented controls / chart cards */
     .controls { flex-wrap: wrap; }
@@ -1814,7 +1824,7 @@
       </div>
 
       <div class="table-wrap">
-        <table class="nodes">
+        <table class="nodes devices">
           <thead>
             <tr>
               <th data-sort="name">Name</th>
@@ -1832,7 +1842,7 @@
             </tr>
           </thead>
           <tbody id="nodes-tbody">
-            <tr><td colspan="11" style="text-align:center;color:var(--text-faint);padding:40px 0">Loading…</td></tr>
+            <tr><td colspan="12" class="nodes-empty">Loading…</td></tr>
           </tbody>
         </table>
       </div>
@@ -4162,7 +4172,7 @@
     }
 
     if (rows.length === 0) {
-      html = '<tr><td colspan="11" style="text-align:center;color:var(--text-faint);padding:40px 0">No nodes match the current filters.</td></tr>';
+      html = '<tr><td colspan="12" class="nodes-empty">No nodes match the current filters.</td></tr>';
     }
     setHTML(tbody, html);
     nodesOpening = null;
