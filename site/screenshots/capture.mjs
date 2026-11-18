@@ -96,7 +96,9 @@ for (const theme of THEMES) for (const pi of [false, true]) {
   await ctx.route('**/api/**', async (route) => {
     const url = route.request().url();
     const path = new URL(url).pathname.replace(/^.*(\/api\/)/, '$1');
-    let body = (pi && piRoutes[path]) ?? routes[path];
+    // Not `(pi && piRoutes[path]) ?? ...`: off the Pi that is `false`, which
+    // ?? keeps, so every ESP32 call was answered with JSON false.
+    let body = (pi ? piRoutes[path] : undefined) ?? routes[path];
     if (body === undefined) {
       const hit = patterns.find(([re]) => re.test(path));
       if (hit) body = hit[1](url);

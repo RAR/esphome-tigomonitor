@@ -62,7 +62,7 @@ if [ "$1" = configure ]; then
   getent group bluetooth >/dev/null || groupadd --system bluetooth
   if ! getent passwd tigomonitor >/dev/null; then
     useradd --system --user-group --home-dir /var/lib/tigomonitor --no-create-home \
-      --shell /usr/sbin/nologin --comment "Tigo Monitor" tigomonitor
+      --shell /usr/sbin/nologin --comment "TigoMonitor" tigomonitor
   fi
   usermod -a -G dialout,bluetooth tigomonitor
 fi

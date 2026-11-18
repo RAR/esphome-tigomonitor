@@ -1,6 +1,6 @@
 # Board Configuration Files
 
-This directory contains optimized ESPHome configurations for different ESP32 boards used with the Tigo Monitor system.
+This directory contains optimized ESPHome configurations for different ESP32 boards used with the TigoMonitor system.
 
 **PSRAM is required for the web server (`tigo_server`)**, which builds whole HTML
 pages and JSON API responses in memory. It is *not* required by `tigo_monitor` —

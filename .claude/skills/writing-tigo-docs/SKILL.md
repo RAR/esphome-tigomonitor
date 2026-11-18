@@ -3,7 +3,7 @@ name: writing-tigo-docs
 description: Use when adding or editing any page under site/src/content/docs/, the README, CHANGELOG, or an engineering note in docs/ — covers which audience each destination serves, the frontmatter and sidebar wiring a new page needs, and the build steps that silently publish stale or fabricated content.
 ---
 
-# Writing Tigo Monitor Docs
+# Writing TigoMonitor Docs
 
 Three destinations, three audiences. Most doc mistakes here are a page written
 for the wrong one.

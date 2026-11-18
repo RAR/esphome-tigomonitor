@@ -1,4 +1,4 @@
-"""Button platform for Tigo Monitor buttons."""
+"""Button platform for TigoMonitor buttons."""
 import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome.components import button

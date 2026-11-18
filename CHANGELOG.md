@@ -14,8 +14,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (its answer to the Pi's calibration read): one taking more watts or volts
   in than it's rated for is tagged **Over rating** on Devices and ringed on
   the Dashboard; one whose string's panel nameplate (Topology) is above its
-  rating is tagged **Clips at 475 W**, say, since it limits that panel to
-  its own rating in strong sun. Its details under the row show its peak
+  rating is tagged **Panel above 475 W**, say, since in strong sun it can
+  run over its rating. Its details under the row show its peak
   and input voltage against its rating.
 
 - **Each optimizer's rating shows on Devices without a CCA (Raspberry Pi
@@ -179,6 +179,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The name is TigoMonitor, one word, everywhere.** The web UI's sidebar,
+  tab title and sign-in page, the docs site, and the Raspberry Pi's Home
+  Assistant device all said "Tigo Monitor" while the rest of the copy said
+  TigoMonitor. On the Pi, Home Assistant renames the device in place and
+  keeps its entity IDs; a name you gave the device yourself stays. The
+  browser may ask for the web UI password once more, since its sign-in
+  prompt names the device. Board YAML entity names are unchanged.
+
 - **No Bus control page any more (Raspberry Pi and other Linux).** Its
   PV output and discovery window switches are on System setup, under the
   tasks, while the Pi runs or stands by for the bus; its figures are a Bus
@@ -270,6 +278,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   could run across each other.
 
 ### Fixed
+
+- **The README and docs screenshots showed an empty system.** Every
+  ESP32 view rendered "0 / 0" panels and "No nodes match" because the
+  screenshot script answered each request with `false`; regenerated with
+  the fixture array.
+
+- **The web UI works better with a keyboard, a screen reader and a
+  phone.** Every filter and settings field now has a name a screen reader
+  reads out, and focused fields and cards show a clear ring. On a phone,
+  Devices keeps each row on one line with name, string, volts and power in
+  view (address, barcode and amps are in the row's details), and the
+  "No nodes match" message is no longer cut off.
+
+- **Error messages say what went wrong in words.** A failed request showed
+  "refresh error: Failed to fetch", "/api/settings 400" or, on the
+  Dashboard, a JSON parse error. It now shows "Couldn't refresh:
+  TigoMonitor didn't answer", "Not saved: refused (400)" and so on, with
+  TigoMonitor's own reason when it gives one. Error toasts stay up for six
+  seconds rather than two and a half, and screen readers read them out.
+
+- **Small layout fixes across the web UI.** On a phone, the closed menu no
+  longer casts a shadow down the left edge of every page. Bus traffic's
+  numbers line up across the strip. The Dashboard's per-string rating reads
+  "91% of 2.40 kW rated" on its own line, and the Alerts heading has room
+  above it. The History chart's axis labels stay readable over the curve.
+  Two Diagnostics headers and the CCA Status header no longer show a stray
+  "—".
+
+- **An optimizer no TAP lists can be forgotten (Raspberry Pi and other
+  Linux).** One a CCA listed and was later removed (in EI, say) stayed in
+  Devices, and Retire said only "not in the table: nothing to remove".
+  Retire now says it isn't in the TAP's list and offers **Forget**, and on
+  Devices a row tagged "Not on the TAP" has a **Forget** button.
 
 - **A TAP could show as "not answering" while it was polled (Raspberry Pi
   and other Linux, more than one TAP).** If every TAP missed a few polls at

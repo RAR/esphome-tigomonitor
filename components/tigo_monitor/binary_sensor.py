@@ -1,4 +1,4 @@
-"""Binary sensor platform for Tigo Monitor."""
+"""Binary sensor platform for TigoMonitor."""
 import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome.components import binary_sensor

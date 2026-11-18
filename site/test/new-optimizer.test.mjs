@@ -10,6 +10,7 @@ import { createServer } from 'node:http';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
+import { answerAll } from './ui-dialog.mjs';
 import { routes } from '../screenshots/fixtures.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -55,6 +56,12 @@ async function open(hash, heard = Math.floor(Date.now() / 1000) - 3600, mutate =
       api.known.push(b);
       for (const n of nodes.nodes) if (n.long_address === b.barcode) n.known = b.known;
       return json(200, { known: b.known });
+    }
+    if (path === '/api/nodes/delete' && req.method() === 'POST') {
+      const addr = new URL(req.url()).searchParams.get('addr');
+      api.deleted = [...(api.deleted || []), addr];
+      nodes.nodes = nodes.nodes.filter((n) => n.addr !== addr);
+      return json(200, { status: 'ok' });
     }
     if (path === '/api/nodes') return json(200, nodes);
     if (path === '/api/devices') return json(200, devices);
@@ -154,6 +161,31 @@ test('the Node Table tags a missing optimizer, one off the TAP\'s roster, and on
   // Its last answers, as heard, are in its row's details.
   await row('C6').locator('.node-toggle').click();
   assert.match(await page.locator('#nodes-tbody tr.node-detail').textContent(), /Mppt\s*!Mppt 1 0 S/);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+// One the TAPs stopped listing (a CCA listed it; the owner removed it in
+// EI, 2026-11-17): on the Pi its row offers Forget, which takes it out of
+// the node table after asking.
+test("Devices, on the Pi: an optimizer off the TAP's list can be forgotten from its row", async () => {
+  const now = Math.floor(Date.now() / 1000);
+  const { page, ctx, api, errors } = await open('#nodes', 0, (nodes) => {
+    for (const n of nodes) { n.last_heard_unix = now - 60; n.last_roster_unix = now - 600; }
+    // Listed once, never joined: no reading ever, off the roster for 2 days.
+    nodes.push({ addr: '8002', first_heard_unix: 0, long_address: '04C05B0000300002', sensor_index: 30, checksum: '',
+      cca_validated: false, cca_label: '', cca_string: '', cca_mppt: '', cca_channel: '', last_heard_unix: 0, last_roster_unix: now - 2 * 86400 });
+  }, true);
+  await page.waitForFunction(() => /8002/.test(document.getElementById('nodes-tbody').textContent));
+  const row = page.locator('#nodes-tbody tr[data-addr="8002"]');
+  assert.match(await row.textContent(), /Not on the TAP/);
+  assert.equal(await page.locator('#nodes-tbody button.node-forget-btn').count(), 1);
+  await answerAll(page, true);
+  await row.locator('button.node-forget-btn').click();
+  await page.waitForFunction(() => !/8002/.test(document.getElementById('nodes-tbody').textContent));
+  assert.deepEqual(api.deleted, ['8002']);
+  // Its row didn't open on the click.
+  assert.equal(await page.locator('#nodes-tbody tr.node-detail').count(), 0);
   assert.deepEqual(errors, []);
   await ctx.close();
 });

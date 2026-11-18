@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Tigo Monitor</title>
+<title>TigoMonitor</title>
 <style>
   /* ===== Theme tokens ===== */
   :root {
@@ -476,7 +476,9 @@
     background: var(--bg-2); border: 1px solid var(--border); color: var(--text);
     padding: 7px 12px; border-radius: 6px; font-size: 12px; min-width: 240px;
   }
-  .input:focus { outline: none; border-color: var(--accent); }
+  /* A 1 px border changing colour is too faint to find the caret by; the
+     sign-in page's soft ring is used for every field. */
+  .input:focus { border-color: var(--accent); outline: 2px solid color-mix(in srgb, var(--accent) 35%, transparent); outline-offset: 1px; }
   .table-toolbar .input.compact { min-width: auto; }
   .table-meta { font-size: 12px; color: var(--text-dim); }
 
@@ -498,7 +500,7 @@
   /* The Bus log: the last 5 minutes in a strip, then one row per exchange. */
   .bx-strip { display: grid; grid-template-columns: repeat(auto-fit, minmax(128px, 1fr)); gap: 1px; background: var(--border);
               border: 1px solid var(--border); border-radius: 10px; overflow: hidden; margin-bottom: 16px; }
-  .bx-tile { background: var(--bg-2); padding: 12px 14px; display: grid; gap: 2px; min-width: 0; }
+  .bx-tile { background: var(--bg-2); padding: 12px 14px; display: grid; align-content: start; gap: 2px; min-width: 0; }
   .bx-tile .k { font-size: 11px; letter-spacing: .05em; text-transform: uppercase; color: var(--text-faint); }
   .bx-tile .v { font-size: 20px; font-weight: 650; font-variant-numeric: tabular-nums; }
   .bx-tile .s { font-size: 12px; color: var(--text-dim); overflow-wrap: anywhere; }
@@ -558,6 +560,7 @@
 
   .table-wrap { background: var(--bg-2); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
   table.nodes { width: 100%; border-collapse: collapse; font-size: 14px; }
+  .nodes-empty { text-align: center; color: var(--text-faint); padding: 40px 0; }
   table.nodes th[data-sort] { cursor: pointer; user-select: none; }
   table.nodes th[data-sort]:hover { color: var(--text); }
   table.nodes th.sort-asc::after { content: ' ↑'; color: var(--accent-text); }
@@ -615,7 +618,7 @@
   .topo-inv-name-edit-btn {
     background: none; border: 1px solid var(--border); color: var(--text-dim);
     border-radius: 4px; padding: 2px 6px; font-size: 11px; cursor: pointer;
-    margin-left: 4px;
+    margin-left: 4px; min-width: 24px; min-height: 24px;
   }
   .topo-inv-name-edit-btn:hover { color: var(--text); border-color: var(--accent-2); }
   .topo-inv-name-input {
@@ -798,6 +801,7 @@
   .setup-start { display: flex; flex-wrap: wrap; align-items: center; gap: 14px 22px; width: 100%; padding: 18px 22px; margin-bottom: 22px; text-align: left;
                  border-radius: 10px; border: 1px solid var(--border); border-top: 4px solid var(--task); background: var(--bg-2); color: var(--text); font: inherit; cursor: pointer; }
   .setup-start:hover, .setup-start:focus-visible { border-color: var(--task); outline: none; }
+  .setup-start:focus-visible { outline: 2px solid var(--task); outline-offset: 2px; }
   .setup-start .in { flex: 1 1 320px; display: flex; flex-direction: column; gap: 6px; }
   .setup-start strong { font-size: 17px; }
   .setup-start .in > span { font-size: 13px; color: var(--text-dim); }
@@ -808,6 +812,7 @@
   /* Every step done: rolled up to one line that says so. */
   .setup-start.done { flex-wrap: nowrap; gap: 14px; padding: 12px 16px; margin-bottom: 18px; border-top: 1px solid var(--border); }
   .setup-start.done:hover, .setup-start.done:focus-visible { border-color: var(--good); }
+  .setup-start.done:focus-visible { outline-color: var(--good); }
   .setup-start.done .ico { width: 32px; height: 32px; flex: none; border-radius: 50%; display: grid; place-items: center; background: color-mix(in srgb, var(--good) 15%, transparent); }
   .setup-start.done .in { flex: 1 1 auto; gap: 2px; min-width: 0; }
   .setup-start.done strong { font-size: 14px; }
@@ -861,6 +866,7 @@
                 background: var(--bg-2); border: 1px solid var(--border); color: var(--text); font: inherit; }
   .setup-task::before { content: ""; height: 4px; background: var(--task); }
   .setup-task:hover, .setup-task:focus-visible { border-color: var(--task); outline: none; }
+  .setup-task:focus-visible { outline: 2px solid var(--task); outline-offset: 2px; }
   .setup-task .art { height: 92px; margin: 14px 14px 0; border-radius: 10px; display: flex; align-items: center; justify-content: center;
                      background: color-mix(in srgb, var(--task) 10%, transparent); }
   .setup-task .in { flex: 1; display: flex; flex-direction: column; gap: 8px; padding: 14px 18px 18px; }
@@ -877,7 +883,7 @@
   .setup-taps strong { font-size: 13px; }
   .setup-taps span { color: var(--text-dim); }
   .setup-taps .lost { color: var(--warn-text); font-weight: 600; }
-  .setup-health .head a { margin-left: auto; font-size: 12px; color: var(--accent-2-text); }
+  .setup-health .head a { margin-left: auto; padding-block: 4px; font-size: 12px; color: var(--accent-2-text); }
   .setup-bar { display: flex; gap: 2px; height: 12px; border-radius: 6px; overflow: hidden; background: var(--bg-3); }
   .setup-bar span { min-width: 6px; }
   .setup-key { display: flex; flex-wrap: wrap; gap: 6px 22px; font-size: 12px; color: var(--text-dim); }
@@ -1010,6 +1016,7 @@
   .mesh-card { font: inherit; text-align: left; color: inherit; cursor: pointer; display: flex; flex-direction: column; gap: 5px;
                padding: 8px 9px; border-radius: 8px; background: var(--bg-3); border: 1px solid var(--border); min-height: 96px; }
   .mesh-card:hover, .mesh-card:focus-visible { border-color: var(--text-faint); outline: none; }
+  .mesh-card:focus-visible { outline: 2px solid var(--accent-2); outline-offset: 2px; }
   .mesh-card[aria-pressed="true"] { border-color: var(--text); box-shadow: 0 0 0 1px var(--text); }
   .mesh-card.tier-poor { border-color: color-mix(in srgb, var(--bad) 55%, transparent); }
   .mesh-card-top { display: flex; justify-content: space-between; align-items: center; font-size: 12px; font-weight: 600; }
@@ -1202,7 +1209,7 @@
     background: var(--bg); border: 1px solid var(--border); color: var(--text);
     border-radius: 4px; padding: 3px 8px; font-size: 13px; font-weight: 600; min-width: 120px; max-width: 220px;
   }
-  .topo-ed-name:focus { border-color: var(--accent-2); outline: none; }
+  .topo-ed-name:focus { border-color: var(--accent-2); outline: 2px solid color-mix(in srgb, var(--accent-2) 35%, transparent); outline-offset: 1px; }
   .topo-ed-canon { color: var(--text-faint); font-size: 11px; }
   .topo-add {
     background: none; border: 1px dashed var(--border); color: var(--text-dim);
@@ -1268,6 +1275,7 @@
   .cfg-row:has(> .cfg-text) .cfg-ctrl .cfg-input[type="number"] { max-width: 120px; }
   .cfg-row:has(> .cfg-text) .cfg-ctrl select.cfg-input { max-width: 480px; }
   .cfg-row:has(> .cfg-text) .cfg-switch { min-width: 120px; }  /* Save lines up with the number rows' */
+  .cfg-input:focus-visible { border-color: var(--accent); outline: 2px solid color-mix(in srgb, var(--accent) 35%, transparent); outline-offset: 1px; }
   .cfg-input { width: 110px; padding: 7px 9px; background: var(--bg-2); border: 1px solid var(--border); border-radius: 6px; color: var(--text); font-size: 13px; }
   .cfg-unit { color: var(--text-dim); font-size: 12px; margin-right: 2px; }
   .cfg-switch { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text); cursor: pointer; min-width: 64px; min-height: 24px; }
@@ -1346,9 +1354,8 @@
       z-index: 55;
       transform: translateX(-100%);
       transition: transform 0.22s ease;
-      box-shadow: 4px 0 24px rgba(0, 0, 0, 0.4);
     }
-    .app.menu-open aside { transform: translateX(0); }
+    .app.menu-open aside { transform: translateX(0); box-shadow: 4px 0 24px rgba(0, 0, 0, 0.4); }
     .app.menu-open .sidebar-overlay { display: block; }
 
     main { padding: 60px 14px 20px; }
@@ -1394,6 +1401,15 @@
        than reflowing into card-list form (which loses at-a-glance compare). */
     .table-wrap { overflow-x: auto; }
     table.nodes { min-width: 720px; }
+    /* Devices: at 720 px its cells wrapped into three-line rows with Power
+       and State off the right edge. Address, barcode and amps are in each
+       row's details, so drop them, keep each cell on one line, and let the
+       table take its own width. */
+    table.nodes.devices { min-width: 0; }
+    /* Centred across a table wider than the phone, it was cut off. */
+    .nodes-empty { text-align: left; padding: 32px 16px; }
+    table.nodes.devices tr:not(.node-detail) > :is(th, td):not([colspan]) { white-space: nowrap; }
+    table.nodes.devices tr:not(.node-detail) > :is(:nth-child(2), :nth-child(3), :nth-child(6)):not([colspan]) { display: none; }
 
     /* History segmented controls / chart cards */
     .controls { flex-wrap: wrap; }
@@ -1436,7 +1452,7 @@
              the body collapses to two bars — at 3px per block the full
              version is illegible. Both bus arcs still read at this size,
              unlike the 16px favicon, which keeps only the inner one. -->
-        <svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" aria-label="Tigo Monitor">
+        <svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" aria-label="TigoMonitor">
           <defs>
             <linearGradient id="brand-tile" x1="0" y1="0" x2="0" y2="1">
               <stop offset="0%" stop-color="#16213B"/>
@@ -1459,7 +1475,7 @@
         </svg>
       </div>
       <div>
-        <div class="brand-name">Tigo Monitor</div>
+        <div class="brand-name">TigoMonitor</div>
         <div class="brand-sub" id="brand-sub">v—</div>
       </div>
     </div>
@@ -1584,7 +1600,7 @@
         <div class="legend-item"><div class="legend-swatch" style="background:var(--bg-3);border:1px dashed var(--text-faint)"></div> Sleeping / no data</div>
         <div class="legend-item" id="legend-over" hidden><div class="legend-swatch" style="background:var(--bg-3);box-shadow:0 0 0 2px var(--bad)"></div> Over its optimizer's rating</div>
       </div>
-      <div style="font-size:11px;color:var(--text-faint);margin-top:6px">
+      <div style="font-size:11px;color:var(--text-faint);margin:6px 0 20px">
         Tile color compares each panel to its string median — answers "is this panel keeping up with neighbors right now?". Low output at dawn, dusk, or under cloud cover is expected and shifts the median, not the color. The small stripe at the bottom of a tile compares to the per-panel nameplate rating (when set) using the same green/yellow/red bands — useful for spotting cases where the whole string is below rating but individual panels still look "on par" with each other.
       </div>
 
@@ -1695,7 +1711,7 @@
       <div class="topo-toolbar">
         <button class="btn" id="topo-expand-btn">Expand all</button>
         <button class="btn" id="topo-collapse-btn">Collapse all</button>
-        <input class="input" id="topo-filter" placeholder="Filter by name, barcode, or string…">
+        <input class="input" id="topo-filter" aria-label="Filter the topology" placeholder="Filter by name, barcode, or string…">
         <span class="topo-summary" id="topo-summary">—</span>
         <button class="btn" id="topo-cloud-import-btn" style="display:none" title="Pull panel names + layout from Tigo's cloud">Import from Tigo cloud</button>
         <button class="btn" id="topo-edit-btn" title="Add inverters, MPPTs and strings, and drag panels into place">Edit layout</button>
@@ -1795,11 +1811,11 @@
       </div>
 
       <div class="table-toolbar">
-        <input class="input" id="nodes-search" placeholder="Search name, barcode, address…">
-        <select class="input compact" id="nodes-filter-string">
+        <input class="input" id="nodes-search" aria-label="Search devices" placeholder="Search name, barcode, address…">
+        <select class="input compact" id="nodes-filter-string" aria-label="Show string">
           <option value="">All strings</option>
         </select>
-        <select class="input compact" id="nodes-filter-state">
+        <select class="input compact" id="nodes-filter-state" aria-label="Show state">
           <option value="">All states</option>
           <option value="ok">Active</option>
           <option value="warn">Shaded</option>
@@ -1814,7 +1830,7 @@
       </div>
 
       <div class="table-wrap">
-        <table class="nodes">
+        <table class="nodes devices">
           <thead>
             <tr>
               <th data-sort="name">Name</th>
@@ -1832,7 +1848,7 @@
             </tr>
           </thead>
           <tbody id="nodes-tbody">
-            <tr><td colspan="11" style="text-align:center;color:var(--text-faint);padding:40px 0">Loading…</td></tr>
+            <tr><td colspan="12" class="nodes-empty">Loading…</td></tr>
           </tbody>
         </table>
       </div>
@@ -1846,7 +1862,7 @@
         <h1>System setup</h1>
         <div class="topbar-meta" id="setup-meta">—</div>
       </div>
-      <!-- The marks on the task cards: the optimizer from the Tigo Monitor
+      <!-- The marks on the task cards: the optimizer from the TigoMonitor
            logo, and the TAP, a gateway with one live light. -->
       <svg width="0" height="0" style="position:absolute" aria-hidden="true">
         <defs>
@@ -2221,7 +2237,7 @@
 
       <div class="section-head">
         <div class="section-title">Network &amp; uptime</div>
-        <div class="section-sub" id="diag-net-sub">—</div>
+        <div class="section-sub" id="diag-net-sub"></div>
       </div>
       <div class="hist-stat-grid">
         <div class="hist-stat-card">
@@ -2288,7 +2304,7 @@
 
       <div class="section-head">
         <div class="section-title">UART telemetry</div>
-        <div class="section-sub" id="diag-uart-sub">—</div>
+        <div class="section-sub" id="diag-uart-sub"></div>
       </div>
       <div class="hist-stat-grid">
         <div class="hist-stat-card">
@@ -2380,7 +2396,7 @@
       <section class="bx-strip" id="bus-strip" aria-label="The last 5 minutes"></section>
       <div class="table-toolbar">
         <span id="bus-chips" role="group" aria-label="Show" style="display:flex;gap:6px;flex-wrap:wrap"></span>
-        <input class="input" id="buslog-search" placeholder="Filter, e.g. 0002 or GatewayCfg">
+        <input class="input" id="buslog-search" aria-label="Filter bus traffic" placeholder="Filter, e.g. 0002 or GatewayCfg">
         <button class="btn" id="buslog-pause">Pause</button>
       </div>
       <div class="bx-table" id="bus-box" role="table" aria-label="Exchanges">
@@ -2405,7 +2421,7 @@
 
       <div class="section-head">
         <div class="section-title">Status</div>
-        <div class="section-sub" id="cca-conn-sub">—</div>
+        <div class="section-sub" id="cca-conn-sub"></div>
       </div>
       <div class="hist-stat-grid cca-status-grid">
         <div class="hist-stat-card">
@@ -2539,7 +2555,7 @@
   </main>
 
   <!-- Global toast (lives outside any view so it's reachable from any tab) -->
-  <div id="app-toast" class="toast"></div>
+  <div id="app-toast" class="toast" role="status" aria-live="polite"></div>
 
   <!-- Tigo Cloud connection modal (opened from the Tigo Cloud page's Configure button) -->
   <div id="cloud-config-modal" style="display:none;position:fixed;inset:0;z-index:1000;align-items:center;justify-content:center;background:rgba(0,0,0,0.5)">
@@ -2615,7 +2631,7 @@
      {"sign_in": true}; the browser's password manager fills it. -->
 <div class="signin" id="signin" hidden>
   <form class="signin-form" id="signin-form">
-    <div class="signin-brand"><span class="signin-mark" id="signin-mark"></span>Tigo Monitor</div>
+    <div class="signin-brand"><span class="signin-mark" id="signin-mark"></span>TigoMonitor</div>
     <h1>Sign in</h1>
     <label>Username <input class="input" id="signin-user" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" required></label>
     <label>Password <input class="input" id="signin-pass" name="password" type="password" autocomplete="current-password" required></label>
@@ -2682,6 +2698,28 @@
     }
     return r;
   }
+  // A failed request in words. The server's own reason first; with none,
+  // what the status means, its number kept in brackets for a bug report,
+  // never a bare "HTTP 500" or an API path.
+  function httpWords(status) {
+    if (status === 401) return `sign-in needed (${status})`;
+    if (status === 403) return `not allowed (${status})`;
+    if (status === 404) return `not on this TigoMonitor (${status})`;
+    if (status === 409) return `not possible right now (${status})`;
+    if (status === 503) return `not ready yet (${status})`;
+    if (status >= 500) return `TigoMonitor hit an error (${status})`;
+    return `refused (${status})`;
+  }
+  async function httpFail(r) {
+    const j = await r.clone().json().catch(() => null);
+    return new Error((j && (j.error || j.message)) || httpWords(r.status));
+  }
+  // What a caught error says. fetch() rejects when nothing answered, in
+  // words that differ by browser.
+  function failText(e) {
+    const m = String((e && e.message) || e || '');
+    return /^(Failed to fetch|NetworkError|Load failed)/.test(m) ? "TigoMonitor didn't answer" : m;
+  }
   let signingIn = false;
   function showSignIn() {
     signingIn = true;
@@ -2730,6 +2768,27 @@
     document.getElementById('theme-toggle').textContent = theme === 'light' ? '☾' : '☀';
   }
   // No choice saved yet: follow the device's own light or dark setting.
+  // A settings row names its control in a <strong> beside it, which is not
+  // a <label>: point each unlabelled control at that title, and at the line
+  // under it, so a screen reader says what the field is.
+  let cfgLabelSeq = 0;
+  function labelCfgRows(scope) {
+    scope.querySelectorAll('.cfg-row').forEach(row => {
+      const title = row.querySelector('.cfg-text > strong');
+      if (!title) return;
+      if (!title.id) title.id = `cfg-t-${++cfgLabelSeq}`;
+      const desc = row.querySelector('.cfg-text > span:not(.cfg-default)');
+      if (desc && !desc.id) desc.id = `${title.id}-d`;
+      row.querySelectorAll('.cfg-ctrl input, .cfg-ctrl select, .cfg-ctrl textarea').forEach(c => {
+        if (c.type === 'hidden' || c.hasAttribute('aria-label') || c.hasAttribute('aria-labelledby')) return;
+        if (c.type !== 'checkbox' && c.labels && c.labels.length) return;
+        c.setAttribute('aria-labelledby', title.id);
+        if (desc && !c.hasAttribute('aria-describedby')) c.setAttribute('aria-describedby', desc.id);
+      });
+    });
+  }
+  labelCfgRows(document);
+
   const initialTheme = localStorage.getItem('tigoTheme') || (matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
   applyTheme(initialTheme);
   document.getElementById('theme-toggle').addEventListener('click', () => {
@@ -2830,7 +2889,7 @@
   async function refreshOverview() {
     try {
       const r = await apiFetch('/api/overview');
-      if (!r.ok) throw new Error('HTTP ' + r.status);
+      if (!r.ok) throw await httpFail(r);
       const d = await r.json();
       document.getElementById('ov-active').textContent =
         `${d.active_devices ?? 0} / ${d.max_devices ?? 0}`;
@@ -3080,7 +3139,7 @@
         // Optional string-level nameplate roll-up: total / (n × rating).
         const nameplate = rating > 0 ? rating * panels.length : 0;
         const stringRatedPct = nameplate > 0
-          ? ` <span style="color:var(--text-faint);font-size:11px">${Math.round((s.total_power || 0) / nameplate * 100)}% of ${(nameplate / 1000).toFixed(2)}kW</span>`
+          ? `<br><span style="color:var(--text-faint);font-size:11px">${Math.round((s.total_power || 0) / nameplate * 100)}% of ${(nameplate / 1000).toFixed(2)} kW rated</span>`
           : '';
         html += `
           <div class="panel-string-row">
@@ -3225,6 +3284,7 @@
         apiFetch('/api/energy/history'),
         PLATFORM === 'linux' ? apiFetch('/api/nodes').catch(() => null) : null,
       ]);
+      for (const r of [ovR, invR, devR]) if (!r.ok) throw await httpFail(r);
       const ov   = await ovR.json();
       const inv  = await invR.json();
       mpptNames = inv.mppt_names || {};
@@ -3280,7 +3340,7 @@
         console.error('dashboard refresh failed', e);
         dashLastErr = e.message;
       }
-      document.getElementById('dash-meta').textContent = `refresh error: ${e.message}`;
+      document.getElementById('dash-meta').textContent = `Couldn't refresh: ${failText(e)}`;
     }
   }
   setInterval(refreshDashboard, 5000);
@@ -3549,7 +3609,7 @@
     }
 
     const yLabel = (frac, y) =>
-      `<text x="6" y="${y}" fill="var(--text-faint)" font-size="10">${Math.round(yScale * frac)} W</text>`;
+      `<text x="6" y="${y}" fill="var(--text-faint)" stroke="var(--bg-2)" stroke-width="5" stroke-linejoin="round" paint-order="stroke" font-size="10">${Math.round(yScale * frac)} W</text>`;
     yLab.innerHTML = yLabel(0.75, 50) + yLabel(0.50, 105) + yLabel(0.25, 160);
 
     const ticks = 4;
@@ -3692,7 +3752,7 @@
     fill.setAttribute('d', `M${pts.join(' L')} L${W},210 L0,210 Z`);
 
     const yLabel = (frac, y) =>
-      `<text x="6" y="${y}" fill="var(--text-faint)" font-size="10">${(yScale * frac / 1000).toFixed(1)} kW</text>`;
+      `<text x="6" y="${y}" fill="var(--text-faint)" stroke="var(--bg-2)" stroke-width="5" stroke-linejoin="round" paint-order="stroke" font-size="10">${(yScale * frac / 1000).toFixed(1)} kW</text>`;
     yLab.innerHTML = yLabel(0.75, 50) + yLabel(0.50, 105) + yLabel(0.25, 160);
 
     const ticks = 4;
@@ -3802,9 +3862,9 @@
       if (r.status === 503) {
         let detail = '';
         try { detail = (await r.json()).detail || ''; } catch (_) {}
-        throw new Error(detail || 'on-flash history failed to start (HTTP 503)');
+        throw new Error(detail || 'on-flash history did not start (503)');
       }
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      if (!r.ok) throw await httpFail(r);
       const data = await r.json();
       status.textContent = `${data.count} records · ${data.query_ms} ms · range=${range}`;
       // Cadence comes from the firmware (`history_interval`) — never hardcode it.
@@ -3820,7 +3880,7 @@
       renderHistStats(data.records, days);
       renderHistEnergyBars(days);
     } catch (e) {
-      status.textContent = `error: ${e.message}`;
+      status.textContent = `Couldn't load: ${failText(e)}`;
       console.error(e);
     }
   }
@@ -3917,8 +3977,9 @@
     if (r.volts > 0 && v > r.volts) return `${v.toFixed(1)} V in, rated ${r.volts} V`;
     return '';
   }
-  // A panel rated above its optimizer: the optimizer limits it to its own rating.
-  function clipsAt(panelW, r) {
+  // A panel rated above its optimizer: in strong sun the optimizer can run
+  // over its rating (it doesn't hold the panel to it). Its rating, or 0.
+  function panelAbove(panelW, r) {
     return r && r.watts > 0 && panelW > r.watts ? r.watts : 0;
   }
 
@@ -4052,7 +4113,7 @@
       const fw = fwByAddr[String(n.addr).toUpperCase()] || null;
       const rating = ratingByAddr[String(n.addr).toUpperCase()] || null;
       const panelW = panelRatingOf[stringLabel] || 0;
-      const over = overRating(dev, rating), clip = clipsAt(panelW, rating);
+      const over = overRating(dev, rating), under = panelAbove(panelW, rating);
       const smart = smartByAddr[String(n.addr).toUpperCase()] || null;
       const fam = smart ? smartFamily(String(n.addr).toUpperCase()) : '';
       const c = smart && smartCount[fam], usual = smart && smartUsual[fam];
@@ -4064,7 +4125,7 @@
       if (smartPeers) Object.assign(smartPeers, { mppt, mpptUsual });
       rows.push({ n, name, addr: n.addr, barcodeKey, barcodeShort, tap: dev?.tap || null,
                   stringLabel, mpptLabel, v, a, w, t, age, state, fw, rating, smart, differs, smartPeers,
-                  over, clip, panelW, peak: dev?.peak_power || 0 });
+                  over, under, panelW, peak: dev?.peak_power || 0 });
     }
 
     // Sort by current column. Numeric columns sort numerically; string
@@ -4105,6 +4166,10 @@
       const stateLabel = r.n.known ? 'known' : r.state === 'ok' ? 'active' : r.state === 'warn' ? 'shaded' :
                          r.state === 'bad' ? 'fault' : 'stale';
       // The Pi can mark one with no reading known: not missing, not counted.
+      // Off the TAPs' lists (a CCA listed it, then it was removed): the Pi
+      // can forget it from its own table.
+      const offRoster = PLATFORM === 'linux' && r.n.last_roster_unix && newestRoster - r.n.last_roster_unix >= NODE_OFF_ROSTER_S;
+      const forgetBtn = offRoster ? `<button class="btn node-forget-btn" data-forget-addr="${topoEscape(String(r.addr))}">Forget</button>` : '';
       const knownBtn = PLATFORM === 'linux' && r.n.long_address && (r.n.known || r.state === 'stale')
         ? `<button class="btn node-known-btn" data-known-bc="${topoEscape(r.n.long_address)}" data-known="${r.n.known ? '0' : '1'}"
              title="${r.n.known ? 'Count it again, and flag it if it goes missing'
@@ -4115,7 +4180,7 @@
         <tr class="node-row${open ? ' open' : ''}" data-addr="${topoEscape(String(r.addr))}">
           <td><button type="button" class="node-toggle" aria-expanded="${open}" aria-controls="${did}" aria-label="Details for ${topoEscape(r.name)}">${CHEVRON}</button><strong>${r.name}</strong>${isNewOptimizer(r.n.first_heard_unix, !!r.n.cca_string)
             ? ` <span class="node-new" title="First heard ${new Date(r.n.first_heard_unix * 1000).toLocaleString()}">New</span>` : ''}${nodeTags(r.n, newestRoster)}${r.over ? ' <span class="node-missing">Over rating</span>'
-            : r.clip ? ` <span class="node-unset">Clips at ${r.clip} W</span>` : ''}${knownBtn}</td>
+            : r.under ? ` <span class="node-unset">Panel above ${r.under} W</span>` : ''}${knownBtn}${forgetBtn}</td>
           <td class="mono">${r.addr}${multiTap && r.tap ? `<div class="node-tap">${topoEscape(tapLabel(r.tap))}</div>` : ''}</td>
           <td class="mono">…${r.barcodeShort}</td>
           <td>${r.stringLabel} <span style="color:var(--text-faint)">·</span> ${r.mpptLabel}</td>
@@ -4136,7 +4201,7 @@
     }
 
     if (rows.length === 0) {
-      html = '<tr><td colspan="11" style="text-align:center;color:var(--text-faint);padding:40px 0">No nodes match the current filters.</td></tr>';
+      html = '<tr><td colspan="12" class="nodes-empty">No nodes match the current filters.</td></tr>';
     }
     setHTML(tbody, html);
     nodesOpening = null;
@@ -4262,7 +4327,7 @@
           ndPair('Calibration', `<span class="mono">${topoEscape(r.rating.cal)}</span>`)
           : ndPair('Rated', '<span style="color:var(--text-faint)">Not read yet</span>')) + `</dl>` +
         (r.over ? `<p class="nd-note bad">Over its rating now: ${topoEscape(r.over)}.</p>` : '') +
-        (r.clip ? `<p class="nd-note warn">Its panel is rated ${r.panelW} W, more than this optimizer's ${r.clip} W: in strong sun it limits the panel to ${r.clip} W.</p>` : '') +
+        (r.under ? `<p class="nd-note warn">Its panel is rated ${r.panelW} W, above this optimizer's ${r.under} W rating: in strong sun it can run over its rating.</p>` : '') +
         `</div>`);
     const changes = ((nodesData.versions || {}).changes || []).filter(c => String(c.addr).toUpperCase() === String(r.addr).toUpperCase());
     if (changes.length)
@@ -4499,11 +4564,11 @@
     b.disabled = true;
     try {
       const r = await apiFetch(`/api/nodes/delete?addr=${encodeURIComponent(addr)}`, { method: 'POST' });
-      if (!r.ok) throw new Error('HTTP ' + r.status);
+      if (!r.ok) throw await httpFail(r);
       await refreshNodes();
     } catch (err) {
       b.disabled = false;
-      b.textContent = 'Forget failed: ' + err.message;
+      b.textContent = 'Not forgotten: ' + failText(err);
     }
   });
   // What the TAPs hold: one TAP's window, or with several, theirs summed
@@ -5094,6 +5159,16 @@
         body = '<h2>Reading the TAP\'s list…</h2><div class="sub">Only a read is sent.</div>';
       } else if (!e.ok) {
         body = `<h2>This change cannot be made</h2><div class="setup-error">${topoEscape(e.message)}</div><div class="setup-actions">${back()}</div>`;
+      } else if (f.task === 'retire' && /^not in the table/.test(e.message || '')) {
+        // Nothing on the TAP to remove (one a CCA listed, then removed): what
+        // is left is this TigoMonitor's own record of it.
+        body = f.forgotten
+          ? `<div class="setup-done"><h2>${topoEscape(f.old.name)} has been forgotten</h2></div>
+             <div class="sub">It's out of Devices, the Dashboard and the mesh map. If a TAP lists it again, it comes back.</div>
+             <div class="setup-actions"><button type="button" class="btn primary" data-setup-back>Finish</button></div>`
+          : `<h2>${topoEscape(f.old.name)} isn't in the TAP's list</h2>
+             <div class="sub">There's nothing to remove from the TAP. This TigoMonitor still has it in Devices; forget it there and it stops showing.</div>
+             <div class="setup-actions">${back()}<button type="button" class="btn task-go" data-setup-forget="${topoEscape(f.old.addr)}">Forget ${topoEscape(f.old.name)}</button></div>`;
       } else {
         const plan = setupPlan(f, e);
         const go = f.task === 'replace' ? `Replace ${f.old.name}` : f.task === 'add' ? 'Add optimizer' : `Retire ${f.old.name}`;
@@ -5207,7 +5282,7 @@
   }
   async function setupPost(path, body) {
     const r = await apiFetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `refused (${r.status})`);
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || httpWords(r.status));
   }
   // The check, or the real thing: the same request, dry_run on or off.
   function setupRequest(f, dry) {
@@ -5234,7 +5309,7 @@
       const w = parseInt(ev.target.value, 10);
       if (!(w >= 0 && w <= 65535)) return showToast('A rating is in watts, 0 to 65535', 'err');
       try { await setupPost('/api/strings/rating', { label: ev.target.dataset.setupRating, rating_w: w }); showToast(`${ev.target.dataset.setupRating}: ${w} W saved`); }
-      catch (err) { showToast('Not saved: ' + err.message, 'err'); }
+      catch (err) { showToast('Not saved: ' + failText(err), 'err'); }
     }
     if (ev.target.id === 'setup-tap' && setup.flow) setup.flow.tap = ev.target.value;
     // Picking a TAP to retire only enables its button: no re-render.
@@ -5260,7 +5335,7 @@
         await setupPost('/api/settings', { master_adopt_taps: b.dataset.setupAdopt === 'on' });
         showToast(`Take on a new TAP is ${b.dataset.setupAdopt}`, 'ok');
       } catch (err) {
-        showToast('Not saved: ' + err.message, 'err');
+        showToast('Not saved: ' + failText(err), 'err');
       }
       return refreshSetup(true);
     }
@@ -5272,7 +5347,7 @@
         await setupPost('/api/master/taps/forget', { tap: f.tapPick });
         f.step = 'done';
       } catch (err) {
-        showToast('Not retired: ' + err.message, 'err');
+        showToast('Not retired: ' + failText(err), 'err');
       }
       return refreshSetup(true);
     }
@@ -5288,7 +5363,7 @@
         await setupPost('/api/master/taps/provision', { mac: tap.mac, dry_run: !go });
       } catch (err) {
         f.radio.phase = 'failed';
-        f.radio.message = err.message;
+        f.radio.message = failText(err);
       }
       return refreshSetup(true);
     }
@@ -5304,7 +5379,18 @@
         await setupPost('/api/master/taps/herd', {});
         f.looking = true;
       } catch (err) {
-        showToast('Not started: ' + err.message, 'err');
+        showToast('Not started: ' + failText(err), 'err');
+      }
+      return refreshSetup(true);
+    }
+    if (b.dataset.setupForget) {
+      b.disabled = true;
+      try {
+        const r = await apiFetch(`/api/nodes/delete?addr=${encodeURIComponent(b.dataset.setupForget)}`, { method: 'POST' });
+        if (!r.ok) throw await httpFail(r);
+        f.forgotten = true;
+      } catch (err) {
+        showToast('Not forgotten: ' + failText(err), 'err');
       }
       return refreshSetup(true);
     }
@@ -5326,20 +5412,20 @@
       if (role === 'standby' && cfg.bus_role !== 'standby' && !(await askStandbyRole())) return;
       b.disabled = true;
       try { await setupPost('/api/settings', { serial_port: port, bus_role: role }); showToast('Saved: the bus master restarts'); f.edited = null; }
-      catch (err) { showToast('Not saved: ' + err.message, 'err'); }
+      catch (err) { showToast('Not saved: ' + failText(err), 'err'); }
       return refreshSetup(true);
     }
     if (b.hasAttribute('data-setup-window')) {
       b.disabled = true;
       try { await setupPost('/api/master/discovery', { renew: true }); showToast('Optimizers can join again'); }
-      catch (err) { showToast('Not changed: ' + err.message, 'err'); }
+      catch (err) { showToast('Not changed: ' + failText(err), 'err'); }
       return refreshSetup(true);
     }
     if (b.hasAttribute('data-setup-layout')) {
       const inverters = setupLayoutFrom(setupCount('setup-invs'), setupCount('setup-mppts'), setupCount('setup-strings'));
       b.disabled = true;
       try { await setupPost('/api/layout', { inverters }); showToast('Layout made: now place each panel in Topology'); f.edited = null; }
-      catch (err) { showToast('Not made: ' + err.message, 'err'); }
+      catch (err) { showToast('Not made: ' + failText(err), 'err'); }
       return refreshSetup(true);
     }
     if (b.hasAttribute('data-setup-finish')) {
@@ -5347,7 +5433,7 @@
       if (!pass || pass !== document.getElementById('setup-pass2').value) return;
       b.disabled = true;
       try { await setupPost('/api/settings', { web_password: pass }); showToast('Password set. This browser is signed in'); f.edited = null; }
-      catch (err) { showToast('Not set: ' + err.message, 'err'); }
+      catch (err) { showToast('Not set: ' + failText(err), 'err'); }
       return refreshSetup(true);
     }
     if (b.hasAttribute('data-setup-back')) {
@@ -5363,25 +5449,25 @@
         const name = (document.getElementById('setup-tap-name').value || '').trim();
         f.tapName = name;
         if (name) {
-          try { await setupPost('/api/taps/name', { tap: f.found, name }); } catch (err) { return showToast('Name not saved: ' + err.message, 'err'); }
+          try { await setupPost('/api/taps/name', { tap: f.found, name }); } catch (err) { return showToast('Name not saved: ' + failText(err), 'err'); }
         }
       }
       f.step = steps[steps.indexOf(f.step) + 1];
       if (f.step === 'check') {
         f.mac = f.label ? macOfLabel(f.label) : null;
         f.checkedAt = Math.floor(Date.now() / 1000) - 1;
-        try { await setupRequest(f, true); } catch (err) { showToast('Not checked: ' + err.message, 'err'); f.step = steps[steps.indexOf('check') - 1]; }
+        try { await setupRequest(f, true); } catch (err) { showToast('Not checked: ' + failText(err), 'err'); f.step = steps[steps.indexOf('check') - 1]; }
       }
       return refreshSetup(true);
     }
     if (b.hasAttribute('data-setup-go')) {
       b.disabled = true;
       f.startedAt = Math.floor(Date.now() / 1000) - 1;
-      try { await setupRequest(f, false); f.step = 'do'; } catch (err) { showToast('Not started: ' + err.message, 'err'); }
+      try { await setupRequest(f, false); f.step = 'do'; } catch (err) { showToast('Not started: ' + failText(err), 'err'); }
       return refreshSetup(true);
     }
     if (b.hasAttribute('data-setup-stop')) {
-      try { await setupPost('/api/master/table/stop', { mac: f.mac }); } catch (err) { showToast('Not stopped: ' + err.message, 'err'); }
+      try { await setupPost('/api/master/table/stop', { mac: f.mac }); } catch (err) { showToast('Not stopped: ' + failText(err), 'err'); }
       setup.flow = null;
       return refreshSetup(true);
     }
@@ -5446,20 +5532,34 @@
       renderNodesTable();
     } catch (e) {
       document.getElementById('nodes-tbody').innerHTML =
-        `<tr><td colspan="10" style="text-align:center;color:var(--bad-text);padding:40px 0">refresh error: ${e.message}</td></tr>`;
+        `<tr><td colspan="12" class="nodes-empty" style="color:var(--bad-text)">Couldn't refresh: ${topoEscape(failText(e))}</td></tr>`;
     }
   }
 
   document.getElementById('nodes-tbody').addEventListener('click', async e => {
+    const fb = e.target.closest('button.node-forget-btn');
+    if (fb) {
+      const addr = fb.dataset.forgetAddr;
+      if (!(await uiAsk({ title: `Forget optimizer ${addr}?`, body: "No TAP lists it. It leaves Devices, the Dashboard and the mesh map; if a TAP lists it again, it comes back.",
+                          ok: 'Forget', tone: 'danger' }))) return;
+      fb.disabled = true;
+      try {
+        const r = await apiFetch(`/api/nodes/delete?addr=${encodeURIComponent(addr)}`, { method: 'POST' });
+        if (!r.ok) throw await httpFail(r);
+      } catch (err) {
+        showToast('Not forgotten: ' + failText(err), 'err');
+      }
+      return refreshNodes();
+    }
     const b = e.target.closest('button.node-known-btn');
     if (!b) return;
     b.disabled = true;
     try {
       const r = await apiFetch('/api/nodes/known', { method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ barcode: b.dataset.knownBc, known: b.dataset.known === '1' }) });
-      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `refused (${r.status})`);
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || httpWords(r.status));
     } catch (err) {
-      showToast('Not saved: ' + err.message, 'err');
+      showToast('Not saved: ' + failText(err), 'err');
     }
     await refreshNodes();
   });
@@ -5487,9 +5587,9 @@
       try {
         const r = await apiFetch('/api/taps/name', { method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ tap, name: input.value.trim() }) });
-        if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `refused (${r.status})`);
+        if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || httpWords(r.status));
       } catch (err) {
-        showToast('Not saved: ' + err.message, 'err');
+        showToast('Not saved: ' + failText(err), 'err');
       }
       td.innerHTML = '';
       await refreshNodes();
@@ -5530,7 +5630,7 @@
   document.getElementById('nodes-export-btn').addEventListener('click', async () => {
     try {
       const r = await apiFetch('/api/nodes');
-      if (!r.ok) throw new Error('/api/nodes ' + r.status);
+      if (!r.ok) throw await httpFail(r);
       const data = await r.json();
       const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
@@ -5541,7 +5641,7 @@
       URL.revokeObjectURL(url);
       showToast('Exported node table ✓', 'ok');
     } catch (e) {
-      showToast(`Export failed: ${e.message}`, 'err');
+      showToast(`Not exported: ${failText(e)}`, 'err');
     }
   });
 
@@ -5589,7 +5689,7 @@
           'Their strings exist (see /api/strings) but do not appear on the Dashboard or Topology.', facts);
       }
     } catch (e) {
-      showToast(`Import failed: ${e.message}`, 'err');
+      showToast(`Not imported: ${failText(e)}`, 'err');
     }
   });
 
@@ -5763,7 +5863,7 @@
         wantTsdb ? apiFetch('/api/tsdb/stats') : Promise.resolve(null),
       ]);
       if (wantTsdb) tsdbStatsAt = Date.now();
-      if (!statusR.ok) throw new Error('/api/status ' + statusR.status);
+      if (!statusR.ok) throw await httpFail(statusR);
       const status = await statusR.json();
 
       // Memory
@@ -5868,7 +5968,7 @@
       document.getElementById('diag-meta').textContent =
         `last update ${now.toLocaleTimeString()}`;
     } catch (e) {
-      document.getElementById('diag-meta').textContent = `refresh error: ${e.message}`;
+      document.getElementById('diag-meta').textContent = `Couldn't refresh: ${failText(e)}`;
     }
   }
 
@@ -5987,9 +6087,9 @@
       const r = await apiFetch('/api/master/pv', { method: 'POST', headers: { 'Content-Type': 'application/json' },
                                                    body: JSON.stringify({ on: !on }) });
       const j = await r.json().catch(() => ({}));
-      status.textContent = r.ok ? '' : (j.error || `refused (${r.status})`);
+      status.textContent = r.ok ? '' : (j.error || httpWords(r.status));
     } catch (e) {
-      status.textContent = 'not sent: ' + e.message;
+      status.textContent = 'Not sent: ' + failText(e);
     }
     await refreshPv();
   });
@@ -6000,9 +6100,9 @@
       const r = await apiFetch('/api/master/discovery', { method: 'POST', headers: { 'Content-Type': 'application/json' },
                                                           body: JSON.stringify({ renew }) });
       const j = await r.json().catch(() => ({}));
-      status.textContent = r.ok ? '' : (j.error || `refused (${r.status})`);
+      status.textContent = r.ok ? '' : (j.error || httpWords(r.status));
     } catch (e) {
-      status.textContent = 'not sent: ' + e.message;
+      status.textContent = 'Not sent: ' + failText(e);
     }
     await refreshPv();
   });
@@ -6094,15 +6194,15 @@
       const grouping = groupingEl ? groupingEl.value : 'mppt';
       try { localStorage.setItem('tools-grouping', grouping); } catch (e) {}
       const r = await apiFetch(`/api/yaml?sensors=${dev}&hub_sensors=${hub}&grouping=${grouping}`);
-      if (!r.ok) throw new Error('/api/yaml ' + r.status);
+      if (!r.ok) throw await httpFail(r);
       const data = await r.json();
       document.getElementById('tools-yaml').textContent = data.yaml || '';
       document.getElementById('tools-yaml-sub').textContent = `${data.device_count ?? '—'} devices`;
       document.getElementById('settings-meta').textContent =
         `last update ${new Date().toLocaleTimeString()}`;
     } catch (e) {
-      document.getElementById('tools-yaml').textContent = `Error: ${e.message}`;
-      document.getElementById('settings-meta').textContent = `error: ${e.message}`;
+      document.getElementById('tools-yaml').textContent = `Couldn't load the YAML: ${failText(e)}`;
+      document.getElementById('settings-meta').textContent = `Couldn't load: ${failText(e)}`;
     }
     refreshConfig();
   }
@@ -6143,11 +6243,12 @@
           </div>
           <div class="cfg-ctrl">
             ${control}
-            <button class="btn" data-cfg-save="${f.key}">Save</button>
-            <button class="btn cfg-revert" data-cfg-reset="${f.key}"${ov ? '' : ' disabled'} title="Revert to ${PLATFORM === 'linux' ? '' : 'YAML '}default">Revert</button>
+            <button class="btn" data-cfg-save="${f.key}" aria-label="Save ${cloudEsc(f.label)}">Save</button>
+            <button class="btn cfg-revert" data-cfg-reset="${f.key}" aria-label="Revert ${cloudEsc(f.label)}"${ov ? '' : ' disabled'} title="Revert to ${PLATFORM === 'linux' ? '' : 'YAML '}default">Revert</button>
           </div>
         </div>`;
     }).join('');
+    labelCfgRows(rows);
     rows.querySelectorAll('[data-cfg-save]').forEach(b =>
       b.addEventListener('click', () => cfgSave(b.dataset.cfgSave)));
     rows.querySelectorAll('[data-cfg-reset]').forEach(b =>
@@ -6159,11 +6260,11 @@
   async function refreshConfig() {
     try {
       const r = await apiFetch('/api/config');
-      if (!r.ok) throw new Error('/api/config ' + r.status);
+      if (!r.ok) throw await httpFail(r);
       cfgRenderRows(await r.json());
       document.getElementById('cfg-status').textContent = '';
     } catch (e) {
-      document.getElementById('cfg-rows').innerHTML = `<span style="color:var(--bad-text)">Config unavailable: ${cloudEsc(e.message)}</span>`;
+      document.getElementById('cfg-rows').innerHTML = `<span style="color:var(--bad-text)">Config unavailable: ${cloudEsc(failText(e))}</span>`;
     }
   }
 
@@ -6173,11 +6274,11 @@
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
       });
       const data = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(data.message || ('HTTP ' + r.status));
+      if (!r.ok) throw new Error(data.message || httpWords(r.status));
       cfgRenderRows(data);
       showToast(okMsg, 'ok');
     } catch (e) {
-      showToast('Config error: ' + e.message, 'bad');
+      showToast('Not changed: ' + failText(e), 'err');
     }
   }
 
@@ -6193,7 +6294,7 @@
     t.textContent = msg;
     t.className = 'toast show' + (kind ? ' ' + kind : '');
     clearTimeout(t._timer);
-    t._timer = setTimeout(() => { t.className = 'toast'; }, 2400);
+    t._timer = setTimeout(() => { t.className = 'toast'; }, kind === 'err' ? 6000 : 2400);
   }
 
   // Asks before a change, in place of confirm(): resolves true for the
@@ -6248,10 +6349,10 @@
     if (ask && !(await uiAsk({ tone: 'danger', ...ask }))) return;
     try {
       const r = await apiFetch(path, { method: 'POST' });
-      if (!r.ok) throw new Error(`${path} ${r.status}`);
+      if (!r.ok) throw await httpFail(r);
       showToast(`${label} ✓`, 'ok');
     } catch (e) {
-      showToast(`${label} failed: ${e.message}`, 'err');
+      showToast(`${label} failed: ${failText(e)}`, 'err');
     }
   }
 
@@ -6273,7 +6374,7 @@
     const text = document.getElementById('tools-yaml').textContent;
     navigator.clipboard.writeText(text).then(
       () => showToast('Copied to clipboard ✓', 'ok'),
-      () => showToast('Copy failed', 'err')
+      () => showToast("Couldn't copy. Select the text and copy it instead.", 'err')
     );
   });
   document.getElementById('tools-reset-peak').addEventListener('click', () =>
@@ -6325,7 +6426,7 @@
     if (logsPaused || !document.getElementById('view-logs').classList.contains('active')) return;
     try {
       const r = await apiFetch('/api/logs?after=' + logNext);
-      if (!r.ok) throw new Error('/api/logs ' + r.status);
+      if (!r.ok) throw await httpFail(r);
       const j = await r.json();
       // A smaller next means the service restarted: start over.
       if (j.next < logNext) { logLines = []; logNext = 0; delete logsBox.dataset.loaded; return pollLogs(); }
@@ -6349,7 +6450,7 @@
       }
       updateLogsMeta();
     } catch (e) {
-      document.getElementById('logs-meta').textContent = 'error: ' + e.message;
+      document.getElementById('logs-meta').textContent = "Couldn't load: " + failText(e);
     }
   }
   function startLogs() {
@@ -6485,7 +6586,7 @@
     if (!force && open && busPaused) return;
     try {
       const r = await apiFetch(open ? '/api/bus' : '/api/bus?limit=1');
-      if (!r.ok) throw new Error('/api/bus ' + r.status);
+      if (!r.ok) throw await httpFail(r);
       const b = await r.json();
       if (open && Date.now() - busNamesAt > 60000) {
         busNamesAt = Date.now();
@@ -6495,7 +6596,7 @@
       busApply(b);
       if (open) { busLast = b; renderBus(); }
     } catch (e) {
-      if (open) document.getElementById('buslog-meta').textContent = 'error: ' + e.message;
+      if (open) document.getElementById('buslog-meta').textContent = "Couldn't load: " + failText(e);
     }
   }
   document.getElementById('bus-alarm-clear').addEventListener('click', async () => {
@@ -6594,7 +6695,7 @@
     try {
       const r = await apiFetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       const j = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(j.error || `refused (${r.status})`);
+      if (!r.ok) throw new Error(j.error || httpWords(r.status));
       let e = {};
       for (let i = 0; i < 120; i++) {
         const m = await (await apiFetch('/api/master')).json();
@@ -6604,7 +6705,7 @@
       }
       out.textContent = e.finished ? `${e.ok ? '' : 'Failed: '}${e.message}` : 'No answer yet; check the Bus log.';
     } catch (err) {
-      out.textContent = `Refused: ${err.message}`;
+      out.textContent = `Refused: ${failText(err)}`;
     } finally {
       row.querySelectorAll('button').forEach(x => { x.disabled = false; });
     }
@@ -6613,7 +6714,7 @@
   async function refreshPiSettings() {
     try {
       const r = await apiFetch('/api/settings');
-      if (!r.ok) throw new Error('/api/settings ' + r.status);
+      if (!r.ok) throw await httpFail(r);
       const s = await r.json();
       piApplyPages(s);
       document.getElementById('pi-mqtt-host').value = s.mqtt.host || '';
@@ -6672,7 +6773,7 @@
         : s.mqtt_connected ? `connected to ${s.mqtt.host}` : `not connected${s.mqtt_error ? ': ' + s.mqtt_error : ''}`;
       document.getElementById('settings-meta').textContent = `last update ${new Date().toLocaleTimeString()}`;
     } catch (e) {
-      document.getElementById('settings-meta').textContent = `error: ${e.message}`;
+      document.getElementById('settings-meta').textContent = `Couldn't load: ${failText(e)}`;
     }
   }
   let piWebPortActive = 0;
@@ -6697,11 +6798,11 @@
     try {
       const r = await apiFetch('/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(Object.fromEntries(PI_CCA_PARTS.map(([k]) => [k, true]))) });
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      if (!r.ok) throw await httpFail(r);
       showToast('All on: the bus master restarts');
       refreshPiSettings();
     } catch (err) {
-      showToast('Not saved: ' + err.message, 'err');
+      showToast('Not saved: ' + failText(err), 'err');
     } finally { e.target.disabled = false; }
   });
   // Two masters on one bus collide, and the master's requests reach the
@@ -6771,13 +6872,13 @@
           method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ [key]: on }),
         });
         const j = await r.json().catch(() => ({}));
-        if (!r.ok) throw new Error(j.error || `/api/settings ${r.status}`);
+        if (!r.ok) throw new Error(j.error || httpWords(r.status));
         piApplyPages({ ...piPages, [key]: on });
         status.textContent = 'Saved';
       } catch (err) {
         e.target.checked = !on;
         e.target.nextElementSibling.textContent = !on ? 'On' : 'Off';
-        status.textContent = `Not saved: ${err.message}`;
+        status.textContent = `Not saved: ${failText(err)}`;
       }
     });
   }
@@ -6838,11 +6939,11 @@
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ web_password: '' }),
       });
       const j = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(j.error || `/api/settings ${r.status}`);
+      if (!r.ok) throw new Error(j.error || httpWords(r.status));
       showToast('Password removed ✓', 'ok');
       setTimeout(refreshPiSettings, 1500);
     } catch (e) {
-      showToast(`Save failed: ${e.message}`, 'err');
+      showToast(`Not saved: ${failText(e)}`, 'err');
     }
   });
   document.getElementById('pi-serial-rescan').addEventListener('click',
@@ -6885,7 +6986,7 @@
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
       });
       const j = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(j.error || `/api/settings ${r.status}`);
+      if (!r.ok) throw new Error(j.error || httpWords(r.status));
       showToast('Saved ✓', 'ok');
       const https = tlsCert !== '';
       const next = webPort || (https ? 443 : 80);
@@ -6904,7 +7005,7 @@
       }
       setTimeout(refreshPiSettings, 1500);
     } catch (e) {
-      showToast(`Save failed: ${e.message}`, 'err');
+      showToast(`Not saved: ${failText(e)}`, 'err');
     }
   }
   // The Bus and Web UI cards post the same settings, so either saves both.
@@ -6915,8 +7016,8 @@
     const row = document.createElement('div');
     row.className = 'cfg-row';
     row.innerHTML = `
-      <div class="cfg-ctrl"><input class="cfg-input pi-inv-name" style="width:160px" placeholder="Inverter name" autocomplete="off"></div>
-      <div class="cfg-ctrl" style="flex:1"><input class="cfg-input pi-inv-mppts" style="width:100%;min-width:180px" placeholder="MPPT 1, MPPT 2" autocomplete="off"></div>
+      <div class="cfg-ctrl"><input class="cfg-input pi-inv-name" style="width:160px" aria-label="Inverter name" placeholder="Inverter name" autocomplete="off"></div>
+      <div class="cfg-ctrl" style="flex:1"><input class="cfg-input pi-inv-mppts" style="width:100%;min-width:180px" aria-label="MPPTs on this inverter" placeholder="MPPT 1, MPPT 2" autocomplete="off"></div>
       <div class="cfg-ctrl"><button class="btn pi-inv-remove">Remove</button></div>`;
     row.querySelector('.pi-inv-name').value = inv.name || '';
     row.querySelector('.pi-inv-mppts').value = (inv.mppts || []).join(', ');
@@ -6926,7 +7027,7 @@
   async function refreshPiInverters() {
     try {
       const r = await apiFetch('/api/topology');
-      if (!r.ok) throw new Error('/api/topology ' + r.status);
+      if (!r.ok) throw await httpFail(r);
       const t = await r.json();
       document.getElementById('pi-inv-rows').innerHTML = '';
       t.inverters.forEach(piInvRow);
@@ -6936,7 +7037,7 @@
       document.getElementById('pi-inv-sub').textContent = !t.mppts_seen.length ? 'no MPPTs in the node table yet'
         : free.length ? `not assigned: ${free.join(', ')}` : 'every MPPT assigned';
     } catch (e) {
-      document.getElementById('pi-inv-sub').textContent = `error: ${e.message}`;
+      document.getElementById('pi-inv-sub').textContent = `Couldn't load: ${failText(e)}`;
     }
   }
   document.getElementById('pi-inv-add').addEventListener('click', () => piInvRow({}));
@@ -6950,11 +7051,11 @@
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ inverters }),
       });
       const j = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(j.error || `/api/topology ${r.status}`);
+      if (!r.ok) throw new Error(j.error || httpWords(r.status));
       showToast('Inverters saved ✓', 'ok');
       refreshPiInverters();
     } catch (e) {
-      showToast(`Save failed: ${e.message}`, 'err');
+      showToast(`Not saved: ${failText(e)}`, 'err');
     }
   });
 
@@ -6977,12 +7078,12 @@
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
       });
       const j = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(j.error || `/api/settings ${r.status}`);
+      if (!r.ok) throw new Error(j.error || httpWords(r.status));
       showToast('Settings saved ✓', 'ok');
       // The daemon applies them within a second; give MQTT a moment to connect.
       setTimeout(refreshPiSettings, 2500);
     } catch (e) {
-      showToast(`Save failed: ${e.message}`, 'err');
+      showToast(`Not saved: ${failText(e)}`, 'err');
     }
   });
 
@@ -7093,7 +7194,7 @@
         target.innerHTML = lockdown;
         return 'blocked';
       }
-      target.innerHTML = `<div style="color:var(--bad-text)">Failed to retrieve CCA information: ${msg}</div>`;
+      target.innerHTML = `<div style="color:var(--bad-text)">Couldn't get the CCA's details: ${cloudEsc(msg)}</div>`;
       return 'error';
     }
 
@@ -7295,7 +7396,7 @@
     await ccaCheckMaster();
     try {
       const r = await apiFetch('/api/cca');
-      if (!r.ok) throw new Error(`/api/cca ${r.status}`);
+      if (!r.ok) throw await httpFail(r);
       const data = await r.json();
       const { state } = applyCcaData(data);
       if (state === 'connected') ccaLastGood = data;
@@ -7303,8 +7404,8 @@
     } catch (e) {
       ccaSetStatusBadge('failed');
       document.getElementById('cca-device-info').innerHTML =
-        `<div style="color:var(--bad-text)">Error loading CCA information: ${e.message}</div>`;
-      document.getElementById('cca-meta').textContent = `error: ${e.message}`;
+        `<div style="color:var(--bad-text)">Couldn't load the CCA's details: ${cloudEsc(failText(e))}</div>`;
+      document.getElementById('cca-meta').textContent = `Couldn't load: ${failText(e)}`;
     }
   }
 
@@ -7378,13 +7479,13 @@
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
       });
       const data = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(data.message || ('HTTP ' + r.status));
+      if (!r.ok) throw new Error(data.message || httpWords(r.status));
       ccaBleRender(data);
       res.innerHTML = `<span style="color:var(--good-text)">Targeting ${cloudEsc(data.active_mac)} — use Refresh from CCA to connect.</span>`;
       showToast('CCA MAC updated', 'ok');
     } catch (e) {
-      res.innerHTML = `<span style="color:var(--bad-text)">${cloudEsc(e.message)}</span>`;
-      showToast('MAC error: ' + e.message, 'bad');
+      res.innerHTML = `<span style="color:var(--bad-text)">${cloudEsc(failText(e))}</span>`;
+      showToast('MAC not changed: ' + failText(e), 'err');
     }
   }
   function ccaBleSetMac(mac) { document.getElementById('cca-ble-mac').value = mac; ccaBlePost({ mac }); }
@@ -7408,7 +7509,7 @@
     info.innerHTML = '<div class="spinner-box"><span class="spinner"></span> Connecting to the CCA over BLE… (~10 s)</div>';
     try {
       const r = await apiFetch('/api/cca/refresh');
-      if (!r.ok) throw new Error('refresh request failed');
+      if (!r.ok) throw await httpFail(r);
 
       // The refresh is async on the device: HTTP is ~instant, BLE is connect →
       // DEVICE_INFO → disconnect (~10 s). Poll /api/cca until the cache reports data
@@ -7445,7 +7546,7 @@
     } catch (e) {
       if (ccaShowUnreachable('CCA not reachable · showing last sync')) return;
       ccaSetStatusBadge('failed');
-      info.innerHTML = `<div style="color:var(--bad-text)">Failed to refresh: ${e.message}</div>`;
+      info.innerHTML = `<div style="color:var(--bad-text)">Couldn't refresh: ${cloudEsc(failText(e))}</div>`;
     } finally {
       ccaBusy = false;
     }
@@ -7465,7 +7566,7 @@
     try {
       const r = await apiFetch('/api/cca/data-export', { method: 'POST' });
       const j = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(j.message || `failed (${r.status})`);
+      if (!r.ok) throw new Error(j.message || httpWords(r.status));
       showToast('Cloud sync requested — confirming…', 'ok');
       // The CCA's DEVICE_DATA_EXPORT handler runs `msgsend DCID ExportData` and replies per the
       // mobile_api contract: success → {"code":0}; failure → {"msg":"Internal error pushing data"}.
@@ -7489,7 +7590,7 @@
       if (!confirmed) showToast(ccaMasterMode ? 'No answer from the CCA: it may be off, or out of Bluetooth range'
                                               : 'Sync requested — no confirmation from the CCA yet');
     } catch (e) {
-      showToast(`Cloud sync failed: ${e.message}`, 'err');
+      showToast(`Cloud sync failed: ${failText(e)}`, 'err');
     } finally {
       btn.disabled = false; btn.textContent = orig;
       ccaBusy = false;
@@ -7530,7 +7631,7 @@
     el.innerHTML = '<span style="color:var(--text-dim)"><span class="spinner" style="width:13px;height:13px;vertical-align:-2px;margin-right:6px"></span>Connecting to the CCA over BLE to start the scan… (~10 s)</span>';
     try {
       const r = await apiFetch('/api/cca/discovery/start', { method: 'POST' });
-      if (!r.ok) throw new Error(`start failed (${r.status})`);
+      if (!r.ok) throw await httpFail(r);
 
       // Poll progress: trigger a background DISCOVERY_STATUS read, give the one-shot BLE
       // round trip time to land, then read the cache. Stop when the CCA reports done or
@@ -7550,7 +7651,7 @@
         if (data.status && !running) { break; }  // CCA reports complete
       }
     } catch (e) {
-      el.innerHTML = `<span style="color:var(--bad-text)">Discovery failed: ${e.message}</span>`;
+      el.innerHTML = `<span style="color:var(--bad-text)">Discovery failed: ${failText(e)}</span>`;
     } finally {
       ccaDiscovering = false;
       ccaBusy = false;
@@ -7603,7 +7704,7 @@
     el.innerHTML = `<span style="color:var(--text-dim)"><span class="spinner" style="width:13px;height:13px;vertical-align:-2px;margin-right:6px"></span>Querying ${label} over BLE… (~10 s)</span>`;
     try {
       const r = await apiFetch('/api/cca/network/poll?cmd=' + encodeURIComponent(cmd), { method: 'POST' });
-      if (!r.ok) throw new Error(`request failed (${r.status})`);
+      if (!r.ok) throw await httpFail(r);
       const start = Date.now(), maxWaitMs = 30000;
       while (Date.now() - start < maxWaitMs) {
         await new Promise(res => setTimeout(res, 1500));
@@ -7619,7 +7720,7 @@
       }
       el.innerHTML = `<span style="color:var(--bad-text)">${label} timed out — the CCA may be out of range or busy (one BLE client at a time).</span>`;
     } catch (e) {
-      el.innerHTML = `<span style="color:var(--bad-text)">${label} failed: ${e.message}</span>`;
+      el.innerHTML = `<span style="color:var(--bad-text)">${label} failed: ${failText(e)}</span>`;
     } finally {
       ccaBusy = false;
     }
@@ -7641,11 +7742,11 @@
     try {
       const r = await apiFetch('/api/cca/network/wifi-connect', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ nid: ssid, pwd }) });
       const j = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(j.message || `failed (${r.status})`);
+      if (!r.ok) throw new Error(j.message || httpWords(r.status));
       res.innerHTML = 'Requested — give it ~15 s, then <b>Refresh from CCA</b> to confirm in Network status.';
       document.getElementById('cca-wifi-pwd').value = '';
     } catch (e) {
-      res.innerHTML = `<span style="color:var(--bad-text)">Join failed: ${e.message}</span>`;
+      res.innerHTML = `<span style="color:var(--bad-text)">Join failed: ${failText(e)}</span>`;
     } finally {
       ccaBusy = false;
     }
@@ -7662,10 +7763,10 @@
     try {
       const r = await apiFetch('/api/cca/network/wifi-clear', { method: 'POST' });
       const j = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(j.message || `failed (${r.status})`);
+      if (!r.ok) throw new Error(j.message || httpWords(r.status));
       res.innerHTML = '<span style="color:var(--good-text)">WiFi clear requested.</span>';
     } catch (e) {
-      res.innerHTML = `<span style="color:var(--bad-text)">Clear failed: ${e.message}</span>`;
+      res.innerHTML = `<span style="color:var(--bad-text)">Clear failed: ${failText(e)}</span>`;
     } finally {
       ccaBusy = false;
     }
@@ -7702,7 +7803,7 @@
     try {
       const r = await apiFetch('/api/cloud/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password: pwd }) });
       const j = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(j.message || `failed (${r.status})`);
+      if (!r.ok) throw new Error(j.message || httpWords(r.status));
       document.getElementById('cloud-cfg-pwd').value = '';
       res.innerHTML = '<span style="color:var(--good-text)">Connected ✓</span>';
       showToast('Connected to Tigo cloud ✓', 'ok');
@@ -7710,7 +7811,7 @@
       refreshCloudStatus();
       setTimeout(cloudConfigClose, 700);
     } catch (e) {
-      res.innerHTML = `<span style="color:var(--bad-text)">${e.message}</span>`;
+      res.innerHTML = `<span style="color:var(--bad-text)">${failText(e)}</span>`;
     } finally {
       btn.disabled = false; btn.textContent = orig;
     }
@@ -7740,11 +7841,11 @@
     try {
       const r = await apiFetch('/api/cloud/import', { method: 'POST' });
       const j = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(j.message || `failed (${r.status})`);
+      if (!r.ok) throw new Error(j.message || httpWords(r.status));
       showToast('Tigo cloud layout imported ✓', 'ok');
       refreshTopology();
     } catch (e) {
-      showToast(`Import failed: ${e.message}`, 'err');
+      showToast(`Not imported: ${failText(e)}`, 'err');
     } finally {
       btn.disabled = false; btn.textContent = orig;
     }
@@ -7940,7 +8041,7 @@
       else document.getElementById('cloudstatus-history').textContent = '—';
       document.getElementById('cloudstatus-meta').textContent = `from Tigo cloud · ${new Date().toLocaleTimeString()}`;
     } catch (e) {
-      document.getElementById('cloudstatus-meta').textContent = `error: ${e.message}`;
+      document.getElementById('cloudstatus-meta').textContent = `Couldn't load: ${failText(e)}`;
     } finally {
       cloudSetLoading(false);
       cloudStatusBusy = false;
@@ -8094,7 +8195,7 @@
       const jobs = [apiFetch('/api/devices').then(r => r.ok ? r.json() : { devices: [] }),
                     apiFetch('/api/master').then(r => r.ok ? r.json() : {}).catch(() => ({}))];
       if (!devicesOnly) {
-        jobs.push(apiFetch('/api/array').then(r => { if (!r.ok) throw new Error(`/api/array ${r.status}`); return r.json(); }));
+        jobs.push(apiFetch('/api/array').then(async r => { if (!r.ok) throw await httpFail(r); return r.json(); }));
         jobs.push(apiFetch('/api/mesh').then(r => r.ok ? r.json() : {}).catch(() => ({})));
       }
       const [dev, master, saved, mesh] = await Promise.all(jobs);
@@ -8107,7 +8208,7 @@
       if (mesh && mesh.taps) mesh.taps.forEach(t => { arr.tapNames[t.id] = t.name || ''; });
       document.getElementById('array-error').textContent = '';
     } catch (e) {
-      document.getElementById('array-error').textContent = `Couldn't load the array: ${e.message}`;
+      document.getElementById('array-error').textContent = `Couldn't load the array: ${failText(e)}`;
     }
     arrayRender();
   }
@@ -8329,13 +8430,13 @@
     try {
       const r = await apiFetch('/api/array', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(arr.draft) });
       const j = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(j.error || `refused (${r.status})`);
+      if (!r.ok) throw new Error(j.error || httpWords(r.status));
       arr.saved = arr.draft; arr.draft = null; arr.sel = null;
       document.getElementById('array-error').textContent = '';
       showToast('Array saved ✓', 'ok');
       arrayRender();
     } catch (e) {
-      document.getElementById('array-error').textContent = `Not saved: ${e.message}`;
+      document.getElementById('array-error').textContent = `Not saved: ${failText(e)}`;
     } finally {
       btn.disabled = false;
     }
@@ -8491,7 +8592,7 @@
     try {
       const [r, nR, dR] = await Promise.all([apiFetch('/api/mesh'),
         apiFetch('/api/nodes').catch(() => null), apiFetch('/api/devices').catch(() => null)]);
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      if (!r.ok) throw await httpFail(r);
       meshData = await r.json();
       // Aliens (alienAddrs) aren't panels: not drawn.
       if (nR && nR.ok && dR && dR.ok) {
@@ -8500,7 +8601,7 @@
       }
     } catch (e) {
       if (!meshData) document.querySelector('#topology-mesh .mesh-graph').innerHTML =
-        `<div class="mesh-empty">Couldn't load the mesh: ${meshEsc(e.message)}</div>`;
+        `<div class="mesh-empty">Couldn't load the mesh: ${meshEsc(failText(e))}</div>`;
       return;
     }
     renderMesh();
@@ -8858,9 +8959,9 @@
         apiFetch('/api/devices'),
         apiFetch('/api/nodes'),
       ]);
-      if (!invR.ok) throw new Error('/api/inverters ' + invR.status);
-      if (!devR.ok) throw new Error('/api/devices ' + devR.status);
-      if (!nodeR.ok) throw new Error('/api/nodes ' + nodeR.status);
+      if (!invR.ok) throw await httpFail(invR);
+      if (!devR.ok) throw await httpFail(devR);
+      if (!nodeR.ok) throw await httpFail(nodeR);
 
       const invData = await invR.json();
       mpptNames = invData.mppt_names || {};
@@ -9125,11 +9226,11 @@
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify(body),
                 });
-                if (!r.ok) throw new Error(`${r.status}`);
+                if (!r.ok) throw await httpFail(r);
                 showToast('Renamed ✓', 'ok');
                 await refreshTopology();
               } catch (err) {
-                showToast(`Rename failed: ${err.message}`, 'err');
+                showToast(`Not renamed: ${failText(err)}`, 'err');
                 await refreshTopology();
               }
             };
@@ -9188,11 +9289,11 @@
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ label: canonical, rating_w }),
               });
-              if (!r.ok) throw new Error(`${r.status}`);
+              if (!r.ok) throw await httpFail(r);
               showToast(rating_w > 0 ? `Rating set to ${rating_w} W ✓` : 'Rating cleared ✓', 'ok');
               await refreshTopology();
             } catch (err) {
-              showToast(`Save failed: ${err.message}`, 'err');
+              showToast(`Not saved: ${failText(err)}`, 'err');
               await refreshTopology();
             }
           };
@@ -9217,8 +9318,8 @@
         `last update ${new Date().toLocaleTimeString()}`;
     } catch (e) {
       document.getElementById('topo-tree').innerHTML =
-        `<div class="topo-empty" style="color:var(--bad-text)">Error loading topology: ${topoEscape(e.message)}</div>`;
-      document.getElementById('topo-meta').textContent = `error: ${e.message}`;
+        `<div class="topo-empty" style="color:var(--bad-text)">Couldn't load the topology: ${topoEscape(failText(e))}</div>`;
+      document.getElementById('topo-meta').textContent = `Couldn't load: ${failText(e)}`;
     }
   }
 
@@ -9286,7 +9387,7 @@
   async function enterTopoEdit() {
     try {
       const r = await apiFetch('/api/layout');
-      if (!r.ok) throw new Error('/api/layout ' + r.status);
+      if (!r.ok) throw await httpFail(r);
       const l = await r.json();
       const strip = ms => ms.map(m => ({
         label: m.label, display_label: m.display_label || '',
@@ -9314,7 +9415,7 @@
       renderTopoEditor();
       topoEdRefreshReadings();
     } catch (e) {
-      showToast(`Could not open the editor: ${e.message}`, 'err');
+      showToast(`Could not open the editor: ${failText(e)}`, 'err');
     }
   }
 
@@ -9346,11 +9447,11 @@
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
       });
       const j = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(j.error || `save failed (${r.status})`);
+      if (!r.ok) throw new Error(j.error || httpWords(r.status));
       showToast('Layout saved ✓', 'ok');
       exitTopoEdit();
     } catch (e) {
-      document.getElementById('topo-ed-error').textContent = e.message;
+      document.getElementById('topo-ed-error').textContent = failText(e);
     } finally {
       btn.disabled = false;
     }
@@ -9783,14 +9884,14 @@
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action }),
       });
       const j = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(j.error || r.status);
+      if (!r.ok) throw new Error(j.error || httpWords(r.status));
       topoPending = null;
       topoRenderPending();
       showToast(action === 'keep' ? 'Kept your layout ✓' : 'Layout replaced ✓', 'ok');
       if (action === 'use' && topoEditor.active) exitTopoEdit();
       else if (!topoEditor.active) refreshTopology();
     } catch (e) {
-      showToast(`Failed: ${e.message}`, 'err');
+      showToast(`${action === 'keep' ? 'Not kept' : 'Not replaced'}: ${failText(e)}`, 'err');
     }
   }
 

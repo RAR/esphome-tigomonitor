@@ -1,4 +1,4 @@
-# Tigo Monitor — ESP32-P4 test config (local components)
+# TigoMonitor — ESP32-P4 test config (local components)
 # Mirrors /home/rar/device-configs/esphome/TigoMonitor/TigoMonitorP4.yaml but
 # points at the local component sources for branch testing, and adds the
 # tsdb partition + esp_tsdb dependency from feat/tsdb-phase1.

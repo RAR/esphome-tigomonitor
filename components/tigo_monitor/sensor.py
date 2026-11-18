@@ -1,4 +1,4 @@
-"""Sensor platform for Tigo Monitor devices."""
+"""Sensor platform for TigoMonitor devices."""
 import re
 
 import esphome.codegen as cg

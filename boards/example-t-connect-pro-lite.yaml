@@ -1,4 +1,4 @@
-# Example Tigo Monitor Configuration using the LilyGO T-Connect Pro Lite
+# Example TigoMonitor Configuration using the LilyGO T-Connect Pro Lite
 #
 # This is the "wired, full features" profile: web UI, REST API, on-flash
 # history, and Home Assistant over the native API — all over Ethernet.
