@@ -2556,7 +2556,7 @@
   </main>
 
   <!-- Global toast (lives outside any view so it's reachable from any tab) -->
-  <div id="app-toast" class="toast"></div>
+  <div id="app-toast" class="toast" role="status" aria-live="polite"></div>
 
   <!-- Tigo Cloud connection modal (opened from the Tigo Cloud page's Configure button) -->
   <div id="cloud-config-modal" style="display:none;position:fixed;inset:0;z-index:1000;align-items:center;justify-content:center;background:rgba(0,0,0,0.5)">
@@ -2698,6 +2698,28 @@
       if (j && j.sign_in) showSignIn();
     }
     return r;
+  }
+  // A failed request in words. The server's own reason first; with none,
+  // what the status means, its number kept in brackets for a bug report,
+  // never a bare "HTTP 500" or an API path.
+  function httpWords(status) {
+    if (status === 401) return `sign-in needed (${status})`;
+    if (status === 403) return `not allowed (${status})`;
+    if (status === 404) return `not on this TigoMonitor (${status})`;
+    if (status === 409) return `not possible right now (${status})`;
+    if (status === 503) return `not ready yet (${status})`;
+    if (status >= 500) return `TigoMonitor hit an error (${status})`;
+    return `refused (${status})`;
+  }
+  async function httpFail(r) {
+    const j = await r.clone().json().catch(() => null);
+    return new Error((j && (j.error || j.message)) || httpWords(r.status));
+  }
+  // What a caught error says. fetch() rejects when nothing answered, in
+  // words that differ by browser.
+  function failText(e) {
+    const m = String((e && e.message) || e || '');
+    return /^(Failed to fetch|NetworkError|Load failed)/.test(m) ? "TigoMonitor didn't answer" : m;
   }
   let signingIn = false;
   function showSignIn() {
@@ -2868,7 +2890,7 @@
   async function refreshOverview() {
     try {
       const r = await apiFetch('/api/overview');
-      if (!r.ok) throw new Error('HTTP ' + r.status);
+      if (!r.ok) throw await httpFail(r);
       const d = await r.json();
       document.getElementById('ov-active').textContent =
         `${d.active_devices ?? 0} / ${d.max_devices ?? 0}`;
@@ -3263,6 +3285,7 @@
         apiFetch('/api/energy/history'),
         PLATFORM === 'linux' ? apiFetch('/api/nodes').catch(() => null) : null,
       ]);
+      for (const r of [ovR, invR, devR]) if (!r.ok) throw await httpFail(r);
       const ov   = await ovR.json();
       const inv  = await invR.json();
       mpptNames = inv.mppt_names || {};
@@ -3318,7 +3341,7 @@
         console.error('dashboard refresh failed', e);
         dashLastErr = e.message;
       }
-      document.getElementById('dash-meta').textContent = `refresh error: ${e.message}`;
+      document.getElementById('dash-meta').textContent = `Couldn't refresh: ${failText(e)}`;
     }
   }
   setInterval(refreshDashboard, 5000);
@@ -3840,9 +3863,9 @@
       if (r.status === 503) {
         let detail = '';
         try { detail = (await r.json()).detail || ''; } catch (_) {}
-        throw new Error(detail || 'on-flash history failed to start (HTTP 503)');
+        throw new Error(detail || 'on-flash history did not start (503)');
       }
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      if (!r.ok) throw await httpFail(r);
       const data = await r.json();
       status.textContent = `${data.count} records · ${data.query_ms} ms · range=${range}`;
       // Cadence comes from the firmware (`history_interval`) — never hardcode it.
@@ -3858,7 +3881,7 @@
       renderHistStats(data.records, days);
       renderHistEnergyBars(days);
     } catch (e) {
-      status.textContent = `error: ${e.message}`;
+      status.textContent = `Couldn't load: ${failText(e)}`;
       console.error(e);
     }
   }
@@ -4542,11 +4565,11 @@
     b.disabled = true;
     try {
       const r = await apiFetch(`/api/nodes/delete?addr=${encodeURIComponent(addr)}`, { method: 'POST' });
-      if (!r.ok) throw new Error('HTTP ' + r.status);
+      if (!r.ok) throw await httpFail(r);
       await refreshNodes();
     } catch (err) {
       b.disabled = false;
-      b.textContent = 'Forget failed: ' + err.message;
+      b.textContent = 'Not forgotten: ' + failText(err);
     }
   });
   // What the TAPs hold: one TAP's window, or with several, theirs summed
@@ -5260,7 +5283,7 @@
   }
   async function setupPost(path, body) {
     const r = await apiFetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `refused (${r.status})`);
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || httpWords(r.status));
   }
   // The check, or the real thing: the same request, dry_run on or off.
   function setupRequest(f, dry) {
@@ -5287,7 +5310,7 @@
       const w = parseInt(ev.target.value, 10);
       if (!(w >= 0 && w <= 65535)) return showToast('A rating is in watts, 0 to 65535', 'err');
       try { await setupPost('/api/strings/rating', { label: ev.target.dataset.setupRating, rating_w: w }); showToast(`${ev.target.dataset.setupRating}: ${w} W saved`); }
-      catch (err) { showToast('Not saved: ' + err.message, 'err'); }
+      catch (err) { showToast('Not saved: ' + failText(err), 'err'); }
     }
     if (ev.target.id === 'setup-tap' && setup.flow) setup.flow.tap = ev.target.value;
     // Picking a TAP to retire only enables its button: no re-render.
@@ -5313,7 +5336,7 @@
         await setupPost('/api/settings', { master_adopt_taps: b.dataset.setupAdopt === 'on' });
         showToast(`Take on a new TAP is ${b.dataset.setupAdopt}`, 'ok');
       } catch (err) {
-        showToast('Not saved: ' + err.message, 'err');
+        showToast('Not saved: ' + failText(err), 'err');
       }
       return refreshSetup(true);
     }
@@ -5325,7 +5348,7 @@
         await setupPost('/api/master/taps/forget', { tap: f.tapPick });
         f.step = 'done';
       } catch (err) {
-        showToast('Not retired: ' + err.message, 'err');
+        showToast('Not retired: ' + failText(err), 'err');
       }
       return refreshSetup(true);
     }
@@ -5341,7 +5364,7 @@
         await setupPost('/api/master/taps/provision', { mac: tap.mac, dry_run: !go });
       } catch (err) {
         f.radio.phase = 'failed';
-        f.radio.message = err.message;
+        f.radio.message = failText(err);
       }
       return refreshSetup(true);
     }
@@ -5357,7 +5380,7 @@
         await setupPost('/api/master/taps/herd', {});
         f.looking = true;
       } catch (err) {
-        showToast('Not started: ' + err.message, 'err');
+        showToast('Not started: ' + failText(err), 'err');
       }
       return refreshSetup(true);
     }
@@ -5365,10 +5388,10 @@
       b.disabled = true;
       try {
         const r = await apiFetch(`/api/nodes/delete?addr=${encodeURIComponent(b.dataset.setupForget)}`, { method: 'POST' });
-        if (!r.ok) throw new Error(`refused (${r.status})`);
+        if (!r.ok) throw await httpFail(r);
         f.forgotten = true;
       } catch (err) {
-        showToast('Not forgotten: ' + err.message, 'err');
+        showToast('Not forgotten: ' + failText(err), 'err');
       }
       return refreshSetup(true);
     }
@@ -5390,20 +5413,20 @@
       if (role === 'standby' && cfg.bus_role !== 'standby' && !(await askStandbyRole())) return;
       b.disabled = true;
       try { await setupPost('/api/settings', { serial_port: port, bus_role: role }); showToast('Saved: the bus master restarts'); f.edited = null; }
-      catch (err) { showToast('Not saved: ' + err.message, 'err'); }
+      catch (err) { showToast('Not saved: ' + failText(err), 'err'); }
       return refreshSetup(true);
     }
     if (b.hasAttribute('data-setup-window')) {
       b.disabled = true;
       try { await setupPost('/api/master/discovery', { renew: true }); showToast('Optimizers can join again'); }
-      catch (err) { showToast('Not changed: ' + err.message, 'err'); }
+      catch (err) { showToast('Not changed: ' + failText(err), 'err'); }
       return refreshSetup(true);
     }
     if (b.hasAttribute('data-setup-layout')) {
       const inverters = setupLayoutFrom(setupCount('setup-invs'), setupCount('setup-mppts'), setupCount('setup-strings'));
       b.disabled = true;
       try { await setupPost('/api/layout', { inverters }); showToast('Layout made: now place each panel in Topology'); f.edited = null; }
-      catch (err) { showToast('Not made: ' + err.message, 'err'); }
+      catch (err) { showToast('Not made: ' + failText(err), 'err'); }
       return refreshSetup(true);
     }
     if (b.hasAttribute('data-setup-finish')) {
@@ -5411,7 +5434,7 @@
       if (!pass || pass !== document.getElementById('setup-pass2').value) return;
       b.disabled = true;
       try { await setupPost('/api/settings', { web_password: pass }); showToast('Password set. This browser is signed in'); f.edited = null; }
-      catch (err) { showToast('Not set: ' + err.message, 'err'); }
+      catch (err) { showToast('Not set: ' + failText(err), 'err'); }
       return refreshSetup(true);
     }
     if (b.hasAttribute('data-setup-back')) {
@@ -5427,25 +5450,25 @@
         const name = (document.getElementById('setup-tap-name').value || '').trim();
         f.tapName = name;
         if (name) {
-          try { await setupPost('/api/taps/name', { tap: f.found, name }); } catch (err) { return showToast('Name not saved: ' + err.message, 'err'); }
+          try { await setupPost('/api/taps/name', { tap: f.found, name }); } catch (err) { return showToast('Name not saved: ' + failText(err), 'err'); }
         }
       }
       f.step = steps[steps.indexOf(f.step) + 1];
       if (f.step === 'check') {
         f.mac = f.label ? macOfLabel(f.label) : null;
         f.checkedAt = Math.floor(Date.now() / 1000) - 1;
-        try { await setupRequest(f, true); } catch (err) { showToast('Not checked: ' + err.message, 'err'); f.step = steps[steps.indexOf('check') - 1]; }
+        try { await setupRequest(f, true); } catch (err) { showToast('Not checked: ' + failText(err), 'err'); f.step = steps[steps.indexOf('check') - 1]; }
       }
       return refreshSetup(true);
     }
     if (b.hasAttribute('data-setup-go')) {
       b.disabled = true;
       f.startedAt = Math.floor(Date.now() / 1000) - 1;
-      try { await setupRequest(f, false); f.step = 'do'; } catch (err) { showToast('Not started: ' + err.message, 'err'); }
+      try { await setupRequest(f, false); f.step = 'do'; } catch (err) { showToast('Not started: ' + failText(err), 'err'); }
       return refreshSetup(true);
     }
     if (b.hasAttribute('data-setup-stop')) {
-      try { await setupPost('/api/master/table/stop', { mac: f.mac }); } catch (err) { showToast('Not stopped: ' + err.message, 'err'); }
+      try { await setupPost('/api/master/table/stop', { mac: f.mac }); } catch (err) { showToast('Not stopped: ' + failText(err), 'err'); }
       setup.flow = null;
       return refreshSetup(true);
     }
@@ -5510,7 +5533,7 @@
       renderNodesTable();
     } catch (e) {
       document.getElementById('nodes-tbody').innerHTML =
-        `<tr><td colspan="10" style="text-align:center;color:var(--bad-text);padding:40px 0">refresh error: ${e.message}</td></tr>`;
+        `<tr><td colspan="12" class="nodes-empty" style="color:var(--bad-text)">Couldn't refresh: ${topoEscape(failText(e))}</td></tr>`;
     }
   }
 
@@ -5523,9 +5546,9 @@
       fb.disabled = true;
       try {
         const r = await apiFetch(`/api/nodes/delete?addr=${encodeURIComponent(addr)}`, { method: 'POST' });
-        if (!r.ok) throw new Error(`refused (${r.status})`);
+        if (!r.ok) throw await httpFail(r);
       } catch (err) {
-        showToast('Not forgotten: ' + err.message, 'err');
+        showToast('Not forgotten: ' + failText(err), 'err');
       }
       return refreshNodes();
     }
@@ -5535,9 +5558,9 @@
     try {
       const r = await apiFetch('/api/nodes/known', { method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ barcode: b.dataset.knownBc, known: b.dataset.known === '1' }) });
-      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `refused (${r.status})`);
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || httpWords(r.status));
     } catch (err) {
-      showToast('Not saved: ' + err.message, 'err');
+      showToast('Not saved: ' + failText(err), 'err');
     }
     await refreshNodes();
   });
@@ -5565,9 +5588,9 @@
       try {
         const r = await apiFetch('/api/taps/name', { method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ tap, name: input.value.trim() }) });
-        if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `refused (${r.status})`);
+        if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || httpWords(r.status));
       } catch (err) {
-        showToast('Not saved: ' + err.message, 'err');
+        showToast('Not saved: ' + failText(err), 'err');
       }
       td.innerHTML = '';
       await refreshNodes();
@@ -5608,7 +5631,7 @@
   document.getElementById('nodes-export-btn').addEventListener('click', async () => {
     try {
       const r = await apiFetch('/api/nodes');
-      if (!r.ok) throw new Error('/api/nodes ' + r.status);
+      if (!r.ok) throw await httpFail(r);
       const data = await r.json();
       const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
@@ -5619,7 +5642,7 @@
       URL.revokeObjectURL(url);
       showToast('Exported node table ✓', 'ok');
     } catch (e) {
-      showToast(`Export failed: ${e.message}`, 'err');
+      showToast(`Not exported: ${failText(e)}`, 'err');
     }
   });
 
@@ -5667,7 +5690,7 @@
           'Their strings exist (see /api/strings) but do not appear on the Dashboard or Topology.', facts);
       }
     } catch (e) {
-      showToast(`Import failed: ${e.message}`, 'err');
+      showToast(`Not imported: ${failText(e)}`, 'err');
     }
   });
 
@@ -5841,7 +5864,7 @@
         wantTsdb ? apiFetch('/api/tsdb/stats') : Promise.resolve(null),
       ]);
       if (wantTsdb) tsdbStatsAt = Date.now();
-      if (!statusR.ok) throw new Error('/api/status ' + statusR.status);
+      if (!statusR.ok) throw await httpFail(statusR);
       const status = await statusR.json();
 
       // Memory
@@ -5946,7 +5969,7 @@
       document.getElementById('diag-meta').textContent =
         `last update ${now.toLocaleTimeString()}`;
     } catch (e) {
-      document.getElementById('diag-meta').textContent = `refresh error: ${e.message}`;
+      document.getElementById('diag-meta').textContent = `Couldn't refresh: ${failText(e)}`;
     }
   }
 
@@ -6065,9 +6088,9 @@
       const r = await apiFetch('/api/master/pv', { method: 'POST', headers: { 'Content-Type': 'application/json' },
                                                    body: JSON.stringify({ on: !on }) });
       const j = await r.json().catch(() => ({}));
-      status.textContent = r.ok ? '' : (j.error || `refused (${r.status})`);
+      status.textContent = r.ok ? '' : (j.error || httpWords(r.status));
     } catch (e) {
-      status.textContent = 'not sent: ' + e.message;
+      status.textContent = 'Not sent: ' + failText(e);
     }
     await refreshPv();
   });
@@ -6078,9 +6101,9 @@
       const r = await apiFetch('/api/master/discovery', { method: 'POST', headers: { 'Content-Type': 'application/json' },
                                                           body: JSON.stringify({ renew }) });
       const j = await r.json().catch(() => ({}));
-      status.textContent = r.ok ? '' : (j.error || `refused (${r.status})`);
+      status.textContent = r.ok ? '' : (j.error || httpWords(r.status));
     } catch (e) {
-      status.textContent = 'not sent: ' + e.message;
+      status.textContent = 'Not sent: ' + failText(e);
     }
     await refreshPv();
   });
@@ -6172,15 +6195,15 @@
       const grouping = groupingEl ? groupingEl.value : 'mppt';
       try { localStorage.setItem('tools-grouping', grouping); } catch (e) {}
       const r = await apiFetch(`/api/yaml?sensors=${dev}&hub_sensors=${hub}&grouping=${grouping}`);
-      if (!r.ok) throw new Error('/api/yaml ' + r.status);
+      if (!r.ok) throw await httpFail(r);
       const data = await r.json();
       document.getElementById('tools-yaml').textContent = data.yaml || '';
       document.getElementById('tools-yaml-sub').textContent = `${data.device_count ?? '—'} devices`;
       document.getElementById('settings-meta').textContent =
         `last update ${new Date().toLocaleTimeString()}`;
     } catch (e) {
-      document.getElementById('tools-yaml').textContent = `Error: ${e.message}`;
-      document.getElementById('settings-meta').textContent = `error: ${e.message}`;
+      document.getElementById('tools-yaml').textContent = `Couldn't load the YAML: ${failText(e)}`;
+      document.getElementById('settings-meta').textContent = `Couldn't load: ${failText(e)}`;
     }
     refreshConfig();
   }
@@ -6238,11 +6261,11 @@
   async function refreshConfig() {
     try {
       const r = await apiFetch('/api/config');
-      if (!r.ok) throw new Error('/api/config ' + r.status);
+      if (!r.ok) throw await httpFail(r);
       cfgRenderRows(await r.json());
       document.getElementById('cfg-status').textContent = '';
     } catch (e) {
-      document.getElementById('cfg-rows').innerHTML = `<span style="color:var(--bad-text)">Config unavailable: ${cloudEsc(e.message)}</span>`;
+      document.getElementById('cfg-rows').innerHTML = `<span style="color:var(--bad-text)">Config unavailable: ${cloudEsc(failText(e))}</span>`;
     }
   }
 
@@ -6252,11 +6275,11 @@
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
       });
       const data = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(data.message || ('HTTP ' + r.status));
+      if (!r.ok) throw new Error(data.message || httpWords(r.status));
       cfgRenderRows(data);
       showToast(okMsg, 'ok');
     } catch (e) {
-      showToast('Config error: ' + e.message, 'bad');
+      showToast('Not changed: ' + failText(e), 'err');
     }
   }
 
@@ -6272,7 +6295,7 @@
     t.textContent = msg;
     t.className = 'toast show' + (kind ? ' ' + kind : '');
     clearTimeout(t._timer);
-    t._timer = setTimeout(() => { t.className = 'toast'; }, 2400);
+    t._timer = setTimeout(() => { t.className = 'toast'; }, kind === 'err' ? 6000 : 2400);
   }
 
   // Asks before a change, in place of confirm(): resolves true for the
@@ -6327,10 +6350,10 @@
     if (ask && !(await uiAsk({ tone: 'danger', ...ask }))) return;
     try {
       const r = await apiFetch(path, { method: 'POST' });
-      if (!r.ok) throw new Error(`${path} ${r.status}`);
+      if (!r.ok) throw await httpFail(r);
       showToast(`${label} ✓`, 'ok');
     } catch (e) {
-      showToast(`${label} failed: ${e.message}`, 'err');
+      showToast(`${label} failed: ${failText(e)}`, 'err');
     }
   }
 
@@ -6352,7 +6375,7 @@
     const text = document.getElementById('tools-yaml').textContent;
     navigator.clipboard.writeText(text).then(
       () => showToast('Copied to clipboard ✓', 'ok'),
-      () => showToast('Copy failed', 'err')
+      () => showToast("Couldn't copy. Select the text and copy it instead.", 'err')
     );
   });
   document.getElementById('tools-reset-peak').addEventListener('click', () =>
@@ -6404,7 +6427,7 @@
     if (logsPaused || !document.getElementById('view-logs').classList.contains('active')) return;
     try {
       const r = await apiFetch('/api/logs?after=' + logNext);
-      if (!r.ok) throw new Error('/api/logs ' + r.status);
+      if (!r.ok) throw await httpFail(r);
       const j = await r.json();
       // A smaller next means the service restarted: start over.
       if (j.next < logNext) { logLines = []; logNext = 0; delete logsBox.dataset.loaded; return pollLogs(); }
@@ -6428,7 +6451,7 @@
       }
       updateLogsMeta();
     } catch (e) {
-      document.getElementById('logs-meta').textContent = 'error: ' + e.message;
+      document.getElementById('logs-meta').textContent = "Couldn't load: " + failText(e);
     }
   }
   function startLogs() {
@@ -6564,7 +6587,7 @@
     if (!force && open && busPaused) return;
     try {
       const r = await apiFetch(open ? '/api/bus' : '/api/bus?limit=1');
-      if (!r.ok) throw new Error('/api/bus ' + r.status);
+      if (!r.ok) throw await httpFail(r);
       const b = await r.json();
       if (open && Date.now() - busNamesAt > 60000) {
         busNamesAt = Date.now();
@@ -6574,7 +6597,7 @@
       busApply(b);
       if (open) { busLast = b; renderBus(); }
     } catch (e) {
-      if (open) document.getElementById('buslog-meta').textContent = 'error: ' + e.message;
+      if (open) document.getElementById('buslog-meta').textContent = "Couldn't load: " + failText(e);
     }
   }
   document.getElementById('bus-alarm-clear').addEventListener('click', async () => {
@@ -6673,7 +6696,7 @@
     try {
       const r = await apiFetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       const j = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(j.error || `refused (${r.status})`);
+      if (!r.ok) throw new Error(j.error || httpWords(r.status));
       let e = {};
       for (let i = 0; i < 120; i++) {
         const m = await (await apiFetch('/api/master')).json();
@@ -6683,7 +6706,7 @@
       }
       out.textContent = e.finished ? `${e.ok ? '' : 'Failed: '}${e.message}` : 'No answer yet; check the Bus log.';
     } catch (err) {
-      out.textContent = `Refused: ${err.message}`;
+      out.textContent = `Refused: ${failText(err)}`;
     } finally {
       row.querySelectorAll('button').forEach(x => { x.disabled = false; });
     }
@@ -6692,7 +6715,7 @@
   async function refreshPiSettings() {
     try {
       const r = await apiFetch('/api/settings');
-      if (!r.ok) throw new Error('/api/settings ' + r.status);
+      if (!r.ok) throw await httpFail(r);
       const s = await r.json();
       piApplyPages(s);
       document.getElementById('pi-mqtt-host').value = s.mqtt.host || '';
@@ -6751,7 +6774,7 @@
         : s.mqtt_connected ? `connected to ${s.mqtt.host}` : `not connected${s.mqtt_error ? ': ' + s.mqtt_error : ''}`;
       document.getElementById('settings-meta').textContent = `last update ${new Date().toLocaleTimeString()}`;
     } catch (e) {
-      document.getElementById('settings-meta').textContent = `error: ${e.message}`;
+      document.getElementById('settings-meta').textContent = `Couldn't load: ${failText(e)}`;
     }
   }
   let piWebPortActive = 0;
@@ -6776,11 +6799,11 @@
     try {
       const r = await apiFetch('/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(Object.fromEntries(PI_CCA_PARTS.map(([k]) => [k, true]))) });
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      if (!r.ok) throw await httpFail(r);
       showToast('All on: the bus master restarts');
       refreshPiSettings();
     } catch (err) {
-      showToast('Not saved: ' + err.message, 'err');
+      showToast('Not saved: ' + failText(err), 'err');
     } finally { e.target.disabled = false; }
   });
   // Two masters on one bus collide, and the master's requests reach the
@@ -6850,13 +6873,13 @@
           method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ [key]: on }),
         });
         const j = await r.json().catch(() => ({}));
-        if (!r.ok) throw new Error(j.error || `/api/settings ${r.status}`);
+        if (!r.ok) throw new Error(j.error || httpWords(r.status));
         piApplyPages({ ...piPages, [key]: on });
         status.textContent = 'Saved';
       } catch (err) {
         e.target.checked = !on;
         e.target.nextElementSibling.textContent = !on ? 'On' : 'Off';
-        status.textContent = `Not saved: ${err.message}`;
+        status.textContent = `Not saved: ${failText(err)}`;
       }
     });
   }
@@ -6917,11 +6940,11 @@
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ web_password: '' }),
       });
       const j = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(j.error || `/api/settings ${r.status}`);
+      if (!r.ok) throw new Error(j.error || httpWords(r.status));
       showToast('Password removed ✓', 'ok');
       setTimeout(refreshPiSettings, 1500);
     } catch (e) {
-      showToast(`Save failed: ${e.message}`, 'err');
+      showToast(`Not saved: ${failText(e)}`, 'err');
     }
   });
   document.getElementById('pi-serial-rescan').addEventListener('click',
@@ -6964,7 +6987,7 @@
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
       });
       const j = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(j.error || `/api/settings ${r.status}`);
+      if (!r.ok) throw new Error(j.error || httpWords(r.status));
       showToast('Saved ✓', 'ok');
       const https = tlsCert !== '';
       const next = webPort || (https ? 443 : 80);
@@ -6983,7 +7006,7 @@
       }
       setTimeout(refreshPiSettings, 1500);
     } catch (e) {
-      showToast(`Save failed: ${e.message}`, 'err');
+      showToast(`Not saved: ${failText(e)}`, 'err');
     }
   }
   // The Bus and Web UI cards post the same settings, so either saves both.
@@ -7005,7 +7028,7 @@
   async function refreshPiInverters() {
     try {
       const r = await apiFetch('/api/topology');
-      if (!r.ok) throw new Error('/api/topology ' + r.status);
+      if (!r.ok) throw await httpFail(r);
       const t = await r.json();
       document.getElementById('pi-inv-rows').innerHTML = '';
       t.inverters.forEach(piInvRow);
@@ -7015,7 +7038,7 @@
       document.getElementById('pi-inv-sub').textContent = !t.mppts_seen.length ? 'no MPPTs in the node table yet'
         : free.length ? `not assigned: ${free.join(', ')}` : 'every MPPT assigned';
     } catch (e) {
-      document.getElementById('pi-inv-sub').textContent = `error: ${e.message}`;
+      document.getElementById('pi-inv-sub').textContent = `Couldn't load: ${failText(e)}`;
     }
   }
   document.getElementById('pi-inv-add').addEventListener('click', () => piInvRow({}));
@@ -7029,11 +7052,11 @@
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ inverters }),
       });
       const j = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(j.error || `/api/topology ${r.status}`);
+      if (!r.ok) throw new Error(j.error || httpWords(r.status));
       showToast('Inverters saved ✓', 'ok');
       refreshPiInverters();
     } catch (e) {
-      showToast(`Save failed: ${e.message}`, 'err');
+      showToast(`Not saved: ${failText(e)}`, 'err');
     }
   });
 
@@ -7056,12 +7079,12 @@
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
       });
       const j = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(j.error || `/api/settings ${r.status}`);
+      if (!r.ok) throw new Error(j.error || httpWords(r.status));
       showToast('Settings saved ✓', 'ok');
       // The daemon applies them within a second; give MQTT a moment to connect.
       setTimeout(refreshPiSettings, 2500);
     } catch (e) {
-      showToast(`Save failed: ${e.message}`, 'err');
+      showToast(`Not saved: ${failText(e)}`, 'err');
     }
   });
 
@@ -7172,7 +7195,7 @@
         target.innerHTML = lockdown;
         return 'blocked';
       }
-      target.innerHTML = `<div style="color:var(--bad-text)">Failed to retrieve CCA information: ${msg}</div>`;
+      target.innerHTML = `<div style="color:var(--bad-text)">Couldn't get the CCA's details: ${cloudEsc(msg)}</div>`;
       return 'error';
     }
 
@@ -7374,7 +7397,7 @@
     await ccaCheckMaster();
     try {
       const r = await apiFetch('/api/cca');
-      if (!r.ok) throw new Error(`/api/cca ${r.status}`);
+      if (!r.ok) throw await httpFail(r);
       const data = await r.json();
       const { state } = applyCcaData(data);
       if (state === 'connected') ccaLastGood = data;
@@ -7382,8 +7405,8 @@
     } catch (e) {
       ccaSetStatusBadge('failed');
       document.getElementById('cca-device-info').innerHTML =
-        `<div style="color:var(--bad-text)">Error loading CCA information: ${e.message}</div>`;
-      document.getElementById('cca-meta').textContent = `error: ${e.message}`;
+        `<div style="color:var(--bad-text)">Couldn't load the CCA's details: ${cloudEsc(failText(e))}</div>`;
+      document.getElementById('cca-meta').textContent = `Couldn't load: ${failText(e)}`;
     }
   }
 
@@ -7457,13 +7480,13 @@
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
       });
       const data = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(data.message || ('HTTP ' + r.status));
+      if (!r.ok) throw new Error(data.message || httpWords(r.status));
       ccaBleRender(data);
       res.innerHTML = `<span style="color:var(--good-text)">Targeting ${cloudEsc(data.active_mac)} — use Refresh from CCA to connect.</span>`;
       showToast('CCA MAC updated', 'ok');
     } catch (e) {
-      res.innerHTML = `<span style="color:var(--bad-text)">${cloudEsc(e.message)}</span>`;
-      showToast('MAC error: ' + e.message, 'bad');
+      res.innerHTML = `<span style="color:var(--bad-text)">${cloudEsc(failText(e))}</span>`;
+      showToast('MAC not changed: ' + failText(e), 'err');
     }
   }
   function ccaBleSetMac(mac) { document.getElementById('cca-ble-mac').value = mac; ccaBlePost({ mac }); }
@@ -7487,7 +7510,7 @@
     info.innerHTML = '<div class="spinner-box"><span class="spinner"></span> Connecting to the CCA over BLE… (~10 s)</div>';
     try {
       const r = await apiFetch('/api/cca/refresh');
-      if (!r.ok) throw new Error('refresh request failed');
+      if (!r.ok) throw await httpFail(r);
 
       // The refresh is async on the device: HTTP is ~instant, BLE is connect →
       // DEVICE_INFO → disconnect (~10 s). Poll /api/cca until the cache reports data
@@ -7524,7 +7547,7 @@
     } catch (e) {
       if (ccaShowUnreachable('CCA not reachable · showing last sync')) return;
       ccaSetStatusBadge('failed');
-      info.innerHTML = `<div style="color:var(--bad-text)">Failed to refresh: ${e.message}</div>`;
+      info.innerHTML = `<div style="color:var(--bad-text)">Couldn't refresh: ${cloudEsc(failText(e))}</div>`;
     } finally {
       ccaBusy = false;
     }
@@ -7544,7 +7567,7 @@
     try {
       const r = await apiFetch('/api/cca/data-export', { method: 'POST' });
       const j = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(j.message || `failed (${r.status})`);
+      if (!r.ok) throw new Error(j.message || httpWords(r.status));
       showToast('Cloud sync requested — confirming…', 'ok');
       // The CCA's DEVICE_DATA_EXPORT handler runs `msgsend DCID ExportData` and replies per the
       // mobile_api contract: success → {"code":0}; failure → {"msg":"Internal error pushing data"}.
@@ -7568,7 +7591,7 @@
       if (!confirmed) showToast(ccaMasterMode ? 'No answer from the CCA: it may be off, or out of Bluetooth range'
                                               : 'Sync requested — no confirmation from the CCA yet');
     } catch (e) {
-      showToast(`Cloud sync failed: ${e.message}`, 'err');
+      showToast(`Cloud sync failed: ${failText(e)}`, 'err');
     } finally {
       btn.disabled = false; btn.textContent = orig;
       ccaBusy = false;
@@ -7609,7 +7632,7 @@
     el.innerHTML = '<span style="color:var(--text-dim)"><span class="spinner" style="width:13px;height:13px;vertical-align:-2px;margin-right:6px"></span>Connecting to the CCA over BLE to start the scan… (~10 s)</span>';
     try {
       const r = await apiFetch('/api/cca/discovery/start', { method: 'POST' });
-      if (!r.ok) throw new Error(`start failed (${r.status})`);
+      if (!r.ok) throw await httpFail(r);
 
       // Poll progress: trigger a background DISCOVERY_STATUS read, give the one-shot BLE
       // round trip time to land, then read the cache. Stop when the CCA reports done or
@@ -7629,7 +7652,7 @@
         if (data.status && !running) { break; }  // CCA reports complete
       }
     } catch (e) {
-      el.innerHTML = `<span style="color:var(--bad-text)">Discovery failed: ${e.message}</span>`;
+      el.innerHTML = `<span style="color:var(--bad-text)">Discovery failed: ${failText(e)}</span>`;
     } finally {
       ccaDiscovering = false;
       ccaBusy = false;
@@ -7682,7 +7705,7 @@
     el.innerHTML = `<span style="color:var(--text-dim)"><span class="spinner" style="width:13px;height:13px;vertical-align:-2px;margin-right:6px"></span>Querying ${label} over BLE… (~10 s)</span>`;
     try {
       const r = await apiFetch('/api/cca/network/poll?cmd=' + encodeURIComponent(cmd), { method: 'POST' });
-      if (!r.ok) throw new Error(`request failed (${r.status})`);
+      if (!r.ok) throw await httpFail(r);
       const start = Date.now(), maxWaitMs = 30000;
       while (Date.now() - start < maxWaitMs) {
         await new Promise(res => setTimeout(res, 1500));
@@ -7698,7 +7721,7 @@
       }
       el.innerHTML = `<span style="color:var(--bad-text)">${label} timed out — the CCA may be out of range or busy (one BLE client at a time).</span>`;
     } catch (e) {
-      el.innerHTML = `<span style="color:var(--bad-text)">${label} failed: ${e.message}</span>`;
+      el.innerHTML = `<span style="color:var(--bad-text)">${label} failed: ${failText(e)}</span>`;
     } finally {
       ccaBusy = false;
     }
@@ -7720,11 +7743,11 @@
     try {
       const r = await apiFetch('/api/cca/network/wifi-connect', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ nid: ssid, pwd }) });
       const j = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(j.message || `failed (${r.status})`);
+      if (!r.ok) throw new Error(j.message || httpWords(r.status));
       res.innerHTML = 'Requested — give it ~15 s, then <b>Refresh from CCA</b> to confirm in Network status.';
       document.getElementById('cca-wifi-pwd').value = '';
     } catch (e) {
-      res.innerHTML = `<span style="color:var(--bad-text)">Join failed: ${e.message}</span>`;
+      res.innerHTML = `<span style="color:var(--bad-text)">Join failed: ${failText(e)}</span>`;
     } finally {
       ccaBusy = false;
     }
@@ -7741,10 +7764,10 @@
     try {
       const r = await apiFetch('/api/cca/network/wifi-clear', { method: 'POST' });
       const j = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(j.message || `failed (${r.status})`);
+      if (!r.ok) throw new Error(j.message || httpWords(r.status));
       res.innerHTML = '<span style="color:var(--good-text)">WiFi clear requested.</span>';
     } catch (e) {
-      res.innerHTML = `<span style="color:var(--bad-text)">Clear failed: ${e.message}</span>`;
+      res.innerHTML = `<span style="color:var(--bad-text)">Clear failed: ${failText(e)}</span>`;
     } finally {
       ccaBusy = false;
     }
@@ -7781,7 +7804,7 @@
     try {
       const r = await apiFetch('/api/cloud/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password: pwd }) });
       const j = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(j.message || `failed (${r.status})`);
+      if (!r.ok) throw new Error(j.message || httpWords(r.status));
       document.getElementById('cloud-cfg-pwd').value = '';
       res.innerHTML = '<span style="color:var(--good-text)">Connected ✓</span>';
       showToast('Connected to Tigo cloud ✓', 'ok');
@@ -7789,7 +7812,7 @@
       refreshCloudStatus();
       setTimeout(cloudConfigClose, 700);
     } catch (e) {
-      res.innerHTML = `<span style="color:var(--bad-text)">${e.message}</span>`;
+      res.innerHTML = `<span style="color:var(--bad-text)">${failText(e)}</span>`;
     } finally {
       btn.disabled = false; btn.textContent = orig;
     }
@@ -7819,11 +7842,11 @@
     try {
       const r = await apiFetch('/api/cloud/import', { method: 'POST' });
       const j = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(j.message || `failed (${r.status})`);
+      if (!r.ok) throw new Error(j.message || httpWords(r.status));
       showToast('Tigo cloud layout imported ✓', 'ok');
       refreshTopology();
     } catch (e) {
-      showToast(`Import failed: ${e.message}`, 'err');
+      showToast(`Not imported: ${failText(e)}`, 'err');
     } finally {
       btn.disabled = false; btn.textContent = orig;
     }
@@ -8019,7 +8042,7 @@
       else document.getElementById('cloudstatus-history').textContent = '—';
       document.getElementById('cloudstatus-meta').textContent = `from Tigo cloud · ${new Date().toLocaleTimeString()}`;
     } catch (e) {
-      document.getElementById('cloudstatus-meta').textContent = `error: ${e.message}`;
+      document.getElementById('cloudstatus-meta').textContent = `Couldn't load: ${failText(e)}`;
     } finally {
       cloudSetLoading(false);
       cloudStatusBusy = false;
@@ -8173,7 +8196,7 @@
       const jobs = [apiFetch('/api/devices').then(r => r.ok ? r.json() : { devices: [] }),
                     apiFetch('/api/master').then(r => r.ok ? r.json() : {}).catch(() => ({}))];
       if (!devicesOnly) {
-        jobs.push(apiFetch('/api/array').then(r => { if (!r.ok) throw new Error(`/api/array ${r.status}`); return r.json(); }));
+        jobs.push(apiFetch('/api/array').then(async r => { if (!r.ok) throw await httpFail(r); return r.json(); }));
         jobs.push(apiFetch('/api/mesh').then(r => r.ok ? r.json() : {}).catch(() => ({})));
       }
       const [dev, master, saved, mesh] = await Promise.all(jobs);
@@ -8186,7 +8209,7 @@
       if (mesh && mesh.taps) mesh.taps.forEach(t => { arr.tapNames[t.id] = t.name || ''; });
       document.getElementById('array-error').textContent = '';
     } catch (e) {
-      document.getElementById('array-error').textContent = `Couldn't load the array: ${e.message}`;
+      document.getElementById('array-error').textContent = `Couldn't load the array: ${failText(e)}`;
     }
     arrayRender();
   }
@@ -8408,13 +8431,13 @@
     try {
       const r = await apiFetch('/api/array', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(arr.draft) });
       const j = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(j.error || `refused (${r.status})`);
+      if (!r.ok) throw new Error(j.error || httpWords(r.status));
       arr.saved = arr.draft; arr.draft = null; arr.sel = null;
       document.getElementById('array-error').textContent = '';
       showToast('Array saved ✓', 'ok');
       arrayRender();
     } catch (e) {
-      document.getElementById('array-error').textContent = `Not saved: ${e.message}`;
+      document.getElementById('array-error').textContent = `Not saved: ${failText(e)}`;
     } finally {
       btn.disabled = false;
     }
@@ -8570,7 +8593,7 @@
     try {
       const [r, nR, dR] = await Promise.all([apiFetch('/api/mesh'),
         apiFetch('/api/nodes').catch(() => null), apiFetch('/api/devices').catch(() => null)]);
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      if (!r.ok) throw await httpFail(r);
       meshData = await r.json();
       // Aliens (alienAddrs) aren't panels: not drawn.
       if (nR && nR.ok && dR && dR.ok) {
@@ -8579,7 +8602,7 @@
       }
     } catch (e) {
       if (!meshData) document.querySelector('#topology-mesh .mesh-graph').innerHTML =
-        `<div class="mesh-empty">Couldn't load the mesh: ${meshEsc(e.message)}</div>`;
+        `<div class="mesh-empty">Couldn't load the mesh: ${meshEsc(failText(e))}</div>`;
       return;
     }
     renderMesh();
@@ -8937,9 +8960,9 @@
         apiFetch('/api/devices'),
         apiFetch('/api/nodes'),
       ]);
-      if (!invR.ok) throw new Error('/api/inverters ' + invR.status);
-      if (!devR.ok) throw new Error('/api/devices ' + devR.status);
-      if (!nodeR.ok) throw new Error('/api/nodes ' + nodeR.status);
+      if (!invR.ok) throw await httpFail(invR);
+      if (!devR.ok) throw await httpFail(devR);
+      if (!nodeR.ok) throw await httpFail(nodeR);
 
       const invData = await invR.json();
       mpptNames = invData.mppt_names || {};
@@ -9204,11 +9227,11 @@
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify(body),
                 });
-                if (!r.ok) throw new Error(`${r.status}`);
+                if (!r.ok) throw await httpFail(r);
                 showToast('Renamed ✓', 'ok');
                 await refreshTopology();
               } catch (err) {
-                showToast(`Rename failed: ${err.message}`, 'err');
+                showToast(`Not renamed: ${failText(err)}`, 'err');
                 await refreshTopology();
               }
             };
@@ -9267,11 +9290,11 @@
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ label: canonical, rating_w }),
               });
-              if (!r.ok) throw new Error(`${r.status}`);
+              if (!r.ok) throw await httpFail(r);
               showToast(rating_w > 0 ? `Rating set to ${rating_w} W ✓` : 'Rating cleared ✓', 'ok');
               await refreshTopology();
             } catch (err) {
-              showToast(`Save failed: ${err.message}`, 'err');
+              showToast(`Not saved: ${failText(err)}`, 'err');
               await refreshTopology();
             }
           };
@@ -9296,8 +9319,8 @@
         `last update ${new Date().toLocaleTimeString()}`;
     } catch (e) {
       document.getElementById('topo-tree').innerHTML =
-        `<div class="topo-empty" style="color:var(--bad-text)">Error loading topology: ${topoEscape(e.message)}</div>`;
-      document.getElementById('topo-meta').textContent = `error: ${e.message}`;
+        `<div class="topo-empty" style="color:var(--bad-text)">Couldn't load the topology: ${topoEscape(failText(e))}</div>`;
+      document.getElementById('topo-meta').textContent = `Couldn't load: ${failText(e)}`;
     }
   }
 
@@ -9365,7 +9388,7 @@
   async function enterTopoEdit() {
     try {
       const r = await apiFetch('/api/layout');
-      if (!r.ok) throw new Error('/api/layout ' + r.status);
+      if (!r.ok) throw await httpFail(r);
       const l = await r.json();
       const strip = ms => ms.map(m => ({
         label: m.label, display_label: m.display_label || '',
@@ -9393,7 +9416,7 @@
       renderTopoEditor();
       topoEdRefreshReadings();
     } catch (e) {
-      showToast(`Could not open the editor: ${e.message}`, 'err');
+      showToast(`Could not open the editor: ${failText(e)}`, 'err');
     }
   }
 
@@ -9425,11 +9448,11 @@
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
       });
       const j = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(j.error || `save failed (${r.status})`);
+      if (!r.ok) throw new Error(j.error || httpWords(r.status));
       showToast('Layout saved ✓', 'ok');
       exitTopoEdit();
     } catch (e) {
-      document.getElementById('topo-ed-error').textContent = e.message;
+      document.getElementById('topo-ed-error').textContent = failText(e);
     } finally {
       btn.disabled = false;
     }
@@ -9862,14 +9885,14 @@
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action }),
       });
       const j = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(j.error || r.status);
+      if (!r.ok) throw new Error(j.error || httpWords(r.status));
       topoPending = null;
       topoRenderPending();
       showToast(action === 'keep' ? 'Kept your layout ✓' : 'Layout replaced ✓', 'ok');
       if (action === 'use' && topoEditor.active) exitTopoEdit();
       else if (!topoEditor.active) refreshTopology();
     } catch (e) {
-      showToast(`Failed: ${e.message}`, 'err');
+      showToast(`${action === 'keep' ? 'Not kept' : 'Not replaced'}: ${failText(e)}`, 'err');
     }
   }
 

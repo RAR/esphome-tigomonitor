@@ -271,6 +271,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   view (address, barcode and amps are in the row's details), and the
   "No nodes match" message is no longer cut off.
 
+- **Error messages say what went wrong in words.** A failed request showed
+  "refresh error: Failed to fetch", "/api/settings 400" or, on the
+  Dashboard, a JSON parse error. It now shows "Couldn't refresh:
+  TigoMonitor didn't answer", "Not saved: refused (400)" and so on, with
+  TigoMonitor's own reason when it gives one. Error toasts stay up for six
+  seconds rather than two and a half, and screen readers read them out.
+
 - **An optimizer no TAP lists can be forgotten (Raspberry Pi and other
   Linux).** One a CCA listed and was later removed (in EI, say) stayed in
   Devices, and Retire said only "not in the table: nothing to remove".
