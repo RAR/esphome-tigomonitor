@@ -50,7 +50,7 @@ async function firstLoad(pi) {
 for (const pi of [false, true]) {
   test(`the Dashboard's first refresh shows data at once (${pi ? 'Pi' : 'ESP32'})`, async () => {
     const { meta, errors, ctx } = await firstLoad(pi);
-    assert.doesNotMatch(meta, /refresh error/);
+    assert.doesNotMatch(meta, /Couldn't refresh/);
     assert.deepEqual(errors.filter((e) => /PLATFORM|before initialization/.test(e)), []);
     await ctx.close();
   });
