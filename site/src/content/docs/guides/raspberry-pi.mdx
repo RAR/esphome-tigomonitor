@@ -380,7 +380,9 @@ Running the bus, the Pi does all of it, and Settings → Bus says so under
   reports. H9 firmware answers the settings query with fixed zeros, so those
   show "Not reported". When an answer calls for one of the two writes a
   CCA makes, `#00w255` after an Info reading 00 or Smrt mode S after one in
-  mode N, the Pi makes it.
+  mode N, the Pi makes it. `#00w255` sets the optimizer's start level
+  (StartPWM), which most optimizers lose overnight, so the Pi reads Info
+  again each morning as each one wakes.
 - **It reads the TAP's radio settings** once each time it starts. The
   Devices page then shows the TAP's channel and the signal level it admits
   optimizers at. A listening Pi shows them too whenever it hears any master
