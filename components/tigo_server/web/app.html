@@ -500,7 +500,7 @@
   /* The Bus log: the last 5 minutes in a strip, then one row per exchange. */
   .bx-strip { display: grid; grid-template-columns: repeat(auto-fit, minmax(128px, 1fr)); gap: 1px; background: var(--border);
               border: 1px solid var(--border); border-radius: 10px; overflow: hidden; margin-bottom: 16px; }
-  .bx-tile { background: var(--bg-2); padding: 12px 14px; display: grid; gap: 2px; min-width: 0; }
+  .bx-tile { background: var(--bg-2); padding: 12px 14px; display: grid; align-content: start; gap: 2px; min-width: 0; }
   .bx-tile .k { font-size: 11px; letter-spacing: .05em; text-transform: uppercase; color: var(--text-faint); }
   .bx-tile .v { font-size: 20px; font-weight: 650; font-variant-numeric: tabular-nums; }
   .bx-tile .s { font-size: 12px; color: var(--text-dim); overflow-wrap: anywhere; }
@@ -1354,9 +1354,8 @@
       z-index: 55;
       transform: translateX(-100%);
       transition: transform 0.22s ease;
-      box-shadow: 4px 0 24px rgba(0, 0, 0, 0.4);
     }
-    .app.menu-open aside { transform: translateX(0); }
+    .app.menu-open aside { transform: translateX(0); box-shadow: 4px 0 24px rgba(0, 0, 0, 0.4); }
     .app.menu-open .sidebar-overlay { display: block; }
 
     main { padding: 60px 14px 20px; }
@@ -1601,7 +1600,7 @@
         <div class="legend-item"><div class="legend-swatch" style="background:var(--bg-3);border:1px dashed var(--text-faint)"></div> Sleeping / no data</div>
         <div class="legend-item" id="legend-over" hidden><div class="legend-swatch" style="background:var(--bg-3);box-shadow:0 0 0 2px var(--bad)"></div> Over its optimizer's rating</div>
       </div>
-      <div style="font-size:11px;color:var(--text-faint);margin-top:6px">
+      <div style="font-size:11px;color:var(--text-faint);margin:6px 0 20px">
         Tile color compares each panel to its string median — answers "is this panel keeping up with neighbors right now?". Low output at dawn, dusk, or under cloud cover is expected and shifts the median, not the color. The small stripe at the bottom of a tile compares to the per-panel nameplate rating (when set) using the same green/yellow/red bands — useful for spotting cases where the whole string is below rating but individual panels still look "on par" with each other.
       </div>
 
@@ -2238,7 +2237,7 @@
 
       <div class="section-head">
         <div class="section-title">Network &amp; uptime</div>
-        <div class="section-sub" id="diag-net-sub">—</div>
+        <div class="section-sub" id="diag-net-sub"></div>
       </div>
       <div class="hist-stat-grid">
         <div class="hist-stat-card">
@@ -2305,7 +2304,7 @@
 
       <div class="section-head">
         <div class="section-title">UART telemetry</div>
-        <div class="section-sub" id="diag-uart-sub">—</div>
+        <div class="section-sub" id="diag-uart-sub"></div>
       </div>
       <div class="hist-stat-grid">
         <div class="hist-stat-card">
@@ -2422,7 +2421,7 @@
 
       <div class="section-head">
         <div class="section-title">Status</div>
-        <div class="section-sub" id="cca-conn-sub">—</div>
+        <div class="section-sub" id="cca-conn-sub"></div>
       </div>
       <div class="hist-stat-grid cca-status-grid">
         <div class="hist-stat-card">
@@ -3140,7 +3139,7 @@
         // Optional string-level nameplate roll-up: total / (n × rating).
         const nameplate = rating > 0 ? rating * panels.length : 0;
         const stringRatedPct = nameplate > 0
-          ? ` <span style="color:var(--text-faint);font-size:11px">${Math.round((s.total_power || 0) / nameplate * 100)}% of ${(nameplate / 1000).toFixed(2)}kW</span>`
+          ? `<br><span style="color:var(--text-faint);font-size:11px">${Math.round((s.total_power || 0) / nameplate * 100)}% of ${(nameplate / 1000).toFixed(2)} kW rated</span>`
           : '';
         html += `
           <div class="panel-string-row">
@@ -3610,7 +3609,7 @@
     }
 
     const yLabel = (frac, y) =>
-      `<text x="6" y="${y}" fill="var(--text-faint)" font-size="10">${Math.round(yScale * frac)} W</text>`;
+      `<text x="6" y="${y}" fill="var(--text-faint)" stroke="var(--bg-2)" stroke-width="5" stroke-linejoin="round" paint-order="stroke" font-size="10">${Math.round(yScale * frac)} W</text>`;
     yLab.innerHTML = yLabel(0.75, 50) + yLabel(0.50, 105) + yLabel(0.25, 160);
 
     const ticks = 4;
@@ -3753,7 +3752,7 @@
     fill.setAttribute('d', `M${pts.join(' L')} L${W},210 L0,210 Z`);
 
     const yLabel = (frac, y) =>
-      `<text x="6" y="${y}" fill="var(--text-faint)" font-size="10">${(yScale * frac / 1000).toFixed(1)} kW</text>`;
+      `<text x="6" y="${y}" fill="var(--text-faint)" stroke="var(--bg-2)" stroke-width="5" stroke-linejoin="round" paint-order="stroke" font-size="10">${(yScale * frac / 1000).toFixed(1)} kW</text>`;
     yLab.innerHTML = yLabel(0.75, 50) + yLabel(0.50, 105) + yLabel(0.25, 160);
 
     const ticks = 4;
