@@ -3104,7 +3104,10 @@ void TigoWebServer::build_esp_status_json(PSRAMString& json) {
       break;
     }
   }
-  mac_address = get_mac_address_pretty();
+  {
+    char mac_buf[MAC_ADDRESS_PRETTY_BUFFER_SIZE];
+    mac_address = get_mac_address_pretty_into_buffer(mac_buf);
+  }
 #endif
 
 #ifdef USE_WIFI
