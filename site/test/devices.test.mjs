@@ -146,6 +146,9 @@ test("Devices, on the Pi: a whole settings answer's protection fields, in words"
   assert.deepEqual(r0.find((r) => r[1] === 'UclLimit · UclThrsh'), ['Current limit at low input voltage', 'UclLimit · UclThrsh', '1.0 A below 32 V', '—']);
   assert.deepEqual(r0.find((r) => r[1] === 'OvMinPwm'), ['Over-voltage minimum PWM', 'OvMinPwm', '9 (3.5%)', '—']);
   assert.deepEqual(r0.find((r) => r[1] === 'BaseOverride'), ['Base-memory override', 'BaseOverride', 'Off', '—']);
+  // AcLoss is active-low: 0 is shutdown on AC loss enabled (a CCA's "ON"
+  // writes 0), so it reads On, beside most K8s' On.
+  assert.deepEqual(r0.find((r) => r[1] === 'AcLoss'), ['Shut down on AC loss', 'AcLoss', 'On', 'On']);
   assert.equal(r0.some((r) => r[1] === 'UclThrsh'), false);
   assert.doesNotMatch(await page.textContent(id(0)), /Limits|Discharge enabled|never arrive/);
   assert.deepEqual((await rows(4)).find((r) => r[1] === 'OvMinPwm'), ['Over-voltage minimum PWM', 'OvMinPwm', '0 (can switch off)', '—']);

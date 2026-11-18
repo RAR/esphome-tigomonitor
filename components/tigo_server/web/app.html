@@ -4251,7 +4251,8 @@
   // writes (the analysis side, 2026-11-18): UclLimit is an input current
   // limit that applies only below UclThrsh, an input voltage; OvMinPwm the
   // lowest PWM (of 255) it backs off to on over-voltage, 9 on K8.0120/0130
-  // and 0 on K8.0131; BaseOverride a 0/1 flag.
+  // and 0 on K8.0131; BaseOverride a 0/1 flag. AcLoss (10) is active-low:
+  // 0 is shutdown on AC loss enabled, 1 disabled.
   const SMRT_FIELDS = [
     ['SwVout', 0.05, 2, ' V'], ['OutResis', 0.01953125, 3, ' Ω'], ['HwVout', 0.05, 2, ' V'],
     ['DnPwmTim', 0.001, 3, ' s'], ['UpPwmTim', 0.001, 3, ' s'], ['PwmThrsh', 1, 0, ''],
@@ -4289,6 +4290,9 @@
         out.push([f[0], `${(+(n * f[1]).toFixed(2)).toFixed(1)} A below ${num(t[i + 1], 0.05)} V`]);
       else if (f[0] === 'OvMinPwm' && !isNaN(n))
         out.push([f[0], n === 0 ? '0 (can switch off)' : `${n} (${(n / 255 * 100).toFixed(1)}%)`]);
+      // Active-low: 0 is shutdown on AC loss enabled (a CCA's "ON" writes 0).
+      else if (f[0] === 'AcLoss' && !isNaN(n) && n <= 1)
+        out.push([f[0], n === 0 ? 'On' : 'Off']);
       else if (f[0] === 'BaseOverride')
         out.push([f[0], /^0+$/.test(v) ? 'Off' : /^0*1$/.test(v) ? 'On' : v]);
       else out.push([f[0], f[1] === null || isNaN(n) ? v

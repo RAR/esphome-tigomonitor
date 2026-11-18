@@ -173,7 +173,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   so the two fields now read as one: "Current limit at low input voltage:
   1.0 A below 32 V". Over-voltage minimum PWM reads "9 (3.5%)", or "0 (can
   switch off)" on K8.0131 firmware, and the last field reads Off or On as
-  "Base-memory override" rather than "Discharge enabled 00". None of these
+  "Base-memory override" rather than "Discharge enabled 00". "Shut down on
+  AC loss" reads On or Off: the field is active-low, so the 0 it showed meant
+  On, rapid shutdown enabled. None of these
   is compared with other optimizers: a CCA never writes them, and they
   differ by firmware version.
 
