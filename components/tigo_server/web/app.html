@@ -1695,7 +1695,7 @@
       <div class="topo-toolbar">
         <button class="btn" id="topo-expand-btn">Expand all</button>
         <button class="btn" id="topo-collapse-btn">Collapse all</button>
-        <input class="input" id="topo-filter" placeholder="Filter by name, barcode, or string…">
+        <input class="input" id="topo-filter" aria-label="Filter the topology" placeholder="Filter by name, barcode, or string…">
         <span class="topo-summary" id="topo-summary">—</span>
         <button class="btn" id="topo-cloud-import-btn" style="display:none" title="Pull panel names + layout from Tigo's cloud">Import from Tigo cloud</button>
         <button class="btn" id="topo-edit-btn" title="Add inverters, MPPTs and strings, and drag panels into place">Edit layout</button>
@@ -1795,11 +1795,11 @@
       </div>
 
       <div class="table-toolbar">
-        <input class="input" id="nodes-search" placeholder="Search name, barcode, address…">
-        <select class="input compact" id="nodes-filter-string">
+        <input class="input" id="nodes-search" aria-label="Search devices" placeholder="Search name, barcode, address…">
+        <select class="input compact" id="nodes-filter-string" aria-label="Show string">
           <option value="">All strings</option>
         </select>
-        <select class="input compact" id="nodes-filter-state">
+        <select class="input compact" id="nodes-filter-state" aria-label="Show state">
           <option value="">All states</option>
           <option value="ok">Active</option>
           <option value="warn">Shaded</option>
@@ -2380,7 +2380,7 @@
       <section class="bx-strip" id="bus-strip" aria-label="The last 5 minutes"></section>
       <div class="table-toolbar">
         <span id="bus-chips" role="group" aria-label="Show" style="display:flex;gap:6px;flex-wrap:wrap"></span>
-        <input class="input" id="buslog-search" placeholder="Filter, e.g. 0002 or GatewayCfg">
+        <input class="input" id="buslog-search" aria-label="Filter bus traffic" placeholder="Filter, e.g. 0002 or GatewayCfg">
         <button class="btn" id="buslog-pause">Pause</button>
       </div>
       <div class="bx-table" id="bus-box" role="table" aria-label="Exchanges">
@@ -2730,6 +2730,27 @@
     document.getElementById('theme-toggle').textContent = theme === 'light' ? '☾' : '☀';
   }
   // No choice saved yet: follow the device's own light or dark setting.
+  // A settings row names its control in a <strong> beside it, which is not
+  // a <label>: point each unlabelled control at that title, and at the line
+  // under it, so a screen reader says what the field is.
+  let cfgLabelSeq = 0;
+  function labelCfgRows(scope) {
+    scope.querySelectorAll('.cfg-row').forEach(row => {
+      const title = row.querySelector('.cfg-text > strong');
+      if (!title) return;
+      if (!title.id) title.id = `cfg-t-${++cfgLabelSeq}`;
+      const desc = row.querySelector('.cfg-text > span:not(.cfg-default)');
+      if (desc && !desc.id) desc.id = `${title.id}-d`;
+      row.querySelectorAll('.cfg-ctrl input, .cfg-ctrl select, .cfg-ctrl textarea').forEach(c => {
+        if (c.type === 'hidden' || c.hasAttribute('aria-label') || c.hasAttribute('aria-labelledby')) return;
+        if (c.type !== 'checkbox' && c.labels && c.labels.length) return;
+        c.setAttribute('aria-labelledby', title.id);
+        if (desc && !c.hasAttribute('aria-describedby')) c.setAttribute('aria-describedby', desc.id);
+      });
+    });
+  }
+  labelCfgRows(document);
+
   const initialTheme = localStorage.getItem('tigoTheme') || (matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
   applyTheme(initialTheme);
   document.getElementById('theme-toggle').addEventListener('click', () => {
@@ -6183,11 +6204,12 @@
           </div>
           <div class="cfg-ctrl">
             ${control}
-            <button class="btn" data-cfg-save="${f.key}">Save</button>
-            <button class="btn cfg-revert" data-cfg-reset="${f.key}"${ov ? '' : ' disabled'} title="Revert to ${PLATFORM === 'linux' ? '' : 'YAML '}default">Revert</button>
+            <button class="btn" data-cfg-save="${f.key}" aria-label="Save ${cloudEsc(f.label)}">Save</button>
+            <button class="btn cfg-revert" data-cfg-reset="${f.key}" aria-label="Revert ${cloudEsc(f.label)}"${ov ? '' : ' disabled'} title="Revert to ${PLATFORM === 'linux' ? '' : 'YAML '}default">Revert</button>
           </div>
         </div>`;
     }).join('');
+    labelCfgRows(rows);
     rows.querySelectorAll('[data-cfg-save]').forEach(b =>
       b.addEventListener('click', () => cfgSave(b.dataset.cfgSave)));
     rows.querySelectorAll('[data-cfg-reset]').forEach(b =>
@@ -6955,8 +6977,8 @@
     const row = document.createElement('div');
     row.className = 'cfg-row';
     row.innerHTML = `
-      <div class="cfg-ctrl"><input class="cfg-input pi-inv-name" style="width:160px" placeholder="Inverter name" autocomplete="off"></div>
-      <div class="cfg-ctrl" style="flex:1"><input class="cfg-input pi-inv-mppts" style="width:100%;min-width:180px" placeholder="MPPT 1, MPPT 2" autocomplete="off"></div>
+      <div class="cfg-ctrl"><input class="cfg-input pi-inv-name" style="width:160px" aria-label="Inverter name" placeholder="Inverter name" autocomplete="off"></div>
+      <div class="cfg-ctrl" style="flex:1"><input class="cfg-input pi-inv-mppts" style="width:100%;min-width:180px" aria-label="MPPTs on this inverter" placeholder="MPPT 1, MPPT 2" autocomplete="off"></div>
       <div class="cfg-ctrl"><button class="btn pi-inv-remove">Remove</button></div>`;
     row.querySelector('.pi-inv-name').value = inv.name || '';
     row.querySelector('.pi-inv-mppts').value = (inv.mppts || []).join(', ');
