@@ -1,4 +1,4 @@
-# Example Tigo Monitor Configuration using the Waveshare ESP32-S3-RS485-CAN
+# Example TigoMonitor Configuration using the Waveshare ESP32-S3-RS485-CAN
 #
 # This is the "industrial, full features" profile: web UI, REST API, on-flash
 # history, and Home Assistant over the native API — on a DIN-rail board that can

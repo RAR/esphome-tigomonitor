@@ -97,7 +97,7 @@ grep -q '^enable_uart=1' "$cfg" || printf '\n[all]\n# tigomonitor: RS485 HATs re
 sed -i -E 's/ ?console=(serial0|ttyAMA0|ttyS0),[0-9]+//' "$mnt/boot/firmware/cmdline.txt"
 
 cat > "$mnt/boot/firmware/TIGOMONITOR.txt" <<EOF
-Tigo Monitor $version
+TigoMonitor $version
 
 Open http://tigomonitor.local (or the hostname you chose in Raspberry Pi
 Imager) once the Pi has joined your Wi-Fi, then set your MQTT broker under

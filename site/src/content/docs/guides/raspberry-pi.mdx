@@ -1,12 +1,12 @@
 ---
 title: Raspberry Pi and Linux
-description: Run Tigo Monitor on a Raspberry Pi, another Linux machine or in Docker instead of an ESP32 — install one package, connect an RS485 adapter or a network bridge, and point it at Home Assistant's MQTT broker.
+description: Run TigoMonitor on a Raspberry Pi, another Linux machine or in Docker instead of an ESP32 — install one package, connect an RS485 adapter or a network bridge, and point it at Home Assistant's MQTT broker.
 ---
 
 import ThemedShot from '../../../components/ThemedShot.astro';
 
 
-The ESP32 is the main way to run Tigo Monitor. If you would rather use a
+The ESP32 is the main way to run TigoMonitor. If you would rather use a
 Raspberry Pi, there is a Pi build: the same dashboard and the same panel
 decoding, packaged for Raspberry Pi OS, with no ESPHome and no YAML. The same
 build runs on other Debian and Ubuntu machines and in Docker, and can read the
@@ -157,11 +157,11 @@ UART** (`/dev/serial0`).
    panels appear in Home Assistant under **Settings → Devices & services →
    MQTT**.
 
-For the Energy dashboard, add the **Tigo Monitor Energy** sensor under
+For the Energy dashboard, add the **TigoMonitor Energy** sensor under
 **Settings → Dashboards → Energy → Solar production**.
 
 Each panel also has a **Reports lost today** sensor, and each string a
-**reports lost today** sensor on the Tigo Monitor device, the same figures
+**reports lost today** sensor on the TigoMonitor device, the same figures
 the mesh map shows, for graphs and alerts in Home Assistant.
 **Optimizer setting changes (24 h)** counts the optimizers whose settings,
 MPPT parameters or firmware changed in the last day. A CCA never drifts

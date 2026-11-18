@@ -163,7 +163,7 @@ void MqttPublisher::announce_(const std::string &component, const std::string &u
 
 static json monitor_device(const Settings &s, const std::string &version) {
   return {{"identifiers", json::array({"tigomonitor_" + s.device_id})},
-          {"name", "Tigo Monitor"},
+          {"name", "TigoMonitor"},
           {"manufacturer", "esphome-tigomonitor"},
           {"model", "tigomonitord"},
           {"sw_version", version}};

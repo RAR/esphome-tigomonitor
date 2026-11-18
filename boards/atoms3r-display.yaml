@@ -1,5 +1,5 @@
 # M5Stack AtomS3R Display Package (ST7789V panel)
-# 128x128 LCD screen showing Tigo Monitor status
+# 128x128 LCD screen showing TigoMonitor status
 #
 # Use this file if your unit's own label reads "ST7789" (not "ST7735") - see
 # atoms3r-display-st7735.yaml otherwise (#93). Everything but the panel

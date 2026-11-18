@@ -1,4 +1,4 @@
-# ESPHome Tigo Monitor AI Agent Instructions
+# ESPHome TigoMonitor AI Agent Instructions
 
 ## Architecture Overview
 

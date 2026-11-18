@@ -1,4 +1,4 @@
-# Tigo Monitor partition table for 16 MB flash (e.g. ESP32-P4-Function-EV-Board)
+# TigoMonitor partition table for 16 MB flash (e.g. ESP32-P4-Function-EV-Board)
 # Adds a LittleFS-backed `tsdb` partition for esp_tsdb time-series storage.
 # Empty offset column = auto-allocate (ESP-IDF computes sequentially).
 #

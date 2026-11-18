@@ -2,7 +2,7 @@
 title: Home Assistant Integration
 ---
 
-This guide shows you how to surface Tigo Monitor data in Home Assistant — the Energy Dashboard, custom Lovelace views, automations, and the REST API. It's written for hobbyist and prosumer solar owners running Home Assistant alongside the ESPHome device.
+This guide shows you how to surface TigoMonitor data in Home Assistant — the Energy Dashboard, custom Lovelace views, automations, and the REST API. It's written for hobbyist and prosumer solar owners running Home Assistant alongside the ESPHome device.
 
 > **You may not need any of this.** The device already serves a full built-in web dashboard — a single-page app — at `http://<device-ip>/`. It shows per-string heatmaps, live panel readings, alerts, and topology out of the box, and it works under Home Assistant Ingress with no extra configuration. Hand-building Lovelace cards is an **optional** customization path, not a requirement. See [Web Server & API](/esphome-tigomonitor/guides/web-server/) for the SPA and Ingress details.
 
@@ -283,7 +283,7 @@ cards:
 
 ## API Access
 
-You can also pull Tigo Monitor data through the REST API instead of ESPHome-native sensors.
+You can also pull TigoMonitor data through the REST API instead of ESPHome-native sensors.
 
 ```yaml
 rest:

@@ -167,6 +167,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The name is TigoMonitor, one word, everywhere.** The web UI's sidebar,
+  tab title and sign-in page, the docs site, and the Raspberry Pi's Home
+  Assistant device all said "Tigo Monitor" while the rest of the copy said
+  TigoMonitor. On the Pi, Home Assistant renames the device in place and
+  keeps its entity IDs; a name you gave the device yourself stays. The
+  browser may ask for the web UI password once more, since its sign-in
+  prompt names the device. Board YAML entity names are unchanged.
+
 - **No Bus control page any more (Raspberry Pi and other Linux).** Its
   PV output and discovery window switches are on System setup, under the
   tasks, while the Pi runs or stands by for the bus; its figures are a Bus

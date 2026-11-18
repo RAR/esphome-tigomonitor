@@ -1,4 +1,4 @@
-# Example Tigo Monitor Configuration with AtomS3R Display
+# Example TigoMonitor Configuration with AtomS3R Display
 # This demonstrates the AtomS3R with built-in LCD display
 
 # Include board-specific hardware configuration
@@ -60,7 +60,7 @@ tigo_monitor:
 font:
 text_sensor:
 
-# Tigo Monitor Control Buttons
+# TigoMonitor Control Buttons
 button:
   - platform: tigo_monitor
     name: "Generate YAML Config"

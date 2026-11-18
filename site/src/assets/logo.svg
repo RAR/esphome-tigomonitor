@@ -9,7 +9,7 @@
   Full-detail version:  docs/images/logo.svg
   16px version:         site/public/favicon.svg
 -->
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Tigo Monitor">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="TigoMonitor">
   <defs>
     <linearGradient id="site-tile" x1="0" y1="0" x2="0" y2="1">
       <stop offset="0%"  stop-color="#16213B"/>

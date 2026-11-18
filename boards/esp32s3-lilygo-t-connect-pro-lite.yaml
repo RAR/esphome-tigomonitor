@@ -140,7 +140,7 @@ uart:
   stop_bits: 1
   rx_buffer_size: 2048
 
-# --- Tigo Monitor ------------------------------------------------------------
+# --- TigoMonitor ------------------------------------------------------------
 tigo_monitor:
   id: tigo_hub
   uart_id: tigo_uart

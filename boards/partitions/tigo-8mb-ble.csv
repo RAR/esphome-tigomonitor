@@ -1,4 +1,4 @@
-# Tigo Monitor partition table for 8 MB flash WITH the CCA-over-BLE bridge.
+# TigoMonitor partition table for 8 MB flash WITH the CCA-over-BLE bridge.
 # Folding the ble_client/esp32_ble stack into the monitor firmware pushes the app
 # past the stock 1.75 MB slot, so each OTA app slot grows to 2.25 MB.
 #

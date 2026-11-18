@@ -8,7 +8,7 @@ export default defineConfig({
   base: '/esphome-tigomonitor',
   integrations: [
     starlight({
-      title: 'Tigo Monitor',
+      title: 'TigoMonitor',
       // "Emitting" brand mark. Three cuts of the same drawing, each tuned to
       // its render size — see the comments in each file. The favicon matches
       // the one the device itself serves, so a docs tab and a live-rig tab
