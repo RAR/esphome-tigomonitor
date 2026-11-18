@@ -894,11 +894,16 @@ static const char *const QUERY_SMART_S = "^00Smrt_........S0000...0000\r";
 // again, 3 minutes on, then 2 minutes later each time (up to 30), until
 // one comes. A node first heard gets all six reads (as every node did after
 // a CCA reboot); one heard again after half an hour asleep gets ^00Tests (as
-// each did at sunrise). Two answers bring a write, with writes on: an Info
-// whose ninth word is 00 brings #00w255 (50 of 50 in the capture; its
-// field read FF on 104 other answers), and Info is read again 40 minutes
-// on; a Smrt in mode N brings ^00Smrt_........S0000...0000 (30 of 30), and
-// Smrt is read again to see it took. What the fields mean isn't known.
+// each did at sunrise) and ^00Info. Two answers bring a write, with writes
+// on. An Info whose ninth word is 00 brings #00w255 (50 of 50 in the
+// capture; the word read FF on 104 other answers), and Info is read again
+// 40 minutes on. That word is the optimizer's StartPWM, the PWM it starts
+// producing at, and w255 sets it to the CCA's configured 255; the CCA
+// rewrites it on every Info that differs, as we do. It can be back at 00
+// after a night unpowered (seen on the roof 2026-11-18), hence the Info
+// read on waking. A Smrt in mode N brings ^00Smrt_........S0000...0000
+// (30 of 30), and Smrt is read again to see it took; what Smrt's fields
+// mean isn't known.
 // Unlike the CCA, which rewrote the same nodes all day, the Smrt write goes
 // once a node a session: an H9 answers N to every read and reports S only
 // in its reply to the write itself (its firmware, 3.5.0 and 4.0.3), so a
@@ -1039,6 +1044,7 @@ class Queries {
     } else if (now_ms - h->second >= ASLEEP_MS) {
       drop_(tuid);
       add_(tuid, tests, now_ms);
+      add_(tuid, info, now_ms);  // StartPWM can be 00 after a night unpowered
     }
     heard_ms_[tuid] = now_ms;
   }
