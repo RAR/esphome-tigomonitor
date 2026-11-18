@@ -4243,9 +4243,16 @@
   // A settings answer's tooltip: stored or not, how it compares, the tokens.
   // The !Smrt answer's fields after "!Smrt", by the CCA's own names, scales
   // and units (the CCA's field table; the analysis side, 2026-11-08): one
-  // layout for every firmware. Index 9 is the stored flag. A K8's answer is
-  // cut at 58 characters, two digits into UclLimit, so it carries 0-10 whole
-  // and a fragment; an H9's is whole but its firmware reports zeros.
+  // layout for every firmware. Index 9 is the stored flag. K8 answers heard
+  // while a CCA ran the bus were cut at 58 characters, two digits into
+  // UclLimit, so carried 0-10 whole and a fragment; to the Pi's own reads
+  // they come whole. An H9's is whole but its firmware reports zeros.
+  // 11-14 are the optimizer's own protection settings, which a CCA never
+  // writes (the analysis side, 2026-11-18): UclLimit is an input current
+  // limit that applies only below UclThrsh, an input voltage; OvMinPwm the
+  // lowest PWM (of 255) it backs off to on over-voltage, 9 on K8.0120/0130
+  // and 0 on K8.0131; BaseOverride a 0/1 flag. AcLoss (10) is active-low:
+  // 0 is shutdown on AC loss enabled, 1 disabled.
   const SMRT_FIELDS = [
     ['SwVout', 0.05, 2, ' V'], ['OutResis', 0.01953125, 3, ' Ω'], ['HwVout', 0.05, 2, ' V'],
     ['DnPwmTim', 0.001, 3, ' s'], ['UpPwmTim', 0.001, 3, ' s'], ['PwmThrsh', 1, 0, ''],
@@ -4269,19 +4276,33 @@
     const t = settings.split(' ');
     return SMRT_WHOLE.map(i => t[i] || '').join(' ');
   }
-  // [name, text] for each field the answer carries whole.
+  // [name, text] for each field the answer carries whole. The current limit
+  // and its threshold read as one ("1.0 A below 32 V"): alone, "1 A" reads
+  // as a cap on an optimizer that runs at 9 A.
   function smartFields(settings) {
     const t = settings.split(' '), full = t.length >= SMRT_FIELDS.length;
-    const out = [];
+    const out = [], num = (v, k) => String(+(parseInt(v, 16) * k).toFixed(2));
     t.forEach((v, i) => {
       const f = SMRT_FIELDS[i];
-      if (!f || (!full && !SMRT_WHOLE.includes(i))) return;
+      if (!f || (!full && !SMRT_WHOLE.includes(i)) || f[0] === 'UclThrsh') return;
       const n = parseInt(v, 16);
-      out.push([f[0], f[1] === null || isNaN(n) ? v
+      if (f[0] === 'UclLimit' && !isNaN(n) && !isNaN(parseInt(t[i + 1], 16)))
+        out.push([f[0], `${(+(n * f[1]).toFixed(2)).toFixed(1)} A below ${num(t[i + 1], 0.05)} V`]);
+      else if (f[0] === 'OvMinPwm' && !isNaN(n))
+        out.push([f[0], n === 0 ? '0 (can switch off)' : `${n} (${(n / 255 * 100).toFixed(1)}%)`]);
+      // Active-low: 0 is shutdown on AC loss enabled (a CCA's "ON" writes 0).
+      else if (f[0] === 'AcLoss' && !isNaN(n) && n <= 1)
+        out.push([f[0], n === 0 ? 'On' : 'Off']);
+      else if (f[0] === 'BaseOverride')
+        out.push([f[0], /^0+$/.test(v) ? 'Off' : /^0*1$/.test(v) ? 'On' : v]);
+      else out.push([f[0], f[1] === null || isNaN(n) ? v
         : n === 0xFFF && SMRT_NO_LIMIT.includes(f[0]) ? 'No limit (max)' : (n * f[1]).toFixed(f[2]) + f[3]]);
     });
     return out;
   }
+  // The fields compared with most of a family: the protection settings
+  // (11-14) differ by firmware version, so they're shown, not compared.
+  const SMRT_COMPARED = new Set(SMRT_WHOLE.map(i => SMRT_FIELDS[i] && SMRT_FIELDS[i][0]).filter(Boolean));
   // The four MPPT parameters, the last four bytes of an answer to ^00Mppt, as
   // the CCA's settings page names them (its "Additional MPPT command
   // settings", 5-8) and scales them (the owner's analysis, 2026-11-09). Every
@@ -4296,13 +4317,16 @@
     const b = (params || '').split(' ').map(x => parseInt(x, 16));
     return b.length === 4 && b.every(v => !isNaN(v)) ? MPPT_FIELDS.map(([code, , f], i) => [code, f(b[i])]) : [];
   }
-  // Plain names for the panel, by section; the CCA's name goes beneath.
+  // Plain names for the panel, by section; the CCA's name goes beneath
+  // (or the third entry, where one row shows two of its fields).
   const SMRT_GROUPS = [
     ['Output', [['SwVout', 'Output voltage setpoint'], ['HwVout', 'Output voltage limit'], ['OutResis', 'Output resistance']]],
-    ['Switching', [['DnPwmTim', 'PWM ramp down'], ['UpPwmTim', 'PWM ramp up'], ['PwmThrsh', 'PWM threshold'], ['OvRecTim', 'Over-voltage recovery']]],
-    ['Input', [['UvinLvLo', 'Under-voltage, low'], ['UvinLvHi', 'Under-voltage, high']]],
+    ['Switching', [['DnPwmTim', 'PWM ramp down'], ['UpPwmTim', 'PWM ramp up'], ['PwmThrsh', 'PWM threshold'], ['OvRecTim', 'Over-voltage recovery'],
+      ['OvMinPwm', 'Over-voltage minimum PWM']]],
+    ['Input', [['UvinLvLo', 'Under-voltage, low'], ['UvinLvHi', 'Under-voltage, high'],
+      ['UclLimit', 'Current limit at low input voltage', 'UclLimit · UclThrsh']]],
     ['Rapid shutdown', [['AcLoss', 'Shut down on AC loss']]],
-    ['Limits', [['UclLimit', 'Current limit'], ['UclThrsh', 'Current limit threshold'], ['OvMinPwm', 'Over-voltage minimum PWM'], ['BaseOverride', 'Discharge enabled']]],
+    ['Other', [['BaseOverride', 'Base-memory override']]],
   ];
   // Which optimizers' rows are open (by address), kept across polls; the
   // one just opened animates in, the rest are redrawn still.
@@ -4360,7 +4384,7 @@
     const pill = zeros ? '<span class="smart-pill quiet">Not reported</span>'
       : `<span class="smart-pill${o.stored ? '' : ' warn'}">${o.stored ? 'Stored' : 'Not stored'}</span>`;
     const mine = Object.fromEntries(smartFields(o.settings));
-    const most = peers.usualSettings ? Object.fromEntries(smartFields(peers.usualSettings)) : {};
+    const most = peers.usualSettings ? Object.fromEntries(smartFields(peers.usualSettings).filter(([k]) => SMRT_COMPARED.has(k))) : {};
     const nDiff = Object.keys(mine).filter(k => most[k] !== undefined && most[k] !== mine[k]).length;
     const verdictText = zeros
       ? (peers.mppt ? 'Only its MPPT parameters are reported.' : 'Nothing here can be checked: its firmware answers the same whatever it holds.')
@@ -4383,14 +4407,14 @@
       const groups = SMRT_GROUPS.map(([title, items]) => {
         const shown = items.filter(([code]) => mine[code] !== undefined);
         if (!shown.length) return '';
-        return `<div class="smart-group">${title}</div>` + shown.map(([code, label]) => {
+        return `<div class="smart-group">${title}</div>` + shown.map(([code, label, codes]) => {
           const diff = most[code] !== undefined && most[code] !== mine[code];
-          return `<div class="smart-row${r.differs && diff ? ' differs' : ''}"><span class="smart-name"><span>${label}</span><span class="smart-code">${code}</span></span>` +
+          return `<div class="smart-row${r.differs && diff ? ' differs' : ''}"><span class="smart-name"><span>${label}</span><span class="smart-code">${codes || code}</span></span>` +
             `<span class="smart-val">${topoEscape(mine[code])}</span><span class="smart-most">${topoEscape(most[code] ?? '—')}</span></div>`;
         }).join('');
       }).join('');
       const cut = t.length < SMRT_FIELDS.length
-        ? `<div class="smart-note">Not in a ${topoEscape(fam)}'s answer: the current limit, its threshold, minimum PWM and Discharge enabled. Its reply is cut short, so these never arrive.</div>` : '';
+        ? `<div class="smart-note">Not in this answer: the low-voltage current limit, over-voltage minimum PWM and base-memory override. It was cut short, as ${topoEscape(fam)} answers were while a CCA ran the bus, so these never arrived.</div>` : '';
       return [verdict + `<div class="smart-table"><div class="smart-cols"><span>Setting</span><span>This one</span><span>Most ${topoEscape(fam)}s</span></div>${groups}${cut}</div>`, mpptTable];
     }
   }

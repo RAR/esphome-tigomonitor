@@ -126,6 +126,35 @@ test("Devices, on the Pi: each optimizer's settings, stored or not, and the odd 
   await ctx.close();
 });
 
+// The four fields after AcLoss arrive only in a whole answer. They're the
+// optimizer's own protection settings, which a CCA never writes: the current
+// limit only applies below its input-voltage threshold, so the two read as
+// one line; OvMinPwm differs by firmware, so none of them is compared.
+test("Devices, on the Pi: a whole settings answer's protection fields, in words", async () => {
+  const { page, errors } = await open(true);
+  await page.waitForFunction(() => /Not reported/.test(document.getElementById('nodes-tbody').textContent));
+  const dev = routes['/api/devices'].devices;
+  const id = (i) => `#nd-${dev[i].addr.toUpperCase()}`;
+  const rows = (i) => page.$$eval(`${id(i)} .smart-row:not(.mppt-row)`, (rs) => rs.map((r) => [
+    r.querySelector('.smart-name > span').textContent, r.querySelector('.smart-code').textContent,
+    r.querySelector('.smart-val').textContent, r.querySelector('.smart-most').textContent]));
+  for (const i of [0, 4]) {
+    await page.click(`#nodes-tbody tr[data-addr="${dev[i].addr}"] .node-toggle`);
+    await page.waitForSelector(id(i));
+  }
+  const r0 = await rows(0);
+  assert.deepEqual(r0.find((r) => r[1] === 'UclLimit · UclThrsh'), ['Current limit at low input voltage', 'UclLimit · UclThrsh', '1.0 A below 32 V', '—']);
+  assert.deepEqual(r0.find((r) => r[1] === 'OvMinPwm'), ['Over-voltage minimum PWM', 'OvMinPwm', '9 (3.5%)', '—']);
+  assert.deepEqual(r0.find((r) => r[1] === 'BaseOverride'), ['Base-memory override', 'BaseOverride', 'Off', '—']);
+  // AcLoss is active-low: 0 is shutdown on AC loss enabled (a CCA's "ON"
+  // writes 0), so it reads On, beside most K8s' On.
+  assert.deepEqual(r0.find((r) => r[1] === 'AcLoss'), ['Shut down on AC loss', 'AcLoss', 'On', 'On']);
+  assert.equal(r0.some((r) => r[1] === 'UclThrsh'), false);
+  assert.doesNotMatch(await page.textContent(id(0)), /Limits|Discharge enabled|never arrive/);
+  assert.deepEqual((await rows(4)).find((r) => r[1] === 'OvMinPwm'), ['Over-voltage minimum PWM', 'OvMinPwm', '0 (can switch off)', '—']);
+  assert.deepEqual(errors, []);
+});
+
 test("Devices, on the Pi: a row opens in place to show that optimizer, its settings beside what its family has", async () => {
   const { page, ctx, errors } = await open(true);
   await page.waitForFunction(() => /Not reported/.test(document.getElementById('nodes-tbody').textContent));
