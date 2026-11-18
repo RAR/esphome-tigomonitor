@@ -259,6 +259,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The README and docs screenshots showed an empty system.** Every
+  ESP32 view rendered "0 / 0" panels and "No nodes match" because the
+  screenshot script answered each request with `false`; regenerated with
+  the fixture array.
+
+- **The web UI works better with a keyboard, a screen reader and a
+  phone.** Every filter and settings field now has a name a screen reader
+  reads out, and focused fields and cards show a clear ring. On a phone,
+  Devices keeps each row on one line with name, string, volts and power in
+  view (address, barcode and amps are in the row's details), and the
+  "No nodes match" message is no longer cut off.
+
 - **An optimizer no TAP lists can be forgotten (Raspberry Pi and other
   Linux).** One a CCA listed and was later removed (in EI, say) stayed in
   Devices, and Retire said only "not in the table: nothing to remove".

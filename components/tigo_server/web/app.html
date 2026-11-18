@@ -476,7 +476,9 @@
     background: var(--bg-2); border: 1px solid var(--border); color: var(--text);
     padding: 7px 12px; border-radius: 6px; font-size: 12px; min-width: 240px;
   }
-  .input:focus { outline: none; border-color: var(--accent); }
+  /* A 1 px border changing colour is too faint to find the caret by; the
+     sign-in page's soft ring is used for every field. */
+  .input:focus { border-color: var(--accent); outline: 2px solid color-mix(in srgb, var(--accent) 35%, transparent); outline-offset: 1px; }
   .table-toolbar .input.compact { min-width: auto; }
   .table-meta { font-size: 12px; color: var(--text-dim); }
 
@@ -558,6 +560,7 @@
 
   .table-wrap { background: var(--bg-2); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
   table.nodes { width: 100%; border-collapse: collapse; font-size: 14px; }
+  .nodes-empty { text-align: center; color: var(--text-faint); padding: 40px 0; }
   table.nodes th[data-sort] { cursor: pointer; user-select: none; }
   table.nodes th[data-sort]:hover { color: var(--text); }
   table.nodes th.sort-asc::after { content: ' ↑'; color: var(--accent-text); }
@@ -615,7 +618,7 @@
   .topo-inv-name-edit-btn {
     background: none; border: 1px solid var(--border); color: var(--text-dim);
     border-radius: 4px; padding: 2px 6px; font-size: 11px; cursor: pointer;
-    margin-left: 4px;
+    margin-left: 4px; min-width: 24px; min-height: 24px;
   }
   .topo-inv-name-edit-btn:hover { color: var(--text); border-color: var(--accent-2); }
   .topo-inv-name-input {
@@ -798,6 +801,7 @@
   .setup-start { display: flex; flex-wrap: wrap; align-items: center; gap: 14px 22px; width: 100%; padding: 18px 22px; margin-bottom: 22px; text-align: left;
                  border-radius: 10px; border: 1px solid var(--border); border-top: 4px solid var(--task); background: var(--bg-2); color: var(--text); font: inherit; cursor: pointer; }
   .setup-start:hover, .setup-start:focus-visible { border-color: var(--task); outline: none; }
+  .setup-start:focus-visible { outline: 2px solid var(--task); outline-offset: 2px; }
   .setup-start .in { flex: 1 1 320px; display: flex; flex-direction: column; gap: 6px; }
   .setup-start strong { font-size: 17px; }
   .setup-start .in > span { font-size: 13px; color: var(--text-dim); }
@@ -808,6 +812,7 @@
   /* Every step done: rolled up to one line that says so. */
   .setup-start.done { flex-wrap: nowrap; gap: 14px; padding: 12px 16px; margin-bottom: 18px; border-top: 1px solid var(--border); }
   .setup-start.done:hover, .setup-start.done:focus-visible { border-color: var(--good); }
+  .setup-start.done:focus-visible { outline-color: var(--good); }
   .setup-start.done .ico { width: 32px; height: 32px; flex: none; border-radius: 50%; display: grid; place-items: center; background: color-mix(in srgb, var(--good) 15%, transparent); }
   .setup-start.done .in { flex: 1 1 auto; gap: 2px; min-width: 0; }
   .setup-start.done strong { font-size: 14px; }
@@ -861,6 +866,7 @@
                 background: var(--bg-2); border: 1px solid var(--border); color: var(--text); font: inherit; }
   .setup-task::before { content: ""; height: 4px; background: var(--task); }
   .setup-task:hover, .setup-task:focus-visible { border-color: var(--task); outline: none; }
+  .setup-task:focus-visible { outline: 2px solid var(--task); outline-offset: 2px; }
   .setup-task .art { height: 92px; margin: 14px 14px 0; border-radius: 10px; display: flex; align-items: center; justify-content: center;
                      background: color-mix(in srgb, var(--task) 10%, transparent); }
   .setup-task .in { flex: 1; display: flex; flex-direction: column; gap: 8px; padding: 14px 18px 18px; }
@@ -877,7 +883,7 @@
   .setup-taps strong { font-size: 13px; }
   .setup-taps span { color: var(--text-dim); }
   .setup-taps .lost { color: var(--warn-text); font-weight: 600; }
-  .setup-health .head a { margin-left: auto; font-size: 12px; color: var(--accent-2-text); }
+  .setup-health .head a { margin-left: auto; padding-block: 4px; font-size: 12px; color: var(--accent-2-text); }
   .setup-bar { display: flex; gap: 2px; height: 12px; border-radius: 6px; overflow: hidden; background: var(--bg-3); }
   .setup-bar span { min-width: 6px; }
   .setup-key { display: flex; flex-wrap: wrap; gap: 6px 22px; font-size: 12px; color: var(--text-dim); }
@@ -1010,6 +1016,7 @@
   .mesh-card { font: inherit; text-align: left; color: inherit; cursor: pointer; display: flex; flex-direction: column; gap: 5px;
                padding: 8px 9px; border-radius: 8px; background: var(--bg-3); border: 1px solid var(--border); min-height: 96px; }
   .mesh-card:hover, .mesh-card:focus-visible { border-color: var(--text-faint); outline: none; }
+  .mesh-card:focus-visible { outline: 2px solid var(--accent-2); outline-offset: 2px; }
   .mesh-card[aria-pressed="true"] { border-color: var(--text); box-shadow: 0 0 0 1px var(--text); }
   .mesh-card.tier-poor { border-color: color-mix(in srgb, var(--bad) 55%, transparent); }
   .mesh-card-top { display: flex; justify-content: space-between; align-items: center; font-size: 12px; font-weight: 600; }
@@ -1202,7 +1209,7 @@
     background: var(--bg); border: 1px solid var(--border); color: var(--text);
     border-radius: 4px; padding: 3px 8px; font-size: 13px; font-weight: 600; min-width: 120px; max-width: 220px;
   }
-  .topo-ed-name:focus { border-color: var(--accent-2); outline: none; }
+  .topo-ed-name:focus { border-color: var(--accent-2); outline: 2px solid color-mix(in srgb, var(--accent-2) 35%, transparent); outline-offset: 1px; }
   .topo-ed-canon { color: var(--text-faint); font-size: 11px; }
   .topo-add {
     background: none; border: 1px dashed var(--border); color: var(--text-dim);
@@ -1268,6 +1275,7 @@
   .cfg-row:has(> .cfg-text) .cfg-ctrl .cfg-input[type="number"] { max-width: 120px; }
   .cfg-row:has(> .cfg-text) .cfg-ctrl select.cfg-input { max-width: 480px; }
   .cfg-row:has(> .cfg-text) .cfg-switch { min-width: 120px; }  /* Save lines up with the number rows' */
+  .cfg-input:focus-visible { border-color: var(--accent); outline: 2px solid color-mix(in srgb, var(--accent) 35%, transparent); outline-offset: 1px; }
   .cfg-input { width: 110px; padding: 7px 9px; background: var(--bg-2); border: 1px solid var(--border); border-radius: 6px; color: var(--text); font-size: 13px; }
   .cfg-unit { color: var(--text-dim); font-size: 12px; margin-right: 2px; }
   .cfg-switch { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text); cursor: pointer; min-width: 64px; min-height: 24px; }
@@ -1394,6 +1402,15 @@
        than reflowing into card-list form (which loses at-a-glance compare). */
     .table-wrap { overflow-x: auto; }
     table.nodes { min-width: 720px; }
+    /* Devices: at 720 px its cells wrapped into three-line rows with Power
+       and State off the right edge. Address, barcode and amps are in each
+       row's details, so drop them, keep each cell on one line, and let the
+       table take its own width. */
+    table.nodes.devices { min-width: 0; }
+    /* Centred across a table wider than the phone, it was cut off. */
+    .nodes-empty { text-align: left; padding: 32px 16px; }
+    table.nodes.devices tr:not(.node-detail) > :is(th, td):not([colspan]) { white-space: nowrap; }
+    table.nodes.devices tr:not(.node-detail) > :is(:nth-child(2), :nth-child(3), :nth-child(6)):not([colspan]) { display: none; }
 
     /* History segmented controls / chart cards */
     .controls { flex-wrap: wrap; }
@@ -1695,7 +1712,7 @@
       <div class="topo-toolbar">
         <button class="btn" id="topo-expand-btn">Expand all</button>
         <button class="btn" id="topo-collapse-btn">Collapse all</button>
-        <input class="input" id="topo-filter" placeholder="Filter by name, barcode, or string…">
+        <input class="input" id="topo-filter" aria-label="Filter the topology" placeholder="Filter by name, barcode, or string…">
         <span class="topo-summary" id="topo-summary">—</span>
         <button class="btn" id="topo-cloud-import-btn" style="display:none" title="Pull panel names + layout from Tigo's cloud">Import from Tigo cloud</button>
         <button class="btn" id="topo-edit-btn" title="Add inverters, MPPTs and strings, and drag panels into place">Edit layout</button>
@@ -1795,11 +1812,11 @@
       </div>
 
       <div class="table-toolbar">
-        <input class="input" id="nodes-search" placeholder="Search name, barcode, address…">
-        <select class="input compact" id="nodes-filter-string">
+        <input class="input" id="nodes-search" aria-label="Search devices" placeholder="Search name, barcode, address…">
+        <select class="input compact" id="nodes-filter-string" aria-label="Show string">
           <option value="">All strings</option>
         </select>
-        <select class="input compact" id="nodes-filter-state">
+        <select class="input compact" id="nodes-filter-state" aria-label="Show state">
           <option value="">All states</option>
           <option value="ok">Active</option>
           <option value="warn">Shaded</option>
@@ -1814,7 +1831,7 @@
       </div>
 
       <div class="table-wrap">
-        <table class="nodes">
+        <table class="nodes devices">
           <thead>
             <tr>
               <th data-sort="name">Name</th>
@@ -1832,7 +1849,7 @@
             </tr>
           </thead>
           <tbody id="nodes-tbody">
-            <tr><td colspan="11" style="text-align:center;color:var(--text-faint);padding:40px 0">Loading…</td></tr>
+            <tr><td colspan="12" class="nodes-empty">Loading…</td></tr>
           </tbody>
         </table>
       </div>
@@ -2380,7 +2397,7 @@
       <section class="bx-strip" id="bus-strip" aria-label="The last 5 minutes"></section>
       <div class="table-toolbar">
         <span id="bus-chips" role="group" aria-label="Show" style="display:flex;gap:6px;flex-wrap:wrap"></span>
-        <input class="input" id="buslog-search" placeholder="Filter, e.g. 0002 or GatewayCfg">
+        <input class="input" id="buslog-search" aria-label="Filter bus traffic" placeholder="Filter, e.g. 0002 or GatewayCfg">
         <button class="btn" id="buslog-pause">Pause</button>
       </div>
       <div class="bx-table" id="bus-box" role="table" aria-label="Exchanges">
@@ -2730,6 +2747,27 @@
     document.getElementById('theme-toggle').textContent = theme === 'light' ? '☾' : '☀';
   }
   // No choice saved yet: follow the device's own light or dark setting.
+  // A settings row names its control in a <strong> beside it, which is not
+  // a <label>: point each unlabelled control at that title, and at the line
+  // under it, so a screen reader says what the field is.
+  let cfgLabelSeq = 0;
+  function labelCfgRows(scope) {
+    scope.querySelectorAll('.cfg-row').forEach(row => {
+      const title = row.querySelector('.cfg-text > strong');
+      if (!title) return;
+      if (!title.id) title.id = `cfg-t-${++cfgLabelSeq}`;
+      const desc = row.querySelector('.cfg-text > span:not(.cfg-default)');
+      if (desc && !desc.id) desc.id = `${title.id}-d`;
+      row.querySelectorAll('.cfg-ctrl input, .cfg-ctrl select, .cfg-ctrl textarea').forEach(c => {
+        if (c.type === 'hidden' || c.hasAttribute('aria-label') || c.hasAttribute('aria-labelledby')) return;
+        if (c.type !== 'checkbox' && c.labels && c.labels.length) return;
+        c.setAttribute('aria-labelledby', title.id);
+        if (desc && !c.hasAttribute('aria-describedby')) c.setAttribute('aria-describedby', desc.id);
+      });
+    });
+  }
+  labelCfgRows(document);
+
   const initialTheme = localStorage.getItem('tigoTheme') || (matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
   applyTheme(initialTheme);
   document.getElementById('theme-toggle').addEventListener('click', () => {
@@ -4141,7 +4179,7 @@
     }
 
     if (rows.length === 0) {
-      html = '<tr><td colspan="11" style="text-align:center;color:var(--text-faint);padding:40px 0">No nodes match the current filters.</td></tr>';
+      html = '<tr><td colspan="12" class="nodes-empty">No nodes match the current filters.</td></tr>';
     }
     setHTML(tbody, html);
     nodesOpening = null;
@@ -6183,11 +6221,12 @@
           </div>
           <div class="cfg-ctrl">
             ${control}
-            <button class="btn" data-cfg-save="${f.key}">Save</button>
-            <button class="btn cfg-revert" data-cfg-reset="${f.key}"${ov ? '' : ' disabled'} title="Revert to ${PLATFORM === 'linux' ? '' : 'YAML '}default">Revert</button>
+            <button class="btn" data-cfg-save="${f.key}" aria-label="Save ${cloudEsc(f.label)}">Save</button>
+            <button class="btn cfg-revert" data-cfg-reset="${f.key}" aria-label="Revert ${cloudEsc(f.label)}"${ov ? '' : ' disabled'} title="Revert to ${PLATFORM === 'linux' ? '' : 'YAML '}default">Revert</button>
           </div>
         </div>`;
     }).join('');
+    labelCfgRows(rows);
     rows.querySelectorAll('[data-cfg-save]').forEach(b =>
       b.addEventListener('click', () => cfgSave(b.dataset.cfgSave)));
     rows.querySelectorAll('[data-cfg-reset]').forEach(b =>
@@ -6955,8 +6994,8 @@
     const row = document.createElement('div');
     row.className = 'cfg-row';
     row.innerHTML = `
-      <div class="cfg-ctrl"><input class="cfg-input pi-inv-name" style="width:160px" placeholder="Inverter name" autocomplete="off"></div>
-      <div class="cfg-ctrl" style="flex:1"><input class="cfg-input pi-inv-mppts" style="width:100%;min-width:180px" placeholder="MPPT 1, MPPT 2" autocomplete="off"></div>
+      <div class="cfg-ctrl"><input class="cfg-input pi-inv-name" style="width:160px" aria-label="Inverter name" placeholder="Inverter name" autocomplete="off"></div>
+      <div class="cfg-ctrl" style="flex:1"><input class="cfg-input pi-inv-mppts" style="width:100%;min-width:180px" aria-label="MPPTs on this inverter" placeholder="MPPT 1, MPPT 2" autocomplete="off"></div>
       <div class="cfg-ctrl"><button class="btn pi-inv-remove">Remove</button></div>`;
     row.querySelector('.pi-inv-name').value = inv.name || '';
     row.querySelector('.pi-inv-mppts').value = (inv.mppts || []).join(', ');
