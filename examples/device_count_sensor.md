@@ -1,6 +1,6 @@
 # Device Count Sensor Example
 
-This example shows how to use the new device count sensor in your Tigo Monitor ESPHome component.
+This example shows how to use the new device count sensor in your TigoMonitor ESPHome component.
 
 ## Basic Configuration
 

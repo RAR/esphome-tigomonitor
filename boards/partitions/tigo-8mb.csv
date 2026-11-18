@@ -1,4 +1,4 @@
-# Tigo Monitor partition table for 8 MB flash (e.g. AtomS3R)
+# TigoMonitor partition table for 8 MB flash (e.g. AtomS3R)
 # Adds a LittleFS-backed `tsdb` partition for esp_tsdb time-series storage.
 # Empty offset column = auto-allocate (ESP-IDF computes sequentially).
 #

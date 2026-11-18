@@ -744,7 +744,7 @@ bool TigoWebServer::check_web_auth(httpd_req_t *req) {
   if (buf_len == 0) {
     // Send 401 with WWW-Authenticate header to trigger browser auth prompt
     httpd_resp_set_status(req, "401 Unauthorized");
-    httpd_resp_set_hdr(req, "WWW-Authenticate", "Basic realm=\"Tigo Monitor\"");
+    httpd_resp_set_hdr(req, "WWW-Authenticate", "Basic realm=\"TigoMonitor\"");
     httpd_resp_send(req, "401 Unauthorized", HTTPD_RESP_USE_STRLEN);
     return false;
   }
@@ -769,7 +769,7 @@ bool TigoWebServer::check_web_auth(httpd_req_t *req) {
   if (auth_str.length() < 6 || auth_str.substr(0, 6) != "Basic ") {
     // Send 401 to trigger browser auth prompt
     httpd_resp_set_status(req, "401 Unauthorized");
-    httpd_resp_set_hdr(req, "WWW-Authenticate", "Basic realm=\"Tigo Monitor\"");
+    httpd_resp_set_hdr(req, "WWW-Authenticate", "Basic realm=\"TigoMonitor\"");
     httpd_resp_send(req, "401 Unauthorized", HTTPD_RESP_USE_STRLEN);
     return false;
   }
@@ -787,7 +787,7 @@ bool TigoWebServer::check_web_auth(httpd_req_t *req) {
   if (ret != 0 || decoded_len == 0) {
     ESP_LOGW(TAG, "Failed to decode Basic Auth credentials");
     httpd_resp_set_status(req, "401 Unauthorized");
-    httpd_resp_set_hdr(req, "WWW-Authenticate", "Basic realm=\"Tigo Monitor\"");
+    httpd_resp_set_hdr(req, "WWW-Authenticate", "Basic realm=\"TigoMonitor\"");
     httpd_resp_send(req, "401 Unauthorized", HTTPD_RESP_USE_STRLEN);
     return false;
   }
@@ -799,7 +799,7 @@ bool TigoWebServer::check_web_auth(httpd_req_t *req) {
   if (colon_pos == std::string::npos) {
     ESP_LOGW(TAG, "Invalid Basic Auth format");
     httpd_resp_set_status(req, "401 Unauthorized");
-    httpd_resp_set_hdr(req, "WWW-Authenticate", "Basic realm=\"Tigo Monitor\"");
+    httpd_resp_set_hdr(req, "WWW-Authenticate", "Basic realm=\"TigoMonitor\"");
     httpd_resp_send(req, "401 Unauthorized", HTTPD_RESP_USE_STRLEN);
     return false;
   }
@@ -811,7 +811,7 @@ bool TigoWebServer::check_web_auth(httpd_req_t *req) {
   if (username != server->web_username_ || password != server->web_password_) {
     ESP_LOGW(TAG, "Invalid web credentials provided for user: %s", username.c_str());
     httpd_resp_set_status(req, "401 Unauthorized");
-    httpd_resp_set_hdr(req, "WWW-Authenticate", "Basic realm=\"Tigo Monitor\"");
+    httpd_resp_set_hdr(req, "WWW-Authenticate", "Basic realm=\"TigoMonitor\"");
     httpd_resp_send(req, "401 Unauthorized", HTTPD_RESP_USE_STRLEN);
     return false;
   }

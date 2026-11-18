@@ -1,4 +1,4 @@
-# Example Tigo Monitor Configuration using ESP32-P4 EVBoard
+# Example TigoMonitor Configuration using ESP32-P4 EVBoard
 # This demonstrates how to use the board-specific configurations.
 #
 # The hardware base (esp32p4-evboard.yaml) provides the P4 essentials:
@@ -49,7 +49,7 @@ ota:
     # flag, repartitioning needs a serial flash.
     allow_partition_access: true
 
-# Tigo Monitor Control Buttons
+# TigoMonitor Control Buttons
 button:
   - platform: tigo_monitor
     name: "Generate YAML Config"

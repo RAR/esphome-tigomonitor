@@ -1,4 +1,4 @@
-# Example Tigo Monitor Configuration using the LilyGO T-CAN485
+# Example TigoMonitor Configuration using the LilyGO T-CAN485
 #
 # This is the "Home Assistant only" profile: no web UI, no REST API, no on-flash
 # history. Every value goes to Home Assistant over the native ESPHome API.
@@ -92,7 +92,7 @@ ota:
   - platform: esphome
     password: "YOUR_OTA_PASSWORD"
 
-# Tigo Monitor control buttons — your discovery tooling on a board with no web UI.
+# TigoMonitor control buttons — your discovery tooling on a board with no web UI.
 button:
   - platform: tigo_monitor
     name: "Generate YAML Config"

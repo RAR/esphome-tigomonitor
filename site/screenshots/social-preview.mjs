@@ -34,7 +34,7 @@ const MONO = font('@fontsource/ibm-plex-mono/files/ibm-plex-mono-latin-500-norma
 // The mark, at the full-detail cut — at 128px the six-block frame reads, so
 // this is the docs/images/logo.svg drawing rather than the collapsed header one.
 const MARK = `
-<svg viewBox="0 0 64 64" class="mark" role="img" aria-label="Tigo Monitor">
+<svg viewBox="0 0 64 64" class="mark" role="img" aria-label="TigoMonitor">
   <rect x="9" y="17" width="34" height="28" rx="5" fill="#1D2A63" stroke="#C6D0E2" stroke-width="3.5"/>
   <rect x="16" y="24" width="20" height="5" rx="1" fill="#C6D0E2" fill-opacity=".65"/>
   <rect x="16" y="34" width="13" height="5" rx="1" fill="#F4B23C"/>
