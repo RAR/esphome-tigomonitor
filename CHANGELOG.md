@@ -279,6 +279,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The ESP32 build failed on ESPHome 2026.11.** ESPHome moved
+  `get_mac_address_pretty()` out of the header we include, so
+  `tigo_web_server.cpp` stopped compiling. We now use the buffer form,
+  which exists in 2026.10 and 2026.11 alike. No config change needed.
 - **Optimizers could run each day without their start setting (Raspberry
   Pi and other Linux).** Running the bus, the Pi sets each optimizer's
   StartPWM, the level it starts producing at, as the CCA does. After a
