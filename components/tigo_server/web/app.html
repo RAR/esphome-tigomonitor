@@ -438,6 +438,9 @@
   .seg button.active { background: var(--accent); color: #061018; font-weight: 600; }
 
   .hist-stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 16px; }
+  /* Six bus cards: at most three a row (a column is never under a third), so they
+     split 3+3, 2+2+2 or one a row, never five and one left over. */
+  #diag-master { grid-template-columns: repeat(auto-fit, minmax(max(180px, calc((100% - 24px) / 3)), 1fr)); }
   .hist-stat-card {
     background:
       linear-gradient(160deg, rgba(74,222,128,0.04) 0%, rgba(56,189,248,0.025) 40%, transparent 75%),
@@ -978,8 +981,11 @@
   td.tap-radio .tap-sub, #devices-taps td.num .tap-sub { font-size: 11px; color: var(--text-dim); white-space: nowrap; }
   #setup-bus { margin-top: 28px; }
   td.tap-model .tap-board { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 11px; color: var(--text-dim); font-weight: 400; }
+  /* Beside the version, not under it: a second line made rated rows taller
+     than the rest. */
   table.nodes .node-rating { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; font-size: 11px;
-    color: var(--text-faint); }
+    color: var(--text-faint); margin-left: 4px; }
+  table.nodes td.mono.fw { white-space: nowrap; }
   table.nodes .node-tap { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; font-size: 11px;
                          color: var(--text-faint); white-space: nowrap; }
   td.tap-name .input { width: 12em; }
@@ -4190,7 +4196,7 @@
           <td class="num">${fmtTemp(r.t, 0)} ${tempUnit()}</td>
           <td class="num">${fmtAge(r.age)}</td>
           <td><span class="badge ${r.n.known ? 'stale' : r.state}"${r.n.known ? ' title="Marked known: not reporting, not counted, not flagged as missing"' : ''}>${stateLabel}</span></td>
-          <td class="mono fw">${r.fw ? topoEscape(r.fw.version) : '—'}${r.rating ? `<div class="node-rating">${r.rating.watts} W</div>` : ''}</td>
+          <td class="mono fw">${r.fw ? topoEscape(r.fw.version) : '—'}${r.rating ? ` <span class="node-rating">${r.rating.watts} W</span>` : ''}</td>
           <td class="fw smart">${r.smart
             ? (r.smartPeers.placeholder ? 'Not reported'
               : `<span${r.smart.stored && !r.differs ? '' : ' class="warn"'}>${r.smart.stored ? 'Stored' : 'Not stored'}${r.differs ? ' · differs' : ''}</span>`) : '—'}</td>

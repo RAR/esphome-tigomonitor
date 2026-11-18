@@ -300,7 +300,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   "91% of 2.40 kW rated" on its own line, and the Alerts heading has room
   above it. The History chart's axis labels stay readable over the curve.
   Two Diagnostics headers and the CCA Status header no longer show a stray
-  "—".
+  "—". Diagnostics' six Bus cards split evenly (three and three, or two a
+  row) instead of leaving one alone on a second row, and on Devices an
+  optimizer's rating sits beside its firmware version, so rated rows are no
+  taller than the rest.
 
 - **An optimizer no TAP lists can be forgotten (Raspberry Pi and other
   Linux).** One a CCA listed and was later removed (in EI, say) stayed in
