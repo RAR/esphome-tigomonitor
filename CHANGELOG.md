@@ -267,6 +267,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Optimizers could run each day without their start setting (Raspberry
+  Pi and other Linux).** Running the bus, the Pi sets each optimizer's
+  StartPWM, the level it starts producing at, as the CCA does. After a
+  night unpowered most optimizers had lost the setting again, and the Pi
+  only noticed after a restart. It now checks the setting when an
+  optimizer wakes and sets it again if it was lost. Nothing new is sent;
+  it's the CCA's own Info read and write.
+
 - **The README and docs screenshots showed an empty system.** Every
   ESP32 view rendered "0 / 0" panels and "No nodes match" because the
   screenshot script answered each request with `false`; regenerated with

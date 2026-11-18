@@ -1133,7 +1133,9 @@ static void test_queries() {
   CHECK(w.sent_writes() == 2);
 
   // A node quiet for half an hour is asleep: its queries stop. Heard again,
-  // it gets ^00Tests, as each optimizer does at sunrise.
+  // it gets ^00Tests, as each optimizer does at sunrise, and ^00Info: its
+  // StartPWM (Info's ninth word) can be back at 00 after a night unpowered,
+  // and only an Info read brings the w255 that sets it again.
   Queries s(0, false);
   s.on_poll_reply(poll_reply_with({power_from(0x05)}), 0);
   ask(s, 0, 10000, seq);
@@ -1141,7 +1143,21 @@ static void test_queries() {
   uint32_t dawn = 10 * 3600000;
   s.on_poll_reply(poll_reply_with({power_from(0x05)}), dawn);
   r = ask(s, dawn, dawn + 10000, seq);
-  CHECK(r.size() == 1 && query_text(r[0]) == "^00Tests\r");
+  CHECK(r.size() == 2 && query_text(r[0]) == "^00Tests\r" && query_text(r[1]) == "^00Info\r");
+  // With writes on, that dawn Info at 00 brings the w255.
+  Queries d(0, /*writes=*/true);
+  d.on_poll_reply(poll_reply_with({power_from(0x06)}), 0);
+  d.on_poll_reply(poll_reply_with({string_packet(0x06, "!Info 0027 12 0000 0D81 00 0000 0000 FF 00 0000 0FFF 161 B")}), 1000);
+  ask(d, 0, 20000, seq);
+  CHECK(d.sent_writes() == 0);
+  d.on_poll_reply(poll_reply_with({power_from(0x06)}), dawn);
+  int dawn_info = 0;
+  for (const Request &x : ask(d, dawn, dawn + 10000, seq)) dawn_info += query_text(x) == "^00Info\r";
+  CHECK(dawn_info == 1);
+  d.on_poll_reply(poll_reply_with({string_packet(0x06, "!Info 0027 12 0000 0DC1 00 0000 0000 00 00 0000 0FFF 1F9 B")}), dawn + 10000);
+  int dawn_w255 = 0;
+  for (const Request &x : ask(d, dawn + 10000, dawn + 20000, seq)) dawn_w255 += query_text(x) == QUERY_W255;
+  CHECK(dawn_w255 == 1 && d.sent_writes() == 1);
   // A reply with the long header (status bits 0-4 clear: seven more bytes)
   // is read past it, to the packets.
   Queries l(0, false);
