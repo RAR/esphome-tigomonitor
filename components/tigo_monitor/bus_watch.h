@@ -603,7 +603,8 @@ class BusWatch {
   // come from those pairs); the optimizers' answers need none.
   // poll_stats: keep a mark per poll for WINDOW_MS, for stats(). Each is
   // ~16 bytes, and a busy bus polls ~23 times a second: ~110 KB, more than
-  // an ESP32's internal RAM can spare. Off, stats() counts no polls.
+  // an ESP32's internal RAM can spare (the ESP32 sets TIGO_BUS_ALLOCATOR to
+  // keep them in PSRAM). Off, stats() counts no polls.
   explicit BusWatch(size_t keep = KEEP, bool poll_stats = true)
       : keep_(keep < 1 ? 1 : keep), poll_stats_(poll_stats) {}
 
@@ -613,14 +614,12 @@ class BusWatch {
       on_reply_(f, unix_ms);
       return "";
     }
-    close_open_(unix_ms);
     if (ours) last_ours_ms_ = unix_ms;
     if (f.cmd == CMD_POLL) {
-      polls_++;
-      poll_open_ = true;
-      poll_sent_ms_ = unix_ms;
+      on_poll(unix_ms);
       return "";
     }
+    close_open_(unix_ms);
     Exchange e;
     e.id = ++next_id_;
     e.unix_ms = unix_ms;
@@ -651,6 +650,23 @@ class BusWatch {
     // Our own bench provisioning (tap_config.h) is named in the log like
     // anyone's, but only another device's reconfiguration is an alarm.
     return ours ? "" : e.reconfig;
+  }
+
+  // A poll, for a caller that doesn't decode them (the ESP32 hears ~23 a
+  // second): as on_frame() with the decoded poll, never ours.
+  void on_poll(int64_t unix_ms) {
+    close_open_(unix_ms);
+    polls_++;
+    poll_open_ = true;
+    poll_sent_ms_ = unix_ms;
+  }
+  // Its reply, not decoded: empty, or holding only reports. One with an
+  // optimizer's answer in it goes to on_frame(), which reads the answer;
+  // so does a refusal (0x0006).
+  void on_poll_reply(bool empty, int64_t unix_ms) {
+    if (!poll_open_) return;
+    poll_open_ = false;
+    mark_poll_(poll_sent_ms_, static_cast<int>(unix_ms - poll_sent_ms_), empty);
   }
 
   const Deque<Exchange> &exchanges() const { return exchanges_; }
@@ -713,7 +729,9 @@ class BusWatch {
         if (p.empty) s.polls_empty++;
       }
     }
-    for (const Exchange &e : exchanges_at(now_ms)) {
+    // Not exchanges_at(): a copy of every exchange, each request on the
+    // ESP32, for nothing these counts read (they skip a "waiting" one either way).
+    for (const Exchange &e : exchanges_) {
       if (e.unix_ms < from) continue;
       s.count[e.category]++;
       if (e.result == "delivered") s.delivered++;
@@ -723,16 +741,145 @@ class BusWatch {
       if (e.rt_ms >= 0) rts.push_back(e.rt_ms);
     }
     if (!rts.empty()) {
-      std::sort(rts.begin(), rts.end());
-      s.rt_median_ms = rts[(rts.size() - 1) / 2];
-      s.rt_max_ms = rts.back();
+      // A partial sort: ~11,000 polls in the window on a busy bus, and the
+      // ESP32 computes this holding the lock its loop needs.
+      auto mid = rts.begin() + (rts.size() - 1) / 2;
+      std::nth_element(rts.begin(), mid, rts.end());
+      s.rt_median_ms = *mid;
+      s.rt_max_ms = *std::max_element(mid, rts.end());
     }
     s.discovery = discovery_;
     return s;
   }
 
+  // /api/bus's "stats" and "exchanges" members, without the braces around
+  // them (the caller adds its alarm), into out: anything with
+  // append(const char *). The last `limit` exchanges, newest last, as they
+  // stand at now_ms, read in place. Both builds write it the same; the
+  // ESP32 writes the same pieces with its lock let go between them.
+  // timed: false where the times can't give a round trip (the ESP32 reads
+  // the bus once a loop, ~16 ms, so a poll and its reply often share a
+  // time): every round trip null, and "timed": false for the page to say so.
+  template <class Out> void write_json(Out &out, int64_t now_ms, size_t limit, bool timed = true) const {
+    write_stats_json(out, now_ms, timed);
+    out.append(",\"exchanges\":[");
+    size_t from = exchanges_.size() > limit ? exchanges_.size() - limit : 0;
+    for (size_t i = from; i < exchanges_.size(); i++) {
+      if (i > from) out.append(",");
+      write_exchange_json(out, exchanges_[i], now_ms, timed);
+    }
+    out.append("]");
+  }
+  // The log's oldest and newest exchange ids, 0 when it is empty; the ids
+  // between them are all there, one each, in order.
+  uint64_t first_id() const { return exchanges_.empty() ? 0 : exchanges_.front().id; }
+  uint64_t last_id() const { return exchanges_.empty() ? 0 : exchanges_.back().id; }
+  const Exchange *exchange(uint64_t id) const {
+    if (exchanges_.empty() || id < first_id() || id > last_id()) return nullptr;
+    return &exchanges_[static_cast<size_t>(id - first_id())];
+  }
+  // "stats":{...}
+  template <class Out> void write_stats_json(Out &out, int64_t now_ms, bool timed = true) const {
+    BusStats st = stats(now_ms);
+    key_(out, "stats"), out.append("{");
+    key_(out, "window_s"), num_(out, WINDOW_MS / 1000), out.append(",");
+    key_(out, "polls"), num_(out, st.polls), out.append(",");
+    key_(out, "polls_lost"), num_(out, st.polls_lost), out.append(",");
+    key_(out, "polls_empty"), num_(out, st.polls_empty), out.append(",");
+    key_(out, "polls_refused"), num_(out, st.polls_refused), out.append(",");
+    key_(out, "count"), out.append("{");
+    bool first = true;
+    for (const auto &kv : st.count) {
+      if (!first) out.append(",");
+      first = false;
+      json_str_(out, kv.first), out.append(":"), num_(out, kv.second);
+    }
+    out.append("},");
+    key_(out, "delivered"), num_(out, st.delivered), out.append(",");
+    key_(out, "not_delivered"), num_(out, st.not_delivered), out.append(",");
+    key_(out, "other_master"), num_(out, st.other_master), out.append(",");
+    key_(out, "reconfig"), num_(out, st.reconfig), out.append(",");
+    key_(out, "timed"), flag_(out, timed), out.append(",");
+    key_(out, "rt_median_ms"), opt_(out, timed ? st.rt_median_ms : -1), out.append(",");
+    key_(out, "rt_max_ms"), opt_(out, timed ? st.rt_max_ms : -1), out.append(",");
+    key_(out, "discovery"), json_str_(out, st.discovery);
+    out.append("}");
+  }
+  // One exchange's {...}, as it stands at now_ms.
+  template <class Out> void write_exchange_json(Out &out, const Exchange &e, int64_t now_ms, bool timed = true) const {
+    bool gone = e.result == "waiting" && now_ms - e.unix_ms >= NO_REPLY_MS;  // as no_reply_() has it
+    out.append("{");
+    key_(out, "id"), num_(out, static_cast<long long>(e.id)), out.append(",");
+    key_(out, "unix_ms"), num_(out, e.unix_ms), out.append(",");
+    key_(out, "ours"), flag_(out, e.ours), out.append(",");
+    key_(out, "other_master"), flag_(out, e.other_master), out.append(",");
+    key_(out, "addr"), hex4_(out, e.addr), out.append(",");
+    key_(out, "cmd"), hex4_(out, e.cmd), out.append(",");
+    key_(out, "name"), json_str_(out, e.name), out.append(",");
+    key_(out, "sub_name"), json_str_(out, e.sub_name), out.append(",");
+    key_(out, "node");
+    if (e.node < 0) out.append("null");
+    else hex4_(out, static_cast<unsigned>(e.node));
+    out.append(",");
+    key_(out, "category"), json_str_(out, e.category), out.append(",");
+    key_(out, "result"), json_str_(out, gone ? Str("no_reply") : e.result), out.append(",");
+    key_(out, "late"), flag_(out, e.late), out.append(",");
+    key_(out, "rt_ms"), opt_(out, timed ? e.rt_ms : -1), out.append(",");
+    key_(out, "summary"), json_str_(out, gone && e.summary.empty() ? Str("Nothing back") : e.summary), out.append(",");
+    key_(out, "answer"), json_str_(out, e.answer), out.append(",");
+    key_(out, "answer_after_ms"), opt_(out, e.answer_after_ms), out.append(",");
+    key_(out, "request_hex"), json_str_(out, e.request_hex), out.append(",");
+    key_(out, "reply_hex"), json_str_(out, e.reply_hex), out.append(",");
+    key_(out, "reconfig"), json_str_(out, e.reconfig);
+    out.append("}");
+  }
+
  private:
   static const int LOST = -1, REFUSED = -2;
+  template <class Out> static void key_(Out &out, const char *k) {
+    out.append("\"");
+    out.append(k);
+    out.append("\":");
+  }
+  template <class Out> static void num_(Out &out, long long v) {
+    char b[24];
+    std::snprintf(b, sizeof(b), "%lld", v);
+    out.append(b);
+  }
+  template <class Out> static void opt_(Out &out, long long v) {  // -1: none
+    if (v < 0) out.append("null");
+    else num_(out, v);
+  }
+  template <class Out> static void hex4_(Out &out, unsigned v) {
+    char b[8];
+    std::snprintf(b, sizeof(b), "\"%04X\"", v & 0xFFFF);
+    out.append(b);
+  }
+  template <class Out> static void flag_(Out &out, bool v) { out.append(v ? "true" : "false"); }
+  // A JSON string: quotes, backslashes and control characters escaped.
+  // Text from the bus is printable ASCII already (bus_text).
+  template <class Out> static void json_str_(Out &out, const Str &s) {
+    char b[8];
+    out.append("\"");
+    size_t run = 0;  // plain characters not yet appended, ending at i
+    for (size_t i = 0; i <= s.size(); i++) {
+      unsigned char c = i < s.size() ? static_cast<unsigned char>(s[i]) : 0;
+      if (i < s.size() && c >= 0x20 && c != '"' && c != '\\') {
+        run++;
+        continue;
+      }
+      if (run) out.append(Str(s, i - run, run).c_str());
+      run = 0;
+      if (i == s.size()) break;
+      if (c == '"' || c == '\\') {
+        b[0] = '\\', b[1] = static_cast<char>(c), b[2] = '\0';
+      } else {
+        std::snprintf(b, sizeof(b), "\\u%04x", c);
+      }
+      out.append(b);
+    }
+    out.append("\"");
+  }
   struct PollMark {
     int64_t unix_ms;
     int rt_ms;  // or LOST, REFUSED

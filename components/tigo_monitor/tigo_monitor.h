@@ -640,11 +640,13 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
     fn();
   }
   // The Devices page's firmware, settings and ratings, as heard on the bus
-  // (bus_book.h), kept from the first call on: tigo_server's setup makes it,
-  // so a build without the web UI never pays for it. Read it inside
+  // (bus_book.h), and the Bus traffic page's exchanges (bus_watch.h), kept
+  // from the first call on: tigo_server's setup makes them, so a build
+  // without the web UI never pays for them. Read them inside
   // with_state_lock(); null until then.
   void enable_bus_book();
   const master::BusBook *bus_book() const { return bus_book_.get(); }
+  const master::BusWatch *bus_watch() const { return bus_watch_.get(); }
   // A TAP's name on the Devices page, kept in the settings storage (eight
   // TAPs at most) and written into /api/versions; an empty name clears it.
   // Inside with_state_lock(), after enable_bus_book(). nullptr when taken,
@@ -1121,10 +1123,10 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   // flash, if there is one, at most every BUS_BOOK_SAVE_EVERY_MS.
   psram_unique<master::BusWatch> bus_watch_;
   psram_unique<master::BusBook> bus_book_;
-  // The last poll, as the bus gave it, kept until its reply shows whether
-  // it carries an answer: most don't, and only those are decoded.
-  frame_string bus_book_poll_;
-  bool frame_has_answer_ = false;  // set by process_frame_'s packet walk
+  // Set by process_frame_ for the frame it walked: its CRC held, it held
+  // packets, one an optimizer's answer. The bus book decodes a poll reply
+  // only for an answer; the rest it counts from these.
+  bool frame_crc_ok_ = false, frame_has_packets_ = false, frame_has_answer_ = false;
   void feed_bus_book_one_(const frame_string &frame);
   bool bus_book_loaded_ = false;
   uint32_t bus_book_saved_ms_ = 0;

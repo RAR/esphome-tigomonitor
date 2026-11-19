@@ -69,8 +69,9 @@ class PSRAMString {
   
   const char* c_str() const { return data_ ? data_ : ""; }
   size_t length() const { return size_; }
-  
- private:
+
+  // Grows to new_capacity plus 1 KB: an answer that will be long reserves
+  // its size first, or it is copied again every kilobyte on the way.
   void reserve(size_t new_capacity) {
     if (new_capacity <= capacity_) return;
     
@@ -103,7 +104,8 @@ class PSRAMString {
     data_ = new_data;
     capacity_ = alloc_size;
   }
-  
+
+ private:
   char* data_;
   size_t size_;
   size_t capacity_;
@@ -282,6 +284,16 @@ void TigoWebServer::setup() {
       .user_ctx = this
     };
     httpd_register_uri_handler(server_, &api_tap_name_uri);
+
+    // The Bus traffic page: the last 5 minutes in numbers and the last 300
+    // exchanges, the Pi's shape (bus_watch.h writes both).
+    httpd_uri_t api_bus_uri = {
+      .uri = "/api/bus",
+      .method = HTTP_GET,
+      .handler = api_bus_handler,
+      .user_ctx = this
+    };
+    httpd_register_uri_handler(server_, &api_bus_uri);
 
     httpd_uri_t api_strings_uri = {
       .uri = "/api/strings",
@@ -1013,6 +1025,79 @@ esp_err_t TigoWebServer::api_versions_handler(httpd_req_t *req) {
     httpd_resp_sendstr(req, "{\"error\":\"no bus book\"}");
     return ESP_OK;
   }
+  httpd_resp_send(req, json_buffer.c_str(), json_buffer.length());
+  return ESP_OK;
+}
+
+// GET /api/bus[?limit=N]. Never an alarm here: only a monitor running the
+// bus raises one, and an ESP32 with the web UI only listens. No round trips
+// either: the bus is read once a loop, too coarse to time them.
+esp_err_t TigoWebServer::api_bus_handler(httpd_req_t *req) {
+  TigoWebServer *server = static_cast<TigoWebServer *>(req->user_ctx);
+  if (!server->check_api_auth(req)) return ESP_OK;
+  size_t limit = tigo_monitor::master::BusWatch::KEEP;
+  char query[32], v[12];
+  if (httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK &&
+      httpd_query_key_value(query, "limit", v, sizeof(v)) == ESP_OK) {
+    long n = strtol(v, nullptr, 10);
+    if (n > 0 && static_cast<size_t>(n) < limit) limit = static_cast<size_t>(n);
+  }
+  struct timeval tv;
+  gettimeofday(&tv, nullptr);
+  int64_t now = static_cast<int64_t>(tv.tv_sec) * 1000 + tv.tv_usec / 1000;
+  // Written a piece at a time: the stats, then BUS_CHUNK exchanges per hold
+  // of the state lock, with a tick between for the loop to read the bus. In
+  // one piece (~120 KB) the loop waited long enough for the UART's buffer to
+  // overflow: a full answer a second cost ~3.5 frames a second on the rig.
+  static const unsigned BUS_CHUNK = 20;
+  PSRAMString json_buffer;
+  json_buffer.reserve(limit * 450 + 1024);
+  bool kept = false;
+  uint64_t next = 0, last = 0;
+  uint32_t held = 0, longest = 0, t0 = millis();
+  if (server->parent_ != nullptr) {
+    server->parent_->with_state_lock([&] {
+      const auto *watch = server->parent_->bus_watch();
+      if (watch == nullptr) return;
+      uint32_t t = millis();
+      json_buffer.append("{\"alarm\":{\"active\":false,\"count\":0,\"first_unix_ms\":0,\"recent\":[]},");
+      watch->write_stats_json(json_buffer, now, false);
+      json_buffer.append(",\"exchanges\":[");
+      last = watch->last_id();
+      next = last >= limit ? last - limit + 1 : 1;
+      if (next < watch->first_id()) next = watch->first_id();
+      kept = true;
+      held = longest = millis() - t;
+    });
+  }
+  bool first = true;
+  while (kept && last && next <= last) {
+    vTaskDelay(1);
+    server->parent_->with_state_lock([&] {
+      const auto *watch = server->parent_->bus_watch();
+      uint32_t t = millis();
+      for (unsigned n = 0; n < BUS_CHUNK && next <= last; n++, next++) {
+        const auto *e = watch->exchange(next);
+        if (e == nullptr) continue;  // aged out meanwhile
+        if (!first) json_buffer.append(",");
+        first = false;
+        watch->write_exchange_json(json_buffer, *e, now, false);
+      }
+      uint32_t d = millis() - t;
+      held += d;
+      if (d > longest) longest = d;
+    });
+  }
+  if (kept) json_buffer.append("]}");
+  httpd_resp_set_type(req, "application/json");
+  httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+  if (!kept) {
+    httpd_resp_set_status(req, "404 Not Found");
+    httpd_resp_sendstr(req, "{\"error\":\"no bus log\"}");
+    return ESP_OK;
+  }
+  ESP_LOGD(TAG, "/api/bus: %u bytes in %u ms, the state lock held %u ms, %u at most at once",
+           (unsigned) json_buffer.length(), (unsigned) (millis() - t0), (unsigned) held, (unsigned) longest);
   httpd_resp_send(req, json_buffer.c_str(), json_buffer.length());
   return ESP_OK;
 }

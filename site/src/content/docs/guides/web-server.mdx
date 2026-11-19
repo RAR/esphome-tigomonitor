@@ -26,7 +26,7 @@ setup).
 | **Devices** | The raw list of every panel the device has ever seen. You can export it to a file as a backup. On the Raspberry Pi build it also lists the TAP, each optimizer's and the TAP's firmware as heard on the bus, and any optimizer heard that the TAP doesn't list, such as a spare that still has your network's key: kept off the Dashboard and the mesh map as the CCA keeps its aliens, with **Forget** to clear it. While it runs the bus, each TAP's polls and dropouts are in the TAP table. Click an optimizer to see everything about it under its row. |
 | **Settings** | Change settings, generate config, reset counters, restart the device. One tab per area; on the Raspberry Pi build, Bus, MQTT, Inverters and Web UI too. |
 | **Diagnostics** | Is it healthy? Memory, WiFi signal, how many messages it's missing. On the Raspberry Pi build, its Logs tab shows the service's log, and while it runs the bus a Bus section shows the discovery window, polls, the longest pause, housekeeping and optimizer queries. |
-| **Bus traffic** | Raspberry Pi build only. Each request on the bus with its reply, how long the reply took and what it means, under a strip of the last 5 minutes, filtered by kind. A banner says if another device reconfigures the TAP. |
+| **Bus traffic** | Each request on the bus with its reply, how long the reply took and what it means, under a strip of the last 5 minutes, filtered by kind. On the Raspberry Pi build, a banner says if another device reconfigures the TAP. |
 | **System setup** | Raspberry Pi build only. Guided steps for changing the hardware: adding, replacing or retiring an optimizer, or adding a TAP. While this monitor runs or stands by for the bus, it also has the PV output and discovery window switches. |
 | **CCA Info** | What your Tigo box reports about itself. |
 | **Tigo Cloud** | Tigo's own view of your system, if you've connected your account. |
@@ -76,7 +76,7 @@ it. You don't need any of it to use the dashboard.
 | Settings | `/app#settings` (the old `/app#tools` still works) |
 | Diagnostics | `/app#diagnostics` |
 | Diagnostics › Logs (Raspberry Pi) | `/app#logs` |
-| Bus traffic (Raspberry Pi) | `/app#buslog` |
+| Bus traffic | `/app#buslog` |
 | System setup (Raspberry Pi) | `/app#setup` (the old `/app#busmaster` opens it too) |
 | CCA Info | `/app#cca` |
 | Tigo Cloud | `/app#cloudstatus` (only when `cloud_import` is set) |

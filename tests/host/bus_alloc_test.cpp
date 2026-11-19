@@ -144,16 +144,17 @@ static void test_what_they_keep_goes_through_the_hook() {
   CHECK(g_hooked_live == hooked_before);
 }
 
-// The saved copy and the JSON can be written into a hooked string, as the
-// ESP32 writes them into PSRAM.
+// The saved copy and both JSON answers can be written into a hooked string,
+// as the ESP32 writes them into PSRAM.
 static void test_writing_into_a_hooked_string() {
   BusWatch w(16, false);
   BusBook b;
   run_roof(w, b);
-  Str text, json;
+  Str text, json, bus;
   b.write_text(text);
   b.write_json(json, false);
-  CHECK(text.size() > 1000 && json.size() > 1000);
+  w.write_json(bus, 1767225600000LL, BusWatch::KEEP);
+  CHECK(text.size() > 1000 && json.size() > 1000 && bus.find("\"exchanges\":[") != Str::npos);
   BusBook c;
   size_t from = 0;
   int bad = 0;

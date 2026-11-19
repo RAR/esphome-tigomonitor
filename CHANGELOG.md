@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The ESP32 has the Bus traffic page too.** It lists each request on the
+  bus with its reply, round trip and meaning, the last 300 of them, under the
+  last five minutes in numbers, as the Pi's does. It keeps them in PSRAM. As
+  a listener it never raises the alarm for another device reconfiguring the
+  TAP; only a monitor running the bus does.
+
 - **An ESP32 standby can run a system with more than one TAP** (experimental,
   not yet run on hardware). While another master runs the bus, it learns each
   TAP that master polls and keeps the list in flash, so on taking over it

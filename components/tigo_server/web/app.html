@@ -1506,7 +1506,7 @@
       <div class="nav-group" role="group" aria-labelledby="nav-h-inspect">
         <div class="nav-head" id="nav-h-inspect">Inspect</div>
         <button data-view="diagnostics"><span class="icon">◈</span> Diagnostics</button>
-        <button data-view="buslog" id="nav-buslog" data-linux-only style="display:none"><span class="icon">⇄</span> Bus traffic</button>
+        <button data-view="buslog" id="nav-buslog"><span class="icon">⇄</span> Bus traffic</button>
         <button data-view="cca"><span class="icon">◉</span> CCA Info</button>
         <button data-view="cloudstatus" id="nav-cloudstatus" style="display:none"><span class="icon">☁</span> Tigo Cloud</button>
       </div>
@@ -2409,7 +2409,7 @@
         <div class="bx-cols" role="row"><span>Time</span><span>From</span><span>TAP</span><span>Exchange</span><span>Node</span><span>Result</span><span>Round trip</span><span>Summary</span></div>
         <div id="bus-rows"><div class="bx-empty">Loading…</div></div>
       </div>
-      <p class="table-meta" style="margin-top:10px">The last 300 exchanges, newest last: each request with what came back, paired by the tunnel's sequence number or the reply's command. Polls are counted in the strip, not listed. Click a row for its bytes; the TAP's network config block, which holds its network key, is the only thing hidden. Round trips are exact when this monitor runs the bus; listening, they are only as fine as the reads, about 16 ms.</p>
+      <p class="table-meta" id="bus-note" style="margin-top:10px">The last 300 exchanges, newest last: each request with what came back, paired by the tunnel's sequence number or the reply's command. Polls are counted in the strip, not listed. Click a row for its bytes; the TAP's network config block, which holds its network key, is the only thing hidden. <span id="bus-note-rt">Round trips are exact when this monitor runs the bus; listening, they are only as fine as the reads, about 16 ms.</span></p>
     </section>
 
     <!-- CCA -->
@@ -6506,9 +6506,10 @@
   document.getElementById('logs-level').addEventListener('change', () => { renderLogs(); updateLogsMeta(); });
   document.getElementById('logs-search').addEventListener('input', () => { renderLogs(); updateLogsMeta(); });
 
-  // ---- Bus log and the reconfiguration alarm (Pi) ----
+  // ---- Bus log and the reconfiguration alarm ----
   // The banner is checked every 10 s wherever you are; the page polls every
-  // 2 s while open.
+  // 2 s while open. The ESP32 only listens, so it never has an alarm: it is
+  // asked only while the page is open.
   let busLast = null, busPaused = false, busCat = 'all';
   const busOpen = new Set();  // exchanges whose bytes are showing, by id
   let busNames = {}, busNamesAt = 0;  // node id (upper-case hex) → panel name, from /api/devices
@@ -6577,7 +6578,8 @@
       tile('Discovery', n(c.discovery), s.discovery || 'not read yet') +
       tile('Queries', n(c.queries), `${n(s.delivered)} delivered · ${n(s.not_delivered)} not`) +
       tile('Housekeeping', n(c.housekeeping), 'table pages, preferred gateways, PV') +
-      tile('Round trip', s.rt_median_ms == null ? '—' : `${s.rt_median_ms} ms`, s.rt_max_ms == null ? 'median' : `median · max ${s.rt_max_ms} ms`) +
+      (s.timed === false ? tile('Round trip', '—', 'not timed here')
+        : tile('Round trip', s.rt_median_ms == null ? '—' : `${s.rt_median_ms} ms`, s.rt_max_ms == null ? 'median' : `median · max ${s.rt_max_ms} ms`)) +
       tile('Other master', n(s.other_master), s.reconfig ? `${n(s.reconfig)} reconfigure the TAP` : 'none heard', s.other_master || s.reconfig);
   }
   function renderBus() {
@@ -6591,6 +6593,8 @@
       `${l}<span class="n">${all.filter(e => busIn(e, k)).length}</span></button>`).join('');
     if (chipId) document.querySelector(`#bus-chips .bx-chip[data-c="${chipId}"]`)?.focus({ preventScroll: true });
     busStrip(busLast.stats || {});
+    if ((busLast.stats || {}).timed === false) document.getElementById('bus-note-rt').textContent =
+      "This monitor doesn't time round trips: it reads the bus about every 16 ms, too coarse for replies that come back within a few.";
     const shown = all.filter(busShown);
     const box = document.getElementById('bus-box');
     const stick = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
@@ -6623,8 +6627,8 @@
     if (r && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); busToggle(r); }
   });
   async function refreshBus(force) {
-    if (PLATFORM !== 'linux') return;
     const open = document.getElementById('view-buslog').classList.contains('active');
+    if (PLATFORM !== 'linux' && !open) return;
     if (!force && open && busPaused) return;
     try {
       const r = await apiFetch(open ? '/api/bus' : '/api/bus?limit=1');

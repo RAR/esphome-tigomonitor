@@ -446,7 +446,7 @@ export const piRoutes = {
     alarm: { active: false, count: 0, first_unix_ms: 0, recent: [] },
     stats: { window_s: 300, polls: 13180, polls_lost: 0, polls_empty: 12950, polls_refused: 0,
       count: { discovery: 4, queries: 4, housekeeping: 7, bringup: 0, reconfig: 0, other: 0 }, delivered: 3, not_delivered: 1,
-      other_master: 0, reconfig: 0, rt_median_ms: 4, rt_max_ms: 31,
+      other_master: 0, reconfig: 0, timed: true, rt_median_ms: 4, rt_max_ms: 31,
       discovery: 'Open, 552 s left · 24 of the 24 in the table have joined' },
     exchanges: piExchanges,
   },
