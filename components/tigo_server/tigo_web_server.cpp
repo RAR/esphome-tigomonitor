@@ -111,6 +111,8 @@ class PSRAMString {
 
 void TigoWebServer::setup() {
   ESP_LOGI(TAG, "Starting Tigo Web Server on port %d...", port_);
+  // The Devices page's firmware, settings and ratings (/api/versions).
+  if (parent_ != nullptr) parent_->enable_bus_book();
 
 #ifdef USE_TIGO_CCA_BLE
   this->ble_setup_();
@@ -262,6 +264,16 @@ void TigoWebServer::setup() {
     };
     httpd_register_uri_handler(server_, &api_node_table_uri);
     
+    // Each device's firmware, settings and ratings, as heard on the bus: the
+    // Devices page's detail, the Pi's shape (bus_book.h writes both).
+    httpd_uri_t api_versions_uri = {
+      .uri = "/api/versions",
+      .method = HTTP_GET,
+      .handler = api_versions_handler,
+      .user_ctx = this
+    };
+    httpd_register_uri_handler(server_, &api_versions_uri);
+
     httpd_uri_t api_strings_uri = {
       .uri = "/api/strings",
       .method = HTTP_GET,
@@ -966,6 +978,32 @@ esp_err_t TigoWebServer::api_node_table_handler(httpd_req_t *req) {
   
   httpd_resp_set_type(req, "application/json");
   httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+  httpd_resp_send(req, json_buffer.c_str(), json_buffer.length());
+  return ESP_OK;
+}
+
+esp_err_t TigoWebServer::api_versions_handler(httpd_req_t *req) {
+  TigoWebServer *server = static_cast<TigoWebServer *>(req->user_ctx);
+  if (!server->check_api_auth(req)) {
+    return ESP_OK;
+  }
+  PSRAMString json_buffer;
+  bool kept = false;
+  if (server->parent_ != nullptr) {
+    server->parent_->with_state_lock([&] {
+      const auto *book = server->parent_->bus_book();
+      if (book == nullptr) return;
+      book->write_json(json_buffer, false);
+      kept = true;
+    });
+  }
+  httpd_resp_set_type(req, "application/json");
+  httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+  if (!kept) {
+    httpd_resp_set_status(req, "404 Not Found");
+    httpd_resp_sendstr(req, "{\"error\":\"no bus book\"}");
+    return ESP_OK;
+  }
   httpd_resp_send(req, json_buffer.c_str(), json_buffer.length());
   return ESP_OK;
 }

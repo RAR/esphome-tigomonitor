@@ -15,6 +15,7 @@
 #ifdef USE_BUTTON
 #include "esphome/components/button/button.h"
 #endif
+#include <memory>
 #include <vector>
 #include <map>
 #include <set>
@@ -26,6 +27,7 @@
 #include "barcode_bindings.h"
 #include "tigo_history.h"
 #include "tigo_protocol.h"
+#include "bus_book.h"
 
 #ifdef USE_ESP_IDF
 #include <esp_heap_caps.h>
@@ -607,6 +609,12 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
     StateLock lock(state_mutex_);
     fn();
   }
+  // The Devices page's firmware, settings and ratings, as heard on the bus
+  // (bus_book.h), kept from the first call on: tigo_server's setup makes it,
+  // so a build without the web UI never pays for it. Read it inside
+  // with_state_lock(); null until then.
+  void enable_bus_book();
+  const master::BusBook *bus_book() const { return bus_book_.get(); }
   int get_number_of_devices() const { return number_of_devices_; }
   const std::string& get_cca_ip() const { return cca_ip_; }
   bool get_sync_cca_on_startup() const { return sync_cca_on_startup_; }
@@ -1072,6 +1080,16 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   std::string cfg_def_cca_ip_;
   
   // No timing variables needed - ESPHome handles update intervals
+
+  // See enable_bus_book(). Kept as BusWatch saw it, then on the history's
+  // flash, if there is one, at most every BUS_BOOK_SAVE_EVERY_MS.
+  std::unique_ptr<master::BusWatch> bus_watch_;
+  std::unique_ptr<master::BusBook> bus_book_;
+  bool bus_book_loaded_ = false;
+  uint32_t bus_book_saved_ms_ = 0;
+  static const uint32_t BUS_BOOK_SAVE_EVERY_MS = 15UL * 60UL * 1000UL;
+  void feed_bus_book_(const frame_string &frame);
+  void keep_bus_book_();
 
 #ifdef TIGO_TSDB_AVAILABLE
   TigoHistory history_;

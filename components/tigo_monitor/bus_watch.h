@@ -571,6 +571,11 @@ class BusWatch {
   static const int64_t OURS_RECENT_MS = 10000;   // we sent within this: we run the bus
   static const int64_t ANSWER_WITHIN_MS = 60000;
 
+  // keep: how many exchanges to keep, KEEP for the Bus log. A few are enough
+  // to pair each reply with its request (the TAPs' radio settings and MACs
+  // come from those pairs); the optimizers' answers need none.
+  explicit BusWatch(size_t keep = KEEP) : keep_(keep < 1 ? 1 : keep) {}
+
   // Returns the frame's reconfiguration, or "".
   std::string on_frame(const Frame &f, bool ours, int64_t unix_ms) {
     if (is_reply(f)) {
@@ -719,7 +724,7 @@ class BusWatch {
   }
   void push_(const Exchange &e) {
     exchanges_.push_back(e);
-    if (exchanges_.size() > KEEP) exchanges_.pop_front();
+    if (exchanges_.size() > keep_) exchanges_.pop_front();
   }
   void mark_poll_(int64_t at, int rt, bool empty) {
     poll_marks_.push_back({at, rt, empty});
@@ -873,6 +878,7 @@ class BusWatch {
     }
   }
 
+  size_t keep_;
   std::deque<Exchange> exchanges_;
   std::deque<PollMark> poll_marks_;
   std::deque<std::pair<uint64_t, Frame>> recent_unanswered_;

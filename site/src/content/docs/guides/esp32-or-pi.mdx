@@ -34,7 +34,7 @@ below.
 | CCA Info from the CCA | Over Bluetooth with `cca_source: ble`, or HTTP for CCA firmware before 4.0.4. | Over the Pi's Bluetooth, finding the nearest CCA by itself; HTTP for firmware before 4.0.4. |
 | A display on the board | Optional, on an AtomS3R. | No |
 | [New and missing optimizers](/esphome-tigomonitor/guides/raspberry-pi/#new-and-missing-optimizers) | No | A notice for a new one, tags for missing ones, and both counts in Home Assistant. |
-| Optimizer and TAP firmware, optimizer settings | No | On the Devices page, from what the bus carries. |
+| Optimizer and TAP firmware, optimizer settings | On the Devices page, from what the bus carries, once a master asks the optimizers. Kept across a reboot with history on. | On the Devices page, from what the bus carries. |
 | [Mesh map](/esphome-tigomonitor/guides/raspberry-pi/#see-which-optimizers-have-a-weak-link) | No | Each optimizer's link: reports lost today, signal over a day, and which optimizer it joined through. |
 | Bus traffic | No | Bus → Traffic: each request on the bus with its reply and what it means. |
 | The service's log | Through ESPHome's logs. | Diagnostics → Logs, in the web UI. |

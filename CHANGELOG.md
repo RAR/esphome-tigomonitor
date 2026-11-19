@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **The ESP32's Devices page shows each optimizer's firmware, settings and
+  rating, and the TAPs, as the Pi's does.** It reads them from what the bus
+  carries, so they appear once a master asks the optimizers: a Pi, a CCA,
+  or an ESP32 master with `queries: true`. A board with history keeps them
+  across a reboot. The ESP32 lists a changed setting only when it runs the
+  bus, and as a listener it never does. Renaming a TAP stays on the Pi.
+
 ## [2.2.0] - 2026-11-18
 
 ### Added

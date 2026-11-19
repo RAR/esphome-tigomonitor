@@ -1789,10 +1789,10 @@
         <div class="topbar-meta" id="nodes-meta">—</div>
       </div>
 
-      <!-- Pi build: optimizers whose settings, MPPT or firmware changed. -->
+      <!-- Optimizers whose settings, MPPT or firmware changed (only while this monitor runs the bus). -->
       <div id="devices-changes" class="devices-changes" style="display:none"></div>
 
-      <!-- Pi build: the TAPs, from /api/versions. -->
+      <!-- The TAPs, from /api/versions. -->
       <div id="devices-taps" style="display:none">
         <div class="section-title devices-head">TAPs</div>
         <div class="table-wrap">
@@ -3969,7 +3969,7 @@
   // Dashboard (Devices reads the same answer on its own).
   var optRatings = {}, optRatingsAt = 0;
   async function loadOptRatings() {
-    if (PLATFORM !== 'linux' || Date.now() - optRatingsAt < 300000) return optRatings;
+    if (Date.now() - optRatingsAt < 300000) return optRatings;
     optRatingsAt = Date.now();
     const v = await apiFetch('/api/versions').then(r => r.ok ? r.json() : null).catch(() => null);
     if (v) optRatings = Object.fromEntries((v.ratings || []).map(o => [String(o.addr).toUpperCase(), o]));
@@ -4501,8 +4501,8 @@
         ? `<div class="tap-sub">last ${new Date(m.tap.last_lost_unix * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>` : '';
       return `<td class="num">${t.polls.toLocaleString()}${unanswered}</td><td class="num">${t.lost.toLocaleString()}${last}</td>`;
     };
-    // A name, kept on the Pi and shown on the mesh map too.
-    const name = t => `<td class="tap-name" data-tap="${topoEscape(t.addr)}">${t.name
+    // A name, kept on the Pi and shown on the mesh map too; the ESP32 keeps none.
+    const name = t => PLATFORM !== 'linux' ? '<td class="tap-name" style="color:var(--text-faint)">—</td>' : `<td class="tap-name" data-tap="${topoEscape(t.addr)}">${t.name
       ? `<span>${topoEscape(t.name)}</span><button type="button" class="tap-rename" aria-label="Rename TAP ${topoEscape(t.addr)}" title="Rename"></button>`
       : `<button type="button" class="tap-rename add">Add a name</button>`}</td>`;
     setHTML(box.querySelector('tbody'), (v.taps || []).length ? v.taps.map(t => `<tr>
@@ -5547,9 +5547,9 @@
       nodesData = {
         nodes: (await nR.json()).nodes || [],
         devices: (await dR.json()).devices || [],
-        // Pi build: each device's firmware, as heard on the bus.
-        versions: PLATFORM === 'linux'
-          ? await apiFetch('/api/versions').then(r => r.ok ? r.json() : null).catch(() => null) : null,
+        // Each device's firmware, settings and ratings, as heard on the bus
+        // (both builds; an older ESP32 answers 404, and the detail stays empty).
+        versions: await apiFetch('/api/versions').then(r => r.ok ? r.json() : null).catch(() => null),
         // Pi build: each string's panel nameplate, against its optimizers' ratings.
         strings: PLATFORM === 'linux'
           ? await apiFetch('/api/strings').then(r => r.ok ? r.json() : null).catch(() => null) : null,

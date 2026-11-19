@@ -1,4 +1,10 @@
 #include "tigo_monitor.h"
+
+#include <strings.h>
+#include <sys/time.h>
+#include <unistd.h>
+
+#include <cstdio>
 #include "tigo_node_identity.h"
 #include "esphome/core/log.h"
 #include "esphome/core/helpers.h"
@@ -430,6 +436,7 @@ psram_vector<InverterData> TigoMonitorComponent::snapshot_inverters() const {
 void TigoMonitorComponent::loop() {
   StateLock lock(state_mutex_);
   process_serial_data();
+  if (bus_book_) keep_bus_book_();
   
 #ifdef USE_ESP_IDF
   // Periodic heap and stack monitoring (every 60 seconds) to detect memory leaks/stack issues
@@ -745,6 +752,7 @@ void TigoMonitorComponent::process_serial_data() {
 void TigoMonitorComponent::process_frame(const frame_string &frame) {
   // The whole frame pipeline stays in frame_string (PSRAM on IDF builds) —
   // see the typedef note in the header (#23).
+  if (bus_book_) feed_bus_book_(frame);
 
   // Increment total frames processed counter for diagnostics
   total_frames_processed_++;
@@ -3539,6 +3547,92 @@ void TigoMonitorComponent::snapshot_to_history_() {
   history_.enqueue_snapshot(snap);
 }
 #endif  // TIGO_TSDB_AVAILABLE
+
+// --- The bus book (bus_book.h): what the Devices page shows of each device ---
+
+static const char *const kBusBookPath = "/tsdb/bus_book.txt";
+
+void TigoMonitorComponent::enable_bus_book() {
+  StateLock lock(state_mutex_);
+  if (bus_book_) return;
+  // A few exchanges, to pair each TAP reply with its request; the Bus log's
+  // 300 would be ~150 KB of internal RAM here.
+  bus_watch_.reset(new master::BusWatch(16));
+  bus_book_.reset(new master::BusBook([](char level, const char *msg) {
+    if (level == 'W') ESP_LOGW(TAG, "%s", msg);
+    else ESP_LOGI(TAG, "%s", msg);
+  }));
+  // Called from absorb(), inside the loop, which holds the state lock.
+  bus_book_->set_barcode_of([this](uint16_t addr) {
+    char a[5];
+    snprintf(a, sizeof(a), "%04X", addr);
+    for (const auto &n : node_table_)
+      if (strcasecmp(n.addr.c_str(), a) == 0) return std::string(n.long_address.c_str());
+    return std::string();
+  });
+  ESP_LOGI(TAG, "Keeping each device's firmware, settings and ratings as heard on the bus");
+}
+
+// Each frame, as the bus gave it (escaped, between 7E 07 and 7E 08). Not
+// until the clock is set: a time near 1970 would be saved as when it was heard.
+void TigoMonitorComponent::feed_bus_book_(const frame_string &frame) {
+  struct timeval tv;
+  gettimeofday(&tv, nullptr);
+  int64_t now = static_cast<int64_t>(tv.tv_sec) * 1000 + tv.tv_usec / 1000;
+  if (now < 1700000000000LL) return;
+  master::Frame f;
+  if (!master::decode_frame(std::string(frame.data(), frame.size()), f)) return;
+  bus_watch_->on_frame(f, false, now);
+  // This monitor never runs the bus: what changes is another master's doing.
+  bus_book_->absorb(*bus_watch_, now, false);
+}
+
+// From the loop: read the saved copy once the history's flash is mounted,
+// then save it when changed, at most every BUS_BOOK_SAVE_EVERY_MS. A busy
+// flash (a history commit) is skipped and tried again a minute later.
+void TigoMonitorComponent::keep_bus_book_() {
+#ifdef TIGO_TSDB_AVAILABLE
+  if (!history_.initialized()) return;
+  uint32_t now = millis();
+  if (!bus_book_loaded_) {
+    TigoHistory::FlashLock lock(&history_, 2000);
+    if (!lock.held()) return;
+    bus_book_loaded_ = true;
+    bus_book_saved_ms_ = now;
+    FILE *f = fopen(kBusBookPath, "rb");
+    if (f == nullptr) return;
+    char line[512];
+    unsigned good = 0, bad = 0;
+    while (fgets(line, sizeof(line), f) != nullptr) (bus_book_->restore_line(line) ? good : bad)++;
+    fclose(f);
+    bus_book_->dirty = false;
+    ESP_LOGI(TAG, "Bus book: %u records read back%s", good, bad ? " (some lines unreadable, skipped)" : "");
+    return;
+  }
+  if (!bus_book_->dirty || now - bus_book_saved_ms_ < BUS_BOOK_SAVE_EVERY_MS) return;
+  TigoHistory::FlashLock lock(&history_, 100);
+  if (!lock.held()) {
+    bus_book_saved_ms_ = now - BUS_BOOK_SAVE_EVERY_MS + 60000;
+    return;
+  }
+  psram_string text;
+  bus_book_->write_text(text);
+  FILE *f = fopen(kBusBookPath, "wb");
+  bool ok = f != nullptr && fwrite(text.data(), 1, text.size(), f) == text.size();
+  if (f != nullptr) {
+    fflush(f);
+    fsync(fileno(f));
+    fclose(f);
+  }
+  bus_book_saved_ms_ = now;
+  if (ok) {
+    bus_book_->dirty = false;
+    ESP_LOGD(TAG, "Bus book saved (%u bytes, %u ms)", (unsigned) text.size(), (unsigned) (millis() - now));
+  } else {
+    ESP_LOGW(TAG, "Bus book: could not write %s", kBusBookPath);
+  }
+#endif
+}
 
 }  // namespace tigo_monitor
 }  // namespace esphome
