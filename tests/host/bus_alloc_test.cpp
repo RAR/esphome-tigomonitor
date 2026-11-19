@@ -57,6 +57,7 @@ template <class T> struct CountingAllocator {
 };
 
 #define TIGO_BUS_ALLOCATOR CountingAllocator
+#include "array_grid.h"
 #include "bus_book.h"
 
 using namespace esphome::tigo_monitor::master;
@@ -182,7 +183,36 @@ static void test_poll_marks_go_through_the_hook() {
   CHECK(g_heap_live - before <= 0);
 }
 
+// The array layout, read and written as the ESP32's /api/array does: what
+// it holds goes through the hook, and the ordinary heap holds nothing of it.
+static void test_the_array_layout_goes_through_the_hook() {
+  using namespace esphome::tigo_monitor::array_grid;
+  std::string text = "{\"panels\": [";
+  char b[160];
+  for (int i = 0; i < 40; i++) {
+    std::snprintf(b, sizeof(b), "%s{\"addr\": \"%04X\", \"barcode\": \"04C05B0000%06X\", \"x\": %d, \"y\": %d, \"portrait\": true}",
+                  i ? ", " : "", 0x10 + i, i, i % 10, i / 10);
+    text += b;
+  }
+  text += "], \"taps\": [{\"id\": \"1201\", \"x\": 12, \"y\": 0}]}";
+  long heap_before = g_heap_live, hooked_before = g_hooked_live;
+  {
+    auto *r = new ArrayLayout();
+    long heap_empty = g_heap_live;
+    CHECK(array_from_text(text.data(), text.size(), *r).empty());
+    Str out;
+    array_write_json(out, *r);
+    CHECK(r->panels.size() == 40 && out.size() > 2000);
+    long kept_heap = g_heap_live - heap_empty, kept_hooked = g_hooked_live - hooked_before;
+    std::printf("  40 panels: %ld bytes through the hook, %ld more on the ordinary heap\n", kept_hooked, kept_heap);
+    CHECK(kept_hooked > 2000 && kept_heap <= 0);
+    delete r;
+  }
+  CHECK(g_heap_live == heap_before && g_hooked_live == hooked_before);
+}
+
 int main() {
+  test_the_array_layout_goes_through_the_hook();
   test_what_they_keep_goes_through_the_hook();
   test_writing_into_a_hooked_string();
   test_poll_marks_go_through_the_hook();

@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The ESP32 can draw the array too.** Topology › Array places each panel
+  where it sits, shaded by its power, and each TAP where it's mounted, as on
+  the Pi. The board keeps the drawing in its settings storage (NVS), so it
+  survives a reflash, and saves it by barcode, so it stays right after the
+  TAP renumbers the optimizers. The Mesh tab stays on the Pi for now.
+
 - **The ESP32 has the Bus traffic page too.** It lists each request on the
   bus with its reply, round trip and meaning, the last 300 of them, under the
   last five minutes in numbers, as the Pi's does. It keeps them in PSRAM. As

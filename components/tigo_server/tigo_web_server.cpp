@@ -30,6 +30,8 @@
 #include <sys/time.h>
 #include <mbedtls/base64.h>
 #include "cJSON.h"
+#include <nvs.h>
+#include "../tigo_monitor/array_grid.h"
 
 namespace esphome {
 namespace tigo_server {
@@ -294,6 +296,23 @@ void TigoWebServer::setup() {
       .user_ctx = this
     };
     httpd_register_uri_handler(server_, &api_bus_uri);
+
+    // Topology > Array: where each panel and TAP sits, kept in NVS
+    // (array_grid.h reads and writes it as the Pi does).
+    httpd_uri_t api_array_get_uri = {
+      .uri = "/api/array",
+      .method = HTTP_GET,
+      .handler = api_array_get_handler,
+      .user_ctx = this
+    };
+    httpd_register_uri_handler(server_, &api_array_get_uri);
+    httpd_uri_t api_array_post_uri = {
+      .uri = "/api/array",
+      .method = HTTP_POST,
+      .handler = api_array_post_handler,
+      .user_ctx = this
+    };
+    httpd_register_uri_handler(server_, &api_array_post_uri);
 
     httpd_uri_t api_strings_uri = {
       .uri = "/api/strings",
@@ -2865,7 +2884,134 @@ void TigoWebServer::build_strings_json(PSRAMString& json) {
 
 namespace {
 void append_json_str(PSRAMString &out, const std::string &in);  // with the layout handlers below
+
+// The array layout's saved text, in NVS: the JSON /api/array gives, a few
+// KB for a roof. NVS, not the history's flash, so a board without history
+// keeps it too.
+const char *const ARRAY_NVS_NAMESPACE = "tigo_array";
+const char *const ARRAY_NVS_KEY = "layout";
+const size_t ARRAY_BODY_MAX = 64 * 1024;  // ~600 panels; the ESP32 watches far fewer
+
+struct PsramFree {
+  void operator()(char *p) const { heap_caps_free(p); }
+};
+using psram_chars = std::unique_ptr<char, PsramFree>;
+
+psram_chars psram_chars_alloc(size_t n) {
+  char *p = static_cast<char *>(heap_caps_malloc(n, MALLOC_CAP_SPIRAM));
+  if (p == nullptr) p = static_cast<char *>(heap_caps_malloc(n, MALLOC_CAP_DEFAULT));
+  return psram_chars(p);
+}
+
+// The saved layout, or null (none saved, or unreadable); n its length.
+psram_chars array_load(size_t &n) {
+  n = 0;
+  nvs_handle_t h;
+  if (nvs_open(ARRAY_NVS_NAMESPACE, NVS_READONLY, &h) != ESP_OK) return nullptr;
+  size_t len = 0;
+  psram_chars text;
+  if (nvs_get_blob(h, ARRAY_NVS_KEY, nullptr, &len) == ESP_OK && len > 0) {
+    text = psram_chars_alloc(len + 1);
+    if (text && nvs_get_blob(h, ARRAY_NVS_KEY, text.get(), &len) == ESP_OK) {
+      text.get()[len] = '\0';
+      n = len;
+    } else {
+      text.reset();
+    }
+  }
+  nvs_close(h);
+  return text;
+}
+
+bool array_save(const char *text, size_t n) {
+  nvs_handle_t h;
+  if (nvs_open(ARRAY_NVS_NAMESPACE, NVS_READWRITE, &h) != ESP_OK) return false;
+  bool ok = nvs_set_blob(h, ARRAY_NVS_KEY, text, n) == ESP_OK && nvs_commit(h) == ESP_OK;
+  nvs_close(h);
+  return ok;
+}
 }  // namespace
+
+// GET /api/array: the saved layout, each panel at the address its barcode
+// has now, as the Pi gives it.
+esp_err_t TigoWebServer::api_array_get_handler(httpd_req_t *req) {
+  TigoWebServer *server = static_cast<TigoWebServer *>(req->user_ctx);
+  if (!server->check_api_auth(req)) return ESP_OK;
+  namespace ag = tigo_monitor::array_grid;
+  ag::ArrayLayout r;
+  size_t n = 0;
+  psram_chars text = array_load(n);
+  if (text) {
+    ag::Str err = ag::array_from_text(text.get(), n, r);
+    if (!err.empty()) {
+      ESP_LOGW(TAG, "array: the saved layout isn't one (%s); showing none", err.c_str());
+      r = ag::ArrayLayout();
+    }
+  }
+  text.reset();
+  if (server->parent_ != nullptr) {
+    server->parent_->with_state_lock([&] {
+      ag::Map<ag::Str, ag::Str> addr_of, barcode_of;
+      ag::array_node_maps(server->parent_->get_node_table(), addr_of, barcode_of);
+      ag::array_follow_barcodes(r, addr_of);
+    });
+  }
+  PSRAMString out;
+  ag::array_write_json(out, r);
+  httpd_resp_set_type(req, "application/json");
+  httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+  httpd_resp_send(req, out.c_str(), out.length());
+  return ESP_OK;
+}
+
+// POST /api/array: the whole layout, checked by the Pi's rules, each panel
+// given its barcode, then saved.
+esp_err_t TigoWebServer::api_array_post_handler(httpd_req_t *req) {
+  TigoWebServer *server = static_cast<TigoWebServer *>(req->user_ctx);
+  if (!server->check_api_auth(req)) return ESP_OK;
+  namespace ag = tigo_monitor::array_grid;
+  httpd_resp_set_type(req, "application/json");
+  auto fail = [&](const char *status, const std::string &why) {
+    PSRAMString out;
+    out.append("{\"error\":");
+    append_json_str(out, why);
+    out.append("}");
+    httpd_resp_set_status(req, status);
+    httpd_resp_send(req, out.c_str(), out.length());
+    return ESP_OK;
+  };
+  size_t len = req->content_len;
+  if (len == 0) return fail("400 Bad Request", "Expected a JSON object.");
+  if (len > ARRAY_BODY_MAX) return fail("400 Bad Request", "The array layout is too large.");
+  psram_chars body = psram_chars_alloc(len + 1);
+  if (!body) return fail("500 Internal Server Error", "Out of memory.");
+  size_t got = 0;
+  while (got < len) {
+    int r = httpd_req_recv(req, body.get() + got, len - got);
+    if (r == HTTPD_SOCK_ERR_TIMEOUT) continue;
+    if (r <= 0) return ESP_FAIL;
+    got += r;
+  }
+  body.get()[len] = '\0';
+  ag::ArrayLayout r;
+  ag::Str err = ag::array_from_text(body.get(), len, r);
+  body.reset();
+  if (!err.empty()) return fail("400 Bad Request", err.c_str());
+  if (server->parent_ != nullptr) {
+    server->parent_->with_state_lock([&] {
+      ag::Map<ag::Str, ag::Str> addr_of, barcode_of;
+      ag::array_node_maps(server->parent_->get_node_table(), addr_of, barcode_of);
+      ag::array_fill_barcodes(r, barcode_of);
+    });
+  }
+  PSRAMString text;
+  ag::array_write_json(text, r);
+  if (!array_save(text.c_str(), text.length()))
+    return fail("500 Internal Server Error", "Could not save the array layout.");
+  ESP_LOGI(TAG, "array: saved, %u panels and %u TAPs placed", (unsigned) r.panels.size(), (unsigned) r.taps.size());
+  httpd_resp_sendstr(req, "{\"saved\":true}");
+  return ESP_OK;
+}
 
 // POST {"tap": "1201", "name": "..."}: answered as the Pi answers it.
 esp_err_t TigoWebServer::api_tap_name_handler(httpd_req_t *req) {
