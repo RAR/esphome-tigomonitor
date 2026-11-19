@@ -273,6 +273,16 @@ class MasterCore {
     adopt_taps_ = on;
     taps_saved_ = std::move(saved);
   }
+  // Standing by, learn the TAPs from the master it stands by for: each id that
+  // master polls joins the list, after those already on it, and the list is
+  // saved (saved, from the master's thread). guessed: the list is only
+  // gateway_id, neither set nor saved, so the first TAP heard replaces it.
+  // Nothing is sent to learn them. Off unless called; call before open().
+  void set_learn_taps(TapsSaved saved, bool guessed) {
+    learn_taps_ = true;
+    learn_guessed_ = guessed;
+    taps_learned_ = std::move(saved);
+  }
   // The owner's herd, to find a TAP left at some other address: at the next
   // tick. False, with why, unless adopting is on and this monitor runs the
   // bus with no change to a table running.
@@ -475,7 +485,8 @@ class MasterCore {
   void log_(int prio, const char *fmt, ...) __attribute__((format(printf, 3, 4)));
   void update_discovery_fault_();
   void drop_housekeeping_(Tap &t);
-  void restart_taps_();  // window, housekeeping, queries and counts back to a start, for every TAP
+  void restart_taps_();
+  void learn_tap_(uint16_t id);  // standing by: one the other master polls  // window, housekeeping, queries and counts back to a start, for every TAP
   void report_extra_taps_(const std::vector<esphome::tigo_monitor::master::Bytes> &macs);
   void note_stranger_(const esphome::tigo_monitor::master::Bytes &mac);
   // The TAP to serve this tick (round robin over those due), or null.
@@ -493,6 +504,9 @@ class MasterCore {
   bool housekeeping_on_;
   bool read_tap_config_ = false;
   bool send_41_ = true;
+  bool learn_taps_ = false;
+  bool learn_guessed_ = false;  // the list is still the gateway_id guess
+  TapsSaved taps_learned_;
   std::vector<esphome::tigo_monitor::master::Learned41::Entry> learned_;
   Targets targets_;
   TapTargets tap_targets_;

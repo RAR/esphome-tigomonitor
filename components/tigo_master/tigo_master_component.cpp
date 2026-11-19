@@ -4,7 +4,9 @@
 #include "esphome/core/log.h"
 
 #include <algorithm>
+#include <cstdio>
 #include <cstdlib>
+#include <string>
 
 namespace esphome {
 namespace tigo_master {
@@ -77,6 +79,24 @@ void TigoMasterComponent::setup() {
   if (standby_)
     core_->set_standby(takeover_s_, [this](const char *d, size_t n) { on_listen_(d, n); },
                        [this] { return learned_.entries(); });
+  // The TAPs: the YAML's, else the ones saved; neither, the one at gateway_id.
+  taps_pref_ = global_preferences->make_preference<TapsPref>(fnv1_hash("tigo_master_taps"));
+  std::vector<MasterCore::TapEntry> taps;
+  if (!fixed_taps_.empty()) {
+    for (uint16_t id : fixed_taps_) taps.push_back({id, {}});
+  } else {
+    load_taps_(taps);
+  }
+  if (!taps.empty()) core_->set_taps(taps);
+  // Standing by, the rest are learned from the master it stands by for.
+  if (standby_ && fixed_taps_.empty())
+    core_->set_learn_taps(
+        [this](const std::vector<MasterCore::TapEntry> &t) {
+          std::lock_guard<std::mutex> lock(taps_mu_);
+          taps_to_save_ = t;
+          taps_dirty_ = true;
+        },
+        /*guessed=*/taps.empty());
   core_->open();
   // Core 1: Wi-Fi and the network stack live on core 0. Above the ESPHome
   // loop task (priority 1), so publishing never delays a reply.
@@ -140,10 +160,46 @@ void TigoMasterComponent::loop() {
       pv_dirty_ = false;
     }
   }
+  {
+    std::vector<MasterCore::TapEntry> taps;
+    {
+      std::lock_guard<std::mutex> lock(taps_mu_);
+      if (taps_dirty_) taps.swap(taps_to_save_);
+      taps_dirty_ = false;
+    }
+    if (!taps.empty()) save_taps_(taps);
+  }
   if (now - published_at_ms_ >= PUBLISH_EVERY_MS) {
     published_at_ms_ = now;
     publish_();
   }
+}
+
+void TigoMasterComponent::load_taps_(std::vector<MasterCore::TapEntry> &out) {
+  TapsPref p{};
+  if (!taps_pref_.load(&p)) return;
+  for (size_t i = 0; i < std::min<size_t>(p.count, SAVED_TAPS); i++) {
+    MasterCore::TapEntry e;
+    e.id = p.taps[i].id;
+    if (p.taps[i].mac_len <= sizeof(p.taps[i].mac)) e.mac.assign(p.taps[i].mac, p.taps[i].mac + p.taps[i].mac_len);
+    out.push_back(e);
+  }
+}
+
+void TigoMasterComponent::save_taps_(const std::vector<MasterCore::TapEntry> &taps) {
+  TapsPref p{};
+  p.count = static_cast<uint8_t>(std::min(taps.size(), SAVED_TAPS));
+  for (size_t i = 0; i < p.count; i++) {
+    p.taps[i].id = taps[i].id;
+    if (taps[i].mac.size() <= sizeof(p.taps[i].mac)) {
+      p.taps[i].mac_len = static_cast<uint8_t>(taps[i].mac.size());
+      std::copy(taps[i].mac.begin(), taps[i].mac.end(), p.taps[i].mac);
+    }
+  }
+  if (taps.size() > SAVED_TAPS)
+    ESP_LOGW(TAG, "%u TAPs learned; only the first %u are kept across a reboot", static_cast<unsigned>(taps.size()),
+             static_cast<unsigned>(SAVED_TAPS));
+  if (taps_pref_.save(&p)) ESP_LOGI(TAG, "saved %u TAP%s", static_cast<unsigned>(p.count), p.count == 1 ? "" : "s");
 }
 
 #ifdef USE_SWITCH
@@ -218,6 +274,16 @@ void TigoMasterComponent::dump_config() {
     ESP_LOGCONFIG(TAG, "  Takes over after: %u s", static_cast<unsigned>(takeover_s_));
   }
   ESP_LOGCONFIG(TAG, "  Gateway id: %04X", gateway_id_);
+  if (core_) {
+    std::string list;
+    for (const auto &t : core_->taps()) {
+      char b[6];
+      snprintf(b, sizeof(b), " %04X", t.id);
+      list += b;
+    }
+    ESP_LOGCONFIG(TAG, "  TAPs:%s (%s)", list.c_str(),
+                  !fixed_taps_.empty() ? "from the config" : standby_ ? "saved, and learned standing by" : "saved");
+  }
   ESP_LOGCONFIG(TAG, "  Bring-up: %s, housekeeping: %s, queries: %s%s", YESNO(startup_), YESNO(housekeeping_),
                 YESNO(queries_), writes_ ? " (with the CCA's two writes)" : "");
 }

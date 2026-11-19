@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **An ESP32 standby can run a system with more than one TAP** (experimental,
+  not yet run on hardware). While another master runs the bus, it learns each
+  TAP that master polls and keeps the list in flash, so on taking over it
+  polls them all, not only the one at `gateway_id`. To fix the list instead,
+  give `tigo_master` a `taps:` list. Nothing changes for one TAP.
+
 - **The ESP32's Devices page shows each optimizer's firmware, settings and
   rating, and the TAPs, as the Pi's does.** It reads them from what the bus
   carries, so they appear once a master asks the optimizers: a Pi, a CCA,
