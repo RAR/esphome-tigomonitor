@@ -46,6 +46,9 @@ class BusBook {
   // address another optimizer has taken since (a gateway renumbering) then
   // starts that address's record afresh instead of logging a change.
   void set_barcode_of(std::function<std::string(uint16_t)> f) { barcode_of_ = std::move(f); }
+  // A TAP's name, or "": the ESP32 keeps them itself, and the API's TAP
+  // entries (read or only polled) carry them. The Pi adds its own instead.
+  void set_tap_name_of(std::function<Str(uint16_t)> f) { tap_name_of_ = std::move(f); }
 
   // After each frame BusWatch was given. runs_bus: this monitor runs the bus
   // now; while another master runs it, what an optimizer reports changed is
@@ -305,6 +308,12 @@ class BusBook {
       std::snprintf(b, sizeof(b), "%lld", v);
       out.append(b);
     };
+    // Into an API answer only: the names are kept elsewhere, not in a saved copy.
+    auto name = [&](uint16_t tap) {
+      if (with_pans || !tap_name_of_) return;
+      Str n = tap_name_of_(tap);
+      if (!n.empty()) out.append(","), key("name"), str(n);
+    };
     auto entry = [&](const VersionBook::Entry &e) {
       out.append("{");
       key("addr"), hex(e.addr), out.append(",");
@@ -313,6 +322,7 @@ class BusBook {
       key("previous"), str(e.previous), out.append(",");
       key("since_unix_ms"), num(e.since_ms), out.append(",");
       key("last_unix_ms"), num(e.last_ms);
+      if (e.tap) name(e.addr);
       out.append("}");
     };
     out.append("{");
@@ -367,6 +377,7 @@ class BusBook {
       out.append("{");
       key("tap"), hex(kv.first), out.append(",");
       key("heard_unix_ms"), num(kv.second);
+      name(kv.first);
       out.append("}");
     }
     out.append("],");
@@ -511,6 +522,7 @@ class BusBook {
 
   Log log_;
   std::function<std::string(uint16_t)> barcode_of_;
+  std::function<Str(uint16_t)> tap_name_of_;
 };
 
 }  // namespace master

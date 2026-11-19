@@ -437,6 +437,10 @@ void TigoMonitorComponent::loop() {
   StateLock lock(state_mutex_);
   process_serial_data();
   if (bus_book_) keep_bus_book_();
+  if (tap_names_dirty_) {
+    tap_names_dirty_ = false;
+    tap_names_pref_.save(tap_names_.get());
+  }
   
 #ifdef USE_ESP_IDF
   // Periodic heap and stack monitoring (every 60 seconds) to detect memory leaks/stack issues
@@ -3578,7 +3582,48 @@ void TigoMonitorComponent::enable_bus_book() {
       if (strcasecmp(n.addr.c_str(), a) == 0) return std::string(n.long_address.c_str());
     return std::string();
   });
+  tap_names_ = make_psram_unique<TapNames>();
+  memset(tap_names_.get(), 0, sizeof(TapNames));
+  tap_names_pref_ = global_preferences->make_preference<TapNames>(fnv1_hash("tigo_tap_names"));
+  if (!tap_names_pref_.load(tap_names_.get())) memset(tap_names_.get(), 0, sizeof(TapNames));
+  for (auto &n : tap_names_->name) n[TapNames::LEN] = '\0';
+  bus_book_->set_tap_name_of([this](uint16_t tap) {
+    for (int i = 0; i < TapNames::MAX; i++)
+      if (tap_names_->addr[i] == tap && tap_names_->name[i][0]) return master::Str(tap_names_->name[i]);
+    return master::Str();
+  });
   ESP_LOGI(TAG, "Keeping each device's firmware, settings and ratings as heard on the bus");
+}
+
+const char *TigoMonitorComponent::set_tap_name(const std::string &tap, const std::string &name) {
+  static const char *const BAD = "a TAP is 4 hex digits, and a name at most 32 characters";
+  if (!tap_names_) return "this monitor keeps no TAP names";
+  if (tap.size() != 4 || tap.find_first_not_of("0123456789abcdefABCDEF") != std::string::npos) return BAD;
+  uint16_t addr = static_cast<uint16_t>(strtoul(tap.c_str(), nullptr, 16));
+  if (addr == 0) return BAD;
+  size_t a = name.find_first_not_of(" \t"), b = name.find_last_not_of(" \t");
+  size_t len = a == std::string::npos ? 0 : b - a + 1;
+  if (len > static_cast<size_t>(TapNames::LEN)) return BAD;
+  int slot = -1, free_slot = -1;
+  for (int i = 0; i < TapNames::MAX; i++) {
+    if (tap_names_->addr[i] == addr) slot = i;
+    else if (tap_names_->addr[i] == 0 && free_slot < 0) free_slot = i;
+  }
+  if (len == 0) {
+    if (slot < 0) return nullptr;
+    tap_names_->addr[slot] = 0;
+    tap_names_->name[slot][0] = '\0';
+    ESP_LOGI(TAG, "TAP %04X has no name now", addr);
+  } else {
+    if (slot < 0) slot = free_slot;
+    if (slot < 0) return "names for eight TAPs at most: clear one first";
+    tap_names_->addr[slot] = addr;
+    memcpy(tap_names_->name[slot], name.data() + a, len);
+    tap_names_->name[slot][len] = '\0';
+    ESP_LOGI(TAG, "TAP %04X is named %s", addr, tap_names_->name[slot]);
+  }
+  tap_names_dirty_ = true;
+  return nullptr;
 }
 
 // Each frame, as the bus gave it (escaped, between 7E 07 and 7E 08), after

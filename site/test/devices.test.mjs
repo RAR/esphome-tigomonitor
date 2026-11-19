@@ -36,7 +36,8 @@ async function open(linux, versions = routes['/api/versions'], posts = [], maste
     if (path === '/api/taps/name' && route.request().method() === 'POST') {
       const b = JSON.parse(route.request().postData());
       posts.push(b);
-      versions = { ...versions, taps: versions.taps.map((t) => t.addr === b.tap ? { ...t, name: b.name } : t) };
+      versions = { ...versions, taps: versions.taps.map((t) => t.addr === b.tap ? { ...t, name: b.name } : t),
+        polled: (versions.polled || []).map((t) => t.tap === b.tap ? { ...t, name: b.name } : t) };
       return json(200, b);
     }
     if (path === '/api/status') return json(200, pi ? { ...routes['/api/status'], platform: 'linux' } : routes['/api/status']);
@@ -353,10 +354,29 @@ test('Devices, on the ESP32: each TAP answering polls is listed, its firmware no
   await page.waitForSelector('#devices-taps tbody tr:nth-child(2)');
   const rows = await page.$$eval('#devices-taps tbody tr', (trs) => trs.map((tr) => [...tr.cells].map((td) => td.textContent.trim())));
   assert.deepEqual(rows.map((r) => r.slice(0, 6)), [
-    ['—', '1201', '—', '—', '—', '—'],
-    ['—', '1202', '04C05B00000000BB', '—', '—', '—']]);
+    ['Add a name', '1201', '—', '—', '—', '—'],
+    ['Add a name', '1202', '04C05B00000000BB', '—', '—', '—']]);
   assert.match(await page.getAttribute('#devices-taps tbody tr:nth-child(1) td.tap-fw', 'title'), /bus master brings the TAP up/);
   assert.doesNotMatch(await page.textContent('#devices-taps'), /Not heard yet/);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+// The ESP32 keeps TAP names too, in its settings storage.
+test('Devices, on the ESP32: a TAP is named in place, its current name offered', async () => {
+  const posts = [];
+  const versions = { ...routes['/api/versions'], taps: [], radios: [], ids: [],
+    polled: [{ tap: '1201', heard_unix_ms: Date.now() - 1000, name: 'Garage' }] };
+  const { page, ctx, errors } = await open('esp32', versions, posts);
+  await page.waitForSelector('#devices-taps td.tap-name button.tap-rename');
+  assert.equal((await page.textContent('#devices-taps td.tap-name')).trim(), 'Garage');
+  await page.click('#devices-taps td.tap-name button.tap-rename');
+  const input = page.locator('#devices-taps td.tap-name input');
+  assert.equal(await input.inputValue(), 'Garage');
+  await input.fill('Shed');
+  await input.press('Enter');
+  await page.waitForFunction(() => document.querySelector('#devices-taps td.tap-name').textContent.trim() === 'Shed');
+  assert.deepEqual(posts, [{ tap: '1201', name: 'Shed' }]);
   assert.deepEqual(errors, []);
   await ctx.close();
 });

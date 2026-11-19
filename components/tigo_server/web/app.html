@@ -4501,8 +4501,9 @@
         ? `<div class="tap-sub">last ${new Date(m.tap.last_lost_unix * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>` : '';
       return `<td class="num">${t.polls.toLocaleString()}${unanswered}</td><td class="num">${t.lost.toLocaleString()}${last}</td>`;
     };
-    // A name, kept on the Pi and shown on the mesh map too; the ESP32 keeps none.
-    const name = t => PLATFORM !== 'linux' ? '<td class="tap-name" style="color:var(--text-faint)">—</td>' : `<td class="tap-name" data-tap="${topoEscape(t.addr)}">${t.name
+    // A name, kept by the monitor (on the ESP32, in its settings storage) and
+    // shown on the mesh map too.
+    const name = t => `<td class="tap-name" data-tap="${topoEscape(t.addr)}">${t.name
       ? `<span>${topoEscape(t.name)}</span><button type="button" class="tap-rename" aria-label="Rename TAP ${topoEscape(t.addr)}" title="Rename"></button>`
       : `<button type="button" class="tap-rename add">Add a name</button>`}</td>`;
     // A TAP answering polls (in the last day) whose firmware no master has
@@ -5610,7 +5611,8 @@
     const b = e.target.closest('button.tap-rename');
     if (!b) return;
     const td = b.closest('td.tap-name'), tap = td.dataset.tap;
-    const t = ((nodesData.versions || {}).taps || []).find(x => x.addr === tap) || {};
+    const v = nodesData.versions || {};
+    const t = (v.taps || []).find(x => x.addr === tap) || (v.polled || []).find(x => x.tap === tap) || {};
     td.innerHTML = `<input class="input compact" maxlength="32" aria-label="Name for TAP ${topoEscape(tap)}" placeholder="e.g. Garage">`;
     const input = td.querySelector('input');
     input.value = t.name || '';

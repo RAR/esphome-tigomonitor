@@ -184,8 +184,8 @@ export const routes = {
     inverters: [],
     strings: strings.map((s) => ({ label: s.label, panel_rating_w: RATING })),
   },
-  // Firmware, settings and ratings heard on the bus (both builds; the ESP32
-  // shows no TAP names). One optimizer was updated.
+  // Firmware, settings and ratings heard on the bus, and the TAPs' names
+  // (both builds). One optimizer was updated.
   '/api/versions': {
     taps: [{ addr: '1201', model: 'Mgate', version: 'G8.59 Jan  1 2026 10:00:00 GW-H150.6.0S0.12', previous: '',
              since_unix_ms: 1767225600000, last_unix_ms: 1767225600000, name: 'Garage' }],

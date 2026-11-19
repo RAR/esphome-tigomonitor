@@ -645,6 +645,11 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   // with_state_lock(); null until then.
   void enable_bus_book();
   const master::BusBook *bus_book() const { return bus_book_.get(); }
+  // A TAP's name on the Devices page, kept in the settings storage (eight
+  // TAPs at most) and written into /api/versions; an empty name clears it.
+  // Inside with_state_lock(), after enable_bus_book(). nullptr when taken,
+  // else why not, for the page.
+  const char *set_tap_name(const std::string &tap, const std::string &name);
   int get_number_of_devices() const { return number_of_devices_; }
   const std::string& get_cca_ip() const { return cca_ip_; }
   bool get_sync_cca_on_startup() const { return sync_cca_on_startup_; }
@@ -1126,6 +1131,16 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   static const uint32_t BUS_BOOK_SAVE_EVERY_MS = 15UL * 60UL * 1000UL;
   void feed_bus_book_(const frame_string &frame);
   void keep_bus_book_();
+  // See set_tap_name(). Also the stored form; saved from the loop, since the
+  // settings storage is not the web server task's to write.
+  struct TapNames {
+    static const int MAX = 8, LEN = 32;
+    uint16_t addr[MAX];
+    char name[MAX][LEN + 1];
+  };
+  psram_unique<TapNames> tap_names_;
+  ESPPreferenceObject tap_names_pref_;
+  bool tap_names_dirty_ = false;
 
 #ifdef TIGO_TSDB_AVAILABLE
   TigoHistory history_;

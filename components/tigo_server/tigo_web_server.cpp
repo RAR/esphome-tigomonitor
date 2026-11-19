@@ -274,6 +274,15 @@ void TigoWebServer::setup() {
     };
     httpd_register_uri_handler(server_, &api_versions_uri);
 
+    // A TAP's name, by its address, as the Pi takes it; an empty name clears it.
+    httpd_uri_t api_tap_name_uri = {
+      .uri = "/api/taps/name",
+      .method = HTTP_POST,
+      .handler = api_tap_name_handler,
+      .user_ctx = this
+    };
+    httpd_register_uri_handler(server_, &api_tap_name_uri);
+
     httpd_uri_t api_strings_uri = {
       .uri = "/api/strings",
       .method = HTTP_GET,
@@ -2772,6 +2781,47 @@ void TigoWebServer::build_strings_json(PSRAMString& json) {
 namespace {
 void append_json_str(PSRAMString &out, const std::string &in);  // with the layout handlers below
 }  // namespace
+
+// POST {"tap": "1201", "name": "..."}: answered as the Pi answers it.
+esp_err_t TigoWebServer::api_tap_name_handler(httpd_req_t *req) {
+  TigoWebServer *server = static_cast<TigoWebServer *>(req->user_ctx);
+  if (!server->check_api_auth(req)) return ESP_OK;
+  httpd_resp_set_type(req, "application/json");
+  auto fail = [&](const char *status, const char *why) {
+    PSRAMString out;
+    out.append("{\"error\":");
+    append_json_str(out, why);
+    out.append("}");
+    httpd_resp_set_status(req, status);
+    httpd_resp_send(req, out.c_str(), out.length());
+    return ESP_OK;
+  };
+  if (server->parent_ == nullptr) return fail("503 Service Unavailable", "monitor not bound");
+  char body[256];
+  int ret = httpd_req_recv(req, body, sizeof(body) - 1);
+  if (ret <= 0) return fail("400 Bad Request", "empty body");
+  body[ret] = '\0';
+  cJSON *root = cJSON_Parse(body);
+  cJSON *t = root ? cJSON_GetObjectItem(root, "tap") : nullptr;
+  cJSON *n = root ? cJSON_GetObjectItem(root, "name") : nullptr;
+  if (!t || !cJSON_IsString(t) || !n || !cJSON_IsString(n)) {
+    if (root) cJSON_Delete(root);
+    return fail("400 Bad Request", "expected {\"tap\": \"1201\", \"name\": \"...\"}");
+  }
+  std::string tap = t->valuestring, name = n->valuestring;
+  cJSON_Delete(root);
+  const char *why = nullptr;
+  server->parent_->with_state_lock([&] { why = server->parent_->set_tap_name(tap, name); });
+  if (why != nullptr) return fail("400 Bad Request", why);
+  PSRAMString out;
+  out.append("{\"tap\":");
+  append_json_str(out, tap);
+  out.append(",\"name\":");
+  append_json_str(out, name);
+  out.append("}");
+  httpd_resp_send(req, out.c_str(), out.length());
+  return ESP_OK;
+}
 
 void TigoWebServer::build_inverters_json(PSRAMString& json) {
   json.append("{\"inverters\":[");

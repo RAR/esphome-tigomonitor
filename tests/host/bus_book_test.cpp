@@ -163,6 +163,28 @@ static void test_a_tap_answering_polls_is_listed() {
   CHECK(j["taps"].empty());
 }
 
+// The ESP32 keeps TAP names itself: given a way to look them up, the book
+// writes each into the API's TAP entries, read or only polled, and never
+// into a saved copy (the names are kept elsewhere).
+static void test_a_tap_name_goes_into_the_api() {
+  BusBook b;
+  b.versions.record({true, 0x1201, "Mgate", "G8.59"}, 1000);
+  b.hear_poll_reply(0x9201, 1000);
+  b.hear_poll_reply(0x9202, 1000);
+  b.set_tap_name_of([](uint16_t tap) { return tap == 0x1202 ? Str("Attic \"B\"") : tap == 0x1201 ? Str("Garage") : Str(); });
+  json j = json::parse(json_of(b, false), nullptr, false);
+  CHECK(j.is_object());
+  if (!j.is_object()) return;
+  CHECK(j["taps"][0]["name"] == "Garage");
+  CHECK(j["polled"][0]["name"] == "Garage" && j["polled"][1]["name"] == "Attic \"B\"");
+  b.set_tap_name_of([](uint16_t) { return Str(); });
+  j = json::parse(json_of(b, false), nullptr, false);
+  CHECK(!j["taps"][0].contains("name") && !j["polled"][1].contains("name"));
+  b.set_tap_name_of([](uint16_t) { return Str("Garage"); });
+  json saved = json::parse(json_of(b, true), nullptr, false);
+  CHECK(!saved["taps"][0].contains("name") && !saved["polled"][0].contains("name"));
+}
+
 // A tab or newline inside a field can't split a record: it becomes a space.
 static void test_a_tab_in_a_field_stays_in_its_field() {
   BusBook a;
@@ -195,6 +217,7 @@ int main() {
   test_odd_text_is_escaped();
   test_the_saved_copy_reads_back();
   test_a_tap_answering_polls_is_listed();
+  test_a_tap_name_goes_into_the_api();
   test_a_tab_in_a_field_stays_in_its_field();
   test_a_bad_line_is_skipped();
   if (failures) {
