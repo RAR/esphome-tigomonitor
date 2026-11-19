@@ -62,7 +62,7 @@ async function open(saved = { panels: [], taps: [] }, platform = 'linux', master
       return json(200, api.layout);
     }
     if (path === '/api/master' && master) return json(200, master);
-    if (path === '/api/mesh' && platform === 'linux') return json(200, { taps: [{ id: '1201', name: 'Garage' }], nodes: [], loss_days: [] });
+    if (path === '/api/mesh') return json(200, { taps: [{ id: '1201', name: 'Garage' }], nodes: [], loss_days: [] });
     if (routes[path] !== undefined) return json(200, routes[path]);
     return route.fulfill({ status: 404, body: 'no fixture' });
   });
@@ -77,12 +77,12 @@ async function open(saved = { panels: [], taps: [] }, platform = 'linux', master
 const tile = (page, addr) => page.locator(`#array-canvas [data-kind="panel"][data-id="${addr}"]`);
 const chip = (page, addr) => page.locator(`#array-tray [data-kind="panel"][data-id="${addr}"]`);
 
-test('the ESP32: Layout and Array, no Mesh; its TAPs from what answers polls, named', async () => {
+test('the ESP32: Mesh, Layout and Array; its TAPs from what answers polls, named', async () => {
   const { page, ctx, api, errors } = await open({
     panels: [{ addr: '0002', x: 5, y: 3, portrait: true }, { addr: '0003', x: 6, y: 3, portrait: false }],
     taps: [{ id: '1201', x: 8, y: 4 }],
   }, 'esp32');
-  assert.equal(await page.isVisible('#topology-tab-mesh'), false);
+  assert.equal(await page.isVisible('#topology-tab-mesh'), true);
   assert.equal(await page.isVisible('#topology-tab-layout'), true);
   await page.waitForSelector('#array-canvas .array-tile');
   assert.match(await tile(page, '0002').textContent(), /400 W/);
@@ -94,7 +94,7 @@ test('the ESP32: Layout and Array, no Mesh; its TAPs from what answers polls, na
   await page.waitForFunction(() => document.getElementById('array-edit-btn').style.display !== 'none');
   assert.equal(api.posts.length, 1);
   assert.deepEqual(api.posts[0].taps, [{ id: '1201', x: 8, y: 4 }]);
-  assert.equal(api.asked.includes('/api/mesh') || api.asked.includes('/api/master'), false);
+  assert.equal(api.asked.includes('/api/master'), false);  // it runs no bus
   assert.deepEqual(errors, []);
   await ctx.close();
 });

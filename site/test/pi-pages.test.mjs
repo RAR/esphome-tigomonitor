@@ -69,11 +69,11 @@ async function open(opts = {}) {
       return json(200, api.settings);
     }
     if (path === '/api/master' && linux && opts.master) return json(200, piRoutes['/api/master']);
-    if (path === '/api/mesh/joins' && linux) {
+    if (path === '/api/mesh/joins') {
       api.joinReads = [...(api.joinReads || []), new URL(req.url()).searchParams.get('addr')];
       return json(200, { addr: new URL(req.url()).searchParams.get('addr'), ...(opts.joins ?? piRoutes['/api/mesh/joins']) });
     }
-    if (path === '/api/mesh' && linux) { api.meshReads = (api.meshReads || 0) + 1; return json(200, opts.mesh ?? piRoutes['/api/mesh']); }
+    if (path === '/api/mesh') { api.meshReads = (api.meshReads || 0) + 1; return json(200, opts.mesh ?? piRoutes['/api/mesh']); }
     if (path === '/api/logs') { api.logReads = (api.logReads || 0) + 1; return json(200, { lines: [], next: 0 }); }
     if (path === '/api/cloud/status') return json(200, { configured: true });
     if (path === '/api/cloud/health') return json(200, { summary: {} });
@@ -399,11 +399,17 @@ async function openMesh(opts = {}) {
 const meshNode = (page, label) => page.locator(`#mesh-svg .mesh-node[data-label="${label}"]`);
 const fixtureNodes = piRoutes['/api/mesh'].nodes;
 
-test('mesh: tab only on the Pi', async () => {
-  const { page, ctx } = await open({ linux: false });
+test('mesh: the ESP32 has it too, first of the tabs, opening on Layout until picked', async () => {
+  const { page, ctx, errors } = await open({ linux: false });
   await page.click('#nav button[data-view="topology"]');
-  assert.equal(await page.isVisible('#topology-tabs [data-tab="mesh"]'), false);
-  assert.equal(await page.isVisible('#topo-tree'), true);
+  assert.equal(await page.getAttribute('#topology-tab-layout', 'aria-selected'), 'true');
+  await page.click('#topology-tabs [data-tab="mesh"]');
+  await page.waitForSelector('#topology-mesh .mesh-node', { state: 'attached' });
+  assert.deepEqual(await page.locator('#topology-tabs [role="tab"]').evaluateAll((ts) => ts.filter((t) => t.style.display !== 'none').map((t) => t.dataset.tab)),
+    ['mesh', 'layout', 'array']);
+  assert.equal(await page.getAttribute('#topology-tab-mesh', 'aria-selected'), 'true');
+  assert.equal(await page.locator('#mesh-svg .mesh-node').count(), fixtureNodes.length);
+  assert.deepEqual(errors, []);
   await ctx.close();
 });
 

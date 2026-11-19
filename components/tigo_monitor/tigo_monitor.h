@@ -136,6 +136,8 @@ inline bool operator!=(const std::string &a, const psram_string &b) { return !(b
 #define TIGO_BUS_ALLOCATOR ::PSRAMAllocator
 #endif
 #include "bus_book.h"
+#include "link_stats.h"
+#include "mesh_history.h"
 
 #ifdef USE_ESP_IDF
 // An object of its own in PSRAM, freed back there (bus_watch_, bus_book_).
@@ -647,6 +649,19 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   void enable_bus_book();
   const master::BusBook *bus_book() const { return bus_book_.get(); }
   const master::BusWatch *bus_watch() const { return bus_watch_.get(); }
+  // The mesh map (link_stats.h, mesh_history.h), made with the bus book:
+  // each optimizer's TAP, link and joins, and reports and losses by day.
+  // Inside with_state_lock(); null until enable_bus_book().
+  const link::LinkStats *mesh_links() const { return mesh_links_.get(); }
+  const mesh_history::LossBook *mesh_losses() const { return mesh_losses_.get(); }
+  const master::Vec<mesh_history::JoinEntry> *mesh_joins() const { return mesh_joins_.get(); }
+  // Notes today's reports and losses so far into the loss book, as the Pi
+  // does before reading it. today: "YYYY-MM-DD", for the page.
+  void mesh_note_today(master::Str *today = nullptr);
+  // A TAP's name (set_tap_name), or "". Inside with_state_lock().
+  master::Str tap_name(uint16_t tap) const;
+  static const size_t MESH_LOSS_DAYS = 30;
+  static const int64_t MESH_JOIN_DAYS = 30;
   // A TAP's name on the Devices page, kept in the settings storage (eight
   // TAPs at most) and written into /api/versions; an empty name clears it.
   // Inside with_state_lock(), after enable_bus_book(). nullptr when taken,
@@ -1133,6 +1148,34 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   static const uint32_t BUS_BOOK_SAVE_EVERY_MS = 15UL * 60UL * 1000UL;
   void feed_bus_book_(const frame_string &frame);
   void keep_bus_book_();
+  // A file written a piece a loop, to a temporary file renamed into place at
+  // the end: written at once, a large one stops the loop reading the bus for
+  // longer than the UART's buffer holds (the bus book's 12 KB held it 223 ms,
+  // the mesh map's ~110 KB would hold it over a second).
+  struct FileSave {
+    psram_unique<master::Str> text;  // null when no save is under way
+    size_t at = 0;
+    FILE *f = nullptr;
+  };
+  FileSave bus_book_save_, mesh_save_;
+  // The next piece of save, under the history's flash lock. False while
+  // there is more to write (or the lock was busy); true when it ended, ok
+  // then saying whether the file is in place.
+  bool save_piece_(FileSave &save, const char *tmp_path, const char *path, bool &ok);
+  // See mesh_links(). Fed from process_power_frame and process_09_frame;
+  // kept on the history's flash by keep_mesh_, written a piece a loop.
+  psram_unique<link::LinkStats> mesh_links_;
+  psram_unique<mesh_history::LossBook> mesh_losses_;
+  psram_unique<master::Vec<mesh_history::JoinEntry>> mesh_joins_;
+  uint16_t frame_tap_ = 0;  // the TAP the power frame being walked came through
+  bool mesh_loaded_ = false;
+  uint32_t mesh_saved_ms_ = 0, mesh_pruned_ms_ = 0;
+  FILE *mesh_file_ = nullptr;  // the saved copy, while it's read back
+  int mesh_day_(master::Str *date) const;
+  void feed_mesh_report_(const DeviceData &d);
+  void feed_mesh_join_(const frame_string &packet);
+  void keep_mesh_();
+  bool restore_mesh_line_(const char *line);
   // See set_tap_name(). Also the stored form; saved from the loop, since the
   // settings storage is not the web server task's to write.
   struct TapNames {

@@ -437,6 +437,7 @@ void TigoMonitorComponent::loop() {
   StateLock lock(state_mutex_);
   process_serial_data();
   if (bus_book_) keep_bus_book_();
+  if (mesh_links_) keep_mesh_();
   if (tap_names_dirty_) {
     tap_names_dirty_ = false;
     tap_names_pref_.save(tap_names_.get());
@@ -808,6 +809,15 @@ void TigoMonitorComponent::process_frame_(const frame_string &frame) {
       ESP_LOGW(TAG, "Frame too short: %s", hex_frame.c_str());
       break;
     case protocol::FrameType::power: {
+      // DEST: the TAP it came through, with the reply bit set. The mesh map
+      // keeps it for each report, without a string for the 4 digits.
+      frame_tap_ = 0;
+      for (size_t i = 0; i < 4 && i < hex_frame.size(); i++) {
+        char c = hex_frame[i];
+        frame_tap_ = static_cast<uint16_t>(frame_tap_ << 4 |
+                                           (c >= '0' && c <= '9' ? c - '0' : (c | 0x20) - 'a' + 10));
+      }
+      frame_tap_ &= 0x7FFF;
       bool clean = protocol::walk_power_packets(hex_frame, [this](const frame_string &type, const frame_string &packet) {
         frame_has_packets_ = true;
         if (type == "07") frame_has_answer_ = true;  // an optimizer's answer: the bus book wants it
@@ -898,6 +908,7 @@ void TigoMonitorComponent::process_power_frame(const frame_string &frame) {
 
   // Power factor (assuming unity for DC systems, can be customized)
   data.power_factor = 1.0f;
+  feed_mesh_report_(data);
   
   // Firmware version (placeholder - would need to be extracted from other frames if available)
   data.firmware_version = "unknown";
@@ -920,6 +931,7 @@ void TigoMonitorComponent::process_power_frame(const frame_string &frame) {
 }
 
 void TigoMonitorComponent::process_09_frame(const frame_string &frame) {
+  feed_mesh_join_(frame);  // a NetDiag join, for the mesh map
   // Need at least 46 chars to read barcode at offset 40 (length 6)
   if (frame.length() < 46) {
     ESP_LOGW(TAG, "Frame 09 too short (%zu chars), skipping", frame.length());
@@ -3563,6 +3575,8 @@ void TigoMonitorComponent::snapshot_to_history_() {
 // --- The bus book (bus_book.h): what the Devices page shows of each device ---
 
 static const char *const kBusBookPath = "/tsdb/bus_book.txt";
+static const char *const kBusBookTmpPath = "/tsdb/bus_book.tmp";
+static const size_t SAVE_PIECE = 4096;  // FileSave's piece a loop
 
 void TigoMonitorComponent::enable_bus_book() {
   StateLock lock(state_mutex_);
@@ -3589,12 +3603,11 @@ void TigoMonitorComponent::enable_bus_book() {
   tap_names_pref_ = global_preferences->make_preference<TapNames>(fnv1_hash("tigo_tap_names"));
   if (!tap_names_pref_.load(tap_names_.get())) memset(tap_names_.get(), 0, sizeof(TapNames));
   for (auto &n : tap_names_->name) n[TapNames::LEN] = '\0';
-  bus_book_->set_tap_name_of([this](uint16_t tap) {
-    for (int i = 0; i < TapNames::MAX; i++)
-      if (tap_names_->addr[i] == tap && tap_names_->name[i][0]) return master::Str(tap_names_->name[i]);
-    return master::Str();
-  });
-  ESP_LOGI(TAG, "Keeping each device's firmware, settings and ratings as heard on the bus");
+  bus_book_->set_tap_name_of([this](uint16_t tap) { return tap_name(tap); });
+  mesh_links_ = make_psram_unique<link::LinkStats>();
+  mesh_losses_ = make_psram_unique<mesh_history::LossBook>();
+  mesh_joins_ = make_psram_unique<master::Vec<mesh_history::JoinEntry>>();
+  ESP_LOGI(TAG, "Keeping each device's firmware, settings and ratings as heard on the bus, and the mesh map");
 }
 
 const char *TigoMonitorComponent::set_tap_name(const std::string &tap, const std::string &name) {
@@ -3699,28 +3712,269 @@ void TigoMonitorComponent::keep_bus_book_() {
     ESP_LOGI(TAG, "Bus book: %u records read back%s", good, bad ? " (some lines unreadable, skipped)" : "");
     return;
   }
-  if (!bus_book_->dirty || now - bus_book_saved_ms_ < BUS_BOOK_SAVE_EVERY_MS) return;
-  TigoHistory::FlashLock lock(&history_, 100);
-  if (!lock.held()) {
-    bus_book_saved_ms_ = now - BUS_BOOK_SAVE_EVERY_MS + 60000;
+  if (bus_book_save_.text) {
+    bool ok;
+    size_t size = bus_book_save_.text->size();
+    if (!save_piece_(bus_book_save_, kBusBookTmpPath, kBusBookPath, ok)) return;
+    if (ok) {
+      ESP_LOGI(TAG, "Bus book saved (%u bytes, %u pieces)", (unsigned) size,
+               (unsigned) ((size + SAVE_PIECE - 1) / SAVE_PIECE));
+    } else {
+      bus_book_->dirty = true;  // tried again next time
+      ESP_LOGW(TAG, "Bus book: could not write %s", kBusBookPath);
+    }
     return;
   }
-  psram_string text;
-  bus_book_->write_text(text);
-  FILE *f = fopen(kBusBookPath, "wb");
-  bool ok = f != nullptr && fwrite(text.data(), 1, text.size(), f) == text.size();
-  if (f != nullptr) {
-    fflush(f);
-    fsync(fileno(f));
-    fclose(f);
-  }
+  if (!bus_book_->dirty || now - bus_book_saved_ms_ < BUS_BOOK_SAVE_EVERY_MS) return;
   bus_book_saved_ms_ = now;
+  // What changes from here on marks it again, for the next save.
+  bus_book_save_.text = make_psram_unique<master::Str>();
+  bus_book_->write_text(*bus_book_save_.text);
+  bus_book_->dirty = false;
+#endif
+}
+
+// See FileSave. A piece a call: the UART's buffer drains between.
+bool TigoMonitorComponent::save_piece_(FileSave &save, const char *tmp_path, const char *path, bool &ok) {
+  ok = false;
+#ifdef TIGO_TSDB_AVAILABLE
+  TigoHistory::FlashLock lock(&history_, 10);
+  if (!lock.held()) return false;
+  const master::Str &text = *save.text;
+  if (save.f == nullptr && save.at == 0) save.f = fopen(tmp_path, "wb");
+  ok = save.f != nullptr;
   if (ok) {
-    bus_book_->dirty = false;
-    ESP_LOGI(TAG, "Bus book saved (%u bytes, %u ms)", (unsigned) text.size(), (unsigned) (millis() - now));
-  } else {
-    ESP_LOGW(TAG, "Bus book: could not write %s", kBusBookPath);
+    size_t n = std::min(SAVE_PIECE, text.size() - save.at);
+    ok = fwrite(text.data() + save.at, 1, n, save.f) == n;
+    save.at += n;
   }
+  if (ok && save.at < text.size()) return false;
+  if (save.f != nullptr) {
+    fflush(save.f);
+    fsync(fileno(save.f));
+    fclose(save.f);
+    save.f = nullptr;
+  }
+  ok = ok && rename(tmp_path, path) == 0;
+#endif
+  save.text.reset();
+  save.at = 0;
+  return true;
+}
+
+// ---- the mesh map ----------------------------------------------------------
+
+static const char *const kMeshPath = "/tsdb/mesh.txt";
+static const char *const kMeshTmpPath = "/tsdb/mesh.tmp";
+static const uint32_t MESH_SAVE_EVERY_MS = 15UL * 60UL * 1000UL;
+static const size_t MESH_LINE_MAX = 1400;    // a day of RSSI is 1,152 hex digits
+static const int64_t MESH_QUIET_S = 3600;    // as the Pi's LINK_QUIET_S
+
+// Today, as YYYYMMDD (and "YYYY-MM-DD" into date): local with a time
+// source, else UTC. 0 before the clock is set.
+int TigoMonitorComponent::mesh_day_(master::Str *date) const {
+  int y = 0, m = 0, d = 0;
+#ifdef USE_TIME
+  if (time_id_ != nullptr) {
+    auto now = time_id_->now();
+    if (now.is_valid()) y = now.year, m = now.month, d = now.day_of_month;
+  }
+#endif
+  if (!y) {
+    int64_t ms = bus_now_ms();
+    if (!ms) return 0;
+    time_t t = static_cast<time_t>(ms / 1000);
+    struct tm g;
+    gmtime_r(&t, &g);
+    y = g.tm_year + 1900, m = g.tm_mon + 1, d = g.tm_mday;
+  }
+  if (date != nullptr) {
+    char b[16];
+    snprintf(b, sizeof(b), "%04d-%02d-%02d", y, m, d);
+    *date = b;
+  }
+  return y * 10000 + m * 100 + d;
+}
+
+void TigoMonitorComponent::feed_mesh_report_(const DeviceData &d) {
+  if (!mesh_links_) return;
+  int64_t now = bus_now_ms();
+  int day = mesh_day_(nullptr);
+  if (!now || !day) return;
+  uint16_t slot = static_cast<uint16_t>(strtoul(d.slot_counter.c_str(), nullptr, 16));
+  mesh_links_->on_report(master::Str(d.addr.c_str()), frame_tap_, d.rssi, slot, now / 1000, day);
+}
+
+// A NetDiag join: the optimizer named by its MAC, else by the packet's
+// address, and the parent it joined through, as the Pi keeps it.
+void TigoMonitorComponent::feed_mesh_join_(const frame_string &packet) {
+  if (!mesh_links_) return;
+  protocol::NetDiagJoin j;
+  if (!protocol::decode_netdiag_packet(packet, j)) return;
+  int64_t now = bus_now_ms();
+  if (!now) return;
+  int64_t now_s = now / 1000;
+  master::Str addr(j.addr);
+  for (const auto &n : node_table_)
+    if (strcasecmp(n.long_address.c_str(), j.node_mac) == 0) addr = n.addr.c_str();
+  mesh_links_->on_join(addr, now_s, j.parent, j.nwid);
+  mesh_joins_->push_back({addr, now_s, j.parent, j.nwid});
+  while (!mesh_joins_->empty() && mesh_joins_->front().unix_s < now_s - MESH_JOIN_DAYS * 86400)
+    mesh_joins_->erase(mesh_joins_->begin());
+  ESP_LOGI(TAG, "mesh: %s joined (parent %s)", addr.c_str(), j.parent);
+}
+
+master::Str TigoMonitorComponent::tap_name(uint16_t tap) const {
+  if (!tap_names_) return master::Str();
+  for (int i = 0; i < TapNames::MAX; i++)
+    if (tap_names_->addr[i] == tap && tap_names_->name[i][0]) return master::Str(tap_names_->name[i]);
+  return master::Str();
+}
+
+// Also starts a new day's counts for each optimizer not heard since
+// midnight, as the Pi's links() does before they're read.
+void TigoMonitorComponent::mesh_note_today(master::Str *today) {
+  if (!mesh_links_) return;
+  master::Str date;
+  int day = mesh_day_(&date);
+  if (!day) return;
+  mesh_links_->roll(day);
+  for (const auto &kv : mesh_links_->links())
+    if (kv.second.day == day && kv.second.reports_today)
+      mesh_losses_->note(date, kv.first, kv.second.reports_today, kv.second.lost_today);
+  mesh_losses_->prune(MESH_LOSS_DAYS);
+  if (today != nullptr) *today = date;
+}
+
+// One line of the saved copy, tab-separated, its newline already gone:
+//   J addr unix parent nwid    the last join of each optimizer
+//   R addr to hex              a day of its RSSI (link_stats.h's rssi_dump)
+//   L date addr reports lost   a day's counts
+//   G addr unix parent nwid    the join log, oldest first
+bool TigoMonitorComponent::restore_mesh_line_(const char *line) {
+  char buf[MESH_LINE_MAX];
+  strncpy(buf, line, sizeof(buf) - 1);
+  buf[sizeof(buf) - 1] = '\0';
+  char *t[6] = {nullptr};
+  int n = 0;
+  char *save = nullptr;
+  for (char *p = strtok_r(buf, "\t", &save); p != nullptr && n < 6; p = strtok_r(nullptr, "\t", &save)) t[n++] = p;
+  if (n < 1 || strlen(t[0]) != 1) return false;
+  switch (t[0][0]) {
+    case 'J':
+      if (n != 5) return false;
+      mesh_links_->on_join(t[1], strtoll(t[2], nullptr, 10), t[3], t[4]);
+      return true;
+    case 'R':
+      if (n != 4) return false;
+      mesh_links_->rssi_restore(t[1], static_cast<int32_t>(strtol(t[2], nullptr, 10)), t[3]);
+      return true;
+    case 'L':
+      if (n != 5) return false;
+      mesh_losses_->restore(t[1], t[2], strtoul(t[3], nullptr, 10), strtoul(t[4], nullptr, 10));
+      return true;
+    case 'G':
+      if (n != 5) return false;
+      mesh_joins_->push_back({t[1], strtoll(t[2], nullptr, 10), t[3], t[4]});
+      return true;
+    default:
+      return false;
+  }
+}
+
+// From the loop: drop links no optimizer holds now, read the saved copy back
+// once the history's flash is mounted, then save it every
+// MESH_SAVE_EVERY_MS, a piece a loop (FileSave): ~110 KB for 40
+// optimizers, most of it a day of RSSI.
+void TigoMonitorComponent::keep_mesh_() {
+  uint32_t now = millis();
+  int64_t unix_ms = bus_now_ms();
+  if (unix_ms && now - mesh_pruned_ms_ >= 60000) {
+    mesh_pruned_ms_ = now;
+    if (!node_table_.empty()) {
+      size_t n = mesh_links_->prune(
+          [this](const master::Str &addr) {
+            for (const auto &x : node_table_)
+              if (strcasecmp(x.addr.c_str(), addr.c_str()) == 0) return true;
+            return false;
+          },
+          unix_ms / 1000, MESH_QUIET_S);
+      if (n)
+        ESP_LOGI(TAG, "mesh: dropped %u address%s no optimizer holds now, quiet for an hour", (unsigned) n,
+                 n == 1 ? "" : "es");
+    }
+  }
+#ifdef TIGO_TSDB_AVAILABLE
+  if (!history_.initialized()) return;
+  if (!mesh_loaded_) {
+    TigoHistory::FlashLock lock(&history_, 10);
+    if (!lock.held()) return;
+    if (mesh_file_ == nullptr) {
+      mesh_file_ = fopen(kMeshPath, "rb");
+      if (mesh_file_ == nullptr) {
+        mesh_loaded_ = true;
+        mesh_saved_ms_ = now;
+        return;
+      }
+    }
+    auto line = make_psram_unique<std::array<char, MESH_LINE_MAX>>();
+    for (int i = 0; i < 32; i++) {
+      if (fgets(line->data(), line->size(), mesh_file_) == nullptr) {
+        fclose(mesh_file_);
+        mesh_file_ = nullptr;
+        mesh_loaded_ = true;
+        mesh_saved_ms_ = now;
+        ESP_LOGI(TAG, "Mesh: %u optimizers' links and %u joins read back", (unsigned) mesh_links_->links().size(),
+                 (unsigned) mesh_joins_->size());
+        return;
+      }
+      line->data()[strcspn(line->data(), "\r\n")] = '\0';
+      if (line->data()[0] && !restore_mesh_line_(line->data())) ESP_LOGW(TAG, "Mesh: an unreadable line, skipped");
+    }
+    return;
+  }
+  if (mesh_save_.text) {
+    bool ok;
+    size_t size = mesh_save_.text->size();
+    if (!save_piece_(mesh_save_, kMeshTmpPath, kMeshPath, ok)) return;
+    if (ok) ESP_LOGI(TAG, "Mesh saved (%u bytes, %u pieces)", (unsigned) size, (unsigned) ((size + SAVE_PIECE - 1) / SAVE_PIECE));
+    else ESP_LOGW(TAG, "Mesh: could not write %s", kMeshPath);
+    return;
+  }
+  if (now - mesh_saved_ms_ < MESH_SAVE_EVERY_MS || !unix_ms || mesh_links_->links().empty()) return;
+  mesh_saved_ms_ = now;
+  mesh_note_today();
+  int64_t now_s = unix_ms / 1000;
+  auto text = make_psram_unique<master::Str>();
+  text->reserve(mesh_links_->links().size() * 1300 + mesh_joins_->size() * 40 + 32 * 1024);
+  char b[96];
+  for (const auto &kv : mesh_links_->links()) {
+    const auto &l = kv.second;
+    if (!l.last_join_s) continue;
+    snprintf(b, sizeof(b), "J\t%s\t%lld\t%s\t%s\n", kv.first.c_str(), (long long) l.last_join_s, l.parent.c_str(),
+             l.nwid.c_str());
+    text->append(b);
+  }
+  for (const auto &kv : mesh_links_->links()) {
+    master::Str hex = mesh_links_->rssi_dump(kv.first, now_s);
+    if (hex.empty()) continue;
+    snprintf(b, sizeof(b), "R\t%s\t%lld\t", kv.first.c_str(), (long long) (now_s / link::BUCKET_S));
+    text->append(b);
+    text->append(hex);
+    text->append("\n");
+  }
+  for (const auto &day : mesh_losses_->days())
+    for (const auto &kv : day.second) {
+      snprintf(b, sizeof(b), "L\t%s\t%s\t%u\t%u\n", day.first.c_str(), kv.first.c_str(), (unsigned) kv.second.first,
+               (unsigned) kv.second.second);
+      text->append(b);
+    }
+  for (const auto &e : *mesh_joins_) {
+    snprintf(b, sizeof(b), "G\t%s\t%lld\t%s\t%s\n", e.addr.c_str(), (long long) e.unix_s, e.parent.c_str(),
+             e.nwid.c_str());
+    text->append(b);
+  }
+  mesh_save_.text = std::move(text);
 #endif
 }
 
