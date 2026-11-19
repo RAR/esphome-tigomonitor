@@ -750,9 +750,14 @@ void TigoMonitorComponent::process_serial_data() {
 }
 
 void TigoMonitorComponent::process_frame(const frame_string &frame) {
+  frame_has_answer_ = false;
+  process_frame_(frame);
+  if (bus_book_) feed_bus_book_(frame);
+}
+
+void TigoMonitorComponent::process_frame_(const frame_string &frame) {
   // The whole frame pipeline stays in frame_string (PSRAM on IDF builds) —
   // see the typedef note in the header (#23).
-  if (bus_book_) feed_bus_book_(frame);
 
   // Increment total frames processed counter for diagnostics
   total_frames_processed_++;
@@ -799,6 +804,7 @@ void TigoMonitorComponent::process_frame(const frame_string &frame) {
       break;
     case protocol::FrameType::power: {
       bool clean = protocol::walk_power_packets(hex_frame, [this](const frame_string &type, const frame_string &packet) {
+        if (type == "07") frame_has_answer_ = true;  // an optimizer's answer: the bus book wants it
         if (type == "31") {
           process_power_frame(packet);
         } else if (type == "09") {
@@ -3559,11 +3565,11 @@ void TigoMonitorComponent::enable_bus_book() {
   // marks: the Bus log's 300 exchanges and five minutes of polls would be
   // ~260 KB of internal RAM here (the poll marks alone ran the rig out,
   // 2026-11-19).
-  bus_watch_.reset(new master::BusWatch(16, false));
-  bus_book_.reset(new master::BusBook([](char level, const char *msg) {
+  bus_watch_ = make_psram_unique<master::BusWatch>(16, false);
+  bus_book_ = make_psram_unique<master::BusBook>([](char level, const char *msg) {
     if (level == 'W') ESP_LOGW(TAG, "%s", msg);
     else ESP_LOGI(TAG, "%s", msg);
-  }));
+  });
   // Called from absorb(), inside the loop, which holds the state lock.
   bus_book_->set_barcode_of([this](uint16_t addr) {
     char a[5];
@@ -3575,9 +3581,33 @@ void TigoMonitorComponent::enable_bus_book() {
   ESP_LOGI(TAG, "Keeping each device's firmware, settings and ratings as heard on the bus");
 }
 
-// Each frame, as the bus gave it (escaped, between 7E 07 and 7E 08). Not
-// until the clock is set: a time near 1970 would be saved as when it was heard.
+// Each frame, as the bus gave it (escaped, between 7E 07 and 7E 08), after
+// process_frame_ has walked it. Decoding means a string and a payload vector
+// on the internal heap, so only the frames the book can use are decoded:
+// anything that isn't a poll or its reply (housekeeping, VERSION, GET_MAC,
+// GatewayCfg: a few a second), and a poll reply carrying an optimizer's
+// answer, with its poll. The ~20 polls a second and their power replies are
+// not, which keeps the #23 churn out.
 void TigoMonitorComponent::feed_bus_book_(const frame_string &frame) {
+  // DEST then CMD; an escaped byte among them (a 7D) shifts them, so decode.
+  bool plain = frame.size() >= 4 && static_cast<uint8_t>(frame[0]) != 0x7D &&
+               static_cast<uint8_t>(frame[1]) != 0x7D && static_cast<uint8_t>(frame[2]) != 0x7D &&
+               static_cast<uint8_t>(frame[3]) != 0x7D;
+  uint16_t cmd = plain ? static_cast<uint16_t>(static_cast<uint8_t>(frame[2]) << 8 | static_cast<uint8_t>(frame[3])) : 0;
+  if (cmd == master::CMD_POLL) {
+    bus_book_poll_.assign(frame.data(), frame.size());
+    return;
+  }
+  if (cmd == master::CMD_POLL_REPLY) {
+    if (!frame_has_answer_ || bus_book_poll_.empty()) return;
+    feed_bus_book_one_(bus_book_poll_);
+    bus_book_poll_.clear();
+  }
+  feed_bus_book_one_(frame);
+}
+
+// Not until the clock is set: a time near 1970 would be saved as when it was heard.
+void TigoMonitorComponent::feed_bus_book_one_(const frame_string &frame) {
   struct timeval tv;
   gettimeofday(&tv, nullptr);
   int64_t now = static_cast<int64_t>(tv.tv_sec) * 1000 + tv.tv_usec / 1000;

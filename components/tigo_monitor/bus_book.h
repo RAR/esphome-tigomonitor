@@ -35,7 +35,7 @@ class BusBook {
   struct Change {
     int64_t unix_ms;
     uint16_t addr;
-    std::string what, before, after;
+    Str what, before, after;
   };
   // level: 'I' or 'W'.
   using Log = std::function<void(char level, const char *msg)>;
@@ -82,7 +82,7 @@ class BusBook {
       if (it == smarts.end() || it->second.first.settings != m.settings)
         log_f_('I', "bus: optimizer %04X settings: %s (%s)", m.addr, m.settings.c_str(),
                m.stored ? "stored" : "not stored");
-      if (it != smarts.end() && mesh_history::settings_changed(it->second.first.settings, m.settings))
+      if (it != smarts.end() && mesh_history::settings_changed(to_std(it->second.first.settings), to_std(m.settings)))
         change_(now, runs_bus, m.addr, "settings", it->second.first.settings, m.settings);
       smarts[m.addr] = {m, now};
       dirty = true;
@@ -127,8 +127,8 @@ class BusBook {
   //   X unix_ms addr what before after             (changes, oldest first)
   template<class Out> void write_text(Out &out) const {
     char b[48];
-    auto f = [&](const std::string &s) {
-      std::string c = s;
+    auto f = [&](const Str &s) {
+      Str c = s;
       for (char &ch : c)
         if (ch == '\t' || ch == '\n' || ch == '\r') ch = ' ';
       out.append("\t");
@@ -169,9 +169,10 @@ class BusBook {
 
   // One line of write_text's (its newline optional). False for one that
   // isn't a record: the rest still load.
-  bool restore_line(const std::string &line) {
-    std::vector<std::string> t;
-    std::string cur;
+  bool restore_line(const char *line) { return restore_line(Str(line)); }
+  template <class S> bool restore_line(const S &line) {
+    Vec<Str> t;
+    Str cur;
     for (char c : line) {
       if (c == '\n' || c == '\r') break;
       if (c == '\t') {
@@ -185,7 +186,7 @@ class BusBook {
     auto x = [&](size_t i) { return static_cast<uint16_t>(std::strtoul(t[i].c_str(), nullptr, 16)); };
     auto i64 = [&](size_t i) { return static_cast<int64_t>(std::strtoll(t[i].c_str(), nullptr, 10)); };
     auto i32 = [&](size_t i) { return static_cast<int>(std::strtol(t[i].c_str(), nullptr, 10)); };
-    const std::string &k = t[0];
+    const Str &k = t[0];
     if (k == "V" && t.size() == 8) {
       VersionBook::Entry e;
       e.tap = i32(1) != 0;
@@ -249,9 +250,9 @@ class BusBook {
   // address owners, for a saved copy only: the API never carries the PAN.
   template<class Out> void write_json(Out &out, bool with_pans) const {
     char b[64];
-    auto str = [&](const std::string &s) {
+    auto str = [&](const Str &s) {
       out.append("\"");
-      std::string e;
+      Str e;
       for (char c : s) {
         if (c == '"' || c == '\\') {
           e += '\\';
@@ -410,18 +411,18 @@ class BusBook {
 
   VersionBook versions;
   // Each TAP's radio settings, as last read (by anyone), and when.
-  std::map<uint16_t, std::pair<TapRadio, int64_t>> radios;
+  Map<uint16_t, std::pair<TapRadio, int64_t>> radios;
   // Each TAP's MAC, its ID, from its last answer to GET_MAC, and when.
-  std::map<uint16_t, std::pair<std::string, int64_t>> tap_ids;
+  Map<uint16_t, std::pair<Str, int64_t>> tap_ids;
   // Each optimizer's MPPT parameters, from its answer to ^00Mppt, and when.
-  std::map<uint16_t, std::pair<MpptSeen, int64_t>> mppts;
+  Map<uint16_t, std::pair<MpptSeen, int64_t>> mppts;
   // Each optimizer's answer to ^00Smrt, as last heard, and when.
-  std::map<uint16_t, std::pair<SmartSeen, int64_t>> smarts;
+  Map<uint16_t, std::pair<SmartSeen, int64_t>> smarts;
   // Each optimizer's rating, from its answer to ^00Cal, and when.
-  std::map<uint16_t, std::pair<CalSeen, int64_t>> cals;
+  Map<uint16_t, std::pair<CalSeen, int64_t>> cals;
   // Which barcode each address last answered for.
   AddressOwners owners;
-  std::deque<Change> changes;  // newest last
+  Deque<Change> changes;  // newest last
   bool dirty = false;          // changed since the owner last saved it
 
  private:
@@ -437,8 +438,8 @@ class BusBook {
   // An optimizer whose settings, MPPT parameters or firmware changed: a CCA
   // never drifts them, so each is news. The last KEEP_CHANGES are kept. Only
   // while this monitor runs the bus: under another master, the change is its.
-  void change_(int64_t now, bool runs_bus, uint16_t addr, const char *what, const std::string &before,
-               const std::string &after) {
+  void change_(int64_t now, bool runs_bus, uint16_t addr, const char *what, const Str &before,
+               const Str &after) {
     if (!runs_bus) {
       log_f_('I', "bus: optimizer %04X's %s is now %s, was %s (another master runs the bus)", addr, what,
              after.c_str(), before.c_str());
@@ -453,9 +454,9 @@ class BusBook {
   // before: if another optimizer holds that address now, forget the old one's.
   void check_owner_(uint16_t addr) {
     if (!barcode_of_) return;
-    std::string now = barcode_of_(addr);
+    Str now = to_str(barcode_of_(addr));
     auto was = owners.owners().find(addr);
-    std::string before = was == owners.owners().end() ? "" : was->second;
+    Str before = was == owners.owners().end() ? "" : was->second;
     if (!owners.moved(addr, now)) {
       if (before.empty() && !now.empty()) dirty = true;  // first owner, kept
       return;

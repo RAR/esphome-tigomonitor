@@ -27,7 +27,6 @@
 #include "barcode_bindings.h"
 #include "tigo_history.h"
 #include "tigo_protocol.h"
-#include "bus_book.h"
 
 #ifdef USE_ESP_IDF
 #include <esp_heap_caps.h>
@@ -128,6 +127,37 @@ inline bool operator!=(const std::string &a, const psram_string &b) { return !(b
 #define TIGO_LAYOUT_ALLOCATOR ::PSRAMAllocator
 #endif
 #include "tigo_layout.h"
+
+// The bus decoder and the Devices page's book (bus_watch.h, bus_book.h) keep
+// their strings, lists and maps in PSRAM, as the layout does: plain std types
+// come from the internal heap, which five minutes of poll marks ran out on
+// the rig (2026-11-19).
+#ifdef USE_ESP_IDF
+#define TIGO_BUS_ALLOCATOR ::PSRAMAllocator
+#endif
+#include "bus_book.h"
+
+#ifdef USE_ESP_IDF
+// An object of its own in PSRAM, freed back there (bus_watch_, bus_book_).
+template <class T> struct PsramDelete {
+  void operator()(T *p) const {
+    if (p == nullptr) return;
+    p->~T();
+    esphome::tigo_monitor::psram_free_impl(p);
+  }
+};
+template <class T> using psram_unique = std::unique_ptr<T, PsramDelete<T>>;
+template <class T, class... A> psram_unique<T> make_psram_unique(A &&...a) {
+  void *mem = esphome::tigo_monitor::psram_malloc_impl(sizeof(T));
+  if (mem == nullptr) esphome::tigo_monitor::psram_alloc_failed_abort(sizeof(T));
+  return psram_unique<T>(new (mem) T(std::forward<A>(a)...));
+}
+#else
+template <class T> using psram_unique = std::unique_ptr<T>;
+template <class T, class... A> psram_unique<T> make_psram_unique(A &&...a) {
+  return psram_unique<T>(new T(std::forward<A>(a)...));
+}
+#endif
 
 namespace esphome {
 namespace tigo_monitor {
@@ -735,6 +765,7 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   // Frame processing
   void process_serial_data();
   void process_frame(const frame_string &frame);
+  void process_frame_(const frame_string &frame);
 
   // Frame type handlers
   void process_power_frame(const frame_string &frame);
@@ -1083,8 +1114,13 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
 
   // See enable_bus_book(). Kept as BusWatch saw it, then on the history's
   // flash, if there is one, at most every BUS_BOOK_SAVE_EVERY_MS.
-  std::unique_ptr<master::BusWatch> bus_watch_;
-  std::unique_ptr<master::BusBook> bus_book_;
+  psram_unique<master::BusWatch> bus_watch_;
+  psram_unique<master::BusBook> bus_book_;
+  // The last poll, as the bus gave it, kept until its reply shows whether
+  // it carries an answer: most don't, and only those are decoded.
+  frame_string bus_book_poll_;
+  bool frame_has_answer_ = false;  // set by process_frame_'s packet walk
+  void feed_bus_book_one_(const frame_string &frame);
   bool bus_book_loaded_ = false;
   uint32_t bus_book_saved_ms_ = 0;
   static const uint32_t BUS_BOOK_SAVE_EVERY_MS = 15UL * 60UL * 1000UL;
