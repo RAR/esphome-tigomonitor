@@ -3627,7 +3627,7 @@ void TigoMonitorComponent::keep_bus_book_() {
   bus_book_saved_ms_ = now;
   if (ok) {
     bus_book_->dirty = false;
-    ESP_LOGD(TAG, "Bus book saved (%u bytes, %u ms)", (unsigned) text.size(), (unsigned) (millis() - now));
+    ESP_LOGI(TAG, "Bus book saved (%u bytes, %u ms)", (unsigned) text.size(), (unsigned) (millis() - now));
   } else {
     ESP_LOGW(TAG, "Bus book: could not write %s", kBusBookPath);
   }
