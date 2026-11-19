@@ -387,9 +387,9 @@ static void test_raw_polls_count_as_decoded_ones() {
   CHECK(raw.exchanges().back().result == "no_reply" && dec.exchanges().back().result == "no_reply");
 }
 
-static nlohmann::json bus_json(const BusWatch &w, int64_t now, size_t limit) {
+static nlohmann::json bus_json(const BusWatch &w, int64_t now, size_t limit, bool timed = true) {
   std::string out = "{";
-  w.write_json(out, now, limit);
+  w.write_json(out, now, limit, timed);
   out += "}";
   return nlohmann::json::parse(out, nullptr, false);
 }
@@ -427,10 +427,46 @@ static void test_the_json_is_the_apis() {
         s["polls_refused"] == 0 && s["delivered"] == 1 && s["not_delivered"] == 0 && s["other_master"] == 1 &&
         s["reconfig"] == 1 && s["rt_median_ms"] == st.rt_median_ms && s["rt_max_ms"] == 20 && s["discovery"] == "");
   CHECK(s["count"]["queries"] == 1 && s["count"]["reconfig"] == 1 && s["count"]["discovery"] == 0);
+  CHECK(s["timed"] == true);
   nlohmann::json one = bus_json(w, 5000, 1);
   CHECK(one["exchanges"].size() == 1 && one["exchanges"][0]["id"] == 2);
+  // Untimed (the ESP32, whose reads are a loop apart): no round trip
+  // anywhere, and the stats say so; the rest as timed.
+  nlohmann::json untimed = bus_json(w, 5000, BusWatch::KEEP, false);
+  CHECK(untimed["stats"]["timed"] == false && untimed["stats"]["rt_median_ms"].is_null() &&
+        untimed["stats"]["rt_max_ms"].is_null() && untimed["exchanges"][0]["rt_ms"].is_null());
+  CHECK(untimed["exchanges"][0]["result"] == "delivered" && untimed["exchanges"][0]["answer_after_ms"] == 1893 &&
+        untimed["stats"]["polls"] == s["polls"]);
   nlohmann::json none = bus_json(BusWatch(), 0, BusWatch::KEEP);
   CHECK(none["exchanges"].empty() && none["stats"]["rt_median_ms"].is_null() && none["stats"]["polls"] == 0);
+}
+
+// The ESP32 writes /api/bus a piece at a time, letting its loop read the bus
+// between them: the stats, then each exchange by id. The same text as the
+// one-piece writer; an id gone from the log is skipped.
+static void test_written_in_pieces_is_the_same() {
+  BusWatch w(5);
+  for (int i = 0; i < 8; i++) {
+    w.on_frame(request(CMD_TUNNEL, tunnel_request(0x06, static_cast<uint8_t>(i), text_query(0x0002, "^00Info"))), false, 1000 + i * 100);
+    if (i % 3) w.on_frame(reply(0x0B10, Bytes{0x00, 0x0E, 0x00, 0x07, static_cast<uint8_t>(i), 0x02}), false, 1010 + i * 100);
+  }
+  CHECK(w.first_id() == 4 && w.last_id() == 8 && !w.exchange(3) && w.exchange(4) && w.exchange(4)->id == 4 && !w.exchange(9));
+  for (bool timed : {true, false}) {
+    std::string whole, pieces;
+    w.write_json(whole, 5000, 3, timed);
+    w.write_stats_json(pieces, 5000, timed);
+    pieces += ",\"exchanges\":[";
+    bool first = true;
+    for (uint64_t id = w.last_id() - 2; id <= w.last_id(); id++) {
+      if (!first) pieces += ",";
+      first = false;
+      w.write_exchange_json(pieces, *w.exchange(id), 5000, timed);
+    }
+    pieces += "]";
+    CHECK(pieces == whole);
+  }
+  BusWatch empty;
+  CHECK(empty.first_id() == 0 && empty.last_id() == 0 && !empty.exchange(0) && !empty.exchange(1));
 }
 
 static void test_log_is_bounded() {
@@ -630,6 +666,7 @@ int main() {
   test_log_is_bounded();
   test_raw_polls_count_as_decoded_ones();
   test_the_json_is_the_apis();
+  test_written_in_pieces_is_the_same();
   test_tap_radio_from_a_read();
   test_tap_id_from_its_mac_reply();
   test_tap_radio_not_from_a_write();

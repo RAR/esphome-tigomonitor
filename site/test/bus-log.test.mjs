@@ -63,9 +63,12 @@ function bus(alarm) {
   };
 }
 
-// opts.esp32: the ESP32 build, which only listens and so never has an alarm.
+// opts.esp32: the ESP32 build, which only listens and so never has an
+// alarm, and times nothing: its reads are a loop apart.
 async function open(opts = {}) {
   const api = { bus: bus(opts.alarm), clears: 0, busAsked: 0 };
+  if (opts.esp32) api.bus = { ...api.bus, stats: { ...api.bus.stats, timed: false, rt_median_ms: null, rt_max_ms: null },
+    exchanges: api.bus.exchanges.map((e) => ({ ...e, rt_ms: null })) };
   const ctx = await browser.newContext({ viewport: { width: opts.width || 1280, height: 900 } });
   await ctx.route('**/api/**', async (route) => {
     const req = route.request();
@@ -144,6 +147,12 @@ test('the Bus log on the ESP32: the same page, asked for only while it is open',
   assert.equal(await page.locator('#bus-rows .bx-row').count(), 4);
   assert.match(await page.textContent('#buslog-meta'), /4 exchanges · polls 44\.1\/s/);
   assert.equal(await page.isVisible('#bus-alarm-card'), false);
+  // No round trips: a delivered query reads "—", and the strip and the note say why.
+  const rts = await page.$$eval('#bus-rows .bx-row .rt', (els) => els.map((e) => e.textContent.trim()));
+  assert.deepEqual(rts, ['—', '—', '—', '—']);
+  const tile = await page.textContent('#bus-strip .bx-tile:nth-child(5)');
+  assert.match(tile, /Round trip\s*—\s*not timed here/);
+  assert.match(await page.textContent('#bus-note'), /This monitor doesn't time round trips/);
   assert.deepEqual(errors, []);
   await ctx.close();
 });
