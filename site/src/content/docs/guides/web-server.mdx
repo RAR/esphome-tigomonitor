@@ -99,6 +99,10 @@ Inverters and strings can be renamed live from the Topology view (✎ next to ea
 
 Empty override = falls back to canonical.
 
+### Drawing the array
+
+**Topology › Array** shows each panel where it really sits, shaded by the power it's making now, and each TAP where it's mounted. It works as on the Raspberry Pi build; see [Draw the array](/esphome-tigomonitor/guides/raspberry-pi/#draw-the-array). The board keeps the drawing in its settings storage, so it survives a reflash, and it's saved by each panel's barcode, so it stays right when the TAP gives the optimizers new addresses. The TAPs to place are the ones answering polls on the bus.
+
 ### Laying out the array by hand
 
 You don't need a CCA or a Tigo account to tell the monitor which panel is where. On the Topology page, **Edit layout** opens the layout for editing:

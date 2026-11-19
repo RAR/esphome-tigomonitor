@@ -30,6 +30,7 @@ below.
 |---|---|---|
 | Dashboard, Topology, Devices, CCA Info, Tigo Cloud | Yes | Yes |
 | [Laying out the array by hand](/esphome-tigomonitor/guides/web-server/#laying-out-the-array-by-hand) | Yes, or inverters in YAML | Yes |
+| [Drawing the array](/esphome-tigomonitor/guides/raspberry-pi/#draw-the-array): each panel where it sits, shaded by its power | Yes, kept in the board's settings storage. | Yes. |
 | History | On the board's flash: a reading every 30 minutes by default, about two years ([Saving History to Flash](/esphome-tigomonitor/guides/tsdb-integration/)). | On the SD card: a reading every minute, for two years. |
 | CCA Info from the CCA | Over Bluetooth with `cca_source: ble`, or HTTP for CCA firmware before 4.0.4. | Over the Pi's Bluetooth, finding the nearest CCA by itself; HTTP for firmware before 4.0.4. |
 | A display on the board | Optional, on an AtomS3R. | No |
