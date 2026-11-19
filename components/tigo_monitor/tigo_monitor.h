@@ -1148,6 +1148,20 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   static const uint32_t BUS_BOOK_SAVE_EVERY_MS = 15UL * 60UL * 1000UL;
   void feed_bus_book_(const frame_string &frame);
   void keep_bus_book_();
+  // A file written a piece a loop, to a temporary file renamed into place at
+  // the end: written at once, a large one stops the loop reading the bus for
+  // longer than the UART's buffer holds (the bus book's 12 KB held it 223 ms,
+  // the mesh map's ~110 KB would hold it over a second).
+  struct FileSave {
+    psram_unique<master::Str> text;  // null when no save is under way
+    size_t at = 0;
+    FILE *f = nullptr;
+  };
+  FileSave bus_book_save_, mesh_save_;
+  // The next piece of save, under the history's flash lock. False while
+  // there is more to write (or the lock was busy); true when it ended, ok
+  // then saying whether the file is in place.
+  bool save_piece_(FileSave &save, const char *tmp_path, const char *path, bool &ok);
   // See mesh_links(). Fed from process_power_frame and process_09_frame;
   // kept on the history's flash by keep_mesh_, written a piece a loop.
   psram_unique<link::LinkStats> mesh_links_;
@@ -1156,9 +1170,7 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   uint16_t frame_tap_ = 0;  // the TAP the power frame being walked came through
   bool mesh_loaded_ = false;
   uint32_t mesh_saved_ms_ = 0, mesh_pruned_ms_ = 0;
-  psram_unique<master::Str> mesh_save_text_;  // a save under way, and how far
-  size_t mesh_save_at_ = 0;
-  FILE *mesh_file_ = nullptr;  // the file being read back or written
+  FILE *mesh_file_ = nullptr;  // the saved copy, while it's read back
   int mesh_day_(master::Str *date) const;
   void feed_mesh_report_(const DeviceData &d);
   void feed_mesh_join_(const frame_string &packet);

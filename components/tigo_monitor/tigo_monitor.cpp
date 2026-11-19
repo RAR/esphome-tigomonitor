@@ -3575,6 +3575,8 @@ void TigoMonitorComponent::snapshot_to_history_() {
 // --- The bus book (bus_book.h): what the Devices page shows of each device ---
 
 static const char *const kBusBookPath = "/tsdb/bus_book.txt";
+static const char *const kBusBookTmpPath = "/tsdb/bus_book.tmp";
+static const size_t SAVE_PIECE = 4096;  // FileSave's piece a loop
 
 void TigoMonitorComponent::enable_bus_book() {
   StateLock lock(state_mutex_);
@@ -3710,29 +3712,54 @@ void TigoMonitorComponent::keep_bus_book_() {
     ESP_LOGI(TAG, "Bus book: %u records read back%s", good, bad ? " (some lines unreadable, skipped)" : "");
     return;
   }
-  if (!bus_book_->dirty || now - bus_book_saved_ms_ < BUS_BOOK_SAVE_EVERY_MS) return;
-  TigoHistory::FlashLock lock(&history_, 100);
-  if (!lock.held()) {
-    bus_book_saved_ms_ = now - BUS_BOOK_SAVE_EVERY_MS + 60000;
+  if (bus_book_save_.text) {
+    bool ok;
+    size_t size = bus_book_save_.text->size();
+    if (!save_piece_(bus_book_save_, kBusBookTmpPath, kBusBookPath, ok)) return;
+    if (ok) {
+      ESP_LOGI(TAG, "Bus book saved (%u bytes, %u pieces)", (unsigned) size,
+               (unsigned) ((size + SAVE_PIECE - 1) / SAVE_PIECE));
+    } else {
+      bus_book_->dirty = true;  // tried again next time
+      ESP_LOGW(TAG, "Bus book: could not write %s", kBusBookPath);
+    }
     return;
   }
-  psram_string text;
-  bus_book_->write_text(text);
-  FILE *f = fopen(kBusBookPath, "wb");
-  bool ok = f != nullptr && fwrite(text.data(), 1, text.size(), f) == text.size();
-  if (f != nullptr) {
-    fflush(f);
-    fsync(fileno(f));
-    fclose(f);
-  }
+  if (!bus_book_->dirty || now - bus_book_saved_ms_ < BUS_BOOK_SAVE_EVERY_MS) return;
   bus_book_saved_ms_ = now;
-  if (ok) {
-    bus_book_->dirty = false;
-    ESP_LOGI(TAG, "Bus book saved (%u bytes, %u ms)", (unsigned) text.size(), (unsigned) (millis() - now));
-  } else {
-    ESP_LOGW(TAG, "Bus book: could not write %s", kBusBookPath);
-  }
+  // What changes from here on marks it again, for the next save.
+  bus_book_save_.text = make_psram_unique<master::Str>();
+  bus_book_->write_text(*bus_book_save_.text);
+  bus_book_->dirty = false;
 #endif
+}
+
+// See FileSave. A piece a call: the UART's buffer drains between.
+bool TigoMonitorComponent::save_piece_(FileSave &save, const char *tmp_path, const char *path, bool &ok) {
+  ok = false;
+#ifdef TIGO_TSDB_AVAILABLE
+  TigoHistory::FlashLock lock(&history_, 10);
+  if (!lock.held()) return false;
+  const master::Str &text = *save.text;
+  if (save.f == nullptr && save.at == 0) save.f = fopen(tmp_path, "wb");
+  ok = save.f != nullptr;
+  if (ok) {
+    size_t n = std::min(SAVE_PIECE, text.size() - save.at);
+    ok = fwrite(text.data() + save.at, 1, n, save.f) == n;
+    save.at += n;
+  }
+  if (ok && save.at < text.size()) return false;
+  if (save.f != nullptr) {
+    fflush(save.f);
+    fsync(fileno(save.f));
+    fclose(save.f);
+    save.f = nullptr;
+  }
+  ok = ok && rename(tmp_path, path) == 0;
+#endif
+  save.text.reset();
+  save.at = 0;
+  return true;
 }
 
 // ---- the mesh map ----------------------------------------------------------
@@ -3740,7 +3767,6 @@ void TigoMonitorComponent::keep_bus_book_() {
 static const char *const kMeshPath = "/tsdb/mesh.txt";
 static const char *const kMeshTmpPath = "/tsdb/mesh.tmp";
 static const uint32_t MESH_SAVE_EVERY_MS = 15UL * 60UL * 1000UL;
-static const size_t MESH_SAVE_PIECE = 4096;  // a piece a loop: the UART buffer drains between
 static const size_t MESH_LINE_MAX = 1400;    // a day of RSSI is 1,152 hex digits
 static const int64_t MESH_QUIET_S = 3600;    // as the Pi's LINK_QUIET_S
 
@@ -3858,9 +3884,8 @@ bool TigoMonitorComponent::restore_mesh_line_(const char *line) {
 
 // From the loop: drop links no optimizer holds now, read the saved copy back
 // once the history's flash is mounted, then save it every
-// MESH_SAVE_EVERY_MS. A save (~110 KB for 40 optimizers, most of it a day of
-// RSSI) goes a piece a loop, to a file renamed into place at the end: written
-// at once, the loop would stop reading the bus for over a second.
+// MESH_SAVE_EVERY_MS, a piece a loop (FileSave): ~110 KB for 40
+// optimizers, most of it a day of RSSI.
 void TigoMonitorComponent::keep_mesh_() {
   uint32_t now = millis();
   int64_t unix_ms = bus_now_ms();
@@ -3908,33 +3933,12 @@ void TigoMonitorComponent::keep_mesh_() {
     }
     return;
   }
-  if (mesh_save_text_) {
-    TigoHistory::FlashLock lock(&history_, 10);
-    if (!lock.held()) return;
-    const master::Str &text = *mesh_save_text_;
-    if (mesh_file_ == nullptr) mesh_file_ = fopen(kMeshTmpPath, "wb");
-    bool ok = mesh_file_ != nullptr;
-    if (ok) {
-      size_t n = std::min(MESH_SAVE_PIECE, text.size() - mesh_save_at_);
-      ok = fwrite(text.data() + mesh_save_at_, 1, n, mesh_file_) == n;
-      mesh_save_at_ += n;
-    }
-    if (!ok || mesh_save_at_ >= text.size()) {
-      if (mesh_file_ != nullptr) {
-        fflush(mesh_file_);
-        fsync(fileno(mesh_file_));
-        fclose(mesh_file_);
-        mesh_file_ = nullptr;
-      }
-      if (ok && rename(kMeshTmpPath, kMeshPath) == 0) {
-        ESP_LOGI(TAG, "Mesh saved (%u bytes, %u pieces)", (unsigned) text.size(),
-                 (unsigned) ((text.size() + MESH_SAVE_PIECE - 1) / MESH_SAVE_PIECE));
-      } else {
-        ESP_LOGW(TAG, "Mesh: could not write %s", kMeshPath);
-      }
-      mesh_save_text_.reset();
-      mesh_save_at_ = 0;
-    }
+  if (mesh_save_.text) {
+    bool ok;
+    size_t size = mesh_save_.text->size();
+    if (!save_piece_(mesh_save_, kMeshTmpPath, kMeshPath, ok)) return;
+    if (ok) ESP_LOGI(TAG, "Mesh saved (%u bytes, %u pieces)", (unsigned) size, (unsigned) ((size + SAVE_PIECE - 1) / SAVE_PIECE));
+    else ESP_LOGW(TAG, "Mesh: could not write %s", kMeshPath);
     return;
   }
   if (now - mesh_saved_ms_ < MESH_SAVE_EVERY_MS || !unix_ms || mesh_links_->links().empty()) return;
@@ -3970,8 +3974,7 @@ void TigoMonitorComponent::keep_mesh_() {
              e.nwid.c_str());
     text->append(b);
   }
-  mesh_save_text_ = std::move(text);
-  mesh_save_at_ = 0;
+  mesh_save_.text = std::move(text);
 #endif
 }
 
