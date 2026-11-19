@@ -283,6 +283,16 @@ void TigoWebServer::setup() {
     };
     httpd_register_uri_handler(server_, &api_tap_name_uri);
 
+    // The Bus traffic page: the last 5 minutes in numbers and the last 300
+    // exchanges, the Pi's shape (bus_watch.h writes both).
+    httpd_uri_t api_bus_uri = {
+      .uri = "/api/bus",
+      .method = HTTP_GET,
+      .handler = api_bus_handler,
+      .user_ctx = this
+    };
+    httpd_register_uri_handler(server_, &api_bus_uri);
+
     httpd_uri_t api_strings_uri = {
       .uri = "/api/strings",
       .method = HTTP_GET,
@@ -1013,6 +1023,49 @@ esp_err_t TigoWebServer::api_versions_handler(httpd_req_t *req) {
     httpd_resp_sendstr(req, "{\"error\":\"no bus book\"}");
     return ESP_OK;
   }
+  httpd_resp_send(req, json_buffer.c_str(), json_buffer.length());
+  return ESP_OK;
+}
+
+// GET /api/bus[?limit=N]. Never an alarm here: only a monitor running the
+// bus raises one, and an ESP32 with the web UI only listens.
+esp_err_t TigoWebServer::api_bus_handler(httpd_req_t *req) {
+  TigoWebServer *server = static_cast<TigoWebServer *>(req->user_ctx);
+  if (!server->check_api_auth(req)) return ESP_OK;
+  size_t limit = tigo_monitor::master::BusWatch::KEEP;
+  char query[32], v[12];
+  if (httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK &&
+      httpd_query_key_value(query, "limit", v, sizeof(v)) == ESP_OK) {
+    long n = strtol(v, nullptr, 10);
+    if (n > 0 && static_cast<size_t>(n) < limit) limit = static_cast<size_t>(n);
+  }
+  struct timeval tv;
+  gettimeofday(&tv, nullptr);
+  int64_t now = static_cast<int64_t>(tv.tv_sec) * 1000 + tv.tv_usec / 1000;
+  PSRAMString json_buffer;
+  bool kept = false;
+  uint32_t held = 0;
+  if (server->parent_ != nullptr) {
+    server->parent_->with_state_lock([&] {
+      const auto *watch = server->parent_->bus_watch();
+      if (watch == nullptr) return;
+      uint32_t t0 = millis();
+      json_buffer.append("{\"alarm\":{\"active\":false,\"count\":0,\"first_unix_ms\":0,\"recent\":[]},");
+      watch->write_json(json_buffer, now, limit);
+      json_buffer.append("}");
+      held = millis() - t0;
+      kept = true;
+    });
+  }
+  httpd_resp_set_type(req, "application/json");
+  httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+  if (!kept) {
+    httpd_resp_set_status(req, "404 Not Found");
+    httpd_resp_sendstr(req, "{\"error\":\"no bus log\"}");
+    return ESP_OK;
+  }
+  ESP_LOGD(TAG, "/api/bus: %u exchanges at most, %u bytes, the state lock held %u ms", (unsigned) limit,
+           (unsigned) json_buffer.length(), (unsigned) held);
   httpd_resp_send(req, json_buffer.c_str(), json_buffer.length());
   return ESP_OK;
 }

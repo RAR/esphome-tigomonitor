@@ -2024,7 +2024,8 @@ void HttpServer::routes_() {
       long v = std::strtol(req.get_param_value("limit").c_str(), nullptr, 10);
       if (v > 0 && static_cast<size_t>(v) < limit) limit = static_cast<size_t>(v);
     }
-    send_json(res, ctx_.bus_log->to_json(limit));
+    res.set_header("Cache-Control", "no-store");
+    res.set_content(ctx_.bus_log->to_json(limit), "application/json");
   });
   // The TAPs' and optimizers' firmware, as heard on the bus.
   svr.Get("/api/versions", [this](const httplib::Request &, httplib::Response &res) {

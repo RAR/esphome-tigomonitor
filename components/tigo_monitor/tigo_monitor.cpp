@@ -754,7 +754,7 @@ void TigoMonitorComponent::process_serial_data() {
 }
 
 void TigoMonitorComponent::process_frame(const frame_string &frame) {
-  frame_has_answer_ = false;
+  frame_crc_ok_ = frame_has_packets_ = frame_has_answer_ = false;
   process_frame_(frame);
   if (bus_book_) feed_bus_book_(frame);
 }
@@ -798,6 +798,7 @@ void TigoMonitorComponent::process_frame_(const frame_string &frame) {
     return;
   }
   
+  frame_crc_ok_ = true;
   // Remove checksum (last 2 bytes)
   processed_frame = processed_frame.substr(0, processed_frame.length() - 2);
   frame_string hex_frame = protocol::to_hex(processed_frame);
@@ -808,6 +809,7 @@ void TigoMonitorComponent::process_frame_(const frame_string &frame) {
       break;
     case protocol::FrameType::power: {
       bool clean = protocol::walk_power_packets(hex_frame, [this](const frame_string &type, const frame_string &packet) {
+        frame_has_packets_ = true;
         if (type == "07") frame_has_answer_ = true;  // an optimizer's answer: the bus book wants it
         if (type == "31") {
           process_power_frame(packet);
@@ -3565,11 +3567,11 @@ static const char *const kBusBookPath = "/tsdb/bus_book.txt";
 void TigoMonitorComponent::enable_bus_book() {
   StateLock lock(state_mutex_);
   if (bus_book_) return;
-  // A few exchanges, to pair each TAP reply with its request, and no poll
-  // marks: the Bus log's 300 exchanges and five minutes of polls would be
-  // ~260 KB of internal RAM here (the poll marks alone ran the rig out,
-  // 2026-11-19).
-  bus_watch_ = make_psram_unique<master::BusWatch>(16, false);
+  // The Bus traffic page's 300 exchanges and five minutes of poll marks,
+  // ~260 KB, all in PSRAM: TIGO_BUS_ALLOCATOR (tigo_monitor.h) puts what
+  // BusWatch keeps there, and the watch itself is made there. In internal
+  // RAM, the poll marks alone ran the rig out (2026-11-19).
+  bus_watch_ = make_psram_unique<master::BusWatch>();
   bus_book_ = make_psram_unique<master::BusBook>([](char level, const char *msg) {
     if (level == 'W') ESP_LOGW(TAG, "%s", msg);
     else ESP_LOGI(TAG, "%s", msg);
@@ -3626,45 +3628,50 @@ const char *TigoMonitorComponent::set_tap_name(const std::string &tap, const std
   return nullptr;
 }
 
+// Now, in Unix ms, or 0 before the clock is set: a time near 1970 would be
+// saved as when something was heard.
+static int64_t bus_now_ms() {
+  struct timeval tv;
+  gettimeofday(&tv, nullptr);
+  int64_t now = static_cast<int64_t>(tv.tv_sec) * 1000 + tv.tv_usec / 1000;
+  return now < 1700000000000LL ? 0 : now;
+}
+
 // Each frame, as the bus gave it (escaped, between 7E 07 and 7E 08), after
 // process_frame_ has walked it. Decoding means a string and a payload vector
-// on the internal heap, so only the frames the book can use are decoded:
-// anything that isn't a poll or its reply (housekeeping, VERSION, GET_MAC,
-// GatewayCfg: a few a second), and a poll reply carrying an optimizer's
-// answer, with its poll. The ~20 polls a second and their power replies are
-// not, which keeps the #23 churn out.
+// on the internal heap, so the ~23 polls a second and their replies are not
+// decoded (the #23 churn): a poll is counted as one, and a reply as empty or
+// not, from what process_frame_ found. Decoded: a reply carrying an
+// optimizer's answer, and everything that isn't a poll or its reply
+// (housekeeping, VERSION, GET_MAC, GatewayCfg: a few a second).
 void TigoMonitorComponent::feed_bus_book_(const frame_string &frame) {
+  if (!frame_crc_ok_) return;
   // DEST then CMD; an escaped byte among them (a 7D) shifts them, so decode.
   bool plain = frame.size() >= 4 && static_cast<uint8_t>(frame[0]) != 0x7D &&
                static_cast<uint8_t>(frame[1]) != 0x7D && static_cast<uint8_t>(frame[2]) != 0x7D &&
                static_cast<uint8_t>(frame[3]) != 0x7D;
   uint16_t cmd = plain ? static_cast<uint16_t>(static_cast<uint8_t>(frame[2]) << 8 | static_cast<uint8_t>(frame[3])) : 0;
-  if (cmd == master::CMD_POLL) {
-    bus_book_poll_.assign(frame.data(), frame.size());
-    return;
-  }
-  if (cmd == master::CMD_POLL_REPLY) {
-    // Which TAP answered, from DEST, for the Devices page's TAP list.
-    struct timeval tv;
-    gettimeofday(&tv, nullptr);
-    int64_t now = static_cast<int64_t>(tv.tv_sec) * 1000 + tv.tv_usec / 1000;
-    if (now >= 1700000000000LL)
+  if ((cmd == master::CMD_POLL || cmd == master::CMD_POLL_REPLY) && !frame_has_answer_) {
+    int64_t now = bus_now_ms();
+    if (!now) return;
+    if (cmd == master::CMD_POLL) {
+      bus_watch_->on_poll(now);
+    } else {
+      // Which TAP answered, from DEST, for the Devices page's TAP list.
       bus_book_->hear_poll_reply(static_cast<uint16_t>(static_cast<uint8_t>(frame[0]) << 8 | static_cast<uint8_t>(frame[1])), now);
-    if (!frame_has_answer_ || bus_book_poll_.empty()) return;
-    feed_bus_book_one_(bus_book_poll_);
-    bus_book_poll_.clear();
+      bus_watch_->on_poll_reply(!frame_has_packets_, now);
+    }
+    return;
   }
   feed_bus_book_one_(frame);
 }
 
-// Not until the clock is set: a time near 1970 would be saved as when it was heard.
 void TigoMonitorComponent::feed_bus_book_one_(const frame_string &frame) {
-  struct timeval tv;
-  gettimeofday(&tv, nullptr);
-  int64_t now = static_cast<int64_t>(tv.tv_sec) * 1000 + tv.tv_usec / 1000;
-  if (now < 1700000000000LL) return;
+  int64_t now = bus_now_ms();
+  if (!now) return;
   master::Frame f;
   if (!master::decode_frame(std::string(frame.data(), frame.size()), f)) return;
+  if (f.cmd == master::CMD_POLL_REPLY) bus_book_->hear_poll_reply(f.dest, now);
   bus_watch_->on_frame(f, false, now);
   // This monitor never runs the bus: what changes is another master's doing.
   bus_book_->absorb(*bus_watch_, now, false);

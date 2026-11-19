@@ -63,15 +63,19 @@ function bus(alarm) {
   };
 }
 
+// opts.esp32: the ESP32 build, which only listens and so never has an alarm.
 async function open(opts = {}) {
-  const api = { bus: bus(opts.alarm), clears: 0 };
+  const api = { bus: bus(opts.alarm), clears: 0, busAsked: 0 };
   const ctx = await browser.newContext({ viewport: { width: opts.width || 1280, height: 900 } });
   await ctx.route('**/api/**', async (route) => {
     const req = route.request();
     const path = new URL(req.url()).pathname.replace(/^.*(\/api\/)/, '$1');
     const json = (status, body) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
-    if (path === '/api/status') return json(200, { ...routes['/api/status'], platform: 'linux' });
-    if (path === '/api/bus') return json(200, api.bus);
+    if (path === '/api/status') return json(200, opts.esp32 ? routes['/api/status'] : { ...routes['/api/status'], platform: 'linux' });
+    if (path === '/api/bus') {
+      api.busAsked++;
+      return json(200, api.bus);
+    }
     if (path === '/api/bus/alarm/clear' && req.method() === 'POST') {
       api.clears++;
       api.bus = bus(false);
@@ -126,6 +130,20 @@ test('the Bus log: the strip, one row per exchange, and a row opens to its bytes
   assert.equal(await page.isVisible('#bus-alarm-card'), false);
   assert.equal(await page.isVisible('#bus-alarm-banner'), false);
   assert.equal(/undefined|null|NaN/.test(await page.textContent('#view-buslog')), false);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test('the Bus log on the ESP32: the same page, asked for only while it is open', async () => {
+  const { page, ctx, api, errors } = await open({ esp32: true });
+  await page.waitForSelector('#nav button[data-view="buslog"]', { state: 'visible' });
+  await page.waitForTimeout(2500);
+  assert.equal(api.busAsked, 0);  // no alarm to watch for elsewhere
+  await page.click('#nav button[data-view="buslog"]');
+  await page.waitForSelector('#bus-rows .bx-row');
+  assert.equal(await page.locator('#bus-rows .bx-row').count(), 4);
+  assert.match(await page.textContent('#buslog-meta'), /4 exchanges · polls 44\.1\/s/);
+  assert.equal(await page.isVisible('#bus-alarm-card'), false);
   assert.deepEqual(errors, []);
   await ctx.close();
 });

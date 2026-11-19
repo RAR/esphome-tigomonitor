@@ -1506,7 +1506,7 @@
       <div class="nav-group" role="group" aria-labelledby="nav-h-inspect">
         <div class="nav-head" id="nav-h-inspect">Inspect</div>
         <button data-view="diagnostics"><span class="icon">◈</span> Diagnostics</button>
-        <button data-view="buslog" id="nav-buslog" data-linux-only style="display:none"><span class="icon">⇄</span> Bus traffic</button>
+        <button data-view="buslog" id="nav-buslog"><span class="icon">⇄</span> Bus traffic</button>
         <button data-view="cca"><span class="icon">◉</span> CCA Info</button>
         <button data-view="cloudstatus" id="nav-cloudstatus" style="display:none"><span class="icon">☁</span> Tigo Cloud</button>
       </div>
@@ -6506,9 +6506,10 @@
   document.getElementById('logs-level').addEventListener('change', () => { renderLogs(); updateLogsMeta(); });
   document.getElementById('logs-search').addEventListener('input', () => { renderLogs(); updateLogsMeta(); });
 
-  // ---- Bus log and the reconfiguration alarm (Pi) ----
+  // ---- Bus log and the reconfiguration alarm ----
   // The banner is checked every 10 s wherever you are; the page polls every
-  // 2 s while open.
+  // 2 s while open. The ESP32 only listens, so it never has an alarm: it is
+  // asked only while the page is open.
   let busLast = null, busPaused = false, busCat = 'all';
   const busOpen = new Set();  // exchanges whose bytes are showing, by id
   let busNames = {}, busNamesAt = 0;  // node id (upper-case hex) → panel name, from /api/devices
@@ -6623,8 +6624,8 @@
     if (r && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); busToggle(r); }
   });
   async function refreshBus(force) {
-    if (PLATFORM !== 'linux') return;
     const open = document.getElementById('view-buslog').classList.contains('active');
+    if (PLATFORM !== 'linux' && !open) return;
     if (!force && open && busPaused) return;
     try {
       const r = await apiFetch(open ? '/api/bus' : '/api/bus?limit=1');

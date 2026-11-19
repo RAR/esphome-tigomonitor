@@ -12,8 +12,6 @@
 namespace tigod {
 
 using nlohmann::json;
-using esphome::tigo_monitor::master::BusStats;
-using esphome::tigo_monitor::master::Exchange;
 using esphome::tigo_monitor::master::Frame;
 using esphome::tigo_monitor::master::VersionBook;
 
@@ -306,57 +304,16 @@ std::string BusLog::alarm_summary() const {
          ", last " + when;
 }
 
-json BusLog::to_json(size_t limit) const {
+std::string BusLog::to_json(size_t limit) const {
   std::lock_guard<std::mutex> lock(mu_);
   json recent = json::array();
   for (const Alarm &a : alarms_) recent.push_back({{"unix_ms", a.unix_ms}, {"what", a.what}});
-  int64_t now = unix_ms_now();
-  json exchanges = json::array();
-  std::deque<Exchange> ex = watch_.exchanges_at(now);
-  size_t from = ex.size() > limit ? ex.size() - limit : 0;
-  for (size_t i = from; i < ex.size(); i++) {
-    const Exchange &e = ex[i];
-    exchanges.push_back({{"id", e.id},
-                         {"unix_ms", e.unix_ms},
-                         {"ours", e.ours},
-                         {"other_master", e.other_master},
-                         {"addr", hex4(e.addr)},
-                         {"cmd", hex4(e.cmd)},
-                         {"name", e.name},
-                         {"sub_name", e.sub_name},
-                         {"node", e.node < 0 ? json(nullptr) : json(hex4(static_cast<unsigned>(e.node)))},
-                         {"category", e.category},
-                         {"result", e.result},
-                         {"late", e.late},
-                         {"rt_ms", e.rt_ms < 0 ? json(nullptr) : json(e.rt_ms)},
-                         {"summary", e.summary},
-                         {"answer", e.answer},
-                         {"answer_after_ms", e.answer_after_ms < 0 ? json(nullptr) : json(e.answer_after_ms)},
-                         {"request_hex", e.request_hex},
-                         {"reply_hex", e.reply_hex},
-                         {"reconfig", e.reconfig}});
-  }
-  BusStats st = watch_.stats(now);
-  json stats = {{"window_s", esphome::tigo_monitor::master::BusWatch::WINDOW_MS / 1000},
-                {"polls", st.polls},
-                {"polls_lost", st.polls_lost},
-                {"polls_empty", st.polls_empty},
-                {"polls_refused", st.polls_refused},
-                {"count", st.count},
-                {"delivered", st.delivered},
-                {"not_delivered", st.not_delivered},
-                {"other_master", st.other_master},
-                {"reconfig", st.reconfig},
-                {"rt_median_ms", st.rt_median_ms < 0 ? json(nullptr) : json(st.rt_median_ms)},
-                {"rt_max_ms", st.rt_max_ms < 0 ? json(nullptr) : json(st.rt_max_ms)},
-                {"discovery", st.discovery}};
-  return {{"alarm",
-           {{"active", alarm_count_ > 0},
-            {"count", alarm_count_},
-            {"first_unix_ms", first_alarm_ms_},
-            {"recent", recent}}},
-          {"stats", stats},
-          {"exchanges", exchanges}};
+  json alarm = {{"active", alarm_count_ > 0}, {"count", alarm_count_}, {"first_unix_ms", first_alarm_ms_}, {"recent", recent}};
+  // The stats and exchanges from the writer the ESP32 uses too (bus_watch.h).
+  std::string out = "{\"alarm\":" + alarm.dump(-1, ' ', false, json::error_handler_t::replace) + ",";
+  watch_.write_json(out, unix_ms_now(), limit);
+  out += "}";
+  return out;
 }
 
 }  // namespace tigod

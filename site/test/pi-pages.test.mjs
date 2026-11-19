@@ -115,7 +115,7 @@ test('the ESP32\'s sidebar keeps the groups without the Pi\'s pages', async () =
   await page.waitForTimeout(600);
   assert.deepEqual(await navGroups(page), [
     ['Monitor', ['Dashboard', 'History', 'Topology', 'Devices']],
-    ['Inspect', ['Diagnostics', 'CCA Info', 'Tigo Cloud']],
+    ['Inspect', ['Diagnostics', 'Bus traffic', 'CCA Info', 'Tigo Cloud']],
     ['Control', ['Settings']],
   ]);
   assert.deepEqual(errors, []);
