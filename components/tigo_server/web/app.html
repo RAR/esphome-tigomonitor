@@ -1708,7 +1708,7 @@
       </div>
 
       <div class="page-tabs" role="tablist" aria-label="Topology" id="topology-tabs">
-        <button role="tab" id="topology-tab-mesh" aria-controls="topology-mesh" aria-selected="false" data-tab="mesh" tabindex="-1" data-linux-only style="display:none">Mesh</button>
+        <button role="tab" id="topology-tab-mesh" aria-controls="topology-mesh" aria-selected="false" data-tab="mesh" tabindex="-1">Mesh</button>
         <button role="tab" id="topology-tab-layout" aria-controls="topology-layout" aria-selected="true" data-tab="layout">Layout</button>
         <button role="tab" id="topology-tab-array" aria-controls="topology-array" aria-selected="false" data-tab="array" tabindex="-1">Array</button>
       </div>
@@ -8186,13 +8186,13 @@
 
   // ============================================================
   // Topology tabs: Mesh, the optimizers around the TAP each reports
-  // through (Pi), Layout, the panel layout below, and Array, where each
-  // panel sits. The ESP32 has no /api/mesh: Layout and Array.
+  // through, Layout, the panel layout below, and Array, where each panel
+  // sits. Both builds have all three.
   function topologyTab(name) {
     if (!name) { try { name = localStorage.getItem('topology-tab'); } catch (e) {} }
-    // The Pi opens on Mesh unless another was picked; the ESP32 on Layout.
-    if (PLATFORM !== 'linux') { if (name !== 'array') name = 'layout'; }
-    else if (name !== 'layout' && name !== 'array') name = 'mesh';
+    // Until one is picked: the Pi opens on Mesh, the ESP32 on Layout, as it
+    // always has (a new board's mesh map is empty until the reports come in).
+    if (name !== 'mesh' && name !== 'layout' && name !== 'array') name = PLATFORM === 'linux' ? 'mesh' : 'layout';
     document.querySelectorAll('#topology-tabs [role="tab"]').forEach(t => {
       const on = t.dataset.tab === name;
       t.setAttribute('aria-selected', String(on));

@@ -169,7 +169,7 @@ void TigoWebServer::setup() {
   // + 2 CCA BLE-search + 5 cloud + 2 config). Handlers past this cap
   // silently fail to register and 404 — TSDB stats registers last, so it's the canary.
   // Keep generous headroom so adding a route doesn't quietly drop the tail again.
-  config.max_uri_handlers = 60;
+  config.max_uri_handlers = 64;
   config.stack_size = 8192;
   config.lru_purge_enable = true;  // Enable LRU purging of connections
   config.max_open_sockets = 4;     // Limit concurrent connections to reduce memory
@@ -313,6 +313,23 @@ void TigoWebServer::setup() {
       .user_ctx = this
     };
     httpd_register_uri_handler(server_, &api_array_post_uri);
+
+    // Topology > Mesh: each optimizer's TAP, link and joins (link_stats.h,
+    // mesh_history.h), the Pi's shape.
+    httpd_uri_t api_mesh_uri = {
+      .uri = "/api/mesh",
+      .method = HTTP_GET,
+      .handler = api_mesh_handler,
+      .user_ctx = this
+    };
+    httpd_register_uri_handler(server_, &api_mesh_uri);
+    httpd_uri_t api_mesh_joins_uri = {
+      .uri = "/api/mesh/joins",
+      .method = HTTP_GET,
+      .handler = api_mesh_joins_handler,
+      .user_ctx = this
+    };
+    httpd_register_uri_handler(server_, &api_mesh_joins_uri);
 
     httpd_uri_t api_strings_uri = {
       .uri = "/api/strings",
@@ -2672,6 +2689,14 @@ void TigoWebServer::build_devices_json(PSRAMString& json) {
   parent_->with_state_lock([&]() {
     const auto &devices = parent_->get_devices();
     const auto &node_table = parent_->get_node_table();
+    // The TAP each reports through, from the mesh map, as the Pi gives it.
+    const auto *links = parent_->mesh_links();
+    auto tap_of = [&](const tigo_monitor::node_string &addr, char *out, size_t n) {
+      snprintf(out, n, "null");
+      if (links == nullptr) return;
+      auto it = links->links().find(tigo_monitor::master::Str(addr.c_str()));
+      if (it != links->links().end() && it->second.tap) snprintf(out, n, "\"%04X\"", it->second.tap);
+    };
 
     std::vector<DeviceWithName> sorted_devices;
 
@@ -2748,7 +2773,9 @@ void TigoWebServer::build_devices_json(PSRAMString& json) {
         name_cstr = name_buf;
       }
 
-      char buffer[600];
+      char buffer[620];
+      char tap[8];
+      tap_of(*dwn.addr, tap, sizeof(tap));
 
       if (dwn.has_runtime_data && dwn.device != nullptr) {
         // Device has runtime data - show actual values
@@ -2760,18 +2787,18 @@ void TigoWebServer::build_devices_json(PSRAMString& json) {
         snprintf(buffer, sizeof(buffer),
           "{\"addr\":\"%s\",\"barcode\":\"%s\",\"name\":\"%s\",\"string_label\":\"%s\",\"voltage_in\":%.2f,\"voltage_out\":%.2f,"
           "\"current\":%.3f,\"current_out\":%.3f,\"power_in\":%.1f,\"power\":%.1f,\"power_out\":%.1f,\"peak_power\":%.1f,\"temperature\":%.1f,\"rssi\":%d,"
-          "\"duty_cycle\":%.1f,\"efficiency\":%.2f,\"data_age_ms\":%lu,\"stale\":%s}",
+          "\"duty_cycle\":%.1f,\"efficiency\":%.2f,\"data_age_ms\":%lu,\"stale\":%s,\"tap\":%s}",
           device.addr.c_str(), device.barcode.c_str(), name_cstr, dwn.string_label->c_str(), device.voltage_in, device.voltage_out,
           device.current_in, device.current_out, device.power_in, device.power_out, device.power_out, device.peak_power, device.temperature, device.rssi,
-          duty_cycle_percent, device.efficiency, data_age_ms, device.is_stale ? "true" : "false");
+          duty_cycle_percent, device.efficiency, data_age_ms, device.is_stale ? "true" : "false", tap);
       } else {
         // Device is known but has no runtime data yet (e.g., ESP32 restarted at night)
         // Show zeros with a very large data_age to indicate no recent data
         snprintf(buffer, sizeof(buffer),
           "{\"addr\":\"%s\",\"barcode\":\"%s\",\"name\":\"%s\",\"string_label\":\"%s\",\"voltage_in\":0.00,\"voltage_out\":0.00,"
           "\"current\":0.000,\"current_out\":0.000,\"power_in\":0.0,\"power\":0.0,\"power_out\":0.0,\"peak_power\":0.0,\"temperature\":0.0,\"rssi\":0,"
-          "\"duty_cycle\":0.0,\"efficiency\":0.00,\"data_age_ms\":999999999,\"stale\":true}",
-          dwn.addr->c_str(), dwn.barcode->c_str(), name_cstr, dwn.string_label->c_str());
+          "\"duty_cycle\":0.0,\"efficiency\":0.00,\"data_age_ms\":999999999,\"stale\":true,\"tap\":%s}",
+          dwn.addr->c_str(), dwn.barcode->c_str(), name_cstr, dwn.string_label->c_str(), tap);
       }
 
       json.append(buffer);
@@ -3010,6 +3037,225 @@ esp_err_t TigoWebServer::api_array_post_handler(httpd_req_t *req) {
     return fail("500 Internal Server Error", "Could not save the array layout.");
   ESP_LOGI(TAG, "array: saved, %u panels and %u TAPs placed", (unsigned) r.panels.size(), (unsigned) r.taps.size());
   httpd_resp_sendstr(req, "{\"saved\":true}");
+  return ESP_OK;
+}
+
+// A JSON string from C text, escaped: labels come from the CCA and the YAML.
+static void json_cstr(PSRAMString &out, const char *s) {
+  char b[8];
+  out.append("\"");
+  const char *run = s;
+  for (const char *p = s;; p++) {
+    unsigned char c = static_cast<unsigned char>(*p);
+    if (c && c >= 0x20 && c != '"' && c != '\\') continue;
+    if (p > run) {
+      tigo_monitor::master::Str piece(run, p - run);
+      out.append(piece.c_str());
+    }
+    if (!c) break;
+    if (c == '"' || c == '\\') b[0] = '\\', b[1] = static_cast<char>(c), b[2] = '\0';
+    else snprintf(b, sizeof(b), "\\u%04x", c);
+    out.append(b);
+    run = p + 1;
+  }
+  out.append("\"");
+}
+
+// GET /api/mesh: each optimizer's TAP, reports lost today and a day of RSSI
+// (the raw byte, not dBm), where it last joined and through whom, and
+// reports and losses by day summed by string: the Pi's shape. Written a few
+// optimizers per hold of the state lock, with a tick between for the loop.
+esp_err_t TigoWebServer::api_mesh_handler(httpd_req_t *req) {
+  TigoWebServer *server = static_cast<TigoWebServer *>(req->user_ctx);
+  if (!server->check_api_auth(req)) return ESP_OK;
+  namespace tm = tigo_monitor;
+  using tm::master::Str;
+  static const char *const NO_STRING = "No string";  // as the Pi's Monitor::NO_STRING
+  static const size_t MESH_CHUNK = 6;
+  struct timeval tv;
+  gettimeofday(&tv, nullptr);
+  int64_t now_s = static_cast<int64_t>(tv.tv_sec);
+  PSRAMString out;
+  bool kept = false;
+  tm::master::Vec<Str> addrs;
+  auto *mon = server->parent_;
+  if (mon != nullptr) {
+    mon->with_state_lock([&] {
+      const auto *links = mon->mesh_links();
+      if (links == nullptr) return;
+      kept = true;
+      mon->mesh_note_today();
+      out.reserve(links->links().size() * 1600 + 4096);
+      out.append("{\"loss_method\":\"slot\",\"parent_confirmed\":true,\"taps\":[");
+      tm::master::Map<uint16_t, bool> taps;
+      for (const auto &kv : links->links()) {
+        if (kv.second.tap) taps[kv.second.tap] = true;
+        addrs.push_back(kv.first);
+      }
+      bool first = true;
+      char b[48];
+      for (const auto &t : taps) {
+        if (!first) out.append(",");
+        first = false;
+        snprintf(b, sizeof(b), "{\"id\":\"%04X\"", t.first);
+        out.append(b);
+        Str name = mon->tap_name(t.first);
+        if (!name.empty()) out.append(",\"name\":"), json_cstr(out, name.c_str());
+        out.append("}");
+      }
+      out.append("],\"nodes\":[");
+    });
+  }
+  if (!kept) {
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_status(req, "404 Not Found");
+    httpd_resp_sendstr(req, "{\"error\":\"no mesh map\"}");
+    return ESP_OK;
+  }
+  bool first = true;
+  for (size_t at = 0; at < addrs.size(); at += MESH_CHUNK) {
+    vTaskDelay(1);
+    mon->with_state_lock([&] {
+      const auto *links = mon->mesh_links();
+      const auto &nodes = mon->get_node_table();
+      char b[96];
+      for (size_t i = at; i < addrs.size() && i < at + MESH_CHUNK; i++) {
+        auto it = links->links().find(addrs[i]);
+        if (it == links->links().end()) continue;  // dropped meanwhile
+        const auto &l = it->second;
+        const char *addr = it->first.c_str();
+        // The node table's name and string, as /api/devices has them; one not
+        // in the table yet goes by its address.
+        const char *label = addr, *string = NO_STRING;
+        char tail[8] = {0};
+        for (const auto &n : nodes) {
+          if (strcasecmp(n.addr.c_str(), addr) != 0) continue;
+          if (!n.cca_label.empty()) {
+            label = n.cca_label.c_str();
+          } else if (n.long_address.size() >= 6) {
+            memcpy(tail, n.long_address.c_str() + n.long_address.size() - 6, 6);
+            label = tail;
+          }
+          if (!n.cca_string_label.empty()) string = n.cca_string_label.c_str();
+          break;
+        }
+        if (!first) out.append(",");
+        first = false;
+        out.append("{\"addr\":"), json_cstr(out, addr);
+        out.append(",\"label\":"), json_cstr(out, label);
+        out.append(",\"string\":"), json_cstr(out, string);
+        if (l.tap) snprintf(b, sizeof(b), ",\"tap\":\"%04X\"", l.tap);
+        else snprintf(b, sizeof(b), ",\"tap\":null");
+        out.append(b);
+        out.append(",\"parent\":");
+        if (l.parent.empty()) out.append("null");
+        else json_cstr(out, l.parent.c_str());
+        Str relay = links->relay_of(it->first);
+        out.append(",\"relay\":");
+        if (relay.empty()) out.append("null");
+        else json_cstr(out, relay.c_str());
+        bool heard = l.last_heard_s > 0;
+        if (heard) snprintf(b, sizeof(b), ",\"rssi\":%d,\"rssi_24h\":[", l.rssi);
+        else snprintf(b, sizeof(b), ",\"rssi\":null,\"rssi_24h\":[");
+        out.append(b);
+        auto day = links->rssi_24h(it->first, now_s);
+        for (size_t k = 0; k < day.size(); k++) {
+          if (day[k] < 0) snprintf(b, sizeof(b), k ? ",null" : "null");
+          else snprintf(b, sizeof(b), k ? ",%d" : "%d", day[k]);
+          out.append(b);
+        }
+        snprintf(b, sizeof(b), "],\"reports_today\":%u,\"lost_today\":%u", (unsigned) l.reports_today,
+                 (unsigned) l.lost_today);
+        out.append(b);
+        if (heard) snprintf(b, sizeof(b), ",\"last_heard_s\":%lld", (long long) (now_s - l.last_heard_s));
+        else snprintf(b, sizeof(b), ",\"last_heard_s\":null");
+        out.append(b);
+        if (l.last_join_s) snprintf(b, sizeof(b), ",\"last_join_unix\":%lld}", (long long) l.last_join_s);
+        else snprintf(b, sizeof(b), ",\"last_join_unix\":null}");
+        out.append(b);
+      }
+    });
+  }
+  out.append("],\"loss_days\":[");
+  vTaskDelay(1);
+  mon->with_state_lock([&] {
+    // Reports and losses by day, summed by string: how each string fares
+    // over weeks. Only the optimizers in the table: a deleted one's counts
+    // stay in the book but belong to no string.
+    tm::master::Map<Str, Str> string_of;
+    for (const auto &n : mon->get_node_table())
+      string_of[Str(n.addr.c_str())] = n.cca_string_label.empty() ? Str(NO_STRING) : Str(n.cca_string_label.c_str());
+    bool first_day = true;
+    char b[64];
+    for (const auto &day : mon->mesh_losses()->days()) {
+      tm::master::Map<Str, std::pair<uint64_t, uint64_t>> by;
+      for (const auto &kv : day.second) {
+        auto it = string_of.find(kv.first);
+        if (it == string_of.end()) continue;
+        by[it->second].first += kv.second.first;
+        by[it->second].second += kv.second.second;
+      }
+      if (!first_day) out.append(",");
+      first_day = false;
+      out.append("{\"date\":"), json_cstr(out, day.first.c_str()), out.append(",\"strings\":{");
+      bool first_string = true;
+      for (const auto &kv : by) {
+        if (!first_string) out.append(",");
+        first_string = false;
+        json_cstr(out, kv.first.c_str());
+        snprintf(b, sizeof(b), ":[%llu,%llu]", (unsigned long long) kv.second.first,
+                 (unsigned long long) kv.second.second);
+        out.append(b);
+      }
+      out.append("}}");
+    }
+  });
+  out.append("]}");
+  httpd_resp_set_type(req, "application/json");
+  httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+  httpd_resp_send(req, out.c_str(), out.length());
+  return ESP_OK;
+}
+
+// GET /api/mesh/joins?addr=XXXX: one optimizer's joins of the last 30 days,
+// newest first, each with the relay it went through as best the join log
+// can tell (mesh_history.h's resolve_relay, for its joins alone).
+esp_err_t TigoWebServer::api_mesh_joins_handler(httpd_req_t *req) {
+  TigoWebServer *server = static_cast<TigoWebServer *>(req->user_ctx);
+  if (!server->check_api_auth(req)) return ESP_OK;
+  namespace tm = tigo_monitor;
+  char query[32], addr[8] = {0};
+  if (httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK)
+    httpd_query_key_value(query, "addr", addr, sizeof(addr));
+  for (char *p = addr; *p; p++) *p = static_cast<char>(toupper(static_cast<unsigned char>(*p)));
+  PSRAMString out;
+  out.append("{\"addr\":"), json_cstr(out, addr), out.append(",\"joins\":[");
+  if (server->parent_ != nullptr) {
+    server->parent_->with_state_lock([&] {
+      const auto *log = server->parent_->mesh_joins();
+      if (log == nullptr) return;
+      bool first = true;
+      char b[48];
+      for (size_t i = log->size(); i-- > 0;) {
+        const auto &e = (*log)[i];
+        if (e.addr != addr) continue;
+        if (!first) out.append(",");
+        first = false;
+        snprintf(b, sizeof(b), "{\"unix\":%lld,\"parent\":", (long long) e.unix_s);
+        out.append(b);
+        json_cstr(out, e.parent.c_str());
+        tm::master::Str relay = tm::mesh_history::resolve_relay(*log, i);
+        out.append(",\"relay\":");
+        if (relay.empty()) out.append("null");
+        else json_cstr(out, relay.c_str());
+        out.append("}");
+      }
+    });
+  }
+  out.append("]}");
+  httpd_resp_set_type(req, "application/json");
+  httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+  httpd_resp_send(req, out.c_str(), out.length());
   return ESP_OK;
 }
 

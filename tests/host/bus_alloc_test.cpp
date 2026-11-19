@@ -59,6 +59,8 @@ template <class T> struct CountingAllocator {
 #define TIGO_BUS_ALLOCATOR CountingAllocator
 #include "array_grid.h"
 #include "bus_book.h"
+#include "link_stats.h"
+#include "mesh_history.h"
 
 using namespace esphome::tigo_monitor::master;
 
@@ -211,7 +213,43 @@ static void test_the_array_layout_goes_through_the_hook() {
   CHECK(g_heap_live == heap_before && g_hooked_live == hooked_before);
 }
 
+// The mesh map's links, losses and joins, as the ESP32 keeps them: through
+// the hook, and nothing on the ordinary heap but the objects themselves.
+static void test_the_mesh_goes_through_the_hook() {
+  using namespace esphome::tigo_monitor;
+  long heap_before = g_heap_live, hooked_before = g_hooked_live;
+  {
+    auto *links = new link::LinkStats();
+    auto *losses = new mesh_history::LossBook();
+    auto *joins = new master::Vec<mesh_history::JoinEntry>();
+    long heap_empty = g_heap_live;
+    int64_t t = 1767225600;
+    char addr[8];
+    for (int i = 0; i < 40; i++) {
+      std::snprintf(addr, sizeof(addr), "%04X", 0x10 + i);
+      links->on_join(addr, t, "0001", "00AB");
+      joins->push_back({addr, t, "0001", "00AB"});
+    }
+    for (int r = 0; r < 600; r++)
+      for (int i = 0; i < 40; i++) {
+        std::snprintf(addr, sizeof(addr), "%04X", 0x10 + i);
+        links->on_report(addr, 0x1201, 120, static_cast<uint16_t>((r * 400) % 48000), t + r * 2, 20260101);
+      }
+    for (const auto &kv : links->links()) losses->note("2026-01-01", kv.first, kv.second.reports_today, kv.second.lost_today);
+    CHECK(links->links().size() == 40 && losses->days().begin()->second.size() == 40);
+    CHECK(links->rssi_24h("0010", t + 1198)[287] == 120 && !links->rssi_dump("0010", t + 1198).empty());
+    long kept_heap = g_heap_live - heap_empty, kept_hooked = g_hooked_live - hooked_before;
+    std::printf("  mesh, 40 optimizers: %ld bytes through the hook, %ld more on the ordinary heap\n", kept_hooked, kept_heap);
+    CHECK(kept_hooked > 40 * 2304 && kept_heap <= 0);
+    delete joins;
+    delete losses;
+    delete links;
+  }
+  CHECK(g_heap_live == heap_before && g_hooked_live == hooked_before);
+}
+
 int main() {
+  test_the_mesh_goes_through_the_hook();
   test_the_array_layout_goes_through_the_hook();
   test_what_they_keep_goes_through_the_hook();
   test_writing_into_a_hooked_string();

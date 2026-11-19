@@ -36,7 +36,7 @@ below.
 | A display on the board | Optional, on an AtomS3R. | No |
 | [New and missing optimizers](/esphome-tigomonitor/guides/raspberry-pi/#new-and-missing-optimizers) | No | A notice for a new one, tags for missing ones, and both counts in Home Assistant. |
 | Optimizer and TAP firmware, optimizer settings | On the Devices page, from what the bus carries, once a master asks the optimizers. Kept across a reboot with history on. | On the Devices page, from what the bus carries. |
-| [Mesh map](/esphome-tigomonitor/guides/raspberry-pi/#see-which-optimizers-have-a-weak-link) | No | Each optimizer's link: reports lost today, signal over a day, and which optimizer it joined through. |
+| [Mesh map](/esphome-tigomonitor/guides/raspberry-pi/#see-which-optimizers-have-a-weak-link) | Each optimizer's link: reports lost today, signal over a day, and which optimizer it joined through. Kept across a reboot with history on. | Each optimizer's link: reports lost today, signal over a day, and which optimizer it joined through. |
 | Bus traffic | Each request on the bus with its reply and what it means. It only listens, so it never raises the alarm for another device reconfiguring the TAP. | Each request on the bus with its reply and what it means, and an alarm if another device reconfigures the TAP. |
 | The service's log | Through ESPHome's logs. | Diagnostics → Logs, in the web UI. |
 | [HTTPS](/esphome-tigomonitor/guides/raspberry-pi/#use-https) | No | Yes, with your certificate. |

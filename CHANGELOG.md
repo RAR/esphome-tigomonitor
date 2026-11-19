@@ -13,7 +13,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   where it sits, shaded by its power, and each TAP where it's mounted, as on
   the Pi. The board keeps the drawing in its settings storage (NVS), so it
   survives a reflash, and saves it by barcode, so it stays right after the
-  TAP renumbers the optimizers. The Mesh tab stays on the Pi for now.
+  TAP renumbers the optimizers.
+- **The ESP32 has the mesh map too.** Topology › Mesh shows each optimizer
+  around its TAP, coloured by the reports lost today and its signal over a
+  day, and which optimizer it joined through, as on the Pi. Everything it
+  keeps (~3 KB an optimizer) is in PSRAM. With history on, it's saved to
+  flash every 15 minutes, a piece at a time so the bus is never left unread,
+  and a reboot doesn't blank the map. `/api/devices` names each optimizer's
+  TAP on the ESP32 too.
 
 - **The ESP32 has the Bus traffic page too.** It lists each request on the
   bus with its reply, round trip and meaning, the last 300 of them, under the

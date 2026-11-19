@@ -4,8 +4,9 @@
 // its reports went missing today, and its RSSI over the last day.
 //
 // Pure and header-only, like tigo_protocol.h, so it builds on the host
-// (tests/host/link_stats_test.cpp). The Linux daemon feeds it; the ESP32 does
-// not use it yet.
+// (tests/host/link_stats_test.cpp). Both builds feed it; its containers are
+// tigo_alloc.h's, so on the ESP32 what it keeps (~2.3 KB an optimizer, for a
+// day of RSSI) is in PSRAM.
 //
 // Loss is counted from the slot counter, not a sequence number: a power report
 // carries none (no byte steps by one from report to report in the 2026-11-06
@@ -22,9 +23,15 @@
 #include <string>
 #include <vector>
 
+#include "tigo_alloc.h"
+
 namespace esphome {
 namespace tigo_monitor {
 namespace link {
+
+using master::Map;
+using master::Str;
+using master::Vec;
 
 static const uint32_t WRAP_TICKS = 48000;  // 4 Hslots of 12,000 ticks
 static const uint32_t BIN_TICKS = 400;     // one report bin, 2 s
@@ -48,8 +55,8 @@ struct Link {
   int rssi = 0;      // the raw byte, higher is better; not dBm
   int64_t last_heard_s = 0;
   int64_t last_join_s = 0;  // 0 until a NetDiag join is heard
-  std::string parent;       // its parent's NWID from that join, hex; 0001 is the TAP
-  std::string nwid;         // its own NWID from that join: what children name
+  Str parent;       // its parent's NWID from that join, hex; 0001 is the TAP
+  Str nwid;         // its own NWID from that join: what children name
   uint32_t reports_today = 0;
   uint32_t lost_today = 0;
 
@@ -76,7 +83,7 @@ struct Link {
 class LinkStats {
  public:
   // day: anything that changes at local midnight (the daemon passes YYYYMMDD).
-  void on_report(const std::string &addr, uint16_t tap, int rssi, uint16_t slot, int64_t unix_s, int day) {
+  void on_report(const Str &addr, uint16_t tap, int rssi, uint16_t slot, int64_t unix_s, int day) {
     Link &l = links_[addr];
     roll_(l, day);
     uint32_t ticks = slot_ticks(slot);
@@ -132,7 +139,7 @@ class LinkStats {
     for (auto &e : links_) roll_(e.second, day);
   }
 
-  void on_join(const std::string &addr, int64_t unix_s, const std::string &parent, const std::string &nwid) {
+  void on_join(const Str &addr, int64_t unix_s, const Str &parent, const Str &nwid) {
     Link &l = links_[addr];
     l.last_join_s = unix_s;
     l.parent = parent;
@@ -145,12 +152,12 @@ class LinkStats {
   // heard or joined since shortly before the child's join is gone (a spare
   // switched off days ago keeps its last NWID on record, and the TAP hands
   // NWIDs out again), so it is no relay.
-  std::string relay_of(const std::string &addr) const {
+  Str relay_of(const Str &addr) const {
     auto it = links_.find(addr);
     if (it == links_.end()) return "";
     const Link &l = it->second;
     if (l.parent.empty() || l.parent == "0001" || l.parent == l.nwid) return "";
-    std::string best;
+    Str best;
     int64_t when = 0;
     for (const auto &e : links_)
       if (e.first != addr && e.second.nwid == l.parent && e.second.last_join_s >= when &&
@@ -162,11 +169,11 @@ class LinkStats {
   }
 
   // An optimizer deleted from the node table is forgotten here too.
-  void erase(const std::string &addr) { links_.erase(addr); }
+  void erase(const Str &addr) { links_.erase(addr); }
   // Drops each address the node table doesn't hold (in_table false) that
   // hasn't been heard or joined for quiet_s: what a gateway renumbering
   // leaves behind. A new optimizer stays while it's recent. How many went.
-  size_t prune(const std::function<bool(const std::string &)> &in_table, int64_t unix_s, int64_t quiet_s) {
+  size_t prune(const std::function<bool(const Str &)> &in_table, int64_t unix_s, int64_t quiet_s) {
     size_t n = 0;
     for (auto it = links_.begin(); it != links_.end();) {
       const Link &l = it->second;
@@ -182,8 +189,8 @@ class LinkStats {
 
   // The last day of 5-minute RSSI averages, oldest first; -1 where nothing
   // was heard.
-  std::vector<int> rssi_24h(const std::string &addr, int64_t unix_s) const {
-    std::vector<int> out(BUCKETS, -1);
+  Vec<int> rssi_24h(const Str &addr, int64_t unix_s) const {
+    Vec<int> out(BUCKETS, -1);
     auto it = links_.find(addr);
     if (it == links_.end()) return out;
     int64_t now = unix_s / BUCKET_S;
@@ -199,12 +206,12 @@ class LinkStats {
   // The last day of the RSSI ring as text, for the daemon's state file: 4 hex
   // digits a bucket, its mean then how many reports made it, oldest first,
   // ending at the bucket holding unix_s. Empty if nothing was heard that day.
-  std::string rssi_dump(const std::string &addr, int64_t unix_s) const {
+  Str rssi_dump(const Str &addr, int64_t unix_s) const {
     auto it = links_.find(addr);
     if (it == links_.end()) return "";
     static const char HEX[] = "0123456789abcdef";
     int64_t now = unix_s / BUCKET_S;
-    std::string out;
+    Str out;
     bool any = false;
     for (size_t i = 0; i < BUCKETS; i++) {
       int64_t index = now - static_cast<int64_t>(BUCKETS - 1 - i);
@@ -227,9 +234,9 @@ class LinkStats {
 
   // Puts back what rssi_dump wrote; `to` is the index (unix_s / BUCKET_S)
   // of its last bucket. Anything else is ignored.
-  void rssi_restore(const std::string &addr, int32_t to, const std::string &hex) {
+  void rssi_restore(const Str &addr, int32_t to, const Str &hex) {
     if (hex.size() != BUCKETS * 4) return;
-    std::vector<int> v(hex.size());
+    Vec<int> v(hex.size());
     for (size_t i = 0; i < hex.size(); i++) {
       char c = hex[i];
       v[i] = c >= '0' && c <= '9' ? c - '0' : c >= 'a' && c <= 'f' ? c - 'a' + 10 : -1;
@@ -244,7 +251,7 @@ class LinkStats {
     }
   }
 
-  const std::map<std::string, Link> &links() const { return links_; }
+  const Map<Str, Link> &links() const { return links_; }
 
  private:
   static void roll_(Link &l, int day) {
@@ -255,7 +262,7 @@ class LinkStats {
     l.cadence = 0;
   }
   static size_t bucket_of_(int64_t unix_s) { return static_cast<size_t>(unix_s / BUCKET_S); }
-  std::map<std::string, Link> links_;
+  Map<Str, Link> links_;
 };
 
 }  // namespace link
