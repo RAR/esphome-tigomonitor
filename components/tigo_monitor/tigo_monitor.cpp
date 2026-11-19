@@ -3555,9 +3555,11 @@ static const char *const kBusBookPath = "/tsdb/bus_book.txt";
 void TigoMonitorComponent::enable_bus_book() {
   StateLock lock(state_mutex_);
   if (bus_book_) return;
-  // A few exchanges, to pair each TAP reply with its request; the Bus log's
-  // 300 would be ~150 KB of internal RAM here.
-  bus_watch_.reset(new master::BusWatch(16));
+  // A few exchanges, to pair each TAP reply with its request, and no poll
+  // marks: the Bus log's 300 exchanges and five minutes of polls would be
+  // ~260 KB of internal RAM here (the poll marks alone ran the rig out,
+  // 2026-11-19).
+  bus_watch_.reset(new master::BusWatch(16, false));
   bus_book_.reset(new master::BusBook([](char level, const char *msg) {
     if (level == 'W') ESP_LOGW(TAG, "%s", msg);
     else ESP_LOGI(TAG, "%s", msg);

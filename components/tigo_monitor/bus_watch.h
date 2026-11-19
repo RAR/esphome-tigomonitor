@@ -574,7 +574,11 @@ class BusWatch {
   // keep: how many exchanges to keep, KEEP for the Bus log. A few are enough
   // to pair each reply with its request (the TAPs' radio settings and MACs
   // come from those pairs); the optimizers' answers need none.
-  explicit BusWatch(size_t keep = KEEP) : keep_(keep < 1 ? 1 : keep) {}
+  // poll_stats: keep a mark per poll for WINDOW_MS, for stats(). Each is
+  // ~16 bytes, and a busy bus polls ~23 times a second: ~110 KB, more than
+  // an ESP32's internal RAM can spare. Off, stats() counts no polls.
+  explicit BusWatch(size_t keep = KEEP, bool poll_stats = true)
+      : keep_(keep < 1 ? 1 : keep), poll_stats_(poll_stats) {}
 
   // Returns the frame's reconfiguration, or "".
   std::string on_frame(const Frame &f, bool ours, int64_t unix_ms) {
@@ -727,6 +731,7 @@ class BusWatch {
     if (exchanges_.size() > keep_) exchanges_.pop_front();
   }
   void mark_poll_(int64_t at, int rt, bool empty) {
+    if (!poll_stats_) return;
     poll_marks_.push_back({at, rt, empty});
     while (!poll_marks_.empty() && poll_marks_.front().unix_ms < at - WINDOW_MS) poll_marks_.pop_front();
   }
@@ -879,6 +884,7 @@ class BusWatch {
   }
 
   size_t keep_;
+  bool poll_stats_;
   std::deque<Exchange> exchanges_;
   std::deque<PollMark> poll_marks_;
   std::deque<std::pair<uint64_t, Frame>> recent_unanswered_;

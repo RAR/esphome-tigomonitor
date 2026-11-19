@@ -294,6 +294,27 @@ static void test_another_master() {
   CHECK(!last(w).other_master);
 }
 
+// Without poll stats (the ESP32's Devices detail), no poll is kept: the
+// marks would be ~16 bytes each for five minutes of ~23 polls a second, and
+// on the rig they ran its internal RAM out (2026-11-19). Answers still come.
+static void test_no_poll_stats_keeps_no_polls() {
+  BusWatch w(16, false);
+  int64_t t = 0;
+  for (int i = 0; i < 1000; i++, t += 20) {
+    w.on_frame(request(0x0148, hex("00016fc404")), true, t);
+    w.on_frame(reply(0x0149, i == 500 ? poll_reply_with_answer(0x10, "Mnode Version K8.0120 (2D)\r") : hex("001f000000")),
+               false, t + 10);
+  }
+  CHECK(w.stats(t).polls == 0);
+  CHECK(w.take_versions().size() == 1);
+  BusWatch on;
+  for (int i = 0; i < 1000; i++, t += 20) {
+    on.on_frame(request(0x0148, hex("00016fc404")), true, t);
+    on.on_frame(reply(0x0149, hex("001f000000")), false, t + 10);
+  }
+  CHECK(on.stats(t).polls == 1000);
+}
+
 static void test_stats_cover_five_minutes() {
   BusWatch w;
   int64_t t = 0;
@@ -509,6 +530,7 @@ int main() {
   test_version_book();
   test_another_master();
   test_stats_cover_five_minutes();
+  test_no_poll_stats_keeps_no_polls();
   test_log_is_bounded();
   test_tap_radio_from_a_read();
   test_tap_id_from_its_mac_reply();
