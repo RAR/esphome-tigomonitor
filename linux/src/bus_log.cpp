@@ -33,10 +33,13 @@ static std::string hex4(unsigned v) {
   return b;
 }
 
-static json entry_json(const VersionBook::Entry &e) {
-  return {{"addr", hex4(e.addr)},     {"model", e.model},       {"version", e.version},
-          {"previous", e.previous},   {"since_unix_ms", e.since_ms}, {"last_unix_ms", e.last_ms}};
-}
+BusLog::BusLog(std::string alarm_path, std::string versions_path)
+    : path_(std::move(alarm_path)),
+      versions_path_(std::move(versions_path)),
+      book_([](char level, const char *msg) {
+        if (level == 'W') LOGW("%s", msg);
+        else LOGI("%s", msg);
+      }) {}
 
 void BusLog::load_versions_() {
   if (versions_path_.empty()) return;
@@ -59,7 +62,7 @@ void BusLog::load_versions_() {
       e.previous = o.value("previous", std::string());
       e.since_ms = o.value("since_unix_ms", int64_t{0});
       e.last_ms = o.value("last_unix_ms", int64_t{0});
-      if (!e.version.empty()) versions_.restore(e);
+      if (!e.version.empty()) book_.versions.restore(e);
     }
   for (const auto &o : j.value("radios", json::array())) {
     if (!o.is_object()) continue;
@@ -70,13 +73,18 @@ void BusLog::load_versions_() {
     r.slm = o.value("slm", 0);
     r.profile = o.value("profile", 0);
     r.pan = static_cast<uint16_t>(std::strtoul(o.value("pan", std::string("0")).c_str(), nullptr, 16));
-    if (r.tap) radios_[r.tap] = {r, o.value("heard_unix_ms", int64_t{0})};
+    if (r.tap) book_.radios[r.tap] = {r, o.value("heard_unix_ms", int64_t{0})};
   }
   for (const auto &o : j.value("ids", json::array())) {
     if (!o.is_object()) continue;
     auto tap = static_cast<uint16_t>(std::strtoul(o.value("tap", std::string("0")).c_str(), nullptr, 16));
     std::string mac = o.value("mac", std::string());
-    if (tap && mac.size() == 16) tap_ids_[tap] = {mac, o.value("heard_unix_ms", int64_t{0})};
+    if (tap && mac.size() == 16) book_.tap_ids[tap] = {mac, o.value("heard_unix_ms", int64_t{0})};
+  }
+  for (const auto &o : j.value("polled", json::array())) {
+    if (!o.is_object()) continue;
+    auto tap = static_cast<uint16_t>(std::strtoul(o.value("tap", std::string("0")).c_str(), nullptr, 16));
+    if (tap) book_.polled[tap] = o.value("heard_unix_ms", int64_t{0});
   }
   for (const auto &o : j.value("settings", json::array())) {
     if (!o.is_object()) continue;
@@ -84,7 +92,7 @@ void BusLog::load_versions_() {
     m.addr = static_cast<uint16_t>(std::strtoul(o.value("addr", std::string("0")).c_str(), nullptr, 16));
     m.settings = o.value("settings", std::string());
     m.stored = o.value("stored", false);
-    if (!m.settings.empty()) smarts_[m.addr] = {m, o.value("heard_unix_ms", int64_t{0})};
+    if (!m.settings.empty()) book_.smarts[m.addr] = {m, o.value("heard_unix_ms", int64_t{0})};
   }
   for (const auto &o : j.value("ratings", json::array())) {
     if (!o.is_object()) continue;
@@ -93,28 +101,28 @@ void BusLog::load_versions_() {
     c.volts = o.value("volts", 0);
     c.watts = o.value("watts", 0);
     c.cal = o.value("cal", std::string());
-    if (!c.cal.empty()) cals_[c.addr] = {c, o.value("heard_unix_ms", int64_t{0})};
+    if (!c.cal.empty()) book_.cals[c.addr] = {c, o.value("heard_unix_ms", int64_t{0})};
   }
   for (const auto &o : j.value("owners", json::array())) {
     if (!o.is_object()) continue;
     std::string b = o.value("barcode", std::string());
     if (!b.empty())
-      owners_.restore(static_cast<uint16_t>(std::strtoul(o.value("addr", std::string("0")).c_str(), nullptr, 16)), b);
+      book_.owners.restore(static_cast<uint16_t>(std::strtoul(o.value("addr", std::string("0")).c_str(), nullptr, 16)), b);
   }
   for (const auto &o : j.value("changes", json::array())) {  // newest first
     if (!o.is_object()) continue;
-    changes_.push_front({o.value("unix_ms", int64_t{0}),
+    book_.changes.push_front({o.value("unix_ms", int64_t{0}),
                          static_cast<uint16_t>(std::strtoul(o.value("addr", std::string("0")).c_str(), nullptr, 16)),
                          o.value("what", std::string()), o.value("before", std::string()), o.value("after", std::string())});
   }
-  while (changes_.size() > KEEP_CHANGES) changes_.pop_front();
+  while (book_.changes.size() > esphome::tigo_monitor::master::BusBook::KEEP_CHANGES) book_.changes.pop_front();
   for (const auto &o : j.value("mppt", json::array())) {
     if (!o.is_object()) continue;
     MpptSeen m;
     m.addr = static_cast<uint16_t>(std::strtoul(o.value("addr", std::string("0")).c_str(), nullptr, 16));
     m.params = o.value("params", std::string());
     m.answer = o.value("answer", std::string());
-    if (!m.params.empty()) mppts_[m.addr] = {m, o.value("heard_unix_ms", int64_t{0})};
+    if (!m.params.empty()) book_.mppts[m.addr] = {m, o.value("heard_unix_ms", int64_t{0})};
   }
 }
 
@@ -138,108 +146,17 @@ void BusLog::load() {
          static_cast<unsigned long long>(alarm_count_));
 }
 
-// An optimizer whose settings, MPPT parameters or firmware changed: a CCA
-// never drifts them, so each is news. The last KEEP_CHANGES are kept. Only
-// while this monitor runs the bus: under another master, the change is its.
-void BusLog::change_(int64_t now, uint16_t addr, const char *what, const std::string &before, const std::string &after) {
-  if (!runs_bus_) {
-    LOGI("bus: optimizer %s's %s is now %s, was %s (another master runs the bus)", hex4(addr).c_str(), what,
-         after.c_str(), before.c_str());
-    return;
-  }
-  LOGW("bus: optimizer %s's %s changed: %s, was %s", hex4(addr).c_str(), what, after.c_str(), before.c_str());
-  changes_.push_back({now, addr, what, before, after});
-  while (changes_.size() > KEEP_CHANGES) changes_.pop_front();
-  versions_dirty_ = true;
-}
-
-// Before an optimizer's answer is compared with what its address said
-// before: if another optimizer holds that address now, forget the old one's.
-void BusLog::check_owner_(uint16_t addr) {
-  if (!barcode_of_) return;
-  std::string now = barcode_of_(addr);
-  auto was = owners_.owners().find(addr);
-  std::string before = was == owners_.owners().end() ? "" : was->second;
-  if (!owners_.moved(addr, now)) {
-    if (before.empty() && !now.empty()) versions_dirty_ = true;  // first owner, kept
-    return;
-  }
-  LOGI("bus: address %s is barcode %s now, was %s; its answers start afresh", hex4(addr).c_str(), now.c_str(),
-       before.c_str());
-  smarts_.erase(addr);
-  mppts_.erase(addr);
-  cals_.erase(addr);
-  versions_.forget(false, addr);
-  versions_dirty_ = true;
-}
-
 int BusLog::changes_since(int64_t since_ms) const {
   std::lock_guard<std::mutex> lock(mu_);
   int n = 0;
-  for (const auto &c : changes_) n += c.unix_ms >= since_ms;
+  for (const auto &c : book_.changes) n += c.unix_ms >= since_ms;
   return n;
 }
 
 void BusLog::on_frame_(const Frame &f, bool ours, int64_t now) {
   std::string what = watch_.on_frame(f, ours, now);
-  for (auto r : watch_.take_radios()) {
-    auto it = radios_.find(r.tap);
-    if (!r.profile && it != radios_.end()) r.profile = it->second.first.profile;  // a stored read: keep the live one
-    bool changed = it == radios_.end() || it->second.first.channel != r.channel || it->second.first.slt != r.slt ||
-                   it->second.first.slm != r.slm;
-    if (changed)
-      LOGI("bus: TAP %s radio: channel %d, SLT %d, SLm %d", hex4(r.tap).c_str(), r.channel, r.slt, r.slm);
-    radios_[r.tap] = {r, now};
-    versions_dirty_ = true;
-  }
-  for (const auto &t : watch_.take_tap_ids()) {
-    auto it = tap_ids_.find(t.tap);
-    if (it == tap_ids_.end() || it->second.first != t.mac) LOGI("bus: TAP %s is %s", hex4(t.tap).c_str(), t.mac.c_str());
-    tap_ids_[t.tap] = {t.mac, now};
-    versions_dirty_ = true;
-  }
-  for (const auto &m : watch_.take_mppts()) {
-    check_owner_(m.addr);
-    auto it = mppts_.find(m.addr);
-    if (it == mppts_.end() || it->second.first.params != m.params)
-      LOGI("bus: optimizer %s MPPT parameters: %s", hex4(m.addr).c_str(), m.params.c_str());
-    if (it != mppts_.end() && it->second.first.params != m.params) change_(now, m.addr, "MPPT", it->second.first.params, m.params);
-    mppts_[m.addr] = {m, now};
-    versions_dirty_ = true;
-  }
-  for (const auto &m : watch_.take_smarts()) {
-    check_owner_(m.addr);
-    auto it = smarts_.find(m.addr);
-    if (it == smarts_.end() || it->second.first.settings != m.settings)
-      LOGI("bus: optimizer %s settings: %s (%s)", hex4(m.addr).c_str(), m.settings.c_str(),
-           m.stored ? "stored" : "not stored");
-    if (it != smarts_.end() && esphome::tigo_monitor::mesh_history::settings_changed(it->second.first.settings, m.settings))
-      change_(now, m.addr, "settings", it->second.first.settings, m.settings);
-    smarts_[m.addr] = {m, now};
-    versions_dirty_ = true;
-  }
-  for (const auto &c : watch_.take_cals()) {
-    check_owner_(c.addr);
-    auto it = cals_.find(c.addr);
-    if (it == cals_.end() || it->second.first.cal != c.cal)
-      LOGI("bus: optimizer %s is rated %d V, %d W (%s)", hex4(c.addr).c_str(), c.volts, c.watts, c.cal.c_str());
-    cals_[c.addr] = {c, now};
-    versions_dirty_ = true;
-  }
-  for (const auto &v : watch_.take_versions()) {
-    if (!v.tap) check_owner_(v.addr);
-    VersionBook::Result r = versions_.record(v, now);
-    versions_dirty_ = true;
-    if (r == VersionBook::changed) {
-      if (v.tap || runs_bus_)
-        LOGW("bus: %s %s's firmware changed: %s, was %s", v.tap ? "TAP" : "optimizer", hex4(v.addr).c_str(),
-             v.version.c_str(), versions_.find(v.tap, v.addr)->previous.c_str());
-      if (!v.tap) change_(now, v.addr, "firmware", versions_.find(v.tap, v.addr)->previous, v.version);
-    }
-    else if (r == VersionBook::first)
-      LOGI("bus: %s %s runs %s %s", v.tap ? "TAP" : "optimizer", hex4(v.addr).c_str(), v.model.c_str(),
-           v.version.c_str());
-  }
+  if (f.cmd == esphome::tigo_monitor::master::CMD_POLL_REPLY) book_.hear_poll_reply(f.dest, now);
+  book_.absorb(watch_, now, runs_bus_);
   if (what.empty()) return;
   // Listening (or standing by), another master runs the bus, and what it
   // sends the TAP is its own business: marked in the log, not raised.
@@ -294,7 +211,7 @@ void BusLog::feed_tx(const char *data, size_t n, uint32_t late_ms) {
 
 bool BusLog::needs_save() const {
   std::lock_guard<std::mutex> lock(mu_);
-  return dirty_ || versions_dirty_;
+  return dirty_ || book_.dirty;
 }
 
 // The API's: no PAN. The saved file's keeps it (versions_json_(true)).
@@ -303,24 +220,24 @@ json BusLog::versions_json() const { return versions_json_(false); }
 std::vector<esphome::tigo_monitor::master::TapRadio> BusLog::radios() const {
   std::lock_guard<std::mutex> lock(mu_);
   std::vector<esphome::tigo_monitor::master::TapRadio> out;
-  for (const auto &kv : radios_) out.push_back(kv.second.first);
+  for (const auto &kv : book_.radios) out.push_back(kv.second.first);
   return out;
 }
 
 std::map<uint16_t, std::string> BusLog::tap_macs() const {
   std::lock_guard<std::mutex> lock(mu_);
   std::map<uint16_t, std::string> out;
-  for (const auto &kv : tap_ids_) out[kv.first] = kv.second.first;
+  for (const auto &kv : book_.tap_ids) out[kv.first] = kv.second.first;
   return out;
 }
 
 uint16_t BusLog::tap_of_mac(const std::string &mac) const {
   std::lock_guard<std::mutex> lock(mu_);
   // The address it gave this MAC from most recently: a TAP re-addressed by a
-  // herd leaves its old one behind in tap_ids_.
+  // herd leaves its old one behind in book_.tap_ids.
   uint16_t best = 0;
   int64_t when = -1;
-  for (const auto &kv : tap_ids_)
+  for (const auto &kv : book_.tap_ids)
     if (kv.second.first == mac && kv.second.second > when) {
       best = kv.first;
       when = kv.second.second;
@@ -328,55 +245,14 @@ uint16_t BusLog::tap_of_mac(const std::string &mac) const {
   return best;
 }
 
+// One writer for both builds (bus_book.h): the ESP32 serves the same text.
 json BusLog::versions_json_(bool with_pans) const {
-  std::lock_guard<std::mutex> lock(mu_);
-  json taps = json::array(), optimizers = json::array();
-  for (const auto &kv : versions_.entries()) (kv.second.tap ? taps : optimizers).push_back(entry_json(kv.second));
-  json radios = json::array();
-  for (const auto &kv : radios_) {
-    json r = {{"tap", hex4(kv.first)},
-              {"channel", kv.second.first.channel},
-              {"slt", kv.second.first.slt},
-              {"slm", kv.second.first.slm},
-              {"heard_unix_ms", kv.second.second}};
-    if (kv.second.first.profile) r["profile"] = kv.second.first.profile;
-    if (with_pans && kv.second.first.pan) r["pan"] = hex4(kv.second.first.pan);
-    radios.push_back(r);
+  std::string text;
+  {
+    std::lock_guard<std::mutex> lock(mu_);
+    book_.write_json(text, with_pans);
   }
-  json ids = json::array();
-  for (const auto &kv : tap_ids_)
-    ids.push_back({{"tap", hex4(kv.first)}, {"mac", kv.second.first}, {"heard_unix_ms", kv.second.second}});
-  json settings = json::array();
-  for (const auto &kv : smarts_)
-    settings.push_back({{"addr", hex4(kv.first)},
-                        {"settings", kv.second.first.settings},
-                        {"stored", kv.second.first.stored},
-                        {"heard_unix_ms", kv.second.second}});
-  json mppt = json::array();
-  for (const auto &kv : mppts_)
-    mppt.push_back({{"addr", hex4(kv.first)},
-                    {"params", kv.second.first.params},
-                    {"answer", kv.second.first.answer},
-                    {"heard_unix_ms", kv.second.second}});
-  json ratings = json::array();
-  for (const auto &kv : cals_)
-    ratings.push_back({{"addr", hex4(kv.first)},
-                       {"volts", kv.second.first.volts},
-                       {"watts", kv.second.first.watts},
-                       {"cal", kv.second.first.cal},
-                       {"heard_unix_ms", kv.second.second}});
-  json changes = json::array();
-  for (auto it = changes_.rbegin(); it != changes_.rend(); ++it)
-    changes.push_back({{"unix_ms", it->unix_ms}, {"addr", hex4(it->addr)}, {"what", it->what},
-                       {"before", it->before}, {"after", it->after}});
-  json out = {{"taps", taps},         {"optimizers", optimizers}, {"radios", radios}, {"ids", ids},
-              {"settings", settings}, {"mppt", mppt},             {"ratings", ratings}, {"changes", changes}};
-  if (with_pans) {  // the saved file's: which barcode each address answered for
-    json owners = json::array();
-    for (const auto &kv : owners_.owners()) owners.push_back({{"addr", hex4(kv.first)}, {"barcode", kv.second}});
-    out["owners"] = owners;
-  }
-  return out;
+  return json::parse(text);
 }
 
 void BusLog::save_if_changed() {
@@ -384,8 +260,8 @@ void BusLog::save_if_changed() {
     bool write;
     {
       std::lock_guard<std::mutex> lock(mu_);
-      write = versions_dirty_;
-      versions_dirty_ = false;
+      write = book_.dirty;
+      book_.dirty = false;
     }
     if (write && !write_file_atomic(versions_path_, versions_json_(true).dump(1) + "\n", 0644))
       LOGW("bus log: cannot write %s", versions_path_.c_str());

@@ -2038,6 +2038,10 @@ void HttpServer::routes_() {
       auto it = names.find(t.value("addr", std::string()));
       if (it != names.end()) t["name"] = it->second;
     }
+    for (auto &t : v["polled"]) {  // a TAP answering polls, its firmware not read yet
+      auto it = names.find(t.value("tap", std::string()));
+      if (it != names.end()) t["name"] = it->second;
+    }
     send_json(res, v);
   });
   // Clearing only forgets the alarm; it sends nothing on the bus.

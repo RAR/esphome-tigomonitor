@@ -24,6 +24,7 @@
 #include <deque>
 #include <iterator>
 #include <map>
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
@@ -31,6 +32,32 @@
 namespace esphome {
 namespace tigo_monitor {
 namespace master {
+
+// What this keeps (exchanges, poll marks, answers and their text) takes its
+// memory from TIGO_BUS_ALLOCATOR when it is defined, as tigo_layout.h does.
+// The ESP32 sets it to its PSRAM allocator: plain std types there come from
+// the ~95 KB internal heap, which five minutes of poll marks alone ran out
+// on the rig (2026-11-19). The Pi and the host tests leave it unset, so these
+// are the std types there.
+#ifdef TIGO_BUS_ALLOCATOR
+template <class T> using BusAlloc = TIGO_BUS_ALLOCATOR<T>;
+#else
+template <class T> using BusAlloc = std::allocator<T>;
+#endif
+using Str = std::basic_string<char, std::char_traits<char>, BusAlloc<char>>;
+template <class T> using Vec = std::vector<T, BusAlloc<T>>;
+template <class T> using Deque = std::deque<T, BusAlloc<T>>;
+template <class K, class V> using Map = std::map<K, V, std::less<K>, BusAlloc<std::pair<const K, V>>>;
+// Text from elsewhere (std::string) into one of these, and back.
+template <class S> inline Str to_str(const S &s) { return Str(s.data(), s.size()); }
+template <class S> inline std::string to_std(const S &s) { return std::string(s.data(), s.size()); }
+// std::to_string, into a Str.
+inline Str num_str(long long v) {
+  char b[24];
+  std::snprintf(b, sizeof(b), "%lld", v);
+  return Str(b);
+}
+
 
 inline const char *cmd_name(uint16_t cmd) {
   switch (cmd) {
@@ -113,8 +140,8 @@ inline const char *sub_name(uint8_t sub) {
 }
 
 // Text from the bus, made printable: CR/LF as spaces, trailing ones trimmed.
-inline std::string bus_text(const uint8_t *p, size_t n) {
-  std::string out;
+inline Str bus_text(const uint8_t *p, size_t n) {
+  Str out;
   for (size_t i = 0; i < n; i++) out += p[i] == '\r' || p[i] == '\n' ? ' ' : std::isprint(p[i]) ? char(p[i]) : '.';
   while (!out.empty() && out.back() == ' ') out.pop_back();
   return out;
@@ -123,7 +150,7 @@ inline std::string bus_text(const uint8_t *p, size_t n) {
 // The payload as "37 24 92 66 …", but for the GatewayCfg block (a write's
 // 36 bytes after its 01 00, or all of a 0x0E reply's data) and
 // SetKnownNetworks' args, shown by length.
-inline std::string bus_hex(const Frame &f) {
+inline Str bus_hex(const Frame &f) {
   size_t keep = f.payload.size();
   bool tunnel = (f.cmd == CMD_TUNNEL || f.cmd == CMD_TUNNEL_REPLY) && f.payload.size() >= 5;
   if (tunnel && f.cmd == CMD_TUNNEL && f.payload[3] == 0x0D && f.payload.size() > 7) keep = 7;
@@ -132,14 +159,14 @@ inline std::string bus_hex(const Frame &f) {
   // perhaps with their keys.
   bool known_networks = tunnel && f.cmd == CMD_TUNNEL && f.payload[3] == 0xE1 && f.payload.size() > 5;
   if (known_networks) keep = 5;
-  std::string out;
+  Str out;
   char b[4];
   for (size_t i = 0; i < keep; i++) {
     std::snprintf(b, sizeof(b), "%s%02X", i ? " " : "", f.payload[i]);
     out += b;
   }
   if (keep < f.payload.size())
-    out += " + " + std::to_string(f.payload.size() - keep) + " bytes hidden (" +
+    out += " + " + num_str(f.payload.size() - keep) + " bytes hidden (" +
            (known_networks ? "a list of networks, perhaps with keys" : "the TAP's network config and key") + ")";
   return out;
 }
@@ -149,7 +176,7 @@ inline std::string bus_hex(const Frame &f) {
 // A reply goes to the TAP's id with the 0x8000 bit; 0xFFFF is a broadcast request.
 inline bool is_reply(const Frame &f) { return (f.dest & 0x8000) && f.dest != 0xFFFF; }
 
-inline std::string reconfiguration(const Frame &f) {
+inline Str reconfiguration(const Frame &f) {
   if (is_reply(f)) return "";
   // A radio settings write is one even though the bench may send it: heard
   // here, it's another device's.
@@ -161,7 +188,7 @@ inline std::string reconfiguration(const Frame &f) {
     if (sub == 0x0D) return "GatewayCfg write (the TAP's channel, network ID and key)";
     if (sub == SUB_ERASE_FLASH) return "EraseFlash (the optimizer table)";
     if (sub == 0x06) {
-      std::string t = f.payload.size() > 7 ? bus_text(f.payload.data() + 7, f.payload.size() - 7) : "";
+      Str t = f.payload.size() > 7 ? bus_text(f.payload.data() + 7, f.payload.size() - 7) : "";
       return "An optimizer setting write (" + t + ")";
     }
     if (sub == 0x22) return "SamplingRate with data";
@@ -193,17 +220,17 @@ struct Exchange {
   uint8_t seq = 0;            // a tunnel request's
   int sub = -1;
   int node = -1;              // a text query's optimizer
-  std::string name;           // "Tunnel", "SET_CHANNEL"
-  std::string sub_name;       // "DiscState"
-  std::string category;       // discovery, queries, housekeeping, bringup, reconfig, other
+  Str name;           // "Tunnel", "SET_CHANNEL"
+  Str sub_name;       // "DiscState"
+  Str category;       // discovery, queries, housekeeping, bringup, reconfig, other
   // waiting, answered, delivered, not_delivered, refused, no_reply, broadcast, unasked
-  std::string result = "waiting";
+  Str result = "waiting";
   bool late = false;          // answered after the next request went out
   int rt_ms = -1;
-  std::string summary;
-  std::string request_hex, reply_hex;
-  std::string reconfig;
-  std::string answer;         // an optimizer's text answer to a query, from a later poll
+  Str summary;
+  Str request_hex, reply_hex;
+  Str reconfig;
+  Str answer;         // an optimizer's text answer to a query, from a later poll
   int answer_after_ms = -1;
 };
 
@@ -212,15 +239,15 @@ struct Exchange {
 struct VersionSeen {
   bool tap = false;
   uint16_t addr = 0;     // the optimizer's node id, or the TAP's RS485 id
-  std::string model;     // the word before "Version": Mnode, Mgate
-  std::string version;   // the rest
+  Str model;     // the word before "Version": Mnode, Mgate
+  Str version;   // the rest
 };
 
 // "<model> Version <version>", or false.
-inline bool parse_version(const std::string &text, VersionSeen &v) {
+inline bool parse_version(const Str &text, VersionSeen &v) {
   size_t at = text.find(" Version ");
-  if (at == 0 || at == std::string::npos || text.find(' ') < at) return false;
-  std::string rest = text.substr(at + 9);
+  if (at == 0 || at == Str::npos || text.find(' ') < at) return false;
+  Str rest = text.substr(at + 9);
   while (!rest.empty() && (rest.back() == ' ' || rest.back() == '\r' || rest.back() == '\n')) rest.pop_back();
   if (rest.empty()) return false;
   v.model = text.substr(0, at);
@@ -234,13 +261,13 @@ inline bool parse_version(const std::string &text, VersionSeen &v) {
 // is kept as heard, for telling an optimizer that differs from the others.
 struct SmartSeen {
   uint16_t addr = 0;
-  std::string settings;  // the tokens after "!Smrt", one space apart
+  Str settings;  // the tokens after "!Smrt", one space apart
   bool stored = false;
 };
 
-inline bool parse_smart(const std::string &text, SmartSeen &s) {
-  std::vector<std::string> tok;
-  std::string cur;
+inline bool parse_smart(const Str &text, SmartSeen &s) {
+  Vec<Str> tok;
+  Str cur;
   for (char c : text) {
     if (c == ' ' || c == '\r' || c == '\n') {
       if (!cur.empty()) tok.push_back(cur);
@@ -266,13 +293,13 @@ inline bool parse_smart(const std::string &text, SmartSeen &s) {
 // below VMP). Unlike an H9's ^00Smrt, every firmware reports them.
 struct MpptSeen {
   uint16_t addr = 0;
-  std::string params;  // the four parameter bytes, hex, one space apart
-  std::string answer;  // the tokens after "!Mppt", as heard
+  Str params;  // the four parameter bytes, hex, one space apart
+  Str answer;  // the tokens after "!Mppt", as heard
 };
 
-inline bool parse_mppt(const std::string &text, MpptSeen &m) {
-  std::vector<std::string> tok;
-  std::string cur;
+inline bool parse_mppt(const Str &text, MpptSeen &m) {
+  Vec<Str> tok;
+  Str cur;
   for (char c : text) {
     if (c == ' ' || c == '\r' || c == '\n') {
       if (!cur.empty()) tok.push_back(cur);
@@ -289,7 +316,7 @@ inline bool parse_mppt(const std::string &text, MpptSeen &m) {
   if (close == tok.size() || tok.size() - close != 6) return false;  // status, then four
   m.params.clear();
   for (size_t i = tok.size() - 4; i < tok.size(); i++) {
-    if (tok[i].size() != 2 || tok[i].find_first_not_of("0123456789ABCDEFabcdef") != std::string::npos) return false;
+    if (tok[i].size() != 2 || tok[i].find_first_not_of("0123456789ABCDEFabcdef") != Str::npos) return false;
     m.params += (m.params.empty() ? "" : " ") + tok[i];
   }
   m.answer.clear();
@@ -304,10 +331,10 @@ inline bool parse_mppt(const std::string &text, MpptSeen &m) {
 struct CalSeen {
   uint16_t addr = 0;
   int volts = 0, watts = 0;
-  std::string cal;  // the answer after "!", as heard
+  Str cal;  // the answer after "!", as heard
 };
 
-inline bool parse_cal(const std::string &text, CalSeen &c) {
+inline bool parse_cal(const Str &text, CalSeen &c) {
   if (text.compare(0, 4, "!ESO") != 0) return false;
   size_t i = 4, v0 = i;
   while (i < text.size() && isdigit(static_cast<unsigned char>(text[i]))) i++;
@@ -331,18 +358,18 @@ class AddressOwners {
  public:
   // Whether addr now belongs to another barcode than before. An empty
   // barcode (not known yet) says nothing and changes nothing.
-  bool moved(uint16_t addr, const std::string &barcode) {
+  bool moved(uint16_t addr, const Str &barcode) {
     if (barcode.empty()) return false;
-    std::string &o = owners_[addr];
+    Str &o = owners_[addr];
     bool m = !o.empty() && o != barcode;
     o = barcode;
     return m;
   }
-  void restore(uint16_t addr, const std::string &barcode) { owners_[addr] = barcode; }
-  const std::map<uint16_t, std::string> &owners() const { return owners_; }
+  void restore(uint16_t addr, const Str &barcode) { owners_[addr] = barcode; }
+  const Map<uint16_t, Str> &owners() const { return owners_; }
 
  private:
-  std::map<uint16_t, std::string> owners_;
+  Map<uint16_t, Str> owners_;
 };
 
 // Each device's version, from when it was first seen, and the one it
@@ -368,7 +395,7 @@ struct TapRadio {
 // 16 hex characters, the same form as an optimizer's barcode here.
 struct TapId {
   uint16_t tap = 0;
-  std::string mac;
+  Str mac;
 };
 
 // req and rep: a tunnel request and the reply paired with it. Only a read
@@ -398,7 +425,7 @@ class VersionBook {
   struct Entry {
     bool tap = false;
     uint16_t addr = 0;
-    std::string model, version, previous;
+    Str model, version, previous;
     int64_t since_ms = 0, last_ms = 0;  // seen at this version from, and last
   };
   Result record(const VersionSeen &v, int64_t now_ms) {
@@ -420,23 +447,23 @@ class VersionBook {
     auto it = entries_.find({tap, addr});
     return it == entries_.end() ? nullptr : &it->second;
   }
-  const std::map<std::pair<bool, uint16_t>, Entry> &entries() const { return entries_; }
+  const Map<std::pair<bool, uint16_t>, Entry> &entries() const { return entries_; }
 
  private:
-  std::map<std::pair<bool, uint16_t>, Entry> entries_;
+  Map<std::pair<bool, uint16_t>, Entry> entries_;
 };
 
 // The last WINDOW_MS of the bus, for the Bus log's strip.
 struct BusStats {
   uint32_t polls = 0, polls_lost = 0, polls_empty = 0, polls_refused = 0;
-  std::map<std::string, uint32_t> count;  // exchanges by category
+  Map<Str, uint32_t> count;  // exchanges by category
   uint32_t delivered = 0, not_delivered = 0;
   uint32_t other_master = 0, reconfig = 0;
   int rt_median_ms = -1, rt_max_ms = -1;
-  std::string discovery;  // the latest DiscState read, however old
+  Str discovery;  // the latest DiscState read, however old
 };
 
-inline std::string exchange_category(uint16_t cmd, int sub, const std::string &reconfig) {
+inline Str exchange_category(uint16_t cmd, int sub, const Str &reconfig) {
   if (!reconfig.empty()) return "reconfig";
   switch (sub) {
     case 0x2D: case 0x2E: return "discovery";
@@ -454,8 +481,8 @@ inline std::string exchange_category(uint16_t cmd, int sub, const std::string &r
   }
 }
 
-inline std::string hex16(const uint8_t *p, size_t n) {
-  std::string out;
+inline Str hex16(const uint8_t *p, size_t n) {
+  Str out;
   char b[3];
   for (size_t i = 0; i < n; i++) {
     std::snprintf(b, sizeof(b), "%02X", p[i]);
@@ -465,14 +492,14 @@ inline std::string hex16(const uint8_t *p, size_t n) {
 }
 
 // "Open, 408 s left · 40 of the 44 in the table have joined"
-inline std::string window_summary(const DiscoveryWindow &w) {
+inline Str window_summary(const DiscoveryWindow &w) {
   bool open = w.running && w.remaining_s > 0;
-  return (open ? "Open, " + std::to_string(w.remaining_s) + " s left" : std::string("Closed")) + " · " +
-         std::to_string(w.joined) + " of the " + std::to_string(w.node_count) + " in the table have joined";
+  return (open ? "Open, " + num_str(w.remaining_s) + " s left" : Str("Closed")) + " · " +
+         num_str(w.joined) + " of the " + num_str(w.node_count) + " in the table have joined";
 }
 
 // What the request asks, before any reply.
-inline std::string request_summary(const Frame &f) {
+inline Str request_summary(const Frame &f) {
   const Bytes &p = f.payload;
   char b[64];
   if (f.cmd == CMD_TUNNEL && p.size() >= 5) {
@@ -489,7 +516,7 @@ inline std::string request_summary(const Frame &f) {
       case 0x22:
         return a == Bytes{0x00, 0x00} ? "To every optimizer" : a == Bytes{0x00, 0x01} ? "To the TAP" : "";
       case 0x0D:
-        if (a.size() == 2 && a[0] == 0x00) return "Read the TAP's network config (part " + std::to_string(a[1]) + ")";
+        if (a.size() == 2 && a[0] == 0x00) return "Read the TAP's network config (part " + num_str(a[1]) + ")";
         return "";
       case 0x41:  // SetPgw: the node, then 00 00 00 <stream> 00 (Housekeeping in tigo_master.h)
         if (a.size() >= 6) {
@@ -526,10 +553,10 @@ inline std::string request_summary(const Frame &f) {
 }
 
 // The request's summary, finished with what came back.
-inline std::string reply_summary(const Frame &req, const Frame &rep, const std::string &asked) {
+inline Str reply_summary(const Frame &req, const Frame &rep, const Str &asked) {
   if (rep.cmd == 0x0006) return "The TAP refused it (0x0006)";
   if (rep.cmd == CMD_NOT_TAKEN)
-    return (asked.empty() ? std::string() : asked + " · ") +
+    return (asked.empty() ? Str() : asked + " · ") +
            "the TAP couldn't deliver it (0x0146): the optimizer may be off or rejoining";
   char b[64];
   TunnelReply t;
@@ -545,14 +572,14 @@ inline std::string reply_summary(const Frame &req, const Frame &rep, const std::
     return asked;
   }
   if (rep.cmd == 0x000B) {
-    std::string v = bus_text(rep.payload.data(), rep.payload.size());
+    Str v = bus_text(rep.payload.data(), rep.payload.size());
     size_t at = v.find(" Version");
-    if (at != std::string::npos) v.erase(at, 8);
+    if (at != Str::npos) v.erase(at, 8);
     return v;
   }
   if (rep.cmd == CMD_SESSION_REPLY && rep.payload.size() == 1 && req.payload.size() == 1)
     return asked + (rep.payload[0] == req.payload[0] ? " · the TAP confirmed"
-                                                     : std::string(" · the TAP answered ") + (rep.payload[0] ? "on" : "off"));
+                                                     : Str(" · the TAP answered ") + (rep.payload[0] ? "on" : "off"));
   if ((rep.cmd == 0x0039 || rep.cmd == 0x003B) && rep.payload.size() >= 10) {
     std::snprintf(b, sizeof(b), " at %04X", rep.payload[8] << 8 | rep.payload[9]);
     return hex16(rep.payload.data(), 8) + b;
@@ -571,8 +598,17 @@ class BusWatch {
   static const int64_t OURS_RECENT_MS = 10000;   // we sent within this: we run the bus
   static const int64_t ANSWER_WITHIN_MS = 60000;
 
+  // keep: how many exchanges to keep, KEEP for the Bus log. A few are enough
+  // to pair each reply with its request (the TAPs' radio settings and MACs
+  // come from those pairs); the optimizers' answers need none.
+  // poll_stats: keep a mark per poll for WINDOW_MS, for stats(). Each is
+  // ~16 bytes, and a busy bus polls ~23 times a second: ~110 KB, more than
+  // an ESP32's internal RAM can spare. Off, stats() counts no polls.
+  explicit BusWatch(size_t keep = KEEP, bool poll_stats = true)
+      : keep_(keep < 1 ? 1 : keep), poll_stats_(poll_stats) {}
+
   // Returns the frame's reconfiguration, or "".
-  std::string on_frame(const Frame &f, bool ours, int64_t unix_ms) {
+  Str on_frame(const Frame &f, bool ours, int64_t unix_ms) {
     if (is_reply(f)) {
       on_reply_(f, unix_ms);
       return "";
@@ -617,47 +653,47 @@ class BusWatch {
     return ours ? "" : e.reconfig;
   }
 
-  const std::deque<Exchange> &exchanges() const { return exchanges_; }
+  const Deque<Exchange> &exchanges() const { return exchanges_; }
   // As they stand at now_ms: one still open past NO_REPLY_MS got nothing.
-  std::deque<Exchange> exchanges_at(int64_t now_ms) const {
-    std::deque<Exchange> out = exchanges_;
+  Deque<Exchange> exchanges_at(int64_t now_ms) const {
+    Deque<Exchange> out = exchanges_;
     for (Exchange &e : out)
       if (e.result == "waiting" && now_ms - e.unix_ms >= NO_REPLY_MS) no_reply_(e);
     return out;
   }
   uint64_t polls() const { return polls_; }
   // The TAP radio settings read since the last call.
-  std::vector<TapId> take_tap_ids() {
-    std::vector<TapId> out;
+  Vec<TapId> take_tap_ids() {
+    Vec<TapId> out;
     out.swap(tap_ids_);
     return out;
   }
-  std::vector<TapRadio> take_radios() {
-    std::vector<TapRadio> out;
+  Vec<TapRadio> take_radios() {
+    Vec<TapRadio> out;
     out.swap(radios_);
     return out;
   }
   // The optimizer MPPT parameters heard since the last call.
-  std::vector<MpptSeen> take_mppts() {
-    std::vector<MpptSeen> out;
+  Vec<MpptSeen> take_mppts() {
+    Vec<MpptSeen> out;
     out.swap(mppts_);
     return out;
   }
   // The optimizer settings heard since the last call.
-  std::vector<SmartSeen> take_smarts() {
-    std::vector<SmartSeen> out;
+  Vec<SmartSeen> take_smarts() {
+    Vec<SmartSeen> out;
     out.swap(smarts_);
     return out;
   }
   // The optimizer ratings heard since the last call.
-  std::vector<CalSeen> take_cals() {
-    std::vector<CalSeen> out;
+  Vec<CalSeen> take_cals() {
+    Vec<CalSeen> out;
     out.swap(cals_);
     return out;
   }
   // The versions heard since the last call.
-  std::vector<VersionSeen> take_versions() {
-    std::vector<VersionSeen> out;
+  Vec<VersionSeen> take_versions() {
+    Vec<VersionSeen> out;
     out.swap(versions_);
     return out;
   }
@@ -666,7 +702,7 @@ class BusWatch {
     BusStats s;
     for (const char *c : {"discovery", "queries", "housekeeping", "bringup", "reconfig", "other"}) s.count[c] = 0;
     int64_t from = now_ms - WINDOW_MS;
-    std::vector<int> rts;
+    Vec<int> rts;
     for (const PollMark &p : poll_marks_) {
       if (p.unix_ms < from) continue;
       s.polls++;
@@ -703,7 +739,7 @@ class BusWatch {
     bool empty;
   };
 
-  static std::string hex_cmd_(uint16_t cmd) {
+  static Str hex_cmd_(uint16_t cmd) {
     char b[8];
     std::snprintf(b, sizeof(b), "0x%04X", cmd);
     return b;
@@ -719,9 +755,10 @@ class BusWatch {
   }
   void push_(const Exchange &e) {
     exchanges_.push_back(e);
-    if (exchanges_.size() > KEEP) exchanges_.pop_front();
+    if (exchanges_.size() > keep_) exchanges_.pop_front();
   }
   void mark_poll_(int64_t at, int rt, bool empty) {
+    if (!poll_stats_) return;
     poll_marks_.push_back({at, rt, empty});
     while (!poll_marks_.empty() && poll_marks_.front().unix_ms < at - WINDOW_MS) poll_marks_.pop_front();
   }
@@ -765,7 +802,7 @@ class BusWatch {
     }
     e.rt_ms = static_cast<int>(now - e.unix_ms);
     e.reply_hex = bus_hex(rep);
-    std::string asked = e.reconfig.empty() ? request_summary(req) : e.reconfig;
+    Str asked = e.reconfig.empty() ? request_summary(req) : e.reconfig;
     if (rep.cmd == 0x0006) e.result = "refused";
     else if (rep.cmd == CMD_NOT_TAKEN) e.result = "not_delivered";
     else if (e.sub == 0x06) e.result = "delivered";
@@ -788,7 +825,7 @@ class BusWatch {
       for_each_poll_packet(f.payload, [&](uint8_t type, uint16_t tuid, const uint8_t *data, size_t n) {
         empty = false;
         if (type == 0x07) {
-          std::string text = bus_text(data, n);
+          Str text = bus_text(data, n);
           version_(false, tuid, text);
           smart_(tuid, text);
           mppt_(tuid, text);
@@ -834,7 +871,7 @@ class BusWatch {
     e.reply_hex = bus_hex(f);
     push_(e);
   }
-  void version_(bool tap, uint16_t addr, const std::string &text) {
+  void version_(bool tap, uint16_t addr, const Str &text) {
     VersionSeen v;
     if (!parse_version(text, v)) return;
     v.tap = tap;
@@ -842,28 +879,28 @@ class BusWatch {
     versions_.push_back(v);
     if (versions_.size() > 64) versions_.erase(versions_.begin());  // nobody taking them
   }
-  void mppt_(uint16_t addr, const std::string &text) {
+  void mppt_(uint16_t addr, const Str &text) {
     MpptSeen m;
     if (!parse_mppt(text, m)) return;
     m.addr = addr;
     mppts_.push_back(m);
     if (mppts_.size() > 64) mppts_.erase(mppts_.begin());  // nobody taking them
   }
-  void cal_(uint16_t addr, const std::string &text) {
+  void cal_(uint16_t addr, const Str &text) {
     CalSeen c;
     if (!parse_cal(text, c)) return;
     c.addr = addr;
     cals_.push_back(c);
     if (cals_.size() > 64) cals_.erase(cals_.begin());  // nobody taking them
   }
-  void smart_(uint16_t addr, const std::string &text) {
+  void smart_(uint16_t addr, const Str &text) {
     SmartSeen s;
     if (!parse_smart(text, s)) return;
     s.addr = addr;
     smarts_.push_back(s);
     if (smarts_.size() > 64) smarts_.erase(smarts_.begin());  // nobody taking them
   }
-  void answer_(uint16_t tuid, std::string text, int64_t now) {
+  void answer_(uint16_t tuid, Str text, int64_t now) {
     for (auto it = exchanges_.rbegin(); it != exchanges_.rend(); ++it) {
       if (now - it->unix_ms > ANSWER_WITHIN_MS) return;
       if (it->sub != 0x06 || it->node != tuid || it->result != "delivered" || !it->answer.empty()) continue;
@@ -873,22 +910,24 @@ class BusWatch {
     }
   }
 
-  std::deque<Exchange> exchanges_;
-  std::deque<PollMark> poll_marks_;
-  std::deque<std::pair<uint64_t, Frame>> recent_unanswered_;
+  size_t keep_;
+  bool poll_stats_;
+  Deque<Exchange> exchanges_;
+  Deque<PollMark> poll_marks_;
+  Deque<std::pair<uint64_t, Frame>> recent_unanswered_;
   uint64_t next_id_ = 0, open_id_ = 0;
   Frame open_req_;
   bool poll_open_ = false;
   int64_t poll_sent_ms_ = 0, last_ours_ms_ = -1;
   uint64_t polls_ = 0;
-  std::string discovery_;
-  std::vector<VersionSeen> versions_;
-  std::vector<TapRadio> radios_;
-  std::vector<TapId> tap_ids_;
+  Str discovery_;
+  Vec<VersionSeen> versions_;
+  Vec<TapRadio> radios_;
+  Vec<TapId> tap_ids_;
   static const uint16_t FACTORY_ID_ = 0x1235;  // where a TAP answers before it's addressed
-  std::vector<SmartSeen> smarts_;
-  std::vector<MpptSeen> mppts_;
-  std::vector<CalSeen> cals_;
+  Vec<SmartSeen> smarts_;
+  Vec<MpptSeen> mppts_;
+  Vec<CalSeen> cals_;
 };
 
 }  // namespace master

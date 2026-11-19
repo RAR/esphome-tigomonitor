@@ -264,6 +264,8 @@ class TigoWebServer : public Component
   static esp_err_t api_overview_handler(httpd_req_t *req);
   static esp_err_t api_node_table_handler(httpd_req_t *req);
   static esp_err_t api_strings_handler(httpd_req_t *req);
+  static esp_err_t api_versions_handler(httpd_req_t *req);
+  static esp_err_t api_tap_name_handler(httpd_req_t *req);
   static esp_err_t api_energy_history_handler(httpd_req_t *req);
   static esp_err_t api_inverters_handler(httpd_req_t *req);
   static esp_err_t api_inverters_rename_handler(httpd_req_t *req);

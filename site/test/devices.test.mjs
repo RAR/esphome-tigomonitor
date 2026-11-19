@@ -25,7 +25,10 @@ before(async () => {
 });
 after(async () => { await browser.close(); server.close(); });
 
+// linux: true for the Pi, false for an ESP32 too old to serve /api/versions,
+// 'esp32' for one that does.
 async function open(linux, versions = routes['/api/versions'], posts = [], master = { role: 'listen', active: false }, devices = null, nodes = null) {
+  const pi = linux === true;
   const ctx = await browser.newContext({ viewport: { width: 1400, height: 1200 } });
   await ctx.route('**/api/**', async (route) => {
     const path = new URL(route.request().url()).pathname.replace(/^.*(\/api\/)/, '$1');
@@ -33,10 +36,11 @@ async function open(linux, versions = routes['/api/versions'], posts = [], maste
     if (path === '/api/taps/name' && route.request().method() === 'POST') {
       const b = JSON.parse(route.request().postData());
       posts.push(b);
-      versions = { ...versions, taps: versions.taps.map((t) => t.addr === b.tap ? { ...t, name: b.name } : t) };
+      versions = { ...versions, taps: versions.taps.map((t) => t.addr === b.tap ? { ...t, name: b.name } : t),
+        polled: (versions.polled || []).map((t) => t.tap === b.tap ? { ...t, name: b.name } : t) };
       return json(200, b);
     }
-    if (path === '/api/status') return json(200, linux ? { ...routes['/api/status'], platform: 'linux' } : routes['/api/status']);
+    if (path === '/api/status') return json(200, pi ? { ...routes['/api/status'], platform: 'linux' } : routes['/api/status']);
     if (path === '/api/versions') return linux ? json(200, versions) : route.fulfill({ status: 404, body: 'no' });
     if (path === '/api/master/table/stop' && route.request().method() === 'POST') {
       const b = JSON.parse(route.request().postData());
@@ -334,6 +338,62 @@ test('Devices, on the Pi with no TAP version heard yet, says where it comes from
   const { page, ctx, errors } = await open(true, { taps: [], optimizers: [] });
   await page.waitForSelector('#devices-taps', { state: 'visible' });
   assert.match(await page.textContent('#devices-taps'), /Not heard yet/);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+// A monitor that only listens hears a TAP's firmware and radio read only
+// when a master brings the TAP up; each TAP answering polls is listed before
+// then, with what is known of it so far.
+test('Devices, on the ESP32: each TAP answering polls is listed, its firmware not read yet', async () => {
+  const now = Date.now();
+  const versions = { ...routes['/api/versions'], taps: [], radios: [],
+    ids: [{ tap: '1202', mac: '04C05B00000000BB', heard_unix_ms: now - 60000 }],
+    polled: [{ tap: '1201', heard_unix_ms: now - 1000 }, { tap: '1202', heard_unix_ms: now - 1000 }] };
+  const { page, ctx, errors } = await open('esp32', versions);
+  await page.waitForSelector('#devices-taps tbody tr:nth-child(2)');
+  const rows = await page.$$eval('#devices-taps tbody tr', (trs) => trs.map((tr) => [...tr.cells].map((td) => td.textContent.trim())));
+  assert.deepEqual(rows.map((r) => r.slice(0, 6)), [
+    ['Add a name', '1201', '—', '—', '—', '—'],
+    ['Add a name', '1202', '04C05B00000000BB', '—', '—', '—']]);
+  assert.match(await page.getAttribute('#devices-taps tbody tr:nth-child(1) td.tap-fw', 'title'), /bus master brings the TAP up/);
+  assert.doesNotMatch(await page.textContent('#devices-taps'), /Not heard yet/);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+// The ESP32 keeps TAP names too, in its settings storage.
+test('Devices, on the ESP32: a TAP is named in place, its current name offered', async () => {
+  const posts = [];
+  const versions = { ...routes['/api/versions'], taps: [], radios: [], ids: [],
+    polled: [{ tap: '1201', heard_unix_ms: Date.now() - 1000, name: 'Garage' }] };
+  const { page, ctx, errors } = await open('esp32', versions, posts);
+  await page.waitForSelector('#devices-taps td.tap-name button.tap-rename');
+  assert.equal((await page.textContent('#devices-taps td.tap-name')).trim(), 'Garage');
+  await page.click('#devices-taps td.tap-name button.tap-rename');
+  const input = page.locator('#devices-taps td.tap-name input');
+  assert.equal(await input.inputValue(), 'Garage');
+  await input.fill('Shed');
+  await input.press('Enter');
+  await page.waitForFunction(() => document.querySelector('#devices-taps td.tap-name').textContent.trim() === 'Shed');
+  assert.deepEqual(posts, [{ tap: '1201', name: 'Shed' }]);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test('Devices, on the Pi: a TAP answering polls before its firmware is read gets a row, and a name', async () => {
+  const now = Date.now();
+  const versions = { ...routes['/api/versions'], polled: [
+    { tap: '1201', heard_unix_ms: now - 1000 },
+    { tap: '1202', heard_unix_ms: now - 1000, name: 'Attic' },
+    // Not heard for over a day: gone, not listed.
+    { tap: '1203', heard_unix_ms: now - 26 * 3600000 }] };
+  const { page, ctx, errors } = await open(true, versions);
+  await page.waitForSelector('#devices-taps tbody tr:nth-child(2)');
+  const addrs = await page.$$eval('#devices-taps tbody tr td:nth-child(2)', (tds) => tds.map((td) => td.textContent.trim()));
+  assert.deepEqual(addrs, ['1201', '1202']);
+  assert.equal((await page.textContent('#devices-taps tbody tr:nth-child(2) td.tap-name')).trim(), 'Attic');
+  assert.equal((await page.textContent('#devices-taps tbody tr:nth-child(2) td.tap-fw')).trim(), '—');
   assert.deepEqual(errors, []);
   await ctx.close();
 });

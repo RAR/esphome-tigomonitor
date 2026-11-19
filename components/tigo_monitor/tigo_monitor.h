@@ -15,6 +15,7 @@
 #ifdef USE_BUTTON
 #include "esphome/components/button/button.h"
 #endif
+#include <memory>
 #include <vector>
 #include <map>
 #include <set>
@@ -126,6 +127,37 @@ inline bool operator!=(const std::string &a, const psram_string &b) { return !(b
 #define TIGO_LAYOUT_ALLOCATOR ::PSRAMAllocator
 #endif
 #include "tigo_layout.h"
+
+// The bus decoder and the Devices page's book (bus_watch.h, bus_book.h) keep
+// their strings, lists and maps in PSRAM, as the layout does: plain std types
+// come from the internal heap, which five minutes of poll marks ran out on
+// the rig (2026-11-19).
+#ifdef USE_ESP_IDF
+#define TIGO_BUS_ALLOCATOR ::PSRAMAllocator
+#endif
+#include "bus_book.h"
+
+#ifdef USE_ESP_IDF
+// An object of its own in PSRAM, freed back there (bus_watch_, bus_book_).
+template <class T> struct PsramDelete {
+  void operator()(T *p) const {
+    if (p == nullptr) return;
+    p->~T();
+    esphome::tigo_monitor::psram_free_impl(p);
+  }
+};
+template <class T> using psram_unique = std::unique_ptr<T, PsramDelete<T>>;
+template <class T, class... A> psram_unique<T> make_psram_unique(A &&...a) {
+  void *mem = esphome::tigo_monitor::psram_malloc_impl(sizeof(T));
+  if (mem == nullptr) esphome::tigo_monitor::psram_alloc_failed_abort(sizeof(T));
+  return psram_unique<T>(new (mem) T(std::forward<A>(a)...));
+}
+#else
+template <class T> using psram_unique = std::unique_ptr<T>;
+template <class T, class... A> psram_unique<T> make_psram_unique(A &&...a) {
+  return psram_unique<T>(new T(std::forward<A>(a)...));
+}
+#endif
 
 namespace esphome {
 namespace tigo_monitor {
@@ -607,6 +639,17 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
     StateLock lock(state_mutex_);
     fn();
   }
+  // The Devices page's firmware, settings and ratings, as heard on the bus
+  // (bus_book.h), kept from the first call on: tigo_server's setup makes it,
+  // so a build without the web UI never pays for it. Read it inside
+  // with_state_lock(); null until then.
+  void enable_bus_book();
+  const master::BusBook *bus_book() const { return bus_book_.get(); }
+  // A TAP's name on the Devices page, kept in the settings storage (eight
+  // TAPs at most) and written into /api/versions; an empty name clears it.
+  // Inside with_state_lock(), after enable_bus_book(). nullptr when taken,
+  // else why not, for the page.
+  const char *set_tap_name(const std::string &tap, const std::string &name);
   int get_number_of_devices() const { return number_of_devices_; }
   const std::string& get_cca_ip() const { return cca_ip_; }
   bool get_sync_cca_on_startup() const { return sync_cca_on_startup_; }
@@ -727,6 +770,7 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   // Frame processing
   void process_serial_data();
   void process_frame(const frame_string &frame);
+  void process_frame_(const frame_string &frame);
 
   // Frame type handlers
   void process_power_frame(const frame_string &frame);
@@ -1072,6 +1116,31 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   std::string cfg_def_cca_ip_;
   
   // No timing variables needed - ESPHome handles update intervals
+
+  // See enable_bus_book(). Kept as BusWatch saw it, then on the history's
+  // flash, if there is one, at most every BUS_BOOK_SAVE_EVERY_MS.
+  psram_unique<master::BusWatch> bus_watch_;
+  psram_unique<master::BusBook> bus_book_;
+  // The last poll, as the bus gave it, kept until its reply shows whether
+  // it carries an answer: most don't, and only those are decoded.
+  frame_string bus_book_poll_;
+  bool frame_has_answer_ = false;  // set by process_frame_'s packet walk
+  void feed_bus_book_one_(const frame_string &frame);
+  bool bus_book_loaded_ = false;
+  uint32_t bus_book_saved_ms_ = 0;
+  static const uint32_t BUS_BOOK_SAVE_EVERY_MS = 15UL * 60UL * 1000UL;
+  void feed_bus_book_(const frame_string &frame);
+  void keep_bus_book_();
+  // See set_tap_name(). Also the stored form; saved from the loop, since the
+  // settings storage is not the web server task's to write.
+  struct TapNames {
+    static const int MAX = 8, LEN = 32;
+    uint16_t addr[MAX];
+    char name[MAX][LEN + 1];
+  };
+  psram_unique<TapNames> tap_names_;
+  ESPPreferenceObject tap_names_pref_;
+  bool tap_names_dirty_ = false;
 
 #ifdef TIGO_TSDB_AVAILABLE
   TigoHistory history_;

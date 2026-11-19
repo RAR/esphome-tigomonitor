@@ -1,4 +1,10 @@
 #include "tigo_monitor.h"
+
+#include <strings.h>
+#include <sys/time.h>
+#include <unistd.h>
+
+#include <cstdio>
 #include "tigo_node_identity.h"
 #include "esphome/core/log.h"
 #include "esphome/core/helpers.h"
@@ -430,6 +436,11 @@ psram_vector<InverterData> TigoMonitorComponent::snapshot_inverters() const {
 void TigoMonitorComponent::loop() {
   StateLock lock(state_mutex_);
   process_serial_data();
+  if (bus_book_) keep_bus_book_();
+  if (tap_names_dirty_) {
+    tap_names_dirty_ = false;
+    tap_names_pref_.save(tap_names_.get());
+  }
   
 #ifdef USE_ESP_IDF
   // Periodic heap and stack monitoring (every 60 seconds) to detect memory leaks/stack issues
@@ -743,6 +754,12 @@ void TigoMonitorComponent::process_serial_data() {
 }
 
 void TigoMonitorComponent::process_frame(const frame_string &frame) {
+  frame_has_answer_ = false;
+  process_frame_(frame);
+  if (bus_book_) feed_bus_book_(frame);
+}
+
+void TigoMonitorComponent::process_frame_(const frame_string &frame) {
   // The whole frame pipeline stays in frame_string (PSRAM on IDF builds) —
   // see the typedef note in the header (#23).
 
@@ -791,6 +808,7 @@ void TigoMonitorComponent::process_frame(const frame_string &frame) {
       break;
     case protocol::FrameType::power: {
       bool clean = protocol::walk_power_packets(hex_frame, [this](const frame_string &type, const frame_string &packet) {
+        if (type == "07") frame_has_answer_ = true;  // an optimizer's answer: the bus book wants it
         if (type == "31") {
           process_power_frame(packet);
         } else if (type == "09") {
@@ -3539,6 +3557,165 @@ void TigoMonitorComponent::snapshot_to_history_() {
   history_.enqueue_snapshot(snap);
 }
 #endif  // TIGO_TSDB_AVAILABLE
+
+// --- The bus book (bus_book.h): what the Devices page shows of each device ---
+
+static const char *const kBusBookPath = "/tsdb/bus_book.txt";
+
+void TigoMonitorComponent::enable_bus_book() {
+  StateLock lock(state_mutex_);
+  if (bus_book_) return;
+  // A few exchanges, to pair each TAP reply with its request, and no poll
+  // marks: the Bus log's 300 exchanges and five minutes of polls would be
+  // ~260 KB of internal RAM here (the poll marks alone ran the rig out,
+  // 2026-11-19).
+  bus_watch_ = make_psram_unique<master::BusWatch>(16, false);
+  bus_book_ = make_psram_unique<master::BusBook>([](char level, const char *msg) {
+    if (level == 'W') ESP_LOGW(TAG, "%s", msg);
+    else ESP_LOGI(TAG, "%s", msg);
+  });
+  // Called from absorb(), inside the loop, which holds the state lock.
+  bus_book_->set_barcode_of([this](uint16_t addr) {
+    char a[5];
+    snprintf(a, sizeof(a), "%04X", addr);
+    for (const auto &n : node_table_)
+      if (strcasecmp(n.addr.c_str(), a) == 0) return std::string(n.long_address.c_str());
+    return std::string();
+  });
+  tap_names_ = make_psram_unique<TapNames>();
+  memset(tap_names_.get(), 0, sizeof(TapNames));
+  tap_names_pref_ = global_preferences->make_preference<TapNames>(fnv1_hash("tigo_tap_names"));
+  if (!tap_names_pref_.load(tap_names_.get())) memset(tap_names_.get(), 0, sizeof(TapNames));
+  for (auto &n : tap_names_->name) n[TapNames::LEN] = '\0';
+  bus_book_->set_tap_name_of([this](uint16_t tap) {
+    for (int i = 0; i < TapNames::MAX; i++)
+      if (tap_names_->addr[i] == tap && tap_names_->name[i][0]) return master::Str(tap_names_->name[i]);
+    return master::Str();
+  });
+  ESP_LOGI(TAG, "Keeping each device's firmware, settings and ratings as heard on the bus");
+}
+
+const char *TigoMonitorComponent::set_tap_name(const std::string &tap, const std::string &name) {
+  static const char *const BAD = "a TAP is 4 hex digits, and a name at most 32 characters";
+  if (!tap_names_) return "this monitor keeps no TAP names";
+  if (tap.size() != 4 || tap.find_first_not_of("0123456789abcdefABCDEF") != std::string::npos) return BAD;
+  uint16_t addr = static_cast<uint16_t>(strtoul(tap.c_str(), nullptr, 16));
+  if (addr == 0) return BAD;
+  size_t a = name.find_first_not_of(" \t"), b = name.find_last_not_of(" \t");
+  size_t len = a == std::string::npos ? 0 : b - a + 1;
+  if (len > static_cast<size_t>(TapNames::LEN)) return BAD;
+  int slot = -1, free_slot = -1;
+  for (int i = 0; i < TapNames::MAX; i++) {
+    if (tap_names_->addr[i] == addr) slot = i;
+    else if (tap_names_->addr[i] == 0 && free_slot < 0) free_slot = i;
+  }
+  if (len == 0) {
+    if (slot < 0) return nullptr;
+    tap_names_->addr[slot] = 0;
+    tap_names_->name[slot][0] = '\0';
+    ESP_LOGI(TAG, "TAP %04X has no name now", addr);
+  } else {
+    if (slot < 0) slot = free_slot;
+    if (slot < 0) return "names for eight TAPs at most: clear one first";
+    tap_names_->addr[slot] = addr;
+    memcpy(tap_names_->name[slot], name.data() + a, len);
+    tap_names_->name[slot][len] = '\0';
+    ESP_LOGI(TAG, "TAP %04X is named %s", addr, tap_names_->name[slot]);
+  }
+  tap_names_dirty_ = true;
+  return nullptr;
+}
+
+// Each frame, as the bus gave it (escaped, between 7E 07 and 7E 08), after
+// process_frame_ has walked it. Decoding means a string and a payload vector
+// on the internal heap, so only the frames the book can use are decoded:
+// anything that isn't a poll or its reply (housekeeping, VERSION, GET_MAC,
+// GatewayCfg: a few a second), and a poll reply carrying an optimizer's
+// answer, with its poll. The ~20 polls a second and their power replies are
+// not, which keeps the #23 churn out.
+void TigoMonitorComponent::feed_bus_book_(const frame_string &frame) {
+  // DEST then CMD; an escaped byte among them (a 7D) shifts them, so decode.
+  bool plain = frame.size() >= 4 && static_cast<uint8_t>(frame[0]) != 0x7D &&
+               static_cast<uint8_t>(frame[1]) != 0x7D && static_cast<uint8_t>(frame[2]) != 0x7D &&
+               static_cast<uint8_t>(frame[3]) != 0x7D;
+  uint16_t cmd = plain ? static_cast<uint16_t>(static_cast<uint8_t>(frame[2]) << 8 | static_cast<uint8_t>(frame[3])) : 0;
+  if (cmd == master::CMD_POLL) {
+    bus_book_poll_.assign(frame.data(), frame.size());
+    return;
+  }
+  if (cmd == master::CMD_POLL_REPLY) {
+    // Which TAP answered, from DEST, for the Devices page's TAP list.
+    struct timeval tv;
+    gettimeofday(&tv, nullptr);
+    int64_t now = static_cast<int64_t>(tv.tv_sec) * 1000 + tv.tv_usec / 1000;
+    if (now >= 1700000000000LL)
+      bus_book_->hear_poll_reply(static_cast<uint16_t>(static_cast<uint8_t>(frame[0]) << 8 | static_cast<uint8_t>(frame[1])), now);
+    if (!frame_has_answer_ || bus_book_poll_.empty()) return;
+    feed_bus_book_one_(bus_book_poll_);
+    bus_book_poll_.clear();
+  }
+  feed_bus_book_one_(frame);
+}
+
+// Not until the clock is set: a time near 1970 would be saved as when it was heard.
+void TigoMonitorComponent::feed_bus_book_one_(const frame_string &frame) {
+  struct timeval tv;
+  gettimeofday(&tv, nullptr);
+  int64_t now = static_cast<int64_t>(tv.tv_sec) * 1000 + tv.tv_usec / 1000;
+  if (now < 1700000000000LL) return;
+  master::Frame f;
+  if (!master::decode_frame(std::string(frame.data(), frame.size()), f)) return;
+  bus_watch_->on_frame(f, false, now);
+  // This monitor never runs the bus: what changes is another master's doing.
+  bus_book_->absorb(*bus_watch_, now, false);
+}
+
+// From the loop: read the saved copy once the history's flash is mounted,
+// then save it when changed, at most every BUS_BOOK_SAVE_EVERY_MS. A busy
+// flash (a history commit) is skipped and tried again a minute later.
+void TigoMonitorComponent::keep_bus_book_() {
+#ifdef TIGO_TSDB_AVAILABLE
+  if (!history_.initialized()) return;
+  uint32_t now = millis();
+  if (!bus_book_loaded_) {
+    TigoHistory::FlashLock lock(&history_, 2000);
+    if (!lock.held()) return;
+    bus_book_loaded_ = true;
+    bus_book_saved_ms_ = now;
+    FILE *f = fopen(kBusBookPath, "rb");
+    if (f == nullptr) return;
+    char line[512];
+    unsigned good = 0, bad = 0;
+    while (fgets(line, sizeof(line), f) != nullptr) (bus_book_->restore_line(line) ? good : bad)++;
+    fclose(f);
+    bus_book_->dirty = false;
+    ESP_LOGI(TAG, "Bus book: %u records read back%s", good, bad ? " (some lines unreadable, skipped)" : "");
+    return;
+  }
+  if (!bus_book_->dirty || now - bus_book_saved_ms_ < BUS_BOOK_SAVE_EVERY_MS) return;
+  TigoHistory::FlashLock lock(&history_, 100);
+  if (!lock.held()) {
+    bus_book_saved_ms_ = now - BUS_BOOK_SAVE_EVERY_MS + 60000;
+    return;
+  }
+  psram_string text;
+  bus_book_->write_text(text);
+  FILE *f = fopen(kBusBookPath, "wb");
+  bool ok = f != nullptr && fwrite(text.data(), 1, text.size(), f) == text.size();
+  if (f != nullptr) {
+    fflush(f);
+    fsync(fileno(f));
+    fclose(f);
+  }
+  bus_book_saved_ms_ = now;
+  if (ok) {
+    bus_book_->dirty = false;
+    ESP_LOGI(TAG, "Bus book saved (%u bytes, %u ms)", (unsigned) text.size(), (unsigned) (millis() - now));
+  } else {
+    ESP_LOGW(TAG, "Bus book: could not write %s", kBusBookPath);
+  }
+#endif
+}
 
 }  // namespace tigo_monitor
 }  // namespace esphome

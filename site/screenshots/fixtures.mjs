@@ -184,7 +184,8 @@ export const routes = {
     inverters: [],
     strings: strings.map((s) => ({ label: s.label, panel_rating_w: RATING })),
   },
-  // Pi build only: firmware heard on the bus. One optimizer was updated.
+  // Firmware, settings and ratings heard on the bus, and the TAPs' names
+  // (both builds). One optimizer was updated.
   '/api/versions': {
     taps: [{ addr: '1201', model: 'Mgate', version: 'G8.59 Jan  1 2026 10:00:00 GW-H150.6.0S0.12', previous: '',
              since_unix_ms: 1767225600000, last_unix_ms: 1767225600000, name: 'Garage' }],
@@ -193,6 +194,8 @@ export const routes = {
     changes: [{ unix_ms: now * 1000 - 3 * 60000, addr: devices[3].addr, what: 'MPPT', before: '12 40 08 12', after: '12 40 0A 12' }],
     // Each TAP's MAC, from its answer to GET_MAC; made up.
     ids: [{ tap: '1201', mac: '04C05B0000001234', heard_unix_ms: 1767225600000 }],
+    // Each TAP answering polls, and when it last did.
+    polled: [{ tap: '1201', heard_unix_ms: now * 1000 - 1000 }],
     // Two on the H9 firmware, as D6-D10 are on the roof.
     optimizers: devices.map((d, i) => ({ addr: d.addr, model: 'Mnode', version: i === 4 ? 'K8.0130 (2D)' : i === 5 || i === 6 ? 'H9.0018 (40)' : 'K8.0120 (2D)',
       previous: i === 4 ? 'K8.0120 (2D)' : '', since_unix_ms: 1767225600000 + i * 60000, last_unix_ms: 1767225600000 + i * 60000 })),
