@@ -53,4 +53,4 @@ Only the Pi has done it on a roof.
 | Bring up the TAP, housekeeping, query the optimizers, let queries change settings | Yes, in YAML | Yes, always, running the bus |
 | Read the TAP's radio settings, open discovery only when needed | No | Yes, always, running the bus |
 | [Turn the array's output off](/esphome-tigomonitor/guides/raspberry-pi/#turn-the-arrays-output-off) | `pv_output:`, a switch in ESPHome | A switch on System setup |
-| More than one TAP | No: a second TAP on the bus is reported and left alone. | No, the same. |
+| More than one TAP | Yes, not yet run on hardware. A standby learns them from the master it stands by for; or list them in `taps:`. | Yes, experimental. Each TAP gets its own join window and table. |

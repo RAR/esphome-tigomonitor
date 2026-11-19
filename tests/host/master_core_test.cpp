@@ -1449,7 +1449,159 @@ static void test_a_table_change_on_a_lost_tap_is_refused() {
   core.close();
 }
 
+// The bus as a standby hears it: another master polling some TAPs, until
+// `quiet` stops it; then the TAPs (MultiTap) answer whatever this one sends.
+class OtherMasterThenTaps : public Transport {
+ public:
+  explicit OtherMasterThenTaps(MultiTap &bus) : bus_(bus) {}
+  std::vector<uint16_t> polled;  // the other master's poll targets, in turn
+  bool quiet = false;
+  bool configured() const override { return true; }
+  bool open(std::string &e) override { return bus_.port.open(e); }
+  void close() override { bus_.port.close(); }
+  bool is_open() const override { return bus_.port.is_open(); }
+  bool write(const uint8_t *d, size_t n, std::string &e) override {
+    writes++;
+    return bus_.port.write(d, n, e);
+  }
+  void drain() override {}
+  int read(char *buf, size_t n, int t) override {
+    if (quiet || polled.empty()) return bus_.port.read(buf, n, t);
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    auto f = mp::encode_frame(polled[next_++ % polled.size()], 0x0148, {0x00, 0x00, 0x00, 0x00, 0x00});
+    size_t k = std::min(n, f.size());
+    std::copy(f.begin(), f.begin() + k, buf);
+    return static_cast<int>(k);
+  }
+  int baud() const override { return 38400; }
+  std::string name() const override { return "fake"; }
+  int writes = 0;
+
+ private:
+  MultiTap &bus_;
+  size_t next_ = 0;
+};
+
+static void tick_for_real(MasterCore &core, int ms, uint32_t &t) {
+  auto end = std::chrono::steady_clock::now() + std::chrono::milliseconds(ms);
+  while (std::chrono::steady_clock::now() < end) {
+    core.tick(t += 20);
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+}
+
+static std::vector<uint16_t> tap_ids(const MasterCore &core) {
+  std::vector<uint16_t> ids;
+  for (const auto &t : core.taps()) ids.push_back(t.id);
+  return ids;
+}
+
+// A standby that starts from a guess (gateway_id, nothing saved) learns the
+// TAPs the other master polls, drops the guess, saves them, and on taking
+// over runs them, and not the guess.
+static void test_a_standby_learns_the_taps_another_master_polls() {
+  MultiTap bus;
+  bus.taps = {{0x1203, 3}, {0x1204, 4}};
+  OtherMasterThenTaps port(bus);
+  port.polled = {0x1203, 0x1204};
+  MasterCore core(&port, [](int, const std::string &) {}, nullptr, nullptr, 0x1201, false, false);
+  core.set_standby(1, nullptr, nullptr);
+  std::vector<MasterCore::TapEntry> saved;
+  int saves = 0;
+  core.set_learn_taps(
+      [&](const std::vector<MasterCore::TapEntry> &t) {
+        saved = t;
+        saves++;
+      },
+      /*guessed=*/true);
+  CHECK(core.open());
+  uint32_t t = 0;
+  tick_for_real(core, 500, t);
+  CHECK(port.writes == 0);
+  CHECK((tap_ids(core) == std::vector<uint16_t>{0x1203, 0x1204}));
+  CHECK(saves == 2 && saved.size() == 2 && saved[0].id == 0x1203 && saved[1].id == 0x1204);
+  port.quiet = true;
+  tick_for_real(core, 2500, t);
+  CHECK(core.status().standby == Standby::active);
+  CHECK(bus.sent_to(0x1203, 0x0148) > 0 && bus.sent_to(0x1204, 0x0148) > 0);
+  CHECK(bus.sent_to(0x1201, 0x0148) == 0);
+  core.close();
+}
+
+// The guess, once the other master polls it too, is a TAP like the rest:
+// the next one heard joins it rather than replacing it.
+static void test_a_guess_the_master_polls_is_kept() {
+  MultiTap bus;
+  OtherMasterThenTaps port(bus);
+  port.polled = {0x1201, 0x1202};
+  MasterCore core(&port, [](int, const std::string &) {}, nullptr, nullptr, 0x1201, false, false);
+  core.set_standby(1, nullptr, nullptr);
+  std::vector<MasterCore::TapEntry> saved;
+  core.set_learn_taps([&](const std::vector<MasterCore::TapEntry> &t) { saved = t; }, /*guessed=*/true);
+  CHECK(core.open());
+  uint32_t t = 0;
+  tick_for_real(core, 400, t);
+  CHECK((tap_ids(core) == std::vector<uint16_t>{0x1201, 0x1202}));
+  CHECK(saved.size() == 2);
+  core.close();
+}
+
+// A saved list is kept, MACs and all; a TAP the other master polls that
+// isn't on it is added after it.
+static void test_a_learned_tap_joins_a_saved_list() {
+  MultiTap bus;
+  OtherMasterThenTaps port(bus);
+  port.polled = {0x1201, 0x1202};
+  MasterCore core(&port, [](int, const std::string &) {}, nullptr, nullptr, 0x1201, false, false);
+  core.set_taps({{0x1201, multi_mac(1)}});
+  core.set_standby(1, nullptr, nullptr);
+  int saves = 0;
+  core.set_learn_taps([&](const std::vector<MasterCore::TapEntry> &) { saves++; }, /*guessed=*/false);
+  CHECK(core.open());
+  uint32_t t = 0;
+  tick_for_real(core, 400, t);
+  auto taps = core.taps();
+  CHECK(taps.size() == 2 && taps[0].id == 0x1201 && taps[0].mac == multi_mac(1) && taps[1].id == 0x1202);
+  CHECK(saves == 1);
+  core.close();
+}
+
+// Polls to the factory addresses are a bring-up, not a TAP to run.
+static void test_polls_to_the_factory_address_are_not_learned() {
+  MultiTap bus;
+  OtherMasterThenTaps port(bus);
+  port.polled = {0x1234, 0x1235, 0x0000};
+  MasterCore core(&port, [](int, const std::string &) {}, nullptr, nullptr, 0x1201, false, false);
+  core.set_standby(1, nullptr, nullptr);
+  int saves = 0;
+  core.set_learn_taps([&](const std::vector<MasterCore::TapEntry> &) { saves++; }, /*guessed=*/true);
+  CHECK(core.open());
+  uint32_t t = 0;
+  tick_for_real(core, 300, t);
+  CHECK((tap_ids(core) == std::vector<uint16_t>{0x1201}) && saves == 0);
+  core.close();
+}
+
+// Without learning (the Pi's default), the list is what it was given.
+static void test_without_learning_the_list_stays() {
+  MultiTap bus;
+  OtherMasterThenTaps port(bus);
+  port.polled = {0x1202};
+  MasterCore core(&port, [](int, const std::string &) {}, nullptr, nullptr, 0x1201, false, false);
+  core.set_standby(1, nullptr, nullptr);
+  CHECK(core.open());
+  uint32_t t = 0;
+  tick_for_real(core, 300, t);
+  CHECK((tap_ids(core) == std::vector<uint16_t>{0x1201}));
+  core.close();
+}
+
 int main() {
+  test_a_standby_learns_the_taps_another_master_polls();
+  test_a_learned_tap_joins_a_saved_list();
+  test_a_guess_the_master_polls_is_kept();
+  test_polls_to_the_factory_address_are_not_learned();
+  test_without_learning_the_list_stays();
   test_a_lost_tap_at_the_factory_address_is_brought_back();
   test_both_quiet_at_once_then_back_each_shows_running();
   test_a_table_change_on_a_lost_tap_is_refused();

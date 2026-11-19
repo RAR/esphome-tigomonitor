@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **An ESP32 standby can run a system with more than one TAP** (experimental,
+  not yet run on hardware). While another master runs the bus, it learns each
+  TAP that master polls and keeps the list in flash, so on taking over it
+  polls them all, not only the one at `gateway_id`. To fix the list instead,
+  give `tigo_master` a `taps:` list. Nothing changes for one TAP.
+
 ## [2.2.0] - 2026-11-18
 
 ### Added

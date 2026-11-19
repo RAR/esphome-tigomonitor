@@ -114,6 +114,9 @@ class TigoMasterComponent : public Component, public uart::UARTComponent {
     takeover_s_ = takeover_s;
   }
   void set_gateway_id(uint16_t id) { gateway_id_ = id; }
+  // The TAPs to run, from the YAML's taps: exactly these, in this order, and
+  // nothing learned. Without it, the saved list, learned while standing by.
+  void set_taps(const std::vector<uint16_t> &ids) { fixed_taps_ = ids; }
   void set_startup(bool on) { startup_ = on; }
   void set_housekeeping(bool on) { housekeeping_ = on; }
   void set_queries(bool on, bool writes) {
@@ -178,6 +181,7 @@ class TigoMasterComponent : public Component, public uart::UARTComponent {
   bool standby_ = false;
   uint32_t takeover_s_ = 8;
   uint16_t gateway_id_ = 0x1201;
+  std::vector<uint16_t> fixed_taps_;
   bool startup_ = false, housekeeping_ = false, queries_ = false, writes_ = false;
 
   std::unique_ptr<UartTransport> port_;
@@ -214,6 +218,25 @@ class TigoMasterComponent : public Component, public uart::UARTComponent {
 #ifdef USE_SWITCH
   PvOutputSwitch *pv_switch_ = nullptr;
 #endif
+
+  // The TAPs learned while standing by, in flash, so a reboot after the
+  // other master stopped still runs them all. Saved from the loop, as the
+  // PV state is. A MAC is kept only while it fits.
+  static const size_t SAVED_TAPS = 8;
+  struct TapsPref {
+    uint8_t count;
+    struct {
+      uint16_t id;
+      uint8_t mac_len;
+      uint8_t mac[8];
+    } taps[SAVED_TAPS];
+  };
+  ESPPreferenceObject taps_pref_;
+  std::mutex taps_mu_;
+  bool taps_dirty_ = false;                    // under taps_mu_
+  std::vector<MasterCore::TapEntry> taps_to_save_;  // under taps_mu_
+  void load_taps_(std::vector<MasterCore::TapEntry> &out);
+  void save_taps_(const std::vector<MasterCore::TapEntry> &taps);
 
 #ifdef USE_TEXT_SENSOR
   text_sensor::TextSensor *status_sensor_ = nullptr;

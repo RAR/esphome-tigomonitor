@@ -1697,6 +1697,7 @@ void MasterCore::stand_by_(uint32_t) {
         if (!master::decode_frame(body, f) || !is_request_(f)) return;
         heard = true;
         if (f.cmd == master::CMD_SESSION && f.payload.size() == 1) pv_heard = f.payload[0];
+        if (learn_taps_ && f.cmd == master::CMD_POLL) learn_tap_(f.dest);
       });
     }
     if (pv_heard >= 0) hear_pv_(pv_heard == master::PV_OFF);
@@ -1715,6 +1716,34 @@ void MasterCore::stand_by_(uint32_t) {
     set_standby_(Standby::taking_over);
   }
   if (standby_ == Standby::taking_over && quiet >= static_cast<int64_t>(takeover_ms_) + jitter_ms_) take_over_(quiet);
+}
+
+// A TAP the master this one stands by for polls: run it too on taking over.
+// In the tick, where taps_ is walked without the lock, so changed under it.
+void MasterCore::learn_tap_(uint16_t id) {
+  // A bring-up's polls to the factory addresses, or a broadcast, aren't a TAP.
+  if (id == 0 || id > 0x7FFE || id == 0x1234 || id == FACTORY_ID) return;
+  bool known = false;
+  for (const auto &t : taps_) known = known || t->id == id;
+  // A known one confirms a guess, which is then kept like the rest.
+  if (known && !learn_guessed_) return;
+  std::vector<TapEntry> saved;
+  {
+    std::lock_guard<std::mutex> lock(mu_);
+    if (!known) {
+      if (learn_guessed_) taps_.clear();
+      auto t = std::make_unique<Tap>();
+      t->id = id;
+      t->st.id = id;
+      taps_.push_back(std::move(t));
+      turn_ = 0;
+    }
+    learn_guessed_ = false;
+    for (const auto &x : taps_) saved.push_back({x->id, x->mac});
+  }
+  LOGI("standby: the master polls TAP %04X; %zu TAP%s to run on taking over", id, saved.size(),
+       saved.size() == 1 ? "" : "s");
+  if (taps_learned_) taps_learned_(saved);
 }
 
 // As at start, minus the open: the discovery window is read before anything renews
