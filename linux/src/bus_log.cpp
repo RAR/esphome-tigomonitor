@@ -81,6 +81,11 @@ void BusLog::load_versions_() {
     std::string mac = o.value("mac", std::string());
     if (tap && mac.size() == 16) book_.tap_ids[tap] = {mac, o.value("heard_unix_ms", int64_t{0})};
   }
+  for (const auto &o : j.value("polled", json::array())) {
+    if (!o.is_object()) continue;
+    auto tap = static_cast<uint16_t>(std::strtoul(o.value("tap", std::string("0")).c_str(), nullptr, 16));
+    if (tap) book_.polled[tap] = o.value("heard_unix_ms", int64_t{0});
+  }
   for (const auto &o : j.value("settings", json::array())) {
     if (!o.is_object()) continue;
     SmartSeen m;
@@ -150,6 +155,7 @@ int BusLog::changes_since(int64_t since_ms) const {
 
 void BusLog::on_frame_(const Frame &f, bool ours, int64_t now) {
   std::string what = watch_.on_frame(f, ours, now);
+  if (f.cmd == esphome::tigo_monitor::master::CMD_POLL_REPLY) book_.hear_poll_reply(f.dest, now);
   book_.absorb(watch_, now, runs_bus_);
   if (what.empty()) return;
   // Listening (or standing by), another master runs the bus, and what it

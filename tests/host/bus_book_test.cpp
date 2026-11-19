@@ -88,7 +88,7 @@ static void test_the_json_is_the_apis() {
   json j = json::parse(json_of(b, false), nullptr, false);
   CHECK(j.is_object());
   if (!j.is_object()) return;
-  for (const char *k : {"taps", "optimizers", "radios", "ids", "settings", "mppt", "ratings", "changes"})
+  for (const char *k : {"taps", "optimizers", "radios", "ids", "polled", "settings", "mppt", "ratings", "changes"})
     CHECK(j.contains(k) && j[k].is_array());
   CHECK(!j.contains("owners"));
   CHECK(j["optimizers"].size() == 1 && j["optimizers"][0]["addr"] == "0010" &&
@@ -128,6 +128,7 @@ static void test_the_saved_copy_reads_back() {
   a.radios[0x1202] = {r, 7000};
   a.tap_ids[0x1202] = {"04C05B00000000BB", 7100};
   a.versions.record({true, 0x1202, "Mgate", "G8.59"}, 7200);
+  a.hear_poll_reply(0x9202, 7300);
   std::string text;
   a.write_text(text);
   BusBook b;
@@ -138,8 +139,28 @@ static void test_the_saved_copy_reads_back() {
     bad += !b.restore_line(text.substr(from, nl - from));
     from = nl + 1;
   }
-  CHECK(lines == 9 && bad == 0);
+  CHECK(lines == 10 && bad == 0);
   CHECK(json_of(a, true) == json_of(b, true));
+}
+
+// A TAP answering polls is listed by the time it last answered, before any
+// master has read its firmware: a monitor that only listens sees the read
+// only when a master brings a TAP up. Requests, and the addresses no TAP
+// keeps (none, the factory's, the first-run 0x1234), list nothing.
+static void test_a_tap_answering_polls_is_listed() {
+  BusBook b;
+  b.hear_poll_reply(0x9201, 1000);
+  CHECK(b.dirty);
+  b.dirty = false;
+  b.hear_poll_reply(0x9201, 2000);
+  CHECK(!b.dirty);  // only a new TAP is worth saving for
+  for (uint16_t dest : {0x1202, 0x8000, 0x9234, 0x9235, 0xFFFF}) b.hear_poll_reply(dest, 3000);
+  CHECK(!b.dirty);
+  json j = json::parse(json_of(b, false), nullptr, false);
+  CHECK(j.is_object() && j["polled"].is_array() && j["polled"].size() == 1);
+  if (!j.is_object() || j["polled"].size() != 1) return;
+  CHECK(j["polled"][0]["tap"] == "1201" && j["polled"][0]["heard_unix_ms"] == 2000);
+  CHECK(j["taps"].empty());
 }
 
 // A tab or newline inside a field can't split a record: it becomes a space.
@@ -173,6 +194,7 @@ int main() {
   test_the_json_is_the_apis();
   test_odd_text_is_escaped();
   test_the_saved_copy_reads_back();
+  test_a_tap_answering_polls_is_listed();
   test_a_tab_in_a_field_stays_in_its_field();
   test_a_bad_line_is_skipped();
   if (failures) {

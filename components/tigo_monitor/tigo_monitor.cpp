@@ -3599,6 +3599,12 @@ void TigoMonitorComponent::feed_bus_book_(const frame_string &frame) {
     return;
   }
   if (cmd == master::CMD_POLL_REPLY) {
+    // Which TAP answered, from DEST, for the Devices page's TAP list.
+    struct timeval tv;
+    gettimeofday(&tv, nullptr);
+    int64_t now = static_cast<int64_t>(tv.tv_sec) * 1000 + tv.tv_usec / 1000;
+    if (now >= 1700000000000LL)
+      bus_book_->hear_poll_reply(static_cast<uint16_t>(static_cast<uint8_t>(frame[0]) << 8 | static_cast<uint8_t>(frame[1])), now);
     if (!frame_has_answer_ || bus_book_poll_.empty()) return;
     feed_bus_book_one_(bus_book_poll_);
     bus_book_poll_.clear();

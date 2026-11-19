@@ -111,6 +111,26 @@ class BusBook {
     }
   }
 
+  // Each poll reply's DEST (a TAP's address with the top bit set),
+  // given before any decoding: a TAP is listed as soon as it answers polls,
+  // before a master reads its firmware and radio, which a monitor that only
+  // listens hears only when a master brings a TAP up. Not the addresses no
+  // TAP keeps: none, the first-run 0x1234, the factory's 0x1235, 0x7FFF.
+  // Only a new TAP marks the book changed; a later answer just moves its time.
+  void hear_poll_reply(uint16_t dest, int64_t now) {
+    if (!(dest & 0x8000)) return;
+    uint16_t tap = dest & 0x7FFF;
+    if (tap == 0 || tap == 0x1234 || tap == 0x1235 || tap == 0x7FFF) return;
+    auto it = polled.find(tap);
+    if (it != polled.end()) {
+      it->second = now;
+      return;
+    }
+    log_f_('I', "bus: TAP %04X answers polls", tap);
+    polled[tap] = now;
+    dirty = true;
+  }
+
   // Restoring what was saved: the changes, oldest first.
   void restore_change(const Change &c) {
     changes.push_back(c);
@@ -122,6 +142,7 @@ class BusBook {
   // on its history's flash, read back a line at a time by restore_line.
   //   V tap addr model version previous since last
   //   R tap channel slt slm profile pan heard      I tap mac heard
+  //   P tap heard (a TAP answering polls)
   //   S addr settings stored heard                 M addr params answer heard
   //   C addr volts watts cal heard                 O addr barcode
   //   X unix_ms addr what before after             (changes, oldest first)
@@ -153,6 +174,7 @@ class BusBook {
       out.append("\n");
     }
     for (const auto &kv : tap_ids) out.append("I"), h(kv.first), f(kv.second.first), n(kv.second.second), out.append("\n");
+    for (const auto &kv : polled) out.append("P"), h(kv.first), n(kv.second), out.append("\n");
     for (const auto &kv : smarts)
       out.append("S"), h(kv.first), f(kv.second.first.settings), n(kv.second.first.stored), n(kv.second.second),
           out.append("\n");
@@ -211,6 +233,9 @@ class BusBook {
     } else if (k == "I" && t.size() == 4) {
       if (!x(1) || t[2].size() != 16) return false;
       tap_ids[x(1)] = {t[2], i64(3)};
+    } else if (k == "P" && t.size() == 3) {
+      if (!x(1)) return false;
+      polled[x(1)] = i64(2);
     } else if (k == "S" && t.size() == 5) {
       SmartSeen s;
       s.addr = x(1);
@@ -245,7 +270,7 @@ class BusBook {
   }
 
   // /api/versions, written into out (anything with append(const char *)):
-  // {taps, optimizers, radios, ids, settings, mppt, ratings, changes}, each
+  // {taps, optimizers, radios, ids, polled, settings, mppt, ratings, changes}, each
   // by address, changes newest first. with_pans adds each TAP's PAN and the
   // address owners, for a saved copy only: the API never carries the PAN.
   template<class Out> void write_json(Out &out, bool with_pans) const {
@@ -333,6 +358,18 @@ class BusBook {
       out.append("}");
     }
     out.append("],");
+    key("polled");
+    out.append("[");
+    first = true;
+    for (const auto &kv : polled) {
+      if (!first) out.append(",");
+      first = false;
+      out.append("{");
+      key("tap"), hex(kv.first), out.append(",");
+      key("heard_unix_ms"), num(kv.second);
+      out.append("}");
+    }
+    out.append("],");
     key("settings");
     out.append("[");
     first = true;
@@ -414,6 +451,8 @@ class BusBook {
   Map<uint16_t, std::pair<TapRadio, int64_t>> radios;
   // Each TAP's MAC, its ID, from its last answer to GET_MAC, and when.
   Map<uint16_t, std::pair<Str, int64_t>> tap_ids;
+  // Each TAP answering polls, and when it last did.
+  Map<uint16_t, int64_t> polled;
   // Each optimizer's MPPT parameters, from its answer to ^00Mppt, and when.
   Map<uint16_t, std::pair<MpptSeen, int64_t>> mppts;
   // Each optimizer's answer to ^00Smrt, as last heard, and when.

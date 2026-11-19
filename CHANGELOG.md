@@ -15,6 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   or an ESP32 master with `queries: true`. A board with history keeps them
   across a reboot. The ESP32 lists a changed setting only when it runs the
   bus, and as a listener it never does. Renaming a TAP stays on the Pi.
+  Each TAP is listed as soon as it answers polls; its firmware and radio
+  fill in when a master next brings it up, which a listener may not hear
+  for days.
 
 ## [2.2.0] - 2026-11-18
 

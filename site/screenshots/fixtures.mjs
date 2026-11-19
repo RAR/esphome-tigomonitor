@@ -194,6 +194,8 @@ export const routes = {
     changes: [{ unix_ms: now * 1000 - 3 * 60000, addr: devices[3].addr, what: 'MPPT', before: '12 40 08 12', after: '12 40 0A 12' }],
     // Each TAP's MAC, from its answer to GET_MAC; made up.
     ids: [{ tap: '1201', mac: '04C05B0000001234', heard_unix_ms: 1767225600000 }],
+    // Each TAP answering polls, and when it last did.
+    polled: [{ tap: '1201', heard_unix_ms: now * 1000 - 1000 }],
     // Two on the H9 firmware, as D6-D10 are on the roof.
     optimizers: devices.map((d, i) => ({ addr: d.addr, model: 'Mnode', version: i === 4 ? 'K8.0130 (2D)' : i === 5 || i === 6 ? 'H9.0018 (40)' : 'K8.0120 (2D)',
       previous: i === 4 ? 'K8.0120 (2D)' : '', since_unix_ms: 1767225600000 + i * 60000, last_unix_ms: 1767225600000 + i * 60000 })),
