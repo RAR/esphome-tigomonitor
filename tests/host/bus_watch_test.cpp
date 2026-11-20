@@ -3,6 +3,8 @@
 // another device reconfiguring the TAP.
 #include "bus_watch.h"
 
+#include <nlohmann/json.hpp>
+
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -294,6 +296,27 @@ static void test_another_master() {
   CHECK(!last(w).other_master);
 }
 
+// Without poll stats (the ESP32's Devices detail), no poll is kept: the
+// marks would be ~16 bytes each for five minutes of ~23 polls a second, and
+// on the rig they ran its internal RAM out (2026-11-19). Answers still come.
+static void test_no_poll_stats_keeps_no_polls() {
+  BusWatch w(16, false);
+  int64_t t = 0;
+  for (int i = 0; i < 1000; i++, t += 20) {
+    w.on_frame(request(0x0148, hex("00016fc404")), true, t);
+    w.on_frame(reply(0x0149, i == 500 ? poll_reply_with_answer(0x10, "Mnode Version K8.0120 (2D)\r") : hex("001f000000")),
+               false, t + 10);
+  }
+  CHECK(w.stats(t).polls == 0);
+  CHECK(w.take_versions().size() == 1);
+  BusWatch on;
+  for (int i = 0; i < 1000; i++, t += 20) {
+    on.on_frame(request(0x0148, hex("00016fc404")), true, t);
+    on.on_frame(reply(0x0149, hex("001f000000")), false, t + 10);
+  }
+  CHECK(on.stats(t).polls == 1000);
+}
+
 static void test_stats_cover_five_minutes() {
   BusWatch w;
   int64_t t = 0;
@@ -314,6 +337,136 @@ static void test_stats_cover_five_minutes() {
   BusStats later = w.stats(t + 5 * 60000 + 1000);
   CHECK(later.polls == 0 && later.count.at("discovery") == 0 && later.rt_median_ms == -1);
   CHECK(later.discovery == s.discovery);
+}
+
+// A poll reply with one power report: not empty, and no answer in it.
+static Bytes poll_reply_with_power(uint16_t node) {
+  return {0x00, 0x1F, 0x00, 0x00, 0x00, 0x31, static_cast<uint8_t>(node >> 8), static_cast<uint8_t>(node), 0x00, 0x00, 0x00,
+          0x02, 0x12, 0x34};
+}
+
+// The ESP32 counts polls without decoding them (~23 a second): on_poll and
+// on_poll_reply give the strip the decoded frames give. A refusal and a
+// reply carrying an answer are still decoded there, so both get those.
+static void test_raw_polls_count_as_decoded_ones() {
+  BusWatch dec, raw;
+  int64_t t = 0;
+  for (int i = 0; i < 200; i++, t += 40) {
+    dec.on_frame(request(0x0148, hex("00016fc404")), false, t);
+    raw.on_poll(t);
+    Frame r;
+    int at = 5 + i % 9;
+    switch (i % 10) {
+      case 3:  // lost
+        continue;
+      case 5:
+        r = reply(0x0006, {});
+        break;
+      case 7:
+        r = reply(0x0149, poll_reply_with_answer(0x10, "Mnode Version K8.0120 (2D)\r"));
+        break;
+      default:
+        r = reply(0x0149, i % 2 ? hex("001f000000") : poll_reply_with_power(0x11));
+        dec.on_frame(r, false, t + at);
+        raw.on_poll_reply(i % 2 == 1, t + at);
+        continue;
+    }
+    dec.on_frame(r, false, t + at);
+    raw.on_frame(r, false, t + at);
+  }
+  // An exchange the next poll closes unanswered, on both.
+  dec.on_frame(request(0x000A, {}), false, t);
+  raw.on_frame(request(0x000A, {}), false, t);
+  dec.on_frame(request(0x0148, hex("00016fc404")), false, t + 40);
+  raw.on_poll(t + 40);
+  BusStats a = dec.stats(t + 100), b = raw.stats(t + 100);
+  CHECK(a.polls == 200 && a.polls_lost == 20 && a.polls_refused == 20 && a.polls_empty == 40);  // the last poll still open
+  CHECK(b.polls == a.polls && b.polls_lost == a.polls_lost && b.polls_refused == a.polls_refused &&
+        b.polls_empty == a.polls_empty && b.rt_median_ms == a.rt_median_ms && b.rt_max_ms == a.rt_max_ms);
+  CHECK(raw.polls() == dec.polls() && raw.take_versions().size() == 20);
+  CHECK(raw.exchanges().back().result == "no_reply" && dec.exchanges().back().result == "no_reply");
+}
+
+static nlohmann::json bus_json(const BusWatch &w, int64_t now, size_t limit, bool timed = true) {
+  std::string out = "{";
+  w.write_json(out, now, limit, timed);
+  out += "}";
+  return nlohmann::json::parse(out, nullptr, false);
+}
+
+// /api/bus's stats and exchanges, one writer for both builds: what the Pi
+// built field by field, with an exchange still waiting past NO_REPLY_MS
+// written as unanswered, and only the last `limit`.
+static void test_the_json_is_the_apis() {
+  BusWatch w;
+  w.on_frame(request(0x0148, hex("00016fc404")), true, 900);
+  w.on_frame(reply(0x0149, hex("001f000000")), false, 912);
+  w.on_frame(request(CMD_TUNNEL, tunnel_request(0x06, 7, text_query(0x0002, "^00Info"))), true, 1000);
+  w.on_frame(reply(0x0B10, hex("000e00070702")), false, 1020);
+  w.on_frame(request(0x0148, hex("00016fc504")), true, 2900);
+  w.on_frame(reply(0x0149, poll_reply_with_answer(2, "!Info \"q\" 12\r")), false, 2913);
+  w.on_frame(request(0x000C, {0x20, 0x00}), false, 3000);  // another master's SET_CHANNEL, unanswered
+  nlohmann::json j = bus_json(w, 5000, BusWatch::KEEP);
+  CHECK(j.is_object());
+  if (!j.is_object()) return;
+  CHECK(j["exchanges"].size() == 2);
+  if (j["exchanges"].size() != 2) return;
+  const auto &q = j["exchanges"][0], &c = j["exchanges"][1];
+  CHECK(q["id"] == 1 && q["unix_ms"] == 1000 && q["ours"] == true && q["other_master"] == false);
+  CHECK(q["addr"] == "1201" && q["cmd"] == "0B0F" && q["name"] == "Tunnel" && q["sub_name"] == w.exchanges()[0].sub_name);
+  CHECK(q["node"] == "0002" && q["category"] == "queries" && q["result"] == "delivered" && q["late"] == false);
+  CHECK(q["rt_ms"] == 20 && q["answer"] == "!Info \"q\" 12" && q["answer_after_ms"] == 1893);
+  CHECK(q["summary"] == w.exchanges()[0].summary && q["request_hex"] == w.exchanges()[0].request_hex &&
+        q["reply_hex"] == w.exchanges()[0].reply_hex && q["reconfig"] == "");
+  CHECK(c["other_master"] == true && c["result"] == "no_reply" && c["rt_ms"].is_null() && c["node"].is_null() &&
+        c["answer_after_ms"].is_null() && c["reconfig"] != "" && c["category"] == "reconfig");
+  CHECK(w.exchanges()[1].result == "waiting");  // written as unanswered, not changed
+  const auto &s = j["stats"];
+  BusStats st = w.stats(5000);
+  CHECK(s["window_s"] == 300 && s["polls"] == st.polls && s["polls_lost"] == 0 && s["polls_empty"] == 1 &&
+        s["polls_refused"] == 0 && s["delivered"] == 1 && s["not_delivered"] == 0 && s["other_master"] == 1 &&
+        s["reconfig"] == 1 && s["rt_median_ms"] == st.rt_median_ms && s["rt_max_ms"] == 20 && s["discovery"] == "");
+  CHECK(s["count"]["queries"] == 1 && s["count"]["reconfig"] == 1 && s["count"]["discovery"] == 0);
+  CHECK(s["timed"] == true);
+  nlohmann::json one = bus_json(w, 5000, 1);
+  CHECK(one["exchanges"].size() == 1 && one["exchanges"][0]["id"] == 2);
+  // Untimed (the ESP32, whose reads are a loop apart): no round trip
+  // anywhere, and the stats say so; the rest as timed.
+  nlohmann::json untimed = bus_json(w, 5000, BusWatch::KEEP, false);
+  CHECK(untimed["stats"]["timed"] == false && untimed["stats"]["rt_median_ms"].is_null() &&
+        untimed["stats"]["rt_max_ms"].is_null() && untimed["exchanges"][0]["rt_ms"].is_null());
+  CHECK(untimed["exchanges"][0]["result"] == "delivered" && untimed["exchanges"][0]["answer_after_ms"] == 1893 &&
+        untimed["stats"]["polls"] == s["polls"]);
+  nlohmann::json none = bus_json(BusWatch(), 0, BusWatch::KEEP);
+  CHECK(none["exchanges"].empty() && none["stats"]["rt_median_ms"].is_null() && none["stats"]["polls"] == 0);
+}
+
+// The ESP32 writes /api/bus a piece at a time, letting its loop read the bus
+// between them: the stats, then each exchange by id. The same text as the
+// one-piece writer; an id gone from the log is skipped.
+static void test_written_in_pieces_is_the_same() {
+  BusWatch w(5);
+  for (int i = 0; i < 8; i++) {
+    w.on_frame(request(CMD_TUNNEL, tunnel_request(0x06, static_cast<uint8_t>(i), text_query(0x0002, "^00Info"))), false, 1000 + i * 100);
+    if (i % 3) w.on_frame(reply(0x0B10, Bytes{0x00, 0x0E, 0x00, 0x07, static_cast<uint8_t>(i), 0x02}), false, 1010 + i * 100);
+  }
+  CHECK(w.first_id() == 4 && w.last_id() == 8 && !w.exchange(3) && w.exchange(4) && w.exchange(4)->id == 4 && !w.exchange(9));
+  for (bool timed : {true, false}) {
+    std::string whole, pieces;
+    w.write_json(whole, 5000, 3, timed);
+    w.write_stats_json(pieces, 5000, timed);
+    pieces += ",\"exchanges\":[";
+    bool first = true;
+    for (uint64_t id = w.last_id() - 2; id <= w.last_id(); id++) {
+      if (!first) pieces += ",";
+      first = false;
+      w.write_exchange_json(pieces, *w.exchange(id), 5000, timed);
+    }
+    pieces += "]";
+    CHECK(pieces == whole);
+  }
+  BusWatch empty;
+  CHECK(empty.first_id() == 0 && empty.last_id() == 0 && !empty.exchange(0) && !empty.exchange(1));
 }
 
 static void test_log_is_bounded() {
@@ -509,7 +662,11 @@ int main() {
   test_version_book();
   test_another_master();
   test_stats_cover_five_minutes();
+  test_no_poll_stats_keeps_no_polls();
   test_log_is_bounded();
+  test_raw_polls_count_as_decoded_ones();
+  test_the_json_is_the_apis();
+  test_written_in_pieces_is_the_same();
   test_tap_radio_from_a_read();
   test_tap_id_from_its_mac_reply();
   test_tap_radio_not_from_a_write();

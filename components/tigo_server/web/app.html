@@ -438,6 +438,9 @@
   .seg button.active { background: var(--accent); color: #061018; font-weight: 600; }
 
   .hist-stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 16px; }
+  /* Six bus cards: at most three a row (a column is never under a third), so they
+     split 3+3, 2+2+2 or one a row, never five and one left over. */
+  #diag-master { grid-template-columns: repeat(auto-fit, minmax(max(180px, calc((100% - 24px) / 3)), 1fr)); }
   .hist-stat-card {
     background:
       linear-gradient(160deg, rgba(74,222,128,0.04) 0%, rgba(56,189,248,0.025) 40%, transparent 75%),
@@ -978,8 +981,11 @@
   td.tap-radio .tap-sub, #devices-taps td.num .tap-sub { font-size: 11px; color: var(--text-dim); white-space: nowrap; }
   #setup-bus { margin-top: 28px; }
   td.tap-model .tap-board { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 11px; color: var(--text-dim); font-weight: 400; }
+  /* Beside the version, not under it: a second line made rated rows taller
+     than the rest. */
   table.nodes .node-rating { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; font-size: 11px;
-    color: var(--text-faint); }
+    color: var(--text-faint); margin-left: 4px; }
+  table.nodes td.mono.fw { white-space: nowrap; }
   table.nodes .node-tap { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; font-size: 11px;
                          color: var(--text-faint); white-space: nowrap; }
   td.tap-name .input { width: 12em; }
@@ -1500,7 +1506,7 @@
       <div class="nav-group" role="group" aria-labelledby="nav-h-inspect">
         <div class="nav-head" id="nav-h-inspect">Inspect</div>
         <button data-view="diagnostics"><span class="icon">◈</span> Diagnostics</button>
-        <button data-view="buslog" id="nav-buslog" data-linux-only style="display:none"><span class="icon">⇄</span> Bus traffic</button>
+        <button data-view="buslog" id="nav-buslog"><span class="icon">⇄</span> Bus traffic</button>
         <button data-view="cca"><span class="icon">◉</span> CCA Info</button>
         <button data-view="cloudstatus" id="nav-cloudstatus" style="display:none"><span class="icon">☁</span> Tigo Cloud</button>
       </div>
@@ -1701,7 +1707,7 @@
         <div class="topbar-meta" id="topo-meta">CCA-derived inverter → string → panel hierarchy</div>
       </div>
 
-      <div class="page-tabs" role="tablist" aria-label="Topology" id="topology-tabs" data-linux-only style="display:none">
+      <div class="page-tabs" role="tablist" aria-label="Topology" id="topology-tabs">
         <button role="tab" id="topology-tab-mesh" aria-controls="topology-mesh" aria-selected="false" data-tab="mesh" tabindex="-1">Mesh</button>
         <button role="tab" id="topology-tab-layout" aria-controls="topology-layout" aria-selected="true" data-tab="layout">Layout</button>
         <button role="tab" id="topology-tab-array" aria-controls="topology-array" aria-selected="false" data-tab="array" tabindex="-1">Array</button>
@@ -1783,10 +1789,10 @@
         <div class="topbar-meta" id="nodes-meta">—</div>
       </div>
 
-      <!-- Pi build: optimizers whose settings, MPPT or firmware changed. -->
+      <!-- Optimizers whose settings, MPPT or firmware changed (only while this monitor runs the bus). -->
       <div id="devices-changes" class="devices-changes" style="display:none"></div>
 
-      <!-- Pi build: the TAPs, from /api/versions. -->
+      <!-- The TAPs, from /api/versions. -->
       <div id="devices-taps" style="display:none">
         <div class="section-title devices-head">TAPs</div>
         <div class="table-wrap">
@@ -2403,7 +2409,7 @@
         <div class="bx-cols" role="row"><span>Time</span><span>From</span><span>TAP</span><span>Exchange</span><span>Node</span><span>Result</span><span>Round trip</span><span>Summary</span></div>
         <div id="bus-rows"><div class="bx-empty">Loading…</div></div>
       </div>
-      <p class="table-meta" style="margin-top:10px">The last 300 exchanges, newest last: each request with what came back, paired by the tunnel's sequence number or the reply's command. Polls are counted in the strip, not listed. Click a row for its bytes; the TAP's network config block, which holds its network key, is the only thing hidden. Round trips are exact when this monitor runs the bus; listening, they are only as fine as the reads, about 16 ms.</p>
+      <p class="table-meta" id="bus-note" style="margin-top:10px">The last 300 exchanges, newest last: each request with what came back, paired by the tunnel's sequence number or the reply's command. Polls are counted in the strip, not listed. Click a row for its bytes; the TAP's network config block, which holds its network key, is the only thing hidden. <span id="bus-note-rt">Round trips are exact when this monitor runs the bus; listening, they are only as fine as the reads, about 16 ms.</span></p>
     </section>
 
     <!-- CCA -->
@@ -3963,7 +3969,7 @@
   // Dashboard (Devices reads the same answer on its own).
   var optRatings = {}, optRatingsAt = 0;
   async function loadOptRatings() {
-    if (PLATFORM !== 'linux' || Date.now() - optRatingsAt < 300000) return optRatings;
+    if (Date.now() - optRatingsAt < 300000) return optRatings;
     optRatingsAt = Date.now();
     const v = await apiFetch('/api/versions').then(r => r.ok ? r.json() : null).catch(() => null);
     if (v) optRatings = Object.fromEntries((v.ratings || []).map(o => [String(o.addr).toUpperCase(), o]));
@@ -4190,7 +4196,7 @@
           <td class="num">${fmtTemp(r.t, 0)} ${tempUnit()}</td>
           <td class="num">${fmtAge(r.age)}</td>
           <td><span class="badge ${r.n.known ? 'stale' : r.state}"${r.n.known ? ' title="Marked known: not reporting, not counted, not flagged as missing"' : ''}>${stateLabel}</span></td>
-          <td class="mono fw">${r.fw ? topoEscape(r.fw.version) : '—'}${r.rating ? `<div class="node-rating">${r.rating.watts} W</div>` : ''}</td>
+          <td class="mono fw">${r.fw ? topoEscape(r.fw.version) : '—'}${r.rating ? ` <span class="node-rating">${r.rating.watts} W</span>` : ''}</td>
           <td class="fw smart">${r.smart
             ? (r.smartPeers.placeholder ? 'Not reported'
               : `<span${r.smart.stored && !r.differs ? '' : ' class="warn"'}>${r.smart.stored ? 'Stored' : 'Not stored'}${r.differs ? ' · differs' : ''}</span>`) : '—'}</td>
@@ -4237,9 +4243,16 @@
   // A settings answer's tooltip: stored or not, how it compares, the tokens.
   // The !Smrt answer's fields after "!Smrt", by the CCA's own names, scales
   // and units (the CCA's field table; the analysis side, 2026-11-08): one
-  // layout for every firmware. Index 9 is the stored flag. A K8's answer is
-  // cut at 58 characters, two digits into UclLimit, so it carries 0-10 whole
-  // and a fragment; an H9's is whole but its firmware reports zeros.
+  // layout for every firmware. Index 9 is the stored flag. K8 answers heard
+  // while a CCA ran the bus were cut at 58 characters, two digits into
+  // UclLimit, so carried 0-10 whole and a fragment; to the Pi's own reads
+  // they come whole. An H9's is whole but its firmware reports zeros.
+  // 11-14 are the optimizer's own protection settings, which a CCA never
+  // writes (the analysis side, 2026-11-18): UclLimit is an input current
+  // limit that applies only below UclThrsh, an input voltage; OvMinPwm the
+  // lowest PWM (of 255) it backs off to on over-voltage, 9 on K8.0120/0130
+  // and 0 on K8.0131; BaseOverride a 0/1 flag. AcLoss (10) is active-low:
+  // 0 is shutdown on AC loss enabled, 1 disabled.
   const SMRT_FIELDS = [
     ['SwVout', 0.05, 2, ' V'], ['OutResis', 0.01953125, 3, ' Ω'], ['HwVout', 0.05, 2, ' V'],
     ['DnPwmTim', 0.001, 3, ' s'], ['UpPwmTim', 0.001, 3, ' s'], ['PwmThrsh', 1, 0, ''],
@@ -4263,19 +4276,33 @@
     const t = settings.split(' ');
     return SMRT_WHOLE.map(i => t[i] || '').join(' ');
   }
-  // [name, text] for each field the answer carries whole.
+  // [name, text] for each field the answer carries whole. The current limit
+  // and its threshold read as one ("1.0 A below 32 V"): alone, "1 A" reads
+  // as a cap on an optimizer that runs at 9 A.
   function smartFields(settings) {
     const t = settings.split(' '), full = t.length >= SMRT_FIELDS.length;
-    const out = [];
+    const out = [], num = (v, k) => String(+(parseInt(v, 16) * k).toFixed(2));
     t.forEach((v, i) => {
       const f = SMRT_FIELDS[i];
-      if (!f || (!full && !SMRT_WHOLE.includes(i))) return;
+      if (!f || (!full && !SMRT_WHOLE.includes(i)) || f[0] === 'UclThrsh') return;
       const n = parseInt(v, 16);
-      out.push([f[0], f[1] === null || isNaN(n) ? v
+      if (f[0] === 'UclLimit' && !isNaN(n) && !isNaN(parseInt(t[i + 1], 16)))
+        out.push([f[0], `${(+(n * f[1]).toFixed(2)).toFixed(1)} A below ${num(t[i + 1], 0.05)} V`]);
+      else if (f[0] === 'OvMinPwm' && !isNaN(n))
+        out.push([f[0], n === 0 ? '0 (can switch off)' : `${n} (${(n / 255 * 100).toFixed(1)}%)`]);
+      // Active-low: 0 is shutdown on AC loss enabled (a CCA's "ON" writes 0).
+      else if (f[0] === 'AcLoss' && !isNaN(n) && n <= 1)
+        out.push([f[0], n === 0 ? 'On' : 'Off']);
+      else if (f[0] === 'BaseOverride')
+        out.push([f[0], /^0+$/.test(v) ? 'Off' : /^0*1$/.test(v) ? 'On' : v]);
+      else out.push([f[0], f[1] === null || isNaN(n) ? v
         : n === 0xFFF && SMRT_NO_LIMIT.includes(f[0]) ? 'No limit (max)' : (n * f[1]).toFixed(f[2]) + f[3]]);
     });
     return out;
   }
+  // The fields compared with most of a family: the protection settings
+  // (11-14) differ by firmware version, so they're shown, not compared.
+  const SMRT_COMPARED = new Set(SMRT_WHOLE.map(i => SMRT_FIELDS[i] && SMRT_FIELDS[i][0]).filter(Boolean));
   // The four MPPT parameters, the last four bytes of an answer to ^00Mppt, as
   // the CCA's settings page names them (its "Additional MPPT command
   // settings", 5-8) and scales them (the owner's analysis, 2026-11-09). Every
@@ -4290,13 +4317,16 @@
     const b = (params || '').split(' ').map(x => parseInt(x, 16));
     return b.length === 4 && b.every(v => !isNaN(v)) ? MPPT_FIELDS.map(([code, , f], i) => [code, f(b[i])]) : [];
   }
-  // Plain names for the panel, by section; the CCA's name goes beneath.
+  // Plain names for the panel, by section; the CCA's name goes beneath
+  // (or the third entry, where one row shows two of its fields).
   const SMRT_GROUPS = [
     ['Output', [['SwVout', 'Output voltage setpoint'], ['HwVout', 'Output voltage limit'], ['OutResis', 'Output resistance']]],
-    ['Switching', [['DnPwmTim', 'PWM ramp down'], ['UpPwmTim', 'PWM ramp up'], ['PwmThrsh', 'PWM threshold'], ['OvRecTim', 'Over-voltage recovery']]],
-    ['Input', [['UvinLvLo', 'Under-voltage, low'], ['UvinLvHi', 'Under-voltage, high']]],
+    ['Switching', [['DnPwmTim', 'PWM ramp down'], ['UpPwmTim', 'PWM ramp up'], ['PwmThrsh', 'PWM threshold'], ['OvRecTim', 'Over-voltage recovery'],
+      ['OvMinPwm', 'Over-voltage minimum PWM']]],
+    ['Input', [['UvinLvLo', 'Under-voltage, low'], ['UvinLvHi', 'Under-voltage, high'],
+      ['UclLimit', 'Current limit at low input voltage', 'UclLimit · UclThrsh']]],
     ['Rapid shutdown', [['AcLoss', 'Shut down on AC loss']]],
-    ['Limits', [['UclLimit', 'Current limit'], ['UclThrsh', 'Current limit threshold'], ['OvMinPwm', 'Over-voltage minimum PWM'], ['BaseOverride', 'Discharge enabled']]],
+    ['Other', [['BaseOverride', 'Base-memory override']]],
   ];
   // Which optimizers' rows are open (by address), kept across polls; the
   // one just opened animates in, the rest are redrawn still.
@@ -4354,7 +4384,7 @@
     const pill = zeros ? '<span class="smart-pill quiet">Not reported</span>'
       : `<span class="smart-pill${o.stored ? '' : ' warn'}">${o.stored ? 'Stored' : 'Not stored'}</span>`;
     const mine = Object.fromEntries(smartFields(o.settings));
-    const most = peers.usualSettings ? Object.fromEntries(smartFields(peers.usualSettings)) : {};
+    const most = peers.usualSettings ? Object.fromEntries(smartFields(peers.usualSettings).filter(([k]) => SMRT_COMPARED.has(k))) : {};
     const nDiff = Object.keys(mine).filter(k => most[k] !== undefined && most[k] !== mine[k]).length;
     const verdictText = zeros
       ? (peers.mppt ? 'Only its MPPT parameters are reported.' : 'Nothing here can be checked: its firmware answers the same whatever it holds.')
@@ -4377,14 +4407,14 @@
       const groups = SMRT_GROUPS.map(([title, items]) => {
         const shown = items.filter(([code]) => mine[code] !== undefined);
         if (!shown.length) return '';
-        return `<div class="smart-group">${title}</div>` + shown.map(([code, label]) => {
+        return `<div class="smart-group">${title}</div>` + shown.map(([code, label, codes]) => {
           const diff = most[code] !== undefined && most[code] !== mine[code];
-          return `<div class="smart-row${r.differs && diff ? ' differs' : ''}"><span class="smart-name"><span>${label}</span><span class="smart-code">${code}</span></span>` +
+          return `<div class="smart-row${r.differs && diff ? ' differs' : ''}"><span class="smart-name"><span>${label}</span><span class="smart-code">${codes || code}</span></span>` +
             `<span class="smart-val">${topoEscape(mine[code])}</span><span class="smart-most">${topoEscape(most[code] ?? '—')}</span></div>`;
         }).join('');
       }).join('');
       const cut = t.length < SMRT_FIELDS.length
-        ? `<div class="smart-note">Not in a ${topoEscape(fam)}'s answer: the current limit, its threshold, minimum PWM and Discharge enabled. Its reply is cut short, so these never arrive.</div>` : '';
+        ? `<div class="smart-note">Not in this answer: the low-voltage current limit, over-voltage minimum PWM and base-memory override. It was cut short, as ${topoEscape(fam)} answers were while a CCA ran the bus, so these never arrived.</div>` : '';
       return [verdict + `<div class="smart-table"><div class="smart-cols"><span>Setting</span><span>This one</span><span>Most ${topoEscape(fam)}s</span></div>${groups}${cut}</div>`, mpptTable];
     }
   }
@@ -4471,11 +4501,22 @@
         ? `<div class="tap-sub">last ${new Date(m.tap.last_lost_unix * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>` : '';
       return `<td class="num">${t.polls.toLocaleString()}${unanswered}</td><td class="num">${t.lost.toLocaleString()}${last}</td>`;
     };
-    // A name, kept on the Pi and shown on the mesh map too.
+    // A name, kept by the monitor (on the ESP32, in its settings storage) and
+    // shown on the mesh map too.
     const name = t => `<td class="tap-name" data-tap="${topoEscape(t.addr)}">${t.name
       ? `<span>${topoEscape(t.name)}</span><button type="button" class="tap-rename" aria-label="Rename TAP ${topoEscape(t.addr)}" title="Rename"></button>`
       : `<button type="button" class="tap-rename add">Add a name</button>`}</td>`;
-    setHTML(box.querySelector('tbody'), (v.taps || []).length ? v.taps.map(t => `<tr>
+    // A TAP answering polls (in the last day) whose firmware no master has
+    // read yet: a monitor that only listens hears that read only when a
+    // master brings a TAP up, so it gets a row with what is known so far.
+    const taps = [...(v.taps || [])];
+    for (const p of v.polled || [])
+      if (Date.now() - p.heard_unix_ms < 86400000 && !taps.some(t => t.addr === p.tap)) taps.push({ addr: p.tap, name: p.name, unread: true });
+    if (taps.length > (v.taps || []).length) taps.sort((a, b) => a.addr.localeCompare(b.addr));
+    const unread = '<td class="mono tap-fw" title="Read when a bus master brings the TAP up">—</td>';
+    setHTML(box.querySelector('tbody'), taps.length ? taps.map(t => t.unread ? `<tr>
+        ${name(t)}<td class="mono">${topoEscape(t.addr)}</td>${id(t.addr)}<td class="tap-model" title="Read when a bus master brings the TAP up">—</td>
+        ${unread}${radio(t.addr)}<td>—</td><td>—</td>${busOf(t.addr)}</tr>` : `<tr>
         ${name(t)}<td class="mono">${topoEscape(t.addr)}</td>${id(t.addr)}${model(t)}
         <td class="mono tap-fw" title="${topoEscape(t.version || '')}${t.previous ? ` · was ${topoEscape(t.previous)}` : ''}"><strong>${topoEscape((t.version || '').replace(boardRe, '').replace(/\s+\d{1,2}:\d{2}:\d{2}$/, ''))}</strong></td>
         ${radio(t.addr)}<td>${when(t.since_unix_ms)}</td><td>${when(t.last_unix_ms)}</td>${busOf(t.addr)}</tr>`).join('')
@@ -5517,9 +5558,9 @@
       nodesData = {
         nodes: (await nR.json()).nodes || [],
         devices: (await dR.json()).devices || [],
-        // Pi build: each device's firmware, as heard on the bus.
-        versions: PLATFORM === 'linux'
-          ? await apiFetch('/api/versions').then(r => r.ok ? r.json() : null).catch(() => null) : null,
+        // Each device's firmware, settings and ratings, as heard on the bus
+        // (both builds; an older ESP32 answers 404, and the detail stays empty).
+        versions: await apiFetch('/api/versions').then(r => r.ok ? r.json() : null).catch(() => null),
         // Pi build: each string's panel nameplate, against its optimizers' ratings.
         strings: PLATFORM === 'linux'
           ? await apiFetch('/api/strings').then(r => r.ok ? r.json() : null).catch(() => null) : null,
@@ -5570,7 +5611,8 @@
     const b = e.target.closest('button.tap-rename');
     if (!b) return;
     const td = b.closest('td.tap-name'), tap = td.dataset.tap;
-    const t = ((nodesData.versions || {}).taps || []).find(x => x.addr === tap) || {};
+    const v = nodesData.versions || {};
+    const t = (v.taps || []).find(x => x.addr === tap) || (v.polled || []).find(x => x.tap === tap) || {};
     td.innerHTML = `<input class="input compact" maxlength="32" aria-label="Name for TAP ${topoEscape(tap)}" placeholder="e.g. Garage">`;
     const input = td.querySelector('input');
     input.value = t.name || '';
@@ -6464,9 +6506,10 @@
   document.getElementById('logs-level').addEventListener('change', () => { renderLogs(); updateLogsMeta(); });
   document.getElementById('logs-search').addEventListener('input', () => { renderLogs(); updateLogsMeta(); });
 
-  // ---- Bus log and the reconfiguration alarm (Pi) ----
+  // ---- Bus log and the reconfiguration alarm ----
   // The banner is checked every 10 s wherever you are; the page polls every
-  // 2 s while open.
+  // 2 s while open. The ESP32 only listens, so it never has an alarm: it is
+  // asked only while the page is open.
   let busLast = null, busPaused = false, busCat = 'all';
   const busOpen = new Set();  // exchanges whose bytes are showing, by id
   let busNames = {}, busNamesAt = 0;  // node id (upper-case hex) → panel name, from /api/devices
@@ -6535,7 +6578,8 @@
       tile('Discovery', n(c.discovery), s.discovery || 'not read yet') +
       tile('Queries', n(c.queries), `${n(s.delivered)} delivered · ${n(s.not_delivered)} not`) +
       tile('Housekeeping', n(c.housekeeping), 'table pages, preferred gateways, PV') +
-      tile('Round trip', s.rt_median_ms == null ? '—' : `${s.rt_median_ms} ms`, s.rt_max_ms == null ? 'median' : `median · max ${s.rt_max_ms} ms`) +
+      (s.timed === false ? tile('Round trip', '—', 'not timed here')
+        : tile('Round trip', s.rt_median_ms == null ? '—' : `${s.rt_median_ms} ms`, s.rt_max_ms == null ? 'median' : `median · max ${s.rt_max_ms} ms`)) +
       tile('Other master', n(s.other_master), s.reconfig ? `${n(s.reconfig)} reconfigure the TAP` : 'none heard', s.other_master || s.reconfig);
   }
   function renderBus() {
@@ -6549,6 +6593,8 @@
       `${l}<span class="n">${all.filter(e => busIn(e, k)).length}</span></button>`).join('');
     if (chipId) document.querySelector(`#bus-chips .bx-chip[data-c="${chipId}"]`)?.focus({ preventScroll: true });
     busStrip(busLast.stats || {});
+    if ((busLast.stats || {}).timed === false) document.getElementById('bus-note-rt').textContent =
+      "This monitor doesn't time round trips: it reads the bus about every 16 ms, too coarse for replies that come back within a few.";
     const shown = all.filter(busShown);
     const box = document.getElementById('bus-box');
     const stick = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
@@ -6581,8 +6627,8 @@
     if (r && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); busToggle(r); }
   });
   async function refreshBus(force) {
-    if (PLATFORM !== 'linux') return;
     const open = document.getElementById('view-buslog').classList.contains('active');
+    if (PLATFORM !== 'linux' && !open) return;
     if (!force && open && busPaused) return;
     try {
       const r = await apiFetch(open ? '/api/bus' : '/api/bus?limit=1');
@@ -8139,14 +8185,14 @@
   }
 
   // ============================================================
-  // Topology tabs (Pi): Mesh, the optimizers around the TAP each reports
-  // through, and Layout, the panel layout below. The ESP32 has no
-  // /api/mesh and shows Layout alone.
+  // Topology tabs: Mesh, the optimizers around the TAP each reports
+  // through, Layout, the panel layout below, and Array, where each panel
+  // sits. Both builds have all three.
   function topologyTab(name) {
     if (!name) { try { name = localStorage.getItem('topology-tab'); } catch (e) {} }
-    // The Pi opens on Mesh unless Layout was picked; the ESP32 has only Layout.
-    if (PLATFORM !== 'linux') name = 'layout';
-    else if (name !== 'layout' && name !== 'array') name = 'mesh';
+    // Until one is picked: the Pi opens on Mesh, the ESP32 on Layout, as it
+    // always has (a new board's mesh map is empty until the reports come in).
+    if (name !== 'mesh' && name !== 'layout' && name !== 'array') name = PLATFORM === 'linux' ? 'mesh' : 'layout';
     document.querySelectorAll('#topology-tabs [role="tab"]').forEach(t => {
       const on = t.dataset.tab === name;
       t.setAttribute('aria-selected', String(on));
@@ -8163,7 +8209,7 @@
   }));
   document.getElementById('topology-tabs').addEventListener('keydown', e => {
     if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
-    const tabs = [...document.querySelectorAll('#topology-tabs [role="tab"]')];
+    const tabs = [...document.querySelectorAll('#topology-tabs [role="tab"]')].filter(t => t.style.display !== 'none');
     const i = tabs.indexOf(document.activeElement);
     if (i < 0) return;
     const next = tabs[(i + 1) % tabs.length];
@@ -8178,7 +8224,7 @@
   });
 
   // ---- the array: each panel where it sits, coloured by its power ----
-  // Topology > Array (Pi). /api/array holds the positions (one grid cell per
+  // Topology > Array. /api/array holds the positions (one grid cell per
   // panel; touching cells are neighbours on the arr), /api/devices the
   // live power. Edit array opens a tray of what isn't placed yet.
   const arr = { saved: { panels: [], taps: [] }, draft: null, devices: [], tapNames: {}, sel: null, loaded: false, helpers: false, pgw: {}, pgwAt: 0 };
@@ -8192,11 +8238,15 @@
 
   async function refreshArray(devicesOnly) {
     try {
+      // The ESP32 runs no bus and has no mesh map: its TAPs, and their
+      // names, are the ones /api/versions has, each TAP answering polls.
+      const pi = PLATFORM === 'linux';
       const jobs = [apiFetch('/api/devices').then(r => r.ok ? r.json() : { devices: [] }),
-                    apiFetch('/api/master').then(r => r.ok ? r.json() : {}).catch(() => ({}))];
+                    pi ? apiFetch('/api/master').then(r => r.ok ? r.json() : {}).catch(() => ({})) : Promise.resolve({})];
       if (!devicesOnly) {
         jobs.push(apiFetch('/api/array').then(async r => { if (!r.ok) throw await httpFail(r); return r.json(); }));
-        jobs.push(apiFetch('/api/mesh').then(r => r.ok ? r.json() : {}).catch(() => ({})));
+        jobs.push(pi ? apiFetch('/api/mesh').then(r => r.ok ? r.json() : {}).catch(() => ({}))
+                     : apiFetch('/api/versions').then(r => r.ok ? r.json() : {}).catch(() => ({})));
       }
       const [dev, master, saved, mesh] = await Promise.all(jobs);
       arr.devices = (dev && dev.devices) || [];
@@ -8205,7 +8255,12 @@
       ((master && master.active !== false && master.taps) || []).forEach(t => { if (t.pgw) arr.pgw[t.id] = t.pgw; });
       arr.pgwAt = Date.now();
       if (saved) { arr.saved = { panels: saved.panels || [], taps: saved.taps || [] }; arr.loaded = true; }
-      if (mesh && mesh.taps) mesh.taps.forEach(t => { arr.tapNames[t.id] = t.name || ''; });
+      if (pi && mesh && mesh.taps) mesh.taps.forEach(t => { arr.tapNames[t.id] = t.name || ''; });
+      if (!pi && mesh) {
+        (mesh.taps || []).forEach(t => { arr.tapNames[t.addr] = t.name || arr.tapNames[t.addr] || ''; });
+        (mesh.polled || []).filter(t => Date.now() - t.heard_unix_ms < 86400000)
+          .forEach(t => { arr.tapNames[t.tap] = t.name || arr.tapNames[t.tap] || ''; });
+      }
       document.getElementById('array-error').textContent = '';
     } catch (e) {
       document.getElementById('array-error').textContent = `Couldn't load the array: ${failText(e)}`;

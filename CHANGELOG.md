@@ -9,6 +9,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The ESP32 can draw the array too.** Topology › Array places each panel
+  where it sits, shaded by its power, and each TAP where it's mounted, as on
+  the Pi. The board keeps the drawing in its settings storage (NVS), so it
+  survives a reflash, and saves it by barcode, so it stays right after the
+  TAP renumbers the optimizers.
+- **The ESP32 has the mesh map too.** Topology › Mesh shows each optimizer
+  around its TAP, coloured by the reports lost today and its signal over a
+  day, and which optimizer it joined through, as on the Pi. Everything it
+  keeps (~3 KB an optimizer) is in PSRAM. With history on, it's saved to
+  flash every 15 minutes, a piece at a time so the bus is never left unread,
+  and a reboot doesn't blank the map. `/api/devices` names each optimizer's
+  TAP on the ESP32 too.
+
+- **The ESP32 has the Bus traffic page too.** It lists each request on the
+  bus with its reply, round trip and meaning, the last 300 of them, under the
+  last five minutes in numbers, as the Pi's does. It keeps them in PSRAM. As
+  a listener it never raises the alarm for another device reconfiguring the
+  TAP; only a monitor running the bus does.
+
+- **An ESP32 standby can run a system with more than one TAP** (experimental,
+  not yet run on hardware). While another master runs the bus, it learns each
+  TAP that master polls and keeps the list in flash, so on taking over it
+  polls them all, not only the one at `gateway_id`. To fix the list instead,
+  give `tigo_master` a `taps:` list. Nothing changes for one TAP.
+
+- **The ESP32's Devices page shows each optimizer's firmware, settings and
+  rating, and the TAPs, as the Pi's does.** It reads them from what the bus
+  carries, so they appear once a master asks the optimizers: a Pi, a CCA,
+  or an ESP32 master with `queries: true`. A board with history keeps them
+  across a reboot. The ESP32 lists a changed setting only when it runs the
+  bus, and as a listener it never does. TAPs can be named there too; the
+  ESP32 keeps up to eight names in its settings storage.
+  Each TAP is listed as soon as it answers polls; its firmware and radio
+  fill in when a master next brings it up, which a listener may not hear
+  for days.
+
+## [2.2.0] - 2026-11-18
+
+### Added
+
 - **Optimizers over their rating, or with a panel rated above them, are
   marked (Raspberry Pi and other Linux).** From each optimizer's own rating
   (its answer to the Pi's calibration read): one taking more watts or volts
@@ -179,6 +219,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **An optimizer's protection settings read for what they are (Raspberry
+  Pi and other Linux).** The settings panel showed "Current limit 1.0000 A"
+  beside optimizers making 9 A. That limit only applies below a 32 V input,
+  so the two fields now read as one: "Current limit at low input voltage:
+  1.0 A below 32 V". Over-voltage minimum PWM reads "9 (3.5%)", or "0 (can
+  switch off)" on K8.0131 firmware, and the last field reads Off or On as
+  "Base-memory override" rather than "Discharge enabled 00". "Shut down on
+  AC loss" reads On or Off: the field is active-low, so the 0 it showed meant
+  On, rapid shutdown enabled. None of these
+  is compared with other optimizers: a CCA never writes them, and they
+  differ by firmware version.
+
 - **The name is TigoMonitor, one word, everywhere.** The web UI's sidebar,
   tab title and sign-in page, the docs site, and the Raspberry Pi's Home
   Assistant device all said "Tigo Monitor" while the rest of the copy said
@@ -279,6 +331,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The ESP32 build failed on ESPHome 2026.11.** ESPHome moved
+  `get_mac_address_pretty()` out of the header we include, so
+  `tigo_web_server.cpp` stopped compiling. We now use the buffer form,
+  which exists in 2026.10 and 2026.11 alike. No config change needed.
 - **Optimizers could run each day without their start setting (Raspberry
   Pi and other Linux).** Running the bus, the Pi sets each optimizer's
   StartPWM, the level it starts producing at, as the CCA does. After a
@@ -312,7 +368,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   "91% of 2.40 kW rated" on its own line, and the Alerts heading has room
   above it. The History chart's axis labels stay readable over the curve.
   Two Diagnostics headers and the CCA Status header no longer show a stray
-  "—".
+  "—". Diagnostics' six Bus cards split evenly (three and three, or two a
+  row) instead of leaving one alone on a second row, and on Devices an
+  optimizer's rating sits beside its firmware version, so rated rows are no
+  taller than the rest.
 
 - **An optimizer no TAP lists can be forgotten (Raspberry Pi and other
   Linux).** One a CCA listed and was later removed (in EI, say) stayed in
@@ -1206,7 +1265,8 @@ None - All changes are backward compatible. Web authentication and API tokens ar
 ## Initial Development
 Previous commits were part of the initial development phase. This is the first official release with comprehensive feature set and documentation.
 
-[Unreleased]: https://github.com/RAR/esphome-tigomonitor/compare/v2.1.0...HEAD
+[Unreleased]: https://github.com/RAR/esphome-tigomonitor/compare/v2.2.0...HEAD
+[2.2.0]: https://github.com/RAR/esphome-tigomonitor/compare/v2.1.0...v2.2.0
 [2.1.0]: https://github.com/RAR/esphome-tigomonitor/releases/tag/v2.1.0
 [2.0.1]: https://github.com/RAR/esphome-tigomonitor/releases/tag/v2.0.1
 [2.0.0]: https://github.com/RAR/esphome-tigomonitor/releases/tag/v2.0.0

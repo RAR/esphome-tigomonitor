@@ -184,7 +184,8 @@ export const routes = {
     inverters: [],
     strings: strings.map((s) => ({ label: s.label, panel_rating_w: RATING })),
   },
-  // Pi build only: firmware heard on the bus. One optimizer was updated.
+  // Firmware, settings and ratings heard on the bus, and the TAPs' names
+  // (both builds). One optimizer was updated.
   '/api/versions': {
     taps: [{ addr: '1201', model: 'Mgate', version: 'G8.59 Jan  1 2026 10:00:00 GW-H150.6.0S0.12', previous: '',
              since_unix_ms: 1767225600000, last_unix_ms: 1767225600000, name: 'Garage' }],
@@ -193,17 +194,22 @@ export const routes = {
     changes: [{ unix_ms: now * 1000 - 3 * 60000, addr: devices[3].addr, what: 'MPPT', before: '12 40 08 12', after: '12 40 0A 12' }],
     // Each TAP's MAC, from its answer to GET_MAC; made up.
     ids: [{ tap: '1201', mac: '04C05B0000001234', heard_unix_ms: 1767225600000 }],
+    // Each TAP answering polls, and when it last did.
+    polled: [{ tap: '1201', heard_unix_ms: now * 1000 - 1000 }],
     // Two on the H9 firmware, as D6-D10 are on the roof.
     optimizers: devices.map((d, i) => ({ addr: d.addr, model: 'Mnode', version: i === 4 ? 'K8.0130 (2D)' : i === 5 || i === 6 ? 'H9.0018 (40)' : 'K8.0120 (2D)',
       previous: i === 4 ? 'K8.0120 (2D)' : '', since_unix_ms: 1767225600000 + i * 60000, last_unix_ms: 1767225600000 + i * 60000 })),
-    // Answers to ^00Smrt: the roof's usual 13 tokens from the K8s, one of
-    // them with a different HwVout; the two H9s in their all-zero form, one
-    // not yet stored; the rest not answered yet.
+    // Answers to ^00Smrt: the K8s' whole 15 fields, as they answer the Pi
+    // (one with a newer firmware's OvMinPwm 0); one cut at 13 tokens, as
+    // K8 answers were in the CCA's day, with a different HwVout; the two
+    // H9s in their all-zero form, one not yet stored; the rest not
+    // answered yet.
     settings: devices.slice(0, 8).map((d, i) => ({ addr: d.addr,
       settings: i === 5 ? '0000 0000 0000 0000 0000 0000 0000 0000 0000 N 00 0000 0000 0000 00'
               : i === 6 ? '0000 0000 0000 0000 0000 0000 0000 0000 0000 S 00 0000 0000 0000 00'
               : i === 7 ? '0FFF 0000 0E00 0008 00C8 00C8 000A 0154 0154 S 00 01'
-              : '0FFF 0000 0FFF 0008 00C8 00C8 000A 0154 0154 S 00 01',
+              : i === 4 ? '0FFF 0000 0FFF 0008 00C8 00C8 000A 0154 0154 S 00 0190 0280 0000 00'
+              : '0FFF 0000 0FFF 0008 00C8 00C8 000A 0154 0154 S 00 0190 0280 0009 00',
       stored: i !== 5, heard_unix_ms: 1767225600000 + i * 60000 })),
     // The four MPPT parameters from each answer to ^00Mppt: the roof's
     // 12 40 08 12 from every firmware, one with a different PIV current.
@@ -440,7 +446,7 @@ export const piRoutes = {
     alarm: { active: false, count: 0, first_unix_ms: 0, recent: [] },
     stats: { window_s: 300, polls: 13180, polls_lost: 0, polls_empty: 12950, polls_refused: 0,
       count: { discovery: 4, queries: 4, housekeeping: 7, bringup: 0, reconfig: 0, other: 0 }, delivered: 3, not_delivered: 1,
-      other_master: 0, reconfig: 0, rt_median_ms: 4, rt_max_ms: 31,
+      other_master: 0, reconfig: 0, timed: true, rt_median_ms: 4, rt_max_ms: 31,
       discovery: 'Open, 552 s left · 24 of the 24 in the table have joined' },
     exchanges: piExchanges,
   },

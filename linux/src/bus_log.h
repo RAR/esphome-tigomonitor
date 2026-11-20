@@ -10,6 +10,7 @@
 // It also keeps the firmware versions heard (the optimizers' answers to
 // ^00Version, the TAP's to VERSION) in <state_dir>/versions.json.
 
+#include "bus_book.h"
 #include "bus_watch.h"
 #include "tigo_protocol.h"
 
@@ -29,8 +30,7 @@ class BusLog {
  public:
   static const size_t KEEP_ALARMS = 20;
 
-  explicit BusLog(std::string alarm_path, std::string versions_path = "")
-      : path_(std::move(alarm_path)), versions_path_(std::move(versions_path)) {}
+  explicit BusLog(std::string alarm_path, std::string versions_path = "");
   void load();
   void feed_rx(const char *data, size_t n);  // read off the bus
   // This monitor's master sent it; its last byte left late_ms before now.
@@ -44,9 +44,9 @@ class BusLog {
   bool alarm_active() const;
   // "GatewayCfg write (…), 3 frames, last 2026-11-07 01:02:03 UTC" for health.
   std::string alarm_summary() const;
-  // /api/bus: the alarm, the last 5 minutes in numbers, then up to limit of
-  // the newest exchanges.
-  nlohmann::json to_json(size_t limit) const;
+  // /api/bus, as JSON text: the alarm, the last 5 minutes in numbers, then
+  // up to limit of the newest exchanges.
+  std::string to_json(size_t limit) const;
   // /api/versions: {taps: [...], optimizers: [...], radios: [...], ids: [...],
   // settings: [...]}, each by address; radios are the TAPs' channel, SLT and
   // SLm as last read, ids each TAP's MAC, settings each optimizer's answer to
@@ -65,7 +65,7 @@ class BusLog {
   // address another optimizer has taken since (a gateway renumbering) then
   // starts that address's record afresh instead of logging a change. Called
   // with this log's lock held, so it must not call back in.
-  void set_barcode_of(std::function<std::string(uint16_t)> barcode_of) { barcode_of_ = std::move(barcode_of); }
+  void set_barcode_of(std::function<std::string(uint16_t)> barcode_of) { book_.set_barcode_of(std::move(barcode_of)); }
   // Whether this monitor runs the bus now. While another master runs it,
   // what an optimizer reports changed is that master's doing: the new value
   // is kept, but not listed as a change or warned of; and a reconfiguration
@@ -79,33 +79,11 @@ class BusLog {
   };
   void on_frame_(const esphome::tigo_monitor::master::Frame &f, bool ours, int64_t now);
   void load_versions_();
-  void change_(int64_t now, uint16_t addr, const char *what, const std::string &before, const std::string &after);
-  void check_owner_(uint16_t addr);
-  struct Change {
-    int64_t unix_ms;
-    uint16_t addr;
-    std::string what, before, after;
-  };
-  std::deque<Change> changes_;  // newest last
-  static const size_t KEEP_CHANGES = 50;
-
   std::string path_, versions_path_;
-  esphome::tigo_monitor::master::VersionBook versions_;
-  // Each TAP's radio settings, as last read (by anyone), and when.
-  std::map<uint16_t, std::pair<esphome::tigo_monitor::master::TapRadio, int64_t>> radios_;
+  // The TAPs' and optimizers' firmware, settings, ratings and radios, shared
+  // with the ESP32 (bus_book.h). Its dirty flag: versions.json to write.
+  esphome::tigo_monitor::master::BusBook book_;
   nlohmann::json versions_json_(bool with_pans) const;
-  // Each TAP's MAC, its ID, from its last answer to GET_MAC, and when.
-  std::map<uint16_t, std::pair<std::string, int64_t>> tap_ids_;
-  // Each optimizer's MPPT parameters, from its answer to ^00Mppt, and when.
-  std::map<uint16_t, std::pair<esphome::tigo_monitor::master::MpptSeen, int64_t>> mppts_;
-  // Each optimizer's answer to ^00Smrt, as last heard, and when.
-  std::map<uint16_t, std::pair<esphome::tigo_monitor::master::SmartSeen, int64_t>> smarts_;
-  // Each optimizer's rating, from its answer to ^00Cal, and when.
-  std::map<uint16_t, std::pair<esphome::tigo_monitor::master::CalSeen, int64_t>> cals_;
-  // Which barcode each address last answered for (versions.json, not the API).
-  esphome::tigo_monitor::master::AddressOwners owners_;
-  std::function<std::string(uint16_t)> barcode_of_;
-  bool versions_dirty_ = false;
   std::atomic<bool> runs_bus_{false};
   mutable std::mutex mu_;
   esphome::tigo_monitor::master::BusWatch watch_;

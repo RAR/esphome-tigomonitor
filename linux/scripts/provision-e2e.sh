@@ -24,6 +24,8 @@ try:
     print(r.status, r.read().decode())
 except urllib.error.HTTPError as e:
     print(e.code, e.read().decode())
+except Exception:  # not up yet, or gone: the wait loops look for 000
+    print('000 {}')
 PY
 }
 code() { req "$@" | cut -d' ' -f1; }

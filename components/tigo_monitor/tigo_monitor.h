@@ -15,6 +15,7 @@
 #ifdef USE_BUTTON
 #include "esphome/components/button/button.h"
 #endif
+#include <memory>
 #include <vector>
 #include <map>
 #include <set>
@@ -126,6 +127,39 @@ inline bool operator!=(const std::string &a, const psram_string &b) { return !(b
 #define TIGO_LAYOUT_ALLOCATOR ::PSRAMAllocator
 #endif
 #include "tigo_layout.h"
+
+// The bus decoder and the Devices page's book (bus_watch.h, bus_book.h) keep
+// their strings, lists and maps in PSRAM, as the layout does: plain std types
+// come from the internal heap, which five minutes of poll marks ran out on
+// the rig (2026-11-19).
+#ifdef USE_ESP_IDF
+#define TIGO_BUS_ALLOCATOR ::PSRAMAllocator
+#endif
+#include "bus_book.h"
+#include "link_stats.h"
+#include "mesh_history.h"
+
+#ifdef USE_ESP_IDF
+// An object of its own in PSRAM, freed back there (bus_watch_, bus_book_).
+template <class T> struct PsramDelete {
+  void operator()(T *p) const {
+    if (p == nullptr) return;
+    p->~T();
+    esphome::tigo_monitor::psram_free_impl(p);
+  }
+};
+template <class T> using psram_unique = std::unique_ptr<T, PsramDelete<T>>;
+template <class T, class... A> psram_unique<T> make_psram_unique(A &&...a) {
+  void *mem = esphome::tigo_monitor::psram_malloc_impl(sizeof(T));
+  if (mem == nullptr) esphome::tigo_monitor::psram_alloc_failed_abort(sizeof(T));
+  return psram_unique<T>(new (mem) T(std::forward<A>(a)...));
+}
+#else
+template <class T> using psram_unique = std::unique_ptr<T>;
+template <class T, class... A> psram_unique<T> make_psram_unique(A &&...a) {
+  return psram_unique<T>(new T(std::forward<A>(a)...));
+}
+#endif
 
 namespace esphome {
 namespace tigo_monitor {
@@ -607,6 +641,32 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
     StateLock lock(state_mutex_);
     fn();
   }
+  // The Devices page's firmware, settings and ratings, as heard on the bus
+  // (bus_book.h), and the Bus traffic page's exchanges (bus_watch.h), kept
+  // from the first call on: tigo_server's setup makes them, so a build
+  // without the web UI never pays for them. Read them inside
+  // with_state_lock(); null until then.
+  void enable_bus_book();
+  const master::BusBook *bus_book() const { return bus_book_.get(); }
+  const master::BusWatch *bus_watch() const { return bus_watch_.get(); }
+  // The mesh map (link_stats.h, mesh_history.h), made with the bus book:
+  // each optimizer's TAP, link and joins, and reports and losses by day.
+  // Inside with_state_lock(); null until enable_bus_book().
+  const link::LinkStats *mesh_links() const { return mesh_links_.get(); }
+  const mesh_history::LossBook *mesh_losses() const { return mesh_losses_.get(); }
+  const master::Vec<mesh_history::JoinEntry> *mesh_joins() const { return mesh_joins_.get(); }
+  // Notes today's reports and losses so far into the loss book, as the Pi
+  // does before reading it. today: "YYYY-MM-DD", for the page.
+  void mesh_note_today(master::Str *today = nullptr);
+  // A TAP's name (set_tap_name), or "". Inside with_state_lock().
+  master::Str tap_name(uint16_t tap) const;
+  static const size_t MESH_LOSS_DAYS = 30;
+  static const int64_t MESH_JOIN_DAYS = 30;
+  // A TAP's name on the Devices page, kept in the settings storage (eight
+  // TAPs at most) and written into /api/versions; an empty name clears it.
+  // Inside with_state_lock(), after enable_bus_book(). nullptr when taken,
+  // else why not, for the page.
+  const char *set_tap_name(const std::string &tap, const std::string &name);
   int get_number_of_devices() const { return number_of_devices_; }
   const std::string& get_cca_ip() const { return cca_ip_; }
   bool get_sync_cca_on_startup() const { return sync_cca_on_startup_; }
@@ -727,6 +787,7 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   // Frame processing
   void process_serial_data();
   void process_frame(const frame_string &frame);
+  void process_frame_(const frame_string &frame);
 
   // Frame type handlers
   void process_power_frame(const frame_string &frame);
@@ -1072,6 +1133,59 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   std::string cfg_def_cca_ip_;
   
   // No timing variables needed - ESPHome handles update intervals
+
+  // See enable_bus_book(). Kept as BusWatch saw it, then on the history's
+  // flash, if there is one, at most every BUS_BOOK_SAVE_EVERY_MS.
+  psram_unique<master::BusWatch> bus_watch_;
+  psram_unique<master::BusBook> bus_book_;
+  // Set by process_frame_ for the frame it walked: its CRC held, it held
+  // packets, one an optimizer's answer. The bus book decodes a poll reply
+  // only for an answer; the rest it counts from these.
+  bool frame_crc_ok_ = false, frame_has_packets_ = false, frame_has_answer_ = false;
+  void feed_bus_book_one_(const frame_string &frame);
+  bool bus_book_loaded_ = false;
+  uint32_t bus_book_saved_ms_ = 0;
+  static const uint32_t BUS_BOOK_SAVE_EVERY_MS = 15UL * 60UL * 1000UL;
+  void feed_bus_book_(const frame_string &frame);
+  void keep_bus_book_();
+  // A file written a piece a loop, to a temporary file renamed into place at
+  // the end: written at once, a large one stops the loop reading the bus for
+  // longer than the UART's buffer holds (the bus book's 12 KB held it 223 ms,
+  // the mesh map's ~110 KB would hold it over a second).
+  struct FileSave {
+    psram_unique<master::Str> text;  // null when no save is under way
+    size_t at = 0;
+    FILE *f = nullptr;
+  };
+  FileSave bus_book_save_, mesh_save_;
+  // The next piece of save, under the history's flash lock. False while
+  // there is more to write (or the lock was busy); true when it ended, ok
+  // then saying whether the file is in place.
+  bool save_piece_(FileSave &save, const char *tmp_path, const char *path, bool &ok);
+  // See mesh_links(). Fed from process_power_frame and process_09_frame;
+  // kept on the history's flash by keep_mesh_, written a piece a loop.
+  psram_unique<link::LinkStats> mesh_links_;
+  psram_unique<mesh_history::LossBook> mesh_losses_;
+  psram_unique<master::Vec<mesh_history::JoinEntry>> mesh_joins_;
+  uint16_t frame_tap_ = 0;  // the TAP the power frame being walked came through
+  bool mesh_loaded_ = false;
+  uint32_t mesh_saved_ms_ = 0, mesh_pruned_ms_ = 0;
+  FILE *mesh_file_ = nullptr;  // the saved copy, while it's read back
+  int mesh_day_(master::Str *date) const;
+  void feed_mesh_report_(const DeviceData &d);
+  void feed_mesh_join_(const frame_string &packet);
+  void keep_mesh_();
+  bool restore_mesh_line_(const char *line);
+  // See set_tap_name(). Also the stored form; saved from the loop, since the
+  // settings storage is not the web server task's to write.
+  struct TapNames {
+    static const int MAX = 8, LEN = 32;
+    uint16_t addr[MAX];
+    char name[MAX][LEN + 1];
+  };
+  psram_unique<TapNames> tap_names_;
+  ESPPreferenceObject tap_names_pref_;
+  bool tap_names_dirty_ = false;
 
 #ifdef TIGO_TSDB_AVAILABLE
   TigoHistory history_;

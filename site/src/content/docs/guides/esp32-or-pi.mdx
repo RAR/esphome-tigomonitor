@@ -30,13 +30,14 @@ below.
 |---|---|---|
 | Dashboard, Topology, Devices, CCA Info, Tigo Cloud | Yes | Yes |
 | [Laying out the array by hand](/esphome-tigomonitor/guides/web-server/#laying-out-the-array-by-hand) | Yes, or inverters in YAML | Yes |
+| [Drawing the array](/esphome-tigomonitor/guides/raspberry-pi/#draw-the-array): each panel where it sits, shaded by its power | Yes, kept in the board's settings storage. | Yes. |
 | History | On the board's flash: a reading every 30 minutes by default, about two years ([Saving History to Flash](/esphome-tigomonitor/guides/tsdb-integration/)). | On the SD card: a reading every minute, for two years. |
 | CCA Info from the CCA | Over Bluetooth with `cca_source: ble`, or HTTP for CCA firmware before 4.0.4. | Over the Pi's Bluetooth, finding the nearest CCA by itself; HTTP for firmware before 4.0.4. |
 | A display on the board | Optional, on an AtomS3R. | No |
 | [New and missing optimizers](/esphome-tigomonitor/guides/raspberry-pi/#new-and-missing-optimizers) | No | A notice for a new one, tags for missing ones, and both counts in Home Assistant. |
-| Optimizer and TAP firmware, optimizer settings | No | On the Devices page, from what the bus carries. |
-| [Mesh map](/esphome-tigomonitor/guides/raspberry-pi/#see-which-optimizers-have-a-weak-link) | No | Each optimizer's link: reports lost today, signal over a day, and which optimizer it joined through. |
-| Bus traffic | No | Bus → Traffic: each request on the bus with its reply and what it means. |
+| Optimizer and TAP firmware, optimizer settings | On the Devices page, from what the bus carries, once a master asks the optimizers. Kept across a reboot with history on. | On the Devices page, from what the bus carries. |
+| [Mesh map](/esphome-tigomonitor/guides/raspberry-pi/#see-which-optimizers-have-a-weak-link) | Each optimizer's link: reports lost today, signal over a day, and which optimizer it joined through. Kept across a reboot with history on. | Each optimizer's link: reports lost today, signal over a day, and which optimizer it joined through. |
+| Bus traffic | Each request on the bus with its reply and what it means. It only listens, so it never raises the alarm for another device reconfiguring the TAP. | Each request on the bus with its reply and what it means, and an alarm if another device reconfigures the TAP. |
 | The service's log | Through ESPHome's logs. | Diagnostics → Logs, in the web UI. |
 | [HTTPS](/esphome-tigomonitor/guides/raspberry-pi/#use-https) | No | Yes, with your certificate. |
 | Web UI password | Yes | Yes |
@@ -53,4 +54,4 @@ Only the Pi has done it on a roof.
 | Bring up the TAP, housekeeping, query the optimizers, let queries change settings | Yes, in YAML | Yes, always, running the bus |
 | Read the TAP's radio settings, open discovery only when needed | No | Yes, always, running the bus |
 | [Turn the array's output off](/esphome-tigomonitor/guides/raspberry-pi/#turn-the-arrays-output-off) | `pv_output:`, a switch in ESPHome | A switch on System setup |
-| More than one TAP | No: a second TAP on the bus is reported and left alone. | No, the same. |
+| More than one TAP | Yes, not yet run on hardware. A standby learns them from the master it stands by for; or list them in `taps:`. | Yes, experimental. Each TAP gets its own join window and table. |

@@ -55,6 +55,7 @@ CONF_MONITOR_ID = "monitor_id"
 CONF_ROLE = "role"
 CONF_TAKEOVER_AFTER = "takeover_after"
 CONF_GATEWAY_ID = "gateway_id"
+CONF_TAPS = "taps"
 CONF_STARTUP = "startup"
 CONF_HOUSEKEEPING = "housekeeping"
 CONF_QUERIES = "queries"
@@ -80,7 +81,13 @@ def _gateway_id(value):
     # which must be neither the factory address nor past the top.
     value = cv.hex_int(value)
     if not 1 <= value <= 0x7FFE or value in (0x1234, 0x1235):
-        raise cv.Invalid("gateway_id must be 0x0001-0x7FFE, and not 0x1234 or 0x1235")
+        raise cv.Invalid("a TAP id must be 0x0001-0x7FFE, and not 0x1234 or 0x1235")
+    return value
+
+
+def _unique_taps(value):
+    if len(set(value)) != len(value):
+        raise cv.Invalid("taps: each TAP once")
     return value
 
 
@@ -103,6 +110,9 @@ CONFIG_SCHEMA = cv.All(
                 cv.Range(min=cv.TimePeriod(seconds=2), max=cv.TimePeriod(seconds=60)),
             ),
             cv.Optional(CONF_GATEWAY_ID, default=0x1201): _gateway_id,
+            # The TAPs to run, in polling order. Left out, a standby learns
+            # them from the master it stands by for and keeps them in flash.
+            cv.Optional(CONF_TAPS): cv.All(cv.ensure_list(_gateway_id), cv.Length(min=1, max=8), _unique_taps),
             cv.Optional(CONF_STARTUP, default=False): cv.boolean,
             cv.Optional(CONF_HOUSEKEEPING, default=False): cv.boolean,
             cv.Optional(CONF_QUERIES, default=False): cv.boolean,
@@ -197,6 +207,8 @@ async def to_code(config):
     if config[CONF_ROLE] == "standby":
         cg.add(var.set_standby(config[CONF_TAKEOVER_AFTER].total_seconds))
     cg.add(var.set_gateway_id(config[CONF_GATEWAY_ID]))
+    if CONF_TAPS in config:
+        cg.add(var.set_taps(config[CONF_TAPS]))
     cg.add(var.set_startup(config[CONF_STARTUP]))
     cg.add(var.set_housekeeping(config[CONF_HOUSEKEEPING]))
     cg.add(var.set_queries(config[CONF_QUERIES], config[CONF_OPTIMIZER_WRITES]))

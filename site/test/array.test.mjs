@@ -39,15 +39,24 @@ const DEVICES = [
   { addr: '0004', name: 'B1', string_label: 'String B', power: 0, peak_power: 300, stale: true, tap: '1201' },
 ];
 
+// The ESP32 ('esp32') has no /api/mesh or /api/master, and its devices name
+// no TAP: its TAPs come from /api/versions, each TAP answering polls.
+const VERSIONS = { taps: [], optimizers: [], radios: [], ids: [], settings: [], mppt: [], ratings: [], changes: [],
+  polled: [{ tap: '1201', heard_unix_ms: Date.now() - 1000, name: 'Garage' }, { tap: '1202', heard_unix_ms: Date.now() - 1000 }] };
 async function open(saved = { panels: [], taps: [] }, platform = 'linux', master = null) {
-  const api = { layout: JSON.parse(JSON.stringify(saved)), posts: [] };
+  const api = { layout: JSON.parse(JSON.stringify(saved)), posts: [], asked: [] };
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
   await ctx.route('**/api/**', async (route) => {
     const req = route.request();
     const path = new URL(req.url()).pathname.replace(/^.*(\/api\/)/, '$1');
     const json = (status, body) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
     if (path === '/api/status') return json(200, { ...routes['/api/status'], ...(platform === 'linux' ? { platform: 'linux' } : {}) });
-    if (path === '/api/devices') return json(200, { devices: DEVICES, count: DEVICES.length });
+    api.asked.push(path);
+    if (path === '/api/devices') {
+      const devices = platform === 'linux' ? DEVICES : DEVICES.map(({ tap, ...d }) => d);
+      return json(200, { devices, count: devices.length });
+    }
+    if (path === '/api/versions' && platform !== 'linux') return json(200, VERSIONS);
     if (path === '/api/array') {
       if (req.method() === 'POST') { const b = JSON.parse(req.postData()); api.posts.push(b); api.layout = b; return json(200, { saved: true }); }
       return json(200, api.layout);
@@ -61,19 +70,32 @@ async function open(saved = { panels: [], taps: [] }, platform = 'linux', master
   const errors = [];
   page.on('pageerror', (e) => errors.push(e.message));
   await page.goto(`http://127.0.0.1:${port}/#topology`, { waitUntil: 'networkidle' });
-  if (platform === 'linux') {
-    await page.click('#topology-tab-array');
-    await page.waitForSelector('#topology-array:not([hidden])');
-  }
+  await page.click('#topology-tab-array');
+  await page.waitForSelector('#topology-array:not([hidden])');
   return { page, ctx, api, errors };
 }
 const tile = (page, addr) => page.locator(`#array-canvas [data-kind="panel"][data-id="${addr}"]`);
 const chip = (page, addr) => page.locator(`#array-tray [data-kind="panel"][data-id="${addr}"]`);
 
-test('the ESP32 has no Array tab', async () => {
-  const { page, ctx } = await open(undefined, 'esp32');
-  await page.waitForTimeout(400);
-  assert.equal(await page.isVisible('#topology-tab-array'), false);
+test('the ESP32: Mesh, Layout and Array; its TAPs from what answers polls, named', async () => {
+  const { page, ctx, api, errors } = await open({
+    panels: [{ addr: '0002', x: 5, y: 3, portrait: true }, { addr: '0003', x: 6, y: 3, portrait: false }],
+    taps: [{ id: '1201', x: 8, y: 4 }],
+  }, 'esp32');
+  assert.equal(await page.isVisible('#topology-tab-mesh'), true);
+  assert.equal(await page.isVisible('#topology-tab-layout'), true);
+  await page.waitForSelector('#array-canvas .array-tile');
+  assert.match(await tile(page, '0002').textContent(), /400 W/);
+  assert.match(await page.getAttribute('#array-canvas .array-tap', 'aria-label'), /Garage/);
+  // 1202 answers polls and isn't placed: the tray offers it.
+  await page.click('#array-edit-btn');
+  assert.equal(await page.locator('#array-tray [data-kind="tap"]').count(), 1);
+  await page.click('#array-save-btn');
+  await page.waitForFunction(() => document.getElementById('array-edit-btn').style.display !== 'none');
+  assert.equal(api.posts.length, 1);
+  assert.deepEqual(api.posts[0].taps, [{ id: '1201', x: 8, y: 4 }]);
+  assert.equal(api.asked.includes('/api/master'), false);  // it runs no bus
+  assert.deepEqual(errors, []);
   await ctx.close();
 });
 

@@ -26,7 +26,7 @@ setup).
 | **Devices** | The raw list of every panel the device has ever seen. You can export it to a file as a backup. On the Raspberry Pi build it also lists the TAP, each optimizer's and the TAP's firmware as heard on the bus, and any optimizer heard that the TAP doesn't list, such as a spare that still has your network's key: kept off the Dashboard and the mesh map as the CCA keeps its aliens, with **Forget** to clear it. While it runs the bus, each TAP's polls and dropouts are in the TAP table. Click an optimizer to see everything about it under its row. |
 | **Settings** | Change settings, generate config, reset counters, restart the device. One tab per area; on the Raspberry Pi build, Bus, MQTT, Inverters and Web UI too. |
 | **Diagnostics** | Is it healthy? Memory, WiFi signal, how many messages it's missing. On the Raspberry Pi build, its Logs tab shows the service's log, and while it runs the bus a Bus section shows the discovery window, polls, the longest pause, housekeeping and optimizer queries. |
-| **Bus traffic** | Raspberry Pi build only. Each request on the bus with its reply, how long the reply took and what it means, under a strip of the last 5 minutes, filtered by kind. A banner says if another device reconfigures the TAP. |
+| **Bus traffic** | Each request on the bus with its reply, how long the reply took and what it means, under a strip of the last 5 minutes, filtered by kind. On the Raspberry Pi build, a banner says if another device reconfigures the TAP. |
 | **System setup** | Raspberry Pi build only. Guided steps for changing the hardware: adding, replacing or retiring an optimizer, or adding a TAP. While this monitor runs or stands by for the bus, it also has the PV output and discovery window switches. |
 | **CCA Info** | What your Tigo box reports about itself. |
 | **Tigo Cloud** | Tigo's own view of your system, if you've connected your account. |
@@ -76,7 +76,7 @@ it. You don't need any of it to use the dashboard.
 | Settings | `/app#settings` (the old `/app#tools` still works) |
 | Diagnostics | `/app#diagnostics` |
 | Diagnostics › Logs (Raspberry Pi) | `/app#logs` |
-| Bus traffic (Raspberry Pi) | `/app#buslog` |
+| Bus traffic | `/app#buslog` |
 | System setup (Raspberry Pi) | `/app#setup` (the old `/app#busmaster` opens it too) |
 | CCA Info | `/app#cca` |
 | Tigo Cloud | `/app#cloudstatus` (only when `cloud_import` is set) |
@@ -98,6 +98,14 @@ When `cloud_import` is set and a Tigo cloud token is connected, a **cloud status
 Inverters and strings can be renamed live from the Topology view (✎ next to each label). The override is stored in NVS via ESPHome's `global_preferences` API and is keyed by canonical name (the YAML inverter name or CCA string label). YAML stays the source of truth for identity — overrides are purely display labels and are used wherever those names appear: Topology, Dashboard inverter cards, Dashboard alert text, embedded strings inside `/api/inverters`.
 
 Empty override = falls back to canonical.
+
+### The mesh map
+
+**Topology › Mesh** shows each optimizer around the TAP it reports through, coloured by its link: the reports lost today and the signal over the last day, and, if it joined through another optimizer, which one. It works as on the Raspberry Pi build; see [See which optimizers have a weak link](/esphome-tigomonitor/guides/raspberry-pi/#see-which-optimizers-have-a-weak-link). With history on, the board keeps the map on its flash, so a reboot doesn't blank it; without, it fills again as the reports come in. "Today" is the board's local day when it has a `time:` source, else UTC.
+
+### Drawing the array
+
+**Topology › Array** shows each panel where it really sits, shaded by the power it's making now, and each TAP where it's mounted. It works as on the Raspberry Pi build; see [Draw the array](/esphome-tigomonitor/guides/raspberry-pi/#draw-the-array). The board keeps the drawing in its settings storage, so it survives a reflash, and it's saved by each panel's barcode, so it stays right when the TAP gives the optimizers new addresses. The TAPs to place are the ones answering polls on the bus.
 
 ### Laying out the array by hand
 

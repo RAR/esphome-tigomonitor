@@ -34,6 +34,8 @@ esp32:
       # LittleFS — backing filesystem for the tsdb partition
       - joltwallet/littlefs^1.16
     sdkconfig_options:
+      # esp_tsdb needs stat()/mkdir()/rmdir(); without this the link fails (rmdir).
+      CONFIG_VFS_SUPPORT_DIR: "y"
       # UART optimizations — aggressive for 32 MB PSRAM
       CONFIG_UART_ISR_IN_IRAM: "y"
       CONFIG_UART_RX_BUFFER_SIZE: "16384"

@@ -108,6 +108,11 @@ tigo_master:
   role: standby
   # Longer than the Pi's 3 s, so with both standing by the Pi is preferred.
   takeover_after: 8s
+  # The TAPs: learned from the master it stands by for (each TAP id that
+  # master polls) and kept in flash, so leave this out. List them only to
+  # run exactly these, as the master with no other to learn from, or to
+  # drop one that has gone for good.
+  # taps: [0x1201, 0x1202]
   # The CCA's housekeeping and read queries, as the Pi runs the roof.
   housekeeping: true
   queries: true
