@@ -4,7 +4,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-ESPHome external component for monitoring Tigo solar optimizers via RS485/UART. Two C++ components (`tigo_monitor`, `tigo_server`) run on ESP32 using the **ESP-IDF framework** (not Arduino). FreeRTOS tasks/semaphores handle all async operations.
+ESPHome external component for monitoring Tigo solar optimizers via RS485/UART. Three C++ components (`tigo_monitor`, `tigo_server`, `tigo_master`) run on ESP32 using the **ESP-IDF framework** (not Arduino). FreeRTOS tasks/semaphores handle all async operations.
+
+There are two builds of the same monitor:
+- **ESP32**: the components above.
+- **Linux daemon** (`linux/`, `tigomonitord`): runs on a Raspberry Pi, shipped as a .deb and a Docker image. It can also be the bus master that replaces the CCA.
+
+The two builds share the protocol and data headers in `components/tigo_monitor/` (`tigo_protocol.h`, `bus_book.h`, `bus_watch.h`, `array_grid.h`, `link_stats.h`, `mesh_history.h`, …). Both also serve the same web page, `components/tigo_server/web/app.html`. A change to a shared header changes both builds.
 
 ## Build Commands
 
@@ -19,18 +25,37 @@ esphome run boards/esp32s3-atoms3r.yaml
 esphome logs boards/esp32s3-atoms3r.yaml
 ```
 
-There is no test suite. Testing is manual (sensor updates in HA, web UI, CCA sync, memory monitoring).
+## Tests
+
+```bash
+# Host tests of the shared headers, plus the Linux build (run inside the dev container, as CI does)
+docker build -t tigod-dev -f linux/Dockerfile.dev linux
+docker run --rm -v "$PWD":/src -w /src tigod-dev linux/scripts/build.sh
+
+# End-to-end scripts for the Linux daemon (CI runs every linux/scripts/*-e2e.sh)
+linux/scripts/<name>-e2e.sh
+
+# Web UI tests (app.html): run before any app.html PR
+cd site && npm test
+```
+
+- Host tests live in `tests/host/`. A new test must also be added to the list in `linux/scripts/build.sh`, or nothing runs it.
+- CI runs three workflows: `.github/workflows/pi.yml` (the host tests, the e2e scripts, the .deb and the image), `esp32.yml` (`esphome compile` of `test-local-tigomonitor` and the relay standby) and `pages.yml` (the docs site).
+- Hardware behaviour (frame loss, heap, flash timing) is checked on the rig by hand, and measured, not assumed.
 
 ## Architecture
 
 ### Component Structure
 
-- **`components/tigo_monitor/`** — Core component: UART frame parsing, device tracking, sensor publishing, CCA sync
+- **`components/tigo_monitor/`** — Core component: UART frame parsing, device tracking, sensor publishing, CCA sync, plus the headers shared with the Linux build
   - `__init__.py`, `sensor.py`, `button.py`, `binary_sensor.py` — Python config schemas + ESPHome codegen (no runtime logic)
-  - `tigo_monitor.h` / `tigo_monitor.cpp` — C++ implementation (~3,200 lines)
-- **`components/tigo_server/`** — HTTP web server with 5 HTML pages + RESTful JSON API
+  - `tigo_monitor.h` / `tigo_monitor.cpp` — C++ implementation (~5,200 lines)
+- **`components/tigo_server/`** — HTTP web server: the single-page app plus the JSON API
   - `__init__.py` — Config schema
-  - `tigo_web_server.h` / `tigo_web_server.cpp` — C++ implementation (~4,200 lines)
+  - `tigo_web_server.h` / `tigo_web_server.cpp` — C++ implementation (~5,000 lines)
+  - `web/app.html` — the web UI, shared with the Linux build; `web_assets_gen.py` gzips it into the firmware
+- **`components/tigo_master/`** — an ESP32 bus master or standby (`master_core.cpp` is also built into the host tests)
+- **`linux/`** — `tigomonitord`: `src/` is the daemon, `scripts/` the build and e2e tests, `packaging/` the .deb, `Dockerfile` the image
 
 ### Three-File Config Pattern
 
@@ -66,7 +91,7 @@ Always use PSRAM containers for large data. Internal RAM is <200KB; PSRAM is 8MB
 
 ### Web Server
 
-5 HTML pages (`/`, `/nodes`, `/status`, `/yaml`, `/cca`) + JSON API endpoints (`/api/devices`, `/api/overview`, `/api/strings`, `/api/status`, `/api/health`, `/api/inverters`, `/api/energy-history`). Auth: `api_token` for API, HTTP Basic for HTML pages. All responses built in PSRAM via `PSRAMString`.
+One page, `/app` (`web/app.html`, served gzipped). The old paths (`/`, `/nodes`, `/status`, `/history`, `/cca`) redirect to views in it. About 50 JSON routes under `/api/`: see the `httpd_register_uri_handler` calls in `tigo_web_server.cpp`. Auth: `api_token` for API, HTTP Basic for HTML pages. All responses built in PSRAM via `PSRAMString`. Handlers read monitor state under `with_state_lock()`. A long answer is written in chunks so it doesn't hold that lock, and the UART loop, for long.
 
 ### CCA Integration
 
@@ -86,7 +111,6 @@ Fuzzy barcode matching (`match_barcode()`): compares last 6 chars of UART-discov
 
 - **`main`**: Trunk. Stable releases are tagged `vX.Y.Z` here, and current development also lands here via short-lived branches. Base for new work and the target for PRs.
 - **`feature/*`, `fix/*`**: Short-lived branches created off `main`, merged back to `main`.
-- Legacy branches `dev` (abandoned ~2026-04) and `next` (lagging, no unique work) are **not** the current line — start new work from `main`.
 
 ### Release Process
 
