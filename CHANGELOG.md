@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.3.0] - 2026-11-20
+
 ### Added
 
 - **The ESP32 can draw the array too.** Topology › Array places each panel
@@ -14,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the Pi. The board keeps the drawing in its settings storage (NVS), so it
   survives a reflash, and saves it by barcode, so it stays right after the
   TAP renumbers the optimizers.
+
 - **The ESP32 has the mesh map too.** Topology › Mesh shows each optimizer
   around its TAP, coloured by the reports lost today and its signal over a
   day, and which optimizer it joined through, as on the Pi. Everything it
@@ -41,9 +44,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   across a reboot. The ESP32 lists a changed setting only when it runs the
   bus, and as a listener it never does. TAPs can be named there too; the
   ESP32 keeps up to eight names in its settings storage.
-  Each TAP is listed as soon as it answers polls; its firmware and radio
-  fill in when a master next brings it up, which a listener may not hear
-  for days.
+
+### Changed
+
+- **Devices lists every TAP that answers polls, on the Pi too.** It listed
+  only the TAPs whose firmware read it had heard, so a monitor that started
+  after a TAP's bring-up could show none. A TAP now appears as soon as it
+  answers; its firmware and radio fill in when a master next brings it up,
+  which a listener may not hear for days.
 
 ## [2.2.0] - 2026-11-18
 
@@ -1253,7 +1261,8 @@ None - All changes are backward compatible. Web authentication and API tokens ar
 ## Initial Development
 Previous commits were part of the initial development phase. This is the first official release with comprehensive feature set and documentation.
 
-[Unreleased]: https://github.com/RAR/esphome-tigomonitor/compare/v2.2.0...HEAD
+[Unreleased]: https://github.com/RAR/esphome-tigomonitor/compare/v2.3.0...HEAD
+[2.3.0]: https://github.com/RAR/esphome-tigomonitor/compare/v2.2.0...v2.3.0
 [2.2.0]: https://github.com/RAR/esphome-tigomonitor/compare/v2.1.0...v2.2.0
 [2.1.0]: https://github.com/RAR/esphome-tigomonitor/releases/tag/v2.1.0
 [2.0.1]: https://github.com/RAR/esphome-tigomonitor/releases/tag/v2.0.1
