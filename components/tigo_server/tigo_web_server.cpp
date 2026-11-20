@@ -72,12 +72,14 @@ class PSRAMString {
   const char* c_str() const { return data_ ? data_ : ""; }
   size_t length() const { return size_; }
 
-  // Grows to new_capacity plus 1 KB: an answer that will be long reserves
-  // its size first, or it is copied again every kilobyte on the way.
+  // Grows to new_capacity plus 1 KB, and at least half again what it had:
+  // appends then copy the text O(log n) times, not once a kilobyte (a
+  // 125 KB answer grown 1 KB at a time copied ~8 MB). A long answer that
+  // knows its size still reserves it first, and gets exactly that.
   void reserve(size_t new_capacity) {
     if (new_capacity <= capacity_) return;
     
-    size_t alloc_size = new_capacity + 1024;  // Add some headroom
+    size_t alloc_size = std::max(new_capacity + 1024, capacity_ + capacity_ / 2);
     char* new_data = nullptr;
     
     // Try PSRAM first if available
