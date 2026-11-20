@@ -1869,6 +1869,40 @@ void HttpServer::routes_() {
     else send_json(res, {{"error", why.empty() ? "not running the bus" : why}}, code);
   });
 
+  // Pi-only: Replace a TAP's handover ({"from": "1202", "to": "1201",
+  // "dry_run": true by default}): every optimizer last heard through from is
+  // listed on to at its own address, not joined, and watched until it joins
+  // there (table_edit.h's TableHandover). Nothing is sent to from, so a TAP
+  // that has died can be handed over. Behind the web password and, but for
+  // a dry run, Allow changes to the TAPs.
+  svr.Post("/api/master/taps/handover", [this](const httplib::Request &req, httplib::Response &res) {
+    if (ctx_.current_settings().web_password.empty() && !setup_open(ctx_.current_settings(), unix_now_s())) {
+      send_json(res, {{"error", "set a web password first"}}, 403);
+      return;
+    }
+    json j = json::parse(req.body, nullptr, false);
+    auto id_of = [&j](const char *k, unsigned &id) {
+      return j.contains(k) && j[k].is_string() && sscanf(j[k].get<std::string>().c_str(), "%x", &id) == 1 && id &&
+             id <= 0xFFFF;
+    };
+    unsigned from = 0, to = 0;
+    if (j.is_discarded() || !j.is_object() || !id_of("from", from) || !id_of("to", to)) {
+      send_json(res, {{"error", "expected {\"from\": \"1202\", \"to\": \"1201\"}"}}, 400);
+      return;
+    }
+    bool dry = !j.contains("dry_run") || !j["dry_run"].is_boolean() || j["dry_run"].get<bool>();
+    std::string why;
+    size_t count = 0;
+    int code = ctx_.request_table_handover
+                   ? ctx_.request_table_handover(static_cast<uint16_t>(from), static_cast<uint16_t>(to), dry, why, count)
+                   : 409;
+    if (code == 200)
+      send_json(res, {{"started", true}, {"dry_run", dry}, {"from", hex4(static_cast<uint16_t>(from))},
+                      {"to", hex4(static_cast<uint16_t>(to))}, {"count", count}});
+    else
+      send_json(res, {{"error", why.empty() ? "not running the bus" : why}}, code);
+  });
+
   // Pi-only: give a new TAP its radio settings (tap_config.h), Add a TAP's
   // step. {"mac": "<the TAP's 16 hex digits>", "channel": 11..26 (optional:
   // two from every TAP heard), "pan": "1A2B" (optional: from this machine's

@@ -103,6 +103,10 @@ struct HttpContext {
   // dry run. 200, or 409 with why.
   std::function<int(const esphome::tigo_monitor::master::Bytes &tap_mac, uint8_t code, bool dry_run, std::string &why)>
       request_period;
+  // Replace a TAP's handover (POST /api/master/taps/handover): list every
+  // optimizer last heard through TAP from on TAP to, not joined, and watch
+  // each join there. 200 with how many in count, or 409 with why.
+  std::function<int(uint16_t from, uint16_t to, bool dry_run, std::string &why, size_t &count)> request_table_handover;
 };
 
 // tigomonitord --health-check PORT, the container's HEALTHCHECK: GETs
