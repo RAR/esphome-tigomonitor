@@ -103,6 +103,10 @@ struct HttpContext {
   // dry run. 200, or 409 with why.
   std::function<int(const esphome::tigo_monitor::master::Bytes &tap_mac, uint8_t code, bool dry_run, std::string &why)>
       request_period;
+  // --trust-ingress: requests from this address count as signed in. It is
+  // Home Assistant's ingress proxy, which has signed the user in already;
+  // the address is the connection's own, never a forwarded header's.
+  std::string trusted_ingress;
 };
 
 // tigomonitord --health-check PORT, the container's HEALTHCHECK: GETs
@@ -149,6 +153,7 @@ class HttpServer {
   // (scripts, and browsers that still send what their popup was given).
   bool signed_in_(const httplib::Request &req, const Settings &s);
   // The Set-Cookie for a session, or with "" one that ends it.
+  bool via_ingress_(const httplib::Request &req) const;  // from --trust-ingress's address
   std::string session_cookie_(const std::string &token, const httplib::Request &req, const Settings &s) const;
   std::string client_(const httplib::Request &req, const Settings &s) const;  // who wrong passwords count against
 };

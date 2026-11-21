@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **TigoMonitor as a Home Assistant app.** On Home Assistant OS, add this
+  repository under Settings → Apps → App store → Repositories, install
+  TigoMonitor, and its page opens from Home Assistant's sidebar. It's the
+  Pi build in an app: it reads the bus from a network bridge or a USB adapter
+  on the Home Assistant machine, uses the Mosquitto broker app from its first
+  start, and doesn't ask you to sign in a second time. See
+  [Run it as a Home Assistant app](https://rar.github.io/esphome-tigomonitor/guides/raspberry-pi/#run-it-as-a-home-assistant-app).
+
 - **The sidebar says when a newer release is out.** A green up-arrow
   appears after the version, linked to the new release's notes, when GitHub
   has a release newer than the one running. Your browser checks, at most once a

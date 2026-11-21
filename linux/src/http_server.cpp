@@ -2065,7 +2065,7 @@ void HttpServer::routes_() {
   });
 
   // Pi-only: the settings an ESP32 user would put in YAML.
-  svr.Get("/api/settings", [this](const httplib::Request &, httplib::Response &res) {
+  svr.Get("/api/settings", [this](const httplib::Request &req, httplib::Response &res) {
     Settings s = ctx_.current_settings();
     send_json(res, {{"serial_port", s.serial_port},
                     {"bus_role", s.bus_role},
@@ -2089,6 +2089,7 @@ void HttpServer::routes_() {
                     {"web_port_active", port_},
                     {"web_username", s.web_username},
                     {"web_password_set", !s.web_password.empty()},
+                    {"via_ingress", via_ingress_(req)},
                     {"trusted_proxies", s.trusted_proxies},
                     {"setup_open", setup_open(s, unix_now_s())},
                     {"setup_open_until", s.setup_open_until},
@@ -2244,7 +2245,12 @@ void HttpServer::routes_() {
   });
 }
 
+bool HttpServer::via_ingress_(const httplib::Request &req) const {
+  return !ctx_.trusted_ingress.empty() && req.remote_addr == ctx_.trusted_ingress;
+}
+
 bool HttpServer::signed_in_(const httplib::Request &req, const Settings &s) {
+  if (via_ingress_(req)) return true;
   int64_t now = unix_now_s();
   if (sessions_.valid(cookie_value(req.get_header_value("Cookie"), "tm_session"), now)) return true;
   std::string given = req.get_header_value("Authorization");

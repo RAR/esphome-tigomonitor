@@ -6935,7 +6935,8 @@
         ? `Set: sign in as "${piWebLogin.user}". Leave empty to keep it.`
         : 'Empty: anyone on your network can open this page and change settings';
       document.getElementById('pi-web-pass-remove').style.display = s.web_password_set ? '' : 'none';
-      document.getElementById('pi-web-signout').style.display = s.web_password_set ? '' : 'none';
+      // Opened in Home Assistant, which did the signing in: nothing to sign out of here.
+      document.getElementById('pi-web-signout').style.display = s.web_password_set && !s.via_ingress ? '' : 'none';
       await piFillSerial(s.serial_port || '');
       document.getElementById('pi-mqtt-state').textContent = !s.mqtt.host ? 'MQTT off'
         : s.mqtt_connected ? `connected to ${s.mqtt.host}` : `not connected${s.mqtt_error ? ': ' + s.mqtt_error : ''}`;

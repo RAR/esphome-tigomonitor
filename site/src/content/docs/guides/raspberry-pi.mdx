@@ -686,6 +686,37 @@ does the same with Compose.
   against a CCA yet. The CCA's HTTP API, for firmware older than 4.0.4, needs
   nothing extra.
 
+### Run it as a Home Assistant app
+
+On Home Assistant OS, or a Supervised install, the monitor can run as an app,
+with its page in Home Assistant's sidebar. It's the same build as the Docker
+image, for the same two architectures (64-bit ARM, such as a Raspberry Pi 4 or 5,
+and x86-64).
+
+1. In Home Assistant, open **Settings → Apps → App store**, then
+   **⋮ → Repositories**, and add
+   `https://github.com/RAR/esphome-tigomonitor`.
+2. Find **TigoMonitor** in the store, install it, and start it. Turn on
+   **Show in sidebar**.
+3. Open it from the sidebar and choose how it reads the bus under
+   **Settings → Bus**: a [network bridge](#read-the-bus-over-the-network) at the
+   Tigo cabinet, or a USB RS485 adapter plugged into the Home Assistant
+   machine, by its `/dev/serial/by-id/` name.
+
+- **MQTT:** if the Mosquitto broker app is installed, the monitor uses it
+  from its first start, so the panels appear in Home Assistant without
+  typing a broker in. That's done once: a broker you change or clear later
+  stays as you set it.
+- **Signing in:** Home Assistant signs you in before it shows the page, so
+  the monitor doesn't ask again. To open the web UI outside Home Assistant,
+  give port 8080 a host port in the app's **Network** settings, and set a
+  password under **Settings → Web UI**, because that port answers anyone
+  on your network.
+- **HTTPS:** leave it off in **Settings → Web UI**. Home Assistant reaches
+  the app over plain HTTP, and does HTTPS itself.
+- **Backups:** the settings and the history are in the app's data folder,
+  which Home Assistant's backups include.
+
 ## If nothing shows up
 
 - **No panels on the dashboard:** check **Diagnostics → Frames processed**.
