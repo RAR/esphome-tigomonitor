@@ -137,6 +137,10 @@ the logs. `example-t-can485.yaml` documents that workflow.
 - **Footprint**: flash 21.1%, RAM 29.9% (ESPHome 2026.11). Run on a 40-panel
   roof bus: 859 frames in 10 s with none cut short, decoded by a Pi 5
 
+The Config Builder writes both bridges too, from `site/bridge.js`. Change a
+bridge's pins, UART or stream settings in both places:
+`site/test/bridge.test.mjs` fails when the two disagree.
+
 ## Usage
 
 To use a board configuration, include it in your main YAML file:

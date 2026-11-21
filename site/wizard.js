@@ -2,23 +2,32 @@
 import { BOARDS, getBoard } from './boards.js';
 import { assembleConfig } from './rules.js';
 import { toYaml, toSecretsYaml } from './yaml.js';
+import { BRIDGE_BOARDS, getBridgeBoard, assembleBridge, toBridgeYaml } from './bridge.js';
 import { generateApiKey } from './lib/apikey.mjs';
 
 const $ = (id) => document.getElementById(id);
 const boardSel = $('board');
-for (const b of BOARDS) {
-  const o = document.createElement('option');
-  o.value = b.id; o.textContent = b.label; boardSel.appendChild(o);
+// A monitor decodes the bus itself; a network bridge (bridge.js) only passes
+// it to TigoMonitor elsewhere. Each has its own board list and generator.
+const isBridge = () => $('build-bridge').checked;
+const currentBoard = () => (isBridge() ? getBridgeBoard : getBoard)(boardSel.value);
+function fillBoards() {
+  boardSel.replaceChildren(...(isBridge() ? BRIDGE_BOARDS : BOARDS).map((b) => {
+    const o = document.createElement('option');
+    o.value = b.id; o.textContent = b.label;
+    return o;
+  }));
 }
+if (new URLSearchParams(location.search).get('build') === 'bridge') $('build-bridge').checked = true;
 if (!$('api-key').value) $('api-key').value = generateApiKey();
 
 function readForm() {
-  const board = getBoard(boardSel.value);
+  const board = currentBoard();
   return {
     board,
     form: {
       name: $('name').value.trim(),
-      numberOfDevices: Number($('num-devices').value) || board.numberOfDevices,
+      numberOfDevices: Number($('num-devices').value) || board.numberOfDevices || 0,
       updateInterval: $('update-interval').value.trim(),
       uart: { tx_pin: $('uart-tx').value.trim(), rx_pin: $('uart-rx').value.trim() },
       wifi: { ssid: $('wifi-ssid').value.trim() || 'YOUR_WIFI_SSID',
@@ -71,15 +80,46 @@ function syncBoardConstraints(board) {
   $('board-notes').textContent = board.notes.join(' ');
 }
 
+// A bridge has no UART pins to choose (it has no tx_pin, and its rx pin is the
+// board's), no CCA and no extras. Both of its boards are Wi-Fi boards.
+function syncMode() {
+  const bridge = isBridge();
+  $('monitor-fields').style.display = bridge ? 'none' : '';
+  $('cca-card').style.display = bridge ? 'none' : '';
+  $('bridge-intro').style.display = bridge ? '' : 'none';
+  $('device-legend').textContent = bridge ? 'Device' : 'Device & UART';
+  $('static-ip-hint').textContent = bridge
+    ? 'Leave blank and your router picks one. A fixed address means TigoMonitor always finds the bridge.'
+    : 'Leave blank and your router picks one. Fill it in if you want the dashboard always at the same address.';
+  const name = $('name');
+  if (bridge && ['', 'tigo-server', 'tigo-monitor'].includes(name.value.trim())) name.value = 'tigo-bridge';
+  if (!bridge && name.value.trim() === 'tigo-bridge') name.value = 'tigo-server';
+  // So a copied link opens the same build.
+  const search = bridge ? '?build=bridge' : '';
+  if (location.search !== search) history.replaceState(null, '', location.pathname + search + location.hash);
+  fillBoards();
+  syncBoard();
+}
+
+function syncBoard() {
+  const board = currentBoard();
+  if (!isBridge()) { syncBoardConstraints(board); return; }
+  for (const id of ['wifi-ssid-row', 'wifi-pass-row', 'static-ip-row']) $(id).style.display = '';
+  $('ethernet-note').style.display = 'none';
+  $('board-notes').textContent = board.notes.join(' ');
+}
+
 let lastYaml = '', lastSecrets = null;
 function render() {
   const { board, form } = readForm();
+  const bridge = isBridge();
+  $('out-name').textContent = `${boardSel.value}.yaml`;
   $('cca-ip-row').style.display = form.cca === 'http' ? '' : 'none';
   $('cca-mac-row').style.display = form.cca === 'ble' ? '' : 'none';
-  $('display-panel-row').style.display = form.display && board.supports.display ? '' : 'none';
+  $('display-panel-row').style.display = !bridge && form.display && board.supports.display ? '' : 'none';
   try {
-    const cfg = assembleConfig(board, form);
-    lastYaml = toYaml(cfg);
+    const cfg = bridge ? assembleBridge(board, form) : assembleConfig(board, form);
+    lastYaml = bridge ? toBridgeYaml(cfg) : toYaml(cfg);
     lastSecrets = toSecretsYaml(cfg);
     $('out').textContent = lastYaml;
     $('warn').textContent = '';
@@ -98,8 +138,10 @@ function download(name, text) {
   a.download = name; a.click(); URL.revokeObjectURL(a.href);
 }
 
-boardSel.addEventListener('change', () => { syncBoardConstraints(getBoard(boardSel.value)); render(); });
-$('wizard').addEventListener('input', render);
+boardSel.addEventListener('change', () => { syncBoard(); render(); });
+// The build choice swaps the board list, so it must be synced before render
+// reads the board.
+$('wizard').addEventListener('input', (e) => { if (e.target.name === 'build') syncMode(); render(); });
 $('gen-key').addEventListener('click', () => { $('api-key').value = generateApiKey(); render(); });
 $('copy').addEventListener('click', () =>
   navigator.clipboard.writeText(lastYaml).catch(() => {
@@ -108,5 +150,5 @@ $('copy').addEventListener('click', () =>
 $('dl-yaml').addEventListener('click', () => download(`${boardSel.value}.yaml`, lastYaml));
 $('dl-secrets').addEventListener('click', () => { if (lastSecrets) download('secrets.yaml', lastSecrets); });
 
-syncBoardConstraints(getBoard(boardSel.value));
+syncMode();
 render();

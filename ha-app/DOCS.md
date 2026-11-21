@@ -11,8 +11,10 @@ Open TigoMonitor from the sidebar, then choose under **Settings → Bus**:
 
 - **Network bridge (TCP):** a small ESP32 at the Tigo cabinet that passes the
   bus along over Wi-Fi. Enter its address, such as `10.0.0.46:6638`. The
-  bridge configs are in the repository's `boards/` folder:
-  `example-atoms3-bridge.yaml` and `example-t-can485-bridge.yaml`.
+  [Config Builder](https://rar.github.io/esphome-tigomonitor/config-builder/?build=bridge)
+  writes the bridge's config, and
+  [Network bridge](https://rar.github.io/esphome-tigomonitor/guides/network-bridge/)
+  covers the boards and the wiring.
 - **A USB RS485 adapter** plugged into this machine, wired to the TAP's A, B
   and ground. Choose it by its `/dev/serial/by-id/` name, which stays the
   same across reboots.

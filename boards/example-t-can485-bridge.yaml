@@ -6,8 +6,8 @@
 # from where you want to run the monitor, or when you would rather keep an
 # ESP32 at the cabinet and the history on a bigger machine.
 #
-# In tigomonitord, under Tools -> RS485 adapter and web UI, choose
-# "Network bridge (TCP)" and enter  tigo-bridge.local:6638  (or this board's IP).
+# In tigomonitord, under Settings -> Bus, choose "Network bridge (TCP)" and
+# enter  tigo-bridge.local:6638  (or this board's IP).
 #
 # stream_server (https://github.com/oxan/esphome-stream-server) does the
 # forwarding: every byte the UART receives goes to each connected client.
