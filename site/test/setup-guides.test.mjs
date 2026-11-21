@@ -112,7 +112,7 @@ async function open(w) {
   page.on('pageerror', (e) => errors.push(e.message));
   await answerAll(page, true);
   await page.goto(`http://127.0.0.1:${port}/#setup`, { waitUntil: 'networkidle' });
-  await page.waitForSelector('.setup-tasks');
+  await page.waitForSelector('.setup-start');  // listening has no task cards
   return { page, ctx, errors };
 }
 

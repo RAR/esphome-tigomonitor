@@ -121,6 +121,16 @@ UART** (`/dev/serial0`).
 
   Each step ticks itself off from what the Pi already sees, so the list also
   answers "what's left?" on a running system.
+- **Listening beside a CCA,** the checklist is shorter. The CCA looks after
+  the TAP and its optimizers, so the TAP and optimizer steps, and the add,
+  replace and retire tasks, give way to one step, **Listen for a day**. It
+  lists what the monitor has heard so far: power reports, the TAP, the
+  optimizers' barcodes, their firmware and settings, and their joins. Not all
+  of it goes by all the time. Power reports come every few seconds in
+  daylight, but the rest comes only when the CCA asks for it: the firmware
+  and settings usually in the evening, around sunset, and joins at sunrise.
+  So give a new install a full day, through a sunrise, before treating
+  anything as missing.
 - **Setup mode.** On a new install, the first day needs no password for
   System setup's changes, so you can set the system up first and lock it
   last. Every page says so in a banner until you set one. Turning the
@@ -130,7 +140,8 @@ UART** (`/dev/serial0`).
 <ThemedShot name="pi-setup" alt="System setup — the Set up a new system checklist, then a card for each optimizer and TAP task." />
 - **Optimizers:** replace, add or retire one, step by step, each change
   checked before anything is sent. These need the Pi running the bus and
-  **Allow changes to the TAPs** on (Settings → Bus).
+  **Allow changes to the TAPs** on (Settings → Bus), so they don't show
+  while it listens.
 - **TAPs** (experimental):
   - **Add a TAP** walks through bringing a new TAP onto the bus, no CCA
     needed. It lets the Pi take on a new TAP while you add it, looks for
