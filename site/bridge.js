@@ -8,7 +8,8 @@
 // checks every block that touches the bus against it). Only boards whose
 // transceiver we know how to hold silent are listed: a bridge's UART has no
 // tx_pin, and a switch holds the driver's input (or enable) at the level that
-// keeps it off.
+// keeps it off. ESPHome's safe mode never runs the switches, so each board
+// marks that pin safeMode and a safe_mode: hook drives it to the same level.
 // Add a board only with an example file to check it against.
 import { wifiLines } from './yaml.js';
 
@@ -25,7 +26,7 @@ export const BRIDGE_BOARDS = [
     rxPin: 'GPIO5', rxComment: "the base's RS485_RX; no tx_pin, see the top",
     // The base drives the bus while its TX input (G6) is LOW.
     holdPins: [
-      { id: 'rs485_tx_idle', pin: 'GPIO6', comment: "the base's RS485_TX, held HIGH: its driver stays off" },
+      { id: 'rs485_tx_idle', pin: 'GPIO6', comment: "the base's RS485_TX, held HIGH: its driver stays off", safeMode: true },
     ],
     notes: [
       'No PSRAM needed: a plain AtomS3 is enough.',
@@ -46,7 +47,7 @@ export const BRIDGE_BOARDS = [
       { id: 'rs485_auto_direction', pin: 'GPIO17', comment: '/RE high => AutoDirection controls the receiver' },
       { id: 'rs485_chip_enable', pin: 'GPIO19', comment: 'SHDN high => normal operation' },
       // The MAX13487E turns its driver on when DI is LOW.
-      { id: 'rs485_driver_off', pin: 'GPIO22', comment: 'DI high => the driver stays off (no tx_pin below)' },
+      { id: 'rs485_driver_off', pin: 'GPIO22', comment: 'DI high => the driver stays off (no tx_pin below)', safeMode: true },
     ],
     notes: [
       'No PSRAM needed, so this board can be a bridge even though it is too small for the dashboard.',
@@ -61,11 +62,10 @@ export const BRIDGE_BOARDS = [
     board: 'esp32-s3-devkitc-1', variant: 'esp32s3', flash_size: '16MB',
     minimumChipRevision: null,
     rxPin: 'GPIO18', rxComment: 'no tx_pin: see the read-only note at the top',
-    // DE and /RE are one net: LOW is receiver on, driver off. It floats high
-    // in safe mode, where the switch never runs, so that holds it low too.
+    // DE and /RE are one net: LOW is receiver on, driver off.
     holdPins: [
       { id: 'rs485_enable', pin: 'GPIO21', restore: 'ALWAYS_OFF',
-        comment: 'DE + /RE, low => receiver on and driver off', safeModeLow: true },
+        comment: 'DE + /RE, low => receiver on and driver off', safeMode: true },
     ],
     notes: [
       '7-36V input and a DIN-rail case, so it can share the Tigo cabinet\u2019s supply.',
@@ -83,7 +83,7 @@ export const BRIDGE_BOARDS = [
     // The transceiver turns around on its TX input; HIGH is the UART's idle
     // level, what the monitor config leaves on the pin between bytes.
     holdPins: [
-      { id: 'rs485_tx_idle', pin: 'GPIO17', comment: "the transceiver's TX input, held HIGH: idle, driver off" },
+      { id: 'rs485_tx_idle', pin: 'GPIO17', comment: "the transceiver's TX input, held HIGH: idle, driver off", safeMode: true },
     ],
     // On-board W5500. The bridge then has no wifi: block at all.
     ethernet: {
@@ -221,20 +221,22 @@ export function toBridgeYaml(cfg) {
   L.push(`${I(2)}name: "Tigo Bridge Restart"`);
   L.push('');
 
-  // Safe mode sets up only the network, OTA and the logger, so the switches
-  // never run. A pin that must stay low is driven low here instead.
-  const holdLow = b.holdPins.filter((p) => p.safeModeLow);
-  if (holdLow.length) {
+  // Safe mode (after 10 quick reboots) sets up only the network, OTA and the
+  // logger, so the switches never run and the driver-off pin floats. Drive it
+  // to the level its switch holds.
+  const holds = b.holdPins.filter((p) => p.safeMode);
+  if (holds.length) {
     L.push('# Safe mode never runs the switches above; this holds the driver off there.');
     L.push('safe_mode:');
     L.push(`${I(1)}on_safe_mode:`);
     L.push(`${I(2)}- lambda: |-`);
-    for (const p of holdLow) {
+    for (const p of holds) {
       const n = p.pin.replace('GPIO', 'GPIO_NUM_');
+      const high = (p.restore ?? 'ALWAYS_ON') === 'ALWAYS_ON';
       L.push(`${I(4)}gpio_reset_pin(${n});`);
       L.push(`${I(4)}gpio_set_direction(${n}, GPIO_MODE_OUTPUT);`);
-      L.push(`${I(4)}gpio_set_level(${n}, 0);`);
-      L.push(`${I(4)}ESP_LOGW("tigo_bridge", "Safe mode: ${p.pin} held low, the RS485 driver is off");`);
+      L.push(`${I(4)}gpio_set_level(${n}, ${high ? 1 : 0});`);
+      L.push(`${I(4)}ESP_LOGW("tigo_bridge", "Safe mode: ${p.pin} held ${high ? 'high' : 'low'}, the RS485 driver is off");`);
     }
     L.push('');
   }

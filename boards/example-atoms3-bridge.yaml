@@ -26,7 +26,8 @@
 # Until the firmware is running, about a second after power-on, nothing holds
 # G6. Our AtomS3R, with G6 wired as the UART's TX, held the bus for about that
 # long at each boot. Power the bridge up before connecting A and B, and expect
-# a short gap on the bus if it ever reboots while connected.
+# a short gap on the bus if it ever reboots while connected. ESPHome's safe mode
+# never runs the switch either; the safe_mode: block holds G6 high there.
 #
 # Tested 2026-11-21 on a 40-panel roof bus: an AtomS3 at -80 dBm Wi-Fi passed
 # 859 frames in 10 s with none cut short, and a Pi 5 decoded the roof from it.
@@ -82,6 +83,16 @@ switch:
     restore_mode: ALWAYS_ON
   - platform: restart
     name: "Tigo Bridge Restart"
+
+# Safe mode (after 10 quick reboots) sets up only Wi-Fi, OTA and the logger, so
+# the switch above never runs and GPIO6 floats. This holds it high there too.
+safe_mode:
+  on_safe_mode:
+    - lambda: |-
+        gpio_reset_pin(GPIO_NUM_6);
+        gpio_set_direction(GPIO_NUM_6, GPIO_MODE_OUTPUT);
+        gpio_set_level(GPIO_NUM_6, 1);
+        ESP_LOGW("tigo_bridge", "Safe mode: GPIO6 held high, the RS485 driver is off");
 
 uart:
   id: tigo_uart

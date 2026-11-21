@@ -119,8 +119,9 @@ the logs. `example-t-can485.yaml` documents that workflow.
   via [stream_server](https://github.com/oxan/esphome-stream-server)) to
   tigomonitord on a Pi or another Linux machine, which does everything else
 - **Read-only in hardware**: the UART has no `tx_pin`, and GPIO22 (the
-  transceiver's DI) is held high so its driver stays off. Keep both; a floating
-  DI turns the MAX13487E's driver *on*
+  transceiver's DI) is held high so its driver stays off, by a switch and, in
+  ESPHome's safe mode where switches never run, a `safe_mode:` hook. Keep
+  both; a floating DI turns the MAX13487E's driver *on*
 - **Standalone**: it does not include `esp32-lilygo-t-can485.yaml`, whose UART
   has a TX pin and whose `tigo_monitor` would compete for the bytes
 - **Footprint**: flash 45.1%, RAM 24.8% (ESPHome 2026.10); compiled, not yet run
@@ -130,8 +131,8 @@ the logs. `example-t-can485.yaml` documents that workflow.
 - **What it does**: the same bridge as the T-CAN485 one, on an AtomS3 (or
   AtomS3R) with the Atomic RS485 Base. No PSRAM needed
 - **Read-only in hardware**: the UART has no `tx_pin`, and G6 (the base's
-  RS485_TX) is held high. The base drives the bus whenever G6 is low, so keep
-  that switch
+  RS485_TX) is held high, by a switch and, in safe mode, a `safe_mode:` hook.
+  The base drives the bus whenever G6 is low, so keep both
 - **Power it before connecting A/B**: G6 isn't held until the firmware runs,
   about a second after power-on
 - **Footprint**: flash 21.1%, RAM 29.9% (ESPHome 2026.11). Run on a 40-panel
@@ -151,7 +152,8 @@ the logs. `example-t-can485.yaml` documents that workflow.
   `wifi:` block
 - **Read-only in hardware**: the UART has no `tx_pin`, and GPIO17 (the
   transceiver's TX input) is held high, the UART's idle level, which is what
-  the monitor config leaves on that pin
+  the monitor config leaves on that pin. A `safe_mode:` hook holds it there in
+  safe mode too
 - **Footprint**: flash 10.8%, RAM 17.5% (ESPHome 2026.11); compiled, not yet
   run on a real bus
 
