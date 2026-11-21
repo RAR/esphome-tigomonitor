@@ -860,7 +860,7 @@ test('the sidebar shows a release version, linked to its notes, on both builds',
     const { page, ctx, errors } = await open({ linux });
     await page.waitForFunction(() => !document.getElementById('app-version').hidden);
     assert.deepEqual(await appVersion(page), {
-      shown: true, text: 'TigoMonitor v2.3.0',
+      shown: true, text: 'v2.3.0',
       href: 'https://github.com/RAR/esphome-tigomonitor/releases/tag/v2.3.0',
     });
     assert.deepEqual(errors, []);
@@ -869,7 +869,7 @@ test('the sidebar shows a release version, linked to its notes, on both builds',
 });
 
 test('a build between releases or from a branch shows its version unlinked', async () => {
-  for (const [v, text] of [['2.3.0+1.g8632d50', 'TigoMonitor v2.3.0+1.g8632d50'], ['main · 8632d50', 'TigoMonitor main · 8632d50']]) {
+  for (const [v, text] of [['2.3.0+1.g8632d50', 'v2.3.0+1.g8632d50'], ['main · 8632d50', 'main · 8632d50']]) {
     const { page, ctx, errors } = await open({ linux: false, status: { tigomonitor_version: v } });
     await page.waitForFunction(() => !document.getElementById('app-version').hidden);
     assert.deepEqual(await appVersion(page), { shown: true, text, href: null });

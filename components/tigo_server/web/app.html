@@ -3363,13 +3363,14 @@
     const el = document.getElementById('app-version');
     if (!v) return;
     const shown = /^\d/.test(v) ? `v${v}` : v;
-    el.textContent = 'TigoMonitor ';
+    el.textContent = '';
+    el.title = 'TigoMonitor version';
     if (/^\d+\.\d+\.\d+(-[0-9A-Za-z.]+)?$/.test(v)) {
       const a = document.createElement('a');
       a.href = `https://github.com/RAR/esphome-tigomonitor/releases/tag/v${v}`;
       a.target = '_blank';
       a.rel = 'noopener';
-      a.title = 'Release notes';
+      a.title = 'TigoMonitor version: release notes';
       a.textContent = shown;
       el.append(a);
     } else {
