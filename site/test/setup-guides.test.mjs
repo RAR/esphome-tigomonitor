@@ -382,6 +382,9 @@ test('System setup: the browser\'s Back and Forward step through a task, then ba
   await page.waitForFunction(() => /Find the TAP$/.test((document.querySelector('.setup-rail li[aria-current="step"]') || {}).textContent || ''));
   await page.click('button[data-setup-back]');
   await page.waitForFunction(() => /Connect the bus$/.test((document.querySelector('.setup-rail li[aria-current="step"]') || {}).textContent || ''));
+  // The step redraws at once, but the page's Back steps the history back with
+  // history.go(-1), which lands later. A Forward sent before it lands is lost.
+  await page.waitForFunction(() => (history.state || {}).setupIdx === 1);
   await page.goForward();
   await page.waitForFunction(() => /Find the TAP$/.test((document.querySelector('.setup-rail li[aria-current="step"]') || {}).textContent || ''));
   assert.deepEqual(errors, []);
