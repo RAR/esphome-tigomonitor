@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.4.0] - 2026-11-21
+
 ### Added
 
 - **TigoMonitor as a Home Assistant app.** On Home Assistant OS, add this
@@ -1318,7 +1320,8 @@ None - All changes are backward compatible. Web authentication and API tokens ar
 ## Initial Development
 Previous commits were part of the initial development phase. This is the first official release with comprehensive feature set and documentation.
 
-[Unreleased]: https://github.com/RAR/esphome-tigomonitor/compare/v2.3.0...HEAD
+[Unreleased]: https://github.com/RAR/esphome-tigomonitor/compare/v2.4.0...HEAD
+[2.4.0]: https://github.com/RAR/esphome-tigomonitor/compare/v2.3.0...v2.4.0
 [2.3.0]: https://github.com/RAR/esphome-tigomonitor/compare/v2.2.0...v2.3.0
 [2.2.0]: https://github.com/RAR/esphome-tigomonitor/compare/v2.1.0...v2.2.0
 [2.1.0]: https://github.com/RAR/esphome-tigomonitor/releases/tag/v2.1.0
