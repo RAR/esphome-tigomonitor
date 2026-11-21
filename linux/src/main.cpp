@@ -751,7 +751,7 @@ int main(int argc, char **argv) {
         }
         return bus_master->request_period(tap_mac, code, dry_run, why) ? 200 : 409;
       },
-      trusted_ingress});
+      trusted_ingress, port >= 0});
   if (port < 0 && settings.web_port > 0) port = settings.web_port;
   // Only the default steps aside for another web server; a port someone
   // chose fails loudly instead, and systemd keeps retrying it.

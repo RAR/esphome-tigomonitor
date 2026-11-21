@@ -2087,6 +2087,7 @@ void HttpServer::routes_() {
                     {"gateway_id", s.gateway_id},
                     {"web_port", s.web_port},
                     {"web_port_active", port_},
+                    {"web_port_from_args", ctx_.web_port_from_args},
                     {"web_username", s.web_username},
                     {"web_password_set", !s.web_password.empty()},
                     {"via_ingress", via_ingress_(req)},

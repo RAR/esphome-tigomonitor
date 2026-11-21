@@ -2088,7 +2088,7 @@
       </div>
       <div class="tools-card">
         <div class="cfg-row">
-          <div class="cfg-text"><strong>Web UI port</strong><span>Empty: 80, or 8080 when another web server has 80; with HTTPS, 443 or 8443. Takes effect after a restart</span></div>
+          <div class="cfg-text"><strong>Web UI port</strong><span id="pi-web-port-hint">Empty: 80, or 8080 when another web server has 80; with HTTPS, 443 or 8443. Takes effect after a restart</span></div>
           <div class="cfg-ctrl"><input class="cfg-input" id="pi-web-port" type="number" min="1" max="65535" placeholder="80"></div>
         </div>
         <div class="cfg-row">
@@ -6903,7 +6903,13 @@
       document.getElementById('pi-mqtt-topic-hint').textContent =
         `Readings go to ${s.mqtt.base_topic}/${s.device_id}/panel/<barcode>/state`;
       piWebPortActive = s.web_port_active;
-      document.getElementById('pi-web-port').value = s.web_port || '';
+      // Docker and Home Assistant start it with --port: the setting does nothing there.
+      piWebPortFixed = !!s.web_port_from_args;
+      document.getElementById('pi-web-port').value = piWebPortFixed ? '' : s.web_port || '';
+      document.getElementById('pi-web-port').disabled = piWebPortFixed;
+      document.getElementById('pi-web-port-hint').textContent = piWebPortFixed
+        ? `${piWebPortActive}, set when this monitor was started, so it can't be changed here`
+        : 'Empty: 80, or 8080 when another web server has 80; with HTTPS, 443 or 8443. Takes effect after a restart';
       piBusRole = s.bus_role || 'listen';
       document.getElementById('pi-bus-role').value = piBusRole;
       document.getElementById('pi-takeover').value = s.standby_takeover_s || 3;
@@ -6919,7 +6925,7 @@
       document.getElementById('pi-tls-key').value = piTls.key;
       document.getElementById('pi-tls-cert').disabled = piTls.fixed;
       document.getElementById('pi-tls-key').disabled = piTls.fixed;
-      document.getElementById('pi-web-port').placeholder = piTls.cert ? '443' : '80';
+      document.getElementById('pi-web-port').placeholder = piWebPortFixed ? String(piWebPortActive) : piTls.cert ? '443' : '80';
       document.getElementById('pi-tls-hint').textContent = (s.tls_active
         ? `On, valid until ${new Date(s.tls_expires * 1000).toLocaleDateString()}. A renewed certificate is used without a restart`
         : piTls.fixed ? 'Waiting for the certificate; HTTPS starts once it loads'
@@ -6946,6 +6952,7 @@
     }
   }
   let piWebPortActive = 0;
+  let piWebPortFixed = false;
   let piWebLogin = { user: 'admin', set: false };
   let piBusRole = 'listen';
   const PI_MASTER_ROWS = ['pi-cca-row', 'pi-morning-row', 'pi-tablewrites-row'];
@@ -7130,13 +7137,14 @@
     }
     const tlsCert = document.getElementById('pi-tls-cert').value.trim();
     const tlsKey = document.getElementById('pi-tls-key').value.trim();
-    const body = { serial_port: source, web_port: webPort,
+    const body = { serial_port: source,
                    bus_role: document.getElementById('pi-bus-role').value,
                    standby_takeover_s: Number(document.getElementById('pi-takeover').value) || 3,
                    discovery_morning_min: Math.max(0, Math.min(720, Math.round(Number(document.getElementById('pi-morning').value)))) || 0,
                    master_table_writes: document.getElementById('pi-tablewrites').checked,
                    web_username: document.getElementById('pi-web-user').value.trim() || 'admin',
                    trusted_proxies: document.getElementById('pi-web-proxies').value.split(/[\s,]+/).filter(Boolean) };
+    if (!piWebPortFixed) body.web_port = webPort;
     if (!piTls.fixed) Object.assign(body, { tls_cert: tlsCert, tls_key: tlsKey });
     const webPass = document.getElementById('pi-web-pass').value;
     if (webPass !== '') body.web_password = webPass;
@@ -7158,10 +7166,14 @@
       if (!r.ok) throw new Error(j.error || httpWords(r.status));
       showToast('Saved ✓', 'ok');
       const https = tlsCert !== '';
-      const next = webPort || (https ? 443 : 80);
+      // Empty starts on 80, or 8080 when 80 is taken (443 or 8443 with HTTPS),
+      // so either is no change; nor is anything when --port fixed it.
+      const portChanged = !piWebPortFixed &&
+        (webPort ? webPort !== piWebPortActive : !(https ? [443, 8443] : [80, 8080]).includes(piWebPortActive));
+      const next = piWebPortFixed || !portChanged ? piWebPortActive : webPort || (https ? 443 : 80);
       const tlsChanged = tlsCert !== piTls.cert || tlsKey !== piTls.key;
       const where = `${https ? 'https' : 'http'} on port ${next}`;
-      if ((next !== piWebPortActive || tlsChanged) &&
+      if ((portChanged || tlsChanged) &&
           await uiAsk({ title: `Restart to serve the web UI over ${where}?`, body: 'Without a restart it stays as it is.',
                         ok: 'Restart now', cancel: 'Later' })) {
         await apiFetch('/api/restart', { method: 'POST' }).catch(() => {});
