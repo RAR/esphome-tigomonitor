@@ -19,6 +19,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   [Network bridge](https://rar.github.io/esphome-tigomonitor/guides/network-bridge/)
   guide covers the boards, the wiring order and pointing TigoMonitor at it.
 
+### Fixed
+
+- **The Home Assistant app no longer sits at "starting".** Home Assistant
+  waited for a health report the app had switched off, so it never counted
+  the app as started, though the monitor itself was running. The app now
+  reports itself started once its page answers, within a few seconds. Press
+  **Rebuild** on the app's page in Home Assistant to pick it up.
+
 ## [2.4.0] - 2026-11-21
 
 ### Added
