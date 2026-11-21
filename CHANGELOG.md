@@ -41,6 +41,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Saving settings no longer asks to restart for a port change you didn't
+  make.** In Docker and the Home Assistant app the web UI's port is set when
+  the monitor starts, and on a Pi where something else had port 80 it moved
+  to 8080 by itself; either way every Save asked to "restart to serve the web
+  UI over http on port 80". The port field now shows the port it's on, locked
+  when the start command set it, and Save asks only when you changed it.
+
 - **On a phone, the bottom of the sidebar couldn't be reached.** The
   connection row, the GitHub, unit and theme buttons and the version sat
   below the screen, behind the browser's bottom bar, and the sidebar didn't
