@@ -61,8 +61,11 @@ async function open(opts = {}) {
   return { page, ctx, api, errors };
 }
 
+// The green icon after the version: its link, its tooltip, what a screen
+// reader says, and whether it's actually drawn.
 const notice = (page) => page.$eval('#app-update', (el) => ({
-  shown: !el.hidden, text: el.textContent.trim(), href: el.querySelector('a').getAttribute('href'),
+  shown: !el.hidden && el.getBoundingClientRect().width > 0, text: el.title, href: el.getAttribute('href'),
+  label: el.getAttribute('aria-label'),
 }));
 const status = (page) => page.$eval('#update-status', (el) => el.textContent);
 
@@ -70,7 +73,11 @@ test('a newer release shows under the version, linked to its notes', async () =>
   const { page, ctx, api, errors } = await open({ running: '2.3.0', latest: 'v2.4.0' });
   assert.deepEqual(await notice(page), {
     shown: true, text: 'v2.4.0 available', href: 'https://github.com/RAR/esphome-tigomonitor/releases/tag/v2.4.0',
+    label: 'TigoMonitor v2.4.0 is available: release notes',
   });
+  // Beside the version, on its line.
+  const [v, icon] = await page.$$eval('#app-version-text, #app-update', (els) => els.map((e) => e.getBoundingClientRect()));
+  assert.ok(Math.abs((v.top + v.bottom) / 2 - (icon.top + icon.bottom) / 2) < 4 && icon.left > v.right);
   assert.match(await status(page), /^v2\.4\.0 is available/);
   assert.equal(api.github, 1);
   assert.deepEqual(errors, []);

@@ -9,9 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **The sidebar says when a newer release is out.** Under the version, a
-  `v2.4.0 available` link to the release notes appears when GitHub has a
-  release newer than the one running. Your browser checks, at most once a
+- **The sidebar says when a newer release is out.** A green up-arrow
+  appears after the version, linked to the new release's notes, when GitHub
+  has a release newer than the one running. Your browser checks, at most once a
   day; the device never contacts GitHub, so an ESP32 spends nothing on it
   and one with no internet is fine. Turn it off per browser in Settings ›
   Maintenance. Builds from a branch aren't release-numbered and are never

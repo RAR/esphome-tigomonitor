@@ -852,7 +852,7 @@ test('topology: a poll with nothing new keeps the tree, and a header still toggl
 
 // TigoMonitor's version, under the sidebar's connection row.
 const appVersion = (page) => page.$eval('#app-version', (el) => ({
-  shown: !el.hidden, text: el.textContent.trim(), href: el.querySelector('a')?.getAttribute('href') || null,
+  shown: !el.hidden, text: el.textContent.trim(), href: el.querySelector('#app-version-text a')?.getAttribute('href') || null,
 }));
 
 test('the sidebar shows a release version, linked to its notes, on both builds', async () => {

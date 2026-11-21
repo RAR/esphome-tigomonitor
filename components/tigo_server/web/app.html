@@ -143,10 +143,12 @@
   .app-version { padding: 0 20px; margin-top: -4px; text-align: center; font-size: 11px; color: var(--text-dim); font-variant-numeric: tabular-nums; }
   .app-version a { color: inherit; text-decoration: none; }
   .app-version a:hover, .app-version a:focus-visible { color: var(--text); text-decoration: underline; }
-  /* A newer release on GitHub, found by this browser (Settings › Maintenance › Updates). */
-  .app-update { padding: 2px 20px 0; text-align: center; font-size: 11px; }
-  .app-update a { color: var(--accent-text); text-decoration: none; font-weight: 600; }
-  .app-update a:hover, .app-update a:focus-visible { text-decoration: underline; }
+  /* A newer release on GitHub, found by this browser (Settings › Maintenance ›
+     Updates): a green up-arrow after the version, linked to its notes. */
+  .app-version a.app-update { display: inline-flex; margin-left: 5px; vertical-align: -2px; color: var(--accent-text); }
+  .app-version a.app-update[hidden] { display: none; }
+  .app-version a.app-update:hover, .app-version a.app-update:focus-visible { color: var(--accent-text); filter: brightness(1.2); }
+  .app-version a.app-update svg { display: block; }
   /* The sidebar's PV output state, on every page. Off is the state that must
      be noticed: it turns red and its dot pulses. */
   .pv-pill { display: flex; align-items: center; gap: 9px; margin: 8px 12px; padding: 8px 10px 8px 12px;
@@ -1548,8 +1550,7 @@
         <button class="theme-toggle" id="theme-toggle" title="Toggle light/dark">☀</button>
       </span>
     </div>
-    <div class="app-version" id="app-version" hidden></div>
-    <div class="app-update" id="app-update" hidden><a id="app-update-link" target="_blank" rel="noopener"></a></div>
+    <div class="app-version" id="app-version" hidden><span id="app-version-text"></span><a class="app-update" id="app-update" target="_blank" rel="noopener" hidden><svg width="13" height="13" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="8" fill="currentColor"/><path d="M8 3.5 3.75 7.75H6.5V12h3V7.75h2.75z" style="fill:var(--bg-2)"/></svg></a></div>
   </aside>
 
   <!-- ===== Main content ===== -->
@@ -3379,7 +3380,7 @@
   // branch and commit ("main · 8632d50") on an ESP32 built from one.
   let appVersion = '';
   function showAppVersion(v) {
-    const el = document.getElementById('app-version');
+    const box = document.getElementById('app-version'), el = document.getElementById('app-version-text');
     appVersion = v || '';
     checkForUpdate();
     if (!v) return;
@@ -3397,7 +3398,7 @@
     } else {
       el.append(shown);
     }
-    el.hidden = false;
+    box.hidden = false;
   }
 
   // A newer release on GitHub. The browser asks, not the device (an ESP32
@@ -3427,12 +3428,12 @@
   }
   function updateStatus(text) { document.getElementById('update-status').textContent = text; }
   function showUpdate(tag) {
-    const box = document.getElementById('app-update'), link = document.getElementById('app-update-link');
-    if (!tag) { box.hidden = true; return; }
+    const link = document.getElementById('app-update');
+    if (!tag) { link.hidden = true; return; }
     link.href = RELEASE_PAGE + tag;
-    link.textContent = `${tag} available`;
-    link.title = `TigoMonitor ${tag} is out: release notes`;
-    box.hidden = false;
+    link.title = `${tag} available`;
+    link.setAttribute('aria-label', `TigoMonitor ${tag} is available: release notes`);
+    link.hidden = false;
   }
   async function checkForUpdate(force) {
     const off = lsGet(UPDATE_OFF_KEY) === 'off';
