@@ -1,10 +1,10 @@
 ---
 title: Network bridge
-description: A small ESP32 at the Tigo cabinet that passes the RS485 bus over Wi-Fi to TigoMonitor on a Raspberry Pi, another Linux machine or Home Assistant, so the monitor can run somewhere else.
+description: A small ESP32 at the Tigo cabinet that passes the RS485 bus over your network to TigoMonitor on a Raspberry Pi, another Linux machine or Home Assistant, so the monitor can run somewhere else.
 ---
 
 A network bridge is a small ESP32 at the Tigo cabinet that passes the RS485
-bus along over Wi-Fi. TigoMonitor runs somewhere else, on a
+bus along over Wi-Fi or Ethernet. TigoMonitor runs somewhere else, on a
 [Raspberry Pi or another Linux machine](/esphome-tigomonitor/guides/raspberry-pi/)
 or as the
 [Home Assistant app](/esphome-tigomonitor/guides/raspberry-pi/#run-it-as-a-home-assistant-app),
@@ -24,7 +24,7 @@ every byte it hears on the bus to whoever connects on TCP port 6638. The
 decoding, the dashboard, the history and the panels in Home Assistant all come
 from TigoMonitor on the other machine. On its own, a bridge shows Home
 Assistant only its own status: whether it's online, whether a client is
-connected, and its Wi-Fi signal.
+connected, and its Wi-Fi signal if it has one.
 
 It can't send anything onto the bus. Its UART has no transmit pin, and a pin
 on the board holds the transceiver's driver off. So a bridge can feed
@@ -36,21 +36,28 @@ in place of a CCA. That needs an adapter wired to the machine running it.
 
 - **TigoMonitor running on the other machine.** Set it up first, from
   [Raspberry Pi and Linux](/esphome-tigomonitor/guides/raspberry-pi/).
-- **One of these boards.** Neither needs PSRAM.
+- **One of these boards.** None of them needs PSRAM.
   - An **M5Stack AtomS3 or AtomS3R** on the **Atomic RS485 Base**. This is the
     one we've run on a roof.
-  - A **LilyGO T-CAN485**. Its config builds, but it hasn't run on a bus yet.
-- **Wi-Fi at the cabinet.** It doesn't have to be strong. An AtomS3 at
-  −80 dBm passed 859 frames in 10 seconds with none cut short.
+  - A **LilyGO T-CAN485**.
+  - A **Waveshare ESP32-S3-RS485-CAN**, which takes 7–36 V and mounts on a DIN
+    rail, so it can share the cabinet's supply.
+  - A **LilyGO T-Connect Pro Lite**, which is wired: its bridge uses Ethernet
+    and has no Wi-Fi.
+
+  The last three configs compile, and their pins are the ones their monitor
+  configs use, but none has run as a bridge on a bus yet.
+- **Wi-Fi or Ethernet at the cabinet.** Wi-Fi doesn't have to be strong. An
+  AtomS3 at −80 dBm passed 859 frames in 10 seconds with none cut short.
 
 ## Build it
 
 1. Open the [Config Builder](/esphome-tigomonitor/config-builder/?build=bridge),
-   which opens on **A network bridge**. Pick your board, fill in your Wi-Fi,
+   which opens on **A network bridge**. Pick your board, fill in your Wi-Fi if it uses it,
    and download the config and its `secrets.yaml`.
 2. Flash it over USB the first time, as in
    [Start Here](/esphome-tigomonitor/guides/getting-started/#4-flash-it). Later updates can
-   go over Wi-Fi.
+   go over the network.
 3. Power the bridge up, then wire its A, B and ground to the TAP as in
    [Wiring](/esphome-tigomonitor/guides/wiring/). On the AtomS3 the Atomic
    RS485 Base is the same one an AtomS3R monitor uses.
@@ -60,11 +67,9 @@ before its firmware holds the driver off, the AtomS3's base can drive the bus.
 Our AtomS3R held the bus for about that long at each boot. If a bridge ever
 reboots while it's connected, expect a short gap on the bus.
 
-The same configs are in the repository as
-[`example-atoms3-bridge.yaml`](https://github.com/RAR/esphome-tigomonitor/blob/main/boards/example-atoms3-bridge.yaml)
-and
-[`example-t-can485-bridge.yaml`](https://github.com/RAR/esphome-tigomonitor/blob/main/boards/example-t-can485-bridge.yaml),
-with a comment on every pin.
+The same configs are in the repository's
+[`boards/`](https://github.com/RAR/esphome-tigomonitor/tree/main/boards)
+folder as `example-*-bridge.yaml`, with a comment on every pin.
 
 ## Point TigoMonitor at it
 
@@ -79,7 +84,7 @@ every network, and Docker containers and Home Assistant apps often can't look
 them up. Give the bridge a fixed address in the builder's **Static IP** field,
 or reserve one in your router, so the address doesn't change under you.
 
-If the bridge loses power or Wi-Fi, TigoMonitor notices within about a minute
+If the bridge loses power or its network, TigoMonitor notices within about a minute
 and reconnects when it's back.
 
 ## Instead of an ESP32

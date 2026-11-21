@@ -137,7 +137,25 @@ the logs. `example-t-can485.yaml` documents that workflow.
 - **Footprint**: flash 21.1%, RAM 29.9% (ESPHome 2026.11). Run on a 40-panel
   roof bus: 859 frames in 10 s with none cut short, decoded by a Pi 5
 
-The Config Builder writes both bridges too, from `site/bridge.js`. Change a
+#### `example-waveshare-rs485-can-bridge.yaml` - Waveshare ESP32-S3-RS485-CAN as a network bridge
+- **What it does**: the same bridge, on the DIN-rail Waveshare board, which can
+  share the cabinet's 7-36V supply
+- **Read-only in hardware**: the UART has no `tx_pin`, and GPIO21 (DE + /RE)
+  is held low: receiver on, driver off. A `safe_mode:` hook holds it low in
+  safe mode too, where the switch never runs
+- **Footprint**: flash 10.2%, RAM 29.9% (ESPHome 2026.11); compiled, not yet
+  run on a real bus
+
+#### `example-t-connect-pro-lite-bridge.yaml` - LilyGO T-Connect Pro Lite as a wired network bridge
+- **What it does**: the same bridge over the board's W5500 Ethernet, with no
+  `wifi:` block
+- **Read-only in hardware**: the UART has no `tx_pin`, and GPIO17 (the
+  transceiver's TX input) is held high, the UART's idle level, which is what
+  the monitor config leaves on that pin
+- **Footprint**: flash 10.8%, RAM 17.5% (ESPHome 2026.11); compiled, not yet
+  run on a real bus
+
+The Config Builder writes all four bridges too, from `site/bridge.js`. Change a
 bridge's pins, UART or stream settings in both places:
 `site/test/bridge.test.mjs` fails when the two disagree.
 

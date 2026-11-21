@@ -7,7 +7,8 @@
 // Each board here mirrors an example file in boards/ (test/bridge.test.mjs
 // checks every block that touches the bus against it). Only boards whose
 // transceiver we know how to hold silent are listed: a bridge's UART has no
-// tx_pin, and a switch holds the driver's input at the level that keeps it off.
+// tx_pin, and a switch holds the driver's input (or enable) at the level that
+// keeps it off.
 // Add a board only with an example file to check it against.
 import { wifiLines } from './yaml.js';
 
@@ -53,6 +54,48 @@ export const BRIDGE_BOARDS = [
       'Built, but not yet run on a bus.',
     ],
   },
+  {
+    id: 'waveshare-rs485-can-bridge',
+    label: 'Waveshare ESP32-S3-RS485-CAN',
+    example: 'boards/example-waveshare-rs485-can-bridge.yaml',
+    board: 'esp32-s3-devkitc-1', variant: 'esp32s3', flash_size: '16MB',
+    minimumChipRevision: null,
+    rxPin: 'GPIO18', rxComment: 'no tx_pin: see the read-only note at the top',
+    // DE and /RE are one net: LOW is receiver on, driver off. It floats high
+    // in safe mode, where the switch never runs, so that holds it low too.
+    holdPins: [
+      { id: 'rs485_enable', pin: 'GPIO21', restore: 'ALWAYS_OFF',
+        comment: 'DE + /RE, low => receiver on and driver off', safeModeLow: true },
+    ],
+    notes: [
+      '7-36V input and a DIN-rail case, so it can share the Tigo cabinet\u2019s supply.',
+      'GPIO21 is held low, which turns the receiver on and the driver off, in safe mode too.',
+      'Built, but not yet run on a bus. The pins are the monitor config\u2019s, which a user ran (issue #22).',
+    ],
+  },
+  {
+    id: 't-connect-pro-lite-bridge',
+    label: 'LilyGO T-Connect Pro Lite (wired Ethernet)',
+    example: 'boards/example-t-connect-pro-lite-bridge.yaml',
+    board: 'esp32-s3-devkitc-1', variant: 'esp32s3', flash_size: '8MB',
+    minimumChipRevision: null,
+    rxPin: 'GPIO18', rxComment: 'no tx_pin: see the read-only note at the top',
+    // The transceiver turns around on its TX input; HIGH is the UART's idle
+    // level, what the monitor config leaves on the pin between bytes.
+    holdPins: [
+      { id: 'rs485_tx_idle', pin: 'GPIO17', comment: "the transceiver's TX input, held HIGH: idle, driver off" },
+    ],
+    // On-board W5500. The bridge then has no wifi: block at all.
+    ethernet: {
+      type: 'W5500', clk_pin: 'GPIO12', mosi_pin: 'GPIO11', miso_pin: 'GPIO13',
+      cs_pin: 'GPIO10', interrupt_pin: 'GPIO9', reset_pin: 'GPIO48', clock_speed: '8MHz',
+    },
+    notes: [
+      'Wired Ethernet, so the stream never waits on Wi-Fi. For a fixed address, reserve one in your router or fill in the commented manual_ip: block.',
+      'GPIO17, the transceiver\u2019s TX input, is held high, the line\u2019s idle level.',
+      'Built, but not yet run on a bus. The pins are the monitor config\u2019s, from a contributor\u2019s working install (discussion #30).',
+    ],
+  },
 ];
 
 export function getBridgeBoard(id) {
@@ -61,10 +104,12 @@ export function getBridgeBoard(id) {
 
 export function assembleBridge(board, form) {
   const useSecrets = Boolean(form.useSecrets);
+  const wired = Boolean(board.ethernet);
   return {
     board,
     name: form.name || 'tigo-bridge',
-    wifi: {
+    // null on a wired board: no wifi: block, and no Wi-Fi in secrets.yaml.
+    wifi: wired ? null : {
       ssid: form.wifi.ssid, password: form.wifi.password,
       staticIp: form.wifi.staticIp || null, useSecrets,
     },
@@ -72,8 +117,7 @@ export function assembleBridge(board, form) {
     ota: { useSecrets, password: form.otaPassword },
     secrets: useSecrets
       ? {
-          wifi_ssid: form.wifi.ssid,
-          wifi_password: form.wifi.password,
+          ...(wired ? {} : { wifi_ssid: form.wifi.ssid, wifi_password: form.wifi.password }),
           api_encryption_key: form.apiKey,
           ota_password: form.otaPassword,
         }
@@ -126,15 +170,29 @@ export function toBridgeYaml(cfg) {
   L.push(`${I(2)}components: [stream_server]`);
   L.push('');
 
-  L.push(...wifiLines(cfg.wifi));
-  L.push(`${I(1)}# Latency costs nothing here, but dropped Wi-Fi beacons stall the stream.`);
-  L.push(`${I(1)}power_save_mode: none`);
-  L.push(`${I(1)}ap:`);
-  L.push(`${I(2)}ssid: "Tigo-Bridge Fallback Hotspot"`);
-  L.push(`${I(2)}password: "12345678"`);
-  L.push('');
-  L.push('captive_portal:');
-  L.push('');
+  if (b.ethernet) {
+    const e = b.ethernet;
+    L.push('ethernet:');
+    for (const k of ['type', 'clk_pin', 'mosi_pin', 'miso_pin', 'cs_pin', 'interrupt_pin', 'reset_pin', 'clock_speed']) {
+      L.push(`${I(1)}${k}: ${e[k]}`);
+    }
+    L.push(`${I(1)}# For a fixed address, uncomment and fill in:`);
+    L.push(`${I(1)}# manual_ip:`);
+    L.push(`${I(1)}#   static_ip: 10.0.0.50`);
+    L.push(`${I(1)}#   gateway: 10.0.0.1`);
+    L.push(`${I(1)}#   subnet: 255.255.255.0`);
+    L.push('');
+  } else {
+    L.push(...wifiLines(cfg.wifi));
+    L.push(`${I(1)}# Latency costs nothing here, but dropped Wi-Fi beacons stall the stream.`);
+    L.push(`${I(1)}power_save_mode: none`);
+    L.push(`${I(1)}ap:`);
+    L.push(`${I(2)}ssid: "Tigo-Bridge Fallback Hotspot"`);
+    L.push(`${I(2)}password: "12345678"`);
+    L.push('');
+    L.push('captive_portal:');
+    L.push('');
+  }
 
   L.push('logger:');
   L.push(`${I(1)}level: INFO`);
@@ -157,11 +215,29 @@ export function toBridgeYaml(cfg) {
     L.push(`${I(2)}id: ${p.id}`);
     L.push(`${I(2)}internal: true`);
     L.push(`${I(2)}pin: ${p.pin}  # ${p.comment}`);
-    L.push(`${I(2)}restore_mode: ALWAYS_ON`);
+    L.push(`${I(2)}restore_mode: ${p.restore ?? 'ALWAYS_ON'}`);
   }
   L.push(`${I(1)}- platform: restart`);
   L.push(`${I(2)}name: "Tigo Bridge Restart"`);
   L.push('');
+
+  // Safe mode sets up only the network, OTA and the logger, so the switches
+  // never run. A pin that must stay low is driven low here instead.
+  const holdLow = b.holdPins.filter((p) => p.safeModeLow);
+  if (holdLow.length) {
+    L.push('# Safe mode never runs the switches above; this holds the driver off there.');
+    L.push('safe_mode:');
+    L.push(`${I(1)}on_safe_mode:`);
+    L.push(`${I(2)}- lambda: |-`);
+    for (const p of holdLow) {
+      const n = p.pin.replace('GPIO', 'GPIO_NUM_');
+      L.push(`${I(4)}gpio_reset_pin(${n});`);
+      L.push(`${I(4)}gpio_set_direction(${n}, GPIO_MODE_OUTPUT);`);
+      L.push(`${I(4)}gpio_set_level(${n}, 0);`);
+      L.push(`${I(4)}ESP_LOGW("tigo_bridge", "Safe mode: ${p.pin} held low, the RS485 driver is off");`);
+    }
+    L.push('');
+  }
 
   L.push('uart:');
   L.push(`${I(1)}id: tigo_uart`);
@@ -173,8 +249,8 @@ export function toBridgeYaml(cfg) {
   L.push('stream_server:');
   L.push(`${I(1)}uart_id: tigo_uart`);
   L.push(`${I(1)}port: 6638`);
-  L.push(`${I(1)}# Bytes sit here while Wi-Fi is slow; 38400 baud is ~3.8 kB/s, so this`);
-  L.push(`${I(1)}# covers about a second.`);
+  L.push(`${I(1)}# Bytes sit here while the network is slow; 38400 baud is ~3.8 kB/s, so`);
+  L.push(`${I(1)}# this covers about a second.`);
   L.push(`${I(1)}buffer_size: 4096`);
   L.push('');
 
@@ -187,9 +263,11 @@ export function toBridgeYaml(cfg) {
   L.push('');
 
   L.push('sensor:');
-  L.push(`${I(1)}- platform: wifi_signal`);
-  L.push(`${I(2)}name: "Tigo Bridge WiFi Signal"`);
-  L.push(`${I(2)}update_interval: 60s`);
+  if (!b.ethernet) {
+    L.push(`${I(1)}- platform: wifi_signal`);
+    L.push(`${I(2)}name: "Tigo Bridge WiFi Signal"`);
+    L.push(`${I(2)}update_interval: 60s`);
+  }
   L.push(`${I(1)}- platform: stream_server`);
   L.push(`${I(2)}connection_count:`);
   L.push(`${I(3)}name: "Tigo Bridge Clients"`);

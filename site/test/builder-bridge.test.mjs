@@ -11,6 +11,7 @@ import { resolve, dirname, extname, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
 import { BOARDS } from '../boards.js';
+import { BRIDGE_BOARDS } from '../bridge.js';
 
 const SITE = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const astro = readFileSync(resolve(SITE, 'src/components/ConfigWizard.astro'), 'utf8');
@@ -70,7 +71,7 @@ test('the builder opens on a monitor, with every monitor board', async () => {
 test('choosing a network bridge writes a bridge, and choosing a monitor again undoes it', async () => {
   const { p, ctx, errors } = await open();
   await p.check('#build-bridge');
-  assert.deepEqual(await options(p), ['atoms3-bridge', 't-can485-bridge']);
+  assert.deepEqual(await options(p), BRIDGE_BOARDS.map((b) => b.id));
   for (const id of ['#cca-card', '#monitor-fields']) assert.equal(await p.isVisible(id), false, id);
   assert.equal(await p.isVisible('#bridge-intro'), true);
   assert.equal(await p.inputValue('#name'), 'tigo-bridge');
@@ -113,5 +114,23 @@ test('a wired monitor board, then a bridge, brings the Wi-Fi fields back', async
   await p.fill('#wifi-ssid', 'cabinet-net');
   await p.uncheck('#use-secrets');
   assert.match(await out(p), /^  ssid: cabinet-net$/m);
+  await ctx.close();
+});
+
+test('a wired bridge hides the Wi-Fi fields and writes ethernet:, and a Wi-Fi bridge brings them back', async () => {
+  const { p, ctx, errors } = await open('?build=bridge');
+  await p.selectOption('#board', 't-connect-pro-lite-bridge');
+  for (const id of ['#wifi-ssid-row', '#wifi-pass-row', '#static-ip-row']) assert.equal(await p.isVisible(id), false, id);
+  assert.equal(await p.isVisible('#ethernet-note'), true);
+  let y = await out(p);
+  assert.match(y, /^ethernet:$/m);
+  assert.doesNotMatch(y, /^wifi:/m);
+  await p.selectOption('#board', 'waveshare-rs485-can-bridge');
+  assert.equal(await p.isVisible('#wifi-ssid-row'), true);
+  assert.equal(await p.isVisible('#ethernet-note'), false);
+  y = await out(p);
+  assert.match(y, /^safe_mode:$/m);
+  assert.match(y, /pin: GPIO21\b[^\n]*\n\s+restore_mode: ALWAYS_OFF/);
+  assert.deepEqual(errors, []);
   await ctx.close();
 });

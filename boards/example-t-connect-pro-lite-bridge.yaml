@@ -1,0 +1,109 @@
+# Tigo bus network bridge on a LilyGO T-Connect Pro Lite, over wired Ethernet
+#
+# This board does no decoding. It forwards the raw RS485 bus over TCP to
+# tigomonitord (the Raspberry Pi / Linux build, or the Home Assistant app)
+# running somewhere else, which decodes it and serves the dashboard. Its
+# on-board W5500 puts the bridge on a cable, so the stream never waits on Wi-Fi.
+#
+# In tigomonitord, under Settings -> Bus, choose "Network bridge (TCP)" and
+# enter  tigo-bridge.local:6638  (or this board's IP: mDNS doesn't reach every
+# network, and the IP always works).
+#
+# stream_server (https://github.com/oxan/esphome-stream-server) does the
+# forwarding: every byte the UART receives goes to each connected client.
+#
+# READ-ONLY, IN HARDWARE. stream_server also writes whatever a client sends to
+# the UART. To keep any of that off the roof bus, the UART below has no tx_pin,
+# so there is nowhere for a write to go. tigomonitord never sends anything
+# either; this covers any other program that connects to port 6638.
+#
+# The board's transceiver has no enable pin of its own on our map: it switches
+# direction from its TX input, GPIO17. The switch below holds GPIO17 HIGH, the
+# UART's idle level, which is what the monitor config's UART leaves on that pin
+# between bytes it never sends. Keep that switch.
+#
+# Built, not yet run on a bus. The pins are the ones the monitor config uses
+# (esp32s3-lilygo-t-connect-pro-lite.yaml), from a contributor's working
+# install in discussion #30.
+
+esphome:
+  name: tigo-bridge
+  friendly_name: "Tigo Bridge"
+
+esp32:
+  board: esp32-s3-devkitc-1
+  variant: esp32s3
+  flash_size: 8MB
+  framework:
+    type: esp-idf
+    version: recommended
+    sdkconfig_options:
+      # The UART ISR from IRAM, so bytes are not dropped while flash is busy.
+      CONFIG_UART_ISR_IN_IRAM: "y"
+      CONFIG_LOG_DEFAULT_LEVEL_INFO: "y"
+
+external_components:
+  - source: github://oxan/esphome-stream-server
+    components: [stream_server]
+
+# On-board W5500 over SPI; no wifi: block, see esp32s3-lilygo-t-connect-pro-lite.yaml.
+ethernet:
+  type: W5500
+  clk_pin: GPIO12
+  mosi_pin: GPIO11
+  miso_pin: GPIO13
+  cs_pin: GPIO10
+  interrupt_pin: GPIO9
+  reset_pin: GPIO48
+  clock_speed: 8MHz
+  # For a fixed address, uncomment and fill in:
+  # manual_ip:
+  #   static_ip: 10.0.0.50
+  #   gateway: 10.0.0.1
+  #   subnet: 255.255.255.0
+
+logger:
+  level: INFO
+
+# For OTA updates and the sensors below; nothing on the bus goes through it.
+api:
+  # encryption:
+  #   key: "YOUR_BASE64_KEY"
+
+ota:
+  - platform: esphome
+    password: "YOUR_OTA_PASSWORD"
+
+switch:
+  - platform: gpio
+    id: rs485_tx_idle
+    internal: true
+    pin: GPIO17          # the transceiver's TX input, held HIGH: idle, driver off
+    restore_mode: ALWAYS_ON
+  - platform: restart
+    name: "Tigo Bridge Restart"
+
+uart:
+  id: tigo_uart
+  rx_pin: GPIO18         # no tx_pin: see the read-only note at the top
+  baud_rate: 38400
+  rx_buffer_size: 2048
+
+stream_server:
+  uart_id: tigo_uart
+  port: 6638
+  # Bytes sit here while the network is slow; 38400 baud is ~3.8 kB/s, so
+  # this covers about a second.
+  buffer_size: 4096
+
+binary_sensor:
+  - platform: status
+    name: "Tigo Bridge Status"
+  - platform: stream_server
+    connected:
+      name: "Tigo Bridge Client Connected"
+
+sensor:
+  - platform: stream_server
+    connection_count:
+      name: "Tigo Bridge Clients"

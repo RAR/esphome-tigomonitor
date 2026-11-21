@@ -6,7 +6,7 @@
 // boards/, which are the ones that were built and, for the AtomS3, run on a bus.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { BRIDGE_BOARDS, getBridgeBoard, assembleBridge, toBridgeYaml } from '../bridge.js';
@@ -34,14 +34,17 @@ function blocks(yaml) {
   return Object.fromEntries(Object.entries(out).map(([k, v]) => [k, v.join('\n')]));
 }
 
-// Everything that touches the bus, the chip or the stream. wifi:, api: and ota:
-// differ on purpose: the builder fills in the user's network and a real key.
-const HARDWARE_BLOCKS = ['esp32', 'external_components', 'switch', 'uart', 'stream_server',
-  'logger', 'binary_sensor', 'sensor'];
+// Everything that touches the bus, the chip, the wire or the stream. wifi:,
+// api: and ota: differ on purpose: the builder fills in the user's network and
+// a real key.
+const HARDWARE_BLOCKS = ['esp32', 'external_components', 'ethernet', 'switch', 'safe_mode', 'uart',
+  'stream_server', 'logger', 'binary_sensor', 'sensor'];
 
-test('there is a bridge for each example bridge file, and each file exists', () => {
-  assert.deepEqual(BRIDGE_BOARDS.map((b) => b.example).sort(),
-    ['boards/example-atoms3-bridge.yaml', 'boards/example-t-can485-bridge.yaml']);
+test('there is a bridge for each example bridge file in boards/, and no other', () => {
+  const examples = readdirSync(resolve(ROOT, 'boards'))
+    .filter((f) => /^example-.*-bridge\.yaml$/.test(f)).map((f) => `boards/${f}`).sort();
+  assert.ok(examples.length >= 4);
+  assert.deepEqual(BRIDGE_BOARDS.map((b) => b.example).sort(), examples);
   for (const b of BRIDGE_BOARDS) assert.equal(getBridgeBoard(b.id), b);
 });
 
@@ -49,20 +52,31 @@ for (const b of BRIDGE_BOARDS) {
   test(`${b.id}: the bus, chip and stream blocks match ${b.example}`, () => {
     const want = blocks(readFileSync(resolve(ROOT, b.example), 'utf8'));
     const got = blocks(toBridgeYaml(assembleBridge(b, form)));
-    for (const k of HARDWARE_BLOCKS) {
+    for (const k of ['esp32', 'external_components', 'switch', 'uart', 'stream_server']) {
       assert.ok(want[k], `${b.example} has no ${k}: block`);
-      assert.equal(got[k], want[k], `${k}: differs from ${b.example}`);
     }
+    for (const k of HARDWARE_BLOCKS) assert.equal(got[k], want[k], `${k}: differs from ${b.example}`);
   });
 
-  test(`${b.id}: the UART has no transmit pin, and every pin the board drives stays on`, () => {
+  test(`${b.id}: the UART has no transmit pin, and every pin the board drives is held`, () => {
     const y = toBridgeYaml(assembleBridge(b, { ...form, uart: { tx_pin: 'GPIO6' } }));
     assert.doesNotMatch(y, /^\s*tx_pin:/m);
     assert.ok(b.holdPins.length > 0, 'a bridge must hold its transceiver driver off');
     for (const p of b.holdPins) {
-      assert.match(y, new RegExp(`pin: ${p.pin}\\b[^\\n]*\\n\\s+restore_mode: ALWAYS_ON`));
+      assert.match(y, new RegExp(`pin: ${p.pin}\\b[^\\n]*\\n\\s+restore_mode: ${p.restore ?? 'ALWAYS_ON'}`));
     }
   });
+
+  if (b.ethernet) {
+    test(`${b.id}: a wired bridge has no Wi-Fi at all, and no Wi-Fi in its secrets`, () => {
+      const cfg = assembleBridge(b, { ...form, useSecrets: true });
+      const y = toBridgeYaml(cfg);
+      assert.doesNotMatch(y, /^wifi:|^captive_portal:|wifi_signal/m);
+      assert.match(y, /^ethernet:\n  type: W5500$/m);
+      assert.equal(toSecretsYaml(cfg), 'api_encryption_key: KEY==\nota_password: ota\n');
+    });
+    continue;
+  }
 
   test(`${b.id}: Wi-Fi never sleeps, and the network and secrets come from the form`, () => {
     const cfg = assembleBridge(b, { ...form, useSecrets: true,

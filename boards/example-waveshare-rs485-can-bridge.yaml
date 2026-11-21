@@ -1,0 +1,120 @@
+# Tigo bus network bridge on a Waveshare ESP32-S3-RS485-CAN
+#
+# This board does no decoding. It forwards the raw RS485 bus over TCP to
+# tigomonitord (the Raspberry Pi / Linux build, or the Home Assistant app)
+# running somewhere else, which decodes it and serves the dashboard. Its 7-36V
+# input and DIN-rail case let it share the Tigo cabinet's supply.
+#
+# In tigomonitord, under Settings -> Bus, choose "Network bridge (TCP)" and
+# enter  tigo-bridge.local:6638  (or this board's IP: mDNS doesn't reach every
+# network, and the IP always works).
+#
+# stream_server (https://github.com/oxan/esphome-stream-server) does the
+# forwarding: every byte the UART receives goes to each connected client.
+#
+# READ-ONLY, IN HARDWARE. stream_server also writes whatever a client sends to
+# the UART. To keep any of that off the roof bus, the UART below has no tx_pin,
+# so there is nowhere for a write to go. tigomonitord never sends anything
+# either; this covers any other program that connects to port 6638.
+#
+# The SP3485EN's DE and /RE are one net on GPIO21, and LOW means "receiver on,
+# driver off". The switch below holds it low; without it the board hears
+# nothing (issue #22), and with it the driver can't turn on. Keep that switch.
+#
+# Two gaps, both while GPIO21 floats (see esp32s3-waveshare-rs485-can.yaml):
+# under a second at each boot, and ESPHome's safe mode, which never sets the
+# switch up. The safe_mode: block covers the second. A 10 kOhm resistor from
+# GPIO21 to GND closes the first.
+#
+# Built, not yet run on a bus. The pins are the ones the monitor config uses,
+# which a user ran in issue #22.
+
+esphome:
+  name: tigo-bridge
+  friendly_name: "Tigo Bridge"
+
+esp32:
+  board: esp32-s3-devkitc-1
+  variant: esp32s3
+  flash_size: 16MB
+  framework:
+    type: esp-idf
+    version: recommended
+    sdkconfig_options:
+      # The UART ISR from IRAM, so bytes are not dropped while flash is busy.
+      CONFIG_UART_ISR_IN_IRAM: "y"
+      CONFIG_LOG_DEFAULT_LEVEL_INFO: "y"
+
+external_components:
+  - source: github://oxan/esphome-stream-server
+    components: [stream_server]
+
+wifi:
+  ssid: "YOUR_WIFI_SSID"
+  password: "YOUR_WIFI_PASSWORD"
+  # Latency costs nothing here, but dropped Wi-Fi beacons stall the stream.
+  power_save_mode: none
+  ap:
+    ssid: "Tigo-Bridge Fallback Hotspot"
+    password: "12345678"
+
+captive_portal:
+
+logger:
+  level: INFO
+
+# For OTA updates and the sensors below; nothing on the bus goes through it.
+api:
+  # encryption:
+  #   key: "YOUR_BASE64_KEY"
+
+ota:
+  - platform: esphome
+    password: "YOUR_OTA_PASSWORD"
+
+switch:
+  - platform: gpio
+    id: rs485_enable
+    internal: true
+    pin: GPIO21          # DE + /RE, low => receiver on and driver off
+    restore_mode: ALWAYS_OFF
+  - platform: restart
+    name: "Tigo Bridge Restart"
+
+# Safe mode sets up only Wi-Fi, OTA and the logger, so the switch above never
+# runs and GPIO21 floats high: driver on, for the 5 minutes safe mode lasts.
+safe_mode:
+  on_safe_mode:
+    - lambda: |-
+        gpio_reset_pin(GPIO_NUM_21);
+        gpio_set_direction(GPIO_NUM_21, GPIO_MODE_OUTPUT);
+        gpio_set_level(GPIO_NUM_21, 0);
+        ESP_LOGW("tigo_bridge", "Safe mode: GPIO21 held low, the RS485 driver is off");
+
+uart:
+  id: tigo_uart
+  rx_pin: GPIO18         # no tx_pin: see the read-only note at the top
+  baud_rate: 38400
+  rx_buffer_size: 2048
+
+stream_server:
+  uart_id: tigo_uart
+  port: 6638
+  # Bytes sit here while Wi-Fi is slow; 38400 baud is ~3.8 kB/s, so this
+  # covers about a second.
+  buffer_size: 4096
+
+binary_sensor:
+  - platform: status
+    name: "Tigo Bridge Status"
+  - platform: stream_server
+    connected:
+      name: "Tigo Bridge Client Connected"
+
+sensor:
+  - platform: wifi_signal
+    name: "Tigo Bridge WiFi Signal"
+    update_interval: 60s
+  - platform: stream_server
+    connection_count:
+      name: "Tigo Bridge Clients"

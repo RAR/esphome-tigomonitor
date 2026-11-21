@@ -81,7 +81,7 @@ function syncBoardConstraints(board) {
 }
 
 // A bridge has no UART pins to choose (it has no tx_pin, and its rx pin is the
-// board's), no CCA and no extras. Both of its boards are Wi-Fi boards.
+// board's), no CCA and no extras.
 function syncMode() {
   const bridge = isBridge();
   $('monitor-fields').style.display = bridge ? 'none' : '';
@@ -104,8 +104,9 @@ function syncMode() {
 function syncBoard() {
   const board = currentBoard();
   if (!isBridge()) { syncBoardConstraints(board); return; }
-  for (const id of ['wifi-ssid-row', 'wifi-pass-row', 'static-ip-row']) $(id).style.display = '';
-  $('ethernet-note').style.display = 'none';
+  const wired = Boolean(board.ethernet);
+  for (const id of ['wifi-ssid-row', 'wifi-pass-row', 'static-ip-row']) $(id).style.display = wired ? 'none' : '';
+  $('ethernet-note').style.display = wired ? '' : 'none';
   $('board-notes').textContent = board.notes.join(' ');
 }
 

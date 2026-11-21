@@ -10,11 +10,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **The Config Builder writes a network bridge.** Choose "A network bridge"
-  at the top, pick an AtomS3 or AtomS3R on the Atomic RS485 Base or a LilyGO
-  T-CAN485, and it writes the config for a board that passes the bus over
-  Wi-Fi to TigoMonitor on a Pi or in Home Assistant. Like the example files
-  it matches, the bridge has no transmit pin and holds its transceiver's
-  driver off. A new
+  at the top and pick a board: an AtomS3 or AtomS3R on the Atomic RS485
+  Base, a LilyGO T-CAN485, a Waveshare ESP32-S3-RS485-CAN, or a LilyGO
+  T-Connect Pro Lite over wired Ethernet. It writes the config for a board
+  that passes the bus to TigoMonitor on a Pi or in Home Assistant. The
+  bridge has no transmit pin and holds its transceiver's driver off. Only
+  the AtomS3 bridge has run on a bus so far. A new
   [Network bridge](https://rar.github.io/esphome-tigomonitor/guides/network-bridge/)
   guide covers the boards, the wiring order and pointing TigoMonitor at it.
 
