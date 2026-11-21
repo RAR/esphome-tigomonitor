@@ -104,6 +104,8 @@
     display: flex;
     flex-direction: column;
     position: sticky; top: 0; height: 100vh;
+    /* A window shorter than the sidebar scrolls it, rather than cutting off its foot. */
+    overflow-y: auto; overscroll-behavior: contain;
   }
   .brand {
     padding: 0 20px 20px;
@@ -1366,7 +1368,10 @@
     aside {
       position: fixed; top: 0; left: 0; bottom: 0;
       width: 280px; max-width: 85vw;
-      height: 100vh;
+      /* 100vh on a phone is the screen with its browser bars hidden, so the
+         foot sat behind the bottom bar; dvh is what is actually visible. */
+      height: 100vh; height: 100dvh;
+      padding-bottom: calc(20px + env(safe-area-inset-bottom, 0px));
       z-index: 55;
       transform: translateX(-100%);
       transition: transform 0.22s ease;

@@ -24,6 +24,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   one built from a branch shows the branch and commit (`main · 8632d50`).
   `/api/status` carries it as `tigomonitor_version` on both builds.
 
+### Fixed
+
+- **On a phone, the bottom of the sidebar couldn't be reached.** The
+  connection row, the GitHub, unit and theme buttons and the version sat
+  below the screen, behind the browser's bottom bar, and the sidebar didn't
+  scroll. It now fits the part of the screen you can see and scrolls when
+  it's taller.
+
 ## [2.3.0] - 2026-11-20
 
 ### Added
