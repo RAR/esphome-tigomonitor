@@ -42,6 +42,7 @@ basic = {'Authorization': 'Basic ' + base64.b64encode(b'admin:pw').decode()}
 
 s, b = req(18096, '/api/settings')
 expect('from the ingress proxy: no sign-in', (s, json.loads(b).get('via_ingress')), (200, True))
+expect('the port given with --port is reported as fixed', (json.loads(b).get('web_port_from_args'), json.loads(b).get('web_port_active')), (True, 18096))
 expect('it can save settings too', req(18096, '/api/settings', {'publish_interval_s': 30})[0], 200)
 expect('another site is still refused', req(18096, '/api/settings', {'publish_interval_s': 30},
                                             headers={'Sec-Fetch-Site': 'cross-site'})[0], 403)

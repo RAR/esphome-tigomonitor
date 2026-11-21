@@ -268,6 +268,56 @@ test('the Web UI card saves the web settings with the bus ones', async () => {
   await ctx.close();
 });
 
+// The questions the page asks from now on, by title (answering each "Later").
+async function recordQuestions(page) {
+  await page.evaluate(() => {
+    window.asked = [];
+    const d = document.getElementById('ui-dialog');
+    new MutationObserver(() => {
+      if (!d.open) return;
+      window.asked.push(d.querySelector('h2').textContent);
+      setTimeout(() => d.querySelector('[data-answer="cancel"]').click(), 0);
+    }).observe(d, { attributes: true, attributeFilter: ['open'] });
+  });
+  return () => page.evaluate(() => window.asked);
+}
+
+test('a web port set when it was started (as in Docker or Home Assistant) is fixed, and saving asks no restart', async () => {
+  const { page, ctx, api } = await open({ hash: '#settings', pages: { web_port_active: 8080, web_port_from_args: true } });
+  await page.click('#settings-tab-web');
+  const asked = await recordQuestions(page);
+  assert.equal(await page.isDisabled('#pi-web-port'), true);
+  assert.equal(await page.getAttribute('#pi-web-port', 'placeholder'), '8080');
+  await page.click('#pi-web-save');
+  await page.waitForSelector('#app-toast.show');
+  await page.waitForTimeout(300);
+  assert.equal(api.posts.at(-1).web_port, undefined, 'the port is not saved over');
+  assert.deepEqual(await asked(), []);
+  await ctx.close();
+});
+
+test('an empty web port that fell back to 8080 asks no restart', async () => {
+  const { page, ctx } = await open({ hash: '#settings', pages: { web_port_active: 8080 } });
+  await page.click('#settings-tab-web');
+  const asked = await recordQuestions(page);
+  await page.click('#pi-web-save');
+  await page.waitForSelector('#app-toast.show');
+  await page.waitForTimeout(300);
+  assert.deepEqual(await asked(), []);
+  await ctx.close();
+});
+
+test('a new web port still asks to restart', async () => {
+  const { page, ctx } = await open({ hash: '#settings' });
+  await page.click('#settings-tab-web');
+  const asked = await recordQuestions(page);
+  await page.fill('#pi-web-port', '9000');
+  await page.click('#pi-web-save');
+  await page.waitForFunction(() => window.asked.length > 0);
+  assert.deepEqual(await asked(), ['Restart to serve the web UI over http on port 9000?']);
+  await ctx.close();
+});
+
 test('a primary button keeps its colour under the pointer', async () => {
   const { page, ctx } = await open({ hash: '#settings' });
   await page.click('#settings-tab-web');

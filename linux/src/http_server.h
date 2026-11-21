@@ -107,6 +107,7 @@ struct HttpContext {
   // Home Assistant's ingress proxy, which has signed the user in already;
   // the address is the connection's own, never a forwarded header's.
   std::string trusted_ingress;
+  bool web_port_from_args = false;  // --port: the web UI's port setting does nothing
 };
 
 // tigomonitord --health-check PORT, the container's HEALTHCHECK: GETs
