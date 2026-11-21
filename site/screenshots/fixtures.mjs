@@ -226,7 +226,7 @@ export const routes = {
     free_psram: 8289756, total_psram: 8388608,
     min_free_heap: 88440, min_free_psram: 8001336,
     uptime_sec: 187245, uptime_days: 2, uptime_hours: 4, uptime_mins: 0,
-    esphome_version: '2026.7.2', compilation_time: 'Jan 01 2026 00:00:00',
+    tigomonitor_version: '2.3.0', esphome_version: '2026.7.2', compilation_time: 'Jan 01 2026 00:00:00',
     task_count: 16, internal_temp: 50.9,
     invalid_checksum: 37, missed_frames: 606, total_frames: 8629414,
     command_frames: 9653, frame_27_count: 510,

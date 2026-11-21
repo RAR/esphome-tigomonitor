@@ -126,6 +126,8 @@ class TigoWebServer : public Component
   float get_setup_priority() const override { return setup_priority::WIFI - 1.0f; }
   
   void set_port(uint16_t port) { port_ = port; }
+  // TigoMonitor's version (tigo_server/build_version.py), "" if unknown.
+  void set_version(const char *version) { version_ = version; }
   uint16_t get_port() const { return port_; }
   
   void set_api_token(const std::string &token) { api_token_ = token; }
@@ -142,6 +144,7 @@ class TigoWebServer : public Component
   light::LightState *backlight_{nullptr};
   httpd_handle_t server_{nullptr};
   uint16_t port_{80};
+  const char *version_{""};
   std::string api_token_{""};
   std::string web_username_{""};
   std::string web_password_{""};

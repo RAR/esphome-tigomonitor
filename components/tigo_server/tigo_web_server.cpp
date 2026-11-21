@@ -3719,7 +3719,7 @@ void TigoWebServer::build_esp_status_json(PSRAMString& json) {
     "{\"free_heap\":%zu,\"total_heap\":%zu,\"free_psram\":%zu,\"total_psram\":%zu,"
     "\"min_free_heap\":%zu,\"min_free_psram\":%zu,"
     "\"uptime_sec\":%u,\"uptime_days\":%u,\"uptime_hours\":%u,\"uptime_mins\":%u,"
-    "\"esphome_version\":\"%s\",\"compilation_time\":\"%s %s\","
+    "\"tigomonitor_version\":\"%s\",\"esphome_version\":\"%s\",\"compilation_time\":\"%s %s\","
     "\"task_count\":%u,\"internal_temp\":%s,"
     "\"invalid_checksum\":%u,\"missed_frames\":%u,\"total_frames\":%u,"
     "\"command_frames\":%u,\"frame_27_count\":%u,"
@@ -3728,7 +3728,7 @@ void TigoWebServer::build_esp_status_json(PSRAMString& json) {
     free_heap, total_heap, free_psram, total_psram,
     min_free_heap, min_free_psram,
     (unsigned) uptime_sec, (unsigned) uptime_days, (unsigned) uptime_hours, (unsigned) uptime_mins,
-    ESPHOME_VERSION, __DATE__, __TIME__,
+    version_, ESPHOME_VERSION, __DATE__, __TIME__,
     (unsigned int)task_count, temp_str,
     (unsigned) invalid_checksum, (unsigned) missed_frames, (unsigned) total_frames,
     (unsigned) command_frames, (unsigned) frame_27_count,

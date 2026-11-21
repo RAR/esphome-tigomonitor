@@ -57,7 +57,7 @@ async function open(opts = {}) {
     const req = route.request();
     const path = new URL(req.url()).pathname.replace(/^.*(\/api\/)/, '$1');
     const json = (status, body) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
-    if (path === '/api/status') return json(200, { ...routes['/api/status'], ...(linux ? { platform: 'linux' } : {}) });
+    if (path === '/api/status') return json(200, { ...routes['/api/status'], ...(linux ? { platform: 'linux' } : {}), ...(opts.status || {}) });
     if (path === '/api/settings' && linux) {
       if (req.method() === 'POST') {
         const body = JSON.parse(req.postData());
@@ -846,6 +846,42 @@ test('topology: a poll with nothing new keeps the tree, and a header still toggl
   // One handler per header: a second one would toggle it straight back.
   await page.click('#topo-tree .topo-inv-head');
   assert.equal(await page.evaluate(() => document.querySelector('#topo-tree .topo-inv').classList.contains('collapsed')), true);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+// TigoMonitor's version, under the sidebar's connection row.
+const appVersion = (page) => page.$eval('#app-version', (el) => ({
+  shown: !el.hidden, text: el.textContent.trim(), href: el.querySelector('a')?.getAttribute('href') || null,
+}));
+
+test('the sidebar shows a release version, linked to its notes, on both builds', async () => {
+  for (const linux of [true, false]) {
+    const { page, ctx, errors } = await open({ linux });
+    await page.waitForFunction(() => !document.getElementById('app-version').hidden);
+    assert.deepEqual(await appVersion(page), {
+      shown: true, text: 'TigoMonitor v2.3.0',
+      href: 'https://github.com/RAR/esphome-tigomonitor/releases/tag/v2.3.0',
+    });
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+});
+
+test('a build between releases or from a branch shows its version unlinked', async () => {
+  for (const [v, text] of [['2.3.0+1.g8632d50', 'TigoMonitor v2.3.0+1.g8632d50'], ['main · 8632d50', 'TigoMonitor main · 8632d50']]) {
+    const { page, ctx, errors } = await open({ linux: false, status: { tigomonitor_version: v } });
+    await page.waitForFunction(() => !document.getElementById('app-version').hidden);
+    assert.deepEqual(await appVersion(page), { shown: true, text, href: null });
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+});
+
+test('a firmware that reports no version shows no version line', async () => {
+  const { page, ctx, errors } = await open({ linux: false, status: { tigomonitor_version: undefined } });
+  await page.waitForSelector('#conn-label');
+  assert.equal((await appVersion(page)).shown, false);
   assert.deepEqual(errors, []);
   await ctx.close();
 });
