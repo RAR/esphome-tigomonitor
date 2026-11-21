@@ -35,6 +35,21 @@ for arch in arches:
 expect("ingress on the port the daemon is given", bool(re.search(r"^ingress_port:\s*8080\s*$", config, re.M)), True)
 expect("run.sh starts it on that port", "--port 8080" in (root / "ha-app/run.sh").read_text(), True)
 
+# The Supervisor counts an app with any healthcheck in its image as started
+# only once Docker reports it healthy or unhealthy. HEALTHCHECK NONE still
+# leaves one ({"Test": ["NONE"]}), which never reports, so the app sat at
+# "starting" forever. The image's own check reports the bus, unhealthy until
+# one is chosen. So: a check of the web server alone, on the ingress port,
+# with a short start interval.
+dockerfile = (root / "ha-app/Dockerfile").read_text().replace("\\\n", " ")  # join continued lines
+checks = re.findall(r"^HEALTHCHECK\b(.*)$", dockerfile, re.M)
+expect("one healthcheck of its own", len(checks), 1)
+check = checks[0] if checks else ""
+expect("not NONE (the Supervisor would wait for it forever)", "NONE" in check.split(), False)
+expect("it asks the web server on the ingress port", "127.0.0.1:8080/" in check, True)
+expect("not the bus's health (unhealthy until a bus is chosen)", "health-check" in check or "/api/health" in check, False)
+expect("a start interval, so it's started within seconds", bool(re.search(r"--start-interval=\d+s", check)), True)
+
 if fail:
     sys.exit(1)
 print(f"ha_app_test: all passed ({version}, {', '.join(arches)})")
