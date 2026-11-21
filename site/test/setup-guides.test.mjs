@@ -23,7 +23,7 @@ before(async () => {
     .listen(0, '127.0.0.1');
   await new Promise((r) => server.once('listening', r));
   port = server.address().port;
-  browser = await chromium.launch({ args: ['--no-sandbox'] });
+  browser = await chromium.launch({ args: ['--no-sandbox', '--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1'] });
 });
 after(async () => { await browser.close(); server.close(); });
 // A test that fails before its own ctx.close() leaves the page polling the
@@ -112,7 +112,7 @@ async function open(w) {
   page.on('pageerror', (e) => errors.push(e.message));
   await answerAll(page, true);
   await page.goto(`http://127.0.0.1:${port}/#setup`, { waitUntil: 'networkidle' });
-  await page.waitForSelector('.setup-tasks');
+  await page.waitForSelector('.setup-start');  // listening has no task cards
   return { page, ctx, errors };
 }
 
@@ -382,6 +382,9 @@ test('System setup: the browser\'s Back and Forward step through a task, then ba
   await page.waitForFunction(() => /Find the TAP$/.test((document.querySelector('.setup-rail li[aria-current="step"]') || {}).textContent || ''));
   await page.click('button[data-setup-back]');
   await page.waitForFunction(() => /Connect the bus$/.test((document.querySelector('.setup-rail li[aria-current="step"]') || {}).textContent || ''));
+  // The step redraws at once, but the page's Back steps the history back with
+  // history.go(-1), which lands later. A Forward sent before it lands is lost.
+  await page.waitForFunction(() => (history.state || {}).setupIdx === 1);
   await page.goForward();
   await page.waitForFunction(() => /Find the TAP$/.test((document.querySelector('.setup-rail li[aria-current="step"]') || {}).textContent || ''));
   assert.deepEqual(errors, []);

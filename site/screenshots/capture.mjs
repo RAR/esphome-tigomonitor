@@ -42,11 +42,17 @@ const README_SHOTS = {
 // Only the views worth putting in front of a reader. CCA Info and Tigo Cloud
 // are deliberately absent: both are mostly account and connection state, which
 // is exactly the material we do not want on a public page even as fixtures.
+// [file stem, label, and optionally what to click, as PI_VIEWS below, and
+// what to scroll to the top before the capture].
 const VIEWS = [
   ['dashboard',   'Dashboard'],
   ['topology',    'Topology'],
   ['history',     'History'],
   ['nodes',       'Devices'],
+  // One optimizer opened: A1, which the fixtures give firmware, settings,
+  // MPPT parameters and a rating.
+  ['nodes-detail', 'Device detail', ['button[data-view="nodes"]', '#nodes-tbody tr.node-row[data-addr="0002"] .node-toggle'],
+    'table.nodes.devices thead'],
   ['settings',    'Settings'],
   ['diagnostics', 'Diagnostics'],
 ];
@@ -77,8 +83,11 @@ const port = server.address().port;
 rmSync(OUT, { recursive: true, force: true });
 mkdirSync(OUT, { recursive: true });
 
+// No DNS but the local server: the page's once-a-day GitHub release check
+// fails quietly, so a newer release never puts a notice in the screenshots.
 const browser = await chromium.launch({
-  args: ['--no-sandbox', '--force-color-profile=srgb', '--font-render-hinting=none'],
+  args: ['--no-sandbox', '--force-color-profile=srgb', '--font-render-hinting=none',
+    '--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1'],
 });
 
 const missing = new Set();
@@ -127,11 +136,12 @@ for (const theme of THEMES) for (const pi of [false, true]) {
   await page.goto(`http://127.0.0.1:${port}/app`, { waitUntil: 'networkidle' });
   await page.waitForTimeout(1500);
 
-  const views = pi ? PI_VIEWS : VIEWS.map(([v, name]) => [v, name, `button[data-view="${v}"]`]);
-  for (const [view, name, click] of views) {
+  const views = pi ? PI_VIEWS : VIEWS.map(([v, name, click, top]) => [v, name, click ?? `button[data-view="${v}"]`, top]);
+  for (const [view, name, click, top] of views) {
     for (const c of [].concat(click)) await page.click(c);
     await page.waitForLoadState('networkidle');
     await page.waitForTimeout(1500);
+    if (top) await page.$eval(top, (el) => el.scrollIntoView({ block: 'start' }));
     const file = `${view}-${theme}.png`;
     await page.screenshot({ path: `${OUT}/${file}` });
     written.push(file);
@@ -139,6 +149,7 @@ for (const theme of THEMES) for (const pi of [false, true]) {
       copyFileSync(`${OUT}/${file}`, `${README_OUT}/${README_SHOTS[view]}`);
     }
     console.log(`  ✓ ${name.padEnd(12)} ${theme.padEnd(5)} → ${file}`);
+    if (top) await page.evaluate(() => window.scrollTo(0, 0));  // the next view starts at the top
   }
   await ctx.close();
 }

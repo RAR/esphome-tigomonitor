@@ -106,7 +106,16 @@ struct HttpContext {
   // Replace a TAP's handover (POST /api/master/taps/handover): list every
   // optimizer last heard through TAP from on TAP to, not joined, and watch
   // each join there. 200 with how many in count, or 409 with why.
-  std::function<int(uint16_t from, uint16_t to, bool dry_run, std::string &why, size_t &count)> request_table_handover;
+  // given: bench only (master_bench), the optimizers to hand over as (MAC hex,
+  // address), in place of the ones heard through from; empty otherwise.
+  std::function<int(uint16_t from, uint16_t to, bool dry_run,
+                    const std::vector<std::pair<std::string, uint16_t>> &given, std::string &why, size_t &count)>
+      request_table_handover;
+  // --trust-ingress: requests from this address count as signed in. It is
+  // Home Assistant's ingress proxy, which has signed the user in already;
+  // the address is the connection's own, never a forwarded header's.
+  std::string trusted_ingress;
+  bool web_port_from_args = false;  // --port: the web UI's port setting does nothing
 };
 
 // tigomonitord --health-check PORT, the container's HEALTHCHECK: GETs
@@ -153,6 +162,7 @@ class HttpServer {
   // (scripts, and browsers that still send what their popup was given).
   bool signed_in_(const httplib::Request &req, const Settings &s);
   // The Set-Cookie for a session, or with "" one that ends it.
+  bool via_ingress_(const httplib::Request &req) const;  // from --trust-ingress's address
   std::string session_cookie_(const std::string &token, const httplib::Request &req, const Settings &s) const;
   std::string client_(const httplib::Request &req, const Settings &s) const;  // who wrong passwords count against
 };

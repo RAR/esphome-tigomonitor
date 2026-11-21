@@ -70,6 +70,8 @@ static void usage() {
                "  --serial DEV      serial port, overriding settings.json\n"
                "  --tls-cert FILE   HTTPS certificate (with its chain), overriding settings.json\n"
                "  --tls-key FILE    its private key\n"
+               "  --trust-ingress ADDR  requests from ADDR (Home Assistant's ingress proxy,\n"
+               "                    which signs users in itself) need no sign-in here\n"
                "  --watchdog S      without systemd's watchdog, exit if the main loop stops\n"
                "                    for S seconds, for Docker to restart it (default 60, 0 off)\n"
                "  --health-check P  check the daemon on port P, as Docker's HEALTHCHECK does\n"
@@ -178,6 +180,7 @@ int main(int argc, char **argv) {
   int port = -1;  // -1: from settings.json
   std::string serial_override, replay, capture;
   std::string tls_cert_override, tls_key_override;
+  std::string trusted_ingress;
   double speed = 1.0;
   int watchdog_s = 60;
   for (int i = 1; i < argc; i++) {
@@ -195,6 +198,7 @@ int main(int argc, char **argv) {
     else if (a == "--serial") serial_override = next();
     else if (a == "--tls-cert") tls_cert_override = next();
     else if (a == "--tls-key") tls_key_override = next();
+    else if (a == "--trust-ingress") trusted_ingress = next();
     else if (a == "--watchdog") watchdog_s = std::atoi(next().c_str());
     else if (a == "--health-check") return health_check(std::atoi(next().c_str()));
     else if (a == "--replay") replay = next();
@@ -747,14 +751,23 @@ int main(int argc, char **argv) {
         }
         return bus_master->request_period(tap_mac, code, dry_run, why) ? 200 : 409;
       },
-      [&](uint16_t from, uint16_t to, bool dry_run, std::string &why, size_t &count) {
+      [&](uint16_t from, uint16_t to, bool dry_run, const std::vector<std::pair<std::string, uint16_t>> &given,
+          std::string &why, size_t &count) {
         namespace mp = esphome::tigo_monitor::master;
         // Every optimizer whose link was last heard through from: its
         // barcode is its MAC, its address its id. From the node table and
         // the links, so a TAP that has died can still be handed over.
         std::vector<mp::TableRecord> recs;
         auto links = monitor.links();
-        for (const Node &n : monitor.nodes()) {
+        // Bench only: a list the request brought (the HTTP layer allows it
+        // only with master_bench), for rehearsing on TAPs with no optimizers.
+        for (const auto &g : given) {
+          mp::Bytes mac;
+          for (size_t i = 0; i + 1 < g.first.size(); i += 2)
+            mac.push_back(static_cast<uint8_t>(std::stoul(g.first.substr(i, 2), nullptr, 16)));
+          recs.push_back({mac, g.second});
+        }
+        for (const Node &n : given.empty() ? monitor.nodes() : std::vector<Node>{}) {
           auto it = links.links().find(n.addr);
           if (it == links.links().end() || it->second.tap != from) continue;
           if (n.long_address.size() != 16 ||
@@ -784,7 +797,8 @@ int main(int argc, char **argv) {
           return 409;
         }
         return bus_master->request_table_handover(recs, dry_run, why, to) ? 200 : 409;
-      }});
+      },
+      trusted_ingress, port >= 0});
   if (port < 0 && settings.web_port > 0) port = settings.web_port;
   // Only the default steps aside for another web server; a port someone
   // chose fails loudly instead, and systemd keeps retrying it.

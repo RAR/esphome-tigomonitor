@@ -9,11 +9,85 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The Config Builder writes a network bridge.** Choose "A network bridge"
+  at the top and pick a board: an AtomS3 or AtomS3R on the Atomic RS485
+  Base, a LilyGO T-CAN485, a Waveshare ESP32-S3-RS485-CAN, or a LilyGO
+  T-Connect Pro Lite over wired Ethernet. It writes the config for a board
+  that passes the bus to TigoMonitor on a Pi or in Home Assistant. The
+  bridge has no transmit pin and holds its transceiver's driver off. Only
+  the AtomS3 bridge has run on a bus so far. A new
+  [Network bridge](https://rar.github.io/esphome-tigomonitor/guides/network-bridge/)
+  guide covers the boards, the wiring order and pointing TigoMonitor at it.
+
+## [2.4.0] - 2026-11-21
+
+### Added
+
+- **TigoMonitor as a Home Assistant app.** On Home Assistant OS, add this
+  repository under Settings → Apps → App store → Repositories, install
+  TigoMonitor, and its page opens from Home Assistant's sidebar. It's the
+  Pi build in an app: it reads the bus from a network bridge or a USB adapter
+  on the Home Assistant machine, uses the Mosquitto broker app from its first
+  start, and doesn't ask you to sign in a second time. See
+  [Run it as a Home Assistant app](https://rar.github.io/esphome-tigomonitor/guides/raspberry-pi/#run-it-as-a-home-assistant-app).
+
+- **The sidebar says when a newer release is out.** A green up-arrow
+  appears after the version, linked to the new release's notes, when GitHub
+  has a release newer than the one running. Your browser checks, at most once a
+  day; the device never contacts GitHub, so an ESP32 spends nothing on it
+  and one with no internet is fine. Turn it off per browser in Settings ›
+  Maintenance. Builds from a branch aren't release-numbered and are never
+  told.
+
+- **The sidebar shows which TigoMonitor you're running.** It appears under
+  the connection row, as `v2.3.0`, and a release links to its
+  notes. The Pi already knew its version. The ESP32 now works its version
+  out when it's compiled: an ESP32 pinned to a release shows the release;
+  one built from a branch shows the branch and commit (`main · 8632d50`).
+  `/api/status` carries it as `tigomonitor_version` on both builds.
+
+- **An AtomS3 can be the network bridge.** `boards/example-atoms3-bridge.yaml`
+  turns an M5Stack AtomS3 on the Atomic RS485 Base into a bridge that passes
+  the bus to the Pi build over Wi-Fi, and can't send anything onto it. It's
+  the first bridge run on a real bus: on a 40-panel roof it passed 859 frames
+  in 10 s with none cut short, and a Pi 5 in Docker decoded the roof from it.
+  See [Read the bus over the network](https://rar.github.io/esphome-tigomonitor/guides/raspberry-pi/#read-the-bus-over-the-network).
+
+### Changed
+
+- **A new install that listens beside a CCA gets a setup that fits it.**
+  System setup no longer offers to add, replace or retire optimizers and
+  TAPs, which is the CCA's job while it runs the bus. Set up a new system
+  swaps finding the TAP and its optimizers for **Listen for a day**: a
+  checklist of what has been heard so far, since some of it (barcodes,
+  firmware and settings, joins) only goes by when the CCA asks, often in the
+  evening, or at sunrise. A Pi that runs the bus sees System setup as before.
+
+### Fixed
+
+- **Saving settings no longer asks to restart for a port change you didn't
+  make.** In Docker and the Home Assistant app the web UI's port is set when
+  the monitor starts, and on a Pi where something else had port 80 it moved
+  to 8080 by itself; either way every Save asked to "restart to serve the web
+  UI over http on port 80". The port field now shows the port it's on, locked
+  when the start command set it, and Save asks only when you changed it.
+
+- **On a phone, the bottom of the sidebar couldn't be reached.** The
+  connection row, the GitHub, unit and theme buttons and the version sat
+  below the screen, behind the browser's bottom bar, and the sidebar didn't
+  scroll. It now fits the part of the screen you can see and scrolls when
+  it's taller.
+
+## [2.3.0] - 2026-11-20
+
+### Added
+
 - **The ESP32 can draw the array too.** Topology › Array places each panel
   where it sits, shaded by its power, and each TAP where it's mounted, as on
   the Pi. The board keeps the drawing in its settings storage (NVS), so it
   survives a reflash, and saves it by barcode, so it stays right after the
   TAP renumbers the optimizers.
+
 - **The ESP32 has the mesh map too.** Topology › Mesh shows each optimizer
   around its TAP, coloured by the reports lost today and its signal over a
   day, and which optimizer it joined through, as on the Pi. Everything it
@@ -41,9 +115,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   across a reboot. The ESP32 lists a changed setting only when it runs the
   bus, and as a listener it never does. TAPs can be named there too; the
   ESP32 keeps up to eight names in its settings storage.
-  Each TAP is listed as soon as it answers polls; its firmware and radio
-  fill in when a master next brings it up, which a listener may not hear
-  for days.
+
+### Changed
+
+- **Devices lists every TAP that answers polls, on the Pi too.** It listed
+  only the TAPs whose firmware read it had heard, so a monitor that started
+  after a TAP's bring-up could show none. A TAP now appears as soon as it
+  answers; its firmware and radio fill in when a master next brings it up,
+  which a listener may not hear for days.
 
 ## [2.2.0] - 2026-11-18
 
@@ -1265,7 +1344,9 @@ None - All changes are backward compatible. Web authentication and API tokens ar
 ## Initial Development
 Previous commits were part of the initial development phase. This is the first official release with comprehensive feature set and documentation.
 
-[Unreleased]: https://github.com/RAR/esphome-tigomonitor/compare/v2.2.0...HEAD
+[Unreleased]: https://github.com/RAR/esphome-tigomonitor/compare/v2.4.0...HEAD
+[2.4.0]: https://github.com/RAR/esphome-tigomonitor/compare/v2.3.0...v2.4.0
+[2.3.0]: https://github.com/RAR/esphome-tigomonitor/compare/v2.2.0...v2.3.0
 [2.2.0]: https://github.com/RAR/esphome-tigomonitor/compare/v2.1.0...v2.2.0
 [2.1.0]: https://github.com/RAR/esphome-tigomonitor/releases/tag/v2.1.0
 [2.0.1]: https://github.com/RAR/esphome-tigomonitor/releases/tag/v2.0.1

@@ -26,7 +26,7 @@ before(async () => {
   }).listen(0, '127.0.0.1');
   await new Promise((r) => server.once('listening', r));
   port = server.address().port;
-  browser = await chromium.launch({ args: ['--no-sandbox'] });
+  browser = await chromium.launch({ args: ['--no-sandbox', '--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1'] });
 });
 
 after(async () => {
@@ -57,7 +57,7 @@ async function open(opts = {}) {
     const req = route.request();
     const path = new URL(req.url()).pathname.replace(/^.*(\/api\/)/, '$1');
     const json = (status, body) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
-    if (path === '/api/status') return json(200, { ...routes['/api/status'], ...(linux ? { platform: 'linux' } : {}) });
+    if (path === '/api/status') return json(200, { ...routes['/api/status'], ...(linux ? { platform: 'linux' } : {}), ...(opts.status || {}) });
     if (path === '/api/settings' && linux) {
       if (req.method() === 'POST') {
         const body = JSON.parse(req.postData());
@@ -265,6 +265,56 @@ test('the Web UI card saves the web settings with the bus ones', async () => {
   const body = api.posts.at(-1);
   assert.equal(body.web_port, 8080);
   assert.equal(body.bus_role, 'listen');
+  await ctx.close();
+});
+
+// The questions the page asks from now on, by title (answering each "Later").
+async function recordQuestions(page) {
+  await page.evaluate(() => {
+    window.asked = [];
+    const d = document.getElementById('ui-dialog');
+    new MutationObserver(() => {
+      if (!d.open) return;
+      window.asked.push(d.querySelector('h2').textContent);
+      setTimeout(() => d.querySelector('[data-answer="cancel"]').click(), 0);
+    }).observe(d, { attributes: true, attributeFilter: ['open'] });
+  });
+  return () => page.evaluate(() => window.asked);
+}
+
+test('a web port set when it was started (as in Docker or Home Assistant) is fixed, and saving asks no restart', async () => {
+  const { page, ctx, api } = await open({ hash: '#settings', pages: { web_port_active: 8080, web_port_from_args: true } });
+  await page.click('#settings-tab-web');
+  const asked = await recordQuestions(page);
+  assert.equal(await page.isDisabled('#pi-web-port'), true);
+  assert.equal(await page.getAttribute('#pi-web-port', 'placeholder'), '8080');
+  await page.click('#pi-web-save');
+  await page.waitForSelector('#app-toast.show');
+  await page.waitForTimeout(300);
+  assert.equal(api.posts.at(-1).web_port, undefined, 'the port is not saved over');
+  assert.deepEqual(await asked(), []);
+  await ctx.close();
+});
+
+test('an empty web port that fell back to 8080 asks no restart', async () => {
+  const { page, ctx } = await open({ hash: '#settings', pages: { web_port_active: 8080 } });
+  await page.click('#settings-tab-web');
+  const asked = await recordQuestions(page);
+  await page.click('#pi-web-save');
+  await page.waitForSelector('#app-toast.show');
+  await page.waitForTimeout(300);
+  assert.deepEqual(await asked(), []);
+  await ctx.close();
+});
+
+test('a new web port still asks to restart', async () => {
+  const { page, ctx } = await open({ hash: '#settings' });
+  await page.click('#settings-tab-web');
+  const asked = await recordQuestions(page);
+  await page.fill('#pi-web-port', '9000');
+  await page.click('#pi-web-save');
+  await page.waitForFunction(() => window.asked.length > 0);
+  assert.deepEqual(await asked(), ['Restart to serve the web UI over http on port 9000?']);
   await ctx.close();
 });
 
@@ -846,6 +896,42 @@ test('topology: a poll with nothing new keeps the tree, and a header still toggl
   // One handler per header: a second one would toggle it straight back.
   await page.click('#topo-tree .topo-inv-head');
   assert.equal(await page.evaluate(() => document.querySelector('#topo-tree .topo-inv').classList.contains('collapsed')), true);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+// TigoMonitor's version, under the sidebar's connection row.
+const appVersion = (page) => page.$eval('#app-version', (el) => ({
+  shown: !el.hidden, text: el.textContent.trim(), href: el.querySelector('#app-version-text a')?.getAttribute('href') || null,
+}));
+
+test('the sidebar shows a release version, linked to its notes, on both builds', async () => {
+  for (const linux of [true, false]) {
+    const { page, ctx, errors } = await open({ linux });
+    await page.waitForFunction(() => !document.getElementById('app-version').hidden);
+    assert.deepEqual(await appVersion(page), {
+      shown: true, text: 'v2.3.0',
+      href: 'https://github.com/RAR/esphome-tigomonitor/releases/tag/v2.3.0',
+    });
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+});
+
+test('a build between releases or from a branch shows its version unlinked', async () => {
+  for (const [v, text] of [['2.3.0+1.g8632d50', 'v2.3.0+1.g8632d50'], ['main · 8632d50', 'main · 8632d50']]) {
+    const { page, ctx, errors } = await open({ linux: false, status: { tigomonitor_version: v } });
+    await page.waitForFunction(() => !document.getElementById('app-version').hidden);
+    assert.deepEqual(await appVersion(page), { shown: true, text, href: null });
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+});
+
+test('a firmware that reports no version shows no version line', async () => {
+  const { page, ctx, errors } = await open({ linux: false, status: { tigomonitor_version: undefined } });
+  await page.waitForSelector('#conn-label');
+  assert.equal((await appVersion(page)).shown, false);
   assert.deepEqual(errors, []);
   await ctx.close();
 });

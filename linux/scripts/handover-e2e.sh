@@ -97,5 +97,28 @@ expect "1202's three are waited for" "$(master 18451 "len(d['table']['waiting'])
 wait_for 90 18451 "len(d['table']['waiting']) == 0"
 expect "all three joined 1201" "$(master 18451 "len(d['table']['waiting'])")" 0
 expect "nothing unknown sent" "$(stat "$out/one.json" "d['other']")" "[]"
+expect "a given list is refused off the bench" \
+  "$(code POST 18451 /api/master/taps/handover '{"from": "1201", "to": "1202", "records": [{"mac": "04C05BFE00000001", "addr": "0010"}]}')" 403
+stop_all
+
+# The bench: two TAPs with no optimizers, and a list the request brings, as
+# a rehearsal on real TAPs does (20 made-up optimizers, 0010-0023).
+mkdir -p "$out/bench"
+echo '{"taps": [{"id": "1201", "mac": "04c05b0000a1b2a1"}, {"id": "1202", "mac": "04c05b0000a1b2a2"}]}' > "$out/bench/taps.json"
+start bench 18452 ', "master_table_writes": true, "master_bench": true' --tap 1201,a1,0 --tap 1202,a2,0
+wait_for 20 18452 "len(d['taps']) == 2 and all(t['polls'] > 20 for t in d['taps'])"
+records=$(python3 -c "import json; print(json.dumps([{'mac': '04C05BFE%08X' % (i + 1), 'addr': '%04X' % (0x10 + i)} for i in range(20)]))")
+expect "a bad record is refused" \
+  "$(code POST 18452 /api/master/taps/handover '{"from": "1201", "to": "1202", "records": [{"mac": "04C05BFE00000001", "addr": "0001"}]}')" 400
+expect "the check counts the given list" "$(body POST 18452 /api/master/taps/handover "{\"from\": \"1201\", \"to\": \"1202\", \"records\": $records}" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d['dry_run'], d['count'])")" "True 20"
+expect "the handover starts" "$(code POST 18452 /api/master/taps/handover "{\"from\": \"1201\", \"to\": \"1202\", \"dry_run\": false, \"records\": $records}")" 200
+wait_for 30 18452 "d['table']['edit']['finished'] and d['table']['edit']['kind'] == 'handover' and not d['table']['edit']['dry_run']"
+expect "it finished" "$(master 18452 "d['table']['edit']['ok']")" True
+sleep 1.5
+expect "only 1202 erased and written, ten a write" "$(stat "$out/bench.json" "[(t['erases'], len(t['writes'])) for t in d['taps']]")" "[(0, 0), (1, 2)]"
+expect "all twenty listed, not joined, at their addresses" "$(stat "$out/bench.json" \
+  "sorted('%04X' % int(w[2+20*i+16:2+20*i+20], 16) for w in d['taps'][1]['writes'] for i in range(int(w[:2], 16)))")" \
+  "$(python3 -c "print(sorted('%04X' % (0x8000 | (0x10 + i)) for i in range(20)))")"
+expect "nothing unknown sent" "$(stat "$out/bench.json" "d['other']")" "[]"
 stop_all
 [ $fail = 0 ] && echo "handover-e2e: ok" || { echo "handover-e2e: FAILED"; exit 1; }

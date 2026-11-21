@@ -1330,6 +1330,7 @@ void HttpServer::routes_() {
                     {"uptime_days", up / 86400},
                     {"uptime_hours", (up / 3600) % 24},
                     {"uptime_mins", (up / 60) % 60},
+                    {"tigomonitor_version", ctx_.version},
                     {"esphome_version", "tigomonitord " + ctx_.version},
                     {"compilation_time", __DATE__ " " __TIME__},
                     {"internal_temp", cpu_temp()},
@@ -1891,10 +1892,41 @@ void HttpServer::routes_() {
       return;
     }
     bool dry = !j.contains("dry_run") || !j["dry_run"].is_boolean() || j["dry_run"].get<bool>();
+    // Bench only: "records": [{"mac": "04C05B...", "addr": "0003"}, ...], the
+    // optimizers to hand over in place of the ones heard through from, for
+    // rehearsing on TAPs with no optimizers. Refused off the bench.
+    std::vector<std::pair<std::string, uint16_t>> given;
+    if (j.contains("records")) {
+      if (!ctx_.current_settings().master_bench) {
+        send_json(res, {{"error", "records are for the bench only (master_bench)"}}, 403);
+        return;
+      }
+      const char *shape = "expected \"records\": [{\"mac\": \"04C05B...\" (16 hex), \"addr\": \"0003\" (0002-03FF)}]";
+      if (!j["records"].is_array() || j["records"].empty() || j["records"].size() > 300) {
+        send_json(res, {{"error", shape}}, 400);
+        return;
+      }
+      for (const auto &r : j["records"]) {
+        unsigned addr = 0;
+        if (!r.is_object() || !r.contains("mac") || !r["mac"].is_string() || !r.contains("addr") ||
+            !r["addr"].is_string() || sscanf(r["addr"].get<std::string>().c_str(), "%x", &addr) != 1 || addr < 2 ||
+            addr > 1023) {
+          send_json(res, {{"error", shape}}, 400);
+          return;
+        }
+        std::string mac = r["mac"].get<std::string>();
+        if (mac.size() != 16 || mac.find_first_not_of("0123456789abcdefABCDEF") != std::string::npos) {
+          send_json(res, {{"error", shape}}, 400);
+          return;
+        }
+        given.emplace_back(mac, static_cast<uint16_t>(addr));
+      }
+    }
     std::string why;
     size_t count = 0;
     int code = ctx_.request_table_handover
-                   ? ctx_.request_table_handover(static_cast<uint16_t>(from), static_cast<uint16_t>(to), dry, why, count)
+                   ? ctx_.request_table_handover(static_cast<uint16_t>(from), static_cast<uint16_t>(to), dry, given, why,
+                                                 count)
                    : 409;
     if (code == 200)
       send_json(res, {{"started", true}, {"dry_run", dry}, {"from", hex4(static_cast<uint16_t>(from))},
@@ -2098,7 +2130,7 @@ void HttpServer::routes_() {
   });
 
   // Pi-only: the settings an ESP32 user would put in YAML.
-  svr.Get("/api/settings", [this](const httplib::Request &, httplib::Response &res) {
+  svr.Get("/api/settings", [this](const httplib::Request &req, httplib::Response &res) {
     Settings s = ctx_.current_settings();
     send_json(res, {{"serial_port", s.serial_port},
                     {"bus_role", s.bus_role},
@@ -2120,8 +2152,10 @@ void HttpServer::routes_() {
                     {"gateway_id", s.gateway_id},
                     {"web_port", s.web_port},
                     {"web_port_active", port_},
+                    {"web_port_from_args", ctx_.web_port_from_args},
                     {"web_username", s.web_username},
                     {"web_password_set", !s.web_password.empty()},
+                    {"via_ingress", via_ingress_(req)},
                     {"trusted_proxies", s.trusted_proxies},
                     {"setup_open", setup_open(s, unix_now_s())},
                     {"setup_open_until", s.setup_open_until},
@@ -2277,7 +2311,12 @@ void HttpServer::routes_() {
   });
 }
 
+bool HttpServer::via_ingress_(const httplib::Request &req) const {
+  return !ctx_.trusted_ingress.empty() && req.remote_addr == ctx_.trusted_ingress;
+}
+
 bool HttpServer::signed_in_(const httplib::Request &req, const Settings &s) {
+  if (via_ingress_(req)) return true;
   int64_t now = unix_now_s();
   if (sessions_.valid(cookie_value(req.get_header_value("Cookie"), "tm_session"), now)) return true;
   std::string given = req.get_header_value("Authorization");

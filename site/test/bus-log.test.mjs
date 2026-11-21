@@ -24,7 +24,7 @@ before(async () => {
   }).listen(0, '127.0.0.1');
   await new Promise((r) => server.once('listening', r));
   port = server.address().port;
-  browser = await chromium.launch({ args: ['--no-sandbox'] });
+  browser = await chromium.launch({ args: ['--no-sandbox', '--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1'] });
 });
 after(async () => {
   await browser.close();

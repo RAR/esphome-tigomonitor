@@ -226,7 +226,7 @@ export const routes = {
     free_psram: 8289756, total_psram: 8388608,
     min_free_heap: 88440, min_free_psram: 8001336,
     uptime_sec: 187245, uptime_days: 2, uptime_hours: 4, uptime_mins: 0,
-    esphome_version: '2026.7.2', compilation_time: 'Jan 01 2026 00:00:00',
+    tigomonitor_version: '2.3.0', esphome_version: '2026.7.2', compilation_time: 'Jan 01 2026 00:00:00',
     task_count: 16, internal_temp: 50.9,
     invalid_checksum: 37, missed_frames: 606, total_frames: 8629414,
     command_frames: 9653, frame_27_count: 510,
@@ -421,7 +421,7 @@ export const piRoutes = {
   '/api/settings': {
     serial_port: '/dev/serial/by-id/usb-FTDI_USB_RS485-if00-port0', bus_role: 'master', standby_takeover_s: 3,
     master_startup: true, master_housekeeping: true, master_queries: true, master_optimizer_writes: false,
-    master_read_tap_config: false, master_send_41: true, dangerous_options: false, pgw_rule: 'random', pgw_panels: [], master_table_writes: false, master_adopt_taps: false, discovery_auto: false, discovery_morning_min: 120, gateway_id: 0x1201, web_port: 0, web_port_active: 80, web_username: 'admin', web_password_set: true, trusted_proxies: [],
+    master_read_tap_config: false, master_send_41: true, dangerous_options: false, pgw_rule: 'random', pgw_panels: [], master_table_writes: false, master_adopt_taps: false, discovery_auto: false, discovery_morning_min: 120, gateway_id: 0x1201, web_port: 0, web_port_active: 80, web_port_from_args: false, web_username: 'admin', web_password_set: true, via_ingress: false, trusted_proxies: [],
     tls_cert: '', tls_key: '', tls_active: false, tls_from_args: false, power_calibration: 1, publish_interval_s: 30,
     device_id: 'tigomonitor', show_cca_page: true, show_cloud_page: true, setup_open: false, setup_open_until: 0,
     mqtt: { host: '192.0.2.10', port: 1883, username: 'tigomonitor', password_set: true, discovery: true,

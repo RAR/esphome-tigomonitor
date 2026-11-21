@@ -121,6 +121,16 @@ UART** (`/dev/serial0`).
 
   Each step ticks itself off from what the Pi already sees, so the list also
   answers "what's left?" on a running system.
+- **Listening beside a CCA,** the checklist is shorter. The CCA looks after
+  the TAP and its optimizers, so the TAP and optimizer steps, and the add,
+  replace and retire tasks, give way to one step, **Listen for a day**. It
+  lists what the monitor has heard so far: power reports, the TAP, the
+  optimizers' barcodes, their firmware and settings, and their joins. Not all
+  of it goes by all the time. Power reports come every few seconds in
+  daylight, but the rest comes only when the CCA asks for it: the firmware
+  and settings usually in the evening, around sunset, and joins at sunrise.
+  So give a new install a full day, through a sunrise, before treating
+  anything as missing.
 - **Setup mode.** On a new install, the first day needs no password for
   System setup's changes, so you can set the system up first and lock it
   last. Every page says so in a banner until you set one. Turning the
@@ -130,7 +140,8 @@ UART** (`/dev/serial0`).
 <ThemedShot name="pi-setup" alt="System setup — the Set up a new system checklist, then a card for each optimizer and TAP task." />
 - **Optimizers:** replace, add or retire one, step by step, each change
   checked before anything is sent. These need the Pi running the bus and
-  **Allow changes to the TAPs** on (Settings → Bus).
+  **Allow changes to the TAPs** on (Settings → Bus), so they don't show
+  while it listens.
 - **TAPs** (experimental):
   - **Add a TAP** walks through bringing a new TAP onto the bus, no CCA
     needed. It lets the Pi take on a new TAP while you add it, looks for
@@ -578,24 +589,19 @@ small ESP32 there can pass the bus along over Wi-Fi instead, and the monitor
 reads it from the network. The bridge only forwards bytes; the decoding, the
 dashboard and the history all stay on the machine running the monitor.
 
-1. Flash
-   [`boards/example-t-can485-bridge.yaml`](https://github.com/RAR/esphome-tigomonitor/blob/main/boards/example-t-can485-bridge.yaml)
-   to a LilyGO T-CAN485, with your Wi-Fi filled in, and wire its RS485
-   terminals to the TAP as in [Wiring](/esphome-tigomonitor/guides/wiring/).
-   It runs [stream_server](https://github.com/oxan/esphome-stream-server),
-   which sends every byte from the bus to whoever connects on port 6638.
+1. Build and flash a bridge: the
+   [Config Builder](/esphome-tigomonitor/config-builder/?build=bridge) writes
+   one for an M5Stack AtomS3 on the Atomic RS485 Base, a LilyGO T-CAN485 or
+   T-Connect Pro Lite, or a Waveshare ESP32-S3-RS485-CAN.
+   Power it up, then wire it to the TAP.
 2. Under **Settings → Bus**, choose **Network bridge (TCP)**
    and enter the bridge's address, `tigo-bridge.local:6638` or its IP and
-   port, then save.
+   port, then save. If the name doesn't resolve, use the IP.
 
-The bridge can't send anything onto the bus: its UART has no transmit pin,
-and the transceiver's driver is held off. If the bridge loses power or Wi-Fi,
-the monitor notices within about a minute and reconnects when it's back.
-
-An RS485-to-Ethernet converter set to TCP server mode, passing bytes through
-unchanged, takes the bridge's place the same way. So far only the T-CAN485
-config has been built, and the monitor's side tested against a simulated
-bridge.
+The bridge can't send anything onto the bus, so the monitor can only listen
+through it, not [run the bus](#run-the-bus-in-the-ccas-place).
+[Network bridge](/esphome-tigomonitor/guides/network-bridge/) has the
+boards, the wiring order and what's been tested.
 
 ### On a machine that does other things
 
@@ -683,6 +689,41 @@ does the same with Compose.
   directory it owns in place of the named volume. This hasn't been tried
   against a CCA yet. The CCA's HTTP API, for firmware older than 4.0.4, needs
   nothing extra.
+
+### Run it as a Home Assistant app
+
+On Home Assistant OS, or a Supervised install, the monitor can run as an app,
+with its page in Home Assistant's sidebar. It's the same build as the Docker
+image, for the same two architectures (64-bit ARM, such as a Raspberry Pi 4 or 5,
+and x86-64).
+
+1. Add this repository to Home Assistant. This button opens your Home
+   Assistant with it filled in:
+
+   [![Add this repository to your Home Assistant](https://my.home-assistant.io/badges/supervisor_add_addon_repository.svg)](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgithub.com%2FRAR%2Fesphome-tigomonitor)
+
+   Or open **Settings → Apps → App store**, then **⋮ → Repositories**, and add
+   `https://github.com/RAR/esphome-tigomonitor`.
+2. Find **TigoMonitor** in the store, install it, and start it. Turn on
+   **Show in sidebar**.
+3. Open it from the sidebar and choose how it reads the bus under
+   **Settings → Bus**: a [network bridge](#read-the-bus-over-the-network) at the
+   Tigo cabinet, or a USB RS485 adapter plugged into the Home Assistant
+   machine, by its `/dev/serial/by-id/` name.
+
+- **MQTT:** if the Mosquitto broker app is installed, the monitor uses it
+  from its first start, so the panels appear in Home Assistant without
+  typing a broker in. That's done once: a broker you change or clear later
+  stays as you set it.
+- **Signing in:** Home Assistant signs you in before it shows the page, so
+  the monitor doesn't ask again. To open the web UI outside Home Assistant,
+  give port 8080 a host port in the app's **Network** settings, and set a
+  password under **Settings → Web UI**, because that port answers anyone
+  on your network.
+- **HTTPS:** leave it off in **Settings → Web UI**. Home Assistant reaches
+  the app over plain HTTP, and does HTTPS itself.
+- **Backups:** the settings and the history are in the app's data folder,
+  which Home Assistant's backups include.
 
 ## If nothing shows up
 
