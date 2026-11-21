@@ -23,7 +23,7 @@ before(async () => {
     .listen(0, '127.0.0.1');
   await new Promise((r) => server.once('listening', r));
   port = server.address().port;
-  browser = await chromium.launch({ args: ['--no-sandbox'] });
+  browser = await chromium.launch({ args: ['--no-sandbox', '--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1'] });
 });
 after(async () => { await browser.close(); server.close(); });
 // A test that fails before its own ctx.close() leaves the page polling the

@@ -26,7 +26,7 @@ before(async () => {
   }).listen(0, '127.0.0.1');
   await new Promise((r) => server.once('listening', r));
   port = server.address().port;
-  browser = await chromium.launch({ args: ['--no-sandbox'] });
+  browser = await chromium.launch({ args: ['--no-sandbox', '--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1'] });
 });
 
 after(async () => {
@@ -852,7 +852,7 @@ test('topology: a poll with nothing new keeps the tree, and a header still toggl
 
 // TigoMonitor's version, under the sidebar's connection row.
 const appVersion = (page) => page.$eval('#app-version', (el) => ({
-  shown: !el.hidden, text: el.textContent.trim(), href: el.querySelector('a')?.getAttribute('href') || null,
+  shown: !el.hidden, text: el.textContent.trim(), href: el.querySelector('#app-version-text a')?.getAttribute('href') || null,
 }));
 
 test('the sidebar shows a release version, linked to its notes, on both builds', async () => {
