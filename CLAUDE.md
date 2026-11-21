@@ -117,4 +117,4 @@ Fuzzy barcode matching (`match_barcode()`): compares last 6 chars of UART-discov
 1. Update `CHANGELOG.md` under `## [Unreleased]` (group by Added/Fixed/Changed/Removed).
 2. Move the `## [Unreleased]` entries under a new `## [X.Y.Z]` heading, create an annotated tag `vX.Y.Z`, push, and create the GitHub release.
 
-(The web UI shows ESPHome's own version via `esphome/core/version.h` — there is no project-specific version constant to bump.)
+(There is no version constant to bump: the tag is the version. The Pi's CI builds it from `git describe`. The ESP32 works it out at compile time in `components/tigo_server/build_version.py`, from the `ref:` its config pinned. Both report it as `tigomonitor_version` in `/api/status`, and the sidebar shows it. ESPHome's own version stays in `esphome_version`.)

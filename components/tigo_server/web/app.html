@@ -139,6 +139,10 @@
 
   .conn { padding: 12px 20px; border-top: 1px solid var(--border); font-size: 11px; color: var(--text-dim); display: flex; justify-content: space-between; align-items: center; }
   .pill { display: inline-flex; align-items: center; gap: 6px; }
+  /* TigoMonitor's version, under the connection row: a release links to its notes. */
+  .app-version { padding: 0 20px; margin-top: -4px; text-align: center; font-size: 11px; color: var(--text-dim); font-variant-numeric: tabular-nums; }
+  .app-version a { color: inherit; text-decoration: none; }
+  .app-version a:hover, .app-version a:focus-visible { color: var(--text); text-decoration: underline; }
   /* The sidebar's PV output state, on every page. Off is the state that must
      be noticed: it turns red and its dot pulses. */
   .pv-pill { display: flex; align-items: center; gap: 9px; margin: 8px 12px; padding: 8px 10px 8px 12px;
@@ -1540,6 +1544,7 @@
         <button class="theme-toggle" id="theme-toggle" title="Toggle light/dark">☀</button>
       </span>
     </div>
+    <div class="app-version" id="app-version" hidden></div>
   </aside>
 
   <!-- ===== Main content ===== -->
@@ -3351,9 +3356,33 @@
   }
   setInterval(refreshDashboard, 5000);
 
+  // TigoMonitor's version under the sidebar's connection row: "2.3.0" from a
+  // release (linked to its notes), "2.3.0+1.g8632d50" between releases, or a
+  // branch and commit ("main · 8632d50") on an ESP32 built from one.
+  function showAppVersion(v) {
+    const el = document.getElementById('app-version');
+    if (!v) return;
+    const shown = /^\d/.test(v) ? `v${v}` : v;
+    el.textContent = '';
+    el.title = 'TigoMonitor version';
+    if (/^\d+\.\d+\.\d+(-[0-9A-Za-z.]+)?$/.test(v)) {
+      const a = document.createElement('a');
+      a.href = `https://github.com/RAR/esphome-tigomonitor/releases/tag/v${v}`;
+      a.target = '_blank';
+      a.rel = 'noopener';
+      a.title = 'TigoMonitor version: release notes';
+      a.textContent = shown;
+      el.append(a);
+    } else {
+      el.append(shown);
+    }
+    el.hidden = false;
+  }
+
   // Once the platform is known (below), the Pi's and the ESP32's pages
   // differ: swap the ESP32-only Settings tabs for the Pi's.
   const platformReady = apiFetch('/api/status').then(r => r.ok ? r.json() : {}).then(s => {
+    showAppVersion(s.tigomonitor_version);
     if (s.platform !== 'linux') return;
     PLATFORM = 'linux';
     apiFetch('/api/settings').then(r => r.ok ? r.json() : null).then(st => { if (st) piApplyPages(st); }).catch(() => {});

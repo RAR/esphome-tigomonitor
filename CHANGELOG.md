@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **The sidebar shows which TigoMonitor you're running.** It appears under
+  the connection row, as `v2.3.0`, and a release links to its
+  notes. The Pi already knew its version. The ESP32 now works its version
+  out when it's compiled: an ESP32 pinned to a release shows the release;
+  one built from a branch shows the branch and commit (`main · 8632d50`).
+  `/api/status` carries it as `tigomonitor_version` on both builds.
+
 ## [2.3.0] - 2026-11-20
 
 ### Added

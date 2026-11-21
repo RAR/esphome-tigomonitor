@@ -1330,6 +1330,7 @@ void HttpServer::routes_() {
                     {"uptime_days", up / 86400},
                     {"uptime_hours", (up / 3600) % 24},
                     {"uptime_mins", (up / 60) % 60},
+                    {"tigomonitor_version", ctx_.version},
                     {"esphome_version", "tigomonitord " + ctx_.version},
                     {"compilation_time", __DATE__ " " __TIME__},
                     {"internal_temp", cpu_temp()},

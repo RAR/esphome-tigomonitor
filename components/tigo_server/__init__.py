@@ -246,6 +246,12 @@ async def to_code(config):
     # Set the port
     cg.add(var.set_port(config[CONF_PORT]))
 
+    # TigoMonitor's own version, for the page's sidebar (build_version.py):
+    # the git tag or ref this build came from. ESPHome's own version stays
+    # in /api/status as esphome_version.
+    from . import build_version
+    cg.add(var.set_version(build_version.version(CORE.config)))
+
     # Set the API token if provided
     if CONF_API_TOKEN in config:
         cg.add(var.set_api_token(config[CONF_API_TOKEN]))
