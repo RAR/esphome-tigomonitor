@@ -17,6 +17,7 @@ for t in barcode_bindings_test protocol_test node_identity_test cca_ble_protocol
 done
 # The ESP32's TigoMonitor version, worked out at compile time.
 python3 -I tests/host/build_version_test.py
+python3 -I tests/host/ha_app_test.py
 # The ESP32's gzipped web page, token spliced in (components/tigo_server).
 python3 components/tigo_server/web_assets_gen.py --out build/linux/web_assets.h
 g++ -std=c++17 -Wall -Wextra -I build/linux -I components/tigo_server \

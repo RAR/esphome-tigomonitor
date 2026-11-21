@@ -70,6 +70,8 @@ static void usage() {
                "  --serial DEV      serial port, overriding settings.json\n"
                "  --tls-cert FILE   HTTPS certificate (with its chain), overriding settings.json\n"
                "  --tls-key FILE    its private key\n"
+               "  --trust-ingress ADDR  requests from ADDR (Home Assistant's ingress proxy,\n"
+               "                    which signs users in itself) need no sign-in here\n"
                "  --watchdog S      without systemd's watchdog, exit if the main loop stops\n"
                "                    for S seconds, for Docker to restart it (default 60, 0 off)\n"
                "  --health-check P  check the daemon on port P, as Docker's HEALTHCHECK does\n"
@@ -178,6 +180,7 @@ int main(int argc, char **argv) {
   int port = -1;  // -1: from settings.json
   std::string serial_override, replay, capture;
   std::string tls_cert_override, tls_key_override;
+  std::string trusted_ingress;
   double speed = 1.0;
   int watchdog_s = 60;
   for (int i = 1; i < argc; i++) {
@@ -195,6 +198,7 @@ int main(int argc, char **argv) {
     else if (a == "--serial") serial_override = next();
     else if (a == "--tls-cert") tls_cert_override = next();
     else if (a == "--tls-key") tls_key_override = next();
+    else if (a == "--trust-ingress") trusted_ingress = next();
     else if (a == "--watchdog") watchdog_s = std::atoi(next().c_str());
     else if (a == "--health-check") return health_check(std::atoi(next().c_str()));
     else if (a == "--replay") replay = next();
@@ -746,7 +750,8 @@ int main(int argc, char **argv) {
           return 409;
         }
         return bus_master->request_period(tap_mac, code, dry_run, why) ? 200 : 409;
-      }});
+      },
+      trusted_ingress});
   if (port < 0 && settings.web_port > 0) port = settings.web_port;
   // Only the default steps aside for another web server; a port someone
   // chose fails loudly instead, and systemd keeps retrying it.

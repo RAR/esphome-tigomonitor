@@ -1,0 +1,30 @@
+# The TigoMonitor app for Home Assistant: the Pi build (tigomonitord) in
+# Home Assistant OS. Its version is the release it's built from, and goes up
+# with build.yaml's image tags at each release.
+name: TigoMonitor
+version: "2.3.0"
+slug: tigomonitor
+description: Each Tigo optimizer's power, voltage and temperature, read from the RS485 bus
+url: https://rar.github.io/esphome-tigomonitor/guides/raspberry-pi/#run-it-as-a-home-assistant-app
+arch:
+  - aarch64
+  - amd64
+# The web UI in Home Assistant's sidebar, signed in by Home Assistant.
+ingress: true
+ingress_port: 8080
+panel_icon: mdi:solar-power-variant
+panel_title: TigoMonitor
+# For a USB RS485 adapter on this machine. A network bridge needs nothing.
+uart: true
+# The broker from Home Assistant's MQTT app, offered on first start.
+services:
+  - mqtt:want
+# Off by default: Home Assistant's own page needs no port. Give one to reach
+# the web UI directly; then set a password in Settings.
+ports:
+  8080/tcp: null
+ports_description:
+  8080/tcp: The web UI outside Home Assistant (not needed for its sidebar)
+# Not /api/health: that answers 503 while the bus is quiet or unchosen, and a
+# restart wouldn't fix either.
+watchdog: tcp://[HOST]:[PORT:8080]

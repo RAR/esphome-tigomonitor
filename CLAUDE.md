@@ -56,6 +56,7 @@ cd site && npm test
   - `web/app.html` — the web UI, shared with the Linux build; `web_assets_gen.py` gzips it into the firmware
 - **`components/tigo_master/`** — an ESP32 bus master or standby (`master_core.cpp` is also built into the host tests)
 - **`linux/`** — `tigomonitord`: `src/` is the daemon, `scripts/` the build and e2e tests, `packaging/` the .deb, `Dockerfile` the image
+- **`ha-app/`** (with `repository.yaml` at the root) — the Home Assistant app: a thin layer on the released image (`build.yaml`) whose `run.sh` starts the daemon with `--state-dir /data --trust-ingress 172.30.32.2` and offers HA's MQTT broker once
 
 ### Three-File Config Pattern
 
@@ -116,5 +117,6 @@ Fuzzy barcode matching (`match_barcode()`): compares last 6 chars of UART-discov
 
 1. Update `CHANGELOG.md` under `## [Unreleased]` (group by Added/Fixed/Changed/Removed).
 2. Move the `## [Unreleased]` entries under a new `## [X.Y.Z]` heading, create an annotated tag `vX.Y.Z`, push, and create the GitHub release.
+3. Set `ha-app/config.yaml`'s `version` and `ha-app/build.yaml`'s image tags to `X.Y.Z` in the release commit (`tests/host/ha_app_test.py` fails if they disagree). Home Assistant offers the update as soon as `main` has it and then pulls the tag's images, so push the tag first and let CI publish them before `main` moves.
 
 (There is no version constant to bump: the tag is the version. The Pi's CI builds it from `git describe`. The ESP32 works it out at compile time in `components/tigo_server/build_version.py`, from the `ref:` its config pinned. Both report it as `tigomonitor_version` in `/api/status`, and the sidebar shows it. ESPHome's own version stays in `esphome_version`.)
