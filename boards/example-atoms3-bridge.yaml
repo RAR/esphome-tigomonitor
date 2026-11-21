@@ -1,0 +1,112 @@
+# Tigo bus network bridge on an M5Stack AtomS3 (or AtomS3R) with the
+# Atomic RS485 Base
+#
+# This board does no decoding. It forwards the raw RS485 bus over TCP to
+# tigomonitord (the Raspberry Pi / Linux build) running somewhere else, which
+# decodes it and serves the dashboard. Pick it when the Tigo cabinet is far
+# from where you want to run the monitor. No PSRAM needed: a plain AtomS3 is
+# enough.
+#
+# In tigomonitord, under Settings -> Bus, choose "Network bridge (TCP)" and
+# enter  tigo-bridge.local:6638  (or this board's IP: mDNS doesn't reach every
+# network, and the IP always works).
+#
+# stream_server (https://github.com/oxan/esphome-stream-server) does the
+# forwarding: every byte the UART receives goes to each connected client.
+#
+# READ-ONLY, IN HARDWARE. stream_server also writes whatever a client sends to
+# the UART. To keep any of that off the roof bus, the UART below has no tx_pin,
+# so there is nowhere for a write to go. tigomonitord never sends anything
+# either; this covers any other program that connects to port 6638.
+#
+# The Atomic RS485 Base switches direction by itself: it drives the bus while
+# its TX input (G6) is LOW. So G6 is not just left out of the UART, it is held
+# HIGH, the line's idle level, by the switch below. Keep that switch.
+#
+# Until the firmware is running, about a second after power-on, nothing holds
+# G6. Our AtomS3R, with G6 wired as the UART's TX, held the bus for about that
+# long at each boot. Power the bridge up before connecting A and B, and expect
+# a short gap on the bus if it ever reboots while connected.
+#
+# Tested 2026-11-21 on a 40-panel roof bus: an AtomS3 at -80 dBm Wi-Fi passed
+# 859 frames in 10 s with none cut short, and a Pi 5 decoded the roof from it.
+
+esphome:
+  name: tigo-bridge
+  friendly_name: "Tigo Bridge"
+
+esp32:
+  board: m5stack-atoms3
+  variant: esp32s3
+  flash_size: 8MB
+  framework:
+    type: esp-idf
+    version: recommended
+    sdkconfig_options:
+      # The UART ISR from IRAM, so bytes are not dropped while flash is busy.
+      CONFIG_UART_ISR_IN_IRAM: "y"
+      CONFIG_LOG_DEFAULT_LEVEL_INFO: "y"
+
+external_components:
+  - source: github://oxan/esphome-stream-server
+    components: [stream_server]
+
+wifi:
+  ssid: "YOUR_WIFI_SSID"
+  password: "YOUR_WIFI_PASSWORD"
+  # Latency costs nothing here, but dropped Wi-Fi beacons stall the stream.
+  power_save_mode: none
+  ap:
+    ssid: "Tigo-Bridge Fallback Hotspot"
+    password: "12345678"
+
+captive_portal:
+
+logger:
+  level: INFO
+
+# For OTA updates and the sensors below; nothing on the bus goes through it.
+api:
+  # encryption:
+  #   key: "YOUR_BASE64_KEY"
+
+ota:
+  - platform: esphome
+    password: "YOUR_OTA_PASSWORD"
+
+switch:
+  - platform: gpio
+    id: rs485_tx_idle
+    internal: true
+    pin: GPIO6           # the base's RS485_TX, held HIGH: its driver stays off
+    restore_mode: ALWAYS_ON
+  - platform: restart
+    name: "Tigo Bridge Restart"
+
+uart:
+  id: tigo_uart
+  rx_pin: GPIO5          # the base's RS485_RX; no tx_pin, see the top
+  baud_rate: 38400
+  rx_buffer_size: 2048
+
+stream_server:
+  uart_id: tigo_uart
+  port: 6638
+  # Bytes sit here while Wi-Fi is slow; 38400 baud is ~3.8 kB/s, so this
+  # covers about a second.
+  buffer_size: 4096
+
+binary_sensor:
+  - platform: status
+    name: "Tigo Bridge Status"
+  - platform: stream_server
+    connected:
+      name: "Tigo Bridge Client Connected"
+
+sensor:
+  - platform: wifi_signal
+    name: "Tigo Bridge WiFi Signal"
+    update_interval: 60s
+  - platform: stream_server
+    connection_count:
+      name: "Tigo Bridge Clients"

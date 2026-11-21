@@ -24,6 +24,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   one built from a branch shows the branch and commit (`main · 8632d50`).
   `/api/status` carries it as `tigomonitor_version` on both builds.
 
+- **An AtomS3 can be the network bridge.** `boards/example-atoms3-bridge.yaml`
+  turns an M5Stack AtomS3 on the Atomic RS485 Base into a bridge that passes
+  the bus to the Pi build over Wi-Fi, and can't send anything onto it. It's
+  the first bridge run on a real bus: on a 40-panel roof it passed 859 frames
+  in 10 s with none cut short, and a Pi 5 in Docker decoded the roof from it.
+  See [Read the bus over the network](https://rar.github.io/esphome-tigomonitor/guides/raspberry-pi/#read-the-bus-over-the-network).
+
 ### Fixed
 
 - **On a phone, the bottom of the sidebar couldn't be reached.** The

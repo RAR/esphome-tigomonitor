@@ -126,6 +126,17 @@ the logs. `example-t-can485.yaml` documents that workflow.
 - **Footprint**: flash 45.1%, RAM 24.8% (ESPHome 2026.10); compiled, not yet run
   on a real bus
 
+#### `example-atoms3-bridge.yaml` - M5Stack AtomS3 as a network bridge
+- **What it does**: the same bridge as the T-CAN485 one, on an AtomS3 (or
+  AtomS3R) with the Atomic RS485 Base. No PSRAM needed
+- **Read-only in hardware**: the UART has no `tx_pin`, and G6 (the base's
+  RS485_TX) is held high. The base drives the bus whenever G6 is low, so keep
+  that switch
+- **Power it before connecting A/B**: G6 isn't held until the firmware runs,
+  about a second after power-on
+- **Footprint**: flash 21.1%, RAM 29.9% (ESPHome 2026.11). Run on a 40-panel
+  roof bus: 859 frames in 10 s with none cut short, decoded by a Pi 5
+
 ## Usage
 
 To use a board configuration, include it in your main YAML file:

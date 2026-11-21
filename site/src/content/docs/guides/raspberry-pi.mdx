@@ -578,24 +578,26 @@ small ESP32 there can pass the bus along over Wi-Fi instead, and the monitor
 reads it from the network. The bridge only forwards bytes; the decoding, the
 dashboard and the history all stay on the machine running the monitor.
 
-1. Flash
+1. Flash a bridge config, with your Wi-Fi filled in:
+   [`boards/example-atoms3-bridge.yaml`](https://github.com/RAR/esphome-tigomonitor/blob/main/boards/example-atoms3-bridge.yaml)
+   for an M5Stack AtomS3 on the Atomic RS485 Base, or
    [`boards/example-t-can485-bridge.yaml`](https://github.com/RAR/esphome-tigomonitor/blob/main/boards/example-t-can485-bridge.yaml)
-   to a LilyGO T-CAN485, with your Wi-Fi filled in, and wire its RS485
-   terminals to the TAP as in [Wiring](/esphome-tigomonitor/guides/wiring/).
-   It runs [stream_server](https://github.com/oxan/esphome-stream-server),
-   which sends every byte from the bus to whoever connects on port 6638.
+   for a LilyGO T-CAN485. Power it up, then wire its RS485 terminals to the
+   TAP as in [Wiring](/esphome-tigomonitor/guides/wiring/). It runs
+   [stream_server](https://github.com/oxan/esphome-stream-server), which sends
+   every byte from the bus to whoever connects on port 6638.
 2. Under **Settings → Bus**, choose **Network bridge (TCP)**
    and enter the bridge's address, `tigo-bridge.local:6638` or its IP and
-   port, then save.
+   port, then save. If the name doesn't resolve, use the IP.
 
 The bridge can't send anything onto the bus: its UART has no transmit pin,
 and the transceiver's driver is held off. If the bridge loses power or Wi-Fi,
 the monitor notices within about a minute and reconnects when it's back.
 
 An RS485-to-Ethernet converter set to TCP server mode, passing bytes through
-unchanged, takes the bridge's place the same way. So far only the T-CAN485
-config has been built, and the monitor's side tested against a simulated
-bridge.
+unchanged, takes the bridge's place the same way. The AtomS3 bridge has run
+on a 40-panel roof bus, feeding a Pi 5 in Docker. The T-CAN485 config has
+been built but not yet run on a bus.
 
 ### On a machine that does other things
 
