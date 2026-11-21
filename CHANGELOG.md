@@ -39,6 +39,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   in 10 s with none cut short, and a Pi 5 in Docker decoded the roof from it.
   See [Read the bus over the network](https://rar.github.io/esphome-tigomonitor/guides/raspberry-pi/#read-the-bus-over-the-network).
 
+### Changed
+
+- **A new install that listens beside a CCA gets a setup that fits it.**
+  System setup no longer offers to add, replace or retire optimizers and
+  TAPs, which is the CCA's job while it runs the bus. Set up a new system
+  swaps finding the TAP and its optimizers for **Listen for a day**: a
+  checklist of what has been heard so far, since some of it (barcodes,
+  firmware and settings, joins) only goes by when the CCA asks, often in the
+  evening, or at sunrise. A Pi that runs the bus sees System setup as before.
+
 ### Fixed
 
 - **Saving settings no longer asks to restart for a port change you didn't

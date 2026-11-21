@@ -864,6 +864,12 @@
   .setup-form .choice span span { display: block; color: var(--text-dim); font-size: 12px; }
   .setup-sumlist { list-style: none; padding: 0; margin: 14px 0; display: flex; flex-direction: column; gap: 8px; font-size: 13px; }
   .setup-sumlist .setup-state { margin: 0 8px 0 0; }
+  /* Listening: what has been heard so far, each ticked off as it arrives. */
+  .setup-heard { list-style: none; padding: 0; margin: 14px 0; display: flex; flex-direction: column; gap: 10px; font-size: 13px; }
+  .setup-heard li { display: grid; grid-template-columns: 18px 1fr; column-gap: 10px; }
+  .setup-heard .mk { grid-row: span 2; padding-top: 1px; color: var(--warn-text); }
+  .setup-heard li.ok .mk { color: var(--good-text); }
+  .setup-heard .ln { color: var(--text-dim); font-size: 12px; }
   .setup-ratings { display: flex; flex-direction: column; gap: 8px; margin: 14px 0; }
   .setup-ratings > div { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 8px 12px; border-radius: 10px; background: var(--bg-3); font-size: 13px; }
   .setup-ratings .nm { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
@@ -4767,13 +4773,15 @@
     add: ['label', 'check', 'do', 'wait', 'done'],
     retire: ['pick', 'check', 'do', 'done'],
     // Guides: no check or job of their own; each step says what it found.
-    system: ['bus', 'tap', 'optimizers', 'layout', 'names', 'done'],
+    // Listening, a CCA runs the bus: the TAP and its list are its business,
+    // and what TigoMonitor needs is a day of hearing the system.
+    get system() { return setupListening() ? ['bus', 'heard', 'layout', 'names', 'done'] : ['bus', 'tap', 'optimizers', 'layout', 'names', 'done']; },
     addtap: ['connect', 'allow', 'find', 'radio', 'name', 'done'],
     retiretap: ['pick', 'done'],
   };
   const SETUP_STEP_NAMES = { pick: 'Optimizer to remove', label: 'New optimizer', check: 'Review', do: 'Apply',
                              wait: 'Wait for join', done: 'Complete',
-                             bus: 'Connect the bus', tap: 'Find the TAP', optimizers: 'Optimizers', layout: 'Lay out the array',
+                             bus: 'Connect the bus', tap: 'Find the TAP', optimizers: 'Optimizers', heard: 'Listen for a day', layout: 'Lay out the array',
                              names: 'Names and ratings',
                              radio: 'Radio settings', connect: 'Wire it in', allow: 'Allow a new TAP', find: 'Look for TAPs',
                              name: 'Name it' };
@@ -4787,6 +4795,11 @@
              ['writing back what stays', 'Rewrite the list'], ['reading it back', 'Verify the result']],
   };
   let setup = { flow: null, data: null, timer: 0 };
+  // The bus role saved in Settings; a new install listens.
+  function setupListening() {
+    const cfg = setup.data && setup.data.settings;
+    return ((cfg && cfg.bus_role) || 'listen') === 'listen';
+  }
   // The tasks' drawings and marks, in each task's hue (currentColor).
   const setupMark = (id, w, h, style = '') => `<svg width="${w}" height="${h}"${style ? ` style="${style}"` : ''}><use href="#setup-mark-${id}"/></svg>`;
   const setupBadge = (body, color, pos) => `<svg class="mark-badge" width="20" height="20" viewBox="0 0 24 24" style="${pos}" fill="var(--bg)" stroke="${color}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/>${body}</svg>`;
@@ -4825,8 +4838,8 @@
 
   async function setupLoad() {
     const get = u => apiFetch(u).then(r => r.ok ? r.json() : null).catch(() => null);
-    const [m, d, n, v, st, cfg, lay] = await Promise.all([get('/api/master'), get('/api/devices'), get('/api/nodes'),
-                                            get('/api/versions'), get('/api/status'), get('/api/settings'), get('/api/layout')]);
+    const [m, d, n, v, st, cfg, lay, mesh] = await Promise.all([get('/api/master'), get('/api/devices'), get('/api/nodes'),
+                                            get('/api/versions'), get('/api/status'), get('/api/settings'), get('/api/layout'), get('/api/mesh')]);
     const devices = (d && d.devices) || [];
     const opts = ((n && n.nodes) || []).filter(x => /^04C05B/i.test(x.long_address || '')).map(x => {
       const dev = devices.find(v => String(v.addr).toUpperCase() === String(x.addr).toUpperCase()) || {};
@@ -4839,7 +4852,7 @@
     for (const o of opts) o.quiet = o.placed && reporting > opts.length / 2 && (o.stale || !(o.ageMs < 15 * 60000));
     // Each TAP's name, by its id, as on the Devices page.
     const tapNames = Object.fromEntries(((v && v.taps) || []).filter(t => t.name).map(t => [t.addr, t.name]));
-    setup.data = { master: m, opts, tapNames, devices, nodes: n, versions: v, status: st, settings: cfg, layout: lay };
+    setup.data = { master: m, opts, tapNames, devices, nodes: n, versions: v, status: st, settings: cfg, layout: lay, mesh };
   }
 
   // "Set up a new system": each step's state, from what the Pi already
@@ -4859,7 +4872,34 @@
     const loose = (lay.unassigned || []).length;
     const unrated = rated.filter(x => !(x.rating_w > 0)).length;
     const fmt = x => Number(x).toLocaleString('en-US');
+    // Listening: what has gone by on the bus so far. Power reports come all
+    // day; the rest only when the CCA asks, or at sunrise.
+    const up = x => String(x).toUpperCase();
+    const fw = new Set((v.optimizers || []).map(o => up(o.addr)));
+    const barcodes = (d.devices || []).filter(x => (d.opts || []).some(o => o.addr === up(x.addr))).length;
+    const firmware = (d.devices || []).filter(x => fw.has(up(x.addr))).length;
+    const joins = ((d.mesh && d.mesh.nodes) || []).filter(x => x.last_join_unix).length;
+    const tapAnswering = tapsHeard > 0 || (v.polled || []).length > 0;
+    const of = n => heard ? `${n} of ${heard} optimizer${heard === 1 ? '' : 's'}` : 'None yet';
+    const items = [
+      { name: 'Power reports', ok: heard > 0,
+        line: reporting ? `${reporting} of ${heard} optimizer${heard === 1 ? '' : 's'} reporting now. Each reports every few seconds in daylight.`
+          : heard ? `${heard} optimizer${heard === 1 ? '' : 's'} heard, none reporting now: they stop at night.`
+          : 'None yet. Optimizers report every few seconds in daylight, and not at night.' },
+      { name: 'The TAP', ok: tapAnswering,
+        line: tapsHeard ? `${(v.taps || []).map(t => `${t.name || 'TAP ' + t.addr} (${t.version.split(' ')[0]})`).join(', ')}.`
+          : tapAnswering ? 'Answering the CCA. Its firmware version comes when the CCA asks for it.' : 'Not heard yet.' },
+      { name: 'Barcodes', ok: heard > 0 && barcodes === heard,
+        line: `${of(barcodes)}. They come from the TAP's list, which goes by when the CCA asks for it.` },
+      { name: 'Firmware and settings', ok: heard > 0 && firmware === heard,
+        line: `${of(firmware)}. The CCA asks each optimizer, usually in the evening, around sunset.` },
+      { name: 'Joins', ok: joins > 0,
+        line: joins ? `${joins} heard, for the mesh map in Topology.` : 'None yet. Optimizers join the TAP at sunrise; the mesh map shows which joined through which.' },
+    ];
+    const arrived = items.filter(x => x.ok).length;
     return {
+      heard: { ok: arrived === items.length, items,
+               line: arrived === items.length ? 'Everything has been heard.' : `${arrived} of ${items.length} have been heard so far.` },
       bus: { ok: frames > 0, line: frames ? `${fmt(frames)} messages heard on the bus${st.invalid_checksum ? `, ${fmt(st.invalid_checksum)} with a bad checksum` : ''}.` : 'Nothing heard on the bus yet.' },
       tap: { ok: tapsHeard > 0, line: tapsHeard ? `${tapsHeard === 1 ? 'The TAP' : `${tapsHeard} TAPs`} answered: ${(v.taps || []).map(t => `${t.name || 'TAP ' + t.addr} (${t.version.split(' ')[0]})`).join(', ')}.` : 'No TAP has answered yet.' },
       optimizers: { ok: heard > 0, line: reporting ? `${reporting} optimizer${reporting === 1 ? '' : 's'} reporting${w ? `, ${w.in_table} in the TAP's table` : ''}.`
@@ -4934,7 +4974,9 @@
       ? `${w.in_table} optimizer${w.in_table === 1 ? '' : 's'} · ${w.joined} joined${taps.length > 1 ? ` · ${taps.length} TAPs` : ''}` : '—';
     if (setup.flow) return renderSetupFlow(root);
     setup.drawn = '';
-    let html = '<p class="setup-lede">Make changes to the system\'s hardware. Each change is checked first, and you will see exactly what it will do before anything is sent.</p>';
+    let html = setupListening()
+      ? '<p class="setup-lede">Set TigoMonitor up beside the CCA: connect it to the bus, let it listen, then lay out your array.</p>'
+      : '<p class="setup-lede">Make changes to the system\'s hardware. Each change is checked first, and you will see exactly what it will do before anything is sent.</p>';
     // "Set up a new system": its steps as a bar, done or not, and the next to do.
     const checks = setupChecks(d), keys = SETUP_STEPS.system.filter(k => k !== 'done');
     const left = keys.filter(k => !checks[k].ok);
@@ -4947,18 +4989,21 @@
       <span class="steps" aria-hidden="true">${keys.map(k => `<span class="${checks[k].ok ? 'ok' : ''}"></span>`).join('')}</span>
       <span>${keys.length - left.length} of ${keys.length} done${left.length ? ` · next: ${SETUP_STEP_NAMES[left[0]]}` : ''}</span></span>
       <span class="go">${left.length === keys.length ? 'Start' : 'Continue'} →</span></button>`;
-    if (!setupRunning(m))
+    const listening = setupListening();
+    if (listening)
+      html += '<div class="setup-note info">Adding, replacing or retiring optimizers and TAPs is done by the CCA while it runs the bus. If TigoMonitor is to run the bus instead, set its role in <a href="#settings">Settings → Bus</a>.</div>';
+    else if (!setupRunning(m))
       html += '<div class="setup-note info">This TigoMonitor is not running the bus, so it cannot change the TAP\'s optimizer list. To make changes, set its bus role in Settings → Bus.</div>';
     else if (!t.writes)
       html += '<div class="setup-note info">Changes are disabled. To enable them, turn on <strong>Allow changes to the TAPs</strong> in Settings → Bus. You can still review each task and its planned changes.</div>';
     const quiet = d.opts.filter(o => o.quiet).sort((a, b) => (b.ageMs || 0) - (a.ageMs || 0))[0];
     if (quiet)
       html += `<div class="setup-note"><span class="ico">${setupSvg('<path d="M12 8v5"/><path d="M12 16.5h.01"/><path d="M10.3 3.9 2.6 17.5A2 2 0 0 0 4.3 20.5h15.4a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/>', 'var(--warn-text)', 18)}</span>
-        <span class="what"><strong>${topoEscape(quiet.name)} has not reported for ${topoEscape(setupAgo(quiet.ageMs).replace(' ago', ''))}.</strong><span>If it has been physically replaced, update the system here.</span></span>
-        <span style="flex-grow:1"></span><button type="button" class="btn task-go" data-task="replace" data-setup-start="replace" data-setup-old="${topoEscape(quiet.mac)}">Replace ${topoEscape(quiet.name)}</button></div>`;
+        <span class="what"><strong>${topoEscape(quiet.name)} has not reported for ${topoEscape(setupAgo(quiet.ageMs).replace(' ago', ''))}.</strong><span>${listening ? 'Its last readings are on Devices.' : 'If it has been physically replaced, update the system here.'}</span></span>
+        ${listening ? '' : `<span style="flex-grow:1"></span><button type="button" class="btn task-go" data-task="replace" data-setup-start="replace" data-setup-old="${topoEscape(quiet.mac)}">Replace ${topoEscape(quiet.name)}</button>`}</div>`;
     const task = (k, title, text) => `<button type="button" class="setup-task" data-task="${k}" data-setup-start="${k}"><span class="art">${SETUP_ART[k]}</span>
       <span class="in"><strong>${title}</strong><span>${text}</span><span class="go">Start →</span></span></button>`;
-    html += `<h2 class="setup-group">Optimizers</h2><div class="setup-tasks">
+    if (!listening) html += `<h2 class="setup-group">Optimizers</h2><div class="setup-tasks">
       ${task('replace', 'Replace an optimizer', 'Remove a failed optimizer, add its replacement, and keep its position in your layout.')}
       ${task('add', 'Add an optimizer', 'Register a new optimizer, wait for it to join, then assign it in Topology.')}
       ${task('retire', 'Retire an optimizer', 'Permanently remove an optimizer from your system.')}
@@ -5075,6 +5120,8 @@
           [['#buslog', 'bus', 'Bus traffic', 'Each message on the bus, as it is heard']]],
     tap: ['Running the bus, TigoMonitor brings the TAP up and asks its version; listening, it hears the CCA ask. If no TAP answers, check its power and the A and B wires.',
           [['#buslog', 'bus', 'Bus traffic', 'Watch the TAP answer, message by message'], ['#settings', 'settings', 'Settings → Bus', 'Serial port, role, and the one switch', 'bus']]],
+    heard: ['A CCA runs this bus, so TigoMonitor learns the system by listening, and not all of it goes by all the time. Power reports come every few seconds in daylight. The rest comes only when the CCA asks for it: each optimizer\'s firmware and settings usually in the evening, around sunset, and joins at sunrise. Give it a full day, through a sunrise, before treating anything as missing.',
+            [['#nodes', 'list', 'Devices', 'Every optimizer, its barcode and its firmware'], ['#topology', 'grid', 'Topology', 'The mesh map, once joins are heard']]],
     optimizers: ['An optimizer reports once it has joined the TAP, which lists the optimizers it takes. One the TAP doesn\'t list won\'t join; add it with Add an optimizer.',
                  [['#nodes', 'list', 'Devices', 'Every optimizer, its TAP and its firmware']]],
     layout: ['Tell TigoMonitor which inverter, MPPT and string each optimizer feeds, so the Dashboard can group them and spot a panel lagging its neighbours. Start the layout here, then place each panel on its string in Topology. A layout from a CCA (CCA Info) or Tigo Cloud (Topology) can be brought in instead.',
@@ -5126,6 +5173,10 @@
   // The step's own part, between its line and its cards.
   function setupSystemPart(k, c) {
     const d = setup.data, cfg = d.settings || {}, m = d.master || {}, lay = d.layout || {};
+    if (k === 'heard')
+      return `<ul class="setup-heard">${c.heard.items.map(x => `<li class="${x.ok ? 'ok' : ''}"><span class="mk">${x.ok
+        ? setupSvg('<path d="M5 12l4 4 10-10"/>', 'currentColor', 16) : setupSvg('<circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/>', 'currentColor', 16)}</span>
+        <strong>${x.name}</strong><span class="ln">${topoEscape(x.line)}</span></li>`).join('')}</ul>`;
     if (k === 'bus') {
       const role = cfg.bus_role || 'listen', cur = cfg.serial_port || '';
       const roles = [['listen', 'Listen', 'A CCA runs the bus; TigoMonitor hears it.'],
