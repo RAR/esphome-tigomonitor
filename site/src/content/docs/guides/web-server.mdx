@@ -92,6 +92,8 @@ The sidebar's footer carries:
 - **GitHub link** → opens `github.com/RAR/esphome-tigomonitor` in a new tab.
 - **°C / °F toggle** — persists via `localStorage['tempUnit']` (same key the legacy page used). The button shows the unit you'll *get* if you click. Active view re-renders immediately.
 - **Theme toggle** — light/dark, persists via `localStorage['tigoTheme']`. With nothing saved, the page follows `prefers-color-scheme`.
+- **Version** — the TigoMonitor version the device reports (`tigomonitor_version` in `/api/status`). A release links to its release notes.
+- **New release notice** — `v2.4.0 available`, linked to its notes, when GitHub has a release newer than the one running. Your browser asks GitHub's API for the latest release at most once a day and keeps the answer in `localStorage['tigoLatestRelease']`. The device itself never contacts GitHub. A build from a branch has no release number to compare, so it's never told. To stop the check in this browser, turn off **Settings › Maintenance › Check GitHub for new releases**.
 
 When `cloud_import` is set and a Tigo cloud token is connected, a **cloud status box** also appears in the sidebar with at-a-glance severity dots for the CCA and panels (refreshed ~10 min while the UI is open); clicking it opens the Tigo Cloud view.
 

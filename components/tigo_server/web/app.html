@@ -143,6 +143,10 @@
   .app-version { padding: 0 20px; margin-top: -4px; text-align: center; font-size: 11px; color: var(--text-dim); font-variant-numeric: tabular-nums; }
   .app-version a { color: inherit; text-decoration: none; }
   .app-version a:hover, .app-version a:focus-visible { color: var(--text); text-decoration: underline; }
+  /* A newer release on GitHub, found by this browser (Settings › Maintenance › Updates). */
+  .app-update { padding: 2px 20px 0; text-align: center; font-size: 11px; }
+  .app-update a { color: var(--accent-text); text-decoration: none; font-weight: 600; }
+  .app-update a:hover, .app-update a:focus-visible { text-decoration: underline; }
   /* The sidebar's PV output state, on every page. Off is the state that must
      be noticed: it turns red and its dot pulses. */
   .pv-pill { display: flex; align-items: center; gap: 9px; margin: 8px 12px; padding: 8px 10px 8px 12px;
@@ -1545,6 +1549,7 @@
       </span>
     </div>
     <div class="app-version" id="app-version" hidden></div>
+    <div class="app-update" id="app-update" hidden><a id="app-update-link" target="_blank" rel="noopener"></a></div>
   </aside>
 
   <!-- ===== Main content ===== -->
@@ -2200,6 +2205,19 @@
             <span>Reboots the ESP32. UART will drop briefly; the dashboard will reconnect on its own.</span>
           </div>
           <button class="btn danger" id="tools-restart">Restart</button>
+        </div>
+      </div>
+      <div class="section-head">
+        <div class="section-title">Updates</div>
+        <div class="section-sub">This browser only</div>
+      </div>
+      <div class="tools-card">
+        <div class="danger-row">
+          <div class="danger-text">
+            <strong>Check GitHub for new releases</strong>
+            <span>Once a day, this browser asks GitHub for TigoMonitor's latest release, and the sidebar says when there's a newer one. The device itself never contacts GitHub.<span id="update-status" style="display:block;margin-top:4px"></span></span>
+          </div>
+          <label style="display:inline-flex;align-items:center;gap:6px;white-space:nowrap"><input type="checkbox" id="update-check"> On</label>
         </div>
       </div>
       </div>
@@ -3359,8 +3377,11 @@
   // TigoMonitor's version under the sidebar's connection row: "2.3.0" from a
   // release (linked to its notes), "2.3.0+1.g8632d50" between releases, or a
   // branch and commit ("main · 8632d50") on an ESP32 built from one.
+  let appVersion = '';
   function showAppVersion(v) {
     const el = document.getElementById('app-version');
+    appVersion = v || '';
+    checkForUpdate();
     if (!v) return;
     const shown = /^\d/.test(v) ? `v${v}` : v;
     el.textContent = '';
@@ -3378,6 +3399,72 @@
     }
     el.hidden = false;
   }
+
+  // A newer release on GitHub. The browser asks, not the device (an ESP32
+  // has no internal RAM to spare for TLS, and many have no internet), at
+  // most once a day: the answer is kept in localStorage. "Off" in Settings ›
+  // Maintenance is this browser's choice, stored beside the theme. A branch
+  // build (main · 8632d50) has no release number, so it's never told.
+  const UPDATE_OFF_KEY = 'tigoUpdateCheck', RELEASE_KEY = 'tigoLatestRelease';
+  const RELEASE_API = 'https://api.github.com/repos/RAR/esphome-tigomonitor/releases/latest';
+  const RELEASE_PAGE = 'https://github.com/RAR/esphome-tigomonitor/releases/tag/';
+  const RELEASE_EVERY_MS = 24 * 3600 * 1000;
+  const lsGet = k => { try { return localStorage.getItem(k); } catch { return null; } };
+  const lsSet = (k, v) => { try { v == null ? localStorage.removeItem(k) : localStorage.setItem(k, v); } catch {} };
+  // "2.3.0", "v2.3.0", "2.3.0+3.g838855d" or "2.0.0-rc.1": the numbers, and
+  // whether it's a pre-release. Anything else (a branch build) is null.
+  function releaseOf(v) {
+    const m = /^v?(\d+)\.(\d+)\.(\d+)(-[0-9A-Za-z.]+)?(?:\+|$)/.exec(v || '');
+    return m ? { n: [+m[1], +m[2], +m[3]], pre: !!m[4] } : null;
+  }
+  // Is release `latest` newer than the running build? 2.3.0+3.g… is past
+  // 2.3.0 but not 2.3.1; 2.4.0-rc.1 is before 2.4.0.
+  function isNewerRelease(latest, running) {
+    const a = releaseOf(latest), b = releaseOf(running);
+    if (!a || !b) return false;
+    for (let i = 0; i < 3; i++) if (a.n[i] !== b.n[i]) return a.n[i] > b.n[i];
+    return b.pre && !a.pre;
+  }
+  function updateStatus(text) { document.getElementById('update-status').textContent = text; }
+  function showUpdate(tag) {
+    const box = document.getElementById('app-update'), link = document.getElementById('app-update-link');
+    if (!tag) { box.hidden = true; return; }
+    link.href = RELEASE_PAGE + tag;
+    link.textContent = `${tag} available`;
+    link.title = `TigoMonitor ${tag} is out: release notes`;
+    box.hidden = false;
+  }
+  async function checkForUpdate(force) {
+    const off = lsGet(UPDATE_OFF_KEY) === 'off';
+    document.getElementById('update-check').checked = !off;
+    if (off) { showUpdate(null); updateStatus('Off.'); return; }
+    if (!appVersion) { showUpdate(null); updateStatus("This device doesn't report its version, so there's nothing to compare."); return; }
+    if (!releaseOf(appVersion)) { showUpdate(null); updateStatus(`This build (${appVersion}) isn't a release, so there's nothing to compare.`); return; }
+    let latest = null;
+    try { latest = JSON.parse(lsGet(RELEASE_KEY) || 'null'); } catch {}
+    if (force || !latest || !(Date.now() - latest.at < RELEASE_EVERY_MS)) {
+      try {
+        const r = await fetch(RELEASE_API, { headers: { Accept: 'application/vnd.github+json' }, cache: 'no-store' });
+        const j = r.ok ? await r.json() : null;
+        const tag = j && typeof j.tag_name === 'string' && /^v\d+\.\d+\.\d+[0-9A-Za-z.+-]*$/.test(j.tag_name) ? j.tag_name : null;
+        if (tag) { latest = { tag, at: Date.now() }; lsSet(RELEASE_KEY, JSON.stringify(latest)); }
+      } catch {}
+    }
+    if (!latest || !latest.tag) { showUpdate(null); updateStatus("GitHub couldn't be reached; it will try again next time the page opens."); return; }
+    const when = new Date(latest.at).toLocaleString();
+    if (isNewerRelease(latest.tag, appVersion)) {
+      showUpdate(latest.tag);
+      updateStatus(`${latest.tag} is available (checked ${when}).`);
+    } else {
+      showUpdate(null);
+      updateStatus(`Up to date: the latest release is ${latest.tag} (checked ${when}).`);
+    }
+  }
+  document.getElementById('update-check').addEventListener('change', e => {
+    lsSet(UPDATE_OFF_KEY, e.target.checked ? null : 'off');
+    checkForUpdate(e.target.checked);
+  });
+  document.getElementById('update-check').checked = lsGet(UPDATE_OFF_KEY) !== 'off';
 
   // Once the platform is known (below), the Pi's and the ESP32's pages
   // differ: swap the ESP32-only Settings tabs for the Pi's.

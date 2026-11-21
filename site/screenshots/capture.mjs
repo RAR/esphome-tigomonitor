@@ -83,8 +83,11 @@ const port = server.address().port;
 rmSync(OUT, { recursive: true, force: true });
 mkdirSync(OUT, { recursive: true });
 
+// No DNS but the local server: the page's once-a-day GitHub release check
+// fails quietly, so a newer release never puts a notice in the screenshots.
 const browser = await chromium.launch({
-  args: ['--no-sandbox', '--force-color-profile=srgb', '--font-render-hinting=none'],
+  args: ['--no-sandbox', '--force-color-profile=srgb', '--font-render-hinting=none',
+    '--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1'],
 });
 
 const missing = new Set();
