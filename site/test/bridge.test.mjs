@@ -1,0 +1,129 @@
+// site/test/bridge.test.mjs
+// The Config Builder's network bridge: a board that forwards the raw RS485
+// bus over TCP and decodes nothing. What keeps a bridge off the roof bus is
+// hardware (no tx_pin, and the transceiver's driver held off by a switch), so
+// the generated config is checked block by block against the example files in
+// boards/, which are the ones that were built and, for the AtomS3, run on a bus.
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { readFileSync, readdirSync } from 'node:fs';
+import { resolve, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { BRIDGE_BOARDS, getBridgeBoard, assembleBridge, toBridgeYaml } from '../bridge.js';
+import { toSecretsYaml } from '../yaml.js';
+
+const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
+
+const form = {
+  name: '', wifi: { ssid: 'net', password: 'pw', staticIp: '' },
+  useSecrets: false, apiKey: 'KEY==', otaPassword: 'ota',
+};
+
+// Top-level YAML blocks, comments and blank lines dropped, so a block compares
+// on what ESPHome reads rather than on how it is annotated.
+function blocks(yaml) {
+  const out = {};
+  let key = null;
+  for (const raw of yaml.split('\n')) {
+    const line = raw.replace(/\s+#.*$/, '').replace(/^\s*#.*$/, '').trimEnd();
+    if (!line) continue;
+    const top = /^([a-z_0-9]+):/.exec(line);
+    if (top) { key = top[1]; out[key] = []; }
+    out[key].push(line);
+  }
+  return Object.fromEntries(Object.entries(out).map(([k, v]) => [k, v.join('\n')]));
+}
+
+// Everything that touches the bus, the chip, the wire or the stream. wifi:,
+// api: and ota: differ on purpose: the builder fills in the user's network and
+// a real key.
+const HARDWARE_BLOCKS = ['esp32', 'external_components', 'ethernet', 'switch', 'safe_mode', 'uart',
+  'stream_server', 'logger', 'binary_sensor', 'sensor'];
+
+test('there is a bridge for each example bridge file in boards/, and no other', () => {
+  const examples = readdirSync(resolve(ROOT, 'boards'))
+    .filter((f) => /^example-.*-bridge\.yaml$/.test(f)).map((f) => `boards/${f}`).sort();
+  assert.ok(examples.length >= 4);
+  assert.deepEqual(BRIDGE_BOARDS.map((b) => b.example).sort(), examples);
+  for (const b of BRIDGE_BOARDS) assert.equal(getBridgeBoard(b.id), b);
+});
+
+for (const b of BRIDGE_BOARDS) {
+  test(`${b.id}: the bus, chip and stream blocks match ${b.example}`, () => {
+    const want = blocks(readFileSync(resolve(ROOT, b.example), 'utf8'));
+    const got = blocks(toBridgeYaml(assembleBridge(b, form)));
+    for (const k of ['esp32', 'external_components', 'switch', 'uart', 'stream_server']) {
+      assert.ok(want[k], `${b.example} has no ${k}: block`);
+    }
+    for (const k of HARDWARE_BLOCKS) assert.equal(got[k], want[k], `${k}: differs from ${b.example}`);
+  });
+
+  test(`${b.id}: the UART has no transmit pin, and every pin the board drives is held`, () => {
+    const y = toBridgeYaml(assembleBridge(b, { ...form, uart: { tx_pin: 'GPIO6' } }));
+    assert.doesNotMatch(y, /^\s*tx_pin:/m);
+    assert.ok(b.holdPins.length > 0, 'a bridge must hold its transceiver driver off');
+    for (const p of b.holdPins) {
+      assert.match(y, new RegExp(`pin: ${p.pin}\\b[^\\n]*\\n\\s+restore_mode: ${p.restore ?? 'ALWAYS_ON'}`));
+    }
+  });
+
+  if (b.ethernet) {
+    test(`${b.id}: a wired bridge has no Wi-Fi at all, and no Wi-Fi in its secrets`, () => {
+      const cfg = assembleBridge(b, { ...form, useSecrets: true });
+      const y = toBridgeYaml(cfg);
+      assert.doesNotMatch(y, /^wifi:|^captive_portal:|wifi_signal/m);
+      assert.match(y, /^ethernet:\n  type: W5500$/m);
+      assert.equal(toSecretsYaml(cfg), 'api_encryption_key: KEY==\nota_password: ota\n');
+    });
+    continue;
+  }
+
+  test(`${b.id}: Wi-Fi never sleeps, and the network and secrets come from the form`, () => {
+    const cfg = assembleBridge(b, { ...form, useSecrets: true,
+      wifi: { ssid: 'net', password: 'pw', staticIp: '10.0.0.46' } });
+    const y = toBridgeYaml(cfg);
+    assert.match(y, /^  power_save_mode: none$/m);
+    assert.match(y, /^  ssid: !secret wifi_ssid$/m);
+    assert.match(y, /^    key: !secret api_encryption_key$/m);
+    assert.match(y, /^    password: !secret ota_password$/m);
+    assert.match(y, /static_ip: 10\.0\.0\.46\n[\s\S]*gateway: 10\.0\.0\.1\n[\s\S]*dns1: 10\.0\.0\.1/);
+    assert.equal(toSecretsYaml(cfg),
+      'wifi_ssid: net\nwifi_password: pw\napi_encryption_key: KEY==\nota_password: ota\n');
+  });
+}
+
+test('a bridge is named tigo-bridge unless the form names it', () => {
+  const b = BRIDGE_BOARDS[0];
+  assert.match(toBridgeYaml(assembleBridge(b, form)), /^  name: tigo-bridge$/m);
+  assert.match(toBridgeYaml(assembleBridge(b, { ...form, name: 'cabinet' })), /^  name: cabinet$/m);
+});
+
+test('a bridge config pulls in no TigoMonitor component', () => {
+  for (const b of BRIDGE_BOARDS) {
+    const y = toBridgeYaml(assembleBridge(b, form));
+    assert.doesNotMatch(y, /tigo_monitor|tigo_server|psram:/);
+  }
+});
+
+// ESPHome's safe mode (after 10 quick reboots) sets up only the network, OTA
+// and the logger, so the switches never run and the driver-off pin floats.
+// Every bridge holds that pin at its off level there too.
+const SAFE_MODE_HOLDS = {
+  'atoms3-bridge': [['GPIO6', 1]],
+  't-can485-bridge': [['GPIO22', 1]],
+  'waveshare-rs485-can-bridge': [['GPIO21', 0]],
+  't-connect-pro-lite-bridge': [['GPIO17', 1]],
+};
+test('every bridge holds its driver off in safe mode, at the level its switch holds', () => {
+  assert.deepEqual(BRIDGE_BOARDS.map((b) => b.id).sort(), Object.keys(SAFE_MODE_HOLDS).sort());
+  for (const b of BRIDGE_BOARDS) {
+    const sm = blocks(toBridgeYaml(assembleBridge(b, form))).safe_mode;
+    assert.ok(sm, `${b.id}: no safe_mode: block`);
+    for (const [pin, level] of SAFE_MODE_HOLDS[b.id]) {
+      const n = pin.replace('GPIO', 'GPIO_NUM_');
+      assert.match(sm, new RegExp(`gpio_set_direction\\(${n}, GPIO_MODE_OUTPUT\\);\\n\\s+gpio_set_level\\(${n}, ${level}\\);`), `${b.id}: ${pin}`);
+      const sw = b.holdPins.find((p) => p.pin === pin);
+      assert.equal(sw.restore ?? 'ALWAYS_ON', level ? 'ALWAYS_ON' : 'ALWAYS_OFF', `${b.id}: ${pin} held one way, safe mode the other`);
+    }
+  }
+});

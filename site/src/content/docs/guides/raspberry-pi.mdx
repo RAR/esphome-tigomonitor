@@ -589,26 +589,19 @@ small ESP32 there can pass the bus along over Wi-Fi instead, and the monitor
 reads it from the network. The bridge only forwards bytes; the decoding, the
 dashboard and the history all stay on the machine running the monitor.
 
-1. Flash a bridge config, with your Wi-Fi filled in:
-   [`boards/example-atoms3-bridge.yaml`](https://github.com/RAR/esphome-tigomonitor/blob/main/boards/example-atoms3-bridge.yaml)
-   for an M5Stack AtomS3 on the Atomic RS485 Base, or
-   [`boards/example-t-can485-bridge.yaml`](https://github.com/RAR/esphome-tigomonitor/blob/main/boards/example-t-can485-bridge.yaml)
-   for a LilyGO T-CAN485. Power it up, then wire its RS485 terminals to the
-   TAP as in [Wiring](/esphome-tigomonitor/guides/wiring/). It runs
-   [stream_server](https://github.com/oxan/esphome-stream-server), which sends
-   every byte from the bus to whoever connects on port 6638.
+1. Build and flash a bridge: the
+   [Config Builder](/esphome-tigomonitor/config-builder/?build=bridge) writes
+   one for an M5Stack AtomS3 on the Atomic RS485 Base, a LilyGO T-CAN485 or
+   T-Connect Pro Lite, or a Waveshare ESP32-S3-RS485-CAN.
+   Power it up, then wire it to the TAP.
 2. Under **Settings → Bus**, choose **Network bridge (TCP)**
    and enter the bridge's address, `tigo-bridge.local:6638` or its IP and
    port, then save. If the name doesn't resolve, use the IP.
 
-The bridge can't send anything onto the bus: its UART has no transmit pin,
-and the transceiver's driver is held off. If the bridge loses power or Wi-Fi,
-the monitor notices within about a minute and reconnects when it's back.
-
-An RS485-to-Ethernet converter set to TCP server mode, passing bytes through
-unchanged, takes the bridge's place the same way. The AtomS3 bridge has run
-on a 40-panel roof bus, feeding a Pi 5 in Docker. The T-CAN485 config has
-been built but not yet run on a bus.
+The bridge can't send anything onto the bus, so the monitor can only listen
+through it, not [run the bus](#run-the-bus-in-the-ccas-place).
+[Network bridge](/esphome-tigomonitor/guides/network-bridge/) has the
+boards, the wiring order and what's been tested.
 
 ### On a machine that does other things
 

@@ -18,7 +18,7 @@ below.
 
 |  | ESP32 | Raspberry Pi and Linux |
 |---|---|---|
-| Hardware | An ESP32 with PSRAM and an RS485 transceiver, about $30 ([Start Here](/esphome-tigomonitor/guides/getting-started/)). Boards without PSRAM run sensors only, without the web UI. | A Pi with a USB RS485 adapter or an RS485 HAT, or any Linux machine reading the bus from an [ESP32 bridge](/esphome-tigomonitor/guides/raspberry-pi/#read-the-bus-over-the-network) over Wi-Fi. |
+| Hardware | An ESP32 with PSRAM and an RS485 transceiver, about $30 ([Start Here](/esphome-tigomonitor/guides/getting-started/)). Boards without PSRAM run sensors only, without the web UI. | A Pi with a USB RS485 adapter or an RS485 HAT, or any Linux machine reading the bus from an [ESP32 bridge](/esphome-tigomonitor/guides/network-bridge/) over Wi-Fi. |
 | Install | Write a YAML config ([Config Builder](/esphome-tigomonitor/config-builder/)), compile and flash with ESPHome. | Install one package, or [run it in Docker](/esphome-tigomonitor/guides/raspberry-pi/#run-it-in-docker). Nothing to compile. |
 | Settings | In YAML, and some under Settings → General. | All in the browser, under Settings. |
 | Home Assistant | The ESPHome integration, with the sensors you list in YAML. | MQTT discovery: each panel its own device, as soon as the gateway announces it. |

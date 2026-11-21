@@ -6,8 +6,8 @@
 # from where you want to run the monitor, or when you would rather keep an
 # ESP32 at the cabinet and the history on a bigger machine.
 #
-# In tigomonitord, under Tools -> RS485 adapter and web UI, choose
-# "Network bridge (TCP)" and enter  tigo-bridge.local:6638  (or this board's IP).
+# In tigomonitord, under Settings -> Bus, choose "Network bridge (TCP)" and
+# enter  tigo-bridge.local:6638  (or this board's IP).
 #
 # stream_server (https://github.com/oxan/esphome-stream-server) does the
 # forwarding: every byte the UART receives goes to each connected client.
@@ -20,7 +20,8 @@
 # Removing tx_pin is only safe because GPIO22 (the transceiver's DI) is held
 # HIGH by the switch below. The MAX13487E turns its driver ON when DI is LOW
 # (see esp32-lilygo-t-can485.yaml), so a floating DI could drive your bus.
-# Keep that switch.
+# Keep that switch. ESPHome's safe mode never runs it; the safe_mode: block
+# holds GPIO22 high there.
 
 esphome:
   name: tigo-bridge
@@ -91,6 +92,16 @@ switch:
     restore_mode: ALWAYS_ON
   - platform: restart
     name: "Tigo Bridge Restart"
+
+# Safe mode (after 10 quick reboots) sets up only Wi-Fi, OTA and the logger, so
+# the switch above never runs and GPIO22 floats. This holds it high there too.
+safe_mode:
+  on_safe_mode:
+    - lambda: |-
+        gpio_reset_pin(GPIO_NUM_22);
+        gpio_set_direction(GPIO_NUM_22, GPIO_MODE_OUTPUT);
+        gpio_set_level(GPIO_NUM_22, 1);
+        ESP_LOGW("tigo_bridge", "Safe mode: GPIO22 held high, the RS485 driver is off");
 
 uart:
   id: tigo_uart

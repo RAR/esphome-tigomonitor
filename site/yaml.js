@@ -122,27 +122,7 @@ export function toYaml(cfg) {
     L.push(`${I(1)}#   subnet: 255.255.255.0`);
     L.push('');
   } else {
-    L.push('wifi:');
-    L.push(`${I(1)}ssid: ${val(cfg.wifi.useSecrets, 'wifi_ssid', cfg.wifi.ssid)}`);
-    L.push(`${I(1)}password: ${val(cfg.wifi.useSecrets, 'wifi_password', cfg.wifi.password)}`);
-    if (cfg.wifi.staticIp) {
-      // We used to emit static_ip alone, which does not even validate: ESPHome
-      // marks gateway and subnet Required. dns1/dns2 it does default, to
-      // 0.0.0.0 — a device with no resolver cannot look up pool.ntp.org, so the
-      // clock stays at epoch 0 and history records nothing while the dashboard
-      // keeps working over the static address (#60). Emit all five, assuming the
-      // common /24 with the router at .1: a wrong guess is visible in the
-      // comment below, a missing DNS server is not.
-      const gw = `${cfg.wifi.staticIp.split('.').slice(0, 3).join('.')}.1`;
-      L.push(`${I(1)}manual_ip:`);
-      L.push(`${I(2)}static_ip: ${cfg.wifi.staticIp}`);
-      L.push(`${I(2)}# Assumes a /24 with the router at .1 — correct these if yours differ.`);
-      L.push(`${I(2)}gateway: ${gw}`);
-      L.push(`${I(2)}subnet: 255.255.255.0`);
-      L.push(`${I(2)}# Without dns1 the clock never sets and history stays empty.`);
-      L.push(`${I(2)}dns1: ${gw}`);
-      L.push(`${I(2)}dns2: 1.1.1.1`);
-    }
+    L.push(...wifiLines(cfg.wifi));
     L.push('');
     L.push('captive_portal:');
     L.push('');
@@ -303,6 +283,33 @@ export function toYaml(cfg) {
   let out = L.join('\n');
   if (cfg.displayOverlay) out += '\n' + cfg.displayOverlay.trim() + '\n';
   return out;
+}
+
+// The wifi: block's credentials and fixed address, shared with the network
+// bridge (bridge.js). The caller adds anything after them.
+export function wifiLines(wifi) {
+  const L = ['wifi:'];
+  L.push(`${I(1)}ssid: ${val(wifi.useSecrets, 'wifi_ssid', wifi.ssid)}`);
+  L.push(`${I(1)}password: ${val(wifi.useSecrets, 'wifi_password', wifi.password)}`);
+  if (wifi.staticIp) {
+    // We used to emit static_ip alone, which does not even validate: ESPHome
+    // marks gateway and subnet Required. dns1/dns2 it does default, to
+    // 0.0.0.0 — a device with no resolver cannot look up pool.ntp.org, so the
+    // clock stays at epoch 0 and history records nothing while the dashboard
+    // keeps working over the static address (#60). Emit all five, assuming the
+    // common /24 with the router at .1: a wrong guess is visible in the
+    // comment below, a missing DNS server is not.
+    const gw = `${wifi.staticIp.split('.').slice(0, 3).join('.')}.1`;
+    L.push(`${I(1)}manual_ip:`);
+    L.push(`${I(2)}static_ip: ${wifi.staticIp}`);
+    L.push(`${I(2)}# Assumes a /24 with the router at .1 — correct these if yours differ.`);
+    L.push(`${I(2)}gateway: ${gw}`);
+    L.push(`${I(2)}subnet: 255.255.255.0`);
+    L.push(`${I(2)}# Without dns1 the clock never sets and history stays empty.`);
+    L.push(`${I(2)}dns1: ${gw}`);
+    L.push(`${I(2)}dns2: 1.1.1.1`);
+  }
+  return L;
 }
 
 export function toSecretsYaml(cfg) {

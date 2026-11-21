@@ -46,6 +46,7 @@ export default defineConfig({
             { label: 'Wiring', link: '/guides/wiring/' },
             { label: 'Config Builder', link: '/config-builder/' },
             { label: 'Raspberry Pi and Linux', link: '/guides/raspberry-pi/' },
+            { label: 'Network bridge', link: '/guides/network-bridge/' },
           ],
         },
         {
