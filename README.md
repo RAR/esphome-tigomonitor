@@ -45,8 +45,11 @@ The full walkthrough — parts list, safety, sensor blocks, PSRAM tuning — is 
 [Start Here](https://rar.github.io/esphome-tigomonitor/guides/getting-started/).
 
 No ESP32? The same monitor runs on a Raspberry Pi, any Debian or Ubuntu machine,
-or in Docker, with no ESPHome — see
+in Docker, or as a Home Assistant app, with no ESPHome — see
 [Raspberry Pi and Linux](https://rar.github.io/esphome-tigomonitor/guides/raspberry-pi/).
+On Home Assistant OS, this button adds the app's repository to your Home Assistant:
+
+[![Add this repository to your Home Assistant](https://my.home-assistant.io/badges/supervisor_add_addon_repository.svg)](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgithub.com%2FRAR%2Fesphome-tigomonitor)
 
 > ⚠ **Upgrading from a pre-TSDB release: one-time data loss + serial flash required.**
 > The partition layout changed to make room for the on-flash time-series database, so
