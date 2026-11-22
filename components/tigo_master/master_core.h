@@ -530,7 +530,8 @@ class MasterCore {
   bool housekeeping_on_;
   bool read_tap_config_ = false;
   bool known_networks_ = false;
-  bool reads_config_() const { return read_tap_config_ || known_networks_; }
+  // With one TAP there's no key to share and no one to tell: no read added.
+  bool reads_config_() const { return read_tap_config_ || (known_networks_ && taps_.size() > 1); }
   void sync_key_words_();
   void known_networks_due_() {
     for (auto &t : taps_) t->known_due = true;
