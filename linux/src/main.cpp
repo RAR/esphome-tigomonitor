@@ -751,6 +751,53 @@ int main(int argc, char **argv) {
         }
         return bus_master->request_period(tap_mac, code, dry_run, why) ? 200 : 409;
       },
+      [&](uint16_t from, uint16_t to, bool dry_run, const std::vector<std::pair<std::string, uint16_t>> &given,
+          std::string &why, size_t &count) {
+        namespace mp = esphome::tigo_monitor::master;
+        // Every optimizer whose link was last heard through from: its
+        // barcode is its MAC, its address its id. From the node table and
+        // the links, so a TAP that has died can still be handed over.
+        std::vector<mp::TableRecord> recs;
+        auto links = monitor.links();
+        // Bench only: a list the request brought (the HTTP layer allows it
+        // only with master_bench), for rehearsing on TAPs with no optimizers.
+        for (const auto &g : given) {
+          mp::Bytes mac;
+          for (size_t i = 0; i + 1 < g.first.size(); i += 2)
+            mac.push_back(static_cast<uint8_t>(std::stoul(g.first.substr(i, 2), nullptr, 16)));
+          recs.push_back({mac, g.second});
+        }
+        for (const Node &n : given.empty() ? monitor.nodes() : std::vector<Node>{}) {
+          auto it = links.links().find(n.addr);
+          if (it == links.links().end() || it->second.tap != from) continue;
+          if (n.long_address.size() != 16 ||
+              n.long_address.find_first_not_of("0123456789abcdefABCDEF") != std::string::npos)
+            continue;
+          mp::Bytes mac;
+          for (size_t i = 0; i < 16; i += 2)
+            mac.push_back(static_cast<uint8_t>(std::stoul(n.long_address.substr(i, 2), nullptr, 16)));
+          unsigned long id = std::strtoul(n.addr.c_str(), nullptr, 16);
+          if (id < 2 || id > 1023) continue;
+          recs.push_back({mac, static_cast<uint16_t>(id)});
+        }
+        count = recs.size();
+        std::lock_guard<std::mutex> lock(master_mu);
+        if (!bus_master) {
+          why = "this monitor isn't running the bus";
+          return 409;
+        }
+        if (from == to) {
+          why = "the TAP handing over and the one taking over are the same";
+          return 409;
+        }
+        if (recs.empty()) {
+          char b[80];
+          snprintf(b, sizeof(b), "no optimizer has been heard through TAP %04X", from);
+          why = b;
+          return 409;
+        }
+        return bus_master->request_table_handover(recs, dry_run, why, to) ? 200 : 409;
+      },
       trusted_ingress, port >= 0});
   if (port < 0 && settings.web_port > 0) port = settings.web_port;
   // Only the default steps aside for another web server; a port someone

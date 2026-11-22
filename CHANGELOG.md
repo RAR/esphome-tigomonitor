@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Hand a TAP's optimizers to another (Raspberry Pi, experimental, API
+  only).** `POST /api/master/taps/handover` with `{"from": "1202", "to":
+  "1201"}` lists every optimizer last heard through the first TAP on the
+  second, at its own address and not yet joined, then holds the second
+  TAP's join window open until each has joined it. It is the first step of
+  replacing a TAP, and it sends nothing to the old one, so a TAP that has
+  died can still be handed over. A check (`"dry_run"`, the default) only
+  reads. It needs **Allow changes to the TAPs**. On two bench TAPs it
+  listed 20 optimizers on the new one, ten a write, each at its own
+  address; an optimizer actually moving across hasn't been seen yet.
+
 - **The Config Builder writes a network bridge.** Choose "A network bridge"
   at the top and pick a board: an AtomS3 or AtomS3R on the Atomic RS485
   Base, a LilyGO T-CAN485, a Waveshare ESP32-S3-RS485-CAN, or a LilyGO

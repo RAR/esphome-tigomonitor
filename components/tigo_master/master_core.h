@@ -383,6 +383,12 @@ class MasterCore {
   bool request_table_replace(const esphome::tigo_monitor::master::Bytes &old_mac,
                              const esphome::tigo_monitor::master::Bytes &new_mac, bool dry_run, std::string &why,
                              uint16_t tap = 0);
+  // Replace a TAP's first step: list another TAP's optimizers on TAP tap at
+  // their own ids, not joined (table_edit.h's TableHandover), and watch each
+  // until it joins there. Needs what a removal needs (Allow changes to the
+  // TAPs, somewhere to save the table) and the window renewing.
+  bool request_table_handover(const std::vector<esphome::tigo_monitor::master::TableRecord> &from_old_tap, bool dry_run,
+                              std::string &why, uint16_t tap);
   // Gives one TAP its radio settings (tap_config.h), Add a TAP's step: with
   // Allow changes to the TAPs (master_table_writes) or master_bench on, the
   // TAP named by the MAC it answered GET_MAC with, no other change running.

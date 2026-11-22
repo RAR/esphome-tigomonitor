@@ -572,6 +572,11 @@ class TableRemove : public TableJob {
           f.insert(f.end(), a.begin(), a.end());
           dry_frames_.push_back(f);
         }
+        if (!handover_.empty())
+          finish_("dry run: would erase the table, write back the other " +
+                  std::to_string(survivors_.size() - joining_.size()) + " and list " + std::to_string(joining_.size()) +
+                  " from the other TAP, not joined");
+        else
         finish_(add_mac_.empty()
                     ? "dry run: would erase the table and write back the other " + std::to_string(survivors_.size())
                     : "dry run: would erase the table, write back the other " + std::to_string(survivors_.size() - 1) +
@@ -628,7 +633,9 @@ class TableRemove : public TableJob {
   bool keep_saved() const override { return keep_saved_; }
   const std::vector<TableRecord> &survivors() const override { return survivors_; }
 
-  const char *kind() const override { return add_mac_.empty() ? "remove" : "replace"; }
+  const char *kind() const override { return !handover_.empty() ? "handover" : add_mac_.empty() ? "remove" : "replace"; }
+  // A handover's optimizers newly listed here, not joined yet: for JoinWatch.
+  const std::vector<TableRecord> &joining() const { return joining_; }
   // The MACs this job took off (or, dry, would): found in the table.
   const std::vector<Bytes> &removed() const { return removed_; }
   Step step() const { return step_; }
@@ -657,6 +664,8 @@ class TableRemove : public TableJob {
  protected:
   // A replace: the new optimizer, written provisional at the removed one's id.
   Bytes add_mac_;
+  // A handover: the old TAP's optimizers, to list here at their own ids.
+  std::vector<TableRecord> handover_;
 
  private:
   Bytes batch_(size_t from) const {
@@ -686,6 +695,7 @@ class TableRemove : public TableJob {
     const std::vector<TableRecord> &walk = walk_.records();
     if (step_ == Step::read_before) {
       before_ = walk;
+      if (!handover_.empty()) return plan_handover_();
       if (resuming_) {
         if (same_table(walk, survivors_)) return finish_("the interrupted removal had finished: nothing to do");
         step_ = Step::erase;  // the saved list is already on disk
@@ -741,7 +751,32 @@ class TableRemove : public TableJob {
                    true);
     finish_(done_text_());
   }
+  // Everything the new TAP lists stays as it is; each of the old TAP's
+  // optimizers not listed here yet is added at its own id with bit 15 set,
+  // so it may join this TAP while a window is open. An id this TAP gives
+  // another optimizer stops it before anything is sent.
+  void plan_handover_() {
+    survivors_ = before_;
+    joining_.clear();
+    for (const auto &h : handover_) {
+      if (TableWalk::find(before_, h.mac)) continue;
+      for (const auto &r : before_)
+        if (r.id() == h.id())
+          return fail_("this TAP already lists another optimizer at " + hex4_(h.id()) + "; nothing was changed", false);
+      TableRecord rec{h.mac, static_cast<uint16_t>(0x8000 | h.id())};
+      survivors_.push_back(rec);
+      joining_.push_back(rec);
+    }
+    if (joining_.empty())
+      return finish_("all " + std::to_string(handover_.size()) + " are already listed on this TAP: nothing to do");
+    std::sort(survivors_.begin(), survivors_.end(),
+              [](const TableRecord &a, const TableRecord &b) { return a.id() < b.id(); });
+    step_ = dry_run_ ? Step::erase : Step::save;
+  }
   std::string done_text_() const {
+    if (!handover_.empty())
+      return "listed " + std::to_string(joining_.size()) + " from the other TAP, not joined yet; the other " +
+             std::to_string(survivors_.size() - joining_.size()) + " written back as they were";
     std::string n = std::to_string(survivors_.size());
     if (resuming_) return "finished the interrupted removal: " + n + " written back";
     if (!several_.empty())
@@ -757,6 +792,7 @@ class TableRemove : public TableJob {
   std::vector<Bytes> removed_;
   Step step_ = Step::read_before;
   std::vector<TableRecord> survivors_;
+  std::vector<TableRecord> joining_;
   size_t written_ = 0;
   uint32_t empty_at_ms_ = 0;
   bool erase_sent_ = false;
@@ -772,6 +808,23 @@ class TableReplace : public TableRemove {
  public:
   TableReplace(const Bytes &old_mac, const Bytes &new_mac, bool dry_run) : TableRemove(old_mac, dry_run) {
     add_mac_ = new_mac;
+  }
+};
+
+// Handing a TAP's optimizers to another (Replace a TAP): read the new TAP's
+// table, keep everything on it, and add each of the old TAP's optimizers at
+// its own id with bit 15 set: listed, not a member, as a CCA's rediscovery
+// wrote every optimizer to a second TAP on the roof (2026-11-15). An
+// optimizer joins a TAP only while that TAP lists it and has a window open,
+// and its address stays the same. The rewrite is a removal's (save, erase,
+// write back ten a write, read back), with nothing removed. Then JoinWatch
+// holds the window open until each has joined (the TAP clears the bit) or
+// gives up on it.
+class TableHandover : public TableRemove {
+ public:
+  TableHandover(const std::vector<TableRecord> &from_old_tap, bool dry_run)
+      : TableRemove(from_old_tap.empty() ? Bytes{} : from_old_tap.front().mac, dry_run) {
+    handover_ = from_old_tap;
   }
 };
 
