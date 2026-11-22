@@ -538,6 +538,7 @@ void MasterCore::herd_done_() {
     known_networks_due_();  // the set of TAPs may have changed
   }
   for (const auto &l : lines) log_(l.find("wasn't heard") != std::string::npos ? 4 : 6, "%s", l.c_str());
+  sync_key_words_();
   phase_ = Phase::running;
   probe_index_ = 0;
   std::vector<Bytes> extras = herd_->extras();
@@ -776,7 +777,7 @@ void MasterCore::sync_key_words_() {
   for (const auto &h : held) read += h.second;
   std::lock_guard<std::mutex> lock(mu_);
   for (auto &t : taps_) {
-    if (taps_.size() == 1) t->st.key = t->radio ? "alone" : "unread";
+    if (taps_.size() == 1) t->st.key = "alone";
     else if (!t->radio || read < 2) t->st.key = "unread";
     else t->st.key = !tie && site && t->radio->key == *site ? "same" : "different";
   }
@@ -792,6 +793,9 @@ bool MasterCore::send_known_networks_(Tap &t) {
   std::vector<master::KnownNetwork> others;
   for (const auto &x : taps_) {
     if (x.get() == &t) continue;
+    // One on a channel no network uses (a new TAP on its factory settings,
+    // channel 0) is no network to join: named nowhere.
+    if (x->radio && (x->radio->channel < master::CHANNEL_MIN || x->radio->channel > master::CHANNEL_MAX)) continue;
     if (x->radio) others.push_back({static_cast<uint8_t>(x->radio->channel), x->radio->pan, x->radio->key});
     else if (!x->lost) return false;  // wait for its read
   }
@@ -861,6 +865,7 @@ bool MasterCore::open() {
   splitter_ = protocol::FrameSplitter<std::string>();
   restart_taps_();
   known_networks_due_();
+  sync_key_words_();
   holding_ = false;
   // Or it lost power, and came back at the factory address.
   if (startup_) phase_ = Phase::probing;
@@ -886,6 +891,7 @@ bool MasterCore::open() {
     fresh.id = t->id;
     fresh.mac = t->st.mac;
     fresh.version = t->st.version;
+    fresh.key = t->st.key;  // its settings, read before, are still known
     t->st = fresh;
     t->lost = false;
     t->lost_misses = 0;
@@ -1243,6 +1249,7 @@ void MasterCore::tick_(uint32_t now_ms) {
     if (forget && !herd_) {
       forget_tap_(forget);
       known_networks_due_();  // no TAP is told about one that's gone
+      sync_key_words_();
     }
   }
   {

@@ -1508,6 +1508,47 @@ static void test_known_networks_refusal_is_said_once() {
   core.close();
 }
 
+// A TAP still on its factory settings (channel 0: a new one, not yet given
+// its own) is no network to join: named in nobody's 0xE1, and nothing the
+// gate would refuse goes out.
+static void test_known_networks_skip_a_tap_on_factory_settings() {
+  MultiTap bus;
+  three_on_one_key(bus);
+  mp::RadioBlock factory = radio(0, 0x1234, 0x00);
+  for (auto &k : factory.key) k = 0;
+  give_radio(bus, 0x1203, factory);
+  MasterCore core(&bus.port, [](int, const std::string &) {}, nullptr, nullptr, 0x1201, false, true);
+  core.set_taps({{0x1201, {}}, {0x1202, {}}, {0x1203, {}}});
+  core.set_known_networks(true);
+  core.set_table_writes(true);
+  CHECK(core.open());
+  run_for(core, 0, 20000, 50);
+  CHECK(core.status().fault != Fault::refused);
+  CHECK(bus.at(0x1201)->e1.size() == 1 && bus.at(0x1202)->e1.size() == 1);
+  if (bus.at(0x1201)->e1.size() == 1) CHECK((e1_channels(bus.at(0x1201)->e1[0]) == std::vector<int>{18}));
+  if (bus.at(0x1202)->e1.size() == 1) CHECK((e1_channels(bus.at(0x1202)->e1[0]) == std::vector<int>{15}));
+  // The factory TAP itself is told the two real networks.
+  CHECK(bus.at(0x1203)->e1.size() == 1);
+  core.close();
+}
+
+// One TAP: nothing to share and no one to tell, so no settings read is
+// added to its start; it says "alone" all the same.
+static void test_one_tap_is_alone_without_a_read() {
+  MultiTap bus;
+  bus.taps = {{0x1201, 1}};
+  give_radio(bus, 0x1201, radio(15, 0x7E21, 0x30));
+  MasterCore core(&bus.port, [](int, const std::string &) {}, nullptr, nullptr, 0x1201, false, true);
+  core.set_known_networks(true);
+  core.set_table_writes(true);
+  CHECK(core.open());
+  run_for(core, 0, 20000, 50);
+  CHECK(bus.at(0x1201)->cfg_reads == 0);
+  CHECK(core.status().taps[0].key == "alone");
+  CHECK(bus.at(0x1201)->e1.empty());
+  core.close();
+}
+
 // Retiring a TAP that has gone for good: refused while it answers, for the
 // only TAP, and for one the master doesn't have; a lost one is dropped at the
 // next tick, no longer polled, and the shorter list is saved.
@@ -2108,6 +2149,8 @@ int main() {
   test_known_networks_waits_for_a_table_job();
   test_known_networks_lost_and_unread();
   test_known_networks_refusal_is_said_once();
+  test_known_networks_skip_a_tap_on_factory_settings();
+  test_one_tap_is_alone_without_a_read();
   test_one_tap_still_quiet_after_the_bus_is_back_is_removed();
   test_a_lost_tap_can_be_retired();
   test_no_tap_answering_is_a_fault();
