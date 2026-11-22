@@ -89,12 +89,13 @@ struct HttpContext {
   std::function<int(std::string &why)> request_herd;
   // Retire a TAP that has gone for good (POST /api/master/taps/forget); 200, or 409 with why.
   std::function<int(uint16_t id, std::string &why)> forget_tap;
-  // Give a bench TAP its radio settings (POST /api/master/taps/provision,
+  // Give a TAP its radio settings (POST /api/master/taps/provision,
   // tap_config.h): its MAC, the channel, the PAN (0: from its MAC), reset
-  // after, dry run. 200 with what it will give in given (no key), or 409 with why.
+  // after, dry run, and shared_key: the key the other TAPs share rather than
+  // a new one. 200 with what it will give in given (no key), or 409 with why.
   std::function<int(const esphome::tigo_monitor::master::Bytes &tap_mac, uint16_t channel, uint16_t pan,
                     bool identify, bool reset, bool dry_run, int profile, bool keep_network,
-                    bool store, std::string &why, std::string &given)>
+                    bool shared_key, bool store, std::string &why, std::string &given)>
       request_provision;
   // Bench only: ask one optimizer a read-shaped text (POST /api/master/query);
   // 200, or 409 with why.
