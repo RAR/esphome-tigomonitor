@@ -485,6 +485,7 @@ void MasterCore::herd_done_() {
       lines.push_back(b);
       t->lost = true;
       t->lost_misses = 0;
+      t->removed = false;
       t->next_try_ms = 0;
       t->st.state = "lost";
       next.push_back(std::move(t));
@@ -755,6 +756,7 @@ bool MasterCore::open() {
     t->st = fresh;
     t->lost = false;
     t->lost_misses = 0;
+    t->removed = false;
   }
   status_.active = true;
   status_.pv = pv_state_;
@@ -1017,6 +1019,7 @@ void MasterCore::tap_answered_(Tap &t) {
   if (!t.lost) return;
   t.lost = false;
   t.lost_misses = 0;
+  t.removed = false;
   LOGI("bus master: TAP %04X is answering again; polling it", t.id);
   std::lock_guard<std::mutex> lock(mu_);
   t.st.state = "running";
@@ -1029,6 +1032,7 @@ void MasterCore::tap_unanswered_(Tap &t, uint32_t now_ms) {
     if (t.timeouts_in_a_row != NO_REPLY_FAULT_AFTER) return;
     t.lost = true;
     t.lost_misses = 0;
+    t.removed = false;
     t.next_try_ms = now_ms + LOST_PROBE_MS;
     t.window = master::WindowKeeper();
     drop_housekeeping_(t);
@@ -1039,11 +1043,21 @@ void MasterCore::tap_unanswered_(Tap &t, uint32_t now_ms) {
     t.st.state = "lost";
     return;
   }
-  bool removed = ++t.lost_misses >= LOST_MISSES;
+  // Every TAP quiet at once is the bus (cut, or being wired), not the TAPs:
+  // each is still asked every LOST_PROBE_MS, so polling is back soon after
+  // the bus is. Only one quiet while another answers is a TAP gone.
+  bool bus_quiet = std::all_of(taps_.begin(), taps_.end(), [](const std::unique_ptr<Tap> &x) { return x->lost; });
+  bool removed = ++t.lost_misses >= LOST_MISSES && !bus_quiet;
   t.next_try_ms = now_ms + (removed ? REMOVED_PROBE_MS : LOST_PROBE_MS);
-  if (t.lost_misses == LOST_MISSES)
+  if (t.lost_misses == LOST_MISSES && bus_quiet)
+    LOGW("bus master: TAP %04X has not answered %u tries, and no TAP is answering: it may be the bus, so it is "
+         "still asked every %u s",
+         t.id, static_cast<unsigned>(LOST_MISSES), static_cast<unsigned>(LOST_PROBE_MS / 1000));
+  bool newly_removed = removed && !t.removed;
+  t.removed = removed;
+  if (newly_removed)
     LOGW("bus master: TAP %04X has not answered %u tries; asking it every %u s (it keeps its id)", t.id,
-         static_cast<unsigned>(LOST_MISSES), static_cast<unsigned>(REMOVED_PROBE_MS / 1000));
+         static_cast<unsigned>(t.lost_misses), static_cast<unsigned>(REMOVED_PROBE_MS / 1000));
   std::lock_guard<std::mutex> lock(mu_);
   t.st.state = removed ? "removed" : "lost";
 }
