@@ -111,13 +111,14 @@ expect "the TAP's 10 bytes as they were" "$(stat "$out/wide.json" "d['cfg_extra'
 stop_all
 
 # --- a live system, as Add a TAP's step: no bench, Allow changes to the TAPs
-# on, and neither channel nor PAN given: chosen two from the TAP's own (1),
+# on, and neither channel nor PAN given: the first Wi-Fi gap (15; the TAP's
+# own channel, 1, doesn't count against it),
 # the PAN from this machine's MAC ---
 start live 18404 false "" ', "master_table_writes": true'
 expect "the step's write starts" "$(code POST 18404 /api/master/taps/provision "{\"mac\": \"$MAC\", \"dry_run\": false}")" 200
 finished 18404
 expect "it finished" "$(edit 18404 "(e['ok'], e['step'])")" "(True, 'done')"
-expect "on a channel two from the one heard" "$(stat "$out/live.json" "[w['channel'] for w in d['cfg_writes']]")" "[11]"
+expect "on the first channel between Wi-Fi's" "$(stat "$out/live.json" "[w['channel'] for w in d['cfg_writes']]")" "[15]"
 expect "with a PAN" "$(stat "$out/live.json" "d['cfg_writes'][0]['pan'] not in ('0000', 'FFFF')")" True
 # In a container (this test runs in one), the PAN comes from a random seed
 # kept in the state directory, not the container's MAC.

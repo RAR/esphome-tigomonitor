@@ -277,14 +277,25 @@ inline uint16_t pan_for(const Bytes &tap_mac, const std::set<uint16_t> &in_use) 
   return 0;
 }
 
-// The first channel from 11 up at least two away from every one in use.
+// A channel at least two away from every one in use: 15, 20, 25 or 26 first,
+// then the first from 11 up; 0 if there's none.
+//
+// 11-26 is IEEE 802.15.4's numbering, and the TAP's radio is an 802.15.4
+// one, so channel c sits at 2405 + 5 (c - 11) MHz. 15, 20, 25 and 26 are the
+// four that clear Wi-Fi channels 1, 6 and 11, which most 2.4 GHz networks
+// use; 11, the old first pick, is inside Wi-Fi 1. (The CCA doesn't do this:
+// on the bench it gave TAPs 14, 15, 20 and 23.) The two-away rule is ours,
+// for TAPs on neighbouring channels; nobody has measured whether it matters.
 inline uint16_t channel_for(const std::set<uint16_t> &in_use) {
-  for (uint16_t c = CHANNEL_MIN; c <= CHANNEL_MAX; c++) {
-    bool clear = true;
+  auto clear = [&in_use](uint16_t c) {
     for (uint16_t u : in_use)
-      if (c + 1 >= u && c <= u + 1) clear = false;
-    if (clear) return c;
-  }
+      if (c + 1 >= u && c <= u + 1) return false;
+    return true;
+  };
+  for (uint16_t c : {15, 20, 25, 26})
+    if (clear(c)) return c;
+  for (uint16_t c = CHANNEL_MIN; c <= CHANNEL_MAX; c++)
+    if (clear(c)) return c;
   return 0;
 }
 

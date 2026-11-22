@@ -78,7 +78,7 @@ async function open(w) {
       }
       if (path === '/api/master/taps/provision') {
         // Channel and PAN chosen by the daemon when not given; the key never shown.
-        const given = 'channel 11, PAN 1A2B, map 0c020201000000011c01, SLT 5A, key hidden, optimization 00000200, SLm 3C, for up to 40 optimizers';
+        const given = `channel ${b.channel || 15}, PAN 1A2B, map 0c020201000000011c01, SLT 5A, key hidden, optimization 00000200, SLm 3C, for up to 40 optimizers`;
         const dry = b.dry_run !== false;
         w.master.table.edit = { ...w.master.table.edit, kind: 'provision', active: false, finished: true, ok: true, dry_run: dry,
           step: 'done', mac: b.mac, started_unix: Math.floor(Date.now() / 1000),
@@ -302,20 +302,28 @@ test('System setup: "Add a TAP" from wiring it in to its name, giving it its rad
   // Not given until checked and given: Next waits.
   assert.equal(await page.isDisabled('button[data-setup-next]'), true);
   await page.click('button[data-setup-radio-check]');
-  await page.waitForFunction(() => /Channel 11/.test(document.querySelector('.setup-body').textContent));
+  await page.waitForFunction(() => /Channel 15/.test(document.querySelector('.setup-body').textContent));
   const plan = await page.textContent('.setup-body');
-  assert.match(plan, /Channel 11/);
+  assert.match(plan, /Channel 15/);
+  assert.match(plan, /clear of Wi-Fi/);
   assert.match(plan, /Network ID 1A2B/);
   assert.match(plan, /up to 40 optimizers/);
   assert.match(plan, /never shown/);
   assert.doesNotMatch(plan, /key hidden/);
+  // Another channel: chosen here, checked again, and given as chosen.
+  assert.equal(await page.inputValue('#setup-radio-channel'), '');
+  await page.selectOption('#setup-radio-channel', '20');
+  await page.waitForFunction(() => /Channel 20/.test(document.querySelector('.setup-body').textContent));
+  assert.match(await page.textContent('.setup-body'), /the channel you chose/);
+  assert.equal(await page.inputValue('#setup-radio-channel'), '20');
   await page.click('button[data-setup-radio-go]');
   await page.waitForFunction(() => /Given and saved/.test(document.querySelector('.setup-body').textContent));
   // Only what the job checked: no claim about a power cut it didn't see.
   assert.doesNotMatch(await page.textContent('.setup-body'), /power cut/);
-  // The check first, then the real one, to the TAP found, and no channel or PAN chosen here.
-  assert.deepEqual(w.posts.filter((p) => p.path === '/api/master/taps/provision').map((p) => [p.mac, p.dry_run, 'channel' in p, 'pan' in p]),
-    [['04C05B3000000202', true, false, false], ['04C05B3000000202', false, false, false]]);
+  // The check first, then a check on the channel chosen, then the real one on
+  // it, to the TAP found; the PAN is never chosen here.
+  assert.deepEqual(w.posts.filter((p) => p.path === '/api/master/taps/provision').map((p) => [p.mac, p.dry_run, p.channel ?? null, 'pan' in p]),
+    [['04C05B3000000202', true, null, false], ['04C05B3000000202', true, 20, false], ['04C05B3000000202', false, 20, false]]);
   await next(page, 'Name it');
   await page.fill('#setup-tap-name', 'Shed');
   await next(page, 'Complete');
