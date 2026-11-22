@@ -712,8 +712,10 @@ int main(int argc, char **argv) {
           if (r.pan) pans.insert(r.pan);
         }
         // Keeping the TAP's network: the job copies its channel, PAN and key
-        // from its read; these only pass the shape check until then.
+        // from its read; these only pass the shape check until then. A
+        // channel given with it is the one change (a TAP moved to another).
         block.keep_network = keep_network;
+        block.new_channel = keep_network ? channel : 0;
         block.channel = keep_network ? 11 : channel ? channel : mp::channel_for(channels);
         mp::Bytes own = pan_seed(state_dir);
         block.pan = keep_network ? 1 : pan ? pan : mp::pan_for(own.size() >= 2 ? own : tap_mac, pans);

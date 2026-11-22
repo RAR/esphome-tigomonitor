@@ -2000,7 +2000,8 @@ void HttpServer::routes_() {
     bool reset = j.value("reset", false), dry = j.value("dry_run", true), identify = j.value("identify", true);
     // "profile": how many optimizers the TAP is for (40, 75, 120 or 300);
     // absent, sized the CCA's way from its table (tap_config.h). "keep_network": keep its channel, PAN and key, so
-    // only the profile changes.
+    // only the profile changes; with "channel" too, the TAP moves to that
+    // channel and keeps its PAN and key.
     int profile = j.contains("profile") && j["profile"].is_number_integer() ? j["profile"].get<int>() : 0;
     bool keep_network = j.value("keep_network", false);
     // "store": the bench only; the gateway Store after the check (tap_config.h).
