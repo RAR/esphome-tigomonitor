@@ -31,6 +31,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <optional>
 #include <cstdint>
 #include <functional>
 #include <map>
@@ -124,6 +125,9 @@ struct TapStatus {
   std::vector<uint16_t> pgw_pool;
   uint16_t holder_01 = 0, holder_02 = 0, holder_04 = 0;
   uint32_t turn_left_s = 0;
+  // Its network key against the other TAPs' (never the key itself): same
+  // (the one most of the read TAPs hold), different, unread, or alone.
+  std::string key = "unread";
 };
 
 struct MasterStatus {
@@ -334,6 +338,10 @@ class MasterCore {
   // read, 0x0D 00 00), for its channel and SLT. Off unless the owner asks;
   // call before open().
   void set_read_tap_config(bool on) { read_tap_config_ = on; }
+  // The Pi's: every TAP's settings read at start, so its key can be compared
+  // and shared, and each TAP told the others' networks (0xE1). Off on the
+  // ESP32.
+  void set_known_networks(bool on) { known_networks_ = on; }
   // Housekeeping without its 0x41s (the rest unchanged).
   void set_send_41(bool on) { send_41_ = on; }
   // Automatic discovery (discovery_policy.h): false lets the window close,
@@ -458,6 +466,9 @@ class MasterCore {
     bool readdressed = false;         // the last bring-up moved it off the factory address
     bool session_reset_sent = false;  // the 0x0B00 00, sent once per start, as after a CCA reboot
     bool config_read_sent = false;    // once a master lifetime, not at each takeover
+    // Its radio settings from its last GatewayCfg read, whoever asked: kept
+    // here only, as they hold the network key.
+    std::optional<esphome::tigo_monitor::master::RadioBlock> radio;
     // More than one TAP: lost (stopped answering), it is asked at most once
     // every LOST_PROBE_MS; removed after LOST_MISSES of those, unless no TAP
     // is answering (the bus, then: still every LOST_PROBE_MS).
@@ -511,6 +522,9 @@ class MasterCore {
   bool bench_, startup_;
   bool housekeeping_on_;
   bool read_tap_config_ = false;
+  bool known_networks_ = false;
+  bool reads_config_() const { return read_tap_config_ || known_networks_; }
+  void sync_key_words_();
   bool send_41_ = true;
   bool learn_taps_ = false;
   bool learn_guessed_ = false;  // the list is still the gateway_id guess

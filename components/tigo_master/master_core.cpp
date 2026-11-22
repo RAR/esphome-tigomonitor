@@ -260,6 +260,44 @@ bool MasterCore::request_provision(const master::Bytes &tap_mac, const master::R
     return false;
   if (!why.empty()) return false;
   master::RadioBlock b = block;
+  // The key the other TAPs share (one per site): taken from their last
+  // reads; refused if they disagree, or one that answers hasn't been read.
+  // A lost TAP never read doesn't count. With none to share, a new network
+  // keeps its own key, and a re-key (the network kept) has nothing to do.
+  if (block.shared_key) {
+    std::vector<const master::RadioBlock *> others;
+    uint16_t unread = 0;
+    for (const auto &x : taps_) {
+      if (x->id == tap) continue;
+      if (x->radio) {
+        others.push_back(&*x->radio);
+      } else if (!x->lost) {
+        others.push_back(nullptr);
+        if (!unread) unread = x->id;
+      }
+    }
+    std::array<uint8_t, 16> key{};
+    switch (master::shared_key(others, key)) {
+      case master::KeyMatch::alone:
+        if (block.keep_network) {
+          why = "there's no other TAP to share a key with";
+          return false;
+        }
+        break;
+      case master::KeyMatch::different:
+        why = "your other TAPs don't share a key";
+        return false;
+      case master::KeyMatch::unread: {
+        char m[96];
+        snprintf(m, sizeof(m), "TAP %04X's radio settings haven't been read yet; try again in a minute", unread);
+        why = m;
+        return false;
+      }
+      case master::KeyMatch::same:
+        b.key = key;
+        break;
+    }
+  }
   for (const auto &t : taps_)
     if (t->id == tap) b.saved_by_store = master::saves_with_store(t->st.version);
   start_table_job_(std::make_unique<master::ProvisionJob>(tap_mac, b, reset, dry_run), tap);
@@ -707,6 +745,39 @@ void MasterCore::sync_pv_status_(Tap &t) {
 
 // Every TAP back to a start: its discovery window read before anything
 // renews it, housekeeping and queries made again when it is next served.
+// Each TAP's key against the others': the key held by more of the read TAPs
+// than any other is the site's. A TAP alone is "alone"; one with no other
+// TAP read to compare with, or not read itself, "unread"; a tie, "different".
+void MasterCore::sync_key_words_() {
+  std::vector<std::pair<std::array<uint8_t, 16>, int>> held;
+  for (const auto &t : taps_) {
+    if (!t->radio) continue;
+    auto it = std::find_if(held.begin(), held.end(), [&](const auto &h) { return h.first == t->radio->key; });
+    if (it == held.end()) held.push_back({t->radio->key, 1});
+    else it->second++;
+  }
+  const std::array<uint8_t, 16> *site = nullptr;
+  int best = 0;
+  bool tie = false;
+  for (const auto &h : held) {
+    if (h.second > best) {
+      best = h.second;
+      site = &h.first;
+      tie = false;
+    } else if (h.second == best) {
+      tie = true;
+    }
+  }
+  int read = 0;
+  for (const auto &h : held) read += h.second;
+  std::lock_guard<std::mutex> lock(mu_);
+  for (auto &t : taps_) {
+    if (taps_.size() == 1) t->st.key = t->radio ? "alone" : "unread";
+    else if (!t->radio || read < 2) t->st.key = "unread";
+    else t->st.key = !tie && site && t->radio->key == *site ? "same" : "different";
+  }
+}
+
 void MasterCore::restart_taps_() {
   for (auto &t : taps_) {
     t->window = master::WindowKeeper();
@@ -1162,7 +1233,7 @@ void MasterCore::tick_(uint32_t now_ms) {
     }
     // The radio-settings read rides in a housekeeping opening, with or without
     // the rest of housekeeping.
-    if ((housekeeping_on_ || t.readdressed || (read_tap_config_ && !t.config_read_sent)) && !t.housekeeping) {
+    if ((housekeeping_on_ || t.readdressed || (reads_config_() && !t.config_read_sent)) && !t.housekeeping) {
       master::HousekeepingPlan plan;
       plan.session = plan.broadcast = plan.walks = housekeeping_on_;
       // No 0x41 with more than one TAP: its content is a CCA's, copied, and
@@ -1174,7 +1245,7 @@ void MasterCore::tick_(uint32_t now_ms) {
       plan.bring_up_reads = t.readdressed;
       // Marked sent when it goes out, below: an opening dropped before it got
       // there (the TAP lost) plans it again.
-      plan.config_read = read_tap_config_ && !t.config_read_sent;
+      plan.config_read = reads_config_() && !t.config_read_sent;
       plan.session_reset = housekeeping_on_ && t.readdressed && !t.session_reset_sent;
       t.session_reset_sent = t.session_reset_sent || plan.session_reset;
       t.housekeeping = std::make_unique<master::Housekeeping>(learned_, now_ms, plan, now_ms ^ unix_now());
@@ -1287,7 +1358,7 @@ void MasterCore::tick_(uint32_t now_ms) {
   // Bring-up frames are allowed only straight after a re-address, but for
   // the one GatewayCfg read the owner asked for (set_read_tap_config).
   bool bring_up =
-      req.bring_up && (t.readdressed || (read_tap_config_ && master::is_config_read(req.cmd, req.payload)));
+      req.bring_up && (t.readdressed || (reads_config_() && master::is_config_read(req.cmd, req.payload)));
   if (t.housekeeping) {
     std::lock_guard<std::mutex> lock(mu_);
     t.st.sent_41 = t.sent_41_before + t.housekeeping->sent_41();
@@ -1324,6 +1395,17 @@ void MasterCore::tick_(uint32_t now_ms) {
   bool ok = transact(t.id, req.cmd, req.payload, reply, req.wait_ms ? req.wait_ms : REPLY_TIMEOUT_MS);
   in_flight_ = nullptr;
   if (master::is_config_read(req.cmd, req.payload)) t.config_read_sent = true;
+  // Any read of its settings, the opening's or a provision's: kept, for the
+  // key words and for sharing the key.
+  if (ok && master::is_config_read(req.cmd, req.payload)) {
+    master::TunnelReply tr;
+    master::RadioBlock b;
+    if (master::parse_tunnel_reply(reply.payload, tr) && tr.sub == master::SUB_GATEWAY_CFG_REPLY && !tr.data.empty() &&
+        master::RadioBlock::decode(master::Bytes(tr.data.begin(), tr.data.end() - 1), b)) {
+      t.radio = b;
+      sync_key_words_();
+    }
+  }
   if (status().fault == Fault::second_master || standing_by_()) return;
   if (t.housekeeping && !req.table_edit) t.housekeeping->on_reply(req, ok, reply);
   if (req.table_edit && table_sources.from_watch) {

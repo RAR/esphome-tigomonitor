@@ -798,6 +798,11 @@ struct MultiTap {
     bool up;
     uint16_t stored;  // where a RESET puts it; 0: the factory address (a new TAP)
     bool window_closed = false;  // its discovery window reads closed, 0 s left
+    // Its radio settings (GatewayCfg): read with 0D 00 00, written with
+    // 0D 01 00, the stored copy read with 0D 00 01 and saved by the Store.
+    bool has_cfg = false, cfg_silent = false;
+    mp::RadioBlock cfg, cfg_stored;
+    int cfg_reads = 0;
     std::vector<mp::Bytes> records;
     std::vector<mp::Bytes> writes;
   };
@@ -851,6 +856,7 @@ struct MultiTap {
         for (auto &t : taps)
           if (t.up && t.id == f.dest) {
             t.stored = t.id;
+            t.cfg_stored = t.cfg;
             mp::Frame a;
             a.dest = t.id | 0x8000;
             a.cmd = 0x0013;
@@ -906,6 +912,25 @@ struct MultiTap {
                        static_cast<uint8_t>(page.size())};
         for (const auto &rec : page) d.insert(d.end(), rec.begin(), rec.end());
         r.payload.insert(r.payload.end(), d.begin(), d.end());
+        return true;
+      }
+      if (sub == 0x0D && t->has_cfg && !t->cfg_silent) {
+        r.payload[3] = 0x0E;
+        mp::RadioBlock shown = t->cfg;
+        if (args == mp::Bytes{0x00, 0x00}) {
+          t->cfg_reads++;
+        } else if (args == mp::Bytes{0x00, 0x01}) {
+          shown = t->cfg_stored;
+        } else if (args.size() > 2 && args[0] == 0x01 && args[1] == 0x00) {
+          mp::RadioBlock w;
+          if (!mp::RadioBlock::decode(mp::Bytes(args.begin() + 2, args.end()), w)) return false;
+          t->cfg = shown = w;
+        } else {
+          return false;
+        }
+        mp::Bytes b = shown.encode();
+        r.payload.insert(r.payload.end(), b.begin(), b.end());
+        r.payload.push_back(0x00);
         return true;
       }
       if (sub == 0x29) {
@@ -1110,6 +1135,173 @@ static void test_an_empty_tap_s_closed_window_is_logged_once() {
   // Its window is still read on every check.
   CHECK(bus.sent_to(0x1202, 0x0B0F) >= 4);
   core.close();
+}
+
+// ---- one network for every TAP (2026-11-22) ----
+// Made-up radio settings: a channel, a PAN, and a key of first, first+1, ...
+static mp::RadioBlock radio(uint16_t ch, uint16_t pan, uint8_t key_first, bool wide = false) {
+  mp::RadioBlock b;
+  b.channel = ch;
+  b.pan = pan;
+  mp::map_for_profile(20, b.map);
+  for (int i = 0; i < 16; i++) b.key[i] = static_cast<uint8_t>(key_first + i);
+  b.wide = wide;
+  if (wide) b.extra = {0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0xA6, 0xA7, 0xA8, 0xA9, 0xAA};
+  return b;
+}
+static void give_radio(MultiTap &bus, uint16_t id, const mp::RadioBlock &b) {
+  bus.at(id)->has_cfg = true;
+  bus.at(id)->cfg = bus.at(id)->cfg_stored = b;
+}
+// No made-up key's first four bytes, spaced or not, in any log line.
+static bool no_key_in(const std::vector<std::string> &lines) {
+  for (const auto &l : lines)
+    for (const char *k : {"30313233", "30 31 32 33", "40414243", "40 41 42 43", "50515253", "50 51 52 53",
+                          "99999999", "99 99 99 99"})
+      if (l.find(k) != std::string::npos) return false;
+  return true;
+}
+static mp::Bytes tap_mac(uint8_t which) { return {0x04, 0xC0, 0x5B, 0x00, 0x00, 0x00, 0x00, which}; }
+static mp::RadioBlock rekey_block() {
+  mp::RadioBlock b;  // what a re-key request carries: placeholders, the key filled in by the master
+  b.channel = 11;
+  b.pan = 1;
+  mp::map_for_profile(12, b.map);
+  b.keep_network = b.keep_tap_profile = b.shared_key = true;
+  for (auto &k : b.key) k = 0x99;
+  return b;
+}
+
+// Each TAP's settings are read at start when it may send known networks,
+// and each TAP says whether its key is the one the others share. 1203 is a
+// 46-byte TAP, read the same way.
+static void test_radio_reads_give_key_words() {
+  {
+    MultiTap bus;
+    bus.taps = {{0x1201, 1}, {0x1202, 2}, {0x1203, 3}};
+    give_radio(bus, 0x1201, radio(15, 0x7E21, 0x30));
+    give_radio(bus, 0x1202, radio(18, 0x5A5A, 0x30));
+    give_radio(bus, 0x1203, radio(11, 0x1A2B, 0x50, /*wide=*/true));
+    std::vector<std::string> lines;
+    MasterCore core(&bus.port, [&](int, const std::string &l) { lines.push_back(l); }, nullptr, nullptr, 0x1201, false,
+                    true);
+    core.set_taps({{0x1201, {}}, {0x1202, {}}, {0x1203, {}}});
+    core.set_known_networks(true);
+    CHECK(core.open());
+    run_for(core, 0, 20000, 50);
+    MasterStatus m = core.status();
+    CHECK(m.taps.size() == 3);
+    CHECK(m.taps[0].key == "same" && m.taps[1].key == "same" && m.taps[2].key == "different");
+    CHECK(bus.at(0x1203)->cfg_reads >= 1);
+    CHECK(no_key_in(lines));
+    core.close();
+  }
+  {
+    MultiTap bus;
+    bus.taps = {{0x1201, 1}, {0x1202, 2}};
+    give_radio(bus, 0x1201, radio(15, 0x7E21, 0x30));
+    give_radio(bus, 0x1202, radio(18, 0x5A5A, 0x30));
+    MasterCore core(&bus.port, [](int, const std::string &) {}, nullptr, nullptr, 0x1201, false, true);
+    core.set_taps({{0x1201, {}}, {0x1202, {}}});
+    CHECK(core.open());
+    run_for(core, 0, 20000, 50);
+    CHECK(bus.at(0x1201)->cfg_reads == 0 && bus.at(0x1202)->cfg_reads == 0);
+    CHECK(core.status().taps[0].key == "unread" && core.status().taps[1].key == "unread");
+    core.close();
+  }
+}
+
+// A provision asking for the shared key gets the one the others have, and
+// a re-key keeps the TAP's own channel and PAN.
+static void test_provision_takes_the_shared_key() {
+  MultiTap bus;
+  bus.taps = {{0x1201, 1}, {0x1202, 2}, {0x1203, 3}};
+  give_radio(bus, 0x1201, radio(15, 0x7E21, 0x30));
+  give_radio(bus, 0x1202, radio(18, 0x5A5A, 0x30));
+  give_radio(bus, 0x1203, radio(11, 0x1A2B, 0x50));
+  std::vector<std::string> lines;
+  MasterCore core(&bus.port, [&](int, const std::string &l) { lines.push_back(l); }, nullptr, nullptr, 0x1201, false,
+                  true);
+  core.set_taps({{0x1201, {}}, {0x1202, {}}, {0x1203, {}}});
+  core.set_known_networks(true);
+  core.set_table_writes(true);
+  CHECK(core.open());
+  run_for(core, 0, 20000, 50);
+  std::string why;
+  CHECK(core.request_provision(tap_mac(3), rekey_block(), false, false, why));
+  CHECK(why.empty());
+  run_for(core, 20000, 60000, 50);
+  const auto *t = bus.at(0x1203);
+  CHECK(t->cfg.key[0] == 0x30 && t->cfg.key[15] == 0x3F);
+  CHECK(t->cfg_stored.key[0] == 0x30);
+  CHECK(t->cfg.channel == 11 && t->cfg.pan == 0x1A2B);
+  CHECK(core.status().taps[2].key == "same");
+  CHECK(no_key_in(lines));
+  core.close();
+}
+
+// Refused when the others disagree, or when one that answers hasn't been
+// read; alone, the request's own key stands.
+static void test_provision_shared_key_refusals() {
+  {
+    MultiTap bus;
+    bus.taps = {{0x1201, 1}, {0x1202, 2}, {0x1203, 3}};
+    give_radio(bus, 0x1201, radio(15, 0x7E21, 0x30));
+    give_radio(bus, 0x1202, radio(18, 0x5A5A, 0x40));
+    give_radio(bus, 0x1203, radio(11, 0x1A2B, 0x50));
+    MasterCore core(&bus.port, [](int, const std::string &) {}, nullptr, nullptr, 0x1201, false, true);
+    core.set_taps({{0x1201, {}}, {0x1202, {}}, {0x1203, {}}});
+    core.set_known_networks(true);
+    core.set_table_writes(true);
+    CHECK(core.open());
+    run_for(core, 0, 20000, 50);
+    std::string why;
+    CHECK(!core.request_provision(tap_mac(3), rekey_block(), false, false, why));
+    CHECK(why == "your other TAPs don't share a key");
+    core.close();
+  }
+  {
+    MultiTap bus;
+    bus.taps = {{0x1201, 1}, {0x1202, 2}, {0x1203, 3}};
+    give_radio(bus, 0x1201, radio(15, 0x7E21, 0x30));
+    give_radio(bus, 0x1202, radio(18, 0x5A5A, 0x30));
+    give_radio(bus, 0x1203, radio(11, 0x1A2B, 0x50));
+    bus.at(0x1202)->cfg_silent = true;  // answers polls, never its settings
+    MasterCore core(&bus.port, [](int, const std::string &) {}, nullptr, nullptr, 0x1201, false, true);
+    core.set_taps({{0x1201, {}}, {0x1202, {}}, {0x1203, {}}});
+    core.set_known_networks(true);
+    core.set_table_writes(true);
+    CHECK(core.open());
+    run_for(core, 0, 20000, 50);
+    CHECK(core.status().taps[1].state == "running");
+    std::string why;
+    CHECK(!core.request_provision(tap_mac(3), rekey_block(), false, false, why));
+    CHECK(why.find("1202") != std::string::npos && why.find("haven't been read") != std::string::npos);
+    core.close();
+  }
+  {
+    MultiTap bus;
+    bus.taps = {{0x1201, 1}};
+    give_radio(bus, 0x1201, radio(15, 0x7E21, 0x30));
+    MasterCore core(&bus.port, [](int, const std::string &) {}, nullptr, nullptr, 0x1201, false, true);
+    core.set_known_networks(true);
+    core.set_table_writes(true);
+    CHECK(core.open());
+    run_for(core, 0, 20000, 50);
+    CHECK(core.status().taps[0].key == "alone");
+    std::string no;
+    CHECK(!core.request_provision(tap_mac(1), rekey_block(), false, false, no));  // a re-key with no one to share with
+    CHECK(no == "there's no other TAP to share a key with");
+    mp::RadioBlock b = rekey_block();
+    b.keep_network = false;  // Add a TAP's: a new network, its own key
+    b.channel = 20;
+    b.pan = 0x4C3D;
+    std::string why;
+    CHECK(core.request_provision(tap_mac(1), b, false, false, why));
+    run_for(core, 20000, 60000, 50);
+    CHECK(bus.at(0x1201)->cfg.key[0] == 0x99 && bus.at(0x1201)->cfg.channel == 20);
+    core.close();
+  }
 }
 
 // Retiring a TAP that has gone for good: refused while it answers, for the
@@ -1703,6 +1895,9 @@ int main() {
   test_a_quiet_tap_does_not_stop_the_other();
   test_a_quiet_bus_is_still_asked_often();
   test_an_empty_tap_s_closed_window_is_logged_once();
+  test_radio_reads_give_key_words();
+  test_provision_takes_the_shared_key();
+  test_provision_shared_key_refusals();
   test_one_tap_still_quiet_after_the_bus_is_back_is_removed();
   test_a_lost_tap_can_be_retired();
   test_no_tap_answering_is_a_fault();
