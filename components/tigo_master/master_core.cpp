@@ -1223,9 +1223,12 @@ void MasterCore::tick_(uint32_t now_ms) {
       else if (kind == "provision")
         LOGW("bus master: radio settings: %sgiving TAP %04X %s", table_job_->dry_run() ? "a dry run of " : "",
              table_tap_, static_cast<master::ProvisionJob *>(table_job_.get())->block().describe().c_str());
+      else if (kind == "handover")
+        LOGI("bus master: table: %shanding optimizers over to TAP %04X", table_job_->dry_run() ? "a dry run of " : "",
+             table_tap_);
       else if (several_())
         LOGI("bus master: table: %s%s an optimizer on TAP %04X", table_job_->dry_run() ? "a dry run of " : "",
-             add ? "adding" : kind == "replace" ? "replacing" : kind == "handover" ? "handing over to" : "removing", table_tap_);
+             add ? "adding" : kind == "replace" ? "replacing" : "removing", table_tap_);
       else
         LOGI("bus master: table: %s%s an optimizer", table_job_->dry_run() ? "a dry run of " : "",
              add ? "adding" : kind == "replace" ? "replacing" : "removing");

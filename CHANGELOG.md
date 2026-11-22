@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Hand a TAP's optimizers to another (Raspberry Pi, experimental, API
+  only).** `POST /api/master/taps/handover` with `{"from": "1202", "to":
+  "1201"}` lists every optimizer last heard through the first TAP on the
+  second, at its own address and not yet joined, then holds the second
+  TAP's join window open until each has joined it. It is the first step of
+  replacing a TAP, and it sends nothing to the old one, so a TAP that has
+  died can still be handed over. A check (`"dry_run"`, the default) only
+  reads. It needs **Allow changes to the TAPs**. On two bench TAPs it
+  listed 20 optimizers on the new one, ten a write, each at its own
+  address; an optimizer actually moving across hasn't been seen yet.
+
 - **The Config Builder writes a network bridge.** Choose "A network bridge"
   at the top and pick a board: an AtomS3 or AtomS3R on the Atomic RS485
   Base, a LilyGO T-CAN485, a Waveshare ESP32-S3-RS485-CAN, or a LilyGO
@@ -18,6 +29,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the AtomS3 bridge has run on a bus so far. A new
   [Network bridge](https://rar.github.io/esphome-tigomonitor/guides/network-bridge/)
   guide covers the boards, the wiring order and pointing TigoMonitor at it.
+
+### Fixed
+
+- **The Home Assistant app no longer sits at "starting".** Home Assistant
+  waited for a health report the app had switched off, so it never counted
+  the app as started, though the monitor itself was running. The app now
+  reports itself started once its page answers, within a few seconds. Press
+  **Rebuild** on the app's page in Home Assistant to pick it up.
 
 ## [2.4.0] - 2026-11-21
 
@@ -144,16 +163,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   bus happened to ask. It's one more read in the first-heard set, the
   text exactly as the CCA sent it.
 
-- **Hand a TAP's optimizers to another (Raspberry Pi, experimental, API
-  only).** `POST /api/master/taps/handover` with `{"from": "1202", "to":
-  "1201"}` lists every optimizer last heard through the first TAP on the
-  second, at its own address and not yet joined, then holds the second
-  TAP's join window open until each has joined it. It is the first step of
-  replacing a TAP, and it sends nothing to the old one, so a TAP that has
-  died can still be handed over. A check (`"dry_run"`, the default) only
-  reads. It needs **Allow changes to the TAPs**. Tested against simulated
-  TAPs only, not yet on hardware.
-
 - **Draw your array and see each panel's power where it sits (Raspberry
   Pi and other Linux).** Topology › Array places every panel and TAP on a
   grid as they really are (a TAP can share the square of the panel it's
@@ -233,13 +242,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   switch (Settings → Bus, off by default) brings every TAP up again the
   CCA's way when a new one appears: each known TAP keeps its address, a
   new one gets the next free and has it stored, and polling stops for
-  about 30 seconds. **Add a TAP** in System setup gives a new TAP its radio
-  settings. With more than one TAP the Pi sends no
+  about 30 seconds. The new TAP must already have its radio settings from a
+  CCA; the Pi never writes them. With more than one TAP the Pi sends no
   0x41, the CCA's message telling an optimizer which TAP to use, so it
-  never steers one onto the wrong TAP. On a bench with two TAPs
-  (2026-11-10) the bring-up matched a CCA's frame for frame, both were
-  polled, and a TAP kept its id across a power cycle; moving an optimizer
-  from one TAP to another is not tested yet. With one TAP nothing changes.
+  never steers one onto the wrong TAP. Tested against simulated TAPs only,
+  not yet on hardware. With one TAP nothing changes.
 - **Replace, add or retire an optimizer without a CCA (Raspberry Pi,
   opt-in).** A new **System setup** page walks you through it: pick the one
   coming out (quiet ones first), type the new one's printed label (its check
