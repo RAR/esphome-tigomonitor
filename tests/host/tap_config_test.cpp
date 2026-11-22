@@ -326,6 +326,56 @@ static void test_provision_keeps_the_network_changes_the_channel() {
   CHECK(again.ok() && same.ram.channel == 13);
 }
 
+// The key a new TAP takes: the one every other TAP has (one key per site,
+// 2026-11-22). Alone, there's none to share; any two that differ, or one
+// not read yet, and nothing is chosen.
+static RadioBlock with_key(uint8_t first) {
+  RadioBlock b = made_up();
+  for (int i = 0; i < 16; i++) b.key[i] = static_cast<uint8_t>(first + i);
+  return b;
+}
+
+static void test_shared_key_choice() {
+  std::array<uint8_t, 16> key{};
+  CHECK(shared_key({}, key) == KeyMatch::alone);
+  RadioBlock a = with_key(0x30), b = with_key(0x30), c = with_key(0x40);
+  b.channel = 18;
+  b.pan = 0x5A5A;
+  CHECK(shared_key({&a, &b}, key) == KeyMatch::same && key[0] == 0x30 && key[15] == 0x3F);
+  key = {};
+  CHECK(shared_key({&a, &c}, key) == KeyMatch::different && key[0] == 0);
+  CHECK(shared_key({&a, nullptr}, key) == KeyMatch::unread);
+  CHECK(shared_key({nullptr, &a, &c}, key) == KeyMatch::different);  // a disagreement says so first
+  RadioBlock w = with_key(0x30);
+  w.wide = true;
+  w.extra = {0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0xA6, 0xA7, 0xA8, 0xA9, 0xAA};
+  CHECK(shared_key({&w, &a}, key) == KeyMatch::same && key[0] == 0x30);
+}
+
+// The re-key (dangerous options): the TAP keeps its channel, PAN and own
+// profile, and takes the shared key the request carries, not its own.
+static void test_provision_rekey_keeps_channel_pan_profile() {
+  FakeTap tap;
+  tap.ram = with_key(0x50);
+  tap.ram.channel = 11;
+  tap.ram.pan = 0x7E21;
+  map_for_profile(20, tap.ram.map);
+  RadioBlock want = with_key(0x30);
+  want.channel = 11;
+  want.pan = 1;
+  map_for_profile(12, want.map);
+  want.keep_network = true;
+  want.keep_tap_profile = true;
+  want.shared_key = true;
+  ProvisionJob job(TAP_MAC, want, false, false);
+  run(job, tap);
+  CHECK(job.ok());
+  CHECK(tap.ram.channel == 11 && tap.ram.pan == 0x7E21);
+  CHECK(tap.ram.key[0] == 0x30 && tap.ram.key[15] == 0x3F);
+  CHECK(tap.ram.map[0] == 20);
+  CHECK(job.message().find("3031") == std::string::npos && job.message().find("5051") == std::string::npos);
+}
+
 // A profile change the TAP runs but doesn't store (the roof's G8.65,
 // 2026-11-13: the live read showed the new map, the stored read the old).
 // Not a failure: it says the TAP runs the new profile now and goes back to
@@ -829,6 +879,8 @@ int main() {
   test_provision_keeps_the_taps_profile();
   test_provision_keeps_the_network_changes_the_profile();
   test_provision_keeps_the_network_changes_the_channel();
+  test_shared_key_choice();
+  test_provision_rekey_keeps_channel_pan_profile();
   test_provision_profile_not_stored();
   test_provision_store();
   test_saves_with_store();
