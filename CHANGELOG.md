@@ -30,6 +30,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   [Network bridge](https://rar.github.io/esphome-tigomonitor/guides/network-bridge/)
   guide covers the boards, the wiring order and pointing TigoMonitor at it.
 
+- **A Network key row for each TAP (Raspberry Pi, dangerous options).**
+  With `"dangerous_options": true` in settings.json, each TAP in Settings
+  → Bus says whether its network key matches your other TAPs', never the
+  key itself. A TAP on a different key can be given the shared one, keeping
+  its channel and network ID. Its optimizers drop off it until they rejoin,
+  so it's safest on a TAP that has none yet. It needs **Allow changes to
+  the TAPs**.
+
 ### Changed
 
 - **A new TAP gets a channel clear of Wi-Fi, and you can pick another.**
@@ -50,6 +58,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   TAPs**.
 
 ### Fixed
+
+- **A TAP added by TigoMonitor could never take an optimizer.** Add a TAP
+  gave each new TAP a network key of its own. A site's TAPs must share one
+  key and be told each other's networks, or an optimizer can't move from
+  one to another. Now a new TAP gets the key your other TAPs share, and
+  when there are several TAPs, TigoMonitor (Raspberry Pi) tells each TAP
+  the others' networks. It does that at start, after a change, and when a
+  TAP comes back. **If you added a TAP with an earlier version, give it the
+  shared key** from its Network key row in dangerous options. Until then,
+  no optimizer can join it.
 
 - **A bus cut no longer leaves TigoMonitor silent for half an hour.** With
   more than one TAP, a TAP that stops answering is asked every 30 s, then
