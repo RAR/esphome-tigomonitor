@@ -469,6 +469,9 @@ int main(int argc, char **argv) {
       m->set_pv(pv.state(), [&pv](const PvState &s) { pv.save(s); }, pv.unreadable());
       m->set_discovery(discovery.renew(), [&discovery](bool renew) { discovery.save(renew); });
       m->set_read_tap_config(settings.master_read_tap_config);
+      // Every TAP's settings read and each told the others' networks (0xE1),
+      // so optimizers can move between them; it needs Allow changes to the TAPs.
+      m->set_known_networks(true);
       m->set_send_41(settings.master_send_41);
       m->set_table_writes(settings.master_table_writes);
       // A herd's TAPs, saved so each gets its id back next time.
@@ -691,7 +694,7 @@ int main(int argc, char **argv) {
         return bus_master->request_forget_tap(id, why) ? 200 : 409;
       },
       [&](const esphome::tigo_monitor::master::Bytes &tap_mac, uint16_t channel, uint16_t pan,
-          bool identify, bool reset, bool dry_run, int profile, bool keep_network, bool store,
+          bool identify, bool reset, bool dry_run, int profile, bool keep_network, bool shared_key, bool store,
           std::string &why, std::string &given) {
         namespace mp = esphome::tigo_monitor::master;
         std::lock_guard<std::mutex> lock(master_mu);
@@ -716,6 +719,9 @@ int main(int argc, char **argv) {
         // channel given with it is the one change (a TAP moved to another).
         block.keep_network = keep_network;
         block.new_channel = keep_network ? channel : 0;
+        // The key the other TAPs share, taken by the master from their reads
+        // (one key per site): this random one stands only with no other TAP.
+        block.shared_key = shared_key;
         block.channel = keep_network ? 11 : channel ? channel : mp::channel_for(channels);
         mp::Bytes own = pan_seed(state_dir);
         block.pan = keep_network ? 1 : pan ? pan : mp::pan_for(own.size() >= 2 ? own : tap_mac, pans);
