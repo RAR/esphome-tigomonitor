@@ -376,6 +376,25 @@ static void test_provision_rekey_keeps_channel_pan_profile() {
   CHECK(job.message().find("3031") == std::string::npos && job.message().find("5051") == std::string::npos);
 }
 
+// A re-key (or any kept-network write) to a TAP still on its factory
+// settings, channel 0: refused at the read, before any write, naming the
+// way out. The gate would refuse the write anyway, raising a fault.
+static void test_keep_network_on_factory_settings_is_refused() {
+  FakeTap tap;
+  tap.ram = with_key(0x00);
+  tap.ram.channel = 0;
+  tap.ram.pan = 0x1234;
+  RadioBlock want = with_key(0x30);
+  want.channel = 11;
+  want.pan = 1;
+  want.keep_network = want.keep_tap_profile = want.shared_key = true;
+  ProvisionJob job(TAP_MAC, want, false, false);
+  run(job, tap);
+  CHECK(!job.ok());
+  CHECK(job.message().find("factory settings") != std::string::npos);
+  CHECK(tap.ram.channel == 0 && tap.ram.key[0] == 0x00);  // nothing written
+}
+
 // A profile change the TAP runs but doesn't store (the roof's G8.65,
 // 2026-11-13: the live read showed the new map, the stored read the old).
 // Not a failure: it says the TAP runs the new profile now and goes back to
@@ -881,6 +900,7 @@ int main() {
   test_provision_keeps_the_network_changes_the_channel();
   test_shared_key_choice();
   test_provision_rekey_keeps_channel_pan_profile();
+  test_keep_network_on_factory_settings_is_refused();
   test_provision_profile_not_stored();
   test_provision_store();
   test_saves_with_store();

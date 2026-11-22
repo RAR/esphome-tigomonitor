@@ -268,10 +268,22 @@ bool MasterCore::request_provision(const master::Bytes &tap_mac, const master::R
     std::vector<const master::RadioBlock *> others;
     uint16_t unread = 0;
     for (const auto &x : taps_) {
-      if (x->id == tap) continue;
+      if (x->id == tap) {
+        // Re-keying a TAP on its factory settings: no network to keep.
+        if (block.keep_network && x->radio && !has_network_(*x)) {
+          char m[112];
+          snprintf(m, sizeof(m), "TAP %04X is still on its factory settings; Add a TAP gives it a network of its own first",
+                   tap);
+          why = m;
+          return false;
+        }
+        continue;
+      }
+      // A TAP on its factory settings holds no key worth sharing.
+      if (x->radio && !has_network_(*x)) continue;
       if (x->radio) {
         others.push_back(&*x->radio);
-      } else if (!x->lost) {
+      } else if (x->st.state == "running" && !x->cfg_gave_up) {  // st: written under mu_, held here
         others.push_back(nullptr);
         if (!unread) unread = x->id;
       }
@@ -755,8 +767,10 @@ void MasterCore::sync_pv_status_(Tap &t) {
 // TAP read to compare with, or not read itself, "unread"; a tie, "different".
 void MasterCore::sync_key_words_() {
   std::vector<std::pair<std::array<uint8_t, 16>, int>> held;
+  bool waiting = false;  // a TAP with no settings yet that may still give some
   for (const auto &t : taps_) {
-    if (!t->radio) continue;
+    if (!t->radio && !t->lost && !t->cfg_gave_up) waiting = true;
+    if (!has_network_(*t)) continue;
     auto it = std::find_if(held.begin(), held.end(), [&](const auto &h) { return h.first == t->radio->key; });
     if (it == held.end()) held.push_back({t->radio->key, 1});
     else it->second++;
@@ -778,7 +792,9 @@ void MasterCore::sync_key_words_() {
   std::lock_guard<std::mutex> lock(mu_);
   for (auto &t : taps_) {
     if (taps_.size() == 1) t->st.key = "alone";
-    else if (!t->radio || read < 2) t->st.key = "unread";
+    else if (!t->radio) t->st.key = "unread";
+    else if (!has_network_(*t)) t->st.key = "factory";
+    else if (read < 2) t->st.key = waiting ? "unread" : "alone";  // the only TAP with a network
     else t->st.key = !tie && site && t->radio->key == *site ? "same" : "different";
   }
 }
@@ -788,16 +804,70 @@ void MasterCore::sync_key_words_() {
 // has been read or is lost (a lost one is named from its last read; one
 // never read is named nowhere). Whatever the answer, it isn't asked again
 // until the next reason to (no loop on a refusal).
-bool MasterCore::send_known_networks_(Tap &t) {
-  if (!known_networks_ || !t.known_due || t.lost || !t.radio || table_job_ || table_job_pending_) return false;
+void MasterCore::take_config_reply_(Tap &t, const Frame &reply) {
+  master::TunnelReply tr;
+  master::RadioBlock b;
+  if (!master::parse_tunnel_reply(reply.payload, tr) || tr.sub != master::SUB_GATEWAY_CFG_REPLY || tr.data.empty() ||
+      !master::RadioBlock::decode(master::Bytes(tr.data.begin(), tr.data.end() - 1), b))
+    return;
+  bool changed = !t.radio || t.radio->channel != b.channel || t.radio->pan != b.pan || t.radio->key != b.key;
+  {
+    std::lock_guard<std::mutex> lock(mu_);
+    t.radio = b;
+  }
+  sync_key_words_();
+  // A network the others haven't been told about (a TAP read for the first
+  // time after start, or changed): every TAP is owed an 0xE1 again.
+  if (changed) known_networks_due_();
+}
+
+// The opening asks each TAP for its settings once; one that didn't answer
+// (a lost frame, or a reply in a form we don't read) is asked again each
+// CONFIG_RETRY_MS, up to CONFIG_TRIES in all, then given up on, said once,
+// and named in nobody's 0xE1, so the others are still told.
+bool MasterCore::retry_config_read_(Tap &t, uint32_t now_ms) {
+  if (!reads_config_() || !t.config_read_sent || t.radio || t.lost || t.cfg_gave_up) return false;
+  if (now_ms - t.cfg_try_ms < CONFIG_RETRY_MS) return false;
+  {
+    std::lock_guard<std::mutex> lock(mu_);
+    if (table_job_ || table_job_pending_) return false;
+    if (t.cfg_tries >= CONFIG_TRIES) t.cfg_gave_up = true;
+  }
+  if (t.cfg_gave_up) {
+    LOGW("bus master: TAP %04X's radio settings couldn't be read (%u tries); it is left out of the other TAPs' networks",
+         t.id, static_cast<unsigned>(t.cfg_tries));
+    sync_key_words_();
+    return false;
+  }
+  seq_ = master::next_seq(seq_);
+  Bytes payload = master::tunnel_request(master::SUB_GATEWAY_CFG, seq_, {0x00, 0x00});
+  // The same read the opening sends, a bring-up frame the gate takes as such.
+  if (!master::may_send(master::CMD_TUNNEL, payload, bench_, /*startup=*/true)) return false;
+  Frame reply;
+  in_flight_ = &t;
+  bool ok = transact(t.id, master::CMD_TUNNEL, payload, reply, REPLY_TIMEOUT_MS);
+  in_flight_ = nullptr;
+  t.cfg_tries++;
+  t.cfg_try_ms = now_ms;
+  if (ok) take_config_reply_(t, reply);
+  return true;
+}
+
+bool MasterCore::send_known_networks_(Tap &t, uint32_t now_ms) {
+  if (!known_networks_ || !t.known_due || t.lost || !t.radio) return false;
+  if (t.known_next_ms && static_cast<int32_t>(now_ms - t.known_next_ms) < 0) return false;
+  {
+    std::lock_guard<std::mutex> lock(mu_);
+    if (table_job_ || table_job_pending_) return false;
+  }
   std::vector<master::KnownNetwork> others;
   for (const auto &x : taps_) {
     if (x.get() == &t) continue;
     // One on a channel no network uses (a new TAP on its factory settings,
     // channel 0) is no network to join: named nowhere.
-    if (x->radio && (x->radio->channel < master::CHANNEL_MIN || x->radio->channel > master::CHANNEL_MAX)) continue;
+    if (x->radio && !has_network_(*x)) continue;
     if (x->radio) others.push_back({static_cast<uint8_t>(x->radio->channel), x->radio->pan, x->radio->key});
-    else if (!x->lost) return false;  // wait for its read
+    else if (!x->lost && !x->cfg_gave_up) return false;  // wait for its read
   }
   std::string word;
   if (others.empty()) {
@@ -811,10 +881,19 @@ bool MasterCore::send_known_networks_(Tap &t) {
     word = "waiting: Allow changes to the TAPs is off";
   }
   if (!word.empty()) {
-    std::lock_guard<std::mutex> lock(mu_);
-    t.st.known_networks = word;
+    bool said = word.rfind("waiting", 0) == 0 && known_waiting_logged_;
+    if (word.rfind("waiting", 0) == 0) known_waiting_logged_ = true;
+    {
+      std::lock_guard<std::mutex> lock(mu_);
+      t.st.known_networks = word;
+    }
+    if (!said && word.rfind("waiting", 0) == 0)
+      LOGW("bus master: the TAPs aren't told each other's networks: %s", word.c_str());
+    else if (!said)
+      LOGW("bus master: TAP %04X isn't told the other TAPs' networks: %s", t.id, word.c_str());
     return false;
   }
+  known_waiting_logged_ = false;
   seq_ = master::next_seq(seq_);
   Bytes payload = master::tunnel_request(master::SUB_KNOWN_NETWORKS, seq_, master::known_networks_args(others));
   if (!master::may_send(master::CMD_TUNNEL, payload, bench_, false, false, false, table_writes_on_)) {
@@ -827,8 +906,16 @@ bool MasterCore::send_known_networks_(Tap &t) {
   bool ok = transact(t.id, master::CMD_TUNNEL, payload, reply, KNOWN_NETWORKS_WAIT_MS);
   in_flight_ = nullptr;
   if (status().fault == Fault::second_master || standing_by_()) return true;
-  t.known_due = false;
   int status_byte = ok ? master::known_networks_status(reply) : -1;
+  // No answer is a frame lost, not a refusal: tried again a few times.
+  if (status_byte < 0 && ++t.known_tries < KNOWN_NETWORKS_TRIES) {
+    t.known_next_ms = now_ms + KNOWN_NETWORKS_RETRY_MS;
+    if (!t.known_next_ms) t.known_next_ms = 1;
+    return true;
+  }
+  t.known_due = false;
+  t.known_tries = 0;
+  t.known_next_ms = 0;
   std::string text = status_byte == 0 ? "accepted (" + std::to_string(others.size()) + " other TAP" +
                                             (others.size() == 1 ? ")" : "s)")
                                       : master::known_networks_status_text(status_byte);
@@ -1158,6 +1245,13 @@ void MasterCore::tap_answered_(Tap &t) {
   if (!t.lost) return;
   t.lost = false;
   t.known_due = true;  // it may have lost power, and its list with it
+  t.known_tries = 0;
+  t.known_next_ms = 0;
+  if (!t.radio && t.cfg_gave_up) {
+    std::lock_guard<std::mutex> lock(mu_);
+    t.cfg_gave_up = false;
+    t.cfg_tries = 0;
+  }
   t.lost_misses = 0;
   t.removed = false;
   LOGI("bus master: TAP %04X is answering again; polling it", t.id);
@@ -1405,7 +1499,8 @@ void MasterCore::tick_(uint32_t now_ms) {
         }
     sync_join_status_(t);
   }
-  if (send_known_networks_(t)) return;
+  if (retry_config_read_(t, now_ms)) return;
+  if (send_known_networks_(t, now_ms)) return;
   // A change to the table first, else the join watch's reads; only on the
   // TAP the change runs on.
   struct TableSources : master::RequestSource {
@@ -1468,18 +1563,16 @@ void MasterCore::tick_(uint32_t now_ms) {
   in_flight_ = &t;
   bool ok = transact(t.id, req.cmd, req.payload, reply, req.wait_ms ? req.wait_ms : REPLY_TIMEOUT_MS);
   in_flight_ = nullptr;
-  if (master::is_config_read(req.cmd, req.payload)) t.config_read_sent = true;
+  if (master::is_config_read(req.cmd, req.payload)) {
+    if (!t.config_read_sent) {  // the opening's: the first of its tries
+      t.cfg_tries++;
+      t.cfg_try_ms = now_ms;
+    }
+    t.config_read_sent = true;
+  }
   // Any read of its settings, the opening's or a provision's: kept, for the
   // key words and for sharing the key.
-  if (ok && master::is_config_read(req.cmd, req.payload)) {
-    master::TunnelReply tr;
-    master::RadioBlock b;
-    if (master::parse_tunnel_reply(reply.payload, tr) && tr.sub == master::SUB_GATEWAY_CFG_REPLY && !tr.data.empty() &&
-        master::RadioBlock::decode(master::Bytes(tr.data.begin(), tr.data.end() - 1), b)) {
-      t.radio = b;
-      sync_key_words_();
-    }
-  }
+  if (ok && master::is_config_read(req.cmd, req.payload)) take_config_reply_(t, reply);
   if (status().fault == Fault::second_master || standing_by_()) return;
   if (t.housekeeping && !req.table_edit) t.housekeeping->on_reply(req, ok, reply);
   if (req.table_edit && table_sources.from_watch) {

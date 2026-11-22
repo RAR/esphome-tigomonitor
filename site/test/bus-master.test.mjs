@@ -489,6 +489,23 @@ test('the Network key row: same or alone can\'t be re-keyed; a different one can
   await ctx.close();
 });
 
+test('the Network key row says whether the other TAPs\' networks reached it, and a factory TAP is locked', async () => {
+  const master = { taps: [
+    { id: '1201', mac: '04C05B0000A1B2C1', state: 'running', key: 'alone', known_networks: 'waiting: Allow changes to the TAPs is off',
+      discovery: { read: true, running: true, remaining_s: 500, node_count: 20, joined: 20 } },
+    { id: '1202', mac: '04C05B0000A1B2C2', state: 'running', key: 'factory', known_networks: '',
+      discovery: { read: true, running: false, remaining_s: 0, node_count: 0, joined: 0 } }] };
+  const { page, ctx, errors } = await open({ hash: '#settings', master, settings: { dangerous_options: true } });
+  await page.waitForSelector('#pi-danger [data-danger-tap="04C05B0000A1B2C2"]', { state: 'visible' });
+  const first = '#pi-danger [data-danger-tap="04C05B0000A1B2C1"]', fresh = '#pi-danger [data-danger-tap="04C05B0000A1B2C2"]';
+  assert.match(await page.textContent(first), /Other TAPs' networks: waiting: Allow changes to the TAPs is off/);
+  assert.match(await page.textContent(fresh), /Still on its factory settings: Add a TAP gives it a network of its own/);
+  assert.doesNotMatch(await page.textContent(fresh), /Other TAPs' networks/);
+  assert.equal(await page.isDisabled(`${fresh} button[data-danger="key-write"]`), true);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
 test('the Network key row warns that a TAP\'s optimizers drop off it', async () => {
   const master = { taps: [
     { id: '1201', mac: '04C05B0000A1B2C1', state: 'running', key: 'different',

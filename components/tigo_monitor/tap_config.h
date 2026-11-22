@@ -481,6 +481,11 @@ class ProvisionJob : public TableJob {
         block_.wide = now.wide;
         block_.extra = now.extra;
         turn_ = true;
+        // Keeping a network the TAP doesn't have (its factory settings,
+        // channel 0): nothing to keep, and the write would be refused.
+        if (block_.keep_network && !block_.new_channel && (now.channel < CHANNEL_MIN || now.channel > CHANNEL_MAX))
+          return fail_("the TAP is still on its factory settings (channel " + std::to_string(now.channel) +
+                       "); Add a TAP gives it a network of its own first");
         if (block_.keep_network) {
           block_.channel = block_.new_channel ? block_.new_channel : now.channel;
           block_.pan = now.pan;

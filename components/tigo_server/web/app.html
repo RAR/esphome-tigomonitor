@@ -6885,7 +6885,8 @@
   // Each TAP's key against the others' (/api/master's taps[].key; never the key).
   const DANGER_KEY_WORDS = { same: 'The same key as your other TAPs',
     different: 'A different key from your other TAPs: optimizers can\'t move to it',
-    unread: 'Not read yet', alone: 'The only TAP' };
+    unread: 'Not read yet', alone: 'The only TAP',
+    factory: 'Still on its factory settings: Add a TAP gives it a network of its own' };
   let dangerOn = false;
   const dangerEsc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   async function piDangerRefresh(s) {
@@ -6919,8 +6920,9 @@
             <button class="btn" data-danger="channel-preview">Preview</button> <button class="btn danger" data-danger="channel-write">Write</button></div>
         </div>
         <div class="cfg-row">
-          <div class="cfg-text"><strong>Network key</strong><span>${dangerEsc(DANGER_KEY_WORDS[t.key] || DANGER_KEY_WORDS.unread)}</span></div>
-          <div class="cfg-ctrl">${(() => { const lock = t.key === 'same' || t.key === 'alone' ? ' disabled data-locked' : '';
+          <div class="cfg-text"><strong>Network key</strong><span>${dangerEsc(DANGER_KEY_WORDS[t.key] || DANGER_KEY_WORDS.unread)}${
+            t.known_networks ? `. Other TAPs' networks: ${dangerEsc(t.known_networks)}` : ''}</span></div>
+          <div class="cfg-ctrl">${(() => { const lock = t.key === 'same' || t.key === 'alone' || t.key === 'factory' ? ' disabled data-locked' : '';
             return `<button class="btn" data-danger="key-preview"${lock}>Preview</button> <button class="btn danger" data-danger="key-write"${lock}>Use the shared key</button>`; })()}</div>
         </div>
         <div class="cfg-row">
