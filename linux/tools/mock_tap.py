@@ -168,7 +168,8 @@ def main():
     stats['erases'] = 0
     # The radio settings block (tap_config.h): the write sets RAM, the
     # stored read (00 01) saves it, a reset brings back what was saved.
-    cfg_ram = bytes(range(a.cfg_size))
+    # Invented, but on a channel networks use (15), as a real TAP's is.
+    cfg_ram = bytes([0x00, 0x0F]) + bytes(range(2, a.cfg_size))
     cfg_saved = cfg_ram
     stats['cfg_extra'] = cfg_ram[31:41].hex() if a.cfg_size == 46 else ''  # the 46-byte form's 10 unexplained bytes
     stats['cfg_writes'] = []  # channel and PAN of each write, never the key
