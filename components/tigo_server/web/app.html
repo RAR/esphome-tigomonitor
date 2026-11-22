@@ -843,6 +843,8 @@
   .setup-stats .todo b { color: var(--warn-text); }
   .setup-found { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border-radius: 10px; background: var(--bg-3); margin: 14px 0; font-size: 13px; }
   .setup-found .new { color: var(--good-text); }
+  .setup-found strong + span { margin-left: 8px; color: var(--text-dim); }
+  .setup-radio-ch { display: flex; align-items: center; gap: 8px; margin-top: 6px; color: var(--text-dim); font-size: 12px; }
   .setup-tap-pick label { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; cursor: pointer; }
   .setup-tap-pick label.off { cursor: default; opacity: .6; }
   .setup-tap-pick span { color: var(--text-dim); font-size: 12px; }
@@ -5287,7 +5289,11 @@
         else if (r.phase === 'failed') state = `<div class="setup-error">${topoEscape(r.message || 'Not given.')}</div>`;
         else state = '';
         const plan = r.phase === 'checked' || r.phase === 'writing' || r.phase === 'done'
-          ? `<div class="setup-found"><div><strong>Channel ${ch ? ch[1] : '?'}</strong><span>at least two from your other TAPs'</span></div>
+          ? `<div class="setup-found"><div><strong>Channel ${ch ? ch[1] : '?'}</strong><span>${r.channel ? 'the channel you chose'
+                : 'clear of Wi-Fi channels 1, 6 and 11 where it can be, and at least two from your other TAPs\''}</span>
+               ${r.phase === 'checked' ? `<label class="setup-radio-ch">Use another <select id="setup-radio-channel" class="cfg-input">
+                 <option value="">Automatic</option>${Array.from({ length: 16 }, (_, i) => 11 + i)
+                   .map(c => `<option value="${c}"${r.channel === c ? ' selected' : ''}>${c}</option>`).join('')}</select></label>` : ''}</div>
              <div><strong>Network ID ${pan ? pan[1] : '?'}</strong><span>made from this TigoMonitor's own</span></div>
              <div><strong>A new network key</strong><span>made here, never shown</span></div>
              ${cap ? `<div><strong>For up to ${cap[1]} optimizers</strong><span>its own profile if it had one; running this step again changes nothing else</span></div>` : ''}</div>` : '';
@@ -5517,6 +5523,22 @@
       document.querySelector('#setup-root button[data-setup-finish]').disabled = !a || a !== b;
     }
   });
+  // Add a TAP's radio step, the check (go false) or the write: the daemon
+  // chooses the PAN, and the channel unless one was picked on the step.
+  async function setupRadio(f, go) {
+    const tap = setupTaps().find(x => x.id === f.found);
+    if (!tap || !tap.mac) return showToast('TAP ' + f.found + ' has not said its MAC yet; look for TAPs again', 'err');
+    f.radio = { ...(f.radio || {}), phase: go ? 'writing' : 'checking', at: Math.floor(Date.now() / 1000) - 1 };
+    const body = { mac: tap.mac, dry_run: !go };
+    if (f.radio.channel) body.channel = f.radio.channel;
+    try {
+      await setupPost('/api/master/taps/provision', body);
+    } catch (err) {
+      f.radio.phase = 'failed';
+      f.radio.message = failText(err);
+    }
+    return refreshSetup(true);
+  }
   document.getElementById('setup-root').addEventListener('change', async ev => {
     if (ev.target.id === 'setup-serial') { ev.target.dataset.picked = ev.target.value; if (setup.flow) setup.flow.edited = setup.flow.step; }
     if (ev.target.dataset.setupRating !== undefined) {
@@ -5526,6 +5548,11 @@
       catch (err) { showToast('Not saved: ' + failText(err), 'err'); }
     }
     if (ev.target.id === 'setup-tap' && setup.flow) setup.flow.tap = ev.target.value;
+    // Add a TAP's radio step: another channel, checked again before it's given.
+    if (ev.target.id === 'setup-radio-channel' && setup.flow && setup.flow.radio) {
+      setup.flow.radio.channel = parseInt(ev.target.value, 10) || null;
+      return setupRadio(setup.flow, false);
+    }
     // Picking a TAP to retire only enables its button: no re-render.
     if (ev.target.name === 'setup-tap-retire' && setup.flow) {
       setup.flow.tapPick = ev.target.value;
@@ -5566,20 +5593,10 @@
       return refreshSetup(true);
     }
     // Add a TAP's radio step: the check (a dry run), then the real one, to
-    // the TAP the guide found. The daemon chooses the channel and PAN.
+    // the TAP the guide found.
     if (b.hasAttribute('data-setup-radio-check') || b.hasAttribute('data-setup-radio-go')) {
-      const go = b.hasAttribute('data-setup-radio-go');
-      const tap = setupTaps().find(x => x.id === f.found);
-      if (!tap || !tap.mac) return showToast('TAP ' + f.found + ' has not said its MAC yet; look for TAPs again', 'err');
       b.disabled = true;
-      f.radio = { ...(f.radio || {}), phase: go ? 'writing' : 'checking', at: Math.floor(Date.now() / 1000) - 1 };
-      try {
-        await setupPost('/api/master/taps/provision', { mac: tap.mac, dry_run: !go });
-      } catch (err) {
-        f.radio.phase = 'failed';
-        f.radio.message = failText(err);
-      }
-      return refreshSetup(true);
+      return setupRadio(f, b.hasAttribute('data-setup-radio-go'));
     }
     if (b.hasAttribute('data-setup-look')) {
       if (!(await uiAsk({ title: 'Look for TAPs?', body: 'Every TAP on the bus is brought up again, and polling stops for about 30 seconds.',

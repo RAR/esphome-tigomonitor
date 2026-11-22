@@ -65,10 +65,17 @@ static void test_values() {
   CHECK(map_for_profile(12, m) && m == (std::array<uint8_t, 10>{12, 2, 2, 1, 0, 0, 0, 0, 28, 1}));
   // The 300 map: 24-4-2-1, the same 28/1 (owner's analysis, 2026-11-11).
   CHECK(map_for_profile(24, m) && m == (std::array<uint8_t, 10>{24, 4, 2, 1, 0, 0, 0, 0, 28, 1}));
-  // Channels: two clear of each in use, so 20 rules out 19-21.
-  CHECK(channel_for({}) == 11);
-  CHECK(channel_for({11}) == 13);
-  CHECK(channel_for({12, 15}) == 17);
+  // Channels: the gaps between Wi-Fi 1, 6 and 11 first (15, 20, 25, 26),
+  // each two clear of every one in use, so 20 rules out 19-21.
+  CHECK(channel_for({}) == 15);
+  CHECK(channel_for({15}) == 20);
+  CHECK(channel_for({15, 20}) == 25);
+  CHECK(channel_for({14}) == 20);       // 15 is next to 14
+  CHECK(channel_for({11, 22}) == 15);   // others in use don't matter
+  CHECK(channel_for({15, 20, 25}) == 11);  // 26 is next to 25: then from 11 up
+  CHECK(channel_for({12, 15, 20, 25}) == 17);
+  // Then none: every channel in use or next to one.
+  CHECK(channel_for({11, 13, 15, 17, 19, 21, 23, 25}) == 0);
   // PAN: the MAC's low 16 bits, stepped by 0x1000 past one in use.
   CHECK(pan_for(TAP_MAC, {}) == 0xB2C3);
   CHECK(pan_for(TAP_MAC, {0xB2C3}) == 0xC2C3);

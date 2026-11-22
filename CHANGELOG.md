@@ -19,6 +19,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   [Network bridge](https://rar.github.io/esphome-tigomonitor/guides/network-bridge/)
   guide covers the boards, the wiring order and pointing TigoMonitor at it.
 
+### Changed
+
+- **A new TAP gets a channel clear of Wi-Fi, and you can pick another.**
+  Add a TAP's radio step used to start at channel 11, which shares the air
+  with Wi-Fi channel 1. It now tries 15, 20, 25 and 26 first, the channels
+  between Wi-Fi 1, 6 and 11, still at least two from your other TAPs'. The
+  step's check shows the pick with a menu to choose any channel from 11 to
+  26, checked again before it's given. TAPs already set up keep their
+  channel.
+
 ## [2.4.0] - 2026-11-21
 
 ### Added
