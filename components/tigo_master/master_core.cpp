@@ -535,6 +535,7 @@ void MasterCore::herd_done_() {
     taps_ = std::move(next);
     turn_ = 0;
     status_.extra_taps.clear();
+    known_networks_due_();  // the set of TAPs may have changed
   }
   for (const auto &l : lines) log_(l.find("wasn't heard") != std::string::npos ? 4 : 6, "%s", l.c_str());
   phase_ = Phase::running;
@@ -626,6 +627,9 @@ void MasterCore::settle_table_job_(uint32_t now_ms) {
       LOGI("bus master: %s: %s", what, table_job_->message().c_str());
     else
       LOGW("bus master: %s: stopped: %s", what, table_job_->message().c_str());
+    // A TAP's network changed: every TAP is told the others' again.
+    if (table_job_->ok() && !table_job_->dry_run() && std::string(table_job_->kind()) == "provision")
+      known_networks_due_();
     table_job_.reset();
     return;
   }
@@ -778,6 +782,63 @@ void MasterCore::sync_key_words_() {
   }
 }
 
+// Each TAP told the other TAPs' networks (0xE1, the CCA's shape), when it's
+// owed one: not while a table change runs, and only once every other TAP
+// has been read or is lost (a lost one is named from its last read; one
+// never read is named nowhere). Whatever the answer, it isn't asked again
+// until the next reason to (no loop on a refusal).
+bool MasterCore::send_known_networks_(Tap &t) {
+  if (!known_networks_ || !t.known_due || t.lost || !t.radio || table_job_ || table_job_pending_) return false;
+  std::vector<master::KnownNetwork> others;
+  for (const auto &x : taps_) {
+    if (x.get() == &t) continue;
+    if (x->radio) others.push_back({static_cast<uint8_t>(x->radio->channel), x->radio->pan, x->radio->key});
+    else if (!x->lost) return false;  // wait for its read
+  }
+  std::string word;
+  if (others.empty()) {
+    t.known_due = false;
+    return false;
+  }
+  if (others.size() > master::KNOWN_NETWORKS_MAX) {
+    t.known_due = false;
+    word = "not sent: more than 16 other TAPs";
+  } else if (!table_writes_on_) {
+    word = "waiting: Allow changes to the TAPs is off";
+  }
+  if (!word.empty()) {
+    std::lock_guard<std::mutex> lock(mu_);
+    t.st.known_networks = word;
+    return false;
+  }
+  seq_ = master::next_seq(seq_);
+  Bytes payload = master::tunnel_request(master::SUB_KNOWN_NETWORKS, seq_, master::known_networks_args(others));
+  if (!master::may_send(master::CMD_TUNNEL, payload, bench_, false, false, false, table_writes_on_)) {
+    set_fault(Fault::refused, "refused to send command " + std::to_string(master::CMD_TUNNEL));
+    t.known_due = false;
+    return false;
+  }
+  Frame reply;
+  in_flight_ = &t;
+  bool ok = transact(t.id, master::CMD_TUNNEL, payload, reply, KNOWN_NETWORKS_WAIT_MS);
+  in_flight_ = nullptr;
+  if (status().fault == Fault::second_master || standing_by_()) return true;
+  t.known_due = false;
+  int status_byte = ok ? master::known_networks_status(reply) : -1;
+  std::string text = status_byte == 0 ? "accepted (" + std::to_string(others.size()) + " other TAP" +
+                                            (others.size() == 1 ? ")" : "s)")
+                                      : master::known_networks_status_text(status_byte);
+  {
+    std::lock_guard<std::mutex> lock(mu_);
+    t.st.known_networks = text;
+  }
+  if (status_byte == 0)
+    LOGI("bus master: TAP %04X told the other TAPs' networks (%zu): %s", t.id, others.size(), text.c_str());
+  else
+    LOGW("bus master: TAP %04X told the other TAPs' networks (%zu): %s", t.id, others.size(), text.c_str());
+  return true;
+}
+
 void MasterCore::restart_taps_() {
   for (auto &t : taps_) {
     t->window = master::WindowKeeper();
@@ -799,6 +860,7 @@ bool MasterCore::open() {
   // before renewing anything, and drop any half-read frame.
   splitter_ = protocol::FrameSplitter<std::string>();
   restart_taps_();
+  known_networks_due_();
   holding_ = false;
   // Or it lost power, and came back at the factory address.
   if (startup_) phase_ = Phase::probing;
@@ -1089,6 +1151,7 @@ void MasterCore::tap_answered_(Tap &t) {
   t.refusals_in_a_row = 0;
   if (!t.lost) return;
   t.lost = false;
+  t.known_due = true;  // it may have lost power, and its list with it
   t.lost_misses = 0;
   t.removed = false;
   LOGI("bus master: TAP %04X is answering again; polling it", t.id);
@@ -1177,7 +1240,10 @@ void MasterCore::tick_(uint32_t now_ms) {
       forget = forget_wanted_;
       forget_wanted_ = 0;
     }
-    if (forget && !herd_) forget_tap_(forget);
+    if (forget && !herd_) {
+      forget_tap_(forget);
+      known_networks_due_();  // no TAP is told about one that's gone
+    }
   }
   {
     std::vector<std::pair<uint16_t, std::string>> asks;
@@ -1332,6 +1398,7 @@ void MasterCore::tick_(uint32_t now_ms) {
         }
     sync_join_status_(t);
   }
+  if (send_known_networks_(t)) return;
   // A change to the table first, else the join watch's reads; only on the
   // TAP the change runs on.
   struct TableSources : master::RequestSource {

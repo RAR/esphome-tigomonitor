@@ -803,6 +803,9 @@ struct MultiTap {
     bool has_cfg = false, cfg_silent = false;
     mp::RadioBlock cfg, cfg_stored;
     int cfg_reads = 0;
+    // The 0xE1s it was sent (their args), and the status it answers with.
+    std::vector<mp::Bytes> e1;
+    uint8_t e1_status = 0;
     std::vector<mp::Bytes> records;
     std::vector<mp::Bytes> writes;
   };
@@ -912,6 +915,15 @@ struct MultiTap {
                        static_cast<uint8_t>(page.size())};
         for (const auto &rec : page) d.insert(d.end(), rec.begin(), rec.end());
         r.payload.insert(r.payload.end(), d.begin(), d.end());
+        return true;
+      }
+      if (sub == 0xE1) {
+        t->e1.push_back(args);
+        r.payload[3] = 0xE2;
+        r.payload.push_back(t->e1_status);
+        r.payload.push_back(static_cast<uint8_t>(t->cfg.channel));
+        r.payload.push_back(static_cast<uint8_t>(t->cfg.pan >> 8));
+        r.payload.push_back(static_cast<uint8_t>(t->cfg.pan));
         return true;
       }
       if (sub == 0x0D && t->has_cfg && !t->cfg_silent) {
@@ -1302,6 +1314,198 @@ static void test_provision_shared_key_refusals() {
     CHECK(bus.at(0x1201)->cfg.key[0] == 0x99 && bus.at(0x1201)->cfg.channel == 20);
     core.close();
   }
+}
+
+// ---- 0xE1: each TAP told the others' networks ----
+static void three_on_one_key(MultiTap &bus) {
+  bus.taps = {{0x1201, 1}, {0x1202, 2}, {0x1203, 3}};
+  give_radio(bus, 0x1201, radio(15, 0x7E21, 0x30));
+  give_radio(bus, 0x1202, radio(18, 0x5A5A, 0x30));
+  give_radio(bus, 0x1203, radio(11, 0x1A2B, 0x50));
+}
+// The channels an 0xE1's records carry, in order.
+static std::vector<int> e1_channels(const mp::Bytes &args) {
+  std::vector<int> ch;
+  for (size_t i = 0; args.size() >= 4 && i < args[0] && 4 + 20 * i < args.size(); i++) ch.push_back(args[4 + 20 * i]);
+  return ch;
+}
+
+// At start, once every TAP has been read: one each, naming the other two in
+// the master's order, and not again without a reason.
+static void test_known_networks_at_start() {
+  MultiTap bus;
+  three_on_one_key(bus);
+  std::vector<std::string> lines;
+  MasterCore core(&bus.port, [&](int, const std::string &l) { lines.push_back(l); }, nullptr, nullptr, 0x1201, false,
+                  true);
+  core.set_taps({{0x1201, {}}, {0x1202, {}}, {0x1203, {}}});
+  core.set_known_networks(true);
+  core.set_table_writes(true);
+  CHECK(core.open());
+  run_for(core, 0, 20000, 50);
+  CHECK(bus.at(0x1201)->e1.size() == 1 && bus.at(0x1202)->e1.size() == 1 && bus.at(0x1203)->e1.size() == 1);
+  if (bus.at(0x1201)->e1.size() == 1) CHECK((e1_channels(bus.at(0x1201)->e1[0]) == std::vector<int>{18, 11}));
+  if (bus.at(0x1202)->e1.size() == 1) CHECK((e1_channels(bus.at(0x1202)->e1[0]) == std::vector<int>{15, 11}));
+  if (bus.at(0x1203)->e1.size() == 1) {
+    CHECK((e1_channels(bus.at(0x1203)->e1[0]) == std::vector<int>{15, 18}));
+    CHECK(bus.at(0x1203)->e1[0].size() == 44);
+  }
+  for (const auto &t : core.status().taps) CHECK(t.known_networks == "accepted (2 other TAPs)");
+  run_for(core, 20000, 140000, 50);
+  CHECK(bus.at(0x1201)->e1.size() == 1 && bus.at(0x1202)->e1.size() == 1 && bus.at(0x1203)->e1.size() == 1);
+  CHECK(no_key_in(lines));
+  core.close();
+}
+
+// Without Allow changes to the TAPs nothing goes out, and each TAP says why;
+// turned on, they go.
+static void test_known_networks_waits_for_writes() {
+  MultiTap bus;
+  three_on_one_key(bus);
+  MasterCore core(&bus.port, [](int, const std::string &) {}, nullptr, nullptr, 0x1201, false, true);
+  core.set_taps({{0x1201, {}}, {0x1202, {}}, {0x1203, {}}});
+  core.set_known_networks(true);
+  CHECK(core.open());
+  run_for(core, 0, 20000, 50);
+  CHECK(bus.at(0x1201)->e1.empty() && bus.at(0x1202)->e1.empty() && bus.at(0x1203)->e1.empty());
+  for (const auto &t : core.status().taps) CHECK(t.known_networks == "waiting: Allow changes to the TAPs is off");
+  core.set_table_writes(true);
+  run_for(core, 20000, 30000, 50);
+  CHECK(bus.at(0x1201)->e1.size() == 1 && bus.at(0x1202)->e1.size() == 1 && bus.at(0x1203)->e1.size() == 1);
+  core.close();
+}
+
+// A TAP's network changed (a provision): every TAP is told again.
+static void test_known_networks_after_provision() {
+  MultiTap bus;
+  three_on_one_key(bus);
+  MasterCore core(&bus.port, [](int, const std::string &) {}, nullptr, nullptr, 0x1201, false, true);
+  core.set_taps({{0x1201, {}}, {0x1202, {}}, {0x1203, {}}});
+  core.set_known_networks(true);
+  core.set_table_writes(true);
+  CHECK(core.open());
+  run_for(core, 0, 20000, 50);
+  std::string why;
+  CHECK(core.request_provision(tap_mac(3), rekey_block(), false, false, why));
+  run_for(core, 20000, 60000, 50);
+  CHECK(core.status().table_edit.ok);
+  CHECK(bus.at(0x1201)->e1.size() == 2 && bus.at(0x1202)->e1.size() == 2 && bus.at(0x1203)->e1.size() == 2);
+  core.close();
+}
+
+// While a table change runs, no 0xE1 goes out; after it, they do. With the
+// writes off, every TAP is read and waiting; a check-only add starts and
+// the writes go on at the same moment, so each 0xE1 is due while it runs.
+static void test_known_networks_waits_for_a_table_job() {
+  MultiTap bus;
+  three_on_one_key(bus);
+  MasterCore core(&bus.port, [](int, const std::string &) {}, nullptr, nullptr, 0x1201, false, true);
+  core.set_taps({{0x1201, {}}, {0x1202, {}}, {0x1203, {}}});
+  core.set_known_networks(true);
+  CHECK(core.open());
+  run_for(core, 0, 20000, 50);
+  CHECK(core.status().taps[2].known_networks == "waiting: Allow changes to the TAPs is off");
+  std::string why;
+  CHECK(core.request_table_add(NEW_MAC, 0, /*dry_run=*/true, why, 0x1201));
+  core.set_table_writes(true);
+  bool ran = false, sent_during = false;
+  for (uint32_t t = 20000; t < 40000; t += 50) {
+    core.tick(t);
+    if (core.status().table_edit.active) {
+      ran = true;
+      for (uint16_t id : {0x1201, 0x1202, 0x1203}) sent_during = sent_during || !bus.at(id)->e1.empty();
+    }
+  }
+  CHECK(ran);
+  CHECK(!sent_during);
+  CHECK(core.status().table_edit.finished);
+  CHECK(bus.at(0x1201)->e1.size() == 1 && bus.at(0x1202)->e1.size() == 1 && bus.at(0x1203)->e1.size() == 1);
+  core.close();
+}
+
+// A lost TAP that was read is still named; it isn't sent one while lost,
+// and is when it's back. One lost before it was ever read is named nowhere.
+static void test_known_networks_lost_and_unread() {
+  {
+    MultiTap bus;
+    three_on_one_key(bus);
+    MasterCore core(&bus.port, [](int, const std::string &) {}, nullptr, nullptr, 0x1201, false, true);
+    core.set_taps({{0x1201, {}}, {0x1202, {}}, {0x1203, {}}});
+    core.set_known_networks(true);
+    core.set_table_writes(true);
+    CHECK(core.open());
+    run_for(core, 0, 20000, 50);
+    bus.at(0x1202)->up = false;
+    run_for(core, 20000, 30000, 50);
+    CHECK(core.status().taps[1].state == "lost");
+    std::string why;
+    CHECK(core.request_provision(tap_mac(3), rekey_block(), false, false, why));  // a change: all due again
+    run_for(core, 30000, 70000, 50);
+    CHECK(bus.at(0x1201)->e1.size() == 2 && bus.at(0x1203)->e1.size() == 2 && bus.at(0x1202)->e1.size() == 1);
+    if (bus.at(0x1201)->e1.size() == 2) CHECK((e1_channels(bus.at(0x1201)->e1[1]) == std::vector<int>{18, 11}));
+    bus.at(0x1202)->up = true;
+    run_for(core, 70000, 110000, 50);
+    CHECK(core.status().taps[1].state == "running");
+    CHECK(bus.at(0x1202)->e1.size() == 2 && bus.at(0x1201)->e1.size() == 2 && bus.at(0x1203)->e1.size() == 2);
+    core.close();
+  }
+  {
+    // Lost and back with nothing else happening (a power cut may have
+    // cleared its list): it alone is told again.
+    MultiTap bus;
+    three_on_one_key(bus);
+    MasterCore core(&bus.port, [](int, const std::string &) {}, nullptr, nullptr, 0x1201, false, true);
+    core.set_taps({{0x1201, {}}, {0x1202, {}}, {0x1203, {}}});
+    core.set_known_networks(true);
+    core.set_table_writes(true);
+    CHECK(core.open());
+    run_for(core, 0, 20000, 50);
+    bus.at(0x1202)->up = false;
+    run_for(core, 20000, 30000, 50);
+    CHECK(core.status().taps[1].state == "lost");
+    bus.at(0x1202)->up = true;
+    run_for(core, 30000, 70000, 50);
+    CHECK(core.status().taps[1].state == "running");
+    CHECK(bus.at(0x1202)->e1.size() == 2 && bus.at(0x1201)->e1.size() == 1 && bus.at(0x1203)->e1.size() == 1);
+    core.close();
+  }
+  {
+    MultiTap bus;
+    three_on_one_key(bus);
+    bus.at(0x1203)->up = false;  // gone before its first read
+    MasterCore core(&bus.port, [](int, const std::string &) {}, nullptr, nullptr, 0x1201, false, true);
+    core.set_taps({{0x1201, {}}, {0x1202, {}}, {0x1203, {}}});
+    core.set_known_networks(true);
+    core.set_table_writes(true);
+    CHECK(core.open());
+    run_for(core, 0, 30000, 50);
+    CHECK(bus.at(0x1201)->e1.size() == 1 && bus.at(0x1202)->e1.size() == 1 && bus.at(0x1203)->e1.empty());
+    if (bus.at(0x1201)->e1.size() == 1) CHECK((e1_channels(bus.at(0x1201)->e1[0]) == std::vector<int>{18}));
+    if (bus.at(0x1202)->e1.size() == 1) CHECK((e1_channels(bus.at(0x1202)->e1[0]) == std::vector<int>{15}));
+    core.close();
+  }
+}
+
+// A refusal is said, by name, once; not retried in a loop.
+static void test_known_networks_refusal_is_said_once() {
+  MultiTap bus;
+  three_on_one_key(bus);
+  bus.at(0x1203)->e1_status = 3;
+  std::vector<std::string> lines;
+  MasterCore core(&bus.port, [&](int, const std::string &l) { lines.push_back(l); }, nullptr, nullptr, 0x1201, false,
+                  true);
+  core.set_taps({{0x1201, {}}, {0x1202, {}}, {0x1203, {}}});
+  core.set_known_networks(true);
+  core.set_table_writes(true);
+  CHECK(core.open());
+  run_for(core, 0, 140000, 50);
+  CHECK(bus.at(0x1203)->e1.size() == 1);
+  CHECK(core.status().taps[2].known_networks == "refused: no room for another network");
+  int said = 0;
+  for (const auto &l : lines) said += l.find("no room for another network") != std::string::npos;
+  CHECK(said == 1);
+  CHECK(no_key_in(lines));
+  core.close();
 }
 
 // Retiring a TAP that has gone for good: refused while it answers, for the
@@ -1898,6 +2102,12 @@ int main() {
   test_radio_reads_give_key_words();
   test_provision_takes_the_shared_key();
   test_provision_shared_key_refusals();
+  test_known_networks_at_start();
+  test_known_networks_waits_for_writes();
+  test_known_networks_after_provision();
+  test_known_networks_waits_for_a_table_job();
+  test_known_networks_lost_and_unread();
+  test_known_networks_refusal_is_said_once();
   test_one_tap_still_quiet_after_the_bus_is_back_is_removed();
   test_a_lost_tap_can_be_retired();
   test_no_tap_answering_is_a_fault();
