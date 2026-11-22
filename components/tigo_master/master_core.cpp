@@ -1398,9 +1398,17 @@ void MasterCore::tick_(uint32_t now_ms) {
       // The CCA lets it run down to 0 and renews then, so that's routine;
       // finding it gone when the TAP comes back is not.
       bool out = !window.running || window.remaining_s == 0;
+      // No optimizers listed (a TAP just added): no renewal carries a count
+      // of 0, so it stays closed, read every 20 s. Said once, not each read.
+      bool empty = window.node_count == 0;
       const char *then = t.window.renewing() ? "renewing" : "left closed, as asked";
       bool was_out = t.window.ever_read() && (!t.window.last().running || t.window.last().remaining_s == 0);
-      if (out && t.lost_since_window_read)
+      bool was_empty = t.window.ever_read() && t.window.last().node_count == 0;
+      if (out && empty) {
+        if (!was_out || !was_empty)
+          LOGI("bus master: TAP %04X has no optimizers listed, so its discovery window stays closed until one is added",
+               t.id);
+      } else if (out && t.lost_since_window_read)
         LOGW("bus master: the TAP came back with its discovery window closed (%u nodes); %s",
              static_cast<unsigned>(window.node_count), then);
       else if (out && (t.window.renewing() || !was_out))
