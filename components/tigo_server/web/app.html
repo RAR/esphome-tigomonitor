@@ -5295,7 +5295,8 @@
                  <option value="">Automatic</option>${Array.from({ length: 16 }, (_, i) => 11 + i)
                    .map(c => `<option value="${c}"${r.channel === c ? ' selected' : ''}>${c}</option>`).join('')}</select></label>` : ''}</div>
              <div><strong>Network ID ${pan ? pan[1] : '?'}</strong><span>made from this TigoMonitor's own</span></div>
-             <div><strong>A new network key</strong><span>made here, never shown</span></div>
+             ${setupTaps().length > 1 ? '<div><strong>The key your other TAPs share</strong><span>never shown</span></div>'
+               : '<div><strong>A new network key</strong><span>made here, never shown</span></div>'}
              ${cap ? `<div><strong>For up to ${cap[1]} optimizers</strong><span>its own profile if it had one; running this step again changes nothing else</span></div>` : ''}</div>` : '';
         const act = !running ? offBus
           : r.phase === 'checked' ? (writes ? `<div class="setup-actions"><button type="button" class="btn task-go" data-setup-radio-go>Give it these settings</button></div>`
@@ -5529,7 +5530,8 @@
     const tap = setupTaps().find(x => x.id === f.found);
     if (!tap || !tap.mac) return showToast('TAP ' + f.found + ' has not said its MAC yet; look for TAPs again', 'err');
     f.radio = { ...(f.radio || {}), phase: go ? 'writing' : 'checking', at: Math.floor(Date.now() / 1000) - 1 };
-    const body = { mac: tap.mac, dry_run: !go };
+    // The key the other TAPs share (one per site): with none, the daemon makes a new one.
+    const body = { mac: tap.mac, dry_run: !go, shared_key: true };
     if (f.radio.channel) body.channel = f.radio.channel;
     try {
       await setupPost('/api/master/taps/provision', body);
@@ -6870,8 +6872,8 @@
   });
 
   // ===== Raspberry Pi settings (linux/ build) =====
-  // Dangerous options: a TAP's radio profile, channel and report period,
-  // shown only with "dangerous_options": true in settings.json, on a
+  // Dangerous options: a TAP's radio profile, channel, network key and report
+  // period, shown only with "dangerous_options": true in settings.json, on a
   // TigoMonitor that runs the bus.
   const DANGER_PERIODS = [[1, '1 s'], [2, '2 s'], [3, '3 s'], [4, '4 s'], [5, '5 s'], [6, '6 s'], [7, '10 s'],
                           [8, '12 s'], [9, '15 s'], [10, '20 s'], [11, '30 s']];
@@ -6880,6 +6882,10 @@
   // 11-26, as Add a TAP offers them; 15, 20, 25 and 26 clear Wi-Fi channels 1, 6 and 11.
   const DANGER_CHANNELS = Array.from({ length: 16 }, (_, i) => 11 + i)
     .map(c => [c, [15, 20, 25, 26].includes(c) ? `${c} (clear of Wi-Fi)` : String(c)]);
+  // Each TAP's key against the others' (/api/master's taps[].key; never the key).
+  const DANGER_KEY_WORDS = { same: 'The same key as your other TAPs',
+    different: 'A different key from your other TAPs: optimizers can\'t move to it',
+    unread: 'Not read yet', alone: 'The only TAP' };
   let dangerOn = false;
   const dangerEsc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   async function piDangerRefresh(s) {
@@ -6900,7 +6906,7 @@
     } catch (e) { /* drawn empty, or with the usual default, below */ }
     const opts = (list, pick) => list.map(([v, t]) => `<option value="${v}"${v === pick ? ' selected' : ''}>${dangerEsc(t)}</option>`).join('');
     document.getElementById('pi-danger-taps').innerHTML = taps.length ? taps.map(t => `
-      <div data-danger-tap="${dangerEsc(t.mac)}" style="border-top:1px solid var(--border);padding-top:10px;margin-top:10px">
+      <div data-danger-tap="${dangerEsc(t.mac)}" data-danger-nodes="${(t.discovery && t.discovery.node_count) || 0}" style="border-top:1px solid var(--border);padding-top:10px;margin-top:10px">
         <div style="font-weight:600;margin:0 0 10px">TAP ${dangerEsc(t.id)}</div>
         <div class="cfg-row">
           <div class="cfg-text"><strong>Radio profile</strong><span>How many optimizers its schedule is planned for. ${live[t.id] ? `It runs ${live[t.id]} now` : 'Preview shows what it has now'}</span></div>
@@ -6911,6 +6917,11 @@
           <div class="cfg-text"><strong>Channel</strong><span>The radio channel it runs; its network ID and key stay. ${chan[t.id] ? `It runs channel ${chan[t.id]} now` : 'Preview shows what it has now'}</span></div>
           <div class="cfg-ctrl"><select class="cfg-input" data-danger-channel>${opts(DANGER_CHANNELS, chan[t.id] || 15)}</select>
             <button class="btn" data-danger="channel-preview">Preview</button> <button class="btn danger" data-danger="channel-write">Write</button></div>
+        </div>
+        <div class="cfg-row">
+          <div class="cfg-text"><strong>Network key</strong><span>${dangerEsc(DANGER_KEY_WORDS[t.key] || DANGER_KEY_WORDS.unread)}</span></div>
+          <div class="cfg-ctrl">${(() => { const lock = t.key === 'same' || t.key === 'alone' ? ' disabled data-locked' : '';
+            return `<button class="btn" data-danger="key-preview"${lock}>Preview</button> <button class="btn danger" data-danger="key-write"${lock}>Use the shared key</button>`; })()}</div>
         </div>
         <div class="cfg-row">
           <div class="cfg-text"><strong>Report period</strong><span>How often each optimizer reports. Preview shows what it has now</span></div>
@@ -6931,20 +6942,27 @@
     const channel = Number(row.querySelector('[data-danger-channel]').value);
     const code = Number(row.querySelector('[data-danger-period]').value);
     const label = what === 'profile' ? DANGER_PROFILES.find(p => p[0] === profile)[1]
-      : what === 'channel' ? `channel ${channel}` : DANGER_PERIODS.find(p => p[0] === code)[1];
+      : what === 'channel' ? `channel ${channel}` : what === 'key' ? 'the shared key' : DANGER_PERIODS.find(p => p[0] === code)[1];
     const tapName = row.querySelector('div').textContent;
+    const nodes = Number(row.dataset.dangerNodes) || 0;
     if (!dry && !(await uiAsk(what === 'profile'
           ? { title: `Write the radio profile for ${label}?`, tone: 'danger', ok: 'Write profile',
               body: 'The TAP keeps its channel, PAN and key, and re-slots its optimizers. A wrong profile can cost reports until it\'s set back.' }
           : what === 'channel'
           ? { title: `Move ${tapName} to ${label}?`, tone: 'danger', ok: 'Move it',
               body: 'It keeps its network ID and key. Its optimizers lose it until they find it on the new channel, and how long that takes hasn\'t been measured, so this is safest before any optimizer is on it.' }
+          : what === 'key'
+          ? { title: `Give ${tapName} the key your other TAPs share?`, tone: 'danger', ok: 'Use the shared key',
+              body: `It keeps its channel and network ID. ${nodes
+                ? `Its ${nodes} optimizer${nodes === 1 ? '' : 's'} drop off it until they rejoin on the shared key, and how long that takes hasn't been measured.`
+                : 'It has no optimizers yet, so none lose it.'}` }
           : { title: `Set the report period to ${label}?`, tone: 'danger', ok: 'Set period',
               body: 'Every optimizer on this TAP reports at the new rate.' }))) return;
-    const provision = what === 'profile' || what === 'channel';
+    const provision = what === 'profile' || what === 'channel' || what === 'key';
     const path = provision ? '/api/master/taps/provision' : '/api/master/taps/period';
     const body = what === 'profile' ? { mac, keep_network: true, profile, dry_run: dry }
-      : what === 'channel' ? { mac, keep_network: true, channel, dry_run: dry } : { mac, code, dry_run: dry };
+      : what === 'channel' ? { mac, keep_network: true, channel, dry_run: dry }
+      : what === 'key' ? { mac, keep_network: true, shared_key: true, dry_run: dry } : { mac, code, dry_run: dry };
     row.querySelectorAll('button').forEach(x => { x.disabled = true; });
     out.textContent = dry ? 'Reading the TAP…' : 'Writing…';
     try {
@@ -6962,7 +6980,7 @@
     } catch (err) {
       out.textContent = `Refused: ${failText(err)}`;
     } finally {
-      row.querySelectorAll('button').forEach(x => { x.disabled = false; });
+      row.querySelectorAll('button:not([data-locked])').forEach(x => { x.disabled = false; });
     }
   });
 

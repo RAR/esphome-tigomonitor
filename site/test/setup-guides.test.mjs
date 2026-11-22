@@ -68,7 +68,11 @@ async function open(w) {
       if (path === '/api/master/taps/herd') {
         // The herd runs, then the new TAP is at the next free id.
         w.master.phase = 'discovering';
-        setTimeout(() => { w.master.phase = 'running'; w.master.taps = [tap('1201'), { ...tap('1202'), mac: '04C05B3000000202' }]; }, 300);
+        setTimeout(() => {
+          w.master.phase = 'running';
+          w.master.taps = w.herdAlone ? [{ ...tap('1202'), mac: '04C05B3000000202' }]
+            : [tap('1201'), { ...tap('1202'), mac: '04C05B3000000202' }];
+        }, 300);
         return json(200, { started: true });
       }
       if (path === '/api/taps/name') { w.names[b.tap] = b.name; return json(200, b); }
@@ -308,6 +312,9 @@ test('System setup: "Add a TAP" from wiring it in to its name, giving it its rad
   assert.match(plan, /clear of Wi-Fi/);
   assert.match(plan, /Network ID 1A2B/);
   assert.match(plan, /up to 40 optimizers/);
+  // Another TAP is on the bus: the new one takes the key they share.
+  assert.match(plan, /The key your other TAPs share/);
+  assert.doesNotMatch(plan, /A new network key/);
   assert.match(plan, /never shown/);
   assert.doesNotMatch(plan, /key hidden/);
   // Another channel: chosen here, checked again, and given as chosen.
@@ -324,6 +331,8 @@ test('System setup: "Add a TAP" from wiring it in to its name, giving it its rad
   // it, to the TAP found; the PAN is never chosen here.
   assert.deepEqual(w.posts.filter((p) => p.path === '/api/master/taps/provision').map((p) => [p.mac, p.dry_run, p.channel ?? null, 'pan' in p]),
     [['04C05B3000000202', true, null, false], ['04C05B3000000202', true, 20, false], ['04C05B3000000202', false, 20, false]]);
+  // Each asks for the shared key; with no other TAP the daemon makes a new one.
+  assert.ok(w.posts.filter((p) => p.path === '/api/master/taps/provision').every((p) => p.shared_key === true));
   await next(page, 'Name it');
   await page.fill('#setup-tap-name', 'Shed');
   await next(page, 'Complete');
@@ -333,6 +342,28 @@ test('System setup: "Add a TAP" from wiring it in to its name, giving it its rad
   await page.click('button[data-setup-adopt="off"]');
   await page.waitForFunction(() => !document.querySelector('button[data-setup-adopt="off"]'));
   assert.deepEqual(w.posts.filter((p) => p.path === '/api/settings').map((p) => p.master_adopt_taps), [true, false]);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test('System setup: "Add a TAP" with no other TAP on the bus makes a new network key', async () => {
+  const w = world();
+  w.herdAlone = true;
+  const { page, ctx, errors } = await open(w);
+  await page.click('.setup-task[data-task="addtap"]');
+  await page.waitForSelector('.setup-flow[data-task="addtap"]');
+  await next(page, 'Allow a new TAP');
+  await page.click('button[data-setup-adopt="on"]');
+  await page.waitForFunction(() => !document.querySelector('button[data-setup-next]').disabled);
+  await next(page, 'Look for TAPs');
+  await page.click('button[data-setup-look]');
+  await page.waitForFunction(() => /Found TAP 1202/.test(document.querySelector('.setup-body').textContent), null, { timeout: 15000 });
+  await next(page, 'Radio settings');
+  await page.click('button[data-setup-radio-check]');
+  await page.waitForFunction(() => /Channel 15/.test(document.querySelector('.setup-body').textContent));
+  const plan = await page.textContent('.setup-body');
+  assert.match(plan, /A new network key/);
+  assert.doesNotMatch(plan, /other TAPs share/);
   assert.deepEqual(errors, []);
   await ctx.close();
 });
