@@ -148,8 +148,14 @@ reply:   0B10  00 0E 00 E2 <seq>  <status> <own ch> <own PAN: 2>
     own network.
   - The re-key row on a TAP with optimizers warns, in red, that they drop
     off it.
-- **The add step and the re-key read the other TAPs themselves** if their
-  settings haven't been read yet.
+- **The master reads every TAP's settings at start and after a bring-up**
+  whenever it may send 0xE1 (the Pi), not only when read_tap_config is on.
+  A provision that finds another answering TAP still unread is refused and
+  names it ("TAP 1201's radio settings haven't been read yet"), rather than
+  reading in the middle of the request. A lost TAP that was never read is
+  left out.
+- **0xE1 is Pi-only**, behind a MasterCore switch the daemon turns on, so an
+  ESP32 master sends none.
 - **More than 16 other TAPs is refused** rather than sent.
 
 ## The roof test (after merge, the owner's go-ahead)
