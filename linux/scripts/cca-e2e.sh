@@ -212,6 +212,10 @@ expect('page has no API token', (b'__TIGO_API_TOKEN__' in page, b'const API_TOKE
 code('/api/settings', 'POST', b'{"web_password": ""}', dict(auth, **{'Content-Type': 'application/json'}))
 time.sleep(1.5)
 expect('login removed', code('/api/status'), 200)
+# Uptime is TigoMonitor's own, as on the ESP32, not the machine's time since boot.
+status = get('/api/status')[1]
+expect('uptime is the daemon\'s', (status['uptime_sec'] < 600, status.get('system_uptime_sec', -1) >= status['uptime_sec']), (True, True))
+expect('and health\'s too', get('/api/health')[1]['uptime'] < 600, True)
 expect('total_energy_in is input energy', 'total_energy_in' in get('/api/overview')[1], True)
 # A fresh install with port 80 taken: the UI moves to 8080, no port is opened.
 busy = subprocess.Popen([sys.executable, '-m', 'http.server', '80'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
