@@ -447,6 +447,7 @@ struct Request {
   bool bring_up = false;  // a frame the CCA sends only straight after re-addressing a TAP
   bool table_edit = false;  // from a TableAdd (table_edit.h), the only source of a table write
   bool provision = false;   // from a ProvisionJob (tap_config.h): Add a TAP's radio step
+  bool resort = false;      // from a ResortJob (resort.h): its PV off is allowed inside its bracket
 };
 
 // ---- housekeeping ----------------------------------------------------------
