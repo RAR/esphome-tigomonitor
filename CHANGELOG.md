@@ -91,6 +91,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The Mesh map no longer draws an optimizer through one on another TAP
+  (Raspberry Pi and ESP32).** An optimizer names its parent by an ID its
+  TAP hands out, and each TAP hands them out on its own network, so two
+  TAPs can each have one with the same ID. The map took any match; after
+  the roof's re-sort 8 of its 12 relay lines crossed TAPs. It now looks
+  only on the optimizer's own TAP.
+
 - **A TAP added by TigoMonitor could never take an optimizer.** Add a TAP
   gave each new TAP a network key of its own. A site's TAPs must share one
   key and be told each other's networks, or an optimizer can't move from

@@ -159,8 +159,12 @@ class LinkStats {
     if (l.parent.empty() || l.parent == "0001" || l.parent == l.nwid) return "";
     Str best;
     int64_t when = 0;
+    // On the child's own TAP: each TAP hands NWIDs out on its own network,
+    // so another TAP may have a node with the same one. A TAP not heard yet
+    // (no report since the join) is no reason to rule one out.
     for (const auto &e : links_)
       if (e.first != addr && e.second.nwid == l.parent && e.second.last_join_s >= when &&
+          (!l.tap || !e.second.tap || e.second.tap == l.tap) &&
           std::max(e.second.last_heard_s, e.second.last_join_s) >= l.last_join_s - RELAY_STALE_S) {
         best = e.first;
         when = e.second.last_join_s;
