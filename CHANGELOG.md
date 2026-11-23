@@ -17,9 +17,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   every TAP, joins the one it hears, and each TAP is then trimmed to the
   ones that joined it. Production drops while they rejoin, so run it at low
   sun. It waits as long as it takes, and until every optimizer is back the
-  old networks can be put back with a button. It needs **Allow changes to
-  the TAPs**. It has run end to end against mock TAPs only: no real
-  optimizer has joined a TAP after one yet.
+  old networks can be put back with a button, which lists every optimizer
+  again. One that stops part-way (a TAP that doesn't answer, a restart)
+  waits for you to put the old networks back or keep the TAPs as they are.
+  Replace a TAP lists the old TAP's optimizers on the new one before the
+  re-sort, so it finds them. It needs **Allow changes to the TAPs**. It has
+  run end to end against mock TAPs only: no real optimizer has joined a TAP
+  after one yet.
 
 - **Hand a TAP's optimizers to another (Raspberry Pi, experimental, API
   only).** `POST /api/master/taps/handover` with `{"from": "1202", "to":

@@ -185,7 +185,20 @@ What followed:
 - **The put-back needs every TAP in the file to answer.** Otherwise it is
   refused by name and the file stays.
 - **In Replace a TAP, the old TAP is forgotten before the re-sort step.**
-  Otherwise the re-sort refuses, because the old TAP doesn't answer.
+  Otherwise the re-sort refuses, because the old TAP doesn't answer. Its
+  optimizers are listed on the new TAP first (the handover, from what was
+  last heard through it), so the re-sort's list includes them.
+- **A re-sort that stops part-way waits for the owner** (added after the
+  final review). A failed step, a restart or another master on the bus
+  leaves it "stopped": nothing is trimmed and it never ends by itself,
+  because the old tables still read everyone joined. Only the put-back,
+  which lists the saved list as well as the tables, or the owner's "keep
+  the TAPs as they are" ends it.
+- **The bracket's PV on is confirmed** (added after the final review):
+  when it closes, each TAP's PV state goes to its PV switch, which checks
+  the 0B01 and tries again, and a TAP lost then gets it when it answers.
+  The owner's PV off holds: before the writes it cancels the re-sort,
+  after them the PV on goes out as off.
 
 ## The roof test (after merge, the owner's go-ahead)
 

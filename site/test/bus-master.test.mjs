@@ -620,3 +620,34 @@ test('with the old networks put back already, no put-back button', async () => {
   assert.equal(await page.isVisible('#pi-danger button[data-resort="stop"]'), true);
   await ctx.close();
 });
+
+test('a re-sort that stopped part-way offers the old networks back, or to keep the TAPs as they are', async () => {
+  const master = JSON.parse(JSON.stringify(TWO));
+  master.resort = { ...master.resort, state: 'stopped', finished: true, ok: false, message: "TAP 1203 didn't echo its network write",
+    joined: [], missing: [], can_put_back: true };
+  const { page, ctx, api, errors } = await open({ hash: '#settings', master, settings: { dangerous_options: true } });
+  await page.waitForSelector('#pi-danger [data-resort-panel]', { state: 'visible' });
+  const text = await page.textContent('#pi-danger [data-resort-panel]');
+  assert.match(text, /stopped part-way/);
+  assert.match(text, /TAP 1203 didn't echo its network write/);
+  assert.equal(await page.isVisible('#pi-danger button[data-resort="putback"]'), true);
+  assert.equal(await page.$('#pi-danger button[data-resort="stop"]'), null);
+  await page.click('#pi-danger button[data-resort="keep"]');
+  await page.waitForSelector('#ui-dialog[open]');
+  assert.match(await page.textContent('#ui-dialog'), /old networks are discarded/);
+  await answer(page, true);
+  await page.waitForFunction(() => !document.querySelector('#pi-danger [data-resort-panel]'));
+  assert.deepEqual(api.posts.at(-1), { path: '/api/master/resort/stop', body: {} });
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test('while waiting with Allow changes to the TAPs off, the panel says why nothing is trimmed', async () => {
+  const master = JSON.parse(JSON.stringify(TWO));
+  master.resort = { ...master.resort, state: 'waiting', joined: [{ tap: '1201', count: 20 }, { tap: '1203', count: 0 }], missing: [],
+    can_put_back: true, note: "Allow changes to the TAPs is off: no TAP is trimmed until it's on" };
+  const { page, ctx } = await open({ hash: '#settings', master, settings: { dangerous_options: true } });
+  await page.waitForSelector('#pi-danger [data-resort-panel]', { state: 'visible' });
+  assert.match(await page.textContent('#pi-danger [data-resort-panel]'), /no TAP is trimmed until it's on/);
+  await ctx.close();
+});

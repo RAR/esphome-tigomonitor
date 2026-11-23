@@ -4929,14 +4929,22 @@
   function resortPanelHTML(r, nameOf, esc) {
     const joined = r.joined || [], missing = r.missing || [];
     const n = joined.reduce((a, j) => a + (j.count || 0), 0);
+    const putBack = r.can_put_back ? '<button type="button" class="btn danger" data-resort="putback">Put the old networks back</button>' : '';
+    // Stopped part-way: the TAPs may be on different networks, or missing
+    // optimizers, so it waits for the owner: the old networks back, or keep.
+    if (r.state === 'stopped')
+      return `<div class="resort-panel" data-resort-panel><strong>The re-sort stopped part-way</strong>` +
+        (r.message ? `<div class="setup-error">${esc(r.message)}</div>` : '') +
+        '<div class="hint">The TAPs may be on different networks, and some optimizers may be on no TAP\'s list. Put the old networks back, which lists every optimizer again, or keep the TAPs as they are.</div>' +
+        `<div class="setup-actions">${putBack}<button type="button" class="btn" data-resort="keep">Keep the TAPs as they are</button></div></div>`;
     const head = r.state === 'running' ? `Re-sort: ${r.step || 'starting'}…`
       : r.state === 'putting_back' ? `Putting the old networks back: ${r.step || 'starting'}…`
       : `Re-sort: ${n} of ${n + missing.length} joined${joined.length ? ': ' + joined.map(j => `${nameOf(j.tap)} ${j.count}`).join(', ') : ''}`;
     return `<div class="resort-panel" data-resort-panel><strong>${esc(head)}</strong>` +
       (r.state === 'waiting' && missing.length ? `<div class="hint">Still to join: ${esc(missing.map(x => x.label || x.mac).join(', '))}</div>` : '') +
+      (r.note ? `<div class="hint">${esc(r.note)}</div>` : '') +
       (r.finished && !r.ok && r.message ? `<div class="setup-error">${esc(r.message)}</div>` : '') +
-      (r.state === 'waiting' ? `<div class="setup-actions"><button type="button" class="btn" data-resort="stop">Stop waiting</button>${
-        r.can_put_back ? '<button type="button" class="btn danger" data-resort="putback">Put the old networks back</button>' : ''}</div>` : '') +
+      (r.state === 'waiting' ? `<div class="setup-actions"><button type="button" class="btn" data-resort="stop">Stop waiting</button>${putBack}</div>` : '') +
       '</div>';
   }
   // One of the re-sort's buttons, asked first where it changes anything. A
@@ -4946,13 +4954,16 @@
       go: { title: 'Re-sort every optimizer?', body: RESORT_WORDS, ok: 'Re-sort', tone: 'danger' },
       stop: { title: 'Stop waiting?', ok: 'Stop waiting',
               body: 'The optimizers that haven\'t joined a TAP stay listed on every TAP, and join whichever one they hear when they wake.' },
+      keep: { title: 'Keep the TAPs as they are?', ok: 'Keep them', tone: 'danger',
+              body: 'The old networks are discarded: each TAP keeps the network it has now. An optimizer on no TAP\'s list stays off until a new re-sort, or Add an optimizer, lists it.' },
       putback: { title: 'Put the old networks back?', ok: 'Put them back', tone: 'danger',
                  body: 'Every TAP gets the network it had before the re-sort, and every optimizer looks for a TAP again, including those that have joined one. Production drops again while they rejoin.' },
     };
     if (asks[kind] && !(await uiAsk(asks[kind]))) return null;
-    const path = kind === 'stop' ? '/api/master/resort/stop' : kind === 'putback' ? '/api/master/resort/put-back' : '/api/master/resort';
+    const stop = kind === 'stop' || kind === 'keep';
+    const path = stop ? '/api/master/resort/stop' : kind === 'putback' ? '/api/master/resort/put-back' : '/api/master/resort';
     const r = await apiFetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' },
-                                     body: JSON.stringify(kind === 'stop' ? {} : { dry_run: kind === 'preview' }) });
+                                     body: JSON.stringify(stop ? {} : { dry_run: kind === 'preview' }) });
     const j = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(j.error || httpWords(r.status));
     if (kind !== 'preview') return {};
@@ -5308,7 +5319,8 @@
           <strong>${topoEscape(setupTapName(t.id))}</strong><span>${answering ? 'answering: unplug it first' : t.state === 'lost' ? 'not answering' : 'not answering; asked every 5 min'}</span></label>`;
       }).join('');
       return `<h2>${f.task === 'replacetap' ? 'Which TAP did you take out?' : 'Which TAP has gone for good?'}</h2>
-        <div class="sub">TigoMonitor stops polling it and leaves it off its list. A TAP still answering can't be retired: unplug it first. Its optimizers' history stays.</div>
+        <div class="sub">TigoMonitor stops polling it and leaves it off its list. A TAP still answering can't be retired: unplug it first. Its optimizers' history stays.${
+          f.task === 'replacetap' ? ' Its optimizers are listed on the new TAP first, so the re-sort finds them.' : ''}</div>
         ${setupRunning(setup.data.master) ? (taps.length > 1 ? `<div class="setup-found setup-tap-pick">${rows}</div>` : '<div class="setup-note info">There is only one TAP: nothing to retire.</div>')
           : '<div class="setup-note info">This TigoMonitor is not running the bus, so it cannot change its list of TAPs.</div>'}
         <div class="setup-actions">${back('Cancel')}<button type="button" class="btn task-go" data-setup-retire${f.tapPick ? '' : ' disabled'}>${f.tapPick ? `Retire TAP ${topoEscape(f.tapPick)}` : 'Retire'}</button></div>`;
@@ -5678,6 +5690,25 @@
                           ok: 'Retire', tone: 'danger' }))) return;
       b.disabled = true;
       try {
+        // Replacing: the old TAP's optimizers are listed on the new one first
+        // (from what was last heard through it), so the re-sort lists them
+        // on every TAP. One with none heard has nothing to hand over.
+        if (f.task === 'replacetap') {
+          const r = await apiFetch('/api/master/taps/handover', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                                                   body: JSON.stringify({ from: f.tapPick, to: f.found, dry_run: false }) });
+          const j = await r.json().catch(() => ({}));
+          if (!r.ok && !/no optimizer has been heard/.test(j.error || '')) throw new Error(j.error || httpWords(r.status));
+          if (r.ok) {
+            for (let i = 0; i < 120; i++) {
+              const e = ((await (await apiFetch('/api/master')).json()).table || {}).edit || {};
+              if (e.kind === 'handover' && e.finished) {
+                if (!e.ok) throw new Error(e.message || 'the handover stopped');
+                break;
+              }
+              await new Promise(done => setTimeout(done, 500));
+            }
+          }
+        }
         await setupPost('/api/master/taps/forget', { tap: f.tapPick });
         f.step = f.task === 'replacetap' ? 'resort' : 'done';
       } catch (err) {

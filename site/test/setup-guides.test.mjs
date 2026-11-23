@@ -96,6 +96,11 @@ async function open(w) {
         w.master.taps = w.master.taps.filter((t) => t.id !== b.tap);
         return json(200, { retired: true });
       }
+      if (path === '/api/master/taps/handover') {
+        w.master.table.edit = { ...w.master.table.edit, kind: 'handover', active: false, finished: true, ok: true, dry_run: false,
+          step: 'done', message: 'listed 20 from the other TAP, not joined yet', started_unix: Math.floor(Date.now() / 1000) };
+        return json(200, { started: true, count: 20 });
+      }
       if (path === '/api/master/resort') {
         const dry = b.dry_run !== false;
         w.master.resort = dry
@@ -542,7 +547,10 @@ test('System setup: "Replace a TAP" wires in the new one, retires the old one, t
   await page.check('input[name="setup-tap-retire"][value="1203"]');
   await page.click('button[data-setup-retire]');
   await page.waitForFunction(() => (document.querySelector('.setup-rail li[aria-current="step"]') || {}).textContent?.endsWith('Re-sort the optimizers'));
-  assert.deepEqual(w.posts.filter((p) => p.path === '/api/master/taps/forget'), [{ path: '/api/master/taps/forget', tap: '1203' }]);
+  // The old TAP's optimizers listed on the new one first, so the re-sort finds them; then it's forgotten.
+  const tapPosts = w.posts.filter((p) => p.path.startsWith('/api/master/taps/') && p.path !== '/api/master/taps/provision' && p.path !== '/api/master/taps/herd');
+  assert.deepEqual(tapPosts, [{ path: '/api/master/taps/handover', from: '1203', to: '1202', dry_run: false },
+                              { path: '/api/master/taps/forget', tap: '1203' }]);
   await page.click('button[data-resort="go"]');
   await page.waitForFunction(() => /of 21 joined/.test(document.querySelector('.setup-body').textContent));
   await next(page, 'Complete');
