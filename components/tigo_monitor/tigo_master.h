@@ -229,11 +229,14 @@ inline bool parse_discovery_window(const TunnelReply &r, DiscoveryWindow &out) {
   return true;
 }
 
-// The CCA's renewal, byte for byte: BA BE, 02, 900 s, the node count, 01 00.
-// What BA BE, 02 and 01 00 mean isn't known; they are copied, not composed.
-inline Bytes discovery_renewal_args(uint16_t node_count) {
+// The CCA's renewal, byte for byte: BA BE, 02, 900 s, the node count, 01,
+// then the known-networks flag. With one TAP the CCA sent 01 00; with two,
+// every renewal ended 01 01 (119 per TAP, 11-14 to 11-16): the flag lets a
+// TAP use the networks 0xE1 told it of during the window (the analyst,
+// 2026-11-22). What BA BE and 02 mean isn't known; they are copied.
+inline Bytes discovery_renewal_args(uint16_t node_count, bool known_networks = false) {
   return {0xBA, 0xBE, 0x02, 0x03, 0x84, static_cast<uint8_t>(node_count >> 8), static_cast<uint8_t>(node_count),
-          0x01, 0x00};
+          0x01, static_cast<uint8_t>(known_networks ? 0x01 : 0x00)};
 }
 
 // What to do about the discovery window, as the CCA does it: read it every 20 s (or
@@ -256,6 +259,7 @@ inline Bytes discovery_renewal_args(uint16_t node_count) {
 struct WindowAction {
   enum Kind { none, check, renew } kind = none;
   uint16_t node_count = 0;
+  bool known_networks = false;  // a renewal ending 01 01
 };
 
 class WindowKeeper {
@@ -279,6 +283,7 @@ class WindowKeeper {
     if (out && may && renewing_) {
       a.kind = WindowAction::renew;
       a.node_count = last_.node_count;
+      a.known_networks = known_networks_;
       renewed_ = true;
       last_renew_ms_ = now_ms;
       renews_unanswered_++;
@@ -311,6 +316,10 @@ class WindowKeeper {
 
   void set_renewing(bool on) { renewing_ = on; }
   bool renewing() const { return renewing_; }
+  // Renewals end 01 01 (discovery_renewal_args): more than one TAP, told
+  // each other's networks.
+  void set_known_networks(bool on) { known_networks_ = on; }
+  bool known_networks() const { return known_networks_; }
   const DiscoveryWindow &last() const { return last_; }
   uint32_t renewals() const { return renewals_; }
   bool ever_read() const { return ever_read_; }
@@ -322,6 +331,7 @@ class WindowKeeper {
   bool checked_ = false;
   bool renewed_ = false;
   bool renewing_ = true;
+  bool known_networks_ = false;
   WindowAction::Kind last_sent_ = WindowAction::none;
   uint32_t next_check_ms_ = 0;
   uint32_t last_renew_ms_ = 0;
@@ -1230,7 +1240,7 @@ inline Request next_request(WindowKeeper &window, const PollCursor &cursor, uint
   }
   seq = next_seq(seq);
   if (a.kind == WindowAction::renew)
-    return {CMD_TUNNEL, tunnel_request(SUB_DISCOVERY_START, seq, discovery_renewal_args(a.node_count))};
+    return {CMD_TUNNEL, tunnel_request(SUB_DISCOVERY_START, seq, discovery_renewal_args(a.node_count, a.known_networks))};
   return {CMD_TUNNEL, tunnel_request(SUB_DISCOVERY_STATUS, seq, {})};
 }
 
@@ -1959,9 +1969,10 @@ inline Allow classify_request(uint16_t cmd, const Bytes &payload) {
     case SUB_DISCOVERY_STATUS:
       return args.empty() ? Allow::yes : Allow::bench_only;
     case SUB_DISCOVERY_START:
-      // Only the CCA's renewal, with a node count; it never sent 0.
+      // Only the CCA's renewal, with a node count (it never sent 0), ending
+      // 01 00 or, with more than one TAP, 01 01.
       return args.size() == 9 && Bytes(args.begin(), args.begin() + 5) == Bytes{0xBA, 0xBE, 0x02, 0x03, 0x84} &&
-                     (args[5] || args[6]) && args[7] == 0x01 && args[8] == 0x00
+                     (args[5] || args[6]) && args[7] == 0x01 && args[8] <= 0x01
                  ? Allow::yes
                  : Allow::bench_only;
     case SUB_HOUSEKEEPING:  // only the CCA's shape; Housekeeping sends only learned ones

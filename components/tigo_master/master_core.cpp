@@ -1488,6 +1488,9 @@ void MasterCore::tick_(uint32_t now_ms) {
     // An add waiting for its optimizer to join holds the window open, as
     // the CCA opened it after its write; the owner's switch still wins.
     t.window.set_renewing(discovery_renewing_ && (window_wanted_ || t.join_watch.wants_window()));
+    // More than one TAP, told each other's networks: renewals end 01 01, as
+    // the CCA's did from its second TAP on.
+    t.window.set_known_networks(known_networks_ && several_());
   }
   if (t.refusals_in_a_row >= NO_REPLY_FAULT_AFTER && now_ms - t.refused_at_ms < REFUSED_RETRY_MS) return;
   if (!stops.empty()) {

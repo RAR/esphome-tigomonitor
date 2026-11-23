@@ -4,7 +4,7 @@ on a pseudo-terminal (docs/superpowers/specs/2026-11-10-multi-tap-design.md).
 
     mock_taps.py PTY_LINK --tap ID,MAC[,PANELS[,new]] [--tap ...]
                  [--radio N,CH,PANHEX,KEYBYTE] [--down N,AT,FOR] [--down-file N,PATH]
-                 [--reset-quiet S] [--join-after S] [--stats FILE]
+                 [--reset-quiet S] [--join-after S] [--window S] [--stats FILE]
 
 Each --tap is a TAP at RS485 id ID (hex; 1235 is the factory address), with
 a MAC ending in the hex byte MAC and PANELS optimizers behind it (3). "new"
@@ -22,7 +22,8 @@ without --radio answers the read with fixed invented bytes, as before.
 
 Every TAP answers at its own id, as mock_tap.py's one does: polls with
 readings for its own optimizers and, once, a Frame 27 naming them; its
-discovery window (2E, renewed by 2D); VERSION, 000E/0E02, the GatewayCfg
+discovery window (2E, renewed by 2D, open --window seconds; each renewal's
+last two bytes are in the TAP's stats as renewal_flags); VERSION, 000E/0E02, the GatewayCfg
 read, 0B00, 22, 41 and table pages (26), writes (29) and erases (2B). The
 bring-up goes to all of them, as on RS485: SET_485_ID moves every TAP to the
 factory address, GET_MAC there is answered by each, SET_ID_BY_MAC moves the
@@ -84,6 +85,7 @@ def main():
     ap.add_argument('--down-file', action='append', default=[])
     ap.add_argument('--reset-quiet', type=float, default=4.5)
     ap.add_argument('--join-after', type=float, default=5)
+    ap.add_argument('--window', type=float, default=600)  # how long a discovery window runs, renewed or at start
     ap.add_argument('--stats', default=None)
     a = ap.parse_args()
 
@@ -93,6 +95,7 @@ def main():
         f = spec.split(',')
         panels = int(f[2]) if len(f) > 2 else 3
         taps.append(Tap(i + 1, int(f[0], 16), int(f[1], 16), panels, len(f) > 3 and f[3] == 'new', node, rng))
+        taps[-1].window_end = time.monotonic() + a.window
         node += panels
     for spec in a.radio:
         n, ch, pan, kb = spec.split(',')
@@ -223,7 +226,8 @@ def main():
                 send(encode(addr | 0x8000, 0x0B10, t.window(p[4], len(t.panels))))
             elif cmd == 0x0B0F and len(p) == 14 and p[3] == 0x2D:
                 t.st['renewals'] += 1
-                t.window_end = time.monotonic() + 600
+                t.st.setdefault('renewal_flags', []).append(p[12:14].hex())
+                t.window_end = time.monotonic() + a.window
                 send(encode(addr | 0x8000, 0x0B10, t.window(p[4], len(t.panels))))
             elif cmd == 0x0B00 and len(p) == 1:
                 t.st['sessions'].append(f'{p[0]:02x}')

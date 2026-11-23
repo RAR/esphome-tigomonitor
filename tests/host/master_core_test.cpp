@@ -811,6 +811,7 @@ struct MultiTap {
     int e1_silent = 0;         // this many 0xE1s go unanswered first; -1: all
     std::vector<mp::Bytes> records;
     std::vector<mp::Bytes> writes;
+    std::vector<mp::Bytes> renewals;  // each 0x2D's args
   };
   TapPort port;
   std::vector<One> taps;
@@ -902,6 +903,7 @@ struct MultiTap {
       r.cmd = 0x0B10;
       r.payload = {0x00, 0x0E, 0x00, static_cast<uint8_t>(sub + 1), seq};
       if (sub == 0x2E || sub == 0x2D) {
+        if (sub == 0x2D) t->renewals.push_back(args);
         r.payload[3] = 0x2F;
         mp::Bytes w = {0x01, 0x03, 0x84, 0x00, 0x02, 0x00, 0x02, 0x00, static_cast<uint8_t>(t->records.size())};
         if (t->window_closed) w[0] = w[1] = w[2] = 0x00;
@@ -2334,7 +2336,74 @@ static void test_without_learning_the_list_stays() {
   core.close();
 }
 
+// With more than one TAP and 0xE1 on (the Pi), every renewal ends 01 01, as
+// the CCA's did from its second TAP on; one TAP, or the ESP32 (no 0xE1),
+// keeps 01 00.
+static std::set<std::string> renewal_ends(MultiTap &bus) {
+  std::set<std::string> ends;
+  for (auto &t : bus.taps)
+    for (auto &a : t.renewals) {
+      char b[8];
+      std::snprintf(b, sizeof(b), "%02X%02X", a.size() > 8 ? a[7] : 0, a.size() > 8 ? a[8] : 0);
+      ends.insert(b);
+    }
+  return ends;
+}
+static int renewal_count(MultiTap &bus) {
+  int n = 0;
+  for (auto &t : bus.taps) n += static_cast<int>(t.renewals.size());
+  return n;
+}
+static void test_two_taps_renew_with_known_networks() {
+  MultiTap bus;
+  bus.taps = {{0x1201, 1}, {0x1202, 2}};
+  for (auto &t : bus.taps) {
+    t.records = {rec(t.mac_last, static_cast<uint16_t>(0x10 + t.mac_last))};
+    t.window_closed = true;
+  }
+  MasterCore core(&bus.port, [](int, const std::string &) {}, nullptr, nullptr, 0x1201, false, false);
+  core.set_taps({{0x1201, {}}, {0x1202, {}}});
+  core.set_known_networks(true);
+  CHECK(core.open());
+  run_for(core, 0, 10000, 50);
+  CHECK(bus.at(0x1201)->renewals.size() >= 1 && bus.at(0x1202)->renewals.size() >= 1);
+  CHECK(renewal_ends(bus) == std::set<std::string>{"0101"});
+  core.close();
+}
+static void test_one_tap_renews_without_the_flag() {
+  {
+    MultiTap bus;
+    bus.taps = {{0x1201, 1}};
+    bus.taps[0].records = {rec(1, 0x10)};
+    bus.taps[0].window_closed = true;
+    MasterCore core(&bus.port, [](int, const std::string &) {}, nullptr, nullptr, 0x1201, false, false);
+    core.set_known_networks(true);
+    CHECK(core.open());
+    run_for(core, 0, 10000, 50);
+    CHECK(renewal_count(bus) >= 1);
+    CHECK(renewal_ends(bus) == std::set<std::string>{"0100"});
+    core.close();
+  }
+  {  // the ESP32: two TAPs, no 0xE1
+    MultiTap bus;
+    bus.taps = {{0x1201, 1}, {0x1202, 2}};
+    for (auto &t : bus.taps) {
+      t.records = {rec(t.mac_last, static_cast<uint16_t>(0x10 + t.mac_last))};
+      t.window_closed = true;
+    }
+    MasterCore core(&bus.port, [](int, const std::string &) {}, nullptr, nullptr, 0x1201, false, false);
+    core.set_taps({{0x1201, {}}, {0x1202, {}}});
+    CHECK(core.open());
+    run_for(core, 0, 10000, 50);
+    CHECK(renewal_count(bus) >= 2);
+    CHECK(renewal_ends(bus) == std::set<std::string>{"0100"});
+    core.close();
+  }
+}
+
 int main() {
+  test_two_taps_renew_with_known_networks();
+  test_one_tap_renews_without_the_flag();
   test_a_standby_learns_the_taps_another_master_polls();
   test_a_learned_tap_joins_a_saved_list();
   test_a_guess_the_master_polls_is_kept();
