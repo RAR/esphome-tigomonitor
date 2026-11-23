@@ -61,6 +61,7 @@
 #include <cstdio>
 #include <set>
 #include <string>
+#include <vector>
 
 namespace esphome {
 namespace tigo_monitor {
@@ -95,6 +96,10 @@ struct RadioBlock {
   // Not sent: with keep_network, this channel instead of the TAP's own
   // (moving a TAP to another channel; its PAN and key stay). 0: its own.
   uint16_t new_channel = 0;
+  // Not sent: the key is the one the other TAPs share, filled in by the
+  // master before the job starts (shared_key() below); with keep_network
+  // the TAP's own key is not copied from its read.
+  bool shared_key = false;
   // Not sent: start at the read, without asking the TAP for its MAC first
   // (bench: does a lone 003A to a running TAP set the 0x0E status to 1?).
   bool skip_identify = false;
@@ -311,6 +316,31 @@ template<typename Draw> std::array<uint8_t, 16> key_from(Draw draw) {
   return k;
 }
 
+// The key a TAP should have: the one the other TAPs share. A site's TAPs
+// share one key and each keeps its own channel and PAN (the roof's capture,
+// 2026-11-14..16, and the analyst, 2026-11-22): a TAP on another key is one
+// no optimizer can join. others holds one entry per other TAP that counts,
+// nullptr for one whose settings haven't been read. Two read keys that
+// differ say so before anything unread does.
+enum class KeyMatch { alone, unread, same, different };
+
+inline KeyMatch shared_key(const std::vector<const RadioBlock *> &others, std::array<uint8_t, 16> &key) {
+  if (others.empty()) return KeyMatch::alone;
+  const RadioBlock *first = nullptr;
+  bool unread = false;
+  for (const RadioBlock *b : others) {
+    if (!b) {
+      unread = true;
+      continue;
+    }
+    if (!first) first = b;
+    else if (b->key != first->key) return KeyMatch::different;
+  }
+  if (unread || !first) return KeyMatch::unread;
+  key = first->key;
+  return KeyMatch::same;
+}
+
 // The write's args: 01 00 and the block.
 inline Bytes radio_write_args(const RadioBlock &b) {
   Bytes a = {0x01, 0x00};
@@ -451,10 +481,15 @@ class ProvisionJob : public TableJob {
         block_.wide = now.wide;
         block_.extra = now.extra;
         turn_ = true;
+        // Keeping a network the TAP doesn't have (its factory settings,
+        // channel 0): nothing to keep, and the write would be refused.
+        if (block_.keep_network && !block_.new_channel && (now.channel < CHANNEL_MIN || now.channel > CHANNEL_MAX))
+          return fail_("the TAP is still on its factory settings (channel " + std::to_string(now.channel) +
+                       "); Add a TAP gives it a network of its own first");
         if (block_.keep_network) {
           block_.channel = block_.new_channel ? block_.new_channel : now.channel;
           block_.pan = now.pan;
-          block_.key = now.key;
+          if (!block_.shared_key) block_.key = now.key;
         }
         // Sized the CCA's way: a TAP keeps its own known map while that still
         // covers its table; otherwise the smallest that does.

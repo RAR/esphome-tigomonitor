@@ -3,15 +3,22 @@
 on a pseudo-terminal (docs/superpowers/specs/2026-11-10-multi-tap-design.md).
 
     mock_taps.py PTY_LINK --tap ID,MAC[,PANELS[,new]] [--tap ...]
-                 [--down N,AT,FOR] [--down-file N,PATH] [--reset-quiet S] [--join-after S]
-                 [--stats FILE]
+                 [--radio N,CH,PANHEX,KEYBYTE] [--down N,AT,FOR] [--down-file N,PATH]
+                 [--reset-quiet S] [--join-after S] [--stats FILE]
 
 Each --tap is a TAP at RS485 id ID (hex; 1235 is the factory address), with
 a MAC ending in the hex byte MAC and PANELS optimizers behind it (3). "new"
 means it keeps no id through a RESET, as a TAP never stored has none: it
 goes back to the factory address. --down takes TAP number N (from 1) off the
 bus AT seconds in, for FOR seconds (0: for good); --down-file, while PATH
-exists.
+exists. --radio gives TAP N its radio settings (GatewayCfg): channel CH, PAN
+PANHEX and a key of KEYBYTE sixteen times (made up). Such a TAP answers the
+read (0D 00 00) with them, takes a write (0D 01 00), answers the stored read
+(0D 00 01) with what the Store (0012) last saved, and answers SetKnownNetworks
+(E1) with status 0 and its own channel and PAN. Its stats list each write's
+channel, PAN and which TAP's starting key it holds (key_same_as, the TAP's
+number, or null) and each E1's count and channels, never a key. A TAP
+without --radio answers the read with fixed invented bytes, as before.
 
 Every TAP answers at its own id, as mock_tap.py's one does: polls with
 readings for its own optimizers and, once, a Frame 27 naming them; its
@@ -54,8 +61,12 @@ class Tap:
         self.written = []  # [mac hex, id, joins at]
         self.erased = False
         self.down = False
+        self.cfg = None  # its radio block (36 bytes), with --radio
+        self.cfg_stored = None
+        self.key0 = None  # the key it started with, for key_same_as
         self.st = {'n': n, 'mac': self.mac.hex(), 'polls': 0, 'checks': 0, 'renewals': 0, 'writes': [], 'erases': 0,
-                   'stores': 0, 'housekeeping': [], 'sessions': [], 'versions': 0, 'config_reads': 0, 'frames': 0}
+                   'stores': 0, 'housekeeping': [], 'sessions': [], 'versions': 0, 'config_reads': 0, 'frames': 0,
+                   'cfg_writes': [], 'e1': []}
 
     def window(self, seq, nodes):
         left = max(0, int(self.window_end - time.monotonic()))
@@ -68,6 +79,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('link')
     ap.add_argument('--tap', action='append', default=[])
+    ap.add_argument('--radio', action='append', default=[])
     ap.add_argument('--down', action='append', default=[])
     ap.add_argument('--down-file', action='append', default=[])
     ap.add_argument('--reset-quiet', type=float, default=4.5)
@@ -82,6 +94,13 @@ def main():
         panels = int(f[2]) if len(f) > 2 else 3
         taps.append(Tap(i + 1, int(f[0], 16), int(f[1], 16), panels, len(f) > 3 and f[3] == 'new', node, rng))
         node += panels
+    for spec in a.radio:
+        n, ch, pan, kb = spec.split(',')
+        t = taps[int(n) - 1]
+        pan, kb = int(pan, 16), int(kb, 16)
+        t.key0 = bytes([kb]) * 16
+        t.cfg = t.cfg_stored = (bytes([0x00, int(ch), pan >> 8, pan & 0xFF]) + bytes.fromhex('14030201000000001c03') +
+                                b'\x5a' + t.key0 + bytes.fromhex('00000200') + b'\x3c')
     downs = []
     for spec in a.down:
         n, at, dur = spec.split(',')
@@ -178,6 +197,7 @@ def main():
             if cmd == 0x0012 and p == bytes.fromhex('37249266'):  # STORE, key only
                 t.kept = t.id
                 t.st['stores'] += 1
+                t.cfg_stored = t.cfg
                 send(encode(addr | 0x8000, 0x0013, b''))
             elif cmd == 0x000A:
                 t.st['versions'] += 1
@@ -210,7 +230,23 @@ def main():
                 send(encode(addr | 0x8000, 0x0B01, p))
             elif cmd == 0x0B0F and len(p) == 7 and p[3] == 0x0D:
                 t.st['config_reads'] += 1
-                send(encode(addr | 0x8000, 0x0B10, bytes([0x00, 0x0E, 0x00, 0x0E, p[4]]) + bytes(range(37))))
+                if t.cfg is None:
+                    block = bytes(range(37))
+                else:
+                    block = (t.cfg_stored if p[5:7] == b'\x00\x01' else t.cfg) + b'\x00'
+                send(encode(addr | 0x8000, 0x0B10, bytes([0x00, 0x0E, 0x00, 0x0E, p[4]]) + block))
+            elif cmd == 0x0B0F and len(p) == 7 + 36 and p[3] == 0x0D and p[5:7] == b'\x01\x00' and t.cfg is not None:
+                t.cfg = bytes(p[7:])
+                key = t.cfg[15:31]
+                same = next((o.n for o in taps if o.key0 == key), None)
+                t.st['cfg_writes'].append({'channel': t.cfg[1], 'pan': f'{t.cfg[2]:02X}{t.cfg[3]:02X}', 'key_same_as': same})
+                send(encode(addr | 0x8000, 0x0B10, bytes([0x00, 0x0E, 0x00, 0x0E, p[4]]) + t.cfg + b'\x00'))
+            elif cmd == 0x0B0F and len(p) >= 9 and p[3] == 0xE1:
+                args = p[5:]
+                t.st['e1'].append({'count': args[0], 'channels': [args[4 + 20 * i] for i in range(args[0])
+                                                                  if 4 + 20 * i < len(args)]})
+                own = t.cfg or bytes(4)
+                send(encode(addr | 0x8000, 0x0B10, bytes([0x00, 0x0E, 0x00, 0xE2, p[4], 0x00, own[1], own[2], own[3]])))
             elif cmd == 0x0B0F and len(p) == 7 and p[3] == 0x22:
                 send(encode(addr | 0x8000, 0x0B10, bytes([0x00, 0x0E, 0x00, 0x23, p[4], 0x03])))
             elif cmd == 0x0B0F and len(p) >= 5 and p[3] == 0x41:
