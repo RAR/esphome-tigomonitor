@@ -1,6 +1,6 @@
 # Let the optimizers choose their TAP: the re-sort (Pi)
 
-Status: design, 2026-11-23. This is PR 2 of 2. PR 1 (#182, on main) gave
+Status: built on feature/tap-resort, 2026-11-23. This is PR 2 of 2. PR 1 (#182, on main) gave
 every TAP one shared key and told each TAP the others' networks (0xE1).
 
 ## Why
