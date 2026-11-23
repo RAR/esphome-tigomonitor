@@ -118,6 +118,15 @@ class BusMaster {
     core_.set_adopt_taps(on, std::move(saved));
   }
   bool request_herd(std::string &why) { return core_.request_herd(why); }
+  // The re-sort (resort.h): its file, its random bytes, and the owner's three requests.
+  void set_resort_saved(esphome::tigo_master::MasterCore::ResortSaved saved,
+                        const esphome::tigo_master::ResortFile *resume) {
+    core_.set_resort_saved(std::move(saved), resume);
+  }
+  void set_resort_draw(std::function<uint8_t()> draw) { core_.set_resort_draw(std::move(draw)); }
+  bool request_resort(bool dry_run, std::string &why) { return core_.request_resort(dry_run, why); }
+  bool request_resort_put_back(bool dry_run, std::string &why) { return core_.request_resort_put_back(dry_run, why); }
+  bool request_resort_stop(std::string &why) { return core_.request_resort_stop(why); }
   uint8_t seq() const { return core_.seq(); }
   void set_seq(uint8_t s) { core_.set_seq(s); }
   bool request_forget_tap(uint16_t id, std::string &why) { return core_.request_forget_tap(id, why); }

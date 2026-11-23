@@ -29,6 +29,7 @@ add_executable(tigomonitord
   src/discovery_store.cpp
   src/table_store.cpp
   src/tap_store.cpp
+  src/resort_store.cpp
   src/log.cpp
   src/cca_ble.cpp
   src/cca_http.cpp

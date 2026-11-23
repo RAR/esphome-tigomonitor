@@ -9,6 +9,7 @@
 #include "pv_store.h"
 #include "discovery_store.h"
 #include "table_store.h"
+#include "resort_store.h"
 #include "tap_store.h"
 #include "heard_taps.h"
 #include "monitor.h"
@@ -293,6 +294,8 @@ int main(int argc, char **argv) {
   discovery.load();
   TableStore table_store(state_dir + "/table-remove.json");
   TapStore tap_store(state_dir + "/taps.json");
+  ResortStore resort_store(state_dir + "/resort.json");
+  std::random_device resort_rd;  // the re-sort's new PANs and key
   // The TAP an optimizer (MAC, hex) last reported through, from the Monitor's
   // link stats: 0 if it never has, which a table change takes as the first.
   auto tap_of_mac = [&monitor](const std::string &mac) -> uint16_t {
@@ -504,6 +507,15 @@ int main(int argc, char **argv) {
                                           const std::vector<esphome::tigo_monitor::master::TableRecord> *stay) {
           return table_store.save(mac, stay);
         }, resume_mac, unfinished ? &resume : nullptr);
+      }
+      {
+        // A re-sort cut off by a restart goes on from its file.
+        std::optional<esphome::tigo_master::ResortFile> resort = resort_store.load();
+        if (resort) LOGW("bus master: re-sort: found one %s; carrying on", resort->phase == "writing" ? "cut off in its writes" : "waiting");
+        m->set_resort_saved([&resort_store](const esphome::tigo_master::ResortFile *f) {
+          return f ? resort_store.save(*f) : resort_store.clear();
+        }, resort ? &*resort : nullptr);
+        m->set_resort_draw([&resort_rd]() { return static_cast<uint8_t>(resort_rd()); });
       }
       // Standing by, it listens as the listen role does, learning the 0x41s
       // another master sends, and takes the latest of them when it takes over.
@@ -805,6 +817,30 @@ int main(int argc, char **argv) {
           return 409;
         }
         return bus_master->request_table_handover(recs, dry_run, why, to) ? 200 : 409;
+      },
+      [&](bool dry_run, std::string &why) {
+        std::lock_guard<std::mutex> lock(master_mu);
+        if (!bus_master) {
+          why = "this monitor isn't running the bus";
+          return 409;
+        }
+        return bus_master->request_resort(dry_run, why) ? 200 : 409;
+      },
+      [&](bool dry_run, std::string &why) {
+        std::lock_guard<std::mutex> lock(master_mu);
+        if (!bus_master) {
+          why = "this monitor isn't running the bus";
+          return 409;
+        }
+        return bus_master->request_resort_put_back(dry_run, why) ? 200 : 409;
+      },
+      [&](std::string &why) {
+        std::lock_guard<std::mutex> lock(master_mu);
+        if (!bus_master) {
+          why = "this monitor isn't running the bus";
+          return 409;
+        }
+        return bus_master->request_resort_stop(why) ? 200 : 409;
       },
       trusted_ingress, port >= 0});
   if (port < 0 && settings.web_port > 0) port = settings.web_port;

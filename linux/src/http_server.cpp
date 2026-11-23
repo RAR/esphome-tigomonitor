@@ -1678,6 +1678,28 @@ void HttpServer::routes_() {
                                         {"text", o.text}, {"unix", o.at_unix}});
                          return a;
                        }()}}},
+                    // The re-sort (resort.h): no key or PAN in any of it.
+                    {"resort",
+                     {{"state", m.resort.state},
+                      {"dry_run", m.resort.dry_run},
+                      {"finished", m.resort.finished},
+                      {"ok", m.resort.ok},
+                      {"step", m.resort.step},
+                      {"message", m.resort.message},
+                      {"dry_frames", m.resort.dry_frames},
+                      {"started_unix", m.resort.started_unix},
+                      {"joined", [&m] {
+                         json a = json::array();
+                         for (const auto &j : m.resort.joined) a.push_back({{"tap", hex4(j.first)}, {"count", j.second}});
+                         return a;
+                       }()},
+                      {"missing", [&m] {
+                         json a = json::array();
+                         for (const auto &w : m.resort.missing)
+                           a.push_back({{"mac", w.mac}, {"label", label_of_hex(w.mac)}, {"id", w.id ? hex4(w.id) : ""}});
+                         return a;
+                       }()},
+                      {"can_put_back", m.resort.can_put_back}}},
                     {"standby",
                      {{"state", standby_name(m.standby)},
                       {"takeover_s", m.takeover_s},
@@ -1889,6 +1911,38 @@ void HttpServer::routes_() {
     if (code == 200) send_json(res, {{"retired", true}});
     else send_json(res, {{"error", why.empty() ? "not running the bus" : why}}, code);
   });
+
+  // Pi-only: the re-sort (resort.h, docs/superpowers/specs/2026-11-23-tap-resort-design.md):
+  // {"dry_run": false} gives every TAP a new network and lists every
+  // optimizer on every TAP, so each joins the TAP it hears; a dry run (the
+  // default) reads the tables and says what it would send. Its put-back
+  // (the old networks again) takes the same body; its stop, none. Behind
+  // the web password and, but for a dry run, Allow changes to the TAPs.
+  auto resort_route = [this, &svr](const char *path, std::function<int(bool, std::string &)> *fn, bool has_body) {
+    svr.Post(path, [this, fn, has_body](const httplib::Request &req, httplib::Response &res) {
+      if (ctx_.current_settings().web_password.empty() && !setup_open(ctx_.current_settings(), unix_now_s())) {
+        send_json(res, {{"error", "set a web password first"}}, 403);
+        return;
+      }
+      bool dry_run = true;
+      if (has_body) {
+        json j = req.body.empty() ? json::object() : json::parse(req.body, nullptr, false);
+        if (j.is_discarded() || !j.is_object() || (j.contains("dry_run") && !j["dry_run"].is_boolean())) {
+          send_json(res, {{"error", "expected {\"dry_run\": true|false}"}}, 400);
+          return;
+        }
+        dry_run = j.value("dry_run", true);
+      }
+      std::string why;
+      int code = *fn ? (*fn)(dry_run, why) : 409;
+      if (code == 200) send_json(res, {{"status", "ok"}, {"dry_run", dry_run}});
+      else send_json(res, {{"error", why.empty() ? "not running the bus" : why}}, code);
+    });
+  };
+  resort_route("/api/master/resort", &ctx_.request_resort, true);
+  resort_route("/api/master/resort/put-back", &ctx_.request_resort_put_back, true);
+  resort_stop_fn_ = [this](bool, std::string &why) { return ctx_.request_resort_stop ? ctx_.request_resort_stop(why) : 409; };
+  resort_route("/api/master/resort/stop", &resort_stop_fn_, false);
 
   // Pi-only: Replace a TAP's handover ({"from": "1202", "to": "1201",
   // "dry_run": true by default}): every optimizer last heard through from is
