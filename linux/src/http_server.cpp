@@ -612,6 +612,12 @@ void HttpServer::routes_() {
                        {"last_heard_s", heard ? json(now_s - l.last_heard_s) : json(nullptr)},
                        {"last_join_unix", l.last_join_s ? json(l.last_join_s) : json(nullptr)}});
     }
+    // And every named TAP, though nothing reports through it yet (one just
+    // added), so Topology can place it and call it by its name.
+    for (const auto &kv : names) {
+      unsigned long id = strtoul(kv.first.c_str(), nullptr, 16);
+      if (kv.first.size() == 4 && id) tap_ids.insert(static_cast<uint16_t>(id));
+    }
     json taps = json::array();
     for (uint16_t t : tap_ids) {
       char id[8];

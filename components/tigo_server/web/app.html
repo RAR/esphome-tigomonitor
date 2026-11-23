@@ -8494,6 +8494,9 @@
       arr.devices = (dev && dev.devices) || [];
       // The TAP's helpers (the 0x41 PGW streams), from a TigoMonitor running the bus.
       arr.pgw = {};
+      // And every TAP it runs, so one nothing reports through yet (just
+      // added) can still be placed.
+      arr.masterTaps = ((master && master.active !== false && master.taps) || []).map(t => t.id);
       ((master && master.active !== false && master.taps) || []).forEach(t => { if (t.pgw) arr.pgw[t.id] = t.pgw; });
       arr.pgwAt = Date.now();
       if (saved) { arr.saved = { panels: saved.panels || [], taps: saved.taps || [] }; arr.loaded = true; }
@@ -8512,6 +8515,7 @@
   // Every TAP a panel reports through, plus any placed or named.
   function arrayTapIds() {
     const ids = new Set(Object.keys(arr.tapNames));
+    (arr.masterTaps || []).forEach(id => ids.add(id));
     arr.devices.forEach(d => { if (d.tap) ids.add(d.tap); });
     (arr.draft || arr.saved).taps.forEach(t => ids.add(t.id));
     return [...ids].sort();
