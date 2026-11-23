@@ -484,16 +484,22 @@ void MasterCore::resort_wait_(uint32_t now_ms) {
     resort_trim_tap_ = 0;
     for (auto &t : taps_) t->resort_read = false;
   }
-  bool all = true;
+  bool all = true, lost = false;
   std::map<uint16_t, std::vector<master::TableRecord>> tables;
   for (const auto &t : taps_) {
     if (!t->resort_read || t->lost) all = false;
+    lost = lost || t->lost;
     tables[t->id] = t->resort_table;
   }
   std::map<uint16_t, std::vector<master::Bytes>> trim = master::resort_trim(tables);
   bool owed = false;
   for (auto &t : taps_) {
-    t->resort_trim_owed = all && !trim[t->id].empty();
+    // While the tables are read again after a trim, a TAP owed one stays
+    // owed, so its closed window isn't renewed before its turn. A lost TAP
+    // (one whose table goes unanswered soon is) frees the windows: no trim
+    // can be worked out until it answers.
+    if (all) t->resort_trim_owed = !trim[t->id].empty();
+    else if (lost) t->resort_trim_owed = false;
     owed = owed || t->resort_trim_owed;
   }
   // Without Allow changes to the TAPs no trim can be sent: none is waited

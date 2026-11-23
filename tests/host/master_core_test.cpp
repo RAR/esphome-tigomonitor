@@ -801,6 +801,7 @@ struct MultiTap {
     bool up;
     uint16_t stored;  // where a RESET puts it; 0: the factory address (a new TAP)
     bool window_closed = false;  // its discovery window reads closed, 0 s left
+    bool reopen_on_renewal = false;  // a 0x2D opens a closed window, as a TAP does
     // Its radio settings (GatewayCfg): read with 0D 00 00, written with
     // 0D 01 00, the stored copy read with 0D 00 01 and saved by the Store.
     bool has_cfg = false, cfg_silent = false;
@@ -820,6 +821,7 @@ struct MultiTap {
     int drop_pv_on = 0;                // this many 0B00 01s it never hears
     int drop_29_ack = 0;               // this many 0x29s it takes without acking
     int reads_silent_after_erase = 0;  // table pages unanswered after an erase: a TAP restarting
+    bool tables_silent = false;        // no table page answered, though polls are
     bool erased = false;
   };
   bool other_master = false;  // every answer comes with another master's poll beside it
@@ -962,6 +964,7 @@ struct MultiTap {
       r.payload = {0x00, 0x0E, 0x00, static_cast<uint8_t>(sub + 1), seq};
       if (sub == 0x2E || sub == 0x2D) {
         if (sub == 0x2D) t->renewals.push_back(args);
+        if (sub == 0x2D && t->reopen_on_renewal) t->window_closed = false;
         r.payload[3] = 0x2F;
         mp::Bytes w = {0x01, 0x03, 0x84, 0x00, 0x02, 0x00, 0x02, 0x00, static_cast<uint8_t>(t->records.size())};
         if (t->window_closed) w[0] = w[1] = w[2] = 0x00;
@@ -973,6 +976,7 @@ struct MultiTap {
           t->reads_silent_after_erase--;
           return false;
         }
+        if (t->tables_silent) return false;
         uint16_t asked = static_cast<uint16_t>(args[0] << 8 | args[1]);
         std::vector<mp::Bytes> page;
         for (const auto &rec : t->records)
@@ -2643,6 +2647,56 @@ static void test_resort_trims_at_window_close_and_finishes() {
   CHECK(no_key_in(rig.lines));
 }
 
+// The roof, 2026-11-23: every window closed in the same second. The first
+// TAP was trimmed; the others' windows were renewed while the tables were
+// read again after it, so their trims waited a whole window each.
+static void test_resort_trims_every_tap_whose_window_closed() {
+  ResortRig rig;
+  rig.start();
+  std::string why;
+  CHECK(rig.core->request_resort(false, why));
+  rig.run(60000);
+  for (uint16_t id = 0x10; id < 0x24; id++) rig.bus.join(0x1201, id);
+  for (uint16_t id = 0x24; id < 0x38; id++) rig.bus.join(0x1202, id);
+  rig.run(2 * MasterCore::RESORT_READ_MS);  // the joins read while the windows run
+  for (auto &t : rig.bus.taps) t.reopen_on_renewal = true;
+  rig.close_windows();
+  rig.run(2 * MasterCore::RESORT_READ_MS + 60000);
+  std::vector<uint16_t> a, b;
+  for (uint16_t id = 0x10; id < 0x24; id++) a.push_back(id);
+  for (uint16_t id = 0x24; id < 0x38; id++) b.push_back(id);
+  CHECK(rig.bus.ids_on(0x1201) == a);
+  CHECK(rig.bus.ids_on(0x1202) == b);
+  CHECK(rig.bus.ids_on(0x1203).empty());
+  auto st = rig.core->status().resort;
+  CHECK(st.state == "idle" && st.finished && st.ok);
+  CHECK(rig.logged("re-sort: done: 20 on TAP 1201, 20 on TAP 1202, 0 on TAP 1203"));
+  CHECK(rig.removed == 0);
+}
+
+// A TAP that still answers polls but whose table can't be read again after
+// a trim mustn't hold the windows closed for good.
+static void test_resort_an_unreadable_table_frees_the_windows() {
+  ResortRig rig;
+  rig.start();
+  std::string why;
+  CHECK(rig.core->request_resort(false, why));
+  rig.run(60000);
+  for (uint16_t id = 0x10; id < 0x24; id++) rig.bus.join(0x1201, id);
+  for (uint16_t id = 0x24; id < 0x38; id++) rig.bus.join(0x1202, id);
+  rig.run(2 * MasterCore::RESORT_READ_MS);
+  for (auto &t : rig.bus.taps) t.reopen_on_renewal = true;
+  rig.bus.at(0x1203)->tables_silent = true;  // from now on: Mid Roof's table can't be read
+  size_t before[3];
+  for (int k = 0; k < 3; k++) before[k] = rig.bus.taps[k].renewals.size();
+  rig.close_windows();
+  rig.run(5 * MasterCore::RESORT_READ_MS + 60000);
+  CHECK(rig.logged("re-sort: taking 20 optimizers off TAP 1201"));  // the first trim ran
+  CHECK(rig.bus.taps[1].renewals.size() > before[1]);
+  CHECK(rig.bus.taps[2].renewals.size() > before[2]);
+  CHECK(rig.removed == 0);
+}
+
 static void test_resort_windows_renew_despite_auto_discovery() {
   ResortRig rig;
   rig.start();
@@ -2971,6 +3025,8 @@ int main() {
   test_resort_refusals();
   test_resort_runs_and_waits();
   test_resort_trims_at_window_close_and_finishes();
+  test_resort_trims_every_tap_whose_window_closed();
+  test_resort_an_unreadable_table_frees_the_windows();
   test_resort_windows_renew_despite_auto_discovery();
   test_resort_stop_waiting();
   test_resort_tap_lost_mid_write();
