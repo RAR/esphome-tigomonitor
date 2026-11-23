@@ -96,6 +96,16 @@ async function open(w) {
         w.master.taps = w.master.taps.filter((t) => t.id !== b.tap);
         return json(200, { retired: true });
       }
+      if (path === '/api/master/resort') {
+        const dry = b.dry_run !== false;
+        w.master.resort = dry
+          ? { ...w.master.resort, state: 'idle', finished: true, ok: true, dry_run: true, message: 'dry run: would give 2 TAPs new networks and list all 24 optimizers on each',
+              dry_frames: ['PV off (0B00 00) to 2 TAPs', '2D window ending 01 01 on each TAP'] }
+          : { ...w.master.resort, state: 'waiting', finished: true, ok: true, dry_run: false, step: 'done', message: 'new networks on 2 TAPs',
+              joined: w.master.taps.map((t, i) => ({ tap: t.id, count: i ? 0 : 20 })), missing: [{ mac: '04C05B0000000099', label: '0-000099X', id: '0030' }],
+              can_put_back: true };
+        return json(200, { status: 'ok', dry_run: dry });
+      }
       return json(404, {});
     }
     if (path === '/api/status') return json(200, { ...routes['/api/status'], platform: 'linux' });
@@ -335,8 +345,21 @@ test('System setup: "Add a TAP" from wiring it in to its name, giving it its rad
   assert.ok(w.posts.filter((p) => p.path === '/api/master/taps/provision').every((p) => p.shared_key === true));
   await next(page, 'Name it');
   await page.fill('#setup-tap-name', 'Shed');
-  await next(page, 'Complete');
+  // Last, the re-sort: every optimizer chooses its TAP, so the new one gets some.
+  await next(page, 'Re-sort the optimizers');
   assert.deepEqual(w.posts.filter((p) => p.path === '/api/taps/name'), [{ path: '/api/taps/name', tap: '1202', name: 'Shed' }]);
+  const step = await page.textContent('.setup-body');
+  assert.match(step, /every optimizer looks for a TAP again/);
+  assert.match(step, /low sun/);
+  assert.doesNotMatch(step, /CCA/);
+  assert.equal(await page.isDisabled('button[data-setup-next]'), true);
+  await page.click('button[data-resort="preview"]');
+  await page.waitForFunction(() => /PV off \(0B00 00\) to 2 TAPs/.test(document.querySelector('.setup-body').textContent));
+  await page.click('button[data-resort="go"]');
+  await page.waitForFunction(() => /20 of 21 joined/.test(document.querySelector('.setup-body').textContent));
+  assert.deepEqual(w.posts.filter((p) => p.path === '/api/master/resort').map((p) => p.dry_run), [true, false]);
+  assert.match(await page.textContent('.setup-body'), /Still to join: 0-000099X/);
+  await next(page, 'Complete');
   const done = await page.textContent('.setup-body');
   assert.match(done, /TAP 1202 is on the bus/);
   await page.click('button[data-setup-adopt="off"]');
@@ -461,6 +484,70 @@ test('System setup: "Add a TAP"\'s radio check that never finishes can be tried 
   await page.clock.fastForward(95000);
   await page.waitForFunction(() => document.querySelector('button[data-setup-radio-check]'), null, { timeout: 10000 });
   assert.match(await page.textContent('.setup-body'), /no result/i);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test('System setup: "Add a TAP" can skip the re-sort, and then says the new TAP has no optimizers yet', async () => {
+  const w = world();
+  const { page, ctx, errors } = await open(w);
+  await page.click('.setup-task[data-task="addtap"]');
+  await page.waitForSelector('.setup-flow[data-task="addtap"]');
+  await next(page, 'Allow a new TAP');
+  await page.click('button[data-setup-adopt="on"]');
+  await page.waitForFunction(() => !document.querySelector('button[data-setup-next]').disabled);
+  await next(page, 'Look for TAPs');
+  await page.click('button[data-setup-look]');
+  await page.waitForFunction(() => /Found TAP 1202/.test(document.querySelector('.setup-body').textContent), null, { timeout: 15000 });
+  await next(page, 'Radio settings');
+  await page.click('button[data-setup-radio-check]');
+  await page.waitForFunction(() => /Channel 15/.test(document.querySelector('.setup-body').textContent));
+  await page.click('button[data-setup-radio-go]');
+  await page.waitForFunction(() => /Given and saved/.test(document.querySelector('.setup-body').textContent));
+  await next(page, 'Name it');
+  await next(page, 'Re-sort the optimizers');
+  await page.click('button[data-setup-resort-skip]');
+  await page.waitForFunction(() => !document.querySelector('button[data-setup-next]').disabled);
+  await next(page, 'Complete');
+  assert.match(await page.textContent('.setup-body'), /no optimizers until you re-sort/);
+  assert.equal(w.posts.filter((p) => p.path === '/api/master/resort').length, 0);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test('System setup: "Replace a TAP" wires in the new one, retires the old one, then re-sorts', async () => {
+  const w = world();
+  w.master.taps = [tap('1201'), tap('1203', 'removed')];
+  const { page, ctx, errors } = await open(w);
+  assert.doesNotMatch(await page.textContent('.setup-start'), /Not yet/);
+  await page.click('.setup-task[data-task="replacetap"]');
+  await page.waitForSelector('.setup-flow[data-task="replacetap"]');
+  assert.match(await page.textContent('.setup-body'), /Unplug the old TAP/);
+  await next(page, 'Allow a new TAP');
+  await page.click('button[data-setup-adopt="on"]');
+  await page.waitForFunction(() => !document.querySelector('button[data-setup-next]').disabled);
+  await next(page, 'Look for TAPs');
+  w.master.taps = [tap('1201'), tap('1203', 'removed')];
+  await page.click('button[data-setup-look]');
+  await page.waitForFunction(() => /Found TAP 1202/.test(document.querySelector('.setup-body').textContent), null, { timeout: 15000 });
+  await next(page, 'Radio settings');
+  await page.click('button[data-setup-radio-check]');
+  await page.waitForFunction(() => /Channel 15/.test(document.querySelector('.setup-body').textContent));
+  await page.click('button[data-setup-radio-go]');
+  await page.waitForFunction(() => /Given and saved/.test(document.querySelector('.setup-body').textContent));
+  await next(page, 'Name it');
+  w.master.taps = [tap('1201'), { ...tap('1202'), mac: '04C05B3000000202' }, tap('1203', 'removed')];
+  await next(page, 'TAP to retire');
+  await page.waitForSelector('input[name="setup-tap-retire"][value="1203"]');
+  await page.check('input[name="setup-tap-retire"][value="1203"]');
+  await page.click('button[data-setup-retire]');
+  await page.waitForFunction(() => (document.querySelector('.setup-rail li[aria-current="step"]') || {}).textContent?.endsWith('Re-sort the optimizers'));
+  assert.deepEqual(w.posts.filter((p) => p.path === '/api/master/taps/forget'), [{ path: '/api/master/taps/forget', tap: '1203' }]);
+  await page.click('button[data-resort="go"]');
+  await page.waitForFunction(() => /of 21 joined/.test(document.querySelector('.setup-body').textContent));
+  await next(page, 'Complete');
+  assert.match(await page.textContent('.setup-body'), /TAP 1202 has taken TAP 1203's place/);
+  assert.doesNotMatch(await page.textContent('.setup-body'), /CCA/);
   assert.deepEqual(errors, []);
   await ctx.close();
 });
