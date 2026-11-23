@@ -101,11 +101,16 @@ struct TableJoinOutcome {
 // The re-sort (resort.h), as the daemon keeps it on disk. The old networks
 // hold keys: the file is the only place they are kept outside the TAPs.
 struct ResortFile {
-  // writing: between the first PV off and the last PV on, so a restart owes
-  // every TAP a PV on; waiting: the networks written, waiting for joins.
+  // writing: from just before the first PV off until the job ends, so a
+  // restart owes every TAP a PV on; waiting: every network written and
+  // every optimizer listed, waiting for joins; stopped: the job didn't
+  // finish, so the TAPs may be on mixed networks or missing optimizers, and
+  // only a put-back or the owner's stop ends it.
   std::string phase;
   int64_t started_unix = 0;
-  std::vector<esphome::tigo_monitor::master::Bytes> waited;  // every MAC the re-sort listed
+  // Every optimizer the re-sort listed: MAC and id (0x8000 set), so a
+  // put-back can list them again whatever the tables hold by then.
+  std::vector<esphome::tigo_monitor::master::TableRecord> waited;
   // Each TAP's network before the re-sort, by TAP id; empty after a put-back.
   std::vector<std::pair<uint16_t, esphome::tigo_monitor::master::RadioBlock>> old_networks;
 };
@@ -121,6 +126,7 @@ struct ResortStatus {
   std::vector<std::pair<uint16_t, int>> joined;  // per TAP, in polling order, at its last read
   std::vector<TableWaiting> missing;             // waited for, joined on no TAP
   bool can_put_back = false;                     // the old networks are on file
+  std::string note;                              // why the waiting can't do everything now
 };
 
 // One TAP the master runs (docs/superpowers/specs/2026-11-10-multi-tap-design.md):
@@ -553,7 +559,9 @@ class MasterCore {
     bool resort_read = false;
     uint32_t resort_read_ms = 0;
     bool resort_trim_owed = false;
-    bool resort_pv_on_sent = false;  // a restart in the writes: its PV on
+    // Owed its PV state again by the re-sort: once it's answering, handed to
+    // its PvSwitch, which confirms it against the 0B01 and retries.
+    bool resort_pv_owed = false;
   };
 
   // Sends one frame and reads until the gateway's reply ends or the timeout.
@@ -674,12 +682,18 @@ class MasterCore {
   std::optional<ResortFile> resort_file_;    // under mu_: as last saved
   bool resort_stop_wanted_ = false;          // under mu_
   bool resort_resume_writing_ = false;       // a restart in the writes: PV on owed to every TAP
+  bool resort_bracket_open_ = false;         // the job has sent PV off and not yet PV on to every TAP
+  bool resort_pv_cancel_ = false;            // under mu_: the owner's PV off, for a job that hasn't begun
+  void resort_owe_pv_();
+  void resort_cut_off_(const char *why);
   uint16_t resort_trim_tap_ = 0;             // the TAP a trim (a TableRemove) runs on
   bool resort_trim_job_ = false;             // table_job_ is that trim: no retire callback
   std::set<std::string> resort_two_logged_;  // MACs joined on two TAPs, said once each
   bool resort_busy_() const { return resort_running_ || resort_file_.has_value(); }  // under mu_
   bool resort_refusal_(bool dry_run, std::string &why) const;                       // under mu_
   bool resort_save_(const ResortFile *f);
+  static std::vector<esphome::tigo_monitor::master::Bytes> resort_macs_(
+      const std::vector<esphome::tigo_monitor::master::TableRecord> &records);
   void settle_resort_(uint32_t now_ms);
   void resort_wait_(uint32_t now_ms);  // the waiting: reads, trims, the end
   void sync_resort_status_();          // the waiting's counts, from the last reads

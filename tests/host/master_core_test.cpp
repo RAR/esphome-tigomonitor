@@ -816,7 +816,13 @@ struct MultiTap {
     std::vector<mp::Bytes> renewals;  // each 0x2D's args
     std::vector<uint8_t> sessions;    // each 0x0B00's byte, heard even when it no longer answers
     bool silent_after_pv_off = false;  // stops answering at its first 0B00 00
+    bool answer_pv = false;            // answers 0B00 with 0B01, as a TAP does
+    int drop_pv_on = 0;                // this many 0B00 01s it never hears
+    int drop_29_ack = 0;               // this many 0x29s it takes without acking
+    int reads_silent_after_erase = 0;  // table pages unanswered after an erase: a TAP restarting
+    bool erased = false;
   };
+  bool other_master = false;  // every answer comes with another master's poll beside it
   // Every request in order: (TAP, cmd, the tunnel sub or 0, the first payload byte after the header or 0).
   struct Sent {
     uint16_t id, cmd;
@@ -901,6 +907,13 @@ struct MultiTap {
       }
       mp::Frame r;
       if (one(f, r)) out.push_back(r);
+      if (other_master) {
+        mp::Frame poll;  // a request we didn't send: another master
+        poll.dest = 0x1201;
+        poll.cmd = 0x0148;
+        poll.payload = {0x00, 0x01, 0x00, 0x10, 0x00};
+        out.push_back(poll);
+      }
       return out;
     };
   }
@@ -911,8 +924,18 @@ struct MultiTap {
                      static_cast<uint8_t>(f.cmd == 0x0B00 && !f.payload.empty() ? f.payload[0] : 0)});
       One *t = at(f.dest);
       if (t && f.cmd == 0x0B00 && f.payload.size() == 1) {
+        if (f.payload[0] == 0x01 && t->drop_pv_on > 0) {
+          t->drop_pv_on--;
+          return false;
+        }
         t->sessions.push_back(f.payload[0]);
         if (f.payload[0] == 0x00 && t->silent_after_pv_off) t->up = false;
+        if (t->answer_pv && t->up) {
+          r.dest = f.dest | 0x8000;
+          r.cmd = 0x0B01;
+          r.payload = {f.payload[0]};
+          return true;
+        }
         return false;  // as before: no 0B01
       }
       if (!t || !t->up) return false;
@@ -946,6 +969,10 @@ struct MultiTap {
         return true;
       }
       if (sub == 0x26) {
+        if (t->erased && t->reads_silent_after_erase > 0) {
+          t->reads_silent_after_erase--;
+          return false;
+        }
         uint16_t asked = static_cast<uint16_t>(args[0] << 8 | args[1]);
         std::vector<mp::Bytes> page;
         for (const auto &rec : t->records)
@@ -996,6 +1023,7 @@ struct MultiTap {
       }
       if (sub == 0x2B) {
         t->records.clear();
+        t->erased = true;
         r.payload.push_back(0x00);
         return true;
       }
@@ -1003,6 +1031,10 @@ struct MultiTap {
         t->writes.push_back(args);
         for (size_t i = 0; i < args[0]; i++)
           t->records.push_back(mp::Bytes(args.begin() + 1 + 10 * i, args.begin() + 11 + 10 * i));
+        if (t->drop_29_ack > 0) {
+          t->drop_29_ack--;
+          return false;
+        }
         r.payload.push_back(0x00);
         return true;
       }
@@ -2664,8 +2696,8 @@ static void test_resort_tap_lost_mid_write() {
   }
   auto st = rig.core->status().resort;
   CHECK(st.finished && !st.ok && st.message.find("TAP 1202") != std::string::npos);
-  CHECK(st.can_put_back);
-  CHECK(!rig.files.empty() && rig.files.back() && rig.files.back()->phase == "waiting");
+  CHECK(st.can_put_back && st.state == "stopped");
+  CHECK(!rig.files.empty() && rig.files.back() && rig.files.back()->phase == "stopped");
   CHECK(no_key_in(rig.lines));
 }
 
@@ -2697,7 +2729,7 @@ static void test_resort_resume_after_cut_writes() {
   f.started_unix = 1;
   for (uint16_t id = 0x10; id < 0x38; id++) {
     mp::Bytes r = rec(static_cast<uint8_t>(id), id);
-    f.waited.push_back(mp::Bytes(r.begin(), r.begin() + 8));
+    f.waited.push_back({mp::Bytes(r.begin(), r.begin() + 8), static_cast<uint16_t>(0x8000 | id)});
   }
   f.old_networks = {{0x1201, radio(15, 0x7E21, 0x30)}, {0x1202, radio(18, 0x5A5A, 0x30)}, {0x1203, radio(20, 0x1A2B, 0x30)}};
   // As a re-sort cut off in its writes leaves them: listed, nobody joined yet.
@@ -2719,8 +2751,9 @@ static void test_resort_resume_after_cut_writes() {
   CHECK(first_2d < 0 || first_2d > last_on);
   CHECK(first_29 < 0 || first_29 > last_on);
   CHECK(rig.logged("re-sort: TigoMonitor restarted during the network writes; PV on to every TAP"));
-  CHECK(!rig.files.empty() && rig.files.back() && rig.files.back()->phase == "waiting");
-  CHECK(rig.core->status().resort.state == "waiting" && rig.core->status().resort.can_put_back);
+  // The job didn't finish: stopped, the old networks kept, nothing trimmed or ended.
+  CHECK(!rig.files.empty() && rig.files.back() && rig.files.back()->phase == "stopped");
+  CHECK(rig.core->status().resort.state == "stopped" && rig.core->status().resort.can_put_back);
 }
 
 static void test_resort_blocks_other_changes() {
@@ -2736,7 +2769,205 @@ static void test_resort_blocks_other_changes() {
   CHECK(rig.core->request_resort_stop(why));
 }
 
+
+// ---- the re-sort's failure paths (the final review's C1-C3, I1-I3) --------
+
+static ResortFile roof_file(const char *phase) {
+  ResortFile f;
+  f.phase = phase;
+  f.started_unix = 1;
+  for (uint16_t id = 0x10; id < 0x38; id++) {
+    mp::Bytes r = rec(static_cast<uint8_t>(id), id);
+    f.waited.push_back({mp::Bytes(r.begin(), r.begin() + 8), static_cast<uint16_t>(0x8000 | id)});
+  }
+  f.old_networks = {{0x1201, radio(15, 0x7E21, 0x30)}, {0x1202, radio(18, 0x5A5A, 0x30)}, {0x1203, radio(20, 0x1A2B, 0x30)}};
+  return f;
+}
+
+// C1: a network write that fails with every TAP still answering. The tables
+// are untouched, so everyone reads joined; the re-sort must not call that done.
+static void test_resort_failed_write_keeps_the_old_networks() {
+  ResortRig rig;
+  rig.start();
+  std::string why;
+  CHECK(rig.core->request_resort(false, why));
+  rig.run(300);
+  rig.bus.at(0x1202)->cfg_silent = true;
+  rig.run(140000);
+  auto st = rig.core->status().resort;
+  CHECK(st.state == "stopped" && st.finished && !st.ok && st.can_put_back);
+  CHECK(!rig.files.empty() && rig.files.back() && rig.files.back()->phase == "stopped" &&
+        rig.files.back()->old_networks.size() == 3);
+  CHECK(!rig.logged("re-sort: done"));
+  CHECK(rig.core->request_resort_put_back(true, why));
+  CHECK(!rig.core->request_resort(false, why) && why.find("stopped part-way") != std::string::npos);
+  CHECK(no_key_in(rig.lines));
+}
+
+// C1: a restart in the writes with the tables untouched.
+static void test_resort_resume_with_joined_tables_stays_stopped() {
+  ResortRig rig;
+  ResortFile f = roof_file("writing");
+  rig.start(&f);
+  rig.run(120000);
+  auto st = rig.core->status().resort;
+  CHECK(st.state == "stopped" && st.can_put_back);
+  CHECK(!rig.files.empty() && rig.files.back() && rig.files.back()->phase == "stopped");
+  CHECK(!rig.logged("re-sort: done"));
+}
+
+// C2: one lost 0x29 ack is tried again, not a lost list.
+static void test_resort_a_lost_list_ack_is_tried_again() {
+  ResortRig rig;
+  rig.start();
+  rig.bus.at(0x1201)->drop_29_ack = 1;
+  std::string why;
+  CHECK(rig.core->request_resort(false, why));
+  rig.run(120000);
+  auto st = rig.core->status().resort;
+  CHECK(st.state == "waiting" && st.ok);
+  for (auto &t : rig.bus.taps) CHECK(t.records.size() == 40);
+}
+
+// C2: a restart after the erases: the tables are empty, the put-back lists
+// everyone from the file.
+static void test_resort_put_back_lists_the_saved_list() {
+  ResortRig rig;
+  ResortFile f = roof_file("writing");
+  for (auto &t : rig.bus.taps) t.records.clear();
+  rig.start(&f);
+  rig.run(60000);
+  std::string why;
+  CHECK(rig.core->request_resort_put_back(false, why));
+  rig.run(120000);
+  for (auto &t : rig.bus.taps) CHECK(t.records.size() == 40);
+  CHECK(rig.bus.at(0x1201)->cfg.pan == 0x7E21 && rig.bus.at(0x1202)->cfg.pan == 0x5A5A);
+  auto st = rig.core->status().resort;
+  CHECK(st.state == "waiting" && !st.can_put_back);
+}
+
+// C3: a PV on the TAP never hears is sent again until it answers.
+static void test_resort_pv_on_is_confirmed() {
+  ResortRig rig;
+  for (auto &t : rig.bus.taps) t.answer_pv = true;
+  rig.bus.at(0x1202)->drop_pv_on = 1;
+  rig.start();
+  std::string why;
+  CHECK(rig.core->request_resort(false, why));
+  rig.run(120000);
+  auto *b = rig.bus.at(0x1202);
+  CHECK(std::count(b->sessions.begin(), b->sessions.end(), 0x01) >= 1);  // heard one after the dropped one
+  CHECK(!b->sessions.empty() && b->sessions.back() == 0x01);
+  CHECK(rig.core->status().resort.state == "waiting");
+}
+
+// I1: the owner's PV off before the writes stops the re-sort before it changes anything.
+static void test_resort_pv_off_before_the_writes_cancels_it() {
+  ResortRig rig;
+  for (auto &t : rig.bus.taps) t.answer_pv = true;
+  rig.start();
+  std::string why;
+  CHECK(rig.core->request_resort(false, why));
+  rig.run(300);
+  CHECK(rig.core->request_pv(true));
+  rig.run(120000);
+  for (auto &t : rig.bus.taps) {
+    CHECK(t.cfg.pan == (t.id == 0x1201 ? 0x7E21 : t.id == 0x1202 ? 0x5A5A : 0x1A2B));  // nothing written
+    CHECK(std::count(t.sessions.begin(), t.sessions.end(), 0x01) == 0);
+  }
+  CHECK(rig.core->status().pv.off);
+  CHECK(rig.core->status().resort.state == "idle");
+}
+
+// I1: the owner's PV off after the bracket opened: no PV on goes out after it.
+static void test_resort_pv_off_held_inside_the_bracket() {
+  ResortRig rig;
+  for (auto &t : rig.bus.taps) t.answer_pv = true;
+  rig.start();
+  std::string why;
+  CHECK(rig.core->request_resort(false, why));
+  for (int i = 0; i < 400 && rig.bus.index_of(0x0B00, 0x00) < 0; i++) rig.run(50);
+  CHECK(rig.bus.index_of(0x0B00, 0x00) >= 0);
+  size_t mark = rig.bus.log.size();
+  CHECK(rig.core->request_pv(true));
+  rig.run(120000);
+  CHECK(rig.bus.index_of(0x0B00, 0x01, mark) < 0);
+  for (auto &t : rig.bus.taps) CHECK(!t.sessions.empty() && t.sessions.back() == 0x00);
+}
+
+// I2: a trim cut off after its erase, finished later, retires nobody.
+static void test_resort_an_interrupted_trim_retires_nobody() {
+  ResortRig rig;
+  rig.start();
+  std::string why;
+  CHECK(rig.core->request_resort(false, why));
+  rig.run(60000);
+  for (uint16_t id = 0x10; id < 0x24; id++) rig.bus.join(0x1201, id);
+  for (uint16_t id = 0x24; id < 0x38; id++) rig.bus.join(0x1203, id);
+  for (auto &t : rig.bus.taps) t.erased = false;
+  rig.bus.at(0x1202)->reads_silent_after_erase = 12;
+  rig.close_windows();
+  rig.run(2 * MasterCore::RESORT_READ_MS + 400000);
+  CHECK(rig.removed == 0);
+}
+
+// I3: waiting with Allow changes to the TAPs off: no trim to hang on, and
+// the windows are still renewed.
+static void test_resort_waiting_with_writes_off_keeps_windows() {
+  ResortRig rig;
+  ResortFile f = roof_file("waiting");
+  for (auto &t : rig.bus.taps) {
+    t.records.clear();
+    for (uint16_t id = 0x10; id < 0x38; id++) {
+      mp::Bytes r = rec(static_cast<uint8_t>(id), id);
+      r[8] |= 0x80;
+      t.records.push_back(r);
+    }
+  }
+  for (uint16_t id = 0x10; id < 0x24; id++) rig.bus.join(0x1201, id);
+  rig.bus.join(0x1203, 0x24);
+  rig.start(&f, false);
+  rig.close_windows();
+  size_t before[3];
+  for (int k = 0; k < 3; k++) before[k] = rig.bus.taps[k].renewals.size();
+  rig.run(300000);
+  for (int k = 0; k < 3; k++) CHECK(rig.bus.taps[k].renewals.size() > before[k]);
+  CHECK(!rig.logged("re-sort: taking"));
+  CHECK(rig.core->status().fault != Fault::refused);
+  CHECK(rig.core->status().resort.note.find("Allow changes to the TAPs is off") != std::string::npos);
+}
+
+
+// I5: another master inside the bracket: the job stops where it is, the
+// file stays "writing" so the next start owes every TAP its PV, and the
+// owner's stop isn't refused as "running".
+static void test_resort_another_master_mid_bracket() {
+  ResortRig rig;
+  rig.start();
+  std::string why;
+  CHECK(rig.core->request_resort(false, why));
+  for (int i = 0; i < 400 && rig.bus.index_of(0x0B00, 0x00) < 0; i++) rig.run(50);
+  CHECK(rig.bus.index_of(0x0B00, 0x00) >= 0);
+  rig.bus.other_master = true;
+  rig.run(5000);
+  auto st = rig.core->status().resort;
+  CHECK(st.finished && !st.ok && st.message == "another master is on the bus");
+  CHECK(st.can_put_back);
+  CHECK(!rig.files.empty() && rig.files.back() && rig.files.back()->phase == "writing");
+  CHECK(rig.core->request_resort_stop(why));
+}
+
 int main() {
+  test_resort_failed_write_keeps_the_old_networks();
+  test_resort_resume_with_joined_tables_stays_stopped();
+  test_resort_a_lost_list_ack_is_tried_again();
+  test_resort_put_back_lists_the_saved_list();
+  test_resort_pv_on_is_confirmed();
+  test_resort_pv_off_before_the_writes_cancels_it();
+  test_resort_pv_off_held_inside_the_bracket();
+  test_resort_an_interrupted_trim_retires_nobody();
+  test_resort_waiting_with_writes_off_keeps_windows();
+  test_resort_another_master_mid_bracket();
   test_resort_refusals();
   test_resort_runs_and_waits();
   test_resort_trims_at_window_close_and_finishes();

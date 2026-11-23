@@ -177,6 +177,7 @@ struct FakeTaps {
     std::vector<uint8_t> pv;
     std::string silent_from;  // a label: from that frame on, it doesn't answer
     bool silent = false;
+    int drop_list_acks = 0;   // this many 0x29s taken without an ack
   };
   std::map<uint16_t, One> taps;
   std::vector<std::pair<uint16_t, std::string>> sent;  // (TAP, label), in order
@@ -271,6 +272,10 @@ struct FakeTaps {
       for (size_t k = 0; k < a[0]; k++) {
         const uint8_t *p = &a[1 + 10 * k];
         t.table.push_back({Bytes(p, p + 8), static_cast<uint16_t>(p[8] << 8 | p[9])});
+      }
+      if (t.drop_list_acks > 0) {
+        t.drop_list_acks--;
+        return false;
       }
       out = tunnel_reply(id, 0x2A, seq, {0x00});
       return true;
@@ -549,6 +554,48 @@ static void test_resort_list_conflict_stops_before_anything() {
   CHECK(labels(bus).empty());
 }
 
+
+// A 0x29 that goes unanswered: that TAP's erase and its whole list again,
+// so it ends with each record once.
+static void test_resort_retries_a_lost_list_ack() {
+  std::vector<ResortTap> taps;
+  FakeTaps bus = roof(taps);
+  bus.taps[0x1202].drop_list_acks = 1;
+  ResortJob job(taps, targets(taps), false, false);
+  drive(job, bus, {0x1201, 0x1202, 0x1203});
+  CHECK(job.finished() && job.ok());
+  for (auto &kv : bus.taps) CHECK(kv.second.table.size() == 40);
+}
+
+static void test_resort_gives_up_on_a_table_after_three_tries() {
+  std::vector<ResortTap> taps;
+  FakeTaps bus = roof(taps);
+  bus.taps[0x1202].drop_list_acks = 100;
+  ResortJob job(taps, targets(taps), false, false);
+  drive(job, bus, {0x1201, 0x1202, 0x1203});
+  CHECK(job.finished() && !job.ok());
+  CHECK(job.failed_tap() == 0x1202);
+  CHECK(job.message().find("3 times") != std::string::npos);
+}
+
+// A put-back lists the re-sort's saved list as well as what the tables
+// hold, so nobody an erase took is lost.
+static void test_resort_put_back_lists_the_saved_list_too() {
+  std::vector<ResortTap> taps;
+  FakeTaps bus = roof(taps);
+  std::vector<TableRecord> saved;
+  for (auto &kv : bus.taps)
+    for (const auto &r : kv.second.table) saved.push_back({r.mac, static_cast<uint16_t>(0x8000 | r.id())});
+  for (auto &kv : bus.taps) kv.second.table.clear();  // erased, then cut off
+  std::vector<RadioBlock> old;
+  for (const auto &t : taps) old.push_back(t.now);
+  ResortJob job(taps, old, false, true, saved);
+  drive(job, bus, {0x1201, 0x1202, 0x1203});
+  CHECK(job.finished() && job.ok());
+  CHECK(job.records().size() == 40);
+  for (auto &kv : bus.taps) CHECK(kv.second.table.size() == 40);
+}
+
 int main() {
   test_resort_networks_keep_all_but_pan_and_key();
   test_resort_networks_no_free_pan();
@@ -565,6 +612,9 @@ int main() {
   test_resort_dry_run_has_no_key();
   test_resort_put_back_skips_the_save();
   test_resort_list_conflict_stops_before_anything();
+  test_resort_retries_a_lost_list_ack();
+  test_resort_gives_up_on_a_table_after_three_tries();
+  test_resort_put_back_lists_the_saved_list_too();
   if (failures) {
     std::printf("%d failed\n", failures);
     return 1;

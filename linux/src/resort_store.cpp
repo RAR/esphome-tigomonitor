@@ -37,10 +37,13 @@ std::optional<ResortFile> ResortStore::load() {
     r.phase = j.at("phase").get<std::string>();
     if (r.phase != "writing" && r.phase != "waiting") throw std::runtime_error("bad phase");
     r.started_unix = j.value("started_unix", static_cast<int64_t>(0));
-    for (const auto &m : j.at("waited")) {
+    for (const auto &w : j.at("waited")) {
       mp::Bytes mac;
-      if (!from_hex(m.get<std::string>(), mac) || mac.size() != 8) throw std::runtime_error("bad MAC");
-      r.waited.push_back(mac);
+      unsigned id = 0;
+      if (!from_hex(w.at("mac").get<std::string>(), mac) || mac.size() != 8) throw std::runtime_error("bad MAC");
+      if (sscanf(w.at("id").get<std::string>().c_str(), "%x", &id) != 1 || id < 2 || id > 1023)
+        throw std::runtime_error("bad id");
+      r.waited.push_back({mac, static_cast<uint16_t>(0x8000 | id)});
     }
     for (const auto &n : j.at("old_networks")) {
       unsigned tap = 0;
@@ -53,9 +56,10 @@ std::optional<ResortFile> ResortStore::load() {
       r.old_networks.push_back({static_cast<uint16_t>(tap), block});
     }
     return r;
-  } catch (const std::exception &e) {
-    // Never its content: it holds the TAPs' keys.
-    LOGE("%s is unreadable (%s); no re-sort resumed", path_.c_str(), e.what());
+  } catch (const std::exception &) {
+    // Never its content, nor the parser's words, which quote what it read:
+    // the file holds the TAPs' keys.
+    LOGE("%s is unreadable; no re-sort resumed", path_.c_str());
     return std::nullopt;
   }
 }
@@ -63,7 +67,11 @@ std::optional<ResortFile> ResortStore::load() {
 bool ResortStore::save(const ResortFile &r) {
   std::lock_guard<std::mutex> lock(mu_);
   nlohmann::json waited = nlohmann::json::array(), old = nlohmann::json::array();
-  for (const auto &m : r.waited) waited.push_back(mp::mac_hex(m));
+  for (const auto &w : r.waited) {
+    char id[5];
+    snprintf(id, sizeof(id), "%04X", w.id());
+    waited.push_back({{"mac", mp::mac_hex(w.mac)}, {"id", id}});
+  }
   for (const auto &n : r.old_networks) {
     char tap[5];
     snprintf(tap, sizeof(tap), "%04X", n.first);

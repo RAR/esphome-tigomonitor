@@ -66,8 +66,13 @@ sleep 0.5
 echo '{"taps": [{"id": "1201", "mac": "04c05b0000a1b2a1"}, {"id": "1202", "mac": "04c05b0000a1b2a2"}, {"id": "1203", "mac": "04c05b0000a1b2a3"}]}' > "$out/one/taps.json"
 printf '{"bus_role": "master", "master_startup": true, "master_housekeeping": false, "master_queries": false, "master_optimizer_writes": false, "master_read_tap_config": false, "discovery_auto": false, "master_table_writes": true, "serial_port": "%s", "gateway_id": 4609, "web_port": %s, "web_password": "pw"}\n' \
   "$PWD/$out/mock.tty" "$port" > "$out/one/settings.json"
+# An unreadable resort.json is said to be, never quoted: it would hold keys.
+printf '{"phase": "waiting", "waited": [{"mac": "3131313131313131313131' > "$out/one/resort.json"
 start_daemon
 wait_for 60 $port "len(d['taps']) == 3 and all(t['key'] == 'same' for t in d['taps'])"
+grep -q "resort.json is unreadable" "$out/daemon.log" && said=yes || said=no
+expect "an unreadable resort.json is said to be" "$said" yes
+expect "and none of it quoted" "$(grep -c '31313131' "$out/daemon.log" || true)" 0
 expect "three TAPs on one key" "$(master $port "[t['key'] for t in d['taps']]")" "['same', 'same', 'same']"
 
 # Nothing to stop or put back yet.
@@ -88,8 +93,8 @@ wait_for 60 $port "d['resort']['state'] == 'waiting'"
 expect "and waits" "$(master $port "(d['resort']['state'], d['resort']['can_put_back'])")" "('waiting', True)"
 expect "resort.json is the service's alone" "$(command stat -c %a "$out/one/resort.json")" 600
 sleep 1.5
-expect "PV off then on, once each, on every TAP" "$(stat "$out/mock.json" "[[p['b'] for p in t.get('pv', [])] for t in d['taps']]")" \
-  "[['00', '01'], ['00', '01'], ['00', '01']]"
+expect "PV off then on, on every TAP, and never off again" "$(stat "$out/mock.json" "[(b[:2], '00' not in b[1:]) for b in ([p['b'] for p in t.get('pv', [])] for t in d['taps'])]")" \
+  "[(['00', '01'], True), (['00', '01'], True), (['00', '01'], True)]"
 expect "every PV off before every write, every PV on after" "$(stat "$out/mock.json" "(lambda pv, w: max(p['seq'] for p in pv if p['b'] == '00') < min(w) and max(w) < min(p['seq'] for p in pv if p['b'] == '01'))([p for t in d['taps'] for p in t['pv']], [c['seq'] for t in d['taps'] for c in t['cfg_writes']])")" True
 expect "a new PAN each" "$(stat "$out/mock.json" "[t['cfg_writes'][0]['pan'] not in ('7E21', '5A5A', '1A2B') for t in d['taps']] + [len({t['cfg_writes'][0]['pan'] for t in d['taps']})]")" \
   "[True, True, True, 3]"

@@ -139,6 +139,18 @@ bool MasterCore::request_pv(bool off) {
     pv_gen_++;
     pv_silent_ = false;
     s = pv_state_;
+    // A re-sort not yet begun stops before it changes anything; one already
+    // past its PV off goes on with PV held off (its PV on is sent as off).
+    if (off && resort_pending_) {
+      resort_pending_.reset();
+      resort_running_ = false;
+      status_.resort.state = "idle";
+      status_.resort.finished = true;
+      status_.resort.ok = false;
+      status_.resort.message = "PV off was asked for; the re-sort stopped before changing anything";
+    } else if (off && resort_running_) {
+      resort_pv_cancel_ = true;
+    }
   }
   LOGW("PV output: %s, asked from this monitor", off ? "off" : "on");
   if (pv_saved_) pv_saved_(s);
@@ -177,6 +189,8 @@ bool MasterCore::resort_refusal_(bool dry_run, std::string &why) const {
   why.clear();
   if (!known_networks_)
     why = "a re-sort needs every TAP told the others' networks (0xE1), which this monitor doesn't send";
+  else if (resort_file_ && resort_file_->phase == "stopped")
+    why = "a re-sort stopped part-way; put the old networks back, or stop it, first";
   else if (resort_busy_())
     why = "a re-sort is already running";
   else if (table_refusal_(dry_run, 0, why))
@@ -265,7 +279,7 @@ bool MasterCore::request_resort_put_back(bool dry_run, std::string &why) {
       why = m;
       return false;
     }
-  resort_pending_ = std::make_unique<master::ResortJob>(taps, target, dry_run, true);
+  resort_pending_ = std::make_unique<master::ResortJob>(taps, target, dry_run, true, resort_file_->waited);
   resort_running_ = true;
   status_.resort.state = "putting_back";
   status_.resort.dry_run = dry_run;
@@ -293,6 +307,12 @@ bool MasterCore::request_resort_stop(std::string &why) {
 
 bool MasterCore::resort_save_(const ResortFile *f) { return resort_saved_ && resort_saved_(f); }
 
+std::vector<master::Bytes> MasterCore::resort_macs_(const std::vector<master::TableRecord> &records) {
+  std::vector<master::Bytes> macs;
+  for (const auto &r : records) macs.push_back(r.mac);
+  return macs;
+}
+
 // The job's save, and its end. Bus thread.
 void MasterCore::settle_resort_(uint32_t now_ms) {
   (void) now_ms;
@@ -302,7 +322,7 @@ void MasterCore::settle_resort_(uint32_t now_ms) {
     ResortFile f;
     f.phase = "writing";
     f.started_unix = unix_now();
-    for (const auto &r : job.records()) f.waited.push_back(r.mac);
+    f.waited = job.records();
     for (const auto &t : job.taps()) f.old_networks.push_back({t.tap, t.now});
     bool ok = resort_save_(&f);
     if (ok) {
@@ -317,6 +337,14 @@ void MasterCore::settle_resort_(uint32_t now_ms) {
     std::lock_guard<std::mutex> lock(mu_);
     status_.resort.step = job.step_text();
   }
+  // The bracket closed: every TAP's PV state goes to its PvSwitch, which
+  // confirms it and tries again; the job's own PV on is one frame each.
+  if (job.pv_off_sent()) {
+    resort_bracket_open_ = true;
+  } else if (resort_bracket_open_) {
+    resort_bracket_open_ = false;
+    resort_owe_pv_();
+  }
   if (!job.finished()) return;
   bool dry = job.dry_run(), put_back = job.put_back(), ok = job.ok(), began = job.began();
   std::optional<ResortFile> file;
@@ -328,8 +356,14 @@ void MasterCore::settle_resort_(uint32_t now_ms) {
     if (!ok && !began && !put_back) {
       resort_save_(nullptr);  // stopped before any network frame: nothing to put back
       file.reset();
+    } else if (!ok && !began) {
+      file->phase = "stopped";  // a put-back that changed nothing: as it was
+      resort_save_(&*file);
     } else {
-      file->phase = "waiting";
+      // Finished: waiting for the joins. Stopped part-way: the TAPs may be
+      // on mixed networks or missing optimizers, so nothing is trimmed or
+      // ended; only a put-back or the owner's stop ends it.
+      file->phase = ok ? "waiting" : "stopped";
       if (put_back && ok) file->old_networks.clear();
       resort_save_(&*file);
     }
@@ -351,10 +385,55 @@ void MasterCore::settle_resort_(uint32_t now_ms) {
   status_.resort.dry_run = dry;
   status_.resort.message = job.message();
   status_.resort.dry_frames = job.dry_text();
-  status_.resort.state = file ? "waiting" : "idle";
+  status_.resort.state = !file ? "idle" : file->phase == "waiting" ? "waiting" : "stopped";
   status_.resort.can_put_back = file && !file->old_networks.empty();
   resort_running_ = false;
+  resort_pv_cancel_ = false;
   resort_job_.reset();
+}
+
+void MasterCore::resort_owe_pv_() {
+  for (auto &t : taps_) t->resort_pv_owed = true;
+}
+
+// Another master took the bus: nothing more goes out, so the job stops
+// where it is. Inside the bracket the file stays "writing", so the next
+// start sends every TAP its PV state; past it, "stopped". Bus thread.
+void MasterCore::resort_cut_off_(const char *why) {
+  {
+    std::lock_guard<std::mutex> lock(mu_);
+    resort_pending_.reset();
+    if (!resort_job_) resort_running_ = false;
+  }
+  if (!resort_job_) return;
+  bool began = resort_job_->began(), open = resort_job_->pv_off_sent(), put_back = resort_job_->put_back();
+  std::optional<ResortFile> file;
+  {
+    std::lock_guard<std::mutex> lock(mu_);
+    file = resort_file_;
+  }
+  if (file) {
+    if (!began && !put_back) {
+      resort_save_(nullptr);
+      file.reset();
+    } else {
+      file->phase = open ? "writing" : began ? "stopped" : file->phase == "writing" ? "stopped" : file->phase;
+      resort_save_(&*file);
+    }
+  }
+  if (open) resort_owe_pv_();
+  resort_bracket_open_ = false;
+  LOGW("bus master: re-sort: stopped: %s%s", why, open ? "; every TAP is owed PV on" : "");
+  resort_job_.reset();
+  std::lock_guard<std::mutex> lock(mu_);
+  resort_file_ = file;
+  resort_running_ = false;
+  resort_pv_cancel_ = false;
+  status_.resort.finished = true;
+  status_.resort.ok = false;
+  status_.resort.message = why;
+  status_.resort.state = !file ? "idle" : file->phase == "waiting" ? "waiting" : "stopped";
+  status_.resort.can_put_back = file && !file->old_networks.empty();
 }
 
 // Under no lock; takes mu_.
@@ -374,7 +453,7 @@ void MasterCore::sync_resort_status_() {
     joined.push_back({t->id, n});
   }
   std::vector<TableWaiting> missing;
-  for (const auto &r : master::resort_missing(tables, file->waited)) {
+  for (const auto &r : master::resort_missing(tables, resort_macs_(file->waited))) {
     TableWaiting w;
     w.mac = master::mac_hex(r.mac);
     w.id = r.id();
@@ -417,7 +496,16 @@ void MasterCore::resort_wait_(uint32_t now_ms) {
     t->resort_trim_owed = all && !trim[t->id].empty();
     owed = owed || t->resort_trim_owed;
   }
-  if (!all || resort_trim_tap_ || table_busy) return;
+  // Without Allow changes to the TAPs no trim can be sent: none is waited
+  // for, so the windows go on being renewed, and the page says why.
+  {
+    std::lock_guard<std::mutex> lock(mu_);
+    status_.resort.note = table_writes_on_ || !owed ? ""
+        : "Allow changes to the TAPs is off: no TAP is trimmed until it's on";
+  }
+  if (!table_writes_on_)
+    for (auto &t : taps_) t->resort_trim_owed = false;
+  if (!all || resort_trim_tap_ || table_busy || !table_writes_on_) return;
   // Joined on two TAPs: left on both, said once.
   std::map<master::Bytes, int> joined_on;
   for (const auto &kv : tables)
@@ -443,7 +531,7 @@ void MasterCore::resort_wait_(uint32_t now_ms) {
     return;
   }
   if (owed) return;
-  if (!master::resort_missing(tables, file->waited).empty()) return;
+  if (!master::resort_missing(tables, resort_macs_(file->waited)).empty()) return;
   resort_save_(nullptr);
   std::string counts;
   for (const auto &t : taps_) {
@@ -974,8 +1062,15 @@ void MasterCore::settle_table_job_(uint32_t now_ms) {
     if (gone.empty() && r->resuming()) gone.push_back(table_job_->mac());
   }
   // A re-sort's trim takes an optimizer off a TAP it didn't join: no retire.
+  // While one is on file every removal is a trim (the owner's are refused),
+  // a resumed one too, across a restart.
+  bool resorting;
+  {
+    std::lock_guard<std::mutex> lock(mu_);
+    resorting = resort_file_.has_value();
+  }
   if (std::string(table_job_->kind()) == "remove" && table_job_->ok() && !table_job_->dry_run() && on_removed_ &&
-      !resort_trim_job_)
+      !resort_trim_job_ && !resorting)
     for (const auto &m : gone) on_removed_(master::mac_hex(m));
   resort_trim_job_ = false;
   if (!add && table_job_->ok() && !table_job_->dry_run()) {
@@ -1615,6 +1710,7 @@ void MasterCore::tap_unanswered_(Tap &t, uint32_t now_ms) {
 
 void MasterCore::tick_(uint32_t now_ms) {
   if (status().fault == Fault::second_master) {
+    if (resort_job_) resort_cut_off_("another master is on the bus");
     listen_stopped_();
     return;
   }
@@ -1715,14 +1811,43 @@ void MasterCore::tick_(uint32_t now_ms) {
       settle_resort_(now_ms);
     }
     if (resort_job_) {
+      bool cancel;
+      {
+        std::lock_guard<std::mutex> lock(mu_);
+        cancel = resort_pv_cancel_;
+        resort_pv_cancel_ = false;
+      }
       uint16_t turn = resort_job_->turn_tap();
       Tap *tt = turn ? tap_by_id_(turn) : nullptr;
-      if (turn && (!tt || tt->lost)) {
+      if (cancel && !resort_job_->began()) {
+        resort_job_->abort("PV off was asked for; the re-sort stopped before changing anything");
+      } else if (turn && (!tt || tt->lost)) {
         char m[64];
         snprintf(m, sizeof(m), "TAP %04X isn't answering", turn);
         resort_job_->abort(m);
       }
       settle_resort_(now_ms);
+    }
+    // A restart during the writes: every TAP owed its PV state (on, unless
+    // held off), sent and confirmed by its PvSwitch, a lost one's when it
+    // answers again. The job didn't finish, so the re-sort is stopped.
+    if (resort_resume_writing_) {
+      resort_resume_writing_ = false;
+      resort_owe_pv_();
+      LOGW("bus master: re-sort: TigoMonitor restarted during the network writes; PV on to every TAP");
+      std::optional<ResortFile> f;
+      {
+        std::lock_guard<std::mutex> lock(mu_);
+        f = resort_file_;
+      }
+      if (f) {
+        f->phase = "stopped";
+        resort_save_(&*f);
+        std::lock_guard<std::mutex> lock(mu_);
+        resort_file_ = f;
+        status_.resort.state = "stopped";
+        status_.resort.message = "TigoMonitor restarted during the network writes";
+      }
     }
     if (stop) {
       size_t missing;
@@ -1730,9 +1855,17 @@ void MasterCore::tick_(uint32_t now_ms) {
         std::lock_guard<std::mutex> lock(mu_);
         missing = status_.resort.missing.size();
       }
+      bool part_way;
+      {
+        std::lock_guard<std::mutex> lock(mu_);
+        part_way = resort_file_ && resort_file_->phase == "stopped";
+      }
       resort_save_(nullptr);
-      LOGI("bus master: re-sort: stopped waiting; %zu optimizer%s stay listed on every TAP", missing,
-           missing == 1 ? "" : "s");
+      if (part_way)
+        LOGW("bus master: re-sort: stopped; the old networks are discarded, and each TAP keeps the network it has now");
+      else
+        LOGI("bus master: re-sort: stopped waiting; %zu optimizer%s stay listed on every TAP", missing,
+             missing == 1 ? "" : "s");
       resort_two_logged_.clear();
       std::lock_guard<std::mutex> lock(mu_);
       resort_file_.reset();
@@ -1775,6 +1908,11 @@ void MasterCore::tick_(uint32_t now_ms) {
         if (silent) LOGW("PV output: took the bus without hearing what the TAP was told; saying nothing about it until asked");
         else if (off) LOGI("PV output is held off; telling the TAP");
       } else if (changed) {
+        t.pv->set_off(off, now_ms);
+      }
+      // The re-sort's bracket has closed: its PV state again, confirmed.
+      if (t.resort_pv_owed) {
+        t.resort_pv_owed = false;
         t.pv->set_off(off, now_ms);
       }
     }
@@ -1938,16 +2076,14 @@ void MasterCore::tick_(uint32_t now_ms) {
                         (t.resort_walk.active() || !t.resort_read || now_ms - t.resort_read_ms >= RESORT_READ_MS);
   resort_sources.rest = (table_job_ && !job_here) ? nullptr : &table_sources;
   size_t waiting_before = t.join_watch.waiting().size();
-  // A restart during the network writes: every TAP's PV on before anything else.
-  bool resort_pv_on = resort_resume_writing_ && !t.lost && !t.resort_pv_on_sent;
-  master::Request req;
-  if (resort_pv_on) {
-    req = {master::CMD_SESSION, {master::PV_ON}, master::ResortJob::PV_WAIT_MS};
-    req.resort = true;
-  } else {
-    req = t.lost ? master::next_request(t.window, t.cursor, seq_, now_ms, nullptr, nullptr, nullptr, nullptr)
-                 : master::next_request(t.window, t.cursor, seq_, now_ms, t.housekeeping.get(), t.queries.get(),
-                                        t.pv.get(), &resort_sources);
+  master::Request req =
+      t.lost ? master::next_request(t.window, t.cursor, seq_, now_ms, nullptr, nullptr, nullptr, nullptr)
+             : master::next_request(t.window, t.cursor, seq_, now_ms, t.housekeeping.get(), t.queries.get(), t.pv.get(),
+                                    &resort_sources);
+  // The owner's PV off holds inside a re-sort's bracket: its PV on goes out as off.
+  if (req.resort && req.cmd == master::CMD_SESSION && req.payload.size() == 1 && req.payload[0] == master::PV_ON) {
+    std::lock_guard<std::mutex> lock(mu_);
+    if (pv_state_.off) req.payload[0] = master::PV_OFF;
   }
   if (t.join_watch.waiting().size() != waiting_before) sync_join_status_(t);  // given up on in due()
   if (job_here) settle_table_job_(now_ms);  // a dry run ends in due(), and a removal saves there
@@ -2010,34 +2146,12 @@ void MasterCore::tick_(uint32_t now_ms) {
   // Any read of its settings, the opening's or a provision's: kept, for the
   // key words and for sharing the key.
   if (ok && master::is_config_read(req.cmd, req.payload)) take_config_reply_(t, reply);
-  if (status().fault == Fault::second_master || standing_by_()) return;
+  if (status().fault == Fault::second_master || standing_by_()) {
+    if (resort_job_) resort_cut_off_("another master is on the bus");
+    return;
+  }
   if (t.housekeeping && !req.table_edit) t.housekeeping->on_reply(req, ok, reply);
-  if (resort_pv_on) {
-    t.resort_pv_on_sent = true;
-    bool first = true, all = true;
-    for (const auto &x : taps_) {
-      if (x.get() != &t && x->resort_pv_on_sent) first = false;
-      if (!x->resort_pv_on_sent) all = false;
-    }
-    if (first) LOGW("bus master: re-sort: TigoMonitor restarted during the network writes; PV on to every TAP");
-    bool rest_lost = true;
-    for (const auto &x : taps_)
-      if (!x->resort_pv_on_sent && !x->lost) rest_lost = false;
-    if (all) resort_resume_writing_ = false;
-    if (all || rest_lost) {
-      std::optional<ResortFile> f;
-      {
-        std::lock_guard<std::mutex> lock(mu_);
-        f = resort_file_;
-      }
-      if (f && f->phase == "writing") {
-        f->phase = "waiting";
-        resort_save_(&*f);
-        std::lock_guard<std::mutex> lock(mu_);
-        resort_file_ = f;
-      }
-    }
-  } else if (resort_sources.from == 1 && resort_job_) {
+  if (resort_sources.from == 1 && resort_job_) {
     resort_job_->on_reply(t.id, req, ok, reply, now_ms);
     settle_resort_(now_ms);
   } else if (resort_sources.from == 2) {
@@ -2562,6 +2676,7 @@ void MasterCore::take_over_(int64_t quiet_ms) {
 // it is. The other side, if it is a standby too, yields as well; their
 // takeover times differ, so they don't tie again.
 void MasterCore::yield_() {
+  if (resort_job_) resort_cut_off_("another master is on the bus");
   LOGW("standby: another master is on the bus; standing by");
   heard_at_ms_ = steady_ms();
   set_standby_(Standby::standing_by);

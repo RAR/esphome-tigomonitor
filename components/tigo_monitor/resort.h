@@ -67,6 +67,8 @@ inline std::string resort_hex4_(uint16_t v) {
   std::snprintf(b, sizeof(b), "%04X", v);
   return b;
 }
+// A table's owner in a message: a TAP, or (0) the re-sort's saved list.
+inline std::string resort_where_(uint16_t tap) { return tap ? "TAP " + resort_hex4_(tap) : "the re-sort's saved list"; }
 
 // Every optimizer on any TAP's table, once each, listed (0x8000) at its own
 // id, in id order. False, saying why, if two TAPs list one id under
@@ -80,14 +82,14 @@ inline bool resort_list(const std::map<uint16_t, std::vector<TableRecord>> &tabl
     for (const auto &r : kv.second) {
       auto i = by_id.find(r.id());
       if (i != by_id.end() && i->second.first != r.mac) {
-        why = "TAP " + resort_hex4_(i->second.second) + " lists " + resort_hex4_(r.id()) + " as " +
-              mac_hex(i->second.first) + " and TAP " + resort_hex4_(kv.first) + " as " + mac_hex(r.mac);
+        why = resort_where_(i->second.second) + " lists " + resort_hex4_(r.id()) + " as " + mac_hex(i->second.first) +
+              " and " + resort_where_(kv.first) + " as " + mac_hex(r.mac);
         return false;
       }
       auto m = by_mac.find(r.mac);
       if (m != by_mac.end() && m->second.first != r.id()) {
-        why = mac_hex(r.mac) + " is listed at " + resort_hex4_(m->second.first) + " on TAP " +
-              resort_hex4_(m->second.second) + " and at " + resort_hex4_(r.id()) + " on TAP " + resort_hex4_(kv.first);
+        why = mac_hex(r.mac) + " is listed at " + resort_hex4_(m->second.first) + " on " + resort_where_(m->second.second) +
+              " and at " + resort_hex4_(r.id()) + " on " + resort_where_(kv.first);
         return false;
       }
       if (i == by_id.end()) by_id[r.id()] = {r.mac, kv.first};
@@ -171,9 +173,16 @@ class ResortJob {
   static const uint32_t WRITE_WAIT_MS = 3000;
   static const uint32_t TABLE_WAIT_MS = 3000;
   static const uint32_t WINDOW_WAIT_MS = 1000;
+  // An erase or a 0x29 that goes unanswered, or refused, is tried again: the
+  // erase alone, or that TAP's erase and whole list, this many times in all.
+  static const int TABLE_TRIES = 3;
 
-  ResortJob(std::vector<ResortTap> taps, std::vector<RadioBlock> target, bool dry_run, bool put_back)
-      : taps_(std::move(taps)), target_(std::move(target)), dry_run_(dry_run), put_back_(put_back) {
+  // also: optimizers to list besides the tables' (a put-back's: the list the
+  // re-sort saved, so none is lost to a table it erased).
+  ResortJob(std::vector<ResortTap> taps, std::vector<RadioBlock> target, bool dry_run, bool put_back,
+            std::vector<TableRecord> also = {})
+      : taps_(std::move(taps)), target_(std::move(target)), dry_run_(dry_run), put_back_(put_back),
+        also_(std::move(also)) {
     if (taps_.size() < 2) {
       fail_now_("a re-sort needs at least two TAPs");
     } else if (taps_.size() - 1 > KNOWN_NETWORKS_MAX) {
@@ -207,7 +216,9 @@ class ResortJob {
       }
       case Step::known: return tunnel_(SUB_KNOWN_NETWORKS, known_networks_args(others_(i_)), READ_WAIT_MS, seq);
       case Step::erase: return tunnel_(SUB_ERASE_FLASH, {0xBA, 0xBE}, TABLE_WAIT_MS, seq);
-      case Step::list: return tunnel_(0x29, chunk_(), TABLE_WAIT_MS, seq);
+      case Step::list:
+        if (redo_erase_) return tunnel_(SUB_ERASE_FLASH, {0xBA, 0xBE}, TABLE_WAIT_MS, seq);
+        return tunnel_(0x29, chunk_(), TABLE_WAIT_MS, seq);
       case Step::window: {
         seq = next_seq(seq);
         waiting_ = true;
@@ -283,11 +294,27 @@ class ResortJob {
       }
       case Step::erase:
       case Step::list: {
-        uint8_t sub = step_ == Step::erase ? 0x2C : 0x2A;
+        bool erasing = step_ == Step::erase || redo_erase_;
+        uint8_t sub = erasing ? 0x2C : 0x2A;
         int ack = tunnel && tr.sub == sub && !tr.data.empty() ? tr.data[0] : -1;
-        if (ack != 0)
-          return fail_(t.tap, "TAP " + resort_hex4_(t.tap) + (step_ == Step::erase ? " didn't erase its table" : " didn't take the list") +
-                                  (ack < 0 ? " (no answer)" : " (" + std::string(step_ == Step::list ? set_table_ack_text(ack) : "refused") + ")"));
+        if (ack != 0) {
+          // Tried again: the erase, or this TAP's erase and its whole list
+          // (after an erase a repeated record can't clash).
+          if (++table_tries_ < TABLE_TRIES) {
+            if (step_ == Step::list) {
+              redo_erase_ = true;
+              list_off_ = 0;
+            }
+            return;
+          }
+          return fail_(t.tap, "TAP " + resort_hex4_(t.tap) + (erasing ? " didn't erase its table" : " didn't take the list") +
+                                  (ack < 0 ? " (no answer)" : " (" + std::string(erasing ? "refused" : set_table_ack_text(ack)) + ")") +
+                                  ", " + std::to_string(TABLE_TRIES) + " times");
+        }
+        if (redo_erase_) {
+          redo_erase_ = false;
+          return;
+        }
         if (step_ == Step::list) {
           list_off_ += chunk_size_();
           if (list_off_ < records_.size()) return;
@@ -403,10 +430,14 @@ class ResortJob {
   void start_(Step s) {
     step_ = s;
     i_ = 0;
+    table_tries_ = 0;
+    redo_erase_ = false;
     while (i_ < taps_.size() && skipped_(i_)) i_++;
     if (i_ >= taps_.size()) next_();
   }
   void advance_() {
+    table_tries_ = 0;
+    redo_erase_ = false;
     i_++;
     while (i_ < taps_.size() && skipped_(i_)) i_++;
     if (i_ >= taps_.size()) next_();
@@ -442,7 +473,9 @@ class ResortJob {
   // The tables are read: the list, then a dry run's account or the save.
   void listed_() {
     std::string why;
-    if (!resort_list(tables_, records_, why)) return fail_now_(why);
+    std::map<uint16_t, std::vector<TableRecord>> all = tables_;
+    if (!also_.empty()) all[0] = also_;  // the saved list, by its own name
+    if (!resort_list(all, records_, why)) return fail_now_(why);
     if (dry_run_) {
       describe_();
       step_ = Step::done;
@@ -489,6 +522,9 @@ class ResortJob {
   std::vector<ResortTap> taps_;
   std::vector<RadioBlock> target_;
   bool dry_run_, put_back_;
+  std::vector<TableRecord> also_;
+  int table_tries_ = 0;
+  bool redo_erase_ = false;
   Step step_ = Step::read_tables;
   size_t i_ = 0;
   bool waiting_ = false;
