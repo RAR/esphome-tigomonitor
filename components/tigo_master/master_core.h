@@ -459,9 +459,11 @@ class MasterCore {
     bool session_reset_sent = false;  // the 0x0B00 00, sent once per start, as after a CCA reboot
     bool config_read_sent = false;    // once a master lifetime, not at each takeover
     // More than one TAP: lost (stopped answering), it is asked at most once
-    // every LOST_PROBE_MS; removed after LOST_MISSES of those.
+    // every LOST_PROBE_MS; removed after LOST_MISSES of those, unless no TAP
+    // is answering (the bus, then: still every LOST_PROBE_MS).
     bool lost = false;
     uint32_t lost_misses = 0;
+    bool removed = false;  // asked only every REMOVED_PROBE_MS: quiet while another TAP answers
     uint32_t next_try_ms = 0;
     uint32_t pv_gen = 0;  // the request_pv its switch has been told
   };

@@ -797,6 +797,7 @@ struct MultiTap {
     uint8_t mac_last;
     bool up;
     uint16_t stored;  // where a RESET puts it; 0: the factory address (a new TAP)
+    bool window_closed = false;  // its discovery window reads closed, 0 s left
     std::vector<mp::Bytes> records;
     std::vector<mp::Bytes> writes;
   };
@@ -891,6 +892,7 @@ struct MultiTap {
       if (sub == 0x2E || sub == 0x2D) {
         r.payload[3] = 0x2F;
         mp::Bytes w = {0x01, 0x03, 0x84, 0x00, 0x02, 0x00, 0x02, 0x00, static_cast<uint8_t>(t->records.size())};
+        if (t->window_closed) w[0] = w[1] = w[2] = 0x00;
         r.payload.insert(r.payload.end(), w.begin(), w.end());
         return true;
       }
@@ -1026,6 +1028,87 @@ static void test_a_quiet_tap_does_not_stop_the_other() {
   before = bus.sent_to(0x1202, 0x0148);
   run_for(core, t, t + 1000);
   CHECK(bus.sent_to(0x1202, 0x0148) - before > 10);
+  core.close();
+}
+
+// Every TAP goes quiet at once, as when the bus is cut to wire in another
+// TAP: that is the bus, not the TAPs, so each is still asked every
+// LOST_PROBE_MS however long it lasts, never REMOVED_PROBE_MS, and polling
+// is back within one of those once the bus is. (On the roof, 2026-11-22, the
+// 300 s rule left 30 min with no data, until a restart.)
+static void test_a_quiet_bus_is_still_asked_often() {
+  MultiTap bus;
+  bus.taps = {{0x1201, 1}, {0x1202, 2}};
+  MasterCore core(&bus.port, [](int, const std::string &) {}, nullptr, nullptr, 0x1201, false, /*startup=*/true);
+  core.set_taps({{0x1201, {}}, {0x1202, {}}});
+  CHECK(core.open());
+  run_for(core, 0, 4000);
+  CHECK(core.status().taps[0].state == "running" && core.status().taps[1].state == "running");
+  bus.at(0x1201)->up = bus.at(0x1202)->up = false;
+  uint32_t t = 4000;
+  for (uint32_t end = t + (MasterCore::LOST_MISSES + 5) * MasterCore::LOST_PROBE_MS; t < end; t += 1000) core.tick(t);
+  MasterStatus m = core.status();
+  CHECK(m.taps[0].state != "removed" && m.taps[1].state != "removed");
+  int before1 = bus.sent_to(0x1201, 0x0148) + bus.sent_to(0x1201, 0x0B0F);
+  int before2 = bus.sent_to(0x1202, 0x0148) + bus.sent_to(0x1202, 0x0B0F);
+  for (uint32_t end = t + 3 * MasterCore::LOST_PROBE_MS; t < end; t += 1000) core.tick(t);
+  CHECK(bus.sent_to(0x1201, 0x0148) + bus.sent_to(0x1201, 0x0B0F) - before1 >= 2);
+  CHECK(bus.sent_to(0x1202, 0x0148) + bus.sent_to(0x1202, 0x0B0F) - before2 >= 2);
+  // The bus is back: both polled again within one LOST_PROBE_MS.
+  bus.at(0x1201)->up = bus.at(0x1202)->up = true;
+  for (uint32_t end = t + MasterCore::LOST_PROBE_MS + 2000; t < end; t += 1000) core.tick(t);
+  m = core.status();
+  CHECK(m.taps[0].state == "running" && m.taps[1].state == "running");
+  before1 = bus.sent_to(0x1201, 0x0148);
+  before2 = bus.sent_to(0x1202, 0x0148);
+  run_for(core, t, t + 1000);
+  CHECK(bus.sent_to(0x1201, 0x0148) - before1 > 5 && bus.sent_to(0x1202, 0x0148) - before2 > 5);
+  core.close();
+}
+
+// Quiet together, then one comes back: the other is a TAP gone, not the
+// bus, and drops to REMOVED_PROBE_MS once it has missed LOST_MISSES tries.
+static void test_one_tap_still_quiet_after_the_bus_is_back_is_removed() {
+  MultiTap bus;
+  bus.taps = {{0x1201, 1}, {0x1202, 2}};
+  MasterCore core(&bus.port, [](int, const std::string &) {}, nullptr, nullptr, 0x1201, false, /*startup=*/true);
+  core.set_taps({{0x1201, {}}, {0x1202, {}}});
+  CHECK(core.open());
+  run_for(core, 0, 4000);
+  bus.at(0x1201)->up = bus.at(0x1202)->up = false;
+  uint32_t t = 4000;
+  for (uint32_t end = t + (MasterCore::LOST_MISSES + 2) * MasterCore::LOST_PROBE_MS; t < end; t += 1000) core.tick(t);
+  bus.at(0x1201)->up = true;
+  for (uint32_t end = t + 3 * MasterCore::LOST_PROBE_MS; t < end; t += 1000) core.tick(t);
+  MasterStatus m = core.status();
+  CHECK(m.taps[0].state == "running" && m.taps[1].state == "removed");
+  core.close();
+}
+
+// A TAP with no optimizers listed (one just added) reads its window closed
+// on every check. Nothing renews it (no renewal carries a count of 0), so
+// the log says so once, naming the TAP, not "renewing" every 20 s. (On the
+// roof, 2026-11-22: 26 of those lines in an hour for the new TAP.)
+static void test_an_empty_tap_s_closed_window_is_logged_once() {
+  MultiTap bus;
+  bus.taps = {{0x1201, 1}, {0x1202, 2}};
+  bus.at(0x1201)->records = {rec(0x11, 0x0011)};
+  bus.at(0x1202)->window_closed = true;
+  std::vector<std::string> lines;
+  MasterCore core(&bus.port, [&](int, const std::string &l) { lines.push_back(l); }, nullptr, nullptr, 0x1201, false,
+                  false);
+  core.set_taps({{0x1201, {}}, {0x1202, {}}});
+  CHECK(core.open());
+  run_for(core, 0, 5 * mp::WindowKeeper::CHECK_EVERY_MS, 50);
+  int renewing = 0, stays = 0;
+  for (const auto &l : lines) {
+    renewing += l.find("window has closed") != std::string::npos && l.find("renewing") != std::string::npos;
+    stays += l.find("1202") != std::string::npos && l.find("stays closed") != std::string::npos;
+  }
+  CHECK(renewing == 0);
+  CHECK(stays == 1);
+  // Its window is still read on every check.
+  CHECK(bus.sent_to(0x1202, 0x0B0F) >= 4);
   core.close();
 }
 
@@ -1618,6 +1701,9 @@ int main() {
   test_two_taps_are_polled_in_turn();
   test_no_0x41_with_more_than_one_tap();
   test_a_quiet_tap_does_not_stop_the_other();
+  test_a_quiet_bus_is_still_asked_often();
+  test_an_empty_tap_s_closed_window_is_logged_once();
+  test_one_tap_still_quiet_after_the_bus_is_back_is_removed();
   test_a_lost_tap_can_be_retired();
   test_no_tap_answering_is_a_fault();
   test_a_table_add_runs_on_its_tap();

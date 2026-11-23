@@ -6870,13 +6870,16 @@
   });
 
   // ===== Raspberry Pi settings (linux/ build) =====
-  // Dangerous options: a TAP's radio profile and report period, shown only
-  // with "dangerous_options": true in settings.json, on a TigoMonitor that
-  // runs the bus.
+  // Dangerous options: a TAP's radio profile, channel and report period,
+  // shown only with "dangerous_options": true in settings.json, on a
+  // TigoMonitor that runs the bus.
   const DANGER_PERIODS = [[1, '1 s'], [2, '2 s'], [3, '3 s'], [4, '4 s'], [5, '5 s'], [6, '6 s'], [7, '10 s'],
                           [8, '12 s'], [9, '15 s'], [10, '20 s'], [11, '30 s']];
   const DANGER_PROFILES = [[40, '40 optimizers (12-2-2-1)'], [75, '75 optimizers (14-2-2-1)'],
                            [120, '120 optimizers (20-2-2-1)'], [300, '300 optimizers (24-4-2-1)']];
+  // 11-26, as Add a TAP offers them; 15, 20, 25 and 26 clear Wi-Fi channels 1, 6 and 11.
+  const DANGER_CHANNELS = Array.from({ length: 16 }, (_, i) => 11 + i)
+    .map(c => [c, [15, 20, 25, 26].includes(c) ? `${c} (clear of Wi-Fi)` : String(c)]);
   let dangerOn = false;
   const dangerEsc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   async function piDangerRefresh(s) {
@@ -6885,12 +6888,15 @@
     card.style.display = dangerOn ? '' : 'none';
     if (!dangerOn) return;
     let taps = [];
-    const live = {};  // the profile each TAP runs, from its last live read
+    const live = {}, chan = {};  // the profile and channel each TAP runs, from its last live read
     try {
       const r = await apiFetch('/api/master');
       if (r.ok) taps = ((await r.json()).taps || []).filter(t => t.mac);
       const v = await apiFetch('/api/versions');
-      if (v.ok) for (const x of ((await v.json()).radios || [])) if (x.profile) live[x.tap] = x.profile;
+      if (v.ok) for (const x of ((await v.json()).radios || [])) {
+        if (x.profile) live[x.tap] = x.profile;
+        if (x.channel) chan[x.tap] = x.channel;
+      }
     } catch (e) { /* drawn empty, or with the usual default, below */ }
     const opts = (list, pick) => list.map(([v, t]) => `<option value="${v}"${v === pick ? ' selected' : ''}>${dangerEsc(t)}</option>`).join('');
     document.getElementById('pi-danger-taps').innerHTML = taps.length ? taps.map(t => `
@@ -6900,6 +6906,11 @@
           <div class="cfg-text"><strong>Radio profile</strong><span>How many optimizers its schedule is planned for. ${live[t.id] ? `It runs ${live[t.id]} now` : 'Preview shows what it has now'}</span></div>
           <div class="cfg-ctrl"><select class="cfg-input" data-danger-profile>${opts(DANGER_PROFILES, live[t.id] || 75)}</select>
             <button class="btn" data-danger="profile-preview">Preview</button> <button class="btn danger" data-danger="profile-write">Write</button></div>
+        </div>
+        <div class="cfg-row">
+          <div class="cfg-text"><strong>Channel</strong><span>The radio channel it runs; its network ID and key stay. ${chan[t.id] ? `It runs channel ${chan[t.id]} now` : 'Preview shows what it has now'}</span></div>
+          <div class="cfg-ctrl"><select class="cfg-input" data-danger-channel>${opts(DANGER_CHANNELS, chan[t.id] || 15)}</select>
+            <button class="btn" data-danger="channel-preview">Preview</button> <button class="btn danger" data-danger="channel-write">Write</button></div>
         </div>
         <div class="cfg-row">
           <div class="cfg-text"><strong>Report period</strong><span>How often each optimizer reports. Preview shows what it has now</span></div>
@@ -6917,15 +6928,23 @@
     const dry = mode === 'preview';
     const mac = row.dataset.dangerTap;
     const profile = Number(row.querySelector('[data-danger-profile]').value);
+    const channel = Number(row.querySelector('[data-danger-channel]').value);
     const code = Number(row.querySelector('[data-danger-period]').value);
-    const label = what === 'profile' ? DANGER_PROFILES.find(p => p[0] === profile)[1] : DANGER_PERIODS.find(p => p[0] === code)[1];
+    const label = what === 'profile' ? DANGER_PROFILES.find(p => p[0] === profile)[1]
+      : what === 'channel' ? `channel ${channel}` : DANGER_PERIODS.find(p => p[0] === code)[1];
+    const tapName = row.querySelector('div').textContent;
     if (!dry && !(await uiAsk(what === 'profile'
           ? { title: `Write the radio profile for ${label}?`, tone: 'danger', ok: 'Write profile',
               body: 'The TAP keeps its channel, PAN and key, and re-slots its optimizers. A wrong profile can cost reports until it\'s set back.' }
+          : what === 'channel'
+          ? { title: `Move ${tapName} to ${label}?`, tone: 'danger', ok: 'Move it',
+              body: 'It keeps its network ID and key. Its optimizers lose it until they find it on the new channel, and how long that takes hasn\'t been measured, so this is safest before any optimizer is on it.' }
           : { title: `Set the report period to ${label}?`, tone: 'danger', ok: 'Set period',
               body: 'Every optimizer on this TAP reports at the new rate.' }))) return;
-    const path = what === 'profile' ? '/api/master/taps/provision' : '/api/master/taps/period';
-    const body = what === 'profile' ? { mac, keep_network: true, profile, dry_run: dry } : { mac, code, dry_run: dry };
+    const provision = what === 'profile' || what === 'channel';
+    const path = provision ? '/api/master/taps/provision' : '/api/master/taps/period';
+    const body = what === 'profile' ? { mac, keep_network: true, profile, dry_run: dry }
+      : what === 'channel' ? { mac, keep_network: true, channel, dry_run: dry } : { mac, code, dry_run: dry };
     row.querySelectorAll('button').forEach(x => { x.disabled = true; });
     out.textContent = dry ? 'Reading the TAP…' : 'Writing…';
     try {
@@ -6936,7 +6955,7 @@
       for (let i = 0; i < 120; i++) {
         const m = await (await apiFetch('/api/master')).json();
         e = (m.table && m.table.edit) || {};
-        if (e.finished && e.kind === (what === 'profile' ? 'provision' : 'period')) break;
+        if (e.finished && e.kind === (provision ? 'provision' : 'period')) break;
         await new Promise(res => setTimeout(res, 500));
       }
       out.textContent = e.finished ? `${e.ok ? '' : 'Failed: '}${e.message}` : 'No answer yet; check the Bus log.';

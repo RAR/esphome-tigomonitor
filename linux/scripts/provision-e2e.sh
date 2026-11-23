@@ -3,7 +3,8 @@
 # write refused without master_bench or Allow changes to the TAPs, and for a
 # MAC that isn't the TAP's; a dry run reads the TAP and writes nothing; the
 # real one writes, saves with the stored read and checks; a reset to that TAP
-# alone only on the bench; Add a TAP's live case, the channel and PAN chosen.
+# alone only on the bench; Add a TAP's live case, the channel and PAN chosen;
+# a TAP moved to another channel, keeping its PAN and key.
 # The key never appears in the API's answers or the log.
 # Run from the repo root inside the dev container, after build.sh.
 set -eu
@@ -170,6 +171,17 @@ expect "on when the file says so" "$(body GET 18407 /api/settings | python3 -c "
 expect "and the API can't turn it off" "$(code POST 18407 /api/settings '{"dangerous_options": false}')" 200
 sleep 2
 expect "still on" "$(body GET 18407 /api/settings | python3 -c "import json,sys; print(json.load(sys.stdin)['dangerous_options'])")" True
+stop_all
+
+# --- a TAP moved to another channel: its PAN and key kept, only the channel written ---
+start channel 18408 false "" ', "master_table_writes": true'
+expect "a first network is given" "$(code POST 18408 /api/master/taps/provision "{\"mac\": \"$MAC\", \"channel\": 20, \"pan\": \"5A5A\", \"dry_run\": false}")" 200
+finished 18408
+expect "and saved" "$(edit 18408 "e['ok']")" True
+expect "a channel change starts" "$(code POST 18408 /api/master/taps/provision "{\"mac\": \"$MAC\", \"keep_network\": true, \"channel\": 22, \"dry_run\": false}")" 200
+finished 18408
+expect "and is given" "$(edit 18408 "(e['ok'], 'channel 22' in e['message'])")" "(True, True)"
+expect "written with the PAN it had" "$(stat "$out/channel.json" "d['cfg_writes'][-1]")" "{'channel': 22, 'pan': '5A5A'}"
 stop_all
 
 [ $fail = 0 ] && echo "provision e2e passed" || { echo "provision e2e FAILED; see $out/"; exit 1; }

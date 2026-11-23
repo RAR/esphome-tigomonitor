@@ -40,7 +40,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   26, checked again before it's given. TAPs already set up keep their
   channel.
 
+- **A TAP's channel can be changed after setup (Raspberry Pi, dangerous
+  options).** With `"dangerous_options": true` in settings.json, each TAP
+  in Settings → Bus has a Channel row beside its radio profile and report
+  period. Preview reads the TAP; Write moves it to the channel picked and
+  keeps its network ID and key. Its optimizers then have to find it on the
+  new channel, and how long that takes hasn't been measured, so it's
+  safest on a TAP with no optimizers yet. It needs **Allow changes to the
+  TAPs**.
+
 ### Fixed
+
+- **A bus cut no longer leaves TigoMonitor silent for half an hour.** With
+  more than one TAP, a TAP that stops answering is asked every 30 s, then
+  every 5 minutes after ten misses. When every TAP stopped at once, as when
+  the bus is opened to wire in another TAP, they all went to 5 minutes, and
+  on the roof that left 30 minutes with no readings until a restart. Now
+  that only happens to a TAP that is silent while another answers; while
+  none answers, each is still asked every 30 s. (Raspberry Pi and ESP32
+  bus master.)
+
+- **A new TAP's log no longer says "renewing" every 20 seconds.** A TAP
+  with no optimizers listed reads its discovery window closed on every
+  check. Nothing renews it, but the log said "renewing" each time. It now
+  says once, naming the TAP, that the window stays closed until an
+  optimizer is added.
 
 - **The Home Assistant app no longer sits at "starting".** Home Assistant
   waited for a health report the app had switched off, so it never counted

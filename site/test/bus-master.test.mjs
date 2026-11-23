@@ -425,6 +425,38 @@ test('with no live read the profile list opens on 75', async () => {
   await ctx.close();
 });
 
+test('the channel list opens on the channel the TAP runs; preview and write keep its network', async () => {
+  const versions = { taps: [], optimizers: [], radios: [{ tap: '1201', channel: 18, slt: 90, slm: 60, profile: 120, heard_unix_ms: 1 }] };
+  const { page, ctx, api, errors } = await open({ hash: '#settings', master: TAPS, settings: { dangerous_options: true }, versions });
+  await page.waitForSelector('#pi-danger [data-danger-tap]', { state: 'visible' });
+  assert.equal(await page.inputValue('#pi-danger select[data-danger-channel]'), '18');
+  assert.match(await page.textContent('#pi-danger [data-danger-tap]'), /It runs channel 18 now/);
+  await page.selectOption('#pi-danger select[data-danger-channel]', '20');
+  await page.click('#pi-danger button[data-danger="channel-preview"]');
+  await page.waitForFunction(() => /would do it \(provision\)/.test(document.querySelector('#pi-danger [data-danger-out]').textContent));
+  assert.deepEqual(api.posts.at(-1), { path: '/api/master/taps/provision',
+    body: { mac: '04C05B0000A1B2C3', keep_network: true, channel: 20, dry_run: true } });
+  // The write asks first, in red, and says its optimizers must find it again.
+  await page.click('#pi-danger button[data-danger="channel-write"]');
+  await page.waitForSelector('#ui-dialog[open]');
+  assert.match(await page.getAttribute('#ui-dialog [data-answer="ok"]', 'class'), /danger/);
+  assert.match(await page.textContent('#ui-dialog'), /find it on the new channel/);
+  const asked = await answer(page, true);
+  await page.waitForFunction(() => /done \(provision\)/.test(document.querySelector('#pi-danger [data-danger-out]').textContent));
+  assert.match(asked, /channel 20/);
+  assert.deepEqual(api.posts.at(-1).body, { mac: '04C05B0000A1B2C3', keep_network: true, channel: 20, dry_run: false });
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test('with no live read the channel list opens on 15, the first clear of Wi-Fi', async () => {
+  const versions = { taps: [], optimizers: [], radios: [] };
+  const { page, ctx } = await open({ hash: '#settings', master: TAPS, settings: { dangerous_options: true }, versions });
+  await page.waitForSelector('#pi-danger [data-danger-tap]', { state: 'visible' });
+  assert.equal(await page.inputValue('#pi-danger select[data-danger-channel]'), '15');
+  await ctx.close();
+});
+
 test('with the flag: preview a profile and a period, then write one after a warning', async () => {
   const { page, ctx, api, errors } = await open({ hash: '#settings', master: TAPS, settings: { dangerous_options: true } });
   await page.waitForSelector('#pi-danger', { state: 'visible' });

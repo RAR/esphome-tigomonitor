@@ -92,6 +92,9 @@ struct RadioBlock {
   // Not sent: keep the TAP's channel, PAN and key from its own read, so only
   // the map changes (changing a TAP's profile under its joined optimizers).
   bool keep_network = false;
+  // Not sent: with keep_network, this channel instead of the TAP's own
+  // (moving a TAP to another channel; its PAN and key stay). 0: its own.
+  uint16_t new_channel = 0;
   // Not sent: start at the read, without asking the TAP for its MAC first
   // (bench: does a lone 003A to a running TAP set the 0x0E status to 1?).
   bool skip_identify = false;
@@ -449,7 +452,7 @@ class ProvisionJob : public TableJob {
         block_.extra = now.extra;
         turn_ = true;
         if (block_.keep_network) {
-          block_.channel = now.channel;
+          block_.channel = block_.new_channel ? block_.new_channel : now.channel;
           block_.pan = now.pan;
           block_.key = now.key;
         }

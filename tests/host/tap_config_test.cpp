@@ -290,6 +290,42 @@ static void test_provision_keeps_the_network_changes_the_profile() {
   CHECK(job.message().find("3031") == std::string::npos);  // the key still hidden
 }
 
+// Moving a TAP to another channel: its PAN and key are kept from its own
+// read, and only the channel asked for changes (Settings > Bus, a TAP's
+// Channel row). Its optimizers then have to find it on the new channel.
+static void test_provision_keeps_the_network_changes_the_channel() {
+  FakeTap tap;
+  tap.ram = made_up();
+  tap.ram.channel = 11;
+  tap.ram.pan = 0x7E21;
+  for (int i = 0; i < 16; i++) tap.ram.key[i] = static_cast<uint8_t>(0x30 + i);
+  map_for_profile(20, tap.ram.map);
+  tap.ram.map[8] = 0x1C;
+  RadioBlock want;  // what the request carries: placeholders, the TAP's own profile, the new channel
+  want.channel = 11;
+  want.pan = 1;
+  map_for_profile(12, want.map);
+  want.keep_network = true;
+  want.keep_tap_profile = true;
+  want.new_channel = 20;
+  ProvisionJob job(TAP_MAC, want, false, false);
+  run(job, tap);
+  CHECK(job.ok());
+  CHECK(tap.ram.channel == 20);
+  CHECK(tap.ram.pan == 0x7E21 && tap.ram.key[0] == 0x30 && tap.ram.key[15] == 0x3F);
+  CHECK(tap.ram.map[0] == 20);  // its own profile, kept
+  CHECK(job.message().find("channel 20") != std::string::npos);
+  CHECK(job.message().find("3031") == std::string::npos);  // the key still hidden
+  // Without a new channel, keeping the network keeps the channel too.
+  FakeTap same;
+  same.ram = tap.ram;
+  same.ram.channel = 13;
+  want.new_channel = 0;
+  ProvisionJob again(TAP_MAC, want, false, false);
+  run(again, same);
+  CHECK(again.ok() && same.ram.channel == 13);
+}
+
 // A profile change the TAP runs but doesn't store (the roof's G8.65,
 // 2026-11-13: the live read showed the new map, the stored read the old).
 // Not a failure: it says the TAP runs the new profile now and goes back to
@@ -792,6 +828,7 @@ int main() {
   test_provision_gives_a_turn_before_writing();
   test_provision_keeps_the_taps_profile();
   test_provision_keeps_the_network_changes_the_profile();
+  test_provision_keeps_the_network_changes_the_channel();
   test_provision_profile_not_stored();
   test_provision_store();
   test_saves_with_store();
