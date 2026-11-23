@@ -417,7 +417,7 @@ const arrayFixture = {
 
 export const piRoutes = {
   '/api/array': arrayFixture,
-  '/api/status': { ...routes['/api/status'], platform: 'linux' },
+  '/api/status': { ...routes['/api/status'], platform: 'linux', system_uptime_sec: 1209600 },
   '/api/settings': {
     serial_port: '/dev/serial/by-id/usb-FTDI_USB_RS485-if00-port0', bus_role: 'master', standby_takeover_s: 3,
     master_startup: true, master_housekeeping: true, master_queries: true, master_optimizer_writes: false,

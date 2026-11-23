@@ -418,6 +418,17 @@ test('on the Pi, Logs is a tab of Diagnostics, not a sidebar item', async () => 
   await ctx.close();
 });
 
+test('on the Pi, uptime is TigoMonitor\'s, with the computer\'s beside it, not an ESP32 reset cause', async () => {
+  const { page, ctx, errors } = await open({ hash: '#diagnostics', status: { uptime_sec: 3600, system_uptime_sec: 1209600 } });
+  await page.waitForFunction(() => document.getElementById('diag-uptime').textContent !== '—');
+  const sub = await page.textContent('#diag-uptime-sub');
+  assert.match(sub, /since TigoMonitor started/);
+  assert.match(sub, /this computer up 14d/);
+  assert.doesNotMatch(sub, /cause not recorded/);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
 test('the ESP32 has no Logs, so Diagnostics has no tabs', async () => {
   const { page, ctx } = await open({ linux: false, hash: '#diagnostics' });
   await page.waitForTimeout(500);

@@ -69,6 +69,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   shared key** from its Network key row in dangerous options. Until then,
   no optimizer can join it.
 
+- **On a Raspberry Pi, uptime is TigoMonitor's own.** The sidebar's "up …"
+  and Diagnostics' uptime showed how long the computer had been on, not how
+  long TigoMonitor had been running, so a restart of TigoMonitor alone
+  didn't reset it. Both now count from TigoMonitor's start, as on the ESP32.
+  Diagnostics shows the computer's own uptime beside it, in place of an
+  ESP32 reset cause the Pi doesn't have. `/api/status` gains
+  `system_uptime_sec`.
+
 - **A bus cut no longer leaves TigoMonitor silent for half an hour.** With
   more than one TAP, a TAP that stops answering is asked every 30 s, then
   every 5 minutes after ten misses. When every TAP stopped at once, as when

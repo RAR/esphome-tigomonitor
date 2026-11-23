@@ -6007,6 +6007,13 @@
     label('diag-sockets', 'MQTT');
     label('diag-version', 'Version');
     document.getElementById('diag-mem-sub').textContent = 'system';
+    // TigoMonitor's own uptime, not an ESP32 reset cause (the Pi has none);
+    // the computer's time since boot beside it.
+    const upSub = document.getElementById('diag-uptime-sub');
+    upSub.textContent = 'since TigoMonitor started' +
+      (status.system_uptime_sec ? `; this computer up ${fmtBrandUptime(status.system_uptime_sec)}` : '');
+    upSub.style.color = '';
+    upSub.title = '';
     document.getElementById('diag-temp').nextElementSibling.textContent = 'SoC sensor';
     const mb = (b) => (b / 1048576).toFixed(0);
     document.getElementById('diag-heap-free').innerHTML =

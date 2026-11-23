@@ -266,9 +266,18 @@ static std::string mac_address() {
   return "";
 }
 
+// The computer's time since boot (in a container, the host's).
 static long system_uptime_s() {
   struct sysinfo si {};
   return sysinfo(&si) == 0 ? si.uptime : 0;
+}
+
+// TigoMonitor's own uptime, as the ESP32 reports it (there the device and
+// the firmware start together): since this process started.
+static const std::chrono::steady_clock::time_point process_start = std::chrono::steady_clock::now();
+static long process_uptime_s() {
+  return static_cast<long>(
+      std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - process_start).count());
 }
 
 HttpServer::HttpServer(HttpContext ctx) : ctx_(std::move(ctx)), started_unix_ms_(unix_ms()) { new_server_(); }
@@ -1301,7 +1310,7 @@ void HttpServer::routes_() {
     while (avail && avail < prev && !min_seen.compare_exchange_weak(prev, avail)) {
     }
     uint64_t min_avail = std::min(prev, avail);
-    long up = system_uptime_s();
+    long up = process_uptime_s();
     if (req.path == "/api/health") {
       std::vector<std::string> problems = health_problems_();
       send_json(res,
@@ -1336,6 +1345,7 @@ void HttpServer::routes_() {
                     {"uptime_days", up / 86400},
                     {"uptime_hours", (up / 3600) % 24},
                     {"uptime_mins", (up / 60) % 60},
+                    {"system_uptime_sec", system_uptime_s()},
                     {"tigomonitor_version", ctx_.version},
                     {"esphome_version", "tigomonitord " + ctx_.version},
                     {"compilation_time", __DATE__ " " __TIME__},
