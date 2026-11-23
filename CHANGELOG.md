@@ -21,9 +21,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   again. One that stops part-way (a TAP that doesn't answer, a restart)
   waits for you to put the old networks back or keep the TAPs as they are.
   Replace a TAP lists the old TAP's optimizers on the new one before the
-  re-sort, so it finds them. It needs **Allow changes to the TAPs**. It has
-  run end to end against mock TAPs only: no real optimizer has joined a TAP
-  after one yet.
+  re-sort, so it finds them. It needs **Allow changes to the TAPs**. On a
+  roof with three TAPs and 40 optimizers (2026-11-23) all 40 rejoined in
+  12 minutes the first time and in under 10 the second, when 22 moved to
+  the TAP that had none.
 
 - **Hand a TAP's optimizers to another (Raspberry Pi, experimental, API
   only).** `POST /api/master/taps/handover` with `{"from": "1202", "to":
@@ -79,6 +80,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   new channel, and how long that takes hasn't been measured, so it's
   safest on a TAP with no optimizers yet. It needs **Allow changes to the
   TAPs**.
+
+- **A TAP moved to another channel is restarted (Raspberry Pi).** Once the
+  new channel is saved, TigoMonitor restarts that TAP alone, as the CCA
+  restarts every TAP after its writes; Add a TAP's first channel counts
+  too. On the roof a TAP moved channel without a restart took no
+  optimizers in a re-sort; after a power cycle and another channel, the
+  next re-sort gave it 22. The two changes went in together, so which one
+  it needed isn't known.
 
 ### Fixed
 

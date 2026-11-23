@@ -217,6 +217,7 @@ static void run(ProvisionJob &job, FakeTap &tap) {
 
 static void test_provision() {
   FakeTap tap;
+  tap.ram.channel = made_up().channel;  // already on the channel it's given: no restart
   ProvisionJob job(TAP_MAC, made_up(), false, false);
   run(job, tap);
   CHECK(job.ok());
@@ -602,6 +603,69 @@ static void test_provision_gives_a_turn_before_writing() {
   CHECK(due_cmds.size() >= 4 && due_cmds[0] == 0x100 && due_cmds[1] == 0x00 && due_cmds[2] == 0 && due_cmds[3] == 0x01);
 }
 
+// A new channel takes a restart, as the CCA restarts every TAP after its
+// writes: Mid Roof (a G8.65) was moved channel live twice and took no
+// optimizer until it was power-cycled (the roof, 2026-11-23). Saved first,
+// so the restart keeps it.
+static void test_provision_new_channel_resets_the_tap() {
+  {  // the channel row: the network kept, a new channel
+    FakeTap tap;
+    tap.ram = made_up();
+    tap.ram.channel = 20;
+    RadioBlock want = made_up();
+    want.keep_network = true;
+    want.new_channel = 25;
+    ProvisionJob job(TAP_MAC, want, /*reset=*/false, false);
+    run(job, tap);
+    CHECK(job.ok() && tap.resets == 1);
+    CHECK(tap.ram.channel == 25);  // saved before the reset, so kept through it
+    CHECK(job.message().find("reset") != std::string::npos);
+  }
+  {  // a G8: the Store, then the reset
+    FakeTap tap;
+    tap.g8 = true;
+    tap.ram = made_up();
+    tap.ram.channel = 20;
+    tap.stored_copy = tap.ram;
+    RadioBlock want = made_up();
+    want.keep_network = true;
+    want.new_channel = 25;
+    want.store = true;
+    ProvisionJob job(TAP_MAC, want, false, false);
+    run(job, tap);
+    CHECK(job.ok() && tap.stores == 1 && tap.resets == 1);
+    CHECK(tap.stored_copy.channel == 25);
+  }
+  {  // a new TAP, from its factory channel 0
+    FakeTap tap;
+    ProvisionJob job(TAP_MAC, made_up(), false, false);
+    run(job, tap);
+    CHECK(job.ok() && tap.resets == 1);
+  }
+  {  // the dry run says so, and sends none
+    FakeTap tap;
+    tap.ram = made_up();
+    tap.ram.channel = 20;
+    RadioBlock want = made_up();
+    want.keep_network = true;
+    want.new_channel = 25;
+    ProvisionJob job(TAP_MAC, want, false, /*dry_run=*/true);
+    run(job, tap);
+    bool said = false;
+    for (const auto &l : job.dry_text()) said = said || l.find("0010 37 24 92 66") != std::string::npos;
+    CHECK(job.ok() && said && tap.resets == 0);
+  }
+  {  // the same channel (the re-key): no reset
+    FakeTap tap;
+    tap.ram = made_up();
+    RadioBlock want = made_up();
+    want.keep_network = true;
+    ProvisionJob job(TAP_MAC, want, false, false);
+    run(job, tap);
+    CHECK(job.ok() && tap.resets == 0);
+  }
+}
+
 static void test_provision_with_reset() {
   FakeTap tap;
   ProvisionJob job(TAP_MAC, made_up(), true, false);
@@ -898,6 +962,7 @@ int main() {
   test_provision_keeps_the_taps_profile();
   test_provision_keeps_the_network_changes_the_profile();
   test_provision_keeps_the_network_changes_the_channel();
+  test_provision_new_channel_resets_the_tap();
   test_shared_key_choice();
   test_provision_rekey_keeps_channel_pan_profile();
   test_keep_network_on_factory_settings_is_refused();

@@ -7139,7 +7139,7 @@
               body: 'The TAP keeps its channel, PAN and key, and re-slots its optimizers. A wrong profile can cost reports until it\'s set back.' }
           : what === 'channel'
           ? { title: `Move ${tapName} to ${label}?`, tone: 'danger', ok: 'Move it',
-              body: 'It keeps its network ID and key. Its optimizers lose it until they find it on the new channel, and how long that takes hasn\'t been measured, so this is safest before any optimizer is on it.' }
+              body: 'It keeps its network ID and key, and restarts once the new channel is saved, so its radio comes up on it. Its optimizers lose it until they find it on the new channel, and how long that takes hasn\'t been measured, so this is safest before any optimizer is on it.' }
           : what === 'key'
           ? { title: `Give ${tapName} the key your other TAPs share?`, tone: 'danger', ok: 'Use the shared key',
               body: `It keeps its channel and network ID. ${nodes
