@@ -5,6 +5,7 @@ on a pseudo-terminal (docs/superpowers/specs/2026-11-10-multi-tap-design.md).
     mock_taps.py PTY_LINK --tap ID,MAC[,PANELS[,new]] [--tap ...]
                  [--radio N,CH,PANHEX,KEYBYTE] [--down N,AT,FOR] [--down-file N,PATH]
                  [--reset-quiet S] [--join-after S] [--window S] [--stats FILE]
+                 [--home N:LO-HI] [--never-join ID] [--keys-file FILE]
 
 Each --tap is a TAP at RS485 id ID (hex; 1235 is the factory address), with
 a MAC ending in the hex byte MAC and PANELS optimizers behind it (3). "new"
@@ -31,6 +32,15 @@ one with that MAC, STORE keeps a TAP's id, and RESET puts each back at its
 kept id (a new one at the factory address), deaf for --reset-quiet seconds.
 Optimizer ids run on across the TAPs, as a system's do. MACs and barcodes
 are made up.
+
+For the re-sort (resort-e2e.sh): an optimizer written listed (0x8000) joins
+--join-after seconds later, but with --home N:LO-HI (ids in hex) the ids
+LO..HI join only on TAP N, and a --never-join id joins nowhere. Each TAP's
+stats carry its table as [id, joined] pairs, and a shared seq numbers every
+0B00 (pv) and GatewayCfg write (cfg_writes) across the TAPs, so the order
+can be checked. A write's key shows only as key_id (1 for the first new key
+seen, 2 for the next); --keys-file lists every key seen in hex, for the
+e2e's leak check, and nothing else.
 """
 import argparse
 import json
@@ -86,6 +96,9 @@ def main():
     ap.add_argument('--reset-quiet', type=float, default=4.5)
     ap.add_argument('--join-after', type=float, default=5)
     ap.add_argument('--window', type=float, default=600)  # how long a discovery window runs, renewed or at start
+    ap.add_argument('--home', action='append', default=[])  # N:LO-HI, ids in hex: they join only on TAP N
+    ap.add_argument('--never-join', action='append', default=[])  # an id (hex) that never joins
+    ap.add_argument('--keys-file', default=None)
     ap.add_argument('--stats', default=None)
     a = ap.parse_args()
 
@@ -123,7 +136,23 @@ def main():
         except OSError:
             pass
 
-    stats = {'claims': 0, 'resets': 0, 'other': [], 'log': [], 'taps': [t.st for t in taps]}
+    stats = {'claims': 0, 'resets': 0, 'other': [], 'log': [], 'taps': [t.st for t in taps], 'seq': 0}
+    home = {}
+    for spec in a.home:
+        n, rng_ = spec.split(':')
+        lo, hi = (int(x, 16) for x in rng_.split('-'))
+        for i in range(lo, hi + 1):
+            home[i] = int(n)
+    never = {int(x, 16) for x in a.never_join}
+    keys_seen = []  # every key seen, for key_id and --keys-file
+
+    def next_seq():
+        stats['seq'] += 1
+        return stats['seq']
+
+    def table_of(t, t_rel):
+        rows = ([] if t.erased else [(n, True) for _, n in t.panels]) + [(n, t_rel >= at) for _, n, at in t.written]
+        return [[f'{n:04X}', j] for n, j in sorted(rows)]
     start = time.monotonic()
     quiet_until = 0.0
     last_stats = 0.0
@@ -139,6 +168,8 @@ def main():
             t.st['id'] = f'{t.id:04X}'
             t.st['down'] = t.down
         if a.stats and now - last_stats >= 1.0:
+            for t in taps:
+                t.st['table'] = table_of(t, t_rel)
             with open(a.stats + '.tmp', 'w') as f:
                 json.dump(stats, f)
             os.replace(a.stats + '.tmp', a.stats)
@@ -231,6 +262,7 @@ def main():
                 send(encode(addr | 0x8000, 0x0B10, t.window(p[4], len(t.panels))))
             elif cmd == 0x0B00 and len(p) == 1:
                 t.st['sessions'].append(f'{p[0]:02x}')
+                t.st.setdefault('pv', []).append({'b': f'{p[0]:02x}', 'seq': next_seq()})
                 send(encode(addr | 0x8000, 0x0B01, p))
             elif cmd == 0x0B0F and len(p) == 7 and p[3] == 0x0D:
                 t.st['config_reads'] += 1
@@ -243,7 +275,13 @@ def main():
                 t.cfg = bytes(p[7:])
                 key = t.cfg[15:31]
                 same = next((o.n for o in taps if o.key0 == key), None)
-                t.st['cfg_writes'].append({'channel': t.cfg[1], 'pan': f'{t.cfg[2]:02X}{t.cfg[3]:02X}', 'key_same_as': same})
+                if key not in keys_seen:
+                    keys_seen.append(key)
+                    if a.keys_file:
+                        with open(a.keys_file, 'w') as f:
+                            f.write(''.join(k.hex() + '\n' for k in keys_seen + [o.key0 for o in taps if o.key0]))
+                t.st['cfg_writes'].append({'channel': t.cfg[1], 'pan': f'{t.cfg[2]:02X}{t.cfg[3]:02X}', 'key_same_as': same,
+                                           'key_id': keys_seen.index(key) + 1, 'seq': next_seq()})
                 send(encode(addr | 0x8000, 0x0B10, bytes([0x00, 0x0E, 0x00, 0x0E, p[4]]) + t.cfg + b'\x00'))
             elif cmd == 0x0B0F and len(p) >= 9 and p[3] == 0xE1:
                 args = p[5:]
@@ -271,7 +309,11 @@ def main():
                 for k in range(p[5]):
                     rec = p[6 + 10 * k:16 + 10 * k]
                     tuid = rec[8] << 8 | rec[9]
-                    t.written.append((rec[:8].hex(), tuid & 0x7FFF, t_rel + a.join_after if tuid & 0x8000 else t_rel))
+                    nid = tuid & 0x7FFF
+                    joins = t_rel + a.join_after
+                    if tuid & 0x8000 and (nid in never or (nid in home and home[nid] != t.n)):
+                        joins = float('inf')  # it joins another TAP, or none
+                    t.written.append((rec[:8].hex(), nid, joins if tuid & 0x8000 else t_rel))
                 send(encode(addr | 0x8000, 0x0B10, bytes([0x00, 0x0E, 0x00, 0x2A, p[4], 0x00])))
             elif cmd == 0x0B0F and len(p) == 7 and p[3] == 0x2B and p[5:7] == b'\xba\xbe':
                 t.st['erases'] += 1

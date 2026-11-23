@@ -89,7 +89,7 @@ expect "having written nothing" "$(stat "$out/one.json" "d['taps'][2]['cfg_write
 expect "the re-key starts" "$(code POST 18501 /api/master/taps/provision '{"mac": "04C05B0000A1B2A3", "keep_network": true, "shared_key": true, "dry_run": false}')" 200
 finished 18501
 expect "and is given" "$(master 18501 "d['table']['edit']['ok']")" True
-expect "the shared key, its channel and PAN kept" "$(stat "$out/one.json" "d['taps'][2]['cfg_writes'][-1]")" \
+expect "the shared key, its channel and PAN kept" "$(stat "$out/one.json" "{k: v for k, v in d['taps'][2]['cfg_writes'][-1].items() if k in ('channel', 'pan', 'key_same_as')}")" \
   "{'channel': 11, 'pan': '1A2B', 'key_same_as': 1}"
 wait_for 20 18501 "all(t['key'] == 'same' for t in d['taps'])"
 expect "now all the same" "$(master 18501 "[t['key'] for t in d['taps']]")" "['same', 'same', 'same']"
