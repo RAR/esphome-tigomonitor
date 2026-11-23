@@ -12,6 +12,7 @@
 #include "tigo_master.h"
 
 #include <algorithm>
+#include <array>
 #include <cstring>
 #include <cstdio>
 #include <string>
@@ -1751,7 +1752,89 @@ static void test_herd_with_no_tap_fails() {
   CHECK(h.failed() && bus.count(CMD_GET_MAC) == Herd::MAC_TRIES);
 }
 
+
+// 0xE1 SetKnownNetworks, the CCA's shape (analyst, 2026-11-22; the roof's
+// two-TAP capture): a count of the other TAPs, three zeros, then per TAP its
+// channel, a zero, its PAN and its key. Made-up networks here.
+static std::array<uint8_t, 16> key_from_byte(uint8_t first) {
+  std::array<uint8_t, 16> k{};
+  for (int i = 0; i < 16; i++) k[i] = static_cast<uint8_t>(first + i);
+  return k;
+}
+
+static void test_known_networks_args_one_and_two() {
+  KnownNetwork a{15, 0x7E21, key_from_byte(0x30)};
+  KnownNetwork b{11, 0x5A5A, key_from_byte(0x40)};
+  CHECK(known_networks_args({a}) == hex("010000000F007E21303132333435363738393A3B3C3D3E3F"));
+  Bytes two = known_networks_args({a, b});
+  CHECK(two.size() == 44);
+  CHECK(two == hex("020000000F007E21303132333435363738393A3B3C3D3E3F"
+                   "0B005A5A404142434445464748494A4B4C4D4E4F"));
+}
+
+static void test_known_networks_gate() {
+  KnownNetwork a{15, 0x7E21, key_from_byte(0x30)};
+  KnownNetwork b{11, 0x5A5A, key_from_byte(0x40)};
+  Bytes one = known_networks_args({a}), two = known_networks_args({a, b});
+  CHECK(classify_request(CMD_TUNNEL, tunnel_request(0xE1, 7, one)) == Allow::table_write);
+  CHECK(classify_request(CMD_TUNNEL, tunnel_request(0xE1, 7, two)) == Allow::table_write);
+  CHECK(is_known_networks_args(one) && is_known_networks_args(two));
+  auto never = [](const Bytes &args) { return classify_request(CMD_TUNNEL, tunnel_request(0xE1, 7, args)) == Allow::never; };
+  Bytes zero = one;
+  zero[0] = 0;
+  CHECK(never(zero));
+  Bytes seventeen = {17, 0, 0, 0};
+  for (int i = 0; i < 17; i++) {
+    Bytes r = known_networks_args({a});
+    seventeen.insert(seventeen.end(), r.begin() + 4, r.end());
+  }
+  CHECK(never(seventeen));
+  for (int i = 1; i <= 3; i++) {
+    Bytes bad = one;
+    bad[i] = 1;
+    CHECK(never(bad));
+  }
+  Bytes longer = one;
+  longer.push_back(0);
+  CHECK(never(longer));
+  Bytes shorter(one.begin(), one.end() - 1);
+  CHECK(never(shorter));
+  Bytes pad = one;
+  pad[5] = 1;  // the zero after the channel
+  CHECK(never(pad));
+  for (uint8_t ch : {uint8_t{10}, uint8_t{27}}) {
+    Bytes bad = one;
+    bad[4] = ch;
+    CHECK(never(bad));
+  }
+  // The bench alone doesn't send it: it needs Allow changes to the TAPs.
+  CHECK(!may_send(CMD_TUNNEL, tunnel_request(0xE1, 7, one), /*bench=*/true, false, false, false, /*table_writes=*/false));
+  CHECK(may_send(CMD_TUNNEL, tunnel_request(0xE1, 7, one), false, false, false, false, /*table_writes=*/true));
+}
+
+static void test_known_networks_status() {
+  Frame ok;
+  ok.cmd = CMD_TUNNEL_REPLY;
+  ok.payload = hex("000E00E207000F7E21");
+  CHECK(known_networks_status(ok) == 0);
+  CHECK(known_networks_status_text(0) == "accepted");
+  Frame full = ok;
+  full.payload[5] = 3;
+  CHECK(known_networks_status(full) == 3);
+  CHECK(known_networks_status_text(3) == "refused: no room for another network");
+  CHECK(known_networks_status_text(1) == "refused: an invalid channel");
+  CHECK(known_networks_status_text(2) == "refused: an invalid network ID");
+  CHECK(known_networks_status_text(9) == "refused (status 9)");
+  Frame other = ok;
+  other.payload[3] = 0x2F;
+  CHECK(known_networks_status(other) == -1);
+  CHECK(known_networks_status_text(-1) == "no answer");
+}
+
 int main() {
+  test_known_networks_args_one_and_two();
+  test_known_networks_gate();
+  test_known_networks_status();
   test_herd_one_known_tap();
   test_herd_a_new_tap_is_stored_in_a_second_round();
   test_herd_skips_a_missing_taps_id();

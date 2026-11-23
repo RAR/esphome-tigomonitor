@@ -43,7 +43,8 @@ const DEVICES = [
 // no TAP: its TAPs come from /api/versions, each TAP answering polls.
 const VERSIONS = { taps: [], optimizers: [], radios: [], ids: [], settings: [], mppt: [], ratings: [], changes: [],
   polled: [{ tap: '1201', heard_unix_ms: Date.now() - 1000, name: 'Garage' }, { tap: '1202', heard_unix_ms: Date.now() - 1000 }] };
-async function open(saved = { panels: [], taps: [] }, platform = 'linux', master = null) {
+async function open(saved = { panels: [], taps: [] }, platform = 'linux', master = null,
+                    mesh = { taps: [{ id: '1201', name: 'Garage' }], nodes: [], loss_days: [] }) {
   const api = { layout: JSON.parse(JSON.stringify(saved)), posts: [], asked: [] };
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
   await ctx.route('**/api/**', async (route) => {
@@ -62,7 +63,7 @@ async function open(saved = { panels: [], taps: [] }, platform = 'linux', master
       return json(200, api.layout);
     }
     if (path === '/api/master' && master) return json(200, master);
-    if (path === '/api/mesh') return json(200, { taps: [{ id: '1201', name: 'Garage' }], nodes: [], loss_days: [] });
+    if (path === '/api/mesh') return json(200, mesh);
     if (routes[path] !== undefined) return json(200, routes[path]);
     return route.fulfill({ status: 404, body: 'no fixture' });
   });
@@ -106,6 +107,29 @@ test('no array yet: it says how to start', async () => {
   assert.equal(await page.isVisible('#array-tray'), false);
   assert.deepEqual(errors, []);
   await ctx.close();
+});
+
+test('a TAP nothing reports through yet can be placed: by its name, or as TAP 1203 if it has none', async () => {
+  const disc = { read: true, running: false, remaining_s: 0, node_count: 0, joined: 0 };
+  const master = { role: 'master', active: true,
+    taps: [{ id: '1201', state: 'running', discovery: disc }, { id: '1203', state: 'running', discovery: disc }] };
+  {
+    const mesh = { taps: [{ id: '1201', name: 'Garage' }, { id: '1203', name: 'Mid Roof' }], nodes: [], loss_days: [] };
+    const { page, ctx, errors } = await open({ panels: [], taps: [] }, 'linux', master, mesh);
+    await page.click('#array-edit-btn');
+    const names = await page.locator('#array-tray [data-kind="tap"]').allTextContents();
+    assert.deepEqual(names, ['Garage', 'Mid Roof']);
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  {
+    const { page, ctx, errors } = await open({ panels: [], taps: [] }, 'linux', master);
+    await page.click('#array-edit-btn');
+    const names = await page.locator('#array-tray [data-kind="tap"]').allTextContents();
+    assert.deepEqual(names, ['Garage', 'TAP 1203']);
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
 });
 
 test('a saved array: each panel in place, lit by its power, and the TAP', async () => {

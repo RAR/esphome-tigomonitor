@@ -457,6 +457,70 @@ test('with no live read the channel list opens on 15, the first clear of Wi-Fi',
   await ctx.close();
 });
 
+test('the Network key row: same or alone can\'t be re-keyed; a different one can, with a warning that fits', async () => {
+  const master = { taps: [
+    { id: '1201', mac: '04C05B0000A1B2C1', state: 'running', key: 'same', known_networks: 'accepted (1 other TAP)',
+      discovery: { read: true, running: true, remaining_s: 500, node_count: 20, joined: 20 } },
+    { id: '1203', mac: '04C05B0000A1B2C3', state: 'running', key: 'different', known_networks: 'accepted (1 other TAP)',
+      discovery: { read: true, running: false, remaining_s: 0, node_count: 0, joined: 0 } }] };
+  const { page, ctx, api, errors } = await open({ hash: '#settings', master, settings: { dangerous_options: true } });
+  await page.waitForSelector('#pi-danger [data-danger-tap="04C05B0000A1B2C3"]', { state: 'visible' });
+  const first = '#pi-danger [data-danger-tap="04C05B0000A1B2C1"]', other = '#pi-danger [data-danger-tap="04C05B0000A1B2C3"]';
+  assert.match(await page.textContent(first), /The same key as your other TAPs/);
+  assert.equal(await page.isDisabled(`${first} button[data-danger="key-write"]`), true);
+  assert.equal(await page.isDisabled(`${first} button[data-danger="key-preview"]`), true);
+  assert.match(await page.textContent(other), /A different key from your other TAPs: optimizers can't move to it/);
+  assert.equal(await page.isDisabled(`${other} button[data-danger="key-write"]`), false);
+  await page.click(`${other} button[data-danger="key-preview"]`);
+  await page.waitForFunction(() => /would do it \(provision\)/.test(document.querySelector('#pi-danger [data-danger-out]').textContent));
+  assert.deepEqual(api.posts.at(-1), { path: '/api/master/taps/provision',
+    body: { mac: '04C05B0000A1B2C3', keep_network: true, shared_key: true, dry_run: true } });
+  // No optimizers on it: the warning says so, and the write goes.
+  await page.click(`${other} button[data-danger="key-write"]`);
+  await page.waitForSelector('#ui-dialog[open]');
+  assert.match(await page.getAttribute('#ui-dialog [data-answer="ok"]', 'class'), /danger/);
+  assert.match(await page.textContent('#ui-dialog'), /no optimizers/);
+  await answer(page, true);
+  await page.waitForFunction(() => /done \(provision\)/.test(document.querySelector('#pi-danger [data-danger-out]').textContent));
+  assert.deepEqual(api.posts.at(-1).body, { mac: '04C05B0000A1B2C3', keep_network: true, shared_key: true, dry_run: false });
+  // Still locked after a write on another TAP's row.
+  assert.equal(await page.isDisabled(`${first} button[data-danger="key-write"]`), true);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test('the Network key row says whether the other TAPs\' networks reached it, and a factory TAP is locked', async () => {
+  const master = { taps: [
+    { id: '1201', mac: '04C05B0000A1B2C1', state: 'running', key: 'alone', known_networks: 'waiting: Allow changes to the TAPs is off',
+      discovery: { read: true, running: true, remaining_s: 500, node_count: 20, joined: 20 } },
+    { id: '1202', mac: '04C05B0000A1B2C2', state: 'running', key: 'factory', known_networks: '',
+      discovery: { read: true, running: false, remaining_s: 0, node_count: 0, joined: 0 } }] };
+  const { page, ctx, errors } = await open({ hash: '#settings', master, settings: { dangerous_options: true } });
+  await page.waitForSelector('#pi-danger [data-danger-tap="04C05B0000A1B2C2"]', { state: 'visible' });
+  const first = '#pi-danger [data-danger-tap="04C05B0000A1B2C1"]', fresh = '#pi-danger [data-danger-tap="04C05B0000A1B2C2"]';
+  assert.match(await page.textContent(first), /Other TAPs' networks: waiting: Allow changes to the TAPs is off/);
+  assert.match(await page.textContent(fresh), /Still on its factory settings: Add a TAP gives it a network of its own/);
+  assert.doesNotMatch(await page.textContent(fresh), /Other TAPs' networks/);
+  assert.equal(await page.isDisabled(`${fresh} button[data-danger="key-write"]`), true);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test('the Network key row warns that a TAP\'s optimizers drop off it', async () => {
+  const master = { taps: [
+    { id: '1201', mac: '04C05B0000A1B2C1', state: 'running', key: 'different',
+      discovery: { read: true, running: true, remaining_s: 500, node_count: 20, joined: 20 } },
+    { id: '1202', mac: '04C05B0000A1B2C2', state: 'running', key: 'different',
+      discovery: { read: true, running: true, remaining_s: 500, node_count: 20, joined: 20 } }] };
+  const { page, ctx } = await open({ hash: '#settings', master, settings: { dangerous_options: true } });
+  await page.waitForSelector('#pi-danger [data-danger-tap="04C05B0000A1B2C1"]', { state: 'visible' });
+  await page.click('#pi-danger [data-danger-tap="04C05B0000A1B2C1"] button[data-danger="key-write"]');
+  await page.waitForSelector('#ui-dialog[open]');
+  assert.match(await page.textContent('#ui-dialog'), /20 optimizers drop off it/);
+  await answer(page, false);
+  await ctx.close();
+});
+
 test('with the flag: preview a profile and a period, then write one after a warning', async () => {
   const { page, ctx, api, errors } = await open({ hash: '#settings', master: TAPS, settings: { dangerous_options: true } });
   await page.waitForSelector('#pi-danger', { state: 'visible' });

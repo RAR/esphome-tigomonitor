@@ -31,6 +31,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <optional>
 #include <cstdint>
 #include <functional>
 #include <map>
@@ -124,6 +125,13 @@ struct TapStatus {
   std::vector<uint16_t> pgw_pool;
   uint16_t holder_01 = 0, holder_02 = 0, holder_04 = 0;
   uint32_t turn_left_s = 0;
+  // Its network key against the other TAPs' (never the key itself): same
+  // (the one most of the read TAPs hold), different, unread, alone, or
+  // factory (still on its factory settings, so no network and no key).
+  std::string key = "unread";
+  // Telling it the other TAPs' networks (0xE1): "" before any try, then
+  // "accepted (2 other TAPs)", a refusal's words, or why it waits.
+  std::string known_networks;
 };
 
 struct MasterStatus {
@@ -305,6 +313,11 @@ class MasterCore {
   static constexpr uint32_t LOST_PROBE_MS = 30000;
   static constexpr uint32_t LOST_MISSES = 10;
   static constexpr uint32_t REMOVED_PROBE_MS = 300000;
+  static constexpr uint32_t KNOWN_NETWORKS_WAIT_MS = 2000;
+  static constexpr uint32_t KNOWN_NETWORKS_TRIES = 3;
+  static constexpr uint32_t KNOWN_NETWORKS_RETRY_MS = 30000;
+  static constexpr uint32_t CONFIG_RETRY_MS = 60000;
+  static constexpr uint32_t CONFIG_TRIES = 5;
 
   // Stand by rather than run the bus (bus_role standby); call before open().
   // on_listen gets the bytes read while standing by (the Monitor, and the
@@ -334,6 +347,10 @@ class MasterCore {
   // read, 0x0D 00 00), for its channel and SLT. Off unless the owner asks;
   // call before open().
   void set_read_tap_config(bool on) { read_tap_config_ = on; }
+  // The Pi's: every TAP's settings read at start, so its key can be compared
+  // and shared, and each TAP told the others' networks (0xE1). Off on the
+  // ESP32.
+  void set_known_networks(bool on) { known_networks_ = on; }
   // Housekeeping without its 0x41s (the rest unchanged).
   void set_send_41(bool on) { send_41_ = on; }
   // Automatic discovery (discovery_policy.h): false lets the window close,
@@ -458,6 +475,20 @@ class MasterCore {
     bool readdressed = false;         // the last bring-up moved it off the factory address
     bool session_reset_sent = false;  // the 0x0B00 00, sent once per start, as after a CCA reboot
     bool config_read_sent = false;    // once a master lifetime, not at each takeover
+    // Its radio settings from its last GatewayCfg read, whoever asked: kept
+    // here only, as they hold the network key.
+    std::optional<esphome::tigo_monitor::master::RadioBlock> radio;
+    // Owed an 0xE1 naming the other TAPs: at start, after a TAP's network or
+    // the set of TAPs changed, and when it's back from lost. An unanswered
+    // one is tried again KNOWN_NETWORKS_TRIES times, KNOWN_NETWORKS_RETRY_MS
+    // apart.
+    bool known_due = true;
+    uint32_t known_tries = 0, known_next_ms = 0;
+    // Its settings read: tried again CONFIG_RETRY_MS apart while unanswered,
+    // then given up on after CONFIG_TRIES (said once; it is named nowhere).
+    // Written under mu_, as request_provision reads them from another thread.
+    uint32_t cfg_tries = 0, cfg_try_ms = 0;
+    bool cfg_gave_up = false;
     // More than one TAP: lost (stopped answering), it is asked at most once
     // every LOST_PROBE_MS; removed after LOST_MISSES of those, unless no TAP
     // is answering (the bus, then: still every LOST_PROBE_MS).
@@ -511,6 +542,32 @@ class MasterCore {
   bool bench_, startup_;
   bool housekeeping_on_;
   bool read_tap_config_ = false;
+  bool known_networks_ = false;
+  // With one TAP there's no key to share and no one to tell: no read added.
+  bool reads_config_() const { return read_tap_config_ || (known_networks_ && taps_.size() > 1); }
+  void sync_key_words_();
+  void known_networks_due_() {
+    for (auto &t : taps_) {
+      t->known_due = true;
+      t->known_tries = 0;
+      t->known_next_ms = 0;
+    }
+  }
+  // Sends t its 0xE1 if it's owed one and ready; true if a frame went out.
+  bool send_known_networks_(Tap &t, uint32_t now_ms);
+  // Asks t for its settings again if its read went unanswered; true if a
+  // frame went out.
+  bool retry_config_read_(Tap &t, uint32_t now_ms);
+  // A reply to a 0D 00 00 read: kept (under mu_), the key words redone, and
+  // every TAP owed an 0xE1 if this TAP's network is new or changed.
+  void take_config_reply_(Tap &t, const esphome::tigo_monitor::master::Frame &reply);
+  bool known_waiting_logged_ = false;
+  // A TAP with a network: settings read, on a channel networks use. One on
+  // its factory settings (channel 0) holds no key worth sharing.
+  static bool has_network_(const Tap &t) {
+    return t.radio && t.radio->channel >= esphome::tigo_monitor::master::CHANNEL_MIN &&
+           t.radio->channel <= esphome::tigo_monitor::master::CHANNEL_MAX;
+  }
   bool send_41_ = true;
   bool learn_taps_ = false;
   bool learn_guessed_ = false;  // the list is still the gateway_id guess
