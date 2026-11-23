@@ -40,8 +40,9 @@
 // allows only for a provisioning request, with "Allow changes to the TAPs"
 // (master_table_writes) or master_bench on. No PV bracket, no 0x000E /
 // 0x0E02, no table erase: the analysis found the TAP needs none of them, and
-// the bench showed it. A reset addressed to that TAP alone is sent only when
-// asked for; Add a TAP's step never asks.
+// the bench showed it. A reset addressed to that TAP alone (the CCA's
+// 0010 37 24 92 66) is sent when asked for, and whenever the write moves the
+// TAP to another channel, a new TAP's first one included.
 //
 // The 0x0E reply's status byte is the TAP's join-window state (1 while a
 // window is open; bench, 2026-11-11), not a verdict on the write: the job
@@ -364,9 +365,9 @@ inline std::string radio_write_text(const RadioBlock &b) {
 
 // Giving one TAP its radio settings: ask the TAP at that address for its
 // MAC and stop unless it's the one named, read what it runs now, write ours,
-// read the stored copy (the save), read it again, and, only if asked, reset
-// that TAP alone. Then it's done; whether the TAP saved it is for a power
-// cycle and a read to show.
+// read the stored copy (the save), read it again, and reset that TAP alone
+// if asked or if its channel changed. Then it's done; whether the TAP saved
+// it is for a power cycle and a read to show.
 class ProvisionJob : public TableJob {
  public:
   enum class Step { identify, read_before, write, save, check, store, store_read, reset, done, failed };
@@ -491,6 +492,11 @@ class ProvisionJob : public TableJob {
           block_.pan = now.pan;
           if (!block_.shared_key) block_.key = now.key;
         }
+        // A new channel takes a restart, as the CCA restarts every TAP after
+        // its writes: Mid Roof (a G8.65) was moved channel live twice and
+        // took no optimizer until it was power-cycled (the roof, 2026-11-23).
+        // It goes out after the save, so the TAP comes back on what it saved.
+        if (now.channel != block_.channel) reset_ = true;
         // Sized the CCA's way: a TAP keeps its own known map while that still
         // covers its table; otherwise the smallest that does.
         if (block_.keep_tap_profile) {

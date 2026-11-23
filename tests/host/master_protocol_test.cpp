@@ -1831,7 +1831,48 @@ static void test_known_networks_status() {
   CHECK(known_networks_status_text(-1) == "no answer");
 }
 
+// With more than one TAP and 0xE1 on, the CCA's renewals ended 01 01 (the
+// known-networks flag), 119 per TAP from 11-14 to 11-16; one TAP's, 01 00.
+static void test_renewal_with_known_networks() {
+  CHECK(discovery_renewal_args(0x2C) == (Bytes{0xBA, 0xBE, 0x02, 0x03, 0x84, 0x00, 0x2C, 0x01, 0x00}));
+  CHECK(discovery_renewal_args(0x2C, true) == (Bytes{0xBA, 0xBE, 0x02, 0x03, 0x84, 0x00, 0x2C, 0x01, 0x01}));
+  auto req = [](const Bytes &args) { return tunnel_request(0x2D, 7, args); };
+  CHECK(classify_request(CMD_TUNNEL, req(discovery_renewal_args(20))) == Allow::yes);
+  CHECK(classify_request(CMD_TUNNEL, req(discovery_renewal_args(20, true))) == Allow::yes);
+  Bytes two = discovery_renewal_args(20, true);
+  two[8] = 0x02;
+  CHECK(classify_request(CMD_TUNNEL, req(two)) == Allow::bench_only);
+  CHECK(classify_request(CMD_TUNNEL, req(discovery_renewal_args(0, true))) == Allow::bench_only);
+}
+
+static void test_keeper_renews_with_the_flag() {
+  WindowKeeper k;
+  k.set_known_networks(true);
+  CHECK(k.known_networks());
+  DiscoveryWindow w;  // read: 0 s left, 20 listed
+  w.remaining_s = 0;
+  w.node_count = 20;
+  k.on_window(w, 0);
+  WindowAction a = k.due(1);
+  CHECK(a.kind == WindowAction::renew && a.known_networks);
+  WindowKeeper plain;
+  plain.on_window(w, 0);
+  WindowAction b = plain.due(1);
+  CHECK(b.kind == WindowAction::renew && !b.known_networks);
+  // next_request builds the renewal with it.
+  WindowKeeper k2;
+  k2.set_known_networks(true);
+  k2.on_window(w, 0);
+  PollCursor cursor{0};
+  uint8_t seq = 0;
+  Request r = next_request(k2, cursor, seq, 1);
+  CHECK(r.cmd == CMD_TUNNEL && r.payload.size() == 14 && r.payload[3] == 0x2D && r.payload[12] == 0x01 &&
+        r.payload[13] == 0x01);
+}
+
 int main() {
+  test_renewal_with_known_networks();
+  test_keeper_renews_with_the_flag();
   test_known_networks_args_one_and_two();
   test_known_networks_gate();
   test_known_networks_status();

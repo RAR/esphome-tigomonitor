@@ -7,7 +7,8 @@
 # the shared key and keeps its channel and PAN (a dry run writes nothing), and
 # every TAP is told again; that a TAP a herd brings in on factory settings is
 # named in no 0xE1 until Add a TAP gives it its settings, with the key the others
-# share; and that no key appears in the daemon's log.
+# share; that with more than one TAP every window renewal ends 01 01; and that
+# no key appears in the daemon's log.
 # Run from the repo root inside the dev container, after build.sh.
 set -eu
 out=build/shared-network-e2e
@@ -72,7 +73,7 @@ no_key_logged() {  # no_key_logged LOG: none of the made-up keys' bytes
 mkdir -p "$out/one"
 echo '{"taps": [{"id": "1201", "mac": "04c05b0000a1b2a1"}, {"id": "1202", "mac": "04c05b0000a1b2a2"}, {"id": "1203", "mac": "04c05b0000a1b2a3"}]}' > "$out/one/taps.json"
 start one 18501 '' --tap 1201,a1,3 --tap 1202,a2,3 --tap 1203,a3,0 \
-  --radio 1,15,7E21,30 --radio 2,18,5A5A,30 --radio 3,11,1A2B,77
+  --radio 1,15,7E21,30 --radio 2,18,5A5A,30 --radio 3,11,1A2B,77 --window 3
 wait_for 40 18501 "len(d['taps']) == 3 and all(t['key'] != 'unread' for t in d['taps'])"
 expect "each TAP's key against the others'" "$(master 18501 "[t['key'] for t in d['taps']]")" "['same', 'same', 'different']"
 wait_mock 20 "$out/one.json" "all(len(t['e1']) == 1 for t in d['taps'])"
@@ -88,13 +89,17 @@ expect "having written nothing" "$(stat "$out/one.json" "d['taps'][2]['cfg_write
 expect "the re-key starts" "$(code POST 18501 /api/master/taps/provision '{"mac": "04C05B0000A1B2A3", "keep_network": true, "shared_key": true, "dry_run": false}')" 200
 finished 18501
 expect "and is given" "$(master 18501 "d['table']['edit']['ok']")" True
-expect "the shared key, its channel and PAN kept" "$(stat "$out/one.json" "d['taps'][2]['cfg_writes'][-1]")" \
+expect "the shared key, its channel and PAN kept" "$(stat "$out/one.json" "{k: v for k, v in d['taps'][2]['cfg_writes'][-1].items() if k in ('channel', 'pan', 'key_same_as')}")" \
   "{'channel': 11, 'pan': '1A2B', 'key_same_as': 1}"
 wait_for 20 18501 "all(t['key'] == 'same' for t in d['taps'])"
 expect "now all the same" "$(master 18501 "[t['key'] for t in d['taps']]")" "['same', 'same', 'same']"
 wait_mock 20 "$out/one.json" "all(len(t['e1']) == 2 for t in d['taps'])"
 expect "and each told again" "$(stat "$out/one.json" "[len(t['e1']) for t in d['taps']]")" "[2, 2, 2]"
 expect "nothing unknown sent" "$(stat "$out/one.json" "d['other']")" "[]"
+# With more than one TAP, every renewal carries the known-networks flag (01 01).
+wait_mock 20 "$out/one.json" "all(t.get('renewal_flags') for t in d['taps'][:2])"
+expect "renewals carry the known-networks flag" \
+  "$(stat "$out/one.json" "sorted(set(sum((t.get('renewal_flags', []) for t in d['taps']), [])))")" "['0101']"
 expect "no key in the log" "$(no_key_logged "$out/one.log")" 0
 stop_all
 

@@ -10,6 +10,8 @@
 #include <atomic>
 #include <chrono>
 #include <functional>
+#include <memory>
+#include <optional>
 #include <cstdio>
 #include <string>
 #include <thread>
@@ -799,6 +801,7 @@ struct MultiTap {
     bool up;
     uint16_t stored;  // where a RESET puts it; 0: the factory address (a new TAP)
     bool window_closed = false;  // its discovery window reads closed, 0 s left
+    bool reopen_on_renewal = false;  // a 0x2D opens a closed window, as a TAP does
     // Its radio settings (GatewayCfg): read with 0D 00 00, written with
     // 0D 01 00, the stored copy read with 0D 00 01 and saved by the Store.
     bool has_cfg = false, cfg_silent = false;
@@ -811,7 +814,41 @@ struct MultiTap {
     int e1_silent = 0;         // this many 0xE1s go unanswered first; -1: all
     std::vector<mp::Bytes> records;
     std::vector<mp::Bytes> writes;
+    std::vector<mp::Bytes> renewals;  // each 0x2D's args
+    std::vector<uint8_t> sessions;    // each 0x0B00's byte, heard even when it no longer answers
+    bool silent_after_pv_off = false;  // stops answering at its first 0B00 00
+    bool answer_pv = false;            // answers 0B00 with 0B01, as a TAP does
+    int drop_pv_on = 0;                // this many 0B00 01s it never hears
+    int drop_29_ack = 0;               // this many 0x29s it takes without acking
+    int reads_silent_after_erase = 0;  // table pages unanswered after an erase: a TAP restarting
+    bool tables_silent = false;        // no table page answered, though polls are
+    bool erased = false;
   };
+  bool other_master = false;  // every answer comes with another master's poll beside it
+  // Every request in order: (TAP, cmd, the tunnel sub or 0, the first payload byte after the header or 0).
+  struct Sent {
+    uint16_t id, cmd;
+    uint8_t sub, first;
+  };
+  std::vector<Sent> log;
+  int index_of(uint16_t cmd, uint8_t sub_or_byte, size_t from = 0) const {
+    for (size_t i = from; i < log.size(); i++)
+      if (log[i].cmd == cmd && (cmd == 0x0B00 ? log[i].first == sub_or_byte : log[i].sub == sub_or_byte))
+        return static_cast<int>(i);
+    return -1;
+  }
+  // An optimizer joins: its record's 0x8000 bit cleared on that TAP.
+  void join(uint16_t tap, uint16_t id) {
+    for (auto &r : at(tap)->records)
+      if (((r[8] & 0x7F) << 8 | r[9]) == id) r[8] &= 0x7F;
+  }
+  std::vector<uint16_t> ids_on(uint16_t tap, bool joined_only = false) {
+    std::vector<uint16_t> out;
+    for (auto &r : at(tap)->records)
+      if (!joined_only || !(r[8] & 0x80)) out.push_back(static_cast<uint16_t>((r[8] & 0x7F) << 8 | r[9]));
+    std::sort(out.begin(), out.end());
+    return out;
+  }
   TapPort port;
   std::vector<One> taps;
   std::vector<uint16_t> dests;  // each request's dest, in order
@@ -872,13 +909,37 @@ struct MultiTap {
       }
       mp::Frame r;
       if (one(f, r)) out.push_back(r);
+      if (other_master) {
+        mp::Frame poll;  // a request we didn't send: another master
+        poll.dest = 0x1201;
+        poll.cmd = 0x0148;
+        poll.payload = {0x00, 0x01, 0x00, 0x10, 0x00};
+        out.push_back(poll);
+      }
       return out;
     };
   }
   bool one(const mp::Frame &f, mp::Frame &r) {
     {
       dests.push_back(f.dest);
+      log.push_back({f.dest, f.cmd, static_cast<uint8_t>(f.cmd == 0x0B0F && f.payload.size() > 3 ? f.payload[3] : 0),
+                     static_cast<uint8_t>(f.cmd == 0x0B00 && !f.payload.empty() ? f.payload[0] : 0)});
       One *t = at(f.dest);
+      if (t && f.cmd == 0x0B00 && f.payload.size() == 1) {
+        if (f.payload[0] == 0x01 && t->drop_pv_on > 0) {
+          t->drop_pv_on--;
+          return false;
+        }
+        t->sessions.push_back(f.payload[0]);
+        if (f.payload[0] == 0x00 && t->silent_after_pv_off) t->up = false;
+        if (t->answer_pv && t->up) {
+          r.dest = f.dest | 0x8000;
+          r.cmd = 0x0B01;
+          r.payload = {f.payload[0]};
+          return true;
+        }
+        return false;  // as before: no 0B01
+      }
       if (!t || !t->up) return false;
       r.dest = f.dest | 0x8000;
       if (f.cmd == 0x003A) {
@@ -902,6 +963,8 @@ struct MultiTap {
       r.cmd = 0x0B10;
       r.payload = {0x00, 0x0E, 0x00, static_cast<uint8_t>(sub + 1), seq};
       if (sub == 0x2E || sub == 0x2D) {
+        if (sub == 0x2D) t->renewals.push_back(args);
+        if (sub == 0x2D && t->reopen_on_renewal) t->window_closed = false;
         r.payload[3] = 0x2F;
         mp::Bytes w = {0x01, 0x03, 0x84, 0x00, 0x02, 0x00, 0x02, 0x00, static_cast<uint8_t>(t->records.size())};
         if (t->window_closed) w[0] = w[1] = w[2] = 0x00;
@@ -909,6 +972,11 @@ struct MultiTap {
         return true;
       }
       if (sub == 0x26) {
+        if (t->erased && t->reads_silent_after_erase > 0) {
+          t->reads_silent_after_erase--;
+          return false;
+        }
+        if (t->tables_silent) return false;
         uint16_t asked = static_cast<uint16_t>(args[0] << 8 | args[1]);
         std::vector<mp::Bytes> page;
         for (const auto &rec : t->records)
@@ -957,10 +1025,20 @@ struct MultiTap {
         r.payload.push_back(0x00);
         return true;
       }
+      if (sub == 0x2B) {
+        t->records.clear();
+        t->erased = true;
+        r.payload.push_back(0x00);
+        return true;
+      }
       if (sub == 0x29) {
         t->writes.push_back(args);
         for (size_t i = 0; i < args[0]; i++)
           t->records.push_back(mp::Bytes(args.begin() + 1 + 10 * i, args.begin() + 11 + 10 * i));
+        if (t->drop_29_ack > 0) {
+          t->drop_29_ack--;
+          return false;
+        }
         r.payload.push_back(0x00);
         return true;
       }
@@ -2334,7 +2412,675 @@ static void test_without_learning_the_list_stays() {
   core.close();
 }
 
+// With more than one TAP and 0xE1 on (the Pi), every renewal ends 01 01, as
+// the CCA's did from its second TAP on; one TAP, or the ESP32 (no 0xE1),
+// keeps 01 00.
+static std::set<std::string> renewal_ends(MultiTap &bus) {
+  std::set<std::string> ends;
+  for (auto &t : bus.taps)
+    for (auto &a : t.renewals) {
+      char b[8];
+      std::snprintf(b, sizeof(b), "%02X%02X", a.size() > 8 ? a[7] : 0, a.size() > 8 ? a[8] : 0);
+      ends.insert(b);
+    }
+  return ends;
+}
+static int renewal_count(MultiTap &bus) {
+  int n = 0;
+  for (auto &t : bus.taps) n += static_cast<int>(t.renewals.size());
+  return n;
+}
+static void test_two_taps_renew_with_known_networks() {
+  MultiTap bus;
+  bus.taps = {{0x1201, 1}, {0x1202, 2}};
+  for (auto &t : bus.taps) {
+    t.records = {rec(t.mac_last, static_cast<uint16_t>(0x10 + t.mac_last))};
+    t.window_closed = true;
+  }
+  MasterCore core(&bus.port, [](int, const std::string &) {}, nullptr, nullptr, 0x1201, false, false);
+  core.set_taps({{0x1201, {}}, {0x1202, {}}});
+  core.set_known_networks(true);
+  CHECK(core.open());
+  run_for(core, 0, 10000, 50);
+  CHECK(bus.at(0x1201)->renewals.size() >= 1 && bus.at(0x1202)->renewals.size() >= 1);
+  CHECK(renewal_ends(bus) == std::set<std::string>{"0101"});
+  core.close();
+}
+static void test_one_tap_renews_without_the_flag() {
+  {
+    MultiTap bus;
+    bus.taps = {{0x1201, 1}};
+    bus.taps[0].records = {rec(1, 0x10)};
+    bus.taps[0].window_closed = true;
+    MasterCore core(&bus.port, [](int, const std::string &) {}, nullptr, nullptr, 0x1201, false, false);
+    core.set_known_networks(true);
+    CHECK(core.open());
+    run_for(core, 0, 10000, 50);
+    CHECK(renewal_count(bus) >= 1);
+    CHECK(renewal_ends(bus) == std::set<std::string>{"0100"});
+    core.close();
+  }
+  {  // the ESP32: two TAPs, no 0xE1
+    MultiTap bus;
+    bus.taps = {{0x1201, 1}, {0x1202, 2}};
+    for (auto &t : bus.taps) {
+      t.records = {rec(t.mac_last, static_cast<uint16_t>(0x10 + t.mac_last))};
+      t.window_closed = true;
+    }
+    MasterCore core(&bus.port, [](int, const std::string &) {}, nullptr, nullptr, 0x1201, false, false);
+    core.set_taps({{0x1201, {}}, {0x1202, {}}});
+    CHECK(core.open());
+    run_for(core, 0, 10000, 50);
+    CHECK(renewal_count(bus) >= 2);
+    CHECK(renewal_ends(bus) == std::set<std::string>{"0100"});
+    core.close();
+  }
+}
+
+// ---- the re-sort (resort.h) -------------------------------------------------
+
+// The roof: 1201 and 1202 with 20 optimizers each, 1203 new with none; one
+// shared made-up key. Windows open unless a test closes them.
+struct ResortRig {
+  MultiTap bus;
+  std::vector<std::string> lines;
+  std::vector<std::optional<ResortFile>> files;  // each save, nullopt for a delete
+  int saved_at = -1;  // the bus log's length at the first save
+  int removed = 0;    // retire callbacks: a trim must never make one
+  std::unique_ptr<MasterCore> core;
+  uint32_t now = 0;
+  ResortRig(bool three = true) {
+    bus.taps = {{0x1201, 1}, {0x1202, 2}};
+    if (three) bus.taps.push_back({0x1203, 3});
+    give_radio(bus, 0x1201, radio(15, 0x7E21, 0x30));
+    give_radio(bus, 0x1202, radio(18, 0x5A5A, 0x30));
+    if (three) give_radio(bus, 0x1203, radio(20, 0x1A2B, 0x30));
+    for (uint16_t id = 0x10; id < 0x24; id++) bus.at(0x1201)->records.push_back(rec(static_cast<uint8_t>(id), id));
+    for (uint16_t id = 0x24; id < 0x38; id++) bus.at(0x1202)->records.push_back(rec(static_cast<uint8_t>(id), id));
+  }
+  void start(const ResortFile *resume = nullptr, bool writes = true) {
+    core = std::make_unique<MasterCore>(&bus.port, [this](int, const std::string &l) { lines.push_back(l); }, nullptr,
+                                        nullptr, 0x1201, false, true);
+    std::vector<MasterCore::TapEntry> list;
+    for (auto &t : bus.taps) list.push_back({t.id, {}});
+    core->set_taps(list);
+    core->set_known_networks(true);
+    core->set_table_writes(writes);
+    core->set_table_saved([](const mp::Bytes &, const std::vector<mp::TableRecord> *) { return true; });
+    core->set_on_removed([this](const std::string &) { removed++; });
+    core->set_resort_saved(
+        [this](const ResortFile *f) {
+          if (saved_at < 0) saved_at = static_cast<int>(bus.log.size());
+          files.push_back(f ? std::optional<ResortFile>(*f) : std::nullopt);
+          return true;
+        },
+        resume);
+    int n = 0;
+    core->set_resort_draw([n]() mutable { return static_cast<uint8_t>(0x41 + 0x1D * n++); });
+    CHECK(core->open());
+    run(20000);  // every TAP's settings read
+  }
+  void run(uint32_t ms) {
+    run_for(*core, now, now + ms, 50);
+    now += ms;
+  }
+  bool logged(const std::string &part) const {
+    for (const auto &l : lines)
+      if (l.find(part) != std::string::npos) return true;
+    return false;
+  }
+  void close_windows() {
+    for (auto &t : bus.taps) t.window_closed = true;
+  }
+  ~ResortRig() {
+    if (core) core->close();
+  }
+};
+
+static void test_resort_refusals() {
+  std::string why;
+  {
+    ResortRig rig(false);  // two TAPs, but fine; then one
+    rig.bus.taps.pop_back();
+    rig.bus.taps.pop_back();
+    rig.bus.taps = {{0x1201, 1}};
+    give_radio(rig.bus, 0x1201, radio(15, 0x7E21, 0x30));
+    rig.start();
+    CHECK(!rig.core->request_resort(false, why) && why == "a re-sort needs at least two TAPs");
+  }
+  {
+    ResortRig rig;
+    rig.start(nullptr, false);
+    CHECK(!rig.core->request_resort(false, why) && why.find("table writes are off") != std::string::npos);
+    CHECK(rig.core->request_resort(true, why));  // a dry run needs no writes
+    rig.run(20000);
+    CHECK(rig.core->status().resort.finished && rig.core->status().resort.ok && rig.core->status().resort.dry_run);
+    CHECK(!rig.core->status().resort.dry_frames.empty());
+    CHECK(rig.files.empty());
+    CHECK(rig.bus.index_of(0x0B00, 0x00) < 0);
+    CHECK(no_key_in(rig.lines));
+  }
+  {
+    ResortRig rig;
+    give_radio(rig.bus, 0x1203, radio(20, 0x1A2B, 0x50));  // its own key
+    rig.start();
+    CHECK(!rig.core->request_resort(false, why) && why.find("TAP 1203's key isn't the one the others share") == 0);
+  }
+  {
+    ResortRig rig;
+    rig.start();
+    rig.bus.at(0x1203)->up = false;
+    rig.run(30000);
+    CHECK(!rig.core->request_resort(false, why) && why.find("TAP 1203 isn't answering") == 0);
+  }
+  {
+    ResortRig rig;
+    rig.start();
+    CHECK(rig.core->request_discovery(false));
+    CHECK(!rig.core->request_resort(false, why) && why == "the discovery window is held closed; no optimizer could join");
+  }
+  {
+    ResortRig rig;
+    rig.start();
+    CHECK(rig.core->request_pv(true));
+    rig.run(2000);
+    CHECK(!rig.core->request_resort(false, why) && why.find("PV output is held off") == 0);
+  }
+  {
+    ResortRig rig;
+    rig.start();
+    CHECK(rig.core->request_resort(false, why));
+    CHECK(!rig.core->request_resort(false, why) && why == "a re-sort is already running");
+  }
+}
+
+static void test_resort_runs_and_waits() {
+  ResortRig rig;
+  rig.start();
+  std::string why;
+  CHECK(rig.core->request_resort(false, why));
+  rig.run(60000);
+  int pvoff = rig.bus.index_of(0x0B00, 0x00);
+  CHECK(pvoff >= 0 && rig.saved_at >= 0 && rig.saved_at <= pvoff);
+  CHECK(!rig.files.empty() && rig.files[0] && rig.files[0]->phase == "writing");
+  if (!rig.files.empty() && rig.files[0]) {
+    CHECK(rig.files[0]->waited.size() == 40);
+    CHECK(rig.files[0]->old_networks.size() == 3);
+  }
+  CHECK(rig.files.back() && rig.files.back()->phase == "waiting");
+  const MultiTap::One *a = rig.bus.at(0x1201), *b = rig.bus.at(0x1202), *c = rig.bus.at(0x1203);
+  CHECK(a && b && c);
+  if (!a || !b || !c) return;
+  CHECK(a->cfg.pan != 0x7E21 && b->cfg.pan != 0x5A5A && c->cfg.pan != 0x1A2B);
+  CHECK(a->cfg.key == b->cfg.key && a->cfg.key == c->cfg.key && a->cfg.key[0] != 0x30);
+  for (auto &t : rig.bus.taps) {
+    CHECK(t.records.size() == 40);
+    CHECK(t.sessions.size() >= 2 && t.sessions[t.sessions.size() - 1] == 0x01);
+  }
+  auto st = rig.core->status().resort;
+  CHECK(st.state == "waiting" && st.can_put_back);
+  CHECK(st.missing.size() == 40);
+  CHECK(no_key_in(rig.lines));
+}
+
+static void test_resort_trims_at_window_close_and_finishes() {
+  ResortRig rig;
+  rig.start();
+  std::string why;
+  CHECK(rig.core->request_resort(false, why));
+  rig.run(60000);
+  for (uint16_t id = 0x10; id < 0x24; id++) rig.bus.join(0x1201, id);
+  for (uint16_t id = 0x24; id < 0x38; id++) rig.bus.join(0x1203, id);
+  rig.close_windows();
+  rig.run(2 * MasterCore::RESORT_READ_MS + 60000);
+  std::vector<uint16_t> a, c;
+  for (uint16_t id = 0x10; id < 0x24; id++) a.push_back(id);
+  for (uint16_t id = 0x24; id < 0x38; id++) c.push_back(id);
+  CHECK(rig.bus.ids_on(0x1201) == a);
+  CHECK(rig.bus.ids_on(0x1202).empty());
+  CHECK(rig.bus.ids_on(0x1203) == c);
+  CHECK(!rig.files.empty() && !rig.files.back());  // deleted
+  auto st = rig.core->status().resort;
+  CHECK(st.state == "idle" && st.finished && st.ok);
+  CHECK(rig.logged("re-sort: done: 20 on TAP 1201, 0 on TAP 1202, 20 on TAP 1203"));
+  CHECK(rig.removed == 0);  // trimming isn't retiring
+  CHECK(no_key_in(rig.lines));
+}
+
+// The roof, 2026-11-23: every window closed in the same second. The first
+// TAP was trimmed; the others' windows were renewed while the tables were
+// read again after it, so their trims waited a whole window each.
+static void test_resort_trims_every_tap_whose_window_closed() {
+  ResortRig rig;
+  rig.start();
+  std::string why;
+  CHECK(rig.core->request_resort(false, why));
+  rig.run(60000);
+  for (uint16_t id = 0x10; id < 0x24; id++) rig.bus.join(0x1201, id);
+  for (uint16_t id = 0x24; id < 0x38; id++) rig.bus.join(0x1202, id);
+  rig.run(2 * MasterCore::RESORT_READ_MS);  // the joins read while the windows run
+  for (auto &t : rig.bus.taps) t.reopen_on_renewal = true;
+  rig.close_windows();
+  rig.run(2 * MasterCore::RESORT_READ_MS + 60000);
+  std::vector<uint16_t> a, b;
+  for (uint16_t id = 0x10; id < 0x24; id++) a.push_back(id);
+  for (uint16_t id = 0x24; id < 0x38; id++) b.push_back(id);
+  CHECK(rig.bus.ids_on(0x1201) == a);
+  CHECK(rig.bus.ids_on(0x1202) == b);
+  CHECK(rig.bus.ids_on(0x1203).empty());
+  auto st = rig.core->status().resort;
+  CHECK(st.state == "idle" && st.finished && st.ok);
+  CHECK(rig.logged("re-sort: done: 20 on TAP 1201, 20 on TAP 1202, 0 on TAP 1203"));
+  CHECK(rig.removed == 0);
+}
+
+// A TAP that still answers polls but whose table can't be read again after
+// a trim mustn't hold the windows closed for good.
+static void test_resort_an_unreadable_table_frees_the_windows() {
+  ResortRig rig;
+  rig.start();
+  std::string why;
+  CHECK(rig.core->request_resort(false, why));
+  rig.run(60000);
+  for (uint16_t id = 0x10; id < 0x24; id++) rig.bus.join(0x1201, id);
+  for (uint16_t id = 0x24; id < 0x38; id++) rig.bus.join(0x1202, id);
+  rig.run(2 * MasterCore::RESORT_READ_MS);
+  for (auto &t : rig.bus.taps) t.reopen_on_renewal = true;
+  rig.bus.at(0x1203)->tables_silent = true;  // from now on: Mid Roof's table can't be read
+  size_t before[3];
+  for (int k = 0; k < 3; k++) before[k] = rig.bus.taps[k].renewals.size();
+  rig.close_windows();
+  rig.run(5 * MasterCore::RESORT_READ_MS + 60000);
+  CHECK(rig.logged("re-sort: taking 20 optimizers off TAP 1201"));  // the first trim ran
+  CHECK(rig.bus.taps[1].renewals.size() > before[1]);
+  CHECK(rig.bus.taps[2].renewals.size() > before[2]);
+  CHECK(rig.removed == 0);
+}
+
+static void test_resort_windows_renew_despite_auto_discovery() {
+  ResortRig rig;
+  rig.start();
+  std::string why;
+  CHECK(rig.core->request_resort(false, why));
+  rig.run(60000);
+  rig.core->set_window_wanted(false);  // every optimizer reported today
+  size_t before[3];
+  for (int k = 0; k < 3; k++) before[k] = rig.bus.taps[k].renewals.size();
+  rig.close_windows();
+  rig.run(30000);
+  for (int k = 0; k < 3; k++) {
+    CHECK(rig.bus.taps[k].renewals.size() > before[k]);
+    if (!rig.bus.taps[k].renewals.empty()) CHECK(rig.bus.taps[k].renewals.back()[8] == 0x01);
+  }
+}
+
+static void test_resort_stop_waiting() {
+  ResortRig rig;
+  rig.start();
+  std::string why;
+  CHECK(!rig.core->request_resort_stop(why) && !why.empty());  // nothing to stop
+  CHECK(rig.core->request_resort(false, why));
+  rig.run(60000);
+  for (uint16_t id = 0x10; id < 0x22; id++) rig.bus.join(0x1201, id);  // 0x22 and 0x23 never join
+  for (uint16_t id = 0x24; id < 0x38; id++) rig.bus.join(0x1203, id);
+  rig.close_windows();
+  rig.run(2 * MasterCore::RESORT_READ_MS + 60000);
+  CHECK(rig.core->status().resort.missing.size() == 2);
+  CHECK(rig.core->request_resort_stop(why));
+  rig.run(2000);
+  CHECK(!rig.files.empty() && !rig.files.back());
+  CHECK(rig.logged("2 optimizers stay listed on every TAP"));
+  for (uint16_t tap : {0x1201, 0x1202, 0x1203}) {
+    auto ids = rig.bus.ids_on(tap);
+    CHECK(std::count(ids.begin(), ids.end(), 0x22) == 1 && std::count(ids.begin(), ids.end(), 0x23) == 1);
+  }
+  CHECK(rig.core->status().resort.state == "idle");
+}
+
+// Stop waiting with the windows still open (the roof, 2026-11-23: pressed
+// with all 40 joined, before any window closed): each TAP is trimmed to
+// the ones that joined it, at once, and only the missing stay listed on
+// every TAP. With Allow changes off nothing can be trimmed: it just ends.
+static void test_resort_stop_waiting_trims_first() {
+  {
+    ResortRig rig;
+    rig.start();
+    std::string why;
+    CHECK(rig.core->request_resort(false, why));
+    rig.run(60000);
+    for (uint16_t id = 0x10; id < 0x22; id++) rig.bus.join(0x1201, id);  // 0x22 and 0x23 never join
+    for (uint16_t id = 0x24; id < 0x38; id++) rig.bus.join(0x1203, id);
+    rig.run(2 * MasterCore::RESORT_READ_MS);  // read, the windows still open
+    CHECK(rig.core->status().resort.missing.size() == 2);
+    CHECK(rig.core->request_resort_stop(why));
+    rig.run(2 * MasterCore::RESORT_READ_MS + 60000);
+    std::vector<uint16_t> a, b = {0x22, 0x23}, c;
+    for (uint16_t id = 0x10; id < 0x24; id++) a.push_back(id);
+    for (uint16_t id = 0x22; id < 0x38; id++) c.push_back(id);
+    CHECK(rig.bus.ids_on(0x1201) == a);
+    CHECK(rig.bus.ids_on(0x1202) == b);
+    CHECK(rig.bus.ids_on(0x1203) == c);
+    CHECK(!rig.files.empty() && !rig.files.back());
+    CHECK(rig.logged("2 optimizers stay listed on every TAP"));
+    auto st = rig.core->status().resort;
+    CHECK(st.state == "idle" && st.message == "stopped waiting");
+    CHECK(rig.removed == 0);
+  }
+  {
+    ResortRig rig;
+    rig.start();
+    std::string why;
+    CHECK(rig.core->request_resort(false, why));
+    rig.run(60000);
+    for (uint16_t id = 0x10; id < 0x24; id++) rig.bus.join(0x1201, id);
+    rig.run(2 * MasterCore::RESORT_READ_MS);
+    rig.core->set_table_writes(false);
+    CHECK(rig.core->request_resort_stop(why));
+    rig.run(5000);
+    CHECK(rig.core->status().resort.state == "idle");
+    CHECK(rig.bus.ids_on(0x1202).size() == 40);  // nothing trimmed
+  }
+}
+
+static void test_resort_tap_lost_mid_write() {
+  ResortRig rig;
+  rig.start();
+  rig.bus.at(0x1202)->silent_after_pv_off = true;
+  std::string why;
+  CHECK(rig.core->request_resort(false, why));
+  rig.run(60000);
+  for (auto &t : rig.bus.taps) {
+    CHECK(std::count(t.sessions.begin(), t.sessions.end(), 0x00) == 1);
+    CHECK(!t.sessions.empty() && t.sessions.back() == 0x01);
+  }
+  auto st = rig.core->status().resort;
+  CHECK(st.finished && !st.ok && st.message.find("TAP 1202") != std::string::npos);
+  CHECK(st.can_put_back && st.state == "stopped");
+  CHECK(!rig.files.empty() && rig.files.back() && rig.files.back()->phase == "stopped");
+  CHECK(no_key_in(rig.lines));
+}
+
+static void test_resort_put_back() {
+  ResortRig rig;
+  rig.start();
+  std::string why;
+  CHECK(!rig.core->request_resort_put_back(false, why) && !why.empty());  // nothing to put back
+  CHECK(rig.core->request_resort(false, why));
+  rig.run(60000);
+  CHECK(rig.core->request_resort_put_back(true, why));  // a check first
+  rig.run(20000);
+  CHECK(rig.bus.at(0x1201)->cfg.pan != 0x7E21);  // nothing written
+  CHECK(rig.core->request_resort_put_back(false, why));
+  rig.run(60000);
+  CHECK(rig.bus.at(0x1201)->cfg.pan == 0x7E21 && rig.bus.at(0x1202)->cfg.pan == 0x5A5A &&
+        rig.bus.at(0x1203)->cfg.pan == 0x1A2B);
+  CHECK(rig.bus.at(0x1201)->cfg.key[0] == 0x30 && rig.bus.at(0x1203)->cfg.key[0] == 0x30);
+  CHECK(!rig.files.empty() && rig.files.back() && rig.files.back()->old_networks.empty());
+  CHECK(!rig.core->status().resort.can_put_back);
+  CHECK(rig.core->status().resort.state == "waiting");
+  CHECK(no_key_in(rig.lines));
+}
+
+static void test_resort_resume_after_cut_writes() {
+  ResortRig rig;
+  ResortFile f;
+  f.phase = "writing";
+  f.started_unix = 1;
+  for (uint16_t id = 0x10; id < 0x38; id++) {
+    mp::Bytes r = rec(static_cast<uint8_t>(id), id);
+    f.waited.push_back({mp::Bytes(r.begin(), r.begin() + 8), static_cast<uint16_t>(0x8000 | id)});
+  }
+  f.old_networks = {{0x1201, radio(15, 0x7E21, 0x30)}, {0x1202, radio(18, 0x5A5A, 0x30)}, {0x1203, radio(20, 0x1A2B, 0x30)}};
+  // As a re-sort cut off in its writes leaves them: listed, nobody joined yet.
+  for (auto &t : rig.bus.taps)
+    for (auto &r : t.records) r[8] |= 0x80;
+  rig.start(&f);
+  int last_on = -1;
+  for (uint16_t tap : {0x1201, 0x1202, 0x1203}) {
+    int i = -1;
+    for (size_t k = 0; k < rig.bus.log.size(); k++)
+      if (rig.bus.log[k].id == tap && rig.bus.log[k].cmd == 0x0B00 && rig.bus.log[k].first == 0x01) {
+        i = static_cast<int>(k);
+        break;
+      }
+    CHECK(i >= 0);
+    last_on = std::max(last_on, i);
+  }
+  int first_2d = rig.bus.index_of(0x0B0F, 0x2D), first_29 = rig.bus.index_of(0x0B0F, 0x29);
+  CHECK(first_2d < 0 || first_2d > last_on);
+  CHECK(first_29 < 0 || first_29 > last_on);
+  CHECK(rig.logged("re-sort: TigoMonitor restarted during the network writes; PV on to every TAP"));
+  // The job didn't finish: stopped, the old networks kept, nothing trimmed or ended.
+  CHECK(!rig.files.empty() && rig.files.back() && rig.files.back()->phase == "stopped");
+  CHECK(rig.core->status().resort.state == "stopped" && rig.core->status().resort.can_put_back);
+}
+
+static void test_resort_blocks_other_changes() {
+  ResortRig rig;
+  rig.start();
+  std::string why;
+  CHECK(rig.core->request_resort(false, why));
+  rig.run(60000);
+  CHECK(!rig.core->request_table_add(tap_mac(9), 0, false, why) && why == "a re-sort is running");
+  CHECK(!rig.core->request_provision(tap_mac(3), rekey_block(), false, false, why) && why == "a re-sort is running");
+  CHECK(!rig.core->request_forget_tap(0x1203, why) && !why.empty());
+  CHECK(!rig.core->request_herd(why) && !why.empty());
+  CHECK(rig.core->request_resort_stop(why));
+}
+
+
+// ---- the re-sort's failure paths (the final review's C1-C3, I1-I3) --------
+
+static ResortFile roof_file(const char *phase) {
+  ResortFile f;
+  f.phase = phase;
+  f.started_unix = 1;
+  for (uint16_t id = 0x10; id < 0x38; id++) {
+    mp::Bytes r = rec(static_cast<uint8_t>(id), id);
+    f.waited.push_back({mp::Bytes(r.begin(), r.begin() + 8), static_cast<uint16_t>(0x8000 | id)});
+  }
+  f.old_networks = {{0x1201, radio(15, 0x7E21, 0x30)}, {0x1202, radio(18, 0x5A5A, 0x30)}, {0x1203, radio(20, 0x1A2B, 0x30)}};
+  return f;
+}
+
+// C1: a network write that fails with every TAP still answering. The tables
+// are untouched, so everyone reads joined; the re-sort must not call that done.
+static void test_resort_failed_write_keeps_the_old_networks() {
+  ResortRig rig;
+  rig.start();
+  std::string why;
+  CHECK(rig.core->request_resort(false, why));
+  rig.run(300);
+  rig.bus.at(0x1202)->cfg_silent = true;
+  rig.run(140000);
+  auto st = rig.core->status().resort;
+  CHECK(st.state == "stopped" && st.finished && !st.ok && st.can_put_back);
+  CHECK(!rig.files.empty() && rig.files.back() && rig.files.back()->phase == "stopped" &&
+        rig.files.back()->old_networks.size() == 3);
+  CHECK(!rig.logged("re-sort: done"));
+  CHECK(rig.core->request_resort_put_back(true, why));
+  CHECK(!rig.core->request_resort(false, why) && why.find("stopped part-way") != std::string::npos);
+  CHECK(no_key_in(rig.lines));
+}
+
+// C1: a restart in the writes with the tables untouched.
+static void test_resort_resume_with_joined_tables_stays_stopped() {
+  ResortRig rig;
+  ResortFile f = roof_file("writing");
+  rig.start(&f);
+  rig.run(120000);
+  auto st = rig.core->status().resort;
+  CHECK(st.state == "stopped" && st.can_put_back);
+  CHECK(!rig.files.empty() && rig.files.back() && rig.files.back()->phase == "stopped");
+  CHECK(!rig.logged("re-sort: done"));
+}
+
+// C2: one lost 0x29 ack is tried again, not a lost list.
+static void test_resort_a_lost_list_ack_is_tried_again() {
+  ResortRig rig;
+  rig.start();
+  rig.bus.at(0x1201)->drop_29_ack = 1;
+  std::string why;
+  CHECK(rig.core->request_resort(false, why));
+  rig.run(120000);
+  auto st = rig.core->status().resort;
+  CHECK(st.state == "waiting" && st.ok);
+  for (auto &t : rig.bus.taps) CHECK(t.records.size() == 40);
+}
+
+// C2: a restart after the erases: the tables are empty, the put-back lists
+// everyone from the file.
+static void test_resort_put_back_lists_the_saved_list() {
+  ResortRig rig;
+  ResortFile f = roof_file("writing");
+  for (auto &t : rig.bus.taps) t.records.clear();
+  rig.start(&f);
+  rig.run(60000);
+  std::string why;
+  CHECK(rig.core->request_resort_put_back(false, why));
+  rig.run(120000);
+  for (auto &t : rig.bus.taps) CHECK(t.records.size() == 40);
+  CHECK(rig.bus.at(0x1201)->cfg.pan == 0x7E21 && rig.bus.at(0x1202)->cfg.pan == 0x5A5A);
+  auto st = rig.core->status().resort;
+  CHECK(st.state == "waiting" && !st.can_put_back);
+}
+
+// C3: a PV on the TAP never hears is sent again until it answers.
+static void test_resort_pv_on_is_confirmed() {
+  ResortRig rig;
+  for (auto &t : rig.bus.taps) t.answer_pv = true;
+  rig.bus.at(0x1202)->drop_pv_on = 1;
+  rig.start();
+  std::string why;
+  CHECK(rig.core->request_resort(false, why));
+  rig.run(120000);
+  auto *b = rig.bus.at(0x1202);
+  CHECK(std::count(b->sessions.begin(), b->sessions.end(), 0x01) >= 1);  // heard one after the dropped one
+  CHECK(!b->sessions.empty() && b->sessions.back() == 0x01);
+  CHECK(rig.core->status().resort.state == "waiting");
+}
+
+// I1: the owner's PV off before the writes stops the re-sort before it changes anything.
+static void test_resort_pv_off_before_the_writes_cancels_it() {
+  ResortRig rig;
+  for (auto &t : rig.bus.taps) t.answer_pv = true;
+  rig.start();
+  std::string why;
+  CHECK(rig.core->request_resort(false, why));
+  rig.run(300);
+  CHECK(rig.core->request_pv(true));
+  rig.run(120000);
+  for (auto &t : rig.bus.taps) {
+    CHECK(t.cfg.pan == (t.id == 0x1201 ? 0x7E21 : t.id == 0x1202 ? 0x5A5A : 0x1A2B));  // nothing written
+    CHECK(std::count(t.sessions.begin(), t.sessions.end(), 0x01) == 0);
+  }
+  CHECK(rig.core->status().pv.off);
+  CHECK(rig.core->status().resort.state == "idle");
+}
+
+// I1: the owner's PV off after the bracket opened: no PV on goes out after it.
+static void test_resort_pv_off_held_inside_the_bracket() {
+  ResortRig rig;
+  for (auto &t : rig.bus.taps) t.answer_pv = true;
+  rig.start();
+  std::string why;
+  CHECK(rig.core->request_resort(false, why));
+  for (int i = 0; i < 400 && rig.bus.index_of(0x0B00, 0x00) < 0; i++) rig.run(50);
+  CHECK(rig.bus.index_of(0x0B00, 0x00) >= 0);
+  size_t mark = rig.bus.log.size();
+  CHECK(rig.core->request_pv(true));
+  rig.run(120000);
+  CHECK(rig.bus.index_of(0x0B00, 0x01, mark) < 0);
+  for (auto &t : rig.bus.taps) CHECK(!t.sessions.empty() && t.sessions.back() == 0x00);
+}
+
+// I2: a trim cut off after its erase, finished later, retires nobody.
+static void test_resort_an_interrupted_trim_retires_nobody() {
+  ResortRig rig;
+  rig.start();
+  std::string why;
+  CHECK(rig.core->request_resort(false, why));
+  rig.run(60000);
+  for (uint16_t id = 0x10; id < 0x24; id++) rig.bus.join(0x1201, id);
+  for (uint16_t id = 0x24; id < 0x38; id++) rig.bus.join(0x1203, id);
+  for (auto &t : rig.bus.taps) t.erased = false;
+  rig.bus.at(0x1202)->reads_silent_after_erase = 12;
+  rig.close_windows();
+  rig.run(2 * MasterCore::RESORT_READ_MS + 400000);
+  CHECK(rig.removed == 0);
+}
+
+// I3: waiting with Allow changes to the TAPs off: no trim to hang on, and
+// the windows are still renewed.
+static void test_resort_waiting_with_writes_off_keeps_windows() {
+  ResortRig rig;
+  ResortFile f = roof_file("waiting");
+  for (auto &t : rig.bus.taps) {
+    t.records.clear();
+    for (uint16_t id = 0x10; id < 0x38; id++) {
+      mp::Bytes r = rec(static_cast<uint8_t>(id), id);
+      r[8] |= 0x80;
+      t.records.push_back(r);
+    }
+  }
+  for (uint16_t id = 0x10; id < 0x24; id++) rig.bus.join(0x1201, id);
+  rig.bus.join(0x1203, 0x24);
+  rig.start(&f, false);
+  rig.close_windows();
+  size_t before[3];
+  for (int k = 0; k < 3; k++) before[k] = rig.bus.taps[k].renewals.size();
+  rig.run(300000);
+  for (int k = 0; k < 3; k++) CHECK(rig.bus.taps[k].renewals.size() > before[k]);
+  CHECK(!rig.logged("re-sort: taking"));
+  CHECK(rig.core->status().fault != Fault::refused);
+  CHECK(rig.core->status().resort.note.find("Allow changes to the TAPs is off") != std::string::npos);
+}
+
+
+// I5: another master inside the bracket: the job stops where it is, the
+// file stays "writing" so the next start owes every TAP its PV, and the
+// owner's stop isn't refused as "running".
+static void test_resort_another_master_mid_bracket() {
+  ResortRig rig;
+  rig.start();
+  std::string why;
+  CHECK(rig.core->request_resort(false, why));
+  for (int i = 0; i < 400 && rig.bus.index_of(0x0B00, 0x00) < 0; i++) rig.run(50);
+  CHECK(rig.bus.index_of(0x0B00, 0x00) >= 0);
+  rig.bus.other_master = true;
+  rig.run(5000);
+  auto st = rig.core->status().resort;
+  CHECK(st.finished && !st.ok && st.message == "another master is on the bus");
+  CHECK(st.can_put_back);
+  CHECK(!rig.files.empty() && rig.files.back() && rig.files.back()->phase == "writing");
+  CHECK(rig.core->request_resort_stop(why));
+}
+
 int main() {
+  test_resort_failed_write_keeps_the_old_networks();
+  test_resort_resume_with_joined_tables_stays_stopped();
+  test_resort_a_lost_list_ack_is_tried_again();
+  test_resort_put_back_lists_the_saved_list();
+  test_resort_pv_on_is_confirmed();
+  test_resort_pv_off_before_the_writes_cancels_it();
+  test_resort_pv_off_held_inside_the_bracket();
+  test_resort_an_interrupted_trim_retires_nobody();
+  test_resort_waiting_with_writes_off_keeps_windows();
+  test_resort_another_master_mid_bracket();
+  test_resort_refusals();
+  test_resort_runs_and_waits();
+  test_resort_trims_at_window_close_and_finishes();
+  test_resort_trims_every_tap_whose_window_closed();
+  test_resort_stop_waiting_trims_first();
+  test_resort_an_unreadable_table_frees_the_windows();
+  test_resort_windows_renew_despite_auto_discovery();
+  test_resort_stop_waiting();
+  test_resort_tap_lost_mid_write();
+  test_resort_put_back();
+  test_resort_resume_after_cut_writes();
+  test_resort_blocks_other_changes();
+  test_two_taps_renew_with_known_networks();
+  test_one_tap_renews_without_the_flag();
   test_a_standby_learns_the_taps_another_master_polls();
   test_a_learned_tap_joins_a_saved_list();
   test_a_guess_the_master_polls_is_kept();

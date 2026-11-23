@@ -112,6 +112,12 @@ struct HttpContext {
   std::function<int(uint16_t from, uint16_t to, bool dry_run,
                     const std::vector<std::pair<std::string, uint16_t>> &given, std::string &why, size_t &count)>
       request_table_handover;
+  // The re-sort (POST /api/master/resort, resort.h): every TAP a new
+  // network, every optimizer listed on every TAP. Its put-back (the old
+  // networks again) and its stop (no more waiting). 200, or 409 with why.
+  std::function<int(bool dry_run, std::string &why)> request_resort;
+  std::function<int(bool dry_run, std::string &why)> request_resort_put_back;
+  std::function<int(std::string &why)> request_resort_stop;
   // --trust-ingress: requests from this address count as signed in. It is
   // Home Assistant's ingress proxy, which has signed the user in already;
   // the address is the connection's own, never a forwarded header's.
@@ -149,6 +155,7 @@ class HttpServer {
   void stop();
 
  private:
+  std::function<int(bool, std::string &)> resort_stop_fn_;  // the stop route: no body, no dry run
   void routes_();
   std::vector<std::string> health_problems_() const;
   void new_server_();

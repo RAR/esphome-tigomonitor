@@ -171,6 +171,24 @@ static void test_a_parent_heard_later_resolves_then() {
   CHECK(s.relay_of("0026") == "0017");
 }
 
+// Each TAP hands NWIDs out on its own network, so two TAPs can each have a
+// node with the same one (the roof after its re-sort, 2026-11-23: A7 on Mid
+// Roof was drawn through D9 on South Roof). A parent is one on the child's
+// own TAP.
+static void test_a_parent_resolves_on_its_own_tap() {
+  LinkStats s;
+  s.on_join("0021", T0, "0001", "0018");  // on 1203, NWID 0018
+  s.on_report("0021", 0x1203, 120, slot_of(0), T0 + 1, DAY);
+  s.on_join("0006", T0 + 5, "0001", "0018");  // on 1202, the same NWID there, joined later
+  s.on_report("0006", 0x1202, 120, slot_of(0), T0 + 6, DAY);
+  s.on_join("0003", T0 + 10, "0018", "0040");  // a child on 1203
+  s.on_report("0003", 0x1203, 120, slot_of(400), T0 + 11, DAY);
+  s.on_join("0024", T0 + 12, "0018", "0041");  // and one on 1202
+  s.on_report("0024", 0x1202, 120, slot_of(400), T0 + 13, DAY);
+  CHECK(s.relay_of("0003") == "0021");
+  CHECK(s.relay_of("0024") == "0006");
+}
+
 // NWIDs change on a rejoin: a parent that came back under a new one leaves
 // its child unresolved, and a NWID taken up by another node goes to it.
 static void test_a_rejoined_parent_leaves_its_child_unresolved() {
@@ -391,6 +409,7 @@ int main() {
   test_a_rejoin_moves_the_parent();
   test_a_parent_resolves_by_nwid_not_address();
   test_a_parent_heard_later_resolves_then();
+  test_a_parent_resolves_on_its_own_tap();
   test_a_rejoined_parent_leaves_its_child_unresolved();
   test_a_node_not_heard_since_the_join_is_no_relay();
   test_a_parent_heard_reporting_since_the_join_resolves();

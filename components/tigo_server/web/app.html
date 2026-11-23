@@ -804,6 +804,10 @@
   [data-task="system"] { --task: var(--warn); --task-text: var(--warn-text); }
   [data-task="addtap"] { --task: var(--accent); --task-text: var(--accent-text); }
   [data-task="retiretap"] { --task: var(--accent-3); --task-text: var(--accent-3-text); }
+  [data-task="replacetap"] { --task: var(--accent-2); --task-text: var(--accent-2-text); }
+  .resort-panel { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; margin-top: 10px; }
+  .resort-panel .hint { margin-top: 4px; }
+  .resort-panel .setup-actions { margin-top: 8px; }
   .setup-group { font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--text-dim); margin: 0 0 10px; }
   .setup-task .art { gap: 12px; }
   .setup-task .art .mark { position: relative; display: flex; }
@@ -2021,6 +2025,7 @@
         <div class="tools-card">
           <p class="hint">These change how a TAP schedules its optimizers. The channel, PAN and key stay as they are, but a wrong choice can cost reports until it's set back. Preview first: it reads the TAP and says what would be sent, without sending it. Writing needs Allow changes to the TAPs.</p>
           <div id="pi-danger-taps"></div>
+          <div id="pi-danger-resort"></div>
           <div class="hint" data-danger-out style="margin-top:10px;white-space:pre-wrap"></div>
         </div>
       </div>
@@ -4743,9 +4748,18 @@
     }
   });
   // What the TAPs hold: one TAP's window, or with several, theirs summed
-  // (those read so far). null until one is read.
+  // (those read so far). null until one is read. While a re-sort waits it
+  // lists every optimizer on every TAP, so a sum would count each several
+  // times: its own counts are used, by MAC, each TAP's joined and the ones
+  // still missing.
   function setupCounts(m) {
     const taps = (m && m.taps) || [];
+    const rs = m && m.resort;
+    if (taps.length > 1 && rs && (rs.state === 'waiting' || rs.state === 'stopped') && Array.isArray(rs.missing) &&
+        (rs.joined || []).length) {
+      const joined = rs.joined.reduce((n, j) => n + j.count, 0);
+      return { in_table: joined + rs.missing.length, joined, never: rs.missing.length };
+    }
     if (taps.length > 1) {
       const read = taps.filter(t => t.discovery && t.discovery.read);
       return read.length ? { in_table: read.reduce((n, t) => n + t.discovery.node_count, 0),
@@ -4778,17 +4792,20 @@
     // Listening, a CCA runs the bus: the TAP and its list are its business,
     // and what TigoMonitor needs is a day of hearing the system.
     get system() { return setupListening() ? ['bus', 'heard', 'layout', 'names', 'done'] : ['bus', 'tap', 'optimizers', 'layout', 'names', 'done']; },
-    addtap: ['connect', 'allow', 'find', 'radio', 'name', 'done'],
+    addtap: ['connect', 'allow', 'find', 'radio', 'name', 'resort', 'done'],
     retiretap: ['pick', 'done'],
+    // Add a TAP's steps for the new one, Retire a TAP's for the old one, then the re-sort.
+    replacetap: ['connect', 'allow', 'find', 'radio', 'name', 'pick', 'resort', 'done'],
   };
   const SETUP_STEP_NAMES = { pick: 'Optimizer to remove', label: 'New optimizer', check: 'Review', do: 'Apply',
                              wait: 'Wait for join', done: 'Complete',
                              bus: 'Connect the bus', tap: 'Find the TAP', optimizers: 'Optimizers', heard: 'Listen for a day', layout: 'Lay out the array',
                              names: 'Names and ratings',
                              radio: 'Radio settings', connect: 'Wire it in', allow: 'Allow a new TAP', find: 'Look for TAPs',
-                             name: 'Name it' };
+                             name: 'Name it', resort: 'Re-sort the optimizers' };
   const SETUP_TITLES = { replace: 'Replace an optimizer', add: 'Add an optimizer', retire: 'Retire an optimizer',
-                         system: 'Set up a new system', addtap: 'Add a TAP', retiretap: 'Retire a TAP' };
+                         system: 'Set up a new system', addtap: 'Add a TAP', retiretap: 'Retire a TAP',
+                         replacetap: 'Replace a TAP' };
   // The master's steps, in order, for the progress list.
   const SETUP_JOB_STEPS = {
     add: [['reading the table', 'Read the TAP\'s list'], ['writing', 'Write the new record'], ['reading it back', 'Verify the result']],
@@ -4825,6 +4842,7 @@
     system: '<path d="M9 6h11M9 12h11M9 18h11"/><path d="M4 6l1 1 2-2M4 12l1 1 2-2"/><path d="M4.5 18h.01"/>',
     addtap: '<path d="M12 5v14M5 12h14"/>',
     retiretap: '<path d="M3 7h18v3H3z"/><path d="M5 10v9h14v-9"/><path d="M10 14h4"/>',
+    replacetap: '<path d="M4 8h13l-3-3"/><path d="M20 16H7l3 3"/>',
   };
   // The review plan's marks: each line says what kind of step it is.
   const SETUP_MARK = {
@@ -4911,6 +4929,77 @@
       names: { ok: rated.length > 0 && unrated === 0, line: !rated.length ? 'No strings to rate yet.' : unrated ? `${unrated} string${unrated === 1 ? ' has' : 's have'} no panel rating.` : 'Every string has a panel rating.' },
     };
   }
+  // The re-sort (resort.h): every TAP gets a new network, so every optimizer
+  // looks for a TAP again and joins the one it hears. Shared by System setup,
+  // its TAP flows and the Dangerous options card.
+  const RESORT_WORDS = 'Every TAP gets a new network, and every optimizer looks for a TAP again and joins the one it hears. ' +
+    'Production drops while they rejoin, to nothing for a few minutes, so run it at low sun. At night they join at sunrise.';
+  function resortBusy(r) { return !!(r && r.state && r.state !== 'idle'); }
+  function resortPanelHTML(r, nameOf, esc) {
+    const joined = r.joined || [], missing = r.missing || [];
+    const n = joined.reduce((a, j) => a + (j.count || 0), 0);
+    const putBack = r.can_put_back ? '<button type="button" class="btn danger" data-resort="putback">Put the old networks back</button>' : '';
+    // Stopped part-way: the TAPs may be on different networks, or missing
+    // optimizers, so it waits for the owner: the old networks back, or keep.
+    if (r.state === 'stopped')
+      return `<div class="resort-panel" data-resort-panel><strong>The re-sort stopped part-way</strong>` +
+        (r.message ? `<div class="setup-error">${esc(r.message)}</div>` : '') +
+        '<div class="hint">The TAPs may be on different networks, and some optimizers may be on no TAP\'s list. Put the old networks back, which lists every optimizer again, or keep the TAPs as they are.</div>' +
+        `<div class="setup-actions">${putBack}<button type="button" class="btn" data-resort="keep">Keep the TAPs as they are</button></div></div>`;
+    const head = r.state === 'running' ? `Re-sort: ${r.step || 'starting'}…`
+      : r.state === 'putting_back' ? `Putting the old networks back: ${r.step || 'starting'}…`
+      : `Re-sort: ${n} of ${n + missing.length} joined${joined.length ? ': ' + joined.map(j => `${nameOf(j.tap)} ${j.count}`).join(', ') : ''}`;
+    return `<div class="resort-panel" data-resort-panel><strong>${esc(head)}</strong>` +
+      (r.state === 'waiting' && missing.length ? `<div class="hint">Still to join: ${esc(missing.map(x => x.label || x.mac).join(', '))}</div>` : '') +
+      (r.note ? `<div class="hint">${esc(r.note)}</div>` : '') +
+      (r.finished && !r.ok && r.message ? `<div class="setup-error">${esc(r.message)}</div>` : '') +
+      (r.state === 'waiting' ? `<div class="setup-actions"><button type="button" class="btn" data-resort="stop">Stop waiting</button>${putBack}</div>` : '') +
+      '</div>';
+  }
+  // One of the re-sort's buttons, asked first where it changes anything. A
+  // preview waits for its answer and returns it; null: not asked to go on.
+  async function resortAct(kind) {
+    const asks = {
+      go: { title: 'Re-sort every optimizer?', body: RESORT_WORDS, ok: 'Re-sort', tone: 'danger' },
+      stop: { title: 'Stop waiting?', ok: 'Stop waiting',
+              body: 'The optimizers that haven\'t joined a TAP stay listed on every TAP, and join whichever one they hear when they wake.' },
+      keep: { title: 'Keep the TAPs as they are?', ok: 'Keep them', tone: 'danger',
+              body: 'The old networks are discarded: each TAP keeps the network it has now. An optimizer on no TAP\'s list stays off until a new re-sort, or Add an optimizer, lists it.' },
+      putback: { title: 'Put the old networks back?', ok: 'Put them back', tone: 'danger',
+                 body: 'Every TAP gets the network it had before the re-sort, and every optimizer looks for a TAP again, including those that have joined one. Production drops again while they rejoin.' },
+    };
+    if (asks[kind] && !(await uiAsk(asks[kind]))) return null;
+    const stop = kind === 'stop' || kind === 'keep';
+    const path = stop ? '/api/master/resort/stop' : kind === 'putback' ? '/api/master/resort/put-back' : '/api/master/resort';
+    const r = await apiFetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                     body: JSON.stringify(stop ? {} : { dry_run: kind === 'preview' }) });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.error || httpWords(r.status));
+    if (kind !== 'preview') return {};
+    for (let i = 0; i < 120; i++) {
+      const m = await (await apiFetch('/api/master')).json();
+      const res = m.resort || {};
+      if (res.finished && res.dry_run && res.state !== 'running') return res;
+      await new Promise(done => setTimeout(done, 500));
+    }
+    return { message: 'No answer yet; check the Bus log.' };
+  }
+  // The flows' last step: preview, re-sort, or skip it for now.
+  function setupResortStep(f, back) {
+    const m = setup.data.master, r = (m && m.resort) || {}, busy = resortBusy(r);
+    const writes = !!(m && m.table && m.table.writes);
+    const act = !setupRunning(m) ? '<div class="setup-note info">This TigoMonitor is not running the bus, so it cannot re-sort.</div>'
+      : busy ? resortPanelHTML(r, setupTapName, topoEscape)
+      : !writes ? '<div class="setup-note info">To re-sort, turn on <strong>Allow changes to the TAPs</strong> in Settings → Bus.</div>'
+      : '<div class="setup-actions"><button type="button" class="btn" data-resort="preview">Preview</button><button type="button" class="btn task-go" data-resort="go">Re-sort</button></div>';
+    const preview = !busy && f.resortPreview ? `<ul class="setup-sumlist">${f.resortPreview.map(l => `<li>${topoEscape(l)}</li>`).join('')}</ul>` : '';
+    return `<h2>Re-sort the optimizers</h2>
+      <div class="sub">${topoEscape(RESORT_WORDS)} The new TAP gets the optimizers that hear it best. Preview only reads.</div>
+      ${preview}${act}
+      <div class="setup-actions">${back()}${busy || f.resortSkipped ? '' : '<button type="button" class="btn" data-setup-resort-skip>Skip for now</button>'}${
+        setupNext(f, busy || !!f.resortSkipped || !!f.resorted)}</div>`;
+  }
+
   // More than one TAP: the ones run, and each by name.
   function setupTaps() {
     const m = setup.data && setup.data.master;
@@ -5013,14 +5102,13 @@
     <h2 class="setup-group">TAPs</h2><div class="setup-tasks">
       ${task('addtap', 'Add a TAP', 'Wire in a new TAP, give it an address and its radio settings, and name it.')}
       ${task('retiretap', 'Retire a TAP', 'Forget a TAP that has gone for good, so it stops showing as not answering.')}
-      <div class="setup-task later"><span class="art">${SETUP_ART.replacetap}</span><span class="in"><strong>Replace a TAP</strong>
-        <span>Not yet: moving the old TAP's optimizers to the new one needs a re-sort of every TAP, which is still to be built.</span></span></div>
+      ${task('replacetap', 'Replace a TAP', 'Swap a TAP for a new one, then let every optimizer choose its TAP again.')}
     </div>`;
     if (w) {
       // Your system: joined and reporting, joined but silent, listed and never joined.
       const silent = d.opts.filter(o => o.quiet);
       const never = d.opts.filter(o => /^8/.test(o.addr));
-      const nNever = Math.max(never.length, w.in_table - w.joined);
+      const nNever = w.never != null ? w.never : Math.max(never.length, w.in_table - w.joined);
       const nSilent = Math.min(silent.length, w.joined);
       const nOk = Math.max(0, w.joined - nSilent);
       const names = list => list.length && list.length <= 3 ? ` (${list.map(o => topoEscape(o.placed ? o.name : o.addr)).join(', ')})` : '';
@@ -5037,6 +5125,7 @@
           return `<li><strong>${topoEscape(setupTapName(x.id))}</strong><span>${dx.read ? `${dx.node_count} optimizer${dx.node_count === 1 ? '' : 's'}, ${dx.joined} joined` : 'not read yet'}</span>${state}</li>`;
         }).join('')}</ul>` : ''}</div>`;
     }
+    if (m && resortBusy(m.resort)) html += resortPanelHTML(m.resort, setupTapName, topoEscape);
     if (t && t.edit && t.edit.kind && t.edit.finished && !t.edit.dry_run)
       html += `<div class="setup-last">Last change: ${topoEscape(t.edit.message)}</div>`;
     setHTML(root, html);
@@ -5045,7 +5134,8 @@
   function setupRail(f) {
     const steps = SETUP_STEPS[f.task], i = steps.indexOf(f.step);
     const name = s => {
-      if (s === 'pick' && f.task === 'retiretap') return f.tapPick && steps.indexOf(s) < i ? `Retiring TAP ${f.tapPick}` : 'TAP to retire';
+      if (s === 'pick' && (f.task === 'retiretap' || f.task === 'replacetap'))
+        return f.tapPick && steps.indexOf(s) < i ? `Retiring TAP ${f.tapPick}` : 'TAP to retire';
       if (s === 'pick' && f.old && steps.indexOf(s) < i) return `Removing ${f.old.name}`;
       if (s === 'label' && f.label && steps.indexOf(s) < i) return `Adding ${macOfLabel(f.label) ? labelOfMac(macOfLabel(f.label)) : f.label}`;
       if (s === 'done' && f.task === 'system') return 'Finish setup';
@@ -5237,8 +5327,9 @@
         return `<label class="${answering ? 'off' : ''}"><input type="radio" name="setup-tap-retire" value="${topoEscape(t.id)}"${answering ? ' disabled' : ''}${f.tapPick === t.id ? ' checked' : ''}>
           <strong>${topoEscape(setupTapName(t.id))}</strong><span>${answering ? 'answering: unplug it first' : t.state === 'lost' ? 'not answering' : 'not answering; asked every 5 min'}</span></label>`;
       }).join('');
-      return `<h2>Which TAP has gone for good?</h2>
-        <div class="sub">TigoMonitor stops polling it and leaves it off its list. A TAP still answering can't be retired: unplug it first. Its optimizers' history stays.</div>
+      return `<h2>${f.task === 'replacetap' ? 'Which TAP did you take out?' : 'Which TAP has gone for good?'}</h2>
+        <div class="sub">TigoMonitor stops polling it and leaves it off its list. A TAP still answering can't be retired: unplug it first. Its optimizers' history stays.${
+          f.task === 'replacetap' ? ' Its optimizers are listed on the new TAP first, so the re-sort finds them.' : ''}</div>
         ${setupRunning(setup.data.master) ? (taps.length > 1 ? `<div class="setup-found setup-tap-pick">${rows}</div>` : '<div class="setup-note info">There is only one TAP: nothing to retire.</div>')
           : '<div class="setup-note info">This TigoMonitor is not running the bus, so it cannot change its list of TAPs.</div>'}
         <div class="setup-actions">${back('Cancel')}<button type="button" class="btn task-go" data-setup-retire${f.tapPick ? '' : ' disabled'}>${f.tapPick ? `Retire TAP ${topoEscape(f.tapPick)}` : 'Retire'}</button></div>`;
@@ -5333,12 +5424,32 @@
           <div class="setup-field"><label for="setup-tap-name">Name for TAP ${topoEscape(f.found)}</label>
           <input class="input" id="setup-tap-name" maxlength="40" value="${topoEscape(f.tapName || '')}" placeholder="Garage"></div>
           <div class="setup-actions">${back()}${setupNext(f)}</div>`;
+      if (f.step === 'resort') return setupResortStep(f, back);
       const on = !!(m && m.adopt_taps);
       return `<div class="setup-done"><h2>TAP ${topoEscape(f.found)} is on the bus</h2>
-        <div class="sub">TigoMonitor polls it with the others. To put optimizers on it, add them with Add an optimizer and choose this TAP.</div>
+        <div class="sub">TigoMonitor polls it with the others. ${f.resortSkipped
+          ? 'It has no optimizers until you re-sort them (Settings → Bus, Dangerous options), or add one with Add an optimizer and choose this TAP.'
+          : 'The re-sort goes on until every optimizer has joined a TAP: System setup shows how far it has got.'}</div>
         ${on ? `<div class="setup-note info"><strong>Take on a new TAP</strong> is still on. Turn it off unless you are adding another, so TigoMonitor only brings TAPs up when you ask. <button type="button" class="btn" data-setup-adopt="off">Turn it off</button></div>` : ''}
         <div class="setup-actions"><button type="button" class="btn" data-setup-start="add">Add an optimizer</button><button type="button" class="btn primary" data-setup-home>Finish</button></div></div>`;
     },
+  };
+
+  // Replace a TAP: Add a TAP's steps for the new one, Retire a TAP's for
+  // the old, then the re-sort.
+  SETUP_GUIDES.replacetap = (f, back) => {
+    if (f.step === 'connect')
+      return `<h2>Wire in the new TAP</h2>
+        <div class="sub">Unplug the old TAP, then wire the new one in its place on this bus: A to A, B to B and a shared ground, then power it. The old one's optimizers have no TAP until the re-sort at the end.</div>
+        <div class="setup-actions">${back('Cancel')}${setupNext(f)}</div>`;
+    if (f.step === 'pick') return SETUP_GUIDES.retiretap(f, back);
+    if (f.step === 'resort') return setupResortStep(f, back);
+    if (f.step === 'done')
+      return `<div class="setup-done"><h2>TAP ${topoEscape(f.found)} has taken TAP ${topoEscape(f.tapPick || '')}'s place</h2>
+        <div class="sub">${f.resortSkipped ? 'The old one\'s optimizers have no TAP until you re-sort them (Settings → Bus, Dangerous options).'
+          : 'The re-sort goes on until every optimizer has joined a TAP: System setup shows how far it has got.'}</div>
+        <div class="setup-actions"><button type="button" class="btn primary" data-setup-home>Finish</button></div></div>`;
+    return SETUP_GUIDES.addtap(f, back);
   };
 
   function renderSetupFlow(root) {
@@ -5471,7 +5582,7 @@
         f.step = f.task === 'retire' ? 'done' : (t.waiting || []).some(x => x.mac === f.mac) ? 'wait' : 'done';
       if (f.step === 'wait' && (t.joins || []).some(x => x.mac === f.mac && x.joined && x.unix >= f.startedAt)) f.step = 'done';
       // The radio step's job: the check gives the plan, the real one the result.
-      if (f.task === 'addtap' && f.radio && (f.radio.phase === 'checking' || f.radio.phase === 'writing')) {
+      if ((f.task === 'addtap' || f.task === 'replacetap') && f.radio && (f.radio.phase === 'checking' || f.radio.phase === 'writing')) {
         const e = setupJob();
         if (Date.now() / 1000 - f.radio.at > 90 && !(e.kind === 'provision' && e.finished && e.started_unix >= f.radio.at)) {
           f.radio.phase = 'failed';
@@ -5484,7 +5595,7 @@
           } else f.radio.phase = 'done';
         }
       }
-      if (f.task === 'addtap' && f.looking && !f.found) {
+      if ((f.task === 'addtap' || f.task === 'replacetap') && f.looking && !f.found) {
         const m = setup.data.master, fresh = setupTaps().find(x => !(f.before || []).includes(x.id) && x.state === 'running');
         if (m && m.phase === 'running' && fresh) f.found = fresh.id;
         else if (Date.now() - f.lookedAt > 120000) f.looking = false;  // gave up: say so, offer to look again
@@ -5496,8 +5607,9 @@
       renderSetup();
       if (f && f.task === 'system' && f.step === 'bus') setupFillSerial();
     }
-    const busy = f && (f.step === 'check' || f.step === 'do' || f.step === 'wait' || f.step === 'done' || (f.looking && !f.found) ||
-                       (f.radio && (f.radio.phase === 'checking' || f.radio.phase === 'writing')));
+    const busy = (f && (f.step === 'check' || f.step === 'do' || f.step === 'wait' || f.step === 'done' || (f.looking && !f.found) ||
+                        (f.radio && (f.radio.phase === 'checking' || f.radio.phase === 'writing')))) ||
+                 resortBusy(setup.data && setup.data.master && setup.data.master.resort);
     if (document.getElementById('view-setup').classList.contains('active'))
       setup.timer = setTimeout(refreshSetup, busy ? 1500 : 10000);
   }
@@ -5587,12 +5699,47 @@
                           ok: 'Retire', tone: 'danger' }))) return;
       b.disabled = true;
       try {
+        // Replacing: the old TAP's optimizers are listed on the new one first
+        // (from what was last heard through it), so the re-sort lists them
+        // on every TAP. One with none heard has nothing to hand over.
+        if (f.task === 'replacetap') {
+          const r = await apiFetch('/api/master/taps/handover', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                                                   body: JSON.stringify({ from: f.tapPick, to: f.found, dry_run: false }) });
+          const j = await r.json().catch(() => ({}));
+          if (!r.ok && !/no optimizer has been heard/.test(j.error || '')) throw new Error(j.error || httpWords(r.status));
+          if (r.ok) {
+            for (let i = 0; i < 120; i++) {
+              const e = ((await (await apiFetch('/api/master')).json()).table || {}).edit || {};
+              if (e.kind === 'handover' && e.finished) {
+                if (!e.ok) throw new Error(e.message || 'the handover stopped');
+                break;
+              }
+              await new Promise(done => setTimeout(done, 500));
+            }
+          }
+        }
         await setupPost('/api/master/taps/forget', { tap: f.tapPick });
-        f.step = 'done';
+        f.step = f.task === 'replacetap' ? 'resort' : 'done';
       } catch (err) {
         showToast('Not retired: ' + failText(err), 'err');
       }
       return refreshSetup(true);
+    }
+    // The re-sort's buttons, on a flow's last step or the start page.
+    if (b.dataset.resort) {
+      b.disabled = true;
+      try {
+        const res = await resortAct(b.dataset.resort);
+        if (res && f && b.dataset.resort === 'preview') f.resortPreview = [res.message, ...(res.dry_frames || [])].filter(Boolean);
+        if (res && f && b.dataset.resort === 'go') f.resorted = true;
+      } catch (err) {
+        showToast('Not done: ' + failText(err), 'err');
+      }
+      return refreshSetup(true);
+    }
+    if (b.hasAttribute('data-setup-resort-skip')) {
+      f.resortSkipped = true;
+      return renderSetup();
     }
     // Add a TAP's radio step: the check (a dry run), then the real one, to
     // the TAP the guide found.
@@ -5678,7 +5825,7 @@
     }
     if (b.hasAttribute('data-setup-next')) {
       const steps = SETUP_STEPS[f.task];
-      if (f.task === 'addtap' && f.step === 'name') {
+      if ((f.task === 'addtap' || f.task === 'replacetap') && f.step === 'name') {
         const name = (document.getElementById('setup-tap-name').value || '').trim();
         f.tapName = name;
         if (name) {
@@ -6894,22 +7041,32 @@
     different: 'A different key from your other TAPs: optimizers can\'t move to it',
     unread: 'Not read yet', alone: 'The only TAP',
     factory: 'Still on its factory settings: Add a TAP gives it a network of its own' };
-  let dangerOn = false;
+  let dangerOn = false, dangerSettings = null, dangerResortTimer = 0;
   const dangerEsc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   async function piDangerRefresh(s) {
     dangerOn = !!(s && s.dangerous_options && s.bus_role && s.bus_role !== 'listen');
+    dangerSettings = s;
+    clearTimeout(dangerResortTimer);
     const card = document.getElementById('pi-danger');
     card.style.display = dangerOn ? '' : 'none';
     if (!dangerOn) return;
-    let taps = [];
-    const live = {}, chan = {};  // the profile and channel each TAP runs, from its last live read
+    let taps = [], resort = {};
+    const live = {}, chan = {}, names = {};  // the profile and channel each TAP runs, from its last live read
     try {
       const r = await apiFetch('/api/master');
-      if (r.ok) taps = ((await r.json()).taps || []).filter(t => t.mac);
+      if (r.ok) {
+        const m = await r.json();
+        taps = (m.taps || []).filter(t => t.mac);
+        resort = m.resort || {};
+      }
       const v = await apiFetch('/api/versions');
-      if (v.ok) for (const x of ((await v.json()).radios || [])) {
-        if (x.profile) live[x.tap] = x.profile;
-        if (x.channel) chan[x.tap] = x.channel;
+      if (v.ok) {
+        const vj = await v.json();
+        for (const x of (vj.radios || [])) {
+          if (x.profile) live[x.tap] = x.profile;
+          if (x.channel) chan[x.tap] = x.channel;
+        }
+        for (const x of (vj.taps || [])) if (x.name) names[x.addr] = x.name;
       }
     } catch (e) { /* drawn empty, or with the usual default, below */ }
     const opts = (list, pick) => list.map(([v, t]) => `<option value="${v}"${v === pick ? ' selected' : ''}>${dangerEsc(t)}</option>`).join('');
@@ -6938,7 +7095,39 @@
             <button class="btn" data-danger="period-preview">Preview</button> <button class="btn danger" data-danger="period-write">Write</button></div>
         </div>
       </div>`).join('') : '<p class="hint">No TAP is running on the bus yet.</p>';
+    // The re-sort, once per system: every optimizer chooses its TAP again.
+    const busy = resortBusy(resort), off = busy ? ' disabled' : '';
+    document.getElementById('pi-danger-resort').innerHTML = taps.length > 1 ? `
+      <div style="border-top:1px solid var(--border);padding-top:10px;margin-top:10px">
+        <div class="cfg-row">
+          <div class="cfg-text"><strong>Re-sort the optimizers</strong><span>${dangerEsc(RESORT_WORDS)}</span></div>
+          <div class="cfg-ctrl"><button class="btn" data-resort="preview"${off}>Preview</button> <button class="btn danger" data-resort="go"${off}>Re-sort</button></div>
+        </div>
+        ${busy ? resortPanelHTML(resort, id => names[id] || `TAP ${id}`, dangerEsc) : ''}
+        <div class="hint" data-resort-out style="margin-top:8px;white-space:pre-wrap"></div>
+      </div>` : '';
+    if (busy) dangerResortTimer = setTimeout(() => { if (dangerOn && card.offsetParent) piDangerRefresh(dangerSettings); }, 3000);
   }
+  document.getElementById('pi-danger').addEventListener('click', async ev => {
+    const b = ev.target.closest('button[data-resort]');
+    if (!b) return;
+    const out = () => document.querySelector('#pi-danger [data-resort-out]');
+    b.disabled = true;
+    let res = null;
+    try {
+      res = await resortAct(b.dataset.resort);
+    } catch (err) {
+      if (out()) out().textContent = `Refused: ${failText(err)}`;
+      b.disabled = false;
+      return;
+    }
+    if (res && b.dataset.resort === 'preview') {
+      b.disabled = false;
+      if (out()) out().textContent = [res.message, ...(res.dry_frames || [])].filter(Boolean).join('\n');
+      return;
+    }
+    await piDangerRefresh(dangerSettings);
+  });
   document.getElementById('pi-danger').addEventListener('click', async ev => {
     const b = ev.target.closest('button[data-danger]');
     if (!b) return;
@@ -6959,7 +7148,7 @@
               body: 'The TAP keeps its channel, PAN and key, and re-slots its optimizers. A wrong profile can cost reports until it\'s set back.' }
           : what === 'channel'
           ? { title: `Move ${tapName} to ${label}?`, tone: 'danger', ok: 'Move it',
-              body: 'It keeps its network ID and key. Its optimizers lose it until they find it on the new channel, and how long that takes hasn\'t been measured, so this is safest before any optimizer is on it.' }
+              body: 'It keeps its network ID and key, and restarts once the new channel is saved, so its radio comes up on it. Its optimizers lose it until they find it on the new channel, and how long that takes hasn\'t been measured, so this is safest before any optimizer is on it.' }
           : what === 'key'
           ? { title: `Give ${tapName} the key your other TAPs share?`, tone: 'danger', ok: 'Use the shared key',
               body: `It keeps its channel and network ID. ${nodes

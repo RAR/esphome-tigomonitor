@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **A new TAP can now get optimizers: re-sort them, and each joins the TAP
+  it hears (Raspberry Pi, experimental).** Re-sort the optimizers is the
+  last step of Add a TAP and of the new Replace a TAP (System setup), and a
+  row under Dangerous options. Every TAP gets a new network ID and all of
+  them one new key, each keeping its channel; every optimizer is listed on
+  every TAP, joins the one it hears, and each TAP is then trimmed to the
+  ones that joined it. Production drops while they rejoin, so run it at low
+  sun. It waits as long as it takes, and until every optimizer is back the
+  old networks can be put back with a button, which lists every optimizer
+  again. **Stop waiting** trims each TAP at once and leaves only the
+  optimizers still missing listed everywhere. One that stops part-way (a TAP that doesn't answer, a restart)
+  waits for you to put the old networks back or keep the TAPs as they are.
+  Replace a TAP lists the old TAP's optimizers on the new one before the
+  re-sort, so it finds them. It needs **Allow changes to the TAPs**. On a
+  roof with three TAPs and 40 optimizers (2026-11-23) all 40 rejoined in
+  12 minutes the first time and in under 10 the second, when 22 moved to
+  the TAP that had none.
+
 - **Hand a TAP's optimizers to another (Raspberry Pi, experimental, API
   only).** `POST /api/master/taps/handover` with `{"from": "1202", "to":
   "1201"}` lists every optimizer last heard through the first TAP on the
@@ -40,6 +58,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **With more than one TAP, discovery windows carry the known-networks
+  flag (Raspberry Pi).** Each renewal now ends `01 01`, as the CCA's did
+  from its second TAP on (119 renewals per TAP in a capture of a CCA
+  running two TAPs), rather than the one-TAP `01 00`. An optimizer listed
+  on one TAP only still can't join another, so nothing should move. One
+  TAP, and the ESP32, keep `01 00`.
+
 - **A new TAP gets a channel clear of Wi-Fi, and you can pick another.**
   Add a TAP's radio step used to start at channel 11, which shares the air
   with Wi-Fi channel 1. It now tries 15, 20, 25 and 26 first, the channels
@@ -57,7 +82,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   safest on a TAP with no optimizers yet. It needs **Allow changes to the
   TAPs**.
 
+- **A TAP moved to another channel is restarted (Raspberry Pi).** Once the
+  new channel is saved, TigoMonitor restarts that TAP alone, as the CCA
+  restarts every TAP after its writes; Add a TAP's first channel counts
+  too. On the roof a TAP moved channel without a restart took no
+  optimizers in a re-sort; after a power cycle and another channel, the
+  next re-sort gave it 22. The two changes went in together, so which one
+  it needed isn't known.
+
 ### Fixed
+
+- **The Mesh map no longer draws an optimizer through one on another TAP
+  (Raspberry Pi and ESP32).** An optimizer names its parent by an ID its
+  TAP hands out, and each TAP hands them out on its own network, so two
+  TAPs can each have one with the same ID. The map took any match; after
+  the roof's re-sort 8 of its 12 relay lines crossed TAPs. It now looks
+  only on the optimizer's own TAP.
 
 - **A TAP added by TigoMonitor could never take an optimizer.** Add a TAP
   gave each new TAP a network key of its own. A site's TAPs must share one

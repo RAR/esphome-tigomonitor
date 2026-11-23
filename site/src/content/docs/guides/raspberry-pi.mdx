@@ -145,21 +145,44 @@ UART** (`/dev/serial0`).
 - **TAPs** (experimental):
   - **Add a TAP** walks through bringing a new TAP onto the bus, no CCA
     needed. It lets the Pi take on a new TAP while you add it, looks for
-    TAPs, gives the new one its radio settings (a channel, a network ID
-    made from the Pi's own and a new key, which the TAP saves), and names
-    it. The channel is the first of 15, 20, 25 and 26, which sit between
-    Wi-Fi channels 1, 6 and 11, that's at least two from your other TAPs',
-    or the first that is if none of those are. A check
-    shows the channel and network ID first, and you can pick another
-    channel there; giving them needs **Allow changes to the TAPs**. We
-    tested the radio settings on two bench TAPs, an H1 and a G8, and both
-    kept them through a power cycle; on a roof, so far only a TAP's mesh
-    size has been changed this way. Allowing it, and stopping again,
-    restarts the bus master, a few seconds without polling, and looking for
-    TAPs stops polling for about 30 seconds.
+    TAPs, gives the new one its radio settings, and names it. The radio
+    settings are a channel, a network ID made from the Pi's own, and the
+    key your other TAPs share (a new one for your first TAP); the TAP saves
+    them, and is restarted so its radio comes up on the new channel. The
+    channel is the first of 15, 20, 25 and 26, which sit between Wi-Fi
+    channels 1, 6 and 11, that's at least two from your other TAPs', or the
+    first that is if none of those are. A check shows the channel and
+    network ID first, and you can pick another channel there; giving them
+    needs **Allow changes to the TAPs**. The settings held through a power
+    cycle on two bench TAPs, an H1 and a G8, and on our roof's three.
+    Allowing it, and stopping again, restarts the bus master, a few seconds
+    without polling, and looking for TAPs stops polling for about 30
+    seconds. A new TAP gets no optimizers until they're re-sorted, so
+    that's the last step.
+  - **Re-sort the optimizers** lets every optimizer choose its TAP again,
+    as a CCA's rediscovery does. An optimizer stays on its TAP for as long
+    as that TAP's network stays the same, so every TAP gets a new network
+    ID, and all of them one new key, each keeping its channel. Every
+    optimizer is listed on every TAP and joins the one it hears; when a
+    TAP's discovery window closes, about 15 minutes in, it's trimmed to the
+    ones that joined it. Production drops while they rejoin: on our roof
+    (three TAPs, 40 optimizers, 2026-11-23) it fell from 4 to 5 kW to
+    under 1 kW for about 5 minutes, and all 40 were back within 13. Run it
+    at low sun. It waits
+    as long as it takes. Until it ends, **Put the old networks back**
+    re-sorts to the networks the TAPs had before, and **Stop waiting**
+    trims each TAP at once and ends it, leaving only the optimizers that
+    haven't come back listed on every TAP. One that stops part-way (a
+    restart, a TAP that stops answering) waits for you to put the old
+    networks back or keep the TAPs as they are. It's the last step of Add
+    a TAP and Replace a TAP, and a row under the dangerous options
+    (`"dangerous_options": true` in settings.json); it never starts by
+    itself.
+  - **Replace a TAP** swaps a TAP for a new one: Add a TAP's steps for the
+    new one, then you pick the old one. Its optimizers are listed on the
+    new one, the old one is forgotten, and the optimizers are re-sorted.
   - **Retire a TAP** drops a TAP that has gone for good, so it stops showing
     as not answering. One still answering can't be retired.
-  - Replacing a TAP isn't offered yet.
 
 ## Connect it to Home Assistant
 

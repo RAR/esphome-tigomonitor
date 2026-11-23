@@ -285,6 +285,30 @@ test('System setup: with two TAPs, each is listed and an add names its TAP', asy
   await ctx.close();
 });
 
+// A re-sort lists every optimizer on every TAP, so adding up the TAPs'
+// counts overstates the system (the roof, 2026-11-23: "120 optimizers, 81
+// listed, never joined" for 40). While one waits, the counts are its own,
+// by MAC: each TAP's joined, and the ones still missing.
+test('System setup: during a re-sort, each optimizer is counted once', async () => {
+  const w = world();
+  const tap = (id, joined) => ({ id, mac: '', version: '', state: 'running', polls: 10, timeouts: 0, renewals: 1, lost: 0,
+    last_reply_unix: now(), discovery: { read: true, running: true, remaining_s: 500, node_count: 24, joined } });
+  w.master.taps = [tap('1201', 8), tap('1202', 10), tap('1203', 5)];
+  w.master.resort = { ...w.master.resort, state: 'waiting', finished: true, ok: true, can_put_back: true,
+    message: 'new networks on 3 TAPs and all 24 optimizers listed on each; waiting for them to join',
+    joined: [{ tap: '1201', count: 8 }, { tap: '1202', count: 10 }, { tap: '1203', count: 5 }],
+    missing: [{ mac: '04C05B4000000005', id: '0005', label: '4-000005A' }] };
+  const { page, ctx, errors } = await open(w);
+  await page.waitForSelector('.setup-health');
+  assert.match(await page.textContent('#setup-meta'), /24 optimizers · 23 joined · 3 TAPs/);
+  const health = (await page.textContent('.setup-health')).replace(/\s+/g, ' ');
+  assert.match(health, /Your system ?24 optimizers/);
+  assert.match(health, /1 ?listed, never joined/);
+  assert.doesNotMatch(health, /72 optimizers|49 ?listed/);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
 // One TAP, as before: no list, no TAP choice, nothing extra sent.
 test('System setup: with one TAP, no TAP is asked for', async () => {
   const w = world();

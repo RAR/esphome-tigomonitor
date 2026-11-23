@@ -100,6 +100,19 @@ async function open(opts = {}) {
         message: body.dry_run !== false ? `dry run: would do it (${kind})` : `done (${kind})` } };
       return json(200, { started: true });
     }
+    if (path.startsWith('/api/master/resort') && req.method() === 'POST') {
+      const body = req.postData() ? JSON.parse(req.postData()) : {};
+      api.posts.push({ path, body });
+      if (path === '/api/master/resort' && body.dry_run !== false)
+        api.master.resort = { ...api.master.resort, state: 'idle', finished: true, ok: true, dry_run: true,
+          message: 'dry run: would give 2 TAPs new networks and list all 40 optimizers on each',
+          dry_frames: ['PV off (0B00 00) to 2 TAPs', '2D window ending 01 01 on each TAP'] };
+      else if (path === '/api/master/resort')
+        api.master.resort = { ...api.master.resort, state: 'waiting', finished: true, ok: true, dry_run: false,
+          joined: [{ tap: '1201', count: 0 }, { tap: '1203', count: 0 }], missing: [], can_put_back: true };
+      else if (path.endsWith('/stop')) api.master.resort = { ...api.master.resort, state: 'idle', can_put_back: false };
+      return json(200, { status: 'ok' });
+    }
     if (path === '/api/versions' && opts.versions) return json(200, opts.versions);
     if (path === '/api/serial-ports') return json(200, { ports: [] });
     if (path === '/api/devices' && opts.devices) return json(200, { devices: opts.devices, count: opts.devices.length });
@@ -549,5 +562,92 @@ test('with the flag: preview a profile and a period, then write one after a warn
   assert.match(asked, /120/);
   assert.deepEqual(api.posts.at(-1).body, { mac: '04C05B0000A1B2C3', keep_network: true, profile: 120, dry_run: false });
   assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+// The re-sort: once per system, under the TAPs' rows.
+const TWO = { taps: [
+  { id: '1201', mac: '04C05B0000A1B2C1', state: 'running', key: 'same', discovery: { read: true, running: true, remaining_s: 500, node_count: 20, joined: 20 } },
+  { id: '1203', mac: '04C05B0000A1B2C3', state: 'running', key: 'same', discovery: { read: true, running: true, remaining_s: 500, node_count: 0, joined: 0 } }],
+  resort: { state: 'idle', finished: false, ok: false, dry_run: false, step: '', message: '', dry_frames: [], joined: [], missing: [], can_put_back: false } };
+
+test('the Re-sort row: a preview says what it would send, the re-sort asks first, in red', async () => {
+  const { page, ctx, api, errors } = await open({ hash: '#settings', master: JSON.parse(JSON.stringify(TWO)), settings: { dangerous_options: true } });
+  await page.waitForSelector('#pi-danger button[data-resort="go"]', { state: 'visible' });
+  assert.match(await page.textContent('#pi-danger'), /Re-sort the optimizers/);
+  await page.click('#pi-danger button[data-resort="preview"]');
+  await page.waitForFunction(() => /PV off \(0B00 00\) to 2 TAPs/.test(document.querySelector('#pi-danger').textContent));
+  assert.deepEqual(api.posts.at(-1), { path: '/api/master/resort', body: { dry_run: true } });
+  await page.click('#pi-danger button[data-resort="go"]');
+  await page.waitForSelector('#ui-dialog[open]');
+  assert.match(await page.getAttribute('#ui-dialog [data-answer="ok"]', 'class'), /danger/);
+  assert.match(await page.textContent('#ui-dialog'), /low sun/);
+  await answer(page, true);
+  await page.waitForFunction(() => /Stop waiting/.test(document.querySelector('#pi-danger').textContent));
+  assert.deepEqual(api.posts.at(-1), { path: '/api/master/resort', body: { dry_run: false } });
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test('while a re-sort waits: how many joined each TAP, who is missing, Stop waiting and the put-back', async () => {
+  const master = JSON.parse(JSON.stringify(TWO));
+  master.resort = { ...master.resort, state: 'waiting', finished: true, ok: true,
+    joined: [{ tap: '1201', count: 20 }, { tap: '1203', count: 11 }],
+    missing: Array.from({ length: 9 }, (_, i) => ({ mac: `04C05B00000000${(0x40 + i).toString(16).toUpperCase()}`, label: `0-0000${40 + i}X`, id: (0x40 + i).toString(16).padStart(4, '0') })),
+    can_put_back: true };
+  const { page, ctx, api, errors } = await open({ hash: '#settings', master, settings: { dangerous_options: true } });
+  await page.waitForSelector('#pi-danger [data-resort-panel]', { state: 'visible' });
+  const text = await page.textContent('#pi-danger [data-resort-panel]');
+  assert.match(text, /31 of 40 joined: Garage 20, TAP 1203 11/);  // 1201 is named in the fixtures
+  assert.match(text, /Still to join: 0-000040X/);
+  assert.equal(await page.isVisible('#pi-danger button[data-resort="putback"]'), true);
+  await page.click('#pi-danger button[data-resort="stop"]');
+  await page.waitForSelector('#ui-dialog[open]');
+  assert.match(await page.textContent('#ui-dialog'), /stay listed on every TAP/);
+  await answer(page, true);
+  await page.waitForFunction(() => !document.querySelector('#pi-danger [data-resort-panel]'));
+  assert.deepEqual(api.posts.at(-1), { path: '/api/master/resort/stop', body: {} });
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test('with the old networks put back already, no put-back button', async () => {
+  const master = JSON.parse(JSON.stringify(TWO));
+  master.resort = { ...master.resort, state: 'waiting', joined: [{ tap: '1201', count: 20 }, { tap: '1203', count: 0 }], missing: [], can_put_back: false };
+  const { page, ctx } = await open({ hash: '#settings', master, settings: { dangerous_options: true } });
+  await page.waitForSelector('#pi-danger [data-resort-panel]', { state: 'visible' });
+  assert.equal(await page.$('#pi-danger button[data-resort="putback"]'), null);
+  assert.equal(await page.isVisible('#pi-danger button[data-resort="stop"]'), true);
+  await ctx.close();
+});
+
+test('a re-sort that stopped part-way offers the old networks back, or to keep the TAPs as they are', async () => {
+  const master = JSON.parse(JSON.stringify(TWO));
+  master.resort = { ...master.resort, state: 'stopped', finished: true, ok: false, message: "TAP 1203 didn't echo its network write",
+    joined: [], missing: [], can_put_back: true };
+  const { page, ctx, api, errors } = await open({ hash: '#settings', master, settings: { dangerous_options: true } });
+  await page.waitForSelector('#pi-danger [data-resort-panel]', { state: 'visible' });
+  const text = await page.textContent('#pi-danger [data-resort-panel]');
+  assert.match(text, /stopped part-way/);
+  assert.match(text, /TAP 1203 didn't echo its network write/);
+  assert.equal(await page.isVisible('#pi-danger button[data-resort="putback"]'), true);
+  assert.equal(await page.$('#pi-danger button[data-resort="stop"]'), null);
+  await page.click('#pi-danger button[data-resort="keep"]');
+  await page.waitForSelector('#ui-dialog[open]');
+  assert.match(await page.textContent('#ui-dialog'), /old networks are discarded/);
+  await answer(page, true);
+  await page.waitForFunction(() => !document.querySelector('#pi-danger [data-resort-panel]'));
+  assert.deepEqual(api.posts.at(-1), { path: '/api/master/resort/stop', body: {} });
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test('while waiting with Allow changes to the TAPs off, the panel says why nothing is trimmed', async () => {
+  const master = JSON.parse(JSON.stringify(TWO));
+  master.resort = { ...master.resort, state: 'waiting', joined: [{ tap: '1201', count: 20 }, { tap: '1203', count: 0 }], missing: [],
+    can_put_back: true, note: "Allow changes to the TAPs is off: no TAP is trimmed until it's on" };
+  const { page, ctx } = await open({ hash: '#settings', master, settings: { dangerous_options: true } });
+  await page.waitForSelector('#pi-danger [data-resort-panel]', { state: 'visible' });
+  assert.match(await page.textContent('#pi-danger [data-resort-panel]'), /no TAP is trimmed until it's on/);
   await ctx.close();
 });

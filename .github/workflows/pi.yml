@@ -68,7 +68,7 @@ jobs:
           - shard: standby, PV, table
             scripts: standby pv table
           - shard: the rest
-            scripts: e2e cca layout bridge multitap bus-log setup new-optimizer mesh mqtt-lookup login ingress https provision array handover shared-network
+            scripts: e2e cca layout bridge multitap bus-log setup new-optimizer mesh mqtt-lookup login ingress https provision array handover shared-network resort
           - shard: system
             scripts: watchdog
             compose: true

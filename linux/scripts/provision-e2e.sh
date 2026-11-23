@@ -76,8 +76,8 @@ expect "having written nothing" "$(stat "$out/on.json" "len(d['cfg_writes'])")" 
 r="$(body POST 18402 /api/master/taps/provision "{\"mac\": \"$MAC\", \"channel\": 20, \"pan\": \"5A5A\"}")"
 expect "a dry run by default" "$(echo "$r" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d['dry_run'], 'channel 20, PAN 5A5A' in d['given'], 'key hidden' in d['given'])")" "True True True"
 finished 18402
-expect "the dry run lists what it would send" "$(edit 18402 "(e['kind'], e['ok'], len(e['dry_frames']), e['dry_frames'][1])")" \
-  "('provision', True, 3, '0D 00 01 (the save)')"
+expect "the dry run lists what it would send, the restart for a new channel last" "$(edit 18402 "(e['kind'], e['ok'], len(e['dry_frames']), e['dry_frames'][1], e['dry_frames'][-1])")" \
+  "('provision', True, 4, '0D 00 01 (the save)', '0010 37 24 92 66 to this TAP alone')"
 expect "and wrote nothing" "$(stat "$out/on.json" "len(d['cfg_writes'])")" 0
 # The real one.
 expect "the write starts" "$(code POST 18402 /api/master/taps/provision "{\"mac\": \"$MAC\", \"channel\": 20, \"pan\": \"5A5A\", \"dry_run\": false}")" 200
@@ -85,12 +85,13 @@ finished 18402
 expect "it finished" "$(edit 18402 "(e['ok'], e['step'])")" "(True, 'done')"
 expect "one write, on channel 20, PAN 5A5A" "$(stat "$out/on.json" "d['cfg_writes']")" "[{'channel': 20, 'pan': '5A5A'}]"
 expect "saved by the stored read" "$(stat "$out/on.json" "d['cfg_saves'] >= 1")" True
-expect "no reset unless asked" "$(stat "$out/on.json" "d['unicast_resets'] + d['resets']")" 0
+expect "restarted unasked, its channel new (15 to 20), and to it alone" "$(stat "$out/on.json" "(d['unicast_resets'], d['resets'])")" "(1, 0)"
+sleep 5  # deaf for the mock's --reset-quiet (4.5 s)
 # And with a reset, to that TAP alone.
 expect "again, with a reset" "$(code POST 18402 /api/master/taps/provision "{\"mac\": \"$MAC\", \"channel\": 22, \"reset\": true, \"dry_run\": false}")" 200
 finished 18402
 sleep 3
-expect "reset to it alone, no broadcast" "$(stat "$out/on.json" "(d['unicast_resets'], d['resets'])")" "(1, 0)"
+expect "reset to it alone, no broadcast" "$(stat "$out/on.json" "(d['unicast_resets'], d['resets'])")" "(2, 0)"
 expect "on channel 22, the PAN from this machine's MAC, not the TAP's" "$(stat "$out/on.json" "(d['cfg_writes'][-1]['channel'], d['cfg_writes'][-1]['pan'] != 'B2C3')")" "(22, True)"
 expect "still polled after the reset" "$(body GET 18402 /api/master | python3 -c "import json,sys; print(json.load(sys.stdin)['taps'][0]['state'])")" running
 # No key anywhere a person sees: the API's answer and the log show it hidden,
@@ -178,10 +179,14 @@ start channel 18408 false "" ', "master_table_writes": true'
 expect "a first network is given" "$(code POST 18408 /api/master/taps/provision "{\"mac\": \"$MAC\", \"channel\": 20, \"pan\": \"5A5A\", \"dry_run\": false}")" 200
 finished 18408
 expect "and saved" "$(edit 18408 "e['ok']")" True
+# A channel new to it, so the TAP was restarted after the save: deaf for the
+# mock's --reset-quiet (4.5 s), then back on what it saved.
+sleep 5
 expect "a channel change starts" "$(code POST 18408 /api/master/taps/provision "{\"mac\": \"$MAC\", \"keep_network\": true, \"channel\": 22, \"dry_run\": false}")" 200
 finished 18408
 expect "and is given" "$(edit 18408 "(e['ok'], 'channel 22' in e['message'])")" "(True, True)"
 expect "written with the PAN it had" "$(stat "$out/channel.json" "d['cfg_writes'][-1]")" "{'channel': 22, 'pan': '5A5A'}"
+expect "each channel change restarted it, without the bench" "$(stat "$out/channel.json" "d['unicast_resets']")" 2
 stop_all
 
 [ $fail = 0 ] && echo "provision e2e passed" || { echo "provision e2e FAILED; see $out/"; exit 1; }
