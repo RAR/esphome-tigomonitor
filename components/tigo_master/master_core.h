@@ -24,6 +24,7 @@
 // the bus, ours or a CCA, and takes the bus over once no master has been
 // heard for takeover_s. Any master it hears, it yields to: a CCA can't.
 
+#include "../tigo_monitor/resort.h"
 #include "../tigo_monitor/table_edit.h"
 #include "../tigo_monitor/tap_config.h"
 #include "../tigo_monitor/tigo_master.h"
@@ -95,6 +96,31 @@ struct TableJoinOutcome {
   bool joined = false;
   std::string text;
   int64_t at_unix = 0;
+};
+
+// The re-sort (resort.h), as the daemon keeps it on disk. The old networks
+// hold keys: the file is the only place they are kept outside the TAPs.
+struct ResortFile {
+  // writing: between the first PV off and the last PV on, so a restart owes
+  // every TAP a PV on; waiting: the networks written, waiting for joins.
+  std::string phase;
+  int64_t started_unix = 0;
+  std::vector<esphome::tigo_monitor::master::Bytes> waited;  // every MAC the re-sort listed
+  // Each TAP's network before the re-sort, by TAP id; empty after a put-back.
+  std::vector<std::pair<uint16_t, esphome::tigo_monitor::master::RadioBlock>> old_networks;
+};
+
+// The re-sort for the Bus page: running (its writes), waiting (for joins),
+// putting_back, or idle; and the last run's end.
+struct ResortStatus {
+  std::string state = "idle";
+  bool dry_run = false, finished = false, ok = false;
+  std::string step, message;
+  std::vector<std::string> dry_frames;
+  int64_t started_unix = 0;
+  std::vector<std::pair<uint16_t, int>> joined;  // per TAP, in polling order, at its last read
+  std::vector<TableWaiting> missing;             // waited for, joined on no TAP
+  bool can_put_back = false;                     // the old networks are on file
 };
 
 // One TAP the master runs (docs/superpowers/specs/2026-11-10-multi-tap-design.md):
@@ -198,6 +224,7 @@ struct MasterStatus {
   std::vector<TableJoinOutcome> table_joins;  // newest last, at most TABLE_JOINS_KEPT
   static constexpr size_t TABLE_JOINS_KEPT = 10;
   uint16_t table_tap = 0;      // the TAP the last change ran on
+  ResortStatus resort;
   std::vector<TapStatus> taps;  // in the order they are polled
 };
 
@@ -423,6 +450,28 @@ class MasterCore {
   // joins whenever the window is next open). False if it isn't waited for.
   bool request_table_stop_waiting(const esphome::tigo_monitor::master::Bytes &mac);
 
+  // The re-sort (resort.h, docs/superpowers/specs/2026-11-23-tap-resort-design.md):
+  // every TAP a new network, every optimizer listed on every TAP, then
+  // waiting until each has joined one, each TAP trimmed when its window
+  // closes. Pi only (set_known_networks). saved writes the file (null:
+  // delete it), from the bus thread; false stops the re-sort before any
+  // network frame. resume: a file found at the start. Call before open().
+  using ResortSaved = std::function<bool(const ResortFile *file)>;
+  void set_resort_saved(ResortSaved saved, const ResortFile *resume = nullptr);
+  // Random bytes for the new PANs and key; call before open().
+  void set_resort_draw(std::function<uint8_t()> draw) { resort_draw_ = std::move(draw); }
+  // Starts one, in the next tick. A dry run reads the tables and says what
+  // it would send. Refused, saying why, unless every TAP answers, has been
+  // read and shares the key, with Allow changes to the TAPs on, PV off not
+  // held and the window not held closed (a dry run needs neither of the
+  // first two switches).
+  bool request_resort(bool dry_run, std::string &why);
+  // While waiting: the old networks back the same way (a re-sort to them).
+  bool request_resort_put_back(bool dry_run, std::string &why);
+  // While waiting: stop; those not joined stay listed on every TAP.
+  bool request_resort_stop(std::string &why);
+  static constexpr uint32_t RESORT_READ_MS = 30000;  // each TAP's table, while waiting
+
   bool open();
   // Sends at most one request and reads its reply, up to REPLY_TIMEOUT_MS.
   void tick(uint32_t now_ms);  // measures the gap, then tick_()
@@ -497,6 +546,14 @@ class MasterCore {
     bool removed = false;  // asked only every REMOVED_PROBE_MS: quiet while another TAP answers
     uint32_t next_try_ms = 0;
     uint32_t pv_gen = 0;  // the request_pv its switch has been told
+    // While a re-sort waits: its table read every RESORT_READ_MS, and whether
+    // a trim is owed before its window is renewed.
+    esphome::tigo_monitor::master::TableWalk resort_walk;
+    std::vector<esphome::tigo_monitor::master::TableRecord> resort_table;
+    bool resort_read = false;
+    uint32_t resort_read_ms = 0;
+    bool resort_trim_owed = false;
+    bool resort_pv_on_sent = false;  // a restart in the writes: its PV on
   };
 
   // Sends one frame and reads until the gateway's reply ends or the timeout.
@@ -607,6 +664,25 @@ class MasterCore {
   TableReplaced on_replaced_;
   TableRemoved on_removed_;
   void sync_join_status_(Tap &t);
+  // The re-sort's state. resort_job_ and the waiting are the tick thread's;
+  // the rest is under mu_.
+  ResortSaved resort_saved_;
+  std::function<uint8_t()> resort_draw_;
+  std::unique_ptr<esphome::tigo_monitor::master::ResortJob> resort_job_;
+  std::unique_ptr<esphome::tigo_monitor::master::ResortJob> resort_pending_;  // under mu_
+  bool resort_running_ = false;              // under mu_: pending or resort_job_
+  std::optional<ResortFile> resort_file_;    // under mu_: as last saved
+  bool resort_stop_wanted_ = false;          // under mu_
+  bool resort_resume_writing_ = false;       // a restart in the writes: PV on owed to every TAP
+  uint16_t resort_trim_tap_ = 0;             // the TAP a trim (a TableRemove) runs on
+  bool resort_trim_job_ = false;             // table_job_ is that trim: no retire callback
+  std::set<std::string> resort_two_logged_;  // MACs joined on two TAPs, said once each
+  bool resort_busy_() const { return resort_running_ || resort_file_.has_value(); }  // under mu_
+  bool resort_refusal_(bool dry_run, std::string &why) const;                       // under mu_
+  bool resort_save_(const ResortFile *f);
+  void settle_resort_(uint32_t now_ms);
+  void resort_wait_(uint32_t now_ms);  // the waiting: reads, trims, the end
+  void sync_resort_status_();          // the waiting's counts, from the last reads
   // Every TAP's queries' answers, kept across a restart of them (a
   // takeover, a TAP power cut); under mu_.
   std::map<uint16_t, esphome::tigo_monitor::master::Queries::Setup> setups_;

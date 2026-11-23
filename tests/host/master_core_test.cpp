@@ -10,6 +10,8 @@
 #include <atomic>
 #include <chrono>
 #include <functional>
+#include <memory>
+#include <optional>
 #include <cstdio>
 #include <string>
 #include <thread>
@@ -812,7 +814,33 @@ struct MultiTap {
     std::vector<mp::Bytes> records;
     std::vector<mp::Bytes> writes;
     std::vector<mp::Bytes> renewals;  // each 0x2D's args
+    std::vector<uint8_t> sessions;    // each 0x0B00's byte, heard even when it no longer answers
+    bool silent_after_pv_off = false;  // stops answering at its first 0B00 00
   };
+  // Every request in order: (TAP, cmd, the tunnel sub or 0, the first payload byte after the header or 0).
+  struct Sent {
+    uint16_t id, cmd;
+    uint8_t sub, first;
+  };
+  std::vector<Sent> log;
+  int index_of(uint16_t cmd, uint8_t sub_or_byte, size_t from = 0) const {
+    for (size_t i = from; i < log.size(); i++)
+      if (log[i].cmd == cmd && (cmd == 0x0B00 ? log[i].first == sub_or_byte : log[i].sub == sub_or_byte))
+        return static_cast<int>(i);
+    return -1;
+  }
+  // An optimizer joins: its record's 0x8000 bit cleared on that TAP.
+  void join(uint16_t tap, uint16_t id) {
+    for (auto &r : at(tap)->records)
+      if (((r[8] & 0x7F) << 8 | r[9]) == id) r[8] &= 0x7F;
+  }
+  std::vector<uint16_t> ids_on(uint16_t tap, bool joined_only = false) {
+    std::vector<uint16_t> out;
+    for (auto &r : at(tap)->records)
+      if (!joined_only || !(r[8] & 0x80)) out.push_back(static_cast<uint16_t>((r[8] & 0x7F) << 8 | r[9]));
+    std::sort(out.begin(), out.end());
+    return out;
+  }
   TapPort port;
   std::vector<One> taps;
   std::vector<uint16_t> dests;  // each request's dest, in order
@@ -879,7 +907,14 @@ struct MultiTap {
   bool one(const mp::Frame &f, mp::Frame &r) {
     {
       dests.push_back(f.dest);
+      log.push_back({f.dest, f.cmd, static_cast<uint8_t>(f.cmd == 0x0B0F && f.payload.size() > 3 ? f.payload[3] : 0),
+                     static_cast<uint8_t>(f.cmd == 0x0B00 && !f.payload.empty() ? f.payload[0] : 0)});
       One *t = at(f.dest);
+      if (t && f.cmd == 0x0B00 && f.payload.size() == 1) {
+        t->sessions.push_back(f.payload[0]);
+        if (f.payload[0] == 0x00 && t->silent_after_pv_off) t->up = false;
+        return false;  // as before: no 0B01
+      }
       if (!t || !t->up) return false;
       r.dest = f.dest | 0x8000;
       if (f.cmd == 0x003A) {
@@ -956,6 +991,11 @@ struct MultiTap {
         }
         mp::Bytes b = shown.encode();
         r.payload.insert(r.payload.end(), b.begin(), b.end());
+        r.payload.push_back(0x00);
+        return true;
+      }
+      if (sub == 0x2B) {
+        t->records.clear();
         r.payload.push_back(0x00);
         return true;
       }
@@ -2401,7 +2441,311 @@ static void test_one_tap_renews_without_the_flag() {
   }
 }
 
+// ---- the re-sort (resort.h) -------------------------------------------------
+
+// The roof: 1201 and 1202 with 20 optimizers each, 1203 new with none; one
+// shared made-up key. Windows open unless a test closes them.
+struct ResortRig {
+  MultiTap bus;
+  std::vector<std::string> lines;
+  std::vector<std::optional<ResortFile>> files;  // each save, nullopt for a delete
+  int saved_at = -1;  // the bus log's length at the first save
+  int removed = 0;    // retire callbacks: a trim must never make one
+  std::unique_ptr<MasterCore> core;
+  uint32_t now = 0;
+  ResortRig(bool three = true) {
+    bus.taps = {{0x1201, 1}, {0x1202, 2}};
+    if (three) bus.taps.push_back({0x1203, 3});
+    give_radio(bus, 0x1201, radio(15, 0x7E21, 0x30));
+    give_radio(bus, 0x1202, radio(18, 0x5A5A, 0x30));
+    if (three) give_radio(bus, 0x1203, radio(20, 0x1A2B, 0x30));
+    for (uint16_t id = 0x10; id < 0x24; id++) bus.at(0x1201)->records.push_back(rec(static_cast<uint8_t>(id), id));
+    for (uint16_t id = 0x24; id < 0x38; id++) bus.at(0x1202)->records.push_back(rec(static_cast<uint8_t>(id), id));
+  }
+  void start(const ResortFile *resume = nullptr, bool writes = true) {
+    core = std::make_unique<MasterCore>(&bus.port, [this](int, const std::string &l) { lines.push_back(l); }, nullptr,
+                                        nullptr, 0x1201, false, true);
+    std::vector<MasterCore::TapEntry> list;
+    for (auto &t : bus.taps) list.push_back({t.id, {}});
+    core->set_taps(list);
+    core->set_known_networks(true);
+    core->set_table_writes(writes);
+    core->set_table_saved([](const mp::Bytes &, const std::vector<mp::TableRecord> *) { return true; });
+    core->set_on_removed([this](const std::string &) { removed++; });
+    core->set_resort_saved(
+        [this](const ResortFile *f) {
+          if (saved_at < 0) saved_at = static_cast<int>(bus.log.size());
+          files.push_back(f ? std::optional<ResortFile>(*f) : std::nullopt);
+          return true;
+        },
+        resume);
+    int n = 0;
+    core->set_resort_draw([n]() mutable { return static_cast<uint8_t>(0x41 + 0x1D * n++); });
+    CHECK(core->open());
+    run(20000);  // every TAP's settings read
+  }
+  void run(uint32_t ms) {
+    run_for(*core, now, now + ms, 50);
+    now += ms;
+  }
+  bool logged(const std::string &part) const {
+    for (const auto &l : lines)
+      if (l.find(part) != std::string::npos) return true;
+    return false;
+  }
+  void close_windows() {
+    for (auto &t : bus.taps) t.window_closed = true;
+  }
+  ~ResortRig() {
+    if (core) core->close();
+  }
+};
+
+static void test_resort_refusals() {
+  std::string why;
+  {
+    ResortRig rig(false);  // two TAPs, but fine; then one
+    rig.bus.taps.pop_back();
+    rig.bus.taps.pop_back();
+    rig.bus.taps = {{0x1201, 1}};
+    give_radio(rig.bus, 0x1201, radio(15, 0x7E21, 0x30));
+    rig.start();
+    CHECK(!rig.core->request_resort(false, why) && why == "a re-sort needs at least two TAPs");
+  }
+  {
+    ResortRig rig;
+    rig.start(nullptr, false);
+    CHECK(!rig.core->request_resort(false, why) && why.find("table writes are off") != std::string::npos);
+    CHECK(rig.core->request_resort(true, why));  // a dry run needs no writes
+    rig.run(20000);
+    CHECK(rig.core->status().resort.finished && rig.core->status().resort.ok && rig.core->status().resort.dry_run);
+    CHECK(!rig.core->status().resort.dry_frames.empty());
+    CHECK(rig.files.empty());
+    CHECK(rig.bus.index_of(0x0B00, 0x00) < 0);
+    CHECK(no_key_in(rig.lines));
+  }
+  {
+    ResortRig rig;
+    give_radio(rig.bus, 0x1203, radio(20, 0x1A2B, 0x50));  // its own key
+    rig.start();
+    CHECK(!rig.core->request_resort(false, why) && why.find("TAP 1203's key isn't the one the others share") == 0);
+  }
+  {
+    ResortRig rig;
+    rig.start();
+    rig.bus.at(0x1203)->up = false;
+    rig.run(30000);
+    CHECK(!rig.core->request_resort(false, why) && why.find("TAP 1203 isn't answering") == 0);
+  }
+  {
+    ResortRig rig;
+    rig.start();
+    CHECK(rig.core->request_discovery(false));
+    CHECK(!rig.core->request_resort(false, why) && why == "the discovery window is held closed; no optimizer could join");
+  }
+  {
+    ResortRig rig;
+    rig.start();
+    CHECK(rig.core->request_pv(true));
+    rig.run(2000);
+    CHECK(!rig.core->request_resort(false, why) && why.find("PV output is held off") == 0);
+  }
+  {
+    ResortRig rig;
+    rig.start();
+    CHECK(rig.core->request_resort(false, why));
+    CHECK(!rig.core->request_resort(false, why) && why == "a re-sort is already running");
+  }
+}
+
+static void test_resort_runs_and_waits() {
+  ResortRig rig;
+  rig.start();
+  std::string why;
+  CHECK(rig.core->request_resort(false, why));
+  rig.run(60000);
+  int pvoff = rig.bus.index_of(0x0B00, 0x00);
+  CHECK(pvoff >= 0 && rig.saved_at >= 0 && rig.saved_at <= pvoff);
+  CHECK(!rig.files.empty() && rig.files[0] && rig.files[0]->phase == "writing");
+  if (!rig.files.empty() && rig.files[0]) {
+    CHECK(rig.files[0]->waited.size() == 40);
+    CHECK(rig.files[0]->old_networks.size() == 3);
+  }
+  CHECK(rig.files.back() && rig.files.back()->phase == "waiting");
+  const MultiTap::One *a = rig.bus.at(0x1201), *b = rig.bus.at(0x1202), *c = rig.bus.at(0x1203);
+  CHECK(a && b && c);
+  if (!a || !b || !c) return;
+  CHECK(a->cfg.pan != 0x7E21 && b->cfg.pan != 0x5A5A && c->cfg.pan != 0x1A2B);
+  CHECK(a->cfg.key == b->cfg.key && a->cfg.key == c->cfg.key && a->cfg.key[0] != 0x30);
+  for (auto &t : rig.bus.taps) {
+    CHECK(t.records.size() == 40);
+    CHECK(t.sessions.size() >= 2 && t.sessions[t.sessions.size() - 1] == 0x01);
+  }
+  auto st = rig.core->status().resort;
+  CHECK(st.state == "waiting" && st.can_put_back);
+  CHECK(st.missing.size() == 40);
+  CHECK(no_key_in(rig.lines));
+}
+
+static void test_resort_trims_at_window_close_and_finishes() {
+  ResortRig rig;
+  rig.start();
+  std::string why;
+  CHECK(rig.core->request_resort(false, why));
+  rig.run(60000);
+  for (uint16_t id = 0x10; id < 0x24; id++) rig.bus.join(0x1201, id);
+  for (uint16_t id = 0x24; id < 0x38; id++) rig.bus.join(0x1203, id);
+  rig.close_windows();
+  rig.run(2 * MasterCore::RESORT_READ_MS + 60000);
+  std::vector<uint16_t> a, c;
+  for (uint16_t id = 0x10; id < 0x24; id++) a.push_back(id);
+  for (uint16_t id = 0x24; id < 0x38; id++) c.push_back(id);
+  CHECK(rig.bus.ids_on(0x1201) == a);
+  CHECK(rig.bus.ids_on(0x1202).empty());
+  CHECK(rig.bus.ids_on(0x1203) == c);
+  CHECK(!rig.files.empty() && !rig.files.back());  // deleted
+  auto st = rig.core->status().resort;
+  CHECK(st.state == "idle" && st.finished && st.ok);
+  CHECK(rig.logged("re-sort: done: 20 on TAP 1201, 0 on TAP 1202, 20 on TAP 1203"));
+  CHECK(rig.removed == 0);  // trimming isn't retiring
+  CHECK(no_key_in(rig.lines));
+}
+
+static void test_resort_windows_renew_despite_auto_discovery() {
+  ResortRig rig;
+  rig.start();
+  std::string why;
+  CHECK(rig.core->request_resort(false, why));
+  rig.run(60000);
+  rig.core->set_window_wanted(false);  // every optimizer reported today
+  size_t before[3];
+  for (int k = 0; k < 3; k++) before[k] = rig.bus.taps[k].renewals.size();
+  rig.close_windows();
+  rig.run(30000);
+  for (int k = 0; k < 3; k++) {
+    CHECK(rig.bus.taps[k].renewals.size() > before[k]);
+    if (!rig.bus.taps[k].renewals.empty()) CHECK(rig.bus.taps[k].renewals.back()[8] == 0x01);
+  }
+}
+
+static void test_resort_stop_waiting() {
+  ResortRig rig;
+  rig.start();
+  std::string why;
+  CHECK(!rig.core->request_resort_stop(why) && !why.empty());  // nothing to stop
+  CHECK(rig.core->request_resort(false, why));
+  rig.run(60000);
+  for (uint16_t id = 0x10; id < 0x22; id++) rig.bus.join(0x1201, id);  // 0x22 and 0x23 never join
+  for (uint16_t id = 0x24; id < 0x38; id++) rig.bus.join(0x1203, id);
+  rig.close_windows();
+  rig.run(2 * MasterCore::RESORT_READ_MS + 60000);
+  CHECK(rig.core->status().resort.missing.size() == 2);
+  CHECK(rig.core->request_resort_stop(why));
+  rig.run(2000);
+  CHECK(!rig.files.empty() && !rig.files.back());
+  CHECK(rig.logged("2 optimizers stay listed on every TAP"));
+  for (uint16_t tap : {0x1201, 0x1202, 0x1203}) {
+    auto ids = rig.bus.ids_on(tap);
+    CHECK(std::count(ids.begin(), ids.end(), 0x22) == 1 && std::count(ids.begin(), ids.end(), 0x23) == 1);
+  }
+  CHECK(rig.core->status().resort.state == "idle");
+}
+
+static void test_resort_tap_lost_mid_write() {
+  ResortRig rig;
+  rig.start();
+  rig.bus.at(0x1202)->silent_after_pv_off = true;
+  std::string why;
+  CHECK(rig.core->request_resort(false, why));
+  rig.run(60000);
+  for (auto &t : rig.bus.taps) {
+    CHECK(std::count(t.sessions.begin(), t.sessions.end(), 0x00) == 1);
+    CHECK(!t.sessions.empty() && t.sessions.back() == 0x01);
+  }
+  auto st = rig.core->status().resort;
+  CHECK(st.finished && !st.ok && st.message.find("TAP 1202") != std::string::npos);
+  CHECK(st.can_put_back);
+  CHECK(!rig.files.empty() && rig.files.back() && rig.files.back()->phase == "waiting");
+  CHECK(no_key_in(rig.lines));
+}
+
+static void test_resort_put_back() {
+  ResortRig rig;
+  rig.start();
+  std::string why;
+  CHECK(!rig.core->request_resort_put_back(false, why) && !why.empty());  // nothing to put back
+  CHECK(rig.core->request_resort(false, why));
+  rig.run(60000);
+  CHECK(rig.core->request_resort_put_back(true, why));  // a check first
+  rig.run(20000);
+  CHECK(rig.bus.at(0x1201)->cfg.pan != 0x7E21);  // nothing written
+  CHECK(rig.core->request_resort_put_back(false, why));
+  rig.run(60000);
+  CHECK(rig.bus.at(0x1201)->cfg.pan == 0x7E21 && rig.bus.at(0x1202)->cfg.pan == 0x5A5A &&
+        rig.bus.at(0x1203)->cfg.pan == 0x1A2B);
+  CHECK(rig.bus.at(0x1201)->cfg.key[0] == 0x30 && rig.bus.at(0x1203)->cfg.key[0] == 0x30);
+  CHECK(!rig.files.empty() && rig.files.back() && rig.files.back()->old_networks.empty());
+  CHECK(!rig.core->status().resort.can_put_back);
+  CHECK(rig.core->status().resort.state == "waiting");
+  CHECK(no_key_in(rig.lines));
+}
+
+static void test_resort_resume_after_cut_writes() {
+  ResortRig rig;
+  ResortFile f;
+  f.phase = "writing";
+  f.started_unix = 1;
+  for (uint16_t id = 0x10; id < 0x38; id++) {
+    mp::Bytes r = rec(static_cast<uint8_t>(id), id);
+    f.waited.push_back(mp::Bytes(r.begin(), r.begin() + 8));
+  }
+  f.old_networks = {{0x1201, radio(15, 0x7E21, 0x30)}, {0x1202, radio(18, 0x5A5A, 0x30)}, {0x1203, radio(20, 0x1A2B, 0x30)}};
+  // As a re-sort cut off in its writes leaves them: listed, nobody joined yet.
+  for (auto &t : rig.bus.taps)
+    for (auto &r : t.records) r[8] |= 0x80;
+  rig.start(&f);
+  int last_on = -1;
+  for (uint16_t tap : {0x1201, 0x1202, 0x1203}) {
+    int i = -1;
+    for (size_t k = 0; k < rig.bus.log.size(); k++)
+      if (rig.bus.log[k].id == tap && rig.bus.log[k].cmd == 0x0B00 && rig.bus.log[k].first == 0x01) {
+        i = static_cast<int>(k);
+        break;
+      }
+    CHECK(i >= 0);
+    last_on = std::max(last_on, i);
+  }
+  int first_2d = rig.bus.index_of(0x0B0F, 0x2D), first_29 = rig.bus.index_of(0x0B0F, 0x29);
+  CHECK(first_2d < 0 || first_2d > last_on);
+  CHECK(first_29 < 0 || first_29 > last_on);
+  CHECK(rig.logged("re-sort: TigoMonitor restarted during the network writes; PV on to every TAP"));
+  CHECK(!rig.files.empty() && rig.files.back() && rig.files.back()->phase == "waiting");
+  CHECK(rig.core->status().resort.state == "waiting" && rig.core->status().resort.can_put_back);
+}
+
+static void test_resort_blocks_other_changes() {
+  ResortRig rig;
+  rig.start();
+  std::string why;
+  CHECK(rig.core->request_resort(false, why));
+  rig.run(60000);
+  CHECK(!rig.core->request_table_add(tap_mac(9), 0, false, why) && why == "a re-sort is running");
+  CHECK(!rig.core->request_provision(tap_mac(3), rekey_block(), false, false, why) && why == "a re-sort is running");
+  CHECK(!rig.core->request_forget_tap(0x1203, why) && !why.empty());
+  CHECK(!rig.core->request_herd(why) && !why.empty());
+  CHECK(rig.core->request_resort_stop(why));
+}
+
 int main() {
+  test_resort_refusals();
+  test_resort_runs_and_waits();
+  test_resort_trims_at_window_close_and_finishes();
+  test_resort_windows_renew_despite_auto_discovery();
+  test_resort_stop_waiting();
+  test_resort_tap_lost_mid_write();
+  test_resort_put_back();
+  test_resort_resume_after_cut_writes();
+  test_resort_blocks_other_changes();
   test_two_taps_renew_with_known_networks();
   test_one_tap_renews_without_the_flag();
   test_a_standby_learns_the_taps_another_master_polls();

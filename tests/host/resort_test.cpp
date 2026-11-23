@@ -357,6 +357,34 @@ static void test_resort_order_three_taps() {
     CHECK(bus.taps[taps[k].tap].stored.same_settings(want[k]));
   }
   CHECK(!job.pv_off_sent());
+  CHECK(job.began());
+  CHECK(job.turn_tap() == 0);
+}
+
+// Whose turn it is (the master's check for a TAP that is lost), and whether
+// the first PV off went out (the file's keep-or-delete on a failure).
+static void test_resort_turn_and_began() {
+  std::vector<ResortTap> taps;
+  FakeTaps bus = roof(taps);
+  ResortJob job(taps, targets(taps), false, false);
+  CHECK(job.turn_tap() == 0x1201);
+  CHECK(!job.began());
+  uint8_t seq = 0;
+  for (int turn = 0; turn < 2000 && !job.wants_save(); turn++) {
+    uint16_t id = taps[turn % 3].tap;
+    Request r = job.due(id, 0, seq);
+    if (!r.cmd) continue;
+    Frame f;
+    bool ok = bus.answer(id, r, f);
+    job.on_reply(id, r, ok, f, 0);
+  }
+  CHECK(job.turn_tap() == 0);  // waiting on the save, no TAP's turn
+  job.saved(true);
+  CHECK(job.turn_tap() == 0x1201 && !job.began());
+  Request r = job.due(0x1201, 0, seq);
+  CHECK(r.cmd == CMD_SESSION && job.began());
+  ResortJob none(taps, {}, false, false);
+  CHECK(none.finished() && none.turn_tap() == 0);
 }
 
 static void test_resort_e1_names_the_others_new_networks() {
@@ -529,6 +557,7 @@ int main() {
   test_resort_trim();
   test_resort_missing();
   test_resort_order_three_taps();
+  test_resort_turn_and_began();
   test_resort_e1_names_the_others_new_networks();
   test_resort_save_comes_before_the_first_network_frame();
   test_resort_fails_after_pv_off_still_sends_pv_on();

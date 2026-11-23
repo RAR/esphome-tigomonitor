@@ -194,7 +194,7 @@ class ResortJob {
       case Step::pv_on: {
         Request r{CMD_SESSION, {static_cast<uint8_t>(step_ == Step::pv_off ? 0x00 : 0x01)}, PV_WAIT_MS};
         r.resort = true;
-        if (step_ == Step::pv_off) bracket_open_ = true;
+        if (step_ == Step::pv_off) bracket_open_ = began_ = true;
         return mark_(r);
       }
       case Step::write: return provision_(tunnel_(SUB_GATEWAY_CFG, radio_write_args(b), WRITE_WAIT_MS, seq));
@@ -318,6 +318,12 @@ class ResortJob {
   // Between the first PV off and the last PV on: a restart then owes every
   // TAP a PV on.
   bool pv_off_sent() const { return bracket_open_; }
+  // Once the first PV off has gone out: the networks may have changed.
+  bool began() const { return began_; }
+  // The TAP whose turn it is, or 0 (finished, or waiting on the save).
+  uint16_t turn_tap() const {
+    return finished() || step_ == Step::save || i_ >= taps_.size() ? 0 : taps_[i_].tap;
+  }
   Step step() const { return step_; }
   const char *step_text() const { return step_name(step_); }
   static const char *step_name(Step s) {
@@ -487,6 +493,7 @@ class ResortJob {
   size_t i_ = 0;
   bool waiting_ = false;
   bool bracket_open_ = false;
+  bool began_ = false;
   TableWalk walk_;
   std::map<uint16_t, std::vector<TableRecord>> tables_;
   std::vector<TableRecord> records_;
