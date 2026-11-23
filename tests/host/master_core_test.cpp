@@ -2737,6 +2737,51 @@ static void test_resort_stop_waiting() {
   CHECK(rig.core->status().resort.state == "idle");
 }
 
+// Stop waiting with the windows still open (the roof, 2026-11-23: pressed
+// with all 40 joined, before any window closed): each TAP is trimmed to
+// the ones that joined it, at once, and only the missing stay listed on
+// every TAP. With Allow changes off nothing can be trimmed: it just ends.
+static void test_resort_stop_waiting_trims_first() {
+  {
+    ResortRig rig;
+    rig.start();
+    std::string why;
+    CHECK(rig.core->request_resort(false, why));
+    rig.run(60000);
+    for (uint16_t id = 0x10; id < 0x22; id++) rig.bus.join(0x1201, id);  // 0x22 and 0x23 never join
+    for (uint16_t id = 0x24; id < 0x38; id++) rig.bus.join(0x1203, id);
+    rig.run(2 * MasterCore::RESORT_READ_MS);  // read, the windows still open
+    CHECK(rig.core->status().resort.missing.size() == 2);
+    CHECK(rig.core->request_resort_stop(why));
+    rig.run(2 * MasterCore::RESORT_READ_MS + 60000);
+    std::vector<uint16_t> a, b = {0x22, 0x23}, c;
+    for (uint16_t id = 0x10; id < 0x24; id++) a.push_back(id);
+    for (uint16_t id = 0x22; id < 0x38; id++) c.push_back(id);
+    CHECK(rig.bus.ids_on(0x1201) == a);
+    CHECK(rig.bus.ids_on(0x1202) == b);
+    CHECK(rig.bus.ids_on(0x1203) == c);
+    CHECK(!rig.files.empty() && !rig.files.back());
+    CHECK(rig.logged("2 optimizers stay listed on every TAP"));
+    auto st = rig.core->status().resort;
+    CHECK(st.state == "idle" && st.message == "stopped waiting");
+    CHECK(rig.removed == 0);
+  }
+  {
+    ResortRig rig;
+    rig.start();
+    std::string why;
+    CHECK(rig.core->request_resort(false, why));
+    rig.run(60000);
+    for (uint16_t id = 0x10; id < 0x24; id++) rig.bus.join(0x1201, id);
+    rig.run(2 * MasterCore::RESORT_READ_MS);
+    rig.core->set_table_writes(false);
+    CHECK(rig.core->request_resort_stop(why));
+    rig.run(5000);
+    CHECK(rig.core->status().resort.state == "idle");
+    CHECK(rig.bus.ids_on(0x1202).size() == 40);  // nothing trimmed
+  }
+}
+
 static void test_resort_tap_lost_mid_write() {
   ResortRig rig;
   rig.start();
@@ -3026,6 +3071,7 @@ int main() {
   test_resort_runs_and_waits();
   test_resort_trims_at_window_close_and_finishes();
   test_resort_trims_every_tap_whose_window_closed();
+  test_resort_stop_waiting_trims_first();
   test_resort_an_unreadable_table_frees_the_windows();
   test_resort_windows_renew_despite_auto_discovery();
   test_resort_stop_waiting();

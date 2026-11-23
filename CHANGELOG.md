@@ -18,7 +18,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ones that joined it. Production drops while they rejoin, so run it at low
   sun. It waits as long as it takes, and until every optimizer is back the
   old networks can be put back with a button, which lists every optimizer
-  again. One that stops part-way (a TAP that doesn't answer, a restart)
+  again. **Stop waiting** trims each TAP at once and leaves only the
+  optimizers still missing listed everywhere. One that stops part-way (a TAP that doesn't answer, a restart)
   waits for you to put the old networks back or keep the TAPs as they are.
   Replace a TAP lists the old TAP's optimizers on the new one before the
   re-sort, so it finds them. It needs **Allow changes to the TAPs**. On a

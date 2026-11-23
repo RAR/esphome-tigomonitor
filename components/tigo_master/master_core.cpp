@@ -465,6 +465,27 @@ void MasterCore::sync_resort_status_() {
   status_.resort.missing = missing;
 }
 
+void MasterCore::resort_stop_end_(bool part_way) {
+  size_t missing;
+  {
+    std::lock_guard<std::mutex> lock(mu_);
+    missing = status_.resort.missing.size();
+  }
+  resort_finishing_ = false;
+  resort_save_(nullptr);
+  if (part_way)
+    LOGW("bus master: re-sort: stopped; the old networks are discarded, and each TAP keeps the network it has now");
+  else
+    LOGI("bus master: re-sort: stopped waiting; %zu optimizer%s stay listed on every TAP", missing,
+         missing == 1 ? "" : "s");
+  resort_two_logged_.clear();
+  std::lock_guard<std::mutex> lock(mu_);
+  resort_file_.reset();
+  status_.resort.state = "idle";
+  status_.resort.can_put_back = false;
+  status_.resort.message = "stopped waiting";
+}
+
 // While a re-sort waits: a trim on a TAP whose window has closed, and the
 // end once every listed optimizer has joined a TAP. Bus thread.
 void MasterCore::resort_wait_(uint32_t now_ms) {
@@ -478,6 +499,7 @@ void MasterCore::resort_wait_(uint32_t now_ms) {
   }
   if (!file || resort_job_ || file->phase != "waiting") {
     for (auto &t : taps_) t->resort_trim_owed = false;
+    resort_finishing_ = false;
     return;
   }
   if (resort_trim_tap_ && !table_busy) {  // the trim has finished: read again
@@ -511,6 +533,8 @@ void MasterCore::resort_wait_(uint32_t now_ms) {
   }
   if (!table_writes_on_)
     for (auto &t : taps_) t->resort_trim_owed = false;
+  // Stopping, and no trim can be sent now: it ends as it is.
+  if (resort_finishing_ && !resort_trim_tap_ && !table_busy && (lost || !table_writes_on_)) return resort_stop_end_(false);
   if (!all || resort_trim_tap_ || table_busy || !table_writes_on_) return;
   // Joined on two TAPs: left on both, said once.
   std::map<master::Bytes, int> joined_on;
@@ -523,7 +547,8 @@ void MasterCore::resort_wait_(uint32_t now_ms) {
   for (auto &t : taps_) {
     if (!t->resort_trim_owed) continue;
     const master::DiscoveryWindow &w = t->window.last();
-    if (!t->window.ever_read() || (w.running && w.remaining_s > 0)) continue;  // trimmed when it closes, as the CCA did
+    // Trimmed when it closes, as the CCA did; at once when stopping.
+    if (!resort_finishing_ && (!t->window.ever_read() || (w.running && w.remaining_s > 0))) continue;
     const std::vector<master::Bytes> &macs = trim[t->id];
     {
       std::lock_guard<std::mutex> lock(mu_);
@@ -537,6 +562,7 @@ void MasterCore::resort_wait_(uint32_t now_ms) {
     return;
   }
   if (owed) return;
+  if (resort_finishing_) return resort_stop_end_(false);
   if (!master::resort_missing(tables, resort_macs_(file->waited)).empty()) return;
   resort_save_(nullptr);
   std::string counts;
@@ -1856,28 +1882,26 @@ void MasterCore::tick_(uint32_t now_ms) {
       }
     }
     if (stop) {
-      size_t missing;
-      {
-        std::lock_guard<std::mutex> lock(mu_);
-        missing = status_.resort.missing.size();
-      }
-      bool part_way;
+      bool part_way, writes;
       {
         std::lock_guard<std::mutex> lock(mu_);
         part_way = resort_file_ && resort_file_->phase == "stopped";
+        writes = table_writes_on_;
       }
-      resort_save_(nullptr);
-      if (part_way)
-        LOGW("bus master: re-sort: stopped; the old networks are discarded, and each TAP keeps the network it has now");
-      else
-        LOGI("bus master: re-sort: stopped waiting; %zu optimizer%s stay listed on every TAP", missing,
-             missing == 1 ? "" : "s");
-      resort_two_logged_.clear();
-      std::lock_guard<std::mutex> lock(mu_);
-      resort_file_.reset();
-      status_.resort.state = "idle";
-      status_.resort.can_put_back = false;
-      status_.resort.message = "stopped waiting";
+      bool lost = false;
+      for (const auto &t : taps_) lost = lost || t->lost;
+      // Waiting, the owner stops it: each TAP is trimmed to the ones that
+      // joined it first, without waiting for its window to close, so only
+      // the missing stay listed everywhere. One that stopped part-way, or
+      // with no trim possible (Allow changes off, a TAP lost), just ends.
+      if (!part_way && writes && !lost) {
+        resort_finishing_ = true;
+        LOGI("bus master: re-sort: stopping: each TAP trimmed to the optimizers that joined it first");
+        std::lock_guard<std::mutex> lock(mu_);
+        status_.resort.message = "stopping: each TAP trimmed to the optimizers that joined it first";
+      } else {
+        resort_stop_end_(part_way);
+      }
     }
     resort_wait_(now_ms);
   }

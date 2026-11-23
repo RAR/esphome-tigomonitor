@@ -681,6 +681,7 @@ class MasterCore {
   bool resort_running_ = false;              // under mu_: pending or resort_job_
   std::optional<ResortFile> resort_file_;    // under mu_: as last saved
   bool resort_stop_wanted_ = false;          // under mu_
+  bool resort_finishing_ = false;            // Stop waiting: every TAP trimmed now, then the end (bus thread)
   bool resort_resume_writing_ = false;       // a restart in the writes: PV on owed to every TAP
   bool resort_bracket_open_ = false;         // the job has sent PV off and not yet PV on to every TAP
   bool resort_pv_cancel_ = false;            // under mu_: the owner's PV off, for a job that hasn't begun
@@ -696,6 +697,7 @@ class MasterCore {
       const std::vector<esphome::tigo_monitor::master::TableRecord> &records);
   void settle_resort_(uint32_t now_ms);
   void resort_wait_(uint32_t now_ms);  // the waiting: reads, trims, the end
+  void resort_stop_end_(bool part_way);  // Stop waiting's end: the file deleted, idle
   void sync_resort_status_();          // the waiting's counts, from the last reads
   // Every TAP's queries' answers, kept across a restart of them (a
   // takeover, a TAP power cut); under mu_.
