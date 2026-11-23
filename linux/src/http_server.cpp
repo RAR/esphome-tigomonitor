@@ -612,6 +612,12 @@ void HttpServer::routes_() {
                        {"last_heard_s", heard ? json(now_s - l.last_heard_s) : json(nullptr)},
                        {"last_join_unix", l.last_join_s ? json(l.last_join_s) : json(nullptr)}});
     }
+    // And every named TAP, though nothing reports through it yet (one just
+    // added), so Topology can place it and call it by its name.
+    for (const auto &kv : names) {
+      unsigned long id = strtoul(kv.first.c_str(), nullptr, 16);
+      if (kv.first.size() == 4 && id) tap_ids.insert(static_cast<uint16_t>(id));
+    }
     json taps = json::array();
     for (uint16_t t : tap_ids) {
       char id[8];
@@ -1608,6 +1614,10 @@ void HttpServer::routes_() {
                                       {"renewals", t.renewals},
                                       {"lost", t.tap_lost},
                                       {"last_reply_unix", t.last_reply_unix},
+                                      // Its key against the others' (never the key) and
+                                      // whether it has been told their networks.
+                                      {"key", t.key},
+                                      {"known_networks", t.known_networks},
                                       {"pgw", [&t] {
                                          json pool = json::array();
                                          for (uint16_t p : t.pgw_pool) pool.push_back(hex4(p));
@@ -2004,6 +2014,9 @@ void HttpServer::routes_() {
     // channel and keeps its PAN and key.
     int profile = j.contains("profile") && j["profile"].is_number_integer() ? j["profile"].get<int>() : 0;
     bool keep_network = j.value("keep_network", false);
+    // "shared_key": the key the other TAPs share (one per site), not a new
+    // one; with keep_network, the re-key. Refused if they disagree.
+    bool shared_key = j.value("shared_key", false);
     // "store": the bench only; the gateway Store after the check (tap_config.h).
     bool store = j.value("store", false);
     if (profile && profile != 40 && profile != 75 && profile != 120 && profile != 300) {
@@ -2013,7 +2026,7 @@ void HttpServer::routes_() {
     std::string why, given;
     int code = ctx_.request_provision
                    ? ctx_.request_provision(mac, static_cast<uint16_t>(channel), static_cast<uint16_t>(pan),
-                                            identify, reset, dry, profile, keep_network, store, why, given)
+                                            identify, reset, dry, profile, keep_network, shared_key, store, why, given)
                    : 409;
     if (code == 200) send_json(res, {{"started", true}, {"dry_run", dry}, {"reset", reset}, {"given", given}});
     else send_json(res, {{"error", why.empty() ? "not running the bus" : why}}, code);

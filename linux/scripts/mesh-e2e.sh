@@ -99,6 +99,12 @@ expect "not a TAP address" "$(post 18091 /api/taps/name '{"tap": "12", "name": "
 expect "a name too long" "$(post 18091 /api/taps/name '{"tap": "1201", "name": "'"$(printf 'x%.0s' $(seq 33))"'"}')" 400
 get 18091 /api/mesh > "$out/mesh.json"
 expect "the map has its name" "$(q "d['taps']")" "[{'id': '1201', 'name': 'Garage'}]"
+# A TAP no optimizer reports through yet (one just added) is listed by its
+# name too, so Topology can place it and call it by it.
+expect "name a TAP nothing reports through" "$(post 18091 /api/taps/name '{"tap": "1209", "name": "Spare"}')" 200
+get 18091 /api/mesh > "$out/mesh.json"
+expect "listed with its name" "$(q "d['taps']")" "[{'id': '1201', 'name': 'Garage'}, {'id': '1209', 'name': 'Spare'}]"
+expect "and its name cleared again" "$(post 18091 /api/taps/name '{"tap": "1209", "name": ""}')" 200
 # A restart keeps where each optimizer joined: joins come only at sunrise.
 # And the day of signal history, which would otherwise start empty.
 rssi_before="$(q "{a: n[a]['rssi_24h'][-1] for a in sorted(n)}")"

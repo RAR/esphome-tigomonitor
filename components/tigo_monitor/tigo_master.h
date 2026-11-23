@@ -22,6 +22,7 @@
 #include "tigo_protocol.h"
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <cstdint>
 #include <map>
@@ -137,6 +138,70 @@ inline bool parse_tunnel_reply(const Bytes &payload, TunnelReply &out) {
   out.seq = payload[4];
   out.data.assign(payload.begin() + 5, payload.end());
   return true;
+}
+
+// ---- known networks (0xE1 SetKnownNetworks) --------------------------------
+
+// Each TAP is told the other TAPs' networks so an optimizer can move between
+// them: the CCA's shape (the analyst's reading of its updater, 2026-11-22,
+// matching every one in the roof's two-TAP capture): a count of the other
+// TAPs, three zeros, then per TAP its channel, a zero, its PAN and its
+// 16-byte key. It sets the TAP's whole list. The reply's first data byte is
+// a status; the rest echoes the TAP's own network and isn't checked.
+static const uint8_t SUB_KNOWN_NETWORKS = 0xE1;
+static const uint8_t SUB_KNOWN_NETWORKS_REPLY = 0xE2;
+static const size_t KNOWN_NETWORKS_MAX = 16;
+static const size_t KNOWN_NETWORK_RECORD = 20;
+
+struct KnownNetwork {
+  uint8_t channel = 0;
+  uint16_t pan = 0;
+  std::array<uint8_t, 16> key{};
+};
+
+// 1 to KNOWN_NETWORKS_MAX networks; the caller refuses more.
+inline Bytes known_networks_args(const std::vector<KnownNetwork> &others) {
+  Bytes a = {static_cast<uint8_t>(others.size()), 0x00, 0x00, 0x00};
+  for (const auto &n : others) {
+    a.push_back(n.channel);
+    a.push_back(0x00);
+    a.push_back(static_cast<uint8_t>(n.pan >> 8));
+    a.push_back(static_cast<uint8_t>(n.pan));
+    a.insert(a.end(), n.key.begin(), n.key.end());
+  }
+  return a;
+}
+
+// Exactly that shape: count 1..16, three zeros, count records, each with a
+// zero after a channel of 11..26.
+inline bool is_known_networks_args(const Bytes &args) {
+  if (args.size() < 4 || args[0] < 1 || args[0] > KNOWN_NETWORKS_MAX || args[1] || args[2] || args[3]) return false;
+  if (args.size() != 4 + KNOWN_NETWORK_RECORD * args[0]) return false;
+  for (size_t i = 0; i < args[0]; i++) {
+    const uint8_t *r = &args[4 + KNOWN_NETWORK_RECORD * i];
+    if (r[0] < 11 || r[0] > 26 || r[1]) return false;
+  }
+  return true;
+}
+
+// The status byte of a 0xE2 reply, or -1 for anything else.
+inline int known_networks_status(const Frame &reply) {
+  TunnelReply t;
+  if (reply.cmd != CMD_TUNNEL_REPLY || !parse_tunnel_reply(reply.payload, t) || t.sub != SUB_KNOWN_NETWORKS_REPLY ||
+      t.data.empty())
+    return -1;
+  return t.data[0];
+}
+
+inline std::string known_networks_status_text(int status) {
+  switch (status) {
+    case -1: return "no answer";
+    case 0: return "accepted";
+    case 1: return "refused: an invalid channel";
+    case 2: return "refused: an invalid network ID";
+    case 3: return "refused: no room for another network";
+    default: return "refused (status " + std::to_string(status) + ")";
+  }
 }
 
 // ---- the discovery window --------------------------------------------------
@@ -1874,9 +1939,10 @@ inline Allow classify_request(uint16_t cmd, const Bytes &payload) {
       return is_set_table_args(args) ? Allow::table_write : Allow::never;
     case SUB_ERASE_FLASH:  // the whole table, exactly as the CCA sent it
       return args == Bytes{0xBA, 0xBE} ? Allow::table_write : Allow::never;
+    case SUB_KNOWN_NETWORKS:  // SetKnownNetworks, only the CCA's shape
+      return is_known_networks_args(args) ? Allow::table_write : Allow::never;
     case 0x1D:  // ResetNode
     case 0x13:  // PeriodicCfg Write
-    case 0xE1:  // SetKnownNetworks
     case 0xE5:  // EraseStackTrace
     case 0x1B:  // unnamed in the CCA's UI; its neighbours are all writes
     // The CCA's other messages to an optimizer besides SetPgw (0x41): Own star,
