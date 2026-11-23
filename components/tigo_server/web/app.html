@@ -4748,9 +4748,18 @@
     }
   });
   // What the TAPs hold: one TAP's window, or with several, theirs summed
-  // (those read so far). null until one is read.
+  // (those read so far). null until one is read. While a re-sort waits it
+  // lists every optimizer on every TAP, so a sum would count each several
+  // times: its own counts are used, by MAC, each TAP's joined and the ones
+  // still missing.
   function setupCounts(m) {
     const taps = (m && m.taps) || [];
+    const rs = m && m.resort;
+    if (taps.length > 1 && rs && (rs.state === 'waiting' || rs.state === 'stopped') && Array.isArray(rs.missing) &&
+        (rs.joined || []).length) {
+      const joined = rs.joined.reduce((n, j) => n + j.count, 0);
+      return { in_table: joined + rs.missing.length, joined, never: rs.missing.length };
+    }
     if (taps.length > 1) {
       const read = taps.filter(t => t.discovery && t.discovery.read);
       return read.length ? { in_table: read.reduce((n, t) => n + t.discovery.node_count, 0),
@@ -5099,7 +5108,7 @@
       // Your system: joined and reporting, joined but silent, listed and never joined.
       const silent = d.opts.filter(o => o.quiet);
       const never = d.opts.filter(o => /^8/.test(o.addr));
-      const nNever = Math.max(never.length, w.in_table - w.joined);
+      const nNever = w.never != null ? w.never : Math.max(never.length, w.in_table - w.joined);
       const nSilent = Math.min(silent.length, w.joined);
       const nOk = Math.max(0, w.joined - nSilent);
       const names = list => list.length && list.length <= 3 ? ` (${list.map(o => topoEscape(o.placed ? o.name : o.addr)).join(', ')})` : '';
