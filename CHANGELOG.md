@@ -100,6 +100,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A network bridge from the Config Builder or our examples builds on
+  current ESPHome again.** It forwarded the bus with stream_server, which
+  calls a function ESPHome removed in 2026.7. It still built while the logger
+  stayed at `INFO`, the level our configs set, and failed at ESPHome's default,
+  `DEBUG` (#186). Bridges now use ESPHome's own `uart_tcp`, so they need
+  ESPHome 2026.11 or later, and serve one client at a time. **To update a
+  bridge, build it again from the Config Builder;** in Home Assistant its
+  "Tigo Bridge Clients" sensor gives way to "Tigo Bridge Disconnects". All
+  four build on ESPHome 2026.11.1; none has run on a bus with `uart_tcp` yet.
+
 - **The Mesh map no longer draws an optimizer through one on another TAP
   (Raspberry Pi and ESP32).** An optimizer names its parent by an ID its
   TAP hands out, and each TAP hands them out on its own network, so two

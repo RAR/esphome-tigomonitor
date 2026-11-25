@@ -1,8 +1,8 @@
 // site/bridge.js
 // The Config Builder's second kind of build: a network bridge. The board
-// decodes nothing; stream_server passes every byte from the RS485 bus to
-// whoever connects on port 6638, and TigoMonitor on a Pi, a Linux machine or
-// Home Assistant reads the bus from there.
+// decodes nothing; ESPHome's own uart_tcp passes every byte from the RS485
+// bus to whoever connects on port 6638, one client at a time, and TigoMonitor
+// on a Pi, a Linux machine or Home Assistant reads the bus from there.
 //
 // Each board here mirrors an example file in boards/ (test/bridge.test.mjs
 // checks every block that touches the bus against it). Only boards whose
@@ -138,14 +138,19 @@ export function toBridgeYaml(cfg) {
   L.push(`# choose "Network bridge (TCP)" and enter  ${cfg.name}.local:6638  (or this`);
   L.push("# board's IP: mDNS doesn't reach every network, and the IP always works).");
   L.push('#');
-  L.push('# READ-ONLY, IN HARDWARE. stream_server writes whatever a client sends to the');
-  L.push('# UART, so the UART below has no tx_pin, and the switch block holds the');
-  L.push("# transceiver's driver off. Keep both as they are.");
+  L.push('# READ-ONLY, IN HARDWARE. uart_tcp writes whatever a client sends to the UART,');
+  L.push("# so the UART below has no tx_pin, and the switch block holds the transceiver's");
+  L.push('# driver off. Keep both as they are.');
+  L.push('#');
+  L.push('# uart_tcp serves one client at a time: while TigoMonitor is connected, nothing');
+  L.push('# else can read the bus here.');
   L.push('');
 
   L.push('esphome:');
   L.push(`${I(1)}name: ${cfg.name}`);
   L.push(`${I(1)}friendly_name: "Tigo Bridge"`);
+  L.push(`${I(1)}# uart_tcp, below, is built into ESPHome from 2026.11.`);
+  L.push(`${I(1)}min_version: 2026.11.0`);
   L.push('');
 
   L.push('esp32:');
@@ -163,11 +168,6 @@ export function toBridgeYaml(cfg) {
   L.push(`${I(3)}# The UART ISR from IRAM, so bytes are not dropped while flash is busy.`);
   L.push(`${I(3)}CONFIG_UART_ISR_IN_IRAM: "y"`);
   L.push(`${I(3)}CONFIG_LOG_DEFAULT_LEVEL_INFO: "y"`);
-  L.push('');
-
-  L.push('external_components:');
-  L.push(`${I(1)}- source: github://oxan/esphome-stream-server`);
-  L.push(`${I(2)}components: [stream_server]`);
   L.push('');
 
   if (b.ethernet) {
@@ -245,21 +245,23 @@ export function toBridgeYaml(cfg) {
   L.push(`${I(1)}id: tigo_uart`);
   L.push(`${I(1)}rx_pin: ${b.rxPin}  # ${b.rxComment}`);
   L.push(`${I(1)}baud_rate: 38400`);
-  L.push(`${I(1)}rx_buffer_size: 2048`);
+  L.push(`${I(1)}# Bytes wait here while the network is slow. With uart_tcp's own 1 KB that's`);
+  L.push(`${I(1)}# 6 KB; 38400 baud is ~3.8 kB/s, so it covers about a second and a half.`);
+  L.push(`${I(1)}rx_buffer_size: 5120`);
   L.push('');
 
-  L.push('stream_server:');
-  L.push(`${I(1)}uart_id: tigo_uart`);
-  L.push(`${I(1)}port: 6638`);
-  L.push(`${I(1)}# Bytes sit here while the network is slow; 38400 baud is ~3.8 kB/s, so`);
-  L.push(`${I(1)}# this covers about a second.`);
-  L.push(`${I(1)}buffer_size: 4096`);
+  L.push('uart_tcp:');
+  L.push(`${I(1)}- id: tigo_tcp`);
+  L.push(`${I(2)}uart_id: tigo_uart`);
+  L.push(`${I(2)}role: server`);
+  L.push(`${I(2)}port: 6638`);
   L.push('');
 
   L.push('binary_sensor:');
   L.push(`${I(1)}- platform: status`);
   L.push(`${I(2)}name: "Tigo Bridge Status"`);
-  L.push(`${I(1)}- platform: stream_server`);
+  L.push(`${I(1)}- platform: uart_tcp`);
+  L.push(`${I(2)}uart_tcp_id: tigo_tcp`);
   L.push(`${I(2)}connected:`);
   L.push(`${I(3)}name: "Tigo Bridge Client Connected"`);
   L.push('');
@@ -270,9 +272,10 @@ export function toBridgeYaml(cfg) {
     L.push(`${I(2)}name: "Tigo Bridge WiFi Signal"`);
     L.push(`${I(2)}update_interval: 60s`);
   }
-  L.push(`${I(1)}- platform: stream_server`);
-  L.push(`${I(2)}connection_count:`);
-  L.push(`${I(3)}name: "Tigo Bridge Clients"`);
+  L.push(`${I(1)}- platform: uart_tcp`);
+  L.push(`${I(2)}uart_tcp_id: tigo_tcp`);
+  L.push(`${I(2)}disconnects:`);
+  L.push(`${I(3)}name: "Tigo Bridge Disconnects"`);
   L.push('');
   return L.join('\n');
 }

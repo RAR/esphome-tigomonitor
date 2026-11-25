@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""A network bridge for tests: serves a bus capture over TCP, as stream_server
-does on an ESP32. Each connection gets the whole file and is then closed, so a
+"""A network bridge for tests: serves a bus capture over TCP, as uart_tcp does
+on an ESP32. Each connection gets the whole file and is then closed, so a
 second connection shows the daemon reconnecting. Counts every byte a client
 sends, which must stay 0: the daemon only ever reads.
 

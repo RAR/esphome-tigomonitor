@@ -9,10 +9,12 @@
 # enter  tigo-bridge.local:6638  (or this board's IP: mDNS doesn't reach every
 # network, and the IP always works).
 #
-# stream_server (https://github.com/oxan/esphome-stream-server) does the
-# forwarding: every byte the UART receives goes to each connected client.
+# ESPHome's own uart_tcp (built in from ESPHome 2026.11) does the forwarding:
+# every byte the UART receives goes to the connected client. It serves one
+# client at a time, so while TigoMonitor is connected nothing else can read
+# the bus here.
 #
-# READ-ONLY, IN HARDWARE. stream_server also writes whatever a client sends to
+# READ-ONLY, IN HARDWARE. uart_tcp also writes whatever a client sends to
 # the UART. To keep any of that off the roof bus, the UART below has no tx_pin,
 # so there is nowhere for a write to go. tigomonitord never sends anything
 # either; this covers any other program that connects to port 6638.
@@ -32,6 +34,8 @@
 esphome:
   name: tigo-bridge
   friendly_name: "Tigo Bridge"
+  # uart_tcp, below, is built into ESPHome from 2026.11.
+  min_version: 2026.11.0
 
 esp32:
   board: esp32-s3-devkitc-1
@@ -44,10 +48,6 @@ esp32:
       # The UART ISR from IRAM, so bytes are not dropped while flash is busy.
       CONFIG_UART_ISR_IN_IRAM: "y"
       CONFIG_LOG_DEFAULT_LEVEL_INFO: "y"
-
-external_components:
-  - source: github://oxan/esphome-stream-server
-    components: [stream_server]
 
 wifi:
   ssid: "YOUR_WIFI_SSID"
@@ -95,19 +95,21 @@ uart:
   id: tigo_uart
   rx_pin: GPIO18         # no tx_pin: see the read-only note at the top
   baud_rate: 38400
-  rx_buffer_size: 2048
+  # Bytes wait here while the network is slow. With uart_tcp's own 1 KB that's
+  # 6 KB; 38400 baud is ~3.8 kB/s, so it covers about a second and a half.
+  rx_buffer_size: 5120
 
-stream_server:
-  uart_id: tigo_uart
-  port: 6638
-  # Bytes sit here while Wi-Fi is slow; 38400 baud is ~3.8 kB/s, so this
-  # covers about a second.
-  buffer_size: 4096
+uart_tcp:
+  - id: tigo_tcp
+    uart_id: tigo_uart
+    role: server
+    port: 6638
 
 binary_sensor:
   - platform: status
     name: "Tigo Bridge Status"
-  - platform: stream_server
+  - platform: uart_tcp
+    uart_tcp_id: tigo_tcp
     connected:
       name: "Tigo Bridge Client Connected"
 
@@ -115,6 +117,7 @@ sensor:
   - platform: wifi_signal
     name: "Tigo Bridge WiFi Signal"
     update_interval: 60s
-  - platform: stream_server
-    connection_count:
-      name: "Tigo Bridge Clients"
+  - platform: uart_tcp
+    uart_tcp_id: tigo_tcp
+    disconnects:
+      name: "Tigo Bridge Disconnects"

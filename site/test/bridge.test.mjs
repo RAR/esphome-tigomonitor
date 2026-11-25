@@ -38,7 +38,7 @@ function blocks(yaml) {
 // api: and ota: differ on purpose: the builder fills in the user's network and
 // a real key.
 const HARDWARE_BLOCKS = ['esp32', 'external_components', 'ethernet', 'switch', 'safe_mode', 'uart',
-  'stream_server', 'logger', 'binary_sensor', 'sensor'];
+  'uart_tcp', 'logger', 'binary_sensor', 'sensor'];
 
 test('there is a bridge for each example bridge file in boards/, and no other', () => {
   const examples = readdirSync(resolve(ROOT, 'boards'))
@@ -52,7 +52,7 @@ for (const b of BRIDGE_BOARDS) {
   test(`${b.id}: the bus, chip and stream blocks match ${b.example}`, () => {
     const want = blocks(readFileSync(resolve(ROOT, b.example), 'utf8'));
     const got = blocks(toBridgeYaml(assembleBridge(b, form)));
-    for (const k of ['esp32', 'external_components', 'switch', 'uart', 'stream_server']) {
+    for (const k of ['esp32', 'switch', 'uart', 'uart_tcp']) {
       assert.ok(want[k], `${b.example} has no ${k}: block`);
     }
     for (const k of HARDWARE_BLOCKS) assert.equal(got[k], want[k], `${k}: differs from ${b.example}`);
@@ -91,6 +91,27 @@ for (const b of BRIDGE_BOARDS) {
       'wifi_ssid: net\nwifi_password: pw\napi_encryption_key: KEY==\nota_password: ota\n');
   });
 }
+
+// oxan's stream_server, which the bridges used to forward the bus, calls a
+// function ESPHome removed in 2026.7; it built only while the logger stayed at
+// INFO (discussion #186). ESPHome 2026.11 has uart_tcp built in.
+test('a bridge forwards the bus with ESPHome\'s own uart_tcp, and needs ESPHome 2026.11', () => {
+  for (const b of BRIDGE_BOARDS) {
+    for (const [what, y] of [['builder', toBridgeYaml(assembleBridge(b, form))],
+      [b.example, readFileSync(resolve(ROOT, b.example), 'utf8')]]) {
+      const got = blocks(y);
+      assert.equal(got.external_components, undefined, `${b.id} (${what}): an external component`);
+      // What ESPHome reads; a comment may still say what a bridge used before.
+      assert.doesNotMatch(Object.values(got).join('\n'), /stream_server|stream-server/, `${b.id} (${what}): stream_server`);
+      assert.match(got.esphome, /^  min_version: 2026\.11\.0$/m, `${b.id} (${what}): min_version`);
+      assert.equal(got.uart_tcp, 'uart_tcp:\n  - id: tigo_tcp\n    uart_id: tigo_uart\n    role: server\n    port: 6638',
+        `${b.id} (${what}): uart_tcp`);
+      // uart_tcp holds 1 KB; with the UART's buffer that's 6 KB, about 1.6 s at
+      // 38400 baud, as stream_server's 4 KB plus the UART's 2 KB were.
+      assert.match(got.uart, /^  rx_buffer_size: 5120$/m, `${b.id} (${what}): rx_buffer_size`);
+    }
+  }
+});
 
 test('a bridge is named tigo-bridge unless the form names it', () => {
   const b = BRIDGE_BOARDS[0];
