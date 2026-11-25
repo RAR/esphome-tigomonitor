@@ -18,14 +18,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ones that joined it. Production drops while they rejoin, so run it at low
   sun. It waits as long as it takes, and until every optimizer is back the
   old networks can be put back with a button, which lists every optimizer
-  again. **Stop waiting** trims each TAP at once and leaves only the
-  optimizers still missing listed everywhere. One that stops part-way (a TAP that doesn't answer, a restart)
-  waits for you to put the old networks back or keep the TAPs as they are.
-  Replace a TAP lists the old TAP's optimizers on the new one before the
-  re-sort, so it finds them. It needs **Allow changes to the TAPs**. On a
-  roof with three TAPs and 40 optimizers (2026-11-23) all 40 rejoined in
-  12 minutes the first time and in under 10 the second, when 22 moved to
-  the TAP that had none.
+  again; that hasn't been tried on a roof yet. **Stop waiting** trims each
+  TAP at once and leaves only the optimizers still missing listed
+  everywhere; with Allow changes off, or a TAP not answering, it ends
+  without trimming. One that stops part-way (a TAP that doesn't answer, a
+  restart) waits for you to put the old networks back or keep the TAPs as
+  they are. Replace a TAP lists the old TAP's optimizers on the new one
+  before the re-sort, so it finds them. It needs **Allow changes to the
+  TAPs**. On a roof with three TAPs and 40 optimizers (2026-11-23) all 40
+  rejoined in 12 minutes the first time and in under 10 the second, when 22
+  moved to the TAP that had none. Over the next full day the 40 missed
+  about 0.7% of their reports, against about 2.3% with two TAPs on
+  2026-11-17: the two strings that had lost the most (4.9% and 4.1%) lost
+  0.3% each, and the two that had lost almost nothing lost about 1%. A
+  Zigbee network had also left the new TAP's channel the evening before.
 
 - **Hand a TAP's optimizers to another (Raspberry Pi, experimental, API
   only).** `POST /api/master/taps/handover` with `{"from": "1202", "to":
@@ -62,8 +68,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   flag (Raspberry Pi).** Each renewal now ends `01 01`, as the CCA's did
   from its second TAP on (119 renewals per TAP in a capture of a CCA
   running two TAPs), rather than the one-TAP `01 00`. An optimizer listed
-  on one TAP only still can't join another, so nothing should move. One
-  TAP, and the ESP32, keep `01 00`.
+  on one TAP only still can't join another, so nothing should move, and on
+  the roof none of the 40 did over the day after a re-sort. One TAP, and
+  the ESP32, keep `01 00`.
 
 - **A new TAP gets a channel clear of Wi-Fi, and you can pick another.**
   Add a TAP's radio step used to start at channel 11, which shares the air
@@ -88,7 +95,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   too. On the roof a TAP moved channel without a restart took no
   optimizers in a re-sort; after a power cycle and another channel, the
   next re-sort gave it 22. The two changes went in together, so which one
-  it needed isn't known.
+  it needed isn't known. The restart hasn't run on a real TAP yet; on mock
+  TAPs each channel change restarted that TAP alone, and nothing else.
 
 ### Fixed
 
