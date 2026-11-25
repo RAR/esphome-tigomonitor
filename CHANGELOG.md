@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.5.0] - 2026-11-25
+
 ### Added
 
 - **A new TAP can now get optimizers: re-sort them, and each joins the TAP
@@ -108,7 +110,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ESPHome 2026.11 or later, and serve one client at a time. **To update a
   bridge, build it again from the Config Builder;** in Home Assistant its
   "Tigo Bridge Clients" sensor gives way to "Tigo Bridge Disconnects". All
-  four build on ESPHome 2026.11.1; none has run on a bus with `uart_tcp` yet.
+  four build on ESPHome 2026.11.1. None of ours has run on a bus with
+  `uart_tcp` yet, but a bridge a user built with it works on their bus (#186).
 
 - **The Mesh map no longer draws an optimizer through one on another TAP
   (Raspberry Pi and ESP32).** An optimizer names its parent by an ID its
@@ -1469,7 +1472,8 @@ None - All changes are backward compatible. Web authentication and API tokens ar
 ## Initial Development
 Previous commits were part of the initial development phase. This is the first official release with comprehensive feature set and documentation.
 
-[Unreleased]: https://github.com/RAR/esphome-tigomonitor/compare/v2.4.0...HEAD
+[Unreleased]: https://github.com/RAR/esphome-tigomonitor/compare/v2.5.0...HEAD
+[2.5.0]: https://github.com/RAR/esphome-tigomonitor/compare/v2.4.0...v2.5.0
 [2.4.0]: https://github.com/RAR/esphome-tigomonitor/compare/v2.3.0...v2.4.0
 [2.3.0]: https://github.com/RAR/esphome-tigomonitor/compare/v2.2.0...v2.3.0
 [2.2.0]: https://github.com/RAR/esphome-tigomonitor/compare/v2.1.0...v2.2.0

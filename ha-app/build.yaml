@@ -1,5 +1,5 @@
 # The released image the app is built on: the same tigomonitord as the Pi's
 # Docker image. Keep these tags equal to config.yaml's version.
 build_from:
-  aarch64: ghcr.io/rar/tigomonitord:2.4.0-arm64
-  amd64: ghcr.io/rar/tigomonitord:2.4.0-amd64
+  aarch64: ghcr.io/rar/tigomonitord:2.5.0-arm64
+  amd64: ghcr.io/rar/tigomonitord:2.5.0-amd64
