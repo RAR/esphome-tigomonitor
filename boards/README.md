@@ -116,7 +116,7 @@ the logs. `example-t-can485.yaml` documents that workflow.
 
 #### `example-t-can485-bridge.yaml` - LilyGO T-CAN485 as a network bridge
 - **What it does**: no decoding. It forwards the raw bus over TCP (port 6638,
-  via [stream_server](https://github.com/oxan/esphome-stream-server)) to
+  via ESPHome's built-in `uart_tcp`, so ESPHome 2026.11 or later) to
   tigomonitord on a Pi or another Linux machine, which does everything else
 - **Read-only in hardware**: the UART has no `tx_pin`, and GPIO22 (the
   transceiver's DI) is held high so its driver stays off, by a switch and, in

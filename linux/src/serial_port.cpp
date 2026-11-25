@@ -213,8 +213,9 @@ static int connect_tcp(const std::string &host, const std::string &port) {
   return fd;
 }
 
-// The bus bytes from a network bridge: an ESP32 running stream_server, or an
-// RS485-to-Ethernet converter in TCP server mode. Only ever reads, so nothing
+// The bus bytes from a network bridge: an ESP32 running uart_tcp (or, built
+// from an older config, stream_server), or an RS485-to-Ethernet converter in
+// TCP server mode. Only ever reads, so nothing
 // reaches the bus from here.
 static void run_tcp(const std::string &source, const std::atomic<bool> &stop,
                     const std::function<void(const char *, size_t)> &on_data) {

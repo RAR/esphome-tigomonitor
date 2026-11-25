@@ -2,7 +2,7 @@
 // The Config Builder's "What you're building" choice, in Chromium: the form
 // markup comes from ConfigWizard.astro and the script is the real wizard.js.
 // Choosing a network bridge swaps the board list, hides what a bridge has no
-// use for, and writes a stream_server config with no transmit pin.
+// use for, and writes a uart_tcp config with no transmit pin.
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -78,7 +78,7 @@ test('choosing a network bridge writes a bridge, and choosing a monitor again un
   assert.equal(await p.textContent('#out-name'), 'atoms3-bridge.yaml');
   assert.equal(new URL(p.url()).search, '?build=bridge');
   let y = await out(p);
-  assert.match(y, /^stream_server:/m);
+  assert.match(y, /^uart_tcp:/m);
   assert.match(y, /pin: GPIO6\b/);
   assert.doesNotMatch(y, /^\s*tx_pin:|tigo_monitor/m);
 
@@ -99,7 +99,7 @@ test('choosing a network bridge writes a bridge, and choosing a monitor again un
 test('a link with ?build=bridge opens on the bridge', async () => {
   const { p, ctx, errors } = await open('?build=bridge');
   assert.equal(await p.isChecked('#build-bridge'), true);
-  assert.match(await out(p), /^stream_server:/m);
+  assert.match(await out(p), /^uart_tcp:/m);
   assert.deepEqual(errors, []);
   await ctx.close();
 });

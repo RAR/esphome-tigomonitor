@@ -18,9 +18,10 @@ adapter to the TAP directly.
 
 ## What it does, and what it doesn't
 
-The bridge decodes nothing. It runs
-[stream_server](https://github.com/oxan/esphome-stream-server), which sends
-every byte it hears on the bus to whoever connects on TCP port 6638. The
+The bridge decodes nothing. It runs ESPHome's own `uart_tcp`, which sends
+every byte it hears on the bus to the client connected on TCP port 6638. It
+serves one client at a time, so while TigoMonitor is connected nothing else
+can read the bus from the bridge. The
 decoding, the dashboard, the history and the panels in Home Assistant all come
 from TigoMonitor on the other machine. On its own, a bridge shows Home
 Assistant only its own status: whether it's online, whether a client is
@@ -36,6 +37,8 @@ in place of a CCA. That needs an adapter wired to the machine running it.
 
 - **TigoMonitor running on the other machine.** Set it up first, from
   [Raspberry Pi and Linux](/esphome-tigomonitor/guides/raspberry-pi/).
+- **ESPHome 2026.11 or later**, to build the bridge. `uart_tcp` is built into
+  ESPHome from 2026.11.
 - **One of these boards.** None of them needs PSRAM.
   - An **M5Stack AtomS3 or AtomS3R** on the **Atomic RS485 Base**. This is the
     one we've run on a roof.
@@ -48,7 +51,8 @@ in place of a CCA. That needs an adapter wired to the machine running it.
   The last three configs compile, and their pins are the ones their monitor
   configs use, but none has run as a bridge on a bus yet.
 - **Wi-Fi or Ethernet at the cabinet.** Wi-Fi doesn't have to be strong. An
-  AtomS3 at −80 dBm passed 859 frames in 10 seconds with none cut short.
+  AtomS3 at −80 dBm passed 859 frames in 10 seconds with none cut short
+  (2026-11-21, on the forwarder the bridge used before `uart_tcp`).
 
 ## Build it
 
@@ -70,6 +74,13 @@ reboots while it's connected, expect a short gap on the bus.
 The same configs are in the repository's
 [`boards/`](https://github.com/RAR/esphome-tigomonitor/tree/main/boards)
 folder as `example-*-bridge.yaml`, with a comment on every pin.
+
+A bridge built from an earlier config runs
+[stream_server](https://github.com/oxan/esphome-stream-server), which doesn't
+build on ESPHome 2026.7 or later unless its logger stays at `INFO`. To update
+it, build it again from the Config Builder with the same name. It keeps port
+6638, so TigoMonitor finds it as before. In Home Assistant, its "Tigo Bridge
+Clients" sensor gives way to "Tigo Bridge Disconnects".
 
 ## Point TigoMonitor at it
 
