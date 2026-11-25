@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Home Assistant shows what changed when it offers an update of the
+  app.** It said "No changelog found for app …", because the app had no
+  changelog of its own. `ha-app/CHANGELOG.md` now has an entry for each
+  release, about the app alone, under headings Home Assistant recognises,
+  so an update shows only the releases since the one installed. Home
+  Assistant reads it from `main`, so it should show up at its next check
+  for updates, without waiting for a release.
+
 ## [2.5.0] - 2026-11-25
 
 ### Added

@@ -50,6 +50,31 @@ expect("it asks the web server on the ingress port", "127.0.0.1:8080/" in check,
 expect("not the bus's health (unhealthy until a bus is chosen)", "health-check" in check or "/api/health" in check, False)
 expect("a start interval, so it's started within seconds", bool(re.search(r"--start-interval=\d+s", check)), True)
 
+# The update dialog's "what changed" is ha-app/CHANGELOG.md; without it the
+# Supervisor answers "No changelog found for app …". Home Assistant shows the
+# text from the heading of the version on offer down to the installed one's,
+# found by this pattern (homeassistant/components/hassio/update.py,
+# async_release_notes). A heading with anything after the version, such as
+# the root changelog's "## [2.5.0] - date", doesn't match, and the dialog
+# shows the whole file.
+changelog_path = root / "ha-app/CHANGELOG.md"
+expect("the app has a changelog", changelog_path.is_file(), True)
+changelog = changelog_path.read_text() if changelog_path.is_file() else ""
+headings = re.findall(r"^#+ (.*)$", changelog, re.M)
+versions = [h for h in headings if re.fullmatch(r"\d+\.\d+\.\d+", h)]
+expect("its newest entry is this version", versions[:1], [version])
+expect("every ## heading is a bare version", [h for h in re.findall(r"^## (.*)$", changelog, re.M) if h not in versions], [])
+if len(versions) >= 2:
+    latest, installed = versions[0], versions[1]
+    shown = re.compile(
+        rf"^#* {re.escape(latest)}\n"
+        rf"(?:^(?!#* {re.escape(installed)}).*\n)*",
+        re.MULTILINE,
+    ).search(changelog)
+    shown = shown.group(0) if shown else changelog
+    expect(f"updating from {installed} shows {latest}'s entry", shown.startswith(f"## {latest}\n"), True)
+    expect(f"and not {installed}'s", f"## {installed}\n" in shown, False)
+
 if fail:
     sys.exit(1)
 print(f"ha_app_test: all passed ({version}, {', '.join(arches)})")

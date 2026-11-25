@@ -1,11 +1,11 @@
 ---
 name: shipping-tigo-changes
-description: Use when writing a commit message, adding a CHANGELOG entry, annotating a version tag, or drafting GitHub release notes for esphome-tigomonitor — covers the commit type/scope vocabulary in use, the evidence a body must carry, and how the same change is described differently in each of the three places.
+description: Use when writing a commit message, adding a CHANGELOG entry, annotating a version tag, or drafting GitHub release notes for esphome-tigomonitor — covers the commit type/scope vocabulary in use, the evidence a body must carry, and how the same change is described differently in each of the places it goes.
 ---
 
 # Shipping Changes
 
-One change gets described in up to three places, for three readers. Say it
+One change gets described in up to four places, for four readers. Say it
 differently each time; never paste one into another.
 
 | Where | Reader | Answers |
@@ -13,6 +13,7 @@ differently each time; never paste one into another.
 | Commit message | Whoever runs `git log -S` in a year | Why the obvious fix didn't work, and how we know this one does |
 | `CHANGELOG.md` | Someone deciding whether to upgrade | What's different for them, in one to three sentences |
 | Release notes | Someone who just clicked the tag | Should I take this, and do I have to do anything |
+| `ha-app/CHANGELOG.md` | Someone pressing Update in Home Assistant | The same, for the app alone: no ESP32 or `.deb` news |
 
 ## Commit messages
 
@@ -87,7 +88,12 @@ deep enough to be trusted, then a link out for the rest:
 ## Releases
 
 1. Move `## [Unreleased]` entries under `## [X.Y.Z] - YYYY-MM-DD`, add the
-   link reference, commit as `release: vX.Y.Z`.
+   link reference, add the app's entry to the top of `ha-app/CHANGELOG.md`
+   as a bare `## X.Y.Z` heading (no brackets, no date), and commit as
+   `release: vX.Y.Z`. Home Assistant's update dialog shows that file from
+   the offered version's heading down to the installed one's, and only
+   finds a heading that is the bare version; `tests/host/ha_app_test.py`
+   fails without it.
 2. Annotated tag `vX.Y.Z`. First line of the annotation is `vX.Y.Z` —
    with the `v`. The body is the maintainer's summary: what's in it, and
    what's still open.
