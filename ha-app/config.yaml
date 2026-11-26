@@ -2,7 +2,7 @@
 # Home Assistant OS. Its version is the release it's built from, and goes up
 # with build.yaml's image tags at each release.
 name: TigoMonitor
-version: "2.5.0"
+version: "2.5.1"
 slug: tigomonitor
 description: Each Tigo optimizer's power, voltage and temperature, read from the RS485 bus
 url: https://rar.github.io/esphome-tigomonitor/guides/raspberry-pi/#run-it-as-a-home-assistant-app

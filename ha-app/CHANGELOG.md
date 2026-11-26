@@ -4,6 +4,23 @@ What changed in the TigoMonitor app at each release, and anything you need
 to do. Each release's full notes are on
 [GitHub](https://github.com/RAR/esphome-tigomonitor/releases).
 
+## 2.5.1
+
+Nothing to do, unless you turned on dangerous options in the app's
+settings.json: turn them on in the new Configuration tab as well, or this
+update turns them off.
+
+- **A Configuration tab.** Turn on dangerous options there (each TAP's radio
+  settings and report period, and re-sorting the optimizers), and debug
+  logging. Each takes effect when the app restarts.
+- **Changes to the bus no longer ask you to set a web password first.** When
+  the app runs the bus, System setup's changes, turning the array's output
+  off and a TAP's report period said "set a web password first", though Home
+  Assistant had already signed you in. They now count that sign-in, as
+  everything else already did.
+
+[All of 2.5.1's changes](https://github.com/RAR/esphome-tigomonitor/releases/tag/v2.5.1)
+
 ## 2.5.0
 
 Nothing to do for most installs. Two cases take a step, below: building a

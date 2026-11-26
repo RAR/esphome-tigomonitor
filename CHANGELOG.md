@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.5.1] - 2026-11-26
+
 ### Added
 
 - **Dangerous options can be turned on in the Home Assistant app's
@@ -1500,7 +1502,8 @@ None - All changes are backward compatible. Web authentication and API tokens ar
 ## Initial Development
 Previous commits were part of the initial development phase. This is the first official release with comprehensive feature set and documentation.
 
-[Unreleased]: https://github.com/RAR/esphome-tigomonitor/compare/v2.5.0...HEAD
+[Unreleased]: https://github.com/RAR/esphome-tigomonitor/compare/v2.5.1...HEAD
+[2.5.1]: https://github.com/RAR/esphome-tigomonitor/compare/v2.5.0...v2.5.1
 [2.5.0]: https://github.com/RAR/esphome-tigomonitor/compare/v2.4.0...v2.5.0
 [2.4.0]: https://github.com/RAR/esphome-tigomonitor/compare/v2.3.0...v2.4.0
 [2.3.0]: https://github.com/RAR/esphome-tigomonitor/compare/v2.2.0...v2.3.0
