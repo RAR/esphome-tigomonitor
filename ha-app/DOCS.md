@@ -48,6 +48,11 @@ takes effect when the app restarts.
 - **Debug logging** puts more detail in the app's **Log** tab, for tracking
   down a problem.
 
+At each start the **Log** tab says what the switches gave, as
+`Configuration: dangerous options on, debug logging off`. While TigoMonitor
+only listens to the bus, that line is where to see the first switch took:
+the page shows Dangerous options only while it runs the bus.
+
 ## More
 
 The full guide, including running the bus in the CCA's place:

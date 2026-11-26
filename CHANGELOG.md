@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **The Home Assistant app's log says what its Configuration tab gave.**
+  Each start logs a line such as `Configuration: dangerous options on,
+  debug logging off`. The page shows Dangerous options only while
+  TigoMonitor runs the bus, so an app that only listens had no way to see
+  the switch took.
+
 ## [2.5.1] - 2026-11-26
 
 ### Added
