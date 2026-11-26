@@ -17,6 +17,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Assistant reads it from `main`, so it should show up at its next check
   for updates, without waiting for a release.
 
+- **In the Home Assistant app, changes to the bus no longer ask you to set
+  a web password first.** When the app runs the bus, System setup's
+  changes, turning the array's output off, and a TAP's report period
+  answered "set a web password first", though Home Assistant had already
+  signed you in. A request through Home Assistant now counts as signed in
+  for these too, as it already did for everything else. On the app's own
+  port, if you give it one, they still need a password.
+
 ## [2.5.0] - 2026-11-25
 
 ### Added

@@ -171,6 +171,7 @@ class HttpServer {
   bool signed_in_(const httplib::Request &req, const Settings &s);
   // The Set-Cookie for a session, or with "" one that ends it.
   bool via_ingress_(const httplib::Request &req) const;  // from --trust-ingress's address
+  bool nobody_signed_in_(const httplib::Request &req) const;  // the bus changes' password check
   std::string session_cookie_(const std::string &token, const httplib::Request &req, const Settings &s) const;
   std::string client_(const httplib::Request &req, const Settings &s) const;  // who wrong passwords count against
 };
