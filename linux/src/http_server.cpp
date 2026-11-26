@@ -1710,9 +1710,10 @@ void HttpServer::routes_() {
   });
 
   // Pi-only: PV output off or on, through the bus master. Turning an array
-  // off is not for anyone on the LAN: refused until a web password is set.
+  // off is not for anyone on the LAN: refused until a web password is set,
+  // or Home Assistant's ingress proxy signed the user in.
   svr.Post("/api/master/pv", [this](const httplib::Request &req, httplib::Response &res) {
-    if (ctx_.current_settings().web_password.empty()) {
+    if (nobody_signed_in_(req)) {
       send_json(res, {{"error", "set a web password first"}}, 403);
       return;
     }
@@ -1746,7 +1747,7 @@ void HttpServer::routes_() {
     return true;
   };
   svr.Post("/api/master/table/add", [this, tap_of](const httplib::Request &req, httplib::Response &res) {
-    if (ctx_.current_settings().web_password.empty() && !setup_open(ctx_.current_settings(), unix_now_s())) {
+    if (nobody_signed_in_(req) && !setup_open(ctx_.current_settings(), unix_now_s())) {
       send_json(res, {{"error", "set a web password first"}}, 403);
       return;
     }
@@ -1793,7 +1794,7 @@ void HttpServer::routes_() {
   // {"label": ...} or {"mac": ...}, or several in one pass as {"macs": [...]}
   // (up to 100; ones not listed are skipped), and "dry_run"; behind the web password.
   svr.Post("/api/master/table/remove", [this, tap_of](const httplib::Request &req, httplib::Response &res) {
-    if (ctx_.current_settings().web_password.empty() && !setup_open(ctx_.current_settings(), unix_now_s())) {
+    if (nobody_signed_in_(req) && !setup_open(ctx_.current_settings(), unix_now_s())) {
       send_json(res, {{"error", "set a web password first"}}, 403);
       return;
     }
@@ -1841,7 +1842,7 @@ void HttpServer::routes_() {
   // once it joins, it takes the old one's place in the layout. Behind the
   // web password.
   svr.Post("/api/master/table/replace", [this, tap_of](const httplib::Request &req, httplib::Response &res) {
-    if (ctx_.current_settings().web_password.empty() && !setup_open(ctx_.current_settings(), unix_now_s())) {
+    if (nobody_signed_in_(req) && !setup_open(ctx_.current_settings(), unix_now_s())) {
       send_json(res, {{"error", "set a web password first"}}, 403);
       return;
     }
@@ -1880,8 +1881,8 @@ void HttpServer::routes_() {
   // bus moved to the factory address and given its saved id, or the next
   // free one (tigo_master.h's Herd). Polling stops for ~30 s. Needs
   // master_adopt_taps and master_startup; behind the web password.
-  svr.Post("/api/master/taps/herd", [this](const httplib::Request &, httplib::Response &res) {
-    if (ctx_.current_settings().web_password.empty() && !setup_open(ctx_.current_settings(), unix_now_s())) {
+  svr.Post("/api/master/taps/herd", [this](const httplib::Request &req, httplib::Response &res) {
+    if (nobody_signed_in_(req) && !setup_open(ctx_.current_settings(), unix_now_s())) {
       send_json(res, {{"error", "set a web password first"}}, 403);
       return;
     }
@@ -1895,7 +1896,7 @@ void HttpServer::routes_() {
   // longer polled, and left off the saved list (taps.json). Refused for a
   // TAP still answering, or the only one. Behind the web password.
   svr.Post("/api/master/taps/forget", [this](const httplib::Request &req, httplib::Response &res) {
-    if (ctx_.current_settings().web_password.empty() && !setup_open(ctx_.current_settings(), unix_now_s())) {
+    if (nobody_signed_in_(req) && !setup_open(ctx_.current_settings(), unix_now_s())) {
       send_json(res, {{"error", "set a web password first"}}, 403);
       return;
     }
@@ -1920,7 +1921,7 @@ void HttpServer::routes_() {
   // the web password and, but for a dry run, Allow changes to the TAPs.
   auto resort_route = [this, &svr](const char *path, std::function<int(bool, std::string &)> *fn, bool has_body) {
     svr.Post(path, [this, fn, has_body](const httplib::Request &req, httplib::Response &res) {
-      if (ctx_.current_settings().web_password.empty() && !setup_open(ctx_.current_settings(), unix_now_s())) {
+      if (nobody_signed_in_(req) && !setup_open(ctx_.current_settings(), unix_now_s())) {
         send_json(res, {{"error", "set a web password first"}}, 403);
         return;
       }
@@ -1951,7 +1952,7 @@ void HttpServer::routes_() {
   // that has died can be handed over. Behind the web password and, but for
   // a dry run, Allow changes to the TAPs.
   svr.Post("/api/master/taps/handover", [this](const httplib::Request &req, httplib::Response &res) {
-    if (ctx_.current_settings().web_password.empty() && !setup_open(ctx_.current_settings(), unix_now_s())) {
+    if (nobody_signed_in_(req) && !setup_open(ctx_.current_settings(), unix_now_s())) {
       send_json(res, {{"error", "set a web password first"}}, 403);
       return;
     }
@@ -2019,7 +2020,7 @@ void HttpServer::routes_() {
   // Both settings are written where they differ, then read back. Behind the
   // web password and, but for a dry run, Allow changes to the TAPs.
   svr.Post("/api/master/taps/period", [this](const httplib::Request &req, httplib::Response &res) {
-    if (ctx_.current_settings().web_password.empty()) {
+    if (nobody_signed_in_(req)) {
       send_json(res, {{"error", "set a web password first"}}, 403);
       return;
     }
@@ -2045,7 +2046,7 @@ void HttpServer::routes_() {
   });
 
   svr.Post("/api/master/taps/provision", [this](const httplib::Request &req, httplib::Response &res) {
-    if (ctx_.current_settings().web_password.empty()) {
+    if (nobody_signed_in_(req)) {
       send_json(res, {{"error", "set a web password first"}}, 403);
       return;
     }
@@ -2101,7 +2102,7 @@ void HttpServer::routes_() {
   // "text": "GetOsState"}; the answer goes to the log. Behind the web
   // password; refused unless master_bench is on.
   svr.Post("/api/master/query", [this](const httplib::Request &req, httplib::Response &res) {
-    if (ctx_.current_settings().web_password.empty()) {
+    if (nobody_signed_in_(req)) {
       send_json(res, {{"error", "set a web password first"}}, 403);
       return;
     }
@@ -2121,7 +2122,7 @@ void HttpServer::routes_() {
   });
 
   svr.Post("/api/master/table/stop", [this](const httplib::Request &req, httplib::Response &res) {
-    if (ctx_.current_settings().web_password.empty() && !setup_open(ctx_.current_settings(), unix_now_s())) {
+    if (nobody_signed_in_(req) && !setup_open(ctx_.current_settings(), unix_now_s())) {
       send_json(res, {{"error", "set a web password first"}}, 403);
       return;
     }
@@ -2141,7 +2142,7 @@ void HttpServer::routes_() {
   // Pi-only: keep renewing the TAP's discovery window, or let it close (for
   // testing; saved in discovery.json). Behind the web password, as PV output is.
   svr.Post("/api/master/discovery", [this](const httplib::Request &req, httplib::Response &res) {
-    if (ctx_.current_settings().web_password.empty() && !setup_open(ctx_.current_settings(), unix_now_s())) {
+    if (nobody_signed_in_(req) && !setup_open(ctx_.current_settings(), unix_now_s())) {
       send_json(res, {{"error", "set a web password first"}}, 403);
       return;
     }
@@ -2391,6 +2392,14 @@ void HttpServer::routes_() {
 
 bool HttpServer::via_ingress_(const httplib::Request &req) const {
   return !ctx_.trusted_ingress.empty() && req.remote_addr == ctx_.trusted_ingress;
+}
+
+// The password check on bus changes: with no web password, anyone on the
+// network gets this far, but Home Assistant's ingress proxy signs its users
+// in itself, as signed_in_ takes it to. They could set a password from this
+// page and go on; refusing them would only send them to do that.
+bool HttpServer::nobody_signed_in_(const httplib::Request &req) const {
+  return ctx_.current_settings().web_password.empty() && !via_ingress_(req);
 }
 
 bool HttpServer::signed_in_(const httplib::Request &req, const Settings &s) {

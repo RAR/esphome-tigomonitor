@@ -135,7 +135,8 @@ UART** (`/dev/serial0`).
   System setup's changes, so you can set the system up first and lock it
   last. Every page says so in a banner until you set one. Turning the
   array's output off always needs the password. An install that already
-  had a settings file never gets setup mode.
+  had a settings file never gets setup mode. In the Home Assistant app,
+  Home Assistant's sign-in counts as the password.
 
 <ThemedShot name="pi-setup" alt="System setup — the Set up a new system checklist, then a card for each optimizer and TAP task." />
 - **Optimizers:** replace, add or retire one, step by step, each change
@@ -742,7 +743,8 @@ and x86-64).
   typing a broker in. That's done once: a broker you change or clear later
   stays as you set it.
 - **Signing in:** Home Assistant signs you in before it shows the page, so
-  the monitor doesn't ask again. To open the web UI outside Home Assistant,
+  the monitor doesn't ask again, and changes to the bus need no web
+  password there. To open the web UI outside Home Assistant,
   give port 8080 a host port in the app's **Network** settings, and set a
   password under **Settings → Web UI**, because that port answers anyone
   on your network.

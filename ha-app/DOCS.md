@@ -28,7 +28,7 @@ set once; change it under **Settings → MQTT**.
 ## Signing in
 
 Home Assistant signs you in before it shows the page, so TigoMonitor doesn't
-ask again. To open the web UI outside Home Assistant, give port 8080 a host
+ask again, and changes to the bus need no web password here. To open the web UI outside Home Assistant, give port 8080 a host
 port under this app's **Network** settings, and set a password under
 **Settings → Web UI**: that port answers anyone on your network.
 
