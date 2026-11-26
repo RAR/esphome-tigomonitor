@@ -40,14 +40,22 @@ fi
 # refuse to start, so it gets settings.json's.
 options=$state/options.json
 option() { [ -f "$options" ] && [ "$(jq -r --arg k "$1" '.[$k] // false' "$options" 2>/dev/null)" = true ]; }
+danger="as settings.json has them"
 if [ -f "$options" ] && printf '%s' "$help" | grep -q -- --dangerous-options; then
   if option dangerous_options; then
     set -- "$@" --dangerous-options on
+    danger=on
   else
     set -- "$@" --dangerous-options off
+    danger=off
   fi
 fi
+debug=off
 if option debug_logging; then
   set -- "$@" --verbose
+  debug=on
 fi
+# In the Log tab: the page shows Dangerous options only while TigoMonitor
+# runs the bus, so this is where a listening app shows the switch took.
+echo "Configuration: dangerous options $danger, debug logging $debug"
 exec /usr/bin/tigomonitord "$@"

@@ -56,7 +56,8 @@ OLD_HELP = "  --trust-ingress ADDR\n  --verbose\n"
 
 
 def run(options, help_text=NEW_HELP):
-    """run.sh's arguments to the daemon, and whether settings.json exists after."""
+    """run.sh's arguments to the daemon, whether settings.json exists after,
+    and the line it logs about the Configuration tab (None without one)."""
     with tempfile.TemporaryDirectory() as tmp:
         tmp = Path(tmp)
         data = tmp / "data"
@@ -82,7 +83,8 @@ def run(options, help_text=NEW_HELP):
             print(f"  FAIL run.sh exited {r.returncode}: {r.stderr.strip()}")
             sys.exit(1)
         args = (tmp / "args").read_text().splitlines() if (tmp / "args").exists() else None
-        return args, (data / "settings.json").exists()
+        said = [l for l in r.stdout.splitlines() if l.startswith("Configuration:")]
+        return args, (data / "settings.json").exists(), said[0] if len(said) == 1 else said or None
 
 
 def flag(args, name):
@@ -93,7 +95,7 @@ def flag(args, name):
     return args[i + 1] if i + 1 < len(args) and not args[i + 1].startswith("--") else True
 
 
-args, settings = run({"dangerous_options": True, "debug_logging": True})
+args, settings, said = run({"dangerous_options": True, "debug_logging": True})
 expect("the daemon is started on /data and the ingress port", (flag(args, "--port"), args is not None and "--state-dir" in args), ("8080", True))
 expect("Home Assistant's ingress proxy is trusted", flag(args, "--trust-ingress"), "172.30.32.2")
 expect("dangerous options on", flag(args, "--dangerous-options"), "on")
@@ -101,19 +103,25 @@ expect("debug logging on", flag(args, "--verbose"), True)
 # The daemon counts a start without settings.json as a new install, so the
 # options mustn't be written there.
 expect("no settings.json written", settings, False)
+# The Log tab says what the tab gave, since the page shows Dangerous options
+# only while TigoMonitor runs the bus.
+expect("the log says so", said, "Configuration: dangerous options on, debug logging on")
 
-args, settings = run({"dangerous_options": False, "debug_logging": False})
+args, settings, said = run({"dangerous_options": False, "debug_logging": False})
 expect("dangerous options off", flag(args, "--dangerous-options"), "off")
 expect("no debug logging", flag(args, "--verbose"), None)
+expect("the log says both off", said, "Configuration: dangerous options off, debug logging off")
 
-args, settings = run(None)
+args, settings, said = run(None)
 expect("without options.json: settings.json decides", flag(args, "--dangerous-options"), None)
 expect("and no debug logging", flag(args, "--verbose"), None)
+expect("the log says settings.json decides", said, "Configuration: dangerous options as settings.json has them, debug logging off")
 
 # A daemon that doesn't know the flag would refuse to start on it.
-args, settings = run({"dangerous_options": True, "debug_logging": True}, OLD_HELP)
+args, settings, said = run({"dangerous_options": True, "debug_logging": True}, OLD_HELP)
 expect("a daemon without the flag isn't given it", flag(args, "--dangerous-options"), None)
 expect("but still gets debug logging", flag(args, "--verbose"), True)
+expect("the log says settings.json decides there too", said, "Configuration: dangerous options as settings.json has them, debug logging on")
 
 if fail:
     sys.exit(1)
