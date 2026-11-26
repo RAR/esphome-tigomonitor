@@ -1,7 +1,7 @@
 // tigomonitord — listens to a Tigo RS485 bus and publishes to Home Assistant.
 //
 //   tigomonitord [--state-dir DIR] [--serial DEV] [--replay FILE [--speed X]]
-//                [--capture FILE] [--verbose]
+//                [--capture FILE] [--dangerous-options on|off] [--verbose]
 
 #include "log.h"
 #include "bus_master.h"
@@ -73,6 +73,8 @@ static void usage() {
                "  --tls-key FILE    its private key\n"
                "  --trust-ingress ADDR  requests from ADDR (Home Assistant's ingress proxy,\n"
                "                    which signs users in itself) need no sign-in here\n"
+               "  --dangerous-options on|off  Settings > Bus's dangerous options, overriding\n"
+               "                    settings.json (the Home Assistant app's Configuration)\n"
                "  --watchdog S      without systemd's watchdog, exit if the main loop stops\n"
                "                    for S seconds, for Docker to restart it (default 60, 0 off)\n"
                "  --health-check P  check the daemon on port P, as Docker's HEALTHCHECK does\n"
@@ -182,6 +184,7 @@ int main(int argc, char **argv) {
   std::string serial_override, replay, capture;
   std::string tls_cert_override, tls_key_override;
   std::string trusted_ingress;
+  int dangerous_override = -1;  // -1: from settings.json, else 0 or 1
   double speed = 1.0;
   int watchdog_s = 60;
   for (int i = 1; i < argc; i++) {
@@ -200,6 +203,14 @@ int main(int argc, char **argv) {
     else if (a == "--tls-cert") tls_cert_override = next();
     else if (a == "--tls-key") tls_key_override = next();
     else if (a == "--trust-ingress") trusted_ingress = next();
+    else if (a == "--dangerous-options") {
+      const std::string v = next();
+      if (v != "on" && v != "off") {
+        usage();
+        return 2;
+      }
+      dangerous_override = v == "on";
+    }
     else if (a == "--watchdog") watchdog_s = std::atoi(next().c_str());
     else if (a == "--health-check") return health_check(std::atoi(next().c_str()));
     else if (a == "--replay") replay = next();
@@ -229,6 +240,7 @@ int main(int argc, char **argv) {
   }
   if (settings.device_id.empty()) settings.device_id = hostname();
   if (!serial_override.empty()) settings.serial_port = serial_override;
+  if (dangerous_override >= 0) settings.dangerous_options = dangerous_override;
   // As the Docker compose file with certbot sets them: the certificate
   // comes with the deployment, not from the web UI.
   const bool tls_from_args = !tls_cert_override.empty() || !tls_key_override.empty();
@@ -957,6 +969,7 @@ int main(int argc, char **argv) {
       if (fresh.device_id.empty()) fresh.device_id = settings.device_id;
       apply_tls_override(fresh);
       if (!serial_override.empty()) fresh.serial_port = serial_override;
+      if (dangerous_override >= 0) fresh.dangerous_options = dangerous_override;
       if (differ_only_in_pages(fresh, settings)) {
         // The web UI's sidebar: nothing to restart, and no reason to make
         // MQTT reconnect and Home Assistant hear every entity again.

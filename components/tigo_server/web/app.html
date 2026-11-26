@@ -2020,7 +2020,7 @@
       <div id="pi-danger" style="display:none">
         <div class="section-head">
           <div class="section-title">Dangerous options</div>
-          <div class="section-sub">Turned on in settings.json; this page can't turn them on or off</div>
+          <div class="section-sub">Turned on in settings.json, or in the Home Assistant app's Configuration tab; this page can't turn them on or off</div>
         </div>
         <div class="tools-card">
           <p class="hint">These change how a TAP schedules its optimizers. The channel, PAN and key stay as they are, but a wrong choice can cost reports until it's set back. Preview first: it reads the TAP and says what would be sent, without sending it. Writing needs Allow changes to the TAPs.</p>
@@ -7027,8 +7027,9 @@
 
   // ===== Raspberry Pi settings (linux/ build) =====
   // Dangerous options: a TAP's radio profile, channel, network key and report
-  // period, shown only with "dangerous_options": true in settings.json, on a
-  // TigoMonitor that runs the bus.
+  // period, shown only with "dangerous_options": true in settings.json (or
+  // --dangerous-options on, from the Home Assistant app), on a TigoMonitor
+  // that runs the bus.
   const DANGER_PERIODS = [[1, '1 s'], [2, '2 s'], [3, '3 s'], [4, '4 s'], [5, '5 s'], [6, '6 s'], [7, '10 s'],
                           [8, '12 s'], [9, '15 s'], [10, '20 s'], [11, '30 s']];
   const DANGER_PROFILES = [[40, '40 optimizers (12-2-2-1)'], [75, '75 optimizers (14-2-2-1)'],

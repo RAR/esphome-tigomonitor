@@ -1,0 +1,13 @@
+configuration:
+  dangerous_options:
+    name: Dangerous options
+    description: >-
+      Shows Dangerous options under Settings → Bus, when TigoMonitor runs the
+      bus: each TAP's radio profile, channel, network key and report period,
+      and re-sorting the optimizers. A wrong choice there can cost reports
+      until it's set back. Takes effect when the app restarts.
+  debug_logging:
+    name: Debug logging
+    description: >-
+      More detail in the app's log, for tracking down a problem. Takes effect
+      when the app restarts.
