@@ -25,9 +25,29 @@ if [ ! -e "$offered" ] && [ -n "${SUPERVISOR_TOKEN:-}" ]; then
 fi
 
 set -- --state-dir "$state" --port 8080
+# What this build of the daemon takes: run.sh can be newer than the image
+# it's built on, when someone rebuilds the app between releases.
+help=$(/usr/bin/tigomonitord --help 2>&1 || true)
 # Home Assistant signs users in before its ingress proxy passes them on.
 # Builds older than the flag ask for the password instead, if one is set.
-if /usr/bin/tigomonitord --help 2>&1 | grep -q -- --trust-ingress; then
+if printf '%s' "$help" | grep -q -- --trust-ingress; then
   set -- "$@" --trust-ingress 172.30.32.2
+fi
+# The app's Configuration tab, which Home Assistant writes to options.json.
+# Passed as flags, never written into settings.json: the daemon takes a
+# start without settings.json as a new install. Dangerous options as set
+# there, on or off, over settings.json's; a daemon without the flag would
+# refuse to start, so it gets settings.json's.
+options=$state/options.json
+option() { [ -f "$options" ] && [ "$(jq -r --arg k "$1" '.[$k] // false' "$options" 2>/dev/null)" = true ]; }
+if [ -f "$options" ] && printf '%s' "$help" | grep -q -- --dangerous-options; then
+  if option dangerous_options; then
+    set -- "$@" --dangerous-options on
+  else
+    set -- "$@" --dangerous-options off
+  fi
+fi
+if option debug_logging; then
+  set -- "$@" --verbose
 fi
 exec /usr/bin/tigomonitord "$@"

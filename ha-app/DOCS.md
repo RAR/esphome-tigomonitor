@@ -35,6 +35,19 @@ port under this app's **Network** settings, and set a password under
 Leave HTTPS off under **Settings → Web UI**. Home Assistant reaches the app
 over plain HTTP, and does HTTPS itself.
 
+## Configuration
+
+The app's **Configuration** tab has two switches, both off at first. Each
+takes effect when the app restarts.
+
+- **Dangerous options** shows Dangerous options under **Settings → Bus**,
+  when TigoMonitor runs the bus: each TAP's radio profile, channel, network
+  key and report period, and re-sorting the optimizers. A wrong choice there
+  can cost reports until it's set back. This switch decides, whatever the
+  app's settings.json says.
+- **Debug logging** puts more detail in the app's **Log** tab, for tracking
+  down a problem.
+
 ## More
 
 The full guide, including running the bus in the CCA's place:

@@ -59,8 +59,10 @@ struct Settings {
   // roof test, 2026-11-12, of whether a stale replay costs reports.
   bool master_send_41 = true;
   // Shows Settings > Bus's Dangerous options (a TAP's radio profile and
-  // report period). Set by editing settings.json only: the settings API
-  // reports it and never changes it, so the web UI can't turn it on.
+  // report period). Set by editing settings.json, or by --dangerous-options
+  // (the Home Assistant app's Configuration tab), which overrides it: the
+  // settings API reports it and never changes it, so the web UI can't turn
+  // it on.
   bool dangerous_options = false;
   // Which optimizers the 0x41 PGW streams 01 and 02 go to (pgw.h):
   // "random", any heard optimizer in turn, as before; "array", the far end

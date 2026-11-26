@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Dangerous options can be turned on in the Home Assistant app's
+  Configuration tab**, and so can debug logging. Before, dangerous options
+  took `"dangerous_options": true` in the app's settings.json, which Home
+  Assistant gives no way to edit. The tab now decides: if you turned them on
+  in the file, turn them on in the tab as well, or the update turns them
+  off. Each takes effect when the app restarts. On a Pi, `tigomonitord`
+  takes the same as `--dangerous-options on|off`.
+
 ### Fixed
 
 - **Home Assistant shows what changed when it offers an update of the

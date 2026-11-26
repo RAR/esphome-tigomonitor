@@ -16,6 +16,14 @@ panel_icon: mdi:solar-power-variant
 panel_title: TigoMonitor
 # For a USB RS485 adapter on this machine. A network bridge needs nothing.
 uart: true
+# The Configuration tab, named in translations/en.yaml. run.sh passes each to
+# the daemon as a flag when the app starts, so a change takes effect then.
+options:
+  dangerous_options: false
+  debug_logging: false
+schema:
+  dangerous_options: bool
+  debug_logging: bool
 # The broker from Home Assistant's MQTT app, offered on first start.
 services:
   - mqtt:want
