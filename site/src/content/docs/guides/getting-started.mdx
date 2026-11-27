@@ -59,11 +59,11 @@ just as well.
 
 Cheaper alternative: an ESP32-S3 dev board plus a MAX485 module. Make sure the board
 has PSRAM — it's required, and plenty of cheap boards leave it out.
-See [Wiring](/esphome-tigomonitor/guides/wiring/).
+See [Wiring](/guides/wiring/).
 
 Already have a Raspberry Pi, a Linux server or Docker? The monitor runs there
 too, with no ESPHome; see
-[Raspberry Pi and Linux](/esphome-tigomonitor/guides/raspberry-pi/).
+[Raspberry Pi and Linux](/guides/raspberry-pi/).
 
 ## The five steps
 
@@ -85,12 +85,12 @@ that stays exactly as it is, alongside everything already connected to it.
 Ground is not optional. RS485 needs a shared reference or the readings won't be
 reliable.
 
-Full diagrams, terminal-by-terminal: **[Wiring guide](/esphome-tigomonitor/guides/wiring/)**.
+Full diagrams, terminal-by-terminal: **[Wiring guide](/guides/wiring/)**.
 
 ### 3. Build your config file
 
 ESPHome needs a configuration file describing your board. Rather than writing one
-by hand, use the **[Config Builder](/esphome-tigomonitor/config-builder/)** — pick
+by hand, use the **[Config Builder](/config-builder/)** — pick
 your board, answer a few questions, copy the result.
 
 ### 4. Flash it
@@ -170,7 +170,7 @@ Out of the box the device knows there *is* a panel, but not that it's "South Roo
 3. **Type them in.** The Topology page lets you name everything by hand. Tedious
    with 30 panels, but it always works.
 
-Details for all three: [Configuration guide](/esphome-tigomonitor/guides/configuration/).
+Details for all three: [Configuration guide](/guides/configuration/).
 
 ## How to tell it's working
 
@@ -180,7 +180,7 @@ Open the **Diagnostics** page on the device and look at two numbers:
   find them all.
 - **Missed packets** will always tick up slowly — that's normal on a shared
   cable. If it's climbing fast, see
-  [Reducing frame loss](/esphome-tigomonitor/guides/uart-optimization/).
+  [Reducing frame loss](/guides/uart-optimization/).
 
 Then open the **History** tab. It fills one snapshot at a time, so it is empty
 for the first half hour no matter what — but if it reports that the device clock
@@ -188,17 +188,17 @@ has not been set, that's the thing to fix before anything else. Daily energy, th
 midnight reset and all stored history key off a real timestamp, and none of them
 works until the device reaches a time server. The usual cause is a static IP
 configured without a DNS server; see
-[Static IP With No DNS](/esphome-tigomonitor/guides/troubleshooting/#static-ip-with-no-dns-breaks-the-clock-cca-sync-and-cloud-import).
+[Static IP With No DNS](/guides/troubleshooting/#static-ip-with-no-dns-breaks-the-clock-cca-sync-and-cloud-import).
 
 Nothing showing up at all? Start with the
-[Troubleshooting guide](/esphome-tigomonitor/guides/troubleshooting/).
+[Troubleshooting guide](/guides/troubleshooting/).
 
 ## Where to go next
 
 | If you want to… | Read |
 |-----------------|------|
-| See it in Home Assistant | [Home Assistant](/esphome-tigomonitor/guides/home-assistant/) |
-| Change a setting | [Configuration](/esphome-tigomonitor/guides/configuration/) |
-| Fix something | [Troubleshooting](/esphome-tigomonitor/guides/troubleshooting/) |
-| Keep long-term history on the device | [Saving history to flash](/esphome-tigomonitor/guides/tsdb-integration/) |
-| Pull the data into your own scripts | [Web server & API](/esphome-tigomonitor/guides/web-server/) |
+| See it in Home Assistant | [Home Assistant](/guides/home-assistant/) |
+| Change a setting | [Configuration](/guides/configuration/) |
+| Fix something | [Troubleshooting](/guides/troubleshooting/) |
+| Keep long-term history on the device | [Saving history to flash](/guides/tsdb-integration/) |
+| Pull the data into your own scripts | [Web server & API](/guides/web-server/) |

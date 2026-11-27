@@ -29,7 +29,7 @@ MQTT.
   and the CCA.
 - **Run the bus in the CCA's place** *(experimental, over a USB adapter)*:
   poll the TAP itself, or stand by to take over if the CCA stops. See
-  [Run the bus in the CCA's place](https://rar.github.io/esphome-tigomonitor/guides/raspberry-pi/#run-the-bus-in-the-ccas-place).
+  [Run the bus in the CCA's place](https://tigomonitor.overwattlabs.com/guides/raspberry-pi/#run-the-bus-in-the-ccas-place).
 
 ## What you need
 
@@ -38,13 +38,13 @@ MQTT.
 - **A way onto the Tigo bus**, one of:
   - a **network bridge**: a small ESP32 at the Tigo cabinet that passes the
     bus along over your network. The
-    [Config Builder](https://rar.github.io/esphome-tigomonitor/config-builder/?build=bridge)
+    [Config Builder](https://tigomonitor.overwattlabs.com/config-builder/?build=bridge)
     writes its config, and
-    [Network bridge](https://rar.github.io/esphome-tigomonitor/guides/network-bridge/)
+    [Network bridge](https://tigomonitor.overwattlabs.com/guides/network-bridge/)
     covers the boards;
   - a **USB RS485 adapter** plugged into the Home Assistant machine, wired to
     the TAP's A, B and ground. See
-    [Wiring](https://rar.github.io/esphome-tigomonitor/guides/wiring/).
+    [Wiring](https://tigomonitor.overwattlabs.com/guides/wiring/).
 - **An MQTT broker** for the panels to appear in Home Assistant: the
   Mosquitto broker app is the easiest.
 
@@ -62,9 +62,9 @@ tab says more.
 
 ## More
 
-- [Documentation](https://rar.github.io/esphome-tigomonitor/), all of it
-- [Run it as a Home Assistant app](https://rar.github.io/esphome-tigomonitor/guides/raspberry-pi/#run-it-as-a-home-assistant-app)
-- [Troubleshooting](https://rar.github.io/esphome-tigomonitor/guides/troubleshooting/)
+- [Documentation](https://tigomonitor.overwattlabs.com/), all of it
+- [Run it as a Home Assistant app](https://tigomonitor.overwattlabs.com/guides/raspberry-pi/#run-it-as-a-home-assistant-app)
+- [Troubleshooting](https://tigomonitor.overwattlabs.com/guides/troubleshooting/)
 - [Issues](https://github.com/RAR/esphome-tigomonitor/issues): what you saw,
   working or not
 - [Releases](https://github.com/RAR/esphome-tigomonitor/releases)

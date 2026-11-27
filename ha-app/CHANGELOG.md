@@ -41,7 +41,7 @@ release.
 
 **A network bridge** that's running keeps working. To build one again, take
 the new config from the
-[Config Builder](https://rar.github.io/esphome-tigomonitor/config-builder/?build=bridge)
+[Config Builder](https://tigomonitor.overwattlabs.com/config-builder/?build=bridge)
 and build it on ESPHome 2026.11 or later: the old config doesn't build on
 current ESPHome. It keeps port 6638, so the app finds the bridge as before.
 It serves one client at a time, and its "Tigo Bridge Clients" sensor gives

@@ -32,9 +32,9 @@ you wire it up. Both steps, same commit:
    reader is, not at the end.
 
 Internal links are validated at build time by `starlight-links-validator` —
-a broken link or anchor fails the build rather than shipping. Site-absolute
-links need the base path (`/esphome-tigomonitor/guides/...`); relative links
-don't.
+a broken link or anchor fails the build rather than shipping. The site has
+its own domain (tigomonitor.overwattlabs.com) and no base path, so
+site-absolute links start at the root (`/guides/...`).
 
 ## Two build steps that publish things you didn't look at
 
