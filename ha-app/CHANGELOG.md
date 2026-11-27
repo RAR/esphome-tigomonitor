@@ -2,7 +2,7 @@
 
 What changed in the TigoMonitor app at each release, and anything you need
 to do. Each release's full notes are on
-[GitHub](https://github.com/RAR/esphome-tigomonitor/releases).
+[GitHub](https://github.com/RAR/tigomonitor/releases).
 
 ## 2.5.1
 
@@ -19,7 +19,7 @@ update turns them off.
   Assistant had already signed you in. They now count that sign-in, as
   everything else already did.
 
-[All of 2.5.1's changes](https://github.com/RAR/esphome-tigomonitor/releases/tag/v2.5.1)
+[All of 2.5.1's changes](https://github.com/RAR/tigomonitor/releases/tag/v2.5.1)
 
 ## 2.5.0
 
@@ -49,11 +49,11 @@ way to "Tigo Bridge Disconnects".
 
 **A TAP you added with TigoMonitor before 2.5.0** got a network key of its
 own, so no optimizer can join it. The
-[release notes](https://github.com/RAR/esphome-tigomonitor/releases/tag/v2.5.0)
+[release notes](https://github.com/RAR/tigomonitor/releases/tag/v2.5.0)
 say how to give it the shared key. This only applies when TigoMonitor runs
 the bus; over a bridge it only listens.
 
-[All of 2.5.0's changes](https://github.com/RAR/esphome-tigomonitor/releases/tag/v2.5.0)
+[All of 2.5.0's changes](https://github.com/RAR/tigomonitor/releases/tag/v2.5.0)
 
 ## 2.4.0
 
@@ -63,4 +63,4 @@ first start it uses the Mosquitto broker app, so the panels appear in Home
 Assistant without typing a broker in. Home Assistant signs you in, and its
 backups include the app's settings and history.
 
-[All of 2.4.0's changes](https://github.com/RAR/esphome-tigomonitor/releases/tag/v2.4.0)
+[All of 2.4.0's changes](https://github.com/RAR/tigomonitor/releases/tag/v2.4.0)

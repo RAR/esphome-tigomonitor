@@ -922,7 +922,7 @@ test('the sidebar shows a release version, linked to its notes, on both builds',
     await page.waitForFunction(() => !document.getElementById('app-version').hidden);
     assert.deepEqual(await appVersion(page), {
       shown: true, text: 'v2.3.0',
-      href: 'https://github.com/RAR/esphome-tigomonitor/releases/tag/v2.3.0',
+      href: 'https://github.com/RAR/tigomonitor/releases/tag/v2.3.0',
     });
     assert.deepEqual(errors, []);
     await ctx.close();

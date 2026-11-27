@@ -1,6 +1,6 @@
 [Unit]
 Description=Tigo optimizer monitor
-Documentation=https://github.com/RAR/esphome-tigomonitor
+Documentation=https://github.com/RAR/tigomonitor
 After=network-online.target bluetooth.service
 Wants=network-online.target
 

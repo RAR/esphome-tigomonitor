@@ -44,7 +44,7 @@ psram:
 external_components:
   - source:
       type: git
-      url: https://github.com/RAR/esphome-tigomonitor
+      url: https://github.com/RAR/tigomonitor
       ref: main
     components: [tigo_monitor, tigo_master]
 

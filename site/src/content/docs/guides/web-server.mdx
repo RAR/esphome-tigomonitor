@@ -89,7 +89,7 @@ it. You don't need any of it to use the dashboard.
 
 The sidebar's footer carries:
 
-- **GitHub link** → opens `github.com/RAR/esphome-tigomonitor` in a new tab.
+- **GitHub link** → opens `github.com/RAR/tigomonitor` in a new tab.
 - **°C / °F toggle** — persists via `localStorage['tempUnit']` (same key the legacy page used). The button shows the unit you'll *get* if you click. Active view re-renders immediately.
 - **Theme toggle** — light/dark, persists via `localStorage['tigoTheme']`. With nothing saved, the page follows `prefers-color-scheme`.
 - **Version** — the TigoMonitor version the device reports (`tigomonitor_version` in `/api/status`). A release links to its release notes.
@@ -300,7 +300,7 @@ succeeds — the strings are created, and `/api/strings` returns them — but th
 belong to no inverter, so the Dashboard and Topology views show **0 strings /
 0 panels**.
 
-Since this was reported ([#60](https://github.com/RAR/esphome-tigomonitor/issues/60))
+Since this was reported ([#60](https://github.com/RAR/tigomonitor/issues/60))
 the import reports unmatched labels back to you, and any string that matches no
 inverter is grouped under **Unassigned** rather than hidden. The confusion comes
 from the CCA itself, which calls an MPPT an "Inverter" — which is also why this
@@ -323,7 +323,7 @@ barcode — so the labels in the node table follow it:
   boot. The `addr` in the file is only used for panels that have not been
   heard from yet.
 
-Before this ([#74](https://github.com/RAR/esphome-tigomonitor/issues/74)),
+Before this ([#74](https://github.com/RAR/tigomonitor/issues/74)),
 restoring a backup taken before a renumbering put every label back on the
 panel's *old* address. If you are on an older firmware, run **Cloud Import**
 instead, which matches by barcode, and export a fresh backup afterwards.
@@ -445,4 +445,4 @@ Modern Chrome / Firefox / Safari, mobile or desktop. No plugins. The SPA degrade
 
 ---
 
-**See also:** [Configuration](/guides/configuration/) · [Home Assistant](/guides/home-assistant/) · [Troubleshooting](/guides/troubleshooting/) · [← Back to README](https://github.com/RAR/esphome-tigomonitor)
+**See also:** [Configuration](/guides/configuration/) · [Home Assistant](/guides/home-assistant/) · [Troubleshooting](/guides/troubleshooting/) · [← Back to README](https://github.com/RAR/tigomonitor)

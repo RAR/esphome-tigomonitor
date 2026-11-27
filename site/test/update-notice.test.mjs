@@ -32,7 +32,7 @@ after(async () => {
   server.close();
 });
 
-const RELEASE_API = 'https://api.github.com/repos/RAR/esphome-tigomonitor/releases/latest';
+const RELEASE_API = 'https://api.github.com/repos/RAR/tigomonitor/releases/latest';
 
 // opts.running: the device's version. opts.latest: GitHub's tag_name, or a
 // status number for a failed answer. opts.storage: localStorage to start with.
@@ -50,7 +50,7 @@ async function open(opts = {}) {
     api.github++;
     if (typeof opts.latest === 'number') return route.fulfill({ status: opts.latest, body: '{}' });
     return route.fulfill({ status: 200, contentType: 'application/json',
-      body: JSON.stringify({ tag_name: opts.latest, html_url: `https://github.com/RAR/esphome-tigomonitor/releases/tag/${opts.latest}` }) });
+      body: JSON.stringify({ tag_name: opts.latest, html_url: `https://github.com/RAR/tigomonitor/releases/tag/${opts.latest}` }) });
   });
   if (opts.storage) await ctx.addInitScript((s) => { for (const [k, v] of Object.entries(s)) localStorage.setItem(k, v); }, opts.storage);
   const page = await ctx.newPage();
@@ -72,7 +72,7 @@ const status = (page) => page.$eval('#update-status', (el) => el.textContent);
 test('a newer release shows under the version, linked to its notes', async () => {
   const { page, ctx, api, errors } = await open({ running: '2.3.0', latest: 'v2.4.0' });
   assert.deepEqual(await notice(page), {
-    shown: true, text: 'v2.4.0 available', href: 'https://github.com/RAR/esphome-tigomonitor/releases/tag/v2.4.0',
+    shown: true, text: 'v2.4.0 available', href: 'https://github.com/RAR/tigomonitor/releases/tag/v2.4.0',
     label: 'TigoMonitor v2.4.0 is available: release notes',
   });
   // Beside the version, on its line.

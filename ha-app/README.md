@@ -1,6 +1,6 @@
 # TigoMonitor
 
-![TigoMonitor: per-panel solar data in Home Assistant, read straight off the Tigo RS485 bus. No cloud account, no Tigo API.](https://raw.githubusercontent.com/RAR/esphome-tigomonitor/main/docs/images/social-preview.png)
+![TigoMonitor: per-panel solar data in Home Assistant, read straight off the Tigo RS485 bus. No cloud account, no Tigo API.](https://raw.githubusercontent.com/RAR/tigomonitor/main/docs/images/social-preview.png)
 
 Each Tigo optimizer's power, voltage and temperature, read from the RS485 bus
 by a USB adapter or a network bridge, in Home Assistant's sidebar and over
@@ -56,18 +56,18 @@ tab says more.
 
 | | |
 |---|---|
-| **Dashboard**: every panel by string, colored against its neighbours; click one for its details | ![Dashboard](https://raw.githubusercontent.com/RAR/esphome-tigomonitor/main/docs/images/Dashboard.png) |
-| **History**: the system's power and each day's energy | ![History](https://raw.githubusercontent.com/RAR/esphome-tigomonitor/main/docs/images/History.png) |
-| **Topology**: inverters, strings and panels, renamed and laid out by dragging | ![Topology](https://raw.githubusercontent.com/RAR/esphome-tigomonitor/main/docs/images/Topology.png) |
+| **Dashboard**: every panel by string, colored against its neighbours; click one for its details | ![Dashboard](https://raw.githubusercontent.com/RAR/tigomonitor/main/docs/images/Dashboard.png) |
+| **History**: the system's power and each day's energy | ![History](https://raw.githubusercontent.com/RAR/tigomonitor/main/docs/images/History.png) |
+| **Topology**: inverters, strings and panels, renamed and laid out by dragging | ![Topology](https://raw.githubusercontent.com/RAR/tigomonitor/main/docs/images/Topology.png) |
 
 ## More
 
 - [Documentation](https://tigomonitor.overwattlabs.com/), all of it
 - [Run it as a Home Assistant app](https://tigomonitor.overwattlabs.com/guides/raspberry-pi/#run-it-as-a-home-assistant-app)
 - [Troubleshooting](https://tigomonitor.overwattlabs.com/guides/troubleshooting/)
-- [Issues](https://github.com/RAR/esphome-tigomonitor/issues): what you saw,
+- [Issues](https://github.com/RAR/tigomonitor/issues): what you saw,
   working or not
-- [Releases](https://github.com/RAR/esphome-tigomonitor/releases)
+- [Releases](https://github.com/RAR/tigomonitor/releases)
 
 ## Acknowledgments
 

@@ -44,11 +44,11 @@ Depends: $deps, ca-certificates
 Recommends: avahi-daemon, bluez
 Section: misc
 Priority: optional
-Homepage: https://github.com/RAR/esphome-tigomonitor
+Homepage: https://github.com/RAR/tigomonitor
 Description: Tigo solar optimizer monitor for Home Assistant
  Listens to a Tigo TAP's RS485 bus and publishes every optimizer's power,
  voltage, current and temperature to Home Assistant over MQTT discovery,
- with the same web dashboard as the ESP32 build of esphome-tigomonitor.
+ with the same web dashboard as the ESP32 build of TigoMonitor.
 EOF
 printf '/etc/avahi/services/tigomonitor-http.service\n' > "$root/DEBIAN/conffiles"
 

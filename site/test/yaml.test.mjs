@@ -81,7 +81,7 @@ test('displayOverlay is appended verbatim at the end', () => {
 test('generated config sources the tigo components via external_components', () => {
   const y = toYaml(assembleConfig(getBoard('esp32s3-atoms3r'), form));
   assert.ok(y.includes('external_components:'), 'no external_components block');
-  assert.ok(y.includes('url: https://github.com/RAR/esphome-tigomonitor'), 'tigo url missing');
+  assert.ok(y.includes('url: https://github.com/RAR/tigomonitor'), 'tigo url missing');
   // Must track trunk. `next` is a lagging legacy branch — pinning the builder
   // there silently shipped users older components than the docs describe.
   assert.ok(y.includes('ref: main'), 'ref must pin main, not a legacy branch');

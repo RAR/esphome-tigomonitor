@@ -72,7 +72,7 @@ Our AtomS3R held the bus for about that long at each boot. If a bridge ever
 reboots while it's connected, expect a short gap on the bus.
 
 The same configs are in the repository's
-[`boards/`](https://github.com/RAR/esphome-tigomonitor/tree/main/boards)
+[`boards/`](https://github.com/RAR/tigomonitor/tree/main/boards)
 folder as `example-*-bridge.yaml`, with a comment on every pin.
 
 A bridge built from an earlier config runs

@@ -31,7 +31,7 @@ export default defineConfig({
       // silently ship again.
       plugins: [starlightLinksValidator()],
       social: [
-        { icon: 'github', label: 'GitHub', href: 'https://github.com/RAR/esphome-tigomonitor' },
+        { icon: 'github', label: 'GitHub', href: 'https://github.com/RAR/tigomonitor' },
       ],
       // Ordered by when a first-time installer needs it, not alphabetically:
       // setup you can't skip, then the things you reach for once it's running,

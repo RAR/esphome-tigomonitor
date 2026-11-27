@@ -108,4 +108,4 @@ This guidance came out of a real case: an AtomS3R with its display enabled was d
 
 ---
 
-**See also:** [Troubleshooting](/guides/troubleshooting/) · [Configuration](/guides/configuration/) · [← Back to README](https://github.com/RAR/esphome-tigomonitor)
+**See also:** [Troubleshooting](/guides/troubleshooting/) · [Configuration](/guides/configuration/) · [← Back to README](https://github.com/RAR/tigomonitor)

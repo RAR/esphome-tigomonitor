@@ -102,7 +102,7 @@ cached clone for a day and never mentions that it did.
 external_components:
   - source:
       type: git
-      url: https://github.com/RAR/esphome-tigomonitor
+      url: https://github.com/RAR/tigomonitor
       ref: main
     components: [ tigo_monitor, tigo_server ]
     refresh: 0s
@@ -441,7 +441,7 @@ successfully and the partition is fine.
 That distinction used to be invisible: both failures returned HTTP 503 and the
 page blamed storage for either one, which sent one reporter through a partition
 table and a rebuild before the clock turned out to be the cause
-([#60](https://github.com/RAR/esphome-tigomonitor/issues/60)). Current firmware
+([#60](https://github.com/RAR/tigomonitor/issues/60)). Current firmware
 says which it is — if yours still blames storage, you're on an older build, or on
 a cached clone (see [above](#a-merged-fix-doesnt-appear-after-rebuilding)).
 
@@ -563,7 +563,7 @@ Note the error names whichever header the compiler reached first, so you may see
 external_components:
   - source:
       type: git
-      url: https://github.com/RAR/esphome-tigomonitor
+      url: https://github.com/RAR/tigomonitor
     components: [ tigo_monitor, tigo_server ]
     refresh: 0s
 ```
@@ -574,7 +574,7 @@ For a specific release:
 external_components:
   - source:
       type: git
-      url: https://github.com/RAR/esphome-tigomonitor
+      url: https://github.com/RAR/tigomonitor
       ref: v1.3.1
     components: [ tigo_monitor, tigo_server ]
     refresh: 0s
@@ -665,8 +665,8 @@ button:
 
 1. Check ESPHome logs for error messages
 2. Review the Diagnostics view for memory info
-3. Search existing [GitHub issues](https://github.com/RAR/esphome-tigomonitor/issues)
-4. Open a [new issue](https://github.com/RAR/esphome-tigomonitor/issues) with:
+3. Search existing [GitHub issues](https://github.com/RAR/tigomonitor/issues)
+4. Open a [new issue](https://github.com/RAR/tigomonitor/issues) with:
    - ESPHome version
    - Hardware (board, PSRAM)
    - Relevant log output
@@ -674,4 +674,4 @@ button:
 
 ---
 
-**See also:** [Wiring](/guides/wiring/) · [UART Optimization](/guides/uart-optimization/) · [Configuration](/guides/configuration/) · [← Back to README](https://github.com/RAR/esphome-tigomonitor)
+**See also:** [Wiring](/guides/wiring/) · [UART Optimization](/guides/uart-optimization/) · [Configuration](/guides/configuration/) · [← Back to README](https://github.com/RAR/tigomonitor)

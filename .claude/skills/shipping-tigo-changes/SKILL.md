@@ -1,6 +1,6 @@
 ---
 name: shipping-tigo-changes
-description: Use when writing a commit message, adding a CHANGELOG entry, annotating a version tag, or drafting GitHub release notes for esphome-tigomonitor — covers the commit type/scope vocabulary in use, the evidence a body must carry, and how the same change is described differently in each of the places it goes.
+description: Use when writing a commit message, adding a CHANGELOG entry, annotating a version tag, or drafting GitHub release notes for TigoMonitor (this repo) — covers the commit type/scope vocabulary in use, the evidence a body must carry, and how the same change is described differently in each of the places it goes.
 ---
 
 # Shipping Changes
