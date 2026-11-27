@@ -5,15 +5,15 @@ description: A small ESP32 at the Tigo cabinet that passes the RS485 bus over yo
 
 A network bridge is a small ESP32 at the Tigo cabinet that passes the RS485
 bus along over Wi-Fi or Ethernet. TigoMonitor runs somewhere else, on a
-[Raspberry Pi or another Linux machine](/esphome-tigomonitor/guides/raspberry-pi/)
+[Raspberry Pi or another Linux machine](/guides/raspberry-pi/)
 or as the
-[Home Assistant app](/esphome-tigomonitor/guides/raspberry-pi/#run-it-as-a-home-assistant-app),
+[Home Assistant app](/guides/raspberry-pi/#run-it-as-a-home-assistant-app),
 and reads the bus from the bridge instead of from an adapter plugged into it.
 
 Use one when the machine you want to run TigoMonitor on isn't at the cabinet:
 a Home Assistant box in another room, say, or a Pi in a rack. If the monitor
 can sit at the cabinet, you don't need a bridge. Wire an
-[ESP32 monitor](/esphome-tigomonitor/guides/getting-started/) or a Pi's RS485
+[ESP32 monitor](/guides/getting-started/) or a Pi's RS485
 adapter to the TAP directly.
 
 ## What it does, and what it doesn't
@@ -30,13 +30,13 @@ connected, and its Wi-Fi signal if it has one.
 It can't send anything onto the bus. Its UART has no transmit pin, and a pin
 on the board holds the transceiver's driver off. So a bridge can feed
 TigoMonitor listening alongside the CCA, but it can't be used for
-[TigoMonitor running the bus](/esphome-tigomonitor/guides/raspberry-pi/#run-the-bus-in-the-ccas-place)
+[TigoMonitor running the bus](/guides/raspberry-pi/#run-the-bus-in-the-ccas-place)
 in place of a CCA. That needs an adapter wired to the machine running it.
 
 ## What you need
 
 - **TigoMonitor running on the other machine.** Set it up first, from
-  [Raspberry Pi and Linux](/esphome-tigomonitor/guides/raspberry-pi/).
+  [Raspberry Pi and Linux](/guides/raspberry-pi/).
 - **ESPHome 2026.11 or later**, to build the bridge. `uart_tcp` is built into
   ESPHome from 2026.11.
 - **One of these boards.** None of them needs PSRAM.
@@ -56,14 +56,14 @@ in place of a CCA. That needs an adapter wired to the machine running it.
 
 ## Build it
 
-1. Open the [Config Builder](/esphome-tigomonitor/config-builder/?build=bridge),
+1. Open the [Config Builder](/config-builder/?build=bridge),
    which opens on **A network bridge**. Pick your board, fill in your Wi-Fi if it uses it,
    and download the config and its `secrets.yaml`.
 2. Flash it over USB the first time, as in
-   [Start Here](/esphome-tigomonitor/guides/getting-started/#4-flash-it). Later updates can
+   [Start Here](/guides/getting-started/#4-flash-it). Later updates can
    go over the network.
 3. Power the bridge up, then wire its A, B and ground to the TAP as in
-   [Wiring](/esphome-tigomonitor/guides/wiring/). On the AtomS3 the Atomic
+   [Wiring](/guides/wiring/). On the AtomS3 the Atomic
    RS485 Base is the same one an AtomS3R monitor uses.
 
 Power it up before you connect A and B. For about a second after power-on,

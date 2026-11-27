@@ -99,5 +99,5 @@ the registry rather than git.
 
 ## See also
 
-- [Saving History to Flash](https://rar.github.io/esphome-tigomonitor/guides/tsdb-integration/) — the user-facing cost model and the measurement behind the 2.4.1 floor
+- [Saving History to Flash](https://tigomonitor.overwattlabs.com/guides/tsdb-integration/) — the user-facing cost model and the measurement behind the 2.4.1 floor
 - [`tsdb-flash-crash-issue.md`](tsdb-flash-crash-issue.md) — the separate flash-write crash investigation (cause was cabinet power, not the filesystem)

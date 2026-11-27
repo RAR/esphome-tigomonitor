@@ -3,7 +3,7 @@
 An ESPHome component for monitoring Tigo solar optimizers via RS485/UART. Real-time
 per-panel monitoring with a built-in web app and Home Assistant integration.
 
-📖 **[Documentation](https://rar.github.io/esphome-tigomonitor/)** &nbsp;·&nbsp; 🚀 **[Start Here](https://rar.github.io/esphome-tigomonitor/guides/getting-started/)** &nbsp;·&nbsp; 🔧 **[Config Builder](https://rar.github.io/esphome-tigomonitor/config-builder/)** — generate a ready-to-flash YAML in your browser
+📖 **[Documentation](https://tigomonitor.overwattlabs.com/)** &nbsp;·&nbsp; 🚀 **[Start Here](https://tigomonitor.overwattlabs.com/guides/getting-started/)** &nbsp;·&nbsp; 🔧 **[Config Builder](https://tigomonitor.overwattlabs.com/config-builder/)** — generate a ready-to-flash YAML in your browser
 
 ## Features
 
@@ -23,7 +23,7 @@ per-panel monitoring with a built-in web app and Home Assistant integration.
 - **Run the Bus Without a CCA** *(Raspberry Pi, experimental)* – Poll the TAP in the
   CCA's place, or stand by to take over if the master stops; turn the array's output
   off and on; watch the bus traffic live. See
-  [Run the bus in the CCA's place](https://rar.github.io/esphome-tigomonitor/guides/raspberry-pi/#run-the-bus-in-the-ccas-place)
+  [Run the bus in the CCA's place](https://tigomonitor.overwattlabs.com/guides/raspberry-pi/#run-the-bus-in-the-ccas-place)
 
 ## Requirements
 
@@ -36,17 +36,17 @@ per-panel monitoring with a built-in web app and Home Assistant integration.
 
 ## Quick Start
 
-1. Wire an ESP32 to the Tigo RS485 bus — see the [Wiring Guide](https://rar.github.io/esphome-tigomonitor/guides/wiring/).
-2. Generate a config with the [Config Builder](https://rar.github.io/esphome-tigomonitor/config-builder/),
+1. Wire an ESP32 to the Tigo RS485 bus — see the [Wiring Guide](https://tigomonitor.overwattlabs.com/guides/wiring/).
+2. Generate a config with the [Config Builder](https://tigomonitor.overwattlabs.com/config-builder/),
    or start from a ready-to-flash example in [`boards/`](boards/).
 3. `esphome run your-config.yaml`, then open `http://<esp32-ip>/`.
 
 The full walkthrough — parts list, safety, sensor blocks, PSRAM tuning — is in
-[Start Here](https://rar.github.io/esphome-tigomonitor/guides/getting-started/).
+[Start Here](https://tigomonitor.overwattlabs.com/guides/getting-started/).
 
 No ESP32? The same monitor runs on a Raspberry Pi, any Debian or Ubuntu machine,
 in Docker, or as a Home Assistant app, with no ESPHome — see
-[Raspberry Pi and Linux](https://rar.github.io/esphome-tigomonitor/guides/raspberry-pi/).
+[Raspberry Pi and Linux](https://tigomonitor.overwattlabs.com/guides/raspberry-pi/).
 On Home Assistant OS, this button adds the app's repository to your Home Assistant:
 
 [![Add this repository to your Home Assistant](https://my.home-assistant.io/badges/supervisor_add_addon_repository.svg)](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgithub.com%2FRAR%2Fesphome-tigomonitor)
@@ -69,20 +69,20 @@ On Home Assistant OS, this button adds the app's repository to your Home Assista
 
 ## Documentation
 
-Full documentation lives at **[rar.github.io/esphome-tigomonitor](https://rar.github.io/esphome-tigomonitor/)**.
+Full documentation lives at **[tigomonitor.overwattlabs.com](https://tigomonitor.overwattlabs.com/)**.
 
 | Document | Description |
 |----------|-------------|
-| [Start Here](https://rar.github.io/esphome-tigomonitor/guides/getting-started/) | Parts, safety, and the five steps to a live dashboard |
-| [Config Builder](https://rar.github.io/esphome-tigomonitor/config-builder/) | Generate a ready-to-flash ESPHome YAML for your board |
-| [Raspberry Pi and Linux](https://rar.github.io/esphome-tigomonitor/guides/raspberry-pi/) | The monitor on a Pi, a Linux machine or in Docker, without ESPHome, or in place of the CCA |
-| [Wiring Guide](https://rar.github.io/esphome-tigomonitor/guides/wiring/) | RS485 connection to Tigo CCA/TAP |
-| [Configuration Guide](https://rar.github.io/esphome-tigomonitor/guides/configuration/) | Full configuration options, PSRAM and large installs |
-| [Web Server](https://rar.github.io/esphome-tigomonitor/guides/web-server/) | SPA views and the full API reference |
-| [TSDB Integration](https://rar.github.io/esphome-tigomonitor/guides/tsdb-integration/) | On-flash time-series history (esp_tsdb) |
-| [Home Assistant](https://rar.github.io/esphome-tigomonitor/guides/home-assistant/) | HA integration and dashboards |
-| [UART Optimization](https://rar.github.io/esphome-tigomonitor/guides/uart-optimization/) | Reducing packet loss |
-| [Troubleshooting](https://rar.github.io/esphome-tigomonitor/guides/troubleshooting/) | Common issues and solutions |
+| [Start Here](https://tigomonitor.overwattlabs.com/guides/getting-started/) | Parts, safety, and the five steps to a live dashboard |
+| [Config Builder](https://tigomonitor.overwattlabs.com/config-builder/) | Generate a ready-to-flash ESPHome YAML for your board |
+| [Raspberry Pi and Linux](https://tigomonitor.overwattlabs.com/guides/raspberry-pi/) | The monitor on a Pi, a Linux machine or in Docker, without ESPHome, or in place of the CCA |
+| [Wiring Guide](https://tigomonitor.overwattlabs.com/guides/wiring/) | RS485 connection to Tigo CCA/TAP |
+| [Configuration Guide](https://tigomonitor.overwattlabs.com/guides/configuration/) | Full configuration options, PSRAM and large installs |
+| [Web Server](https://tigomonitor.overwattlabs.com/guides/web-server/) | SPA views and the full API reference |
+| [TSDB Integration](https://tigomonitor.overwattlabs.com/guides/tsdb-integration/) | On-flash time-series history (esp_tsdb) |
+| [Home Assistant](https://tigomonitor.overwattlabs.com/guides/home-assistant/) | HA integration and dashboards |
+| [UART Optimization](https://tigomonitor.overwattlabs.com/guides/uart-optimization/) | Reducing packet loss |
+| [Troubleshooting](https://tigomonitor.overwattlabs.com/guides/troubleshooting/) | Common issues and solutions |
 
 ## Contributing
 

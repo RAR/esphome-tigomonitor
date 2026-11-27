@@ -11,9 +11,9 @@ Open TigoMonitor from the sidebar, then choose under **Settings → Bus**:
 
 - **Network bridge (TCP):** a small ESP32 at the Tigo cabinet that passes the
   bus along over Wi-Fi. Enter its address, such as `10.0.0.46:6638`. The
-  [Config Builder](https://rar.github.io/esphome-tigomonitor/config-builder/?build=bridge)
+  [Config Builder](https://tigomonitor.overwattlabs.com/config-builder/?build=bridge)
   writes the bridge's config, and
-  [Network bridge](https://rar.github.io/esphome-tigomonitor/guides/network-bridge/)
+  [Network bridge](https://tigomonitor.overwattlabs.com/guides/network-bridge/)
   covers the boards and the wiring.
 - **A USB RS485 adapter** plugged into this machine, wired to the TAP's A, B
   and ground. Choose it by its `/dev/serial/by-id/` name, which stays the
@@ -56,4 +56,4 @@ the page shows Dangerous options only while it runs the bus.
 ## More
 
 The full guide, including running the bus in the CCA's place:
-https://rar.github.io/esphome-tigomonitor/guides/raspberry-pi/
+https://tigomonitor.overwattlabs.com/guides/raspberry-pi/

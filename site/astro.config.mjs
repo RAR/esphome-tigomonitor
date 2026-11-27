@@ -4,8 +4,7 @@ import starlight from '@astrojs/starlight';
 import starlightLinksValidator from 'starlight-links-validator';
 
 export default defineConfig({
-  site: 'https://rar.github.io',
-  base: '/esphome-tigomonitor',
+  site: 'https://tigomonitor.overwattlabs.com',
   integrations: [
     starlight({
       title: 'TigoMonitor',

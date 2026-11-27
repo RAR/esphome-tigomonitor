@@ -203,4 +203,4 @@ The UART runs at **38400 baud, 8N1** on TX=GPIO6 / RX=GPIO5.
 
 ---
 
-**See also:** [Troubleshooting](/esphome-tigomonitor/guides/troubleshooting/) · [Configuration](/esphome-tigomonitor/guides/configuration/) · [← Back to README](https://github.com/RAR/esphome-tigomonitor)
+**See also:** [Troubleshooting](/guides/troubleshooting/) · [Configuration](/guides/configuration/) · [← Back to README](https://github.com/RAR/esphome-tigomonitor)

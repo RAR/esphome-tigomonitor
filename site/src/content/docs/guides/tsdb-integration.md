@@ -10,7 +10,7 @@ power cut, a reboot, or a firmware update.
 
 It's off by default because it needs a couple of extra lines in your setup file
 and a change to how the device's storage is divided up. The
-[Config Builder](/esphome-tigomonitor/config-builder/) can do that part for you.
+[Config Builder](/config-builder/) can do that part for you.
 
 **To turn it on:** copy the block under
 [Required configuration](#required-configuration) into your setup file and
@@ -316,4 +316,4 @@ Buffer pools default to internal RAM in upstream esp_tsdb. We override via `cfg.
 
 ---
 
-**See also:** [Configuration](/esphome-tigomonitor/guides/configuration/) · [Web Server & API](/esphome-tigomonitor/guides/web-server/) · [← Back to README](https://github.com/RAR/esphome-tigomonitor)
+**See also:** [Configuration](/guides/configuration/) · [Web Server & API](/guides/web-server/) · [← Back to README](https://github.com/RAR/esphome-tigomonitor)

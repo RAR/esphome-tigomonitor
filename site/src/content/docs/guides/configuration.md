@@ -5,13 +5,13 @@ title: Configuration Guide
 This is the full list of every setting, for when you need to look one up.
 
 :::tip[You probably don't need to read this]
-The **[Config Builder](/esphome-tigomonitor/config-builder/)** writes a working
+The **[Config Builder](/config-builder/)** writes a working
 setup file for you, and the settings people actually change day-to-day can be
 changed on the device itself without touching any file — see
 [the handful that matter](#the-settings-most-people-change) below.
 
 Setting up for the first time? Go to
-**[Start Here](/esphome-tigomonitor/guides/getting-started/)** instead.
+**[Start Here](/guides/getting-started/)** instead.
 :::
 
 ## The settings most people change
@@ -75,7 +75,7 @@ tigo_monitor:
 | `power_calibration` | Float | 1.0 | Power multiplier (0.5-2.0) |
 | `night_mode_timeout` | Integer | 60 | Minutes before night mode (1-1440) |
 | `stale_timeout` | Integer | 10 | Minutes without data before a device's production values (power, current, efficiency, duty cycle) zero out. `0` disables. Voltage/temperature keep their last reading for diagnostics |
-| `history_interval` | Integer | 30 | Minutes between on-flash history snapshots (5–1440). Lower means finer charts but proportionally more flash wear and shorter retention — see [Saving History to Flash](/esphome-tigomonitor/guides/tsdb-integration/). Values under 15 log a warning at build time |
+| `history_interval` | Integer | 30 | Minutes between on-flash history snapshots (5–1440). Lower means finer charts but proportionally more flash wear and shorter retention — see [Saving History to Flash](/guides/tsdb-integration/). Values under 15 log a warning at build time |
 | `inverters` | List | None | Inverter grouping config |
 
 ### Inverter Grouping
@@ -523,13 +523,13 @@ Check the low-water mark at any time — `heap_min_free` in `curl http://<device
   ```
 
 - **Entity count.** Every per-panel sensor declared in YAML costs ~110–150 bytes of internal RAM at boot (the sensor object plus API registration). It scales: 64 panels × 7 sensor types ≈ 450 entities ≈ **50–70 KB** — the largest static consumer on a big install. Declare only the per-panel sensors you actually use in Home Assistant; the web dashboard shows every metric for every panel regardless, at no per-entity cost. For HA aggregates, prefer the `string_label:` per-string power sensor (one entity per string) over declaring — or lambda-summing — per-panel sensors.
-- **UART RX buffer.** `CONFIG_UART_RX_BUFFER_SIZE` (and the matching `rx_buffer_size:` on the `uart:` component) allocate from internal RAM, never PSRAM. 2–8 KB is plenty on an ESP32-S3 at 38400 baud; a 32 KB buffer silently spends a sixth of the usable internal heap. See [UART Optimization](/esphome-tigomonitor/guides/uart-optimization/).
+- **UART RX buffer.** `CONFIG_UART_RX_BUFFER_SIZE` (and the matching `rx_buffer_size:` on the `uart:` component) allocate from internal RAM, never PSRAM. 2–8 KB is plenty on an ESP32-S3 at 38400 baud; a 32 KB buffer silently spends a sixth of the usable internal heap. See [UART Optimization](/guides/uart-optimization/).
 
 ---
 
 ## On-Flash History (esp_tsdb)
 
-Persistent time-series history is opt-in via two extra dependencies and a custom partition table. See [Saving history to flash](/esphome-tigomonitor/guides/tsdb-integration/) for the full schema, sizing, and query reference.
+Persistent time-series history is opt-in via two extra dependencies and a custom partition table. See [Saving history to flash](/guides/tsdb-integration/) for the full schema, sizing, and query reference.
 
 Quick form (8 MB AtomS3R):
 
@@ -575,4 +575,4 @@ See [`boards/`](https://github.com/RAR/esphome-tigomonitor/tree/main/boards) for
 
 ---
 
-**See also:** [Web Server &amp; API](/esphome-tigomonitor/guides/web-server/) · [Wiring](/esphome-tigomonitor/guides/wiring/) · [Troubleshooting](/esphome-tigomonitor/guides/troubleshooting/) · [← Back to README](https://github.com/RAR/esphome-tigomonitor)
+**See also:** [Web Server &amp; API](/guides/web-server/) · [Wiring](/guides/wiring/) · [Troubleshooting](/guides/troubleshooting/) · [← Back to README](https://github.com/RAR/esphome-tigomonitor)

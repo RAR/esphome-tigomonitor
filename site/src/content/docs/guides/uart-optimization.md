@@ -84,7 +84,7 @@ light:
 
 ## 4. Confirm PSRAM is on
 
-PSRAM is required — check it's actually enabled in your config, not just present on the board. See [Configuration → PSRAM](/esphome-tigomonitor/guides/configuration/#psram-esp32-s3).
+PSRAM is required — check it's actually enabled in your config, not just present on the board. See [Configuration → PSRAM](/guides/configuration/#psram-esp32-s3).
 
 ## Verify it worked
 
@@ -108,4 +108,4 @@ This guidance came out of a real case: an AtomS3R with its display enabled was d
 
 ---
 
-**See also:** [Troubleshooting](/esphome-tigomonitor/guides/troubleshooting/) · [Configuration](/esphome-tigomonitor/guides/configuration/) · [← Back to README](https://github.com/RAR/esphome-tigomonitor)
+**See also:** [Troubleshooting](/guides/troubleshooting/) · [Configuration](/guides/configuration/) · [← Back to README](https://github.com/RAR/esphome-tigomonitor)
