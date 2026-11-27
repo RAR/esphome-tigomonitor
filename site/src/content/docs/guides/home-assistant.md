@@ -319,4 +319,4 @@ See [Web Server & API](/guides/web-server/) for the full endpoint list and token
 
 ---
 
-**See also:** [Web Server & API](/guides/web-server/) · [Configuration](/guides/configuration/) · [Troubleshooting](/guides/troubleshooting/) · [← Back to README](https://github.com/RAR/esphome-tigomonitor)
+**See also:** [Web Server & API](/guides/web-server/) · [Configuration](/guides/configuration/) · [Troubleshooting](/guides/troubleshooting/) · [← Back to README](https://github.com/RAR/tigomonitor)

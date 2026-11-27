@@ -101,7 +101,7 @@ TigoMonitor $version
 
 Open http://tigomonitor.local (or the hostname you chose in Raspberry Pi
 Imager) once the Pi has joined your Wi-Fi, then set your MQTT broker under
-Tools. Docs: https://github.com/RAR/esphome-tigomonitor
+Tools. Docs: https://github.com/RAR/tigomonitor
 EOF
 
 sync

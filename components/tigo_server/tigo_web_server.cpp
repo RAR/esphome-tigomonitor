@@ -4175,7 +4175,7 @@ esp_err_t TigoWebServer::api_github_release_handler(httpd_req_t *req) {
   httpd_resp_set_type(req, "application/json");
   httpd_resp_set_hdr(req, "Cache-Control", "public, max-age=3600"); // Cache for 1 hour
 
-  const char *response = R"({"fetch_url":"https://api.github.com/repos/RAR/esphome-tigomonitor/releases/latest"})";
+  const char *response = R"({"fetch_url":"https://api.github.com/repos/RAR/tigomonitor/releases/latest"})";
 
   httpd_resp_sendstr(req, response);
   return ESP_OK;

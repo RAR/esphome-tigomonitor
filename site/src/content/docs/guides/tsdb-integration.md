@@ -77,7 +77,7 @@ esp32:
 Every snapshot is keyed by a real timestamp, so history needs a time source —
 and it needs it *linked to the component*, not just present in the file. A
 `time:` block on its own leaves the component's clock pointer null, and
-snapshots are skipped silently ([#58](https://github.com/RAR/esphome-tigomonitor/issues/58)):
+snapshots are skipped silently ([#58](https://github.com/RAR/tigomonitor/issues/58)):
 
 ```yaml
 time:
@@ -105,7 +105,7 @@ server. Two ways that quietly fails:
 
 Either way the clock stays at epoch 0 and every snapshot is skipped: `0 records`
 and `0 writes` on a device that has been up for hours
-([#60](https://github.com/RAR/esphome-tigomonitor/issues/60)). If NTP is awkward
+([#60](https://github.com/RAR/tigomonitor/issues/60)). If NTP is awkward
 on your network, `platform: homeassistant` needs neither DNS nor a time server:
 
 ```yaml
@@ -157,7 +157,7 @@ refuses to install older versions there at all.
 
 This used to be a pinned fork; both changes are upstream as of 2.4.1 and the
 fork is retired. [The
-record](https://github.com/RAR/esphome-tigomonitor/blob/main/docs/esp-tsdb-fork.md)
+record](https://github.com/RAR/tigomonitor/blob/main/docs/esp-tsdb-fork.md)
 explains what it carried and why.
 :::
 
@@ -179,7 +179,7 @@ Phases 1–3 shipped. Per-snapshot system rollups + per-panel power are persiste
 
 **Why it moved around.** The interval was originally 5 min. Every flash write briefly disables the CPU instruction cache on both cores, and at 5-min cadence those windows collided often enough with WiFi/BLE-coex radio ISRs to crash the device. Coarsening to 30 min (and core-pinning the writer) cut the crash rate ~40×, and 60 min halved the exposure again — but both were probability reductions that left the fault in place, with mean time-to-failure still only 13.5–42 h.
 
-`execute_from_psram` addressed the mechanism instead. With instructions and rodata relocated to PSRAM, ESP-IDF satisfies `SPI_FLASH_CACHE_NO_DISABLE` and compiles the cache-disable out entirely, so a flash write no longer stalls the other core at all — see [the crash investigation](https://github.com/RAR/esphome-tigomonitor/blob/main/docs/tsdb-flash-crash-issue.md). A build with that flag ran 142 h with no fault and no movement in any memory watermark, against a 42 h best beforehand.
+`execute_from_psram` addressed the mechanism instead. With instructions and rodata relocated to PSRAM, ESP-IDF satisfies `SPI_FLASH_CACHE_NO_DISABLE` and compiles the cache-disable out entirely, so a flash write no longer stalls the other core at all — see [the crash investigation](https://github.com/RAR/tigomonitor/blob/main/docs/tsdb-flash-crash-issue.md). A build with that flag ran 142 h with no fault and no movement in any memory watermark, against a 42 h best beforehand.
 
 Cadence is therefore a resolution/retention decision again rather than a stability lever, and 10 min is deliberately 6× the write rate of that 142 h run — it tests the fix rather than trusting it. `period_e_*` energy deltas are interval-agnostic, so totals stay correct across any of these changes; only time-resolution and retention move.
 
@@ -316,4 +316,4 @@ Buffer pools default to internal RAM in upstream esp_tsdb. We override via `cfg.
 
 ---
 
-**See also:** [Configuration](/guides/configuration/) · [Web Server & API](/guides/web-server/) · [← Back to README](https://github.com/RAR/esphome-tigomonitor)
+**See also:** [Configuration](/guides/configuration/) · [Web Server & API](/guides/web-server/) · [← Back to README](https://github.com/RAR/tigomonitor)

@@ -1,5 +1,5 @@
 # Lets Home Assistant add this repository as an app store (Settings > Apps >
 # App store > ... > Repositories). The app itself is in ha-app/.
 name: TigoMonitor
-url: https://github.com/RAR/esphome-tigomonitor
+url: https://github.com/RAR/tigomonitor
 maintainer: RAR

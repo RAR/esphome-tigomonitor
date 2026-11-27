@@ -17,7 +17,7 @@ bus from a small ESP32 bridge at the Tigo cabinet; see
 The Pi build is new and has run on one installation so far: a Pi Zero 2 W
 with a Waveshare RS485 CAN HAT, on a 40-panel bus, where its readings
 matched the ESP32's on the same bus panel for panel. If you try it, please
-[open an issue](https://github.com/RAR/esphome-tigomonitor/issues) with what
+[open an issue](https://github.com/RAR/tigomonitor/issues) with what
 you saw, working or not.
 :::
 
@@ -72,7 +72,7 @@ For everything side by side, see [ESP32 or Raspberry Pi?](/guides/esp32-or-pi/).
 3. Write the card, put it in the Pi, connect the RS485 adapter, and power it
    on. Once it has joined your Wi-Fi, log in over SSH.
 4. Download `tigomonitord_VERSION_arm64.deb` from the
-   [releases page](https://github.com/RAR/esphome-tigomonitor/releases) and
+   [releases page](https://github.com/RAR/tigomonitor/releases) and
    install it:
 
    ```sh
@@ -457,7 +457,7 @@ said on the bus; see
 <ThemedShot name="pi-bus-traffic" alt="Bus › Traffic — a strip of the last 5 minutes, then each request on the bus with its reply, round trip and what it means: discovery window reads, node table pages, preferred gateways and optimizer queries." />
  An ESP32 can run
 the bus too, with `tigo_master:`
-([example](https://github.com/RAR/esphome-tigomonitor/blob/main/boards/example-waveshare-relay-1ch-standby.yaml)),
+([example](https://github.com/RAR/tigomonitor/blob/main/boards/example-waveshare-relay-1ch-standby.yaml)),
 but that hasn't been run on hardware yet.
 
 ## Turn the array's output off
@@ -503,7 +503,7 @@ it, so give the Pi its own broker login.
 
 On an ESP32 running the bus, `pv_output:` under `tigo_master:` adds the
 same switch; see the
-[Relay-1CH standby example](https://github.com/RAR/esphome-tigomonitor/blob/main/boards/example-waveshare-relay-1ch-standby.yaml).
+[Relay-1CH standby example](https://github.com/RAR/tigomonitor/blob/main/boards/example-waveshare-relay-1ch-standby.yaml).
 
 ### Disable the discovery window
 
@@ -673,7 +673,7 @@ docker run -d --name tigomonitord --hostname tigomonitor --restart unless-stoppe
 ```
 
 Then open `http://HOST:8080` and set it up under Settings, as with the package.
-[`linux/docker-compose.yml`](https://github.com/RAR/esphome-tigomonitor/blob/main/linux/docker-compose.yml)
+[`linux/docker-compose.yml`](https://github.com/RAR/tigomonitor/blob/main/linux/docker-compose.yml)
 does the same with Compose.
 
 - **The bus:** a [network bridge](#read-the-bus-over-the-network) needs
@@ -698,7 +698,7 @@ does the same with Compose.
 - **The web port** is 8080 inside the container; publish it as any port you
   like. The web UI's port setting does nothing here.
 - **HTTPS:** use
-  [`linux/docker-compose.https.yml`](https://github.com/RAR/esphome-tigomonitor/blob/main/linux/docker-compose.https.yml)
+  [`linux/docker-compose.https.yml`](https://github.com/RAR/tigomonitor/blob/main/linux/docker-compose.https.yml)
   instead. It adds a certbot container that gets a Let's Encrypt certificate
   through Route 53 or Cloudflare and renews it, with nothing installed on the
   host. Set `DOMAIN`, `DNS_PROVIDER` and the provider's keys as the file's
@@ -728,10 +728,10 @@ and x86-64).
 1. Add this repository to Home Assistant. This button opens your Home
    Assistant with it filled in:
 
-   [![Add this repository to your Home Assistant](https://my.home-assistant.io/badges/supervisor_add_addon_repository.svg)](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgithub.com%2FRAR%2Fesphome-tigomonitor)
+   [![Add this repository to your Home Assistant](https://my.home-assistant.io/badges/supervisor_add_addon_repository.svg)](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgithub.com%2FRAR%2Ftigomonitor)
 
    Or open **Settings → Apps → App store**, then **⋮ → Repositories**, and add
-   `https://github.com/RAR/esphome-tigomonitor`.
+   `https://github.com/RAR/tigomonitor`.
 2. Find **TigoMonitor** in the store, install it, and start it. Turn on
    **Show in sidebar**.
 3. Open it from the sidebar and choose how it reads the bus under
@@ -739,6 +739,11 @@ and x86-64).
    Tigo cabinet, or a USB RS485 adapter plugged into the Home Assistant
    machine, by its `/dev/serial/by-id/` name.
 
+- **Added before the rename:** this repository used to be
+  `RAR/esphome-tigomonitor`. If that's the address in your list, keep it;
+  it still works. Home Assistant names an app after its repository's
+  address, so adding the new one installs a second, empty TigoMonitor
+  instead of updating yours.
 - **MQTT:** if the Mosquitto broker app is installed, the monitor uses it
   from its first start, so the panels appear in Home Assistant without
   typing a broker in. That's done once: a broker you change or clear later

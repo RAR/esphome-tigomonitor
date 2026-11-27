@@ -571,8 +571,8 @@ sensor:
 
 ## Complete Example
 
-See [`boards/`](https://github.com/RAR/esphome-tigomonitor/tree/main/boards) for complete, ready-to-flash board configs — e.g. [`boards/esp32s3-atoms3r.yaml`](https://github.com/RAR/esphome-tigomonitor/blob/main/boards/esp32s3-atoms3r.yaml) for the recommended M5Stack AtomS3R (PSRAM + esp_tsdb + tuned UART buffers).
+See [`boards/`](https://github.com/RAR/tigomonitor/tree/main/boards) for complete, ready-to-flash board configs — e.g. [`boards/esp32s3-atoms3r.yaml`](https://github.com/RAR/tigomonitor/blob/main/boards/esp32s3-atoms3r.yaml) for the recommended M5Stack AtomS3R (PSRAM + esp_tsdb + tuned UART buffers).
 
 ---
 
-**See also:** [Web Server &amp; API](/guides/web-server/) · [Wiring](/guides/wiring/) · [Troubleshooting](/guides/troubleshooting/) · [← Back to README](https://github.com/RAR/esphome-tigomonitor)
+**See also:** [Web Server &amp; API](/guides/web-server/) · [Wiring](/guides/wiring/) · [Troubleshooting](/guides/troubleshooting/) · [← Back to README](https://github.com/RAR/tigomonitor)

@@ -404,7 +404,7 @@ gh release create vX.Y.Z --title "vX.Y.Z" --notes "## What's Changed
 ### Fixed  
 - Bug fix descriptions
 
-**Full Changelog**: https://github.com/RAR/esphome-tigomonitor/compare/vX.Y.Z-1...vX.Y.Z"
+**Full Changelog**: https://github.com/RAR/tigomonitor/compare/vX.Y.Z-1...vX.Y.Z"
 
 # 6. Return to dev for continued work
 git checkout dev

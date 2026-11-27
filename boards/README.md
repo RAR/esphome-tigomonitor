@@ -34,7 +34,7 @@ Assistant over the native API; it just cannot serve the dashboard.
   the four `CONFIG_BT_*` lines *and* switching to `partitions/tigo-8mb-ble.csv`
 - **Ready-to-flash example**: `example-t-connect-pro-lite.yaml`
 - **Provenance**: contributed by @davidcoulson from a working install
-  ([discussion #30](https://github.com/RAR/esphome-tigomonitor/discussions/30)).
+  ([discussion #30](https://github.com/RAR/tigomonitor/discussions/30)).
   The pin map is the contributor's — no maintainer unit exists to check it
   against, though the config compiles clean here. The screen-equipped "Pro" is a
   different board and is not configured by this file
@@ -51,7 +51,7 @@ Assistant over the native API; it just cannot serve the dashboard.
 - **⚠ The transceiver enable on GPIO21 is not optional.** DE and /RE are tied to
   one net that floats at reset, so a config setting only `tx_pin`/`rx_pin` boots
   with the **receiver disabled** and reads zero bytes off the bus forever — no
-  frames, no checksum errors, `Buffer: 0 bytes` ([issue #22](https://github.com/RAR/esphome-tigomonitor/issues/22)).
+  frames, no checksum errors, `Buffer: 0 bytes` ([issue #22](https://github.com/RAR/tigomonitor/issues/22)).
   The board file holds it LOW with a `switch:` entry. That also disables the
   driver, which is the same hardware read-only guarantee the wiring guide gets
   from strapping a discrete MAX485 — the ESP32 physically cannot transmit onto
@@ -61,7 +61,7 @@ Assistant over the native API; it just cannot serve the dashboard.
   BLE all fit — BLE needs no repartition here, unlike the 8MB boards
 - **Ready-to-flash example**: `example-waveshare-rs485-can.yaml`
 - **Provenance**: verified working by @Brooklyn18m in
-  [issue #22](https://github.com/RAR/esphome-tigomonitor/issues/22); pin map from
+  [issue #22](https://github.com/RAR/tigomonitor/issues/22); pin map from
   Waveshare's schematic plus that report. No maintainer unit exists to bench-test
   it against, though the config compiles clean here (40.4% of a 3MB slot)
 - **Other on-board hardware** (not instantiated): CAN (TWAI) on GPIO15/GPIO16

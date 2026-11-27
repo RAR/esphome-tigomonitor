@@ -507,7 +507,7 @@ void HttpServer::routes_() {
   // The page checks for a newer release from the browser; this only says where.
   svr.Get("/api/github/release", [](const httplib::Request &, httplib::Response &res) {
     res.set_header("Cache-Control", "public, max-age=3600");
-    res.set_content(R"({"fetch_url":"https://api.github.com/repos/RAR/esphome-tigomonitor/releases/latest"})",
+    res.set_content(R"({"fetch_url":"https://api.github.com/repos/RAR/tigomonitor/releases/latest"})",
                     "application/json");
   });
 
