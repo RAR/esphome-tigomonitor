@@ -256,6 +256,9 @@ void MqttPublisher::publish_system_discovery_() {
       {"power_in", "Power in", "W", "power", "measurement"},
       {"energy", "Energy", "kWh", "energy", "total_increasing"},
       {"energy_in", "Energy in", "kWh", "energy", "total_increasing"},
+      // The page's "Today", whatever reset_at_midnight says; total_increasing,
+      // so Home Assistant takes its drop at midnight as a new day.
+      {"energy_today", "Energy today", "kWh", "energy", "total_increasing"},
       {"panels_online", "Panels online", nullptr, nullptr, "measurement"},
       {"invalid_checksum", "Invalid checksums", nullptr, nullptr, "total_increasing"},
       {"missed_frames", "Missed frames", nullptr, nullptr, "total_increasing"},
@@ -543,6 +546,7 @@ void MqttPublisher::publish() {
               {"power_in", round_to(monitor_.total_power_in(), 1)},
               {"energy", round_to(daily ? monitor_.today_kwh() : monitor_.energy_kwh(), 3)},
               {"energy_in", round_to(daily ? monitor_.today_in_kwh() : monitor_.energy_in_kwh(), 3)},
+              {"energy_today", round_to(monitor_.today_kwh(), 3)},
               {"panels_online", online},
               {"invalid_checksum", bus.bad_checksums},
               {"missed_frames", bus.ends_without_start + bus.overflows},

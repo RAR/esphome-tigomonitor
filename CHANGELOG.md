@@ -14,6 +14,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   debug logging off`. The page shows Dangerous options only while
   TigoMonitor runs the bus, so an app that only listens had no way to see
   the switch took.
+- **Today's energy in Home Assistant, the web page's "Today" figure.** It
+  counts output energy since local midnight and starts again at zero each
+  night; Home Assistant takes that as a new day. On the ESP32, add a sensor
+  whose name says `today` or `daily`, such as `"Energy Today"` (the Config
+  Builder now includes it; it needs `time_id`, as the daily totals do). On
+  the Pi it arrives through MQTT discovery as **Energy today**. A sensor you
+  already have whose name says `today` or `daily` (say `"Daily Energy"`)
+  becomes this sensor: today's output energy, where it was the input
+  energy's total. (#92)
 
 ### Changed
 

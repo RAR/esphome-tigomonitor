@@ -260,6 +260,10 @@ sensor:
   - platform: tigo_monitor
     tigo_monitor_id: tigo_hub
     name: "Total System Energy"
+
+  - platform: tigo_monitor
+    tigo_monitor_id: tigo_hub
+    name: "Energy Today"
     
   - platform: tigo_monitor
     tigo_monitor_id: tigo_hub
@@ -292,6 +296,7 @@ sensor:
 
 Sensor type is inferred from name keywords:
 - `power`, `total`, `sum`, `watt`, `system`, `combined` → Total power sensor
+- `today`, `daily` → Today's energy: the web page's "Today", output energy since local midnight. It needs `time_id`, and Home Assistant takes its drop at midnight as a new day
 - `energy`, `kwh`, `kilowatt`, `wh` → Energy sensor
 - `count`, `devices`, `discovered`, `active`, `number` → Device count sensor
 - `frame`, `missed`, `lost`, `dropped` → Missed frame counter
@@ -305,7 +310,8 @@ Sensor type is inferred from name keywords:
 > matched **before** `count`, so a name like `"Invalid Checksum Count"` or
 > `"Missed Frame Count"` resolves to the checksum/frame counter rather than the
 > device-count sensor even though it contains the word "count". Likewise
-> `psram` is matched before the generic `ram` keyword.
+> `psram` is matched before the generic `ram` keyword, and `today`/`daily`
+> before `energy`, so `"Energy Today"` is today's energy, not the total.
 
 > **Important:** Each hub-level sensor must be its own `- platform: tigo_monitor` entry.
 > Do **not** nest them as sub-keys (e.g., `power_sum:`) under a single platform entry — that format is only for per-device sensors.

@@ -1862,7 +1862,7 @@ void TigoMonitorComponent::publish_sensor_data() {
     }
     
     // Calculate and publish energy sum sensors if configured
-    if (energy_in_sum_sensor_ != nullptr || energy_out_sum_sensor_ != nullptr) {
+    if (energy_in_sum_sensor_ != nullptr || energy_out_sum_sensor_ != nullptr || energy_today_sensor_ != nullptr) {
       unsigned long current_time = millis();
       
       if (last_energy_update_ > 0) {
@@ -1894,6 +1894,7 @@ void TigoMonitorComponent::publish_sensor_data() {
       
       // Update daily energy tracking (output energy)
       update_daily_energy(total_energy_out_kwh_);
+      publish_energy_today_();
       
       // Save energy data at the top of each hour to reduce flash wear
       static unsigned long last_save_time = 0;
@@ -1906,7 +1907,7 @@ void TigoMonitorComponent::publish_sensor_data() {
         ESP_LOGI(TAG, "Energy data saved at hour boundary");
       }
     }
-  } else if (energy_in_sum_sensor_ != nullptr || energy_out_sum_sensor_ != nullptr) {
+  } else if (energy_in_sum_sensor_ != nullptr || energy_out_sum_sensor_ != nullptr || energy_today_sensor_ != nullptr) {
     // Energy sensor configured but no power sum sensor - calculate power directly
     float total_power_in = 0.0f;
     float total_power_out = 0.0f;
@@ -1947,6 +1948,7 @@ void TigoMonitorComponent::publish_sensor_data() {
     
     // Update daily energy tracking (output energy)
     update_daily_energy(total_energy_out_kwh_);
+    publish_energy_today_();
     
     // Save energy data at the top of each hour to reduce flash wear
     static unsigned long last_save_time_standalone = 0;
@@ -2503,6 +2505,13 @@ void TigoMonitorComponent::reset_peak_power() {
 #endif
 }
 
+// The web page's "Today" (/api/overview's today_energy): output energy since
+// local midnight.
+void TigoMonitorComponent::publish_energy_today_() {
+  if (energy_today_sensor_ != nullptr)
+    energy_today_sensor_->publish_state(fmaxf(0.0f, total_energy_out_kwh_ - energy_at_day_start_));
+}
+
 void TigoMonitorComponent::reset_total_energy() {
   ESP_LOGI(TAG, "Resetting total energy...");
   
@@ -2516,6 +2525,7 @@ void TigoMonitorComponent::reset_total_energy() {
   if (energy_out_sum_sensor_ != nullptr) {
     energy_out_sum_sensor_->publish_state(0.0f);
   }
+  publish_energy_today_();
   
   // Save to persistent storage
   save_energy_data();
@@ -2600,6 +2610,7 @@ void TigoMonitorComponent::check_midnight_reset() {
     if (energy_out_sum_sensor_ != nullptr) {
       energy_out_sum_sensor_->publish_state(0.0f);
     }
+    publish_energy_today_();
     
     // Reset all peak power values (without saving to flash yet)
     int reset_count = 0;

@@ -420,6 +420,11 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   void add_energy_sum_sensor(sensor::Sensor *sensor) {
     this->add_energy_in_sum_sensor(sensor);
   }
+  // Today's energy: the web page's "Today", output energy since local midnight.
+  void add_energy_today_sensor(sensor::Sensor *sensor) {
+    this->energy_today_sensor_ = sensor;
+    ESP_LOGCONFIG("tigo_monitor", "Registered energy today sensor");
+  }
   void add_device_count_sensor(sensor::Sensor *sensor) {
     this->device_count_sensor_ = sensor;
     ESP_LOGCONFIG("tigo_monitor", "Registered device count sensor");
@@ -821,6 +826,7 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   void save_daily_energy_history();
   void load_daily_energy_history();
   void update_daily_energy(float energy_kwh);
+  void publish_energy_today_();
   void save_persistent_data();  // Save all persistent data (node table + peak power + energy)
   int get_next_available_sensor_index();
   NodeTableData* find_node_by_addr(const node_string &addr);
@@ -1039,6 +1045,7 @@ class TigoMonitorComponent : public PollingComponent, public uart::UARTDevice {
   sensor::Sensor* power_out_sum_sensor_ = nullptr;
   sensor::Sensor* energy_in_sum_sensor_ = nullptr;
   sensor::Sensor* energy_out_sum_sensor_ = nullptr;
+  sensor::Sensor* energy_today_sensor_ = nullptr;
   sensor::Sensor* device_count_sensor_ = nullptr;
   sensor::Sensor* stale_count_sensor_ = nullptr;
   sensor::Sensor* zero_production_count_sensor_ = nullptr;
