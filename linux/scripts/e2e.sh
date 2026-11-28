@@ -31,6 +31,8 @@ expect "panels" "$(echo "$summary" | sed -E 's/.* ([0-9]+) panels.*/\1/')" $pane
 # 13 metrics and the barcode per panel; 10 system sensors and night mode.
 expect "panel discovery configs" "$(grep -c '^homeassistant/sensor/tigo_04C05B' "$out/mqtt.txt")" $((panels * 14))
 expect "system discovery configs" "$(grep '^homeassistant/sensor/tigomonitor_test_' "$out/mqtt.txt" | grep -vc _bus_master)" 10
+# Home Assistant's device page names the maker; the repo's old name isn't one.
+expect "the monitor's maker is TigoMonitor" "$(grep '^homeassistant/sensor/tigomonitor_test_' "$out/mqtt.txt" | grep -o '"manufacturer":"[^"]*"' | sort -u)" '"manufacturer":"TigoMonitor"'
 # Each panel's share of today's reports lost, and the setting changes heard.
 expect "panel state has its loss" "$(grep -m1 '^tigomonitor/test/panel/' "$out/mqtt.txt" | sed 's/^[^ ]* //' | python3 -c 'import json,sys; print(type(json.load(sys.stdin)["link_loss"]).__name__)')" float
 expect "no setting changes" "$(grep '^tigomonitor/test/system/state' "$out/mqtt.txt" | tail -1 | sed 's/^[^ ]* //' | python3 -c 'import json,sys; print(json.load(sys.stdin)["setting_changes"])')" 0

@@ -27,6 +27,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   run the Home Assistant app, keep the old address in your app store
   repositories: adding the new one installs a second, empty app instead of
   updating yours.
+- **Home Assistant names TigoMonitor as the monitor's maker.** The device
+  page said "esphome-tigomonitor", the repo's old name. It changes on its
+  own once the Pi build starts; nothing to redo in Home Assistant.
 
 ## [2.5.1] - 2026-11-26
 
