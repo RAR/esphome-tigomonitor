@@ -16,6 +16,7 @@ This guide uses one consistent convention throughout:
 |-----------------|-----------------------|
 | `Total System Power` | `sensor.total_system_power` |
 | `Total System Energy` | `sensor.total_system_energy` |
+| `Energy Today` | `sensor.energy_today` |
 | `Active Device Count` | `sensor.active_device_count` |
 | `East Panel 1` (power) | `sensor.east_panel_1_power` |
 | `East Panel 1` (efficiency) | `sensor.east_panel_1_efficiency` |
@@ -41,6 +42,19 @@ sensor:
     tigo_monitor_id: tigo_hub
     name: "Total System Energy"  # Must include "energy" in the name
 ```
+
+For the web page's **Today** figure in Home Assistant, add a sensor with
+`today` or `daily` in its name. It counts output energy since local
+midnight and starts again at zero each night:
+
+```yaml
+  - platform: tigo_monitor
+    tigo_monitor_id: tigo_hub
+    name: "Energy Today"
+```
+
+On the Raspberry Pi build, MQTT discovery gives you the same sensor as
+**Energy today**, with no configuration.
 
 ---
 
@@ -159,7 +173,7 @@ automation:
       - action: notify.mobile_app_your_phone  # replace with your device
         data:
           message: >
-            Today's solar: {{ states('sensor.total_system_energy') }} kWh
+            Today's solar: {{ states('sensor.energy_today') }} kWh
             Peak: {{ states('sensor.total_system_peak_power') }} W
 ```
 
@@ -259,7 +273,7 @@ severity:
 
 ```yaml
 type: entity
-entity: sensor.total_system_energy
+entity: sensor.energy_today
 name: Energy Today
 icon: mdi:solar-power
 ```

@@ -22,9 +22,10 @@ cards:
           red: 4500
         needle: true
 
-      # Total Energy Production  
+      # Today's energy: an "Energy Today" sensor in your config (it starts
+      # again at midnight)
       - type: gauge
-        entity: sensor.tigo_monitor_total_system_energy
+        entity: sensor.tigo_monitor_energy_today
         name: Energy Today
         unit: kWh
         min: 0
@@ -60,7 +61,7 @@ cards:
             period: day
 
       - type: statistic
-        entity: sensor.tigo_monitor_total_system_energy
+        entity: sensor.tigo_monitor_energy_today
         name: Daily Energy
         stat_type: state
         period:

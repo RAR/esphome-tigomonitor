@@ -260,7 +260,7 @@ export function toYaml(cfg) {
 
   // sensor + required empty sections
   L.push('sensor:');
-  const sensorNames = ['Total Output Power', 'Total Energy Out', 'Active Device Count', 'Free Internal RAM'];
+  const sensorNames = ['Total Output Power', 'Total Energy Out', 'Energy Today', 'Active Device Count', 'Free Internal RAM'];
   if (cfg.psram) sensorNames.push('Free PSRAM');
   for (const nm of sensorNames) {
     L.push(`${I(1)}- platform: tigo_monitor`);

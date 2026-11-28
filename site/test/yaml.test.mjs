@@ -147,6 +147,15 @@ test('display config wires the backlight into tigo_server', () => {
 // A PSRAM board must emit the psram block and its sensor; a no-PSRAM board must
 // emit neither, and must also leave out everything that depends on the web
 // server. Asserting both directions keeps the two tiers from blurring.
+// The page's "Today" for Home Assistant (#92), next to the lifetime total.
+test('every board gets an Energy Today sensor beside Total Energy Out', () => {
+  for (const b of BOARDS) {
+    const y = toYaml(assembleConfig(b, { ...form, uart: b.uartDefault }));
+    assert.ok(y.includes('name: "Total Energy Out"'), `${b.id} lost Total Energy Out`);
+    assert.ok(y.includes('name: "Energy Today"'), `${b.id} has no Energy Today sensor`);
+  }
+});
+
 test('psram block and Free PSRAM sensor track the board tier', () => {
   for (const b of BOARDS) {
     const y = toYaml(assembleConfig(b, { ...form, uart: b.uartDefault }));

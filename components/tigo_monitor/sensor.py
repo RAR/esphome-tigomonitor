@@ -370,6 +370,18 @@ ENERGY_OUT_SUM_CONFIG_SCHEMA = sensor.sensor_schema(
     cv.GenerateID(CONF_TIGO_MONITOR_ID): cv.use_id(TigoMonitorComponent),
 }).extend(cv.COMPONENT_SCHEMA)
 
+# Schema for today's energy (no address required): the web page's "Today",
+# output energy since local midnight. total_increasing, so Home Assistant
+# takes the drop at midnight as a new day, not a loss.
+ENERGY_TODAY_CONFIG_SCHEMA = sensor.sensor_schema(
+    unit_of_measurement=UNIT_KILOWATT_HOURS,
+    accuracy_decimals=3,
+    device_class=DEVICE_CLASS_ENERGY,
+    state_class=STATE_CLASS_TOTAL_INCREASING,
+).extend({
+    cv.GenerateID(CONF_TIGO_MONITOR_ID): cv.use_id(TigoMonitorComponent),
+}).extend(cv.COMPONENT_SCHEMA)
+
 # Schema for device count sensor (no address required)
 DEVICE_COUNT_CONFIG_SCHEMA = sensor.sensor_schema(
     accuracy_decimals=0,
@@ -465,6 +477,8 @@ _AGGREGATE_RULES = [
     ("stale_count",     ["stale"]),
     ("zero_production", ["zero production", "no production", "zero output",
                          "dead", "failed"]),
+    # Before the other energy rules: "Energy Today" says energy too.
+    ("energy_today", ["today", "daily"]),
     ("energy_out",   ["energy out", "output energy", "e_out", "e out"]),
     ("energy_in",    ["energy in", "input energy", "e_in", "e in",
                       "energy", "kwh", "kilowatt", "wh"]),
@@ -508,6 +522,7 @@ def _classify_aggregate_sensor(name):
 _AGGREGATE_SCHEMA_BY_CATEGORY = {
     "stale_count": STALE_COUNT_CONFIG_SCHEMA,
     "zero_production": ZERO_PRODUCTION_COUNT_CONFIG_SCHEMA,
+    "energy_today": ENERGY_TODAY_CONFIG_SCHEMA,
     "energy_out": ENERGY_OUT_SUM_CONFIG_SCHEMA,
     "energy_in": ENERGY_IN_SUM_CONFIG_SCHEMA,
     "power_out": POWER_OUT_SUM_CONFIG_SCHEMA,
@@ -519,6 +534,25 @@ _AGGREGATE_SCHEMA_BY_CATEGORY = {
     "stack": STACK_FREE_CONFIG_SCHEMA,
     "internal_ram": INTERNAL_RAM_FREE_CONFIG_SCHEMA,
     "internal_ram_min": INTERNAL_RAM_MIN_CONFIG_SCHEMA,
+}
+
+
+# The hub method each kind registers with (tigo_monitor.h).
+_REGISTER_BY_CATEGORY = {
+    "stale_count": "add_stale_count_sensor",
+    "zero_production": "add_zero_production_count_sensor",
+    "energy_today": "add_energy_today_sensor",
+    "energy_out": "add_energy_out_sum_sensor",
+    "energy_in": "add_energy_in_sum_sensor",
+    "power_out": "add_power_out_sum_sensor",
+    "power_in": "add_power_sum_sensor",
+    "checksum": "add_invalid_checksum_sensor",
+    "frame": "add_missed_frame_sensor",
+    "count": "add_device_count_sensor",
+    "psram": "add_psram_free_sensor",
+    "stack": "add_stack_free_sensor",
+    "internal_ram": "add_internal_ram_free_sensor",
+    "internal_ram_min": "add_internal_ram_min_sensor",
 }
 
 
@@ -545,7 +579,8 @@ def _validate_config(config):
     if schema is None:
         raise cv.Invalid(
             "For sensors without 'address', the name must contain a keyword "
-            "identifying the aggregate type: 'energy out'/'output energy' for "
+            "identifying the aggregate type: 'today'/'daily' for today's energy, "
+            "'energy out'/'output energy' for "
             "output-energy, 'energy'/'kwh'/'energy in' for input-energy, "
             "'power out'/'output power' for output-power, "
             "'power'/'total'/'sum'/'power in' for input-power, "
@@ -574,21 +609,7 @@ async def to_code(config):
         # validation, so the registered hub method always matches the schema.
         category = _classify_aggregate_sensor(config.get(CONF_NAME, ""))
         sens = await sensor.new_sensor(config)
-        register = {
-            "stale_count": hub.add_stale_count_sensor,
-            "zero_production": hub.add_zero_production_count_sensor,
-            "energy_out": hub.add_energy_out_sum_sensor,
-            "energy_in": hub.add_energy_in_sum_sensor,
-            "power_out": hub.add_power_out_sum_sensor,
-            "power_in": hub.add_power_sum_sensor,
-            "checksum": hub.add_invalid_checksum_sensor,
-            "frame": hub.add_missed_frame_sensor,
-            "count": hub.add_device_count_sensor,
-            "psram": hub.add_psram_free_sensor,
-            "stack": hub.add_stack_free_sensor,
-            "internal_ram": hub.add_internal_ram_free_sensor,
-            "internal_ram_min": hub.add_internal_ram_min_sensor,
-        }.get(category, hub.add_power_sum_sensor)
+        register = getattr(hub, _REGISTER_BY_CATEGORY.get(category, "add_power_sum_sensor"))
         cg.add(register(sens))
         return
     

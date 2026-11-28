@@ -50,6 +50,10 @@ sensor:
   - platform: tigo_monitor
     tigo_monitor_id: tigo_hub
     name: "Total System Energy"
+  # Today's energy, the web page's "Today" (#92)
+  - platform: tigo_monitor
+    tigo_monitor_id: tigo_hub
+    name: "Energy Today"
   - platform: tigo_monitor
     tigo_monitor_id: tigo_hub
     name: "Active Device Count"

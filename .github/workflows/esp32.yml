@@ -7,9 +7,9 @@ name: ESP32 build
 on:
   push:
     branches: [main]
-    paths: ['components/**', 'boards/**', '.github/workflows/esp32.yml']
+    paths: ['components/**', 'boards/**', 'tests/host/sensor_classify_test.py', '.github/workflows/esp32.yml']
   pull_request:
-    paths: ['components/**', 'boards/**', '.github/workflows/esp32.yml']
+    paths: ['components/**', 'boards/**', 'tests/host/sensor_classify_test.py', '.github/workflows/esp32.yml']
   workflow_dispatch:
 permissions:
   contents: read
@@ -34,6 +34,10 @@ jobs:
         with:
           python-version: '3.12'
       - run: pip install "esphome==$ESPHOME_VERSION"
+      # The hub sensors' name keywords, which need ESPHome to import.
+      - name: Hub sensor names
+        if: matrix.config == 'test-local-tigomonitor'
+        run: python3 tests/host/sensor_classify_test.py
       - uses: actions/cache@v4
         with:
           path: ~/.platformio

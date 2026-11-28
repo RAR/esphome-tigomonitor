@@ -107,7 +107,7 @@
       data:
         title: "☀️ Daily Solar Report"
         message: |
-          Today's Energy Production: {{ states('sensor.tigo_monitor_total_system_energy') }} kWh
+          Today's Energy Production: {{ states('sensor.tigo_monitor_energy_today') }} kWh
           Peak Power: {{ state_attr('sensor.tigo_monitor_total_system_power', 'max_value') | default('N/A') }} W
           Active Panels: {{ states('sensor.tigo_monitor_active_device_count') }}
         data:
