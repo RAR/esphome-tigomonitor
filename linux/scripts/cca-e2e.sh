@@ -65,7 +65,8 @@ get('/api/cca/ble-scan')  # notices BlueZ is up now
 expect('BlueZ found on a later load', wait(lambda: get('/api/cca/ble-scan')[0] == 200, 5), True)
 
 expect('refresh queued', get('/api/cca/refresh')[1]['status'], 'ok')
-info = wait(lambda: (lambda c: c if c['device_info'] != '{}' else None)(get('/api/cca')[1]))
+# Two replies, stored as each lands: wait for both, not just the first.
+info = wait(lambda: (lambda c: c if c['device_info'] != '{}' and c['network_info'] != '{}' else None)(get('/api/cca')[1]))
 expect('device info', json.loads(info['device_info']).get('serial'), '00000000TEST')
 expect('network info', json.loads(info['network_info'])['eth']['ip'], '192.0.2.10')
 # A non-UTF-8 SSID once ended the daemon when the reply was saved.

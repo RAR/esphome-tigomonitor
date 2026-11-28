@@ -188,7 +188,11 @@ def main():
                         'Value': dbus.Array(bytes([req, 0, 0]) + pieces.pop(0), signature='y')}, [])
                     return True
                 return False
-            GLib.timeout_add(20, send)
+            # NETWORK_INFO answers a second late, as a slow CCA can: the daemon
+            # stores each reply as it lands, so a reader may find device info
+            # in and network info not yet. (One-shot: timeout_add's id and False.)
+            delay = 1000 if cmd == 'NETWORK_INFO' else 0
+            GLib.timeout_add(delay, lambda: GLib.timeout_add(20, send) and False)
 
     root.add(Adapter(bus, ADAPTER, 'org.bluez.Adapter1', {'Address': '00:00:5E:00:53:01', 'Powered': False}))
 
