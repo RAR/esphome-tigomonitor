@@ -5339,8 +5339,12 @@
       if (f.step === 'done') {
         const left = keys.filter(k => !c[k].ok), cfg = setup.data.settings || {};
         const user = topoEscape(cfg.web_username || 'admin');
+        // In the Home Assistant app, Home Assistant has signed the user in;
+        // a password only matters for a host port they open themselves.
         const lock = cfg.web_password_set
           ? '<p class="setup-line">A web password is set: only you can change settings.</p>'
+          : cfg.via_ingress
+          ? '<p class="setup-line">Home Assistant signs you in before it shows this page, so TigoMonitor needs no web password here. If you give port 8080 a host port in the app\'s Network settings, set one under Settings → Web UI: that port answers anyone on your network.</p>'
           : `<div class="setup-form"><div class="sub">Set a web password to finish. Until then, anyone on your network can change the bus${cfg.setup_open ? ', for the rest of the first day' : ''}. Your browser will then ask for a login: <strong>${user}</strong> and this password.</div>
             <div class="row"><label>Password<input class="cfg-input" id="setup-pass" type="password" autocomplete="new-password"></label>
               <label>Again<input class="cfg-input" id="setup-pass2" type="password" autocomplete="new-password"></label></div>
@@ -7243,6 +7247,8 @@
       document.getElementById('pi-web-pass').placeholder = s.web_password_set ? 'unchanged' : '';
       document.getElementById('pi-web-pass-hint').textContent = s.web_password_set
         ? `Set: sign in as "${piWebLogin.user}". Leave empty to keep it.`
+        : s.via_ingress
+        ? 'Empty: Home Assistant signs you in. Set one if you give port 8080 a host port: that port answers anyone on your network'
         : 'Empty: anyone on your network can open this page and change settings';
       document.getElementById('pi-web-pass-remove').style.display = s.web_password_set ? '' : 'none';
       // Opened in Home Assistant, which did the signing in: nothing to sign out of here.
@@ -7316,9 +7322,10 @@
   });
   // The sidebar's page switches save on their own, at once.
   const piPages = { show_cca_page: true, show_cloud_page: true };
-  // Setup mode (a new install, no password, its first day): said on every page.
+  // Setup mode (a new install, no password, its first day): said on every
+  // page, but not in the Home Assistant app, where Home Assistant signs in.
   function setupBanner(st) {
-    document.getElementById('setup-banner').hidden = !(st && st.setup_open);
+    document.getElementById('setup-banner').hidden = !(st && st.setup_open && !st.via_ingress);
   }
   function piApplyPages(st) {
     setupBanner(st);
