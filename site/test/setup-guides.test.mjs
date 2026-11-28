@@ -291,6 +291,34 @@ test('System setup: two passwords that differ are not sent', async () => {
   await ctx.close();
 });
 
+// In the Home Assistant app, Home Assistant signs the user in before the
+// page loads (via_ingress), so a web password is only for a host port the
+// user opens themselves. Setup mustn't make it the way to finish.
+test('System setup in Home Assistant: the last step asks for no password', async () => {
+  const w = world();
+  w.settings = { ...w.settings, web_password_set: false, via_ingress: true, setup_open: false };
+  const { page, ctx, errors } = await open(w);
+  await page.click('.setup-start[data-task="system"]');
+  for (const n of ['Find the TAP', 'Optimizers', 'Lay out the array', 'Names and ratings', 'Finish setup']) await next(page, n);
+  assert.equal(await page.locator('#setup-pass').count(), 0);
+  assert.equal(await page.locator('button[data-setup-finish]').count(), 0);
+  const text = await page.textContent('#setup-root');
+  assert.match(text, /Home Assistant signs you in/);
+  assert.match(text, /port 8080/);
+  assert.doesNotMatch(text, /Set a web password to finish/);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test('setup mode in Home Assistant: no banner saying anyone can change the bus', async () => {
+  const w = world();
+  w.settings = { ...w.settings, web_password_set: false, via_ingress: true, setup_open: true };
+  const { page, ctx } = await open(w);
+  await page.waitForFunction(() => document.querySelector('.setup-start[data-task="system"]'));
+  assert.equal(await page.isVisible('#setup-banner'), false);
+  await ctx.close();
+});
+
 test('with setup closed, no banner', async () => {
   const w = world();
   w.settings = { ...w.settings, setup_open: false };

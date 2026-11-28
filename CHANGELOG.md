@@ -28,6 +28,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   repositories: adding the new one installs a second, empty app instead of
   updating yours.
 
+### Fixed
+
+- **In the Home Assistant app, setup no longer says a web password is how to
+  finish.** Home Assistant signs you in before it shows the page, yet
+  System setup's last step asked for a password, the setup banner said
+  anyone on your network could change the bus, and Settings called an empty
+  password a risk. They now say a password is only needed if you give port
+  8080 a host port. Nothing changes outside Home Assistant.
+
 ## [2.5.1] - 2026-11-26
 
 ### Added

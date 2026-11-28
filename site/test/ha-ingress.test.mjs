@@ -34,7 +34,7 @@ after(async () => {
   server.close();
 });
 
-async function open(hash = '') {
+async function open(hash = '', settings = {}) {
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
   const calls = [];
   await ctx.route('**/api/**', async (route) => {
@@ -47,7 +47,7 @@ async function open(hash = '') {
     if (path === '/api/status') return json({ ...routes['/api/status'], platform: 'linux' });
     if (path === '/api/settings') return json({ ...(routes['/api/settings'] || {}), web_username: 'admin', web_password_set: true,
       via_ingress: true, mqtt: { host: 'core-mosquitto', port: 1883, username: 'addons', password_set: true, discovery: true,
-        discovery_prefix: 'homeassistant', base_topic: 'tigomonitor' } });
+        discovery_prefix: 'homeassistant', base_topic: 'tigomonitor' }, ...settings });
     return json(routes[path] !== undefined ? routes[path] : {});
   });
   const page = await ctx.newPage();
@@ -75,6 +75,17 @@ test('signed in by Home Assistant, Settings offers no Sign out', async () => {
   await page.click('#settings-tab-web');
   await page.waitForFunction(() => document.getElementById('pi-web-pass').placeholder === 'unchanged');
   assert.equal(await page.isVisible('#pi-web-signout'), false);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test('signed in by Home Assistant, an empty web password is not called a risk', async () => {
+  const { page, ctx, errors } = await open('#settings', { web_password_set: false });
+  await page.click('#settings-tab-web');
+  await page.waitForFunction(() => /Home Assistant/.test(document.getElementById('pi-web-pass-hint').textContent));
+  const hint = await page.textContent('#pi-web-pass-hint');
+  assert.match(hint, /port 8080/);
+  assert.doesNotMatch(hint, /^Empty: anyone on your network/);
   assert.deepEqual(errors, []);
   await ctx.close();
 });
