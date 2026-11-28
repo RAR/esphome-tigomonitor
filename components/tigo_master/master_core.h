@@ -751,6 +751,7 @@ class MasterCore {
   std::set<uint16_t> not_taken_logged_;  // nodes whose queries the TAP couldn't deliver, logged once each
   std::set<uint16_t> refusals_logged_;  // commands the TAP NAKed (0x0006), logged once each
   esphome::tigo_monitor::protocol::FrameSplitter<std::string> splitter_;
+  std::string last_sent_;  // the last request written, as an echo of it would read
   Standby standby_ = Standby::off;
   uint32_t takeover_ms_ = 0;
   uint32_t jitter_ms_ = 0;

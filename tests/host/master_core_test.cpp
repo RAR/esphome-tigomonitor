@@ -205,6 +205,9 @@ class TapPort : public Transport {
   std::function<std::vector<mp::Frame>(const mp::Frame &)> answer_all;
   std::vector<std::pair<uint16_t, uint16_t>> sent;
   std::vector<mp::Frame> frames;  // every request, whole
+  // Answers it says yes to come late: not there while the master waits for
+  // them, then there, ahead of anything after, once it has given up.
+  std::function<bool(const mp::Frame &)> late;
   bool configured() const override { return true; }
   bool open(std::string &) override { return open_ = true; }
   void close() override { open_ = false; }
@@ -223,13 +226,26 @@ class TapPort : public Transport {
           }
         } else if (answer && answer(f, r)) {
           auto w = mp::encode_frame(r.dest, r.cmd, r.payload);
-          pending_.insert(pending_.end(), w.begin(), w.end());
+          auto &to = late && late(f) ? late_ : pending_;
+          to.insert(to.end(), w.begin(), w.end());
         }
       });
     return true;
   }
   void drain() override {}
   int read(char *buf, size_t n, int) override {
+    if (!late_.empty()) {
+      if (!late_due_) {  // the wait it is late for: nothing yet
+        late_due_ = true;
+        return 0;
+      }
+      // Then on its own, as it arrived: before anything sent after it.
+      size_t k = std::min(n, late_.size());
+      std::copy(late_.begin(), late_.begin() + k, buf);
+      late_.erase(late_.begin(), late_.begin() + k);
+      late_due_ = !late_.empty();
+      return static_cast<int>(k);
+    }
     size_t k = std::min(n, pending_.size());
     std::copy(pending_.begin(), pending_.begin() + k, buf);
     pending_.erase(pending_.begin(), pending_.begin() + k);
@@ -245,7 +261,8 @@ class TapPort : public Transport {
 
  private:
   bool open_ = false;
-  std::vector<uint8_t> pending_;
+  std::vector<uint8_t> pending_, late_;
+  bool late_due_ = false;
   esphome::tigo_monitor::protocol::FrameSplitter<std::string> splitter_;
 };
 
@@ -306,6 +323,74 @@ static bool readdresses_after_loss(uint8_t factory_mac) {
 static void test_only_the_same_tap_is_readdressed() {
   CHECK(readdresses_after_loss(1));
   CHECK(!readdresses_after_loss(2));
+}
+
+// A poll's reply that comes after the master gave up on it is waiting when
+// the master sends the retry, but it isn't the retry's answer. Taken as one,
+// it leaves the retry's real reply for the next poll, and the master's cursor
+// and the TAP's part: master-e2e's "the cursor counts the answers too" failed
+// that way on starved CI runners (hundreds of resyncs with one CPU). This TAP
+// counts its cursor as the rig's does, sends its last batch again on a
+// retry, and hands out a packet in every other batch.
+static void test_a_late_poll_reply_is_not_the_retrys_answer() {
+  TapPort port;
+  uint16_t handed = 0, last_from = 0;  // the TAP's cursor; where its last batch began
+  int polls = 0, batches = 0, mismatches = 0;
+  bool held = false;
+  mp::Bytes last;  // the last batch's packets
+  const mp::Bytes packet = {0x31, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00};  // 7 bytes and no more
+  port.answer = [&](const mp::Frame &f, mp::Frame &r) {
+    if (f.cmd == 0x003A) {
+      r = mac_reply(f.dest, 1);
+      return f.dest == GW;
+    }
+    if (f.cmd != 0x0148 || f.payload.size() != 5) return false;
+    polls++;
+    uint16_t cursor = static_cast<uint16_t>(f.payload[2] << 8 | f.payload[3]);
+    bool retry = f.payload[1] == 0x00;
+    r.dest = f.dest | 0x8000;
+    r.cmd = 0x0149;
+    r.payload = {0x41, 0xFF, static_cast<uint8_t>(cursor), 0x4B, 0x9A};
+    if (retry && cursor == last_from) {  // the last batch never reached the master: again
+      r.payload.insert(r.payload.end(), last.begin(), last.end());
+      return true;
+    }
+    if (cursor != handed) {  // states the TAP's whole cursor, which the master takes
+      mismatches++;
+      r.payload = {0x41, 0xE0, 0x00, 0x0E, 0x00, 0x01, 0x02, 0x00, static_cast<uint8_t>(handed >> 8),
+                   static_cast<uint8_t>(handed), 0x4C, 0x00};
+      return true;
+    }
+    last = batches++ % 2 ? mp::Bytes{} : packet;
+    last_from = handed;
+    handed = static_cast<uint16_t>(handed + (last.empty() ? 0 : 1));
+    r.payload.insert(r.payload.end(), last.begin(), last.end());
+    return true;
+  };
+  // One empty batch, a few polls in, comes late.
+  port.late = [&](const mp::Frame &f) {
+    if (held || f.cmd != 0x0148 || batches < 5 || !last.empty()) return false;
+    return held = true;
+  };
+  MasterCore core(&port, [](int, const std::string &) {}, nullptr, nullptr, GW, false, /*startup=*/true);
+  CHECK(core.open());
+  for (uint32_t t = 0; t < 20000 && polls < 40; t += 100) core.tick(t);
+  CHECK(polls >= 40);
+  CHECK(held);
+  CHECK(mismatches == 0);
+  core.close();
+}
+
+// Another master's request already waiting is found before this one sends,
+// so it never talks over it.
+static void test_another_master_waiting_is_found_before_sending() {
+  OtherMasterPort port;
+  MasterCore core(&port, [](int, const std::string &) {}, nullptr, nullptr, 0x1201, false, false);
+  CHECK(core.open());
+  for (uint32_t t = 0; t < 1000; t += 100) core.tick(t);
+  CHECK(core.status().fault == Fault::second_master);
+  CHECK(port.writes == 0);
+  core.close();
 }
 
 // A request to 0xFFFF is a broadcast, not a reply: a standby that hears only
@@ -3151,6 +3236,8 @@ int main() {
   test_a_master_stopped_by_another_keeps_reading();
   test_one_missed_probe_readdresses_nothing();
   test_only_the_same_tap_is_readdressed();
+  test_a_late_poll_reply_is_not_the_retrys_answer();
+  test_another_master_waiting_is_found_before_sending();
   test_a_broadcast_is_a_master_heard();
   test_a_stopped_master_refuses_pv();
   test_a_pv_request_clears_the_last_confirmation();
