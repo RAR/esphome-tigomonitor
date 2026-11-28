@@ -39,6 +39,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   anyone on your network could change the bus, and Settings called an empty
   password a risk. They now say a password is only needed if you give port
   8080 a host port. Nothing changes outside Home Assistant.
+- **A bus master held up past a reply's deadline no longer takes that late
+  reply for its next request.** Taken as the answer to the retry, it left
+  the retry's real reply for the next poll, and the master could stay one
+  exchange behind the TAP, resyncing its cursor. It now reads what is
+  already waiting before it sends, and never takes it as a reply; another
+  master's request found there stops it before it sends. Rare on a real
+  bus: the reference roof had 580 timeouts and 3 resyncs in 4.4 million
+  polls over two days. Against the test TAP on one CPU, it had been
+  hundreds of resyncs a minute. (Pi and ESP32 bus master.)
 
 ## [2.5.1] - 2026-11-26
 

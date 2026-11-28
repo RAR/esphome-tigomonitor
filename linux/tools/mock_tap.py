@@ -146,6 +146,7 @@ def main():
     start = time.monotonic()
     window_end = start + a.window
     handed_out = a.start_cursor
+    last_batch = None  # (the poll's cursor, its packets): sent again on a retry
     sent_table = False
     foreign_sent = False
     next_foreign = 0.0
@@ -153,7 +154,7 @@ def main():
     SECOND_MAC = bytes.fromhex('04c05b3000d4e5f6')
     FACTORY = 0x1235
     addr = FACTORY if a.factory else GATEWAY  # the id the TAP currently answers at
-    stats = {'refused': 0, 'probes': 0, 'not_taken': 0, 'polls': 0, 'retries': 0, 'cursor_mismatches': 0, 'checks': 0, 'renewals': [], 'other': [],
+    stats = {'refused': 0, 'probes': 0, 'not_taken': 0, 'polls': 0, 'retries': 0, 'cursor_mismatches': 0, 'mismatch_polls': [], 'checks': 0, 'renewals': [], 'other': [],
              'first_discovery_frame': None, 'first_frame': None, 'addressed_to': None, 'frames_after_foreign': 0, 'foreign_at': None,
              'second_asked': 0, 'second_written': 0, 'session': [], 'cut_marks': [], 'pv': 'on', 'housekeeping': [],
              'log': [], 'claims': 0, 'deaf': 0, 'resets': 0, 'quiet_broken': 0, 'broadcast': [], 'walk': [], 'queries': [],
@@ -307,8 +308,15 @@ def main():
                 if a.drop_every and stats['polls'] % a.drop_every == 0:
                     stats['dropped'] = stats.get('dropped', 0) + 1
                     continue
+                if p[1] == 0 and last_batch and cursor == last_batch[0]:
+                    # A retry: our last reply never reached the master. Send that
+                    # batch again, as the TAP keeps what isn't acknowledged.
+                    stats['resent'] = stats.get('resent', 0) + 1
+                    send(encode(addr | 0x8000, 0x0149, bytes.fromhex(f'41FF{cursor & 0xFF:02X}4B9A' + last_batch[1])))
+                    continue
                 if cursor != handed_out & 0xFFFF:
                     stats['cursor_mismatches'] += 1
+                    stats['mismatch_polls'].append({'t': round(t, 2), 'retry': p[1] == 0, 'got': cursor, 'want': handed_out & 0xFFFF})
                     # 0x41E0: bits 0-4 clear, so the header carries the TAP's whole cursor.
                     reply = bytes.fromhex(f'41E0000E00010200{handed_out & 0xFFFF:04X}4C00')
                     send(encode(addr | 0x8000, 0x0149, reply))
@@ -321,6 +329,7 @@ def main():
                     stats['answered'] += 1
                 handed_out += len(answers)  # counted in the cursor too, as in the rig capture (7 of 7)
                 answers.clear()
+                last_batch = (cursor, packets)
                 reply = bytes.fromhex(f'41FF{cursor & 0xFF:02X}4B9A' + packets)
                 send(encode(addr | 0x8000, 0x0149, reply))
                 if not sent_table:  # the node table, as a reply from the gateway

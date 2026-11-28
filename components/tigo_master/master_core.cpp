@@ -1542,6 +1542,39 @@ bool MasterCore::transact(uint16_t dest, uint16_t cmd, const Bytes &payload, Fra
   master::Bytes wire = master::encode_frame(dest, cmd, payload);
   // What our own request looks like coming back, if the adapter hears itself.
   std::string sent(wire.begin() + 5, wire.end() - 2);
+  // Whatever is already waiting came before this request, so none of it is
+  // its reply: most likely the reply to one we gave up on. Taken for this
+  // one, a poll's leaves the real reply for the next poll, and the cursor
+  // parts from the TAP's (master-e2e, on a starved runner). The monitor
+  // still decodes it, and a request in it we didn't send is another master,
+  // found before we send. A few reads at most.
+  bool foreign = false;
+  {
+    char stale[512];
+    for (int round = 0, n; round < 4 && (n = port_->read(stale, sizeof(stale), 0)) > 0; round++) {
+      if (on_rx_) {
+        int64_t t0 = steady_ms();
+        on_rx_(stale, static_cast<size_t>(n));
+        int64_t t1 = steady_ms();
+        note_pause_(static_cast<uint32_t>(t1 - t0), t1);
+      }
+      for (int i = 0; i < n; i++)
+        splitter_.feed(stale[i], [&](const std::string &body) {
+          Frame f;
+          // Our own last request, if the adapter heard itself late, is not another master's.
+          if (master::decode_frame(body, f) && is_request_(f) && body != sent && body != last_sent_) foreign = true;
+        });
+    }
+  }
+  auto another_master = [&]() {
+    if (standby_ != Standby::off) {
+      yield_();
+      return false;
+    }
+    set_fault(Fault::second_master, "another master is on the bus (is the CCA still connected?); stopped transmitting");
+    return false;
+  };
+  if (foreign) return another_master();
   std::string error;
   int64_t written_from = steady_ms();
   if (!port_->write(wire.data(), wire.size(), error)) {
@@ -1549,6 +1582,7 @@ bool MasterCore::transact(uint16_t dest, uint16_t cmd, const Bytes &payload, Fra
     port_->close();  // reopened by tick()
     return false;
   }
+  last_sent_ = sent;
   // A frame takes 10 bits a byte on the wire; past that, the drain waited
   // on the process, not the line.
   int64_t drain_from = steady_ms();
@@ -1564,7 +1598,7 @@ bool MasterCore::transact(uint16_t dest, uint16_t cmd, const Bytes &payload, Fra
   }
 
   auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
-  bool got = false, foreign = false, refused = false, not_taken = false;
+  bool got = false, refused = false, not_taken = false;
   bool query = cmd == master::CMD_TUNNEL && payload.size() > 3 && payload[3] == 0x06;
   char buf[512];
   while ((all || !got) && !foreign && !refused && !not_taken) {
@@ -1613,15 +1647,7 @@ bool MasterCore::transact(uint16_t dest, uint16_t cmd, const Bytes &payload, Fra
       });
     }
   }
-  if (foreign && standby_ != Standby::off) {
-    yield_();
-    return false;
-  }
-  if (foreign) {
-    set_fault(Fault::second_master,
-              "another master is on the bus (is the CCA still connected?); stopped transmitting");
-    return false;
-  }
+  if (foreign) return another_master();
   refused_ = refused && !got;
   not_taken_ = not_taken && !got;
   return got;
